@@ -54,8 +54,8 @@ type StatusAssemblyDeps struct {
 	Sandbox SandboxRuntimeDeps
 }
 
-func (d StatusAssemblyDeps) runtimeDeps() *ControlRuntimeDeps {
-	return &ControlRuntimeDeps{
+func (d StatusAssemblyDeps) runtimeDeps() *runtimeDeps {
+	return &runtimeDeps{
 		Gateway: d.Gateway, Session: d.Session, Status: d.Status,
 		Agent: d.Agent, Model: d.Model, Sandbox: d.Sandbox,
 	}
@@ -69,8 +69,8 @@ type AgentAssemblyDeps struct {
 	Agent   AgentRuntimeDeps
 }
 
-func (d AgentAssemblyDeps) runtimeDeps() *ControlRuntimeDeps {
-	return &ControlRuntimeDeps{Gateway: d.Gateway, Session: d.Session, Agent: d.Agent}
+func (d AgentAssemblyDeps) runtimeDeps() *runtimeDeps {
+	return &runtimeDeps{Gateway: d.Gateway, Session: d.Session, Agent: d.Agent}
 }
 
 // CompletionAssemblyDeps contains the catalog and principal-bound Session
@@ -84,8 +84,8 @@ type CompletionAssemblyDeps struct {
 	Plugin  PluginRuntimeDeps
 }
 
-func (d CompletionAssemblyDeps) runtimeDeps() *ControlRuntimeDeps {
-	return &ControlRuntimeDeps{
+func (d CompletionAssemblyDeps) runtimeDeps() *runtimeDeps {
+	return &runtimeDeps{
 		Session: d.Session, Status: d.Status, Agent: d.Agent,
 		Model: d.Model, Skill: d.Skill, Plugin: d.Plugin,
 	}
@@ -96,8 +96,8 @@ type PluginAssemblyDeps struct {
 	Plugin PluginRuntimeDeps
 }
 
-func (d PluginAssemblyDeps) runtimeDeps() *ControlRuntimeDeps {
-	return &ControlRuntimeDeps{Plugin: d.Plugin}
+func (d PluginAssemblyDeps) runtimeDeps() *runtimeDeps {
+	return &runtimeDeps{Plugin: d.Plugin}
 }
 
 // NewStatusAssemblerForSession binds the status assembler to an already

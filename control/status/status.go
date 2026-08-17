@@ -4,7 +4,27 @@ import (
 	"maps"
 	"strings"
 	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
+
+// SessionRuntimeState is the stable Control read projection for effective
+// per-Session runtime selections.
+type SessionRuntimeState struct {
+	ModelID         string
+	ModelAlias      string
+	ReasoningEffort string
+	SessionMode     string
+	PolicyProfile   string
+	SandboxMode     string
+}
+
+// DoctorRequest selects the optional Session context for product diagnostics.
+type DoctorRequest struct {
+	SessionRef session.SessionRef
+	SessionID  string
+	BindingKey string
+}
 
 // UsageSnapshot is one provider/model token-usage aggregate.
 type UsageSnapshot struct {

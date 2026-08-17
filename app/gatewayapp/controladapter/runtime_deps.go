@@ -12,6 +12,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -31,26 +32,13 @@ type GatewayControlPlaneService interface {
 
 type ModelConfig = modelconfig.Config
 
-type ModelChoice struct {
-	ID                 string
-	Alias              string
-	Provider           string
-	Model              string
-	ProviderEndpointID string
-	EndpointID         string
-	BaseURL            string
-	Detail             string
-}
+type ModelChoice = modelconfig.Choice
+type SessionRuntimeState = controlstatus.SessionRuntimeState
 
-type SessionRuntimeState struct {
-	ModelID         string
-	ModelAlias      string
-	ReasoningEffort string
-	SessionMode     string
-	SandboxMode     string
-}
-
-type SandboxStatus struct {
+// SandboxStatusProjection is the subset of Host sandbox state consumed by the
+// AppServer status assembler. Host lifecycle and setup authorities stay out of
+// this projection.
+type SandboxStatusProjection struct {
 	RequestedBackend         string
 	ResolvedBackend          string
 	Route                    string
@@ -75,13 +63,11 @@ type SandboxStatus struct {
 	WorkspaceSetupUpdatedAt  time.Time
 }
 
-type DoctorRequest struct {
-	SessionRef session.SessionRef
-	SessionID  string
-	BindingKey string
-}
+type DoctorRequest = controlstatus.DoctorRequest
 
-type DoctorReport struct {
+// DoctorStatusProjection is the diagnostics subset consumed by the stable
+// Control status read model. Host-only setup detail remains in gatewayapp.
+type DoctorStatusProjection struct {
 	GoVersion                       string
 	GOOS                            string
 	GOARCH                          string
@@ -128,10 +114,7 @@ type DoctorReport struct {
 	Warnings                        []string
 }
 
-type ACPAgentInfo struct {
-	Name        string
-	Description string
-}
+type ACPAgentInfo = controlagents.CatalogEntry
 
 // PluginRuntimeDeps carries pure plugin and marketplace reads. Host mutations
 // use the shared Control command path instead of assembler hooks.
@@ -168,7 +151,7 @@ type SessionRuntimeDeps struct {
 type StatusRuntimeDeps struct {
 	RuntimeStateFn          func(context.Context, session.SessionRef) (SessionRuntimeState, error)
 	ConfigurationRevisionFn func(context.Context) (uint64, error)
-	DoctorFn                func(context.Context, DoctorRequest) (DoctorReport, error)
+	DoctorFn                func(context.Context, DoctorRequest) (DoctorStatusProjection, error)
 }
 
 // AgentRuntimeDeps carries ACP controller and registered-agent capabilities.
@@ -210,13 +193,12 @@ func (deps SkillRuntimeDeps) Snapshot() skill.Catalog {
 // lifecycle mutations are exposed only by the principal-bound AppServer
 // Configuration capability.
 type SandboxRuntimeDeps struct {
-	StatusFn func() SandboxStatus
+	StatusFn func() SandboxStatusProjection
 }
 
-// ControlRuntimeDeps is the focused, Host-neutral dependency set used to
-// assemble private AppServer services. The local adapter owns translation from
-// gatewayapp and must bind principal-sensitive capabilities before use.
-type ControlRuntimeDeps struct {
+// runtimeDeps is the private union used by the shared assembler implementation.
+// Public constructors accept only the focused capability groups above.
+type runtimeDeps struct {
 	Gateway GatewayRuntimeDeps
 	Session SessionRuntimeDeps
 	Status  StatusRuntimeDeps

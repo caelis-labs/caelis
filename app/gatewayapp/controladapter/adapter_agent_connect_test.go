@@ -51,7 +51,7 @@ func TestCompleteConnectACPIncludesRegistryAndNativeAgentCatalog(t *testing.T) {
 func TestAdapterListsControlOwnedDisconnectCandidates(t *testing.T) {
 	t.Parallel()
 
-	driver := &assembler{deps: &ControlRuntimeDeps{Agent: AgentRuntimeDeps{
+	driver := &assembler{deps: &runtimeDeps{Agent: AgentRuntimeDeps{
 		DisconnectCandidatesFn: func(context.Context) ([]controlagents.DisconnectCandidate, error) {
 			return []controlagents.DisconnectCandidate{{AgentID: "codex", Name: "Codex", ConnectionID: "codex", LastOnConnection: true}}, nil
 		},

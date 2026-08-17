@@ -5,14 +5,12 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 )
 
 func TestAppServerLeafServicesDoNotRetainConcreteHost(t *testing.T) {
 	t.Parallel()
 
 	stackType := reflect.TypeFor[gatewayapp.Stack]()
-	fullRuntimeDepsType := reflect.TypeFor[controladapter.ControlRuntimeDeps]()
 	for _, test := range []struct {
 		name string
 		typ  reflect.Type
@@ -29,9 +27,6 @@ func TestAppServerLeafServicesDoNotRetainConcreteHost(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if path, ok := retainedConcreteType(test.typ, stackType, nil); ok {
 				t.Fatalf("%s service retains gatewayapp.Stack through %s", test.name, path)
-			}
-			if path, ok := retainedConcreteType(test.typ, fullRuntimeDepsType, nil); ok {
-				t.Fatalf("%s service retains the aggregate ControlRuntimeDeps through %s", test.name, path)
 			}
 		})
 	}

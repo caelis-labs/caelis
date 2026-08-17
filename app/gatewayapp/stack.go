@@ -27,6 +27,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
@@ -298,14 +299,7 @@ func (s *runtimeComposition) isClosing() bool {
 	return s.closing.Load()
 }
 
-type SessionRuntimeState struct {
-	ModelID         string
-	ModelAlias      string
-	ReasoningEffort string
-	SessionMode     string
-	PolicyProfile   string
-	SandboxMode     string
-}
+type SessionRuntimeState = controlstatus.SessionRuntimeState
 
 type SandboxStatus struct {
 	RequestedBackend         string

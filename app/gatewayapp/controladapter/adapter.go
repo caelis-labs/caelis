@@ -17,7 +17,7 @@ const processOwnedFullAccessSessionMode = "yolo"
 
 type assembler struct {
 	mu                 sync.Mutex
-	deps               *ControlRuntimeDeps
+	deps               *runtimeDeps
 	session            session.Session
 	hasSession         bool
 	bindingKey         string
@@ -34,7 +34,7 @@ type assembler struct {
 // clients; these private assemblers expose only the server-side projections
 // needed by focused status, configuration, Agent, completion, and plugin
 // services.
-func newAssemblerForSession(ctx context.Context, deps *ControlRuntimeDeps, activeSession session.Session, bindingKey string, modelText string) (*assembler, error) {
+func newAssemblerForSession(ctx context.Context, deps *runtimeDeps, activeSession session.Session, bindingKey string, modelText string) (*assembler, error) {
 	if deps == nil {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: dependencies are required")
 	}
@@ -56,7 +56,7 @@ func newAssemblerForSession(ctx context.Context, deps *ControlRuntimeDeps, activ
 	return driver, nil
 }
 
-func newHostAssembler(deps *ControlRuntimeDeps, bindingKey string, modelText string) *assembler {
+func newHostAssembler(deps *runtimeDeps, bindingKey string, modelText string) *assembler {
 	key := firstNonEmpty(strings.TrimSpace(bindingKey), "cli-tui")
 	return &assembler{
 		deps:               deps,

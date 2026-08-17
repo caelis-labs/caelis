@@ -42,7 +42,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 	if d.deps != nil && d.deps.Model.EffectiveEffortFn != nil {
 		reasoningEffort = strings.TrimSpace(d.deps.Model.EffectiveEffortFn())
 	}
-	sandboxStatus := SandboxStatus{}
+	sandboxStatus := SandboxStatusProjection{}
 	if d.deps != nil && d.deps.Sandbox.StatusFn != nil {
 		sandboxStatus = d.deps.Sandbox.StatusFn()
 	}
@@ -236,7 +236,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 	return status, nil
 }
 
-func applyDoctorStatus(status *controlstatus.StatusSnapshot, report DoctorReport) {
+func applyDoctorStatus(status *controlstatus.StatusSnapshot, report DoctorStatusProjection) {
 	if status == nil {
 		return
 	}

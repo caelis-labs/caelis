@@ -18,12 +18,12 @@ func newAssemblerFromGatewayAppSession(ctx context.Context, stack *gatewayapp.St
 	if err != nil {
 		return nil, err
 	}
-	return newAssemblerForSession(ctx, gatewayAppControlRuntimeDepsForTest(stack), active, bindingKey, modelText)
+	return newAssemblerForSession(ctx, gatewayAppRuntimeDepsForTest(stack), active, bindingKey, modelText)
 }
 
-func gatewayAppControlRuntimeDepsForTest(stack *gatewayapp.Stack) *ControlRuntimeDeps {
+func gatewayAppRuntimeDepsForTest(stack *gatewayapp.Stack) *runtimeDeps {
 	view := stack.ControlRuntimeView()
-	deps := &ControlRuntimeDeps{
+	deps := &runtimeDeps{
 		Gateway: GatewayRuntimeDeps{
 			TurnServiceFn: func() GatewayTurnService {
 				return view.TurnStateFn()
@@ -47,18 +47,16 @@ func gatewayAppControlRuntimeDepsForTest(stack *gatewayapp.Stack) *ControlRuntim
 			},
 		},
 		Status: StatusRuntimeDeps{
-			RuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
-				return testRuntimeSessionRuntimeState(view.RuntimeStateFn(ctx, ref))
-			},
+			RuntimeStateFn:          view.RuntimeStateFn,
 			ConfigurationRevisionFn: view.ConfigurationRevisionFn,
-			DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
-				return testRuntimeDoctorReport(view.DoctorFn(ctx, testGatewayDoctorRequest(req)))
+			DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorStatusProjection, error) {
+				return testDoctorStatusProjection(view.DoctorFn(ctx, req))
 			},
 		},
 		Agent: AgentRuntimeDeps{
 			ControllerStatusFn:     view.ControllerStatusFn,
 			DisconnectCandidatesFn: view.DisconnectCandidatesFn,
-			ListFn:                 func() []ACPAgentInfo { return testRuntimeACPAgents(view.ListAgentsFn()) },
+			ListFn:                 view.ListAgentsFn,
 		},
 		Model: ModelRuntimeDeps{
 			EffectiveAliasFn:  view.EffectiveModelAliasFn,
@@ -69,16 +67,14 @@ func gatewayAppControlRuntimeDepsForTest(stack *gatewayapp.Stack) *ControlRuntim
 			SessionUsageSnapshotFn: view.SessionUsageSnapshotFn,
 			ProviderUsageFn:        view.ProviderUsageFn,
 			ListAliasesFn:          view.ListModelAliasesFn,
-			ListChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
-				return testRuntimeModelChoices(view.ListModelChoicesFn(ctx, ref))
-			},
-			HasReusableAuthFn: view.HasReusableAuthFn,
+			ListChoicesFn:          view.ListModelChoicesFn,
+			HasReusableAuthFn:      view.HasReusableAuthFn,
 		},
 		Skill: SkillRuntimeDeps{
 			SnapshotFn: view.SkillCatalogFn,
 		},
 		Sandbox: SandboxRuntimeDeps{
-			StatusFn: func() SandboxStatus { return testRuntimeSandboxStatus(view.SandboxFn()) },
+			StatusFn: func() SandboxStatusProjection { return testSandboxStatusProjection(view.SandboxFn()) },
 		},
 		Plugin: PluginRuntimeDeps{
 			ListPluginsFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
@@ -112,12 +108,12 @@ func startGatewayAppSessionForTest(ctx context.Context, stack *gatewayapp.Stack,
 	return stack.Sessions().Session(ctx, session.SessionRef{SessionID: result.SessionID})
 }
 
-func TestGatewayAppControlRuntimeDepsWiresFocusedServices(t *testing.T) {
+func TestGatewayAppRuntimeDepsWiresFocusedServices(t *testing.T) {
 	t.Parallel()
 
-	stack := gatewayAppControlRuntimeDepsForTest(&gatewayapp.Stack{})
+	stack := gatewayAppRuntimeDepsForTest(&gatewayapp.Stack{})
 	if stack == nil {
-		t.Fatal("gatewayAppControlRuntimeDepsForTest() returned nil")
+		t.Fatal("gatewayAppRuntimeDepsForTest() returned nil")
 	}
 
 	gatewayHooks := map[string]bool{
@@ -215,8 +211,8 @@ func testRuntimeMarketplaceSnapshots(list []gatewayapp.MarketplaceInfo, err erro
 	return out, nil
 }
 
-func testRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
-	return SandboxStatus{
+func testSandboxStatusProjection(status gatewayapp.SandboxStatus) SandboxStatusProjection {
+	return SandboxStatusProjection{
 		RequestedBackend:   status.RequestedBackend,
 		ResolvedBackend:    status.ResolvedBackend,
 		Route:              status.Route,
@@ -231,46 +227,8 @@ func testRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
 	}
 }
 
-func testRuntimeSessionRuntimeState(state gatewayapp.SessionRuntimeState, err error) (SessionRuntimeState, error) {
-	return SessionRuntimeState{
-		ModelID:         state.ModelID,
-		ModelAlias:      state.ModelAlias,
-		ReasoningEffort: state.ReasoningEffort,
-		SessionMode:     state.SessionMode,
-		SandboxMode:     state.SandboxMode,
-	}, err
-}
-
-func testRuntimeModelChoices(choices []gatewayapp.ModelChoice, err error) ([]ModelChoice, error) {
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ModelChoice, 0, len(choices))
-	for _, choice := range choices {
-		out = append(out, ModelChoice{
-			ID:                 choice.ID,
-			Alias:              choice.Alias,
-			Provider:           choice.Provider,
-			Model:              choice.Model,
-			ProviderEndpointID: choice.ProviderEndpointID,
-			EndpointID:         choice.EndpointID,
-			BaseURL:            choice.BaseURL,
-			Detail:             choice.Detail,
-		})
-	}
-	return out, nil
-}
-
-func testGatewayDoctorRequest(req DoctorRequest) gatewayapp.DoctorRequest {
-	return gatewayapp.DoctorRequest{
-		SessionRef: req.SessionRef,
-		SessionID:  req.SessionID,
-		BindingKey: req.BindingKey,
-	}
-}
-
-func testRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorReport, error) {
-	return DoctorReport{
+func testDoctorStatusProjection(report gatewayapp.DoctorReport, err error) (DoctorStatusProjection, error) {
+	return DoctorStatusProjection{
 		StoreDir:                  report.StoreDir,
 		SessionID:                 report.SessionID,
 		SessionMode:               report.SessionMode,
@@ -293,15 +251,4 @@ func testRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorR
 		ConfigPermissionsSecure:   report.ConfigPermissionsSecure,
 		Warnings:                  append([]string(nil), report.Warnings...),
 	}, err
-}
-
-func testRuntimeACPAgents(agents []gatewayapp.ACPAgentInfo) []ACPAgentInfo {
-	out := make([]ACPAgentInfo, 0, len(agents))
-	for _, agent := range agents {
-		out = append(out, ACPAgentInfo{
-			Name:        agent.Name,
-			Description: agent.Description,
-		})
-	}
-	return out
 }

@@ -64,11 +64,11 @@ func (s *StatusService) SessionStatus(
 		}
 		deps := *s.hostDeps
 		deps.Session.Workspace = workspace
-		deps.Sandbox.StatusFn = func() SandboxStatus {
-			return toRuntimeSandboxStatus(s.sandboxStatusForWorkspace(workspace))
+		deps.Sandbox.StatusFn = func() SandboxStatusProjection {
+			return toSandboxStatusProjection(s.sandboxStatusForWorkspace(workspace))
 		}
-		deps.Status.DoctorFn = func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
-			return toRuntimeDoctorReport(s.doctorForWorkspace(ctx, workspace, toGatewayDoctorRequest(req)))
+		deps.Status.DoctorFn = func(ctx context.Context, req DoctorRequest) (DoctorStatusProjection, error) {
+			return toDoctorStatusProjection(s.doctorForWorkspace(ctx, workspace, req))
 		}
 		driver := controladapter.NewStatusAssemblerForHost(
 			deps,

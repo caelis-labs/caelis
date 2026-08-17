@@ -8,10 +8,10 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-func TestControlRuntimeDepsPluginDepsUseGroupedField(t *testing.T) {
+func TestRuntimeDepsPluginDepsUseGroupedField(t *testing.T) {
 	t.Parallel()
 
-	deps := &ControlRuntimeDeps{
+	deps := &runtimeDeps{
 		Plugin: PluginRuntimeDeps{
 			ListPluginsFn: func(context.Context) ([]controlprompt.PluginSnapshot, error) {
 				return []controlprompt.PluginSnapshot{{ID: "grouped"}}, nil
@@ -28,7 +28,7 @@ func TestControlRuntimeDepsPluginDepsUseGroupedField(t *testing.T) {
 	}
 }
 
-func TestControlRuntimeDepsPluginDepsMissingFieldErrors(t *testing.T) {
+func TestRuntimeDepsPluginDepsMissingFieldErrors(t *testing.T) {
 	t.Parallel()
 
 	if err := missingRuntimeDependency("list plugins"); err == nil {
@@ -36,10 +36,10 @@ func TestControlRuntimeDepsPluginDepsMissingFieldErrors(t *testing.T) {
 	}
 }
 
-func TestControlRuntimeDepsModelDepsUseGroupedField(t *testing.T) {
+func TestRuntimeDepsModelDepsUseGroupedField(t *testing.T) {
 	t.Parallel()
 
-	deps := &ControlRuntimeDeps{
+	deps := &runtimeDeps{
 		Model: ModelRuntimeDeps{
 			EffectiveAliasFn: func() string {
 				return "grouped"
@@ -56,7 +56,7 @@ func TestHasReusableConnectAuthUsesCredentialValidationHook(t *testing.T) {
 	t.Parallel()
 
 	called := false
-	driver := &assembler{deps: &ControlRuntimeDeps{
+	driver := &assembler{deps: &runtimeDeps{
 		Model: ModelRuntimeDeps{
 			HasReusableAuthFn: func(_ context.Context, provider string, baseURL string) bool {
 				called = true
@@ -82,10 +82,10 @@ func TestHasReusableConnectAuthUsesCredentialValidationHook(t *testing.T) {
 	}
 }
 
-func TestControlRuntimeDepsModelDepsMissingFieldUsesEmptyDefault(t *testing.T) {
+func TestRuntimeDepsModelDepsMissingFieldUsesEmptyDefault(t *testing.T) {
 	t.Parallel()
 
-	deps := &ControlRuntimeDeps{}
+	deps := &runtimeDeps{}
 	got := ""
 	if deps.Model.EffectiveAliasFn != nil {
 		got = deps.Model.EffectiveAliasFn()
@@ -95,10 +95,10 @@ func TestControlRuntimeDepsModelDepsMissingFieldUsesEmptyDefault(t *testing.T) {
 	}
 }
 
-func TestControlRuntimeDepsModelChoicesFallbackUsesGroupedAliases(t *testing.T) {
+func TestRuntimeDepsModelChoicesFallbackUsesGroupedAliases(t *testing.T) {
 	t.Parallel()
 
-	deps := &ControlRuntimeDeps{
+	deps := &runtimeDeps{
 		Model: ModelRuntimeDeps{
 			ListAliasesFn: func(context.Context, session.SessionRef) ([]string, error) {
 				return []string{"alpha", "beta"}, nil
@@ -115,13 +115,13 @@ func TestControlRuntimeDepsModelChoicesFallbackUsesGroupedAliases(t *testing.T) 
 	}
 }
 
-func TestControlRuntimeDepsSandboxDepsUseGroupedFields(t *testing.T) {
+func TestRuntimeDepsSandboxDepsUseGroupedFields(t *testing.T) {
 	t.Parallel()
 
 	called := 0
-	deps := &ControlRuntimeDeps{Sandbox: SandboxRuntimeDeps{StatusFn: func() SandboxStatus {
+	deps := &runtimeDeps{Sandbox: SandboxRuntimeDeps{StatusFn: func() SandboxStatusProjection {
 		called++
-		return SandboxStatus{ResolvedBackend: "status"}
+		return SandboxStatusProjection{ResolvedBackend: "status"}
 	}}}
 	status := deps.Sandbox.StatusFn()
 	if status.ResolvedBackend != "status" || called != 1 {

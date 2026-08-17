@@ -60,7 +60,7 @@ func TestCompleteResumeSearchesBeyondFirstTwoHundredSessions(t *testing.T) {
 			Title:      "needle target", UpdatedAt: time.Unix(1, 0),
 		}}},
 	}}
-	driver := &assembler{deps: &ControlRuntimeDeps{
+	driver := &assembler{deps: &runtimeDeps{
 		Session: SessionRuntimeDeps{
 			AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws"}, ListSessionsFn: gw.ListSessions,
 		},
@@ -83,7 +83,7 @@ func TestCompleteResumeSearchesBeyondFirstTwoHundredSessions(t *testing.T) {
 func TestCompleteResumeRequiresPrincipalBoundSessionList(t *testing.T) {
 	t.Parallel()
 
-	driver := &assembler{deps: &ControlRuntimeDeps{
+	driver := &assembler{deps: &runtimeDeps{
 		Session: SessionRuntimeDeps{
 			AppName: "caelis", UserID: "legacy-user", Workspace: session.WorkspaceRef{Key: "ws"},
 		},
@@ -102,7 +102,7 @@ func TestCompleteResumeKeepsOrdinarySessionWithoutTitle(t *testing.T) {
 			UpdatedAt:  time.Unix(1000, 0),
 		}}},
 	}}
-	driver := &assembler{deps: &ControlRuntimeDeps{
+	driver := &assembler{deps: &runtimeDeps{
 		Session: SessionRuntimeDeps{
 			AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws"}, ListSessionsFn: gw.ListSessions,
 		},
@@ -136,7 +136,7 @@ func TestCompleteResumeStopsWhenFirstPageSatisfiesLimit(t *testing.T) {
 		},
 		errors: map[string]error{"page-2": errors.New("later page unavailable")},
 	}
-	driver := &assembler{deps: &ControlRuntimeDeps{
+	driver := &assembler{deps: &runtimeDeps{
 		Session: SessionRuntimeDeps{
 			AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws"}, ListSessionsFn: gw.ListSessions,
 		},

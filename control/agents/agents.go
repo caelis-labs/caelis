@@ -65,6 +65,14 @@ type Agent struct {
 	ConnectionID string `json:"connection_id,omitempty"`
 }
 
+// CatalogEntry is the stable read projection for one configured ACP Agent.
+// It contains presentation metadata only; connection identity and lifecycle
+// remain owned by Agent and the Control binding services.
+type CatalogEntry struct {
+	Name        string
+	Description string
+}
+
 // ConfigChoice is one value advertised for a session config option.
 type ConfigChoice struct {
 	Value       string `json:"value,omitempty"`

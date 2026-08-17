@@ -21,10 +21,7 @@ import (
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
-type ACPAgentInfo struct {
-	Name        string
-	Description string
-}
+type ACPAgentInfo = controlagents.CatalogEntry
 
 const systemSceneEnvKey = "CAELIS_SYSTEM_SCENE"
 

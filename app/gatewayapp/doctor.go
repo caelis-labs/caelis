@@ -16,13 +16,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
-type DoctorRequest struct {
-	SessionRef session.SessionRef
-	SessionID  string
-	BindingKey string
-}
+type DoctorRequest = controlstatus.DoctorRequest
 
 // DoctorReport is the product diagnostics snapshot. SandboxFallbackReason is
 // retained for JSON compatibility; successful product startup never implicitly

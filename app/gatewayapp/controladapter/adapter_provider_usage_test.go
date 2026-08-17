@@ -18,11 +18,11 @@ func TestAdapterFullStatusQueriesProviderUsageAndFailsSoft(t *testing.T) {
 	providerCalls := 0
 	doctorCalls := 0
 	usageCalls := 0
-	deps := &ControlRuntimeDeps{
+	deps := &runtimeDeps{
 		Session: SessionRuntimeDeps{Store: inmemory.NewStore(inmemory.Config{})},
-		Status: StatusRuntimeDeps{DoctorFn: func(context.Context, DoctorRequest) (DoctorReport, error) {
+		Status: StatusRuntimeDeps{DoctorFn: func(context.Context, DoctorRequest) (DoctorStatusProjection, error) {
 			doctorCalls++
-			return DoctorReport{}, nil
+			return DoctorStatusProjection{}, nil
 		}},
 		Model: ModelRuntimeDeps{
 			EffectiveAliasFn: func() string { return "openai-codex/gpt-5.6-luna" },

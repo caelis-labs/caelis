@@ -65,7 +65,7 @@ func BenchmarkResumeCompletion200Sessions500Events(b *testing.B) {
 	}
 
 	gatewayService := completionBenchmarkGateway{sessions: service}
-	driver := &assembler{deps: &ControlRuntimeDeps{
+	driver := &assembler{deps: &runtimeDeps{
 		Session: SessionRuntimeDeps{
 			Store: service, AppName: "caelis", UserID: "performance-user",
 			Workspace: session.WorkspaceRef{Key: "performance-workspace", CWD: "/tmp/performance-workspace"}, ListSessionsFn: gatewayService.ListSessions,

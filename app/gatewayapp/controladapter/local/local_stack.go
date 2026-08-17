@@ -4,19 +4,15 @@ import (
 	"context"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 type ModelConfig = controladapter.ModelConfig
-type ModelChoice = controladapter.ModelChoice
-type SessionRuntimeState = controladapter.SessionRuntimeState
-type SandboxStatus = controladapter.SandboxStatus
+type SandboxStatusProjection = controladapter.SandboxStatusProjection
 type DoctorRequest = controladapter.DoctorRequest
-type DoctorReport = controladapter.DoctorReport
-type ACPAgentInfo = controladapter.ACPAgentInfo
+type DoctorStatusProjection = controladapter.DoctorStatusProjection
 
 type controlAssemblyDeps struct {
 	Status     controladapter.StatusAssemblyDeps
@@ -41,31 +37,27 @@ func controlAssemblyDepsFromView(view *gatewayapp.ControlRuntimeView) *controlAs
 		Store: view.Sessions, AppName: view.AppName, UserID: view.UserID, Workspace: view.Workspace,
 	}
 	status := controladapter.StatusRuntimeDeps{
-		RuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
-			return toRuntimeSessionRuntimeState(view.RuntimeStateFn(ctx, ref))
-		},
+		RuntimeStateFn:          view.RuntimeStateFn,
 		ConfigurationRevisionFn: view.ConfigurationRevisionFn,
-		DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
-			return toRuntimeDoctorReport(view.DoctorFn(ctx, toGatewayDoctorRequest(req)))
+		DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorStatusProjection, error) {
+			return toDoctorStatusProjection(view.DoctorFn(ctx, req))
 		},
 	}
 	agent := controladapter.AgentRuntimeDeps{
 		ControllerStatusFn: view.ControllerStatusFn, DisconnectCandidatesFn: view.DisconnectCandidatesFn,
-		ListFn: func() []ACPAgentInfo { return toRuntimeACPAgents(view.ListAgentsFn()) },
+		ListFn: view.ListAgentsFn,
 	}
 	model := controladapter.ModelRuntimeDeps{
 		EffectiveAliasFn: view.EffectiveModelAliasFn, EffectiveEffortFn: view.EffectiveModelEffortFn,
 		ConfigFn:               func(alias string) (ModelConfig, bool) { return view.ModelConfigFn(alias) },
 		SessionUsageSnapshotFn: view.SessionUsageSnapshotFn, ProviderUsageFn: view.ProviderUsageFn,
-		ListAliasesFn: view.ListModelAliasesFn,
-		ListChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
-			return toRuntimeModelChoices(view.ListModelChoicesFn(ctx, ref))
-		},
+		ListAliasesFn:     view.ListModelAliasesFn,
+		ListChoicesFn:     view.ListModelChoicesFn,
 		HasReusableAuthFn: view.HasReusableAuthFn,
 	}
 	skill := controladapter.SkillRuntimeDeps{SnapshotFn: view.SkillCatalogFn}
 	sandboxDeps := controladapter.SandboxRuntimeDeps{
-		StatusFn: func() SandboxStatus { return toRuntimeSandboxStatus(view.SandboxFn()) },
+		StatusFn: func() SandboxStatusProjection { return toSandboxStatusProjection(view.SandboxFn()) },
 	}
 	plugin := controladapter.PluginRuntimeDeps{
 		ListPluginsFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
@@ -90,8 +82,8 @@ func controlAssemblyDepsFromView(view *gatewayapp.ControlRuntimeView) *controlAs
 	}
 }
 
-func toRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
-	return SandboxStatus{
+func toSandboxStatusProjection(status gatewayapp.SandboxStatus) SandboxStatusProjection {
+	return SandboxStatusProjection{
 		RequestedBackend:         status.RequestedBackend,
 		ResolvedBackend:          status.ResolvedBackend,
 		Route:                    status.Route,
@@ -117,46 +109,8 @@ func toRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
 	}
 }
 
-func toRuntimeSessionRuntimeState(state gatewayapp.SessionRuntimeState, err error) (SessionRuntimeState, error) {
-	return SessionRuntimeState{
-		ModelID:         state.ModelID,
-		ModelAlias:      state.ModelAlias,
-		ReasoningEffort: state.ReasoningEffort,
-		SessionMode:     state.SessionMode,
-		SandboxMode:     state.SandboxMode,
-	}, err
-}
-
-func toRuntimeModelChoices(choices []gatewayapp.ModelChoice, err error) ([]ModelChoice, error) {
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ModelChoice, 0, len(choices))
-	for _, choice := range choices {
-		out = append(out, ModelChoice{
-			ID:                 choice.ID,
-			Alias:              choice.Alias,
-			Provider:           choice.Provider,
-			Model:              choice.Model,
-			ProviderEndpointID: choice.ProviderEndpointID,
-			EndpointID:         choice.EndpointID,
-			BaseURL:            choice.BaseURL,
-			Detail:             choice.Detail,
-		})
-	}
-	return out, nil
-}
-
-func toGatewayDoctorRequest(req DoctorRequest) gatewayapp.DoctorRequest {
-	return gatewayapp.DoctorRequest{
-		SessionRef: req.SessionRef,
-		SessionID:  req.SessionID,
-		BindingKey: req.BindingKey,
-	}
-}
-
-func toRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorReport, error) {
-	return DoctorReport{
+func toDoctorStatusProjection(report gatewayapp.DoctorReport, err error) (DoctorStatusProjection, error) {
+	return DoctorStatusProjection{
 		GoVersion:                       report.GoVersion,
 		GOOS:                            report.GOOS,
 		GOARCH:                          report.GOARCH,
@@ -210,17 +164,6 @@ func cloneOptionalSetupStatus(status *sandbox.SetupStatus) *sandbox.SetupStatus 
 	}
 	out := sandbox.CloneSetupStatus(*status)
 	return &out
-}
-
-func toRuntimeACPAgents(agents []gatewayapp.ACPAgentInfo) []ACPAgentInfo {
-	out := make([]ACPAgentInfo, 0, len(agents))
-	for _, agent := range agents {
-		out = append(out, ACPAgentInfo{
-			Name:        agent.Name,
-			Description: agent.Description,
-		})
-	}
-	return out
 }
 
 func toRuntimePluginSnapshot(info gatewayapp.PluginInfo) controlprompt.PluginSnapshot {
