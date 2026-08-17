@@ -10,10 +10,11 @@
 // composition and product capabilities through control/appserver. Authorized
 // Session Runtime leases expose only focused inputs selected by that private
 // composition; reconnect observation and Task child-history fallback use
-// dedicated readers rather than Stack pass-throughs. Execution writes and
-// configuration revision reads remain on AppServer or focused services rather
-// than direct Stack mirrors. Presentation Surfaces must not depend on this
-// package.
+// dedicated readers rather than Stack pass-throughs, as does Participant
+// handle projection. Execution and Plugin writes remain on principal-bound
+// AppServer commands, while configuration revision reads use a focused status
+// service rather than direct Stack mirrors. Presentation Surfaces must not
+// depend on this package.
 //
 // Stack owns process-lifetime Host services and a process-default Runtime
 // composition. Each activated Session instead uses a private

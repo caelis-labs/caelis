@@ -70,7 +70,7 @@ func TestPluginServiceAddPathHappyPath(t *testing.T) {
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
 
-	info, err := stack.Plugins().AddPath(ctx, pluginDir)
+	info, err := stack.plugins().AddPath(ctx, pluginDir)
 	if err != nil {
 		t.Fatalf("AddPath() error = %v", err)
 	}
@@ -85,7 +85,7 @@ func TestPluginServiceAddPathHappyPath(t *testing.T) {
 	}
 
 	// Verify persistence: reload via List
-	plugins, err := stack.Plugins().List(ctx)
+	plugins, err := stack.plugins().List(ctx)
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -104,7 +104,7 @@ func TestPluginServiceAddPathHappyPath(t *testing.T) {
 	}
 
 	// Verify Inspect
-	detail, err := stack.Plugins().Inspect(ctx, "myplugin")
+	detail, err := stack.plugins().Inspect(ctx, "myplugin")
 	if err != nil {
 		t.Fatalf("Inspect() error = %v", err)
 	}
@@ -167,7 +167,7 @@ func TestPluginServiceEnableDisableHappyPath(t *testing.T) {
 	ctx := context.Background()
 
 	// Enable
-	info, err := stack.Plugins().Enable(ctx, "myplugin")
+	info, err := stack.plugins().Enable(ctx, "myplugin")
 	if err != nil {
 		t.Fatalf("Enable() error = %v", err)
 	}
@@ -179,7 +179,7 @@ func TestPluginServiceEnableDisableHappyPath(t *testing.T) {
 	}
 
 	// Verify List shows active
-	plugins, err := stack.Plugins().List(ctx)
+	plugins, err := stack.plugins().List(ctx)
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -188,7 +188,7 @@ func TestPluginServiceEnableDisableHappyPath(t *testing.T) {
 	}
 
 	// Disable
-	dinfo, err := stack.Plugins().Disable(ctx, "myplugin")
+	dinfo, err := stack.plugins().Disable(ctx, "myplugin")
 	if err != nil {
 		t.Fatalf("Disable() error = %v", err)
 	}
@@ -200,7 +200,7 @@ func TestPluginServiceEnableDisableHappyPath(t *testing.T) {
 	}
 
 	// Verify List shows inactive
-	plugins, err = stack.Plugins().List(ctx)
+	plugins, err = stack.plugins().List(ctx)
 	if err != nil {
 		t.Fatalf("List() after Disable error = %v", err)
 	}
@@ -238,7 +238,7 @@ func TestPluginServiceAddPathAffectsFutureSessionSkillPrompt(t *testing.T) {
 		t.Fatalf("runtime-skill unexpectedly present before plugin add:\n%s", systemPrompt)
 	}
 
-	if _, err := stack.Plugins().AddPath(ctx, pluginDir); err != nil {
+	if _, err := stack.plugins().AddPath(ctx, pluginDir); err != nil {
 		t.Fatalf("AddPath() error = %v", err)
 	}
 	activated := activateFutureAssemblyRuntime(t, stack, "plugin-skill-enabled")
@@ -247,7 +247,7 @@ func TestPluginServiceAddPathAffectsFutureSessionSkillPrompt(t *testing.T) {
 		t.Fatalf("runtime-skill missing from future Session activation:\n%s", systemPrompt)
 	}
 
-	if _, err := stack.Plugins().Disable(ctx, "skillplugin"); err != nil {
+	if _, err := stack.plugins().Disable(ctx, "skillplugin"); err != nil {
 		t.Fatalf("Disable() error = %v", err)
 	}
 	if current, _ := activated.activeRuntime.BaseMetadata["system_prompt"].(string); !strings.Contains(current, "skillplugin:runtime-skill") {
@@ -285,12 +285,12 @@ func TestPluginServiceRemoveHappyPath(t *testing.T) {
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
 
-	if err := stack.Plugins().Remove(ctx, "myplugin"); err != nil {
+	if err := stack.plugins().Remove(ctx, "myplugin"); err != nil {
 		t.Fatalf("Remove() error = %v", err)
 	}
 
 	// List should now be empty
-	plugins, err := stack.Plugins().List(ctx)
+	plugins, err := stack.plugins().List(ctx)
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -299,7 +299,7 @@ func TestPluginServiceRemoveHappyPath(t *testing.T) {
 	}
 
 	// Inspect should return not-found
-	_, err = stack.Plugins().Inspect(ctx, "myplugin")
+	_, err = stack.plugins().Inspect(ctx, "myplugin")
 	if err == nil || !strings.Contains(err.Error(), "plugin not found") {
 		t.Errorf("Inspect() after Remove: err = %v, want 'plugin not found'", err)
 	}
@@ -338,7 +338,7 @@ func TestPluginServiceEnableValidatesBeforeCAS(t *testing.T) {
 	}
 
 	// Enable should fail because rebuild cannot parse the missing directory.
-	_, err := stack.Plugins().Enable(ctx, "brokenplug")
+	_, err := stack.plugins().Enable(ctx, "brokenplug")
 	if err == nil {
 		t.Fatal("Enable() with missing plugin dir: expected error, got nil")
 	}
@@ -396,7 +396,7 @@ func TestPluginServiceRemoveRejectsInvalidCandidateBeforeCAS(t *testing.T) {
 	}
 
 	// Remove goodplugin — this should fail during rebuild because badplugin is broken
-	err := stack.Plugins().Remove(ctx, "goodplugin")
+	err := stack.plugins().Remove(ctx, "goodplugin")
 	if err == nil {
 		t.Fatal("Remove(goodplugin) expected error, got nil")
 	}
@@ -452,7 +452,7 @@ func TestPluginServiceListSkipsParseForDisabled(t *testing.T) {
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
 
-	plugins, err := stack.Plugins().List(ctx)
+	plugins, err := stack.plugins().List(ctx)
 	if err != nil {
 		t.Fatalf("List() error = %v (disabled plugin with bad path should not fail list)", err)
 	}
@@ -492,10 +492,10 @@ func TestPluginServiceNotFoundErrors(t *testing.T) {
 		name string
 		fn   func() error
 	}{
-		{"Enable", func() error { _, err := stack.Plugins().Enable(ctx, "nosuch"); return err }},
-		{"Disable", func() error { _, err := stack.Plugins().Disable(ctx, "nosuch"); return err }},
-		{"Remove", func() error { return stack.Plugins().Remove(ctx, "nosuch") }},
-		{"Inspect", func() error { _, err := stack.Plugins().Inspect(ctx, "nosuch"); return err }},
+		{"Enable", func() error { _, err := stack.plugins().Enable(ctx, "nosuch"); return err }},
+		{"Disable", func() error { _, err := stack.plugins().Disable(ctx, "nosuch"); return err }},
+		{"Remove", func() error { return stack.plugins().Remove(ctx, "nosuch") }},
+		{"Inspect", func() error { _, err := stack.plugins().Inspect(ctx, "nosuch"); return err }},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -529,7 +529,7 @@ func TestPluginServiceAddPathRejectsNonDirectory(t *testing.T) {
 	}
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
-	_, err := stack.Plugins().AddPath(context.Background(), aFile)
+	_, err := stack.plugins().AddPath(context.Background(), aFile)
 	if err == nil {
 		t.Fatal("AddPath() with file path: expected error, got nil")
 	}
@@ -574,7 +574,7 @@ func TestPluginServiceDisableRejectsInvalidCandidateBeforeCAS(t *testing.T) {
 	}
 
 	// Disable goodplugin — this should fail during rebuild because badplugin is broken
-	_, err := stack.Plugins().Disable(ctx, "goodplugin")
+	_, err := stack.plugins().Disable(ctx, "goodplugin")
 	if err == nil {
 		t.Fatal("Disable(goodplugin) expected error, got nil")
 	}
@@ -630,22 +630,22 @@ func TestPluginServiceCommitsWhileTurnIsActiveWithoutReplacingRuntime(t *testing
 
 	existingDir := filepath.Join(t.TempDir(), "some-plugin")
 	buildMinimalPluginDir(t, existingDir, `{"name":"existing","version":"1.0.0"}`)
-	_, err = stack.Plugins().AddPath(ctx, existingDir)
+	_, err = stack.plugins().AddPath(ctx, existingDir)
 	if err != nil {
 		t.Errorf("AddPath() error = %v", err)
 	}
 
-	_, err = stack.Plugins().Disable(ctx, "some-plugin")
+	_, err = stack.plugins().Disable(ctx, "some-plugin")
 	if err != nil {
 		t.Errorf("Disable() error = %v", err)
 	}
 
-	_, err = stack.Plugins().Enable(ctx, "some-plugin")
+	_, err = stack.plugins().Enable(ctx, "some-plugin")
 	if err != nil {
 		t.Errorf("Enable() error = %v", err)
 	}
 
-	err = stack.Plugins().Remove(ctx, "some-plugin")
+	err = stack.plugins().Remove(ctx, "some-plugin")
 	if err != nil {
 		t.Errorf("Remove() error = %v", err)
 	}
@@ -691,7 +691,7 @@ func TestPluginServiceValidationFailureDoesNotEnterConfigWriter(t *testing.T) {
 		return nil
 	}
 
-	_, err := stack.Plugins().Enable(ctx, "goodplugin")
+	_, err := stack.plugins().Enable(ctx, "goodplugin")
 	if err == nil {
 		t.Fatal("Enable() expected error, got nil")
 	}
@@ -750,7 +750,7 @@ func TestPluginServiceMCPServers(t *testing.T) {
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
 
-	info, err := stack.Plugins().AddPath(ctx, pluginDir)
+	info, err := stack.plugins().AddPath(ctx, pluginDir)
 	if err != nil {
 		t.Fatalf("AddPath() failed: %v", err)
 	}
@@ -777,7 +777,7 @@ func TestPluginServiceMCPServers(t *testing.T) {
 	if len(detail.MCPServers) != 1 || detail.MCPServers[0].Status != "running" {
 		t.Errorf("expected running MCP server in inspect, got: %+v", detail.MCPServers)
 	}
-	if err := stack.Plugins().Remove(ctx, "myplugin"); err != nil {
+	if err := stack.plugins().Remove(ctx, "myplugin"); err != nil {
 		t.Fatalf("Remove() failed: %v", err)
 	}
 	pinned, err := activated.pluginReads().Inspect(ctx, "myplugin")
@@ -824,7 +824,7 @@ func TestPluginServiceAgentContributions(t *testing.T) {
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
 
-	info, err := stack.Plugins().AddPath(ctx, pluginDir)
+	info, err := stack.plugins().AddPath(ctx, pluginDir)
 	if err != nil {
 		t.Fatalf("AddPath() failed: %v", err)
 	}
@@ -847,7 +847,7 @@ func TestPluginServiceAgentContributions(t *testing.T) {
 		t.Fatalf("plugin-helper workdir = %q, want plugin dir %q", agent.WorkDir, pluginDir)
 	}
 
-	detail, err := stack.Plugins().Inspect(ctx, "agentplugin")
+	detail, err := stack.plugins().Inspect(ctx, "agentplugin")
 	if err != nil {
 		t.Fatalf("Inspect() failed: %v", err)
 	}
@@ -855,7 +855,7 @@ func TestPluginServiceAgentContributions(t *testing.T) {
 		t.Fatalf("Inspect() agents = %#v, want plugin-helper", detail.Agents)
 	}
 
-	if _, err := stack.Plugins().Disable(ctx, "agentplugin"); err != nil {
+	if _, err := stack.plugins().Disable(ctx, "agentplugin"); err != nil {
 		t.Fatalf("Disable() failed: %v", err)
 	}
 	if _, ok := agentConfigByNameForPluginTest(stack.composition.activeRuntime.Assembly.Agents, "plugin-helper"); ok {
@@ -893,7 +893,7 @@ func TestPluginServiceRejectsAgentCollisionBeforeCAS(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stack.Close() })
 
-	if _, err := stack.Plugins().AddPath(context.Background(), pluginDir); err == nil || !strings.Contains(err.Error(), "conflicts with an existing Agent") {
+	if _, err := stack.plugins().AddPath(context.Background(), pluginDir); err == nil || !strings.Contains(err.Error(), "conflicts with an existing Agent") {
 		t.Fatalf("AddPath(colliding Agent) error = %v, want pre-CAS collision rejection", err)
 	}
 	doc, err := stack.composition.authorities.store.Load()

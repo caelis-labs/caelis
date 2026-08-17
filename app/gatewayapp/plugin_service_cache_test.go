@@ -39,7 +39,7 @@ func TestPluginServiceRemoveKeepsManagedInstallCacheForActiveRuntimes(t *testing
 		t.Fatalf("save managed plugin config: %v", err)
 	}
 	activated := activateFutureAssemblyRuntime(t, stack, "managed-plugin-runtime")
-	if err := stack.Plugins().Remove(ctx, "plugin"); err != nil {
+	if err := stack.plugins().Remove(ctx, "plugin"); err != nil {
 		t.Fatalf("Remove(managed) error = %v", err)
 	}
 	// Pure configuration removal must leave managed cache files in place so an
@@ -60,10 +60,10 @@ func TestPluginServiceRemoveKeepsManagedInstallCacheForActiveRuntimes(t *testing
 
 	localPlugin := filepath.Join(tmp, "localplugin")
 	buildMinimalPluginDir(t, localPlugin, `{"name":"local","version":"1.0.0"}`)
-	if _, err := stack.Plugins().AddPath(ctx, localPlugin); err != nil {
+	if _, err := stack.plugins().AddPath(ctx, localPlugin); err != nil {
 		t.Fatalf("AddPath(local) error = %v", err)
 	}
-	if err := stack.Plugins().Remove(ctx, "localplugin"); err != nil {
+	if err := stack.plugins().Remove(ctx, "localplugin"); err != nil {
 		t.Fatalf("Remove(local) error = %v", err)
 	}
 	if _, err := os.Stat(localPlugin); err != nil {

@@ -127,7 +127,7 @@ func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testi
 	if got := child.Models().EffectiveEffort(); got != "high" {
 		t.Fatalf("EffectiveEffort() = %q, want high", got)
 	}
-	report, err := child.Status().Doctor(context.Background(), DoctorRequest{})
+	report, err := child.ControlStatus().Doctor(context.Background(), DoctorRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}

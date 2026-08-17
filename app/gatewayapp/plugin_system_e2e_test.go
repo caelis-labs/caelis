@@ -79,7 +79,7 @@ func TestPluginSystemE2E(t *testing.T) {
 	}
 	defer stack.Close()
 
-	list, err := stack.Plugins().List(context.Background())
+	list, err := stack.plugins().List(context.Background())
 	if err != nil {
 		t.Fatalf("Plugins().List() error = %v", err)
 	}

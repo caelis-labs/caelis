@@ -84,7 +84,7 @@ func TestPluginServiceInstallFromClaudeMarketplaceDirectory(t *testing.T) {
 	})
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
-	info, _, err := stack.Plugins().Install(context.Background(), "mcp-server-dev@"+marketplaceDir)
+	info, _, err := stack.plugins().Install(context.Background(), "mcp-server-dev@"+marketplaceDir)
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -119,7 +119,7 @@ func TestPluginServiceInstallFromMarketplaceUsesEntryNameWhenSourceDirDiffers(t 
 	})
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
-	info, _, err := stack.Plugins().Install(context.Background(), "drawio@"+marketplaceDir)
+	info, _, err := stack.plugins().Install(context.Background(), "drawio@"+marketplaceDir)
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -177,7 +177,7 @@ func TestPluginServiceMarketplaceInstallRenamesExistingSameRoot(t *testing.T) {
 	}
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
-	info, _, err := stack.Plugins().Install(context.Background(), "drawio@"+marketplaceDir)
+	info, _, err := stack.plugins().Install(context.Background(), "drawio@"+marketplaceDir)
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -191,7 +191,7 @@ func TestPluginServiceMarketplaceInstallRenamesExistingSameRoot(t *testing.T) {
 	if len(doc.Plugins) != 1 || doc.Plugins[0].ID != "drawio" || doc.Plugins[0].Root != pluginDir {
 		t.Fatalf("persisted plugins = %#v, want renamed drawio entry", doc.Plugins)
 	}
-	if _, err := stack.Plugins().Inspect(context.Background(), "claude-code"); err == nil {
+	if _, err := stack.plugins().Inspect(context.Background(), "claude-code"); err == nil {
 		t.Fatal("Inspect(claude-code) error = nil, want old ID removed")
 	}
 }
@@ -229,7 +229,7 @@ func TestPluginServiceMarketplaceInstallUpdatesSameIDAtNewRoot(t *testing.T) {
 	}
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
-	info, _, err := stack.Plugins().Install(context.Background(), "drawio@"+marketplaceDir)
+	info, _, err := stack.plugins().Install(context.Background(), "drawio@"+marketplaceDir)
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -276,7 +276,7 @@ func TestPluginServiceMarketplaceInstallRejectsIDCollisionOnRootRename(t *testin
 	}
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
-	_, _, err := stack.Plugins().Install(context.Background(), "drawio@"+marketplaceDir)
+	_, _, err := stack.plugins().Install(context.Background(), "drawio@"+marketplaceDir)
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("Install() error = %v, want ID collision", err)
 	}

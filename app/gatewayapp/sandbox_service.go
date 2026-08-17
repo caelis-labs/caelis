@@ -3,7 +3,6 @@ package gatewayapp
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -218,22 +217,6 @@ func applySandboxSetupProjection(status *SandboxStatus, setup sandbox.SetupStatu
 			status.SetupError = strings.TrimSpace(workspace.Error)
 		}
 	}
-}
-
-func (s *Stack) PreflightSandbox(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
-	if s == nil {
-		return SandboxStatus{}, fmt.Errorf("gatewayapp: stack is unavailable")
-	}
-	snapshot, err := s.sandboxLifecycleSnapshot()
-	if err != nil {
-		return SandboxStatus{}, err
-	}
-	preflight, ok := snapshot.exec.(sandbox.PreflightRuntime)
-	if !ok {
-		return s.runtimeProjection().SandboxStatus(), nil
-	}
-	err = preflight.Preflight(ctx, sandbox.PreflightOptions{AllowNonElevatedRepair: allowNonElevatedRepair})
-	return s.runtimeProjection().SandboxStatus(), err
 }
 
 func normalizeSandboxBackend(backend string) (string, error) {

@@ -484,6 +484,10 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
+	participantHandles, err := newParticipantHandleReader(&stack.composition)
+	if err != nil {
+		return nil, err
+	}
 	controlState, err := appserver.NewStateService(appserver.StateServiceConfig{
 		Sessions: sessions, Runtime: runtimeStateReader, Feeds: controlFeeds,
 		PrepareReconnect:  stack.prepareControlClientReconnect,
@@ -525,7 +529,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	controlClient, err := appserver.NewClient(appserver.ClientConfig{
 		Commands: controlCommands, State: controlState, Feeds: controlFeeds,
 		Authorizer:         sessionAuthorizer,
-		ParticipantHandles: stack,
+		ParticipantHandles: participantHandles,
 		Sessions:           sessions,
 	})
 	if err != nil {
@@ -579,6 +583,10 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	}
 	stack.sessionRuntimes = sessionRuntimes
 	if err := runtimeStateReader.bindRegistry(sessionRuntimes); err != nil {
+		_ = stack.Close()
+		return nil, err
+	}
+	if err := participantHandles.bindRegistry(sessionRuntimes); err != nil {
 		_ = stack.Close()
 		return nil, err
 	}

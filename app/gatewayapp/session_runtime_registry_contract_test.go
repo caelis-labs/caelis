@@ -53,6 +53,7 @@ func TestHostPrivateProjectionTypesDoNotRetainHostStack(t *testing.T) {
 		{name: "Workspace reads", typ: reflect.TypeFor[WorkspaceReadService]()},
 		{name: "Task stream router", typ: reflect.TypeFor[hostTaskStreamService]()},
 		{name: "Runtime state reader", typ: reflect.TypeFor[controlRuntimeStateReader]()},
+		{name: "Participant handle reader", typ: reflect.TypeFor[participantHandleReader]()},
 		{name: "Subagent history", typ: reflect.TypeFor[subagentHistoryService]()},
 	} {
 		t.Run(test.name, func(t *testing.T) {

@@ -51,7 +51,7 @@ func TestPluginServiceSkillsFollowEnabledStateAndSuppressLegacyCopies(t *testing
 	t.Cleanup(func() { _ = stack.Close() })
 	ctx := context.Background()
 
-	if _, err := stack.Plugins().AddPath(ctx, pluginDir); err != nil {
+	if _, err := stack.plugins().AddPath(ctx, pluginDir); err != nil {
 		t.Fatalf("AddPath() error = %v", err)
 	}
 	enabled := activateFutureAssemblyRuntime(t, stack, "plugin-skill-enabled-with-legacy")
@@ -81,7 +81,7 @@ func TestPluginServiceSkillsFollowEnabledStateAndSuppressLegacyCopies(t *testing
 		t.Fatalf("Doctor warnings = %#v, want legacy copy warning", report.Warnings)
 	}
 
-	if _, err := stack.Plugins().Disable(ctx, "skillplugin"); err != nil {
+	if _, err := stack.plugins().Disable(ctx, "skillplugin"); err != nil {
 		t.Fatalf("Disable() error = %v", err)
 	}
 	if current, _ := enabled.activeRuntime.BaseMetadata["system_prompt"].(string); !strings.Contains(current, "skillplugin:runtime-skill") {

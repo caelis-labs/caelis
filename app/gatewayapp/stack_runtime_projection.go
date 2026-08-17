@@ -23,6 +23,6 @@ func (s *Stack) Skills() SkillService {
 	return s.runtimeProjection().Skills()
 }
 
-func (s *Stack) Plugins() PluginService {
+func (s *Stack) plugins() PluginService {
 	return s.runtimeProjection().Plugins()
 }

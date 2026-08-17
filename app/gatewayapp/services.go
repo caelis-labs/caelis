@@ -31,8 +31,7 @@ type SkillService struct {
 }
 
 type StatusService struct {
-	composition        *runtimeComposition
-	preflightSandboxFn func(context.Context, bool) (SandboxStatus, error)
+	composition *runtimeComposition
 }
 
 // ACPPresentationService is the read-only ACP-shaped projection used behind
@@ -62,18 +61,8 @@ func (s *runtimeComposition) Status() StatusService {
 	return StatusService{composition: s}
 }
 
-// Status adds process-only bootstrap diagnostics when the projection is
-// requested from the Host. Detached Session Runtimes expose the same read
-// snapshot without Host lifecycle mutation seams.
-func (s *Stack) Status() StatusService {
-	if s == nil {
-		return StatusService{}
-	}
-	return StatusService{composition: &s.composition, preflightSandboxFn: s.PreflightSandbox}
-}
-
 // ControlStatus returns the focused read-only status projection used by
-// AppServer composition. Host bootstrap preflight remains on Status().
+// AppServer composition.
 func (s *Stack) ControlStatus() StatusService {
 	if s == nil {
 		return StatusService{}
@@ -286,16 +275,6 @@ func (s StatusService) SandboxForWorkspace(workspace session.WorkspaceRef) Sandb
 // workspace without retaining the concrete Host Stack.
 func (s StatusService) DoctorForWorkspace(ctx context.Context, workspace session.WorkspaceRef, req DoctorRequest) (DoctorReport, error) {
 	return s.composition.DoctorForWorkspace(ctx, workspace, req)
-}
-
-// PreflightSandbox is a Host bootstrap diagnostic used before presentation
-// clients are available. Product lifecycle mutations belong to the typed,
-// principal-bound AppServer Configuration capability.
-func (s StatusService) PreflightSandbox(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
-	if s.preflightSandboxFn == nil {
-		return SandboxStatus{}, fmt.Errorf("gatewayapp: Host sandbox preflight is unavailable")
-	}
-	return s.preflightSandboxFn(ctx, allowNonElevatedRepair)
 }
 
 func (s StatusService) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {

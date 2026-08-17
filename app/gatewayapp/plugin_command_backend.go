@@ -89,7 +89,7 @@ func (s *Stack) mutatePluginAtRevision(ctx context.Context, action appserver.Act
 	}
 	ctx = plugin.WithExpectedRevision(ctx, expected)
 
-	resourceKind, resourceRef, effect, warning, invokeErr := invoke(ctx, s.Plugins())
+	resourceKind, resourceRef, effect, warning, invokeErr := invoke(ctx, s.plugins())
 	result.ResourceKind = resourceKind
 	result.ResourceRef = resourceRef
 	// EffectStarted is monotonic: once true it is never cleared, including after

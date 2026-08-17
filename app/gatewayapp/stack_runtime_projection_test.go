@@ -12,7 +12,7 @@ func TestNilStackRuntimeProjectionPreservesUnavailableResults(t *testing.T) {
 	t.Parallel()
 
 	var stack *Stack
-	if _, err := stack.Status().Doctor(context.Background(), DoctorRequest{}); err == nil || !strings.Contains(err.Error(), "stack is unavailable") {
+	if _, err := stack.ControlStatus().Doctor(context.Background(), DoctorRequest{}); err == nil || !strings.Contains(err.Error(), "stack is unavailable") {
 		t.Fatalf("Doctor() error = %v, want unavailable Stack", err)
 	}
 	if status, found, err := stack.Agents().ControllerStatus(context.Background(), session.SessionRef{}); err != nil || found {

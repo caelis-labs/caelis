@@ -39,7 +39,7 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 		t.Fatalf("SandboxStatus() = %#v, want visible YOLO Host status", status)
 	}
 
-	report, err := stack.Status().Doctor(context.Background(), DoctorRequest{})
+	report, err := stack.ControlStatus().Doctor(context.Background(), DoctorRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 	if runtimeState.SessionMode != dangerouslySkipPermissionsModeLabel || runtimeState.PolicyProfile != presets.ModeDangerFullAccess {
 		t.Fatalf("SessionRuntimeState() = %#v, want process-owned YOLO display", runtimeState)
 	}
-	report, err = stack.Status().Doctor(context.Background(), DoctorRequest{SessionRef: active.SessionRef})
+	report, err = stack.ControlStatus().Doctor(context.Background(), DoctorRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}
