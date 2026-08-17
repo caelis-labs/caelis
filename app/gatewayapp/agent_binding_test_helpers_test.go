@@ -75,7 +75,7 @@ func (s testAgentBindingService) mutate(
 	prefix string,
 	command func(appserver.WriteBase) (appserver.CommandResult, error),
 ) (agentbinding.Status, error) {
-	revision, err := s.stack.ConfigurationRevision(ctx)
+	revision, err := s.stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		return agentbinding.Status{}, err
 	}

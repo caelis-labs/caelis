@@ -24,7 +24,7 @@ func TestAgentBindingCommandsUseHostCASAndSharedLedger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	revision, err := stack.ConfigurationRevision(ctx)
+	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -35,7 +35,7 @@ func BindAgentBinding(ctx context.Context, stack *gatewayapp.Stack, binding agen
 	if stack == nil {
 		return agentbinding.Status{}, fmt.Errorf("gatewayapptest: stack is unavailable")
 	}
-	revision, err := stack.ConfigurationRevision(ctx)
+	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		return agentbinding.Status{}, err
 	}
@@ -66,7 +66,7 @@ func CreateAgentRole(
 	if stack == nil {
 		return agentbinding.Status{}, fmt.Errorf("gatewayapptest: stack is unavailable")
 	}
-	revision, err := stack.ConfigurationRevision(ctx)
+	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		return agentbinding.Status{}, err
 	}
@@ -92,7 +92,7 @@ func ConnectModel(ctx context.Context, stack *gatewayapp.Stack, cfg gatewayapp.M
 	if stack == nil {
 		return "", fmt.Errorf("gatewayapptest: stack is unavailable")
 	}
-	revision, err := stack.ConfigurationRevision(ctx)
+	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -119,7 +119,7 @@ func UseHostModel(ctx context.Context, stack *gatewayapp.Stack, alias string) er
 	if stack == nil {
 		return fmt.Errorf("gatewayapptest: stack is unavailable")
 	}
-	revision, err := stack.ConfigurationRevision(ctx)
+	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		return err
 	}

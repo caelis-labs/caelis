@@ -65,7 +65,7 @@ func TestAgentBindingServiceRollsForwardAfterCommittedConfigWriteFault(t *testin
 	fault := errors.New("directory fsync after rename failed")
 	writeCount := installCommittedConfigSaveFault(t, stack, "fsync", fault)
 
-	revision, err := stack.ConfigurationRevision(context.Background())
+	revision, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestAgentBindingCommandCachesUnknownWhenCommittedRevisionCannotBeObserved(t
 		pathBlocked = true
 		return committedErr
 	}
-	expected, err := stack.ConfigurationRevision(context.Background())
+	expected, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestAgentBindingCommandCommitsWithoutRuntimeRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected, err := stack.ConfigurationRevision(context.Background())
+	expected, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

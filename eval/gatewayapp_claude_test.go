@@ -4,7 +4,6 @@ package eval
 
 import (
 	"context"
-	"fmt"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -14,8 +13,12 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/internal/gatewayapptest"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
@@ -38,23 +41,29 @@ func TestLocalStackClaudeBuiltInACPE2E(t *testing.T) {
 		t.Fatalf("gatewayapp.NewLocalStack() error = %v", err)
 	}
 	activeSession := startEvalSession(t, ctx, stack, "")
-	claudeAgent := connectClaudeAgentForE2E(ctx, t, stack, activeSession, storeDir)
+	connectClaudeAgentForE2E(ctx, t, stack, activeSession, storeDir)
 
 	const want = "caelis claude acp e2e ok"
-	snapshot, err := stack.StartSubagent(ctx, activeSession.SessionRef, claudeAgent, "Reply with exactly: "+want, "claude_e2e")
+	driver := newEvalAppServerAdapter(t, stack, activeSession, "claude_e2e")
+	turn, err := driver.StartAgentRun(ctx, string(agentbinding.HandleZenith), "Reply with exactly: "+want, nil)
 	if err != nil {
-		t.Fatalf("StartSubagent(claude) error = %v", err)
+		t.Fatalf("StartAgentRun(zenith) error = %v", err)
 	}
-	for snapshot.Running {
-		snapshot, err = stack.WaitSubagentTask(ctx, activeSession.SessionRef, snapshot.Ref.TaskID, 5*time.Second)
-		if err != nil {
-			t.Fatalf("WaitSubagentTask(claude) error = %v", err)
+	defer turn.Close()
+	var assistant schema.FinalAssistantAccumulator
+	terminalState := ""
+	for envelope := range turn.Events() {
+		if envelope.Update != nil {
+			assistant.ObserveUpdate(envelope.Update)
+		}
+		if eventstream.IsTurnTerminalLifecycle(envelope) {
+			terminalState = envelope.Lifecycle.State
 		}
 	}
-	if strings.TrimSpace(string(snapshot.State)) != "completed" {
-		t.Fatalf("claude snapshot state = %s result = %#v", snapshot.State, snapshot.Result)
+	if terminalState != eventstream.LifecycleStateCompleted {
+		t.Fatalf("Claude participant terminal state = %q, want completed", terminalState)
 	}
-	result := strings.TrimSpace(fmt.Sprint(snapshot.Result["result"]))
+	result := strings.TrimSpace(assistant.FinalText())
 	if !strings.Contains(result, want) {
 		t.Fatalf("claude result = %q, want %q", result, want)
 	}
@@ -180,6 +189,11 @@ func connectClaudeAgentForE2E(
 	}
 	if profile.Effort.DefaultEffort == "" || !profile.SupportsEffort(profile.Effort.DefaultEffort) {
 		t.Fatalf("ConnectACP(claude) effort defaults = %#v, want supported default", profile.Effort)
+	}
+	if _, err := gatewayapptest.BindAgentBinding(ctx, stack, agentbinding.Binding{
+		Handle: agentbinding.HandleZenith, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort,
+	}); err != nil {
+		t.Fatalf("BindAgentBinding(zenith, Claude) error = %v", err)
 	}
 	return profile.Backend.ACP.AgentID
 }

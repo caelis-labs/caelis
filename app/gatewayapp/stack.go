@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -310,11 +309,6 @@ type SandboxStatus struct {
 	WorkspaceSetupWriteRoots int
 	WorkspaceSetupPolicyHash string
 	WorkspaceSetupUpdatedAt  time.Time
-}
-
-type StartSubagentOptions struct {
-	ApprovalRequester agent.ApprovalRequester
-	ApprovalMode      string
 }
 
 func NewLocalStack(cfg Config) (*Stack, error) {

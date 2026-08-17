@@ -82,7 +82,7 @@ func TestCustomDirectRoleCollisionFailsClosedAndRollsBack(t *testing.T) {
 		t.Fatalf("Connect() error = %v", err)
 	}
 
-	revision, err := stack.ConfigurationRevision(context.Background())
+	revision, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

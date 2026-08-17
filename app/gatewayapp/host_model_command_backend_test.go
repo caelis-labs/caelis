@@ -27,7 +27,7 @@ func TestHostModelCommandsUseHostCASAndSharedLedger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected, err := stack.ConfigurationRevision(ctx)
+	expected, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestHostModelConnectUsesCanonicalDocumentAndDoesNotPersistSecretInLedger(t 
 func TestHostModelCredentialsUseStableEndpointReferenceAcrossPrincipals(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	revision, err := stack.ConfigurationRevision(ctx)
+	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 		ctx := context.Background()
 		stack, _ := newLocalStateTestStack(t)
 		principal := appserver.Principal{ID: stack.composition.authorities.userID}
-		revision, err := stack.ConfigurationRevision(ctx)
+		revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -250,7 +250,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 		if commandErr == nil || result.Outcome != appserver.OutcomeRejected || !strings.Contains(commandErr.Error(), "API key") {
 			t.Fatalf("ConnectModel(stale live auth) = %#v, %v", result, commandErr)
 		}
-		actual, revisionErr := stack.ConfigurationRevision(ctx)
+		actual, revisionErr := stack.ControlStatus().ConfigurationRevision(ctx)
 		if revisionErr != nil || actual != saved.ConfigurationRevision {
 			t.Fatalf("revision after rejected stale auth = %d, %v; want %d", actual, revisionErr, saved.ConfigurationRevision)
 		}
@@ -260,7 +260,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 		ctx := context.Background()
 		stack, _ := newLocalStateTestStack(t)
 		principal := appserver.Principal{ID: stack.composition.authorities.userID}
-		revision, err := stack.ConfigurationRevision(ctx)
+		revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -327,7 +327,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 		principal := appserver.Principal{ID: stack.composition.authorities.userID}
 		before := stack.composition.lookup.Snapshot()
 		contextWindow := stack.composition.lookup.contextWindow
-		revision, err := stack.ConfigurationRevision(ctx)
+		revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -367,7 +367,7 @@ func TestHostModelReusableCredentialsAreScopedToExactEndpointIdentity(t *testing
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
-	revision, err := stack.ConfigurationRevision(ctx)
+	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func TestHostModelDeleteRetainsEndpointCredentialForPinnedRuntimeAndReconnect(t 
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
-	revision, err := stack.ConfigurationRevision(ctx)
+	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +489,7 @@ func TestHostModelDeleteRetainsEndpointCredentialForPinnedRuntimeAndReconnect(t 
 
 func TestHostModelCommandPreCanceledContextHasNoEffect(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
-	before, err := stack.ConfigurationRevision(context.Background())
+	before, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,7 +502,7 @@ func TestHostModelCommandPreCanceledContextHasNoEffect(t *testing.T) {
 	if err == nil || result.Outcome == appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel(cancelled) = %#v, %v", result, err)
 	}
-	after, loadErr := stack.ConfigurationRevision(context.Background())
+	after, loadErr := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if loadErr != nil || after != before {
 		t.Fatalf("cancelled model revision = %d, %v; want %d", after, loadErr, before)
 	}
@@ -533,7 +533,7 @@ func TestHostModelConnectCommitsWhileTurnIsActiveWithoutReplacingRuntime(t *test
 	defer handle.Handle.Close()
 	defer close(blocking.release)
 
-	before, err := stack.ConfigurationRevision(ctx)
+	before, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +545,7 @@ func TestHostModelConnectCommitsWhileTurnIsActiveWithoutReplacingRuntime(t *test
 	if commandErr != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != before+1 {
 		t.Fatalf("ConnectModel(active turn) = %#v, %v", result, commandErr)
 	}
-	after, revisionErr := stack.ConfigurationRevision(ctx)
+	after, revisionErr := stack.ControlStatus().ConfigurationRevision(ctx)
 	if revisionErr != nil || after != before+1 {
 		t.Fatalf("configuration revision after mutation = %d, %v; want %d", after, revisionErr, before+1)
 	}
@@ -557,7 +557,7 @@ func TestHostModelConnectCommitsWhileTurnIsActiveWithoutReplacingRuntime(t *test
 func TestHostModelConnectRejectsConcurrentOAuthWithoutSecondEffect(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	expected, err := stack.ConfigurationRevision(ctx)
+	expected, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +575,7 @@ func TestHostModelConnectRejectsConcurrentOAuthWithoutSecondEffect(t *testing.T)
 	if commandErr == nil || result.Outcome != appserver.OutcomeConflicted || errorcode.CodeOf(commandErr) != errorcode.Conflict {
 		t.Fatalf("ConnectModel(concurrent OAuth) = %#v, %v", result, commandErr)
 	}
-	after, revisionErr := stack.ConfigurationRevision(ctx)
+	after, revisionErr := stack.ControlStatus().ConfigurationRevision(ctx)
 	if revisionErr != nil || after != expected {
 		t.Fatalf("configuration revision after rejected OAuth = %d, %v; want %d", after, revisionErr, expected)
 	}
@@ -588,7 +588,7 @@ func TestHostModelCommandRollsForwardAfterCommittedWriteWarning(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
 	fault := errors.New("directory fsync after model CAS failed")
 	writeCount := installCommittedConfigSaveFault(t, stack, "fsync", fault)
-	expected, err := stack.ConfigurationRevision(context.Background())
+	expected, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +618,7 @@ func TestHostModelCommandPersistsUnknownWhenCredentialRollbackIsIncomplete(t *te
 	}
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	expected, err := stack.ConfigurationRevision(ctx)
+	expected, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +655,7 @@ func TestHostModelCommandPersistsUnknownWhenCredentialRollbackIsIncomplete(t *te
 		t.Fatalf("ConnectModel(incomplete rollback) = %#v, %v", result, commandErr)
 	}
 	restorePermissions()
-	actual, revisionErr := stack.ConfigurationRevision(ctx)
+	actual, revisionErr := stack.ControlStatus().ConfigurationRevision(ctx)
 	if revisionErr != nil || actual != expected {
 		t.Fatalf("configuration revision after incomplete rollback = %d, %v; want %d", actual, revisionErr, expected)
 	}
@@ -700,7 +700,7 @@ func TestHostModelCommandDoesNotGuessRevisionWhenCommittedWriteCannotBeReadBack(
 		pathBlocked = true
 		return committedErr
 	}
-	expected, err := stack.ConfigurationRevision(context.Background())
+	expected, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -741,7 +741,7 @@ func TestHostModelCommandReconcilesNewerCanonicalRevisionBeforeLiveInstall(t *te
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
-	revision, err := stack.ConfigurationRevision(ctx)
+	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -805,7 +805,7 @@ func TestHostModelCommandReconcilesNewerCanonicalRevisionBeforeLiveInstall(t *te
 
 func TestHostModelCommandCommitsForFutureActivationWithoutAssemblyRefresh(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
-	expected, err := stack.ConfigurationRevision(context.Background())
+	expected, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -76,7 +76,7 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	revision, err := host.ConfigurationRevision(ctx)
+	revision, err := host.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 		t.Fatalf("stale error = %v, want OutcomeError(conflicted)", conflictErr)
 	}
 
-	current, err := host.ConfigurationRevision(ctx)
+	current, err := host.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 		writeHTTPParityGitMarketplace(t, marketRepo)
 		started, release, count := installBlockingGitWrapper(t, marketRepo, remoteSource)
 
-		expected, err := host.ConfigurationRevision(ctx)
+		expected, err := host.ControlStatus().ConfigurationRevision(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}

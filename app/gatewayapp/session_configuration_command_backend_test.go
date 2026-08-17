@@ -54,7 +54,7 @@ func TestSessionModelCommandDoesNotChangeHostDefaultOrConfigurationRevision(t *t
 	stack, active := newLocalStateTestStack(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	active = mustCurrentSession(t, stack, active.SessionID)
-	hostRevision, err := stack.ConfigurationRevision(ctx)
+	hostRevision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestSessionModelCommandDoesNotChangeHostDefaultOrConfigurationRevision(t *t
 	if got := stack.composition.lookup.DefaultID(); got != hostDefault {
 		t.Fatalf("Host default = %q, want unchanged %q", got, hostDefault)
 	}
-	if got, err := stack.ConfigurationRevision(ctx); err != nil || got != hostRevision {
+	if got, err := stack.ControlStatus().ConfigurationRevision(ctx); err != nil || got != hostRevision {
 		t.Fatalf("Host configuration revision = %d, %v; want %d", got, err, hostRevision)
 	}
 	state, err := stack.composition.sessions.SnapshotState(ctx, active.SessionRef)

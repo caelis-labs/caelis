@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
@@ -17,54 +15,9 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func (s *runtimeComposition) StartSubagent(
-	ctx context.Context,
-	ref session.SessionRef,
-	agent string,
-	prompt string,
-	source string,
-) (task.Snapshot, error) {
-	return s.StartSubagentWithOptions(ctx, ref, agent, prompt, source, StartSubagentOptions{})
-}
-
-func (s *runtimeComposition) StartSubagentWithOptions(
-	ctx context.Context,
-	ref session.SessionRef,
-	agent string,
-	prompt string,
-	source string,
-	opts StartSubagentOptions,
-) (task.Snapshot, error) {
-	var snapshot task.Snapshot
-	err := s.withPlaced(ctx, ref, func(runCtx context.Context, engine *sdkruntime.Runtime) error {
-		var err error
-		snapshot, err = engine.StartSubagentWithOptions(runCtx, ref, agent, prompt, source, sdkruntime.StartSubagentOptions{
-			ApprovalRequester: opts.ApprovalRequester,
-			ApprovalMode:      opts.ApprovalMode,
-		})
-		return err
-	})
-	return snapshot, err
-}
-
-func (s *runtimeComposition) WaitSubagentTask(
-	ctx context.Context,
-	ref session.SessionRef,
-	taskID string,
-	yield time.Duration,
-) (task.Snapshot, error) {
-	var snapshot task.Snapshot
-	err := s.withPlaced(ctx, ref, func(runCtx context.Context, engine *sdkruntime.Runtime) error {
-		var err error
-		snapshot, err = engine.WaitSubagentTask(runCtx, ref, taskID, yield)
-		return err
-	})
-	return snapshot, err
-}
-
-// CompactSession forces a model-backed checkpoint compaction for the given
+// compactSession forces a model-backed checkpoint compaction for the given
 // session.
-func (s *runtimeComposition) CompactSession(ctx context.Context, ref session.SessionRef) error {
+func (s *runtimeComposition) compactSession(ctx context.Context, ref session.SessionRef) error {
 	if s == nil {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}

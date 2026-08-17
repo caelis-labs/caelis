@@ -337,7 +337,7 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		err = s.CompactSession(ctx, active.SessionRef)
+		err = s.compactSession(ctx, active.SessionRef)
 		return sessionCommandResult(active), classifyControlBackendError(err)
 	case appserver.CancelRequest:
 		active, err := s.checkControlTurnTarget(ctx, req.WriteBase, req.Target)

@@ -127,7 +127,7 @@ func TestDisconnectACPCommandCachesUnknownWhenCommittedRevisionCannotBeObserved(
 		pathBlocked = true
 		return committedErr
 	}
-	expected, err := stack.ConfigurationRevision(context.Background())
+	expected, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

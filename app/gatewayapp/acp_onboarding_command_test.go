@@ -648,7 +648,7 @@ func TestGatewayACPOnboardingHelperProcess(t *testing.T) {
 
 func currentConfigurationRevision(t *testing.T, stack *Stack) uint64 {
 	t.Helper()
-	revision, err := stack.ConfigurationRevision(context.Background())
+	revision, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

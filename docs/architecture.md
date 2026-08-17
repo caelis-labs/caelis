@@ -420,8 +420,9 @@ focused service getters cross the package boundary. Authorized Runtime leases
 remain request-scoped and expose focused service selections rather than a wide
 function bag. Reconnect live-state observation and Task child-history fallback
 use dedicated private readers instead of Stack pass-throughs. Direct Stack
-mirrors of Model, Agent, Status, Runtime acquisition, workspace, preparation,
-and Agent-message service methods are not parallel entry points. Architecture
+mirrors of execution, configuration revision, Model, Agent, Status, Runtime
+acquisition, workspace, preparation, and Agent-message service methods are not
+parallel entry points. Architecture
 and structural gates enforce the private adapter consumer boundary, reject
 concrete Stack use and the retired wide Runtime view in local leaf adapters,
 reject anonymous Host composition, freeze deliberate public Stack methods, and

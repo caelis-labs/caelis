@@ -27,7 +27,7 @@ func TestSandboxConfigurationCommandUsesHostCASAndSharedLedger(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
-	expected, err := stack.ConfigurationRevision(ctx)
+	expected, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestSandboxConfigurationCommandUsesHostCASAndSharedLedger(t *testing.T) {
 	if err != nil || first.Outcome != appserver.OutcomeCommitted || first.Revision != expected+1 {
 		t.Fatalf("SetSandboxBackend() = %#v, %v", first, err)
 	}
-	if actual, err := stack.ConfigurationRevision(ctx); err != nil || actual != first.Revision {
+	if actual, err := stack.ControlStatus().ConfigurationRevision(ctx); err != nil || actual != first.Revision {
 		t.Fatalf("ConfigurationRevision() = %d, %v; want %d", actual, err, first.Revision)
 	}
 	replayed, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, principal, request)
@@ -81,7 +81,7 @@ func TestSandboxConfigurationCommandUsesHostCASAndSharedLedger(t *testing.T) {
 		t.Fatalf("ResetSandbox(shared operation ID) = %#v, %v", sharedConflict, err)
 	}
 
-	beforeCancelled, err := stack.ConfigurationRevision(ctx)
+	beforeCancelled, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestSandboxConfigurationCommandUsesHostCASAndSharedLedger(t *testing.T) {
 	if err == nil || cancelled.Outcome == appserver.OutcomeCommitted {
 		t.Fatalf("SetSandboxBackend(cancelled) = %#v, %v", cancelled, err)
 	}
-	if afterCancelled, loadErr := stack.ConfigurationRevision(ctx); loadErr != nil || afterCancelled != beforeCancelled {
+	if afterCancelled, loadErr := stack.ControlStatus().ConfigurationRevision(ctx); loadErr != nil || afterCancelled != beforeCancelled {
 		t.Fatalf("cancelled revision = %d, %v; want unchanged %d", afterCancelled, loadErr, beforeCancelled)
 	}
 }
@@ -156,7 +156,7 @@ func TestSandboxConfigurationCommandRollsForwardAfterCommittedWriteFault(t *test
 		cancel()
 		return committedFault(doc)
 	}
-	expected, err := stack.ConfigurationRevision(ctx)
+	expected, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestSandboxConfigurationCommandDoesNotGuessRevisionWhenCommittedWriteCannot
 		pathBlocked = true
 		return committedErr
 	}
-	expected, err := stack.ConfigurationRevision(context.Background())
+	expected, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -628,7 +628,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 		{
 			name: "sandbox lifecycle command",
 			run: func() error {
-				expected, err := stack.ConfigurationRevision(ctx)
+				expected, err := stack.ControlStatus().ConfigurationRevision(ctx)
 				if err != nil {
 					return err
 				}

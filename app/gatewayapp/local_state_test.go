@@ -496,7 +496,7 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	expected, err := stack.ConfigurationRevision(context.Background())
+	expected, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatalf("ConfigurationRevision() error = %v", err)
 	}
@@ -1160,8 +1160,20 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppAssistantEvent("ack"))
 	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Next action: force the runtime compactor with trigger manual."))
 
-	if err := stack.CompactSession(ctx, activeSession.SessionRef); err != nil {
-		t.Fatalf("CompactSession() error = %v", err)
+	current := mustCurrentSession(t, stack, activeSession.SessionID)
+	revision := current.Revision
+	sessions, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: activeSession.UserID})
+	if err != nil {
+		t.Fatalf("BindSessionClient() error = %v", err)
+	}
+	result, err := sessions.CompactSession(ctx, appserver.CompactSessionRequest{WriteBase: appserver.WriteBase{
+		OperationID:             "manual-compact-product-path",
+		SessionID:               current.SessionID,
+		ExpectedRevision:        &revision,
+		ExpectedControllerEpoch: current.Controller.EpochID,
+	}})
+	if err != nil || result.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("AppServer CompactSession() = %#v, %v", result, err)
 	}
 	if got := server.compactionCalls.Load(); got != 1 {
 		t.Fatalf("compactionCalls = %d, want 1", got)
