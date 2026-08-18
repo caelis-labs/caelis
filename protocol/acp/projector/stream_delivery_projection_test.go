@@ -13,12 +13,12 @@ func TestProjectTaskStreamFrameSeparatesDelegatedSemanticsFromCommandTerminalOut
 
 	taskRequest := spawnStreamRequestForTest()
 	taskRequest.CallID = "task-call-1"
-	taskRequest.ToolName = "TASK"
+	taskRequest.ToolName = "Task"
 	taskRequest.DisplayTerminalID = "task-call-1"
 	commandRequest := StreamRequest{
 		SessionRef:        session.SessionRef{SessionID: "root-session"},
 		CallID:            "command-call-1",
-		ToolName:          "RUN_COMMAND",
+		ToolName:          "RunCommand",
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "command-task-1", TerminalID: "command-terminal-1"},
 		DisplayTerminalID: "command-call-1",
 		Scope:             eventstream.ScopeMain,
@@ -39,7 +39,7 @@ func TestProjectTaskStreamFrameSeparatesDelegatedSemanticsFromCommandTerminalOut
 				Event:   childMessageEventForStreamTest("child message"),
 			},
 			want: []streamFrameEnvelopeExpectation{
-				{parentCallID: "task-call-1", parentTool: "TASK", transient: true},
+				{parentCallID: "task-call-1", parentTool: "Task", transient: true},
 			},
 		},
 		{
@@ -60,7 +60,7 @@ func TestProjectTaskStreamFrameSeparatesDelegatedSemanticsFromCommandTerminalOut
 				Closed: true,
 				State:  "completed",
 			},
-			want: []streamFrameEnvelopeExpectation{{parentCallID: "spawn-call-1", parentTool: "SPAWN", transient: true}},
+			want: []streamFrameEnvelopeExpectation{{parentCallID: "spawn-call-1", parentTool: "Spawn", transient: true}},
 		},
 		{
 			name: "run command running",

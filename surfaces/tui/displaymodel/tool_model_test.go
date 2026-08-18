@@ -12,28 +12,28 @@ func TestRenderToolEventLineLifecycle(t *testing.T) {
 	}{
 		{
 			name: "running",
-			vm:   ToolEventViewModel{Name: "RUN_COMMAND", Args: "go test"},
-			want: "▸ RUN_COMMAND go test",
+			vm:   ToolEventViewModel{Name: "RunCommand", Args: "go test"},
+			want: "▸ RunCommand go test",
 		},
 		{
 			name: "expanded",
-			vm:   ToolEventViewModel{Name: "RUN_COMMAND", Args: "go test", Expandable: true, Expanded: true},
-			want: "▾ RUN_COMMAND go test",
+			vm:   ToolEventViewModel{Name: "RunCommand", Args: "go test", Expandable: true, Expanded: true},
+			want: "▾ RunCommand go test",
 		},
 		{
 			name: "done",
-			vm:   ToolEventViewModel{Name: "READ", Done: true, Output: "README.md"},
-			want: "✓ READ README.md",
+			vm:   ToolEventViewModel{Name: "Read", Done: true, Output: "README.md"},
+			want: "✓ Read README.md",
 		},
 		{
 			name: "done default",
-			vm:   ToolEventViewModel{Name: "READ", Done: true},
-			want: "✓ READ completed",
+			vm:   ToolEventViewModel{Name: "Read", Done: true},
+			want: "✓ Read completed",
 		},
 		{
 			name: "error",
-			vm:   ToolEventViewModel{Name: "PATCH", Done: true, Err: true, Output: "failed"},
-			want: "✗ PATCH failed",
+			vm:   ToolEventViewModel{Name: "Patch", Done: true, Err: true, Output: "failed"},
+			want: "✗ Patch failed",
 		},
 	}
 

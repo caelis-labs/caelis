@@ -187,7 +187,7 @@ func TestLiveExplorationScrollbarHardScrollPreservesWideReasoning(t *testing.T) 
 				newNarrativeSourceIdentity("reasoning-old", "event-old", "projection-old"),
 			)
 			block.UpdateToolWithMeta("read-1", "Read", "overview.md", "", true, false, ToolUpdateMeta{ToolKind: "read"})
-			block.UpdateToolWithMeta("list-1", "List", "overview", "", true, false, ToolUpdateMeta{ToolKind: "search"})
+			block.UpdateToolWithMeta("glob-1", "Glob", "overview", "", true, false, ToolUpdateMeta{ToolKind: "search"})
 			block.AppendStreamEvent(
 				SEReasoning,
 				reasoning,

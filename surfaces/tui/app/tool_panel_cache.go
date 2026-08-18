@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 )
 
 const maxGenericToolPanelCacheBytes = 64 * 1024
@@ -49,7 +47,7 @@ func toolPanelRenderCacheKey(request toolPanelRenderRequest, scroll toolPanelScr
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(request.CallID))
 	b.WriteByte(0)
-	b.WriteString(strings.ToUpper(strings.TrimSpace(request.ToolName)))
+	b.WriteString(strings.TrimSpace(request.ToolName))
 	b.WriteByte(0)
 	b.WriteString(strconv.Itoa(request.Width))
 	b.WriteByte(0)
@@ -71,7 +69,7 @@ func toolPanelRenderCacheKey(request toolPanelRenderRequest, scroll toolPanelScr
 
 func toolPanelCacheText(toolName string, text string, width int) string {
 	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
-	if !display.IsTerminalPanelTool(toolName, "") {
+	if !surfaceIsTerminalPanelTool(toolName) {
 		return boundedGenericToolPanelText(text)
 	}
 	segments := tailWrappedTerminalSegmentsFromEnd(text, maxInt(1, width), acpTerminalPanelMaxLines)

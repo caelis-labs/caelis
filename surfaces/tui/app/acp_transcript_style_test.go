@@ -87,8 +87,8 @@ func TestACPHeaderAndToolLineSanitizeSourceANSI(t *testing.T) {
 		t.Fatalf("source ANSI color leaked into header: %q", header)
 	}
 
-	line := styleToolEventLine(model.theme, "✓ RUN_COMMAND \x1b[31m└ failed\x1b[0m", tuikit.LineStyleTool)
-	if got := ansi.Strip(line); got != "✓ RUN_COMMAND └ failed" {
+	line := styleToolEventLine(model.theme, "✓ RunCommand \x1b[31m└ failed\x1b[0m", tuikit.LineStyleTool)
+	if got := ansi.Strip(line); got != "✓ RunCommand └ failed" {
 		t.Fatalf("tool line strips to %q, want sanitized suffix", got)
 	}
 	if strings.Contains(line, "[31m") {
@@ -267,7 +267,7 @@ func TestViewportCacheKeyIncludesPulseOnlyForRunningTools(t *testing.T) {
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	block := NewMainACPTurnBlock("turn")
 	block.Events = []SubagentEvent{{
-		Kind: SEToolCall, Name: "RUN_COMMAND", Args: "git status", Done: false,
+		Kind: SEToolCall, Name: "RunCommand", Args: "git status", Done: false,
 	}}
 	bright := BlockRenderContext{Width: 80, TermWidth: 80, Theme: theme, AnimationsEnabled: true, SpinnerView: runningSpinnerFrames[0]}
 	dim := bright
@@ -279,7 +279,7 @@ func TestViewportCacheKeyIncludesPulseOnlyForRunningTools(t *testing.T) {
 	if viewportBlockRenderKey(block, bright) != viewportBlockRenderKey(block, dim) {
 		t.Fatal("completed tool cache key changed with pulse phase")
 	}
-	block.Events[0].Name = "SPAWN"
+	block.Events[0].Name = "Spawn"
 	block.Events[0].Done = false
 	if viewportBlockRenderKey(block, bright) != viewportBlockRenderKey(block, dim) {
 		t.Fatal("Spawn row cache key should stay independent of pulse phase")
@@ -293,7 +293,7 @@ func TestCommandTaskWriteKeepsInteractionHeaderWhenTerminalTagged(t *testing.T) 
 	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}
 	ev := SubagentEvent{
 		Kind:           SEToolCall,
-		Name:           "TASK",
+		Name:           "Task",
 		Args:           "Write command-82",
 		CallID:         "task-write-82",
 		ToolKind:       "execute",

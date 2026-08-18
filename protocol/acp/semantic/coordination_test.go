@@ -19,7 +19,7 @@ func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
 	wantApproval := session.ProtocolApproval{
 		ToolCall: session.ProtocolToolCall{
 			ID:       "call-1",
-			Name:     "RUN_COMMAND",
+			Name:     "RunCommand",
 			Kind:     schema.ToolKindExecute,
 			Title:    "Run command",
 			Status:   schema.ToolStatusPending,

@@ -156,7 +156,7 @@ func TestTaskWaitUsesGenericFallbackAndStableFinalKey(t *testing.T) {
 		Kind:           TranscriptEventTool,
 		Scope:          ACPProjectionMain,
 		ToolCallID:     "task-wait-1",
-		ToolName:       "TASK",
+		ToolName:       "Task",
 		ToolTaskAction: "wait",
 		ToolTaskHandle: "command-48",
 	}
@@ -185,7 +185,7 @@ func TestSparseTaskWaitFinalClosesInvocation(t *testing.T) {
 		Scope:              ACPProjectionMain,
 		TurnID:             "turn-1",
 		ToolCallID:         "task-wait-1",
-		ToolName:           "TASK",
+		ToolName:           "Task",
 		ToolTaskAction:     "wait",
 		ToolTaskTargetKind: "command",
 	})
@@ -235,11 +235,11 @@ func TestParticipantACPEventsDriveForegroundActivity(t *testing.T) {
 	apply(schema.ToolCall{
 		SessionUpdate: schema.UpdateToolCall,
 		ToolCallID:    "review-command-1",
-		Title:         "RUN_COMMAND go test ./...",
+		Title:         "RunCommand go test ./...",
 		Kind:          schema.ToolKindExecute,
 		Status:        schema.ToolStatusInProgress,
 		RawInput:      map[string]any{"command": "go test ./..."},
-		Meta:          acpToolNameMeta("RUN_COMMAND"),
+		Meta:          acpToolNameMeta("RunCommand"),
 	})
 	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetShell {
 		t.Fatalf("participant tool activity = %#v, want Waiting on shell", m.runningActivity)
@@ -273,7 +273,7 @@ func TestTaskWriteDoesNotReplaceModelWaitingActivity(t *testing.T) {
 		Kind:           TranscriptEventTool,
 		Scope:          ACPProjectionMain,
 		ToolCallID:     "task-write-1",
-		ToolName:       "TASK",
+		ToolName:       "Task",
 		ToolTaskAction: "write",
 	}
 	m.applyTranscriptRunningActivity(start)
@@ -301,7 +301,7 @@ func TestTaskReadAndWriteDoNotReplaceModelWaitingActivity(t *testing.T) {
 				Kind:               TranscriptEventTool,
 				Scope:              ACPProjectionMain,
 				ToolCallID:         "task-" + action,
-				ToolName:           "TASK",
+				ToolName:           "Task",
 				ToolTaskAction:     action,
 				ToolTaskTargetKind: "command",
 				ToolTaskHandle:     "command-48",
@@ -316,7 +316,7 @@ func TestTaskReadAndWriteDoNotReplaceModelWaitingActivity(t *testing.T) {
 func TestShortFileToolsDoNotReplaceCurrentACPActivity(t *testing.T) {
 	t.Parallel()
 
-	for _, toolName := range []string{"READ", "WRITE", "PATCH", "GLOB", "GREP"} {
+	for _, toolName := range []string{"Read", "Write", "Patch", "Glob", "GREP"} {
 		t.Run(toolName, func(t *testing.T) {
 			m := NewModel(Config{NoColor: true, NoAnimation: true})
 			m.liveTurn.Active = true
@@ -345,8 +345,8 @@ func TestLongRunningWebToolsUseDistinctWebActivity(t *testing.T) {
 		phase    runningActivityPhase
 		label    string
 	}{
-		{toolName: "WEB_SEARCH", phase: runningPhaseSearch, label: "Searching web"},
-		{toolName: "WEB_FETCH", phase: runningPhaseFetch, label: "Fetching web"},
+		{toolName: "WebSearch", phase: runningPhaseSearch, label: "Searching web"},
+		{toolName: "WebFetch", phase: runningPhaseFetch, label: "Fetching web"},
 	} {
 		t.Run(test.toolName, func(t *testing.T) {
 			m := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -466,13 +466,13 @@ func TestParallelToolCompletionRestoresRemainingActivity(t *testing.T) {
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		ToolCallID: "command-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 	})
 	m.applyTranscriptRunningActivity(TranscriptEvent{
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		ToolCallID: "spawn-1",
-		ToolName:   "SPAWN",
+		ToolName:   "Spawn",
 	})
 	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetSubagent {
 		t.Fatalf("runningActivity = %#v, want latest parallel Spawn activity", m.runningActivity)
@@ -482,7 +482,7 @@ func TestParallelToolCompletionRestoresRemainingActivity(t *testing.T) {
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		ToolCallID: "spawn-1",
-		ToolName:   "SPAWN",
+		ToolName:   "Spawn",
 		Final:      true,
 	})
 	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetShell ||
@@ -494,7 +494,7 @@ func TestParallelToolCompletionRestoresRemainingActivity(t *testing.T) {
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		ToolCallID: "command-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 		Final:      true,
 	})
 	if m.runningActivity.Phase != runningPhaseModelWait || m.runningActivity.Key != "model" {
@@ -577,7 +577,7 @@ func TestNarrativeForegroundOverridesRunningBackgroundTool(t *testing.T) {
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		ToolCallID: "command-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 	}
 	m.applyTranscriptRunningActivity(command)
 	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetShell {
@@ -605,7 +605,7 @@ func TestNarrativeForegroundOverridesRunningBackgroundTool(t *testing.T) {
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		ToolCallID: "spawn-1",
-		ToolName:   "SPAWN",
+		ToolName:   "Spawn",
 	}
 	m.applyTranscriptRunningActivity(spawn)
 	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetSubagent {
@@ -662,7 +662,7 @@ func TestRunningActivityAllowsReusedCallIDInANewTurnWithoutRevivingOldOwner(t *t
 		TurnID:     "turn-1",
 		OccurredAt: time.Unix(101, 0),
 		ToolCallID: "command-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 	}
 	m.applyTranscriptRunningActivity(first)
 	first.Final = true
@@ -696,7 +696,7 @@ func TestRunningActivityMissingTurnIDUsesTurnGenerationAndRejectsOlderEvent(t *t
 		Scope:      ACPProjectionMain,
 		OccurredAt: time.Unix(101, 0),
 		ToolCallID: "command-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 	}
 	m.applyTranscriptRunningActivity(event)
 	event.Final = true
@@ -822,7 +822,7 @@ func TestRejectedInterruptRestoresActivityAdvancedWhilePending(t *testing.T) {
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		ToolCallID: "command-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 	})
 
 	updated, _ := m.requestRunningInterrupt()
@@ -831,7 +831,7 @@ func TestRejectedInterruptRestoresActivityAdvancedWhilePending(t *testing.T) {
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		ToolCallID: "command-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 		Final:      true,
 	}})
 	m.applyACPRunningActivity(eventstream.Envelope{}, []TranscriptEvent{{

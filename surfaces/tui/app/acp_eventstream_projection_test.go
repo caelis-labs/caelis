@@ -125,7 +125,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysSkillContentReadAsSkill(t *tes
 		t.Fatalf("events = %#v, want one transcript event", events)
 	}
 	event := events[0]
-	if event.Kind != TranscriptEventTool || event.ToolName != "SKILL" || event.ToolArgs != "review" || event.ToolKind != schema.ToolKindRead {
+	if event.Kind != TranscriptEventTool || event.ToolName != "Skill" || event.ToolArgs != "review" || event.ToolKind != schema.ToolKindRead {
 		t.Fatalf("event = %#v, want Skill review tool event", event)
 	}
 }
@@ -242,7 +242,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardRawTerminalOutput(t *t
 			Kind:          &kind,
 			Status:        &status,
 			RawOutput:     map[string]any{"stdout": "side acp output\n"},
-			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RUN_COMMAND"), "call-1"),
+			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RunCommand"), "call-1"),
 		},
 	})
 	if len(events) != 1 {
@@ -268,7 +268,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardRawOutputWithoutToolKi
 			Kind:          stringPtr(schema.ToolKindExecute),
 			Status:        &status,
 			RawOutput:     map[string]any{"stdout": "side acp output\n"},
-			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RUN_COMMAND"), "call-1"),
+			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RunCommand"), "call-1"),
 		},
 	})
 	if len(events) != 1 {
@@ -290,7 +290,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardTerminalContentWithout
 			ToolCallID:    "call-1",
 			Status:        &status,
 			Kind:          stringPtr(schema.ToolKindExecute),
-			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), "call-1", "terminal content\n"),
+			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "terminal content\n"),
 		},
 	})
 	if len(events) != 1 {
@@ -339,7 +339,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysTerminalContentWithoutToolKind
 			ToolCallID:    "call-1",
 			Status:        &status,
 			Kind:          stringPtr(schema.ToolKindExecute),
-			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), "call-1", "terminal content output\n"),
+			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "terminal content output\n"),
 		},
 	})
 	if len(events) != 1 {
@@ -365,7 +365,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysStringRawOutput(t *testing.T) 
 			Status:        &status,
 			Kind:          stringPtr(schema.ToolKindExecute),
 			RawOutput:     "string raw output\n",
-			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RUN_COMMAND"), "call-1"),
+			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RunCommand"), "call-1"),
 		},
 	})
 	if len(events) != 1 {
@@ -414,12 +414,12 @@ func TestProjectACPEventToTranscriptEventsSuppressesRunningSnapshotTerminalOutpu
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
-			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Title:         stringPtr("RunCommand echo ok"),
 			Kind:          &kind,
 			Status:        &status,
 			RawInput:      map[string]any{"command": "echo ok"},
 			RawOutput:     map[string]any{"latest_output": "Step 1/5\nStep 2/5\n", "state": "running"},
-			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "Step 1/5\nStep 2/5\n", ""),
+			Meta:          runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "Step 1/5\nStep 2/5\n", ""),
 		},
 	})
 	if len(events) != 1 {
@@ -443,10 +443,10 @@ func TestProjectACPEventToTranscriptEventsDisplaysTerminalStreamFrameOutput(t *t
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
-			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Title:         stringPtr("RunCommand echo ok"),
 			Kind:          &kind,
 			Status:        &status,
-			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "Step 3/5\n", "append"),
+			Meta:          runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "Step 3/5\n", "append"),
 		},
 	})
 	if len(events) != 1 {
@@ -465,7 +465,7 @@ func TestProjectACPEventToTranscriptEventsMarksUnavailableTerminalPrefix(t *test
 
 	status := schema.ToolStatusInProgress
 	kind := schema.ToolKindExecute
-	meta := runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "retained tail\n", "append")
+	meta := runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "retained tail\n", "append")
 	meta = metautil.WithRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
 		metautil.RuntimeStreamMode:      "append",
 		metautil.RuntimeStreamTruncated: true,
@@ -476,7 +476,7 @@ func TestProjectACPEventToTranscriptEventsMarksUnavailableTerminalPrefix(t *test
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
-			Title:         stringPtr("RUN_COMMAND long job"),
+			Title:         stringPtr("RunCommand long job"),
 			Kind:          &kind,
 			Status:        &status,
 			Meta:          meta,
@@ -500,10 +500,10 @@ func TestProjectACPEventToTranscriptEventsPreservesTerminalNewlineFrameOutput(t 
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
-			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Title:         stringPtr("RunCommand echo ok"),
 			Kind:          &kind,
 			Status:        &status,
-			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "\n", "append"),
+			Meta:          runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "\n", "append"),
 		},
 	})
 	if len(events) != 1 {

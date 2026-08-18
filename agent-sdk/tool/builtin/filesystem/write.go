@@ -10,10 +10,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const WriteToolName = names.Write
+const WriteToolName = "Write"
 
 type WriteTool struct {
 	runtime sandbox.Runtime

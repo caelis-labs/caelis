@@ -650,7 +650,7 @@ func TestToKernelMessage_OpenAICompatKeepsRawToolArgsOnDecodeFailure(t *testing.
 				ID:   "c1",
 				Type: "function",
 				Function: openAICompatCallFunction{
-					Name:      "WRITE",
+					Name:      "Write",
 					Arguments: `{"path":`,
 				},
 			},
@@ -1511,12 +1511,12 @@ func TestOpenAICompatMessageTransformPreservesTerminalLikeCommandPayload(t *test
 	messages := llm.fromKernelMessages(nil, []model.Message{
 		model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 			ID:   "call_1",
-			Name: "RUN_COMMAND",
+			Name: "RunCommand",
 			Args: jsonArgs(map[string]any{"command": "go build ./... 2>&1"}),
 		}}, ""),
 		{
 			Role: model.RoleTool,
-			Parts: []model.Part{model.NewToolResultJSONPart("call_1", "RUN_COMMAND", map[string]any{
+			Parts: []model.Part{model.NewToolResultJSONPart("call_1", "RunCommand", map[string]any{
 				"stdout":    "go: writing stat cache: open " + deniedPath + ": read-only file system\n",
 				"stderr":    "",
 				"error":     "Sandbox permission denied. Use a writable workspace path or request elevated permissions.",
@@ -1598,24 +1598,24 @@ func TestAnthropicMessageTransformMergesConsecutiveToolResults(t *testing.T) {
 		model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{
 			{
 				ID:   "call1",
-				Name: "SEARCH",
+				Name: "Grep",
 				Args: jsonArgs(map[string]any{"pattern": "tests"}),
 			},
 			{
 				ID:   "call2",
-				Name: "READ",
+				Name: "Read",
 				Args: jsonArgs(map[string]any{"path": "calculator/tests/test_basic.py"}),
 			},
 		}, ""),
 		{
 			Role: model.RoleTool,
-			Parts: []model.Part{model.NewToolResultJSONPart("call1", "SEARCH", map[string]any{
+			Parts: []model.Part{model.NewToolResultJSONPart("call1", "Grep", map[string]any{
 				"matches": []any{"test_add"},
 			}, false)},
 		},
 		{
 			Role: model.RoleTool,
-			Parts: []model.Part{model.NewToolResultJSONPart("call2", "READ", map[string]any{
+			Parts: []model.Part{model.NewToolResultJSONPart("call2", "Read", map[string]any{
 				"content": "def test_add(): pass",
 			}, false)},
 		},
@@ -1928,7 +1928,7 @@ func TestDeepSeekAnthropicStreamWrapsMalformedToolInputBeforeSDKMarshal(t *testi
 	for event, err := range llm.Generate(context.Background(), &model.Request{
 		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
 		Tools: []model.ToolSpec{
-			model.NewFunctionToolSpec("SEARCH", "Search file content.", map[string]any{"type": "object"}),
+			model.NewFunctionToolSpec("Grep", "Search file content.", map[string]any{"type": "object"}),
 		},
 		Stream: true,
 	}) {
@@ -2168,7 +2168,7 @@ func TestGeminiMessageTransform_SkipsToolCallWithoutThoughtSignature(t *testing.
 	_, msgs, err := toGeminiContents(nil, []model.Message{
 		model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 			ID:   "call1",
-			Name: "RUN_COMMAND",
+			Name: "RunCommand",
 			Args: jsonArgs(map[string]any{"command": "ls"}),
 		}}, "tool planned"),
 	})
@@ -2214,7 +2214,7 @@ func TestGeminiResponseToMessage_PreservesThoughtSignature(t *testing.T) {
 						{
 							ThoughtSignature: []byte("sig-call-1"),
 							FunctionCall: &genai.FunctionCall{
-								Name: "RUN_COMMAND",
+								Name: "RunCommand",
 								Args: map[string]any{"command": "ls"},
 							},
 						},
@@ -2293,7 +2293,7 @@ func TestGeminiResponseDecode_PartLevelThoughtSignature(t *testing.T) {
 				"content":{
 					"parts":[
 						{
-							"functionCall":{"name":"RUN_COMMAND","args":{"command":"ls"}},
+							"functionCall":{"name":"RunCommand","args":{"command":"ls"}},
 							"thoughtSignature":"c2lnLXBhcnQtMQ=="
 						}
 					]
@@ -2320,13 +2320,13 @@ func TestGeminiResponseDecode_PartLevelThoughtSignature(t *testing.T) {
 func TestDedupToolCalls_MergesLateThoughtSignature(t *testing.T) {
 	calls := dedupToolCalls([]model.ToolCall{
 		{
-			ID:   "RUN_COMMAND",
-			Name: "RUN_COMMAND",
+			ID:   "RunCommand",
+			Name: "RunCommand",
 			Args: jsonArgs(map[string]any{"command": "ls"}),
 		},
 		{
-			ID:               "RUN_COMMAND",
-			Name:             "RUN_COMMAND",
+			ID:               "RunCommand",
+			Name:             "RunCommand",
 			Args:             jsonArgs(map[string]any{"command": "ls -la"}),
 			ThoughtSignature: "sig-late-1",
 		},

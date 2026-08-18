@@ -2,8 +2,6 @@ package tuiapp
 
 import (
 	"strings"
-
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 )
 
 type ToolUpdateMeta struct {
@@ -55,10 +53,10 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	taskTargetKind := strings.ToLower(strings.TrimSpace(update.Meta.TaskTargetKind))
 	messageTarget := strings.TrimSpace(update.Meta.MessageTarget)
 	authoritativeFinal := update.Meta.OutputAuthoritative || toolFinalOutputAuthoritative(update.Err, update.Meta.ToolStatus)
-	effectiveName, effectiveToolKind, openIdx := effectiveToolEventIdentity(out, update, toolIndex, name, toolKind)
-	semanticName := toolSemanticName(effectiveName, effectiveToolKind)
-	output := normalizeToolEventOutput(update.Output, effectiveName, effectiveToolKind, update.Meta.Terminal)
-	if strings.EqualFold(semanticName, "TASK") && taskAction == "cancel" {
+	effectiveName, _, openIdx := effectiveToolEventIdentity(out, update, toolIndex, name, toolKind)
+	semanticName := effectiveName
+	output := normalizeToolEventOutput(update.Output, effectiveName, update.Meta.Terminal)
+	if semanticName == surfaceToolTask && taskAction == "cancel" {
 		args = taskCancelArgsWithLinkedCommand(args, out, taskHandle)
 	}
 	defer func() {
@@ -69,12 +67,12 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	}()
 	if updateLinkedTerminalEvent(out, callID, semanticName, taskHandle, output, update.Final, update.Err, update.Meta) {
 		changed = true
-		if strings.EqualFold(semanticName, "SPAWN") {
+		if semanticName == surfaceToolSpawn {
 			return out, changed, false
 		}
 		output = ""
 	}
-	if shouldIgnoreStaleTerminalUpdate(out, callID, effectiveName, effectiveToolKind, update.Meta.Terminal, update.Final) {
+	if shouldIgnoreStaleTerminalUpdate(out, callID, effectiveName, update.Meta.Terminal, update.Final) {
 		return out, changed, false
 	}
 	if !update.Final {
@@ -177,10 +175,10 @@ func shouldReplaceCompletedSubagentToolEvent(existing SubagentEvent, incoming Su
 	if !existing.Done || !incoming.Done || strings.TrimSpace(existing.CallID) == "" || strings.TrimSpace(existing.CallID) != strings.TrimSpace(incoming.CallID) {
 		return false
 	}
-	existingName := toolSemanticName(existing.Name, existing.ToolKind)
-	incomingName := toolSemanticName(incoming.Name, incoming.ToolKind)
-	return strings.EqualFold(existingName, incomingName) &&
-		(strings.EqualFold(existingName, "SPAWN") || strings.EqualFold(existingName, "TASK"))
+	existingName := existing.Name
+	incomingName := incoming.Name
+	return existingName == incomingName &&
+		(existingName == surfaceToolSpawn || existingName == surfaceToolTask)
 }
 
 func effectiveToolEventIdentity(events []SubagentEvent, update toolEventUpdate, toolIndex map[string]int, name string, toolKind string) (string, string, int) {
@@ -191,6 +189,11 @@ func effectiveToolEventIdentity(events []SubagentEvent, update toolEventUpdate, 
 	existing := events[idx]
 	if strings.TrimSpace(name) == "" {
 		name = strings.TrimSpace(existing.Name)
+	} else if strings.TrimSpace(existing.Name) != "" && strings.TrimSpace(name) == strings.TrimSpace(toolKind) {
+		// ACP kind is a display classification, not a Definition.Name. A
+		// partial update that only carries the kind must not replace the exact
+		// name already established by the call event.
+		name = strings.TrimSpace(existing.Name)
 	}
 	if strings.TrimSpace(toolKind) == "" {
 		toolKind = strings.TrimSpace(existing.ToolKind)
@@ -198,8 +201,8 @@ func effectiveToolEventIdentity(events []SubagentEvent, update toolEventUpdate, 
 	return name, toolKind, idx
 }
 
-func normalizeToolEventOutput(output string, effectiveName string, effectiveToolKind string, terminal bool) string {
-	if terminal || display.IsTerminalPanelTool(effectiveName, effectiveToolKind) {
+func normalizeToolEventOutput(output string, effectiveName string, terminal bool) string {
+	if terminal || surfaceIsTerminalPanelTool(effectiveName) {
 		return output
 	}
 	return strings.TrimSpace(output)
@@ -292,7 +295,7 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 	// Spawn may carry a terminal relation for Task linkage, but its live output
 	// is structured child narrative rather than terminal bytes and must retain
 	// message scope.
-	terminalOutput := isTerminalPanelToolEvent(*ev) && !strings.EqualFold(semanticName, "SPAWN")
+	terminalOutput := isTerminalPanelToolEvent(*ev) && semanticName != surfaceToolSpawn
 	if shouldMergeOpenToolOutput(semanticName, output, terminalOutput) {
 		if terminalOutput {
 			if meta.OutputTerminal && meta.OutputCursorKnown {
@@ -383,7 +386,7 @@ func shouldUseExistingArgsForFinal(finalEvent SubagentEvent, existing SubagentEv
 		// a new full representation for the replacement preview.
 		return true
 	}
-	if !strings.EqualFold(toolSemanticName(finalEvent.Name, finalEvent.ToolKind), "SPAWN") {
+	if finalEvent.Name != surfaceToolSpawn {
 		return false
 	}
 	// A final preview accompanied by its full Spawn invocation is one
@@ -400,7 +403,7 @@ func shouldUseExistingFullArgsForFinal(finalEvent SubagentEvent, existing Subage
 	if strings.TrimSpace(finalEvent.FullArgs) == "" {
 		return true
 	}
-	if !strings.EqualFold(toolSemanticName(finalEvent.Name, finalEvent.ToolKind), "SPAWN") {
+	if finalEvent.Name != surfaceToolSpawn {
 		return false
 	}
 	return shouldReplaceSpawnDisplayArgs(finalEvent.FullArgs, existing.FullArgs)
@@ -503,8 +506,8 @@ func finalToolOutputShouldReplace(existing SubagentEvent, finalEvent SubagentEve
 	if isTaskWriteInteractionEvent(existing) || isTaskWriteInteractionEvent(finalEvent) {
 		return finalEvent.Err && renderableTextHasContent(finalEvent.Output)
 	}
-	semanticName := toolSemanticName(existing.Name, existing.ToolKind)
-	subagentTool := strings.EqualFold(semanticName, "SPAWN")
+	semanticName := existing.Name
+	subagentTool := semanticName == surfaceToolSpawn
 	if authoritativeFinal && subagentTool && renderableTextHasContent(finalEvent.Output) {
 		return true
 	}

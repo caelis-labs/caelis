@@ -22,8 +22,9 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
@@ -503,7 +504,7 @@ func (m *scriptedSpawnLLM) Generate(_ context.Context, req *model.Request) iter.
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   "task-wait-spawn-1",
-						Name: names.Task,
+						Name: tasktool.ToolName,
 						Args: string(mustJSON(map[string]any{
 							"action": "wait",
 							"handle": m.taskHandle,
@@ -585,7 +586,7 @@ func (m *scriptedAsyncCommandLLM) Generate(_ context.Context, req *model.Request
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   "command-async-1",
-						Name: names.RunCommand,
+						Name: shell.RunCommandToolName,
 						Args: string(mustJSON(map[string]any{
 							"command":       "sleep 0.05; printf 'acpx async command ok'",
 							"workdir":       ".",
@@ -604,7 +605,7 @@ func (m *scriptedAsyncCommandLLM) Generate(_ context.Context, req *model.Request
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   "task-wait-1",
-						Name: names.Task,
+						Name: tasktool.ToolName,
 						Args: string(mustJSON(map[string]any{"action": "wait", "handle": m.taskHandle})),
 					}}, ""),
 					TurnComplete: true,
@@ -643,7 +644,7 @@ func (m *scriptedInteractiveCommandLLM) Generate(_ context.Context, req *model.R
 		case 1:
 			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 				ID:   "command-interactive-1",
-				Name: names.RunCommand,
+				Name: shell.RunCommandToolName,
 				Args: string(mustJSON(map[string]any{
 					"command":       "printf 'interactive ready\\n'; while IFS= read -r line; do printf 'echo:%s\\n' \"$line\"; sleep 0.25; printf 'later:%s\\n' \"$line\"; done",
 					"workdir":       ".",
@@ -653,7 +654,7 @@ func (m *scriptedInteractiveCommandLLM) Generate(_ context.Context, req *model.R
 		case 2:
 			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 				ID:   "task-write-interactive-1",
-				Name: names.Task,
+				Name: tasktool.ToolName,
 				Args: string(mustJSON(map[string]any{
 					"action": "write",
 					"handle": m.taskHandle,
@@ -663,7 +664,7 @@ func (m *scriptedInteractiveCommandLLM) Generate(_ context.Context, req *model.R
 		case 3:
 			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 				ID:   "task-read-interactive-1",
-				Name: names.Task,
+				Name: tasktool.ToolName,
 				Args: string(mustJSON(map[string]any{
 					"action": "read",
 					"handle": m.taskHandle,
@@ -672,7 +673,7 @@ func (m *scriptedInteractiveCommandLLM) Generate(_ context.Context, req *model.R
 		case 4:
 			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 				ID:   "task-cancel-interactive-1",
-				Name: names.Task,
+				Name: tasktool.ToolName,
 				Args: string(mustJSON(map[string]any{
 					"action": "cancel",
 					"handle": m.taskHandle,
@@ -699,7 +700,7 @@ func (m *scriptedApprovalCommandLLM) Generate(_ context.Context, req *model.Requ
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   "command-approval-1",
-						Name: names.RunCommand,
+						Name: shell.RunCommandToolName,
 						Args: string(mustJSON(map[string]any{
 							"command":             "printf 'child approval ok\n'; sleep 0.2",
 							"workdir":             ".",
@@ -720,7 +721,7 @@ func (m *scriptedApprovalCommandLLM) Generate(_ context.Context, req *model.Requ
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   "task-wait-approval-1",
-						Name: names.Task,
+						Name: tasktool.ToolName,
 						Args: string(mustJSON(map[string]any{"action": "wait", "handle": m.taskHandle})),
 					}}, ""),
 					TurnComplete: true,
@@ -748,7 +749,7 @@ func (m *scriptedProbeSpawnLLM) Generate(_ context.Context, req *model.Request) 
 	hasSpawn := false
 	if req != nil {
 		for _, one := range req.Tools {
-			if one.Kind == model.ToolSpecKindFunction && one.Function != nil && strings.EqualFold(strings.TrimSpace(one.Function.Name), spawn.ToolName) {
+			if one.Kind == model.ToolSpecKindFunction && one.Function != nil && one.Function.Name == spawn.ToolName {
 				hasSpawn = true
 				break
 			}
@@ -807,7 +808,7 @@ func (m *scriptedSpawnPassthroughLLM) Generate(_ context.Context, req *model.Req
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   "task-wait-spawn-pass-1",
-						Name: names.Task,
+						Name: tasktool.ToolName,
 						Args: string(mustJSON(map[string]any{"action": "wait", "handle": m.taskHandle})),
 					}}, ""),
 					TurnComplete: true,

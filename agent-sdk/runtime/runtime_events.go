@@ -316,7 +316,7 @@ func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {
 			name = strings.TrimSpace(results[0].Name)
 		}
 	}
-	if !strings.EqualFold(name, plan.ToolName) {
+	if name != plan.ToolName {
 		return nil, "", false
 	}
 
@@ -360,24 +360,7 @@ func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {
 }
 
 func planToolNameFromEvent(event *session.Event) string {
-	if event == nil {
-		return ""
-	}
-	if name := nestedString(event.Meta, "caelis", "runtime", "tool", "name"); name != "" {
-		return name
-	}
-	if toolPayload := session.EventToolProjection(event); toolPayload != nil {
-		if name := strings.TrimSpace(toolPayload.Name); name != "" {
-			return name
-		}
-	}
-	if update := session.ProtocolUpdateOf(event); update != nil {
-		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
-			return title[0]
-		}
-		return strings.TrimSpace(update.Kind)
-	}
-	return ""
+	return session.CanonicalToolName(event, nil)
 }
 
 func nestedString(values map[string]any, path ...string) string {

@@ -3,8 +3,6 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -61,9 +59,9 @@ func renderACPLiveExplorationStageRows(blockID string, events []SubagentEvent, i
 }
 
 func renderLiveExplorationToolHeaderRow(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext) RenderedRow {
-	verb := display.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
+	verb := surfaceExplorationVerb(ev.Name)
 	if verb == "" {
-		verb = names.CanonicalOrSelf(ev.Name)
+		verb = ev.Name
 	}
 	detail := explorationToolDetailForDisplay(ev, ctx.Workspace, explorationToolDetailLiveSummary)
 	return liveExplorationBulletHeaderRow(blockID, verb, detail, width, ctx)
@@ -76,7 +74,7 @@ func liveExplorationRepeatedToolSummary(stage []SubagentEvent) ([]SubagentEvent,
 		if !isExplorationToolEvent(ev) {
 			continue
 		}
-		nextVerb := display.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
+		nextVerb := surfaceExplorationVerb(ev.Name)
 		if nextVerb == "" {
 			return nil, "", false
 		}

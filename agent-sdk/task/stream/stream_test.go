@@ -67,7 +67,7 @@ func TestFrameEventJSONRoundTrip(t *testing.T) {
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
 					ToolCallID:    "call-1",
-					Kind:          "RUN_COMMAND",
+					Kind:          "RunCommand",
 					Status:        "pending",
 					RawInput:      map[string]any{"command": "go test ./...", "limit": 3},
 				},
@@ -87,7 +87,7 @@ func TestFrameEventJSONRoundTrip(t *testing.T) {
 	if decoded.Event == nil || decoded.Event.Protocol == nil || update == nil {
 		t.Fatalf("decoded.Event = %#v, want tool call event", decoded.Event)
 	}
-	if decoded.Event.Type != session.EventTypeToolCall || update.Kind != "RUN_COMMAND" {
+	if decoded.Event.Type != session.EventTypeToolCall || update.Kind != "RunCommand" {
 		t.Fatalf("decoded.Event = %#v, want RUN_COMMAND tool call", decoded.Event)
 	}
 	if got := update.RawInput["command"]; got != "go test ./..." {

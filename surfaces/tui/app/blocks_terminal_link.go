@@ -2,15 +2,13 @@ package tuiapp
 
 import (
 	"strings"
-
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 )
 
 func updateLinkedTerminalEvent(events []SubagentEvent, callID string, toolName string, taskID string, output string, final bool, err bool, meta ToolUpdateMeta) bool {
 	toolName = strings.TrimSpace(toolName)
 	taskID = strings.TrimSpace(taskID)
 	authoritativeFinal := toolFinalOutputAuthoritative(err, meta.ToolStatus)
-	if strings.EqualFold(toolName, "SPAWN") {
+	if toolName == surfaceToolSpawn {
 		return updateLinkedSpawnEvent(events, strings.TrimSpace(callID), taskID, output, meta.MessageID, final, err, meta.Terminal, meta.OutputNarrative, authoritativeFinal)
 	}
 	return false
@@ -27,7 +25,7 @@ func updateLinkedSpawnEvent(events []SubagentEvent, callID string, taskID string
 		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskHandle) != taskID {
 			continue
 		}
-		if !strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
+		if ev.Name != surfaceToolSpawn {
 			continue
 		}
 		if strings.TrimSpace(ev.CallID) == callID {
@@ -74,7 +72,7 @@ func linkedTerminalCommandForTask(events []SubagentEvent, taskID string) string 
 		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskHandle) != taskID || !isTerminalPanelToolEvent(ev) {
 			continue
 		}
-		if strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
+		if ev.Name == surfaceToolSpawn {
 			continue
 		}
 		if command := strings.TrimSpace(ev.FullArgs); command != "" {
@@ -128,8 +126,8 @@ func spawnContinuationDisplayArgs(existing string, prompt string) string {
 	return prompt
 }
 
-func shouldIgnoreStaleTerminalUpdate(events []SubagentEvent, callID string, name string, toolKind string, terminal bool, final bool) bool {
-	if final || strings.TrimSpace(callID) == "" || (!terminal && !display.IsTerminalPanelTool(name, toolKind)) {
+func shouldIgnoreStaleTerminalUpdate(events []SubagentEvent, callID string, name string, terminal bool, final bool) bool {
+	if final || strings.TrimSpace(callID) == "" || (!terminal && !surfaceIsTerminalPanelTool(name)) {
 		return false
 	}
 	for i := len(events) - 1; i >= 0; i-- {

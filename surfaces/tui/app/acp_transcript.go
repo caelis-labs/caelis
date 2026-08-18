@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
@@ -835,7 +834,7 @@ func toolPanelCanExpandHiddenDetails(ev SubagentEvent, outputText string, final 
 	if toolPanelEventHasHiddenToolArgs(ev) {
 		return true
 	}
-	if final && strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
+	if final && ev.Name == surfaceToolSpawn {
 		return shouldRenderACPToolPanel(outputText, err)
 	}
 	if final && shouldDefaultCollapseToolEvent(ev) && shouldRenderACPToolPanel(outputText, err) {
@@ -862,7 +861,7 @@ func acpToolPanelScrollToken(callID string) string {
 
 func terminalToolPanelLineCount(events []SubagentEvent, callID string, ctx BlockRenderContext) int {
 	toolName, text, err, ok := terminalToolPanelPayload(events, callID)
-	if !ok || !shouldRenderACPToolPanel(text, err) || !display.IsTerminalPanelTool(toolName, "") {
+	if !ok || !shouldRenderACPToolPanel(text, err) || !surfaceIsTerminalPanelTool(toolName) {
 		return 0
 	}
 	return len(renderACPTerminalPanelBody(text, maxInt(1, ctx.Width-2), ctx, err))
@@ -904,7 +903,7 @@ func terminalToolPanelPayload(events []SubagentEvent, callID string) (toolName s
 	if !hasStart && !hasFinal {
 		return "", "", false, false
 	}
-	toolName = toolSemanticName(finalPanelToolName(start, final, hasFinal), firstNonEmpty(final.ToolKind, start.ToolKind))
+	toolName = finalPanelToolName(start, final, hasFinal)
 	text = preview
 	err = false
 	if hasFinal {

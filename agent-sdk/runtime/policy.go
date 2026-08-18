@@ -8,6 +8,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -41,6 +42,10 @@ type policyWrappedTool struct {
 type rejectedPolicyMode struct {
 	name string
 	err  error
+}
+
+func (t policyWrappedTool) RuntimeTaskResultSource(toolbinding.Token) bool {
+	return toolbinding.IsTaskResultSource(t.tool)
 }
 
 func (m rejectedPolicyMode) Name() string { return strings.TrimSpace(m.name) }

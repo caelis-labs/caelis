@@ -9,12 +9,12 @@ func TestRuntimeSectionReadsCanonicalToolFields(t *testing.T) {
 	t.Parallel()
 
 	meta := WithRuntimeSection(nil, "tool", map[string]any{
-		"name":   "RUN_COMMAND",
+		"name":   "RunCommand",
 		"status": "completed",
 	})
 
 	got := RuntimeSection(meta, "tool")
-	if got["name"] != "RUN_COMMAND" {
+	if got["name"] != "RunCommand" {
 		t.Fatalf("name = %#v, want canonical tool name", got["name"])
 	}
 	if got["status"] != "completed" {

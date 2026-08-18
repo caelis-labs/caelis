@@ -12,10 +12,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const ToolName = names.Skill
+const ToolName = "Skill"
 
 type Config struct {
 	Loader  skill.Loader

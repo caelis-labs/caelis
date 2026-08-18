@@ -8,10 +8,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const ToolName = names.Spawn
+const ToolName = "Spawn"
 
 const (
 	maxModelVisibleAgents                = 32

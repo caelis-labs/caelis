@@ -53,7 +53,7 @@ func TestComposerSitsOneColumnPastTranscriptGutter(t *testing.T) {
 						Kind:          schema.ToolKindExecute,
 						Status:        schema.ToolStatusInProgress,
 						RawInput:      map[string]any{"command": "ls -la ~"},
-						Meta:          acpToolNameMeta("RUN_COMMAND"),
+						Meta:          acpToolNameMeta("RunCommand"),
 					},
 				},
 				{
@@ -68,7 +68,7 @@ func TestComposerSitsOneColumnPastTranscriptGutter(t *testing.T) {
 						Status:        stringPtr(schema.ToolStatusCompleted),
 						RawInput:      map[string]any{"command": "ls -la ~"},
 						RawOutput:     map[string]any{"exit_code": 0},
-						Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), "call-1", "ok\n"),
+						Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "ok\n"),
 					},
 				},
 				completedRegressionTurn("sess", ""),

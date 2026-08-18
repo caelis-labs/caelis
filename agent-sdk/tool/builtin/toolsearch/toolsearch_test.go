@@ -14,7 +14,7 @@ import (
 func TestNewReturnsNilWithoutMCPTools(t *testing.T) {
 	t.Parallel()
 
-	plain := tool.NamedTool{Def: tool.Definition{Name: "READ"}}
+	plain := tool.NamedTool{Def: tool.Definition{Name: "Read"}}
 	if got := New([]tool.Tool{plain}); got != nil {
 		t.Fatalf("New(non-MCP) = %#v, want nil", got)
 	}

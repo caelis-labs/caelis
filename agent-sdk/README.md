@@ -41,17 +41,18 @@ projection rather than those reusable semantics.
 | `agent-sdk/skill` | Skill discovery and builtin skill tooling |
 | `agent-sdk/task` | Task and subagent contracts |
 | `agent-sdk/tool` | Tool registry contracts and builtin tools |
-| `agent-sdk/tool/identity` | Canonical built-in identities, historical aliases, and shared semantic traits |
 
-Built-in tools use PascalCase model-visible names: `Read`, `ViewImage`, `Write`,
+`tool.Definition.Name` is the sole execution identity. Built-in tools use
+PascalCase model-visible names: `Read`, `ViewImage`, `Write`,
 `Patch`, `Glob`, `Grep`, `RunCommand`, `Task`, `Plan`, `Skill`, `WebSearch`,
 and `WebFetch`. `ViewImage` is exposed only when the selected model declares
 image-input support from maintained endpoint metadata or an explicit model
 override; generic compatible endpoints remain conservative. `Spawn` and
 `ToolSearch` are injected only when their capabilities are available.
-Historical names are accepted only at the built-in execution and replay
-boundary. Removed `List` remains a historical display identity but cannot be
-registered for execution; external MCP tool names are unchanged.
+Tool lookup is exact and case-sensitive; external MCP tool names are preserved
+unchanged. Product projectors and Surfaces may attach private presentation
+semantics to the exact built-in names, but those labels do not create aliases
+or additional executable identities.
 
 ## Quickstart
 

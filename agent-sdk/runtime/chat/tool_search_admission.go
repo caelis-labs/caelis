@@ -2,7 +2,6 @@ package chat
 
 import (
 	"encoding/json"
-	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -15,7 +14,7 @@ import (
 func admitToolSearchResult(def tool.Definition, call model.ToolCall, result tool.Result, visibility *tool.ToolVisibility) tool.Result {
 	if visibility == nil || result.IsError ||
 		!tool.IsToolSearchDefinition(def) ||
-		!strings.EqualFold(strings.TrimSpace(call.Name), tool.ToolSearchToolName) {
+		call.Name != tool.ToolSearchToolName {
 		return result
 	}
 	admitted := visibility.AdmitToolSearchResult(tool.ParseToolSearchOutput(toolResultRawOutput(result)))

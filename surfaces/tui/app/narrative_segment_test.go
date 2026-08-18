@@ -41,7 +41,7 @@ func TestNarrativePresentationSealsAtToolAndTurnBoundaries(t *testing.T) {
 	toolBlock := NewMainACPTurnBlock("turn-tool")
 	source := newNarrativeSourceIdentity("message-tool", "event-tool", "projection-tool")
 	toolBlock.AppendStreamEvent(SEAssistant, "审查结论\n\n先确认未提交改动的范围", source)
-	toolBlock.UpdateToolWithMeta("call-1", "READ", "file.go", "", false, false, ToolUpdateMeta{})
+	toolBlock.UpdateToolWithMeta("call-1", "Read", "file.go", "", false, false, ToolUpdateMeta{})
 	buffer := toolBlock.Events[0].ActiveBuffer
 	if buffer == nil || buffer.HasTail() {
 		t.Fatalf("tool boundary buffer = %#v, want sealed stable prefix", buffer)
@@ -79,7 +79,7 @@ func TestSealedNarrativePrefixIsNotRerenderedWhenToolOutputChanges(t *testing.T)
 	block := NewMainACPTurnBlock("turn-cache")
 	source := newNarrativeSourceIdentity("message-cache", "event-cache", "projection-cache")
 	block.AppendStreamEvent(SEAssistant, "审查结论\n\n先确认未提交改动的范围", source)
-	block.UpdateToolWithMeta("call-cache", "READ", "file.go", "first", false, false, ToolUpdateMeta{})
+	block.UpdateToolWithMeta("call-cache", "Read", "file.go", "first", false, false, ToolUpdateMeta{})
 
 	ctx := model.blockRenderContext(96)
 	block.Render(ctx)
@@ -88,7 +88,7 @@ func TestSealedNarrativePrefixIsNotRerenderedWhenToolOutputChanges(t *testing.T)
 		t.Fatal("sealed narrative prefix did not use Glamour")
 	}
 
-	block.UpdateToolWithMeta("call-cache", "READ", "file.go", "second", false, false, ToolUpdateMeta{})
+	block.UpdateToolWithMeta("call-cache", "Read", "file.go", "second", false, false, ToolUpdateMeta{})
 	block.Render(ctx)
 	if got := model.diag.GlamourRenderCalls; got != firstCalls {
 		t.Fatalf("tool output update rerendered sealed narrative: calls %d, before %d", got, firstCalls)
@@ -122,7 +122,7 @@ func TestProductionMainACPTurnUsesActiveTailViewportPathUntilToolBoundary(t *tes
 		t.Fatal("active MainACPTurnBlock tail did not use the direct viewport path")
 	}
 
-	block.UpdateToolWithMeta("call-active-tail", "READ", "file.go", "", false, false, ToolUpdateMeta{})
+	block.UpdateToolWithMeta("call-active-tail", "Read", "file.go", "", false, false, ToolUpdateMeta{})
 	model.markViewportBlockDirty(block.BlockID())
 	if model.dirtyViewportBlocksOnlyActiveNarrative() {
 		t.Fatal("tool boundary incorrectly retained the active-tail viewport path")
@@ -413,7 +413,7 @@ func TestNarrativeStreamNonNarrativeEventsCannotCloseIdentifiedMessage(t *testin
 		{
 			name: "tool",
 			barrier: func(block *MainACPTurnBlock) {
-				block.UpdateToolWithMeta("read-1", "READ", "file.go", "ok", true, false, ToolUpdateMeta{})
+				block.UpdateToolWithMeta("read-1", "Read", "file.go", "ok", true, false, ToolUpdateMeta{})
 			},
 		},
 		{
@@ -464,7 +464,7 @@ func TestNarrativeStreamNonNarrativeEventsStillSeparateAnonymousMessages(t *test
 		{
 			name: "tool",
 			barrier: func(block *MainACPTurnBlock) {
-				block.UpdateToolWithMeta("read-1", "READ", "file.go", "ok", true, false, ToolUpdateMeta{})
+				block.UpdateToolWithMeta("read-1", "Read", "file.go", "ok", true, false, ToolUpdateMeta{})
 			},
 		},
 		{
@@ -780,7 +780,7 @@ func TestHiddenTaskWaitStillCreatesAnonymousNarrativeBoundary(t *testing.T) {
 			Scope:          ACPProjectionMain,
 			TurnID:         "turn-1",
 			ToolCallID:     "task-wait-1",
-			ToolName:       "TASK",
+			ToolName:       "Task",
 			ToolTaskAction: "wait",
 			ToolStatus:     "completed",
 			Final:          true,
@@ -1158,14 +1158,14 @@ func TestHiddenParticipantTaskReadRepairsCommandOwnerAcrossTurns(t *testing.T) {
 		{
 			Kind: TranscriptEventTool, Scope: base.Scope, ScopeID: base.ScopeID, TurnID: base.TurnID,
 			ParticipantID: base.ParticipantID, Actor: base.Actor,
-			ToolCallID: "command-1", ToolName: "RUN_COMMAND", ToolKind: "execute", ToolStatus: "in_progress",
+			ToolCallID: "command-1", ToolName: "RunCommand", ToolKind: "execute", ToolStatus: "in_progress",
 			ToolTaskHandle: "command-3", ToolTerminal: true, ToolOutput: first, ToolOutputTerminal: true,
 			ToolOutputCursor: int64(len([]byte(first))), ToolOutputCursorKnown: true,
 		},
 		{
 			Kind: TranscriptEventTool, Scope: base.Scope, ScopeID: "participant-turn-2", TurnID: "participant-turn-2",
 			ParticipantID: base.ParticipantID, Actor: base.Actor,
-			ToolCallID: "read-1", ToolName: "TASK", ToolKind: "execute", ToolStatus: "completed", Final: true,
+			ToolCallID: "read-1", ToolName: "Task", ToolKind: "execute", ToolStatus: "completed", Final: true,
 			ToolTaskAction: "read", ToolTaskHandle: "command-3", ToolTaskTargetKind: "command",
 			ToolOutput: second, ToolOutputTerminal: true,
 			ToolOutputStartCursor: int64(len([]byte(first))), ToolOutputStartCursorKnown: true,
@@ -1198,13 +1198,13 @@ func TestHiddenMainTaskReadUsesNormalizedOwnerIndex(t *testing.T) {
 	events := []TranscriptEvent{
 		{
 			Kind: TranscriptEventTool, Scope: ACPProjectionMain, TurnID: "turn-1",
-			ToolCallID: "command-1", ToolName: "RUN_COMMAND", ToolKind: "execute", ToolStatus: "in_progress",
+			ToolCallID: "command-1", ToolName: "RunCommand", ToolKind: "execute", ToolStatus: "in_progress",
 			ToolTaskHandle: "@COMMAND-3", ToolTerminal: true, ToolOutput: first, ToolOutputTerminal: true,
 			ToolOutputCursor: int64(len([]byte(first))), ToolOutputCursorKnown: true,
 		},
 		{
 			Kind: TranscriptEventTool, Scope: ACPProjectionMain, TurnID: "turn-2",
-			ToolCallID: "read-1", ToolName: "TASK", ToolKind: "execute", ToolStatus: "completed", Final: true,
+			ToolCallID: "read-1", ToolName: "Task", ToolKind: "execute", ToolStatus: "completed", Final: true,
 			ToolTaskAction: "read", ToolTaskHandle: "command-3", ToolTaskTargetKind: "command",
 			ToolOutput: second, ToolOutputTerminal: true,
 			ToolOutputStartCursor: int64(len([]byte(first))), ToolOutputStartCursorKnown: true,

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -95,19 +96,20 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 			t.Fatalf("prompt missing %q:\n%s", required, prompt)
 		}
 	}
+	toolNeutralPrompt := strings.ReplaceAll(prompt, "Read-only", "")
 	for _, forbidden := range []string{
 		"terminal-first",
-		"RUN_COMMAND",
-		"READ",
-		"SEARCH",
-		"GLOB",
+		"RunCommand",
+		"Read",
+		"Grep",
+		"Glob",
 		"LIST",
-		"WRITE",
-		"PATCH",
-		"TASK",
-		"SPAWN",
+		"Write",
+		"Patch",
+		"Task",
+		"Spawn",
 	} {
-		if strings.Contains(prompt, forbidden) {
+		if containsStandalonePromptTerm(toolNeutralPrompt, forbidden) {
 			t.Fatalf("prompt should not contain tool-coupled %q:\n%s", forbidden, prompt)
 		}
 	}
@@ -153,23 +155,29 @@ func TestBuildSystemPromptCoreContractIsConciseAndToolAgnostic(t *testing.T) {
 			t.Fatalf("system instructions missing %q:\n%s", want, systemBlock)
 		}
 	}
+	toolNeutralPrompt := strings.ReplaceAll(prompt, "Read-only", "")
 	for _, forbidden := range []string{
 		"terminal-first",
-		"RUN_COMMAND",
-		"READ",
-		"SEARCH",
-		"GLOB",
+		"RunCommand",
+		"Read",
+		"Grep",
+		"Glob",
 		"LIST",
-		"WRITE",
-		"PATCH",
-		"TASK",
-		"SPAWN",
+		"Write",
+		"Patch",
+		"Task",
+		"Spawn",
 		"with_additional_permissions",
 	} {
-		if strings.Contains(prompt, forbidden) {
+		if containsStandalonePromptTerm(toolNeutralPrompt, forbidden) {
 			t.Fatalf("prompt should not contain tool-coupled %q:\n%s", forbidden, prompt)
 		}
 	}
+}
+
+func containsStandalonePromptTerm(prompt, term string) bool {
+	pattern := `(?:^|[^\pL\pN_])` + regexp.QuoteMeta(term) + `(?:$|[^\pL\pN_])`
+	return regexp.MustCompile(pattern).MatchString(prompt)
 }
 
 func TestSystemPromptWithSharedWorkspaceGuidanceIsIdempotentAndChildOnly(t *testing.T) {

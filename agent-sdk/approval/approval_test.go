@@ -19,7 +19,7 @@ func TestPayloadFromRuntimeRequestUsesProtocolApprovalFirst(t *testing.T) {
 		Approval: &session.ProtocolApproval{
 			ToolCall: session.ProtocolToolCall{
 				ID:     "call-from-protocol",
-				Name:   "RUN_COMMAND",
+				Name:   "RunCommand",
 				Kind:   "execute",
 				Title:  "Run command",
 				Status: "pending",
@@ -46,7 +46,7 @@ func TestPayloadFromRuntimeRequestUsesProtocolApprovalFirst(t *testing.T) {
 		t.Fatal("PayloadFromRuntimeRequest() = nil, want payload")
 		return
 	}
-	if payload.ToolCallID != "call-from-protocol" || payload.ToolName != "RUN_COMMAND" {
+	if payload.ToolCallID != "call-from-protocol" || payload.ToolName != "RunCommand" {
 		t.Fatalf("payload tool = %q/%q, want protocol call RUN_COMMAND", payload.ToolCallID, payload.ToolName)
 	}
 	if payload.RawInput["command"] != "git restore hello.py" {
@@ -91,8 +91,8 @@ func TestPayloadFromRuntimeRequestFallsBackToCallInput(t *testing.T) {
 		"command": "git status --short",
 	})
 	payload := PayloadFromRuntimeRequest(agentsdk.ApprovalRequest{
-		Tool: tool.Definition{Name: "RUN_COMMAND"},
-		Call: tool.Call{ID: "call-1", Name: "RUN_COMMAND", Input: raw},
+		Tool: tool.Definition{Name: "RunCommand"},
+		Call: tool.Call{ID: "call-1", Name: "RunCommand", Input: raw},
 	})
 
 	if payload == nil {

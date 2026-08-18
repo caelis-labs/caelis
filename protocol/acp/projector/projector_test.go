@@ -93,7 +93,7 @@ func TestProjectPermissionRequestUsesDurablePermissionAfterRoundTrip(t *testing.
 			Permission: &session.ProtocolApproval{
 				ToolCall: session.ProtocolToolCall{
 					ID:       "call-rm",
-					Name:     "RUN_COMMAND",
+					Name:     "RunCommand",
 					Kind:     ToolKindExecute,
 					Title:    "RUN_COMMAND rm",
 					Status:   "waiting_approval",
@@ -146,7 +146,7 @@ func TestEventProjectorRemapsBuiltinTerminalContentToDisplayID(t *testing.T) {
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Kind:          "RUN_COMMAND",
+				Kind:          "RunCommand",
 				Status:        "running",
 				Content: []session.ProtocolToolCallContent{{
 					Type:       "terminal",
@@ -217,7 +217,7 @@ func TestEventProjectorConcatenatesMultipleTerminalContentItems(t *testing.T) {
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Kind:          "RUN_COMMAND",
+				Kind:          "RunCommand",
 				Status:        "completed",
 				Content: []session.ProtocolToolCallContent{
 					{Type: "terminal", TerminalID: "call-1", Content: session.ProtocolTextContent("caelis")},
@@ -243,7 +243,7 @@ func TestEventProjectorConcatenatesMultipleTerminalContentItems(t *testing.T) {
 	assertTerminalExit(t, update.Meta, "call-1")
 }
 
-func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T) {
+func TestEventProjectorKeepsGenericProtocolTerminalContentWithoutPromotingExecuteKind(t *testing.T) {
 	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
@@ -276,9 +276,15 @@ func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T
 	if call.ToolCallID != "call-1" || call.Kind != ToolKindExecute || call.Title != "RUN_COMMAND date" {
 		t.Fatalf("tool call = %#v, want durable protocol identity", call)
 	}
-	assertTerminalAnchor(t, call.Content, "call-1")
-	assertTerminalInfo(t, call.Meta, "call-1")
-	assertTerminalOutput(t, call.Meta, "call-1", "ignored body\n")
+	if len(call.Content) != 1 || call.Content[0].Type != "terminal" || call.Content[0].TerminalID != "call-1" {
+		t.Fatalf("content = %#v, want preserved generic terminal content", call.Content)
+	}
+	if got := terminalTextContent(call.Content[0].Content); got != "ignored body\n" {
+		t.Fatalf("terminal content = %q, want preserved generic body", got)
+	}
+	if _, ok := metautil.TerminalInfo(call.Meta); ok {
+		t.Fatalf("meta = %#v, generic execute kind must not gain terminal ownership", call.Meta)
+	}
 }
 
 func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
@@ -511,7 +517,7 @@ func TestEventProjectorProjectsCompactCheckpoint(t *testing.T) {
 func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 	assistantMessage := model.MessageFromAssistantParts("I will run it.", "Need output first.", []model.ToolCall{{
 		ID:   "call-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Args: `{"command":"date","workdir":"/tmp/work"}`,
 	}, {
 		ID:   "call-2",
@@ -524,7 +530,7 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 		Message:   &assistantMessage,
 		Tool: &session.EventTool{
 			ID:     "call-1",
-			Name:   "RUN_COMMAND",
+			Name:   "RunCommand",
 			Kind:   ToolKindExecute,
 			Title:  "RUN_COMMAND date",
 			Status: ToolStatusPending,
@@ -576,7 +582,7 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 
 	toolMessage := model.MessageFromToolResponse(&model.ToolResponse{
 		ID:     "call-1",
-		Name:   "RUN_COMMAND",
+		Name:   "RunCommand",
 		Result: map[string]any{"stdout": "ok\n", "exit_code": 0},
 	})
 	resultEvent := session.CanonicalizeEvent(&session.Event{
@@ -584,7 +590,7 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 		Type:      session.EventTypeToolResult,
 		Tool: &session.EventTool{
 			ID:     "call-1",
-			Name:   "RUN_COMMAND",
+			Name:   "RunCommand",
 			Kind:   ToolKindExecute,
 			Title:  "RUN_COMMAND echo ok",
 			Status: ToolStatusCompleted,
@@ -767,7 +773,7 @@ func TestEventProjectorPreservesStandardDiffContent(t *testing.T) {
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Kind:          "PATCH",
+				Kind:          "Patch",
 				Status:        "completed",
 				Content: []session.ProtocolToolCallContent{{
 					Type:    "diff",
@@ -887,7 +893,7 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 func TestEventProjectorProjectsCanonicalAssistantMessageWithToolCalls(t *testing.T) {
 	message := model.MessageFromAssistantParts("I will run the command.", "Need shell output first.", []model.ToolCall{{
 		ID:   "call-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Args: `{"command":"date","workdir":"/tmp/work"}`,
 	}, {
 		ID:   "call-2",
@@ -931,7 +937,7 @@ func TestEventProjectorProjectsCanonicalAssistantMessageWithToolCalls(t *testing
 	}
 }
 
-func TestEventProjectorProjectsSpawnAsExecuteWithTerminalMeta(t *testing.T) {
+func TestEventProjectorDoesNotInferSpawnIdentityFromRawInput(t *testing.T) {
 	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
@@ -963,14 +969,16 @@ func TestEventProjectorProjectsSpawnAsExecuteWithTerminalMeta(t *testing.T) {
 	if update.Kind == nil || *update.Kind != ToolKindExecute {
 		t.Fatalf("kind = %v, want %q", update.Kind, ToolKindExecute)
 	}
-	if update.Title == nil || *update.Title != "Spawn codex: child work" {
-		t.Fatalf("title = %v, want Spawn codex: child work", update.Title)
+	if update.Title == nil || *update.Title != ToolKindExecute {
+		t.Fatalf("title = %v, want generic execute title", update.Title)
 	}
-	assertTerminalAnchor(t, update.Content, "call-1")
-	assertTerminalInfo(t, update.Meta, "call-1")
+	assertTerminalAnchor(t, update.Content, "terminal-1")
+	if _, ok := metautil.TerminalInfo(update.Meta); ok {
+		t.Fatalf("meta = %#v, raw input and generic execute kind must not gain terminal ownership", update.Meta)
+	}
 }
 
-func TestEventProjectorAddsTerminalInfoToRunningToolUpdate(t *testing.T) {
+func TestEventProjectorDoesNotAddTerminalInfoToGenericRunningToolUpdate(t *testing.T) {
 	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
@@ -1009,14 +1017,24 @@ func TestEventProjectorAddsTerminalInfoToRunningToolUpdate(t *testing.T) {
 	if got := stringPtrValue(update.Status); got != ToolStatusInProgress {
 		t.Fatalf("status = %q, want in_progress", got)
 	}
-	assertTerminalAnchor(t, update.Content, "call-1")
-	assertTerminalInfo(t, update.Meta, "call-1")
+	if len(update.Content) != 0 {
+		t.Fatalf("content = %#v, want no inferred terminal anchor", update.Content)
+	}
+	if _, ok := metautil.TerminalInfo(update.Meta); ok {
+		t.Fatalf("meta = %#v, generic execute kind must not gain terminal ownership", update.Meta)
+	}
 }
 
 func TestEventProjectorProjectsRunCommandDisplayTerminalMetadata(t *testing.T) {
+	message := model.MessageFromAssistantParts("", "", []model.ToolCall{{
+		ID:   "call-1",
+		Name: "RunCommand",
+		Args: `{"command":"echo hi","workdir":"/tmp/work"}`,
+	}})
 	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
+		Message:   &message,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: UpdateToolCall,

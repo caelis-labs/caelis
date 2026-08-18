@@ -35,7 +35,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 type burstTestAgent struct {
@@ -1507,7 +1506,7 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 						Update: &session.ProtocolUpdate{
 							SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
 							ToolCallID:    "external-command",
-							Kind:          "RUN_COMMAND",
+							Kind:          "RunCommand",
 							Status:        "completed",
 						},
 					},
@@ -2555,7 +2554,7 @@ func TestRuntimeRunDoesNotFailWhenCanonicalTaskIndexSyncFails(t *testing.T) {
 		Agent: seqAgent{events: []*session.Event{{
 			Type: session.EventTypeToolResult,
 			Tool: &session.EventTool{
-				Name:   "RUN_COMMAND",
+				Name:   "RunCommand",
 				Status: "completed",
 				Output: map[string]any{
 					"task_id":   "task-sync-fails",
@@ -2955,7 +2954,7 @@ func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 		defaultPolicyMode: presets.ModeAutoReview,
 	}
 	targetTool := tool.NamedTool{
-		Def: tool.Definition{Name: "WRITE"},
+		Def: tool.Definition{Name: "Write"},
 		Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 			t.Fatal("default policy should deny before invoking the tool")
 			return tool.Result{}, nil
@@ -2974,7 +2973,7 @@ func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 	}
 	_, err = wrapped[0].Call(context.Background(), tool.Call{
 		ID:    "call-1",
-		Name:  "WRITE",
+		Name:  "Write",
 		Input: []byte(`{"path":` + jsonStringForTest(policyOutsidePathForRuntimeTest()) + `}`),
 	})
 	var profileErr *policy.ProfileError
@@ -3331,7 +3330,7 @@ func TestRuntimeRecoveryInterruptsOrphanedApprovalPause(t *testing.T) {
 	now := time.Unix(500, 0).UTC()
 	token := session.PauseToken{
 		Schema: session.ExecutionJournalSchemaVersion, TokenID: "pause-orphaned", SessionID: activeSession.SessionID,
-		RunID: "run-orphaned", TurnID: "turn-orphaned", ToolCallID: "call-orphaned", ToolName: "WRITE",
+		RunID: "run-orphaned", TurnID: "turn-orphaned", ToolCallID: "call-orphaned", ToolName: "Write",
 		Revision: 1, Status: session.PauseTokenPending, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := runtime.appendPauseToken(context.Background(), activeSession.SessionRef, token); err != nil {
@@ -3388,7 +3387,7 @@ func TestControllerApprovalRequesterPreservesToolRawInput(t *testing.T) {
 		Mode:  "default",
 		ToolCall: controller.ApprovalToolCall{
 			ID:     "call-1",
-			Name:   "RUN_COMMAND",
+			Name:   "RunCommand",
 			Kind:   "execute",
 			Title:  "Run command",
 			Status: "pending",
@@ -3450,7 +3449,7 @@ func TestControllerApprovalRequesterMarksParticipantScope(t *testing.T) {
 		Mode:  "default",
 		ToolCall: controller.ApprovalToolCall{
 			ID:   "call-1",
-			Name: "RUN_COMMAND",
+			Name: "RunCommand",
 		},
 	})
 	if err != nil {
@@ -3873,7 +3872,7 @@ func TestTaskToolPayloadReturnsCompletedCommandTerminalStreams(t *testing.T) {
 	if got, _ := payload["result"].(string); !strings.Contains(got, "hello Codex") {
 		t.Fatalf("taskToolPayload result = %q, want terminal text", got)
 	}
-	if payload["parent_call"] != "command-call-1" || payload["parent_tool"] != identity.RunCommand {
+	if payload["parent_call"] != "command-call-1" || payload["parent_tool"] != shell.RunCommandToolName {
 		t.Fatalf("taskToolPayload parent = %v/%v, want typed RunCommand/command-call-1 relation", payload["parent_tool"], payload["parent_call"])
 	}
 }
@@ -4117,12 +4116,12 @@ func TestRuntimeTerminalSubscribePreservesCompletionTailDuringTaskWait(t *testin
 	if waited.Running || waited.State != taskapi.StateCompleted {
 		t.Fatalf("TASK wait snapshot = %#v, want completed", waited)
 	}
-	if waited.Metadata["parent_call"] != "call-terminal-task-wait-tail" || waited.Metadata["parent_tool"] != identity.RunCommand {
+	if waited.Metadata["parent_call"] != "call-terminal-task-wait-tail" || waited.Metadata["parent_tool"] != shell.RunCommandToolName {
 		t.Fatalf(
 			"TASK wait parent relation = %v/%v, want typed %s/%s relation",
 			waited.Metadata["parent_tool"],
 			waited.Metadata["parent_call"],
-			identity.RunCommand,
+			shell.RunCommandToolName,
 			"call-terminal-task-wait-tail",
 		)
 	}

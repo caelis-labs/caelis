@@ -31,10 +31,10 @@ func TestApprovalPersistenceUsesApprovalControlAuthorityDuringRuntimeLease(t *te
 	gateway := &Gateway{sessions: sessions}
 	request := &agent.ApprovalRequest{
 		SessionRef: active.SessionRef, RunID: "run-1", TurnID: "turn-1",
-		Tool: tool.Definition{Name: "WRITE"},
-		Call: tool.Call{ID: "write-1", Name: "WRITE", Input: json.RawMessage(`{"path":"child.txt"}`)},
+		Tool: tool.Definition{Name: "Write"},
+		Call: tool.Call{ID: "write-1", Name: "Write", Input: json.RawMessage(`{"path":"child.txt"}`)},
 		Approval: &session.ProtocolApproval{
-			ToolCall: session.ProtocolToolCall{ID: "write-1", Name: "WRITE", RawInput: map[string]any{"path": "child.txt"}},
+			ToolCall: session.ProtocolToolCall{ID: "write-1", Name: "Write", RawInput: map[string]any{"path": "child.txt"}},
 			Options:  []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}},
 		},
 	}

@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 type journaledTool struct {
@@ -27,6 +27,10 @@ type journaledTool struct {
 }
 
 func (t journaledTool) Definition() tool.Definition { return tool.CloneDefinition(t.base.Definition()) }
+
+func (t journaledTool) RuntimeTaskResultSource(toolbinding.Token) bool {
+	return toolbinding.IsTaskResultSource(t.base)
+}
 
 func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	def := t.base.Definition()
@@ -292,12 +296,9 @@ func (r *Runtime) recoverIncompleteToolExecutions(ctx context.Context, ref sessi
 }
 
 func reconcileToolExecution(ctx context.Context, record session.ToolExecution, tools []tool.Tool) (tool.RecoveryResult, string) {
-	recoveryName := strings.TrimSpace(record.ToolName)
-	if canonical, ok := names.ResolveExecutable(recoveryName); ok {
-		recoveryName = canonical
-	}
+	recoveryName := record.ToolName
 	for _, candidate := range tools {
-		if candidate == nil || !strings.EqualFold(candidate.Definition().Name, recoveryName) {
+		if candidate == nil || candidate.Definition().Name != recoveryName {
 			continue
 		}
 		recoverer, ok := candidate.(tool.Recoverer)

@@ -46,7 +46,7 @@ func TestACPTranscriptDecorativeColumnsAreExcludedFromSelection(t *testing.T) {
 	block := NewMainACPTurnBlock("turn-selection-gutters")
 	block.AppendStreamEvent(SEReasoning, "检查范围", newNarrativeSourceIdentity("reasoning-1", "", ""))
 	block.AppendStreamEvent(SEAssistant, "审查结论", newNarrativeSourceIdentity("answer-1", "", ""))
-	block.UpdateToolWithMeta("call-1", "READ", "file.go", "", false, false, ToolUpdateMeta{})
+	block.UpdateToolWithMeta("call-1", "Read", "file.go", "", false, false, ToolUpdateMeta{})
 	rows := block.Render(BlockRenderContext{
 		Width:     80,
 		TermWidth: 100,
@@ -153,29 +153,29 @@ func TestRUNCommandOverlappingRunningTailDoesNotDuplicateOutput(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	first := "步骤 1/5 - 21:53:13\n步骤 2/5 - 21:53:14\n步骤 3/5 - 21:53:15\n步骤 4/5 - 21:53:16\n"
 	tail := "步骤 4/5 - 21:53:16\n步骤 5/5 - 21:53:17\n"
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "for i in 1 2 3 4 5", first, false, false, ToolUpdateMeta{TaskHandle: "task-1"})
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "for i in 1 2 3 4 5", tail, false, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "for i in 1 2 3 4 5", first, false, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "for i in 1 2 3 4 5", tail, false, false, ToolUpdateMeta{TaskHandle: "task-1"})
 
 	if len(block.Events) != 1 {
-		t.Fatalf("events = %#v, want one RUN_COMMAND event", block.Events)
+		t.Fatalf("events = %#v, want one RunCommand event", block.Events)
 	}
 	want := first + "步骤 5/5 - 21:53:17\n"
 	if got := block.Events[0].Output; got != want {
-		t.Fatalf("RUN_COMMAND output = %q, want %q", got, want)
+		t.Fatalf("RunCommand output = %q, want %q", got, want)
 	}
 }
 
 func TestRUNCommandSplitNewlineStreamChunkPreserved(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "for i in 1 2", "Step 1/2", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "for i in 1 2", "\n", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "for i in 1 2", "Step 2/2\n", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "for i in 1 2", "Step 1/2", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "for i in 1 2", "\n", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "for i in 1 2", "Step 2/2\n", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
 
 	if len(block.Events) != 1 {
-		t.Fatalf("events = %#v, want one RUN_COMMAND event", block.Events)
+		t.Fatalf("events = %#v, want one RunCommand event", block.Events)
 	}
 	if got, want := block.Events[0].Output, "Step 1/2\nStep 2/2\n"; got != want {
-		t.Fatalf("RUN_COMMAND output = %q, want %q", got, want)
+		t.Fatalf("RunCommand output = %q, want %q", got, want)
 	}
 }
 
@@ -189,7 +189,7 @@ func TestToolPanelClickExpandsHiddenSummaryBeforeCollapse(t *testing.T) {
 		"Step 5/6",
 		"Step 6/6",
 	}, "\n")
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "for i in 1 2 3 4 5 6", output, true, false, ToolUpdateMeta{})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "for i in 1 2 3 4 5 6", output, true, false, ToolUpdateMeta{})
 	block.setToolPanelExpanded("command-1", true)
 
 	if !block.toggleToolPanelClick("command-1") {
@@ -222,7 +222,7 @@ func TestTerminalToolSummaryRowsCarryClickTokenAndExpandToFullOutput(t *testing.
 		"  ]",
 		"}",
 	}, "\n")
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "/home/xueyongzhi/go/bin/cmpctl dict archive preflight --output json", output, true, false, ToolUpdateMeta{})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "/home/xueyongzhi/go/bin/cmpctl dict archive preflight --output json", output, true, false, ToolUpdateMeta{})
 	model.doc.Append(block)
 	model.syncViewportContent()
 
@@ -267,7 +267,7 @@ func TestTerminalToolSummaryRowsCarryClickTokenAndExpandToFullOutput(t *testing.
 func TestExplorationSummaryDisplaysSkillName(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	block.Status = "completed"
-	block.UpdateToolWithMeta("skill-1", "SKILL", "superpowers:brainstorming", "", true, false, ToolUpdateMeta{ToolKind: "read"})
+	block.UpdateToolWithMeta("skill-1", "Skill", "superpowers:brainstorming", "", true, false, ToolUpdateMeta{ToolKind: "read"})
 	block.UpdateToolWithMeta("list-1", "LIST", "demo 9 entries", "", true, false, ToolUpdateMeta{ToolKind: "search"})
 
 	rows := block.Render(BlockRenderContext{
@@ -291,7 +291,7 @@ func TestToolOnlyExploredGroupWithoutHiddenContentHasNoClickToken(t *testing.T) 
 
 	block := NewMainACPTurnBlock("session-1")
 	block.Status = "completed"
-	block.UpdateToolWithMeta("skill-1", "SKILL", "superpowers:brainstorming", "", true, false, ToolUpdateMeta{ToolKind: "read"})
+	block.UpdateToolWithMeta("skill-1", "Skill", "superpowers:brainstorming", "", true, false, ToolUpdateMeta{ToolKind: "read"})
 	block.UpdateToolWithMeta("list-1", "LIST", "demo 9 entries", "", true, false, ToolUpdateMeta{ToolKind: "search"})
 	model.doc.Append(block)
 	model.syncViewportContent()
@@ -406,7 +406,7 @@ func TestTerminalToolFinalOutputReplacesStreamedOutput(t *testing.T) {
 func TestMainACPIdentifiedFinalStaysWithPreToolMessage(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	block.AppendStreamEvent(SEAssistant, "Before tool.", narrativeTestSource())
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "pwd", "ok", true, false, ToolUpdateMeta{})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "pwd", "ok", true, false, ToolUpdateMeta{})
 	block.AppendStreamEvent(SEAssistant, "After", narrativeTestSource())
 
 	block.ReplaceFinalStreamEvent(SEAssistant, "Before tool.\n\nAfter tool done.", narrativeTestSource())
@@ -417,8 +417,8 @@ func TestMainACPIdentifiedFinalStaysWithPreToolMessage(t *testing.T) {
 	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool.\n\nAfter tool done." {
 		t.Fatalf("assistant event = %#v, want canonical final on its original owner", block.Events[0])
 	}
-	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "RUN_COMMAND" {
-		t.Fatalf("tool event = %#v, want RUN_COMMAND after its owning assistant message", block.Events[1])
+	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "RunCommand" {
+		t.Fatalf("tool event = %#v, want RunCommand after its owning assistant message", block.Events[1])
 	}
 }
 
@@ -479,7 +479,7 @@ func TestMainACPAppendStreamEventClearsAnonymousPendingPrefixAcrossToolBoundary(
 	block := NewMainACPTurnBlock("session-1")
 
 	block.AppendStreamEvent(SEAssistant, "\n", narrativeSourceIdentity{})
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "pwd", "ok", true, false, ToolUpdateMeta{})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "pwd", "ok", true, false, ToolUpdateMeta{})
 	block.AppendStreamEvent(SEAssistant, "after", narrativeSourceIdentity{})
 
 	if len(block.Events) != 2 {
@@ -532,7 +532,7 @@ func TestMainACPFinalStreamEventMergesPendingPrefixWithoutDuplication(t *testing
 func TestVisibleNarrativeEventsFiltersReplayedWhitespaceOnlyNarrative(t *testing.T) {
 	events := []SubagentEvent{
 		{Kind: SEAssistant, Text: "\n"},
-		{Kind: SEToolCall, Name: "RUN_COMMAND", Args: "pwd"},
+		{Kind: SEToolCall, Name: "RunCommand", Args: "pwd"},
 	}
 
 	visible := visibleNarrativeEvents(events, "running")
@@ -575,7 +575,7 @@ func TestMainACPClearActiveBuffersPreservesCanonicalFinalNarrative(t *testing.T)
 func TestParticipantIdentifiedFinalStaysWithPreToolMessage(t *testing.T) {
 	block := NewParticipantTurnBlock("session-1", "@self")
 	block.AppendStreamEvent(SEAssistant, "Before tool.", narrativeTestSource())
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "pwd", "ok", true, false, ToolUpdateMeta{})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "pwd", "ok", true, false, ToolUpdateMeta{})
 	block.AppendStreamEvent(SEAssistant, "After", narrativeTestSource())
 
 	block.ReplaceFinalStreamEvent(SEAssistant, "Before tool.\n\nAfter tool done.", narrativeTestSource())
@@ -586,35 +586,35 @@ func TestParticipantIdentifiedFinalStaysWithPreToolMessage(t *testing.T) {
 	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool.\n\nAfter tool done." {
 		t.Fatalf("assistant event = %#v, want canonical final on its original owner", block.Events[0])
 	}
-	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "RUN_COMMAND" {
-		t.Fatalf("tool event = %#v, want RUN_COMMAND after its owning assistant message", block.Events[1])
+	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "RunCommand" {
+		t.Fatalf("tool event = %#v, want RunCommand after its owning assistant message", block.Events[1])
 	}
 }
 
 func TestTaskWaitResultDoesNotCompleteLinkedSpawnTool(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	block.UpdateToolWithMeta("spawn-1", "SPAWN", "inspect files", "", false, false, ToolUpdateMeta{TaskHandle: "jack"})
-	block.UpdateToolWithMeta("task-wait-1", "TASK", "Wait jack", "final answer", true, false, ToolUpdateMeta{TaskHandle: "jack"})
+	block.UpdateToolWithMeta("spawn-1", "Spawn", "inspect files", "", false, false, ToolUpdateMeta{TaskHandle: "jack"})
+	block.UpdateToolWithMeta("task-wait-1", "Task", "Wait jack", "final answer", true, false, ToolUpdateMeta{TaskHandle: "jack"})
 
 	if len(block.Events) != 2 {
-		t.Fatalf("events = %#v, want SPAWN event plus TASK control event", block.Events)
+		t.Fatalf("events = %#v, want Spawn event plus Task control event", block.Events)
 	}
 	ev := block.Events[0]
 	if ev.Done || ev.Err || ev.Output != "" {
-		t.Fatalf("linked event = %#v, want SPAWN unchanged until stream final", ev)
+		t.Fatalf("linked event = %#v, want Spawn unchanged until stream final", ev)
 	}
-	if block.Events[1].Name != "TASK" || block.Events[1].Output != "final answer" {
-		t.Fatalf("task control event = %#v, want TASK result kept separate", block.Events[1])
+	if block.Events[1].Name != "Task" || block.Events[1].Output != "final answer" {
+		t.Fatalf("task control event = %#v, want Task result kept separate", block.Events[1])
 	}
 }
 
 func TestTaskResultReplacesSelfTaskIDWithVisibleHandle(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	block.UpdateToolWithMeta("task-wait-1", "TASK", "Wait self 3s", "", false, false, ToolUpdateMeta{TaskHandle: "self"})
-	block.UpdateToolWithMeta("task-wait-1", "TASK", "Wait jeff 3s", "still running", false, false, ToolUpdateMeta{TaskHandle: "jeff"})
+	block.UpdateToolWithMeta("task-wait-1", "Task", "Wait self 3s", "", false, false, ToolUpdateMeta{TaskHandle: "self"})
+	block.UpdateToolWithMeta("task-wait-1", "Task", "Wait jeff 3s", "still running", false, false, ToolUpdateMeta{TaskHandle: "jeff"})
 
 	if len(block.Events) != 1 {
-		t.Fatalf("events = %#v, want one merged TASK event", block.Events)
+		t.Fatalf("events = %#v, want one merged Task event", block.Events)
 	}
 	if got := block.Events[0].TaskHandle; got != "jeff" {
 		t.Fatalf("TaskID = %q, want visible handle", got)
@@ -626,13 +626,13 @@ func TestTaskResultReplacesSelfTaskIDWithVisibleHandle(t *testing.T) {
 
 func TestToolEventIndexSurvivesStaleShiftAndUpdatesOpenTool(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "go test", "first", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "go test", "first", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
 	if got := block.toolEventIndex["command-1"]; got != 0 {
 		t.Fatalf("initial tool index = %d, want 0", got)
 	}
 
 	block.Events = append([]SubagentEvent{{Kind: SEAssistant, Text: "shift"}}, block.Events...)
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "go test", " second", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "go test", " second", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
 
 	if got := block.toolEventIndex["command-1"]; got != 1 {
 		t.Fatalf("refreshed tool index = %d, want 1", got)
@@ -647,48 +647,48 @@ func TestToolEventIndexSurvivesStaleShiftAndUpdatesOpenTool(t *testing.T) {
 
 func TestTaskWaitResultDoesNotCompleteLinkedRunCommandTool(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "go test", "", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
-	block.UpdateToolWithMeta("task-wait-1", "TASK", "Wait task-1", "final answer", true, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "go test", "", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("task-wait-1", "Task", "Wait task-1", "final answer", true, false, ToolUpdateMeta{TaskHandle: "task-1"})
 
 	if len(block.Events) != 2 {
-		t.Fatalf("events = %#v, want RUN_COMMAND event plus TASK control event", block.Events)
+		t.Fatalf("events = %#v, want RunCommand event plus Task control event", block.Events)
 	}
 	ev := block.Events[0]
 	if ev.Done || ev.Err || ev.Output != "" {
-		t.Fatalf("linked event = %#v, want RUN_COMMAND unchanged until its own stream final", ev)
+		t.Fatalf("linked event = %#v, want RunCommand unchanged until its own stream final", ev)
 	}
-	if block.Events[1].Name != "TASK" || block.Events[1].Output != "final answer" {
-		t.Fatalf("task control event = %#v, want TASK result kept separate", block.Events[1])
+	if block.Events[1].Name != "Task" || block.Events[1].Output != "final answer" {
+		t.Fatalf("task control event = %#v, want Task result kept separate", block.Events[1])
 	}
 
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "", "late running output", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "", "late running output", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
 	if got := block.Events[0].Output; got != "late running output" {
-		t.Fatalf("late running update output = %q, want RUN_COMMAND stream to update original panel", got)
+		t.Fatalf("late running update output = %q, want RunCommand stream to update original panel", got)
 	}
 }
 
 func TestTaskCancelShowsLinkedCommandWithoutCompletingCommand(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	command := `echo "启动一个长任务" && sleep 30 && echo "这行不会输出"`
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", command, "启动一个长任务\n", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
-	block.UpdateToolWithMeta("task-cancel-1", "TASK", "Cancel", "", true, false, ToolUpdateMeta{
+	block.UpdateToolWithMeta("command-1", "RunCommand", command, "启动一个长任务\n", false, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("task-cancel-1", "Task", "Cancel", "", true, false, ToolUpdateMeta{
 		TaskHandle: "task-1",
 		TaskAction: "cancel",
 	})
 
 	if len(block.Events) != 2 {
-		t.Fatalf("events = %#v, want linked RUN_COMMAND event plus TASK cancel row", block.Events)
+		t.Fatalf("events = %#v, want linked RunCommand event plus Task cancel row", block.Events)
 	}
 	if ev := block.Events[0]; ev.Done || ev.Output != "启动一个长任务\n" {
-		t.Fatalf("linked command event = %#v, want TASK cancel to leave RUN_COMMAND open until stream final", ev)
+		t.Fatalf("linked command event = %#v, want Task cancel to leave RunCommand open until stream final", ev)
 	}
 	if got := block.Events[1].Args; got != "Cancel "+command {
 		t.Fatalf("cancel args = %q, want linked command", got)
 	}
 
-	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", command, "启动一个长任务\n", true, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RunCommand", command, "启动一个长任务\n", true, false, ToolUpdateMeta{TaskHandle: "task-1"})
 	if len(block.Events) != 2 {
-		t.Fatalf("events = %#v, want final RUN_COMMAND update to replace existing event", block.Events)
+		t.Fatalf("events = %#v, want final RunCommand update to replace existing event", block.Events)
 	}
 	if got := block.Events[0].Output; strings.TrimSpace(got) != "启动一个长任务" {
 		t.Fatalf("command output = %q, want final output on original event", got)
@@ -697,11 +697,11 @@ func TestTaskCancelShowsLinkedCommandWithoutCompletingCommand(t *testing.T) {
 
 func TestCompletedSpawnFinalWithSameCallIDReplacesExistingEvent(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	block.UpdateToolWithMeta("spawn-1", "SPAWN", "claude: first very long original prompt", "first done", true, false, ToolUpdateMeta{TaskHandle: "amy"})
-	block.UpdateToolWithMeta("spawn-1", "SPAWN", "claude: ok", "second done", true, false, ToolUpdateMeta{TaskHandle: "amy"})
+	block.UpdateToolWithMeta("spawn-1", "Spawn", "claude: first very long original prompt", "first done", true, false, ToolUpdateMeta{TaskHandle: "amy"})
+	block.UpdateToolWithMeta("spawn-1", "Spawn", "claude: ok", "second done", true, false, ToolUpdateMeta{TaskHandle: "amy"})
 
 	if len(block.Events) != 1 {
-		t.Fatalf("events = %#v, want one replaced SPAWN event", block.Events)
+		t.Fatalf("events = %#v, want one replaced Spawn event", block.Events)
 	}
 	ev := block.Events[0]
 	if !ev.Done || ev.Output != "second done" || ev.Args != "claude: ok" {

@@ -102,7 +102,7 @@ func TestRefFromEventUsesSemanticToolResultTaskMetadata(t *testing.T) {
 		Visibility: session.VisibilityCanonical,
 		Tool: &session.EventTool{
 			ID:     "spawn-1",
-			Name:   "SPAWN",
+			Name:   "Spawn",
 			Status: "running",
 			Output: map[string]any{"task_id": "reya", "state": "running"},
 			Content: []session.EventToolContent{{
@@ -114,7 +114,7 @@ func TestRefFromEventUsesSemanticToolResultTaskMetadata(t *testing.T) {
 			"caelis": map[string]any{
 				"version": 1,
 				"runtime": map[string]any{
-					"tool": map[string]any{"name": "SPAWN"},
+					"tool": map[string]any{"name": "Spawn"},
 					"task": map[string]any{
 						"task_id":     "reya",
 						"terminal_id": "subagent-task-1",

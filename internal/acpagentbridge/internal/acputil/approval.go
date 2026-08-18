@@ -3,8 +3,6 @@ package acputil
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
@@ -40,17 +38,6 @@ func ToolCallName(update client.ToolCallUpdate) string {
 	kind := ""
 	if update.Kind != nil {
 		kind = strings.TrimSpace(*update.Kind)
-		if !strings.EqualFold(kind, display.ToolKindExecute) {
-			return kind
-		}
-	}
-	if input, ok := update.RawInput.(map[string]any); ok {
-		if command, _ := input["command"].(string); strings.TrimSpace(command) != "" {
-			return names.RunCommand
-		}
-		if command, _ := input["cmd"].(string); strings.TrimSpace(command) != "" {
-			return names.RunCommand
-		}
 	}
 	return kind
 }

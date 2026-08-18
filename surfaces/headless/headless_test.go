@@ -219,7 +219,7 @@ func TestRunSessionOnceIgnoresScopedTraceOutput(t *testing.T) {
 func TestRunSessionOnceAutoDeniesApprovalByDefault(t *testing.T) {
 	t.Parallel()
 
-	title := "RUN_COMMAND"
+	title := "RunCommand"
 	handle := newFakeACPHandle([]eventstream.Envelope{
 		{
 			Cursor:            "a1",
@@ -253,7 +253,7 @@ func TestRunSessionOnceAutoDeniesApprovalByDefault(t *testing.T) {
 func TestRunSessionOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 	t.Parallel()
 
-	title := "RUN_COMMAND"
+	title := "RunCommand"
 	handle := newFakeACPHandle([]eventstream.Envelope{
 		{
 			Cursor:            "a1",
@@ -321,7 +321,7 @@ func TestRunSessionOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 			Cursor: "r1",
 			Kind:   eventstream.KindApprovalReview,
 			ApprovalReview: &eventstream.ApprovalReview{
-				ToolName: "RUN_COMMAND",
+				ToolName: "RunCommand",
 				Status:   string(approval.ReviewStatusInProgress),
 			},
 		},

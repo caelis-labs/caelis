@@ -274,11 +274,10 @@ func normalizeDiscoveredTools(names []string) []string {
 		if name == "" {
 			continue
 		}
-		canonical := strings.ToUpper(name)
-		if seen[canonical] {
+		if seen[name] {
 			continue
 		}
-		seen[canonical] = true
+		seen[name] = true
 		out = append(out, name)
 	}
 	return out

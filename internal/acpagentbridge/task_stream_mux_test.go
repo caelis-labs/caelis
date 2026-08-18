@@ -28,7 +28,7 @@ func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
 		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
 			SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
 			State: task.StateRunning, Running: true,
-			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 		}}},
 	}
 	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
@@ -177,7 +177,7 @@ func TestACPTaskStreamMuxDetachedDeliveryOutlivesParentPrompt(t *testing.T) {
 		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
 			SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
 			State: task.StateRunning, Running: true,
-			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 		}}},
 	}
 	client, err := taskstream.BindClient(service, taskstream.Principal{ID: "user-1"})
@@ -190,7 +190,7 @@ func TestACPTaskStreamMuxDetachedDeliveryOutlivesParentPrompt(t *testing.T) {
 	}
 	mux := agent.startACPTaskStreamMux(context.Background(), "session-1")
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "RUN_COMMAND",
+		metautil.RuntimeToolName: "RunCommand",
 	})
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
@@ -352,13 +352,13 @@ func TestACPTaskStreamMuxProjectsControlTaskRecordThroughACPAdapter(t *testing.T
 		list: controltaskstream.ListResult{Tasks: []controltaskstream.TaskDescriptor{{
 			SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
 			State: task.StateRunning, Running: true,
-			ParentTool: controltaskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 		}}},
 	}
 	mux := newACPTaskStreamMux(context.Background(), taskstream.New(controlService), taskstream.Principal{ID: "user-1"}, "session-1")
 	defer mux.Close()
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "RUN_COMMAND",
+		metautil.RuntimeToolName: "RunCommand",
 	})
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
@@ -380,7 +380,7 @@ func TestACPTaskStreamMuxProjectsControlTaskRecordThroughACPAdapter(t *testing.T
 		Task: controltaskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
 			State: task.StateRunning, Running: true,
-			ParentTool: controltaskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 		},
 		Frame: &sdkstream.Frame{
 			Ref:  sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "terminal-1"},
@@ -407,13 +407,13 @@ func TestACPTaskStreamMuxMakesSubscribeFailureVisible(t *testing.T) {
 		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
 			SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
 			State: task.StateRunning, Running: true,
-			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 		}}},
 	}
 	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
 	defer mux.Close()
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "RUN_COMMAND",
+		metautil.RuntimeToolName: "RunCommand",
 	})
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
@@ -446,13 +446,13 @@ func TestACPTaskStreamMuxRetriesAnchorAfterEarlyDirectoryMiss(t *testing.T) {
 		descriptor: taskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
 			State: task.StateRunning, Running: true,
-			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 		},
 	}
 	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
 	defer mux.Close()
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "RUN_COMMAND",
+		metautil.RuntimeToolName: "RunCommand",
 	})
 	anchor := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
@@ -493,13 +493,13 @@ func TestACPTaskStreamMuxExhaustsRetryWithOneSanitizedNotice(t *testing.T) {
 		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
 			SessionID: "session-1", TaskID: internalTaskID, Handle: "command-43", Kind: task.KindCommand,
 			State: task.StateCompleted, Running: false,
-			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 		}}},
 	}
 	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
 	defer mux.Close()
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "RUN_COMMAND",
+		metautil.RuntimeToolName: "RunCommand",
 	})
 	anchor := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
@@ -553,7 +553,7 @@ func TestACPTaskStreamMuxLaterAnchorAttachesAfterRecoveryWindow(t *testing.T) {
 		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
 			SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
 			State: task.StateRunning, Running: true,
-			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 		}}},
 	}
 	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
@@ -610,7 +610,7 @@ func TestACPTaskStreamMuxRetryGenerationCannotSignalLaterAttachmentBoundary(t *t
 		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
 			SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
 			State: task.StateRunning, Running: true,
-			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 		}}},
 	}
 	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
@@ -708,7 +708,7 @@ func TestACPTaskStreamMuxDoesNotRetryAfterParentTerminalOrSeal(t *testing.T) {
 			list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
 				SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
 				State: task.StateRunning, Running: true,
-				ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+				ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 			}}},
 		}
 	}
@@ -823,7 +823,7 @@ func TestACPTaskStreamMuxStopsInFlightAttachRetryAtObservationBoundary(t *testin
 				list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
 					SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
 					State: task.StateRunning, Running: true,
-					ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+					ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 				}}},
 			}
 			mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
@@ -852,7 +852,7 @@ func TestACPTaskStreamMuxKeepsHardResolutionReasonsExplicit(t *testing.T) {
 		return taskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: taskID, Handle: "command", Kind: task.KindCommand,
 			State: task.StateRunning, Running: true,
-			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 		}
 	}
 	tests := []struct {
@@ -888,7 +888,7 @@ func TestACPTaskStreamMuxKeepsHardResolutionReasonsExplicit(t *testing.T) {
 					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
 					RawOutput: map[string]any{"handle": "command", "state": "running"},
 					Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-						metautil.RuntimeToolName: "RUN_COMMAND",
+						metautil.RuntimeToolName: "RunCommand",
 					}),
 				},
 			})

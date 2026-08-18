@@ -26,8 +26,8 @@ func TestProjectSessionEventEnvelopeProjectsToolUpdate(t *testing.T) {
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 				ToolCallID:    "call-1",
-				Kind:          "RUN_COMMAND",
-				Title:         "RUN_COMMAND",
+				Kind:          "RunCommand",
+				Title:         "RunCommand",
 				Status:        "running",
 				RawInput:      map[string]any{"command": "echo ok"},
 				Content: []session.ProtocolToolCallContent{{
@@ -45,7 +45,7 @@ func TestProjectSessionEventEnvelopeProjectsToolUpdate(t *testing.T) {
 	if !ok {
 		t.Fatalf("update = %#v, want ToolCallUpdate", events[0].Update)
 	}
-	if update.ToolCallID != "call-1" || stringPtrValue(update.Kind) != "RUN_COMMAND" || stringPtrValue(update.Status) != schema.ToolStatusInProgress {
+	if update.ToolCallID != "call-1" || stringPtrValue(update.Kind) != "RunCommand" || stringPtrValue(update.Status) != schema.ToolStatusInProgress {
 		t.Fatalf("tool update = %#v, want RUN_COMMAND in_progress call-1", update)
 	}
 	assertTerminalAnchor(t, update.Content, "call-1")
@@ -154,9 +154,9 @@ func TestProjectSessionEventEnvelopeProjectsPermission(t *testing.T) {
 			Permission: &session.ProtocolApproval{
 				ToolCall: session.ProtocolToolCall{
 					ID:       "call-1",
-					Name:     "RUN_COMMAND",
-					Kind:     "RUN_COMMAND",
-					Title:    "RUN_COMMAND",
+					Name:     "RunCommand",
+					Kind:     "RunCommand",
+					Title:    "RunCommand",
 					Status:   "pending",
 					RawInput: map[string]any{"command": "go test ./..."},
 				},
@@ -172,7 +172,7 @@ func TestProjectSessionEventEnvelopeProjectsPermission(t *testing.T) {
 		t.Fatalf("permission projection = %#v, want request_permission", events)
 	}
 	permission := events[0].Permission
-	if permission.ToolCall.ToolCallID != "call-1" || stringPtrValue(permission.ToolCall.Kind) != "RUN_COMMAND" {
+	if permission.ToolCall.ToolCallID != "call-1" || stringPtrValue(permission.ToolCall.Kind) != "RunCommand" {
 		t.Fatalf("permission tool call = %#v, want RUN_COMMAND call-1", permission.ToolCall)
 	}
 	if len(permission.Options) != 1 || permission.Options[0].OptionID != "allow_once" {
@@ -257,8 +257,8 @@ func TestProjectSessionEventLiveSupplementKeepsTerminalFinalStateWithoutBytes(t 
 		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
 			SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 			ToolCallID:    "call-1",
-			Kind:          "RUN_COMMAND",
-			Title:         "RUN_COMMAND",
+			Kind:          "RunCommand",
+			Title:         "RunCommand",
 			Status:        "completed",
 			RawInput:      map[string]any{"command": "echo ok"},
 			RawOutput:     map[string]any{"stdout": "ok\n", "exit_code": 0},
@@ -359,7 +359,7 @@ func TestProjectSessionEventEnvelopeUsesUserDisplayTextWhenMessageIsProjected(t 
 func TestProjectSessionEventEnvelopeKeepsLiveAndReplayNarrativeAligned(t *testing.T) {
 	message := model.MessageFromAssistantParts("I will run pwd.", "Need inspect cwd.", []model.ToolCall{{
 		ID:   "call-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Args: `{"command":"pwd"}`,
 	}})
 	event := &session.Event{

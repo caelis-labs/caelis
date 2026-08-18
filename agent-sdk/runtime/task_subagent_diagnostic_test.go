@@ -175,9 +175,9 @@ func TestFailedSubagentDiagnosticSurvivesCanonicalTaskSyncAndRehydrate(t *testin
 	}
 	err = runtime.tasks.syncCanonicalToolResult(ctx, activeSession.SessionRef, &session.Event{
 		Type: session.EventTypeToolResult,
-		Meta: taskToolMeta(snapshot),
+		Meta: trustedTaskResultMeta(taskToolMeta(snapshot)),
 		Tool: &session.EventTool{
-			Name:   "TASK",
+			Name:   "Task",
 			Status: "completed",
 			Output: payload,
 		},
@@ -460,8 +460,9 @@ func TestCanonicalSubagentFailureDoesNotPromoteUntypedDiagnostic(t *testing.T) {
 			}
 			event := &session.Event{
 				Type: session.EventTypeToolResult,
+				Meta: trustedTaskResultMeta(nil),
 				Tool: &session.EventTool{
-					Name:   "TASK",
+					Name:   "Task",
 					Status: "completed",
 					Output: map[string]any{
 						"task_id": taskID,
@@ -547,8 +548,9 @@ func TestCanonicalNonFailureSubagentDropsLegacyError(t *testing.T) {
 
 			event := &session.Event{
 				Type: session.EventTypeToolResult,
+				Meta: trustedTaskResultMeta(nil),
 				Tool: &session.EventTool{
-					Name:   "TASK",
+					Name:   "Task",
 					Status: "completed",
 					Output: map[string]any{
 						"task_id":       taskID,

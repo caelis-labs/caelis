@@ -74,7 +74,7 @@ func TestProjectSessionEventEnvelopeKeepsPreToolAndPostToolMessageIDsDistinct(t 
 		ScopeID:   "session-1",
 	}
 	preTool := model.MessageFromAssistantParts("I will inspect.", "", []model.ToolCall{{
-		ID: "call-1", Name: "READ", Args: `{"path":"README.md"}`,
+		ID: "call-1", Name: "Read", Args: `{"path":"README.md"}`,
 	}})
 	postTool := model.NewTextMessage(model.RoleAssistant, "Done.")
 
@@ -90,7 +90,7 @@ func TestProjectSessionEventEnvelopeKeepsPreToolAndPostToolMessageIDsDistinct(t 
 			Message:    &preTool,
 			Text:       "I will inspect.",
 			Tool: &session.EventTool{
-				ID: "call-1", Name: "READ", Status: "pending",
+				ID: "call-1", Name: "Read", Status: "pending",
 				Input: map[string]any{"path": "README.md"},
 			},
 		},

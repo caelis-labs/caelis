@@ -111,7 +111,7 @@ func TestForwardSourceEventsPublishesTaskOwnedRunCommandFinalWithoutTerminalByte
 				ID: "command-final", Seq: 2, Type: session.EventTypeToolResult,
 				Visibility: session.VisibilityCanonical, Meta: meta,
 				Tool: &session.EventTool{
-					ID: "call-1", Name: "RUN_COMMAND", Status: "completed",
+					ID: "call-1", Name: "RunCommand", Status: "completed",
 					Output:  map[string]any{"stdout": "ok\n", "exit_code": 0},
 					Content: []session.EventToolContent{{Type: "terminal", TerminalID: "terminal-1", Text: "ok\n"}},
 				},

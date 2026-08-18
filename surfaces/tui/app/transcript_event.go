@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
@@ -120,8 +119,8 @@ func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any 
 	out := map[string]any{}
 	toolMeta := transcript.RuntimeToolMeta(meta)
 	taskMeta := transcript.RuntimeTaskMeta(meta)
-	switch names.CanonicalOrSelf(toolName) {
-	case names.RunCommand, names.Spawn, names.Task:
+	switch toolName {
+	case surfaceToolRunCommand, surfaceToolSpawn, surfaceToolTask:
 		if handle := firstNonEmpty(
 			asString(toolMeta["target_handle"]),
 			asString(taskMeta["handle"]),
@@ -136,7 +135,7 @@ func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any 
 				out[key] = value
 			}
 		}
-		if names.CanonicalOrSelf(toolName) == names.RunCommand {
+		if toolName == surfaceToolRunCommand {
 			break
 		}
 		for _, key := range []string{"agent", "agent_id", "handle", "mention", "prompt", "target_kind", "action", "input"} {

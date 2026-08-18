@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
@@ -19,18 +20,16 @@ func TestRegressionACPProjectorGoldenTerminalOutput(t *testing.T) {
 	updates, err := p.ProjectEvent(&session.Event{
 		SessionID: "sess-1",
 		Type:      session.EventTypeToolResult,
-		Protocol: &session.EventProtocol{
-			Update: &session.ProtocolUpdate{
-				SessionUpdate: projector.UpdateToolCallInfo,
-				ToolCallID:    "call-ls",
-				Kind:          projector.ToolKindExecute,
-				Status:        "completed",
-				Content: []session.ProtocolToolCallContent{{
-					Type:       "terminal",
-					TerminalID: "runtime-term-1",
-					Content:    session.ProtocolTextContent("total 0\n"),
-				}},
-			},
+		Tool: &session.EventTool{
+			ID:     "call-ls",
+			Name:   shell.RunCommandToolName,
+			Kind:   projector.ToolKindExecute,
+			Status: "completed",
+			Content: []session.EventToolContent{{
+				Type:       "terminal",
+				TerminalID: "runtime-term-1",
+				Text:       "total 0\n",
+			}},
 		},
 	})
 	if err != nil {
@@ -265,7 +264,7 @@ func TestRegressionACPProjectorTUIFormatGolden(t *testing.T) {
 		t.Fatalf("FormatToolContent(diff) = %q, want contains '-old line'", got)
 	}
 
-	got = acpprojector.FormatToolStart("RUN_COMMAND", map[string]any{"command": "go test ./..."})
+	got = acpprojector.FormatToolStart("RunCommand", map[string]any{"command": "go test ./..."})
 	if !strings.Contains(got, "go test ./...") {
 		t.Fatalf("FormatToolStart() = %q, want contains 'go test ./...'", got)
 	}
@@ -283,7 +282,7 @@ func TestRegressionACPProjectorPermissionRequest(t *testing.T) {
 			Permission: &session.ProtocolApproval{
 				ToolCall: session.ProtocolToolCall{
 					ID:   "call-rm",
-					Name: "RUN_COMMAND",
+					Name: "RunCommand",
 				},
 				Options: []session.ProtocolApprovalOption{
 					{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},

@@ -26,6 +26,38 @@ type recordingAgentMessageSender struct {
 	requests []agentmessage.Request
 }
 
+type preRuntimeToolWrapper struct {
+	tool.Tool
+}
+
+func TestRuntimeTaskWrappingRequiresConcreteBuiltinAuthority(t *testing.T) {
+	t.Parallel()
+
+	runtime := &Runtime{}
+	active := session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}}
+	wrap := func(candidate tool.Tool) []tool.Tool {
+		return runtime.wrapToolsForRuntime(active, active.SessionRef, agent.AgentSpec{Tools: []tool.Tool{candidate}}, runtimeToolContext{})
+	}
+
+	builtin := wrap(new(shell.RunCommandTool))
+	if len(builtin) < 1 {
+		t.Fatal("concrete RunCommand builtin was dropped")
+	}
+	if _, ok := builtin[0].(runtimeCommandTool); !ok {
+		t.Fatalf("concrete RunCommand builtin wrapped as %T, want runtimeCommandTool", builtin[0])
+	}
+
+	external := &tool.NamedTool{Def: tool.Definition{Name: shell.RunCommandToolName}}
+	if got := wrap(external); len(got) != 1 || got[0] != external {
+		t.Fatalf("external same-name tool = %#v, want unchanged ordinary capability", got)
+	}
+
+	preWrapped := &preRuntimeToolWrapper{Tool: new(shell.RunCommandTool)}
+	if got := wrap(preWrapped); len(got) != 1 || got[0] != preWrapped {
+		t.Fatalf("untrusted pre-Runtime wrapper = %#v, want no inherited builtin authority", got)
+	}
+}
+
 func (s *recordingAgentMessageSender) SendMessage(_ context.Context, req agentmessage.Request) (agentmessage.Response, error) {
 	s.request = agentmessage.NormalizeRequest(req)
 	s.requests = append(s.requests, s.request)
@@ -236,7 +268,7 @@ func TestSubagentApprovalRequesterPreservesCanonicalToolPayload(t *testing.T) {
 		TaskID: "task-1",
 		ToolCall: tasksubagent.ApprovalToolCall{
 			ID:        "call-1",
-			Name:      "WRITE",
+			Name:      "Write",
 			RawInput:  map[string]any{"path": "a.txt"},
 			RawOutput: map[string]any{"preview": "new text"},
 			Content: []session.ProtocolToolCallContent{{

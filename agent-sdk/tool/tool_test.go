@@ -342,7 +342,7 @@ func TestDiscoveredToolNamesMetadataRoundTrip(t *testing.T) {
 
 	value := DiscoveredToolNamesMetadataValue([]string{"mcp__a", "mcp__A", "", "mcp__b"})
 	got := DiscoveredToolNamesFromMetadata(map[string]any{MetadataDiscoveredToolNames: value})
-	if want := []string{"mcp__a", "mcp__b"}; !equalStrings(got, want) {
+	if want := []string{"mcp__a", "mcp__A", "mcp__b"}; !equalStrings(got, want) {
 		t.Fatalf("DiscoveredToolNamesFromMetadata = %v, want %v", got, want)
 	}
 

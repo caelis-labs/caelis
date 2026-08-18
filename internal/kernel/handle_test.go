@@ -108,7 +108,7 @@ func TestTurnHandlePublishesApprovalAsACPPermission(t *testing.T) {
 
 	handle := newTestTurnHandle()
 	pending, err := handle.publishApproval(&agent.ApprovalRequest{
-		Tool: tool.Definition{Name: "RUN_COMMAND"},
+		Tool: tool.Definition{Name: "RunCommand"},
 		Call: tool.Call{ID: "call-1", Input: []byte(`{"command":"go test ./..."}`)},
 		Approval: &session.ProtocolApproval{
 			Options: []session.ProtocolApprovalOption{{
@@ -135,7 +135,7 @@ func TestTurnHandlePublishesApprovalAsACPPermission(t *testing.T) {
 	if permission.ToolCall.ToolCallID != "call-1" || stringPtrValue(permission.ToolCall.Kind) != schema.ToolKindExecute {
 		t.Fatalf("permission tool call = %#v, want execute call-1", permission.ToolCall)
 	}
-	if got := metautil.String(permission.ToolCall.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RUN_COMMAND" {
+	if got := metautil.String(permission.ToolCall.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RunCommand" {
 		t.Fatalf("permission tool meta = %#v, want RUN_COMMAND tool name", permission.ToolCall.Meta)
 	}
 	if len(permission.Options) != 1 || permission.Options[0].OptionID != "allow_once" {
@@ -151,8 +151,8 @@ func TestTurnHandlePublishApprovalRequiresDurablePersister(t *testing.T) {
 		sessionRef: session.SessionRef{SessionID: "s1"},
 	})
 	_, err := handle.publishApproval(&agent.ApprovalRequest{
-		Tool: tool.Definition{Name: "RUN_COMMAND"},
-		Call: tool.Call{ID: "call-1", Name: "RUN_COMMAND"},
+		Tool: tool.Definition{Name: "RunCommand"},
+		Call: tool.Call{ID: "call-1", Name: "RunCommand"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "durable approval persistence is unavailable") {
 		t.Fatalf("publishApproval() error = %v, want durable persistence failure", err)
@@ -422,7 +422,7 @@ func TestTurnHandleLiveStreamDoesNotDropApprovalWhenConsumerIsSlow(t *testing.T)
 		handle.publishACP(eventstream.Envelope{Kind: eventstream.KindNotice, Notice: fmt.Sprintf("event-%d", i)}, "")
 	}
 	if _, err := handle.publishApproval(&agent.ApprovalRequest{
-		Tool: tool.Definition{Name: "RUN_COMMAND"},
+		Tool: tool.Definition{Name: "RunCommand"},
 		Call: tool.Call{ID: "call-1"},
 	}); err != nil {
 		t.Fatalf("publishApproval() error = %v", err)
@@ -681,8 +681,8 @@ func TestTurnHandleQueuesMainAndChildApprovalsOnOnePlane(t *testing.T) {
 
 	handle := newTestTurnHandle()
 	main, err := handle.publishApproval(&agent.ApprovalRequest{
-		Tool: tool.Definition{Name: "RUN_COMMAND"},
-		Call: tool.Call{ID: "main-call", Name: "RUN_COMMAND"},
+		Tool: tool.Definition{Name: "RunCommand"},
+		Call: tool.Call{ID: "main-call", Name: "RunCommand"},
 		Approval: &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{{
 			ID: "allow_once", Name: "Allow once", Kind: "allow_once",
 		}}},
@@ -964,8 +964,8 @@ func TestSessionApprovalCoordinatorKeepsConcurrentStepOpenForLateSibling(t *test
 			RunID:        "run-a",
 			TurnID:       "turn-a",
 			PauseTokenID: token,
-			Tool:         tool.Definition{Name: "RUN_COMMAND"},
-			Call:         tool.Call{ID: token, Name: "RUN_COMMAND"},
+			Tool:         tool.Definition{Name: "RunCommand"},
+			Call:         tool.Call{ID: token, Name: "RunCommand"},
 			ModelStep:    step,
 		}
 	}
@@ -1024,8 +1024,8 @@ func TestSessionApprovalCoordinatorAbandonReleasesOpenConcurrentStep(t *testing.
 		SessionRef: ref,
 		RunID:      "run-a",
 		TurnID:     "turn-a",
-		Tool:       tool.Definition{Name: "RUN_COMMAND"},
-		Call:       tool.Call{ID: "first", Name: "RUN_COMMAND"},
+		Tool:       tool.Definition{Name: "RunCommand"},
+		Call:       tool.Call{ID: "first", Name: "RunCommand"},
 		ModelStep:  stepRefs[0],
 	})
 	if err != nil {
@@ -1033,8 +1033,8 @@ func TestSessionApprovalCoordinatorAbandonReleasesOpenConcurrentStep(t *testing.
 	}
 	other, err := otherOwner.openPendingApproval(&agent.ApprovalRequest{
 		SessionRef: ref,
-		Tool:       tool.Definition{Name: "WRITE"},
-		Call:       tool.Call{ID: "other", Name: "WRITE"},
+		Tool:       tool.Definition{Name: "Write"},
+		Call:       tool.Call{ID: "other", Name: "Write"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1213,12 +1213,12 @@ func BenchmarkTurnHandleLiveQueueDrain(b *testing.B) {
 
 func testChildApprovalRequest(taskID string, path string) *agent.ApprovalRequest {
 	return &agent.ApprovalRequest{
-		Tool: tool.Definition{Name: "WRITE"},
-		Call: tool.Call{ID: "shared-child-call", Name: "WRITE"},
+		Tool: tool.Definition{Name: "Write"},
+		Call: tool.Call{ID: "shared-child-call", Name: "Write"},
 		Approval: &session.ProtocolApproval{
 			ToolCall: session.ProtocolToolCall{
 				ID:       "shared-child-call",
-				Name:     "WRITE",
+				Name:     "Write",
 				Kind:     "edit",
 				Title:    "Write file",
 				Status:   "pending",
@@ -1238,7 +1238,7 @@ func testChildApprovalRequest(taskID string, path string) *agent.ApprovalRequest
 			"scope_id":       taskID,
 			"task_id":        taskID,
 			"parent_call_id": "spawn-call-1",
-			"parent_tool":    "SPAWN",
+			"parent_tool":    "Spawn",
 		},
 	}
 }
@@ -1251,7 +1251,7 @@ func assertChildPermissionEnvelope(t *testing.T, env eventstream.Envelope, reque
 	if env.Scope != eventstream.ScopeSubagent || env.ScopeID != taskID {
 		t.Fatalf("child permission scope = %q/%q, want subagent/%q", env.Scope, env.ScopeID, taskID)
 	}
-	if env.ParentTool == nil || env.ParentTool.ToolCallID != "spawn-call-1" || env.ParentTool.ToolName != "SPAWN" {
+	if env.ParentTool == nil || env.ParentTool.ToolCallID != "spawn-call-1" || env.ParentTool.ToolName != "Spawn" {
 		t.Fatalf("child parent relation = %#v, want SPAWN/spawn-call-1", env.ParentTool)
 	}
 	if env.Delivery == nil || env.Delivery.Mode != eventstream.DeliveryMirror {

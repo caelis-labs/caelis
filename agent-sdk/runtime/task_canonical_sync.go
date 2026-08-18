@@ -6,21 +6,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func (tm *taskRuntime) syncCanonicalToolResult(ctx context.Context, ref session.SessionRef, event *session.Event) error {
 	if tm == nil || tm.store == nil || event == nil || session.EventTypeOf(event) != session.EventTypeToolResult || event.Tool == nil {
 		return nil
 	}
-	output := session.CloneState(event.Tool.Output)
-	if len(output) == 0 {
+	if !taskRuntimeMetaBool(event.Meta, toolbinding.MetadataSection, toolbinding.MetadataTaskResult) {
 		return nil
 	}
-	toolName := names.ExecutableOrSelf(event.Tool.Name)
-	if toolName != names.RunCommand && toolName != names.Task && toolName != names.Spawn {
+	output := session.CloneState(event.Tool.Output)
+	if len(output) == 0 {
 		return nil
 	}
 	if tasks, ok := canonicalTaskBatchOutputs(output["tasks"]); ok {
@@ -29,13 +28,13 @@ func (tm *taskRuntime) syncCanonicalToolResult(ctx context.Context, ref session.
 			if !canonicalTaskBatchOutputSyncable(item) {
 				continue
 			}
-			if err := tm.syncCanonicalToolOutput(ctx, ref, toolName, "", item, event); err != nil && firstErr == nil {
+			if err := tm.syncCanonicalToolOutput(ctx, ref, "", item, event); err != nil && firstErr == nil {
 				firstErr = err
 			}
 		}
 		return firstErr
 	}
-	return tm.syncCanonicalToolOutput(ctx, ref, toolName, "", output, event)
+	return tm.syncCanonicalToolOutput(ctx, ref, "", output, event)
 }
 
 func canonicalTaskBatchOutputs(value any) ([]map[string]any, bool) {
@@ -73,7 +72,7 @@ func canonicalTaskBatchOutputSyncable(output map[string]any) bool {
 	return true
 }
 
-func (tm *taskRuntime) syncCanonicalToolOutput(ctx context.Context, ref session.SessionRef, toolName string, targetKind string, output map[string]any, event *session.Event) error {
+func (tm *taskRuntime) syncCanonicalToolOutput(ctx context.Context, ref session.SessionRef, targetKind string, output map[string]any, event *session.Event) error {
 	taskID := firstNonEmpty(
 		taskRuntimeMetaString(event.Meta, "task", "task_id"),
 	)
@@ -102,22 +101,22 @@ func (tm *taskRuntime) syncCanonicalToolOutput(ctx context.Context, ref session.
 		return nil
 	}
 	metaKind := strings.ToLower(firstNonEmpty(
+		taskStringValue(output["target_kind"]),
 		taskRuntimeMetaString(event.Meta, "task", "kind"),
 		taskRuntimeMetaString(event.Meta, "task", "task_kind"),
 		taskRuntimeMetaString(event.Meta, "tool", "target_kind"),
 	))
 	targetKind = firstNonEmpty(strings.ToLower(strings.TrimSpace(targetKind)), metaKind)
-	switch {
-	case toolName == names.RunCommand || targetKind == string(taskapi.KindCommand):
+	if targetKind == "" {
+		if entry, ok := tm.storedTaskEntryByID(ctx, ref, taskID); ok {
+			targetKind = string(entry.Kind)
+		}
+	}
+	switch targetKind {
+	case string(taskapi.KindCommand):
 		_, err := tm.syncCanonicalTaskEntry(ctx, ref, taskID, taskapi.KindCommand, output, event)
 		return err
-	case toolName == names.Spawn || targetKind == string(taskapi.KindSubagent):
-		_, err := tm.syncCanonicalTaskEntry(ctx, ref, taskID, taskapi.KindSubagent, output, event)
-		return err
-	case toolName == names.Task:
-		if synced, err := tm.syncCanonicalTaskEntry(ctx, ref, taskID, taskapi.KindCommand, output, event); err != nil || synced {
-			return err
-		}
+	case string(taskapi.KindSubagent):
 		_, err := tm.syncCanonicalTaskEntry(ctx, ref, taskID, taskapi.KindSubagent, output, event)
 		return err
 	default:
@@ -153,13 +152,24 @@ func (tm *taskRuntime) syncCanonicalTaskEntry(ctx context.Context, ref session.S
 }
 
 func (tm *taskRuntime) storedTaskEntry(ctx context.Context, ref session.SessionRef, taskID string, kind taskapi.Kind) (*taskapi.Entry, bool) {
+	entry, ok := tm.storedTaskEntryByID(ctx, ref, taskID)
+	return entry, ok && entry.Kind == kind
+}
+
+func (tm *taskRuntime) storedTaskEntryByID(ctx context.Context, ref session.SessionRef, taskID string) (*taskapi.Entry, bool) {
 	if tm == nil || tm.store == nil {
 		return nil, false
 	}
-	if entry, err := tm.store.Get(ctx, taskID); err == nil && entry != nil && storedTaskEntryMatches(entry, ref, kind) {
-		return entry, true
+	entry, err := tm.store.Get(ctx, taskID)
+	if err != nil || entry == nil || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) {
+		return nil, false
 	}
-	return nil, false
+	switch entry.Kind {
+	case taskapi.KindCommand, taskapi.KindSubagent:
+		return entry, true
+	default:
+		return nil, false
+	}
 }
 
 func storedTaskEntryMatches(entry *taskapi.Entry, ref session.SessionRef, kind taskapi.Kind) bool {
@@ -202,9 +212,13 @@ func canonicalSubagentTaskOutput(
 }
 
 type canonicalTaskHistoryOutput struct {
-	Output    map[string]any
-	Status    string
-	UpdatedAt time.Time
+	Output          map[string]any
+	Kind            taskapi.Kind
+	Trusted         bool
+	BindingDeclared bool
+	CallID          string
+	Status          string
+	UpdatedAt       time.Time
 }
 
 func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref session.SessionRef, entry *taskapi.Entry) (*taskapi.Entry, error) {
@@ -229,7 +243,10 @@ func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref sessi
 	)
 	for _, event := range events {
 		for _, candidate := range canonicalTaskHistoryOutputs(event) {
-			if !canonicalTaskOutputMatchesEntry(entry, candidate.Output) {
+			if (candidate.Kind != "" && candidate.Kind != entry.Kind) || !canonicalTaskOutputMatchesEntry(entry, candidate.Output) {
+				continue
+			}
+			if !candidate.Trusted && (candidate.BindingDeclared || !legacyCanonicalTaskRelationMatchesEntry(entry, candidate)) {
 				continue
 			}
 			latest = candidate
@@ -270,33 +287,75 @@ func canonicalTaskHistoryOutputs(event *session.Event) []canonicalTaskHistoryOut
 	if event == nil || session.EventTypeOf(event) != session.EventTypeToolResult || event.Tool == nil {
 		return nil
 	}
-	toolName := names.ExecutableOrSelf(event.Tool.Name)
-	if toolName != names.RunCommand && toolName != names.Task && toolName != names.Spawn {
-		return nil
-	}
+	trusted, bindingDeclared := taskRuntimeMetaBoolDeclaration(
+		event.Meta,
+		toolbinding.MetadataSection,
+		toolbinding.MetadataTaskResult,
+	)
 	if tasks, ok := canonicalTaskBatchOutputs(event.Tool.Output["tasks"]); ok {
 		out := make([]canonicalTaskHistoryOutput, 0, len(tasks))
 		for _, item := range tasks {
+			kind := canonicalTaskOutputKind(event, item)
 			if !canonicalTaskBatchOutputSyncable(item) {
 				continue
 			}
 			out = append(out, canonicalTaskHistoryOutput{
-				Output:    item,
-				Status:    event.Tool.Status,
-				UpdatedAt: event.Time,
+				Output:          item,
+				Kind:            kind,
+				Trusted:         trusted,
+				BindingDeclared: bindingDeclared,
+				CallID:          strings.TrimSpace(event.Tool.ID),
+				Status:          event.Tool.Status,
+				UpdatedAt:       event.Time,
 			})
 		}
 		return out
 	}
 	output := session.CloneState(event.Tool.Output)
+	kind := canonicalTaskOutputKind(event, output)
 	if len(output) == 0 || strings.TrimSpace(firstNonEmpty(taskStringValue(output["handle"]), taskStringValue(output["task_id"]))) == "" {
 		return nil
 	}
 	return []canonicalTaskHistoryOutput{{
-		Output:    output,
-		Status:    event.Tool.Status,
-		UpdatedAt: event.Time,
+		Output:          output,
+		Kind:            kind,
+		Trusted:         trusted,
+		BindingDeclared: bindingDeclared,
+		CallID:          strings.TrimSpace(event.Tool.ID),
+		Status:          event.Tool.Status,
+		UpdatedAt:       event.Time,
 	}}
+}
+
+func legacyCanonicalTaskRelationMatchesEntry(entry *taskapi.Entry, candidate canonicalTaskHistoryOutput) bool {
+	if entry == nil {
+		return false
+	}
+	parentCall := firstNonEmpty(
+		taskStringValue(entry.Metadata["parent_call"]),
+		taskSpecString(entry.Spec, "parent_call"),
+		taskStringValue(entry.Result["parent_call"]),
+	)
+	if parentCall == "" {
+		return false
+	}
+	return parentCall == strings.TrimSpace(candidate.CallID) ||
+		parentCall == strings.TrimSpace(taskStringValue(candidate.Output["parent_call"]))
+}
+
+func canonicalTaskOutputKind(event *session.Event, output map[string]any) taskapi.Kind {
+	kind := strings.ToLower(firstNonEmpty(
+		taskStringValue(output["target_kind"]),
+		taskRuntimeMetaString(event.Meta, "task", "kind"),
+		taskRuntimeMetaString(event.Meta, "task", "task_kind"),
+		taskRuntimeMetaString(event.Meta, "tool", "target_kind"),
+	))
+	switch taskapi.Kind(kind) {
+	case taskapi.KindCommand, taskapi.KindSubagent:
+		return taskapi.Kind(kind)
+	default:
+		return ""
+	}
 }
 
 func canonicalTaskOutputMatchesEntry(entry *taskapi.Entry, output map[string]any) bool {
@@ -409,6 +468,26 @@ func taskStateRunning(state taskapi.State) bool {
 func taskRuntimeMetaString(meta map[string]any, section string, key string) string {
 	sectionMap := taskRuntimeMetaReadSection(meta, section)
 	return taskStringValue(sectionMap[key])
+}
+
+func taskRuntimeMetaBool(meta map[string]any, section string, key string) bool {
+	value, _ := taskRuntimeMetaReadSection(meta, section)[key].(bool)
+	return value
+}
+
+func taskRuntimeMetaBoolDeclaration(meta map[string]any, section string, key string) (bool, bool) {
+	caelis, _ := meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	rawSection, declared := runtimeMeta[strings.TrimSpace(section)]
+	if !declared {
+		return false, false
+	}
+	sectionMap, ok := rawSection.(map[string]any)
+	if !ok {
+		return false, true
+	}
+	value, _ := sectionMap[key].(bool)
+	return value, true
 }
 
 func taskRuntimeMetaReadSection(meta map[string]any, section string) map[string]any {

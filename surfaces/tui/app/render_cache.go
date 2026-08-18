@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -858,7 +857,7 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 		builder.addString(event.Args)
 		builder.addString(event.StartArgs)
 		builder.addString(event.FullArgs)
-		if event.Kind == SEToolCall && display.IsTerminalPanelTool(event.Name, "") {
+		if event.Kind == SEToolCall && surfaceIsTerminalPanelTool(event.Name) {
 			builder.addString(toolOutputRenderKey(event.Name, event.Output, ctx.Width))
 		} else {
 			builder.addString(event.Output)

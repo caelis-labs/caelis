@@ -26,17 +26,17 @@ func TestSessionReconnectMessageInstallsSessionBeforeSubagentBackfill(t *testing
 		{
 			SessionID: "session-old", TaskID: "task-kira", Handle: "kira", Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(103, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "SPAWN"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "Spawn"},
 		},
 		{
 			SessionID: "session-old", TaskID: "task-wen", Handle: "wen", Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(102, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-wen", ToolName: "SPAWN"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-wen", ToolName: "Spawn"},
 		},
 		{
 			SessionID: "session-old", TaskID: "task-yara", Handle: "yara", Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(101, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-yara", ToolName: "SPAWN"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-yara", ToolName: "Spawn"},
 		},
 	}
 	service := &subagentRosterTestTaskStreamService{

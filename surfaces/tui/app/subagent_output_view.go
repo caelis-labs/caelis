@@ -5,8 +5,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 const subagentOutputRenderInterval = 50 * time.Millisecond
@@ -58,7 +56,7 @@ func (m *Model) observeSubagentOutputEvents(events []TranscriptEvent) bool {
 	changed := false
 	for _, event := range events {
 		if event.Scope == ACPProjectionMain && event.Kind == TranscriptEventTool &&
-			names.CanonicalOrSelf(toolSemanticName(event.ToolName, event.ToolKind)) == names.Spawn {
+			event.ToolName == surfaceToolSpawn {
 			m.observeSubagentOutputOwner(event)
 			changed = true
 			continue
@@ -398,7 +396,7 @@ func (m *Model) subagentOutputOwner(blockID, callID string) (SubagentEvent, bool
 	found := false
 	for _, event := range events {
 		if event.Kind != SEToolCall || strings.TrimSpace(event.CallID) != callID ||
-			names.CanonicalOrSelf(toolSemanticName(event.Name, event.ToolKind)) != names.Spawn {
+			event.Name != surfaceToolSpawn {
 			continue
 		}
 		if !found {

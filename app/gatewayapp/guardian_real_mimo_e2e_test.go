@@ -184,7 +184,7 @@ func appendGuardianRealMimoTranscript(
 		appendEvent(&session.Event{
 			Type: session.EventTypeToolCall,
 			Tool: &session.EventTool{
-				ID: callID, Name: "RUN_COMMAND", Status: "running",
+				ID: callID, Name: "RunCommand", Status: "running",
 				Input: map[string]any{"command": fmt.Sprintf("git status --short --untracked-files=no # attempt %d", index+1)},
 			},
 		})
@@ -199,7 +199,7 @@ func appendGuardianRealMimoTranscript(
 		}
 		appendEvent(&session.Event{
 			Type: session.EventTypeToolResult,
-			Tool: &session.EventTool{ID: callID, Name: "RUN_COMMAND", Status: status, Output: output},
+			Tool: &session.EventTool{ID: callID, Name: "RunCommand", Status: status, Output: output},
 		})
 	}
 }
@@ -228,7 +228,7 @@ func guardianRealMimoApprovalRequest(
 		Model:      llm,
 		Approval: &kernel.ApprovalPayload{
 			ToolCallID:         "guardian-real-mimo-command",
-			ToolName:           "RUN_COMMAND",
+			ToolName:           "RunCommand",
 			ToolKind:           "execute",
 			RawInput:           input,
 			Reason:             "Execute the exact user-requested repository repair",
@@ -242,11 +242,11 @@ func guardianRealMimoApprovalRequest(
 			Session:    activeSession,
 			RunID:      "guardian-real-mimo-run",
 			TurnID:     "guardian-real-mimo-turn",
-			Tool:       tool.Definition{Name: "RUN_COMMAND"},
-			Call:       tool.Call{ID: "guardian-real-mimo-command", Name: "RUN_COMMAND", Input: raw},
+			Tool:       tool.Definition{Name: "RunCommand"},
+			Call:       tool.Call{ID: "guardian-real-mimo-command", Name: "RunCommand", Input: raw},
 			Approval: &session.ProtocolApproval{
 				ToolCall: session.ProtocolToolCall{
-					ID: "guardian-real-mimo-command", Name: "RUN_COMMAND", Kind: "execute", Status: "pending", RawInput: input,
+					ID: "guardian-real-mimo-command", Name: "RunCommand", Kind: "execute", Status: "pending", RawInput: input,
 				},
 				Options: []session.ProtocolApprovalOption{
 					{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},

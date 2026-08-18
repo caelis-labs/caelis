@@ -76,16 +76,33 @@ func TestChatAgentUsesSessionMessages(t *testing.T) {
 	}
 }
 
-func TestToolCallTitleIncludesSpawnPrompt(t *testing.T) {
+func TestNewWithToolsRejectsDuplicateExactNames(t *testing.T) {
 	t.Parallel()
 
-	call := model.ToolCall{
-		ID:   "spawn-1",
-		Name: "SPAWN",
-		Args: `{"agent":"self","prompt":"总结当前目录"}`,
+	_, err := NewWithTools("chat", &recordingModel{}, []tool.Tool{
+		tool.NamedTool{Def: tool.Definition{Name: "ExternalSearch"}},
+		tool.NamedTool{Def: tool.Definition{Name: "ExternalSearch"}},
+	}, "")
+	if err == nil || !strings.Contains(err.Error(), `duplicate tool Definition.Name "ExternalSearch"`) {
+		t.Fatalf("NewWithTools() error = %v, want duplicate exact-name rejection", err)
 	}
-	if got := toolCallTitle(call); got != "Spawn self: 总结当前目录" {
-		t.Fatalf("toolCallTitle(SPAWN) = %q", got)
+}
+
+func TestNewWithToolsKeepsDistinctExactNames(t *testing.T) {
+	t.Parallel()
+
+	agent, err := NewWithTools("chat", &recordingModel{}, []tool.Tool{
+		tool.NamedTool{Def: tool.Definition{Name: "Grep"}},
+		tool.NamedTool{Def: tool.Definition{Name: "SEARCH"}},
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured, ok := agent.lookupTool("SEARCH"); !ok || configured.Definition().Name != "SEARCH" {
+		t.Fatalf("lookupTool(SEARCH) = %#v, %v, want exact external tool", configured, ok)
+	}
+	if _, ok := agent.lookupTool("search"); ok {
+		t.Fatal("lookupTool(search) unexpectedly performed case-insensitive lookup")
 	}
 }
 
@@ -703,7 +720,7 @@ func TestChatAgentRetriesInvalidModelToolCallWithoutPersistingIt(t *testing.T) {
 	}
 }
 
-func TestCanonicalizeAssistantToolCallsPreservesNumericArgumentLexemes(t *testing.T) {
+func TestValidateAssistantToolCallsPreservesNumericArgumentLexemes(t *testing.T) {
 	t.Parallel()
 
 	rawArgs := `{"id":9007199254740993,"amount":0.12345678901234567890}`
@@ -713,9 +730,9 @@ func TestCanonicalizeAssistantToolCallsPreservesNumericArgumentLexemes(t *testin
 		Args: rawArgs,
 	}}, "")
 
-	canonical, calls, err := canonicalizeAssistantToolCalls(message)
+	canonical, calls, err := validateAssistantToolCalls(message)
 	if err != nil {
-		t.Fatalf("canonicalizeAssistantToolCalls() error = %v", err)
+		t.Fatalf("validateAssistantToolCalls() error = %v", err)
 	}
 	if len(calls) != 1 || calls[0].Args != rawArgs {
 		t.Fatalf("calls = %#v, want raw args preserved", calls)
@@ -725,7 +742,7 @@ func TestCanonicalizeAssistantToolCallsPreservesNumericArgumentLexemes(t *testin
 	}
 }
 
-func TestCanonicalizeAssistantToolCallsResolvesHistoricalBuiltinName(t *testing.T) {
+func TestValidateAssistantToolCallsPreservesExactToolName(t *testing.T) {
 	t.Parallel()
 
 	message := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
@@ -733,20 +750,19 @@ func TestCanonicalizeAssistantToolCallsResolvesHistoricalBuiltinName(t *testing.
 		Name: "SEARCH",
 		Args: `{"path":".","pattern":"needle"}`,
 	}}, "")
-	grepTool := tool.NamedTool{Def: tool.Definition{Name: "Grep"}}
-	canonical, calls, err := canonicalizeAssistantToolCalls(message, grepTool)
+	canonical, calls, err := validateAssistantToolCalls(message)
 	if err != nil {
-		t.Fatalf("canonicalizeAssistantToolCalls() error = %v", err)
+		t.Fatalf("validateAssistantToolCalls() error = %v", err)
 	}
-	if len(calls) != 1 || calls[0].Name != "Grep" {
-		t.Fatalf("calls = %#v, want canonical Grep call", calls)
+	if len(calls) != 1 || calls[0].Name != "SEARCH" {
+		t.Fatalf("calls = %#v, want exact SEARCH call", calls)
 	}
-	if got := canonical.ToolCalls()[0].Name; got != "Grep" {
-		t.Fatalf("canonical message tool name = %q, want Grep", got)
+	if got := canonical.ToolCalls()[0].Name; got != "SEARCH" {
+		t.Fatalf("validated message tool name = %q, want SEARCH", got)
 	}
 }
 
-func TestMessagesFromContextNormalizesHistoricalBuiltinCallAndResultNames(t *testing.T) {
+func TestMessagesFromContextPreservesHistoricalToolNames(t *testing.T) {
 	t.Parallel()
 
 	events := []*session.Event{
@@ -757,23 +773,23 @@ func TestMessagesFromContextNormalizesHistoricalBuiltinCallAndResultNames(t *tes
 	if len(messages) != 2 {
 		t.Fatalf("messages = %#v, want call and result", messages)
 	}
-	if got := messages[0].ToolCalls()[0].Name; got != "Grep" {
-		t.Fatalf("replayed call name = %q, want Grep", got)
+	if got := messages[0].ToolCalls()[0].Name; got != "SEARCH" {
+		t.Fatalf("replayed call name = %q, want SEARCH", got)
 	}
-	if got := messages[1].ToolResults()[0].Name; got != "Grep" {
-		t.Fatalf("replayed result name = %q, want Grep", got)
+	if got := messages[1].ToolResults()[0].Name; got != "SEARCH" {
+		t.Fatalf("replayed result name = %q, want SEARCH", got)
 	}
 }
 
 func TestChatAgentExecutesSameStepToolCallsConcurrently(t *testing.T) {
 	t.Parallel()
 
-	testModel := &contextStabilityModel{toolNames: []string{"RUN_COMMAND", "RUN_COMMAND"}}
+	testModel := &contextStabilityModel{toolNames: []string{"RunCommand", "RunCommand"}}
 	var active int32
 	var overlapped atomic.Bool
 	runCommandTool := tool.NamedTool{
 		Def: tool.Definition{
-			Name:         "RUN_COMMAND",
+			Name:         "RunCommand",
 			Description:  "echo input",
 			InputSchema:  map[string]any{"type": "object"},
 			Capabilities: tool.Capabilities{ParallelSafe: true},
@@ -886,7 +902,7 @@ func TestChatAgentExecutesSameStepWebSearchCallsConcurrently(t *testing.T) {
 func TestChatAgentExecutesMixedSameStepToolCallsSerially(t *testing.T) {
 	t.Parallel()
 
-	testModel := &contextStabilityModel{toolNames: []string{"RUN_COMMAND", "ECHO"}}
+	testModel := &contextStabilityModel{toolNames: []string{"RunCommand", "ECHO"}}
 	var active int32
 	var overlapped atomic.Bool
 	invoke := func(ctx context.Context, call tool.Call) (tool.Result, error) {
@@ -906,7 +922,7 @@ func TestChatAgentExecutesMixedSameStepToolCallsSerially(t *testing.T) {
 		}, nil
 	}
 	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{
-		tool.NamedTool{Def: tool.Definition{Name: "RUN_COMMAND", InputSchema: map[string]any{"type": "object"}, Capabilities: tool.Capabilities{ParallelSafe: true}}, Invoke: invoke},
+		tool.NamedTool{Def: tool.Definition{Name: "RunCommand", InputSchema: map[string]any{"type": "object"}, Capabilities: tool.Capabilities{ParallelSafe: true}}, Invoke: invoke},
 		tool.NamedTool{Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}}, Invoke: invoke},
 	}, "Use tools when needed.")
 	if err != nil {
@@ -1664,7 +1680,7 @@ func TestLiveModelContextPrefixMatchesPersistedReplay(t *testing.T) {
 func TestToolMetaCarriesOnlyRuntimeToolName(t *testing.T) {
 	t.Parallel()
 
-	meta := toolMeta("TASK")
+	meta := toolMeta("Task")
 	caelis, ok := meta["caelis"].(map[string]any)
 	if !ok {
 		t.Fatalf("meta = %#v, want caelis wrapper", meta)
@@ -1677,7 +1693,7 @@ func TestToolMetaCarriesOnlyRuntimeToolName(t *testing.T) {
 		t.Fatalf("caelis = %#v, want runtime map", caelis)
 	}
 	toolRuntime, ok := runtimeMeta["tool"].(map[string]any)
-	if !ok || toolRuntime["name"] != "TASK" {
+	if !ok || toolRuntime["name"] != "Task" {
 		t.Fatalf("runtime.tool = %#v, want TASK tool name", runtimeMeta["tool"])
 	}
 }
@@ -1694,10 +1710,10 @@ func TestMessagesFromContextGroupsConsecutiveToolCalls(t *testing.T) {
 				Message: ptrMessage(model.NewTextMessage(model.RoleUser, "demo async tools")),
 				Text:    "demo async tools",
 			},
-			persistedToolCallEvent("command-1", "RUN_COMMAND", map[string]any{"command": "sleep 1", "yield_time_ms": 5}),
-			persistedToolCallEvent("spawn-1", "SPAWN", map[string]any{"agent": "self", "prompt": "check"}),
-			persistedToolResultEvent("command-1", "RUN_COMMAND", map[string]any{"command": "sleep 1", "yield_time_ms": 5}, map[string]any{"task_id": "command-task", "state": "running"}),
-			persistedToolResultEvent("spawn-1", "SPAWN", map[string]any{"agent": "self", "prompt": "check"}, map[string]any{"task_id": "spawn-task", "state": "running"}),
+			persistedToolCallEvent("command-1", "RunCommand", map[string]any{"command": "sleep 1", "yield_time_ms": 5}),
+			persistedToolCallEvent("spawn-1", "Spawn", map[string]any{"agent": "self", "prompt": "check"}),
+			persistedToolResultEvent("command-1", "RunCommand", map[string]any{"command": "sleep 1", "yield_time_ms": 5}, map[string]any{"task_id": "command-task", "state": "running"}),
+			persistedToolResultEvent("spawn-1", "Spawn", map[string]any{"agent": "self", "prompt": "check"}, map[string]any{"task_id": "spawn-task", "state": "running"}),
 			{
 				Type:    session.EventTypeUser,
 				Message: ptrMessage(model.NewTextMessage(model.RoleUser, "next turn")),
@@ -1740,9 +1756,9 @@ func TestMessagesFromContextDropsIncompleteToolCallRun(t *testing.T) {
 				Message: ptrMessage(model.NewTextMessage(model.RoleUser, "demo async tools")),
 				Text:    "demo async tools",
 			},
-			persistedToolCallEvent("command-1", "RUN_COMMAND", map[string]any{"command": "sleep 1"}),
-			persistedToolCallEvent("spawn-1", "SPAWN", map[string]any{"agent": "self", "prompt": "check"}),
-			persistedToolResultEvent("command-1", "RUN_COMMAND", map[string]any{"command": "sleep 1"}, map[string]any{"task_id": "command-task", "state": "running"}),
+			persistedToolCallEvent("command-1", "RunCommand", map[string]any{"command": "sleep 1"}),
+			persistedToolCallEvent("spawn-1", "Spawn", map[string]any{"agent": "self", "prompt": "check"}),
+			persistedToolResultEvent("command-1", "RunCommand", map[string]any{"command": "sleep 1"}, map[string]any{"task_id": "command-task", "state": "running"}),
 			{
 				Type:    session.EventTypeUser,
 				Message: ptrMessage(model.NewTextMessage(model.RoleUser, "next turn")),
@@ -1768,7 +1784,7 @@ func TestMessagesFromContextDropsInvalidToolCallRun(t *testing.T) {
 
 	invalidAssistant := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 		ID:   "command-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Args: `{"command":"git status"`,
 	}}, "I will check status.")
 	ctx := agent.NewContext(agent.ContextSpec{
@@ -1786,11 +1802,11 @@ func TestMessagesFromContextDropsInvalidToolCallRun(t *testing.T) {
 				Text:    invalidAssistant.TextContent(),
 				Tool: &session.EventTool{
 					ID:     "command-1",
-					Name:   "RUN_COMMAND",
+					Name:   "RunCommand",
 					Status: "pending",
 				},
 			},
-			persistedToolResultEvent("command-1", "RUN_COMMAND", map[string]any{}, map[string]any{"error": "decode failed"}),
+			persistedToolResultEvent("command-1", "RunCommand", map[string]any{}, map[string]any{"error": "decode failed"}),
 			{
 				Type:    session.EventTypeUser,
 				Message: ptrMessage(model.NewTextMessage(model.RoleUser, "try again")),
@@ -1953,10 +1969,10 @@ func TestToolResultMessagePreservesCanonicalCommandPayloadForModel(t *testing.T)
 	const deniedPath = "/home/test/go/pkg/mod/cache/download/code.example/internal/system/@v/v0.0.0.tmp"
 	message := toolResultMessage(model.ToolCall{
 		ID:   "call-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 	}, tool.Result{
 		ID:      "call-1",
-		Name:    "RUN_COMMAND",
+		Name:    "RunCommand",
 		Content: []model.Part{model.NewJSONPart([]byte(`{"result":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/code.example/internal/system/@v/v0.0.0.tmp: read-only file system\n","exit_code":1,"error":"Sandbox permission denied. Use a writable workspace path or request elevated permissions."}`))},
 	})
 
@@ -2020,14 +2036,14 @@ func TestToolResultEventFallsBackToJSONContentForRawOutput(t *testing.T) {
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "call-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Args: `{"command":"echo hello"}`,
 	}, tool.Result{
 		ID:      "call-1",
-		Name:    "RUN_COMMAND",
+		Name:    "RunCommand",
 		IsError: true,
 		Content: []model.Part{model.NewJSONPart([]byte(`{"error":"terminal session failed"}`))},
-	}, nil)
+	}, nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event.Tool = nil, want tool result payload")
@@ -2045,11 +2061,11 @@ func TestToolResultEventSuppressesSuccessfulTaskWaitACPContent(t *testing.T) {
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "task-wait-1",
-		Name: "TASK",
+		Name: "Task",
 		Args: `{"action":"wait","task_id":"jack"}`,
 	}, tool.Result{
 		ID:   "task-wait-1",
-		Name: "TASK",
+		Name: "Task",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"action":         "wait",
 			"running":        true,
@@ -2058,7 +2074,7 @@ func TestToolResultEventSuppressesSuccessfulTaskWaitACPContent(t *testing.T) {
 			"target_kind":    "subagent",
 			"output_preview": "正在读取 hello_from_spawn.txt\n",
 		}))},
-	}, nil)
+	}, nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2080,17 +2096,17 @@ func TestToolResultEventSuppressesCompletedTaskWaitACPContent(t *testing.T) {
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "task-wait-1",
-		Name: "TASK",
+		Name: "Task",
 		Args: `{"action":"wait","task_id":"jeff"}`,
 	}, tool.Result{
 		ID:   "task-wait-1",
-		Name: "TASK",
+		Name: "Task",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"task_id":       "jeff",
 			"state":         "completed",
 			"final_message": "child final answer\n",
 		}))},
-	}, nil)
+	}, nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2112,11 +2128,11 @@ func TestToolResultEventSuppressesTaskReadACPContent(t *testing.T) {
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "task-read-1",
-		Name: "TASK",
+		Name: "Task",
 		Args: `{"action":"read","handle":"command-3"}`,
 	}, tool.Result{
 		ID:   "task-read-1",
-		Name: "TASK",
+		Name: "Task",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"action":        "read",
 			"handle":        "command-3",
@@ -2137,16 +2153,16 @@ func TestToolResultEventSuppressesTaskReadACPContent(t *testing.T) {
 	}
 }
 
-func TestToolResultEventPreservesTaskWriteACPContent(t *testing.T) {
+func TestToolResultEventPreservesTaskWriteRawOutput(t *testing.T) {
 	t.Parallel()
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "task-write-1",
-		Name: "TASK",
+		Name: "Task",
 		Args: `{"action":"write","task_id":"jeff","input":"continue"}`,
 	}, tool.Result{
 		ID:   "task-write-1",
-		Name: "TASK",
+		Name: "Task",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"task_id":       "jeff",
 			"state":         "running",
@@ -2160,15 +2176,11 @@ func TestToolResultEventPreservesTaskWriteACPContent(t *testing.T) {
 	if got := event.Tool.Status; got != "completed" {
 		t.Fatalf("status = %q, want completed control invocation", got)
 	}
-	content := event.Tool.Content
-	if len(content) != 1 {
-		t.Fatalf("content = %#v, want one terminal content item", content)
+	if content := event.Tool.Content; len(content) != 0 {
+		t.Fatalf("content = %#v, want Runtime to leave display projection empty", content)
 	}
-	if content[0].Type != "terminal" {
-		t.Fatalf("content type = %q, want terminal", content[0].Type)
-	}
-	if got := content[0].Text; got != "input accepted\n" {
-		t.Fatalf("content text = %q, want TASK write result", got)
+	if got, _ := event.Tool.Output["latest_output"].(string); got != "input accepted\n" {
+		t.Fatalf("raw output = %q, want Task write result", got)
 	}
 }
 
@@ -2177,11 +2189,11 @@ func TestToolResultEventSuppressesFailedTaskWaitACPContent(t *testing.T) {
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "task-wait-1",
-		Name: "TASK",
+		Name: "Task",
 		Args: `{"action":"wait","task_id":"command-task"}`,
 	}, tool.Result{
 		ID:   "task-wait-1",
-		Name: "TASK",
+		Name: "Task",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"state":     "failed",
 			"result":    "go: module internal registry: network unreachable\n",
@@ -2210,11 +2222,11 @@ func TestToolResultEventSuppressesTaskCancelACPContent(t *testing.T) {
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "task-cancel-1",
-		Name: "TASK",
+		Name: "Task",
 		Args: `{"action":"cancel","task_id":"command-task"}`,
 	}, tool.Result{
 		ID:   "task-cancel-1",
-		Name: "TASK",
+		Name: "Task",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"state":     "cancelled",
 			"result":    "cancelled command output\n",
@@ -2239,11 +2251,11 @@ func TestToolResultEventMarksTaskInvocationErrorFailed(t *testing.T) {
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "task-wait-1",
-		Name: "TASK",
+		Name: "Task",
 		Args: `{"action":"wait","task_id":"command-task"}`,
 	}, tool.Result{
 		ID:      "task-wait-1",
-		Name:    "TASK",
+		Name:    "Task",
 		IsError: true,
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"state": "running",
@@ -2378,11 +2390,11 @@ func TestToolResultEventCompletesSpawnInvocationWhileChildRuns(t *testing.T) {
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "spawn-1",
-		Name: "SPAWN",
+		Name: "Spawn",
 		Args: `{"agent":"self","prompt":"inspect"}`,
 	}, tool.Result{
 		ID:   "spawn-1",
-		Name: "SPAWN",
+		Name: "Spawn",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"task_id": "task-1",
 			"state":   "running",
@@ -2419,15 +2431,16 @@ func TestToolResultEventDisplaysCancelledCommandStatus(t *testing.T) {
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "command-cancel-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Args: `{"command":"sleep 10"}`,
 	}, tool.Result{
-		ID:   "command-cancel-1",
-		Name: "RUN_COMMAND",
+		ID:       "command-cancel-1",
+		Name:     "RunCommand",
+		Metadata: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}},
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"state": "cancelled",
 		}))},
-	}, nil)
+	}, nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2435,22 +2448,21 @@ func TestToolResultEventDisplaysCancelledCommandStatus(t *testing.T) {
 	if got := event.Tool.Status; got != "cancelled" {
 		t.Fatalf("status = %q, want cancelled", got)
 	}
-	content := event.Tool.Content
-	if len(content) != 1 || content[0].Type != "terminal" || content[0].Text != "cancelled" {
-		t.Fatalf("content = %#v, want terminal cancelled status", content)
+	if content := event.Tool.Content; len(content) != 0 {
+		t.Fatalf("content = %#v, want Runtime to leave display projection empty", content)
 	}
 }
 
-func TestToolResultEventPreservesCommandResultFieldAsACPContent(t *testing.T) {
+func TestToolResultEventPreservesCommandResultAsRawOutput(t *testing.T) {
 	t.Parallel()
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "command-status-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Args: `{"command":"git status"}`,
 	}, tool.Result{
 		ID:   "command-status-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"result":    "On branch dev\nYour branch is behind 'origin/dev' by 3 commits.\n",
 			"exit_code": 0,
@@ -2460,14 +2472,10 @@ func TestToolResultEventPreservesCommandResultFieldAsACPContent(t *testing.T) {
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
 	}
-	content := event.Tool.Content
-	if len(content) != 1 {
-		t.Fatalf("content = %#v, want one terminal content item", content)
+	if content := event.Tool.Content; len(content) != 0 {
+		t.Fatalf("content = %#v, want Runtime to leave display projection empty", content)
 	}
-	if content[0].Type != "terminal" {
-		t.Fatalf("content type = %q, want terminal", content[0].Type)
-	}
-	got := content[0].Text
+	got, _ := event.Tool.Output["result"].(string)
 	if got != "On branch dev\nYour branch is behind 'origin/dev' by 3 commits.\n" {
 		t.Fatalf("content text = %q, want result field", got)
 	}
@@ -2479,11 +2487,11 @@ func TestToolResultEventPreservesRawCommandOutputWhitespace(t *testing.T) {
 	raw := "  first line  \r\n   \r\nsecond line  \r\n"
 	event := toolResultEvent(model.ToolCall{
 		ID:   "command-output-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Args: `{"command":"python test.py"}`,
 	}, tool.Result{
 		ID:   "command-output-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"result":    raw,
 			"exit_code": 0,
@@ -2493,11 +2501,10 @@ func TestToolResultEventPreservesRawCommandOutputWhitespace(t *testing.T) {
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
 	}
-	content := event.Tool.Content
-	if len(content) != 1 {
-		t.Fatalf("content = %#v, want one terminal content item", content)
+	if content := event.Tool.Content; len(content) != 0 {
+		t.Fatalf("content = %#v, want Runtime to leave display projection empty", content)
 	}
-	if got := content[0].Text; got != raw {
+	if got, _ := event.Tool.Output["result"].(string); got != raw {
 		t.Fatalf("content text = %q, want raw command output %q", got, raw)
 	}
 }
@@ -2507,16 +2514,17 @@ func TestToolResultEventPreservesFailedCommandOutputBeforeExitSummary(t *testing
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "command-tidy-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Args: `{"command":"go mod tidy"}`,
 	}, tool.Result{
-		ID:   "command-tidy-1",
-		Name: "RUN_COMMAND",
+		ID:       "command-tidy-1",
+		Name:     "RunCommand",
+		Metadata: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}},
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"result":    "go: module internal registry: network unreachable\n",
 			"exit_code": 1,
 		}))},
-	}, nil)
+	}, nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2524,11 +2532,10 @@ func TestToolResultEventPreservesFailedCommandOutputBeforeExitSummary(t *testing
 	if got := event.Tool.Status; got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	content := event.Tool.Content
-	if len(content) != 1 {
-		t.Fatalf("content = %#v, want one terminal content item", content)
+	if content := event.Tool.Content; len(content) != 0 {
+		t.Fatalf("content = %#v, want Runtime to leave display projection empty", content)
 	}
-	got := content[0].Text
+	got, _ := event.Tool.Output["result"].(string)
 	if got != "go: module internal registry: network unreachable\n" {
 		t.Fatalf("content text = %q, want failed result field", got)
 	}
@@ -2539,15 +2546,16 @@ func TestToolResultEventUsesStatusForSilentCommandFailure(t *testing.T) {
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "command-silent-failure-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Args: `{"command":"false"}`,
 	}, tool.Result{
-		ID:   "command-silent-failure-1",
-		Name: "RUN_COMMAND",
+		ID:       "command-silent-failure-1",
+		Name:     "RunCommand",
+		Metadata: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}},
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"exit_code": 1,
 		}))},
-	}, nil)
+	}, nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2555,13 +2563,11 @@ func TestToolResultEventUsesStatusForSilentCommandFailure(t *testing.T) {
 	if got := event.Tool.Status; got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	content := event.Tool.Content
-	if len(content) != 1 {
-		t.Fatalf("content = %#v, want one terminal content item", content)
+	if content := event.Tool.Content; len(content) != 0 {
+		t.Fatalf("content = %#v, want Runtime to leave display projection empty", content)
 	}
-	got := content[0].Text
-	if got != "exit 1" {
-		t.Fatalf("content text = %q, want exit code status", got)
+	if got, _ := event.Tool.Output["exit_code"].(float64); got != 1 {
+		t.Fatalf("raw exit code = %v, want 1", got)
 	}
 }
 
@@ -2570,11 +2576,11 @@ func TestToolResultEventOmitsContentForSuccessfulSilentCommand(t *testing.T) {
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "command-silent-success-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Args: `{"command":"true"}`,
 	}, tool.Result{
 		ID:   "command-silent-success-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"state":     "completed",
 			"exit_code": 0,
@@ -2598,7 +2604,7 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	large := strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
 	result := tool.Result{
 		ID:   "call-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"result":    large,
 			"exit_code": 1,
@@ -2606,14 +2612,14 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	}
 	call := model.ToolCall{
 		ID:   "call-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Args: `{"command":"find /tmp -delete"}`,
 	}
 	canonical, truncationMeta := canonicalToolResult(result, nil)
 	message := toolResultMessageFromCanonical(call, canonical)
 	event := toolResultEvent(model.ToolCall{
 		ID:   "call-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Args: `{"command":"find /tmp -delete"}`,
 	}, canonical, &message, truncationMeta)
 
@@ -2686,10 +2692,10 @@ func TestToolResultMessageCompactsLargeJSONPayloadForModel(t *testing.T) {
 	large := strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
 	message := toolResultMessage(model.ToolCall{
 		ID:   "call-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 	}, tool.Result{
 		ID:   "call-1",
-		Name: "RUN_COMMAND",
+		Name: "RunCommand",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"result": large,
 		}))},
@@ -2728,7 +2734,7 @@ func TestToolResultContextUsesCanonicalRawOutput(t *testing.T) {
 		Type: session.EventTypeToolResult,
 		Tool: &session.EventTool{
 			ID:     "call-1",
-			Name:   "RUN_COMMAND",
+			Name:   "RunCommand",
 			Title:  "RUN_COMMAND echo",
 			Status: "completed",
 			Output: output,
@@ -2764,7 +2770,7 @@ func TestToolResultContextUsesContentWhenRawOutputAbsent(t *testing.T) {
 		Type: session.EventTypeToolResult,
 		Tool: &session.EventTool{
 			ID:     "call-1",
-			Name:   "RUN_COMMAND",
+			Name:   "RunCommand",
 			Title:  "RUN_COMMAND printf",
 			Status: "completed",
 			Content: []session.EventToolContent{{
@@ -2807,7 +2813,7 @@ func TestToolResultContextUsesCanonicalCommandFailureShape(t *testing.T) {
 		Type: session.EventTypeToolResult,
 		Tool: &session.EventTool{
 			ID:     "call-1",
-			Name:   "RUN_COMMAND",
+			Name:   "RunCommand",
 			Title:  "RUN_COMMAND find /tmp/gomod -delete",
 			Status: "failed",
 			Output: output,
@@ -3432,7 +3438,7 @@ func persistedToolResultEvent(id string, name string, input map[string]any, outp
 	meta := mergeEventMeta(toolMeta(name))
 	return &session.Event{
 		Type: session.EventTypeToolResult,
-		Tool: toolEventPayload(call, "completed", maps.Clone(input), maps.Clone(output), toolResultContent(call, input, output, meta, "completed", false)),
+		Tool: toolEventPayload(call, "completed", maps.Clone(input), maps.Clone(output), nil),
 		Meta: meta,
 	}
 }

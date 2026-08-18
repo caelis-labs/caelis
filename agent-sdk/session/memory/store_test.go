@@ -223,7 +223,7 @@ func TestStoreIsolatesNestedMetadataEventsAndState(t *testing.T) {
 		Type: session.EventTypeToolCall,
 		Tool: &session.EventTool{
 			ID:    "call-1",
-			Name:  "READ",
+			Name:  "Read",
 			Input: map[string]any{"nested": map[string]any{"path": "a"}},
 		},
 		Meta: map[string]any{"nested": map[string]any{"trace": "one"}},

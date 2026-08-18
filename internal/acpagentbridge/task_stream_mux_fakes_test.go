@@ -23,7 +23,7 @@ func acpMuxCommandAnchor(handle string) eventstream.Envelope {
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
 			RawOutput: map[string]any{"handle": handle, "state": "running"},
 			Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-				metautil.RuntimeToolName: "RUN_COMMAND",
+				metautil.RuntimeToolName: "RunCommand",
 			}),
 		},
 	}
@@ -187,7 +187,7 @@ func (s *acpMuxReconnectService) List(context.Context, taskstream.Principal, tas
 	return taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
 		SessionID: "session-1", TaskID: "task-1", Handle: handle, Kind: task.KindCommand,
 		State: task.StateRunning, Running: true,
-		ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+		ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 	}}}, nil
 }
 

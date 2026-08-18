@@ -415,10 +415,10 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
 			Update: schema.ToolCall{
 				SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-1",
-				Title: "RUN_COMMAND printf ok", Kind: schema.ToolKindExecute,
+				Title: "RunCommand printf ok", Kind: schema.ToolKindExecute,
 				Status:   schema.ToolStatusInProgress,
 				RawInput: map[string]any{"command": "printf ok"},
-				Meta:     metautil.WithTerminalInfo(acpToolNameMeta("RUN_COMMAND"), "command-1"),
+				Meta:     metautil.WithTerminalInfo(acpToolNameMeta("RunCommand"), "command-1"),
 			},
 		}
 	}
@@ -468,19 +468,19 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "SPAWN zenith: inspect",
+				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn zenith: inspect",
 				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-				RawInput: map[string]any{"agent": "zenith", "prompt": "inspect"}, Meta: acpToolNameMeta("SPAWN"),
+				RawInput: map[string]any{"agent": "zenith", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
 			},
 		})
 		childStart := start(eventstream.ScopeSubagent, "task-1", "codex", "@zenith")
-		childStart.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "SPAWN"}
+		childStart.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
 		model = applyACPEnvelopeForTest(t, model, childStart)
 		childDelta := delta(eventstream.ScopeSubagent, "task-1", "codex", "@zenith")
-		childDelta.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "SPAWN"}
+		childDelta.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
 		model = applyACPEnvelopeForTest(t, model, childDelta)
 		childFinish := finish(eventstream.ScopeSubagent, "task-1", "codex", "@zenith")
-		childFinish.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "SPAWN"}
+		childFinish.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
 		model = applyACPEnvelopeForTest(t, model, childFinish)
 		block := requireMainACPTurnBlockForTest(t, model)
 		if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-1") {

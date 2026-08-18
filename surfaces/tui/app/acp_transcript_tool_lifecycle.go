@@ -2,9 +2,6 @@ package tuiapp
 
 import (
 	"strings"
-
-	"github.com/caelis-labs/caelis/agent-sdk/display"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int) {
@@ -106,6 +103,9 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 		if isTaskWriteInteractionEvent(headerEvent) {
 			return renderACPStandardToolLifecycleRows(blockID, headerEvent, callID, panelText, width, ctx, panelErr, hasFinal, fullOutput), end
 		}
+		if headerEvent.Name == surfaceToolSendMessage {
+			return renderACPTerminalLifecycleRows(blockID, headerEvent, callID, panelText, width, ctx, panelErr, panelExpanded, hasFinal, fullOutput, opts), end
+		}
 		if isTerminalPanelToolEvent(start) {
 			return renderACPTerminalLifecycleRows(blockID, headerEvent, callID, panelText, width, ctx, panelErr, panelExpanded, hasFinal, fullOutput, opts), end
 		}
@@ -161,6 +161,17 @@ func renderACPStandaloneFinalToolRows(blockID string, ev SubagentEvent, width in
 			fullOutput = opts.ToolPanelFullOutput(ev.CallID)
 		}
 		return renderACPStandardToolLifecycleRows(blockID, ev, ev.CallID, output, width, ctx, ev.Err, true, fullOutput)
+	}
+	if opts.ToolOutputPanels && ev.Name == surfaceToolSendMessage {
+		panelExpanded := true
+		if opts.ToolPanelExpanded != nil {
+			panelExpanded = opts.ToolPanelExpanded(ev.CallID)
+		}
+		fullOutput := false
+		if opts.ToolPanelFullOutput != nil {
+			fullOutput = opts.ToolPanelFullOutput(ev.CallID)
+		}
+		return renderACPTerminalLifecycleRows(blockID, ev, ev.CallID, output, width, ctx, ev.Err, panelExpanded, true, fullOutput, opts)
 	}
 	if opts.ToolOutputPanels && shouldRenderACPToolPanel(output, ev.Err) {
 		panelExpanded := true
@@ -309,21 +320,24 @@ func acpStandardCollapsedClickToken(callID string, ev SubagentEvent, text string
 }
 
 func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
-	semanticName := toolSemanticName(ev.Name, ev.ToolKind)
-	switch names.CanonicalOrSelf(semanticName) {
-	case names.RunCommand, names.Spawn:
+	semanticName := ev.Name
+	switch semanticName {
+	case surfaceToolRunCommand, surfaceToolSpawn, surfaceToolSendMessage:
 		ev.Name = semanticName
 		return terminalLifecycleHeader(ev)
-	case names.Task:
+	case surfaceToolTask:
 		if taskEventAction(ev) == "write" {
 			return taskWriteLifecycleHeader(ev, err)
 		}
 		return taskControlLifecycleHeader(ev)
-	case names.Write, names.Patch:
+	case surfaceToolWrite, surfaceToolPatch:
 		ev.Name = semanticName
 		return mutationLifecycleHeader(ev, err)
 	default:
-		if verb := display.ExplorationVerbForTool(semanticName); verb != "" {
+		if isExecuteToolKind(ev.ToolKind) {
+			return terminalLifecycleHeader(ev)
+		}
+		if verb := surfaceExplorationVerb(semanticName); verb != "" {
 			return standardVerbLifecycleHeader(verb, ev.Args, err)
 		}
 		return standardVerbLifecycleHeader(toolEventDisplayName(firstTrimmed(ev.Name, ev.ToolKind, "Tool")), ev.Args, err)
@@ -412,7 +426,7 @@ func (r toolPanelRenderRequest) renderUncached() []RenderedRow {
 	if isDiffPanelText(text) && !err {
 		return applyClickTokenToRows(renderACPDiffPanelRows(blockID, text, width, ctx), token)
 	}
-	if display.IsTerminalPanelTool(toolName, "") {
+	if surfaceIsTerminalPanelTool(toolName) {
 		return renderACPTerminalPanelRows(blockID, callID, text, width, ctx, err, token)
 	}
 	style := ctx.Theme.HelpHintTextStyle()
@@ -429,7 +443,7 @@ func isTerminalPanelToolEvent(ev SubagentEvent) bool {
 	if isTaskControlEvent(ev) {
 		return false
 	}
-	return ev.Terminal || display.IsTerminalPanelTool(ev.Name, ev.ToolKind)
+	return ev.Terminal || surfaceIsTerminalPanelTool(ev.Name)
 }
 
 func isMutationPanelTool(name string) bool {
@@ -437,8 +451,8 @@ func isMutationPanelTool(name string) bool {
 }
 
 func isMutationPanelToolKind(name string, kind string) bool {
-	switch names.CanonicalOrSelf(name) {
-	case names.Write, names.Patch:
+	switch name {
+	case surfaceToolWrite, surfaceToolPatch:
 		return true
 	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
@@ -453,13 +467,8 @@ func isMutationPanelToolEvent(ev SubagentEvent) bool {
 	return isMutationPanelToolKind(ev.Name, ev.ToolKind)
 }
 
-func toolSemanticName(name string, kind string) string {
-	return display.SemanticToolName(name, kind)
-}
-
 func isAttentionLoopTool(name string) bool {
-	name = names.CanonicalOrSelf(name)
-	if name == "" || name == names.Task {
+	if name == "" || name == surfaceToolTask {
 		return false
 	}
 	return !shouldDefaultCollapseToolPanel(name)
@@ -467,7 +476,7 @@ func isAttentionLoopTool(name string) bool {
 
 func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, expanded bool, final bool, fullOutput bool, opts acpTranscriptRenderOptions) []RenderedRow {
 	headerEvent := ev
-	sendMessage := names.CanonicalOrSelf(toolSemanticName(ev.Name, ev.ToolKind)) == names.SendMessage
+	sendMessage := ev.Name == surfaceToolSendMessage
 	if fullOutput {
 		if fullArgs := strings.TrimSpace(ev.FullArgs); fullArgs != "" {
 			headerEvent.Args = fullArgs
@@ -495,12 +504,12 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 		return rows
 	}
 	text = summarizeACPToolPanelText(text, final)
-	rows = append(rows, renderACPToolPanelRows(blockID, callID, toolSemanticName(ev.Name, ev.ToolKind), text, width, ctx, err, token, opts)...)
+	rows = append(rows, renderACPToolPanelRows(blockID, callID, ev.Name, text, width, ctx, err, token, opts)...)
 	return rows
 }
 
 func isSpawnToolEvent(ev SubagentEvent) bool {
-	return names.CanonicalOrSelf(toolSemanticName(ev.Name, ev.ToolKind)) == names.Spawn
+	return ev.Name == surfaceToolSpawn
 }
 
 func acpTranscriptEventsHaveRunningTool(events []SubagentEvent) bool {
@@ -562,21 +571,21 @@ func renderACPTerminalGapRow(blockID string, width int, ctx BlockRenderContext, 
 
 func terminalLifecycleHeader(ev SubagentEvent) string {
 	rawName := firstTrimmed(ev.Name, "TOOL")
-	name := names.CanonicalOrSelf(rawName)
+	name := rawName
 	args := strings.TrimSpace(ev.Args)
 	switch name {
-	case names.RunCommand:
+	case surfaceToolRunCommand:
 		if args != "" {
 			return "• Ran " + args
 		}
 		return "• Ran"
-	case names.Spawn:
-		args = display.SanitizeSpawnHeaderArgs(args)
+	case surfaceToolSpawn:
+		args = surfaceSanitizeSpawnHeaderArgs(args)
 		if args != "" {
 			return "• Spawned " + args
 		}
 		return "• Spawned"
-	case names.SendMessage:
+	case surfaceToolSendMessage:
 		if args != "" {
 			return "• Sent " + args
 		}
@@ -596,7 +605,7 @@ func terminalLifecycleHeader(ev SubagentEvent) string {
 }
 
 func sanitizeSpawnHeaderArgs(args string) string {
-	return display.SanitizeSpawnHeaderArgs(args)
+	return surfaceSanitizeSpawnHeaderArgs(args)
 }
 
 func isExecuteToolKind(kind string) bool {
@@ -672,10 +681,10 @@ func mutationPanelTextIsHeaderOnly(ev SubagentEvent, text string) bool {
 }
 
 func mutationLifecycleHeader(ev SubagentEvent, err bool) string {
-	name := names.CanonicalOrSelf(toolSemanticName(ev.Name, ev.ToolKind))
+	name := ev.Name
 	args := strings.TrimSpace(ev.Args)
 	switch name {
-	case names.Write, names.Patch:
+	case surfaceToolWrite, surfaceToolPatch:
 		return standardVerbLifecycleHeader("Edit", args, err)
 	default:
 		if args == "" {

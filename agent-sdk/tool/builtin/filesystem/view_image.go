@@ -13,11 +13,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 const (
-	ViewImageToolName = names.ViewImage
+	ViewImageToolName = "ViewImage"
 	maxViewImageBytes = int64(20_000_000)
 )
 

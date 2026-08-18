@@ -217,7 +217,7 @@ func guardianMainSummaryParentEvents(summaryText string, directUserText string) 
 
 func guardianMainSummaryApprovalRequest() kernel.ApprovalReviewRequest {
 	return kernel.ApprovalReviewRequest{Approval: &kernel.ApprovalPayload{
-		ToolName: "RUN_COMMAND",
+		ToolName: "RunCommand",
 		Reason:   "commit the prepared fix",
 		RawInput: map[string]any{"cmd": "git commit -m fix"},
 		Status:   kernel.ApprovalStatusPending,

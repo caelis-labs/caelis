@@ -642,12 +642,12 @@ func (r *guardianApprovalGateRuntime) Run(ctx context.Context, req agent.RunRequ
 			Session:    r.session,
 			RunID:      "runtime-run",
 			TurnID:     "runtime-turn",
-			Tool:       tool.Definition{Name: "RUN_COMMAND"},
-			Call:       tool.Call{ID: "runtime-call", Name: "RUN_COMMAND", RuntimeModel: r.model},
+			Tool:       tool.Definition{Name: "RunCommand"},
+			Call:       tool.Call{ID: "runtime-call", Name: "RunCommand", RuntimeModel: r.model},
 			Approval: &session.ProtocolApproval{
 				ToolCall: session.ProtocolToolCall{
 					ID:       "runtime-call",
-					Name:     "RUN_COMMAND",
+					Name:     "RunCommand",
 					Kind:     "execute",
 					Status:   "pending",
 					RawInput: map[string]any{"cmd": r.command},
@@ -751,15 +751,15 @@ func TestGuardianTranscriptProjectionOmitsSuccessBodiesKeepsFailuresAndOrder(t *
 	events := []*session.Event{
 		{ID: "e1", Seq: 1, Type: session.EventTypeUser, Message: ptrMessage(model.NewTextMessage(model.RoleUser, "Please fix tests."))},
 		{ID: "e2", Seq: 2, Type: session.EventTypeAssistant, Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "I will run tests."))},
-		{ID: "e3", Seq: 3, Type: session.EventTypeToolCall, Tool: &session.EventTool{Name: "RUN_COMMAND", Input: map[string]any{"command": "go test ./..."}}},
+		{ID: "e3", Seq: 3, Type: session.EventTypeToolCall, Tool: &session.EventTool{Name: "RunCommand", Input: map[string]any{"command": "go test ./..."}}},
 		{ID: "e4", Seq: 4, Type: session.EventTypeToolResult, Tool: &session.EventTool{
-			Name:   "RUN_COMMAND",
+			Name:   "RunCommand",
 			Status: "completed",
 			Output: map[string]any{"state": "completed", "result": "ok\n" + strings.Repeat("x", 200)},
 		}},
-		{ID: "e5", Seq: 5, Type: session.EventTypeToolCall, Tool: &session.EventTool{Name: "RUN_COMMAND", Input: map[string]any{"command": "git add ."}}},
+		{ID: "e5", Seq: 5, Type: session.EventTypeToolCall, Tool: &session.EventTool{Name: "RunCommand", Input: map[string]any{"command": "git add ."}}},
 		{ID: "e6", Seq: 6, Type: session.EventTypeToolResult, Tool: &session.EventTool{
-			Name:   "RUN_COMMAND",
+			Name:   "RunCommand",
 			Status: "failed",
 			Output: map[string]any{"state": "failed", "error": "index.lock denied", "system_hint": "retry once"},
 		}},
@@ -836,7 +836,7 @@ func TestGuardianFlatTranscriptKeepsAssistantLinesInAttributedBlock(t *testing.T
 		{ID: "a1", Type: session.EventTypeAssistant, Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, malicious))},
 	}
 	items, err := buildGuardianPromptItems(events, guardianPromptMode{}, kernel.ApprovalReviewRequest{
-		RuntimeRequest: agent.ApprovalRequest{Call: tool.Call{Name: "RUN_COMMAND", Input: json.RawMessage(`{"cmd":"true"}`)}},
+		RuntimeRequest: agent.ApprovalRequest{Call: tool.Call{Name: "RunCommand", Input: json.RawMessage(`{"cmd":"true"}`)}},
 	})
 	if err != nil {
 		t.Fatal(err)

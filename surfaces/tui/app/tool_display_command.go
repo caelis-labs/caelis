@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func commandDisplayArguments(name string, kind string, raw map[string]any) (string, string, bool) {
@@ -13,8 +12,8 @@ func commandDisplayArguments(name string, kind string, raw map[string]any) (stri
 }
 
 func commandTextDisplayArguments(name string, kind string, command string) (string, string, bool) {
-	canonical := names.CanonicalOrSelf(name)
-	if canonical == names.Spawn || canonical == names.Task || !display.IsTerminalPanelTool(name, kind) {
+	if name == surfaceToolSpawn || name == surfaceToolTask ||
+		(!surfaceIsTerminalPanelTool(name) && !isExecuteToolKind(kind)) {
 		return "", "", false
 	}
 	command = display.NormalizeDisplayArg(command)

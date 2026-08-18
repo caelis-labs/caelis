@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -155,7 +154,7 @@ func agentMessageTargetFromBlock(block Block, messageCallID string) string {
 	for index := len(events) - 1; index >= 0; index-- {
 		event := events[index]
 		if event.Kind == SEToolCall && strings.TrimSpace(event.CallID) == messageCallID &&
-			names.CanonicalOrSelf(toolSemanticName(event.Name, event.ToolKind)) == names.SendMessage {
+			event.Name == surfaceToolSendMessage {
 			return event.MessageTarget
 		}
 	}

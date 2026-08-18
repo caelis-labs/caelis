@@ -7,7 +7,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -204,22 +206,21 @@ func canonicalTaskParentToolRelation(event *session.Event) *eventstream.ParentTo
 	if session.EventTypeOf(event) != session.EventTypeToolResult || !canonicalTaskResultFinal(event.Tool.Status) {
 		return nil
 	}
-	canonical, _ := names.Resolve(event.Tool.Name)
 	action := strings.ToLower(stringValue(event.Tool.Input["action"]))
-	if canonical != names.Task || (action != "read" && action != "wait") {
+	if event.Tool.Name != tasktool.ToolName || (action != "read" && action != "wait") {
 		return nil
 	}
 	var expectedParent string
 	switch strings.ToLower(stringValue(event.Tool.Output["target_kind"])) {
 	case "subagent":
-		expectedParent = names.Spawn
+		expectedParent = spawn.ToolName
 	case "command", "terminal":
-		expectedParent = names.RunCommand
+		expectedParent = shell.RunCommandToolName
 	default:
 		return nil
 	}
 	parentCall := stringValue(event.Tool.Output["parent_call"])
-	parentName, _ := names.Resolve(stringValue(event.Tool.Output["parent_tool"]))
+	parentName := stringValue(event.Tool.Output["parent_tool"])
 	if parentCall == "" || parentName != expectedParent {
 		return nil
 	}

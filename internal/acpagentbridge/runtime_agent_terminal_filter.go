@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -81,7 +81,7 @@ func normalizeACPStdioTerminalExtension(notification acp.SessionNotification) ac
 // do not pass through this normalizer.
 func acpStdioFinalOnlySpawn(meta map[string]any) bool {
 	toolName := metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName)
-	return identity.CanonicalOrSelf(toolName) == identity.Spawn
+	return toolName == spawn.ToolName
 }
 
 func withoutACPStdioTerminalMount(meta map[string]any, content []acp.ToolCallContent) (map[string]any, []acp.ToolCallContent) {

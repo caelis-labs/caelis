@@ -920,7 +920,7 @@ func TestRuntimeAgentPromptAutoReviewUsesReviewerInsteadOfClientPermission(t *te
 	if reviewer.last.Model == nil {
 		t.Fatal("reviewer request model = nil, want resolved session model")
 	}
-	if reviewer.last.Approval == nil || reviewer.last.Approval.ToolName != "RUN_COMMAND" {
+	if reviewer.last.Approval == nil || reviewer.last.Approval.ToolName != "RunCommand" {
 		t.Fatalf("reviewer approval payload = %#v, want RUN_COMMAND payload", reviewer.last.Approval)
 	}
 	if got := reviewer.last.Approval.RawInput["command"]; got != "git restore hello.py" {
@@ -1012,7 +1012,7 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 	if cb.last.SessionID != sessionResp.SessionID || cb.last.ToolCall.ToolCallID != "call-1" {
 		t.Fatalf("client permission request = %#v, want normalized session and call identity", cb.last)
 	}
-	if got := metautil.String(cb.last.ToolCall.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RUN_COMMAND" {
+	if got := metautil.String(cb.last.ToolCall.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RunCommand" {
 		t.Fatalf("client permission tool name = %q, want RUN_COMMAND", got)
 	}
 	if got := schema.NormalizeRawMap(cb.last.ToolCall.RawInput)["command"]; got != "git restore hello.py" {
@@ -1478,12 +1478,12 @@ func (r *approvalReviewRuntime) Run(ctx context.Context, req agent.RunRequest) (
 			Session:    activeSession,
 			RunID:      "run-1",
 			TurnID:     "turn-1",
-			Tool:       tool.Definition{Name: "RUN_COMMAND"},
-			Call:       tool.Call{ID: "call-1", Name: "RUN_COMMAND"},
+			Tool:       tool.Definition{Name: "RunCommand"},
+			Call:       tool.Call{ID: "call-1", Name: "RunCommand"},
 			Approval: &session.ProtocolApproval{
 				ToolCall: session.ProtocolToolCall{
 					ID:   "call-1",
-					Name: "RUN_COMMAND",
+					Name: "RunCommand",
 					RawInput: map[string]any{
 						"command": "git restore hello.py",
 					},
@@ -1548,7 +1548,7 @@ func (r terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (age
 	sessionID := req.SessionRef.SessionID
 	toolName := strings.TrimSpace(r.toolName)
 	if toolName == "" {
-		toolName = "RUN_COMMAND"
+		toolName = "RunCommand"
 	}
 	taskID := strings.TrimSpace(r.taskID)
 	if taskID == "" {
@@ -1559,7 +1559,7 @@ func (r terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (age
 		terminalID = "terminal-1"
 	}
 	rawInput := map[string]any{"command": "printf streamed"}
-	if strings.EqualFold(toolName, "SPAWN") {
+	if strings.EqualFold(toolName, "Spawn") {
 		rawInput = map[string]any{"agent": "claude", "prompt": "stream child output"}
 	}
 	events := []*session.Event{
@@ -1657,7 +1657,7 @@ func (r terminalBridgeFinalRuntime) Run(_ context.Context, req agent.RunRequest)
 	sessionID := req.SessionRef.SessionID
 	toolName := strings.TrimSpace(r.toolName)
 	if toolName == "" {
-		toolName = "RUN_COMMAND"
+		toolName = "RunCommand"
 	}
 	taskID := strings.TrimSpace(r.taskID)
 	if taskID == "" {
@@ -1668,7 +1668,7 @@ func (r terminalBridgeFinalRuntime) Run(_ context.Context, req agent.RunRequest)
 		terminalID = "terminal-1"
 	}
 	rawInput := map[string]any{"command": "printf streamed"}
-	if strings.EqualFold(toolName, "SPAWN") {
+	if strings.EqualFold(toolName, "Spawn") {
 		rawInput = map[string]any{"agent": "claude", "prompt": "stream child output"}
 	}
 	return agent.RunResult{
@@ -1894,7 +1894,7 @@ func (narrativeToolBoundaryReplayRuntime) Run(_ context.Context, req agent.RunRe
 					Update: &session.ProtocolUpdate{
 						SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
 						ToolCallID:    "call-1",
-						Kind:          "READ",
+						Kind:          "Read",
 						Status:        "completed",
 					},
 				},

@@ -125,7 +125,7 @@ func openSpawnEventIndexes(block *MainACPTurnBlock, callID string) []int {
 		if event.Kind != SEToolCall ||
 			event.Done ||
 			strings.TrimSpace(event.CallID) != callID ||
-			!strings.EqualFold(toolSemanticName(event.Name, event.ToolKind), "SPAWN") {
+			event.Name != surfaceToolSpawn {
 			continue
 		}
 		indexes = append(indexes, eventIndex)

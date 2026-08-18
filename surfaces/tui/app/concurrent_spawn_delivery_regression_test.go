@@ -174,7 +174,7 @@ func requireSpawnCallIDs(t *testing.T, model *Model, spawned []concurrentSpawnTa
 	block := requireMainACPTurnBlockForTest(t, model)
 	got := make(map[string]SubagentEvent)
 	for _, event := range physicalTranscriptEventsForTest(block.Events) {
-		if strings.EqualFold(toolSemanticName(event.Name, event.ToolKind), "Spawn") {
+		if event.Name == surfaceToolSpawn {
 			got[event.CallID] = event
 		}
 	}

@@ -446,7 +446,7 @@ func pendingApprovalTestEvent(requestID string) *session.Event {
 		Type: session.EventTypeCustom, Visibility: session.VisibilityMirror, ApprovalRequestID: requestID,
 		Protocol: &session.EventProtocol{
 			Method:     session.ProtocolMethodRequestPermission,
-			Permission: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call-" + requestID, Name: "WRITE"}},
+			Permission: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call-" + requestID, Name: "Write"}},
 		},
 	}
 }

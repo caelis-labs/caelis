@@ -26,10 +26,10 @@ func TestDurableTaskWaitFinalCompletesOriginalSpawnRowWithoutInjectingChildWorks
 	block := requireMainACPTurnBlockForTest(t, model)
 	physical := physicalTranscriptEventsForTest(block.Events)
 	if len(physical) != 1 {
-		t.Fatalf("events = %#v, want one physical Spawn entry and no TASK result row", block.Events)
+		t.Fatalf("events = %#v, want one physical Spawn entry and no Task result row", block.Events)
 	}
 	spawn := physical[0]
-	if !spawn.Done || spawn.Err || !strings.EqualFold(toolSemanticName(spawn.Name, spawn.ToolKind), "SPAWN") {
+	if !spawn.Done || spawn.Err || spawn.Name != surfaceToolSpawn {
 		t.Fatalf("Spawn = %#v, want completed original Spawn call", spawn)
 	}
 	if spawn.Output != structuredFinalMessageForFidelityTest {
@@ -147,12 +147,12 @@ func canonicalOutputFidelityEvents() []*session.Event {
 			Visibility: session.VisibilityCanonical,
 			Time:       time.Unix(300, 0),
 			Scope:      &session.EventScope{TurnID: "turn-1"},
-			Meta:       acpToolNameMeta("SPAWN"),
+			Meta:       acpToolNameMeta("Spawn"),
 			Tool: &session.EventTool{
 				ID:     "spawn-call-1",
-				Name:   "SPAWN",
+				Name:   "Spawn",
 				Kind:   "execute",
-				Title:  "SPAWN reviewer: inspect",
+				Title:  "Spawn reviewer: inspect",
 				Status: "running",
 				Input:  map[string]any{"agent": "reviewer", "prompt": "inspect"},
 			},
@@ -165,12 +165,12 @@ func canonicalOutputFidelityEvents() []*session.Event {
 			Visibility: session.VisibilityCanonical,
 			Time:       time.Unix(301, 0),
 			Scope:      &session.EventScope{TurnID: "turn-2"},
-			Meta:       acpToolNameMeta("TASK"),
+			Meta:       acpToolNameMeta("Task"),
 			Tool: &session.EventTool{
 				ID:     "task-wait-call-1",
-				Name:   "TASK",
+				Name:   "Task",
 				Kind:   "execute",
-				Title:  "TASK wait reviewer",
+				Title:  "Task wait reviewer",
 				Status: "completed",
 				Input:  map[string]any{"action": "wait", "task_id": "reviewer"},
 				Output: map[string]any{
@@ -178,7 +178,7 @@ func canonicalOutputFidelityEvents() []*session.Event {
 					"state":         "completed",
 					"target_kind":   "subagent",
 					"parent_call":   "spawn-call-1",
-					"parent_tool":   "SPAWN",
+					"parent_tool":   "Spawn",
 					"final_message": structuredFinalMessageForFidelityTest,
 				},
 			},
@@ -209,7 +209,7 @@ func TestNarrativePreservesRepeatedLongLinesParagraphsAndUnicodeMarkers(t *testi
 
 	block := NewParticipantTurnBlock("participant-1", "@reviewer")
 	block.AppendStreamEvent(SEAssistant, paragraph, narrativeTestSource())
-	block.UpdateToolWithMeta("hidden-tool-1", "READ", "file.go", "", true, false, ToolUpdateMeta{ToolKind: "read"})
+	block.UpdateToolWithMeta("hidden-tool-1", "Read", "file.go", "", true, false, ToolUpdateMeta{ToolKind: "read"})
 	block.ReplaceFinalStreamEvent(
 		SEAssistant,
 		paragraph,
@@ -228,14 +228,14 @@ func TestHiddenChildToolWithoutMessageIDCreatesMarkdownBoundary(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-call-1",
-			Title: "SPAWN explorer: inspect", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("SPAWN"),
+			Title: "Spawn explorer: inspect", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
 	child := func(update schema.Update) eventstream.Envelope {
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeSubagent, ScopeID: "task-1",
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "SPAWN"}, Update: update,
+			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"}, Update: update,
 		}
 	}
 	model = applyACPEnvelopeForTest(t, model, child(schema.ContentChunk{
@@ -266,13 +266,13 @@ func TestTerminalGapIsRenderedOnceWithoutChangingExactBytes(t *testing.T) {
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-1", Title: "RUN_COMMAND long job",
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-1", Title: "RunCommand long job",
 			Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 			RawInput: map[string]any{"command": "long job"}, Content: []schema.ToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
-			Meta: acpToolNameMeta("RUN_COMMAND"),
+			Meta: acpToolNameMeta("RunCommand"),
 		},
 	})
-	runningMeta := runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", retained, "append")
+	runningMeta := runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", retained, "append")
 	runningMeta = metautil.WithRuntimeSection(runningMeta, metautil.RuntimeStream, map[string]any{
 		metautil.RuntimeStreamMode:      "append",
 		metautil.RuntimeStreamTruncated: true,
@@ -287,7 +287,7 @@ func TestTerminalGapIsRenderedOnceWithoutChangingExactBytes(t *testing.T) {
 	})
 
 	completed := schema.ToolStatusCompleted
-	finalMeta := metautil.WithTerminalInfo(acpToolNameMeta("RUN_COMMAND"), "terminal-1")
+	finalMeta := metautil.WithTerminalInfo(acpToolNameMeta("RunCommand"), "terminal-1")
 	final := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCallUpdate{

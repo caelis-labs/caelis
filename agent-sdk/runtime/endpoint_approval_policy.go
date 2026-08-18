@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 // resolveEndpointApprovalByPolicy handles process-owned policy decisions for
@@ -44,6 +43,12 @@ func (r *Runtime) resolveEndpointApprovalByPolicy(
 	}
 	definition := tool.CloneDefinition(request.Tool)
 	definition.Name = endpointPolicyToolName(definition.Name, request.Approval)
+	if endpointPolicyCommandCapability(request.Approval) {
+		if definition.ExecutionRequirements == nil {
+			definition.ExecutionRequirements = &tool.ExecutionRequirements{}
+		}
+		definition.ExecutionRequirements.Sandbox.CommandExec = true
+	}
 	call.Name = firstNonEmpty(call.Name, definition.Name)
 	decision, err := mode.DecideTool(ctx, policy.ToolContext{
 		Session: session.CloneSession(request.Session),
@@ -108,18 +113,22 @@ func endpointPolicyApprovalResponse(
 }
 
 func endpointPolicyToolName(name string, payload *session.ProtocolApproval) string {
-	name = strings.TrimSpace(name)
-	if payload == nil {
+	if name != "" || payload == nil {
 		return name
 	}
-	raw := payload.ToolCall.RawInput
-	if command, ok := raw["command"].(string); ok && strings.TrimSpace(command) != "" {
-		return names.RunCommand
+	return firstNonEmpty(payload.ToolCall.Name, payload.ToolCall.Kind)
+}
+
+func endpointPolicyCommandCapability(payload *session.ProtocolApproval) bool {
+	if payload == nil || !strings.EqualFold(strings.TrimSpace(payload.ToolCall.Kind), "execute") {
+		return false
 	}
-	if command, ok := raw["cmd"].(string); ok && strings.TrimSpace(command) != "" {
-		return names.RunCommand
+	for _, key := range []string{"command", "cmd"} {
+		if command, ok := payload.ToolCall.RawInput[key].(string); ok && strings.TrimSpace(command) != "" {
+			return true
+		}
 	}
-	return firstNonEmpty(name, payload.ToolCall.Name, payload.ToolCall.Title, payload.ToolCall.Kind, "ACP_TOOL")
+	return false
 }
 
 func endpointPolicyCallInput(raw json.RawMessage, payload *session.ProtocolApproval) (json.RawMessage, error) {

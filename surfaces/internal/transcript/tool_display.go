@@ -2,8 +2,6 @@ package transcript
 
 import (
 	"strings"
-
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 )
 
 func NormalizeToolStartStatus(status string) string {
@@ -71,7 +69,7 @@ func SuppressToolResultOutput(toolName string, toolKind string, output string, s
 	if isErr {
 		return false
 	}
-	if !display.IsExplorationTool(display.SemanticToolName(toolName, toolKind)) {
+	if !transcriptToolIsExploration(strings.TrimSpace(toolName)) {
 		return false
 	}
 	trimmed := strings.TrimSpace(output)

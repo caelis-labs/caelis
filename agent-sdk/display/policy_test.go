@@ -23,50 +23,6 @@ func TestSpawnFullDisplayArgsUsesHandleWithAgentAnnotation(t *testing.T) {
 	}
 }
 
-func TestSummarizeToolCallTitleIncludesSpawnPrompt(t *testing.T) {
-	raw := map[string]any{
-		"agent":  "self",
-		"prompt": "创建 hello_spawn.txt",
-	}
-	if got := SummarizeToolCallTitle("SPAWN", raw); got != "Spawn self: 创建 hello_spawn.txt" {
-		t.Fatalf("SummarizeToolCallTitle(SPAWN) = %q", got)
-	}
-}
-
-func TestSummarizeToolCallTitleUsesSemanticAgentMessage(t *testing.T) {
-	raw := map[string]any{
-		"to":      "parent",
-		"message": "READY file=payload",
-	}
-	if got := SummarizeToolCallTitle("SendMessage", raw); got != "Send message to @parent: READY file=payload" {
-		t.Fatalf("SummarizeToolCallTitle(SendMessage) = %q", got)
-	}
-}
-
-func TestSkillToolKeepsDistinctSemanticName(t *testing.T) {
-	if got := SemanticToolName("skill", ToolKindForName("skill")); got != "Skill" {
-		t.Fatalf("SemanticToolName(skill) = %q, want Skill", got)
-	}
-	if got := ToolKindForName("skill"); got != ToolKindRead {
-		t.Fatalf("ToolKindForName(skill) = %q, want %q", got, ToolKindRead)
-	}
-	if got := ExplorationVerbForTool("skill"); got != "Skill" {
-		t.Fatalf("ExplorationVerbForTool(skill) = %q, want Skill", got)
-	}
-	if got := SummarizeToolCallTitle("skill", map[string]any{"name": "brainstorm"}); got != "Skill brainstorm" {
-		t.Fatalf("SummarizeToolCallTitle(skill) = %q, want Skill brainstorm", got)
-	}
-}
-
-func TestSemanticToolNameDoesNotInventBuiltinFromKind(t *testing.T) {
-	if got := SemanticToolName("", ToolKindSearch); got != "" {
-		t.Fatalf("SemanticToolName(empty, search) = %q, want empty", got)
-	}
-	if got := SemanticToolName("external_search", ToolKindSearch); got != "external_search" {
-		t.Fatalf("SemanticToolName(external_search, search) = %q", got)
-	}
-}
-
 func TestSpawnDisplayInputForResultMergesPromptFromLifecycleOutput(t *testing.T) {
 	input := map[string]any{"agent": "codex"}
 	output := map[string]any{"text": `{"prompt":"inspect repo","task_id":"task-1"} running`}
@@ -77,55 +33,6 @@ func TestSpawnDisplayInputForResultMergesPromptFromLifecycleOutput(t *testing.T)
 	normalized := NormalizeSpawnDisplayRawMap(output)
 	if normalized["text"] != "running" {
 		t.Fatalf("text remainder = %#v", normalized["text"])
-	}
-}
-
-func TestDisplayTerminalInitialOutputForSpawn(t *testing.T) {
-	got := DisplayTerminalInitialOutput("SPAWN", map[string]any{
-		"agent":  "codex",
-		"prompt": "explain the patch",
-	})
-	if got != "Spawn agent=codex\nexplain the patch\n" {
-		t.Fatalf("DisplayTerminalInitialOutput() = %q", got)
-	}
-}
-
-func TestIsTerminalPanelTool(t *testing.T) {
-	tests := []struct {
-		name string
-		kind string
-		want bool
-	}{
-		{name: "RUN_COMMAND", want: true},
-		{name: "SPAWN", want: true},
-		{name: "TASK", kind: ToolKindExecute, want: false},
-		{name: "external", kind: ToolKindExecute, want: true},
-		{name: "READ", kind: ToolKindRead, want: false},
-	}
-	for _, tt := range tests {
-		if got := IsTerminalPanelTool(tt.name, tt.kind); got != tt.want {
-			t.Fatalf("IsTerminalPanelTool(%q, %q) = %v, want %v", tt.name, tt.kind, got, tt.want)
-		}
-	}
-}
-
-func TestDisplayTerminalIDAcceptsGenericExecuteKindWithoutInventingName(t *testing.T) {
-	if got, ok := DisplayTerminalID("call-1", ToolKindExecute); !ok || got != "call-1" {
-		t.Fatalf("DisplayTerminalID(execute) = %q, %v", got, ok)
-	}
-	if got := SemanticToolName(ToolKindExecute, ToolKindExecute); got != ToolKindExecute {
-		t.Fatalf("SemanticToolName(execute) = %q, want generic kind preserved", got)
-	}
-}
-
-func TestDisplayTerminalIDUsesTerminalPanelToolTable(t *testing.T) {
-	t.Parallel()
-
-	if id, ok := DisplayTerminalID("call-1", "SPAWN"); id != "call-1" || !ok {
-		t.Fatalf("DisplayTerminalID(SPAWN) = %q/%v, want call-1/true", id, ok)
-	}
-	if id, ok := DisplayTerminalID("task-1", "TASK"); id != "" || ok {
-		t.Fatalf("DisplayTerminalID(TASK) = %q/%v, want empty/false", id, ok)
 	}
 }
 
@@ -218,14 +125,5 @@ func TestWebDisplayArgs(t *testing.T) {
 	}
 	if got := WebFetchDisplayArg(map[string]any{"url": "https://api-docs.deepseek.com/guides/claude_code"}); got != "https://api-docs.deepseek.com/guides/claude_code" {
 		t.Fatalf("WebFetchDisplayArg() = %q", got)
-	}
-}
-
-func TestExplorationVerbForWebTools(t *testing.T) {
-	if got := ExplorationVerbForTool("WEB_SEARCH"); got != "Search" {
-		t.Fatalf("ExplorationVerbForTool(WEB_SEARCH) = %q", got)
-	}
-	if got := ExplorationVerbForTool("WEB_FETCH"); got != "Fetch" {
-		t.Fatalf("ExplorationVerbForTool(WEB_FETCH) = %q", got)
 	}
 }

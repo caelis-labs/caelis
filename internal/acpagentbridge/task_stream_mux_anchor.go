@@ -5,7 +5,8 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -35,10 +36,10 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 	}
 	callID := strings.TrimSpace(taskStreamToolCallID(envelope.Update))
 	kind := task.Kind("")
-	switch identity.CanonicalOrSelf(toolName) {
-	case identity.RunCommand:
+	switch toolName {
+	case shell.RunCommandToolName:
 		kind = task.KindCommand
-	case identity.Spawn:
+	case spawn.ToolName:
 		kind = task.KindSubagent
 	default:
 		targetKind := strings.ToLower(strings.TrimSpace(display.ToolTaskTargetKind(input, output, meta)))
@@ -51,7 +52,7 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 			// but the typed RunCommand terminal anchor and target kind remain.
 			// Directory matching still validates the parent before attaching.
 			kind = task.KindCommand
-		case identity.CanonicalOrSelf(display.MapString(output, "parent_tool")) == identity.Spawn &&
+		case display.MapString(output, "parent_tool") == spawn.ToolName &&
 			strings.EqualFold(display.ToolTaskTargetKind(input, output, meta), "subagent"):
 			kind = task.KindSubagent
 		}
@@ -88,7 +89,7 @@ func acpTaskStreamEnvelopeAllowed(anchor acpTaskStreamAnchor, envelope eventstre
 	case task.KindSubagent:
 		if envelope.Scope != eventstream.ScopeSubagent || envelope.ParentTool == nil ||
 			strings.TrimSpace(envelope.ParentTool.ToolCallID) != anchor.callID ||
-			identity.CanonicalOrSelf(envelope.ParentTool.ToolName) != identity.Spawn {
+			envelope.ParentTool.ToolName != spawn.ToolName {
 			return false
 		}
 		switch envelope.Kind {
@@ -106,9 +107,9 @@ func acpTaskStreamEnvelopeAllowed(anchor acpTaskStreamAnchor, envelope eventstre
 func taskStreamParentToolName(kind task.Kind) string {
 	switch kind {
 	case task.KindSubagent:
-		return identity.Spawn
+		return spawn.ToolName
 	case task.KindCommand:
-		return identity.RunCommand
+		return shell.RunCommandToolName
 	default:
 		return ""
 	}

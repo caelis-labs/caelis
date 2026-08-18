@@ -150,7 +150,7 @@ func (b *MainACPTurnBlock) markSubagentNarrativeBoundary(callID string, taskID s
 		}
 		direct := callID != "" && strings.TrimSpace(event.CallID) == callID
 		linked := taskID != "" && strings.TrimSpace(event.TaskHandle) == taskID &&
-			strings.EqualFold(toolSemanticName(event.Name, event.ToolKind), "SPAWN")
+			event.Name == surfaceToolSpawn
 		if !direct && !linked {
 			continue
 		}
@@ -177,7 +177,7 @@ func (b *MainACPTurnBlock) setSubagentActivity(callID string, taskID string, act
 		}
 		direct := callID != "" && strings.TrimSpace(event.CallID) == callID
 		linked := taskID != "" && strings.TrimSpace(event.TaskHandle) == taskID &&
-			strings.EqualFold(toolSemanticName(event.Name, event.ToolKind), "SPAWN")
+			event.Name == surfaceToolSpawn
 		if !direct && !linked {
 			continue
 		}

@@ -14,7 +14,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	_ "github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
 func TestAutoReviewModeAllowsWorkspaceWrites(t *testing.T) {
@@ -186,8 +190,8 @@ func TestDefaultModeAllowsExplicitWebAndMCPTools(t *testing.T) {
 
 	tests := []policy.ToolContext{
 		{
-			Tool: policyToolDefinition("SKILL"),
-			Call: policyToolCall("SKILL", map[string]any{"name": "superpowers:brainstorming"}),
+			Tool: policyToolDefinition("Skill"),
+			Call: policyToolCall("Skill", map[string]any{"name": "superpowers:brainstorming"}),
 		},
 		{
 			Tool: policyToolSearchDefinition(),
@@ -198,12 +202,12 @@ func TestDefaultModeAllowsExplicitWebAndMCPTools(t *testing.T) {
 			Call: policyToolCall("mcp__plugin__server__read_fixture", map[string]any{"name": "fixture"}),
 		},
 		{
-			Tool: policyToolDefinition("WEB_SEARCH"),
-			Call: policyToolCall("WEB_SEARCH", map[string]any{"query": "latest release"}),
+			Tool: policyToolDefinition("WebSearch"),
+			Call: policyToolCall("WebSearch", map[string]any{"query": "latest release"}),
 		},
 		{
-			Tool: policyToolDefinition("WEB_FETCH"),
-			Call: policyToolCall("WEB_FETCH", map[string]any{"url": "https://example.com"}),
+			Tool: policyToolDefinition("WebFetch"),
+			Call: policyToolCall("WebFetch", map[string]any{"url": "https://example.com"}),
 		},
 	}
 	for _, input := range tests {
@@ -244,7 +248,7 @@ func TestDefaultModeAllowsAssembledToolsWithoutANameAllowlist(t *testing.T) {
 func TestDefaultModeAllowsAssembledAgentCoordinationTools(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{names.Spawn, names.Task, names.SendMessage} {
+	for _, name := range []string{spawn.ToolName, tasktool.ToolName, sendmessage.ToolName} {
 		input := policy.ToolContext{
 			Tool: policyToolDefinition(name),
 			Call: policyToolCall(name, map[string]any{}),
@@ -1102,8 +1106,8 @@ func TestSensitiveWritePathsRemainDenied(t *testing.T) {
 func writeCtx(path string) policy.ToolContext {
 	raw, _ := json.Marshal(map[string]any{"path": path, "content": "x"})
 	return policy.ToolContext{
-		Tool: tool.Definition{Name: "WRITE"},
-		Call: tool.Call{Name: "WRITE", Input: raw},
+		Tool: tool.Definition{Name: filesystem.WriteToolName},
+		Call: tool.Call{Name: filesystem.WriteToolName, Input: raw},
 		Options: policy.ModeOptions{
 			WorkspaceRoot: testWorkspaceRoot(),
 			TempRoot:      testTempRoot(),
@@ -1124,8 +1128,8 @@ func commandCtx(command string, requireEscalated bool) policy.ToolContext {
 func commandCtxWithArgs(args map[string]any) policy.ToolContext {
 	raw, _ := json.Marshal(args)
 	return policy.ToolContext{
-		Tool: tool.Definition{Name: "RUN_COMMAND"},
-		Call: tool.Call{Name: "RUN_COMMAND", Input: raw},
+		Tool: tool.Definition{Name: shell.RunCommandToolName},
+		Call: tool.Call{Name: shell.RunCommandToolName, Input: raw},
 		Options: policy.ModeOptions{
 			WorkspaceRoot: testWorkspaceRoot(),
 			TempRoot:      testTempRoot(),
@@ -1167,8 +1171,8 @@ func hasPathRuleForPath(rules []sandbox.PathRule, path string) bool {
 func readCtx(path string) policy.ToolContext {
 	raw, _ := json.Marshal(map[string]any{"path": path})
 	return policy.ToolContext{
-		Tool: tool.Definition{Name: "READ"},
-		Call: tool.Call{Name: "READ", Input: raw},
+		Tool: tool.Definition{Name: filesystem.ReadToolName},
+		Call: tool.Call{Name: filesystem.ReadToolName, Input: raw},
 		Options: policy.ModeOptions{
 			WorkspaceRoot: testWorkspaceProjectRoot(),
 			TempRoot:      testTempRoot(),
@@ -1197,8 +1201,8 @@ func searchCtx(path string, pattern string) policy.ToolContext {
 	}
 	raw, _ := json.Marshal(input)
 	return policy.ToolContext{
-		Tool: tool.Definition{Name: "SEARCH"},
-		Call: tool.Call{Name: "SEARCH", Input: raw},
+		Tool: tool.Definition{Name: filesystem.SearchToolName},
+		Call: tool.Call{Name: filesystem.SearchToolName, Input: raw},
 		Options: policy.ModeOptions{
 			WorkspaceRoot: testWorkspaceProjectRoot(),
 			TempRoot:      testTempRoot(),
@@ -1210,8 +1214,8 @@ func searchCtx(path string, pattern string) policy.ToolContext {
 func globCtx(path string, pattern string) policy.ToolContext {
 	raw, _ := json.Marshal(map[string]any{"path": path, "pattern": pattern})
 	return policy.ToolContext{
-		Tool: tool.Definition{Name: "GLOB"},
-		Call: tool.Call{Name: "GLOB", Input: raw},
+		Tool: tool.Definition{Name: filesystem.GlobToolName},
+		Call: tool.Call{Name: filesystem.GlobToolName, Input: raw},
 		Options: policy.ModeOptions{
 			WorkspaceRoot: testWorkspaceProjectRoot(),
 			TempRoot:      testTempRoot(),

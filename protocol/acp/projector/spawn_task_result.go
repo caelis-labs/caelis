@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -31,7 +31,7 @@ func SpawnTaskResultsFromEnvelope(env eventstream.Envelope) []SpawnTaskResult {
 func spawnTaskResultsFromObservations(observations []terminalTaskObservation) []SpawnTaskResult {
 	out := make([]SpawnTaskResult, 0, len(observations))
 	for _, observation := range observations {
-		if observation.ParentTool != identity.Spawn || observation.TargetKind != "subagent" {
+		if observation.ParentTool != spawn.ToolName || observation.TargetKind != "subagent" {
 			continue
 		}
 		expandedTurns := map[string]struct{}{}

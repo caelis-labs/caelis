@@ -41,13 +41,13 @@ func TestExecutionValidatorDerivesAndValidatesActualRequirements(t *testing.T) {
 			}},
 			Tools: []tool.Tool{
 				tool.NamedTool{Def: tool.Definition{
-					Name: "READ",
+					Name: "Read",
 					ExecutionRequirements: &tool.ExecutionRequirements{
 						Sandbox: sandbox.CapabilitySet{FileSystem: true},
 					},
 				}},
 				tool.NamedTool{Def: tool.Definition{
-					Name: "RUN_COMMAND",
+					Name: "RunCommand",
 					ExecutionRequirements: &tool.ExecutionRequirements{
 						Sandbox: sandbox.CapabilitySet{CommandExec: true, AsyncSessions: true},
 					},
@@ -111,7 +111,7 @@ func TestExecutionValidatorFailsClosedBeforeUnsupportedExecution(t *testing.T) {
 			err = validator.ValidateExecutionRequest(agent.RunRequest{AgentSpec: agent.AgentSpec{
 				Model: executionModel{capabilities: tt.model},
 				Tools: []tool.Tool{tool.NamedTool{Def: tool.Definition{
-					Name: "RUN_COMMAND",
+					Name: "RunCommand",
 					ExecutionRequirements: &tool.ExecutionRequirements{
 						Sandbox: sandbox.CapabilitySet{CommandExec: true, AsyncSessions: true},
 					},

@@ -739,11 +739,11 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 	runtime := &promptRouterRuntime{sessions: sessions}
 	status := acp.ToolStatusInProgress
 	completed := acp.ToolStatusCompleted
-	spawnKind := "SPAWN"
+	spawnKind := "Spawn"
 	childTitle := "Apply child patch"
 	childCommandTitle := "Run child command"
 	line := 12
-	parentTool := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "SPAWN"}
+	parentTool := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
 	childDelivery := &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
 	main := eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
@@ -792,7 +792,7 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 				SessionUpdate: acp.UpdateToolCall,
 				ToolCallID:    "child-list-1",
 				Title:         childTitle,
-				Kind:          "PATCH",
+				Kind:          "Patch",
 				Status:        acp.ToolStatusInProgress,
 			},
 		},

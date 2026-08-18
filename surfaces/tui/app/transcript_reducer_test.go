@@ -10,7 +10,7 @@ func TestMainCommandTaskOwnerBlockRequiresUniqueRenderedOwner(t *testing.T) {
 		block.Events = []SubagentEvent{{
 			Kind:       SEToolCall,
 			CallID:     callID,
-			Name:       "RUN_COMMAND",
+			Name:       "RunCommand",
 			ToolKind:   "execute",
 			TaskHandle: taskHandle,
 			Terminal:   true,
@@ -44,7 +44,7 @@ func TestMainCommandTaskOwnerBlockRequiresUniqueRenderedOwner(t *testing.T) {
 			t.Fatalf("mainCommandTaskOwnerBlock() = %#v, %v; want ambiguous handle to fail closed", got, ok)
 		}
 		mutation := transcriptToolMutation{
-			name:   "TASK",
+			name:   "Task",
 			output: "must not be routed\n",
 			meta: ToolUpdateMeta{
 				TaskAction:     "read",
@@ -68,7 +68,7 @@ func TestMainCommandTaskOwnerBlockRequiresUniqueRenderedOwner(t *testing.T) {
 		owner.Events = append(owner.Events, SubagentEvent{
 			Kind:       SEToolCall,
 			CallID:     "command-2",
-			Name:       "RUN_COMMAND",
+			Name:       "RunCommand",
 			ToolKind:   "execute",
 			TaskHandle: "command-task",
 			Terminal:   true,

@@ -13,10 +13,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const GlobToolName = names.Glob
+const GlobToolName = "Glob"
 
 const globResultLimit = 100
 

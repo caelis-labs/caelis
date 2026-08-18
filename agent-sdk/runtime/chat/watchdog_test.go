@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
 func TestGenerationWatchdogInterruptsRepeatedRawModelToolStep(t *testing.T) {
@@ -16,7 +17,7 @@ func TestGenerationWatchdogInterruptsRepeatedRawModelToolStep(t *testing.T) {
 	watchdog := newGenerationWatchdog(50, 3, 8)
 	for step := 1; step <= 3; step++ {
 		watchdog.beginModelStep()
-		err := watchdog.finishModelStep(toolStepResponse("call-"+fmt.Sprint(step), "SEARCH", `{"query":"same"}`))
+		err := watchdog.finishModelStep(toolStepResponse("call-"+fmt.Sprint(step), "Grep", `{"query":"same"}`))
 		if step < 3 && err != nil {
 			t.Fatalf("step %d error = %v", step, err)
 		}
@@ -37,11 +38,25 @@ func TestGenerationWatchdogTreatsDifferentRawModelArgsAsProgress(t *testing.T) {
 		watchdog.beginModelStep()
 		err := watchdog.finishModelStep(toolStepResponse(
 			"call-"+fmt.Sprint(step),
-			"SEARCH",
+			"Grep",
 			fmt.Sprintf(`{"query":"query-%d"}`, step),
 		))
 		if err != nil {
 			t.Fatalf("step %d error = %v, want distinct model args treated as progress", step, err)
+		}
+	}
+}
+
+func TestGenerationWatchdogTreatsExactDistinctToolNamesAsProgress(t *testing.T) {
+	t.Parallel()
+
+	watchdog := newGenerationWatchdog(50, 2, 8)
+	for step, name := range []string{"Search", "SEARCH", "Search", "SEARCH"} {
+		watchdog.beginModelStep()
+		if err := watchdog.finishModelStep(toolStepResponse(
+			fmt.Sprintf("call-%d", step), name, `{"query":"same"}`,
+		)); err != nil {
+			t.Fatalf("step %d (%s) error = %v, want exact-distinct name to reset loop evidence", step, name, err)
 		}
 	}
 }
@@ -54,7 +69,7 @@ func TestGenerationWatchdogRepeatedTaskWaitIsObservation(t *testing.T) {
 		watchdog.beginModelStep()
 		err := watchdog.finishModelStep(toolStepResponse(
 			"wait-"+fmt.Sprint(step),
-			"TASK",
+			tasktool.ToolName,
 			`{"action":"wait","task_id":"command-1"}`,
 		))
 		if err != nil {
@@ -71,8 +86,8 @@ func TestGenerationWatchdogMixedTaskWaitStepRemainsLoopEvidence(t *testing.T) {
 		watchdog.beginModelStep()
 		err := watchdog.finishModelStep(&model.Response{
 			Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{
-				{ID: fmt.Sprintf("wait-%d", step), Name: "TASK", Args: `{"action":"wait","task_id":"command-1"}`},
-				{ID: fmt.Sprintf("write-%d", step), Name: "WRITE", Args: `{"path":"result.txt","content":"same"}`},
+				{ID: fmt.Sprintf("wait-%d", step), Name: tasktool.ToolName, Args: `{"action":"wait","task_id":"command-1"}`},
+				{ID: fmt.Sprintf("write-%d", step), Name: "Write", Args: `{"path":"result.txt","content":"same"}`},
 			}, ""),
 			TurnComplete: true,
 			StepComplete: true,
@@ -100,7 +115,7 @@ func TestGenerationWatchdogRepeatedTaskReadRemainsLoopEvidence(t *testing.T) {
 		watchdog.beginModelStep()
 		err = watchdog.finishModelStep(toolStepResponse(
 			"read-"+fmt.Sprint(step),
-			"TASK",
+			tasktool.ToolName,
 			`{"action":"read","task_id":"command-1"}`,
 		))
 	}
@@ -115,7 +130,7 @@ func TestGenerationWatchdogToolEvidenceDoesNotCrossNoToolStep(t *testing.T) {
 
 	watchdog := newGenerationWatchdog(50, 2, 8)
 	watchdog.beginModelStep()
-	if err := watchdog.finishModelStep(toolStepResponse("before", "SEARCH", `{"query":"same"}`)); err != nil {
+	if err := watchdog.finishModelStep(toolStepResponse("before", "Grep", `{"query":"same"}`)); err != nil {
 		t.Fatal(err)
 	}
 	watchdog.beginModelStep()
@@ -129,7 +144,7 @@ func TestGenerationWatchdogToolEvidenceDoesNotCrossNoToolStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	watchdog.beginModelStep()
-	if err := watchdog.finishModelStep(toolStepResponse("after", "SEARCH", `{"query":"same"}`)); err != nil {
+	if err := watchdog.finishModelStep(toolStepResponse("after", "Grep", `{"query":"same"}`)); err != nil {
 		t.Fatalf("tool step after a no-tool boundary error = %v, want a new evidence window", err)
 	}
 }
@@ -189,7 +204,7 @@ func TestGenerationWatchdogUsesUnstreamedFinalContentForToolProgress(t *testing.
 		}
 		err := watchdog.finishModelStep(&model.Response{
 			Message: model.MessageFromAssistantParts(finalText, reasoning, []model.ToolCall{{
-				ID: fmt.Sprintf("call-%d", step+1), Name: "SEARCH", Args: `{"query":"same"}`,
+				ID: fmt.Sprintf("call-%d", step+1), Name: "Grep", Args: `{"query":"same"}`,
 			}}),
 			TurnComplete: true,
 			StepComplete: true,
@@ -208,7 +223,7 @@ func TestGenerationWatchdogIncompleteToolArgsFailOpenAndResetEvidence(t *testing
 	watchdog := newGenerationWatchdog(50, 3, 8)
 	for _, args := range []string{`{"query":"same"}`, `{"query":"same"} trailing`, `{"query":"same"}`, `{"query":"same"}`} {
 		watchdog.beginModelStep()
-		if err := watchdog.finishModelStep(toolStepResponse("call", "SEARCH", args)); err != nil {
+		if err := watchdog.finishModelStep(toolStepResponse("call", "Grep", args)); err != nil {
 			t.Fatalf("args %q error = %v, want incomplete args as evidence barrier", args, err)
 		}
 	}
@@ -220,14 +235,14 @@ func TestGenerationWatchdogUserSubmissionResetsPriorEvidence(t *testing.T) {
 	watchdog := newGenerationWatchdog(50, 3, 8)
 	for step := 0; step < 2; step++ {
 		watchdog.beginModelStep()
-		if err := watchdog.finishModelStep(toolStepResponse("before", "SEARCH", `{"query":"same"}`)); err != nil {
+		if err := watchdog.finishModelStep(toolStepResponse("before", "Grep", `{"query":"same"}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	watchdog.resetAll() // chat.Agent calls this when it accepts new user steering.
 	for step := 0; step < 2; step++ {
 		watchdog.beginModelStep()
-		if err := watchdog.finishModelStep(toolStepResponse("after", "SEARCH", `{"query":"same"}`)); err != nil {
+		if err := watchdog.finishModelStep(toolStepResponse("after", "Grep", `{"query":"same"}`)); err != nil {
 			t.Fatalf("post-submission step %d error = %v, want a new evidence window", step, err)
 		}
 	}

@@ -7,11 +7,11 @@ import (
 )
 
 func overrideSkillContentRead(semanticName string, kind string, title string, raw map[string]any) string {
-	if !strings.EqualFold(strings.TrimSpace(semanticName), "READ") && !strings.EqualFold(strings.TrimSpace(kind), "read") {
+	if strings.TrimSpace(semanticName) != surfaceToolRead && !strings.EqualFold(strings.TrimSpace(kind), "read") {
 		return ""
 	}
 	if name := display.SkillContentNameFromHint(title, toolPath(raw)); name != "" {
-		return "SKILL"
+		return surfaceToolSkill
 	}
 	return ""
 }

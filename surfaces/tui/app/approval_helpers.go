@@ -3,8 +3,6 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -127,29 +125,27 @@ func approvalReviewToolName(toolName string) string {
 }
 
 func approvalToolDisplayLabel(toolName string) string {
-	semanticName := display.SemanticToolName(toolName, toolName)
-	switch names.CanonicalOrSelf(semanticName) {
+	semanticName := toolName
+	switch semanticName {
 	case "":
 		return ""
 	case "UNKNOWN":
 		return ""
-	case names.RunCommand:
+	case surfaceToolRunCommand:
 		return "Ran"
-	case names.Spawn:
+	case surfaceToolSpawn:
 		return "Spawned"
-	case names.Task:
+	case surfaceToolTask:
 		return "Task"
-	case names.Read:
+	case surfaceToolRead:
 		return "Read"
-	case names.ViewImage:
+	case surfaceToolViewImage:
 		return "Viewed"
-	case names.List:
-		return "List"
-	case names.Glob:
+	case surfaceToolGlob:
 		return "Glob"
-	case names.Grep, "RG", "FIND":
+	case surfaceToolGrep:
 		return "Search"
-	case names.Write, names.Patch:
+	case surfaceToolWrite, surfaceToolPatch:
 		return "Edit"
 	default:
 		return strings.TrimSpace(toolName)
@@ -160,13 +156,13 @@ func approvalActionLabel(req *approvalPayload) string {
 	if req == nil {
 		return ""
 	}
-	if info, ok := names.Lookup(req.ToolName); ok {
+	if info, ok := surfaceToolProfile(req.ToolName); ok {
 		switch info.Kind {
-		case names.KindEdit:
+		case surfaceToolKindEdit:
 			return "write"
-		case names.KindExecute:
+		case surfaceToolKindExecute:
 			return "execute"
-		case names.KindRead, names.KindSearch:
+		case surfaceToolKindRead, surfaceToolKindSearch:
 			return "read"
 		}
 	}

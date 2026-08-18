@@ -46,7 +46,7 @@ func TestApprovalRecoverySettlementRevisionCASContract(t *testing.T) {
 					Protocol: &session.EventProtocol{
 						Method: session.ProtocolMethodRequestPermission,
 						Permission: &session.ProtocolApproval{
-							ToolCall: session.ProtocolToolCall{ID: "call-contract", Name: "WRITE"},
+							ToolCall: session.ProtocolToolCall{ID: "call-contract", Name: "Write"},
 						},
 					},
 				},

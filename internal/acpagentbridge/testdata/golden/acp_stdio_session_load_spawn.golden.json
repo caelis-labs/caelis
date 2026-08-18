@@ -392,6 +392,15 @@
       "rawOutput": {
         "result": "verified"
       },
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "text",
+            "text": "report.md"
+          }
+        }
+      ],
       "_meta": {
         "caelis": {
           "runtime": {

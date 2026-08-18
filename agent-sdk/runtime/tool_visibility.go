@@ -1,8 +1,6 @@
 package runtime
 
 import (
-	"strings"
-
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -40,7 +38,7 @@ func discoveredToolNamesFromEvents(events []*session.Event) []string {
 		if data, ok := compact.CompactEventDataFromEvent(event); ok {
 			names = append(names, data.DiscoveredTools...)
 		}
-		if event.Tool == nil || !strings.EqualFold(strings.TrimSpace(event.Tool.Name), tool.ToolSearchToolName) {
+		if event.Tool == nil || event.Tool.Name != tool.ToolSearchToolName {
 			continue
 		}
 		names = append(names, tool.ParseToolSearchOutput(event.Tool.Output).DiscoveredToolNames()...)

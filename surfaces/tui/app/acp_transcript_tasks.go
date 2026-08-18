@@ -26,7 +26,7 @@ func splitTaskAction(action string) (string, string) {
 
 func normalizeRawTaskAction(action string) string {
 	fields := strings.Fields(strings.TrimSpace(action))
-	if len(fields) == 0 || !strings.EqualFold(fields[0], "TASK") {
+	if len(fields) == 0 || fields[0] != surfaceToolTask {
 		return ""
 	}
 	return taskControlDisplayFallback(action)
@@ -83,7 +83,7 @@ func isTaskHandleDetail(value string) bool {
 }
 
 func isTaskControlEvent(ev SubagentEvent) bool {
-	return ev.Kind == SEToolCall && strings.EqualFold(strings.TrimSpace(ev.Name), "TASK")
+	return ev.Kind == SEToolCall && strings.TrimSpace(ev.Name) == surfaceToolTask
 }
 
 func isTaskWriteInteractionEvent(ev SubagentEvent) bool {

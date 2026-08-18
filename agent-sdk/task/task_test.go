@@ -30,7 +30,7 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 			"details":   map[string]any{"files": []any{"a"}},
 		},
 		Metadata: map[string]any{
-			"tool_name": "RUN_COMMAND",
+			"tool_name": "RunCommand",
 			"trace":     map[string]any{"ids": []any{"one"}},
 		},
 		Terminal: sandbox.TerminalRef{
@@ -43,7 +43,7 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 	cloned := CloneEntry(entry)
 	cloned.Spec["command"] = "pwd"
 	cloned.Result["exit_code"] = 1
-	cloned.Metadata["tool_name"] = "TASK"
+	cloned.Metadata["tool_name"] = "Task"
 	cloned.Spec["options"].(map[string]any)["env"].([]any)[0] = "A=2"
 	cloned.Result["details"].(map[string]any)["files"].([]any)[0] = "b"
 	cloned.Metadata["trace"].(map[string]any)["ids"].([]any)[0] = "two"
@@ -69,7 +69,7 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 	if got := entry.Result["exit_code"]; got != 0 {
 		t.Fatalf("original result mutated: %v", got)
 	}
-	if got := entry.Metadata["tool_name"]; got != "RUN_COMMAND" {
+	if got := entry.Metadata["tool_name"]; got != "RunCommand" {
 		t.Fatalf("original metadata mutated: %v", got)
 	}
 	if got := entry.Spec["options"].(map[string]any)["env"].([]any)[0]; got != "A=1" {

@@ -12,7 +12,7 @@ func TestCanonicalApprovalPayloadPreservesPromptFields(t *testing.T) {
 	t.Parallel()
 
 	payload := canonicalApprovalPayload(&agent.ApprovalRequest{
-		Tool: tool.Definition{Name: "RUN_COMMAND"},
+		Tool: tool.Definition{Name: "RunCommand"},
 		Call: tool.Call{
 			ID: "call-1",
 			Input: []byte(`{
@@ -33,7 +33,7 @@ func TestCanonicalApprovalPayloadPreservesPromptFields(t *testing.T) {
 	if payload == nil {
 		t.Fatal("canonicalApprovalPayload() = nil")
 	}
-	if payload.ToolCallID != "call-1" || payload.ToolName != "RUN_COMMAND" {
+	if payload.ToolCallID != "call-1" || payload.ToolName != "RunCommand" {
 		t.Fatalf("approval payload identity = %#v", payload)
 	}
 	if payload.Reason != "needs execution" || payload.Justification != "requested by user" || payload.SandboxPermissions != "workspace-write" {

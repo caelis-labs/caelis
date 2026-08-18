@@ -32,7 +32,7 @@ func TestTUISubagentWorkspaceFollowsOnlyWhileOpenAndResumesCursor(t *testing.T) 
 		list: controltaskstream.ListResult{Tasks: []controltaskstream.TaskDescriptor{{
 			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
 			State: task.StateRunning, Running: true,
-			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "SPAWN"},
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		}}},
 	}
 	service := taskstream.New(controlService)
@@ -50,12 +50,12 @@ func TestTUISubagentWorkspaceFollowsOnlyWhileOpenAndResumesCursor(t *testing.T) 
 	model.height = 28
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "SPAWN",
+		metautil.RuntimeToolName: "Spawn",
 	})
 	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "SPAWN helper",
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn helper",
 			Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 			RawInput: map[string]any{"agent": "self", "prompt": "inspect"}, Meta: meta,
 		},
@@ -101,7 +101,7 @@ func TestTUISubagentWorkspaceFollowsOnlyWhileOpenAndResumesCursor(t *testing.T) 
 		Task: controltaskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
 			State: task.StateRunning, Running: true, CurrentTurnID: "child-turn-1",
-			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "SPAWN"},
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
 		Frame: &sdkstream.Frame{
 			Ref:     sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "child-turn-1"},
@@ -167,7 +167,7 @@ func TestTUISubagentWorkspaceFollowsOnlyWhileOpenAndResumesCursor(t *testing.T) 
 		Task: controltaskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
 			State: task.StateRunning, Running: true, CurrentTurnID: "child-turn-2",
-			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "SPAWN"},
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
 		Frame: &sdkstream.Frame{
 			Ref:     sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "child-turn-2"},
@@ -191,7 +191,7 @@ func TestTUISubagentWorkspaceFollowsOnlyWhileOpenAndResumesCursor(t *testing.T) 
 		Task: controltaskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
 			State: task.StateRunning, Running: true, CurrentTurnID: "child-turn-2",
-			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "SPAWN"},
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
 		Frame: &sdkstream.Frame{
 			Ref:     sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "child-turn-2"},
@@ -216,7 +216,7 @@ func TestTUISubagentWorkspaceFollowsOnlyWhileOpenAndResumesCursor(t *testing.T) 
 		Task: controltaskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
 			State: task.StateCompleted, CurrentTurnID: "child-turn-2",
-			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "SPAWN"},
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
 		Frame: &sdkstream.Frame{
 			Ref:    sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "child-turn-2"},
@@ -274,7 +274,7 @@ func TestTUITaskControlToolsDoNotAffectVisibleSubagentStream(t *testing.T) {
 				Update: schema.ToolCall{
 					SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-control-" + action,
 					Title: "Task " + action, Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-					RawInput: map[string]any{"action": action, "handle": "akio"}, Meta: acpToolNameMeta("TASK"),
+					RawInput: map[string]any{"action": action, "handle": "akio"}, Meta: acpToolNameMeta("Task"),
 				},
 			})
 
@@ -328,12 +328,12 @@ func TestTUIVisibleSubagentObservationRetriesDirectoryAndSubscriptionFailures(t 
 	})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "SPAWN",
+		metautil.RuntimeToolName: "Spawn",
 	})
 	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "SPAWN helper",
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn helper",
 			Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 			RawInput: map[string]any{"agent": "self", "prompt": "inspect"}, Meta: meta,
 		},
@@ -407,12 +407,12 @@ func TestTUIVisibleSubagentObservationKeepsResolvingByParentCall(t *testing.T) {
 	})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "SPAWN",
+		metautil.RuntimeToolName: "Spawn",
 	})
 	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "SPAWN helper",
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn helper",
 			Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 			RawInput: map[string]any{"agent": "self", "prompt": "inspect"}, Meta: meta,
 		},
@@ -519,7 +519,7 @@ func TestTUIVisibleSubagentObservationSurvivesSpawnTerminalAndStopsOnClose(t *te
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &completed,
 			RawOutput: map[string]any{"handle": "provisional-child", "state": "completed", "final_response": "done"},
-			Meta:      acpToolNameMeta("SPAWN"),
+			Meta:      acpToolNameMeta("Spawn"),
 		},
 	})
 	if !model.taskStreamWanted["task-1"] {
@@ -683,7 +683,7 @@ func TestTUITerminalHistoricalReplayDetachesAfterCleanExit(t *testing.T) {
 	model.subagentRosterTasks["spawn-1"] = taskstream.TaskDescriptor{
 		SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
 		State: task.StateCompleted, Running: false,
-		ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "SPAWN"},
+		ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 	}
 	model.taskStreamWanted["task-1"] = true
 	model.taskStreamTokens["task-1"] = 7
@@ -747,7 +747,7 @@ func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 			Cursor:     "boundary-cursor",
 			OccurredAt: startedAt,
 			ParentTool: &eventstream.ParentToolRelation{
-				ToolCallID: "spawn-1", ToolName: "SPAWN",
+				ToolCallID: "spawn-1", ToolName: "Spawn",
 			},
 			Update: schema.ContentChunk{
 				SessionUpdate: schema.UpdateAgentThought,
@@ -763,7 +763,7 @@ func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 			Cursor:     "boundary-cursor",
 			OccurredAt: startedAt.Add(3 * time.Second),
 			ParentTool: &eventstream.ParentToolRelation{
-				ToolCallID: "spawn-1", ToolName: "SPAWN",
+				ToolCallID: "spawn-1", ToolName: "Spawn",
 			},
 			Update: schema.ContentChunk{
 				SessionUpdate: schema.UpdateAgentMessage,
@@ -779,7 +779,7 @@ func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 			Cursor:     "boundary-cursor",
 			OccurredAt: startedAt.Add(4 * time.Second),
 			ParentTool: &eventstream.ParentToolRelation{
-				ToolCallID: "spawn-1", ToolName: "SPAWN",
+				ToolCallID: "spawn-1", ToolName: "Spawn",
 			},
 			Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
 		}, {
@@ -791,7 +791,7 @@ func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 			Cursor:     "boundary-cursor",
 			OccurredAt: startedAt.Add(10 * time.Second),
 			ParentTool: &eventstream.ParentToolRelation{
-				ToolCallID: "spawn-1", ToolName: "SPAWN",
+				ToolCallID: "spawn-1", ToolName: "Spawn",
 			},
 			Update: schema.ContentChunk{
 				SessionUpdate: schema.UpdateAgentThought,
@@ -807,7 +807,7 @@ func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 			Cursor:     "boundary-cursor",
 			OccurredAt: startedAt.Add(17 * time.Second),
 			ParentTool: &eventstream.ParentToolRelation{
-				ToolCallID: "spawn-1", ToolName: "SPAWN",
+				ToolCallID: "spawn-1", ToolName: "Spawn",
 			},
 			Update: schema.ContentChunk{
 				SessionUpdate: schema.UpdateAgentMessage,
@@ -823,7 +823,7 @@ func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 			Cursor:     "current-state-cursor",
 			OccurredAt: startedAt.Add(18 * time.Second),
 			ParentTool: &eventstream.ParentToolRelation{
-				ToolCallID: "spawn-1", ToolName: "SPAWN",
+				ToolCallID: "spawn-1", ToolName: "Spawn",
 			},
 			Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
 		}},
@@ -926,7 +926,7 @@ func (s *tuiRetryTaskStreamService) List(context.Context, taskstream.Principal, 
 	return taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
 		SessionID: "session-1", TaskID: "task-1", Handle: handle, Kind: task.KindSubagent,
 		State: task.StateRunning, Running: true,
-		ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "SPAWN"},
+		ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 	}}}, nil
 }
 

@@ -61,7 +61,7 @@ func newToolVisibility(tools []Tool, llm model.LLM) ToolVisibility {
 			continue
 		}
 		def := item.Definition()
-		name := CanonicalName(def.Name)
+		name := def.Name
 		if name == "" {
 			continue
 		}
@@ -84,7 +84,7 @@ func newToolVisibility(tools []Tool, llm model.LLM) ToolVisibility {
 
 // ApplyToolResult restores visibility changes from one durable tool result.
 func (v *ToolVisibility) ApplyToolResult(name string, output map[string]any) {
-	if !strings.EqualFold(strings.TrimSpace(name), ToolSearchToolName) {
+	if name != ToolSearchToolName {
 		return
 	}
 	v.ApplyToolSearchOutput(output)
@@ -118,18 +118,17 @@ func (v *ToolVisibility) Reveal(name string) bool {
 	if v.visible == nil {
 		v.visible = map[string]bool{}
 	}
-	canonical := CanonicalName(name)
-	def, known := v.definitions[canonical]
-	if canonical == "" || !known {
+	def, known := v.definitions[name]
+	if name == "" || name != strings.TrimSpace(name) || !known {
 		return false
 	}
-	if available, constrained := v.available[canonical]; constrained && !available {
+	if available, constrained := v.available[name]; constrained && !available {
 		return false
 	}
-	if v.visible[canonical] {
+	if v.visible[name] {
 		return true
 	}
-	if v.deferred[canonical] {
+	if v.deferred[name] {
 		cost := EstimateDefinitionPromptTokens(def)
 		if v.deferredCount >= MaxDeferredToolsPerRun || v.deferredPromptTokens+cost > MaxDeferredToolPromptTokensPerRun {
 			return false
@@ -137,7 +136,7 @@ func (v *ToolVisibility) Reveal(name string) bool {
 		v.deferredCount++
 		v.deferredPromptTokens += cost
 	}
-	v.visible[canonical] = true
+	v.visible[name] = true
 	return true
 }
 
@@ -213,20 +212,19 @@ func (v *ToolVisibility) planToolSearchAdmission(result ToolSearchResult, maxAcc
 		if strings.TrimSpace(name) == "" && discovered.Function != nil {
 			name = discovered.Function.Name
 		}
-		canonical := CanonicalName(name)
-		def, known := v.definitions[canonical]
-		if !known || !v.deferred[canonical] {
+		def, known := v.definitions[name]
+		if name == "" || name != strings.TrimSpace(name) || !known || !v.deferred[name] {
 			admitted.OmittedCount++
 			admitted.Truncated = true
 			continue
 		}
-		if visible[canonical] {
+		if visible[name] {
 			admitted.AlreadyVisibleCount++
 			continue
 		}
 		cost := EstimateDefinitionPromptTokens(def)
 		available := true
-		if constrained, exists := v.available[canonical]; exists && !constrained {
+		if constrained, exists := v.available[name]; exists && !constrained {
 			available = false
 		}
 		if !available || len(planned) >= maxAccepted || deferredCount >= MaxDeferredToolsPerRun ||
@@ -236,8 +234,8 @@ func (v *ToolVisibility) planToolSearchAdmission(result ToolSearchResult, maxAcc
 			continue
 		}
 		admitted.Tools = append(admitted.Tools, NewToolSearchDiscoveredTool(def))
-		planned = append(planned, canonical)
-		visible[canonical] = true
+		planned = append(planned, name)
+		visible[name] = true
 		deferredCount++
 		deferredPromptTokens += cost
 	}
@@ -256,7 +254,7 @@ func (v ToolVisibility) ModelSpecs() []model.ToolSpec {
 			continue
 		}
 		def := item.Definition()
-		name := CanonicalName(def.Name)
+		name := def.Name
 		if name == "" || !v.visible[name] || (v.available != nil && !v.available[name]) {
 			continue
 		}
@@ -402,15 +400,13 @@ func normalizeToolNameList(names []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(names))
 	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" {
+		if name == "" || name != strings.TrimSpace(name) {
 			continue
 		}
-		canonical := CanonicalName(name)
-		if seen[canonical] {
+		if seen[name] {
 			continue
 		}
-		seen[canonical] = true
+		seen[name] = true
 		out = append(out, name)
 	}
 	return out

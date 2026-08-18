@@ -622,7 +622,7 @@ func TestFeedBrokerFreshReplayLetsStoredTerminalOutputWinAfterRingEviction(t *te
 		Scope: &session.EventScope{TurnID: "turn-1"},
 		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
 			SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate), ToolCallID: "command-1",
-			Kind: "RUN_COMMAND", Title: "RUN_COMMAND", Status: "completed",
+			Kind: "RunCommand", Title: "RunCommand", Status: "completed",
 			Content: []session.ProtocolToolCallContent{{
 				Type: "terminal", TerminalID: "terminal-1", Content: session.ProtocolTextContent("line 1\nline 2\nline 3\n"),
 			}},

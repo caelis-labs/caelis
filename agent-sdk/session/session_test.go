@@ -405,7 +405,7 @@ func TestPrepareEventsRejectsInvalidJSONCompatibleValue(t *testing.T) {
 			Type: EventTypeToolCall,
 			Tool: &EventTool{
 				ID:    "call-1",
-				Name:  "READ",
+				Name:  "Read",
 				Input: map[string]any{"limit": math.Inf(1)},
 			},
 		}},
@@ -515,13 +515,13 @@ func TestFilterReplayTranscriptEventsKeepsLatestTurnTraceOnly(t *testing.T) {
 		{
 			ID:    "turn-1-tool-call",
 			Type:  EventTypeToolCall,
-			Tool:  &EventTool{ID: "old-call", Name: "RUN_COMMAND", Status: "running"},
+			Tool:  &EventTool{ID: "old-call", Name: "RunCommand", Status: "running"},
 			Scope: &EventScope{TurnID: "turn-1"},
 		},
 		{
 			ID:    "turn-1-tool-result",
 			Type:  EventTypeToolResult,
-			Tool:  &EventTool{ID: "old-call", Name: "RUN_COMMAND", Status: "completed", Output: map[string]any{"stdout": "old"}},
+			Tool:  &EventTool{ID: "old-call", Name: "RunCommand", Status: "completed", Output: map[string]any{"stdout": "old"}},
 			Scope: &EventScope{TurnID: "turn-1"},
 		},
 		{
@@ -557,19 +557,19 @@ func TestFilterReplayTranscriptEventsKeepsLatestTurnTraceOnly(t *testing.T) {
 		{
 			ID:    "turn-2-tool-call",
 			Type:  EventTypeToolCall,
-			Tool:  &EventTool{ID: "latest-call", Name: "RUN_COMMAND", Status: "running"},
+			Tool:  &EventTool{ID: "latest-call", Name: "RunCommand", Status: "running"},
 			Scope: &EventScope{TurnID: "turn-2"},
 		},
 		{
 			ID:    "turn-2-tool-result-old",
 			Type:  EventTypeToolResult,
-			Tool:  &EventTool{ID: "latest-call", Name: "RUN_COMMAND", Status: "running", Output: map[string]any{"stdout": "partial"}},
+			Tool:  &EventTool{ID: "latest-call", Name: "RunCommand", Status: "running", Output: map[string]any{"stdout": "partial"}},
 			Scope: &EventScope{TurnID: "turn-2"},
 		},
 		{
 			ID:    "turn-2-tool-result",
 			Type:  EventTypeToolResult,
-			Tool:  &EventTool{ID: "latest-call", Name: "RUN_COMMAND", Status: "interrupted", Output: map[string]any{"stderr": "stopped"}},
+			Tool:  &EventTool{ID: "latest-call", Name: "RunCommand", Status: "interrupted", Output: map[string]any{"stderr": "stopped"}},
 			Scope: &EventScope{TurnID: "turn-2"},
 		},
 		{
@@ -581,7 +581,7 @@ func TestFilterReplayTranscriptEventsKeepsLatestTurnTraceOnly(t *testing.T) {
 		{
 			ID:    "turn-2-side-tool",
 			Type:  EventTypeToolCall,
-			Tool:  &EventTool{ID: "side-call", Name: "RUN_COMMAND", Status: "running"},
+			Tool:  &EventTool{ID: "side-call", Name: "RunCommand", Status: "running"},
 			Scope: &EventScope{TurnID: "turn-2", Source: "acp_participant", Participant: ParticipantRef{ID: "participant-1", Kind: ParticipantKindACP}},
 		},
 	}
@@ -614,13 +614,13 @@ func TestFilterReplayTranscriptEventsLatestTurnWithoutFinalAssistantIncludesDura
 		{
 			ID:    "turn-1-tool-call",
 			Type:  EventTypeToolCall,
-			Tool:  &EventTool{ID: "call-1", Name: "RUN_COMMAND", Status: "running", Input: map[string]any{"command": "sleep 10"}},
+			Tool:  &EventTool{ID: "call-1", Name: "RunCommand", Status: "running", Input: map[string]any{"command": "sleep 10"}},
 			Scope: &EventScope{TurnID: "turn-1"},
 		},
 		{
 			ID:    "turn-1-tool-result",
 			Type:  EventTypeToolResult,
-			Tool:  &EventTool{ID: "call-1", Name: "RUN_COMMAND", Status: "running", Output: map[string]any{"running": true}},
+			Tool:  &EventTool{ID: "call-1", Name: "RunCommand", Status: "running", Output: map[string]any{"running": true}},
 			Scope: &EventScope{TurnID: "turn-1"},
 		},
 	}
@@ -638,7 +638,7 @@ func TestFilterReplayTranscriptEventsIncludeTransientUnchanged(t *testing.T) {
 	events := []*Event{
 		{ID: "user-1", Type: EventTypeUser, Message: ptrMessage(model.NewTextMessage(model.RoleUser, "prompt"))},
 		MarkUIOnly(&Event{ID: "ui-1", Type: EventTypeAssistant, Text: "partial"}),
-		{ID: "tool-1", Type: EventTypeToolCall, Tool: &EventTool{ID: "call-1", Name: "READ"}},
+		{ID: "tool-1", Type: EventTypeToolCall, Tool: &EventTool{ID: "call-1", Name: "Read"}},
 	}
 
 	got := FilterReplayTranscriptEvents(events, true)
@@ -667,13 +667,13 @@ func TestFilterReplayTranscriptEventsBoundsLatestTurnTraceAndKeepsToolPairs(t *t
 			&Event{
 				ID:    "call-" + strconv.Itoa(i),
 				Type:  EventTypeToolCall,
-				Tool:  &EventTool{ID: callID, Name: "RUN_COMMAND", Status: "running"},
+				Tool:  &EventTool{ID: callID, Name: "RunCommand", Status: "running"},
 				Scope: &EventScope{TurnID: "turn-1"},
 			},
 			&Event{
 				ID:    "result-" + strconv.Itoa(i),
 				Type:  EventTypeToolResult,
-				Tool:  &EventTool{ID: callID, Name: "RUN_COMMAND", Status: "completed", Output: map[string]any{"stdout": "ok"}},
+				Tool:  &EventTool{ID: callID, Name: "RunCommand", Status: "completed", Output: map[string]any{"stdout": "ok"}},
 				Scope: &EventScope{TurnID: "turn-1"},
 			},
 		)
@@ -733,7 +733,7 @@ func TestFilterReplayTranscriptEventsIgnoresTrailingNonMainTurnForTrace(t *testi
 		{
 			ID:    "turn-1-tool-call",
 			Type:  EventTypeToolCall,
-			Tool:  &EventTool{ID: "call-1", Name: "RUN_COMMAND", Status: "running"},
+			Tool:  &EventTool{ID: "call-1", Name: "RunCommand", Status: "running"},
 			Scope: &EventScope{TurnID: "turn-1"},
 		},
 		{
@@ -1093,7 +1093,7 @@ func TestEventTypeOfProtocolPlan(t *testing.T) {
 			Permission: &ProtocolApproval{
 				ToolCall: ProtocolToolCall{
 					ID:     "call-1",
-					Name:   "RUN_COMMAND",
+					Name:   "RunCommand",
 					Status: "pending",
 				},
 				Options: []ProtocolApprovalOption{
@@ -1152,7 +1152,7 @@ func TestCanonicalToolNamePrefersDurablePayloadAndMatchesMessageToolCallID(t *te
 
 	message := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{
 		{ID: "call-read", Name: "READ_FILE", Args: `{"path":"a.go"}`},
-		{ID: "call-run", Name: "RUN_COMMAND", Args: `{"command":"go test ./..."}`},
+		{ID: "call-run", Name: "RunCommand", Args: `{"command":"go test ./..."}`},
 	}, "")
 	event := &Event{
 		Type:    EventTypeToolCall,
@@ -1161,7 +1161,7 @@ func TestCanonicalToolNamePrefersDurablePayloadAndMatchesMessageToolCallID(t *te
 		Meta:    map[string]any{"caelis": map[string]any{"runtime": map[string]any{"tool": map[string]any{"name": "META_ONLY"}}}},
 	}
 
-	if got := CanonicalToolName(event, nil); got != "RUN_COMMAND" {
+	if got := CanonicalToolName(event, nil); got != "RunCommand" {
 		t.Fatalf("CanonicalToolName() = %q, want Event.Tool.ID matched message tool call name", got)
 	}
 	event.Protocol = &EventProtocol{
@@ -1172,12 +1172,17 @@ func TestCanonicalToolNamePrefersDurablePayloadAndMatchesMessageToolCallID(t *te
 			Kind:          "execute",
 		},
 	}
-	if got := CanonicalToolName(event, nil); got != "RUN_COMMAND" {
+	if got := CanonicalToolName(event, nil); got != "RunCommand" {
 		t.Fatalf("CanonicalToolName() = %q, want message tool call name", got)
 	}
 	event.Tool.Name = "CANONICAL_TOOL"
 	if got := CanonicalToolName(event, nil); got != "CANONICAL_TOOL" {
 		t.Fatalf("CanonicalToolName() = %q, want Event.Tool name", got)
+	}
+	event.Tool.Name = ""
+	event.Message = nil
+	if got := CanonicalToolName(event, nil); got != "" {
+		t.Fatalf("CanonicalToolName() = %q, want protocol title/kind/meta excluded from durable identity", got)
 	}
 }
 
@@ -1243,7 +1248,7 @@ func TestValidateDurableCoreEventRejectsProtocolOnlyToolResult(t *testing.T) {
 		Protocol: &EventProtocol{Update: &ProtocolUpdate{
 			SessionUpdate: string(ProtocolUpdateTypeToolUpdate),
 			ToolCallID:    "call-1",
-			Kind:          "RUN_COMMAND",
+			Kind:          "RunCommand",
 			RawOutput:     map[string]any{"stdout": "ok"},
 		}},
 	})
@@ -1265,7 +1270,7 @@ func TestValidateDurableCoreEventRejectsUsageOnlyProtocolToolEvent(t *testing.T)
 		Protocol: &EventProtocol{Update: &ProtocolUpdate{
 			SessionUpdate: string(ProtocolUpdateTypeToolCall),
 			ToolCallID:    "call-1",
-			Kind:          "RUN_COMMAND",
+			Kind:          "RunCommand",
 			RawInput:      map[string]any{"command": "pwd"},
 		}},
 		Meta: map[string]any{
@@ -1309,7 +1314,7 @@ func TestValidateDurableCoreEventAllowsMatchingToolMessageOutput(t *testing.T) {
 			Kind: model.PartKindToolResult,
 			ToolResult: &model.ToolResultPart{
 				ToolUseID: "call-1",
-				Name:      "RUN_COMMAND",
+				Name:      "RunCommand",
 				Content:   []model.Part{model.NewTextPart("ok")},
 			},
 		}},
@@ -1319,7 +1324,7 @@ func TestValidateDurableCoreEventAllowsMatchingToolMessageOutput(t *testing.T) {
 		Visibility: VisibilityCanonical,
 		Tool: &EventTool{
 			ID:     "call-1",
-			Name:   "RUN_COMMAND",
+			Name:   "RunCommand",
 			Output: map[string]any{"result": "ok"},
 		},
 		Message: &message,
@@ -1335,15 +1340,15 @@ func TestValidateDurableCoreEventRejectsAmbiguousToolResultMessageMatch(t *testi
 	message := model.Message{
 		Role: model.RoleTool,
 		Parts: []model.Part{
-			model.NewToolResultJSONPart("call-1", "RUN_COMMAND", map[string]any{"result": "one"}, false),
-			model.NewToolResultJSONPart("call-2", "RUN_COMMAND", map[string]any{"result": "two"}, false),
+			model.NewToolResultJSONPart("call-1", "RunCommand", map[string]any{"result": "one"}, false),
+			model.NewToolResultJSONPart("call-2", "RunCommand", map[string]any{"result": "two"}, false),
 		},
 	}
 	err := ValidateDurableCoreEvent(&Event{
 		Type:       EventTypeToolResult,
 		Visibility: VisibilityCanonical,
 		Tool: &EventTool{
-			Name:   "RUN_COMMAND",
+			Name:   "RunCommand",
 			Output: map[string]any{"result": "one"},
 		},
 		Message: &message,
@@ -1365,7 +1370,7 @@ func TestValidateDurableCoreEventRejectsToolResultNameCaseMismatch(t *testing.T)
 			Kind: model.PartKindToolResult,
 			ToolResult: &model.ToolResultPart{
 				ToolUseID: "call-1",
-				Name:      "WRITE",
+				Name:      "Write",
 				Content:   []model.Part{model.NewJSONPart([]byte(`{"result":"ok"}`))},
 			},
 		}},
@@ -1375,12 +1380,12 @@ func TestValidateDurableCoreEventRejectsToolResultNameCaseMismatch(t *testing.T)
 		Visibility: VisibilityCanonical,
 		Tool: &EventTool{
 			ID:     "call-1",
-			Name:   "Write",
+			Name:   "WRITE",
 			Status: "completed",
 			Output: map[string]any{"result": "ok"},
 		},
 		Message: &message,
-		Meta:    toolResultTestMeta("WRITE"),
+		Meta:    toolResultTestMeta("Write"),
 	})
 	if err := ValidateDurableCoreEvent(event); err == nil {
 		t.Fatal("ValidateDurableCoreEvent() error = nil, want tool result name mismatch rejected")
@@ -1397,7 +1402,7 @@ func TestCanonicalizeToolResultPreservesRuntimeTaskMetadata(t *testing.T) {
 		Visibility: VisibilityCanonical,
 		Tool: &EventTool{
 			ID:     "spawn-1",
-			Name:   "SPAWN",
+			Name:   "Spawn",
 			Status: "running",
 			Output: map[string]any{"task_id": "reya", "state": "running"},
 		},
@@ -1406,7 +1411,7 @@ func TestCanonicalizeToolResultPreservesRuntimeTaskMetadata(t *testing.T) {
 				"version": 1,
 				"runtime": map[string]any{
 					"tool": map[string]any{
-						"name": "SPAWN",
+						"name": "Spawn",
 					},
 					"task": map[string]any{
 						"task_id":          "reya",
@@ -1436,7 +1441,7 @@ func TestValidateDurableCoreEventRejectsToolMessageOutputDivergence(t *testing.T
 
 	message := model.Message{
 		Role: model.RoleTool,
-		Parts: []model.Part{model.NewToolResultJSONPart("call-1", "RUN_COMMAND", map[string]any{
+		Parts: []model.Part{model.NewToolResultJSONPart("call-1", "RunCommand", map[string]any{
 			"result":    "raw",
 			"exit_code": 1,
 		}, true)},
@@ -1446,7 +1451,7 @@ func TestValidateDurableCoreEventRejectsToolMessageOutputDivergence(t *testing.T
 		Visibility: VisibilityCanonical,
 		Tool: &EventTool{
 			ID:     "call-1",
-			Name:   "RUN_COMMAND",
+			Name:   "RunCommand",
 			Output: map[string]any{"result": "canonical", "exit_code": 1},
 		},
 		Message: &message,
@@ -1467,7 +1472,7 @@ func TestValidateDurableCoreEventRejectsUntruncatedToolOutput(t *testing.T) {
 		Visibility: VisibilityCanonical,
 		Tool: &EventTool{
 			ID:   "call-1",
-			Name: "RUN_COMMAND",
+			Name: "RunCommand",
 			Output: map[string]any{
 				"result": strings.Repeat("x", tool.DefaultTruncationPolicy().ByteBudget()*2),
 			},

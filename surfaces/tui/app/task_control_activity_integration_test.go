@@ -18,8 +18,8 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1",
-			Title: "SPAWN orbit: inspect", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-			RawInput: map[string]any{"agent": "orbit", "prompt": "inspect"}, Meta: acpToolNameMeta("SPAWN"),
+			Title: "Spawn orbit: inspect", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"agent": "orbit", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
 	running := schema.ToolStatusInProgress
@@ -27,7 +27,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
-			RawOutput: map[string]any{"handle": "command-48", "state": "running"}, Meta: acpToolNameMeta("SPAWN"),
+			RawOutput: map[string]any{"handle": "command-48", "state": "running"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
 	taskInput := map[string]any{
@@ -38,8 +38,8 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-wait-1",
-			Title: "TASK wait command-48", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-			RawInput: taskInput, Meta: acpToolNameMeta("TASK"),
+			Title: "Task wait command-48", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: taskInput, Meta: acpToolNameMeta("Task"),
 		},
 	})
 	if model.runningActivity.Phase != runningPhaseToolWait || model.runningActivity.Target != runningTargetSubagent {
@@ -58,15 +58,15 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "SPAWN",
+			ToolName:   "Spawn",
 		},
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "task-wait-1", Status: &completed,
 			RawInput: taskInput, RawOutput: map[string]any{
 				"action": "wait", "handle": "command-48", "target_kind": "subagent",
-				"state": "running", "parent_call": "spawn-1", "parent_tool": "SPAWN",
+				"state": "running", "parent_call": "spawn-1", "parent_tool": "Spawn",
 			},
-			Meta: acpToolNameMeta("TASK"),
+			Meta: acpToolNameMeta("Task"),
 		},
 	})
 	if model.runningActivity.Phase != runningPhaseToolWait ||
@@ -82,8 +82,8 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-cancel-1",
-			Title: "TASK cancel command-48", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-			RawInput: cancelInput, Meta: acpToolNameMeta("TASK"),
+			Title: "Task cancel command-48", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: cancelInput, Meta: acpToolNameMeta("Task"),
 		},
 	})
 	if model.runningActivity.Phase != runningPhaseCancel || model.runningActivity.Target != runningTargetSubagent {
@@ -96,31 +96,31 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 			RawInput: cancelInput, RawOutput: map[string]any{
 				"action": "cancel", "handle": "command-48", "target_kind": "subagent", "state": "cancelled",
 			},
-			Meta: acpToolNameMeta("TASK"),
+			Meta: acpToolNameMeta("Task"),
 		},
 	})
 	if model.runningActivity.Phase != runningPhaseToolWait || model.runningActivity.Target != runningTargetSubagent {
 		t.Fatalf("runningActivity = %#v, want the still-running Task wait restored after cancel completes", model.runningActivity)
 	}
 	if blocks := mainACPTurnBlocksForTest(model); len(blocks) != 1 {
-		t.Fatalf("main blocks = %#v, want no TASK cancel row beside Spawn", blocks)
+		t.Fatalf("main blocks = %#v, want no Task cancel row beside Spawn", blocks)
 	} else if physical := physicalTranscriptEventsForTest(blocks[0].Events); len(physical) != 1 || physical[0].CallID != "spawn-1" {
-		t.Fatalf("main events = %#v, want no physical TASK cancel row beside Spawn", blocks[0].Events)
+		t.Fatalf("main events = %#v, want no physical Task cancel row beside Spawn", blocks[0].Events)
 	}
 
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "SPAWN",
+			ToolName:   "Spawn",
 		},
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "task-wait-1", Status: &completed,
 			RawInput: taskInput, RawOutput: map[string]any{
 				"action": "wait", "handle": "command-48", "target_kind": "subagent",
-				"state": "completed", "parent_call": "spawn-1", "parent_tool": "SPAWN", "final_message": "done",
+				"state": "completed", "parent_call": "spawn-1", "parent_tool": "Spawn", "final_message": "done",
 			},
-			Meta: acpToolNameMeta("TASK"),
+			Meta: acpToolNameMeta("Task"),
 		},
 	})
 	if model.runningActivity.Phase != runningPhaseModelWait {
@@ -130,7 +130,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &completed,
-			RawOutput: map[string]any{"handle": "command-48", "state": "completed"}, Meta: acpToolNameMeta("SPAWN"),
+			RawOutput: map[string]any{"handle": "command-48", "state": "completed"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
 	if model.runningActivity.Phase != runningPhaseModelWait {
@@ -142,8 +142,8 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-cancel-failed",
-			Title: "TASK cancel command-48", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-			RawInput: cancelInput, Meta: acpToolNameMeta("TASK"),
+			Title: "Task cancel command-48", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: cancelInput, Meta: acpToolNameMeta("Task"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -153,7 +153,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 			RawInput: cancelInput, RawOutput: map[string]any{
 				"action": "cancel", "handle": "command-48", "target_kind": "subagent", "error": "cancel denied",
 			},
-			Meta: acpToolNameMeta("TASK"),
+			Meta: acpToolNameMeta("Task"),
 		},
 	})
 	blocks := mainACPTurnBlocksForTest(model)
@@ -166,7 +166,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		}
 	}
 	if !foundFailure {
-		t.Fatalf("main blocks = %#v, want failed TASK cancel result to remain visible", blocks)
+		t.Fatalf("main blocks = %#v, want failed Task cancel result to remain visible", blocks)
 	}
 }
 
@@ -187,11 +187,11 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "spawn-1",
-			Title:         "SPAWN orbit: inspect",
+			Title:         "Spawn orbit: inspect",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "orbit", "prompt": "inspect"},
-			Meta:          acpToolNameMeta("SPAWN"),
+			Meta:          acpToolNameMeta("Spawn"),
 		},
 	})
 	running := schema.ToolStatusInProgress
@@ -202,7 +202,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 			ToolCallID:    "spawn-1",
 			Status:        &running,
 			RawOutput:     map[string]any{"handle": "orbit", "state": "running"},
-			Meta:          acpToolNameMeta("SPAWN"),
+			Meta:          acpToolNameMeta("Spawn"),
 		},
 	})
 	apply(eventstream.Envelope{
@@ -221,18 +221,18 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "wait-1",
-			Title:         "TASK wait orbit",
+			Title:         "Task wait orbit",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      firstWaitInput,
-			Meta:          acpToolNameMeta("TASK"),
+			Meta:          acpToolNameMeta("Task"),
 		},
 	})
 	apply(eventstream.Envelope{
 		EventID: "wait-1-result",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "SPAWN",
+			ToolName:   "Spawn",
 		},
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
@@ -241,9 +241,9 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 			RawInput:      firstWaitInput,
 			RawOutput: map[string]any{
 				"action": "wait", "handle": "orbit", "target_kind": "subagent",
-				"state": "running", "parent_call": "spawn-1", "parent_tool": "SPAWN",
+				"state": "running", "parent_call": "spawn-1", "parent_tool": "Spawn",
 			},
-			Meta: acpToolNameMeta("TASK"),
+			Meta: acpToolNameMeta("Task"),
 		},
 	})
 	apply(eventstream.Envelope{
@@ -261,18 +261,18 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "wait-2",
-			Title:         "TASK wait orbit",
+			Title:         "Task wait orbit",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      secondWaitInput,
-			Meta:          acpToolNameMeta("TASK"),
+			Meta:          acpToolNameMeta("Task"),
 		},
 	})
 	apply(eventstream.Envelope{
 		EventID: "wait-2-result",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "SPAWN",
+			ToolName:   "Spawn",
 		},
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
@@ -281,10 +281,10 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 			RawInput:      secondWaitInput,
 			RawOutput: map[string]any{
 				"action": "wait", "handle": "orbit", "target_kind": "subagent",
-				"state": "completed", "parent_call": "spawn-1", "parent_tool": "SPAWN",
+				"state": "completed", "parent_call": "spawn-1", "parent_tool": "Spawn",
 				"final_message": "child done",
 			},
-			Meta: acpToolNameMeta("TASK"),
+			Meta: acpToolNameMeta("Task"),
 		},
 	})
 	apply(eventstream.Envelope{
@@ -313,7 +313,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 		case SEReasoning, SEAssistant:
 			narratives = append(narratives, *event)
 		case SEToolCall:
-			if strings.EqualFold(toolSemanticName(event.Name, event.ToolKind), "TASK") {
+			if event.Name == surfaceToolTask {
 				t.Fatalf("hidden Task control rendered a panel: %#v", *event)
 			}
 			if event.CallID == "spawn-1" {

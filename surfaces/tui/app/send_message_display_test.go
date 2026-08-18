@@ -18,7 +18,7 @@ func TestSendMessageToolRendersActionTargetAndOpensTargetFromWholeRow(t *testing
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
 			Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-			RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("SPAWN"),
+			RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
 	running := schema.ToolStatusInProgress
@@ -26,7 +26,7 @@ func TestSendMessageToolRendersActionTargetAndOpensTargetFromWholeRow(t *testing
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
-			RawOutput: map[string]any{"handle": "ziva", "state": "running"}, Meta: acpToolNameMeta("SPAWN"),
+			RawOutput: map[string]any{"handle": "ziva", "state": "running"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
 	view := model.ensureSubagentOutputView("spawn-1")
@@ -144,14 +144,14 @@ func TestSendMessageReplayBatchResolvesEarlierSpawnTarget(t *testing.T) {
 			Update: schema.ToolCall{
 				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
 				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-				RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("SPAWN"),
+				RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("Spawn"),
 			},
 		},
 		{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 			Update: schema.ToolCallUpdate{
 				SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
-				RawOutput: map[string]any{"handle": "ziva", "state": "running"}, Meta: acpToolNameMeta("SPAWN"),
+				RawOutput: map[string]any{"handle": "ziva", "state": "running"}, Meta: acpToolNameMeta("Spawn"),
 			},
 		},
 		{

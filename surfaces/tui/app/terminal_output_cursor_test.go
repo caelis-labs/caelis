@@ -51,11 +51,11 @@ func TestContentlessFinalDoesNotAdvanceRepresentedOutputCursor(t *testing.T) {
 	t.Parallel()
 
 	event := SubagentEvent{
-		Kind: SEToolCall, Name: "RUN_COMMAND", ToolKind: "execute", Terminal: true,
+		Kind: SEToolCall, Name: "RunCommand", ToolKind: "execute", Terminal: true,
 		Output: "abc", OutputTerminal: true, OutputCursor: 3, OutputCursorKnown: true,
 	}
 	final := SubagentEvent{
-		Kind: SEToolCall, Name: "RUN_COMMAND", ToolKind: "execute", Terminal: true,
+		Kind: SEToolCall, Name: "RunCommand", ToolKind: "execute", Terminal: true,
 		OutputCursor: 6, OutputCursorKnown: true, Done: true,
 	}
 	mergeFinalToolEvent(&event, &final, false)
@@ -95,7 +95,7 @@ func TestLegacyCompactTaskObservationCannotClaimExactCursor(t *testing.T) {
 	}
 	newOwner := func() []SubagentEvent {
 		return []SubagentEvent{{
-			Kind: SEToolCall, Name: "RUN_COMMAND", ToolKind: "execute",
+			Kind: SEToolCall, Name: "RunCommand", ToolKind: "execute",
 			Terminal: true, TaskHandle: "command-3",
 		}}
 	}

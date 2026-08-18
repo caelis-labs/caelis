@@ -34,7 +34,7 @@ func TestJournaledToolPersistsLifecycleAndCancellationRequest(t *testing.T) {
 			name: "success",
 			ctx:  context.Background,
 			invoke: func(context.Context, tool.Call) (tool.Result, error) {
-				return tool.Result{Name: "WRITE", Content: []model.Part{model.NewTextPart("ok")}}, nil
+				return tool.Result{Name: "Write", Content: []model.Part{model.NewTextPart("ok")}}, nil
 			},
 			wantDurable:  []session.ToolExecutionStatus{session.ToolExecutionPrepared, session.ToolExecutionApproved, session.ToolExecutionStarted},
 			wantTerminal: session.ToolExecutionSucceeded,
@@ -57,10 +57,10 @@ func TestJournaledToolPersistsLifecycleAndCancellationRequest(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			service, active := newJournalTestSession(t, "sess-"+tt.name)
 			wrapped := journaledTool{
-				base:     tool.NamedTool{Def: tool.Definition{Name: "WRITE", EffectClass: tool.EffectNonIdempotent}, Invoke: tt.invoke},
+				base:     tool.NamedTool{Def: tool.Definition{Name: "Write", EffectClass: tool.EffectNonIdempotent}, Invoke: tt.invoke},
 				sessions: service, sessionRef: active.SessionRef, runID: "run-1", turnID: "turn-1", now: func() time.Time { return time.Unix(100, 0) },
 			}
-			result, _ := wrapped.Call(tt.ctx(), tool.Call{ID: "call-1", Name: "WRITE", Input: []byte(`{"path":"a"}`)})
+			result, _ := wrapped.Call(tt.ctx(), tool.Call{ID: "call-1", Name: "Write", Input: []byte(`{"path":"a"}`)})
 			loadedEvents, err := service.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatalf("Events() error = %v", err)
@@ -92,7 +92,7 @@ func TestRuntimeRecoveryMarksStartedExecutionUnknownWithoutCallingTool(t *testin
 	record := session.NormalizeToolExecution(session.ToolExecution{
 		Schema:   session.ToolExecutionSchemaVersion,
 		Key:      session.ExecutionKey{SessionID: active.SessionID, RunID: "run-old", TurnID: "turn-old", StepID: "call-1", ToolCallID: "call-1"},
-		Revision: 1, ToolName: "WRITE", EffectClass: string(tool.EffectNonIdempotent), Status: session.ToolExecutionPrepared,
+		Revision: 1, ToolName: "Write", EffectClass: string(tool.EffectNonIdempotent), Status: session.ToolExecutionPrepared,
 	})
 	if err := writer.appendEntry(context.Background(), session.ToolExecution{}, record, session.ExecutionRecord{}, session.ExecutionRecord{}); err != nil {
 		t.Fatalf("append prepared: %v", err)
@@ -281,7 +281,7 @@ func TestJournaledToolPersistsCancelRequestBeforeExecutionTerminates(t *testing.
 	returned := make(chan struct{})
 	wrapped := journaledTool{
 		base: tool.NamedTool{
-			Def: tool.Definition{Name: "WRITE", EffectClass: tool.EffectNonIdempotent},
+			Def: tool.Definition{Name: "Write", EffectClass: tool.EffectNonIdempotent},
 			Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 				close(started)
 				<-release
@@ -293,7 +293,7 @@ func TestJournaledToolPersistsCancelRequestBeforeExecutionTerminates(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		defer close(returned)
-		_, _ = wrapped.Call(ctx, tool.Call{ID: "call-live", Name: "WRITE"})
+		_, _ = wrapped.Call(ctx, tool.Call{ID: "call-live", Name: "Write"})
 	}()
 	<-started
 	cancel()

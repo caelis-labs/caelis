@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
@@ -21,29 +20,16 @@ func toolDisplayArgsForKind(name string, kind string, raw map[string]any, fallba
 	if preview, _, ok := commandDisplayArguments(name, kind, raw); ok {
 		return preview
 	}
-	name = names.CanonicalOrSelf(name)
 	switch name {
-	case names.Read, names.ViewImage:
+	case surfaceToolRead, surfaceToolViewImage:
 		if path := toolPath(raw); path != "" {
 			return path
 		}
-	case names.List:
-		if path := toolPath(raw); path != "" {
-			return path
-		}
-		if strings.EqualFold(parsedCommandType(raw), "list_files") {
-			if cwd := strings.TrimSpace(asString(raw["cwd"])); cwd != "" {
-				return cwd
-			}
-		}
-		if metadataOnlyToolArgs(raw) {
-			return ""
-		}
-	case names.Glob:
+	case surfaceToolGlob:
 		if pattern := globPattern(raw); pattern != "" {
 			return pattern
 		}
-	case names.Grep, "RG", "FIND":
+	case surfaceToolGrep:
 		query := toolQuery(raw)
 		path := toolPath(raw)
 		switch {
@@ -54,27 +40,27 @@ func toolDisplayArgsForKind(name string, kind string, raw map[string]any, fallba
 		case path != "":
 			return compactPathDisplay(path)
 		}
-	case names.WebSearch:
+	case surfaceToolWebSearch:
 		if display := display.WebSearchDisplayArg(raw); display != "" {
 			return display
 		}
-	case names.WebFetch:
+	case surfaceToolWebFetch:
 		if display := display.WebFetchDisplayArg(raw); display != "" {
 			return display
 		}
-	case names.Skill:
+	case surfaceToolSkill:
 		if name := strings.TrimSpace(asString(raw["name"])); name != "" {
 			return name
 		}
 		if name := skillContentDisplayNameFromRaw(raw); name != "" {
 			return name
 		}
-	case names.Write, names.Patch:
+	case surfaceToolWrite, surfaceToolPatch:
 		if path := toolPath(raw); path != "" {
 			return filepath.Base(path)
 		}
-	case names.Spawn, names.Task:
-		if name == names.Task {
+	case surfaceToolSpawn, surfaceToolTask:
+		if name == surfaceToolTask {
 			if action := taskControlDisplay(raw); action != "" {
 				return action
 			}
@@ -82,7 +68,7 @@ func toolDisplayArgsForKind(name string, kind string, raw map[string]any, fallba
 				return action
 			}
 		}
-		if name == names.Spawn {
+		if name == surfaceToolSpawn {
 			if display := spawnDisplayArgs(raw); display != "" {
 				return display
 			}
@@ -90,7 +76,7 @@ func toolDisplayArgsForKind(name string, kind string, raw map[string]any, fallba
 		if command := terminalCommandDisplay(raw); command != "" {
 			return display.NormalizeDisplayArg(command)
 		}
-	case names.SendMessage:
+	case surfaceToolSendMessage:
 		return display.AgentMessageFullDisplayArgs(raw)
 	}
 	if summary := genericToolArgs(raw); summary != "" {
@@ -231,7 +217,7 @@ func isASCIILetter(ch byte) bool {
 // toolDisplayArguments owns the paired compact and full representations used
 // by expandable tool headers.
 func toolDisplayArguments(name string, kind string, raw map[string]any, fallback ...string) (string, string) {
-	if names.CanonicalOrSelf(name) == names.SendMessage {
+	if name == surfaceToolSendMessage {
 		if full := display.AgentMessageFullDisplayArgs(raw); full != "" {
 			preview, folded := longCommandDisplayPreview(full)
 			if folded {
@@ -254,10 +240,10 @@ func toolDisplayFullArgs(name string, kind string, raw map[string]any) string {
 	if _, full, ok := commandDisplayArguments(name, kind, raw); ok {
 		return full
 	}
-	switch names.CanonicalOrSelf(name) {
-	case names.Spawn:
+	switch name {
+	case surfaceToolSpawn:
 		return spawnFullDisplayArgs(raw)
-	case names.SendMessage:
+	case surfaceToolSendMessage:
 		return display.AgentMessageFullDisplayArgs(raw)
 	default:
 		return ""
@@ -268,7 +254,6 @@ type toolDisplaySemanticOverrideFunc func(semanticName string, kind string, titl
 
 var toolDisplaySemanticOverrides = []toolDisplaySemanticOverrideFunc{
 	overrideSkillContentRead,
-	overrideSearchListFiles,
 }
 
 func toolDisplaySemanticOverride(semanticName string, kind string, title string, raw map[string]any) string {
@@ -280,41 +265,28 @@ func toolDisplaySemanticOverride(semanticName string, kind string, title string,
 	return ""
 }
 
-func overrideSearchListFiles(semanticName string, kind string, title string, raw map[string]any) string {
-	if !strings.EqualFold(strings.TrimSpace(kind), "search") && names.CanonicalOrSelf(semanticName) != names.Grep {
-		return ""
-	}
-	switch parsedCommandType(raw) {
-	case "list_files":
-		return names.List
-	default:
-		return ""
-	}
-}
-
 func toolTitleDisplayArgs(name string, kind string, title string) string {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return ""
 	}
-	name = names.CanonicalOrSelf(name)
 	if titleEqualsToolName(title, name) {
 		return ""
 	}
 	switch name {
-	case names.Skill:
+	case surfaceToolSkill:
 		return display.SkillContentNameFromTitle(title)
-	case names.RunCommand:
+	case surfaceToolRunCommand:
 		return executeTitleDisplayArgs(title)
-	case names.Glob:
+	case surfaceToolGlob:
 		return globTitleDisplayArgs(title)
-	case names.Read, names.ViewImage, names.List:
-		return prefixedTitleDetail(title, "Read", "View", "ViewImage", "List")
-	case names.Grep, "RG", "FIND":
+	case surfaceToolRead, surfaceToolViewImage:
+		return prefixedTitleDetail(title, "Read", "View", "ViewImage")
+	case surfaceToolGrep:
 		return searchTitleDisplayArgs(title)
-	case names.Write, names.Patch:
+	case surfaceToolWrite, surfaceToolPatch:
 		return compactMutationTitleDetail(prefixedTitleDetail(title, "Write", "Edit", "Patch", "Delete", "Move"))
-	case names.SendMessage:
+	case surfaceToolSendMessage:
 		return prefixedTitleDetail(title, "Send message", "Sent message", "SendMessage")
 	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
@@ -456,7 +428,7 @@ func executeTitleDisplayArgs(title string) string {
 		return ""
 	}
 	if fields := strings.Fields(title); len(fields) > 1 {
-		if info, ok := names.Lookup(fields[0]); ok && info.Kind == names.KindExecute {
+		if info, ok := surfaceToolProfile(fields[0]); ok && info.Kind == surfaceToolKindExecute {
 			return strings.TrimSpace(strings.TrimPrefix(title, fields[0]))
 		}
 	}
@@ -701,7 +673,7 @@ func taskControlDisplay(raw map[string]any) string {
 			parts = append(parts, duration)
 		}
 		return strings.Join(parts, " ")
-	case "READ":
+	case surfaceToolRead:
 		if handle != "" {
 			return "Read " + handle
 		}
@@ -711,7 +683,7 @@ func taskControlDisplay(raw map[string]any) string {
 			return "Cancel " + handle
 		}
 		return "Cancel"
-	case "WRITE":
+	case surfaceToolWrite:
 		rawInput := asString(raw["input"])
 		input := normalizeTaskWriteDisplayInput(rawInput)
 		if handle != "" && input != "" {
@@ -755,7 +727,7 @@ func taskControlDisplayFallback(values ...string) string {
 		if len(fields) == 0 {
 			continue
 		}
-		if strings.EqualFold(fields[0], "TASK") {
+		if fields[0] == surfaceToolTask {
 			fields = fields[1:]
 		}
 		if len(fields) == 0 {
@@ -778,7 +750,7 @@ func taskControlDisplayFallback(values ...string) string {
 				return "Wait " + detail
 			}
 			return "Wait"
-		case "READ":
+		case surfaceToolRead:
 			if detail != "" {
 				return "Read " + detail
 			}
@@ -788,7 +760,7 @@ func taskControlDisplayFallback(values ...string) string {
 				return "Cancel " + detail
 			}
 			return "Cancel"
-		case "WRITE":
+		case surfaceToolWrite:
 			return "Write"
 		}
 	}
@@ -929,10 +901,10 @@ func formatDurationMS(ms int) string {
 }
 
 func toolDisplayPanelOutput(name string, output string) string {
-	if names.CanonicalOrSelf(name) == names.SendMessage && isACPCompactToolAck(output) {
+	if name == surfaceToolSendMessage && isACPCompactToolAck(output) {
 		return ""
 	}
-	if info, ok := names.Lookup(name); ok && info.ResultStyle == names.ResultMutation {
+	if info, ok := surfaceToolProfile(name); ok && info.ResultStyle == surfaceResultMutation {
 		lines := strings.Split(strings.TrimSpace(output), "\n")
 		if len(lines) >= 2 && strings.EqualFold(strings.TrimSpace(lines[1]), "diff / hunk") {
 			return strings.Join(lines[1:], "\n")
@@ -942,26 +914,24 @@ func toolDisplayPanelOutput(name string, output string) string {
 }
 
 func toolDisplaySummaryOutput(name string, output map[string]any, meta map[string]any) map[string]any {
-	return display.HydrateToolSummaryOutput(name, output, meta)
+	return surfaceHydrateToolSummaryOutput(name, output, meta)
 }
 
 func toolDisplayStructuredSummary(name string, input map[string]any, output map[string]any, meta map[string]any) string {
-	info, ok := names.Lookup(name)
+	info, ok := surfaceToolProfile(name)
 	if !ok {
 		return ""
 	}
 	switch info.ResultStyle {
-	case names.ResultRead:
+	case surfaceResultRead:
 		return readDisplaySummary(input, output)
-	case names.ResultList:
-		return listDisplaySummary(input, output)
-	case names.ResultGlob:
+	case surfaceResultGlob:
 		return globDisplaySummary(input, output)
-	case names.ResultSearch:
+	case surfaceResultSearch:
 		return searchDisplaySummary(input, output)
-	case names.ResultWebSearch:
+	case surfaceResultWebSearch:
 		return display.WebSearchSummary(input, output)
-	case names.ResultWebFetch:
+	case surfaceResultWebFetch:
 		return display.WebFetchSummary(input, output)
 	default:
 		return ""
@@ -1010,16 +980,16 @@ func displayStringAllDigits(value string) bool {
 }
 
 func toolDisplayResultHeader(name string, output string) string {
-	info, ok := names.Lookup(name)
+	info, ok := surfaceToolProfile(name)
 	if !ok {
 		return ""
 	}
 	switch info.ResultStyle {
-	case names.ResultRead, names.ResultList, names.ResultGlob, names.ResultMutation:
+	case surfaceResultRead, surfaceResultGlob, surfaceResultMutation:
 	default:
 		return ""
 	}
-	mutationDiff := info.ResultStyle == names.ResultMutation && toolOutputLooksLikeMutationDiff(output)
+	mutationDiff := info.ResultStyle == surfaceResultMutation && toolOutputLooksLikeMutationDiff(output)
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -1039,8 +1009,8 @@ func toolDisplayResultHeader(name string, output string) string {
 }
 
 func compactToolResultHeaderPath(name string, header string) string {
-	switch names.CanonicalOrSelf(name) {
-	case names.Read, names.List:
+	switch name {
+	case surfaceToolRead:
 		pathPart, rest, ok, tagged := splitLeadingPathHeaderParts(header)
 		if !ok {
 			return header
@@ -1053,7 +1023,7 @@ func compactToolResultHeaderPath(name string, header string) string {
 			return header
 		}
 		return compact + rest
-	case names.Glob:
+	case surfaceToolGlob:
 	default:
 		return header
 	}
@@ -1195,18 +1165,6 @@ func readDisplaySummary(input map[string]any, output map[string]any) string {
 	}
 	if start > 0 && end > 0 {
 		return displayPathBase(path) + " " + strconv.Itoa(start) + "~" + strconv.Itoa(end)
-	}
-	return displayPathBase(path)
-}
-
-func listDisplaySummary(input map[string]any, output map[string]any) string {
-	path := firstTrimmed(toolPath(output), toolPath(input))
-	count := displayInt(output["count"])
-	if path == "" && count <= 0 {
-		return ""
-	}
-	if count > 0 {
-		return strings.TrimSpace(displayPathBase(path) + " " + pluralizeUnit(count, "entry"))
 	}
 	return displayPathBase(path)
 }

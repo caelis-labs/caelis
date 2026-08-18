@@ -16,11 +16,11 @@ func TestRegressionMultiToolCallOrderingTrace(t *testing.T) {
 	scripted := evalharness.NewScriptedModel("multi-tool",
 		evalharness.ToolCallStep("looking...", model.ToolCall{
 			ID:   "call-read",
-			Name: "READ",
+			Name: "Read",
 			Args: `{"path":"main.go"}`,
 		}, model.ToolCall{
 			ID:   "call-search",
-			Name: "SEARCH",
+			Name: "Grep",
 			Args: `{"path":".","pattern":"func main"}`,
 		}, model.ToolCall{
 			ID:   "call-list",
@@ -36,8 +36,8 @@ func TestRegressionMultiToolCallOrderingTrace(t *testing.T) {
 		SystemPrompt: "Use tools when needed.",
 		Model:        scripted,
 		Tools: []tool.Tool{
-			evalharness.EchoTool("READ"),
-			evalharness.EchoTool("SEARCH"),
+			evalharness.EchoTool("Read"),
+			evalharness.EchoTool("Grep"),
 			evalharness.EchoTool("LIST"),
 		},
 	})

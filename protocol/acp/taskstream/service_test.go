@@ -91,7 +91,7 @@ func TestProjectRecordProjectsHistoricalTurnBoundaryWithoutTaskTerminalTransport
 		Task: controltaskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
 			State: task.StateRunning, Running: true, CurrentTurnID: "turn-2",
-			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "SPAWN"},
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
 		Frame: &sdkstream.Frame{
 			Ref:    sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"},
@@ -180,7 +180,7 @@ func TestProjectRecordKeepsOneEnvelopePerCursorWhenEventCarriesUsage(t *testing.
 		Task: controltaskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
 			State: task.StateRunning, Running: true,
-			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "SPAWN"},
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
 		Frame: &sdkstream.Frame{
 			Ref:    sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"},

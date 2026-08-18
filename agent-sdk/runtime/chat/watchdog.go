@@ -13,7 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
 const (
@@ -254,8 +254,7 @@ func modelCallsAreOnlyTaskWaits(calls []model.ToolCall) bool {
 		return false
 	}
 	for _, call := range calls {
-		info, ok := identity.Lookup(call.Name)
-		if !ok || info.Name != identity.Task {
+		if call.Name != tasktool.ToolName {
 			return false
 		}
 		args, ok := decodeComparableToolArgs(call.Args)
@@ -305,7 +304,7 @@ func modelToolStepDigest(calls []model.ToolCall) (string, bool) {
 	}
 	steps := make([]map[string]any, 0, len(calls))
 	for _, call := range calls {
-		name := strings.ToUpper(strings.TrimSpace(call.Name))
+		name := strings.TrimSpace(call.Name)
 		if name == "" {
 			return "", false
 		}

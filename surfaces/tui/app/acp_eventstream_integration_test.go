@@ -81,14 +81,14 @@ func TestHandleACPEventEnvelopeDisplaysTaskOwnedRunCommandOutputOnce(t *testing.
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-1",
-			Title: "RUN_COMMAND sleep 6", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-			RawInput: map[string]any{"command": "sleep 6"}, Meta: acpToolNameMeta("RUN_COMMAND"),
+			Title: "RunCommand sleep 6", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"command": "sleep 6"}, Meta: acpToolNameMeta("RunCommand"),
 		},
 	})
 	ref := taskstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "terminal-1"}
 	frames := acpprojector.ProjectTaskStreamFrame(acpprojector.StreamRequest{
 		SessionRef: session.SessionRef{SessionID: "session-1"}, CallID: "command-1",
-		ToolName: "RUN_COMMAND", Ref: ref, Scope: eventstream.ScopeMain,
+		ToolName: "RunCommand", Ref: ref, Scope: eventstream.ScopeMain,
 	}, taskstream.Frame{
 		Ref: ref, Text: output, Cursor: taskstream.Cursor{Output: int64(len([]byte(output)))},
 		Running: true, State: "running",
@@ -98,7 +98,7 @@ func TestHandleACPEventEnvelopeDisplaysTaskOwnedRunCommandOutputOnce(t *testing.
 	}
 	model = applyACPEnvelopeForTest(t, model, frames[0])
 
-	meta := metautil.WithRuntimeSection(acpToolNameMeta("RUN_COMMAND"), metautil.RuntimeTask, map[string]any{
+	meta := metautil.WithRuntimeSection(acpToolNameMeta("RunCommand"), metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID: "task-1", "kind": "command",
 		metautil.RuntimeOutputDelta: output, "running": false, "state": "completed",
 	})
@@ -106,8 +106,8 @@ func TestHandleACPEventEnvelopeDisplaysTaskOwnedRunCommandOutputOnce(t *testing.
 		ID: "command-final", Seq: 2, SessionID: "session-1", Type: session.EventTypeToolResult,
 		Visibility: session.VisibilityCanonical, Meta: meta,
 		Tool: &session.EventTool{
-			ID: "command-1", Name: "RUN_COMMAND", Kind: schema.ToolKindExecute,
-			Title: "RUN_COMMAND sleep 6", Status: "completed",
+			ID: "command-1", Name: "RunCommand", Kind: schema.ToolKindExecute,
+			Title: "RunCommand sleep 6", Status: "completed",
 			Input: map[string]any{"command": "sleep 6"}, Output: map[string]any{"stdout": output, "exit_code": 0},
 			Content: []session.EventToolContent{{Type: "terminal", TerminalID: "terminal-1", Text: output}},
 		},
@@ -138,7 +138,7 @@ func TestHandleACPEventEnvelopeRendersTaskWriteInteractionAndKeepsUTF8RunCommand
 	const output = "请输入你的名字: 小明\r\n你好, 小明! (输入来自 stdin/TTY)\r\n"
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(242, 0))
-	commandMeta := metautil.WithRuntimeSection(acpToolNameMeta("RUN_COMMAND"), metautil.RuntimeTask, map[string]any{
+	commandMeta := metautil.WithRuntimeSection(acpToolNameMeta("RunCommand"), metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID:         "task-4",
 		metautil.RuntimeTaskTerminalID: "terminal-4",
 		"handle":                       "command-4",
@@ -150,7 +150,7 @@ func TestHandleACPEventEnvelopeRendersTaskWriteInteractionAndKeepsUTF8RunCommand
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-call-4",
-			Title: "RUN_COMMAND read name", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "RunCommand read name", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 			RawInput: map[string]any{"command": `read -p "请输入你的名字: " name && echo "你好, $name! (输入来自 stdin/TTY)"`},
 			Meta:     commandMeta,
 		},
@@ -158,7 +158,7 @@ func TestHandleACPEventEnvelopeRendersTaskWriteInteractionAndKeepsUTF8RunCommand
 	ref := taskstream.Ref{SessionID: "session-1", TaskID: "task-4", TerminalID: "terminal-4"}
 	frames := acpprojector.ProjectTaskStreamFrame(acpprojector.StreamRequest{
 		SessionRef: session.SessionRef{SessionID: "session-1"}, CallID: "command-call-4",
-		ToolName: "RUN_COMMAND", TaskHandle: "command-4", Ref: ref, Scope: eventstream.ScopeMain,
+		ToolName: "RunCommand", TaskHandle: "command-4", Ref: ref, Scope: eventstream.ScopeMain,
 	}, taskstream.Frame{
 		Ref: ref, Text: output, Cursor: taskstream.Cursor{Output: int64(len([]byte(output)))},
 		Running: true, State: "running",
@@ -171,15 +171,15 @@ func TestHandleACPEventEnvelopeRendersTaskWriteInteractionAndKeepsUTF8RunCommand
 	taskInput := map[string]any{
 		"action": "write", "handle": "command-4", "target_kind": "command", "input": "小明",
 	}
-	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("TASK"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "TASK", metautil.RuntimeToolAction: "write",
+	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "write",
 		metautil.RuntimeToolInput: "小明", metautil.RuntimeTargetKind: "command", metautil.RuntimeTargetHandle: "command-4",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-write-4",
-			Title: "TASK write command-4", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "Task write command-4", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 			RawInput: taskInput, Meta: taskMeta,
 		},
 	})
@@ -229,15 +229,15 @@ func TestHandleACPEventEnvelopeRendersTaskWriteFailureWithoutInternalHandle(t *t
 	taskInput := map[string]any{
 		"action": "write", "handle": "command-10", "target_kind": "command", "input": "test",
 	}
-	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("TASK"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "TASK", metautil.RuntimeToolAction: "write",
+	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "write",
 		metautil.RuntimeToolInput: "test", metautil.RuntimeTargetKind: "command", metautil.RuntimeTargetHandle: "command-10",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-write-10",
-			Title: "TASK write command-10", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "Task write command-10", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 			RawInput: taskInput, Meta: taskMeta,
 		},
 	})
@@ -281,8 +281,8 @@ func TestHandleACPEventEnvelopeRendersTerminalTaggedCommandTaskWriteAsShellInter
 	taskInput := map[string]any{
 		"action": "write", "handle": "command-82", "target_kind": "command", "input": input,
 	}
-	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("TASK"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "TASK", metautil.RuntimeToolAction: "write",
+	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "write",
 		metautil.RuntimeToolInput: input, metautil.RuntimeTargetKind: "command", metautil.RuntimeTargetHandle: "command-82",
 	})
 	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
@@ -294,7 +294,7 @@ func TestHandleACPEventEnvelopeRendersTerminalTaggedCommandTaskWriteAsShellInter
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-write-82",
-			Title: "TASK write command-82", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "Task write command-82", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 			RawInput: taskInput, Content: []schema.ToolCallContent{{Type: "terminal", TerminalID: "terminal-82"}},
 			Meta: taskMeta,
 		},
@@ -333,12 +333,12 @@ func TestHandleACPEventEnvelopeKeepsStreamedRunCommandOutputOnEmptyFinalFrame(t 
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "command-1",
-			Title:         "RUN_COMMAND " + command,
+			Title:         "RunCommand " + command,
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": command, "yield_time_ms": 250},
 			Content:       []schema.ToolCallContent{{Type: "terminal", TerminalID: "command-1"}},
-			Meta:          acpToolNameMeta("RUN_COMMAND"),
+			Meta:          acpToolNameMeta("RunCommand"),
 		},
 	})
 
@@ -351,13 +351,13 @@ func TestHandleACPEventEnvelopeKeepsStreamedRunCommandOutputOnEmptyFinalFrame(t 
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "command-1",
 			Status:        &running,
-			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "command-1", output, "append"),
+			Meta:          runningSnapshotTerminalMeta("RunCommand", "task-1", "command-1", output, "append"),
 		},
 	})
 
 	completed := schema.ToolStatusCompleted
 	exitCode := 0
-	finalMeta := metautil.WithRuntimeSection(acpToolNameMeta("RUN_COMMAND"), metautil.RuntimeTask, map[string]any{
+	finalMeta := metautil.WithRuntimeSection(acpToolNameMeta("RunCommand"), metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID:         "task-1",
 		metautil.RuntimeTaskTerminalID: "command-1",
 		"output_cursor":                len([]byte(output)),
@@ -397,15 +397,15 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-1",
-			Title: "RUN_COMMAND long job", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "RunCommand long job", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 			RawInput: map[string]any{"command": "long job", "yield_time_ms": 250},
 			Content:  []schema.ToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
-			Meta:     acpToolNameMeta("RUN_COMMAND"),
+			Meta:     acpToolNameMeta("RunCommand"),
 		},
 	})
 	completed := schema.ToolStatusCompleted
 	exitCode := 0
-	commandFinalMeta := metautil.WithRuntimeSection(acpToolNameMeta("RUN_COMMAND"), metautil.RuntimeTask, map[string]any{
+	commandFinalMeta := metautil.WithRuntimeSection(acpToolNameMeta("RunCommand"), metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID: "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
 		"running": false, "state": "completed",
 	})
@@ -422,8 +422,8 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 	model.commitUserDisplayLine("resume")
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(243, 0))
 	taskInput := map[string]any{"action": "wait", "task_id": "task-1", "target_kind": "command"}
-	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("TASK"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "TASK", metautil.RuntimeToolAction: "wait",
+	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "wait",
 		metautil.RuntimeTargetID: "task-1", metautil.RuntimeTargetKind: "command",
 	})
 	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
@@ -435,12 +435,12 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-wait-1",
-			Title: "TASK wait task-1", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "Task wait task-1", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 			RawInput: taskInput, Meta: taskMeta,
 		},
 	})
 	if model.runningActivity.Phase != runningPhaseToolWait || model.runningActivity.Target != runningTargetShell {
-		t.Fatalf("runningActivity = %#v, want Wait shell while TASK observes command", model.runningActivity)
+		t.Fatalf("runningActivity = %#v, want Wait shell while Task observes command", model.runningActivity)
 	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2", Scope: eventstream.ScopeMain,
@@ -458,10 +458,10 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 		t.Fatalf("resume blocks = %#v, want only the original command panel", blocks)
 	}
 	if command := blocks[0].Events[0]; command.Output != recovered || !command.OutputSynthetic || strings.Contains(command.Output, "(no output)") {
-		t.Fatalf("recovered command = %#v, want replaceable durable TASK snapshot in empty owner panel", command)
+		t.Fatalf("recovered command = %#v, want replaceable durable Task snapshot in empty owner panel", command)
 	}
 	if model.runningActivity.Phase != runningPhaseModelWait {
-		t.Fatalf("runningActivity = %#v, want model waiting after TASK wait completes", model.runningActivity)
+		t.Fatalf("runningActivity = %#v, want model waiting after Task wait completes", model.runningActivity)
 	}
 }
 
@@ -484,7 +484,7 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	applyStream := func(update schema.Update, sequence uint64) {
 		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "terminal-1", Scope: eventstream.ScopeMain,
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "command-call", ToolName: "RUN_COMMAND"},
+			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "command-call", ToolName: "RunCommand"},
 			Delivery:   &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 			Position: &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
 				Generation: "task-stream-1", Sequence: sequence,
@@ -494,13 +494,13 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	}
 	apply(schema.ToolCall{
 		SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-call",
-		Title: "RUN_COMMAND long job", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Title: "RunCommand long job", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 		RawInput: map[string]any{"command": "long job"},
 		Content:  []schema.ToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
-		Meta:     acpToolNameMeta("RUN_COMMAND"),
+		Meta:     acpToolNameMeta("RunCommand"),
 	})
 	running := schema.ToolStatusInProgress
-	firstMeta := runningSnapshotTerminalMeta("RUN_COMMAND", "command-task", "terminal-1", first, "append")
+	firstMeta := runningSnapshotTerminalMeta("RunCommand", "command-task", "terminal-1", first, "append")
 	firstMeta = metautil.WithRuntimeSection(firstMeta, metautil.RuntimeTask, map[string]any{
 		"handle": "command-3",
 	})
@@ -517,8 +517,8 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	}
 
 	readInput := map[string]any{"action": "read", "handle": "command-3"}
-	readMeta := metautil.WithRuntimeSection(acpToolNameMeta("TASK"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "TASK", metautil.RuntimeToolAction: "read",
+	readMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "read",
 		metautil.RuntimeTargetHandle: "command-3", metautil.RuntimeTargetKind: "command",
 	})
 	readMeta = metautil.WithRuntimeSection(readMeta, metautil.RuntimeTask, map[string]any{
@@ -530,7 +530,7 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	})
 	apply(schema.ToolCall{
 		SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-read",
-		Title: "TASK read command-3", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Title: "Task read command-3", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 		RawInput: readInput, Meta: readMeta,
 	})
 	if model.runningActivity.Phase != runningPhaseToolWait || model.runningActivity.Target != runningTargetShell {
@@ -559,7 +559,7 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 		t.Fatalf("command output after Task read = %q, want %q", got, first+second)
 	}
 
-	duplicateMeta := runningSnapshotTerminalMeta("RUN_COMMAND", "command-task", "terminal-1", second, "append")
+	duplicateMeta := runningSnapshotTerminalMeta("RunCommand", "command-task", "terminal-1", second, "append")
 	duplicateMeta = metautil.WithRuntimeSection(duplicateMeta, metautil.RuntimeStream, map[string]any{
 		metautil.RuntimeStreamMode:   "append",
 		metautil.RuntimeOutputCursor: int64(len([]byte(first + second))),
@@ -568,7 +568,7 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 		SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-call",
 		Status: &running, Meta: duplicateMeta,
 	}, 2)
-	thirdMeta := runningSnapshotTerminalMeta("RUN_COMMAND", "command-task", "terminal-1", third, "append")
+	thirdMeta := runningSnapshotTerminalMeta("RunCommand", "command-task", "terminal-1", third, "append")
 	thirdMeta = metautil.WithRuntimeSection(thirdMeta, metautil.RuntimeStream, map[string]any{
 		metautil.RuntimeStreamMode:   "append",
 		metautil.RuntimeOutputCursor: int64(len([]byte(first + second + third))),
@@ -584,13 +584,13 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	}
 
 	terminalReadInput := map[string]any{"action": "read", "handle": "command-3"}
-	terminalReadMeta := metautil.WithRuntimeSection(acpToolNameMeta("TASK"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "TASK", metautil.RuntimeToolAction: "read",
+	terminalReadMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "read",
 		metautil.RuntimeTargetHandle: "command-3", metautil.RuntimeTargetKind: "command",
 	})
 	apply(schema.ToolCall{
 		SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-read-terminal",
-		Title: "TASK read command-3", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Title: "Task read command-3", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 		RawInput: terminalReadInput, Meta: terminalReadMeta,
 	})
 	if model.runningActivity.Phase != runningPhaseToolWait {
@@ -603,7 +603,7 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 		Scope:     eventstream.ScopeMain,
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "command-call",
-			ToolName:   "RUN_COMMAND",
+			ToolName:   "RunCommand",
 		},
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
@@ -612,7 +612,7 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 			RawInput:      terminalReadInput,
 			RawOutput: map[string]any{
 				"action": "read", "handle": "command-3", "target_kind": "command",
-				"parent_call": "command-call", "parent_tool": "RUN_COMMAND", "state": "completed",
+				"parent_call": "command-call", "parent_tool": "RunCommand", "state": "completed",
 			},
 			Meta: terminalReadMeta,
 		},
@@ -723,7 +723,7 @@ func TestHandleACPEventEnvelopeMergesPartialToolUpdateFromCaelisOutput(t *testin
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "call-1",
-			Title:         "RUN_COMMAND pwd",
+			Title:         "RunCommand pwd",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": "pwd"},
@@ -767,11 +767,11 @@ func TestHandleACPEventEnvelopeDoesNotDuplicateRunningSnapshotAfterTerminalStrea
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "call-1",
-			Title:         "RUN_COMMAND echo ok",
+			Title:         "RunCommand echo ok",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": "echo ok"},
-			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "", ""),
+			Meta:          runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "", ""),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -780,9 +780,9 @@ func TestHandleACPEventEnvelopeDoesNotDuplicateRunningSnapshotAfterTerminalStrea
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
-			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Title:         stringPtr("RunCommand echo ok"),
 			Kind:          &kind,
-			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "Step 1/5\nStep 2/5\n", "append"),
+			Meta:          runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "Step 1/5\nStep 2/5\n", "append"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -791,18 +791,18 @@ func TestHandleACPEventEnvelopeDoesNotDuplicateRunningSnapshotAfterTerminalStrea
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
-			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Title:         stringPtr("RunCommand echo ok"),
 			Kind:          &kind,
 			Status:        &status,
 			RawInput:      map[string]any{"command": "echo ok"},
 			RawOutput:     map[string]any{"latest_output": "Step 1/5\nStep 2/5\n", "state": "running"},
-			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "Step 1/5\nStep 2/5\n", ""),
+			Meta:          runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "Step 1/5\nStep 2/5\n", ""),
 		},
 	})
 
 	block := requireMainACPTurnBlockForTest(t, model)
 	if len(block.Events) != 1 {
-		t.Fatalf("main events = %#v, want one RUN_COMMAND event", block.Events)
+		t.Fatalf("main events = %#v, want one RunCommand event", block.Events)
 	}
 	if got, want := block.Events[0].Output, "Step 1/5\nStep 2/5\n"; got != want {
 		t.Fatalf("tool output = %q, want live stream output once %q", got, want)
@@ -819,11 +819,11 @@ func TestHandleACPEventEnvelopePreservesSplitTerminalNewlineFrame(t *testing.T) 
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "call-1",
-			Title:         "RUN_COMMAND for i in 1 2",
+			Title:         "RunCommand for i in 1 2",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": "for i in 1 2; do echo Step $i/2; done"},
-			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "", ""),
+			Meta:          runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "", ""),
 		},
 	})
 	for _, text := range []string{"Step 1/2", "\n", "Step 2/2\n"} {
@@ -832,7 +832,7 @@ func TestHandleACPEventEnvelopePreservesSplitTerminalNewlineFrame(t *testing.T) 
 
 	block := requireMainACPTurnBlockForTest(t, model)
 	if len(block.Events) != 1 {
-		t.Fatalf("main events = %#v, want one RUN_COMMAND event", block.Events)
+		t.Fatalf("main events = %#v, want one RunCommand event", block.Events)
 	}
 	if got, want := block.Events[0].Output, "Step 1/2\nStep 2/2\n"; got != want {
 		t.Fatalf("tool output = %q, want %q", got, want)
@@ -849,11 +849,11 @@ func TestHandleACPEventEnvelopePreservesStandardTerminalPatchNewlines(t *testing
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "call-1",
-			Title:         "RUN_COMMAND for i in 1 2",
+			Title:         "RunCommand for i in 1 2",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": "for i in 1 2; do echo Step $i/2; done"},
-			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "", ""),
+			Meta:          runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "", ""),
 		},
 	})
 	for _, text := range []string{"[1/2] 14:57:57\n", "[2/2] 14:57:58\n"} {
@@ -863,14 +863,14 @@ func TestHandleACPEventEnvelopePreservesStandardTerminalPatchNewlines(t *testing
 			Update: schema.ToolCallUpdate{
 				SessionUpdate: schema.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), "call-1", text),
+				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", text),
 			},
 		})
 	}
 
 	block := requireMainACPTurnBlockForTest(t, model)
 	if len(block.Events) != 1 {
-		t.Fatalf("main events = %#v, want one RUN_COMMAND event", block.Events)
+		t.Fatalf("main events = %#v, want one RunCommand event", block.Events)
 	}
 	const want = "[1/2] 14:57:57\n[2/2] 14:57:58\n"
 	if got := block.Events[0].Output; got != want {
@@ -1158,7 +1158,7 @@ func TestHandleACPEventEnvelopeDisplaysParticipantSkillContentReadAsSkill(t *tes
 	if block == nil {
 		t.Fatal("participant block missing")
 	}
-	if len(block.Events) != 1 || block.Events[0].Name != "SKILL" || block.Events[0].Args != "review" || !block.Events[0].Done {
+	if len(block.Events) != 1 || block.Events[0].Name != "Skill" || block.Events[0].Args != "review" || !block.Events[0].Done {
 		t.Fatalf("participant events = %#v, want completed Skill review", block.Events)
 	}
 	rows := block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme)})
@@ -1173,7 +1173,7 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	spawnMeta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "SPAWN",
+		metautil.RuntimeToolName: "Spawn",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
@@ -1181,7 +1181,7 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "spawn-1",
-			Title:         "SPAWN reviewer: inspect",
+			Title:         "Spawn reviewer: inspect",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusPending,
 			RawInput:      map[string]any{"agent": "reviewer", "prompt": "inspect"},
@@ -1197,7 +1197,7 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 		Final:     true,
 		Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
 			metautil.RuntimeStreamParentCallID: "spawn-1",
-			metautil.RuntimeStreamParentTool:   "SPAWN",
+			metautil.RuntimeStreamParentTool:   "Spawn",
 		}),
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentMessage,
@@ -1210,8 +1210,8 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 		t.Fatalf("main events = %#v, want anchored spawn event", block.Events)
 	}
 	event := block.Events[0]
-	if event.Kind != SEToolCall || event.CallID != "spawn-1" || event.Name != "SPAWN" {
-		t.Fatalf("spawn event = %#v, want SPAWN tool call", event)
+	if event.Kind != SEToolCall || event.CallID != "spawn-1" || event.Name != "Spawn" {
+		t.Fatalf("spawn event = %#v, want Spawn tool call", event)
 	}
 	if strings.Contains(event.Output, "subagent found the issue") {
 		t.Fatalf("spawn event = %#v, child output must stay in the detached view", event)
@@ -1234,11 +1234,11 @@ func TestHandleACPEventEnvelopeStreamsDurableChildNarrativeBeforeCompletion(t *t
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "spawn-call-1",
-			Title:         "SPAWN explorer: inspect",
+			Title:         "Spawn explorer: inspect",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect"},
-			Meta:          acpToolNameMeta("SPAWN"),
+			Meta:          acpToolNameMeta("Spawn"),
 		},
 	})
 
@@ -1265,7 +1265,7 @@ func TestHandleACPEventEnvelopeStreamsDurableChildNarrativeBeforeCompletion(t *t
 				ParticipantID: "child-1",
 				ACPSessionID:  "child-session-1",
 				SourceEventID: chunk.eventID,
-				ParentTool:    session.EventParentTool{CallID: "spawn-call-1", Name: "SPAWN"},
+				ParentTool:    session.EventParentTool{CallID: "spawn-call-1", Name: "Spawn"},
 			},
 			Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
@@ -1320,7 +1320,7 @@ func TestHandleACPEventEnvelopeStreamsDurableChildNarrativeBeforeCompletion(t *t
 	}
 
 	completed := schema.ToolStatusCompleted
-	finalMeta := metautil.WithRuntimeSection(acpToolNameMeta("SPAWN"), metautil.RuntimeTask, map[string]any{
+	finalMeta := metautil.WithRuntimeSection(acpToolNameMeta("Spawn"), metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID: "task-1",
 		"running":              false,
 		"state":                "completed",
@@ -1365,11 +1365,11 @@ func TestHandleACPEventEnvelopeChildFinalChunksDoNotCloseOrTruncateSpawn(t *test
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "spawn-call-1",
-			Title:         "SPAWN explorer: inspect",
+			Title:         "Spawn explorer: inspect",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect"},
-			Meta:          acpToolNameMeta("SPAWN"),
+			Meta:          acpToolNameMeta("Spawn"),
 		},
 	})
 
@@ -1393,7 +1393,7 @@ func TestHandleACPEventEnvelopeChildFinalChunksDoNotCloseOrTruncateSpawn(t *test
 			Final:     true,
 			ParentTool: &eventstream.ParentToolRelation{
 				ToolCallID: "spawn-call-1",
-				ToolName:   "SPAWN",
+				ToolName:   "Spawn",
 			},
 			Update: schema.ContentChunk{
 				SessionUpdate: schema.UpdateAgentMessage,
@@ -1417,7 +1417,7 @@ func TestHandleACPEventEnvelopeChildFinalChunksDoNotCloseOrTruncateSpawn(t *test
 	}
 
 	completed := schema.ToolStatusCompleted
-	finalMeta := metautil.WithRuntimeSection(acpToolNameMeta("SPAWN"), metautil.RuntimeTask, map[string]any{
+	finalMeta := metautil.WithRuntimeSection(acpToolNameMeta("Spawn"), metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID: "task-1",
 		"running":              false,
 		"state":                "completed",
@@ -1461,15 +1461,15 @@ func TestHandleACPEventEnvelopePreservesHiddenChildToolAsBlankMessageBoundary(t 
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-call-1",
-			Title: "SPAWN explorer: inspect", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("SPAWN"),
+			Title: "Spawn explorer: inspect", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
 	childEnvelope := func(update schema.Update) eventstream.Envelope {
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "child-turn-1",
 			Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Actor: "explorer",
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "SPAWN"},
+			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
 			Update:     update,
 		}
 	}
@@ -1505,14 +1505,14 @@ func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-call-1",
-			Title: "SPAWN explorer: inspect", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("SPAWN"),
+			Title: "Spawn explorer: inspect", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "child-turn-1",
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Actor: "explorer",
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "SPAWN"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "child-tool-1",
 			Title: "Read /workspace/config.go", Kind: schema.ToolKindRead, Status: schema.ToolStatusInProgress,
@@ -1542,7 +1542,7 @@ func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "child-turn-1",
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Actor: "explorer",
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "SPAWN"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "child-tool-1",
 			Title: &readTitle, Kind: &readKind, Status: &completed,
@@ -1552,26 +1552,17 @@ func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T
 		},
 	})
 	overlay = subagentOutputOverlayPlain(model)
-	if model.subagentOutputOverlay.geometry.totalRows != 1 {
-		t.Fatalf("completed child tool did not default to a one-row summary:\n%s", overlay)
-	}
-	view := requireSubagentOutputViewForTest(t, model, "spawn-call-1")
-	if !view.block.toggleToolPanelClick("child-tool-1") {
-		t.Fatal("collapsed child tool panel could not be expanded")
-	}
-	view.touch(true)
-	overlay = subagentOutputOverlayPlain(model)
 	if !strings.Contains(overlay, "loaded child settings") {
-		t.Fatalf("expanded output overlay does not expose child tool output:\n%s", overlay)
+		t.Fatalf("generic child tool panel does not expose child tool output:\n%s", overlay)
 	}
 	if model.subagentOutputOverlay.geometry.totalRows <= 1 {
-		t.Fatalf("expanded child tool panel did not expose a structured body:\n%s", overlay)
+		t.Fatalf("unnamed external tool was incorrectly collapsed as an exact built-in:\n%s", overlay)
 	}
 
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "child-turn-1",
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Actor: "explorer",
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "SPAWN"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentMessage,
 			Content:       schema.TextContent{Type: "text", Text: "found the configuration issue"},
@@ -1594,8 +1585,8 @@ func TestHandleACPEventEnvelopeRoutesCrossTurnChildContinuationAfterSendMessage(
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(250, 0))
-	spawnMeta := metautil.WithRuntimeSection(acpToolNameMeta("SPAWN"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "SPAWN",
+	spawnMeta := metautil.WithRuntimeSection(acpToolNameMeta("Spawn"), metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "Spawn",
 		metautil.RuntimeTargetID: "task-1",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -1606,7 +1597,7 @@ func TestHandleACPEventEnvelopeRoutesCrossTurnChildContinuationAfterSendMessage(
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "spawn-call-1",
-			Title:         "SPAWN explorer: inspect",
+			Title:         "Spawn explorer: inspect",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect"},
@@ -1674,7 +1665,7 @@ func TestHandleACPEventEnvelopeRoutesCrossTurnChildContinuationAfterSendMessage(
 			Final:     true,
 			ParentTool: &eventstream.ParentToolRelation{
 				ToolCallID: "spawn-call-1",
-				ToolName:   "SPAWN",
+				ToolName:   "Spawn",
 			},
 			Update: schema.ContentChunk{
 				SessionUpdate: schema.UpdateAgentMessage,
@@ -1742,11 +1733,11 @@ func TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce(t *testing.T) {
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "spawn-call-1",
-			Title:         "SPAWN explorer: inspect",
+			Title:         "Spawn explorer: inspect",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect"},
-			Meta:          acpToolNameMeta("SPAWN"),
+			Meta:          acpToolNameMeta("Spawn"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -1763,10 +1754,10 @@ func TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce(t *testing.T) {
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "child-read-1",
-			Title:         "READ README.md",
+			Title:         "Read ReadME.md",
 			Kind:          schema.ToolKindRead,
 			Status:        schema.ToolStatusCompleted,
-			RawInput:      map[string]any{"path": "README.md"},
+			RawInput:      map[string]any{"path": "ReadME.md"},
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -1783,7 +1774,7 @@ func TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce(t *testing.T) {
 		Update: schema.PlanUpdate{
 			SessionUpdate: schema.UpdatePlan,
 			Entries: []schema.PlanEntry{{
-				Content: "inspect README.md",
+				Content: "inspect ReadME.md",
 				Status:  "in_progress",
 			}},
 		},
@@ -1823,7 +1814,7 @@ func TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce(t *testing.T) {
 
 	block := requireMainACPTurnBlockForTest(t, model)
 	if len(block.Events) != 1 {
-		t.Fatalf("main events = %#v, want only parent SPAWN event", block.Events)
+		t.Fatalf("main events = %#v, want only parent Spawn event", block.Events)
 	}
 	if event := block.Events[0]; event.CallID != "spawn-call-1" || event.Output != "" {
 		t.Fatalf("spawn event = %#v, want compact parent owner", event)
@@ -1861,11 +1852,11 @@ func TestHandleACPEventEnvelopeScopedChildTerminalKeepsOneSpawnPanelAndMainTurnA
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "spawn-call-1",
-			Title:         "SPAWN explorer: inspect",
+			Title:         "Spawn explorer: inspect",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect"},
-			Meta:          acpToolNameMeta("SPAWN"),
+			Meta:          acpToolNameMeta("Spawn"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -1958,11 +1949,11 @@ func TestHandleACPEventEnvelopeKeepsTaskWriteCompactWhenChildIsAnchoredToIt(t *t
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "task-call-1",
-			Title:         "TASK write akio",
+			Title:         "Task write akio",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"action": "write", "task_id": "akio"},
-			Meta:          acpToolNameMeta("TASK"),
+			Meta:          acpToolNameMeta("Task"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -1972,7 +1963,7 @@ func TestHandleACPEventEnvelopeKeepsTaskWriteCompactWhenChildIsAnchoredToIt(t *t
 		ScopeID:   "akio",
 		Actor:     "explorer",
 		Final:     true,
-		Meta:      parentToolStreamMeta("task-call-1", "TASK"),
+		Meta:      parentToolStreamMeta("task-call-1", "Task"),
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentMessage,
 			Content:       schema.TextContent{Type: "text", Text: "child write response"},
@@ -1998,7 +1989,7 @@ func TestHandleACPEventEnvelopeKeepsTaskWriteCompactWhenChildIsAnchoredToIt(t *t
 		Actor:     "explorer",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "task-call-1",
-			ToolName:   "TASK",
+			ToolName:   "Task",
 		},
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
@@ -2026,7 +2017,7 @@ func TestHandleACPEventEnvelopeAppliesSpawnFinalRuntimeResultWithoutTerminalOutp
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	spawnMeta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "SPAWN",
+		metautil.RuntimeToolName: "Spawn",
 	})
 	spawnMeta = metautil.WithRuntimeSection(spawnMeta, metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID:         "task-1",
@@ -2038,7 +2029,7 @@ func TestHandleACPEventEnvelopeAppliesSpawnFinalRuntimeResultWithoutTerminalOutp
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "spawn-1",
-			Title:         "SPAWN reviewer: inspect",
+			Title:         "Spawn reviewer: inspect",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusPending,
 			RawInput:      map[string]any{"agent": "reviewer", "prompt": "inspect"},
@@ -2066,7 +2057,7 @@ func TestHandleACPEventEnvelopeAppliesSpawnFinalRuntimeResultWithoutTerminalOutp
 
 	block := requireMainACPTurnBlockForTest(t, model)
 	if len(block.Events) != 1 {
-		t.Fatalf("main events = %#v, want one SPAWN tool event", block.Events)
+		t.Fatalf("main events = %#v, want one Spawn tool event", block.Events)
 	}
 	event := block.Events[0]
 	if !event.Done || event.Output != "Final child result" {
@@ -2084,7 +2075,7 @@ func TestHandleACPEventEnvelopeAppliesApprovalReview(t *testing.T) {
 		SessionID: "session-1",
 		ApprovalReview: &eventstream.ApprovalReview{
 			ToolCallID: "call-1",
-			ToolName:   "RUN_COMMAND",
+			ToolName:   "RunCommand",
 			RawInput:   map[string]any{"command": "go test ./..."},
 			Status:     "in_progress",
 		},
@@ -2101,7 +2092,7 @@ func TestHandleACPEventEnvelopeAppliesApprovalReview(t *testing.T) {
 		SessionID: "session-1",
 		ApprovalReview: &eventstream.ApprovalReview{
 			ToolCallID:    "call-1",
-			ToolName:      "RUN_COMMAND",
+			ToolName:      "RunCommand",
 			RawInput:      map[string]any{"command": "go test ./..."},
 			Status:        "approved",
 			Risk:          "low",
@@ -3116,8 +3107,8 @@ func TestHandleACPEventEnvelopeKeepsCompactionForegroundAcrossBackgroundCommandS
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-1",
-			Title: "RUN_COMMAND long job", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-			RawInput: map[string]any{"command": "long job", "yield_time_ms": 250}, Meta: acpToolNameMeta("RUN_COMMAND"),
+			Title: "RunCommand long job", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"command": "long job", "yield_time_ms": 250}, Meta: acpToolNameMeta("RunCommand"),
 		},
 	})
 	if model.runningActivity.Phase != runningPhaseToolWait || model.runningActivity.Target != runningTargetShell {
@@ -3134,7 +3125,7 @@ func TestHandleACPEventEnvelopeKeepsCompactionForegroundAcrossBackgroundCommandS
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1", Status: &running,
 			// Stream-shaped display metadata alone must not suppress a canonical
 			// foreground result.
-			Meta: runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "", "append"),
+			Meta: runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "", "append"),
 		},
 	})
 	if model.runningActivity.Phase != runningPhaseModelWait {
@@ -3153,7 +3144,7 @@ func TestHandleACPEventEnvelopeKeepsCompactionForegroundAcrossBackgroundCommandS
 	backgroundFrame := func(status *string, meta map[string]any, sequence uint64) eventstream.Envelope {
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "runtime-terminal-1", Scope: eventstream.ScopeMain,
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "command-1", ToolName: "RunCommand"},
 			Delivery:   &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 			Position: &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
 				Generation: "task-stream-1", Sequence: sequence,
@@ -3168,7 +3159,7 @@ func TestHandleACPEventEnvelopeKeepsCompactionForegroundAcrossBackgroundCommandS
 	// carries none of the runtime stream display metadata.
 	model = applyACPEnvelopeForTest(t, model, backgroundFrame(
 		&running,
-		runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "", ""),
+		runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "", ""),
 		1,
 	))
 	if model.runningActivity.Phase != runningPhaseCompact || len(model.runningHintTracker.active) != 0 {
@@ -3181,7 +3172,7 @@ func TestHandleACPEventEnvelopeKeepsCompactionForegroundAcrossBackgroundCommandS
 
 	model = applyACPEnvelopeForTest(t, model, backgroundFrame(
 		&running,
-		runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "tail\n", "append"),
+		runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "tail\n", "append"),
 		2,
 	))
 	if model.runningActivity.Phase != runningPhaseCompact {
@@ -3191,7 +3182,7 @@ func TestHandleACPEventEnvelopeKeepsCompactionForegroundAcrossBackgroundCommandS
 	completed := schema.ToolStatusCompleted
 	model = applyACPEnvelopeForTest(t, model, backgroundFrame(
 		&completed,
-		runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "", "final"),
+		runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "", "final"),
 		3,
 	))
 	if model.runningActivity.Phase != runningPhaseCompact {
@@ -3462,12 +3453,12 @@ func TestProjectResumeReplayEventsUsesACPEnvelopeTrace(t *testing.T) {
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
-			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Title:         stringPtr("RunCommand echo ok"),
 			Kind:          stringPtr(schema.ToolKindExecute),
 			Status:        stringPtr(schema.ToolStatusCompleted),
 			RawInput:      map[string]any{"command": "echo ok"},
 			RawOutput:     map[string]any{"stdout": "ok\n"},
-			Meta:          acpToolNameMeta("RUN_COMMAND"),
+			Meta:          acpToolNameMeta("RunCommand"),
 		},
 	}, {
 		Kind:      eventstream.KindLifecycle,
@@ -3479,8 +3470,8 @@ func TestProjectResumeReplayEventsUsesACPEnvelopeTrace(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("projectResumeReplayEvents() = %#v, want tool + lifecycle", events)
 	}
-	if events[0].Kind != TranscriptEventTool || events[0].ToolCallID != "call-1" || events[0].ToolName != "RUN_COMMAND" {
-		t.Fatalf("tool replay event = %#v, want RUN_COMMAND ACP tool event", events[0])
+	if events[0].Kind != TranscriptEventTool || events[0].ToolCallID != "call-1" || events[0].ToolName != "RunCommand" {
+		t.Fatalf("tool replay event = %#v, want RunCommand ACP tool event", events[0])
 	}
 	if events[1].Kind != TranscriptEventLifecycle || events[1].State != "completed" {
 		t.Fatalf("lifecycle replay event = %#v, want completed lifecycle", events[1])
@@ -3731,7 +3722,7 @@ func TestMainTimelineStableToolAnchorUpdatesOriginalBlockAcrossUserBarrier(t *te
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		ToolCallID: "call-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 		ToolArgs:   "slow task",
 		ToolOutput: "started\n",
 	})
@@ -3748,7 +3739,7 @@ func TestMainTimelineStableToolAnchorUpdatesOriginalBlockAcrossUserBarrier(t *te
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		ToolCallID: "call-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 		ToolArgs:   "slow task",
 		ToolOutput: "finished\n",
 		Final:      true,
@@ -3777,8 +3768,8 @@ func TestMainTimelineRepeatedToolCallIDAfterTerminalStartsNewBlock(t *testing.T)
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		TurnID:     "turn-1",
-		ToolCallID: "RUN_COMMAND",
-		ToolName:   "RUN_COMMAND",
+		ToolCallID: "RunCommand",
+		ToolName:   "RunCommand",
 		ToolArgs:   "first command",
 		ToolOutput: "first output\n",
 		Final:      true,
@@ -3796,8 +3787,8 @@ func TestMainTimelineRepeatedToolCallIDAfterTerminalStartsNewBlock(t *testing.T)
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		TurnID:     "turn-2",
-		ToolCallID: "RUN_COMMAND",
-		ToolName:   "RUN_COMMAND",
+		ToolCallID: "RunCommand",
+		ToolName:   "RunCommand",
 		ToolArgs:   "second command",
 		ToolOutput: "second output\n",
 		Final:      true,
@@ -3824,23 +3815,23 @@ func TestMainTimelineRoutesCrossTurnTaskObserverStreamToOriginalCommandPanel(t *
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-1",
-			Title: "RUN_COMMAND long job", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "RunCommand long job", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 			RawInput: map[string]any{"command": "long job", "yield_time_ms": 250},
 			Content:  []schema.ToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
-			Meta:     acpToolNameMeta("RUN_COMMAND"),
+			Meta:     acpToolNameMeta("RunCommand"),
 		},
 	})
 	running := schema.ToolStatusInProgress
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "command-1", ToolName: "RunCommand"},
 		Delivery:   &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Position: &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
 			Generation: "task-stream-1", Sequence: 1,
 		}},
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1", Status: &running,
-			Meta: runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "initial\n", "append"),
+			Meta: runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "initial\n", "append"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, completedRegressionTurn("session-1", "turn-1"))
@@ -3848,36 +3839,36 @@ func TestMainTimelineRoutesCrossTurnTaskObserverStreamToOriginalCommandPanel(t *
 	model.commitUserDisplayLine("wait for the command")
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(271, 0))
 	taskInput := map[string]any{"action": "wait", "task_id": "task-1", "target_kind": "terminal"}
-	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("TASK"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "TASK", metautil.RuntimeToolAction: "wait",
+	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "wait",
 		metautil.RuntimeTargetID: "task-1", metautil.RuntimeTargetKind: "terminal",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-wait-1",
-			Title: "TASK wait task-1", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "Task wait task-1", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 			RawInput: taskInput, Meta: taskMeta,
 		},
 	})
 	foreground := model.runningActivity
 	if foreground.Key != "tool:turn-2:task-wait-1" || foreground.Target != runningTargetShell {
-		t.Fatalf("foreground activity = %#v, want Agent's TASK wait invocation", foreground)
+		t.Fatalf("foreground activity = %#v, want Agent's Task wait invocation", foreground)
 	}
 
-	// Control projects the physical command owner with the observing TASK TurnID.
+	// Control projects the physical command owner with the observing Task TurnID.
 	// The typed stream provenance plus exact CallID+TaskID must still update the
 	// original command panel instead of creating a duplicate in turn 2.
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2", Scope: eventstream.ScopeMain,
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "command-1", ToolName: "RunCommand"},
 		Delivery:   &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Position: &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
 			Generation: "task-stream-1", Sequence: 2,
 		}},
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1", Status: &running,
-			Meta: runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "tail\n", "append"),
+			Meta: runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "tail\n", "append"),
 		},
 	})
 
@@ -3975,7 +3966,7 @@ func TestApprovalPayloadFromACPEventUsesStandardPermission(t *testing.T) {
 			ToolCall: schema.ToolCallUpdate{
 				SessionUpdate: schema.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Title:         stringPtr("RUN_COMMAND go test ./..."),
+				Title:         stringPtr("RunCommand go test ./..."),
 				Kind:          stringPtr(schema.ToolKindExecute),
 				RawInput: map[string]any{
 					"command":             "go test ./...",
@@ -3990,12 +3981,12 @@ func TestApprovalPayloadFromACPEventUsesStandardPermission(t *testing.T) {
 				Kind:     "allow_once",
 			}},
 		},
-		Meta: acpToolNameMeta("RUN_COMMAND"),
+		Meta: acpToolNameMeta("RunCommand"),
 	})
 	if req == nil {
 		t.Fatal("approvalPayloadFromACPEvent() = nil")
 	}
-	if req.RequestID != "approval-child-1" || req.ToolCallID != "call-1" || req.ToolName != "RUN_COMMAND" || req.Reason != "needs execution" {
+	if req.RequestID != "approval-child-1" || req.ToolCallID != "call-1" || req.ToolName != "RunCommand" || req.Reason != "needs execution" {
 		t.Fatalf("approval payload = %#v, want ACP permission fields", req)
 	}
 	if len(req.Options) != 1 || req.Options[0].ID != "allow_once" {

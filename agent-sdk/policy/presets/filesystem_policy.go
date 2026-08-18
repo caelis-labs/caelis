@@ -8,7 +8,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func decideFilesystemWrite(input policy.ToolContext, def sandbox.Constraints) (policy.Decision, error) {
@@ -166,20 +165,15 @@ func candidatePaths(input policy.ToolContext) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	name := toolName(input)
-	info, ok := names.LookupExecutable(name)
-	if !ok {
-		return nil, nil
-	}
-	switch info.ResultStyle {
-	case names.ResultRead, names.ResultMutation:
+	switch policyClass(input) {
+	case builtinPolicyReadPath, builtinPolicyWritePath:
 		return resolvePathsAgainstWorkspace(stringValues(args["path"]), input.Options.WorkspaceRoot), nil
-	case names.ResultSearch:
+	case builtinPolicySearchPath:
 		if roots := resolvePathsAgainstWorkspace(stringValues(args["path"]), input.Options.WorkspaceRoot); len(roots) > 0 {
 			return roots, nil
 		}
 		return resolvePathsAgainstWorkspace([]string{"."}, input.Options.WorkspaceRoot), nil
-	case names.ResultGlob:
+	case builtinPolicyGlobPath:
 		if roots := resolvePathsAgainstWorkspace(stringValues(args["path"]), input.Options.WorkspaceRoot); len(roots) > 0 {
 			return roots, nil
 		}

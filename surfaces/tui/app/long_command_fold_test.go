@@ -22,11 +22,11 @@ func TestProjectACPToolCallFoldsLongCommandAndKeepsFullArgs(t *testing.T) {
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "command-1",
-			Title:         "RUN_COMMAND python3",
+			Title:         "RunCommand python3",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": command},
-			Meta:          acpToolNameMeta("RUN_COMMAND"),
+			Meta:          acpToolNameMeta("RunCommand"),
 		},
 	})
 	if len(events) != 1 {
@@ -74,11 +74,11 @@ func TestProjectACPToolCallFoldsLongCommandAndKeepsFullArgs(t *testing.T) {
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "command-2",
-			Title:         "RUN_COMMAND go test ./...",
+			Title:         "RunCommand go test ./...",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": "go test ./..."},
-			Meta:          acpToolNameMeta("RUN_COMMAND"),
+			Meta:          acpToolNameMeta("RunCommand"),
 		},
 	})
 	if len(short) != 1 || short[0].ToolArgs != "go test ./..." || short[0].ToolFullArgs != "" {
@@ -96,10 +96,10 @@ func TestProjectACPToolCallFoldsLongCommandFromTitleWithoutRawInput(t *testing.T
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "command-title-only",
-			Title:         "RUN_COMMAND " + command,
+			Title:         "RunCommand " + command,
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
-			Meta:          acpToolNameMeta("RUN_COMMAND"),
+			Meta:          acpToolNameMeta("RunCommand"),
 		},
 	})
 	if len(events) != 1 {
@@ -128,15 +128,15 @@ func TestLongCommandHeaderClickExpandsAndCollapsesCommand(t *testing.T) {
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "command-1",
-			Title:         "RUN_COMMAND python3",
+			Title:         "RunCommand python3",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": command},
-			Meta:          acpToolNameMeta("RUN_COMMAND"),
+			Meta:          acpToolNameMeta("RunCommand"),
 		},
 	})
 	completed := schema.ToolStatusCompleted
-	title := "RUN_COMMAND python3"
+	title := "RunCommand python3"
 	kind := schema.ToolKindExecute
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
@@ -148,7 +148,7 @@ func TestLongCommandHeaderClickExpandsAndCollapsesCommand(t *testing.T) {
 			Title:         &title,
 			Kind:          &kind,
 			Status:        &completed,
-			Meta:          acpToolNameMeta("RUN_COMMAND"),
+			Meta:          acpToolNameMeta("RunCommand"),
 		},
 	})
 	block := requireMainACPTurnBlockForTest(t, model)

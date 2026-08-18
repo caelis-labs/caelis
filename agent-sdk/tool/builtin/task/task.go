@@ -7,10 +7,9 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const ToolName = names.Task
+const ToolName = "Task"
 
 var allowedArgs = []string{"action", "handle", "input", "append_newline"}
 

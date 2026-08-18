@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
@@ -53,7 +51,7 @@ func terminalTextContent(content any) string {
 
 func withDisplayTerminal(call ToolCall, name string, args map[string]any) ToolCall {
 	call.Meta = acpMetaWithToolName(call.Meta, name)
-	terminalID, ok := display.DisplayTerminalID(call.ToolCallID, name)
+	terminalID, ok := projectedDisplayTerminalID(call.ToolCallID, name)
 	if !ok {
 		return call
 	}
@@ -64,7 +62,7 @@ func withDisplayTerminal(call ToolCall, name string, args map[string]any) ToolCa
 
 func withDisplayTerminalUpdate(update ToolCallUpdate, toolCallID string, name string) ToolCallUpdate {
 	update.Meta = acpMetaWithToolName(update.Meta, name)
-	terminalID, ok := display.DisplayTerminalID(toolCallID, name)
+	terminalID, ok := projectedDisplayTerminalID(toolCallID, name)
 	if !ok || strings.TrimSpace(terminalID) == "" {
 		return update
 	}
@@ -151,26 +149,19 @@ func terminalExitCode(raw any) *int {
 func protocolToolNameForUpdate(event *session.Event, update *session.ProtocolUpdate) string {
 	var updateMeta map[string]any
 	var eventMeta map[string]any
-	var rawInput map[string]any
-	var title string
 	var kind string
 	if event != nil {
 		eventMeta = event.Meta
 	}
 	if update != nil {
 		updateMeta = update.Meta
-		rawInput = update.RawInput
-		title = protocolToolNameFromTitle(update.Title)
 		kind = update.Kind
 	}
 	candidates := []string{
 		protocolToolNameFromKind(protocolCanonicalEventToolName(event, update)),
 		protocolToolNameFromMeta(updateMeta),
 		protocolToolNameFromMeta(eventMeta),
-		protocolToolNameFromRawInput(rawInput),
-		protocolKnownToolName(title),
 		protocolToolNameFromKind(kind),
-		title,
 	}
 	for _, candidate := range candidates {
 		if candidate = strings.TrimSpace(candidate); candidate != "" {
@@ -219,14 +210,6 @@ func protocolCanonicalEventToolName(event *session.Event, update *session.Protoc
 	return ""
 }
 
-func protocolToolNameFromTitle(title string) string {
-	fields := strings.Fields(strings.TrimSpace(title))
-	if len(fields) == 0 {
-		return ""
-	}
-	return fields[0]
-}
-
 func protocolToolNameFromMeta(meta map[string]any) string {
 	return protocolToolNameFromKind(metautil.String(
 		meta,
@@ -237,50 +220,6 @@ func protocolToolNameFromMeta(meta map[string]any) string {
 	))
 }
 
-func protocolToolNameFromRawInput(rawInput map[string]any) string {
-	if len(rawInput) == 0 {
-		return ""
-	}
-	if command := display.MapString(rawInput, "command"); command != "" {
-		return names.RunCommand
-	}
-	if agent := display.MapString(rawInput, "agent"); agent != "" {
-		return names.Spawn
-	}
-	if prompt := display.MapString(rawInput, "prompt"); prompt != "" {
-		return names.Spawn
-	}
-	return ""
-}
-
 func protocolToolNameFromKind(kind string) string {
-	kind = strings.TrimSpace(kind)
-	if kind == "" {
-		return ""
-	}
-	if canonical, ok := names.Resolve(kind); ok {
-		return canonical
-	}
-	if compatibility := protocolCompatibilityToolName(kind); compatibility != "" {
-		return compatibility
-	}
-	return kind
-}
-
-func protocolKnownToolName(name string) string {
-	if canonical, ok := names.Resolve(name); ok {
-		return canonical
-	}
-	return protocolCompatibilityToolName(name)
-}
-
-func protocolCompatibilityToolName(name string) string {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "rg":
-		return "RG"
-	case "find":
-		return "FIND"
-	default:
-		return ""
-	}
+	return strings.TrimSpace(kind)
 }

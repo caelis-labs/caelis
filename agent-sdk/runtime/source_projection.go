@@ -6,9 +6,9 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 // liveContentOwnership records only which logical Assistant message already
@@ -167,19 +167,15 @@ func taskStreamOwnsTerminalContent(event *session.Event) bool {
 	if event == nil || event.Tool == nil {
 		return false
 	}
+	if !taskRuntimeMetaBool(event.Meta, toolbinding.MetadataSection, toolbinding.MetadataTaskResult) {
+		return false
+	}
 	if strings.TrimSpace(taskRuntimeMetaString(event.Meta, "task", "task_id")) == "" {
 		return false
 	}
-	switch identity.CanonicalOrSelf(event.Tool.Name) {
-	case identity.RunCommand:
-		return true
-	case identity.Task:
-		targetKind := firstNonEmpty(
-			taskRuntimeMetaString(event.Meta, "tool", "target_kind"),
-			taskRuntimeMetaString(event.Meta, "task", "kind"),
-		)
-		return strings.EqualFold(strings.TrimSpace(targetKind), string(taskapi.KindCommand))
-	default:
-		return false
-	}
+	targetKind := firstNonEmpty(
+		taskRuntimeMetaString(event.Meta, "tool", "target_kind"),
+		taskRuntimeMetaString(event.Meta, "task", "kind"),
+	)
+	return strings.EqualFold(strings.TrimSpace(targetKind), string(taskapi.KindCommand))
 }

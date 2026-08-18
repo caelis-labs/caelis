@@ -328,7 +328,7 @@ func TestStoreAppendRejectsProtocolOnlyCoreToolResult(t *testing.T) {
 		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
 			SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 			ToolCallID:    "call-1",
-			Kind:          "RUN_COMMAND",
+			Kind:          "RunCommand",
 			RawOutput:     map[string]any{"stdout": "ok"},
 		}},
 	}})

@@ -9,7 +9,7 @@ func TestApprovalToPromptRequestIncludesSandboxDetails(t *testing.T) {
 	t.Parallel()
 
 	msg := approvalToPromptRequest(&approvalPayload{
-		ToolName:           "RUN_COMMAND",
+		ToolName:           "RunCommand",
 		RawInput:           map[string]any{"command": "git fetch"},
 		Reason:             "host execution requires user approval",
 		Justification:      "Do you want to run git fetch on the host?",
@@ -57,12 +57,12 @@ func TestApprovalReviewPendingHintPrefersCommandOverUnknownTool(t *testing.T) {
 func TestApprovalReviewPendingHintMapsToolNameToDisplayLabel(t *testing.T) {
 	t.Parallel()
 
-	hint := approvalReviewPendingHint("RUN_COMMAND", nil, 80)
+	hint := approvalReviewPendingHint("RunCommand", nil, 80)
 
 	if hint != "Reviewing approval request: Ran" {
 		t.Fatalf("approvalReviewPendingHint() = %q, want display label", hint)
 	}
-	if strings.Contains(hint, "RUN_COMMAND") {
+	if strings.Contains(hint, "RunCommand") {
 		t.Fatalf("approvalReviewPendingHint() = %q, should not expose raw tool name", hint)
 	}
 }
@@ -70,7 +70,7 @@ func TestApprovalReviewPendingHintMapsToolNameToDisplayLabel(t *testing.T) {
 func TestApprovalReviewPendingHintTruncatesToSingleLineBudget(t *testing.T) {
 	t.Parallel()
 
-	hint := approvalReviewPendingHint("RUN_COMMAND", map[string]any{
+	hint := approvalReviewPendingHint("RunCommand", map[string]any{
 		"command": "printf 'first line'\nprintf 'second line'\nprintf 'third line'",
 	}, 42)
 

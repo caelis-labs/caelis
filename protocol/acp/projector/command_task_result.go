@@ -1,7 +1,7 @@
 package projector
 
 import (
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -24,7 +24,7 @@ func CommandTaskResultsFromEnvelope(env eventstream.Envelope) []CommandTaskResul
 func commandTaskResultsFromObservations(observations []terminalTaskObservation) []CommandTaskResult {
 	out := make([]CommandTaskResult, 0, len(observations))
 	for _, observation := range observations {
-		if observation.ParentTool != identity.RunCommand ||
+		if observation.ParentTool != shell.RunCommandToolName ||
 			(observation.TargetKind != "command" && observation.TargetKind != "terminal") {
 			continue
 		}

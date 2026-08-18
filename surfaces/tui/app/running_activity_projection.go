@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
@@ -166,17 +165,17 @@ func (m *Model) applyToolRunningActivity(event TranscriptEvent) {
 		return
 	}
 
-	semanticName := names.CanonicalOrSelf(toolSemanticName(event.ToolName, event.ToolKind))
+	semanticName := event.ToolName
 	switch semanticName {
-	case names.WebSearch:
+	case surfaceToolWebSearch:
 		m.setRunningToolActivity(runningPhaseSearch, "", key, event.ToolCallID)
-	case names.WebFetch:
+	case surfaceToolWebFetch:
 		m.setRunningToolActivity(runningPhaseFetch, "", key, event.ToolCallID)
-	case names.RunCommand:
+	case surfaceToolRunCommand:
 		m.setRunningToolActivity(runningPhaseToolWait, runningTargetShell, key, event.ToolCallID)
-	case names.Spawn:
+	case surfaceToolSpawn:
 		m.setRunningToolActivity(runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
-	case names.Task:
+	case surfaceToolTask:
 		action := strings.ToLower(strings.TrimSpace(event.ToolTaskAction))
 		target := m.taskControlActivityTarget(event)
 		switch action {
@@ -200,10 +199,10 @@ func (m *Model) observeRunningActivityTargets(events []TranscriptEvent) {
 			continue
 		}
 		var target runningActivityTarget
-		switch names.CanonicalOrSelf(toolSemanticName(event.ToolName, event.ToolKind)) {
-		case names.RunCommand:
+		switch event.ToolName {
+		case surfaceToolRunCommand:
 			target = runningTargetShell
-		case names.Spawn:
+		case surfaceToolSpawn:
 			target = runningTargetSubagent
 		default:
 			continue
@@ -230,10 +229,10 @@ func (m *Model) observeToolPresentationOwner(block *MainACPTurnBlock, event Tran
 		return
 	}
 	var target runningActivityTarget
-	switch names.CanonicalOrSelf(toolSemanticName(event.ToolName, event.ToolKind)) {
-	case names.RunCommand:
+	switch event.ToolName {
+	case surfaceToolRunCommand:
 		target = runningTargetShell
-	case names.Spawn:
+	case surfaceToolSpawn:
 		target = runningTargetSubagent
 	default:
 		return
@@ -256,10 +255,10 @@ func (m *Model) taskControlActivityTarget(event TranscriptEvent) runningActivity
 	case "task":
 		return runningTargetTask
 	}
-	switch names.CanonicalOrSelf(toolSemanticName(event.AnchorToolName, "")) {
-	case names.RunCommand:
+	switch event.AnchorToolName {
+	case surfaceToolRunCommand:
 		return runningTargetShell
-	case names.Spawn:
+	case surfaceToolSpawn:
 		return runningTargetSubagent
 	}
 	handles := runningActivityTaskHandles(event.ToolTaskHandle)

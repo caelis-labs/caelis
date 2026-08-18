@@ -568,17 +568,17 @@ func TestEstimateModelRequestTokensIncludesStructuredRequestParts(t *testing.T) 
 			model.NewTextMessage(model.RoleUser, "search first"),
 			model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 				ID:   "call-1",
-				Name: "SEARCH",
+				Name: "Grep",
 				Args: string(toolInput),
 			}}, ""),
 			model.MessageFromToolResponse(&model.ToolResponse{
 				ID:     "call-1",
-				Name:   "SEARCH",
+				Name:   "Grep",
 				Result: map[string]any{"result": "found source"},
 			}),
 		},
 		Tools: []model.ToolSpec{
-			model.NewFunctionToolSpec("SEARCH", "search docs", map[string]any{"type": "object"}),
+			model.NewFunctionToolSpec("Grep", "search docs", map[string]any{"type": "object"}),
 		},
 		Output: &model.OutputSpec{
 			Mode:            model.OutputModeJSON,
@@ -591,7 +591,7 @@ func TestEstimateModelRequestTokensIncludesStructuredRequestParts(t *testing.T) 
 	wantAtLeast := estimateTextTokens("follow the tool result") +
 		estimateMediaPartTokens(req.Instructions[1].Media) +
 		estimateTextTokens("search first") +
-		estimateTextTokens("SEARCH") +
+		estimateTextTokens("Grep") +
 		estimateTextTokens(string(toolInput)) +
 		estimateTextTokens("found source")
 	if got < wantAtLeast {

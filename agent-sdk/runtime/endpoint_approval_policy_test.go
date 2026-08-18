@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 )
 
 func TestDangerFullAccessResolvesControllerPermissionsBeforeApprovalRequester(t *testing.T) {
@@ -31,7 +31,7 @@ func TestDangerFullAccessResolvesControllerPermissionsBeforeApprovalRequester(t 
 		Mode: presets.ModeDangerFullAccess,
 		ToolCall: controller.ApprovalToolCall{
 			ID:       "call-allow",
-			Name:     identity.RunCommand,
+			Name:     shell.RunCommandToolName,
 			RawInput: map[string]any{"command": "go test ./..."},
 		},
 		Options: endpointApprovalTestOptions(),
@@ -48,6 +48,7 @@ func TestDangerFullAccessResolvesControllerPermissionsBeforeApprovalRequester(t 
 		ToolCall: controller.ApprovalToolCall{
 			ID:       "call-deny",
 			Name:     "execute",
+			Kind:     "execute",
 			RawInput: map[string]any{"cmd": "rm -rf /"},
 		},
 		Options: endpointApprovalTestOptions(),
@@ -75,7 +76,7 @@ func TestDangerFullAccessResolvesSubagentPermissionsBeforeApprovalRequester(t *t
 		Mode: presets.ModeDangerFullAccess,
 		ToolCall: subagent.ApprovalToolCall{
 			ID:       "call-subagent",
-			Name:     identity.RunCommand,
+			Name:     shell.RunCommandToolName,
 			RawInput: map[string]any{"command": "go test ./..."},
 		},
 		Options: endpointApprovalTestOptions(),

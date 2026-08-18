@@ -359,9 +359,6 @@ func toolArgsWithName(name string, raw any) string {
 		}
 		return ""
 	}
-	if strings.EqualFold(strings.TrimSpace(name), "LIST") && listArgsHaveNoDisplayValue(values) {
-		return ""
-	}
 	kind := strings.ToLower(strings.TrimSpace(asString(values["kind"])))
 	switch kind {
 	case "search":
@@ -389,15 +386,6 @@ func toolArgsWithName(name string, raw any) string {
 		return truncateInline(value, 120)
 	}
 	return ""
-}
-
-func listArgsHaveNoDisplayValue(values map[string]any) bool {
-	for _, key := range []string{"path", "target", "source", "cwd"} {
-		if strings.TrimSpace(asString(values[key])) != "" {
-			return false
-		}
-	}
-	return true
 }
 
 func primaryValue(raw any) string {

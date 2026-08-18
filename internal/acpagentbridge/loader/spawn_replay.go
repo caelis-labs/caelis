@@ -5,7 +5,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -182,7 +182,7 @@ func sessionEventOwnsSpawnCall(event *session.Event, toolCallID string) bool {
 		return false
 	}
 	if event.Tool != nil && strings.TrimSpace(event.Tool.ID) == toolCallID &&
-		identity.CanonicalOrSelf(event.Tool.Name) == identity.Spawn {
+		event.Tool.Name == spawn.ToolName {
 		return true
 	}
 	message := event.Message
@@ -195,20 +195,20 @@ func sessionEventOwnsSpawnCall(event *session.Event, toolCallID string) bool {
 		return false
 	}
 	for _, call := range message.ToolCalls() {
-		if strings.TrimSpace(call.ID) == toolCallID && identity.CanonicalOrSelf(call.Name) == identity.Spawn {
+		if strings.TrimSpace(call.ID) == toolCallID && call.Name == spawn.ToolName {
 			return true
 		}
 	}
 	response := message.ToolResponse()
 	return response != nil && strings.TrimSpace(response.ID) == toolCallID &&
-		identity.CanonicalOrSelf(response.Name) == identity.Spawn
+		response.Name == spawn.ToolName
 }
 
 func finalSpawnEventKey(event *session.Event) spawnReplayKey {
 	if event == nil {
 		return spawnReplayKey{}
 	}
-	if event.Tool != nil && identity.CanonicalOrSelf(event.Tool.Name) == identity.Spawn &&
+	if event.Tool != nil && event.Tool.Name == spawn.ToolName &&
 		toolStatusFinalString(event.Tool.Status) {
 		return spawnReplayKeyForRawOutput(event.Tool.ID, event.Tool.Output)
 	}
@@ -279,7 +279,7 @@ func finalSpawnEventFingerprint(event *session.Event) spawnReplayTerminalFingerp
 	if event == nil {
 		return spawnReplayTerminalFingerprint{}
 	}
-	if event.Tool != nil && identity.CanonicalOrSelf(event.Tool.Name) == identity.Spawn &&
+	if event.Tool != nil && event.Tool.Name == spawn.ToolName &&
 		toolStatusFinalString(event.Tool.Status) {
 		return spawnReplayFingerprint(event.Tool.Status, event.Tool.Output)
 	}

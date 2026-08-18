@@ -10,7 +10,7 @@ func TestMessageFromToolCallsNormalizesInvalidToolInputForJSONPersistence(t *tes
 	rawArgs := `* SEARCH "gm_license"`
 	msg := MessageFromToolCalls(RoleAssistant, []ToolCall{{
 		ID:   "call-search",
-		Name: "SEARCH",
+		Name: "Grep",
 		Args: rawArgs,
 	}}, "")
 
@@ -59,7 +59,7 @@ func TestMessageFromToolCallsKeepsValidJSONToolInput(t *testing.T) {
 	rawArgs := `{"pattern":"gm_license"}`
 	msg := MessageFromToolCalls(RoleAssistant, []ToolCall{{
 		ID:   "call-search",
-		Name: "SEARCH",
+		Name: "Grep",
 		Args: rawArgs,
 	}}, "")
 

@@ -21,7 +21,6 @@ import (
 	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 // Core tools are always visible to the model, so each definition must leave
@@ -81,9 +80,6 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 
 func TestCoreToolsExposeOnlyCanonicalPascalCaseNames(t *testing.T) {
 	t.Parallel()
-	if names.ToolSearch != tool.ToolSearchToolName {
-		t.Fatalf("ToolSearch names drifted: builtin=%q public=%q", names.ToolSearch, tool.ToolSearchToolName)
-	}
 
 	rt, err := host.New(host.Config{CWD: t.TempDir()})
 	if err != nil {
@@ -98,8 +94,10 @@ func TestCoreToolsExposeOnlyCanonicalPascalCaseNames(t *testing.T) {
 		got = append(got, configured.Definition().Name)
 	}
 	want := []string{
-		names.Read, names.ViewImage, names.Write, names.Patch, names.Glob, names.Grep,
-		names.RunCommand, names.Task, names.Plan, names.Skill, names.WebSearch, names.WebFetch,
+		filesystem.ReadToolName, filesystem.ViewImageToolName, filesystem.WriteToolName,
+		filesystem.PatchToolName, filesystem.GlobToolName, filesystem.SearchToolName,
+		shell.RunCommandToolName, task.ToolName, plan.ToolName, skilltool.ToolName,
+		web.SearchToolName, web.FetchToolName,
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("core tool names = %#v, want %#v", got, want)
@@ -303,30 +301,6 @@ func TestCoreSearchAndGlobSchemasRemainStrict(t *testing.T) {
 		if !spec.Function.Strict {
 			t.Fatalf("%s Function.Strict = false, want strict inferred from closed schema", name)
 		}
-	}
-}
-
-func TestEnsureCoreToolsRejectsReservedBuiltinNames(t *testing.T) {
-	t.Parallel()
-
-	userTool := tool.NamedTool{Def: tool.Definition{Name: filesystem.ReadToolName}}
-	_, err := EnsureCoreTools([]tool.Tool{userTool}, nil)
-	if err == nil {
-		t.Fatal("EnsureCoreTools() error = nil, want reserved name failure")
-	}
-}
-
-func TestEnsureCoreToolsRejectsHistoricalBuiltinNamesButNotRemovedList(t *testing.T) {
-	t.Parallel()
-
-	for _, name := range []string{"READ", "SEARCH", "RUN_COMMAND", "web_search", "tool_search"} {
-		_, err := EnsureCoreTools([]tool.Tool{tool.NamedTool{Def: tool.Definition{Name: name}}}, nil)
-		if err == nil {
-			t.Fatalf("EnsureCoreTools(%q) error = nil, want reserved name failure", name)
-		}
-	}
-	if _, err := EnsureCoreTools([]tool.Tool{tool.NamedTool{Def: tool.Definition{Name: "List"}}}, nil); err != nil {
-		t.Fatalf("EnsureCoreTools(List) error = %v, removed List must not alias another built-in", err)
 	}
 }
 
@@ -578,7 +552,7 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 func mustLookupTool(t *testing.T, tools []tool.Tool, name string) tool.Tool {
 	t.Helper()
 	for _, item := range tools {
-		if item != nil && tool.CanonicalName(item.Definition().Name) == tool.CanonicalName(name) {
+		if item != nil && item.Definition().Name == name {
 			return item
 		}
 	}

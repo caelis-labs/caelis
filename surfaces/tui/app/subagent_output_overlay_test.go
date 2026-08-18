@@ -36,11 +36,11 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "spawn-1",
-			Title:         "SPAWN explorer: inspect task streams",
+			Title:         "Spawn explorer: inspect task streams",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect task streams"},
-			Meta:          acpToolNameMeta("SPAWN"),
+			Meta:          acpToolNameMeta("Spawn"),
 		},
 	})
 	running := schema.ToolStatusInProgress
@@ -54,7 +54,7 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 			ToolCallID:    "spawn-1",
 			Status:        &running,
 			RawOutput:     map[string]any{"handle": "zuri", "state": "running"},
-			Meta:          acpToolNameMeta("SPAWN"),
+			Meta:          acpToolNameMeta("Spawn"),
 		},
 	})
 
@@ -68,7 +68,7 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 			Actor:     "explorer",
 			ParentTool: &eventstream.ParentToolRelation{
 				ToolCallID: "spawn-1",
-				ToolName:   "SPAWN",
+				ToolName:   "Spawn",
 			},
 			Update: update,
 		}
@@ -114,7 +114,7 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 		Actor:     "explorer",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "SPAWN",
+			ToolName:   "Spawn",
 		},
 		Notice: "retrying child request",
 	})
@@ -127,7 +127,7 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 		Actor:     "explorer",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "SPAWN",
+			ToolName:   "Spawn",
 		},
 		Err: errors.New("child transport failed"),
 	})
@@ -197,11 +197,11 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 			Update: schema.ToolCall{
 				SessionUpdate: schema.UpdateToolCall,
 				ToolCallID:    "spawn-1",
-				Title:         "SPAWN breeze: inspect process state",
+				Title:         "Spawn breeze: inspect process state",
 				Kind:          schema.ToolKindExecute,
 				Status:        schema.ToolStatusInProgress,
 				RawInput:      map[string]any{"agent": "breeze", "prompt": "inspect process state"},
-				Meta:          acpToolNameMeta("SPAWN"),
+				Meta:          acpToolNameMeta("Spawn"),
 			},
 		})
 	}
@@ -214,7 +214,7 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 		Actor:     "breeze",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "SPAWN",
+			ToolName:   "Spawn",
 		},
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
@@ -236,11 +236,11 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 		Actor:   "breeze",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "SPAWN",
+			ToolName:   "Spawn",
 		},
 		ApprovalReview: &eventstream.ApprovalReview{
 			ToolCallID:    "child-command-1",
-			ToolName:      "RUN_COMMAND",
+			ToolName:      "RunCommand",
 			RawInput:      map[string]any{"command": "ps aux | head -5"},
 			Status:        "denied",
 			Risk:          "low",
@@ -297,13 +297,13 @@ func TestSubagentOutputViewUsesSpawnOnlyForIdentityAndDropsSyntheticNoOutput(t *
 	view := model.ensureSubagentOutputView("spawn-1")
 	initialStatus := view.block.Status
 	view.observeOwnerIdentity(SubagentEvent{
-		Kind: SEToolCall, CallID: "spawn-1", Name: "SPAWN",
+		Kind: SEToolCall, CallID: "spawn-1", Name: "Spawn",
 		Args: "xena[breeze]: inspect", TaskHandle: "xena",
 		Done: true, Output: "(no output)", OutputSynthetic: true,
 	})
 	view.observeChildEvent(TranscriptEvent{
 		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent,
-		Actor: "self", TurnID: "task-1:1", AnchorToolCallID: "spawn-1", AnchorToolName: "SPAWN",
+		Actor: "self", TurnID: "task-1:1", AnchorToolCallID: "spawn-1", AnchorToolName: "Spawn",
 		NarrativeKind: TranscriptNarrativeReasoning, Text: "child reasoning",
 	})
 
@@ -398,7 +398,7 @@ func TestOpeningSubagentOutputOverlayDoesNotCompleteRunningChild(t *testing.T) {
 	// child Task is independently still running.
 	block.UpdateToolWithMeta(
 		"spawn-1",
-		"SPAWN",
+		"Spawn",
 		"zuri[breeze]: inspect",
 		"(no output)",
 		true,
@@ -463,7 +463,7 @@ func TestSubagentOutputOverlayDeduplicatesSameProjectionAcrossDeliveryPaths(t *t
 		ScopeID:            "zuri",
 		Actor:              "reviewer",
 		AnchorToolCallID:   "spawn-1",
-		AnchorToolName:     "SPAWN",
+		AnchorToolName:     "Spawn",
 		SourceEventID:      "child-event-1",
 		SourceProjectionID: "child-event-1:0",
 		MessageID:          "child-message-1",
@@ -495,7 +495,7 @@ func TestSubagentOutputOverlayLatePlanDoesNotReopenTerminalStatus(t *testing.T) 
 		Scope:            ACPProjectionSubagent,
 		ScopeID:          "zuri",
 		AnchorToolCallID: "spawn-1",
-		AnchorToolName:   "SPAWN",
+		AnchorToolName:   "Spawn",
 		State:            eventstream.LifecycleStateCompleted,
 	})
 	view.observeChildEvent(TranscriptEvent{
@@ -503,7 +503,7 @@ func TestSubagentOutputOverlayLatePlanDoesNotReopenTerminalStatus(t *testing.T) 
 		Scope:            ACPProjectionSubagent,
 		ScopeID:          "zuri",
 		AnchorToolCallID: "spawn-1",
-		AnchorToolName:   "SPAWN",
+		AnchorToolName:   "Spawn",
 		PlanEntries: []transcript.PlanEntry{{
 			Content: "late plan projection",
 			Status:  "completed",
@@ -587,7 +587,7 @@ func TestVisibleSubagentOutputOverlaySchedulesRefreshFromTranscriptPath(t *testi
 		ScopeID:          "zuri",
 		Actor:            "reviewer",
 		AnchorToolCallID: "spawn-1",
-		AnchorToolName:   "SPAWN",
+		AnchorToolName:   "Spawn",
 		NarrativeKind:    TranscriptNarrativeAssistant,
 		Text:             "live child output from the Session projection",
 	}}})
@@ -912,14 +912,14 @@ func TestSubagentOutputOverlayRunCommandUsesParticipantPanelDefaults(t *testing.
 	view.observeChildEvent(TranscriptEvent{
 		Kind:       TranscriptEventTool,
 		ToolCallID: "command-date",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 		ToolKind:   "execute",
 		ToolArgs:   "date",
 	})
 	view.observeChildEvent(TranscriptEvent{
 		Kind:       TranscriptEventTool,
 		ToolCallID: "command-date",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 		ToolKind:   "execute",
 		ToolArgs:   "date",
 		ToolOutput: "Thu Jul 30 16:42:00 CST 2026",
@@ -930,14 +930,14 @@ func TestSubagentOutputOverlayRunCommandUsesParticipantPanelDefaults(t *testing.
 	overlay := subagentOutputOverlayPlain(model)
 	if !strings.Contains(overlay, "• Ran date") ||
 		!strings.Contains(overlay, "Thu Jul 30 16:42:00 CST 2026") {
-		t.Fatalf("completed RUN_COMMAND did not retain the participant transcript defaults:\n%s", overlay)
+		t.Fatalf("completed RunCommand did not retain the participant transcript defaults:\n%s", overlay)
 	}
 	if !view.block.toolPanelExpanded("command-date") {
-		t.Fatal("completed RUN_COMMAND was collapsed only in the subagent overlay")
+		t.Fatal("completed RunCommand was collapsed only in the subagent overlay")
 	}
 	for _, token := range model.subagentOutputOverlay.geometry.rowTokens {
 		if token == acpToolPanelClickToken("command-date") {
-			t.Fatalf("short RUN_COMMAND exposed a click target with no hidden details:\n%s", overlay)
+			t.Fatalf("short RunCommand exposed a click target with no hidden details:\n%s", overlay)
 		}
 	}
 }
@@ -962,14 +962,14 @@ func TestSubagentOutputOverlayLongRunCommandMouseTogglesFullAndSummary(t *testin
 	view.observeChildEvent(TranscriptEvent{
 		Kind:       TranscriptEventTool,
 		ToolCallID: "command-ls",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 		ToolKind:   "execute",
 		ToolArgs:   "ls -la",
 	})
 	view.observeChildEvent(TranscriptEvent{
 		Kind:       TranscriptEventTool,
 		ToolCallID: "command-ls",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 		ToolKind:   "execute",
 		ToolArgs:   "ls -la",
 		ToolOutput: strings.Join(outputLines, "\n"),
@@ -980,7 +980,7 @@ func TestSubagentOutputOverlayLongRunCommandMouseTogglesFullAndSummary(t *testin
 	summary := subagentOutputOverlayPlain(model)
 	middleLine := outputLines[len(outputLines)/2]
 	if !strings.Contains(summary, "... +") || strings.Contains(summary, middleLine) {
-		t.Fatalf("long RUN_COMMAND did not default to the bounded participant summary:\n%s", summary)
+		t.Fatalf("long RunCommand did not default to the bounded participant summary:\n%s", summary)
 	}
 
 	rowIndex, commandCol := subagentOutputMarkerPositionForTest(t, model, "ls -la")
@@ -1106,7 +1106,7 @@ func TestSpawnToolRowUsesOrdinaryHeaderAndOverlayLink(t *testing.T) {
 	base := SubagentEvent{
 		Kind:   SEToolCall,
 		CallID: "spawn-1",
-		Name:   "SPAWN",
+		Name:   "Spawn",
 		Args:   "reviewer: inspect",
 	}
 
@@ -1155,7 +1155,7 @@ func TestSpawnToolRowDoesNotScheduleIndependentAnimation(t *testing.T) {
 	block.Events = append(block.Events, SubagentEvent{
 		Kind:   SEToolCall,
 		CallID: "spawn-1",
-		Name:   "SPAWN",
+		Name:   "Spawn",
 		Args:   "reviewer: inspect",
 	})
 	model.doc.Append(block)
@@ -1251,7 +1251,7 @@ func TestSubagentOutputOverlayWrapsLongACPHeadersAtNarrowWidth(t *testing.T) {
 	view.block.Events = []SubagentEvent{{
 		Kind:   SEToolCall,
 		CallID: "command-long",
-		Name:   "RUN_COMMAND",
+		Name:   "RunCommand",
 		Args:   "go test ./surfaces/tui/app -run TestSubagentOutputOverlayWrapsLongACPHeadersAtNarrowWidth -count=1",
 		Output: "ok",
 		Done:   true,

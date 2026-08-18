@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 const maxInvalidToolCallRepairAttempts = 2
@@ -31,7 +30,7 @@ func (e invalidToolCallError) Error() string {
 	return fmt.Sprintf("invalid model tool call for %s: %s", toolName, reason)
 }
 
-func canonicalizeAssistantToolCalls(message model.Message, tools ...tool.Tool) (model.Message, []model.ToolCall, error) {
+func validateAssistantToolCalls(message model.Message) (model.Message, []model.ToolCall, error) {
 	cloned := model.CloneMessage(message)
 	calls := cloned.ToolCalls()
 	if len(calls) == 0 {
@@ -45,7 +44,6 @@ func canonicalizeAssistantToolCalls(message model.Message, tools ...tool.Tool) (
 		if strings.TrimSpace(call.Name) == "" {
 			return model.Message{}, nil, invalidToolCallError{Tool: call.Name, Reason: "missing tool name"}
 		}
-		call.Name = canonicalToolCallName(call.Name, tools)
 		raw, err := model.ParseToolCallArgsRaw(call.Args)
 		if err != nil {
 			return model.Message{}, nil, invalidToolCallError{Tool: call.Name, Reason: err.Error()}
@@ -66,26 +64,6 @@ func canonicalizeAssistantToolCalls(message model.Message, tools ...tool.Tool) (
 		callIndex++
 	}
 	return cloned, canonical, nil
-}
-
-func canonicalToolCallName(name string, tools []tool.Tool) string {
-	requested := names.ExecutableOrSelf(name)
-	if requested == "" {
-		return ""
-	}
-	for _, item := range tools {
-		if item == nil {
-			continue
-		}
-		defined := strings.TrimSpace(item.Definition().Name)
-		if defined == "" {
-			continue
-		}
-		if strings.EqualFold(names.ExecutableOrSelf(defined), requested) {
-			return defined
-		}
-	}
-	return requested
 }
 
 func toolCallsHaveValidArgs(calls []model.ToolCall) bool {

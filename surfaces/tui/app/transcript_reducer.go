@@ -182,7 +182,7 @@ func (m *Model) applyTranscriptToolToMain(event TranscriptEvent, mutation transc
 // lost. Main and participant lanes repair their own command owner before
 // consuming the row. Task write remains visible as a compact interaction row.
 func hiddenTaskControlAction(event TranscriptEvent) (string, bool) {
-	if !strings.EqualFold(toolSemanticName(event.ToolName, event.ToolKind), "TASK") {
+	if event.ToolName != surfaceToolTask {
 		return "", false
 	}
 	action := strings.ToLower(strings.TrimSpace(event.ToolTaskAction))
@@ -203,7 +203,7 @@ func hiddenTaskControlAction(event TranscriptEvent) (string, bool) {
 // recovery-only and never append onto already rendered bytes.
 func (m *Model) absorbCommandTaskObservation(event TranscriptEvent, mutation *transcriptToolMutation) *MainACPTurnBlock {
 	if m == nil || m.doc == nil || mutation == nil || mutation.err ||
-		!strings.EqualFold(toolSemanticName(mutation.name, mutation.meta.ToolKind), "TASK") ||
+		mutation.name != surfaceToolTask ||
 		!commandTaskTargetKind(mutation.meta.TaskTargetKind) ||
 		!taskObservationHasOutput(*mutation) {
 		return nil
@@ -229,9 +229,9 @@ func absorbCommandTaskObservationIntoEvents(events []SubagentEvent, mutation *tr
 	}
 	for i := len(events) - 1; i >= 0; i-- {
 		owner := &events[i]
-		ownerName := toolSemanticName(owner.Name, owner.ToolKind)
+		ownerName := owner.Name
 		if owner.Kind != SEToolCall || !sameTaskHandle(owner.TaskHandle, taskHandle) ||
-			!isTerminalPanelToolEvent(*owner) || strings.EqualFold(ownerName, "SPAWN") || strings.EqualFold(ownerName, "TASK") {
+			!isTerminalPanelToolEvent(*owner) || ownerName == surfaceToolSpawn || ownerName == surfaceToolTask {
 			continue
 		}
 		switch {
@@ -327,7 +327,7 @@ func (m *Model) mainCommandTaskOwnerBlock(taskHandle string, parentCallID string
 		if !ok {
 			continue
 		}
-		ownerCount := mainACPBlockStreamOwnerCount(block, parentCallID, taskHandle, "RUN_COMMAND")
+		ownerCount := mainACPBlockStreamOwnerCount(block, parentCallID, taskHandle, surfaceToolRunCommand)
 		if ownerCount == 0 {
 			continue
 		}
@@ -377,7 +377,7 @@ func mainACPBlockStreamOwnerCount(block *MainACPTurnBlock, callID string, taskID
 	}
 	callID = strings.TrimSpace(callID)
 	taskID = strings.TrimSpace(taskID)
-	semanticName := toolSemanticName(toolName, "")
+	semanticName := toolName
 	count := 0
 	for i := len(block.Events) - 1; i >= 0; i-- {
 		event := block.Events[i]
@@ -386,8 +386,8 @@ func mainACPBlockStreamOwnerCount(block *MainACPTurnBlock, callID string, taskID
 			!sameTaskHandle(event.TaskHandle, taskID) {
 			continue
 		}
-		eventName := toolSemanticName(event.Name, event.ToolKind)
-		if semanticName != "" && eventName != "" && !strings.EqualFold(eventName, semanticName) {
+		eventName := event.Name
+		if semanticName != "" && eventName != "" && eventName != semanticName {
 			continue
 		}
 		count++

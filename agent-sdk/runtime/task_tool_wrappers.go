@@ -12,6 +12,7 @@ import (
 	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -23,7 +24,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/commanddiag"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session.SessionRef, spec agent.AgentSpec, toolCtx runtimeToolContext) []tool.Tool {
@@ -36,9 +36,8 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 		if one == nil {
 			continue
 		}
-		name := names.ExecutableOrSelf(one.Definition().Name)
-		switch name {
-		case shell.RunCommandToolName:
+		switch {
+		case isBuiltinRunCommandTool(one):
 			hasCommand = true
 			if runtime, ok := sandboxRuntimeFromTool(one); ok {
 				r.tasks.registerSandboxRuntime(runtime)
@@ -49,7 +48,7 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 				sessionRef: session.NormalizeSessionRef(ref),
 				tasks:      r.tasks,
 			})
-		case spawn.ToolName:
+		case isBuiltinSpawnTool(one):
 			hasSpawn = true
 			resolver, _ := one.(spawn.Resolver)
 			out = append(out, runtimeSpawnTool{
@@ -64,14 +63,14 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 				approvalMode: strings.TrimSpace(toolCtx.approvalMode),
 				approval:     toolCtx.approvalRequester,
 			})
-		case tasktool.ToolName:
+		case isBuiltinTaskTool(one):
 			hasTask = true
 			out = append(out, runtimeTaskTool{
 				base:       one,
 				sessionRef: session.NormalizeSessionRef(ref),
 				tasks:      r.tasks,
 			})
-		case sendmessage.ToolName:
+		case isBuiltinSendMessageTool(one):
 			hasSendMessage = true
 			out = append(out, runtimeSendMessageTool{
 				base: one, runtime: r, session: session.CloneSession(activeSession),
@@ -99,6 +98,38 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 		})
 	}
 	return out
+}
+
+func isBuiltinRunCommandTool(candidate tool.Tool) bool {
+	_, ok := candidate.(*shell.RunCommandTool)
+	return ok
+}
+
+func isBuiltinSpawnTool(candidate tool.Tool) bool {
+	switch candidate.(type) {
+	case spawn.Tool, *spawn.Tool:
+		return true
+	default:
+		return false
+	}
+}
+
+func isBuiltinTaskTool(candidate tool.Tool) bool {
+	switch candidate.(type) {
+	case tasktool.Tool, *tasktool.Tool:
+		return true
+	default:
+		return false
+	}
+}
+
+func isBuiltinSendMessageTool(candidate tool.Tool) bool {
+	switch candidate.(type) {
+	case sendmessage.Tool, *sendmessage.Tool:
+		return true
+	default:
+		return false
+	}
 }
 
 type runtimeSendMessageTool struct {
@@ -237,6 +268,8 @@ type runtimeCommandTool struct {
 	tasks      *taskRuntime
 }
 
+func (runtimeCommandTool) RuntimeTaskResultSource(toolbinding.Token) bool { return true }
+
 func (t runtimeCommandTool) Definition() tool.Definition {
 	return tool.CloneDefinition(t.base.Definition())
 }
@@ -353,6 +386,8 @@ type runtimeSpawnTool struct {
 	approvalMode string
 	approval     agent.ApprovalRequester
 }
+
+func (runtimeSpawnTool) RuntimeTaskResultSource(toolbinding.Token) bool { return true }
 
 func (t runtimeSpawnTool) Definition() tool.Definition {
 	def := tool.CloneDefinition(t.base.Definition())
@@ -506,6 +541,8 @@ type runtimeTaskTool struct {
 	tasks      *taskRuntime
 }
 
+func (runtimeTaskTool) RuntimeTaskResultSource(toolbinding.Token) bool { return true }
+
 type subagentApprovalRequester struct {
 	runtime    *Runtime
 	mode       string
@@ -545,10 +582,7 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 			Kind: strings.TrimSpace(item.Kind),
 		})
 	}
-	toolName := strings.TrimSpace(req.ToolCall.Name)
-	if toolName == "" || strings.EqualFold(toolName, "UNKNOWN") {
-		toolName = firstNonEmpty(req.ToolCall.Title, req.ToolCall.Kind, "UNKNOWN")
-	}
+	toolName := firstNonEmpty(req.ToolCall.Name, req.ToolCall.Kind)
 	rawInput := session.CloneState(req.ToolCall.RawInput)
 	var callInput json.RawMessage
 	if len(rawInput) > 0 {
@@ -587,7 +621,7 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 			"task_id":        strings.TrimSpace(req.TaskID),
 			"agent":          strings.TrimSpace(req.Agent),
 			"parent_call_id": strings.TrimSpace(req.ParentCallID),
-			"parent_tool":    names.Spawn,
+			"parent_tool":    spawn.ToolName,
 		},
 	}
 	if r.runtime != nil {
@@ -881,7 +915,7 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 		out = map[string]any{}
 	}
 	toolMeta := taskRuntimeMetaSection(out, "tool")
-	toolMeta["name"] = names.Task
+	toolMeta["name"] = tasktool.ToolName
 	toolMeta["action"] = strings.ToLower(strings.TrimSpace(action))
 	toolMeta["target_kind"] = strings.TrimSpace(string(snapshot.Kind))
 	toolMeta["target_handle"] = taskPublicHandle(snapshot)
@@ -901,7 +935,7 @@ func taskBatchToolResultEventMeta(existing map[string]any, action string, input 
 		out = map[string]any{}
 	}
 	toolMeta := taskRuntimeMetaSection(out, "tool")
-	toolMeta["name"] = names.Task
+	toolMeta["name"] = tasktool.ToolName
 	toolMeta["action"] = strings.ToLower(strings.TrimSpace(action))
 	toolMeta["target_handles"] = taskBatchVisibleHandles(items)
 	toolMeta["target_count"] = len(items)

@@ -280,6 +280,38 @@ func WithoutRuntimeSectionKeys(meta map[string]any, section string, keys ...stri
 	return out
 }
 
+// WithoutRuntimeSections returns a copy of meta without the selected complete
+// _meta.caelis.runtime sections. It is used at untrusted ingress boundaries
+// where retaining even unknown keys would let a peer impersonate Runtime facts.
+func WithoutRuntimeSections(meta map[string]any, sections ...string) map[string]any {
+	out := CloneMap(meta)
+	if len(out) == 0 || len(sections) == 0 {
+		return out
+	}
+	caelis := CloneMap(mapAt(out, Root))
+	runtime := CloneMap(mapAt(caelis, Runtime))
+	if len(runtime) == 0 {
+		return out
+	}
+	for _, section := range sections {
+		delete(runtime, strings.TrimSpace(section))
+	}
+	if len(runtime) == 0 {
+		delete(caelis, Runtime)
+	} else {
+		caelis[Runtime] = runtime
+	}
+	if len(caelis) == 0 {
+		delete(out, Root)
+	} else {
+		out[Root] = caelis
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func Merge(base map[string]any, extra map[string]any) map[string]any {
 	if len(extra) == 0 {
 		return CloneMap(base)

@@ -1,8 +1,6 @@
 package builtin
 
 import (
-	"fmt"
-
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -12,13 +10,7 @@ import (
 	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
-
-func isReservedCoreToolName(name string) bool {
-	_, ok := names.LookupExecutable(name)
-	return ok
-}
 
 // CoreToolsConfig configures default core coding tools.
 type CoreToolsConfig struct {
@@ -73,23 +65,4 @@ func BuildCoreTools(cfg CoreToolsConfig) ([]tool.Tool, error) {
 		readTool, viewImageTool, writeTool, patchTool, globTool, searchTool, runCommandTool, taskTool, planTool,
 		skillTool, webSearchTool, webFetchTool,
 	}, nil
-}
-
-// EnsureCoreTools injects default coding tools while rejecting user overrides
-// of reserved builtin names.
-func EnsureCoreTools(userTools []tool.Tool, builtins []tool.Tool) ([]tool.Tool, error) {
-	filtered := make([]tool.Tool, 0, len(userTools))
-	for _, one := range userTools {
-		if one == nil {
-			continue
-		}
-		if isReservedCoreToolName(one.Definition().Name) {
-			return nil, fmt.Errorf("tool/builtin: %q is reserved by the core runtime and cannot be overridden", one.Definition().Name)
-		}
-		filtered = append(filtered, one)
-	}
-	out := make([]tool.Tool, 0, len(builtins)+len(filtered))
-	out = append(out, builtins...)
-	out = append(out, filtered...)
-	return out, nil
 }

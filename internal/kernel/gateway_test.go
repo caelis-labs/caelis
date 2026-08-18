@@ -2472,8 +2472,8 @@ func TestResolveApprovalRequestSerializesDifferentModelSteps(t *testing.T) {
 			Session:    activeSession,
 			RunID:      "run-1",
 			TurnID:     "turn-1",
-			Tool:       tool.Definition{Name: "RUN_COMMAND"},
-			Call:       tool.Call{ID: callID, Name: "RUN_COMMAND"},
+			Tool:       tool.Definition{Name: "RunCommand"},
+			Call:       tool.Call{ID: callID, Name: "RunCommand"},
 			ModelStep:  stepRefs[stepID][0],
 		}
 	}
@@ -2562,8 +2562,8 @@ func TestResolveApprovalRequestRunsSameModelStepAutoReviewsConcurrently(t *testi
 			Session:    activeSession,
 			RunID:      "run-1",
 			TurnID:     "turn-1",
-			Tool:       tool.Definition{Name: "RUN_COMMAND"},
-			Call:       tool.Call{ID: callID, Name: "RUN_COMMAND"},
+			Tool:       tool.Definition{Name: "RunCommand"},
+			Call:       tool.Call{ID: callID, Name: "RunCommand"},
 			ModelStep:  stepRefs[index],
 		}
 	}
@@ -3175,8 +3175,8 @@ func TestResolveActiveAutoApprovalPropagatesApprovalDeadlineWithoutSyntheticDeci
 			Session:    activeSession,
 			RunID:      "run-1",
 			TurnID:     "turn-1",
-			Tool:       tool.Definition{Name: "RUN_COMMAND"},
-			Call:       tool.Call{ID: "call-deadline", Name: "RUN_COMMAND"},
+			Tool:       tool.Definition{Name: "RunCommand"},
+			Call:       tool.Call{ID: "call-deadline", Name: "RunCommand"},
 		},
 		nil,
 		ApprovalModeAutoReview,

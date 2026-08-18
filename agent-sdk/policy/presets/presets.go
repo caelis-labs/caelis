@@ -10,7 +10,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
 )
 
 const (
@@ -56,20 +62,15 @@ func WorkspaceWriteMode() policy.Mode {
 		ID: ModeWorkspaceWrite,
 		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 			def := workspaceWriteConstraints(input.Options)
-			name := toolName(input)
-			if info, ok := names.LookupExecutable(name); ok {
-				switch info.ResultStyle {
-				case names.ResultRead, names.ResultSearch, names.ResultGlob:
-					if err := ensureReadPathsOutsideDefaultHiddenRoots(input); err != nil {
-						return policyErrorOrDeny(err)
-					}
-					return allow(def), nil
+			switch policyClass(input) {
+			case builtinPolicyReadPath, builtinPolicySearchPath, builtinPolicyGlobPath:
+				if err := ensureReadPathsOutsideDefaultHiddenRoots(input); err != nil {
+					return policyErrorOrDeny(err)
 				}
-			}
-			switch name {
-			case names.Write, names.Patch:
+				return allow(def), nil
+			case builtinPolicyWritePath:
 				return decideFilesystemWrite(input, def)
-			case names.RunCommand:
+			case builtinPolicyCommand:
 				return decideCommand(input, def)
 			default:
 				// Tool assembly is the capability-admission boundary. This
@@ -82,13 +83,13 @@ func WorkspaceWriteMode() policy.Mode {
 }
 
 // DangerFullAccessMode allows tools to execute directly on the Host while
-// retaining the small machine-level RUN_COMMAND denylist. Callers must
+// retaining the small machine-level command denylist. Callers must
 // register this mode explicitly; it is not a substitute for sandbox isolation.
 func DangerFullAccessMode() policy.Mode {
 	return policy.NamedMode{
 		ID: ModeDangerFullAccess,
 		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
-			if toolName(input) == names.RunCommand {
+			if policyClass(input) == builtinPolicyCommand {
 				command, err := commandArg(input)
 				if err != nil {
 					return policy.Decision{}, err
@@ -178,14 +179,58 @@ func hostExecutionConstraints() sandbox.Constraints {
 }
 
 func toolKind(name string) string {
-	if info, ok := names.LookupExecutable(name); ok {
-		return string(info.Kind)
+	switch name {
+	case filesystem.ReadToolName, filesystem.ViewImageToolName, skilltool.ToolName:
+		return "read"
+	case filesystem.WriteToolName, filesystem.PatchToolName:
+		return "edit"
+	case filesystem.GlobToolName, filesystem.SearchToolName, web.SearchToolName, web.FetchToolName:
+		return "search"
+	case shell.RunCommandToolName, tasktool.ToolName, spawn.ToolName, sendmessage.ToolName:
+		return "execute"
+	default:
+		return "other"
 	}
-	return string(names.KindOther)
 }
 
 func approvalTitle(name string, call map[string]any) string {
-	return display.SummarizeToolCallTitle(name, call)
+	switch name {
+	case filesystem.ReadToolName, filesystem.ViewImageToolName, filesystem.WriteToolName, filesystem.PatchToolName, filesystem.GlobToolName, filesystem.SearchToolName:
+		if path := strings.TrimSpace(display.MapString(call, "path")); path != "" {
+			return name + " " + path
+		}
+	case skilltool.ToolName:
+		if skillName := strings.TrimSpace(display.MapString(call, "name")); skillName != "" {
+			return name + " " + skillName
+		}
+	case web.SearchToolName:
+		if query := strings.TrimSpace(display.MapString(call, "query")); query != "" {
+			return name + " " + query
+		}
+	case web.FetchToolName:
+		if url := strings.TrimSpace(display.MapString(call, "url")); url != "" {
+			return name + " " + url
+		}
+	case shell.RunCommandToolName, tasktool.ToolName:
+		if command := strings.TrimSpace(display.MapString(call, "command")); command != "" {
+			return name + " " + command
+		}
+		if action := strings.TrimSpace(display.MapString(call, "action")); action != "" {
+			if handle := strings.TrimSpace(display.MapString(call, "handle")); handle != "" {
+				return name + " " + action + " " + handle
+			}
+			return name + " " + action
+		}
+	case spawn.ToolName:
+		if args := strings.TrimSpace(display.SpawnFullDisplayArgs(call)); args != "" {
+			return name + " " + args
+		}
+	case sendmessage.ToolName:
+		if args := strings.TrimSpace(display.AgentMessageFullDisplayArgs(call)); args != "" {
+			return "Send message " + args
+		}
+	}
+	return name
 }
 
 func workspaceWriteConstraints(opts policy.ModeOptions) sandbox.Constraints {
@@ -225,5 +270,43 @@ func defaultNetworkPolicy(opts policy.ModeOptions) sandbox.Network {
 }
 
 func toolName(input policy.ToolContext) string {
-	return names.ExecutableOrSelf(input.Tool.Name)
+	return input.Tool.Name
+}
+
+type builtinPolicyClass uint8
+
+const (
+	builtinPolicyUnknown builtinPolicyClass = iota
+	builtinPolicyReadPath
+	builtinPolicySearchPath
+	builtinPolicyGlobPath
+	builtinPolicyWritePath
+	builtinPolicyCommand
+)
+
+func builtinPolicyClassForName(name string) builtinPolicyClass {
+	switch name {
+	case filesystem.ReadToolName, filesystem.ViewImageToolName:
+		return builtinPolicyReadPath
+	case filesystem.SearchToolName:
+		return builtinPolicySearchPath
+	case filesystem.GlobToolName:
+		return builtinPolicyGlobPath
+	case filesystem.WriteToolName, filesystem.PatchToolName:
+		return builtinPolicyWritePath
+	case shell.RunCommandToolName:
+		return builtinPolicyCommand
+	default:
+		return builtinPolicyUnknown
+	}
+}
+
+func policyClass(input policy.ToolContext) builtinPolicyClass {
+	if class := builtinPolicyClassForName(toolName(input)); class != builtinPolicyUnknown {
+		return class
+	}
+	if input.Tool.ExecutionRequirements != nil && input.Tool.ExecutionRequirements.Sandbox.CommandExec {
+		return builtinPolicyCommand
+	}
+	return builtinPolicyUnknown
 }

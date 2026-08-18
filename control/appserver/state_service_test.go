@@ -38,7 +38,7 @@ func TestStateServiceReturnsTypedConsistentBootstrapBySessionID(t *testing.T) {
 		Run: RunState{Active: true, Status: "waiting_approval", HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1", WaitingApproval: true},
 		Approval: ApprovalState{Active: &ActiveApproval{
 			RequestID: "approval-1", Scope: eventstream.ScopeMain,
-			Permission: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call-1", Name: "WRITE"}},
+			Permission: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call-1", Name: "Write"}},
 		}, QueuedCount: 2},
 	}}
 	service, err := NewStateService(StateServiceConfig{Sessions: sessions, Runtime: runtime, Feeds: feeds})

@@ -11,7 +11,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
@@ -161,7 +160,7 @@ func taskStreamPanelHandle(events []SubagentEvent, callID string) string {
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
 		if event.Kind != SEToolCall || strings.TrimSpace(event.CallID) != callID ||
-			names.CanonicalOrSelf(toolSemanticName(event.Name, event.ToolKind)) != names.RunCommand {
+			event.Name != surfaceToolRunCommand {
 			continue
 		}
 		if taskHandle := normalizeTaskStreamHandle(event.TaskHandle); taskHandle != "" {

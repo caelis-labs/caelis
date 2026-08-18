@@ -11,6 +11,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -258,6 +259,10 @@ type lifecycleTool struct {
 
 func (t lifecycleTool) Definition() tool.Definition {
 	return tool.CloneDefinition(t.inner.Definition())
+}
+
+func (t lifecycleTool) RuntimeTaskResultSource(toolbinding.Token) bool {
+	return toolbinding.IsTaskResultSource(t.inner)
 }
 
 func (t lifecycleTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {

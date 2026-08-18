@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -492,7 +491,7 @@ func ACPUpdateMeta(update schema.Update) map[string]any {
 
 func ToolIsPlan(values ...string) bool {
 	for _, value := range values {
-		if canonical, ok := names.Resolve(value); ok && canonical == names.Plan {
+		if transcriptToolIsPlan(value) {
 			return true
 		}
 	}

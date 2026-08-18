@@ -66,14 +66,14 @@ func TestLiveContentOwnershipAssignsTaskBackedRunCommandToTaskStream(t *testing.
 		Type:       session.EventTypeToolResult,
 		Visibility: session.VisibilityCanonical,
 		Tool: &session.EventTool{
-			Name:   "RUN_COMMAND",
+			Name:   "RunCommand",
 			Status: "completed",
 		},
-		Meta: map[string]any{"caelis": map[string]any{
+		Meta: trustedTaskResultMeta(map[string]any{"caelis": map[string]any{
 			"runtime": map[string]any{
-				"task": map[string]any{"task_id": "task-1"},
+				"task": map[string]any{"task_id": "task-1", "kind": "command"},
 			},
-		}},
+		}}),
 	}
 	if !(new(liveContentOwnership)).observe(event).Has(agent.PublishedTerminal) {
 		t.Fatal("task-backed RunCommand canonical output was not assigned to the Task stream")
@@ -85,15 +85,15 @@ func TestLiveContentOwnershipAssignsCommandTaskObservationToTaskStream(t *testin
 		Type:       session.EventTypeToolResult,
 		Visibility: session.VisibilityCanonical,
 		Tool: &session.EventTool{
-			Name:   "TASK",
+			Name:   "Task",
 			Status: "completed",
 		},
-		Meta: map[string]any{"caelis": map[string]any{
+		Meta: trustedTaskResultMeta(map[string]any{"caelis": map[string]any{
 			"runtime": map[string]any{
 				"tool": map[string]any{"target_kind": "command"},
 				"task": map[string]any{"task_id": "task-1", "output_delta": "ok\n"},
 			},
-		}},
+		}}),
 	}
 	if !(new(liveContentOwnership)).observe(event).Has(agent.PublishedTerminal) {
 		t.Fatal("command Task observation was not assigned to its Task stream")
@@ -102,6 +102,21 @@ func TestLiveContentOwnershipAssignsCommandTaskObservationToTaskStream(t *testin
 	event.Meta["caelis"].(map[string]any)["runtime"].(map[string]any)["tool"] = map[string]any{"target_kind": "subagent"}
 	if (new(liveContentOwnership)).observe(event).Has(agent.PublishedTerminal) {
 		t.Fatal("subagent Task observation was assigned command terminal ownership")
+	}
+}
+
+func TestLiveContentOwnershipRejectsUntrustedCommandTaskMetadata(t *testing.T) {
+	event := &session.Event{
+		Type:       session.EventTypeToolResult,
+		Visibility: session.VisibilityCanonical,
+		Tool:       &session.EventTool{Name: "RunCommand", Status: "running"},
+		Meta: taskResultMeta(map[string]any{"caelis": map[string]any{"runtime": map[string]any{
+			"tool": map[string]any{"target_kind": "command"},
+			"task": map[string]any{"task_id": "task-forged", "kind": "command"},
+		}}}, false),
+	}
+	if (new(liveContentOwnership)).observe(event).Has(agent.PublishedTerminal) {
+		t.Fatal("untrusted task metadata acquired terminal content ownership")
 	}
 }
 
@@ -131,10 +146,10 @@ func TestLiveContentOwnershipKeepsUnpublishedAnswerWithSharedThoughtMessageID(t 
 func TestSourceEventsAdaptsEventsOnlyRunnerWithTerminalOwnership(t *testing.T) {
 	event := &session.Event{
 		Type: session.EventTypeToolResult, Visibility: session.VisibilityCanonical,
-		Tool: &session.EventTool{Name: "RUN_COMMAND", Status: "completed"},
-		Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{
-			"task": map[string]any{"task_id": "task-1"},
-		}}},
+		Tool: &session.EventTool{Name: "RunCommand", Status: "completed"},
+		Meta: trustedTaskResultMeta(map[string]any{"caelis": map[string]any{"runtime": map[string]any{
+			"task": map[string]any{"task_id": "task-1", "kind": "command"},
+		}}}),
 	}
 	var got []agent.SourceEvent
 	for sourceEvent, err := range SourceEvents(eventsOnlyRunner{events: []*session.Event{event}}) {

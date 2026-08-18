@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
@@ -13,7 +12,7 @@ import (
 func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptEvent {
 	toolName := transcriptToolDisplayName(input.ToolName, input.ToolTitle, input.ToolKind)
 	status := transcript.NormalizeToolStartStatus(input.Status)
-	semanticName := toolSemanticName(toolName, input.ToolKind)
+	semanticName := toolName
 	rawInput := transcript.CloneAnyMap(input.RawInput)
 	if refinedName := toolDisplaySemanticOverride(semanticName, input.ToolKind, input.ToolTitle, rawInput); refinedName != "" {
 		toolName = refinedName
@@ -21,18 +20,18 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 	}
 	toolTaskHandle := display.ToolTaskHandle(rawInput, nil, input.Meta)
 	toolMessageTarget := ""
-	if names.CanonicalOrSelf(semanticName) == names.SendMessage {
+	if semanticName == surfaceToolSendMessage {
 		toolMessageTarget = display.AgentMessageTarget(display.MapString(rawInput, "to"))
 	}
 	content := acpToolContentToDisplay(input.Content)
 	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
 	outputCursor, outputCursorKnown, outputStartCursor, outputStartCursorKnown := transcriptToolOutputRange(input.Meta)
 	displayInput := rawInput
-	if strings.EqualFold(semanticName, "TASK") {
+	if semanticName == surfaceToolTask {
 		displayInput = taskDisplayInputForResult(rawInput, toolDisplayMetaOutput(semanticName, input.Meta))
 	}
 	toolArgs, toolFullArgs := toolDisplayArguments(semanticName, input.ToolKind, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
-	if strings.EqualFold(semanticName, "TASK") {
+	if semanticName == surfaceToolTask {
 		toolArgs = taskDisplayArgsWithHandle(toolArgs, toolTaskHandle)
 	}
 	return TranscriptEvent{
@@ -64,13 +63,13 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 
 func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSuccessStatus string) (TranscriptEvent, bool) {
 	toolName := transcriptToolDisplayName(input.ToolName, input.ToolTitle, input.ToolKind)
-	semanticName := toolSemanticName(toolName, input.ToolKind)
+	semanticName := toolName
 	rawInput := transcript.CloneAnyMap(input.RawInput)
 	rawOutput := transcript.RawMap(input.RawOutput)
 	status, toolErr := transcript.NormalizeToolResultStatus(input.Status, rawOutput, input.Error, defaultSuccessStatus)
 	content := acpToolContentToDisplay(input.Content)
 	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
-	suppressRunningSnapshotOutput := suppressRunningTerminalSnapshotOutput(semanticName, input.ToolKind, input.Meta, status, toolErr)
+	suppressRunningSnapshotOutput := suppressRunningTerminalSnapshotOutput(semanticName, input.Meta, status, toolErr)
 	if refinedName := toolDisplaySemanticOverride(semanticName, input.ToolKind, input.ToolTitle, rawInput); refinedName != "" {
 		toolName = refinedName
 		semanticName = refinedName
@@ -86,10 +85,10 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	}
 	displayMeta := metautil.Section(input.Meta, metautil.Display)
 	displayInput := toolDisplayInputWithRecovered(rawInput, transcript.RawMap(displayMeta[metautil.DisplayToolInput]))
-	if strings.EqualFold(semanticName, "SPAWN") {
+	if semanticName == surfaceToolSpawn {
 		displayInput = spawnDisplayInputForResult(rawInput, displayOutput)
 	}
-	if strings.EqualFold(semanticName, "TASK") {
+	if semanticName == surfaceToolTask {
 		displayInput = taskDisplayInputForResult(rawInput, displayOutput)
 	}
 	toolOutput := acpprojector.FormatToolContent(content)
@@ -131,7 +130,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	// presentation owner needs the exact observed bytes to reconcile with
 	// transient terminal frames without normalization, truncation, or
 	// delivery-order races.
-	if strings.EqualFold(semanticName, "TASK") {
+	if semanticName == surfaceToolTask {
 		if delta, ok := transcriptToolObservationDelta(input.Meta); ok {
 			toolOutput = delta
 			toolOutputHasTerminalData = true
@@ -176,22 +175,22 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	// live terminal stream; replay likewise renders that command's final result.
 	// Keep failed write output so the rejection reason remains visible, but do
 	// not expose the internal command handle in that presentation-only detail.
-	if strings.EqualFold(semanticName, "TASK") && strings.EqualFold(toolTaskAction, "write") && !toolErr {
+	if semanticName == surfaceToolTask && strings.EqualFold(toolTaskAction, "write") && !toolErr {
 		toolOutput = ""
 		toolOutputHasTerminalData = false
 		toolOutputSynthetic = false
 		toolOutputGapBefore = false
-	} else if strings.EqualFold(semanticName, "TASK") && strings.EqualFold(toolTaskAction, "write") {
+	} else if semanticName == surfaceToolTask && strings.EqualFold(toolTaskAction, "write") {
 		toolOutput = taskWriteFailureDisplayOutput(rawOutput, input.Meta, toolOutput, toolTaskHandle, status, toolErr)
 	}
 	toolMessageTarget := ""
-	if names.CanonicalOrSelf(semanticName) == names.SendMessage {
+	if semanticName == surfaceToolSendMessage {
 		toolMessageTarget = display.AgentMessageTarget(firstNonEmpty(
 			display.MapString(rawOutput, "to"),
 			display.MapString(rawInput, "to"),
 		))
 	}
-	if strings.EqualFold(semanticName, "TASK") {
+	if semanticName == surfaceToolTask {
 		toolArgs = taskDisplayArgsWithHandle(toolArgs, toolTaskHandle)
 	}
 	if !toolErr && toolFullArgs == "" {
@@ -206,6 +205,10 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		}
 	}
 	toolOutput = toolDisplayPanelOutput(semanticName, toolOutput)
+	if input.GatewayProjection && isExecuteToolKind(input.ToolKind) && len(input.Content) == 0 {
+		toolOutput = ""
+		toolOutputSynthetic = false
+	}
 	return TranscriptEvent{
 		Kind:                       TranscriptEventTool,
 		Scope:                      input.Scope,
@@ -307,11 +310,11 @@ func transcriptToolContentHasTerminal(content []acpprojector.ToolContent) bool {
 	return false
 }
 
-func suppressRunningTerminalSnapshotOutput(toolName string, toolKind string, meta map[string]any, status string, isErr bool) bool {
+func suppressRunningTerminalSnapshotOutput(toolName string, meta map[string]any, status string, isErr bool) bool {
 	if isErr || transcript.ToolStatusFinal(status, isErr) {
 		return false
 	}
-	if !display.IsTerminalPanelTool(toolName, toolKind) {
+	if !surfaceIsTerminalPanelTool(toolName) {
 		return false
 	}
 	if transcript.MetaString(meta, "caelis", "runtime", "stream", "mode") != "" {

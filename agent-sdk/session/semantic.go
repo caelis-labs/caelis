@@ -52,9 +52,9 @@ func EventToolProjection(event *Event) *EventTool {
 	return &out
 }
 
-// CanonicalToolName resolves the durable tool name for one event using the
-// canonical precedence shared by replay and client projection:
-// Event.Tool / Message tool calls, then protocol projection, then display meta.
+// CanonicalToolName resolves the exact durable tool name from authoritative
+// Event.Tool or Message tool-call data. Protocol title, kind, and display
+// metadata are projection facts and never create a durable tool identity.
 func CanonicalToolName(event *Event, update *ProtocolUpdate) string {
 	if event == nil {
 		return ""
@@ -70,15 +70,7 @@ func CanonicalToolName(event *Event, update *ProtocolUpdate) string {
 	if name := messageToolCallName(event, update); name != "" {
 		return name
 	}
-	if update != nil {
-		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
-			return title[0]
-		}
-		if kind := strings.TrimSpace(update.Kind); kind != "" {
-			return kind
-		}
-	}
-	return stringFromNestedMap(event.Meta, "caelis", "runtime", "tool", "name")
+	return ""
 }
 
 func messageToolCallName(event *Event, update *ProtocolUpdate) string {
@@ -109,19 +101,6 @@ func messageToolCallName(event *Event, update *ProtocolUpdate) string {
 		return strings.TrimSpace(calls[0].Name)
 	}
 	return ""
-}
-
-func stringFromNestedMap(values map[string]any, path ...string) string {
-	var current any = values
-	for _, key := range path {
-		mapped, ok := current.(map[string]any)
-		if !ok {
-			return ""
-		}
-		current = mapped[key]
-	}
-	text, _ := current.(string)
-	return strings.TrimSpace(text)
 }
 
 func cloneEventPlanPayload(in EventPlanPayload) EventPlanPayload {

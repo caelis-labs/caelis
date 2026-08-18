@@ -15,10 +15,10 @@ func TestObservedSpawnResultUsesHandleWhenCallIDIsReusedAcrossTurns(t *testing.T
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	alpha := NewMainACPTurnBlock("turn-alpha")
-	alpha.UpdateToolWithMeta("spawn-1", "SPAWN", "alpha", "", false, false, ToolUpdateMeta{TaskHandle: "alpha"})
+	alpha.UpdateToolWithMeta("spawn-1", "Spawn", "alpha", "", false, false, ToolUpdateMeta{TaskHandle: "alpha"})
 	appendObservedSpawnOwner(model, alpha, "spawn-1", "alpha")
 	beta := NewMainACPTurnBlock("turn-beta")
-	beta.UpdateToolWithMeta("spawn-1", "SPAWN", "beta", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
+	beta.UpdateToolWithMeta("spawn-1", "Spawn", "beta", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
 	appendObservedSpawnOwner(model, beta, "spawn-1", "beta")
 
 	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
@@ -46,7 +46,7 @@ func TestObservedSpawnResultDoesNotInjectParentTaskResultIntoOpenOutputOverlay(t
 	block := NewMainACPTurnBlock("turn-1")
 	block.UpdateToolWithMeta(
 		"spawn-1",
-		"SPAWN",
+		"Spawn",
 		"reviewer: inspect",
 		"",
 		false,
@@ -92,10 +92,10 @@ func TestObservedSpawnResultBatchClosesReusedCallIDByHandle(t *testing.T) {
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	alpha := NewMainACPTurnBlock("turn-alpha")
-	alpha.UpdateToolWithMeta("spawn-1", "SPAWN", "alpha", "", false, false, ToolUpdateMeta{TaskHandle: "alpha"})
+	alpha.UpdateToolWithMeta("spawn-1", "Spawn", "alpha", "", false, false, ToolUpdateMeta{TaskHandle: "alpha"})
 	appendObservedSpawnOwner(model, alpha, "spawn-1", "alpha")
 	beta := NewMainACPTurnBlock("turn-beta")
-	beta.UpdateToolWithMeta("spawn-1", "SPAWN", "beta", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
+	beta.UpdateToolWithMeta("spawn-1", "Spawn", "beta", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
 	appendObservedSpawnOwner(model, beta, "spawn-1", "beta")
 
 	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{
@@ -126,7 +126,7 @@ func TestObservedSpawnResultFailsClosedOnHandleMismatch(t *testing.T) {
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	block := NewMainACPTurnBlock("turn-1")
-	block.UpdateToolWithMeta("spawn-1", "SPAWN", "beta", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
+	block.UpdateToolWithMeta("spawn-1", "Spawn", "beta", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
 	appendObservedSpawnOwner(model, block, "spawn-1", "beta")
 
 	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
@@ -154,7 +154,7 @@ func TestObservedSpawnResultNeverOverridesCanonicalOrFirstFallbackFinal(t *testi
 			name:          "canonical parent result wins",
 			initialOutput: "canonical final",
 			complete: func(_ *Model, block *MainACPTurnBlock) {
-				block.UpdateToolWithMeta("spawn-1", "SPAWN", "", "canonical final", true, false, ToolUpdateMeta{
+				block.UpdateToolWithMeta("spawn-1", "Spawn", "", "canonical final", true, false, ToolUpdateMeta{
 					TaskHandle: "alpha", OutputAuthoritative: true,
 				})
 			},
@@ -179,7 +179,7 @@ func TestObservedSpawnResultNeverOverridesCanonicalOrFirstFallbackFinal(t *testi
 
 			model := NewModel(Config{NoColor: true, NoAnimation: true})
 			block := NewMainACPTurnBlock("turn-1")
-			block.UpdateToolWithMeta("spawn-1", "SPAWN", "alpha", "", false, false, ToolUpdateMeta{TaskHandle: "alpha"})
+			block.UpdateToolWithMeta("spawn-1", "Spawn", "alpha", "", false, false, ToolUpdateMeta{TaskHandle: "alpha"})
 			appendObservedSpawnOwner(model, block, "spawn-1", "alpha")
 			test.complete(model, block)
 
@@ -203,10 +203,10 @@ func TestObservedSpawnResultWithoutHandleRequiresUniqueOpenOwner(t *testing.T) {
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	first := NewMainACPTurnBlock("turn-1")
-	first.UpdateToolWithMeta("spawn-1", "SPAWN", "first", "", false, false, ToolUpdateMeta{})
+	first.UpdateToolWithMeta("spawn-1", "Spawn", "first", "", false, false, ToolUpdateMeta{})
 	appendObservedSpawnOwner(model, first, "spawn-1", "")
 	second := NewMainACPTurnBlock("turn-2")
-	second.UpdateToolWithMeta("spawn-1", "SPAWN", "second", "", false, false, ToolUpdateMeta{})
+	second.UpdateToolWithMeta("spawn-1", "Spawn", "second", "", false, false, ToolUpdateMeta{})
 	appendObservedSpawnOwner(model, second, "spawn-1", "")
 
 	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
@@ -224,10 +224,10 @@ func TestObservedSpawnResultWithHandleFailsClosedAcrossEmptyAndMismatchedOwners(
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	unknown := NewMainACPTurnBlock("turn-unknown")
-	unknown.UpdateToolWithMeta("spawn-1", "SPAWN", "unknown", "", false, false, ToolUpdateMeta{})
+	unknown.UpdateToolWithMeta("spawn-1", "Spawn", "unknown", "", false, false, ToolUpdateMeta{})
 	appendObservedSpawnOwner(model, unknown, "spawn-1", "")
 	beta := NewMainACPTurnBlock("turn-beta")
-	beta.UpdateToolWithMeta("spawn-1", "SPAWN", "beta", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
+	beta.UpdateToolWithMeta("spawn-1", "Spawn", "beta", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
 	appendObservedSpawnOwner(model, beta, "spawn-1", "beta")
 
 	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
@@ -247,11 +247,11 @@ func TestObservedSpawnResultIgnoresClosedReusedCallOwnerDuringFallback(t *testin
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	closed := NewMainACPTurnBlock("turn-closed")
-	closed.UpdateToolWithMeta("spawn-1", "SPAWN", "closed", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
+	closed.UpdateToolWithMeta("spawn-1", "Spawn", "closed", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
 	appendObservedSpawnOwner(model, closed, "spawn-1", "beta")
-	closed.UpdateToolWithMeta("spawn-1", "SPAWN", "", "beta done", true, false, ToolUpdateMeta{TaskHandle: "beta"})
+	closed.UpdateToolWithMeta("spawn-1", "Spawn", "", "beta done", true, false, ToolUpdateMeta{TaskHandle: "beta"})
 	open := NewMainACPTurnBlock("turn-open")
-	open.UpdateToolWithMeta("spawn-1", "SPAWN", "open", "", false, false, ToolUpdateMeta{})
+	open.UpdateToolWithMeta("spawn-1", "Spawn", "open", "", false, false, ToolUpdateMeta{})
 	appendObservedSpawnOwner(model, open, "spawn-1", "")
 
 	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
@@ -271,7 +271,7 @@ func TestObservedSpawnResultWithoutHandleClosesUniqueOpenOwner(t *testing.T) {
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	block := NewMainACPTurnBlock("turn-1")
-	block.UpdateToolWithMeta("spawn-1", "SPAWN", "only owner", "", false, false, ToolUpdateMeta{})
+	block.UpdateToolWithMeta("spawn-1", "Spawn", "only owner", "", false, false, ToolUpdateMeta{})
 	appendObservedSpawnOwner(model, block, "spawn-1", "")
 
 	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
@@ -291,14 +291,14 @@ func TestObservedSpawnResultClosesBlockAndActivityThroughSameOwner(t *testing.T)
 	model.currentSessionID = "session-1"
 	model.liveTurn.Active = true
 	block := NewMainACPTurnBlock("turn-1")
-	block.UpdateToolWithMeta("spawn-1", "SPAWN", "inspect", "", false, false, ToolUpdateMeta{TaskHandle: "alpha"})
+	block.UpdateToolWithMeta("spawn-1", "Spawn", "inspect", "", false, false, ToolUpdateMeta{TaskHandle: "alpha"})
 	appendObservedSpawnOwner(model, block, "spawn-1", "alpha")
 	model.applyTranscriptRunningActivity(TranscriptEvent{
 		Kind:           TranscriptEventTool,
 		Scope:          ACPProjectionMain,
 		TurnID:         "turn-1",
 		ToolCallID:     "spawn-1",
-		ToolName:       "SPAWN",
+		ToolName:       "Spawn",
 		ToolTaskHandle: "alpha",
 	})
 
@@ -328,7 +328,7 @@ func TestObservedSpawnResultDoesNotSplitActiveAssistantMessage(t *testing.T) {
 	block := NewMainACPTurnBlock("turn-1")
 	block.UpdateToolWithMeta(
 		"spawn-1",
-		"SPAWN",
+		"Spawn",
 		"calculate",
 		"",
 		false,
@@ -396,20 +396,20 @@ func TestTerminalTaskReadRepairsSpawnBlockAndActivity(t *testing.T) {
 	model.currentSessionID = "session-1"
 	model.liveTurn.Active = true
 	block := NewMainACPTurnBlock("turn-1")
-	block.UpdateToolWithMeta("spawn-1", "SPAWN", "inspect", "", false, false, ToolUpdateMeta{TaskHandle: "alpha"})
+	block.UpdateToolWithMeta("spawn-1", "Spawn", "inspect", "", false, false, ToolUpdateMeta{TaskHandle: "alpha"})
 	appendObservedSpawnOwner(model, block, "spawn-1", "alpha")
 	model.applyTranscriptRunningActivity(TranscriptEvent{
 		Kind:           TranscriptEventTool,
 		Scope:          ACPProjectionMain,
 		TurnID:         "turn-1",
 		ToolCallID:     "spawn-1",
-		ToolName:       "SPAWN",
+		ToolName:       "Spawn",
 		ToolTaskHandle: "alpha",
 	})
 
 	completed := schema.ToolStatusCompleted
 	taskMeta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName:     "TASK",
+		metautil.RuntimeToolName:     "Task",
 		metautil.RuntimeToolAction:   "read",
 		metautil.RuntimeTargetKind:   "subagent",
 		metautil.RuntimeTargetHandle: "alpha",
@@ -421,7 +421,7 @@ func TestTerminalTaskReadRepairsSpawnBlockAndActivity(t *testing.T) {
 		Scope:     eventstream.ScopeMain,
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "SPAWN",
+			ToolName:   "Spawn",
 		},
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
@@ -430,7 +430,7 @@ func TestTerminalTaskReadRepairsSpawnBlockAndActivity(t *testing.T) {
 			RawInput:      map[string]any{"action": "read", "handle": "alpha"},
 			RawOutput: map[string]any{
 				"handle": "alpha", "target_kind": "subagent", "state": "completed",
-				"parent_call": "spawn-1", "parent_tool": "SPAWN",
+				"parent_call": "spawn-1", "parent_tool": "Spawn",
 				"final_message": "## Exact child result\n\n- done",
 			},
 			Meta: taskMeta,
@@ -457,7 +457,7 @@ func appendObservedSpawnOwner(model *Model, block *MainACPTurnBlock, callID stri
 		Scope:          ACPProjectionMain,
 		TurnID:         block.TurnKey,
 		ToolCallID:     callID,
-		ToolName:       "SPAWN",
+		ToolName:       "Spawn",
 		ToolTaskHandle: handle,
 	})
 }

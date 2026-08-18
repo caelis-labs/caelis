@@ -108,7 +108,7 @@ func TestEnvelopeV1SessionUpdateGolden(t *testing.T) {
 func TestEnvelopeV1RequestPermissionGolden(t *testing.T) {
 	t.Parallel()
 
-	title := "RUN_COMMAND"
+	title := "RunCommand"
 	kind := schema.ToolKindExecute
 	status := schema.ToolStatusPending
 	env := Envelope{

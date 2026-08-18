@@ -7,7 +7,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func messagesFromContext(ctx agent.Context) []model.Message {
@@ -42,30 +41,7 @@ func messagesFromContext(ctx agent.Context) []model.Message {
 		out = append(out, message)
 		i++
 	}
-	return normalizeToolCallHistory(normalizeBuiltinToolNames(out))
-}
-
-func normalizeBuiltinToolNames(messages []model.Message) []model.Message {
-	if len(messages) == 0 {
-		return nil
-	}
-	out := model.CloneMessages(messages)
-	for messageIndex := range out {
-		for partIndex := range out[messageIndex].Parts {
-			part := &out[messageIndex].Parts[partIndex]
-			if part.ToolUse != nil {
-				if canonical, ok := names.Resolve(part.ToolUse.Name); ok {
-					part.ToolUse.Name = canonical
-				}
-			}
-			if part.ToolResult != nil {
-				if canonical, ok := names.Resolve(part.ToolResult.Name); ok {
-					part.ToolResult.Name = canonical
-				}
-			}
-		}
-	}
-	return out
+	return normalizeToolCallHistory(out)
 }
 
 func eventWithParticipantContextMeta(event *session.Event, activeSession session.Session) *session.Event {

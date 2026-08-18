@@ -113,7 +113,7 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 			Kind: strings.TrimSpace(item.Kind),
 		})
 	}
-	toolName := firstNonEmpty(req.ToolCall.Name, req.ToolCall.Title, "ACP_TOOL")
+	toolName := firstNonEmpty(req.ToolCall.Name, req.ToolCall.Kind)
 	rawInput := session.CloneState(req.ToolCall.RawInput)
 	var callInput json.RawMessage
 	if len(rawInput) > 0 {

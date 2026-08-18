@@ -182,7 +182,7 @@ func TestNarrativeInlineCodeStyleScopesToolNamesInCJKLists(t *testing.T) {
 		"我能做什么：",
 		"",
 		"- 执行 `Shell` 命令（默认沙箱模式，需要时可申请提权）",
-		"- 通过 `SPAWN` 委托子任务",
+		"- 通过 `Spawn` 委托子任务",
 	}, "\n")
 	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
 	inlineFG := sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())
@@ -191,7 +191,7 @@ func TestNarrativeInlineCodeStyleScopesToolNamesInCJKLists(t *testing.T) {
 		t.Helper()
 		assertInlineCodeForegroundScope(t, firstStyledLineContaining(styled, "验证"), fg, "Shell")
 		assertInlineCodeForegroundScope(t, firstStyledLineContaining(styled, "命令"), fg, "Shell")
-		assertInlineCodeForegroundScope(t, firstStyledLineContaining(styled, "委托"), fg, "SPAWN")
+		assertInlineCodeForegroundScope(t, firstStyledLineContaining(styled, "委托"), fg, "Spawn")
 	}
 
 	t.Run("glamour finalized", func(t *testing.T) {
@@ -366,10 +366,10 @@ func TestGlamourListStrongDoesNotStealToolCodeColor(t *testing.T) {
 	raw := strings.Join([]string{
 		"可用工具",
 		"",
-		"- **读/写/编辑文件**（`READ`, `WRITE`, `PATCH`）",
-		"- **搜索文件内容与路径**（`SEARCH`, `GLOB`, `LIST`）",
-		"- **执行 `Shell` 命令**（`RUN_COMMAND`）",
-		"- **管理多步骤任务**（`PLAN`, `TASK`, `SPAWN`）",
+		"- **读/写/编辑文件**（`Read`, `Write`, `Patch`）",
+		"- **搜索文件内容与路径**（`Grep`, `Glob`, `LIST`）",
+		"- **执行 `Shell` 命令**（`RunCommand`）",
+		"- **管理多步骤任务**（`Plan`, `Task`, `Spawn`）",
 	}, "\n")
 	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
 	rendered := glamourRenderNarrative(raw, 180, theme, tuikit.LineStyleAssistant)
@@ -387,7 +387,7 @@ func TestGlamourListStrongDoesNotStealToolCodeColor(t *testing.T) {
 
 	codeFG := sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())
 	codeText := textWithSGRForeground(rendered, codeFG)
-	for _, want := range []string{"READ", "WRITE", "PATCH", "SEARCH", "GLOB", "LIST", "Shell", "RUN_COMMAND", "PLAN", "TASK", "SPAWN"} {
+	for _, want := range []string{"Read", "Write", "Patch", "Grep", "Glob", "LIST", "Shell", "RunCommand", "Plan", "Task", "Spawn"} {
 		if !strings.Contains(codeText, want) {
 			t.Fatalf("inline code %q should use code foreground\ncodeText=%q\nstyled=%q", want, codeText, rendered)
 		}
@@ -525,13 +525,13 @@ func TestGlamourNarrativeRendersNormalizedMarkdownTable(t *testing.T) {
 }
 
 func TestNarrativeBlockquoteUsesSingleRailInStreamAndFinal(t *testing.T) {
-	raw := "> **RUN_COMMAND** 运行了 pytest 测试套件。可以看到 36 个测试用例中有些导入错误（`caelis_demo` 模块不存在）。这展示了我执行测试和诊断问题的能力。"
+	raw := "> **RunCommand** 运行了 pytest 测试套件。可以看到 36 个测试用例中有些导入错误（`caelis_demo` 模块不存在）。这展示了我执行测试和诊断问题的能力。"
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	ctx := BlockRenderContext{Width: 220, TermWidth: 220, Theme: theme, ThemeKey: themeRenderCacheKey(theme)}
-	body := "│ RUN_COMMAND 运行了 pytest 测试套件。可以看到 36 个测试用例中有些导入错误（caelis_demo 模块不存在）。这展示了我执行测试和诊断问题的能力。"
+	body := "│ RunCommand 运行了 pytest 测试套件。可以看到 36 个测试用例中有些导入错误（caelis_demo 模块不存在）。这展示了我执行测试和诊断问题的能力。"
 
 	plainRows := NarrativeToPlainRows(SplitNarrativeBlocks(raw))
-	if len(plainRows) != 1 || plainRows[0] != "RUN_COMMAND 运行了 pytest 测试套件。可以看到 36 个测试用例中有些导入错误（caelis_demo 模块不存在）。这展示了我执行测试和诊断问题的能力。" {
+	if len(plainRows) != 1 || plainRows[0] != "RunCommand 运行了 pytest 测试套件。可以看到 36 个测试用例中有些导入错误（caelis_demo 模块不存在）。这展示了我执行测试和诊断问题的能力。" {
 		t.Fatalf("canonical blockquote plain rows = %#v", plainRows)
 	}
 
@@ -597,13 +597,13 @@ func TestNarrativeBlockquoteUsesSingleRailInStreamAndFinal(t *testing.T) {
 			if streamSemantic != finalSemantic {
 				t.Fatalf("stream/final semantic foreground mismatch\nstream=%q\nfinal=%q\nstream styled=%q\nfinal styled=%q", streamSemantic, finalSemantic, stream.Styled, final.Styled)
 			}
-			if !strings.Contains(streamSemantic, "RUN_COMMAND") || !strings.Contains(finalSemantic, "pytest") {
+			if !strings.Contains(streamSemantic, "RunCommand") || !strings.Contains(finalSemantic, "pytest") {
 				t.Fatalf("semantic foreground should cover blockquote body\nstream=%q\nfinal=%q", streamSemantic, finalSemantic)
 			}
 			if tt.role == tuikit.LineStyleAssistant {
 				for _, row := range []RenderedRow{stream, final} {
 					reasoningText := normalizeInlineStyleText(textWithSGRForeground(row.Styled, sgrForegroundCode(t, theme.ReasoningFg)))
-					if strings.Contains(reasoningText, "RUN_COMMAND") || strings.Contains(reasoningText, "pytest") {
+					if strings.Contains(reasoningText, "RunCommand") || strings.Contains(reasoningText, "pytest") {
 						t.Fatalf("assistant blockquote body should not use reasoning foreground; reasoning text=%q styled=%q", reasoningText, row.Styled)
 					}
 				}

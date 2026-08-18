@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 )
 
 func (t *commandTask) snapshotLocked(status sandbox.SessionStatus) taskapi.Snapshot {
@@ -43,7 +43,7 @@ func (t *commandTask) retainParentRelationLocked() {
 		t.metadata = map[string]any{}
 	}
 	t.metadata["parent_call"] = strings.TrimSpace(t.parentCall)
-	t.metadata["parent_tool"] = identity.RunCommand
+	t.metadata["parent_tool"] = shell.RunCommandToolName
 }
 
 func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask, error) {

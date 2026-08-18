@@ -153,6 +153,38 @@ func TestNormalizeToolCallDefaultsMissingStatusToPending(t *testing.T) {
 	}
 }
 
+func TestNormalizeExternalToolCallCannotDeclareRuntimeToolName(t *testing.T) {
+	t.Parallel()
+
+	meta := metautil.WithRuntimeSection(
+		map[string]any{"vendor": map[string]any{"trace": "keep"}},
+		metautil.RuntimeTool,
+		map[string]any{metautil.RuntimeToolName: "RunCommand"},
+	)
+	meta = metautil.WithRuntimeSection(meta, "binding", map[string]any{"task_result": true})
+	event := NormalizeUpdate(client.ToolCall{
+		SessionUpdate: client.UpdateToolCall,
+		ToolCallID:    "call-1",
+		Title:         "External command",
+		Kind:          "execute",
+		Meta:          meta,
+	}, controllerTestOptions())
+	update := session.ProtocolUpdateOf(event)
+	if update == nil {
+		t.Fatal("NormalizeUpdate() = nil, want UI-only tool event")
+	}
+	if got := metautil.String(update.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "" {
+		t.Fatalf("external runtime tool name = %q, want stripped", got)
+	}
+	if got := metautil.RuntimeSection(update.Meta, "binding"); len(got) != 0 {
+		t.Fatalf("external runtime binding = %#v, want stripped", got)
+	}
+	vendor, _ := update.Meta["vendor"].(map[string]any)
+	if vendor["trace"] != "keep" {
+		t.Fatalf("unrelated provider metadata was not preserved: %#v", update.Meta)
+	}
+}
+
 func TestNormalizeRejectsProtocolOnlyCanonicalToolAndPlan(t *testing.T) {
 	t.Parallel()
 

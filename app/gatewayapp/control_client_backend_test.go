@@ -225,7 +225,7 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 	stack.composition.attachControlClientHandle(handle)
 
 	status := schema.ToolStatusInProgress
-	title := "RUN_COMMAND"
+	title := "RunCommand"
 	mainEvents <- eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: active.SessionID,
@@ -243,7 +243,7 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 			metautil.Root: map[string]any{
 				metautil.Runtime: map[string]any{
 					metautil.RuntimeTool: map[string]any{
-						metautil.RuntimeToolName: "RUN_COMMAND",
+						metautil.RuntimeToolName: "RunCommand",
 					},
 					metautil.RuntimeTask: map[string]any{
 						metautil.RuntimeTaskID:         "task-1",

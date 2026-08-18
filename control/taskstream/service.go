@@ -13,7 +13,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 )
 
 type Authorizer interface {
@@ -421,9 +422,9 @@ func descriptorFromEntry(entry *task.Entry) TaskDescriptor {
 	if parentTool == "" {
 		switch entry.Kind {
 		case task.KindSubagent:
-			parentTool = identity.Spawn
+			parentTool = spawn.ToolName
 		case task.KindCommand:
-			parentTool = identity.RunCommand
+			parentTool = shell.RunCommandToolName
 		}
 	}
 	return TaskDescriptor{

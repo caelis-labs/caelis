@@ -134,11 +134,11 @@ func TestRegressionProjectionGoldenMultiTool(t *testing.T) {
 	scripted := evalharness.NewScriptedModel("proj-multi-tool",
 		evalharness.ToolCallStep("looking...", model.ToolCall{
 			ID:   "call-a",
-			Name: "READ",
+			Name: "Read",
 			Args: `{"path":"main.go"}`,
 		}, model.ToolCall{
 			ID:   "call-b",
-			Name: "SEARCH",
+			Name: "Grep",
 			Args: `{"path":".","pattern":"func main"}`,
 		}),
 		evalharness.TextStep("done"),
@@ -149,8 +149,8 @@ func TestRegressionProjectionGoldenMultiTool(t *testing.T) {
 		Prompt:    "inspect",
 		Model:     scripted,
 		Tools: []tool.Tool{
-			evalharness.EchoTool("READ"),
-			evalharness.EchoTool("SEARCH"),
+			evalharness.EchoTool("Read"),
+			evalharness.EchoTool("Grep"),
 		},
 	})
 	if err != nil {

@@ -40,6 +40,23 @@ func TestCompactEventDataContractMetadataRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCompactEventDataPreservesExactDistinctToolNames(t *testing.T) {
+	t.Parallel()
+
+	value := CompactEventDataValue(CompactEventData{
+		ContractVersion: CompactContractVersion,
+		DiscoveredTools: []string{"Search", "SEARCH", "Search"},
+	})
+	event := &session.Event{Type: session.EventTypeCompact, Meta: map[string]any{MetaKeyCompact: value}}
+	got, ok := CompactEventDataFromEvent(event)
+	if !ok {
+		t.Fatal("CompactEventDataFromEvent() ok = false")
+	}
+	if len(got.DiscoveredTools) != 2 || got.DiscoveredTools[0] != "Search" || got.DiscoveredTools[1] != "SEARCH" {
+		t.Fatalf("discovered tools = %v, want exact [Search SEARCH]", got.DiscoveredTools)
+	}
+}
+
 func TestCompactEventSequencePersistsAsExactDecimalString(t *testing.T) {
 	for _, sequence := range []uint64{
 		9007199254740991,

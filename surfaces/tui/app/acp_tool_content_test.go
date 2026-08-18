@@ -36,18 +36,16 @@ func testRuntimeToolMeta(values map[string]any) map[string]any {
 
 func toolResultLabel(name string, input map[string]any) string {
 	switch name {
-	case "READ":
+	case "Read":
 		return baseNameFromInput(input)
-	case "LIST":
-		return baseNameFromInput(input)
-	case "RG", "SEARCH", "FIND":
+	case "Grep":
 		if pattern, _ := input["pattern"].(string); pattern != "" {
 			return `"` + pattern + `"`
 		}
 		if query, _ := input["query"].(string); query != "" {
 			return `"` + query + `"`
 		}
-	case "PATCH", "WRITE":
+	case "Patch", "Write":
 		return baseNameFromInput(input)
 	}
 	return name

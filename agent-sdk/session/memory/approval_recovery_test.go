@@ -92,7 +92,7 @@ func pendingApprovalEvent(requestID string) *session.Event {
 		Protocol: &session.EventProtocol{
 			Method: session.ProtocolMethodRequestPermission,
 			Permission: &session.ProtocolApproval{
-				ToolCall: session.ProtocolToolCall{ID: "call-" + requestID, Name: "WRITE"},
+				ToolCall: session.ProtocolToolCall{ID: "call-" + requestID, Name: "Write"},
 			},
 		},
 	}

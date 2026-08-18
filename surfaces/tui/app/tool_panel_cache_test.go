@@ -56,7 +56,7 @@ func TestTerminalToolPanelCacheKeyUsesBoundedTail(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 
 	longOutput := strings.Join(numberedToolLines(500), "\n")
-	block.UpdateToolWithMeta("call-1", "RUN_COMMAND", "go test", longOutput, false, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("call-1", "RunCommand", "go test", longOutput, false, false, ToolUpdateMeta{TaskHandle: "task-1"})
 	_ = block.Render(ctx)
 	cache := block.toolPanelRenderCache["call-1"]
 	if cache.lastInputBytes >= len(longOutput) {
@@ -83,7 +83,7 @@ func TestGenericToolPanelCacheKeyUsesBoundedText(t *testing.T) {
 	_ = renderCachedToolPanelRows(&cacheByCall, toolPanelRenderRequest{
 		BlockID:  "block-1",
 		CallID:   "call-1",
-		ToolName: "READ",
+		ToolName: "Read",
 		Text:     longOutput,
 		Width:    ctx.Width,
 		Ctx:      ctx,
@@ -109,7 +109,7 @@ func acpToolPanelUpdate(callID string, command string, output string, status str
 			Kind:          stringPtr(schema.ToolKindExecute),
 			Status:        stringPtr(status),
 			RawInput:      map[string]any{"command": command},
-			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), callID, output),
+			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), callID, output),
 		},
 	}
 }

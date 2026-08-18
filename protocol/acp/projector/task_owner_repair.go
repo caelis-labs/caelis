@@ -6,7 +6,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -119,7 +118,7 @@ func terminalTaskObservationsFromEnvelope(env eventstream.Envelope) []terminalTa
 
 func terminalBatchTaskObservation(rawOutput map[string]any, observerStatus string) (terminalTaskObservation, bool) {
 	parentCallID := strings.TrimSpace(display.MapString(rawOutput, "parent_call"))
-	parentTool := identity.CanonicalOrSelf(display.MapString(rawOutput, "parent_tool"))
+	parentTool := strings.TrimSpace(display.MapString(rawOutput, "parent_tool"))
 	state := strings.TrimSpace(display.MapString(rawOutput, "state"))
 	if parentCallID == "" || parentTool == "" ||
 		(!eventstream.IsTerminalLifecycleState(state) && !taskOutputHasFinalResponses(rawOutput)) {
@@ -138,7 +137,7 @@ func terminalSingularTaskObservation(
 		return terminalTaskObservation{}, false
 	}
 	parentCallID := strings.TrimSpace(env.ParentTool.ToolCallID)
-	parentTool := identity.CanonicalOrSelf(env.ParentTool.ToolName)
+	parentTool := strings.TrimSpace(env.ParentTool.ToolName)
 	state := strings.TrimSpace(display.MapString(rawOutput, "state"))
 	if parentCallID == "" || parentTool == "" ||
 		strings.TrimSpace(observerCallID) == parentCallID ||
@@ -149,7 +148,7 @@ func terminalSingularTaskObservation(
 		return terminalTaskObservation{}, false
 	}
 	if rawParentTool := strings.TrimSpace(display.MapString(rawOutput, "parent_tool")); rawParentTool != "" &&
-		identity.CanonicalOrSelf(rawParentTool) != parentTool {
+		rawParentTool != parentTool {
 		return terminalTaskObservation{}, false
 	}
 	return newTerminalTaskObservation(parentCallID, parentTool, rawOutput, observerStatus), true
@@ -176,7 +175,7 @@ func newTerminalTaskObservation(
 ) terminalTaskObservation {
 	return terminalTaskObservation{
 		ParentCallID:   strings.TrimSpace(parentCallID),
-		ParentTool:     identity.CanonicalOrSelf(parentTool),
+		ParentTool:     strings.TrimSpace(parentTool),
 		TargetKind:     strings.ToLower(strings.TrimSpace(display.ToolTaskTargetKind(nil, rawOutput, nil))),
 		Handle:         taskapi.NormalizeHandle(display.MapString(rawOutput, "handle")),
 		ObserverStatus: strings.TrimSpace(observerStatus),

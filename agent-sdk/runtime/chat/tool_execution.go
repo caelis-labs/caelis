@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 const toolCancellationDrainGrace = 100 * time.Millisecond
@@ -53,6 +53,10 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 ) (model.Message, *session.Event, error) {
 	progressCh := make(chan tool.Result, 16)
 	doneCh := make(chan toolExecutionResult, 1)
+	progressTaskResultMeta := runtimeTaskResultSourceMeta(false)
+	if selectedTool, ok := a.lookupTool(call.Name); ok && toolbinding.IsTaskResultSource(selectedTool) {
+		progressTaskResultMeta = runtimeTaskResultSourceMeta(true)
+	}
 	callCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -71,7 +75,7 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 					continue
 				}
 				canonical, truncationMeta := canonicalToolResult(progress, nil)
-				_ = yieldProgress(session.MarkUIOnly(toolProgressEvent(call, canonical, truncationMeta)))
+				_ = yieldProgress(session.MarkUIOnly(toolProgressEvent(call, canonical, truncationMeta, progressTaskResultMeta)))
 			default:
 				return done.message, done.event, done.err
 			}
@@ -84,7 +88,7 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 				continue
 			}
 			canonical, truncationMeta := canonicalToolResult(progress, nil)
-			if !yieldProgress(session.MarkUIOnly(toolProgressEvent(call, canonical, truncationMeta))) {
+			if !yieldProgress(session.MarkUIOnly(toolProgressEvent(call, canonical, truncationMeta, progressTaskResultMeta))) {
 				return model.Message{}, nil, context.Canceled
 			}
 		case done := <-doneCh:
@@ -150,8 +154,20 @@ func (a *Agent) executeToolCallAdmitted(
 	result = admitToolSearchResult(selectedTool.Definition(), call, result, visibility)
 	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 	message := toolResultMessageFromCanonical(call, canonical)
-	event := toolResultEvent(call, canonical, &message, truncationMeta)
+	eventMeta := truncationMeta
+	if toolbinding.IsTaskResultSource(selectedTool) {
+		eventMeta = mergeEventMeta(eventMeta, runtimeTaskResultSourceMeta(true))
+	}
+	event := toolResultEvent(call, canonical, &message, eventMeta)
 	return message, event, nil
+}
+
+func runtimeTaskResultSourceMeta(trusted bool) map[string]any {
+	return map[string]any{
+		"caelis": map[string]any{"runtime": map[string]any{
+			toolbinding.MetadataSection: map[string]any{toolbinding.MetadataTaskResult: trusted},
+		}},
+	}
 }
 
 func modelVisibleToolErrorResult(call model.ToolCall, result tool.Result, err error) tool.Result {
@@ -169,16 +185,11 @@ func modelVisibleToolErrorResult(call model.ToolCall, result tool.Result, err er
 }
 
 func (a *Agent) lookupTool(name string) (tool.Tool, bool) {
-	requested := names.ExecutableOrSelf(name)
-	for _, item := range a.tools {
-		if item == nil {
-			continue
-		}
-		if strings.EqualFold(names.ExecutableOrSelf(item.Definition().Name), requested) {
-			return item, true
-		}
+	if a == nil || a.toolsByName == nil {
+		return nil, false
 	}
-	return nil, false
+	configured, ok := a.toolsByName[name]
+	return configured, ok
 }
 
 func toolResultMessage(call model.ToolCall, result tool.Result) model.Message {

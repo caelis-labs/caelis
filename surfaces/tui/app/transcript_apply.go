@@ -6,7 +6,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/internal/promptview"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
@@ -59,7 +58,7 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 func (m *Model) acceptedSendMessageTargetsSubagent(event TranscriptEvent) bool {
 	return m != nil && event.Scope == ACPProjectionMain && event.Kind == TranscriptEventTool &&
 		event.Final && !event.ToolError &&
-		names.CanonicalOrSelf(toolSemanticName(event.ToolName, event.ToolKind)) == names.SendMessage &&
+		event.ToolName == surfaceToolSendMessage &&
 		m.subagentOutputCallIDForHandle(event.ToolMessageTarget) != ""
 }
 
@@ -67,7 +66,7 @@ func (m *Model) decorateAgentMessageDisplayTargets(events []TranscriptEvent) []T
 	for index := range events {
 		event := &events[index]
 		if event.Kind != TranscriptEventTool ||
-			names.CanonicalOrSelf(toolSemanticName(event.ToolName, event.ToolKind)) != names.SendMessage {
+			event.ToolName != surfaceToolSendMessage {
 			continue
 		}
 		target := event.ToolMessageTarget
@@ -570,12 +569,12 @@ func eventTargetsParentToolPanel(event TranscriptEvent) bool {
 }
 
 func parentToolIsTaskControl(name string) bool {
-	return names.CanonicalOrSelf(toolSemanticName(name, "")) == names.Task
+	return name == surfaceToolTask
 }
 
 func eventTargetsSubagentOutputView(event TranscriptEvent) bool {
 	return eventTargetsParentToolPanel(event) &&
-		names.CanonicalOrSelf(toolSemanticName(event.AnchorToolName, "")) == names.Spawn
+		event.AnchorToolName == surfaceToolSpawn
 }
 
 func (m *Model) applyAnchoredSubagentNarrativeToTool(event TranscriptEvent) (tea.Model, tea.Cmd) {

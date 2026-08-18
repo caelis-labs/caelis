@@ -306,7 +306,7 @@ func directPermissionEvent(sessionID string, scope *session.EventScope) *session
 		Visibility: session.VisibilityUIOnly,
 		Scope:      scope,
 		Protocol: &session.EventProtocol{Permission: &session.ProtocolApproval{
-			ToolCall: session.ProtocolToolCall{ID: "child-permission", Name: "WRITE", Status: "pending"},
+			ToolCall: session.ProtocolToolCall{ID: "child-permission", Name: "Write", Status: "pending"},
 			Options: []session.ProtocolApprovalOption{{
 				ID: acp.PermAllowOnce, Name: "Allow once", Kind: acp.PermAllowOnce,
 			}},

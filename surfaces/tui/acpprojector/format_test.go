@@ -131,11 +131,11 @@ func TestFormatToolContentDoesNotRenderTerminalContentBodies(t *testing.T) {
 	}
 }
 
-func TestFormatToolStartHidesMetadataOnlyListArgs(t *testing.T) {
+func TestFormatToolStartKeepsGenericArgs(t *testing.T) {
 	t.Parallel()
 
-	got := FormatToolStart("LIST", map[string]any{"metadata": true})
-	if got != "" {
-		t.Fatalf("FormatToolStart(LIST metadata) = %q, want empty", got)
+	got := FormatToolStart("ExternalList", map[string]any{"metadata": true})
+	if got != `{"metadata":true}` {
+		t.Fatalf("FormatToolStart(ExternalList metadata) = %q, want generic JSON", got)
 	}
 }

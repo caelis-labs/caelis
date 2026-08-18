@@ -249,6 +249,14 @@ child workspace described above.
 
 ## Display Extensions
 
+ACP projectors may keep private presentation tables for the exact built-in
+names, and Surfaces own their final labels and panel layout. Those tables do
+not normalize execution identity: unknown names and former aliases stay
+generic, and titles, arguments, result fields, or `_meta` cannot promote an
+external tool into a built-in. Typed `Event.Tool` and Envelope relation fields
+remain authoritative; display metadata is only a fallback where the maintained
+wire contract explicitly permits one.
+
 Display extensions may preserve information that standard ACP content cannot
 represent without changing semantic ownership:
 
@@ -266,6 +274,10 @@ example, codex-acp `terminal_output_delta` becomes canonical
 `terminal_output` before projection or Surface code. After normalization every
 `terminal_output` payload is an ordered delta; a compatibility adapter must not
 also publish a cumulative final payload.
+
+External ACP tool metadata cannot carry Runtime wrapper bindings. Ingress drops
+the complete reserved `caelis.runtime.binding` section before projection, just
+as it prevents external metadata from declaring a Runtime tool identity.
 
 Standard ACP tool `content` remains the primary display payload. Caelis
 advertises `_meta.terminal_output=true` under `clientCapabilities` for the

@@ -12,7 +12,7 @@ func TestResolveRelationDeliveryPrefersTypedPointersOverLegacyMetadata(t *testin
 	env := Envelope{
 		ParentTool: &ParentToolRelation{ToolCallID: "typed-parent", ToolName: "Spawn"},
 		Delivery:   &Delivery{},
-		Meta:       legacyRelationDeliveryMetaForTest("legacy-parent", "TASK", true),
+		Meta:       legacyRelationDeliveryMetaForTest("legacy-parent", "Task", true),
 	}
 	resolved := ResolveRelationDelivery(env)
 	if resolved.ParentTool == nil || resolved.ParentTool.ToolCallID != "typed-parent" || resolved.ParentTool.ToolName != "Spawn" {
@@ -36,11 +36,11 @@ func TestResolveRelationDeliveryFallsBackToLegacyMetadataInUpdate(t *testing.T) 
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "child-tool-1",
-			Meta:          legacyRelationDeliveryMetaForTest("spawn-call-1", "SPAWN", true),
+			Meta:          legacyRelationDeliveryMetaForTest("spawn-call-1", "Spawn", true),
 		},
 	}
 	resolved := ResolveRelationDelivery(env)
-	if resolved.ParentTool == nil || resolved.ParentTool.ToolCallID != "spawn-call-1" || resolved.ParentTool.ToolName != "SPAWN" {
+	if resolved.ParentTool == nil || resolved.ParentTool.ToolCallID != "spawn-call-1" || resolved.ParentTool.ToolName != "Spawn" {
 		t.Fatalf("parent relation = %#v, want legacy Spawn parent", resolved.ParentTool)
 	}
 	if resolved.Delivery == nil || resolved.Delivery.Mode != DeliveryTransient {
@@ -51,7 +51,7 @@ func TestResolveRelationDeliveryFallsBackToLegacyMetadataInUpdate(t *testing.T) 
 func TestResolveRelationDeliveryFallsBackPerMissingTypedPointer(t *testing.T) {
 	t.Parallel()
 
-	legacyMeta := legacyRelationDeliveryMetaForTest("legacy-parent", "TASK", true)
+	legacyMeta := legacyRelationDeliveryMetaForTest("legacy-parent", "Task", true)
 	tests := []struct {
 		name             string
 		env              Envelope
@@ -76,7 +76,7 @@ func TestResolveRelationDeliveryFallsBackPerMissingTypedPointer(t *testing.T) {
 				Meta:     legacyMeta,
 			},
 			wantParentCallID: "legacy-parent",
-			wantParentTool:   "TASK",
+			wantParentTool:   "Task",
 			wantDelivery:     Delivery{},
 		},
 	}

@@ -4,12 +4,11 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Message, extraMeta ...map[string]any) *session.Event {
@@ -24,19 +23,21 @@ func toolEvent(call model.ToolCall, result tool.Result, message *model.Message, 
 	rawInput := mustObject(call.Args)
 	rawOutput := toolResultRawOutput(result)
 	journal := toolExecutionJournalFromResult(result)
+	trustedTaskResult := runtimeTaskResultSourceDeclared(extraMeta)
 	resultMetadata := session.CloneState(result.Metadata)
 	delete(resultMetadata, tool.MetadataExecutionJournal)
+	resultMetadata = withoutUntrustedRuntimeTaskAuthority(resultMetadata, trustedTaskResult)
 	metaParts := []map[string]any{resultMetadata}
 	metaParts = append(metaParts, extraMeta...)
-	metaParts = append(metaParts, toolMeta(call.Name))
+	metaParts = append(metaParts, toolMeta(call.Name), runtimeTaskResultSourceMeta(trustedTaskResult))
 	status := strings.TrimSpace(statusOverride)
 	if status == "" {
-		status = toolCallStatus(call, result, rawOutput)
+		status = toolCallStatus(call, result, rawOutput, trustedTaskResult)
 	}
 	meta := mergeEventMeta(metaParts...)
 	event := &session.Event{
 		Type: session.EventTypeToolResult,
-		Tool: toolEventPayload(call, status, rawInput, rawOutput, toolResultContent(call, rawInput, rawOutput, meta, status, result.IsError)),
+		Tool: toolEventPayload(call, status, rawInput, rawOutput, nil),
 		Meta: meta,
 	}
 	if journal != nil {
@@ -47,6 +48,28 @@ func toolEvent(call model.ToolCall, result tool.Result, message *model.Message, 
 		event.Text = message.TextContent()
 	}
 	return event
+}
+
+func runtimeTaskResultSourceDeclared(metaParts []map[string]any) bool {
+	for _, meta := range metaParts {
+		caelis, _ := meta["caelis"].(map[string]any)
+		runtimeMeta, _ := caelis["runtime"].(map[string]any)
+		binding, _ := runtimeMeta[toolbinding.MetadataSection].(map[string]any)
+		if trusted, _ := binding[toolbinding.MetadataTaskResult].(bool); trusted {
+			return true
+		}
+	}
+	return false
+}
+
+func withoutUntrustedRuntimeTaskAuthority(meta map[string]any, trusted bool) map[string]any {
+	caelis, _ := meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	delete(runtimeMeta, toolbinding.MetadataSection)
+	if !trusted {
+		delete(runtimeMeta, "task")
+	}
+	return meta
 }
 
 func toolExecutionJournalFromResult(result tool.Result) *session.ExecutionJournalEntry {
@@ -98,63 +121,7 @@ func toolResultRawOutput(result tool.Result) map[string]any {
 	return map[string]any{}
 }
 
-func toolResultContent(call model.ToolCall, input map[string]any, output map[string]any, meta map[string]any, status string, isErr bool) []session.EventToolContent {
-	info, _ := names.Lookup(call.Name)
-	toolName := names.CanonicalOrSelf(call.Name)
-	displayOutput := toolResultDisplayOutput(toolName, output, meta)
-	if info.ResultStyle == names.ResultTask && suppressTaskControlContent(display.ToolTaskAction(input, displayOutput, meta)) {
-		return nil
-	}
-	text := toolResultDisplayText(toolName, input, displayOutput, meta, status, isErr)
-	if strings.TrimSpace(text) == "" && successfulEmptyTerminalResult(toolName, status, isErr) {
-		return nil
-	}
-	if strings.TrimSpace(text) == "" {
-		text = toolResultStatusText(status, isErr)
-	}
-	if strings.TrimSpace(text) == "" {
-		return nil
-	}
-	item := session.EventToolContent{
-		Type: "content",
-		Text: text,
-	}
-	if info.TerminalKnown {
-		item.Type = "terminal"
-		item.TerminalID = toolResultTerminalID(call, displayOutput, meta)
-	}
-	return []session.EventToolContent{item}
-}
-
-func suppressTaskControlContent(action string) bool {
-	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "wait", "read", "cancel":
-		return true
-	default:
-		return false
-	}
-}
-
-func successfulEmptyTerminalResult(name string, status string, isErr bool) bool {
-	if isErr || strings.EqualFold(strings.TrimSpace(status), "failed") {
-		return false
-	}
-	if !strings.EqualFold(strings.TrimSpace(status), "completed") {
-		return false
-	}
-	info, ok := names.Lookup(name)
-	return ok && info.TerminalKnown && info.TerminalPanel
-}
-
-func toolCallTitle(call model.ToolCall) string {
-	name := strings.TrimSpace(call.Name)
-	if title := display.SummarizeToolCallTitle(name, mustObject(call.Args)); strings.TrimSpace(title) != "" {
-		return title
-	}
-	return name
-}
-
-func toolCallStatus(call model.ToolCall, result tool.Result, rawOutput map[string]any) string {
+func toolCallStatus(_ model.ToolCall, result tool.Result, rawOutput map[string]any, trustedTaskResult bool) string {
 	if result.IsError {
 		return "failed"
 	}
@@ -162,8 +129,7 @@ func toolCallStatus(call model.ToolCall, result tool.Result, rawOutput map[strin
 	// the process state carried in its payload; control tools such as Spawn,
 	// Task, and SendMessage report a separate target lifecycle that must not
 	// keep the tool invocation open.
-	info, _ := names.Lookup(call.Name)
-	if info.ResultStyle == names.ResultCommand {
+	if trustedTaskResult && runtimeTaskKind(result.Metadata) == "command" {
 		state, _ := rawOutput["state"].(string)
 		if strings.TrimSpace(state) == "" {
 			if exitCode, ok := intValue(rawOutput["exit_code"]); ok && exitCode != 0 {
@@ -179,6 +145,14 @@ func toolCallStatus(call model.ToolCall, result tool.Result, rawOutput map[strin
 		}
 	}
 	return "completed"
+}
+
+func runtimeTaskKind(meta map[string]any) string {
+	caelis, _ := meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	taskMeta, _ := runtimeMeta["task"].(map[string]any)
+	kind, _ := taskMeta["kind"].(string)
+	return strings.ToLower(strings.TrimSpace(kind))
 }
 
 func responseMeta(resp *model.Response) map[string]any {
@@ -328,8 +302,6 @@ func toolEventPayload(call model.ToolCall, status string, rawInput map[string]an
 	payload := &session.EventTool{
 		ID:      strings.TrimSpace(call.ID),
 		Name:    strings.TrimSpace(call.Name),
-		Kind:    display.ToolKindForName(call.Name),
-		Title:   toolCallTitle(call),
 		Status:  strings.TrimSpace(status),
 		Input:   session.CloneState(rawInput),
 		Output:  session.CloneState(rawOutput),

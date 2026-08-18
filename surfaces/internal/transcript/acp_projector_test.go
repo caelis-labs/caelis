@@ -95,7 +95,7 @@ func TestProjectACPEventToEventsPrefersTypedRelationAndDeliveryOverConflictingLe
 				"runtime": map[string]any{
 					"stream": map[string]any{
 						"parent_call_id": "legacy-task-1",
-						"parent_tool":    "TASK",
+						"parent_tool":    "Task",
 					},
 				},
 			},
@@ -158,7 +158,7 @@ func TestProjectACPEventToEventsFallsBackToLegacyRelationAndDeliveryMetadata(t *
 				"runtime": map[string]any{
 					"stream": map[string]any{
 						"parent_call_id": "spawn-1",
-						"parent_tool":    "SPAWN",
+						"parent_tool":    "Spawn",
 					},
 				},
 			},
@@ -179,7 +179,7 @@ func TestProjectACPEventToEventsFallsBackToLegacyRelationAndDeliveryMetadata(t *
 	if event.Scope != ScopeSubagent || event.ScopeID != "task-1" || event.Actor != "worker" || event.TurnID != "turn-1" {
 		t.Fatalf("event scope = %#v, want subagent/task-1/worker/turn-1", event)
 	}
-	if event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "SPAWN" || event.Observation {
+	if event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "Spawn" || event.Observation {
 		t.Fatalf("event anchor = %#v, want compatibility anchor without typed observation authority", event)
 	}
 }
@@ -205,7 +205,7 @@ func TestProjectACPEventToEventsDelegatesToolUpdate(t *testing.T) {
 			RawOutput:     map[string]any{"stdout": "done\n"},
 		},
 	}, testSurfaceProjector{
-		toolName:       "RUN_COMMAND",
+		toolName:       "RunCommand",
 		resultCapture:  &captured,
 		requireDefault: "in_progress",
 		t:              t,
@@ -213,7 +213,7 @@ func TestProjectACPEventToEventsDelegatesToolUpdate(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want one transcript event", events)
 	}
-	if events[0].ToolName != "RUN_COMMAND" || events[0].ToolCallID != "call-1" {
+	if events[0].ToolName != "RunCommand" || events[0].ToolCallID != "call-1" {
 		t.Fatalf("event = %#v, want delegated tool event", events[0])
 	}
 	rawOutput := RawMap(captured.RawOutput)
@@ -230,7 +230,7 @@ func TestProjectACPEventToEventsSkipsPlanTools(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate,
 		Update: schema.ToolCall{
 			ToolCallID: "plan-1",
-			Title:      "PLAN",
+			Title:      "Plan",
 		},
 	}, testSurfaceProjector{callCalled: &called})
 	if len(events) != 0 || called {
@@ -245,7 +245,7 @@ func TestProjectACPEventToEventsProjectsApprovalReview(t *testing.T) {
 		Kind: eventstream.KindApprovalReview,
 		ApprovalReview: &eventstream.ApprovalReview{
 			ToolCallID: "call-1",
-			ToolName:   "RUN_COMMAND",
+			ToolName:   "RunCommand",
 			RawInput:   map[string]any{"command": "git status"},
 			Status:     "approved",
 			Text:       "Automatic approval review approved (risk: low, authorization: allow)",

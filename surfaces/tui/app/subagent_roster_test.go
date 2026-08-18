@@ -264,17 +264,17 @@ func TestSubagentRosterColdResumeLoadsOnlySelectedWorkspace(t *testing.T) {
 		{
 			SessionID: "session-old", TaskID: "task-kira", Handle: "kira", Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(103, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "SPAWN"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "Spawn"},
 		},
 		{
 			SessionID: "session-old", TaskID: "task-wen", Handle: "wen", Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(102, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-wen", ToolName: "SPAWN"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-wen", ToolName: "Spawn"},
 		},
 		{
 			SessionID: "session-old", TaskID: "task-yara", Handle: "yara", Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(101, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-yara", ToolName: "SPAWN"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-yara", ToolName: "Spawn"},
 		},
 	}
 	requests := make(chan protocoltaskstream.SubscribeRequest, len(descriptors))
@@ -419,7 +419,7 @@ func TestSubagentRosterRefreshUsesTerminalTaskDirectoryWithoutMutatingWorkspace(
 	service := &subagentRosterTestTaskStreamService{list: protocoltaskstream.ListResult{Tasks: []protocoltaskstream.TaskDescriptor{{
 		SessionID: "session-1", TaskID: "task-1", Handle: "rhea", Kind: task.KindSubagent,
 		State: task.StateCompleted, Running: false, UpdatedAt: endedAt,
-		ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-rhea", ToolName: "SPAWN"},
+		ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-rhea", ToolName: "Spawn"},
 	}}}}
 	model := NewModel(Config{
 		NoColor: true, NoAnimation: true, TaskStreams: bindTaskStreamTestClient(t, service),
@@ -463,7 +463,7 @@ func TestSubagentRosterResumeLetsTerminalDirectorySupersedeHistoricalSpawn(t *te
 		descriptors = append(descriptors, protocoltaskstream.TaskDescriptor{
 			SessionID: "session-old", TaskID: "task-" + handles[index], Handle: handles[index], Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, CurrentTurnID: "task-" + handles[index] + ":1", UpdatedAt: endedAt,
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: callIDs[index], ToolName: "SPAWN"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: callIDs[index], ToolName: "Spawn"},
 		})
 	}
 	service := &subagentRosterTestTaskStreamService{list: protocoltaskstream.ListResult{Tasks: descriptors}}
@@ -516,7 +516,7 @@ func TestSubagentRosterColdResumeLetsDirectorySupersedeFreshReplayShell(t *testi
 	service := &subagentRosterTestTaskStreamService{list: protocoltaskstream.ListResult{Tasks: []protocoltaskstream.TaskDescriptor{{
 		SessionID: "session-old", TaskID: "task-kira", Handle: "kira", Kind: task.KindSubagent,
 		State: task.StateCompleted, Running: false, CurrentTurnID: "task-kira:1", UpdatedAt: endedAt,
-		ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "SPAWN"},
+		ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "Spawn"},
 	}}}}
 	model := NewModel(Config{
 		NoColor: true, NoAnimation: true, Workspace: "caelis",
@@ -708,7 +708,7 @@ func transcriptTaskDescriptor(turnID string, state task.State, running bool, upd
 	return protocoltaskstream.TaskDescriptor{
 		SessionID: "session-1", TaskID: "task-1", Handle: "rhea", Kind: task.KindSubagent,
 		State: state, Running: running, CurrentTurnID: turnID, UpdatedAt: updatedAt,
-		ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-rhea", ToolName: "SPAWN"},
+		ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-rhea", ToolName: "Spawn"},
 	}
 }
 

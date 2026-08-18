@@ -3,8 +3,6 @@ package tuiapp
 import (
 	"strings"
 	"time"
-
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 )
 
 func toolPanelExpanded(state map[string]bool, callID string) bool {
@@ -521,9 +519,9 @@ func collectToolPanelCallIDs(events []SubagentEvent) []string {
 }
 
 func shouldDefaultCollapseToolPanel(name string) bool {
-	return display.IsExplorationTool(name)
+	return surfaceIsExplorationTool(name)
 }
 
 func shouldDefaultCollapseToolEvent(ev SubagentEvent) bool {
-	return shouldDefaultCollapseToolPanel(toolSemanticName(ev.Name, ev.ToolKind))
+	return shouldDefaultCollapseToolPanel(ev.Name)
 }

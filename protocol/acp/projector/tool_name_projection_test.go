@@ -144,7 +144,7 @@ func TestEventProjectorProjectsProtocolToolSemanticNameWithoutEventMetaLeak(t *t
 	}
 }
 
-func TestProtocolToolNameForUpdateUsesOneOrderedCandidateLadder(t *testing.T) {
+func TestProtocolToolNameForUpdateKeepsCanonicalAndProtocolCandidatesOrdered(t *testing.T) {
 	t.Parallel()
 
 	runtimeToolMeta := func(name string) map[string]any {
@@ -201,7 +201,7 @@ func TestProtocolToolNameForUpdateUsesOneOrderedCandidateLadder(t *testing.T) {
 			want: "Spawn",
 		},
 		{
-			name:  "event meta wins raw input",
+			name:  "event meta supplies maintained protocol name",
 			event: &session.Event{Meta: runtimeToolMeta("Task")},
 			update: &session.ProtocolUpdate{
 				RawInput: map[string]any{"command": "go test"}, Title: "Spawn orbit", Kind: "execute",
@@ -209,34 +209,34 @@ func TestProtocolToolNameForUpdateUsesOneOrderedCandidateLadder(t *testing.T) {
 			want: "Task",
 		},
 		{
-			name:   "raw input wins title",
+			name:   "raw input does not invent a tool identity",
 			event:  &session.Event{},
 			update: &session.ProtocolUpdate{RawInput: map[string]any{"command": "go test"}, Title: "Spawn orbit", Kind: "execute"},
-			want:   "RunCommand",
+			want:   "execute",
 		},
 		{
-			name:   "known title wins generic kind",
+			name:   "title cannot promote a builtin over generic kind",
 			event:  &session.Event{},
 			update: &session.ProtocolUpdate{Title: "Task wait", Kind: "execute"},
-			want:   "Task",
+			want:   "execute",
 		},
 		{
-			name:   "title only rg compatibility",
+			name:   "unknown title without name stays anonymous",
 			event:  &session.Event{},
 			update: &session.ProtocolUpdate{Title: "rg task stream"},
-			want:   "RG",
+			want:   "",
 		},
 		{
-			name:   "title only find compatibility",
+			name:   "another unknown title stays anonymous",
 			event:  &session.Event{},
 			update: &session.ProtocolUpdate{Title: "find task stream"},
-			want:   "FIND",
+			want:   "",
 		},
 		{
-			name:   "compatibility title wins generic kind",
+			name:   "generic kind wins unknown title",
 			event:  &session.Event{},
 			update: &session.ProtocolUpdate{Title: "rg task stream", Kind: "execute"},
-			want:   "RG",
+			want:   "execute",
 		},
 		{
 			name:   "kind wins unknown title",
@@ -245,10 +245,10 @@ func TestProtocolToolNameForUpdateUsesOneOrderedCandidateLadder(t *testing.T) {
 			want:   "execute",
 		},
 		{
-			name:   "unknown title is final fallback",
+			name:   "title is never an identity fallback",
 			event:  &session.Event{},
 			update: &session.ProtocolUpdate{Title: "Custom action"},
-			want:   "Custom",
+			want:   "",
 		},
 	}
 

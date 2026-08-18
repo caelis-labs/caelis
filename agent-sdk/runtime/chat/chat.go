@@ -27,6 +27,7 @@ type Agent struct {
 	name                string
 	model               model.LLM
 	tools               []tool.Tool
+	toolsByName         map[string]tool.Tool
 	systemPrompt        string
 	reasoning           model.ReasoningConfig
 	request             agent.ModelRequestOptions
@@ -45,6 +46,7 @@ func New(name string, model model.LLM, systemPrompt string) (*Agent, error) {
 	return &Agent{
 		name:                name,
 		model:               model,
+		toolsByName:         map[string]tool.Tool{},
 		systemPrompt:        strings.TrimSpace(systemPrompt),
 		toolResultArtifacts: defaultToolResultArtifactStore(),
 	}, nil
@@ -57,6 +59,23 @@ func NewWithTools(name string, model model.LLM, tools []tool.Tool, systemPrompt 
 		return nil, err
 	}
 	agent.tools = append([]tool.Tool(nil), tools...)
+	for index, configured := range agent.tools {
+		if configured == nil {
+			continue
+		}
+		definition := configured.Definition()
+		name := definition.Name
+		switch {
+		case name == "":
+			return nil, fmt.Errorf("agent-sdk/runtime/chat: tool at index %d has an empty Definition.Name", index)
+		case name != strings.TrimSpace(name):
+			return nil, fmt.Errorf("agent-sdk/runtime/chat: tool Definition.Name %q has surrounding whitespace", name)
+		case agent.toolsByName[name] != nil:
+			return nil, fmt.Errorf("agent-sdk/runtime/chat: duplicate tool Definition.Name %q", name)
+		default:
+			agent.toolsByName[name] = configured
+		}
+	}
 	return agent, nil
 }
 
@@ -200,7 +219,7 @@ func (a *Agent) collectCanonicalModelStep(
 		}
 		final.Message = normalizeAssistantCitations(final.Message, messages)
 
-		assistantMessage, calls, err := canonicalizeAssistantToolCalls(final.Message, a.tools...)
+		assistantMessage, calls, err := validateAssistantToolCalls(final.Message)
 		if err == nil {
 			return assistantMessage, calls, final, messageID, prefixusage.ForRequest(request), true, nil
 		}

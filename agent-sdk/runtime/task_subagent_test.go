@@ -1115,9 +1115,9 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsSubagentResult(t *testing.T) 
 	canonicalText := "canonical truncated child answer\n"
 	err = runtime.tasks.syncCanonicalToolResult(ctx, activeSession.SessionRef, &session.Event{
 		Type: session.EventTypeToolResult,
-		Meta: taskToolMeta(snapshot),
+		Meta: trustedTaskResultMeta(taskToolMeta(snapshot)),
 		Tool: &session.EventTool{
-			Name:   "SPAWN",
+			Name:   "Spawn",
 			Status: "completed",
 			Output: map[string]any{
 				"handle":        handle,
@@ -1889,7 +1889,7 @@ func TestSubagentTaskToolMetaCarriesPhysicalTurnCursorAndSpawnParent(t *testing.
 		Metadata: map[string]any{
 			"turn_id":     "task-1:2",
 			"parent_call": "spawn-call-1",
-			"parent_tool": "SPAWN",
+			"parent_tool": "Spawn",
 		},
 	})
 	caelisMeta, ok := meta["caelis"].(map[string]any)
@@ -1910,7 +1910,7 @@ func TestSubagentTaskToolMetaCarriesPhysicalTurnCursorAndSpawnParent(t *testing.
 	if got, ok := taskInt64Value(taskMeta["event_cursor"]); !ok || got != 17 {
 		t.Fatalf("event_cursor = %#v, want 17", taskMeta["event_cursor"])
 	}
-	if taskStringValue(taskMeta["parent_call"]) != "spawn-call-1" || taskStringValue(taskMeta["parent_tool"]) != "SPAWN" {
+	if taskStringValue(taskMeta["parent_call"]) != "spawn-call-1" || taskStringValue(taskMeta["parent_tool"]) != "Spawn" {
 		t.Fatalf("parent task metadata = %#v, want canonical Spawn relation", taskMeta)
 	}
 }
@@ -1925,7 +1925,7 @@ func TestSubagentTaskToolPayloadCarriesCanonicalFinalAndSpawnParent(t *testing.T
 		Metadata: map[string]any{
 			"turn_id":     "task-1:2",
 			"parent_call": "spawn-call-1",
-			"parent_tool": "SPAWN",
+			"parent_tool": "Spawn",
 		},
 	})
 
@@ -1938,7 +1938,7 @@ func TestSubagentTaskToolPayloadCarriesCanonicalFinalAndSpawnParent(t *testing.T
 	if got := taskStringValue(payload["turn_id"]); got != "task-1:2" {
 		t.Fatalf("child Turn identity payload = %#v, want task-1:2", payload)
 	}
-	if taskStringValue(payload["parent_call"]) != "spawn-call-1" || taskStringValue(payload["parent_tool"]) != "SPAWN" {
+	if taskStringValue(payload["parent_call"]) != "spawn-call-1" || taskStringValue(payload["parent_tool"]) != "Spawn" {
 		t.Fatalf("parent relation payload = %#v, want canonical Spawn relation", payload)
 	}
 }

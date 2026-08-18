@@ -6,7 +6,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
-func TestToolCallNameInfersSemanticExecuteName(t *testing.T) {
+func TestToolCallNamePreservesGenericExecuteKind(t *testing.T) {
 	t.Parallel()
 
 	got := ToolCallName(client.ToolCallUpdate{
@@ -15,8 +15,8 @@ func TestToolCallNameInfersSemanticExecuteName(t *testing.T) {
 		RawInput: map[string]any{"command": "pwd"},
 	})
 
-	if got != "RunCommand" {
-		t.Fatalf("ToolCallName() = %q, want RunCommand", got)
+	if got != "execute" {
+		t.Fatalf("ToolCallName() = %q, want generic execute kind", got)
 	}
 }
 

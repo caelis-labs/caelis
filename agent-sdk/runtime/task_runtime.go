@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 )
 
 const taskIDRandomBytes = 6
@@ -261,7 +261,7 @@ func taskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 		// Command Tasks are created only by RunCommand. Carry that canonical
 		// relation in the model-visible result even for snapshots rehydrated
 		// from older entries that persisted only the parent call ID.
-		payload["parent_tool"] = names.RunCommand
+		payload["parent_tool"] = shell.RunCommandToolName
 	}
 	return payload
 }

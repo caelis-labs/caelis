@@ -71,13 +71,7 @@ func TestRegressionChatMinimalToolLoopTrace(t *testing.T) {
       },
       "output": {
         "value": "pong"
-      },
-      "content": [
-        {
-          "type": "content",
-          "text": "completed"
-        }
-      ]
+      }
     }
   },
   {
@@ -162,13 +156,7 @@ func TestRegressionChatInvalidToolCallRetryTrace(t *testing.T) {
       "output": {
         "error": "decode tool call input for ECHO: unexpected EOF",
         "error_code": "invalid_input"
-      },
-      "content": [
-        {
-          "type": "content",
-          "text": "decode tool call input for ECHO: unexpected EOF"
-        }
-      ]
+      }
     }
   },
   {
@@ -204,13 +192,7 @@ func TestRegressionChatInvalidToolCallRetryTrace(t *testing.T) {
       },
       "output": {
         "value": "pong"
-      },
-      "content": [
-        {
-          "type": "content",
-          "text": "completed"
-        }
-      ]
+      }
     }
   },
   {

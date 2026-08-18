@@ -3,7 +3,7 @@ package appserver
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -178,7 +178,7 @@ func freshReplayTerminalKey(envelope eventstream.Envelope) (freshReplayContentKe
 	}
 	if terminalID != "" {
 		toolCallID = terminalID
-	} else if envelope.ParentTool != nil && identity.CanonicalOrSelf(envelope.ParentTool.ToolName) == identity.RunCommand {
+	} else if envelope.ParentTool != nil && envelope.ParentTool.ToolName == shell.RunCommandToolName {
 		toolCallID = strings.TrimSpace(envelope.ParentTool.ToolCallID)
 	}
 	if toolCallID == "" {
@@ -256,7 +256,7 @@ func terminalMaterializationComplete(envelope eventstream.Envelope) bool {
 		return false
 	}
 	targetKind, _ := rawOutput["target_kind"].(string)
-	if (envelope.ParentTool != nil && identity.CanonicalOrSelf(envelope.ParentTool.ToolName) == identity.RunCommand) ||
+	if (envelope.ParentTool != nil && envelope.ParentTool.ToolName == shell.RunCommandToolName) ||
 		strings.EqualFold(strings.TrimSpace(targetKind), "command") || strings.EqualFold(strings.TrimSpace(targetKind), "terminal") {
 		targetState, _ := rawOutput["state"].(string)
 		return eventstream.IsTerminalLifecycleState(targetState)
@@ -302,7 +302,7 @@ func freshReplayTerminalOwner(envelope eventstream.Envelope) *eventstream.Parent
 		metautil.RuntimeTool,
 		metautil.RuntimeToolName,
 	)
-	if identity.CanonicalOrSelf(toolName) != identity.RunCommand {
+	if toolName != shell.RunCommandToolName {
 		return nil
 	}
 	var callID string
@@ -315,7 +315,7 @@ func freshReplayTerminalOwner(envelope eventstream.Envelope) *eventstream.Parent
 	if callID = strings.TrimSpace(callID); callID == "" {
 		return nil
 	}
-	return &eventstream.ParentToolRelation{ToolCallID: callID, ToolName: identity.RunCommand}
+	return &eventstream.ParentToolRelation{ToolCallID: callID, ToolName: shell.RunCommandToolName}
 }
 
 func terminalMaterializationStartsAtZero(meta map[string]any, data string) bool {

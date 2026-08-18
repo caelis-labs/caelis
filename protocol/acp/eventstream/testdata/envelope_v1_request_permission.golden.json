@@ -13,7 +13,7 @@
     "toolCall": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "call-1",
-      "title": "RUN_COMMAND",
+      "title": "RunCommand",
       "kind": "execute",
       "status": "pending",
       "rawInput": {

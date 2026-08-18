@@ -50,7 +50,7 @@ func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
 				Kind:          schema.ToolKindExecute,
 				Status:        schema.ToolStatusInProgress,
 				RawInput:      map[string]any{"command": "go test ./surfaces/tui/app"},
-				Meta:          acpToolNameMeta("RUN_COMMAND"),
+				Meta:          acpToolNameMeta("RunCommand"),
 			},
 		},
 		{
@@ -65,7 +65,7 @@ func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
 				Status:        stringPtr(schema.ToolStatusCompleted),
 				RawInput:      map[string]any{"command": "go test ./surfaces/tui/app"},
 				RawOutput:     map[string]any{"exit_code": 0},
-				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), "call-1", "ok\nPASS\n"),
+				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "ok\nPASS\n"),
 			},
 		},
 		{
@@ -136,7 +136,7 @@ func TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBefore
 				Kind:          schema.ToolKindExecute,
 				Status:        schema.ToolStatusInProgress,
 				RawInput:      map[string]any{"command": "cmpctl list ebs --json 2>&1"},
-				Meta:          acpToolNameMeta("RUN_COMMAND"),
+				Meta:          acpToolNameMeta("RunCommand"),
 			},
 		},
 		{
@@ -152,7 +152,7 @@ func TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBefore
 				Status:        stringPtr(schema.ToolStatusFailed),
 				RawInput:      map[string]any{"command": "cmpctl list ebs --json 2>&1"},
 				RawOutput:     map[string]any{"exit_code": 1},
-				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), "call-1", "{\"status\":\"error\"}\n"),
+				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "{\"status\":\"error\"}\n"),
 			},
 		},
 		{

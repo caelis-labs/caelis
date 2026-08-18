@@ -468,6 +468,7 @@ func liveExplorationToolStartEnvelope(callID, name, kind, arg string) eventstrea
 		Kind:          kind,
 		Status:        schema.ToolStatusPending,
 		RawInput:      liveExplorationToolInput(kind, arg),
+		Meta:          acpToolNameMeta(name),
 	})
 }
 
@@ -480,6 +481,7 @@ func liveExplorationToolCompleteEnvelope(callID, name, kind, arg string) eventst
 		Kind:          &kind,
 		Status:        &status,
 		RawInput:      liveExplorationToolInput(kind, arg),
+		Meta:          acpToolNameMeta(name),
 	})
 }
 

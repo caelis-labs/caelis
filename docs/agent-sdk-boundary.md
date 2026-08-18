@@ -245,7 +245,23 @@ Persistence and replay changes require whole-object round trips proving rebuilt
 `[]model.Message` context matches Runtime-produced context. UI reload tests are
 not a substitute.
 
+Runtime-authored tool-result Events declare whether their selected wrapper may
+produce Task lifecycle facts. `binding.task_result=true` is the live authority;
+new ordinary tool results explicitly carry `false`. Historical backfill accepts
+an absent binding only for the bounded legacy case whose exact parent call and
+stored Task identity agree, and never accepts an explicit false or malformed
+binding. Remove that absence-only reader when the minimum supported upgrade
+source postdates the first release that writes the explicit marker.
+
 ## Tool Schema Contracts
+
+`tool.Definition.Name` is the sole executable tool identity. Agent assembly
+rejects empty, whitespace-padded, or duplicate exact names, and execution lookup
+is case-sensitive. Built-in tools are an optional assembled preset, not a
+registry that claims aliases; an external `SEARCH`, `RunCommand`, or any other
+distinct exact name remains an ordinary external capability. Model calls,
+durable history, ToolSearch admission, and replay preserve the exact name they
+received.
 
 Canonical ToolSpecs describe the Runtime-accepted input set. Conditional
 requirements may use JSON Schema conditionals, while the Runtime repeats the

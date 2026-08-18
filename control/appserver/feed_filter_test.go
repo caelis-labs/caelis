@@ -9,7 +9,7 @@ import (
 func TestSuppressHistoricalChildStreamMirrorPreservesControlFacts(t *testing.T) {
 	origin := &session.EventChildOrigin{
 		Scope: session.EventChildScopeSubagent, ScopeID: "task-1", TaskID: "task-1",
-		SourceEventID: "legacy:1", ParentTool: session.EventParentTool{CallID: "spawn-1", Name: "SPAWN"},
+		SourceEventID: "legacy:1", ParentTool: session.EventParentTool{CallID: "spawn-1", Name: "Spawn"},
 	}
 	permission := &session.EventProtocol{Method: session.ProtocolMethodRequestPermission}
 	participant := session.NewParticipantProtocol(session.ProtocolParticipant{Action: "attached"})

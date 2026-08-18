@@ -75,10 +75,10 @@ func terminalMetaStreamEnvelope(callID string, text string) eventstream.Envelope
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    callID,
-			Title:         stringPtr("RUN_COMMAND"),
+			Title:         stringPtr("RunCommand"),
 			Kind:          stringPtr(schema.ToolKindExecute),
 			Status:        stringPtr(schema.ToolStatusInProgress),
-			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), "terminal-1", text),
+			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "terminal-1", text),
 		},
 	}
 }

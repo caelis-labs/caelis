@@ -310,8 +310,8 @@ func renderToolResultSuffix(toolName string, suffix string, theme Theme) string 
 }
 
 func isEditToolDisplayName(toolName string) bool {
-	switch strings.ToLower(strings.TrimSpace(toolName)) {
-	case "patch", "write", "edit":
+	switch strings.TrimSpace(toolName) {
+	case "Patch", "Write", "Edit":
 		return true
 	default:
 		return false

@@ -20,12 +20,12 @@ func TestApprovalReviewTailOutputUsesParsedFallbackFields(t *testing.T) {
 	t.Parallel()
 
 	output := ApprovalReviewTailOutput(ApprovalReviewFields{
-		Tool:    "RUN_COMMAND",
+		Tool:    "RunCommand",
 		Command: "git status",
 		Text:    "Automatic approval review approved (risk: low, authorization: allow): safe read-only command",
 	})
 
-	want := "Approval review approved RUN_COMMAND git status (risk: low, authorization: allow)\nsafe read-only command\n"
+	want := "Approval review approved RunCommand git status (risk: low, authorization: allow)\nsafe read-only command\n"
 	if output != want {
 		t.Fatalf("ApprovalReviewTailOutput() = %q, want %q", output, want)
 	}
@@ -131,10 +131,10 @@ func TestSuppressToolResultOutput(t *testing.T) {
 		isErr     bool
 		want      bool
 	}{
-		{name: "synthetic exploration", toolName: "LIST", synthetic: true, want: true},
-		{name: "completed exploration", toolName: "READ", output: " completed ", want: true},
-		{name: "errored exploration", toolName: "READ", output: ToolStatusCompleted, isErr: true, want: false},
-		{name: "non exploration", toolName: "RUN_COMMAND", synthetic: true, want: false},
+		{name: "removed List alias stays generic", toolName: "LIST", synthetic: true, want: false},
+		{name: "completed exploration", toolName: "Read", output: " completed ", want: true},
+		{name: "errored exploration", toolName: "Read", output: ToolStatusCompleted, isErr: true, want: false},
+		{name: "non exploration", toolName: "RunCommand", synthetic: true, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -150,9 +150,9 @@ func TestSuppressToolResultOutput(t *testing.T) {
 func TestTerminalToolOutputTextUsesRuntimeTerminalOutput(t *testing.T) {
 	t.Parallel()
 
-	meta := metautil.WithTerminalOutput(acpToolNameMetaForDisplayTest("RUN_COMMAND"), "call-1", "\n")
+	meta := metautil.WithTerminalOutput(acpToolNameMetaForDisplayTest("RunCommand"), "call-1", "\n")
 	output := TerminalToolOutputText(ToolOutputFallbackInput{
-		ToolName:  "RUN_COMMAND",
+		ToolName:  "RunCommand",
 		ToolKind:  "execute",
 		Meta:      meta,
 		Status:    "in_progress",
@@ -189,7 +189,7 @@ func TestTerminalToolOutputTextUsesRunningTaskCommandObservationWithoutTerminalA
 	t.Parallel()
 
 	output := TerminalToolOutputText(ToolOutputFallbackInput{
-		ToolName: "TASK",
+		ToolName: "Task",
 		Status:   ToolStatusCompleted,
 		RawOutput: map[string]any{
 			"target_kind":   "command",
@@ -206,7 +206,7 @@ func TestTerminalToolOutputTextPreservesRawWhitespace(t *testing.T) {
 	t.Parallel()
 
 	output := TerminalToolOutputText(ToolOutputFallbackInput{
-		ToolName:  "RUN_COMMAND",
+		ToolName:  "RunCommand",
 		ToolKind:  "execute",
 		Meta:      metautil.WithTerminalInfo(nil, "call-1"),
 		Status:    ToolStatusRunning,
@@ -236,10 +236,10 @@ func TestDelegatedTaskResultTextUsesCanonicalTaskResultWithoutTerminalOutput(t *
 		status   string
 		want     string
 	}{
-		{name: "spawn final", toolName: "SPAWN", status: ToolStatusCompleted, want: "child final result"},
-		{name: "task final", toolName: "TASK", status: ToolStatusCompleted, want: "child final result"},
-		{name: "running", toolName: "SPAWN", status: ToolStatusRunning},
-		{name: "command", toolName: "RUN_COMMAND", status: ToolStatusCompleted},
+		{name: "spawn final", toolName: "Spawn", status: ToolStatusCompleted, want: "child final result"},
+		{name: "task final", toolName: "Task", status: ToolStatusCompleted, want: "child final result"},
+		{name: "running", toolName: "Spawn", status: ToolStatusRunning},
+		{name: "command", toolName: "RunCommand", status: ToolStatusCompleted},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -256,7 +256,7 @@ func TestDelegatedTaskResultTextPrefersDurableRawOutput(t *testing.T) {
 
 	raw := "## 完成\n\n- 第一项\n- 第二项\n\n| 列 | 值 |\n| --- | --- |\n| 文件 | 好 |\n\n```go\nfmt.Println(\"好\")\n```"
 	got := DelegatedTaskResultText(ToolOutputFallbackInput{
-		ToolName: "TASK",
+		ToolName: "Task",
 		Status:   ToolStatusCompleted,
 		RawOutput: map[string]any{
 			"state":         "completed",
@@ -276,7 +276,7 @@ func TestTerminalFallbacksForNoOutputAndExitCode(t *testing.T) {
 	t.Parallel()
 
 	completed := ToolOutputFallbackInput{
-		ToolName: "RUN_COMMAND",
+		ToolName: "RunCommand",
 		ToolKind: "execute",
 		Meta:     metautil.WithTerminalInfo(nil, "call-1"),
 		Status:   ToolStatusCompleted,
@@ -286,7 +286,7 @@ func TestTerminalFallbacksForNoOutputAndExitCode(t *testing.T) {
 	}
 
 	failed := ToolOutputFallbackInput{
-		ToolName:  "RUN_COMMAND",
+		ToolName:  "RunCommand",
 		ToolKind:  "execute",
 		Status:    ToolStatusFailed,
 		Error:     true,

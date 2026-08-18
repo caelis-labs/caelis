@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -125,10 +124,10 @@ func permissionToolCallUpdateFromProtocol(call session.ProtocolToolCall) ToolCal
 	}
 	if title := strings.TrimSpace(call.Title); title != "" {
 		update.Title = stringPtr(title)
-	} else if title := display.SummarizeToolCallTitle(call.Name, call.RawInput); title != "" {
+	} else if title := projectedToolTitle(call.Name, call.RawInput); title != "" {
 		update.Title = stringPtr(title)
 	}
-	if kind := firstNonEmpty(strings.TrimSpace(call.Kind), display.ToolKindForName(call.Name)); kind != "" {
+	if kind := firstNonEmpty(strings.TrimSpace(call.Kind), projectedToolKind(call.Name)); kind != "" {
 		update.Kind = stringPtr(kind)
 	}
 	if status := acpToolStatus(call.Status); status != "" {
@@ -140,7 +139,7 @@ func permissionToolCallUpdateFromProtocol(call session.ProtocolToolCall) ToolCal
 	if output := cloneAnyMap(call.RawOutput); len(output) > 0 {
 		update.RawOutput = output
 	}
-	displayTerminalID, _ := display.DisplayTerminalID(call.ID, call.Name)
+	displayTerminalID, _ := projectedDisplayTerminalID(call.ID, call.Name)
 	update.Content = projectToolContent(call.Content, displayTerminalID)
 	return withDisplayTerminalUpdate(update, call.ID, call.Name)
 }
@@ -317,8 +316,8 @@ func inferredToolCallUpdates(event *session.Event) []Update {
 		update := ToolCall{
 			SessionUpdate: UpdateToolCall,
 			ToolCallID:    strings.TrimSpace(call.ID),
-			Title:         display.SummarizeToolCallTitle(call.Name, args),
-			Kind:          display.ToolKindForName(call.Name),
+			Title:         projectedToolTitle(call.Name, args),
+			Kind:          projectedToolKind(call.Name),
 			Status:        ToolStatusPending,
 			RawInput:      cloneAnyMapPayload(args),
 		}
@@ -423,8 +422,8 @@ func toolCallForEvent(event *session.Event) (ToolCall, bool, error) {
 	call := ToolCall{
 		SessionUpdate: UpdateToolCall,
 		ToolCallID:    strings.TrimSpace(calls[0].ID),
-		Title:         display.SummarizeToolCallTitle(calls[0].Name, args),
-		Kind:          display.ToolKindForName(calls[0].Name),
+		Title:         projectedToolTitle(calls[0].Name, args),
+		Kind:          projectedToolKind(calls[0].Name),
 		Status:        ToolStatusPending,
 		RawInput:      cloneAnyMapPayload(args),
 	}
@@ -437,12 +436,12 @@ func toolCallFromEventToolPayload(tool *session.EventTool) ToolCall {
 		return ToolCall{SessionUpdate: UpdateToolCall}
 	}
 	rawInput := cloneAnyMap(tool.Input)
-	displayTerminalID, _ := display.DisplayTerminalID(tool.ID, tool.Name)
+	displayTerminalID, _ := projectedDisplayTerminalID(tool.ID, tool.Name)
 	call := ToolCall{
 		SessionUpdate: UpdateToolCall,
 		ToolCallID:    strings.TrimSpace(tool.ID),
-		Title:         firstNonEmpty(strings.TrimSpace(tool.Title), display.SummarizeToolCallTitle(tool.Name, rawInput), strings.TrimSpace(tool.Name)),
-		Kind:          firstNonEmpty(strings.TrimSpace(tool.Kind), display.ToolKindForName(tool.Name)),
+		Title:         firstNonEmpty(strings.TrimSpace(tool.Title), projectedToolTitle(tool.Name, rawInput), strings.TrimSpace(tool.Name)),
+		Kind:          firstNonEmpty(strings.TrimSpace(tool.Kind), projectedToolKind(tool.Name)),
 		Status:        firstNonEmpty(acpToolStatus(tool.Status), ToolStatusPending),
 		RawInput:      cloneAnyMapPayload(rawInput),
 		RawOutput:     cloneAnyMapPayload(tool.Output),
@@ -460,10 +459,10 @@ func toolCallFromProtocolUpdate(event *session.Event, update *session.ProtocolUp
 	if err != nil || !ok {
 		return ToolCall{SessionUpdate: UpdateToolCall}
 	}
-	call.Title = firstNonEmpty(strings.TrimSpace(call.Title), display.SummarizeToolCallTitle(name, rawInput), strings.TrimSpace(name))
-	call.Kind = firstNonEmpty(strings.TrimSpace(call.Kind), display.ToolKindForName(name))
+	call.Title = firstNonEmpty(strings.TrimSpace(call.Title), projectedToolTitle(name, rawInput), strings.TrimSpace(name))
+	call.Kind = firstNonEmpty(strings.TrimSpace(call.Kind), projectedToolKind(name))
 	call.Status = firstNonEmpty(acpToolStatus(call.Status), ToolStatusPending)
-	displayTerminalID, _ := display.DisplayTerminalID(call.ToolCallID, name)
+	displayTerminalID, _ := projectedDisplayTerminalID(call.ToolCallID, name)
 	call.Content = projectToolContent(session.ProtocolToolCallContentOf(update), displayTerminalID)
 	return withDisplayTerminal(call, name, rawInput)
 }
@@ -494,7 +493,7 @@ func toolCallUpdateForEvent(event *session.Event) (ToolCallUpdate, bool, error) 
 		status = ToolStatusFailed
 	}
 	name := strings.TrimSpace(resp.Name)
-	kind := display.ToolKindForName(name)
+	kind := projectedToolKind(name)
 	out := ToolCallUpdate{
 		SessionUpdate: UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(resp.ID),
@@ -510,7 +509,7 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string
 	if tool == nil {
 		return ToolCallUpdate{SessionUpdate: UpdateToolCallInfo}
 	}
-	displayTerminalID, _ := display.DisplayTerminalID(tool.ID, tool.Name)
+	displayTerminalID, _ := projectedDisplayTerminalID(tool.ID, tool.Name)
 	out := ToolCallUpdate{
 		SessionUpdate: UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(tool.ID),
@@ -519,12 +518,15 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string
 		Content:       projectEventToolContent(tool.Content, displayTerminalID),
 		Locations:     projectEventToolLocations(tool.Locations),
 	}
+	if len(out.Content) == 0 {
+		out.Content = projectedToolResultContent(tool.ID, tool.Name, tool.Input, tool.Output, meta, tool.Status)
+	}
 	if title := strings.TrimSpace(tool.Title); title != "" {
 		out.Title = stringPtr(title)
-	} else if title := display.SummarizeToolCallTitle(tool.Name, tool.Input); title != "" {
+	} else if title := projectedToolTitle(tool.Name, tool.Input); title != "" {
 		out.Title = stringPtr(title)
 	}
-	if kind := firstNonEmpty(strings.TrimSpace(tool.Kind), display.ToolKindForName(tool.Name)); kind != "" {
+	if kind := firstNonEmpty(strings.TrimSpace(tool.Kind), projectedToolKind(tool.Name)); kind != "" {
 		out.Kind = stringPtr(kind)
 	}
 	if status := acpToolStatus(tool.Status); status != "" {
@@ -547,16 +549,16 @@ func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.Prot
 	if !ok {
 		return ToolCallUpdate{}, fmt.Errorf("protocol/acp/projector: semantic codec returned %T for tool update", wire)
 	}
-	displayTerminalID, _ := display.DisplayTerminalID(id, name)
+	displayTerminalID, _ := projectedDisplayTerminalID(id, name)
 	out.Content = projectToolContent(session.ProtocolToolCallContentOf(update), displayTerminalID)
 	if title := strings.TrimSpace(stringFromPtr(out.Title)); title != "" {
 		out.Title = stringPtr(title)
-	} else if title := display.SummarizeToolCallTitle(name, update.RawInput); title != "" {
+	} else if title := projectedToolTitle(name, update.RawInput); title != "" {
 		out.Title = stringPtr(title)
 	}
 	kind := strings.TrimSpace(stringFromPtr(out.Kind))
 	if kind == "" && strings.TrimSpace(name) != "" {
-		kind = display.ToolKindForName(name)
+		kind = projectedToolKind(name)
 	}
 	if kind != "" {
 		out.Kind = stringPtr(kind)
@@ -578,10 +580,10 @@ func toolCallUpdateFromProtocol(call session.ProtocolToolCall) (ToolCallUpdate, 
 	}
 	if title := strings.TrimSpace(call.Title); title != "" {
 		update.Title = stringPtr(title)
-	} else if title := display.SummarizeToolCallTitle(call.Name, call.RawInput); title != "" {
+	} else if title := projectedToolTitle(call.Name, call.RawInput); title != "" {
 		update.Title = stringPtr(title)
 	}
-	if kind := firstNonEmpty(strings.TrimSpace(call.Kind), display.ToolKindForName(call.Name)); kind != "" {
+	if kind := firstNonEmpty(strings.TrimSpace(call.Kind), projectedToolKind(call.Name)); kind != "" {
 		update.Kind = stringPtr(kind)
 	}
 	if status := acpToolStatus(call.Status); status != "" {
@@ -593,13 +595,13 @@ func toolCallUpdateFromProtocol(call session.ProtocolToolCall) (ToolCallUpdate, 
 	if output := cloneAnyMap(call.RawOutput); len(output) > 0 {
 		update.RawOutput = output
 	}
-	displayTerminalID, _ := display.DisplayTerminalID(call.ID, call.Name)
+	displayTerminalID, _ := projectedDisplayTerminalID(call.ID, call.Name)
 	update.Content = projectToolContent(call.Content, displayTerminalID)
 	return withDisplayTerminalUpdate(update, call.ID, call.Name), nil
 }
 
 func projectToolContentForTool(content []session.ProtocolToolCallContent, toolCallID string, name string) []ToolCallContent {
-	displayTerminalID, _ := display.DisplayTerminalID(toolCallID, name)
+	displayTerminalID, _ := projectedDisplayTerminalID(toolCallID, name)
 	return projectToolContent(content, displayTerminalID)
 }
 

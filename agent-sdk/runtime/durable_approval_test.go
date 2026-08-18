@@ -116,8 +116,8 @@ func TestResolveApprovalDeliversFileStoreCommittedResolution(t *testing.T) {
 			Session:    activeSession,
 			RunID:      runID,
 			TurnID:     turnID,
-			Tool:       tool.Definition{Name: "WRITE"},
-			Call:       tool.Call{ID: "call-approval-committed", Name: "WRITE"},
+			Tool:       tool.Definition{Name: "Write"},
+			Call:       tool.Call{ID: "call-approval-committed", Name: "Write"},
 		}, nil)
 		result <- struct {
 			decision agent.ApprovalResponse
@@ -180,8 +180,8 @@ func TestRequestDurableApprovalExposesPauseTokenIDToRequester(t *testing.T) {
 		Session:    activeSession,
 		RunID:      runID,
 		TurnID:     turnID,
-		Tool:       tool.Definition{Name: "WRITE"},
-		Call:       tool.Call{ID: "call-approval-request-id", Name: "WRITE"},
+		Tool:       tool.Definition{Name: "Write"},
+		Call:       tool.Call{ID: "call-approval-request-id", Name: "Write"},
 	}, approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		observed = req
 		return decision, nil
@@ -232,8 +232,8 @@ func TestRequestDurableApprovalRequesterFailureLeavesStartedJournal(t *testing.T
 		Session:    activeSession,
 		RunID:      runID,
 		TurnID:     turnID,
-		Tool:       tool.Definition{Name: "WRITE"},
-		Call:       tool.Call{ID: "call-approval-request-fail", Name: "WRITE"},
+		Tool:       tool.Definition{Name: "Write"},
+		Call:       tool.Call{ID: "call-approval-request-fail", Name: "Write"},
 	}, approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		return agent.ApprovalResponse{}, wantErr
 	}))
@@ -307,8 +307,8 @@ func TestRequestDurableApprovalResolveFailureLeavesStartedJournal(t *testing.T) 
 		Session:    activeSession,
 		RunID:      runID,
 		TurnID:     turnID,
-		Tool:       tool.Definition{Name: "WRITE"},
-		Call:       tool.Call{ID: "call-approval-resolve-fail", Name: "WRITE"},
+		Tool:       tool.Definition{Name: "Write"},
+		Call:       tool.Call{ID: "call-approval-resolve-fail", Name: "Write"},
 	}, approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		return decision, nil
 	}))
@@ -377,8 +377,8 @@ func TestRequestDurableApprovalCancelDoesNotForceStarted(t *testing.T) {
 			Session:    activeSession,
 			RunID:      runID,
 			TurnID:     turnID,
-			Tool:       tool.Definition{Name: "WRITE"},
-			Call:       tool.Call{ID: "call-approval-request-cancel", Name: "WRITE"},
+			Tool:       tool.Definition{Name: "Write"},
+			Call:       tool.Call{ID: "call-approval-request-cancel", Name: "Write"},
 		}, approvalRequesterFunc(func(callCtx context.Context, _ agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 			close(started)
 			<-callCtx.Done()
@@ -455,7 +455,7 @@ func TestResolveApprovalRedeliversMatchingDurableDecision(t *testing.T) {
 	now := time.Unix(500, 0).UTC()
 	pending := session.PauseToken{
 		Schema: session.ExecutionJournalSchemaVersion, TokenID: "pause-redelivery", SessionID: activeSession.SessionID,
-		RunID: "run-redelivery", TurnID: "turn-redelivery", ToolCallID: "call-redelivery", ToolName: "WRITE",
+		RunID: "run-redelivery", TurnID: "turn-redelivery", ToolCallID: "call-redelivery", ToolName: "Write",
 		Revision: 1, Status: session.PauseTokenPending, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := runtime.appendPauseToken(context.Background(), activeSession.SessionRef, pending); err != nil {
@@ -532,7 +532,7 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 			go func() {
 				_, requestErr := runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
 					SessionRef: active.SessionRef, Session: active, RunID: runID, TurnID: turnID,
-					Tool: tool.Definition{Name: "WRITE"}, Call: tool.Call{ID: "call-" + kind, Name: "WRITE"},
+					Tool: tool.Definition{Name: "Write"}, Call: tool.Call{ID: "call-" + kind, Name: "Write"},
 				}, nil)
 				result <- requestErr
 			}()

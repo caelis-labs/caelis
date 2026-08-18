@@ -73,7 +73,7 @@ func TestSweepAbandonedApprovalsDoesNotOverwriteResolutionAfterCandidateSnapshot
 			Protocol: &session.EventProtocol{
 				Method: session.ProtocolMethodRequestPermission,
 				Permission: &session.ProtocolApproval{
-					ToolCall: session.ProtocolToolCall{ID: "call-recovery-cas", Name: "WRITE"},
+					ToolCall: session.ProtocolToolCall{ID: "call-recovery-cas", Name: "Write"},
 				},
 			},
 		},
@@ -128,7 +128,7 @@ func TestSweepAbandonedApprovalsDefersLiveForeignLeaseThenInterruptsOnceAfterExp
 		Event: &session.Event{
 			Type: session.EventTypeCustom, Visibility: session.VisibilityMirror, ApprovalRequestID: "approval-1",
 			Protocol: &session.EventProtocol{Method: session.ProtocolMethodRequestPermission, Permission: &session.ProtocolApproval{
-				ToolCall: session.ProtocolToolCall{ID: "call-1", Name: "WRITE"},
+				ToolCall: session.ProtocolToolCall{ID: "call-1", Name: "Write"},
 			}},
 		}})
 	if err != nil {
@@ -183,7 +183,7 @@ func TestSweepAbandonedApprovalsContinuesPastTwoHundredSessions(t *testing.T) {
 	if _, err := service.AppendEvent(ctx, session.AppendEventRequest{SessionRef: target.SessionRef, Event: &session.Event{
 		Type: session.EventTypeCustom, Visibility: session.VisibilityMirror, ApprovalRequestID: "approval-last-page",
 		Protocol: &session.EventProtocol{Method: session.ProtocolMethodRequestPermission, Permission: &session.ProtocolApproval{
-			ToolCall: session.ProtocolToolCall{ID: "call-last-page", Name: "WRITE"},
+			ToolCall: session.ProtocolToolCall{ID: "call-last-page", Name: "Write"},
 		}},
 	}}); err != nil {
 		t.Fatal(err)

@@ -392,8 +392,8 @@ func TestTranslateApprovalRequestPreservesToolRawInput(t *testing.T) {
 	if req.ToolCall.RawInput["command"] != "pwd" {
 		t.Fatalf("ToolCall.RawInput[command] = %#v", req.ToolCall.RawInput["command"])
 	}
-	if req.ToolCall.Name != "RunCommand" {
-		t.Fatalf("ToolCall.Name = %q, want RunCommand", req.ToolCall.Name)
+	if req.ToolCall.Name != "execute" {
+		t.Fatalf("ToolCall.Name = %q, want exact generic ACP kind", req.ToolCall.Name)
 	}
 	if req.ToolCall.RawInput["workdir"] != "/tmp/project" {
 		t.Fatalf("ToolCall.RawInput[workdir] = %#v", req.ToolCall.RawInput["workdir"])
@@ -2327,10 +2327,10 @@ func TestControllerRunPublishesACPSourceEvent(t *testing.T) {
 		turnStream: true,
 		handle:     handle,
 	}
-	title := "READ"
+	title := "Read"
 	status := schema.ToolStatusInProgress
 	line := 7
-	raw := json.RawMessage(`{"sessionUpdate":"tool_call_update","toolCallId":"call-1","title":"READ","status":"in_progress","locations":[{"path":"main.go","line":7}],"_meta":{"vendor":{"trace":"abc"}}}`)
+	raw := json.RawMessage(`{"sessionUpdate":"tool_call_update","toolCallId":"call-1","title":"Read","status":"in_progress","locations":[{"path":"main.go","line":7}],"_meta":{"vendor":{"trace":"abc"}}}`)
 	run.handleUpdate(func() time.Time { return time.Unix(10, 0) }, client.UpdateEnvelope{
 		SessionID: "remote-1",
 		Raw:       raw,

@@ -5,7 +5,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 type explorationProjectionState struct {
@@ -642,9 +641,9 @@ func renderExplorationNarrativeRows(blockID string, text string, width int, ctx 
 }
 
 func renderExplorationToolRowWithMode(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, token string, first bool, mode explorationToolDetailMode) RenderedRow {
-	verb := display.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
+	verb := surfaceExplorationVerb(ev.Name)
 	if verb == "" {
-		verb = names.CanonicalOrSelf(ev.Name)
+		verb = ev.Name
 	}
 	detail := explorationToolDetailForDisplay(ev, ctx.Workspace, mode)
 	prefix := explorationChildPrefix(first)
@@ -699,7 +698,7 @@ func explorationGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width i
 	grouped := map[string][]string{}
 	order := make([]string, 0, 4)
 	for _, ev := range events {
-		verb := display.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
+		verb := surfaceExplorationVerb(ev.Name)
 		if verb == "" {
 			continue
 		}
@@ -759,10 +758,10 @@ func explorationToolDetailForDisplay(ev SubagentEvent, workspace string, mode ex
 	}
 	fromOutput := !fromArgs && item != ""
 	if item == "" {
-		if display.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind)) != "" {
+		if surfaceExplorationVerb(ev.Name) != "" {
 			return ""
 		}
-		item = names.CanonicalOrSelf(ev.Name)
+		item = ev.Name
 	}
 	item = normalizeExplorationFailedDetail(item)
 	item = compactExplorationToolDetailWithWorkspace(ev, item, workspace)
@@ -781,11 +780,11 @@ func compactExplorationToolDetailWithWorkspace(ev SubagentEvent, detail string, 
 	if detail == "" {
 		return ""
 	}
-	semanticName := toolSemanticName(ev.Name, ev.ToolKind)
-	if names.CanonicalOrSelf(semanticName) == names.WebSearch {
+	semanticName := ev.Name
+	if semanticName == surfaceToolWebSearch {
 		return detail
 	}
-	switch display.ExplorationVerbForTool(semanticName) {
+	switch surfaceExplorationVerb(semanticName) {
 	case "Read", "View", "List", "Glob", "Search":
 		return compactExplorationPathDetailWithBase(detail, workspace)
 	default:
@@ -1032,7 +1031,7 @@ func isASCIIAlphaNum(ch byte) bool {
 
 func isExplorationSummaryVerb(verb string) bool {
 	switch strings.ToLower(strings.TrimSpace(verb)) {
-	case "read", "view", "list", "glob", "search", "fetch", "skill":
+	case "read", "view", "glob", "search", "fetch", "skill":
 		return true
 	default:
 		return false
@@ -1040,23 +1039,23 @@ func isExplorationSummaryVerb(verb string) bool {
 }
 
 func toolSignalDisplayVerb(name string) string {
-	if verb := display.ExplorationVerbForTool(name); verb != "" {
+	if verb := surfaceExplorationVerb(name); verb != "" {
 		return verb
 	}
-	info, ok := names.Lookup(name)
+	info, ok := surfaceToolProfile(name)
 	if !ok {
 		return ""
 	}
 	switch info.Name {
-	case names.Write:
+	case surfaceToolWrite:
 		return "Write"
-	case names.Patch:
+	case surfaceToolPatch:
 		return "Patch"
-	case names.RunCommand:
+	case surfaceToolRunCommand:
 		return "Ran"
-	case names.Spawn:
+	case surfaceToolSpawn:
 		return "Spawned"
-	case names.Task:
+	case surfaceToolTask:
 		return "Task"
 	default:
 		return ""

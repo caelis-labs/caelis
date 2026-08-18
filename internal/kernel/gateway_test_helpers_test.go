@@ -121,12 +121,12 @@ func (r *approvalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 			Session:    r.session,
 			RunID:      "run-1",
 			TurnID:     "turn-1",
-			Tool:       tool.Definition{Name: "RUN_COMMAND"},
-			Call:       tool.Call{ID: "approval-call", Name: "RUN_COMMAND"},
+			Tool:       tool.Definition{Name: "RunCommand"},
+			Call:       tool.Call{ID: "approval-call", Name: "RunCommand"},
 			Approval: &session.ProtocolApproval{
 				ToolCall: session.ProtocolToolCall{
 					ID:     "approval-call",
-					Name:   "RUN_COMMAND",
+					Name:   "RunCommand",
 					Kind:   "execute",
 					Title:  "RUN_COMMAND test",
 					Status: "pending",
@@ -174,12 +174,12 @@ func (r *childApprovalRuntime) Run(ctx context.Context, req agent.RunRequest) (a
 		Session:    r.session,
 		RunID:      "run-1",
 		TurnID:     "turn-1",
-		Tool:       tool.Definition{Name: "WRITE"},
-		Call:       tool.Call{ID: "shared-child-call", Name: "WRITE"},
+		Tool:       tool.Definition{Name: "Write"},
+		Call:       tool.Call{ID: "shared-child-call", Name: "Write"},
 		Approval: &session.ProtocolApproval{
 			ToolCall: session.ProtocolToolCall{
 				ID:        "shared-child-call",
-				Name:      "WRITE",
+				Name:      "Write",
 				Kind:      "edit",
 				Title:     "Write file",
 				Status:    "pending",
@@ -198,7 +198,7 @@ func (r *childApprovalRuntime) Run(ctx context.Context, req agent.RunRequest) (a
 			"scope_id":       "task-1",
 			"task_id":        "task-1",
 			"parent_call_id": "spawn-call-1",
-			"parent_tool":    "SPAWN",
+			"parent_tool":    "Spawn",
 		},
 	})
 	if err != nil {

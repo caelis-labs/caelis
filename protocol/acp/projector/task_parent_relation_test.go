@@ -102,7 +102,7 @@ func canonicalTaskObservationEventForParentTest(
 		Visibility: session.VisibilityCanonical,
 		Tool: &session.EventTool{
 			ID:     "task-call-1",
-			Name:   "TASK",
+			Name:   "Task",
 			Status: "completed",
 			Input:  map[string]any{"action": action, "task_id": "helper"},
 			Output: map[string]any{

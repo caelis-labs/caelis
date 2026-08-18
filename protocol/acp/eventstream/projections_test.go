@@ -30,7 +30,7 @@ func TestToolCallFromEnvelopeReturnsACPToolCall(t *testing.T) {
 
 func TestToolCallUpdateFromEnvelopeReturnsACPToolCallUpdate(t *testing.T) {
 	t.Parallel()
-	title := "RUN_COMMAND"
+	title := "RunCommand"
 	status := schema.ToolStatusInProgress
 	env := Envelope{Kind: KindSessionUpdate, Update: schema.ToolCallUpdate{
 		SessionUpdate: schema.UpdateToolCallInfo,
@@ -40,20 +40,20 @@ func TestToolCallUpdateFromEnvelopeReturnsACPToolCallUpdate(t *testing.T) {
 		RawInput:      map[string]any{"command": "make test"},
 	}}
 	update, ok := ToolCallUpdateFromEnvelope(env)
-	if !ok || update.ToolCallID != "call-1" || update.Title == nil || *update.Title != "RUN_COMMAND" {
+	if !ok || update.ToolCallID != "call-1" || update.Title == nil || *update.Title != "RunCommand" {
 		t.Fatalf("tool call update = %#v, %v", update, ok)
 	}
 	*update.Title = "mutated"
 	update.RawInput.(map[string]any)["command"] = "mutated"
 	source := env.Update.(schema.ToolCallUpdate)
-	if source.Title == nil || *source.Title != "RUN_COMMAND" || source.RawInput.(map[string]any)["command"] != "make test" {
+	if source.Title == nil || *source.Title != "RunCommand" || source.RawInput.(map[string]any)["command"] != "make test" {
 		t.Fatalf("source tool update mutated: %#v", source)
 	}
 }
 
 func TestPermissionRequestFromEnvelopeReturnsACPRequest(t *testing.T) {
 	t.Parallel()
-	title := "RUN_COMMAND"
+	title := "RunCommand"
 	status := schema.ToolStatusPending
 	env := Envelope{Kind: KindRequestPermission, Permission: &schema.RequestPermissionRequest{
 		SessionID: "session-1",

@@ -23,7 +23,7 @@ func TestProjectApprovalPayloadEnvelopeUsesPermissionProjectorPolicy(t *testing.
 		},
 	}, &approval.Payload{
 		ToolCallID: "call-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 		RawInput:   map[string]any{"command": "go test ./..."},
 		RawOutput:  map[string]any{"preview": "would run tests"},
 		Content: []session.ProtocolToolCallContent{{
@@ -68,7 +68,7 @@ func TestProjectApprovalPayloadEnvelopeUsesPermissionProjectorPolicy(t *testing.
 		t.Fatalf("permission content = %#v, want preserved canonical content", permission.ToolCall.Content)
 	}
 	payload := ApprovalPayloadFromPermission(permission)
-	if payload == nil || payload.ToolName != "RUN_COMMAND" || len(payload.Content) != 1 {
+	if payload == nil || payload.ToolName != "RunCommand" || len(payload.Content) != 1 {
 		t.Fatalf("approval payload = %#v, want canonical RUN_COMMAND tool name", payload)
 	}
 }
@@ -82,7 +82,7 @@ func TestProjectTaskStreamFrameDoesNotProjectChildPermissionOutsideControl(t *te
 		TurnID:     "turn-1",
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		CallID:     "spawn-call-1",
-		ToolName:   "SPAWN",
+		ToolName:   "Spawn",
 		RawInput:   map[string]any{"agent": "helper", "prompt": "inspect"},
 		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "child-terminal-1"},
 		Scope:      eventstream.ScopeMain,
@@ -110,7 +110,7 @@ func TestProjectTaskStreamFrameDoesNotProjectChildPermissionOutsideControl(t *te
 				Permission: &session.ProtocolApproval{
 					ToolCall: session.ProtocolToolCall{
 						ID:        "shared-call",
-						Name:      "WRITE",
+						Name:      "Write",
 						Kind:      "edit",
 						Title:     "Write file",
 						Status:    "pending",
@@ -144,7 +144,7 @@ func TestProjectTaskStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 		TurnID:     "turn-1",
 		SessionRef: session.SessionRef{SessionID: "session-1"},
 		CallID:     "call-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 		TaskHandle: "command",
 		RawInput:   map[string]any{"command": "echo ok"},
 		Ref: stream.Ref{
@@ -237,7 +237,7 @@ func TestProjectTaskStreamFramePreservesClosedCommandExitCode(t *testing.T) {
 	req := StreamRequest{
 		SessionRef:        session.SessionRef{SessionID: "session-1"},
 		CallID:            "call-1",
-		ToolName:          "RUN_COMMAND",
+		ToolName:          "RunCommand",
 		RawInput:          map[string]any{"command": "false"},
 		Ref:               stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "term-1"},
 		DisplayTerminalID: "call-1",
@@ -273,7 +273,7 @@ func TestProjectTaskStreamFramePreservesSplitNewlineFrame(t *testing.T) {
 	req := StreamRequest{
 		SessionRef: session.SessionRef{SessionID: "session-1"},
 		CallID:     "call-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 		RawInput:   map[string]any{"command": "echo lines"},
 		Ref:        stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "terminal-1"},
 		Scope:      eventstream.ScopeMain,
@@ -305,7 +305,7 @@ func TestProjectTaskStreamFrameFinalDoesNotRepeatStreamedOutput(t *testing.T) {
 	req := StreamRequest{
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		CallID:     "command-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 		RawInput:   map[string]any{"command": "printf ok"},
 		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
 		Scope:      eventstream.ScopeMain,
@@ -334,7 +334,7 @@ func TestProjectTaskStreamFrameProjectsDelegatedTaskSemanticsWithoutParentText(t
 	req := StreamRequest{
 		SessionRef:        session.SessionRef{SessionID: "root-session"},
 		CallID:            "task-call-1",
-		ToolName:          "TASK",
+		ToolName:          "Task",
 		RawInput:          map[string]any{"action": "write", "task_id": "jack"},
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
 		DisplayTerminalID: "task-call-1",
@@ -369,7 +369,7 @@ func TestProjectTaskStreamFrameProjectsDelegatedTaskSemanticsWithoutParentText(t
 	if embedded.Scope != eventstream.ScopeSubagent || embedded.ScopeID != "jack" || eventstream.UpdateType(embedded.Update) != schema.UpdateAgentMessage {
 		t.Fatalf("embedded event = %#v, want subagent agent message", embedded)
 	}
-	if embedded.ParentTool == nil || embedded.ParentTool.ToolCallID != "task-call-1" || embedded.ParentTool.ToolName != "TASK" {
+	if embedded.ParentTool == nil || embedded.ParentTool.ToolCallID != "task-call-1" || embedded.ParentTool.ToolName != "Task" {
 		t.Fatalf("embedded parent relation = %#v, want TASK/task-call-1", embedded.ParentTool)
 	}
 	assertStreamDelivery(t, embedded, true)
@@ -385,7 +385,7 @@ func TestProjectTaskStreamFrameKeepsNoOutputPlaceholderOutOfTerminalBytes(t *tes
 	req := StreamRequest{
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		CallID:     "command-1",
-		ToolName:   "RUN_COMMAND",
+		ToolName:   "RunCommand",
 		RawInput:   map[string]any{"command": "false"},
 		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
 		Scope:      eventstream.ScopeMain,
@@ -417,7 +417,7 @@ func TestProjectTaskStreamFrameProjectsSubagentSemanticEventWithoutParentTermina
 		TurnID:            "turn-1",
 		SessionRef:        session.SessionRef{SessionID: "root-session"},
 		CallID:            "spawn-call-1",
-		ToolName:          "SPAWN",
+		ToolName:          "Spawn",
 		RawInput:          map[string]any{"agent": "self", "prompt": "inspect"},
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
 		DisplayTerminalID: "spawn-call-1",
@@ -549,7 +549,7 @@ func TestProjectTaskStreamFrameProjectsEventOnlySpawnChildSemantics(t *testing.T
 					Update: &session.ProtocolUpdate{
 						SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 						ToolCallID:    "child-patch-1",
-						Kind:          "PATCH",
+						Kind:          "Patch",
 						Status:        schema.ToolStatusCompleted,
 						Content: []session.ProtocolToolCallContent{{
 							Type:    "diff",
@@ -717,7 +717,7 @@ func TestProjectTaskStreamFrameDoesNotPromoteDelegatedResultIntoParentTool(t *te
 	req := StreamRequest{
 		SessionRef:        session.SessionRef{SessionID: "root-session"},
 		CallID:            "spawn-call-1",
-		ToolName:          "SPAWN",
+		ToolName:          "Spawn",
 		RawInput:          map[string]any{"agent": "self", "prompt": "inspect"},
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
 		DisplayTerminalID: "spawn-call-1",
@@ -744,7 +744,7 @@ func TestProjectTaskStreamFrameSuppressesEmbeddedParentToolEcho(t *testing.T) {
 	req := StreamRequest{
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		CallID:     "spawn-call-1",
-		ToolName:   "SPAWN",
+		ToolName:   "Spawn",
 		RawInput:   map[string]any{"agent": "self", "prompt": "inspect"},
 		Ref:        stream.Ref{SessionID: "root-session", TaskID: "jack"},
 		Scope:      eventstream.ScopeMain,
@@ -769,7 +769,7 @@ func TestProjectTaskStreamFrameSuppressesEmbeddedParentToolEcho(t *testing.T) {
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
 					ToolCallID:    "spawn-call-1",
-					Kind:          "SPAWN",
+					Kind:          "Spawn",
 					Title:         `SPAWN {"agent":"self","prompt":"inspect"}`,
 					Status:        "running",
 					RawInput:      map[string]any{"agent": "self", "prompt": "inspect"},
@@ -866,7 +866,7 @@ func childToolUpdateEventForStreamTest() *session.Event {
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 				ToolCallID:    "child-tool-stream-1",
-				Kind:          "PATCH",
+				Kind:          "Patch",
 				Status:        schema.ToolStatusCompleted,
 			},
 		},
@@ -880,7 +880,7 @@ func spawnStreamRequestForTest() StreamRequest {
 		TurnID:            "turn-1",
 		SessionRef:        session.SessionRef{SessionID: "root-session"},
 		CallID:            "spawn-call-1",
-		ToolName:          "SPAWN",
+		ToolName:          "Spawn",
 		RawInput:          map[string]any{"agent": "self", "prompt": "inspect"},
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
 		DisplayTerminalID: "spawn-call-1",
@@ -905,7 +905,7 @@ func assertSpawnSemanticEnvelope(t *testing.T, env eventstream.Envelope, taskID 
 	if env.Kind != eventstream.KindSessionUpdate || env.Scope != eventstream.ScopeSubagent || env.ScopeID != taskID {
 		t.Fatalf("child envelope = %#v, want scoped subagent session/update for task %q", env, taskID)
 	}
-	if env.ParentTool == nil || env.ParentTool.ToolCallID != parentCallID || env.ParentTool.ToolName != "SPAWN" {
+	if env.ParentTool == nil || env.ParentTool.ToolCallID != parentCallID || env.ParentTool.ToolName != "Spawn" {
 		t.Fatalf("child parent relation = %#v, want SPAWN/%q", env.ParentTool, parentCallID)
 	}
 	assertStreamDelivery(t, env, true)
@@ -966,4 +966,14 @@ func runtimeTaskMeta(meta map[string]any) map[string]any {
 	runtimeMeta, _ := caelis[metautil.Runtime].(map[string]any)
 	taskMeta, _ := runtimeMeta[metautil.RuntimeTask].(map[string]any)
 	return taskMeta
+}
+
+func TestStreamParentEchoMatchingUsesExactToolName(t *testing.T) {
+	t.Parallel()
+
+	req := StreamRequest{ParentCallID: "call-1", ParentToolName: "Spawn"}
+	event := &session.Event{Tool: &session.EventTool{ID: "call-1", Name: "SPAWN"}}
+	if streamFrameSessionEventIsParentToolEcho(req, event) {
+		t.Fatal("SPAWN alias unexpectedly matched exact Spawn parent")
+	}
 }

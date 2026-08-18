@@ -4,10 +4,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -120,8 +120,7 @@ func commandTaskStreamFrameEvents(req StreamRequest, frame stream.Frame) []event
 }
 
 func delegatedParentStream(req StreamRequest) bool {
-	canonical, ok := names.Resolve(req.ToolName)
-	return ok && (canonical == names.Spawn || canonical == names.Task)
+	return req.ToolName == spawn.ToolName || req.ToolName == tasktool.ToolName
 }
 
 func streamFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
@@ -142,7 +141,7 @@ func streamDisplayTerminalID(req StreamRequest, frame stream.Frame) string {
 }
 
 func streamTerminalExitID(req StreamRequest, frame stream.Frame) string {
-	if terminalID, ok := display.DisplayTerminalID(req.CallID, req.ToolName); ok {
+	if terminalID, ok := projectedDisplayTerminalID(req.CallID, req.ToolName); ok {
 		return terminalID
 	}
 	return streamDisplayTerminalID(req, frame)
@@ -375,7 +374,7 @@ func streamFrameSessionEventIsParentToolEcho(req StreamRequest, event *session.E
 		return false
 	}
 	parentTool := firstNonEmpty(strings.TrimSpace(req.ParentToolName), strings.TrimSpace(req.ToolName))
-	return parentTool == "" || toolName == "" || strings.EqualFold(parentTool, toolName)
+	return parentTool == "" || toolName == "" || parentTool == toolName
 }
 
 func streamFrameEventMeta(meta map[string]any) map[string]any {

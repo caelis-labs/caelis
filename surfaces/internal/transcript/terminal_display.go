@@ -5,7 +5,8 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
@@ -16,7 +17,7 @@ func TerminalFinalWithoutContent(input ToolOutputFallbackInput) bool {
 	if input.Error || strings.EqualFold(strings.TrimSpace(input.Status), ToolStatusFailed) {
 		return false
 	}
-	return display.IsTerminalPanelTool(input.ToolName, input.ToolKind)
+	return transcriptToolIsTerminalPanel(input.ToolName)
 }
 
 func TerminalNoOutputPlaceholder(input ToolOutputFallbackInput) bool {
@@ -33,7 +34,7 @@ func TerminalNoOutputPlaceholder(input ToolOutputFallbackInput) bool {
 }
 
 func TerminalExitCodeOutputText(input ToolOutputFallbackInput) string {
-	if !display.IsTerminalPanelTool(input.ToolName, input.ToolKind) {
+	if !transcriptToolIsTerminalPanel(input.ToolName) {
 		return ""
 	}
 	if !input.Error && !strings.EqualFold(strings.TrimSpace(input.Status), ToolStatusFailed) {
@@ -59,8 +60,8 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 	if text := TerminalRuntimeOutputText(input.Meta); text != "" {
 		return text
 	}
-	canonical, _ := names.Resolve(input.ToolName)
-	if canonical == names.Task && commandTaskTargetKind(display.ToolTaskTargetKind(nil, input.RawOutput, input.Meta)) {
+	toolName := strings.TrimSpace(input.ToolName)
+	if toolName == tasktool.ToolName && commandTaskTargetKind(display.ToolTaskTargetKind(nil, input.RawOutput, input.Meta)) {
 		if TerminalTaskStillRunning(input.RawOutput, input.Meta) || !ToolStatusFinal(input.Status, input.Error) {
 			return firstRawNonEmpty(rawDisplayString(input.RawOutput["latest_output"]), rawDisplayString(input.RawOutput["output_preview"]))
 		}
@@ -69,13 +70,13 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 		}
 		return ""
 	}
-	if !display.IsTerminalPanelTool(input.ToolName, input.ToolKind) {
+	if !transcriptToolIsTerminalPanel(input.ToolName) {
 		return ""
 	}
 	if !HasTerminalPanelMeta(input.Meta) {
 		return ""
 	}
-	if canonical == names.Spawn {
+	if toolName == spawn.ToolName {
 		if input.Error || strings.EqualFold(strings.TrimSpace(input.Status), ToolStatusFailed) {
 			return firstRawNonEmpty(rawDisplayString(input.RawOutput["stderr"]), rawDisplayString(input.RawOutput["error"]))
 		}
@@ -100,8 +101,8 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 // durable tool output is authoritative; runtime task metadata is only a
 // compatibility fallback for older stored events.
 func DelegatedTaskResultText(input ToolOutputFallbackInput) string {
-	canonical, _ := names.Resolve(input.ToolName)
-	if (canonical != names.Spawn && canonical != names.Task) || !ToolStatusFinal(input.Status, input.Error) {
+	toolName := strings.TrimSpace(input.ToolName)
+	if (toolName != spawn.ToolName && toolName != tasktool.ToolName) || !ToolStatusFinal(input.Status, input.Error) {
 		return ""
 	}
 	targetKind := strings.ToLower(firstRawNonEmpty(
@@ -109,7 +110,7 @@ func DelegatedTaskResultText(input ToolOutputFallbackInput) string {
 		display.ToolTaskTargetKind(nil, input.RawOutput, input.Meta),
 	))
 	state := rawDisplayString(input.RawOutput["state"])
-	if canonical == names.Spawn || !commandTaskTargetKind(targetKind) {
+	if toolName == spawn.ToolName || !commandTaskTargetKind(targetKind) {
 		if text := display.SubagentTaskFinalText(state, input.RawOutput); text != "" {
 			return text
 		}
@@ -120,7 +121,7 @@ func DelegatedTaskResultText(input ToolOutputFallbackInput) string {
 	}
 	taskMeta := RuntimeTaskMeta(input.Meta)
 	state = firstRawNonEmpty(rawDisplayString(taskMeta["state"]), state)
-	if canonical == names.Spawn || !commandTaskTargetKind(targetKind) {
+	if toolName == spawn.ToolName || !commandTaskTargetKind(targetKind) {
 		return display.SubagentTaskFinalText(state, taskMeta)
 	}
 	if TerminalRawOutputHasText(taskMeta) {

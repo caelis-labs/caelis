@@ -12,7 +12,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	sdkstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -273,9 +274,9 @@ func projectorRequest(descriptor controltaskstream.TaskDescriptor, frame sdkstre
 	if toolName == "" {
 		switch descriptor.Kind {
 		case task.KindSubagent:
-			toolName = identity.Spawn
+			toolName = spawn.ToolName
 		case task.KindCommand:
-			toolName = identity.RunCommand
+			toolName = shell.RunCommandToolName
 		}
 	}
 	terminalID := firstString(frame.Ref.TerminalID, descriptor.CurrentTurnID)

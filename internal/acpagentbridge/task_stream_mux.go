@@ -8,7 +8,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
@@ -328,7 +327,7 @@ func (m *acpTaskStreamMux) resolveSubscription(
 	var taskID string
 	for _, descriptor := range directory.Tasks {
 		if descriptor.Kind != anchor.kind || strings.TrimSpace(descriptor.ParentTool.ToolCallID) != anchor.callID ||
-			identity.CanonicalOrSelf(descriptor.ParentTool.ToolName) != taskStreamParentToolName(anchor.kind) {
+			descriptor.ParentTool.ToolName != taskStreamParentToolName(anchor.kind) {
 			continue
 		}
 		if descriptorHandle := task.NormalizeHandle(descriptor.Handle); descriptorHandle != "" && descriptorHandle != task.NormalizeHandle(anchor.handle) {

@@ -724,7 +724,7 @@ func TestRuntimeCommandToolReturnsUnknownTaskIDOnTripleFailure(t *testing.T) {
 	base := mustRuntimeRunCommandTool(t, fake)
 	raw, _ := json.Marshal(map[string]any{"command": "sleep 60", "yield_time_ms": 0})
 	result, err := (runtimeCommandTool{base: base, session: activeSession, sessionRef: activeSession.SessionRef, tasks: runtime.tasks}).Call(
-		context.Background(), tool.Call{ID: "command-triple-failure", Name: "RUN_COMMAND", Input: raw},
+		context.Background(), tool.Call{ID: "command-triple-failure", Name: "RunCommand", Input: raw},
 	)
 	if err != nil {
 		t.Fatalf("Call() error = %v, want canonical error result", err)
@@ -838,14 +838,16 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsCommandResult(t *testing.T) {
 	err = runtime.tasks.syncCanonicalToolResult(context.Background(), activeSession.SessionRef, &session.Event{
 		Type: session.EventTypeToolResult,
 		Time: eventTime,
+		Meta: trustedTaskResultMeta(nil),
 		Tool: &session.EventTool{
-			Name:   "RUN_COMMAND",
+			Name:   "RunCommand",
 			Status: "completed",
 			Output: map[string]any{
-				"task_id":   snapshot.Ref.TaskID,
-				"state":     string(taskapi.StateCompleted),
-				"result":    canonicalText,
-				"exit_code": 0,
+				"task_id":     snapshot.Ref.TaskID,
+				"target_kind": string(taskapi.KindCommand),
+				"state":       string(taskapi.StateCompleted),
+				"result":      canonicalText,
+				"exit_code":   0,
 			},
 		},
 	})
@@ -928,16 +930,17 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsBatchTaskResults(t *testing.T
 
 	err := runtime.tasks.syncCanonicalToolResult(context.Background(), activeSession.SessionRef, &session.Event{
 		Type: session.EventTypeToolResult,
+		Meta: trustedTaskResultMeta(nil),
 		Tool: &session.EventTool{
-			Name:   "TASK",
+			Name:   "Task",
 			Status: "completed",
 			Output: map[string]any{
 				"action": "wait",
 				"count":  3,
 				"tasks": []any{
-					map[string]any{"task_id": "task-a", "state": string(taskapi.StateCompleted), "result": "canonical a\n", "exit_code": 0},
-					map[string]any{"task_id": "task-b", "state": string(taskapi.StateFailed), "result": "canonical b\n", "exit_code": 1},
-					map[string]any{"task_id": "task-error", "error": "not updated"},
+					map[string]any{"task_id": "task-a", "target_kind": string(taskapi.KindCommand), "state": string(taskapi.StateCompleted), "result": "canonical a\n", "exit_code": 0},
+					map[string]any{"task_id": "task-b", "target_kind": string(taskapi.KindCommand), "state": string(taskapi.StateFailed), "result": "canonical b\n", "exit_code": 1},
+					map[string]any{"task_id": "task-error", "target_kind": string(taskapi.KindCommand), "error": "not updated"},
 				},
 			},
 		},
@@ -974,6 +977,107 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsBatchTaskResults(t *testing.T
 	}
 }
 
+func TestTaskRuntimeIgnoresUntrustedToolResultForExistingTask(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	store := newFileTaskStoreForTest(t)
+	runtime.tasks.store = store
+	entry := &taskapi.Entry{
+		TaskID:  "task-protected",
+		Handle:  "command-7",
+		Kind:    taskapi.KindCommand,
+		Session: activeSession.SessionRef,
+		State:   taskapi.StateRunning,
+		Running: true,
+		Result:  map[string]any{"state": string(taskapi.StateRunning)},
+	}
+	if err := store.Upsert(context.Background(), entry); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runtime.tasks.syncCanonicalToolResult(context.Background(), activeSession.SessionRef, &session.Event{
+		Type: session.EventTypeToolResult,
+		Tool: &session.EventTool{
+			ID:     "external-call",
+			Name:   "RunCommand",
+			Status: "completed",
+			Output: map[string]any{
+				"handle": "command-7", "target_kind": string(taskapi.KindCommand),
+				"state": string(taskapi.StateCompleted), "result": "spoofed\n",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Get(context.Background(), entry.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.State != taskapi.StateRunning || !stored.Running || taskStringValue(stored.Result["result"]) != "" {
+		t.Fatalf("untrusted result changed Task entry: %#v", stored)
+	}
+}
+
+func TestLookupCommandDoesNotBackfillExplicitlyUntrustedToolResult(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	store := newFileTaskStoreForTest(t)
+	runtime.tasks.store = store
+	eventTime := time.Now().UTC()
+	entry := &taskapi.Entry{
+		TaskID:    "task-protected-backfill",
+		Handle:    "command-7",
+		Kind:      taskapi.KindCommand,
+		Session:   activeSession.SessionRef,
+		State:     taskapi.StateCompleted,
+		CreatedAt: eventTime.Add(-2 * time.Minute),
+		UpdatedAt: eventTime.Add(-time.Minute),
+		Metadata:  map[string]any{"parent_call": "external-call"},
+		Result: map[string]any{
+			"state": string(taskapi.StateCompleted), "result": "producer result", "exit_code": 0,
+		},
+	}
+	if err := store.Upsert(context.Background(), entry); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: activeSession.SessionRef,
+		Event: &session.Event{
+			Type: session.EventTypeToolResult,
+			Time: eventTime,
+			Meta: taskResultMeta(nil, false),
+			Tool: &session.EventTool{
+				ID: "external-call", Name: "RunCommand", Status: "completed",
+				Output: map[string]any{
+					"handle": "command-7", "target_kind": string(taskapi.KindCommand),
+					"parent_call": "external-call", "state": string(taskapi.StateCompleted),
+					"result": "spoofed history\n", "exit_code": 0,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	command, err := runtime.tasks.lookupCommand(context.Background(), activeSession.SessionRef, entry.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := taskStringValue(command.result["result"]); got != "producer result" {
+		t.Fatalf("lookup result = %q, want producer-owned result", got)
+	}
+	stored, err := store.Get(context.Background(), entry.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := taskStringValue(stored.Result["result"]); got != "producer result" {
+		t.Fatalf("stored result = %q, want producer-owned result", got)
+	}
+}
+
 func TestLookupCommandBackfillsCanonicalResultFromSessionHistory(t *testing.T) {
 	t.Parallel()
 
@@ -985,7 +1089,10 @@ func TestLookupCommandBackfillsCanonicalResultFromSessionHistory(t *testing.T) {
 		Kind:    taskapi.KindCommand,
 		Session: activeSession.SessionRef,
 		State:   taskapi.StateCompleted,
-		Result:  map[string]any{"state": string(taskapi.StateCompleted), "exit_code": 0},
+		Metadata: map[string]any{
+			"parent_call": "run-backfill",
+		},
+		Result: map[string]any{"state": string(taskapi.StateCompleted), "exit_code": 0},
 		Terminal: sandbox.TerminalRef{
 			Backend:    sandbox.BackendHost,
 			SessionID:  "term-backfill-session",
@@ -1000,7 +1107,8 @@ func TestLookupCommandBackfillsCanonicalResultFromSessionHistory(t *testing.T) {
 		Event: &session.Event{
 			Type: session.EventTypeToolResult,
 			Tool: &session.EventTool{
-				Name:   "RUN_COMMAND",
+				ID:     "run-backfill",
+				Name:   "RunCommand",
 				Status: "completed",
 				Output: map[string]any{
 					"task_id":   "task-backfill",
@@ -1049,6 +1157,7 @@ func TestTaskStreamBackfillDefersToActiveSessionLeaseOwner(t *testing.T) {
 			"result":    "stale result\n",
 			"exit_code": 0,
 		},
+		Metadata: map[string]any{"parent_call": "run-lease-contended"},
 	}
 	if err := baseStore.Upsert(context.Background(), stale); err != nil {
 		t.Fatalf("Upsert() error = %v", err)
@@ -1076,7 +1185,8 @@ func TestTaskStreamBackfillDefersToActiveSessionLeaseOwner(t *testing.T) {
 			Type: session.EventTypeToolResult,
 			Time: eventTime,
 			Tool: &session.EventTool{
-				Name:   "RUN_COMMAND",
+				ID:     "run-lease-contended",
+				Name:   "RunCommand",
 				Status: "completed",
 				Output: map[string]any{
 					"handle":    stale.Handle,
@@ -1123,7 +1233,7 @@ func TestTaskControlWriteFailsClosedWhenBackfillLosesSessionLease(t *testing.T) 
 		CreatedAt: eventTime.Add(-2 * time.Minute),
 		UpdatedAt: eventTime.Add(-time.Minute),
 		Result:    map[string]any{"state": string(taskapi.StateRunning)},
-		Metadata:  map[string]any{"command_phase": commandPhaseRunning},
+		Metadata:  map[string]any{"command_phase": commandPhaseRunning, "parent_call": "run-stale-fence"},
 		Terminal: sandbox.TerminalRef{
 			Backend:    sandbox.BackendHost,
 			SessionID:  "stale-fence-session",
@@ -1152,7 +1262,8 @@ func TestTaskControlWriteFailsClosedWhenBackfillLosesSessionLease(t *testing.T) 
 			Type: session.EventTypeToolResult,
 			Time: eventTime,
 			Tool: &session.EventTool{
-				Name:   "RUN_COMMAND",
+				ID:     "run-stale-fence",
+				Name:   "RunCommand",
 				Status: "running",
 				Output: map[string]any{
 					"handle": entry.Handle,
@@ -1201,7 +1312,7 @@ func TestLookupCommandCanonicalDoesNotRegressNewerDurableUnknownOutcome(t *testi
 	if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
 		SessionRef: activeSession.SessionRef,
 		Event: &session.Event{Type: session.EventTypeToolResult, Time: durableTime.Add(time.Hour), Tool: &session.EventTool{
-			Name: "RUN_COMMAND", Status: "completed", Output: map[string]any{
+			Name: "RunCommand", Status: "completed", Output: map[string]any{
 				"task_id": entry.TaskID, "state": string(taskapi.StateCompleted), "result": "historical result",
 			},
 		}},

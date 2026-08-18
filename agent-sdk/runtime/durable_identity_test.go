@@ -116,8 +116,8 @@ func TestDefaultPauseTokenIdentitySurvivesRuntimeRestart(t *testing.T) {
 				Session:    active,
 				RunID:      runID,
 				TurnID:     turnID,
-				Tool:       tool.Definition{Name: "WRITE"},
-				Call:       tool.Call{ID: runtime.nextID("call", nil), Name: "WRITE"},
+				Tool:       tool.Definition{Name: "Write"},
+				Call:       tool.Call{ID: runtime.nextID("call", nil), Name: "Write"},
 			}, nil)
 			result <- requestErr
 		}()

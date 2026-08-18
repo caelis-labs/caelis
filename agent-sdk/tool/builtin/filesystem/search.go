@@ -16,10 +16,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const SearchToolName = names.Grep
+const SearchToolName = "Grep"
 
 const (
 	binaryDetectionBytes = 8 * 1024

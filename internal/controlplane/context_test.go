@@ -47,7 +47,7 @@ func TestContextRouterUsesOnlySharedCanonicalDialogue(t *testing.T) {
 		t.Fatalf("PutParticipant() error = %v", err)
 	}
 	toolMessage := model.Message{Role: model.RoleTool, Parts: []model.Part{
-		model.NewToolResultJSONPart("call-1", "RUN_COMMAND", map[string]any{"result": "tool output"}, false),
+		model.NewToolResultJSONPart("call-1", "RunCommand", map[string]any{"result": "tool output"}, false),
 	}}
 	childEvent := controlAssistantEvent("child answer")
 	childEvent.Actor = session.ActorRef{Kind: session.ActorKindParticipant, Name: "ella"}
@@ -56,7 +56,7 @@ func TestContextRouterUsesOnlySharedCanonicalDialogue(t *testing.T) {
 		controlUserEvent("user prompt"),
 		{
 			Type: session.EventTypeToolResult, Visibility: session.VisibilityCanonical, Text: "tool output", Message: &toolMessage,
-			Tool: &session.EventTool{ID: "call-1", Name: "RUN_COMMAND", Output: map[string]any{"result": "tool output"}},
+			Tool: &session.EventTool{ID: "call-1", Name: "RunCommand", Output: map[string]any{"result": "tool output"}},
 		},
 		childEvent,
 		session.MarkUIOnly(&session.Event{Type: session.EventTypeAssistant, Text: "live chunk"}),
