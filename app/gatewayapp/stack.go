@@ -646,6 +646,9 @@ func (s *Stack) Close() error {
 	quiesceCtx, cancelQuiesce := context.WithTimeout(context.Background(), 5*time.Second)
 	quiesceErr := s.Quiesce(quiesceCtx)
 	cancelQuiesce()
+	if s.composition.authorities.approvalRecovery != nil {
+		s.composition.authorities.approvalRecovery.Close()
+	}
 	var sessionCloseErr error
 	if s.sessionRuntimes != nil {
 		sessionCloseErr = s.sessionRuntimes.closeRuntimeResources()

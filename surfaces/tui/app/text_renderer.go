@@ -176,31 +176,49 @@ func renderAssistantText(req TextRenderRequest, policy MarkdownPolicy) TextRende
 		return TextRenderResult{Rows: rows, InlineCalls: inlineCalls}
 	case req.Mode == RenderStream || policy == MarkdownStableTail:
 		rows, glamourCalls, cacheHit := renderAssistantStableTailRows(req)
-		if len(rows) > 0 {
-			return TextRenderResult{Rows: rows, GlamourCalls: glamourCalls, CacheHit: cacheHit}
-		}
-		fallbackRows, inlineCalls := renderInlineMarkdownTextRows(req)
-		return TextRenderResult{
-			Rows:         fallbackRows,
-			GlamourCalls: glamourCalls,
-			InlineCalls:  inlineCalls,
-			CacheHit:     cacheHit,
-		}
+		return TextRenderResult{Rows: rows, GlamourCalls: glamourCalls, CacheHit: cacheHit}
 	default:
 		if req.ObserveGlamourRender != nil {
 			req.ObserveGlamourRender()
 		}
-		rows := glamourNarrativeRows(req.BlockID, req.Raw, req.Prefix, req.LineStyle, req.Width, req.Theme)
-		if len(rows) > 0 {
-			return TextRenderResult{Rows: rows, GlamourCalls: 1}
-		}
-		fallbackRows, inlineCalls := renderInlineMarkdownTextRows(req)
-		return TextRenderResult{
-			Rows:         fallbackRows,
-			GlamourCalls: 1,
-			InlineCalls:  inlineCalls,
-		}
+		rows := renderCompletedAssistantRows(req, glamourNarrativeRows)
+		return TextRenderResult{Rows: rows, GlamourCalls: 1}
 	}
+}
+
+type narrativeRowsRenderer func(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow
+
+func renderCompletedAssistantRows(req TextRenderRequest, render narrativeRowsRenderer) []RenderedRow {
+	streamKey := assistantStreamingCacheKey(req)
+	var rows []RenderedRow
+	if render != nil {
+		rows = render(req.BlockID, req.Raw, req.Prefix, req.LineStyle, req.Width, req.Theme)
+	}
+	if len(rows) == 0 {
+		rows = compatibleStreamingNarrativeFallbackRowsForKey(
+			streamKey,
+			req.BlockID,
+			req.Raw,
+			req.Prefix,
+			req.LineStyle,
+			req.Width,
+			req.Theme,
+		)
+	}
+	releaseStreamingNarrativeCacheEntry(streamKey)
+	if len(rows) > 0 {
+		return rows
+	}
+	prefixWidth := maxInt(graphemeWidth(req.Prefix), 0)
+	return renderPlainStreamingNarrativeTailRows(
+		req.BlockID,
+		req.Raw,
+		req.Prefix,
+		req.LineStyle,
+		maxInt(1, req.Width-prefixWidth),
+		req.Theme,
+		false,
+	)
 }
 
 func renderAssistantStableTailRows(req TextRenderRequest) ([]RenderedRow, int, bool) {
@@ -208,7 +226,7 @@ func renderAssistantStableTailRows(req TextRenderRequest) ([]RenderedRow, int, b
 		return nil, 0, false
 	}
 	if strings.TrimSpace(req.StablePrefixRaw) == "" && strings.TrimSpace(req.TailRaw) == "" {
-		return glamourStreamingNarrativeRowsObserved(req.BlockID, req.Raw, req.Prefix, req.LineStyle, req.Width, req.Theme, req.ObserveGlamourRender)
+		return glamourStreamingNarrativeRowsObservedForKey(assistantStreamingCacheKey(req), req.BlockID, req.Raw, req.Prefix, req.LineStyle, req.Width, req.Theme, req.ObserveGlamourRender)
 	}
 	return renderSplitAssistantStableTailRows(req)
 }
@@ -219,38 +237,31 @@ func renderSplitAssistantStableTailRows(req TextRenderRequest) ([]RenderedRow, i
 	raw := stableRaw + tailRaw
 	if strings.TrimSpace(stableRaw) == "" {
 		prefixWidth := maxInt(graphemeWidth(req.Prefix), 0)
-		return renderStreamingNarrativeTailRows(req.BlockID, raw, req.Prefix, req.LineStyle, maxInt(1, req.Width-prefixWidth), req.Theme), 0, false
+		return renderPlainStreamingNarrativeTailRows(req.BlockID, raw, req.Prefix, req.LineStyle, maxInt(1, req.Width-prefixWidth), req.Theme, true), 0, false
 	}
-	prefixRows, glamourCalls, cacheHit := cachedStreamingNarrativePrefixRows(req.BlockID, stableRaw, req.Prefix, req.LineStyle, req.Width, req.Theme, req.ObserveGlamourRender)
+	prefixRows, glamourCalls, cacheHit := cachedStreamingNarrativePrefixRowsForKey(assistantStreamingCacheKey(req), req.BlockID, stableRaw, req.Prefix, req.LineStyle, req.Width, req.Theme, req.ObserveGlamourRender)
 	if len(prefixRows) == 0 {
 		prefixWidth := maxInt(graphemeWidth(req.Prefix), 0)
-		return renderStreamingNarrativeTailRows(req.BlockID, raw, req.Prefix, req.LineStyle, maxInt(1, req.Width-prefixWidth), req.Theme), glamourCalls, cacheHit
+		return renderPlainStreamingNarrativeTailRows(req.BlockID, raw, req.Prefix, req.LineStyle, maxInt(1, req.Width-prefixWidth), req.Theme, true), glamourCalls, cacheHit
 	}
 	prefixWidth := maxInt(graphemeWidth(req.Prefix), 0)
 	tailWidth := maxInt(1, req.Width-prefixWidth)
-	tailRows := renderStreamingNarrativeTailRows(req.BlockID, tailRaw, "", req.LineStyle, tailWidth, req.Theme)
-	if len(tailRows) == 0 {
-		return prefixRows, glamourCalls, cacheHit
+	tailRows := renderPlainStreamingNarrativeTailRows(req.BlockID, tailRaw, "", req.LineStyle, tailWidth, req.Theme, true)
+	return joinStreamingNarrativeRows(req.BlockID, stableRaw, prefixRows, tailRows, tailWidth), glamourCalls, cacheHit
+}
+
+func assistantStreamingCacheKey(req TextRenderRequest) string {
+	if req.StreamKey != "" {
+		return req.StreamKey
 	}
-	separatorRows := 0
-	if hasStreamingParagraphBoundary(stableRaw) {
-		separatorRows = 1
-	}
-	rows := make([]RenderedRow, 0, len(prefixRows)+separatorRows+len(tailRows))
-	rows = append(rows, prefixRows...)
-	if separatorRows > 0 {
-		separator := strings.Repeat(" ", tailWidth)
-		rows = append(rows, RenderedRow{Styled: separator, Plain: separator, BlockID: req.BlockID, PreWrapped: true})
-	}
-	rows = append(rows, tailRows...)
-	return rows, glamourCalls, cacheHit
+	return req.BlockID
 }
 
 func renderInlineMarkdownTextRows(req TextRenderRequest) ([]RenderedRow, int) {
 	if req.Width <= 0 {
 		req.Width = 1
 	}
-	baseStyle := narrativeBodyStyle(req.LineStyle, req.Theme)
+	baseStyle := req.Theme.TextStyle()
 	prefixWidth := displayColumns(req.Prefix)
 	continuationPrefix := ""
 	if prefixWidth > 0 {

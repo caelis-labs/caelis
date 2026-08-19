@@ -17,7 +17,7 @@ func TestGlamourNarrativeMakesCitationSourceURLClickable(t *testing.T) {
 	if !strings.Contains(rendered, "上海市气象服务中心") {
 		t.Fatalf("rendered source label missing: %q", rendered)
 	}
-	if !strings.Contains(rendered, "\x1b]8;;https://sh.weather.com.cn/gdtp/07/4722387.shtml") {
+	if !strings.Contains(rendered, "\x1b]8;") || !strings.Contains(rendered, ";https://sh.weather.com.cn/gdtp/07/4722387.shtml\a") {
 		t.Fatalf("rendered source URL is not an OSC 8 hyperlink: %q", rendered)
 	}
 }

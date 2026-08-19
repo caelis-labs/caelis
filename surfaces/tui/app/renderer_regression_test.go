@@ -8,6 +8,8 @@ import (
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/charmbracelet/colorprofile"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -89,10 +91,28 @@ func TestStreamAppendPhysicalScreenPreservesTextAfterComplexGrapheme(t *testing.
 		t.Fatal("TUI program did not run OnStart")
 	}
 
-	program.Send(schedulerACPAssistantEnvelope("A🏳️‍🌈B"))
-	waitForPhysicalStreamLine(t, terminal, "A🏳️‍🌈B")
-	program.Send(schedulerACPAssistantEnvelope("C"))
-	waitForPhysicalStreamLine(t, terminal, "A🏳️‍🌈BC")
+	envelope := func(text string, final bool) eventstream.Envelope {
+		msg := schedulerACPAssistantEnvelope(text)
+		msg.Final = final
+		update := msg.Update.(schema.ContentChunk)
+		update.MessageID = "physical-markdown-stream"
+		msg.Update = update
+		return msg
+	}
+	const finalMarkdown = "**A🏳️‍🌈BC** [链接](https://example.com)"
+	program.Send(envelope("**A🏳️‍🌈B", false))
+	waitForPhysicalStreamLine(t, terminal, "**A🏳️‍🌈B")
+	program.Send(envelope("C** [链接](https://example.com)", false))
+	waitForPhysicalStreamLine(t, terminal, finalMarkdown)
+	program.Send(envelope(finalMarkdown, true))
+	if _, err := waitForProductScreen(t.Context(), terminal, func(screen string) bool {
+		return strings.Contains(screen, "A🏳️‍🌈BC") &&
+			strings.Contains(screen, "链接") &&
+			!strings.Contains(screen, "**A") &&
+			!strings.Contains(screen, "[链接](")
+	}); err != nil {
+		t.Fatalf("physical terminal did not converge from raw tail to Glamour: %v", err)
+	}
 
 	program.Quit()
 	select {
@@ -109,10 +129,18 @@ func TestStreamAppendPhysicalScreenPreservesTextAfterComplexGrapheme(t *testing.
 		t.Fatalf("final model = %T, want *Model", finalModel)
 	}
 	block := requireMainACPTurnBlockForTest(t, model)
-	if len(block.Events) != 1 || block.Events[0].Text != "A🏳️‍🌈BC" {
+	if len(block.Events) != 1 || block.Events[0].Text != finalMarkdown {
 		t.Fatalf("final assistant events = %#v, want complete stream text", block.Events)
 	}
-	if plain := ansi.Strip(model.View().Content); !strings.Contains(plain, "A🏳️‍🌈BC") {
+	if buffer := block.Events[0].ActiveBuffer; buffer == nil || buffer.HasTail() {
+		t.Fatalf("final assistant buffer = %#v, want sealed Glamour source", buffer)
+	}
+	for _, row := range block.Render(model.blockRenderContext(width)) {
+		if row.activeTail {
+			t.Fatalf("physical final render retained raw active tail: %#v", row)
+		}
+	}
+	if plain := ansi.Strip(model.View().Content); !strings.Contains(plain, "A🏳️‍🌈BC") || strings.Contains(plain, "**A") {
 		t.Fatalf("final model view lost stream text: %q", plain)
 	}
 }

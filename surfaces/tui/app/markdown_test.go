@@ -15,21 +15,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func TestNormalizeTerminalMarkdownSplitsGluedMarkdownTable(t *testing.T) {
-	raw := "---## 工具调用演示总结我刚刚同时使用了 7 种工具 来展示能力：| 工具 | 用途 | 演示内容 | |------|------|----------| | Command | 执行 shell 命令 | ls 列出文件 | | Glob | 文件名模式匹配 | 搜索 *.py 文件 |"
-
-	got := normalizeTerminalMarkdown(raw)
-
-	for _, want := range []string{
-		"---\n## 工具调用演示总结",
-		"能力：\n| 工具 | 用途 | 演示内容 |",
-		"| 工具 | 用途 | 演示内容 |\n|------|------|----------|",
-		"| Command | 执行 shell 命令 | ls 列出文件 |",
-		"| Glob | 文件名模式匹配 | 搜索 *.py 文件 |",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("normalized markdown missing %q\ngot:\n%s", want, got)
-		}
+func TestGlamourNarrativePreservesDollarDelimitedSourceText(t *testing.T) {
+	raw := "```sh\nprintf '%s\\n' '$PATH$'\n```"
+	rendered := glamourRenderNarrative(raw, 80, tuikit.DefaultTheme(), tuikit.LineStyleAssistant)
+	if plain := ansi.Strip(rendered); !strings.Contains(plain, "$PATH$") {
+		t.Fatalf("Glamour render changed code source containing dollars: %q", plain)
 	}
 }
 
@@ -107,54 +97,16 @@ func TestNarrativeInlineCodeStyleScopesAfterCJKText(t *testing.T) {
 	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
 	inlineFG := sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())
 
-	t.Run("glamour finalized", func(t *testing.T) {
-		rendered := glamourRenderNarrative(raw, 180, theme, tuikit.LineStyleAssistant)
-		assertInlineCodeForegroundScope(t, rendered, inlineFG, "shell")
-	})
+	rendered := glamourRenderNarrative(raw, 180, theme, tuikit.LineStyleAssistant)
+	assertInlineCodeForegroundScope(t, rendered, inlineFG, "shell")
 
-	t.Run("streaming tail", func(t *testing.T) {
-		rows := renderStreamingNarrativeTailRows("block-1", raw, "", tuikit.LineStyleAssistant, 180, theme)
-		assertInlineCodeForegroundScope(t, joinRenderedStyled(rows), inlineFG, "shell")
-	})
-
-	t.Run("main transcript active stream", func(t *testing.T) {
-		m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
-		m.viewport.SetWidth(180)
-		m.viewport.SetHeight(20)
-		_, _ = m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: []TranscriptEvent{{
-			Kind:          TranscriptEventNarrative,
-			NarrativeKind: TranscriptNarrativeAssistant,
-			Scope:         ACPProjectionMain,
-			ScopeID:       "session-1",
-			Actor:         "assistant",
-			Text:          raw,
-			Final:         false,
-		}}})
-		m.syncViewportContent()
-		assertInlineCodeForegroundScope(t, strings.Join(m.viewportStyledLines, "\n"), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()), "shell")
-	})
-
-	t.Run("viewport stream line", func(t *testing.T) {
-		m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
-		m.viewport.SetWidth(180)
-		m.viewport.SetHeight(20)
-		m.streamLine = raw
-		m.lastCommittedStyle = tuikit.LineStyleAssistant
-		ctx := m.blockRenderContext(180)
-		styled, _, _ := m.renderStreamViewportLines(ctx)
-		assertInlineCodeForegroundScope(t, strings.Join(styled, "\n"), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()), "shell")
-	})
-
-	t.Run("viewport stream line wrapped inline code", func(t *testing.T) {
-		m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
-		m.viewport.SetWidth(24)
-		m.viewport.SetHeight(20)
-		m.streamLine = "前缀前缀前缀前缀前缀前缀，用 `shell command` 验证结果。"
-		m.lastCommittedStyle = tuikit.LineStyleAssistant
-		ctx := m.blockRenderContext(24)
-		styled, _, _ := m.renderStreamViewportLines(ctx)
-		assertInlineCodeForegroundScope(t, strings.Join(styled, "\n"), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()), "shell command")
-	})
+	rows := renderPlainStreamingNarrativeTailRows("block-1", raw, "· ", tuikit.LineStyleAssistant, 180, theme, true)
+	if plain := joinRenderedPlain(rows); plain != "· "+raw {
+		t.Fatalf("streaming tail plain = %q, want raw Markdown source", plain)
+	}
+	if styled := textWithSGRForeground(joinRenderedStyled(rows), inlineFG); strings.Contains(styled, "shell") {
+		t.Fatalf("raw streaming tail unexpectedly used inline-code styling: %q", joinRenderedStyled(rows))
+	}
 }
 
 func TestFinalMarkdownDoesNotDecorateProseWithInlineCodeColor(t *testing.T) {
@@ -169,8 +121,13 @@ func TestStreamingTailMarkdownDoesNotDecorateProseWithInlineCodeColor(t *testing
 	raw := markdownInlineCodeScopeFixture()
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 
-	rows := renderStreamingNarrativeTailRows("block-1", raw, "", tuikit.LineStyleAssistant, 160, theme)
-	assertMarkdownInlineCodeForegroundScope(t, joinRenderedStyled(rows), sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground()), []string{"git status", "console.log(\"hello\")"})
+	rows := renderPlainStreamingNarrativeTailRows("block-1", raw, "", tuikit.LineStyleAssistant, 160, theme, true)
+	if got := joinRenderedPlain(rows); got != raw {
+		t.Fatalf("streaming tail changed Markdown source\n got=%q\nwant=%q", got, raw)
+	}
+	if got := textWithSGRForeground(joinRenderedStyled(rows), sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())); strings.TrimSpace(got) != "" {
+		t.Fatalf("raw streaming tail unexpectedly used inline-code styling: %q", got)
+	}
 }
 
 func TestNarrativeInlineCodeStyleScopesToolNamesInCJKLists(t *testing.T) {
@@ -187,39 +144,24 @@ func TestNarrativeInlineCodeStyleScopesToolNamesInCJKLists(t *testing.T) {
 	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
 	inlineFG := sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())
 
-	assertToolCodeScopes := func(t *testing.T, styled string, fg string) {
-		t.Helper()
-		assertInlineCodeForegroundScope(t, firstStyledLineContaining(styled, "验证"), fg, "Shell")
-		assertInlineCodeForegroundScope(t, firstStyledLineContaining(styled, "命令"), fg, "Shell")
-		assertInlineCodeForegroundScope(t, firstStyledLineContaining(styled, "委托"), fg, "Spawn")
+	rendered := glamourRenderNarrative(raw, 180, theme, tuikit.LineStyleAssistant)
+	assertInlineCodeForegroundScope(t, firstStyledLineContaining(rendered, "验证"), inlineFG, "Shell")
+	assertInlineCodeForegroundScope(t, firstStyledLineContaining(rendered, "命令"), inlineFG, "Shell")
+	assertInlineCodeForegroundScope(t, firstStyledLineContaining(rendered, "委托"), inlineFG, "Spawn")
+
+	ctx := BlockRenderContext{Width: 180, Theme: theme, ThemeKey: themeRenderCacheKey(theme)}
+	stream := RenderTextWithContext(ctx, TextRenderRequest{
+		Kind:           TextAssistant,
+		Mode:           RenderStream,
+		MarkdownPolicy: MarkdownStableTail,
+		Raw:            raw,
+		Prefix:         "· ",
+		BlockID:        "block-stream-raw",
+		LineStyle:      tuikit.LineStyleAssistant,
+	}).Rows
+	if got := joinRenderedPlain(stream); got != "· "+raw {
+		t.Fatalf("streaming CJK list changed raw Markdown\n got=%q\nwant=%q", got, "· "+raw)
 	}
-
-	t.Run("glamour finalized", func(t *testing.T) {
-		rendered := glamourRenderNarrative(raw, 180, theme, tuikit.LineStyleAssistant)
-		assertToolCodeScopes(t, rendered, inlineFG)
-	})
-
-	t.Run("streaming tail", func(t *testing.T) {
-		rows := renderStreamingNarrativeTailRows("block-1", raw, "", tuikit.LineStyleAssistant, 180, theme)
-		assertToolCodeScopes(t, joinRenderedStyled(rows), inlineFG)
-	})
-
-	t.Run("main transcript active stream", func(t *testing.T) {
-		m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
-		m.viewport.SetWidth(180)
-		m.viewport.SetHeight(20)
-		_, _ = m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: []TranscriptEvent{{
-			Kind:          TranscriptEventNarrative,
-			NarrativeKind: TranscriptNarrativeAssistant,
-			Scope:         ACPProjectionMain,
-			ScopeID:       "session-1",
-			Actor:         "assistant",
-			Text:          raw,
-			Final:         false,
-		}}})
-		m.syncViewportContent()
-		assertToolCodeScopes(t, strings.Join(m.viewportStyledLines, "\n"), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()))
-	})
 }
 
 func TestNarrativeInlineCodeStyleScopesShortCJKListAcronym(t *testing.T) {
@@ -229,135 +171,16 @@ func TestNarrativeInlineCodeStyleScopesShortCJKListAcronym(t *testing.T) {
 		"• 无新增 `API` 依赖",
 		"• 无新增`API`依赖",
 	}
-	for _, tt := range []struct {
-		name string
-		dark bool
-	}{
-		{name: "light", dark: false},
-		{name: "dark", dark: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			theme := tuikit.ResolveThemeWithState(tt.dark, false, colorprofile.TrueColor)
-			inlineFG := sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())
-
-			assertAPICodeScope := func(t *testing.T, styled string, fg string) {
-				t.Helper()
-				assertInlineCodeForegroundScope(t, firstStyledLineContaining(styled, "API"), fg, "API")
+	for _, dark := range []bool{false, true} {
+		theme := tuikit.ResolveThemeWithState(dark, false, colorprofile.TrueColor)
+		inlineFG := sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())
+		for _, raw := range raws {
+			rendered := glamourRenderNarrative(raw, 80, theme, tuikit.LineStyleAssistant)
+			assertInlineCodeForegroundScope(t, firstStyledLineContaining(rendered, "API"), inlineFG, "API")
+			rows := renderPlainStreamingNarrativeTailRows("block-api", raw, "", tuikit.LineStyleAssistant, 80, theme, true)
+			if got := joinRenderedPlain(rows); got != raw {
+				t.Fatalf("streaming acronym row = %q, want raw %q", got, raw)
 			}
-
-			for _, raw := range raws {
-				t.Run("raw="+raw, func(t *testing.T) {
-					t.Run("glamour finalized", func(t *testing.T) {
-						rendered := glamourRenderNarrative(raw, 80, theme, tuikit.LineStyleAssistant)
-						assertAPICodeScope(t, rendered, inlineFG)
-					})
-
-					t.Run("glamour finalized with heading context", func(t *testing.T) {
-						text := strings.Join([]string{"无问题点", "", raw}, "\n")
-						rendered := glamourRenderNarrative(text, 80, theme, tuikit.LineStyleAssistant)
-						assertAPICodeScope(t, rendered, inlineFG)
-					})
-
-					t.Run("render text stream with heading context", func(t *testing.T) {
-						ctx := BlockRenderContext{Width: 80, Theme: theme, ThemeKey: themeRenderCacheKey(theme)}
-						text := strings.Join([]string{"无问题点", "", raw}, "\n")
-						rows := RenderTextWithContext(ctx, TextRenderRequest{
-							Kind:           TextAssistant,
-							Mode:           RenderStream,
-							MarkdownPolicy: MarkdownStableTail,
-							Raw:            text,
-							Prefix:         "· ",
-							BlockID:        "block-1",
-							LineStyle:      tuikit.LineStyleAssistant,
-						}).Rows
-						assertAPICodeScope(t, joinRenderedStyled(rows), inlineFG)
-					})
-
-					t.Run("streaming tail", func(t *testing.T) {
-						rows := renderStreamingNarrativeTailRows("block-1", raw, "", tuikit.LineStyleAssistant, 80, theme)
-						assertAPICodeScope(t, joinRenderedStyled(rows), inlineFG)
-					})
-
-					t.Run("streaming tail with heading context", func(t *testing.T) {
-						text := strings.Join([]string{"无问题点", "", raw}, "\n")
-						rows := renderStreamingNarrativeTailRows("block-1", text, "", tuikit.LineStyleAssistant, 80, theme)
-						assertAPICodeScope(t, joinRenderedStyled(rows), inlineFG)
-					})
-
-					t.Run("streaming tail with role prefix", func(t *testing.T) {
-						text := strings.Join([]string{"无问题点", "", raw}, "\n")
-						rows := renderStreamingNarrativeTailRows("block-1", text, "· ", tuikit.LineStyleAssistant, 80, theme)
-						assertAPICodeScope(t, joinRenderedStyled(rows), inlineFG)
-					})
-
-					t.Run("main transcript finalized", func(t *testing.T) {
-						m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
-						m.applyTheme(theme)
-						m.viewport.SetWidth(80)
-						m.viewport.SetHeight(20)
-						_, _ = m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: []TranscriptEvent{{
-							Kind:          TranscriptEventNarrative,
-							NarrativeKind: TranscriptNarrativeAssistant,
-							Scope:         ACPProjectionMain,
-							ScopeID:       "session-1",
-							Actor:         "assistant",
-							Text:          strings.Join([]string{"无问题点", "", raw}, "\n"),
-							Final:         true,
-						}}})
-						block := requireMainACPTurnBlockForTest(t, m)
-						assertAPICodeScope(t, joinRenderedStyled(block.Render(m.blockRenderContext(80))), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()))
-						m.syncViewportContent()
-						assertAPICodeScope(t, strings.Join(m.viewportStyledLines, "\n"), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()))
-					})
-
-					t.Run("main transcript active stream", func(t *testing.T) {
-						m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
-						m.applyTheme(theme)
-						m.viewport.SetWidth(80)
-						m.viewport.SetHeight(20)
-						_, _ = m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: []TranscriptEvent{{
-							Kind:          TranscriptEventNarrative,
-							NarrativeKind: TranscriptNarrativeAssistant,
-							Scope:         ACPProjectionMain,
-							ScopeID:       "session-1",
-							Actor:         "assistant",
-							Text:          raw,
-							Final:         false,
-						}}})
-						m.syncViewportContent()
-						assertAPICodeScope(t, strings.Join(m.viewportStyledLines, "\n"), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()))
-					})
-				})
-			}
-		})
-	}
-}
-
-func TestActiveMarkdownStreamDoesNotStyleMultilineInlineCodeAcrossStablePrefix(t *testing.T) {
-	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
-	stable := strings.Join([]string{
-		strings.Repeat("stable intro ", 12) + "`partial",
-		"ordinary text should not receive inline code color",
-		"more ordinary text should also stay body styled` after",
-		"",
-		"",
-	}, "\n")
-	tail := strings.Repeat("tail text remains long enough for stable-prefix promotion. ", 4)
-	raw := stable + tail
-	stableRaw, tailRaw := splitStableStreamingMarkdown(raw)
-	if strings.TrimSpace(stableRaw) == "" || strings.TrimSpace(tailRaw) == "" {
-		t.Fatalf("test setup did not split stable prefix and tail\nstable=%q\ntail=%q", stableRaw, tailRaw)
-	}
-
-	rows := renderActiveNarrativeBufferTestRows("block-1", raw, "· ", tuikit.LineStyleAssistant, 120, theme)
-	styled := joinRenderedStyled(rows)
-	fgText := normalizeInlineStyleText(textWithSGRForeground(styled, sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())))
-	for _, notWant := range []string{
-		"ordinary text should not receive inline code color",
-		"more ordinary text should also stay body styled",
-	} {
-		if strings.Contains(fgText, notWant) {
-			t.Fatalf("multiline inline-code foreground leaked onto ordinary text %q\nfgText=%q\nplain=%q\nstyled=%q", notWant, fgText, joinRenderedPlain(rows), styled)
 		}
 	}
 }
@@ -508,8 +331,8 @@ func TestGlamourNarrativeRendererCacheKeepsRecentKeys(t *testing.T) {
 	}
 }
 
-func TestGlamourNarrativeRendersNormalizedMarkdownTable(t *testing.T) {
-	raw := "工具调用演示总结：| 工具 | 用途 | 演示内容 | |------|------|----------| | Command | 执行 shell 命令 | ls 列出文件 | | Glob | 文件名模式匹配 | 搜索 *.py 文件 |"
+func TestGlamourNarrativeRendersGFMMarkdownTable(t *testing.T) {
+	raw := "工具调用演示总结：\n\n| 工具 | 用途 | 演示内容 |\n|------|------|----------|\n| Command | 执行 shell 命令 | ls 列出文件 |\n| Glob | 文件名模式匹配 | 搜索 *.py 文件 |"
 
 	rendered := glamourRenderNarrative(raw, 96, tuikit.DefaultTheme(), tuikit.LineStyleAssistant)
 	plain := ansi.Strip(rendered)
@@ -524,91 +347,36 @@ func TestGlamourNarrativeRendersNormalizedMarkdownTable(t *testing.T) {
 	}
 }
 
-func TestNarrativeBlockquoteUsesSingleRailInStreamAndFinal(t *testing.T) {
+func TestNarrativeBlockquoteKeepsRawStreamAndGlamourFinal(t *testing.T) {
 	raw := "> **RunCommand** 运行了 pytest 测试套件。可以看到 36 个测试用例中有些导入错误（`caelis_demo` 模块不存在）。这展示了我执行测试和诊断问题的能力。"
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	ctx := BlockRenderContext{Width: 220, TermWidth: 220, Theme: theme, ThemeKey: themeRenderCacheKey(theme)}
 	body := "│ RunCommand 运行了 pytest 测试套件。可以看到 36 个测试用例中有些导入错误（caelis_demo 模块不存在）。这展示了我执行测试和诊断问题的能力。"
 
-	plainRows := NarrativeToPlainRows(SplitNarrativeBlocks(raw))
-	if len(plainRows) != 1 || plainRows[0] != "RunCommand 运行了 pytest 测试套件。可以看到 36 个测试用例中有些导入错误（caelis_demo 模块不存在）。这展示了我执行测试和诊断问题的能力。" {
-		t.Fatalf("canonical blockquote plain rows = %#v", plainRows)
+	stream := RenderTextWithContext(ctx, TextRenderRequest{
+		Kind:           TextAssistant,
+		Mode:           RenderStream,
+		MarkdownPolicy: MarkdownStableTail,
+		Raw:            raw,
+		Prefix:         "· ",
+		BlockID:        "blockquote-stream",
+		LineStyle:      tuikit.LineStyleAssistant,
+	}).Rows
+	if got := strings.TrimRight(joinRenderedPlain(stream), " "); got != "· "+raw {
+		t.Fatalf("streaming blockquote = %q, want raw source", got)
 	}
 
-	tests := []struct {
-		name     string
-		role     tuikit.LineStyle
-		prefix   string
-		plain    string
-		semantic color.Color
-	}{
-		{
-			name:     "assistant",
-			role:     tuikit.LineStyleAssistant,
-			prefix:   "· ",
-			plain:    "· " + body,
-			semantic: theme.TextStyle().GetForeground(),
-		},
-		{
-			name:     "reasoning",
-			role:     tuikit.LineStyleReasoning,
-			prefix:   "› ",
-			plain:    "› " + body,
-			semantic: theme.ReasoningFg,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			render := func(mode RenderMode, policy MarkdownPolicy) RenderedRow {
-				t.Helper()
-				rows := RenderTextWithContext(ctx, TextRenderRequest{
-					Kind:           TextAssistant,
-					Mode:           mode,
-					MarkdownPolicy: policy,
-					Raw:            raw,
-					Prefix:         tt.prefix,
-					BlockID:        "block-1",
-					LineStyle:      tt.role,
-				}).Rows
-				if len(rows) == 0 {
-					t.Fatal("expected rendered blockquote row")
-				}
-				return rows[0]
-			}
-
-			stream := render(RenderStream, MarkdownStableTail)
-			final := render(RenderFinal, MarkdownFull)
-			for _, row := range []RenderedRow{stream, final} {
-				plain := strings.TrimRight(row.Plain, " ")
-				if plain != tt.plain {
-					t.Fatalf("blockquote row = %q, want %q", plain, tt.plain)
-				}
-				for _, forbidden := range []string{tt.prefix + ">", "│ │"} {
-					if strings.Contains(plain, forbidden) {
-						t.Fatalf("blockquote row contains forbidden marker %q: %q", forbidden, plain)
-					}
-				}
-			}
-
-			semanticFG := sgrForegroundCode(t, tt.semantic)
-			streamSemantic := normalizeInlineStyleText(textWithSGRForeground(stream.Styled, semanticFG))
-			finalSemantic := normalizeInlineStyleText(textWithSGRForeground(final.Styled, semanticFG))
-			if streamSemantic != finalSemantic {
-				t.Fatalf("stream/final semantic foreground mismatch\nstream=%q\nfinal=%q\nstream styled=%q\nfinal styled=%q", streamSemantic, finalSemantic, stream.Styled, final.Styled)
-			}
-			if !strings.Contains(streamSemantic, "RunCommand") || !strings.Contains(finalSemantic, "pytest") {
-				t.Fatalf("semantic foreground should cover blockquote body\nstream=%q\nfinal=%q", streamSemantic, finalSemantic)
-			}
-			if tt.role == tuikit.LineStyleAssistant {
-				for _, row := range []RenderedRow{stream, final} {
-					reasoningText := normalizeInlineStyleText(textWithSGRForeground(row.Styled, sgrForegroundCode(t, theme.ReasoningFg)))
-					if strings.Contains(reasoningText, "RunCommand") || strings.Contains(reasoningText, "pytest") {
-						t.Fatalf("assistant blockquote body should not use reasoning foreground; reasoning text=%q styled=%q", reasoningText, row.Styled)
-					}
-				}
-			}
-		})
+	final := RenderTextWithContext(ctx, TextRenderRequest{
+		Kind:           TextAssistant,
+		Mode:           RenderFinal,
+		MarkdownPolicy: MarkdownFull,
+		Raw:            raw,
+		Prefix:         "· ",
+		BlockID:        "blockquote-final",
+		LineStyle:      tuikit.LineStyleAssistant,
+	}).Rows
+	if got := strings.TrimRight(joinRenderedPlain(final), " "); got != "· "+body {
+		t.Fatalf("final blockquote = %q, want Glamour rail %q", got, "· "+body)
 	}
 }
 
@@ -809,7 +577,7 @@ func TestNarrativeStyleConfigPinsSemanticBodyColors(t *testing.T) {
 	}
 }
 
-func TestStreamingNarrativeTailHidesFenceDelimiterAndAvoidsRedBackground(t *testing.T) {
+func TestStreamingNarrativeTailShowsRawFenceAndAvoidsRedBackground(t *testing.T) {
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	tests := []struct {
 		name string
@@ -836,8 +604,8 @@ func TestStreamingNarrativeTailHidesFenceDelimiterAndAvoidsRedBackground(t *test
 				t.Fatal("expected streaming rows")
 			}
 			plain := joinRenderedPlain(rows)
-			if strings.Contains(plain, "```") {
-				t.Fatalf("streaming code fence delimiter should not be displayed in tail rows:\n%s", plain)
+			if !strings.Contains(plain, "```go") {
+				t.Fatalf("streaming code fence delimiter should remain visible in raw tail rows:\n%s", plain)
 			}
 			styled := joinRenderedStyled(rows)
 			if containsForbiddenRedBackground(styled) {
@@ -1053,7 +821,7 @@ func assertRenderedLineSlicesEqualRows(t *testing.T, styledLines []string, plain
 	}
 }
 
-func TestMainACPTurnActiveMarkdownStreamUsesTailRenderer(t *testing.T) {
+func TestMainACPTurnActiveMarkdownStreamUsesRawTail(t *testing.T) {
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	block := NewMainACPTurnBlock("session-1")
 	block.Events = append(block.Events, SubagentEvent{
@@ -1068,8 +836,8 @@ func TestMainACPTurnActiveMarkdownStreamUsesTailRenderer(t *testing.T) {
 
 	rows := block.Render(ctx)
 	plain := joinRenderedPlain(rows)
-	if strings.Contains(plain, "```") {
-		t.Fatalf("Main ACP active stream should hide code fence delimiter:\n%s", plain)
+	if !strings.Contains(plain, "```go") {
+		t.Fatalf("Main ACP active stream should show raw code fence delimiter:\n%s", plain)
 	}
 	styled := joinRenderedStyled(rows)
 	if containsForbiddenRedBackground(styled) {

@@ -15,9 +15,12 @@ type ApprovalRecoveryGate struct {
 	startOnce sync.Once
 	done      chan struct{}
 	store     ApprovalRecoveryStore
+	workers   sync.WaitGroup
 
-	mu  sync.RWMutex
-	err error
+	mu     sync.RWMutex
+	err    error
+	cancel context.CancelFunc
+	closed bool
 }
 
 // NewApprovalRecoveryGate constructs a lazy recovery gate. Explicit Start is
@@ -37,14 +40,27 @@ func (g *ApprovalRecoveryGate) Start(ctx context.Context) {
 		ctx = context.Background()
 	}
 	g.startOnce.Do(func() {
+		g.mu.Lock()
+		if g.closed {
+			g.err = context.Canceled
+			g.mu.Unlock()
+			close(g.done)
+			return
+		}
+		workerCtx, cancel := context.WithCancel(ctx)
+		g.cancel = cancel
+		g.workers.Add(1)
+		g.mu.Unlock()
 		go func() {
-			result, err := sweepAbandonedApprovals(ctx, g.store)
+			defer g.workers.Done()
+			defer cancel()
+			result, err := sweepAbandonedApprovals(workerCtx, g.store)
 			g.mu.Lock()
 			g.err = err
 			g.mu.Unlock()
 			close(g.done)
 			if err == nil && !result.retryAt.IsZero() {
-				g.retryDeferred(ctx, result.retryAt)
+				g.retryDeferred(workerCtx, result.retryAt)
 			}
 		}()
 	})
@@ -67,6 +83,9 @@ func (g *ApprovalRecoveryGate) retryDeferred(ctx context.Context, retryAt time.T
 		}
 		result, err := sweepAbandonedApprovals(ctx, g.store)
 		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			// The initial gate already completed successfully. Keep deferred
 			// cleanup retryable without retroactively wedging unrelated Turns.
 			retryAt = time.Now().Add(time.Second)
@@ -74,6 +93,23 @@ func (g *ApprovalRecoveryGate) retryDeferred(ctx context.Context, retryAt time.T
 		}
 		retryAt = result.retryAt
 	}
+}
+
+// Close cancels the initial sweep or deferred retries and waits until they can
+// no longer access the recovery store. The Host must call it before releasing
+// the Store directory or other workspace resources.
+func (g *ApprovalRecoveryGate) Close() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.closed = true
+	cancel := g.cancel
+	g.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	g.workers.Wait()
 }
 
 // Wait blocks until recovery completes or ctx is canceled.

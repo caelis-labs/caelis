@@ -13,26 +13,27 @@ var (
 
 func LinkifyText(text string, style lipgloss.Style) string {
 	text = stripBrokenOSC8(text)
+	const osc8Prefix = "\x1b]8;"
 	var out strings.Builder
 	for text != "" {
-		start := strings.Index(text, "\x1b]8;;")
+		start := strings.Index(text, osc8Prefix)
 		if start < 0 {
 			out.WriteString(linkifyPlainHTTP(text, style))
 			break
 		}
 		out.WriteString(linkifyPlainHTTP(text[:start], style))
-		openEnd, openTermLen := oscSequenceEnd(text, start+len("\x1b]8;;"))
+		openEnd, openTermLen := oscSequenceEnd(text, start+len(osc8Prefix))
 		if openEnd < 0 {
 			out.WriteString(text[start:])
 			break
 		}
-		closeRelative := strings.Index(text[openEnd+openTermLen:], "\x1b]8;;")
+		closeRelative := strings.Index(text[openEnd+openTermLen:], osc8Prefix)
 		if closeRelative < 0 {
 			out.WriteString(text[start:])
 			break
 		}
 		closeStart := openEnd + openTermLen + closeRelative
-		closeEnd, closeTermLen := oscSequenceEnd(text, closeStart+len("\x1b]8;;"))
+		closeEnd, closeTermLen := oscSequenceEnd(text, closeStart+len(osc8Prefix))
 		if closeEnd < 0 {
 			out.WriteString(text[start:])
 			break

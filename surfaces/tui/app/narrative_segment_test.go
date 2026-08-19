@@ -48,7 +48,7 @@ func TestNarrativePresentationSealsAtToolAndTurnBoundaries(t *testing.T) {
 	}
 	for _, row := range toolBlock.Render(ctx) {
 		if row.activeTail {
-			t.Fatalf("tool boundary retained lightweight row: %#v", row)
+			t.Fatalf("tool boundary retained an active raw-tail row: %#v", row)
 		}
 	}
 
@@ -61,7 +61,7 @@ func TestNarrativePresentationSealsAtToolAndTurnBoundaries(t *testing.T) {
 	}
 	for _, row := range turnBlock.Render(ctx) {
 		if row.activeTail {
-			t.Fatalf("terminal boundary retained lightweight row: %#v", row)
+			t.Fatalf("terminal boundary retained an active raw-tail row: %#v", row)
 		}
 	}
 
@@ -69,7 +69,7 @@ func TestNarrativePresentationSealsAtToolAndTurnBoundaries(t *testing.T) {
 	finalOnlyBlock.ReplaceFinalStreamEvent(SEAssistant, "先确认未提交改动的范围", source)
 	for _, row := range finalOnlyBlock.Render(ctx) {
 		if row.activeTail {
-			t.Fatalf("final-only narrative retained lightweight row: %#v", row)
+			t.Fatalf("final-only narrative retained an active raw-tail row: %#v", row)
 		}
 	}
 }

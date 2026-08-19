@@ -273,6 +273,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleSubagentRosterRefreshTick(typed)
 
 	case tea.WindowSizeMsg:
+		widthChanged := typed.Width != m.width
+		heightChanged := typed.Height != m.height
+		if widthChanged {
+			// Viewport selections are stored as rendered row/display-column
+			// coordinates. A width change can reflow both the Glamour prefix and raw
+			// streaming tail, so discard those coordinates before rebuilding the
+			// screen instead of applying them to different visible text.
+			m.clearSelection()
+			// Composer selections use logical line/column coordinates, but a width
+			// change can rewrap those lines while a drag is still in progress.
+			m.clearInputSelection()
+		}
+		if widthChanged || heightChanged {
+			// Fixed rows and the subagent overlay use screen-relative geometry, so
+			// either dimension can move their selected cells.
+			m.clearFixedSelection()
+			m.clearSubagentOutputSelection()
+		}
 		m.clearCompletionMouseState()
 		m.subagentRosterPressed = false
 		if m.subagentOverlay != nil {

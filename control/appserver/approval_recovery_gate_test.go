@@ -17,6 +17,74 @@ type blockingApprovalRecoveryStore struct {
 	err     error
 }
 
+type cancelAwareApprovalRecoveryStore struct {
+	started chan struct{}
+}
+
+type deferredApprovalRecoveryStore struct {
+	retryAt     time.Time
+	settleCalls int
+}
+
+func (s *cancelAwareApprovalRecoveryStore) ListSessions(ctx context.Context, _ session.ListSessionsRequest) (session.SessionList, error) {
+	close(s.started)
+	<-ctx.Done()
+	return session.SessionList{}, ctx.Err()
+}
+
+func (*cancelAwareApprovalRecoveryStore) EventsPage(context.Context, session.EventPageRequest) (session.EventPage, error) {
+	return session.EventPage{}, nil
+}
+
+func (*cancelAwareApprovalRecoveryStore) Session(context.Context, session.SessionRef) (session.Session, error) {
+	return session.Session{}, nil
+}
+
+func (*cancelAwareApprovalRecoveryStore) SettlePendingApproval(context.Context, session.SettlePendingApprovalRequest) (session.SettlePendingApprovalResult, error) {
+	return session.SettlePendingApprovalResult{}, nil
+}
+
+func (*deferredApprovalRecoveryStore) ListSessions(context.Context, session.ListSessionsRequest) (session.SessionList, error) {
+	return session.SessionList{}, nil
+}
+
+func (*deferredApprovalRecoveryStore) EventsPage(context.Context, session.EventPageRequest) (session.EventPage, error) {
+	return session.EventPage{}, nil
+}
+
+func (*deferredApprovalRecoveryStore) Session(context.Context, session.SessionRef) (session.Session, error) {
+	return session.Session{}, nil
+}
+
+func (*deferredApprovalRecoveryStore) PendingApprovals(context.Context) ([]session.PendingApproval, error) {
+	return []session.PendingApproval{{
+		SessionRef: session.SessionRef{SessionID: "deferred-close-session"},
+		Revision:   1,
+		Request: &session.Event{
+			ID:                "deferred-close-event",
+			Seq:               1,
+			SessionID:         "deferred-close-session",
+			Type:              session.EventTypeCustom,
+			ApprovalRequestID: "deferred-close-approval",
+			Protocol: &session.EventProtocol{
+				Method: session.ProtocolMethodRequestPermission,
+				Permission: &session.ProtocolApproval{
+					ToolCall: session.ProtocolToolCall{ID: "deferred-close-call", Name: "Write"},
+				},
+			},
+		},
+	}}, nil
+}
+
+func (s *deferredApprovalRecoveryStore) SettlePendingApproval(context.Context, session.SettlePendingApprovalRequest) (session.SettlePendingApprovalResult, error) {
+	s.settleCalls++
+	return session.SettlePendingApprovalResult{}, session.ErrLeaseConflict
+}
+
+func (s *deferredApprovalRecoveryStore) SessionLease(_ context.Context, ref session.SessionRef) (session.SessionLease, error) {
+	return session.SessionLease{SessionRef: ref, LeaseID: "foreign-runtime", ExpiresAt: s.retryAt}, nil
+}
+
 type approvalRecoveryClock struct {
 	mu  sync.Mutex
 	now time.Time
@@ -58,6 +126,7 @@ func (*blockingApprovalRecoveryStore) SettlePendingApproval(
 func TestApprovalRecoveryGateBlocksTurnsWithoutBlockingStartup(t *testing.T) {
 	store := &blockingApprovalRecoveryStore{started: make(chan struct{}), release: make(chan struct{})}
 	gate := NewApprovalRecoveryGate(store)
+	t.Cleanup(gate.Close)
 	gate.Start(context.Background())
 	select {
 	case <-store.started:
@@ -93,6 +162,7 @@ func TestApprovalRecoveryGateRetainsSweepFailure(t *testing.T) {
 	want := errors.New("recovery failed")
 	store := &blockingApprovalRecoveryStore{started: make(chan struct{}), release: make(chan struct{}), err: want}
 	gate := NewApprovalRecoveryGate(store)
+	t.Cleanup(gate.Close)
 	gate.Start(context.Background())
 	<-store.started
 	close(store.release)
@@ -101,6 +171,53 @@ func TestApprovalRecoveryGateRetainsSweepFailure(t *testing.T) {
 	}
 	if err := gate.Wait(context.Background()); !errors.Is(err, want) {
 		t.Fatalf("second Wait() error = %v, want retained %v", err, want)
+	}
+}
+
+func TestApprovalRecoveryGateCloseWaitsForStoreAccessToStop(t *testing.T) {
+	store := &cancelAwareApprovalRecoveryStore{started: make(chan struct{})}
+	gate := NewApprovalRecoveryGate(store)
+	t.Cleanup(gate.Close)
+	gate.Start(context.Background())
+	select {
+	case <-store.started:
+	case <-time.After(time.Second):
+		t.Fatal("approval recovery did not start")
+	}
+
+	gate.Close()
+	if err := gate.Wait(context.Background()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Wait() after Close() error = %v, want context canceled", err)
+	}
+}
+
+func TestApprovalRecoveryGateCloseInterruptsDeferredRetryWithoutOverwritingSuccess(t *testing.T) {
+	store := &deferredApprovalRecoveryStore{retryAt: time.Now().Add(time.Hour)}
+	gate := NewApprovalRecoveryGate(store)
+	t.Cleanup(gate.Close)
+	gate.Start(context.Background())
+	if err := gate.Wait(context.Background()); err != nil {
+		t.Fatalf("initial Wait() error = %v", err)
+	}
+	if store.settleCalls != 1 {
+		t.Fatalf("initial settlement attempts = %d, want 1", store.settleCalls)
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		gate.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close() did not interrupt deferred retry timer")
+	}
+	if err := gate.Wait(context.Background()); err != nil {
+		t.Fatalf("Wait() after deferred retry cancellation = %v, want retained success", err)
+	}
+	if store.settleCalls != 1 {
+		t.Fatalf("settlement attempts after Close() = %d, want 1", store.settleCalls)
 	}
 }
 
@@ -142,6 +259,7 @@ func TestApprovalRecoveryGateDefersForeignLeaseAndSettlesAfterExpiry(t *testing.
 	}
 
 	gate := NewApprovalRecoveryGate(service)
+	t.Cleanup(gate.Close)
 	gate.Start(ctx)
 	if err := gate.Wait(ctx); err != nil {
 		t.Fatal(err)

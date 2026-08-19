@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -11,6 +12,7 @@ type activeNarrativeBuffer struct {
 	stablePrefixRaw string
 	tailRaw         string
 	version         uint64
+	streamID        uint64
 
 	cachedVersion    uint64
 	cachedWidth      int
@@ -19,6 +21,8 @@ type activeNarrativeBuffer struct {
 	cachedRoleStyle  tuikit.LineStyle
 	cachedRows       []RenderedRow
 }
+
+var activeNarrativeStreamID atomic.Uint64
 
 func (b *activeNarrativeBuffer) SetText(text string) {
 	if b == nil {
@@ -50,9 +54,9 @@ func (b *activeNarrativeBuffer) Append(text string) {
 	b.version++
 }
 
-// Seal promotes the complete lightweight tail into the stable Glamour prefix.
-// It is a presentation boundary only; canonical narrative identity and text
-// remain owned by the surrounding SubagentEvent.
+// Seal promotes the complete raw tail into the stable Glamour prefix. It is a
+// presentation boundary only; canonical narrative identity and text remain
+// owned by the surrounding SubagentEvent.
 func (b *activeNarrativeBuffer) Seal() bool {
 	if b == nil || b.tailRaw == "" {
 		return false
@@ -87,6 +91,16 @@ func (b *activeNarrativeBuffer) CacheKey() string {
 		strconv.FormatUint(b.version, 10) + ":" +
 		strconv.Itoa(len(b.stablePrefixRaw)) + ":" +
 		strconv.Itoa(len(b.tailRaw))
+}
+
+func (b *activeNarrativeBuffer) streamKey() string {
+	if b == nil {
+		return ""
+	}
+	if b.streamID == 0 {
+		b.streamID = activeNarrativeStreamID.Add(1)
+	}
+	return "active-narrative:" + strconv.FormatUint(b.streamID, 10)
 }
 
 func (b *activeNarrativeBuffer) RenderRows(blockID, rolePrefix string, roleStyle tuikit.LineStyle, ctx BlockRenderContext) []RenderedRow {
@@ -127,18 +141,24 @@ func (b *activeNarrativeBuffer) renderRows(blockID, rolePrefix string, roleStyle
 	raw := b.Text()
 	kind := TextAssistant
 	policy := MarkdownStableTail
+	mode := RenderStream
+	if !b.HasTail() {
+		mode = RenderFinal
+		policy = MarkdownFull
+	}
 	if roleStyle == tuikit.LineStyleReasoning {
 		kind = TextReasoning
 		policy = MarkdownNone
 	}
 	rows := RenderTextWithContext(ctx, TextRenderRequest{
 		Kind:            kind,
-		Mode:            RenderStream,
+		Mode:            mode,
 		MarkdownPolicy:  policy,
 		Raw:             raw,
 		Prefix:          rolePrefix,
 		Width:           width,
 		BlockID:         blockID,
+		StreamKey:       b.streamKey(),
 		LineStyle:       roleStyle,
 		StablePrefixRaw: b.stablePrefixRaw,
 		TailRaw:         b.tailRaw,

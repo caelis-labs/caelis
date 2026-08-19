@@ -55,6 +55,7 @@ func TestLinkifyText_PreservesExistingOSC8WithoutNesting(t *testing.T) {
 	for _, input := range []string{
 		"\x1b]8;;https://example.com/docs\aExample docs\x1b]8;;\a",
 		"\x1b]8;;https://example.com/docs\x1b\\Example docs\x1b]8;;\x1b\\",
+		"\x1b]8;id=123;https://example.com/docs\aExample docs\x1b]8;;\a",
 	} {
 		got := LinkifyText(input, lipgloss.NewStyle())
 		if got != input {

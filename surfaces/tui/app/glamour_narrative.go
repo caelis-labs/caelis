@@ -5,12 +5,10 @@ import (
 	"image/color"
 	"strings"
 	"sync"
-	"unicode"
 
+	"charm.land/glamour/v2"
+	gansi "charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/glamour"
-	gansi "github.com/charmbracelet/glamour/ansi"
-	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -19,14 +17,17 @@ import (
 // Glamour-based narrative rendering
 // ---------------------------------------------------------------------------
 
+const narrativeBlockquoteRail = "│ "
+
 // glamourRenderNarrative renders markdown text through Glamour for styled
 // terminal output. Returns the rendered multi-line string. On any error
-// the caller should fall back to inline rendering.
+// the caller should fall back to the last compatible rendered prefix plus raw
+// source text for the remaining suffix.
 func glamourRenderNarrative(raw string, width int, theme tuikit.Theme, roleStyle tuikit.LineStyle) string {
-	if raw = strings.TrimSpace(raw); raw == "" {
+	raw = normalizeTextRenderRaw(raw)
+	if strings.TrimSpace(raw) == "" {
 		return ""
 	}
-	raw = normalizeGlamourMarkdown(raw)
 	if width <= 0 {
 		width = 80
 	}
@@ -35,7 +36,7 @@ func glamourRenderNarrative(raw string, width int, theme tuikit.Theme, roleStyle
 		return ""
 	}
 	// Glamour appends trailing newlines; trim them.
-	return strings.TrimRight(tuikit.LinkifyText(rendered, theme.MarkdownLinkStyle()), "\n")
+	return strings.TrimRight(rendered, "\n")
 }
 
 // glamourNarrativeRows renders a finalized narrative block into RenderedRows
@@ -58,10 +59,10 @@ func glamourNarrativeRowsWithWrapWidth(blockID, raw, rolePrefix string, roleStyl
 	styledLines := strings.Split(rendered, "\n")
 
 	// Trim leading/trailing blank lines that glamour may add.
-	for len(styledLines) > 0 && strings.TrimSpace(xansi.Strip(styledLines[0])) == "" {
+	for len(styledLines) > 0 && strings.TrimSpace(tuikit.SanitizeLogText(styledLines[0])) == "" {
 		styledLines = styledLines[1:]
 	}
-	for len(styledLines) > 0 && strings.TrimSpace(xansi.Strip(styledLines[len(styledLines)-1])) == "" {
+	for len(styledLines) > 0 && strings.TrimSpace(tuikit.SanitizeLogText(styledLines[len(styledLines)-1])) == "" {
 		styledLines = styledLines[:len(styledLines)-1]
 	}
 	if len(styledLines) == 0 {
@@ -77,7 +78,10 @@ func glamourNarrativeRowsWithWrapWidth(blockID, raw, rolePrefix string, roleStyl
 	firstOutputLine := true
 	for _, sl := range styledLines {
 		for _, segment := range wrapGlamourNarrativeBodyLine(sl, wrapWidth) {
-			plain := xansi.Strip(segment)
+			// Glamour pads several block styles to the configured terminal width.
+			// Keep that visual padding in Styled, but exclude it from the copy and
+			// mouse-hit plane just like the other styled-row constructors do.
+			plain := strings.TrimRight(tuikit.SanitizeLogText(segment), " ")
 			styled := segment
 			if firstOutputLine && rolePrefix != "" {
 				plain = rolePrefix + plain
@@ -100,7 +104,7 @@ func wrapGlamourNarrativeBodyLine(styled string, width int) []string {
 	if width <= 0 || styled == "" {
 		return []string{styled}
 	}
-	if graphemeWidth(xansi.Strip(styled)) <= width {
+	if graphemeWidth(tuikit.SanitizeLogText(styled)) <= width {
 		return []string{styled}
 	}
 	segments := strings.Split(hardWrapDisplayLine(styled, width), "\n")
@@ -141,6 +145,7 @@ type streamingNarrativeCacheEntry struct {
 var glamourStreamingCache struct {
 	sync.Mutex
 	entries map[string]streamingNarrativeCacheEntry
+	order   []string
 }
 
 // clearGlamourCache invalidates the cached glamour renderer so that the next
@@ -153,6 +158,7 @@ func clearGlamourCache() {
 	glamourCache.Unlock()
 	glamourStreamingCache.Lock()
 	glamourStreamingCache.entries = nil
+	glamourStreamingCache.order = nil
 	glamourStreamingCache.Unlock()
 }
 
@@ -451,261 +457,4 @@ func themeColorCacheKey(c color.Color) string {
 		return *ansiColor
 	}
 	return ""
-}
-
-func normalizeGlamourMarkdown(raw string) string {
-	raw = strings.ReplaceAll(raw, "\r\n", "\n")
-	raw = normalizeTerminalMarkdown(raw)
-	raw = normalizeIndentedCodeFences(raw)
-	return escapeMultilineInlineCodeSpans(raw)
-}
-
-// Glamour/CommonMark allows code spans to cross newlines. The streaming tail
-// renderer intentionally treats inline code as line-local, so keep the stable
-// Glamour prefix on the same visual contract to avoid large transient
-// background spans while text is still arriving.
-func escapeMultilineInlineCodeSpans(raw string) string {
-	if raw == "" || !strings.Contains(raw, "`") {
-		return raw
-	}
-
-	var out strings.Builder
-	var segment strings.Builder
-	inFence := false
-	fencePrefix := ""
-	flushSegment := func() {
-		if segment.Len() == 0 {
-			return
-		}
-		out.WriteString(escapeMultilineInlineCodeSpansInSegment(segment.String()))
-		segment.Reset()
-	}
-
-	for _, line := range strings.SplitAfter(raw, "\n") {
-		lineText := strings.TrimSuffix(line, "\n")
-		trimmed := strings.TrimSpace(lineText)
-		if isFenceDelimiter(trimmed) {
-			if !inFence {
-				flushSegment()
-				inFence = true
-				fencePrefix = extractFencePrefix(trimmed)
-				out.WriteString(line)
-				continue
-			}
-			if isClosingFence(trimmed, fencePrefix) {
-				out.WriteString(line)
-				inFence = false
-				fencePrefix = ""
-				continue
-			}
-		}
-		if inFence {
-			out.WriteString(line)
-			continue
-		}
-		segment.WriteString(line)
-	}
-	flushSegment()
-	return out.String()
-}
-
-type inlineDelimiterRange struct {
-	start int
-	end   int
-}
-
-func escapeMultilineInlineCodeSpansInSegment(segment string) string {
-	if segment == "" || !strings.Contains(segment, "`") || !strings.Contains(segment, "\n") {
-		return segment
-	}
-	var ranges []inlineDelimiterRange
-	for i := 0; i < len(segment); {
-		if segment[i] != '`' || isEscapedInlineBacktick(segment, i) {
-			i++
-			continue
-		}
-		run := countInlineMarkerRun(segment, i, '`')
-		closing := findInlineCodeSpanClosingDelimiter(segment, i+run, run)
-		if closing < 0 {
-			i += run
-			continue
-		}
-		if strings.Contains(segment[i+run:closing], "\n") {
-			ranges = append(ranges,
-				inlineDelimiterRange{start: i, end: i + run},
-				inlineDelimiterRange{start: closing, end: closing + run},
-			)
-		}
-		i = closing + run
-	}
-	if len(ranges) == 0 {
-		return segment
-	}
-	var out strings.Builder
-	last := 0
-	for _, r := range ranges {
-		out.WriteString(segment[last:r.start])
-		for i := r.start; i < r.end; i++ {
-			out.WriteByte('\\')
-			out.WriteByte(segment[i])
-		}
-		last = r.end
-	}
-	out.WriteString(segment[last:])
-	return out.String()
-}
-
-func findInlineCodeSpanClosingDelimiter(text string, from int, run int) int {
-	for i := from; i < len(text); {
-		if text[i] != '`' {
-			i++
-			continue
-		}
-		found := countInlineMarkerRun(text, i, '`')
-		if found == run {
-			return i
-		}
-		i += found
-	}
-	return -1
-}
-
-func isEscapedInlineBacktick(text string, idx int) bool {
-	backslashes := 0
-	for i := idx - 1; i >= 0 && text[i] == '\\'; i-- {
-		backslashes++
-	}
-	return backslashes%2 == 1
-}
-
-func normalizeIndentedCodeFences(raw string) string {
-	if raw == "" {
-		return raw
-	}
-	lines := strings.Split(raw, "\n")
-	for i := 0; i < len(lines); i++ {
-		indent, fence, ok := parseFenceLine(lines[i])
-		if !ok || indent < 4 {
-			continue
-		}
-		end := findClosingFenceLine(lines, i+1, fence)
-		if end < 0 {
-			continue
-		}
-		minIndent := indent
-		for j := i; j <= end; j++ {
-			if strings.TrimSpace(lines[j]) == "" {
-				continue
-			}
-			if lead := leadingIndentWidth(lines[j]); lead < minIndent {
-				minIndent = lead
-			}
-		}
-		if minIndent <= 0 {
-			continue
-		}
-		for j := i; j <= end; j++ {
-			lines[j] = trimLeadingIndent(lines[j], minIndent)
-		}
-		i = end
-	}
-	return strings.Join(lines, "\n")
-}
-
-func parseFenceLine(line string) (indent int, fence string, ok bool) {
-	trimmed := strings.TrimLeftFunc(line, unicode.IsSpace)
-	indent = len(line) - len(trimmed)
-	switch {
-	case strings.HasPrefix(trimmed, "```"):
-		return indent, "```", true
-	case strings.HasPrefix(trimmed, "~~~"):
-		return indent, "~~~", true
-	default:
-		return 0, "", false
-	}
-}
-
-func findClosingFenceLine(lines []string, start int, fence string) int {
-	for i := start; i < len(lines); i++ {
-		trimmed := strings.TrimLeftFunc(lines[i], unicode.IsSpace)
-		if strings.HasPrefix(trimmed, fence) {
-			return i
-		}
-	}
-	return -1
-}
-
-func leadingIndentWidth(line string) int {
-	count := 0
-	for _, r := range line {
-		if r != ' ' && r != '\t' {
-			break
-		}
-		count++
-	}
-	return count
-}
-
-func trimLeadingIndent(line string, width int) string {
-	if width <= 0 || line == "" {
-		return line
-	}
-	i := 0
-	for i < len(line) && width > 0 {
-		if line[i] != ' ' && line[i] != '\t' {
-			break
-		}
-		i++
-		width--
-	}
-	return line[i:]
-}
-
-// closeUnclosedCodeFences appends a closing fence marker when the input
-// contains an odd number of fence delimiters (i.e. a code block that hasn't
-// been closed yet). This prevents glamour from mis-rendering trailing content.
-func closeUnclosedCodeFences(raw string) string {
-	lines := strings.Split(raw, "\n")
-	inFence := false
-	fenceChar := byte(0)
-	fenceLen := 0
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if len(trimmed) < 3 {
-			continue
-		}
-		ch := trimmed[0]
-		if ch != '`' && ch != '~' {
-			continue
-		}
-		count := 0
-		for j := 0; j < len(trimmed) && trimmed[j] == ch; j++ {
-			count++
-		}
-		if count < 3 {
-			continue
-		}
-		if !inFence {
-			// Opening fence (may have info string after the markers).
-			inFence = true
-			fenceChar = ch
-			fenceLen = count
-			continue
-		}
-		// Potential closing fence: same char, at least as many markers, no
-		// non-whitespace after the markers.
-		if ch != fenceChar || count < fenceLen {
-			continue
-		}
-		rest := strings.TrimSpace(trimmed[count:])
-		if rest == "" {
-			inFence = false
-		}
-	}
-
-	if inFence {
-		raw += "\n" + strings.Repeat(string(fenceChar), fenceLen)
-	}
-	return raw
 }
