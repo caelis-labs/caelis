@@ -32,6 +32,12 @@ type SessionModelAdapter interface {
 	SetSessionModel(context.Context, SetSessionModelRequest) (SetSessionModelResponse, error)
 }
 
+// SessionSteeringAdapter accepts one steering request without owning a normal
+// session/prompt lifecycle.
+type SessionSteeringAdapter interface {
+	SteerSession(context.Context, SessionSteeringRequest) (SessionSteeringResponse, error)
+}
+
 // SessionMessageAdapter accepts one Agent-authored Context message.
 type SessionMessageAdapter interface {
 	SessionMessage(context.Context, SessionMessageRequest, PromptCallbacks) (SessionMessageResponse, error)
@@ -64,6 +70,11 @@ func AsSessionConfigAdapter(agent Agent) (SessionConfigAdapter, bool) {
 
 func AsSessionModelAdapter(agent Agent) (SessionModelAdapter, bool) {
 	adapter, ok := agent.(SessionModelAdapter)
+	return adapter, ok
+}
+
+func AsSessionSteeringAdapter(agent Agent) (SessionSteeringAdapter, bool) {
+	adapter, ok := agent.(SessionSteeringAdapter)
 	return adapter, ok
 }
 

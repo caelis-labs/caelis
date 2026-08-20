@@ -17,6 +17,10 @@ const (
 	MethodSessionSetModel  = "session/set_model"
 	MethodSessionPrompt    = "session/prompt"
 	MethodSessionCancel    = "session/cancel"
+	// MethodSessionSteering is the interoperable ACP extension for steering a
+	// running Session. Support is advertised through the top-level initialize
+	// response _meta.steering entry.
+	MethodSessionSteering = "_session/steering"
 	// MethodSessionMessage is the Caelis ACP v1 extension for bidirectional
 	// mid-turn Agent messages. Support is negotiated through _meta.
 	MethodSessionMessage = "_caelis.dev/session/message"
@@ -60,10 +64,11 @@ type PromptCapabilities struct {
 }
 
 type InitializeResponse struct {
-	ProtocolVersion   int               `json:"protocolVersion"`
-	AgentCapabilities AgentCapabilities `json:"agentCapabilities"`
-	AgentInfo         *Implementation   `json:"agentInfo,omitempty"`
-	AuthMethods       []json.RawMessage `json:"authMethods,omitempty"`
+	ProtocolVersion   int                        `json:"protocolVersion"`
+	AgentCapabilities AgentCapabilities          `json:"agentCapabilities"`
+	AgentInfo         *Implementation            `json:"agentInfo,omitempty"`
+	AuthMethods       []json.RawMessage          `json:"authMethods,omitempty"`
+	Meta              map[string]json.RawMessage `json:"_meta,omitempty"`
 }
 
 type AuthenticateRequest struct {
@@ -199,6 +204,34 @@ type PromptRequest struct {
 
 type PromptResponse struct {
 	StopReason string `json:"stopReason"`
+}
+
+// SessionSteeringOutcome is the Agent-selected disposition of one steering
+// request. Unknown values are retained so newer peer outcomes can cross the
+// wire without requiring a schema update.
+type SessionSteeringOutcome string
+
+const (
+	SessionSteeringInjected       SessionSteeringOutcome = "injected"
+	SessionSteeringStartedNewTurn SessionSteeringOutcome = "startedNewTurn"
+	SessionSteeringPromptRequired SessionSteeringOutcome = "promptRequired"
+	SessionSteeringFailed         SessionSteeringOutcome = "failed"
+)
+
+// SessionSteeringRequest carries one ACP prompt to a Session without assigning
+// a prompt or Turn lifecycle to the request itself.
+type SessionSteeringRequest struct {
+	SessionID string                     `json:"sessionId"`
+	Prompt    []json.RawMessage          `json:"prompt"`
+	Meta      map[string]json.RawMessage `json:"_meta,omitempty"`
+}
+
+// SessionSteeringResponse reports how the Agent accepted a steering request.
+// Reason is optional extension detail, including noRunningTurn for the
+// promptRequired outcome.
+type SessionSteeringResponse struct {
+	Outcome SessionSteeringOutcome `json:"outcome"`
+	Reason  string                 `json:"reason,omitempty"`
 }
 
 type SessionMessageRequest struct {

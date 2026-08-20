@@ -164,6 +164,20 @@ func (c *serverConn) handleRequest(ctx context.Context, msg jsonrpc.Message) (an
 		}
 		resp, err := c.agent.Prompt(ctx, req, c.promptCallbacks())
 		return responseOrError(resp, err)
+	case MethodSessionSteering:
+		var req SessionSteeringRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		if err := validateSessionSteeringRequest(req); err != nil {
+			return nil, invalidParams(err)
+		}
+		handler, ok := AsSessionSteeringAdapter(c.agent)
+		if !ok {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+		}
+		resp, err := handler.SteerSession(ctx, req)
+		return responseOrError(resp, err)
 	case MethodSessionMessage:
 		var req SessionMessageRequest
 		if err := decodeParams(msg.Params, &req); err != nil {
@@ -414,6 +428,16 @@ func decodeParams(raw json.RawMessage, target any) error {
 		return nil
 	}
 	return json.Unmarshal(raw, target)
+}
+
+func validateSessionSteeringRequest(req SessionSteeringRequest) error {
+	if strings.TrimSpace(req.SessionID) == "" {
+		return fmt.Errorf("sessionId is required")
+	}
+	if len(req.Prompt) == 0 {
+		return fmt.Errorf("prompt must contain at least one content block")
+	}
+	return nil
 }
 
 func responseOrError(result any, err error) (any, *jsonrpc.RPCError) {

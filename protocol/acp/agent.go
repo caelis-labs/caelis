@@ -23,6 +23,7 @@ const (
 	MethodSessionSetModel  = schema.MethodSessionSetModel
 	MethodSessionPrompt    = schema.MethodSessionPrompt
 	MethodSessionCancel    = schema.MethodSessionCancel
+	MethodSessionSteering  = schema.MethodSessionSteering
 	MethodSessionMessage   = schema.MethodSessionMessage
 
 	StopReasonEndTurn   = schema.StopReasonEndTurn
@@ -107,9 +108,19 @@ type SetSessionConfigOptionRequest = schema.SetSessionConfigOptionRequest
 type SetSessionConfigOptionResponse = schema.SetSessionConfigOptionResponse
 type PromptRequest = schema.PromptRequest
 type PromptResponse = schema.PromptResponse
+type SessionSteeringOutcome = schema.SessionSteeringOutcome
+type SessionSteeringRequest = schema.SessionSteeringRequest
+type SessionSteeringResponse = schema.SessionSteeringResponse
 type CancelNotification = schema.CancelNotification
 type SessionMessageRequest = schema.SessionMessageRequest
 type SessionMessageResponse = schema.SessionMessageResponse
 type AvailableCommandInput = schema.AvailableCommandInput
 type AvailableCommand = schema.AvailableCommand
 type AvailableCommandsUpdate = schema.AvailableCommandsUpdate
+
+const (
+	SessionSteeringInjected       = schema.SessionSteeringInjected
+	SessionSteeringStartedNewTurn = schema.SessionSteeringStartedNewTurn
+	SessionSteeringPromptRequired = schema.SessionSteeringPromptRequired
+	SessionSteeringFailed         = schema.SessionSteeringFailed
+)

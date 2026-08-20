@@ -311,6 +311,9 @@ func TestInitializeAdvertisesClientCapabilitiesFromHandlers(t *testing.T) {
 		if _, ok := req.ClientCapabilities[MethodSessionMessage]; !ok {
 			t.Fatalf("message capability missing: %#v", req.ClientCapabilities)
 		}
+		if _, ok := req.ClientCapabilities[MethodSessionSteering]; ok {
+			t.Fatalf("initialize request unexpectedly advertised Agent steering capability: %#v", req.ClientCapabilities)
+		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for initialize request")
 	}

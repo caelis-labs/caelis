@@ -216,6 +216,37 @@ func (c *Client) PromptParts(ctx context.Context, sessionID string, prompt []jso
 	return resp, err
 }
 
+// Steer sends one text content block through the interoperable ACP steering
+// extension.
+func (c *Client) Steer(ctx context.Context, sessionID string, text string, meta map[string]json.RawMessage) (SessionSteeringResponse, error) {
+	return c.SteerParts(ctx, sessionID, []json.RawMessage{
+		jsonrpc.MustMarshalRaw(TextContent{Type: "text", Text: text}),
+	}, meta)
+}
+
+// SteerParts sends ACP content blocks without assigning a session/prompt
+// lifecycle to this client call.
+func (c *Client) SteerParts(ctx context.Context, sessionID string, prompt []json.RawMessage, meta map[string]json.RawMessage) (SessionSteeringResponse, error) {
+	var resp SessionSteeringResponse
+	err := c.conn.Call(ctx, MethodSessionSteering, SessionSteeringRequest{
+		SessionID: sessionID,
+		Prompt:    append([]json.RawMessage(nil), prompt...),
+		Meta:      cloneRawMessages(meta),
+	}, &resp)
+	return resp, err
+}
+
+func cloneRawMessages(in map[string]json.RawMessage) map[string]json.RawMessage {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(in))
+	for key, value := range in {
+		out[key] = append(json.RawMessage(nil), value...)
+	}
+	return out
+}
+
 func (c *Client) SessionMessage(ctx context.Context, req SessionMessageRequest) (SessionMessageResponse, error) {
 	var resp SessionMessageResponse
 	err := c.conn.Call(ctx, MethodSessionMessage, req, &resp)

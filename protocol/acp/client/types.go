@@ -23,6 +23,7 @@ const (
 	MethodSessionSetModel      = schema.MethodSessionSetModel
 	MethodSessionPrompt        = schema.MethodSessionPrompt
 	MethodSessionCancel        = schema.MethodSessionCancel
+	MethodSessionSteering      = schema.MethodSessionSteering
 	MethodSessionMessage       = schema.MethodSessionMessage
 	MethodSessionUpdate        = schema.MethodSessionUpdate
 	MethodSessionReqPermission = schema.MethodSessionReqPermission
@@ -74,6 +75,9 @@ type SetSessionConfigOptionRequest = schema.SetSessionConfigOptionRequest
 type SetSessionConfigOptionResponse = schema.SetSessionConfigOptionResponse
 type PromptRequest = schema.PromptRequest
 type PromptResponse = schema.PromptResponse
+type SessionSteeringOutcome = schema.SessionSteeringOutcome
+type SessionSteeringRequest = schema.SessionSteeringRequest
+type SessionSteeringResponse = schema.SessionSteeringResponse
 type SessionMessageRequest = schema.SessionMessageRequest
 type SessionMessageResponse = schema.SessionMessageResponse
 type SessionMode = schema.SessionMode
@@ -116,6 +120,13 @@ type ImageContent = schema.ImageContent
 type RawUpdate = schema.RawUpdate
 type AvailableCommand = schema.AvailableCommand
 type AvailableCommandInput = schema.AvailableCommandInput
+
+const (
+	SessionSteeringInjected       = schema.SessionSteeringInjected
+	SessionSteeringStartedNewTurn = schema.SessionSteeringStartedNewTurn
+	SessionSteeringPromptRequired = schema.SessionSteeringPromptRequired
+	SessionSteeringFailed         = schema.SessionSteeringFailed
+)
 
 type CancelResponse struct{}
 
