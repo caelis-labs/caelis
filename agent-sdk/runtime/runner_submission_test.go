@@ -8,7 +8,28 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
+
+func TestRunnerPublicSubmitRejectsRuntimeModelContext(t *testing.T) {
+	t.Parallel()
+
+	runner := newRunner("run-1", func() {})
+	submission := agent.Submission{
+		Kind: runtimeinput.ModelContext, Text: "hidden context",
+		Actor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "participant-1"},
+	}
+	if err := runner.Submit(submission); err == nil {
+		t.Fatal("Runner.Submit(runtime model context) error = nil, want unsupported kind")
+	}
+	if err := runner.SubmitContext(context.Background(), submission); err == nil {
+		t.Fatal("Runner.SubmitContext(runtime model context) error = nil, want unsupported kind")
+	}
+	if drained := runner.drainSubmissions(); len(drained) != 0 {
+		t.Fatalf("public runtime model context reached queue: %#v", drained)
+	}
+}
 
 func TestRunnerSubmissionDispatcherPreservesFIFOAndPerItemResults(t *testing.T) {
 	t.Parallel()

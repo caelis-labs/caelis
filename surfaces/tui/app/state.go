@@ -374,6 +374,7 @@ type Model struct {
 	subagentRosterRefreshScheduled   bool
 	subagentRosterRefreshWake        bool
 	subagentRosterRefreshWakeRetries int
+	subagentRosterRefreshWakeTargets map[string]string
 	subagentRosterRefreshGeneration  uint64
 
 	// Transient log replacement tracking — now uses block IDs.

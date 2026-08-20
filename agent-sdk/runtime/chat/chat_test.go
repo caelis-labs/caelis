@@ -14,6 +14,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -1019,6 +1020,45 @@ func TestChatAgentDrainsPendingUserSubmissionAfterToolResults(t *testing.T) {
 	}
 	if len(userEvents) != 1 || userEvents[0].Text != "focus on the follow-up" {
 		t.Fatalf("emitted user events = %#v, want queued guidance echoed once", userEvents)
+	}
+}
+
+func TestChatAgentDrainsModelContextWithoutClientProjection(t *testing.T) {
+	t.Parallel()
+
+	drained := false
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		DrainSubmissions: func() []agent.Submission {
+			if drained {
+				return nil
+			}
+			drained = true
+			return []agent.Submission{{
+				Kind:  runtimeinput.ModelContext,
+				Text:  "Subagent @reviewer is completed. Use Task read with handle reviewer for its full result.",
+				Actor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "reviewer", Name: "@reviewer"},
+			}}
+		},
+	})
+
+	messages := []model.Message{}
+	var events []*session.Event
+	accepted, err := (&Agent{}).drainPendingSubmissions(ctx, &messages, func(event *session.Event) bool {
+		events = append(events, session.CloneEvent(event))
+		return true
+	})
+	if err != nil {
+		t.Fatalf("drainPendingSubmissions() error = %v", err)
+	}
+	if !accepted || len(messages) != 1 || messages[0].Role != model.RoleUser ||
+		messages[0].TextContent() != "Subagent @reviewer is completed. Use Task read with handle reviewer for its full result." {
+		t.Fatalf("model input = accepted %v, messages %#v", accepted, messages)
+	}
+	if len(events) != 1 || session.EventTypeOf(events[0]) != session.EventTypeContext ||
+		events[0].Visibility != session.VisibilityCanonical || events[0].Protocol != nil ||
+		events[0].Actor.Kind != session.ActorKindParticipant || session.IsClientReplayEvent(events[0]) {
+		t.Fatalf("model-context event = %#v, want canonical model input without client projection", events)
 	}
 }
 

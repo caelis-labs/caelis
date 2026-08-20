@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -1041,6 +1042,7 @@ func TestStreamSubscribeFollowTracksObservedSubagentActivitiesUntilCanceled(t *t
 	task := &subagentTask{
 		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "session-1", TerminalID: "task-1:1"},
 		sessionRef: session.SessionRef{SessionID: "session-1"},
+		anchor:     delegation.Anchor{AgentID: "child-1", SessionID: "child-session-1"},
 		state:      taskapi.StateCompleted,
 		turnSeq:    1,
 		createdAt:  time.Now(),
@@ -1086,17 +1088,29 @@ func TestStreamSubscribeFollowTracksObservedSubagentActivitiesUntilCanceled(t *t
 	entry.Metadata[subagentStreamEventCursorMeta] = first.Cursor.Events
 	entry.Metadata[subagentStreamOutputCursorMeta] = first.Cursor.Output
 	rehydrated := tasks.rehydrateSubagentTask(entry)
-	beginObservedActivityForTest(rehydrated)
 	tasks.mu.Lock()
 	delete(tasks.subagents, task.ref.TaskID)
 	tasks.subagents[rehydrated.ref.TaskID] = rehydrated
 	tasks.mu.Unlock()
 	task = rehydrated
-	tasks.notifyTaskStreamActivity(task.sessionRef.SessionID, task.ref.TaskID)
-	tasks.PublishStream(stream.Frame{
-		Ref: stream.Ref{TaskID: task.ref.TaskID}, Text: "turn-2 output",
-		State: string(delegation.StateRunning), Running: true,
-	})
+	observer := newSubagentActivityObserver(tasks, task.ref.TaskID)
+	if err := observer.ObserveChildActivity(context.Background(), agent.ChildActivityEvent{
+		Target: agent.ChildEndpointRef{
+			ParticipantID: task.anchor.AgentID,
+			SessionID:     task.anchor.SessionID,
+			EndpointKey:   task.ref.TaskID,
+			Role:          session.ParticipantRoleDelegated,
+			Placement:     task.target.Placement,
+		},
+		ActivityID: "activity-2",
+		Cursor:     1,
+		Frame: &stream.Frame{
+			Ref: stream.Ref{TaskID: task.ref.TaskID}, Text: "turn-2 output",
+			State: string(delegation.StateRunning), Running: true,
+		},
+	}); err != nil {
+		t.Fatalf("ObserveChildActivity() error = %v", err)
+	}
 	second := receiveStreamFrame(t, frames)
 	if second.Text != "turn-2 output" || !second.Running || second.Closed {
 		t.Fatalf("second frame = %#v, want live turn-2 output", second)
@@ -2175,6 +2189,90 @@ func TestSubagentCurrentStateRetainsCompletedFinalsBelowByteBudget(t *testing.T)
 		if !slices.Contains(texts, want) {
 			t.Fatalf("current state lost completed Final %q: %q", want, texts)
 		}
+	}
+}
+
+func TestSubagentCompletionRetractsDivergedAssistantSnapshots(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	appendAssistant := func(messageID string, text string) {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: messageID, MessageID: messageID, Type: session.EventTypeAssistant,
+			Visibility: session.VisibilityUIOnly, Text: text,
+			Scope: &session.EventScope{TurnID: subagentTurnID(task.ref.TaskID, task.turnSeq)},
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), MessageID: messageID,
+				Content: session.ProtocolTextContent(text),
+			}},
+		}})
+	}
+
+	task.mu.Lock()
+	appendAssistant("provisional", "TURN")
+	appendAssistant("canonical", "TURN2_A")
+	provisionalCursor := stream.Cursor{Output: task.streamOutputCursor, Events: task.streamEventBase + int64(len(task.streamFrames))}
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "TURN2_A"})
+	task.mu.Unlock()
+
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, provisionalCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.EventsTruncatedBefore <= provisionalCursor.Events {
+		t.Fatalf("completion boundary = %d, want after provisional cursor %d", snapshot.EventsTruncatedBefore, provisionalCursor.Events)
+	}
+	frames := stream.FramesForSnapshot(snapshot)
+	var assistant []string
+	for _, frame := range frames {
+		if frame.Event != nil && session.EventTypeOf(frame.Event) == session.EventTypeAssistant {
+			assistant = append(assistant, session.EventText(frame.Event))
+		}
+	}
+	if !reflect.DeepEqual(assistant, []string{"TURN2_A"}) {
+		t.Fatalf("reconciled assistant = %#v in %#v, want authoritative Final only", assistant, frames)
+	}
+	if len(frames) == 0 || !frames[len(frames)-1].Closed || frames[len(frames)-1].State != string(taskapi.StateCompleted) {
+		t.Fatalf("reconciled frames = %#v, want completed terminal boundary", frames)
+	}
+}
+
+func TestSubagentCompletionKeepsExactAssistantDeltaChain(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	task.mu.Lock()
+	for _, text := range []string{"TURN", "2_A"} {
+		messageID := "message-1"
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: messageID, MessageID: messageID, Type: session.EventTypeAssistant,
+			Visibility: session.VisibilityUIOnly, Text: text,
+			Scope: &session.EventScope{TurnID: subagentTurnID(task.ref.TaskID, task.turnSeq)},
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), MessageID: messageID,
+				Content: session.ProtocolTextContent(text),
+			}},
+		}})
+	}
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "TURN2_A"})
+	eventBase := task.streamEventBase
+	task.mu.Unlock()
+
+	if eventBase != 0 {
+		t.Fatalf("exact assistant event base = %d, want no reconciliation gap", eventBase)
+	}
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.EventsTruncatedBefore != 0 || snapshot.Cursor.Output != int64(len("TURN2_A")) {
+		t.Fatalf("exact snapshot = %#v, want retained delta cursors", snapshot)
 	}
 }
 

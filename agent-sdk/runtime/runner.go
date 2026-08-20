@@ -9,6 +9,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -147,6 +148,20 @@ func (r *runner) SubmitContext(ctx context.Context, sub agent.Submission) error 
 	if sub.Kind != agent.SubmissionKindConversation {
 		return fmt.Errorf("agent-sdk/runtime: unsupported submission kind %q", sub.Kind)
 	}
+	return r.submitContext(ctx, sub)
+}
+
+// submitRuntimeModelContext is intentionally available only to Runtime
+// orchestration. The public Runner API rejects this kind so SDK consumers
+// cannot create hidden canonical model input.
+func (r *runner) submitRuntimeModelContext(ctx context.Context, sub agent.Submission) error {
+	if sub.Kind != runtimeinput.ModelContext || !session.ActorRefHasIdentity(sub.Actor) {
+		return errors.New("agent-sdk/runtime: invalid runtime model-context submission")
+	}
+	return r.submitContext(ctx, sub)
+}
+
+func (r *runner) submitContext(ctx context.Context, sub agent.Submission) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}

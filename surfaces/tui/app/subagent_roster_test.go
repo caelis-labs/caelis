@@ -684,6 +684,54 @@ func TestSubagentRosterRefreshRetriesAcceptedSendAfterTransientListFailure(t *te
 	}
 }
 
+func TestSubagentRosterRefreshRetriesAcceptedSendAfterStaleSuccessfulList(t *testing.T) {
+	t.Parallel()
+
+	oldEndedAt := time.Date(2026, time.August, 5, 10, 0, 0, 0, time.Local)
+	continuedEndedAt := oldEndedAt.Add(time.Minute)
+	stale := transcriptTaskDescriptor("turn-1", task.StateCompleted, false, oldEndedAt)
+	service := &subagentRosterTestTaskStreamService{list: protocoltaskstream.ListResult{Tasks: []protocoltaskstream.TaskDescriptor{stale}}}
+	model := NewModel(Config{
+		NoColor: true, NoAnimation: true, TaskStreams: bindTaskStreamTestClient(t, service),
+	})
+	model.currentSessionID = "session-1"
+	view := addSubagentRosterTestView(model, "spawn-rhea", "rhea", "rhea[reviewer]: continue audit", "completed", oldEndedAt.Add(-time.Minute), oldEndedAt)
+	view.block.SessionID = "turn-1"
+	view.turnID = "turn-1"
+	view.historyResolved = true
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-rhea"}
+	model.subagentRosterTasks = subagentRosterTasksByCallID([]protocoltaskstream.TaskDescriptor{stale})
+
+	first := requireSubagentRosterRefreshResult(t, model.requestSubagentRosterRefreshAfterAcceptedSend("spawn-rhea"))
+	if first.err != nil {
+		t.Fatalf("first List() error = %v", first.err)
+	}
+	if cmd := model.handleSubagentRosterRefreshResult(first); cmd == nil {
+		t.Fatal("stale successful directory result did not schedule an accepted-send retry")
+	}
+	if !model.subagentRosterRefreshWake || model.subagentRosterRefreshWakeRetries != 1 {
+		t.Fatalf("stale-success retry state = (%v, %d), want pending wake and one retry", model.subagentRosterRefreshWake, model.subagentRosterRefreshWakeRetries)
+	}
+	if demand := model.taskStreamDemandForOwner("spawn-rhea", "rhea"); demand != taskStreamDemandNone {
+		t.Fatalf("stale terminal demand = %v, want cached history detached", demand)
+	}
+
+	service.list.Tasks[0] = transcriptTaskDescriptor("turn-2", task.StateCompleted, false, continuedEndedAt)
+	retryCmd := model.handleSubagentRosterRefreshTick(subagentRosterRefreshTickMsg{
+		sessionID: first.sessionID, generation: first.generation,
+	})
+	result := requireSubagentRosterRefreshResult(t, retryCmd)
+	if cmd := model.handleSubagentRosterRefreshResult(result); cmd != nil {
+		t.Fatal("new terminal activity unexpectedly kept roster polling")
+	}
+	if model.subagentRosterRefreshWake || model.subagentRosterRefreshWakeRetries != 0 {
+		t.Fatalf("accepted-send wake survived new activity: (%v, %d)", model.subagentRosterRefreshWake, model.subagentRosterRefreshWakeRetries)
+	}
+	if demand := model.taskStreamDemandForOwner("spawn-rhea", "rhea"); demand != taskStreamDemandVisibleSubagent {
+		t.Fatalf("new terminal activity demand = %v, want finite history subscription", demand)
+	}
+}
+
 func requireSubagentRosterRefreshResult(t *testing.T, cmd tea.Cmd) subagentRosterRefreshResultMsg {
 	t.Helper()
 	commands := []tea.Cmd{cmd}

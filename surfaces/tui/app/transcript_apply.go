@@ -18,11 +18,13 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	// Decorating the whole batch first would permanently erase the structured
 	// target before the earlier Spawn event had mounted its view.
 	subagentOutputChanged := false
-	subagentRosterRefreshNeeded := false
+	subagentRosterRefreshTargets := make([]string, 0, 1)
 	for index := range msg.Events {
 		one := msg.Events[index : index+1]
 		subagentOutputChanged = m.observeSubagentOutputEvents(one) || subagentOutputChanged
-		subagentRosterRefreshNeeded = m.successfulSendMessageTargetsSubagent(one[0]) || subagentRosterRefreshNeeded
+		if callID := m.successfulSendMessageSubagentCallID(one[0]); callID != "" {
+			subagentRosterRefreshTargets = append(subagentRosterRefreshTargets, callID)
+		}
 		m.decorateAgentMessageDisplayTargets(one)
 	}
 	// Mount/update transcript owners before applying the correlated repairs;
@@ -44,8 +46,8 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	if subagentOutputChanged {
 		subagentOutputCmd = m.requestSubagentOutputRender()
 	}
-	if subagentRosterRefreshNeeded {
-		subagentRosterCmd = m.requestSubagentRosterRefreshAfterAcceptedSend()
+	if len(subagentRosterRefreshTargets) > 0 {
+		subagentRosterCmd = m.requestSubagentRosterRefreshAfterAcceptedSend(subagentRosterRefreshTargets...)
 	} else if subagentOutputChanged {
 		subagentRosterCmd = m.requestSubagentRosterRefresh()
 	}
@@ -56,10 +58,15 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 // retained child workspace. Child output remains the Task observation owner;
 // this signal only refreshes the roster hint after the input call returns.
 func (m *Model) successfulSendMessageTargetsSubagent(event TranscriptEvent) bool {
-	return m != nil && event.Scope == ACPProjectionMain && event.Kind == TranscriptEventTool &&
-		event.Final && !event.ToolError &&
-		event.ToolName == surfaceToolSendMessage &&
-		m.subagentOutputCallIDForHandle(event.ToolMessageTarget) != ""
+	return m.successfulSendMessageSubagentCallID(event) != ""
+}
+
+func (m *Model) successfulSendMessageSubagentCallID(event TranscriptEvent) string {
+	if m == nil || event.Scope != ACPProjectionMain || event.Kind != TranscriptEventTool ||
+		!event.Final || event.ToolError || event.ToolName != surfaceToolSendMessage {
+		return ""
+	}
+	return m.subagentOutputCallIDForHandle(event.ToolMessageTarget)
 }
 
 func (m *Model) decorateAgentMessageDisplayTargets(events []TranscriptEvent) []TranscriptEvent {

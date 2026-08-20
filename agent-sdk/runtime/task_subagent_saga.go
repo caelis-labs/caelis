@@ -150,6 +150,7 @@ func (tm *taskRuntime) startSubagentTarget(
 	}
 	handle := firstNonEmpty(outcome.Entry.Handle, taskSpecString(outcome.Entry.Spec, "handle"))
 	var task *subagentTask
+	var initialResult *delegation.Result
 	if outcome.ShouldSpawn {
 		childPrompt := contextprompt.ComposeTextPrompt(spawnContextFromSpec(outcome.Entry.Spec), strings.TrimSpace(req.Prompt))
 		spawnContext := subagent.SpawnContext{
@@ -183,7 +184,11 @@ func (tm *taskRuntime) startSubagentTarget(
 			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, validationErr)
 		}
 		task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, target, req, mode, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhasePostSpawn)
+		// Persist a compatibility Final cursor before the post_spawn crash
+		// boundary. If real ACP frames raced Spawn, installation below replaces
+		// this fallback before exposing the live Task stream.
 		task.seedStreamFromResult(result)
+		initialResult = &result
 		spawnedEntry := task.entrySnapshot(tm.runtime.now())
 		if err := tm.persistSpawnEntry(ctx, spawnedEntry); err != nil {
 			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err)
@@ -203,7 +208,26 @@ func (tm *taskRuntime) startSubagentTarget(
 	delete(tm.pending, taskID)
 	tm.order[strings.TrimSpace(ref.SessionID)] = append(tm.order[strings.TrimSpace(ref.SessionID)], taskID)
 	tm.mu.Unlock()
+	if initialResult != nil && subagentFramesContainStructuredAssistantText(pending) {
+		task.mu.Lock()
+		task.discardInitialResultStreamFallbackLocked()
+		task.mu.Unlock()
+	}
 	task.applyStreamFramesLocked(pending)
+	if initialResult != nil {
+		task.mu.Lock()
+		// The result is only a compatibility fallback. Earlier ACP frames may
+		// have arrived before Task installation, so apply them first and avoid
+		// manufacturing a second full Final beside the real delta chain.
+		task.seedStreamFromResult(*initialResult)
+		if task.state == taskapi.StateCompleted && taskOutputHasNonBlankLine(initialResult.Result) {
+			// applyResult ran before pending ACP delivery. Re-protect the exact
+			// Final now so semantic current-state replay does not retain both the
+			// real assistant delta and the result fallback for this Turn.
+			task.retainCompletedFinalLocked(initialResult.Result)
+		}
+		task.mu.Unlock()
+	}
 	task.streamMu.Unlock()
 	snapshot, err := tm.advanceSubagentSpawn(ctx, activeSession, task, strings.TrimSpace(req.ParentCall), strings.TrimSpace(req.Prompt))
 	if err != nil {

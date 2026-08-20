@@ -595,9 +595,16 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	}
 	target = delegation.NormalizeTarget(target)
 	result := session.CloneState(entry.Result)
-	if len(result) == 0 {
+	if taskTurnSeqFromSpec(entry.Spec) <= 1 {
 		if stored, ok := entry.Spec["spawn_result"].(map[string]any); ok {
-			result = session.CloneState(stored)
+			if result == nil {
+				result = map[string]any{}
+			}
+			for key, value := range session.CloneState(stored) {
+				if _, exists := result[key]; !exists {
+					result[key] = value
+				}
+			}
 		}
 	}
 	// Durable Task records may predate FailureDiagnostic. Rehydrate lifecycle

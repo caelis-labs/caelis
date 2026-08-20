@@ -562,6 +562,23 @@ func TestProjectSessionEventEnvelopeProjectsContextCompactingAsTransientLifecycl
 	}
 }
 
+func TestProjectSessionEventEnvelopeSkipsModelOnlyContext(t *testing.T) {
+	t.Parallel()
+
+	message := model.NewTextMessage(model.RoleUser, "Subagent @reviewer is completed.")
+	event := &session.Event{
+		ID: "context-1", Seq: 7, SessionID: "session-1",
+		Type: session.EventTypeContext, Visibility: session.VisibilityCanonical,
+		Actor:   session.ActorRef{Kind: session.ActorKindParticipant, ID: "reviewer", Name: "@reviewer"},
+		Message: &message, Text: message.TextContent(),
+	}
+	if events := ProjectSessionEventEnvelope(eventstream.Envelope{
+		SessionID: "session-1", Scope: eventstream.ScopeMain, ScopeID: "session-1",
+	}, event); len(events) != 0 {
+		t.Fatalf("model-only Context projection = %#v, want no client envelope", events)
+	}
+}
+
 func TestProjectSessionEventEnvelopeProjectsParticipantAndLifecycleExtensions(t *testing.T) {
 	participant := ProjectSessionEventEnvelope(eventstream.Envelope{
 		Cursor:        "participant-1",

@@ -32,15 +32,16 @@ func (m *Model) requestSubagentRosterRefresh() tea.Cmd {
 	return m.requestSubagentRosterRefreshCommand(false)
 }
 
-func (m *Model) requestSubagentRosterRefreshAfterAcceptedSend() tea.Cmd {
-	return m.requestSubagentRosterRefreshCommand(true)
+func (m *Model) requestSubagentRosterRefreshAfterAcceptedSend(callIDs ...string) tea.Cmd {
+	return m.requestSubagentRosterRefreshCommand(true, callIDs...)
 }
 
-func (m *Model) requestSubagentRosterRefreshCommand(afterAcceptedSend bool) tea.Cmd {
+func (m *Model) requestSubagentRosterRefreshCommand(afterAcceptedSend bool, callIDs ...string) tea.Cmd {
 	if m == nil || m.cfg.TaskStreams == nil || m.subagentRosterCount() == 0 {
 		return nil
 	}
 	if afterAcceptedSend {
+		m.markSubagentRosterRefreshWakeTargets(callIDs...)
 		m.subagentRosterRefreshWake = true
 		m.subagentRosterRefreshWakeRetries = 0
 	}
@@ -94,10 +95,10 @@ func (m *Model) handleSubagentRosterRefreshResult(msg subagentRosterRefreshResul
 		m.subagentRosterRefreshScheduled = false
 		return m.requestSubagentRosterRefresh()
 	}
-	if msg.err == nil {
-		m.subagentRosterRefreshWake = false
-		m.subagentRosterRefreshWakeRetries = 0
-	} else if m.subagentRosterRefreshWake && taskStreamRetryable(msg.err) {
+	if msg.err == nil && m.subagentRosterRefreshWake {
+		m.resolveSubagentRosterRefreshWakeTargets()
+	}
+	if m.subagentRosterRefreshWake && (msg.err == nil || taskStreamRetryable(msg.err)) {
 		m.subagentRosterRefreshWakeRetries++
 		if m.subagentRosterRefreshWakeRetries <= subagentRosterAcceptedSendRetryLimit {
 			m.subagentRosterRefreshScheduled = true
@@ -107,11 +108,9 @@ func (m *Model) handleSubagentRosterRefreshResult(msg subagentRosterRefreshResul
 				return subagentRosterRefreshTickMsg{sessionID: sessionID, generation: generation}
 			})
 		}
-		m.subagentRosterRefreshWake = false
-		m.subagentRosterRefreshWakeRetries = 0
+		m.clearSubagentRosterRefreshWake()
 	} else {
-		m.subagentRosterRefreshWake = false
-		m.subagentRosterRefreshWakeRetries = 0
+		m.clearSubagentRosterRefreshWake()
 	}
 	if !m.subagentRosterHasRunning() {
 		m.subagentRosterRefreshScheduled = false
@@ -144,7 +143,60 @@ func (m *Model) resetSubagentRosterRefresh() {
 	m.subagentRosterRefreshScheduled = false
 	m.subagentRosterRefreshWake = false
 	m.subagentRosterRefreshWakeRetries = 0
+	m.subagentRosterRefreshWakeTargets = nil
 	m.subagentRosterTasks = map[string]taskstream.TaskDescriptor{}
+}
+
+func (m *Model) markSubagentRosterRefreshWakeTargets(callIDs ...string) {
+	if m == nil {
+		return
+	}
+	if len(callIDs) == 0 {
+		for callID := range m.subagentOutputViews {
+			callIDs = append(callIDs, callID)
+		}
+	}
+	if m.subagentRosterRefreshWakeTargets == nil {
+		m.subagentRosterRefreshWakeTargets = map[string]string{}
+	}
+	for _, callID := range callIDs {
+		callID = strings.TrimSpace(callID)
+		if callID == "" {
+			continue
+		}
+		baseline := strings.TrimSpace(m.subagentRosterTasks[callID].CurrentTurnID)
+		if baseline == "" {
+			if view := m.subagentOutputViews[callID]; view != nil && view.block != nil {
+				baseline = strings.TrimSpace(view.block.SessionID)
+			}
+		}
+		m.subagentRosterRefreshWakeTargets[callID] = baseline
+	}
+}
+
+func (m *Model) resolveSubagentRosterRefreshWakeTargets() {
+	if m == nil {
+		return
+	}
+	for callID, baseline := range m.subagentRosterRefreshWakeTargets {
+		descriptor, ok := m.subagentRosterTasks[callID]
+		turnID := strings.TrimSpace(descriptor.CurrentTurnID)
+		if ok && (descriptor.Running || (turnID != "" && turnID != strings.TrimSpace(baseline))) {
+			delete(m.subagentRosterRefreshWakeTargets, callID)
+		}
+	}
+	if len(m.subagentRosterRefreshWakeTargets) == 0 {
+		m.subagentRosterRefreshWake = false
+	}
+}
+
+func (m *Model) clearSubagentRosterRefreshWake() {
+	if m == nil {
+		return
+	}
+	m.subagentRosterRefreshWake = false
+	m.subagentRosterRefreshWakeRetries = 0
+	m.subagentRosterRefreshWakeTargets = nil
 }
 
 func (m *Model) subagentRosterViewState(callID string, view *subagentOutputView) (subagentOutputStatus, time.Time, time.Time) {

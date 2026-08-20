@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -170,6 +171,106 @@ func TestRuntimeChildInputLeavesTaskUnchangedUntilOutputThenObservesGeneration(t
 	audit.mu.Unlock()
 	if runningTerminalCursor || !terminalCursorCommitted {
 		t.Fatalf("terminal cursor persistence running=%v terminal=%v, want one terminal-state commit", runningTerminalCursor, terminalCursorCommitted)
+	}
+}
+
+func TestRuntimeChildActivityBatchUsesOneRunningWriteAndKeepsGapNonTerminal(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	runner := &runtimeChildInputRunner{spawnResult: delegation.Result{
+		State: delegation.StateCompleted, Result: "initial result",
+	}}
+	runtime, active := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.StartSubagentWithOptions(
+		ctx, active.SessionRef, "helper", "initial", "batch-activity-test", StartSubagentOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseStore := runtime.tasks.store
+	audit := &activityTaskStoreAudit{Store: baseStore, cas: baseStore.(taskapi.CASStore)}
+	runtime.tasks.store = audit
+
+	runner.mu.Lock()
+	observer := runner.observer
+	runner.mu.Unlock()
+	batchObserver, ok := observer.(agent.ChildActivityBatchObserver)
+	if !ok {
+		t.Fatalf("activity observer = %T, want batch observer", observer)
+	}
+	runtime.tasks.mu.RLock()
+	task := runtime.tasks.subagents[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	if task == nil {
+		t.Fatal("started Task is unavailable")
+	}
+	task.mu.Lock()
+	target := agent.ChildEndpointRef{
+		ParticipantID: task.anchor.AgentID,
+		SessionID:     task.anchor.SessionID,
+		EndpointKey:   task.ref.TaskID,
+		Role:          subagentParticipantRole(task),
+		Placement:     task.target.Placement,
+	}
+	task.mu.Unlock()
+	const frames = 300
+	events := make([]agent.ChildActivityEvent, 0, frames)
+	for index := range frames {
+		events = append(events, agent.ChildActivityEvent{
+			Target: target, ActivityID: "activity-batch", Cursor: uint64(index + 1),
+			Frame: &stream.Frame{Text: fmt.Sprintf("frame-%03d\n", index), Running: true},
+		})
+	}
+	if err := batchObserver.ObserveChildActivityBatch(ctx, events); err != nil {
+		t.Fatal(err)
+	}
+	audit.mu.Lock()
+	runningWrites := audit.puts
+	audit.mu.Unlock()
+	if runningWrites != 1 {
+		t.Fatalf("Task writes for %d-frame activity batch = %d, want 1", frames, runningWrites)
+	}
+
+	if err := batchObserver.ObserveChildActivityBatch(ctx, []agent.ChildActivityEvent{
+		{
+			Target: target, ActivityID: "activity-batch", Cursor: frames + 1,
+			Gap: true, Dropped: 400,
+		},
+		{
+			Target: target, ActivityID: "activity-batch", Cursor: frames + 2,
+			Result: &delegation.Result{
+				TaskID: started.Ref.TaskID, State: delegation.StateCompleted,
+				Result: "exact final result", UpdatedAt: time.Now(),
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runtime.tasks.mu.RLock()
+	observed := runtime.tasks.subagents[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	if observed == nil {
+		t.Fatal("observed Task disappeared")
+	}
+	snapshot := observed.snapshot()
+	observed.mu.Lock()
+	durableCursor := observed.activityDurableCursor
+	streamBase := observed.streamEventBase
+	observed.mu.Unlock()
+	if snapshot.Running || snapshot.State != taskapi.StateCompleted ||
+		taskStringValue(snapshot.Result["final_message"]) != "exact final result" {
+		t.Fatalf("Task after recoverable gap = %#v, want authoritative completion", snapshot)
+	}
+	if durableCursor != frames+2 || streamBase == 0 {
+		t.Fatalf("durable activity cursor/base = %d/%d, want %d and recoverable stream gap", durableCursor, streamBase, frames+2)
+	}
+	audit.mu.Lock()
+	terminalCursorCommitted := audit.terminalCursorCommitted
+	audit.mu.Unlock()
+	if !terminalCursorCommitted {
+		t.Fatal("batched terminal did not commit its durable activity cursor")
 	}
 }
 
@@ -399,6 +500,7 @@ type activityTaskStoreAudit struct {
 	cas taskapi.CASStore
 
 	mu                      sync.Mutex
+	puts                    int
 	runningTerminalCursor   bool
 	terminalCursorCommitted bool
 }
@@ -432,6 +534,9 @@ func (s *activityTaskStoreAudit) Put(ctx context.Context, req taskapi.PutRequest
 	if req.Entry != nil {
 		cursor, _ := taskInt64Value(req.Entry.Metadata[subagentActivityCursorMeta])
 		s.mu.Lock()
+		if req.Entry.Kind == taskapi.KindSubagent {
+			s.puts++
+		}
 		if cursor >= 2 && req.Entry.Running {
 			s.runningTerminalCursor = true
 		}

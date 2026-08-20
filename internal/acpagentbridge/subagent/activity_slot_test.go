@@ -5,14 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
 func TestChildActivityObserverSwapReplaysUnacknowledgedJournalExactlyOnce(t *testing.T) {
@@ -70,45 +73,573 @@ func TestChildActivityObserverSwapReplaysUnacknowledgedJournalExactlyOnce(t *tes
 	}
 }
 
-func TestChildActivityJournalOverflowRetainsGapTerminal(t *testing.T) {
+type childActivityBatchObserverFunc func(context.Context, []agent.ChildActivityEvent) error
+
+func (fn childActivityBatchObserverFunc) ObserveChildActivity(ctx context.Context, event agent.ChildActivityEvent) error {
+	return fn(ctx, []agent.ChildActivityEvent{event})
+}
+
+func (fn childActivityBatchObserverFunc) ObserveChildActivityBatch(ctx context.Context, events []agent.ChildActivityEvent) error {
+	return fn(ctx, events)
+}
+
+func TestChildActivityJournalCoalescesStreamingAssistantChunksWhileObserverPersists(t *testing.T) {
 	t.Parallel()
 
 	run := &childRun{
-		taskID: "task-overflow", state: delegation.StateRunning, running: true,
+		taskID: "task-stream-burst", state: delegation.StateRunning, running: true,
 		done: make(chan struct{}),
 	}
 	slot := newChildSlot(agent.ChildEndpointRef{
-		ParticipantID: "child-overflow", SessionID: "child-session", EndpointKey: run.taskID,
+		ParticipantID: "child-stream-burst", SessionID: "child-session", EndpointKey: run.taskID,
 		Role: session.ParticipantRoleDelegated,
 	}, run)
-	slot.beginActivity("activity-overflow", run)
-	slot.bindObserver(0, childActivityObserverFunc(func(context.Context, agent.ChildActivityEvent) error {
-		return errors.New("observer unavailable")
-	}))
-	for i := 0; i < childActivityJournalMaxEvents+32; i++ {
-		slot.publishFrame(stream.Frame{Text: "output"})
-	}
-
-	replayed := make(chan agent.ChildActivityEvent, 1)
-	slot.bindObserver(0, childActivityObserverFunc(func(_ context.Context, event agent.ChildActivityEvent) error {
-		replayed <- event
+	slot.beginActivity("activity-stream-burst", run)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	var observed []agent.ChildActivityEvent
+	slot.bindObserver(0, childActivityBatchObserverFunc(func(_ context.Context, events []agent.ChildActivityEvent) error {
+		mu.Lock()
+		for _, event := range events {
+			observed = append(observed, agent.CloneChildActivityEvent(event))
+		}
+		mu.Unlock()
+		once.Do(func() {
+			close(entered)
+			<-release
+		})
 		return nil
 	}))
-	select {
-	case event := <-replayed:
-		if !event.Gap || event.Result == nil || event.Result.State != delegation.StateUnknownOutcome {
-			t.Fatalf("overflow replay = %#v, want terminal gap", event)
+
+	const chunks = childActivityJournalMaxEvents + 64
+	var expected strings.Builder
+	for index := range chunks {
+		text := fmt.Sprintf("%03d\n", index)
+		expected.WriteString(text)
+		slot.publishFrame(childAssistantActivityFrame("message-1", text))
+		if index == 0 {
+			select {
+			case <-entered:
+			case <-time.After(time.Second):
+				t.Fatal("observer did not start first durable callback")
+			}
 		}
+	}
+	want := expected.String()
+	wantFinal := strings.TrimSpace(want)
+	terminalAck := publishChildRunResult(slot, run, delegation.Result{
+		TaskID: run.taskID, State: delegation.StateCompleted, Result: wantFinal,
+	})
+	close(release)
+	select {
+	case <-terminalAck:
 	case <-time.After(time.Second):
-		t.Fatal("overflow gap was not replayed")
+		t.Fatal("real terminal result was not durably acknowledged")
+	}
+	mu.Lock()
+	events := append([]agent.ChildActivityEvent(nil), observed...)
+	mu.Unlock()
+	var got strings.Builder
+	var terminal *delegation.Result
+	for _, event := range events {
+		if event.Gap {
+			t.Fatalf("coalesced %d-chunk stream produced observation gap: %#v", chunks, event)
+		}
+		if event.Frame != nil {
+			got.WriteString(session.EventText(event.Frame.Event))
+		}
+		if event.Result != nil {
+			result := delegation.CloneResult(*event.Result)
+			terminal = &result
+		}
+	}
+	if got.String() != want {
+		t.Fatalf("observed assistant stream bytes = %d, want %d", got.Len(), len(want))
+	}
+	if terminal == nil || terminal.State != delegation.StateCompleted || terminal.Result != wantFinal {
+		if terminal == nil {
+			t.Fatal("terminal result is nil")
+		}
+		t.Fatalf("terminal state/result = %q equal:%v bytes:%d, want %q/%d bytes", terminal.State, terminal.Result == wantFinal, len(terminal.Result), delegation.StateCompleted, len(wantFinal))
 	}
 	slot.mu.Lock()
 	remaining := len(slot.journal)
-	overflowed := slot.overflowed
 	slot.mu.Unlock()
-	if !overflowed || remaining != 0 {
-		t.Fatalf("overflow state = %v journal=%d, want acknowledged gap", overflowed, remaining)
+	if remaining != 0 {
+		t.Fatalf("journal retained %d acknowledged items", remaining)
 	}
+}
+
+func TestChildActivityJournalBoundsStreamingMergeWork(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		chunks int
+		text   string
+	}{
+		{
+			name:   "frame_count",
+			chunks: childActivityMergedMaxFrames*4 + 1,
+			text:   "x",
+		},
+		{
+			name:   "text_bytes",
+			chunks: 25,
+			text:   strings.Repeat("x", childActivityMergedMaxBytes/8),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			run := &childRun{
+				taskID: "task-bounded-merge-" + test.name, state: delegation.StateRunning, running: true,
+				done: make(chan struct{}),
+			}
+			slot := newChildSlot(agent.ChildEndpointRef{
+				ParticipantID: "child-bounded-merge", SessionID: "child-session", EndpointKey: run.taskID,
+				Role: session.ParticipantRoleDelegated,
+			}, run)
+			slot.beginActivity("activity-bounded-merge", run)
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			released := false
+			defer func() {
+				if !released {
+					close(release)
+				}
+			}()
+			var once sync.Once
+			slot.bindObserver(0, childActivityBatchObserverFunc(func(context.Context, []agent.ChildActivityEvent) error {
+				once.Do(func() {
+					close(entered)
+					<-release
+				})
+				return nil
+			}))
+
+			for index := range test.chunks {
+				slot.publishFrame(childAssistantActivityFrame("bounded-message", test.text))
+				if index == 0 {
+					select {
+					case <-entered:
+					case <-time.After(time.Second):
+						t.Fatal("observer did not enter slow callback")
+					}
+				}
+			}
+
+			type journalSummary struct {
+				frames    uint64
+				textBytes int
+			}
+			slot.mu.Lock()
+			summaries := make([]journalSummary, 0, len(slot.journal))
+			for _, item := range slot.journal {
+				if item != nil && item.event.Frame != nil {
+					summaries = append(summaries, journalSummary{
+						frames: item.frameCount, textBytes: len(session.EventText(item.event.Frame.Event)),
+					})
+				}
+			}
+			slot.mu.Unlock()
+
+			var retainedFrames uint64
+			for _, summary := range summaries {
+				retainedFrames += summary.frames
+				if summary.frames == 0 || summary.frames > childActivityMergedMaxFrames {
+					t.Fatalf("merged journal item frame count = %d, want 1..%d", summary.frames, childActivityMergedMaxFrames)
+				}
+				if summary.textBytes > childActivityMergedMaxBytes {
+					t.Fatalf("merged journal item text bytes = %d, want <= %d", summary.textBytes, childActivityMergedMaxBytes)
+				}
+			}
+			if retainedFrames != uint64(test.chunks) {
+				t.Fatalf("retained frame count = %d, want %d", retainedFrames, test.chunks)
+			}
+
+			terminalAck := publishChildRunResult(slot, run, delegation.Result{
+				TaskID: run.taskID, State: delegation.StateCompleted, Result: "done",
+			})
+			close(release)
+			released = true
+			select {
+			case <-terminalAck:
+			case <-time.After(time.Second):
+				t.Fatal("bounded journal did not deliver authoritative terminal result")
+			}
+		})
+	}
+}
+
+func TestChildActivityJournalReplaysPreinstallBurstWhenTaskObserverBecomesReady(t *testing.T) {
+	t.Parallel()
+
+	run := &childRun{
+		taskID: "task-preinstall-burst", state: delegation.StateRunning, running: true,
+		done: make(chan struct{}),
+	}
+	slot := newChildSlot(agent.ChildEndpointRef{
+		ParticipantID: "child-preinstall", SessionID: "child-session", EndpointKey: run.taskID,
+		Role: session.ParticipantRoleDelegated,
+	}, run)
+	slot.beginInitialActivity("activity-preinstall", run)
+	observerAttempted := make(chan struct{})
+	var attemptOnce sync.Once
+	slot.bindObserver(0, childActivityObserverFunc(func(context.Context, agent.ChildActivityEvent) error {
+		attemptOnce.Do(func() { close(observerAttempted) })
+		return errors.New("child Task is not installed yet")
+	}))
+
+	const chunks = childActivityJournalMaxEvents + 64
+	var expected strings.Builder
+	for index := range chunks {
+		text := fmt.Sprintf("preinstall-%03d\n", index)
+		expected.WriteString(text)
+		slot.publishFrame(childAssistantActivityFrame("preinstall-message", text))
+	}
+	select {
+	case <-observerAttempted:
+	case <-time.After(time.Second):
+		t.Fatal("preinstall observer was not attempted")
+	}
+	want := expected.String()
+	terminalAck := publishChildRunResult(slot, run, delegation.Result{
+		TaskID: run.taskID, State: delegation.StateCompleted, Result: strings.TrimSpace(want),
+	})
+	var mu sync.Mutex
+	var observed []agent.ChildActivityEvent
+	slot.bindObserver(0, childActivityBatchObserverFunc(func(_ context.Context, events []agent.ChildActivityEvent) error {
+		mu.Lock()
+		for _, event := range events {
+			observed = append(observed, agent.CloneChildActivityEvent(event))
+		}
+		mu.Unlock()
+		return nil
+	}))
+	select {
+	case <-terminalAck:
+	case <-time.After(time.Second):
+		t.Fatal("preinstall terminal did not replay after Task observer installation")
+	}
+
+	mu.Lock()
+	events := append([]agent.ChildActivityEvent(nil), observed...)
+	mu.Unlock()
+	var got strings.Builder
+	var terminal *delegation.Result
+	for _, event := range events {
+		if event.Gap {
+			t.Fatalf("bounded preinstall text burst produced gap: %#v", event)
+		}
+		if event.Frame != nil {
+			got.WriteString(session.EventText(event.Frame.Event))
+		}
+		if event.Result != nil {
+			result := delegation.CloneResult(*event.Result)
+			terminal = &result
+		}
+	}
+	if got.String() != want {
+		t.Fatalf("preinstall replay bytes = %d, want %d", got.Len(), len(want))
+	}
+	if terminal == nil || terminal.State != delegation.StateCompleted {
+		t.Fatalf("preinstall terminal = %#v, want completed", terminal)
+	}
+}
+
+func TestChildActivityJournalOverflowIsRecoverableAndRetainsRealTerminal(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		frames []stream.Frame
+	}{
+		{
+			name: "event_limit",
+			frames: func() []stream.Frame {
+				frames := make([]stream.Frame, 0, childActivityJournalMaxEvents+32)
+				for index := 0; index < childActivityJournalMaxEvents+32; index++ {
+					frames = append(frames, stream.Frame{Text: fmt.Sprintf("output-%d", index)})
+				}
+				return frames
+			}(),
+		},
+		{
+			name: "byte_limit",
+			frames: []stream.Frame{
+				{Text: strings.Repeat("a", childActivityJournalMaxBytes/2)},
+				{Text: strings.Repeat("b", childActivityJournalMaxBytes/2)},
+				{Text: strings.Repeat("c", childActivityJournalMaxBytes/2)},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runCtx, cancelRun := context.WithCancel(context.Background())
+			defer cancelRun()
+			run := &childRun{
+				taskID: "task-overflow-" + test.name, state: delegation.StateRunning, running: true,
+				done: make(chan struct{}), cancel: cancelRun,
+			}
+			slot := newChildSlot(agent.ChildEndpointRef{
+				ParticipantID: "child-overflow", SessionID: "child-session", EndpointKey: run.taskID,
+				Role: session.ParticipantRoleDelegated,
+			}, run)
+			slot.beginActivity("activity-overflow", run)
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			var once sync.Once
+			var mu sync.Mutex
+			var observed []agent.ChildActivityEvent
+			slot.bindObserver(0, childActivityObserverFunc(func(_ context.Context, event agent.ChildActivityEvent) error {
+				once.Do(func() {
+					close(entered)
+					<-release
+				})
+				mu.Lock()
+				observed = append(observed, agent.CloneChildActivityEvent(event))
+				mu.Unlock()
+				return nil
+			}))
+
+			for index, frame := range test.frames {
+				slot.publishFrame(frame)
+				if index == 0 {
+					select {
+					case <-entered:
+					case <-time.After(time.Second):
+						t.Fatal("observer did not enter slow callback")
+					}
+				}
+			}
+			terminalAck := publishChildRunResult(slot, run, delegation.Result{
+				TaskID: run.taskID, State: delegation.StateCompleted, Result: "exact final result",
+			})
+			select {
+			case <-runCtx.Done():
+				t.Fatal("presentation backlog cancelled child execution")
+			default:
+			}
+			close(release)
+			select {
+			case <-terminalAck:
+			case <-time.After(time.Second):
+				t.Fatal("real terminal result was not acknowledged after observation gap")
+			}
+
+			mu.Lock()
+			events := append([]agent.ChildActivityEvent(nil), observed...)
+			mu.Unlock()
+			var gap *agent.ChildActivityEvent
+			var terminal *delegation.Result
+			for index := range events {
+				if events[index].Gap {
+					cloned := agent.CloneChildActivityEvent(events[index])
+					gap = &cloned
+				}
+				if events[index].Result != nil {
+					result := delegation.CloneResult(*events[index].Result)
+					terminal = &result
+				}
+			}
+			if gap == nil || gap.Dropped == 0 || gap.Result != nil {
+				t.Fatalf("recoverable gap = %#v, want non-terminal dropped-frame boundary", gap)
+			}
+			if terminal == nil || terminal.State != delegation.StateCompleted || terminal.Result != "exact final result" {
+				t.Fatalf("terminal result = %#v, want authoritative completion", terminal)
+			}
+			select {
+			case <-runCtx.Done():
+				t.Fatal("completed observation gap eventually cancelled child execution")
+			default:
+			}
+		})
+	}
+}
+
+func TestChildActivityTerminalResultIsReferencedOutsideBoundedJournal(t *testing.T) {
+	t.Parallel()
+
+	run := &childRun{
+		taskID: "task-large-terminal", state: delegation.StateRunning, running: true,
+		done: make(chan struct{}),
+	}
+	slot := newChildSlot(agent.ChildEndpointRef{
+		ParticipantID: "child-large-terminal", SessionID: "child-session", EndpointKey: run.taskID,
+		Role: session.ParticipantRoleDelegated,
+	}, run)
+	slot.beginActivity("activity-large-terminal", run)
+	attempted := make(chan int, 1)
+	var once sync.Once
+	slot.bindObserver(0, childActivityObserverFunc(func(_ context.Context, event agent.ChildActivityEvent) error {
+		once.Do(func() {
+			if event.Result == nil {
+				attempted <- -1
+				return
+			}
+			attempted <- len(event.Result.Result)
+		})
+		return errors.New("observer unavailable")
+	}))
+
+	largeFinal := strings.Repeat("x", 2*childActivityJournalMaxBytes)
+	terminalAck := publishChildRunResult(slot, run, delegation.Result{
+		TaskID: run.taskID, State: delegation.StateCompleted, Result: largeFinal,
+	})
+	select {
+	case size := <-attempted:
+		if size != len(largeFinal) {
+			t.Fatalf("delivered terminal bytes = %d, want %d", size, len(largeFinal))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("large terminal was not attempted")
+	}
+
+	slot.mu.Lock()
+	journalBytes := slot.journalBytes
+	journalItems := append([]*childActivityJournalItem(nil), slot.journal...)
+	slot.mu.Unlock()
+	if journalBytes > childActivityJournalMaxBytes || len(journalItems) != 1 {
+		t.Fatalf("terminal journal = %d bytes/%d items, want one bounded reference", journalBytes, len(journalItems))
+	}
+	if journalItems[0].event.Result != nil || journalItems[0].terminal == nil ||
+		len(journalItems[0].terminal.Result) != len(largeFinal) {
+		t.Fatalf("terminal journal item = %#v, want result-free immutable terminal snapshot", journalItems[0])
+	}
+	select {
+	case <-terminalAck:
+		t.Fatal("failed terminal observation was acknowledged")
+	default:
+	}
+
+	delivered := make(chan int, 1)
+	slot.bindObserver(0, childActivityBatchObserverFunc(func(_ context.Context, events []agent.ChildActivityEvent) error {
+		if len(events) != 1 || events[0].Result == nil {
+			return errors.New("terminal result missing")
+		}
+		delivered <- len(events[0].Result.Result)
+		return nil
+	}))
+	select {
+	case size := <-delivered:
+		if size != len(largeFinal) {
+			t.Fatalf("replayed terminal bytes = %d, want %d", size, len(largeFinal))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("large terminal was not replayed")
+	}
+	select {
+	case <-terminalAck:
+	case <-time.After(time.Second):
+		t.Fatal("large terminal was not acknowledged after replay")
+	}
+}
+
+func TestChildActivityTerminalSnapshotRejectsLateUpdates(t *testing.T) {
+	t.Parallel()
+
+	terminalAt := time.Unix(100, 0)
+	lateAt := terminalAt.Add(time.Minute)
+	run := &childRun{
+		anchor: delegation.Anchor{TaskID: "task-frozen-terminal", SessionID: "child-session", AgentID: "child-1"},
+		taskID: "task-frozen-terminal", state: delegation.StateRunning, running: true,
+		updatedAt: terminalAt, done: make(chan struct{}),
+	}
+	slot := newChildSlot(agent.ChildEndpointRef{
+		ParticipantID: "child-1", SessionID: "child-session", EndpointKey: run.taskID,
+		Role: session.ParticipantRoleDelegated,
+	}, run)
+	slot.beginActivity("activity-frozen-terminal", run)
+	firstAttempt := make(chan delegation.Result, 1)
+	var firstOnce sync.Once
+	slot.bindObserver(0, childActivityObserverFunc(func(_ context.Context, event agent.ChildActivityEvent) error {
+		if event.Result != nil {
+			firstOnce.Do(func() { firstAttempt <- delegation.CloneResult(*event.Result) })
+		}
+		return errors.New("observer unavailable")
+	}))
+
+	terminalAck := publishChildRunResult(slot, run, delegation.Result{
+		TaskID: run.taskID, State: delegation.StateCompleted, Result: "exact terminal", UpdatedAt: terminalAt,
+	})
+	var first delegation.Result
+	select {
+	case first = <-firstAttempt:
+	case <-time.After(time.Second):
+		t.Fatal("terminal result was not attempted")
+	}
+
+	runner := &Runner{clock: func() time.Time { return lateAt }}
+	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentThought, "late notification"))
+	run.mu.RLock()
+	updatedAt := run.updatedAt
+	run.mu.RUnlock()
+	if !updatedAt.Equal(terminalAt) {
+		t.Fatalf("run updated_at = %v, want frozen terminal time %v", updatedAt, terminalAt)
+	}
+
+	replayed := make(chan agent.ChildActivityEvent, 2)
+	slot.bindObserver(0, childActivityBatchObserverFunc(func(_ context.Context, events []agent.ChildActivityEvent) error {
+		for _, event := range events {
+			replayed <- agent.CloneChildActivityEvent(event)
+		}
+		return nil
+	}))
+	var second delegation.Result
+	select {
+	case event := <-replayed:
+		if event.Result == nil {
+			t.Fatalf("replayed event = %#v, want terminal result", event)
+		}
+		second = delegation.CloneResult(*event.Result)
+	case <-time.After(time.Second):
+		t.Fatal("terminal result was not replayed")
+	}
+	if !reflect.DeepEqual(second, first) {
+		t.Fatalf("replayed terminal = %#v, want immutable first generation %#v", second, first)
+	}
+	select {
+	case <-terminalAck:
+	case <-time.After(time.Second):
+		t.Fatal("terminal result was not acknowledged")
+	}
+	select {
+	case event := <-replayed:
+		t.Fatalf("post-terminal activity event = %#v, want late notification quarantined", event)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func childAssistantActivityFrame(messageID string, text string) stream.Frame {
+	message := model.NewTextMessage(model.RoleAssistant, text)
+	return stream.Frame{
+		Running: true,
+		Event: &session.Event{
+			Type: session.EventTypeAssistant, Visibility: session.VisibilityUIOnly,
+			Text: text, Message: &message,
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+				MessageID:     messageID, Content: session.ProtocolTextContent(text),
+			}},
+		},
+	}
+}
+
+func publishChildRunResult(slot *childSlot, run *childRun, result delegation.Result) <-chan struct{} {
+	if run == nil {
+		return slot.publishRunResult(nil)
+	}
+	run.mu.Lock()
+	run.state = result.State
+	run.running = result.Running
+	run.outputPreview = result.OutputPreview
+	run.failureDetail = result.Error
+	run.result = result.Result
+	run.updatedAt = result.UpdatedAt
+	run.mu.Unlock()
+	return slot.publishRunResult(run)
 }
 
 func TestChildActivityObserverResumeAdvancesSlotCursor(t *testing.T) {

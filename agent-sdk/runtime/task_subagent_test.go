@@ -13,6 +13,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -646,8 +647,8 @@ func TestSubagentProducerCompletionDoesNotRequireTaskObservation(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if notice.Kind != agent.SubmissionKindConversation || notice.Actor.Kind != session.ActorKindParticipant {
-		t.Fatalf("completion notice = %#v, want participant-authored ordinary input", notice)
+	if notice.Kind != runtimeinput.ModelContext || notice.Actor.Kind != session.ActorKindParticipant {
+		t.Fatalf("completion notice = %#v, want participant-authored model context", notice)
 	}
 	if !strings.Contains(notice.Text, "Use Task read") || !strings.Contains(notice.Text, started.Handle) || strings.Contains(notice.Text, "producer-owned final") {
 		t.Fatalf("completion notice text = %q, want compact handle hint without final payload", notice.Text)
@@ -1619,6 +1620,131 @@ func TestStartSubagentKeepsEarlyStreamPublishedBeforeTaskRegistration(t *testing
 	}
 }
 
+func TestStartSubagentDoesNotDuplicateFastTerminalAssistantStream(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	const final = "The current working directory is /workspace."
+	runner := &recordingSubagentRunner{
+		spawnResult:    delegation.Result{State: delegation.StateCompleted, Result: final},
+		publishOnSpawn: true,
+		spawnStreamEvent: &session.Event{
+			Type:       session.EventTypeAssistant,
+			Visibility: session.VisibilityUIOnly,
+			MessageID:  "child-final-1",
+			Text:       final,
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+				MessageID:     "child-final-1",
+				Content:       session.ProtocolTextContent(final),
+			}},
+		},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "report cwd",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	snap, err := runtime.Streams().Read(ctx, stream.ReadRequest{
+		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
+	})
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	assistantFrames := 0
+	for _, frame := range snap.Frames {
+		if frame.Event == nil || session.EventTypeOf(frame.Event) != session.EventTypeAssistant ||
+			strings.TrimSpace(session.EventText(frame.Event)) == "" {
+			continue
+		}
+		assistantFrames++
+		if got := session.EventText(frame.Event); got != final {
+			t.Fatalf("assistant frame text = %q, want %q", got, final)
+		}
+		if frame.Event.Scope != nil && frame.Event.Scope.Source == "subagent_result" {
+			t.Fatalf("assistant frame = %#v, synthetic result duplicated real ACP Final", frame.Event)
+		}
+	}
+	if assistantFrames != 1 {
+		t.Fatalf("assistant frames = %d in %#v, want one real ACP Final", assistantFrames, snap.Frames)
+	}
+}
+
+func TestStartSubagentReplacesOversizedInitialResultWithRealACPFinal(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	const realFinal = "real ACP final"
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{
+			State:  delegation.StateCompleted,
+			Result: strings.Repeat("x", subagentExactStreamByteCap+1),
+		},
+		publishOnSpawn: true,
+		spawnStreamEvent: &session.Event{
+			Type: session.EventTypeAssistant, Visibility: session.VisibilityUIOnly,
+			MessageID: "child-real-final", Text: realFinal,
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+				MessageID:     "child-real-final", Content: session.ProtocolTextContent(realFinal),
+			}},
+		},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "return a large final",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	ref := stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID}
+	fromStart, err := runtime.Streams().Read(ctx, stream.ReadRequest{Ref: ref})
+	if err != nil {
+		t.Fatalf("Read(cursor 0) error = %v", err)
+	}
+	if fromStart.EventsTruncatedBefore != 0 {
+		t.Fatalf("cursor 0 truncated before = %d, want reset real-ACP boundary", fromStart.EventsTruncatedBefore)
+	}
+	assistantFrames := 0
+	for _, frame := range fromStart.Frames {
+		if frame.Event == nil || session.EventTypeOf(frame.Event) != session.EventTypeAssistant {
+			continue
+		}
+		assistantFrames++
+		if got := session.EventText(frame.Event); got != realFinal {
+			t.Fatalf("assistant text = %q, want %q", got, realFinal)
+		}
+		if frame.Event.Scope != nil && frame.Event.Scope.Source == "subagent_result" {
+			t.Fatalf("assistant event = %#v, want real ACP provenance", frame.Event)
+		}
+		if frame.Cursor.Events != 1 {
+			t.Fatalf("real ACP event cursor = %d, want 1", frame.Cursor.Events)
+		}
+	}
+	if assistantFrames != 1 {
+		t.Fatalf("assistant frames = %d in %#v, want one real ACP Final", assistantFrames, fromStart.Frames)
+	}
+
+	fromRealFinal, err := runtime.Streams().Read(ctx, stream.ReadRequest{
+		Ref: ref, Cursor: stream.Cursor{Events: 1},
+	})
+	if err != nil {
+		t.Fatalf("Read(cursor 1) error = %v", err)
+	}
+	if fromRealFinal.EventsTruncatedBefore != 0 || fromRealFinal.Cursor.Events != fromStart.Cursor.Events {
+		t.Fatalf("cursor 1 snapshot = cursor:%#v truncated:%d, want stable absolute boundary %#v", fromRealFinal.Cursor, fromRealFinal.EventsTruncatedBefore, fromStart.Cursor)
+	}
+	for _, frame := range fromRealFinal.Frames {
+		if frame.Event != nil && session.EventTypeOf(frame.Event) == session.EventTypeAssistant {
+			t.Fatalf("cursor 1 replayed assistant event = %#v", frame.Event)
+		}
+	}
+}
+
 func TestSubagentStreamReadDoesNotInterruptStaleRunningChild(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
@@ -2214,6 +2340,7 @@ type recordingSubagentRunner struct {
 	waitErr            error
 	publishOnSpawn     bool
 	spawnStreamText    string
+	spawnStreamEvent   *session.Event
 	spawnStreamState   string
 	spawnStreamRunning bool
 	spawnContext       subagent.SpawnContext
@@ -2232,6 +2359,7 @@ func (r *recordingSubagentRunner) Spawn(_ context.Context, spawn subagent.SpawnC
 		spawn.Streams.PublishStream(stream.Frame{
 			Ref:     stream.Ref{TaskID: strings.TrimSpace(spawn.TaskID)},
 			Text:    r.spawnStreamText,
+			Event:   session.CloneEvent(r.spawnStreamEvent),
 			State:   state,
 			Running: running,
 		})

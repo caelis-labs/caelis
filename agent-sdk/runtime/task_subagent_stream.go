@@ -162,6 +162,10 @@ func (t *subagentTask) retainCompletedFinalLocked(text string) {
 		return
 	}
 	turnSeq := max(t.turnSeq, 1)
+	if t.latestFinalTurnSeq == turnSeq && t.latestFinalText == text {
+		return
+	}
+	t.invalidateDivergedAssistantStreamLocked(text)
 	turnID := subagentTurnID(t.ref.TaskID, turnSeq)
 	order := t.streamEventBase + int64(len(t.streamFrames))
 	if t.latestFinalTurnSeq != 0 && t.latestFinalTurnSeq != turnSeq {
@@ -182,6 +186,81 @@ func (t *subagentTask) retainCompletedFinalLocked(text string) {
 	t.latestFinalAt = completedAt
 	t.semanticRetention.dropAssistantTurn(turnID)
 	t.semanticRetention.protectLatestFinal(turnID, order)
+}
+
+// invalidateDivergedAssistantStreamLocked retracts a transient assistant delta
+// chain that does not converge to the producer's authoritative Final Message.
+// Some ACP endpoints publish a provisional prefix and then a complete final
+// snapshot after changing message identity. Those are both valid observations,
+// but concatenating them produces corrupt presentation such as
+// "TURNTURN2_A". Task stream cursors are append-only, so the only honest
+// retraction is a recoverable semantic-current-state boundary. The semantic
+// cache then rebuilds this Turn from its tool/reasoning state plus the exact
+// Task result retained below.
+func (t *subagentTask) invalidateDivergedAssistantStreamLocked(finalText string) {
+	if t == nil {
+		return
+	}
+	turnID := subagentTurnID(t.ref.TaskID, max(t.turnSeq, 1))
+	if !subagentAssistantStreamDiverged(t.streamFrames, turnID, finalText) {
+		return
+	}
+	current := t.streamEventBase + int64(len(t.streamFrames))
+	for index := range t.streamFrames {
+		t.streamFrames[index] = stream.Frame{}
+	}
+	t.streamFrames = nil
+	t.streamFrameSizes = nil
+	t.streamBytes = 0
+	// Advance past one explicit reconciliation boundary so a consumer that
+	// already acknowledged every provisional frame must still reset.
+	t.streamEventBase = current + 1
+	t.notifyStreamChangeLocked()
+}
+
+// subagentAssistantStreamDiverged recognizes only producer-shaped ACP
+// assistant reconciliation. Untyped Task output and generic assistant events
+// may legitimately differ from the final Task result, so they are not enough
+// to retract an exact stream. Explicit ACP agent-message chunks are narrower:
+// tools, plans, and thoughts reset the final-answer segment, and the remaining
+// exact deltas must converge to the producer's authoritative Final Message.
+func subagentAssistantStreamDiverged(frames []stream.Frame, turnID string, finalText string) bool {
+	turnID = strings.TrimSpace(turnID)
+	finalText = strings.TrimSpace(finalText)
+	if turnID == "" || finalText == "" {
+		return false
+	}
+	var presented strings.Builder
+	seenAssistant := false
+	reset := func() {
+		presented.Reset()
+		seenAssistant = false
+	}
+	for _, frame := range frames {
+		if subagentFrameTurnID(frame) != turnID || frame.Event == nil {
+			continue
+		}
+		event := frame.Event
+		updateType := strings.TrimSpace(session.ProtocolSessionUpdateType(event))
+		if updateType == string(session.ProtocolUpdateTypeAgentThought) {
+			reset()
+			continue
+		}
+		if updateType != string(session.ProtocolUpdateTypeAgentMessage) {
+			switch session.EventTypeOf(event) {
+			case session.EventTypeToolCall, session.EventTypeToolResult, session.EventTypePlan:
+				reset()
+			}
+			continue
+		}
+		text := session.EventText(event)
+		if text == "" {
+			continue
+		}
+		presented.WriteString(text)
+		seenAssistant = true
+	}
+	return seenAssistant && strings.TrimSpace(presented.String()) != finalText
 }
 
 func subagentFramesContainAssistantTextForTurn(frames []stream.Frame, turnID string) bool {
@@ -206,6 +285,50 @@ func subagentFramesContainAssistantText(frames []stream.Frame) bool {
 	return false
 }
 
+func subagentFramesContainStructuredAssistantText(frames []stream.Frame) bool {
+	for _, frame := range frames {
+		if frame.Event != nil && session.EventTypeOf(frame.Event) == session.EventTypeAssistant &&
+			strings.TrimSpace(subagentFrameAssistantText(frame)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// discardInitialResultStreamFallbackLocked removes the synthetic boundary
+// seeded before the durable post_spawn boundary. A Result larger than the
+// exact-stream budget has already advanced streamEventBase while evicting its
+// own raw frame, so both retained and oversized seed shapes are recognized.
+// The Task is not discoverable yet, so replacing either shape with pending real
+// ACP frames cannot invalidate a reader cursor. The Task-result-protected latest
+// Final remains available for crash recovery and semantic reconstruction.
+func (t *subagentTask) discardInitialResultStreamFallbackLocked() {
+	if t == nil {
+		return
+	}
+	retainedFallback := false
+	if t.streamEventBase == 0 && len(t.streamFrames) == 1 {
+		frame := t.streamFrames[0]
+		retainedFallback = frame.Event != nil && frame.Event.Scope != nil &&
+			strings.TrimSpace(frame.Event.Scope.Source) == "subagent_result"
+	}
+	oversizedFallback := t.streamEventBase == 1 && len(t.streamFrames) == 0 && t.streamOutputCursor > 0
+	if !retainedFallback && !oversizedFallback {
+		return
+	}
+	for index := range t.streamFrames {
+		t.streamFrames[index] = stream.Frame{}
+	}
+	t.streamFrames = nil
+	t.streamFrameSizes = nil
+	t.streamEventBase = 0
+	t.streamBytes = 0
+	t.streamOutputCursor = 0
+	t.stdout = ""
+	t.stdoutCursor = 0
+	t.semanticRetention = subagentSemanticRetention{}
+}
+
 func (t *subagentTask) applyStreamFrames(frames []stream.Frame) {
 	if t == nil || len(frames) == 0 {
 		return
@@ -213,6 +336,33 @@ func (t *subagentTask) applyStreamFrames(frames []stream.Frame) {
 	t.streamMu.Lock()
 	defer t.streamMu.Unlock()
 	t.applyStreamFramesLocked(frames)
+}
+
+// markSubagentActivityObservationGap advances the transient Task-stream
+// boundary after the endpoint journal discarded presentation-only frames. It
+// intentionally leaves Task lifecycle untouched; later frames and the exact
+// child terminal result continue on the same activity.
+func (t *subagentTask) markSubagentActivityObservationGap(dropped uint64) {
+	if t == nil {
+		return
+	}
+	advance := int64(dropped)
+	if advance <= 0 {
+		advance = 1
+	}
+	t.streamMu.Lock()
+	t.mu.Lock()
+	current := t.streamEventBase + int64(len(t.streamFrames))
+	for index := range t.streamFrames {
+		t.streamFrames[index] = stream.Frame{}
+	}
+	t.streamFrames = nil
+	t.streamFrameSizes = nil
+	t.streamBytes = 0
+	t.streamEventBase = current + advance
+	t.notifyStreamChangeLocked()
+	t.mu.Unlock()
+	t.streamMu.Unlock()
 }
 
 func (t *subagentTask) applyStreamFramesLocked(frames []stream.Frame) {

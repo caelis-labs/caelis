@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -330,7 +331,7 @@ func (tm *taskRuntime) publishSubagentCompletionNoticeAsync(completion *subagent
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(completion.ctx), subagentCompletionNoticeTimeout)
 	go func() {
 		defer cancel()
-		_ = active.handle.SubmitContext(ctx, submission)
+		_ = active.handle.submitRuntimeModelContext(ctx, submission)
 	}()
 }
 
@@ -355,7 +356,7 @@ func subagentCompletionNotice(task *subagentTask, result delegation.Result) (ses
 		text = fmt.Sprintf("Subagent @%s is interrupted.", strings.TrimPrefix(handle, "@"))
 	}
 	return ref, agent.Submission{
-		Kind: agent.SubmissionKindConversation, Text: text,
+		Kind: runtimeinput.ModelContext, Text: text,
 		Actor: session.ActorRef{
 			Kind: session.ActorKindParticipant, ID: agentID,
 			Name: "@" + strings.TrimPrefix(handle, "@"), Role: string(role),

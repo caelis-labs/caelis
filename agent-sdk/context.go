@@ -189,13 +189,25 @@ type ChildActivityEvent struct {
 	Initial bool               `json:"initial,omitempty"`
 	Frame   *stream.Frame      `json:"frame,omitempty"`
 	Result  *delegation.Result `json:"result,omitempty"`
-	Gap     bool               `json:"gap,omitempty"`
+	// Gap marks bounded presentation activity that was not retained by the
+	// endpoint observer journal. It never changes child execution lifecycle.
+	Gap bool `json:"gap,omitempty"`
+	// Dropped is the number of normalized observation frames represented by Gap.
+	Dropped uint64 `json:"dropped,omitempty"`
 }
 
 // ChildActivityObserver consumes target-owned output independently from input
 // admission. Returning nil acknowledges the event cursor to the endpoint slot.
 type ChildActivityObserver interface {
 	ObserveChildActivity(context.Context, ChildActivityEvent) error
+}
+
+// ChildActivityBatchObserver optionally acknowledges one ordered journal batch
+// through a single durable observation boundary. Implementations must apply the
+// batch atomically with respect to their durable cursor: returning nil
+// acknowledges every event through the final cursor.
+type ChildActivityBatchObserver interface {
+	ObserveChildActivityBatch(context.Context, []ChildActivityEvent) error
 }
 
 // ChildActivityObserverBinder atomically installs or replaces the sole output

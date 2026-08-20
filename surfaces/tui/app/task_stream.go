@@ -225,6 +225,9 @@ func (m *Model) subagentOutputTerminalHistoryCached(callID string, view *subagen
 	if !ok || descriptor.Running {
 		return false
 	}
+	if subagentRosterDescriptorIsNewActivity(descriptor, view) {
+		return false
+	}
 	return subagentOutputStatusFromState(string(descriptor.State)) != subagentOutputRunning
 }
 

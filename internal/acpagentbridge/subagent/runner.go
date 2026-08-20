@@ -681,7 +681,6 @@ func (r *Runner) finishDriveLocked(ctx context.Context, run *childRun, stopReaso
 		run.outputPreview = truncateMiddleUTF8(run.outputPreview, maxSubagentPreviewBytes)
 		run.failureDetail = ""
 	}
-	result := childResultLocked(run)
 	done := run.done
 	if done == nil {
 		done = make(chan struct{})
@@ -696,7 +695,7 @@ func (r *Runner) finishDriveLocked(ctx context.Context, run *childRun, stopReaso
 	}
 	if slot != nil {
 		slot.beginTerminalSettlement(done)
-		ack := slot.publishResult(result)
+		ack := slot.publishRunResult(run)
 		go func() {
 			<-ack
 			run.mu.Lock()
@@ -711,6 +710,7 @@ func (r *Runner) finishDriveLocked(ctx context.Context, run *childRun, stopReaso
 	}
 	run.mu.RLock()
 	completion := run.completion
+	result := childResultLocked(run)
 	run.mu.RUnlock()
 	if completion != nil {
 		completion.PublishSubagentCompletion(result)
@@ -939,8 +939,12 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 	var event *session.Event
 	var frame *stream.Frame
 	run.mu.Lock()
-	run.updatedAt = r.clock()
 	acceptOutput := run.running || setupOutput
+	if !acceptOutput {
+		run.mu.Unlock()
+		return
+	}
+	run.updatedAt = r.clock()
 	switch update := env.Update.(type) {
 	case client.ContentChunk:
 		if text := chunkText(update); text != "" {

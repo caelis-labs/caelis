@@ -335,19 +335,22 @@ func TestTurnHandleSubmitNormalizesConversationSubmissions(t *testing.T) {
 func TestTurnHandleSubmitRejectsUnknownSubmissionKind(t *testing.T) {
 	t.Parallel()
 
-	handle := newTestTurnHandle()
-	handle.setRunner(&recordingRunner{})
+	for _, kind := range []SubmissionKind{SubmissionKind("debug"), SubmissionKind("runtime_model_context")} {
+		kind := kind
+		t.Run(string(kind), func(t *testing.T) {
+			t.Parallel()
+			handle := newTestTurnHandle()
+			handle.setRunner(&recordingRunner{})
 
-	err := handle.Submit(context.Background(), SubmitRequest{
-		Kind: SubmissionKind("debug"),
-		Text: "follow up",
-	})
-	if err == nil {
-		t.Fatal("Submit() error = nil, want invalid request")
-	}
-	var gwErr *Error
-	if !As(err, &gwErr) || gwErr.Code != CodeInvalidRequest {
-		t.Fatalf("Submit() error = %v, want invalid_request", err)
+			err := handle.Submit(context.Background(), SubmitRequest{Kind: kind, Text: "follow up"})
+			if err == nil {
+				t.Fatal("Submit() error = nil, want invalid request")
+			}
+			var gwErr *Error
+			if !As(err, &gwErr) || gwErr.Code != CodeInvalidRequest {
+				t.Fatalf("Submit() error = %v, want invalid_request", err)
+			}
+		})
 	}
 }
 

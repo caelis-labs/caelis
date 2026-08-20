@@ -372,6 +372,8 @@ func (s *streamService) readSubagent(_ context.Context, sub *subagentTask, curso
 	if sub == nil {
 		return stream.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent task is required")
 	}
+	sub.streamMu.Lock()
+	defer sub.streamMu.Unlock()
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
 	sub.ensureTerminalStreamFrameLocked()

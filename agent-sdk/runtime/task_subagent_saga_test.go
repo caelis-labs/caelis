@@ -12,6 +12,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -570,8 +571,8 @@ func TestSubagentProducerCompletionDoesNotWaitForCompletionNotice(t *testing.T) 
 	}
 	select {
 	case notice := <-noticeStarted:
-		if notice.Kind != agent.SubmissionKindConversation || !strings.Contains(notice.Text, started.Handle) {
-			t.Fatalf("completion notice = %#v, want ordinary active-run input", notice)
+		if notice.Kind != runtimeinput.ModelContext || !strings.Contains(notice.Text, started.Handle) {
+			t.Fatalf("completion notice = %#v, want model-only active-run input", notice)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("completion notice path was not exercised asynchronously")
@@ -831,6 +832,12 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 				if getErr != nil || taskStringValue(entry.Metadata["spawn_status"]) != test.wantStatus {
 					t.Fatalf("durable spawn status = entry %#v error %v, want %q", entry, getErr, test.wantStatus)
 				}
+				if test.rollForward {
+					cursor, ok := taskInt64Value(entry.Metadata[subagentStreamEventCursorMeta])
+					if !ok || cursor < 1 {
+						t.Fatalf("post_spawn stream cursor = %d/%v, want durable Final fallback", cursor, ok)
+					}
+				}
 				if test.wantStatus == spawnStatusUnknownOutcome {
 					if got := taskStringValue(entry.Result["error"]); got != subagentSpawnCompensationUnknownDiagnostic {
 						t.Fatalf("unknown compensation error = %q, want fixed diagnostic", got)
@@ -872,6 +879,22 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 				entry, getErr := store.Get(context.Background(), taskID)
 				if getErr != nil || taskStringValue(entry.Metadata["spawn_status"]) != spawnStatusCommitted {
 					t.Fatalf("rolled-forward entry = %#v, %v", entry, getErr)
+				}
+				streamSnapshot, readErr := restarted.Streams().Read(context.Background(), taskstream.ReadRequest{
+					Ref: taskstream.Ref{SessionID: active.SessionID, TaskID: taskID},
+				})
+				if readErr != nil {
+					t.Fatalf("rolled-forward Task stream read error = %v", readErr)
+				}
+				assistantFinals := 0
+				for _, frame := range streamSnapshot.Frames {
+					if frame.Event != nil && session.EventTypeOf(frame.Event) == session.EventTypeAssistant &&
+						session.EventText(frame.Event) == "saga result" {
+						assistantFinals++
+					}
+				}
+				if assistantFinals != 1 {
+					t.Fatalf("rolled-forward assistant Finals = %d in %#v, want one", assistantFinals, streamSnapshot.Frames)
 				}
 			}
 			assertSubagentSagaModelRoundTrip(t, sessions, active.SessionRef)

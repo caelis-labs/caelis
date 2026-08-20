@@ -2,7 +2,6 @@ package subagent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -39,7 +38,7 @@ type childSlot struct {
 	journal            []*childActivityJournalItem
 	journalBytes       int
 	delivering         bool
-	overflowed         bool
+	deliveringCount    int
 	terminalActivity   string
 	steeringActive     bool
 	steeringFrames     []stream.Frame
@@ -144,16 +143,21 @@ func (s *childSlot) finishPromptDispatch(done chan struct{}) {
 
 type childActivityJournalItem struct {
 	event agent.ChildActivityEvent
-	size  int
-	done  chan struct{}
-	once  sync.Once
+	// terminal is the immutable result generation captured at the producer's
+	// terminal fence. Copying Result copies only string headers, so the exact
+	// Final remains available without charging or duplicating its potentially
+	// large backing bytes in the bounded presentation journal.
+	terminal   *delegation.Result
+	size       int
+	frameCount uint64
+	done       chan struct{}
+	once       sync.Once
 }
 
 type childActivityCheckpoint struct {
 	activityID        string
 	activityInitial   bool
 	terminalActivity  string
-	overflowed        bool
 	outputQuarantined bool
 	setupActive       bool
 	setupFrames       []stream.Frame
@@ -279,7 +283,6 @@ func (s *childSlot) beginActivityKind(activityID string, run *childRun, initial 
 	s.activityID = strings.TrimSpace(activityID)
 	s.activityInitial = initial
 	s.terminalActivity = ""
-	s.overflowed = false
 	s.steeringActive = false
 	s.steeringFrames = nil
 	s.outputQuarantined = false
@@ -306,7 +309,7 @@ func (s *childSlot) activityCheckpoint() childActivityCheckpoint {
 	defer s.mu.Unlock()
 	return childActivityCheckpoint{
 		activityID: s.activityID, activityInitial: s.activityInitial,
-		terminalActivity: s.terminalActivity, overflowed: s.overflowed,
+		terminalActivity:  s.terminalActivity,
 		outputQuarantined: s.outputQuarantined, setupActive: s.setupActive,
 		setupFrames: append([]stream.Frame(nil), s.setupFrames...),
 	}
@@ -323,7 +326,6 @@ func (s *childSlot) restoreActivity(checkpoint childActivityCheckpoint, run *chi
 	s.activityID = checkpoint.activityID
 	s.activityInitial = checkpoint.activityInitial
 	s.terminalActivity = checkpoint.terminalActivity
-	s.overflowed = checkpoint.overflowed
 	s.steeringActive = false
 	s.steeringFrames = nil
 	s.outputQuarantined = checkpoint.outputQuarantined
@@ -373,6 +375,10 @@ func (s *childSlot) publishRunFrame(run *childRun, frame stream.Frame) {
 	}
 	if s.setupActive {
 		s.setupFrames = append(s.setupFrames, stream.CloneFrame(frame))
+		s.mu.Unlock()
+		return
+	}
+	if s.activityID != "" && s.terminalActivity == s.activityID {
 		s.mu.Unlock()
 		return
 	}
@@ -472,23 +478,32 @@ func (s *childSlot) revokeActiveInput() (*childRun, context.CancelFunc) {
 	}
 }
 
-func (s *childSlot) publishResult(result delegation.Result) <-chan struct{} {
+func (s *childSlot) publishRunResult(run *childRun) <-chan struct{} {
 	done := make(chan struct{})
-	if s == nil {
+	if s == nil || run == nil {
 		close(done)
 		return done
 	}
+	// Serialize the terminal snapshot with ACP notification ingress. An update
+	// already in flight is published before this terminal item; later updates see
+	// the terminal fence and cannot mutate or append to the settled activity.
+	s.ingressMu.Lock()
+	defer s.ingressMu.Unlock()
 	s.mu.Lock()
 	activityID := s.activityID
 	initial := s.activityInitial
-	if activityID == "" || s.terminalActivity == activityID {
+	if s.run != run || activityID == "" || s.terminalActivity == activityID {
 		s.mu.Unlock()
 		close(done)
 		return done
 	}
 	s.terminalActivity = activityID
+	s.outputQuarantined = true
 	s.mu.Unlock()
-	item := s.appendEvent(agent.ChildActivityEvent{ActivityID: activityID, Initial: initial, Result: &result})
+	run.mu.RLock()
+	result := childResultLocked(run)
+	run.mu.RUnlock()
+	item := s.appendJournalEvent(agent.ChildActivityEvent{ActivityID: activityID, Initial: initial}, &result)
 	if item == nil {
 		close(done)
 		return done
@@ -497,83 +512,38 @@ func (s *childSlot) publishResult(result delegation.Result) <-chan struct{} {
 }
 
 func (s *childSlot) appendEvent(raw agent.ChildActivityEvent) *childActivityJournalItem {
+	return s.appendJournalEvent(raw, nil)
+}
+
+func (s *childSlot) appendJournalEvent(raw agent.ChildActivityEvent, terminal *delegation.Result) *childActivityJournalItem {
 	if s == nil {
 		return nil
 	}
 	event := agent.CloneChildActivityEvent(raw)
 	s.mu.Lock()
-	if s.overflowed {
-		if len(s.journal) == 0 {
-			s.mu.Unlock()
-			return nil
-		}
-		item := s.journal[len(s.journal)-1]
-		s.mu.Unlock()
-		return item
-	}
 	s.cursor++
 	event.Cursor = s.cursor
 	event.Target = agent.NormalizeChildEndpointRef(s.target)
+	if merged := s.mergePendingActivityEventLocked(event); merged != nil {
+		s.compactActivityJournalLocked()
+		s.mu.Unlock()
+		s.triggerDelivery()
+		return merged
+	}
 	size := childActivityEventSize(event)
-	item := &childActivityJournalItem{event: event, size: size, done: make(chan struct{})}
+	frameCount := uint64(0)
+	if event.Frame != nil {
+		frameCount = 1
+	}
+	item := &childActivityJournalItem{
+		event: event, terminal: terminal, size: size, frameCount: frameCount, done: make(chan struct{}),
+	}
 	s.journal = append(s.journal, item)
 	s.journalBytes += size
-	overflow := len(s.journal) > childActivityJournalMaxEvents || s.journalBytes > childActivityJournalMaxBytes
-	if overflow && !s.overflowed {
-		s.overflowed = true
-		for _, dropped := range s.journal {
-			dropped.acknowledge()
-		}
-		s.cursor++
-		unknown := delegation.Result{
-			TaskID: strings.TrimSpace(s.target.EndpointKey), State: delegation.StateUnknownOutcome,
-			Error: "child activity observation gap", OutputPreview: "child activity observation gap",
-			UpdatedAt: time.Now(),
-		}
-		gap := agent.ChildActivityEvent{
-			Target: agent.NormalizeChildEndpointRef(s.target), ActivityID: event.ActivityID,
-			Cursor: s.cursor, Initial: event.Initial, Gap: true, Result: &unknown,
-		}
-		gapItem := &childActivityJournalItem{event: gap, size: childActivityEventSize(gap), done: make(chan struct{})}
-		s.journal = []*childActivityJournalItem{gapItem}
-		s.journalBytes = gapItem.size
-		s.terminalActivity = event.ActivityID
-		item = gapItem
-	}
+	s.compactActivityJournalLocked()
 	s.mu.Unlock()
 	s.triggerDelivery()
-	if overflow {
-		go s.isolateOverflow()
-	}
 	return item
-}
-
-func childActivityEventSize(event agent.ChildActivityEvent) int {
-	encoded, err := json.Marshal(event)
-	if err != nil {
-		return 1
-	}
-	return max(len(encoded), 1)
-}
-
-func (s *childSlot) isolateOverflow() {
-	run, cancel := s.revokeActiveInput()
-	if cancel != nil {
-		cancel()
-	}
-	if run == nil {
-		return
-	}
-	run.mu.RLock()
-	acpClient := run.client
-	runCancel := run.cancel
-	run.mu.RUnlock()
-	if runCancel != nil {
-		runCancel()
-	}
-	if acpClient != nil {
-		_ = acpClient.Close(context.Background())
-	}
 }
 
 func (s *childSlot) triggerDelivery() {
@@ -609,21 +579,60 @@ func (s *childSlot) deliverJournal() {
 			return
 		}
 		observer := s.observer
-		item := s.journal[0]
-		event := agent.CloneChildActivityEvent(item.event)
+		count := 1
+		if _, ok := observer.(agent.ChildActivityBatchObserver); ok {
+			count = min(len(s.journal), childActivityJournalMaxEvents)
+			for index := range count {
+				if s.journal[index].terminal != nil {
+					count = index + 1
+					break
+				}
+			}
+		}
+		items := append([]*childActivityJournalItem(nil), s.journal[:count]...)
+		s.deliveringCount = len(items)
 		s.mu.Unlock()
-		err := observer.ObserveChildActivity(context.Background(), event)
+		events := make([]agent.ChildActivityEvent, 0, len(items))
+		for _, item := range items {
+			event := agent.CloneChildActivityEvent(item.event)
+			if item.terminal != nil {
+				result := delegation.CloneResult(*item.terminal)
+				event.Result = &result
+			}
+			events = append(events, event)
+		}
+		var err error
+		if batch, ok := observer.(agent.ChildActivityBatchObserver); ok {
+			err = batch.ObserveChildActivityBatch(context.Background(), events)
+		} else {
+			err = observer.ObserveChildActivity(context.Background(), events[0])
+		}
 		s.deliveryMu.Unlock()
+		s.mu.Lock()
+		s.deliveringCount = 0
+		if err == nil && len(s.journal) >= len(items) {
+			matched := true
+			for index, item := range items {
+				matched = matched && s.journal[index] == item
+			}
+			if matched {
+				s.journal = s.journal[len(items):]
+				for _, item := range items {
+					s.journalBytes -= item.size
+					item.acknowledge()
+				}
+			}
+		}
+		if err != nil {
+			// A selected callback is no longer in flight. Re-apply the hard
+			// presentation budget before retrying it with this or a replacement
+			// observer.
+			s.compactActivityJournalLocked()
+		}
+		s.mu.Unlock()
 		if err != nil {
 			return
 		}
-		s.mu.Lock()
-		if len(s.journal) > 0 && s.journal[0] == item {
-			s.journal = s.journal[1:]
-			s.journalBytes -= item.size
-			item.acknowledge()
-		}
-		s.mu.Unlock()
 	}
 }
 

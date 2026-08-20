@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -415,7 +416,13 @@ func (a *Agent) drainPendingSubmissions(
 		message, displayText, meta := userdisplay.Resolve(text, submission.DisplayInput, submission.ContentParts, submission.Metadata)
 		eventType := session.EventTypeUser
 		actor := session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
-		if session.ActorRefHasIdentity(submission.Actor) {
+		if submission.Kind == runtimeinput.ModelContext {
+			if !session.ActorRefHasIdentity(submission.Actor) {
+				return accepted, fmt.Errorf("agent-sdk/runtime/chat: model-context submission requires source identity")
+			}
+			eventType = session.EventTypeContext
+			actor = session.CloneActorRef(submission.Actor)
+		} else if session.ActorRefHasIdentity(submission.Actor) {
 			actor = session.CloneActorRef(submission.Actor)
 		}
 		event := &session.Event{
@@ -444,7 +451,7 @@ func (a *Agent) drainPendingSubmissions(
 
 func isModelInputSubmission(sub agent.Submission) bool {
 	switch sub.Kind {
-	case agent.SubmissionKindConversation:
+	case agent.SubmissionKindConversation, runtimeinput.ModelContext:
 		return true
 	default:
 		return false
