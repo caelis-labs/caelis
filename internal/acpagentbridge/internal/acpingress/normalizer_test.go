@@ -153,7 +153,7 @@ func TestNormalizeToolCallDefaultsMissingStatusToPending(t *testing.T) {
 	}
 }
 
-func TestNormalizeExternalToolCallCannotDeclareRuntimeToolName(t *testing.T) {
+func TestNormalizeExternalToolCallPreservesPresentationNameButStripsBinding(t *testing.T) {
 	t.Parallel()
 
 	meta := metautil.WithRuntimeSection(
@@ -173,8 +173,8 @@ func TestNormalizeExternalToolCallCannotDeclareRuntimeToolName(t *testing.T) {
 	if update == nil {
 		t.Fatal("NormalizeUpdate() = nil, want UI-only tool event")
 	}
-	if got := metautil.String(update.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "" {
-		t.Fatalf("external runtime tool name = %q, want stripped", got)
+	if got := metautil.String(update.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RunCommand" {
+		t.Fatalf("external runtime tool name = %q, want UI-only presentation identity preserved", got)
 	}
 	if got := metautil.RuntimeSection(update.Meta, "binding"); len(got) != 0 {
 		t.Fatalf("external runtime binding = %#v, want stripped", got)

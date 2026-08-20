@@ -21,12 +21,17 @@ func acpMuxCommandAnchor(handle string) eventstream.Envelope {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
-			RawOutput: map[string]any{"handle": handle, "state": "running"},
-			Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-				metautil.RuntimeToolName: "RunCommand",
-			}),
+			RawOutput: map[string]any{"handle": handle, "state": "running", "target_kind": "command"},
+			Meta:      acpMuxCommandMeta(),
 		},
 	}
+}
+
+func acpMuxCommandMeta() map[string]any {
+	meta := metautil.WithTerminalInfo(nil, "command-1")
+	return metautil.WithRuntimeSection(meta, metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "RunCommand",
+	})
 }
 
 func acpMuxTerminalCommandAnchor(handle string) eventstream.Envelope {
@@ -34,7 +39,7 @@ func acpMuxTerminalCommandAnchor(handle string) eventstream.Envelope {
 	completed := schema.ToolStatusCompleted
 	update := envelope.Update.(schema.ToolCallUpdate)
 	update.Status = &completed
-	update.RawOutput = map[string]any{"handle": handle, "state": "completed"}
+	update.RawOutput = map[string]any{"handle": handle, "state": "completed", "target_kind": "command"}
 	envelope.Update = update
 	return envelope
 }
@@ -57,7 +62,8 @@ func acpMuxSubagentAnchor(handle string) eventstream.Envelope {
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1",
 			RawOutput: map[string]any{
-				"handle": handle, "state": "running", "parent_call": "spawn-1", "parent_tool": "Spawn",
+				"handle": handle, "state": "running", "target_kind": "subagent",
+				"parent_call": "spawn-1", "parent_tool": "Spawn",
 			},
 			Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
 				metautil.RuntimeToolName: "Spawn",

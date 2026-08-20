@@ -75,7 +75,7 @@ func projectedBuiltinToolProfile(name string) (projectedToolProfile, bool) {
 	case shell.RunCommandToolName:
 		return projectedToolProfile{kind: projectedToolKindExecute, title: projectedTitleCommandAction, result: projectedResultCommand, terminalKnown: true, terminalPanel: true}, true
 	case tasktool.ToolName:
-		return projectedToolProfile{kind: projectedToolKindExecute, title: projectedTitleCommandAction, result: projectedResultTask, terminalKnown: true}, true
+		return projectedToolProfile{kind: projectedToolKindOther, title: projectedTitleCommandAction, result: projectedResultTask, terminalKnown: true}, true
 	case plan.ToolName, tool.ToolSearchToolName:
 		return projectedToolProfile{kind: projectedToolKindOther}, true
 	case skilltool.ToolName:

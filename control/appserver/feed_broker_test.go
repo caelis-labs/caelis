@@ -671,7 +671,7 @@ func TestFeedBrokerFreshReplayLetsStoredTerminalOutputWinAfterRingEviction(t *te
 }
 
 func TestFeedBrokerFreshReplaySelectsFinalCommandTaskMaterialization(t *testing.T) {
-	terminalMeta := func(name string, start, cursor int64, text string) map[string]any {
+	terminalMeta := func(name, terminalID string, start, cursor int64, text string) map[string]any {
 		meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTask, map[string]any{
 			metautil.RuntimeTaskID:         "task-1",
 			metautil.RuntimeTaskTerminalID: "terminal-1",
@@ -679,6 +679,7 @@ func TestFeedBrokerFreshReplaySelectsFinalCommandTaskMaterialization(t *testing.
 			metautil.RuntimeOutputCursor:   cursor,
 			metautil.RuntimeOutputDelta:    text,
 		})
+		meta = metautil.WithTerminalInfo(meta, terminalID)
 		return metautil.WithRuntimeSection(meta, metautil.RuntimeTool, map[string]any{
 			metautil.RuntimeToolName: name,
 		})
@@ -708,13 +709,13 @@ func TestFeedBrokerFreshReplaySelectsFinalCommandTaskMaterialization(t *testing.
 			1, "command-call-1", "RunCommand", "running",
 			map[string]any{"command": "chunked"},
 			map[string]any{"handle": "command", "state": "running", "target_kind": "command"},
-			terminalMeta("RunCommand", 0, 7, "CHUNK_A"),
+			terminalMeta("RunCommand", "command-call-1", 0, 7, "CHUNK_A"),
 		),
 		toolResult(
 			2, "task-wait-1", "Task", "completed",
 			map[string]any{"action": "wait", "handle": "command"},
 			map[string]any{"handle": "command", "state": "running", "target_kind": "command"},
-			terminalMeta("Task", 7, 10, "_B\n"),
+			terminalMeta("Task", "terminal-1", 7, 10, "_B\n"),
 		),
 		toolResult(
 			3, "task-wait-2", "Task", "completed",
@@ -723,7 +724,7 @@ func TestFeedBrokerFreshReplaySelectsFinalCommandTaskMaterialization(t *testing.
 				"handle": "command", "state": "completed", "target_kind": "command",
 				"result": "CHUNK_A_B\nCHUNK_C\n",
 			},
-			terminalMeta("Task", 0, 18, "CHUNK_A_B\nCHUNK_C\n"),
+			terminalMeta("Task", "terminal-1", 0, 18, "CHUNK_A_B\nCHUNK_C\n"),
 		),
 	}}
 	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{RingEvents: 8, SubscriberQueue: 8})
@@ -748,6 +749,34 @@ func TestFeedBrokerFreshReplaySelectsFinalCommandTaskMaterialization(t *testing.
 	}
 	if _, open := <-result.Subscription.Backfill(); open {
 		t.Fatal("fresh replay returned more than the three durable tool-result states")
+	}
+}
+
+func TestFreshReplayTerminalOwnerRequiresTypedCommandAnchor(t *testing.T) {
+	t.Parallel()
+
+	nameOnly := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "RunCommand",
+	})
+	envelope := eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-spoof",
+			RawOutput: map[string]any{"handle": "command"}, Meta: nameOnly,
+		},
+	}
+	if owner := freshReplayTerminalOwner(envelope); owner != nil {
+		t.Fatalf("runtime tool-name spoof claimed replay owner %#v", owner)
+	}
+
+	typed := metautil.WithTerminalInfo(nameOnly, "command-spoof")
+	update := envelope.Update.(schema.ToolCallUpdate)
+	update.RawOutput = map[string]any{"handle": "command", "target_kind": "command"}
+	update.Meta = typed
+	envelope.Update = update
+	owner := freshReplayTerminalOwner(envelope)
+	if owner == nil || owner.ToolCallID != "command-spoof" || owner.ToolName != "RunCommand" {
+		t.Fatalf("typed command anchor owner = %#v", owner)
 	}
 }
 

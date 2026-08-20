@@ -43,6 +43,37 @@ func TestSubagentSessionMetaMarksParentAndTask(t *testing.T) {
 	}
 }
 
+func TestChildACPUpdatePreservesUIOnlyRuntimeToolIdentity(t *testing.T) {
+	t.Parallel()
+
+	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "SendMessage",
+	})
+	envelope := client.UpdateEnvelope{
+		SessionID: "child-session",
+		Update: client.ToolCall{
+			SessionUpdate: client.UpdateToolCall,
+			ToolCallID:    "message-1",
+			Title:         "Send message to @tova: ready",
+			Kind:          "other",
+			Meta:          meta,
+		},
+	}
+	run := &childRun{
+		anchor: delegation.Anchor{TaskID: "task-1", SessionID: "child-session", AgentID: "child-1"},
+		taskID: "task-1", agentName: "external",
+	}
+	event := run.acpUpdateEvent(envelope, time.Unix(1, 0))
+	update := session.ProtocolUpdateOf(event)
+	if update == nil {
+		t.Fatal("acpUpdateEvent() = nil, want tool event")
+	}
+	got := metautil.String(update.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName)
+	if got != "SendMessage" {
+		t.Fatalf("runtime tool name = %q, want external UI-only presentation identity preserved", got)
+	}
+}
+
 func TestMessageAcknowledgementWithoutTerminalStateIsUnknownOutcome(t *testing.T) {
 	t.Parallel()
 

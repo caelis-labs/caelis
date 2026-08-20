@@ -104,7 +104,7 @@ func normalizeToolCall(call client.ToolCall, opts Options) *session.Event {
 	if err != nil || protocolUpdate == nil {
 		return nil
 	}
-	protocolUpdate.Meta = externalToolMeta(protocolUpdate.Meta)
+	protocolUpdate.Meta = ingressToolMeta(protocolUpdate.Meta)
 	protocolUpdate.Status = firstNonEmpty(protocolUpdate.Status, acpschema.ToolStatusPending)
 	event := baseEvent(
 		updateType,
@@ -128,7 +128,7 @@ func normalizeToolCallUpdate(update client.ToolCallUpdate, opts Options) *sessio
 	if err != nil || protocolUpdate == nil {
 		return nil
 	}
-	protocolUpdate.Meta = externalToolMeta(protocolUpdate.Meta)
+	protocolUpdate.Meta = ingressToolMeta(protocolUpdate.Meta)
 	event := baseEvent(
 		updateType,
 		eventType,
@@ -143,13 +143,11 @@ func normalizeToolCallUpdate(update client.ToolCallUpdate, opts Options) *sessio
 	return event
 }
 
-func externalToolMeta(meta map[string]any) map[string]any {
-	// An external ACP peer owns its standard title, kind, content, and terminal
-	// extensions, but it cannot declare a Caelis Runtime tool identity. Without
-	// this ingress fence, display metadata could promote an arbitrary tool into
-	// an exact built-in profile.
-	meta = metautil.WithoutRuntimeSections(meta, "binding")
-	return metautil.WithoutRuntimeSectionKeys(meta, metautil.RuntimeTool, metautil.RuntimeToolName)
+func ingressToolMeta(meta map[string]any) map[string]any {
+	// Tool name is UI-only presentation identity supplied by the producing ACP
+	// Agent. Binding metadata is different: it can claim durable Task/result
+	// relations, so ingress must continue to remove it.
+	return metautil.WithoutRuntimeSections(meta, "binding")
 }
 
 func normalizePlanUpdate(update client.PlanUpdate, opts Options) *session.Event {

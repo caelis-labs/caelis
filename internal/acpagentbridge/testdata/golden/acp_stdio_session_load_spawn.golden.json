@@ -127,7 +127,7 @@
       "sessionUpdate": "tool_call",
       "toolCallId": "wait-one",
       "title": "Task wait",
-      "kind": "execute",
+      "kind": "other",
       "status": "pending",
       "rawInput": {
         "action": "wait",
@@ -151,7 +151,7 @@
       "sessionUpdate": "tool_call_update",
       "toolCallId": "wait-one",
       "title": "Task wait",
-      "kind": "execute",
+      "kind": "other",
       "status": "completed",
       "rawInput": {
         "action": "wait",
@@ -247,7 +247,7 @@
       "sessionUpdate": "tool_call",
       "toolCallId": "wait-two",
       "title": "Task wait",
-      "kind": "execute",
+      "kind": "other",
       "status": "pending",
       "rawInput": {
         "action": "wait",
@@ -271,7 +271,7 @@
       "sessionUpdate": "tool_call_update",
       "toolCallId": "wait-two",
       "title": "Task wait",
-      "kind": "execute",
+      "kind": "other",
       "status": "completed",
       "rawInput": {
         "action": "wait",

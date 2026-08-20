@@ -3,6 +3,8 @@ package appserver
 import (
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -295,24 +297,25 @@ func freshReplayTerminalMeta(envelope eventstream.Envelope) map[string]any {
 }
 
 func freshReplayTerminalOwner(envelope eventstream.Envelope) *eventstream.ParentToolRelation {
-	toolName := metautil.String(
-		freshReplayTerminalMeta(envelope),
-		metautil.Root,
-		metautil.Runtime,
-		metautil.RuntimeTool,
-		metautil.RuntimeToolName,
-	)
-	if toolName != shell.RunCommandToolName {
-		return nil
-	}
 	var callID string
+	var input, output map[string]any
 	switch update := envelope.Update.(type) {
 	case schema.ToolCall:
 		callID = update.ToolCallID
+		input, _ = update.RawInput.(map[string]any)
+		output, _ = update.RawOutput.(map[string]any)
 	case schema.ToolCallUpdate:
 		callID = update.ToolCallID
+		input, _ = update.RawInput.(map[string]any)
+		output, _ = update.RawOutput.(map[string]any)
 	}
 	if callID = strings.TrimSpace(callID); callID == "" {
+		return nil
+	}
+	meta := freshReplayTerminalMeta(envelope)
+	terminalInfo, hasTerminalInfo := metautil.TerminalInfo(meta)
+	if !strings.EqualFold(display.ToolTaskTargetKind(input, output, meta), string(task.KindCommand)) ||
+		!hasTerminalInfo || strings.TrimSpace(terminalInfo.TerminalID) != callID {
 		return nil
 	}
 	return &eventstream.ParentToolRelation{ToolCallID: callID, ToolName: shell.RunCommandToolName}

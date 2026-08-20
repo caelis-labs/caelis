@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	sdkstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
@@ -124,7 +125,10 @@ func TestACPTaskStreamMuxSilencesRecoverableSubagentGap(t *testing.T) {
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "spawn-1",
-			RawOutput:     map[string]any{"handle": "maia", "state": "running"},
+			RawOutput: map[string]any{
+				"handle": "maia", "state": "running", "target_kind": "subagent",
+				"parent_call": "spawn-1", "parent_tool": "Spawn",
+			},
 			Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
 				metautil.RuntimeToolName: "Spawn",
 			}),
@@ -189,14 +193,12 @@ func TestACPTaskStreamMuxDetachedDeliveryOutlivesParentPrompt(t *testing.T) {
 		taskMuxes:        map[string]map[*acpTaskStreamMux]struct{}{},
 	}
 	mux := agent.startACPTaskStreamMux(context.Background(), "session-1")
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "RunCommand",
-	})
+	meta := acpMuxCommandMeta()
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
-			RawOutput: map[string]any{"handle": "command", "state": "running"}, Meta: meta,
+			RawOutput: map[string]any{"handle": "command", "state": "running", "target_kind": "command"}, Meta: meta,
 		},
 	})
 	select {
@@ -357,14 +359,12 @@ func TestACPTaskStreamMuxProjectsControlTaskRecordThroughACPAdapter(t *testing.T
 	}
 	mux := newACPTaskStreamMux(context.Background(), taskstream.New(controlService), taskstream.Principal{ID: "user-1"}, "session-1")
 	defer mux.Close()
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "RunCommand",
-	})
+	meta := acpMuxCommandMeta()
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
-			RawOutput: map[string]any{"handle": "command", "state": "running"}, Meta: meta,
+			RawOutput: map[string]any{"handle": "command", "state": "running", "target_kind": "command"}, Meta: meta,
 		},
 	})
 	select {
@@ -412,14 +412,12 @@ func TestACPTaskStreamMuxMakesSubscribeFailureVisible(t *testing.T) {
 	}
 	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
 	defer mux.Close()
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "RunCommand",
-	})
+	meta := acpMuxCommandMeta()
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
-			RawOutput: map[string]any{"handle": "command", "state": "running"}, Meta: meta,
+			RawOutput: map[string]any{"handle": "command", "state": "running", "target_kind": "command"}, Meta: meta,
 		},
 	})
 
@@ -451,14 +449,12 @@ func TestACPTaskStreamMuxRetriesAnchorAfterEarlyDirectoryMiss(t *testing.T) {
 	}
 	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
 	defer mux.Close()
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "RunCommand",
-	})
+	meta := acpMuxCommandMeta()
 	anchor := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
-			RawOutput: map[string]any{"handle": "command", "state": "running"}, Meta: meta,
+			RawOutput: map[string]any{"handle": "command", "state": "running", "target_kind": "command"}, Meta: meta,
 		},
 	}
 
@@ -498,14 +494,12 @@ func TestACPTaskStreamMuxExhaustsRetryWithOneSanitizedNotice(t *testing.T) {
 	}
 	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
 	defer mux.Close()
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "RunCommand",
-	})
+	meta := acpMuxCommandMeta()
 	anchor := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
-			RawOutput: map[string]any{"handle": "command-43", "state": "running"}, Meta: meta,
+			RawOutput: map[string]any{"handle": "command-43", "state": "running", "target_kind": "command"}, Meta: meta,
 		},
 	}
 
@@ -728,7 +722,7 @@ func TestACPTaskStreamMuxDoesNotRetryAfterParentTerminalOrSeal(t *testing.T) {
 		terminal := anchor
 		update := terminal.Update.(schema.ToolCallUpdate)
 		update.Status = &completed
-		update.RawOutput = map[string]any{"handle": "command", "state": "completed"}
+		update.RawOutput = map[string]any{"handle": "command", "state": "completed", "target_kind": "command"}
 		terminal.Update = update
 		mux.Observe(terminal)
 		mux.Observe(anchor)
@@ -763,11 +757,16 @@ func TestACPTaskStreamAnchorUsesTypedToolStatusForParentTerminal(t *testing.T) {
 
 	rawTerminal := acpMuxCommandAnchor("command")
 	rawUpdate := rawTerminal.Update.(schema.ToolCallUpdate)
-	rawUpdate.RawOutput = map[string]any{"handle": "command", "state": "completed"}
+	rawUpdate.RawOutput = map[string]any{"handle": "command", "state": "completed", "target_kind": "command"}
 	rawTerminal.Update = rawUpdate
 	anchor, ok := acpTaskStreamAnchorFromEnvelope(rawTerminal)
 	if !ok {
-		t.Fatal("raw-output anchor was not recognized")
+		meta := eventstream.UpdateMeta(rawTerminal.Update)
+		info, hasInfo := metautil.TerminalInfo(meta)
+		update := rawTerminal.Update.(schema.ToolCallUpdate)
+		output, _ := update.RawOutput.(map[string]any)
+		t.Fatalf("raw-output anchor was not recognized: target_kind=%q terminal=%#v/%t meta=%#v output=%#v",
+			display.ToolTaskTargetKind(nil, output, meta), info, hasInfo, meta, output)
 	}
 	if anchor.parentTerminal {
 		t.Fatal("free-form output state permanently closed Task stream discovery")
@@ -787,6 +786,37 @@ func TestACPTaskStreamAnchorUsesTypedToolStatusForParentTerminal(t *testing.T) {
 	}
 }
 
+func TestACPTaskStreamAnchorDoesNotTrustRuntimeToolName(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		toolName string
+		callID   string
+		output   map[string]any
+	}{
+		{name: "command", toolName: "RunCommand", callID: "command-spoof", output: map[string]any{"handle": "command"}},
+		{name: "subagent", toolName: "Spawn", callID: "spawn-spoof", output: map[string]any{"handle": "helper"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+				metautil.RuntimeToolName: tc.toolName,
+			})
+			envelope := eventstream.Envelope{
+				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+				Update: schema.ToolCallUpdate{
+					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: tc.callID,
+					RawOutput: tc.output, Meta: meta,
+				},
+			}
+			if anchor, ok := acpTaskStreamAnchorFromEnvelope(envelope); ok {
+				t.Fatalf("runtime tool-name spoof produced Task anchor %#v", anchor)
+			}
+		})
+	}
+}
+
 func TestACPTaskStreamMuxStopsInFlightAttachRetryAtObservationBoundary(t *testing.T) {
 	t.Parallel()
 
@@ -800,7 +830,7 @@ func TestACPTaskStreamMuxStopsInFlightAttachRetryAtObservationBoundary(t *testin
 				completed := schema.ToolStatusCompleted
 				update := anchor.Update.(schema.ToolCallUpdate)
 				update.Status = &completed
-				update.RawOutput = map[string]any{"handle": "command", "state": "completed"}
+				update.RawOutput = map[string]any{"handle": "command", "state": "completed", "target_kind": "command"}
 				anchor.Update = update
 				mux.Observe(anchor)
 			},
@@ -886,10 +916,8 @@ func TestACPTaskStreamMuxKeepsHardResolutionReasonsExplicit(t *testing.T) {
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 				Update: schema.ToolCallUpdate{
 					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
-					RawOutput: map[string]any{"handle": "command", "state": "running"},
-					Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-						metautil.RuntimeToolName: "RunCommand",
-					}),
+					RawOutput: map[string]any{"handle": "command", "state": "running", "target_kind": "command"},
+					Meta:      acpMuxCommandMeta(),
 				},
 			})
 

@@ -6,6 +6,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
 func TestBuiltinToolPresentationRequiresExactDefinitionName(t *testing.T) {
@@ -22,6 +23,9 @@ func TestBuiltinToolPresentationRequiresExactDefinitionName(t *testing.T) {
 	}
 	if got := projectedToolKind("SEARCH"); got != projectedToolKindOther {
 		t.Fatalf("projectedToolKind(SEARCH) = %q, want generic other", got)
+	}
+	if got := projectedToolKind(tasktool.ToolName); got != projectedToolKindOther {
+		t.Fatalf("projectedToolKind(Task) = %q, want control-plane other", got)
 	}
 	if got := projectedToolTitle(spawn.ToolName, map[string]any{"agent": "self", "prompt": "inspect"}); got != "Spawn self: inspect" {
 		t.Fatalf("projectedToolTitle(Spawn) = %q", got)

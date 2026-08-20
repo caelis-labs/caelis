@@ -885,43 +885,50 @@ func TestSemanticBoundaryGapMaterializesOnlyBetweenVisibleRows(t *testing.T) {
 	}
 }
 
-func TestFailedTaskReadRemainsVisibleAfterHiddenStart(t *testing.T) {
+func TestFailedTaskControlRemainsVisibleWithoutExecutePresentation(t *testing.T) {
 	t.Parallel()
 
-	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	next, _ := model.applyTranscriptEvents([]TranscriptEvent{
-		{
-			Kind: TranscriptEventNarrative, Scope: ACPProjectionMain, TurnID: "turn-1",
-			NarrativeKind: TranscriptNarrativeReasoning, Text: "before read", Final: true,
-		},
-		{
-			Kind: TranscriptEventTool, Scope: ACPProjectionMain, TurnID: "turn-1",
-			ToolCallID: "read-1", ToolName: "Task", ToolTaskAction: "read", ToolStatus: "in_progress",
-		},
-		{
-			Kind: TranscriptEventTool, Scope: ACPProjectionMain, TurnID: "turn-1",
-			ToolCallID: "read-1", ToolName: "Task", ToolTaskAction: "read",
-			ToolStatus: "failed", ToolError: true, ToolOutput: "read failed", Final: true,
-		},
-	})
-	model = next.(*Model)
-	block := requireMainACPTurnBlockForTest(t, model)
-	var failed *SubagentEvent
-	for i := range block.Events {
-		event := &block.Events[i]
-		if event.Kind == SEToolCall && strings.EqualFold(event.Name, "Task") {
-			failed = event
-			break
-		}
-	}
-	if failed == nil || !failed.Done || !failed.Err || !strings.Contains(failed.Output, "read failed") {
-		t.Fatalf("failed Task event = %#v (events %#v), want visible terminal error", failed, block.Events)
-	}
-	rows := block.Render(BlockRenderContext{
-		Width: 120, TermWidth: 120, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
-	})
-	if plain := joinRenderedPlain(rows); !strings.Contains(plain, "read failed") {
-		t.Fatalf("failed Task output is not visible\nplain:\n%s", plain)
+	for _, action := range []string{"read", "wait"} {
+		action := action
+		t.Run(action, func(t *testing.T) {
+			t.Parallel()
+			model := NewModel(Config{NoColor: true, NoAnimation: true})
+			next, _ := model.applyTranscriptEvents([]TranscriptEvent{
+				{
+					Kind: TranscriptEventNarrative, Scope: ACPProjectionMain, TurnID: "turn-1",
+					NarrativeKind: TranscriptNarrativeReasoning, Text: "before " + action, Final: true,
+				},
+				{
+					Kind: TranscriptEventTool, Scope: ACPProjectionMain, TurnID: "turn-1",
+					ToolCallID: action + "-1", ToolName: "Task", ToolTaskAction: action, ToolStatus: "in_progress",
+				},
+				{
+					Kind: TranscriptEventTool, Scope: ACPProjectionMain, TurnID: "turn-1",
+					ToolCallID: action + "-1", ToolName: "Task", ToolTaskAction: action,
+					ToolStatus: "failed", ToolError: true, ToolOutput: action + " failed", Final: true,
+				},
+			})
+			model = next.(*Model)
+			block := requireMainACPTurnBlockForTest(t, model)
+			var failed *SubagentEvent
+			for i := range block.Events {
+				event := &block.Events[i]
+				if event.Kind == SEToolCall && strings.EqualFold(event.Name, "Task") {
+					failed = event
+					break
+				}
+			}
+			if failed == nil || !failed.Done || !failed.Err || !strings.Contains(failed.Output, action+" failed") {
+				t.Fatalf("failed Task event = %#v (events %#v), want visible terminal error", failed, block.Events)
+			}
+			rows := block.Render(BlockRenderContext{
+				Width: 120, TermWidth: 120, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
+			})
+			if plain := joinRenderedPlain(rows); !strings.Contains(plain, action+" failed") ||
+				strings.Contains(plain, "Ran "+action) || strings.Contains(plain, "Ran Task") {
+				t.Fatalf("failed Task output did not retain Task-specific presentation\nplain:\n%s", plain)
+			}
+		})
 	}
 }
 

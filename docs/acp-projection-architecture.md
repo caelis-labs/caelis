@@ -251,17 +251,19 @@ child workspace described above.
 
 ACP projectors may keep private presentation tables for the exact built-in
 names, and Surfaces own their final labels and panel layout. Those tables do
-not normalize execution identity: unknown names and former aliases stay
-generic, and titles, arguments, result fields, or `_meta` cannot promote an
-external tool into a built-in. Typed `Event.Tool` and Envelope relation fields
-remain authoritative; display metadata is only a fallback where the maintained
-wire contract explicitly permits one.
+not normalize execution identity: an exact `caelis.runtime.tool.name` may select
+the matching UI profile, but it cannot grant invocation, Task, relation, or
+persistence authority. Unknown names and former aliases stay generic, and
+titles, kinds, arguments, or result fields are never used to infer a built-in
+name. Typed `Event.Tool` and Envelope relation fields remain authoritative for
+semantic behavior.
 
 Display extensions may preserve information that standard ACP content cannot
 represent without changing semantic ownership:
 
 - structured citations derived from canonical model citations;
 - a participant's user-visible address;
+- the producing Agent's exact tool name for UI profile selection;
 - a normalized safe subset of external tool input;
 - local terminal output, exit, truncation, and presentation cursor metadata;
 - observation-gap diagnostics.
@@ -276,8 +278,9 @@ example, codex-acp `terminal_output_delta` becomes canonical
 also publish a cumulative final payload.
 
 External ACP tool metadata cannot carry Runtime wrapper bindings. Ingress drops
-the complete reserved `caelis.runtime.binding` section before projection, just
-as it prevents external metadata from declaring a Runtime tool identity.
+the complete reserved `caelis.runtime.binding` section before projection. It
+retains an exact `caelis.runtime.tool.name` only as presentation input; no
+consumer may treat that value as executable or durable identity.
 
 Standard ACP tool `content` remains the primary display payload. Caelis
 advertises `_meta.terminal_output=true` under `clientCapabilities` for the

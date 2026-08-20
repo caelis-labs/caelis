@@ -17,7 +17,6 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 		return acpTaskStreamAnchor{}, false
 	}
 	meta := eventstream.UpdateMeta(envelope.Update)
-	toolName := metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName)
 	var input, output map[string]any
 	var status string
 	switch update := envelope.Update.(type) {
@@ -36,26 +35,19 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 	}
 	callID := strings.TrimSpace(taskStreamToolCallID(envelope.Update))
 	kind := task.Kind("")
-	switch toolName {
-	case shell.RunCommandToolName:
+	targetKind := strings.ToLower(strings.TrimSpace(display.ToolTaskTargetKind(input, output, meta)))
+	terminalInfo, hasTerminalInfo := metautil.TerminalInfo(meta)
+	switch {
+	case targetKind == string(task.KindCommand) &&
+		hasTerminalInfo &&
+		strings.TrimSpace(terminalInfo.TerminalID) == callID:
+		// Runtime tool names are presentation identity, including for external
+		// ACP Agents. Task attachment instead requires the typed command target
+		// and terminal relation carried by the producing event.
 		kind = task.KindCommand
-	case spawn.ToolName:
+	case display.MapString(output, "parent_tool") == spawn.ToolName &&
+		strings.EqualFold(targetKind, string(task.KindSubagent)):
 		kind = task.KindSubagent
-	default:
-		targetKind := strings.ToLower(strings.TrimSpace(display.ToolTaskTargetKind(input, output, meta)))
-		terminalInfo, hasTerminalInfo := metautil.TerminalInfo(meta)
-		switch {
-		case targetKind == string(task.KindCommand) &&
-			hasTerminalInfo &&
-			strings.TrimSpace(terminalInfo.TerminalID) == callID:
-			// Standard ACP strips Caelis' private runtime tool-name metadata,
-			// but the typed RunCommand terminal anchor and target kind remain.
-			// Directory matching still validates the parent before attaching.
-			kind = task.KindCommand
-		case display.MapString(output, "parent_tool") == spawn.ToolName &&
-			strings.EqualFold(display.ToolTaskTargetKind(input, output, meta), "subagent"):
-			kind = task.KindSubagent
-		}
 	}
 	if kind == "" {
 		return acpTaskStreamAnchor{}, false
