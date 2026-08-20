@@ -437,7 +437,8 @@ func validateSessionSteeringRequest(req SessionSteeringRequest) error {
 	if len(req.Prompt) == 0 {
 		return fmt.Errorf("prompt must contain at least one content block")
 	}
-	return nil
+	_, err := DecodeSessionSteeringOptions(req.Meta)
+	return err
 }
 
 func responseOrError(result any, err error) (any, *jsonrpc.RPCError) {

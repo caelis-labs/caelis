@@ -19,7 +19,7 @@ func TestServerRoutesSessionSteeringWithoutPromptCallbacks(t *testing.T) {
 			jsonrpc.MustMarshalRaw(TextContent{Type: "text", Text: "adjust the plan"}),
 		},
 		Meta: map[string]json.RawMessage{
-			"steering": json.RawMessage(`{"idleBehavior":"promptRequired"}`),
+			"steering": json.RawMessage(`{"idleBehavior":"promptRequired","future":42}`),
 		},
 	}
 	result, rpcErr := conn.handleRequest(context.Background(), jsonrpc.Message{
@@ -36,7 +36,7 @@ func TestServerRoutesSessionSteeringWithoutPromptCallbacks(t *testing.T) {
 	if agent.request.SessionID != request.SessionID || len(agent.request.Prompt) != 1 {
 		t.Fatalf("adapter request = %#v", agent.request)
 	}
-	if string(agent.request.Meta["steering"]) != `{"idleBehavior":"promptRequired"}` {
+	if string(agent.request.Meta["steering"]) != `{"idleBehavior":"promptRequired","future":42}` {
 		t.Fatalf("adapter request _meta = %#v", agent.request.Meta)
 	}
 }
@@ -68,6 +68,10 @@ func TestServerRejectsMalformedSessionSteeringParams(t *testing.T) {
 		{name: "wrong prompt type", params: json.RawMessage(`{"sessionId":"session-1","prompt":"hello"}`)},
 		{name: "missing session", params: jsonrpc.MustMarshalRaw(SessionSteeringRequest{Prompt: []json.RawMessage{json.RawMessage(`{"type":"text","text":"hello"}`)}})},
 		{name: "empty prompt", params: jsonrpc.MustMarshalRaw(SessionSteeringRequest{SessionID: "session-1"})},
+		{name: "steering options are null", params: json.RawMessage(`{"sessionId":"session-1","prompt":[{"type":"text","text":"hello"}],"_meta":{"steering":null}}`)},
+		{name: "idle behavior is not a string", params: json.RawMessage(`{"sessionId":"session-1","prompt":[{"type":"text","text":"hello"}],"_meta":{"steering":{"idleBehavior":true}}}`)},
+		{name: "idle behavior has surrounding whitespace", params: json.RawMessage(`{"sessionId":"session-1","prompt":[{"type":"text","text":"hello"}],"_meta":{"steering":{"idleBehavior":" promptRequired "}}}`)},
+		{name: "unsupported idle behavior", params: json.RawMessage(`{"sessionId":"session-1","prompt":[{"type":"text","text":"hello"}],"_meta":{"steering":{"idleBehavior":"startNewTurn"}}}`)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

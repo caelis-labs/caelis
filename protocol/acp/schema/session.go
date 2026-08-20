@@ -1,6 +1,9 @@
 package schema
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 const (
 	JSONRPCVersion         = "2.0"
@@ -211,12 +214,34 @@ type PromptResponse struct {
 // wire without requiring a schema update.
 type SessionSteeringOutcome string
 
+// SessionSteeringIdleBehavior controls how an Agent reports steering input
+// received without a running Turn. It does not authorize the Agent to start a
+// replacement Turn.
+type SessionSteeringIdleBehavior string
+
 const (
+	SessionSteeringMetaKey = "steering"
+
 	SessionSteeringInjected       SessionSteeringOutcome = "injected"
 	SessionSteeringStartedNewTurn SessionSteeringOutcome = "startedNewTurn"
 	SessionSteeringPromptRequired SessionSteeringOutcome = "promptRequired"
 	SessionSteeringFailed         SessionSteeringOutcome = "failed"
+
+	SessionSteeringIdlePromptRequired SessionSteeringIdleBehavior = "promptRequired"
 )
+
+// SessionSteeringCapability is advertised at initialize response
+// _meta.steering when the Agent accepts _session/steering requests.
+type SessionSteeringCapability struct {
+	Supported bool `json:"supported"`
+}
+
+// SessionSteeringOptions is the recognized _meta.steering request vocabulary.
+// Unknown sibling fields remain available to newer peers through the original
+// request Meta value.
+type SessionSteeringOptions struct {
+	IdleBehavior SessionSteeringIdleBehavior `json:"idleBehavior,omitempty"`
+}
 
 // SessionSteeringRequest carries one ACP prompt to a Session without assigning
 // a prompt or Turn lifecycle to the request itself.
@@ -232,6 +257,36 @@ type SessionSteeringRequest struct {
 type SessionSteeringResponse struct {
 	Outcome SessionSteeringOutcome `json:"outcome"`
 	Reason  string                 `json:"reason,omitempty"`
+}
+
+// DecodeSessionSteeringOptions validates and returns the steering options
+// owned by this protocol version while ignoring unknown extension fields.
+func DecodeSessionSteeringOptions(meta map[string]json.RawMessage) (SessionSteeringOptions, error) {
+	raw, ok := meta[SessionSteeringMetaKey]
+	if !ok {
+		return SessionSteeringOptions{}, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		if err == nil {
+			err = fmt.Errorf("must be an object")
+		}
+		return SessionSteeringOptions{}, fmt.Errorf("_meta.%s: %w", SessionSteeringMetaKey, err)
+	}
+	var options SessionSteeringOptions
+	if idleRaw, ok := fields["idleBehavior"]; ok {
+		if err := json.Unmarshal(idleRaw, &options.IdleBehavior); err != nil {
+			return SessionSteeringOptions{}, fmt.Errorf("_meta.%s.idleBehavior: %w", SessionSteeringMetaKey, err)
+		}
+		if options.IdleBehavior != SessionSteeringIdlePromptRequired {
+			return SessionSteeringOptions{}, fmt.Errorf(
+				"_meta.%s.idleBehavior %q is unsupported",
+				SessionSteeringMetaKey,
+				options.IdleBehavior,
+			)
+		}
+	}
+	return options, nil
 }
 
 type SessionMessageRequest struct {

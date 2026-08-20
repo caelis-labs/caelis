@@ -48,7 +48,7 @@ func (h *turnHandle) controlClientRuntimeState(status string, waitingApproval bo
 	h.mu.Lock()
 	out := appserver.RuntimeState{Run: appserver.RunState{
 		Status: status, WaitingApproval: waitingApproval,
-		Active: !h.finished && !h.closed, Kind: string(h.activeKind),
+		Active: !h.finished && !h.closed, Kind: appserver.RunKind(h.activeKind),
 		HandleID: h.handleID, RunID: h.runID, TurnID: h.turnID, StartedAt: h.createdAt,
 	}}
 	ref := h.sessionRef

@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -109,6 +110,9 @@ type SetSessionConfigOptionResponse = schema.SetSessionConfigOptionResponse
 type PromptRequest = schema.PromptRequest
 type PromptResponse = schema.PromptResponse
 type SessionSteeringOutcome = schema.SessionSteeringOutcome
+type SessionSteeringIdleBehavior = schema.SessionSteeringIdleBehavior
+type SessionSteeringCapability = schema.SessionSteeringCapability
+type SessionSteeringOptions = schema.SessionSteeringOptions
 type SessionSteeringRequest = schema.SessionSteeringRequest
 type SessionSteeringResponse = schema.SessionSteeringResponse
 type CancelNotification = schema.CancelNotification
@@ -119,8 +123,16 @@ type AvailableCommand = schema.AvailableCommand
 type AvailableCommandsUpdate = schema.AvailableCommandsUpdate
 
 const (
+	SessionSteeringMetaKey = schema.SessionSteeringMetaKey
+
 	SessionSteeringInjected       = schema.SessionSteeringInjected
 	SessionSteeringStartedNewTurn = schema.SessionSteeringStartedNewTurn
 	SessionSteeringPromptRequired = schema.SessionSteeringPromptRequired
 	SessionSteeringFailed         = schema.SessionSteeringFailed
+
+	SessionSteeringIdlePromptRequired = schema.SessionSteeringIdlePromptRequired
 )
+
+func DecodeSessionSteeringOptions(meta map[string]json.RawMessage) (SessionSteeringOptions, error) {
+	return schema.DecodeSessionSteeringOptions(meta)
+}

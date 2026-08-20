@@ -67,12 +67,22 @@ type ClientCapabilities struct {
 	ManageLoopBootstrapSupported bool `json:"manage_loop_bootstrap_supported"`
 }
 
+// RunKind identifies which Control-owned execution currently occupies a
+// Session. Kernel is the main conversation Turn; participant is a delegated
+// execution and must not be mistaken for a steerable main Turn.
+type RunKind string
+
+const (
+	RunKindKernel      RunKind = "kernel"
+	RunKindParticipant RunKind = "participant"
+)
+
 // RunState is the live Control-owned identity of one Session Turn.
 type RunState struct {
 	Status          string    `json:"status,omitempty"`
 	WaitingApproval bool      `json:"waiting_approval,omitempty"`
 	Active          bool      `json:"active,omitempty"`
-	Kind            string    `json:"kind,omitempty"`
+	Kind            RunKind   `json:"kind,omitempty"`
 	HandleID        string    `json:"handle_id,omitempty"`
 	RunID           string    `json:"run_id,omitempty"`
 	TurnID          string    `json:"turn_id,omitempty"`

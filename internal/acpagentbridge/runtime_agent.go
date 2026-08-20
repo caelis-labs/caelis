@@ -304,11 +304,20 @@ func (a *RuntimeAgent) Initialize(ctx context.Context, _ acp.InitializeRequest) 
 	caps.SessionCapabilities["list"] = json.RawMessage(`{}`)
 	caps.SessionCapabilities["resume"] = json.RawMessage(`{}`)
 	caps.SessionCapabilities["close"] = json.RawMessage(`{}`)
+	var meta map[string]json.RawMessage
+	if a.sessionClient != nil {
+		steering, err := json.Marshal(acp.SessionSteeringCapability{Supported: true})
+		if err != nil {
+			return acp.InitializeResponse{}, err
+		}
+		meta = map[string]json.RawMessage{acp.SessionSteeringMetaKey: steering}
+	}
 	return acp.InitializeResponse{
 		ProtocolVersion:   acp.CurrentProtocolVersion,
 		AgentCapabilities: caps,
 		AgentInfo:         a.agentInfo,
 		AuthMethods:       []json.RawMessage{},
+		Meta:              meta,
 	}, nil
 }
 

@@ -76,6 +76,9 @@ type SetSessionConfigOptionResponse = schema.SetSessionConfigOptionResponse
 type PromptRequest = schema.PromptRequest
 type PromptResponse = schema.PromptResponse
 type SessionSteeringOutcome = schema.SessionSteeringOutcome
+type SessionSteeringIdleBehavior = schema.SessionSteeringIdleBehavior
+type SessionSteeringCapability = schema.SessionSteeringCapability
+type SessionSteeringOptions = schema.SessionSteeringOptions
 type SessionSteeringRequest = schema.SessionSteeringRequest
 type SessionSteeringResponse = schema.SessionSteeringResponse
 type SessionMessageRequest = schema.SessionMessageRequest
@@ -122,10 +125,14 @@ type AvailableCommand = schema.AvailableCommand
 type AvailableCommandInput = schema.AvailableCommandInput
 
 const (
+	SessionSteeringMetaKey = schema.SessionSteeringMetaKey
+
 	SessionSteeringInjected       = schema.SessionSteeringInjected
 	SessionSteeringStartedNewTurn = schema.SessionSteeringStartedNewTurn
 	SessionSteeringPromptRequired = schema.SessionSteeringPromptRequired
 	SessionSteeringFailed         = schema.SessionSteeringFailed
+
+	SessionSteeringIdlePromptRequired = schema.SessionSteeringIdlePromptRequired
 )
 
 type CancelResponse struct{}
