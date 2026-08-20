@@ -89,6 +89,7 @@ type childRun struct {
 	authenticationMethods []controlagents.AuthenticationMethod
 	spawn                 subagent.SpawnContext
 	supportsMessages      bool
+	supportsSteering      bool
 	taskID                string
 	sink                  stream.Sink
 	completion            delegation.CompletionSink
@@ -208,6 +209,13 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		_ = acpClient.Close(ctx)
 		return delegation.Anchor{}, delegation.Result{}, setupErr
 	}
+	supportsSteering, err := client.SupportsSessionSteering(initialize)
+	if err != nil {
+		setupErr := spawnedACPSetupError("negotiate steering with", cfg, err)
+		childCancel()
+		closeErr := acpcleanup.CloseClient(ctx, acpClient)
+		return delegation.Anchor{}, delegation.Result{}, errors.Join(setupErr, closeErr)
+	}
 	authenticationMethods := authentication.Methods(initialize)
 	recovered, err := authentication.OpenNewSession(ctx, authentication.RecoveryConfig{
 		Mode:           authentication.RecoveryConfigured,
@@ -257,6 +265,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 	run.client = acpClient
 	run.authenticationMethods = controlagents.CloneAuthenticationMethods(authenticationMethods)
 	run.supportsMessages = hasACPMessageCapability(initialize)
+	run.supportsSteering = supportsSteering
 	runKey, err := childRunKey(anchor)
 	if err != nil {
 		childCancel()

@@ -2,6 +2,7 @@ package subagent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -88,6 +89,12 @@ func (r *Runner) reconnectIdleChild(
 		_ = acpcleanup.CloseClient(ctx, acpClient)
 		return nil, err
 	}
+	supportsSteering, err := client.SupportsSessionSteering(initialize)
+	if err != nil {
+		childCancel()
+		closeErr := acpcleanup.CloseClient(ctx, acpClient)
+		return nil, fmt.Errorf("internal/acpagentbridge/subagent: negotiate ACP steering capability: %w", errors.Join(err, closeErr))
+	}
 	if !hasACPSessionCapability(initialize, "resume") {
 		childCancel()
 		_ = acpcleanup.CloseClient(ctx, acpClient)
@@ -128,6 +135,7 @@ func (r *Runner) reconnectIdleChild(
 	run.client = acpClient
 	run.authenticationMethods = controlagents.CloneAuthenticationMethods(authenticationMethods)
 	run.supportsMessages = true
+	run.supportsSteering = supportsSteering
 
 	runKey, err := childRunKey(anchor)
 	if err != nil {

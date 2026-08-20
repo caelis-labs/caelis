@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -234,6 +235,35 @@ const (
 // _meta.steering when the Agent accepts _session/steering requests.
 type SessionSteeringCapability struct {
 	Supported bool `json:"supported"`
+}
+
+// DecodeSessionSteeringCapability validates the recognized initialize
+// response _meta.steering capability. Missing fields mean unsupported; a
+// present supported field must be a JSON boolean.
+func DecodeSessionSteeringCapability(meta map[string]json.RawMessage) (SessionSteeringCapability, error) {
+	raw, ok := meta[SessionSteeringMetaKey]
+	if !ok {
+		return SessionSteeringCapability{}, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		if err == nil {
+			err = fmt.Errorf("must be an object")
+		}
+		return SessionSteeringCapability{}, fmt.Errorf("_meta.%s: %w", SessionSteeringMetaKey, err)
+	}
+	supportedRaw, ok := fields["supported"]
+	if !ok {
+		return SessionSteeringCapability{}, nil
+	}
+	if bytes.Equal(bytes.TrimSpace(supportedRaw), []byte("null")) {
+		return SessionSteeringCapability{}, fmt.Errorf("_meta.%s.supported must be a boolean", SessionSteeringMetaKey)
+	}
+	var supported bool
+	if err := json.Unmarshal(supportedRaw, &supported); err != nil {
+		return SessionSteeringCapability{}, fmt.Errorf("_meta.%s.supported: %w", SessionSteeringMetaKey, err)
+	}
+	return SessionSteeringCapability{Supported: supported}, nil
 }
 
 // SessionSteeringOptions is the recognized _meta.steering request vocabulary.

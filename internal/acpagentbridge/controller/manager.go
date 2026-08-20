@@ -72,6 +72,7 @@ type controllerRun struct {
 	client                *client.Client
 	remoteSessionID       string
 	supportsClose         bool
+	supportsSteering      bool
 	authenticationMethods []controlagents.AuthenticationMethod
 	promptCapabilities    schema.PromptCapabilities
 	binding               session.ControllerBinding
@@ -107,6 +108,7 @@ type controllerClientState struct {
 	modeOptions           []ControllerMode
 	agentLabel            string
 	supportsClose         bool
+	supportsSteering      bool
 	authenticationMethods []controlagents.AuthenticationMethod
 	promptCapabilities    schema.PromptCapabilities
 }
@@ -120,6 +122,7 @@ type participantRun struct {
 	binding               session.ParticipantBinding
 	authentication        controlagents.Authentication
 	authenticationMethods []controlagents.AuthenticationMethod
+	supportsSteering      bool
 	promptCapabilities    schema.PromptCapabilities
 
 	mu                    sync.Mutex
@@ -213,6 +216,7 @@ func (r *controllerRun) applyStartupStateLocked(client *client.Client, remoteSes
 	r.client = client
 	r.remoteSessionID = strings.TrimSpace(remoteSessionID)
 	r.supportsClose = state.supportsClose
+	r.supportsSteering = state.supportsSteering
 	r.authenticationMethods = controlagents.CloneAuthenticationMethods(state.authenticationMethods)
 	r.commands = mergeControllerCommands(r.commands, state.commands)
 	r.configOptions = fillControllerConfigOptions(r.configOptions, state.configOptions)
@@ -841,6 +845,7 @@ func (m *Manager) startParticipant(
 		remoteSessionID:       remoteSessionID,
 		authentication:        controlagents.NormalizeAuthentication(cfg.Authentication),
 		authenticationMethods: controlagents.CloneAuthenticationMethods(state.authenticationMethods),
+		supportsSteering:      state.supportsSteering,
 		promptCapabilities:    state.promptCapabilities,
 		binding: session.ParticipantBinding{
 			ID:                   id,
@@ -908,6 +913,14 @@ func (m *Manager) startACPClient(
 		_ = acpClient.Close(ctx)
 		return nil, "", controllerClientState{}, err
 	}
+	supportsSteering, err := client.SupportsSessionSteering(initResp)
+	if err != nil {
+		closeErr := acpcleanup.CloseClient(ctx, acpClient)
+		return nil, "", controllerClientState{}, errors.Join(
+			fmt.Errorf("internal/acpagentbridge/controller: negotiate ACP steering capability: %w", err),
+			closeErr,
+		)
+	}
 	authenticationMethods := authentication.Methods(initResp)
 	recovery := authentication.RecoveryConfig{
 		Mode:           authentication.RecoveryConfigured,
@@ -935,6 +948,7 @@ func (m *Manager) startACPClient(
 				mode:                  currentModeID(recovered.Value.Modes),
 				modeOptions:           controllerModesFromACP(recovered.Value.Modes),
 				supportsClose:         acpSessionCapability(initResp, "close"),
+				supportsSteering:      supportsSteering,
 				authenticationMethods: controlagents.CloneAuthenticationMethods(authenticationMethods),
 				promptCapabilities:    initResp.AgentCapabilities.PromptCapabilities,
 			}
@@ -975,6 +989,7 @@ func (m *Manager) startACPClient(
 		mode:                  currentModeID(resp.Modes),
 		modeOptions:           controllerModesFromACP(resp.Modes),
 		supportsClose:         acpSessionCapability(initResp, "close"),
+		supportsSteering:      supportsSteering,
 		authenticationMethods: controlagents.CloneAuthenticationMethods(authenticationMethods),
 		promptCapabilities:    initResp.AgentCapabilities.PromptCapabilities,
 	}
