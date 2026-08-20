@@ -2127,6 +2127,50 @@ func TestGatewaySubmitActiveTurnForwardsConversationToRunner(t *testing.T) {
 	collectHandleEvents(t, result.Handle)
 }
 
+func TestSubmitActiveTurnRejectsReplacedExactTarget(t *testing.T) {
+	t.Parallel()
+
+	ref := session.SessionRef{SessionID: "session-1"}
+	newHandle := newTurnHandle(turnHandleConfig{
+		handleID:   "new-handle",
+		runID:      "new-run",
+		turnID:     "new-turn",
+		activeKind: ActiveTurnKindParticipant,
+		sessionRef: ref,
+	})
+	runner := &recordingRunner{}
+	newHandle.setRunner(runner)
+	gateway := &Gateway{active: map[string]*turnHandle{ref.SessionID: newHandle}}
+	err := gateway.SubmitActiveTurn(context.Background(), SubmitActiveTurnRequest{
+		SessionRef: ref,
+		HandleID:   "old-handle",
+		RunID:      "old-run",
+		TurnID:     "old-turn",
+		Kind:       SubmissionKindConversation,
+		Text:       "must not reach replacement",
+	})
+	var gatewayErr *Error
+	if !As(err, &gatewayErr) || gatewayErr.Code != CodeActiveRunConflict {
+		t.Fatalf("SubmitActiveTurn() error = %v, want exact-target conflict", err)
+	}
+	if len(runner.submissions) != 0 {
+		t.Fatalf("replacement runner submissions = %#v, want none", runner.submissions)
+	}
+	if err := gateway.SubmitActiveTurn(context.Background(), SubmitActiveTurnRequest{
+		SessionRef: ref,
+		HandleID:   newHandle.HandleID(),
+		RunID:      newHandle.RunID(),
+		TurnID:     newHandle.TurnID(),
+		Kind:       SubmissionKindConversation,
+		Text:       "guide replacement",
+	}); err != nil {
+		t.Fatalf("SubmitActiveTurn(exact replacement) error = %v", err)
+	}
+	if len(runner.submissions) != 1 || runner.submissions[0].Text != "guide replacement" {
+		t.Fatalf("replacement runner submissions = %#v, want exact-target guidance", runner.submissions)
+	}
+}
+
 func TestBeginTurnDefaultsToStreamingRequestsAtGatewayBoundary(t *testing.T) {
 	t.Parallel()
 

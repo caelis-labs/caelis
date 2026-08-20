@@ -84,7 +84,12 @@ func controlServiceCanSubmitRunningPrompt(ctx context.Context, service activeTur
 	if !status.HasActiveTurn {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(status.ActiveTurnKind), "kernel")
+	switch strings.ToLower(strings.TrimSpace(status.ActiveTurnKind)) {
+	case "kernel", "participant":
+		return true
+	default:
+		return false
+	}
 }
 
 func runSubagentTurn(ctx context.Context, sender *ProgramSender, turn controlprompt.Turn) executeLineResult {

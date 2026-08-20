@@ -636,6 +636,13 @@ func (r *leasedSourceRunner) SourceEvents() iter.Seq2[agent.SourceEvent, error] 
 
 func (r *leasedRunner) Submit(submission agent.Submission) error { return r.inner.Submit(submission) }
 
+func (r *leasedRunner) SubmitContext(ctx context.Context, submission agent.Submission) error {
+	if contextual, ok := r.inner.(agent.ContextSubmissionRunner); ok {
+		return contextual.SubmitContext(ctx, submission)
+	}
+	return r.inner.Submit(submission)
+}
+
 func (r *leasedRunner) Cancel() agent.CancelResult { return r.inner.Cancel() }
 
 func (r *leasedRunner) Close() error {

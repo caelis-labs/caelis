@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
@@ -545,6 +546,204 @@ func TestRuntimeParticipantPromptSingleFlightRejectsBeforeUserEventPersistence(t
 		t.Fatal("completed participant prompt did not release the Runtime claim")
 	}
 	for range third.Handle.Events() {
+	}
+}
+
+func TestRuntimeParticipantSteeringWaitsForAdmissionAndCommitsFIFOInputs(t *testing.T) {
+	t.Parallel()
+
+	sessions, active := newTestSessionService(t, "participant-runtime-steering")
+	binding := session.ParticipantBinding{
+		ID: "helper", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar,
+		AgentName: "helper", Label: "@helper", SessionID: "remote-helper",
+		DelegationID: "delegation-helper", AttachmentGeneration: "generation-helper",
+	}
+	active, err := sessions.PutParticipant(context.Background(), session.PutParticipantRequest{
+		SessionRef: active.SessionRef, Binding: binding,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controllerHandle := newTestControllerTurnHandle(nil)
+	promptStarted := make(chan struct{})
+	releasePrompt := make(chan struct{})
+	firstSteerStarted := make(chan struct{})
+	releaseFirstSteer := make(chan struct{})
+	var steerRequests []controller.ParticipantSteerRequest
+	backend := steeringACPController{
+		stubACPController: stubACPController{
+			promptParticipant: func(context.Context, controller.ParticipantPromptRequest) (controller.TurnResult, error) {
+				close(promptStarted)
+				<-releasePrompt
+				return controller.TurnResult{Handle: controllerHandle}, nil
+			},
+		},
+		steerParticipant: func(_ context.Context, req controller.ParticipantSteerRequest) error {
+			steerRequests = append(steerRequests, req)
+			if len(steerRequests) == 1 {
+				close(firstSteerStarted)
+				<-releaseFirstSteer
+			}
+			return req.Commit()
+		},
+	}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, Controllers: backend,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runtime.PromptParticipant(context.Background(), agent.PromptParticipantRequest{
+		SessionRef: active.SessionRef, ParticipantID: binding.ID, Input: "initial",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-promptStarted:
+	case <-time.After(time.Second):
+		t.Fatal("participant prompt did not reach controller admission")
+	}
+	contextual, ok := result.Handle.(agent.ContextSubmissionRunner)
+	if !ok {
+		t.Fatalf("participant runner = %T, want ContextSubmissionRunner", result.Handle)
+	}
+	firstResult := make(chan error, 1)
+	go func() {
+		firstResult <- contextual.SubmitContext(context.Background(), agent.Submission{
+			Kind: agent.SubmissionKindConversation, Text: "guide one", DisplayInput: "display one",
+		})
+	}()
+	select {
+	case <-firstSteerStarted:
+		t.Fatal("steering reached controller before initial prompt admission")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(releasePrompt)
+	select {
+	case <-firstSteerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first steering input did not reach controller")
+	}
+	secondResult := make(chan error, 1)
+	go func() {
+		secondResult <- contextual.SubmitContext(context.Background(), agent.Submission{
+			Kind: agent.SubmissionKindConversation, Text: "guide two", DisplayInput: "display two",
+		})
+	}()
+	select {
+	case err := <-secondResult:
+		t.Fatalf("second steering completed before first: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(releaseFirstSteer)
+	if err := <-firstResult; err != nil {
+		t.Fatalf("first steering result = %v", err)
+	}
+	if err := <-secondResult; err != nil {
+		t.Fatalf("second steering result = %v", err)
+	}
+	if len(steerRequests) != 2 || steerRequests[0].Input != "guide one" || steerRequests[1].Input != "guide two" {
+		t.Fatalf("steering requests = %#v, want FIFO inputs", steerRequests)
+	}
+	if steerRequests[0].SessionRef.SessionID != active.SessionID || steerRequests[0].ParticipantID != binding.ID || steerRequests[0].TurnID == "" {
+		t.Fatalf("steering target = %#v, want exact active participant Turn", steerRequests[0])
+	}
+	if steerRequests[1].TurnID != steerRequests[0].TurnID {
+		t.Fatalf("steering Turn IDs = %q/%q, want same Turn", steerRequests[0].TurnID, steerRequests[1].TurnID)
+	}
+
+	controllerHandle.finish()
+	var published []*session.Event
+	for event, eventErr := range result.Handle.Events() {
+		if eventErr != nil {
+			t.Fatalf("participant runner event error = %v", eventErr)
+		}
+		published = append(published, event)
+	}
+	var publishedInputs []string
+	for _, event := range published {
+		if event != nil && event.Type == session.EventTypeUser && event.Scope != nil && event.Scope.TurnID == steerRequests[0].TurnID && event.Message != nil {
+			publishedInputs = append(publishedInputs, event.Message.TextContent())
+		}
+	}
+	if len(publishedInputs) != 3 || publishedInputs[0] != "initial" || publishedInputs[1] != "guide one" || publishedInputs[2] != "guide two" {
+		t.Fatalf("published participant inputs = %#v, want initial and FIFO steering inputs", publishedInputs)
+	}
+	durable, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var durableInputs []string
+	for _, event := range durable {
+		if event != nil && event.Type == session.EventTypeUser && event.Scope != nil && event.Scope.TurnID == steerRequests[0].TurnID && event.Message != nil {
+			durableInputs = append(durableInputs, event.Message.TextContent())
+		}
+	}
+	if len(durableInputs) != 3 || durableInputs[0] != "initial" || durableInputs[1] != "guide one" || durableInputs[2] != "guide two" {
+		t.Fatalf("durable participant inputs = %#v, want initial and FIFO steering inputs", durableInputs)
+	}
+}
+
+func TestRuntimeParticipantSteeringReportsInitialPromptFailureAsNoEffect(t *testing.T) {
+	t.Parallel()
+
+	sessions, active := newTestSessionService(t, "participant-runtime-steering-admission-failure")
+	binding := session.ParticipantBinding{
+		ID: "helper", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar,
+		AgentName: "helper", Label: "@helper", SessionID: "remote-helper",
+	}
+	active, err := sessions.PutParticipant(context.Background(), session.PutParticipantRequest{
+		SessionRef: active.SessionRef, Binding: binding,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptStarted := make(chan struct{})
+	releasePrompt := make(chan struct{})
+	promptErr := errors.New("initial participant prompt failed")
+	steerCalled := false
+	backend := steeringACPController{
+		stubACPController: stubACPController{
+			promptParticipant: func(context.Context, controller.ParticipantPromptRequest) (controller.TurnResult, error) {
+				close(promptStarted)
+				<-releasePrompt
+				return controller.TurnResult{}, promptErr
+			},
+		},
+		steerParticipant: func(context.Context, controller.ParticipantSteerRequest) error {
+			steerCalled = true
+			return nil
+		},
+	}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, Controllers: backend,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runtime.PromptParticipant(context.Background(), agent.PromptParticipantRequest{
+		SessionRef: active.SessionRef, ParticipantID: binding.ID, Input: "initial",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextual := result.Handle.(agent.ContextSubmissionRunner)
+	submitResult := make(chan error, 1)
+	go func() {
+		submitResult <- contextual.SubmitContext(context.Background(), agent.Submission{
+			Kind: agent.SubmissionKindConversation, Text: "guide",
+		})
+	}()
+	<-promptStarted
+	close(releasePrompt)
+	if err := <-submitResult; errorcode.CodeOf(err) != errorcode.FailedPrecondition || !errors.Is(err, promptErr) {
+		t.Fatalf("SubmitContext() error = %v, want failed_precondition retaining prompt failure", err)
+	}
+	if steerCalled {
+		t.Fatal("initial prompt failure dispatched participant steering")
+	}
+	for range result.Handle.Events() {
 	}
 }
 

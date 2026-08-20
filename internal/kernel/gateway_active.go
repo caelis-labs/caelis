@@ -134,6 +134,13 @@ func (g *Gateway) SubmitActiveTurn(ctx context.Context, req SubmitActiveTurnRequ
 	g.mu.Lock()
 	handle := g.active[sessionID]
 	coordinator := g.approvals[sessionID]
+	if handle != nil && !submissionMatchesHandle(req, handle) {
+		g.mu.Unlock()
+		return &Error{
+			Kind: KindConflict, Code: CodeActiveRunConflict, UserVisible: true,
+			Message: "gateway: active run does not match submission target",
+		}
+	}
 	g.mu.Unlock()
 	if handle == nil {
 		if req.Kind == SubmissionKindApproval && req.Approval != nil && coordinator != nil {
@@ -158,6 +165,22 @@ func (g *Gateway) SubmitActiveTurn(ctx context.Context, req SubmitActiveTurnRequ
 		Persisted:    req.Persisted,
 		Approval:     req.Approval,
 	})
+}
+
+func submissionMatchesHandle(req SubmitActiveTurnRequest, handle *turnHandle) bool {
+	if handle == nil {
+		return false
+	}
+	if value := strings.TrimSpace(req.HandleID); value != "" && value != handle.HandleID() {
+		return false
+	}
+	if value := strings.TrimSpace(req.RunID); value != "" && value != handle.RunID() {
+		return false
+	}
+	if value := strings.TrimSpace(req.TurnID); value != "" && value != handle.TurnID() {
+		return false
+	}
+	return true
 }
 
 func (g *Gateway) CancelActiveTurns() {

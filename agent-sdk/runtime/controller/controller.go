@@ -17,6 +17,10 @@ import (
 // endpoint and Control must reattach it before retrying the turn.
 var ErrNotActive = errorcode.New(errorcode.FailedPrecondition, "agent-sdk/runtime/controller: controller is not active")
 
+// ErrParticipantSteeringUnsupported reports that an active participant
+// connection did not negotiate the standard ACP steering capability.
+var ErrParticipantSteeringUnsupported = errorcode.New(errorcode.Unsupported, "agent-sdk/runtime/controller: participant steering is unsupported")
+
 // ApprovalOption is one controller-side approval choice surfaced by a remote
 // ACP controller.
 type ApprovalOption = agent.ApprovalOption
@@ -158,6 +162,25 @@ type ParticipantPromptRequest struct {
 	ApprovalRequester ApprovalRequester     `json:"-"`
 }
 
+// ParticipantSteerRequest guides one exact active participant Turn. Commit is
+// invoked only after the remote endpoint confirms injection and must durably
+// publish the canonical user input before buffered remote updates are released.
+type ParticipantSteerRequest struct {
+	SessionRef    session.SessionRef  `json:"session_ref,omitempty"`
+	TurnID        string              `json:"turn_id,omitempty"`
+	ParticipantID string              `json:"participant_id,omitempty"`
+	Input         string              `json:"input,omitempty"`
+	DisplayInput  string              `json:"display_input,omitempty"`
+	ContentParts  []model.ContentPart `json:"content_parts,omitempty"`
+	Commit        func() error        `json:"-"`
+}
+
+// ParticipantSteerer is the optional provider-neutral active-input capability
+// implemented by controller backends that negotiated participant steering.
+type ParticipantSteerer interface {
+	SteerParticipant(context.Context, ParticipantSteerRequest) error
+}
+
 type CancelStatus = agent.CancelStatus
 
 const (
@@ -251,5 +274,18 @@ func NormalizeParticipantPromptRequest(in ParticipantPromptRequest) ParticipantP
 	out.Context = agent.CloneContextTransfer(in.Context)
 	out.Stream = in.Stream
 	out.Mode = strings.TrimSpace(in.Mode)
+	return out
+}
+
+// NormalizeParticipantSteerRequest clones request-owned values before they
+// cross the asynchronous participant steering boundary.
+func NormalizeParticipantSteerRequest(in ParticipantSteerRequest) ParticipantSteerRequest {
+	out := in
+	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
+	out.TurnID = strings.TrimSpace(in.TurnID)
+	out.ParticipantID = strings.TrimSpace(in.ParticipantID)
+	out.Input = strings.TrimSpace(in.Input)
+	out.DisplayInput = strings.TrimSpace(in.DisplayInput)
+	out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)
 	return out
 }

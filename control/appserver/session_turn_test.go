@@ -402,6 +402,74 @@ func TestParticipantTurnClientRotatesCancelOperationIDAfterConflict(t *testing.T
 	}
 }
 
+func TestParticipantTurnClientSteersExactObservedTarget(t *testing.T) {
+	t.Parallel()
+
+	target := TurnTarget{HandleID: "participant-handle", RunID: "participant-run", TurnID: "participant-turn"}
+	var steerRequest SteerRequest
+	sessions := &sessionTurnTestClient{
+		inspectFn: func(context.Context, StateRequest) (SessionState, error) {
+			return SessionState{SessionID: "session-1", BoundaryCursor: "cursor-boundary"}, nil
+		},
+		reconnectFn: func(context.Context, ReconnectRequest) (ReconnectResult, error) {
+			return ReconnectResult{
+				State: SessionState{
+					SessionID:  "session-1",
+					Revision:   7,
+					Controller: session.ControllerBinding{EpochID: "epoch-7"},
+				},
+				Subscription: newOpenSessionTurnTestSubscription(),
+			}, nil
+		},
+		steerFn: func(_ context.Context, request SteerRequest) (CommandResult, error) {
+			steerRequest = request
+			return CommandResult{OperationID: request.OperationID, Outcome: OutcomeCommitted}, nil
+		},
+	}
+	participants := &participantTurnTestClient{
+		startFn: func(_ context.Context, request StartParticipantRequest) (CommandResult, error) {
+			return CommandResult{
+				OperationID:   request.OperationID,
+				Outcome:       OutcomeCommitted,
+				SessionID:     request.SessionID,
+				ParticipantID: "participant-1",
+				Target:        target,
+			}, nil
+		},
+		cancelFn: func(_ context.Context, request CancelParticipantRequest) (CommandResult, error) {
+			return CommandResult{OperationID: request.OperationID, Outcome: OutcomeCommitted}, nil
+		},
+	}
+	client, err := NewParticipantTurnClient(sessions, participants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := client.Start(context.Background(), ParticipantTurnStartRequest{
+		SessionID: "session-1", Handle: "reviewer", Input: "review",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer observed.Close()
+	turn, ok := observed.(SessionTurn)
+	if !ok {
+		t.Fatalf("participant Turn = %T, want SessionTurn steering capability", observed)
+	}
+	parts := []model.ContentPart{{Type: model.ContentPartText, Text: "part"}}
+	if err := turn.Steer(context.Background(), "guide", "display guide", parts); err != nil {
+		t.Fatalf("Steer() error = %v", err)
+	}
+	if steerRequest.OperationID == "" || steerRequest.SessionID != "session-1" || steerRequest.ExpectedControllerEpoch != "epoch-7" {
+		t.Fatalf("Steer() write fence = %#v, want session-1/epoch-7 with operation ID", steerRequest.WriteBase)
+	}
+	if steerRequest.Target != target || steerRequest.Input != "guide" || steerRequest.DisplayInput != "display guide" {
+		t.Fatalf("Steer() request = %#v, want exact participant target and input", steerRequest)
+	}
+	if len(steerRequest.ContentParts) != 1 || steerRequest.ContentParts[0].Text != "part" {
+		t.Fatalf("Steer() content parts = %#v, want preserved part", steerRequest.ContentParts)
+	}
+}
+
 func TestSessionTurnClientReportsUnknownAdmissionWithoutTarget(t *testing.T) {
 	t.Parallel()
 

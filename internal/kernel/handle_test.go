@@ -572,6 +572,118 @@ func TestTurnHandlePendingSubmissionRespectsCancellation(t *testing.T) {
 	}
 }
 
+func TestParticipantTurnHandleWaitsForContextualRunnerAdmission(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID:                "participant-handle",
+		runID:                   "participant-run",
+		turnID:                  "participant-turn",
+		activeKind:              ActiveTurnKindParticipant,
+		participantID:           "participant-1",
+		sessionRef:              session.SessionRef{SessionID: "session-1"},
+		allowPendingSubmissions: true,
+		waitForRunnerSubmission: true,
+	})
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "caller")
+	result := make(chan error, 1)
+	go func() {
+		result <- handle.Submit(ctx, SubmitRequest{
+			Kind: SubmissionKindConversation,
+			Text: "guide",
+		})
+	}()
+	select {
+	case err := <-result:
+		t.Fatalf("Submit() returned before participant runner admission: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	wantErr := errors.New("steering rejected")
+	var got agent.Submission
+	contextValue := make(chan any, 1)
+	runner := &contextualSubmissionRunner{
+		submitContext: func(submitCtx context.Context, submission agent.Submission) error {
+			contextValue <- submitCtx.Value(contextKey{})
+			got = agent.CloneSubmission(submission)
+			return wantErr
+		},
+	}
+	handle.setRunner(runner)
+	if err := <-result; !errors.Is(err, wantErr) {
+		t.Fatalf("Submit() error = %v, want runner admission result", err)
+	}
+	if got.Kind != agent.SubmissionKindConversation || got.Text != "guide" {
+		t.Fatalf("runner submission = %#v, want conversation guide", got)
+	}
+	if value := <-contextValue; value != "caller" {
+		t.Fatalf("SubmitContext() caller context value = %#v, want caller", value)
+	}
+	if len(handle.pendingSubmissions) != 0 {
+		t.Fatalf("pending submissions = %#v, want no early-ack queue", handle.pendingSubmissions)
+	}
+}
+
+func TestParticipantTurnHandleRunnerWaitStopsWithCaller(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID:                "participant-handle",
+		runID:                   "participant-run",
+		turnID:                  "participant-turn",
+		activeKind:              ActiveTurnKindParticipant,
+		participantID:           "participant-1",
+		sessionRef:              session.SessionRef{SessionID: "session-1"},
+		allowPendingSubmissions: true,
+		waitForRunnerSubmission: true,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := handle.Submit(ctx, SubmitRequest{Kind: SubmissionKindConversation, Text: "guide"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Submit() error = %v, want caller cancellation", err)
+	}
+	if len(handle.pendingSubmissions) != 0 {
+		t.Fatalf("pending submissions = %#v, want no canceled queue entry", handle.pendingSubmissions)
+	}
+}
+
+func TestParticipantTurnHandleRunnerWaitStopsAtTerminal(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID:                "participant-handle",
+		runID:                   "participant-run",
+		turnID:                  "participant-turn",
+		activeKind:              ActiveTurnKindParticipant,
+		participantID:           "participant-1",
+		sessionRef:              session.SessionRef{SessionID: "session-1"},
+		allowPendingSubmissions: true,
+		waitForRunnerSubmission: true,
+	})
+	result := make(chan error, 1)
+	go func() {
+		result <- handle.Submit(context.Background(), SubmitRequest{
+			Kind: SubmissionKindConversation, Text: "guide",
+		})
+	}()
+	select {
+	case err := <-result:
+		t.Fatalf("Submit() returned before terminal completion: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	handle.finish()
+	select {
+	case err := <-result:
+		var gatewayErr *Error
+		if !As(err, &gatewayErr) || gatewayErr.Code != CodeSubmissionUnsupported {
+			t.Fatalf("Submit() terminal error = %v, want submission_unsupported", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("terminal completion did not wake runner admission")
+	}
+}
+
 func TestTurnHandleApprovalSubmitRejectsWithoutPendingRequest(t *testing.T) {
 	t.Parallel()
 
@@ -1179,6 +1291,18 @@ func newTestTurnHandle() *turnHandle {
 		},
 		createdAt: time.Unix(100, 0),
 	})
+}
+
+type contextualSubmissionRunner struct {
+	recordingRunner
+	submitContext func(context.Context, agent.Submission) error
+}
+
+func (r *contextualSubmissionRunner) SubmitContext(ctx context.Context, submission agent.Submission) error {
+	if r == nil || r.submitContext == nil {
+		return errors.New("contextual submission runner is unavailable")
+	}
+	return r.submitContext(ctx, submission)
 }
 
 func BenchmarkTurnHandleLiveQueueDrain(b *testing.B) {

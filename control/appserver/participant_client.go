@@ -232,6 +232,20 @@ func (c *ParticipantTurnClient) startObserved(
 		return nil, errors.New("controlclient: participant operation returned no addressable participant")
 	}
 	turn, err := admitObservedTurn(c.sessions, sessionID, reconnected, feedCtx, stopFeed, result, err, func(turn *sessionTurn) {
+		turn.steerFn = func(steerCtx context.Context, input, displayInput string, contentParts []model.ContentPart) error {
+			_, steerErr := c.sessions.Steer(steerCtx, SteerRequest{
+				WriteBase: WriteBase{
+					OperationID:             newParticipantOperationID("steer"),
+					SessionID:               sessionID,
+					ExpectedControllerEpoch: turn.controllerEpoch,
+				},
+				Target:       turn.target,
+				Input:        input,
+				DisplayInput: displayInput,
+				ContentParts: append([]model.ContentPart(nil), contentParts...),
+			})
+			return steerErr
+		}
 		cancelWrite := &turnCancelWrite{
 			operationID: newParticipantOperationID("cancel"),
 			newOperationID: func() string {

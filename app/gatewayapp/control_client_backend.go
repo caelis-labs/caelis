@@ -328,11 +328,15 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
 		err = gw.SubmitActiveTurn(ctx, kernelimpl.SubmitActiveTurnRequest{
-			SessionRef: active.SessionRef, Kind: kernelimpl.SubmissionKindConversation,
-			Text: req.Input, DisplayText: req.DisplayInput, ContentParts: req.ContentParts,
+			SessionRef: active.SessionRef,
+			HandleID:   req.Target.HandleID,
+			RunID:      req.Target.RunID,
+			TurnID:     req.Target.TurnID,
+			Kind:       kernelimpl.SubmissionKindConversation,
+			Text:       req.Input, DisplayText: req.DisplayInput, ContentParts: req.ContentParts,
 			Metadata: map[string]any{"operation_id": req.OperationID},
 		})
-		return sessionCommandResult(active), classifyControlBackendError(err)
+		return sessionCommandResult(active), classifyControlSteerError(err)
 	case appserver.CompactSessionRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
@@ -780,4 +784,28 @@ func classifyControlBackendError(err error) error {
 	// Ordinary backend failures remain unknown so the operation ledger cannot
 	// expire their idempotency guard and replay a possible external effect.
 	return appserver.NewOutcomeError(appserver.OutcomeUnknown, err)
+}
+
+func classifyControlSteerError(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch errorcode.CodeOf(err) {
+	case errorcode.InvalidArgument, errorcode.Unsupported, errorcode.FailedPrecondition:
+		return appserver.NewOutcomeError(appserver.OutcomeRejected, err)
+	case errorcode.Cancelled, errorcode.Timeout:
+		coded := errorcode.Wrap(errorcode.FailedPrecondition, "gatewayapp: steering ended before remote dispatch", err)
+		return appserver.NewOutcomeError(appserver.OutcomeRejected, coded)
+	case errorcode.Conflict:
+		return appserver.NewOutcomeError(appserver.OutcomeConflicted, err)
+	case errorcode.UnknownOutcome:
+		return appserver.NewOutcomeError(appserver.OutcomeUnknown, err)
+	default:
+		var gatewayErr *kernelimpl.Error
+		if errors.As(err, &gatewayErr) && gatewayErr.Kind == kernelimpl.KindUnsupported {
+			coded := errorcode.Wrap(errorcode.FailedPrecondition, gatewayErr.Error(), err)
+			return appserver.NewOutcomeError(appserver.OutcomeRejected, coded)
+		}
+		return classifyControlBackendError(err)
+	}
 }

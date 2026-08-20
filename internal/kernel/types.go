@@ -445,6 +445,9 @@ type SubmitRequest struct {
 
 type SubmitActiveTurnRequest struct {
 	SessionRef   session.SessionRef
+	HandleID     string
+	RunID        string
+	TurnID       string
 	Kind         SubmissionKind
 	Text         string
 	DisplayText  string

@@ -39,6 +39,18 @@ type stubACPController struct {
 	promptParticipant func(context.Context, controller.ParticipantPromptRequest) (controller.TurnResult, error)
 }
 
+type steeringACPController struct {
+	stubACPController
+	steerParticipant func(context.Context, controller.ParticipantSteerRequest) error
+}
+
+func (s steeringACPController) SteerParticipant(ctx context.Context, req controller.ParticipantSteerRequest) error {
+	if s.steerParticipant == nil {
+		return controller.ErrParticipantSteeringUnsupported
+	}
+	return s.steerParticipant(ctx, req)
+}
+
 func (stubACPController) Activate(context.Context, controller.HandoffRequest) (session.ControllerBinding, error) {
 	return session.ControllerBinding{}, nil
 }

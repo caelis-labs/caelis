@@ -86,6 +86,51 @@ func TestClassifyControlBackendErrorTreatsUnclassifiedFailureAsUnknown(t *testin
 	}
 }
 
+func TestClassifyControlSteerErrorPreservesEffectCertainty(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name    string
+		code    errorcode.Code
+		outcome appserver.Outcome
+	}{
+		{name: "unsupported", code: errorcode.Unsupported, outcome: appserver.OutcomeRejected},
+		{name: "not injected", code: errorcode.FailedPrecondition, outcome: appserver.OutcomeRejected},
+		{name: "stale target", code: errorcode.Conflict, outcome: appserver.OutcomeConflicted},
+		{name: "ambiguous remote effect", code: errorcode.UnknownOutcome, outcome: appserver.OutcomeUnknown},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			classified := classifyControlSteerError(errorcode.New(test.code, test.name))
+			var outcomeErr *appserver.OutcomeError
+			if !errors.As(classified, &outcomeErr) || outcomeErr.Outcome != test.outcome || errorcode.CodeOf(classified) != test.code {
+				t.Fatalf("classifyControlSteerError() = %v, want %s/%s", classified, test.outcome, test.code)
+			}
+		})
+	}
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		classified := classifyControlSteerError(cause)
+		var outcomeErr *appserver.OutcomeError
+		if !errors.As(classified, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeRejected || errorcode.CodeOf(classified) != errorcode.FailedPrecondition {
+			t.Fatalf("classifyControlSteerError(%v) = %v, want rejected pre-dispatch failure", cause, classified)
+		}
+	}
+	gatewayUnsupported := &kernelimpl.Error{
+		Kind: kernelimpl.KindUnsupported, Code: kernelimpl.CodeSubmissionUnsupported,
+		Message: "active Turn finished before runner admission",
+	}
+	classified := classifyControlSteerError(gatewayUnsupported)
+	var outcomeErr *appserver.OutcomeError
+	if !errors.As(classified, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeRejected || errorcode.CodeOf(classified) != errorcode.FailedPrecondition {
+		t.Fatalf("classifyControlSteerError(finished Turn) = %v, want rejected failed_precondition", classified)
+	}
+	unknownCancellation := errorcode.Wrap(errorcode.UnknownOutcome, "remote response was lost", context.Canceled)
+	classified = classifyControlSteerError(unknownCancellation)
+	if !errors.As(classified, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeUnknown || errorcode.CodeOf(classified) != errorcode.UnknownOutcome {
+		t.Fatalf("classifyControlSteerError(remote cancellation) = %v, want unknown outcome", classified)
+	}
+}
+
 func TestControlParticipantPlacementRejectsOnlyInvalidSelections(t *testing.T) {
 	store := newAppConfigStore(t.TempDir())
 	profile := modelprofile.ModelProfile{

@@ -158,6 +158,7 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 		sessionRef:              session.SessionRef,
 		createdAt:               g.clock(),
 		allowPendingSubmissions: true,
+		waitForRunnerSubmission: true,
 		prepareSubmission: func(submitCtx context.Context, submitReq SubmitRequest) (SubmitRequest, error) {
 			return g.prepareSubmitRequest(submitCtx, session, submitReq)
 		},

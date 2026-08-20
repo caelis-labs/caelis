@@ -26,6 +26,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
@@ -124,7 +125,10 @@ type participantRun struct {
 	authenticationMethods []controlagents.AuthenticationMethod
 	supportsSteering      bool
 	promptCapabilities    schema.PromptCapabilities
+	closeOnce             sync.Once
+	closeErr              error
 
+	operationMu           sync.Mutex
 	mu                    sync.Mutex
 	turnID                string
 	turnSession           session.Session
@@ -133,6 +137,9 @@ type participantRun struct {
 	approvalRequester     controller.ApprovalRequester
 	handle                *turnHandle
 	events                []*session.Event
+	steeringActive        bool
+	steeringCancel        context.CancelFunc
+	steeringUpdates       []turnHandleEvent
 	promptAdmissionClosed bool
 	updatedAt             time.Time
 }
@@ -753,9 +760,7 @@ func (m *Manager) Detach(ctx context.Context, req controller.DetachRequest) erro
 	m.mu.Unlock()
 	if run != nil {
 		run.closePromptAdmission()
-		if run.client != nil {
-			_ = run.client.Close(context.WithoutCancel(ctx))
-		}
+		_ = run.closeClient(ctx)
 	}
 	return nil
 }
@@ -869,9 +874,7 @@ func (m *Manager) startParticipant(
 	if current := m.participants[key]; current != nil {
 		currentBinding := current.bindingSnapshot()
 		m.mu.Unlock()
-		if run.client != nil {
-			_ = run.client.Close(context.WithoutCancel(ctx))
-		}
+		_ = run.closeClient(ctx)
 		if strings.TrimSpace(currentBinding.DelegationID) == strings.TrimSpace(run.binding.DelegationID) &&
 			strings.TrimSpace(currentBinding.AttachmentGeneration) == strings.TrimSpace(run.binding.AttachmentGeneration) {
 			return current, nil
@@ -1566,10 +1569,20 @@ func (r *participantRun) handleUpdate(clock func() time.Time, env client.UpdateE
 	if event != nil {
 		r.events = append(r.events, session.CloneEvent(event))
 	}
-	r.mu.Unlock()
 	if stream && handle != nil {
-		handle.publishSourceEvent(event, acpEnv)
+		if r.steeringActive {
+			r.steeringUpdates = append(r.steeringUpdates, turnHandleEvent{event: acpbridge.SourceEvent{
+				Canonical: session.CloneEvent(event),
+				ACP:       acpbridge.CloneEnvelopePtr(acpEnv),
+			}})
+		} else {
+			// Publish while holding r.mu so steering activation and its barrier
+			// linearize with this update: it is either before the barrier or in
+			// steeringUpdates, never racing into the queue after the barrier.
+			handle.publishSourceEvent(event, acpEnv)
+		}
 	}
+	r.mu.Unlock()
 }
 
 func applyACPParticipantEventScope(event *session.Event, binding session.ParticipantBinding, agent string) {

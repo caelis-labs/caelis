@@ -30,6 +30,7 @@ type runner struct {
 	consumer    string
 	submissions []agent.Submission
 	cancelHook  func() error
+	dispatcher  *runnerSubmissionDispatcher
 }
 
 type runnerEvent struct {
@@ -139,15 +140,54 @@ func (r *runner) claimEventStream(requested string) error {
 }
 
 func (r *runner) Submit(sub agent.Submission) error {
+	return r.SubmitContext(context.Background(), sub)
+}
+
+func (r *runner) SubmitContext(ctx context.Context, sub agent.Submission) error {
 	if sub.Kind != agent.SubmissionKindConversation && sub.Kind != agent.SubmissionKindAgentMessage {
 		return fmt.Errorf("agent-sdk/runtime: unsupported submission kind %q", sub.Kind)
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.closed {
-		return errors.New("agent-sdk/runtime: runner is closed")
+		r.mu.Unlock()
+		return errRunnerSubmissionClosed
+	}
+	dispatcher := r.dispatcher
+	if dispatcher != nil {
+		r.mu.Unlock()
+		return dispatcher.submit(ctx, sub)
 	}
 	r.submissions = append(r.submissions, agent.CloneSubmission(sub))
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *runner) setSubmissionHandler(ctx context.Context, handler func(context.Context, agent.Submission) error) error {
+	if r == nil || handler == nil {
+		return errors.New("agent-sdk/runtime: submission handler is required")
+	}
+	dispatcher := newRunnerSubmissionDispatcher(ctx, handler)
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		dispatcher.close(errRunnerSubmissionClosed)
+		return errRunnerSubmissionClosed
+	}
+	if r.dispatcher != nil {
+		r.mu.Unlock()
+		dispatcher.close(errors.New("agent-sdk/runtime: submission handler is already installed"))
+		return errors.New("agent-sdk/runtime: submission handler is already installed")
+	}
+	if len(r.submissions) != 0 {
+		r.mu.Unlock()
+		dispatcher.close(errors.New("agent-sdk/runtime: submission handler cannot replace queued submissions"))
+		return errors.New("agent-sdk/runtime: submission handler cannot replace queued submissions")
+	}
+	r.dispatcher = dispatcher
+	r.mu.Unlock()
 	return nil
 }
 
@@ -285,7 +325,11 @@ func (r *runner) finish() {
 	r.mu.Lock()
 	r.finished = true
 	r.closed = true
+	dispatcher := r.dispatcher
 	r.mu.Unlock()
+	if dispatcher != nil {
+		dispatcher.close(errRunnerSubmissionClosed)
+	}
 	r.closeOnce.Do(func() {
 		r.events.Close()
 	})

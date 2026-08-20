@@ -77,6 +77,8 @@ func (r *participantRun) beginPrompt(req controller.ParticipantPromptRequest, ha
 	if r == nil {
 		return fmt.Errorf("internal/acpagentbridge/controller: participant run is unavailable")
 	}
+	r.operationMu.Lock()
+	defer r.operationMu.Unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.promptAdmissionClosed {
@@ -99,6 +101,8 @@ func (r *participantRun) finishPrompt(owner *turnHandle) ([]*session.Event, bool
 	if r == nil || owner == nil {
 		return nil, false
 	}
+	r.operationMu.Lock()
+	defer r.operationMu.Unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.handle != owner {
@@ -128,9 +132,17 @@ func (r *participantRun) closePromptAdmission() {
 	}
 	r.mu.Lock()
 	r.promptAdmissionClosed = true
+	cancelSteering := r.steeringCancel
+	r.mu.Unlock()
+	if cancelSteering != nil {
+		cancelSteering()
+	}
+	r.operationMu.Lock()
+	r.mu.Lock()
 	handle := r.handle
 	r.mu.Unlock()
 	if handle != nil {
 		handle.Cancel()
 	}
+	r.operationMu.Unlock()
 }

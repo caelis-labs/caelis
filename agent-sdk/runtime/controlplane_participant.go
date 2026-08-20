@@ -383,7 +383,21 @@ func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptPartici
 	runID := r.nextID("participant-run", nil)
 	runCtx, cancel := context.WithCancel(ctx)
 	handle := newRunner(runID, cancel)
-	go r.executeACPParticipantTurn(runCtx, activeSession, ref, req, binding, contextTransfer, runID, turnID, handle, releasePrompt)
+	admission := newParticipantSteeringAdmission()
+	if err := handle.setSubmissionHandler(runCtx, r.participantSteeringHandler(
+		runCtx,
+		activeSession,
+		ref,
+		binding,
+		turnID,
+		handle,
+		admission,
+	)); err != nil {
+		releasePrompt()
+		cancel()
+		return agent.RunResult{}, err
+	}
+	go r.executeACPParticipantTurn(runCtx, activeSession, ref, req, binding, contextTransfer, runID, turnID, handle, releasePrompt, admission)
 	return agent.RunResult{
 		Session: activeSession,
 		Handle:  handle,
@@ -401,9 +415,16 @@ func (r *Runtime) executeACPParticipantTurn(
 	turnID string,
 	handle *runner,
 	releasePrompt func(),
+	admission *participantSteeringAdmission,
 ) {
 	defer handle.finish()
 	defer releasePrompt()
+	admitted := false
+	defer func() {
+		if !admitted {
+			admission.resolve(controller.ErrNotActive)
+		}
+	}()
 	participantID := strings.TrimSpace(req.ParticipantID)
 	if userEvent := participantPromptUserEvent(activeSession, binding, turnID, strings.TrimSpace(req.Source), req.Input, req.DisplayInput, req.DisplayAddress, req.DisplayTitle, req.ContentParts, r.now()); userEvent != nil {
 		persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
@@ -412,6 +433,7 @@ func (r *Runtime) executeACPParticipantTurn(
 			Event:         userEvent,
 		})
 		if err != nil {
+			admission.resolve(err)
 			handle.publishError(err)
 			return
 		}
@@ -442,10 +464,14 @@ func (r *Runtime) executeACPParticipantTurn(
 		},
 	})
 	if err != nil {
+		admission.resolve(err)
 		handle.publishError(err)
 		return
 	}
 	if turnResult.Handle == nil {
+		err := fmt.Errorf("agent-sdk/runtime: participant controller returned no Turn handle")
+		admission.resolve(err)
+		handle.publishError(err)
 		return
 	}
 	var toolFactOrdinal uint64
@@ -453,6 +479,8 @@ func (r *Runtime) executeACPParticipantTurn(
 		return turnResult.Handle.Cancel().Err
 	})
 	defer turnResult.Handle.Close()
+	admission.resolve(nil)
+	admitted = true
 	if err := r.forwardControllerEvents(ctx, agent.ControllerEventForwardRequest{
 		ActiveSession: activeSession,
 		SessionRef:    ref,

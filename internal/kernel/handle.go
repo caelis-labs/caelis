@@ -26,6 +26,7 @@ type turnHandleConfig struct {
 	createdAt               time.Time
 	cancel                  func() bool
 	allowPendingSubmissions bool
+	waitForRunnerSubmission bool
 	prepareSubmission       func(context.Context, SubmitRequest) (SubmitRequest, error)
 	persistApproval         func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error)
 	settleApproval          func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error)
@@ -58,6 +59,9 @@ type turnHandle struct {
 	runner                  agent.Runner
 	pendingSubmissions      []SubmitRequest
 	allowPendingSubmissions bool
+	waitForRunnerSubmission bool
+	runnerReady             chan struct{}
+	runnerReadyOnce         sync.Once
 	prepareSubmission       func(context.Context, SubmitRequest) (SubmitRequest, error)
 	persistApproval         func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error)
 	settleApproval          func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error)
@@ -79,11 +83,13 @@ func newTurnHandle(cfg turnHandleConfig) *turnHandle {
 		createdAt:               cfg.createdAt,
 		cancelFn:                cfg.cancel,
 		allowPendingSubmissions: cfg.allowPendingSubmissions,
+		waitForRunnerSubmission: cfg.waitForRunnerSubmission,
 		prepareSubmission:       cfg.prepareSubmission,
 		persistApproval:         cfg.persistApproval,
 		settleApproval:          cfg.settleApproval,
 		approvals:               cfg.approvals,
 		eventsCh:                make(chan eventstream.Envelope, 32),
+		runnerReady:             make(chan struct{}),
 	}
 	if h.approvals == nil {
 		h.approvals = newApprovalCoordinator(cfg.sessionRef)
@@ -142,24 +148,42 @@ func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
 		req = prepared
 	}
 
-	h.mu.Lock()
-	runner := h.runner
-	cancelled := h.cancelled
-	if err := ctx.Err(); err != nil {
+	for {
+		h.mu.Lock()
+		runner := h.runner
+		cancelled := h.cancelled
+		finished := h.finished || h.finishing
+		waitForRunner := h.waitForRunnerSubmission && runner == nil && !cancelled && !finished
+		ready := h.runnerReady
+		if err := ctx.Err(); err != nil {
+			h.mu.Unlock()
+			return err
+		}
+		if cancelled {
+			h.mu.Unlock()
+			return context.Canceled
+		}
+		if runner == nil && h.allowPendingSubmissions && !waitForRunner && !finished {
+			h.pendingSubmissions = append(h.pendingSubmissions, cloneSubmitRequest(req))
+			h.mu.Unlock()
+			return nil
+		}
 		h.mu.Unlock()
-		return err
-	}
-	if cancelled {
-		h.mu.Unlock()
-		return context.Canceled
-	}
-	if runner == nil && h.allowPendingSubmissions && !h.finished {
-		h.pendingSubmissions = append(h.pendingSubmissions, cloneSubmitRequest(req))
-		h.mu.Unlock()
-		return nil
-	}
-	h.mu.Unlock()
-	if runner == nil {
+		if runner != nil {
+			submission := runnerSubmissionFromSubmitRequest(req)
+			if contextual, ok := runner.(agent.ContextSubmissionRunner); ok {
+				return contextual.SubmitContext(ctx, submission)
+			}
+			return runner.Submit(submission)
+		}
+		if waitForRunner {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ready:
+				continue
+			}
+		}
 		return &Error{
 			Kind:        KindUnsupported,
 			Code:        CodeSubmissionUnsupported,
@@ -167,7 +191,6 @@ func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
 			Message:     "gateway: submission is not available for this handle",
 		}
 	}
-	return runner.Submit(runnerSubmissionFromSubmitRequest(req))
 }
 
 func (h *turnHandle) Cancel() agent.CancelResult {
@@ -179,6 +202,7 @@ func (h *turnHandle) Cancel() agent.CancelResult {
 	h.cancelled = true
 	cancelFn := h.cancelFn
 	runner := h.runner
+	h.runnerReadyOnce.Do(func() { close(h.runnerReady) })
 	h.mu.Unlock()
 	h.approvals.abandonOwner(h, "cancelled")
 
@@ -224,6 +248,7 @@ func (h *turnHandle) setRunner(runner agent.Runner) {
 	h.runner = runner
 	pending := slices.Clone(h.pendingSubmissions)
 	h.pendingSubmissions = nil
+	h.runnerReadyOnce.Do(func() { close(h.runnerReady) })
 	h.mu.Unlock()
 	if cancelled && runner != nil {
 		runner.Cancel()
@@ -557,6 +582,7 @@ func (h *turnHandle) finish() {
 		return
 	}
 	h.finishing = true
+	h.runnerReadyOnce.Do(func() { close(h.runnerReady) })
 	hooks := append([]func(){}, h.finishHooks...)
 	h.finishHooks = nil
 	h.mu.Unlock()

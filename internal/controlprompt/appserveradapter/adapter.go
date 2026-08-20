@@ -496,11 +496,11 @@ func (t *sessionClientTurn) steer(
 	displayInput string,
 	contentParts []model.ContentPart,
 ) error {
-	mainTurn, ok := t.turn.(appserver.SessionTurn)
+	steerable, ok := t.turn.(appserver.SessionTurn)
 	if !ok {
 		return noActiveTurnSubmissionError()
 	}
-	return mainTurn.Steer(ctx, input, displayInput, contentParts)
+	return steerable.Steer(ctx, input, displayInput, contentParts)
 }
 
 func (t *sessionClientTurn) HandleID() string {

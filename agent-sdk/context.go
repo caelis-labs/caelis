@@ -111,6 +111,14 @@ type Runner interface {
 	Close() error
 }
 
+// ContextSubmissionRunner accepts one live submission while preserving the
+// caller's cancellation and deadline. Kernel prefers this optional capability
+// when a Runner performs synchronous external work; ordinary model runners may
+// continue to implement only Runner.Submit and drain their local queue.
+type ContextSubmissionRunner interface {
+	SubmitContext(context.Context, Submission) error
+}
+
 // RunnerCompletionWaiter reports when the execution producer, including its
 // final durable writes, is quiescent. Runtime decorators that own an external
 // lease use this optional contract before releasing that authority after an

@@ -52,7 +52,9 @@ type TargetTurn interface {
 	Close() error
 }
 
-// SessionTurn is a TargetTurn that accepts main-conversation steer input.
+// SessionTurn is a TargetTurn that accepts additional conversation input on
+// the same active execution. Main and participant Turns share the exact-target
+// write contract while their Runtime backends decide how to inject it.
 type SessionTurn interface {
 	TargetTurn
 	Steer(context.Context, string, string, []model.ContentPart) error
@@ -363,7 +365,7 @@ func (t *sessionTurn) ResolveApproval(
 	return err
 }
 
-// Steer submits additional prompt content to this exact active main Turn.
+// Steer submits additional prompt content to this exact active Turn.
 // The target and controller epoch captured at admission fence the write
 // without asking a Surface to reconstruct live identity.
 func (t *sessionTurn) Steer(
@@ -387,7 +389,7 @@ func (t *sessionTurn) Steer(
 		displayInput = ""
 	}
 	if t.steerFn == nil {
-		return errors.New("controlclient: target Turn does not accept main-conversation steer input")
+		return errors.New("controlclient: target Turn does not accept conversation steer input")
 	}
 	return t.steerFn(ctx, input, displayInput, contentParts)
 }
