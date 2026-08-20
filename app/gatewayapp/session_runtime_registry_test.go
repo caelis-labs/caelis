@@ -2231,7 +2231,7 @@ func assertSessionRuntimeIsolationContract(t *testing.T, host *Stack, instance *
 		instance.authorities.providerUsage != host.composition.authorities.providerUsage ||
 		instance.activation == nil || instance.activation.modelCatalog != host.composition.lookup ||
 		instance.authorities.sessionModelPins != host.composition.authorities.sessionModelPins ||
-		instance.authorities.hostedChildMailbox == nil {
+		instance.authorities.hostedChildInput == nil {
 		t.Fatal("Session Runtime did not receive the required borrowed Host authorities")
 	}
 	if instance.authorities.store == nil || instance.authorities.store == host.composition.authorities.store ||

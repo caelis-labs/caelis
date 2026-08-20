@@ -404,9 +404,6 @@ func TestGenericReconnectDoesNotRequirePrivateMessageCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.supportsMessages {
-		t.Fatal("helper unexpectedly advertised private message support")
-	}
 	_ = run.client.Close(ctx)
 	run.mu.Lock()
 	run.state = delegation.StateFailed

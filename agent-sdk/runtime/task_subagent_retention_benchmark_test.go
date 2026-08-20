@@ -72,7 +72,7 @@ func BenchmarkSubagentAppendStreamFrameMultiTurn(b *testing.B) {
 					})
 					task.ensureTerminalStreamFrameLocked()
 					if turn < turns {
-						task.beginMessageTurn()
+						beginObservedActivityForTest(task)
 					}
 				}
 				subagentRetentionBenchmarkSink = task.streamBytes + task.semanticRetention.bytes +

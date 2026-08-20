@@ -144,7 +144,7 @@ func (r *runner) Submit(sub agent.Submission) error {
 }
 
 func (r *runner) SubmitContext(ctx context.Context, sub agent.Submission) error {
-	if sub.Kind != agent.SubmissionKindConversation && sub.Kind != agent.SubmissionKindAgentMessage {
+	if sub.Kind != agent.SubmissionKindConversation {
 		return fmt.Errorf("agent-sdk/runtime: unsupported submission kind %q", sub.Kind)
 	}
 	if ctx == nil {

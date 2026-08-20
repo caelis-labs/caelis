@@ -258,7 +258,7 @@ suggests.
 | Transport-neutral product client | `control/appserver/service.go`, `client.go` | Yes; all presentation clients should consume it |
 | Atomic reconnect state plus feed splice | `control/appserver/reconnect_bootstrap.go` | Yes; use for TUI and Bar attachment |
 | Durable cursor, replay, bounded subscriber handling, gap recovery | `control/appserver/feed.go`, `feed_broker.go` | Yes; this is the authoritative Session stream |
-| Focused typed clients for prompt, lifecycle, Agent-message delivery, status, configuration, Agent, participant, completion/skill, plugin, presentation, and terminal operations | `control/appserver`, `internal/controlprompt/appserveradapter`, `app/gatewayapp/controladapter/local` | Yes for embedded and HTTP AppServer clients; slash text is parsed by the client and never becomes a generic server command |
+| Focused typed clients for prompt, lifecycle, status, configuration, Agent, participant, completion/skill, plugin, presentation, and terminal operations | `control/appserver`, `internal/controlprompt/appserveradapter`, `app/gatewayapp/controladapter/local` | Yes for embedded and HTTP AppServer clients; slash text is parsed by the client and never becomes a generic server command |
 | Durable idempotency operation ledger and CAS/lease checks | `control/appserver/operation_store.go`, `app/gatewayapp/control_client_backend.go` | Yes; every remote write supplies operation and target identity |
 | Authenticated HTTP/SSE Host adapter with TLS and host policy | `app/controlserver`, `control/appserver/wirev1` | Yes; it is infrastructure around Control, not a Surface |
 | Host-owned accepted main-Turn lifetime | `internal/kernel/gateway_turns.go`, `app/gatewayapp/stack.go` | Yes; HTTP request cancellation must not cancel accepted work |
@@ -326,8 +326,8 @@ instance without binding a host loopback port.
 ### G3 — AppServer capability parity is complete; product process selection lands
 
 **Evidence.** `control/appserver.AppServerClients` is the complete aggregate client
-set for Session lifecycle and Turns, Agent-message delivery and Turn
-observation, participant Turns, status, configuration, Agent operations,
+set for Session lifecycle and Turns, participant Turns, status, configuration,
+Agent operations,
 completion/skill, plugin operations, ACP presentation, terminal RPC, and Task
 observation. Task delivery remains an independent typed side channel inside
 the aggregate. Both the principal-bound

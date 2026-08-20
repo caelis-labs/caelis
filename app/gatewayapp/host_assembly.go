@@ -107,8 +107,8 @@ func activateHostRuntime(stack *Stack, assembly hostControlAssembly) error {
 		stack.lifecycleCancel()
 		return err
 	}
-	mailboxRouter := &hostedChildMailboxRouter{}
-	stack.composition.authorities.hostedChildMailbox = mailboxRouter.deliver
+	inputRouter := &hostedChildInputRouter{}
+	stack.composition.authorities.hostedChildInput = inputRouter.route
 	assemblyDeps, err := newSessionRuntimeAssemblyDeps(stack)
 	if err != nil {
 		_ = stack.Close()
@@ -143,7 +143,7 @@ func activateHostRuntime(stack *Stack, assembly hostControlAssembly) error {
 		}
 	}
 	assembly.taskStreamRouter.registry = sessionRuntimes
-	if err := mailboxRouter.bind(sessionRuntimes); err != nil {
+	if err := inputRouter.bind(sessionRuntimes); err != nil {
 		_ = stack.Close()
 		return err
 	}

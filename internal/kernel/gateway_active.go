@@ -75,6 +75,39 @@ func (g *Gateway) ActiveTurn(sessionID string) (ActiveTurnState, bool) {
 	}, true
 }
 
+// WaitActiveTurnChange waits until the exact active Turn is released or
+// replaced. Callers use it only after a proven-no-effect submission failure,
+// so they can reselect between the next active Turn and a new idle Turn
+// without spinning on a handle whose Runtime runner is already closed.
+func (g *Gateway) WaitActiveTurnChange(ctx context.Context, expected ActiveTurnState) error {
+	if g == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	sessionID := strings.TrimSpace(expected.SessionRef.SessionID)
+	if sessionID == "" {
+		return nil
+	}
+	for {
+		g.mu.Lock()
+		current := g.active[sessionID]
+		if current == nil || current.HandleID() != expected.HandleID ||
+			current.RunID() != expected.RunID || current.TurnID() != expected.TurnID {
+			g.mu.Unlock()
+			return nil
+		}
+		changed := g.activeChanged
+		g.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changed:
+		}
+	}
+}
+
 // ApprovalTarget returns the exact Turn identity that owns one pending
 // Session-scoped approval, including approvals whose detached child outlived
 // the active parent Turn.
@@ -159,10 +192,7 @@ func (g *Gateway) SubmitActiveTurn(ctx context.Context, req SubmitActiveTurnRequ
 		DisplayText:  req.DisplayText,
 		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
 		Metadata:     cloneMap(req.Metadata),
-		MessageID:    strings.TrimSpace(req.MessageID),
 		Actor:        session.CloneActorRef(req.Actor),
-		Scope:        cloneEventScopePointer(req.Scope),
-		Persisted:    req.Persisted,
 		Approval:     req.Approval,
 	})
 }

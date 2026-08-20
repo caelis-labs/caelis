@@ -21,6 +21,10 @@ var ErrNotActive = errorcode.New(errorcode.FailedPrecondition, "agent-sdk/runtim
 // connection did not negotiate the standard ACP steering capability.
 var ErrParticipantSteeringUnsupported = errorcode.New(errorcode.Unsupported, "agent-sdk/runtime/controller: participant steering is unsupported")
 
+// ErrControllerSteeringUnsupported reports that the active main controller
+// connection did not negotiate the standard ACP steering capability.
+var ErrControllerSteeringUnsupported = errorcode.New(errorcode.Unsupported, "agent-sdk/runtime/controller: main controller steering is unsupported")
+
 // ApprovalOption is one controller-side approval choice surfaced by a remote
 // ACP controller.
 type ApprovalOption = agent.ApprovalOption
@@ -181,6 +185,27 @@ type ParticipantSteerer interface {
 	SteerParticipant(context.Context, ParticipantSteerRequest) error
 }
 
+// ControllerSteerRequest guides one exact active main-controller Turn. Commit
+// runs only after the remote endpoint confirms injection and must durably
+// publish the canonical user input before buffered remote updates are released.
+type ControllerSteerRequest struct {
+	SessionRef      session.SessionRef  `json:"session_ref,omitempty"`
+	ControllerID    string              `json:"controller_id,omitempty"`
+	ControllerEpoch string              `json:"controller_epoch,omitempty"`
+	RemoteSessionID string              `json:"remote_session_id,omitempty"`
+	TurnID          string              `json:"turn_id,omitempty"`
+	Input           string              `json:"input,omitempty"`
+	DisplayInput    string              `json:"display_input,omitempty"`
+	ContentParts    []model.ContentPart `json:"content_parts,omitempty"`
+	Commit          func() error        `json:"-"`
+}
+
+// ControllerSteerer is the optional provider-neutral active-input capability
+// implemented by main-controller backends that negotiated steering.
+type ControllerSteerer interface {
+	SteerController(context.Context, ControllerSteerRequest) error
+}
+
 type CancelStatus = agent.CancelStatus
 
 const (
@@ -284,6 +309,21 @@ func NormalizeParticipantSteerRequest(in ParticipantSteerRequest) ParticipantSte
 	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
 	out.TurnID = strings.TrimSpace(in.TurnID)
 	out.ParticipantID = strings.TrimSpace(in.ParticipantID)
+	out.Input = strings.TrimSpace(in.Input)
+	out.DisplayInput = strings.TrimSpace(in.DisplayInput)
+	out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)
+	return out
+}
+
+// NormalizeControllerSteerRequest clones request-owned values before they
+// cross the asynchronous main-controller steering boundary.
+func NormalizeControllerSteerRequest(in ControllerSteerRequest) ControllerSteerRequest {
+	out := in
+	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
+	out.ControllerID = strings.TrimSpace(in.ControllerID)
+	out.ControllerEpoch = strings.TrimSpace(in.ControllerEpoch)
+	out.RemoteSessionID = strings.TrimSpace(in.RemoteSessionID)
+	out.TurnID = strings.TrimSpace(in.TurnID)
 	out.Input = strings.TrimSpace(in.Input)
 	out.DisplayInput = strings.TrimSpace(in.DisplayInput)
 	out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)

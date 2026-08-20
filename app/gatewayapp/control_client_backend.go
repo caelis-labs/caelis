@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
@@ -606,17 +606,17 @@ func (s *runtimeComposition) controlRuntimeContext(fallback context.Context, act
 	}
 	// Accepted Control turns outlive their admission request, so their
 	// cancellation parent is the Stack lifecycle. Preserve only the negotiated
-	// Agent-message transport from the request context: it is a trusted host
+	// Agent-input transport from the request context: it is a trusted host
 	// capability required by ACP child turns, not arbitrary request state.
-	if sender := agentmessage.SenderFromContext(fallback); sender != nil {
-		runtimeCtx = agentmessage.WithSender(runtimeCtx, sender)
+	if sender := agent.AgentInputSenderFromContext(fallback); sender != nil {
+		runtimeCtx = agent.WithAgentInputSender(runtimeCtx, sender)
 		return runtimeCtx
 	}
 	// Hosted child turns execute on a detached Session Runtime. Bind the
-	// Host-owned parent/sibling mailbox so SendMessage does not treat that
+	// Host-owned parent/sibling input route so SendMessage does not treat that
 	// child as the main Agent.
-	if sender := s.hostedChildMessageSender(active); sender != nil {
-		runtimeCtx = agentmessage.WithSender(runtimeCtx, sender)
+	if sender := s.hostedChildInputSender(active); sender != nil {
+		runtimeCtx = agent.WithAgentInputSender(runtimeCtx, sender)
 	}
 	return runtimeCtx
 }

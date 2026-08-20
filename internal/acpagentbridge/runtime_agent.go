@@ -11,7 +11,6 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -23,7 +22,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
@@ -43,26 +41,6 @@ type PromptRouterFactory func(context.Context, session.Session) (controlprompt.R
 // notice required by the ACP surface. Product assembly supplies the formatter
 // so this integration package does not depend on presentation packages.
 type SlashResultFormatter func(controlprompt.SlashCommandResult) string
-
-// AgentMessageDelivery is one durably accepted message and an optional idle
-// target turn whose ACP envelopes must complete before the extension returns.
-type AgentMessageDelivery struct {
-	Accepted    bool
-	State       string
-	TurnID      string
-	StartedTurn bool
-	Events      <-chan eventstream.Envelope
-	// Err reports why Events closed before a target terminal. A nil error after
-	// closure proves that the observed Turn reached its terminal Envelope.
-	Err   func() error
-	Close func() error
-}
-
-type AgentMessageHandler func(context.Context, string, agentmessage.Request) (AgentMessageDelivery, error)
-
-// AgentMessageSourceResolver derives canonical source identity from trusted
-// direct-bridge bindings. Wire from values are never passed to this resolver.
-type AgentMessageSourceResolver func(context.Context, session.Session) (session.ActorRef, *session.EventScope, error)
 
 // Config configures the lower-level ACP bridge used for protocol conformance.
 // Product assembly uses GatewayAgentConfig and supplies typed AppServer clients
@@ -112,11 +90,8 @@ type Config struct {
 	// WorkspaceCWD pairs the product Host's stable Workspace key with its
 	// canonical directory. ACP identifies a workspace by CWD, so typed Session
 	// creation uses this pair to preserve the Host's registered identity.
-	WorkspaceCWD       string
-	AgentInfo          *acp.Implementation
-	AgentMessageTurns  *appserver.AgentMessageTurnClient
-	AgentMessages      AgentMessageHandler
-	AgentMessageSource AgentMessageSourceResolver
+	WorkspaceCWD string
+	AgentInfo    *acp.Implementation
 }
 
 // RuntimeAgent adapts Agent SDK runtime and session contracts into the standard
@@ -147,9 +122,6 @@ type RuntimeAgent struct {
 	workspaceKey          string
 	workspaceCWD          string
 	agentInfo             *acp.Implementation
-	agentMessageTurns     *appserver.AgentMessageTurnClient
-	agentMessages         AgentMessageHandler
-	agentMessageSource    AgentMessageSourceResolver
 
 	mu              sync.Mutex
 	cancels         map[string]context.CancelFunc
@@ -241,9 +213,6 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		workspaceKey:          strings.TrimSpace(cfg.WorkspaceKey),
 		workspaceCWD:          strings.TrimSpace(cfg.WorkspaceCWD),
 		agentInfo:             normalizeAgentInfo(cfg.AgentInfo, appName),
-		agentMessageTurns:     cfg.AgentMessageTurns,
-		agentMessages:         cfg.AgentMessages,
-		agentMessageSource:    cfg.AgentMessageSource,
 		cancels:               map[string]context.CancelFunc{},
 		managedSessions:       map[string]struct{}{},
 		terminalRefs:          map[string]stream.Ref{},
@@ -293,10 +262,6 @@ func (a *RuntimeAgent) Initialize(ctx context.Context, _ acp.InitializeRequest) 
 		},
 		PromptCapabilities:  promptCaps,
 		SessionCapabilities: map[string]json.RawMessage{},
-	}
-	if a.agentMessageTurns != nil || (a.agentMessages != nil && a.agentMessageSource != nil) {
-		caps.Meta = map[string]json.RawMessage{}
-		caps.Meta[acp.MethodSessionMessage] = json.RawMessage(`{}`)
 	}
 	if a.loader != nil || a.sessionClient != nil {
 		caps.LoadSession = true
@@ -819,9 +784,6 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 	ref := a.activeSessionRef(activeSession, req.SessionID)
 
 	runCtx, cancel := context.WithCancel(ctx)
-	if messageCallbacks, ok := cb.(acp.MessageCallbacks); ok {
-		runCtx = agentmessage.WithSender(runCtx, acpMessageSender{sessionID: req.SessionID, callbacks: messageCallbacks})
-	}
 	a.setCancel(req.SessionID, cancel)
 	defer a.clearCancel(req.SessionID)
 	defer cancel()

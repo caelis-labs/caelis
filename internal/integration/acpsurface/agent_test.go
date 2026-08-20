@@ -336,11 +336,6 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 	}, &recordingCallbacks{}); !errors.Is(err, session.ErrSessionNotFound) {
 		t.Fatalf("Prompt(foreign system-managed child) error = %v, want session not found", err)
 	}
-	if _, err := agent.SessionMessage(ctx, acp.SessionMessageRequest{
-		SessionID: foreign.SessionID, MessageID: "foreign-message", From: "main", To: "parent", Message: "must not deliver",
-	}, &recordingCallbacks{}); !errors.Is(err, session.ErrSessionNotFound) {
-		t.Fatalf("SessionMessage(foreign system-managed child) error = %v, want session not found", err)
-	}
 	if _, err := agent.SetSessionMode(ctx, acp.SetSessionModeRequest{
 		SessionID: foreign.SessionID, ModeID: "manual",
 	}); !errors.Is(err, session.ErrSessionNotFound) {

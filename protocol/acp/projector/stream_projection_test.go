@@ -484,7 +484,7 @@ func TestProjectTaskStreamFrameProjectsEventOnlySpawnChildSemantics(t *testing.T
 		assert func(*testing.T, eventstream.Envelope)
 	}{
 		{
-			name: "parent Agent message input",
+			name: "parent Agent input",
 			event: &session.Event{
 				ID: "child-input-1", Type: session.EventTypeContext, Visibility: session.VisibilityUIOnly,
 				Actor: session.ActorRef{Kind: session.ActorKindController, ID: "parent", Name: "parent"},

@@ -568,10 +568,10 @@ func TestSubagentRosterRefreshTracksContinuedCompletedChild(t *testing.T) {
 			Meta:      acpToolNameMeta("SendMessage"),
 		},
 	})
-	if len(accepted) != 1 || !model.acceptedSendMessageTargetsSubagent(accepted[0]) {
+	if len(accepted) != 1 || !model.successfulSendMessageTargetsSubagent(accepted[0]) {
 		t.Fatalf("successful child-directed SendMessage did not resume roster refresh: %#v", accepted)
 	}
-	if model.acceptedSendMessageTargetsSubagent(TranscriptEvent{
+	if model.successfulSendMessageTargetsSubagent(TranscriptEvent{
 		Scope: ACPProjectionMain, Kind: TranscriptEventTool, ToolName: "SendMessage",
 		ToolMessageTarget: "@rhea", Final: true, ToolError: true,
 	}) {

@@ -128,18 +128,19 @@ not the normal way to interrupt an Agent:
 prefer read/wait while observations keep changing, and cancel only for an
 explicit stop or prolonged lack of progress.
 
-`agent-sdk/message` owns the small provider-neutral Agent message contract.
-Runtime owns trusted source identity, Session-scoped handle resolution, durable
-Context persistence, and live-turn wakeup. The model-facing tool intentionally
-exposes only `to` and `message`; delivery acknowledgements are not completion
-claims. Task remains the common lifecycle and observation abstraction for
-commands and subagents, but Task input is reserved for live command stdin and
-does not double as Agent communication. Subagent `Task read` and `Task wait`
+`agent-sdk.AgentInputSender` is the small provider-neutral Agent input contract.
+Runtime owns trusted source identity and Session-scoped handle resolution. The
+model-facing `SendMessage` tool exposes only `to` and `message`; each call sends
+one ordinary input and returns no delivery or target-lifecycle claim. Task
+remains the common lifecycle and observation abstraction for commands and
+subagents, but Task input is reserved for live command stdin and does not double
+as Agent communication. Subagent `Task read` and `Task wait`
 do not hold the lifecycle mutation claim while awaiting remote state. A sampled
-result is applied only under a short mutation claim and only when its child Turn
-is still current; observer cancellation never cancels or interrupts the child.
+result is applied only under a short mutation claim and only when its child
+activity is still current; observer cancellation never cancels or interrupts
+the child.
 Each explicit read/wait advances one parent observation frontier and returns all
-exact retained Turn FinalResponses after that frontier in chronological order;
+exact retained activity FinalResponses after that frontier in chronological order;
 already observed Finals are not returned again. Spawn itself advances the
 frontier when its initial result already contains the first FinalResponse.
 While a subagent is running, the model-facing Task result also carries the
@@ -150,31 +151,28 @@ reasoning or assistant text. It never includes raw tool input/output, is not a
 child transcript or replay token, and enters parent context only as this
 bounded Task result.
 
-Tool invocation lifecycle and target lifecycle are separate contracts. Observer
-callbacks produce in-progress tool events; a successful returned result
-completes the invocation even when a Spawn or SendMessage target remains
-running. Target state stays explicit in the result and Task stream. When an
-accepted message reopens an existing subagent Task, a following Task-stream
-subscription waits by stable Session/Task identity and re-resolves the concrete
-producer. No Host callback, tool result, or Session-feed event acquires a second
-subscription or lifecycle authority.
+Tool invocation, target execution, and Task observation are separate contracts.
+Observer callbacks produce in-progress tool events; a successful SendMessage
+result means only that the target input API accepted the call. Input admission
+does not claim or advance Task state. Later child output opens or updates one
+observed activity generation, and Task read/stream remains an output-derived
+view over that stable Session/Task identity.
 
-Every target uses the shared `agent-sdk/message` canonical Context builder.
-Agent-message persistence requires an atomic append outcome so only a newly
-committed event may wake the target; the sequential read-before-append fallback
-is not an accepted delivery boundary. A completion notice is a bounded,
-best-effort parent hint after Task and any required sidecar final are durable.
-Notice failure never delays producer completion or reopens Task terminal state.
+The input method is selected by the current endpoint owner, not by the caller:
 
-The wake behavior is fixed by owner and target state; it is not a caller option:
+| Input path | Endpoint operation |
+| --- | --- |
+| Hosted child to an active main parent | Submit ordinary conversation input to the exact active parent Run |
+| Hosted child to an idle main parent | Start one ordinary parent Turn |
+| Parent or sibling to a running ACP child | Use negotiated `_session/steering` on the exact active activity |
+| Parent or sibling to an idle ACP child | Resume when required, then use `session/prompt` on the same child Session |
 
-| Message path | Durable owner and effect | Target activity |
-| --- | --- | --- |
-| Hosted child to its main parent | Parent Session appends one canonical Context | Submit to an active parent Turn; an idle parent remains pending for its next ordinary Turn |
-| ACP participant or sibling to main through Gateway | Main Session appends one canonical Context | Submit to an active Turn, or start exactly one Turn when idle |
-| Parent to a running spawned child | Remote child Session owns canonical Context; parent record is audit only | Deliver into the current child Turn without starting another Turn |
-| Parent to an idle spawned child after any terminal Turn outcome | Remote child Session owns canonical Context; parent record is audit only | Reconnect transport when needed, then start the next Turn on the same child Session and existing Task identity |
-| Retry with the same message identity and payload | Existing canonical Context is returned | Never submit or start a second Turn; changed payload conflicts |
+There is no SDK delivery ledger, mailbox, MessageID, parent audit mirror, or
+Task-side input fallback. A completion notice is a separate bounded,
+best-effort conversation hint submitted once to the exact active parent Run
+after Task and sidecar final are durable. It is dropped when the parent is idle
+or the Run changes; failure never delays producer completion or reopens Task
+terminal state.
 
 ## Control and Handoff
 

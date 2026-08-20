@@ -9,7 +9,6 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
@@ -74,7 +73,7 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 			hasSendMessage = true
 			out = append(out, runtimeSendMessageTool{
 				base: one, runtime: r, session: session.CloneSession(activeSession),
-				sessionRef: session.NormalizeSessionRef(ref), external: toolCtx.messageSender,
+				sessionRef: session.NormalizeSessionRef(ref), external: toolCtx.inputSender,
 			})
 		default:
 			out = append(out, one)
@@ -91,10 +90,10 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 	// auditable. A hosted child receives its parent/sibling transport only at
 	// runtime through context, so that SDK host boundary remains the sole
 	// intentional augmentation.
-	if toolCtx.messageSender != nil && !hasSendMessage {
+	if toolCtx.inputSender != nil && !hasSendMessage {
 		out = append(out, runtimeSendMessageTool{
 			base: sendmessage.New(), runtime: r, session: session.CloneSession(activeSession),
-			sessionRef: session.NormalizeSessionRef(ref), external: toolCtx.messageSender,
+			sessionRef: session.NormalizeSessionRef(ref), external: toolCtx.inputSender,
 		})
 	}
 	return out
@@ -137,7 +136,7 @@ type runtimeSendMessageTool struct {
 	runtime    *Runtime
 	session    session.Session
 	sessionRef session.SessionRef
-	external   agentmessage.Sender
+	external   agent.AgentInputSender
 }
 
 func (t runtimeSendMessageTool) Definition() tool.Definition {
@@ -154,71 +153,49 @@ func (t runtimeSendMessageTool) Call(ctx context.Context, call tool.Call) (tool.
 	}
 	to, _ := stringArg(args, "to")
 	text, _ := stringArg(args, "message")
-	messageID, err := agentmessage.ToolMessageID(t.sessionRef, call.ID)
-	if err != nil {
-		return tool.Result{}, err
-	}
-	req := agentmessage.Request{
-		MessageID: messageID, To: strings.TrimSpace(to), Text: strings.TrimSpace(text),
-		From: session.ActorRef{Kind: session.ActorKindController, ID: strings.TrimSpace(t.session.Controller.ControllerID), Name: "main"},
-	}
-	var response agentmessage.Response
-	localTarget := t.hasLocalTaskTarget(ctx, req.To)
+	input := agent.CloneAgentInput(agent.AgentInput{Target: to, Input: text})
+	localTarget := sessionHasSubagentTarget(t.session, input.Target)
 	switch {
-	case strings.EqualFold(req.To, agentmessage.Parent):
+	case strings.EqualFold(input.Target, agent.AgentInputParent):
 		if t.external == nil {
 			return tool.Result{}, fmt.Errorf("agent-sdk/runtime: the main Agent has no parent target")
 		}
-		response, err = t.external.SendMessage(ctx, req)
+		err = t.external.SendAgentInput(ctx, input)
 	case localTarget:
 		if t.runtime == nil {
-			return tool.Result{}, fmt.Errorf("agent-sdk/runtime: local Agent message service is unavailable")
+			return tool.Result{}, fmt.Errorf("agent-sdk/runtime: local Agent input service is unavailable")
 		}
-		response, err = t.runtime.SendAgentMessage(ctx, t.sessionRef, req)
+		_, err = t.runtime.SubmitChildInput(ctx, t.sessionRef, agent.ChildInputCommand{
+			Target: input.Target, Source: session.ControllerExecutor(t.session.Controller),
+			Input: input.Input, DisplayInput: input.DisplayInput, ContentParts: input.ContentParts,
+		})
 	case t.external != nil:
-		response, err = t.external.SendMessage(ctx, req)
+		err = t.external.SendAgentInput(ctx, input)
 	default:
 		if t.runtime == nil {
-			return tool.Result{}, fmt.Errorf("agent-sdk/runtime: local Agent message service is unavailable")
+			return tool.Result{}, fmt.Errorf("agent-sdk/runtime: local Agent input service is unavailable")
 		}
-		response, err = t.runtime.SendAgentMessage(ctx, t.sessionRef, req)
+		_, err = t.runtime.SubmitChildInput(ctx, t.sessionRef, agent.ChildInputCommand{
+			Target: input.Target, Source: session.ControllerExecutor(t.session.Controller),
+			Input: input.Input, DisplayInput: input.DisplayInput, ContentParts: input.ContentParts,
+		})
 	}
 	if err != nil {
 		return tool.Result{}, err
 	}
-	return sendMessageToolResult(call, req.To, response), nil
+	return sendMessageToolResult(call, input.Target), nil
 }
 
-func sendMessageToolResult(call tool.Call, target string, response agentmessage.Response) tool.Result {
-	text := "Message delivered."
-	if !response.Accepted || strings.EqualFold(strings.TrimSpace(response.State), agentmessage.StateUnknownOutcome) {
-		text = "Delivery outcome unknown; do not resend."
-	}
+func sendMessageToolResult(call tool.Call, target string) tool.Result {
 	meta := map[string]any{}
 	messageMeta := taskRuntimeMetaSection(meta, "message")
 	messageMeta["to"] = strings.TrimSpace(target)
-	messageMeta["accepted"] = response.Accepted
-	messageMeta["state"] = strings.TrimSpace(response.State)
-	messageMeta["message_id"] = strings.TrimSpace(response.MessageID)
-	messageMeta["turn_id"] = strings.TrimSpace(response.TurnID)
-	messageMeta["started_turn"] = response.StartedTurn
 	return tool.Result{
 		ID:       strings.TrimSpace(call.ID),
 		Name:     sendmessage.ToolName,
-		Content:  []model.Part{model.NewTextPart(text)},
+		Content:  []model.Part{model.NewTextPart("Message sent.")},
 		Metadata: meta,
 	}
-}
-
-func (t runtimeSendMessageTool) hasLocalTaskTarget(ctx context.Context, target string) bool {
-	if sessionHasSubagentTarget(t.session, target) {
-		return true
-	}
-	if t.runtime == nil || t.runtime.tasks == nil {
-		return false
-	}
-	_, err := t.runtime.tasks.resolveTaskHandle(ctx, t.sessionRef, target)
-	return err == nil
 }
 
 func sessionHasSubagentTarget(activeSession session.Session, target string) bool {

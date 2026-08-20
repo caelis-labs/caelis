@@ -318,14 +318,6 @@
         }
       }
     },
-    "/sessions/{session_id}/agent-messages": {
-      "post": {
-        "operationId": "deliverAgentMessage",
-        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageRequest"}}}},
-        "responses": {"200":{"description":"Durable Agent-message delivery result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentMessageResult"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
-      }
-    },
     "/sessions/{session_id}/participants/handles": {
       "get": {
         "operationId": "listParticipantHandles",
@@ -1730,8 +1722,6 @@
       "PresentationCommand": {"type":"object","required":["name"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"input":{"$ref":"#/components/schemas/PresentationCommandInput"}},"additionalProperties":false},
       "PresentationSnapshot": {"type":"object","properties":{"modes":{"$ref":"#/components/schemas/PresentationModeState"},"config_options":{"$ref":"#/components/schemas/PresentationConfigOptionList"},"models":{"$ref":"#/components/schemas/PresentationModelState"},"commands":{"type":"array","items":{"$ref":"#/components/schemas/PresentationCommand"}}},"additionalProperties":false},
       "TerminalRequest": {"type":"object","required":["session_id","terminal_id"],"properties":{"session_id":{"type":"string"},"terminal_id":{"type":"string"}},"additionalProperties":false},
-      "AgentMessageRequest": {"type":"object","required":["session_id","message_id","text"],"properties":{"session_id":{"type":"string"},"message_id":{"type":"string"},"to":{"type":"string"},"text":{"type":"string"},"display_from":{"type":"string"}},"additionalProperties":false},
-      "AgentMessageResult": {"type":"object","required":["message_id"],"properties":{"message_id":{"type":"string"},"accepted":{"type":"boolean"},"state":{"type":"string"},"target":{"$ref":"#/components/schemas/TurnTarget"},"started_turn":{"type":"boolean"}},"additionalProperties":false},
       "TerminalExitStatus": {"type":"object","properties":{"exit_code":{"type":"integer"},"signal":{"type":"string"}},"additionalProperties":false},
       "TerminalOutput": {"type":"object","required":["output","truncated"],"properties":{"output":{"type":"string"},"truncated":{"type":"boolean"},"exit_status":{"$ref":"#/components/schemas/TerminalExitStatus"}},"additionalProperties":false},
       "StartParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"role":{"$ref":"#/components/schemas/ParticipantRole"},"label":{"type":"string"},"source":{"type":"string"},"input":{"type":"string"},"display_input":{"type":"string"},"display_address":{"type":"string"},"display_title":{"type":"string"},"content_parts":{"type":"array","items":{"$ref":"#/components/schemas/PromptContentPart"}},"transient":{"type":"boolean"},"detach_source":{"type":"string"}}}],"unevaluatedProperties":false},

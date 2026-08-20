@@ -38,7 +38,6 @@ type serverConn struct {
 	agent          Agent
 	rpc            *jsonrpc.Conn
 	clientTerminal atomic.Bool
-	clientMessage  atomic.Bool
 }
 
 // New-session clients may bind the UI thread only after session/new resolves,
@@ -53,8 +52,6 @@ func (c *serverConn) handleRequest(ctx context.Context, msg jsonrpc.Message) (an
 			return nil, invalidParams(err)
 		}
 		c.clientTerminal.Store(clientCapabilityBool(req.ClientCapabilities, "terminal"))
-		_, messageCap := req.ClientCapabilities[MethodSessionMessage]
-		c.clientMessage.Store(messageCap)
 		resp, err := c.agent.Initialize(ctx, req)
 		return responseOrError(resp, err)
 	case MethodAuthenticate:
@@ -177,17 +174,6 @@ func (c *serverConn) handleRequest(ctx context.Context, msg jsonrpc.Message) (an
 			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
 		}
 		resp, err := handler.SteerSession(ctx, req)
-		return responseOrError(resp, err)
-	case MethodSessionMessage:
-		var req SessionMessageRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := AsSessionMessageAdapter(c.agent)
-		if !ok {
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
-		}
-		resp, err := handler.SessionMessage(ctx, req, c.promptCallbacks())
 		return responseOrError(resp, err)
 	case MethodTerminalOutput:
 		var req TerminalOutputRequest
@@ -334,31 +320,8 @@ func (c serverPromptCallbacks) TerminalRelease(ctx context.Context, req Terminal
 	return c.conn.TerminalRelease(ctx, req)
 }
 
-type serverPromptMessageCallbacks struct {
-	serverPromptCallbacks
-}
-
-func (c serverPromptMessageCallbacks) SessionMessage(ctx context.Context, req SessionMessageRequest) (SessionMessageResponse, error) {
-	return c.conn.SessionMessage(ctx, req)
-}
-
 func (c *serverConn) promptCallbacks() PromptCallbacks {
-	base := serverPromptCallbacks{conn: c}
-	if c != nil && c.clientMessage.Load() {
-		return serverPromptMessageCallbacks{serverPromptCallbacks: base}
-	}
-	return base
-}
-
-func (c *serverConn) SessionMessage(ctx context.Context, req SessionMessageRequest) (SessionMessageResponse, error) {
-	if !c.clientMessage.Load() {
-		return SessionMessageResponse{}, ErrCapabilityUnsupported
-	}
-	var resp SessionMessageResponse
-	if err := c.rpc.Call(ctx, MethodSessionMessage, req, &resp); err != nil {
-		return SessionMessageResponse{}, err
-	}
-	return resp, nil
+	return serverPromptCallbacks{conn: c}
 }
 
 func (c *serverConn) CreateTerminal(ctx context.Context, req CreateTerminalRequest) (CreateTerminalResponse, error) {
@@ -456,7 +419,6 @@ func invalidParams(err error) *jsonrpc.RPCError {
 }
 
 var _ PromptCallbacks = serverPromptCallbacks{}
-var _ MessageCallbacks = serverPromptMessageCallbacks{}
 var _ TerminalClientCallbacks = serverPromptCallbacks{}
 var _ TerminalClientCallbacks = (*serverConn)(nil)
 var _ = fmt.Sprintf

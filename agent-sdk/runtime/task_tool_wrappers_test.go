@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -21,9 +21,9 @@ import (
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
-type recordingAgentMessageSender struct {
-	request  agentmessage.Request
-	requests []agentmessage.Request
+type recordingAgentInputSender struct {
+	request  agent.AgentInput
+	requests []agent.AgentInput
 }
 
 type preRuntimeToolWrapper struct {
@@ -58,19 +58,16 @@ func TestRuntimeTaskWrappingRequiresConcreteBuiltinAuthority(t *testing.T) {
 	}
 }
 
-func (s *recordingAgentMessageSender) SendMessage(_ context.Context, req agentmessage.Request) (agentmessage.Response, error) {
-	s.request = agentmessage.NormalizeRequest(req)
+func (s *recordingAgentInputSender) SendAgentInput(_ context.Context, req agent.AgentInput) error {
+	s.request = agent.CloneAgentInput(req)
 	s.requests = append(s.requests, s.request)
-	return agentmessage.Response{
-		MessageID: req.MessageID, Accepted: true, State: "delivered",
-		TurnID: "child-turn-2", StartedTurn: true,
-	}, nil
+	return nil
 }
 
-func TestRuntimeSendMessageToolReusesStableMessageIDForSameCall(t *testing.T) {
+func TestRuntimeSendMessageToolForwardsEachCallAsOrdinaryInput(t *testing.T) {
 	t.Parallel()
 
-	sender := &recordingAgentMessageSender{}
+	sender := &recordingAgentInputSender{}
 	target := runtimeSendMessageTool{
 		base: sendmessage.New(), external: sender,
 		session:    session.Session{Controller: session.ControllerBinding{ControllerID: "controller-1"}},
@@ -82,23 +79,69 @@ func TestRuntimeSendMessageToolReusesStableMessageIDForSameCall(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(sender.requests) != 2 || sender.requests[0].MessageID == "" || sender.requests[0].MessageID != sender.requests[1].MessageID {
-		t.Fatalf("routed requests = %#v, want stable retry identity", sender.requests)
+	if len(sender.requests) != 2 || sender.requests[0].Target != "parent" || sender.requests[0].Input != "status update" ||
+		sender.requests[1].Target != sender.requests[0].Target || sender.requests[1].Input != sender.requests[0].Input {
+		t.Fatalf("routed inputs = %#v, want two independent ordinary inputs", sender.requests)
 	}
-	if _, err := target.Call(context.Background(), tool.Call{ID: "message-call-2", Name: "SendMessage", Input: raw}); err != nil {
-		t.Fatal(err)
+}
+
+func TestRuntimeSendMessageToolAcceptsConcurrentIndependentInputs(t *testing.T) {
+	t.Parallel()
+
+	const calls = 16
+	sender := &recordingConcurrentAgentInputSender{}
+	target := runtimeSendMessageTool{
+		base: sendmessage.New(), external: sender,
+		session:    session.Session{Controller: session.ControllerBinding{ControllerID: "controller-1"}},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
 	}
-	if sender.requests[2].MessageID == sender.requests[0].MessageID {
-		t.Fatalf("different calls reused message id %q", sender.requests[0].MessageID)
+	var wg sync.WaitGroup
+	errs := make(chan error, calls)
+	for index := range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			raw, _ := json.Marshal(map[string]any{"to": "parent", "message": fmt.Sprintf("update-%d", index)})
+			_, err := target.Call(context.Background(), tool.Call{ID: fmt.Sprintf("message-call-%d", index), Name: "SendMessage", Input: raw})
+			errs <- err
+		}()
 	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent SendMessage error = %v", err)
+		}
+	}
+	if got := sender.Count(); got != calls {
+		t.Fatalf("ordinary input calls = %d, want %d independent dispatches", got, calls)
+	}
+}
+
+type recordingConcurrentAgentInputSender struct {
+	mu    sync.Mutex
+	count int
+}
+
+func (s *recordingConcurrentAgentInputSender) SendAgentInput(context.Context, agent.AgentInput) error {
+	s.mu.Lock()
+	s.count++
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *recordingConcurrentAgentInputSender) Count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.count
 }
 
 func TestRuntimeInjectsSendMessageForHostedChildWithoutOtherTools(t *testing.T) {
 	t.Parallel()
 
-	sender := &recordingAgentMessageSender{}
+	sender := &recordingAgentInputSender{}
 	runtime := &Runtime{}
-	wrapped := runtime.wrapToolsForRuntime(session.Session{}, session.SessionRef{SessionID: "child"}, agent.AgentSpec{}, runtimeToolContext{messageSender: sender})
+	wrapped := runtime.wrapToolsForRuntime(session.Session{}, session.SessionRef{SessionID: "child"}, agent.AgentSpec{}, runtimeToolContext{inputSender: sender})
 	if len(wrapped) != 1 || wrapped[0].Definition().Name != "SendMessage" {
 		t.Fatalf("wrapped tools = %#v, want only SendMessage", wrapped)
 	}
@@ -111,14 +154,14 @@ func TestRuntimeInjectedSendMessageSurvivesWorkspaceWritePolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sender := &recordingAgentMessageSender{}
+	sender := &recordingAgentInputSender{}
 	activeSession := session.Session{
 		SessionRef: session.SessionRef{AppName: "caelis", UserID: "user", SessionID: "child", WorkspaceKey: "workspace"},
 		CWD:        "/workspace",
 		Controller: session.ControllerBinding{ControllerID: "child-controller"},
 	}
 	runtime := &Runtime{policies: registry, defaultPolicyMode: presets.ModeWorkspaceWrite}
-	runtimeTools := runtime.wrapToolsForRuntime(activeSession, activeSession.SessionRef, agent.AgentSpec{}, runtimeToolContext{messageSender: sender})
+	runtimeTools := runtime.wrapToolsForRuntime(activeSession, activeSession.SessionRef, agent.AgentSpec{}, runtimeToolContext{inputSender: sender})
 	wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{Tools: runtimeTools}, approvalContext{
 		ctx: context.Background(), session: activeSession, sessionRef: activeSession.SessionRef,
 	})
@@ -130,18 +173,18 @@ func TestRuntimeInjectedSendMessageSurvivesWorkspaceWritePolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sender.request.To != "parent" || sender.request.Text != "status update" {
+	if sender.request.Target != "parent" || sender.request.Input != "status update" {
 		t.Fatalf("routed request = %#v, want policy-approved parent delivery", sender.request)
 	}
-	if got := testToolResultText(t, result); got != "Message delivered." {
-		t.Fatalf("tool result = %q, want mailbox delivery acknowledgement", got)
+	if got := testToolResultText(t, result); got != "Message sent." {
+		t.Fatalf("tool result = %q, want input dispatch acknowledgement", got)
 	}
 }
 
-func TestRuntimeSendMessageToolDelegatesWithTrustedIdentity(t *testing.T) {
+func TestRuntimeSendMessageToolDelegatesWithoutLifecycleProtocol(t *testing.T) {
 	t.Parallel()
 
-	sender := &recordingAgentMessageSender{}
+	sender := &recordingAgentInputSender{}
 	target := runtimeSendMessageTool{
 		base: sendmessage.New(), external: sender,
 		session:    session.Session{Controller: session.ControllerBinding{ControllerID: "controller-1"}},
@@ -152,49 +195,27 @@ func TestRuntimeSendMessageToolDelegatesWithTrustedIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sender.request.To != "parent" || sender.request.Text != "status update" || sender.request.MessageID == "" {
+	if sender.request.Target != "parent" || sender.request.Input != "status update" {
 		t.Fatalf("routed request = %#v", sender.request)
 	}
-	if sender.request.From.Kind != session.ActorKindController || sender.request.From.ID != "controller-1" {
-		t.Fatalf("routed actor = %#v, want trusted controller identity", sender.request.From)
-	}
-	if got := testToolResultText(t, result); got != "Message delivered." {
-		t.Fatalf("tool result = %q, want mailbox delivery acknowledgement", got)
+	if got := testToolResultText(t, result); got != "Message sent." {
+		t.Fatalf("tool result = %q, want input dispatch acknowledgement", got)
 	}
 	messageMeta := testToolResultRuntimeMeta(t, result, "message")
-	if messageMeta["accepted"] != true || messageMeta["state"] != "delivered" || messageMeta["message_id"] != sender.request.MessageID ||
-		messageMeta["turn_id"] != "child-turn-2" || messageMeta["started_turn"] != true || messageMeta["to"] != "parent" {
+	if len(messageMeta) != 1 || messageMeta["to"] != "parent" {
 		t.Fatalf("message metadata = %#v", messageMeta)
 	}
 }
 
-func TestSendMessageToolResultHidesTargetLifecycleFromModel(t *testing.T) {
+func TestSendMessageToolResultContainsNoTargetLifecycle(t *testing.T) {
 	t.Parallel()
 
-	for _, state := range []string{
-		agentmessage.StatePending,
-		agentmessage.StateDelivered,
-		agentmessage.StateRunning,
-		agentmessage.StateCompleted,
-		agentmessage.StateAcceptedUnpersisted,
-	} {
-		result := sendMessageToolResult(tool.Call{ID: "call-1"}, "research", agentmessage.Response{
-			MessageID: "message-1", Accepted: true, State: state,
-			TurnID: "turn-1", StartedTurn: true,
-		})
-		if got := testToolResultText(t, result); got != "Message delivered." {
-			t.Fatalf("state %q result = %q, want one mailbox acknowledgement", state, got)
-		}
-		if result.Content[0].JSON != nil {
-			t.Fatalf("state %q exposed JSON lifecycle payload: %#v", state, result.Content[0])
-		}
+	result := sendMessageToolResult(tool.Call{ID: "call-1"}, "research")
+	if got := testToolResultText(t, result); got != "Message sent." {
+		t.Fatalf("result = %q, want ordinary input acknowledgement", got)
 	}
-
-	unknown := sendMessageToolResult(tool.Call{ID: "call-unknown"}, "research", agentmessage.Response{
-		MessageID: "message-unknown", State: agentmessage.StateUnknownOutcome,
-	})
-	if got := testToolResultText(t, unknown); got != "Delivery outcome unknown; do not resend." {
-		t.Fatalf("unknown result = %q, want bounded non-retry guidance", got)
+	if result.Content[0].JSON != nil {
+		t.Fatalf("result exposed lifecycle payload: %#v", result.Content[0])
 	}
 }
 
@@ -209,7 +230,7 @@ func testToolResultText(t *testing.T, result tool.Result) string {
 func TestRuntimeSendMessageToolRoutesUnknownHandleThroughExternal(t *testing.T) {
 	t.Parallel()
 
-	external := &recordingAgentMessageSender{}
+	external := &recordingAgentInputSender{}
 	target := runtimeSendMessageTool{
 		base: sendmessage.New(), external: external,
 		session:    session.Session{Controller: session.ControllerBinding{ControllerID: "child-controller"}},
@@ -219,16 +240,13 @@ func TestRuntimeSendMessageToolRoutesUnknownHandleThroughExternal(t *testing.T) 
 	if _, err := target.Call(context.Background(), tool.Call{ID: "message-sibling-1", Name: "SendMessage", Input: raw}); err != nil {
 		t.Fatal(err)
 	}
-	if external.request.To != "research" || external.request.Text != "status for sibling" {
+	if external.request.Target != "research" || external.request.Input != "status for sibling" {
 		t.Fatalf("external request = %#v, want sibling handle routed through parent transport", external.request)
 	}
 }
 
 func TestRuntimeSendMessageToolPrefersLocalSpawnTargetOverACPParent(t *testing.T) {
-	runner := &recordingSubagentRunner{
-		spawnResult:    delegation.Result{State: delegation.StateCompleted, Result: "first done"},
-		continueResult: delegation.Result{State: delegation.StateCompleted, Result: "message done"},
-	}
+	runner := &runtimeChildInputRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first done"}}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	started, err := runtime.tasks.StartSubagent(context.Background(), activeSession, activeSession.SessionRef, runner, taskapi.SubagentStartRequest{
 		Agent: "helper", Prompt: "first",
@@ -236,19 +254,33 @@ func TestRuntimeSendMessageToolPrefersLocalSpawnTargetOverACPParent(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	external := &recordingAgentMessageSender{}
+	currentSession, err := runtime.sessions.Session(context.Background(), activeSession.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentSession, err = runtime.sessions.BindController(context.Background(), session.BindControllerRequest{
+		SessionRef: currentSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		Binding: session.ControllerBinding{Kind: session.ControllerKindKernel, ControllerID: "controller-1", AgentName: "main"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	external := &recordingAgentInputSender{}
 	target := runtimeSendMessageTool{
 		base: sendmessage.New(), runtime: runtime, external: external,
-		session: activeSession, sessionRef: activeSession.SessionRef,
+		session: currentSession, sessionRef: activeSession.SessionRef,
 	}
 	raw, _ := json.Marshal(map[string]any{"to": started.Handle, "message": "inspect locally"})
 	if _, err := target.Call(context.Background(), tool.Call{ID: "message-local-1", Name: "SendMessage", Input: raw}); err != nil {
 		t.Fatal(err)
 	}
-	if runner.continuePrompt != "inspect locally" {
-		t.Fatalf("local child prompt = %q, want local delivery", runner.continuePrompt)
+	runner.mu.Lock()
+	delivered := agent.CloneChildInputRequest(runner.request)
+	runner.mu.Unlock()
+	if delivered.Input != "inspect locally" || delivered.Target.EndpointKey != started.Ref.TaskID {
+		t.Fatalf("local child input = %#v, want exact local delivery", delivered)
 	}
-	if external.request.MessageID != "" {
+	if external.request.Target != "" {
 		t.Fatalf("external ACP request = %#v, want no parent callback for local handle", external.request)
 	}
 }

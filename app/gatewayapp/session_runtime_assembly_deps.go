@@ -32,9 +32,9 @@ func newSessionRuntimeAssemblyDeps(host *Stack) (sessionRuntimeAssemblyDeps, err
 	if runtimeRoot.process == nil || runtimeRoot.process.config == nil {
 		return sessionRuntimeAssemblyDeps{}, errors.New("gatewayapp: Session Runtime process configuration source is required")
 	}
-	mailbox := runtimeRoot.authorities.hostedChildMailbox
-	if mailbox == nil {
-		return sessionRuntimeAssemblyDeps{}, errors.New("gatewayapp: hosted child mailbox is required")
+	input := runtimeRoot.authorities.hostedChildInput
+	if input == nil {
+		return sessionRuntimeAssemblyDeps{}, errors.New("gatewayapp: hosted child input route is required")
 	}
 	runtimeStore := newAppConfigStore(runtimeRoot.authorities.storeDir)
 	if runtimeStore == nil {

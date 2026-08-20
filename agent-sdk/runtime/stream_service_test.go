@@ -925,7 +925,7 @@ func TestStreamSubscribeStopsAtCompletedSubagentTask(t *testing.T) {
 	}
 }
 
-func TestStreamSubscribeRestartsMessageAuthoredSubagentTurnFromAbsoluteCursor(t *testing.T) {
+func TestStreamSubscribeRestartsObservedSubagentActivityFromAbsoluteCursor(t *testing.T) {
 	t.Parallel()
 
 	task := &subagentTask{
@@ -972,7 +972,7 @@ func TestStreamSubscribeRestartsMessageAuthoredSubagentTurnFromAbsoluteCursor(t 
 		t.Fatal("first activity subscription remained open after completion")
 	}
 
-	task.beginMessageTurn()
+	beginObservedActivityForTest(task)
 	reopened, err := service.Read(ctx, stream.ReadRequest{
 		Ref:    stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
 		Cursor: first.Cursor,
@@ -1035,7 +1035,7 @@ func TestStreamSubscribeRestartsMessageAuthoredSubagentTurnFromAbsoluteCursor(t 
 	}
 }
 
-func TestStreamSubscribeFollowTracksMessageAuthoredSubagentTurnsUntilCanceled(t *testing.T) {
+func TestStreamSubscribeFollowTracksObservedSubagentActivitiesUntilCanceled(t *testing.T) {
 	t.Parallel()
 
 	task := &subagentTask{
@@ -1080,13 +1080,13 @@ func TestStreamSubscribeFollowTracksMessageAuthoredSubagentTurnsUntilCanceled(t 
 
 	// Recovery or a newer durable revision may replace the concrete task object.
 	// Rehydrate one at the durable absolute frontier before beginning the
-	// message-authored Turn; Follow must not retain or depend on the first
+	// observed activity; Follow must not retain or depend on the first
 	// object pointer.
 	entry := task.entrySnapshot(time.Now())
 	entry.Metadata[subagentStreamEventCursorMeta] = first.Cursor.Events
 	entry.Metadata[subagentStreamOutputCursorMeta] = first.Cursor.Output
 	rehydrated := tasks.rehydrateSubagentTask(entry)
-	rehydrated.beginMessageTurn()
+	beginObservedActivityForTest(rehydrated)
 	tasks.mu.Lock()
 	delete(tasks.subagents, task.ref.TaskID)
 	tasks.subagents[rehydrated.ref.TaskID] = rehydrated
@@ -1190,7 +1190,7 @@ func TestStreamSubscribeFollowWaitsThroughTemporaryTaskNotFound(t *testing.T) {
 	}
 
 	rehydrated := tasks.rehydrateSubagentTask(entry)
-	rehydrated.beginMessageTurn()
+	beginObservedActivityForTest(rehydrated)
 	tasks.mu.Lock()
 	tasks.subagents[rehydrated.ref.TaskID] = rehydrated
 	tasks.mu.Unlock()
@@ -1211,69 +1211,6 @@ func TestStreamSubscribeFollowWaitsThroughTemporaryTaskNotFound(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Follow did not stop after cancellation")
-	}
-}
-
-func TestStreamCursorSurvivesCompletedSubagentMessageTurn(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	runner := &recordingSubagentRunner{
-		spawnResult:    delegation.Result{State: delegation.StateCompleted, Result: "turn-1 done"},
-		continueResult: delegation.Result{State: delegation.StateRunning, Running: true},
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, taskapi.SubagentStartRequest{
-		Agent: "helper", Prompt: "first turn",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	service := newStreamService(runtime.tasks)
-	first, err := service.Read(ctx, stream.ReadRequest{
-		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.Running || !stream.IsTerminalState(first.State) || first.Cursor.Events == 0 {
-		t.Fatalf("first turn snapshot = %#v, want terminal cursor", first)
-	}
-
-	continued, err := sendSubagentMessageForTest(ctx, runtime, activeSession.SessionRef, started.Handle, "second turn")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !continued.Running || runner.continueCompletion == nil {
-		t.Fatalf("continued Task = %#v completion=%T, want running message turn", continued, runner.continueCompletion)
-	}
-	runner.spawnContext.Streams.PublishStream(stream.Frame{
-		Ref: stream.Ref{TaskID: started.Ref.TaskID}, Text: "turn-2 reasoning", Running: true,
-	})
-	runner.continueCompletion.PublishSubagentCompletion(delegation.Result{
-		TaskID: started.Ref.TaskID, State: delegation.StateCompleted, Result: "turn-2 done",
-	})
-
-	second, err := service.Read(ctx, stream.ReadRequest{
-		Ref:    stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
-		Cursor: first.Cursor,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.Cursor.Events <= first.Cursor.Events {
-		t.Fatalf("second turn cursor = %#v, want after first turn %#v", second.Cursor, first.Cursor)
-	}
-	found := false
-	for _, frame := range second.Frames {
-		if strings.Contains(frame.Text, "turn-2 reasoning") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("second turn snapshot = %#v, want retained output after canonical Task refresh", second)
 	}
 }
 
@@ -2151,7 +2088,7 @@ func TestSubagentTwoTurnCurrentStateRetainsBothExactFinals(t *testing.T) {
 	task.ensureTerminalStreamFrameLocked()
 	task.mu.Unlock()
 
-	task.beginMessageTurn()
+	beginObservedActivityForTest(task)
 	task.mu.Lock()
 	appendReasoning(subagentTurnID(task.ref.TaskID, task.turnSeq), "reasoning-turn-2", 82)
 	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "second exact Final"})
@@ -2203,7 +2140,7 @@ func TestSubagentCurrentStateRetainsCompletedFinalsBelowByteBudget(t *testing.T)
 	task.ensureTerminalStreamFrameLocked()
 	task.mu.Unlock()
 
-	task.beginMessageTurn()
+	beginObservedActivityForTest(task)
 	task.mu.Lock()
 	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "exact final turn two"})
 	task.ensureTerminalStreamFrameLocked()
@@ -2212,7 +2149,7 @@ func TestSubagentCurrentStateRetainsCompletedFinalsBelowByteBudget(t *testing.T)
 	// A third running Turn exceeds both the exact frame window and the transient
 	// semantic unit count. Neither threshold may discard small completed Finals
 	// while the semantic byte budget remains available.
-	task.beginMessageTurn()
+	beginObservedActivityForTest(task)
 	task.mu.Lock()
 	for index := 0; index < subagentSemanticUnitCap+128; index++ {
 		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
@@ -2253,7 +2190,7 @@ func TestSubagentMultiTurnCurrentStateRetainsHistoricalTurnBoundaryWithoutRewrit
 	task.ensureTerminalStreamFrameLocked()
 	task.mu.Unlock()
 
-	task.beginMessageTurn()
+	beginObservedActivityForTest(task)
 	turnTwo := subagentTurnID(task.ref.TaskID, task.turnSeq)
 	task.mu.Lock()
 	for index := 0; index < subagentStreamFrameCap+64; index++ {
@@ -2327,7 +2264,7 @@ func TestSubagentHistoricalFinalsIgnoreContextUnitCapBelowByteBudget(t *testing.
 		})
 		task.ensureTerminalStreamFrameLocked()
 		task.mu.Unlock()
-		task.beginMessageTurn()
+		beginObservedActivityForTest(task)
 	}
 
 	currentTurn := subagentTurnID(task.ref.TaskID, task.turnSeq)
@@ -2423,13 +2360,13 @@ func TestSubagentHistoricalFinalEvictionIsLastAndOldest(t *testing.T) {
 	task.ensureTerminalStreamFrameLocked()
 	task.mu.Unlock()
 
-	task.beginMessageTurn()
+	beginObservedActivityForTest(task)
 	task.mu.Lock()
 	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: secondFinal})
 	task.ensureTerminalStreamFrameLocked()
 	task.mu.Unlock()
 
-	task.beginMessageTurn()
+	beginObservedActivityForTest(task)
 	currentTurn := subagentTurnID(task.ref.TaskID, task.turnSeq)
 	task.mu.Lock()
 	for index := 0; index < subagentStreamFrameCap+1; index++ {

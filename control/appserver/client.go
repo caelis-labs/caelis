@@ -130,7 +130,7 @@ func (c *Client) Reconnect(ctx context.Context, principal Principal, req Reconne
 	}
 	// Exact-target observation of system-managed Sessions is available to any
 	// principal that already passed Session authorization (owner/admin). This is
-	// the Host-side capability product ACP and Agent-message delivery use so
+	// the Host-side capability product ACP and managed child observation use so
 	// Surface tokens do not need RoleSystemSessionRuntime. List/load/resume still
 	// hide managed Sessions from discovery via userVisibleSessionSummaries.
 	return reconnect.Reconnect(ctx, req)

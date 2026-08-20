@@ -7,26 +7,11 @@ import (
 	"fmt"
 	"strings"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 )
-
-func validateRunInput(req agent.RunRequest) error {
-	switch req.InputType {
-	case "", session.EventTypeUser:
-		return nil
-	case session.EventTypeContext:
-		if strings.TrimSpace(req.InputMessageID) == "" || !session.ActorRefHasIdentity(req.InputActor) {
-			return fmt.Errorf("agent-sdk/runtime: Agent message input requires message id and source actor")
-		}
-		return nil
-	default:
-		return fmt.Errorf("agent-sdk/runtime: unsupported run input event type %q", req.InputType)
-	}
-}
 
 func buildInputEvent(
 	activeSession session.Session,
@@ -35,9 +20,6 @@ func buildInputEvent(
 	displayInput string,
 	parts []model.ContentPart,
 	actor session.ActorRef,
-	eventType session.EventType,
-	messageID string,
-	inputScope *session.EventScope,
 	compaction *session.EventCompactionContext,
 ) *session.Event {
 	if strings.TrimSpace(input) == "" && len(parts) == 0 {
@@ -47,9 +29,6 @@ func buildInputEvent(
 	if !session.ActorRefHasIdentity(actor) {
 		actor = session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
 	}
-	if eventType == "" {
-		eventType = session.EventTypeUser
-	}
 	var compactionCopy *session.EventCompactionContext
 	if compaction != nil {
 		cloned := *compaction
@@ -57,34 +36,22 @@ func buildInputEvent(
 		compactionCopy = &cloned
 	}
 	idempotencyKey := "turn-input:" + strings.TrimSpace(turnID)
-	if messageID = strings.TrimSpace(messageID); messageID != "" {
-		idempotencyKey = "agent-message:" + messageID
-	}
 	scope := defaultScope(activeSession, turnID)
-	if inputScope != nil {
-		scope = session.CloneEventScope(*inputScope)
-		if scope.TurnID == "" {
-			scope.TurnID = strings.TrimSpace(turnID)
-		}
-	}
 	event := &session.Event{
 		IdempotencyKey: idempotencyKey,
-		Type:           eventType,
+		Type:           session.EventTypeUser,
 		Visibility:     session.VisibilityCanonical,
 		Actor:          actor,
 		Compaction:     compactionCopy,
 		Scope:          &scope,
-		MessageID:      messageID,
 		Message:        &message,
 		Text:           displayText,
 		Meta:           meta,
 	}
-	if eventType == session.EventTypeUser {
-		event.Protocol = &session.EventProtocol{Update: &session.ProtocolUpdate{
-			SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
-			Content:       session.ProtocolTextContent(displayText),
-		}}
-	}
+	event.Protocol = &session.EventProtocol{Update: &session.ProtocolUpdate{
+		SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
+		Content:       session.ProtocolTextContent(displayText),
+	}}
 	return event
 }
 

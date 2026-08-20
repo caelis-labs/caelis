@@ -444,7 +444,7 @@ func (r *Runner) submitIdleChildInput(
 	if state != delegation.StateCompleted {
 		recovery := childInputReconnectRequest(run, req.Target)
 		var err error
-		run, err = r.reconnectChildEndpointLocked(ctx, run.anchor, recovery, slot, false)
+		run, err = r.reconnectChildEndpointLocked(ctx, run.anchor, recovery, slot)
 		if err != nil {
 			slot.opMu.Unlock()
 			return agent.ChildInputResult{}, childInputProvenFailure("internal/acpagentbridge/subagent: resume child endpoint", err)

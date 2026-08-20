@@ -21,7 +21,6 @@ func AppServerClients(client *Client) (appserver.AppServerClients, error) {
 	clients := appserver.AppServerClients{
 		Sessions:      client,
 		Participants:  client,
-		AgentMessages: client,
 		Status:        client,
 		Configuration: client,
 		Agents:        client,
@@ -40,7 +39,6 @@ func AppServerClients(client *Client) (appserver.AppServerClients, error) {
 var (
 	_ appserver.SessionClient       = (*Client)(nil)
 	_ appserver.ParticipantClient   = (*Client)(nil)
-	_ appserver.AgentMessageClient  = (*Client)(nil)
 	_ appserver.StatusClient        = (*Client)(nil)
 	_ appserver.ConfigurationClient = (*Client)(nil)
 	_ appserver.AgentClient         = (*Client)(nil)

@@ -13,7 +13,6 @@ import (
 type AppServerServices struct {
 	Sessions      Service
 	Participants  ParticipantService
-	AgentMessages AgentMessageService
 	Status        StatusService
 	Configuration ConfigurationService
 	Agents        AgentService
@@ -34,7 +33,6 @@ func (s AppServerServices) Validate() error {
 	}{
 		{name: "Session", value: s.Sessions},
 		{name: "participant", value: s.Participants},
-		{name: "Agent message", value: s.AgentMessages},
 		{name: "status", value: s.Status},
 		{name: "configuration", value: s.Configuration},
 		{name: "Agent", value: s.Agents},
@@ -58,7 +56,6 @@ func (s AppServerServices) Validate() error {
 type AppServerClients struct {
 	Sessions      SessionClient
 	Participants  ParticipantClient
-	AgentMessages AgentMessageClient
 	Status        StatusClient
 	Configuration ConfigurationClient
 	Agents        AgentClient
@@ -79,10 +76,6 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 		return AppServerClients{}, err
 	}
 	participants, err := BindParticipantClient(services.Participants, principal)
-	if err != nil {
-		return AppServerClients{}, err
-	}
-	agentMessages, err := BindAgentMessageClient(services.AgentMessages, principal)
 	if err != nil {
 		return AppServerClients{}, err
 	}
@@ -121,7 +114,7 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 		return AppServerClients{}, err
 	}
 	clients := AppServerClients{
-		Sessions: sessions, Participants: participants, AgentMessages: agentMessages, Status: status,
+		Sessions: sessions, Participants: participants, Status: status,
 		Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
 		Presentation: presentation, Terminal: terminal, Tasks: tasks,
 	}
@@ -133,7 +126,7 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 
 // Validate rejects a partial presentation client facade.
 func (c AppServerClients) Validate() error {
-	if c.Sessions == nil || c.Participants == nil || c.AgentMessages == nil || c.Status == nil || c.Configuration == nil ||
+	if c.Sessions == nil || c.Participants == nil || c.Status == nil || c.Configuration == nil ||
 		c.Agents == nil || c.Completion == nil || c.Plugins == nil || c.Presentation == nil || c.Terminal == nil || c.Tasks == nil {
 		return errors.New("controlclient: complete AppServer clients are required")
 	}

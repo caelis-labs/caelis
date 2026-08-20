@@ -272,7 +272,7 @@ func shouldRenderACPToolPanel(text string, err bool) bool {
 
 func isACPCompactToolAck(text string) bool {
 	switch strings.ToLower(strings.TrimSpace(text)) {
-	case "completed", "message delivered.":
+	case "completed", "message sent.", "message delivered.":
 		return true
 	default:
 		return false

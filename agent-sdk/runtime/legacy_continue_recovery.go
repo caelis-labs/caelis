@@ -8,9 +8,9 @@ import (
 )
 
 // These values were persisted by the retired Task-write continuation saga.
-// Keep this compatibility reader until every supported upgrade source predates
-// no Task store that may contain continue_phase. It must never issue a remote
-// effect; new Agent communication is owned exclusively by SendMessage.
+// Keep this compatibility reader while a supported upgrade source may contain
+// continue_phase. It must never issue remote input; current Agent communication
+// is ordinary input routed by SendMessage.
 const (
 	legacyContinuePrepared       = "continue_prepared"
 	legacyContinuePending        = "continue_pending"

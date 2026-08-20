@@ -12,7 +12,6 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -247,21 +246,16 @@ func (s *revisionBumpBeforeParticipantSessionService) PutParticipantWithEvent(
 	s.calls.Add(1)
 	var bumpErr error
 	s.once.Do(func() {
-		_, bumpErr = agentmessage.AppendContext(
-			ctx,
-			s.Service,
-			req.SessionRef,
-			session.ControlMutationGuard(session.ControlMutationPurposeAgentMessage),
-			session.EventScope{Source: "subagent_completion"},
-			agentmessage.Request{
-				MessageID: "subagent-completion:concurrent:1",
-				To:        agentmessage.Parent,
-				Text:      "Subagent @other is failed. Use Task read with handle other for its full result.",
-				From: session.ActorRef{
-					Kind: session.ActorKindParticipant, ID: "other", Name: "@other",
-				},
+		_, bumpErr = s.UpdateState(ctx, session.UpdateStateRequest{
+			SessionRef: req.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+			Update: func(state map[string]any) (map[string]any, error) {
+				if state == nil {
+					state = map[string]any{}
+				}
+				state["concurrent_session_mutation"] = true
+				return state, nil
 			},
-		)
+		})
 	})
 	if bumpErr != nil {
 		return session.Session{}, nil, bumpErr
@@ -534,6 +528,18 @@ func TestSubagentProducerCompletionDoesNotWaitForCompletionNotice(t *testing.T) 
 		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
 	}
 	runtime, active := newSubagentCompletionSagaRuntime(t, store, sessions, runner)
+	parentRun := newRunner("parent-run", func() {})
+	noticeStarted := make(chan agent.Submission, 1)
+	releaseNotice := make(chan struct{})
+	if err := parentRun.setSubmissionHandler(context.Background(), func(_ context.Context, submission agent.Submission) error {
+		noticeStarted <- agent.CloneSubmission(submission)
+		<-releaseNotice
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runtime.registerActiveRun(active.SessionRef, active, "parent-turn", parentRun)
+	defer runtime.unregisterActiveRun(parentRun.RunID())
 	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
 		SpawnID: "completion-notice-failure", Agent: "helper", Prompt: "inspect", Role: session.ParticipantRoleDelegated,
 	})
@@ -562,16 +568,21 @@ func TestSubagentProducerCompletionDoesNotWaitForCompletionNotice(t *testing.T) 
 	if err != nil || entry.Running || entry.State != taskapi.StateCompleted {
 		t.Fatalf("durable completion = %#v, %v; want completed despite notice failure", entry, err)
 	}
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for sessions.calls.Load() == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if sessions.calls.Load() == 0 {
+	select {
+	case notice := <-noticeStarted:
+		if notice.Kind != agent.SubmissionKindConversation || !strings.Contains(notice.Text, started.Handle) {
+			t.Fatalf("completion notice = %#v, want ordinary active-run input", notice)
+		}
+	case <-time.After(time.Second):
 		t.Fatal("completion notice path was not exercised asynchronously")
 	}
+	if sessions.calls.Load() != 0 {
+		t.Fatalf("completion notice persisted %d parent Context events, want none", sessions.calls.Load())
+	}
+	close(releaseNotice)
 }
 
-func TestSubagentSpawnRetriesParticipantAttachAfterConcurrentAgentMessage(t *testing.T) {
+func TestSubagentSpawnRetriesParticipantAttachAfterConcurrentSessionMutation(t *testing.T) {
 	t.Parallel()
 
 	base := memory.NewStore(memory.Config{})
@@ -591,7 +602,7 @@ func TestSubagentSpawnRetriesParticipantAttachAfterConcurrentAgentMessage(t *tes
 		t.Fatal(err)
 	}
 	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
-		SpawnID: "spawn-after-agent-message", Agent: "helper", Prompt: "inspect",
+		SpawnID: "spawn-after-session-mutation", Agent: "helper", Prompt: "inspect",
 		Role: session.ParticipantRoleDelegated,
 	})
 	if err != nil {
@@ -614,21 +625,12 @@ func TestSubagentSpawnRetriesParticipantAttachAfterConcurrentAgentMessage(t *tes
 	if len(loaded.Session.Participants) != 1 || loaded.Session.Participants[0].DelegationID != started.Ref.TaskID {
 		t.Fatalf("participants = %#v, want retried Spawn attachment", loaded.Session.Participants)
 	}
-	events, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef})
+	currentState, err := sessions.SnapshotState(context.Background(), active.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sawMessage bool
-	for _, event := range events {
-		if event == nil {
-			continue
-		}
-		if event.MessageID == "subagent-completion:concurrent:1" {
-			sawMessage = true
-		}
-	}
-	if !sawMessage {
-		t.Fatalf("events lost concurrent Agent message: %#v", events)
+	if currentState["concurrent_session_mutation"] != true {
+		t.Fatalf("Session state lost concurrent mutation: %#v", currentState)
 	}
 }
 

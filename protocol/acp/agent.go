@@ -25,7 +25,6 @@ const (
 	MethodSessionPrompt    = schema.MethodSessionPrompt
 	MethodSessionCancel    = schema.MethodSessionCancel
 	MethodSessionSteering  = schema.MethodSessionSteering
-	MethodSessionMessage   = schema.MethodSessionMessage
 
 	StopReasonEndTurn   = schema.StopReasonEndTurn
 	StopReasonCancelled = schema.StopReasonCancelled
@@ -44,12 +43,6 @@ type Agent interface {
 type PromptCallbacks interface {
 	SessionUpdate(context.Context, SessionNotification) error
 	RequestPermission(context.Context, RequestPermissionRequest) (RequestPermissionResponse, error)
-}
-
-// MessageCallbacks is the optional bidirectional mid-turn extension exposed
-// by clients that advertise _caelis.dev/session/message.
-type MessageCallbacks interface {
-	SessionMessage(context.Context, SessionMessageRequest) (SessionMessageResponse, error)
 }
 
 type SessionLoader interface {
@@ -116,8 +109,6 @@ type SessionSteeringOptions = schema.SessionSteeringOptions
 type SessionSteeringRequest = schema.SessionSteeringRequest
 type SessionSteeringResponse = schema.SessionSteeringResponse
 type CancelNotification = schema.CancelNotification
-type SessionMessageRequest = schema.SessionMessageRequest
-type SessionMessageResponse = schema.SessionMessageResponse
 type AvailableCommandInput = schema.AvailableCommandInput
 type AvailableCommand = schema.AvailableCommand
 type AvailableCommandsUpdate = schema.AvailableCommandsUpdate

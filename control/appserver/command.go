@@ -22,7 +22,7 @@ const (
 	// RoleSystemSessionRuntime allows a dedicated internal Turn-delivery client
 	// to observe a system-managed Session without being its owner. Owner exact-
 	// target Reconnect/Inspect remain available without this role so product ACP
-	// and Agent-message delivery can follow managed children. Surface tokens must
+	// and managed child observation can follow children. Surface tokens must
 	// not receive this role, and managed Sessions stay hidden from list/load/resume.
 	RoleSystemSessionRuntime = "system-session-runtime"
 )
@@ -49,7 +49,6 @@ const (
 	ActionSessionClose              Action = "session.close"
 	ActionSessionCompact            Action = "session.compact"
 	ActionPrompt                    Action = "turn.prompt"
-	ActionAgentMessage              Action = "agent_message.deliver"
 	ActionSteer                     Action = "turn.steer"
 	ActionCancel                    Action = "turn.cancel"
 	ActionApprovalResolve           Action = "approval.resolve"

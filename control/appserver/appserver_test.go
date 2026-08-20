@@ -62,7 +62,6 @@ func appServerTestServices(tasks taskstream.Service) AppServerServices {
 	return AppServerServices{
 		Sessions:      struct{ Service }{},
 		Participants:  struct{ ParticipantService }{},
-		AgentMessages: struct{ AgentMessageService }{},
 		Status:        struct{ StatusService }{},
 		Configuration: struct{ ConfigurationService }{},
 		Agents:        struct{ AgentService }{},

@@ -17,7 +17,6 @@ func (s *Server) focusedRoutes() {
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/terminals/wait", s.waitTerminal)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/terminals/kill", s.killTerminal)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/terminals/release", s.releaseTerminal)
-	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/agent-messages", s.deliverAgentMessage)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/participants/handles", s.participantHandles)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/participants/start", s.startParticipant)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/participants/prompt", s.promptParticipant)
@@ -141,19 +140,6 @@ func terminalRequest(w http.ResponseWriter, r *http.Request, s *Server) (appserv
 		return appserver.Principal{}, appserver.TerminalRequest{}, false
 	}
 	return principal, req, true
-}
-
-func (s *Server) deliverAgentMessage(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
-	}
-	var req appserver.AgentMessageRequest
-	if !decodeSessionBody(w, r, r.PathValue("session_id"), &req.SessionID, &req) {
-		return
-	}
-	result, err := s.config.Services.AgentMessages.DeliverAgentMessage(r.Context(), principal, req)
-	writeJSONResult(w, result, err)
 }
 
 func (s *Server) participantHandles(w http.ResponseWriter, r *http.Request) {

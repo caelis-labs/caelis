@@ -5483,11 +5483,11 @@ func TestRuntimeTaskWaitReturnsEveryUnreadTurnFinalOnce(t *testing.T) {
 	child.mu.Lock()
 	child.applyResult(delegation.Result{State: delegation.StateCompleted, Result: "first exact Final"})
 	child.mu.Unlock()
-	child.beginMessageTurn()
+	beginObservedActivityForTest(child)
 	child.mu.Lock()
 	child.applyResult(delegation.Result{State: delegation.StateCompleted, Result: "second exact Final"})
 	child.mu.Unlock()
-	child.beginMessageTurn()
+	beginObservedActivityForTest(child)
 	child.mu.Lock()
 	child.applyResult(delegation.Result{
 		State: delegation.StateRunning, Running: true, OutputPreview: "third Turn in progress",

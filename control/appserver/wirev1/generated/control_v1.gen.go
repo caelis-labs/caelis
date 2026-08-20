@@ -264,22 +264,6 @@ type AgentCandidate struct {
 
 type AgentCandidateList []AgentCandidate
 
-type AgentMessageRequest struct {
-	DisplayFrom *string `json:"display_from,omitempty"`
-	MessageId   string  `json:"message_id"`
-	SessionId   string  `json:"session_id"`
-	Text        string  `json:"text"`
-	To          *string `json:"to,omitempty"`
-}
-
-type AgentMessageResult struct {
-	Accepted    *bool       `json:"accepted,omitempty"`
-	MessageId   string      `json:"message_id"`
-	StartedTurn *bool       `json:"started_turn,omitempty"`
-	State       *string     `json:"state,omitempty"`
-	Target      *TurnTarget `json:"target,omitempty"`
-}
-
 type AgentParticipantSnapshot struct {
 	AgentName *string `json:"agent_name,omitempty"`
 	Id        string  `json:"id"`
@@ -1667,4 +1651,4 @@ type WriteBase struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
-var OperationIDs = []string{"cancelParticipant", "cancelSessionTurn", "closeSession", "compactSession", "completeFiles", "completeSessions", "completeSkills", "completeSlashArguments", "configureSessionControllerMode", "configureSessionMode", "configureSessionPresentation", "configureSessionPresentationMode", "createSession", "deliverAgentMessage", "getAgentStatus", "getHostStatus", "getPresentationCapabilities", "getSessionPresentation", "getSessionState", "getSessionStatus", "getTerminalOutput", "handoffAgent", "hostAddMarketplace", "hostAddPluginPath", "hostApplyAgentBindingSet", "hostBindAgent", "hostCompleteFiles", "hostCompleteSessions", "hostCompleteSkills", "hostCompleteSlashArguments", "hostConnectACP", "hostConnectModel", "hostCreateAgentRole", "hostDeleteAgentBindingSet", "hostDeleteAgentRole", "hostDeleteModel", "hostDisablePlugin", "hostDisconnectACP", "hostEnablePlugin", "hostGetACPPreparation", "hostGetAgentBindingStatus", "hostGetAgentStatus", "hostInspectPlugin", "hostInstallPlugin", "hostListAgents", "hostListDisconnectCandidates", "hostListMarketplaces", "hostListPlugins", "hostPrepareACP", "hostPrepareACPAuthentication", "hostRemoveMarketplace", "hostRemovePlugin", "hostResetAgentBinding", "hostResolveSkill", "hostSaveAgentBindingSet", "hostUpdateMarketplace", "hostUseModel", "initializeClient", "inspectPlugin", "killTerminal", "listAgents", "listMarketplaces", "listParticipantHandles", "listPlugins", "listSessionTasks", "listSessions", "prepareSandbox", "promptParticipant", "promptSession", "readTaskEvents", "reconnectSession", "refreshSandbox", "releaseTerminal", "repairSandbox", "resetSandbox", "resolveApproval", "resolveSkill", "setSandboxBackend", "shutdownHost", "startParticipant", "steerSession", "subscribeTaskEvents", "useSessionModel", "waitTerminal"}
+var OperationIDs = []string{"cancelParticipant", "cancelSessionTurn", "closeSession", "compactSession", "completeFiles", "completeSessions", "completeSkills", "completeSlashArguments", "configureSessionControllerMode", "configureSessionMode", "configureSessionPresentation", "configureSessionPresentationMode", "createSession", "getAgentStatus", "getHostStatus", "getPresentationCapabilities", "getSessionPresentation", "getSessionState", "getSessionStatus", "getTerminalOutput", "handoffAgent", "hostAddMarketplace", "hostAddPluginPath", "hostApplyAgentBindingSet", "hostBindAgent", "hostCompleteFiles", "hostCompleteSessions", "hostCompleteSkills", "hostCompleteSlashArguments", "hostConnectACP", "hostConnectModel", "hostCreateAgentRole", "hostDeleteAgentBindingSet", "hostDeleteAgentRole", "hostDeleteModel", "hostDisablePlugin", "hostDisconnectACP", "hostEnablePlugin", "hostGetACPPreparation", "hostGetAgentBindingStatus", "hostGetAgentStatus", "hostInspectPlugin", "hostInstallPlugin", "hostListAgents", "hostListDisconnectCandidates", "hostListMarketplaces", "hostListPlugins", "hostPrepareACP", "hostPrepareACPAuthentication", "hostRemoveMarketplace", "hostRemovePlugin", "hostResetAgentBinding", "hostResolveSkill", "hostSaveAgentBindingSet", "hostUpdateMarketplace", "hostUseModel", "initializeClient", "inspectPlugin", "killTerminal", "listAgents", "listMarketplaces", "listParticipantHandles", "listPlugins", "listSessionTasks", "listSessions", "prepareSandbox", "promptParticipant", "promptSession", "readTaskEvents", "reconnectSession", "refreshSandbox", "releaseTerminal", "repairSandbox", "resetSandbox", "resolveApproval", "resolveSkill", "setSandboxBackend", "shutdownHost", "startParticipant", "steerSession", "subscribeTaskEvents", "useSessionModel", "waitTerminal"}

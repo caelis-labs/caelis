@@ -177,7 +177,7 @@ func TestTUISubagentWorkspaceFollowsOnlyWhileOpenAndResumesCursor(t *testing.T) 
 				Scope: &session.EventScope{Participant: session.ParticipantRef{Kind: session.ParticipantKindSubagent}},
 				Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), MessageID: "child-message-2",
-					Content: session.ProtocolTextContent("message-authored second Turn output"),
+					Content: session.ProtocolTextContent("observed second activity output"),
 				}},
 			},
 		},
@@ -230,7 +230,7 @@ func TestTUISubagentWorkspaceFollowsOnlyWhileOpenAndResumesCursor(t *testing.T) 
 		model = next.(*Model)
 	}
 	if overlay := model.renderSubagentOutputOverlay(); !strings.Contains(overlay, "isolated child output") ||
-		!strings.Contains(overlay, "message-authored second Turn output") ||
+		!strings.Contains(overlay, "observed second activity output") ||
 		!strings.Contains(overlay, "terminal final from child Task stream") ||
 		strings.Contains(overlay, "(no output)") {
 		t.Fatalf("subagent workspace omitted multi-Turn transcript:\n%s", overlay)

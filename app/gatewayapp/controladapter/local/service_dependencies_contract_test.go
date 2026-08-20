@@ -25,7 +25,6 @@ func assertAppServerLeafServicesDoNotRetain(t *testing.T, targetName string, tar
 		name string
 		typ  reflect.Type
 	}{
-		{name: "Agent message", typ: reflect.TypeFor[AgentMessageService]()},
 		{name: "Status", typ: reflect.TypeFor[StatusService]()},
 		{name: "Configuration", typ: reflect.TypeFor[ConfigurationService]()},
 		{name: "Agent", typ: reflect.TypeFor[AgentService]()},

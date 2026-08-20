@@ -38,6 +38,21 @@ func (r *Runtime) unregisterActiveRun(runID string) {
 	r.mu.Unlock()
 }
 
+func (r *Runtime) activeRunForSession(ref session.SessionRef) activeRun {
+	if r == nil {
+		return activeRun{}
+	}
+	sessionID := strings.TrimSpace(session.NormalizeSessionRef(ref).SessionID)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, candidate := range r.activeRunners {
+		if candidate.handle != nil && strings.TrimSpace(candidate.ref.SessionID) == sessionID {
+			return candidate
+		}
+	}
+	return activeRun{}
+}
+
 // AttachLiveRun reattaches to one run still live in this Runtime process. A
 // persisted non-live run is reported explicitly rather than being replayed
 // from an unsafe execution point.

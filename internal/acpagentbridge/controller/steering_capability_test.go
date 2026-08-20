@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
@@ -260,6 +261,230 @@ func TestParticipantSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonicalInp
 	case <-ctx.Done():
 		t.Fatal("SourceEvents() consumer did not stop")
 	}
+}
+
+func TestMainControllerSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonicalInput(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cfg := steeringControllerTestConfig(`{"supported":true}`, "")
+	cfg.Env["CAELIS_ACP_STEERING_OUTCOME"] = string(client.SessionSteeringInjected)
+	cfg.Env["CAELIS_ACP_STEERING_NOTIFY_TEXT"] = "after main steer"
+	handle := newTurnHandle(nil)
+	run := &controllerRun{
+		parentSessionID: "parent-session", agent: "steering-helper", cfg: cfg,
+		binding: session.ControllerBinding{
+			Kind: session.ControllerKindACP, ControllerID: "controller-1", EpochID: "epoch-1",
+		},
+		supportsSteering: true, turnID: "main-turn", turnStream: true, handle: handle,
+	}
+	acpClient, remoteID, state, err := (&Manager{}).startACPClient(
+		ctx,
+		t.TempDir(),
+		cfg,
+		"",
+		func(env client.UpdateEnvelope) { run.handleUpdate(time.Now, env) },
+		func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
+			return client.RequestPermissionResponse{}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = acpClient.Close(context.Background()) })
+	if !state.supportsSteering {
+		t.Fatal("test ACP client did not negotiate steering")
+	}
+	run.client = acpClient
+	run.remoteSessionID = remoteID
+	run.binding.RemoteSessionID = remoteID
+	manager := &Manager{controllers: map[string]*controllerRun{run.parentSessionID: run}}
+
+	priorMessage := model.NewTextMessage(model.RoleAssistant, "before main steer")
+	handle.publishEvent(&session.Event{Type: session.EventTypeAssistant, Message: &priorMessage})
+	priorStarted := make(chan struct{})
+	releasePrior := make(chan struct{})
+	ordered := make(chan string, 3)
+	consumerErrors := make(chan error, 1)
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		for source, sourceErr := range handle.SourceEvents() {
+			if sourceErr != nil {
+				consumerErrors <- sourceErr
+				return
+			}
+			if source.Canonical == nil || source.Canonical.Message == nil {
+				continue
+			}
+			text := source.Canonical.Message.TextContent()
+			if text == "before main steer" {
+				close(priorStarted)
+				<-releasePrior
+			}
+			ordered <- text
+		}
+	}()
+	select {
+	case <-priorStarted:
+	case <-ctx.Done():
+		t.Fatal("prior main event did not reach consumer")
+	}
+	steerResult := make(chan error, 1)
+	go func() {
+		steerResult <- manager.SteerController(ctx, controller.ControllerSteerRequest{
+			SessionRef:   session.SessionRef{SessionID: run.parentSessionID},
+			ControllerID: run.binding.ControllerID, ControllerEpoch: run.binding.EpochID,
+			RemoteSessionID: remoteID, TurnID: run.turnID, Input: "guide main",
+			Commit: func() error {
+				ordered <- "user:guide main"
+				return nil
+			},
+		})
+	}()
+	select {
+	case err := <-steerResult:
+		t.Fatalf("SteerController() crossed persistence barrier early: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releasePrior)
+	if err := <-steerResult; err != nil {
+		t.Fatalf("SteerController() error = %v", err)
+	}
+	var got []string
+	for len(got) < 3 {
+		select {
+		case item := <-ordered:
+			got = append(got, item)
+		case err := <-consumerErrors:
+			t.Fatalf("SourceEvents() error = %v", err)
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for ordered main steering events: %#v", got)
+		}
+	}
+	if got[0] != "before main steer" || got[1] != "user:guide main" || got[2] != "after main steer" {
+		t.Fatalf("main steering event order = %#v, want prior/canonical input/buffered output", got)
+	}
+	handle.finish()
+	select {
+	case <-consumerDone:
+	case <-ctx.Done():
+		t.Fatal("main SourceEvents() consumer did not stop")
+	}
+}
+
+func TestMainControllerSteeringAmbiguousOutcomeIsolatesExactRun(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cfg := steeringControllerTestConfig(`{"supported":true}`, "")
+	cfg.Env["CAELIS_ACP_STEERING_OUTCOME"] = string(client.SessionSteeringStartedNewTurn)
+	handle := newTurnHandle(nil)
+	run := &controllerRun{
+		parentSessionID: "parent-session", agent: "steering-helper", cfg: cfg,
+		binding: session.ControllerBinding{
+			Kind: session.ControllerKindACP, ControllerID: "controller-1", EpochID: "epoch-1",
+		},
+		supportsSteering: true, turnID: "main-turn", turnStream: true, handle: handle,
+	}
+	acpClient, remoteID, _, err := (&Manager{}).startACPClient(
+		ctx,
+		t.TempDir(),
+		cfg,
+		"",
+		func(env client.UpdateEnvelope) { run.handleUpdate(time.Now, env) },
+		func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
+			return client.RequestPermissionResponse{}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.client = acpClient
+	run.remoteSessionID = remoteID
+	run.binding.RemoteSessionID = remoteID
+	manager := &Manager{controllers: map[string]*controllerRun{run.parentSessionID: run}}
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		for range handle.SourceEvents() {
+		}
+	}()
+	committed := false
+	err = manager.SteerController(ctx, controller.ControllerSteerRequest{
+		SessionRef:   session.SessionRef{SessionID: run.parentSessionID},
+		ControllerID: run.binding.ControllerID, ControllerEpoch: run.binding.EpochID,
+		RemoteSessionID: remoteID, TurnID: run.turnID, Input: "ambiguous guide",
+		Commit: func() error {
+			committed = true
+			return nil
+		},
+	})
+	if errorcode.CodeOf(err) != errorcode.UnknownOutcome {
+		t.Fatalf("SteerController() error = %v, want unknown_outcome", err)
+	}
+	if committed {
+		t.Fatal("ambiguous main steering committed canonical input")
+	}
+	manager.mu.RLock()
+	retained := manager.controllers[run.parentSessionID]
+	manager.mu.RUnlock()
+	if retained != nil {
+		t.Fatal("ambiguous main controller remained addressable")
+	}
+	handle.mu.Lock()
+	cancelled := handle.cancelled
+	handle.mu.Unlock()
+	if !cancelled {
+		t.Fatal("ambiguous main controller Turn was not cancelled")
+	}
+	handle.finish()
+	select {
+	case <-consumerDone:
+	case <-ctx.Done():
+		t.Fatal("ambiguous main controller consumer did not stop")
+	}
+}
+
+func TestMainControllerSteeringReportsClosedRunBeforeRuntimeRunnerCloses(t *testing.T) {
+	t.Parallel()
+
+	newFixture := func() (*Manager, *controllerRun, *turnHandle, controller.ControllerSteerRequest) {
+		handle := newTurnHandle(nil)
+		run := &controllerRun{
+			parentSessionID: "parent-session", supportsSteering: true,
+			binding: session.ControllerBinding{
+				Kind: session.ControllerKindACP, ControllerID: "controller-1", EpochID: "epoch-1",
+			},
+			remoteSessionID: "remote-session-1", turnID: "main-turn", turnStream: true, handle: handle,
+		}
+		manager := &Manager{controllers: map[string]*controllerRun{run.parentSessionID: run}}
+		request := controller.ControllerSteerRequest{
+			SessionRef:   session.SessionRef{SessionID: run.parentSessionID},
+			ControllerID: run.binding.ControllerID, ControllerEpoch: run.binding.EpochID,
+			RemoteSessionID: run.remoteSessionID, TurnID: run.turnID, Input: "after terminal",
+			Commit: func() error { t.Fatal("closed Run committed steering input"); return nil },
+		}
+		return manager, run, handle, request
+	}
+
+	t.Run("turn owner cleared before handle close", func(t *testing.T) {
+		manager, run, handle, request := newFixture()
+		run.finishTurn(handle)
+		if err := manager.SteerController(context.Background(), request); !errors.Is(err, agent.ErrRunInputClosed) {
+			t.Fatalf("SteerController() error = %v, want ErrRunInputClosed", err)
+		}
+	})
+
+	t.Run("event stream barrier closed before runner close", func(t *testing.T) {
+		manager, _, handle, request := newFixture()
+		handle.closeBarrierAdmission(controller.ErrNotActive)
+		if err := manager.SteerController(context.Background(), request); !errors.Is(err, agent.ErrRunInputClosed) {
+			t.Fatalf("SteerController() error = %v, want ErrRunInputClosed", err)
+		}
+	})
 }
 
 func TestParticipantSteeringAmbiguousOutcomeIsolatesParticipant(t *testing.T) {

@@ -8,7 +8,6 @@ import (
 // exercise. Tests that cover a capability replace the corresponding service.
 type testFocusedServices struct {
 	appserver.ParticipantService
-	appserver.AgentMessageService
 	appserver.ConfigurationService
 	appserver.AgentService
 	appserver.CompletionService
@@ -20,7 +19,7 @@ type testFocusedServices struct {
 func testAppServerServices(sessions appserver.Service, status appserver.StatusService) appserver.AppServerServices {
 	focused := &testFocusedServices{}
 	return appserver.AppServerServices{
-		Sessions: sessions, Participants: focused, AgentMessages: focused, Status: status, Configuration: focused,
+		Sessions: sessions, Participants: focused, Status: status, Configuration: focused,
 		Agents: focused, Completion: focused, Plugins: focused,
 		Presentation: focused, Terminal: focused, Tasks: &fakeTaskService{},
 	}

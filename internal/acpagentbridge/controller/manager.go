@@ -80,6 +80,7 @@ type controllerRun struct {
 	context               agent.ContextTransfer
 	contextPending        bool
 
+	operationMu         sync.Mutex
 	mu                  sync.Mutex
 	commands            []ControllerCommand
 	configOptions       []ControllerConfigOption
@@ -96,6 +97,9 @@ type controllerRun struct {
 	approvalRequester   controller.ApprovalRequester
 	handle              *turnHandle
 	events              []*session.Event
+	steeringActive      bool
+	steeringCancel      context.CancelFunc
+	steeringUpdates     []turnHandleEvent
 	turnAdmissionClosed bool
 	updatedAt           time.Time
 	reconnectMu         sync.Mutex
@@ -409,6 +413,8 @@ func (m *Manager) reconnectControllerRun(ctx context.Context, run *controllerRun
 	if m == nil || run == nil {
 		return fmt.Errorf("internal/acpagentbridge/controller: controller run is unavailable")
 	}
+	run.operationMu.Lock()
+	defer run.operationMu.Unlock()
 	run.reconnectMu.Lock()
 	defer run.reconnectMu.Unlock()
 	if !m.isActiveControllerRun(run) {
@@ -1185,10 +1191,19 @@ func (r *controllerRun) handleUpdate(clock func() time.Time, env client.UpdateEn
 	if event != nil {
 		r.events = append(r.events, session.CloneEvent(event))
 	}
-	r.mu.Unlock()
 	if stream && handle != nil {
-		handle.publishSourceEvent(event, acpEnv)
+		if r.steeringActive {
+			r.steeringUpdates = append(r.steeringUpdates, turnHandleEvent{event: acpbridge.SourceEvent{
+				Canonical: session.CloneEvent(event),
+				ACP:       acpbridge.CloneEnvelopePtr(acpEnv),
+			}})
+		} else {
+			// Publish while holding r.mu so steering activation and its barrier
+			// linearize with this update.
+			handle.publishSourceEvent(event, acpEnv)
+		}
 	}
+	r.mu.Unlock()
 }
 
 func (r *controllerRun) applySessionUpdateLocked(clock func() time.Time, update client.Update) {

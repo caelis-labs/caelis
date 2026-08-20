@@ -383,7 +383,7 @@ func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptPartici
 	runID := r.nextID("participant-run", nil)
 	runCtx, cancel := context.WithCancel(ctx)
 	handle := newRunner(runID, cancel)
-	admission := newParticipantSteeringAdmission()
+	admission := newSteeringAdmission()
 	if err := handle.setSubmissionHandler(runCtx, r.participantSteeringHandler(
 		runCtx,
 		activeSession,
@@ -415,7 +415,7 @@ func (r *Runtime) executeACPParticipantTurn(
 	turnID string,
 	handle *runner,
 	releasePrompt func(),
-	admission *participantSteeringAdmission,
+	admission *steeringAdmission,
 ) {
 	defer handle.finish()
 	defer releasePrompt()

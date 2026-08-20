@@ -349,6 +349,26 @@ type blockingRuntime struct {
 	wait    chan struct{}
 }
 
+type admissionBlockingRuntime struct {
+	started chan struct{}
+	release chan struct{}
+	err     error
+}
+
+func (r *admissionBlockingRuntime) Run(ctx context.Context, _ agent.RunRequest) (agent.RunResult, error) {
+	close(r.started)
+	select {
+	case <-r.release:
+		return agent.RunResult{}, r.err
+	case <-ctx.Done():
+		return agent.RunResult{}, ctx.Err()
+	}
+}
+
+func (*admissionBlockingRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+	return agent.RunState{}, nil
+}
+
 type lostRunRecoveryRuntime struct {
 	session session.Session
 	started chan *lostRunRecoveryRunner

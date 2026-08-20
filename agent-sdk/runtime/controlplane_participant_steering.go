@@ -12,9 +12,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-const participantSteeringCommitTimeout = 5 * time.Second
+const steeringCommitTimeout = 5 * time.Second
 
-type participantSteeringAdmission struct {
+type steeringAdmission struct {
 	done chan struct{}
 	once sync.Once
 
@@ -22,11 +22,11 @@ type participantSteeringAdmission struct {
 	err error
 }
 
-func newParticipantSteeringAdmission() *participantSteeringAdmission {
-	return &participantSteeringAdmission{done: make(chan struct{})}
+func newSteeringAdmission() *steeringAdmission {
+	return &steeringAdmission{done: make(chan struct{})}
 }
 
-func (a *participantSteeringAdmission) resolve(err error) {
+func (a *steeringAdmission) resolve(err error) {
 	if a == nil {
 		return
 	}
@@ -38,7 +38,7 @@ func (a *participantSteeringAdmission) resolve(err error) {
 	})
 }
 
-func (a *participantSteeringAdmission) wait(ctx context.Context) error {
+func (a *steeringAdmission) wait(ctx context.Context) error {
 	if a == nil {
 		return controller.ErrNotActive
 	}
@@ -62,7 +62,7 @@ func (r *Runtime) participantSteeringHandler(
 	binding session.ParticipantBinding,
 	turnID string,
 	handle *runner,
-	admission *participantSteeringAdmission,
+	admission *steeringAdmission,
 ) func(context.Context, agent.Submission) error {
 	return func(ctx context.Context, submission agent.Submission) error {
 		if submission.Kind != agent.SubmissionKindConversation {
@@ -110,7 +110,7 @@ func (r *Runtime) commitParticipantSteering(
 	if r == nil || r.sessions == nil || handle == nil {
 		return errors.New("agent-sdk/runtime: participant steering commit is unavailable")
 	}
-	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(producerCtx), participantSteeringCommitTimeout)
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(producerCtx), steeringCommitTimeout)
 	defer cancel()
 	event := participantPromptUserEvent(
 		activeSession,

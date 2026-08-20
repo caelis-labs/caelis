@@ -11,7 +11,7 @@ import (
 
 const runnerSubmissionQueueCapacity = 64
 
-var errRunnerSubmissionClosed = errorcode.New(errorcode.FailedPrecondition, "agent-sdk/runtime: runner submission handler is closed")
+var errRunnerSubmissionClosed = agent.ErrRunInputClosed
 
 type runnerSubmissionRequest struct {
 	ctx        context.Context

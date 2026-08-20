@@ -38,11 +38,6 @@ type SessionSteeringAdapter interface {
 	SteerSession(context.Context, SessionSteeringRequest) (SessionSteeringResponse, error)
 }
 
-// SessionMessageAdapter accepts one Agent-authored Context message.
-type SessionMessageAdapter interface {
-	SessionMessage(context.Context, SessionMessageRequest, PromptCallbacks) (SessionMessageResponse, error)
-}
-
 func AsSessionListAdapter(agent Agent) (SessionListAdapter, bool) {
 	adapter, ok := agent.(SessionListAdapter)
 	return adapter, ok
@@ -75,11 +70,6 @@ func AsSessionModelAdapter(agent Agent) (SessionModelAdapter, bool) {
 
 func AsSessionSteeringAdapter(agent Agent) (SessionSteeringAdapter, bool) {
 	adapter, ok := agent.(SessionSteeringAdapter)
-	return adapter, ok
-}
-
-func AsSessionMessageAdapter(agent Agent) (SessionMessageAdapter, bool) {
-	adapter, ok := agent.(SessionMessageAdapter)
 	return adapter, ok
 }
 

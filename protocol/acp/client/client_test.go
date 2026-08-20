@@ -281,9 +281,6 @@ func TestInitializeAdvertisesClientCapabilitiesFromHandlers(t *testing.T) {
 		Terminal:     recordingTerminalHandler{},
 		TerminalAuth: true,
 		FileSystem:   recordingFileSystemHandler{},
-		OnSessionMessage: func(context.Context, SessionMessageRequest) (SessionMessageResponse, error) {
-			return SessionMessageResponse{Accepted: true}, nil
-		},
 	}}
 	go func() {
 		_ = client.conn.Serve(ctx, client.handleRequest, client.handleNotification)
@@ -307,9 +304,6 @@ func TestInitializeAdvertisesClientCapabilitiesFromHandlers(t *testing.T) {
 		fs, ok := req.ClientCapabilities["fs"].(map[string]any)
 		if !ok || fs["readTextFile"] != true || fs["writeTextFile"] != true {
 			t.Fatalf("fs capability = %#v, want read/write true", req.ClientCapabilities["fs"])
-		}
-		if _, ok := req.ClientCapabilities[MethodSessionMessage]; !ok {
-			t.Fatalf("message capability missing: %#v", req.ClientCapabilities)
 		}
 		if _, ok := req.ClientCapabilities[MethodSessionSteering]; ok {
 			t.Fatalf("initialize request unexpectedly advertised Agent steering capability: %#v", req.ClientCapabilities)

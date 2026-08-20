@@ -4,7 +4,6 @@ import (
 	"context"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 )
@@ -50,20 +49,9 @@ type Runner interface {
 	Cancel(context.Context, delegation.Anchor) error
 }
 
-// MessageRequest carries one trusted Agent message to an existing child. A
-// completed child receives Completion for the newly started turn; a running
-// child injects the message at its next safe boundary.
-type MessageRequest struct {
-	agentmessage.Request
-	Completion delegation.CompletionSink `json:"-"`
-	// Reconnect carries trusted durable execution identity when the Runtime
-	// recovered a completed Task but the runner has no process-local child.
-	Reconnect *ReconnectRequest `json:"-"`
-}
-
-// ReconnectRequest lets a MessageRunner reattach the exact durable child
-// Session and Task before accepting a new message-authored Turn. It is Runtime
-// recovery context, not a model-facing message argument.
+// ReconnectRequest lets an endpoint runner reattach the exact durable child
+// Session and Task before ordinary input or history access. It is Runtime
+// recovery context, not model-facing input.
 type ReconnectRequest struct {
 	Spawn  SpawnContext      `json:"-"`
 	Target delegation.Target `json:"-"`
@@ -106,13 +94,6 @@ func CloneHistoryRequest(in HistoryRequest) HistoryRequest {
 // or derive history from the parent Task result.
 type HistoryRunner interface {
 	LoadHistory(context.Context, HistoryRequest) (session.LoadedSession, error)
-}
-
-// MessageRunner is the optional Agent-message extension required by
-// SendMessage. Message returns when the runner accepts ownership of delivery;
-// target consumption and a newly started child Turn continue asynchronously.
-type MessageRunner interface {
-	Message(context.Context, delegation.Anchor, MessageRequest) (delegation.Result, error)
 }
 
 // PlacementRunner is the optional typed Spawn extension used when Control has

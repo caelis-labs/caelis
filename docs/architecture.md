@@ -281,7 +281,7 @@ Document responsibilities are intentionally separate:
   cross-process built-in children are unavailable. An explicit
   Control URL attaches a
   caller-selected Host and never falls back to managed local mode. Session
-  lifecycle, main-Turn ingress, and Agent-message delivery use principal-bound
+  lifecycle and main-Turn ingress use principal-bound
   AppServer clients over embedded or HTTP/SSE transports. TUI and product ACP
   slash routers also use
   focused status, configuration, Agent, participant, completion/skill, and
@@ -352,11 +352,12 @@ Document responsibilities are intentionally separate:
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
   product integration adapters that make external endpoints implement the same
   SDK controller/participant contracts used by built-in Agents. Product
-  assembly supplies principal-bound Session, Agent-message, presentation,
+  assembly supplies principal-bound Session, presentation,
   terminal, participant, Task, status, configuration, Agent, completion, and
-  plugin clients; prompt, slash, and Agent-message operations fail closed on
-  those clients. Agent-message Turn observation is reconstructed from the
-  authoritative Session feed and never exposes a Kernel Turn handle. The direct
+  plugin clients; prompt and slash operations fail closed on those clients.
+  Child input uses the reusable Runtime capability and standard ACP prompt or
+  steering methods; Task observation is derived from child output and never
+  exposes a Kernel Turn handle. The direct
   Runtime adapter remains only for lower-level bridge conformance and
   is not selectable through product `GatewayAgentConfig`.
   The bridge does not import presentation packages.
@@ -438,7 +439,7 @@ normalized by the Host-private `PresentationSource` into `control/appserver`
 types before they reach `controladapter/local`; ACP fallback providers are
 accepted only as inputs to that normalization boundary. Direct Stack mirrors
 of execution, configuration revision, Model, Agent, Status, Runtime acquisition,
-workspace, preparation, and Agent-message service methods are not parallel
+workspace and preparation service methods are not parallel
 entry points. Architecture and structural gates enforce the private adapter
 consumer boundary, reject concrete Stack use in local leaf adapters, reject ACP
 wire types in local presentation assembly, reject anonymous Host composition,
@@ -506,21 +507,20 @@ Visibility categories:
 Subagent stream chunks are `ui_only`; the parent receives subagent output
 through durable `Spawn`/`Task` tool results.
 
-Agent-to-Agent delivery uses one target-owned canonical Context path.
-`SendMessage` routes parent, child, and sibling messages; local target delivery
-persists before wakeup and does not create a second mailbox truth or reuse
-`Task write`. Parent-side child-directed audit is an accepted-delivery mirror,
-not main model context. Acceptance means the delivery runner owns the queued
-work; it does not mean the target consumed the message. Agent-message projection requires explicit message
-metadata or a maintained Agent-message source in addition to typed Actor
-identity. After delivery ownership transfers, failure to refresh the sender's Task index
-returns `accepted_unpersisted` rather than a retryable delivery error.
+Agent-to-Agent communication uses ordinary input. `SendMessage` routes parent,
+child, and sibling addresses without a delivery MessageID, durable mailbox,
+parent audit mirror, or `Task write` fallback. Running ACP endpoints use
+negotiated steering; idle endpoints use ordinary prompts on the same Session.
+The trusted source Actor is provenance on a canonical user-role input, not a
+separate provider message class. Input admission does not mutate Task.
 Completion notices carry only state and the Session-scoped Task handle, leaving
-final output under the Task owner. Task read/wait advances a single observation
-frontier and returns all unread retained per-Turn FinalResponses without
-repeating an already observed Turn. They are best-effort hints after authoritative
-Task/sidecar completion and cannot delay the terminal producer. Task observers follow later message-authored
-child Turns with the same absolute cursor without advertising Task input.
+final output under the Task owner. They are one bounded best-effort conversation
+submission to the exact active parent Run after authoritative Task/sidecar
+completion and cannot delay the terminal producer. Task read/wait advances a
+single observation frontier and returns all unread retained per-activity
+FinalResponses without repeating an already observed activity. Task observers
+follow later child activities with the same absolute cursor without advertising
+Task input.
 The Task stream subscription declares whether it follows the complete subagent
 timeline. A following observer releases each completed activity's producer
 observation, waits on the stable Session/Task identity, and re-resolves the
@@ -532,13 +532,13 @@ durable child Session. Provider-owned Sessions use a read-only ACP
 `session/load` selected by the Task's frozen placement; Task final responses are
 observation slices and never serve as transcript history.
 Command Tasks and non-following subscriptions still stop at terminal state.
-`SendMessage` output is only the delivery acknowledgement; it does not manage
-subscriptions. Likewise, `turn_id` groups transcript events and never owns the
-Task or presentation lifecycle.
+`SendMessage` output is only the input-dispatch acknowledgement; it does not
+manage subscriptions. Likewise, `turn_id` groups transcript events and never
+owns the Task or presentation lifecycle.
 
 A Spawn-created child is a stable identity with running and idle activity
 periods; a terminal Turn outcome never makes that identity unrecoverable.
-SendMessage may reconnect the same child Session and start its next Turn.
+SendMessage may reconnect the same child Session and submit its next prompt.
 Cancel ends only the current Turn and is reserved for explicit stop or
 prolonged lack of progress. Control tool assembly never gives a Spawn-created
 Session the Spawn tool, so delegation cannot nest. Spawn-created child prompts

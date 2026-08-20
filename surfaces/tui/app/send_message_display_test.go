@@ -201,7 +201,7 @@ func TestSendMessageReplayBatchResolvesEarlierSpawnTarget(t *testing.T) {
 	}
 }
 
-func TestSendMessageSuccessRendersSingleLineWithoutDeliveryAck(t *testing.T) {
+func TestSendMessageSuccessRendersSingleLineWithoutDispatchAck(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.width = 120
 	model.height = 40
@@ -221,7 +221,7 @@ func TestSendMessageSuccessRendersSingleLineWithoutDeliveryAck(t *testing.T) {
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "message-1", Status: &completed,
 			Content: []schema.ToolCallContent{{
-				Type: "content", Content: schema.TextContent{Type: "text", Text: "Message delivered."},
+				Type: "content", Content: schema.TextContent{Type: "text", Text: "Message sent."},
 			}},
 			RawOutput: map[string]any{"accepted": true, "state": "delivered", "to": "parent"},
 			Meta:      acpToolNameMeta("SendMessage"),
@@ -233,7 +233,7 @@ func TestSendMessageSuccessRendersSingleLineWithoutDeliveryAck(t *testing.T) {
 	if !strings.Contains(plain, "• Sent ") || !strings.Contains(plain, "status update for parent") {
 		t.Fatalf("successful SendMessage header missing:\n%s", plain)
 	}
-	if strings.Contains(plain, "Message delivered.") || strings.Contains(plain, "└") || strings.Contains(plain, "↗") {
+	if strings.Contains(plain, "Message sent.") || strings.Contains(plain, "└") || strings.Contains(plain, "↗") {
 		t.Fatalf("successful SendMessage kept delivery chrome:\n%s", plain)
 	}
 }

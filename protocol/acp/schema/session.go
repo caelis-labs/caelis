@@ -25,9 +25,6 @@ const (
 	// running Session. Support is advertised through the top-level initialize
 	// response _meta.steering entry.
 	MethodSessionSteering = "_session/steering"
-	// MethodSessionMessage is the Caelis ACP v1 extension for bidirectional
-	// mid-turn Agent messages. Support is negotiated through _meta.
-	MethodSessionMessage = "_caelis.dev/session/message"
 
 	StopReasonEndTurn   = "end_turn"
 	StopReasonCancelled = "cancelled"
@@ -317,22 +314,6 @@ func DecodeSessionSteeringOptions(meta map[string]json.RawMessage) (SessionSteer
 		}
 	}
 	return options, nil
-}
-
-type SessionMessageRequest struct {
-	SessionID string `json:"sessionId"`
-	MessageID string `json:"messageId"`
-	To        string `json:"to"`
-	From      string `json:"from,omitempty"`
-	Message   string `json:"message"`
-}
-
-type SessionMessageResponse struct {
-	MessageID   string `json:"messageId"`
-	Accepted    bool   `json:"accepted"`
-	State       string `json:"state,omitempty"`
-	TurnID      string `json:"turnId,omitempty"`
-	StartedTurn bool   `json:"startedTurn,omitempty"`
 }
 
 type CancelNotification struct {

@@ -73,9 +73,6 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 			WriteBase: appserver.WriteBase{OperationID: "agent-binding-set-operation-1", ExpectedRevision: &revision},
 			SetName:   "baseline",
 		},
-		"AgentMessageRequest": appserver.AgentMessageRequest{
-			SessionID: "session-1", MessageID: "message-1", To: "parent", Text: "status", DisplayFrom: "@display-only",
-		},
 		"CompletionRequest": appserver.CompletionRequest{
 			SessionID: "session-1", WorkspaceKey: "workspace-1", CWD: "/tmp/workspace",
 			Surface: "tui", Query: "read", Command: "model use", Name: "review", Limit: 10,
@@ -96,9 +93,6 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 			})
 		})
 	}
-	validateWireValue(t, "AgentMessageResult", appserver.AgentMessageResult{
-		MessageID: "message-1", Accepted: true, State: "running", Target: target, StartedTurn: true,
-	})
 	validateWireValue(t, "ErrorResponse", map[string]any{
 		"error": "invalid request", "code": errorcode.FailedPrecondition, "kind": appserver.ErrorKindSessionClosed,
 	})

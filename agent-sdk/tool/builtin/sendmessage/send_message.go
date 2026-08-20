@@ -1,5 +1,5 @@
-// Package sendmessage declares the Agent-to-Agent message tool. Runtime owns
-// routing and identity; the model supplies only a target and message body.
+// Package sendmessage declares the Agent-to-Agent input tool. Runtime owns
+// routing and identity; the model supplies only a target and input body.
 package sendmessage
 
 import (
@@ -28,7 +28,7 @@ func ValidateArgs(args map[string]any) error {
 	return nil
 }
 
-// Tool is the runtime-managed Agent message declaration.
+// Tool is the runtime-managed Agent input declaration.
 type Tool struct{}
 
 func New() Tool { return Tool{} }
@@ -36,7 +36,7 @@ func New() Tool { return Tool{} }
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Deliver a message to an Agent mailbox.",
+		Description: "Send ordinary input to another Agent or the parent Agent.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -46,7 +46,7 @@ func (Tool) Definition() tool.Definition {
 				},
 				"message": map[string]any{
 					"type": "string", "minLength": 1,
-					"description": "Message to deliver.",
+					"description": "Input to send.",
 				},
 			},
 			"required":             []string{"to", "message"},

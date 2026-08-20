@@ -32,9 +32,6 @@ type SubmissionKind string
 
 const (
 	SubmissionKindConversation SubmissionKind = "conversation"
-	// SubmissionKindAgentMessage injects a canonical participant-authored
-	// Context event at the next safe model boundary.
-	SubmissionKindAgentMessage SubmissionKind = "agent_message"
 )
 
 // Submission is one runtime continuation submission.
@@ -44,12 +41,7 @@ type Submission struct {
 	DisplayInput string              `json:"display_input,omitempty"`
 	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
 	Metadata     map[string]any      `json:"metadata,omitempty"`
-	MessageID    string              `json:"message_id,omitempty"`
 	Actor        session.ActorRef    `json:"actor,omitempty"`
-	Scope        *session.EventScope `json:"scope,omitempty"`
-	// Persisted means the canonical Context event was committed before this
-	// live-run wakeup and must not be appended a second time.
-	Persisted bool `json:"persisted,omitempty"`
 }
 
 // CancelStatus identifies the outcome of one cancellation request.
@@ -505,13 +497,7 @@ func CloneSubmission(sub Submission) Submission {
 		DisplayInput: sub.DisplayInput,
 		ContentParts: append([]model.ContentPart(nil), sub.ContentParts...),
 		Metadata:     jsonvalue.CloneMap(sub.Metadata),
-		MessageID:    sub.MessageID,
 		Actor:        session.CloneActorRef(sub.Actor),
-		Persisted:    sub.Persisted,
-	}
-	if sub.Scope != nil {
-		scope := session.CloneEventScope(*sub.Scope)
-		out.Scope = &scope
 	}
 	return out
 }

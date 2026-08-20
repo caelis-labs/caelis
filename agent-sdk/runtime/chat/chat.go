@@ -408,11 +408,6 @@ func (a *Agent) drainPendingSubmissions(
 		if !isModelInputSubmission(submission) {
 			continue
 		}
-		if submission.Kind == agent.SubmissionKindAgentMessage {
-			if err := validateAgentMessageSubmission(submission); err != nil {
-				return accepted, err
-			}
-		}
 		text := strings.TrimSpace(submission.Text)
 		if text == "" && len(submission.ContentParts) == 0 {
 			continue
@@ -420,44 +415,18 @@ func (a *Agent) drainPendingSubmissions(
 		message, displayText, meta := userdisplay.Resolve(text, submission.DisplayInput, submission.ContentParts, submission.Metadata)
 		eventType := session.EventTypeUser
 		actor := session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
-		if submission.Kind == agent.SubmissionKindAgentMessage {
-			eventType = session.EventTypeContext
+		if session.ActorRefHasIdentity(submission.Actor) {
 			actor = session.CloneActorRef(submission.Actor)
-			if meta == nil {
-				meta = map[string]any{}
-			}
-			// SubmissionKindAgentMessage is assigned only by the trusted Runtime
-			// delivery boundary. Canonicalize its provenance here so a metadata
-			// omission cannot silently degrade the provider projection.
-			meta["agent_message"] = true
 		}
 		event := &session.Event{
-			IdempotencyKey: agentMessageIdempotencyKey(submission),
-			Type:           eventType,
-			Visibility:     session.VisibilityCanonical,
-			Actor:          actor,
-			MessageID:      strings.TrimSpace(submission.MessageID),
-			Message:        &message,
-			Text:           displayText,
-			Meta:           meta,
-		}
-		if submission.Scope != nil {
-			scope := session.CloneEventScope(*submission.Scope)
-			event.Scope = &scope
+			Type:       eventType,
+			Visibility: session.VisibilityCanonical,
+			Actor:      actor,
+			Message:    &message,
+			Text:       displayText,
+			Meta:       meta,
 		}
 		providerMessage := message
-		if eventType == session.EventTypeContext {
-			projected, ok := messageFromInvocationEvent(event)
-			if !ok {
-				return accepted, fmt.Errorf("agent-sdk/runtime/chat: Agent message submission could not be projected into model context")
-			}
-			providerMessage = projected
-		}
-		if submission.Persisted {
-			*messages = append(*messages, providerMessage)
-			accepted = true
-			continue
-		}
 		if eventType == session.EventTypeUser {
 			event.Protocol = &session.EventProtocol{Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
@@ -473,36 +442,13 @@ func (a *Agent) drainPendingSubmissions(
 	return accepted, nil
 }
 
-func validateAgentMessageSubmission(sub agent.Submission) error {
-	if strings.TrimSpace(sub.MessageID) == "" || !session.ActorRefHasIdentity(sub.Actor) ||
-		(strings.TrimSpace(sub.Text) == "" && len(sub.ContentParts) == 0) {
-		return fmt.Errorf("agent-sdk/runtime/chat: Agent message submission requires message id, content, and source identity")
-	}
-	switch sub.Actor.Kind {
-	case session.ActorKindController, session.ActorKindParticipant:
-		return nil
-	default:
-		return fmt.Errorf("agent-sdk/runtime/chat: Agent message source kind %q is not allowed", sub.Actor.Kind)
-	}
-}
-
 func isModelInputSubmission(sub agent.Submission) bool {
 	switch sub.Kind {
-	case agent.SubmissionKindConversation, agent.SubmissionKindAgentMessage:
+	case agent.SubmissionKindConversation:
 		return true
 	default:
 		return false
 	}
-}
-
-func agentMessageIdempotencyKey(sub agent.Submission) string {
-	if sub.Kind != agent.SubmissionKindAgentMessage {
-		return ""
-	}
-	if id := strings.TrimSpace(sub.MessageID); id != "" {
-		return "agent-message:" + id
-	}
-	return ""
 }
 
 func instructionsFromContext(_ agent.Context, systemPrompt string) []model.Part {

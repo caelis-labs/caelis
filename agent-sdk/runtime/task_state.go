@@ -7,7 +7,6 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/textstream"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -219,8 +218,8 @@ type subagentTask struct {
 	turnSeq          int64
 	streamFrames     []stream.Frame
 	streamFrameSizes []int
-	// Stream cursors are absolute for the Task lifetime and do not reset when
-	// an Agent message starts another child turn.
+	// Stream cursors are absolute for the Task lifetime and do not reset when a
+	// new observed child activity starts.
 	streamEventBase    int64
 	streamOutputCursor int64
 	streamBytes        int
@@ -241,81 +240,6 @@ type subagentTask struct {
 	activityGeneration    int64
 	activityCursor        uint64
 	activityDurableCursor uint64
-}
-
-type subagentMessageTurnCheckpoint struct {
-	stdout         string
-	stderr         string
-	stdoutCursor   int64
-	stderrCursor   int64
-	turnSeq        int64
-	state          taskapi.State
-	running        bool
-	metadata       map[string]any
-	terminalFramed bool
-	activityID     string
-	activityGen    int64
-}
-
-// beginMessageTurn snapshots current-turn result state, advances turnSeq, and
-// reopens the same absolute Task stream for the next Agent-message turn.
-// Retained frames and absolute event/output cursors deliberately survive.
-func (task *subagentTask) beginMessageTurn() subagentMessageTurnCheckpoint {
-	task.mu.Lock()
-	defer task.mu.Unlock()
-	checkpoint := subagentMessageTurnCheckpoint{
-		stdout: task.stdout, stderr: task.stderr,
-		stdoutCursor: task.stdoutCursor, stderrCursor: task.stderrCursor,
-		turnSeq: task.turnSeq, state: task.state, running: task.running,
-		metadata: session.CloneState(task.metadata), terminalFramed: task.streamTerminalFramed,
-		activityID: task.activityID, activityGen: task.activityGeneration,
-	}
-	task.turnSeq++
-	if task.turnSeq <= 0 {
-		task.turnSeq = 1
-	}
-	task.stdout = ""
-	task.stderr = ""
-	task.stdoutCursor = 0
-	task.stderrCursor = 0
-	task.state = taskapi.StateRunning
-	task.running = true
-	task.streamTerminalFramed = false
-	// The compatibility Message caller pre-opens this generation. Clearing only
-	// the activity mapping lets its first output bind to the already-incremented
-	// turn without confusing it with a stale running activity after rehydrate.
-	task.activityID = ""
-	task.activityGeneration = 0
-	if task.metadata != nil {
-		task.metadata["state"] = string(taskapi.StateRunning)
-		delete(task.metadata, "final_event_persisted")
-		delete(task.metadata, subagentActivityIDMeta)
-		delete(task.metadata, subagentActivityGenerationMeta)
-	}
-	task.notifyStreamChangeLocked()
-	return checkpoint
-}
-
-// restoreMessageTurn reverts beginMessageTurn when durable parent Context or
-// remote message delivery fails. force restores even if output already arrived.
-func (task *subagentTask) restoreMessageTurn(checkpoint subagentMessageTurnCheckpoint, force bool) {
-	task.mu.Lock()
-	defer task.mu.Unlock()
-	if !force && (task.stdout != "" || task.stderr != "") {
-		return
-	}
-	task.stdout = checkpoint.stdout
-	task.stderr = checkpoint.stderr
-	task.stdoutCursor = checkpoint.stdoutCursor
-	task.stderrCursor = checkpoint.stderrCursor
-	task.turnSeq = checkpoint.turnSeq
-	task.state = checkpoint.state
-	task.running = checkpoint.running
-	task.metadata = session.CloneState(checkpoint.metadata)
-	task.streamTerminalFramed = checkpoint.terminalFramed
-	task.activityID = checkpoint.activityID
-	task.activityGeneration = checkpoint.activityGen
-	task.notifyStreamChangeLocked()
 }
 
 func newTaskRuntime(
@@ -390,7 +314,7 @@ type runtimeToolContext struct {
 	approvalRequester agent.ApprovalRequester
 	runID             string
 	turnID            string
-	messageSender     agentmessage.Sender
+	inputSender       agent.AgentInputSender
 }
 
 type StartSubagentOptions struct {

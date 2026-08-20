@@ -24,7 +24,6 @@ const (
 	MethodSessionPrompt        = schema.MethodSessionPrompt
 	MethodSessionCancel        = schema.MethodSessionCancel
 	MethodSessionSteering      = schema.MethodSessionSteering
-	MethodSessionMessage       = schema.MethodSessionMessage
 	MethodSessionUpdate        = schema.MethodSessionUpdate
 	MethodSessionReqPermission = schema.MethodSessionReqPermission
 	MethodReadTextFile         = schema.MethodReadTextFile
@@ -81,8 +80,6 @@ type SessionSteeringCapability = schema.SessionSteeringCapability
 type SessionSteeringOptions = schema.SessionSteeringOptions
 type SessionSteeringRequest = schema.SessionSteeringRequest
 type SessionSteeringResponse = schema.SessionSteeringResponse
-type SessionMessageRequest = schema.SessionMessageRequest
-type SessionMessageResponse = schema.SessionMessageResponse
 type SessionMode = schema.SessionMode
 type SessionModeState = schema.SessionModeState
 type ModelInfo = schema.ModelInfo

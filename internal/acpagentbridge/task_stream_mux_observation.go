@@ -34,7 +34,7 @@ type acpTaskStreamObservationGeneration struct {
 	settled  chan struct{}
 	cursor   string
 	// followActivities identifies a subagent observation whose transport stays
-	// attached across message-authored activity periods while the parent ACP
+	// attached across observed child activity periods while the parent ACP
 	// Prompt remains active.
 	followActivities bool
 }

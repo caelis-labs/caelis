@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
@@ -49,7 +49,6 @@ func TestHostPrivateProjectionTypesDoNotRetainHostStack(t *testing.T) {
 		{name: "Agent binding service", typ: reflect.TypeFor[AgentBindingService]()},
 		{name: "Control Runtime service", typ: reflect.TypeFor[ControlRuntimeService]()},
 		{name: "Control Runtime lease", typ: reflect.TypeFor[ControlRuntimeLease]()},
-		{name: "Agent message delivery", typ: reflect.TypeFor[AgentMessageDeliveryService]()},
 		{name: "Workspace reads", typ: reflect.TypeFor[WorkspaceReadService]()},
 		{name: "Task stream router", typ: reflect.TypeFor[hostTaskStreamService]()},
 		{name: "Control command backend", typ: reflect.TypeFor[controlCommandBackend]()},
@@ -155,8 +154,8 @@ func TestSessionRuntimeAssemblyUsesIndependentConfigurationSource(t *testing.T) 
 		store:           rootStore,
 		storeDir:        storeDir,
 		configMigration: configstore.MigrationReport{FromSchema: 1, Migrated: true},
-		hostedChildMailbox: func(context.Context, session.SessionRef, agentmessage.Request) (agentmessage.Response, error) {
-			return agentmessage.Response{}, nil
+		hostedChildInput: func(context.Context, session.SessionRef, session.SessionRef, string, agent.AgentInput) error {
+			return nil
 		},
 	}, process: &runtimeProcessState{config: newRuntimeProcessConfigSource(sessionRuntimeProcessSnapshot{})}}}
 

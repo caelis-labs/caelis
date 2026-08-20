@@ -60,6 +60,7 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		sessionRef:              activeSession.SessionRef,
 		createdAt:               g.clock(),
 		allowPendingSubmissions: true,
+		waitForRunnerSubmission: true,
 		prepareSubmission: func(submitCtx context.Context, submitReq SubmitRequest) (SubmitRequest, error) {
 			return g.prepareSubmitRequest(submitCtx, activeSession, submitReq)
 		},
@@ -129,14 +130,11 @@ func (g *Gateway) resolveBeginTurn(ctx context.Context, activeSession session.Se
 		}
 		return ResolvedTurn{
 			RunRequest: agent.RunRequest{
-				SessionRef:     activeSession.SessionRef,
-				Input:          req.Input,
-				DisplayInput:   strings.TrimSpace(req.DisplayInput),
-				ContentParts:   append([]model.ContentPart(nil), req.ContentParts...),
-				InputType:      req.InputType,
-				InputMessageID: req.InputMessageID,
-				InputActor:     session.CloneActorRef(req.InputActor),
-				InputScope:     cloneEventScopePointer(req.InputScope),
+				SessionRef:   activeSession.SessionRef,
+				Input:        req.Input,
+				DisplayInput: strings.TrimSpace(req.DisplayInput),
+				ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
+				InputActor:   session.CloneActorRef(req.InputActor),
 			},
 		}, nil
 	}
@@ -178,17 +176,8 @@ func (g *Gateway) runTurn(
 	if len(runReq.ContentParts) == 0 && len(req.ContentParts) > 0 {
 		runReq.ContentParts = append([]model.ContentPart(nil), req.ContentParts...)
 	}
-	if runReq.InputType == "" {
-		runReq.InputType = req.InputType
-	}
-	if strings.TrimSpace(runReq.InputMessageID) == "" {
-		runReq.InputMessageID = strings.TrimSpace(req.InputMessageID)
-	}
 	if runReq.InputActor.Kind == "" && strings.TrimSpace(runReq.InputActor.ID) == "" && strings.TrimSpace(runReq.InputActor.Name) == "" {
 		runReq.InputActor = req.InputActor
-	}
-	if runReq.InputScope == nil {
-		runReq.InputScope = cloneEventScopePointer(req.InputScope)
 	}
 	normalizeRunRequestPolicyProfile(&runReq)
 	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {

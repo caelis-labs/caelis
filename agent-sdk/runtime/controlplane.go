@@ -82,10 +82,18 @@ func (r *Runtime) runACPControllerTurn(
 	handle.setCancelHook(func() error {
 		return r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 	})
+	admission := newSteeringAdmission()
+	if err := handle.setSubmissionHandler(ctx, r.controllerSteeringHandler(
+		ctx, ref, turnID, handle, admission,
+	)); err != nil {
+		cancel()
+		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
+		return agent.RunResult{}, err
+	}
 	r.registerActiveRun(ref, activeSession, turnID, handle)
 	go func() {
 		defer cancel()
-		r.executeACPControllerTurn(ctx, activeSession, ref, req, runID, turnID, handle)
+		r.executeACPControllerTurn(ctx, activeSession, ref, req, runID, turnID, handle, admission)
 	}()
 	return agent.RunResult{
 		Session: activeSession,
@@ -101,9 +109,16 @@ func (r *Runtime) executeACPControllerTurn(
 	runID string,
 	turnID string,
 	handle *runner,
+	admission *steeringAdmission,
 ) {
 	defer handle.finish()
 	defer r.unregisterActiveRun(runID)
+	admitted := false
+	defer func() {
+		if !admitted {
+			admission.resolve(controller.ErrNotActive)
+		}
+	}()
 	completed := false
 	defer func() {
 		status := session.ExecutionFailed
@@ -121,7 +136,7 @@ func (r *Runtime) executeACPControllerTurn(
 		}
 	}()
 
-	inputEvent := buildInputEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputType, req.InputMessageID, req.InputScope, req.InputCompaction)
+	inputEvent := buildInputEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputCompaction)
 	if inputEvent != nil {
 		persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
 			SessionRef:    ref,
@@ -203,6 +218,8 @@ func (r *Runtime) executeACPControllerTurn(
 			return errors.Join(journalErr, turnResult.Handle.Cancel().Err)
 		})
 		defer turnResult.Handle.Close()
+		admission.resolve(nil)
+		admitted = true
 		if err := r.forwardControllerEvents(ctx, agent.ControllerEventForwardRequest{
 			ActiveSession: activeSession,
 			SessionRef:    ref,
@@ -238,6 +255,11 @@ func (r *Runtime) executeACPControllerTurn(
 			handle.publishError(err)
 			return
 		}
+	} else {
+		err := fmt.Errorf("agent-sdk/runtime: main controller returned no Turn handle")
+		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
+		handle.publishError(err)
+		return
 	}
 	completed = true
 	r.setRunState(ref.SessionID, agent.RunState{

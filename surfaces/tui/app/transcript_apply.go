@@ -22,7 +22,7 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	for index := range msg.Events {
 		one := msg.Events[index : index+1]
 		subagentOutputChanged = m.observeSubagentOutputEvents(one) || subagentOutputChanged
-		subagentRosterRefreshNeeded = m.acceptedSendMessageTargetsSubagent(one[0]) || subagentRosterRefreshNeeded
+		subagentRosterRefreshNeeded = m.successfulSendMessageTargetsSubagent(one[0]) || subagentRosterRefreshNeeded
 		m.decorateAgentMessageDisplayTargets(one)
 	}
 	// Mount/update transcript owners before applying the correlated repairs;
@@ -52,10 +52,10 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	return m, tea.Batch(transcriptCmd, observedSpawnCmd, subagentOutputCmd, subagentRosterCmd, m.resumeRunningAnimationIfNeeded())
 }
 
-// acceptedSendMessageTargetsSubagent detects the delivery acknowledgement that
-// can start a new Turn on a retained child workspace. The canonical Task
-// directory remains the lifecycle owner; this signal only resumes polling it.
-func (m *Model) acceptedSendMessageTargetsSubagent(event TranscriptEvent) bool {
+// successfulSendMessageTargetsSubagent detects a completed input dispatch to a
+// retained child workspace. Child output remains the Task observation owner;
+// this signal only refreshes the roster hint after the input call returns.
+func (m *Model) successfulSendMessageTargetsSubagent(event TranscriptEvent) bool {
 	return m != nil && event.Scope == ACPProjectionMain && event.Kind == TranscriptEventTool &&
 		event.Final && !event.ToolError &&
 		event.ToolName == surfaceToolSendMessage &&

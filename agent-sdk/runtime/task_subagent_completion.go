@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -312,38 +312,41 @@ func (tm *taskRuntime) persistSubagentCompletion(completion *subagentCompletion)
 }
 
 // publishSubagentCompletionNoticeAsync keeps the optional parent hint outside
-// the producer's durable Task/sidecar completion boundary. The idempotency key
-// makes a later independent retry safe, but this bounded best-effort attempt
-// never delays or reopens authoritative completion.
+// the producer's durable Task/sidecar completion boundary. It submits once to
+// the exact active parent run; this bounded best-effort attempt is neither
+// queued nor retried and never delays or reopens authoritative completion.
 func (tm *taskRuntime) publishSubagentCompletionNoticeAsync(completion *subagentCompletion) {
 	if tm == nil || tm.runtime == nil || completion == nil || completion.task == nil {
 		return
 	}
-	ref, req, ok := subagentCompletionNotice(completion.task, completion.result, completion.turnSeq)
+	ref, submission, ok := subagentCompletionNotice(completion.task, completion.result)
 	if !ok {
+		return
+	}
+	active := tm.runtime.activeRunForSession(ref)
+	if active.handle == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(completion.ctx), subagentCompletionNoticeTimeout)
 	go func() {
 		defer cancel()
-		_, _ = tm.runtime.deliverAgentMessageToMain(ctx, ref, req)
+		_ = active.handle.SubmitContext(ctx, submission)
 	}()
 }
 
-func subagentCompletionNotice(task *subagentTask, result delegation.Result, turnSeq int64) (session.SessionRef, agentmessage.Request, bool) {
+func subagentCompletionNotice(task *subagentTask, result delegation.Result) (session.SessionRef, agent.Submission, bool) {
 	if task == nil {
-		return session.SessionRef{}, agentmessage.Request{}, false
+		return session.SessionRef{}, agent.Submission{}, false
 	}
 	task.mu.Lock()
 	ref := session.NormalizeSessionRef(task.sessionRef)
 	handle := strings.TrimSpace(task.handle)
 	if handle == "" {
 		task.mu.Unlock()
-		return session.SessionRef{}, agentmessage.Request{}, false
+		return session.SessionRef{}, agent.Submission{}, false
 	}
 	role := subagentParticipantRole(task)
 	agentID := strings.TrimSpace(task.anchor.AgentID)
-	taskID := strings.TrimSpace(task.ref.TaskID)
 	task.mu.Unlock()
 
 	state := strings.TrimSpace(string(result.State))
@@ -351,17 +354,12 @@ func subagentCompletionNotice(task *subagentTask, result delegation.Result, turn
 	if result.State == delegation.StateCancelled || result.State == delegation.StateInterrupted {
 		text = fmt.Sprintf("Subagent @%s is interrupted.", strings.TrimPrefix(handle, "@"))
 	}
-	return ref, agentmessage.Request{
-		MessageID: fmt.Sprintf("subagent-completion:%s:%d", taskID, max(turnSeq, 1)),
-		To:        agentmessage.Parent, Text: text,
-		From: session.ActorRef{
+	return ref, agent.Submission{
+		Kind: agent.SubmissionKindConversation, Text: text,
+		Actor: session.ActorRef{
 			Kind: session.ActorKindParticipant, ID: agentID,
 			Name: "@" + strings.TrimPrefix(handle, "@"), Role: string(role),
 		},
-		Scope: &session.EventScope{Source: "subagent_completion", Participant: session.ParticipantRef{
-			ID: agentID, Kind: session.ParticipantKindSubagent,
-			Role: role, DelegationID: taskID,
-		}},
 	}, true
 }
 

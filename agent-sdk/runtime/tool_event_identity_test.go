@@ -15,6 +15,26 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
+type capturingContextModel struct {
+	messages chan []model.Message
+}
+
+func (*capturingContextModel) Name() string { return "capturing-context" }
+
+func (m *capturingContextModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	messages := make([]model.Message, len(req.Messages))
+	for index := range req.Messages {
+		messages[index] = model.CloneMessage(req.Messages[index])
+	}
+	m.messages <- messages
+	return func(yield func(*model.StreamEvent, error) bool) {
+		yield(&model.StreamEvent{Type: model.StreamEventTurnDone, Response: &model.Response{
+			Message: model.NewTextMessage(model.RoleAssistant, "probe complete"), TurnComplete: true, StepComplete: true,
+			Status: model.ResponseStatusCompleted, FinishReason: model.FinishReasonStop,
+		}}, nil)
+	}
+}
+
 func TestFreshRuntimesScopeProviderLocalToolCallIDsAndRebuildBothTurns(t *testing.T) {
 	t.Parallel()
 

@@ -401,7 +401,7 @@ func (r *sessionRuntimeRegistry) acquireLoadedRuntime(sessionID string) (*sessio
 
 // acquireActivatedControlRuntime keeps activation and use-retention on one
 // retry loop so an idle release that starts after the Runtime is observed cannot
-// turn a later Agent-message or command into a spurious unavailable error.
+// turn later Agent input or a command into a spurious unavailable error.
 func (r *sessionRuntimeRegistry) acquireActivatedControlRuntime(
 	ctx context.Context,
 	sessionID string,

@@ -69,7 +69,7 @@ The bridge owns one authenticated-operation recovery path:
 5. retry the original operation once.
 
 This path covers Session open and resume as well as prompts and negotiated
-Agent messages on active controller, participant, and spawned-Agent Sessions.
+steering on active controller, participant, and spawned-Agent Sessions.
 
 Stable agent-managed methods call `authenticate` with the declared `methodId`
 on the current ACP connection. A missing method type normalizes to `agent`, as
@@ -102,65 +102,53 @@ See the upstream
 [ACP authentication methods RFD](https://agentclientprotocol.com/rfds/auth-methods)
 for the wire contract.
 
-## Agent Messages
+## Agent Input and Steering
 
-Built-in Caelis ACP children support bidirectional Agent messages through the
-negotiated `_caelis.dev/session/message` extension. An Agent advertises support
-under `initialize.agentCapabilities._meta`; a client with an inbound handler
-advertises the same key in `clientCapabilities`. Missing capability fails
-explicitly and is never emulated with a new `session/prompt` or `Task write`.
+Caelis uses the standard ACP input methods for external Agents. An idle child
+receives `session/prompt` on its existing ACP Session. A running child receives
+`_session/steering` only when the Agent advertised steering support during
+`initialize`; otherwise active input is rejected explicitly. Caelis does not
+advertise, call, or accept a private Agent-message method.
 
-The extension carries `sessionId`, `messageId`, `to`, optional display-only
-`from`, and `message`. Caelis derives the authoritative source at the
-principal-bound AppServer capability from an exact participant/controller
-binding or the durable parent-Task/participant relation of a managed child,
-rather than the wire `from` value. An unbound principal fails closed. An
-untrusted `from` survives only as `display_from` event metadata and
-never changes canonical `Event.Actor` or rebuilt model context. The target
-Session revision and, for a managed child, the parent Session revision used to
-resolve that relation are checked atomically with the canonical append. A
-concurrent close, controller handoff, or participant detach therefore wins the
-race and forces source resolution to run again; it cannot leave a message
-written under a stale binding. Delivery to a
-running child is mid-turn; delivery to a completed child queues its next Turn on the
-same ACP Session. Child-to-parent and child-to-sibling delivery returns once
-the routing boundary owns asynchronous delivery, independently of target
-consumption or completion. Parent-side outbound audit is written only after
-that ownership transfer and remains a mirror; the remote target Session owns
-canonical message context. If that acceptance succeeds but the sender cannot refresh its local Task index, Caelis returns
-`accepted_unpersisted` without a delivery error so callers do not blindly repeat
-the queued effect with a new message ID.
+`SendMessage {to,message}` is a model-facing address adapter over that ordinary
+input capability. It has no delivery MessageID, durable mailbox,
+target-lifecycle acknowledgement, or Task mutation. Each invocation dispatches
+one input. The target Agent chooses when active steering is consumed, while the
+existing child endpoint owner serializes transport operations and isolates
+ambiguous outcomes. A transport loss or malformed post-dispatch response is
+therefore reported as unknown and is not blindly retried.
 
-For a message-authored Turn on a previously completed child, the spawning
-runner owns the asynchronous ACP request after `SendMessage` returns. The ACP
-child keeps `_caelis.dev/session/message` open until that Turn is terminal and
-returns `state: completed`; the runner publishes that later outcome through the
-Task lifecycle. The response also carries `startedTurn` and `turnId` for Task
-observation. A non-terminal acknowledgement such as `state: running` does not
-prove completion; the runner records `unknown_outcome` rather than a false
-completed Task result. A request or observer disconnect detaches only that
-observation and never cancels an accepted target Turn. Feed closure proves
-`completed` only when the target terminal was observed without a feed or
-reconnect error; otherwise the delivery outcome remains unknown.
+Task observes child output, not the input operation. Input admission leaves the
+Task unchanged. If the child later emits output or a terminal result, the
+activity observer derives the next Task generation from those events and keeps
+the same absolute stream cursor across endpoint resume or Runtime rehydration.
+ACP Assistant, reasoning, tool, plan, and terminal notifications remain
+first-class child events; their output `messageId` correlation is unrelated to
+SendMessage input identity.
 
-After the parent host or Session Runtime restarts, the durable Task still owns
-the child handle, placement, ACP Session ID, and Task ID. The first message to a
-completed child lazily recreates only the endpoint process, resumes that exact
-ACP Session, and then starts the next message-authored Turn on the existing
-Task. It never substitutes `session/new` or a new handle. Built-in managed child
-Sessions remain hidden from ordinary lifecycle clients: the internal resume
-claim must match both the durable parent Session and Spawn Task recorded on the
-child before that bridge instance may address it.
+A Caelis-hosted child can address its parent or sibling through a trusted
+Host-bound input sender. The Host derives the source from the exact durable
+participant binding, routes an active parent through its normal conversation
+submission path, starts an ordinary parent Turn when idle, and routes siblings
+through the same child input capability. Standard ACP has no reverse
+Agent-to-client routing method, so a third-party ACP host that does not supply
+such a topology-aware sender cannot use `to=parent`; Caelis fails explicitly
+rather than reviving a private wire extension.
+
+After a Host or Session Runtime restart, the durable parent participant binding
+still owns the child handle, placement, ACP Session ID, and Task identity. A
+later idle input may recreate the endpoint process, resume that exact ACP
+Session, and issue `session/prompt`; it never substitutes `session/new` or uses
+Task state as input authority. Built-in managed child Sessions remain hidden
+from ordinary lifecycle clients, and resume still requires the exact parent and
+delegation binding.
 
 `SendMessage` is the incremental channel for updates and questions. A child's
 terminal answer remains its final response and is retrieved by the parent with
 `Task read` or `Task wait`; sending the same terminal answer through both paths
-creates duplicate narrative. Result fields are observation, not a second Task
-lifecycle: `pending` means canonical context is durable for a later Turn,
-`delivered` means a live target accepted submission, `running` means a new
-message-authored child activity started, and `completed` is returned only after
-that ACP activity closes. `startedTurn` marks that transition and `turnId`
-groups the activity; neither is a completion guarantee.
+creates duplicate narrative. The tool result confirms only that one ordinary
+input dispatch returned successfully. It carries no target state or Turn
+identity; Task read/stream derives those facts later from child output.
 
 When an external participant itself invokes Spawn, that nested child remains
 behind the participant process boundary. Caelis consumes its live child stream

@@ -23,11 +23,11 @@ type ClientsConfig struct {
 	UserID       string
 	WorkspaceKey string
 	WorkspaceCWD string
-	// AgentMessageSessionClient optionally observes product-owned child Sessions
-	// after trusted Agent-message delivery. When nil, the principal-bound Session
+	// SystemSessionClient optionally addresses product-owned child Sessions.
+	// When nil, the principal-bound Session
 	// client is used; Host exact-target Reconnect authorizes owners without
 	// granting RoleSystemSessionRuntime to Surface tokens.
-	AgentMessageSessionClient appserver.SessionClient
+	SystemSessionClient appserver.SessionClient
 }
 
 // NewFromClients builds the product ACP surface from focused clients only.
@@ -36,23 +36,21 @@ func NewFromClients(cfg ClientsConfig) (*runtimeacp.RuntimeAgent, error) {
 		return nil, err
 	}
 	clients := cfg.Clients
-	systemSessionClient := cfg.AgentMessageSessionClient
+	systemSessionClient := cfg.SystemSessionClient
 	if systemSessionClient == nil {
 		systemSessionClient = clients.Sessions
 	}
 	return runtimeacp.NewGatewayAgent(runtimeacp.GatewayAgentConfig{
-		SessionClient:             clients.Sessions,
-		ConfigurationClient:       clients.Configuration,
-		AgentMessageSessionClient: systemSessionClient,
-		AgentMessageClient:        clients.AgentMessages,
-		PresentationClient:        clients.Presentation,
-		TerminalClient:            clients.Terminal,
-		AppName:                   firstNonEmpty(cfg.AppName, "caelis"),
-		UserID:                    firstNonEmpty(cfg.UserID, "local-user"),
-		WorkspaceKey:              strings.TrimSpace(cfg.WorkspaceKey),
-		WorkspaceCWD:              strings.TrimSpace(cfg.WorkspaceCWD),
-		TaskStreamClient:          clients.Tasks,
-		SlashResultFormatter:      promptview.FormatSlashResult,
+		SessionClient:        clients.Sessions,
+		ConfigurationClient:  clients.Configuration,
+		PresentationClient:   clients.Presentation,
+		TerminalClient:       clients.Terminal,
+		AppName:              firstNonEmpty(cfg.AppName, "caelis"),
+		UserID:               firstNonEmpty(cfg.UserID, "local-user"),
+		WorkspaceKey:         strings.TrimSpace(cfg.WorkspaceKey),
+		WorkspaceCWD:         strings.TrimSpace(cfg.WorkspaceCWD),
+		TaskStreamClient:     clients.Tasks,
+		SlashResultFormatter: promptview.FormatSlashResult,
 		PromptRouterFactory: func(ctx context.Context, activeSession session.Session) (controlprompt.Router, error) {
 			turnSessions := clients.Sessions
 			if sessionvisibility.IsSystemManagedSession(activeSession) {

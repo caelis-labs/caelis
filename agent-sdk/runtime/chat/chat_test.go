@@ -1022,90 +1022,6 @@ func TestChatAgentDrainsPendingUserSubmissionAfterToolResults(t *testing.T) {
 	}
 }
 
-func TestChatAgentDrainsAgentMessageAsContextNotUserEvent(t *testing.T) {
-	t.Parallel()
-
-	for _, persisted := range []bool{false, true} {
-		t.Run(fmt.Sprintf("persisted=%t", persisted), func(t *testing.T) {
-			scope := session.EventScope{TurnID: "turn-1", Source: "agent_message"}
-			ctx := agent.NewContext(agent.ContextSpec{
-				Context: context.Background(),
-				Session: session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}},
-				DrainSubmissions: func() []agent.Submission {
-					return []agent.Submission{{
-						Kind: agent.SubmissionKindAgentMessage, Text: "child update",
-						MessageID: "message-1", Persisted: persisted,
-						Actor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@orbit"},
-						Scope: &scope,
-					}}
-				},
-			})
-			var messages []model.Message
-			var events []*session.Event
-			accepted, err := (&Agent{}).drainPendingSubmissions(ctx, &messages, func(event *session.Event) bool {
-				events = append(events, event)
-				return true
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !accepted || len(messages) != 1 || messages[0].Role != model.RoleUser || messages[0].TextContent() != "Agent message from @orbit: child update" {
-				t.Fatalf("accepted/messages = %t / %#v", accepted, messages)
-			}
-			if persisted {
-				if len(events) != 0 {
-					t.Fatalf("persisted submission emitted duplicate events: %#v", events)
-				}
-				return
-			}
-			if len(events) != 1 || session.EventTypeOf(events[0]) != session.EventTypeContext {
-				t.Fatalf("events = %#v, want one Context", events)
-			}
-			if events[0].Actor.Kind != session.ActorKindParticipant || events[0].MessageID != "message-1" || events[0].Protocol != nil {
-				t.Fatalf("Agent Context = %#v", events[0])
-			}
-		})
-	}
-}
-
-func TestChatAgentRejectsMalformedAgentMessageSubmission(t *testing.T) {
-	t.Parallel()
-
-	ctx := agent.NewContext(agent.ContextSpec{
-		Context: context.Background(),
-		DrainSubmissions: func() []agent.Submission {
-			return []agent.Submission{{
-				Kind: agent.SubmissionKindAgentMessage, Text: "untrusted wakeup", MessageID: "message-1",
-				Actor: session.ActorRef{Kind: session.ActorKindUser, ID: "user-1", Name: "user"},
-			}}
-		},
-	})
-	var messages []model.Message
-	accepted, err := (&Agent{}).drainPendingSubmissions(ctx, &messages, func(*session.Event) bool { return true })
-	if err == nil || accepted || len(messages) != 0 {
-		t.Fatalf("malformed Agent message = accepted %t messages %#v error %v, want fail closed", accepted, messages, err)
-	}
-}
-
-func TestAgentContextHistoryProjectsTypedActorIntoProviderMessage(t *testing.T) {
-	t.Parallel()
-
-	message := model.NewTextMessage(model.RoleUser, "child update")
-	event := &session.Event{
-		Type: session.EventTypeContext, Visibility: session.VisibilityCanonical,
-		Actor:   session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@orbit"},
-		Message: &message, Text: "child update",
-		Scope: &session.EventScope{Source: "runtime_delivery"},
-		Meta:  map[string]any{"agent_message": true},
-	}
-	messages := messagesFromContext(agent.NewContext(agent.ContextSpec{
-		Context: context.Background(), Events: []*session.Event{event},
-	}))
-	if len(messages) != 1 || messages[0].Role != model.RoleUser || messages[0].TextContent() != "Agent message from @orbit: child update" {
-		t.Fatalf("Agent Context messages = %#v", messages)
-	}
-}
-
 func TestTypedActorContextWithoutAgentMessageMarkerKeepsOriginalProjection(t *testing.T) {
 	t.Parallel()
 
@@ -1288,7 +1204,7 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 	}
 
 	contextMessage := model.NewTextMessage(model.RoleUser, "[Plugin context: prompt-plugin]\nprefer concise answers")
-	agentMessage := model.NewTextMessage(model.RoleUser, "child status")
+	agentInput := model.NewTextMessage(model.RoleUser, "child status")
 	user := model.NewTextMessage(model.RoleUser, "inspect both values")
 	appendEvent := func(event *session.Event) {
 		t.Helper()
@@ -1307,11 +1223,9 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 		Meta:       map[string]any{"source": "plugin_hook"},
 	})
 	appendEvent(&session.Event{
-		Type: session.EventTypeContext, Visibility: session.VisibilityCanonical,
+		Type: session.EventTypeUser, Visibility: session.VisibilityCanonical,
 		Actor:   session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@orbit"},
-		Message: &agentMessage, Text: agentMessage.TextContent(),
-		Scope: &session.EventScope{Source: "subagent_message"},
-		Meta:  map[string]any{"agent_message": true, "display_from": "@guardian"},
+		Message: &agentInput, Text: agentInput.TextContent(),
 	})
 	appendEvent(&session.Event{Type: session.EventTypeUser, Message: &user})
 
@@ -1348,8 +1262,8 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 	if got := messages[0].TextContent(); !strings.Contains(got, "prefer concise answers") {
 		t.Fatalf("context text = %q, want durable plugin context", got)
 	}
-	if got := messages[1].TextContent(); got != "Agent message from @orbit: child status" {
-		t.Fatalf("Agent Context text = %q, want persisted trusted Actor and no forged display identity", got)
+	if got := messages[1].TextContent(); got != "child status" {
+		t.Fatalf("Agent input text = %q, want ordinary user-role content", got)
 	}
 	if got := messages[2].TextContent(); got != "inspect both values" {
 		t.Fatalf("user text = %q, want original text", got)

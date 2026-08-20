@@ -44,10 +44,6 @@ func (c *Client) ReleaseTerminal(ctx context.Context, req appserver.TerminalRequ
 	return err
 }
 
-func (c *Client) DeliverAgentMessage(ctx context.Context, req appserver.AgentMessageRequest) (appserver.AgentMessageResult, error) {
-	return doFocusedRequiredSessionJSON[appserver.AgentMessageResult](ctx, c, req.SessionID, "/agent-messages", req)
-}
-
 func (c *Client) Handles(ctx context.Context, sessionID string) ([]string, error) {
 	path, err := focusedSessionPath(sessionID, "/participants/handles")
 	if err != nil {
@@ -307,7 +303,6 @@ func doFocusedJSON[T any](ctx context.Context, client *Client, method, path stri
 }
 
 var _ appserver.ParticipantClient = (*Client)(nil)
-var _ appserver.AgentMessageClient = (*Client)(nil)
 var _ appserver.ConfigurationClient = (*Client)(nil)
 var _ appserver.AgentClient = (*Client)(nil)
 var _ appserver.CompletionClient = (*Client)(nil)

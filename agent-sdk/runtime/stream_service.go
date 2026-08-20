@@ -539,7 +539,7 @@ func (s *streamService) Subscribe(ctx context.Context, req stream.SubscribeReque
 			}
 			followEstablished = true
 			// A completed subagent may be removed from the live registry and later
-			// rehydrated for a message-authored turn. Wait by stable Task identity,
+			// rehydrated for another observed activity. Wait by stable Task identity,
 			// then re-resolve the concrete producer and continue from the same
 			// absolute cursor.
 			if err := activity.Await(ctx); err != nil {

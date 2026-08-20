@@ -18,39 +18,11 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
-// reconnectIdleChild recreates only the process-local transport for an
-// existing durable child whose prior Turn no longer has a usable transport. It
-// never creates a replacement ACP Session or Task.
-func (r *Runner) reconnectIdleChild(
-	ctx context.Context,
-	anchor delegation.Anchor,
-	recovery *tasksubagent.ReconnectRequest,
-) (*childRun, error) {
-	key, err := childRunKey(anchor)
-	if err != nil {
-		return nil, err
-	}
-	r.mu.Lock()
-	slot := r.slots[key]
-	if slot == nil {
-		slot = newChildSlot(childEndpointFromReconnect(anchor, recovery), nil)
-		if r.slots == nil {
-			r.slots = map[string]*childSlot{}
-		}
-		r.slots[key] = slot
-	}
-	r.mu.Unlock()
-	slot.opMu.Lock()
-	defer slot.opMu.Unlock()
-	return r.reconnectChildEndpointLocked(ctx, anchor, recovery, slot, true)
-}
-
 func (r *Runner) reconnectChildEndpointLocked(
 	ctx context.Context,
 	anchor delegation.Anchor,
 	recovery *tasksubagent.ReconnectRequest,
 	slot *childSlot,
-	requireMessages bool,
 ) (*childRun, error) {
 	if recovery == nil {
 		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child reconnect context is required")
@@ -116,9 +88,6 @@ func (r *Runner) reconnectChildEndpointLocked(
 		OnPermissionRequest: func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
 			return r.permissionCallback(spawn, cfg, anchor.AgentID)(ctx, req)
 		},
-		OnSessionMessage: func(ctx context.Context, req client.SessionMessageRequest) (client.SessionMessageResponse, error) {
-			return r.handleChildMessage(ctx, run, req)
-		},
 	})
 	if err != nil {
 		childCancel()
@@ -143,11 +112,6 @@ func (r *Runner) reconnectChildEndpointLocked(
 		childCancel()
 		_ = acpcleanup.CloseClient(ctx, acpClient)
 		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child Agent %q does not support session/resume", cfg.Name)
-	}
-	if requireMessages && !hasACPMessageCapability(initialize) {
-		childCancel()
-		_ = acpcleanup.CloseClient(ctx, acpClient)
-		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child session %q does not support %s", anchor.SessionID, client.MethodSessionMessage)
 	}
 	authenticationMethods := authentication.Methods(initialize)
 	recovered, err := authentication.ResumeSession(ctx, authentication.RecoveryConfig{
@@ -178,7 +142,6 @@ func (r *Runner) reconnectChildEndpointLocked(
 	}
 	run.mu.Lock()
 	run.authenticationMethods = controlagents.CloneAuthenticationMethods(authenticationMethods)
-	run.supportsMessages = hasACPMessageCapability(initialize)
 	run.supportsSteering = supportsSteering
 	run.promptCapabilities = initialize.AgentCapabilities.PromptCapabilities
 	run.mu.Unlock()

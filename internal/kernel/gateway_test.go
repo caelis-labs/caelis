@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
@@ -1124,203 +1122,6 @@ func TestBeginTurnRecoversLostLocalProducerBeforeAdmittingNextRequest(t *testing
 	}
 }
 
-func TestDeliverAgentMessagePersistsContextThenStartsIdleTurn(t *testing.T) {
-	t.Parallel()
-
-	activeSession := session.Session{SessionRef: session.SessionRef{
-		AppName: "caelis", UserID: "u", SessionID: "s-message", WorkspaceKey: "ws",
-	}}
-	svc := &recordingSessionService{sessionResult: activeSession}
-	runtime := &recordingRuntime{
-		result: agent.RunResult{Session: activeSession, Handle: &recordingRunner{}},
-		ran:    make(chan struct{}),
-	}
-	gw, err := New(Config{Sessions: svc, Runtime: runtime, Resolver: staticResolver{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	delivery, err := gw.DeliverAgentMessage(context.Background(), DeliverAgentMessageRequest{
-		SessionRef: activeSession.SessionRef,
-		Message: agentmessage.Request{
-			MessageID: "message-1", To: "orbit", Text: "please inspect",
-			From: session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@maya"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !delivery.Accepted || delivery.State != "running" || delivery.Turn == nil {
-		t.Fatalf("delivery = %#v, want accepted running Turn", delivery)
-	}
-	defer delivery.Turn.Close()
-	select {
-	case <-runtime.ran:
-	case <-time.After(time.Second):
-		t.Fatal("idle Agent message did not start target Turn")
-	}
-	if runtime.lastReq.Input != "" || runtime.lastReq.InputType != "" {
-		t.Fatalf("runtime request = %#v, want durable-history wakeup without duplicate input", runtime.lastReq)
-	}
-	if len(svc.appendReqs) != 1 {
-		t.Fatalf("append requests = %#v, want one durable Agent Context", svc.appendReqs)
-	}
-	appendReq := svc.appendReqs[0]
-	if appendReq.MutationGuard.Purpose != session.ControlMutationPurposeAgentMessage || appendReq.Event == nil ||
-		session.EventTypeOf(appendReq.Event) != session.EventTypeContext || appendReq.Event.Actor.ID != "child-1" {
-		t.Fatalf("Agent Context append = %#v", appendReq)
-	}
-}
-
-func TestDeliverAgentMessageReturnsAcceptedPendingWhenWakeupFails(t *testing.T) {
-	t.Parallel()
-
-	activeSession := session.Session{SessionRef: session.SessionRef{
-		AppName: "caelis", UserID: "u", SessionID: "s-message-pending", WorkspaceKey: "ws",
-	}}
-	svc := &recordingSessionService{sessionResult: activeSession}
-	gw, err := New(Config{
-		Sessions: svc,
-		Runtime:  &recordingRuntime{session: activeSession},
-		Resolver: staticResolver{err: errors.New("target assembly unavailable")},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	delivery, err := gw.DeliverAgentMessage(context.Background(), DeliverAgentMessageRequest{
-		SessionRef: activeSession.SessionRef,
-		Message: agentmessage.Request{
-			MessageID: "message-pending-1", To: "orbit", Text: "please inspect later",
-			From: session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@maya"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("DeliverAgentMessage() error = %v, want durable acceptance", err)
-	}
-	if !delivery.Accepted || delivery.State != "pending" || delivery.Turn != nil {
-		t.Fatalf("delivery = %#v, want accepted pending without Turn", delivery)
-	}
-	if len(svc.appendReqs) != 1 || svc.appendReqs[0].Event == nil || svc.appendReqs[0].Event.MessageID != "message-pending-1" {
-		t.Fatalf("durable Agent Context requests = %#v", svc.appendReqs)
-	}
-}
-
-func TestDeliverAgentMessageRetryDoesNotResubmitLiveContext(t *testing.T) {
-	t.Parallel()
-
-	activeSession := session.Session{SessionRef: session.SessionRef{
-		AppName: "caelis", UserID: "u", SessionID: "s-message-retry", WorkspaceKey: "ws",
-	}}
-	svc := &recordingSessionService{sessionResult: activeSession, appendOutcomes: []bool{true, false}}
-	runner := &submitRecordingBlockingRunner{release: make(chan struct{})}
-	runtime := &recordingRuntime{
-		result: agent.RunResult{Session: activeSession, Handle: runner},
-		ran:    make(chan struct{}),
-	}
-	gw, err := New(Config{Sessions: svc, Runtime: runtime, Resolver: staticResolver{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := agentmessage.Request{
-		MessageID: "message-retry-1", To: "orbit", Text: "please inspect",
-		From: session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@maya"},
-	}
-	first, err := gw.DeliverAgentMessage(context.Background(), DeliverAgentMessageRequest{SessionRef: activeSession.SessionRef, Message: req})
-	if err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-runtime.ran:
-	case <-time.After(time.Second):
-		t.Fatal("first message did not start a Turn")
-	}
-	second, err := gw.DeliverAgentMessage(context.Background(), DeliverAgentMessageRequest{SessionRef: activeSession.SessionRef, Message: req})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !first.Accepted || second.State != "pending" {
-		t.Fatalf("deliveries = %#v, %#v; want accepted then idempotent pending", first, second)
-	}
-	events := first.Turn.ACPEvents()
-	close(runner.release)
-	for range events {
-	}
-	if submissions := runner.snapshot(); len(submissions) != 0 {
-		t.Fatalf("retry submissions = %#v, want no duplicate live Agent message", submissions)
-	}
-	if len(svc.appendReqs) != 2 {
-		t.Fatalf("append attempts = %d, want two idempotent attempts", len(svc.appendReqs))
-	}
-}
-
-func TestDeliverAgentMessageConcurrentActivationStartsOneTurn(t *testing.T) {
-	t.Parallel()
-
-	store := inmemory.NewStore(inmemory.Config{})
-	activeSession, err := store.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "owner", PreferredSessionID: "s-message-concurrent",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner := &submitRecordingBlockingRunner{release: make(chan struct{})}
-	runtime := &concurrentAgentMessageRuntime{session: activeSession, runner: runner}
-	gw, err := New(Config{Sessions: store, Runtime: runtime, Resolver: staticResolver{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	requests := []agentmessage.Request{
-		{MessageID: "message-concurrent-1", To: "parent", Text: "first", From: session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1"}},
-		{MessageID: "message-concurrent-2", To: "parent", Text: "second", From: session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1"}},
-	}
-	type result struct {
-		delivery AgentMessageDelivery
-		err      error
-	}
-	results := make(chan result, len(requests))
-	var group sync.WaitGroup
-	for _, req := range requests {
-		req := req
-		group.Add(1)
-		go func() {
-			defer group.Done()
-			delivery, deliverErr := gw.DeliverAgentMessage(context.Background(), DeliverAgentMessageRequest{SessionRef: activeSession.SessionRef, Message: req})
-			results <- result{delivery: delivery, err: deliverErr}
-		}()
-	}
-	group.Wait()
-	close(results)
-
-	started := 0
-	var turn TurnHandle
-	for got := range results {
-		if got.err != nil {
-			t.Fatalf("DeliverAgentMessage() error = %v", got.err)
-		}
-		if !got.delivery.Accepted {
-			t.Fatalf("delivery = %#v, want durable acceptance", got.delivery)
-		}
-		if got.delivery.Turn != nil {
-			started++
-			turn = got.delivery.Turn
-		}
-	}
-	if started != 1 || runtime.calls.Load() != 1 {
-		t.Fatalf("concurrent activation = %d returned Turns, %d Runtime runs; want one", started, runtime.calls.Load())
-	}
-	waitForRunnerSubmissions(t, runner, 1)
-	if turn == nil {
-		t.Fatal("concurrent activation returned no observable Turn")
-	}
-	events := turn.ACPEvents()
-	close(runner.release)
-	for range events {
-	}
-	if err := turn.Close(); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestBeginTurnRuntimeContextOutlivesAdmissionContext(t *testing.T) {
 	t.Parallel()
 
@@ -2125,6 +1926,55 @@ func TestGatewaySubmitActiveTurnForwardsConversationToRunner(t *testing.T) {
 
 	close(runner.release)
 	collectHandleEvents(t, result.Handle)
+}
+
+func TestGatewaySubmitActiveTurnWaitsForRunnerAdmissionFailure(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "u", SessionID: "runner-admission-failure", WorkspaceKey: "ws",
+	}}
+	runtimeErr := errors.New("runtime admission failed")
+	runtime := &admissionBlockingRuntime{
+		started: make(chan struct{}), release: make(chan struct{}), err: runtimeErr,
+	}
+	gateway, err := New(Config{
+		Sessions: staticSessionService{session: activeSession},
+		Runtime:  runtime, Resolver: staticResolver{resolved: ResolvedTurn{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := gateway.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef, Input: "initial",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Handle.Close()
+	select {
+	case <-runtime.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Runtime.Run did not start")
+	}
+
+	submitted := make(chan error, 1)
+	go func() {
+		submitted <- gateway.SubmitActiveTurn(context.Background(), SubmitActiveTurnRequest{
+			SessionRef: activeSession.SessionRef, Kind: SubmissionKindConversation, Text: "must not be acknowledged",
+		})
+	}()
+	select {
+	case err := <-submitted:
+		t.Fatalf("SubmitActiveTurn() returned before runner admission: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(runtime.release)
+	err = <-submitted
+	var gatewayErr *Error
+	if !As(err, &gatewayErr) || gatewayErr.Code != CodeSubmissionUnsupported {
+		t.Fatalf("SubmitActiveTurn() error = %v, want admission failure without success acknowledgement", err)
+	}
 }
 
 func TestSubmitActiveTurnRejectsReplacedExactTarget(t *testing.T) {

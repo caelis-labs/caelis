@@ -144,35 +144,30 @@ the existing line-oriented default by appending a newline, while
 `append_newline=false` sends exact terminal bytes for escape sequences and
 control input. Spawn Tasks never advertise `supports_input`. Agents use the
 runtime-managed `SendMessage {to, message}` tool, where `to=parent` addresses
-the parent and a Session-scoped Spawn handle addresses a child or sibling.
-The target receives a canonical `Context` event with a typed source Actor, not
-a synthetic User event. Explicit `agent_message` metadata or a maintained Agent
-message source selects the provider projection, which includes that Actor as
-`Agent message from <actor>:`; Actor kind alone is not a routing signal. The
-runtime commits a local target Context before wakeup; an idle main Agent consumes
-it on its next Turn, while a spawned child whose previous Turn ended with any
-terminal outcome may begin a new message-authored Turn on the same stable child
-identity. A child-directed message is recorded in the parent Session only after the
-delivery runner accepts ownership and only as a mirror, so its body is not
-duplicated into main model context. This acknowledgement does not wait for
-target consumption. Once delivery ownership transfers, failure to refresh the
-sender's Task index returns accepted state `accepted_unpersisted`, not a
-retryable delivery error.
+the parent and a Session-scoped Spawn handle addresses a child or sibling. The
+tool dispatches ordinary user-role input with a trusted controller or
+participant Actor for provenance; it does not create a Context message type or
+a parent-side audit mirror. Running ACP targets use negotiated steering, while
+idle targets use an ordinary prompt on the same Session. Input has no delivery
+MessageID and does not mutate Task. Subsequent target output alone advances the
+Task activity view and retains its normal ACP output correlation IDs.
 
-Subagent Task output keeps one absolute cursor across message-authored Turns,
+Subagent Task output keeps one absolute cursor across observed activities,
 independent from `supports_input` and `Task write`. Product subscriptions cover
 one activity period by default. A consumer that needs the complete child
 workspace sets `follow`; Runtime then releases the completed activity's producer
 observation, waits on the stable Session/Task identity, and re-resolves it when
-a later message-authored activity begins. Absolute event/output frontiers are
+a later child activity begins. Absolute event/output frontiers are
 persisted with the Task so rehydration cannot reset cursor numbering. No Session-feed
 wakeup event or tool result controls this subscription. The `SendMessage` result
-is only a delivery acknowledgement, and `turn_id` only groups transcript events.
+is only an input-dispatch acknowledgement, and `turn_id` only groups transcript
+events.
 
 The TUI opens a following subscription when the child workspace overlay becomes
 visible, catches up from its last cursor, and renders all child events through
 the same transcript blocks used by the main workspace. Closing the overlay
-cancels only delivery and retains the Document and cursor; reopening resumes.
+cancels only that subscription and retains the Document and cursor; reopening
+resumes.
 When the host restarts, viewing a terminal child must not activate an execution
 Runtime merely to recover presentation history. Control Task-stream first tries
 the live Runtime; if that Session Runtime no longer exists, or its terminal
@@ -191,23 +186,25 @@ original mixed-event positions, Control exposes it as one current-state batch
 at the persisted absolute frontier and never renumbers assistant messages into
 apparently exact cursors. Reopening a terminal workspace uses its retained
 presentation cache. This projection changes neither Task lifecycle nor parent
-model context; the Task directory remains the current-state authority, and a
-later accepted `SendMessage` reopens live observation.
+model context; the Task directory remains the current-state authority, and
+later child output reopens live observation after an input.
 Terminal lifecycle frames finalize their transcript segment but do not close a
-visible following workspace, so a later child Turn appears in chronological
+visible following workspace, so a later child activity appears in chronological
 order without exposing Turn identifiers in the UX.
 
 The product ACP parent projection also follows each anchored subagent Task while
-that parent Prompt remains active, so a message-authored child Turn stays visible
+that parent Prompt remains active, so a later child activity stays visible
 without a second Spawn anchor. Sealing the parent Prompt stops discovery of new
 Tasks. An already-running child activity may deliver through its typed terminal;
 once the subscription is parked at an activity boundary it closes, so later
 activities cannot leak into the completed Prompt. RunCommand remains a
 single-activity terminal stream.
 
-Asynchronous child completion emits one compact Agent Context notice containing
-state and handle only. Final payloads remain owned by the Task observation path:
-`Task read` and `Task wait` return every unread retained Turn FinalResponse in
+Asynchronous child completion may submit one compact ordinary conversation hint
+containing state and handle only to the exact active parent Run. It is dropped
+when the parent is idle or the Run changes. Final payloads remain owned by the
+Task observation path: `Task read` and `Task wait` return every unread retained
+activity FinalResponse in
 chronological order and advance a single parent observation frontier, so a
 later observation does not repeat them. Notification never duplicates a child
 FinalResponse into the parent transcript. Waiting on multiple comma-separated handles is a

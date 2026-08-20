@@ -13,6 +13,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
+// ErrRunInputClosed reports that an exact live Run no longer accepts ordinary
+// conversation input. The input was not dispatched and callers may reselect a
+// newer active Run or start a new idle Turn.
+var ErrRunInputClosed = errorcode.New(errorcode.FailedPrecondition, "agent-sdk: run input is closed")
+
 // RunConflictError reports that Core detected another active run for the same
 // session. Control decides whether to queue, reject, or fork the new request.
 type RunConflictError struct {
@@ -81,11 +86,6 @@ type RunRequest struct {
 	// InputActor identifies who authored Input while preserving its user-role
 	// chatbot message shape. Empty retains the default real-user actor.
 	InputActor session.ActorRef `json:"-"`
-	// InputType defaults to EventTypeUser. Agent messages use EventTypeContext
-	// so durable history never impersonates a real user submission.
-	InputType      session.EventType   `json:"-"`
-	InputMessageID string              `json:"-"`
-	InputScope     *session.EventScope `json:"-"`
 	// InputCompaction preserves typed provenance if Runtime later summarizes the
 	// input. It does not alter the provider-visible message.
 	InputCompaction   *session.EventCompactionContext `json:"-"`

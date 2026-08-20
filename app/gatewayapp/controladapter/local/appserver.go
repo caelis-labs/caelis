@@ -24,7 +24,6 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	sessions := host.Sessions()
 	kernelReads := host.ControlKernelReads()
 	runtimes := host.ControlRuntimes()
-	agentMessageDelivery := host.AgentMessageDelivery()
 	workspaceReads := host.WorkspaceReads()
 	statusReads := host.ControlStatus()
 	agentReads := host.Agents()
@@ -58,10 +57,6 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	}
 	pluginDeps := controladapter.PluginAssemblyDeps{Plugin: pluginRuntimeDeps(pluginReads)}
 
-	agentMessages, err := newAgentMessageService(sessions, agentMessageDelivery.Deliver)
-	if err != nil {
-		return nil, err
-	}
 	status, err := newStatusService(statusServiceDeps{
 		hostDeps: &statusDeps, acquireRuntime: runtimes.Acquire, resolveWorkspace: workspaceReads.Resolve,
 		sandboxStatusForWorkspace: statusReads.SandboxForWorkspace, doctorForWorkspace: statusReads.DoctorForWorkspace,
@@ -116,7 +111,7 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	}
 	server := &AppServer{
 		Services: appserver.AppServerServices{
-			Sessions: control, Participants: participants, AgentMessages: agentMessages, Status: status,
+			Sessions: control, Participants: participants, Status: status,
 			Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
 			Presentation: presentation, Terminal: terminal, Tasks: tasks,
 		},

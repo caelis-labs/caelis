@@ -26,11 +26,11 @@ func newTestAgentFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, e
 		return nil, err
 	}
 	return surfaceacp.NewFromClients(surfaceacp.ClientsConfig{
-		Clients:                   clients,
-		AppName:                   stack.AppName(),
-		UserID:                    stack.UserID(),
-		WorkspaceKey:              strings.TrimSpace(stack.Workspace().Key),
-		WorkspaceCWD:              strings.TrimSpace(stack.Workspace().CWD),
-		AgentMessageSessionClient: systemSessionClient,
+		Clients:             clients,
+		AppName:             stack.AppName(),
+		UserID:              stack.UserID(),
+		WorkspaceKey:        strings.TrimSpace(stack.Workspace().Key),
+		WorkspaceCWD:        strings.TrimSpace(stack.Workspace().CWD),
+		SystemSessionClient: systemSessionClient,
 	})
 }

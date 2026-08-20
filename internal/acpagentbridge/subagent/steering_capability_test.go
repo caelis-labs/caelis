@@ -9,9 +9,6 @@ import (
 	"testing"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
@@ -28,7 +25,7 @@ func TestSpawnedChildRetainsNegotiatedSteeringCapability(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			runner := steeringChildTestRunner(t, fmt.Sprintf(`{"supported":%v}`, supported), false, "")
+			runner := steeringChildTestRunner(t, fmt.Sprintf(`{"supported":%v}`, supported), "")
 			completion := make(chan delegation.Result, 1)
 			anchor, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
 				TaskID: "task-new-" + fmt.Sprint(supported),
@@ -59,54 +56,13 @@ func TestSpawnedChildRetainsNegotiatedSteeringCapability(t *testing.T) {
 	}
 }
 
-func TestReconnectedChildUsesNewConnectionSteeringCapability(t *testing.T) {
-	t.Parallel()
-
-	for _, supported := range []bool{false, true} {
-		supported := supported
-		t.Run(fmt.Sprintf("supported=%v", supported), func(t *testing.T) {
-			t.Parallel()
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			runner := steeringChildTestRunner(t, fmt.Sprintf(`{"supported":%v}`, supported), true, "")
-			anchor := delegation.Anchor{TaskID: "task-reconnect", SessionID: "child-reconnect", AgentID: "agent-reconnect"}
-			run, err := runner.reconnectIdleChild(ctx, anchor, &tasksubagent.ReconnectRequest{
-				Spawn: tasksubagent.SpawnContext{
-					SessionRef: session.SessionRef{SessionID: "parent-session"},
-					TaskID:     anchor.TaskID,
-					CWD:        t.TempDir(),
-				},
-				Target: delegation.AgentTarget("helper"),
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if run.supportsSteering != supported {
-				t.Fatalf("reconnected child steering capability = %v, want %v", run.supportsSteering, supported)
-			}
-			if supported && !run.supportsMessages {
-				t.Fatal("steering negotiation changed independent private message capability")
-			}
-			response, err := runner.callSessionMessage(ctx, run, agentmessage.Request{
-				MessageID: "message-1", To: "child", Text: "continue",
-			})
-			if err != nil || !response.Accepted {
-				t.Fatalf("private message with steering=%v = %#v, %v", supported, response, err)
-			}
-			if err := runner.Quiesce(ctx); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
-
 func TestSpawnRejectsMalformedSteeringBeforeSessionOrRegistration(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	marker := filepath.Join(t.TempDir(), "session-called")
-	runner := steeringChildTestRunner(t, `{"supported":null}`, false, marker)
+	runner := steeringChildTestRunner(t, `{"supported":null}`, marker)
 	_, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
 		TaskID: "task-malformed", CWD: t.TempDir(),
 	}, delegation.Request{Agent: "helper", Prompt: "review"})
@@ -124,87 +80,7 @@ func TestSpawnRejectsMalformedSteeringBeforeSessionOrRegistration(t *testing.T) 
 	}
 }
 
-func TestSteeringSupportDoesNotSubstituteForPrivateMessageCapability(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	runner := steeringChildTestRunner(t, `{"supported":true}`, false, "")
-	completion := make(chan delegation.Result, 1)
-	anchor, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
-		TaskID: "task-steering-only", CWD: t.TempDir(),
-		Completion: completionSinkFunc(func(result delegation.Result) {
-			completion <- result
-		}),
-	}, delegation.Request{Agent: "helper", Prompt: "review"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-completion:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	if _, err := runner.Message(ctx, anchor, tasksubagent.MessageRequest{Request: agentmessage.Request{
-		MessageID: "message-unsupported", To: "child", Text: "continue",
-	}}); err == nil {
-		t.Fatal("steering-only child bypassed private message capability check")
-	}
-	if err := runner.Quiesce(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestLegacySpawnAndMessageUseActivityObserverAsSoleOutputOwner(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	runner := steeringChildTestRunner(t, `{"supported":true}`, true, "")
-	events := make(chan agent.ChildActivityEvent, 4)
-	legacyCompletions := make(chan delegation.Result, 2)
-	anchor, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
-		TaskID: "task-sole-output-owner", CWD: t.TempDir(),
-		ActivityObserver: childActivityObserverFunc(func(_ context.Context, event agent.ChildActivityEvent) error {
-			events <- agent.CloneChildActivityEvent(event)
-			return nil
-		}),
-		Completion: completionSinkFunc(func(result delegation.Result) {
-			legacyCompletions <- result
-		}),
-	}, delegation.Request{Agent: "helper", Prompt: "initial"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	initial := waitChildActivityTerminal(t, ctx, events)
-	if initial.Cursor != 1 {
-		t.Fatalf("initial terminal cursor = %d, want 1", initial.Cursor)
-	}
-
-	_, err = runner.Message(ctx, anchor, tasksubagent.MessageRequest{
-		Request: agentmessage.Request{MessageID: "legacy-message", To: "child", Text: "continue"},
-		Completion: completionSinkFunc(func(result delegation.Result) {
-			legacyCompletions <- result
-		}),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	continued := waitChildActivityTerminal(t, ctx, events)
-	if continued.Cursor != 2 || continued.ActivityID == initial.ActivityID {
-		t.Fatalf("continued terminal = %#v, want cursor 2 on a new activity", continued)
-	}
-	select {
-	case result := <-legacyCompletions:
-		t.Fatalf("legacy completion sink also received observer-owned result: %#v", result)
-	case <-time.After(50 * time.Millisecond):
-	}
-	if err := runner.Quiesce(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func steeringChildTestRunner(t *testing.T, meta string, messages bool, marker string) *Runner {
+func steeringChildTestRunner(t *testing.T, meta string, marker string) *Runner {
 	t.Helper()
 	registry, err := NewRegistry([]AgentConfig{{
 		Name:    "helper",
@@ -213,7 +89,6 @@ func steeringChildTestRunner(t *testing.T, meta string, messages bool, marker st
 		Env: map[string]string{
 			"CAELIS_ACP_STEERING_HELPER":       "1",
 			"CAELIS_ACP_STEERING_META":         meta,
-			"CAELIS_ACP_STEERING_MESSAGES":     fmt.Sprint(messages),
 			"CAELIS_ACP_SESSION_EFFECT_MARKER": marker,
 		},
 	}})
@@ -237,7 +112,6 @@ func TestRunnerSteeringCapabilityHelperProcess(t *testing.T) {
 			_ = os.WriteFile(marker, []byte("called"), 0o600)
 		}
 	}
-	messages := os.Getenv("CAELIS_ACP_STEERING_MESSAGES") == "true"
 	conn := jsonrpc.New(os.Stdin, os.Stdout)
 	err := conn.Serve(context.Background(), func(_ context.Context, message jsonrpc.Message) (any, *jsonrpc.RPCError) {
 		switch message.Method {
@@ -248,14 +122,6 @@ func TestRunnerSteeringCapabilityHelperProcess(t *testing.T) {
 					client.SessionSteeringMetaKey: json.RawMessage(os.Getenv("CAELIS_ACP_STEERING_META")),
 				},
 			}
-			if messages {
-				response.AgentCapabilities.Meta = map[string]json.RawMessage{
-					client.MethodSessionMessage: json.RawMessage(`{}`),
-				}
-				response.AgentCapabilities.SessionCapabilities = map[string]json.RawMessage{
-					"resume": json.RawMessage(`{}`),
-				}
-			}
 			return response, nil
 		case client.MethodSessionNew:
 			markSessionEffect()
@@ -265,14 +131,6 @@ func TestRunnerSteeringCapabilityHelperProcess(t *testing.T) {
 			return client.ResumeSessionResponse{}, nil
 		case client.MethodSessionPrompt:
 			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
-		case client.MethodSessionMessage:
-			var request client.SessionMessageRequest
-			if err := json.Unmarshal(message.Params, &request); err != nil {
-				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
-			}
-			return client.SessionMessageResponse{
-				MessageID: request.MessageID, Accepted: true, State: string(delegation.StateCompleted),
-			}, nil
 		default:
 			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 		}

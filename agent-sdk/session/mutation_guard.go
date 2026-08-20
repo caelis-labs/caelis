@@ -35,9 +35,6 @@ const (
 	// ControlMutationPurposeSubagentCompletion owns the asynchronous terminal
 	// Task and side-participant commit after the spawning Turn may have ended.
 	ControlMutationPurposeSubagentCompletion ControlMutationPurpose = "subagent_completion"
-	// ControlMutationPurposeAgentMessage accepts a durable Agent-authored
-	// Context event before waking an optional live Runtime turn.
-	ControlMutationPurposeAgentMessage ControlMutationPurpose = "agent_message"
 )
 
 // MutationGuard carries the authority and durable fence for one mutation.
@@ -193,7 +190,6 @@ func ControlMutationMayOverlapRuntimeLease(purpose ControlMutationPurpose) bool 
 		ControlMutationPurposeParticipant,
 		ControlMutationPurposeSystemCommit,
 		ControlMutationPurposeSubagentCompletion,
-		ControlMutationPurposeAgentMessage,
 		ControlMutationPurposeTest:
 		return true
 	default:
@@ -211,8 +207,7 @@ func knownControlMutationPurpose(purpose ControlMutationPurpose) bool {
 		ControlMutationPurposeConfiguration,
 		ControlMutationPurposeTest,
 		ControlMutationPurposeSystemCommit,
-		ControlMutationPurposeSubagentCompletion,
-		ControlMutationPurposeAgentMessage:
+		ControlMutationPurposeSubagentCompletion:
 		return true
 	default:
 		return false

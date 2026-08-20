@@ -291,11 +291,14 @@ func TestToolDisplayResultHeaderSkipsStandardDiffBody(t *testing.T) {
 	}
 }
 
-func TestToolDisplayPanelOutputHidesSendMessageDeliveryAck(t *testing.T) {
+func TestToolDisplayPanelOutputHidesSendMessageDispatchAck(t *testing.T) {
 	t.Parallel()
 
-	if got := toolDisplayPanelOutput("SendMessage", "Message delivered."); got != "" {
+	if got := toolDisplayPanelOutput("SendMessage", "Message sent."); got != "" {
 		t.Fatalf("toolDisplayPanelOutput(SendMessage ack) = %q, want empty compact result", got)
+	}
+	if got := toolDisplayPanelOutput("SendMessage", "Message delivered."); got != "" {
+		t.Fatalf("toolDisplayPanelOutput(legacy SendMessage ack) = %q, want replay-compatible compact result", got)
 	}
 	if got := toolDisplayPanelOutput("SendMessage", "Delivery outcome unknown; do not resend."); got != "Delivery outcome unknown; do not resend." {
 		t.Fatalf("toolDisplayPanelOutput(SendMessage unknown) = %q, want unknown-outcome guidance", got)

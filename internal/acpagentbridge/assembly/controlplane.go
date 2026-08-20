@@ -58,15 +58,6 @@ func NewControlPlane(cfg ControlPlaneConfig) (*ControlPlane, error) {
 	}, nil
 }
 
-// BindMessageHandler connects child-originated ACP requests to the owning
-// Runtime after product composition completes.
-func (c *ControlPlane) BindMessageHandler(handler acpsubagent.MessageHandler) {
-	if c == nil || c.runner == nil {
-		return
-	}
-	c.runner.BindMessageHandler(handler)
-}
-
 // Quiesce drains the Host-owned external child producer boundary.
 func (c *ControlPlane) Quiesce(ctx context.Context) error {
 	if c == nil || c.runner == nil {

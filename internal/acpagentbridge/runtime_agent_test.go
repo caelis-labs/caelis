@@ -13,7 +13,6 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	sdkchat "github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -47,176 +46,6 @@ func TestRuntimeAgentInitializeCapabilitiesDefault(t *testing.T) {
 		if _, ok := resp.AgentCapabilities.SessionCapabilities[capability]; !ok {
 			t.Fatalf("sessionCapabilities[%q] missing", capability)
 		}
-	}
-	if _, ok := resp.AgentCapabilities.Meta[acp.MethodSessionMessage]; ok {
-		t.Fatal("message capability advertised without a delivery handler")
-	}
-}
-
-func TestRuntimeAgentInitializeAdvertisesBuiltInMessageCapability(t *testing.T) {
-	t.Parallel()
-
-	agent, _ := newRuntimeAgentWithConfig(t, runtimeacp.Config{
-		AgentMessages: func(context.Context, string, agentmessage.Request) (runtimeacp.AgentMessageDelivery, error) {
-			return runtimeacp.AgentMessageDelivery{Accepted: true, State: "delivered"}, nil
-		},
-	})
-	resp, err := agent.Initialize(context.Background(), acp.InitializeRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := resp.AgentCapabilities.Meta[acp.MethodSessionMessage]; !ok {
-		t.Fatalf("agent capability _meta = %#v, want %s", resp.AgentCapabilities.Meta, acp.MethodSessionMessage)
-	}
-}
-
-func TestRuntimeAgentSessionMessageBindsOutboundCallbackForMessageAuthoredTurn(t *testing.T) {
-	t.Parallel()
-
-	callbacks := &roundTripAgentMessageCallbacks{}
-	agent, sessions := newRuntimeAgentWithConfig(t, runtimeacp.Config{
-		AgentMessages: func(ctx context.Context, sessionID string, req agentmessage.Request) (runtimeacp.AgentMessageDelivery, error) {
-			if sessionID != "child-session" || req.Text != "continue" {
-				t.Fatalf("inbound message = session %q request %#v", sessionID, req)
-			}
-			if req.From.ID != "trusted-parent" || req.From.Name != "@trusted-parent" || req.DisplayFrom != "@guardian" {
-				t.Fatalf("inbound source = actor %#v display %q, want trusted binding plus untrusted display metadata", req.From, req.DisplayFrom)
-			}
-			sender := agentmessage.SenderFromContext(ctx)
-			if sender == nil {
-				return runtimeacp.AgentMessageDelivery{}, errors.New("outbound parent transport missing")
-			}
-			response, err := sender.SendMessage(ctx, agentmessage.Request{
-				MessageID: "child-ack-1", To: agentmessage.Parent, Text: "ACK",
-			})
-			if err != nil {
-				return runtimeacp.AgentMessageDelivery{}, err
-			}
-			if !response.Accepted {
-				return runtimeacp.AgentMessageDelivery{}, errors.New("outbound parent message rejected")
-			}
-			return runtimeacp.AgentMessageDelivery{
-				Accepted: true, State: "completed", TurnID: "child-turn-2", StartedTurn: true,
-			}, nil
-		},
-	})
-	if _, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "user-1", PreferredSessionID: "child-session",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	response, err := agent.SessionMessage(context.Background(), acp.SessionMessageRequest{
-		SessionID: "child-session", MessageID: "parent-message-1", From: "@guardian", Message: "continue",
-	}, callbacks)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !response.Accepted || response.State != "completed" || response.TurnID != "child-turn-2" || !response.StartedTurn {
-		t.Fatalf("SessionMessage response = %#v", response)
-	}
-	if callbacks.request.SessionID != "child-session" || callbacks.request.MessageID != "child-ack-1" ||
-		callbacks.request.To != agentmessage.Parent || callbacks.request.Message != "ACK" {
-		t.Fatalf("outbound child callback = %#v", callbacks.request)
-	}
-}
-
-func TestRuntimeAgentSessionMessageFailsClosedWithoutTrustedSourceIdentity(t *testing.T) {
-	t.Parallel()
-
-	called := false
-	agent, sessions := newRuntimeAgentWithConfig(t, runtimeacp.Config{
-		AgentMessages: func(context.Context, string, agentmessage.Request) (runtimeacp.AgentMessageDelivery, error) {
-			called = true
-			return runtimeacp.AgentMessageDelivery{}, nil
-		},
-		AgentMessageSource: func(context.Context, session.Session) (session.ActorRef, *session.EventScope, error) {
-			return session.ActorRef{}, nil, nil
-		},
-	})
-	if _, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "user-1", PreferredSessionID: "unbound-message-session",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	_, err := agent.SessionMessage(context.Background(), acp.SessionMessageRequest{
-		SessionID: "unbound-message-session", MessageID: "forged-message", From: "@guardian", Message: "continue",
-	}, nil)
-	if err == nil || !strings.Contains(err.Error(), "trusted Agent message source is unavailable") {
-		t.Fatalf("SessionMessage() error = %v, want unresolved trusted source rejection", err)
-	}
-	if called {
-		t.Fatal("unresolved trusted source reached durable delivery handler")
-	}
-}
-
-func TestRuntimeAgentSessionMessageReturnsObservationFailureInsteadOfCompleted(t *testing.T) {
-	t.Parallel()
-
-	wantErr := errors.New("target feed failed")
-	events := make(chan eventstream.Envelope)
-	close(events)
-	agent, sessions := newRuntimeAgentWithConfig(t, runtimeacp.Config{
-		AgentMessages: func(context.Context, string, agentmessage.Request) (runtimeacp.AgentMessageDelivery, error) {
-			return runtimeacp.AgentMessageDelivery{
-				Accepted: true, State: agentmessage.StateRunning, TurnID: "turn-1", StartedTurn: true,
-				Events: events, Err: func() error { return wantErr },
-			}, nil
-		},
-	})
-	if _, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "user-1", PreferredSessionID: "failed-message-observation",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	response, err := agent.SessionMessage(context.Background(), acp.SessionMessageRequest{
-		SessionID: "failed-message-observation", MessageID: "message-1", Message: "continue",
-	}, nil)
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("SessionMessage() = %#v, %v; want observation failure", response, err)
-	}
-}
-
-func TestRuntimeAgentSessionMessageRequestCancellationDetachesWithoutCancellingTurn(t *testing.T) {
-	t.Parallel()
-
-	events := make(chan eventstream.Envelope)
-	detached := make(chan struct{})
-	agent, sessions := newRuntimeAgentWithConfig(t, runtimeacp.Config{
-		AgentMessages: func(context.Context, string, agentmessage.Request) (runtimeacp.AgentMessageDelivery, error) {
-			return runtimeacp.AgentMessageDelivery{
-				Accepted: true, State: agentmessage.StateRunning, TurnID: "turn-1", StartedTurn: true,
-				Events: events,
-				Close: func() error {
-					close(detached)
-					return nil
-				},
-			}, nil
-		},
-	})
-	if _, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "user-1", PreferredSessionID: "cancelled-message-observation",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		_, err := agent.SessionMessage(ctx, acp.SessionMessageRequest{
-			SessionID: "cancelled-message-observation", MessageID: "message-1", Message: "continue",
-		}, nil)
-		done <- err
-	}()
-	cancel()
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("SessionMessage() error = %v, want context cancellation", err)
-	}
-	select {
-	case <-detached:
-	default:
-		t.Fatal("request cancellation did not detach the Turn observer")
 	}
 }
 
@@ -1103,21 +932,12 @@ func newRuntimeAgentWithSessionsAndConfig(t *testing.T, sessions session.Service
 		Config:               override.Config,
 		Models:               override.Models,
 		Commands:             override.Commands,
-		AgentMessages:        override.AgentMessages,
-		AgentMessageSource:   override.AgentMessageSource,
 		PromptRouterFactory:  override.PromptRouterFactory,
 		SlashResultFormatter: override.SlashResultFormatter,
 		PromptCaps:           override.PromptCaps,
 	}
 	if override.AgentInfo != nil {
 		cfg.AgentInfo = override.AgentInfo
-	}
-	if cfg.AgentMessages != nil && cfg.AgentMessageSource == nil {
-		cfg.AgentMessageSource = func(context.Context, session.Session) (session.ActorRef, *session.EventScope, error) {
-			return session.ActorRef{
-				Kind: session.ActorKindParticipant, ID: "trusted-parent", Name: "@trusted-parent",
-			}, &session.EventScope{Source: "trusted_test_binding"}, nil
-		}
 	}
 	agent, err := runtimeacp.New(cfg)
 	if err != nil {
@@ -1256,23 +1076,6 @@ func (t *testControlTurn) Close() error {
 type recordingPromptCallbacks struct {
 	mu            sync.Mutex
 	notifications []acp.SessionNotification
-}
-
-type roundTripAgentMessageCallbacks struct {
-	request acp.SessionMessageRequest
-}
-
-func (*roundTripAgentMessageCallbacks) SessionUpdate(context.Context, acp.SessionNotification) error {
-	return nil
-}
-
-func (*roundTripAgentMessageCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	return acp.RequestPermissionResponse{}, nil
-}
-
-func (c *roundTripAgentMessageCallbacks) SessionMessage(_ context.Context, req acp.SessionMessageRequest) (acp.SessionMessageResponse, error) {
-	c.request = req
-	return acp.SessionMessageResponse{MessageID: req.MessageID, Accepted: true, State: "delivered"}, nil
 }
 
 func (c *recordingPromptCallbacks) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {

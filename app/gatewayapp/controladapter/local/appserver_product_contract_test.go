@@ -19,7 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
-	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
@@ -250,240 +249,6 @@ func TestAgentHandoffReplaysOnePrincipalBoundCommandReceipt(t *testing.T) {
 	}
 }
 
-func TestAgentMessageUsesManagedChildParentBindingAndRejectsForgedSource(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	workspace := filepath.Join(root, "workspace")
-	if err := os.MkdirAll(workspace, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	host, err := gatewayapp.NewLocalStack(gatewayapp.Config{
-		AppName: "caelis-test", UserID: "local-user", StoreDir: filepath.Join(root, "store"),
-		WorkspaceKey: "workspace", WorkspaceCWD: workspace,
-		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = host.Close() })
-	clients := bindAppServerTestClients(t, host)
-	parentID := createAppServerTestSession(t, clients, "create-message-parent", "message-parent", workspace)
-	parent, err := host.Sessions().Session(ctx, session.SessionRef{SessionID: parentID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	controller := session.ControllerBinding{
-		Kind: session.ControllerKindKernel, ControllerID: "parent-controller", AgentName: "main", EpochID: "parent-epoch",
-	}
-	parent, err = host.Sessions().BindController(ctx, session.BindControllerRequest{SessionRef: parent.SessionRef, Binding: controller})
-	if err != nil {
-		t.Fatal(err)
-	}
-	child, err := host.Sessions().StartSession(ctx, session.StartSessionRequest{
-		AppName: "caelis-test", UserID: "local-user", PreferredSessionID: "message-child",
-		Workspace: session.WorkspaceRef{Key: "workspace", CWD: workspace},
-		Metadata: map[string]any{
-			sessionvisibility.MetadataSystemManagedAgent:  sessionvisibility.SystemManagedAgentSubagent,
-			sessionvisibility.MetadataSystemManagedParent: parentID,
-			sessionvisibility.MetadataSystemManagedTask:   "task-1",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	parent, err = host.Sessions().PutParticipant(ctx, session.PutParticipantRequest{
-		SessionRef: parent.SessionRef,
-		Binding: session.ParticipantBinding{
-			ID: "child-agent", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated,
-			AgentName: "orbit", Label: "@orbit", SessionID: child.SessionID, DelegationID: "task-1",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	request := appserver.AgentMessageRequest{
-		SessionID: child.SessionID, MessageID: "managed-message-1", Text: "continue", DisplayFrom: "@forged",
-	}
-	first, err := clients.AgentMessages.DeliverAgentMessage(ctx, request)
-	if err != nil || !first.Accepted {
-		t.Fatalf("DeliverAgentMessage() = %#v, %v", first, err)
-	}
-	second, err := clients.AgentMessages.DeliverAgentMessage(ctx, request)
-	if err != nil || !second.Accepted {
-		t.Fatalf("duplicate DeliverAgentMessage() = %#v, %v", second, err)
-	}
-	loaded, err := host.Sessions().Events(ctx, session.EventsRequest{SessionRef: child.SessionRef, Limit: 100})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var messages []*session.Event
-	for _, event := range loaded {
-		if event != nil && event.MessageID == request.MessageID {
-			messages = append(messages, event)
-		}
-	}
-	if len(messages) != 1 {
-		t.Fatalf("durable Agent messages = %#v, want one idempotent event", messages)
-	}
-	if messages[0].Actor != session.ControllerExecutor(controller) || messages[0].Meta["display_from"] != "@forged" {
-		t.Fatalf("durable Agent message = actor %#v meta %#v, want parent controller and display-only wire source", messages[0].Actor, messages[0].Meta)
-	}
-
-	forgedChild, err := host.Sessions().StartSession(ctx, session.StartSessionRequest{
-		AppName: "caelis-test", UserID: "local-user", PreferredSessionID: "forged-message-child",
-		Workspace: session.WorkspaceRef{Key: "workspace", CWD: workspace},
-		Metadata: map[string]any{
-			sessionvisibility.MetadataSystemManagedAgent:  sessionvisibility.SystemManagedAgentSubagent,
-			sessionvisibility.MetadataSystemManagedParent: parentID,
-			sessionvisibility.MetadataSystemManagedTask:   "forged-task",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := clients.AgentMessages.DeliverAgentMessage(ctx, appserver.AgentMessageRequest{
-		SessionID: forgedChild.SessionID, MessageID: "forged-message", Text: "must not append", DisplayFrom: "@main",
-	}); err == nil {
-		t.Fatal("forged managed-child Task relation was accepted")
-	}
-	if _, err := clients.AgentMessages.DeliverAgentMessage(ctx, appserver.AgentMessageRequest{
-		SessionID: parentID, MessageID: "unbound-message", Text: "must not append", DisplayFrom: "@main",
-	}); err == nil {
-		t.Fatal("unbound ordinary Session source was accepted")
-	}
-}
-
-func TestAgentMessageExactBindingsAuthorizeEmbeddedAndHTTPClients(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	workspace := filepath.Join(root, "workspace")
-	if err := os.MkdirAll(workspace, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	host, err := gatewayapp.NewLocalStack(gatewayapp.Config{
-		AppName: "caelis-test", UserID: "owner", StoreDir: filepath.Join(root, "store"),
-		WorkspaceKey: "workspace", WorkspaceCWD: workspace,
-		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = host.Close() })
-	appServer, err := NewAppServer(host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	owner, err := appServer.Bind(appserver.Principal{ID: "owner"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sessionID := createAppServerTestSession(t, owner, "create-exact-binding", "exact-binding", workspace)
-	active, err := host.Sessions().Session(ctx, session.SessionRef{SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	active, err = host.Sessions().BindController(ctx, session.BindControllerRequest{
-		SessionRef: active.SessionRef,
-		Binding: session.ControllerBinding{
-			Kind: session.ControllerKindACP, ControllerID: "controller-1", AgentName: "main", EpochID: "epoch-1",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	active, err = host.Sessions().PutParticipant(ctx, session.PutParticipantRequest{
-		SessionRef: active.SessionRef,
-		Binding: session.ParticipantBinding{
-			ID: "participant-1", Kind: session.ParticipantKindACP,
-			Role: session.ParticipantRoleSidecar, AgentName: "reviewer", Label: "@reviewer",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	controllerClients, err := appServer.Bind(appserver.Principal{ID: "controller-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result, err := controllerClients.AgentMessages.DeliverAgentMessage(ctx, appserver.AgentMessageRequest{
-		SessionID: sessionID, MessageID: "controller-message", Text: "from controller",
-	}); err != nil || !result.Accepted {
-		t.Fatalf("embedded controller message = %#v, %v", result, err)
-	}
-	participantClients, err := appServer.Bind(appserver.Principal{ID: "participant-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result, err := participantClients.AgentMessages.DeliverAgentMessage(ctx, appserver.AgentMessageRequest{
-		SessionID: sessionID, MessageID: "participant-message", Text: "from participant",
-	}); err != nil || !result.Accepted {
-		t.Fatalf("embedded participant message = %#v, %v", result, err)
-	}
-
-	const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	authenticator, err := controlserver.BearerTokenAuthenticator(token, appserver.Principal{ID: "participant-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler, err := controlserver.Handler(controlserver.Dependencies{
-		Services: appServer.Services,
-	}, controlserver.Config{Authenticator: authenticator, AllowedHosts: []string{"127.0.0.1"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	remote, err := httpclient.New(httpclient.Config{
-		BaseURL: "http://127.0.0.1", BearerToken: token,
-		HTTPClient:    &http.Client{Transport: appServerHandlerRoundTripper{handler: handler}},
-		Compatibility: appserver.CurrentCompatibility(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result, err := remote.DeliverAgentMessage(ctx, appserver.AgentMessageRequest{
-		SessionID: sessionID, MessageID: "http-participant-message", Text: "from HTTP participant",
-	}); err != nil || !result.Accepted {
-		t.Fatalf("HTTP participant message = %#v, %v", result, err)
-	}
-
-	events, err := host.Sessions().Events(ctx, session.EventsRequest{SessionRef: active.SessionRef})
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantActors := map[string]string{
-		"controller-message":       "controller-1",
-		"participant-message":      "participant-1",
-		"http-participant-message": "participant-1",
-	}
-	for _, event := range events {
-		if event == nil {
-			continue
-		}
-		want, ok := wantActors[event.MessageID]
-		if !ok {
-			continue
-		}
-		if event.Actor.ID != want {
-			t.Fatalf("message %q Actor = %#v, want ID %q", event.MessageID, event.Actor, want)
-		}
-		delete(wantActors, event.MessageID)
-	}
-	if len(wantActors) != 0 {
-		t.Fatalf("missing exact-binding Agent messages: %#v", wantActors)
-	}
-}
-
-type appServerHandlerRoundTripper struct {
-	handler http.Handler
-}
-
-func (transport appServerHandlerRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
-	recorder := httptest.NewRecorder()
-	transport.handler.ServeHTTP(recorder, request)
-	return recorder.Result(), nil
-}
-
 func TestHostResumeCompletionUsesPrincipalVisibleSessions(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -569,15 +334,6 @@ func TestClosedSessionRejectsFocusedMutations(t *testing.T) {
 				_, err := clients.Configuration.ConfigureSessionPresentationMode(ctx, appserver.SessionPresentationModeRequest{
 					WriteBase: appserver.WriteBase{OperationID: "closed-presentation-mode", SessionID: sessionID, ExpectedRevision: &closedRevision},
 					Mode:      "manual",
-				})
-				return err
-			},
-		},
-		{
-			name: "Agent message",
-			run: func() error {
-				_, err := clients.AgentMessages.DeliverAgentMessage(ctx, appserver.AgentMessageRequest{
-					SessionID: sessionID, MessageID: "closed-message", Text: "must not append",
 				})
 				return err
 			},
@@ -1073,6 +829,16 @@ func bindAppServerHTTPTestClient(t *testing.T, appServer *AppServer, principalID
 		t.Fatal(err)
 	}
 	return client
+}
+
+type appServerHandlerRoundTripper struct {
+	handler http.Handler
+}
+
+func (transport appServerHandlerRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	recorder := httptest.NewRecorder()
+	transport.handler.ServeHTTP(recorder, request)
+	return recorder.Result(), nil
 }
 
 func resumeCandidatesContain(candidates []appserver.ResumeCandidate, sessionID string) bool {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -180,43 +179,6 @@ func (tm *taskRuntime) appendSideSubagentUserEvent(ctx context.Context, task *su
 		},
 	})
 	return err
-}
-
-// appendSubagentMessageMirror records accepted outbound delivery for parent
-// audit/replay without adding the child-directed body to main model context.
-// The target Agent owns the canonical Context in its own Session.
-func (tm *taskRuntime) appendSubagentMessageMirror(ctx context.Context, task *subagentTask, req agentmessage.Request) error {
-	if tm == nil || tm.runtime == nil || tm.runtime.sessions == nil || task == nil {
-		return nil
-	}
-	req = agentmessage.NormalizeRequest(req)
-	if req.MessageID == "" || req.Text == "" {
-		return fmt.Errorf("agent-sdk/runtime: Agent message id and text are required")
-	}
-	role := subagentParticipantRole(task)
-	message := model.NewTextMessage(model.RoleUser, req.Text)
-	return tm.appendSubagentSagaEvent(ctx, task.sessionRef, &session.Event{
-		IdempotencyKey: "agent-message-mirror:" + req.MessageID,
-		MessageID:      req.MessageID,
-		Type:           session.EventTypeContext, Visibility: session.VisibilityMirror,
-		Time: tm.runtime.now(), Actor: session.CloneActorRef(req.From),
-		Scope: &session.EventScope{
-			TurnID: subagentTurnID(task.ref.TaskID, task.turnSeq), Source: "agent_message_outbound",
-			Executor: session.ParticipantExecutor(session.ParticipantBinding{
-				ID: task.anchor.AgentID, Kind: session.ParticipantKindSubagent, Role: role,
-				AgentName: task.agent, Label: "@" + strings.TrimPrefix(strings.TrimSpace(task.handle), "@"),
-			}),
-			Participant: session.ParticipantRef{
-				ID: task.anchor.AgentID, Kind: session.ParticipantKindSubagent, Role: role,
-				DelegationID: task.ref.TaskID,
-			},
-		},
-		Message: &message, Text: req.Text,
-		Meta: map[string]any{
-			"agent_message": true, "delivery_state": "accepted", "to": strings.TrimSpace(task.handle),
-			"handle": strings.TrimSpace(task.handle), "agent": strings.TrimSpace(task.agent),
-		},
-	})
 }
 
 func (tm *taskRuntime) appendSideSubagentFinalEvent(ctx context.Context, task *subagentTask) error {

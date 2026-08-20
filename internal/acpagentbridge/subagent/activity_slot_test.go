@@ -10,12 +10,9 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 )
 
 func TestChildActivityObserverSwapReplaysUnacknowledgedJournalExactlyOnce(t *testing.T) {
@@ -231,21 +228,6 @@ func TestTerminalObserverCanBeReplacedWhileProducerWaitsForAcknowledgement(t *te
 	case <-oldObserverCalled:
 	case <-time.After(time.Second):
 		t.Fatal("old observer did not receive terminal event")
-	}
-	messageReturned := make(chan error, 1)
-	go func() {
-		_, err := runner.Message(context.Background(), run.anchor, tasksubagent.MessageRequest{Request: agentmessage.Request{
-			MessageID: "message-during-terminal-settlement", To: "child", Text: "continue",
-		}})
-		messageReturned <- err
-	}()
-	select {
-	case err := <-messageReturned:
-		if !errorcode.Is(err, errorcode.Conflict) {
-			t.Fatalf("Message() during terminal settlement error = %v, want conflict", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Message() waited behind terminal durable acknowledgement")
 	}
 	close(allowOldObserverReturn)
 

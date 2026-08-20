@@ -363,7 +363,6 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	bundle.Engine = rt
-	bindSubagentMessageRouter(acpControlPlane, rt)
 	leaseService, ok := s.sessions.(session.SessionLeaseService)
 	if !ok {
 		bundle.Close()

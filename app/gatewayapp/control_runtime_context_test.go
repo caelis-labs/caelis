@@ -4,44 +4,44 @@ import (
 	"context"
 	"testing"
 
-	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 )
 
-type controlRuntimeContextMessageSender struct{}
+type controlRuntimeContextInputSender struct{}
 
-func (controlRuntimeContextMessageSender) SendMessage(context.Context, agentmessage.Request) (agentmessage.Response, error) {
-	return agentmessage.Response{Accepted: true}, nil
+func (controlRuntimeContextInputSender) SendAgentInput(context.Context, agent.AgentInput) error {
+	return nil
 }
 
-func TestControlRuntimeContextPreservesOnlyAgentMessageTransport(t *testing.T) {
+func TestControlRuntimeContextPreservesOnlyAgentInputTransport(t *testing.T) {
 	t.Parallel()
 
 	type requestValueKey struct{}
-	sender := controlRuntimeContextMessageSender{}
+	sender := controlRuntimeContextInputSender{}
 	fallback := context.WithValue(context.Background(), requestValueKey{}, "request-only")
-	fallback = agentmessage.WithSender(fallback, sender)
+	fallback = agent.WithAgentInputSender(fallback, sender)
 	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{lifecycleCtx: context.Background()}}}
 
 	runtimeCtx := stack.composition.controlRuntimeContext(fallback, session.Session{})
-	if agentmessage.SenderFromContext(runtimeCtx) == nil {
-		t.Fatal("Control runtime context dropped negotiated Agent message transport")
+	if agent.AgentInputSenderFromContext(runtimeCtx) == nil {
+		t.Fatal("Control runtime context dropped Agent input transport")
 	}
 	if got := runtimeCtx.Value(requestValueKey{}); got != nil {
 		t.Fatalf("Control runtime context retained arbitrary request value %#v", got)
 	}
 }
 
-func TestControlRuntimeContextBindsMailboxForSpawnedChild(t *testing.T) {
+func TestControlRuntimeContextBindsInputSenderForSpawnedChild(t *testing.T) {
 	t.Parallel()
 
 	stack := &Stack{
 		composition: runtimeComposition{
 			authorities: runtimeHostAuthorities{
 				lifecycleCtx: context.Background(),
-				hostedChildMailbox: func(context.Context, session.SessionRef, agentmessage.Request) (agentmessage.Response, error) {
-					return agentmessage.Response{Accepted: true}, nil
+				hostedChildInput: func(context.Context, session.SessionRef, session.SessionRef, string, agent.AgentInput) error {
+					return nil
 				},
 			},
 		},
@@ -56,14 +56,14 @@ func TestControlRuntimeContextBindsMailboxForSpawnedChild(t *testing.T) {
 	}
 
 	runtimeCtx := stack.composition.controlRuntimeContext(context.Background(), child)
-	if agentmessage.SenderFromContext(runtimeCtx) == nil {
-		t.Fatal("spawned child runtime context has no parent/sibling mailbox")
+	if agent.AgentInputSenderFromContext(runtimeCtx) == nil {
+		t.Fatal("spawned child runtime context has no parent/sibling input route")
 	}
 
 	mainCtx := stack.composition.controlRuntimeContext(context.Background(), session.Session{
 		SessionRef: session.SessionRef{SessionID: "main-1"},
 	})
-	if agentmessage.SenderFromContext(mainCtx) != nil {
-		t.Fatal("main Agent runtime context gained a parent mailbox")
+	if agent.AgentInputSenderFromContext(mainCtx) != nil {
+		t.Fatal("main Agent runtime context gained a parent input route")
 	}
 }

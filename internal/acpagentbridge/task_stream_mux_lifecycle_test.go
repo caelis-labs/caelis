@@ -56,7 +56,7 @@ func TestACPTaskStreamMuxFollowsMessageAuthoredSubagentActivityUntilSeal(t *test
 
 	request := receiveACPTaskStreamRequest(t, service.requests)
 	if !request.Follow {
-		t.Fatalf("subagent Subscribe request = %#v, want Follow across message-authored Turns", request)
+		t.Fatalf("subagent Subscribe request = %#v, want Follow across observed activities", request)
 	}
 
 	subscription.events <- acpMuxSubagentLifecycleEnvelope("cursor-1", "child-turn-1", eventstream.LifecycleStateRunning)
@@ -84,7 +84,7 @@ func TestACPTaskStreamMuxFollowsMessageAuthoredSubagentActivityUntilSeal(t *test
 				t.Fatalf("second activity envelope = %#v", envelope)
 			}
 		case <-time.After(time.Second):
-			t.Fatalf("message-authored activity envelope %d was not forwarded", index+1)
+			t.Fatalf("later activity envelope %d was not forwarded", index+1)
 		}
 	}
 

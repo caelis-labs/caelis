@@ -33,8 +33,8 @@ type runtimeHostAuthorities struct {
 	providerUsage     *providerusage.Registry
 	sessionModelPins  *sessionModelPinRegistry
 	lifecycleCtx      context.Context
-	// hostedChildMailbox is the Host-owned parent/sibling route borrowed by
+	// hostedChildInput is the Host-owned parent/sibling route borrowed by
 	// spawned child Session Runtimes. The function carries routing capability,
 	// not Registry ownership.
-	hostedChildMailbox hostedChildMailboxFunc
+	hostedChildInput hostedChildInputFunc
 }

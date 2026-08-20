@@ -15,7 +15,6 @@ import (
 
 func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 	participants := &focusedParticipantService{}
-	agentMessages := &focusedAgentMessageService{}
 	configuration := &focusedConfigurationService{}
 	agents := &focusedAgentService{}
 	completion := &focusedCompletionService{}
@@ -24,7 +23,6 @@ func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 	terminals := &focusedTerminalService{}
 	services := testAppServerServices(&fakeService{}, staticStatusService{})
 	services.Participants = participants
-	services.AgentMessages = agentMessages
 	services.Configuration = configuration
 	services.Agents = agents
 	services.Completion = completion
@@ -47,12 +45,6 @@ func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	messageResult, err := client.DeliverAgentMessage(context.Background(), appserver.AgentMessageRequest{
-		SessionID: "session-1", MessageID: "message-1", To: "parent", Text: "status", DisplayFrom: "@guardian",
-	})
-	if err != nil || !messageResult.Accepted || messageResult.MessageID != "message-1" {
-		t.Fatalf("DeliverAgentMessage() = %#v, %v", messageResult, err)
-	}
 	handles, err := client.Handles(context.Background(), "session-1")
 	if err != nil || len(handles) != 1 || handles[0] != "review" {
 		t.Fatalf("Handles() = %#v, %v", handles, err)
@@ -182,8 +174,7 @@ func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 		t.Fatalf("TerminalOutput() = %#v, %v", terminal, err)
 	}
 	if participants.principal.ID != "trusted-owner" || participants.sessionID != "session-1" ||
-		agentMessages.principal.ID != "trusted-owner" || agentMessages.request.SessionID != "session-1" ||
-		agentMessages.request.DisplayFrom != "@guardian" || configuration.principal.ID != "trusted-owner" ||
+		configuration.principal.ID != "trusted-owner" ||
 		configuration.request.SessionID != "session-1" || configuration.model.Model != "mimo" ||
 		configuration.controllerMode.ExpectedControllerEpoch != "epoch-1" ||
 		configuration.presentationMode.Mode != "focus" || configuration.presentation.ConfigID != "tone" ||
@@ -338,17 +329,6 @@ func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 	if forgedBindingResponse.Code != http.StatusBadRequest || agents.bindingCalls != bindingCalls {
 		t.Fatalf("Host binding Session body status/calls = %d/%d, want 400/%d", forgedBindingResponse.Code, agents.bindingCalls, bindingCalls)
 	}
-}
-
-type focusedAgentMessageService struct {
-	appserver.AgentMessageService
-	principal appserver.Principal
-	request   appserver.AgentMessageRequest
-}
-
-func (s *focusedAgentMessageService) DeliverAgentMessage(_ context.Context, principal appserver.Principal, request appserver.AgentMessageRequest) (appserver.AgentMessageResult, error) {
-	s.principal, s.request = principal, request
-	return appserver.AgentMessageResult{MessageID: request.MessageID, Accepted: true, State: "pending"}, nil
 }
 
 type focusedParticipantService struct {
