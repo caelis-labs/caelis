@@ -156,15 +156,14 @@ func approvalActionLabel(req *approvalPayload) string {
 	if req == nil {
 		return ""
 	}
-	if info, ok := surfaceToolProfile(req.ToolName); ok {
-		switch info.Kind {
-		case surfaceToolKindEdit:
-			return "write"
-		case surfaceToolKindExecute:
-			return "execute"
-		case surfaceToolKindRead, surfaceToolKindSearch:
-			return "read"
-		}
+	switch req.ToolName {
+	case surfaceToolWrite, surfaceToolPatch:
+		return "write"
+	case surfaceToolRunCommand, surfaceToolSpawn, surfaceToolSendMessage:
+		return "execute"
+	case surfaceToolRead, surfaceToolViewImage, surfaceToolGlob, surfaceToolGrep,
+		surfaceToolSkill, surfaceToolWebSearch, surfaceToolWebFetch:
+		return "read"
 	}
 	tool := strings.TrimSpace(req.ToolName)
 	switch {

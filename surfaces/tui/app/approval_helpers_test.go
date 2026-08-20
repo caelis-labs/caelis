@@ -39,6 +39,14 @@ func TestApprovalToPromptRequestIncludesSandboxDetails(t *testing.T) {
 	}
 }
 
+func TestApprovalActionLabelDoesNotClassifyTaskAsExecute(t *testing.T) {
+	t.Parallel()
+
+	if got := approvalActionLabel(&approvalPayload{ToolName: surfaceToolTask}); got != surfaceToolTask {
+		t.Fatalf("approvalActionLabel(Task) = %q, want exact Task label", got)
+	}
+}
+
 func TestApprovalReviewPendingHintPrefersCommandOverUnknownTool(t *testing.T) {
 	t.Parallel()
 

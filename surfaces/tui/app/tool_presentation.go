@@ -3,9 +3,7 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
@@ -23,23 +21,11 @@ const (
 	surfaceToolGrep        = filesystem.SearchToolName
 	surfaceToolRunCommand  = shell.RunCommandToolName
 	surfaceToolTask        = tasktool.ToolName
-	surfaceToolPlan        = plan.ToolName
 	surfaceToolSkill       = skilltool.ToolName
 	surfaceToolWebSearch   = web.SearchToolName
 	surfaceToolWebFetch    = web.FetchToolName
 	surfaceToolSpawn       = spawn.ToolName
 	surfaceToolSendMessage = sendmessage.ToolName
-	surfaceToolToolSearch  = tool.ToolSearchToolName
-)
-
-type surfaceToolKind uint8
-
-const (
-	surfaceToolKindOther surfaceToolKind = iota
-	surfaceToolKindRead
-	surfaceToolKindEdit
-	surfaceToolKindSearch
-	surfaceToolKindExecute
 )
 
 type surfaceToolResultStyle uint8
@@ -54,44 +40,35 @@ const (
 	surfaceResultMutation
 )
 
-type surfaceToolProfileInfo struct {
-	Name            string
-	Kind            surfaceToolKind
+type surfaceToolDisplayProfile struct {
 	ResultStyle     surfaceToolResultStyle
 	ExplorationVerb string
 }
 
 // surfaceToolProfile is the TUI's private presentation table. Only exact
-// built-in Definition.Name values opt into built-in labels and panel routing.
-func surfaceToolProfile(name string) (info surfaceToolProfileInfo, ok bool) {
-	defer func() {
-		if ok {
-			info.Name = name
-		}
-	}()
+// built-in Definition.Name values opt into built-in labels and result layouts.
+// ACP ToolKind remains the sole coarse presentation category carried by an
+// event; this table must not derive another kind from the tool name.
+func surfaceToolProfile(name string) (surfaceToolDisplayProfile, bool) {
 	switch name {
 	case surfaceToolRead:
-		return surfaceToolProfileInfo{Kind: surfaceToolKindRead, ResultStyle: surfaceResultRead, ExplorationVerb: "Read"}, true
+		return surfaceToolDisplayProfile{ResultStyle: surfaceResultRead, ExplorationVerb: "Read"}, true
 	case surfaceToolViewImage:
-		return surfaceToolProfileInfo{Kind: surfaceToolKindRead, ResultStyle: surfaceResultRead, ExplorationVerb: "View"}, true
+		return surfaceToolDisplayProfile{ResultStyle: surfaceResultRead, ExplorationVerb: "View"}, true
 	case surfaceToolWrite, surfaceToolPatch:
-		return surfaceToolProfileInfo{Kind: surfaceToolKindEdit, ResultStyle: surfaceResultMutation}, true
+		return surfaceToolDisplayProfile{ResultStyle: surfaceResultMutation}, true
 	case surfaceToolGlob:
-		return surfaceToolProfileInfo{Kind: surfaceToolKindSearch, ResultStyle: surfaceResultGlob, ExplorationVerb: "Glob"}, true
+		return surfaceToolDisplayProfile{ResultStyle: surfaceResultGlob, ExplorationVerb: "Glob"}, true
 	case surfaceToolGrep:
-		return surfaceToolProfileInfo{Kind: surfaceToolKindSearch, ResultStyle: surfaceResultSearch, ExplorationVerb: "Search"}, true
-	case surfaceToolRunCommand, surfaceToolTask, surfaceToolSpawn, surfaceToolSendMessage:
-		return surfaceToolProfileInfo{Kind: surfaceToolKindExecute}, true
-	case surfaceToolPlan, surfaceToolToolSearch:
-		return surfaceToolProfileInfo{Kind: surfaceToolKindOther}, true
+		return surfaceToolDisplayProfile{ResultStyle: surfaceResultSearch, ExplorationVerb: "Search"}, true
 	case surfaceToolSkill:
-		return surfaceToolProfileInfo{Kind: surfaceToolKindRead, ExplorationVerb: "Skill"}, true
+		return surfaceToolDisplayProfile{ExplorationVerb: "Skill"}, true
 	case surfaceToolWebSearch:
-		return surfaceToolProfileInfo{Kind: surfaceToolKindSearch, ResultStyle: surfaceResultWebSearch, ExplorationVerb: "Search"}, true
+		return surfaceToolDisplayProfile{ResultStyle: surfaceResultWebSearch, ExplorationVerb: "Search"}, true
 	case surfaceToolWebFetch:
-		return surfaceToolProfileInfo{Kind: surfaceToolKindSearch, ResultStyle: surfaceResultWebFetch, ExplorationVerb: "Fetch"}, true
+		return surfaceToolDisplayProfile{ResultStyle: surfaceResultWebFetch, ExplorationVerb: "Fetch"}, true
 	default:
-		return surfaceToolProfileInfo{}, false
+		return surfaceToolDisplayProfile{}, false
 	}
 }
 

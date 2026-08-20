@@ -38,7 +38,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-wait-1",
-			Title: "Task wait command-48", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "Task wait command-48", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
 			RawInput: taskInput, Meta: acpToolNameMeta("Task"),
 		},
 	})
@@ -82,7 +82,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-cancel-1",
-			Title: "Task cancel command-48", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "Task cancel command-48", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
 			RawInput: cancelInput, Meta: acpToolNameMeta("Task"),
 		},
 	})
@@ -142,7 +142,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-cancel-failed",
-			Title: "Task cancel command-48", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "Task cancel command-48", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
 			RawInput: cancelInput, Meta: acpToolNameMeta("Task"),
 		},
 	})
@@ -222,7 +222,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "wait-1",
 			Title:         "Task wait orbit",
-			Kind:          schema.ToolKindExecute,
+			Kind:          schema.ToolKindOther,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      firstWaitInput,
 			Meta:          acpToolNameMeta("Task"),
@@ -262,7 +262,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "wait-2",
 			Title:         "Task wait orbit",
-			Kind:          schema.ToolKindExecute,
+			Kind:          schema.ToolKindOther,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      secondWaitInput,
 			Meta:          acpToolNameMeta("Task"),

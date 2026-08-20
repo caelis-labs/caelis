@@ -1042,11 +1042,7 @@ func toolSignalDisplayVerb(name string) string {
 	if verb := surfaceExplorationVerb(name); verb != "" {
 		return verb
 	}
-	info, ok := surfaceToolProfile(name)
-	if !ok {
-		return ""
-	}
-	switch info.Name {
+	switch name {
 	case surfaceToolWrite:
 		return "Write"
 	case surfaceToolPatch:

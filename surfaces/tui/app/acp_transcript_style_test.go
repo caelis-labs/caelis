@@ -296,7 +296,7 @@ func TestCommandTaskWriteKeepsInteractionHeaderWhenTerminalTagged(t *testing.T) 
 		Name:           "Task",
 		Args:           "Write command-82",
 		CallID:         "task-write-82",
-		ToolKind:       "execute",
+		ToolKind:       "other",
 		TaskAction:     "write",
 		TaskInput:      "你好，确认一下工作目录和模型，一句话回答",
 		TaskHandle:     "command-82",

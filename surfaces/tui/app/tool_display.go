@@ -428,7 +428,8 @@ func executeTitleDisplayArgs(title string) string {
 		return ""
 	}
 	if fields := strings.Fields(title); len(fields) > 1 {
-		if info, ok := surfaceToolProfile(fields[0]); ok && info.Kind == surfaceToolKindExecute {
+		switch fields[0] {
+		case surfaceToolRunCommand, surfaceToolSpawn, surfaceToolSendMessage:
 			return strings.TrimSpace(strings.TrimPrefix(title, fields[0]))
 		}
 	}
@@ -1002,7 +1003,7 @@ func toolDisplayResultHeader(name string, output string) string {
 			continue
 		}
 		if trimmed != "" {
-			return compactToolResultHeaderPath(info.Name, trimmed)
+			return compactToolResultHeaderPath(name, trimmed)
 		}
 	}
 	return ""

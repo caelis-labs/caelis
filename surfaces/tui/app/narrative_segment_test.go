@@ -1172,7 +1172,7 @@ func TestHiddenParticipantTaskReadRepairsCommandOwnerAcrossTurns(t *testing.T) {
 		{
 			Kind: TranscriptEventTool, Scope: base.Scope, ScopeID: "participant-turn-2", TurnID: "participant-turn-2",
 			ParticipantID: base.ParticipantID, Actor: base.Actor,
-			ToolCallID: "read-1", ToolName: "Task", ToolKind: "execute", ToolStatus: "completed", Final: true,
+			ToolCallID: "read-1", ToolName: "Task", ToolKind: "other", ToolStatus: "completed", Final: true,
 			ToolTaskAction: "read", ToolTaskHandle: "command-3", ToolTaskTargetKind: "command",
 			ToolOutput: second, ToolOutputTerminal: true,
 			ToolOutputStartCursor: int64(len([]byte(first))), ToolOutputStartCursorKnown: true,
@@ -1211,7 +1211,7 @@ func TestHiddenMainTaskReadUsesNormalizedOwnerIndex(t *testing.T) {
 		},
 		{
 			Kind: TranscriptEventTool, Scope: ACPProjectionMain, TurnID: "turn-2",
-			ToolCallID: "read-1", ToolName: "Task", ToolKind: "execute", ToolStatus: "completed", Final: true,
+			ToolCallID: "read-1", ToolName: "Task", ToolKind: "other", ToolStatus: "completed", Final: true,
 			ToolTaskAction: "read", ToolTaskHandle: "command-3", ToolTaskTargetKind: "command",
 			ToolOutput: second, ToolOutputTerminal: true,
 			ToolOutputStartCursor: int64(len([]byte(first))), ToolOutputStartCursorKnown: true,

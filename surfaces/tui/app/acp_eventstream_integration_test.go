@@ -179,7 +179,7 @@ func TestHandleACPEventEnvelopeRendersTaskWriteInteractionAndKeepsUTF8RunCommand
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-write-4",
-			Title: "Task write command-4", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "Task write command-4", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
 			RawInput: taskInput, Meta: taskMeta,
 		},
 	})
@@ -237,7 +237,7 @@ func TestHandleACPEventEnvelopeRendersTaskWriteFailureWithoutInternalHandle(t *t
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-write-10",
-			Title: "Task write command-10", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "Task write command-10", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
 			RawInput: taskInput, Meta: taskMeta,
 		},
 	})
@@ -294,7 +294,7 @@ func TestHandleACPEventEnvelopeRendersTerminalTaggedCommandTaskWriteAsShellInter
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-write-82",
-			Title: "Task write command-82", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "Task write command-82", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
 			RawInput: taskInput, Content: []schema.ToolCallContent{{Type: "terminal", TerminalID: "terminal-82"}},
 			Meta: taskMeta,
 		},
@@ -435,7 +435,7 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-wait-1",
-			Title: "Task wait task-1", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "Task wait task-1", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
 			RawInput: taskInput, Meta: taskMeta,
 		},
 	})
@@ -530,7 +530,7 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	})
 	apply(schema.ToolCall{
 		SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-read",
-		Title: "Task read command-3", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Title: "Task read command-3", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
 		RawInput: readInput, Meta: readMeta,
 	})
 	if model.runningActivity.Phase != runningPhaseToolWait || model.runningActivity.Target != runningTargetShell {
@@ -590,7 +590,7 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	})
 	apply(schema.ToolCall{
 		SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-read-terminal",
-		Title: "Task read command-3", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Title: "Task read command-3", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
 		RawInput: terminalReadInput, Meta: terminalReadMeta,
 	})
 	if model.runningActivity.Phase != runningPhaseToolWait {
@@ -1950,7 +1950,7 @@ func TestHandleACPEventEnvelopeKeepsTaskWriteCompactWhenChildIsAnchoredToIt(t *t
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "task-call-1",
 			Title:         "Task write akio",
-			Kind:          schema.ToolKindExecute,
+			Kind:          schema.ToolKindOther,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"action": "write", "task_id": "akio"},
 			Meta:          acpToolNameMeta("Task"),
@@ -3847,7 +3847,7 @@ func TestMainTimelineRoutesCrossTurnTaskObserverStreamToOriginalCommandPanel(t *
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-wait-1",
-			Title: "Task wait task-1", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Title: "Task wait task-1", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
 			RawInput: taskInput, Meta: taskMeta,
 		},
 	})

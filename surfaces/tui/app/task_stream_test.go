@@ -273,7 +273,7 @@ func TestTUITaskControlToolsDoNotAffectVisibleSubagentStream(t *testing.T) {
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 				Update: schema.ToolCall{
 					SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-control-" + action,
-					Title: "Task " + action, Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+					Title: "Task " + action, Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
 					RawInput: map[string]any{"action": action, "handle": "akio"}, Meta: acpToolNameMeta("Task"),
 				},
 			})
