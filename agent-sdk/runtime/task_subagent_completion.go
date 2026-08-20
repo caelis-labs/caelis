@@ -18,6 +18,9 @@ type subagentCompletion struct {
 	ctx     context.Context
 	result  delegation.Result
 	turnSeq int64
+	// observedTerminal forces the Task write that advances an activity cursor
+	// even when Spawn already returned the same terminal generation.
+	observedTerminal bool
 
 	task          *subagentTask
 	initialized   bool
@@ -40,10 +43,11 @@ func (completion *subagentCompletion) acknowledgeDurable() {
 // subagentCompletionSink binds producer authority to one Task turn. The
 // producer cannot redirect completion by changing Result.TaskID.
 type subagentCompletionSink struct {
-	runtime *taskRuntime
-	ctx     context.Context
-	taskID  string
-	turnSeq int64
+	runtime          *taskRuntime
+	ctx              context.Context
+	taskID           string
+	turnSeq          int64
+	observedTerminal bool
 }
 
 func newSubagentCompletionSink(ctx context.Context, runtime *taskRuntime, taskID string, turnSeq int64) subagentCompletionSink {
@@ -62,9 +66,22 @@ func newSubagentCompletionSink(ctx context.Context, runtime *taskRuntime, taskID
 	}
 }
 
+func newObservedSubagentCompletionSink(ctx context.Context, runtime *taskRuntime, taskID string, turnSeq int64) subagentCompletionSink {
+	sink := newSubagentCompletionSink(ctx, runtime, taskID, turnSeq)
+	sink.observedTerminal = true
+	return sink
+}
+
 func (sink subagentCompletionSink) PublishSubagentCompletion(result delegation.Result) {
+	done := sink.enqueue(result)
+	if done != nil {
+		<-done
+	}
+}
+
+func (sink subagentCompletionSink) enqueue(result delegation.Result) <-chan struct{} {
 	if sink.runtime == nil || sink.taskID == "" {
-		return
+		return nil
 	}
 	result = delegation.CloneResult(result)
 	result.TaskID = sink.taskID
@@ -77,17 +94,15 @@ func (sink subagentCompletionSink) PublishSubagentCompletion(result delegation.R
 		delegation.StateInterrupted,
 		delegation.StateUnknownOutcome:
 	default:
-		return
+		return nil
 	}
-	done := sink.runtime.enqueueSubagentCompletion(&subagentCompletion{
-		ctx:     sink.ctx,
-		result:  result,
-		turnSeq: sink.turnSeq,
-		done:    make(chan struct{}),
+	return sink.runtime.enqueueSubagentCompletion(&subagentCompletion{
+		ctx:              sink.ctx,
+		result:           result,
+		turnSeq:          sink.turnSeq,
+		observedTerminal: sink.observedTerminal,
+		done:             make(chan struct{}),
 	})
-	if done != nil {
-		<-done
-	}
 }
 
 func (tm *taskRuntime) enqueueSubagentCompletion(completion *subagentCompletion) <-chan struct{} {
@@ -164,27 +179,33 @@ func (tm *taskRuntime) kickSubagentCompletion(taskID string) {
 	}
 	taskID = strings.TrimSpace(taskID)
 	tm.mu.Lock()
+	completion, operationKey := tm.startSubagentCompletionLocked(taskID)
+	tm.mu.Unlock()
+	if completion != nil {
+		go tm.applySubagentCompletion(completion, operationKey)
+	}
+}
+
+// startSubagentCompletionLocked atomically transfers the Task operation slot
+// to an already-enqueued producer completion. Callers must hold tm.mu.
+func (tm *taskRuntime) startSubagentCompletionLocked(taskID string) (*subagentCompletion, string) {
 	completion := tm.completions[taskID]
 	if completion == nil {
-		tm.mu.Unlock()
-		return
+		return nil, ""
 	}
 	if live := tm.subagents[taskID]; live != nil {
 		completion.task = live
 	}
 	task := completion.task
 	if task == nil {
-		tm.mu.Unlock()
-		return
+		return nil, ""
 	}
 	if _, applying := tm.completionApplying[taskID]; applying {
-		tm.mu.Unlock()
-		return
+		return nil, ""
 	}
 	operationKey := taskOperationKey(task.sessionRef, taskID)
 	if _, active := tm.operations[operationKey]; active {
-		tm.mu.Unlock()
-		return
+		return nil, ""
 	}
 	task.mu.Lock()
 	ready := task.completionReady
@@ -192,19 +213,15 @@ func (tm *taskRuntime) kickSubagentCompletion(taskID string) {
 	task.mu.Unlock()
 	if turnSeq > completion.turnSeq {
 		delete(tm.completions, taskID)
-		tm.mu.Unlock()
 		completion.acknowledgeDurable()
-		return
+		return nil, ""
 	}
 	if !ready || turnSeq < completion.turnSeq {
-		tm.mu.Unlock()
-		return
+		return nil, ""
 	}
 	tm.operations[operationKey] = struct{}{}
 	tm.completionApplying[taskID] = struct{}{}
-	tm.mu.Unlock()
-
-	go tm.applySubagentCompletion(completion, operationKey)
+	return completion, operationKey
 }
 
 func (tm *taskRuntime) applySubagentCompletion(completion *subagentCompletion, operationKey string) {
@@ -218,29 +235,33 @@ func (tm *taskRuntime) applySubagentCompletion(completion *subagentCompletion, o
 
 	taskID := strings.TrimSpace(completion.result.TaskID)
 	tm.mu.Lock()
+	current := tm.completions[taskID]
+	if err != nil && current == completion {
+		// Retain the Task operation claim across persistence retries. Releasing
+		// it while the endpoint terminal waits for this acknowledgement would
+		// let a new Task control operation enter the runner and form a lock
+		// cycle with the pending completion.
+		tm.mu.Unlock()
+		time.AfterFunc(50*time.Millisecond, func() {
+			tm.applySubagentCompletion(completion, operationKey)
+		})
+		return
+	}
 	delete(tm.operations, operationKey)
 	delete(tm.completionApplying, taskID)
-	current := tm.completions[taskID]
 	if err == nil && current == completion {
 		delete(tm.completions, taskID)
 	}
-	pending := tm.completions[taskID]
+	next, nextOperationKey := tm.startSubagentCompletionLocked(taskID)
 	tm.mu.Unlock()
 
 	if err == nil {
 		completion.acknowledgeDurable()
 		tm.publishSubagentCompletionNoticeAsync(completion)
-		if pending != nil {
-			tm.kickSubagentCompletion(taskID)
-		}
-		return
 	}
-	if current != completion {
-		return
+	if next != nil {
+		go tm.applySubagentCompletion(next, nextOperationKey)
 	}
-	time.AfterFunc(50*time.Millisecond, func() {
-		tm.kickSubagentCompletion(taskID)
-	})
 }
 
 // persistSubagentCompletion owns the producer completion transaction. It keeps
@@ -261,11 +282,13 @@ func (tm *taskRuntime) persistSubagentCompletion(completion *subagentCompletion)
 		completion.initialized = true
 		// A terminal Task observed before this completion already crossed its
 		// durable mutation boundary under the serialized Task operation claim.
-		completion.taskPersisted = !task.running
+		completion.taskPersisted = !task.running && !completion.observedTerminal
 	}
 	if !completion.taskPersisted {
 		if task.running {
 			task.seedStreamFromResult(completion.result)
+			task.applyResult(completion.result)
+		} else if completion.observedTerminal {
 			task.applyResult(completion.result)
 		}
 		entry := task.entrySnapshot(tm.runtime.now())
@@ -375,14 +398,19 @@ func (tm *taskRuntime) refreshSubagentCompletionTask(completion *subagentComplet
 		return
 	}
 	if turnSeq < completion.turnSeq && completion.task != nil {
-		rebased := tm.rebaseAcceptedSubagentTask(completion.task, entry)
+		rebased := tm.rebaseObservedSubagentTask(completion.task, entry)
 		if rebased != nil {
+			completion.taskPersisted = false
+			tm.subagents[taskID] = completion.task
+		}
+	} else if turnSeq == completion.turnSeq && completion.observedTerminal && completion.task != nil {
+		if tm.rebaseObservedSubagentTask(completion.task, entry) != nil {
 			completion.taskPersisted = false
 			tm.subagents[taskID] = completion.task
 		}
 	} else if turnSeq == completion.turnSeq {
 		completion.task = durable
-		completion.taskPersisted = !running
+		completion.taskPersisted = !running && !completion.observedTerminal
 		tm.subagents[taskID] = durable
 	}
 	tm.mu.Unlock()

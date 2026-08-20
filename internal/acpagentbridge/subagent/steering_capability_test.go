@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -148,6 +149,55 @@ func TestSteeringSupportDoesNotSubstituteForPrivateMessageCapability(t *testing.
 		MessageID: "message-unsupported", To: "child", Text: "continue",
 	}}); err == nil {
 		t.Fatal("steering-only child bypassed private message capability check")
+	}
+	if err := runner.Quiesce(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLegacySpawnAndMessageUseActivityObserverAsSoleOutputOwner(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	runner := steeringChildTestRunner(t, `{"supported":true}`, true, "")
+	events := make(chan agent.ChildActivityEvent, 4)
+	legacyCompletions := make(chan delegation.Result, 2)
+	anchor, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
+		TaskID: "task-sole-output-owner", CWD: t.TempDir(),
+		ActivityObserver: childActivityObserverFunc(func(_ context.Context, event agent.ChildActivityEvent) error {
+			events <- agent.CloneChildActivityEvent(event)
+			return nil
+		}),
+		Completion: completionSinkFunc(func(result delegation.Result) {
+			legacyCompletions <- result
+		}),
+	}, delegation.Request{Agent: "helper", Prompt: "initial"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := waitChildActivityTerminal(t, ctx, events)
+	if initial.Cursor != 1 {
+		t.Fatalf("initial terminal cursor = %d, want 1", initial.Cursor)
+	}
+
+	_, err = runner.Message(ctx, anchor, tasksubagent.MessageRequest{
+		Request: agentmessage.Request{MessageID: "legacy-message", To: "child", Text: "continue"},
+		Completion: completionSinkFunc(func(result delegation.Result) {
+			legacyCompletions <- result
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	continued := waitChildActivityTerminal(t, ctx, events)
+	if continued.Cursor != 2 || continued.ActivityID == initial.ActivityID {
+		t.Fatalf("continued terminal = %#v, want cursor 2 on a new activity", continued)
+	}
+	select {
+	case result := <-legacyCompletions:
+		t.Fatalf("legacy completion sink also received observer-owned result: %#v", result)
+	case <-time.After(50 * time.Millisecond):
 	}
 	if err := runner.Quiesce(ctx); err != nil {
 		t.Fatal(err)

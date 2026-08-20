@@ -318,12 +318,7 @@ func (m *Manager) promptControllerRun(ctx context.Context, run *controllerRun, p
 }
 
 func contentPartsContainImage(parts []model.ContentPart) bool {
-	for _, part := range parts {
-		if part.Type == model.ContentPartImage {
-			return true
-		}
-	}
-	return false
+	return acputil.ContentPartsContainImage(parts)
 }
 
 func (r *controllerRun) supportsPromptImages() bool {

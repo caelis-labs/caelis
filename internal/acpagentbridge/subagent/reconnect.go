@@ -7,6 +7,8 @@ import (
 	"maps"
 	"strings"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -23,6 +25,32 @@ func (r *Runner) reconnectIdleChild(
 	ctx context.Context,
 	anchor delegation.Anchor,
 	recovery *tasksubagent.ReconnectRequest,
+) (*childRun, error) {
+	key, err := childRunKey(anchor)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	slot := r.slots[key]
+	if slot == nil {
+		slot = newChildSlot(childEndpointFromReconnect(anchor, recovery), nil)
+		if r.slots == nil {
+			r.slots = map[string]*childSlot{}
+		}
+		r.slots[key] = slot
+	}
+	r.mu.Unlock()
+	slot.opMu.Lock()
+	defer slot.opMu.Unlock()
+	return r.reconnectChildEndpointLocked(ctx, anchor, recovery, slot, true)
+}
+
+func (r *Runner) reconnectChildEndpointLocked(
+	ctx context.Context,
+	anchor delegation.Anchor,
+	recovery *tasksubagent.ReconnectRequest,
+	slot *childSlot,
+	requireMessages bool,
 ) (*childRun, error) {
 	if recovery == nil {
 		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child reconnect context is required")
@@ -59,6 +87,19 @@ func (r *Runner) reconnectIdleChild(
 	childCtx, childCancel := context.WithCancel(detachedCtx)
 	run.ctx = childCtx
 	run.cancel = childCancel
+	if slot == nil {
+		slot = newChildSlot(childEndpointFromReconnect(anchor, recovery), nil)
+	}
+	activityCheckpoint := slot.activityCheckpoint()
+	previousRun := slot.currentRun()
+	setupCommitted := false
+	run.installChildSlot(slot)
+	slot.beginSetup(run)
+	defer func() {
+		if !setupCommitted {
+			slot.restoreActivity(activityCheckpoint, previousRun)
+		}
+	}()
 
 	launchEnv := maps.Clone(cfg.Env)
 	if strings.EqualFold(strings.TrimSpace(cfg.Name), "self") {
@@ -83,6 +124,9 @@ func (r *Runner) reconnectIdleChild(
 		childCancel()
 		return nil, err
 	}
+	run.mu.Lock()
+	run.client = acpClient
+	run.mu.Unlock()
 	initialize, err := acpClient.Initialize(ctx)
 	if err != nil {
 		childCancel()
@@ -100,7 +144,7 @@ func (r *Runner) reconnectIdleChild(
 		_ = acpcleanup.CloseClient(ctx, acpClient)
 		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child Agent %q does not support session/resume", cfg.Name)
 	}
-	if !hasACPMessageCapability(initialize) {
+	if requireMessages && !hasACPMessageCapability(initialize) {
 		childCancel()
 		_ = acpcleanup.CloseClient(ctx, acpClient)
 		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child session %q does not support %s", anchor.SessionID, client.MethodSessionMessage)
@@ -132,10 +176,12 @@ func (r *Runner) reconnectIdleChild(
 		_ = acpcleanup.CloseClient(ctx, acpClient)
 		return nil, err
 	}
-	run.client = acpClient
+	run.mu.Lock()
 	run.authenticationMethods = controlagents.CloneAuthenticationMethods(authenticationMethods)
-	run.supportsMessages = true
+	run.supportsMessages = hasACPMessageCapability(initialize)
 	run.supportsSteering = supportsSteering
+	run.promptCapabilities = initialize.AgentCapabilities.PromptCapabilities
+	run.mu.Unlock()
 
 	runKey, err := childRunKey(anchor)
 	if err != nil {
@@ -143,17 +189,45 @@ func (r *Runner) reconnectIdleChild(
 		_ = acpcleanup.CloseClient(ctx, acpClient)
 		return nil, err
 	}
-	r.mu.Lock()
-	if existing := r.runs[runKey]; existing != nil {
-		r.mu.Unlock()
+	if err := slot.finalizeTarget(childEndpointFromReconnect(anchor, recovery)); err != nil {
 		childCancel()
-		_ = acpcleanup.CloseClient(context.WithoutCancel(ctx), acpClient)
-		if strings.TrimSpace(existing.anchor.SessionID) != strings.TrimSpace(anchor.SessionID) {
-			return nil, fmt.Errorf("internal/acpagentbridge/subagent: child run %q session mismatch", runKey)
-		}
-		return existing, nil
+		_ = acpcleanup.CloseClient(ctx, acpClient)
+		return nil, err
+	}
+	slot.mu.Lock()
+	hasObserver := slot.observer != nil
+	slot.mu.Unlock()
+	if !hasObserver && recovery.Spawn.ActivityObserver != nil {
+		slot.bindObserver(recovery.Spawn.ActivityAfterCursor, recovery.Spawn.ActivityObserver)
+	} else if !hasObserver {
+		slot.bindObserver(0, compatibilityActivityObserver{run: run})
+	}
+	r.mu.Lock()
+	if r.runs == nil {
+		r.runs = map[string]*childRun{}
+	}
+	if r.slots == nil {
+		r.slots = map[string]*childSlot{}
 	}
 	r.runs[runKey] = run
+	r.slots[runKey] = slot
 	r.mu.Unlock()
+	setupCommitted = true
 	return run, nil
+}
+
+func childEndpointFromReconnect(anchor delegation.Anchor, recovery *tasksubagent.ReconnectRequest) agent.ChildEndpointRef {
+	target := agent.ChildEndpointRef{
+		ParticipantID: strings.TrimSpace(anchor.AgentID),
+		SessionID:     strings.TrimSpace(anchor.SessionID),
+		EndpointKey:   strings.TrimSpace(anchor.TaskID),
+	}
+	if recovery != nil {
+		target.Role = recovery.Spawn.Role
+		if target.Role == "" {
+			target.Role = session.ParticipantRoleDelegated
+		}
+		target.Placement = recovery.Target.Placement
+	}
+	return agent.NormalizeChildEndpointRef(target)
 }

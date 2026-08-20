@@ -233,10 +233,14 @@ type subagentTask struct {
 	// Response has already been exposed by Spawn or an explicit Task read/wait.
 	// It is an observation frontier, not a second output store; exact text stays
 	// owned by latestFinalText and semanticRetention.
-	finalResponseCursor  int64
-	streamTerminalFramed bool
-	streamChanged        chan struct{}
-	completionReady      bool
+	finalResponseCursor   int64
+	streamTerminalFramed  bool
+	streamChanged         chan struct{}
+	completionReady       bool
+	activityID            string
+	activityGeneration    int64
+	activityCursor        uint64
+	activityDurableCursor uint64
 }
 
 type subagentMessageTurnCheckpoint struct {
@@ -249,6 +253,8 @@ type subagentMessageTurnCheckpoint struct {
 	running        bool
 	metadata       map[string]any
 	terminalFramed bool
+	activityID     string
+	activityGen    int64
 }
 
 // beginMessageTurn snapshots current-turn result state, advances turnSeq, and
@@ -262,6 +268,7 @@ func (task *subagentTask) beginMessageTurn() subagentMessageTurnCheckpoint {
 		stdoutCursor: task.stdoutCursor, stderrCursor: task.stderrCursor,
 		turnSeq: task.turnSeq, state: task.state, running: task.running,
 		metadata: session.CloneState(task.metadata), terminalFramed: task.streamTerminalFramed,
+		activityID: task.activityID, activityGen: task.activityGeneration,
 	}
 	task.turnSeq++
 	if task.turnSeq <= 0 {
@@ -274,9 +281,16 @@ func (task *subagentTask) beginMessageTurn() subagentMessageTurnCheckpoint {
 	task.state = taskapi.StateRunning
 	task.running = true
 	task.streamTerminalFramed = false
+	// The compatibility Message caller pre-opens this generation. Clearing only
+	// the activity mapping lets its first output bind to the already-incremented
+	// turn without confusing it with a stale running activity after rehydrate.
+	task.activityID = ""
+	task.activityGeneration = 0
 	if task.metadata != nil {
 		task.metadata["state"] = string(taskapi.StateRunning)
 		delete(task.metadata, "final_event_persisted")
+		delete(task.metadata, subagentActivityIDMeta)
+		delete(task.metadata, subagentActivityGenerationMeta)
 	}
 	task.notifyStreamChangeLocked()
 	return checkpoint
@@ -299,6 +313,8 @@ func (task *subagentTask) restoreMessageTurn(checkpoint subagentMessageTurnCheck
 	task.running = checkpoint.running
 	task.metadata = session.CloneState(checkpoint.metadata)
 	task.streamTerminalFramed = checkpoint.terminalFramed
+	task.activityID = checkpoint.activityID
+	task.activityGeneration = checkpoint.activityGen
 	task.notifyStreamChangeLocked()
 }
 
@@ -346,10 +362,10 @@ func (tm *taskRuntime) tryClaimSubagentOperation(ref session.SessionRef, taskID 
 	return func() {
 		tm.mu.Lock()
 		delete(tm.operations, operationKey)
-		_, hasCompletion := tm.completions[strings.TrimSpace(taskID)]
+		completion, completionOperationKey := tm.startSubagentCompletionLocked(strings.TrimSpace(taskID))
 		tm.mu.Unlock()
-		if hasCompletion {
-			tm.kickSubagentCompletion(strings.TrimSpace(taskID))
+		if completion != nil {
+			go tm.applySubagentCompletion(completion, completionOperationKey)
 		}
 	}, true
 }

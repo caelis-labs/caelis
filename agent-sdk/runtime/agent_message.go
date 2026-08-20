@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -152,6 +151,8 @@ func (tm *taskRuntime) sendSubagentMessage(ctx context.Context, ref session.Sess
 			Handle: strings.TrimSpace(task.handle), Role: subagentParticipantRole(task),
 			ParentCallID: taskStringValue(task.metadata["parent_call"]), Mode: strings.TrimSpace(task.mode),
 			ApprovalMode: strings.TrimSpace(task.approvalMode), Streams: tm,
+			ActivityObserver:    newSubagentActivityObserver(tm, task.ref.TaskID),
+			ActivityAfterCursor: task.activityDurableCursor,
 		},
 		Target: delegation.CloneTargetRequest(delegation.TargetRequest{Target: task.target}).Target,
 	}
@@ -181,7 +182,7 @@ func (tm *taskRuntime) sendSubagentMessage(ctx context.Context, ref session.Sess
 	task.seedStreamFromResult(result)
 	entry := task.entrySnapshot(tm.runtime.now())
 	task.mu.Unlock()
-	if err := tm.persistAcceptedSubagentTurn(ctx, task, entry); err != nil {
+	if err := tm.persistObservedSubagentTurn(ctx, task, entry); err != nil {
 		// The runner already owns delivery. Local Task persistence is observation
 		// state and must not turn the queued effect into a retryable delivery
 		// failure; expose the degraded state to the caller instead.
@@ -193,94 +194,4 @@ func (tm *taskRuntime) sendSubagentMessage(ctx context.Context, ref session.Sess
 	return agentmessage.Response{
 		MessageID: req.MessageID, Accepted: true, State: string(result.State), TurnID: turnID, StartedTurn: true,
 	}, nil
-}
-
-const acceptedSubagentTurnPersistAttempts = 4
-
-// persistAcceptedSubagentTurn converges sender-side Task observation after the
-// target has accepted a message. A CAS conflict may rebase this local record,
-// but it must never invalidate the live Turn or repeat runner.Message.
-func (tm *taskRuntime) persistAcceptedSubagentTurn(ctx context.Context, task *subagentTask, entry *taskapi.Entry) error {
-	if tm == nil || task == nil || entry == nil {
-		return nil
-	}
-	var lastErr error
-	for range acceptedSubagentTurnPersistAttempts {
-		lastErr = tm.persistTaskEntryWithConflictInvalidation(ctx, entry, false)
-		if lastErr == nil {
-			return nil
-		}
-		var conflict *taskapi.RevisionConflictError
-		if !errors.As(lastErr, &conflict) || tm.store == nil {
-			return lastErr
-		}
-		current, loadErr := tm.store.Get(context.WithoutCancel(ctx), entry.TaskID)
-		if loadErr != nil || current == nil {
-			return errors.Join(lastErr, loadErr)
-		}
-		desiredTurn := taskTurnSeqFromSpec(entry.Spec)
-		currentTurn := taskTurnSeqFromSpec(current.Spec)
-		if currentTurn > desiredTurn {
-			return lastErr
-		}
-		rebased := tm.rebaseAcceptedSubagentTask(task, current)
-		if rebased == nil {
-			return lastErr
-		}
-		*entry = *rebased
-	}
-	return lastErr
-}
-
-// rebaseAcceptedSubagentTask preserves fields committed by concurrent Task
-// observers while keeping the accepted message Turn's lifecycle and result.
-// The target-owned canonical message is already durable; this is observation
-// convergence only.
-func (tm *taskRuntime) rebaseAcceptedSubagentTask(task *subagentTask, current *taskapi.Entry) *taskapi.Entry {
-	if tm == nil || task == nil || current == nil {
-		return nil
-	}
-	task.mu.Lock()
-	liveMetadata := session.CloneState(task.metadata)
-	mergedMetadata := session.CloneState(current.Metadata)
-	if mergedMetadata == nil {
-		mergedMetadata = map[string]any{}
-	}
-	for key, value := range liveMetadata {
-		mergedMetadata[key] = value
-	}
-	for _, key := range []string{
-		"final_event_persisted", "continue_phase", "continue_prompt", "continue_context", "continue_digest", "continue_turn_seq", "continue_reason",
-	} {
-		if _, kept := liveMetadata[key]; !kept {
-			delete(mergedMetadata, key)
-		}
-	}
-	task.metadata = mergedMetadata
-	task.revision = current.Revision
-	task.lease = taskapi.CloneLease(current.Lease)
-	if cursor, ok := taskInt64Value(current.Metadata[subagentStreamEventCursorMeta]); ok {
-		liveCursor := task.streamEventBase + int64(len(task.streamFrames))
-		if cursor > liveCursor {
-			task.streamEventBase += cursor - liveCursor
-		}
-	}
-	if cursor, ok := taskInt64Value(current.Metadata[subagentStreamOutputCursorMeta]); ok {
-		task.streamOutputCursor = max(task.streamOutputCursor, cursor)
-	}
-	rebased := task.entrySnapshot(tm.runtime.now())
-	task.mu.Unlock()
-
-	mergedSpec := session.CloneState(current.Spec)
-	if mergedSpec == nil {
-		mergedSpec = map[string]any{}
-	}
-	for key, value := range rebased.Spec {
-		mergedSpec[key] = value
-	}
-	for _, key := range []string{"continue_phase", "continue_digest", "continue_turn_seq"} {
-		delete(mergedSpec, key)
-	}
-	rebased.Spec = mergedSpec
-	return rebased
 }

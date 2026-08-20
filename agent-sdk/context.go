@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
@@ -136,6 +137,88 @@ type SubagentRunner interface {
 	Cancel(context.Context, delegation.Anchor) error
 }
 
+// ChildEndpointRef is the provider-neutral address of one exact delegated
+// child endpoint. EndpointKey is an opaque runner-local identity copied from
+// the durable participant binding; callers must not interpret it as Task
+// lifecycle state.
+type ChildEndpointRef struct {
+	ParticipantID string                  `json:"participant_id,omitempty"`
+	SessionID     string                  `json:"session_id,omitempty"`
+	EndpointKey   string                  `json:"endpoint_key,omitempty"`
+	Role          session.ParticipantRole `json:"role,omitempty"`
+	Placement     placement.Placement     `json:"placement"`
+}
+
+// ChildInputRequest submits ordinary conversation input to one exact child.
+// Source is assigned by the trusted Runtime topology boundary, never by a
+// model-facing tool or external wire label.
+type ChildInputRequest struct {
+	Target       ChildEndpointRef    `json:"target"`
+	Source       session.ActorRef    `json:"source"`
+	Input        string              `json:"input,omitempty"`
+	DisplayInput string              `json:"display_input,omitempty"`
+	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
+}
+
+// ChildInputCommand addresses one child inside a parent Session topology.
+// Runtime resolves Target to an exact ChildEndpointRef before crossing the
+// runner boundary.
+type ChildInputCommand struct {
+	Target       string              `json:"target"`
+	Source       session.ActorRef    `json:"source"`
+	Input        string              `json:"input,omitempty"`
+	DisplayInput string              `json:"display_input,omitempty"`
+	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
+}
+
+// ChildInputResult reports only local producer ownership. StartedActivity is
+// true when idle input started an ordinary prompt activity; active steering
+// remains part of the already running activity.
+type ChildInputResult struct {
+	ActivityID      string `json:"activity_id,omitempty"`
+	StartedActivity bool   `json:"started_activity,omitempty"`
+}
+
+// ChildInputRunner is the optional provider-neutral input capability for an
+// exact delegated child endpoint.
+type ChildInputRunner interface {
+	SubmitChildInput(context.Context, ChildInputRequest) (ChildInputResult, error)
+}
+
+// ChildActivityEvent is one ordered output or terminal observation from a
+// delegated child activity. Cursor is monotonic for the endpoint slot.
+type ChildActivityEvent struct {
+	Target     ChildEndpointRef `json:"target"`
+	ActivityID string           `json:"activity_id"`
+	Cursor     uint64           `json:"cursor"`
+	// Initial identifies the activity created by the endpoint's Spawn prompt.
+	// It is activity-owned so journal replay keeps generation semantics across
+	// observer replacement.
+	Initial bool               `json:"initial,omitempty"`
+	Frame   *stream.Frame      `json:"frame,omitempty"`
+	Result  *delegation.Result `json:"result,omitempty"`
+	Gap     bool               `json:"gap,omitempty"`
+}
+
+// ChildActivityObserver consumes target-owned output independently from input
+// admission. Returning nil acknowledges the event cursor to the endpoint slot.
+type ChildActivityObserver interface {
+	ObserveChildActivity(context.Context, ChildActivityEvent) error
+}
+
+// ChildActivityObserverBinder atomically installs or replaces the sole output
+// observer for one endpoint and replays events after afterCursor.
+type ChildActivityObserverBinder interface {
+	BindChildActivityObserver(context.Context, ChildEndpointRef, uint64, ChildActivityObserver) error
+}
+
+// ChildEndpointBinder rehydrates process-local endpoint ownership from one
+// Runtime-validated durable binding. It performs no remote operation; a later
+// ChildInputRunner call may resume the exact remote Session.
+type ChildEndpointBinder interface {
+	BindChildEndpoint(context.Context, ChildEndpointRef, SubagentSpawnContext) error
+}
+
 // EndpointApprovalToolCall is one external endpoint tool call asking for
 // approval. Controller and subagent bridges share this value contract.
 type EndpointApprovalToolCall struct {
@@ -186,6 +269,11 @@ type SubagentSpawnContext struct {
 	ApprovalMode      string                    `json:"approval_mode,omitempty"`
 	ApprovalRequester SubagentApprovalRequester `json:"-"`
 	Streams           stream.Sink               `json:"-"`
+	// ActivityObserver is the single output owner used by runners that support
+	// provider-neutral child input. Legacy runners may continue to publish via
+	// Streams and Completion.
+	ActivityObserver    ChildActivityObserver `json:"-"`
+	ActivityAfterCursor uint64                `json:"-"`
 	// Completion is the Runtime-owned terminal lifecycle path for this child
 	// turn. Stream consumers and Task control calls remain observers.
 	Completion delegation.CompletionSink `json:"-"`

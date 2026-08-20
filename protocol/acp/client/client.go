@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -207,13 +208,91 @@ func (c *Client) Prompt(ctx context.Context, sessionID string, text string, meta
 }
 
 func (c *Client) PromptParts(ctx context.Context, sessionID string, prompt []json.RawMessage, meta map[string]any) (PromptResponse, error) {
-	var resp PromptResponse
-	err := c.conn.Call(ctx, MethodSessionPrompt, PromptRequest{
+	call, err := c.PreparePromptParts(sessionID, prompt, meta)
+	if err != nil {
+		return PromptResponse{}, err
+	}
+	if err := call.Dispatch(ctx); err != nil {
+		return PromptResponse{}, err
+	}
+	return call.Wait(ctx)
+}
+
+// PromptCall separates writing one standard session/prompt request from
+// waiting for its Turn-terminal response. It lets a target runner transfer the
+// pending response to its own lifecycle after the complete request was written.
+type PromptCall struct {
+	inner *jsonrpc.PreparedCall
+}
+
+// PreparePromptParts encodes and registers a standard session/prompt request
+// without touching the transport. Meta is retained for API symmetry; ACP prompt
+// metadata is not currently part of the interoperable request shape.
+func (c *Client) PreparePromptParts(sessionID string, prompt []json.RawMessage, meta map[string]any) (*PromptCall, error) {
+	if c == nil || c.conn == nil {
+		return nil, errors.New("acp client is unavailable")
+	}
+	_ = meta
+	call, err := c.conn.PrepareCall(MethodSessionPrompt, PromptRequest{
 		SessionID: sessionID,
 		Prompt:    append([]json.RawMessage(nil), prompt...),
-	}, &resp)
-	_ = meta
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &PromptCall{inner: call}, nil
+}
+
+// Dispatch writes the complete prompt request under caller-owned admission.
+func (c *PromptCall) Dispatch(ctx context.Context) error {
+	if c == nil || c.inner == nil {
+		return errors.New("acp prompt call is unavailable")
+	}
+	return c.inner.Dispatch(ctx)
+}
+
+// DispatchWithAbort writes the prompt and revokes the exact transport when
+// caller cancellation wins after writing starts. It is used by stable endpoint
+// owners that can close and quarantine that transport.
+func (c *PromptCall) DispatchWithAbort(ctx context.Context, abort func()) error {
+	if c == nil || c.inner == nil {
+		return errors.New("acp prompt call is unavailable")
+	}
+	return c.inner.DispatchWithAbort(ctx, abort)
+}
+
+// ObserveAuthRequired installs a short callback that runs before an
+// auth-required prompt response becomes visible to Wait. The callback belongs
+// to the client adapter boundary so bridge/runtime code need not inspect raw
+// JSON-RPC messages or error payloads.
+func (c *PromptCall) ObserveAuthRequired(observer func() error) error {
+	if c == nil || c.inner == nil {
+		return errors.New("acp prompt call is unavailable")
+	}
+	return c.inner.ObserveResponse(func(message jsonrpc.Message) error {
+		if message.Error == nil || message.Error.Code != ErrorCodeAuthRequired || observer == nil {
+			return nil
+		}
+		return observer()
+	})
+}
+
+// Wait waits for the prompt response under the target producer's context.
+func (c *PromptCall) Wait(ctx context.Context) (PromptResponse, error) {
+	if c == nil || c.inner == nil {
+		return PromptResponse{}, errors.New("acp prompt call is unavailable")
+	}
+	var resp PromptResponse
+	err := c.inner.Wait(ctx, &resp)
 	return resp, err
+}
+
+// Abandon releases pending state after a proven pre-write failure or transport
+// isolation.
+func (c *PromptCall) Abandon() {
+	if c != nil && c.inner != nil {
+		c.inner.Abandon()
+	}
 }
 
 // Steer sends one text content block through the interoperable ACP steering
@@ -227,12 +306,40 @@ func (c *Client) Steer(ctx context.Context, sessionID string, text string, meta 
 // SteerParts sends ACP content blocks without assigning a session/prompt
 // lifecycle to this client call.
 func (c *Client) SteerParts(ctx context.Context, sessionID string, prompt []json.RawMessage, meta map[string]json.RawMessage) (SessionSteeringResponse, error) {
+	return c.steerParts(ctx, sessionID, prompt, meta, nil)
+}
+
+// SteerPartsWithAbort gives an endpoint owner a way to revoke the exact
+// transport when cancellation races a started steering write.
+func (c *Client) SteerPartsWithAbort(
+	ctx context.Context,
+	sessionID string,
+	prompt []json.RawMessage,
+	meta map[string]json.RawMessage,
+	abort func(),
+) (SessionSteeringResponse, error) {
+	return c.steerParts(ctx, sessionID, prompt, meta, abort)
+}
+
+func (c *Client) steerParts(
+	ctx context.Context,
+	sessionID string,
+	prompt []json.RawMessage,
+	meta map[string]json.RawMessage,
+	abort func(),
+) (SessionSteeringResponse, error) {
 	var resp SessionSteeringResponse
-	err := c.conn.Call(ctx, MethodSessionSteering, SessionSteeringRequest{
+	request := SessionSteeringRequest{
 		SessionID: sessionID,
 		Prompt:    append([]json.RawMessage(nil), prompt...),
 		Meta:      cloneRawMessages(meta),
-	}, &resp)
+	}
+	var err error
+	if abort == nil {
+		err = c.conn.Call(ctx, MethodSessionSteering, request, &resp)
+	} else {
+		err = c.conn.CallWithAbort(ctx, MethodSessionSteering, request, &resp, abort)
+	}
 	return resp, err
 }
 
@@ -254,7 +361,7 @@ func (c *Client) SessionMessage(ctx context.Context, req SessionMessageRequest) 
 }
 
 func (c *Client) Cancel(ctx context.Context, sessionID string) error {
-	return c.conn.Notify(MethodSessionCancel, CancelRequest{SessionID: sessionID})
+	return c.conn.NotifyContext(ctx, MethodSessionCancel, CancelRequest{SessionID: sessionID})
 }
 
 func (c *Client) TerminalOutput(ctx context.Context, sessionID, terminalID string) (TerminalOutputResponse, error) {

@@ -61,13 +61,19 @@ type Conn struct {
 	reader io.Reader
 	writer io.Writer
 
-	writeMu sync.Mutex
-	pending sync.Map
-	nextID  atomic.Int64
+	writes      *writerArbiter
+	pending     sync.Map
+	nextID      atomic.Int64
+	lifecycleMu sync.RWMutex
+	lifecycle   context.Context
 }
 
 type pendingCall struct {
 	ch chan pendingCallResult
+
+	mu               sync.Mutex
+	resolved         bool
+	responseObserver func(Message) error
 }
 
 type pendingCallResult struct {
@@ -81,13 +87,16 @@ type PostWriteResult struct {
 }
 
 func New(reader io.Reader, writer io.Writer) *Conn {
-	return &Conn{reader: reader, writer: writer}
+	return &Conn{reader: reader, writer: writer, writes: newWriterArbiter()}
 }
 
 func (c *Conn) Serve(ctx context.Context, onRequest RequestHandler, onNotification NotificationHandler) error {
 	if c == nil {
 		return fmt.Errorf("acp/jsonrpc: conn is nil")
 	}
+	c.lifecycleMu.Lock()
+	c.lifecycle = ctx
+	c.lifecycleMu.Unlock()
 	var serveErr error
 	defer func() {
 		c.failPending(serveErr)
@@ -129,7 +138,7 @@ func (c *Conn) Serve(ctx context.Context, onRequest RequestHandler, onNotificati
 		}
 		var msg Message
 		if err := json.Unmarshal(line, &msg); err != nil {
-			_ = c.writeMessage(Message{
+			_ = c.writeMessageContext(ctx, Message{
 				JSONRPC: JSONRPCVersion,
 				Error:   &RPCError{Code: -32700, Message: "parse error"},
 			})
@@ -152,7 +161,7 @@ func (c *Conn) Serve(ctx context.Context, onRequest RequestHandler, onNotificati
 		}
 		go func(req Message) {
 			if onRequest == nil {
-				_ = c.writeMessage(Message{
+				_ = c.writeMessageContext(ctx, Message{
 					JSONRPC: JSONRPCVersion,
 					ID:      req.ID,
 					Error:   &RPCError{Code: -32601, Message: "method not found"},
@@ -180,7 +189,7 @@ func (c *Conn) Serve(ctx context.Context, onRequest RequestHandler, onNotificati
 			default:
 				resp.Result = result
 			}
-			if err := c.writeMessage(resp); err != nil {
+			if err := c.writeMessageContext(ctx, resp); err != nil {
 				return
 			}
 			if afterWrite != nil {
@@ -191,49 +200,63 @@ func (c *Conn) Serve(ctx context.Context, onRequest RequestHandler, onNotificati
 }
 
 func (c *Conn) Notify(method string, params any) error {
-	return c.writeMessage(Message{
+	return c.NotifyContext(c.lifecycleContext(), method, params)
+}
+
+// NotifyContext writes one notification through the same cancellable FIFO
+// writer admission used by calls and request responses.
+func (c *Conn) NotifyContext(ctx context.Context, method string, params any) error {
+	return c.writeMessageContext(ctx, Message{
 		JSONRPC: JSONRPCVersion,
 		Method:  method,
 		Params:  MustMarshalRaw(params),
 	})
 }
 
-func (c *Conn) Call(ctx context.Context, method string, params any, out any) error {
+func (c *Conn) lifecycleContext() context.Context {
 	if c == nil {
-		return fmt.Errorf("acp/jsonrpc: conn is nil")
+		return context.Background()
 	}
-	id := c.nextID.Add(1)
-	pending := pendingCall{ch: make(chan pendingCallResult, 1)}
-	c.pending.Store(id, pending)
-	defer c.pending.Delete(id)
-	if err := c.writeMessage(Message{
-		JSONRPC: JSONRPCVersion,
-		ID:      id,
-		Method:  method,
-		Params:  MustMarshalRaw(params),
-	}); err != nil {
+	c.lifecycleMu.RLock()
+	ctx := c.lifecycle
+	c.lifecycleMu.RUnlock()
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+func (c *Conn) Call(ctx context.Context, method string, params any, out any) error {
+	return c.call(ctx, method, params, out, nil)
+}
+
+// CallWithAbort performs one call and invokes abort only when cancellation
+// races a transport write that has already started. The transport owner must
+// revoke that exact writer so the call can return with an ambiguous outcome.
+func (c *Conn) CallWithAbort(ctx context.Context, method string, params any, out any, abort func()) error {
+	return c.call(ctx, method, params, out, abort)
+}
+
+func (c *Conn) call(ctx context.Context, method string, params any, out any, abort func()) error {
+	call, err := c.PrepareCall(method, params)
+	if err != nil {
 		return err
 	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case completed := <-pending.ch:
-		if completed.err != nil {
-			return completed.err
-		}
-		resp := completed.message
-		if resp.Error != nil {
-			return FormatRPCError(resp.Error)
-		}
-		if out == nil {
-			return nil
-		}
-		raw, err := json.Marshal(resp.Result)
-		if err != nil {
-			return err
-		}
-		return json.Unmarshal(raw, out)
+	if abort == nil {
+		err = call.Dispatch(ctx)
+	} else {
+		err = call.DispatchWithAbort(ctx, abort)
 	}
+	if err != nil {
+		return err
+	}
+	err = call.Wait(ctx, out)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		// Dispatch completed the full request frame before Wait took ownership.
+		// Caller cancellation can no longer prove that the peer saw no effect.
+		return &DispatchError{Cause: err, WriteStarted: true, AnyWritten: true}
+	}
+	return err
 }
 
 func FormatRPCError(rpcErr *RPCError) error {
@@ -270,23 +293,46 @@ func formatRPCErrorData(data any) string {
 }
 
 func (c *Conn) resolvePending(msg Message) {
+	deliver := func(value any) {
+		call, ok := value.(*pendingCall)
+		if !ok || call == nil {
+			return
+		}
+		call.mu.Lock()
+		call.resolved = true
+		observe := call.responseObserver
+		call.mu.Unlock()
+		if observe != nil {
+			if err := observe(msg); err != nil {
+				select {
+				case call.ch <- pendingCallResult{err: err}:
+				default:
+				}
+				return
+			}
+		}
+		select {
+		case call.ch <- pendingCallResult{message: msg}:
+		default:
+		}
+	}
 	switch id := msg.ID.(type) {
 	case float64:
 		if pending, ok := c.pending.Load(int64(id)); ok {
-			pending.(pendingCall).ch <- pendingCallResult{message: msg}
+			deliver(pending)
 		}
 	case int64:
 		if pending, ok := c.pending.Load(id); ok {
-			pending.(pendingCall).ch <- pendingCallResult{message: msg}
+			deliver(pending)
 		}
 	case int:
 		if pending, ok := c.pending.Load(int64(id)); ok {
-			pending.(pendingCall).ch <- pendingCallResult{message: msg}
+			deliver(pending)
 		}
 	case json.Number:
 		if n, err := id.Int64(); err == nil {
 			if pending, ok := c.pending.Load(n); ok {
-				pending.(pendingCall).ch <- pendingCallResult{message: msg}
+				deliver(pending)
 			}
 		}
 	}
@@ -298,7 +344,7 @@ func (c *Conn) failPending(cause error) {
 	}
 	callErr := pendingCallError(cause)
 	c.pending.Range(func(key, value any) bool {
-		call, ok := value.(pendingCall)
+		call, ok := value.(*pendingCall)
 		if !ok {
 			c.pending.Delete(key)
 			return true
@@ -319,7 +365,7 @@ func pendingCallError(cause error) error {
 	return fmt.Errorf("acp/jsonrpc: connection closed before response: %w", cause)
 }
 
-func (c *Conn) writeMessage(msg Message) error {
+func (c *Conn) writeMessageContext(ctx context.Context, msg Message) error {
 	if msg.JSONRPC == "" {
 		msg.JSONRPC = JSONRPCVersion
 	}
@@ -327,9 +373,7 @@ func (c *Conn) writeMessage(msg Message) error {
 	if err != nil {
 		return err
 	}
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	_, err = c.writer.Write(append(data, '\n'))
+	_, err = c.writeEncoded(ctx, append(data, '\n'), nil)
 	return err
 }
 

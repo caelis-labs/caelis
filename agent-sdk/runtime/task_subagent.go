@@ -22,6 +22,9 @@ const (
 	subagentStreamEventCursorMeta   = "stream_event_cursor"
 	subagentStreamOutputCursorMeta  = "stream_output_cursor"
 	subagentFinalResponseCursorMeta = "final_response_cursor"
+	subagentActivityIDMeta          = "child_activity_id"
+	subagentActivityGenerationMeta  = "child_activity_generation"
+	subagentActivityCursorMeta      = "child_activity_cursor"
 )
 
 func subagentSpawnTaskID(ref session.SessionRef, spawnID string) (string, error) {
@@ -639,6 +642,14 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	}
 	if cursor, ok := taskInt64Value(entry.Metadata[subagentFinalResponseCursorMeta]); ok && cursor >= 0 {
 		task.finalResponseCursor = cursor
+	}
+	task.activityID = strings.TrimSpace(taskStringValue(entry.Metadata[subagentActivityIDMeta]))
+	if generation, ok := taskInt64Value(entry.Metadata[subagentActivityGenerationMeta]); ok && generation > 0 {
+		task.activityGeneration = generation
+	}
+	if cursor, ok := taskInt64Value(entry.Metadata[subagentActivityCursorMeta]); ok && cursor >= 0 {
+		task.activityCursor = uint64(cursor)
+		task.activityDurableCursor = uint64(cursor)
 	}
 	if task.state == taskapi.StateCompleted {
 		if final := firstNonBlankTaskOutput(taskRawStringValue(task.result["final_message"]), taskRawStringValue(task.result["result"])); taskOutputHasNonBlankLine(final) {

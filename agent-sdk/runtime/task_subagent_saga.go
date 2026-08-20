@@ -156,7 +156,8 @@ func (tm *taskRuntime) startSubagentTarget(
 			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession), CWD: strings.TrimSpace(activeSession.CWD),
 			TaskID: taskID, Handle: handle, Role: role, ParentCallID: strings.TrimSpace(req.ParentCall), Mode: mode, ApprovalMode: strings.TrimSpace(req.ApprovalMode),
 			ApprovalRequester: req.Approval, Streams: tm,
-			Completion: newSubagentCompletionSink(ctx, tm, taskID, 1),
+			ActivityObserver: newSubagentActivityObserver(tm, taskID),
+			Completion:       newSubagentCompletionSink(ctx, tm, taskID, 1),
 		}
 		anchor, result, err := spawnSubagentTarget(ctx, runner, spawnContext, target, childPrompt)
 		if err != nil {

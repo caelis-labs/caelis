@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -22,9 +24,11 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
+	"github.com/google/uuid"
 )
 
 type PermissionHandler func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error)
@@ -79,7 +83,10 @@ type Runner struct {
 	counter atomic.Uint64
 	mu      sync.RWMutex
 	runs    map[string]*childRun
+	slots   map[string]*childSlot
 }
+
+const childTerminalSettlementGrace = 25 * time.Millisecond
 
 type childRun struct {
 	anchor                delegation.Anchor
@@ -90,11 +97,13 @@ type childRun struct {
 	spawn                 subagent.SpawnContext
 	supportsMessages      bool
 	supportsSteering      bool
+	promptCapabilities    acpschema.PromptCapabilities
 	taskID                string
 	sink                  stream.Sink
 	completion            delegation.CompletionSink
 	ctx                   context.Context
 	cancel                context.CancelFunc
+	slot                  *childSlot
 
 	mu              sync.RWMutex
 	state           delegation.State
@@ -111,6 +120,26 @@ type childRun struct {
 	cancelFailed    bool
 	cancelResolved  chan struct{}
 	done            chan struct{}
+}
+
+func (run *childRun) childSlot() *childSlot {
+	if run == nil {
+		return nil
+	}
+	run.mu.RLock()
+	defer run.mu.RUnlock()
+	return run.slot
+}
+
+func (run *childRun) installChildSlot(slot *childSlot) {
+	if run == nil || slot == nil {
+		return
+	}
+	run.mu.Lock()
+	if run.slot == nil {
+		run.slot = slot
+	}
+	run.mu.Unlock()
 }
 
 func NewRunner(cfg RunnerConfig) (*Runner, error) {
@@ -131,6 +160,7 @@ func NewRunner(cfg RunnerConfig) (*Runner, error) {
 		sessionPreparer:   cfg.SessionPreparer,
 		messageHandler:    cfg.MessageHandler,
 		runs:              map[string]*childRun{},
+		slots:             map[string]*childSlot{},
 	}, nil
 }
 
@@ -159,7 +189,15 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 	if err != nil {
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
+	agentID := r.stableAgentID(cfg.Name, spawn.TaskID)
+	role := spawn.Role
+	if role == "" {
+		role = session.ParticipantRoleDelegated
+	}
 	run := &childRun{
+		anchor: delegation.Anchor{
+			TaskID: strings.TrimSpace(spawn.TaskID), AgentID: agentID,
+		},
 		state:          delegation.StateRunning,
 		running:        true,
 		taskID:         strings.TrimSpace(spawn.TaskID),
@@ -175,7 +213,19 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 	childCtx, childCancel := context.WithCancel(detachedCtx)
 	run.ctx = childCtx
 	run.cancel = childCancel
-	agentID := r.stableAgentID(cfg.Name, spawn.TaskID)
+	target := agent.ChildEndpointRef{
+		ParticipantID: agentID,
+		EndpointKey:   strings.TrimSpace(spawn.TaskID),
+		Role:          role,
+		Placement:     req.Target.Placement,
+	}
+	slot := newPendingChildSlot(target, run)
+	slot.beginSetup(run)
+	if spawn.ActivityObserver != nil {
+		slot.bindObserver(spawn.ActivityAfterCursor, spawn.ActivityObserver)
+	} else {
+		slot.bindObserver(0, compatibilityActivityObserver{run: run})
+	}
 	launchEnv := maps.Clone(cfg.Env)
 	if strings.EqualFold(strings.TrimSpace(cfg.Name), "self") {
 		if launchEnv == nil {
@@ -202,6 +252,9 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		childCancel()
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
+	run.mu.Lock()
+	run.client = acpClient
+	run.mu.Unlock()
 	initialize, err := acpClient.Initialize(ctx)
 	if err != nil {
 		setupErr := spawnedACPSetupError("initialize", cfg, err)
@@ -261,28 +314,95 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		SessionID: sessionID,
 		AgentID:   agentID,
 	}
+	run.mu.Lock()
 	run.anchor = anchor
-	run.client = acpClient
 	run.authenticationMethods = controlagents.CloneAuthenticationMethods(authenticationMethods)
 	run.supportsMessages = hasACPMessageCapability(initialize)
 	run.supportsSteering = supportsSteering
+	run.promptCapabilities = initialize.AgentCapabilities.PromptCapabilities
+	run.mu.Unlock()
 	runKey, err := childRunKey(anchor)
 	if err != nil {
 		childCancel()
 		_ = acpClient.Close(ctx)
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
+	target = agent.ChildEndpointRef{
+		ParticipantID: anchor.AgentID,
+		SessionID:     anchor.SessionID,
+		EndpointKey:   anchor.TaskID,
+		Role:          role,
+		Placement:     req.Target.Placement,
+	}
 	r.mu.Lock()
-	if existing := r.runs[runKey]; existing != nil {
+	if existing := r.runs[runKey]; existing != nil || r.slots[runKey] != nil {
 		r.mu.Unlock()
 		childCancel()
 		_ = acpClient.Close(ctx)
 		return delegation.Anchor{}, delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child run %q already registered", runKey)
 	}
 	r.runs[runKey] = run
+	r.slots[runKey] = slot
 	r.mu.Unlock()
-	go r.drivePrompt(childCtx, run, strings.TrimSpace(req.Prompt))
+	if err := slot.finalizeTarget(target); err != nil {
+		r.mu.Lock()
+		if r.runs[runKey] == run {
+			delete(r.runs, runKey)
+		}
+		if r.slots[runKey] == slot {
+			delete(r.slots, runKey)
+		}
+		r.mu.Unlock()
+		childCancel()
+		_ = acpClient.Close(ctx)
+		return delegation.Anchor{}, delegation.Result{}, err
+	}
+	slot.beginInitialActivity(uuid.NewString(), run)
+	dispatchCtx, cancelDispatch := context.WithCancel(ctx)
+	dispatchDone := slot.beginPromptDispatch(cancelDispatch)
+	r.dispatchInitialPrompt(dispatchCtx, childCtx, slot, run, dispatchDone, strings.TrimSpace(req.Prompt))
+	cancelDispatch()
 	return anchor, r.waitRun(ctx, run, 0), nil
+}
+
+func (r *Runner) dispatchInitialPrompt(
+	callerCtx context.Context,
+	producerCtx context.Context,
+	slot *childSlot,
+	run *childRun,
+	dispatchDone chan struct{},
+	promptText string,
+) {
+	prompt := acputil.BuildPromptParts(promptText, nil)
+	responseCtx, cancelResponse := context.WithCancel(producerCtx)
+	prepared, err := run.client.PreparePromptParts(run.anchor.SessionID, prompt, nil)
+	fence := newPromptAuthRetryFence(slot, dispatchDone, cancelResponse)
+	if err == nil {
+		err = prepared.ObserveAuthRequired(fence.observeAuthRequired)
+	}
+	if err == nil {
+		err = prepared.DispatchWithAbort(callerCtx, func() {
+			_ = run.client.Close(context.Background())
+		})
+	}
+	slot.opMu.Lock()
+	fence.finishLocked(dispatchDone)
+	slot.opMu.Unlock()
+	if err != nil {
+		cancelResponse()
+		if prepared != nil {
+			prepared.Abandon()
+		}
+		if jsonrpc.DispatchMayHaveCommitted(err) {
+			err = joinChildInputUnknown("internal/acpagentbridge/subagent: initial child prompt dispatch outcome cannot be proven", err)
+		}
+		go func() {
+			r.finishDrive(producerCtx, run, "", err)
+			fence.closeAndFinishCurrent()
+		}()
+		return
+	}
+	go r.drivePreparedPrompt(responseCtx, run, prepared, prompt, fence)
 }
 
 func spawnedACPSetupError(stage string, cfg AgentConfig, err error) error {
@@ -366,26 +486,64 @@ func (r *Runner) Wait(ctx context.Context, anchor delegation.Anchor, yieldTimeMS
 // ownership to the runner; it does not wait for target consumption or Turn
 // completion.
 func (r *Runner) Message(ctx context.Context, anchor delegation.Anchor, req subagent.MessageRequest) (delegation.Result, error) {
-	run, err := r.lookup(anchor)
+	messageReq := agentmessage.NormalizeRequest(req.Request)
+	if messageReq.MessageID == "" || messageReq.Text == "" {
+		return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: message id and text are required")
+	}
+	key, err := childRunKey(anchor)
 	if err != nil {
-		key, keyErr := childRunKey(anchor)
-		if keyErr != nil {
-			return delegation.Result{}, keyErr
+		return delegation.Result{}, err
+	}
+	r.mu.Lock()
+	slot := r.slots[key]
+	run := r.runs[key]
+	if slot == nil {
+		if run == nil && req.Reconnect == nil {
+			r.mu.Unlock()
+			return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child run %q not found", key)
 		}
-		r.mu.RLock()
-		existing := r.runs[key]
-		r.mu.RUnlock()
-		if existing != nil || req.Reconnect == nil {
-			return delegation.Result{}, err
+		slot = newChildSlot(childEndpointFromReconnect(anchor, req.Reconnect), run)
+		if r.slots == nil {
+			r.slots = map[string]*childSlot{}
 		}
-		run, err = r.reconnectIdleChild(ctx, anchor, req.Reconnect)
+		r.slots[key] = slot
+		if run != nil {
+			slot.bindObserver(0, compatibilityActivityObserver{run: run})
+		}
+	}
+	r.mu.Unlock()
+	settlementTimer := time.NewTimer(childTerminalSettlementGrace)
+	defer settlementTimer.Stop()
+	for {
+		slot.opMu.Lock()
+		pending := slot.pendingTerminalSettlement()
+		if pending == nil {
+			break
+		}
+		slot.opMu.Unlock()
+		select {
+		case <-pending:
+			continue
+		case <-ctx.Done():
+			return delegation.Result{}, ctx.Err()
+		case <-settlementTimer.C:
+			return delegation.Result{}, errorcode.New(errorcode.Conflict, "internal/acpagentbridge/subagent: child terminal observation is still settling")
+		}
+	}
+	defer slot.opMu.Unlock()
+	run = slot.currentRun()
+	if run == nil {
+		if req.Reconnect == nil {
+			return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child run %q not found", key)
+		}
+		run, err = r.reconnectChildEndpointLocked(ctx, anchor, req.Reconnect, slot, true)
 		if err != nil {
 			return delegation.Result{}, err
 		}
 	}
-	messageReq := agentmessage.NormalizeRequest(req.Request)
-	if messageReq.MessageID == "" || messageReq.Text == "" {
-		return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: message id and text are required")
+	if sessionID := strings.TrimSpace(anchor.SessionID); sessionID != "" &&
+		strings.TrimSpace(run.anchor.SessionID) != "" && sessionID != strings.TrimSpace(run.anchor.SessionID) {
+		return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child run %q session mismatch", key)
 	}
 	var reconnect bool
 	run.mu.Lock()
@@ -426,16 +584,7 @@ func (r *Runner) Message(ctx context.Context, anchor delegation.Anchor, req suba
 		if req.Reconnect == nil {
 			return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child session %q requires reconnect", run.anchor.SessionID)
 		}
-		key, keyErr := childRunKey(anchor)
-		if keyErr != nil {
-			return delegation.Result{}, keyErr
-		}
-		r.mu.Lock()
-		if r.runs[key] == run {
-			delete(r.runs, key)
-		}
-		r.mu.Unlock()
-		run, err = r.reconnectIdleChild(ctx, anchor, req.Reconnect)
+		run, err = r.reconnectChildEndpointLocked(ctx, anchor, req.Reconnect, slot, true)
 		if err != nil {
 			return delegation.Result{}, err
 		}
@@ -463,6 +612,12 @@ func (r *Runner) Message(ctx context.Context, anchor delegation.Anchor, req suba
 		runCtx = detachedChildContext(ctx)
 	}
 	run.mu.Unlock()
+	if slot := run.childSlot(); slot != nil {
+		if run.spawn.ActivityObserver == nil {
+			slot.bindObserver(0, compatibilityActivityObserver{run: run})
+		}
+		slot.beginActivity(uuid.NewString(), run)
+	}
 	go r.driveMessage(runCtx, run, messageReq)
 	return r.waitRun(ctx, run, 0), nil
 }
@@ -496,6 +651,27 @@ func (r *Runner) Cancel(ctx context.Context, anchor delegation.Anchor) error {
 	run, err := r.lookup(anchor)
 	if err != nil {
 		return err
+	}
+	var slot *childSlot
+	if runSlot := run.childSlot(); runSlot != nil {
+		slot = runSlot
+		_, cancelInput := slot.revokeActiveInput()
+		if cancelInput != nil {
+			cancelInput()
+		}
+		slot.mu.Lock()
+		dispatching := slot.promptDispatchDone != nil
+		slot.mu.Unlock()
+		if dispatching {
+			run.mu.RLock()
+			acpClient := run.client
+			run.mu.RUnlock()
+			if acpClient != nil {
+				_ = acpClient.Close(context.WithoutCancel(ctx))
+			}
+		}
+		slot.opMu.Lock()
+		defer slot.opMu.Unlock()
 	}
 	run.mu.Lock()
 	if !run.running || run.finishing {
@@ -552,6 +728,23 @@ func (r *Runner) Quiesce(ctx context.Context) error {
 	// First revoke every child context. One unresponsive transport must not
 	// prevent later children from receiving the Host shutdown signal.
 	for _, run := range runs {
+		if slot := run.childSlot(); slot != nil {
+			_, cancelInput := slot.revokeActiveInput()
+			if cancelInput != nil {
+				cancelInput()
+			}
+			slot.mu.Lock()
+			dispatching := slot.promptDispatchDone != nil
+			slot.mu.Unlock()
+			if dispatching {
+				run.mu.RLock()
+				acpClient := run.client
+				run.mu.RUnlock()
+				if acpClient != nil {
+					_ = acpClient.Close(context.WithoutCancel(ctx))
+				}
+			}
+		}
 		run.mu.RLock()
 		running := run.running
 		cancel := run.cancel
@@ -584,20 +777,6 @@ func (r *Runner) Quiesce(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
-}
-
-func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) {
-	resp, err := authentication.RecoverConfiguredCall(
-		ctx,
-		run.client,
-		controlagents.CloneAuthenticationMethods(run.authenticationMethods),
-		run.agentName,
-		run.configuredAuth,
-		func(callCtx context.Context, activeClient *client.Client) (client.PromptResponse, error) {
-			return activeClient.Prompt(callCtx, run.anchor.SessionID, prompt, nil)
-		},
-	)
-	r.finishDrive(ctx, run, resp.StopReason, err)
 }
 
 func (r *Runner) driveMessage(ctx context.Context, run *childRun, req agentmessage.Request) {
@@ -670,7 +849,28 @@ func (r *Runner) callSessionMessage(ctx context.Context, run *childRun, req agen
 }
 
 func (r *Runner) finishDrive(ctx context.Context, run *childRun, stopReason string, err error) {
+	if run == nil {
+		return
+	}
+	slot := run.childSlot()
+	if slot != nil {
+		slot.opMu.Lock()
+	}
+	done := r.finishDriveLocked(ctx, run, stopReason, err)
+	if slot != nil {
+		slot.opMu.Unlock()
+	}
+	if done != nil {
+		<-done
+	}
+}
+
+func (r *Runner) finishDriveLocked(ctx context.Context, run *childRun, stopReason string, err error) <-chan struct{} {
 	run.mu.Lock()
+	if !run.running {
+		run.mu.Unlock()
+		return nil
+	}
 	if run.cancelRequested && run.cancelResolved != nil {
 		cancelResolved := run.cancelResolved
 		run.mu.Unlock()
@@ -701,6 +901,12 @@ func (r *Runner) finishDrive(ctx context.Context, run *childRun, stopReason stri
 			run.outputPreview = run.failureDetail
 			run.result = ""
 			closeClient = true
+		} else if errorcode.Is(err, errorcode.UnknownOutcome) {
+			run.state = delegation.StateUnknownOutcome
+			run.failureDetail = strings.TrimSpace(err.Error())
+			run.outputPreview = run.failureDetail
+			run.result = ""
+			closeClient = true
 		} else if errors.Is(err, context.Canceled) {
 			if run.state != delegation.StateCancelled {
 				run.state = delegation.StateInterrupted
@@ -728,22 +934,46 @@ func (r *Runner) finishDrive(ctx context.Context, run *childRun, stopReason stri
 		run.failureDetail = ""
 	}
 	result := childResultLocked(run)
-	completion := run.completion
 	done := run.done
+	if done == nil {
+		done = make(chan struct{})
+		run.done = done
+	}
+	slot := run.slot
+	acpClient := run.client
 	run.mu.Unlock()
 
-	if closeClient && run.client != nil {
-		_ = run.client.Close(context.WithoutCancel(ctx))
+	if closeClient && acpClient != nil {
+		_ = acpClient.Close(context.WithoutCancel(ctx))
+	}
+	if slot != nil {
+		slot.beginTerminalSettlement(done)
+		ack := slot.publishResult(result)
+		go func() {
+			<-ack
+			run.mu.Lock()
+			run.finishing = false
+			run.mu.Unlock()
+			slot.finishTerminalSettlement(done)
+			// done is the full producer barrier: terminal observation is
+			// durable and the endpoint admission fence is clear.
+			close(done)
+		}()
+		return done
+	}
+	run.mu.RLock()
+	completion := run.completion
+	run.mu.RUnlock()
+	if completion != nil {
+		completion.PublishSubagentCompletion(result)
 	}
 	run.mu.Lock()
 	run.finishing = false
 	run.mu.Unlock()
-	if completion != nil {
-		completion.PublishSubagentCompletion(result)
-	}
 	// done is the full producer barrier: completion publication may persist the
 	// durable Task terminal record, so Host quiesce must not cross it early.
 	close(done)
+	return done
 }
 
 func (r *Runner) handleChildMessage(ctx context.Context, run *childRun, req client.SessionMessageRequest) (client.SessionMessageResponse, error) {
@@ -974,11 +1204,18 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 	if run == nil {
 		return
 	}
+	slot := run.childSlot()
+	if slot != nil {
+		slot.ingressMu.Lock()
+		defer slot.ingressMu.Unlock()
+	}
+	setupOutput := slot != nil && slot.acceptsSetupOutput(run)
 	env.Update = acputil.StripTerminalConsoleFenceUpdate(env.Update)
 	var event *session.Event
 	var frame *stream.Frame
 	run.mu.Lock()
 	run.updatedAt = r.clock()
+	acceptOutput := run.running || setupOutput
 	switch update := env.Update.(type) {
 	case client.ContentChunk:
 		if text := chunkText(update); text != "" {
@@ -987,7 +1224,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 				event = run.acpUpdateEvent(env, run.updatedAt)
 				markSubagentInputEvent(event)
 			case client.UpdateAgentMessage:
-				if run.running {
+				if acceptOutput {
 					textOverride := run.appendAgentMessageChunkLocked(update.MessageID, text)
 					run.actionSummary.observeAssistant(update.MessageID, run.agentText)
 					run.outputPreview = run.actionSummary.previewOrEmpty()
@@ -996,7 +1233,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 					}
 				}
 			case client.UpdateAgentThought:
-				if run.running {
+				if acceptOutput {
 					run.clearFinalAssistantLocked()
 					run.actionSummary.observeThought(update.MessageID, text)
 					run.outputPreview = run.actionSummary.previewOrEmpty()
@@ -1007,21 +1244,21 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 			}
 		}
 	case client.ToolCall:
-		if run.running {
+		if acceptOutput {
 			run.clearFinalAssistantLocked()
 			run.actionSummary.observeTool(update.ToolCallID, toolActivity(update.Title, update.Kind, update.Status), toolContentActivity(update.Content))
 			run.outputPreview = run.actionSummary.previewOrEmpty()
 		}
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	case client.ToolCallUpdate:
-		if run.running {
+		if acceptOutput {
 			run.clearFinalAssistantLocked()
 			run.actionSummary.observeTool(update.ToolCallID, toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)), toolContentActivity(update.Content))
 			run.outputPreview = run.actionSummary.previewOrEmpty()
 		}
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	case client.PlanUpdate:
-		if run.running {
+		if acceptOutput {
 			run.clearFinalAssistantLocked()
 			run.actionSummary.observeAction(planActivity(update.Entries))
 			run.outputPreview = run.actionSummary.previewOrEmpty()
@@ -1029,13 +1266,19 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	}
 	if event != nil {
+		frameState := run.state
+		frameRunning := run.running
+		if setupOutput {
+			frameState = delegation.StateRunning
+			frameRunning = true
+		}
 		next := stream.Frame{
 			Ref: stream.Ref{
 				TaskID:    firstNonEmpty(run.taskID, run.anchor.TaskID),
 				SessionID: firstNonEmpty(strings.TrimSpace(env.SessionID), run.anchor.SessionID),
 			},
-			State:     string(run.state),
-			Running:   run.running,
+			State:     string(frameState),
+			Running:   frameRunning,
 			Event:     event,
 			UpdatedAt: run.updatedAt,
 		}
@@ -1119,10 +1362,16 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 }
 
 func (run *childRun) emit(frame stream.Frame) {
-	if run == nil || run.sink == nil {
+	if run == nil {
 		return
 	}
-	run.sink.PublishStream(frame)
+	if slot := run.childSlot(); slot != nil {
+		slot.publishRunFrame(run, frame)
+		return
+	}
+	if run.sink != nil {
+		run.sink.PublishStream(frame)
+	}
 }
 
 func (run *childRun) appendAgentMessageLocked(text string) string {
