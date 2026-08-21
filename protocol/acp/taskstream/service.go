@@ -51,6 +51,7 @@ type TaskDescriptor struct {
 	SupportsCancel bool       `json:"supports_cancel,omitempty"`
 	ParentTool     ParentTool `json:"parent_tool,omitempty"`
 	ParticipantID  string     `json:"participant_id,omitempty"`
+	ActivityID     string     `json:"activity_id,omitempty"`
 	CurrentTurnID  string     `json:"current_turn_id,omitempty"`
 	UpdatedAt      time.Time  `json:"updated_at,omitempty"`
 }
@@ -67,9 +68,10 @@ type ListResult struct {
 
 // ReadRequest selects one Task stream and public Envelope cursor.
 type ReadRequest struct {
-	SessionID string `json:"session_id"`
-	TaskID    string `json:"task_id"`
-	Cursor    string `json:"cursor,omitempty"`
+	SessionID          string `json:"session_id"`
+	TaskID             string `json:"task_id"`
+	Cursor             string `json:"cursor,omitempty"`
+	ExpectedActivityID string `json:"expected_activity_id,omitempty"`
 }
 
 // SubscribeRequest selects one independently delivered Task stream.
@@ -100,6 +102,7 @@ func IsTransientGapEnvelope(envelope eventstream.Envelope) bool {
 
 type Batch struct {
 	Events         []eventstream.Envelope `json:"events,omitempty"`
+	ActivityID     string                 `json:"activity_id,omitempty"`
 	ResumeMode     ResumeMode             `json:"resume_mode"`
 	TransientGap   bool                   `json:"transient_gap,omitempty"`
 	BoundaryCursor string                 `json:"boundary_cursor,omitempty"`
@@ -133,7 +136,11 @@ func New(control controltaskstream.Service) Service {
 	if control == nil {
 		return nil
 	}
-	return &service{control: control}
+	base := &service{control: control}
+	if _, ok := control.(controltaskstream.DirectoryService); ok {
+		return &serviceWithDirectory{service: base}
+	}
+	return base
 }
 
 func (s *service) List(ctx context.Context, principal Principal, req ListRequest) (ListResult, error) {
@@ -151,6 +158,7 @@ func (s *service) List(ctx context.Context, principal Principal, req ListRequest
 func (s *service) Events(ctx context.Context, principal Principal, req ReadRequest) (Batch, error) {
 	result, err := s.control.Events(ctx, controlPrincipal(principal), controltaskstream.ReadRequest{
 		SessionID: req.SessionID, TaskID: req.TaskID, Cursor: req.Cursor,
+		ExpectedActivityID: req.ExpectedActivityID,
 	})
 	if err != nil {
 		return Batch{}, err
@@ -160,7 +168,8 @@ func (s *service) Events(ctx context.Context, principal Principal, req ReadReque
 		events = append(events, projectRecord(record)...)
 	}
 	return Batch{
-		Events: events, ResumeMode: ResumeMode(result.ResumeMode), TransientGap: result.TransientGap,
+		Events: events, ActivityID: result.ActivityID,
+		ResumeMode: ResumeMode(result.ResumeMode), TransientGap: result.TransientGap,
 		BoundaryCursor: result.BoundaryCursor,
 	}, nil
 }
@@ -314,7 +323,7 @@ func taskDescriptorFromControl(descriptor controltaskstream.TaskDescriptor) Task
 			ToolCallID: descriptor.ParentTool.ToolCallID,
 			ToolName:   descriptor.ParentTool.ToolName,
 		},
-		ParticipantID: descriptor.ParticipantID, CurrentTurnID: descriptor.CurrentTurnID,
+		ParticipantID: descriptor.ParticipantID, ActivityID: descriptor.ActivityID, CurrentTurnID: descriptor.CurrentTurnID,
 		UpdatedAt: descriptor.UpdatedAt,
 	}
 }
@@ -322,6 +331,7 @@ func taskDescriptorFromControl(descriptor controltaskstream.TaskDescriptor) Task
 func stampEnvelope(record controltaskstream.Record, envelope eventstream.Envelope) eventstream.Envelope {
 	envelope.Cursor = record.Cursor
 	envelope.SessionID = record.Task.SessionID
+	envelope.ActivityID = record.Task.ActivityID
 	if envelope.Scope == "" {
 		envelope.Scope = eventstream.ScopeMain
 	}

@@ -10,10 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -279,6 +281,77 @@ func TestRunnerLoadHistoryUsesSessionLoadAndPreservesMultipleTurns(t *testing.T)
 	}
 }
 
+func TestRunnerLoadHistoryPassesMatchingCapabilityToBuiltInBridge(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	registry, err := NewRegistry([]AgentConfig{{
+		Name:    "self",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestRunnerPromptFailureHelperProcess", "--"},
+		Env: map[string]string{
+			"CAELIS_ACP_SUBAGENT_HELPER":              "history-load-capability",
+			acpagentenv.EnvManagedSessionHistoryToken: "",
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewRunner(RunnerConfig{Registry: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.LoadHistory(ctx, tasksubagent.HistoryRequest{
+		Anchor: delegation.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
+		Reconnect: tasksubagent.ReconnectRequest{
+			Spawn: tasksubagent.SpawnContext{
+				SessionRef: session.SessionRef{SessionID: "parent-history"},
+				CWD:        "/tmp",
+				TaskID:     "task-history",
+				Handle:     "self",
+			},
+			Target: delegation.AgentTarget("self"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("LoadHistory(built-in capability) error = %v", err)
+	}
+}
+
+func TestRunnerLoadHistoryReportsUnsupportedCapability(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	registry, err := NewRegistry([]AgentConfig{{
+		Name:    "helper",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestRunnerPromptFailureHelperProcess", "--"},
+		Env: map[string]string{
+			"CAELIS_ACP_SUBAGENT_HELPER": "history-unsupported",
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewRunner(RunnerConfig{Registry: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.LoadHistory(ctx, tasksubagent.HistoryRequest{
+		Anchor: delegation.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
+		Reconnect: tasksubagent.ReconnectRequest{
+			Spawn: tasksubagent.SpawnContext{
+				SessionRef: session.SessionRef{SessionID: "parent-history"},
+				CWD:        "/tmp",
+				TaskID:     "task-history",
+				Handle:     "helper",
+			},
+			Target: delegation.AgentTarget("helper"),
+		},
+	})
+	if !errorcode.Is(err, errorcode.Unsupported) {
+		t.Fatalf("LoadHistory() error = %v, want unsupported", err)
+	}
+}
+
 func TestRunnerLoadHistoryRejectsUpdatesFromAnotherSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -337,7 +410,7 @@ func TestLoadedAgentCommunicationPromptRestoresDisplayIdentity(t *testing.T) {
 func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 	mode := os.Getenv("CAELIS_ACP_SUBAGENT_HELPER")
 	switch mode {
-	case "prompt-failure", "prompt-authentication", "message-reconnect", "history-load", "history-load-mismatch", "initialize-exit", "session-options":
+	case "prompt-failure", "prompt-authentication", "message-reconnect", "history-load", "history-load-capability", "history-load-mismatch", "history-unsupported", "initialize-exit", "session-options":
 	default:
 		return
 	}
@@ -371,7 +444,7 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				os.Exit(23)
 			}
 			response := client.InitializeResponse{ProtocolVersion: 1}
-			if mode == "history-load" || mode == "history-load-mismatch" {
+			if mode == "history-load" || mode == "history-load-capability" || mode == "history-load-mismatch" {
 				response.AgentCapabilities.LoadSession = true
 			}
 			if mode == "prompt-authentication" {
@@ -425,12 +498,21 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 			}
 			return client.ResumeSessionResponse{}, nil
 		case client.MethodSessionLoad:
-			if mode != "history-load" && mode != "history-load-mismatch" {
+			if mode != "history-load" && mode != "history-load-capability" && mode != "history-load-mismatch" {
 				return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 			}
 			var req client.LoadSessionRequest
-			if err := json.Unmarshal(msg.Params, &req); err != nil || req.SessionID != "child-history" || req.CWD != "/tmp" {
+			if err := json.Unmarshal(msg.Params, &req); err != nil || req.SessionID != "child-history" || req.CWD != "/tmp" ||
+				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionKind) != metautil.RuntimeSessionKindSubagent ||
+				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionParentID) != "parent-history" ||
+				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeTaskID) != "task-history" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/load request"}
+			}
+			if mode == "history-load-capability" {
+				requestToken := metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionHistoryToken)
+				if processToken := strings.TrimSpace(os.Getenv(acpagentenv.EnvManagedSessionHistoryToken)); len(processToken) != 64 || requestToken != processToken {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: "managed history capability mismatch"}
+				}
 			}
 			updates := []client.Update{
 				client.ContentChunk{SessionUpdate: client.UpdateUserMessage, MessageID: "user-1", Content: jsonrpc.MustMarshalRaw(client.TextContent{Type: "text", Text: "first prompt"})},

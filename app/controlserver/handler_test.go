@@ -591,6 +591,7 @@ type fakeTaskService struct {
 	list      taskstream.ListResult
 	batch     taskstream.Batch
 	subscribe taskstream.SubscribeResult
+	read      taskstream.ReadRequest
 	request   taskstream.SubscribeRequest
 	err       error
 }
@@ -600,8 +601,9 @@ func (s *fakeTaskService) List(_ context.Context, principal taskstream.Principal
 	return s.list, s.err
 }
 
-func (s *fakeTaskService) Events(_ context.Context, principal taskstream.Principal, _ taskstream.ReadRequest) (taskstream.Batch, error) {
+func (s *fakeTaskService) Events(_ context.Context, principal taskstream.Principal, request taskstream.ReadRequest) (taskstream.Batch, error) {
 	s.principal = principal
+	s.read = request
 	return s.batch, s.err
 }
 

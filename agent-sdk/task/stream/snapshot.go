@@ -11,6 +11,9 @@ func FramesForSnapshot(snapshot Snapshot) []Frame {
 	hasClosedFrame := false
 	for _, frame := range snapshot.Frames {
 		cloned := CloneFrame(frame)
+		if cloned.ActivityID == "" {
+			cloned.ActivityID = strings.TrimSpace(snapshot.ActivityID)
+		}
 		if !snapshot.Running && cloned.Closed {
 			cloned = normalizeClosedFrame(snapshot, cloned)
 		}
@@ -28,6 +31,7 @@ func FramesForSnapshot(snapshot Snapshot) []Frame {
 	}
 	frames = append(frames, Frame{
 		Ref:                   NormalizeRef(snapshot.Ref),
+		ActivityID:            strings.TrimSpace(snapshot.ActivityID),
 		Text:                  closeText,
 		State:                 closedState(snapshot),
 		Cursor:                CloneCursor(snapshot.Cursor),
@@ -93,6 +97,9 @@ func normalizeClosedFrame(snapshot Snapshot, frame Frame) Frame {
 	}
 	if frame.Text == "" && snapshot.ExitCode == nil {
 		frame.Text = snapshot.FinalText
+	}
+	if frame.ActivityID == "" {
+		frame.ActivityID = strings.TrimSpace(snapshot.ActivityID)
 	}
 	if strings.TrimSpace(frame.State) == "" {
 		frame.State = closedState(snapshot)

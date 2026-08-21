@@ -152,8 +152,8 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, cwd string, 
 		SessionID:  sessionID,
 		CWD:        cwd,
 		MCPServers: []json.RawMessage{},
+		Meta:       metautil.CloneMap(meta),
 	}, &resp)
-	_ = meta
 	return resp, err
 }
 

@@ -335,6 +335,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		ControllerEventForwarder: acpbridge.NewControllerForwarder(s.sessions),
 		TaskStore:                s.authorities.taskStore,
 		TaskActivityChanged:      s.runtimeTaskChanged,
+		TaskCommitted:            s.taskCommitted,
 	}
 	var acpControlPlane *acpassembly.ControlPlane
 	localCfg, acpControlPlane, err = injectACPControlPlane(

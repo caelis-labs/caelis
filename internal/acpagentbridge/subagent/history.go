@@ -2,11 +2,14 @@ package subagent
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"strings"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
@@ -14,7 +17,9 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
+	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 // LoadHistory starts a short-lived ACP transport and calls session/load for an
@@ -47,9 +52,21 @@ func (r *Runner) LoadHistory(ctx context.Context, raw tasksubagent.HistoryReques
 
 	collector := newHistoryCollector(r, anchor, cfg.Name)
 	launchEnv := maps.Clone(cfg.Env)
+	historyToken := ""
 	if strings.EqualFold(strings.TrimSpace(cfg.Name), "self") {
 		if launchEnv == nil {
 			launchEnv = map[string]string{}
+		}
+		// Only the Host-assembled built-in endpoint carries this scrubbed marker.
+		// A user-supplied Agent named "self" remains an ordinary external ACP
+		// endpoint and must not receive the internal managed-Session capability.
+		if _, builtIn := launchEnv[acpagentenv.EnvManagedSessionHistoryToken]; builtIn {
+			tokenBytes := make([]byte, 32)
+			if _, err := rand.Read(tokenBytes); err != nil {
+				return session.LoadedSession{}, fmt.Errorf("internal/acpagentbridge/subagent: create managed history capability: %w", err)
+			}
+			historyToken = hex.EncodeToString(tokenBytes)
+			launchEnv[acpagentenv.EnvManagedSessionHistoryToken] = historyToken
 		}
 		launchEnv["SDK_ACP_ENABLE_SPAWN"] = "0"
 		launchEnv["SDK_ACP_CHILD_NO_SPAWN"] = "1"
@@ -70,7 +87,10 @@ func (r *Runner) LoadHistory(ctx context.Context, raw tasksubagent.HistoryReques
 		return session.LoadedSession{}, err
 	}
 	if !initialize.AgentCapabilities.LoadSession {
-		return session.LoadedSession{}, fmt.Errorf("internal/acpagentbridge/subagent: child Agent %q does not support session/load", cfg.Name)
+		return session.LoadedSession{}, errorcode.New(
+			errorcode.Unsupported,
+			fmt.Sprintf("internal/acpagentbridge/subagent: child Agent %q does not support session/load", cfg.Name),
+		)
 	}
 	methods := authentication.Methods(initialize)
 	if _, err := authentication.RecoverConfiguredCall(
@@ -80,7 +100,12 @@ func (r *Runner) LoadHistory(ctx context.Context, raw tasksubagent.HistoryReques
 		cfg.Name,
 		controlagents.NormalizeAuthentication(cfg.Authentication),
 		func(loadCtx context.Context, activeClient *client.Client) (client.LoadSessionResponse, error) {
-			return activeClient.LoadSession(loadCtx, strings.TrimSpace(anchor.SessionID), strings.TrimSpace(spawn.CWD), nil)
+			return activeClient.LoadSession(
+				loadCtx,
+				strings.TrimSpace(anchor.SessionID),
+				strings.TrimSpace(spawn.CWD),
+				subagentHistorySessionMeta(spawn, historyToken),
+			)
 		},
 	); err != nil {
 		return session.LoadedSession{}, err
@@ -95,6 +120,15 @@ func (r *Runner) LoadHistory(ctx context.Context, raw tasksubagent.HistoryReques
 		},
 		Events: collector.eventsSnapshot(),
 	}, nil
+}
+
+func subagentHistorySessionMeta(spawn tasksubagent.SpawnContext, historyToken string) map[string]any {
+	return metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
+		metautil.RuntimeSessionKind:         metautil.RuntimeSessionKindSubagent,
+		metautil.RuntimeSessionParentID:     spawn.SessionRef.SessionID,
+		metautil.RuntimeTaskID:              spawn.TaskID,
+		metautil.RuntimeSessionHistoryToken: historyToken,
+	})
 }
 
 type historyCollector struct {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -21,8 +22,9 @@ type workspaceConfigAssembler struct {
 }
 
 type sessionRuntimeActivity struct {
-	retainWork  func(session.SessionRef) func()
-	taskChanged func(session.SessionRef)
+	retainWork    func(session.SessionRef) func()
+	taskChanged   func(session.SessionRef)
+	taskCommitted func(*task.Entry)
 }
 
 func newWorkspaceConfigAssembler(deps sessionRuntimeAssemblyDeps) (*workspaceConfigAssembler, error) {
@@ -109,6 +111,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 			sandbox:            sandboxConfig,
 			retainRuntimeWork:  activity.retainWork,
 			runtimeTaskChanged: activity.taskChanged,
+			taskCommitted:      activity.taskCommitted,
 		},
 	}
 	if err := instance.buildInitialGatewayRuntime(ctx); err != nil {

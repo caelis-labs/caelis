@@ -191,6 +191,10 @@ func (m *Model) closeSubagentOutputOverlay() {
 	m.subagentOutputOverlay = nil
 	if view != nil {
 		m.reconcileTaskStreamOwner(callID, view.taskHandle)
+		// The live activity fence belongs to the visible observation lifetime.
+		// A later cold reopen must be allowed to hydrate the directory's current
+		// terminal activity even when no new live frame was observed locally.
+		view.liveActivityID = ""
 	}
 }
 
@@ -515,8 +519,7 @@ func (m *Model) subagentOutputHistoryPending(view *subagentOutputView) bool {
 		return false
 	}
 	if taskID := strings.TrimSpace(m.taskStreamIDsByCallID[callID]); taskID != "" {
-		return m.taskStreamWanted[taskID] &&
-			(m.taskStreamTokens[taskID] != 0 || m.taskStreamSubscriptions[taskID] != nil)
+		return m.taskStreamHistoryInFlight(taskID)
 	}
 	return m.taskStreamResolveTokens[callID] != 0
 }

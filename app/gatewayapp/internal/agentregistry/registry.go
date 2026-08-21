@@ -80,10 +80,11 @@ func configuredSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
 		}
 	}
 	env := map[string]string{
-		"CAELIS_CONTROL_TOKEN":      "",
-		"CAELIS_CONTROL_TOKEN_FILE": "",
-		acpagentenv.EnvWorkspaceKey: strings.TrimSpace(cfg.WorkspaceKey),
-		acpagentenv.EnvWorkspaceCWD: strings.TrimSpace(cfg.WorkspaceCWD),
+		"CAELIS_CONTROL_TOKEN":                    "",
+		"CAELIS_CONTROL_TOKEN_FILE":               "",
+		acpagentenv.EnvManagedSessionHistoryToken: "",
+		acpagentenv.EnvWorkspaceKey:               strings.TrimSpace(cfg.WorkspaceKey),
+		acpagentenv.EnvWorkspaceCWD:               strings.TrimSpace(cfg.WorkspaceCWD),
 	}
 	// Built-in children never inherit parent Host credentials through stdio's
 	// base environment. When a child bridge is available, authentication is

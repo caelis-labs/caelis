@@ -17,6 +17,7 @@ type hostControlAssembly struct {
 	runtimeStateReader *controlRuntimeStateReader
 	participantHandles *participantHandleReader
 	taskStreamRouter   *hostTaskStreamService
+	taskDirectory      *controltaskstream.DirectoryIndex
 }
 
 func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, cursorSecret []byte) (hostControlAssembly, error) {
@@ -82,10 +83,13 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	stack.pluginCommands = controlCommands
 
 	taskStreamRouter := &hostTaskStreamService{host: &stack.composition}
+	taskDirectory := controltaskstream.NewDirectoryIndex()
+	stack.composition.taskCommitted = taskDirectory.Notify
 	controlTaskStreams, err := controltaskstream.New(controltaskstream.Config{
 		Tasks:           stack.composition.authorities.taskStore,
 		Streams:         func() stream.Service { return taskStreamRouter },
 		Sessions:        stack.composition.sessions,
+		Directory:       taskDirectory,
 		SubagentHistory: subagentHistoryService{composition: &stack.composition},
 		Authorizer:      taskStreamAuthorizer{inner: sessionAuthorizer},
 		Secret:          cursorSecret,
@@ -98,6 +102,7 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 		runtimeStateReader: runtimeStateReader,
 		participantHandles: participantHandles,
 		taskStreamRouter:   taskStreamRouter,
+		taskDirectory:      taskDirectory,
 	}, nil
 }
 
@@ -126,6 +131,7 @@ func activateHostRuntime(stack *Stack, assembly hostControlAssembly) error {
 		DefaultWorkspace: stack.composition.workspace,
 		ModelRecovery:    stack.modelRecovery,
 		Assembler:        runtimeAssembler,
+		TaskCommitted:    assembly.taskDirectory.Notify,
 	})
 	if err != nil {
 		_ = stack.Close()

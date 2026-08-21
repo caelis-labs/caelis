@@ -104,13 +104,13 @@ func validateSpec(spec openAPISpec) error {
 	if spec.OpenAPI != "3.1.0" {
 		return fmt.Errorf("openapi version = %q, want 3.1.0", spec.OpenAPI)
 	}
-	if len(operationIDs(spec)) != 83 {
-		return fmt.Errorf("operation count = %d, want 83", len(operationIDs(spec)))
+	if len(operationIDs(spec)) != 84 {
+		return fmt.Errorf("operation count = %d, want 84", len(operationIDs(spec)))
 	}
 	required := []string{
 		"CreateSessionRequest", "CloseSessionRequest", "CompactSessionRequest", "PromptRequest", "SteerRequest", "CancelRequest",
 		"ResolveApprovalRequest", "CommandResult", "ServerInfo", "HostStatus", "SessionState", "StatusSnapshot", "Envelope",
-		"TaskDescriptor", "TaskList", "TaskEventBatch", "StartParticipantRequest", "PromptParticipantRequest", "CancelParticipantRequest",
+		"TaskDescriptor", "TaskList", "TaskDirectorySnapshot", "TaskEventBatch", "StartParticipantRequest", "PromptParticipantRequest", "CancelParticipantRequest",
 		"SessionModeRequest", "SessionModelRequest", "SessionControllerModeRequest", "SessionPresentationModeRequest",
 		"SessionPresentationConfigRequest", "ConnectModelRequest", "UseModelRequest", "DeleteModelRequest", "SandboxRequest",
 		"AgentRequest", "HandoffAgentRequest", "ConnectACPRequest", "DisconnectACPRequest", "DisconnectCandidatesSnapshot",

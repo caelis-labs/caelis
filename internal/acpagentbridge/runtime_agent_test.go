@@ -129,7 +129,7 @@ func TestRuntimeAgentNewSessionNormalizesManagedSubagentMetadata(t *testing.T) {
 	}
 }
 
-func TestRuntimeAgentResumeReclaimsOnlyMatchingManagedSubagent(t *testing.T) {
+func TestRuntimeAgentManagedLoadAndResumeIgnoreMetaAndRequireTrustedOwnership(t *testing.T) {
 	t.Parallel()
 
 	sessions := inmemory.NewStore(inmemory.Config{})
@@ -150,30 +150,33 @@ func TestRuntimeAgentResumeReclaimsOnlyMatchingManagedSubagent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted, _ := newRuntimeAgentWithSessionsAndConfig(t, sessions, runtimeacp.Config{})
 	claim := metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
 		metautil.RuntimeSessionKind:     metautil.RuntimeSessionKindSubagent,
 		metautil.RuntimeSessionParentID: "parent-session",
 		metautil.RuntimeTaskID:          "task-1",
 	})
-	if _, err := restarted.ResumeSession(context.Background(), acp.ResumeSessionRequest{
-		SessionID: created.SessionID, CWD: loaded.CWD, Meta: claim,
+	if _, err := agent.LoadSession(context.Background(), acp.LoadSessionRequest{
+		SessionID: created.SessionID, CWD: loaded.CWD,
+	}, &recordingPromptCallbacks{}); err != nil {
+		t.Fatalf("LoadSession(owned, no metadata) error = %v", err)
+	}
+	if _, err := agent.ResumeSession(context.Background(), acp.ResumeSessionRequest{
+		SessionID: created.SessionID, CWD: loaded.CWD,
 	}); err != nil {
-		t.Fatalf("ResumeSession(matching claim) error = %v", err)
+		t.Fatalf("ResumeSession(owned, no metadata) error = %v", err)
 	}
 
-	for _, mismatch := range []map[string]any{
-		nil,
-		metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
-			metautil.RuntimeSessionKind: metautil.RuntimeSessionKindSubagent,
-			metautil.RuntimeTaskID:      "task-other",
-		}),
-	} {
+	for _, untrustedMeta := range []map[string]any{nil, claim} {
 		isolated, _ := newRuntimeAgentWithSessionsAndConfig(t, sessions, runtimeacp.Config{})
+		if _, err := isolated.LoadSession(context.Background(), acp.LoadSessionRequest{
+			SessionID: created.SessionID, CWD: loaded.CWD, Meta: untrustedMeta,
+		}, &recordingPromptCallbacks{}); !errors.Is(err, session.ErrSessionNotFound) {
+			t.Fatalf("LoadSession(unowned, metadata=%#v) error = %v, want Session not found", untrustedMeta, err)
+		}
 		if _, err := isolated.ResumeSession(context.Background(), acp.ResumeSessionRequest{
-			SessionID: created.SessionID, CWD: loaded.CWD, Meta: mismatch,
+			SessionID: created.SessionID, CWD: loaded.CWD, Meta: untrustedMeta,
 		}); !errors.Is(err, session.ErrSessionNotFound) {
-			t.Fatalf("ResumeSession(mismatched claim) error = %v, want Session not found", err)
+			t.Fatalf("ResumeSession(unowned, metadata=%#v) error = %v, want Session not found", untrustedMeta, err)
 		}
 	}
 }

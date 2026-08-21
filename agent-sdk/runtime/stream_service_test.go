@@ -1047,6 +1047,8 @@ func TestStreamSubscribeFollowTracksObservedSubagentActivitiesUntilCanceled(t *t
 		turnSeq:    1,
 		createdAt:  time.Now(),
 		result:     map[string]any{"result": "first turn"},
+		metadata:   map[string]any{subagentActivityIDMeta: "activity-1"},
+		activityID: "activity-1",
 	}
 	tasks := newTaskRuntime(&Runtime{clock: time.Now}, nil)
 	tasks.subagents[task.ref.TaskID] = task
@@ -1073,6 +1075,9 @@ func TestStreamSubscribeFollowTracksObservedSubagentActivitiesUntilCanceled(t *t
 	first := receiveStreamFrame(t, frames)
 	if !first.Closed || first.State != string(taskapi.StateCompleted) {
 		t.Fatalf("first frame = %#v, want completed turn-1 close", first)
+	}
+	if first.ActivityID != "activity-1" {
+		t.Fatalf("first activity = %q, want activity-1", first.ActivityID)
 	}
 	select {
 	case err := <-done:
@@ -1115,6 +1120,9 @@ func TestStreamSubscribeFollowTracksObservedSubagentActivitiesUntilCanceled(t *t
 	if second.Text != "turn-2 output" || !second.Running || second.Closed {
 		t.Fatalf("second frame = %#v, want live turn-2 output", second)
 	}
+	if second.ActivityID != "activity-2" {
+		t.Fatalf("second activity = %q, want activity-2", second.ActivityID)
+	}
 	if second.Cursor.Events <= first.Cursor.Events {
 		t.Fatalf("turn-2 cursor = %#v, want after turn-1 %#v", second.Cursor, first.Cursor)
 	}
@@ -1125,6 +1133,9 @@ func TestStreamSubscribeFollowTracksObservedSubagentActivitiesUntilCanceled(t *t
 	terminal := receiveStreamFrame(t, frames)
 	if !terminal.Closed || terminal.Cursor.Events <= second.Cursor.Events {
 		t.Fatalf("turn-2 terminal = %#v, want close after output", terminal)
+	}
+	if terminal.ActivityID != "activity-2" {
+		t.Fatalf("turn-2 terminal activity = %q, want activity-2", terminal.ActivityID)
 	}
 	select {
 	case err := <-done:
@@ -1559,6 +1570,23 @@ func TestAwaitCommandRetainsOneBackendObserverAcrossStreamWake(t *testing.T) {
 	case <-awaitStarted:
 	case <-ctx.Done():
 		t.Fatal("AwaitOutput() did not start")
+	}
+	// AwaitOutput starts independently from the callback/state waiter. Wait for
+	// both observers to be installed before issuing a stream-only wake; normal
+	// production wakes also advance state or a cursor and are level-triggered,
+	// but this probe intentionally changes neither.
+	for {
+		task.mu.Lock()
+		streamWaiterInstalled := task.streamChanged != nil
+		task.mu.Unlock()
+		if streamWaiterInstalled {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("command stream waiter was not installed")
+		case <-time.After(time.Millisecond):
+		}
 	}
 
 	statusBeforeWake := sess.statusCalls.Load()

@@ -571,6 +571,71 @@ func TestSubagentOutputOverlayActiveNarrativeKeepsPhysicalBorderAligned(t *testi
 	assertPhysicalFullscreenFrame(t, width, height, after, updates)
 }
 
+func TestSubagentOutputOverlayLongStreamingTailKeepsPhysicalFrameExact(t *testing.T) {
+	const (
+		width  = 84
+		height = 18
+	)
+	model := NewModel(Config{NoAnimation: true, NoColor: true})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	model = updated.(*Model)
+	view := model.ensureSubagentOutputView("spawn-long-stream")
+	source := newNarrativeSourceIdentity("message-long-stream", "", "")
+	model.subagentOutputOverlay = &subagentOutputOverlayState{
+		callID: "spawn-long-stream", followTail: true,
+		selectStart: textSelectionPoint{line: -1, col: -1},
+		selectEnd:   textSelectionPoint{line: -1, col: -1},
+	}
+
+	chunks := []string{
+		"## 审查结论\n\n",
+		"这是第一段，包含中文、emoji 🧭 和 `inline code`。\n\n",
+		"- 检查点 01：确认 Surface 只负责展示。\n",
+		"- 检查点 02：确认 Control 持有生命周期。\n",
+		"- 检查点 03：保留合法重复文本 haha。\n",
+		"- 检查点 04：继续追加稳定 Markdown。\n",
+		"- 检查点 05：窗口即将开始跟随尾部。\n",
+		"- 检查点 06：这一行会推动整个窗口上移。\n",
+		"- 检查点 07：第二次推动可见窗口。\n",
+		"- 检查点 08：第三次推动可见窗口。\n",
+		"\n```text\n",
+		"stream frame alpha\n",
+		"stream frame beta 中文\n",
+		"stream frame gamma 🚀\n",
+		"```\n\n",
+		"最后一段仍处于 streaming tail，不能依赖 Final 全量重绘恢复。",
+	}
+	frames := make([]string, 0, len(chunks))
+	var exact strings.Builder
+	offsetAdvances := 0
+	previousOffset := 0
+	for index, chunk := range chunks {
+		exact.WriteString(chunk)
+		view.block.AppendStreamEvent(SEAssistant, chunk, source)
+		view.touch(true)
+		if len(view.block.Events) != 1 || view.block.Events[0].Text != exact.String() {
+			t.Fatalf("semantic stream after chunk %d = %#v, want one exact-delta narrative %q", index, view.block.Events, exact.String())
+		}
+		frame := model.View().Content
+		frames = append(frames, frame)
+		if current := model.subagentOutputOverlay.offset; current > previousOffset {
+			offsetAdvances++
+			previousOffset = current
+		}
+	}
+	if offsetAdvances < 3 {
+		t.Fatalf("long stream advanced follow-tail offset %d time(s), want at least three", offsetAdvances)
+	}
+
+	updates := renderFullscreenFramesForTest(t, width, height, frames...)
+	for index := range frames {
+		if index > 0 && frameContainsCSICommand(updates[index], "@LM") {
+			t.Fatalf("long overlay stream update %d used ICH/IL/DL while its visible window moved: %q", index, updates[index])
+		}
+		assertPhysicalFullscreenFrame(t, width, height, frames[index], updates[:index+1])
+	}
+}
+
 func assertOverlayContentRightBorderColumn(t *testing.T, frame string, needle string, want int) {
 	t.Helper()
 	for _, line := range strings.Split(frame, "\n") {
@@ -671,15 +736,19 @@ func fullscreenFrameHasTrailingRepaintSentinel(frame string, needle string) bool
 }
 
 func frameContainsInsertCharacter(s string) bool {
+	return frameContainsCSICommand(s, "@")
+}
+
+func frameContainsCSICommand(s string, commands string) bool {
 	for i := 0; i < len(s); i++ {
 		if s[i] != '\x1b' || i+1 >= len(s) || s[i+1] != '[' {
 			continue
 		}
 		j := i + 2
-		for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+		for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
 			j++
 		}
-		if j < len(s) && s[j] == '@' {
+		if j < len(s) && strings.ContainsRune(commands, rune(s[j])) {
 			return true
 		}
 	}

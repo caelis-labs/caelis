@@ -401,6 +401,7 @@ func (s *streamService) readSubagent(_ context.Context, sub *subagentTask, curso
 			TaskID:     strings.TrimSpace(sub.ref.TaskID),
 			TerminalID: strings.TrimSpace(sub.ref.TerminalID),
 		},
+		ActivityID: strings.TrimSpace(sub.activityID),
 		Cursor: stream.Cursor{
 			Output: nextOutput,
 			Events: nextEvents,
@@ -441,8 +442,9 @@ func (s *streamService) readSubagent(_ context.Context, sub *subagentTask, curso
 					SessionID: strings.TrimSpace(sub.sessionRef.SessionID), TaskID: strings.TrimSpace(sub.ref.TaskID),
 					TerminalID: subagentTurnID(sub.ref.TaskID, sub.latestFinalTurnSeq),
 				},
-				Event:     sub.resultStreamEventForTurnAt(sub.latestFinalText, sub.latestFinalTurnSeq, sub.latestFinalAt),
-				UpdatedAt: sub.latestFinalAt,
+				ActivityID: strings.TrimSpace(sub.latestFinalActivityID),
+				Event:      sub.resultStreamEventForTurnAt(sub.latestFinalText, sub.latestFinalTurnSeq, sub.latestFinalAt),
+				UpdatedAt:  sub.latestFinalAt,
 			}
 		}
 		snap.Frames = sub.semanticRetention.frames(
@@ -480,11 +482,12 @@ func (s *streamService) readSubagent(_ context.Context, sub *subagentTask, curso
 		if cursor.Output >= turnBase {
 			if delta := sliceStringFromByteCursor(output, cursor.Output-turnBase); delta != "" {
 				snap.Frames = append(snap.Frames, stream.Frame{
-					Ref:       snap.Ref,
-					Text:      delta,
-					Cursor:    snap.Cursor,
-					Running:   sub.running,
-					UpdatedAt: snap.UpdatedAt,
+					Ref:        snap.Ref,
+					ActivityID: snap.ActivityID,
+					Text:       delta,
+					Cursor:     snap.Cursor,
+					Running:    sub.running,
+					UpdatedAt:  snap.UpdatedAt,
 				})
 			}
 		}

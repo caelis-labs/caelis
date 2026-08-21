@@ -236,11 +236,25 @@ func hasStreamingParagraphBoundary(raw string) bool {
 // not parse or render Markdown; the suffix stays byte-for-byte source text
 // (apart from normalized line endings) until it is promoted or sealed.
 func splitStableStreamingMarkdown(raw string) (stableRaw string, tailRaw string) {
+	return splitStableStreamingMarkdownContinuation(raw, false)
+}
+
+// splitStableStreamingMarkdownContinuation applies the same promotion rules
+// after an already-rendered stable boundary. The initial stream keeps a
+// two-tail window before invoking Glamour at all. Once a prefix exists, the
+// retained tail already starts at a safe block boundary, so waiting for that
+// whole initial window again would make fine-grained streams lag behind an
+// equivalent one-shot projection.
+func splitStableStreamingMarkdownContinuation(raw string, hasStablePrefix bool) (stableRaw string, tailRaw string) {
 	raw = normalizeTextRenderRaw(raw)
 	if strings.TrimSpace(raw) == "" {
 		return "", ""
 	}
-	if utf8.RuneCountInString(raw) < streamingStableTailMinRunes*2 {
+	minimumRunes := streamingStableTailMinRunes * 2
+	if hasStablePrefix {
+		minimumRunes = streamingStableTailMinRunes + 1
+	}
+	if utf8.RuneCountInString(raw) < minimumRunes {
 		return "", raw
 	}
 	lines := strings.SplitAfter(raw, "\n")

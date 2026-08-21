@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -114,8 +115,8 @@ func TestSubagentRosterOmitsSpawnWithoutChildHandle(t *testing.T) {
 	if model.openSubagentRosterOverlay() {
 		t.Fatal("unresolved Spawn opened an empty roster")
 	}
-	if cmd := model.requestSubagentRosterRefresh(); cmd != nil {
-		t.Fatal("unresolved Spawn started Task directory polling")
+	if cmd := model.ensureSubagentDirectoryWatch(); cmd != nil {
+		t.Fatal("unresolved Spawn started a Task directory watch")
 	}
 }
 
@@ -263,25 +264,24 @@ func TestSubagentRosterColdResumeLoadsOnlySelectedWorkspace(t *testing.T) {
 	descriptors := []protocoltaskstream.TaskDescriptor{
 		{
 			SessionID: "session-old", TaskID: "task-kira", Handle: "kira", Kind: task.KindSubagent,
-			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(103, 0),
+			State: task.StateCompleted, Running: false, ActivityID: "activity-kira", UpdatedAt: time.Unix(103, 0),
 			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "Spawn"},
 		},
 		{
 			SessionID: "session-old", TaskID: "task-wen", Handle: "wen", Kind: task.KindSubagent,
-			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(102, 0),
+			State: task.StateCompleted, Running: false, ActivityID: "activity-wen", UpdatedAt: time.Unix(102, 0),
 			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-wen", ToolName: "Spawn"},
 		},
 		{
 			SessionID: "session-old", TaskID: "task-yara", Handle: "yara", Kind: task.KindSubagent,
-			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(101, 0),
+			State: task.StateCompleted, Running: false, ActivityID: "activity-yara", UpdatedAt: time.Unix(101, 0),
 			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-yara", ToolName: "Spawn"},
 		},
 	}
-	requests := make(chan protocoltaskstream.SubscribeRequest, len(descriptors))
+	requests := make(chan protocoltaskstream.ReadRequest, len(descriptors))
 	service := &subagentRosterTestTaskStreamService{
-		list:              protocoltaskstream.ListResult{Tasks: descriptors},
-		subscribeRequests: requests,
-		subscription:      newTUIProtocolTaskSubscription(),
+		list:          protocoltaskstream.ListResult{Tasks: descriptors},
+		eventRequests: requests,
 	}
 	messages := make(chan tea.Msg, 8)
 	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
@@ -305,8 +305,7 @@ func TestSubagentRosterColdResumeLoadsOnlySelectedWorkspace(t *testing.T) {
 		)
 	}
 
-	result := requireSubagentRosterRefreshResult(t, model.requestSubagentRosterRefresh())
-	model.handleSubagentRosterRefreshResult(result)
+	applySubagentDirectorySnapshotForTest(model, 1, descriptors)
 	if !model.openSubagentRosterOverlay() {
 		t.Fatal("cold roster did not open")
 	}
@@ -321,6 +320,22 @@ func TestSubagentRosterColdResumeLoadsOnlySelectedWorkspace(t *testing.T) {
 	}
 	selectedCallID := model.subagentOutputOverlay.callID
 	selectedTaskID := model.subagentRosterTasks[selectedCallID].TaskID
+	service.eventBatch = protocoltaskstream.Batch{
+		ActivityID: model.subagentRosterTasks[selectedCallID].ActivityID,
+		Events: []eventstream.Envelope{{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-old", TurnID: selectedTaskID + ":1",
+			Scope: eventstream.ScopeSubagent, ScopeID: selectedTaskID,
+			ParentTool: &eventstream.ParentToolRelation{ToolCallID: selectedCallID, ToolName: "Spawn"},
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage, MessageID: "history-answer",
+				Content: schema.TextContent{Type: "text", Text: "restored complete child history"},
+			},
+		}, {
+			Kind: eventstream.KindLifecycle, SessionID: "session-old", TurnID: selectedTaskID + ":1",
+			Scope: eventstream.ScopeSubagent, ScopeID: selectedTaskID, Final: true,
+			ParentTool: &eventstream.ParentToolRelation{ToolCallID: selectedCallID, ToolName: "Spawn"},
+			Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
+		}}}
 	resolved := receiveTUITaskStreamMessage[taskStreamResolvedMsg](t, messages)
 	if next, _ := model.Update(resolved); next != nil {
 		model = next.(*Model)
@@ -328,23 +343,35 @@ func TestSubagentRosterColdResumeLoadsOnlySelectedWorkspace(t *testing.T) {
 	select {
 	case request := <-requests:
 		if request.TaskID != selectedTaskID {
-			t.Fatalf("selected workspace subscribed Task %q, want %q", request.TaskID, selectedTaskID)
+			t.Fatalf("selected workspace loaded Task %q, want %q", request.TaskID, selectedTaskID)
+		}
+		if request.ExpectedActivityID != model.subagentRosterTasks[selectedCallID].ActivityID {
+			t.Fatalf("selected workspace history activity = %q, want %q",
+				request.ExpectedActivityID, model.subagentRosterTasks[selectedCallID].ActivityID)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("selected cold workspace did not subscribe for lazy history")
+		t.Fatal("selected cold workspace did not request lazy history")
 	}
 	select {
 	case request := <-requests:
 		t.Fatalf("selecting one workspace also subscribed Task %q", request.TaskID)
 	default:
 	}
-	opened := receiveTUITaskStreamMessage[taskStreamOpenedMsg](t, messages)
-	if next, _ := model.Update(opened); next != nil {
+	historyBatch := receiveTUITaskStreamMessage[taskStreamHistoryBatchMsg](t, messages)
+	if next, _ := model.Update(historyBatch); next != nil {
 		model = next.(*Model)
 	}
-	model.closeSubagentOutputOverlay()
+	historyClosed := receiveTUITaskStreamMessage[taskStreamHistoryClosedMsg](t, messages)
+	if next, _ := model.Update(historyClosed); next != nil {
+		model = next.(*Model)
+	}
 	view := model.subagentOutputViews[selectedCallID]
-	view.historyResolved = true
+	plain := joinRenderedPlain(model.subagentOutputRows(view, 72, 16))
+	if !view.idleHistorySettled || !strings.Contains(plain, "restored complete child history") ||
+		strings.Contains(plain, "Loading subagent history") {
+		t.Fatalf("cold history settled=%v output=%q", view.idleHistorySettled, plain)
+	}
+	model.closeSubagentOutputOverlay()
 	if !model.openSubagentOutputOverlayView(selectedCallID, view) {
 		t.Fatal("cached terminal workspace did not reopen")
 	}
@@ -412,7 +439,7 @@ func TestSubagentRosterFooterClickTogglesOverlay(t *testing.T) {
 	}
 }
 
-func TestSubagentRosterRefreshUsesTerminalTaskDirectoryWithoutMutatingWorkspace(t *testing.T) {
+func TestSubagentDirectorySnapshotUsesTerminalStateWithoutMutatingWorkspace(t *testing.T) {
 	t.Parallel()
 
 	endedAt := time.Date(2026, time.August, 4, 14, 57, 0, 0, time.Local)
@@ -427,18 +454,7 @@ func TestSubagentRosterRefreshUsesTerminalTaskDirectoryWithoutMutatingWorkspace(
 	model.currentSessionID = "session-1"
 	view := addSubagentRosterTestView(model, "spawn-rhea", "rhea", "rhea[reviewer]: audit ownership", "running", time.Unix(100, 0), time.Time{})
 
-	cmd := model.requestSubagentRosterRefresh()
-	if cmd == nil {
-		t.Fatal("requestSubagentRosterRefresh() = nil")
-	}
-	raw := cmd()
-	msg, ok := raw.(subagentRosterRefreshResultMsg)
-	if !ok {
-		t.Fatalf("refresh result = %T", raw)
-	}
-	if next := model.handleSubagentRosterRefreshResult(msg); next != nil {
-		t.Fatal("terminal directory unexpectedly scheduled another refresh")
-	}
+	applySubagentDirectorySnapshotForTest(model, 1, service.list.Tasks)
 	if got := model.subagentRosterRunningCount(); got != 0 {
 		t.Fatalf("running count = %d, want terminal directory to close stale hidden view", got)
 	}
@@ -491,10 +507,7 @@ func TestSubagentRosterResumeLetsTerminalDirectorySupersedeHistoricalSpawn(t *te
 		t.Fatalf("pre-directory running count = %d, want provisional 3", got)
 	}
 
-	result := requireSubagentRosterRefreshResult(t, model.requestSubagentRosterRefresh())
-	if next := model.handleSubagentRosterRefreshResult(result); next != nil {
-		t.Fatal("terminal resumed directory unexpectedly scheduled another refresh")
-	}
+	applySubagentDirectorySnapshotForTest(model, 1, descriptors)
 	if got := model.subagentRosterRunningCount(); got != 0 {
 		t.Fatalf("resumed running count = %d, want terminal directory to win", got)
 	}
@@ -533,8 +546,7 @@ func TestSubagentRosterColdResumeLetsDirectorySupersedeFreshReplayShell(t *testi
 		t.Fatalf("cold replay shell start = %v, want a fresh local timestamp after terminal Task", view.block.StartedAt)
 	}
 
-	result := requireSubagentRosterRefreshResult(t, model.requestSubagentRosterRefresh())
-	model.handleSubagentRosterRefreshResult(result)
+	applySubagentDirectorySnapshotForTest(model, 1, service.list.Tasks)
 	if got := model.subagentRosterRunningCount(); got != 0 {
 		t.Fatalf("cold resumed running count = %d, want terminal directory to own provisional shell", got)
 	}
@@ -543,213 +555,190 @@ func TestSubagentRosterColdResumeLetsDirectorySupersedeFreshReplayShell(t *testi
 	}
 }
 
-func TestSubagentRosterRefreshTracksContinuedCompletedChild(t *testing.T) {
+func TestSubagentDirectoryTracksRepeatedActivityWithoutMutatingWorkspace(t *testing.T) {
 	t.Parallel()
 
 	oldEndedAt := time.Date(2026, time.August, 4, 14, 57, 0, 0, time.Local)
 	restartedAt := oldEndedAt.Add(time.Minute)
 	continuedEndedAt := restartedAt.Add(2 * time.Minute)
-	service := &subagentRosterTestTaskStreamService{list: protocoltaskstream.ListResult{Tasks: []protocoltaskstream.TaskDescriptor{transcriptTaskDescriptor(
-		"turn-1", task.StateCompleted, false, oldEndedAt,
-	)}}}
-	model := NewModel(Config{
-		NoColor: true, NoAnimation: true, TaskStreams: bindTaskStreamTestClient(t, service),
-	})
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.currentSessionID = "session-1"
 	view := addSubagentRosterTestView(model, "spawn-rhea", "rhea", "rhea[reviewer]: audit ownership", "completed", oldEndedAt.Add(-time.Minute), oldEndedAt)
 	view.block.SessionID = "turn-1"
 
-	completed := schema.ToolStatusCompleted
-	accepted := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
-		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "parent-turn-2", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "message-1", Status: &completed,
-			RawOutput: map[string]any{"accepted": true, "to": "rhea", "state": "running", "turn_id": "turn-2", "started_turn": true},
-			Meta:      acpToolNameMeta("SendMessage"),
-		},
-	})
-	if len(accepted) != 1 || !model.successfulSendMessageTargetsSubagent(accepted[0]) {
-		t.Fatalf("successful child-directed SendMessage did not resume roster refresh: %#v", accepted)
-	}
-	if model.successfulSendMessageTargetsSubagent(TranscriptEvent{
-		Scope: ACPProjectionMain, Kind: TranscriptEventTool, ToolName: "SendMessage",
-		ToolMessageTarget: "@rhea", Final: true, ToolError: true,
-	}) {
-		t.Fatal("failed SendMessage resumed roster refresh")
-	}
-
-	staleCmd := model.requestSubagentRosterRefresh()
-	if staleCmd == nil {
-		t.Fatal("initial roster refresh command = nil")
-	}
-	staleResult := requireSubagentRosterRefreshResult(t, staleCmd)
-	if duplicate := model.requestSubagentRosterRefresh(); duplicate != nil || model.subagentRosterRefreshQueued {
-		t.Fatal("ordinary refresh queued an unthrottled read behind the in-flight request")
-	}
-	service.list.Tasks[0] = transcriptTaskDescriptor("turn-2", task.StateRunning, true, restartedAt)
-	next, _ := model.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: accepted})
-	model = next.(*Model)
-	if !model.subagentRosterRefreshQueued {
-		t.Fatal("accepted SendMessage did not queue a refresh behind the in-flight directory read")
-	}
-	cmd := model.handleSubagentRosterRefreshResult(staleResult)
-	if cmd == nil {
-		t.Fatal("stale terminal directory result dropped queued continuation refresh")
-	}
-	result := requireSubagentRosterRefreshResult(t, cmd)
-	if next := model.handleSubagentRosterRefreshResult(result); next == nil {
-		t.Fatal("running continuation did not schedule another refresh")
-	}
-	if got := model.subagentRosterRunningCount(); got != 1 {
-		t.Fatalf("running count = %d, want continued child restored to running", got)
-	}
+	running := transcriptTaskDescriptor("turn-2", task.StateRunning, true, restartedAt)
+	running.ActivityID = "activity-2"
+	applySubagentDirectorySnapshotForTest(model, 1, []protocoltaskstream.TaskDescriptor{running})
 	rows := model.subagentRosterRows()
-	if len(rows) != 1 || rows[0].status != subagentOutputRunning || !rows[0].startedAt.Equal(restartedAt) || !rows[0].endedAt.IsZero() {
+	if len(rows) != 1 || rows[0].status != subagentOutputRunning || !rows[0].startedAt.Equal(restartedAt) {
 		t.Fatalf("continued running row = %#v", rows)
 	}
 
-	service.list.Tasks[0] = transcriptTaskDescriptor("turn-2", task.StateCompleted, false, continuedEndedAt)
-	cmd = model.handleSubagentRosterRefreshTick(subagentRosterRefreshTickMsg{
-		sessionID: result.sessionID, generation: result.generation,
-	})
-	if cmd == nil {
-		t.Fatal("scheduled continuation refresh = nil")
-	}
-	result = requireSubagentRosterRefreshResult(t, cmd)
-	if next := model.handleSubagentRosterRefreshResult(result); next != nil {
-		t.Fatal("completed continuation unexpectedly scheduled another refresh")
-	}
+	completed := transcriptTaskDescriptor("turn-2", task.StateCompleted, false, continuedEndedAt)
+	completed.ActivityID = "activity-2"
+	applySubagentDirectorySnapshotForTest(model, 2, []protocoltaskstream.TaskDescriptor{completed})
 	if got := model.subagentRosterRunningCount(); got != 0 {
-		t.Fatalf("running count = %d, want completed continuation idle", got)
+		t.Fatalf("running count = %d, want completed child idle", got)
 	}
 	rows = model.subagentRosterRows()
 	if len(rows) != 1 || rows[0].status != subagentOutputSucceeded || !rows[0].endedAt.Equal(continuedEndedAt) {
 		t.Fatalf("continued terminal row = %#v", rows)
 	}
-	if view.block.SessionID != "turn-1" || view.block.Status != "completed" || !view.block.EndedAt.Equal(oldEndedAt) {
-		t.Fatalf("directory continuation mutated retained child workspace: turn=%q status=%q ended=%v", view.block.SessionID, view.block.Status, view.block.EndedAt)
-	}
-}
 
-func TestSubagentRosterRefreshRetriesAcceptedSendAfterTransientListFailure(t *testing.T) {
-	t.Parallel()
-
-	oldEndedAt := time.Date(2026, time.August, 5, 9, 0, 0, 0, time.Local)
-	restartedAt := oldEndedAt.Add(time.Minute)
-	service := &subagentRosterTestTaskStreamService{
-		list: protocoltaskstream.ListResult{Tasks: []protocoltaskstream.TaskDescriptor{
-			transcriptTaskDescriptor("turn-2", task.StateRunning, true, restartedAt),
-		}},
-		listErrors: []error{context.DeadlineExceeded},
-	}
-	model := NewModel(Config{
-		NoColor: true, NoAnimation: true, TaskStreams: bindTaskStreamTestClient(t, service),
-	})
-	model.currentSessionID = "session-1"
-	view := addSubagentRosterTestView(model, "spawn-rhea", "rhea", "rhea[reviewer]: continue audit", "completed", oldEndedAt.Add(-time.Minute), oldEndedAt)
-	view.block.SessionID = "turn-1"
-	model.subagentRosterTasks = subagentRosterTasksByCallID([]protocoltaskstream.TaskDescriptor{
-		transcriptTaskDescriptor("turn-1", task.StateCompleted, false, oldEndedAt),
-	})
-
-	first := requireSubagentRosterRefreshResult(t, model.requestSubagentRosterRefreshAfterAcceptedSend())
-	if first.err == nil {
-		t.Fatal("first accepted-send roster refresh unexpectedly succeeded")
-	}
-	if cmd := model.handleSubagentRosterRefreshResult(first); cmd == nil {
-		t.Fatal("transient accepted-send roster failure did not schedule a retry")
-	}
-	if !model.subagentRosterRefreshWake || model.subagentRosterRefreshWakeRetries != 1 {
-		t.Fatalf("accepted-send retry state = (%v, %d), want pending wake and one failure", model.subagentRosterRefreshWake, model.subagentRosterRefreshWakeRetries)
-	}
-
-	retryCmd := model.handleSubagentRosterRefreshTick(subagentRosterRefreshTickMsg{
-		sessionID: first.sessionID, generation: first.generation,
-	})
-	result := requireSubagentRosterRefreshResult(t, retryCmd)
-	if result.err != nil {
-		t.Fatalf("accepted-send roster retry error = %v", result.err)
-	}
-	if next := model.handleSubagentRosterRefreshResult(result); next == nil {
-		t.Fatal("running continued child did not resume ordinary roster polling")
-	}
-	if model.subagentRosterRefreshWake || model.subagentRosterRefreshWakeRetries != 0 {
-		t.Fatalf("accepted-send retry state survived successful refresh: (%v, %d)", model.subagentRosterRefreshWake, model.subagentRosterRefreshWakeRetries)
-	}
+	third := transcriptTaskDescriptor("turn-3", task.StateRunning, true, continuedEndedAt.Add(time.Minute))
+	third.ActivityID = "activity-3"
+	applySubagentDirectorySnapshotForTest(model, 3, []protocoltaskstream.TaskDescriptor{third})
 	if got := model.subagentRosterRunningCount(); got != 1 {
-		t.Fatalf("running count after retry = %d, want 1", got)
+		t.Fatalf("third activity running count = %d, want 1", got)
 	}
-	if service.listCalls != 2 {
-		t.Fatalf("roster List calls = %d, want initial failure plus successful retry", service.listCalls)
+	if view.block.SessionID != "turn-1" || view.block.Status != "completed" || !view.block.EndedAt.Equal(oldEndedAt) {
+		t.Fatalf("directory snapshots mutated retained workspace: turn=%q status=%q ended=%v", view.block.SessionID, view.block.Status, view.block.EndedAt)
 	}
 }
 
-func TestSubagentRosterRefreshRetriesAcceptedSendAfterStaleSuccessfulList(t *testing.T) {
+func TestSubagentDirectoryClosedRetriesWithoutContentSubscription(t *testing.T) {
 	t.Parallel()
 
-	oldEndedAt := time.Date(2026, time.August, 5, 10, 0, 0, 0, time.Local)
-	continuedEndedAt := oldEndedAt.Add(time.Minute)
-	stale := transcriptTaskDescriptor("turn-1", task.StateCompleted, false, oldEndedAt)
-	service := &subagentRosterTestTaskStreamService{list: protocoltaskstream.ListResult{Tasks: []protocoltaskstream.TaskDescriptor{stale}}}
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.currentSessionID = "session-1"
+	addSubagentRosterTestView(model, "spawn-rhea", "rhea", "rhea[reviewer]: audit", "running", time.Unix(100, 0), time.Time{})
+	model.subagentDirectoryGeneration = 7
+	model.subagentDirectoryRevision = 12
+	cmd := model.handleSubagentDirectoryClosed(subagentDirectoryClosedMsg{
+		sessionID: "session-1", generation: 7,
+		err: errorcode.New(errorcode.Unavailable, "status stream interrupted"),
+	})
+	if cmd == nil || !model.subagentDirectoryRetryScheduled || model.subagentDirectoryRetries != 1 {
+		t.Fatalf("retry state = cmd:%v scheduled:%v attempts:%d", cmd != nil, model.subagentDirectoryRetryScheduled, model.subagentDirectoryRetries)
+	}
+	if len(model.taskStreamSubscriptions) != 0 {
+		t.Fatal("Task directory retry created a child content subscription")
+	}
+	if model.subagentDirectoryGeneration != 8 || model.subagentDirectoryRevision != 0 {
+		t.Fatalf("closed directory boundary = generation %d revision %d, want 8/0", model.subagentDirectoryGeneration, model.subagentDirectoryRevision)
+	}
+
+	// A queued snapshot from the closed connection must not repopulate the
+	// model after the boundary was invalidated.
+	model.handleSubagentDirectorySnapshot(subagentDirectorySnapshotMsg{
+		sessionID: "session-1", generation: 7,
+		snapshot: protocoltaskstream.DirectorySnapshot{Revision: 13, Tasks: []protocoltaskstream.TaskDescriptor{
+			transcriptTaskDescriptor("stale-turn", task.StateCompleted, false, time.Unix(130, 0)),
+		}},
+	})
+	if model.subagentDirectoryRevision != 0 {
+		t.Fatalf("stale closed-generation revision = %d, want ignored", model.subagentDirectoryRevision)
+	}
+
+	// Starting the replacement watch allocates its own generation. Its complete
+	// initial snapshot may legitimately restart at revision 1.
+	model.subagentDirectoryGeneration++
+	model.handleSubagentDirectorySnapshot(subagentDirectorySnapshotMsg{
+		sessionID: "session-1", generation: model.subagentDirectoryGeneration,
+		snapshot: protocoltaskstream.DirectorySnapshot{Revision: 1, Tasks: []protocoltaskstream.TaskDescriptor{
+			transcriptTaskDescriptor("turn-after-reconnect", task.StateRunning, true, time.Unix(140, 0)),
+		}},
+	})
+	if model.subagentDirectoryRevision != 1 || model.subagentRosterRunningCount() != 1 {
+		t.Fatalf("replacement directory = revision %d running %d, want 1/1", model.subagentDirectoryRevision, model.subagentRosterRunningCount())
+	}
+}
+
+func TestSubagentDirectoryNewActivityReopensVisibleContentBeforeParentFinal(t *testing.T) {
+	t.Parallel()
+
+	requests := make(chan protocoltaskstream.SubscribeRequest, 1)
+	subscription := newTUIProtocolTaskSubscription()
+	service := &subagentRosterTestTaskStreamService{subscribeRequests: requests, subscription: subscription}
+	messages := make(chan tea.Msg, 8)
+	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
+	defer sender.Close()
 	model := NewModel(Config{
-		NoColor: true, NoAnimation: true, TaskStreams: bindTaskStreamTestClient(t, service),
+		Context: context.Background(), NoColor: true, NoAnimation: true,
+		TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender,
 	})
 	model.currentSessionID = "session-1"
-	view := addSubagentRosterTestView(model, "spawn-rhea", "rhea", "rhea[reviewer]: continue audit", "completed", oldEndedAt.Add(-time.Minute), oldEndedAt)
+	view := addSubagentRosterTestView(model, "spawn-rhea", "rhea", "rhea[reviewer]: continue audit", "completed", time.Unix(90, 0), time.Unix(100, 0))
 	view.block.SessionID = "turn-1"
 	view.turnID = "turn-1"
 	view.historyResolved = true
+	view.idleHistorySettled = true
+	view.directoryActivityID = "activity:activity-1"
+	view.idleHistoryActivityID = view.directoryActivityID
 	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-rhea"}
-	model.subagentRosterTasks = subagentRosterTasksByCallID([]protocoltaskstream.TaskDescriptor{stale})
-
-	first := requireSubagentRosterRefreshResult(t, model.requestSubagentRosterRefreshAfterAcceptedSend("spawn-rhea"))
-	if first.err != nil {
-		t.Fatalf("first List() error = %v", first.err)
-	}
-	if cmd := model.handleSubagentRosterRefreshResult(first); cmd == nil {
-		t.Fatal("stale successful directory result did not schedule an accepted-send retry")
-	}
-	if !model.subagentRosterRefreshWake || model.subagentRosterRefreshWakeRetries != 1 {
-		t.Fatalf("stale-success retry state = (%v, %d), want pending wake and one retry", model.subagentRosterRefreshWake, model.subagentRosterRefreshWakeRetries)
-	}
-	if demand := model.taskStreamDemandForOwner("spawn-rhea", "rhea"); demand != taskStreamDemandNone {
-		t.Fatalf("stale terminal demand = %v, want cached history detached", demand)
-	}
-
-	service.list.Tasks[0] = transcriptTaskDescriptor("turn-2", task.StateCompleted, false, continuedEndedAt)
-	retryCmd := model.handleSubagentRosterRefreshTick(subagentRosterRefreshTickMsg{
-		sessionID: first.sessionID, generation: first.generation,
-	})
-	result := requireSubagentRosterRefreshResult(t, retryCmd)
-	if cmd := model.handleSubagentRosterRefreshResult(result); cmd != nil {
-		t.Fatal("new terminal activity unexpectedly kept roster polling")
-	}
-	if model.subagentRosterRefreshWake || model.subagentRosterRefreshWakeRetries != 0 {
-		t.Fatalf("accepted-send wake survived new activity: (%v, %d)", model.subagentRosterRefreshWake, model.subagentRosterRefreshWakeRetries)
-	}
+	model.taskStreamHandlesByID["task-1"] = "rhea"
+	model.taskStreamIDsByCallID["spawn-rhea"] = "task-1"
+	model.taskStreamCallIDsByID["task-1"] = "spawn-rhea"
+	initial := transcriptTaskDescriptor("turn-1", task.StateCompleted, false, time.Unix(100, 0))
+	initial.ActivityID = "activity-1"
+	applySubagentDirectorySnapshotForTest(model, 1, []protocoltaskstream.TaskDescriptor{initial})
 	if demand := model.taskStreamDemandForOwner("spawn-rhea", "rhea"); demand != taskStreamDemandVisibleSubagent {
-		t.Fatalf("new terminal activity demand = %v, want finite history subscription", demand)
+		t.Fatalf("idle cached demand = %v, want visible observation ownership", demand)
 	}
+
+	running := transcriptTaskDescriptor("turn-2", task.StateRunning, true, time.Unix(110, 0))
+	running.ActivityID = "activity-2"
+	applySubagentDirectorySnapshotForTest(model, 2, []protocoltaskstream.TaskDescriptor{running})
+	select {
+	case request := <-requests:
+		if request.TaskID != "task-1" || !request.Follow {
+			t.Fatalf("new activity Subscribe request = %#v", request)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("new child activity waited for the parent SendMessage Final before subscribing")
+	}
+	opened := receiveTUITaskStreamMessage[taskStreamOpenedMsg](t, messages)
+	if next, _ := model.Update(opened); next != nil {
+		model = next.(*Model)
+	}
+	base := eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2",
+		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", OccurredAt: time.Unix(111, 0),
+		Delivery:   &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-rhea", ToolName: "Spawn"},
+	}
+	first := base
+	first.Cursor = "cursor-turn-2-1"
+	first.Update = schema.ContentChunk{
+		SessionUpdate: schema.UpdateAgentMessage, MessageID: "answer-turn-2",
+		Content: schema.TextContent{Type: "text", Text: "Here's the "},
+	}
+	second := base
+	second.Cursor = "cursor-turn-2-2"
+	second.Update = schema.ContentChunk{
+		SessionUpdate: schema.UpdateAgentMessage, MessageID: "answer-turn-2",
+		Content: schema.TextContent{Type: "text", Text: "result:"},
+	}
+	go func() {
+		subscription.events <- first
+		subscription.events <- second
+	}()
+	for model.taskStreamCursors["task-1"] != second.Cursor {
+		batch := receiveTUITaskStreamMessage[taskStreamBatchMsg](t, messages)
+		if next, _ := model.Update(batch); next != nil {
+			model = next.(*Model)
+		}
+	}
+	plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
+	if !strings.Contains(plain, "Here's the result:") || strings.Contains(plain, "Here's the Here's the") {
+		t.Fatalf("second activity streaming projection = %q, want both chunks before parent Final without overlap", plain)
+	}
+	model.closeSubagentOutputOverlay()
 }
 
-func requireSubagentRosterRefreshResult(t *testing.T, cmd tea.Cmd) subagentRosterRefreshResultMsg {
-	t.Helper()
-	commands := []tea.Cmd{cmd}
-	for len(commands) > 0 {
-		current := commands[0]
-		commands = commands[1:]
-		if current == nil {
-			continue
-		}
-		switch msg := current().(type) {
-		case subagentRosterRefreshResultMsg:
-			return msg
-		case tea.BatchMsg:
-			commands = append(commands, msg...)
-		}
+func applySubagentDirectorySnapshotForTest(
+	model *Model,
+	revision uint64,
+	tasks []protocoltaskstream.TaskDescriptor,
+) tea.Cmd {
+	if model.subagentDirectoryGeneration == 0 {
+		model.subagentDirectoryGeneration = 1
 	}
-	t.Fatal("command omitted subagent roster refresh result")
-	return subagentRosterRefreshResultMsg{}
+	return model.handleSubagentDirectorySnapshot(subagentDirectorySnapshotMsg{
+		sessionID:  model.currentSessionID,
+		generation: model.subagentDirectoryGeneration,
+		snapshot:   protocoltaskstream.DirectorySnapshot{Revision: revision, Tasks: tasks},
+	})
 }
 
 func transcriptTaskDescriptor(turnID string, state task.State, running bool, updatedAt time.Time) protocoltaskstream.TaskDescriptor {
@@ -831,6 +820,9 @@ type subagentRosterTestTaskStreamService struct {
 	list              protocoltaskstream.ListResult
 	listErrors        []error
 	listCalls         int
+	eventRequests     chan protocoltaskstream.ReadRequest
+	eventBatch        protocoltaskstream.Batch
+	eventErr          error
 	subscribeRequests chan protocoltaskstream.SubscribeRequest
 	subscription      protocoltaskstream.Subscription
 }
@@ -844,8 +836,15 @@ func (s *subagentRosterTestTaskStreamService) List(context.Context, protocoltask
 	return s.list, nil
 }
 
-func (*subagentRosterTestTaskStreamService) Events(context.Context, protocoltaskstream.Principal, protocoltaskstream.ReadRequest) (protocoltaskstream.Batch, error) {
-	return protocoltaskstream.Batch{}, nil
+func (s *subagentRosterTestTaskStreamService) Events(_ context.Context, _ protocoltaskstream.Principal, request protocoltaskstream.ReadRequest) (protocoltaskstream.Batch, error) {
+	if s.eventRequests != nil {
+		s.eventRequests <- request
+	}
+	batch := s.eventBatch
+	if batch.ActivityID == "" {
+		batch.ActivityID = request.ExpectedActivityID
+	}
+	return batch, s.eventErr
 }
 
 func (s *subagentRosterTestTaskStreamService) Subscribe(_ context.Context, _ protocoltaskstream.Principal, request protocoltaskstream.SubscribeRequest) (protocoltaskstream.SubscribeResult, error) {

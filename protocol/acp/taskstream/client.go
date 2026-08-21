@@ -32,7 +32,11 @@ func BindClient(service Service, principal Principal) (Client, error) {
 		return nil, errors.New("taskstream: principal ID is required")
 	}
 	principal.Roles = append([]string(nil), principal.Roles...)
-	return &boundClient{service: service, principal: principal}, nil
+	client := &boundClient{service: service, principal: principal}
+	if _, ok := service.(DirectoryService); ok {
+		return &boundDirectoryClient{boundClient: client}, nil
+	}
+	return client, nil
 }
 
 func (c *boundClient) List(ctx context.Context, request ListRequest) (ListResult, error) {
@@ -53,4 +57,18 @@ func (c *boundClient) boundPrincipal() Principal {
 	return principal
 }
 
+type boundDirectoryClient struct {
+	*boundClient
+}
+
+func (c *boundDirectoryClient) WatchDirectory(ctx context.Context, request DirectoryWatchRequest) (DirectoryWatchResult, error) {
+	service, ok := c.service.(DirectoryService)
+	if !ok {
+		return DirectoryWatchResult{}, errors.New("taskstream: Task directory observation is unavailable")
+	}
+	return service.WatchDirectory(ctx, c.boundPrincipal(), request)
+}
+
 var _ Client = (*boundClient)(nil)
+var _ Client = (*boundDirectoryClient)(nil)
+var _ DirectoryClient = (*boundDirectoryClient)(nil)

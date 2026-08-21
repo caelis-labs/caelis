@@ -178,7 +178,7 @@ func (m *Model) handleSubagentRosterFooterMouse(mouse tea.Mouse, phase mousePhas
 				return true, nil
 			}
 			if m.openSubagentRosterOverlay() {
-				return true, tea.Batch(m.requestSubagentRosterRefresh(), m.resumeRunningAnimationIfNeeded())
+				return true, tea.Batch(m.ensureSubagentDirectoryWatch(), m.resumeRunningAnimationIfNeeded())
 			}
 			return true, nil
 		}

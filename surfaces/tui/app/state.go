@@ -356,6 +356,7 @@ type Model struct {
 	currentSessionID         string
 	taskStreamWanted         map[string]bool
 	taskStreamTokens         map[string]uint64
+	taskStreamCancels        map[string]context.CancelFunc
 	taskStreamSubscriptions  map[string]taskstream.Subscription
 	taskStreamCursors        map[string]string
 	taskStreamHandlesByID    map[string]string
@@ -364,18 +365,22 @@ type Model struct {
 	taskStreamResolveTokens  map[string]uint64
 	taskStreamResolveRetries map[string]int
 	taskStreamRetries        map[string]int
+	taskStreamHistoryStages  map[string]*subagentOutputHistoryStage
+	taskStreamHistoryTokens  map[string]uint64
+	taskStreamHistoryCancels map[string]context.CancelFunc
+	taskStreamHistoryRetries map[string]taskStreamHistoryRetryState
 	taskStreamNextToken      uint64
 	// Subagent output views are transient Surface projections keyed by the
 	// parent Spawn call. They are never persisted or used as Task identity.
-	subagentOutputViews              map[string]*subagentOutputView
-	subagentRosterTasks              map[string]taskstream.TaskDescriptor
-	subagentRosterRefreshPending     bool
-	subagentRosterRefreshQueued      bool
-	subagentRosterRefreshScheduled   bool
-	subagentRosterRefreshWake        bool
-	subagentRosterRefreshWakeRetries int
-	subagentRosterRefreshWakeTargets map[string]string
-	subagentRosterRefreshGeneration  uint64
+	subagentOutputViews             map[string]*subagentOutputView
+	subagentRosterTasks             map[string]taskstream.TaskDescriptor
+	subagentDirectorySubscription   taskstream.DirectorySubscription
+	subagentDirectoryCancel         context.CancelFunc
+	subagentDirectoryStarting       bool
+	subagentDirectoryRetryScheduled bool
+	subagentDirectoryRetries        int
+	subagentDirectoryRevision       uint64
+	subagentDirectoryGeneration     uint64
 
 	// Transient log replacement tracking — now uses block IDs.
 	transientBlockID string

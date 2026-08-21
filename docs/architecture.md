@@ -117,13 +117,16 @@ Document responsibilities are intentionally separate:
   uses its handle resolver; participant attach uses its explicit profile-and-
   effort selector. Both paths consume the same immutable snapshot and sealing
   rules before durable work is prepared.
-- `control/taskstream`: the Control-owned, Session-authorized directory and
-  transient record service for existing Tasks. A stream is addressed only by
+- `control/taskstream`: the Control-owned, Session-authorized Task directory,
+  lightweight current-status observation, and transient content-record
+  service for existing Tasks. A content stream is addressed only by
   `(SessionID, TaskID)`, while the directory exposes the Session-unique public
   Task handle used by people, models, and Task control. Surfaces resolve that
   handle or its typed parent-tool relation through the directory before using
-  the opaque TaskID; they never recover identity from `_meta`. This adds no
-  Execution lifecycle, durable output store, or schema.
+  the opaque TaskID; they never recover identity from `_meta`. Directory
+  snapshots are complete and replaceable, retain no Task content, and exist
+  only while at least one observer watches the Session. This adds no Execution
+  lifecycle, durable output store, or schema.
   `protocol/acp/taskstream` is the protocol adapter that projects those records
   into transient Envelopes for Surfaces.
 - `control/agents`: external ACP connection identity and lifecycle. Host-scoped
@@ -524,19 +527,48 @@ submission to the exact active parent Run after authoritative Task/sidecar
 completion and cannot delay the terminal producer. Task read/wait advances a
 single observation frontier and returns all unread retained per-activity
 FinalResponses without repeating an already observed activity. Task observers
-follow later child activities with the same absolute cursor without advertising
-Task input.
-The Task stream subscription declares whether it follows the complete subagent
-timeline. A following observer releases each completed activity's producer
-observation, waits on the stable Session/Task identity, and re-resolves the
-producer when the child starts another activity period. The absolute
-event/output frontier is persisted
-with the Task so replacement or rehydration cannot reset cursor numbering.
-Opening a cold terminal child workspace loads history on demand from its
-durable child Session. Provider-owned Sessions use a read-only ACP
-`session/load` selected by the Task's frozen placement; Task final responses are
-observation slices and never serve as transcript history.
-Command Tasks and non-following subscriptions still stop at terminal state.
+may follow later child activities with the same absolute cursor without
+advertising Task input. Every Runtime frame and snapshot carries the concrete
+ActivityID that produced it; Control prefers that identity over the Task
+descriptor captured when a long-lived observer attached, so a later Turn cannot
+be mislabeled as the previous activity. Separately, the lightweight Task
+directory publishes complete, replaceable Session snapshots when lifecycle,
+activity identity, routing identity, or capability state changes. Output-only
+Task commits do not wake it. Multiple clients may watch independently, and
+Control releases all process-local index state for a Session when its last
+directory observer closes.
+
+Content demand remains independent from status observation. A visible child
+workspace follows its stable Task identity across running and idle activity
+boundaries; when retained Runtime output no longer reaches its cursor,
+current-state recovery may begin at a later stable boundary and omit the
+unavailable running prefix. Hiding the workspace releases that live observer.
+At a terminal lifecycle, the Surface independently issues one finite history
+read without replacing the visible live observer. Control reconstructs the
+exact child endpoint from the Spawn Task's frozen placement and, when that
+endpoint advertises ACP `session/load`, loads the complete child transcript
+through the Agent, including user, assistant, reasoning, tool, and lifecycle
+updates. This applies equally to built-in and external ACP Agents; Control
+never reads a child Session store as a presentation shortcut. The short-lived
+ACP transport closes after load and does not resume execution. A
+Spawn that failed before creating a child Session remains observable through
+retained Runtime current state. An endpoint without `session/load` also uses
+that state while its Runtime exists; after Runtime release, Control may expose
+the bounded durable terminal Task result and lifecycle as current state. These
+compatibility paths make no complete-history guarantee and do not invent a
+compaction notice. Task final responses remain observation slices: the bounded
+terminal fallback is not transcript history. A cold terminal workspace performs
+only the finite history read until the directory observes a later running
+activity. Command Tasks and non-following subscriptions still stop at terminal
+state. The finite read is fenced by the directory's expected ActivityID before
+and after `session/load`; the Surface installs the invisible projection only
+when the response and current directory still name that activity. Once a child
+Session exists, its frozen endpoint placement is required and malformed routing
+fails closed instead of being disguised as a pre-Session fallback. A built-in
+history bridge receives a Host-issued process-scoped read capability; the ACP
+Surface only forwards that opaque assembly input, while the bridge validates it
+together with the durable parent/Task relation. Ordinary product ACP load,
+resume, prompt, and Session ownership remain unavailable for managed children.
 `SendMessage` output is only the input-dispatch acknowledgement; it does not
 manage subscriptions. Likewise, `turn_id` groups transcript events and never
 owns the Task or presentation lifecycle.

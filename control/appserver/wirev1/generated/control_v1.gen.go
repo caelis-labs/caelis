@@ -278,6 +278,7 @@ type AgentCommunication struct {
 
 type AgentCommunicationEnvelope struct {
 	Meta               *ACPMetadata        `json:"_meta,omitempty"`
+	ActivityId         *string             `json:"activity_id,omitempty"`
 	Actor              *string             `json:"actor,omitempty"`
 	AgentCommunication AgentCommunication  `json:"agent_communication"`
 	Cursor             string              `json:"cursor"`
@@ -343,6 +344,7 @@ type ApprovalReview struct {
 
 type ApprovalReviewEnvelope struct {
 	Meta           *ACPMetadata        `json:"_meta,omitempty"`
+	ActivityId     *string             `json:"activity_id,omitempty"`
 	Actor          *string             `json:"actor,omitempty"`
 	ApprovalReview ApprovalReview      `json:"approval_review"`
 	Cursor         string              `json:"cursor"`
@@ -638,6 +640,7 @@ type EnablePluginRequest struct {
 
 type Envelope struct {
 	Meta               *ACPMetadata        `json:"_meta,omitempty"`
+	ActivityId         *string             `json:"activity_id,omitempty"`
 	Actor              *string             `json:"actor,omitempty"`
 	AgentCommunication *AgentCommunication `json:"agent_communication,omitempty"`
 	ApprovalRequestId  *string             `json:"approval_request_id,omitempty"`
@@ -669,6 +672,7 @@ type Envelope struct {
 
 type EnvelopeBase struct {
 	Meta          *ACPMetadata        `json:"_meta,omitempty"`
+	ActivityId    *string             `json:"activity_id,omitempty"`
 	Actor         *string             `json:"actor,omitempty"`
 	Cursor        string              `json:"cursor"`
 	Delivery      Delivery            `json:"delivery"`
@@ -726,6 +730,7 @@ const (
 
 type ErrorEnvelope struct {
 	Meta          *ACPMetadata        `json:"_meta,omitempty"`
+	ActivityId    *string             `json:"activity_id,omitempty"`
 	Actor         *string             `json:"actor,omitempty"`
 	Cursor        string              `json:"cursor"`
 	Delivery      Delivery            `json:"delivery"`
@@ -802,6 +807,7 @@ type JSONValue = any
 
 type LifecycleEnvelope struct {
 	Meta          *ACPMetadata        `json:"_meta,omitempty"`
+	ActivityId    *string             `json:"activity_id,omitempty"`
 	Actor         *string             `json:"actor,omitempty"`
 	Cursor        string              `json:"cursor"`
 	Delivery      Delivery            `json:"delivery"`
@@ -857,6 +863,7 @@ type ModelUsageSnapshot struct {
 
 type NoticeEnvelope struct {
 	Meta          *ACPMetadata        `json:"_meta,omitempty"`
+	ActivityId    *string             `json:"activity_id,omitempty"`
 	Actor         *string             `json:"actor,omitempty"`
 	Cursor        string              `json:"cursor"`
 	Delivery      Delivery            `json:"delivery"`
@@ -918,6 +925,7 @@ type ParticipantBinding struct {
 
 type ParticipantEnvelope struct {
 	Meta          *ACPMetadata        `json:"_meta,omitempty"`
+	ActivityId    *string             `json:"activity_id,omitempty"`
 	Actor         *string             `json:"actor,omitempty"`
 	Cursor        string              `json:"cursor"`
 	Delivery      Delivery            `json:"delivery"`
@@ -1148,6 +1156,7 @@ type RequestPermission struct {
 
 type RequestPermissionEnvelope struct {
 	Meta              *ACPMetadata        `json:"_meta,omitempty"`
+	ActivityId        *string             `json:"activity_id,omitempty"`
 	Actor             *string             `json:"actor,omitempty"`
 	ApprovalRequestId string              `json:"approval_request_id"`
 	Cursor            string              `json:"cursor"`
@@ -1367,6 +1376,7 @@ type SessionSummary struct {
 
 type SessionUpdateEnvelope struct {
 	Meta          *ACPMetadata        `json:"_meta,omitempty"`
+	ActivityId    *string             `json:"activity_id,omitempty"`
 	Actor         *string             `json:"actor,omitempty"`
 	Cursor        string              `json:"cursor"`
 	Delivery      Delivery            `json:"delivery"`
@@ -1534,6 +1544,7 @@ type SteerRequest struct {
 type StringList []string
 
 type TaskDescriptor struct {
+	ActivityId     *string         `json:"activity_id,omitempty"`
 	AgentHandle    *string         `json:"agent_handle,omitempty"`
 	CurrentTurnId  *string         `json:"current_turn_id,omitempty"`
 	Handle         string          `json:"handle"`
@@ -1550,7 +1561,13 @@ type TaskDescriptor struct {
 	UpdatedAt      *time.Time      `json:"updated_at,omitempty"`
 }
 
+type TaskDirectorySnapshot struct {
+	Revision Uint64Decimal    `json:"revision"`
+	Tasks    []TaskDescriptor `json:"tasks,omitempty"`
+}
+
 type TaskEventBatch struct {
+	ActivityId     *string        `json:"activity_id,omitempty"`
 	BoundaryCursor *string        `json:"boundary_cursor,omitempty"`
 	Events         []Envelope     `json:"events,omitempty"`
 	ResumeMode     TaskResumeMode `json:"resume_mode"`
@@ -1687,4 +1704,4 @@ type WriteBase struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
-var OperationIDs = []string{"cancelParticipant", "cancelSessionTurn", "closeSession", "compactSession", "completeFiles", "completeSessions", "completeSkills", "completeSlashArguments", "configureSessionControllerMode", "configureSessionMode", "configureSessionPresentation", "configureSessionPresentationMode", "createSession", "getAgentStatus", "getHostStatus", "getPresentationCapabilities", "getSessionPresentation", "getSessionState", "getSessionStatus", "getTerminalOutput", "handoffAgent", "hostAddMarketplace", "hostAddPluginPath", "hostApplyAgentBindingSet", "hostBindAgent", "hostCompleteFiles", "hostCompleteSessions", "hostCompleteSkills", "hostCompleteSlashArguments", "hostConnectACP", "hostConnectModel", "hostCreateAgentRole", "hostDeleteAgentBindingSet", "hostDeleteAgentRole", "hostDeleteModel", "hostDisablePlugin", "hostDisconnectACP", "hostEnablePlugin", "hostGetACPPreparation", "hostGetAgentBindingStatus", "hostGetAgentStatus", "hostInspectPlugin", "hostInstallPlugin", "hostListAgents", "hostListDisconnectCandidates", "hostListMarketplaces", "hostListPlugins", "hostPrepareACP", "hostPrepareACPAuthentication", "hostRemoveMarketplace", "hostRemovePlugin", "hostResetAgentBinding", "hostResolveSkill", "hostSaveAgentBindingSet", "hostUpdateMarketplace", "hostUseModel", "initializeClient", "inspectPlugin", "killTerminal", "listAgents", "listMarketplaces", "listParticipantHandles", "listPlugins", "listSessionTasks", "listSessions", "prepareSandbox", "promptParticipant", "promptSession", "readTaskEvents", "reconnectSession", "refreshSandbox", "releaseTerminal", "repairSandbox", "resetSandbox", "resolveApproval", "resolveSkill", "setSandboxBackend", "shutdownHost", "startParticipant", "steerSession", "subscribeTaskEvents", "useSessionModel", "waitTerminal"}
+var OperationIDs = []string{"cancelParticipant", "cancelSessionTurn", "closeSession", "compactSession", "completeFiles", "completeSessions", "completeSkills", "completeSlashArguments", "configureSessionControllerMode", "configureSessionMode", "configureSessionPresentation", "configureSessionPresentationMode", "createSession", "getAgentStatus", "getHostStatus", "getPresentationCapabilities", "getSessionPresentation", "getSessionState", "getSessionStatus", "getTerminalOutput", "handoffAgent", "hostAddMarketplace", "hostAddPluginPath", "hostApplyAgentBindingSet", "hostBindAgent", "hostCompleteFiles", "hostCompleteSessions", "hostCompleteSkills", "hostCompleteSlashArguments", "hostConnectACP", "hostConnectModel", "hostCreateAgentRole", "hostDeleteAgentBindingSet", "hostDeleteAgentRole", "hostDeleteModel", "hostDisablePlugin", "hostDisconnectACP", "hostEnablePlugin", "hostGetACPPreparation", "hostGetAgentBindingStatus", "hostGetAgentStatus", "hostInspectPlugin", "hostInstallPlugin", "hostListAgents", "hostListDisconnectCandidates", "hostListMarketplaces", "hostListPlugins", "hostPrepareACP", "hostPrepareACPAuthentication", "hostRemoveMarketplace", "hostRemovePlugin", "hostResetAgentBinding", "hostResolveSkill", "hostSaveAgentBindingSet", "hostUpdateMarketplace", "hostUseModel", "initializeClient", "inspectPlugin", "killTerminal", "listAgents", "listMarketplaces", "listParticipantHandles", "listPlugins", "listSessionTasks", "listSessions", "prepareSandbox", "promptParticipant", "promptSession", "readTaskEvents", "reconnectSession", "refreshSandbox", "releaseTerminal", "repairSandbox", "resetSandbox", "resolveApproval", "resolveSkill", "setSandboxBackend", "shutdownHost", "startParticipant", "steerSession", "subscribeTaskEvents", "useSessionModel", "waitTerminal", "watchSessionTaskDirectory"}

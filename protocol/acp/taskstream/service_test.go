@@ -54,7 +54,7 @@ func TestProjectRecordKeepsTaskScopeAndTransientCursor(t *testing.T) {
 		Cursor: "cursor-7", Generation: "generation-1", Sequence: 7,
 		Task: controltaskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", AgentHandle: "orbit", Kind: task.KindSubagent,
-			State: task.StateCompleted, CurrentTurnID: "turn-2",
+			State: task.StateCompleted, ActivityID: "activity-2", CurrentTurnID: "turn-2",
 			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
 		Frame: &sdkstream.Frame{
@@ -68,7 +68,8 @@ func TestProjectRecordKeepsTaskScopeAndTransientCursor(t *testing.T) {
 		t.Fatalf("projectRecord() = %#v, want one lifecycle envelope", projected)
 	}
 	envelope := projected[0]
-	if envelope.Cursor != "cursor-7" || envelope.Scope != eventstream.ScopeSubagent || envelope.ScopeID != "task-1" {
+	if envelope.Cursor != "cursor-7" || envelope.Scope != eventstream.ScopeSubagent ||
+		envelope.ScopeID != "task-1" || envelope.ActivityID != "activity-2" {
 		t.Fatalf("projected identity = %#v", envelope)
 	}
 	if envelope.Delivery == nil || envelope.Delivery.Mode != eventstream.DeliveryTransient || envelope.Position == nil || envelope.Position.Transient == nil {

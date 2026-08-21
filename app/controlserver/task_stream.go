@@ -24,6 +24,73 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSONResult(w, result, err)
 }
 
+func (s *Server) watchTaskDirectory(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	directory, ok := s.config.Services.Tasks.(taskstream.DirectoryService)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "service unavailable")
+		return
+	}
+	result, err := directory.WatchDirectory(r.Context(), taskPrincipal(principal), taskstream.DirectoryWatchRequest{
+		SessionID: r.PathValue("session_id"),
+	})
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+	if result.Subscription == nil {
+		writeError(w, http.StatusServiceUnavailable, "service unavailable")
+		return
+	}
+	defer result.Subscription.Close()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming is unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	ticker := time.NewTicker(s.config.Heartbeat)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			_, _ = fmt.Fprint(w, ": heartbeat\n\n")
+			flusher.Flush()
+		case snapshot, open := <-result.Subscription.Snapshots():
+			if !open {
+				if streamErr := result.Subscription.Err(); streamErr != nil {
+					encoded, marshalErr := json.Marshal(taskstream.EncodeStreamError(streamErr))
+					if marshalErr == nil {
+						_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", taskstream.StreamErrorEventName, encoded)
+						flusher.Flush()
+					}
+				} else {
+					_, _ = fmt.Fprintf(w, "event: %s\ndata: {}\n\n", taskstream.StreamDoneEventName)
+					flusher.Flush()
+				}
+				return
+			}
+			data, marshalErr := marshalTaskDirectorySnapshot(snapshot)
+			if marshalErr != nil {
+				return
+			}
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", taskstream.DirectorySnapshotEventName, data)
+			flusher.Flush()
+		}
+	}
+}
+
 func (s *Server) taskEvents(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.requirePrincipal(w, r)
 	if !ok {
@@ -34,9 +101,10 @@ func (s *Server) taskEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.config.Services.Tasks.Events(r.Context(), taskPrincipal(principal), taskstream.ReadRequest{
-		SessionID: r.PathValue("session_id"),
-		TaskID:    r.PathValue("task_id"),
-		Cursor:    cursor,
+		SessionID:          r.PathValue("session_id"),
+		TaskID:             r.PathValue("task_id"),
+		Cursor:             cursor,
+		ExpectedActivityID: strings.TrimSpace(r.URL.Query().Get("activity_id")),
 	})
 	if err != nil {
 		writeMappedError(w, err)
@@ -145,14 +213,28 @@ func parseFollowQuery(r *http.Request) bool {
 
 type taskBatchWire struct {
 	Events         []json.RawMessage     `json:"events,omitempty"`
+	ActivityID     string                `json:"activity_id,omitempty"`
 	ResumeMode     taskstream.ResumeMode `json:"resume_mode"`
 	TransientGap   bool                  `json:"transient_gap,omitempty"`
 	BoundaryCursor string                `json:"boundary_cursor,omitempty"`
 }
 
+type taskDirectorySnapshotWire struct {
+	Revision string                      `json:"revision"`
+	Tasks    []taskstream.TaskDescriptor `json:"tasks,omitempty"`
+}
+
+func marshalTaskDirectorySnapshot(snapshot taskstream.DirectorySnapshot) ([]byte, error) {
+	return wirev1.Marshal(taskDirectorySnapshotWire{
+		Revision: strconv.FormatUint(snapshot.Revision, 10),
+		Tasks:    snapshot.Tasks,
+	})
+}
+
 func marshalTaskBatch(batch taskstream.Batch) ([]byte, error) {
 	wire := taskBatchWire{
 		Events:         make([]json.RawMessage, 0, len(batch.Events)),
+		ActivityID:     batch.ActivityID,
 		ResumeMode:     batch.ResumeMode,
 		TransientGap:   batch.TransientGap,
 		BoundaryCursor: batch.BoundaryCursor,

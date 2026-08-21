@@ -29,13 +29,24 @@ type subagentOutputView struct {
 	// block is the current transcript block. Historical blocks remain in
 	// document and are rendered in stream order; TurnID is internal routing
 	// metadata, never overlay identity or lifecycle authority.
-	block           *ParticipantTurnBlock
-	revision        uint64
-	renderReady     bool
-	renderScheduled bool
-	historyResolved bool
-	renderCache     subagentOutputRenderCache
-	seenProjections map[string]struct{}
+	block              *ParticipantTurnBlock
+	revision           uint64
+	renderReady        bool
+	renderScheduled    bool
+	historyResolved    bool
+	idleHistorySettled bool
+	// directoryActivityID is the latest Control-owned child activity identity.
+	// idleHistoryActivityID records the exact activity represented by the
+	// finite history projection. Transcript Turn IDs never participate in
+	// lifecycle or cache-validity decisions.
+	directoryActivityID string
+	// liveActivityID is the latest Control-owned activity observed by this
+	// Surface's attached content follower. It fences a lagging directory from
+	// reopening history for the previous activity.
+	liveActivityID        string
+	idleHistoryActivityID string
+	renderCache           subagentOutputRenderCache
+	seenProjections       map[string]struct{}
 }
 
 type subagentOutputRenderCache struct {
@@ -148,6 +159,8 @@ func (v *subagentOutputView) resetForCurrentState() {
 	v.turnID = ""
 	v.block = block
 	v.historyResolved = false
+	v.idleHistorySettled = false
+	v.idleHistoryActivityID = ""
 	v.seenProjections = nil
 	v.renderCache = subagentOutputRenderCache{}
 	v.touch(true)

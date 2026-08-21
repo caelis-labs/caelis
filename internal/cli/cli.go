@@ -357,6 +357,7 @@ func runWithProductClientOpener(
 			Clients: product.Clients,
 			AppName: product.Workspace.AppName, UserID: product.Workspace.UserID,
 			WorkspaceKey: product.Workspace.WorkspaceKey, WorkspaceCWD: product.Workspace.WorkspaceCWD,
+			ManagedSessionHistoryToken: strings.TrimSpace(os.Getenv(acpagentenv.EnvManagedSessionHistoryToken)),
 		})
 		if err != nil {
 			return err

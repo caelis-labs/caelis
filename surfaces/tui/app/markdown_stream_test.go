@@ -275,6 +275,62 @@ func TestActiveNarrativeReusesStablePrefixWhileRawTailGrows(t *testing.T) {
 	}
 }
 
+func TestActiveNarrativeFineGrainedChunksMatchFreshStableTailProjection(t *testing.T) {
+	clearGlamourCache()
+	theme := tuikit.DefaultTheme()
+	ctx := BlockRenderContext{
+		Width:    72,
+		Theme:    theme,
+		ThemeKey: themeRenderCacheKey(theme),
+	}
+	raw := strings.Join([]string{
+		"## 审查结论",
+		"",
+		"**具体问题**：长回答必须在流中保持稳定，不能依赖 Final 修复。",
+		"",
+		"1. Surface 只投影事件；",
+		"2. Control 持有生命周期；",
+		"3. 合法重复文本 haha 必须保留。",
+		"",
+		"```text",
+		"token alpha",
+		"token beta 中文",
+		"```",
+		"",
+		strings.Repeat("尾部继续增长，Markdown 标记 **保持原样**。", 18),
+	}, "\n")
+
+	incremental := &activeNarrativeBuffer{}
+	var accumulated strings.Builder
+	for index, chunk := range fineGrainedNarrativeChunks(raw) {
+		accumulated.WriteString(chunk)
+		incremental.Append(chunk)
+		if got := incremental.Text(); got != accumulated.String() {
+			t.Fatalf("incremental text after chunk %d = %q, want %q", index, got, accumulated.String())
+		}
+
+		fresh := &activeNarrativeBuffer{}
+		fresh.SetText(accumulated.String())
+		incrementalRows := incremental.RenderRowsAtWidth("incremental-fine-stream", "· ", tuikit.LineStyleAssistant, ctx.Width, ctx)
+		freshRows := fresh.RenderRowsAtWidth("fresh-fine-stream", "· ", tuikit.LineStyleAssistant, ctx.Width, ctx)
+		if got, want := joinRenderedPlain(incrementalRows), joinRenderedPlain(freshRows); got != want {
+			t.Fatalf("incremental projection diverged after chunk %d\n--- got ---\n%s\n--- want ---\n%s", index, got, want)
+		}
+	}
+}
+
+func fineGrainedNarrativeChunks(raw string) []string {
+	runes := []rune(raw)
+	chunks := make([]string, 0, (len(runes)+4)/5)
+	for index := 0; index < len(runes); {
+		size := 1 + index%7
+		end := min(index+size, len(runes))
+		chunks = append(chunks, string(runes[index:end]))
+		index = end
+	}
+	return chunks
+}
+
 func TestViewportSelectionKeepsReleaseSnapshotAcrossStreamFinalization(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 24})

@@ -262,6 +262,24 @@
         }
       }
     },
+    "/sessions/{session_id}/tasks/watch": {
+      "get": {
+        "operationId": "watchSessionTaskDirectory",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "responses": {
+          "200": {
+            "description": "Replaceable realtime Task status snapshots for one Session. Task output remains on independently subscribed content streams.",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}}
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    },
     "/sessions/{session_id}/tasks/{task_id}/events": {
       "get": {
         "operationId": "readTaskEvents",
@@ -269,6 +287,7 @@
           {"$ref": "#/components/parameters/SessionID"},
           {"$ref": "#/components/parameters/TaskID"},
           {"$ref": "#/components/parameters/After"},
+          {"$ref": "#/components/parameters/TaskActivityID"},
           {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string"}}
         ],
         "responses": {
@@ -1677,6 +1696,7 @@
     "parameters": {
       "SessionID": {"name": "session_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
       "TaskID": {"name": "task_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
+      "TaskActivityID": {"name": "activity_id", "in": "query", "schema": {"type": "string", "minLength": 1}},
       "PreparationRef": {"name": "preparation_ref", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
       "IdempotencyKey": {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 1}},
       "IfMatch": {"name": "If-Match", "in": "header", "schema": {"type": "string"}},
@@ -2311,6 +2331,7 @@
           "kind": {"$ref": "#/components/schemas/EnvelopeKind"}, "cursor": {"type": "string", "minLength": 1},
           "event_id": {"type": "string"}, "projection_id": {"type": "string"}, "position": {"$ref": "#/components/schemas/FeedPosition"},
           "session_id": {"type": "string"}, "handle_id": {"type": "string"}, "run_id": {"type": "string"}, "turn_id": {"type": "string"},
+          "activity_id": {"type": "string"},
           "occurred_at": {"type": "string", "format": "date-time"}, "scope": {"type": "string", "enum": ["main", "participant", "subagent"]},
           "scope_id": {"type": "string"}, "actor": {"type": "string"}, "participant_id": {"type": "string"}, "final": {"type": "boolean"},
           "parent_tool": {"$ref": "#/components/schemas/ParentToolRelation"}, "delivery": {"$ref": "#/components/schemas/Delivery"},
@@ -2352,17 +2373,28 @@
           "supports_cancel": {"type": "boolean"},
           "parent_tool": {"$ref": "#/components/schemas/TaskParentTool"},
           "participant_id": {"type": "string"},
+          "activity_id": {"type": "string"},
           "current_turn_id": {"type": "string"},
           "updated_at": {"type": "string", "format": "date-time"}
         }
       },
       "TaskList": {"type": "object", "additionalProperties": false, "properties": {"tasks": {"type": "array", "items": {"$ref": "#/components/schemas/TaskDescriptor"}}}},
+      "TaskDirectorySnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["revision"],
+        "properties": {
+          "revision": {"$ref": "#/components/schemas/Uint64Decimal"},
+          "tasks": {"type": "array", "items": {"$ref": "#/components/schemas/TaskDescriptor"}}
+        }
+      },
       "TaskEventBatch": {
         "type": "object",
         "additionalProperties": false,
         "required": ["resume_mode"],
         "properties": {
           "events": {"type": "array", "items": {"$ref": "#/components/schemas/Envelope"}},
+          "activity_id": {"type": "string"},
           "resume_mode": {"$ref": "#/components/schemas/TaskResumeMode"},
           "transient_gap": {"type": "boolean"},
           "boundary_cursor": {"type": "string"}

@@ -155,48 +155,78 @@ mutate Task. Subsequent target output alone advances the Task activity view and
 retains its normal ACP output correlation IDs.
 
 Subagent Task output keeps one absolute cursor across observed activities,
-independent from `supports_input` and `Task write`. Product subscriptions cover
-one activity period by default. A consumer that needs the complete child
-workspace sets `follow`; Runtime then releases the completed activity's producer
-observation, waits on the stable Session/Task identity, and re-resolves it when
-a later child activity begins. Absolute event/output frontiers are
-persisted with the Task so rehydration cannot reset cursor numbering. No Session-feed
-wakeup event or tool result controls this subscription. The `SendMessage` result
-is only an input-dispatch acknowledgement, and `turn_id` only groups transcript
+independent from `supports_input` and `Task write`. Product content
+subscriptions cover one activity period by default. A consumer that explicitly
+sets `follow` may release a completed activity's producer observation, wait on
+the stable Session/Task identity, and re-resolve it when a later activity
+begins. Runtime frames and snapshots carry their concrete ActivityID, and
+Control uses that per-record identity instead of the descriptor cached when the
+subscription opened. Absolute event/output frontiers are persisted with the
+Task so rehydration cannot reset cursor numbering.
+
+Current status is a separate Control capability. A Session directory observer
+receives complete, replaceable snapshots and may skip intermediate revisions;
+output-only Task commits are folded away. The index retains no transcript or
+Task output and is released when the Session's last observer closes. Multiple
+Surfaces may watch the same Session independently. No Session-feed wakeup,
+parent Final, or tool result controls either stream. The `SendMessage` result is
+only an input-dispatch acknowledgement, and `turn_id` only groups transcript
 events.
 
-The TUI opens a following subscription when the child workspace overlay becomes
-visible, catches up from its last cursor, and renders all child events through
-the same transcript blocks used by the main workspace. Closing the overlay
-cancels only that subscription and retains the Document and cursor; reopening
-resumes.
+The TUI keeps one lightweight directory observer for its selected Session once
+subagents are discoverable. Each visible child overlay independently owns its
+content demand. Its live observer follows the stable Task identity across
+running and idle activity boundaries, starting from the last stable cursor and
+rendering updates through the same transcript blocks used by the main
+workspace. If that cursor is older than Runtime retention, the overlay accepts
+the current stable boundary and an incomplete running prefix; it does not
+synthesize a compaction message. Hiding the overlay closes the live observer
+while retaining its Document and cursor. Once a visible live stream delivers a
+terminal lifecycle, the TUI starts an independent finite idle read in an
+invisible projection and atomically installs it only after a clean,
+activity-matched completion; the live observer remains parked for the next
+activity. For Agents that advertise `session/load`, that read is the complete
+ACP history. A cold terminal overlay starts with only the finite history read
+and attaches a live observer when the directory later reports running. If
+Spawn failed before creating a child Session,
+Control returns retained Runtime current state. An endpoint without
+`session/load` uses retained Runtime current state when available and otherwise
+the bounded durable terminal fallback described below; neither path claims a
+complete prefix. A later running directory
+snapshot reopens live content immediately, without waiting for the parent Turn
+or Final response. The finite request carries the directory ActivityID and
+Control verifies the same Task activity again after the Agent returns; a stale
+read is discarded rather than replacing newer live content.
 Child-originated Agent communication in the main TUI is one compact
 `Received <handle>[<agent>]: <preview>` row rather than a User transcript block.
 When its trusted participant identity resolves to a retained Spawn owner, the
 whole row opens that child's existing workspace overlay.
-When the host restarts, viewing a terminal child must not activate an execution
-Runtime merely to recover presentation history. Control Task-stream first tries
-the live Runtime; if that Session Runtime no longer exists, or its terminal
-current-state snapshot reports that the requested assistant prefix was
-truncated, it lazily rebuilds assistant-message history from the durable child
-Session used by ACP `session/load`. A locally owned child is loaded from the
-product Session store. A provider-owned child that is absent there is loaded
-through a short-lived read-only ACP transport using the Task's frozen placement
-and child Session identity; Control calls `session/load`, closes only that
-transport, and never substitutes the Task result for transcript history. Task
-directory listing never loads child Sessions: only opening one child workspace
-with no resolved in-memory history may subscribe and load that selected child.
-The finite historical subscription excludes tool and reasoning history and
-closes after catch-up. Because that filtered Session history cannot recover the
-original mixed-event positions, Control exposes it as one current-state batch
-at the persisted absolute frontier and never renumbers assistant messages into
-apparently exact cursors. Reopening a terminal workspace uses its retained
-presentation cache. This projection changes neither Task lifecycle nor parent
-model context; the Task directory remains the current-state authority, and
-later child output reopens live observation after an input.
-Terminal lifecycle frames finalize their transcript segment but do not close a
-visible following workspace, so a later child activity appears in chronological
-order without exposing Turn identifiers in the UX.
+Viewing an idle child must not activate an execution Runtime merely to recover
+presentation history. On demand, Control reconstructs the exact child endpoint
+from the Spawn Task's frozen placement and child Session identity, opens a
+short-lived read-only ACP transport, calls `session/load`, and closes that
+transport without resuming or closing the durable Session. Built-in and
+external ACP children that advertise this capability use the same Agent-owned
+history path; Control never reads a child Session file. The complete ACP replay
+retains user, assistant, reasoning, tool, and lifecycle updates. A pre-Session
+Spawn failure stays on the retained Runtime current-state path. If an Agent
+does not support `session/load`, Control also tries retained Runtime current
+state; when that Runtime has already been released, it may expose the bounded
+durable terminal Task result plus lifecycle as a current-state fallback. That
+fallback is not transcript history and makes no completeness claim. Task
+directory observation never loads child history: only opening an unresolved
+idle workspace or observing a new terminal activity does so. The finite
+history read closes after catch-up, while reopening an already settled idle
+workspace uses its retained presentation cache. This
+projection changes neither Task lifecycle nor parent model context; the
+directory remains the current-state authority, and later child output reopens
+live observation after input. When a child Session exists, Control also requires
+the Spawn Task's frozen endpoint placement; invalid routing fails closed. A
+built-in product ACP bridge may honor the exact durable parent/Task relation on
+read-only `session/load` only after AppServer principal authorization and a
+Host-issued process-scoped history capability. Ordinary ACP Surfaces never
+receive that capability. The read does not claim the managed Session and cannot
+authorize resume or prompt.
 
 The product ACP parent projection also follows each anchored subagent Task while
 that parent Prompt remains active, so a later child activity stays visible

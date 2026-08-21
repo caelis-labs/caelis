@@ -129,12 +129,13 @@ func TestFramesForSnapshotBuildsTerminalFrame(t *testing.T) {
 
 	exitCode := 7
 	frames := FramesForSnapshot(Snapshot{
-		Ref:       Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "term-1"},
-		Cursor:    Cursor{Output: 12, Events: 3},
-		FinalText: "ignored for command exit",
-		State:     "failed",
-		Running:   false,
-		ExitCode:  &exitCode,
+		Ref:        Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "term-1"},
+		ActivityID: "activity-1",
+		Cursor:     Cursor{Output: 12, Events: 3},
+		FinalText:  "ignored for command exit",
+		State:      "failed",
+		Running:    false,
+		ExitCode:   &exitCode,
 	})
 	if len(frames) != 1 {
 		t.Fatalf("frames = %#v, want one generated close frame", frames)
@@ -142,6 +143,9 @@ func TestFramesForSnapshotBuildsTerminalFrame(t *testing.T) {
 	close := frames[0]
 	if !close.Closed || close.Running || close.State != "failed" || close.Text != "" {
 		t.Fatalf("close frame = %#v, want failed contentless close", close)
+	}
+	if close.ActivityID != "activity-1" {
+		t.Fatalf("close activity = %q, want activity-1", close.ActivityID)
 	}
 	if close.ExitCode == nil || *close.ExitCode != exitCode {
 		t.Fatalf("close exit code = %#v, want %d", close.ExitCode, exitCode)
@@ -156,17 +160,18 @@ func TestFramesForSnapshotNormalizesExistingClose(t *testing.T) {
 	t.Parallel()
 
 	frames := FramesForSnapshot(Snapshot{
-		Ref:       Ref{SessionID: "session-1", TaskID: "task-1"},
-		Cursor:    Cursor{Output: 4},
-		FinalText: "child result",
-		State:     "completed",
-		Running:   false,
-		Frames:    []Frame{{Closed: true}},
+		Ref:        Ref{SessionID: "session-1", TaskID: "task-1"},
+		ActivityID: "activity-2",
+		Cursor:     Cursor{Output: 4},
+		FinalText:  "child result",
+		State:      "completed",
+		Running:    false,
+		Frames:     []Frame{{Closed: true}},
 	})
 	if len(frames) != 1 {
 		t.Fatalf("frames = %#v, want one normalized close frame", frames)
 	}
-	if got := frames[0]; !got.Closed || got.Running || got.Text != "child result" || got.State != "completed" || got.Ref.TaskID != "task-1" {
+	if got := frames[0]; !got.Closed || got.Running || got.Text != "child result" || got.State != "completed" || got.Ref.TaskID != "task-1" || got.ActivityID != "activity-2" {
 		t.Fatalf("normalized close = %#v, want snapshot terminal semantics", got)
 	}
 }

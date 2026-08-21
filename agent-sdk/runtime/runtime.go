@@ -39,7 +39,11 @@ type Config struct {
 	// TaskActivityChanged reports a committed Task terminal transition. Product
 	// hosts may use it to re-evaluate an in-memory Runtime reference; it does not
 	// authorize work or replace the durable Task store.
-	TaskActivityChanged   func(session.SessionRef)
+	TaskActivityChanged func(session.SessionRef)
+	// TaskCommitted reports a cloned Task entry after its durable mutation commits.
+	// Product Control may use it to advance a lightweight status index; the
+	// callback never owns Task lifecycle or content delivery.
+	TaskCommitted         func(*task.Entry)
 	Subagents             agent.SubagentRunner
 	LifecycleInterceptors []agent.LifecycleInterceptor
 	TraceSink             agent.TraceSink
@@ -137,6 +141,7 @@ func New(cfg Config) (*Runtime, error) {
 		r.compactor = newCodexStyleCompactor(r.compaction)
 	}
 	r.tasks = newTaskRuntime(r, cfg.TaskStore, cfg.TaskActivityChanged)
+	r.tasks.taskCommitted = cfg.TaskCommitted
 	r.terminals = newStreamService(r.tasks)
 	return r, nil
 }

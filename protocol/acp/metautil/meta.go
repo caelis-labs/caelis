@@ -52,9 +52,12 @@ const (
 
 	// RuntimeSession classifies a product-owned ACP Session creation request.
 	// The receiving Runtime must normalize recognized values before persistence.
-	RuntimeSession             = "session"
-	RuntimeSessionKind         = "kind"
-	RuntimeSessionParentID     = "parent_session_id"
+	RuntimeSession         = "session"
+	RuntimeSessionKind     = "kind"
+	RuntimeSessionParentID = "parent_session_id"
+	// RuntimeSessionHistoryToken is a transient Host-to-bridge capability. It
+	// must never be normalized into durable Session metadata.
+	RuntimeSessionHistoryToken = "history_token"
 	RuntimeSessionKindSubagent = "subagent"
 )
 

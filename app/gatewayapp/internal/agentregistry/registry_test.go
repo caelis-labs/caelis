@@ -44,10 +44,11 @@ func TestConfiguredSelfAgentAttachesManagedHostAndCarriesSessionOptions(t *testi
 		}
 	}
 	if got, want := agent.Env, map[string]string{
-		"CAELIS_CONTROL_TOKEN":      "",
-		"CAELIS_CONTROL_TOKEN_FILE": "",
-		acpagentenv.EnvWorkspaceKey: "workspace",
-		acpagentenv.EnvWorkspaceCWD: "/workspace",
+		"CAELIS_CONTROL_TOKEN":                    "",
+		"CAELIS_CONTROL_TOKEN_FILE":               "",
+		acpagentenv.EnvManagedSessionHistoryToken: "",
+		acpagentenv.EnvWorkspaceKey:               "workspace",
+		acpagentenv.EnvWorkspaceCWD:               "/workspace",
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("configuredSelfAgent() env = %#v, want inherited raw credentials scrubbed %#v", got, want)
 	}
@@ -78,6 +79,9 @@ func TestConfiguredSelfAgentWithoutChildBridgeScrubsParentCredentials(t *testing
 	}
 	if got := agent.Env["CAELIS_CONTROL_TOKEN_FILE"]; got != "" {
 		t.Fatalf("CAELIS_CONTROL_TOKEN_FILE = %q, want scrubbed", got)
+	}
+	if got := agent.Env[acpagentenv.EnvManagedSessionHistoryToken]; got != "" {
+		t.Fatalf("%s = %q, want scrubbed", acpagentenv.EnvManagedSessionHistoryToken, got)
 	}
 	if strings.Contains(strings.Join(agent.Args, " "), "control-token") {
 		t.Fatalf("configuredSelfAgent() args = %#v, contain unavailable child credential", agent.Args)

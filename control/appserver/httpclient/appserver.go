@@ -47,4 +47,5 @@ var (
 	_ appserver.PresentationClient  = (*Client)(nil)
 	_ appserver.TerminalClient      = (*Client)(nil)
 	_ taskstream.Client             = (*TaskClient)(nil)
+	_ taskstream.DirectoryClient    = (*TaskClient)(nil)
 )

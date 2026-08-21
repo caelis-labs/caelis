@@ -84,8 +84,9 @@ func (t *subagentTask) seedStreamFromResult(result delegation.Result) {
 		return
 	}
 	t.appendStreamFrameLocked(stream.Frame{
-		Running: false,
-		Event:   t.resultStreamEvent(text),
+		ActivityID: strings.TrimSpace(t.activityID),
+		Running:    false,
+		Event:      t.resultStreamEvent(text),
 	})
 }
 
@@ -175,8 +176,9 @@ func (t *subagentTask) retainCompletedFinalLocked(text string) {
 				SessionID: strings.TrimSpace(t.sessionRef.SessionID),
 				TaskID:    strings.TrimSpace(t.ref.TaskID), TerminalID: previousTurnID,
 			},
-			Event:     t.resultStreamEventForTurnAt(t.latestFinalText, t.latestFinalTurnSeq, t.latestFinalAt),
-			UpdatedAt: t.latestFinalAt,
+			ActivityID: strings.TrimSpace(t.latestFinalActivityID),
+			Event:      t.resultStreamEventForTurnAt(t.latestFinalText, t.latestFinalTurnSeq, t.latestFinalAt),
+			UpdatedAt:  t.latestFinalAt,
 		}, t.latestFinalOrder)
 	}
 	completedAt := time.Now()
@@ -184,6 +186,7 @@ func (t *subagentTask) retainCompletedFinalLocked(text string) {
 	t.latestFinalTurnSeq = turnSeq
 	t.latestFinalOrder = order
 	t.latestFinalAt = completedAt
+	t.latestFinalActivityID = strings.TrimSpace(t.activityID)
 	t.semanticRetention.dropAssistantTurn(turnID)
 	t.semanticRetention.protectLatestFinal(turnID, order)
 }
@@ -373,6 +376,9 @@ func (t *subagentTask) applyStreamFramesLocked(frames []stream.Frame) {
 		}
 		if frame.Event != nil || text != "" || frame.Closed {
 			cloned := stream.CloneFrame(frame)
+			if cloned.ActivityID == "" {
+				cloned.ActivityID = strings.TrimSpace(t.activityID)
+			}
 			if cloned.Text == "" {
 				cloned.Text = text
 			}
@@ -626,10 +632,11 @@ func (t *subagentTask) ensureTerminalStreamFrameLocked() {
 			TaskID:     strings.TrimSpace(t.ref.TaskID),
 			TerminalID: subagentTurnID(t.ref.TaskID, t.turnSeq),
 		},
-		State:     string(t.state),
-		Running:   false,
-		Closed:    true,
-		UpdatedAt: time.Now(),
+		ActivityID: strings.TrimSpace(t.activityID),
+		State:      string(t.state),
+		Running:    false,
+		Closed:     true,
+		UpdatedAt:  time.Now(),
 	})
 	t.streamTerminalFramed = true
 }

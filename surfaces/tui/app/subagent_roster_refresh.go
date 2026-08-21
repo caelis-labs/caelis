@@ -1,6 +1,8 @@
 package tuiapp
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -9,195 +11,236 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
-const (
-	subagentRosterRefreshInterval        = time.Second
-	subagentRosterAcceptedSendRetryLimit = 4
-)
+type subagentDirectoryOpenedMsg struct {
+	sessionID    string
+	generation   uint64
+	subscription taskstream.DirectorySubscription
+}
 
-type subagentRosterRefreshResultMsg struct {
+type subagentDirectorySnapshotMsg struct {
 	sessionID  string
 	generation uint64
-	tasks      []taskstream.TaskDescriptor
+	snapshot   taskstream.DirectorySnapshot
+}
+
+type subagentDirectoryClosedMsg struct {
+	sessionID  string
+	generation uint64
 	err        error
 }
 
-type subagentRosterRefreshTickMsg struct {
+type subagentDirectoryRetryMsg struct {
 	sessionID  string
 	generation uint64
 }
 
-// requestSubagentRosterRefresh reads only the canonical Task directory. It
-// does not subscribe to hidden child output and cannot advance Task lifecycle.
-func (m *Model) requestSubagentRosterRefresh() tea.Cmd {
-	return m.requestSubagentRosterRefreshCommand(false)
-}
-
-func (m *Model) requestSubagentRosterRefreshAfterAcceptedSend(callIDs ...string) tea.Cmd {
-	return m.requestSubagentRosterRefreshCommand(true, callIDs...)
-}
-
-func (m *Model) requestSubagentRosterRefreshCommand(afterAcceptedSend bool, callIDs ...string) tea.Cmd {
-	if m == nil || m.cfg.TaskStreams == nil || m.subagentRosterCount() == 0 {
+// ensureSubagentDirectoryWatch attaches one lightweight Session status
+// observer for this TUI. It never subscribes to child content or advances Task
+// lifecycle; visible overlays reconcile their own independent content demand
+// from the resulting snapshots.
+func (m *Model) ensureSubagentDirectoryWatch() tea.Cmd {
+	if m == nil || m.cfg.TaskStreams == nil || m.cfg.ProgramSender == nil ||
+		m.subagentRosterCount() == 0 || m.subagentDirectoryStarting ||
+		m.subagentDirectorySubscription != nil || m.subagentDirectoryRetryScheduled {
 		return nil
 	}
-	if afterAcceptedSend {
-		m.markSubagentRosterRefreshWakeTargets(callIDs...)
-		m.subagentRosterRefreshWake = true
-		m.subagentRosterRefreshWakeRetries = 0
-	}
-	if m.subagentRosterRefreshPending {
-		m.subagentRosterRefreshQueued = m.subagentRosterRefreshQueued || afterAcceptedSend
-		return nil
-	}
-	if m.subagentRosterRefreshScheduled {
+	directory, ok := m.cfg.TaskStreams.(taskstream.DirectoryClient)
+	if !ok {
 		return nil
 	}
 	sessionID := strings.TrimSpace(m.currentSessionID)
 	if sessionID == "" {
 		return nil
 	}
-	m.subagentRosterRefreshPending = true
-	m.subagentRosterRefreshGeneration++
-	generation := m.subagentRosterRefreshGeneration
-	service := m.cfg.TaskStreams
-	ctx := contextOrBackground(m.cfg.Context)
-	return func() tea.Msg {
-		result, err := service.List(ctx, taskstream.ListRequest{SessionID: sessionID})
-		return subagentRosterRefreshResultMsg{
-			sessionID: sessionID, generation: generation, tasks: result.Tasks, err: err,
+
+	m.subagentDirectoryGeneration++
+	generation := m.subagentDirectoryGeneration
+	ctx, cancel := context.WithCancel(m.cfg.ProgramSender.observationContext(m.cfg.Context))
+	m.subagentDirectoryCancel = cancel
+	m.subagentDirectoryStarting = true
+	cfg := m.cfg
+	if !cfg.ProgramSender.startForwarder(func() {
+		result, err := directory.WatchDirectory(ctx, taskstream.DirectoryWatchRequest{SessionID: sessionID})
+		if err != nil {
+			cfg.ProgramSender.SendMsg(subagentDirectoryClosedMsg{sessionID: sessionID, generation: generation, err: err})
+			return
+		}
+		subscription := result.Subscription
+		cfg.ProgramSender.SendMsg(subagentDirectoryOpenedMsg{
+			sessionID: sessionID, generation: generation, subscription: subscription,
+		})
+		if subscription == nil {
+			cfg.ProgramSender.SendMsg(subagentDirectoryClosedMsg{
+				sessionID: sessionID, generation: generation,
+				err: errors.New("task directory subscription is unavailable"),
+			})
+			return
+		}
+		defer subscription.Close()
+		for {
+			snapshot, open := latestSubagentDirectorySnapshot(ctx, subscription.Snapshots())
+			if !open {
+				cfg.ProgramSender.SendMsg(subagentDirectoryClosedMsg{
+					sessionID: sessionID, generation: generation, err: subscription.Err(),
+				})
+				return
+			}
+			cfg.ProgramSender.SendMsg(subagentDirectorySnapshotMsg{
+				sessionID: sessionID, generation: generation, snapshot: snapshot,
+			})
+		}
+	}) {
+		cancel()
+		m.subagentDirectoryCancel = nil
+		m.subagentDirectoryStarting = false
+	}
+	return nil
+}
+
+func latestSubagentDirectorySnapshot(
+	ctx context.Context,
+	snapshots <-chan taskstream.DirectorySnapshot,
+) (taskstream.DirectorySnapshot, bool) {
+	select {
+	case <-ctx.Done():
+		return taskstream.DirectorySnapshot{}, false
+	case snapshot, open := <-snapshots:
+		if !open {
+			return taskstream.DirectorySnapshot{}, false
+		}
+		for {
+			select {
+			case newer, newerOpen := <-snapshots:
+				if !newerOpen {
+					return snapshot, true
+				}
+				snapshot = newer
+			default:
+				return snapshot, true
+			}
 		}
 	}
 }
 
-func (m *Model) handleSubagentRosterRefreshResult(msg subagentRosterRefreshResultMsg) tea.Cmd {
+func (m *Model) handleSubagentDirectoryOpened(msg subagentDirectoryOpenedMsg) tea.Cmd {
+	if m == nil || msg.subscription == nil {
+		return nil
+	}
+	if msg.sessionID != m.currentSessionID || msg.generation != m.subagentDirectoryGeneration {
+		_ = msg.subscription.Close()
+		return nil
+	}
+	if previous := m.subagentDirectorySubscription; previous != nil && previous != msg.subscription {
+		_ = previous.Close()
+	}
+	m.subagentDirectoryStarting = false
+	m.subagentDirectorySubscription = msg.subscription
+	return nil
+}
+
+func (m *Model) handleSubagentDirectorySnapshot(msg subagentDirectorySnapshotMsg) tea.Cmd {
 	if m == nil || msg.sessionID != m.currentSessionID ||
-		msg.generation != m.subagentRosterRefreshGeneration {
+		msg.generation != m.subagentDirectoryGeneration {
 		return nil
 	}
-	m.subagentRosterRefreshPending = false
-	if msg.err == nil {
-		m.subagentRosterTasks = subagentRosterTasksByCallID(msg.tasks)
-		// Directory state changes the overlay title and its empty-state copy even
-		// though it deliberately does not mutate retained child transcript blocks.
-		for callID, view := range m.subagentOutputViews {
-			if view != nil {
-				view.participantID = strings.TrimSpace(m.subagentRosterTasks[callID].ParticipantID)
-				view.touch(true)
-			}
-		}
-		// List itself remains metadata-only. Reconcile after installing the
-		// directory snapshot so an already-visible workspace can attach when a
-		// later SendMessage starts new activity, or detach after its cached
-		// terminal history has resolved. Hidden children never gain demand here.
-		m.reconcileSubagentOutputTaskStreams()
-	}
-	if m.subagentRosterRefreshQueued {
-		m.subagentRosterRefreshQueued = false
-		m.subagentRosterRefreshScheduled = false
-		return m.requestSubagentRosterRefresh()
-	}
-	if msg.err == nil && m.subagentRosterRefreshWake {
-		m.resolveSubagentRosterRefreshWakeTargets()
-	}
-	if m.subagentRosterRefreshWake && (msg.err == nil || taskStreamRetryable(msg.err)) {
-		m.subagentRosterRefreshWakeRetries++
-		if m.subagentRosterRefreshWakeRetries <= subagentRosterAcceptedSendRetryLimit {
-			m.subagentRosterRefreshScheduled = true
-			sessionID := msg.sessionID
-			generation := msg.generation
-			return tea.Tick(subagentRosterRefreshInterval, func(time.Time) tea.Msg {
-				return subagentRosterRefreshTickMsg{sessionID: sessionID, generation: generation}
-			})
-		}
-		m.clearSubagentRosterRefreshWake()
-	} else {
-		m.clearSubagentRosterRefreshWake()
-	}
-	if !m.subagentRosterHasRunning() {
-		m.subagentRosterRefreshScheduled = false
+	if m.subagentDirectoryRevision != 0 && msg.snapshot.Revision <= m.subagentDirectoryRevision {
 		return nil
 	}
-	m.subagentRosterRefreshScheduled = true
-	sessionID := msg.sessionID
-	generation := msg.generation
-	return tea.Tick(subagentRosterRefreshInterval, func(time.Time) tea.Msg {
-		return subagentRosterRefreshTickMsg{sessionID: sessionID, generation: generation}
+	m.subagentDirectoryRevision = msg.snapshot.Revision
+	m.subagentDirectoryRetries = 0
+	m.subagentRosterTasks = subagentRosterTasksByCallID(msg.snapshot.Tasks)
+	for callID, view := range m.subagentOutputViews {
+		if view == nil {
+			continue
+		}
+		descriptor, ok := m.subagentRosterTasks[callID]
+		if !ok {
+			continue
+		}
+		activityID := subagentRosterDescriptorActivityID(descriptor)
+		newActivity := subagentRosterDescriptorIsNewActivity(descriptor, view)
+		view.directoryActivityID = activityID
+		if descriptor.Running || newActivity ||
+			(view.idleHistorySettled && view.idleHistoryActivityID != activityID) {
+			view.idleHistorySettled = false
+			view.idleHistoryActivityID = ""
+		}
+		if newActivity {
+			m.cancelTaskStreamHistoryForCallID(callID)
+		}
+		if participantID := strings.TrimSpace(descriptor.ParticipantID); participantID != "" {
+			view.participantID = participantID
+		}
+		view.touch(true)
+	}
+	// Directory metadata never mutates transcript content. It only starts or
+	// stops the content subscription owned by an already-visible overlay.
+	m.reconcileSubagentOutputTaskStreams()
+	return m.requestSubagentOutputRender()
+}
+
+func (m *Model) handleSubagentDirectoryClosed(msg subagentDirectoryClosedMsg) tea.Cmd {
+	if m == nil || msg.sessionID != m.currentSessionID ||
+		msg.generation != m.subagentDirectoryGeneration {
+		return nil
+	}
+	m.subagentDirectoryStarting = false
+	m.subagentDirectorySubscription = nil
+	if m.subagentDirectoryCancel != nil {
+		m.subagentDirectoryCancel()
+		m.subagentDirectoryCancel = nil
+	}
+	// Directory revisions belong to one observation lifetime. Control releases
+	// the Session index after its final observer leaves, so a reconnect may
+	// legitimately restart at revision 1. Invalidate the closed generation as
+	// well, preventing already-queued snapshots from that connection from
+	// racing the replacement snapshot back into the model.
+	m.subagentDirectoryRevision = 0
+	m.subagentDirectoryGeneration++
+	retryGeneration := m.subagentDirectoryGeneration
+	if m.subagentRosterCount() == 0 || errors.Is(msg.err, context.Canceled) {
+		return nil
+	}
+	if msg.err != nil && !taskStreamRetryable(msg.err) {
+		return m.showHint(taskStreamUnavailableHint("subagent status", msg.err), hintOptions{
+			priority: HintPriorityHigh, clearOnMessage: true, clearAfter: systemHintDuration,
+		})
+	}
+	m.subagentDirectoryRetries++
+	m.subagentDirectoryRetryScheduled = true
+	delay := taskStreamRetryBackoff(m.subagentDirectoryRetries)
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		return subagentDirectoryRetryMsg{sessionID: msg.sessionID, generation: retryGeneration}
 	})
 }
 
-func (m *Model) handleSubagentRosterRefreshTick(msg subagentRosterRefreshTickMsg) tea.Cmd {
+func (m *Model) handleSubagentDirectoryRetry(msg subagentDirectoryRetryMsg) tea.Cmd {
 	if m == nil || msg.sessionID != m.currentSessionID ||
-		msg.generation != m.subagentRosterRefreshGeneration {
+		msg.generation != m.subagentDirectoryGeneration {
 		return nil
 	}
-	m.subagentRosterRefreshScheduled = false
-	return m.requestSubagentRosterRefresh()
+	m.subagentDirectoryRetryScheduled = false
+	return m.ensureSubagentDirectoryWatch()
 }
 
-func (m *Model) resetSubagentRosterRefresh() {
+func (m *Model) resetSubagentDirectoryWatch() {
 	if m == nil {
 		return
 	}
-	m.subagentRosterRefreshGeneration++
-	m.subagentRosterRefreshPending = false
-	m.subagentRosterRefreshQueued = false
-	m.subagentRosterRefreshScheduled = false
-	m.subagentRosterRefreshWake = false
-	m.subagentRosterRefreshWakeRetries = 0
-	m.subagentRosterRefreshWakeTargets = nil
+	m.subagentDirectoryGeneration++
+	if m.subagentDirectoryCancel != nil {
+		m.subagentDirectoryCancel()
+		m.subagentDirectoryCancel = nil
+	}
+	if m.subagentDirectorySubscription != nil {
+		_ = m.subagentDirectorySubscription.Close()
+		m.subagentDirectorySubscription = nil
+	}
+	m.subagentDirectoryStarting = false
+	m.subagentDirectoryRetryScheduled = false
+	m.subagentDirectoryRetries = 0
+	m.subagentDirectoryRevision = 0
 	m.subagentRosterTasks = map[string]taskstream.TaskDescriptor{}
-}
-
-func (m *Model) markSubagentRosterRefreshWakeTargets(callIDs ...string) {
-	if m == nil {
-		return
-	}
-	if len(callIDs) == 0 {
-		for callID := range m.subagentOutputViews {
-			callIDs = append(callIDs, callID)
-		}
-	}
-	if m.subagentRosterRefreshWakeTargets == nil {
-		m.subagentRosterRefreshWakeTargets = map[string]string{}
-	}
-	for _, callID := range callIDs {
-		callID = strings.TrimSpace(callID)
-		if callID == "" {
-			continue
-		}
-		baseline := strings.TrimSpace(m.subagentRosterTasks[callID].CurrentTurnID)
-		if baseline == "" {
-			if view := m.subagentOutputViews[callID]; view != nil && view.block != nil {
-				baseline = strings.TrimSpace(view.block.SessionID)
-			}
-		}
-		m.subagentRosterRefreshWakeTargets[callID] = baseline
-	}
-}
-
-func (m *Model) resolveSubagentRosterRefreshWakeTargets() {
-	if m == nil {
-		return
-	}
-	for callID, baseline := range m.subagentRosterRefreshWakeTargets {
-		descriptor, ok := m.subagentRosterTasks[callID]
-		turnID := strings.TrimSpace(descriptor.CurrentTurnID)
-		if ok && (descriptor.Running || (turnID != "" && turnID != strings.TrimSpace(baseline))) {
-			delete(m.subagentRosterRefreshWakeTargets, callID)
-		}
-	}
-	if len(m.subagentRosterRefreshWakeTargets) == 0 {
-		m.subagentRosterRefreshWake = false
-	}
-}
-
-func (m *Model) clearSubagentRosterRefreshWake() {
-	if m == nil {
-		return
-	}
-	m.subagentRosterRefreshWake = false
-	m.subagentRosterRefreshWakeRetries = 0
-	m.subagentRosterRefreshWakeTargets = nil
 }
 
 func (m *Model) subagentRosterViewState(callID string, view *subagentOutputView) (subagentOutputStatus, time.Time, time.Time) {
@@ -217,13 +260,6 @@ func (m *Model) subagentRosterViewState(callID string, view *subagentOutputView)
 	if descriptor.Running {
 		descriptorStatus = subagentOutputRunning
 	}
-	if descriptorStatus == status {
-		if !subagentRosterDescriptorIsNewActivity(descriptor, view) {
-			return status, startedAt, endedAt
-		}
-	} else if !subagentRosterDescriptorSupersedesView(descriptor, view) {
-		return status, startedAt, endedAt
-	}
 	if descriptorStatus == subagentOutputRunning {
 		return descriptorStatus, descriptor.UpdatedAt, time.Time{}
 	}
@@ -231,41 +267,25 @@ func (m *Model) subagentRosterViewState(callID string, view *subagentOutputView)
 }
 
 func subagentRosterDescriptorIsNewActivity(descriptor taskstream.TaskDescriptor, view *subagentOutputView) bool {
-	if view == nil || view.block == nil {
-		return true
-	}
-	descriptorTurnID := strings.TrimSpace(descriptor.CurrentTurnID)
-	viewTurnID := strings.TrimSpace(view.block.SessionID)
-	return descriptorTurnID != "" && viewTurnID != "" && descriptorTurnID != viewTurnID &&
-		subagentRosterDescriptorSupersedesView(descriptor, view)
+	activityID := subagentRosterDescriptorActivityID(descriptor)
+	return view != nil && activityID != "" && view.directoryActivityID != "" &&
+		activityID != view.directoryActivityID
 }
 
-func subagentRosterDescriptorSupersedesView(descriptor taskstream.TaskDescriptor, view *subagentOutputView) bool {
-	if view == nil || view.block == nil {
-		return true
+func subagentRosterDescriptorActivityID(descriptor taskstream.TaskDescriptor) string {
+	if activityID := taskStreamActivityKey(descriptor.ActivityID); activityID != "" {
+		return activityID
 	}
-	// A replayed Spawn with no child transcript is only a provisional
-	// presentation shell. It has no lifecycle authority, so the first canonical
-	// Task directory observation must replace it even if the shell was rebuilt
-	// with a newer local timestamp after process restart.
-	if view.turnID == "" && !subagentOutputViewHasTranscript(view) {
-		return true
+	// Older durable Tasks may predate ActivityID persistence. Keep their cache
+	// scoped to the Control directory's current child Turn rather than falling
+	// back to transcript content or local timestamps.
+	if turnID := strings.TrimSpace(descriptor.CurrentTurnID); turnID != "" {
+		return "turn:" + turnID
 	}
-	viewUpdatedAt := view.block.StartedAt
-	if !view.block.EndedAt.IsZero() {
-		viewUpdatedAt = view.block.EndedAt
+	if taskID := strings.TrimSpace(descriptor.TaskID); taskID != "" {
+		return "legacy-task:" + taskID
 	}
-	if !descriptor.UpdatedAt.IsZero() && !viewUpdatedAt.IsZero() {
-		if descriptor.UpdatedAt.After(viewUpdatedAt) {
-			return true
-		}
-		if descriptor.UpdatedAt.Before(viewUpdatedAt) {
-			return false
-		}
-	}
-	descriptorTurnID := strings.TrimSpace(descriptor.CurrentTurnID)
-	viewTurnID := strings.TrimSpace(view.block.SessionID)
-	return descriptorTurnID != "" && viewTurnID != "" && descriptorTurnID != viewTurnID
+	return ""
 }
 
 func (m *Model) subagentRosterHasRunning() bool {

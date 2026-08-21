@@ -713,7 +713,9 @@ func (o compatibilityActivityObserver) ObserveChildActivity(_ context.Context, e
 		sink := o.run.sink
 		o.run.mu.RUnlock()
 		if sink != nil {
-			sink.PublishStream(stream.CloneFrame(*event.Frame))
+			frame := stream.CloneFrame(*event.Frame)
+			frame.ActivityID = strings.TrimSpace(event.ActivityID)
+			sink.PublishStream(frame)
 		}
 	}
 	if event.Result != nil {

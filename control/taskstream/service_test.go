@@ -44,15 +44,20 @@ func TestServiceListsOnlyOwningSessionAndRejectsCrossSessionTask(t *testing.T) {
 	}
 }
 
-func TestColdTerminalSubagentReplaysAssistantOnlySessionHistoryWithoutRuntime(t *testing.T) {
+func TestColdTerminalSubagentReplaysCompleteACPHistoryWithoutRuntime(t *testing.T) {
 	t.Parallel()
 
 	entry := taskStreamTestEntry("session-parent", "task-1", task.KindSubagent)
 	entry.Running = false
 	entry.State = task.StateCompleted
 	entry.UpdatedAt = time.Unix(130, 0)
-	entry.Spec = map[string]any{}
-	entry.Spec["session_id"] = "session-child"
+	entry.Spec = map[string]any{
+		"session_id": "session-child",
+		"target": delegation.Target{
+			Selector:  "self",
+			Placement: delegation.Placement{Kind: delegation.PlacementAgent, Agent: "self"},
+		},
+	}
 	entry.Metadata["agent_id"] = "participant-1"
 	entry.Metadata["stream_event_cursor"] = float64(12)
 	runtimeSubscribeStarted := make(chan struct{})
@@ -62,8 +67,9 @@ func TestColdTerminalSubagentReplaysAssistantOnlySessionHistoryWithoutRuntime(t 
 		},
 		subscribeStarted: runtimeSubscribeStarted,
 	}
-	loadCalls := 0
-	loader := taskStreamTestSessionLoader{loaded: session.LoadedSession{Events: []*session.Event{
+	parentLoads := 0
+	providerLoads := 0
+	history := session.LoadedSession{Events: []*session.Event{
 		{
 			ID: "assistant-1", MessageID: "assistant-1", Type: session.EventTypeAssistant,
 			Time: time.Unix(100, 0), Scope: &session.EventScope{TurnID: "child-turn-1"}, Text: "first durable answer",
@@ -71,7 +77,7 @@ func TestColdTerminalSubagentReplaysAssistantOnlySessionHistoryWithoutRuntime(t 
 		},
 		{
 			ID: "reasoning-2", MessageID: "reasoning-2", Type: session.EventTypeAssistant,
-			Time: time.Unix(110, 0), Scope: &session.EventScope{TurnID: "child-turn-2"}, Text: "reasoning must stay out",
+			Time: time.Unix(110, 0), Scope: &session.EventScope{TurnID: "child-turn-2"}, Text: "retained reasoning",
 			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentThought)}},
 		},
 		{
@@ -79,7 +85,12 @@ func TestColdTerminalSubagentReplaysAssistantOnlySessionHistoryWithoutRuntime(t 
 			Time: time.Unix(120, 0), Scope: &session.EventScope{TurnID: "child-turn-2"}, Text: "second durable answer",
 			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)}},
 		},
-	}}, calls: &loadCalls}
+	}}
+	loader := taskStreamTestSessionLoader{
+		loaded: session.LoadedSession{Session: session.Session{SessionRef: session.SessionRef{SessionID: "session-parent"}, CWD: "/workspace"}},
+		calls:  &parentLoads,
+	}
+	provider := &taskStreamHistoryRunner{loaded: history, calls: &providerLoads}
 	entries := []*task.Entry{entry}
 	for index := 2; index <= 64; index++ {
 		sibling := taskStreamTestEntry("session-parent", fmt.Sprintf("task-%d", index), task.KindSubagent)
@@ -91,7 +102,7 @@ func TestColdTerminalSubagentReplaysAssistantOnlySessionHistoryWithoutRuntime(t 
 	}
 	service, err := New(Config{
 		Tasks: newTaskStreamTestStore(entries...), Streams: func() stream.Service { return runtime }, Sessions: loader,
-		Authorizer: taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret, Generation: "generation-cold",
+		SubagentHistory: provider, Authorizer: taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret, Generation: "generation-cold",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -100,12 +111,12 @@ func TestColdTerminalSubagentReplaysAssistantOnlySessionHistoryWithoutRuntime(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Tasks) != len(entries) || loadCalls != 0 {
-		t.Fatalf("directory listing = %d Tasks, child Session loads = %d; want %d metadata rows and zero loads", len(listed.Tasks), loadCalls, len(entries))
+	if len(listed.Tasks) != len(entries) || parentLoads != 0 || providerLoads != 0 {
+		t.Fatalf("directory listing = %d Tasks, parent/provider loads = %d/%d; want %d metadata rows and zero loads", len(listed.Tasks), parentLoads, providerLoads, len(entries))
 	}
 
 	result, err := service.Subscribe(context.Background(), Principal{ID: "owner"}, SubscribeRequest{
-		SessionID: "session-parent", TaskID: "task-1", Follow: true,
+		SessionID: "session-parent", TaskID: "task-1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -129,8 +140,8 @@ func TestColdTerminalSubagentReplaysAssistantOnlySessionHistoryWithoutRuntime(t 
 	}
 
 drained:
-	texts := make([]string, 0, 2)
-	turns := make([]string, 0, 2)
+	texts := make([]string, 0, 3)
+	turns := make([]string, 0, 3)
 	for _, record := range records {
 		if record.Frame == nil || record.Frame.Event == nil {
 			continue
@@ -138,14 +149,14 @@ drained:
 		texts = append(texts, session.EventText(record.Frame.Event))
 		turns = append(turns, record.Frame.Ref.TerminalID)
 	}
-	if fmt.Sprint(texts) != "[first durable answer second durable answer]" {
-		t.Fatalf("assistant-only replay = %#v", texts)
+	if fmt.Sprint(texts) != "[first durable answer retained reasoning second durable answer]" {
+		t.Fatalf("complete ACP replay = %#v", texts)
 	}
-	if fmt.Sprint(turns) != "[task-1:1 task-1:2]" {
+	if fmt.Sprint(turns) != "[child-turn-1 child-turn-2 child-turn-2]" {
 		t.Fatalf("multi-Turn replay boundaries = %#v", turns)
 	}
-	if loadCalls != 1 {
-		t.Fatalf("selected child Session loads = %d, want exactly 1", loadCalls)
+	if parentLoads != 1 || providerLoads != 1 {
+		t.Fatalf("selected history loads = parent %d provider %d, want one of each", parentLoads, providerLoads)
 	}
 	if len(records) == 0 || records[len(records)-1].Frame == nil || !records[len(records)-1].Frame.Closed {
 		t.Fatalf("historical replay did not end with terminal lifecycle: %#v", records)
@@ -157,7 +168,418 @@ drained:
 	}
 }
 
-func TestDurableSubagentHistoryUsesCurrentStateBoundaryForFilteredEvents(t *testing.T) {
+func TestTerminalSubagentFollowUsesRuntimeWithoutLoadingIdleHistory(t *testing.T) {
+	t.Parallel()
+
+	entry := taskStreamTestEntry("session-parent", "task-1", task.KindSubagent)
+	entry.Running = false
+	entry.State = task.StateCompleted
+	entry.Spec = map[string]any{
+		"session_id": "session-child",
+		"target": delegation.Target{
+			Selector:  "self",
+			Placement: delegation.Placement{Kind: delegation.PlacementAgent, Agent: "self"},
+		},
+	}
+	runtimeStarted := make(chan struct{})
+	runtime := &taskStreamTestRuntime{
+		snapshots: map[string]stream.Snapshot{
+			entry.TaskID: taskStreamTestSnapshot("session-parent", entry.TaskID, "child-turn-1", "runtime current state"),
+		},
+		subscribeStarted: runtimeStarted,
+	}
+	parentLoads := 0
+	providerLoads := 0
+	service, err := New(Config{
+		Tasks: newTaskStreamTestStore(entry), Streams: func() stream.Service { return runtime },
+		Sessions: taskStreamTestSessionLoader{
+			loaded: session.LoadedSession{Session: session.Session{SessionRef: session.SessionRef{SessionID: "session-parent"}}},
+			calls:  &parentLoads,
+		},
+		SubagentHistory: &taskStreamHistoryRunner{calls: &providerLoads},
+		Authorizer:      taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret, Generation: "generation-follow",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result, err := service.Subscribe(ctx, Principal{ID: "owner"}, SubscribeRequest{
+		SessionID: "session-parent", TaskID: entry.TaskID, Follow: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Subscription.Close()
+	select {
+	case record := <-result.Subscription.Records():
+		if record.Frame == nil || record.Frame.Text != "runtime current state" {
+			t.Fatalf("follow current state = %#v", record)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Runtime current state")
+	}
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case <-runtimeStarted:
+			goto followerStarted
+		case <-result.Subscription.Records():
+			// Drain the bounded current-state catch-up so forwarding can attach
+			// the long-lived Runtime observer.
+		case <-deadline:
+			t.Fatal("timed out waiting for cross-activity Runtime follower")
+		}
+	}
+
+followerStarted:
+	if parentLoads != 0 || providerLoads != 0 {
+		t.Fatalf("Follow loaded idle history: parent=%d provider=%d", parentLoads, providerLoads)
+	}
+	runtime.mu.Lock()
+	request := runtime.lastSubscribeRequest
+	runtime.mu.Unlock()
+	if !request.Follow || request.Ref.TaskID != entry.TaskID {
+		t.Fatalf("Runtime Follow request = %#v", request)
+	}
+}
+
+func TestTerminalSubagentWithoutChildSessionKeepsRuntimeFailureHistory(t *testing.T) {
+	t.Parallel()
+
+	entry := taskStreamTestEntry("session-parent", "task-spawn-failed", task.KindSubagent)
+	entry.State = task.StateUnknownOutcome
+	entry.Running = false
+	entry.Spec = map[string]any{
+		"target": delegation.AgentTarget("helper"),
+	}
+	ref := stream.Ref{SessionID: "session-parent", TaskID: entry.TaskID, TerminalID: "spawn-failed"}
+	runtime := &taskStreamTestRuntime{snapshots: map[string]stream.Snapshot{
+		entry.TaskID: {
+			Ref: ref, Cursor: stream.Cursor{Events: 2}, State: string(task.StateUnknownOutcome), TerminalFramed: true,
+			Frames: []stream.Frame{
+				{Ref: ref, Text: "child Session was not created", Cursor: stream.Cursor{Events: 1}},
+				{Ref: ref, State: string(task.StateUnknownOutcome), Closed: true, Cursor: stream.Cursor{Events: 2}},
+			},
+		},
+	}}
+	parentLoads := 0
+	providerLoads := 0
+	created, err := New(Config{
+		Tasks: newTaskStreamTestStore(entry), Streams: func() stream.Service { return runtime },
+		Sessions:        taskStreamTestSessionLoader{calls: &parentLoads},
+		SubagentHistory: &taskStreamHistoryRunner{calls: &providerLoads},
+		Authorizer:      taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret, Generation: "generation-spawn-failed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := created.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{
+		SessionID: "session-parent", TaskID: entry.TaskID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentLoads != 0 || providerLoads != 0 {
+		t.Fatalf("failed Spawn history loads = parent %d provider %d, want Runtime-only observation", parentLoads, providerLoads)
+	}
+	if len(batch.Records) != 2 || batch.Records[0].Frame == nil || batch.Records[0].Frame.Text != "child Session was not created" ||
+		batch.Records[1].Frame == nil || batch.Records[1].Frame.State != string(task.StateUnknownOutcome) {
+		t.Fatalf("failed Spawn Runtime history = %#v", batch.Records)
+	}
+}
+
+func TestColdTerminalSubagentWithoutChildSessionFallsBackAfterRuntimeRelease(t *testing.T) {
+	t.Parallel()
+
+	entry := taskStreamTestEntry("session-parent", "task-spawn-failed-cold", task.KindSubagent)
+	entry.State = task.StateFailed
+	entry.Running = false
+	entry.FailureDiagnostic = "provider child Session was never created"
+	entry.Spec = map[string]any{"target": delegation.AgentTarget("helper")}
+	runtime := &taskStreamTestRuntime{readSnapshot: func(stream.ReadRequest) (stream.Snapshot, error) {
+		return stream.Snapshot{}, errorcode.New(errorcode.Unavailable, "Runtime is not activated")
+	}}
+	parentLoads := 0
+	providerLoads := 0
+	created, err := New(Config{
+		Tasks: newTaskStreamTestStore(entry), Streams: func() stream.Service { return runtime },
+		Sessions:        taskStreamTestSessionLoader{calls: &parentLoads},
+		SubagentHistory: &taskStreamHistoryRunner{calls: &providerLoads},
+		Authorizer:      taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret, Generation: "generation-spawn-failed-cold",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := created.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{
+		SessionID: "session-parent", TaskID: entry.TaskID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentLoads != 0 || providerLoads != 0 {
+		t.Fatalf("pre-Session fallback loaded history: parent=%d provider=%d", parentLoads, providerLoads)
+	}
+	var text string
+	for _, record := range batch.Records {
+		if record.Frame != nil && record.Frame.Event != nil {
+			text += session.EventText(record.Frame.Event)
+		}
+	}
+	if !strings.Contains(text, "provider child Session was never created") {
+		t.Fatalf("cold pre-Session fallback text = %q", text)
+	}
+}
+
+func TestFiniteSubagentHistoryRejectsActivityChangeDuringProviderLoad(t *testing.T) {
+	t.Parallel()
+
+	entry := taskStreamTestEntry("session-parent", "task-activity-fence", task.KindSubagent)
+	entry.Running = false
+	entry.State = task.StateCompleted
+	entry.Revision = 7
+	entry.UpdatedAt = time.Unix(700, 0)
+	entry.Metadata["child_activity_id"] = "activity-a"
+	entry.Spec = map[string]any{
+		"session_id": "session-child",
+		"target":     delegation.AgentTarget("helper"),
+	}
+	store := newTaskStreamTestStore(entry)
+	provider := &blockingTaskStreamHistoryRunner{
+		started: make(chan struct{}), release: make(chan struct{}),
+		loaded: session.LoadedSession{Events: []*session.Event{{
+			ID: "answer-a", Type: session.EventTypeAssistant, Text: "activity A history",
+			Scope: &session.EventScope{TurnID: "turn-a"},
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), MessageID: "answer-a",
+			}},
+		}}},
+	}
+	created, err := New(Config{
+		Tasks: store, Streams: func() stream.Service { return nil },
+		Sessions: taskStreamTestSessionLoader{loaded: session.LoadedSession{
+			Session: session.Session{SessionRef: session.SessionRef{SessionID: "session-parent"}, CWD: "/workspace"},
+		}},
+		SubagentHistory: provider, Authorizer: taskStreamTestAuthorizer{},
+		Secret: taskStreamTestSecret, Generation: "generation-activity-fence",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	errResult := make(chan error, 1)
+	go func() {
+		_, readErr := created.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{
+			SessionID: "session-parent", TaskID: entry.TaskID, ExpectedActivityID: "activity-a",
+		})
+		errResult <- readErr
+	}()
+	waitTaskStreamSignal(t, provider.started, "provider history load")
+
+	next := task.CloneEntry(entry)
+	next.Revision++
+	next.Running = true
+	next.State = task.StateRunning
+	next.UpdatedAt = time.Unix(701, 0)
+	next.Metadata["child_activity_id"] = "activity-b"
+	if err := store.Upsert(context.Background(), next); err != nil {
+		t.Fatal(err)
+	}
+	close(provider.release)
+	select {
+	case readErr := <-errResult:
+		if !errorcode.Is(readErr, errorcode.Conflict) {
+			t.Fatalf("activity-fenced history error = %v, want conflict", readErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("activity-fenced history read did not return")
+	}
+}
+
+func TestFiniteSubagentHistoryAcceptsSameActivityTerminalBookkeeping(t *testing.T) {
+	t.Parallel()
+
+	entry := taskStreamTestEntry("session-parent", "task-same-activity-fence", task.KindSubagent)
+	entry.Running = false
+	entry.State = task.StateCompleted
+	entry.Revision = 7
+	entry.UpdatedAt = time.Unix(700, 0)
+	entry.Metadata["child_activity_id"] = "activity-a"
+	entry.Spec = map[string]any{
+		"session_id": "session-child",
+		"target":     delegation.AgentTarget("helper"),
+	}
+	store := newTaskStreamTestStore(entry)
+	provider := &blockingTaskStreamHistoryRunner{
+		started: make(chan struct{}), release: make(chan struct{}),
+		loaded: session.LoadedSession{Events: []*session.Event{{
+			ID: "answer-a", Type: session.EventTypeAssistant, Text: "activity A history",
+			Scope: &session.EventScope{TurnID: "turn-a"},
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), MessageID: "answer-a",
+			}},
+		}}},
+	}
+	created, err := New(Config{
+		Tasks: store, Streams: func() stream.Service { return nil },
+		Sessions: taskStreamTestSessionLoader{loaded: session.LoadedSession{
+			Session: session.Session{SessionRef: session.SessionRef{SessionID: "session-parent"}, CWD: "/workspace"},
+		}},
+		SubagentHistory: provider, Authorizer: taskStreamTestAuthorizer{},
+		Secret: taskStreamTestSecret, Generation: "generation-same-activity-fence",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan struct {
+		batch Batch
+		err   error
+	}, 1)
+	go func() {
+		batch, readErr := created.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{
+			SessionID: "session-parent", TaskID: entry.TaskID, ExpectedActivityID: "activity-a",
+		})
+		result <- struct {
+			batch Batch
+			err   error
+		}{batch: batch, err: readErr}
+	}()
+	waitTaskStreamSignal(t, provider.started, "provider history load")
+
+	settled := task.CloneEntry(entry)
+	settled.Revision++
+	settled.UpdatedAt = time.Unix(701, 0)
+	settled.Metadata["final_event_persisted"] = "true"
+	if err := store.Upsert(context.Background(), settled); err != nil {
+		t.Fatal(err)
+	}
+	close(provider.release)
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("same-activity history read error = %v", got.err)
+		}
+		if got.batch.ActivityID != "activity-a" {
+			t.Fatalf("same-activity history batch = %#v, want activity-a", got.batch)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("same-activity history read did not return")
+	}
+}
+
+func TestTerminalSubagentWithoutACPLoadCapabilityFallsBackToRuntimeCurrentState(t *testing.T) {
+	t.Parallel()
+
+	entry := taskStreamTestEntry("session-parent", "task-no-load", task.KindSubagent)
+	entry.Running = false
+	entry.State = task.StateCompleted
+	entry.Spec = map[string]any{
+		"session_id": "session-child",
+		"target":     delegation.AgentTarget("helper"),
+	}
+	runtime := &taskStreamTestRuntime{snapshots: map[string]stream.Snapshot{
+		entry.TaskID: taskStreamTestSnapshot("session-parent", entry.TaskID, "child-turn-1", "retained Runtime answer"),
+	}}
+	parentLoads := 0
+	providerLoads := 0
+	created, err := New(Config{
+		Tasks: newTaskStreamTestStore(entry), Streams: func() stream.Service { return runtime },
+		Sessions: taskStreamTestSessionLoader{
+			loaded: session.LoadedSession{Session: session.Session{SessionRef: session.SessionRef{SessionID: "session-parent"}, CWD: "/workspace"}},
+			calls:  &parentLoads,
+		},
+		SubagentHistory: &taskStreamHistoryRunner{
+			err:   errorcode.New(errorcode.Unsupported, "child Agent does not support session/load"),
+			calls: &providerLoads,
+		},
+		Authorizer: taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret, Generation: "generation-no-load",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := created.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{
+		SessionID: "session-parent", TaskID: entry.TaskID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentLoads != 1 || providerLoads != 1 {
+		t.Fatalf("history capability probe = parent %d provider %d, want 1/1", parentLoads, providerLoads)
+	}
+	var texts []string
+	for _, record := range batch.Records {
+		if record.Frame != nil && record.Frame.Text != "" {
+			texts = append(texts, record.Frame.Text)
+		}
+	}
+	if fmt.Sprint(texts) != "[retained Runtime answer]" {
+		t.Fatalf("unsupported ACP history fallback = %v, want retained Runtime current state", texts)
+	}
+}
+
+func TestTerminalSubagentWithoutACPLoadOrRuntimeUsesBoundedDurableResult(t *testing.T) {
+	t.Parallel()
+
+	entry := taskStreamTestEntry("session-parent", "task-no-load-cold", task.KindSubagent)
+	entry.Running = false
+	entry.State = task.StateCompleted
+	entry.UpdatedAt = time.Unix(240, 0)
+	entry.Spec = map[string]any{
+		"session_id": "session-child",
+		"target":     delegation.AgentTarget("helper"),
+	}
+	entry.Metadata["agent_id"] = "participant-1"
+	entry.Metadata["child_activity_id"] = "activity-1"
+	entry.Metadata["stream_event_cursor"] = int64(9)
+	entry.Result = map[string]any{"final_message": "durable terminal answer"}
+	runtime := &taskStreamTestRuntime{readSnapshot: func(stream.ReadRequest) (stream.Snapshot, error) {
+		return stream.Snapshot{}, errorcode.New(errorcode.Unavailable, "Runtime was released")
+	}}
+	parentLoads := 0
+	providerLoads := 0
+	created, err := New(Config{
+		Tasks: newTaskStreamTestStore(entry), Streams: func() stream.Service { return runtime },
+		Sessions: taskStreamTestSessionLoader{
+			loaded: session.LoadedSession{Session: session.Session{SessionRef: session.SessionRef{SessionID: "session-parent"}, CWD: "/workspace"}},
+			calls:  &parentLoads,
+		},
+		SubagentHistory: &taskStreamHistoryRunner{
+			err: errorcode.New(errorcode.Unsupported, "child Agent does not support session/load"), calls: &providerLoads,
+		},
+		Authorizer: taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret, Generation: "generation-no-load-cold",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := created.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{
+		SessionID: "session-parent", TaskID: entry.TaskID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentLoads != 1 || providerLoads != 1 {
+		t.Fatalf("history capability probe = parent %d provider %d, want 1/1", parentLoads, providerLoads)
+	}
+	var assistant *session.Event
+	var terminal bool
+	for _, record := range batch.Records {
+		if record.Frame == nil {
+			continue
+		}
+		if record.Frame.Event != nil &&
+			session.ProtocolSessionUpdateType(record.Frame.Event) == string(session.ProtocolUpdateTypeAgentMessage) {
+			assistant = record.Frame.Event
+		}
+		terminal = terminal || record.Frame.Closed && record.Frame.State == string(task.StateCompleted)
+	}
+	if assistant == nil || assistant.Text != "durable terminal answer" || assistant.Visibility != session.VisibilityUIOnly {
+		t.Fatalf("durable terminal assistant = %#v, want bounded UI-only result", assistant)
+	}
+	if !terminal || batch.ResumeMode != ResumeModeCurrentState || !batch.TransientGap {
+		t.Fatalf("durable terminal batch = %#v, want current-state gap plus terminal lifecycle", batch)
+	}
+}
+
+func TestDurableSubagentHistoryUsesCurrentStateBoundaryForCompleteEvents(t *testing.T) {
 	t.Parallel()
 
 	entry := taskStreamTestEntry("session-parent", "task-1", task.KindSubagent)
@@ -192,8 +614,8 @@ func TestDurableSubagentHistoryUsesCurrentStateBoundaryForFilteredEvents(t *test
 	if snapshot.EventsTruncatedBefore != 12 || snapshot.Cursor.Events != 12 {
 		t.Fatalf("history boundary = %d/%d, want current-state boundary 12", snapshot.EventsTruncatedBefore, snapshot.Cursor.Events)
 	}
-	if len(snapshot.Frames) != 2 {
-		t.Fatalf("history frames = %d, want complete assistant current state", len(snapshot.Frames))
+	if len(snapshot.Frames) != 3 {
+		t.Fatalf("history frames = %d, want complete ACP current state", len(snapshot.Frames))
 	}
 	for _, frame := range snapshot.Frames {
 		if frame.Cursor.Events != 12 || frame.EventsTruncatedBefore != 12 {
@@ -213,21 +635,31 @@ func TestColdTerminalSubagentResumeReportsGapInsteadOfExactRenumbering(t *testin
 	entry := taskStreamTestEntry("session-parent", "task-1", task.KindSubagent)
 	entry.Running = false
 	entry.State = task.StateCompleted
-	entry.Spec = map[string]any{"session_id": "session-child"}
+	entry.Spec = map[string]any{
+		"session_id": "session-child",
+		"target": delegation.Target{
+			Selector:  "self",
+			Placement: delegation.Placement{Kind: delegation.PlacementAgent, Agent: "self"},
+		},
+	}
 	entry.Metadata["stream_event_cursor"] = float64(12)
 	runtime := &taskStreamTestRuntime{readSnapshot: func(stream.ReadRequest) (stream.Snapshot, error) {
 		return stream.Snapshot{}, errorcode.New(errorcode.Unavailable, "Runtime is not activated")
 	}}
-	loader := taskStreamTestSessionLoader{loaded: session.LoadedSession{Events: []*session.Event{{
+	history := session.LoadedSession{Events: []*session.Event{{
 		ID: "assistant-1", Type: session.EventTypeAssistant, Text: "durable answer",
 		Scope: &session.EventScope{TurnID: "child-turn-1"},
 		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
 			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
 		}},
-	}}}}
+	}}}
+	loader := taskStreamTestSessionLoader{loaded: session.LoadedSession{
+		Session: session.Session{SessionRef: session.SessionRef{SessionID: "session-parent"}, CWD: "/workspace"},
+	}}
 	created, err := New(Config{
 		Tasks: newTaskStreamTestStore(entry), Streams: func() stream.Service { return runtime }, Sessions: loader,
-		Authorizer: taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret, Generation: "generation-resume",
+		SubagentHistory: &taskStreamHistoryRunner{loaded: history},
+		Authorizer:      taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret, Generation: "generation-resume",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -270,14 +702,20 @@ func TestColdTerminalSubagentResumeReportsGapInsteadOfExactRenumbering(t *testin
 	}
 }
 
-func TestColdTerminalSubagentPrefersDurableHistoryOverTruncatedRuntimeSnapshot(t *testing.T) {
+func TestColdTerminalSubagentUsesACPHistoryOverTruncatedRuntimeSnapshot(t *testing.T) {
 	t.Parallel()
 
 	entry := taskStreamTestEntry("session-parent", "task-1", task.KindSubagent)
 	entry.Running = false
 	entry.State = task.StateCompleted
 	entry.UpdatedAt = time.Unix(130, 0)
-	entry.Spec = map[string]any{"session_id": "session-child"}
+	entry.Spec = map[string]any{
+		"session_id": "session-child",
+		"target": delegation.Target{
+			Selector:  "self",
+			Placement: delegation.Placement{Kind: delegation.PlacementAgent, Agent: "self"},
+		},
+	}
 	entry.Metadata["agent_id"] = "participant-1"
 	entry.Metadata["stream_event_cursor"] = float64(12)
 	runtime := &taskStreamTestRuntime{readSnapshot: func(stream.ReadRequest) (stream.Snapshot, error) {
@@ -296,8 +734,9 @@ func TestColdTerminalSubagentPrefersDurableHistoryOverTruncatedRuntimeSnapshot(t
 			}},
 		}, nil
 	}}
-	loadCalls := 0
-	loader := taskStreamTestSessionLoader{loaded: session.LoadedSession{Events: []*session.Event{
+	parentLoads := 0
+	providerLoads := 0
+	history := session.LoadedSession{Events: []*session.Event{
 		{
 			ID: "assistant-1", MessageID: "assistant-1", Type: session.EventTypeAssistant,
 			Time: time.Unix(100, 0), Scope: &session.EventScope{TurnID: "child-turn-1"}, Text: "first durable answer",
@@ -308,10 +747,15 @@ func TestColdTerminalSubagentPrefersDurableHistoryOverTruncatedRuntimeSnapshot(t
 			Time: time.Unix(120, 0), Scope: &session.EventScope{TurnID: "child-turn-2"}, Text: "second durable answer",
 			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)}},
 		},
-	}}, calls: &loadCalls}
+	}}
+	loader := taskStreamTestSessionLoader{
+		loaded: session.LoadedSession{Session: session.Session{SessionRef: session.SessionRef{SessionID: "session-parent"}, CWD: "/workspace"}},
+		calls:  &parentLoads,
+	}
 	service, err := New(Config{
 		Tasks: newTaskStreamTestStore(entry), Streams: func() stream.Service { return runtime }, Sessions: loader,
-		Authorizer: taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret, Generation: "generation-rehydrated",
+		SubagentHistory: &taskStreamHistoryRunner{loaded: history, calls: &providerLoads},
+		Authorizer:      taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret, Generation: "generation-rehydrated",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -332,8 +776,8 @@ func TestColdTerminalSubagentPrefersDurableHistoryOverTruncatedRuntimeSnapshot(t
 	if fmt.Sprint(texts) != "[first durable answer second durable answer]" {
 		t.Fatalf("assistant history = %#v, want all durable Turns instead of the reconstructed Runtime final", texts)
 	}
-	if loadCalls != 1 {
-		t.Fatalf("child Session loads = %d, want 1", loadCalls)
+	if parentLoads != 1 || providerLoads != 1 {
+		t.Fatalf("history loads = parent %d provider %d, want one of each", parentLoads, providerLoads)
 	}
 }
 
@@ -412,8 +856,8 @@ func TestColdExternalSubagentLazilyLoadsProviderSessionInsteadOfTaskResult(t *te
 	if strings.Contains(strings.Join(texts, "\n"), "partial Task slice") {
 		t.Fatalf("provider history incorrectly used Task final response: %v", texts)
 	}
-	if localLoads != 2 || providerLoads != 1 {
-		t.Fatalf("lazy loads = local %d provider %d, want child lookup + parent lookup + one provider load", localLoads, providerLoads)
+	if localLoads != 1 || providerLoads != 1 {
+		t.Fatalf("lazy loads = parent %d provider %d, want one parent lookup plus one ACP session/load", localLoads, providerLoads)
 	}
 	if provider.request.Anchor.SessionID != "session-provider-child" || provider.request.Reconnect.Spawn.SessionRef.SessionID != "session-parent" || provider.request.Reconnect.Spawn.CWD != "/workspace" || provider.request.Reconnect.Target.Placement.Agent != "codex" {
 		t.Fatalf("provider history request = %#v, want durable child identity and placement", provider.request)
@@ -454,8 +898,8 @@ func TestColdExternalSubagentHistoryRequiresFrozenPlacement(t *testing.T) {
 	if providerLoads != 0 {
 		t.Fatalf("provider history loads = %d, want fail closed before resolving a current agent binding", providerLoads)
 	}
-	if localLoads != 2 {
-		t.Fatalf("local Session loads = %d, want child lookup plus parent metadata lookup", localLoads)
+	if localLoads != 0 {
+		t.Fatalf("parent Session loads = %d, want frozen placement validation before loading parent metadata", localLoads)
 	}
 }
 
@@ -570,11 +1014,24 @@ func TestGenerationChangeFallsBackToCurrentTaskState(t *testing.T) {
 
 func TestGenerationChangeReplaysSubagentLatestFinalCurrentState(t *testing.T) {
 	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
+	entry.Spec = map[string]any{
+		"session_id": "session-child",
+		"target": delegation.Target{
+			Selector:  "self",
+			Placement: delegation.Placement{Kind: delegation.PlacementAgent, Agent: "self"},
+		},
+	}
+	entry.Metadata["stream_event_cursor"] = float64(6)
 	store := newTaskStreamTestStore(entry)
-	oldRuntime := &taskStreamTestRuntime{snapshots: map[string]stream.Snapshot{
-		"task-1": taskStreamTestSnapshot("session-1", "task-1", "turn-1", "old transient output"),
-	}}
-	oldService := newTaskStreamTestService(t, store, oldRuntime, "old-generation")
+	oldFinal := &session.Event{
+		ID: "old-final", MessageID: "old-final", Type: session.EventTypeAssistant,
+		Text: "old transient output", Scope: &session.EventScope{TurnID: "turn-1"},
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+			MessageID:     "old-final", Content: session.ProtocolTextContent("old transient output"),
+		}},
+	}
+	oldService := newHistoricalTaskStreamTestService(t, store, "old-generation", oldFinal)
 	oldBatch, err := oldService.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{SessionID: "session-1", TaskID: "task-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -588,16 +1045,7 @@ func TestGenerationChangeReplaysSubagentLatestFinalCurrentState(t *testing.T) {
 			MessageID:     "final-1", Content: session.ProtocolTextContent("latest exact Final"),
 		}},
 	}
-	current := stream.Snapshot{
-		Ref:    stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"},
-		Cursor: stream.Cursor{Events: 6}, EventsTruncatedBefore: 5,
-		State: string(task.StateCompleted), TerminalFramed: true,
-		Frames: []stream.Frame{
-			{Ref: stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"}, Cursor: stream.Cursor{Events: 6}, EventsTruncatedBefore: 5, Event: final},
-			{Ref: stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"}, Cursor: stream.Cursor{Events: 6}, EventsTruncatedBefore: 5, State: string(task.StateCompleted), Closed: true},
-		},
-	}
-	newService := newTaskStreamTestService(t, store, &taskStreamTestRuntime{snapshots: map[string]stream.Snapshot{"task-1": current}}, "new-generation")
+	newService := newHistoricalTaskStreamTestService(t, store, "new-generation", final)
 	resumed, err := newService.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{
 		SessionID: "session-1", TaskID: "task-1", Cursor: oldBatch.BoundaryCursor,
 	})
@@ -755,8 +1203,8 @@ func TestCurrentStatePartialCursorReplaysWholeSemanticBatch(t *testing.T) {
 
 func TestLiveGapCatchupUsesSnapshotDescriptorAndBoundedDrain(t *testing.T) {
 	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
-	entry.State = task.StateCompleted
-	entry.Running = false
+	entry.State = task.StateRunning
+	entry.Running = true
 	initial := stream.Snapshot{
 		Ref:    stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"},
 		Cursor: stream.Cursor{Events: 10}, State: string(task.StateCompleted), TerminalFramed: true,
@@ -909,21 +1357,73 @@ func TestSubscribeRefreshesTaskDescriptorWithinOneActivityPeriod(t *testing.T) {
 	}
 }
 
+func TestSubscribeFollowProjectsSuccessorActivityIdentity(t *testing.T) {
+	t.Parallel()
+
+	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
+	entry.State = task.StateCompleted
+	entry.Running = false
+	entry.Metadata["child_activity_id"] = "activity-a"
+	entry.Metadata["turn_id"] = "turn-a"
+	runtime := &taskStreamTestRuntime{
+		snapshots: map[string]stream.Snapshot{"task-1": {
+			Ref:        stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-a"},
+			ActivityID: "activity-a", Cursor: stream.Cursor{Events: 1},
+			State: string(task.StateCompleted), TerminalFramed: true,
+		}},
+		subscribeFrames: []stream.Frame{
+			{
+				Ref:        stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-b"},
+				ActivityID: "activity-b", Text: "successor", State: string(task.StateRunning), Running: true,
+				Cursor: stream.Cursor{Events: 2, Output: int64(len("successor"))},
+			},
+			{
+				Ref:        stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-b"},
+				ActivityID: "activity-b", State: string(task.StateCompleted), Closed: true,
+				Cursor: stream.Cursor{Events: 3, Output: int64(len("successor"))},
+			},
+		},
+	}
+	service := newTaskStreamTestService(t, newTaskStreamTestStore(entry), runtime, "generation-1")
+	result, err := service.Subscribe(context.Background(), Principal{ID: "owner"}, SubscribeRequest{
+		SessionID: "session-1", TaskID: "task-1", Follow: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Subscription.Close()
+
+	var successor []Record
+	for record := range result.Subscription.Records() {
+		if record.Frame != nil && record.Frame.Ref.TerminalID == "turn-b" {
+			successor = append(successor, record)
+		}
+	}
+	if len(successor) != 2 {
+		t.Fatalf("successor records = %#v, want running and terminal frames", successor)
+	}
+	for index, record := range successor {
+		if record.Task.ActivityID != "activity-b" || record.Frame.ActivityID != "activity-b" {
+			t.Fatalf("successor record %d = %#v, want activity-b on descriptor and frame", index, record)
+		}
+	}
+}
+
 func TestTaskDescriptorRejectsTerminalRunningContradiction(t *testing.T) {
 	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
 	entry.State = task.StateRunning
 	entry.Running = true
 
 	fromFrame := descriptorForFrame(entry, stream.Frame{
-		State: string(task.StateCompleted), Running: true, Closed: true,
+		ActivityID: "activity-frame", State: string(task.StateCompleted), Running: true, Closed: true,
 	})
-	if fromFrame.State != task.StateCompleted || fromFrame.Running {
+	if fromFrame.State != task.StateCompleted || fromFrame.Running || fromFrame.ActivityID != "activity-frame" {
 		t.Fatalf("terminal frame descriptor = %#v, want completed and not running", fromFrame)
 	}
 	fromSnapshot := descriptorForSnapshot(entry, stream.Snapshot{
-		State: string(task.StateCompleted), Running: true, TerminalFramed: true,
+		ActivityID: "activity-snapshot", State: string(task.StateCompleted), Running: true, TerminalFramed: true,
 	})
-	if fromSnapshot.State != task.StateCompleted || fromSnapshot.Running {
+	if fromSnapshot.State != task.StateCompleted || fromSnapshot.Running || fromSnapshot.ActivityID != "activity-snapshot" {
 		t.Fatalf("terminal snapshot descriptor = %#v, want completed and not running", fromSnapshot)
 	}
 }
@@ -1035,6 +1535,30 @@ func newTaskStreamTestService(t *testing.T, store task.Store, runtime stream.Ser
 	return service
 }
 
+func newHistoricalTaskStreamTestService(
+	t *testing.T,
+	store task.Store,
+	generation string,
+	events ...*session.Event,
+) Service {
+	t.Helper()
+	service, err := New(Config{
+		Tasks:   store,
+		Streams: func() stream.Service { return nil },
+		Sessions: taskStreamTestSessionLoader{loaded: session.LoadedSession{
+			Session: session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}, CWD: "/workspace"},
+		}},
+		SubagentHistory: &taskStreamHistoryRunner{loaded: session.LoadedSession{Events: events}},
+		Authorizer:      taskStreamTestAuthorizer{},
+		Secret:          taskStreamTestSecret,
+		Generation:      generation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
+
 func taskStreamTestEntry(sessionID, taskID string, kind task.Kind) *task.Entry {
 	return &task.Entry{
 		TaskID: taskID, Handle: "handle-" + taskID, Session: session.SessionRef{SessionID: sessionID}, Kind: kind,
@@ -1104,6 +1628,22 @@ type taskStreamHistoryRunner struct {
 	request tasksubagent.HistoryRequest
 }
 
+type blockingTaskStreamHistoryRunner struct {
+	started chan struct{}
+	release chan struct{}
+	loaded  session.LoadedSession
+}
+
+func (r *blockingTaskStreamHistoryRunner) LoadHistory(ctx context.Context, _ tasksubagent.HistoryRequest) (session.LoadedSession, error) {
+	close(r.started)
+	select {
+	case <-ctx.Done():
+		return session.LoadedSession{}, ctx.Err()
+	case <-r.release:
+		return r.loaded, nil
+	}
+}
+
 func (r *taskStreamHistoryRunner) LoadHistory(_ context.Context, req tasksubagent.HistoryRequest) (session.LoadedSession, error) {
 	if r.calls != nil {
 		(*r.calls)++
@@ -1125,6 +1665,7 @@ func (l taskStreamTestSessionLoader) LoadSession(_ context.Context, req session.
 }
 
 type taskStreamTestStore struct {
+	mu      sync.RWMutex
 	entries map[string]*task.Entry
 }
 
@@ -1137,11 +1678,15 @@ func newTaskStreamTestStore(entries ...*task.Entry) *taskStreamTestStore {
 }
 
 func (s *taskStreamTestStore) Upsert(_ context.Context, entry *task.Entry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.entries[entry.TaskID] = task.CloneEntry(entry)
 	return nil
 }
 
 func (s *taskStreamTestStore) Get(_ context.Context, taskID string) (*task.Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	entry := s.entries[taskID]
 	if entry == nil {
 		return nil, errors.New("task not found")
@@ -1150,6 +1695,8 @@ func (s *taskStreamTestStore) Get(_ context.Context, taskID string) (*task.Entry
 }
 
 func (s *taskStreamTestStore) ListSession(_ context.Context, ref session.SessionRef) ([]*task.Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	var entries []*task.Entry
 	for _, entry := range s.entries {
 		if entry.Session.SessionID == ref.SessionID {
@@ -1160,6 +1707,8 @@ func (s *taskStreamTestStore) ListSession(_ context.Context, ref session.Session
 }
 
 func (s *taskStreamTestStore) GetSessionTaskByHandle(_ context.Context, ref session.SessionRef, handle string) (*task.Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for _, entry := range s.entries {
 		if entry.Session.SessionID == ref.SessionID && task.NormalizeHandle(firstString(entry.Handle, mapString(entry.Metadata, "handle"))) == task.NormalizeHandle(handle) {
 			return task.CloneEntry(entry), nil

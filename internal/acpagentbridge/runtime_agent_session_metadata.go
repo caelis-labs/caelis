@@ -13,8 +13,10 @@ const (
 )
 
 // normalizedACPSessionMetadata promotes only the recognized built-in
-// subagent classification from wire metadata into product Session metadata.
-// Arbitrary ACP _meta values never become durable Session metadata.
+// subagent classification emitted by the Host-owned ACP bridge into product
+// Session metadata. Arbitrary ACP _meta values never become durable Session
+// metadata, and this classification alone never authorizes an existing Session
+// target.
 func normalizedACPSessionMetadata(meta map[string]any) map[string]any {
 	kind := metautil.String(
 		meta,
@@ -48,13 +50,14 @@ func normalizedACPSessionMetadata(meta map[string]any) map[string]any {
 	return out
 }
 
-// matchesManagedSubagentResumeClaim authorizes only the process-local bridge
-// reattachment for the exact durable parent Session and Spawn Task recorded on
-// the child. Ordinary lifecycle resume supplies no claim and remains hidden.
-func matchesManagedSubagentResumeClaim(active session.Session, meta map[string]any) bool {
+// matchesManagedSubagentRelationClaim recognizes the exact durable relation
+// emitted by Host-owned child execution and history bridges. It is never an
+// authorization by itself: callers additionally require either an execution
+// bridge without the history token or the exact read-only history capability.
+func matchesManagedSubagentRelationClaim(active session.Session, meta map[string]any) bool {
 	if !sessionvisibility.IsSystemManagedSession(active) ||
 		!strings.EqualFold(
-			strings.TrimSpace(taskMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedAgent)),
+			strings.TrimSpace(sessionMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedAgent)),
 			systemManagedSubagentSessionKind,
 		) {
 		return false
@@ -64,11 +67,11 @@ func matchesManagedSubagentResumeClaim(active session.Session, meta map[string]a
 	parentSessionID := metautil.String(meta, append(path, metautil.RuntimeSessionParentID)...)
 	taskID := metautil.String(meta, append(path, metautil.RuntimeTaskID)...)
 	return kind == metautil.RuntimeSessionKindSubagent && parentSessionID != "" && taskID != "" &&
-		parentSessionID == strings.TrimSpace(taskMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedParent)) &&
-		taskID == strings.TrimSpace(taskMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedTask))
+		parentSessionID == strings.TrimSpace(sessionMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedParent)) &&
+		taskID == strings.TrimSpace(sessionMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedTask))
 }
 
-func taskMetadataString(metadata map[string]any, key string) string {
+func sessionMetadataString(metadata map[string]any, key string) string {
 	value, _ := metadata[key].(string)
 	return value
 }

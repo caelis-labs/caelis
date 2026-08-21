@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"context"
 	"maps"
 	"strings"
 	"time"
@@ -126,6 +127,7 @@ func NewModel(cfg Config) *Model {
 		welcomeCardPending:       cfg.ShowWelcomeCard,
 		taskStreamWanted:         map[string]bool{},
 		taskStreamTokens:         map[string]uint64{},
+		taskStreamCancels:        map[string]context.CancelFunc{},
 		taskStreamSubscriptions:  map[string]taskstream.Subscription{},
 		taskStreamCursors:        map[string]string{},
 		taskStreamHandlesByID:    map[string]string{},
@@ -134,6 +136,10 @@ func NewModel(cfg Config) *Model {
 		taskStreamResolveTokens:  map[string]uint64{},
 		taskStreamResolveRetries: map[string]int{},
 		taskStreamRetries:        map[string]int{},
+		taskStreamHistoryStages:  map[string]*subagentOutputHistoryStage{},
+		taskStreamHistoryTokens:  map[string]uint64{},
+		taskStreamHistoryCancels: map[string]context.CancelFunc{},
+		taskStreamHistoryRetries: map[string]taskStreamHistoryRetryState{},
 		subagentOutputViews:      map[string]*subagentOutputView{},
 		subagentRosterTasks:      map[string]taskstream.TaskDescriptor{},
 		runningHintTracker:       newRunningHintTracker(),
@@ -254,6 +260,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case taskStreamClosedMsg:
 		return m.handleTaskStreamClosed(typed)
 
+	case taskStreamHistoryBatchMsg:
+		return m.handleTaskStreamHistoryBatch(typed)
+
+	case taskStreamHistoryClosedMsg:
+		return m.handleTaskStreamHistoryClosed(typed)
+
+	case taskStreamHistoryRetryMsg:
+		return m.handleTaskStreamHistoryRetry(typed)
+
 	case taskStreamResolvedMsg:
 		return m.handleTaskStreamResolved(typed)
 
@@ -266,11 +281,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case subagentOutputRenderTickMsg:
 		return m.handleSubagentOutputRenderTick(typed)
 
-	case subagentRosterRefreshResultMsg:
-		return m, m.handleSubagentRosterRefreshResult(typed)
+	case subagentDirectoryOpenedMsg:
+		return m, m.handleSubagentDirectoryOpened(typed)
 
-	case subagentRosterRefreshTickMsg:
-		return m, m.handleSubagentRosterRefreshTick(typed)
+	case subagentDirectorySnapshotMsg:
+		return m, m.handleSubagentDirectorySnapshot(typed)
+
+	case subagentDirectoryClosedMsg:
+		return m, m.handleSubagentDirectoryClosed(typed)
+
+	case subagentDirectoryRetryMsg:
+		return m, m.handleSubagentDirectoryRetry(typed)
 
 	case tea.WindowSizeMsg:
 		widthChanged := typed.Width != m.width

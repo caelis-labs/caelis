@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math"
+	"reflect"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -21,18 +22,20 @@ type Authorizer interface {
 	AuthorizeTaskStream(context.Context, Principal, string) error
 }
 
-// SessionLoader supplies canonical durable child history for terminal Tasks
-// whose process-local Runtime no longer exists after a host restart.
+// SessionLoader supplies the durable parent Session context needed to resolve
+// the exact child Agent endpoint frozen by Spawn. Child history itself is
+// always loaded through that Agent's read-only ACP session/load capability.
 type SessionLoader interface {
 	LoadSession(context.Context, session.LoadSessionRequest) (session.LoadedSession, error)
 }
 
 type Config struct {
-	Tasks    task.Store
-	Streams  func() stream.Service
-	Sessions SessionLoader
-	// SubagentHistory loads an existing provider-owned child Session when the
-	// local Session store does not own that child identity.
+	Tasks     task.Store
+	Streams   func() stream.Service
+	Sessions  SessionLoader
+	Directory *DirectoryIndex
+	// SubagentHistory loads an existing child Agent Session through ACP
+	// session/load without activating execution.
 	SubagentHistory subagent.HistoryRunner
 	Authorizer      Authorizer
 	Secret          []byte
@@ -44,6 +47,7 @@ type service struct {
 	streams         func() stream.Service
 	sessions        SessionLoader
 	subagentHistory subagent.HistoryRunner
+	directory       *DirectoryIndex
 	authorizer      Authorizer
 	cursors         cursorCodec
 }
@@ -65,7 +69,7 @@ func New(config Config) (Service, error) {
 	}
 	return &service{
 		tasks: config.Tasks, streams: config.Streams, sessions: config.Sessions,
-		subagentHistory: config.SubagentHistory, authorizer: config.Authorizer,
+		subagentHistory: config.SubagentHistory, directory: config.Directory, authorizer: config.Authorizer,
 		cursors: cursorCodec{secret: append([]byte(nil), config.Secret...), generation: generation},
 	}, nil
 }
@@ -94,16 +98,69 @@ func (s *service) Events(ctx context.Context, principal Principal, req ReadReque
 	if err != nil {
 		return Batch{}, err
 	}
-	snapshot, events, mode, gap, point, _, err := s.initialRead(ctx, entry, point, sameGeneration)
+	activityID := descriptorFromEntry(entry).ActivityID
+	if expected := strings.TrimSpace(req.ExpectedActivityID); expected != "" && expected != activityID {
+		return Batch{}, errorcode.New(errorcode.Conflict, "taskstream: Task activity changed before history read")
+	}
+	snapshot, events, mode, gap, point, historical, err := s.initialRead(ctx, entry, point, sameGeneration, true)
 	if err != nil {
 		return Batch{}, err
+	}
+	if historical || strings.TrimSpace(req.ExpectedActivityID) != "" {
+		if err := s.verifyFiniteSubagentRead(ctx, entry); err != nil {
+			return Batch{}, err
+		}
 	}
 	point.Cursor = stream.CloneCursor(snapshot.Cursor)
 	boundary, err := s.cursors.encode(entry.Session.SessionID, entry.TaskID, point)
 	if err != nil {
 		return Batch{}, err
 	}
-	return Batch{Records: events, ResumeMode: mode, TransientGap: gap, BoundaryCursor: boundary}, nil
+	return Batch{
+		Records: events, ActivityID: activityID, ResumeMode: mode,
+		TransientGap: gap, BoundaryCursor: boundary,
+	}, nil
+}
+
+// verifyFiniteSubagentRead prevents a slow provider session/load from
+// publishing history for an activity that ceased to be the Task's terminal
+// activity while the read was in flight. Live observation remains independent
+// and is never fenced by this finite-read check.
+func (s *service) verifyFiniteSubagentRead(ctx context.Context, before *task.Entry) error {
+	if before == nil || before.Kind != task.KindSubagent || before.Running ||
+		!stream.IsTerminalState(string(before.State)) {
+		return errorcode.New(errorcode.FailedPrecondition, "taskstream: finite subagent history requires a terminal activity")
+	}
+	after, err := s.tasks.Get(ctx, before.TaskID)
+	if err != nil {
+		return errorcode.Wrap(errorcode.Unavailable, "taskstream: verify finite subagent history activity", err)
+	}
+	if !sameFiniteSubagentActivity(before, after) {
+		return errorcode.New(errorcode.Conflict, "taskstream: Task activity changed during history read")
+	}
+	return nil
+}
+
+func sameFiniteSubagentActivity(before, after *task.Entry) bool {
+	if before == nil || after == nil || before.TaskID != after.TaskID ||
+		before.Session.SessionID != after.Session.SessionID || after.Kind != task.KindSubagent ||
+		after.Running || !stream.IsTerminalState(string(after.State)) {
+		return false
+	}
+	beforeDescriptor := descriptorFromEntry(before)
+	afterDescriptor := descriptorFromEntry(after)
+	// Terminal bookkeeping such as final_event_persisted may commit a newer
+	// Task revision after the lifecycle became visible. That is still the same
+	// child activity and must not invalidate an in-flight ACP history read.
+	// Fence only the semantic activity and its immutable endpoint identity.
+	return before.State == after.State &&
+		beforeDescriptor.ActivityID == afterDescriptor.ActivityID &&
+		beforeDescriptor.CurrentTurnID == afterDescriptor.CurrentTurnID &&
+		beforeDescriptor.Handle == afterDescriptor.Handle &&
+		beforeDescriptor.AgentHandle == afterDescriptor.AgentHandle &&
+		beforeDescriptor.ParticipantID == afterDescriptor.ParticipantID &&
+		taskHistoryChildSessionID(before) == taskHistoryChildSessionID(after) &&
+		reflect.DeepEqual(taskHistoryTarget(before), taskHistoryTarget(after))
 }
 
 func (s *service) Subscribe(ctx context.Context, principal Principal, req SubscribeRequest) (SubscribeResult, error) {
@@ -113,7 +170,12 @@ func (s *service) Subscribe(ctx context.Context, principal Principal, req Subscr
 	if err != nil {
 		return SubscribeResult{}, err
 	}
-	snapshot, initial, mode, gap, point, historical, err := s.initialRead(ctx, entry, point, sameGeneration)
+	// Follow observes the Runtime-owned current state and future activities.
+	// Complete idle history is a separate finite Events read so a slow
+	// session/load cannot replace or terminate the live observer.
+	snapshot, initial, mode, gap, point, historical, err := s.initialRead(
+		ctx, entry, point, sameGeneration, !req.Follow,
+	)
 	if err != nil {
 		return SubscribeResult{}, err
 	}
@@ -188,7 +250,9 @@ func (s *service) forward(
 			return
 		}
 
-		snapshot, catchup, _, _, next, historical, readErr := s.initialRead(sub.ctx, entry, point, true)
+		snapshot, catchup, _, _, next, historical, readErr := s.initialRead(
+			sub.ctx, entry, point, true, false,
+		)
 		if readErr != nil {
 			sub.finish(readErr)
 			return
@@ -229,7 +293,13 @@ func (s *service) prepare(ctx context.Context, principal Principal, req ReadRequ
 	return task.CloneEntry(entry), point, sameGeneration, nil
 }
 
-func (s *service) initialRead(ctx context.Context, entry *task.Entry, point cursorPoint, sameGeneration bool) (stream.Snapshot, []Record, ResumeMode, bool, cursorPoint, bool, error) {
+func (s *service) initialRead(
+	ctx context.Context,
+	entry *task.Entry,
+	point cursorPoint,
+	sameGeneration bool,
+	preferHistory bool,
+) (stream.Snapshot, []Record, ResumeMode, bool, cursorPoint, bool, error) {
 	readCursor := stream.CloneCursor(point.Cursor)
 	mode := ResumeModeExact
 	gap := false
@@ -243,7 +313,7 @@ func (s *service) initialRead(ctx context.Context, entry *task.Entry, point curs
 		mode = ResumeModeCurrentState
 		gap = true
 	}
-	snapshot, historical, err := s.readTaskSnapshot(ctx, entry, readCursor)
+	snapshot, historical, err := s.readTaskSnapshot(ctx, entry, readCursor, preferHistory)
 	if err != nil {
 		return stream.Snapshot{}, nil, "", false, point, false, err
 	}
@@ -304,7 +374,11 @@ func (s *service) initialRead(ctx context.Context, entry *task.Entry, point curs
 			mode = ResumeModeCurrentState
 			gap = true
 		}
-		projected, next, projectErr := s.recordFrame(entry, descriptor, frame, point)
+		frameDescriptor := descriptor
+		if activityID := strings.TrimSpace(frame.ActivityID); activityID != "" {
+			frameDescriptor.ActivityID = activityID
+		}
+		projected, next, projectErr := s.recordFrame(entry, frameDescriptor, frame, point)
 		if projectErr != nil {
 			return stream.Snapshot{}, nil, "", false, point, false, projectErr
 		}
@@ -367,6 +441,9 @@ func (s *service) gapRecord(entry *task.Entry, descriptor TaskDescriptor, point 
 
 func descriptorForSnapshot(entry *task.Entry, snapshot stream.Snapshot) TaskDescriptor {
 	descriptor := descriptorFromEntry(entry)
+	if activityID := strings.TrimSpace(snapshot.ActivityID); activityID != "" {
+		descriptor.ActivityID = activityID
+	}
 	state := strings.TrimSpace(snapshot.State)
 	if state != "" {
 		descriptor.State = task.State(state)
@@ -384,6 +461,9 @@ func descriptorForSnapshot(entry *task.Entry, snapshot stream.Snapshot) TaskDesc
 
 func descriptorForFrame(entry *task.Entry, frame stream.Frame) TaskDescriptor {
 	descriptor := descriptorFromEntry(entry)
+	if activityID := strings.TrimSpace(frame.ActivityID); activityID != "" {
+		descriptor.ActivityID = activityID
+	}
 	state := strings.TrimSpace(frame.State)
 	switch {
 	case state != "":
@@ -435,6 +515,7 @@ func descriptorFromEntry(entry *task.Entry) TaskDescriptor {
 		SupportsInput: entry.Kind == task.KindCommand && entry.SupportsInput, SupportsCancel: entry.SupportsCancel,
 		ParentTool:    ParentTool{ToolCallID: parentCall, ToolName: parentTool},
 		ParticipantID: firstString(mapString(entry.Metadata, "agent_id"), mapString(entry.Spec, "agent_id")),
+		ActivityID:    mapString(entry.Metadata, "child_activity_id"),
 		CurrentTurnID: firstString(mapString(entry.Metadata, "turn_id"), mapString(entry.Spec, "turn_id"), entry.Terminal.TerminalID),
 		UpdatedAt:     entry.UpdatedAt,
 	}

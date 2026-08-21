@@ -69,6 +69,9 @@ func (c *TaskClient) Events(ctx context.Context, request taskstream.ReadRequest)
 	if cursor := strings.TrimSpace(request.Cursor); cursor != "" {
 		query.Set("after", cursor)
 	}
+	if activityID := strings.TrimSpace(request.ExpectedActivityID); activityID != "" {
+		query.Set("activity_id", activityID)
+	}
 	response, err := c.remote.do(ctx, http.MethodGet, "/sessions/"+sessionID+"/tasks/"+taskID+"/events", query, nil, nil)
 	if err != nil {
 		return taskstream.Batch{}, err
@@ -124,6 +127,7 @@ func (c *TaskClient) Subscribe(ctx context.Context, request taskstream.Subscribe
 
 type taskBatchWire struct {
 	Events         []json.RawMessage     `json:"events,omitempty"`
+	ActivityID     string                `json:"activity_id,omitempty"`
 	ResumeMode     taskstream.ResumeMode `json:"resume_mode"`
 	TransientGap   bool                  `json:"transient_gap,omitempty"`
 	BoundaryCursor string                `json:"boundary_cursor,omitempty"`
@@ -136,6 +140,7 @@ func decodeTaskBatch(raw []byte, headers http.Header) (taskstream.Batch, error) 
 	}
 	batch := taskstream.Batch{
 		Events:         make([]eventstream.Envelope, 0, len(wire.Events)),
+		ActivityID:     wire.ActivityID,
 		ResumeMode:     wire.ResumeMode,
 		TransientGap:   wire.TransientGap,
 		BoundaryCursor: wire.BoundaryCursor,

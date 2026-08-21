@@ -23,6 +23,9 @@ type ClientsConfig struct {
 	UserID       string
 	WorkspaceKey string
 	WorkspaceCWD string
+	// ManagedSessionHistoryToken is opaque Host composition input forwarded to
+	// the ACP bridge. The Surface neither interprets it nor owns its policy.
+	ManagedSessionHistoryToken string
 	// SystemSessionClient optionally addresses product-owned child Sessions.
 	// When nil, the principal-bound Session
 	// client is used; Host exact-target Reconnect authorizes owners without
@@ -41,16 +44,17 @@ func NewFromClients(cfg ClientsConfig) (*runtimeacp.RuntimeAgent, error) {
 		systemSessionClient = clients.Sessions
 	}
 	return runtimeacp.NewGatewayAgent(runtimeacp.GatewayAgentConfig{
-		SessionClient:        clients.Sessions,
-		ConfigurationClient:  clients.Configuration,
-		PresentationClient:   clients.Presentation,
-		TerminalClient:       clients.Terminal,
-		AppName:              firstNonEmpty(cfg.AppName, "caelis"),
-		UserID:               firstNonEmpty(cfg.UserID, "local-user"),
-		WorkspaceKey:         strings.TrimSpace(cfg.WorkspaceKey),
-		WorkspaceCWD:         strings.TrimSpace(cfg.WorkspaceCWD),
-		TaskStreamClient:     clients.Tasks,
-		SlashResultFormatter: promptview.FormatSlashResult,
+		SessionClient:              clients.Sessions,
+		ConfigurationClient:        clients.Configuration,
+		PresentationClient:         clients.Presentation,
+		TerminalClient:             clients.Terminal,
+		AppName:                    firstNonEmpty(cfg.AppName, "caelis"),
+		UserID:                     firstNonEmpty(cfg.UserID, "local-user"),
+		WorkspaceKey:               strings.TrimSpace(cfg.WorkspaceKey),
+		WorkspaceCWD:               strings.TrimSpace(cfg.WorkspaceCWD),
+		ManagedSessionHistoryToken: strings.TrimSpace(cfg.ManagedSessionHistoryToken),
+		TaskStreamClient:           clients.Tasks,
+		SlashResultFormatter:       promptview.FormatSlashResult,
 		PromptRouterFactory: func(ctx context.Context, activeSession session.Session) (controlprompt.Router, error) {
 			turnSessions := clients.Sessions
 			if sessionvisibility.IsSystemManagedSession(activeSession) {

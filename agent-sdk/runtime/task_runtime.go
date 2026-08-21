@@ -380,14 +380,14 @@ func (tm *taskRuntime) persistTaskEntryWithConflictInvalidation(ctx context.Cont
 		if persisted != nil {
 			*entry = *taskapi.CloneEntry(persisted)
 			tm.updateTaskPersistence(entry)
-			tm.notifyTaskActivityChanged(entry)
+			tm.notifyTaskCommitted(entry)
 		}
 		return nil
 	}
 	if err := tm.store.Upsert(ctx, entry); err != nil {
 		return err
 	}
-	tm.notifyTaskActivityChanged(entry)
+	tm.notifyTaskCommitted(entry)
 	return nil
 }
 
@@ -435,15 +435,20 @@ func (tm *taskRuntime) persistSpawnEntry(ctx context.Context, entry *taskapi.Ent
 	}
 	*entry = *taskapi.CloneEntry(persisted)
 	tm.updateTaskPersistence(entry)
-	tm.notifyTaskActivityChanged(entry)
+	tm.notifyTaskCommitted(entry)
 	return nil
 }
 
-func (tm *taskRuntime) notifyTaskActivityChanged(entry *taskapi.Entry) {
-	if tm == nil || tm.activityChanged == nil || entry == nil || entry.Running {
+func (tm *taskRuntime) notifyTaskCommitted(entry *taskapi.Entry) {
+	if tm == nil || entry == nil {
 		return
 	}
-	tm.activityChanged(session.NormalizeSessionRef(entry.Session))
+	if tm.taskCommitted != nil {
+		tm.taskCommitted(taskapi.CloneEntry(entry))
+	}
+	if tm.activityChanged != nil && !entry.Running {
+		tm.activityChanged(session.NormalizeSessionRef(entry.Session))
+	}
 }
 
 func (tm *taskRuntime) updateTaskPersistence(entry *taskapi.Entry) {

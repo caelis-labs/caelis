@@ -237,7 +237,7 @@ func (o subagentActivityObserver) applyChildActivityEvent(
 			task.markSubagentActivityObservationGap(event.Dropped)
 		}
 		if event.Frame != nil {
-			frame := activityFrameForGeneration(*event.Frame, task, generation)
+			frame := activityFrameForGeneration(*event.Frame, task, generation, event.ActivityID)
 			task.applyStreamFrames([]stream.Frame{frame})
 		}
 	}
@@ -382,8 +382,9 @@ func beginObservedSubagentActivityLocked(task *subagentTask) {
 	delete(task.metadata, "final_event_persisted")
 }
 
-func activityFrameForGeneration(frame stream.Frame, task *subagentTask, generation int64) stream.Frame {
+func activityFrameForGeneration(frame stream.Frame, task *subagentTask, generation int64, activityID string) stream.Frame {
 	frame = stream.CloneFrame(frame)
+	frame.ActivityID = strings.TrimSpace(activityID)
 	frame.Ref.TaskID = strings.TrimSpace(task.ref.TaskID)
 	frame.Ref.SessionID = strings.TrimSpace(task.sessionRef.SessionID)
 	frame.Ref.TerminalID = subagentTurnID(task.ref.TaskID, generation)

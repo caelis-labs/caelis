@@ -40,6 +40,7 @@ type taskRuntime struct {
 	runtime         *Runtime
 	store           taskapi.Store
 	activityChanged func(session.SessionRef)
+	taskCommitted   func(*taskapi.Entry)
 
 	mu         sync.RWMutex
 	tasks      map[string]*commandTask
@@ -240,6 +241,7 @@ type subagentTask struct {
 	latestFinalTurnSeq           int64
 	latestFinalOrder             int64
 	latestFinalAt                time.Time
+	latestFinalActivityID        string
 	// finalResponseCursor is the highest completed child Turn whose exact Final
 	// Response has already been exposed by Spawn or an explicit Task read/wait.
 	// It is an observation frontier, not a second output store; exact text stays

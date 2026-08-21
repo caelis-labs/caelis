@@ -52,6 +52,7 @@ type sessionRuntimeRegistry struct {
 	defaultWorkspace session.WorkspaceRef
 	modelRecovery    *sessionModelRecovery
 	assembler        sessionRuntimeAssembler
+	taskCommitted    func(*task.Entry)
 
 	mu           sync.RWMutex
 	activationMu sync.Mutex
@@ -84,6 +85,7 @@ type sessionRuntimeRegistryConfig struct {
 	DefaultWorkspace session.WorkspaceRef
 	ModelRecovery    *sessionModelRecovery
 	Assembler        sessionRuntimeAssembler
+	TaskCommitted    func(*task.Entry)
 }
 
 func newSessionRuntimeRegistry(config sessionRuntimeRegistryConfig) (*sessionRuntimeRegistry, error) {
@@ -103,6 +105,7 @@ func newSessionRuntimeRegistry(config sessionRuntimeRegistryConfig) (*sessionRun
 		defaultWorkspace: workspace,
 		modelRecovery:    config.ModelRecovery,
 		assembler:        config.Assembler,
+		taskCommitted:    config.TaskCommitted,
 		sessions:         map[string]*sessionRuntime{},
 		observers:        map[string]uint64{},
 		workspaceCWD:     map[string]string{workspace.Key: workspace.CWD},
@@ -329,6 +332,7 @@ func (r *sessionRuntimeRegistry) activateSessionTracked(
 		taskChanged: func(ref session.SessionRef) {
 			r.scheduleIdleRelease(runtime, ref)
 		},
+		taskCommitted: r.taskCommitted,
 	}
 	instance, err := r.assembler.assembleSnapshot(buildCtx, active, activity, sessions)
 	if err != nil {

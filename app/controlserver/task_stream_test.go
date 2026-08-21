@@ -1,6 +1,7 @@
 package controlserver
 
 import (
+	"context"
 	"errors"
 	"io"
 	"math"
@@ -18,7 +19,7 @@ import (
 func TestTaskHTTPRoutesBindPrincipalAndPreserveEnvelopeWire(t *testing.T) {
 	envelope := eventstream.Envelope{
 		Kind: eventstream.KindNotice, Cursor: "task-cursor-1",
-		SessionID: "session-1", Notice: "异步输出",
+		SessionID: "session-1", ActivityID: "activity-2", Notice: "异步输出",
 		Position: &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
 			Anchor:     eventstream.DurableFeedPosition{Seq: math.MaxUint64},
 			Generation: "generation-1",
@@ -33,6 +34,7 @@ func TestTaskHTTPRoutesBindPrincipalAndPreserveEnvelopeWire(t *testing.T) {
 		}}},
 		batch: taskstream.Batch{
 			Events:         []eventstream.Envelope{envelope},
+			ActivityID:     "activity-2",
 			ResumeMode:     taskstream.ResumeModeExact,
 			BoundaryCursor: "task-boundary-1",
 		},
@@ -51,7 +53,7 @@ func TestTaskHTTPRoutesBindPrincipalAndPreserveEnvelopeWire(t *testing.T) {
 
 	eventsRequest := httptest.NewRequest(
 		http.MethodGet,
-		apiPrefix+"/sessions/session-1/tasks/task-1/events?after=task-cursor-0",
+		apiPrefix+"/sessions/session-1/tasks/task-1/events?after=task-cursor-0&activity_id=activity-2",
 		nil,
 	)
 	authorizeTestRequest(eventsRequest)
@@ -60,6 +62,8 @@ func TestTaskHTTPRoutesBindPrincipalAndPreserveEnvelopeWire(t *testing.T) {
 	if eventsRecorder.Code != http.StatusOK ||
 		eventsRecorder.Header().Get(resumeModeHeader) != string(taskstream.ResumeModeExact) ||
 		eventsRecorder.Header().Get(boundaryCursorHeader) != "task-boundary-1" ||
+		tasks.read.ExpectedActivityID != "activity-2" ||
+		!strings.Contains(eventsRecorder.Body.String(), `"activity_id":"activity-2"`) ||
 		!strings.Contains(eventsRecorder.Body.String(), `"sequence":"18446744073709551615"`) {
 		t.Fatalf("Task events headers=%#v body=%s", eventsRecorder.Header(), eventsRecorder.Body.String())
 	}
@@ -86,6 +90,37 @@ func TestTaskHTTPSubscribeParsesFollowQuery(t *testing.T) {
 	}
 	if !tasks.request.Follow || tasks.request.SessionID != "session-1" || tasks.request.TaskID != "task-1" {
 		t.Fatalf("Subscribe request = %#v, want Follow=true for exact Task target", tasks.request)
+	}
+}
+
+func TestTaskHTTPDirectoryWatchStreamsReplaceableStatusSnapshots(t *testing.T) {
+	subscription := newTaskTestDirectorySubscription(taskstream.DirectorySnapshot{
+		Revision: math.MaxUint64,
+		Tasks: []taskstream.TaskDescriptor{{
+			SessionID: "session-1", TaskID: "task-1", Handle: "child-1",
+			Kind: task.KindSubagent, State: task.StateRunning, Running: true,
+			ActivityID: "activity-2", CurrentTurnID: "task-1:2",
+		}},
+	})
+	tasks := &fakeTaskDirectoryService{
+		fakeTaskService: &fakeTaskService{},
+		watch:           taskstream.DirectoryWatchResult{Subscription: subscription},
+	}
+	server := newTaskTestServer(t, tasks)
+	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/tasks/watch", nil)
+	authorizeTestRequest(request)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	body := recorder.Body.String()
+	if recorder.Code != http.StatusOK ||
+		!strings.Contains(body, "event: "+taskstream.DirectorySnapshotEventName) ||
+		!strings.Contains(body, `"revision":"18446744073709551615"`) ||
+		!strings.Contains(body, `"activity_id":"activity-2"`) ||
+		!strings.Contains(body, "event: "+taskstream.StreamDoneEventName) {
+		t.Fatalf("Task directory SSE status=%d body=%s", recorder.Code, body)
+	}
+	if tasks.principal.ID != "trusted-owner" || tasks.request.SessionID != "session-1" {
+		t.Fatalf("Task directory principal/request = %#v/%#v", tasks.principal, tasks.request)
 	}
 }
 
@@ -177,6 +212,44 @@ func (s *taskTestSubscription) Err() error                          { return s.e
 func (s *taskTestSubscription) LastCursor() string                  { return s.last }
 
 var _ taskstream.Subscription = (*taskTestSubscription)(nil)
+
+type fakeTaskDirectoryService struct {
+	*fakeTaskService
+	watch   taskstream.DirectoryWatchResult
+	request taskstream.DirectoryWatchRequest
+}
+
+func (s *fakeTaskDirectoryService) WatchDirectory(
+	_ context.Context,
+	principal taskstream.Principal,
+	request taskstream.DirectoryWatchRequest,
+) (taskstream.DirectoryWatchResult, error) {
+	s.principal = principal
+	s.request = request
+	return s.watch, s.err
+}
+
+type taskTestDirectorySubscription struct {
+	snapshots chan taskstream.DirectorySnapshot
+}
+
+func newTaskTestDirectorySubscription(snapshots ...taskstream.DirectorySnapshot) *taskTestDirectorySubscription {
+	channel := make(chan taskstream.DirectorySnapshot, len(snapshots))
+	for _, snapshot := range snapshots {
+		channel <- snapshot
+	}
+	close(channel)
+	return &taskTestDirectorySubscription{snapshots: channel}
+}
+
+func (s *taskTestDirectorySubscription) Snapshots() <-chan taskstream.DirectorySnapshot {
+	return s.snapshots
+}
+func (*taskTestDirectorySubscription) Close() error { return nil }
+func (*taskTestDirectorySubscription) Err() error   { return nil }
+
+var _ taskstream.DirectoryService = (*fakeTaskDirectoryService)(nil)
+var _ taskstream.DirectorySubscription = (*taskTestDirectorySubscription)(nil)
 
 func TestTaskHTTPRejectsUnauthorizedSessionBeforeStreaming(t *testing.T) {
 	tasks := &fakeTaskService{err: errors.New("must not leak")}

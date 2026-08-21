@@ -22,6 +22,10 @@ const (
 	// workspace-selection flags in the public CLI.
 	EnvWorkspaceKey = "CAELIS_ACP_WORKSPACE_KEY"
 	EnvWorkspaceCWD = "CAELIS_ACP_WORKSPACE_CWD"
+	// EnvManagedSessionHistoryToken carries one process-scoped, read-only
+	// capability from the Host-owned subagent history loader to the short-lived
+	// built-in ACP bridge. It must not be inherited by ordinary Agent processes.
+	EnvManagedSessionHistoryToken = "CAELIS_ACP_MANAGED_SESSION_HISTORY_TOKEN"
 )
 
 type LookupFunc func(string) string

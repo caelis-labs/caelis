@@ -61,11 +61,9 @@ func TestSessionReconnectMessageInstallsSessionBeforeSubagentBackfill(t *testing
 			ToolArgs: descriptor.Handle + "[self]: historical task", OccurredAt: time.Unix(90, 0),
 		})
 	}
-	next, cmd := model.Update(TranscriptEventsMsg{Events: events})
+	next, _ = model.Update(TranscriptEventsMsg{Events: events})
 	model = next.(*Model)
-	refresh := requireSubagentRosterRefreshResult(t, cmd)
-	next, _ = model.Update(refresh)
-	model = next.(*Model)
+	applySubagentDirectorySnapshotForTest(model, 1, descriptors)
 
 	if got := len(model.subagentRosterTasks); got != len(descriptors) {
 		t.Fatalf("reconnected Task directory rows = %d, want %d", got, len(descriptors))

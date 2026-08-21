@@ -39,6 +39,17 @@ func TestSubagentSessionMetaMarksParentAndTask(t *testing.T) {
 	if got := metautil.String(meta, append(path, metautil.RuntimeTaskID)...); got != "task-1" {
 		t.Fatalf("Task ID = %q, want task-1", got)
 	}
+	if got := metautil.String(meta, append(path, metautil.RuntimeSessionHistoryToken)...); got != "" {
+		t.Fatalf("ordinary Session metadata history token = %q, want empty", got)
+	}
+
+	historyMeta := subagentHistorySessionMeta(tasksubagent.SpawnContext{
+		SessionRef: session.SessionRef{SessionID: "parent-session"},
+		TaskID:     "task-1",
+	}, strings.Repeat("ab", 32))
+	if got := metautil.String(historyMeta, append(path, metautil.RuntimeSessionHistoryToken)...); got != strings.Repeat("ab", 32) {
+		t.Fatalf("history Session metadata token = %q, want process capability", got)
+	}
 }
 
 func TestChildACPUpdatePreservesUIOnlyRuntimeToolIdentity(t *testing.T) {

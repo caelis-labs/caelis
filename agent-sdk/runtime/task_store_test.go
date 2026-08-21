@@ -36,9 +36,11 @@ func TestPersistTaskEntryNotifiesRuntimeLifetimeOnlyAfterTerminalCommit(t *testi
 	t.Parallel()
 	store := &committedResultTaskStore{}
 	var notified []session.SessionRef
+	var committed []*taskapi.Entry
 	runtime := &taskRuntime{
 		store: store, tasks: map[string]*commandTask{}, subagents: map[string]*subagentTask{},
 		activityChanged: func(ref session.SessionRef) { notified = append(notified, ref) },
+		taskCommitted:   func(entry *taskapi.Entry) { committed = append(committed, entry) },
 	}
 	entry := &taskapi.Entry{
 		TaskID: "lifetime-task", Kind: taskapi.KindSubagent,
@@ -50,6 +52,9 @@ func TestPersistTaskEntryNotifiesRuntimeLifetimeOnlyAfterTerminalCommit(t *testi
 	if len(notified) != 0 {
 		t.Fatalf("running Task notified Runtime lifetime: %#v", notified)
 	}
+	if len(committed) != 1 || committed[0].Revision != 1 || !committed[0].Running {
+		t.Fatalf("running Task commit notifications = %#v, want cloned committed entry", committed)
+	}
 	entry.State = taskapi.StateCompleted
 	entry.Running = false
 	if err := runtime.persistTaskEntry(context.Background(), entry); err != nil {
@@ -57,6 +62,9 @@ func TestPersistTaskEntryNotifiesRuntimeLifetimeOnlyAfterTerminalCommit(t *testi
 	}
 	if len(notified) != 1 || notified[0].SessionID != "lifetime-session" {
 		t.Fatalf("terminal Task lifetime notifications = %#v, want one owning Session", notified)
+	}
+	if len(committed) != 2 || committed[1].Revision != 2 || committed[1].Running || committed[1].State != taskapi.StateCompleted {
+		t.Fatalf("terminal Task commit notifications = %#v, want second cloned committed entry", committed)
 	}
 }
 

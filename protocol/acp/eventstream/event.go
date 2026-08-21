@@ -140,7 +140,10 @@ type Envelope struct {
 	HandleID     string        `json:"handle_id,omitempty"`
 	RunID        string        `json:"run_id,omitempty"`
 	TurnID       string        `json:"turn_id,omitempty"`
-	OccurredAt   time.Time     `json:"occurred_at,omitempty"`
+	// ActivityID identifies the Control-owned execution activity represented by
+	// a Task-stream Envelope. It is empty on ordinary Session feed Envelopes.
+	ActivityID string    `json:"activity_id,omitempty"`
+	OccurredAt time.Time `json:"occurred_at,omitempty"`
 
 	Scope         Scope               `json:"scope,omitempty"`
 	ScopeID       string              `json:"scope_id,omitempty"`

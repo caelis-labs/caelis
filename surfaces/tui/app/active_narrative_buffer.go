@@ -44,7 +44,7 @@ func (b *activeNarrativeBuffer) Append(text string) {
 	}
 	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
 	combinedTail := b.tailRaw + text
-	stableRaw, tailRaw := splitStableStreamingMarkdown(combinedTail)
+	stableRaw, tailRaw := splitStableStreamingMarkdownContinuation(combinedTail, b.stablePrefixRaw != "")
 	if strings.TrimSpace(stableRaw) != "" {
 		b.stablePrefixRaw += stableRaw
 		b.tailRaw = tailRaw

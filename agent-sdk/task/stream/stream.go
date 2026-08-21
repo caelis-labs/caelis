@@ -30,6 +30,11 @@ type Frame struct {
 	Text   string `json:"text,omitempty"`
 	State  string `json:"state,omitempty"`
 	Cursor Cursor `json:"cursor,omitempty"`
+	// ActivityID identifies the concrete execution activity that produced this
+	// frame within a stable Task stream. Follow observers use it to distinguish
+	// later running -> idle -> running periods without consulting durable Task
+	// state for every transient frame.
+	ActivityID string `json:"activity_id,omitempty"`
 	// TruncatedBefore is the earliest absolute output byte still retained when
 	// the requested cursor predates a bounded live buffer.
 	TruncatedBefore int64 `json:"truncated_before,omitempty"`
@@ -45,11 +50,12 @@ type Frame struct {
 
 // Snapshot is one point-in-time stream read result.
 type Snapshot struct {
-	Ref       Ref     `json:"ref,omitempty"`
-	Cursor    Cursor  `json:"cursor,omitempty"`
-	Frames    []Frame `json:"frames,omitempty"`
-	FinalText string  `json:"final_text,omitempty"`
-	State     string  `json:"state,omitempty"`
+	Ref        Ref     `json:"ref,omitempty"`
+	Cursor     Cursor  `json:"cursor,omitempty"`
+	Frames     []Frame `json:"frames,omitempty"`
+	FinalText  string  `json:"final_text,omitempty"`
+	State      string  `json:"state,omitempty"`
+	ActivityID string  `json:"activity_id,omitempty"`
 	// TruncatedBefore is copied to delivered frames so consumers can make a
 	// missing prefix visible instead of treating a retained suffix as complete.
 	TruncatedBefore       int64 `json:"truncated_before,omitempty"`
@@ -144,6 +150,7 @@ func CloneFrame(in Frame) Frame {
 	out := in
 	out.Ref = NormalizeRef(in.Ref)
 	out.Cursor = CloneCursor(in.Cursor)
+	out.ActivityID = strings.TrimSpace(in.ActivityID)
 	if out.TruncatedBefore < 0 {
 		out.TruncatedBefore = 0
 	}
@@ -163,6 +170,7 @@ func CloneSnapshot(in Snapshot) Snapshot {
 	out := in
 	out.Ref = NormalizeRef(in.Ref)
 	out.Cursor = CloneCursor(in.Cursor)
+	out.ActivityID = strings.TrimSpace(in.ActivityID)
 	if out.TruncatedBefore < 0 {
 		out.TruncatedBefore = 0
 	}

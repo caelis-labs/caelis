@@ -44,6 +44,7 @@ func (tm *taskRuntime) consumeSubagentFinalResponses(snapshot taskapi.Snapshot) 
 			task.latestFinalText = finalMessage
 			task.latestFinalTurnSeq = turnSeq
 			task.latestFinalOrder = task.streamEventBase + int64(len(task.streamFrames))
+			task.latestFinalActivityID = strings.TrimSpace(task.activityID)
 			task.semanticRetention.protectLatestFinal(subagentTurnID(task.ref.TaskID, turnSeq), task.latestFinalOrder)
 		}
 	}

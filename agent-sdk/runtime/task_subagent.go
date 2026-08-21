@@ -664,6 +664,7 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 			task.latestFinalTurnSeq = max(task.turnSeq, 1)
 			task.latestFinalOrder = task.streamEventBase
 			task.latestFinalAt = entry.UpdatedAt
+			task.latestFinalActivityID = task.activityID
 			if task.latestFinalAt.IsZero() {
 				task.latestFinalAt = entry.CreatedAt
 			}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
@@ -68,6 +69,7 @@ type taskStreamResolvedMsg struct {
 	handle        string
 	taskID        string
 	participantID string
+	descriptor    taskstream.TaskDescriptor
 	token         uint64
 	err           error
 }
@@ -97,7 +99,7 @@ func (m *Model) observeTaskStreamSession(env eventstream.Envelope) {
 	m.subagentRosterOverlay = nil
 	m.subagentRosterPressed = false
 	m.subagentOutputViews = map[string]*subagentOutputView{}
-	m.resetSubagentRosterRefresh()
+	m.resetSubagentDirectoryWatch()
 	m.runningHintTracker.resetSession()
 	if m.turnRunning() {
 		// The first Envelope of a newly created Session discovers its durable
@@ -200,9 +202,6 @@ func (m *Model) taskStreamDemandForOwner(callID, handle string) taskStreamDemand
 	if view := m.subagentOutputViews[callID]; view != nil {
 		if m.subagentOutputOverlay != nil &&
 			strings.TrimSpace(m.subagentOutputOverlay.callID) == callID {
-			if m.subagentOutputTerminalHistoryCached(callID, view) {
-				return taskStreamDemandNone
-			}
 			return taskStreamDemandVisibleSubagent
 		}
 		return taskStreamDemandNone
@@ -213,13 +212,13 @@ func (m *Model) taskStreamDemandForOwner(callID, handle string) taskStreamDemand
 	return taskStreamDemandNone
 }
 
-// subagentOutputTerminalHistoryCached prevents a terminal child workspace from
-// reopening durable Session history once this process already resolved it. The
-// Task directory owns terminality; historyResolved is only a presentation-cache
-// marker and remains false for a cold replay shell until the selected overlay
-// has actually loaded (including a successfully resolved empty history).
-func (m *Model) subagentOutputTerminalHistoryCached(callID string, view *subagentOutputView) bool {
-	if m == nil || view == nil || !view.historyResolved {
+// subagentOutputTerminalContentSettled prevents a terminal child workspace
+// from repeatedly reopening a finite idle read. Normally that read is the
+// complete Agent-owned ACP history. If the endpoint has no session/load
+// capability, Control may instead return its retained Runtime current state;
+// this Surface cache marker makes no completeness claim.
+func (m *Model) subagentOutputTerminalContentSettled(callID string, view *subagentOutputView) bool {
+	if m == nil || view == nil || !view.idleHistorySettled {
 		return false
 	}
 	// Directory terminality may become visible before the final Task-stream
@@ -236,7 +235,8 @@ func (m *Model) subagentOutputTerminalHistoryCached(callID string, view *subagen
 	if !ok || descriptor.Running {
 		return false
 	}
-	if subagentRosterDescriptorIsNewActivity(descriptor, view) {
+	activityID := subagentRosterDescriptorActivityID(descriptor)
+	if activityID == "" || view.idleHistoryActivityID != activityID {
 		return false
 	}
 	return subagentOutputStatusFromState(string(descriptor.State)) != subagentOutputRunning
@@ -324,7 +324,8 @@ func (m *Model) startTaskStreamResolver(sessionID, callID, handle string, token 
 				}
 				cfg.ProgramSender.SendMsg(taskStreamResolvedMsg{
 					sessionID: sessionID, callID: callID, handle: resolvedHandle,
-					taskID: strings.TrimSpace(matched.TaskID), participantID: strings.TrimSpace(matched.ParticipantID), token: token,
+					taskID: strings.TrimSpace(matched.TaskID), participantID: strings.TrimSpace(matched.ParticipantID),
+					descriptor: *matched, token: token,
 				})
 				return
 			}
@@ -356,9 +357,15 @@ func (m *Model) handleTaskStreamResolved(msg taskStreamResolvedMsg) (tea.Model, 
 	m.taskStreamHandlesByID[msg.taskID] = msg.handle
 	m.taskStreamIDsByCallID[msg.callID] = msg.taskID
 	m.taskStreamCallIDsByID[msg.taskID] = msg.callID
+	if msg.descriptor.Kind == task.KindSubagent {
+		m.subagentRosterTasks[msg.callID] = msg.descriptor
+	}
 	if view := m.subagentOutputViews[msg.callID]; view != nil {
 		view.taskHandle = msg.handle
 		view.participantID = strings.TrimSpace(msg.participantID)
+		if activityID := subagentRosterDescriptorActivityID(msg.descriptor); activityID != "" {
+			view.directoryActivityID = activityID
+		}
 		if view.actor == "" {
 			view.actor = subagentOutputActor("", view.title, msg.handle)
 			view.block.Actor = participantActorDisplayName(view.actor)
@@ -378,16 +385,23 @@ func (m *Model) wantResolvedTaskStream(taskID string, wanted bool) {
 	}
 	if !wanted {
 		delete(m.taskStreamRetries, taskID)
-		if !m.taskStreamWanted[taskID] && m.taskStreamSubscriptions[taskID] == nil {
+		if !m.taskStreamWanted[taskID] && m.taskStreamSubscriptions[taskID] == nil &&
+			m.taskStreamCancels[taskID] == nil && !m.taskStreamHistoryInFlight(taskID) {
 			return
 		}
 		m.taskStreamWanted[taskID] = false
 		m.taskStreamNextToken++
 		m.taskStreamTokens[taskID] = m.taskStreamNextToken
-		if sub := m.taskStreamSubscriptions[taskID]; sub != nil {
-			_ = sub.Close()
-			delete(m.taskStreamSubscriptions, taskID)
-		}
+		m.stopResolvedTaskStream(taskID)
+		m.cancelTaskStreamHistory(taskID)
+		return
+	}
+	demand := m.taskStreamDemandForTaskID(taskID)
+	if demand == taskStreamDemandVisibleSubagent {
+		m.reconcileTaskStreamHistory(taskID)
+	}
+	if !m.taskStreamLiveWanted(taskID, demand) {
+		m.taskStreamWanted[taskID] = false
 		return
 	}
 	if m.taskStreamWanted[taskID] && (m.taskStreamSubscriptions[taskID] != nil || m.taskStreamTokens[taskID] != 0) {
@@ -401,17 +415,66 @@ func (m *Model) wantResolvedTaskStream(taskID string, wanted bool) {
 	m.taskStreamNextToken++
 	token := m.taskStreamNextToken
 	m.taskStreamTokens[taskID] = token
-	m.startTaskStreamForwarder(sessionID, taskID, token, m.taskStreamCursors[taskID])
+	cursor := m.taskStreamCursors[taskID]
+	m.startTaskStreamForwarder(sessionID, taskID, token, cursor, demand == taskStreamDemandVisibleSubagent)
 }
 
-func (m *Model) startTaskStreamForwarder(sessionID, taskID string, token uint64, cursor string) {
+func (m *Model) taskStreamLiveWanted(taskID string, demand taskStreamDemand) bool {
+	if m == nil || !demand.wanted() {
+		return false
+	}
+	if demand == taskStreamDemandExpandedPanel {
+		return true
+	}
+	// Once attached, a visible subagent observer remains parked across idle
+	// activity boundaries. Closing the overlay is the only Surface action that
+	// detaches it.
+	if m.taskStreamWanted[taskID] || m.taskStreamSubscriptions[taskID] != nil ||
+		m.taskStreamCancels[taskID] != nil {
+		return true
+	}
+	callID := strings.TrimSpace(m.taskStreamCallIDsByID[strings.TrimSpace(taskID)])
+	descriptor, ok := m.subagentRosterTasks[callID]
+	if !ok {
+		return true
+	}
+	// A cold terminal Task is hydrated through the finite ACP history read.
+	// Runtime following begins when the directory next observes it running.
+	return descriptor.Running || !eventstream.IsTerminalLifecycleState(string(descriptor.State))
+}
+
+func (m *Model) stopResolvedTaskStream(taskID string) {
+	if m == nil {
+		return
+	}
+	taskID = strings.TrimSpace(taskID)
+	if cancel := m.taskStreamCancels[taskID]; cancel != nil {
+		cancel()
+		delete(m.taskStreamCancels, taskID)
+	}
+	if sub := m.taskStreamSubscriptions[taskID]; sub != nil {
+		_ = sub.Close()
+		delete(m.taskStreamSubscriptions, taskID)
+	}
+}
+
+func (m *Model) startTaskStreamForwarder(
+	sessionID, taskID string,
+	token uint64,
+	cursor string,
+	follow bool,
+) {
 	cfg := m.cfg
 	if cfg.ProgramSender == nil || cfg.TaskStreams == nil {
 		return
 	}
-	follow := m.taskStreamDemandForTaskID(taskID) == taskStreamDemandVisibleSubagent
-	ctx := contextOrBackground(cfg.Context)
-	cfg.ProgramSender.startForwarder(func() {
+	ctx, cancel := context.WithCancel(cfg.ProgramSender.observationContext(cfg.Context))
+	if previous := m.taskStreamCancels[taskID]; previous != nil {
+		previous()
+	}
+	m.taskStreamCancels[taskID] = cancel
+	started := cfg.ProgramSender.startForwarder(func() {
+		defer cancel()
 		result, err := cfg.TaskStreams.Subscribe(ctx, taskstream.SubscribeRequest{
 			SessionID: sessionID,
 			TaskID:    taskID,
@@ -419,20 +482,29 @@ func (m *Model) startTaskStreamForwarder(sessionID, taskID string, token uint64,
 			Follow:    follow,
 		})
 		if err != nil {
-			cfg.ProgramSender.SendMsg(taskStreamClosedMsg{sessionID: sessionID, taskID: taskID, token: token, cursor: cursor, err: err})
+			cfg.ProgramSender.SendMsg(taskStreamClosedMsg{
+				sessionID: sessionID, taskID: taskID, token: token, cursor: cursor, err: err,
+			})
 			return
 		}
 		sub := result.Subscription
-		cfg.ProgramSender.SendMsg(taskStreamOpenedMsg{sessionID: sessionID, taskID: taskID, token: token, subscription: sub})
+		cfg.ProgramSender.SendMsg(taskStreamOpenedMsg{
+			sessionID: sessionID, taskID: taskID, token: token, subscription: sub,
+		})
 		if sub == nil {
-			cfg.ProgramSender.SendMsg(taskStreamClosedMsg{sessionID: sessionID, taskID: taskID, token: token, err: errors.New("task stream subscription is unavailable")})
+			cfg.ProgramSender.SendMsg(taskStreamClosedMsg{
+				sessionID: sessionID, taskID: taskID, token: token,
+				err: errors.New("task stream subscription is unavailable"),
+			})
 			return
 		}
 		defer sub.Close()
 		for {
 			batch, open := readTaskStreamMailbox(ctx, sub.Events())
 			if len(batch) > 0 {
-				cfg.ProgramSender.SendMsg(taskStreamBatchMsg{sessionID: sessionID, taskID: taskID, token: token, events: batch})
+				cfg.ProgramSender.SendMsg(taskStreamBatchMsg{
+					sessionID: sessionID, taskID: taskID, token: token, events: batch,
+				})
 			}
 			if !open {
 				cfg.ProgramSender.SendMsg(taskStreamClosedMsg{
@@ -443,6 +515,14 @@ func (m *Model) startTaskStreamForwarder(sessionID, taskID string, token uint64,
 			}
 		}
 	})
+	if !started {
+		cancel()
+		if m.taskStreamTokens[taskID] == token {
+			delete(m.taskStreamCancels, taskID)
+			m.taskStreamTokens[taskID] = 0
+			m.taskStreamWanted[taskID] = false
+		}
+	}
 }
 
 func readTaskStreamMailbox(ctx context.Context, events <-chan eventstream.Envelope) ([]eventstream.Envelope, bool) {
@@ -477,7 +557,8 @@ func (m *Model) handleTaskStreamOpened(msg taskStreamOpenedMsg) (tea.Model, tea.
 	if m == nil || msg.subscription == nil {
 		return m, nil
 	}
-	if msg.sessionID != m.currentSessionID || !m.taskStreamWanted[msg.taskID] || m.taskStreamTokens[msg.taskID] != msg.token {
+	if msg.sessionID != m.currentSessionID || !m.taskStreamWanted[msg.taskID] ||
+		m.taskStreamTokens[msg.taskID] != msg.token {
 		_ = msg.subscription.Close()
 		return m, nil
 	}
@@ -489,12 +570,24 @@ func (m *Model) handleTaskStreamOpened(msg taskStreamOpenedMsg) (tea.Model, tea.
 }
 
 func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cmd) {
-	if m == nil || msg.sessionID != m.currentSessionID || !m.taskStreamWanted[msg.taskID] || m.taskStreamTokens[msg.taskID] != msg.token {
+	if m == nil || msg.sessionID != m.currentSessionID || !m.taskStreamWanted[msg.taskID] ||
+		m.taskStreamTokens[msg.taskID] != msg.token {
 		return m, nil
 	}
+	// A live frame always wins over an idle snapshot already in flight. The
+	// directory may publish the next ActivityID a few milliseconds later; do
+	// not let the older finite read overwrite output that has already arrived.
+	m.cancelTaskStreamHistory(msg.taskID)
 	delete(m.taskStreamRetries, msg.taskID)
 	cmds := make([]tea.Cmd, 0, len(msg.events))
 	for _, envelope := range msg.events {
+		if activityID := taskStreamActivityKey(envelope.ActivityID); activityID != "" {
+			if callID := strings.TrimSpace(m.taskStreamCallIDsByID[msg.taskID]); callID != "" {
+				if view := m.subagentOutputViews[callID]; view != nil {
+					view.liveActivityID = activityID
+				}
+			}
+		}
 		if cursor := strings.TrimSpace(envelope.Cursor); cursor != "" {
 			m.taskStreamCursors[msg.taskID] = cursor
 		}
@@ -515,7 +608,12 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 	if callID := strings.TrimSpace(m.taskStreamCallIDsByID[msg.taskID]); callID != "" {
 		if view := m.subagentOutputViews[callID]; view != nil {
 			view.historyResolved = true
-			view.touch(true)
+			view.idleHistorySettled = false
+			// Content batches may arrive every mailbox window. Keep their document
+			// mutations exact, but let the overlay's existing render scheduler fold
+			// several tiny batches into one physical frame. Lifecycle and Directory
+			// state remain authoritative regardless of this presentation cadence.
+			view.touch(false)
 			// A terminal lifecycle frame, not Task-directory metadata, is the
 			// transcript sealing boundary. Reconcile only after applying this batch
 			// so a completed descriptor cannot close the subscription one frame early.
@@ -531,6 +629,10 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 		return m, nil
 	}
 	delete(m.taskStreamSubscriptions, msg.taskID)
+	if cancel := m.taskStreamCancels[msg.taskID]; cancel != nil {
+		cancel()
+		delete(m.taskStreamCancels, msg.taskID)
+	}
 	if cursor := strings.TrimSpace(msg.cursor); cursor != "" {
 		m.taskStreamCursors[msg.taskID] = cursor
 	}
@@ -538,17 +640,6 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 	if !demand.wanted() {
 		m.wantResolvedTaskStream(msg.taskID, false)
 		return m, nil
-	}
-	if msg.err == nil && demand == taskStreamDemandVisibleSubagent {
-		callID := strings.TrimSpace(m.taskStreamCallIDsByID[msg.taskID])
-		view := m.subagentOutputViews[callID]
-		if view != nil && view.historyResolved && m.subagentOutputCurrentStatus(view) != subagentOutputRunning {
-			// A cold historical replay is finite. Detach cleanly once its terminal
-			// assistant history is delivered; a later accepted SendMessage will
-			// reopen observation for the next activity period.
-			m.wantResolvedTaskStream(msg.taskID, false)
-			return m, nil
-		}
 	}
 	if msg.err == nil && demand == taskStreamDemandVisibleSubagent && m.taskStreamWanted[msg.taskID] {
 		m.taskStreamRetries[msg.taskID]++
@@ -570,6 +661,8 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 		return m, taskStreamSubscribeRetryCmd(msg.sessionID, msg.taskID, m.taskStreamRetries[msg.taskID])
 	}
 	if msg.err != nil && !errors.Is(msg.err, context.Canceled) {
+		m.taskStreamTokens[msg.taskID] = 0
+		m.taskStreamWanted[msg.taskID] = false
 		handle := m.taskStreamHandlesByID[msg.taskID]
 		return m, m.showHint(taskStreamUnavailableHint(handle, msg.err), hintOptions{
 			priority: HintPriorityHigh, clearOnMessage: true, clearAfter: systemHintDuration,
@@ -634,6 +727,14 @@ func normalizeTaskStreamHandle(handle string) string {
 	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(handle), "@"))
 }
 
+func taskStreamActivityKey(activityID string) string {
+	activityID = strings.TrimSpace(activityID)
+	if activityID == "" {
+		return ""
+	}
+	return "activity:" + activityID
+}
+
 func taskStreamRetryable(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
@@ -665,14 +766,27 @@ func (m *Model) closeTaskStreamSubscriptions() {
 	if m == nil {
 		return
 	}
+	for taskID, cancel := range m.taskStreamCancels {
+		if cancel != nil {
+			cancel()
+		}
+		delete(m.taskStreamCancels, taskID)
+	}
 	for taskID, sub := range m.taskStreamSubscriptions {
 		if sub != nil {
 			_ = sub.Close()
 		}
 		delete(m.taskStreamSubscriptions, taskID)
 	}
+	for taskID, cancel := range m.taskStreamHistoryCancels {
+		if cancel != nil {
+			cancel()
+		}
+		delete(m.taskStreamHistoryCancels, taskID)
+	}
 	m.taskStreamWanted = map[string]bool{}
 	m.taskStreamTokens = map[string]uint64{}
+	m.taskStreamCancels = map[string]context.CancelFunc{}
 	m.taskStreamCursors = map[string]string{}
 	m.taskStreamHandlesByID = map[string]string{}
 	m.taskStreamIDsByCallID = map[string]string{}
@@ -680,4 +794,8 @@ func (m *Model) closeTaskStreamSubscriptions() {
 	m.taskStreamResolveTokens = map[string]uint64{}
 	m.taskStreamResolveRetries = map[string]int{}
 	m.taskStreamRetries = map[string]int{}
+	m.taskStreamHistoryStages = map[string]*subagentOutputHistoryStage{}
+	m.taskStreamHistoryTokens = map[string]uint64{}
+	m.taskStreamHistoryCancels = map[string]context.CancelFunc{}
+	m.taskStreamHistoryRetries = map[string]taskStreamHistoryRetryState{}
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
@@ -56,6 +57,7 @@ type runtimeComposition struct {
 	pluginCacheRelease func() error
 	retainRuntimeWork  func(session.SessionRef) func()
 	runtimeTaskChanged func(session.SessionRef)
+	taskCommitted      func(*task.Entry)
 }
 
 // runtimeProcessState owns the Host root's mutable process selections and the
