@@ -360,6 +360,54 @@ func (r *subagentSemanticRetention) dropAssistantTurn(turnID string) {
 	delete(r.assistantKeys, turnID)
 }
 
+func (r *subagentSemanticRetention) dropAssistantMessage(turnID string, messageID string) {
+	if r == nil {
+		return
+	}
+	turnID = strings.TrimSpace(turnID)
+	messageID = strings.TrimSpace(messageID)
+	if turnID == "" || messageID == "" {
+		return
+	}
+	if unit := r.units["narrative:"+turnID+":assistant:"+messageID]; unit != nil {
+		r.remove(unit)
+	}
+}
+
+// archiveAssistantMessage closes the active identity key at a producer
+// barrier. If the endpoint later reuses that MessageID, the new segment gets a
+// fresh active unit; replacing that segment then cannot discard the legitimate
+// pre-tool or pre-reasoning narrative retained here.
+func (r *subagentSemanticRetention) archiveAssistantMessage(turnID string, messageID string, order int64) {
+	if r == nil {
+		return
+	}
+	turnID = strings.TrimSpace(turnID)
+	messageID = strings.TrimSpace(messageID)
+	if turnID == "" || messageID == "" {
+		return
+	}
+	key := "narrative:" + turnID + ":assistant:" + messageID
+	unit := r.units[key]
+	if unit == nil {
+		return
+	}
+	archivedKey := fmt.Sprintf("%s:segment:%d", key, order)
+	if r.units[archivedKey] != nil {
+		return
+	}
+	before := unit.allocatedBytes()
+	delete(r.units, key)
+	unit.key = archivedKey
+	r.units[archivedKey] = unit
+	if keys := r.assistantKeys[turnID]; keys != nil {
+		delete(keys, key)
+		keys[archivedKey] = struct{}{}
+	}
+	r.bytes += unit.allocatedBytes() - before
+	r.evict()
+}
+
 func (r *subagentSemanticRetention) frames(
 	boundary stream.Cursor,
 	currentTurnID string,

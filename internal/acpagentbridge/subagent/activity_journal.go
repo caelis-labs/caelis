@@ -28,6 +28,7 @@ func (s *childSlot) mergePendingActivityEventLocked(event agent.ChildActivityEve
 	}
 	item := s.journal[len(s.journal)-1]
 	if item == nil || item.frameCount >= childActivityMergedMaxFrames ||
+		item.preserveLiveBoundary ||
 		!mergeChildAssistantActivityEvent(&item.event, event) {
 		return nil
 	}

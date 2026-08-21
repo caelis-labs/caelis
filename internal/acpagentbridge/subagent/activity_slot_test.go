@@ -83,6 +83,167 @@ func (fn childActivityBatchObserverFunc) ObserveChildActivityBatch(ctx context.C
 	return fn(ctx, events)
 }
 
+type childActivityLiveBatchObserver struct {
+	live  func(context.Context, agent.ChildActivityEvent) error
+	batch func(context.Context, []agent.ChildActivityEvent) error
+}
+
+func (o *childActivityLiveBatchObserver) ObserveChildActivity(ctx context.Context, event agent.ChildActivityEvent) error {
+	return o.batch(ctx, []agent.ChildActivityEvent{event})
+}
+
+func (o *childActivityLiveBatchObserver) ObserveChildActivityBatch(ctx context.Context, events []agent.ChildActivityEvent) error {
+	return o.batch(ctx, events)
+}
+
+func (o *childActivityLiveBatchObserver) ObserveChildActivityLive(ctx context.Context, event agent.ChildActivityEvent) error {
+	return o.live(ctx, event)
+}
+
+func TestChildActivityJournalDeliversLiveFramesWhileDurableObserverPersists(t *testing.T) {
+	t.Parallel()
+
+	run := &childRun{taskID: "task-live-persist", state: delegation.StateRunning, running: true, done: make(chan struct{})}
+	slot := newChildSlot(agent.ChildEndpointRef{
+		ParticipantID: "child-live", SessionID: "child-session", EndpointKey: run.taskID,
+		Role: session.ParticipantRoleDelegated,
+	}, run)
+	slot.beginActivity("activity-live", run)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	live := make(chan agent.ChildActivityEvent, 4)
+	durable := make(chan uint64, 4)
+	var once sync.Once
+	observer := &childActivityLiveBatchObserver{
+		live: func(_ context.Context, event agent.ChildActivityEvent) error {
+			live <- agent.CloneChildActivityEvent(event)
+			return nil
+		},
+		batch: func(_ context.Context, events []agent.ChildActivityEvent) error {
+			once.Do(func() {
+				close(entered)
+				<-release
+			})
+			durable <- events[len(events)-1].Cursor
+			return nil
+		},
+	}
+	slot.bindObserver(0, observer)
+	slot.publishFrame(childAssistantActivityFrame("message-1", "first "))
+	select {
+	case event := <-live:
+		if event.Cursor != 1 || session.EventText(event.Frame.Event) != "first " {
+			t.Fatalf("first live frame = %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first frame did not reach live observer")
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("durable observer did not enter first persistence callback")
+	}
+
+	slot.publishFrame(childAssistantActivityFrame("message-1", "second"))
+	select {
+	case event := <-live:
+		if event.Cursor != 2 || session.EventText(event.Frame.Event) != "second" {
+			t.Fatalf("second live frame = %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second frame waited for durable persistence")
+	}
+	close(release)
+
+	deadline := time.After(time.Second)
+	lastDurable := uint64(0)
+	for lastDurable < 2 {
+		select {
+		case cursor := <-durable:
+			lastDurable = max(lastDurable, cursor)
+		case <-deadline:
+			t.Fatalf("durable cursor = %d, want 2", lastDurable)
+		}
+	}
+}
+
+func TestChildActivityJournalDoesNotMergeAcceptedLivePrefixIntoDurableReplay(t *testing.T) {
+	t.Parallel()
+
+	run := &childRun{taskID: "task-live-replay", state: delegation.StateRunning, running: true, done: make(chan struct{})}
+	slot := newChildSlot(agent.ChildEndpointRef{
+		ParticipantID: "child-live", SessionID: "child-session", EndpointKey: run.taskID,
+		Role: session.ParticipantRoleDelegated,
+	}, run)
+	slot.beginActivity("activity-live", run)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	durable := make(chan uint64, 4)
+	var blockFirst sync.Once
+	var appliedMu sync.Mutex
+	var applied strings.Builder
+	var appliedCursor uint64
+	apply := func(event agent.ChildActivityEvent) {
+		if event.Frame == nil || event.Cursor <= appliedCursor {
+			return
+		}
+		applied.WriteString(session.EventText(event.Frame.Event))
+		appliedCursor = event.Cursor
+	}
+	observer := &childActivityLiveBatchObserver{
+		live: func(_ context.Context, event agent.ChildActivityEvent) error {
+			if event.Cursor == 3 {
+				return errors.New("live preview unavailable")
+			}
+			appliedMu.Lock()
+			apply(event)
+			appliedMu.Unlock()
+			return nil
+		},
+		batch: func(_ context.Context, events []agent.ChildActivityEvent) error {
+			blockFirst.Do(func() {
+				close(entered)
+				<-release
+			})
+			appliedMu.Lock()
+			for _, event := range events {
+				apply(event)
+			}
+			appliedMu.Unlock()
+			durable <- events[len(events)-1].Cursor
+			return nil
+		},
+	}
+	slot.bindObserver(0, observer)
+	slot.publishFrame(childAssistantActivityFrame("message-1", "first "))
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("durable observer did not block on the first frame")
+	}
+
+	slot.publishFrame(childAssistantActivityFrame("message-1", "second "))
+	slot.publishFrame(childAssistantActivityFrame("message-1", "third"))
+	close(release)
+
+	deadline := time.After(time.Second)
+	lastDurable := uint64(0)
+	for lastDurable < 3 {
+		select {
+		case cursor := <-durable:
+			lastDurable = max(lastDurable, cursor)
+		case <-deadline:
+			t.Fatalf("durable cursor = %d, want 3", lastDurable)
+		}
+	}
+	appliedMu.Lock()
+	got := applied.String()
+	appliedMu.Unlock()
+	if got != "first second third" {
+		t.Fatalf("live plus durable assistant text = %q, want each delta exactly once", got)
+	}
+}
+
 func TestChildActivityJournalCoalescesStreamingAssistantChunksWhileObserverPersists(t *testing.T) {
 	t.Parallel()
 

@@ -274,6 +274,182 @@ func TestRuntimeChildActivityBatchUsesOneRunningWriteAndKeepsGapNonTerminal(t *t
 	}
 }
 
+func TestRuntimeChildActivityLiveFrameAdvancesTaskStreamWhilePersistenceBlocks(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	runner := &runtimeChildInputRunner{spawnResult: delegation.Result{
+		State: delegation.StateCompleted, Result: "initial result",
+	}}
+	runtime, active := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.StartSubagentWithOptions(
+		ctx, active.SessionRef, "helper", "initial", "live-activity-test", StartSubagentOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := &blockingObservedRunningStore{
+		Store: runtime.tasks.store, cas: runtime.tasks.store.(taskapi.CASStore),
+		entered: make(chan struct{}), release: make(chan struct{}),
+	}
+	runtime.tasks.store = gate
+	released := false
+	defer func() {
+		if !released {
+			close(gate.release)
+		}
+	}()
+
+	runner.mu.Lock()
+	observer := runner.observer
+	runner.mu.Unlock()
+	liveObserver, ok := observer.(agent.ChildActivityLiveObserver)
+	if !ok {
+		t.Fatalf("activity observer = %T, want live observer", observer)
+	}
+	runtime.tasks.mu.RLock()
+	observedTask := runtime.tasks.subagents[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	if observedTask == nil {
+		t.Fatal("started child Task is unavailable")
+	}
+	observedTask.mu.Lock()
+	target := agent.ChildEndpointRef{
+		ParticipantID: observedTask.anchor.AgentID,
+		SessionID:     observedTask.anchor.SessionID,
+		EndpointKey:   observedTask.ref.TaskID,
+		Role:          subagentParticipantRole(observedTask),
+		Placement:     observedTask.target.Placement,
+	}
+	observedTask.mu.Unlock()
+	service := newStreamService(runtime.tasks)
+	baseline, err := service.Read(ctx, stream.ReadRequest{Ref: stream.Ref{
+		SessionID: active.SessionID, TaskID: started.Ref.TaskID,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subCtx, stopSubscription := context.WithCancel(ctx)
+	frames := make(chan stream.Frame, 8)
+	streamErr := make(chan error, 1)
+	go func() {
+		for frame, subscribeErr := range service.Subscribe(subCtx, stream.SubscribeRequest{
+			Ref:    stream.Ref{SessionID: active.SessionID, TaskID: started.Ref.TaskID},
+			Cursor: baseline.Cursor, Follow: true,
+		}) {
+			if subscribeErr != nil {
+				streamErr <- subscribeErr
+				return
+			}
+			if frame != nil {
+				frames <- stream.CloneFrame(*frame)
+			}
+		}
+		streamErr <- nil
+	}()
+	defer func() {
+		stopSubscription()
+		select {
+		case <-streamErr:
+		case <-time.After(time.Second):
+		}
+	}()
+
+	activityFrame := func(messageID, text string) *stream.Frame {
+		return &stream.Frame{Running: true, Event: &session.Event{
+			ID: messageID, MessageID: messageID, Type: session.EventTypeAssistant,
+			Visibility: session.VisibilityUIOnly, Text: text, Time: time.Now(),
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), MessageID: messageID,
+				Content: session.ProtocolTextContent(text),
+			}},
+		}}
+	}
+	event1 := agent.ChildActivityEvent{
+		Target: target, ActivityID: "activity-live-2", Cursor: 1,
+		Frame: activityFrame("answer-live-2", "first "),
+	}
+	durableFirst := make(chan error, 1)
+	go func() { durableFirst <- observer.ObserveChildActivity(ctx, event1) }()
+	select {
+	case <-gate.entered:
+	case err := <-durableFirst:
+		t.Fatalf("first observed frame stopped before persistence: %v", err)
+	case <-ctx.Done():
+		t.Fatal("first observed frame did not reach blocked Task persistence")
+	}
+
+	receiveText := func(want string) {
+		t.Helper()
+		deadline := time.After(time.Second)
+		for {
+			select {
+			case frame := <-frames:
+				if got := session.EventText(frame.Event); got != "" {
+					if got != want {
+						t.Fatalf("assistant stream text = %q, want %q", got, want)
+					}
+					return
+				}
+			case err := <-streamErr:
+				t.Fatalf("Task stream stopped before %q: %v", want, err)
+			case <-deadline:
+				t.Fatalf("Task stream did not expose %q", want)
+			}
+		}
+	}
+	receiveText("first ")
+	event2 := agent.ChildActivityEvent{
+		Target: target, ActivityID: "activity-live-2", Cursor: 2,
+		Frame: activityFrame("answer-live-2", "second"),
+	}
+	if err := liveObserver.ObserveChildActivityLive(ctx, event2); err != nil {
+		t.Fatal(err)
+	}
+	receiveText("second")
+	select {
+	case <-gate.release:
+		t.Fatal("live second frame required releasing Task persistence")
+	default:
+	}
+
+	close(gate.release)
+	released = true
+	if err := <-durableFirst; err != nil {
+		t.Fatal(err)
+	}
+	if err := observer.ObserveChildActivity(ctx, event2); err != nil {
+		t.Fatal(err)
+	}
+	runtime.tasks.mu.RLock()
+	observed := runtime.tasks.subagents[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	observed.mu.Lock()
+	durableCursor := observed.activityDurableCursor
+	retained := append([]stream.Frame(nil), observed.streamFrames...)
+	observed.mu.Unlock()
+	if durableCursor != 2 {
+		t.Fatalf("durable activity cursor = %d, want 2", durableCursor)
+	}
+	var assistant strings.Builder
+	for _, frame := range retained {
+		if frame.Event != nil && session.EventTypeOf(frame.Event) == session.EventTypeAssistant {
+			assistant.WriteString(session.EventText(frame.Event))
+		}
+	}
+	if got := assistant.String(); got != "initial resultfirst second" && got != "first second" {
+		t.Fatalf("retained assistant text = %q, want each live delta exactly once", got)
+	}
+	durable, err := runtime.tasks.store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cursor, _ := taskInt64Value(durable.Metadata[subagentActivityCursorMeta]); cursor != 2 {
+		t.Fatalf("persisted activity cursor = %d, want 2", cursor)
+	}
+}
+
 func TestInitialActivityReplayedAfterFastTerminalStaysOnGenerationOne(t *testing.T) {
 	t.Parallel()
 
@@ -510,6 +686,35 @@ type failOnceObservedTerminalStore struct {
 	cas    taskapi.CASStore
 	failed chan struct{}
 	once   sync.Once
+}
+
+type blockingObservedRunningStore struct {
+	taskapi.Store
+	cas taskapi.CASStore
+
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingObservedRunningStore) Put(ctx context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {
+	block := false
+	if req.Entry != nil && req.Entry.Kind == taskapi.KindSubagent && req.Entry.Running {
+		if cursor, _ := taskInt64Value(req.Entry.Metadata[subagentActivityCursorMeta]); cursor > 0 {
+			s.once.Do(func() {
+				block = true
+				close(s.entered)
+			})
+		}
+	}
+	if block {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-s.release:
+		}
+	}
+	return s.cas.Put(ctx, req)
 }
 
 func (s *failOnceObservedTerminalStore) Put(ctx context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {

@@ -2192,15 +2192,15 @@ func TestSubagentCurrentStateRetainsCompletedFinalsBelowByteBudget(t *testing.T)
 	}
 }
 
-func TestSubagentCompletionRetractsDivergedAssistantSnapshots(t *testing.T) {
+func TestSubagentMessageIdentityReplacementRetractsProvisionalAssistantWhileRunning(t *testing.T) {
 	t.Parallel()
 
 	task := &subagentTask{
 		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
 		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
 	}
-	appendAssistant := func(messageID string, text string) {
-		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+	assistantFrame := func(messageID string, text string) stream.Frame {
+		return stream.Frame{Running: true, Event: &session.Event{
 			ID: messageID, MessageID: messageID, Type: session.EventTypeAssistant,
 			Visibility: session.VisibilityUIOnly, Text: text,
 			Scope: &session.EventScope{TurnID: subagentTurnID(task.ref.TaskID, task.turnSeq)},
@@ -2208,15 +2208,14 @@ func TestSubagentCompletionRetractsDivergedAssistantSnapshots(t *testing.T) {
 				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), MessageID: messageID,
 				Content: session.ProtocolTextContent(text),
 			}},
-		}})
+		}}
 	}
 
+	task.applyStreamFrames([]stream.Frame{assistantFrame("provisional", "Here's the ")})
 	task.mu.Lock()
-	appendAssistant("provisional", "TURN")
-	appendAssistant("canonical", "TURN2_A")
 	provisionalCursor := stream.Cursor{Output: task.streamOutputCursor, Events: task.streamEventBase + int64(len(task.streamFrames))}
-	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "TURN2_A"})
 	task.mu.Unlock()
+	task.applyStreamFrames([]stream.Frame{assistantFrame("canonical", "Here's the result:")})
 
 	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, provisionalCursor)
 	if err != nil {
@@ -2232,11 +2231,87 @@ func TestSubagentCompletionRetractsDivergedAssistantSnapshots(t *testing.T) {
 			assistant = append(assistant, session.EventText(frame.Event))
 		}
 	}
-	if !reflect.DeepEqual(assistant, []string{"TURN2_A"}) {
+	if !reflect.DeepEqual(assistant, []string{"Here's the result:"}) {
 		t.Fatalf("reconciled assistant = %#v in %#v, want authoritative Final only", assistant, frames)
 	}
-	if len(frames) == 0 || !frames[len(frames)-1].Closed || frames[len(frames)-1].State != string(taskapi.StateCompleted) {
-		t.Fatalf("reconciled frames = %#v, want completed terminal boundary", frames)
+	if !snapshot.Running || stream.IsTerminalState(snapshot.State) {
+		t.Fatalf("reconciled running snapshot = %#v, want running Task", snapshot)
+	}
+	taskSnapshot := task.snapshot()
+	if preview := taskRawStringValue(taskSnapshot.Result["output_preview"]); preview != "Here's the result:" {
+		t.Fatalf("reconciled output preview = %q, want canonical assistant only", preview)
+	}
+	if preview := taskRawStringValue(subagentTaskToolPayload(taskSnapshot)["output_preview"]); preview != "Here's the result:" {
+		t.Fatalf("reconciled tool payload preview = %q, want canonical assistant only", preview)
+	}
+	for _, frame := range frames {
+		if frame.Closed || stream.IsTerminalState(frame.State) {
+			t.Fatalf("reconciled running frames = %#v, want no terminal boundary", frames)
+		}
+	}
+
+	task.mu.Lock()
+	boundary := task.streamEventBase
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "Here's the result:"})
+	if task.streamEventBase != boundary {
+		t.Fatalf("completion boundary = %d, want live replacement boundary %d to remain authoritative", task.streamEventBase, boundary)
+	}
+	task.mu.Unlock()
+}
+
+func TestSubagentAssistantMessageIdentityAfterToolKeepsPriorNarrative(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	turnID := subagentTurnID(task.ref.TaskID, task.turnSeq)
+	appendAssistant := func(messageID string, text string) {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: messageID, MessageID: messageID, Type: session.EventTypeAssistant,
+			Visibility: session.VisibilityUIOnly, Text: text,
+			Scope: &session.EventScope{TurnID: turnID},
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), MessageID: messageID,
+				Content: session.ProtocolTextContent(text),
+			}},
+		}})
+	}
+
+	task.mu.Lock()
+	appendAssistant("before-tool", "I will inspect the repository.")
+	task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+		ID: "tool-1", Type: session.EventTypeToolCall, Scope: &session.EventScope{TurnID: turnID},
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeToolCall), ToolCallID: "tool-1",
+		}},
+	}})
+	appendAssistant("before-tool", "Provisional summary after the tool.")
+	provisionalCursor := stream.Cursor{Output: task.streamOutputCursor, Events: task.streamEventBase + int64(len(task.streamFrames))}
+	appendAssistant("after-tool", "Here is the result.")
+	stdout := task.stdout
+	eventBase := task.streamEventBase
+	task.mu.Unlock()
+
+	if eventBase <= provisionalCursor.Events {
+		t.Fatalf("assistant replacement boundary = %d, want after provisional cursor %d", eventBase, provisionalCursor.Events)
+	}
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, provisionalCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var assistant []string
+	for _, frame := range snapshot.Frames {
+		if frame.Event != nil && session.ProtocolSessionUpdateType(frame.Event) == string(session.ProtocolUpdateTypeAgentMessage) {
+			assistant = append(assistant, session.EventText(frame.Event))
+		}
+	}
+	if !reflect.DeepEqual(assistant, []string{"I will inspect the repository.", "Here is the result."}) {
+		t.Fatalf("assistant transcript = %#v in %#v, want pre-tool narrative plus replacement", assistant, snapshot.Frames)
+	}
+	if stdout != "I will inspect the repository.Here is the result." {
+		t.Fatalf("assistant output preview source = %q, want pre-tool narrative plus replacement", stdout)
 	}
 }
 

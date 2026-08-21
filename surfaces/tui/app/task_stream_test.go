@@ -537,6 +537,170 @@ func TestTUIVisibleSubagentObservationSurvivesSpawnTerminalAndStopsOnClose(t *te
 	}
 }
 
+func TestTUIVisibleSubagentWaitsForTaskLifecycleBeforeSealingAndDetaching(t *testing.T) {
+	t.Parallel()
+
+	subscription := newTUIProtocolTaskSubscription()
+	sender := &ProgramSender{Send: func(tea.Msg) {}}
+	defer sender.Close()
+	model := NewModel(Config{
+		Context: context.Background(), NoColor: true, NoAnimation: true,
+		TaskStreams: bindTaskStreamTestClient(t, &subagentRosterTestTaskStreamService{}), ProgramSender: sender,
+	})
+	model.currentSessionID = "session-1"
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.taskHandle = "zuri"
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1"}
+	model.taskStreamWanted["task-1"] = true
+	model.taskStreamTokens["task-1"] = 7
+	model.taskStreamSubscriptions["task-1"] = subscription
+	model.taskStreamHandlesByID["task-1"] = "zuri"
+	model.taskStreamIDsByCallID["spawn-1"] = "task-1"
+	model.taskStreamCallIDsByID["task-1"] = "spawn-1"
+
+	startedAt := time.Unix(100, 0)
+	narrative := eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "task-1:2",
+		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Cursor: "cursor-1", OccurredAt: startedAt,
+		Delivery:   &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage, MessageID: "answer-2",
+			Content: schema.TextContent{Type: "text", Text: "- **overlay result**"},
+		},
+	}
+	next, _ := model.handleTaskStreamBatch(taskStreamBatchMsg{
+		sessionID: "session-1", taskID: "task-1", token: 7, events: []eventstream.Envelope{narrative},
+	})
+	model = next.(*Model)
+	view = requireSubagentOutputViewForTest(t, model, "spawn-1")
+	if len(view.block.Events) != 1 || view.block.Events[0].ActiveBuffer == nil || !view.block.Events[0].ActiveBuffer.HasTail() {
+		t.Fatalf("running child narrative = %#v, want raw unstable Markdown tail", view.block.Events)
+	}
+
+	model.subagentRosterRefreshGeneration = 1
+	model.subagentRosterRefreshPending = true
+	model.handleSubagentRosterRefreshResult(subagentRosterRefreshResultMsg{
+		sessionID: "session-1", generation: 1,
+		tasks: []taskstream.TaskDescriptor{{
+			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
+			State: task.StateCompleted, Running: false, CurrentTurnID: "task-1:2", UpdatedAt: startedAt.Add(time.Second),
+			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		}},
+	})
+	if model.taskStreamSubscriptions["task-1"] != subscription || !model.taskStreamWanted["task-1"] {
+		t.Fatal("terminal directory metadata detached visible child before its Task lifecycle frame")
+	}
+	if got := subscription.closeCalls.Load(); got != 0 {
+		t.Fatalf("terminal directory metadata closed subscription %d time(s), want zero", got)
+	}
+
+	terminal := eventstream.Envelope{
+		Kind: eventstream.KindLifecycle, SessionID: "session-1", TurnID: "task-1:2",
+		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Cursor: "cursor-2", OccurredAt: startedAt.Add(2 * time.Second),
+		Delivery:   &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted}, Final: true,
+	}
+	next, _ = model.handleTaskStreamBatch(taskStreamBatchMsg{
+		sessionID: "session-1", taskID: "task-1", token: 7, events: []eventstream.Envelope{terminal},
+	})
+	model = next.(*Model)
+	view = requireSubagentOutputViewForTest(t, model, "spawn-1")
+	if view.block.Status != eventstream.LifecycleStateCompleted {
+		t.Fatalf("child status = %q, want completed lifecycle", view.block.Status)
+	}
+	if buffer := view.block.Events[0].ActiveBuffer; buffer == nil || buffer.HasTail() {
+		t.Fatalf("terminal child Markdown buffer = %#v, want sealed full Markdown", buffer)
+	}
+	plain := joinRenderedPlain(model.subagentOutputRows(view, 72, 16))
+	if !strings.Contains(plain, "overlay result") || strings.Contains(plain, "**overlay result**") {
+		t.Fatalf("terminal child Markdown did not use final rendering:\n%s", plain)
+	}
+	if model.taskStreamSubscriptions["task-1"] != nil || model.taskStreamWanted["task-1"] {
+		t.Fatal("sealed terminal child retained its Follow subscription")
+	}
+	if got := subscription.closeCalls.Load(); got != 1 {
+		t.Fatalf("sealed terminal child closed subscription %d time(s), want one", got)
+	}
+}
+
+func TestTUIVisibleSubagentGapOnlyBatchWaitsForTaskLifecycleBeforeDetaching(t *testing.T) {
+	t.Parallel()
+
+	subscription := newTUIProtocolTaskSubscription()
+	sender := &ProgramSender{Send: func(tea.Msg) {}}
+	defer sender.Close()
+	model := NewModel(Config{
+		Context: context.Background(), NoColor: true, NoAnimation: true,
+		TaskStreams: bindTaskStreamTestClient(t, &subagentRosterTestTaskStreamService{}), ProgramSender: sender,
+	})
+	model.currentSessionID = "session-1"
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.taskHandle = "zuri"
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1"}
+	model.taskStreamWanted["task-1"] = true
+	model.taskStreamTokens["task-1"] = 7
+	model.taskStreamSubscriptions["task-1"] = subscription
+	model.taskStreamHandlesByID["task-1"] = "zuri"
+	model.taskStreamIDsByCallID["spawn-1"] = "task-1"
+	model.taskStreamCallIDsByID["task-1"] = "spawn-1"
+
+	next, _ := model.handleTaskStreamBatch(taskStreamBatchMsg{
+		sessionID: "session-1", taskID: "task-1", token: 7,
+		events: []eventstream.Envelope{{
+			Kind: eventstream.KindNotice, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
+			ScopeID: "task-1", Cursor: "gap-cursor",
+			Meta: map[string]any{"task_stream": map[string]any{"transient_gap": true}},
+		}},
+	})
+	model = next.(*Model)
+	view = requireSubagentOutputViewForTest(t, model, "spawn-1")
+	if !view.historyResolved || subagentOutputViewHasTranscript(view) {
+		t.Fatalf("gap-only current state resolved=%v transcript=%v, want resolved empty view", view.historyResolved, subagentOutputViewHasTranscript(view))
+	}
+
+	startedAt := time.Unix(100, 0)
+	model.subagentRosterRefreshGeneration = 1
+	model.subagentRosterRefreshPending = true
+	model.handleSubagentRosterRefreshResult(subagentRosterRefreshResultMsg{
+		sessionID: "session-1", generation: 1,
+		tasks: []taskstream.TaskDescriptor{{
+			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
+			State: task.StateCompleted, Running: false, CurrentTurnID: "task-1:2", UpdatedAt: startedAt,
+			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		}},
+	})
+	if model.taskStreamSubscriptions["task-1"] != subscription || !model.taskStreamWanted["task-1"] {
+		t.Fatal("terminal directory metadata detached an empty visible child before its Task lifecycle frame")
+	}
+	if got := subscription.closeCalls.Load(); got != 0 {
+		t.Fatalf("terminal directory metadata closed gap-only subscription %d time(s), want zero", got)
+	}
+
+	terminal := eventstream.Envelope{
+		Kind: eventstream.KindLifecycle, SessionID: "session-1", TurnID: "task-1:2",
+		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Cursor: "terminal-cursor", OccurredAt: startedAt.Add(time.Second),
+		Delivery:   &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted}, Final: true,
+	}
+	next, _ = model.handleTaskStreamBatch(taskStreamBatchMsg{
+		sessionID: "session-1", taskID: "task-1", token: 7, events: []eventstream.Envelope{terminal},
+	})
+	model = next.(*Model)
+	view = requireSubagentOutputViewForTest(t, model, "spawn-1")
+	if view.block.Status != eventstream.LifecycleStateCompleted {
+		t.Fatalf("gap-only child status = %q, want completed lifecycle", view.block.Status)
+	}
+	if model.taskStreamSubscriptions["task-1"] != nil || model.taskStreamWanted["task-1"] {
+		t.Fatal("terminal lifecycle left gap-only child Follow subscription attached")
+	}
+	if got := subscription.closeCalls.Load(); got != 1 {
+		t.Fatalf("terminal lifecycle closed gap-only subscription %d time(s), want one", got)
+	}
+}
+
 func TestTUIClearHistoryClosesVisibleSubagentStreams(t *testing.T) {
 	t.Parallel()
 
@@ -679,6 +843,7 @@ func TestTUITerminalHistoricalReplayDetachesAfterCleanExit(t *testing.T) {
 	view := model.ensureSubagentOutputView("spawn-1")
 	view.taskHandle = "zuri"
 	view.historyResolved = true
+	view.block.SetStatus(eventstream.LifecycleStateCompleted, "", "", time.Unix(100, 0))
 	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1"}
 	model.subagentRosterTasks["spawn-1"] = taskstream.TaskDescriptor{
 		SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,

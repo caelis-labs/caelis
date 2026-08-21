@@ -221,6 +221,16 @@ func (m *Model) subagentOutputTerminalHistoryCached(callID string, view *subagen
 	if m == nil || view == nil || !view.historyResolved {
 		return false
 	}
+	// Directory terminality may become visible before the final Task-stream
+	// lifecycle frame. Keep an active workspace attached until its retained
+	// transcript has consumed that frame; SetStatus then seals the same Markdown
+	// buffers used by the main transcript.
+	taskID := strings.TrimSpace(m.taskStreamIDsByCallID[strings.TrimSpace(callID)])
+	awaitingVisibleLifecycle := taskID != "" && m.taskStreamWanted[taskID]
+	if (awaitingVisibleLifecycle || subagentOutputViewHasTranscript(view)) &&
+		(view.block == nil || !eventstream.IsTerminalLifecycleState(view.block.Status)) {
+		return false
+	}
 	descriptor, ok := m.subagentRosterTasks[strings.TrimSpace(callID)]
 	if !ok || descriptor.Running {
 		return false
@@ -501,6 +511,10 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 		if view := m.subagentOutputViews[callID]; view != nil {
 			view.historyResolved = true
 			view.touch(true)
+			// A terminal lifecycle frame, not Task-directory metadata, is the
+			// transcript sealing boundary. Reconcile only after applying this batch
+			// so a completed descriptor cannot close the subscription one frame early.
+			m.reconcileTaskStreamOwner(callID, view.taskHandle)
 		}
 	}
 	cmds = append(cmds, m.requestSubagentOutputRender())

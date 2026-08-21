@@ -34,6 +34,7 @@ type childSlot struct {
 	activityID         string
 	activityInitial    bool
 	cursor             uint64
+	liveCursor         uint64
 	observer           agent.ChildActivityObserver
 	journal            []*childActivityJournalItem
 	journalBytes       int
@@ -50,8 +51,9 @@ type childSlot struct {
 	promptDispatchDone chan struct{}
 	promptCancel       context.CancelFunc
 
-	deliveryMu sync.Mutex
-	ingressMu  sync.Mutex
+	deliveryMu     sync.Mutex
+	liveDeliveryMu sync.Mutex
+	ingressMu      sync.Mutex
 }
 
 func (s *childSlot) pendingPromptDispatch() <-chan struct{} {
@@ -143,6 +145,11 @@ func (s *childSlot) finishPromptDispatch(done chan struct{}) {
 
 type childActivityJournalItem struct {
 	event agent.ChildActivityEvent
+	// preserveLiveBoundary keeps a frame that was eligible for process-local
+	// live observation cursor-exact in the durable journal. Even if that live
+	// callback fails or an observer is rebound to an older durable cursor, a
+	// later unseen delta must not merge an already-applied prefix into its replay.
+	preserveLiveBoundary bool
 	// terminal is the immutable result generation captured at the producer's
 	// terminal fence. Copying Result copies only string headers, so the exact
 	// Final remains available without charging or duplicating its potentially
@@ -342,9 +349,11 @@ func (s *childSlot) bindObserver(afterCursor uint64, observer agent.ChildActivit
 	// Wait for an already selected observer callback to finish before swapping.
 	// Output ingestion remains free to append to the journal while this waits.
 	s.deliveryMu.Lock()
+	s.liveDeliveryMu.Lock()
 	s.mu.Lock()
 	s.observer = observer
 	s.cursor = max(s.cursor, afterCursor)
+	s.liveCursor = afterCursor
 	for len(s.journal) > 0 && s.journal[0].event.Cursor <= afterCursor {
 		item := s.journal[0]
 		s.journal = s.journal[1:]
@@ -352,6 +361,7 @@ func (s *childSlot) bindObserver(afterCursor uint64, observer agent.ChildActivit
 		item.acknowledge()
 	}
 	s.mu.Unlock()
+	s.liveDeliveryMu.Unlock()
 	s.deliveryMu.Unlock()
 	s.triggerDelivery()
 }
@@ -524,11 +534,17 @@ func (s *childSlot) appendJournalEvent(raw agent.ChildActivityEvent, terminal *d
 	s.cursor++
 	event.Cursor = s.cursor
 	event.Target = agent.NormalizeChildEndpointRef(s.target)
-	if merged := s.mergePendingActivityEventLocked(event); merged != nil {
-		s.compactActivityJournalLocked()
-		s.mu.Unlock()
-		s.triggerDelivery()
-		return merged
+	preserveLiveBoundary := s.liveFrameReadyLocked(event)
+	if !preserveLiveBoundary {
+		if merged := s.mergePendingActivityEventLocked(event); merged != nil {
+			s.compactActivityJournalLocked()
+			s.mu.Unlock()
+			// A merged item is an entirely not-live suffix. Keep it on the
+			// durable path even if an observer frontier advances concurrently;
+			// otherwise the item could later replay an older merged prefix.
+			s.triggerDelivery()
+			return merged
+		}
 	}
 	size := childActivityEventSize(event)
 	frameCount := uint64(0)
@@ -536,14 +552,51 @@ func (s *childSlot) appendJournalEvent(raw agent.ChildActivityEvent, terminal *d
 		frameCount = 1
 	}
 	item := &childActivityJournalItem{
-		event: event, terminal: terminal, size: size, frameCount: frameCount, done: make(chan struct{}),
+		event: event, terminal: terminal, size: size, frameCount: frameCount,
+		preserveLiveBoundary: preserveLiveBoundary, done: make(chan struct{}),
 	}
 	s.journal = append(s.journal, item)
 	s.journalBytes += size
 	s.compactActivityJournalLocked()
 	s.mu.Unlock()
+	s.deliverLiveFrame(event)
 	s.triggerDelivery()
 	return item
+}
+
+func (s *childSlot) liveFrameReadyLocked(event agent.ChildActivityEvent) bool {
+	if s == nil || event.Frame == nil || event.Result != nil || event.Gap || event.Cursor == 0 || !s.targetReady {
+		return false
+	}
+	_, ok := s.observer.(agent.ChildActivityLiveObserver)
+	return ok && event.Cursor == s.liveCursor+1
+}
+
+// deliverLiveFrame exposes an exact frame only after the endpoint journal owns
+// it. A failed or skipped preview leaves a cursor gap, which fences later live
+// delivery until the durable observer catches up; this prevents a merged
+// journal replay from partially overlapping an accepted live suffix.
+func (s *childSlot) deliverLiveFrame(event agent.ChildActivityEvent) {
+	if s == nil || event.Frame == nil || event.Result != nil || event.Gap || event.Cursor == 0 {
+		return
+	}
+	s.liveDeliveryMu.Lock()
+	defer s.liveDeliveryMu.Unlock()
+
+	s.mu.Lock()
+	observer := s.observer
+	live, ok := observer.(agent.ChildActivityLiveObserver)
+	ready := s.liveFrameReadyLocked(event) && ok
+	s.mu.Unlock()
+	if !ready {
+		return
+	}
+	if err := live.ObserveChildActivityLive(context.Background(), agent.CloneChildActivityEvent(event)); err != nil {
+		return
+	}
+	s.mu.Lock()
+	s.liveCursor = max(s.liveCursor, event.Cursor)
+	s.mu.Unlock()
 }
 
 func (s *childSlot) triggerDelivery() {
@@ -608,6 +661,7 @@ func (s *childSlot) deliverJournal() {
 			err = observer.ObserveChildActivity(context.Background(), events[0])
 		}
 		s.deliveryMu.Unlock()
+		ackCursor := uint64(0)
 		s.mu.Lock()
 		s.deliveringCount = 0
 		if err == nil && len(s.journal) >= len(items) {
@@ -621,6 +675,9 @@ func (s *childSlot) deliverJournal() {
 					s.journalBytes -= item.size
 					item.acknowledge()
 				}
+				if len(items) > 0 {
+					ackCursor = items[len(items)-1].event.Cursor
+				}
 			}
 		}
 		if err != nil {
@@ -630,6 +687,13 @@ func (s *childSlot) deliverJournal() {
 			s.compactActivityJournalLocked()
 		}
 		s.mu.Unlock()
+		if ackCursor > 0 {
+			s.liveDeliveryMu.Lock()
+			s.mu.Lock()
+			s.liveCursor = max(s.liveCursor, ackCursor)
+			s.mu.Unlock()
+			s.liveDeliveryMu.Unlock()
+		}
 		if err != nil {
 			return
 		}

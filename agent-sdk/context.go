@@ -210,6 +210,16 @@ type ChildActivityBatchObserver interface {
 	ObserveChildActivityBatch(context.Context, []ChildActivityEvent) error
 }
 
+// ChildActivityLiveObserver optionally accepts one already-journaled frame for
+// process-local presentation before its durable observer callback completes.
+// Returning nil records only that the preview was applied; it never
+// acknowledges or removes the endpoint journal item. Implementations must
+// return promptly, perform no durable I/O, and tolerate the same cursor later
+// arriving through ChildActivityObserver.
+type ChildActivityLiveObserver interface {
+	ObserveChildActivityLive(context.Context, ChildActivityEvent) error
+}
+
 // ChildActivityObserverBinder atomically installs or replaces the sole output
 // observer for one endpoint and replays events after afterCursor.
 type ChildActivityObserverBinder interface {

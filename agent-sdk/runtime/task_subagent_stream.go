@@ -193,9 +193,9 @@ func (t *subagentTask) retainCompletedFinalLocked(text string) {
 // Some ACP endpoints publish a provisional prefix and then a complete final
 // snapshot after changing message identity. Those are both valid observations,
 // but concatenating them produces corrupt presentation such as
-// "TURNTURN2_A". Task stream cursors are append-only, so the only honest
-// retraction is a recoverable semantic-current-state boundary. The semantic
-// cache then rebuilds this Turn from its tool/reasoning state plus the exact
+// "Here's the Here's the result:". Task stream cursors are append-only, so the
+// only honest retraction is a recoverable semantic-current-state boundary.
+// The semantic cache then rebuilds this Turn from its tool/reasoning state plus the exact
 // Task result retained below.
 func (t *subagentTask) invalidateDivergedAssistantStreamLocked(finalText string) {
 	if t == nil {
@@ -205,17 +205,10 @@ func (t *subagentTask) invalidateDivergedAssistantStreamLocked(finalText string)
 	if !subagentAssistantStreamDiverged(t.streamFrames, turnID, finalText) {
 		return
 	}
-	current := t.streamEventBase + int64(len(t.streamFrames))
-	for index := range t.streamFrames {
-		t.streamFrames[index] = stream.Frame{}
-	}
-	t.streamFrames = nil
-	t.streamFrameSizes = nil
-	t.streamBytes = 0
 	// Advance past one explicit reconciliation boundary so a consumer that
 	// already acknowledged every provisional frame must still reset.
-	t.streamEventBase = current + 1
-	t.notifyStreamChangeLocked()
+	t.advanceSubagentStreamBoundaryLocked(1)
+	t.resetAssistantStreamIdentityLocked("")
 }
 
 // subagentAssistantStreamDiverged recognizes only producer-shaped ACP
@@ -327,6 +320,7 @@ func (t *subagentTask) discardInitialResultStreamFallbackLocked() {
 	t.stdout = ""
 	t.stdoutCursor = 0
 	t.semanticRetention = subagentSemanticRetention{}
+	t.resetAssistantStreamIdentityLocked("")
 }
 
 func (t *subagentTask) applyStreamFrames(frames []stream.Frame) {
@@ -352,15 +346,8 @@ func (t *subagentTask) markSubagentActivityObservationGap(dropped uint64) {
 	}
 	t.streamMu.Lock()
 	t.mu.Lock()
-	current := t.streamEventBase + int64(len(t.streamFrames))
-	for index := range t.streamFrames {
-		t.streamFrames[index] = stream.Frame{}
-	}
-	t.streamFrames = nil
-	t.streamFrameSizes = nil
-	t.streamBytes = 0
-	t.streamEventBase = current + advance
-	t.notifyStreamChangeLocked()
+	t.advanceSubagentStreamBoundaryLocked(advance)
+	t.resetAssistantStreamIdentityLocked("")
 	t.mu.Unlock()
 	t.streamMu.Unlock()
 }
@@ -472,6 +459,7 @@ func (t *subagentTask) appendStreamFrameLocked(frame stream.Frame) {
 	frame.Ref.TaskID = firstNonEmpty(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(t.ref.TaskID))
 	frame.Ref.SessionID = firstNonEmpty(strings.TrimSpace(frame.Ref.SessionID), strings.TrimSpace(t.sessionRef.SessionID))
 	frame.Ref.TerminalID = firstNonEmpty(strings.TrimSpace(frame.Ref.TerminalID), subagentTurnID(t.ref.TaskID, t.turnSeq))
+	t.reconcileAssistantStreamIdentityLocked(frame)
 	frame.Cursor = stream.Cursor{
 		Output: t.streamOutputCursor + int64(len([]byte(text))),
 		Events: t.streamEventBase + int64(len(t.streamFrames)) + 1,
@@ -514,6 +502,117 @@ func (t *subagentTask) appendStreamFrameLocked(frame stream.Frame) {
 		t.streamFrames = t.streamFrames[1:]
 		t.streamEventBase++
 	}
+	t.notifyStreamChangeLocked()
+}
+
+// reconcileAssistantStreamIdentityLocked mirrors FinalAssistantAccumulator's
+// typed message boundary while the Task is still running. ACP deltas with one
+// MessageID remain byte-exact. A different non-empty MessageID in the same
+// answer segment means the producer replaced its provisional answer; advance a
+// recoverable current-state boundary before publishing the replacement so no
+// subscriber can render both chains as one sentence.
+func (t *subagentTask) reconcileAssistantStreamIdentityLocked(frame stream.Frame) {
+	if t == nil || frame.Event == nil {
+		return
+	}
+	event := frame.Event
+	turnID := subagentFrameTurnID(frame)
+	updateType := strings.TrimSpace(session.ProtocolSessionUpdateType(event))
+	if updateType == string(session.ProtocolUpdateTypeAgentThought) {
+		t.closeAssistantStreamSegmentLocked(turnID)
+		return
+	}
+	if updateType != string(session.ProtocolUpdateTypeAgentMessage) {
+		switch session.EventTypeOf(event) {
+		case session.EventTypeToolCall, session.EventTypeToolResult, session.EventTypePlan:
+			t.closeAssistantStreamSegmentLocked(turnID)
+		}
+		return
+	}
+
+	if t.assistantStreamTurnID != turnID {
+		t.assistantStreamTurnID = turnID
+		t.assistantStreamMessageID = ""
+		t.assistantStreamHasText = false
+		t.assistantStreamPreviewPrefix = t.stdout
+	}
+	messageID := strings.TrimSpace(session.EventMessageID(event))
+	if messageID != "" && t.assistantStreamMessageID != "" && messageID != t.assistantStreamMessageID {
+		if t.assistantStreamHasText {
+			t.semanticRetention.dropAssistantMessage(turnID, t.assistantStreamMessageID)
+			t.restoreAssistantStreamPreviewLocked()
+			t.advanceSubagentStreamBoundaryLocked(1)
+		}
+		t.assistantStreamMessageID = messageID
+		t.assistantStreamHasText = false
+	} else if messageID != "" {
+		t.assistantStreamMessageID = messageID
+	}
+	if subagentFrameAssistantText(frame) != "" {
+		t.assistantStreamHasText = true
+	}
+}
+
+func (t *subagentTask) closeAssistantStreamSegmentLocked(turnID string) {
+	if t == nil {
+		return
+	}
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" || t.assistantStreamTurnID != turnID {
+		return
+	}
+	if t.assistantStreamHasText && t.assistantStreamMessageID != "" {
+		order := t.streamEventBase + int64(len(t.streamFrames)) + 1
+		t.semanticRetention.archiveAssistantMessage(turnID, t.assistantStreamMessageID, order)
+	}
+	t.resetAssistantStreamIdentityLocked(turnID)
+}
+
+func (t *subagentTask) resetAssistantStreamIdentityLocked(turnID string) {
+	if t == nil {
+		return
+	}
+	turnID = strings.TrimSpace(turnID)
+	if turnID != "" && t.assistantStreamTurnID != turnID {
+		return
+	}
+	t.assistantStreamTurnID = ""
+	t.assistantStreamMessageID = ""
+	t.assistantStreamHasText = false
+	t.assistantStreamPreviewPrefix = ""
+}
+
+func (t *subagentTask) restoreAssistantStreamPreviewLocked() {
+	if t == nil {
+		return
+	}
+	t.stdout = t.assistantStreamPreviewPrefix
+	t.stdoutCursor = int64(len([]byte(t.stdout)))
+	if t.result == nil {
+		return
+	}
+	if preview := compactFinalOutput(t.stdout, t.stderr); taskOutputHasNonBlankLine(preview) {
+		t.result["output_preview"] = preview
+	} else {
+		delete(t.result, "output_preview")
+	}
+}
+
+func (t *subagentTask) advanceSubagentStreamBoundaryLocked(advance int64) {
+	if t == nil {
+		return
+	}
+	if advance <= 0 {
+		advance = 1
+	}
+	current := t.streamEventBase + int64(len(t.streamFrames))
+	for index := range t.streamFrames {
+		t.streamFrames[index] = stream.Frame{}
+	}
+	t.streamFrames = nil
+	t.streamFrameSizes = nil
+	t.streamBytes = 0
+	t.streamEventBase = current + advance
 	t.notifyStreamChangeLocked()
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
@@ -30,6 +31,40 @@ func newSubagentActivityObserver(runtime *taskRuntime, taskID string) agent.Chil
 // already opened one.
 func (o subagentActivityObserver) ObserveChildActivity(ctx context.Context, raw agent.ChildActivityEvent) error {
 	return o.ObserveChildActivityBatch(ctx, []agent.ChildActivityEvent{raw})
+}
+
+// ObserveChildActivityLive applies one already-journaled frame to the
+// process-local Task stream without waiting for its Task-store write. The
+// durable observer later receives the same cursor and persists the resulting
+// current state without appending the frame twice.
+func (o subagentActivityObserver) ObserveChildActivityLive(_ context.Context, raw agent.ChildActivityEvent) error {
+	if o.runtime == nil || o.taskID == "" {
+		return fmt.Errorf("agent-sdk/runtime: child activity observer is unavailable")
+	}
+	event := agent.CloneChildActivityEvent(raw)
+	if strings.TrimSpace(event.ActivityID) == "" || event.Cursor == 0 {
+		return fmt.Errorf("agent-sdk/runtime: child activity identity and cursor are required")
+	}
+	if strings.TrimSpace(event.Target.EndpointKey) != o.taskID {
+		return fmt.Errorf("agent-sdk/runtime: child activity endpoint changed")
+	}
+	if event.Frame == nil || event.Result != nil || event.Gap {
+		return fmt.Errorf("agent-sdk/runtime: live child activity observation requires one frame")
+	}
+	o.runtime.mu.RLock()
+	task := o.runtime.subagents[o.taskID]
+	o.runtime.mu.RUnlock()
+	if task == nil {
+		// Initial Spawn output can precede Task installation. The endpoint journal
+		// keeps it for the durable observer; later live cursors remain fenced until
+		// that replay catches up.
+		return fmt.Errorf("agent-sdk/runtime: child Task %q is not installed yet", o.taskID)
+	}
+	if err := validateTaskActivityTarget(task, event.Target); err != nil {
+		return err
+	}
+	_, _, err := o.applyChildActivityEvent(task, event)
+	return err
 }
 
 // ObserveChildActivityBatch applies one ordered endpoint-journal batch and
@@ -94,72 +129,34 @@ func (o subagentActivityObserver) ObserveChildActivityBatch(ctx context.Context,
 	var terminalGeneration int64
 	var observedCursor uint64
 	for _, event := range events {
-		task.mu.Lock()
-		if event.Cursor <= task.activityDurableCursor {
-			task.mu.Unlock()
+		generation, pending, err := o.applyChildActivityEvent(task, event)
+		if err != nil {
+			return err
+		}
+		if !pending {
 			continue
 		}
-		activityOpened := false
-		if task.activityID != strings.TrimSpace(event.ActivityID) {
-			initialGeneration := event.Initial && task.turnSeq == 1 && task.activityID == ""
-			if !initialGeneration && (!task.running || task.activityID != "") {
-				beginObservedSubagentActivityLocked(task)
-			}
-			task.activityID = strings.TrimSpace(event.ActivityID)
-			task.activityGeneration = max(task.turnSeq, 1)
-			activityOpened = true
-		}
-		generation := max(task.activityGeneration, 1)
-		alreadyApplied := event.Cursor <= task.activityCursor
-		task.mu.Unlock()
-		if activityOpened {
-			// Follow observers park after a terminal Task snapshot. Wake them
-			// only after the first real frame (or terminal-only observation)
-			// proves that a new child activity exists.
-			o.runtime.notifyTaskStreamActivity(task.sessionRef.SessionID, task.ref.TaskID)
-		}
-
-		if !alreadyApplied {
-			if event.Gap {
-				task.markSubagentActivityObservationGap(event.Dropped)
-			}
-			if event.Frame != nil {
-				frame := activityFrameForGeneration(*event.Frame, task, generation)
-				task.applyStreamFrames([]stream.Frame{frame})
-			}
-		}
-
-		task.mu.Lock()
-		if event.Cursor > task.activityCursor {
-			task.activityCursor = event.Cursor
-		}
-		if task.metadata == nil {
-			task.metadata = map[string]any{}
-		}
-		task.metadata[subagentActivityIDMeta] = task.activityID
-		task.metadata[subagentActivityGenerationMeta] = generation
-		task.metadata[subagentActivityCursorMeta] = int64(task.activityCursor)
 		observedCursor = max(observedCursor, event.Cursor)
 		if event.Result != nil {
 			result := delegation.CloneResult(*event.Result)
 			terminal = &result
 			terminalGeneration = generation
 		}
-		task.mu.Unlock()
 	}
 
 	if observedCursor == 0 {
 		return nil
 	}
 	if terminal == nil {
-		task.mu.Lock()
-		entry := task.entrySnapshot(o.runtime.runtime.now())
-		task.mu.Unlock()
+		entry, persistedCursor := observedSubagentActivitySnapshot(task, o.runtime.runtime.now())
 		if err := o.runtime.persistObservedSubagentTurn(ctx, task, entry); err != nil {
 			return err
 		}
+		if cursor, ok := taskInt64Value(entry.Metadata[subagentActivityCursorMeta]); ok && cursor > 0 {
+			persistedCursor = max(persistedCursor, uint64(cursor))
+		}
 		task.mu.Lock()
-		task.activityDurableCursor = max(task.activityDurableCursor, observedCursor)
+		task.activityDurableCursor = max(task.activityDurableCursor, persistedCursor)
 		task.mu.Unlock()
 		return nil
 	}
@@ -193,6 +190,87 @@ func (o subagentActivityObserver) ObserveChildActivityBatch(ctx context.Context,
 	task.activityDurableCursor = max(task.activityDurableCursor, observedCursor)
 	task.mu.Unlock()
 	return nil
+}
+
+// applyChildActivityEvent is the single process-local application boundary for
+// live preview and durable journal replay. pending reports whether the cursor
+// still needs a durable acknowledgement even when its frame was already
+// applied by the live path.
+func (o subagentActivityObserver) applyChildActivityEvent(
+	task *subagentTask,
+	event agent.ChildActivityEvent,
+) (generation int64, pending bool, err error) {
+	if task == nil {
+		return 0, false, fmt.Errorf("agent-sdk/runtime: child Task is unavailable")
+	}
+	task.activityApplyMu.Lock()
+	defer task.activityApplyMu.Unlock()
+
+	task.mu.Lock()
+	if event.Cursor <= task.activityDurableCursor {
+		generation = max(task.activityGeneration, 1)
+		task.mu.Unlock()
+		return generation, false, nil
+	}
+	activityOpened := false
+	if task.activityID != strings.TrimSpace(event.ActivityID) {
+		initialGeneration := event.Initial && task.turnSeq == 1 && task.activityID == ""
+		if !initialGeneration && (!task.running || task.activityID != "") {
+			beginObservedSubagentActivityLocked(task)
+		}
+		task.activityID = strings.TrimSpace(event.ActivityID)
+		task.activityGeneration = max(task.turnSeq, 1)
+		activityOpened = true
+	}
+	generation = max(task.activityGeneration, 1)
+	alreadyApplied := event.Cursor <= task.activityCursor
+	task.mu.Unlock()
+	if activityOpened {
+		// Follow observers park after a terminal Task snapshot. Wake them only
+		// after a real frame (or a durable terminal-only event) proves that a new
+		// child activity exists.
+		o.runtime.notifyTaskStreamActivity(task.sessionRef.SessionID, task.ref.TaskID)
+	}
+
+	if !alreadyApplied {
+		if event.Gap {
+			task.markSubagentActivityObservationGap(event.Dropped)
+		}
+		if event.Frame != nil {
+			frame := activityFrameForGeneration(*event.Frame, task, generation)
+			task.applyStreamFrames([]stream.Frame{frame})
+		}
+	}
+
+	task.mu.Lock()
+	if event.Cursor > task.activityCursor {
+		task.activityCursor = event.Cursor
+	}
+	if task.metadata == nil {
+		task.metadata = map[string]any{}
+	}
+	task.metadata[subagentActivityIDMeta] = task.activityID
+	task.metadata[subagentActivityGenerationMeta] = generation
+	task.metadata[subagentActivityCursorMeta] = int64(task.activityCursor)
+	task.mu.Unlock()
+	return generation, true, nil
+}
+
+func observedSubagentActivitySnapshot(task *subagentTask, now time.Time) (*taskapi.Entry, uint64) {
+	if task == nil {
+		return nil, 0
+	}
+	task.activityApplyMu.Lock()
+	defer task.activityApplyMu.Unlock()
+	task.mu.Lock()
+	defer task.mu.Unlock()
+	if task.metadata == nil {
+		task.metadata = map[string]any{}
+	}
+	task.metadata[subagentActivityIDMeta] = task.activityID
+	task.metadata[subagentActivityGenerationMeta] = max(task.activityGeneration, 1)
+	task.metadata[subagentActivityCursorMeta] = int64(task.activityCursor)
+	return task.entrySnapshot(now), task.activityCursor
 }
 
 const observedSubagentTurnPersistAttempts = 4
@@ -238,6 +316,7 @@ func (tm *taskRuntime) rebaseObservedSubagentTask(task *subagentTask, current *t
 	if tm == nil || task == nil || current == nil {
 		return nil
 	}
+	task.activityApplyMu.Lock()
 	task.mu.Lock()
 	liveMetadata := session.CloneState(task.metadata)
 	mergedMetadata := session.CloneState(current.Metadata)
@@ -268,6 +347,7 @@ func (tm *taskRuntime) rebaseObservedSubagentTask(task *subagentTask, current *t
 	}
 	rebased := task.entrySnapshot(tm.runtime.now())
 	task.mu.Unlock()
+	task.activityApplyMu.Unlock()
 
 	mergedSpec := session.CloneState(current.Spec)
 	if mergedSpec == nil {
@@ -350,4 +430,5 @@ func subagentActivityCursor(task *subagentTask) uint64 {
 var (
 	_ agent.ChildActivityObserver      = subagentActivityObserver{}
 	_ agent.ChildActivityBatchObserver = subagentActivityObserver{}
+	_ agent.ChildActivityLiveObserver  = subagentActivityObserver{}
 )

@@ -205,11 +205,14 @@ type subagentTask struct {
 	// streamMu preserves publication order across the pending-to-live handoff.
 	// It must be acquired before publishing the task in taskRuntime.subagents.
 	streamMu sync.Mutex
-	mu       sync.Mutex
-	state    taskapi.State
-	running  bool
-	result   map[string]any
-	metadata map[string]any
+	// activityApplyMu serializes process-local live frame application with the
+	// matching durable journal callback without covering Task-store I/O.
+	activityApplyMu sync.Mutex
+	mu              sync.Mutex
+	state           taskapi.State
+	running         bool
+	result          map[string]any
+	metadata        map[string]any
 
 	stdout           string
 	stderr           string
@@ -224,10 +227,19 @@ type subagentTask struct {
 	streamOutputCursor int64
 	streamBytes        int
 	semanticRetention  subagentSemanticRetention
-	latestFinalText    string
-	latestFinalTurnSeq int64
-	latestFinalOrder   int64
-	latestFinalAt      time.Time
+	// assistantStream* tracks the producer's current ACP agent-message segment.
+	// A new non-empty MessageID without an intervening reasoning/tool/plan
+	// barrier replaces that provisional segment instead of concatenating it.
+	assistantStreamTurnID    string
+	assistantStreamMessageID string
+	assistantStreamHasText   bool
+	// assistantStreamPreviewPrefix is the bounded output before the current
+	// segment. It is the rebuild point when a new MessageID replaces that segment.
+	assistantStreamPreviewPrefix string
+	latestFinalText              string
+	latestFinalTurnSeq           int64
+	latestFinalOrder             int64
+	latestFinalAt                time.Time
 	// finalResponseCursor is the highest completed child Turn whose exact Final
 	// Response has already been exposed by Spawn or an explicit Task read/wait.
 	// It is an observation frontier, not a second output store; exact text stays

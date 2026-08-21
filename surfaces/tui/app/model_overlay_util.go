@@ -223,7 +223,10 @@ func protectRepaintGuardLine(line string, width int) string {
 	if line == "" || width <= 1 {
 		return line
 	}
-	line = strings.ReplaceAll(line, wideCellRendererSentinel(), "")
+	// The sentinel occupies one concealed display cell. Preserve that cell when
+	// moving the guard to the outer frame edge; deleting it shifts any overlay
+	// padding and right border one column to the left.
+	line = strings.ReplaceAll(line, wideCellRendererSentinel(), " ")
 	lineWidth := displayColumns(line)
 	if lineWidth < width {
 		return line + strings.Repeat(" ", width-lineWidth-1) + wideCellRendererSentinel()

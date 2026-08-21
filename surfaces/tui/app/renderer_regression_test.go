@@ -514,13 +514,13 @@ func TestNormalizeFullscreenFrameLineFitsDisplayWidth(t *testing.T) {
 func TestNormalizeFullscreenFrameLineReseatsRepaintSentinelAtScreenEdge(t *testing.T) {
 	const (
 		viewportWidth = 20
-		screenWidth   = 24
+		screenWidth   = 28
 	)
 	protected := protectRepaintGuardLine("· 先看当前改动", viewportWidth)
 	if !strings.Contains(protected, wideCellRendererSentinel()) {
 		t.Fatalf("viewport line missing repaint sentinel: %q", protected)
 	}
-	indented := strings.Repeat(" ", 2) + protected + " "
+	indented := strings.Repeat(" ", 2) + protected + " │"
 	got := normalizeFullscreenFrameLine(indented, screenWidth)
 	if displayColumns(got) != screenWidth {
 		t.Fatalf("normalized width = %d, want %d; raw=%q", displayColumns(got), screenWidth, got)
@@ -534,6 +534,59 @@ func TestNormalizeFullscreenFrameLineReseatsRepaintSentinelAtScreenEdge(t *testi
 	if !strings.Contains(ansi.Strip(got), "先看当前改动") {
 		t.Fatalf("normalized line lost CJK text: %q", got)
 	}
+	plain := ansi.Strip(got)
+	border := strings.LastIndex(plain, "│")
+	if border < 0 || displayColumns(plain[:border]) != 23 {
+		t.Fatalf("interior suffix shifted while reseating sentinel: plain=%q raw=%q", plain, got)
+	}
+}
+
+func TestSubagentOutputOverlayActiveNarrativeKeepsPhysicalBorderAligned(t *testing.T) {
+	const (
+		width  = 100
+		height = 22
+	)
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	model = updated.(*Model)
+	view := model.ensureSubagentOutputView("spawn-border")
+	source := newNarrativeSourceIdentity("message-border", "", "")
+	view.block.AppendStreamEvent(SEAssistant, "第一行", source)
+	view.touch(true)
+	model.subagentOutputOverlay = &subagentOutputOverlayState{
+		callID: "spawn-border", followTail: true,
+		selectStart: textSelectionPoint{line: -1, col: -1},
+		selectEnd:   textSelectionPoint{line: -1, col: -1},
+	}
+	before := model.View().Content
+
+	view.block.AppendStreamEvent(SEAssistant, "\n第二行", source)
+	view.touch(true)
+	after := model.View().Content
+	layout := model.subagentOutputOverlay.layout
+	wantRightBorder := layout.startX + layout.frameWidth - 1
+	assertOverlayContentRightBorderColumn(t, ansi.Strip(after), "第二行", wantRightBorder)
+
+	updates := renderFullscreenFramesForTest(t, width, height, before, after)
+	assertPhysicalFullscreenFrame(t, width, height, after, updates)
+}
+
+func assertOverlayContentRightBorderColumn(t *testing.T, frame string, needle string, want int) {
+	t.Helper()
+	for _, line := range strings.Split(frame, "\n") {
+		if !strings.Contains(line, needle) {
+			continue
+		}
+		border := strings.LastIndex(line, "│")
+		if border < 0 {
+			t.Fatalf("overlay row containing %q has no right border: %q", needle, line)
+		}
+		if got := displayColumns(line[:border]); got != want {
+			t.Fatalf("overlay right border column = %d, want %d: %q", got, want, line)
+		}
+		return
+	}
+	t.Fatalf("fullscreen frame omitted overlay row %q:\n%s", needle, frame)
 }
 
 func TestActiveASCIINarrativeGetsRepaintGuard(t *testing.T) {
