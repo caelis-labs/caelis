@@ -740,6 +740,8 @@ func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task
 }
 
 func (tm *taskRuntime) detachSubagentParticipant(ctx context.Context, task *subagentTask) error {
+	tm.runtime.participantMu.Lock()
+	defer tm.runtime.participantMu.Unlock()
 	lifecycle, ok := tm.runtime.sessions.(session.ParticipantLifecycleService)
 	if !ok {
 		return errors.New("agent-sdk/runtime: participant lifecycle store does not support atomic compensation")

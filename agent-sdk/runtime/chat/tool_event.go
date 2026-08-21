@@ -126,9 +126,9 @@ func toolCallStatus(_ model.ToolCall, result tool.Result, rawOutput map[string]a
 		return "failed"
 	}
 	// A returned result completes the invocation. Only command execution owns
-	// the process state carried in its payload; control tools such as Spawn,
-	// Task, and SendMessage report a separate target lifecycle that must not
-	// keep the tool invocation open.
+	// the process state carried in its payload. Other tools, including Spawn,
+	// Task, and SendMessage, do not transfer their invocation lifecycle to the
+	// target they address or observe.
 	if trustedTaskResult && runtimeTaskKind(result.Metadata) == "command" {
 		state, _ := rawOutput["state"].(string)
 		if strings.TrimSpace(state) == "" {

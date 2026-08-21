@@ -89,15 +89,15 @@ func (r *hostedChildInputRouter) route(
 	if taskapi.NormalizeHandle(input.Target) == taskapi.NormalizeHandle(hostedChildHandle(binding)) {
 		return errorcode.New(errorcode.Conflict, fmt.Sprintf("gatewayapp: subagent %q cannot message itself", hostedChildHandle(binding)))
 	}
-	source := session.ParticipantExecutor(binding)
-	if strings.EqualFold(input.Target, agent.AgentInputParent) {
-		return routeHostedChildInputToParent(ctx, &parentRuntime.instance.runtimeComposition, active, source, input)
-	}
-	_, err = parentRuntime.instance.engine.SubmitChildInput(ctx, parentRef, agent.ChildInputCommand{
-		Target: input.Target, Source: source, Input: input.Input,
-		DisplayInput: input.DisplayInput, ContentParts: input.ContentParts,
-	})
-	return err
+	return parentRuntime.instance.engine.SubmitParticipantInput(
+		ctx,
+		parentRef,
+		binding,
+		input,
+		func(ctx context.Context, current session.Session, source session.ActorRef, input agent.AgentInput) error {
+			return routeHostedChildInputToParent(ctx, &parentRuntime.instance.runtimeComposition, current, source, input)
+		},
+	)
 }
 
 func routeHostedChildInputToParent(

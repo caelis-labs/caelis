@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -826,6 +827,201 @@ func TestParticipantDetachCancelsInflightSteering(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("detached participant consumer did not stop")
 	}
+}
+
+func TestParticipantDetachAbortsBlockedSteeringWrite(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	marker := filepath.Join(t.TempDir(), "partial-write-started")
+	acpClient := newBlockedSteeringWriteClient(t, marker)
+	handle := newTurnHandle(nil)
+	run := &participantRun{
+		id: "participant-blocked-write", parentSessionID: "parent-session", agent: "blocked-writer",
+		client: acpClient, remoteSessionID: "remote-session", supportsSteering: true,
+		binding: session.ParticipantBinding{
+			ID: "participant-blocked-write", Kind: session.ParticipantKindACP,
+			DelegationID: "delegation-blocked-write", AttachmentGeneration: "generation-blocked-write",
+		},
+		turnID: "participant-turn", turnStream: true, handle: handle,
+	}
+	key := participantKey(run.parentSessionID, run.id)
+	manager := &Manager{participants: map[participantRunKey]*participantRun{key: run}}
+	consumerDone := drainControllerTurnHandle(handle)
+	committed := make(chan struct{}, 1)
+	steerDone := make(chan error, 1)
+	go func() {
+		steerDone <- manager.SteerParticipant(ctx, controller.ParticipantSteerRequest{
+			SessionRef: session.SessionRef{SessionID: run.parentSessionID},
+			TurnID:     run.turnID, ParticipantID: run.id,
+			Input: strings.Repeat("blocked participant steering ", 1<<16),
+			Commit: func() error {
+				committed <- struct{}{}
+				return nil
+			},
+		})
+	}()
+	waitForBlockedSteeringWrite(t, ctx, marker)
+	if err := manager.Detach(ctx, controller.DetachRequest{
+		SessionRef:    session.SessionRef{SessionID: run.parentSessionID},
+		ParticipantID: run.id, DelegationID: run.binding.DelegationID,
+		AttachmentGeneration: run.binding.AttachmentGeneration,
+	}); err != nil {
+		t.Fatalf("Detach() error = %v", err)
+	}
+	select {
+	case err := <-steerDone:
+		if errorcode.CodeOf(err) != errorcode.UnknownOutcome {
+			t.Fatalf("blocked SteerParticipant() error = %v, want unknown_outcome", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("participant detach did not abort the blocked steering write")
+	}
+	manager.mu.RLock()
+	retained := manager.participants[key]
+	manager.mu.RUnlock()
+	if retained != nil {
+		t.Fatal("blocked-write participant remained addressable")
+	}
+	select {
+	case <-committed:
+		t.Fatal("blocked participant steering committed canonical input")
+	default:
+	}
+	handle.finish()
+	select {
+	case <-consumerDone:
+	case <-ctx.Done():
+		t.Fatal("blocked-write participant consumer did not stop")
+	}
+}
+
+func TestControllerCloseAdmissionAbortsBlockedSteeringWrite(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	marker := filepath.Join(t.TempDir(), "partial-write-started")
+	acpClient := newBlockedSteeringWriteClient(t, marker)
+	handle := newTurnHandle(nil)
+	run := &controllerRun{
+		parentSessionID: "parent-session", agent: "blocked-writer", client: acpClient,
+		remoteSessionID: "remote-session", supportsSteering: true,
+		binding: session.ControllerBinding{
+			Kind: session.ControllerKindACP, ControllerID: "controller-blocked-write",
+			EpochID: "epoch-blocked-write", RemoteSessionID: "remote-session",
+		},
+		turnID: "main-turn", turnStream: true, handle: handle,
+	}
+	manager := &Manager{controllers: map[string]*controllerRun{run.parentSessionID: run}}
+	consumerDone := drainControllerTurnHandle(handle)
+	committed := make(chan struct{}, 1)
+	steerDone := make(chan error, 1)
+	go func() {
+		steerDone <- manager.SteerController(ctx, controller.ControllerSteerRequest{
+			SessionRef:   session.SessionRef{SessionID: run.parentSessionID},
+			ControllerID: run.binding.ControllerID, ControllerEpoch: run.binding.EpochID,
+			RemoteSessionID: run.remoteSessionID, TurnID: run.turnID,
+			Input: strings.Repeat("blocked controller steering ", 1<<16),
+			Commit: func() error {
+				committed <- struct{}{}
+				return nil
+			},
+		})
+	}()
+	waitForBlockedSteeringWrite(t, ctx, marker)
+	closeDone := make(chan struct{})
+	go func() {
+		run.closeTurnAdmission()
+		close(closeDone)
+	}()
+	select {
+	case <-closeDone:
+	case <-ctx.Done():
+		t.Fatal("controller close admission did not abort the blocked steering write")
+	}
+	select {
+	case err := <-steerDone:
+		if errorcode.CodeOf(err) != errorcode.UnknownOutcome {
+			t.Fatalf("blocked SteerController() error = %v, want unknown_outcome", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("blocked controller steering did not settle")
+	}
+	manager.mu.RLock()
+	retained := manager.controllers[run.parentSessionID]
+	manager.mu.RUnlock()
+	if retained != nil {
+		t.Fatal("blocked-write controller remained addressable")
+	}
+	select {
+	case <-committed:
+		t.Fatal("blocked controller steering committed canonical input")
+	default:
+	}
+	handle.finish()
+	select {
+	case <-consumerDone:
+	case <-ctx.Done():
+		t.Fatal("blocked-write controller consumer did not stop")
+	}
+}
+
+func newBlockedSteeringWriteClient(t *testing.T, marker string) *client.Client {
+	t.Helper()
+	acpClient, err := client.Start(context.Background(), client.Config{
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestManagerBlockedSteeringWriteHelperProcess", "--"},
+		Env: map[string]string{
+			"CAELIS_ACP_HELPER":               "blocked-steering-write",
+			"CAELIS_ACP_PARTIAL_WRITE_MARKER": marker,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = acpClient.Close(closeCtx)
+	})
+	return acpClient
+}
+
+func waitForBlockedSteeringWrite(t *testing.T, ctx context.Context, marker string) {
+	t.Helper()
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("steering request did not begin its partial transport write")
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+func drainControllerTurnHandle(handle *turnHandle) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range handle.SourceEvents() {
+		}
+	}()
+	return done
+}
+
+func TestManagerBlockedSteeringWriteHelperProcess(t *testing.T) {
+	if os.Getenv("CAELIS_ACP_HELPER") != "blocked-steering-write" {
+		return
+	}
+	buffer := make([]byte, 64)
+	if _, err := os.Stdin.Read(buffer); err != nil {
+		os.Exit(2)
+	}
+	if err := os.WriteFile(os.Getenv("CAELIS_ACP_PARTIAL_WRITE_MARKER"), []byte("started"), 0o600); err != nil {
+		os.Exit(3)
+	}
+	time.Sleep(30 * time.Second)
+	os.Exit(0)
 }
 
 type participantSteeringTestHarness struct {

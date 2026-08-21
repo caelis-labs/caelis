@@ -85,21 +85,6 @@ func (r *recordingRuntime) RunState(context.Context, session.SessionRef) (agent.
 	return agent.RunState{}, nil
 }
 
-type concurrentAgentMessageRuntime struct {
-	session session.Session
-	runner  agent.Runner
-	calls   atomic.Int64
-}
-
-func (r *concurrentAgentMessageRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
-	r.calls.Add(1)
-	return agent.RunResult{Session: r.session, Handle: r.runner}, nil
-}
-
-func (r *concurrentAgentMessageRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
-	return agent.RunState{}, nil
-}
-
 type approvalRuntime struct {
 	session    session.Session
 	requests   int

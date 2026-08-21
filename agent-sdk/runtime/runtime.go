@@ -68,17 +68,19 @@ type Runtime struct {
 	subagents                agent.SubagentRunner
 	sessionWrites            sessionWriteQueue
 	executionMu              sync.Mutex
-	participantMu            sync.Mutex
-	participantPromptClaims  map[participantPromptKey]struct{}
-	mu                       sync.RWMutex
-	runStates                map[string]agent.RunState
-	activeRunners            map[string]activeRun
-	approvalWaiters          map[string]chan agent.ApprovalResponse
-	tasks                    *taskRuntime
-	terminals                *streamService
-	lifecycle                agent.LifecycleOptions
-	guardrails               []agent.GuardrailSpec
-	guardrailSlots           chan struct{}
+	// participantMu linearizes durable participant topology mutations with
+	// source/target input admission until the selected endpoint owns the input.
+	participantMu           sync.Mutex
+	participantPromptClaims map[participantPromptKey]struct{}
+	mu                      sync.RWMutex
+	runStates               map[string]agent.RunState
+	activeRunners           map[string]activeRun
+	approvalWaiters         map[string]chan agent.ApprovalResponse
+	tasks                   *taskRuntime
+	terminals               *streamService
+	lifecycle               agent.LifecycleOptions
+	guardrails              []agent.GuardrailSpec
+	guardrailSlots          chan struct{}
 }
 
 // New returns one baseline local runtime.

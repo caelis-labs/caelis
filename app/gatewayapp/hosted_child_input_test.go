@@ -13,6 +13,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -70,6 +71,35 @@ func TestHostedChildInputStartsIdleParentTurnWithTrustedActor(t *testing.T) {
 	waitHostedChildParentIdle(t, host, parent.SessionID)
 	if got := provider.CallCount(); got != 1 {
 		t.Fatalf("model calls = %d, want one ordinary idle prompt", got)
+	}
+}
+
+func TestHostedChildInputDetachedSourceDoesNotPersistParentContext(t *testing.T) {
+	provider := newHostedChildInputTestProvider(t, false)
+	host := newHostedChildInputTestStack(t, provider)
+	parent, _, sender := newHostedChildInputTestTopology(t, host, "detached")
+	if _, err := host.composition.sessions.RemoveParticipant(context.Background(), session.RemoveParticipantRequest{
+		SessionRef: parent.SessionRef, ParticipantID: "child-agent-detached",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := sender.SendAgentInput(context.Background(), agent.AgentInput{
+		Target: agent.AgentInputParent, Input: "must not enter parent context",
+	})
+	if !errorcode.Is(err, errorcode.PermissionDenied) {
+		t.Fatalf("SendAgentInput() error = %v, want permission denied", err)
+	}
+	events, err := host.composition.sessions.Events(context.Background(), session.EventsRequest{SessionRef: parent.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event != nil && session.EventTypeOf(event) == session.EventTypeContext {
+			t.Fatalf("detached child persisted parent Context event: %#v", event)
+		}
+	}
+	if got := provider.CallCount(); got != 0 {
+		t.Fatalf("detached child triggered %d parent model calls", got)
 	}
 }
 

@@ -610,6 +610,230 @@ func TestRuntimeChildInputRejectsSelfAndStaleSourceBeforeRunner(t *testing.T) {
 	}
 }
 
+func TestRuntimeParticipantInputDetachFirstRejectsParentDispatch(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sessions, active := newTestSessionService(t, "participant-input-detach-first")
+	binding := session.ParticipantBinding{
+		ID: "child-source", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated,
+		SessionID: "child-session", DelegationID: "child-task", AttachmentGeneration: "generation-1",
+	}
+	var err error
+	active, err = sessions.PutParticipant(ctx, session.PutParticipantRequest{
+		SessionRef: active.SessionRef, Binding: binding,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &Runtime{sessions: sessions}
+	runtime.participantMu.Lock()
+	removed, err := sessions.RemoveParticipant(ctx, session.RemoveParticipantRequest{
+		SessionRef: active.SessionRef, ParticipantID: binding.ID,
+	})
+	if err != nil {
+		runtime.participantMu.Unlock()
+		t.Fatal(err)
+	}
+	if len(removed.Participants) != 0 {
+		runtime.participantMu.Unlock()
+		t.Fatalf("participants after detach = %#v", removed.Participants)
+	}
+	dispatched := false
+	result := make(chan error, 1)
+	go func() {
+		result <- runtime.SubmitParticipantInput(
+			ctx,
+			active.SessionRef,
+			binding,
+			agent.AgentInput{Target: agent.AgentInputParent, Input: "after detach"},
+			func(context.Context, session.Session, session.ActorRef, agent.AgentInput) error {
+				dispatched = true
+				return nil
+			},
+		)
+	}()
+	select {
+	case err := <-result:
+		runtime.participantMu.Unlock()
+		t.Fatalf("participant input crossed held detach admission: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	runtime.participantMu.Unlock()
+	if err := <-result; !errorcode.Is(err, errorcode.PermissionDenied) {
+		t.Fatalf("SubmitParticipantInput() error = %v, want permission denied", err)
+	}
+	if dispatched {
+		t.Fatal("detached participant input reached parent dispatcher")
+	}
+}
+
+func TestRuntimeParticipantInputAdmissionOrdersDispatchBeforeDetach(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sessions, active := newTestSessionService(t, "participant-input-dispatch-first")
+	binding := session.ParticipantBinding{
+		ID: "child-source", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated,
+		SessionID: "child-session", DelegationID: "child-task",
+	}
+	var err error
+	active, err = sessions.PutParticipant(ctx, session.PutParticipantRequest{
+		SessionRef: active.SessionRef, Binding: binding,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &Runtime{sessions: sessions}
+	dispatchEntered := make(chan struct{})
+	releaseDispatch := make(chan struct{})
+	inputDone := make(chan error, 1)
+	go func() {
+		inputDone <- runtime.SubmitParticipantInput(
+			ctx,
+			active.SessionRef,
+			binding,
+			agent.AgentInput{Target: agent.AgentInputParent, Input: "before detach"},
+			func(context.Context, session.Session, session.ActorRef, agent.AgentInput) error {
+				close(dispatchEntered)
+				<-releaseDispatch
+				return nil
+			},
+		)
+	}()
+	select {
+	case <-dispatchEntered:
+	case <-ctx.Done():
+		t.Fatal("participant input did not reach parent dispatcher")
+	}
+	detachDone := make(chan error, 1)
+	go func() {
+		runtime.participantMu.Lock()
+		defer runtime.participantMu.Unlock()
+		_, detachErr := sessions.RemoveParticipant(ctx, session.RemoveParticipantRequest{
+			SessionRef: active.SessionRef, ParticipantID: binding.ID,
+		})
+		detachDone <- detachErr
+	}()
+	select {
+	case err := <-detachDone:
+		t.Fatalf("detach crossed an input owned by the parent dispatcher: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(releaseDispatch)
+	if err := <-inputDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-detachDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeParticipantInputRejectsReplacedAttachmentGeneration(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sessions, active := newTestSessionService(t, "participant-input-generation")
+	original := session.ParticipantBinding{
+		ID: "child-source", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated,
+		SessionID: "child-session", DelegationID: "child-task", AttachmentGeneration: "generation-1",
+	}
+	var err error
+	active, err = sessions.PutParticipant(ctx, session.PutParticipantRequest{
+		SessionRef: active.SessionRef, Binding: original,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := session.CloneParticipantBinding(original)
+	replacement.AttachmentGeneration = "generation-2"
+	if _, err := sessions.PutParticipant(ctx, session.PutParticipantRequest{
+		SessionRef: active.SessionRef, Binding: replacement,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runtime := &Runtime{sessions: sessions}
+	dispatched := false
+	err = runtime.SubmitParticipantInput(
+		ctx,
+		active.SessionRef,
+		original,
+		agent.AgentInput{Target: agent.AgentInputParent, Input: "stale generation"},
+		func(context.Context, session.Session, session.ActorRef, agent.AgentInput) error {
+			dispatched = true
+			return nil
+		},
+	)
+	if !errorcode.Is(err, errorcode.PermissionDenied) {
+		t.Fatalf("SubmitParticipantInput() error = %v, want permission denied", err)
+	}
+	if dispatched {
+		t.Fatal("replaced participant generation reached parent dispatcher")
+	}
+}
+
+func TestRuntimeChildInputDetachFirstRejectsSiblingDispatch(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	runner := &runtimeChildInputRunner{spawnResult: delegation.Result{
+		State: delegation.StateCompleted, Result: "initial result",
+	}}
+	runtime, active := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.StartSubagentWithOptions(
+		ctx, active.SessionRef, "helper", "initial", "sibling-detach-race", StartSubagentOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := session.ParticipantBinding{
+		ID: "source-child", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated,
+		SessionID: "source-session", DelegationID: "source-task",
+	}
+	if _, err := runtime.sessions.PutParticipant(ctx, session.PutParticipantRequest{
+		SessionRef: active.SessionRef, Binding: source,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	runtime.participantMu.Lock()
+	if _, err := runtime.sessions.RemoveParticipant(ctx, session.RemoveParticipantRequest{
+		SessionRef: active.SessionRef, ParticipantID: source.ID,
+	}); err != nil {
+		runtime.participantMu.Unlock()
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, inputErr := runtime.SubmitChildInput(ctx, active.SessionRef, agent.ChildInputCommand{
+			Target: started.Handle,
+			Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: source.ID},
+			Input:  "after source detach",
+		})
+		result <- inputErr
+	}()
+	select {
+	case err := <-result:
+		runtime.participantMu.Unlock()
+		t.Fatalf("sibling input crossed held detach admission: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	runtime.participantMu.Unlock()
+	if err := <-result; !errorcode.Is(err, errorcode.PermissionDenied) {
+		t.Fatalf("SubmitChildInput() error = %v, want permission denied", err)
+	}
+	runner.mu.Lock()
+	calls := runner.calls
+	runner.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("detached source reached sibling runner %d times", calls)
+	}
+}
+
 type runtimeChildInputRunner struct {
 	mu          sync.Mutex
 	spawnResult delegation.Result

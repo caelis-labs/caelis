@@ -156,7 +156,9 @@ func (r *controllerRun) steerParts(ctx context.Context, prompt []json.RawMessage
 		agentID,
 		configured,
 		func(callCtx context.Context, activeClient *client.Client) (client.SessionSteeringResponse, error) {
-			return activeClient.SteerParts(callCtx, remoteSessionID, prompt, nil)
+			return activeClient.SteerPartsWithAbort(callCtx, remoteSessionID, prompt, nil, func() {
+				_ = activeClient.Close(callCtx)
+			})
 		},
 	)
 }
