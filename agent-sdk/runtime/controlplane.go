@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -136,7 +137,15 @@ func (r *Runtime) executeACPControllerTurn(
 		}
 	}()
 
-	inputEvent := buildInputEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputCompaction)
+	inputEvent, inputErr := buildInputEvent(activeSession, turnID, req.InputKind, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputCompaction)
+	if inputErr != nil {
+		r.setRunState(ref.SessionID, agent.RunState{
+			Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID,
+			LastError: inputErr.Error(), UpdatedAt: r.now(),
+		})
+		handle.publishError(inputErr)
+		return
+	}
 	if inputEvent != nil {
 		persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
 			SessionRef:    ref,
@@ -156,12 +165,18 @@ func (r *Runtime) executeACPControllerTurn(
 		handle.publishEvent(persisted)
 	}
 
+	controllerInput := req.Input
+	controllerParts := append([]model.ContentPart(nil), req.ContentParts...)
+	if normalizeInputKind(req.InputKind) == agent.SubmissionKindAgentCommunication && inputEvent != nil && inputEvent.Message != nil {
+		controllerInput = ""
+		controllerParts = model.ContentPartsFromParts(inputEvent.Message.Parts)
+	}
 	turnReq := controller.TurnRequest{
 		SessionRef:        ref,
 		Session:           activeSession,
 		TurnID:            turnID,
-		Input:             req.Input,
-		ContentParts:      req.ContentParts,
+		Input:             controllerInput,
+		ContentParts:      controllerParts,
 		Stream:            req.Request.StreamEnabled(false),
 		Mode:              r.policyMode(req.AgentSpec),
 		ApprovalRequester: controllerApprovalRequester{runtime: r, requester: req.ApprovalRequester, sessionRef: ref, session: activeSession, runID: runID, turnID: turnID},

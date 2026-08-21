@@ -134,6 +134,21 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 				})
 			}
 		}
+	case eventstream.KindAgentCommunication:
+		if communication := env.AgentCommunication; communication != nil && communication.Source.HasIdentity() && strings.TrimSpace(communication.Text) != "" {
+			out = append(out, Event{
+				Kind:            EventAgentCommunication,
+				Scope:           scope,
+				ScopeID:         scopeID,
+				Actor:           firstNonEmptyString(strings.TrimSpace(communication.Source.Name), strings.TrimSpace(communication.Source.ID), strings.TrimSpace(env.Actor)),
+				OccurredAt:      occurredAt,
+				Text:            strings.TrimSpace(communication.Text),
+				AgentSourceKind: strings.TrimSpace(communication.Source.Kind),
+				AgentSourceID:   strings.TrimSpace(communication.Source.ID),
+				AgentSourceRole: strings.TrimSpace(communication.Source.Role),
+				AgentSourceName: strings.TrimSpace(communication.Source.Name),
+			})
+		}
 	case eventstream.KindApprovalReview:
 		if event, ok := projectACPApprovalReview(env, meta, scope, scopeID, surface); ok {
 			out = append(out, event)

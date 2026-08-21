@@ -110,8 +110,10 @@ receives `session/prompt` on its existing ACP Session. A running child receives
 `initialize`; otherwise active input is rejected explicitly. Caelis does not
 advertise, call, or accept a private Agent-message method.
 
-`SendMessage {to,message}` is a model-facing address adapter over that ordinary
-input capability. It has no delivery MessageID, durable mailbox,
+`SendMessage {to,message}` is a model-facing address adapter over those standard
+input methods. Caelis classifies the operation as Agent communication before it
+crosses the endpoint boundary and prefixes the standard ACP prompt with the
+trusted sender identity. It has no delivery MessageID, durable mailbox,
 target-lifecycle acknowledgement, or Task mutation. Each invocation dispatches
 one input. The target Agent chooses when active steering is consumed, while the
 existing child endpoint owner serializes transport operations and isolates
@@ -128,9 +130,11 @@ SendMessage input identity.
 
 A Caelis-hosted child can address its parent or sibling through a trusted
 Host-bound input sender. The Host derives the source from the exact durable
-participant binding, routes an active parent through its normal conversation
-submission path, starts an ordinary parent Turn when idle, and routes siblings
-through the same child input capability. Standard ACP has no reverse
+participant binding, routes an active parent through an explicit Agent-
+communication submission, starts a parent Turn with that same semantic kind
+when idle, and routes siblings through the same child input capability. The
+parent Session persists `EventTypeContext` plus the trusted Actor and projects a
+dedicated non-User transcript event. Standard ACP has no reverse
 Agent-to-client routing method, so a third-party ACP host that does not supply
 such a topology-aware sender cannot use `to=parent`; Caelis fails explicitly
 rather than reviving a private wire extension.

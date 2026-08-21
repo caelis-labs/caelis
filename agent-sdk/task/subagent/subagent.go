@@ -50,7 +50,7 @@ type Runner interface {
 }
 
 // ReconnectRequest lets an endpoint runner reattach the exact durable child
-// Session and Task before ordinary input or history access. It is Runtime
+// Session and Task before Agent communication or history access. It is Runtime
 // recovery context, not model-facing input.
 type ReconnectRequest struct {
 	Spawn  SpawnContext      `json:"-"`

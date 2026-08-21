@@ -13,14 +13,15 @@ import (
 type TranscriptEventKind = transcript.EventKind
 
 const (
-	TranscriptEventNarrative   = transcript.EventNarrative
-	TranscriptEventNotice      = transcript.EventNotice
-	TranscriptEventPlan        = transcript.EventPlan
-	TranscriptEventTool        = transcript.EventTool
-	TranscriptEventApproval    = transcript.EventApproval
-	TranscriptEventParticipant = transcript.EventParticipant
-	TranscriptEventLifecycle   = transcript.EventLifecycle
-	TranscriptEventUsage       = transcript.EventUsage
+	TranscriptEventNarrative          = transcript.EventNarrative
+	TranscriptEventNotice             = transcript.EventNotice
+	TranscriptEventPlan               = transcript.EventPlan
+	TranscriptEventTool               = transcript.EventTool
+	TranscriptEventApproval           = transcript.EventApproval
+	TranscriptEventParticipant        = transcript.EventParticipant
+	TranscriptEventLifecycle          = transcript.EventLifecycle
+	TranscriptEventUsage              = transcript.EventUsage
+	TranscriptEventAgentCommunication = transcript.EventAgentCommunication
 )
 
 type TranscriptNarrativeKind = transcript.NarrativeKind

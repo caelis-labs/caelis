@@ -6,6 +6,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -18,8 +19,8 @@ func (r *Runtime) controllerSteeringHandler(
 	admission *steeringAdmission,
 ) func(context.Context, agent.Submission) error {
 	return func(ctx context.Context, submission agent.Submission) error {
-		if submission.Kind != agent.SubmissionKindConversation {
-			return errorcode.New(errorcode.Unsupported, "agent-sdk/runtime: active main controller accepts only conversation steering")
+		if submission.Kind != agent.SubmissionKindConversation && submission.Kind != agent.SubmissionKindAgentCommunication {
+			return errorcode.New(errorcode.Unsupported, "agent-sdk/runtime: active main controller accepts only conversation or Agent communication steering")
 		}
 		steerer, ok := r.controllers.(controller.ControllerSteerer)
 		if !ok {
@@ -38,11 +39,19 @@ func (r *Runtime) controllerSteeringHandler(
 			binding.EpochID == "" || binding.RemoteSessionID == "" {
 			return errorcode.New(errorcode.FailedPrecondition, "agent-sdk/runtime: active main-controller steering target is unavailable")
 		}
+		input := submission.Text
+		parts := submission.ContentParts
+		if submission.Kind == agent.SubmissionKindAgentCommunication {
+			input, parts, err = agentcommunication.Prompt(input, parts, submission.Actor)
+			if err != nil {
+				return errorcode.Wrap(errorcode.InvalidArgument, "agent-sdk/runtime: prepare Agent communication steering", err)
+			}
+		}
 		return steerer.SteerController(ctx, controller.ControllerSteerRequest{
 			SessionRef: ref, ControllerID: binding.ControllerID,
 			ControllerEpoch: binding.EpochID, RemoteSessionID: binding.RemoteSessionID,
-			TurnID: turnID, Input: submission.Text, DisplayInput: submission.DisplayInput,
-			ContentParts: submission.ContentParts,
+			TurnID: turnID, Input: input, DisplayInput: submission.DisplayInput,
+			ContentParts: parts,
 			Commit: func() error {
 				return r.commitControllerSteering(producerCtx, currentSession, ref, turnID, submission, handle)
 			},
@@ -63,10 +72,13 @@ func (r *Runtime) commitControllerSteering(
 	}
 	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(producerCtx), steeringCommitTimeout)
 	defer cancel()
-	event := buildInputEvent(
-		activeSession, turnID, submission.Text, submission.DisplayInput,
+	event, err := buildInputEvent(
+		activeSession, turnID, submission.Kind, submission.Text, submission.DisplayInput,
 		submission.ContentParts, submission.Actor, nil,
 	)
+	if err != nil {
+		return err
+	}
 	if event == nil {
 		return errorcode.New(errorcode.InvalidArgument, "agent-sdk/runtime: main-controller steering input is required")
 	}

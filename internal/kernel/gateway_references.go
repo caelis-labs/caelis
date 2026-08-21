@@ -36,6 +36,21 @@ func (f SubmissionReferenceProjectorFunc) ProjectSubmissionReferences(ctx contex
 }
 
 func (g *Gateway) prepareBeginTurnRequest(ctx context.Context, activeSession session.Session, req BeginTurnRequest) (BeginTurnRequest, error) {
+	if req.InputKind == "" {
+		req.InputKind = SubmissionKindConversation
+	}
+	if req.InputKind == SubmissionKindAgentCommunication {
+		if err := session.ValidateAgentCommunicationActor(req.InputActor); err != nil {
+			return BeginTurnRequest{}, invalidAgentCommunication(err)
+		}
+		req.Input = strings.TrimSpace(req.Input)
+		req.DisplayInput = strings.TrimSpace(req.DisplayInput)
+		req.ContentParts = append([]model.ContentPart(nil), req.ContentParts...)
+		return req, nil
+	}
+	if req.InputKind != SubmissionKindConversation {
+		return BeginTurnRequest{}, invalidSubmissionKind(req.InputKind)
+	}
 	input, displayInput, parts, meta, err := g.prepareUserInput(ctx, activeSession, req.Input, req.DisplayInput, req.ContentParts, req.Metadata)
 	if err != nil {
 		return BeginTurnRequest{}, err
@@ -59,6 +74,15 @@ func (g *Gateway) preparePromptParticipantRequest(ctx context.Context, activeSes
 }
 
 func (g *Gateway) prepareSubmitRequest(ctx context.Context, activeSession session.Session, req SubmitRequest) (SubmitRequest, error) {
+	if req.Kind == SubmissionKindAgentCommunication {
+		if err := session.ValidateAgentCommunicationActor(req.Actor); err != nil {
+			return SubmitRequest{}, invalidAgentCommunication(err)
+		}
+		req.Text = strings.TrimSpace(req.Text)
+		req.DisplayText = strings.TrimSpace(req.DisplayText)
+		req.ContentParts = append([]model.ContentPart(nil), req.ContentParts...)
+		return req, nil
+	}
 	if req.Kind != SubmissionKindConversation {
 		return req, nil
 	}
@@ -71,6 +95,16 @@ func (g *Gateway) prepareSubmitRequest(ctx context.Context, activeSession sessio
 	req.ContentParts = parts
 	req.Metadata = meta
 	return req, nil
+}
+
+func invalidAgentCommunication(err error) error {
+	return &Error{
+		Kind:        KindValidation,
+		Code:        CodeInvalidRequest,
+		UserVisible: true,
+		Message:     "gateway: invalid Agent communication",
+		Detail:      err.Error(),
+	}
 }
 
 func (g *Gateway) prepareUserInput(

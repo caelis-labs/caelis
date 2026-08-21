@@ -91,6 +91,11 @@ func acpTaskStreamEnvelopeAllowed(anchor acpTaskStreamAnchor, envelope eventstre
 			return strings.TrimSpace(envelope.Notice) != ""
 		case eventstream.KindLifecycle:
 			return envelope.Lifecycle != nil
+		case eventstream.KindAgentCommunication:
+			return envelope.AgentCommunication != nil &&
+				envelope.AgentCommunication.Source.HasIdentity() &&
+				!strings.EqualFold(strings.TrimSpace(envelope.AgentCommunication.Source.Kind), "user") &&
+				strings.TrimSpace(envelope.AgentCommunication.Text) != ""
 		}
 	}
 	return false

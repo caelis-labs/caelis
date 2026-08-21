@@ -489,22 +489,14 @@ func TestProjectTaskStreamFrameProjectsEventOnlySpawnChildSemantics(t *testing.T
 				ID: "child-input-1", Type: session.EventTypeContext, Visibility: session.VisibilityUIOnly,
 				Actor: session.ActorRef{Kind: session.ActorKindController, ID: "parent", Name: "parent"},
 				Text:  "continue from parent", Scope: spawnSubagentScope("jack"),
-				Protocol: &session.EventProtocol{
-					Method: session.ProtocolMethodSessionUpdate,
-					Update: &session.ProtocolUpdate{
-						SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
-						MessageID:     "child-input-1",
-						Content:       session.ProtocolTextContent("continue from parent"),
-					},
-				},
+				Protocol: eventProtocolPtrForTest(session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: "continue from parent"})),
 			},
 			assert: func(t *testing.T, env eventstream.Envelope) {
 				t.Helper()
-				update, ok := env.Update.(schema.ContentChunk)
-				content, contentOK := update.Content.(schema.TextContent)
-				if !ok || !contentOK || update.SessionUpdate != schema.UpdateUserMessage ||
-					content.Text != "continue from parent" || env.Actor != "parent" {
-					t.Fatalf("child input = %#v, want scoped parent-authored prompt", env)
+				if env.Kind != eventstream.KindAgentCommunication || env.AgentCommunication == nil ||
+					env.AgentCommunication.Text != "continue from parent" ||
+					env.AgentCommunication.Source.Kind != string(session.ActorKindController) || env.Actor != "parent" {
+					t.Fatalf("child input = %#v, want scoped parent Agent communication", env)
 				}
 			},
 		},
@@ -622,6 +614,10 @@ func TestProjectTaskStreamFrameProjectsEventOnlySpawnChildSemantics(t *testing.T
 			tc.assert(t, events[0])
 		})
 	}
+}
+
+func eventProtocolPtrForTest(protocol session.EventProtocol) *session.EventProtocol {
+	return &protocol
 }
 
 func TestProjectTaskStreamFrameDropsDelegatedTextOnlyRunningFrame(t *testing.T) {
@@ -902,8 +898,9 @@ func spawnSubagentScope(taskID string) *session.EventScope {
 
 func assertSpawnSemanticEnvelope(t *testing.T, env eventstream.Envelope, taskID string, parentCallID string) {
 	t.Helper()
-	if env.Kind != eventstream.KindSessionUpdate || env.Scope != eventstream.ScopeSubagent || env.ScopeID != taskID {
-		t.Fatalf("child envelope = %#v, want scoped subagent session/update for task %q", env, taskID)
+	if (env.Kind != eventstream.KindSessionUpdate && env.Kind != eventstream.KindAgentCommunication) ||
+		env.Scope != eventstream.ScopeSubagent || env.ScopeID != taskID {
+		t.Fatalf("child envelope = %#v, want scoped subagent semantic event for task %q", env, taskID)
 	}
 	if env.ParentTool == nil || env.ParentTool.ToolCallID != parentCallID || env.ParentTool.ToolName != "Spawn" {
 		t.Fatalf("child parent relation = %#v, want SPAWN/%q", env.ParentTool, parentCallID)

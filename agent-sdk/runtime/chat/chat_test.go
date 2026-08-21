@@ -1062,6 +1062,107 @@ func TestChatAgentDrainsModelContextWithoutClientProjection(t *testing.T) {
 	}
 }
 
+func TestChatAgentDrainsAgentCommunicationWithTrustedIdentity(t *testing.T) {
+	t.Parallel()
+
+	actor := session.ActorRef{
+		Kind: session.ActorKindParticipant, ID: "reviewer-1", Role: "delegated", Name: "reviewer",
+	}
+	drained := false
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		DrainSubmissions: func() []agent.Submission {
+			if drained {
+				return nil
+			}
+			drained = true
+			return []agent.Submission{{
+				Kind: agent.SubmissionKindAgentCommunication, Text: "review complete", Actor: actor,
+			}}
+		},
+	})
+
+	messages := []model.Message{}
+	var events []*session.Event
+	accepted, err := (&Agent{}).drainPendingSubmissions(ctx, &messages, func(event *session.Event) bool {
+		events = append(events, session.CloneEvent(event))
+		return true
+	})
+	if err != nil {
+		t.Fatalf("drainPendingSubmissions() error = %v", err)
+	}
+	if !accepted || len(messages) != 1 || messages[0].Role != model.RoleUser {
+		t.Fatalf("model input = accepted %v, messages %#v", accepted, messages)
+	}
+	modelText := messages[0].TextContent()
+	if !strings.Contains(modelText, "[Internal agent message]") ||
+		!strings.Contains(modelText, "Sender: reviewer") ||
+		!strings.Contains(modelText, "Role: delegated") ||
+		!strings.HasSuffix(modelText, "review complete") {
+		t.Fatalf("model input text = %q, want trusted sender identity and original message", modelText)
+	}
+	if len(events) != 1 || session.EventTypeOf(events[0]) != session.EventTypeContext ||
+		events[0].Visibility != session.VisibilityCanonical || events[0].Actor != actor ||
+		events[0].Text != "review complete" || !session.IsClientReplayEvent(events[0]) {
+		t.Fatalf("Agent communication event = %#v", events)
+	}
+	communication := session.ProtocolAgentCommunicationOf(events[0])
+	if communication == nil || communication.Text != "review complete" || session.ProtocolUpdateOf(events[0]) != nil {
+		t.Fatalf("Agent communication protocol = %#v, want typed non-user projection", events[0].Protocol)
+	}
+}
+
+func TestAgentCommunicationPersistenceRoundTripMatchesRuntimeModelContext(t *testing.T) {
+	t.Parallel()
+
+	actor := session.ActorRef{
+		Kind: session.ActorKindParticipant, ID: "reviewer-1", Role: "delegated", Name: "reviewer",
+	}
+	messages := []model.Message{}
+	var produced []*session.Event
+	accepted, err := (&Agent{}).drainPendingSubmissions(agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		DrainSubmissions: func() []agent.Submission {
+			return []agent.Submission{{
+				Kind: agent.SubmissionKindAgentCommunication, Text: "review complete", Actor: actor,
+			}}
+		},
+	}), &messages, func(event *session.Event) bool {
+		produced = append(produced, session.CloneEvent(event))
+		return true
+	})
+	if err != nil || !accepted || len(produced) != 1 {
+		t.Fatalf("runtime production = accepted %v events %#v err %v", accepted, produced, err)
+	}
+	want := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: context.Background(), Events: produced}))
+	raw, err := json.Marshal(produced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded []session.Event
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	replayed := make([]*session.Event, 0, len(decoded))
+	for _, event := range decoded {
+		migrated, migrateErr := session.MigrateEvent(event)
+		if migrateErr != nil {
+			t.Fatal(migrateErr)
+		}
+		if validateErr := session.ValidateDurableCoreEvent(&migrated); validateErr != nil {
+			t.Fatal(validateErr)
+		}
+		replayed = append(replayed, &migrated)
+	}
+	got := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: context.Background(), Events: replayed}))
+	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(got, messages) {
+		t.Fatalf("rebuilt model context = %#v, want runtime-produced %#v", got, want)
+	}
+	if display := session.EventDisplayText(replayed[0]); display != "review complete" {
+		t.Fatalf("round-trip display text = %q, want raw Agent message", display)
+	}
+}
+
 func TestTypedActorContextWithoutAgentMessageMarkerKeepsOriginalProjection(t *testing.T) {
 	t.Parallel()
 

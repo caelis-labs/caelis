@@ -103,6 +103,7 @@ type childRun struct {
 	result          string
 	agentText       string
 	finalAssistant  acpschema.FinalAssistantAccumulator
+	inputActor      session.ActorRef
 	updatedAt       time.Time
 	running         bool
 	finishing       bool
@@ -951,7 +952,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 			switch strings.TrimSpace(update.SessionUpdate) {
 			case client.UpdateUserMessage:
 				event = run.acpUpdateEvent(env, run.updatedAt)
-				markSubagentInputEvent(event)
+				markSubagentInputEvent(event, run.inputActor)
 			case client.UpdateAgentMessage:
 				if acceptOutput {
 					textOverride := run.appendAgentMessageChunkLocked(update.MessageID, text)
@@ -1019,18 +1020,26 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 	}
 }
 
-func markSubagentInputEvent(event *session.Event) {
+func markSubagentInputEvent(event *session.Event, source session.ActorRef) session.ActorRef {
 	if event == nil {
-		return
+		return session.ActorRef{}
 	}
 	// ACP calls this a user_message because it is the input side of the child
 	// transcript. Within the parent Task stream it is observed Agent input, not
 	// a canonical end-user submission to the parent Session.
 	event.Type = session.EventTypeContext
-	event.Actor = session.ActorRef{Kind: session.ActorKindController, ID: "parent", Name: "parent"}
+	if session.ValidateAgentCommunicationActor(source) != nil {
+		source = session.ActorRef{Kind: session.ActorKindController, ID: "parent", Name: "parent"}
+	}
+	event.Actor = session.CloneActorRef(source)
+	header := session.AgentCommunicationPromptHeader(event.Actor)
+	event.Text = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(event.Text), header))
+	protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: event.Text})
+	event.Protocol = &protocol
 	if event.Scope != nil {
 		event.Scope.Source = "agent_input"
 	}
+	return event.Actor
 }
 
 func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, textOverride ...string) *session.Event {

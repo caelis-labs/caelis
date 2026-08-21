@@ -489,7 +489,8 @@ Durable model-visible facts require canonical payloads:
   messages that must not impersonate User input;
 - `Event.Tool` for tool calls and results;
 - `PlanPayload` for plan state;
-- `EventProtocol{Method, Update, Permission}` for ACP-compatible coordination
+- `EventProtocol{Method, Update, Permission, AgentCommunication}` for
+  ACP-compatible coordination
   facts and replayable control-plane projection.
 
 ACP-native does not make raw protocol payloads the only durable truth.
@@ -507,12 +508,16 @@ Visibility categories:
 Subagent stream chunks are `ui_only`; the parent receives subagent output
 through durable `Spawn`/`Task` tool results.
 
-Agent-to-Agent communication uses ordinary input. `SendMessage` routes parent,
-child, and sibling addresses without a delivery MessageID, durable mailbox,
-parent audit mirror, or `Task write` fallback. Running ACP endpoints use
-negotiated steering; idle endpoints use ordinary prompts on the same Session.
-The trusted source Actor is provenance on a canonical user-role input, not a
-separate provider message class. Input admission does not mutate Task.
+Agent-to-Agent communication uses the standard input transport with an explicit
+`agent_communication` semantic kind. `SendMessage` routes parent, child, and
+sibling addresses without a delivery MessageID, durable mailbox, parent audit
+mirror, or `Task write` fallback. Running ACP endpoints use negotiated steering;
+idle endpoints use ordinary prompts on the same Session. Runtime persists a
+canonical `EventTypeContext` with the trusted source `Event.Actor` and an
+explicit Agent-communication protocol payload. Provider APIs still receive a
+user-role-compatible prompt, prefixed with that trusted sender identity. Client
+projection uses `caelis/agent_communication`, so Surfaces never render the
+message as a real User submission. Input admission does not mutate Task.
 Completion notices carry only state and the Session-scoped Task handle, leaving
 final output under the Task owner. They are one bounded best-effort conversation
 submission to the exact active parent Run after authoritative Task/sidecar

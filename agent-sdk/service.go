@@ -13,8 +13,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-// ErrRunInputClosed reports that an exact live Run no longer accepts ordinary
-// conversation input. The input was not dispatched and callers may reselect a
+// ErrRunInputClosed reports that an exact live Run no longer accepts input.
+// The input was not dispatched and callers may reselect a
 // newer active Run or start a new idle Turn.
 var ErrRunInputClosed = errorcode.New(errorcode.FailedPrecondition, "agent-sdk: run input is closed")
 
@@ -79,12 +79,15 @@ type ApprovalRequester interface {
 
 // RunRequest is the minimal runtime execution request.
 type RunRequest struct {
-	SessionRef   session.SessionRef  `json:"session_ref"`
+	SessionRef session.SessionRef `json:"session_ref"`
+	// InputKind distinguishes a real user turn from trusted Agent-to-Agent
+	// communication. Empty retains ordinary conversation behavior.
+	InputKind    SubmissionKind      `json:"input_kind,omitempty"`
 	Input        string              `json:"input,omitempty"`
 	DisplayInput string              `json:"display_input,omitempty"`
 	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
-	// InputActor identifies who authored Input while preserving its user-role
-	// chatbot message shape. Empty retains the default real-user actor.
+	// InputActor identifies who authored Input. Agent communication requires a
+	// trusted source identity; ordinary conversation defaults to the real user.
 	InputActor session.ActorRef `json:"-"`
 	// InputCompaction preserves typed provenance if Runtime later summarizes the
 	// input. It does not alter the provider-visible message.

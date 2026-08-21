@@ -97,6 +97,8 @@ func reasoningFoldBoundaryEvent(ev SubagentEvent) bool {
 		// and are handled by hasLaterTranscriptStep so they can disappear once
 		// later work resumes.
 		return !isModelRetryNotice(ev) && renderableTextHasContent(ev.Text)
+	case SEAgentCommunication:
+		return renderableTextHasContent(ev.Text)
 	case SESemanticBoundary:
 		return true
 	default:

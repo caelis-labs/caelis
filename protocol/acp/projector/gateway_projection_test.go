@@ -579,6 +579,51 @@ func TestProjectSessionEventEnvelopeSkipsModelOnlyContext(t *testing.T) {
 	}
 }
 
+func TestProjectSessionEventEnvelopeProjectsAgentCommunication(t *testing.T) {
+	t.Parallel()
+
+	actor := session.ActorRef{
+		Kind: session.ActorKindParticipant, ID: "reviewer-1", Role: "delegated", Name: "reviewer",
+	}
+	message := model.NewTextMessage(model.RoleUser, "[Internal agent message]\nSender: reviewer\nMessage:\nreview complete")
+	protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: "review complete"})
+	event := &session.Event{
+		ID: "communication-1", Seq: 8, SessionID: "session-1",
+		Type: session.EventTypeContext, Visibility: session.VisibilityCanonical,
+		Actor: actor, Message: &message, Protocol: &protocol,
+	}
+	base := EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, event, SessionEventTransport{})
+	events := ProjectSessionEventEnvelope(base, event)
+	if len(events) != 1 || events[0].Kind != eventstream.KindAgentCommunication || events[0].AgentCommunication == nil {
+		t.Fatalf("Agent communication projection = %#v", events)
+	}
+	communication := events[0].AgentCommunication
+	if communication.Text != "review complete" || communication.Source.Kind != string(session.ActorKindParticipant) ||
+		communication.Source.ID != "reviewer-1" || communication.Source.Role != "delegated" ||
+		communication.Source.Name != "reviewer" {
+		t.Fatalf("Agent communication payload = %#v", communication)
+	}
+	if events[0].Update != nil || events[0].Delivery == nil || events[0].Delivery.Mode != eventstream.DeliveryCanonical {
+		t.Fatalf("Agent communication envelope = %#v, want canonical non-session/update", events[0])
+	}
+}
+
+func TestProjectSessionEventEnvelopeSkipsUnattributedAgentCommunication(t *testing.T) {
+	t.Parallel()
+
+	message := model.NewTextMessage(model.RoleUser, "[Internal agent message]\nMessage:\nreview complete")
+	protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: "review complete"})
+	event := &session.Event{
+		ID: "communication-1", Seq: 8, SessionID: "session-1",
+		Type: session.EventTypeContext, Visibility: session.VisibilityCanonical,
+		Actor: session.ActorRef{Kind: session.ActorKindParticipant}, Message: &message, Protocol: &protocol,
+	}
+	base := EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, event, SessionEventTransport{})
+	if events := ProjectSessionEventEnvelope(base, event); len(events) != 0 {
+		t.Fatalf("unattributed Agent communication projection = %#v, want none", events)
+	}
+}
+
 func TestProjectSessionEventEnvelopeProjectsParticipantAndLifecycleExtensions(t *testing.T) {
 	participant := ProjectSessionEventEnvelope(eventstream.Envelope{
 		Cursor:        "participant-1",

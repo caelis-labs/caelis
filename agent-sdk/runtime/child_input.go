@@ -77,7 +77,7 @@ func (r *Runtime) SubmitChildInput(
 	}
 	runner, ok := task.runner.(agent.ChildInputRunner)
 	if !ok || runner == nil {
-		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "agent-sdk/runtime: child runner does not support ordinary input")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "agent-sdk/runtime: child runner does not support Agent communication")
 	}
 	binder, ok := task.runner.(agent.ChildActivityObserverBinder)
 	if !ok || binder == nil {

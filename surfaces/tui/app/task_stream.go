@@ -63,12 +63,13 @@ type taskStreamClosedMsg struct {
 }
 
 type taskStreamResolvedMsg struct {
-	sessionID string
-	callID    string
-	handle    string
-	taskID    string
-	token     uint64
-	err       error
+	sessionID     string
+	callID        string
+	handle        string
+	taskID        string
+	participantID string
+	token         uint64
+	err           error
 }
 
 type taskStreamResolveRetryMsg struct {
@@ -321,7 +322,10 @@ func (m *Model) startTaskStreamResolver(sessionID, callID, handle string, token 
 				if resolvedHandle == "" {
 					resolvedHandle = handle
 				}
-				cfg.ProgramSender.SendMsg(taskStreamResolvedMsg{sessionID: sessionID, callID: callID, handle: resolvedHandle, taskID: strings.TrimSpace(matched.TaskID), token: token})
+				cfg.ProgramSender.SendMsg(taskStreamResolvedMsg{
+					sessionID: sessionID, callID: callID, handle: resolvedHandle,
+					taskID: strings.TrimSpace(matched.TaskID), participantID: strings.TrimSpace(matched.ParticipantID), token: token,
+				})
 				return
 			}
 		}
@@ -354,6 +358,7 @@ func (m *Model) handleTaskStreamResolved(msg taskStreamResolvedMsg) (tea.Model, 
 	m.taskStreamCallIDsByID[msg.taskID] = msg.callID
 	if view := m.subagentOutputViews[msg.callID]; view != nil {
 		view.taskHandle = msg.handle
+		view.participantID = strings.TrimSpace(msg.participantID)
 		if view.actor == "" {
 			view.actor = subagentOutputActor("", view.title, msg.handle)
 			view.block.Actor = participantActorDisplayName(view.actor)

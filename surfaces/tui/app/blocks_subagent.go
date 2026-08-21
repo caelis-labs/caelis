@@ -17,6 +17,7 @@ const (
 	SEPlan
 	SEApproval
 	SENotice
+	SEAgentCommunication
 	// SESemanticBoundary is a zero-row structural event. It preserves the
 	// ordering effect of canonical events whose physical panel is suppressed,
 	// so later transcript projections cannot fold narratives across them.
@@ -32,6 +33,13 @@ type SubagentEvent struct {
 	NoticeKind transcript.NoticeKind
 	StartedAt  time.Time
 	EndedAt    time.Time
+	SourceName string
+	SourceRole string
+	SourceID   string
+	// SourceCallID is the retained Spawn owner for a received Agent message.
+	// It is presentation-only and lets the compact row reuse the existing
+	// whole-row child-workspace navigation without parsing its rendered label.
+	SourceCallID string
 
 	// ActiveBuffer is transient UI state derived from Text for streaming
 	// narrative rendering. It is not canonical session data.

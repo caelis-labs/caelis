@@ -79,8 +79,9 @@ func (m *Model) handleSubagentRosterRefreshResult(msg subagentRosterRefreshResul
 		m.subagentRosterTasks = subagentRosterTasksByCallID(msg.tasks)
 		// Directory state changes the overlay title and its empty-state copy even
 		// though it deliberately does not mutate retained child transcript blocks.
-		for _, view := range m.subagentOutputViews {
+		for callID, view := range m.subagentOutputViews {
 			if view != nil {
+				view.participantID = strings.TrimSpace(m.subagentRosterTasks[callID].ParticipantID)
 				view.touch(true)
 			}
 		}

@@ -166,11 +166,57 @@ func (m *Model) applyTranscriptEvent(event TranscriptEvent) (tea.Model, tea.Cmd)
 		return m.applyTranscriptLifecycle(event)
 	case TranscriptEventUsage:
 		return m.applyTranscriptUsage(event), nil
+	case TranscriptEventAgentCommunication:
+		return m.applyTranscriptAgentCommunication(event)
 	case transcript.EventError:
 		return m.applyTranscriptError(event)
 	default:
 		return m, nil
 	}
+}
+
+func (m *Model) applyTranscriptAgentCommunication(event TranscriptEvent) (tea.Model, tea.Cmd) {
+	event.Text = strings.TrimSpace(tuikit.SanitizeLogText(event.Text))
+	if event.Text == "" {
+		return m, nil
+	}
+	switch event.Scope {
+	case ACPProjectionParticipant:
+		return m.applyTranscriptAgentCommunicationToParticipant(event)
+	case ACPProjectionSubagent:
+		if eventTargetsParentToolPanel(event) {
+			return m, nil
+		}
+		return m.applyTranscriptAgentCommunicationToParticipant(event)
+	}
+	block := m.ensureMainTimelineBlock(event)
+	if block == nil {
+		return m, nil
+	}
+	block.AddAgentCommunication(m.mainAgentCommunicationEvent(event))
+	m.markViewportBlockDirty(block.BlockID())
+	m.hasCommittedLine = true
+	m.lastCommittedStyle = tuikit.LineStyleNote
+	m.lastCommittedRaw = event.Text
+	return m, m.requestStreamViewportSync()
+}
+
+func (m *Model) applyTranscriptAgentCommunicationToParticipant(event TranscriptEvent) (tea.Model, tea.Cmd) {
+	block := m.ensureParticipantTurnBlock(transcriptParticipantTurnKey(event), participantTurnTranscriptActor(event))
+	if block == nil {
+		return m, nil
+	}
+	result := applyTranscriptEventToParticipantTurn(block, event, participantTurnTranscriptPolicy{
+		actor: participantTurnTranscriptActor(event),
+	})
+	if !result.changed {
+		return m, nil
+	}
+	m.markViewportBlockDirty(block.BlockID())
+	m.hasCommittedLine = true
+	m.lastCommittedStyle = tuikit.LineStyleNote
+	m.lastCommittedRaw = event.Text
+	return m, m.requestStreamViewportSync()
 }
 
 func (m *Model) applyTranscriptError(event TranscriptEvent) (tea.Model, tea.Cmd) {

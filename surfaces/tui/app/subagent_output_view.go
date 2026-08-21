@@ -18,13 +18,14 @@ type subagentOutputRenderTickMsg struct {
 // of the main Document and never becomes Session or Task authority. Views and
 // their complete child transcript are retained until the Session changes.
 type subagentOutputView struct {
-	callID     string
-	taskHandle string
-	actor      string
-	title      string
-	document   *Document
-	turnBlocks map[string]*ParticipantTurnBlock
-	turnID     string
+	callID        string
+	taskHandle    string
+	participantID string
+	actor         string
+	title         string
+	document      *Document
+	turnBlocks    map[string]*ParticipantTurnBlock
+	turnID        string
 	// block is the current transcript block. Historical blocks remain in
 	// document and are rendered in stream order; TurnID is internal routing
 	// metadata, never overlay identity or lifecycle authority.

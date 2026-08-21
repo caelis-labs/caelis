@@ -665,6 +665,35 @@ func TestRunnerHandleUpdateUsesAgentMessageDeltas(t *testing.T) {
 	}
 }
 
+func TestRunnerHandleUpdateKeepsTrustedAgentCommunicationSource(t *testing.T) {
+	t.Parallel()
+
+	source := session.ActorRef{
+		Kind: session.ActorKindParticipant, ID: "reviewer-1", Role: "delegated", Name: "reviewer",
+	}
+	sink := &recordingStreams{}
+	run := &childRun{
+		anchor: delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
+		taskID: "task-1", sink: sink, state: delegation.StateRunning, running: true,
+		inputActor: source,
+	}
+	runner := &Runner{clock: time.Now}
+	input := session.AgentCommunicationPromptHeader(source) + "\nreview this change"
+
+	runner.handleUpdate(run, contentUpdate(t, client.UpdateUserMessage, input))
+
+	if len(sink.frames) != 1 || sink.frames[0].Event == nil {
+		t.Fatalf("stream frames = %#v, want one Agent communication", sink.frames)
+	}
+	event := sink.frames[0].Event
+	communication := session.ProtocolAgentCommunicationOf(event)
+	if session.EventTypeOf(event) != session.EventTypeContext || event.Actor != source ||
+		communication == nil || communication.Text != "review this change" ||
+		strings.Contains(communication.Text, "[Internal agent message]") {
+		t.Fatalf("child input event = %#v, want trusted sibling identity and raw body", event)
+	}
+}
+
 func TestRunnerHandleUpdatePublishesRepeatedAgentMessageDeltas(t *testing.T) {
 	t.Parallel()
 

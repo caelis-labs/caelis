@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
@@ -416,9 +417,9 @@ func (a *Agent) drainPendingSubmissions(
 		message, displayText, meta := userdisplay.Resolve(text, submission.DisplayInput, submission.ContentParts, submission.Metadata)
 		eventType := session.EventTypeUser
 		actor := session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
-		if submission.Kind == runtimeinput.ModelContext {
+		if submission.Kind == runtimeinput.ModelContext || submission.Kind == agent.SubmissionKindAgentCommunication {
 			if !session.ActorRefHasIdentity(submission.Actor) {
-				return accepted, fmt.Errorf("agent-sdk/runtime/chat: model-context submission requires source identity")
+				return accepted, fmt.Errorf("agent-sdk/runtime/chat: context submission requires source identity")
 			}
 			eventType = session.EventTypeContext
 			actor = session.CloneActorRef(submission.Actor)
@@ -439,6 +440,15 @@ func (a *Agent) drainPendingSubmissions(
 				SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
 				Content:       session.ProtocolTextContent(displayText),
 			}}
+		} else if submission.Kind == agent.SubmissionKindAgentCommunication {
+			prefixed, err := agentcommunication.PrefixMessage(message, actor)
+			if err != nil {
+				return accepted, fmt.Errorf("agent-sdk/runtime/chat: %w", err)
+			}
+			providerMessage = prefixed
+			event.Message = &providerMessage
+			protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: displayText})
+			event.Protocol = &protocol
 		}
 		if !yield(event) {
 			return accepted, nil
@@ -451,7 +461,7 @@ func (a *Agent) drainPendingSubmissions(
 
 func isModelInputSubmission(sub agent.Submission) bool {
 	switch sub.Kind {
-	case agent.SubmissionKindConversation, runtimeinput.ModelContext:
+	case agent.SubmissionKindConversation, agent.SubmissionKindAgentCommunication, runtimeinput.ModelContext:
 		return true
 	default:
 		return false

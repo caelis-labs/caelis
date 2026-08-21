@@ -138,6 +138,7 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 	}
 	env.Update = acputil.StripTerminalConsoleFenceUpdate(env.Update)
 	updateType := historyUpdateType(env.Update)
+	newInputTurn := false
 	if updateType == client.UpdateUserMessage {
 		messageID := ""
 		if chunk, ok := env.Update.(client.ContentChunk); ok {
@@ -145,6 +146,7 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 		}
 		if c.lastUpdateType != client.UpdateUserMessage || messageID != "" && messageID != c.lastUserMessageID {
 			c.turnSeq++
+			newInputTurn = true
 		}
 		c.lastUserMessageID = messageID
 	}
@@ -157,7 +159,14 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 		return
 	}
 	if updateType == client.UpdateUserMessage {
-		markSubagentInputEvent(event)
+		if newInputTurn {
+			c.run.inputActor = session.ActorRef{}
+		}
+		if source, body, ok := loadedAgentCommunicationPrompt(event.Text); ok {
+			c.run.inputActor = source
+			event.Text = body
+		}
+		c.run.inputActor = markSubagentInputEvent(event, c.run.inputActor)
 	}
 	if event.Scope == nil {
 		event.Scope = &session.EventScope{}
@@ -167,6 +176,50 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 	event.ID = fmt.Sprintf("subagent-load:%s:%d", strings.TrimSpace(c.run.taskID), len(c.events)+1)
 	c.events = append(c.events, event)
 	c.lastUpdateType = updateType
+}
+
+// loadedAgentCommunicationPrompt reconstructs display-only sender provenance
+// from the exact header Caelis placed in a standard ACP prompt. The result is
+// used only for child transcript replay; it never authorizes routing or input.
+func loadedAgentCommunicationPrompt(text string) (session.ActorRef, string, bool) {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	if len(lines) < 3 || strings.TrimSpace(lines[0]) != "[Internal agent message]" {
+		return session.ActorRef{}, "", false
+	}
+	actor := session.ActorRef{}
+	messageLine := -1
+	for index := 1; index < len(lines); index++ {
+		line := strings.TrimSpace(lines[index])
+		switch {
+		case line == "Message:":
+			messageLine = index
+		case strings.HasPrefix(line, "Sender: "):
+			actor.Name = strings.TrimSpace(strings.TrimPrefix(line, "Sender: "))
+		case strings.HasPrefix(line, "Kind: "):
+			actor.Kind = session.ActorKind(strings.TrimSpace(strings.TrimPrefix(line, "Kind: ")))
+		case strings.HasPrefix(line, "Role: "):
+			actor.Role = strings.TrimSpace(strings.TrimPrefix(line, "Role: "))
+		case strings.HasPrefix(line, "Sender ID: "):
+			actor.ID = strings.TrimSpace(strings.TrimPrefix(line, "Sender ID: "))
+		default:
+			return session.ActorRef{}, "", false
+		}
+		if messageLine >= 0 {
+			break
+		}
+	}
+	if messageLine < 0 {
+		return session.ActorRef{}, "", false
+	}
+	if actor.Kind == "" {
+		// Compatibility for Agent communication prompts written before Kind was
+		// included in the header. The identity remains display-only.
+		actor.Kind = session.ActorKindSystem
+	}
+	if err := session.ValidateAgentCommunicationActor(actor); err != nil {
+		return session.ActorRef{}, "", false
+	}
+	return session.CloneActorRef(actor), strings.TrimSpace(strings.Join(lines[messageLine+1:], "\n")), true
 }
 
 func historyUpdateType(update client.Update) string {

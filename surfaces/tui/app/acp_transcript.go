@@ -150,6 +150,14 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				hasContent = true
 				lastGroup = acpTranscriptGroupNotice
 			}
+		case SEAgentCommunication:
+			communicationRows := renderAgentCommunicationRows(blockID, ev, width, ctx, opts)
+			if len(communicationRows) > 0 {
+				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupAgentCommunication, false)
+				rows = appendACPTranscriptSemanticRows(rows, blockID, communicationRows, &pendingSemanticGap)
+				hasContent = true
+				lastGroup = acpTranscriptGroupAgentCommunication
+			}
 		}
 	}
 	if !hasContent {
@@ -199,6 +207,7 @@ const (
 	acpTranscriptGroupApproval
 	acpTranscriptGroupPlan
 	acpTranscriptGroupNotice
+	acpTranscriptGroupAgentCommunication
 )
 
 func appendACPTranscriptGroupGap(rows []RenderedRow, blockID string, previous acpTranscriptGroupKind, current acpTranscriptGroupKind, attached bool) []RenderedRow {
@@ -404,7 +413,8 @@ func styleACPTranscriptHeaderDetail(ctx BlockRenderContext, verb string, detail 
 		return styleShellCommandText(ctx, detail)
 	}
 	if strings.EqualFold(strings.TrimSpace(verb), "Spawned") ||
-		strings.EqualFold(strings.TrimSpace(verb), "Sent") {
+		strings.EqualFold(strings.TrimSpace(verb), "Sent") ||
+		strings.EqualFold(strings.TrimSpace(verb), "Received") {
 		return styleSpawnedHeaderDetail(ctx, detail)
 	}
 	if path, added, removed, ok := tuikit.SplitDiffCountTokens(detail); ok {

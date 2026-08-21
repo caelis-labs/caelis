@@ -3423,6 +3423,17 @@ func TestRenderEventPolicyForACPEnvelopeRoutesStandardUpdates(t *testing.T) {
 			lane: renderLaneToolStream,
 		},
 		{
+			name: "agent communication",
+			env: eventstream.Envelope{
+				Kind: eventstream.KindAgentCommunication,
+				AgentCommunication: &eventstream.AgentCommunication{
+					Source: eventstream.ActorIdentity{ID: "reviewer-1", Name: "reviewer"},
+					Text:   "review complete",
+				},
+			},
+			lane: renderLaneMainStream,
+		},
+		{
 			name: "lifecycle",
 			env: eventstream.Envelope{
 				Kind:      eventstream.KindLifecycle,

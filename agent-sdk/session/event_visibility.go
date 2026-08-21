@@ -40,6 +40,14 @@ func IsClientReplayEvent(event *Event) bool {
 	if EventTypeOf(event) == EventTypeContext && event.Protocol == nil && UsageSnapshotFromSessionEvent(event) == nil {
 		return false
 	}
+	if event.Protocol != nil {
+		protocol := CloneEventProtocol(*event.Protocol)
+		if protocol.Method == ProtocolMethodAgentCommunication {
+			if ProtocolAgentCommunicationOf(event) == nil || ValidateAgentCommunicationActor(event.Actor) != nil {
+				return false
+			}
+		}
+	}
 	return IsCanonicalHistoryEvent(event) || IsMirror(event)
 }
 

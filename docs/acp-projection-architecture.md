@@ -145,12 +145,14 @@ the existing line-oriented default by appending a newline, while
 control input. Spawn Tasks never advertise `supports_input`. Agents use the
 runtime-managed `SendMessage {to, message}` tool, where `to=parent` addresses
 the parent and a Session-scoped Spawn handle addresses a child or sibling. The
-tool dispatches ordinary user-role input with a trusted controller or
-participant Actor for provenance; it does not create a Context message type or
-a parent-side audit mirror. Running ACP targets use negotiated steering, while
-idle targets use an ordinary prompt on the same Session. Input has no delivery
-MessageID and does not mutate Task. Subsequent target output alone advances the
-Task activity view and retains its normal ACP output correlation IDs.
+tool dispatches an explicit Agent-communication input with a trusted controller
+or participant Actor. Runtime stores it as canonical `EventTypeContext` and
+projects `caelis/agent_communication`; it is never a User transcript event or a
+parent-side audit mirror. Standard ACP targets still use negotiated steering or
+`session/prompt` with a user-role-compatible prompt whose trusted sender header
+is added by the endpoint owner. Input has no delivery MessageID and does not
+mutate Task. Subsequent target output alone advances the Task activity view and
+retains its normal ACP output correlation IDs.
 
 Subagent Task output keeps one absolute cursor across observed activities,
 independent from `supports_input` and `Task write`. Product subscriptions cover
@@ -168,6 +170,10 @@ visible, catches up from its last cursor, and renders all child events through
 the same transcript blocks used by the main workspace. Closing the overlay
 cancels only that subscription and retains the Document and cursor; reopening
 resumes.
+Child-originated Agent communication in the main TUI is one compact
+`Received <handle>[<agent>]: <preview>` row rather than a User transcript block.
+When its trusted participant identity resolves to a retained Spawn owner, the
+whole row opens that child's existing workspace overlay.
 When the host restarts, viewing a terminal child must not activate an execution
 Runtime merely to recover presentation history. Control Task-stream first tries
 the live Runtime; if that Session Runtime no longer exists, or its terminal

@@ -13,13 +13,14 @@ import (
 type Kind string
 
 const (
-	KindSessionUpdate     Kind = schema.MethodSessionUpdate
-	KindRequestPermission Kind = schema.MethodSessionReqPermission
-	KindNotice            Kind = "caelis/notice"
-	KindParticipant       Kind = "caelis/participant"
-	KindLifecycle         Kind = "caelis/lifecycle"
-	KindApprovalReview    Kind = "caelis/approval_review"
-	KindError             Kind = "caelis/error"
+	KindSessionUpdate      Kind = schema.MethodSessionUpdate
+	KindRequestPermission  Kind = schema.MethodSessionReqPermission
+	KindNotice             Kind = "caelis/notice"
+	KindParticipant        Kind = "caelis/participant"
+	KindLifecycle          Kind = "caelis/lifecycle"
+	KindAgentCommunication Kind = "caelis/agent_communication"
+	KindApprovalReview     Kind = "caelis/approval_review"
+	KindError              Kind = "caelis/error"
 )
 
 // NoticeKind identifies one normalized runtime notice independently from its
@@ -158,9 +159,10 @@ type Envelope struct {
 	Notice     string                           `json:"notice,omitempty"`
 	NoticeKind NoticeKind                       `json:"notice_kind,omitempty"`
 
-	ApprovalReview *ApprovalReview `json:"approval_review,omitempty"`
-	Participant    *Participant    `json:"participant,omitempty"`
-	Lifecycle      *Lifecycle      `json:"lifecycle,omitempty"`
+	ApprovalReview     *ApprovalReview     `json:"approval_review,omitempty"`
+	Participant        *Participant        `json:"participant,omitempty"`
+	Lifecycle          *Lifecycle          `json:"lifecycle,omitempty"`
+	AgentCommunication *AgentCommunication `json:"agent_communication,omitempty"`
 
 	Meta  map[string]any `json:"_meta,omitempty"`
 	Err   error          `json:"-"`
@@ -185,6 +187,27 @@ type Lifecycle struct {
 	State      string `json:"state,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	StopReason string `json:"stopReason,omitempty"`
+}
+
+// ActorIdentity is the typed sender identity attached to an Agent
+// communication. It is projected from the trusted durable Event.Actor.
+type ActorIdentity struct {
+	Kind string `json:"kind,omitempty"`
+	ID   string `json:"id,omitempty"`
+	Role string `json:"role,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
+// HasIdentity reports whether the actor can be distinguished from another
+// sender without interpreting its role or kind as identity.
+func (a ActorIdentity) HasIdentity() bool {
+	return strings.TrimSpace(a.ID) != "" || strings.TrimSpace(a.Name) != ""
+}
+
+// AgentCommunication is one explicitly internal Agent-to-Agent message.
+type AgentCommunication struct {
+	Source ActorIdentity `json:"source"`
+	Text   string        `json:"text"`
 }
 
 const (
@@ -362,6 +385,10 @@ func CloneEnvelope(in Envelope) Envelope {
 	if in.Lifecycle != nil {
 		lifecycle := *in.Lifecycle
 		out.Lifecycle = &lifecycle
+	}
+	if in.AgentCommunication != nil {
+		communication := *in.AgentCommunication
+		out.AgentCommunication = &communication
 	}
 	out.Update = CloneUpdate(in.Update)
 	return out

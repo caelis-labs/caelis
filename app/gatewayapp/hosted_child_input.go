@@ -118,7 +118,7 @@ func routeHostedChildInputToParent(
 			}
 			err := gw.SubmitActiveTurn(ctx, kernel.SubmitActiveTurnRequest{
 				SessionRef: active.SessionRef, HandleID: turn.HandleID, RunID: turn.RunID, TurnID: turn.TurnID,
-				Kind: kernel.SubmissionKindConversation, Text: input.Input, DisplayText: input.DisplayInput,
+				Kind: kernel.SubmissionKindAgentCommunication, Text: input.Input, DisplayText: input.DisplayInput,
 				ContentParts: input.ContentParts, Actor: source,
 			})
 			if isHostedChildInputClosingEdge(err) {
@@ -135,6 +135,7 @@ func routeHostedChildInputToParent(
 		result, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
 			SessionRef:     active.SessionRef,
 			RuntimeContext: composition.controlRuntimeContext(context.Background(), active),
+			InputKind:      kernel.SubmissionKindAgentCommunication,
 			Input:          input.Input, DisplayInput: input.DisplayInput, ContentParts: input.ContentParts,
 			InputActor: source, Surface: "agent-input",
 		})

@@ -281,6 +281,9 @@ func EventDisplayText(event *Event) string {
 	if event == nil {
 		return ""
 	}
+	if communication := ProtocolAgentCommunicationOf(event); communication != nil {
+		return communication.Text
+	}
 	if event.Text != "" {
 		return event.Text
 	}

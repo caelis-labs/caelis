@@ -36,7 +36,7 @@ func New() Tool { return Tool{} }
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Send ordinary input to another Agent or the parent Agent.",
+		Description: "Send an internal message to another Agent or the parent Agent.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -46,7 +46,7 @@ func (Tool) Definition() tool.Definition {
 				},
 				"message": map[string]any{
 					"type": "string", "minLength": 1,
-					"description": "Input to send.",
+					"description": "Internal Agent message to send.",
 				},
 			},
 			"required":             []string{"to", "message"},

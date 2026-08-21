@@ -12,6 +12,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
@@ -125,7 +126,7 @@ func (r *Runner) BindChildEndpoint(
 	return nil
 }
 
-// SubmitChildInput routes ordinary conversation input to one exact child
+// SubmitChildInput routes trusted Agent communication to one exact child
 // endpoint. It never claims or mutates a Task operation; Task observation is
 // driven only by child activity output.
 func (r *Runner) SubmitChildInput(ctx context.Context, raw agent.ChildInputRequest) (agent.ChildInputResult, error) {
@@ -139,10 +140,10 @@ func (r *Runner) SubmitChildInput(ctx context.Context, raw agent.ChildInputReque
 	if err := validateChildEndpointRef(req.Target); err != nil {
 		return agent.ChildInputResult{}, err
 	}
-	if !session.ActorRefHasIdentity(req.Source) {
-		return agent.ChildInputResult{}, errorcode.New(errorcode.InvalidArgument, "internal/acpagentbridge/subagent: trusted child input source is required")
+	if err := session.ValidateAgentCommunicationActor(req.Source); err != nil {
+		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.InvalidArgument, "internal/acpagentbridge/subagent: invalid trusted child input source", err)
 	}
-	prompt := acputil.BuildPromptParts(req.Input, req.ContentParts)
+	prompt := buildAgentCommunicationPrompt(req)
 	if len(prompt) == 0 {
 		return agent.ChildInputResult{}, errorcode.New(errorcode.InvalidArgument, "internal/acpagentbridge/subagent: child input is required")
 	}
@@ -188,6 +189,15 @@ func (r *Runner) SubmitChildInput(ctx context.Context, raw agent.ChildInputReque
 	return r.submitIdleChildInput(ctx, slot, run, req, prompt)
 }
 
+func buildAgentCommunicationPrompt(req agent.ChildInputRequest) []json.RawMessage {
+	message := model.MessageFromTextAndContentParts(model.RoleUser, req.Input, req.ContentParts)
+	parts := model.ContentPartsFromParts(message.Parts)
+	parts = append([]model.ContentPart{{
+		Type: model.ContentPartText, Text: session.AgentCommunicationPromptHeader(req.Source),
+	}}, parts...)
+	return acputil.BuildPromptParts("", parts)
+}
+
 func (r *Runner) lookupChildSlot(target agent.ChildEndpointRef) (*childSlot, error) {
 	key := strings.TrimSpace(target.EndpointKey)
 	if key == "" {
@@ -228,6 +238,10 @@ func (r *Runner) submitActiveChildInputLocked(
 		cancelRPC()
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, "internal/acpagentbridge/subagent: child input state changed")
 	}
+	run.mu.Lock()
+	previousInputActor := run.inputActor
+	run.inputActor = session.CloneActorRef(req.Source)
+	run.mu.Unlock()
 	response, err := r.callChildSteering(rpcCtx, run, prompt)
 	cancelRPC()
 	if err != nil {
@@ -238,6 +252,9 @@ func (r *Runner) submitActiveChildInputLocked(
 			return agent.ChildInputResult{}, unknown
 		}
 		slot.settleSteeringFrames(true)
+		run.mu.Lock()
+		run.inputActor = previousInputActor
+		run.mu.Unlock()
 		return agent.ChildInputResult{}, childInputProvenFailure("internal/acpagentbridge/subagent: child steering was rejected", err)
 	}
 	switch response.Outcome {
@@ -246,6 +263,9 @@ func (r *Runner) submitActiveChildInputLocked(
 		return agent.ChildInputResult{ActivityID: activityID}, nil
 	case client.SessionSteeringFailed, client.SessionSteeringPromptRequired:
 		slot.settleSteeringFrames(true)
+		run.mu.Lock()
+		run.inputActor = previousInputActor
+		run.mu.Unlock()
 		return agent.ChildInputResult{}, errorcode.New(errorcode.FailedPrecondition, fmt.Sprintf(
 			"internal/acpagentbridge/subagent: child steering was not injected: %s", response.Outcome,
 		))
@@ -293,6 +313,7 @@ type childIdleCheckpoint struct {
 	agentText       string
 	actionSummary   subagentActionSummary
 	finalAssistant  acpschema.FinalAssistantAccumulator
+	inputActor      session.ActorRef
 	updatedAt       time.Time
 	running         bool
 	finishing       bool
@@ -401,7 +422,7 @@ func checkpointIdleRun(run *childRun) childIdleCheckpoint {
 	return childIdleCheckpoint{
 		state: run.state, outputPreview: run.outputPreview, failureDetail: run.failureDetail,
 		result: run.result, agentText: run.agentText, updatedAt: run.updatedAt,
-		actionSummary: actionSummary, finalAssistant: run.finalAssistant,
+		actionSummary: actionSummary, finalAssistant: run.finalAssistant, inputActor: session.CloneActorRef(run.inputActor),
 		running: run.running, finishing: run.finishing, cancelRequested: run.cancelRequested,
 		cancelFailed: run.cancelFailed, cancelResolved: run.cancelResolved, done: run.done,
 	}
@@ -415,6 +436,7 @@ func restoreIdleRun(run *childRun, checkpoint childIdleCheckpoint) {
 	run.agentText = checkpoint.agentText
 	run.actionSummary = checkpoint.actionSummary
 	run.finalAssistant = checkpoint.finalAssistant
+	run.inputActor = session.CloneActorRef(checkpoint.inputActor)
 	run.updatedAt = checkpoint.updatedAt
 	run.running = checkpoint.running
 	run.finishing = checkpoint.finishing
@@ -485,6 +507,7 @@ func (r *Runner) submitIdleChildInput(
 	run.result = ""
 	run.agentText = ""
 	run.finalAssistant.Reset()
+	run.inputActor = session.CloneActorRef(req.Source)
 	run.updatedAt = r.clock()
 	run.finishing = false
 	run.cancelRequested = false

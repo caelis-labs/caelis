@@ -165,7 +165,9 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 	return ResolvedTurn{
 		RunRequest: agent.RunRequest{
 			SessionRef:   intent.SessionRef,
+			InputKind:    intent.InputKind,
 			Input:        intent.Input,
+			DisplayInput: strings.TrimSpace(intent.DisplayInput),
 			ContentParts: append([]model.ContentPart(nil), intent.ContentParts...),
 			InputActor:   session.CloneActorRef(intent.InputActor),
 			AgentSpec:    spec,
@@ -188,7 +190,9 @@ func (r *AssemblyResolver) ResolveControllerTurn(ctx context.Context, intent Tur
 	return ResolvedTurn{
 		RunRequest: agent.RunRequest{
 			SessionRef:   intent.SessionRef,
+			InputKind:    intent.InputKind,
 			Input:        intent.Input,
+			DisplayInput: strings.TrimSpace(intent.DisplayInput),
 			ContentParts: append([]model.ContentPart(nil), intent.ContentParts...),
 			InputActor:   session.CloneActorRef(intent.InputActor),
 			AgentSpec:    spec,

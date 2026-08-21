@@ -505,6 +505,24 @@ func projectSessionEventstreamOnlyEvents(base eventstream.Envelope, event *sessi
 		return nil
 	}
 	switch session.EventTypeOf(event) {
+	case session.EventTypeContext:
+		communication := session.ProtocolAgentCommunicationOf(event)
+		if communication == nil || session.ValidateAgentCommunicationActor(event.Actor) != nil {
+			return nil
+		}
+		next := base
+		next.Kind = eventstream.KindAgentCommunication
+		next.Actor = firstNonEmpty(strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID), strings.TrimSpace(base.Actor))
+		next.AgentCommunication = &eventstream.AgentCommunication{
+			Source: eventstream.ActorIdentity{
+				Kind: strings.TrimSpace(string(event.Actor.Kind)),
+				ID:   strings.TrimSpace(event.Actor.ID),
+				Role: strings.TrimSpace(event.Actor.Role),
+				Name: strings.TrimSpace(event.Actor.Name),
+			},
+			Text: communication.Text,
+		}
+		return []eventstream.Envelope{next}
 	case session.EventTypeNotice:
 		notice, ok := session.NoticeOf(event)
 		if !ok || strings.TrimSpace(notice.Text) == "" {

@@ -38,6 +38,8 @@ func replayableACPEvents(env eventstream.Envelope, surface SurfaceProjector) []E
 	switch env.Kind {
 	case eventstream.KindSessionUpdate:
 		return replayableACPSessionUpdate(env, surface)
+	case eventstream.KindAgentCommunication:
+		return ProjectACPEventToEvents(env, surface)
 	case eventstream.KindLifecycle:
 		return replayableACPTraceEvent(env, surface)
 	default:

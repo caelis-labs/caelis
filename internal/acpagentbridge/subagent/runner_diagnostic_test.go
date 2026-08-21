@@ -317,6 +317,23 @@ func TestRunnerLoadHistoryRejectsUpdatesFromAnotherSession(t *testing.T) {
 	}
 }
 
+func TestLoadedAgentCommunicationPromptRestoresDisplayIdentity(t *testing.T) {
+	t.Parallel()
+
+	source := session.ActorRef{
+		Kind: session.ActorKindParticipant, ID: "reviewer-1", Role: "delegated", Name: "reviewer",
+	}
+	got, body, ok := loadedAgentCommunicationPrompt(
+		session.AgentCommunicationPromptHeader(source) + "\nreview this change",
+	)
+	if !ok || got != source || body != "review this change" {
+		t.Fatalf("loaded Agent communication = (%#v, %q, %v), want exact display identity and body", got, body, ok)
+	}
+	if _, _, ok := loadedAgentCommunicationPrompt("ordinary user input"); ok {
+		t.Fatal("ordinary input was interpreted as an Agent communication header")
+	}
+}
+
 func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 	mode := os.Getenv("CAELIS_ACP_SUBAGENT_HELPER")
 	switch mode {

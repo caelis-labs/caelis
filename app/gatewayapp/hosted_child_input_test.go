@@ -163,7 +163,8 @@ func TestHostedChildInputWaitsForClosingParentBeforeStartingIdleTurn(t *testing.
 	}
 	select {
 	case req := <-runtime.requests:
-		if req.Input != "after closing edge" || req.InputActor.ID != source.ID {
+		if req.InputKind != agent.SubmissionKindAgentCommunication ||
+			req.Input != "after closing edge" || req.InputActor.ID != source.ID {
 			t.Fatalf("replacement idle prompt = %#v, want child input with trusted Actor", req)
 		}
 	case <-ctx.Done():
@@ -237,12 +238,13 @@ func waitHostedChildInputEvent(t *testing.T, host *Stack, ref session.SessionRef
 			t.Fatal(err)
 		}
 		for _, event := range events {
-			if event == nil || session.EventTypeOf(event) != session.EventTypeUser {
+			if event == nil || session.EventTypeOf(event) != session.EventTypeContext {
 				continue
 			}
-			got := strings.TrimSpace(event.Text)
-			if got == "" && event.Message != nil {
-				got = strings.TrimSpace(event.Message.TextContent())
+			communication := session.ProtocolAgentCommunicationOf(event)
+			got := ""
+			if communication != nil {
+				got = strings.TrimSpace(communication.Text)
 			}
 			if got == text {
 				return event
@@ -258,6 +260,18 @@ func assertHostedChildInputEvent(t *testing.T, event *session.Event) {
 	t.Helper()
 	if event == nil || event.Actor.Kind != session.ActorKindParticipant || !strings.HasPrefix(event.Actor.ID, "child-agent-") {
 		t.Fatalf("input event actor = %#v, want trusted child participant", event)
+	}
+	if session.EventTypeOf(event) != session.EventTypeContext || session.ProtocolUpdateOf(event) != nil {
+		t.Fatalf("input event = %#v, want Agent Context without user_message projection", event)
+	}
+	communication := session.ProtocolAgentCommunicationOf(event)
+	if communication == nil || communication.Text == "" || !session.IsClientReplayEvent(event) {
+		t.Fatalf("input event protocol = %#v, want replayable Agent communication", event.Protocol)
+	}
+	if event.Message == nil || !strings.Contains(event.Message.TextContent(), "[Internal agent message]") ||
+		!strings.Contains(event.Message.TextContent(), event.Actor.Name) ||
+		!strings.Contains(event.Message.TextContent(), communication.Text) {
+		t.Fatalf("model message = %#v, want trusted sender header plus original text", event.Message)
 	}
 	if event.MessageID != "" || strings.Contains(event.IdempotencyKey, "agent-message") {
 		t.Fatalf("input event identity = message %q idempotency %q, want ordinary Turn input", event.MessageID, event.IdempotencyKey)

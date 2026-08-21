@@ -93,6 +93,8 @@ func renderEventPolicyForACPEnvelope(env eventstream.Envelope) renderEventPolicy
 		}
 	case eventstream.KindApprovalReview, eventstream.KindRequestPermission:
 		return renderEventPolicy{lane: renderLaneToolStream, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
+	case eventstream.KindAgentCommunication:
+		return renderEventPolicy{lane: renderLaneMainStream, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
 	case eventstream.KindParticipant:
 		return renderEventPolicy{lane: renderLaneParticipant, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
 	case eventstream.KindLifecycle, eventstream.KindNotice:

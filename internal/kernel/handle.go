@@ -318,6 +318,14 @@ func validateSubmitRequest(req SubmitRequest) error {
 			return invalidSubmissionKind(req.Kind)
 		}
 		return nil
+	case SubmissionKindAgentCommunication:
+		if req.Approval != nil {
+			return invalidSubmissionKind(req.Kind)
+		}
+		if err := session.ValidateAgentCommunicationActor(req.Actor); err != nil {
+			return invalidAgentCommunication(err)
+		}
+		return nil
 	case SubmissionKindApproval:
 		if req.Approval == nil {
 			return invalidSubmissionKind(req.Kind)

@@ -131,6 +131,7 @@ func (g *Gateway) resolveBeginTurn(ctx context.Context, activeSession session.Se
 		return ResolvedTurn{
 			RunRequest: agent.RunRequest{
 				SessionRef:   activeSession.SessionRef,
+				InputKind:    req.InputKind,
 				Input:        req.Input,
 				DisplayInput: strings.TrimSpace(req.DisplayInput),
 				ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
@@ -167,6 +168,9 @@ func (g *Gateway) runTurn(
 
 	runReq := resolved.RunRequest
 	runReq.SessionRef = session.SessionRef
+	if runReq.InputKind == "" {
+		runReq.InputKind = req.InputKind
+	}
 	if strings.TrimSpace(runReq.Input) == "" {
 		runReq.Input = req.Input
 	}

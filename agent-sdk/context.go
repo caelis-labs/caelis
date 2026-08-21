@@ -31,7 +31,8 @@ type ReadonlyState interface {
 type SubmissionKind string
 
 const (
-	SubmissionKindConversation SubmissionKind = "conversation"
+	SubmissionKindConversation       SubmissionKind = "conversation"
+	SubmissionKindAgentCommunication SubmissionKind = "agent_communication"
 )
 
 // Submission is one runtime continuation submission.
@@ -141,7 +142,7 @@ type ChildEndpointRef struct {
 	Placement     placement.Placement     `json:"placement"`
 }
 
-// ChildInputRequest submits ordinary conversation input to one exact child.
+// ChildInputRequest submits Agent communication to one exact child.
 // Source is assigned by the trusted Runtime topology boundary, never by a
 // model-facing tool or external wire label.
 type ChildInputRequest struct {
@@ -164,7 +165,7 @@ type ChildInputCommand struct {
 }
 
 // ChildInputResult reports only local producer ownership. StartedActivity is
-// true when idle input started an ordinary prompt activity; active steering
+// true when idle input started a prompt activity; active steering
 // remains part of the already running activity.
 type ChildInputResult struct {
 	ActivityID      string `json:"activity_id,omitempty"`

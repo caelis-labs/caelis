@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
@@ -16,18 +18,42 @@ import (
 func buildInputEvent(
 	activeSession session.Session,
 	turnID string,
+	inputKind agent.SubmissionKind,
 	input string,
 	displayInput string,
 	parts []model.ContentPart,
 	actor session.ActorRef,
 	compaction *session.EventCompactionContext,
-) *session.Event {
+) (*session.Event, error) {
 	if strings.TrimSpace(input) == "" && len(parts) == 0 {
-		return nil
+		return nil, nil
 	}
 	message, displayText, meta := userdisplay.Resolve(input, displayInput, parts, nil)
-	if !session.ActorRefHasIdentity(actor) {
-		actor = session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
+	inputKind = normalizeInputKind(inputKind)
+	eventType := session.EventTypeUser
+	var protocol session.EventProtocol
+	switch inputKind {
+	case agent.SubmissionKindConversation:
+		if !session.ActorRefHasIdentity(actor) {
+			actor = session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
+		}
+		protocol = session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
+			Content:       session.ProtocolTextContent(displayText),
+		}}
+	case agent.SubmissionKindAgentCommunication:
+		if err := session.ValidateAgentCommunicationActor(actor); err != nil {
+			return nil, fmt.Errorf("agent-sdk/runtime: %w", err)
+		}
+		prefixed, err := agentcommunication.PrefixMessage(message, actor)
+		if err != nil {
+			return nil, err
+		}
+		message = prefixed
+		eventType = session.EventTypeContext
+		protocol = session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: displayText})
+	default:
+		return nil, fmt.Errorf("agent-sdk/runtime: unsupported input kind %q", inputKind)
 	}
 	var compactionCopy *session.EventCompactionContext
 	if compaction != nil {
@@ -39,7 +65,7 @@ func buildInputEvent(
 	scope := defaultScope(activeSession, turnID)
 	event := &session.Event{
 		IdempotencyKey: idempotencyKey,
-		Type:           session.EventTypeUser,
+		Type:           eventType,
 		Visibility:     session.VisibilityCanonical,
 		Actor:          actor,
 		Compaction:     compactionCopy,
@@ -47,12 +73,16 @@ func buildInputEvent(
 		Message:        &message,
 		Text:           displayText,
 		Meta:           meta,
+		Protocol:       &protocol,
 	}
-	event.Protocol = &session.EventProtocol{Update: &session.ProtocolUpdate{
-		SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
-		Content:       session.ProtocolTextContent(displayText),
-	}}
-	return event
+	return event, nil
+}
+
+func normalizeInputKind(kind agent.SubmissionKind) agent.SubmissionKind {
+	if kind == "" {
+		return agent.SubmissionKindConversation
+	}
+	return kind
 }
 
 func normalizeEvent(activeSession session.Session, turnID string, event *session.Event) *session.Event {

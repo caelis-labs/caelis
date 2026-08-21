@@ -169,18 +169,24 @@ func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 	participant.Participant = &eventstream.Participant{State: "attached"}
 	lifecycle := baseEnvelope(eventstream.KindLifecycle)
 	lifecycle.Lifecycle = &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted, StopReason: schema.StopReasonEndTurn}
+	communication := baseEnvelope(eventstream.KindAgentCommunication)
+	communication.AgentCommunication = &eventstream.AgentCommunication{
+		Source: eventstream.ActorIdentity{Kind: "participant", ID: "reviewer-1", Role: "delegated", Name: "reviewer"},
+		Text:   "review complete",
+	}
 	review := baseEnvelope(eventstream.KindApprovalReview)
 	review.ApprovalReview = &eventstream.ApprovalReview{ToolCallID: "tool-1", Status: "completed", RawInput: map[string]any{"path": "README.md"}}
 	failure := baseEnvelope(eventstream.KindError)
 	failure.Error = "failed"
 	for name, envelope := range map[string]eventstream.Envelope{
-		"request_permission": permission,
-		"notice":             noticeEnvelope(),
-		"compact_notice":     compactNoticeEnvelope(),
-		"participant":        participant,
-		"lifecycle":          lifecycle,
-		"approval_review":    review,
-		"error":              failure,
+		"request_permission":  permission,
+		"notice":              noticeEnvelope(),
+		"compact_notice":      compactNoticeEnvelope(),
+		"participant":         participant,
+		"lifecycle":           lifecycle,
+		"agent_communication": communication,
+		"approval_review":     review,
+		"error":               failure,
 	} {
 		t.Run(name, func(t *testing.T) { validateWireValue(t, "Envelope", envelope) })
 	}

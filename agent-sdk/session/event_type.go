@@ -51,6 +51,8 @@ func EventTypeOf(event *Event) EventType {
 			return EventTypeLifecycle
 		case ProtocolMethodContextCheckpoint:
 			return EventTypeCompact
+		case ProtocolMethodAgentCommunication:
+			return EventTypeContext
 		}
 		if protocol.Permission != nil {
 			return EventTypeLifecycle

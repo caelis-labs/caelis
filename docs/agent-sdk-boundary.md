@@ -131,7 +131,9 @@ explicit stop or prolonged lack of progress.
 `agent-sdk.AgentInputSender` is the small provider-neutral Agent input contract.
 Runtime owns trusted source identity and Session-scoped handle resolution. The
 model-facing `SendMessage` tool exposes only `to` and `message`; each call sends
-one ordinary input and returns no delivery or target-lifecycle claim. Task
+one explicit Agent-communication input and returns no delivery or target-
+lifecycle claim. Runtime binds the trusted source Actor, stores a Context event,
+and adds the sender header required by user-role-only provider transports. Task
 remains the common lifecycle and observation abstraction for commands and
 subagents, but Task input is reserved for live command stdin and does not double
 as Agent communication. Subagent `Task read` and `Task wait`
@@ -162,8 +164,8 @@ The input method is selected by the current endpoint owner, not by the caller:
 
 | Input path | Endpoint operation |
 | --- | --- |
-| Hosted child to an active main parent | Submit ordinary conversation input to the exact active parent Run |
-| Hosted child to an idle main parent | Start one ordinary parent Turn |
+| Hosted child to an active main parent | Submit Agent communication to the exact active parent Run |
+| Hosted child to an idle main parent | Start one parent Turn with Agent-communication input |
 | Parent or sibling to a running ACP child | Use negotiated `_session/steering` on the exact active activity |
 | Parent or sibling to an idle ACP child | Resume when required, then use `session/prompt` on the same child Session |
 

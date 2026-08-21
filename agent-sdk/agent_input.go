@@ -10,7 +10,7 @@ import (
 // AgentInputParent is the topology address of the current Agent's parent.
 const AgentInputParent = "parent"
 
-// AgentInput is one ordinary conversation input addressed within an Agent
+// AgentInput is one Agent-to-Agent communication addressed within an Agent
 // topology. The sender is supplied by the trusted runtime context rather than
 // by the model-facing request.
 type AgentInput struct {
@@ -20,8 +20,8 @@ type AgentInput struct {
 	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
 }
 
-// AgentInputSender routes ordinary input on behalf of the sender bound by the
-// Agent host. It does not acknowledge remote consumption or own target
+// AgentInputSender routes Agent communication on behalf of the sender bound by
+// the Agent host. It does not acknowledge remote consumption or own target
 // lifecycle state.
 type AgentInputSender interface {
 	SendAgentInput(context.Context, AgentInput) error

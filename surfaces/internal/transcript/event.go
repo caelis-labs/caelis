@@ -19,17 +19,18 @@ const (
 type EventKind string
 
 const (
-	EventNarrative       EventKind = "narrative"
-	EventNotice          EventKind = "notice"
-	EventPlan            EventKind = "plan"
-	EventTool            EventKind = "tool"
-	EventApprovalRequest EventKind = "approval_request"
-	EventApproval        EventKind = "approval"
-	EventParticipant     EventKind = "participant"
-	EventLifecycle       EventKind = "lifecycle"
-	EventUsage           EventKind = "usage"
-	EventError           EventKind = "error"
-	EventRawExtension    EventKind = "raw_extension"
+	EventNarrative          EventKind = "narrative"
+	EventNotice             EventKind = "notice"
+	EventPlan               EventKind = "plan"
+	EventTool               EventKind = "tool"
+	EventApprovalRequest    EventKind = "approval_request"
+	EventApproval           EventKind = "approval"
+	EventParticipant        EventKind = "participant"
+	EventLifecycle          EventKind = "lifecycle"
+	EventUsage              EventKind = "usage"
+	EventAgentCommunication EventKind = "agent_communication"
+	EventError              EventKind = "error"
+	EventRawExtension       EventKind = "raw_extension"
 )
 
 type NarrativeKind string
@@ -90,6 +91,11 @@ type Event struct {
 	Text          string
 	Final         bool
 	Citations     []Citation
+
+	AgentSourceKind string
+	AgentSourceID   string
+	AgentSourceRole string
+	AgentSourceName string
 
 	ToolCallID          string
 	ToolName            string

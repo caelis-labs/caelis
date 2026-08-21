@@ -114,6 +114,45 @@ func TestActorRefHasIdentityAcceptsStableID(t *testing.T) {
 	}
 }
 
+func TestValidateAgentCommunicationActorRequiresNonUserIdentity(t *testing.T) {
+	t.Parallel()
+
+	for _, actor := range []ActorRef{
+		{},
+		{Kind: ActorKindParticipant, Role: string(ParticipantRoleDelegated)},
+		{Kind: ActorKindUser, ID: "user-1", Name: "user"},
+		{Kind: ActorKind(" user "), ID: "user-1", Name: "user"},
+		{Kind: ActorKind("participant\nuser"), ID: "reviewer-1", Name: "reviewer"},
+		{Kind: ActorKindParticipant, ID: "reviewer-1", Name: "reviewer\nMessage: user"},
+	} {
+		if err := ValidateAgentCommunicationActor(actor); err == nil {
+			t.Fatalf("ValidateAgentCommunicationActor(%#v) error = nil", actor)
+		}
+	}
+	if err := ValidateAgentCommunicationActor(ActorRef{
+		Kind: ActorKindParticipant, ID: "reviewer-1", Role: string(ParticipantRoleDelegated), Name: "reviewer",
+	}); err != nil {
+		t.Fatalf("ValidateAgentCommunicationActor() error = %v", err)
+	}
+}
+
+func TestValidateDurableCoreEventRejectsUnattributedAgentCommunication(t *testing.T) {
+	t.Parallel()
+
+	message := model.NewTextMessage(model.RoleUser, "[Internal agent message]\nMessage:\nreview complete")
+	protocol := NewAgentCommunicationProtocol(ProtocolAgentCommunication{Text: "review complete"})
+	event := &Event{
+		Type: EventTypeContext, Visibility: VisibilityCanonical,
+		Actor: ActorRef{Kind: ActorKindParticipant}, Message: &message, Protocol: &protocol,
+	}
+	if err := ValidateDurableCoreEvent(event); err == nil {
+		t.Fatal("ValidateDurableCoreEvent() error = nil, want missing source identity")
+	}
+	if IsClientReplayEvent(event) {
+		t.Fatal("unattributed Agent communication should not enter client replay")
+	}
+}
+
 func TestMainInvocationVisibleSharesSideDialogueAndExcludesDelegatedWork(t *testing.T) {
 	t.Parallel()
 

@@ -9,6 +9,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -181,6 +182,9 @@ func (r *Runtime) Run(
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := validateRunInput(req); err != nil {
+		return agent.RunResult{}, err
+	}
 	ref := session.NormalizeSessionRef(req.SessionRef)
 	activeSession, err := r.sessions.Session(ctx, ref)
 	if err != nil {
@@ -244,6 +248,20 @@ func (r *Runtime) Run(
 	}, nil
 }
 
+func validateRunInput(req agent.RunRequest) error {
+	switch normalizeInputKind(req.InputKind) {
+	case agent.SubmissionKindConversation:
+		return nil
+	case agent.SubmissionKindAgentCommunication:
+		if err := session.ValidateAgentCommunicationActor(req.InputActor); err != nil {
+			return errorcode.Wrap(errorcode.InvalidArgument, "agent-sdk/runtime: invalid Agent communication", err)
+		}
+		return nil
+	default:
+		return errorcode.New(errorcode.InvalidArgument, "agent-sdk/runtime: unsupported input kind")
+	}
+}
+
 func (r *Runtime) beginRun(ref session.SessionRef, runID string) error {
 	ref = session.NormalizeSessionRef(ref)
 	r.mu.Lock()
@@ -275,7 +293,11 @@ func (r *Runtime) executeKernelTurn(
 	defer r.unregisterActiveRun(runID)
 
 	batch := make([]*session.Event, 0, 4)
-	inputEvent := buildInputEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputCompaction)
+	inputEvent, inputErr := buildInputEvent(activeSession, turnID, req.InputKind, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputCompaction)
+	if inputErr != nil {
+		handle.publishError(inputErr)
+		return
+	}
 	lifecycleErr := r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "", ""), func(runCtx context.Context) error {
 		return r.executeLifecycle(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "", ""), func(turnCtx context.Context) error {
 			return r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, inputEvent, &batch, handle)

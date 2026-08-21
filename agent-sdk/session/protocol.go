@@ -22,12 +22,13 @@ const (
 )
 
 const (
-	ProtocolMethodSessionUpdate     = "session/update"
-	ProtocolMethodRequestPermission = "session/request_permission"
-	ProtocolMethodParticipantUpdate = "caelis/participant"
-	ProtocolMethodControllerHandoff = "caelis/handoff"
-	ProtocolMethodRuntimeLifecycle  = "caelis/lifecycle"
-	ProtocolMethodContextCheckpoint = "caelis/context_checkpoint"
+	ProtocolMethodSessionUpdate      = "session/update"
+	ProtocolMethodRequestPermission  = "session/request_permission"
+	ProtocolMethodParticipantUpdate  = "caelis/participant"
+	ProtocolMethodControllerHandoff  = "caelis/handoff"
+	ProtocolMethodRuntimeLifecycle   = "caelis/lifecycle"
+	ProtocolMethodContextCheckpoint  = "caelis/context_checkpoint"
+	ProtocolMethodAgentCommunication = "caelis/agent_communication"
 )
 
 // ProtocolToolCall is the ACP-compatible tool call or tool update view of one
@@ -137,6 +138,12 @@ type ProtocolHandoff struct {
 	Phase string `json:"phase,omitempty"`
 }
 
+// ProtocolAgentCommunication carries the display text of one trusted
+// Agent-to-Agent message. The durable Event.Actor remains the sender identity.
+type ProtocolAgentCommunication struct {
+	Text string `json:"text,omitempty"`
+}
+
 // NewParticipantProtocol constructs the normalized participant lifecycle
 // protocol payload shared by built-in and external ACP adapters.
 func NewParticipantProtocol(participant ProtocolParticipant) EventProtocol {
@@ -156,20 +163,32 @@ func NewHandoffProtocol(handoff ProtocolHandoff) EventProtocol {
 	})
 }
 
+// NewAgentCommunicationProtocol constructs the explicit client projection for
+// one Agent-to-Agent message. It does not grant sender identity; callers must
+// supply the trusted source through Event.Actor.
+func NewAgentCommunicationProtocol(communication ProtocolAgentCommunication) EventProtocol {
+	return CloneEventProtocol(EventProtocol{
+		Method:             ProtocolMethodAgentCommunication,
+		AgentCommunication: &communication,
+	})
+}
+
 // EventProtocol is the ACP-compatible protocol payload carried by one event.
 // It groups protocol-shaped extensions under one nested object so Event itself
 // stays small and stable.
 type EventProtocol struct {
-	Method     string            `json:"method,omitempty"`
-	Update     *ProtocolUpdate   `json:"update,omitempty"`
-	Permission *ProtocolApproval `json:"permission,omitempty"`
+	Method             string                      `json:"method,omitempty"`
+	Update             *ProtocolUpdate             `json:"update,omitempty"`
+	Permission         *ProtocolApproval           `json:"permission,omitempty"`
+	AgentCommunication *ProtocolAgentCommunication `json:"agent_communication,omitempty"`
 }
 
 func (p EventProtocol) MarshalJSON() ([]byte, error) {
 	type protocolJSON struct {
-		Method     string            `json:"method,omitempty"`
-		Update     *ProtocolUpdate   `json:"update,omitempty"`
-		Permission *ProtocolApproval `json:"permission,omitempty"`
+		Method             string                      `json:"method,omitempty"`
+		Update             *ProtocolUpdate             `json:"update,omitempty"`
+		Permission         *ProtocolApproval           `json:"permission,omitempty"`
+		AgentCommunication *ProtocolAgentCommunication `json:"agent_communication,omitempty"`
 	}
 	normalized := CloneEventProtocol(p)
 	return json.Marshal(protocolJSON(normalized))
@@ -266,6 +285,23 @@ func ProtocolHandoffOf(event *Event) *ProtocolHandoff {
 	}
 	out := ProtocolHandoff{Phase: strings.TrimSpace(normalized.Update.SessionUpdate)}
 	if out.Phase == "" {
+		return nil
+	}
+	return &out
+}
+
+// ProtocolAgentCommunicationOf returns the explicit Agent communication
+// projection carried by one event.
+func ProtocolAgentCommunicationOf(event *Event) *ProtocolAgentCommunication {
+	if event == nil || event.Protocol == nil {
+		return nil
+	}
+	normalized := CloneEventProtocol(*event.Protocol)
+	if normalized.Method != ProtocolMethodAgentCommunication || normalized.AgentCommunication == nil {
+		return nil
+	}
+	out := *normalized.AgentCommunication
+	if strings.TrimSpace(out.Text) == "" {
 		return nil
 	}
 	return &out
@@ -453,8 +489,15 @@ func CloneEventProtocol(in EventProtocol) EventProtocol {
 		approval := cloneProtocolApproval(*in.Permission)
 		out.Permission = &approval
 	}
+	if in.AgentCommunication != nil {
+		communication := *in.AgentCommunication
+		communication.Text = strings.TrimSpace(communication.Text)
+		out.AgentCommunication = &communication
+	}
 	if out.Method == "" {
 		switch {
+		case out.AgentCommunication != nil:
+			out.Method = ProtocolMethodAgentCommunication
 		case out.Permission != nil:
 			out.Method = ProtocolMethodRequestPermission
 		case out.Update != nil:

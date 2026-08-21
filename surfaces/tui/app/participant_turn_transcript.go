@@ -78,6 +78,8 @@ func applyTranscriptEventToParticipantTurn(
 		return applyTranscriptNarrativeToParticipantTurn(block, event, policy)
 	case TranscriptEventNotice:
 		block.AddNotice(formatTranscriptNoticeText(event.Text), event.OccurredAt, event.NoticeKind)
+	case TranscriptEventAgentCommunication:
+		block.AddAgentCommunication(agentCommunicationSubagentEvent(event))
 	case TranscriptEventPlan:
 		state := strings.ToLower(strings.TrimSpace(block.Status))
 		if state == "initializing" || state == "prompting" ||

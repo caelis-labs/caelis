@@ -232,6 +232,15 @@ func (b *MainACPTurnBlock) UpdatePlan(entries []planEntryState) {
 	b.advanceNarrativeBoundary()
 }
 
+func (b *MainACPTurnBlock) AddAgentCommunication(event SubagentEvent) {
+	if b == nil || event.Kind != SEAgentCommunication || strings.TrimSpace(event.Text) == "" {
+		return
+	}
+	b.clearTransientRetryNotice()
+	b.Events = append(b.Events, event)
+	b.advanceNarrativeBoundary()
+}
+
 func (b *MainACPTurnBlock) SetStatus(state string, approvalTool string, approvalCommand string, occurredAt time.Time) {
 	if b == nil {
 		return
@@ -475,6 +484,15 @@ func (b *ParticipantTurnBlock) UpdatePlan(entries []planEntryState) {
 		Kind:        SEPlan,
 		PlanEntries: entries,
 	})
+	b.advanceNarrativeBoundary()
+}
+
+func (b *ParticipantTurnBlock) AddAgentCommunication(event SubagentEvent) {
+	if b == nil || event.Kind != SEAgentCommunication || strings.TrimSpace(event.Text) == "" {
+		return
+	}
+	b.clearTransientRetryNotice()
+	b.Events = append(b.Events, event)
 	b.advanceNarrativeBoundary()
 }
 

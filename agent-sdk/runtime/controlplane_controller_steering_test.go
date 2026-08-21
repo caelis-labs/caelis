@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,8 +72,8 @@ func TestRuntimeMainControllerSteeringWaitsForAdmissionAndCommitsCanonicalInput(
 	steerResult := make(chan error, 1)
 	go func() {
 		steerResult <- inputRunner.SubmitContext(ctx, agent.Submission{
-			Kind: agent.SubmissionKindConversation, Text: "guide active controller",
-			Actor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@child"},
+			Kind: agent.SubmissionKindAgentCommunication, Text: "guide active controller",
+			Actor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Role: "delegated", Name: "@child"},
 		})
 	}()
 	select {
@@ -94,35 +95,119 @@ func TestRuntimeMainControllerSteeringWaitsForAdmissionAndCommitsCanonicalInput(
 		steer.ControllerEpoch != "epoch-1" || steer.RemoteSessionID != "remote-session-1" || steer.TurnID == "" {
 		t.Fatalf("main steering target = %#v, want exact controller generation and Turn", steer)
 	}
+	if steer.Input != "" || len(steer.ContentParts) != 2 ||
+		!strings.Contains(steer.ContentParts[0].Text, "Sender: @child") ||
+		!strings.Contains(steer.ContentParts[0].Text, "Role: delegated") ||
+		steer.ContentParts[1].Text != "guide active controller" {
+		t.Fatalf("main steering prompt = input %q parts %#v, want trusted Agent header", steer.Input, steer.ContentParts)
+	}
 
 	controllerHandle.finish()
-	var inputs []*session.Event
+	var userInputs []*session.Event
+	var communications []*session.Event
 	for event, eventErr := range result.Handle.Events() {
 		if eventErr != nil {
 			t.Fatal(eventErr)
 		}
 		if event != nil && session.EventTypeOf(event) == session.EventTypeUser {
-			inputs = append(inputs, event)
+			userInputs = append(userInputs, event)
+		}
+		if session.ProtocolAgentCommunicationOf(event) != nil {
+			communications = append(communications, event)
 		}
 	}
-	if len(inputs) != 2 || session.EventText(inputs[0]) != "initial" || session.EventText(inputs[1]) != "guide active controller" {
-		t.Fatalf("published user inputs = %#v, want initial then steering", inputs)
+	if len(userInputs) != 1 || session.EventText(userInputs[0]) != "initial" || len(communications) != 1 ||
+		session.ProtocolAgentCommunicationOf(communications[0]).Text != "guide active controller" {
+		t.Fatalf("published inputs = users %#v communications %#v", userInputs, communications)
 	}
-	if inputs[1].Actor.Kind != session.ActorKindParticipant || inputs[1].Actor.ID != "child-1" {
-		t.Fatalf("steering Actor = %#v, want trusted participant provenance", inputs[1].Actor)
+	if communications[0].Actor.Kind != session.ActorKindParticipant || communications[0].Actor.ID != "child-1" {
+		t.Fatalf("steering Actor = %#v, want trusted participant provenance", communications[0].Actor)
 	}
 	durable, err := sessions.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var durableInputs []string
+	var durableUsers []string
+	var durableCommunications []string
 	for _, event := range durable {
 		if event != nil && session.EventTypeOf(event) == session.EventTypeUser {
-			durableInputs = append(durableInputs, session.EventText(event))
+			durableUsers = append(durableUsers, session.EventText(event))
+		}
+		if communication := session.ProtocolAgentCommunicationOf(event); communication != nil {
+			durableCommunications = append(durableCommunications, communication.Text)
 		}
 	}
-	if len(durableInputs) != 2 || durableInputs[0] != "initial" || durableInputs[1] != "guide active controller" {
-		t.Fatalf("durable inputs = %#v, want canonical FIFO", durableInputs)
+	if len(durableUsers) != 1 || durableUsers[0] != "initial" ||
+		len(durableCommunications) != 1 || durableCommunications[0] != "guide active controller" {
+		t.Fatalf("durable inputs = users %#v communications %#v, want typed canonical FIFO", durableUsers, durableCommunications)
+	}
+}
+
+func TestRuntimeACPControllerInitialAgentCommunicationCarriesIdentity(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sessions, active := newTestSessionService(t, "main-controller-agent-communication")
+	var err error
+	active, err = sessions.BindController(ctx, session.BindControllerRequest{
+		SessionRef: active.SessionRef,
+		Binding: session.ControllerBinding{
+			Kind: session.ControllerKindACP, ControllerID: "controller-1", AgentName: "remote-main",
+			EpochID: "epoch-1", RemoteSessionID: "remote-session-1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controllerHandle := newTestControllerTurnHandle(nil)
+	turns := make(chan controller.TurnRequest, 1)
+	backend := stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+		turns <- req
+		return controller.TurnResult{Handle: controllerHandle}, nil
+	}}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, Controllers: backend,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := session.ActorRef{
+		Kind: session.ActorKindParticipant, ID: "child-1", Role: "delegated", Name: "@child",
+	}
+	result, err := runtime.Run(ctx, agent.RunRequest{
+		SessionRef: active.SessionRef, InputKind: agent.SubmissionKindAgentCommunication,
+		Input: "start from child", InputActor: actor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case turn := <-turns:
+		if turn.Input != "" || len(turn.ContentParts) != 2 ||
+			!strings.Contains(turn.ContentParts[0].Text, "Sender: @child") ||
+			turn.ContentParts[1].Text != "start from child" {
+			t.Fatalf("controller prompt = input %q parts %#v", turn.Input, turn.ContentParts)
+		}
+	case <-ctx.Done():
+		t.Fatal("controller Turn did not start")
+	}
+	controllerHandle.finish()
+	var communication *session.Event
+	for event, eventErr := range result.Handle.Events() {
+		if eventErr != nil {
+			t.Fatal(eventErr)
+		}
+		if session.ProtocolAgentCommunicationOf(event) != nil {
+			communication = event
+		}
+		if event != nil && session.EventTypeOf(event) == session.EventTypeUser {
+			t.Fatalf("Agent communication emitted User event: %#v", event)
+		}
+	}
+	if communication == nil || communication.Actor != actor ||
+		session.ProtocolAgentCommunicationOf(communication).Text != "start from child" {
+		t.Fatalf("Agent communication event = %#v", communication)
 	}
 }
 

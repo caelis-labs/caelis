@@ -77,6 +77,27 @@ func TestProjectACPEventToEventsUsesTypedNoticeKindIndependentOfText(t *testing.
 	}
 }
 
+func TestProjectACPEventToEventsKeepsAgentCommunicationOutOfUserNarrative(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToEvents(eventstream.Envelope{
+		Kind:  eventstream.KindAgentCommunication,
+		Scope: eventstream.ScopeMain,
+		AgentCommunication: &eventstream.AgentCommunication{
+			Source: eventstream.ActorIdentity{Kind: "participant", ID: "reviewer-1", Role: "delegated", Name: "reviewer"},
+			Text:   "review complete",
+		},
+	}, nil)
+	if len(events) != 1 || events[0].Kind != EventAgentCommunication {
+		t.Fatalf("events = %#v, want one Agent communication", events)
+	}
+	event := events[0]
+	if event.NarrativeKind == NarrativeUser || event.Text != "review complete" ||
+		event.AgentSourceID != "reviewer-1" || event.AgentSourceRole != "delegated" || event.AgentSourceName != "reviewer" {
+		t.Fatalf("event = %#v, want typed sender without User narrative", event)
+	}
+}
+
 func TestProjectACPEventToEventsPrefersTypedRelationAndDeliveryOverConflictingLegacyMetadata(t *testing.T) {
 	t.Parallel()
 

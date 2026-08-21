@@ -172,6 +172,62 @@ func TestACPTaskStreamMuxSilencesRecoverableSubagentGap(t *testing.T) {
 	}
 }
 
+func TestACPTaskStreamMuxForwardsAgentCommunicationWithSenderIdentity(t *testing.T) {
+	t.Parallel()
+
+	sub := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 1)}
+	service := &acpMuxTestService{
+		requests: make(chan taskstream.SubscribeRequest, 1),
+		sub:      sub,
+		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
+			SessionID: "session-1", TaskID: "task-1", Handle: "maia", Kind: task.KindSubagent,
+			State: task.StateRunning, Running: true,
+			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		}}},
+	}
+	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
+	defer mux.Close()
+	mux.Observe(acpMuxSubagentAnchor("maia"))
+	select {
+	case <-service.requests:
+	case <-time.After(time.Second):
+		t.Fatal("Spawn Task stream was not subscribed")
+	}
+
+	communication := eventstream.Envelope{
+		Kind:      eventstream.KindAgentCommunication,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "task-1",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-1",
+			ToolName:   "Spawn",
+		},
+		AgentCommunication: &eventstream.AgentCommunication{
+			Source: eventstream.ActorIdentity{
+				Kind: "participant",
+				ID:   "agent-maia",
+				Role: "delegated",
+				Name: "maia",
+			},
+			Text: "status from maia",
+		},
+	}
+	sub.events <- communication
+
+	select {
+	case envelope := <-mux.Events():
+		if envelope.AgentCommunication == nil || envelope.AgentCommunication.Text != "status from maia" {
+			t.Fatalf("projected Agent communication = %#v", envelope)
+		}
+		if got := envelope.AgentCommunication.Source.Name; got != "maia" {
+			t.Fatalf("projected Agent communication source = %q, want maia", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Agent communication was not forwarded to the subagent overlay")
+	}
+}
+
 func TestACPTaskStreamMuxDetachedDeliveryOutlivesParentPrompt(t *testing.T) {
 	t.Parallel()
 

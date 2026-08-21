@@ -354,6 +354,38 @@ func TestTurnHandleSubmitRejectsUnknownSubmissionKind(t *testing.T) {
 	}
 }
 
+func TestTurnHandleSubmitAgentCommunicationRequiresTrustedIdentity(t *testing.T) {
+	t.Parallel()
+
+	handle := newTestTurnHandle()
+	runner := &recordingRunner{}
+	handle.setRunner(runner)
+
+	err := handle.Submit(context.Background(), SubmitRequest{
+		Kind: SubmissionKindAgentCommunication,
+		Text: "review complete",
+	})
+	var gatewayErr *Error
+	if !As(err, &gatewayErr) || gatewayErr.Code != CodeInvalidRequest {
+		t.Fatalf("Submit(unattributed Agent communication) error = %v, want invalid_request", err)
+	}
+	if len(runner.submissions) != 0 {
+		t.Fatalf("runner submissions = %#v, want none", runner.submissions)
+	}
+
+	actor := session.ActorRef{Kind: session.ActorKindParticipant, ID: "reviewer-1", Name: "reviewer"}
+	if err := handle.Submit(context.Background(), SubmitRequest{
+		Kind:  SubmissionKindAgentCommunication,
+		Text:  "review complete",
+		Actor: actor,
+	}); err != nil {
+		t.Fatalf("Submit(attributed Agent communication) error = %v", err)
+	}
+	if len(runner.submissions) != 1 || runner.submissions[0].Kind != agent.SubmissionKindAgentCommunication || runner.submissions[0].Actor != actor {
+		t.Fatalf("runner submissions = %#v, want attributed Agent communication", runner.submissions)
+	}
+}
+
 func TestTurnHandleCancelCancelsContextAndRunner(t *testing.T) {
 	t.Parallel()
 

@@ -207,6 +207,13 @@ export interface ActiveApproval {
   scope_id?: string;
 }
 
+export interface ActorIdentity {
+  id?: string;
+  kind?: string;
+  name?: string;
+  role?: string;
+}
+
 export interface AddMarketplaceRequest {
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
@@ -239,6 +246,33 @@ export interface AgentCandidate {
 }
 
 export type AgentCandidateList = Array<AgentCandidate>;
+
+export interface AgentCommunication {
+  source: ActorIdentity;
+  text: string;
+}
+
+export interface AgentCommunicationEnvelope {
+  _meta?: ACPMetadata;
+  actor?: string;
+  agent_communication: AgentCommunication;
+  cursor: string;
+  delivery: Delivery;
+  event_id?: string;
+  final?: boolean;
+  handle_id?: string;
+  kind: "caelis/agent_communication";
+  occurred_at?: string;
+  parent_tool?: ParentToolRelation;
+  participant_id?: string;
+  position: FeedPosition;
+  projection_id?: string;
+  run_id?: string;
+  scope?: "main" | "participant" | "subagent";
+  scope_id?: string;
+  session_id?: string;
+  turn_id?: string;
+}
 
 export interface AgentParticipantSnapshot {
   agent_name?: string;
@@ -577,7 +611,7 @@ export interface EnablePluginRequest {
   session_id?: string;
 }
 
-export type Envelope = SessionUpdateEnvelope | RequestPermissionEnvelope | NoticeEnvelope | ParticipantEnvelope | LifecycleEnvelope | ApprovalReviewEnvelope | ErrorEnvelope;
+export type Envelope = SessionUpdateEnvelope | RequestPermissionEnvelope | NoticeEnvelope | ParticipantEnvelope | LifecycleEnvelope | AgentCommunicationEnvelope | ApprovalReviewEnvelope | ErrorEnvelope;
 
 export interface EnvelopeBase {
   _meta?: ACPMetadata;
@@ -600,7 +634,7 @@ export interface EnvelopeBase {
   turn_id?: string;
 }
 
-export type EnvelopeKind = "session/update" | "session/request_permission" | "caelis/notice" | "caelis/participant" | "caelis/lifecycle" | "caelis/approval_review" | "caelis/error";
+export type EnvelopeKind = "session/update" | "session/request_permission" | "caelis/notice" | "caelis/participant" | "caelis/lifecycle" | "caelis/agent_communication" | "caelis/approval_review" | "caelis/error";
 
 export type ErrorCode = "unknown" | "invalid_argument" | "not_found" | "already_exists" | "conflict" | "permission_denied" | "unauthenticated" | "failed_precondition" | "resource_exhausted" | "rate_limited" | "overloaded" | "timeout" | "cancelled" | "interrupted" | "unavailable" | "unsupported" | "unknown_outcome" | "internal";
 

@@ -10,7 +10,7 @@ import (
 // These values were persisted by the retired Task-write continuation saga.
 // Keep this compatibility reader while a supported upgrade source may contain
 // continue_phase. It must never issue remote input; current Agent communication
-// is ordinary input routed by SendMessage.
+// is explicitly classified and routed by SendMessage.
 const (
 	legacyContinuePrepared       = "continue_prepared"
 	legacyContinuePending        = "continue_pending"

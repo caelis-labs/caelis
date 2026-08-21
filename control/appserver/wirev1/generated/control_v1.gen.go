@@ -231,6 +231,13 @@ type ActiveApproval struct {
 	ScopeId       *string             `json:"scope_id,omitempty"`
 }
 
+type ActorIdentity struct {
+	Id   *string `json:"id,omitempty"`
+	Kind *string `json:"kind,omitempty"`
+	Name *string `json:"name,omitempty"`
+	Role *string `json:"role,omitempty"`
+}
+
 type AddMarketplaceRequest struct {
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
@@ -263,6 +270,33 @@ type AgentCandidate struct {
 }
 
 type AgentCandidateList []AgentCandidate
+
+type AgentCommunication struct {
+	Source ActorIdentity `json:"source"`
+	Text   string        `json:"text"`
+}
+
+type AgentCommunicationEnvelope struct {
+	Meta               *ACPMetadata        `json:"_meta,omitempty"`
+	Actor              *string             `json:"actor,omitempty"`
+	AgentCommunication AgentCommunication  `json:"agent_communication"`
+	Cursor             string              `json:"cursor"`
+	Delivery           Delivery            `json:"delivery"`
+	EventId            *string             `json:"event_id,omitempty"`
+	Final              *bool               `json:"final,omitempty"`
+	HandleId           *string             `json:"handle_id,omitempty"`
+	Kind               string              `json:"kind"`
+	OccurredAt         *time.Time          `json:"occurred_at,omitempty"`
+	ParentTool         *ParentToolRelation `json:"parent_tool,omitempty"`
+	ParticipantId      *string             `json:"participant_id,omitempty"`
+	Position           FeedPosition        `json:"position"`
+	ProjectionId       *string             `json:"projection_id,omitempty"`
+	RunId              *string             `json:"run_id,omitempty"`
+	Scope              *string             `json:"scope,omitempty"`
+	ScopeId            *string             `json:"scope_id,omitempty"`
+	SessionId          *string             `json:"session_id,omitempty"`
+	TurnId             *string             `json:"turn_id,omitempty"`
+}
 
 type AgentParticipantSnapshot struct {
 	AgentName *string `json:"agent_name,omitempty"`
@@ -603,33 +637,34 @@ type EnablePluginRequest struct {
 }
 
 type Envelope struct {
-	Meta              *ACPMetadata        `json:"_meta,omitempty"`
-	Actor             *string             `json:"actor,omitempty"`
-	ApprovalRequestId *string             `json:"approval_request_id,omitempty"`
-	ApprovalReview    *ApprovalReview     `json:"approval_review,omitempty"`
-	Cursor            string              `json:"cursor"`
-	Delivery          Delivery            `json:"delivery"`
-	Error             *string             `json:"error,omitempty"`
-	EventId           *string             `json:"event_id,omitempty"`
-	Final             *bool               `json:"final,omitempty"`
-	HandleId          *string             `json:"handle_id,omitempty"`
-	Kind              string              `json:"kind"`
-	Lifecycle         *LifecycleEvent     `json:"lifecycle,omitempty"`
-	Notice            *string             `json:"notice,omitempty"`
-	NoticeKind        NoticeKind          `json:"notice_kind,omitempty"`
-	OccurredAt        *time.Time          `json:"occurred_at,omitempty"`
-	ParentTool        *ParentToolRelation `json:"parent_tool,omitempty"`
-	Participant       *ParticipantEvent   `json:"participant,omitempty"`
-	ParticipantId     *string             `json:"participant_id,omitempty"`
-	Permission        *RequestPermission  `json:"permission,omitempty"`
-	Position          FeedPosition        `json:"position"`
-	ProjectionId      *string             `json:"projection_id,omitempty"`
-	RunId             *string             `json:"run_id,omitempty"`
-	Scope             *string             `json:"scope,omitempty"`
-	ScopeId           *string             `json:"scope_id,omitempty"`
-	SessionId         *string             `json:"session_id,omitempty"`
-	TurnId            *string             `json:"turn_id,omitempty"`
-	Update            *ACPUpdate          `json:"update,omitempty"`
+	Meta               *ACPMetadata        `json:"_meta,omitempty"`
+	Actor              *string             `json:"actor,omitempty"`
+	AgentCommunication *AgentCommunication `json:"agent_communication,omitempty"`
+	ApprovalRequestId  *string             `json:"approval_request_id,omitempty"`
+	ApprovalReview     *ApprovalReview     `json:"approval_review,omitempty"`
+	Cursor             string              `json:"cursor"`
+	Delivery           Delivery            `json:"delivery"`
+	Error              *string             `json:"error,omitempty"`
+	EventId            *string             `json:"event_id,omitempty"`
+	Final              *bool               `json:"final,omitempty"`
+	HandleId           *string             `json:"handle_id,omitempty"`
+	Kind               string              `json:"kind"`
+	Lifecycle          *LifecycleEvent     `json:"lifecycle,omitempty"`
+	Notice             *string             `json:"notice,omitempty"`
+	NoticeKind         NoticeKind          `json:"notice_kind,omitempty"`
+	OccurredAt         *time.Time          `json:"occurred_at,omitempty"`
+	ParentTool         *ParentToolRelation `json:"parent_tool,omitempty"`
+	Participant        *ParticipantEvent   `json:"participant,omitempty"`
+	ParticipantId      *string             `json:"participant_id,omitempty"`
+	Permission         *RequestPermission  `json:"permission,omitempty"`
+	Position           FeedPosition        `json:"position"`
+	ProjectionId       *string             `json:"projection_id,omitempty"`
+	RunId              *string             `json:"run_id,omitempty"`
+	Scope              *string             `json:"scope,omitempty"`
+	ScopeId            *string             `json:"scope_id,omitempty"`
+	SessionId          *string             `json:"session_id,omitempty"`
+	TurnId             *string             `json:"turn_id,omitempty"`
+	Update             *ACPUpdate          `json:"update,omitempty"`
 }
 
 type EnvelopeBase struct {
@@ -661,6 +696,7 @@ const (
 	EnvelopeKindCaelisNotice             EnvelopeKind = "caelis/notice"
 	EnvelopeKindCaelisParticipant        EnvelopeKind = "caelis/participant"
 	EnvelopeKindCaelisLifecycle          EnvelopeKind = "caelis/lifecycle"
+	EnvelopeKindCaelisAgentCommunication EnvelopeKind = "caelis/agent_communication"
 	EnvelopeKindCaelisApprovalReview     EnvelopeKind = "caelis/approval_review"
 	EnvelopeKindCaelisError              EnvelopeKind = "caelis/error"
 )

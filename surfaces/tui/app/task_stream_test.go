@@ -394,9 +394,10 @@ func TestTUIVisibleSubagentObservationKeepsResolvingByParentCall(t *testing.T) {
 	t.Parallel()
 
 	service := &tuiRetryTaskStreamService{
-		subscription:     newTUIProtocolTaskSubscription(),
-		directoryMisses:  6,
-		descriptorHandle: "canonical-child",
+		subscription:            newTUIProtocolTaskSubscription(),
+		directoryMisses:         6,
+		descriptorHandle:        "canonical-child",
+		descriptorParticipantID: "participant-1",
 	}
 	messages := make(chan tea.Msg, 32)
 	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
@@ -458,6 +459,9 @@ func TestTUIVisibleSubagentObservationKeepsResolvingByParentCall(t *testing.T) {
 	view := requireSubagentOutputViewForTest(t, model, "spawn-1")
 	if view.taskHandle != "canonical-child" {
 		t.Fatalf("subagent public handle = %q, want canonical directory handle", view.taskHandle)
+	}
+	if view.participantID != "participant-1" {
+		t.Fatalf("subagent participant identity = %q, want directory identity", view.participantID)
 	}
 }
 
@@ -1047,12 +1051,13 @@ type tuiTestTaskStreamService struct {
 }
 
 type tuiRetryTaskStreamService struct {
-	listCalls         atomic.Int32
-	subscribeCalls    atomic.Int32
-	subscription      *tuiProtocolTaskSubscription
-	directoryMisses   int32
-	descriptorHandle  string
-	subscribeFailures int32
+	listCalls               atomic.Int32
+	subscribeCalls          atomic.Int32
+	subscription            *tuiProtocolTaskSubscription
+	directoryMisses         int32
+	descriptorHandle        string
+	descriptorParticipantID string
+	subscribeFailures       int32
 }
 
 type tuiProtocolTaskSubscription struct {
@@ -1090,7 +1095,7 @@ func (s *tuiRetryTaskStreamService) List(context.Context, taskstream.Principal, 
 	}
 	return taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
 		SessionID: "session-1", TaskID: "task-1", Handle: handle, Kind: task.KindSubagent,
-		State: task.StateRunning, Running: true,
+		State: task.StateRunning, Running: true, ParticipantID: strings.TrimSpace(s.descriptorParticipantID),
 		ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 	}}}, nil
 }

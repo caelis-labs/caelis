@@ -356,7 +356,7 @@ func isApprovalReviewHeaderPlain(plain string) bool {
 
 func acpTranscriptHeaderUsesRailContinuation(verb string) bool {
 	switch strings.ToLower(strings.TrimSpace(verb)) {
-	case "ran", "spawned", "sent":
+	case "ran", "spawned", "sent", "received":
 		return true
 	default:
 		return false
@@ -844,6 +844,10 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 	for _, event := range events {
 		builder.addInt(int(event.Kind))
 		builder.addString(event.Text)
+		builder.addString(event.SourceName)
+		builder.addString(event.SourceRole)
+		builder.addString(event.SourceID)
+		builder.addString(event.SourceCallID)
 		if event.ActiveBuffer != nil && !event.ActiveBuffer.Empty() {
 			builder.addString(event.ActiveBuffer.CacheKey())
 		} else {

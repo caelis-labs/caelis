@@ -17,6 +17,7 @@ type BeginTurnRequest struct {
 	// request preparation still use the BeginTurn method context. When nil,
 	// the method context remains the runtime parent for compatibility.
 	RuntimeContext context.Context
+	InputKind      SubmissionKind
 	Input          string
 	DisplayInput   string
 	ContentParts   []model.ContentPart
@@ -405,8 +406,9 @@ type EventOrigin struct {
 type SubmissionKind = agent.SubmissionKind
 
 const (
-	SubmissionKindConversation                = agent.SubmissionKindConversation
-	SubmissionKindApproval     SubmissionKind = "approval"
+	SubmissionKindConversation                      = agent.SubmissionKindConversation
+	SubmissionKindAgentCommunication                = agent.SubmissionKindAgentCommunication
+	SubmissionKindApproval           SubmissionKind = "approval"
 )
 
 type CancelStatus = agent.CancelStatus
