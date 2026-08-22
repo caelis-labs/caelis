@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caelis-labs/caelis/protocol/acp/transport/internal/winproc"
@@ -29,6 +31,12 @@ type Process struct {
 	Stdout  io.ReadCloser
 	Stderr  io.ReadCloser
 	timeout time.Duration
+
+	stdinCloseOnce sync.Once
+	waitOnce       sync.Once
+	waitDone       chan struct{}
+	waitErr        error
+	stopRequested  atomic.Bool
 }
 
 func Start(ctx context.Context, cfg Config) (*Process, error) {
@@ -83,13 +91,15 @@ func (p *Process) Close(ctx context.Context) error {
 	if p == nil || p.Cmd == nil {
 		return nil
 	}
-	if p.Stdin != nil {
-		_ = p.Stdin.Close()
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	done := make(chan error, 1)
-	go func() {
-		done <- p.Cmd.Wait()
-	}()
+	p.stdinCloseOnce.Do(func() {
+		if p.Stdin != nil {
+			_ = p.Stdin.Close()
+		}
+	})
+	done := p.wait()
 	timeout := p.timeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if remaining := time.Until(deadline); remaining > 0 && remaining < timeout {
@@ -97,20 +107,37 @@ func (p *Process) Close(ctx context.Context) error {
 		}
 	}
 	select {
-	case err := <-done:
-		if errors.Is(err, os.ErrProcessDone) {
-			return nil
-		}
-		return err
+	case <-done:
+		return p.waitResult()
 	case <-ctx.Done():
+		p.stopRequested.Store(true)
 		_ = killProcess(p.Cmd.Process)
 		<-done
 		return ctx.Err()
 	case <-time.After(timeout):
+		p.stopRequested.Store(true)
 		_ = killProcess(p.Cmd.Process)
 		<-done
 		return nil
 	}
+}
+
+func (p *Process) wait() <-chan struct{} {
+	p.waitOnce.Do(func() {
+		p.waitDone = make(chan struct{})
+		go func() {
+			p.waitErr = p.Cmd.Wait()
+			close(p.waitDone)
+		}()
+	})
+	return p.waitDone
+}
+
+func (p *Process) waitResult() error {
+	if p.stopRequested.Load() || errors.Is(p.waitErr, os.ErrProcessDone) {
+		return nil
+	}
+	return p.waitErr
 }
 
 func mergedEnv(overrides map[string]string) []string {
