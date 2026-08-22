@@ -105,9 +105,13 @@ type CommandStartRequest struct {
 // participant relationship selected by Control. Source is audit provenance and
 // is never interpreted as authorization or role policy.
 type SubagentStartRequest struct {
-	SpawnID string                `json:"spawn_id,omitempty"`
-	Agent   string                `json:"agent,omitempty"`
-	Prompt  string                `json:"prompt,omitempty"`
+	SpawnID string `json:"spawn_id,omitempty"`
+	Agent   string `json:"agent,omitempty"`
+	Prompt  string `json:"prompt,omitempty"`
+	// Handle is an optional Session-unique public identity. Empty lets Runtime
+	// assign one. A supplied value is canonicalized and must not collide with
+	// another Task in the same Session.
+	Handle  string                `json:"handle,omitempty"`
 	Context agent.ContextTransfer `json:"context,omitempty"`
 	// IncludeContext is the model-facing request bit. Durable spawn identity
 	// binds this flag, not the resolved ContextTransfer contents.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
@@ -18,10 +19,28 @@ const (
 	maxSpawnPromptTokens                 = 1024
 )
 
-var allowedArgs = []string{"agent", "prompt", "include_context"}
+var allowedArgs = []string{"agent", "prompt", "handle", "include_context"}
 
 func ValidateArgs(args map[string]any) error {
-	return tool.RejectUnknownArgs(args, allowedArgs...)
+	if err := tool.RejectUnknownArgs(args, allowedArgs...); err != nil {
+		return err
+	}
+	raw, exists := args["handle"]
+	if !exists {
+		return nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"handle\" must be string")
+	}
+	canonical, err := agenthandle.CanonicalRequested(value)
+	if err != nil {
+		return err
+	}
+	if canonical == "" {
+		return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"handle\" must be non-empty")
+	}
+	return nil
 }
 
 type Tool struct {
@@ -127,6 +146,13 @@ func spawnDefinition(agents []delegation.Agent) tool.Definition {
 			"type":        "string",
 			"minLength":   1,
 			"description": "Specific self-contained sub-task.",
+		},
+		"handle": map[string]any{
+			"type":        "string",
+			"minLength":   1,
+			"maxLength":   agenthandle.MaxRequestedHandleLength,
+			"pattern":     agenthandle.RequestedHandlePattern,
+			"description": "Optional unique Session-scoped Task handle. Must start with a letter and use at most 32 lowercase letters, numbers, or hyphens; parent is reserved. A collision fails and is not renamed. Omit to let the runtime assign one.",
 		},
 		"include_context": map[string]any{
 			"type":        "boolean",

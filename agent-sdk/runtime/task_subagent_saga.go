@@ -14,6 +14,7 @@ import (
 	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
@@ -135,6 +136,11 @@ func (tm *taskRuntime) startSubagentTarget(
 			return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent runner does not support typed placements")
 		}
 	}
+	requestedHandle, err := agenthandle.CanonicalRequested(req.Handle)
+	if err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	req.Handle = requestedHandle
 	var requestDigest string
 	if legacyDigest {
 		requestDigest, err = subagentSpawnRequestDigest(req, mode, role)
@@ -266,7 +272,7 @@ func (tm *taskRuntime) beginSubagentSpawn(
 		}
 		return tm.resumeExistingSpawn(ctx, existing, spawnID, runner)
 	}
-	handle, err := tm.reserveTaskHandle(ctx, activeSession, ref, taskapi.KindSubagent, target.Selector)
+	handle, err := tm.reserveTaskHandleValue(ctx, activeSession, ref, taskapi.KindSubagent, target.Selector, strings.TrimSpace(req.Handle))
 	if err != nil {
 		return spawnBeginOutcome{}, err
 	}
@@ -296,6 +302,9 @@ func (tm *taskRuntime) beginSubagentSpawn(
 		},
 	}
 	if err := tm.persistSpawnEntry(ctx, entry); err != nil {
+		if !session.IsCommitted(err) {
+			tm.forgetTaskHandle(ref.SessionID, handle)
+		}
 		return spawnBeginOutcome{}, err
 	}
 	// Claim the external-effect boundary in one additional CAS write. A crash
@@ -371,6 +380,7 @@ func subagentSpawnRequestDigest(req taskapi.SubagentStartRequest, mode string, r
 	payload := struct {
 		Agent        string                  `json:"agent"`
 		Prompt       string                  `json:"prompt"`
+		Handle       string                  `json:"handle,omitempty"`
 		Context      agent.ContextTransfer   `json:"context"`
 		Mode         string                  `json:"mode"`
 		ApprovalMode string                  `json:"approval_mode"`
@@ -378,7 +388,7 @@ func subagentSpawnRequestDigest(req taskapi.SubagentStartRequest, mode string, r
 		Role         session.ParticipantRole `json:"role"`
 	}{
 		Agent: strings.TrimSpace(req.Agent), Prompt: strings.TrimSpace(req.Prompt),
-		Context: agent.CloneContextTransfer(req.Context), Mode: strings.TrimSpace(mode),
+		Handle: strings.TrimSpace(req.Handle), Context: agent.CloneContextTransfer(req.Context), Mode: strings.TrimSpace(mode),
 		ApprovalMode: strings.TrimSpace(req.ApprovalMode), ParentCall: strings.TrimSpace(req.ParentCall), Role: role,
 	}
 	return hashSubagentSpawnPayload(payload)
@@ -388,6 +398,7 @@ func subagentSpawnTargetRequestDigest(target delegation.Target, req taskapi.Suba
 	payload := struct {
 		Target         delegation.Target       `json:"target"`
 		Prompt         string                  `json:"prompt"`
+		Handle         string                  `json:"handle,omitempty"`
 		IncludeContext bool                    `json:"include_context"`
 		Mode           string                  `json:"mode"`
 		ApprovalMode   string                  `json:"approval_mode"`
@@ -395,7 +406,7 @@ func subagentSpawnTargetRequestDigest(target delegation.Target, req taskapi.Suba
 		Role           session.ParticipantRole `json:"role"`
 	}{
 		Target: delegation.NormalizeTarget(target), Prompt: strings.TrimSpace(req.Prompt),
-		IncludeContext: req.IncludeContext, Mode: strings.TrimSpace(mode),
+		Handle: strings.TrimSpace(req.Handle), IncludeContext: req.IncludeContext, Mode: strings.TrimSpace(mode),
 		ApprovalMode: strings.TrimSpace(req.ApprovalMode), ParentCall: strings.TrimSpace(req.ParentCall), Role: role,
 	}
 	return hashSubagentSpawnPayload(payload)

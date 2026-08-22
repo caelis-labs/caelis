@@ -1210,6 +1210,76 @@ func TestSubagentSpawnCancelSuccessCannotRollForwardAfterTerminalWriteFailure(t 
 	}
 }
 
+func TestSubagentSpawnReleasesRequestedHandleAfterFailedIntentPersist(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "handle-retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newSagaTaskStore()
+	store.failOnPut = 1
+	runner := &sagaRunner{}
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := taskapi.SubagentStartRequest{
+		SpawnID: "retry-handle", Agent: "helper", Prompt: "review", Handle: "reviewer", Role: session.ParticipantRoleSidecar,
+	}
+	if _, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err == nil {
+		t.Fatal("StartSubagent() error = nil, want first intent persist failure")
+	}
+	runtime.tasks.mu.Lock()
+	_, reserved := runtime.tasks.handles[active.SessionID]["reviewer"]
+	runtime.tasks.mu.Unlock()
+	if reserved {
+		t.Fatal("requested handle remained reserved after non-committed intent persist failure")
+	}
+	if runner.spawnCalls != 0 {
+		t.Fatalf("spawn calls = %d, want 0 before durable intent", runner.spawnCalls)
+	}
+
+	snapshot, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req)
+	if err != nil {
+		t.Fatalf("StartSubagent(retry) error = %v", err)
+	}
+	if taskStringValue(snapshot.Result["handle"]) != "reviewer" {
+		t.Fatalf("retry handle = %#v, want reviewer", snapshot.Result["handle"])
+	}
+	if runner.spawnCalls != 1 {
+		t.Fatalf("spawn calls = %d, want 1 after released reservation", runner.spawnCalls)
+	}
+}
+
+func TestSubagentSpawnRequestDigestOmitsEmptyHandle(t *testing.T) {
+	t.Parallel()
+
+	empty := taskapi.SubagentStartRequest{Agent: "helper", Prompt: "review", Handle: ""}
+	omitted := taskapi.SubagentStartRequest{Agent: "helper", Prompt: "review"}
+	first, err := subagentSpawnRequestDigest(empty, "allow", session.ParticipantRoleSidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := subagentSpawnRequestDigest(omitted, "allow", session.ParticipantRoleSidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("empty handle digest = %q, omitted = %q, want identical compatibility digest", first, second)
+	}
+	requested := omitted
+	requested.Handle = "reviewer"
+	third, err := subagentSpawnRequestDigest(requested, "allow", session.ParticipantRoleSidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third == first {
+		t.Fatal("requested handle digest matched empty handle digest")
+	}
+}
+
 func TestSubagentSpawnIdentityBindsCompleteSemanticRequest(t *testing.T) {
 	t.Parallel()
 
@@ -1223,6 +1293,7 @@ func TestSubagentSpawnIdentityBindsCompleteSemanticRequest(t *testing.T) {
 		{name: "mode", change: func(req *taskapi.SubagentStartRequest) { req.Mode = "different-mode" }},
 		{name: "approval mode", change: func(req *taskapi.SubagentStartRequest) { req.ApprovalMode = "different-approval" }},
 		{name: "parent call", change: func(req *taskapi.SubagentStartRequest) { req.ParentCall = "different-call" }},
+		{name: "handle", change: func(req *taskapi.SubagentStartRequest) { req.Handle = "reviewer" }},
 		{name: "role", change: func(req *taskapi.SubagentStartRequest) { req.Role = session.ParticipantRoleDelegated }},
 	}
 	for _, change := range changes {

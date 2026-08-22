@@ -23,6 +23,10 @@ func allocateSubagentHandle(activeSession session.Session, agent string) string 
 }
 
 func (tm *taskRuntime) reserveTaskHandle(ctx context.Context, activeSession session.Session, ref session.SessionRef, kind taskapi.Kind, hint string) (string, error) {
+	return tm.reserveTaskHandleValue(ctx, activeSession, ref, kind, hint, "")
+}
+
+func (tm *taskRuntime) reserveTaskHandleValue(ctx context.Context, activeSession session.Session, ref session.SessionRef, kind taskapi.Kind, hint string, requested string) (string, error) {
 	used := subagentHandlesFromSession(activeSession)
 	sessionID := strings.TrimSpace(ref.SessionID)
 	if tm.store != nil && sessionID != "" {
@@ -67,6 +71,13 @@ func (tm *taskRuntime) reserveTaskHandle(ctx context.Context, activeSession sess
 			}
 		}
 	}
+	if requested != "" {
+		if _, exists := used[requested]; exists {
+			return "", fmt.Errorf("agent-sdk/runtime: task handle %q is already in use", requested)
+		}
+		tm.rememberTaskHandleLocked(sessionID, requested)
+		return requested, nil
+	}
 	handle := allocateTaskHandle(used, kind, hint)
 	tm.rememberTaskHandleLocked(sessionID, handle)
 	return handle, nil
@@ -104,6 +115,27 @@ func (tm *taskRuntime) rememberTaskHandleLocked(sessionID string, handle string)
 		tm.handles[sessionID] = map[string]struct{}{}
 	}
 	tm.handles[sessionID][handle] = struct{}{}
+}
+
+func (tm *taskRuntime) forgetTaskHandle(sessionID string, handle string) {
+	if tm == nil {
+		return
+	}
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.forgetTaskHandleLocked(sessionID, handle)
+}
+
+func (tm *taskRuntime) forgetTaskHandleLocked(sessionID string, handle string) {
+	sessionID = strings.TrimSpace(sessionID)
+	handle = normalizeTaskHandle(handle)
+	if sessionID == "" || handle == "" || tm.handles == nil {
+		return
+	}
+	delete(tm.handles[sessionID], handle)
+	if len(tm.handles[sessionID]) == 0 {
+		delete(tm.handles, sessionID)
+	}
 }
 
 func subagentHandlesFromSession(activeSession session.Session) map[string]struct{} {

@@ -1,6 +1,9 @@
 package agenthandle
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNormalize(t *testing.T) {
 	tests := []struct {
@@ -30,6 +33,34 @@ func TestNormalizeBase(t *testing.T) {
 	for _, tc := range tests {
 		if got := NormalizeBase(tc.in); got != tc.want {
 			t.Fatalf("NormalizeBase(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestCanonicalRequested(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    string
+		wantErr string
+	}{
+		{in: "", want: ""},
+		{in: " @Reviewer ", want: "reviewer"},
+		{in: "coder-1", want: "coder-1"},
+		{in: "parent", wantErr: "reserved"},
+		{in: "rev iew", wantErr: "must start with a letter"},
+		{in: "reviewer,helper", wantErr: "must start with a letter"},
+		{in: strings.Repeat("a", MaxRequestedHandleLength+1), wantErr: "exceeds 32 characters"},
+	}
+	for _, tc := range tests {
+		got, err := CanonicalRequested(tc.in)
+		if tc.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("CanonicalRequested(%q) error = %v, want %q", tc.in, err, tc.wantErr)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Fatalf("CanonicalRequested(%q) = %q, %v, want %q", tc.in, got, err, tc.want)
 		}
 	}
 }

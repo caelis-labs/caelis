@@ -1029,6 +1029,71 @@ func TestAllocateSubagentHandleUsesAgentDerivedFallback(t *testing.T) {
 	}
 }
 
+func TestStartSubagentUsesRequestedHandleAndRejectsDuplicates(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+
+	first, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "first",
+		Handle: " @Reviewer ",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent(reviewer) error = %v", err)
+	}
+	if got := taskStringValue(first.Result["handle"]); got != "reviewer" {
+		t.Fatalf("first handle = %q, want reviewer", got)
+	}
+	if runner.spawnContext.Handle != "reviewer" {
+		t.Fatalf("spawn handle = %q, want reviewer", runner.spawnContext.Handle)
+	}
+
+	second, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "second",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent(random) error = %v", err)
+	}
+	secondHandle := taskStringValue(second.Result["handle"])
+	if secondHandle == "" || secondHandle == "reviewer" || !agenthandle.ContainsPoolName(secondHandle) {
+		t.Fatalf("second handle = %q, want unused pool handle", secondHandle)
+	}
+
+	_, err = runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "duplicate",
+		Handle: "reviewer",
+	})
+	if err == nil || !strings.Contains(err.Error(), "already in use") {
+		t.Fatalf("StartSubagent(duplicate) error = %v, want already in use", err)
+	}
+}
+
+func TestStartSubagentRejectsRequestedHandleUsedByParticipant(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	activeSession.Participants = []session.ParticipantBinding{{Label: "@reviewer"}}
+
+	_, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "review",
+		Handle: "reviewer",
+	})
+	if err == nil || !strings.Contains(err.Error(), "already in use") {
+		t.Fatalf("StartSubagent(participant handle) error = %v, want already in use", err)
+	}
+	if runner.spawnRequest.Agent != "" || runner.spawnTargetRequest.Target.Selector != "" {
+		t.Fatalf("external spawn ran despite participant handle collision: %#v", runner.spawnRequest)
+	}
+}
+
 func TestStartSubagentAllocatesUniqueHandlesFromRuntimeReservations(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
@@ -1818,6 +1883,60 @@ func publishSubagentCompletionAndWait(
 			t.Fatalf("stored subagent = %#v, want producer state %q", entry, result.State)
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestRuntimeSpawnToolUsesRequestedHandle(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	targetTool := runtimeSpawnTool{
+		base:       spawn.New([]delegation.Agent{{Name: "self"}}),
+		session:    activeSession,
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+		runner:     runner,
+	}
+	raw, err := json.Marshal(map[string]any{"prompt": "inspect this", "handle": "Reviewer"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	result, err := targetTool.Call(ctx, tool.Call{ID: "spawn-1", Name: spawn.ToolName, Input: raw})
+	if err != nil {
+		t.Fatalf("SPAWN Call() error = %v", err)
+	}
+	payload := testToolResultPayload(t, result)
+	if payload["handle"] != "reviewer" {
+		t.Fatalf("SPAWN handle = %#v, want reviewer", payload["handle"])
+	}
+	if runner.spawnContext.Handle != "reviewer" {
+		t.Fatalf("spawn context handle = %q, want reviewer", runner.spawnContext.Handle)
+	}
+
+	raw, err = json.Marshal(map[string]any{"prompt": "inspect again", "handle": "reviewer"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-2", Name: spawn.ToolName, Input: raw}); err == nil || !strings.Contains(err.Error(), "already in use") {
+		t.Fatalf("SPAWN Call(duplicate) error = %v, want already in use", err)
+	}
+
+	raw, err = json.Marshal(map[string]any{"prompt": "inspect parent", "handle": "parent"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-3", Name: spawn.ToolName, Input: raw}); err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("SPAWN Call(parent) error = %v, want reserved handle", err)
+	}
+
+	raw, err = json.Marshal(map[string]any{"prompt": "inspect empty", "handle": ""})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-4", Name: spawn.ToolName, Input: raw}); err == nil || !strings.Contains(err.Error(), "handle") {
+		t.Fatalf("SPAWN Call(empty handle) error = %v, want non-empty handle rejection", err)
 	}
 }
 

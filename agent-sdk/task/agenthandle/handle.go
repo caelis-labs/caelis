@@ -4,8 +4,24 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"regexp"
 	"strings"
 )
+
+const (
+	// MaxRequestedHandleLength is the maximum canonical length of a
+	// model-supplied Task handle.
+	MaxRequestedHandleLength = 32
+	// RequestedHandlePattern is the canonical charset for a model-supplied
+	// Task handle: a leading letter, then lowercase letters, digits, or hyphens.
+	RequestedHandlePattern = `^[a-z][a-z0-9-]*$`
+)
+
+var requestedHandlePattern = regexp.MustCompile(RequestedHandlePattern)
+
+var reservedRequestedHandles = map[string]struct{}{
+	"parent": {},
+}
 
 var namePool = []string{
 	"emun", "ari", "aria", "ava", "ben", "cai", "cleo", "dana",
@@ -70,6 +86,26 @@ func ContainsPoolName(name string) bool {
 		}
 	}
 	return false
+}
+
+// CanonicalRequested normalizes a model-supplied handle. Empty input remains
+// empty so callers can fall back to Allocate. Non-empty values must use the
+// shared handle charset and must not use reserved routing names.
+func CanonicalRequested(value string) (string, error) {
+	handle := Normalize(value)
+	if handle == "" {
+		return "", nil
+	}
+	if len(handle) > MaxRequestedHandleLength {
+		return "", fmt.Errorf("agent-sdk/task/agenthandle: handle %q exceeds %d characters", handle, MaxRequestedHandleLength)
+	}
+	if !requestedHandlePattern.MatchString(handle) {
+		return "", fmt.Errorf("agent-sdk/task/agenthandle: handle %q must start with a letter and use only lowercase letters, numbers, or hyphens", handle)
+	}
+	if _, reserved := reservedRequestedHandles[handle]; reserved {
+		return "", fmt.Errorf("agent-sdk/task/agenthandle: handle %q is reserved", handle)
+	}
+	return handle, nil
 }
 
 // Normalize lowercases value and strips a leading @ mention prefix.

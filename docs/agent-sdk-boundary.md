@@ -73,7 +73,9 @@ profile. Caelis product assembly adds `SendMessage` explicitly alongside
 `SendMessage` but never receives `Spawn`, so delegation has one level and a
 child cannot create nested children. Runtime augments only a hosted child whose
 parent/sibling message transport is supplied through the execution context.
-Delegated Spawn defaults to the caller prompt only. Optional `include_context`
+Delegated Spawn defaults to the caller prompt only. Optional `handle` requests a
+unique Session-scoped Task identity; omitting it keeps Runtime's current random
+assignment. Optional `include_context`
 asks the host-injected `ContextRouter` for the same recipient-specific public
 `ContextTransfer` used by participant handoff. Durable spawn identity binds that
 request bit, not the resolved transfer contents; the first intent freezes the

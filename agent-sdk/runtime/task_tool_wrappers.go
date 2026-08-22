@@ -392,6 +392,14 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	if !ok || strings.TrimSpace(prompt) == "" {
 		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "prompt")
 	}
+	var requestedHandle string
+	if _, exists := args["handle"]; exists {
+		handle, ok := stringArg(args, "handle")
+		if !ok || handle == "" {
+			return tool.Result{}, fmt.Errorf("tool: arg %q must be a non-empty string", "handle")
+		}
+		requestedHandle = handle
+	}
 	requested, _ := stringArg(args, "agent")
 	requested, err = resolveRuntimeSpawnToolAgent(t.base.Definition(), t.session, requested)
 	if err != nil {
@@ -420,6 +428,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	snapshot, err := t.tasks.StartSubagentTarget(ctx, t.session, t.sessionRef, t.runner, delegation.NormalizeTarget(target), taskapi.SubagentStartRequest{
 		SpawnID:            strings.TrimSpace(call.ID),
 		Prompt:             strings.TrimSpace(prompt),
+		Handle:             requestedHandle,
 		Context:            contextTransfer,
 		IncludeContext:     includeContext,
 		ContextUnsupported: contextUnsupported,

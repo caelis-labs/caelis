@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -26,9 +27,19 @@ func TestDefinitionDoesNotExposeYieldTimeMS(t *testing.T) {
 	if !ok || includeContext["type"] != "boolean" {
 		t.Fatalf("include_context = %#v, want optional boolean", props["include_context"])
 	}
+	handleProp, ok := props["handle"].(map[string]any)
+	if !ok || handleProp["type"] != "string" || handleProp["minLength"] != 1 || handleProp["maxLength"] != agenthandle.MaxRequestedHandleLength || handleProp["pattern"] != agenthandle.RequestedHandlePattern {
+		t.Fatalf("handle = %#v, want optional unique string with charset bounds", props["handle"])
+	}
+	description, _ := handleProp["description"].(string)
+	for _, want := range []string{"unique", "collision fails", "Omit"} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("handle description missing %q: %q", want, description)
+		}
+	}
 	required, _ := def.InputSchema["required"].([]string)
-	if hasString(required, "include_context") {
-		t.Fatalf("required = %#v, want include_context optional", required)
+	if hasString(required, "include_context") || hasString(required, "handle") {
+		t.Fatalf("required = %#v, want handle and include_context optional", required)
 	}
 	promptProp, _ := props["prompt"].(map[string]any)
 	if got := promptProp["minLength"]; got != 1 {
@@ -64,6 +75,20 @@ func TestDefinitionExposesOpenWorldAnnotations(t *testing.T) {
 	} {
 		if got := annotations[key]; got != want {
 			t.Fatalf("annotation %s = %#v, want %v; metadata=%#v", key, got, want, def.Metadata)
+		}
+	}
+}
+
+func TestCallRejectsEmptyHandleBeforeRuntimeWrapperError(t *testing.T) {
+	t.Parallel()
+
+	for _, handle := range []any{"", "   ", "@@@"} {
+		raw, _ := json.Marshal(map[string]any{"prompt": "inspect this", "handle": handle})
+		_, err := New([]delegation.Agent{{Name: "self"}}).Call(context.Background(), tool.Call{
+			Name: ToolName, Input: raw,
+		})
+		if err == nil || strings.Contains(err.Error(), "runtime wrapper") || !strings.Contains(err.Error(), "handle") {
+			t.Fatalf("SPAWN Call(handle=%#v) error = %v, want empty handle rejection", handle, err)
 		}
 	}
 }

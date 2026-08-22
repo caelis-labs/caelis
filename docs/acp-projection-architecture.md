@@ -254,8 +254,10 @@ cancel for an explicit stop or prolonged lack of progress. Product tool
 assembly omits Spawn from every Spawn-created child Session, preventing nested
 delegation while retaining SendMessage for parent and sibling communication.
 Child system prompts state that they share the parent workspace. Optional Spawn
-`include_context` asks the host ContextRouter for public parent context and
-degrades to the prompt alone when that port is absent.
+`handle` requests a unique Session-scoped Task identity; omitting it keeps
+Runtime assignment. Optional Spawn `include_context` asks the host ContextRouter
+for public parent context and degrades to the prompt alone when that port is
+absent.
 
 Permission requests are Control interactions, not Task frames. Control emits
 the approval Envelope on the Session feed after the request has durable
