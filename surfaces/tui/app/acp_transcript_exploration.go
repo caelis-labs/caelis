@@ -641,7 +641,7 @@ func renderExplorationNarrativeRows(blockID string, text string, width int, ctx 
 }
 
 func renderExplorationToolRowWithMode(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, token string, first bool, mode explorationToolDetailMode) RenderedRow {
-	verb := surfaceExplorationVerb(ev.Name)
+	verb := surfaceExplorationVerb(ev.Name, ev.ToolKind)
 	if verb == "" {
 		verb = ev.Name
 	}
@@ -698,7 +698,7 @@ func explorationGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width i
 	grouped := map[string][]string{}
 	order := make([]string, 0, 4)
 	for _, ev := range events {
-		verb := surfaceExplorationVerb(ev.Name)
+		verb := surfaceExplorationVerb(ev.Name, ev.ToolKind)
 		if verb == "" {
 			continue
 		}
@@ -758,7 +758,7 @@ func explorationToolDetailForDisplay(ev SubagentEvent, workspace string, mode ex
 	}
 	fromOutput := !fromArgs && item != ""
 	if item == "" {
-		if surfaceExplorationVerb(ev.Name) != "" {
+		if surfaceExplorationVerb(ev.Name, ev.ToolKind) != "" {
 			return ""
 		}
 		item = ev.Name
@@ -781,10 +781,10 @@ func compactExplorationToolDetailWithWorkspace(ev SubagentEvent, detail string, 
 		return ""
 	}
 	semanticName := ev.Name
-	if semanticName == surfaceToolWebSearch {
+	if semanticName == surfaceToolWebSearch || semanticName == surfaceToolWebFetch {
 		return detail
 	}
-	switch surfaceExplorationVerb(semanticName) {
+	switch surfaceExplorationVerb(semanticName, ev.ToolKind) {
 	case "Read", "View", "List", "Glob", "Search":
 		return compactExplorationPathDetailWithBase(detail, workspace)
 	default:
@@ -1035,26 +1035,6 @@ func isExplorationSummaryVerb(verb string) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func toolSignalDisplayVerb(name string) string {
-	if verb := surfaceExplorationVerb(name); verb != "" {
-		return verb
-	}
-	switch name {
-	case surfaceToolWrite:
-		return "Write"
-	case surfaceToolPatch:
-		return "Patch"
-	case surfaceToolRunCommand:
-		return "Ran"
-	case surfaceToolSpawn:
-		return "Spawned"
-	case surfaceToolTask:
-		return "Task"
-	default:
-		return ""
 	}
 }
 

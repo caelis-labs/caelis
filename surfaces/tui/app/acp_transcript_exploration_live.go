@@ -59,7 +59,7 @@ func renderACPLiveExplorationStageRows(blockID string, events []SubagentEvent, i
 }
 
 func renderLiveExplorationToolHeaderRow(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext) RenderedRow {
-	verb := surfaceExplorationVerb(ev.Name)
+	verb := surfaceExplorationVerb(ev.Name, ev.ToolKind)
 	if verb == "" {
 		verb = ev.Name
 	}
@@ -74,7 +74,7 @@ func liveExplorationRepeatedToolSummary(stage []SubagentEvent) ([]SubagentEvent,
 		if !isExplorationToolEvent(ev) {
 			continue
 		}
-		nextVerb := surfaceExplorationVerb(ev.Name)
+		nextVerb := surfaceExplorationVerb(ev.Name, ev.ToolKind)
 		if nextVerb == "" {
 			return nil, "", false
 		}

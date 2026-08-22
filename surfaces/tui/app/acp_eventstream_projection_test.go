@@ -108,7 +108,7 @@ func TestProjectACPEventToTranscriptEventsProjectsCompactNotice(t *testing.T) {
 	}
 }
 
-func TestProjectACPEventToTranscriptEventsDisplaysSkillContentReadAsSkill(t *testing.T) {
+func TestProjectACPEventToTranscriptEventsKeepsStandardReadIdentityForSkillContent(t *testing.T) {
 	t.Parallel()
 
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
@@ -125,8 +125,8 @@ func TestProjectACPEventToTranscriptEventsDisplaysSkillContentReadAsSkill(t *tes
 		t.Fatalf("events = %#v, want one transcript event", events)
 	}
 	event := events[0]
-	if event.Kind != TranscriptEventTool || event.ToolName != "Skill" || event.ToolArgs != "review" || event.ToolKind != schema.ToolKindRead {
-		t.Fatalf("event = %#v, want Skill review tool event", event)
+	if event.Kind != TranscriptEventTool || event.ToolName != "" || event.ToolArgs != "review" || event.ToolKind != schema.ToolKindRead || event.ToolTitle != `Read <skill_content name="review">` {
+		t.Fatalf("event = %#v, want standard Read review tool event without a forged exact name", event)
 	}
 }
 

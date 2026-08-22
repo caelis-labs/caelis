@@ -804,17 +804,6 @@ func renderACPDiffPanelRows(blockID string, text string, width int, ctx BlockRen
 	return renderNumberedACPDiffPanelRows(blockID, text, width, ctx)
 }
 
-func renderACPToolHeaderRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, expanded bool) []RenderedRow {
-	vm := buildToolEventViewModel(ev)
-	vm.Done = false
-	vm.Err = false
-	vm.Output = ""
-	vm.Expandable = true
-	vm.Expanded = expanded
-	vm.ClickToken = acpToolPanelClickToken(ev.CallID)
-	return renderToolEventViewModelLines(blockID, vm, width, ctx.Theme)
-}
-
 func acpToolPanelClickToken(callID string) string {
 	callID = strings.TrimSpace(callID)
 	if callID == "" {

@@ -39,17 +39,6 @@ func (m *Model) projectACPEventToTranscriptEvents(env eventstream.Envelope) []Tr
 
 type tuiTranscriptProjector struct{}
 
-func (tuiTranscriptProjector) ResolveToolName(meta map[string]any, title string, kind string) string {
-	return acpUpdateToolName(meta, title, kind)
-}
-
-func acpUpdateToolName(meta map[string]any, title string, kind string) string {
-	if name := transcript.MetaString(meta, "caelis", "runtime", "tool", "name"); name != "" {
-		return name
-	}
-	return transcriptToolDisplayName("", title, kind)
-}
-
 func (tuiTranscriptProjector) ProjectToolCall(input transcript.ToolProjectionInput) transcript.Event {
 	return projectTranscriptToolCall(input)
 }

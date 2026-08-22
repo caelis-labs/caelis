@@ -226,7 +226,6 @@ func TestProjectACPEventToEventsDelegatesToolUpdate(t *testing.T) {
 			RawOutput:     map[string]any{"stdout": "done\n"},
 		},
 	}, testSurfaceProjector{
-		toolName:       "RunCommand",
 		resultCapture:  &captured,
 		requireDefault: "in_progress",
 		t:              t,
@@ -234,12 +233,45 @@ func TestProjectACPEventToEventsDelegatesToolUpdate(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want one transcript event", events)
 	}
-	if events[0].ToolName != "RunCommand" || events[0].ToolCallID != "call-1" {
+	if events[0].ToolName != "" || events[0].ToolCallID != "call-1" {
 		t.Fatalf("event = %#v, want delegated tool event", events[0])
 	}
 	rawOutput := RawMap(captured.RawOutput)
 	if !captured.GatewayProjection || rawOutput["stdout"] != "done\n" || captured.RawOutput == nil {
 		t.Fatalf("captured = %#v, want gateway projection and raw output", captured)
+	}
+}
+
+func TestProjectACPEventToEventsTreatsTerminalToolCallAsFinalSnapshot(t *testing.T) {
+	t.Parallel()
+
+	callCalled := false
+	var captured ToolProjectionInput
+	events := ProjectACPEventToEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "read-1",
+			Title:         "Read AGENTS.md",
+			Kind:          schema.ToolKindRead,
+			Status:        schema.ToolStatusCompleted,
+			RawInput:      map[string]any{"path": "AGENTS.md"},
+			RawOutput:     map[string]any{"result": "done"},
+		},
+	}, testSurfaceProjector{
+		t:              t,
+		resultCapture:  &captured,
+		requireDefault: schema.ToolStatusCompleted,
+		callCalled:     &callCalled,
+	})
+	if callCalled || len(events) != 1 {
+		t.Fatalf("call projection = %v, events = %#v, want one final result projection", callCalled, events)
+	}
+	if captured.ToolName != "" || captured.ToolKind != schema.ToolKindRead || captured.ToolTitle != "Read AGENTS.md" {
+		t.Fatalf("captured identity = %#v, want exact name empty with standard kind/title preserved", captured)
+	}
+	if RawMap(captured.RawOutput)["result"] != "done" {
+		t.Fatalf("captured raw output = %#v, want one-shot output preserved", captured.RawOutput)
 	}
 }
 
@@ -379,15 +411,10 @@ func TestProjectACPEventToEventsProjectsCompactNoticeOnly(t *testing.T) {
 
 type testSurfaceProjector struct {
 	t               *testing.T
-	toolName        string
 	resultCapture   *ToolProjectionInput
 	requireDefault  string
 	callCalled      *bool
 	approvalPreview string
-}
-
-func (p testSurfaceProjector) ResolveToolName(map[string]any, string, string) string {
-	return p.toolName
 }
 
 func (p testSurfaceProjector) ProjectToolCall(ToolProjectionInput) Event {

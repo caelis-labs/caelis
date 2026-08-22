@@ -40,16 +40,6 @@ func mergeTranscriptMeta(base map[string]any, overlay map[string]any) map[string
 	return transcript.MergeMeta(base, overlay)
 }
 
-func transcriptToolDisplayName(name string, title string, kind string) string {
-	if name = strings.TrimSpace(name); name != "" {
-		return name
-	}
-	if kind = strings.TrimSpace(kind); kind != "" {
-		return kind
-	}
-	return strings.TrimSpace(title)
-}
-
 func directedParticipantUserDisplay(event TranscriptEvent) string {
 	if event.Scope != ACPProjectionParticipant {
 		return ""

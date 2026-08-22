@@ -827,7 +827,7 @@ func TestHandleACPEventEnvelopeMergesGrokGlobUpdate(t *testing.T) {
 		t.Fatalf("main events = %#v, want one Grok glob event", block.Events)
 	}
 	event := block.Events[0]
-	if event.Name != schema.ToolKindSearch || event.ToolKind != schema.ToolKindSearch || event.Args != "`**/*.py`" {
+	if event.Name != "" || event.ToolKind != schema.ToolKindSearch || event.Title != "Glob `**/*.py`" || event.Args != "`**/*.py`" {
 		t.Fatalf("glob event = %#v, want merged search update with pattern args", event)
 	}
 	model.syncViewportContent()
@@ -875,7 +875,7 @@ func TestHandleACPEventEnvelopeMergesGrokShellUpdate(t *testing.T) {
 		t.Fatalf("main events = %#v, want one Grok shell event", block.Events)
 	}
 	event := block.Events[0]
-	if event.Name != schema.ToolKindExecute || event.Args != "pwd" || event.ToolKind != schema.ToolKindExecute {
+	if event.Name != "" || event.Args != "pwd" || event.ToolKind != schema.ToolKindExecute || event.Title != "Execute `pwd`" {
 		t.Fatalf("shell event = %#v, want merged execute kind with command args", event)
 	}
 	model.syncViewportContent()
@@ -917,13 +917,93 @@ func TestHandleACPEventEnvelopeMergesPartialToolUpdateFromCaelisOutput(t *testin
 		t.Fatalf("main events = %#v, want one merged tool event", block.Events)
 	}
 	event := block.Events[0]
-	if event.Name != schema.ToolKindExecute || event.ToolKind != schema.ToolKindExecute || event.Args != "pwd" || !event.Done {
+	if event.Name != "" || event.ToolKind != schema.ToolKindExecute || event.Title != "RunCommand pwd" || event.Args != "pwd" || !event.Done {
 		t.Fatalf("tool event = %#v, want partial update to preserve existing identity and complete", event)
 	}
 	model.syncViewportContent()
 	plain := strings.Join(model.viewportPlainLines, "\n")
 	if !strings.Contains(plain, "Ran pwd") || strings.Contains(plain, "Ran Tool") {
 		t.Fatalf("viewport rendered unexpected partial update header:\n%s", plain)
+	}
+}
+
+func TestHandleACPEventEnvelopePreservesSparseExplorationContentAfterSettlement(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	readKind := schema.ToolKindRead
+	inProgress := schema.ToolStatusInProgress
+	completed := schema.ToolStatusCompleted
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "read-1",
+			Title:         "Read config.go",
+			Kind:          readKind,
+			Status:        inProgress,
+			RawInput:      map[string]any{"path": "config.go"},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "read-1",
+			Kind:          &readKind,
+			Status:        &inProgress,
+			Content: []schema.ToolCallContent{{
+				Type: "content", Content: schema.TextContent{Type: "text", Text: "first result"},
+			}},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "read-1",
+			Kind:          &readKind,
+			Status:        &completed,
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 || !block.Events[0].Done || block.Events[0].Output != "first result" {
+		t.Fatalf("settled read = %#v, want prior visible content retained", block.Events)
+	}
+
+	// A post-settlement patch that omits status augments content without
+	// reopening the lifecycle. An explicit in_progress patch remains stale.
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "read-1",
+			Content: []schema.ToolCallContent{{
+				Type: "content", Content: schema.TextContent{Type: "text", Text: " late detail"},
+			}},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "read-1",
+			Status:        &inProgress,
+			Content: []schema.ToolCallContent{{
+				Type: "content", Content: schema.TextContent{Type: "text", Text: " stale detail"},
+			}},
+		},
+	})
+
+	block = requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 || !block.Events[0].Done || block.Events[0].Output != "first resultlate detail" {
+		t.Fatalf("sparse settled read = %#v, want status-less content merged and explicit downgrade ignored", block.Events)
 	}
 }
 
@@ -1291,7 +1371,7 @@ func TestParticipantLiveAndFinalWithoutMessageIDRenderExactlyOnce(t *testing.T) 
 	}
 }
 
-func TestHandleACPEventEnvelopeDisplaysParticipantSkillContentReadAsSkill(t *testing.T) {
+func TestHandleACPEventEnvelopeKeepsParticipantSkillContentAsStandardRead(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -1330,13 +1410,13 @@ func TestHandleACPEventEnvelopeDisplaysParticipantSkillContentReadAsSkill(t *tes
 	if block == nil {
 		t.Fatal("participant block missing")
 	}
-	if len(block.Events) != 1 || block.Events[0].Name != "Skill" || block.Events[0].Args != "review" || !block.Events[0].Done {
-		t.Fatalf("participant events = %#v, want completed Skill review", block.Events)
+	if len(block.Events) != 1 || block.Events[0].Name != "" || block.Events[0].ToolKind != schema.ToolKindRead || block.Events[0].Title != `Read <skill_content name="review">` || block.Events[0].Args != "review" || !block.Events[0].Done {
+		t.Fatalf("participant events = %#v, want completed standard Read review", block.Events)
 	}
 	rows := block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme)})
 	plain := joinRenderedPlain(rows)
-	if !strings.Contains(plain, "Skill review") || strings.Contains(plain, "<skill_content") {
-		t.Fatalf("rendered participant skill rows:\n%s", plain)
+	if !strings.Contains(plain, "Read review") || strings.Contains(plain, "<skill_content") {
+		t.Fatalf("rendered participant read rows:\n%s", plain)
 	}
 }
 
@@ -1724,11 +1804,11 @@ func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T
 		},
 	})
 	overlay = subagentOutputOverlayPlain(model)
-	if !strings.Contains(overlay, "loaded child settings") {
-		t.Fatalf("generic child tool panel does not expose child tool output:\n%s", overlay)
+	if strings.Contains(overlay, "loaded child settings") {
+		t.Fatalf("standard ACP read result was not folded as exploration activity:\n%s", overlay)
 	}
-	if model.subagentOutputOverlay.geometry.totalRows <= 1 {
-		t.Fatalf("unnamed external tool was incorrectly collapsed as an exact built-in:\n%s", overlay)
+	if model.subagentOutputOverlay.geometry.totalRows != 1 {
+		t.Fatalf("standard ACP read did not share the compact exploration renderer:\n%s", overlay)
 	}
 
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -1741,9 +1821,8 @@ func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T
 		},
 	})
 	overlay = subagentOutputOverlayPlain(model)
-	if !strings.Contains(overlay, "found the configuration issue") ||
-		!strings.Contains(overlay, "loaded child settings") {
-		t.Fatalf("output overlay did not retain the full child tool-to-narrative sequence:\n%s", overlay)
+	if !strings.Contains(overlay, "found the configuration issue") || strings.Contains(overlay, "loaded child settings") {
+		t.Fatalf("output overlay did not retain narrative after folding exploration output:\n%s", overlay)
 	}
 	model.syncViewportContent()
 	plain = strings.Join(model.viewportPlainLines, "\n")

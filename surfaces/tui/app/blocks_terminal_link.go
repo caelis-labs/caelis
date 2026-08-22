@@ -125,17 +125,3 @@ func spawnContinuationDisplayArgs(existing string, prompt string) string {
 	}
 	return prompt
 }
-
-func shouldIgnoreStaleTerminalUpdate(events []SubagentEvent, callID string, name string, terminal bool, final bool) bool {
-	if final || strings.TrimSpace(callID) == "" || (!terminal && !surfaceIsTerminalPanelTool(name)) {
-		return false
-	}
-	for i := len(events) - 1; i >= 0; i-- {
-		ev := events[i]
-		if ev.Kind != SEToolCall || strings.TrimSpace(ev.CallID) != strings.TrimSpace(callID) || !isTerminalPanelToolEvent(ev) {
-			continue
-		}
-		return ev.Done
-	}
-	return false
-}

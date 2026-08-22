@@ -75,7 +75,7 @@ func TestTerminalOutputKeepsNonBlankLineWhitespaceOnlyDropsBlankLines(t *testing
 	}
 }
 
-func TestACPHeaderAndToolLineSanitizeSourceANSI(t *testing.T) {
+func TestACPHeaderSanitizesSourceANSI(t *testing.T) {
 	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
 	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}
 
@@ -85,14 +85,6 @@ func TestACPHeaderAndToolLineSanitizeSourceANSI(t *testing.T) {
 	}
 	if strings.Contains(header, "[31m") {
 		t.Fatalf("source ANSI color leaked into header: %q", header)
-	}
-
-	line := styleToolEventLine(model.theme, "✓ RunCommand \x1b[31m└ failed\x1b[0m", tuikit.LineStyleTool)
-	if got := ansi.Strip(line); got != "✓ RunCommand └ failed" {
-		t.Fatalf("tool line strips to %q, want sanitized suffix", got)
-	}
-	if strings.Contains(line, "[31m") {
-		t.Fatalf("source ANSI color leaked into tool line: %q", line)
 	}
 }
 
@@ -283,6 +275,21 @@ func TestViewportCacheKeyIncludesPulseOnlyForRunningTools(t *testing.T) {
 	block.Events[0].Done = false
 	if viewportBlockRenderKey(block, bright) != viewportBlockRenderKey(block, dim) {
 		t.Fatal("Spawn row cache key should stay independent of pulse phase")
+	}
+}
+
+func TestViewportCacheKeyIncludesStandardACPToolTitle(t *testing.T) {
+	t.Parallel()
+
+	block := NewMainACPTurnBlock("turn")
+	block.Events = []SubagentEvent{{
+		Kind: SEToolCall, CallID: "other-1", ToolKind: "other", Title: "Start subagent reviewer", Done: true,
+	}}
+	ctx := BlockRenderContext{Width: 80, TermWidth: 80}
+	before := viewportBlockRenderKey(block, ctx)
+	block.Events[0].Title = "Start subagent explorer"
+	if after := viewportBlockRenderKey(block, ctx); before == after {
+		t.Fatal("standard ACP title change did not invalidate the viewport render cache")
 	}
 }
 

@@ -69,7 +69,7 @@ func SuppressToolResultOutput(toolName string, toolKind string, output string, s
 	if isErr {
 		return false
 	}
-	if !transcriptToolIsExploration(strings.TrimSpace(toolName)) {
+	if !ToolIsExploration(toolName, toolKind) {
 		return false
 	}
 	trimmed := strings.TrimSpace(output)

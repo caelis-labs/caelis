@@ -10,14 +10,11 @@ import (
 )
 
 func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptEvent {
-	toolName := transcriptToolDisplayName(input.ToolName, input.ToolTitle, input.ToolKind)
+	toolName := strings.TrimSpace(input.ToolName)
+	presentation := transcript.ResolveToolPresentation(toolName, input.ToolKind, input.ToolTitle)
 	status := transcript.NormalizeToolStartStatus(input.Status)
 	semanticName := toolName
 	rawInput := transcript.CloneAnyMap(input.RawInput)
-	if refinedName := toolDisplaySemanticOverride(semanticName, input.ToolKind, input.ToolTitle, rawInput); refinedName != "" {
-		toolName = refinedName
-		semanticName = refinedName
-	}
 	toolTaskHandle := display.ToolTaskHandle(rawInput, nil, input.Meta)
 	toolMessageTarget := ""
 	if semanticName == surfaceToolSendMessage {
@@ -30,7 +27,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 	if semanticName == surfaceToolTask {
 		displayInput = taskDisplayInputForResult(rawInput, toolDisplayMetaOutput(semanticName, input.Meta))
 	}
-	toolArgs, toolFullArgs := toolDisplayArguments(semanticName, input.ToolKind, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
+	toolArgs, toolFullArgs := toolDisplayArguments(semanticName, input.ToolKind, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(presentation.DisplayName, displayInput))
 	if semanticName == surfaceToolTask {
 		toolArgs = taskDisplayArgsWithHandle(toolArgs, toolTaskHandle)
 	}
@@ -48,6 +45,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolArgs:                   toolArgs,
 		ToolFullArgs:               toolFullArgs,
 		ToolStatus:                 status,
+		ToolStatusExplicit:         input.StatusExplicit,
 		ToolTerminal:               toolTerminal,
 		ToolOutputCursor:           outputCursor,
 		ToolOutputCursorKnown:      outputCursorKnown,
@@ -62,7 +60,8 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 }
 
 func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSuccessStatus string) (TranscriptEvent, bool) {
-	toolName := transcriptToolDisplayName(input.ToolName, input.ToolTitle, input.ToolKind)
+	toolName := strings.TrimSpace(input.ToolName)
+	presentation := transcript.ResolveToolPresentation(toolName, input.ToolKind, input.ToolTitle)
 	semanticName := toolName
 	rawInput := transcript.CloneAnyMap(input.RawInput)
 	rawOutput := transcript.RawMap(input.RawOutput)
@@ -70,10 +69,6 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	content := acpToolContentToDisplay(input.Content)
 	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
 	suppressRunningSnapshotOutput := suppressRunningTerminalSnapshotOutput(semanticName, input.Meta, status, toolErr)
-	if refinedName := toolDisplaySemanticOverride(semanticName, input.ToolKind, input.ToolTitle, rawInput); refinedName != "" {
-		toolName = refinedName
-		semanticName = refinedName
-	}
 	summaryOutput := toolDisplaySummaryOutput(semanticName, rawOutput, input.Meta)
 	displayOutput := toolDisplayMetaOutput(semanticName, input.Meta)
 	taskOutput := transcript.CloneAnyMap(displayOutput)
@@ -145,9 +140,12 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	outputCursor, outputCursorKnown, outputStartCursor, outputStartCursorKnown := transcriptToolOutputRange(input.Meta)
 	if transcript.SuppressToolResultOutput(semanticName, input.ToolKind, toolOutput, toolOutputSynthetic, toolErr) {
 		toolOutput = ""
-		toolOutputSynthetic = false
+		// A suppressed completion acknowledgement is still synthetic. Retaining
+		// that fact prevents a contentless sparse final from erasing content that
+		// an earlier update already materialized for the same call.
+		toolOutputSynthetic = true
 	}
-	toolArgs, toolFullArgs := toolDisplayArguments(semanticName, input.ToolKind, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
+	toolArgs, toolFullArgs := toolDisplayArguments(semanticName, input.ToolKind, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(presentation.DisplayName, displayInput))
 	toolTaskHandle := firstNonEmpty(
 		display.MapString(rawOutput, "handle"),
 		display.MapString(rawInput, "handle"),
@@ -225,6 +223,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolOutput:                 toolOutput,
 		ToolStream:                 transcript.ToolStream(status, toolErr),
 		ToolStatus:                 status,
+		ToolStatusExplicit:         input.StatusExplicit,
 		ToolError:                  toolErr,
 		ToolTerminal:               toolTerminal,
 		ToolOutputSynthetic:        toolOutputSynthetic,

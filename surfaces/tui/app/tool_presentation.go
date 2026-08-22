@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
 const (
@@ -41,8 +42,7 @@ const (
 )
 
 type surfaceToolDisplayProfile struct {
-	ResultStyle     surfaceToolResultStyle
-	ExplorationVerb string
+	ResultStyle surfaceToolResultStyle
 }
 
 // surfaceToolProfile is the TUI's private presentation table. Only exact
@@ -52,35 +52,32 @@ type surfaceToolDisplayProfile struct {
 func surfaceToolProfile(name string) (surfaceToolDisplayProfile, bool) {
 	switch name {
 	case surfaceToolRead:
-		return surfaceToolDisplayProfile{ResultStyle: surfaceResultRead, ExplorationVerb: "Read"}, true
+		return surfaceToolDisplayProfile{ResultStyle: surfaceResultRead}, true
 	case surfaceToolViewImage:
-		return surfaceToolDisplayProfile{ResultStyle: surfaceResultRead, ExplorationVerb: "View"}, true
+		return surfaceToolDisplayProfile{ResultStyle: surfaceResultRead}, true
 	case surfaceToolWrite, surfaceToolPatch:
 		return surfaceToolDisplayProfile{ResultStyle: surfaceResultMutation}, true
 	case surfaceToolGlob:
-		return surfaceToolDisplayProfile{ResultStyle: surfaceResultGlob, ExplorationVerb: "Glob"}, true
+		return surfaceToolDisplayProfile{ResultStyle: surfaceResultGlob}, true
 	case surfaceToolGrep:
-		return surfaceToolDisplayProfile{ResultStyle: surfaceResultSearch, ExplorationVerb: "Search"}, true
+		return surfaceToolDisplayProfile{ResultStyle: surfaceResultSearch}, true
 	case surfaceToolSkill:
-		return surfaceToolDisplayProfile{ExplorationVerb: "Skill"}, true
+		return surfaceToolDisplayProfile{}, true
 	case surfaceToolWebSearch:
-		return surfaceToolDisplayProfile{ResultStyle: surfaceResultWebSearch, ExplorationVerb: "Search"}, true
+		return surfaceToolDisplayProfile{ResultStyle: surfaceResultWebSearch}, true
 	case surfaceToolWebFetch:
-		return surfaceToolDisplayProfile{ResultStyle: surfaceResultWebFetch, ExplorationVerb: "Fetch"}, true
+		return surfaceToolDisplayProfile{ResultStyle: surfaceResultWebFetch}, true
 	default:
 		return surfaceToolDisplayProfile{}, false
 	}
 }
 
-func surfaceExplorationVerb(name string) string {
-	if info, ok := surfaceToolProfile(name); ok {
-		return info.ExplorationVerb
-	}
-	return ""
+func surfaceExplorationVerb(name string, kind string) string {
+	return transcript.ResolveToolPresentation(name, kind, "").ExplorationVerb
 }
 
-func surfaceIsExplorationTool(name string) bool {
-	return surfaceExplorationVerb(name) != ""
+func surfaceIsExplorationTool(name string, kind string) bool {
+	return transcript.ToolIsExploration(name, kind)
 }
 
 func surfaceIsTerminalPanelTool(name string) bool {

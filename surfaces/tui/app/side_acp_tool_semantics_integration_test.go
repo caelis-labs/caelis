@@ -291,7 +291,7 @@ func TestParticipantSpawnRendersStandardFinalResultWithoutSubagentUI(t *testing.
 					Width: 96, TermWidth: 96,
 					Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
 				}))
-				if !strings.Contains(plain, "• Ran orbit: inspect") || !strings.Contains(plain, result.text) ||
+				if !strings.Contains(plain, "• Spawned orbit: inspect") || !strings.Contains(plain, result.text) ||
 					strings.Contains(plain, "↗") {
 					t.Fatalf("participant Spawn did not render as a standard tool panel:\n%s", plain)
 				}
@@ -489,6 +489,164 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 		overlay := subagentOutputOverlayPlain(model)
 		if strings.Count(overlay, "SHARED_TOOL_OUTPUT") != 1 || strings.Contains(overlay, "tool update") {
 			t.Fatalf("subagent sparse tool update rendered incorrectly:\n%s", overlay)
+		}
+	})
+}
+
+func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testing.T) {
+	t.Parallel()
+
+	toolUpdates := func(scope eventstream.Scope, scopeID, participantID, actor string) []eventstream.Envelope {
+		completed := schema.ToolStatusCompleted
+		inProgress := schema.ToolStatusInProgress
+		failed := schema.ToolStatusFailed
+		return []eventstream.Envelope{
+			{
+				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+				Update: schema.ToolCall{
+					SessionUpdate: schema.UpdateToolCall, ToolCallID: "read-1",
+					Title: "Read MEMORY.md", Kind: schema.ToolKindRead, Status: schema.ToolStatusInProgress,
+					RawInput: map[string]any{"path": "MEMORY.md"},
+				},
+			},
+			{
+				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+				Update: schema.ToolCallUpdate{
+					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "read-1", Status: &completed,
+				},
+			},
+			{
+				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+				Update: schema.ToolCall{
+					SessionUpdate: schema.UpdateToolCall, ToolCallID: "search-1",
+					Title: "Search ToolCallStatus", Kind: schema.ToolKindSearch, Status: schema.ToolStatusCompleted,
+					RawInput: map[string]any{"query": "ToolCallStatus"},
+				},
+			},
+			{
+				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+				Update: schema.ToolCallUpdate{
+					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "search-1", Status: &completed,
+				},
+			},
+			{
+				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+				Update: schema.ToolCallUpdate{
+					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "search-1", Status: &inProgress,
+					RawOutput: map[string]any{"result": "stale running snapshot"},
+				},
+			},
+			{
+				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+				Update: schema.ToolCall{
+					SessionUpdate: schema.UpdateToolCall, ToolCallID: "read-failed",
+					Title: "Read missing.go", Kind: schema.ToolKindRead, Status: failed,
+					RawInput: map[string]any{"path": "missing.go"},
+					Content: []schema.ToolCallContent{{
+						Type: "content", Content: schema.TextContent{Type: "text", Text: "missing file"},
+					}},
+				},
+			},
+			{
+				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+				Update: schema.ToolCall{
+					SessionUpdate: schema.UpdateToolCall, ToolCallID: "subagent-1",
+					Title: "Start subagent task_invocation_review", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
+					RawInput: map[string]any{"activityKind": "start", "agentPath": "task_invocation_review"},
+				},
+			},
+			{
+				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+				Update: schema.ToolCallUpdate{
+					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "subagent-1", Status: &completed,
+				},
+			},
+		}
+	}
+	assertPresentation := func(t *testing.T, model *Model, block *ParticipantTurnBlock) {
+		t.Helper()
+		if block == nil {
+			t.Fatal("participant transcript block missing")
+		}
+		tools := make([]SubagentEvent, 0, 4)
+		for _, event := range block.Events {
+			if event.Kind == SEToolCall {
+				tools = append(tools, event)
+			}
+		}
+		if len(tools) != 4 {
+			t.Fatalf("tool events = %#v, want four standard ACP tools", tools)
+		}
+		failedReadFound := false
+		for _, event := range tools {
+			if event.Name != "" || !event.Done {
+				t.Fatalf("tool event = %#v, want no forged exact name and settled lifecycle", event)
+			}
+			rows, _ := renderACPToolLifecycleRows(block.BlockID(), []SubagentEvent{event}, 0, 96, BlockRenderContext{
+				Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
+				AnimationsEnabled: true, SpinnerView: runningSpinnerFrames[len(runningSpinnerFrames)/2],
+			}, acpTranscriptRenderOptions{ToolOutputPanels: true})
+			if len(rows) == 0 || rows[0].acpHeaderMarkDim {
+				t.Fatalf("settled tool rows = %#v, want a non-pulsing header", rows)
+			}
+			if event.CallID == "read-failed" {
+				failedReadFound = event.Err && strings.Contains(event.Output, "missing file")
+			}
+		}
+		if !failedReadFound {
+			t.Fatalf("failed Read was compacted or lost its error: %#v", tools)
+		}
+		plain := joinRenderedPlain(block.Render(BlockRenderContext{
+			Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
+		}))
+		if !strings.Contains(plain, "Read MEMORY.md") || !strings.Contains(plain, "Search \"ToolCallStatus\"") || !strings.Contains(plain, "Read missing.go") || !strings.Contains(plain, "missing file") || !strings.Contains(plain, "Start subagent task_invocation_review") {
+			t.Fatalf("standard ACP presentation lost expected labels:\n%s", plain)
+		}
+		if strings.Contains(plain, "• read") || strings.Contains(plain, "• search") || strings.Contains(plain, "Other Start") || strings.Contains(plain, "• Other") {
+			t.Fatalf("standard ACP presentation leaked kind-as-name compatibility rows:\n%s", plain)
+		}
+	}
+
+	t.Run("participant transcript", func(t *testing.T) {
+		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		for _, envelope := range toolUpdates(eventstream.ScopeParticipant, "participant-turn-1", "codex", "@reviewer") {
+			model = applyACPEnvelopeForTest(t, model, envelope)
+		}
+		assertPresentation(t, model, model.findParticipantTurnBlock("participant-turn-1"))
+	})
+
+	t.Run("subagent overlay", func(t *testing.T) {
+		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		model.width, model.height = 96, 28
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+			Update: schema.ToolCall{
+				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn reviewer: inspect",
+				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+				RawInput: map[string]any{"agent": "reviewer", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
+			},
+		})
+		for _, envelope := range toolUpdates(eventstream.ScopeSubagent, "task-1", "codex", "@reviewer") {
+			envelope.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+			model = applyACPEnvelopeForTest(t, model, envelope)
+		}
+		view := requireSubagentOutputViewForTest(t, model, "spawn-1")
+		assertPresentation(t, model, view.block)
+		mainBlock := requireMainACPTurnBlockForTest(t, model)
+		if !model.openSubagentOutputOverlay(mainBlock.BlockID(), "spawn-1") {
+			t.Fatal("subagent output overlay did not open")
+		}
+		overlay := subagentOutputOverlayPlain(model)
+		if !strings.Contains(overlay, "Read MEMORY.md") || !strings.Contains(overlay, "Search \"ToolCallStatus\"") || !strings.Contains(overlay, "Read missing.go") || !strings.Contains(overlay, "missing file") || !strings.Contains(overlay, "Start subagent task_invocation_review") || strings.Contains(overlay, "Other Start") {
+			t.Fatalf("overlay diverged from participant transcript semantics:\n%s", overlay)
 		}
 	})
 }

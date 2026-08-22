@@ -24,7 +24,7 @@ func eventStreamTerminalBatchKey(env eventstream.Envelope) (string, bool) {
 	if text == "" {
 		return "", false
 	}
-	toolName := acpUpdateToolName(transcript.MergeMeta(transcript.ACPUpdateMeta(update), env.Meta), transcript.StringFromPtr(update.Title), transcript.StringFromPtr(update.Kind))
+	toolName := transcript.ToolNameFromMeta(transcript.MergeMeta(transcript.ACPUpdateMeta(update), env.Meta))
 	return strings.Join([]string{
 		strings.TrimSpace(env.HandleID),
 		strings.TrimSpace(env.RunID),

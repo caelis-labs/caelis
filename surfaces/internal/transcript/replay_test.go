@@ -130,7 +130,7 @@ func TestProjectReplayEventsProjectsMainDurableTrace(t *testing.T) {
 			Kind:      eventstream.KindLifecycle,
 			Lifecycle: &eventstream.Lifecycle{State: "interrupted", Reason: "user interrupt"},
 		},
-	}, testSurfaceProjector{toolName: "RunCommand"})
+	}, testSurfaceProjector{})
 	if len(events) != 4 {
 		t.Fatalf("events = %#v, want tool call, tool result, plan, lifecycle", events)
 	}
@@ -179,7 +179,7 @@ func TestProjectReplayEventsKeepsStandardSideACPToolTrace(t *testing.T) {
 				Type: "content", Content: schema.TextContent{Type: "text", Text: "side result"},
 			}},
 		},
-	}}, testSurfaceProjector{toolName: "RunCommand", resultCapture: &projected})
+	}}, testSurfaceProjector{resultCapture: &projected})
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want one standard side ACP tool result", events)
 	}
@@ -229,7 +229,7 @@ func TestProjectReplayEventsKeepsDurableChildMirrorHistory(t *testing.T) {
 				State: eventstream.LifecycleStateCompleted,
 			},
 		},
-	}, testSurfaceProjector{toolName: "Read"})
+	}, testSurfaceProjector{})
 
 	if len(events) != 4 {
 		t.Fatalf("events = %#v, want child narrative, tool, plan, and lifecycle", events)

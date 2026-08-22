@@ -858,6 +858,7 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 		builder.addString(event.CallID)
 		builder.addString(event.Name)
 		builder.addString(event.ToolKind)
+		builder.addString(event.Title)
 		builder.addString(event.Args)
 		builder.addString(event.StartArgs)
 		builder.addString(event.FullArgs)

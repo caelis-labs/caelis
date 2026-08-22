@@ -55,7 +55,10 @@ type SubagentEvent struct {
 	CallID   string
 	Name     string
 	ToolKind string
-	Args     string
+	// Title is the standard ACP human-readable tool title. It remains separate
+	// from exact Name and coarse ToolKind throughout reduction and rendering.
+	Title string
+	Args  string
 	// StartArgs keeps live exploration rows stable when final summaries arrive.
 	StartArgs       string
 	FullArgs        string

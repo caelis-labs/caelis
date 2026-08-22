@@ -518,10 +518,6 @@ func collectToolPanelCallIDs(events []SubagentEvent) []string {
 	return callIDs
 }
 
-func shouldDefaultCollapseToolPanel(name string) bool {
-	return surfaceIsExplorationTool(name)
-}
-
 func shouldDefaultCollapseToolEvent(ev SubagentEvent) bool {
-	return shouldDefaultCollapseToolPanel(ev.Name)
+	return !ev.Err && surfaceIsExplorationTool(ev.Name, ev.ToolKind)
 }

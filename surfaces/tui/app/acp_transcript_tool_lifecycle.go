@@ -2,6 +2,8 @@ package tuiapp
 
 import (
 	"strings"
+
+	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
 func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int) {
@@ -31,7 +33,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 
 	group := events[idx : end+1]
 	start := group[0]
-	singleCompletedLifecycle := len(group) == 1 && start.Done && strings.TrimSpace(start.Args) != ""
+	singleCompletedLifecycle := len(group) == 1 && start.Done && toolEventHasHeader(start)
 	if start.Done && len(group) > 1 {
 		start = SubagentEvent{}
 		for _, item := range group {
@@ -47,7 +49,8 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 
 	var final SubagentEvent
 	var preview string
-	hasStart := (!start.Done || singleCompletedLifecycle) && strings.TrimSpace(start.Name) != ""
+	settled := false
+	hasStart := (!start.Done || singleCompletedLifecycle) && toolEventHasHeader(start)
 	hasFinal := false
 	for _, item := range group {
 		if !item.Done {
@@ -56,6 +59,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 			}
 			continue
 		}
+		settled = true
 		if !shouldRenderToolEvent(item) {
 			continue
 		}
@@ -79,7 +83,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 		return nil, end
 	}
 
-	spawnHeader := toolLifecycleHeaderEvent(start, final, hasFinal)
+	spawnHeader := toolLifecycleHeaderEvent(start, final, hasFinal, settled)
 	if opts.SubagentOutputLinks && isSpawnToolEvent(spawnHeader) {
 		return renderACPSpawnToolRows(blockID, spawnHeader, callID, width, ctx), end
 	}
@@ -89,7 +93,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 	} else {
 		start.Args = compactACPToolInline(start.Args, width)
 	}
-	headerEvent := toolLifecycleHeaderEvent(start, final, hasFinal)
+	headerEvent := toolLifecycleHeaderEvent(start, final, hasFinal, settled)
 	panelExpanded := true
 	if opts.ToolPanelExpanded != nil {
 		panelExpanded = opts.ToolPanelExpanded(start.CallID)
@@ -101,34 +105,34 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 	if opts.ToolOutputPanels {
 		panelText, panelErr := acpToolPanelText(preview, final, hasFinal)
 		if isTaskWriteInteractionEvent(headerEvent) {
-			return renderACPStandardToolLifecycleRows(blockID, headerEvent, callID, panelText, width, ctx, panelErr, hasFinal, fullOutput), end
+			return renderACPStandardToolLifecycleRows(blockID, headerEvent, callID, panelText, width, ctx, panelErr, settled, fullOutput), end
 		}
 		if headerEvent.Name == surfaceToolSendMessage {
-			return renderACPTerminalLifecycleRows(blockID, headerEvent, callID, panelText, width, ctx, panelErr, panelExpanded, hasFinal, fullOutput, opts), end
+			return renderACPTerminalLifecycleRows(blockID, headerEvent, callID, panelText, width, ctx, panelErr, panelExpanded, settled, fullOutput, opts), end
 		}
 		if isTerminalPanelToolEvent(start) {
-			return renderACPTerminalLifecycleRows(blockID, headerEvent, callID, panelText, width, ctx, panelErr, panelExpanded, hasFinal, fullOutput, opts), end
+			return renderACPTerminalLifecycleRows(blockID, headerEvent, callID, panelText, width, ctx, panelErr, panelExpanded, settled, fullOutput, opts), end
 		}
 		if isMutationPanelToolEvent(start) {
-			return renderACPMutationLifecycleRows(blockID, headerEvent, callID, panelText, width, ctx, panelErr, panelExpanded, hasFinal, opts), end
+			return renderACPMutationLifecycleRows(blockID, headerEvent, callID, panelText, width, ctx, panelErr, panelExpanded, settled, opts), end
 		}
 		if hasFinal && shouldDefaultCollapseToolEvent(final) && !panelExpanded {
 			token := acpStandardCollapsedClickToken(callID, final, panelText, panelErr)
 			return renderACPStandardToolCollapsedRows(blockID, headerEvent, callID, width, ctx, final.Err, true, token), end
 		}
 		if !hasFinal && shouldDefaultCollapseToolEvent(start) && !shouldRenderACPToolPanel(panelText, panelErr) {
-			return renderACPStandardToolCollapsedRows(blockID, headerEvent, callID, width, ctx, panelErr, false, ""), end
+			return renderACPStandardToolCollapsedRows(blockID, headerEvent, callID, width, ctx, panelErr, settled, ""), end
 		}
 		if !shouldRenderACPToolPanel(panelText, panelErr) {
-			return renderACPStandardToolCollapsedRows(blockID, headerEvent, callID, width, ctx, panelErr, hasFinal, ""), end
+			return renderACPStandardToolCollapsedRows(blockID, headerEvent, callID, width, ctx, panelErr, settled, ""), end
 		}
 		if !panelExpanded {
 			token := acpStandardCollapsedClickToken(callID, headerEvent, panelText, panelErr)
-			return renderACPStandardToolCollapsedRows(blockID, headerEvent, callID, width, ctx, panelErr, hasFinal, token), end
+			return renderACPStandardToolCollapsedRows(blockID, headerEvent, callID, width, ctx, panelErr, settled, token), end
 		}
-		return renderACPStandardToolLifecycleRows(blockID, headerEvent, callID, panelText, width, ctx, panelErr, hasFinal, fullOutput), end
+		return renderACPStandardToolLifecycleRows(blockID, headerEvent, callID, panelText, width, ctx, panelErr, settled, fullOutput), end
 	}
-	rows := renderACPStandardToolCollapsedRows(blockID, start, callID, width, ctx, false, hasFinal, "")
+	rows := renderACPStandardToolCollapsedRows(blockID, headerEvent, callID, width, ctx, false, settled, "")
 	if text := sanitizeRenderableText(preview); text != "" {
 		rows = append(rows, renderACPToolDetailRows(blockID, "· ", text, width, ctx, ctx.Theme.HelpHintTextStyle())...)
 	}
@@ -198,10 +202,12 @@ func renderACPStandaloneFinalToolRows(blockID string, ev SubagentEvent, width in
 		return renderACPStandardToolCollapsedRows(blockID, ev, ev.CallID, width, ctx, ev.Err, ev.Done, "")
 	}
 	header := SubagentEvent{
-		Kind: SEToolCall,
-		Name: ev.Name,
-		Done: true,
-		Err:  ev.Err,
+		Kind:     SEToolCall,
+		Name:     ev.Name,
+		ToolKind: ev.ToolKind,
+		Title:    ev.Title,
+		Done:     true,
+		Err:      ev.Err,
 	}
 	rows := renderACPStandardToolCollapsedRows(blockID, header, ev.CallID, width, ctx, ev.Err, true, "")
 	prefix := "✓ "
@@ -227,7 +233,7 @@ func acpToolPanelText(preview string, final SubagentEvent, hasFinal bool) (strin
 	return panelText, panelErr
 }
 
-func toolLifecycleHeaderEvent(start SubagentEvent, final SubagentEvent, hasFinal bool) SubagentEvent {
+func toolLifecycleHeaderEvent(start SubagentEvent, final SubagentEvent, hasFinal bool, settled bool) SubagentEvent {
 	header := start
 	if hasFinal {
 		if name := strings.TrimSpace(final.Name); name != "" {
@@ -235,6 +241,9 @@ func toolLifecycleHeaderEvent(start SubagentEvent, final SubagentEvent, hasFinal
 		}
 		if toolKind := strings.TrimSpace(final.ToolKind); toolKind != "" {
 			header.ToolKind = toolKind
+		}
+		if title := strings.TrimSpace(final.Title); title != "" {
+			header.Title = title
 		}
 		if taskHandle := strings.TrimSpace(final.TaskHandle); taskHandle != "" {
 			header.TaskHandle = taskHandle
@@ -256,8 +265,17 @@ func toolLifecycleHeaderEvent(start SubagentEvent, final SubagentEvent, hasFinal
 				header.Args = compactACPToolInline(args, acpToolInlineArgsMaxWidth+12)
 			}
 		}
+		header.Err = final.Err
 	}
+	header.Done = settled
 	return header
+}
+
+func toolEventHasHeader(ev SubagentEvent) bool {
+	return strings.TrimSpace(ev.Name) != "" ||
+		strings.TrimSpace(ev.ToolKind) != "" ||
+		strings.TrimSpace(ev.Title) != "" ||
+		strings.TrimSpace(ev.Args) != ""
 }
 
 func shouldRenderACPToolPanel(text string, err bool) bool {
@@ -321,6 +339,7 @@ func acpStandardCollapsedClickToken(callID string, ev SubagentEvent, text string
 
 func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 	semanticName := ev.Name
+	presentation := transcript.ResolveToolPresentation(ev.Name, ev.ToolKind, ev.Title)
 	switch semanticName {
 	case surfaceToolRunCommand, surfaceToolSpawn, surfaceToolSendMessage:
 		ev.Name = semanticName
@@ -334,13 +353,16 @@ func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 		ev.Name = semanticName
 		return mutationLifecycleHeader(ev, err)
 	default:
+		if presentation.TitleAsLabel {
+			return standardVerbLifecycleHeader(presentation.DisplayName, "", err)
+		}
 		if isExecuteToolKind(ev.ToolKind) {
 			return terminalLifecycleHeader(ev)
 		}
-		if verb := surfaceExplorationVerb(semanticName); verb != "" {
+		if verb := surfaceExplorationVerb(semanticName, ev.ToolKind); verb != "" {
 			return standardVerbLifecycleHeader(verb, ev.Args, err)
 		}
-		return standardVerbLifecycleHeader(toolEventDisplayName(firstTrimmed(ev.Name, ev.ToolKind, "Tool")), ev.Args, err)
+		return standardVerbLifecycleHeader(presentation.DisplayName, ev.Args, err)
 	}
 }
 
@@ -465,13 +487,6 @@ func isMutationPanelToolKind(name string, kind string) bool {
 
 func isMutationPanelToolEvent(ev SubagentEvent) bool {
 	return isMutationPanelToolKind(ev.Name, ev.ToolKind)
-}
-
-func isAttentionLoopTool(name string) bool {
-	if name == "" || name == surfaceToolTask {
-		return false
-	}
-	return !shouldDefaultCollapseToolPanel(name)
 }
 
 func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, expanded bool, final bool, fullOutput bool, opts acpTranscriptRenderOptions) []RenderedRow {

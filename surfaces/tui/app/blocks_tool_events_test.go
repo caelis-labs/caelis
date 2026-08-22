@@ -16,15 +16,14 @@ func TestApplyToolEventUpdateUsesPatchMergeSemantics(t *testing.T) {
 
 	events, changed, _ = applyToolEventUpdate(events, toolEventUpdate{
 		CallID: "call-1",
-		Name:   "execute",
 		Args:   "pwd",
 		Meta:   ToolUpdateMeta{ToolKind: "execute"},
 	}, map[string]int{})
 	if !changed || len(events) != 1 {
 		t.Fatalf("patch update events = %#v changed=%v, want one event", events, changed)
 	}
-	if event := events[0]; event.Name != "execute" || event.ToolKind != "execute" || event.Args != "pwd" {
-		t.Fatalf("patch update event = %#v, want present fields to replace prior values", event)
+	if event := events[0]; event.Name != "Shell" || event.ToolKind != "execute" || event.Args != "pwd" {
+		t.Fatalf("patch update event = %#v, want kind/args patched without replacing exact name", event)
 	}
 
 	events, changed, _ = applyToolEventUpdate(events, toolEventUpdate{
@@ -35,7 +34,7 @@ func TestApplyToolEventUpdateUsesPatchMergeSemantics(t *testing.T) {
 	if !changed || len(events) != 1 {
 		t.Fatalf("final update events = %#v changed=%v, want one event", events, changed)
 	}
-	if event := events[0]; !event.Done || event.Name != "execute" || event.ToolKind != "execute" || event.Args != "pwd" || event.Output != "ok" {
+	if event := events[0]; !event.Done || event.Name != "Shell" || event.ToolKind != "execute" || event.Args != "pwd" || event.Output != "ok" {
 		t.Fatalf("final update event = %#v, want omitted fields preserved", event)
 	}
 }

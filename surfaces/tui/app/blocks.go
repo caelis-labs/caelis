@@ -203,19 +203,6 @@ func shouldReplaceSpawnDisplayArgs(existing string, incoming string) bool {
 		(strings.HasPrefix(incoming, existing+":") || strings.Contains(incoming, ":"))
 }
 
-func shouldReplaceCompletedTerminalToolEvent(existing SubagentEvent, incoming SubagentEvent) bool {
-	if !existing.Done || !incoming.Done {
-		return false
-	}
-	if !isTerminalPanelToolEvent(existing) && !isTerminalPanelToolEvent(incoming) {
-		return false
-	}
-	if strings.TrimSpace(existing.CallID) == "" || strings.TrimSpace(existing.CallID) != strings.TrimSpace(incoming.CallID) {
-		return false
-	}
-	return true
-}
-
 func (b *MainACPTurnBlock) UpdatePlan(entries []planEntryState) {
 	if b == nil {
 		return

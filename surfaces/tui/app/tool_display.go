@@ -250,21 +250,6 @@ func toolDisplayFullArgs(name string, kind string, raw map[string]any) string {
 	}
 }
 
-type toolDisplaySemanticOverrideFunc func(semanticName string, kind string, title string, raw map[string]any) string
-
-var toolDisplaySemanticOverrides = []toolDisplaySemanticOverrideFunc{
-	overrideSkillContentRead,
-}
-
-func toolDisplaySemanticOverride(semanticName string, kind string, title string, raw map[string]any) string {
-	for _, override := range toolDisplaySemanticOverrides {
-		if name := override(semanticName, kind, title, raw); name != "" {
-			return name
-		}
-	}
-	return ""
-}
-
 func toolTitleDisplayArgs(name string, kind string, title string) string {
 	title = strings.TrimSpace(title)
 	if title == "" {
@@ -272,6 +257,14 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 	}
 	if titleEqualsToolName(title, name) {
 		return ""
+	}
+	// A provider may expose a virtual skill resource through an ordinary ACP
+	// read. Compact the title without rewriting kind=read into the exact
+	// built-in Skill identity.
+	if strings.TrimSpace(name) == "" && strings.EqualFold(strings.TrimSpace(kind), "read") {
+		if skillName := display.SkillContentNameFromTitle(title); skillName != "" {
+			return skillName
+		}
 	}
 	switch name {
 	case surfaceToolSkill:

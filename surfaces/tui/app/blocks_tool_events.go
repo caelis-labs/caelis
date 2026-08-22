@@ -5,16 +5,18 @@ import (
 )
 
 type ToolUpdateMeta struct {
-	TaskHandle      string
-	TaskAction      string
-	TaskInput       string
-	TaskTargetKind  string
-	MessageTarget   string
-	ToolKind        string
-	FullArgs        string
-	MessageID       string
-	ToolStatus      string
-	OutputNarrative bool
+	TaskHandle         string
+	TaskAction         string
+	TaskInput          string
+	TaskTargetKind     string
+	MessageTarget      string
+	ToolKind           string
+	ToolTitle          string
+	FullArgs           string
+	MessageID          string
+	ToolStatus         string
+	ToolStatusExplicit bool
+	OutputNarrative    bool
 	// OutputAuthoritative marks a canonical semantic final that must replace a
 	// transient preview for the same physical task panel.
 	OutputAuthoritative    bool
@@ -45,6 +47,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	name := strings.TrimSpace(update.Name)
 	args := strings.TrimSpace(update.Args)
 	toolKind := strings.TrimSpace(update.Meta.ToolKind)
+	toolTitle := strings.TrimSpace(update.Meta.ToolTitle)
 	fullArgs := strings.TrimSpace(update.Meta.FullArgs)
 	messageID := strings.TrimSpace(update.Meta.MessageID)
 	taskHandle := strings.TrimSpace(update.Meta.TaskHandle)
@@ -53,7 +56,16 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	taskTargetKind := strings.ToLower(strings.TrimSpace(update.Meta.TaskTargetKind))
 	messageTarget := strings.TrimSpace(update.Meta.MessageTarget)
 	authoritativeFinal := update.Meta.OutputAuthoritative || toolFinalOutputAuthoritative(update.Err, update.Meta.ToolStatus)
-	effectiveName, _, openIdx := effectiveToolEventIdentity(out, update, toolIndex, name, toolKind)
+	openIdx := openToolEventIndexForUpdate(out, update, toolIndex)
+	settledIdx := settledToolEventIndexForUpdate(out, callID)
+	effectiveName := name
+	existingIdx := openIdx
+	if existingIdx < 0 {
+		existingIdx = settledIdx
+	}
+	if existingIdx >= 0 && effectiveName == "" {
+		effectiveName = strings.TrimSpace(out[existingIdx].Name)
+	}
 	semanticName := effectiveName
 	output := normalizeToolEventOutput(update.Output, effectiveName, update.Meta.Terminal)
 	if semanticName == surfaceToolTask && taskAction == "cancel" {
@@ -65,6 +77,16 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		changed = changed || moved
 		updateToolEventIndex(toolIndex, out, callID)
 	}()
+	if settledIdx >= 0 && !update.Final {
+		if update.Meta.ToolStatusExplicit {
+			return out, changed, false
+		}
+		// A status-less tool_call_update is a sparse content/state patch. Merge
+		// its present fields into the settled call while leaving Done/Err intact;
+		// only an explicit non-terminal status is a stale lifecycle downgrade.
+		mergeOpenToolEvent(&out[settledIdx], name, toolKind, toolTitle, args, fullArgs, output, messageID, taskHandle, taskAction, taskInput, taskTargetKind, semanticName, update.Meta)
+		return out, true, false
+	}
 	if updateLinkedTerminalEvent(out, callID, semanticName, taskHandle, output, update.Final, update.Err, update.Meta) {
 		changed = true
 		if semanticName == surfaceToolSpawn {
@@ -72,13 +94,10 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		}
 		output = ""
 	}
-	if shouldIgnoreStaleTerminalUpdate(out, callID, effectiveName, update.Meta.Terminal, update.Final) {
-		return out, changed, false
-	}
 	if !update.Final {
 		if i := openIdx; i >= 0 {
 			ev := &out[i]
-			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, messageID, taskHandle, taskAction, taskInput, taskTargetKind, semanticName, update.Meta)
+			mergeOpenToolEvent(ev, name, toolKind, toolTitle, args, fullArgs, output, messageID, taskHandle, taskAction, taskInput, taskTargetKind, semanticName, update.Meta)
 			return out, true, false
 		}
 		out = append(out, SubagentEvent{
@@ -86,6 +105,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			CallID:            callID,
 			Name:              name,
 			ToolKind:          toolKind,
+			Title:             toolTitle,
 			Args:              args,
 			StartArgs:         args,
 			FullArgs:          fullArgs,
@@ -114,6 +134,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		CallID:            callID,
 		Name:              name,
 		ToolKind:          toolKind,
+		Title:             toolTitle,
 		Args:              args,
 		StartArgs:         args,
 		FullArgs:          fullArgs,
@@ -152,7 +173,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			continue
 		}
 		fillMissingFinalToolEventFromExisting(&finalEvent, *ev)
-		if shouldReplaceCompletedTerminalToolEvent(*ev, finalEvent) || shouldReplaceCompletedSubagentToolEvent(*ev, finalEvent) {
+		if completedToolSnapshotsShareCallID(*ev, finalEvent) {
 			mergeFinalToolEvent(ev, &finalEvent, authoritativeFinal)
 			if shouldDefaultCollapseToolEvent(finalEvent) {
 				collapse = true
@@ -171,34 +192,28 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	return out, true, collapse
 }
 
-func shouldReplaceCompletedSubagentToolEvent(existing SubagentEvent, incoming SubagentEvent) bool {
+func settledToolEventIndexForUpdate(events []SubagentEvent, callID string) int {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return -1
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		event := events[i]
+		if event.Kind == SEToolCall && strings.TrimSpace(event.CallID) == callID {
+			if event.Done {
+				return i
+			}
+			return -1
+		}
+	}
+	return -1
+}
+
+func completedToolSnapshotsShareCallID(existing SubagentEvent, incoming SubagentEvent) bool {
 	if !existing.Done || !incoming.Done || strings.TrimSpace(existing.CallID) == "" || strings.TrimSpace(existing.CallID) != strings.TrimSpace(incoming.CallID) {
 		return false
 	}
-	existingName := existing.Name
-	incomingName := incoming.Name
-	return existingName == incomingName &&
-		(existingName == surfaceToolSpawn || existingName == surfaceToolTask)
-}
-
-func effectiveToolEventIdentity(events []SubagentEvent, update toolEventUpdate, toolIndex map[string]int, name string, toolKind string) (string, string, int) {
-	idx := openToolEventIndexForUpdate(events, update, toolIndex)
-	if idx < 0 {
-		return name, toolKind, idx
-	}
-	existing := events[idx]
-	if strings.TrimSpace(name) == "" {
-		name = strings.TrimSpace(existing.Name)
-	} else if strings.TrimSpace(existing.Name) != "" && strings.TrimSpace(name) == strings.TrimSpace(toolKind) {
-		// ACP kind is a display classification, not a Definition.Name. A
-		// partial update that only carries the kind must not replace the exact
-		// name already established by the call event.
-		name = strings.TrimSpace(existing.Name)
-	}
-	if strings.TrimSpace(toolKind) == "" {
-		toolKind = strings.TrimSpace(existing.ToolKind)
-	}
-	return name, toolKind, idx
+	return true
 }
 
 func normalizeToolEventOutput(output string, effectiveName string, terminal bool) string {
@@ -251,15 +266,18 @@ func updateToolEventIndex(index map[string]int, events []SubagentEvent, callID s
 	delete(index, callID)
 }
 
-func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, messageID, taskHandle, taskAction, taskInput, taskTargetKind string, semanticName string, meta ToolUpdateMeta) {
+func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, fullArgs, output, messageID, taskHandle, taskAction, taskInput, taskTargetKind string, semanticName string, meta ToolUpdateMeta) {
 	if ev == nil {
 		return
 	}
-	if strings.TrimSpace(name) != "" {
+	if strings.TrimSpace(ev.Name) == "" && strings.TrimSpace(name) != "" {
 		ev.Name = name
 	}
 	if strings.TrimSpace(toolKind) != "" {
 		ev.ToolKind = toolKind
+	}
+	if strings.TrimSpace(toolTitle) != "" {
+		ev.Title = toolTitle
 	}
 	preferredTaskHandle := preferredDisplayTaskHandle(ev.TaskHandle, taskHandle)
 	if strings.TrimSpace(args) != "" {
@@ -364,6 +382,9 @@ func fillFinalToolEventFromExisting(finalEvent *SubagentEvent, existing Subagent
 	if strings.TrimSpace(finalEvent.ToolKind) == "" {
 		finalEvent.ToolKind = strings.TrimSpace(existing.ToolKind)
 	}
+	if strings.TrimSpace(finalEvent.Title) == "" {
+		finalEvent.Title = strings.TrimSpace(existing.Title)
+	}
 	if strings.TrimSpace(finalEvent.MessageTarget) == "" {
 		finalEvent.MessageTarget = strings.TrimSpace(existing.MessageTarget)
 	}
@@ -426,6 +447,9 @@ func fillMissingFinalToolEventFromExisting(finalEvent *SubagentEvent, existing S
 	if strings.TrimSpace(finalEvent.ToolKind) == "" {
 		finalEvent.ToolKind = strings.TrimSpace(existing.ToolKind)
 	}
+	if strings.TrimSpace(finalEvent.Title) == "" {
+		finalEvent.Title = strings.TrimSpace(existing.Title)
+	}
 	if strings.TrimSpace(finalEvent.MessageTarget) == "" {
 		finalEvent.MessageTarget = strings.TrimSpace(existing.MessageTarget)
 	}
@@ -444,8 +468,15 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authorita
 		return
 	}
 	fillMissingFinalToolEventFromExisting(finalEvent, *ev)
+	// Exact runtime identity is established once for a call. Sparse ACP patches
+	// may omit it, and a later compatibility snapshot must not replace it with
+	// an alias or a coarse standard kind.
+	if existingName := strings.TrimSpace(ev.Name); existingName != "" {
+		finalEvent.Name = existingName
+	}
 	ev.Name = finalEvent.Name
 	ev.ToolKind = finalEvent.ToolKind
+	ev.Title = finalEvent.Title
 	ev.Args = finalEvent.Args
 	mergeStartArgs(ev, finalEvent.StartArgs, finalEvent.Args)
 	ev.FullArgs = finalEvent.FullArgs

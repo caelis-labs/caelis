@@ -494,10 +494,6 @@ func (s *corpusTranscriptState) itemIndex(id string) int {
 
 type corpusSurfaceProjector struct{}
 
-func (corpusSurfaceProjector) ResolveToolName(_ map[string]any, title string, kind string) string {
-	return firstNonEmptyString(title, kind)
-}
-
 func (corpusSurfaceProjector) ProjectToolCall(input ToolProjectionInput) Event {
 	return corpusToolEvent(input, NormalizeToolStartStatus(input.Status), input.Error)
 }

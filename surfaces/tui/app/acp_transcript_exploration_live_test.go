@@ -156,8 +156,8 @@ func TestLiveExplorationReclassificationRemovesPendingContainerMembership(t *tes
 
 	block = requireMainACPTurnBlockForTest(t, h.model)
 	reclassified := requireToolEventForTest(t, block.Events, "reclassified")
-	if !reclassified.Done || reclassified.Name == "Read" || reclassified.ToolKind != kind || isExplorationToolEvent(reclassified) {
-		t.Fatalf("final tool identity was not applied: %#v", reclassified)
+	if !reclassified.Done || reclassified.Name != "Read" || reclassified.ToolKind != kind || reclassified.Title != name || isExplorationToolEvent(reclassified) {
+		t.Fatalf("standard kind patch did not reclassify presentation while preserving exact identity: %#v", reclassified)
 	}
 	for _, container := range block.explorationProjection.Containers {
 		if slices.Contains(container.CallIDs, "reclassified") {

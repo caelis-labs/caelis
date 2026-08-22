@@ -284,6 +284,39 @@ func TestExplorationSummaryDisplaysSkillName(t *testing.T) {
 	}
 }
 
+func TestExplorationSummaryKeepsWebFetchVerbAndFullURL(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	block.Status = "completed"
+	block.UpdateToolWithMeta("fetch-1", surfaceToolWebFetch, "https://example.com/a/b.md", "", true, false, ToolUpdateMeta{ToolKind: "search"})
+	block.UpdateToolWithMeta("search-1", surfaceToolWebSearch, `"surface projection"`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
+
+	rows := block.Render(BlockRenderContext{
+		Width:     100,
+		TermWidth: 100,
+		Theme:     tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY),
+	})
+	plain := joinRenderedPlain(rows)
+	if !strings.Contains(plain, "Fetch https://example.com/a/b.md") {
+		t.Fatalf("rendered rows lost WebFetch verb or compacted its URL\nplain:\n%s", plain)
+	}
+	if !strings.Contains(plain, `Search "surface projection"`) {
+		t.Fatalf("rendered rows merged WebSearch into the Fetch summary\nplain:\n%s", plain)
+	}
+	if strings.Contains(plain, "Search b.md") {
+		t.Fatalf("rendered rows treated the WebFetch URL as a filesystem path\nplain:\n%s", plain)
+	}
+}
+
+func TestAnonymousCompletedToolWithoutPresentationFieldsHasNoHeader(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	rows, _ := renderACPToolLifecycleRows("block-1", []SubagentEvent{{
+		Kind: SEToolCall, CallID: "tool-1", Done: true,
+	}}, 0, 80, model.blockRenderContext(80), acpTranscriptRenderOptions{ToolOutputPanels: true})
+	if len(rows) != 0 {
+		t.Fatalf("anonymous completed tool rows = %#v, want no synthetic Tool header", rows)
+	}
+}
+
 func TestToolOnlyExploredGroupWithoutHiddenContentHasNoClickToken(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -642,6 +675,39 @@ func TestToolEventIndexSurvivesStaleShiftAndUpdatesOpenTool(t *testing.T) {
 	}
 	if got := block.Events[1].Output; got != "first second" {
 		t.Fatalf("tool output = %q, want merged output after stale-index fallback", got)
+	}
+}
+
+func TestToolLifecycleTerminalSnapshotIsMonotonic(t *testing.T) {
+	t.Parallel()
+
+	block := NewMainACPTurnBlock("session-1")
+	block.UpdateToolWithMeta("search-1", "", "ToolCallStatus", "", true, false, ToolUpdateMeta{
+		ToolKind: "search", ToolTitle: "Search ToolCallStatus", ToolStatus: "completed", ToolStatusExplicit: true,
+	})
+	block.UpdateToolWithMeta("search-1", "", "", "", true, false, ToolUpdateMeta{ToolStatus: "completed", ToolStatusExplicit: true})
+	block.UpdateToolWithMeta("search-1", "", "", "stale running snapshot", false, false, ToolUpdateMeta{ToolStatus: "in_progress", ToolStatusExplicit: true})
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want repeated finals merged into one tool event", block.Events)
+	}
+	if event := block.Events[0]; !event.Done || event.Err || event.ToolKind != "search" || event.Title != "Search ToolCallStatus" || event.Output != "" {
+		t.Fatalf("settled search = %#v, want retained terminal snapshot with stale progress ignored", event)
+	}
+	if acpTranscriptEventsHaveRunningTool(block.Events) {
+		t.Fatal("late in_progress patch reopened a settled tool")
+	}
+}
+
+func TestCompletedToolKeepsEstablishedExactNameAcrossRepeatedFinal(t *testing.T) {
+	t.Parallel()
+
+	block := NewMainACPTurnBlock("session-1")
+	block.UpdateTool("spawn-1", "Spawn", "reviewer: inspect", "done", true, false)
+	block.UpdateTool("spawn-1", "SPAWN", "reviewer: inspect", "done", true, false)
+
+	if len(block.Events) != 1 || block.Events[0].Name != "Spawn" || !block.Events[0].Done {
+		t.Fatalf("events = %#v, want one final with its established exact runtime name", block.Events)
 	}
 }
 

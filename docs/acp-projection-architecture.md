@@ -79,6 +79,14 @@ Content, current state, accounting, and lifecycle are separate projections. A
 terminal state such as `completed` is not a content operation, and a durable
 final value is not implicitly another stream chunk.
 
+ACP `tool_call` is a lifecycle snapshot, not necessarily a start frame, and
+`tool_call_update` is a sparse patch keyed by `toolCallId`. A terminal standard
+status on either update settles the same Surface lifecycle even when the update
+has no displayable result content. Missing title, kind, input, output, content,
+or locations on a patch retain the latest value for that call; they do not
+reopen a settled call. Live delivery and replay use this same merge and terminal
+status rule.
+
 ACP message chunks and Caelis `terminal_output` values are deltas. A receiver
 processes them in delivery order and appends each payload exactly once. It does
 not compare text, calculate prefix or suffix overlap, merge byte ranges, or
@@ -295,6 +303,16 @@ persistence authority. Unknown names and former aliases stay generic, and
 titles, kinds, arguments, or result fields are never used to infer a built-in
 name. Typed `Event.Tool` and Envelope relation fields remain authoritative for
 semantic behavior.
+
+Standard ACP `kind` owns the coarse display category independently of the exact
+tool name. In particular, `read`, `search`, and `fetch` share the compact
+exploration presentation for built-in and external Agents. The human-readable
+`title` is retained separately; for `other` or an unknown kind it may be used as
+the complete generic label, but it never becomes an exact tool name. Exact
+built-in names may refine a compatible label or result layout only after the
+standard kind has selected the category. Main transcript blocks, participant
+blocks, and detached child overlays consume this one derived presentation
+model and vary only their container controls.
 
 Display extensions may preserve information that standard ACP content cannot
 represent without changing semantic ownership:

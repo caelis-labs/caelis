@@ -11,7 +11,6 @@ import (
 )
 
 type SurfaceProjector interface {
-	ResolveToolName(meta map[string]any, title string, kind string) string
 	ProjectToolCall(ToolProjectionInput) Event
 	ProjectToolResult(ToolProjectionInput, string) (Event, bool)
 	ApprovalCommandPreview(map[string]any) string
@@ -29,6 +28,9 @@ type ToolProjectionInput struct {
 	ToolKind  string
 	ToolTitle string
 	Status    string
+	// StatusExplicit distinguishes a producer-supplied lifecycle value from
+	// the Surface default used to materialize a sparse tool_call_update.
+	StatusExplicit bool
 
 	RawInput  map[string]any
 	RawOutput any
@@ -259,21 +261,34 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 		if surface == nil || ToolIsPlan(update.Title, update.Kind) {
 			return nil
 		}
-		return []Event{surface.ProjectToolCall(ToolProjectionInput{
-			Scope:      scope,
-			ScopeID:    scopeID,
-			Actor:      strings.TrimSpace(env.Actor),
-			OccurredAt: env.OccurredAt,
-			Meta:       meta,
-			CallID:     update.ToolCallID,
-			ToolName:   acpUpdateToolName(meta, update.Title, update.Kind, surface),
-			ToolKind:   update.Kind,
-			ToolTitle:  update.Title,
-			Status:     update.Status,
-			RawInput:   RawMap(update.RawInput),
-			Content:    update.Content,
-			Locations:  update.Locations,
-		})}
+		input := ToolProjectionInput{
+			Scope:          scope,
+			ScopeID:        scopeID,
+			Actor:          strings.TrimSpace(env.Actor),
+			OccurredAt:     env.OccurredAt,
+			Meta:           meta,
+			CallID:         update.ToolCallID,
+			ToolName:       ToolNameFromMeta(meta),
+			ToolKind:       update.Kind,
+			ToolTitle:      update.Title,
+			Status:         update.Status,
+			StatusExplicit: strings.TrimSpace(update.Status) != "",
+			RawInput:       RawMap(update.RawInput),
+			RawOutput:      update.RawOutput,
+			Content:        update.Content,
+			Locations:      update.Locations,
+		}
+		// ACP permits tool_call to carry any lifecycle status. Some agents emit a
+		// complete one-shot snapshot instead of a start followed by a patch, so
+		// terminal status must use the same final projection authority.
+		if ToolStatusFinal(update.Status, false) {
+			event, ok := surface.ProjectToolResult(input, schema.ToolStatusCompleted)
+			if !ok {
+				return nil
+			}
+			return []Event{event}
+		}
+		return []Event{surface.ProjectToolCall(input)}
 	case schema.ToolCallUpdate:
 		if surface == nil {
 			return nil
@@ -290,10 +305,11 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			OccurredAt:        env.OccurredAt,
 			Meta:              meta,
 			CallID:            update.ToolCallID,
-			ToolName:          acpUpdateToolName(meta, title, kind, surface),
+			ToolName:          ToolNameFromMeta(meta),
 			ToolKind:          kind,
 			ToolTitle:         title,
 			Status:            StringFromPtr(update.Status),
+			StatusExplicit:    update.Status != nil,
 			RawInput:          RawMap(update.RawInput),
 			RawOutput:         update.RawOutput,
 			Content:           update.Content,
@@ -536,19 +552,11 @@ func GatewayProjection(meta map[string]any) bool {
 	return strings.EqualFold(MetaString(meta, "caelis", "bridge", "source"), "gateway_projection")
 }
 
-func acpUpdateToolName(meta map[string]any, title string, kind string, surface SurfaceProjector) string {
-	if surface != nil {
-		if name := surface.ResolveToolName(meta, title, kind); name != "" {
-			return name
-		}
-	}
-	if name := MetaString(meta, "caelis", "runtime", "tool", "name"); name != "" {
-		return name
-	}
-	if kind = strings.TrimSpace(kind); kind != "" {
-		return kind
-	}
-	return strings.TrimSpace(title)
+// ToolNameFromMeta returns the exact runtime tool identity when the producer
+// supplied one. Standard ACP kind and title remain separate presentation
+// fields and are deliberately not used as identity fallbacks.
+func ToolNameFromMeta(meta map[string]any) string {
+	return MetaString(meta, "caelis", "runtime", "tool", "name")
 }
 
 func StringFromPtr(value *string) string {
