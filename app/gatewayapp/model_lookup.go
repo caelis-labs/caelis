@@ -324,22 +324,32 @@ func (l *modelLookup) upsertLocked(cfg ModelConfig, setDefault bool) (string, er
 }
 
 // beginPinnedUpsert keeps one candidate Runtime model invisible until the
-// caller proves the matching durable Session mutation committed. Reads block
-// while the Session revision CAS is in flight; rollback restores the complete
-// lookup state changed by endpoint hydration and context-window selection.
-func (l *modelLookup) beginPinnedUpsert(cfg ModelConfig) (func(bool), error) {
+// caller proves the matching durable Session mutation committed. It returns
+// every model rehydrated through the candidate's shared provider endpoint so
+// placement can stage the same execution configuration. Reads block while the
+// Session revision CAS is in flight; rollback restores the complete lookup
+// state changed by endpoint hydration and context-window selection.
+func (l *modelLookup) beginPinnedUpsert(cfg ModelConfig) ([]ModelConfig, func(bool), error) {
 	if l == nil {
-		return nil, fmt.Errorf("gatewayapp: model lookup is nil")
+		return nil, nil, fmt.Errorf("gatewayapp: model lookup is nil")
 	}
 	l.mu.Lock()
 	before := l.snapshotLocked()
 	beforeContextWindow := l.contextWindow
-	if _, err := l.upsertLocked(cfg, false); err != nil {
+	configuredID, err := l.upsertLocked(cfg, false)
+	if err != nil {
 		l.mu.Unlock()
-		return nil, err
+		return nil, nil, err
+	}
+	configured := l.configs[strings.ToLower(strings.TrimSpace(configuredID))]
+	affected := make([]ModelConfig, 0, len(l.configs))
+	for _, current := range l.snapshotLocked().Configs {
+		if strings.EqualFold(strings.TrimSpace(current.ProviderEndpointID), configured.ProviderEndpointID) {
+			affected = append(affected, current)
+		}
 	}
 	var once sync.Once
-	return func(committed bool) {
+	return affected, func(committed bool) {
 		once.Do(func() {
 			if !committed {
 				l.restoreLocked(before, beforeContextWindow)

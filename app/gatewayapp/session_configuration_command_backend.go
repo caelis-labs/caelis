@@ -158,11 +158,11 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 		return sessionCommandResult(active), sessionConfigurationRejected(fmt.Sprintf("model %q does not support reasoning effort %q", configured.ID, reasoning))
 	}
 	// The App catalog decides whether a model may be selected. Once accepted,
-	// pin its hydrated configuration into this Runtime so a later App deletion
-	// cannot interrupt the active Session.
+	// pin its hydrated configuration and matching placement profile into this
+	// Runtime so a later App deletion cannot interrupt the active Session.
 	var finishPin func(bool)
 	if s.activation != nil && s.activation.modelCatalog != nil {
-		finishPin, err = s.lookup.beginPinnedUpsert(configured)
+		finishPin, err = s.beginPinnedModelSelection(configured)
 		if err != nil {
 			return sessionCommandResult(active), sessionConfigurationRejectedError(err)
 		}

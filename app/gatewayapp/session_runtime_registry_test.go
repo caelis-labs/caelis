@@ -2,19 +2,24 @@ package gatewayapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -23,6 +28,7 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
 )
@@ -169,6 +175,141 @@ func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
 	}
 }
 
+func TestActiveSessionRuntimePromptsAfterConnectingAndSelectingNewModel(t *testing.T) {
+	ctx := context.Background()
+	var requestedModel atomic.Value
+	modelClient := &http.Client{Transport: gatewayAppRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var payload struct {
+			Model  string `json:"model"`
+			Stream bool   `json:"stream"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			return nil, err
+		}
+		requestedModel.Store(payload.Model)
+		body := `{"model":"` + payload.Model + `","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`
+		contentType := "application/json"
+		if payload.Stream {
+			contentType = "text/event-stream"
+			body = "data: {\"model\":\"" + payload.Model + "\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{contentType}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})}
+	workdir := t.TempDir()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "session-model-switch-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Model: ModelConfig{
+			Provider:   "xiaomi",
+			API:        providers.APIMimo,
+			Model:      "mimo-v2.5-pro",
+			BaseURL:    "https://token-plan-cn.xiaomimimo.com/v1",
+			Token:      "mimo-secret",
+			HTTPClient: modelClient,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	active, err := startGatewayAppTestSession(ctx, stack, "session-model-switch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	activated := activateSessionRuntime(t, stack, active.SessionID)
+	releaseObservation, err := stack.sessionRuntimes.retainObservation(active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(releaseObservation)
+
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	first, err := stack.ControlClient().Prompt(ctx, principal, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{OperationID: "prompt-mimo-v2.5-pro", SessionID: active.SessionID},
+		Input:     "start",
+	})
+	if err != nil || first.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("Prompt(mimo-v2.5-pro) = %#v, %v", first, err)
+	}
+	waitForGatewayAppTestTurn(t, stack, active.SessionID)
+	if got, _ := requestedModel.Load().(string); got != "mimo-v2.5-pro" {
+		t.Fatalf("initial requested model = %q, want mimo-v2.5-pro", got)
+	}
+
+	configurationRevision, err := stack.ControlStatus().ConfigurationRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "connect-mimo-v2.5", ExpectedRevision: &configurationRevision},
+		Config: appserver.ConnectConfig{
+			Provider: "xiaomi-token-plan-cn",
+			Model:    "mimo-v2.5",
+			BaseURL:  "https://token-plan-cn.xiaomimimo.com/v1",
+		},
+	})
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("ConnectModel(mimo-v2.5) = %#v, %v", connected, err)
+	}
+	modelConfig, err := stack.composition.lookup.ResolveConfig("xiaomi/mimo-v2.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	active = mustCurrentSession(t, stack, active.SessionID)
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID:             "select-mimo-v2.5",
+			SessionID:               active.SessionID,
+			ExpectedRevision:        &active.Revision,
+			ExpectedControllerEpoch: active.Controller.EpochID,
+		},
+		Model: modelConfig.ID,
+	})
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("UseSessionModel(mimo-v2.5) = %#v, %v", selected, err)
+	}
+	if loaded, ok := stack.sessionRuntimes.loaded(active.SessionID); !ok || loaded != activated {
+		t.Fatalf("model selection replaced active Session Runtime: loaded=%p, want %p", loaded, activated)
+	}
+
+	prompted, err := stack.ControlClient().Prompt(ctx, principal, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{OperationID: "prompt-mimo-v2.5", SessionID: active.SessionID},
+		Input:     "continue",
+	})
+	if err != nil || prompted.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("Prompt(mimo-v2.5) = %#v, %v", prompted, err)
+	}
+	waitForGatewayAppTestTurn(t, stack, active.SessionID)
+	if got, _ := requestedModel.Load().(string); got != "mimo-v2.5" {
+		t.Fatalf("selected requested model = %q, want mimo-v2.5", got)
+	}
+}
+
+func waitForGatewayAppTestTurn(t *testing.T, stack *Stack, sessionID string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		runtime, ok := stack.sessionRuntimes.loaded(sessionID)
+		if !ok {
+			t.Fatalf("Session %q Runtime was released while waiting for Turn", sessionID)
+		}
+		if _, active := runtime.instance.currentGateway().ActiveTurn(sessionID); !active {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("Session %q Turn did not stop", sessionID)
+}
+
 func TestSessionRuntimeSelectsNewCatalogModelPinsDeletionAndRepairsOnReactivation(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
@@ -252,6 +393,94 @@ func TestSessionRuntimeSelectsNewCatalogModelPinsDeletionAndRepairsOnReactivatio
 	}
 	if recovered.Revision != beforeRecovery.Revision+1 {
 		t.Fatalf("recovered Session revision = %d, want %d", recovered.Revision, beforeRecovery.Revision+1)
+	}
+}
+
+func TestSessionRuntimeModelPinSynchronizesSharedProviderEndpoint(t *testing.T) {
+	ctx := context.Background()
+	stack, active := newLocalStateTestStack(t)
+	t.Cleanup(func() { _ = stack.Close() })
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	runtime := activateSessionRuntime(t, stack, active.SessionID)
+	initialID := runtime.instance.lookup.DefaultID()
+	initial, err := runtime.instance.lookup.ResolveConfig(initialID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := runtime.instance.placementSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frozen, err := controlplacement.ResolveHandle(before.placement, controlplacement.HandleRequest{
+		Handle: agentbinding.HandleGuardian, Purpose: controlplacement.PurposeGuardian,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	configurationRevision, err := stack.ControlStatus().ConfigurationRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "connect-shared-endpoint-model", ExpectedRevision: &configurationRevision},
+		Config: appserver.ConnectConfig{
+			Provider:                       "ollama",
+			Model:                          "shared-endpoint-model",
+			StreamFirstEventTimeoutSeconds: 20,
+		},
+	})
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("ConnectModel(shared endpoint) = %#v, %v", connected, err)
+	}
+	selectedConfig, err := stack.composition.lookup.ResolveConfig("ollama/shared-endpoint-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selectedConfig.ProviderEndpointID != initial.ProviderEndpointID {
+		t.Fatalf("selected provider endpoint = %q, want shared endpoint %q", selectedConfig.ProviderEndpointID, initial.ProviderEndpointID)
+	}
+	if selectedConfig.StreamFirstEventTimeout != 20*time.Second {
+		t.Fatalf("selected catalog model first-event timeout = %s, want 20s", selectedConfig.StreamFirstEventTimeout)
+	}
+	active = mustCurrentSession(t, stack, active.SessionID)
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID:             "select-shared-endpoint-model",
+			SessionID:               active.SessionID,
+			ExpectedRevision:        &active.Revision,
+			ExpectedControllerEpoch: active.Controller.EpochID,
+		},
+		Model: selectedConfig.ID,
+	})
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("UseSessionModel(shared endpoint) = %#v, %v", selected, err)
+	}
+
+	after, err := runtime.instance.placementSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controlplacement.ValidateFrozen(after.placement, frozen); err == nil {
+		t.Fatal("shared endpoint update left the old model placement valid")
+	}
+	updated, err := runtime.instance.lookup.ResolveConfig(initialID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.StreamFirstEventTimeout != 20*time.Second {
+		t.Fatalf("shared lookup model first-event timeout = %s, want 20s", updated.StreamFirstEventTimeout)
+	}
+	var placed ModelConfig
+	for _, candidate := range after.placement.Models {
+		if candidate.ID == initialID {
+			placed = candidate
+			break
+		}
+	}
+	if placed.ID != initialID || placed.ProviderEndpointID != updated.ProviderEndpointID ||
+		placed.StreamFirstEventTimeout != updated.StreamFirstEventTimeout {
+		t.Fatalf("shared endpoint placement model = %#v, want endpoint fields from %#v", placed, updated)
 	}
 }
 
@@ -383,12 +612,14 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 	runtime := activateSessionRuntime(t, stack, active.SessionID)
 	beforeLookup := runtime.instance.lookup.Snapshot()
 	beforeContextWindow := runtime.instance.lookup.contextWindow
+	beforePlacement := runtime.instance.placementCache
 
 	profile, err := stack.connectTestModel(ModelConfig{
-		Provider:            "ollama",
-		API:                 "ollama",
-		Model:               "conflicted-runtime-model",
-		ContextWindowTokens: beforeContextWindow + 4096,
+		Provider:                "ollama",
+		API:                     "ollama",
+		Model:                   "conflicted-runtime-model",
+		ContextWindowTokens:     beforeContextWindow + 4096,
+		StreamFirstEventTimeout: 20 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -431,6 +662,16 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 		t.Fatalf("uncommitted Runtime model lookup was observable, present=%v", visible)
 	case <-time.After(50 * time.Millisecond):
 	}
+	placementReadDone := make(chan *placementSnapshot, 1)
+	go func() {
+		snapshot, _ := runtime.instance.placementSnapshot(ctx)
+		placementReadDone <- snapshot
+	}()
+	select {
+	case <-placementReadDone:
+		t.Fatal("uncommitted Runtime placement profile was observable")
+	case <-time.After(50 * time.Millisecond):
+	}
 
 	if _, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
 		SessionRef:    active.SessionRef,
@@ -453,6 +694,9 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 	}
 	if visible := <-readDone; visible {
 		t.Fatal("conflicted model remained in the Runtime lookup")
+	}
+	if after := <-placementReadDone; after != beforePlacement {
+		t.Fatalf("Runtime placement after conflict = %p, want original %p", after, beforePlacement)
 	}
 	if after := runtime.instance.lookup.Snapshot(); !reflect.DeepEqual(after, beforeLookup) {
 		t.Fatalf("Runtime lookup after conflict = %#v, want %#v", after, beforeLookup)

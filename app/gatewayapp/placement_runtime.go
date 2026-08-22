@@ -3,11 +3,14 @@ package gatewayapp
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/modelprofile"
+	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
@@ -48,6 +51,88 @@ func (s *runtimeComposition) invalidateOwnPlacementSnapshot() {
 	s.placementCache = nil
 	s.placementCacheGeneration++
 	s.placementCacheMu.Unlock()
+}
+
+// beginPinnedModelSelection stages one provider model, its product profile,
+// and every model changed through the same shared provider endpoint as a
+// single detached Runtime update. Both views remain unreadable until the
+// matching durable Session revision CAS commits; rollback restores both.
+func (s *runtimeComposition) beginPinnedModelSelection(configured ModelConfig) (func(bool), error) {
+	if s == nil || s.lookup == nil {
+		return nil, fmt.Errorf("gatewayapp: Session Runtime model lookup is unavailable")
+	}
+	profile, err := modelprofilebuilder.FromProvider(configured)
+	if err != nil {
+		return nil, fmt.Errorf("gatewayapp: build pinned Session model profile: %w", err)
+	}
+	affectedModels, finishLookup, err := s.lookup.beginPinnedUpsert(configured)
+	if err != nil {
+		return nil, err
+	}
+
+	s.placementCacheMu.Lock()
+	before := s.placementCache
+	if before == nil {
+		s.placementCacheMu.Unlock()
+		finishLookup(false)
+		return nil, fmt.Errorf("gatewayapp: Session Runtime placement snapshot is unavailable")
+	}
+	next := &placementSnapshot{placement: before.placement}
+	next.placement.Profiles, err = modelprofile.Upsert(next.placement.Profiles, profile)
+	if err == nil {
+		for _, affected := range affectedModels {
+			next.placement.Models = upsertPlacementModel(next.placement.Models, affected)
+		}
+		err = controlplacement.ValidateSnapshot(next.placement)
+	}
+	if err != nil {
+		s.placementCacheMu.Unlock()
+		finishLookup(false)
+		return nil, fmt.Errorf("gatewayapp: pin Session Runtime placement: %w", err)
+	}
+	s.placementCache = next
+
+	var once sync.Once
+	return func(committed bool) {
+		once.Do(func() {
+			if !committed {
+				s.placementCache = before
+			}
+			finishLookup(committed)
+			s.placementCacheMu.Unlock()
+		})
+	}, nil
+}
+
+func upsertPlacementModel(current []modelconfig.Config, configured modelconfig.Config) []modelconfig.Config {
+	configured = placementModelConfig(configured)
+	next := make([]modelconfig.Config, 0, len(current)+1)
+	replaced := false
+	for _, raw := range current {
+		model := modelconfig.NormalizeConfig(raw)
+		if model.ID == configured.ID {
+			if !replaced {
+				next = append(next, configured)
+				replaced = true
+			}
+			continue
+		}
+		next = append(next, model)
+	}
+	if !replaced {
+		next = append(next, configured)
+	}
+	return next
+}
+
+func placementModelConfig(configured modelconfig.Config) modelconfig.Config {
+	configured = modelconfig.NormalizeConfig(configured)
+	// Placement needs stable execution semantics for validation and sealing,
+	// not the Runtime-only credential material retained by model lookup.
+	configured.HTTPClient = nil
+	configured.Token = ""
+	configured.CredentialPath = ""
+	return configured
 }
 
 func (s *runtimeComposition) placementSnapshot(ctx context.Context) (*placementSnapshot, error) {
