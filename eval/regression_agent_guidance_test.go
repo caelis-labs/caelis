@@ -101,14 +101,14 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 	}
 
 	runCommandSpec := toolByName[shell.RunCommandToolName]
-	for _, unwanted := range []string{"5000 ms", "require_escalated", "command timeout"} {
+	for _, unwanted := range []string{"10000 ms", "require_escalated", "command timeout"} {
 		if strings.Contains(runCommandSpec.Function.Description, unwanted) {
 			t.Fatalf("RunCommand usage description contains parameter mechanics %q: %q", unwanted, runCommandSpec.Function.Description)
 		}
 	}
 	propertyGuidance := map[string][]string{
 		"workdir":             {"session cwd", "instead of prefixing command with cd"},
-		"yield_time_ms":       {"async Task", "5000 ms default", "shorter", "longer", "not the command timeout"},
+		"yield_time_ms":       {"async Task", "10000 ms default", "shorter", "longer", "not the command timeout"},
 		"sandbox_permissions": {"Prefer use_default", "require_escalated", "one-shot"},
 		"justification":       {"one short sentence", "sandbox failure", "task link"},
 	}

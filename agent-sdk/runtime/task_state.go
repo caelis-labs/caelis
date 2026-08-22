@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	defaultCommandYield             = 5 * time.Second
+	defaultCommandYield             = 10 * time.Second
 	taskWaitMaxYield                = time.Minute
 	taskWriteOutputWait             = 2 * time.Second
 	taskOutputQuietPeriod           = 100 * time.Millisecond

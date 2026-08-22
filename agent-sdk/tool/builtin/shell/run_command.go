@@ -102,7 +102,7 @@ func (t *RunCommandTool) Definition() tool.Definition {
 				"yield_time_ms": map[string]any{
 					"type":        "integer",
 					"minimum":     0,
-					"description": "Wait before a running command returns as an async Task; not the command timeout. Omit for the 5000 ms default. Use shorter only to yield known long-running or interactive work early; use longer only to await known medium-duration work here.",
+					"description": "Wait before a running command returns as an async Task; not the command timeout. Omit for the 10000 ms default. Use shorter only to yield known long-running or interactive work early; use longer only to await known medium-duration work.",
 				},
 				"tty": map[string]any{
 					"type":        "boolean",
