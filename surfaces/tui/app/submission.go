@@ -27,6 +27,9 @@ type Submission struct {
 	DisplayText string
 	Attachments []Attachment
 	Mode        SubmissionMode
+	// localID correlates asynchronous TUI completion with the exact pending
+	// composer entry. It is presentation-local and never crosses into Control.
+	localID uint64
 }
 
 func cloneAttachments(items []Attachment) []Attachment {

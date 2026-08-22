@@ -1,6 +1,7 @@
 package controlserver
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,10 @@ import (
 )
 
 const apiPrefix = wirev1.APIPrefix
+
+// The HTTP envelope must accommodate the base64 expansion of the shared
+// AppServer prompt-image budget plus ordinary request metadata.
+const maxJSONRequestBytes = 64 << 20
 
 const (
 	resumeModeHeader      = wirev1.ResumeModeHeader
@@ -447,7 +452,17 @@ func decodeBody(w http.ResponseWriter, r *http.Request, target any) bool {
 		writeError(w, http.StatusBadRequest, "Content-Type must be application/json")
 		return false
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	limited := http.MaxBytesReader(nil, r.Body, maxJSONRequestBytes)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			writeError(w, http.StatusRequestEntityTooLarge, jsonRequestBodyTooLargeDetail())
+			return false
+		}
+		writeError(w, http.StatusBadRequest, "invalid JSON request: "+err.Error())
+		return false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	var raw json.RawMessage
 	if err := decoder.Decode(&raw); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON request: "+err.Error())
@@ -462,6 +477,15 @@ func decodeBody(w http.ResponseWriter, r *http.Request, target any) bool {
 		return false
 	}
 	return true
+}
+
+func isRequestBodyTooLarge(err error) bool {
+	var tooLarge *http.MaxBytesError
+	return errors.As(err, &tooLarge)
+}
+
+func jsonRequestBodyTooLargeDetail() string {
+	return fmt.Sprintf("JSON request body exceeds %d MiB", maxJSONRequestBytes>>20)
 }
 
 func applyWriteHeaders(w http.ResponseWriter, r *http.Request, base *appserver.WriteBase, sessionID string) bool {

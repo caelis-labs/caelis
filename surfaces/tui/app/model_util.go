@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -659,6 +660,68 @@ func slashCommandQueryAtCursor(input []rune, cursor int) (string, bool) {
 	}
 	query := strings.TrimPrefix(text, "/")
 	return query, true
+}
+
+// slashSkillQueryAtCursor finds an inline `/skill` token at a legal word
+// boundary. It intentionally rejects URL and path `/` (after `:`, `/`, or
+// identifier runes) so completion does not open inside https:// or foo/bar.
+func slashSkillQueryAtCursor(input []rune, cursor int) (int, int, string, bool) {
+	if len(input) == 0 {
+		return 0, 0, "", false
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(input) {
+		cursor = len(input)
+	}
+	start := cursor
+	for start > 0 && promptrefs.IsSkillQueryRune(input[start-1]) {
+		start--
+	}
+	if start == 0 || input[start-1] != '/' {
+		return 0, 0, "", false
+	}
+	slash := start - 1
+	if !slashSkillReferenceBoundary(input, slash) {
+		return 0, 0, "", false
+	}
+	end := cursor
+	for end < len(input) && promptrefs.IsSkillQueryRune(input[end]) {
+		end++
+	}
+	if end < len(input) {
+		if input[end] == '/' || input[end] == '\\' || !promptrefs.IsSkillReferenceTerminator(input[end]) {
+			return 0, 0, "", false
+		}
+	}
+	return slash, end, string(input[start:end]), true
+}
+
+func slashSkillReferenceBoundary(input []rune, index int) bool {
+	if index <= 0 {
+		return true
+	}
+	prev := input[index-1]
+	if unicode.IsSpace(prev) {
+		return true
+	}
+	return strings.ContainsRune("([{,;\"'", prev)
+}
+
+func slashCompletionTargetAtCursor(input []rune, cursor int, turnRunning bool) (query string, start int, end int, skillOnly bool, ok bool) {
+	lineQuery, lineOK := slashCommandQueryAtCursor(input, cursor)
+	skillStart, skillEnd, skillQuery, skillOK := slashSkillQueryAtCursor(input, cursor)
+	if !turnRunning && lineOK {
+		if skillOK {
+			return lineQuery, skillStart, skillEnd, false, true
+		}
+		return lineQuery, 0, 0, false, true
+	}
+	if skillOK {
+		return skillQuery, skillStart, skillEnd, true, true
+	}
+	return "", 0, 0, false, false
 }
 
 func isMentionQueryRune(r rune) bool {

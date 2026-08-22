@@ -53,6 +53,9 @@ type OverlayState struct {
 	slashDetails          map[string]string
 	slashIndex            int
 	slashPrefix           string
+	slashSkillOnly        bool
+	slashStart            int
+	slashEnd              int
 	slashSkillCatalog     []CompletionCandidate
 	slashSkillLoaded      bool
 	slashSkillLoadPending bool

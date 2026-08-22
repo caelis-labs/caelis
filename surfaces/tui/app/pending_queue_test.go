@@ -29,6 +29,30 @@ func TestContinueRunningDoesNotRenderMidTurnUserLine(t *testing.T) {
 	}
 }
 
+func TestPendingImageRendersAsOrdinaryUserMessageOnGatewayEcho(t *testing.T) {
+	t.Parallel()
+
+	const display = "inspect this [image #1]"
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.pendingQueue = append(model.pendingQueue, pendingPrompt{
+		execLine:    "inspect this",
+		displayLine: display,
+		attachments: []Attachment{{Name: "shot.png", Offset: len([]rune("inspect this"))}},
+		state:       pendingPromptAwaitingActiveDisplay,
+	})
+
+	model = model.handleUserMessageMsg(UserMessageMsg{Text: display}).(*Model)
+	if got := countUserNarrativeBlocksForTest(model, display); got != 1 {
+		t.Fatalf("image user prompt blocks = %d, want one ordinary user message", got)
+	}
+	if len(model.pendingQueue) != 0 {
+		t.Fatalf("pendingQueue after image user echo = %#v, want empty", model.pendingQueue)
+	}
+	if model.hint != "" {
+		t.Fatalf("hint after image user echo = %q, want no scheduling notice", model.hint)
+	}
+}
+
 func TestPendingQueueAbortDropsAwaitingActiveDisplay(t *testing.T) {
 	t.Parallel()
 

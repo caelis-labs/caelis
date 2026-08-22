@@ -1,6 +1,7 @@
 package appserver
 
 import (
+	"encoding/base64"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -29,6 +30,22 @@ func TestValidateCommandRequestAcceptsTypedPromptContent(t *testing.T) {
 		if err := validateCommandRequest(ActionPrompt, request); err != nil {
 			t.Fatalf("validateCommandRequest(%T) = %v", request, err)
 		}
+	}
+}
+
+func TestValidateCommandRequestRejectsAggregateImagePayloadOverLimit(t *testing.T) {
+	imageData := base64.StdEncoding.EncodeToString(make([]byte, MaxPromptImageTotalBytes/2+1))
+	parts := []model.ContentPart{
+		{Type: model.ContentPartImage, MimeType: "image/png", Data: imageData},
+		{Type: model.ContentPartImage, MimeType: "image/png", Data: imageData},
+	}
+
+	err := validateCommandRequest(ActionPrompt, PromptRequest{
+		WriteBase:    WriteBase{SessionID: "session-1"},
+		ContentParts: parts,
+	})
+	if err == nil {
+		t.Fatal("validateCommandRequest() accepted an aggregate image payload over the shared limit")
 	}
 }
 

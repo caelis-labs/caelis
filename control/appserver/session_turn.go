@@ -127,7 +127,7 @@ func (c *SessionTurnClient) Start(
 	})
 	turn, err := admitObservedTurn(c.client, sessionID, reconnected, feedCtx, stopFeed, result, err, func(turn *sessionTurn) {
 		turn.steerFn = func(steerCtx context.Context, input, displayInput string, contentParts []model.ContentPart) error {
-			_, steerErr := c.client.Steer(steerCtx, SteerRequest{
+			steerResult, steerErr := c.client.Steer(steerCtx, SteerRequest{
 				WriteBase: WriteBase{
 					OperationID:             newSessionTurnOperationID("steer"),
 					SessionID:               sessionID,
@@ -138,7 +138,7 @@ func (c *SessionTurnClient) Start(
 				DisplayInput: displayInput,
 				ContentParts: append([]model.ContentPart(nil), contentParts...),
 			})
-			return steerErr
+			return CommandMutationError(steerResult, steerErr)
 		}
 		cancelWrite := &turnCancelWrite{
 			operationID: newSessionTurnOperationID("cancel"),
@@ -187,7 +187,7 @@ func (w *turnCancelWrite) cancel(ctx context.Context, reason string) error {
 		w.operationID = w.newOperationID()
 	}
 	result, err := w.execute(ctx, w.operationID, reason)
-	commandErr := commandMutationError(result, err)
+	commandErr := CommandMutationError(result, err)
 	switch commandReceiptOutcome(result, err) {
 	case OutcomeRejected, OutcomeConflicted:
 		w.operationID = w.newOperationID()

@@ -367,7 +367,7 @@ User testing often this happens right after using the skill, with fresh context 
 To forward-test, launch subagents as a way to stress test the skill with minimal context.
 Subagents should *not* know that they are being asked to test the skill.  They should be treated as
 an agent asked to perform a task by the user.  Prompts to subagents should look like:
-  `Use $skill-x at /path/to/skill-x to solve problem y`
+  `Use /skill-x at /path/to/skill-x to solve problem y`
 Not:
   `Review the skill at /path/to/skill-x; pretend a user asks you to...`
 

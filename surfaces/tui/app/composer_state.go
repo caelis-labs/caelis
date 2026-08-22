@@ -23,6 +23,7 @@ type Composer struct {
 	historyDraft            string
 	historyDraftAttachments []inputAttachment
 	pendingQueue            pendingPromptQueue
+	nextSubmissionID        uint64
 	wizard                  *wizardRuntime
 	composerRowOffset       int
 }

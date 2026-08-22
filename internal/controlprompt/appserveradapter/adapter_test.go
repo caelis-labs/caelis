@@ -623,6 +623,11 @@ func TestSessionClientAdapterCreatesSessionOnlyWhenMainPromptStartsWork(t *testi
 	}
 	if _, err := adapter.Submit(context.Background(), controlprompt.Submission{Mode: controlprompt.SubmissionModeActiveTurn, Text: "steer"}); err == nil {
 		t.Fatal("active-turn submission without a Turn succeeded")
+	} else {
+		var outcomeErr *appserver.OutcomeError
+		if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeRejected {
+			t.Fatalf("active-turn submission without a Turn error = %v, want rejected outcome", err)
+		}
 	}
 	if sessions.create.OperationID != "" {
 		t.Fatalf("idle status or steer created Session: %#v", sessions.create)
@@ -1089,6 +1094,19 @@ func TestAppServerAdapterReconnectsActiveTurnForSteerAndClonesState(t *testing.T
 		steer.ExpectedRevision == nil || *steer.ExpectedRevision != 7 ||
 		steer.ExpectedControllerEpoch != "epoch-resumed" {
 		t.Fatalf("reconnected steer = %#v, want exact resumed target and fence", steer)
+	}
+	client.mu.Lock()
+	client.steerResult = appserver.CommandResult{Outcome: appserver.OutcomeRejected, Detail: "steer rejected"}
+	client.mu.Unlock()
+	if _, err := adapter.Submit(context.Background(), controlprompt.Submission{
+		Text: "retry resumed Turn", Mode: controlprompt.SubmissionModeActiveTurn,
+	}); err == nil {
+		t.Fatal("reconnected steer accepted a replayed rejected receipt")
+	} else {
+		var receipt *appserver.CommandReceiptError
+		if !errors.As(err, &receipt) || receipt.Receipt.Outcome != appserver.OutcomeRejected {
+			t.Fatalf("reconnected steer error = %v, want rejected receipt", err)
+		}
 	}
 	if err := adapter.Interrupt(context.Background()); err != nil {
 		t.Fatal(err)
@@ -2128,6 +2146,8 @@ type sessionClientAdapterTestClient struct {
 	promptErr           error
 	promptOutcome       appserver.Outcome
 	omitPromptTarget    bool
+	steerResult         appserver.CommandResult
+	steerErr            error
 	cancelErr           error
 	cancelErrs          []error
 	cancelOutcomes      []appserver.Outcome
@@ -2679,8 +2699,16 @@ func (c *sessionClientAdapterTestClient) Prompt(ctx context.Context, request app
 func (c *sessionClientAdapterTestClient) Steer(_ context.Context, request appserver.SteerRequest) (appserver.CommandResult, error) {
 	c.mu.Lock()
 	c.steer = request
+	result := c.steerResult
+	err := c.steerErr
 	c.mu.Unlock()
-	return appserver.CommandResult{Outcome: appserver.OutcomeCommitted}, nil
+	if !result.Outcome.Valid() {
+		result.Outcome = appserver.OutcomeCommitted
+	}
+	if result.OperationID == "" {
+		result.OperationID = request.OperationID
+	}
+	return result, err
 }
 
 func (c *sessionClientAdapterTestClient) Cancel(_ context.Context, request appserver.CancelRequest) (appserver.CommandResult, error) {

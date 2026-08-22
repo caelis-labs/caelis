@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
@@ -569,9 +571,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.btwOverlay != nil {
 		return m.handleBTWOverlayKey(msg)
 	}
-	if m.turnRunning() && key.Matches(msg, m.keys.Interrupt) {
-		return m.requestRunningInterrupt()
-	}
 	// Command palette overlay.
 	if m.showPalette {
 		return m, m.handlePaletteKey(msg)
@@ -579,6 +578,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.refreshCompletionOverlaysBeforeAccept(msg)
 	if handled, cmd := m.handleActiveCompletionKey(msg); handled {
 		return m, cmd
+	}
+	if m.turnRunning() && key.Matches(msg, m.keys.Interrupt) {
+		return m.requestRunningInterrupt()
 	}
 	m.clearInputSelection()
 	if !key.Matches(msg, m.keys.Quit) {
@@ -800,13 +802,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.submitInteractiveLine(execLine, displayLine, fileAttachments)
 
 	case key.Matches(msg, m.keys.ImagePaste):
-		if m.turnRunning() {
-			return m, m.showHint("image paste unavailable while running; press Esc to interrupt first", hintOptions{
-				priority:       HintPriorityHigh,
-				clearOnMessage: true,
-				clearAfter:     systemHintDuration,
-			})
-		}
 		pastedImage, err := m.pasteClipboardImage()
 		if err != nil {
 			return m, m.reportClipboardError("paste image", err)
@@ -828,7 +823,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if textErr == nil && pasted {
 			return m, nil
 		}
-		if !m.turnRunning() && m.shouldFallbackTextPasteToImage(msg) {
+		if m.shouldFallbackTextPasteToImage(msg) {
 			pastedImage, imageErr := m.pasteClipboardImage()
 			if imageErr == nil && pastedImage {
 				return m, nil
@@ -1348,6 +1343,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 	}
 	deferUntilIdle := resolved.deferUntilIdle
 	layoutMayChange := mode == SubmissionModeOverlay
+	localID := m.allocateSubmissionID()
 	attachments = cloneAttachments(attachments)
 	displayLine = strings.TrimSpace(displayLine)
 	switch mode {
@@ -1357,6 +1353,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		deferDisplayLine := m.deferLocalUserDisplayLine(execLine)
 		if alreadyRunning {
 			m.pendingQueue.enqueue(pendingPromptEnqueueOptions{
+				localID:        localID,
 				execLine:       execLine,
 				displayLine:    displayLine,
 				attachments:    attachments,
@@ -1382,6 +1379,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		DisplayText: displayLine,
 		Attachments: attachments,
 		Mode:        resolved.gatewayMode,
+		localID:     localID,
 	}
 
 	// Clear input.
@@ -1480,11 +1478,53 @@ func (m *Model) deferLocalUserDisplayLine(line string) bool {
 
 func (m *Model) executeLineCmd(submission Submission) tea.Cmd {
 	return func() tea.Msg {
+		var msg tea.Msg
 		if m.cfg.executeLineCmd != nil {
-			return m.cfg.executeLineCmd(submission)
+			msg = m.cfg.executeLineCmd(submission)
+		} else {
+			msg = m.cfg.ExecuteLine(submission)
 		}
-		return m.cfg.ExecuteLine(submission)
+		result, ok := msg.(TaskResultMsg)
+		if !ok {
+			return msg
+		}
+		if submission.Mode == SubmissionModeActiveTurn && result.Err != nil && !result.Interrupted {
+			// A failed steer does not end the main turn that was already running.
+			// Preserve Control's effect certainty so only a proven no-effect
+			// outcome can restore a safely retriable draft.
+			result.ContinueRunning = true
+			failed := submission
+			failed.Attachments = cloneAttachments(submission.Attachments)
+			result.FailedSubmission = &failed
+			result.SubmissionOutcome = activeSubmissionErrorOutcome(result.Err)
+		}
+		return result
 	}
+}
+
+func activeSubmissionErrorOutcome(err error) appserver.Outcome {
+	var receiptErr *appserver.CommandReceiptError
+	if errors.As(err, &receiptErr) && receiptErr.Receipt.Outcome.Valid() {
+		return receiptErr.Receipt.Outcome
+	}
+	var outcomeErr *appserver.OutcomeError
+	if errors.As(err, &outcomeErr) && outcomeErr.Outcome.Valid() {
+		return outcomeErr.Outcome
+	}
+	// An untyped mutation or transport failure cannot prove that the request
+	// was rejected before dispatch.
+	return appserver.OutcomeUnknown
+}
+
+func (m *Model) allocateSubmissionID() uint64 {
+	if m == nil {
+		return 0
+	}
+	m.nextSubmissionID++
+	if m.nextSubmissionID == 0 {
+		m.nextSubmissionID++
+	}
+	return m.nextSubmissionID
 }
 
 func (m *Model) canSubmitRunningPromptNow() bool {

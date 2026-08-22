@@ -1023,6 +1023,70 @@ func TestChatAgentDrainsPendingUserSubmissionAfterToolResults(t *testing.T) {
 	}
 }
 
+func TestChatAgentDrainsPendingImageAsDurableUserMessage(t *testing.T) {
+	t.Parallel()
+
+	contentParts := []model.ContentPart{
+		{Type: model.ContentPartText, Text: "inspect this screenshot"},
+		{Type: model.ContentPartImage, MimeType: "image/png", Data: "aGVsbG8=", FileName: "shot.png"},
+	}
+	messages := []model.Message{}
+	var produced []*session.Event
+	accepted, err := (&Agent{}).drainPendingSubmissions(agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		DrainSubmissions: func() []agent.Submission {
+			return []agent.Submission{{
+				Kind:         agent.SubmissionKindConversation,
+				DisplayInput: "inspect this screenshot [image #1]",
+				ContentParts: contentParts,
+			}}
+		},
+	}), &messages, func(event *session.Event) bool {
+		produced = append(produced, session.CloneEvent(event))
+		return true
+	})
+	if err != nil || !accepted {
+		t.Fatalf("drainPendingSubmissions() = accepted %v, err %v", accepted, err)
+	}
+	if len(messages) != 1 || len(produced) != 1 {
+		t.Fatalf("drained messages/events = %d/%d, want 1/1", len(messages), len(produced))
+	}
+	wantMessage := model.MessageFromContentParts(model.RoleUser, contentParts)
+	if !reflect.DeepEqual(messages[0], wantMessage) {
+		t.Fatalf("model message = %#v, want %#v", messages[0], wantMessage)
+	}
+	event := produced[0]
+	if session.EventTypeOf(event) != session.EventTypeUser || event.Actor.Kind != session.ActorKindUser ||
+		event.Text != "inspect this screenshot [image #1]" || event.Message == nil ||
+		!reflect.DeepEqual(*event.Message, wantMessage) {
+		t.Fatalf("user image event = %#v", event)
+	}
+
+	raw, err := json.Marshal(produced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded []session.Event
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	replayed := make([]*session.Event, 0, len(decoded))
+	for _, stored := range decoded {
+		migrated, migrateErr := session.MigrateEvent(stored)
+		if migrateErr != nil {
+			t.Fatal(migrateErr)
+		}
+		if validateErr := session.ValidateDurableCoreEvent(&migrated); validateErr != nil {
+			t.Fatal(validateErr)
+		}
+		replayed = append(replayed, &migrated)
+	}
+	got := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: context.Background(), Events: replayed}))
+	if !reflect.DeepEqual(got, messages) {
+		t.Fatalf("rebuilt image model context = %#v, want runtime-produced %#v", got, messages)
+	}
+}
+
 func TestChatAgentDrainsModelContextWithoutClientProjection(t *testing.T) {
 	t.Parallel()
 

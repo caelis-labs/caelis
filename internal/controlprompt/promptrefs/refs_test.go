@@ -10,7 +10,7 @@ import (
 func TestScanSubmissionReferencesAllowsNamespacedSkills(t *testing.T) {
 	t.Parallel()
 
-	tokens := ScanSubmissionReferences("$figma:figma-use build @app.go")
+	tokens := ScanSubmissionReferences("/figma:figma-use build @app.go")
 	if len(tokens) != 2 {
 		t.Fatalf("ScanSubmissionReferences() returned %d tokens, want 2: %#v", len(tokens), tokens)
 	}
@@ -22,19 +22,40 @@ func TestScanSubmissionReferencesAllowsNamespacedSkills(t *testing.T) {
 	}
 }
 
-func TestSkillQueryAtCursorAllowsNamespacedSkills(t *testing.T) {
+func TestScanSubmissionReferencesFindsMultipleInlineSlashSkills(t *testing.T) {
 	t.Parallel()
 
-	input := []rune("use $figma:figma-use")
-	start, end, query, ok := SkillQueryAtCursor(input, len(input))
-	if !ok {
-		t.Fatal("SkillQueryAtCursor() ok = false, want true")
+	tokens := ScanSubmissionReferences("use /lint and /brainstorm on @app.go")
+	if len(tokens) != 3 {
+		t.Fatalf("ScanSubmissionReferences() returned %d tokens, want 3: %#v", len(tokens), tokens)
 	}
-	if query != "figma:figma-use" {
-		t.Fatalf("query = %q, want namespaced skill", query)
+	if tokens[0].Kind != KindSkill || tokens[0].Value != "lint" {
+		t.Fatalf("first skill token = %#v, want lint", tokens[0])
 	}
-	if got := string(input[start:end]); got != "$figma:figma-use" {
-		t.Fatalf("span = %q, want full namespaced skill token", got)
+	if tokens[1].Kind != KindSkill || tokens[1].Value != "brainstorm" {
+		t.Fatalf("second skill token = %#v, want brainstorm", tokens[1])
+	}
+	if tokens[2].Kind != KindFile || tokens[2].Value != "app.go" {
+		t.Fatalf("file token = %#v, want app.go", tokens[2])
+	}
+}
+
+func TestScanSubmissionReferencesIgnoresURLAndPathSlashTokens(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{
+		"see https://example.com/lint and /usr/bin/lint plus path/to/lint",
+		"compare //lint and use/lint",
+		"open C:/Users/docs",
+		"file://tmp/notes.md",
+		"./src/lint",
+		"../pkg/app",
+		"/lint这个命令怎么用?",
+	} {
+		tokens := ScanSubmissionReferences(input)
+		if len(tokens) != 0 {
+			t.Fatalf("ScanSubmissionReferences(%q) = %#v, want URL/path slash tokens ignored", input, tokens)
+		}
 	}
 }
 
@@ -46,7 +67,7 @@ func TestProjectSubmissionReferences(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	projected := ProjectSubmissionReferences("$CMPCTL inspect @dict.go", ProjectionOptions{
+	projected := ProjectSubmissionReferences("/CMPCTL inspect @dict.go", ProjectionOptions{
 		WorkspaceDir: workspace,
 		SkillNames:   map[string]string{"cmpctl": "cmpctl"},
 	})
@@ -62,8 +83,77 @@ func TestProjectSubmissionReferences(t *testing.T) {
 			t.Fatalf("projected input missing %q:\n%s", want, projected.Text)
 		}
 	}
-	if strings.Contains(projected.Text, "$CMPCTL") || strings.Contains(projected.Text, "@dict.go") {
+	if strings.Contains(projected.Text, "/CMPCTL") || strings.Contains(projected.Text, "@dict.go") {
 		t.Fatalf("projected input leaked raw references:\n%s", projected.Text)
+	}
+}
+
+func TestProjectSubmissionReferencesLoadsMultipleInlineSlashSkills(t *testing.T) {
+	t.Parallel()
+
+	projected := ProjectSubmissionReferences("use /lint and /brainstorm together", ProjectionOptions{
+		SkillNames: map[string]string{
+			"lint":       "lint",
+			"brainstorm": "superpowers:brainstorm",
+		},
+	})
+	if !projected.Changed {
+		t.Fatal("ProjectSubmissionReferences() changed = false, want multiple slash skills")
+	}
+	for _, want := range []string{
+		"Load skill `lint` before taking task actions, then follow its instructions.",
+		"Load skill `superpowers:brainstorm` before taking task actions, then follow its instructions.",
+		"User request:\nuse and together",
+	} {
+		if !strings.Contains(projected.Text, want) {
+			t.Fatalf("projected input missing %q:\n%s", want, projected.Text)
+		}
+	}
+	if strings.Contains(projected.Text, "/lint") || strings.Contains(projected.Text, "/brainstorm") {
+		t.Fatalf("projected input leaked raw slash skill tokens:\n%s", projected.Text)
+	}
+}
+
+func TestProjectSubmissionReferencesLoadsLeadingInternalSkillAndInlineSlashSkill(t *testing.T) {
+	t.Parallel()
+
+	projected := ProjectSubmissionReferences("$lint inspect /brainstorm", ProjectionOptions{
+		SkillNames: map[string]string{
+			"lint":       "lint",
+			"brainstorm": "superpowers:brainstorm",
+		},
+	})
+	if !projected.Changed {
+		t.Fatal("ProjectSubmissionReferences() changed = false, want leading internal skill plus inline slash skill")
+	}
+	for _, want := range []string{
+		"Load skill `lint` before taking task actions, then follow its instructions.",
+		"Load skill `superpowers:brainstorm` before taking task actions, then follow its instructions.",
+		"User request:\ninspect",
+	} {
+		if !strings.Contains(projected.Text, want) {
+			t.Fatalf("projected input missing %q:\n%s", want, projected.Text)
+		}
+	}
+	if strings.Contains(projected.Text, "$lint") || strings.Contains(projected.Text, "/brainstorm") {
+		t.Fatalf("projected input leaked raw skill tokens:\n%s", projected.Text)
+	}
+}
+
+func TestProjectSubmissionReferencesLeavesUnresolvedSlashTokensUntouched(t *testing.T) {
+	t.Parallel()
+
+	projected := ProjectSubmissionReferences("please use /notaskill and /lint", ProjectionOptions{
+		SkillNames: map[string]string{"lint": "lint"},
+	})
+	if !projected.Changed {
+		t.Fatal("ProjectSubmissionReferences() changed = false, want resolved /lint")
+	}
+	if !strings.Contains(projected.Text, "Load skill `lint`") {
+		t.Fatalf("projected input missing resolved skill:\n%s", projected.Text)
+	}
+	if !strings.Contains(projected.Text, "/notaskill") {
+		t.Fatalf("projected input dropped unresolved slash token:\n%s", projected.Text)
 	}
 }
 
@@ -96,7 +186,7 @@ func TestScanSubmissionReferencesUsesAtOnlyForFiles(t *testing.T) {
 func TestProjectSubmissionReferencesAllowsNamespacedSkills(t *testing.T) {
 	t.Parallel()
 
-	projected := ProjectSubmissionReferences("$figma:figma-use sync screen", ProjectionOptions{
+	projected := ProjectSubmissionReferences("/figma:figma-use sync screen", ProjectionOptions{
 		SkillNames: map[string]string{"figma:figma-use": "figma:figma-use"},
 	})
 	if !projected.Changed {
@@ -108,7 +198,24 @@ func TestProjectSubmissionReferencesAllowsNamespacedSkills(t *testing.T) {
 	if strings.Contains(projected.Text, "`skill` tool") {
 		t.Fatalf("projected namespaced skill input should stay tool-agnostic:\n%s", projected.Text)
 	}
-	if strings.Contains(projected.Text, "$figma:figma-use") {
+	if strings.Contains(projected.Text, "/figma:figma-use") {
 		t.Fatalf("projected namespaced skill input leaked raw skill token:\n%s", projected.Text)
+	}
+}
+
+func TestProjectSubmissionReferencesStillProjectsInternalCanonicalSkillTokens(t *testing.T) {
+	t.Parallel()
+
+	projected := ProjectSubmissionReferences("$cmpctl inspect", ProjectionOptions{
+		SkillNames: map[string]string{"cmpctl": "cmpctl"},
+	})
+	if !projected.Changed {
+		t.Fatal("ProjectSubmissionReferences() changed = false, want internal $canonical projection")
+	}
+	if !strings.Contains(projected.Text, "Load skill `cmpctl` before taking task actions, then follow its instructions.") {
+		t.Fatalf("projected internal skill input missing load instruction:\n%s", projected.Text)
+	}
+	if strings.Contains(projected.Text, "$cmpctl") {
+		t.Fatalf("projected internal skill input leaked raw $ token:\n%s", projected.Text)
 	}
 }

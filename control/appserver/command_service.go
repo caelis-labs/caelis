@@ -432,6 +432,7 @@ func validateHandoffRequest(request HandoffRequest) error {
 
 func validatePromptContent(kind string, input string, parts []model.ContentPart) error {
 	hasMeaningfulContent := strings.TrimSpace(input) != ""
+	totalImageBytes := 0
 	for index, part := range parts {
 		switch part.Type {
 		case model.ContentPartText:
@@ -457,6 +458,13 @@ func validatePromptContent(kind string, input string, parts []model.ContentPart)
 			if err != nil || len(decoded) == 0 {
 				return fmt.Errorf("controlclient: %s content_parts[%d] image data must be non-empty base64", kind, index)
 			}
+			if len(decoded) > MaxPromptImageBytes {
+				return fmt.Errorf("controlclient: %s content_parts[%d] image is too large (%d bytes, limit %d)", kind, index, len(decoded), MaxPromptImageBytes)
+			}
+			if len(decoded) > MaxPromptImageTotalBytes-totalImageBytes {
+				return fmt.Errorf("controlclient: %s image content exceeds the aggregate limit of %d bytes", kind, MaxPromptImageTotalBytes)
+			}
+			totalImageBytes += len(decoded)
 			hasMeaningfulContent = true
 		default:
 			return fmt.Errorf("controlclient: %s content_parts[%d] has unsupported type %q", kind, index, part.Type)

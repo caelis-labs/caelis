@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -604,7 +605,11 @@ func (m *Model) statusRefreshCmd() tea.Cmd {
 func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 	if msg.ContinueRunning {
 		if msg.Err != nil {
-			m.pendingQueue = nil
+			if msg.FailedSubmission != nil {
+				m.handleFailedActiveSubmission(*msg.FailedSubmission, msg.SubmissionOutcome)
+			} else {
+				m.pendingQueue = nil
+			}
 			errLine := terminalErrorLine(msg.Err)
 			m.commitLine(errLine)
 			m.ensureViewportLayout()
@@ -627,6 +632,40 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, tea.Quit)
 	}
 	return m, cmd
+}
+
+func (m *Model) handleFailedActiveSubmission(submission Submission, outcome appserver.Outcome) {
+	if m == nil {
+		return
+	}
+	pending, matched := m.pendingQueue.removeSubmission(submission)
+	if outcome != appserver.OutcomeRejected && outcome != appserver.OutcomeConflicted {
+		return
+	}
+	if !matched {
+		if submission.localID != 0 {
+			// A same-text gateway echo may have raced ahead and consumed this
+			// rejected entry. Because this outcome proves no effect, that echo
+			// belongs to another equivalent pending submission; consume its
+			// remaining queue entry before restoring the exact failed draft.
+			_, _ = m.pendingQueue.removeMatching(submission.Text, submission.DisplayText)
+		}
+		pending = pendingPrompt{
+			localID:     submission.localID,
+			execLine:    submission.Text,
+			displayLine: submission.DisplayText,
+			attachments: cloneAttachments(submission.Attachments),
+		}
+	}
+	// Never overwrite text or attachments the user entered while the
+	// asynchronous active-turn submission was in flight. The rejected entry is
+	// still available through history in that case.
+	if strings.TrimSpace(m.textarea.Value()) != "" || len(m.inputAttachments) != 0 {
+		return
+	}
+	m.restoreHistoryEntry(pending.execLine, attachmentsToInputAttachments(pending.attachments))
+	m.syncTextareaChrome()
+	m.clearInputOverlays()
 }
 
 func terminalErrorLine(err error) string {

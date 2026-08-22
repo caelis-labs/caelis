@@ -12,22 +12,25 @@ import (
 	"unicode"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
-
-const maxAttachmentImageBytes = 20_000_000
 
 func contentPartsFromSubmission(input string, items []controlprompt.Attachment, workspace string) ([]model.ContentPart, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}
 	out := make([]model.ContentPart, 0, len(items)*2+1)
+	totalImageBytes := 0
 	err := walkSubmissionAttachments(input, items, func(text string) error {
 		out = append(out, model.ContentPart{Type: model.ContentPartText, Text: text})
 		return nil
 	}, func(_ int, item controlprompt.Attachment) error {
-		part, err := imageContentPartFromAttachment(item, workspace)
+		part, imageBytes, err := imageContentPartFromAttachment(item, workspace)
 		if err != nil {
+			return err
+		}
+		if err := addPromptImageBytes(&totalImageBytes, imageBytes); err != nil {
 			return err
 		}
 		out = append(out, part)
@@ -146,69 +149,69 @@ func lastDisplayInputRune(s string) (rune, bool) {
 	return out, ok
 }
 
-func imageContentPartFromAttachment(item controlprompt.Attachment, workspace string) (model.ContentPart, error) {
-	if part, ok, err := imageContentPartFromInlineAttachment(item); ok || err != nil {
-		return part, err
+func imageContentPartFromAttachment(item controlprompt.Attachment, workspace string) (model.ContentPart, int, error) {
+	if part, imageBytes, ok, err := imageContentPartFromInlineAttachment(item); ok || err != nil {
+		return part, imageBytes, err
 	}
 	raw := strings.TrimSpace(item.Name)
 	if raw == "" {
-		return model.ContentPart{}, fmt.Errorf("image attachment path is empty")
+		return model.ContentPart{}, 0, fmt.Errorf("image attachment path is empty")
 	}
 	path, err := resolveAttachmentPath(raw, workspace)
 	if err != nil {
-		return model.ContentPart{}, err
+		return model.ContentPart{}, 0, err
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return model.ContentPart{}, fmt.Errorf("stat image attachment %q: %w", raw, err)
+		return model.ContentPart{}, 0, fmt.Errorf("stat image attachment %q: %w", raw, err)
 	}
-	if info.Size() > maxAttachmentImageBytes {
-		return model.ContentPart{}, fmt.Errorf("image attachment %q is too large (%d bytes, limit %d)", raw, info.Size(), maxAttachmentImageBytes)
+	if info.Size() > appserver.MaxPromptImageBytes {
+		return model.ContentPart{}, 0, fmt.Errorf("image attachment %q is too large (%d bytes, limit %d)", raw, info.Size(), appserver.MaxPromptImageBytes)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return model.ContentPart{}, fmt.Errorf("read image attachment %q: %w", raw, err)
+		return model.ContentPart{}, 0, fmt.Errorf("read image attachment %q: %w", raw, err)
 	}
 	if len(data) == 0 {
-		return model.ContentPart{}, fmt.Errorf("image attachment %q is empty", raw)
+		return model.ContentPart{}, 0, fmt.Errorf("image attachment %q is empty", raw)
 	}
 	mimeType, ok := detectSupportedImageMimeType(data)
 	if !ok {
-		return model.ContentPart{}, fmt.Errorf("attachment %q is not a supported image (detected %s)", raw, imageMimeType(data))
+		return model.ContentPart{}, 0, fmt.Errorf("attachment %q is not a supported image (detected %s)", raw, imageMimeType(data))
 	}
 	return model.ContentPart{
 		Type:     model.ContentPartImage,
 		MimeType: mimeType,
 		Data:     base64.StdEncoding.EncodeToString(data),
 		FileName: filepath.Base(path),
-	}, nil
+	}, len(data), nil
 }
 
-func imageContentPartFromInlineAttachment(item controlprompt.Attachment) (model.ContentPart, bool, error) {
+func imageContentPartFromInlineAttachment(item controlprompt.Attachment) (model.ContentPart, int, bool, error) {
 	data := strings.TrimSpace(item.Data)
 	if data == "" {
-		return model.ContentPart{}, false, nil
+		return model.ContentPart{}, 0, false, nil
 	}
 	raw, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
-		return model.ContentPart{}, true, fmt.Errorf("decode inline image attachment %q: %w", strings.TrimSpace(item.Name), err)
+		return model.ContentPart{}, 0, true, fmt.Errorf("decode inline image attachment %q: %w", strings.TrimSpace(item.Name), err)
 	}
 	if len(raw) == 0 {
-		return model.ContentPart{}, true, fmt.Errorf("inline image attachment %q is empty", strings.TrimSpace(item.Name))
+		return model.ContentPart{}, 0, true, fmt.Errorf("inline image attachment %q is empty", strings.TrimSpace(item.Name))
 	}
-	if len(raw) > maxAttachmentImageBytes {
-		return model.ContentPart{}, true, fmt.Errorf("inline image attachment %q is too large (%d bytes, limit %d)", strings.TrimSpace(item.Name), len(raw), maxAttachmentImageBytes)
+	if len(raw) > appserver.MaxPromptImageBytes {
+		return model.ContentPart{}, 0, true, fmt.Errorf("inline image attachment %q is too large (%d bytes, limit %d)", strings.TrimSpace(item.Name), len(raw), appserver.MaxPromptImageBytes)
 	}
 	mimeType, ok := detectSupportedImageMimeType(raw)
 	if !ok {
-		return model.ContentPart{}, true, fmt.Errorf("inline attachment %q is not a supported image (detected %s)", strings.TrimSpace(item.Name), imageMimeType(raw))
+		return model.ContentPart{}, 0, true, fmt.Errorf("inline attachment %q is not a supported image (detected %s)", strings.TrimSpace(item.Name), imageMimeType(raw))
 	}
 	return model.ContentPart{
 		Type:     model.ContentPartImage,
 		MimeType: mimeType,
 		Data:     data,
 		FileName: strings.TrimSpace(item.Name),
-	}, true, nil
+	}, len(raw), true, nil
 }
 
 func cloneAndSortAttachments(items []controlprompt.Attachment, textLen int) []controlprompt.Attachment {
@@ -257,9 +260,13 @@ func contentPartsFromAttachments(items []controlprompt.Attachment, workspace str
 		return nil, nil
 	}
 	out := make([]model.ContentPart, 0, len(items))
+	totalImageBytes := 0
 	for _, item := range cloneAndSortAttachments(items, 0) {
-		part, err := imageContentPartFromAttachment(item, workspace)
+		part, imageBytes, err := imageContentPartFromAttachment(item, workspace)
 		if err != nil {
+			return nil, err
+		}
+		if err := addPromptImageBytes(&totalImageBytes, imageBytes); err != nil {
 			return nil, err
 		}
 		out = append(out, part)
@@ -268,6 +275,14 @@ func contentPartsFromAttachments(items []controlprompt.Attachment, workspace str
 		return nil, nil
 	}
 	return out, nil
+}
+
+func addPromptImageBytes(total *int, imageBytes int) error {
+	if total == nil || *total < 0 || *total > appserver.MaxPromptImageTotalBytes || imageBytes < 0 || imageBytes > appserver.MaxPromptImageTotalBytes-*total {
+		return fmt.Errorf("image attachments exceed the aggregate limit of %d bytes", appserver.MaxPromptImageTotalBytes)
+	}
+	*total += imageBytes
+	return nil
 }
 
 func resolveAttachmentPath(raw string, workspace string) (string, error) {

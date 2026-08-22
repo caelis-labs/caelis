@@ -14,6 +14,7 @@ const (
 )
 
 type pendingPrompt struct {
+	localID     uint64
 	execLine    string
 	displayLine string
 	attachments []Attachment
@@ -23,6 +24,7 @@ type pendingPrompt struct {
 type pendingPromptQueue []pendingPrompt
 
 type pendingPromptEnqueueOptions struct {
+	localID        uint64
 	execLine       string
 	displayLine    string
 	attachments    []Attachment
@@ -43,6 +45,7 @@ func (q *pendingPromptQueue) enqueue(opts pendingPromptEnqueueOptions) {
 		}
 	}
 	*q = append(*q, pendingPrompt{
+		localID:     opts.localID,
 		execLine:    strings.TrimSpace(opts.execLine),
 		displayLine: strings.TrimSpace(opts.displayLine),
 		attachments: cloneAttachments(opts.attachments),
@@ -51,6 +54,10 @@ func (q *pendingPromptQueue) enqueue(opts pendingPromptEnqueueOptions) {
 }
 
 func (q *pendingPromptQueue) matchGatewayEcho(texts ...string) (pendingPrompt, bool) {
+	return q.removeMatching(texts...)
+}
+
+func (q *pendingPromptQueue) removeMatching(texts ...string) (pendingPrompt, bool) {
 	if q == nil || len(*q) == 0 {
 		return pendingPrompt{}, false
 	}
@@ -72,6 +79,23 @@ func (q *pendingPromptQueue) matchGatewayEcho(texts ...string) (pendingPrompt, b
 		}
 	}
 	return pendingPrompt{}, false
+}
+
+func (q *pendingPromptQueue) removeSubmission(submission Submission) (pendingPrompt, bool) {
+	if q == nil || len(*q) == 0 {
+		return pendingPrompt{}, false
+	}
+	if submission.localID != 0 {
+		for i, pending := range *q {
+			if pending.localID != submission.localID {
+				continue
+			}
+			*q = append((*q)[:i], (*q)[i+1:]...)
+			return pending, true
+		}
+		return pendingPrompt{}, false
+	}
+	return q.removeMatching(submission.Text, submission.DisplayText)
 }
 
 func (q pendingPromptQueue) visibleCount() int {

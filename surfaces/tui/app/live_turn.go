@@ -91,7 +91,9 @@ func (m *Model) finishLiveTurn(endedAt time.Time, interrupted bool, err error) t
 	m.stopLiveTurn()
 	m.compactNoticePair = compactNoticePairState{}
 	m.planEntries = m.planEntries[:0]
-	m.clearInputAttachments()
+	// The composer remains usable while a turn runs. Preserve any image draft
+	// added after the current submission; the submission path already clears
+	// attachments that were actually sent.
 	m.syncTextareaChrome()
 	m.clearInputOverlays()
 	if err != nil && !interrupted {

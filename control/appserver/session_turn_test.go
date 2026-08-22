@@ -468,6 +468,18 @@ func TestParticipantTurnClientSteersExactObservedTarget(t *testing.T) {
 	if len(steerRequest.ContentParts) != 1 || steerRequest.ContentParts[0].Text != "part" {
 		t.Fatalf("Steer() content parts = %#v, want preserved part", steerRequest.ContentParts)
 	}
+
+	sessions.steerFn = func(_ context.Context, request SteerRequest) (CommandResult, error) {
+		return CommandResult{
+			OperationID: request.OperationID,
+			Outcome:     OutcomeRejected,
+			Detail:      "steer rejected",
+		}, nil
+	}
+	var receipt *CommandReceiptError
+	if err := turn.Steer(context.Background(), "retry", "", nil); !errors.As(err, &receipt) || receipt.Receipt.Outcome != OutcomeRejected {
+		t.Fatalf("Steer(replayed rejection) = %v, want rejected receipt", err)
+	}
 }
 
 func TestSessionTurnClientReportsUnknownAdmissionWithoutTarget(t *testing.T) {

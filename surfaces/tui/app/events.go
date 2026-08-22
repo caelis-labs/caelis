@@ -87,6 +87,11 @@ type TaskResultMsg struct {
 	Interrupted         bool
 	ContinueRunning     bool
 	SuppressTurnDivider bool
+	// FailedSubmission identifies the exact active-turn prompt whose submission
+	// command failed. SubmissionOutcome decides whether the draft is safe to
+	// restore or must remain uncertain and non-retriable.
+	FailedSubmission  *Submission
+	SubmissionOutcome appserver.Outcome
 }
 
 type RunningInterruptResultMsg struct {

@@ -21,18 +21,22 @@ func (m *Model) refreshSlashCommands() {
 		selected = strings.TrimSpace(m.slashCandidates[m.slashIndex])
 	}
 	m.clearSlashCompletion()
-	if m.turnRunning() || m.slashArgActive || m.isWizardActive() {
+	if m.slashArgActive || m.isWizardActive() {
 		return
 	}
 	if len(m.mentionCandidates) > 0 || len(m.resumeCandidates) > 0 || len(m.slashArgCandidates) > 0 {
 		return
 	}
-	query, ok := slashCommandQueryAtCursor(m.input, m.cursor)
+	query, start, end, skillOnly, ok := slashCompletionTargetAtCursor(m.input, m.cursor, m.turnRunning())
 	if !ok {
 		return
 	}
 
-	assembled := assembleSlashCompletionCandidates(m.cfg.Commands, m.slashSkillCatalog, query)
+	commands := m.cfg.Commands
+	if skillOnly {
+		commands = nil
+	}
+	assembled := assembleSlashCompletionCandidates(commands, m.slashSkillCatalog, query)
 	if len(assembled.commands) == 0 {
 		return
 	}
@@ -49,16 +53,19 @@ func (m *Model) refreshSlashCommands() {
 		}
 	}
 	m.slashPrefix = "/" + query
+	m.slashSkillOnly = skillOnly
+	m.slashStart = start
+	m.slashEnd = end
 }
 
 // requestSlashSkillCatalog loads the immutable Runtime skill snapshot outside
 // the Bubble Tea update loop. Built-in slash commands are always refreshed
 // immediately; the skill results are merged when this command completes.
 func (m *Model) requestSlashSkillCatalog() tea.Cmd {
-	if m == nil || m.cfg.SkillComplete == nil || m.slashSkillLoaded || m.slashSkillLoadPending || m.turnRunning() {
+	if m == nil || m.cfg.SkillComplete == nil || m.slashSkillLoaded || m.slashSkillLoadPending {
 		return nil
 	}
-	if _, ok := slashCommandQueryAtCursor(m.input, m.cursor); !ok {
+	if _, _, _, _, ok := slashCompletionTargetAtCursor(m.input, m.cursor, m.turnRunning()); !ok {
 		return nil
 	}
 	m.slashSkillLoadSeq++
@@ -188,6 +195,10 @@ func (m *Model) applySlashCommandCompletion() tea.Cmd {
 	if selected == "" {
 		return nil
 	}
+	if m.slashSkillOnly {
+		m.applySlashSkillReferenceCompletion(selected)
+		return nil
+	}
 	command := strings.TrimPrefix(selected, "/")
 	if strings.EqualFold(command, "subagent") {
 		m.clearSlashCompletion()
@@ -208,6 +219,21 @@ func (m *Model) applySlashCommandCompletion() tea.Cmd {
 	return cmd
 }
 
+func (m *Model) applySlashSkillReferenceCompletion(selected string) {
+	selected = strings.TrimSpace(selected)
+	if selected == "" {
+		return
+	}
+	replaced, nextCursor := replaceRuneSpan(m.input, m.slashStart, m.slashEnd, selected)
+	m.input = replaced
+	m.cursor = nextCursor
+	if m.cursor == len(m.input) {
+		m.input = append(m.input, ' ')
+		m.cursor++
+	}
+	m.clearSlashCompletion()
+}
+
 func slashCommandSubmitsOnCompletion(command string) bool {
 	switch strings.ToLower(strings.TrimSpace(command)) {
 	case "help", "status", "exit", "quit":
@@ -220,9 +246,11 @@ func slashCommandSubmitsOnCompletion(command string) bool {
 func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Back):
-		if _, ok := slashCommandQueryAtCursor(m.input, m.cursor); ok {
-			m.setInputText("")
-			m.syncTextareaFromInput()
+		if !m.slashSkillOnly {
+			if _, ok := slashCommandQueryAtCursor(m.input, m.cursor); ok {
+				m.setInputText("")
+				m.syncTextareaFromInput()
+			}
 		}
 		m.clearSlashCompletion()
 		return true, nil
@@ -247,7 +275,10 @@ func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.Accept):
-		if m.turnRunning() || len(m.slashCandidates) == 0 {
+		if len(m.slashCandidates) == 0 {
+			return true, nil
+		}
+		if m.turnRunning() && !m.slashSkillOnly {
 			return true, nil
 		}
 		cmd := m.applySlashCommandCompletion()
@@ -294,4 +325,7 @@ func (m *Model) clearSlashCompletion() {
 	m.slashDetails = nil
 	m.slashIndex = 0
 	m.slashPrefix = ""
+	m.slashSkillOnly = false
+	m.slashStart = 0
+	m.slashEnd = 0
 }

@@ -171,6 +171,90 @@ func TestRouterDirectSkillReportsAmbiguousIdentity(t *testing.T) {
 	}
 }
 
+func TestRouterBestEffortUnknownSlashFallsBackToOrdinaryPrompt(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeService{turn: &fakeTurn{id: "turn-1"}}
+	router := New(RouterConfig{Service: svc})
+
+	glued, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/status这个命令怎么用?"}})
+	if err != nil {
+		t.Fatalf("Route(/status这个命令怎么用?) error = %v", err)
+	}
+	if glued.Turn == nil || firstNotice(glued) != "" || svc.submitted.Text != "/status这个命令怎么用?" {
+		t.Fatalf("Route(/status这个命令怎么用?) = %#v submitted=%#v, want ordinary prompt", glued, svc.submitted)
+	}
+
+	svc.submitted = Submission{}
+	unknown, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/unknown command"}})
+	if err != nil {
+		t.Fatalf("Route(/unknown command) error = %v", err)
+	}
+	if unknown.Turn == nil || firstNotice(unknown) != "" || svc.submitted.Text != "/unknown command" {
+		t.Fatalf("Route(/unknown command) = %#v submitted=%#v, want ordinary prompt", unknown, svc.submitted)
+	}
+}
+
+func TestRouterExactLineLeadingCommandsStillWin(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeService{status: controlstatus.StatusSnapshot{
+		ModelStatus: controlstatus.StatusModel{Display: "ollama/llama3"},
+	}}
+	router := New(RouterConfig{Service: svc})
+
+	status, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/status"}})
+	if err != nil {
+		t.Fatalf("Route(/status) error = %v", err)
+	}
+	if status.SlashResult == nil || status.SlashResult.Kind != SlashCommandResultStatus || svc.submitted.Text != "" {
+		t.Fatalf("Route(/status) = %#v submitted=%#v, want exact command", status, svc.submitted)
+	}
+
+	usage, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/status 这个命令怎么用?"}})
+	if err != nil {
+		t.Fatalf("Route(/status with args) error = %v", err)
+	}
+	if usage.SlashResult != nil || !strings.Contains(firstNotice(usage), "usage: /status") || svc.submitted.Text != "" {
+		t.Fatalf("Route(/status with args) = %#v submitted=%#v, want exact command usage", usage, svc.submitted)
+	}
+}
+
+func TestRouterLeadingSkillKeepsInlineSlashSkillInSubmittedText(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeService{
+		turn: &fakeTurn{id: "turn-1"},
+		skillResolutions: map[string]SkillResolveResult{
+			"lint": {Canonical: "lint"},
+		},
+	}
+	text := "/lint inspect /brainstorm"
+	attachment := Attachment{
+		Name:     "diagram.png",
+		Offset:   len([]rune("/lint inspect /brainstorm")),
+		MimeType: "image/png",
+		Data:     "encoded",
+	}
+	result, err := New(RouterConfig{Service: svc}).Route(context.Background(), Request{
+		Submission: Submission{Text: text, DisplayText: text, Attachments: []Attachment{attachment}},
+	})
+	if err != nil {
+		t.Fatalf("Route(%q) error = %v", text, err)
+	}
+	if !result.Handled || svc.submitted.Text != "$lint inspect /brainstorm" || svc.submitted.DisplayText != text {
+		t.Fatalf("Route(%q) = %#v submission=%#v, want leading skill rewrite that keeps inline slash skill", text, result, svc.submitted)
+	}
+	if len(svc.submitted.Attachments) != 1 {
+		t.Fatalf("Route(%q) attachments = %#v, want one", text, svc.submitted.Attachments)
+	}
+	got := svc.submitted.Attachments[0]
+	wantOffset := len([]rune("$lint inspect /brainstorm"))
+	if got.Offset != wantOffset || got.Name != attachment.Name || got.MimeType != attachment.MimeType || got.Data != attachment.Data {
+		t.Fatalf("Route(%q) attachment = %#v, want offset=%d and preserved payload", text, got, wantOffset)
+	}
+}
+
 func TestRouterSkillRewritePreservesAttachmentOffsets(t *testing.T) {
 	t.Parallel()
 
@@ -329,8 +413,8 @@ func TestRouterFixedProfileRejectsRawAgentAndRoutesNormalPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/helper) error = %v", err)
 	}
-	if !raw.Handled || !strings.Contains(firstNotice(raw), "Unknown command: /helper") || svc.startedAgent != "" {
-		t.Fatalf("raw Agent route = %#v started=%q, want hidden", raw, svc.startedAgent)
+	if raw.Turn == nil || firstNotice(raw) != "" || svc.submitted.Text != "/helper inspect repo" || svc.startedAgent != "" {
+		t.Fatalf("raw Agent route = %#v started=%q submitted=%#v, want ordinary prompt without Agent dispatch", raw, svc.startedAgent, svc.submitted)
 	}
 	dynamic, err := router.Route(context.Background(), Request{Submission: Submission{
 		Text:        "/breeze inspect repo",
@@ -356,8 +440,8 @@ func TestRouterFixedProfileRejectsRawAgentAndRoutesNormalPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/unknown) error = %v", err)
 	}
-	if !unknown.Handled || !strings.Contains(firstNotice(unknown), "Unknown command: /unknown") {
-		t.Fatalf("Route(/unknown) = %#v, want fail-closed notice", unknown)
+	if unknown.Turn == nil || firstNotice(unknown) != "" || svc.submitted.Text != "/unknown command" {
+		t.Fatalf("Route(/unknown) = %#v submitted=%#v, want ordinary prompt", unknown, svc.submitted)
 	}
 	normal, err := router.Route(context.Background(), Request{Submission: Submission{Text: "hello"}})
 	if err != nil {
@@ -394,8 +478,8 @@ func TestRouterDirectAgentRunSlashContinuesAddressableRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/helper(maya)) error = %v", err)
 	}
-	if !delegated.Handled || !strings.Contains(firstNotice(delegated), "Unknown command: /breeze(maya)") {
-		t.Fatalf("Route(/breeze(maya)) = %#v, want delegated run hidden", delegated)
+	if delegated.Turn == nil || firstNotice(delegated) != "" || svc.submitted.Text != "/breeze(maya) continue" || svc.continuedHandle != "breeze(lina)" {
+		t.Fatalf("Route(/breeze(maya)) = %#v continued=%q submitted=%#v, want ordinary prompt without delegated run", delegated, svc.continuedHandle, svc.submitted)
 	}
 }
 
@@ -421,8 +505,8 @@ func TestRouterDoesNotExposeRemoteControllerCommandsAndKeepsSideAgentRuns(t *tes
 	if err != nil {
 		t.Fatalf("Route(/foo) error = %v", err)
 	}
-	if remote.Turn != nil || svc.submitted.Text != "" || !strings.Contains(firstNotice(remote), "Unknown command: /foo") {
-		t.Fatalf("Route(/foo) = %#v submitted=%#v, want remote controller command hidden", remote, svc.submitted)
+	if remote.Turn == nil || firstNotice(remote) != "" || svc.submitted.Text != "/foo remote" || svc.startedAgent != "" {
+		t.Fatalf("Route(/foo) = %#v submitted=%#v started=%q, want ordinary prompt without remote command dispatch", remote, svc.submitted, svc.startedAgent)
 	}
 	svc.submitted = Submission{}
 	agent, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/orbit inspect"}})
@@ -463,8 +547,8 @@ func TestRouterDoesNotForwardRemovedLeadCommandToRemoteController(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Route(/lead) error = %v", err)
 	}
-	if !result.Handled || !strings.Contains(firstNotice(result), "Unknown command: /lead") || svc.submitted.Text != "" {
-		t.Fatalf("Route(/lead) = %#v submitted=%#v, want removed command hidden", result, svc.submitted)
+	if result.Turn == nil || firstNotice(result) != "" || svc.submitted.Text != "/lead helper" || svc.startedAgent != "" {
+		t.Fatalf("Route(/lead) = %#v submitted=%#v started=%q, want ordinary prompt without removed command dispatch", result, svc.submitted, svc.startedAgent)
 	}
 }
 
@@ -483,15 +567,15 @@ func TestRouterDynamicCommandAllowedOnlyPermitsFixedProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/reviewer) error = %v", err)
 	}
-	if !hidden.Handled || !strings.Contains(firstNotice(hidden), "Unknown command: /reviewer") || svc.startedAgent != "" {
-		t.Fatalf("Route(/reviewer) = %#v startedAgent=%q, want fail-closed notice", hidden, svc.startedAgent)
+	if hidden.Turn == nil || firstNotice(hidden) != "" || svc.submitted.Text != "/reviewer inspect" || svc.startedAgent != "" {
+		t.Fatalf("Route(/reviewer) = %#v startedAgent=%q submitted=%#v, want ordinary prompt", hidden, svc.startedAgent, svc.submitted)
 	}
 	raw, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/helper inspect"}})
 	if err != nil {
 		t.Fatalf("Route(/helper) error = %v", err)
 	}
-	if !raw.Handled || !strings.Contains(firstNotice(raw), "Unknown command: /helper") || svc.startedAgent != "" {
-		t.Fatalf("Route(/helper) = %#v agent=%q, want raw Agent hidden", raw, svc.startedAgent)
+	if raw.Turn == nil || firstNotice(raw) != "" || svc.submitted.Text != "/helper inspect" || svc.startedAgent != "" {
+		t.Fatalf("Route(/helper) = %#v agent=%q submitted=%#v, want ordinary prompt", raw, svc.startedAgent, svc.submitted)
 	}
 	allowed, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/breeze inspect"}})
 	if err != nil {
@@ -532,8 +616,8 @@ func TestRouterDispatchesConfiguredCustomRoleButRejectsUnknownHandle(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(firstNotice(unknown), "Unknown command") || base.startedAgent != "" {
-		t.Fatalf("Route(/unknown) = %#v agent=%q", unknown, base.startedAgent)
+	if unknown.Turn == nil || firstNotice(unknown) != "" || base.submitted.Text != "/unknown inspect" || base.startedAgent != "" {
+		t.Fatalf("Route(/unknown) = %#v agent=%q submitted=%#v, want ordinary prompt", unknown, base.startedAgent, base.submitted)
 	}
 }
 
@@ -566,24 +650,24 @@ func TestRouterReviewForwardsAttachmentsForPromptRange(t *testing.T) {
 	}
 }
 
-func TestRouterRemovedAgentCommandsFailClosed(t *testing.T) {
-	svc := &fakeService{}
+func TestRouterRemovedAgentCommandsFallBackToOrdinaryPrompt(t *testing.T) {
+	svc := &fakeService{turn: &fakeTurn{id: "turn-1"}}
 	router := New(RouterConfig{Service: svc})
 
 	install, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/agent install claude"}})
 	if err != nil {
 		t.Fatalf("Route(/agent install) error = %v", err)
 	}
-	if !install.Handled || !strings.Contains(firstNotice(install), "Unknown command: /agent") {
-		t.Fatalf("Route(/agent install) = %#v, want removed command", install)
+	if install.Turn == nil || firstNotice(install) != "" || svc.submitted.Text != "/agent install claude" || svc.startedAgent != "" {
+		t.Fatalf("Route(/agent install) = %#v submitted=%#v started=%q, want ordinary prompt", install, svc.submitted, svc.startedAgent)
 	}
 
 	addInstall, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/agent add --install claude"}})
 	if err != nil {
 		t.Fatalf("Route(/agent add --install) error = %v", err)
 	}
-	if !addInstall.Handled || !strings.Contains(firstNotice(addInstall), "Unknown command: /agent") {
-		t.Fatalf("Route(/agent add --install) = %#v, want removed command", addInstall)
+	if addInstall.Turn == nil || firstNotice(addInstall) != "" || svc.submitted.Text != "/agent add --install claude" || svc.startedAgent != "" {
+		t.Fatalf("Route(/agent add --install) = %#v submitted=%#v started=%q, want ordinary prompt", addInstall, svc.submitted, svc.startedAgent)
 	}
 }
 
@@ -608,8 +692,8 @@ func TestRouterCoreCommandAllowedFiltersSharedSlash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/new) error = %v", err)
 	}
-	if !newSession.Handled || !strings.Contains(firstNotice(newSession), "Unknown command: /new") {
-		t.Fatalf("Route(/new) = %#v, want fail-closed notice when core command is filtered", newSession)
+	if firstNotice(newSession) != "" || svc.submitted.Text != "/new" || svc.resetCalls != 0 {
+		t.Fatalf("Route(/new) = %#v submitted=%#v resetCalls=%d, want ordinary prompt when core command is filtered", newSession, svc.submitted, svc.resetCalls)
 	}
 }
 

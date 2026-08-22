@@ -75,6 +75,8 @@ func errorCodeForStatus(status int) errorcode.Code {
 		return errorcode.Conflict
 	case http.StatusServiceUnavailable:
 		return errorcode.Unavailable
+	case http.StatusRequestEntityTooLarge:
+		return errorcode.ResourceExhausted
 	default:
 		return errorcode.Internal
 	}

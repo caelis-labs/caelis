@@ -350,17 +350,17 @@ func (r *clientSessionReconnect) Cancel() {
 
 func (r *clientSessionReconnect) steer(ctx context.Context, input, displayInput string, contentParts []model.ContentPart) error {
 	if r == nil || r.client == nil || !r.state.Run.Active {
-		return noActiveTurnSubmissionError()
+		return appserver.NewOutcomeError(appserver.OutcomeRejected, noActiveTurnSubmissionError())
 	}
 	base, err := r.writeBase(ctx, "reconnect-steer")
 	if err != nil {
-		return err
+		return appserver.NewOutcomeError(appserver.OutcomeRejected, err)
 	}
-	_, err = r.client.Steer(ctx, appserver.SteerRequest{
+	result, err := r.client.Steer(ctx, appserver.SteerRequest{
 		WriteBase: base, Target: r.target(), Input: input, DisplayInput: displayInput,
 		ContentParts: append([]model.ContentPart(nil), contentParts...),
 	})
-	return err
+	return appserver.CommandMutationError(result, err)
 }
 
 func (r *clientSessionReconnect) cancel(ctx context.Context, reason string) error {

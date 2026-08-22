@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
@@ -144,7 +145,7 @@ func TestContentPartsFromAttachmentsRejectsOversizedImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := file.Truncate(maxAttachmentImageBytes + 1); err != nil {
+	if err := file.Truncate(appserver.MaxPromptImageBytes + 1); err != nil {
 		_ = file.Close()
 		t.Fatal(err)
 	}
@@ -154,5 +155,20 @@ func TestContentPartsFromAttachmentsRejectsOversizedImages(t *testing.T) {
 
 	if _, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "huge.png"}}, workspace); err == nil {
 		t.Fatal("contentPartsFromAttachments() error = nil, want image size rejection")
+	}
+}
+
+func TestAddPromptImageBytesEnforcesAggregateLimit(t *testing.T) {
+	t.Parallel()
+
+	total := appserver.MaxPromptImageTotalBytes - appserver.MaxPromptImageBytes
+	if err := addPromptImageBytes(&total, appserver.MaxPromptImageBytes); err != nil {
+		t.Fatalf("addPromptImageBytes at aggregate limit: %v", err)
+	}
+	if total != appserver.MaxPromptImageTotalBytes {
+		t.Fatalf("total = %d, want %d", total, appserver.MaxPromptImageTotalBytes)
+	}
+	if err := addPromptImageBytes(&total, 1); err == nil {
+		t.Fatal("addPromptImageBytes over aggregate limit error = nil")
 	}
 }

@@ -117,18 +117,26 @@ func (a *SessionClientAdapter) Submit(
 	if displayInput == rawInput {
 		displayInput = ""
 	}
+	activeSubmission := submission.Mode == controlprompt.SubmissionModeActiveTurn
 	contentParts, err := contentPartsFromSubmission(
 		rawInput,
 		submission.Attachments,
 		a.WorkspaceDir(),
 	)
 	if err != nil {
+		if activeSubmission {
+			err = appserver.NewOutcomeError(appserver.OutcomeRejected, err)
+		}
 		return nil, err
 	}
 	if rawInput == "" && len(contentParts) == 0 {
-		return nil, errors.New("app/gatewayapp/controladapter: prompt input is required")
+		err := errors.New("app/gatewayapp/controladapter: prompt input is required")
+		if activeSubmission {
+			err = appserver.NewOutcomeError(appserver.OutcomeRejected, err)
+		}
+		return nil, err
 	}
-	if submission.Mode == controlprompt.SubmissionModeActiveTurn {
+	if activeSubmission {
 		active := a.activeTurn()
 		if active != nil {
 			if err := active.steer(ctx, rawInput, displayInput, contentParts); err != nil {
@@ -142,7 +150,7 @@ func (a *SessionClientAdapter) Submit(
 			}
 			return nil, nil
 		}
-		return nil, noActiveTurnSubmissionError()
+		return nil, appserver.NewOutcomeError(appserver.OutcomeRejected, noActiveTurnSubmissionError())
 	}
 	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (appserver.TargetTurn, error) {
 		state, err := a.ensureSessionForMainPrompt(startCtx)
@@ -498,7 +506,7 @@ func (t *sessionClientTurn) steer(
 ) error {
 	steerable, ok := t.turn.(appserver.SessionTurn)
 	if !ok {
-		return noActiveTurnSubmissionError()
+		return appserver.NewOutcomeError(appserver.OutcomeRejected, noActiveTurnSubmissionError())
 	}
 	return steerable.Steer(ctx, input, displayInput, contentParts)
 }

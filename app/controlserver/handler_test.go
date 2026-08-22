@@ -1,7 +1,9 @@
 package controlserver
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
@@ -385,6 +388,107 @@ func TestAuthenticatedCrossSessionAccessReturns403(t *testing.T) {
 	if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), `"forbidden"`) {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
+}
+
+func TestHTTPJSONRequestBodyLimitAcceptsExactCapAndRejectsOverflow(t *testing.T) {
+	tests := []struct {
+		name       string
+		size       int
+		wantStatus int
+		wantCode   errorcode.Code
+	}{
+		{name: "former 1 MiB cap plus one", size: 1<<20 + 1, wantStatus: http.StatusOK},
+		{name: "exact JSON cap", size: maxJSONRequestBytes, wantStatus: http.StatusOK},
+		{
+			name:       "one byte over JSON cap",
+			size:       maxJSONRequestBytes + 1,
+			wantStatus: http.StatusRequestEntityTooLarge,
+			wantCode:   errorcode.ResourceExhausted,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := &fakeService{}
+			server := newTestServer(t, service, 0)
+			request := httptest.NewRequest(http.MethodPost, apiPrefix+"/sessions", bytes.NewReader(jsonRequestBodyOfSize(t, tt.size)))
+			request.Host = "example.test"
+			authorizeTestRequest(request)
+			setJSONContentType(request)
+			request.Header.Set("Idempotency-Key", "operation-1")
+			recorder := httptest.NewRecorder()
+			server.ServeHTTP(recorder, request)
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", recorder.Code, tt.wantStatus, recorder.Body.String())
+			}
+			if tt.wantStatus == http.StatusOK {
+				if service.created.OperationID != "operation-1" {
+					t.Fatalf("Service missed in-cap request: %#v", service.created)
+				}
+				return
+			}
+			if service.created.OperationID != "" {
+				t.Fatalf("Service received oversized request: %#v", service.created)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode 413 body: %v", err)
+			}
+			if payload["error"] != jsonRequestBodyTooLargeDetail() {
+				t.Fatalf("error = %#v, want %q", payload["error"], jsonRequestBodyTooLargeDetail())
+			}
+			if payload["code"] != string(tt.wantCode) {
+				t.Fatalf("code = %#v, want %q", payload["code"], tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestHTTPPromptAcceptsMaximumInlineImageAfterBase64Expansion(t *testing.T) {
+	service := &fakeService{}
+	server := newTestServer(t, service, 0)
+	encodedLen := base64.StdEncoding.EncodedLen(appserver.MaxPromptImageBytes)
+	encoded := strings.Repeat("A", encodedLen-1) + "="
+	body, err := wirev1.Marshal(appserver.PromptRequest{
+		Input: "inspect",
+		ContentParts: []model.ContentPart{{
+			Type: model.ContentPartImage, MimeType: "image/png", Data: encoded, FileName: "shot.png",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) <= 16<<20 || len(body) >= maxJSONRequestBytes {
+		t.Fatalf("maximum inline-image request size = %d, want between former and current caps", len(body))
+	}
+	request := httptest.NewRequest(http.MethodPost, apiPrefix+"/sessions/session-1/prompt", bytes.NewReader(body))
+	request.Host = "example.test"
+	authorizeTestRequest(request)
+	setJSONContentType(request)
+	request.Header.Set("Idempotency-Key", "operation-image-max")
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if len(service.prompted.ContentParts) != 1 || len(service.prompted.ContentParts[0].Data) != len(encoded) {
+		t.Fatalf("service prompt content parts = %#v, want maximum inline image", service.prompted.ContentParts)
+	}
+}
+
+func jsonRequestBodyOfSize(t *testing.T, n int) []byte {
+	t.Helper()
+	const prefix = `{"workspace_key":"workspace-a","title":"`
+	const suffix = `"}`
+	if n < len(prefix)+len(suffix) {
+		t.Fatalf("jsonRequestBodyOfSize(%d) is smaller than the JSON wrapper", n)
+	}
+	body := make([]byte, n)
+	copy(body, prefix)
+	for i := len(prefix); i < n-len(suffix); i++ {
+		body[i] = 'a'
+	}
+	copy(body[n-len(suffix):], suffix)
+	return body
 }
 
 func TestMalformedWriteInputsReturn400BeforeService(t *testing.T) {

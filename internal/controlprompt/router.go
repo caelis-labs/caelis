@@ -49,13 +49,14 @@ func (r router) Route(ctx context.Context, req Request) (Result, error) {
 		}); handled || err != nil {
 			return result, err
 		}
-		if !r.shouldDispatchSlash(ctx, cmd) {
-			if result, handled, err := r.dispatchDirectSkill(ctx, cmd, args, argsStart, req.Submission); handled || err != nil {
-				return result, err
-			}
-			return r.noticeResult(fmt.Sprintf("Unknown command: /%s", cmd)), nil
+		if r.shouldDispatchSlash(ctx, cmd) {
+			return r.dispatchSlash(ctx, cmd, args, argsStart, text, req.Submission.Attachments)
 		}
-		return r.dispatchSlash(ctx, cmd, args, argsStart, text, req.Submission.Attachments)
+		if result, handled, err := r.dispatchDirectSkill(ctx, cmd, args, argsStart, req.Submission); handled || err != nil {
+			return result, err
+		}
+		// Best-effort: slash-like prose that does not exactly resolve a
+		// configured command or skill is an ordinary prompt.
 	}
 	turn, err := r.service.Submit(ctx, req.Submission)
 	if err != nil {

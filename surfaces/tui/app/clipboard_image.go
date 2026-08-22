@@ -69,7 +69,7 @@ try {
 	if path == "" {
 		return nil, "", nil
 	}
-	return []string{path}, path, nil
+	return finalizeClipboardImageResult(path)
 }
 
 func pasteMacClipboardImage() ([]string, string, error) {
@@ -100,13 +100,14 @@ end run
 `
 	out, err := runClipboardOutputCommand(clipboardCommand{name: "osascript", args: []string{"-e", script, path}, label: "macOS clipboard image reader", timeout: clipboardImageCommandTimeout})
 	if err != nil {
+		_ = os.Remove(path)
 		return nil, "", err
 	}
 	if strings.TrimSpace(string(out)) == "" {
 		_ = os.Remove(path)
 		return nil, "", nil
 	}
-	return []string{path}, path, nil
+	return finalizeClipboardImageResult(path)
 }
 
 func pasteLinuxClipboardImage() ([]string, string, error) {
@@ -169,9 +170,10 @@ func writeClipboardImageBytes(data []byte, mimeType string) ([]string, string, e
 		return nil, "", err
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
+		_ = os.Remove(path)
 		return nil, "", err
 	}
-	return []string{path}, path, nil
+	return finalizeClipboardImageResult(path)
 }
 
 func newClipboardImagePath(ext string) (string, error) {

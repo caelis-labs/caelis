@@ -24,12 +24,12 @@ func TestProjectSubmissionReferencesDoesNotBlockOnSkillDiscoveryError(t *testing
 
 	projected, err := stack.composition.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
 		Session: session.Session{CWD: workspace},
-		Input:   "$cmpctl inspect",
+		Input:   "/cmpctl inspect",
 	})
 	if err != nil {
 		t.Fatalf("projectSubmissionReferences() error = %v, want nil for skill discovery error", err)
 	}
-	if projected.Changed || projected.Input != "$cmpctl inspect" {
+	if projected.Changed || projected.Input != "/cmpctl inspect" {
 		t.Fatalf("projected = %#v, want raw skill reference pass-through", projected)
 	}
 }
@@ -71,7 +71,7 @@ func TestProjectSubmissionReferencesProjectsFilesWhenSkillDiscoveryFails(t *test
 
 	projected, err := stack.composition.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
 		Session: session.Session{CWD: workspace},
-		Input:   "$cmpctl inspect @dict.go",
+		Input:   "/cmpctl inspect @dict.go",
 	})
 	if err != nil {
 		t.Fatalf("projectSubmissionReferences() error = %v, want nil for skill discovery error", err)
@@ -79,7 +79,7 @@ func TestProjectSubmissionReferencesProjectsFilesWhenSkillDiscoveryFails(t *test
 	if !projected.Changed || !strings.Contains(projected.Input, "Read `dict.go` before answering or editing.") {
 		t.Fatalf("projected = %#v, want file projection", projected)
 	}
-	if !strings.Contains(projected.Input, "$cmpctl inspect `dict.go`") {
+	if !strings.Contains(projected.Input, "/cmpctl inspect `dict.go`") {
 		t.Fatalf("projected.Input = %q, want unresolved skill left in user request", projected.Input)
 	}
 }
@@ -134,7 +134,7 @@ func TestProjectSubmissionReferencesUsesRuntimeSkillSnapshot(t *testing.T) {
 
 	projected, err := stack.composition.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
 		Session: session.Session{CWD: workspace},
-		Input:   "$known and $late",
+		Input:   "/known and /late",
 	})
 	if err != nil {
 		t.Fatalf("projectSubmissionReferences() error = %v", err)
@@ -145,7 +145,7 @@ func TestProjectSubmissionReferencesUsesRuntimeSkillSnapshot(t *testing.T) {
 	if strings.Contains(projected.Input, "Load skill `late`") {
 		t.Fatalf("projected.Input = %q, should not project skill added outside runtime snapshot", projected.Input)
 	}
-	if !strings.Contains(projected.Input, "$late") {
+	if !strings.Contains(projected.Input, "/late") {
 		t.Fatalf("projected.Input = %q, want late skill shorthand left unresolved", projected.Input)
 	}
 }

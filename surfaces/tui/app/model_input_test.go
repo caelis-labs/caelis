@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"errors"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -948,22 +949,27 @@ func TestViewportWhitespaceSelectionDoesNotToggleFoldToken(t *testing.T) {
 	}
 }
 
-func TestImagePasteWhileRunningShowsFeedback(t *testing.T) {
+func TestImagePasteWhileRunningAddsAttachment(t *testing.T) {
 	model := NewModel(Config{
 		PasteClipboardImage: func() ([]string, string, error) {
-			t.Fatal("PasteClipboardImage must not run while model is running")
-			return nil, "", nil
+			return []string{"running-shot.png"}, "running-shot.png", nil
 		},
 	})
 	model.liveTurn.Active = true
 
 	updated, cmd := model.handleKey(tea.KeyPressMsg(tea.Key{Text: imagePasteKeysForPlatform(runtime.GOOS, isWSL())[0]}))
 	m := updated.(*Model)
-	if cmd == nil {
-		t.Fatal("running image paste should schedule hint cleanup")
+	if cmd != nil {
+		t.Fatal("running image paste command != nil, want attachment inserted without hint")
 	}
-	if !strings.Contains(m.hint, "image") && !strings.Contains(m.hint, "running") {
-		t.Fatalf("model hint = %q, want image/running feedback", m.hint)
+	if m.hint != "" {
+		t.Fatalf("model hint = %q, want no running-specific image hint", m.hint)
+	}
+	if len(m.inputAttachments) != 1 || m.inputAttachments[0].Name != "running-shot.png" {
+		t.Fatalf("input attachments = %#v, want running image attachment", m.inputAttachments)
+	}
+	if runes := []rune(m.textarea.Value()); len(runes) != 1 || !isAttachmentSentinel(runes[0]) {
+		t.Fatalf("textarea value = %q, want image sentinel", m.textarea.Value())
 	}
 }
 
@@ -1248,7 +1254,7 @@ func TestWindowsCtrlVFallsBackToImageWhenTextClipboardErrors(t *testing.T) {
 	}
 }
 
-func TestWindowsCtrlVDoesNotFallbackToImageWhileRunning(t *testing.T) {
+func TestWindowsCtrlVFallsBackToImageWhileRunning(t *testing.T) {
 	withClipboardPlatform(t, "windows")
 	imageCalled := false
 	model := NewModel(Config{
@@ -1265,11 +1271,11 @@ func TestWindowsCtrlVDoesNotFallbackToImageWhileRunning(t *testing.T) {
 
 	updated, _ := model.handleKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
 	m := updated.(*Model)
-	if imageCalled {
-		t.Fatal("PasteClipboardImage should not run while model is running")
+	if !imageCalled {
+		t.Fatal("PasteClipboardImage was not called while model is running")
 	}
-	if len(m.inputAttachments) != 0 {
-		t.Fatalf("input attachments = %#v, want none", m.inputAttachments)
+	if len(m.inputAttachments) != 1 || m.inputAttachments[0].Name != "shot.png" {
+		t.Fatalf("input attachments = %#v, want pasted running image", m.inputAttachments)
 	}
 }
 
@@ -1384,6 +1390,270 @@ func TestSubmitLineUsesActiveTurnModeOnlyWhileRunning(t *testing.T) {
 	}
 	if got := submissions[1].Mode; got != SubmissionModeActiveTurn {
 		t.Fatalf("running submission mode = %q, want active_turn", got)
+	}
+}
+
+func TestRunningImageSubmissionUsesActiveTurnPendingUserMessage(t *testing.T) {
+	t.Parallel()
+
+	var got Submission
+	model := NewModel(Config{
+		NoColor:     true,
+		NoAnimation: true,
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			got = submission
+			return TaskResultMsg{ContinueRunning: true, SuppressTurnDivider: true}
+		},
+		CanSubmitRunningPrompt: func() bool { return true },
+	})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+
+	attachments := []Attachment{{Name: "running-shot.png", Offset: len([]rune("inspect "))}}
+	next, cmd := model.submitInteractiveLine("inspect screenshot", "inspect [image #1] screenshot", attachments)
+	model = next.(*Model)
+	if cmd == nil || !findAndRunTaskResult(cmd(), model) {
+		t.Fatal("running image submission did not execute")
+	}
+	if got.Mode != SubmissionModeActiveTurn || got.Text != "inspect screenshot" || got.DisplayText != "inspect [image #1] screenshot" ||
+		!reflect.DeepEqual(got.Attachments, attachments) {
+		t.Fatalf("running image submission = %#v", got)
+	}
+	if len(model.pendingQueue) != 1 || !model.pendingQueue[0].awaitsAcceptedActiveDisplay() ||
+		model.pendingQueue[0].displayText() != "inspect [image #1] screenshot" ||
+		!reflect.DeepEqual(model.pendingQueue[0].attachments, attachments) {
+		t.Fatalf("running image pending queue = %#v", model.pendingQueue)
+	}
+	if model.textarea.Value() != "" || len(model.inputAttachments) != 0 {
+		t.Fatalf("composer after submit = %q attachments %#v, want cleared", model.textarea.Value(), model.inputAttachments)
+	}
+}
+
+func TestRunningExactSlashControlIsBlockedButGluedSlashIsPrompt(t *testing.T) {
+	t.Run("exact control", func(t *testing.T) {
+		calls := 0
+		model := NewModel(Config{
+			Commands: []string{"status"},
+			ExecuteLine: func(Submission) TaskResultMsg {
+				calls++
+				return TaskResultMsg{ContinueRunning: true}
+			},
+		})
+		model.beginLiveTurn(SubmissionModeDefault, true, time.Unix(140, 0))
+
+		next, cmd := model.submitInteractiveLine("/status", "/status", nil)
+		model = next.(*Model)
+		if calls != 0 || cmd == nil || !strings.Contains(model.hint, "slash commands are unavailable while running") {
+			t.Fatalf("running /status calls=%d cmd=%v hint=%q, want blocked control command", calls, cmd != nil, model.hint)
+		}
+		if len(model.pendingQueue) != 0 {
+			t.Fatalf("running /status pendingQueue=%#v, want no prompt", model.pendingQueue)
+		}
+	})
+
+	t.Run("glued prose", func(t *testing.T) {
+		var got Submission
+		model := NewModel(Config{
+			Commands: []string{"status"},
+			ExecuteLine: func(submission Submission) TaskResultMsg {
+				got = submission
+				return TaskResultMsg{ContinueRunning: true}
+			},
+			CanSubmitRunningPrompt: func() bool { return true },
+		})
+		model.beginLiveTurn(SubmissionModeDefault, true, time.Unix(141, 0))
+
+		const prompt = "/status这个命令怎么用?"
+		next, cmd := model.submitInteractiveLine(prompt, prompt, nil)
+		model = next.(*Model)
+		if cmd == nil || !findAndRunTaskResult(cmd(), model) {
+			t.Fatal("running glued Slash prose did not submit")
+		}
+		if got.Text != prompt || got.Mode != SubmissionModeActiveTurn {
+			t.Fatalf("running glued Slash submission=%#v, want ordinary active-turn prompt", got)
+		}
+	})
+}
+
+func TestRejectedRunningImageSubmissionRestoresDraftAndKeepsTurnActive(t *testing.T) {
+	t.Parallel()
+
+	failure := errors.New("image input is unavailable")
+	model := NewModel(Config{
+		NoColor:     true,
+		NoAnimation: true,
+		ExecuteLine: func(Submission) TaskResultMsg {
+			return TaskResultMsg{Err: appserver.NewOutcomeError(appserver.OutcomeRejected, failure)}
+		},
+		CanSubmitRunningPrompt: func() bool { return true },
+	})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(142, 0))
+
+	attachments := []Attachment{{Name: "rejected-shot.png", Offset: len([]rune("inspect "))}}
+	next, cmd := model.submitInteractiveLine("inspect screenshot", "inspect [image #1] screenshot", attachments)
+	model = next.(*Model)
+	if cmd == nil || !findAndRunTaskResult(cmd(), model) {
+		t.Fatal("rejected running image submission did not return a task result")
+	}
+	if !model.turnRunning() {
+		t.Fatal("rejected active-turn image submission stopped the existing live turn")
+	}
+	if len(model.pendingQueue) != 0 {
+		t.Fatalf("pendingQueue after rejection=%#v, want rejected entry removed", model.pendingQueue)
+	}
+	execLine, displayLine, restored := model.prepareComposerSubmission()
+	if execLine != "inspect screenshot" || displayLine != "inspect [image #1] screenshot" || !reflect.DeepEqual(restored, attachments) {
+		t.Fatalf("restored composer=%q / %q / %#v, want rejected image draft", execLine, displayLine, restored)
+	}
+}
+
+func TestUnknownRunningSubmissionDoesNotRestoreRetriableDraft(t *testing.T) {
+	t.Parallel()
+
+	failure := appserver.NewOutcomeError(appserver.OutcomeUnknown, errors.New("effect outcome cannot be proven"))
+	model := NewModel(Config{
+		NoColor:     true,
+		NoAnimation: true,
+		ExecuteLine: func(Submission) TaskResultMsg {
+			return TaskResultMsg{Err: failure}
+		},
+		CanSubmitRunningPrompt: func() bool { return true },
+	})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(145, 0))
+
+	attachments := []Attachment{{Name: "uncertain-shot.png", Offset: len([]rune("inspect "))}}
+	next, cmd := model.submitInteractiveLine("inspect screenshot", "inspect [image #1] screenshot", attachments)
+	model = next.(*Model)
+	if cmd == nil || !findAndRunTaskResult(cmd(), model) {
+		t.Fatal("unknown running image submission did not return a task result")
+	}
+	if !model.turnRunning() {
+		t.Fatal("unknown active-turn submission stopped the existing live turn")
+	}
+	if len(model.pendingQueue) != 0 {
+		t.Fatalf("pendingQueue after unknown outcome=%#v, want exact uncertain entry removed", model.pendingQueue)
+	}
+	if execLine, displayLine, restored := model.prepareComposerSubmission(); execLine != "" || displayLine != "" || len(restored) != 0 {
+		t.Fatalf("unknown outcome restored retriable composer=%q / %q / %#v", execLine, displayLine, restored)
+	}
+}
+
+func TestRejectedConcurrentDuplicateSubmissionRestoresExactImage(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{
+		NoColor:     true,
+		NoAnimation: true,
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			if len(submission.Attachments) == 1 && submission.Attachments[0].Name == "b.png" {
+				return TaskResultMsg{Err: appserver.NewOutcomeError(appserver.OutcomeRejected, errors.New("rejected B"))}
+			}
+			return TaskResultMsg{ContinueRunning: true}
+		},
+		CanSubmitRunningPrompt: func() bool { return true },
+	})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(146, 0))
+
+	const execLine = "inspect screenshot"
+	const displayLine = "inspect [image #1] screenshot"
+	next, firstCmd := model.submitInteractiveLine(execLine, displayLine, []Attachment{{Name: "a.png", Offset: 8}})
+	model = next.(*Model)
+	next, secondCmd := model.submitInteractiveLine(execLine, displayLine, []Attachment{{Name: "b.png", Offset: 8}})
+	model = next.(*Model)
+	if firstCmd == nil || secondCmd == nil || len(model.pendingQueue) != 2 || model.pendingQueue[0].localID == model.pendingQueue[1].localID {
+		t.Fatalf("duplicate pending submissions were not assigned distinct identities: %#v", model.pendingQueue)
+	}
+
+	// Complete B before A. Text-only correlation would remove A here.
+	if !findAndRunTaskResult(secondCmd(), model) {
+		t.Fatal("second duplicate submission did not return a task result")
+	}
+	if len(model.pendingQueue) != 1 || len(model.pendingQueue[0].attachments) != 1 || model.pendingQueue[0].attachments[0].Name != "a.png" {
+		t.Fatalf("pendingQueue after B rejection=%#v, want accepted A retained", model.pendingQueue)
+	}
+	exec, display, restored := model.prepareComposerSubmission()
+	if exec != execLine || display != displayLine || len(restored) != 1 || restored[0].Name != "b.png" {
+		t.Fatalf("restored duplicate composer=%q / %q / %#v, want exact B attachment", exec, display, restored)
+	}
+
+	model = model.handleUserMessageMsg(UserMessageMsg{Text: displayLine}).(*Model)
+	if len(model.pendingQueue) != 0 {
+		t.Fatalf("gateway echo for A left pendingQueue=%#v", model.pendingQueue)
+	}
+	_, _, restored = model.prepareComposerSubmission()
+	if len(restored) != 1 || restored[0].Name != "b.png" {
+		t.Fatalf("gateway echo for A changed restored B attachment: %#v", restored)
+	}
+}
+
+func TestAcceptedDuplicateEchoBeforeRejectedResultReconcilesExactImage(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{
+		NoColor:     true,
+		NoAnimation: true,
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			if len(submission.Attachments) == 1 && submission.Attachments[0].Name == "a.png" {
+				return TaskResultMsg{Err: appserver.NewOutcomeError(appserver.OutcomeRejected, errors.New("rejected A"))}
+			}
+			return TaskResultMsg{ContinueRunning: true}
+		},
+		CanSubmitRunningPrompt: func() bool { return true },
+	})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(147, 0))
+
+	const execLine = "inspect screenshot"
+	const displayLine = "inspect [image #1] screenshot"
+	next, firstCmd := model.submitInteractiveLine(execLine, displayLine, []Attachment{{Name: "a.png", Offset: 8}})
+	model = next.(*Model)
+	next, secondCmd := model.submitInteractiveLine(execLine, displayLine, []Attachment{{Name: "b.png", Offset: 8}})
+	model = next.(*Model)
+	if firstCmd == nil || secondCmd == nil || len(model.pendingQueue) != 2 {
+		t.Fatalf("duplicate pending submissions = %#v", model.pendingQueue)
+	}
+
+	// B is accepted and its durable echo reaches Bubble Tea before A's rejected
+	// command result. Text-only dequeue initially consumes A, so rejection must
+	// reconcile the remaining equivalent entry before restoring exact A.
+	secondResult := secondCmd()
+	model = model.handleUserMessageMsg(UserMessageMsg{Text: displayLine}).(*Model)
+	if len(model.pendingQueue) != 1 || model.pendingQueue[0].attachments[0].Name != "b.png" {
+		t.Fatalf("pendingQueue after early B echo = %#v, want unmatched B before reconciliation", model.pendingQueue)
+	}
+	if !findAndRunTaskResult(firstCmd(), model) {
+		t.Fatal("first duplicate rejection did not return a task result")
+	}
+	if len(model.pendingQueue) != 0 {
+		t.Fatalf("pendingQueue after A rejection reconciliation = %#v, want empty", model.pendingQueue)
+	}
+	exec, display, restored := model.prepareComposerSubmission()
+	if exec != execLine || display != displayLine || len(restored) != 1 || restored[0].Name != "a.png" {
+		t.Fatalf("restored duplicate composer=%q / %q / %#v, want exact A attachment", exec, display, restored)
+	}
+	if !findAndRunTaskResult(secondResult, model) {
+		t.Fatal("second duplicate acceptance did not return a task result")
+	}
+}
+
+func TestTurnCompletionPreservesImageDraftAddedWhileRunning(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(143, 0))
+	model.restoreHistoryEntry("next prompt", []inputAttachment{{
+		Kind:   attachmentKindImage,
+		Name:   "next-shot.png",
+		Offset: len([]rune("next ")),
+	}})
+	beforeExec, beforeDisplay, beforeAttachments := model.prepareComposerSubmission()
+
+	_ = model.finishLiveTurn(time.Unix(144, 0), false, nil)
+	afterExec, afterDisplay, afterAttachments := model.prepareComposerSubmission()
+	if beforeExec != afterExec || beforeDisplay != afterDisplay || !reflect.DeepEqual(beforeAttachments, afterAttachments) {
+		t.Fatalf("image draft changed across turn completion: before=%q/%q/%#v after=%q/%q/%#v",
+			beforeExec, beforeDisplay, beforeAttachments, afterExec, afterDisplay, afterAttachments)
+	}
+	if model.turnRunning() {
+		t.Fatal("turn still running after completion")
 	}
 }
 

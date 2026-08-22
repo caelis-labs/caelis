@@ -70,7 +70,7 @@ func (m *Model) handlePaletteKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) requestCompletionRefresh() tea.Cmd {
-	if m == nil || m.turnRunning() {
+	if m == nil {
 		return nil
 	}
 	m.completionRefreshSeq++
@@ -88,16 +88,16 @@ func (m *Model) handleCompletionRefreshMsg(msg completionRefreshMsg) (tea.Model,
 }
 
 func (m *Model) refreshCompletionOverlaysBeforeAccept(msg tea.KeyMsg) {
-	if m == nil || m.turnRunning() || (!key.Matches(msg, m.keys.Accept) && !key.Matches(msg, m.keys.Complete)) {
+	if m == nil || (!key.Matches(msg, m.keys.Accept) && !key.Matches(msg, m.keys.Complete)) {
 		return
 	}
 	switch {
 	case len(m.mentionCandidates) > 0:
 		m.dropStaleMentionCandidates()
-	case m.resumeActive || len(m.resumeCandidates) > 0:
+	case !m.turnRunning() && (m.resumeActive || len(m.resumeCandidates) > 0):
 		// Resume completion is asynchronous. Accept/complete never waits for
 		// Control or Store I/O on the Bubble Tea event loop.
-	case m.slashArgActive:
+	case !m.turnRunning() && m.slashArgActive:
 		m.dropStaleSlashArgCandidates()
 	case len(m.slashCandidates) > 0:
 		m.refreshSlashCommands()
@@ -107,19 +107,21 @@ func (m *Model) refreshCompletionOverlaysBeforeAccept(msg tea.KeyMsg) {
 func (m *Model) refreshCompletionOverlaysNow() tea.Cmd {
 	mentionCmd := m.requestMentionCompletion(0)
 	var resumeCmd tea.Cmd
-	if m.isWizardActive() {
-		if m.resumeActive {
-			resumeCmd = m.updateResumeCandidates()
-		}
-	} else {
-		m.syncSlashInputOverlayState()
-		if m.resumeActive {
-			resumeCmd = m.updateResumeCandidates()
-		}
-	}
 	var slashArgCmd tea.Cmd
-	if m.slashArgActive && !m.mentionRequestPending && len(m.mentionCandidates) == 0 {
-		slashArgCmd = m.requestCurrentSlashArgCompletion()
+	if !m.turnRunning() {
+		if m.isWizardActive() {
+			if m.resumeActive {
+				resumeCmd = m.updateResumeCandidates()
+			}
+		} else {
+			m.syncSlashInputOverlayState()
+			if m.resumeActive {
+				resumeCmd = m.updateResumeCandidates()
+			}
+		}
+		if m.slashArgActive && !m.mentionRequestPending && len(m.mentionCandidates) == 0 {
+			slashArgCmd = m.requestCurrentSlashArgCompletion()
+		}
 	}
 	m.refreshSlashCommands()
 	return tea.Batch(mentionCmd, resumeCmd, slashArgCmd, m.requestSlashSkillCatalog())
@@ -163,7 +165,7 @@ func (m *Model) cancelMentionRequest() {
 }
 
 func (m *Model) requestMentionCompletion(limit int, advanceOpt ...bool) tea.Cmd {
-	if m == nil || m.turnRunning() || m.cfg.FileComplete == nil {
+	if m == nil || m.cfg.FileComplete == nil {
 		return nil
 	}
 	_, _, query, prefix, ok := mentionQueryAtCursorWithPrefix(m.input, m.cursor)
@@ -213,7 +215,7 @@ func (m *Model) handleMentionCompletionResultMsg(msg mentionCompletionResultMsg)
 	}
 	m.diag.LastMentionLatency = msg.latency
 	start, end, query, prefix, ok := mentionQueryAtCursorWithPrefix(m.input, m.cursor)
-	if !ok || query != msg.query || prefix != msg.prefix || m.turnRunning() {
+	if !ok || query != msg.query || prefix != msg.prefix {
 		return m, nil
 	}
 	previousQuery := m.mentionQuery
@@ -252,7 +254,7 @@ func (m *Model) handleMentionCompletionResultMsg(msg mentionCompletionResultMsg)
 }
 
 func (m *Model) hasMentionCompletionTarget() bool {
-	if m == nil || m.cfg.FileComplete == nil || m.turnRunning() {
+	if m == nil || m.cfg.FileComplete == nil {
 		return false
 	}
 	_, _, _, prefix, ok := mentionQueryAtCursorWithPrefix(m.input, m.cursor)

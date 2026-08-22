@@ -233,7 +233,7 @@ func (c *ParticipantTurnClient) startObserved(
 	}
 	turn, err := admitObservedTurn(c.sessions, sessionID, reconnected, feedCtx, stopFeed, result, err, func(turn *sessionTurn) {
 		turn.steerFn = func(steerCtx context.Context, input, displayInput string, contentParts []model.ContentPart) error {
-			_, steerErr := c.sessions.Steer(steerCtx, SteerRequest{
+			steerResult, steerErr := c.sessions.Steer(steerCtx, SteerRequest{
 				WriteBase: WriteBase{
 					OperationID:             newParticipantOperationID("steer"),
 					SessionID:               sessionID,
@@ -244,7 +244,7 @@ func (c *ParticipantTurnClient) startObserved(
 				DisplayInput: displayInput,
 				ContentParts: append([]model.ContentPart(nil), contentParts...),
 			})
-			return steerErr
+			return CommandMutationError(steerResult, steerErr)
 		}
 		cancelWrite := &turnCancelWrite{
 			operationID: newParticipantOperationID("cancel"),

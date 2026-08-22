@@ -373,10 +373,10 @@ func commandReceiptOutcome(result CommandResult, err error) Outcome {
 	return ""
 }
 
-// commandMutationError normalizes transport and in-process command behavior.
+// CommandMutationError normalizes transport and in-process command behavior.
 // The in-process service may replay a persisted rejected result with a nil Go
 // error, while HTTP clients return an OutcomeError for the same receipt.
-func commandMutationError(result CommandResult, err error) error {
+func CommandMutationError(result CommandResult, err error) error {
 	outcome := commandReceiptOutcome(result, err)
 	if err == nil && (outcome == OutcomeAccepted || outcome == OutcomeCommitted) {
 		return nil
