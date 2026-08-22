@@ -2247,15 +2247,19 @@ func TestToolResultEventSuppressesFailedTaskWaitACPContent(t *testing.T) {
 		Name: "Task",
 		Args: `{"action":"wait","task_id":"command-task"}`,
 	}, tool.Result{
-		ID:   "task-wait-1",
-		Name: "Task",
+		ID:       "task-wait-1",
+		Name:     "Task",
+		Metadata: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}},
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
-			"state":     "failed",
-			"result":    "go: module internal registry: network unreachable\n",
-			"error":     "Sandbox permission denied. Use a writable workspace path or request elevated permissions.",
-			"exit_code": 1,
+			"action":      "wait",
+			"handle":      "command-2",
+			"target_kind": "command",
+			"state":       "failed",
+			"result":      "go: module internal registry: network unreachable\n",
+			"error":       "Sandbox permission denied. Use a writable workspace path or request elevated permissions.",
+			"exit_code":   1,
 		}))},
-	}, nil)
+	}, nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")

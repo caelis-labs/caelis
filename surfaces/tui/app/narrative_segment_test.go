@@ -946,11 +946,25 @@ func TestTaskControlVisibilityContract(t *testing.T) {
 			if gotAction, hidden := hiddenTaskControlAction(success); !hidden || gotAction != action {
 				t.Fatalf("successful %s = %q/%v, want hidden control", action, gotAction, hidden)
 			}
-			failure := success
-			failure.ToolStatus = "failed"
-			failure.ToolError = true
-			if _, hidden := hiddenTaskControlAction(failure); hidden {
-				t.Fatalf("failed %s was hidden", action)
+			observedTargetFailure := success
+			observedTargetFailure.ToolStatus = "failed"
+			observedTargetFailure.ToolError = true
+			observedTargetFailure.ToolTaskState = "failed"
+			if gotAction, hidden := hiddenTaskControlAction(observedTargetFailure); !hidden || gotAction != action {
+				t.Fatalf("observed target failure for %s = %q/%v, want hidden observer", action, gotAction, hidden)
+			}
+			runningControlFailure := success
+			runningControlFailure.ToolStatus = "failed"
+			runningControlFailure.ToolError = true
+			runningControlFailure.ToolTaskState = "running"
+			if _, hidden := hiddenTaskControlAction(runningControlFailure); hidden {
+				t.Fatalf("running-state control failure for %s was hidden", action)
+			}
+			controlFailure := success
+			controlFailure.ToolStatus = "failed"
+			controlFailure.ToolError = true
+			if _, hidden := hiddenTaskControlAction(controlFailure); hidden {
+				t.Fatalf("control-invocation failure for %s was hidden", action)
 			}
 		})
 	}

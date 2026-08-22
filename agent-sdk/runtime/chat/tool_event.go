@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 )
 
 func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Message, extraMeta ...map[string]any) *session.Event {
@@ -121,15 +122,17 @@ func toolResultRawOutput(result tool.Result) map[string]any {
 	return map[string]any{}
 }
 
-func toolCallStatus(_ model.ToolCall, result tool.Result, rawOutput map[string]any, trustedTaskResult bool) string {
+func toolCallStatus(call model.ToolCall, result tool.Result, rawOutput map[string]any, trustedTaskResult bool) string {
 	if result.IsError {
 		return "failed"
 	}
-	// A returned result completes the invocation. Only command execution owns
-	// the process state carried in its payload. Other tools, including Spawn,
-	// Task, and SendMessage, do not transfer their invocation lifecycle to the
-	// target they address or observe.
-	if trustedTaskResult && runtimeTaskKind(result.Metadata) == "command" {
+	// A returned result completes the invocation. Only the RunCommand producer
+	// owns the process state carried in its payload. Other tools, including
+	// Spawn, Task, and SendMessage, do not transfer their invocation lifecycle
+	// to the target they address or observe.
+	if trustedTaskResult &&
+		strings.EqualFold(strings.TrimSpace(call.Name), shell.RunCommandToolName) &&
+		runtimeTaskKind(result.Metadata) == "command" {
 		state, _ := rawOutput["state"].(string)
 		if strings.TrimSpace(state) == "" {
 			if exitCode, ok := intValue(rawOutput["exit_code"]); ok && exitCode != 0 {

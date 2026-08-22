@@ -387,6 +387,178 @@ func TestHandleACPEventEnvelopeKeepsStreamedRunCommandOutputOnEmptyFinalFrame(t 
 	}
 }
 
+func TestTaskWaitOfFailedCommandStaysHiddenAndFoldsIntoOwner(t *testing.T) {
+	t.Parallel()
+
+	const failedOutput = "--- FAIL: TestCoreToolsFitModelContextBudgets (0.00s)\nFAIL\n"
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(241, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-call",
+			Title: "RunCommand go test", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"command": "go test", "yield_time_ms": 10000},
+			Content:  []schema.ToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
+			Meta:     acpToolNameMeta("RunCommand"),
+		},
+	})
+	running := schema.ToolStatusInProgress
+	commandMeta := metautil.WithRuntimeSection(acpToolNameMeta("RunCommand"), metautil.RuntimeTask, map[string]any{
+		metautil.RuntimeTaskID: "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
+		"handle": "command-2", "running": true, "state": "running",
+	})
+	commandMeta = metautil.WithTerminalInfo(commandMeta, "terminal-1")
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-call", Status: &running,
+			RawOutput: map[string]any{"handle": "command-2", "state": "running", "target_kind": "command"},
+			Meta:      commandMeta,
+		},
+	})
+
+	taskInput := map[string]any{"action": "wait", "handle": "command-2"}
+	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "wait",
+		metautil.RuntimeTargetHandle: "command-2", metautil.RuntimeTargetKind: "command",
+	})
+	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
+		metautil.RuntimeTaskID: "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
+		"handle": "command-2", "running": false, "state": "failed",
+		metautil.RuntimeOutputDelta: failedOutput,
+	})
+	taskMeta = metautil.WithTerminalInfo(taskMeta, "terminal-1")
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-wait-1",
+			Title: "Task wait command-2", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
+			RawInput: taskInput, Meta: taskMeta,
+		},
+	})
+	failed := schema.ToolStatusFailed
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "command-call", ToolName: "RunCommand"},
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "task-wait-1", Status: &failed,
+			RawInput: taskInput, RawOutput: map[string]any{
+				"action": "wait", "handle": "command-2", "target_kind": "command",
+				"state": "failed", "result": failedOutput, "exit_code": 1,
+			},
+			Meta: taskMeta,
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	physical := physicalTranscriptEventsForTest(block.Events)
+	if len(physical) != 1 || physical[0].CallID != "command-call" {
+		t.Fatalf("events = %#v, want only the RunCommand panel", block.Events)
+	}
+	if command := physical[0]; !strings.Contains(command.Output, "TestCoreToolsFitModelContextBudgets") {
+		t.Fatalf("command panel = %#v, want failed test output folded into the owner", command)
+	}
+	model.syncViewportContent()
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if strings.Contains(plain, "Wait command-2") || strings.Contains(plain, "Ran Wait") {
+		t.Fatalf("failed-target Wait rendered as its own panel:\n%s", plain)
+	}
+	if !strings.Contains(plain, "TestCoreToolsFitModelContextBudgets") {
+		t.Fatalf("command owner lost the observed failure output:\n%s", plain)
+	}
+}
+
+func TestTaskWaitControlTransportFailureStaysVisibleWithoutFoldingIntoOwner(t *testing.T) {
+	t.Parallel()
+
+	const controlError = "task control transport failed"
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(241, 500))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-call",
+			Title: "RunCommand go test", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"command": "go test"},
+			Content:  []schema.ToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
+			Meta:     acpToolNameMeta("RunCommand"),
+		},
+	})
+	running := schema.ToolStatusInProgress
+	commandMeta := metautil.WithRuntimeSection(acpToolNameMeta("RunCommand"), metautil.RuntimeTask, map[string]any{
+		metautil.RuntimeTaskID: "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
+		"handle": "command-2", "running": true, "state": "running",
+	})
+	commandMeta = metautil.WithTerminalInfo(commandMeta, "terminal-1")
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-call", Status: &running,
+			RawOutput: map[string]any{"handle": "command-2", "state": "running", "target_kind": "command"},
+			Meta:      commandMeta,
+		},
+	})
+
+	taskInput := map[string]any{"action": "wait", "handle": "command-2"}
+	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "wait",
+		metautil.RuntimeTargetHandle: "command-2", metautil.RuntimeTargetKind: "command",
+		"error": true,
+	})
+	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
+		metautil.RuntimeTaskID: "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
+		"handle": "command-2", "running": true, "state": "running",
+	})
+	failed := schema.ToolStatusFailed
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-wait-1",
+			Title: "Task wait command-2", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
+			RawInput: taskInput, Meta: taskMeta,
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "task-wait-1", Status: &failed,
+			RawInput: taskInput, RawOutput: map[string]any{
+				"action": "wait", "handle": "command-2", "target_kind": "command",
+				"state": "running", "error": controlError,
+			},
+			Meta: taskMeta,
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	var waitEvent *SubagentEvent
+	var commandEvent *SubagentEvent
+	for i := range block.Events {
+		event := &block.Events[i]
+		if event.Kind != SEToolCall {
+			continue
+		}
+		switch event.CallID {
+		case "task-wait-1":
+			waitEvent = event
+		case "command-call":
+			commandEvent = event
+		}
+	}
+	if waitEvent == nil || !waitEvent.Done || !waitEvent.Err {
+		t.Fatalf("wait event = %#v, want visible control-invocation failure", waitEvent)
+	}
+	if commandEvent == nil || strings.Contains(commandEvent.Output, controlError) {
+		t.Fatalf("command event = %#v, want owner unpolluted by control-failure text", commandEvent)
+	}
+	model.syncViewportContent()
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(plain, "Wait command-2") {
+		t.Fatalf("control failure was not rendered:\n%s", plain)
+	}
+}
+
 func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *testing.T) {
 	t.Parallel()
 

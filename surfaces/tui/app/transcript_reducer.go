@@ -174,13 +174,16 @@ func (m *Model) applyTranscriptToolToMain(event TranscriptEvent, mutation transc
 	return m, m.requestStreamViewportSync()
 }
 
-// TASK wait/read/cancel calls remain canonical model-visible observations, but
-// they are control mechanics rather than transcript panels. The TUI reports
+// TASK wait/read/cancel remain canonical model-visible observations, but they
+// are control mechanics rather than transcript panels. The TUI reports
 // wait/cancel activity in the running hint and consumes the physical row here.
 // Read/wait observations may still repair their owning command panel before
-// being consumed. Failed terminal controls remain visible so their error is not
-// lost. Main and participant lanes repair their own command owner before
-// consuming the row. Task write remains visible as a compact interaction row.
+// being consumed.
+//
+// Hide wait/read/cancel unless the control invocation itself failed. Observing
+// a failed, cancelled, or interrupted target is not a Task-tool failure; that
+// outcome belongs on the RunCommand or Spawn owner. Task write remains visible
+// as a compact interaction row.
 func hiddenTaskControlAction(event TranscriptEvent) (string, bool) {
 	if event.ToolName != surfaceToolTask {
 		return "", false
@@ -188,7 +191,7 @@ func hiddenTaskControlAction(event TranscriptEvent) (string, bool) {
 	action := strings.ToLower(strings.TrimSpace(event.ToolTaskAction))
 	switch action {
 	case "wait", "read", "cancel":
-		if event.Final && event.ToolError {
+		if taskControlInvocationFailed(event) {
 			return action, false
 		}
 		return action, true
@@ -197,12 +200,38 @@ func hiddenTaskControlAction(event TranscriptEvent) (string, bool) {
 	}
 }
 
+func taskControlInvocationFailed(event TranscriptEvent) bool {
+	if !event.Final {
+		return false
+	}
+	if !event.ToolError && !strings.EqualFold(strings.TrimSpace(event.ToolStatus), "failed") {
+		return false
+	}
+	// A terminal target snapshot means the control call observed the owner.
+	// Last-known running/waiting state on an IsError result is still a control
+	// failure, not a successful observation.
+	if taskControlObservedTerminalTarget(event) {
+		return false
+	}
+	return true
+}
+
+func taskControlObservedTerminalTarget(event TranscriptEvent) bool {
+	switch strings.ToLower(strings.TrimSpace(event.ToolTaskState)) {
+	case "completed", "failed", "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout":
+		return true
+	default:
+		return false
+	}
+}
+
 // absorbCommandTaskObservation folds a durable TASK read/wait observation into
 // the original async command panel. Cursors make this order-independent with
 // transient exact stream delivery; legacy compact observations remain
 // recovery-only and never append onto already rendered bytes.
 func (m *Model) absorbCommandTaskObservation(event TranscriptEvent, mutation *transcriptToolMutation) *MainACPTurnBlock {
-	if m == nil || m.doc == nil || mutation == nil || mutation.err ||
+	if m == nil || m.doc == nil || mutation == nil ||
+		taskControlInvocationFailed(event) ||
 		mutation.name != surfaceToolTask ||
 		!commandTaskTargetKind(mutation.meta.TaskTargetKind) ||
 		!taskObservationHasOutput(*mutation) {
@@ -220,7 +249,7 @@ func (m *Model) absorbCommandTaskObservation(event TranscriptEvent, mutation *tr
 }
 
 func absorbCommandTaskObservationIntoEvents(events []SubagentEvent, mutation *transcriptToolMutation) bool {
-	if mutation == nil || mutation.err || !taskObservationHasOutput(*mutation) {
+	if mutation == nil || !taskObservationHasOutput(*mutation) {
 		return false
 	}
 	taskHandle := strings.TrimSpace(mutation.meta.TaskHandle)
@@ -253,7 +282,7 @@ func absorbCommandTaskObservationIntoEvents(events []SubagentEvent, mutation *tr
 }
 
 func (m *Model) absorbParticipantCommandTaskObservation(event TranscriptEvent, mutation *transcriptToolMutation) *ParticipantTurnBlock {
-	if m == nil || m.doc == nil || mutation == nil {
+	if m == nil || m.doc == nil || mutation == nil || taskControlInvocationFailed(event) {
 		return nil
 	}
 	participantID := transcriptParticipantLaneID(event)

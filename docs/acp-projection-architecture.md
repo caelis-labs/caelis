@@ -266,8 +266,11 @@ identity. A Surface returns only that identity and the user's decision.
 A Task control invocation and its target have independent lifecycles. A
 successful read, wait, command write, or cancel invocation does not prove that
 the target completed successfully; target state remains explicit in the
-canonical result. Likewise, an accepted `SendMessage` acknowledges routing
-ownership, not target consumption or completion of the target Agent Turn.
+canonical result. A failed, cancelled, or interrupted target likewise does not
+fail the observer invocation. Surfaces must not present Wait or Read as a failed
+tool panel because the observed command or subagent failed. Likewise, an
+accepted `SendMessage` acknowledges routing ownership, not target consumption or
+completion of the target Agent Turn.
 
 ACP stdio cannot carry surrounding Envelope scope in a standard
 `session/update`. For a participant or Side ACP Agent, nested Spawn messages,
