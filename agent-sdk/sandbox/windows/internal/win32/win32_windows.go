@@ -3,6 +3,7 @@
 package win32
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -26,6 +27,98 @@ type Token = windows.Token
 
 type tokenDefaultDACLInfo struct {
 	DefaultDACL *windows.ACL
+}
+
+type ProcessIdentity struct {
+	PID          uint32 `json:"pid"`
+	CreationTime uint64 `json:"creation_time"`
+}
+
+func CurrentUserLocalAppData() (string, error) {
+	path, err := windows.KnownFolderPath(windows.FOLDERID_LocalAppData, windows.KF_FLAG_DEFAULT)
+	if err != nil {
+		return "", fmt.Errorf("win32: resolve LocalAppData known folder: %w", err)
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("win32: LocalAppData known folder is empty")
+	}
+	return path, nil
+}
+
+func CurrentProcessIdentity() (ProcessIdentity, error) {
+	return processIdentity(windows.CurrentProcess(), windows.GetCurrentProcessId())
+}
+
+// ProcessIdentityAlive returns false only when PID+creation-time proves that
+// the recorded process no longer exists. Inspection failures remain errors so
+// lifecycle cleanup can fail closed rather than prune an unproven owner.
+func ProcessIdentityAlive(identity ProcessIdentity) (bool, error) {
+	if identity.PID == 0 || identity.CreationTime == 0 {
+		return false, fmt.Errorf("win32: complete process identity is required")
+	}
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, false, identity.PID)
+	if err != nil {
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+			return false, nil
+		}
+		return false, fmt.Errorf("win32: open process %d: %w", identity.PID, err)
+	}
+	defer func() { _ = windows.CloseHandle(handle) }()
+	current, err := processIdentity(handle, identity.PID)
+	if err != nil {
+		return false, err
+	}
+	if current.CreationTime != identity.CreationTime {
+		return false, nil
+	}
+	event, err := windows.WaitForSingleObject(handle, 0)
+	if err != nil {
+		return false, err
+	}
+	return event == uint32(windows.WAIT_TIMEOUT), nil
+}
+
+func processIdentity(handle windows.Handle, pid uint32) (ProcessIdentity, error) {
+	var creation, exit, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(handle, &creation, &exit, &kernel, &user); err != nil {
+		return ProcessIdentity{}, fmt.Errorf("win32: read process %d creation time: %w", pid, err)
+	}
+	created := uint64(creation.HighDateTime)<<32 | uint64(creation.LowDateTime)
+	if pid == 0 || created == 0 {
+		return ProcessIdentity{}, fmt.Errorf("win32: process identity is incomplete")
+	}
+	return ProcessIdentity{PID: pid, CreationTime: created}, nil
+}
+
+func CurrentProcessUserSID() (string, error) {
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
+		return "", fmt.Errorf("win32: open current process token: %w", err)
+	}
+	defer token.Close()
+	sid, err := tokenUserSID(token)
+	if err != nil {
+		return "", err
+	}
+	return sid.String(), nil
+}
+
+// NormalizeSID validates and canonicalizes a string SID for durable identity
+// handoff between processes running under different Windows tokens.
+func NormalizeSID(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("win32: SID is required")
+	}
+	sid, err := windows.StringToSid(value)
+	if err != nil {
+		return "", fmt.Errorf("win32: parse SID %q: %w", value, err)
+	}
+	if sid == nil || !sid.IsValid() {
+		return "", fmt.Errorf("win32: SID %q is invalid", value)
+	}
+	return sid.String(), nil
 }
 
 func RestrictedCurrentProcessTokenWithSIDs(restrictingSIDs []string) (Token, error) {

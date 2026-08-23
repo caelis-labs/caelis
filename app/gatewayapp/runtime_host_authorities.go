@@ -22,21 +22,22 @@ type runtimeHostAuthorities struct {
 	userID  string
 	// store is used only as a configuration reader in detached Runtime values;
 	// only the Host root uses the write-hooked store instance.
-	store                  *appConfigStore
-	storeDir               string
-	diagnostics            *slog.Logger
-	configMigration        configstore.MigrationReport
-	fenceOwnerID           string
-	priorHostSessionFences controlplane.PriorHostFenceReplacer
-	taskStore              task.Store
-	controlFeeds           appserver.FeedRegistry
-	approvalRecovery       *appserver.ApprovalRecoveryGate
-	codexAuth              *codexauth.Manager
-	grokAuth               *grokauth.Manager
-	apiKeyCredentials      *credentialstore.Store
-	providerUsage          *providerusage.Registry
-	sessionModelPins       *sessionModelPinRegistry
-	lifecycleCtx           context.Context
+	store                   *appConfigStore
+	storeDir                string
+	sandboxHostAuthorityDir string
+	diagnostics             *slog.Logger
+	configMigration         configstore.MigrationReport
+	fenceOwnerID            string
+	priorHostSessionFences  controlplane.PriorHostFenceReplacer
+	taskStore               task.Store
+	controlFeeds            appserver.FeedRegistry
+	approvalRecovery        *appserver.ApprovalRecoveryGate
+	codexAuth               *codexauth.Manager
+	grokAuth                *grokauth.Manager
+	apiKeyCredentials       *credentialstore.Store
+	providerUsage           *providerusage.Registry
+	sessionModelPins        *sessionModelPinRegistry
+	lifecycleCtx            context.Context
 	// hostedChildInput is the Host-owned parent/sibling route borrowed by
 	// spawned child Session Runtimes. The function carries routing capability,
 	// not Registry ownership.

@@ -43,6 +43,26 @@ func (r *runtime) Prepare(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	releaseUse, err := r.beginRuntimeUse()
+	if err != nil {
+		return fmt.Errorf("impl/sandbox/windows: prepare sandbox: %w", err)
+	}
+	defer releaseUse()
+	return r.prepareUsingCoordinator(ctx)
+}
+
+func requiresElevatedACLRepair(err error) bool {
+	if err == nil {
+		return false
+	}
+	if !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
+		return false
+	}
+	var accessErr *acl.DACLWriteAccessError
+	return errors.As(err, &accessErr)
+}
+
+func (r *runtime) prepareUsingCoordinator(ctx context.Context) error {
 	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
 		Phase:   "acl",
 		Message: "preparing current workspace ACL policy",
@@ -75,7 +95,12 @@ func (r *runtime) Repair(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := r.Prepare(ctx); err == nil {
+	releaseUse, err := r.beginRuntimeUse()
+	if err != nil {
+		return fmt.Errorf("impl/sandbox/windows: repair sandbox: %w", err)
+	}
+	defer releaseUse()
+	if err := r.prepareUsingCoordinator(ctx); err == nil {
 		return nil
 	} else if !requiresElevatedACLRepair(err) {
 		return err
@@ -96,22 +121,11 @@ func (r *runtime) Repair(ctx context.Context) error {
 		Step:    2,
 		Total:   2,
 	})
-	if err := r.Prepare(ctx); err != nil {
+	if err := r.prepareUsingCoordinator(ctx); err != nil {
 		r.recordWorkspaceSetupError(err)
 		return err
 	}
 	return nil
-}
-
-func requiresElevatedACLRepair(err error) bool {
-	if err == nil {
-		return false
-	}
-	if !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
-		return false
-	}
-	lower := strings.ToLower(err.Error())
-	return strings.Contains(lower, "acl: write") && strings.Contains(lower, "dacl")
 }
 
 func (r *runtime) Preflight(ctx context.Context, opts sandbox.PreflightOptions) error {
@@ -136,7 +150,13 @@ func (r *runtime) Refresh(ctx context.Context) error {
 	if !r.beginRefresh() {
 		return nil
 	}
-	err := r.refreshForRequest(ctx, sandbox.CommandRequest{
+	releaseUse, err := r.beginRuntimeUse()
+	if err != nil {
+		r.finishRefresh(err)
+		return fmt.Errorf("impl/sandbox/windows: refresh sandbox: %w", err)
+	}
+	defer releaseUse()
+	err = r.refreshForRequest(ctx, sandbox.CommandRequest{
 		Dir: r.cfg.CWD,
 		Constraints: sandbox.Constraints{
 			Route:      sandbox.RouteSandbox,
@@ -153,7 +173,13 @@ func (r *runtime) startBackgroundRefresh(ctx context.Context, req sandbox.Comman
 	if r == nil || !r.beginRefresh() {
 		return
 	}
+	releaseUse, err := r.beginRuntimeUse()
+	if err != nil {
+		r.finishRefresh(err)
+		return
+	}
 	go func() {
+		defer releaseUse()
 		refreshCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
 		r.finishRefresh(r.refreshForRequest(refreshCtx, req))
@@ -199,90 +225,70 @@ func (r *runtime) refreshForRequest(ctx context.Context, req sandbox.CommandRequ
 	if err := os.MkdirAll(r.sandboxStateDir(), 0o700); err != nil {
 		return err
 	}
-	manifest, manifestErr := r.readManifest()
-	if manifestErr == nil && manifestCoversPolicy(manifest, policy, true) {
-		missing, err := r.missingACLEntries(policy)
-		if err == nil && len(missing) == 0 {
-			return r.cleanupSandboxCaches(ctx, policy.SandboxEnvRoot)
-		}
+	if !r.stateCoordinator.aclMu.TryLock() {
+		return r.cleanupSandboxCaches(ctx, policy.SandboxEnvRoot)
 	}
-	if manifestErr == nil {
-		if !r.tryCleanupStaleManifestACLs(ctx, manifest, policy) {
-			return r.cleanupSandboxCaches(ctx, policy.SandboxEnvRoot)
-		}
-	}
-	appliedPolicy, complete, aclErr := r.applyPolicyACLsInterruptible(ctx, policy)
-	if complete && aclErr == nil {
-		if !r.tryWriteManifest(ctx, appliedPolicy) {
-			return r.cleanupSandboxCaches(ctx, policy.SandboxEnvRoot)
-		}
-	}
+	aclErr := func() error {
+		defer r.stateCoordinator.aclMu.Unlock()
+		return r.refreshACLStateLocked(ctx, policy)
+	}()
 	cacheErr := r.cleanupSandboxCaches(ctx, policy.SandboxEnvRoot)
 	return errors.Join(aclErr, cacheErr)
 }
 
-func (r *runtime) tryCleanupStaleManifestACLs(ctx context.Context, manifest workspaceManifest, policy workspacePolicy) bool {
+func (r *runtime) refreshACLStateLocked(ctx context.Context, policy workspacePolicy) error {
 	if err := ctx.Err(); err != nil {
-		return false
+		return err
 	}
-	if !r.ensureMu.TryLock() {
-		return false
+	if err := r.migrateLegacyManifestLocked(); err != nil {
+		return err
 	}
-	defer r.ensureMu.Unlock()
-	r.cleanupStaleManifestACLs(manifest, policy)
-	return true
-}
-
-func (r *runtime) tryWriteManifest(ctx context.Context, policy workspacePolicy) bool {
-	if err := ctx.Err(); err != nil {
-		return false
-	}
-	if !r.ensureMu.TryLock() {
-		return false
-	}
-	defer r.ensureMu.Unlock()
-	return r.writeManifest(policy) == nil
+	return r.activateReceiptPolicyLocked(ctx, policy, r.stateCoordinator.canPruneACLs())
 }
 
 func (r *runtime) Reset(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	finishReset, err := r.stateCoordinator.beginReset()
+	if err != nil {
+		return fmt.Errorf("impl/sandbox/windows: reset sandbox: %w", err)
+	}
+	defer finishReset()
+	r.stateCoordinator.aclMu.Lock()
+	defer r.stateCoordinator.aclMu.Unlock()
 	plan := r.cleanupPlan()
 	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
 		Phase:   "clean",
-		Message: fmt.Sprintf("cleaning Windows sandbox state: %d ACL paths, %d legacy paths", len(plan.ACLPaths), len(plan.LegacyPaths)),
+		Message: fmt.Sprintf("cleaning exact Windows sandbox ACL receipts and %d workspace paths", len(plan.LegacyPaths)),
 		Step:    1,
 		Total:   3,
 	})
 	var errs []error
-	for _, path := range plan.ACLPaths {
-		if ctx.Err() != nil {
-			return ctx.Err()
+	if err := r.withHostReceiptLedger(func(ledger *hostReceiptLedger) error {
+		if r.hostResetBusy(*ledger) {
+			return errSandboxStateBusy
 		}
-		if _, err := os.Stat(path); err != nil {
-			if !os.IsNotExist(err) {
-				errs = append(errs, fmt.Errorf("inspect ACL cleanup path %s: %w", path, err))
+		if err := r.resetWorkspaceReceiptsTransaction(ctx, ledger); err != nil {
+			return fmt.Errorf("impl/sandbox/windows: clean exact workspace ACL receipts: %w", err)
+		}
+		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+			Phase:   "state",
+			Message: "removing Windows sandbox state files",
+			Step:    2,
+			Total:   3,
+		})
+		for _, path := range plan.LegacyPaths {
+			if ctx.Err() != nil {
+				return ctx.Err()
 			}
-			continue
+			if err := os.RemoveAll(path); err != nil {
+				errs = append(errs, fmt.Errorf("remove sandbox state path %s: %w", path, err))
+			}
 		}
-		if err := acl.RemoveFileDACLPrincipals(path, plan.Principals...); err != nil {
-			errs = append(errs, fmt.Errorf("remove sandbox ACL principals from %s: %w", path, err))
-		}
-	}
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Phase:   "state",
-		Message: "removing Windows sandbox state files",
-		Step:    2,
-		Total:   3,
-	})
-	for _, path := range plan.LegacyPaths {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err := os.RemoveAll(path); err != nil {
-			errs = append(errs, fmt.Errorf("remove sandbox state path %s: %w", path, err))
-		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	for _, leftover := range plan.LegacyProtected {
 		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
@@ -313,14 +319,21 @@ func (r *runtime) Reset(ctx context.Context) error {
 }
 
 func (r *runtime) Close() error {
-	r.mu.RLock()
-	sessions := make([]*windowsSession, 0, len(r.sessions))
-	for _, session := range r.sessions {
-		sessions = append(sessions, session)
+	if r == nil {
+		return nil
 	}
-	r.mu.RUnlock()
-	for _, session := range sessions {
-		_ = session.Terminate(context.Background())
-	}
-	return nil
+	r.closeOnce.Do(func() {
+		r.mu.RLock()
+		sessions := make([]*windowsSession, 0, len(r.sessions))
+		for _, session := range r.sessions {
+			sessions = append(sessions, session)
+		}
+		r.mu.RUnlock()
+		for _, session := range sessions {
+			_ = session.Terminate(context.Background())
+		}
+		r.closeErr = r.closeHostRuntime()
+		r.stateCoordinator.unregisterRuntime(r.registeredEnvRoot)
+	})
+	return r.closeErr
 }

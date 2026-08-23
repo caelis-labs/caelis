@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -16,9 +15,10 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
 )
+
+var errSandboxCacheProvenance = errors.New("sandbox cache has no exact ACL receipt provenance")
 
 func (r *runtime) workspaceSetupCheck() (check sandbox.SetupCheck) {
 	check = sandbox.SetupCheck{
@@ -109,41 +109,22 @@ func (r *runtime) workspaceSetupError() string {
 }
 
 type cleanupPlan struct {
-	ACLPaths        []string
-	Principals      []string
 	LegacyPaths     []string
 	LegacyProtected []string
 }
 
 func (r *runtime) cleanupPlan() cleanupPlan {
 	var plan cleanupPlan
-	if manifest, err := r.readManifest(); err == nil {
-		for _, ace := range manifest.ACEs {
-			plan.ACLPaths = append(plan.ACLPaths, ace.Path)
-			plan.Principals = append(plan.Principals, ace.Principal)
-		}
-	}
-	legacyRoots, legacyPrincipals := r.legacyACLArtifacts()
-	plan.ACLPaths = append(plan.ACLPaths, legacyRoots...)
-	plan.Principals = append(plan.Principals, legacyPrincipals...)
-	plan.ACLPaths = pathutil.Dedupe(plan.ACLPaths)
-	plan.Principals = dedupeStrings(plan.Principals)
 	plan.LegacyPaths = pathutil.Dedupe([]string{
-		r.manifestPath(),
-		r.capabilityStorePath(),
-		r.sandboxEnvBase(),
+		filepath.Dir(r.manifestPath()),
+		r.sandboxEnvRoot(r.cfg.CWD),
 		r.legacyWorkspaceSandboxEnvRoot(),
-		filepath.Join(r.sandboxStateDir(), "workspace_setup.json"),
-		filepath.Join(r.sandboxStateDir(), "setup_marker.json"),
-		filepath.Join(r.sandboxStateDir(), "setup_error.json"),
-		filepath.Join(r.sandboxStateDir(), "setup_progress.json"),
-		filepath.Join(r.stateRoot, ".sandbox-bin"),
-		filepath.Join(r.stateRoot, ".sandbox-secrets"),
-		filepath.Join(r.stateRoot, ".sandbox-reset"),
 	})
 	hash := stateRootHash(r.stateRoot)
 	plan.LegacyProtected = dedupeStrings(
 		[]string{
+			"StateDir-wide capability ledger and other workspace manifests/caches",
+			"legacy random-SID ACLs require explicit repair and are never removed by principal scan",
 			"local user CaelisSbxOff" + hash,
 			"local user CaelisSbxOn" + hash,
 			"local group CaelisSandboxUsers",
@@ -151,45 +132,6 @@ func (r *runtime) cleanupPlan() cleanupPlan {
 		},
 	)
 	return plan
-}
-
-func (r *runtime) legacyACLArtifacts() ([]string, []string) {
-	var roots []string
-	var principals []string
-	type oldWorkspace struct {
-		WriteRoots              []string          `json:"write_roots"`
-		DenyWritePaths          []string          `json:"deny_write_paths"`
-		CapabilitySIDs          []string          `json:"capability_sids"`
-		WriteRootCapabilitySIDs map[string]string `json:"write_root_capability_sids"`
-		OfflineUsername         string            `json:"offline_username"`
-		OnlineUsername          string            `json:"online_username"`
-	}
-	if data, err := os.ReadFile(filepath.Join(r.sandboxStateDir(), "workspace_setup.json")); err == nil {
-		var record oldWorkspace
-		if json.Unmarshal(data, &record) == nil {
-			roots = append(roots, record.WriteRoots...)
-			roots = append(roots, record.DenyWritePaths...)
-			principals = append(principals, record.CapabilitySIDs...)
-			for _, sid := range record.WriteRootCapabilitySIDs {
-				principals = append(principals, sid)
-			}
-			principals = append(principals, record.OfflineUsername, record.OnlineUsername, "CaelisSandboxUsers")
-		}
-	}
-	if data, err := os.ReadFile(r.capabilityStorePath()); err == nil {
-		var store capability.Store
-		if json.Unmarshal(data, &store) == nil {
-			for root, sid := range store.WorkspaceByCWD {
-				roots = append(roots, root)
-				principals = append(principals, sid)
-			}
-			for root, sid := range store.WritableRootByPath {
-				roots = append(roots, root)
-				principals = append(principals, sid)
-			}
-		}
-	}
-	return pathutil.Dedupe(roots), dedupeStrings(principals)
 }
 
 func (r *runtime) sandboxStateDir() string {
@@ -201,7 +143,28 @@ func (r *runtime) capabilityStorePath() string {
 }
 
 func (r *runtime) manifestPath() string {
+	return r.manifestPathForWorkspace(r.cfg.CWD)
+}
+
+func (r *runtime) manifestPathForWorkspace(workspaceRoot string) string {
+	return filepath.Join(r.workspaceManifestBase(), workspaceStateID(workspaceRoot), "workspace_write_manifest.json")
+}
+
+func (r *runtime) workspaceManifestBase() string {
+	return filepath.Join(r.sandboxStateDir(), "workspaces")
+}
+
+func (r *runtime) legacyManifestPath() string {
 	return filepath.Join(r.sandboxStateDir(), "workspace_write_manifest.json")
+}
+
+func workspaceStateID(workspaceRoot string) string {
+	workspace := pathutil.Normalize(workspaceRoot)
+	if workspace == "" {
+		return "unknown"
+	}
+	sum := sha256.Sum256([]byte(pathutil.Key(workspace)))
+	return hex.EncodeToString(sum[:])[:16]
 }
 
 func (r *runtime) sandboxEnvBase() string {
@@ -216,8 +179,7 @@ func (r *runtime) sandboxEnvRoot(workspaceRoot string) string {
 	if workspace == "" {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(pathutil.Key(workspace)))
-	return filepath.Join(r.sandboxEnvBase(), hex.EncodeToString(sum[:])[:16])
+	return filepath.Join(r.sandboxEnvBase(), workspaceStateID(workspace))
 }
 
 type sandboxEnvCacheEntry struct {
@@ -239,12 +201,11 @@ func (r *runtime) cleanupSandboxCaches(ctx context.Context, activeEnvRoot string
 		}
 		return err
 	}
-	activeKey := pathutil.Key(activeEnvRoot)
 	now := time.Now().UTC()
 	var errs []error
 	removed := map[string]struct{}{}
 	for _, entry := range entries {
-		if activeKey != "" && pathutil.Key(entry.path) == activeKey {
+		if pathutil.Key(entry.path) == pathutil.Key(activeEnvRoot) || r.stateCoordinator.protectsEnvRoot(entry.path) {
 			continue
 		}
 		if now.Sub(entry.modTime) <= windowsCacheMaxAge {
@@ -253,8 +214,17 @@ func (r *runtime) cleanupSandboxCaches(ctx context.Context, activeEnvRoot string
 		if err := ctx.Err(); err != nil {
 			return errors.Join(append(errs, err)...)
 		}
-		if err := os.RemoveAll(entry.path); err != nil {
+		removedNow, err := r.stateCoordinator.withUnusedEnvRoot(entry.path, func() error {
+			return r.retireAndRemoveSandboxEnv(ctx, entry.path)
+		})
+		if err != nil {
+			if errors.Is(err, errSandboxCacheProvenance) || errors.Is(err, errSandboxStateBusy) {
+				continue
+			}
 			errs = append(errs, fmt.Errorf("impl/sandbox/windows: clean sandbox cache %s: %w", entry.path, err))
+			continue
+		}
+		if !removedNow {
 			continue
 		}
 		total -= entry.size
@@ -272,7 +242,7 @@ func (r *runtime) cleanupSandboxCaches(ctx context.Context, activeEnvRoot string
 			if key == "" {
 				continue
 			}
-			if activeKey != "" && key == activeKey {
+			if key == pathutil.Key(activeEnvRoot) || r.stateCoordinator.protectsEnvRoot(entry.path) {
 				continue
 			}
 			if _, ok := removed[key]; ok {
@@ -281,8 +251,17 @@ func (r *runtime) cleanupSandboxCaches(ctx context.Context, activeEnvRoot string
 			if err := ctx.Err(); err != nil {
 				return errors.Join(append(errs, err)...)
 			}
-			if err := os.RemoveAll(entry.path); err != nil {
+			removedNow, err := r.stateCoordinator.withUnusedEnvRoot(entry.path, func() error {
+				return r.retireAndRemoveSandboxEnv(ctx, entry.path)
+			})
+			if err != nil {
+				if errors.Is(err, errSandboxCacheProvenance) || errors.Is(err, errSandboxStateBusy) {
+					continue
+				}
 				errs = append(errs, fmt.Errorf("impl/sandbox/windows: clean sandbox cache %s: %w", entry.path, err))
+				continue
+			}
+			if !removedNow {
 				continue
 			}
 			total -= entry.size
@@ -294,6 +273,37 @@ func (r *runtime) cleanupSandboxCaches(ctx context.Context, activeEnvRoot string
 	}
 	r.recordCacheCleanup(now, total)
 	return errors.Join(errs...)
+}
+
+func (r *runtime) retireAndRemoveSandboxEnv(ctx context.Context, envRoot string) error {
+	envRoot = pathutil.Normalize(envRoot)
+	base := pathutil.Normalize(r.sandboxEnvBase())
+	if envRoot == "" || pathutil.Key(filepath.Dir(envRoot)) != pathutil.Key(base) {
+		return fmt.Errorf("impl/sandbox/windows: refuse unscoped sandbox cache removal %s", envRoot)
+	}
+	return r.withHostReceiptLedger(func(ledger *hostReceiptLedger) error {
+		if hostEnvironmentBusy(*ledger, envRoot) {
+			return errSandboxStateBusy
+		}
+		manifestPath := filepath.Join(r.workspaceManifestBase(), filepath.Base(envRoot), "workspace_write_manifest.json")
+		manifest, err := readWorkspaceManifest(manifestPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("%w: %s", errSandboxCacheProvenance, envRoot)
+			}
+			return fmt.Errorf("impl/sandbox/windows: read sandbox cache receipt manifest: %w", err)
+		}
+		if pathutil.Key(manifest.SandboxEnvRoot) != pathutil.Key(envRoot) {
+			return fmt.Errorf("impl/sandbox/windows: sandbox cache receipt manifest does not own %s", envRoot)
+		}
+		if err := r.retireEnvironmentReceiptsTransaction(ctx, manifestPath, &manifest, envRoot, ledger); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(envRoot); err != nil {
+			return err
+		}
+		return finalizeEnvironmentDeletion(manifestPath, &manifest)
+	})
 }
 
 func sandboxEnvCacheEntries(ctx context.Context, base string) ([]sandboxEnvCacheEntry, int64, error) {

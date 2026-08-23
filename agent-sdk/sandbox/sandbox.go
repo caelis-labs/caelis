@@ -154,8 +154,12 @@ type Config struct {
 	FallbackInstallHint string    `json:"fallback_install_hint,omitempty"`
 	HelperPath          string    `json:"helper_path,omitempty"`
 	StateDir            string    `json:"state_dir,omitempty"`
-	WritableRoots       []string  `json:"writable_roots,omitempty"`
-	ReadOnlySubpaths    []string  `json:"read_only_subpaths,omitempty"`
+	// HostAuthorityDir optionally selects the Host-user authority base used by
+	// platform sandboxes for cross-StateDir coordination. It is process
+	// configuration, not workspace policy.
+	HostAuthorityDir string   `json:"host_authority_dir,omitempty"`
+	WritableRoots    []string `json:"writable_roots,omitempty"`
+	ReadOnlySubpaths []string `json:"read_only_subpaths,omitempty"`
 }
 
 // Status reports backend selection and fallback state for one runtime.

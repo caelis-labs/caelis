@@ -115,10 +115,23 @@ func TestWindowsWorkspaceWriteSandboxE2E(t *testing.T) {
 	}
 
 	if resetter, ok := rt.(sandbox.ResettableRuntime); ok {
+		windowsRT := rt.(*runtime)
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			running, _, _, _, _ := windowsRT.refreshSnapshot()
+			if !running {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("background refresh remained active before reset")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		manifestPath := windowsRT.manifestPath()
 		if err := resetter.Reset(ctx); err != nil {
 			t.Fatalf("Reset() error = %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(stateRoot, ".sandbox", "workspace_write_manifest.json")); !os.IsNotExist(err) {
+		if _, err := os.Stat(manifestPath); !os.IsNotExist(err) {
 			t.Fatalf("manifest still exists or unexpected stat error: %v", err)
 		}
 	}

@@ -36,3 +36,11 @@ func TestSandboxConfigToPortPreservesOnlyConfiguredWritableRoots(t *testing.T) {
 		t.Fatalf("port WritableRoots = %#v, want %#v", got.WritableRoots, want)
 	}
 }
+
+func TestSandboxConfigToPortInjectsProcessHostAuthority(t *testing.T) {
+	authority := t.TempDir()
+	got := sandboxConfigToPortWithAuthority(SandboxConfig{}, t.TempDir(), t.TempDir(), authority)
+	if got.HostAuthorityDir != authority {
+		t.Fatalf("HostAuthorityDir = %q, want %q", got.HostAuthorityDir, authority)
+	}
+}

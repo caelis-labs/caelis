@@ -15,9 +15,10 @@ type sandboxLifecycleAction = sandbox.LifecycleAction
 type sandboxLifecycleRuntimeFactory func(sandbox.Config, sandbox.Runtime) (sandbox.LifecycleTarget, error)
 
 type sandboxLifecycleSnapshot struct {
-	exec         sandbox.Runtime
-	workspaceCWD string
-	storeDir     string
+	exec                    sandbox.Runtime
+	workspaceCWD            string
+	storeDir                string
+	sandboxHostAuthorityDir string
 }
 
 type sandboxLifecycleCommand struct {
@@ -112,9 +113,10 @@ func (s *controlCommandBackend) sandboxLifecycleSnapshot() (sandboxLifecycleSnap
 		return sandboxLifecycleSnapshot{}, fmt.Errorf("gatewayapp: sandbox runtime is unavailable")
 	}
 	return sandboxLifecycleSnapshot{
-		exec:         s.composition.exec,
-		workspaceCWD: s.composition.workspace.CWD,
-		storeDir:     s.composition.authorities.storeDir,
+		exec:                    s.composition.exec,
+		workspaceCWD:            s.composition.workspace.CWD,
+		storeDir:                s.composition.authorities.storeDir,
+		sandboxHostAuthorityDir: s.composition.authorities.sandboxHostAuthorityDir,
 	}, nil
 }
 
@@ -142,7 +144,11 @@ func isHostSandboxBackend(backend string) bool {
 }
 
 func (s *controlCommandBackend) sandboxLifecycleRuntime(cfg SandboxConfig, current sandbox.Runtime, workspaceCWD string, storeDir string) (sandbox.LifecycleTarget, error) {
-	portCfg := sandboxConfigToPort(cfg, workspaceCWD, storeDir)
+	authorityDir := ""
+	if s != nil && s.composition != nil {
+		authorityDir = s.composition.authorities.sandboxHostAuthorityDir
+	}
+	portCfg := sandboxConfigToPortWithAuthority(cfg, workspaceCWD, storeDir, authorityDir)
 	if s != nil && s.sandboxLifecycleFactory != nil {
 		return s.sandboxLifecycleFactory(portCfg, current)
 	}
@@ -150,12 +156,17 @@ func (s *controlCommandBackend) sandboxLifecycleRuntime(cfg SandboxConfig, curre
 }
 
 func sandboxConfigToPort(cfg SandboxConfig, workspaceCWD string, storeDir string) sandbox.Config {
+	return sandboxConfigToPortWithAuthority(cfg, workspaceCWD, storeDir, "")
+}
+
+func sandboxConfigToPortWithAuthority(cfg SandboxConfig, workspaceCWD string, storeDir string, authorityDir string) sandbox.Config {
 	cfg = configstore.DefaultSandboxConfig(cfg)
 	return sandbox.Config{
 		CWD:              workspaceCWD,
 		RequestedBackend: sandbox.Backend(cfg.RequestedType),
 		HelperPath:       cfg.HelperPath,
 		StateDir:         storeDir,
+		HostAuthorityDir: authorityDir,
 		WritableRoots:    append([]string(nil), cfg.WritableRoots...),
 		ReadOnlySubpaths: append([]string(nil), cfg.ReadOnlySubpaths...),
 	}

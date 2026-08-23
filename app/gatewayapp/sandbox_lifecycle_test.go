@@ -183,6 +183,9 @@ func TestSandboxLifecycleFactoryError(t *testing.T) {
 func TestSandboxLifecycleCurrentRuntimeWithoutCapabilityNoops(t *testing.T) {
 	runtime := newSandboxLifecycleTestRuntime(sandbox.BackendWindows, sandbox.BackendWindows)
 	stack := sandboxLifecycleTestStack(runtime, "windows")
+	stack.composition.workspace.CWD = t.TempDir()
+	stack.composition.authorities.storeDir = t.TempDir()
+	stack.composition.authorities.sandboxHostAuthorityDir = t.TempDir()
 
 	status, err := stack.runSandboxLifecycle(context.Background(), prepareSandboxRuntime)
 	if err != nil {

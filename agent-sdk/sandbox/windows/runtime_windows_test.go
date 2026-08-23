@@ -10,16 +10,100 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
-	"syscall"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/acl"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
+	xwindows "golang.org/x/sys/windows"
 )
+
+var testHostReceiptAuthorityRoot string
+
+const (
+	hostRuntimeUseHelper     = "CAELIS_HOST_RUNTIME_USE_HELPER"
+	hostRuntimeUseStateDir   = "CAELIS_HOST_RUNTIME_USE_STATE_DIR"
+	hostRuntimeUseWorkspace  = "CAELIS_HOST_RUNTIME_USE_WORKSPACE"
+	hostRuntimeUseReadyFile  = "CAELIS_HOST_RUNTIME_USE_READY_FILE"
+	testHostReceiptAuthority = "CAELIS_TEST_HOST_RECEIPT_AUTHORITY"
+)
+
+func TestMain(m *testing.M) {
+	root := strings.TrimSpace(os.Getenv(testHostReceiptAuthority))
+	owned := false
+	if root == "" {
+		var err error
+		root, err = os.MkdirTemp("", "caelis-windows-host-authority-")
+		if err != nil {
+			panic(err)
+		}
+		owned = true
+	}
+	testHostReceiptAuthorityRoot = root
+	resolveHostReceiptAuthorityRoot = func(hostUserSID string) (string, error) {
+		return hostReceiptAuthorityRootAt(root, hostUserSID)
+	}
+	code := m.Run()
+	if owned {
+		_ = os.RemoveAll(root)
+	}
+	os.Exit(code)
+}
+
+func TestRequiresElevatedACLRepairOnlyForTypedWriteAccessDenial(t *testing.T) {
+	typed := &acl.DACLWriteAccessError{Path: `C:\workspace`, Err: xwindows.ERROR_ACCESS_DENIED}
+	if !requiresElevatedACLRepair(typed) {
+		t.Fatal("requiresElevatedACLRepair(typed access denied) = false, want true")
+	}
+	if requiresElevatedACLRepair(xwindows.ERROR_ACCESS_DENIED) {
+		t.Fatal("requiresElevatedACLRepair(untyped access denied) = true, want false")
+	}
+	if requiresElevatedACLRepair(&acl.DACLWriteAccessError{Path: `C:\workspace`, Err: xwindows.ERROR_INVALID_PARAMETER}) {
+		t.Fatal("requiresElevatedACLRepair(non-access-denied write error) = true, want false")
+	}
+}
+
+func TestHostRuntimeUseHelperProcess(t *testing.T) {
+	if os.Getenv(hostRuntimeUseHelper) != "1" {
+		return
+	}
+	readyFile := os.Getenv(hostRuntimeUseReadyFile)
+	report := func(err error) {
+		if err == nil {
+			_ = os.WriteFile(readyFile, []byte("ready"), 0o600)
+			return
+		}
+		_ = os.WriteFile(readyFile, []byte("error: "+err.Error()), 0o600)
+		t.Fatalf("helper setup error = %v", err)
+	}
+	rt, err := New(sandbox.Config{
+		CWD:      os.Getenv(hostRuntimeUseWorkspace),
+		StateDir: os.Getenv(hostRuntimeUseStateDir),
+	})
+	if err != nil {
+		report(err)
+	}
+	windowsRT := rt.(*runtime)
+	release, err := windowsRT.beginRuntimeUse()
+	if err != nil {
+		report(err)
+	}
+	defer release()
+	defer rt.Close()
+	if _, err := windowsRT.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: windowsRT.cfg.CWD}, ensureModeBackgroundRefresh); err != nil {
+		report(err)
+	}
+	report(nil)
+	for {
+		time.Sleep(time.Second)
+	}
+}
 
 func TestRuntimeDescribeReportsRestrictedTokenCapabilities(t *testing.T) {
 	rt, err := New(sandbox.Config{CWD: t.TempDir(), StateDir: t.TempDir()})
@@ -156,6 +240,94 @@ func TestWindowsSessionForceTerminateMarksDone(t *testing.T) {
 	}
 	if result.ExitCode != -1 {
 		t.Fatalf("second result.ExitCode = %d, want -1", result.ExitCode)
+	}
+}
+
+func TestWatchSessionContextTerminatesNonTTYProcessOnTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{})
+	terminated := make(chan struct{}, 1)
+	go watchSessionContext(ctx, done, func() error {
+		terminated <- struct{}{}
+		return nil
+	})
+	select {
+	case <-terminated:
+	case <-time.After(time.Second):
+		t.Fatal("session timeout did not terminate the atomic Job process")
+	}
+}
+
+func TestNonTTYTimeoutTerminatesContainedDescendant(t *testing.T) {
+	if os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E") != "1" {
+		t.Skip("set CAELIS_WINDOWS_SANDBOX_E2E=1 to run restricted-token Job timeout e2e")
+	}
+	workspace := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	pidFile := filepath.Join(workspace, "child.pid")
+	command := `$p=Start-Process powershell.exe -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30') -PassThru; Set-Content -LiteralPath '` + pidFile + `' -Value $p.Id; Wait-Process -Id $p.Id`
+	session, err := rt.Start(context.Background(), sandbox.CommandRequest{Command: command, Dir: workspace, Timeout: time.Second})
+	if err != nil {
+		t.Fatalf("Start(non-TTY timeout) error = %v", err)
+	}
+	var pid uint64
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, readErr := os.ReadFile(pidFile); readErr == nil {
+			pid, err = strconv.ParseUint(strings.TrimSpace(string(data)), 10, 32)
+			if err != nil {
+				t.Fatalf("parse child PID: %v", err)
+			}
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if pid == 0 {
+		t.Fatal("non-TTY command did not publish descendant PID before timeout")
+	}
+	status, err := session.Wait(context.Background(), 10*time.Second)
+	if err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if status.Running {
+		t.Fatalf("session remains running after Timeout: %+v", status)
+	}
+	handle, err := xwindows.OpenProcess(xwindows.SYNCHRONIZE, false, uint32(pid))
+	if err != nil {
+		return // The exited PID may already have been fully reaped.
+	}
+	defer func() { _ = xwindows.CloseHandle(handle) }()
+	if event, err := xwindows.WaitForSingleObject(handle, 0); err != nil || event != xwindows.WAIT_OBJECT_0 {
+		t.Fatalf("contained descendant after Timeout = %#x/%v, want exited", event, err)
+	}
+}
+
+func TestWindowsSessionForcedPublicationDoesNotReleaseRuntimeUseBeforeProcessWait(t *testing.T) {
+	t.Parallel()
+
+	released := make(chan struct{})
+	session := &windowsSession{
+		running:      true,
+		done:         make(chan struct{}),
+		outputSignal: make(chan struct{}),
+		releaseUse:   func() { close(released) },
+	}
+	session.forceTerminated(errors.New("forced publication"))
+	select {
+	case <-released:
+		t.Fatal("runtime use released before the process wait path became quiescent")
+	default:
+	}
+	session.releaseRuntimeUse()
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("runtime use was not released by the process wait path")
 	}
 }
 
@@ -431,6 +603,21 @@ func TestRunElevatedRepairUsesInternalHelperRequest(t *testing.T) {
 	}
 	defer rt.Close()
 	windowsRT := rt.(*runtime)
+	if _, err := windowsRT.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh); err != nil {
+		t.Fatalf("prepare repair receipts: %v", err)
+	}
+	manifest, err := windowsRT.readManifest()
+	if err != nil {
+		t.Fatalf("read repair manifest: %v", err)
+	}
+	if len(manifest.ManagedReceipts) == 0 {
+		t.Fatal("prepared repair manifest has no receipts")
+	}
+	manifest.ManagedReceipts[0].Applied = false
+	manifest.Phase = manifestPhasePrepared
+	if err := windowsRT.persistManifest(manifest); err != nil {
+		t.Fatalf("persist prepared repair manifest: %v", err)
+	}
 
 	oldLauncher := launchElevatedRepairProcess
 	defer func() { launchElevatedRepairProcess = oldLauncher }()
@@ -441,14 +628,14 @@ func TestRunElevatedRepairUsesInternalHelperRequest(t *testing.T) {
 		gotExe = exe
 		gotCWD = cwd
 		gotArgs = append([]string(nil), args...)
-		configFile := flagValue(args, "-config-file")
-		resultFile := flagValue(args, "-result-file")
-		if configFile == "" || resultFile == "" {
-			t.Fatalf("repair helper args = %#v, want config and result files", args)
+		authorityRoot := flagValue(args, "-authority-root")
+		requestName := flagValue(args, "-request-name")
+		if authorityRoot == "" || requestName == "" || flagValue(args, "-config-file") != "" || flagValue(args, "-result-file") != "" {
+			t.Fatalf("repair helper args = %#v, want stable authority and basenames", args)
 		}
-		data, err := os.ReadFile(configFile)
+		data, err := os.ReadFile(filepath.Join(authorityRoot, requestName))
 		if err != nil {
-			t.Fatalf("read repair config: %v", err)
+			t.Fatalf("read repair request: %v", err)
 		}
 		var request elevatedRepairRequest
 		if err := json.Unmarshal(data, &request); err != nil {
@@ -463,8 +650,11 @@ func TestRunElevatedRepairUsesInternalHelperRequest(t *testing.T) {
 		if request.Config.RequestedBackend != sandbox.BackendWindows {
 			t.Fatalf("repair request backend = %q, want windows", request.Config.RequestedBackend)
 		}
-		if err := writeElevatedRepairResult(resultFile, nil); err != nil {
-			t.Fatalf("write repair result: %v", err)
+		if request.HostUserSID != windowsRT.hostUserSID || pathutil.Key(request.HostReceiptAuthorityRoot) != pathutil.Key(windowsRT.hostReceiptAuthorityRoot) {
+			t.Fatalf("repair request Host authority = %q/%q, want Runtime authority", request.HostUserSID, request.HostReceiptAuthorityRoot)
+		}
+		if err := runInternalRepairHelper(args[1:]); err != nil {
+			t.Fatalf("run repair helper: %v", err)
 		}
 		return 0, nil
 	}
@@ -483,6 +673,148 @@ func TestRunElevatedRepairUsesInternalHelperRequest(t *testing.T) {
 	}
 }
 
+func TestLegacyMigrationFailsBeforeReplacementWhenUnknownSIDNeedsElevation(t *testing.T) {
+	workspace := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	policy, err := windowsRT.policyForRequest(sandbox.CommandRequest{Dir: workspace})
+	if err != nil {
+		t.Fatalf("policyForRequest() error = %v", err)
+	}
+	legacyEntry := acl.Entry{Principal: "S-1-5-21-424242-434343-444444-454545", Rights: acl.Modify, Mode: acl.Grant, Inherit: true}
+	legacyReceipt, err := acl.EnsureExactFileDACLEntry(workspace, legacyEntry)
+	if err != nil {
+		t.Fatalf("install legacy exact ACE: %v", err)
+	}
+	defer func() { _, _ = acl.RemoveFileDACLReceipt(workspace, legacyReceipt) }()
+	plan := legacyMigrationPlan{Required: true, Receipts: []manifestReceipt{{Path: workspace, Entry: legacyEntry, Receipt: legacyReceipt, Applied: true}}}
+
+	oldProbe := probeFileDACLWriteAccess
+	probeFileDACLWriteAccess = func(string) error { return errors.New("access is denied") }
+	defer func() { probeFileDACLWriteAccess = oldProbe }()
+	if err := windowsRT.preflightLegacyMigrationElevation(plan, policy, receiptEffects(policy)); err == nil || !strings.Contains(err.Error(), "before any ACL effect") {
+		t.Fatalf("preflightLegacyMigrationElevation() error = %v, want fail-before-effect diagnostic", err)
+	}
+	newEntry := acl.Entry{Principal: policy.sidForWriteRoot(workspace), Rights: acl.Modify, Mode: acl.Grant, Inherit: true}
+	if count, err := acl.ExactFileDACLEntryCount(workspace, newEntry); err != nil || count != 0 {
+		t.Fatalf("replacement exact ACE count after failed preflight = %d/%v, want zero", count, err)
+	}
+}
+
+func TestInternalRepairVerifiesAllReplacementsBeforeLegacyRetirement(t *testing.T) {
+	workspace := t.TempDir()
+	external := t.TempDir()
+	state := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: state, WritableRoots: []string{external}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	policy, err := windowsRT.policyForRequest(sandbox.CommandRequest{Dir: workspace})
+	if err != nil {
+		t.Fatalf("policyForRequest() error = %v", err)
+	}
+	findGrant := func(path string) receiptEffect {
+		t.Helper()
+		for _, effect := range receiptEffects(policy) {
+			if pathutil.Key(effect.Path) == pathutil.Key(path) && effect.Entry.Mode == acl.Grant && effect.Entry.Rights == acl.Modify {
+				return effect
+			}
+		}
+		t.Fatalf("policy has no grant effect for %s", path)
+		return receiptEffect{}
+	}
+	workspaceEffect := findGrant(workspace)
+	externalEffect := findGrant(external)
+	legacyEntry := acl.Entry{
+		Principal: capability.DeriveLegacyV1SID(windowsRT.capabilityStorePath(), workspace),
+		Rights:    acl.Modify,
+		Mode:      acl.Grant,
+		Inherit:   true,
+	}
+	legacyReceipt, err := acl.EnsureExactFileDACLEntry(workspace, legacyEntry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = acl.RemoveFileDACLReceipt(workspace, legacyReceipt) }()
+	workspaceReceipt, err := acl.PrepareExactFileDACLEntry(workspaceEffect.Path, workspaceEffect.Entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalReceipt, err := acl.PrepareExactFileDACLEntry(externalEffect.Path, externalEffect.Entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := elevatedRepairRequest{
+		Config:                   windowsRT.cfg,
+		HostUserSID:              windowsRT.hostUserSID,
+		HostReceiptAuthorityRoot: windowsRT.hostReceiptAuthorityRoot,
+		PolicyHash:               policy.PolicyHash,
+		Receipts: []manifestReceipt{
+			{Path: workspaceEffect.Path, Entry: workspaceEffect.Entry, Receipt: workspaceReceipt},
+			{Path: externalEffect.Path, Entry: externalEffect.Entry, Receipt: externalReceipt},
+		},
+		RetireReceipts: []manifestReceipt{{Path: workspace, Entry: legacyEntry, Receipt: legacyReceipt, Applied: true}},
+	}
+	foreignOwner := request
+	foreignOwner.Receipts = append([]manifestReceipt(nil), request.Receipts...)
+	foreignOwner.Receipts[1].Receipt.OwnerSID = "S-1-5-32-544"
+	if err := runInternalRepairRequest(foreignOwner); err == nil || !strings.Contains(err.Error(), "not owned by the Host user") {
+		t.Fatalf("runInternalRepairRequest(foreign owner) error = %v, want Host-owner rejection", err)
+	}
+	if count, err := acl.ExactFileDACLEntryCount(workspaceEffect.Path, workspaceEffect.Entry); err != nil || count != 0 {
+		t.Fatalf("workspace replacement after foreign-owner rejection = %d/%v, want zero", count, err)
+	}
+	broken := request
+	broken.Receipts = append([]manifestReceipt(nil), request.Receipts...)
+	broken.Receipts[1].Receipt.BaselineDACLSHA256 = strings.Repeat("0", 64)
+	if err := runInternalRepairRequest(broken); err == nil {
+		t.Fatal("runInternalRepairRequest(broken replacement) succeeded")
+	}
+	if count, err := acl.ExactFileDACLEntryCount(workspace, legacyEntry); err != nil || count != 1 {
+		t.Fatalf("legacy ACE after failed replacement verification = %d/%v, want retained", count, err)
+	}
+	if err := runInternalRepairRequest(request); err != nil {
+		t.Fatalf("runInternalRepairRequest() error = %v", err)
+	}
+	if err := acl.VerifyFileDACLReceipt(workspaceEffect.Path, workspaceReceipt); err != nil {
+		t.Fatalf("workspace replacement receipt: %v", err)
+	}
+	if err := acl.VerifyFileDACLReceipt(externalEffect.Path, externalReceipt); err != nil {
+		t.Fatalf("external replacement receipt: %v", err)
+	}
+	if count, err := acl.ExactFileDACLEntryCount(workspace, legacyEntry); err != nil || count != 0 {
+		t.Fatalf("legacy ACE after verified replacements = %d/%v, want retired", count, err)
+	}
+}
+
+func TestInternalRepairHelperRejectsCallerSelectedResultPath(t *testing.T) {
+	victim := filepath.Join(t.TempDir(), "victim.json")
+	const original = "do not overwrite"
+	if err := os.WriteFile(victim, []byte(original), 0o600); err != nil {
+		t.Fatalf("WriteFile(victim) error = %v", err)
+	}
+	err := runInternalRepairHelper([]string{
+		"-config-file", filepath.Join(t.TempDir(), "request.json"),
+		"-result-file", victim,
+	})
+	if err == nil {
+		t.Fatal("runInternalRepairHelper() error = nil, want unknown result-file rejection")
+	}
+	data, readErr := os.ReadFile(victim)
+	if readErr != nil {
+		t.Fatalf("ReadFile(victim) error = %v", readErr)
+	}
+	if got := string(data); got != original {
+		t.Fatalf("victim contents = %q, want unchanged", got)
+	}
+}
+
 func TestValidateElevatedRepairConfigAllowsPolicyWritableRoots(t *testing.T) {
 	workspace := t.TempDir()
 	state := t.TempDir()
@@ -493,7 +825,11 @@ func TestValidateElevatedRepairConfigAllowsPolicyWritableRoots(t *testing.T) {
 	missingOutsideWorkspace := filepath.Join(t.TempDir(), "missing-global-skills")
 	missingInsideWorkspace := filepath.Join(workspace, ".agents", "skills")
 
-	err := validateElevatedRepairConfig(sandbox.Config{
+	owner, err := acl.InspectFileDACL(workspace)
+	if err != nil {
+		t.Fatalf("InspectFileDACL(workspace) error = %v", err)
+	}
+	err = validateElevatedRepairConfig(sandbox.Config{
 		CWD:              workspace,
 		StateDir:         state,
 		RequestedBackend: sandbox.BackendWindows,
@@ -502,7 +838,7 @@ func TestValidateElevatedRepairConfigAllowsPolicyWritableRoots(t *testing.T) {
 			missingOutsideWorkspace,
 			missingInsideWorkspace,
 		},
-	})
+	}, owner.OwnerSID)
 	if err != nil {
 		t.Fatalf("validateElevatedRepairConfig() error = %v", err)
 	}
@@ -556,9 +892,14 @@ func TestPolicyForRequestUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T
 	if err != nil {
 		t.Fatalf("policyForRequest() error = %v", err)
 	}
-	for _, want := range []string{workspace, commandDir, extraWrite, outDir} {
+	for _, want := range []string{workspace, extraWrite} {
 		if !containsPath(policy.WriteRoots, want) {
 			t.Fatalf("WriteRoots = %#v, want %q", policy.WriteRoots, want)
+		}
+	}
+	for _, compacted := range []string{commandDir, outDir} {
+		if containsPath(policy.WriteRoots, compacted) {
+			t.Fatalf("WriteRoots = %#v, redundant descendant %q was not compacted", policy.WriteRoots, compacted)
 		}
 	}
 	if containsPath(policy.WriteRoots, hidden) || containsPath(policy.DenyWritePaths, hidden) {
@@ -711,6 +1052,787 @@ func TestEnsureWritesManifestAndIsIdempotent(t *testing.T) {
 	if info2.ModTime().Before(info.ModTime()) {
 		t.Fatalf("manifest mtime moved backwards: %s -> %s", info.ModTime(), info2.ModTime())
 	}
+}
+
+func TestWorkspaceManifestsAreIsolatedAcrossRuntimeInstances(t *testing.T) {
+	stateDir := t.TempDir()
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+	rtA, err := New(sandbox.Config{CWD: workspaceA, StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("New(workspace A) error = %v", err)
+	}
+	defer rtA.Close()
+	rtB, err := New(sandbox.Config{CWD: workspaceB, StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("New(workspace B) error = %v", err)
+	}
+	defer rtB.Close()
+	windowsA := rtA.(*runtime)
+	windowsB := rtB.(*runtime)
+
+	if windowsA.manifestPath() == windowsB.manifestPath() {
+		t.Fatalf("manifest paths = %q, want per-workspace paths", windowsA.manifestPath())
+	}
+	for name, current := range map[string]*runtime{"A": windowsA, "B": windowsB} {
+		if _, err := current.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: current.cfg.CWD}); err != nil {
+			t.Fatalf("ensureForRequest(%s) error = %v", name, err)
+		}
+	}
+	manifestBBefore, err := os.ReadFile(windowsB.manifestPath())
+	if err != nil {
+		t.Fatalf("ReadFile(workspace B manifest) error = %v", err)
+	}
+	if err := windowsA.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh(workspace A) error = %v", err)
+	}
+	manifestBAfter, err := os.ReadFile(windowsB.manifestPath())
+	if err != nil {
+		t.Fatalf("ReadFile(workspace B manifest after A refresh) error = %v", err)
+	}
+	if !bytes.Equal(manifestBBefore, manifestBAfter) {
+		t.Fatalf("workspace B manifest changed during workspace A refresh\nbefore=%s\nafter=%s", manifestBBefore, manifestBAfter)
+	}
+	plan := windowsA.cleanupPlan()
+	if containsPath(plan.LegacyPaths, windowsB.manifestPath()) {
+		t.Fatalf("workspace A cleanup paths = %#v, must not include workspace B manifest", plan.LegacyPaths)
+	}
+}
+
+func TestRefreshMigratesLegacyManifestAndCleansStaleDenyACL(t *testing.T) {
+	workspace := t.TempDir()
+	readonly := filepath.Join(workspace, "readonly")
+	if err := os.MkdirAll(readonly, 0o700); err != nil {
+		t.Fatalf("MkdirAll(readonly) error = %v", err)
+	}
+	rt, err := New(sandbox.Config{
+		CWD:              workspace,
+		StateDir:         t.TempDir(),
+		ReadOnlySubpaths: []string{"readonly"},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	legacyWorkspaceSID := "S-1-5-21-100-200-300-4101"
+	legacyEnvSID := "S-1-5-21-100-200-300-4102"
+	legacyStore := capability.Store{
+		WorkspaceByCWD: map[string]string{pathutil.Key(workspace): legacyWorkspaceSID},
+		WritableRootByPath: map[string]string{
+			pathutil.Key(windowsRT.sandboxEnvRoot(workspace)): legacyEnvSID,
+		},
+	}
+	legacyStoreData, err := json.Marshal(legacyStore)
+	if err != nil {
+		t.Fatalf("Marshal(legacy Store) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(windowsRT.capabilityStorePath()), 0o700); err != nil {
+		t.Fatalf("MkdirAll(capability Store) error = %v", err)
+	}
+	if err := os.WriteFile(windowsRT.capabilityStorePath(), legacyStoreData, 0o600); err != nil {
+		t.Fatalf("WriteFile(legacy Store) error = %v", err)
+	}
+	legacyPolicy, err := windowsRT.policyForRequestMode(sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("policyForRequestMode(legacy) error = %v", err)
+	}
+	legacyPolicy.CapabilitySIDs = []string{legacyWorkspaceSID, legacyEnvSID}
+	legacyPolicy.WriteRootCapabilitySIDs = map[string]string{
+		pathutil.Normalize(workspace):                   legacyWorkspaceSID,
+		pathutil.Normalize(legacyPolicy.SandboxEnvRoot): legacyEnvSID,
+	}
+	windowsRT.stateCoordinator.aclMu.Lock()
+	for _, effect := range receiptEffects(legacyPolicy) {
+		if err := acl.ModifyFileDACL(effect.Path, effect.Entry); err != nil {
+			windowsRT.stateCoordinator.aclMu.Unlock()
+			t.Fatalf("ModifyFileDACL(legacy) error = %v", err)
+		}
+	}
+	legacyManifest := workspaceManifestForPolicy(legacyPolicy)
+	legacyManifest.Version = 1
+	legacyManifest.Phase = ""
+	if err := persistWorkspaceManifest(windowsRT.legacyManifestPath(), legacyManifest); err != nil {
+		windowsRT.stateCoordinator.aclMu.Unlock()
+		t.Fatalf("persistWorkspaceManifest(legacy) error = %v", err)
+	}
+	windowsRT.stateCoordinator.aclMu.Unlock()
+	if _, err := os.Stat(windowsRT.manifestPath()); !os.IsNotExist(err) {
+		t.Fatalf("per-workspace manifest stat before refresh = %v, want missing", err)
+	}
+	legacyDeny := []acl.Entry{{
+		Principal: legacyWorkspaceSID,
+		Rights:    acl.Write,
+		Mode:      acl.Deny,
+		Inherit:   true,
+	}}
+	if missing, err := acl.MissingFileDACLEntries(readonly, legacyDeny...); err != nil || len(missing) != 0 {
+		t.Fatalf("legacy deny ACL before refresh = %#v/%v, want present", missing, err)
+	}
+
+	windowsRT.cfg.ReadOnlySubpaths = nil
+	if err := windowsRT.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if _, err := os.Stat(windowsRT.legacyManifestPath()); !os.IsNotExist(err) {
+		t.Fatalf("legacy manifest stat after refresh = %v, want removed", err)
+	}
+	manifest, err := windowsRT.readManifest()
+	if err != nil {
+		t.Fatalf("readManifest() error = %v", err)
+	}
+	if len(manifest.LegacyACEs) != 0 || manifest.LegacyMigrationPrepared {
+		t.Fatalf("migrated manifest = %+v, want legacy evidence consumed after exact retirement", manifest)
+	}
+	if missing, err := acl.MissingFileDACLEntries(readonly, legacyDeny...); err != nil || len(missing) == 0 {
+		t.Fatalf("legacy deny ACL after refresh = %#v/%v, want exact legacy ACE removed", missing, err)
+	}
+}
+
+func TestRefreshPreservesManifestReceiptWhenStaleACLCleanupFails(t *testing.T) {
+	workspace := t.TempDir()
+	staleRoot := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	policy, err := windowsRT.policyForRequestMode(sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("policyForRequestMode() error = %v", err)
+	}
+	staleACE := manifestACE{
+		Path:      staleRoot,
+		Principal: "not-a-valid-windows-principal",
+		Mode:      string(acl.Deny),
+		Rights:    string(acl.Write),
+		Inherit:   true,
+	}
+	manifest := workspaceManifestForPolicy(policy)
+	manifest.Version = 1
+	manifest.Phase = ""
+	manifest.ACEs = append(manifest.ACEs, staleACE)
+	manifest.DenyWritePaths = append(manifest.DenyWritePaths, staleRoot)
+	windowsRT.stateCoordinator.aclMu.Lock()
+	if err := windowsRT.persistManifest(manifest); err != nil {
+		windowsRT.stateCoordinator.aclMu.Unlock()
+		t.Fatalf("persistManifest() error = %v", err)
+	}
+	err = windowsRT.refreshACLStateLocked(context.Background(), policy)
+	windowsRT.stateCoordinator.aclMu.Unlock()
+	if err == nil {
+		t.Fatalf("refreshACLStateLocked() error = nil, want fail-closed unproven legacy residue")
+	}
+	after, readErr := windowsRT.readManifest()
+	if readErr != nil {
+		t.Fatalf("readManifest() error = %v", readErr)
+	}
+	if !containsManifestACE(after.ACEs, staleACE) {
+		t.Fatalf("manifest ACEs = %#v, want unproven legacy manifest unchanged", after.ACEs)
+	}
+}
+
+func TestActiveRuntimePoliciesShareWorkspaceManifestWithoutRevocation(t *testing.T) {
+	stateDir := t.TempDir()
+	workspace := t.TempDir()
+	extraA := t.TempDir()
+	extraB := t.TempDir()
+	rtA, err := New(sandbox.Config{CWD: workspace, StateDir: stateDir, WritableRoots: []string{extraA}})
+	if err != nil {
+		t.Fatalf("New(runtime A) error = %v", err)
+	}
+	defer rtA.Close()
+	rtB, err := New(sandbox.Config{CWD: workspace, StateDir: stateDir, WritableRoots: []string{extraB}})
+	if err != nil {
+		t.Fatalf("New(runtime B) error = %v", err)
+	}
+	defer rtB.Close()
+	windowsA := rtA.(*runtime)
+	windowsB := rtB.(*runtime)
+
+	policyA, err := windowsA.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("ensureForRequestMode(runtime A) error = %v", err)
+	}
+	if _, err := windowsB.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh); err != nil {
+		t.Fatalf("ensureForRequestMode(runtime B) error = %v", err)
+	}
+	manifest, err := windowsA.readManifest()
+	if err != nil {
+		t.Fatalf("readManifest(active runtimes) error = %v", err)
+	}
+	if !containsPath(manifest.WriteRoots, extraA) || !containsPath(manifest.WriteRoots, extraB) {
+		t.Fatalf("active manifest WriteRoots = %#v, want both Runtime policies", manifest.WriteRoots)
+	}
+	entriesA := allowEntries(policyA.sidForWriteRoot(extraA))
+	if missing, err := acl.MissingFileDACLEntries(extraA, entriesA...); err != nil || len(missing) != 0 {
+		t.Fatalf("runtime A ACL after runtime B ensure = %#v/%v, want preserved", missing, err)
+	}
+
+	if err := rtB.Close(); err != nil {
+		t.Fatalf("Close(runtime B) error = %v", err)
+	}
+	if err := windowsA.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh(runtime A after B close) error = %v", err)
+	}
+	manifest, err = windowsA.readManifest()
+	if err != nil {
+		t.Fatalf("readManifest(after B close) error = %v", err)
+	}
+	if !containsPath(manifest.WriteRoots, extraA) || containsPath(manifest.WriteRoots, extraB) {
+		t.Fatalf("pruned manifest WriteRoots = %#v, want only active Runtime extra root %q", manifest.WriteRoots, extraA)
+	}
+}
+
+func TestSharedExternalRootReceiptSurvivesCrossStateDirRetirement(t *testing.T) {
+	externalRoot := t.TempDir()
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+	rtA, err := New(sandbox.Config{CWD: workspaceA, StateDir: t.TempDir(), WritableRoots: []string{externalRoot}})
+	if err != nil {
+		t.Fatalf("New(runtime A) error = %v", err)
+	}
+	defer rtA.Close()
+	rtB, err := New(sandbox.Config{CWD: workspaceB, StateDir: t.TempDir(), WritableRoots: []string{externalRoot}})
+	if err != nil {
+		t.Fatalf("New(runtime B) error = %v", err)
+	}
+	defer rtB.Close()
+	windowsA := rtA.(*runtime)
+	windowsB := rtB.(*runtime)
+	policyA, err := windowsA.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspaceA}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("ensureForRequestMode(runtime A) error = %v", err)
+	}
+	policyB, err := windowsB.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspaceB}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("ensureForRequestMode(runtime B) error = %v", err)
+	}
+	if policyA.sidForWriteRoot(externalRoot) != policyB.sidForWriteRoot(externalRoot) {
+		t.Fatalf("external root SIDs differ across StateDirs: %q vs %q", policyA.sidForWriteRoot(externalRoot), policyB.sidForWriteRoot(externalRoot))
+	}
+	entry := allowEntries(policyA.sidForWriteRoot(externalRoot))[0]
+	if err := windowsA.withHostReceiptLedger(func(ledger *hostReceiptLedger) error {
+		index := hostReceiptIndex(*ledger, externalRoot, entry)
+		if index < 0 {
+			t.Fatal("Host ledger has no cross-StateDir external-root receipt")
+		}
+		if got := len(ledger.Effects[index].References); got != 2 {
+			t.Fatalf("cross-StateDir receipt references = %d, want 2", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("read Host receipt ledger error = %v", err)
+	}
+	if missing, err := acl.MissingFileDACLEntries(externalRoot, entry); err != nil || len(missing) != 0 {
+		t.Fatalf("shared external ACL before retirement = %#v/%v", missing, err)
+	}
+
+	if err := windowsA.resetWorkspaceReceipts(context.Background()); err != nil {
+		t.Fatalf("resetWorkspaceReceipts(runtime A) error = %v", err)
+	}
+	if missing, err := acl.MissingFileDACLEntries(externalRoot, entry); err != nil || len(missing) != 0 {
+		t.Fatalf("shared external ACL after first retirement = %#v/%v, want preserved", missing, err)
+	}
+	if err := windowsB.resetWorkspaceReceipts(context.Background()); err != nil {
+		t.Fatalf("resetWorkspaceReceipts(runtime B) error = %v", err)
+	}
+	if missing, err := acl.MissingFileDACLEntries(externalRoot, entry); err != nil || len(missing) == 0 {
+		t.Fatalf("shared external ACL after final retirement = %#v/%v, want removed", missing, err)
+	}
+}
+
+func TestCrossProcessRuntimeUseBlocksResetAndEnvironmentGC(t *testing.T) {
+	stateDir := t.TempDir()
+	helperWorkspace := t.TempDir()
+	readyFile := filepath.Join(t.TempDir(), "ready")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHostRuntimeUseHelperProcess$")
+	cmd.Env = append(os.Environ(),
+		hostRuntimeUseHelper+"=1",
+		hostRuntimeUseStateDir+"="+stateDir,
+		hostRuntimeUseWorkspace+"="+helperWorkspace,
+		hostRuntimeUseReadyFile+"="+readyFile,
+		testHostReceiptAuthority+"="+testHostReceiptAuthorityRoot,
+	)
+	var helperOutput bytes.Buffer
+	cmd.Stdout = &helperOutput
+	cmd.Stderr = &helperOutput
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper process error = %v", err)
+	}
+	waited := false
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		if !waited {
+			_ = cmd.Wait()
+		}
+	}()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		data, err := os.ReadFile(readyFile)
+		if err == nil {
+			if got := string(data); got != "ready" {
+				t.Fatalf("helper readiness = %q; output=%s", got, helperOutput.String())
+			}
+			break
+		}
+		if !os.IsNotExist(err) {
+			t.Fatalf("read helper readiness error = %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("helper process did not become ready; output=%s", helperOutput.String())
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	rt, err := New(sandbox.Config{CWD: t.TempDir(), StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("New(parent runtime) error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	if err := windowsRT.Reset(context.Background()); !errors.Is(err, errSandboxStateBusy) {
+		t.Fatalf("Reset() with foreign process use error = %v, want busy", err)
+	}
+	helperEnvRoot := windowsRT.sandboxEnvRoot(helperWorkspace)
+	if err := windowsRT.retireAndRemoveSandboxEnv(context.Background(), helperEnvRoot); !errors.Is(err, errSandboxStateBusy) {
+		t.Fatalf("retireAndRemoveSandboxEnv() with foreign process use error = %v, want busy", err)
+	}
+
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill helper process error = %v", err)
+	}
+	if err := cmd.Wait(); err == nil {
+		t.Fatal("killed helper process exited without an error")
+	}
+	waited = true
+	if err := windowsRT.retireAndRemoveSandboxEnv(context.Background(), helperEnvRoot); err != nil {
+		t.Fatalf("retireAndRemoveSandboxEnv() after helper death error = %v; output=%s", err, helperOutput.String())
+	}
+	if _, err := os.Stat(helperEnvRoot); !os.IsNotExist(err) {
+		t.Fatalf("helper sandbox environment stat after recovery = %v, want missing", err)
+	}
+	if err := windowsRT.Reset(context.Background()); err != nil {
+		t.Fatalf("Reset() after helper death error = %v", err)
+	}
+}
+
+func TestDeletingEnvironmentRecoversBeforeRuntimeUse(t *testing.T) {
+	workspace := t.TempDir()
+	stateDir := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	windowsRT := rt.(*runtime)
+	if _, err := windowsRT.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh); err != nil {
+		t.Fatalf("ensureForRequestMode() error = %v", err)
+	}
+	envRoot := windowsRT.registeredEnvRoot
+	if err := windowsRT.withHostReceiptLedger(func(ledger *hostReceiptLedger) error {
+		manifest, err := windowsRT.readManifest()
+		if err != nil {
+			return err
+		}
+		return windowsRT.retireEnvironmentReceiptsTransaction(context.Background(), windowsRT.manifestPath(), &manifest, envRoot, ledger)
+	}); err != nil {
+		t.Fatalf("prepare deleting environment transaction error = %v", err)
+	}
+	if _, err := os.Stat(envRoot); err != nil {
+		t.Fatalf("sandbox environment after simulated crash stat = %v, want retained", err)
+	}
+	manifest, err := windowsRT.readManifest()
+	if err != nil {
+		t.Fatalf("read deleting manifest error = %v", err)
+	}
+	if manifest.Phase != manifestPhaseDeleting || pathutil.Key(manifest.SandboxEnvRoot) != pathutil.Key(envRoot) || pathutil.Key(manifest.DeletingEnvRoot) != pathutil.Key(envRoot) {
+		t.Fatalf("deleting manifest = %+v, want durable source and target", manifest)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close(first runtime) error = %v", err)
+	}
+
+	reopened, err := New(sandbox.Config{CWD: workspace, StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("New(reopened runtime) error = %v", err)
+	}
+	defer reopened.Close()
+	reopenedWindows := reopened.(*runtime)
+	release, err := reopenedWindows.beginRuntimeUse()
+	if err != nil {
+		t.Fatalf("beginRuntimeUse() recovery error = %v", err)
+	}
+	defer release()
+	if _, err := os.Stat(envRoot); !os.IsNotExist(err) {
+		t.Fatalf("sandbox environment after deleting recovery stat = %v, want missing", err)
+	}
+	manifest, err = reopenedWindows.readManifest()
+	if err != nil {
+		t.Fatalf("read recovered manifest error = %v", err)
+	}
+	if manifest.Phase != manifestPhaseActive || manifest.SandboxEnvRoot != "" || manifest.DeletingEnvRoot != "" {
+		t.Fatalf("recovered manifest = %+v, want finalized deletion", manifest)
+	}
+	if _, err := reopenedWindows.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh); err != nil {
+		t.Fatalf("ensureForRequestMode() after deleting recovery error = %v", err)
+	}
+}
+
+func TestActiveManifestRejectsForeignUnappliedReceipt(t *testing.T) {
+	workspace := t.TempDir()
+	foreignRoot := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	policy, err := windowsRT.policyForRequestMode(sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("policyForRequestMode() error = %v", err)
+	}
+	entry := allowEntries(policy.sidForWriteRoot(workspace))[0]
+	receipt, err := acl.PrepareExactFileDACLEntry(foreignRoot, entry)
+	if err != nil {
+		t.Fatalf("PrepareExactFileDACLEntry() error = %v", err)
+	}
+	manifest := workspaceManifestForPolicy(policy)
+	manifest.ManagedReceipts = []manifestReceipt{{Path: foreignRoot, Entry: entry, Receipt: receipt}}
+	if err := windowsRT.persistManifest(manifest); err != nil {
+		t.Fatalf("persist tampered active manifest error = %v", err)
+	}
+	if _, err := windowsRT.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh); err == nil || !strings.Contains(err.Error(), "outside the current validated policy") {
+		t.Fatalf("ensureForRequestMode(tampered active manifest) error = %v, want foreign receipt rejection", err)
+	}
+	if missing, err := acl.MissingFileDACLEntries(foreignRoot, entry); err != nil || len(missing) == 0 {
+		t.Fatalf("foreign ACL after rejected manifest = %#v/%v, want absent", missing, err)
+	}
+}
+
+func TestManifestRejectsReceiptEntryMismatch(t *testing.T) {
+	root := t.TempDir()
+	entry := acl.Entry{Principal: "S-1-5-21-100-200-300-5101", Rights: acl.Modify, Mode: acl.Grant, Inherit: true}
+	receipt, err := acl.PrepareExactFileDACLEntry(root, entry)
+	if err != nil {
+		t.Fatalf("PrepareExactFileDACLEntry() error = %v", err)
+	}
+	manifest := workspaceManifest{
+		Version:       workspaceManifestVersion,
+		WorkspaceRoot: root,
+		Phase:         manifestPhasePrepared,
+		ManagedReceipts: []manifestReceipt{{
+			Path:    root,
+			Entry:   acl.Entry{Principal: "S-1-5-21-100-200-300-5102", Rights: acl.Modify, Mode: acl.Grant, Inherit: true},
+			Receipt: receipt,
+		}},
+	}
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	if err := persistWorkspaceManifest(path, manifest); err != nil {
+		t.Fatalf("persistWorkspaceManifest() error = %v", err)
+	}
+	if _, err := readWorkspaceManifest(path); err == nil {
+		t.Fatal("readWorkspaceManifest() error = nil, want receipt Entry mismatch rejection")
+	}
+}
+
+func TestRetiringReceiptRevivesWithoutReleasingHostReference(t *testing.T) {
+	workspace := t.TempDir()
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir(), WritableRoots: []string{rootA}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	policyA, err := windowsRT.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("ensure policy A error = %v", err)
+	}
+	windowsRT.cfg.WritableRoots = []string{rootB}
+	policyB, err := windowsRT.policyForRequestMode(sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("policy B error = %v", err)
+	}
+	windowsRT.stateCoordinator.aclMu.Lock()
+	err = windowsRT.activateReceiptPolicyLocked(context.Background(), policyB, false)
+	windowsRT.stateCoordinator.aclMu.Unlock()
+	if err != nil {
+		t.Fatalf("activate policy B without retirement error = %v", err)
+	}
+	entryA := allowEntries(policyA.sidForWriteRoot(rootA))[0]
+	manifest, err := windowsRT.readManifest()
+	if err != nil {
+		t.Fatalf("read manifest B error = %v", err)
+	}
+	managedA := receiptIndex(manifest.ManagedReceipts, receiptEffectKey(rootA, entryA))
+	if managedA < 0 {
+		t.Fatalf("manifest B managed receipts = %+v, want preserved root A before retirement", manifest.ManagedReceipts)
+	}
+	manifest.RetiringReceipts = appendReceipt(manifest.RetiringReceipts, manifest.ManagedReceipts[managedA])
+	manifest.ManagedReceipts = append(manifest.ManagedReceipts[:managedA], manifest.ManagedReceipts[managedA+1:]...)
+	if err := windowsRT.persistManifest(manifest); err != nil {
+		t.Fatalf("persist interrupted A-to-B transition error = %v", err)
+	}
+	manifest, err = windowsRT.readManifest()
+	if err != nil {
+		t.Fatalf("read interrupted A-to-B manifest error = %v", err)
+	}
+	if receiptIndex(manifest.RetiringReceipts, receiptEffectKey(rootA, entryA)) < 0 {
+		t.Fatalf("manifest B retiring receipts = %+v, want root A", manifest.RetiringReceipts)
+	}
+	windowsRT.cfg.WritableRoots = []string{rootA}
+	policyA, err = windowsRT.policyForRequestMode(sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("policy A restore error = %v", err)
+	}
+	windowsRT.stateCoordinator.aclMu.Lock()
+	err = windowsRT.activateReceiptPolicyLocked(context.Background(), policyA, true)
+	windowsRT.stateCoordinator.aclMu.Unlock()
+	if err != nil {
+		t.Fatalf("reactivate policy A error = %v", err)
+	}
+	manifest, err = windowsRT.readManifest()
+	if err != nil {
+		t.Fatalf("read reactivated manifest error = %v", err)
+	}
+	if receiptIndex(manifest.ManagedReceipts, receiptEffectKey(rootA, entryA)) < 0 || receiptIndex(manifest.RetiringReceipts, receiptEffectKey(rootA, entryA)) >= 0 {
+		t.Fatalf("reactivated manifest receipts = managed:%+v retiring:%+v, want root A managed only", manifest.ManagedReceipts, manifest.RetiringReceipts)
+	}
+	if missing, err := acl.MissingFileDACLEntries(rootA, entryA); err != nil || len(missing) != 0 {
+		t.Fatalf("root A ACL after reactivation = %#v/%v, want present", missing, err)
+	}
+}
+
+func TestHostReceiptReleaseResumesAfterReferenceCommit(t *testing.T) {
+	workspace := t.TempDir()
+	externalRoot := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir(), WritableRoots: []string{externalRoot}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	policy, err := windowsRT.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("ensureForRequestMode() error = %v", err)
+	}
+	entry := allowEntries(policy.sidForWriteRoot(externalRoot))[0]
+	reference := hostReceiptReferenceForManifest(windowsRT.manifestPath())
+	if err := windowsRT.withHostReceiptLedger(func(ledger *hostReceiptLedger) error {
+		index := hostReceiptIndex(*ledger, externalRoot, entry)
+		if index < 0 {
+			t.Fatalf("Host ledger has no external-root receipt")
+		}
+		refs := ledger.Effects[index].References[:0]
+		for _, candidate := range ledger.Effects[index].References {
+			if candidate != reference {
+				refs = append(refs, candidate)
+			}
+		}
+		ledger.Effects[index].References = refs
+		return windowsRT.persistHostReceiptLedger(*ledger)
+	}); err != nil {
+		t.Fatalf("persist simulated release reference commit error = %v", err)
+	}
+	if err := windowsRT.resetWorkspaceReceipts(context.Background()); err != nil {
+		t.Fatalf("resetWorkspaceReceipts(retry) error = %v", err)
+	}
+	if missing, err := acl.MissingFileDACLEntries(externalRoot, entry); err != nil || len(missing) == 0 {
+		t.Fatalf("external ACL after resumed release = %#v/%v, want removed", missing, err)
+	}
+}
+
+func TestCanceledReceiptResetDoesNotPublishRetirement(t *testing.T) {
+	workspace := t.TempDir()
+	externalRoot := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir(), WritableRoots: []string{externalRoot}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	policy, err := windowsRT.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("ensureForRequestMode() error = %v", err)
+	}
+	before, err := os.ReadFile(windowsRT.manifestPath())
+	if err != nil {
+		t.Fatalf("ReadFile(manifest before reset) error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := windowsRT.resetWorkspaceReceipts(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("resetWorkspaceReceipts(canceled) error = %v, want context canceled", err)
+	}
+	after, err := os.ReadFile(windowsRT.manifestPath())
+	if err != nil {
+		t.Fatalf("ReadFile(manifest after reset) error = %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("manifest changed during canceled reset\nbefore=%s\nafter=%s", before, after)
+	}
+	entry := allowEntries(policy.sidForWriteRoot(externalRoot))[0]
+	if missing, err := acl.MissingFileDACLEntries(externalRoot, entry); err != nil || len(missing) != 0 {
+		t.Fatalf("external ACL after canceled reset = %#v/%v, want present", missing, err)
+	}
+}
+
+func TestRefreshManifestTransactionPreservesClosingRuntimeReceipt(t *testing.T) {
+	workspace := t.TempDir()
+	extraA := t.TempDir()
+	extraB := t.TempDir()
+	stateDir := t.TempDir()
+	rtA, err := New(sandbox.Config{CWD: workspace, StateDir: stateDir, WritableRoots: []string{extraA}})
+	if err != nil {
+		t.Fatalf("New(runtime A) error = %v", err)
+	}
+	defer rtA.Close()
+	rtB, err := New(sandbox.Config{CWD: workspace, StateDir: stateDir, WritableRoots: []string{extraB}})
+	if err != nil {
+		t.Fatalf("New(runtime B) error = %v", err)
+	}
+	windowsA := rtA.(*runtime)
+	windowsB := rtB.(*runtime)
+	for name, current := range map[string]*runtime{"A": windowsA, "B": windowsB} {
+		if _, err := current.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh); err != nil {
+			t.Fatalf("ensureForRequestMode(%s) error = %v", name, err)
+		}
+	}
+	policyA, err := windowsA.policyForRequestMode(sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("policyForRequestMode(A) error = %v", err)
+	}
+	windowsA.stateCoordinator.aclMu.Lock()
+	closed := make(chan error, 1)
+	go func() { closed <- rtB.Close() }()
+	select {
+	case err := <-closed:
+		windowsA.stateCoordinator.aclMu.Unlock()
+		t.Fatalf("Close(runtime B) completed inside manifest transaction: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := windowsA.refreshACLStateLocked(context.Background(), policyA); err != nil {
+		windowsA.stateCoordinator.aclMu.Unlock()
+		t.Fatalf("refreshACLStateLocked() error = %v", err)
+	}
+	windowsA.stateCoordinator.aclMu.Unlock()
+	if err := <-closed; err != nil {
+		t.Fatalf("Close(runtime B) error = %v", err)
+	}
+	manifest, err := windowsA.readManifest()
+	if err != nil {
+		t.Fatalf("readManifest() error = %v", err)
+	}
+	if !containsPath(manifest.WriteRoots, extraA) || !containsPath(manifest.WriteRoots, extraB) {
+		t.Fatalf("manifest WriteRoots = %#v, want pre-existing and concurrent-use policies", manifest.WriteRoots)
+	}
+}
+
+func TestRuntimeInstancesShareACLMutationCoordinator(t *testing.T) {
+	stateDir := t.TempDir()
+	rtA, err := New(sandbox.Config{CWD: t.TempDir(), StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("New(workspace A) error = %v", err)
+	}
+	defer rtA.Close()
+	rtB, err := New(sandbox.Config{CWD: t.TempDir(), StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("New(workspace B) error = %v", err)
+	}
+	defer rtB.Close()
+	windowsA := rtA.(*runtime)
+	windowsB := rtB.(*runtime)
+	if windowsA.stateCoordinator != windowsB.stateCoordinator {
+		t.Fatal("runtime coordinators differ, want one StateDir-scoped coordinator")
+	}
+
+	windowsA.stateCoordinator.aclMu.Lock()
+	result := make(chan error, 1)
+	go func() {
+		_, err := windowsB.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: windowsB.cfg.CWD})
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		windowsA.stateCoordinator.aclMu.Unlock()
+		t.Fatalf("ensureForRequest completed without shared ACL serialization: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	windowsA.stateCoordinator.aclMu.Unlock()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("ensureForRequest() error = %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("ensureForRequest remained blocked after shared ACL coordinator release")
+	}
+}
+
+func TestEnvCacheRemovalSerializesRuntimeRegistration(t *testing.T) {
+	coordinator := &sandboxStateCoordinator{activeEnvRoots: map[string]int{}}
+	envRoot := filepath.Join(t.TempDir(), "env")
+	otherRoot := filepath.Join(t.TempDir(), "other")
+	removeStarted := make(chan struct{})
+	allowRemove := make(chan struct{})
+	removed := make(chan error, 1)
+	go func() {
+		_, err := coordinator.withUnusedEnvRoot(envRoot, func() error {
+			close(removeStarted)
+			<-allowRemove
+			return nil
+		})
+		removed <- err
+	}()
+	<-removeStarted
+	responsive := make(chan bool, 1)
+	go func() { responsive <- coordinator.protectsEnvRoot(otherRoot) }()
+	select {
+	case <-responsive:
+	case <-time.After(time.Second):
+		close(allowRemove)
+		t.Fatal("coordinator state lock remained held during cache removal")
+	}
+
+	registered := make(chan error, 1)
+	go func() {
+		registered <- coordinator.registerRuntime(envRoot)
+	}()
+	select {
+	case err := <-registered:
+		close(allowRemove)
+		t.Fatalf("registerRuntime completed during cache removal: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	aclResponsive := make(chan struct{}, 1)
+	go func() {
+		coordinator.aclMu.Lock()
+		aclResponsive <- struct{}{}
+		coordinator.aclMu.Unlock()
+	}()
+	select {
+	case <-aclResponsive:
+	case <-time.After(time.Second):
+		close(allowRemove)
+		t.Fatal("ACL coordinator lock remained held while registration waited for cache removal")
+	}
+	close(allowRemove)
+	if err := <-removed; err != nil {
+		t.Fatalf("withUnusedEnvRoot() error = %v", err)
+	}
+	select {
+	case err := <-registered:
+		if err != nil {
+			t.Fatalf("registerRuntime() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("registerRuntime remained blocked after cache removal")
+	}
+	coordinator.unregisterRuntime(envRoot)
 }
 
 func TestSandboxEnvironmentPreservesHostUserDirsAndRedirectsToolCaches(t *testing.T) {
@@ -968,8 +2090,218 @@ func TestCleanupSandboxCachesPreservesActiveEnvRoot(t *testing.T) {
 	if _, err := os.Stat(active); err != nil {
 		t.Fatalf("active env stat error = %v, want preserved", err)
 	}
-	if _, err := os.Stat(old); !os.IsNotExist(err) {
-		t.Fatalf("old env stat error = %v, want removed", err)
+	if _, err := os.Stat(old); err != nil {
+		t.Fatalf("unproven old env stat error = %v, want fail-closed preservation", err)
+	}
+}
+
+func TestCleanupSandboxCachesPreservesOtherRuntimeEnvRoot(t *testing.T) {
+	stateDir := t.TempDir()
+	rtA, err := New(sandbox.Config{CWD: t.TempDir(), StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("New(workspace A) error = %v", err)
+	}
+	defer rtA.Close()
+	rtB, err := New(sandbox.Config{CWD: t.TempDir(), StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("New(workspace B) error = %v", err)
+	}
+	defer rtB.Close()
+	windowsA := rtA.(*runtime)
+	windowsB := rtB.(*runtime)
+	for name, current := range map[string]*runtime{"A": windowsA, "B": windowsB} {
+		if _, err := current.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: current.cfg.CWD}, ensureModeBackgroundRefresh); err != nil {
+			t.Fatalf("ensureForRequestMode(%s) error = %v", name, err)
+		}
+	}
+	for _, root := range []string{windowsA.registeredEnvRoot, windowsB.registeredEnvRoot} {
+		if err := os.MkdirAll(filepath.Join(root, "cache"), 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", root, err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "cache", "cache.bin"), []byte("cache"), 0o600); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", root, err)
+		}
+		stale := time.Now().Add(-(windowsCacheMaxAge + time.Hour))
+		if err := os.Chtimes(root, stale, stale); err != nil {
+			t.Fatalf("Chtimes(%s) error = %v", root, err)
+		}
+	}
+
+	if err := windowsA.cleanupSandboxCaches(context.Background(), windowsA.registeredEnvRoot); err != nil {
+		t.Fatalf("cleanupSandboxCaches(active runtimes) error = %v", err)
+	}
+	if _, err := os.Stat(windowsB.registeredEnvRoot); err != nil {
+		t.Fatalf("other active Runtime env stat error = %v, want preserved", err)
+	}
+	if err := rtB.Close(); err != nil {
+		t.Fatalf("Close(workspace B) error = %v", err)
+	}
+	if err := windowsA.cleanupSandboxCaches(context.Background(), windowsA.registeredEnvRoot); err != nil {
+		t.Fatalf("cleanupSandboxCaches(after close) error = %v", err)
+	}
+	if _, err := os.Stat(windowsB.registeredEnvRoot); !os.IsNotExist(err) {
+		t.Fatalf("closed proven Runtime env stat error = %v, want exact-receipt retirement and removal", err)
+	}
+}
+
+func TestReceiptManifestRotationRemovesOnlyOwnedExactACE(t *testing.T) {
+	workspace := t.TempDir()
+	staleRoot := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir(), WritableRoots: []string{staleRoot}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	oldPolicy, err := windowsRT.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("ensureForRequestMode(old) error = %v", err)
+	}
+	managed := acl.Entry{Principal: oldPolicy.sidForWriteRoot(staleRoot), Rights: acl.Modify, Mode: acl.Grant, Inherit: true}
+	thirdParty := acl.Entry{Principal: "S-1-5-21-9-8-7-6", Rights: acl.ReadExecute, Mode: acl.Grant, Inherit: true}
+	if err := acl.ModifyFileDACL(staleRoot, thirdParty); err != nil {
+		t.Fatalf("ModifyFileDACL(third party) error = %v", err)
+	}
+	windowsRT.cfg.WritableRoots = nil
+	if err := windowsRT.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh(rotation) error = %v", err)
+	}
+	if missing, err := acl.MissingFileDACLEntries(staleRoot, managed); err != nil || len(missing) == 0 {
+		t.Fatalf("managed stale ACE after rotation = %#v/%v, want removed", missing, err)
+	}
+	if missing, err := acl.MissingFileDACLEntries(staleRoot, thirdParty); err != nil || len(missing) != 0 {
+		t.Fatalf("third-party ACE after rotation = %#v/%v, want preserved", missing, err)
+	}
+}
+
+func TestReceiptManifestRecoversEffectBeforeAppliedCommit(t *testing.T) {
+	workspace := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	policy, err := windowsRT.policyForRequestMode(sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("policyForRequestMode() error = %v", err)
+	}
+	effect := receiptEffects(policy)[0]
+	receipt, err := acl.PrepareExactFileDACLEntry(effect.Path, effect.Entry)
+	if err != nil {
+		t.Fatalf("PrepareExactFileDACLEntry() error = %v", err)
+	}
+	manifest := workspaceManifestForPolicy(policy)
+	manifest.Phase = manifestPhasePrepared
+	manifest.ManagedReceipts = []manifestReceipt{{Path: effect.Path, Entry: effect.Entry, Receipt: receipt}}
+	if err := windowsRT.persistManifest(manifest); err != nil {
+		t.Fatalf("persistManifest(prepared) error = %v", err)
+	}
+	if err := acl.EnsureFileDACLReceipt(effect.Path, receipt); err != nil {
+		t.Fatalf("EnsureFileDACLReceipt(crash effect) error = %v", err)
+	}
+	windowsRT.stateCoordinator.aclMu.Lock()
+	err = windowsRT.activateReceiptPolicyLocked(context.Background(), policy, true)
+	windowsRT.stateCoordinator.aclMu.Unlock()
+	if err != nil {
+		t.Fatalf("activateReceiptPolicyLocked(recovery) error = %v", err)
+	}
+	recovered, err := windowsRT.readManifest()
+	if err != nil || recovered.Phase != manifestPhaseActive || !receiptManifestCovers(recovered, receiptEffects(policy)) {
+		t.Fatalf("recovered manifest = %+v/%v, want complete active receipts", recovered, err)
+	}
+}
+
+func TestResetFailsClosedWhileRuntimeStateIsActive(t *testing.T) {
+	stateDir := t.TempDir()
+	rtA, err := New(sandbox.Config{CWD: t.TempDir(), StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("New(workspace A) error = %v", err)
+	}
+	defer rtA.Close()
+	rtB, err := New(sandbox.Config{CWD: t.TempDir(), StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("New(workspace B) error = %v", err)
+	}
+	windowsA := rtA.(*runtime)
+
+	if err := windowsA.Reset(context.Background()); !errors.Is(err, errSandboxStateBusy) {
+		t.Fatalf("Reset(other Runtime active) error = %v, want %v", err, errSandboxStateBusy)
+	}
+	if err := rtB.Close(); err != nil {
+		t.Fatalf("Close(workspace B) error = %v", err)
+	}
+	releaseUse, err := windowsA.stateCoordinator.beginUse(windowsA.registeredEnvRoot)
+	if err != nil {
+		t.Fatalf("beginUse() error = %v", err)
+	}
+	if err := windowsA.Reset(context.Background()); !errors.Is(err, errSandboxStateBusy) {
+		releaseUse()
+		t.Fatalf("Reset(command active) error = %v, want %v", err, errSandboxStateBusy)
+	}
+	releaseUse()
+	if err := windowsA.Reset(context.Background()); err != nil {
+		t.Fatalf("Reset(idle) error = %v", err)
+	}
+}
+
+func TestFailedProcessTreeDrainKeepsResetAndGCBusyUntilRetrySucceeds(t *testing.T) {
+	workspace := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	releaseUse, err := windowsRT.beginRuntimeUse()
+	if err != nil {
+		t.Fatalf("beginRuntimeUse() error = %v", err)
+	}
+	released := make(chan struct{})
+	var drainAllowed atomic.Bool
+	var drainAttempts atomic.Int32
+	session := &windowsSession{
+		releaseUse: func() {
+			releaseUse()
+			close(released)
+		},
+		drainTree: func(context.Context) error {
+			drainAttempts.Add(1)
+			if !drainAllowed.Load() {
+				return errors.New("forced Job drain failure")
+			}
+			return nil
+		},
+	}
+	go session.retryProcessTreeDrain()
+	defer func() {
+		drainAllowed.Store(true)
+		select {
+		case <-released:
+		case <-time.After(5 * time.Second):
+		}
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for drainAttempts.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if drainAttempts.Load() == 0 {
+		t.Fatal("process-tree drain retry did not start")
+	}
+	if err := windowsRT.Reset(context.Background()); !errors.Is(err, errSandboxStateBusy) {
+		t.Fatalf("Reset(drain unproven) error = %v, want %v", err, errSandboxStateBusy)
+	}
+	if err := windowsRT.retireAndRemoveSandboxEnv(context.Background(), windowsRT.registeredEnvRoot); !errors.Is(err, errSandboxStateBusy) {
+		t.Fatalf("GC(drain unproven) error = %v, want %v", err, errSandboxStateBusy)
+	}
+	drainAllowed.Store(true)
+	select {
+	case <-released:
+	case <-time.After(5 * time.Second):
+		t.Fatal("process-tree drain retry did not release Runtime use")
+	}
+	if err := windowsRT.Reset(context.Background()); err != nil {
+		t.Fatalf("Reset(after proven drain) error = %v", err)
 	}
 }
 
@@ -1014,60 +2346,11 @@ func TestEnsureSkipsMissingWritableRootsAndRepairsWhenPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("policyForRequest() error = %v", err)
 	}
-	if !containsPath(policy.WriteRoots, missingRoot) {
-		t.Fatalf("WriteRoots = %#v, want existing root %q", policy.WriteRoots, missingRoot)
+	if containsPath(policy.WriteRoots, missingRoot) {
+		t.Fatalf("WriteRoots = %#v, redundant descendant %q was not compacted", policy.WriteRoots, missingRoot)
 	}
-	if missing, err := acl.MissingFileDACLEntries(missingRoot, allowEntries(policy.sidForWriteRoot(missingRoot))...); err != nil || len(missing) != 0 {
-		t.Fatalf("missing writable root ACL entries = %#v/%v, want repaired", missing, err)
-	}
-}
-
-func TestRepairCurrentWorkspaceACLsCleansStaleManifestACLs(t *testing.T) {
-	workspace := t.TempDir()
-	staleRoot := filepath.Join(t.TempDir(), "stale-write")
-	if err := os.MkdirAll(staleRoot, 0o700); err != nil {
-		t.Fatalf("MkdirAll(staleRoot) error = %v", err)
-	}
-	rt, err := New(sandbox.Config{
-		CWD:           workspace,
-		StateDir:      t.TempDir(),
-		WritableRoots: []string{staleRoot},
-	})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer rt.Close()
-	windowsRT := rt.(*runtime)
-
-	oldPolicy, err := windowsRT.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
-	if err != nil {
-		t.Fatalf("ensureForRequest() error = %v", err)
-	}
-	staleEntries := allowEntries(oldPolicy.sidForWriteRoot(staleRoot))
-	if len(staleEntries) == 0 {
-		t.Fatalf("old policy missing stale root SID: %+v", oldPolicy)
-	}
-	if missing, err := acl.MissingFileDACLEntries(staleRoot, staleEntries...); err != nil || len(missing) != 0 {
-		t.Fatalf("stale root ACL entries before repair = %#v/%v, want present", missing, err)
-	}
-
-	windowsRT.cfg.WritableRoots = nil
-	if err := windowsRT.repairCurrentWorkspaceACLs(context.Background()); err != nil {
-		t.Fatalf("repairCurrentWorkspaceACLs() error = %v", err)
-	}
-	missing, err := acl.MissingFileDACLEntries(staleRoot, staleEntries...)
-	if err != nil {
-		t.Fatalf("MissingFileDACLEntries(after repair) error = %v", err)
-	}
-	if len(missing) == 0 {
-		t.Fatalf("stale root ACL entries remained after repair")
-	}
-	manifest, err := windowsRT.readManifest()
-	if err != nil {
-		t.Fatalf("readManifest() error = %v", err)
-	}
-	if containsPath(manifest.WriteRoots, staleRoot) {
-		t.Fatalf("manifest WriteRoots = %#v, did not expect stale root %q", manifest.WriteRoots, staleRoot)
+	if missing, err := acl.MissingFileDACLEntries(workspace, allowEntries(policy.sidForWriteRoot(workspace))...); err != nil || len(missing) != 0 {
+		t.Fatalf("compacted workspace ACL entries = %#v/%v, want inherited coverage", missing, err)
 	}
 }
 
@@ -1088,67 +2371,6 @@ func TestUnsafeWritableRootReasonRejectsBroadUserRoots(t *testing.T) {
 	}
 	if reason := unsafeWritableRootReason(project, home); reason != "" {
 		t.Fatalf("unsafeWritableRootReason(%q, %q) = %q, want allowed", project, home, reason)
-	}
-}
-
-func TestEnsureForRequestReturnsCoreWritableRootACLFailure(t *testing.T) {
-	workspace := t.TempDir()
-	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer rt.Close()
-	windowsRT := rt.(*runtime)
-
-	oldModify := modifyFileDACL
-	defer func() { modifyFileDACL = oldModify }()
-	modifyFileDACL = func(path string, entries ...acl.Entry) error {
-		if pathutil.Key(path) == pathutil.Key(workspace) {
-			return syscall.ERROR_ACCESS_DENIED
-		}
-		return oldModify(path, entries...)
-	}
-
-	_, err = windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace})
-	if err == nil {
-		t.Fatal("ensureForRequest() error = nil, want foreground core ACL failure")
-	}
-	if !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
-		t.Fatalf("ensureForRequest() error = %v, want access denied", err)
-	}
-	if setupErr := windowsRT.workspaceSetupError(); setupErr == "" {
-		t.Fatal("workspaceSetupError() = empty, want recorded ACL failure")
-	}
-}
-
-func TestEnsureForRequestReturnsDenyCarveoutACLFailure(t *testing.T) {
-	workspace := t.TempDir()
-	gitDir := filepath.Join(workspace, ".git")
-	if err := os.MkdirAll(gitDir, 0o700); err != nil {
-		t.Fatalf("MkdirAll(.git) error = %v", err)
-	}
-	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer rt.Close()
-	windowsRT := rt.(*runtime)
-
-	oldModify := modifyFileDACL
-	defer func() { modifyFileDACL = oldModify }()
-	modifyFileDACL = func(path string, entries ...acl.Entry) error {
-		if pathutil.Key(path) == pathutil.Key(gitDir) {
-			return syscall.ERROR_ACCESS_DENIED
-		}
-		return oldModify(path, entries...)
-	}
-
-	_, err = windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace})
-	if err == nil {
-		t.Fatal("ensureForRequest() error = nil, want deny ACL failure")
-	}
-	if !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
-		t.Fatalf("ensureForRequest() error = %v, want access denied", err)
 	}
 }
 
@@ -1181,40 +2403,6 @@ func TestForegroundPolicyExcludesUnrelatedConfiguredWritableRoot(t *testing.T) {
 	}
 }
 
-func TestApplyPolicyACLsInterruptibleReturnsAppliedWriteRoots(t *testing.T) {
-	workspace := t.TempDir()
-	missingRoot := filepath.Join(t.TempDir(), "missing")
-	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer rt.Close()
-	windowsRT := rt.(*runtime)
-
-	sid := "S-1-5-21-1-2-3-4"
-	policy := workspacePolicy{
-		WorkspaceRoot:           workspace,
-		CommandDir:              workspace,
-		WriteRoots:              []string{workspace, missingRoot},
-		CapabilitySIDs:          []string{sid},
-		WriteRootCapabilitySIDs: map[string]string{pathutil.Normalize(workspace): sid, pathutil.Normalize(missingRoot): sid},
-	}
-
-	applied, complete, err := windowsRT.applyPolicyACLsInterruptible(context.Background(), policy)
-	if err != nil {
-		t.Fatalf("applyPolicyACLsInterruptible() error = %v", err)
-	}
-	if !complete {
-		t.Fatal("applyPolicyACLsInterruptible() complete = false, want true")
-	}
-	if containsPath(applied.WriteRoots, missingRoot) {
-		t.Fatalf("applied WriteRoots = %#v, did not expect missing root %q", applied.WriteRoots, missingRoot)
-	}
-	if !containsPath(applied.WriteRoots, workspace) {
-		t.Fatalf("applied WriteRoots = %#v, want workspace root %q", applied.WriteRoots, workspace)
-	}
-}
-
 func TestEnsureForRequestCleansStaleDenyACLFromSatisfyingManifest(t *testing.T) {
 	workspace := t.TempDir()
 	readonly := filepath.Join(workspace, "readonly")
@@ -1236,7 +2424,7 @@ func TestEnsureForRequestCleansStaleDenyACLFromSatisfyingManifest(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ensureForRequestMode() error = %v", err)
 	}
-	staleDenyEntries := denyEntries(oldPolicy.CapabilitySIDs)
+	staleDenyEntries := denyEntries([]string{oldPolicy.sidForCoveredPath(readonly)})
 	if len(staleDenyEntries) == 0 {
 		t.Fatalf("old policy missing deny entries: %+v", oldPolicy)
 	}
@@ -1252,8 +2440,14 @@ func TestEnsureForRequestCleansStaleDenyACLFromSatisfyingManifest(t *testing.T) 
 	if err != nil {
 		t.Fatalf("MissingFileDACLEntries(after foreground ensure) error = %v", err)
 	}
-	if len(missing) == 0 {
-		t.Fatalf("stale readonly deny ACL entries remained after foreground ensure")
+	if len(missing) != 0 {
+		t.Fatalf("foreground ensure retired ACL still present = %#v, want deferred preservation", missing)
+	}
+	if err := windowsRT.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if missing, err := acl.MissingFileDACLEntries(readonly, staleDenyEntries...); err != nil || len(missing) == 0 {
+		t.Fatalf("stale readonly deny after idle refresh = %#v/%v, want exact retirement", missing, err)
 	}
 }
 
@@ -1289,19 +2483,11 @@ func TestPreflightSkipsACLsWhenRepairDisallowed(t *testing.T) {
 	defer rt.Close()
 	windowsRT := rt.(*runtime)
 
-	calls := 0
-	oldModify := modifyFileDACL
-	defer func() { modifyFileDACL = oldModify }()
-	modifyFileDACL = func(path string, entries ...acl.Entry) error {
-		calls++
-		return oldModify(path, entries...)
-	}
-
 	if err := windowsRT.Preflight(context.Background(), sandbox.PreflightOptions{}); err != nil {
 		t.Fatalf("Preflight() error = %v", err)
 	}
-	if calls != 0 {
-		t.Fatalf("modifyFileDACL calls = %d, want 0", calls)
+	if _, err := os.Stat(windowsRT.manifestPath()); !os.IsNotExist(err) {
+		t.Fatalf("manifest stat = %v, want no ACL receipt preparation", err)
 	}
 }
 
@@ -1314,19 +2500,12 @@ func TestPreflightRefreshesWhenRepairAllowed(t *testing.T) {
 	defer rt.Close()
 	windowsRT := rt.(*runtime)
 
-	calls := 0
-	oldModify := modifyFileDACL
-	defer func() { modifyFileDACL = oldModify }()
-	modifyFileDACL = func(path string, entries ...acl.Entry) error {
-		calls++
-		return oldModify(path, entries...)
-	}
-
 	if err := windowsRT.Preflight(context.Background(), sandbox.PreflightOptions{AllowNonElevatedRepair: true}); err != nil {
 		t.Fatalf("Preflight() error = %v", err)
 	}
-	if calls == 0 {
-		t.Fatal("modifyFileDACL calls = 0, want refresh to prepare ACLs")
+	manifest, err := windowsRT.readManifest()
+	if err != nil || len(manifest.ManagedReceipts) == 0 {
+		t.Fatalf("Preflight manifest = %+v/%v, want exact managed receipts", manifest, err)
 	}
 }
 
@@ -1400,21 +2579,17 @@ func TestCleanupPlanIncludesNewManifestAndLegacyArtifacts(t *testing.T) {
 	}
 
 	plan := windowsRT.cleanupPlan()
-	if !containsPath(plan.LegacyPaths, windowsRT.manifestPath()) {
-		t.Fatalf("cleanup LegacyPaths = %#v, want new manifest", plan.LegacyPaths)
+	if !containsPath(plan.LegacyPaths, filepath.Dir(windowsRT.manifestPath())) {
+		t.Fatalf("cleanup LegacyPaths = %#v, want current workspace manifest directory", plan.LegacyPaths)
 	}
-	if !containsPath(plan.LegacyPaths, filepath.Join(stateDir, ".sandbox-bin")) ||
-		!containsPath(plan.LegacyPaths, filepath.Join(stateDir, ".sandbox-secrets")) {
-		t.Fatalf("cleanup LegacyPaths = %#v, want legacy helper/secrets dirs", plan.LegacyPaths)
+	if containsPath(plan.LegacyPaths, filepath.Join(stateDir, ".sandbox-bin")) || containsPath(plan.LegacyPaths, windowsRT.workspaceManifestBase()) {
+		t.Fatalf("cleanup LegacyPaths = %#v, must not delete StateDir-wide or other-workspace state", plan.LegacyPaths)
 	}
 	if !containsPath(plan.LegacyPaths, filepath.Join(workspace, ".caelis-sandbox")) {
 		t.Fatalf("cleanup LegacyPaths = %#v, want workspace sandbox env dir", plan.LegacyPaths)
 	}
-	if !containsPath(plan.LegacyPaths, windowsRT.sandboxEnvBase()) {
-		t.Fatalf("cleanup LegacyPaths = %#v, want state sandbox env base", plan.LegacyPaths)
-	}
-	if len(plan.ACLPaths) == 0 || len(plan.Principals) == 0 {
-		t.Fatalf("cleanup plan = %+v, want ACL paths and principals", plan)
+	if !containsPath(plan.LegacyPaths, windowsRT.sandboxEnvRoot(workspace)) {
+		t.Fatalf("cleanup LegacyPaths = %#v, want only current workspace sandbox env", plan.LegacyPaths)
 	}
 	if len(plan.LegacyProtected) == 0 {
 		t.Fatalf("cleanup plan = %+v, want protected legacy artifact reports", plan)
@@ -1704,6 +2879,15 @@ func containsPath(paths []string, want string) bool {
 	wantKey := pathutil.Key(want)
 	for _, path := range paths {
 		if pathutil.Key(path) == wantKey {
+			return true
+		}
+	}
+	return false
+}
+
+func containsManifestACE(entries []manifestACE, want manifestACE) bool {
+	for _, entry := range entries {
+		if entry == want {
 			return true
 		}
 	}

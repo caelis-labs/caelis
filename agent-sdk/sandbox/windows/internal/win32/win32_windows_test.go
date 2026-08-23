@@ -10,6 +10,25 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+func TestCurrentProcessUserSID(t *testing.T) {
+	got, err := CurrentProcessUserSID()
+	if err != nil {
+		t.Fatalf("CurrentProcessUserSID() error = %v", err)
+	}
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
+		t.Fatalf("OpenProcessToken() error = %v", err)
+	}
+	defer token.Close()
+	want, err := tokenUserSID(token)
+	if err != nil {
+		t.Fatalf("tokenUserSID() error = %v", err)
+	}
+	if !strings.EqualFold(got, want.String()) {
+		t.Fatalf("CurrentProcessUserSID() = %q, want %q", got, want.String())
+	}
+}
+
 func TestRestrictedCurrentProcessTokenWithSIDsE2E(t *testing.T) {
 	if os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E") != "1" {
 		t.Skip("set CAELIS_WINDOWS_SANDBOX_E2E=1 to run restricted token e2e")

@@ -7,6 +7,7 @@
 package conpty
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 
@@ -51,6 +53,17 @@ type Process struct {
 	mu            sync.Mutex
 	processClose  sync.Once
 	terminalClose sync.Once
+}
+
+type basicJobAccountingInformation struct {
+	TotalUserTime             int64
+	TotalKernelTime           int64
+	ThisPeriodTotalUserTime   int64
+	ThisPeriodTotalKernelTime int64
+	TotalPageFaultCount       uint32
+	TotalProcesses            uint32
+	ActiveProcesses           uint32
+	TotalTerminatedProcesses  uint32
 }
 
 // Start creates the terminal and launches the process atomically inside the
@@ -253,6 +266,102 @@ func (p *Process) Terminate() error {
 		return windows.TerminateProcess(p.process, 1)
 	}
 	return nil
+}
+
+// DrainJob terminates descendants that outlive the terminal root and waits
+// until the complete Job tree is empty before its capability fence may be
+// released.
+func (p *Process) DrainJob(ctx context.Context) error {
+	if p == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	p.mu.Lock()
+	job := p.job
+	p.mu.Unlock()
+	if job == 0 {
+		return nil
+	}
+	handles, snapshotErr := jobProcessHandles(job)
+	defer func() {
+		for _, handle := range handles {
+			_ = windows.CloseHandle(handle)
+		}
+	}()
+	terminateErr := windows.TerminateJobObject(job, 1)
+	var accountingErr error
+	for {
+		var info basicJobAccountingInformation
+		if err := windows.QueryInformationJobObject(job, windows.JobObjectBasicAccountingInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), nil); err != nil {
+			accountingErr = err
+			break
+		}
+		if info.ActiveProcesses == 0 {
+			break
+		}
+		timer := time.NewTimer(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			accountingErr = ctx.Err()
+			break
+		case <-timer.C:
+		}
+		if accountingErr != nil {
+			break
+		}
+	}
+	var processErrs []error
+	for _, handle := range handles {
+		for {
+			event, err := windows.WaitForSingleObject(handle, 10)
+			if err != nil {
+				processErrs = append(processErrs, err)
+				break
+			}
+			if event == windows.WAIT_OBJECT_0 {
+				break
+			}
+			if err := ctx.Err(); err != nil {
+				processErrs = append(processErrs, err)
+				break
+			}
+		}
+	}
+	return errors.Join(append([]error{snapshotErr, terminateErr, accountingErr}, processErrs...)...)
+}
+
+func jobProcessHandles(job windows.Handle) ([]windows.Handle, error) {
+	buffer := make([]byte, 4096)
+	for {
+		err := windows.QueryInformationJobObject(job, windows.JobObjectBasicProcessIdList, uintptr(unsafe.Pointer(&buffer[0])), uint32(len(buffer)), nil)
+		if errors.Is(err, windows.ERROR_MORE_DATA) {
+			buffer = make([]byte, len(buffer)*2)
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		count := *(*uint32)(unsafe.Pointer(&buffer[4]))
+		ids := unsafe.Slice((*uintptr)(unsafe.Pointer(&buffer[8])), int(count))
+		handles := make([]windows.Handle, 0, len(ids))
+		for _, id := range ids {
+			handle, openErr := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(id))
+			if openErr != nil {
+				if errors.Is(openErr, windows.ERROR_INVALID_PARAMETER) {
+					continue
+				}
+				for _, opened := range handles {
+					_ = windows.CloseHandle(opened)
+				}
+				return nil, openErr
+			}
+			handles = append(handles, handle)
+		}
+		return handles, nil
+	}
 }
 
 // CloseAfterExit releases the tree fence and terminal after Wait. Output is

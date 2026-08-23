@@ -3,7 +3,6 @@
 package windows
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -31,14 +30,14 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/sessionrun"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/acl"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/job"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/jobprocess"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/win32"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/winps"
 )
 
 const (
-	workspaceManifestVersion = 1
+	workspaceManifestVersion = 2
 	windowsOutputCap         = 1024 * 1024
 	windowsTerminateDrain    = 500 * time.Millisecond
 	windowsCacheMaxBytes     = 10 * 1024 * 1024 * 1024
@@ -46,47 +45,123 @@ const (
 	windowsPreflightTimeout  = 15 * time.Second
 )
 
-var (
-	modifyFileDACL           = acl.ModifyFileDACL
-	errBackgroundRefreshBusy = errors.New("windows sandbox background ACL refresh yielded to foreground work")
-)
+var resolveHostReceiptAuthorityRoot = defaultHostReceiptAuthorityRoot
 
 type ensureMode string
 
+type capabilityBindingMode string
+
 const (
-	ensureModeForegroundCore    ensureMode = "foreground-core"
-	ensureModeBackgroundRefresh ensureMode = "background-refresh"
+	ensureModeForegroundCore    ensureMode            = "foreground-core"
+	ensureModeBackgroundRefresh ensureMode            = "background-refresh"
+	bindingModeCreate           capabilityBindingMode = "create"
+	bindingModeLookup           capabilityBindingMode = "lookup"
+	bindingModeDerive           capabilityBindingMode = "derive"
 )
 
-type appliedWriteGrant struct {
-	path string
-	sid  string
+func newRuntime(cfg Config) (sandbox.Runtime, error) {
+	cfg = sandbox.NormalizeConfig(cfg)
+	hostUserSID, err := win32.CurrentProcessUserSID()
+	if err != nil {
+		return nil, fmt.Errorf("impl/sandbox/windows: resolve current Host user SID: %w", err)
+	}
+	hostUserSID, err = win32.NormalizeSID(hostUserSID)
+	if err != nil {
+		return nil, fmt.Errorf("impl/sandbox/windows: normalize current Host user SID: %w", err)
+	}
+	var authorityRoot string
+	if strings.TrimSpace(cfg.HostAuthorityDir) != "" {
+		authorityRoot, err = hostReceiptAuthorityRootAt(cfg.HostAuthorityDir, hostUserSID)
+	} else {
+		authorityRoot, err = resolveHostReceiptAuthorityRoot(hostUserSID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("impl/sandbox/windows: resolve Host ACL receipt authority: %w", err)
+	}
+	return newRuntimeWithHostIdentity(cfg, hostUserSID, authorityRoot)
 }
 
-func newRuntime(cfg Config) (sandbox.Runtime, error) {
+func newRuntimeWithHostIdentity(cfg Config, hostUserSID, authorityRoot string) (sandbox.Runtime, error) {
 	cfg = sandbox.NormalizeConfig(cfg)
 	stateRoot, err := resolveStateRoot(cfg.StateDir)
 	if err != nil {
 		return nil, err
 	}
+	hostUserSID, err = win32.NormalizeSID(hostUserSID)
+	if err != nil {
+		return nil, fmt.Errorf("impl/sandbox/windows: normalize Host user SID: %w", err)
+	}
+	authorityRoot = pathutil.Normalize(authorityRoot)
+	if authorityRoot == "" || !filepath.IsAbs(authorityRoot) {
+		return nil, fmt.Errorf("impl/sandbox/windows: canonical absolute Host ACL receipt authority is required")
+	}
 	hostRuntime, err := host.New(host.Config{CWD: cfg.CWD})
 	if err != nil {
 		return nil, err
 	}
-	return &runtime{
-		cfg:       cfg,
-		stateRoot: stateRoot,
-		fs:        hostRuntime.FileSystem(),
-		sessions:  map[string]*windowsSession{},
-	}, nil
+	runtimeID, err := newID("runtime")
+	if err != nil {
+		return nil, err
+	}
+	processIdentity, err := win32.CurrentProcessIdentity()
+	if err != nil {
+		return nil, fmt.Errorf("impl/sandbox/windows: identify Host process: %w", err)
+	}
+	r := &runtime{
+		cfg:                      cfg,
+		stateRoot:                stateRoot,
+		hostUserSID:              hostUserSID,
+		hostReceiptAuthorityRoot: authorityRoot,
+		hostProcessIdentity:      processIdentity,
+		runtimeID:                runtimeID,
+		fs:                       hostRuntime.FileSystem(),
+		sessions:                 map[string]*windowsSession{},
+	}
+	r.stateCoordinator = sandboxCoordinatorFor(stateRoot)
+	r.registeredEnvRoot = r.sandboxEnvRoot(cfg.CWD)
+	if err := r.stateCoordinator.registerRuntime(r.registeredEnvRoot); err != nil {
+		return nil, fmt.Errorf("impl/sandbox/windows: register runtime state: %w", err)
+	}
+	return r, nil
+}
+
+func defaultHostReceiptAuthorityRoot(hostUserSID string) (string, error) {
+	localAppData, err := win32.CurrentUserLocalAppData()
+	if err != nil {
+		return "", err
+	}
+	return hostReceiptAuthorityRootAt(filepath.Join(localAppData, "Caelis", "sandbox", "windows", "hosts"), hostUserSID)
+}
+
+func hostReceiptAuthorityRootAt(base, hostUserSID string) (string, error) {
+	base = pathutil.Normalize(base)
+	if base == "" || !filepath.IsAbs(base) {
+		return "", fmt.Errorf("canonical absolute Host authority base is required")
+	}
+	sum := sha256.Sum256([]byte(strings.ToUpper(strings.TrimSpace(hostUserSID))))
+	return filepath.Join(base, hex.EncodeToString(sum[:])[:16]), nil
 }
 
 type runtime struct {
-	cfg       sandbox.Config
-	stateRoot string
-	fs        sandbox.FileSystem
+	cfg         sandbox.Config
+	stateRoot   string
+	hostUserSID string
+	fs          sandbox.FileSystem
 
-	ensureMu  sync.Mutex
+	hostReceiptAuthorityRoot string
+	hostProcessIdentity      win32.ProcessIdentity
+	runtimeID                string
+	hostRegistrationMu       sync.Mutex
+	hostRegistered           bool
+	pendingHostUseReleases   int
+	hostAuthorityMu          sync.Mutex
+	hostAuthorityValidated   bool
+
+	stateCoordinator  *sandboxStateCoordinator
+	registeredEnvRoot string
+	closeOnce         sync.Once
+	closeErr          error
+
 	setupMu   sync.RWMutex
 	refreshMu sync.RWMutex
 	mu        sync.RWMutex
@@ -153,6 +228,17 @@ func (r *runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		return sessionrun.Wait(ctx, session, req.Stdin)
 	}
 	result := sandbox.CommandResult{Route: sandbox.RouteSandbox, Backend: sandbox.BackendWindows, ExitCode: -1}
+	releaseUse, err := r.beginRuntimeUse()
+	if err != nil {
+		result.Error = err.Error()
+		return result, fmt.Errorf("impl/sandbox/windows: start command: %w", err)
+	}
+	keepUse := false
+	defer func() {
+		if !keepUse {
+			releaseUse()
+		}
+	}()
 	policy, err := r.ensureForRequest(ctx, req)
 	if err != nil {
 		result.Error = err.Error()
@@ -170,20 +256,13 @@ func (r *runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		result.Error = err.Error()
 		return result, err
 	}
-	defer token.Close()
-	if len(req.Stdin) > 0 {
-		cmd.Stdin = bytes.NewReader(req.Stdin)
-	}
 	stdout := consoleoutput.NewCappedBuffer(windowsOutputCap)
 	stderr := consoleoutput.NewCappedBuffer(windowsOutputCap)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	err = runCommandWithJob(runCtx, cmd)
+	var exitCode int
+	exitCode, err, keepUse = runAtomicJobProcess(runCtx, cmd, token, req.Stdin, stdout, stderr, releaseUse)
 	result.Stdout = stdout.String()
 	result.Stderr = stderr.String()
-	if cmd.ProcessState != nil {
-		result.ExitCode = cmd.ProcessState.ExitCode()
-	}
+	result.ExitCode = exitCode
 	if err != nil {
 		result.Error = err.Error()
 	}
@@ -206,6 +285,16 @@ func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 		return nil, err
 	}
 	req = sandbox.CloneRequest(req)
+	releaseUse, err := r.beginRuntimeUse()
+	if err != nil {
+		return nil, fmt.Errorf("impl/sandbox/windows: start command: %w", err)
+	}
+	keepUse := false
+	defer func() {
+		if !keepUse {
+			releaseUse()
+		}
+	}()
 	policy, err := r.ensureForRequest(ctx, req)
 	if err != nil {
 		return nil, err
@@ -258,6 +347,7 @@ func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 			startedAt:     now,
 			updatedAt:     now,
 			done:          make(chan struct{}),
+			releaseUse:    releaseUse,
 			onOutput:      req.OnOutput,
 			outputSignal:  make(chan struct{}),
 		}
@@ -267,44 +357,16 @@ func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 		session.wg.Add(1)
 		go session.readStream(process.Output(), "stdout")
 		go session.waitForExit()
-		go func() {
-			select {
-			case <-cmdCtx.Done():
-				_ = process.Terminate()
-			case <-session.done:
-			}
-		}()
+		go watchSessionContext(cmdCtx, session.done, process.Terminate)
+		keepUse = true
 		return session, nil
 	}
-	stdout, stdoutWriter, err := os.Pipe()
-	if err != nil {
-		_ = token.Close()
-		cancel()
-		return nil, fmt.Errorf("impl/sandbox/windows: create stdout pipe: %w", err)
-	}
-	stderr, stderrWriter, err := os.Pipe()
-	if err != nil {
-		_ = stdout.Close()
-		_ = stdoutWriter.Close()
-		_ = token.Close()
-		cancel()
-		return nil, fmt.Errorf("impl/sandbox/windows: create stderr pipe: %w", err)
-	}
-	cmd.Stdout = stdoutWriter
-	cmd.Stderr = stderrWriter
-	if err := cmd.Start(); err != nil {
-		_ = stdout.Close()
-		_ = stdoutWriter.Close()
-		_ = stderr.Close()
-		_ = stderrWriter.Close()
-		_ = token.Close()
-		cancel()
-		return nil, err
-	}
+	process, err := jobprocess.Start(jobprocess.Config{Token: uintptr(token), Application: cmd.Path, Args: append([]string(nil), cmd.Args[1:]...), Dir: cmd.Dir, Env: append([]string(nil), cmd.Env...)})
 	_ = token.Close()
-	_ = stdoutWriter.Close()
-	_ = stderrWriter.Close()
-	jobObject, _ := assignCommandJob(cmd)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("impl/sandbox/windows: start atomic Job process: %w", err)
+	}
 
 	now := time.Now()
 	session := &windowsSession{
@@ -318,14 +380,15 @@ func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 			TerminalID: terminalID,
 		},
 		cmd:          cmd,
-		job:          jobObject,
-		stdoutReader: stdout,
-		stderrReader: stderr,
+		jobProcess:   process,
+		stdoutReader: process.Stdout(),
+		stderrReader: process.Stderr(),
 		cancel:       cancel,
 		running:      true,
 		startedAt:    now,
 		updatedAt:    now,
 		done:         make(chan struct{}),
+		releaseUse:   releaseUse,
 		onOutput:     req.OnOutput,
 		outputSignal: make(chan struct{}),
 	}
@@ -334,10 +397,22 @@ func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	r.mu.Unlock()
 
 	session.wg.Add(2)
-	go session.readStream(stdout, "stdout")
-	go session.readStream(stderr, "stderr")
+	go session.readStream(process.Stdout(), "stdout")
+	go session.readStream(process.Stderr(), "stderr")
 	go session.waitForExit()
+	go watchSessionContext(cmdCtx, session.done, process.Terminate)
+	keepUse = true
 	return session, nil
+}
+
+func watchSessionContext(ctx context.Context, done <-chan struct{}, terminate func() error) {
+	select {
+	case <-ctx.Done():
+		if terminate != nil {
+			_ = terminate()
+		}
+	case <-done:
+	}
 }
 
 func (r *runtime) OpenSession(id string) (sandbox.Session, error) {
@@ -385,70 +460,78 @@ func (r *runtime) restrictedShellCommand(ctx context.Context, req sandbox.Comman
 	return cmd, token, nil
 }
 
-func runCommandWithJob(ctx context.Context, cmd *exec.Cmd) error {
-	if cmd == nil {
-		return fmt.Errorf("impl/sandbox/windows: command is required")
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	jobObject, _ := assignCommandJob(cmd)
-	waitCh := make(chan error, 1)
-	go func() {
-		waitCh <- cmd.Wait()
-	}()
-	select {
-	case err := <-waitCh:
-		if jobObject != nil {
-			_ = jobObject.Close()
-		}
-		return err
-	case <-ctx.Done():
-		terminateErr := terminateWindowsCommand(cmd, jobObject)
-		select {
-		case <-waitCh:
-			return errors.Join(ctx.Err(), terminateErr)
-		case <-time.After(windowsTerminateDrain):
-			return errors.Join(
-				ctx.Err(),
-				fmt.Errorf("impl/sandbox/windows: command terminated before process wait completed"),
-				terminateErr,
-			)
-		}
-	}
-}
-
-func terminateWindowsCommand(cmd *exec.Cmd, jobObject *job.Object) error {
-	var errs []error
-	if jobObject != nil {
-		if err := jobObject.Terminate(1); err != nil {
-			errs = append(errs, fmt.Errorf("terminate job object: %w", err))
-		}
-		if err := jobObject.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close job object: %w", err))
-		}
-	}
-	if cmd != nil && cmd.Process != nil {
-		if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-			errs = append(errs, fmt.Errorf("kill process: %w", err))
-		}
-	}
-	return errors.Join(errs...)
-}
-
-func assignCommandJob(cmd *exec.Cmd) (*job.Object, error) {
-	if cmd == nil || cmd.Process == nil {
-		return nil, nil
-	}
-	jobObject, err := job.New()
+func runAtomicJobProcess(ctx context.Context, cmd *exec.Cmd, token win32.Token, stdin []byte, stdout, stderr io.Writer, releaseUse func()) (int, error, bool) {
+	process, err := jobprocess.Start(jobprocess.Config{Token: uintptr(token), Application: cmd.Path, Args: append([]string(nil), cmd.Args[1:]...), Dir: cmd.Dir, Env: append([]string(nil), cmd.Env...), Stdin: len(stdin) > 0})
+	_ = token.Close()
 	if err != nil {
-		return nil, err
+		return -1, err, false
 	}
-	if err := jobObject.AssignPID(cmd.Process.Pid); err != nil {
-		_ = jobObject.Close()
-		return nil, err
+	defer process.ClosePipes()
+	var copyWG sync.WaitGroup
+	copyWG.Add(2)
+	go func() { defer copyWG.Done(); _, _ = io.Copy(stdout, process.Stdout()) }()
+	go func() { defer copyWG.Done(); _, _ = io.Copy(stderr, process.Stderr()) }()
+	if input := process.Input(); input != nil {
+		_, writeErr := input.Write(stdin)
+		closeErr := input.Close()
+		if writeErr != nil || closeErr != nil {
+			_ = process.Terminate()
+			exitCode, waitErr := process.WaitRoot()
+			drainErr, keepUse := drainAtomicJobProcess(process, releaseUse)
+			copyWG.Wait()
+			return exitCode, errors.Join(writeErr, closeErr, waitErr, drainErr), keepUse
+		}
 	}
-	return jobObject, nil
+	waitCh := make(chan struct {
+		code int
+		err  error
+	}, 1)
+	go func() {
+		code, waitErr := process.WaitRoot()
+		waitCh <- struct {
+			code int
+			err  error
+		}{code, waitErr}
+	}()
+	var waited struct {
+		code int
+		err  error
+	}
+	var contextErr error
+	select {
+	case waited = <-waitCh:
+	case <-ctx.Done():
+		contextErr = ctx.Err()
+		_ = process.Terminate()
+		waited = <-waitCh
+	}
+	drainErr, keepUse := drainAtomicJobProcess(process, releaseUse)
+	copyWG.Wait()
+	return waited.code, errors.Join(contextErr, waited.err, drainErr), keepUse
+}
+
+func drainAtomicJobProcess(process *jobprocess.Process, releaseUse func()) (error, bool) {
+	drainCtx, cancel := context.WithTimeout(context.Background(), windowsPreflightTimeout)
+	drainErr := process.DrainAndClose(drainCtx)
+	cancel()
+	if drainErr == nil || !process.NeedsDrainRetry() {
+		return drainErr, false
+	}
+	go retryAtomicJobProcessDrain(process, releaseUse)
+	return drainErr, true
+}
+
+func retryAtomicJobProcessDrain(process *jobprocess.Process, releaseUse func()) {
+	for {
+		drainCtx, cancel := context.WithTimeout(context.Background(), windowsPreflightTimeout)
+		err := process.DrainAndClose(drainCtx)
+		cancel()
+		if err == nil || !process.NeedsDrainRetry() {
+			releaseUse()
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 type workspacePolicy struct {
@@ -472,7 +555,20 @@ type workspaceManifest struct {
 	DenyWritePaths          []string          `json:"deny_write_paths,omitempty"`
 	WriteRootCapabilitySIDs map[string]string `json:"write_root_capability_sids,omitempty"`
 	ACEs                    []manifestACE     `json:"aces,omitempty"`
+	Phase                   string            `json:"phase,omitempty"`
+	DeletingEnvRoot         string            `json:"deleting_env_root,omitempty"`
+	ManagedReceipts         []manifestReceipt `json:"managed_receipts,omitempty"`
+	RetiringReceipts        []manifestReceipt `json:"retiring_receipts,omitempty"`
+	LegacyACEs              []manifestACE     `json:"legacy_aces,omitempty"`
+	LegacyMigrationPrepared bool              `json:"legacy_migration_prepared,omitempty"`
 	UpdatedAt               time.Time         `json:"updated_at,omitempty"`
+}
+
+type manifestReceipt struct {
+	Path    string         `json:"path"`
+	Entry   acl.Entry      `json:"entry"`
+	Receipt acl.ACEReceipt `json:"receipt"`
+	Applied bool           `json:"applied"`
 }
 
 type manifestACE struct {
@@ -496,31 +592,17 @@ func (r *runtime) ensureForRequestMode(ctx context.Context, req sandbox.CommandR
 		r.recordWorkspaceSetupError(err)
 		return workspacePolicy{}, err
 	}
-	r.ensureMu.Lock()
-	defer r.ensureMu.Unlock()
+	r.stateCoordinator.aclMu.Lock()
+	defer r.stateCoordinator.aclMu.Unlock()
 	if err := os.MkdirAll(r.sandboxStateDir(), 0o700); err != nil {
 		r.recordWorkspaceSetupError(err)
 		return workspacePolicy{}, err
 	}
-	manifest, manifestErr := r.readManifest()
-	if manifestErr == nil && manifestCoversPolicy(manifest, policy, false) {
-		if !manifestCoversPolicy(manifest, policy, true) {
-			r.cleanupStaleManifestDenyACLs(manifest, policy)
-		}
-		missing, err := r.missingACLEntries(policy)
-		if err == nil && len(missing) == 0 {
-			r.clearWorkspaceSetupError()
-			return policy, nil
-		}
-	}
-	if manifestErr == nil && mode == ensureModeBackgroundRefresh {
-		r.cleanupStaleManifestACLs(manifest, policy)
-	}
-	if err := r.applyPolicyACLs(policy); err != nil {
+	if err := r.migrateLegacyManifestLocked(); err != nil {
 		r.recordWorkspaceSetupError(err)
-		return policy, err
+		return workspacePolicy{}, err
 	}
-	if err := r.writeManifest(policy); err != nil {
+	if err := r.activateReceiptPolicyLocked(ctx, policy, mode == ensureModeBackgroundRefresh && r.stateCoordinator.canPruneACLs()); err != nil {
 		r.recordWorkspaceSetupError(err)
 		return policy, err
 	}
@@ -537,14 +619,18 @@ func (r *runtime) foregroundPolicyForRequest(req sandbox.CommandRequest) (worksp
 }
 
 func (r *runtime) policyForRequestMode(req sandbox.CommandRequest, mode ensureMode) (workspacePolicy, error) {
-	return r.policyForRequestWithBinding(req, true, mode)
+	return r.policyForRequestWithBinding(req, bindingModeCreate, mode)
 }
 
 func (r *runtime) inspectPolicyForRequest(req sandbox.CommandRequest) (workspacePolicy, error) {
-	return r.policyForRequestWithBinding(req, false, ensureModeBackgroundRefresh)
+	return r.policyForRequestWithBinding(req, bindingModeLookup, ensureModeBackgroundRefresh)
 }
 
-func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, createSIDs bool, mode ensureMode) (workspacePolicy, error) {
+func (r *runtime) derivePolicyForRequest(req sandbox.CommandRequest) (workspacePolicy, error) {
+	return r.policyForRequestWithBinding(req, bindingModeDerive, ensureModeBackgroundRefresh)
+}
+
+func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindingMode capabilityBindingMode, mode ensureMode) (workspacePolicy, error) {
 	constraints := sandbox.EffectiveConstraints(req)
 	constraints.Network = effectiveWindowsSandboxNetwork(constraints.Network)
 	if constraints.Permission == "" || constraints.Permission == sandbox.PermissionDefault {
@@ -588,7 +674,7 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, create
 	if mode == ensureModeForegroundCore {
 		userWriteRoots = coreUserWriteRoots
 	}
-	envRoot, err := r.prepareSandboxEnvRoot(workspaceRoot, createSIDs)
+	envRoot, err := r.prepareSandboxEnvRoot(workspaceRoot, bindingMode == bindingModeCreate)
 	if err != nil {
 		return workspacePolicy{}, err
 	}
@@ -601,6 +687,7 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, create
 	if err != nil {
 		return workspacePolicy{}, err
 	}
+	writeRoots = pathutil.CompactCovered(writeRoots)
 	if len(writeRoots) == 0 {
 		return workspacePolicy{}, fmt.Errorf("impl/sandbox/windows: at least one writable root is required")
 	}
@@ -632,10 +719,21 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, create
 		return workspacePolicy{}, err
 	}
 	var binding capability.Binding
-	if createSIDs {
-		binding, err = capability.BindWriteRoots(r.capabilityStorePath(), workspaceRoot, writeRoots)
-	} else {
-		binding, err = capability.LookupWriteRoots(r.capabilityStorePath(), workspaceRoot, writeRoots)
+	switch bindingMode {
+	case bindingModeCreate:
+		binding, err = capability.BindWriteRoots(r.capabilityStorePath(), capability.Scope{
+			HostUserSID: r.hostUserSID, WorkspaceRoot: workspaceRoot, SandboxEnvRoot: envRoot, WriteRoots: writeRoots,
+		})
+	case bindingModeLookup:
+		binding, err = capability.LookupWriteRoots(r.capabilityStorePath(), capability.Scope{
+			HostUserSID: r.hostUserSID, WorkspaceRoot: workspaceRoot, SandboxEnvRoot: envRoot, WriteRoots: writeRoots,
+		})
+	case bindingModeDerive:
+		binding, err = capability.DeriveWriteRoots(capability.Scope{
+			HostUserSID: r.hostUserSID, AuthorityID: r.hostReceiptAuthorityRoot, WorkspaceRoot: workspaceRoot, SandboxEnvRoot: envRoot, WriteRoots: writeRoots,
+		})
+	default:
+		err = fmt.Errorf("unsupported capability binding mode %q", bindingMode)
 	}
 	if err != nil {
 		return workspacePolicy{}, fmt.Errorf("impl/sandbox/windows: bind write capability SIDs: %w", err)
@@ -743,321 +841,6 @@ func (r *runtime) prepareSandboxEnvRoot(workspaceRoot string, create bool) (stri
 	return root, nil
 }
 
-func (r *runtime) missingACLEntries(policy workspacePolicy) ([]acl.Entry, error) {
-	var missing []acl.Entry
-	for _, root := range policy.WriteRoots {
-		entries := allowEntries(policy.sidForWriteRoot(root))
-		info, err := os.Stat(root)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, err
-		}
-		if !info.IsDir() {
-			return nil, fmt.Errorf("impl/sandbox/windows: writable root %s is not a directory", root)
-		}
-		rootMissing, err := acl.MissingFileDACLEntries(root, entries...)
-		if err != nil {
-			return nil, err
-		}
-		missing = append(missing, rootMissing...)
-	}
-	envSID := policy.sidForWriteRoot(policy.SandboxEnvRoot)
-	if envSID != "" {
-		for _, path := range sandboxEnvDirs(policy.SandboxEnvRoot) {
-			if pathListContains(policy.WriteRoots, path) {
-				continue
-			}
-			entries := allowEntries(envSID)
-			info, err := os.Stat(path)
-			if err != nil {
-				if os.IsNotExist(err) {
-					continue
-				}
-				return nil, err
-			}
-			if !info.IsDir() {
-				return nil, fmt.Errorf("impl/sandbox/windows: sandbox environment path %s is not a directory", path)
-			}
-			pathMissing, err := acl.MissingFileDACLEntries(path, entries...)
-			if err != nil {
-				return nil, err
-			}
-			missing = append(missing, pathMissing...)
-		}
-	}
-	for _, path := range policy.DenyWritePaths {
-		if _, err := os.Stat(path); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, err
-		}
-		entries := denyEntries(policy.CapabilitySIDs)
-		pathMissing, err := acl.MissingFileDACLEntries(path, entries...)
-		if err != nil {
-			return nil, err
-		}
-		missing = append(missing, pathMissing...)
-	}
-	return missing, nil
-}
-
-func (r *runtime) applyPolicyACLs(policy workspacePolicy) error {
-	for _, root := range policy.WriteRoots {
-		info, err := os.Stat(root)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				return fmt.Errorf("impl/sandbox/windows: inspect writable root %s: %w", root, err)
-			}
-			continue
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("impl/sandbox/windows: writable root %s is not a directory", root)
-		}
-		if err := ensureFileDACLEntries(root, allowEntries(policy.sidForWriteRoot(root))...); err != nil {
-			return fmt.Errorf("impl/sandbox/windows: apply writable root ACL %s: %w", root, diagnoseACLWriteFailure(root, err))
-		}
-	}
-	envSID := policy.sidForWriteRoot(policy.SandboxEnvRoot)
-	if envSID != "" {
-		for _, path := range sandboxEnvDirs(policy.SandboxEnvRoot) {
-			if pathListContains(policy.WriteRoots, path) {
-				continue
-			}
-			info, err := os.Stat(path)
-			if err != nil {
-				if os.IsNotExist(err) {
-					continue
-				}
-				return fmt.Errorf("impl/sandbox/windows: inspect sandbox environment path %s: %w", path, err)
-			}
-			if !info.IsDir() {
-				return fmt.Errorf("impl/sandbox/windows: sandbox environment path %s is not a directory", path)
-			}
-			if err := ensureFileDACLEntries(path, allowEntries(envSID)...); err != nil {
-				return fmt.Errorf("impl/sandbox/windows: apply sandbox environment ACL %s: %w", path, diagnoseACLWriteFailure(path, err))
-			}
-		}
-	}
-	for _, path := range policy.DenyWritePaths {
-		if _, err := os.Stat(path); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return fmt.Errorf("impl/sandbox/windows: inspect deny-write path %s: %w", path, err)
-		}
-		if err := ensureFileDACLEntries(path, denyEntries(policy.CapabilitySIDs)...); err != nil {
-			return fmt.Errorf("impl/sandbox/windows: apply deny-write ACL %s: %w", path, diagnoseACLWriteFailure(path, err))
-		}
-	}
-	return nil
-}
-
-func (r *runtime) applyPolicyACLsInterruptible(ctx context.Context, policy workspacePolicy) (workspacePolicy, bool, error) {
-	keptRoots := make([]string, 0, len(policy.WriteRoots))
-	failedDenyPaths := make([]string, 0, len(policy.DenyWritePaths))
-	appliedGrants := make([]appliedWriteGrant, 0, len(policy.WriteRoots)+len(sandboxEnvDirs(policy.SandboxEnvRoot)))
-	var errs []error
-	for _, root := range policy.WriteRoots {
-		sid := policy.sidForWriteRoot(root)
-		ok, err := r.tryApplyWritableRootACL(ctx, root, sid)
-		if errors.Is(err, errBackgroundRefreshBusy) {
-			return policy, false, errors.Join(errs...)
-		}
-		if err != nil {
-			errs = append(errs, err)
-		}
-		if ok {
-			keptRoots = append(keptRoots, root)
-			appliedGrants = append(appliedGrants, appliedWriteGrant{path: root, sid: sid})
-		} else if ctx.Err() != nil {
-			return policy, false, errors.Join(append(errs, ctx.Err())...)
-		}
-	}
-	for _, path := range sandboxEnvDirs(policy.SandboxEnvRoot) {
-		if pathListContains(policy.WriteRoots, path) {
-			continue
-		}
-		sid := policy.sidForWriteRoot(policy.SandboxEnvRoot)
-		ok, err := r.tryApplyWritableRootACL(ctx, path, sid)
-		if errors.Is(err, errBackgroundRefreshBusy) {
-			return policy, false, errors.Join(errs...)
-		}
-		if err != nil {
-			errs = append(errs, err)
-		}
-		if ok {
-			appliedGrants = append(appliedGrants, appliedWriteGrant{path: path, sid: sid})
-		} else if ctx.Err() != nil {
-			return policy, false, errors.Join(append(errs, ctx.Err())...)
-		}
-	}
-	for _, path := range policy.DenyWritePaths {
-		ok, err := r.tryApplyDenyWriteACL(ctx, path, policy.CapabilitySIDs)
-		if errors.Is(err, errBackgroundRefreshBusy) {
-			return policy, false, errors.Join(errs...)
-		}
-		if err != nil {
-			errs = append(errs, err)
-		}
-		if ok {
-			continue
-		}
-		if ctx.Err() != nil {
-			return policy, false, errors.Join(append(errs, ctx.Err())...)
-		}
-		failedDenyPaths = append(failedDenyPaths, path)
-	}
-	if len(failedDenyPaths) > 0 {
-		if !r.tryRevokeWriteGrantsCovering(ctx, appliedGrants, failedDenyPaths) {
-			return policy, false, errors.Join(errs...)
-		}
-		keptRoots = removeWriteRootsCovering(keptRoots, failedDenyPaths)
-	}
-	return policy.withWriteRoots(keptRoots), true, errors.Join(errs...)
-}
-
-func (r *runtime) tryApplyWritableRootACL(ctx context.Context, root string, sid string) (bool, error) {
-	root = strings.TrimSpace(root)
-	if root == "" || strings.TrimSpace(sid) == "" {
-		return false, nil
-	}
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	if !r.ensureMu.TryLock() {
-		return false, errBackgroundRefreshBusy
-	}
-	defer r.ensureMu.Unlock()
-	info, err := os.Stat(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("impl/sandbox/windows: inspect writable root %s: %w", root, err)
-	}
-	if !info.IsDir() {
-		return false, fmt.Errorf("impl/sandbox/windows: writable root %s is not a directory", root)
-	}
-	if err := ensureFileDACLEntries(root, allowEntries(sid)...); err != nil {
-		return false, fmt.Errorf("impl/sandbox/windows: apply writable root ACL %s: %w", root, diagnoseACLWriteFailure(root, err))
-	}
-	return true, nil
-}
-
-func (r *runtime) tryApplyDenyWriteACL(ctx context.Context, path string, sids []string) (bool, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return true, nil
-	}
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	if !r.ensureMu.TryLock() {
-		return false, errBackgroundRefreshBusy
-	}
-	defer r.ensureMu.Unlock()
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return true, nil
-		}
-		return false, fmt.Errorf("impl/sandbox/windows: inspect deny-write path %s: %w", path, err)
-	}
-	if err := ensureFileDACLEntries(path, denyEntries(sids)...); err != nil {
-		return false, fmt.Errorf("impl/sandbox/windows: apply deny-write ACL %s: %w", path, diagnoseACLWriteFailure(path, err))
-	}
-	return true, nil
-}
-
-func (r *runtime) tryRevokeWriteGrantsCovering(ctx context.Context, grants []appliedWriteGrant, blocked []string) bool {
-	if len(grants) == 0 || len(blocked) == 0 {
-		return true
-	}
-	if ctx.Err() != nil {
-		return false
-	}
-	if !r.ensureMu.TryLock() {
-		return false
-	}
-	defer r.ensureMu.Unlock()
-	revokeWriteGrantsCovering(grants, blocked)
-	return true
-}
-
-func ensureFileDACLEntries(path string, entries ...acl.Entry) error {
-	if len(entries) == 0 {
-		return nil
-	}
-	missing, err := acl.MissingFileDACLEntries(path, entries...)
-	if err == nil && len(missing) == 0 {
-		return nil
-	}
-	return modifyFileDACL(path, entries...)
-}
-
-func revokeWriteGrantsCovering(grants []appliedWriteGrant, blocked []string) {
-	if len(grants) == 0 || len(blocked) == 0 {
-		return
-	}
-	for _, grant := range grants {
-		if !pathOverlapsAny(grant.path, blocked) {
-			continue
-		}
-		_ = modifyFileDACL(grant.path, revokeEntries(grant.sid)...)
-	}
-}
-
-func removeWriteRootsCovering(roots []string, blocked []string) []string {
-	if len(roots) == 0 || len(blocked) == 0 {
-		return pathutil.Dedupe(roots)
-	}
-	out := make([]string, 0, len(roots))
-	for _, root := range roots {
-		if !pathOverlapsAny(root, blocked) {
-			out = append(out, root)
-		}
-	}
-	return pathutil.Dedupe(out)
-}
-
-func pathOverlapsAny(root string, blocked []string) bool {
-	for _, path := range blocked {
-		if pathutil.IsUnder(path, root) || pathutil.IsUnder(root, path) {
-			return true
-		}
-	}
-	return false
-}
-
-func diagnoseACLWriteFailure(path string, err error) error {
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
-		return err
-	}
-	detail := "current token cannot update the directory DACL; Windows workspace-write sandbox needs WRITE_DAC so it can add the Caelis synthetic write SID"
-	if info, inspectErr := acl.InspectFileDACL(path); inspectErr == nil {
-		parts := []string{detail}
-		if owner := firstNonEmpty(info.Owner, info.OwnerSID); owner != "" {
-			parts = append(parts, "owner="+owner)
-		}
-		parts = append(parts,
-			fmt.Sprintf("protected_dacl=%t", info.Protected),
-			fmt.Sprintf("has_inherited_ace=%t", info.HasInheritedACE),
-			fmt.Sprintf("ace_count=%d", info.ACECount),
-		)
-		parts = append(parts, "file writes may still work through existing Modify rights, but sandbox preparation cannot proceed without DACL write access")
-		parts = append(parts, "manual fix: run `/doctor` in TUI or `caelis sandbox fix`")
-		detail = strings.Join(parts, "; ")
-	} else {
-		detail += "; DACL diagnosis failed: " + inspectErr.Error()
-	}
-	return fmt.Errorf("%w; %s", err, detail)
-}
-
 func (p workspacePolicy) sidForWriteRoot(root string) string {
 	key := pathutil.Key(root)
 	for candidate, sid := range p.WriteRootCapabilitySIDs {
@@ -1066,34 +849,6 @@ func (p workspacePolicy) sidForWriteRoot(root string) string {
 		}
 	}
 	return ""
-}
-
-func (p workspacePolicy) withWriteRoots(roots []string) workspacePolicy {
-	roots = pathutil.Dedupe(roots)
-	out := p
-	out.WriteRoots = roots
-	out.WriteRootCapabilitySIDs = map[string]string{}
-	var sids []string
-	for _, root := range roots {
-		if sid := p.sidForWriteRoot(root); sid != "" {
-			normalized := pathutil.Normalize(root)
-			out.WriteRootCapabilitySIDs[normalized] = sid
-			sids = append(sids, sid)
-		}
-	}
-	if len(sids) == 0 {
-		if sid := p.sidForWriteRoot(p.SandboxEnvRoot); sid != "" {
-			sids = append(sids, sid)
-		}
-	}
-	out.CapabilitySIDs = dedupeStrings(sids)
-	if len(out.WriteRootCapabilitySIDs) == 0 {
-		out.WriteRootCapabilitySIDs = nil
-	}
-	if hash, err := hashWorkspacePolicyFields(out.WorkspaceRoot, out.CommandDir, out.SandboxEnvRoot, out.WriteRoots, out.DenyWritePaths); err == nil {
-		out.PolicyHash = hash
-	}
-	return out
 }
 
 func allowEntries(sid string) []acl.Entry {
@@ -1126,19 +881,42 @@ func denyEntries(sids []string) []acl.Entry {
 	return entries
 }
 
-func revokeEntries(sid string) []acl.Entry {
-	sid = strings.TrimSpace(sid)
-	if sid == "" {
-		return nil
-	}
-	return []acl.Entry{{
-		Principal: sid,
-		Mode:      acl.Revoke,
-	}}
+func (r *runtime) readManifest() (workspaceManifest, error) {
+	return readWorkspaceManifest(r.manifestPath())
 }
 
-func (r *runtime) readManifest() (workspaceManifest, error) {
-	data, err := os.ReadFile(r.manifestPath())
+func (r *runtime) migrateLegacyManifestLocked() error {
+	legacyPath := r.legacyManifestPath()
+	legacy, err := readWorkspaceManifest(legacyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("impl/sandbox/windows: read legacy workspace manifest: %w", err)
+	}
+	if strings.TrimSpace(legacy.WorkspaceRoot) == "" {
+		return fmt.Errorf("impl/sandbox/windows: legacy workspace manifest has no workspace root")
+	}
+	destination := r.manifestPathForWorkspace(legacy.WorkspaceRoot)
+	if existing, readErr := readWorkspaceManifest(destination); readErr == nil {
+		if pathutil.Key(existing.WorkspaceRoot) != pathutil.Key(legacy.WorkspaceRoot) {
+			return fmt.Errorf("impl/sandbox/windows: legacy workspace manifest destination belongs to a different workspace")
+		}
+		legacy = mergeWorkspaceManifests(existing, legacy)
+	} else if !os.IsNotExist(readErr) {
+		return fmt.Errorf("impl/sandbox/windows: read migrated workspace manifest: %w", readErr)
+	}
+	if err := persistWorkspaceManifest(destination, legacy); err != nil {
+		return fmt.Errorf("impl/sandbox/windows: migrate legacy workspace manifest: %w", err)
+	}
+	if err := os.Remove(legacyPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("impl/sandbox/windows: remove legacy workspace manifest: %w", err)
+	}
+	return nil
+}
+
+func readWorkspaceManifest(path string) (workspaceManifest, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return workspaceManifest{}, err
 	}
@@ -1146,11 +924,29 @@ func (r *runtime) readManifest() (workspaceManifest, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return workspaceManifest{}, err
 	}
-	return normalizeManifest(manifest), nil
+	manifest = normalizeManifest(manifest)
+	if err := validateWorkspaceManifestReceipts(manifest); err != nil {
+		return workspaceManifest{}, err
+	}
+	return manifest, nil
 }
 
-func (r *runtime) writeManifest(policy workspacePolicy) error {
-	manifest := workspaceManifest{
+func validateWorkspaceManifestReceipts(manifest workspaceManifest) error {
+	for _, group := range [][]manifestReceipt{manifest.ManagedReceipts, manifest.RetiringReceipts} {
+		for _, managed := range group {
+			if pathutil.Key(managed.Path) != pathutil.Key(managed.Receipt.Path) {
+				return fmt.Errorf("impl/sandbox/windows: receipt manifest path mismatch for %s", managed.Path)
+			}
+			if err := acl.ValidateACEReceiptEntry(managed.Receipt, managed.Entry); err != nil {
+				return fmt.Errorf("impl/sandbox/windows: invalid exact receipt for %s: %w", managed.Path, err)
+			}
+		}
+	}
+	return nil
+}
+
+func workspaceManifestForPolicy(policy workspacePolicy) workspaceManifest {
+	return workspaceManifest{
 		Version:                 workspaceManifestVersion,
 		WorkspaceRoot:           policy.WorkspaceRoot,
 		SandboxEnvRoot:          policy.SandboxEnvRoot,
@@ -1160,13 +956,66 @@ func (r *runtime) writeManifest(policy workspacePolicy) error {
 		DenyWritePaths:          append([]string(nil), policy.DenyWritePaths...),
 		WriteRootCapabilitySIDs: cloneStringMap(policy.WriteRootCapabilitySIDs),
 		ACEs:                    manifestACEs(policy),
+		Phase:                   manifestPhaseActive,
 		UpdatedAt:               time.Now().UTC(),
 	}
+}
+
+func mergeWorkspaceManifests(existing workspaceManifest, current workspaceManifest) workspaceManifest {
+	if pathutil.Key(existing.WorkspaceRoot) != pathutil.Key(current.WorkspaceRoot) ||
+		pathutil.Key(existing.SandboxEnvRoot) != pathutil.Key(current.SandboxEnvRoot) {
+		return current
+	}
+	if existing.Version == workspaceManifestVersion && current.Version != workspaceManifestVersion {
+		existing.LegacyACEs = mergeManifestACEs(existing.LegacyACEs, current.ACEs)
+		existing.UpdatedAt = time.Now().UTC()
+		return existing
+	}
+	out := current
+	out.CapabilitySIDs = dedupeStrings(append(append([]string(nil), existing.CapabilitySIDs...), current.CapabilitySIDs...))
+	out.WriteRoots = pathutil.Dedupe(append(append([]string(nil), existing.WriteRoots...), current.WriteRoots...))
+	out.DenyWritePaths = pathutil.Dedupe(append(append([]string(nil), existing.DenyWritePaths...), current.DenyWritePaths...))
+	out.WriteRootCapabilitySIDs = cloneStringMap(existing.WriteRootCapabilitySIDs)
+	if out.WriteRootCapabilitySIDs == nil {
+		out.WriteRootCapabilitySIDs = map[string]string{}
+	}
+	for root, sid := range current.WriteRootCapabilitySIDs {
+		out.WriteRootCapabilitySIDs[pathutil.Normalize(root)] = strings.TrimSpace(sid)
+	}
+	out.ACEs = mergeManifestACEs(existing.ACEs, current.ACEs)
+	return out
+}
+
+func mergeManifestACEs(existing []manifestACE, current []manifestACE) []manifestACE {
+	values := append(append([]manifestACE(nil), existing...), current...)
+	out := make([]manifestACE, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, ace := range values {
+		key := strings.Join([]string{
+			pathutil.Key(ace.Path),
+			strings.ToUpper(strings.TrimSpace(ace.Principal)),
+			strings.ToLower(strings.TrimSpace(ace.Mode)),
+			strings.ToLower(strings.TrimSpace(ace.Rights)),
+			fmt.Sprint(ace.Inherit),
+		}, "\x00")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, ace)
+	}
+	return out
+}
+
+func (r *runtime) persistManifest(manifest workspaceManifest) error {
+	return persistWorkspaceManifest(r.manifestPath(), manifest)
+}
+
+func persistWorkspaceManifest(path string, manifest workspaceManifest) error {
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return err
 	}
-	path := r.manifestPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -1202,9 +1051,17 @@ func (r *runtime) writeManifest(policy workspacePolicy) error {
 func normalizeManifest(in workspaceManifest) workspaceManifest {
 	in.WorkspaceRoot = pathutil.Normalize(in.WorkspaceRoot)
 	in.SandboxEnvRoot = pathutil.Normalize(in.SandboxEnvRoot)
+	in.DeletingEnvRoot = pathutil.Normalize(in.DeletingEnvRoot)
 	in.WriteRoots = pathutil.Dedupe(in.WriteRoots)
 	in.DenyWritePaths = pathutil.Dedupe(in.DenyWritePaths)
 	in.CapabilitySIDs = dedupeStrings(in.CapabilitySIDs)
+	in.LegacyACEs = mergeManifestACEs(nil, in.LegacyACEs)
+	for i := range in.ManagedReceipts {
+		in.ManagedReceipts[i].Path = pathutil.Normalize(in.ManagedReceipts[i].Path)
+	}
+	for i := range in.RetiringReceipts {
+		in.RetiringReceipts[i].Path = pathutil.Normalize(in.RetiringReceipts[i].Path)
+	}
 	if len(in.WriteRootCapabilitySIDs) > 0 {
 		out := map[string]string{}
 		for root, sid := range in.WriteRootCapabilitySIDs {
@@ -1221,6 +1078,9 @@ func normalizeManifest(in workspaceManifest) workspaceManifest {
 
 func manifestFresh(manifest workspaceManifest, policy workspacePolicy) bool {
 	if manifest.Version != workspaceManifestVersion {
+		return false
+	}
+	if manifest.Phase != manifestPhaseActive || !receiptManifestCovers(manifest, receiptEffects(policy)) {
 		return false
 	}
 	if manifest.PolicyHash != policy.PolicyHash {
@@ -1241,46 +1101,6 @@ func manifestFresh(manifest workspaceManifest, policy workspacePolicy) bool {
 	return sameRootSIDMap(manifest.WriteRootCapabilitySIDs, policy.WriteRootCapabilitySIDs)
 }
 
-func manifestSatisfiesPolicy(manifest workspaceManifest, policy workspacePolicy) bool {
-	return manifestCoversPolicy(manifest, policy, false)
-}
-
-func manifestCoversPolicy(manifest workspaceManifest, policy workspacePolicy, requireExact bool) bool {
-	if manifestFresh(manifest, policy) {
-		return true
-	}
-	if requireExact {
-		return false
-	}
-	if manifest.Version != workspaceManifestVersion {
-		return false
-	}
-	if pathutil.Key(manifest.WorkspaceRoot) != pathutil.Key(policy.WorkspaceRoot) {
-		return false
-	}
-	if pathutil.Key(manifest.SandboxEnvRoot) != pathutil.Key(policy.SandboxEnvRoot) {
-		return false
-	}
-	if !pathSetContainsAll(manifest.WriteRoots, policy.WriteRoots) ||
-		!pathSetContainsAll(manifest.DenyWritePaths, policy.DenyWritePaths) {
-		return false
-	}
-	for _, sid := range policy.CapabilitySIDs {
-		if !stringSetContains(manifest.CapabilitySIDs, sid) {
-			return false
-		}
-	}
-	for root, sid := range policy.WriteRootCapabilitySIDs {
-		if strings.TrimSpace(sid) == "" {
-			continue
-		}
-		if !strings.EqualFold(strings.TrimSpace(manifest.WriteRootCapabilitySIDs[pathutil.Normalize(root)]), strings.TrimSpace(sid)) {
-			return false
-		}
-	}
-	return true
-}
-
 func manifestACEs(policy workspacePolicy) []manifestACE {
 	var out []manifestACE
 	for _, root := range policy.WriteRoots {
@@ -1297,84 +1117,11 @@ func manifestACEs(policy workspacePolicy) []manifestACE {
 		}
 	}
 	for _, path := range policy.DenyWritePaths {
-		for _, sid := range policy.CapabilitySIDs {
-			if strings.TrimSpace(sid) != "" {
-				out = append(out, manifestACE{Path: path, Principal: sid, Mode: string(acl.Deny), Rights: string(acl.Write), Inherit: true})
-			}
+		if sid := policy.sidForCoveredPath(path); sid != "" {
+			out = append(out, manifestACE{Path: path, Principal: sid, Mode: string(acl.Deny), Rights: string(acl.Write), Inherit: true})
 		}
 	}
 	return out
-}
-
-func (r *runtime) cleanupStaleManifestACLs(manifest workspaceManifest, policy workspacePolicy) {
-	r.cleanupStaleManifestACLsMatching(manifest, policy, func(manifestACE) bool { return true })
-}
-
-func (r *runtime) cleanupStaleManifestDenyACLs(manifest workspaceManifest, policy workspacePolicy) {
-	r.cleanupStaleManifestACLsMatching(manifest, policy, func(ace manifestACE) bool {
-		return strings.EqualFold(strings.TrimSpace(ace.Mode), string(acl.Deny))
-	})
-}
-
-func (r *runtime) cleanupStaleManifestACLsMatching(manifest workspaceManifest, policy workspacePolicy, include func(manifestACE) bool) {
-	currentGrantPaths := map[string]struct{}{}
-	grantPaths := append([]string{}, policy.WriteRoots...)
-	grantPaths = append(grantPaths, sandboxEnvDirs(policy.SandboxEnvRoot)...)
-	for _, path := range grantPaths {
-		if key := pathutil.Key(path); key != "" {
-			currentGrantPaths[key] = struct{}{}
-		}
-	}
-	currentDenyPaths := map[string]struct{}{}
-	for _, path := range policy.DenyWritePaths {
-		if key := pathutil.Key(path); key != "" {
-			currentDenyPaths[key] = struct{}{}
-		}
-	}
-	currentSIDs := map[string]struct{}{}
-	for _, sid := range policy.CapabilitySIDs {
-		currentSIDs[strings.ToUpper(strings.TrimSpace(sid))] = struct{}{}
-	}
-	for _, ace := range manifest.ACEs {
-		if include != nil && !include(ace) {
-			continue
-		}
-		path := strings.TrimSpace(ace.Path)
-		sid := strings.TrimSpace(ace.Principal)
-		if path == "" || sid == "" {
-			continue
-		}
-		if manifestACEStillCurrent(ace, currentGrantPaths, currentDenyPaths, currentSIDs) {
-			continue
-		}
-		if _, err := os.Stat(path); err == nil {
-			_ = acl.RemoveFileDACLPrincipals(path, sid)
-		}
-	}
-}
-
-func manifestACEStillCurrent(ace manifestACE, currentGrantPaths map[string]struct{}, currentDenyPaths map[string]struct{}, currentSIDs map[string]struct{}) bool {
-	sid := strings.ToUpper(strings.TrimSpace(ace.Principal))
-	if sid == "" {
-		return false
-	}
-	if _, ok := currentSIDs[sid]; !ok {
-		return false
-	}
-	pathKey := pathutil.Key(ace.Path)
-	if pathKey == "" {
-		return false
-	}
-	switch {
-	case strings.EqualFold(strings.TrimSpace(ace.Mode), string(acl.Grant)):
-		_, ok := currentGrantPaths[pathKey]
-		return ok
-	case strings.EqualFold(strings.TrimSpace(ace.Mode), string(acl.Deny)):
-		_, ok := currentDenyPaths[pathKey]
-		return ok
-	default:
-		return false
-	}
 }
 
 type windowsSession struct {
@@ -1383,7 +1130,7 @@ type windowsSession struct {
 
 	cmd              *exec.Cmd
 	conpty           *conpty.Process
-	job              *job.Object
+	jobProcess       *jobprocess.Process
 	stdin            io.WriteCloser
 	stdoutReader     io.Closer
 	stderrReader     io.Closer
@@ -1392,6 +1139,10 @@ type windowsSession struct {
 	wg               sync.WaitGroup
 	finalizeOnce     sync.Once
 	closeReadersOnce sync.Once
+	releaseUseOnce   sync.Once
+	releaseUse       func()
+	drainTree        func(context.Context) error
+	closeTree        func()
 
 	onOutput func(sandbox.OutputChunk)
 
@@ -1538,6 +1289,7 @@ func (s *windowsSession) Terminate(ctx context.Context) error {
 	s.mu.RLock()
 	cmd := s.cmd
 	ptyProcess := s.conpty
+	atomicProcess := s.jobProcess
 	running := s.running
 	finalizing := s.finalizing
 	s.mu.RUnlock()
@@ -1548,8 +1300,12 @@ func (s *windowsSession) Terminate(ctx context.Context) error {
 	var terminateErr error
 	if ptyProcess != nil {
 		terminateErr = ptyProcess.Terminate()
+	} else if atomicProcess != nil {
+		terminateErr = atomicProcess.Terminate()
 	} else {
-		terminateErr = terminateWindowsCommand(cmd, s.takeJob())
+		if cmd != nil && cmd.Process != nil {
+			terminateErr = cmd.Process.Kill()
+		}
 	}
 	if s.outputCallbackActive() {
 		go s.forceTerminationAfterDrain(terminateErr)
@@ -1617,20 +1373,87 @@ func (s *windowsSession) readStream(reader io.Reader, stream string) {
 
 func (s *windowsSession) waitForExit() {
 	var err error
+	jobBacked := false
 	if s.conpty != nil {
+		jobBacked = true
 		var exitCode int
 		exitCode, err = s.conpty.Wait()
 		s.mu.Lock()
 		s.exitCode = exitCode
 		s.mu.Unlock()
-		s.conpty.CloseAfterExit()
+	} else if s.jobProcess != nil {
+		jobBacked = true
+		var exitCode int
+		exitCode, err = s.jobProcess.WaitRoot()
+		s.mu.Lock()
+		s.exitCode = exitCode
+		s.mu.Unlock()
+		s.jobProcess.ClosePipes()
 	} else {
 		err = s.cmd.Wait()
-		if jobObject := s.takeJob(); jobObject != nil {
-			_ = jobObject.Close()
-		}
+	}
+	var drainErr error
+	if jobBacked {
+		drainCtx, cancel := context.WithTimeout(context.Background(), windowsPreflightTimeout)
+		drainErr = s.drainAndCloseProcessTree(drainCtx)
+		cancel()
+		err = errors.Join(err, drainErr)
 	}
 	s.finalize(err, false)
+	if drainErr != nil && s.processTreeDrainNeedsRetry() {
+		go s.retryProcessTreeDrain()
+		return
+	}
+	s.releaseRuntimeUse()
+}
+
+func (s *windowsSession) processTreeDrainNeedsRetry() bool {
+	if s == nil {
+		return false
+	}
+	if s.drainTree != nil || s.conpty != nil {
+		return true
+	}
+	return s.jobProcess != nil && s.jobProcess.NeedsDrainRetry()
+}
+
+func (s *windowsSession) drainAndCloseProcessTree(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if s.drainTree != nil {
+		if err := s.drainTree(ctx); err != nil {
+			return err
+		}
+		if s.closeTree != nil {
+			s.closeTree()
+		}
+		return nil
+	}
+	if s.conpty != nil {
+		if err := s.conpty.DrainJob(ctx); err != nil {
+			return err
+		}
+		s.conpty.CloseAfterExit()
+		return nil
+	}
+	if s.jobProcess != nil {
+		return s.jobProcess.DrainAndClose(ctx)
+	}
+	return nil
+}
+
+func (s *windowsSession) retryProcessTreeDrain() {
+	for {
+		drainCtx, cancel := context.WithTimeout(context.Background(), windowsPreflightTimeout)
+		err := s.drainAndCloseProcessTree(drainCtx)
+		cancel()
+		if err == nil || !s.processTreeDrainNeedsRetry() {
+			s.releaseRuntimeUse()
+			return
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 }
 
 func (s *windowsSession) finalize(err error, forced bool) {
@@ -1695,12 +1518,12 @@ func (s *windowsSession) finalize(err error, forced bool) {
 	s.mu.Unlock()
 }
 
-func (s *windowsSession) takeJob() *job.Object {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	jobObject := s.job
-	s.job = nil
-	return jobObject
+func (s *windowsSession) releaseRuntimeUse() {
+	s.releaseUseOnce.Do(func() {
+		if s.releaseUse != nil {
+			s.releaseUse()
+		}
+	})
 }
 
 func (s *windowsSession) forceTerminated(err error) {
@@ -1850,30 +1673,8 @@ func pathListContains(paths []string, want string) bool {
 	return false
 }
 
-func pathSetContainsAll(haystack, needles []string) bool {
-	for _, needle := range pathutil.Dedupe(needles) {
-		if !pathListContains(haystack, needle) {
-			return false
-		}
-	}
-	return true
-}
-
 func sameStringSet(a, b []string) bool {
 	return slices.Equal(dedupeStrings(a), dedupeStrings(b))
-}
-
-func stringSetContains(values []string, want string) bool {
-	want = strings.TrimSpace(want)
-	if want == "" {
-		return false
-	}
-	for _, value := range values {
-		if strings.EqualFold(strings.TrimSpace(value), want) {
-			return true
-		}
-	}
-	return false
 }
 
 func sameRootSIDMap(a, b map[string]string) bool {

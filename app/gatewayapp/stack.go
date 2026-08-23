@@ -36,9 +36,13 @@ import (
 )
 
 type Config struct {
-	AppName                   string
-	UserID                    string
-	StoreDir                  string
+	AppName  string
+	UserID   string
+	StoreDir string
+	// SandboxHostAuthorityDir optionally injects a writable Host-user authority
+	// base for platform sandbox coordination. Production normally uses the
+	// platform default; tests and restricted embeddings may provide one.
+	SandboxHostAuthorityDir   string
 	ControlOperationRetention time.Duration // Zero adopts an existing root policy; a fresh root uses the default.
 	WorkspaceKey              string
 	WorkspaceCWD              string
@@ -478,22 +482,23 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	stack := &Stack{
 		composition: runtimeComposition{
 			authorities: runtimeHostAuthorities{
-				appName:                appName,
-				userID:                 userID,
-				store:                  configStore,
-				storeDir:               storeDir,
-				diagnostics:            runtimeDiagnostics,
-				configMigration:        configStore.MigrationReport(),
-				fenceOwnerID:           fenceOwnerID,
-				priorHostSessionFences: runtimePriorHostFences,
-				taskStore:              taskStore,
-				controlFeeds:           controlFeeds,
-				approvalRecovery:       approvalRecovery,
-				codexAuth:              codexAuth,
-				grokAuth:               grokAuth,
-				apiKeyCredentials:      apiKeyCredentials,
-				providerUsage:          providerUsage,
-				sessionModelPins:       newSessionModelPinRegistry(),
+				appName:                 appName,
+				userID:                  userID,
+				store:                   configStore,
+				storeDir:                storeDir,
+				sandboxHostAuthorityDir: strings.TrimSpace(cfg.SandboxHostAuthorityDir),
+				diagnostics:             runtimeDiagnostics,
+				configMigration:         configStore.MigrationReport(),
+				fenceOwnerID:            fenceOwnerID,
+				priorHostSessionFences:  runtimePriorHostFences,
+				taskStore:               taskStore,
+				controlFeeds:            controlFeeds,
+				approvalRecovery:        approvalRecovery,
+				codexAuth:               codexAuth,
+				grokAuth:                grokAuth,
+				apiKeyCredentials:       apiKeyCredentials,
+				providerUsage:           providerUsage,
+				sessionModelPins:        newSessionModelPinRegistry(),
 			},
 			sessions:  sessions,
 			workspace: workspace,

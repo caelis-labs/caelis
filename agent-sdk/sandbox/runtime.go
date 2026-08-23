@@ -129,6 +129,12 @@ func NormalizeConfig(cfg Config) Config {
 			cfg.StateDir = abs
 		}
 	}
+	cfg.HostAuthorityDir = strings.TrimSpace(cfg.HostAuthorityDir)
+	if cfg.HostAuthorityDir != "" {
+		if abs, err := filepath.Abs(cfg.HostAuthorityDir); err == nil {
+			cfg.HostAuthorityDir = abs
+		}
+	}
 	cfg.WritableRoots = normalizeStringSlice(cfg.WritableRoots)
 	cfg.ReadOnlySubpaths = normalizeStringSlice(cfg.ReadOnlySubpaths)
 	cfg.BackendCandidates = normalizeBackendCandidates(cfg.BackendCandidates)

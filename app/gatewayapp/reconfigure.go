@@ -254,6 +254,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		FallbackInstallHint: route.InstallHint,
 		HelperPath:          sandboxCfg.HelperPath,
 		StateDir:            s.authorities.storeDir,
+		HostAuthorityDir:    s.authorities.sandboxHostAuthorityDir,
 		WritableRoots:       append([]string(nil), sandboxCfg.WritableRoots...),
 		ReadOnlySubpaths:    append([]string(nil), sandboxCfg.ReadOnlySubpaths...),
 	})
