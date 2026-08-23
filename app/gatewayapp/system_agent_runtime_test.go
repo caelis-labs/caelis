@@ -80,7 +80,7 @@ func TestSystemManagedAgentUsesCoreRuntimeLifecycleAndJournalPipeline(t *testing
 	}
 }
 
-func TestSystemManagedAgentDoesNotInheritParentRuntimeLease(t *testing.T) {
+func TestSystemManagedAgentDoesNotInheritParentRuntimeFence(t *testing.T) {
 	t.Parallel()
 
 	staging := inmemory.NewStore(inmemory.Config{})
@@ -91,18 +91,18 @@ func TestSystemManagedAgentDoesNotInheritParentRuntimeLease(t *testing.T) {
 	parent := session.Session{SessionRef: session.SessionRef{
 		AppName: "caelis", UserID: "user-1", SessionID: "parent-session", WorkspaceKey: "workspace-1",
 	}}
-	parentLease := session.SessionLease{
+	parentFence := session.SessionFence{
 		SessionRef: parent.SessionRef,
-		LeaseID:    "parent-lease", OwnerID: "parent-owner", FencingToken: 7,
+		FenceID:    "parent-fence", OwnerID: "parent-owner", FencingToken: 7,
 	}
-	ctx := session.ContextWithRuntimeLease(context.Background(), parentLease)
+	ctx := session.ContextWithRuntimeFence(context.Background(), parentFence)
 	prompt := model.NewTextMessage(model.RoleUser, "review this")
 	result, err := runner.Run(ctx, systemManagedAgentRunRequest{
 		AgentID: guardianSceneID, Model: systemManagedAgentResponseModel{}, ParentSession: parent,
 		Events: []*session.Event{{Type: session.EventTypeUser, Message: &prompt, Text: "review this"}},
 	})
 	if err != nil {
-		t.Fatalf("Run() inherited parent lease into staging Session: %v", err)
+		t.Fatalf("Run() inherited parent fence into staging Session: %v", err)
 	}
 	if result.AssistantEvent == nil {
 		t.Fatal("Run() returned no Guardian assessment")

@@ -2463,7 +2463,7 @@ func assertSessionRuntimeIsolationContract(t *testing.T, host *Stack, instance *
 	if instance.authorities.appName != host.composition.authorities.appName ||
 		instance.authorities.userID != host.composition.authorities.userID ||
 		instance.authorities.storeDir != host.composition.authorities.storeDir ||
-		instance.authorities.leaseOwnerID != host.composition.authorities.leaseOwnerID ||
+		instance.authorities.fenceOwnerID != host.composition.authorities.fenceOwnerID ||
 		!sameSessionRuntimeReference(instance.sessions, host.composition.sessions) ||
 		!sameSessionRuntimeReference(instance.authorities.taskStore, host.composition.authorities.taskStore) ||
 		!sameSessionRuntimeReference(instance.authorities.controlFeeds, host.composition.authorities.controlFeeds) ||

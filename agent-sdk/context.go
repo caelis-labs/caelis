@@ -114,9 +114,10 @@ type ContextSubmissionRunner interface {
 }
 
 // RunnerCompletionWaiter reports when the execution producer, including its
-// final durable writes, is quiescent. Runtime decorators that own an external
-// lease use this optional contract before releasing that authority after an
-// early consumer stop or Close.
+// final durable writes, is quiescent. A nil result proves quiescence; an error
+// leaves completion unproven. Runtime decorators that own an external fence
+// require this contract before releasing authority after natural completion,
+// an early consumer stop, or Close.
 type RunnerCompletionWaiter interface {
 	WaitCompletion(context.Context) error
 }

@@ -6,8 +6,8 @@ import (
 )
 
 // contextMutex is a zero-value mutex whose acquisition can be cancelled.
-// Request-scoped Store operations use LockContext so callers, including lease
-// heartbeats, cannot be trapped behind unrelated local Store work.
+// Request-scoped Store operations use LockContext so callers cannot be trapped
+// behind unrelated local Store work.
 type contextMutex struct {
 	once  sync.Once
 	token chan struct{}

@@ -85,7 +85,7 @@ func (s *Store) pendingApprovalsForSession(ctx context.Context, ref session.Sess
 			}
 			doc.PendingApprovals = pendingApprovalsFromEvents(events)
 			// This is derived persistence metadata, not a semantic Session
-			// mutation: revision, lease, state, and canonical events stay fixed.
+			// mutation: revision, fence, state, and canonical events stay fixed.
 			if err := s.writeDocumentInternal(ctx, doc, false, false); err != nil {
 				return err
 			}
@@ -112,7 +112,7 @@ func (s *Store) pendingApprovalsForSession(ctx context.Context, ref session.Sess
 
 // SettlePendingApproval appends one approval settlement only while the exact
 // request observed by recovery remains pending at the expected revision. The
-// pending check, lease guard, revision CAS, and append share one root lock.
+// pending check, fence guard, revision CAS, and append share one root lock.
 func (s *Store) SettlePendingApproval(
 	ctx context.Context,
 	req session.SettlePendingApprovalRequest,
@@ -148,7 +148,7 @@ func (s *Store) SettlePendingApproval(
 		if !session.PendingApprovalMatches(current, req) {
 			return nil
 		}
-		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
+		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
 			return err
 		}
 		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {

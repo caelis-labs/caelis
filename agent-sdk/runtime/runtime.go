@@ -83,6 +83,10 @@ type Runtime struct {
 	guardrailSlots          chan struct{}
 }
 
+// RunnerCompletionWaiterGuaranteed marks that every non-nil Runner returned
+// by Runtime implements agent.RunnerCompletionWaiter.
+func (*Runtime) RunnerCompletionWaiterGuaranteed() {}
+
 // New returns one baseline local runtime.
 func New(cfg Config) (*Runtime, error) {
 	if cfg.Sessions == nil {

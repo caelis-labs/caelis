@@ -177,6 +177,7 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 	if err != nil {
 		return nil, err
 	}
+	cfg.HostOwnership = ownership
 	openEndpoint := options.EmbeddedControlEndpoint
 	if openEndpoint == nil {
 		openEndpoint = newLoopbackEmbeddedControlEndpoint

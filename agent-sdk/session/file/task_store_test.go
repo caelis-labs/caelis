@@ -252,7 +252,10 @@ func TestEnsureTaskIndexV4ColumnsAddsFailureDiagnostic(t *testing.T) {
 func TestTaskStoreRejectsStaleSessionFenceAfterTakeover(t *testing.T) {
 	t.Parallel()
 	now := time.Unix(1000, 0).UTC()
-	backing := NewStore(Config{RootDir: t.TempDir(), Clock: func() time.Time { return now }})
+	backing, priorHostFences := NewStoreWithPriorHostFences(
+		Config{RootDir: t.TempDir(), Clock: func() time.Time { return now }},
+		func(context.Context) (func(), bool) { return func() {}, true },
+	)
 	active, err := backing.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "task-fence", PreferredSessionID: "task-fence",
 	})
@@ -260,13 +263,13 @@ func TestTaskStoreRejectsStaleSessionFenceAfterTakeover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaseA, err := backing.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
-		SessionRef: active.SessionRef, OwnerID: "host-a", TTL: time.Minute,
+	fenceA, err := backing.AcquireSessionFence(context.Background(), session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "host-a",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctxA := session.ContextWithRuntimeLease(context.Background(), leaseA)
+	ctxA := session.ContextWithRuntimeFence(context.Background(), fenceA)
 	tasks := NewTaskStore(backing)
 	created, err := tasks.Put(ctxA, task.PutRequest{Entry: &task.Entry{
 		TaskID: "fenced-task", Kind: task.KindSubagent, Session: active.SessionRef, State: task.StateRunning, Running: true,
@@ -275,21 +278,20 @@ func TestTaskStoreRejectsStaleSessionFenceAfterTakeover(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	now = now.Add(2 * time.Minute)
-	leaseB, err := backing.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
-		SessionRef: active.SessionRef, OwnerID: "host-b", TTL: time.Minute,
+	fenceB, err := priorHostFences.ReplacePriorHostSessionFence(context.Background(), session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "host-b",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	stale := task.CloneEntry(created)
 	stale.Title = "stale host write"
-	if _, err := tasks.Put(ctxA, task.PutRequest{Entry: stale, ExpectedRevision: created.Revision}); !errors.Is(err, session.ErrLeaseConflict) {
-		t.Fatalf("stale task Put error = %v, want session lease conflict", err)
+	if _, err := tasks.Put(ctxA, task.PutRequest{Entry: stale, ExpectedRevision: created.Revision}); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("stale task Put error = %v, want Session fence conflict", err)
 	}
 	current := task.CloneEntry(created)
 	current.Title = "new owner write"
-	ctxB := session.ContextWithRuntimeLease(context.Background(), leaseB)
+	ctxB := session.ContextWithRuntimeFence(context.Background(), fenceB)
 	if _, err := tasks.Put(ctxB, task.PutRequest{Entry: current, ExpectedRevision: created.Revision}); err != nil {
 		t.Fatalf("new owner task Put error = %v", err)
 	}

@@ -15,6 +15,32 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
+func TestSessionFenceJSONUsesFenceTerminology(t *testing.T) {
+	t.Parallel()
+
+	encoded, err := json.Marshal(ReleaseSessionFenceRequest{
+		SessionRef: SessionRef{SessionID: "session-1"},
+		FenceID:    "fence-1", OwnerID: "host-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if !strings.Contains(text, `"fence_id":"fence-1"`) || strings.Contains(text, "lease") || strings.Contains(text, "revision") {
+		t.Fatalf("ReleaseSessionFenceRequest JSON = %s, want only fence terminology", text)
+	}
+
+	encoded, err = json.Marshal(SessionFence{FenceID: "fence-1", OwnerID: "host-1", FencingToken: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text = string(encoded)
+	if !strings.Contains(text, `"fence_id":"fence-1"`) || !strings.Contains(text, `"fencing_token":7`) ||
+		strings.Contains(text, "lease") || strings.Contains(text, "revision") {
+		t.Fatalf("SessionFence JSON = %s, want public fence fields without renewal revision", text)
+	}
+}
+
 func TestVisibilityRules(t *testing.T) {
 	t.Parallel()
 

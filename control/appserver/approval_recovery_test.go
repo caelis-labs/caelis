@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -14,7 +13,7 @@ import (
 
 type resolveAfterRecoverySnapshotStore struct {
 	*sessionfile.Store
-	lease session.SessionLease
+	fence session.SessionFence
 	once  sync.Once
 	err   error
 }
@@ -38,10 +37,7 @@ func (s *resolveAfterRecoverySnapshotStore) PendingApprovals(ctx context.Context
 		if s.err != nil {
 			return
 		}
-		s.err = s.ReleaseSessionLease(ctx, session.ReleaseSessionLeaseRequest{
-			SessionRef: pending[0].SessionRef, LeaseID: s.lease.LeaseID, OwnerID: s.lease.OwnerID,
-			ExpectedLeaseRevision: s.lease.Revision,
-		})
+		s.err = s.ReleaseSessionFence(ctx, session.SessionFenceReleaseRequest(s.fence))
 	})
 	return pending, s.err
 }
@@ -55,18 +51,15 @@ func TestSweepAbandonedApprovalsDoesNotOverwriteResolutionAfterCandidateSnapshot
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := service.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
-		SessionRef: active.SessionRef, OwnerID: "runtime-1", TTL: time.Minute,
+	fence, err := service.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "runtime-1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: active.SessionRef,
-		MutationGuard: session.MutationGuard{
-			Authority: session.MutationAuthorityRuntime, LeaseID: lease.LeaseID,
-			OwnerID: lease.OwnerID, FencingToken: lease.FencingToken,
-		},
+		SessionRef:    active.SessionRef,
+		MutationGuard: session.RuntimeMutationGuard(session.ContextWithRuntimeFence(ctx, fence)),
 		Event: &session.Event{
 			Type: session.EventTypeCustom, Visibility: session.VisibilityMirror,
 			ApprovalRequestID: "approval-recovery-cas",
@@ -80,7 +73,7 @@ func TestSweepAbandonedApprovalsDoesNotOverwriteResolutionAfterCandidateSnapshot
 	}); err != nil {
 		t.Fatal(err)
 	}
-	recovery := &resolveAfterRecoverySnapshotStore{Store: service, lease: lease}
+	recovery := &resolveAfterRecoverySnapshotStore{Store: service, fence: fence}
 	if err := SweepAbandonedApprovals(ctx, recovery); err != nil {
 		t.Fatal(err)
 	}
@@ -100,12 +93,10 @@ func TestSweepAbandonedApprovalsDoesNotOverwriteResolutionAfterCandidateSnapshot
 	}
 }
 
-func TestSweepAbandonedApprovalsDefersLiveForeignLeaseThenInterruptsOnceAfterExpiry(t *testing.T) {
+func TestSweepAbandonedApprovalsDefersLiveForeignFenceThenInterruptsOnceAfterRelease(t *testing.T) {
 	ctx := context.Background()
-	now := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
 	store := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return "session-1" },
-		Clock:              func() time.Time { return now },
 	})
 	runtimeService := store
 	recoveryService := store
@@ -113,18 +104,15 @@ func TestSweepAbandonedApprovalsDefersLiveForeignLeaseThenInterruptsOnceAfterExp
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := runtimeService.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
-		SessionRef: active.SessionRef, OwnerID: "foreign-runtime", TTL: time.Minute,
+	fence, err := runtimeService.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "foreign-runtime",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = runtimeService.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: active.SessionRef,
-		MutationGuard: session.MutationGuard{
-			Authority: session.MutationAuthorityRuntime, LeaseID: lease.LeaseID,
-			OwnerID: lease.OwnerID, FencingToken: lease.FencingToken,
-		},
+		SessionRef:    active.SessionRef,
+		MutationGuard: session.RuntimeMutationGuard(session.ContextWithRuntimeFence(ctx, fence)),
 		Event: &session.Event{
 			Type: session.EventTypeCustom, Visibility: session.VisibilityMirror, ApprovalRequestID: "approval-1",
 			Protocol: &session.EventProtocol{Method: session.ProtocolMethodRequestPermission, Permission: &session.ProtocolApproval{
@@ -144,10 +132,12 @@ func TestSweepAbandonedApprovalsDefersLiveForeignLeaseThenInterruptsOnceAfterExp
 		t.Fatal(err)
 	}
 	if len(page.Events) != 1 || page.Events[0].ApprovalRequestID != "approval-1" {
-		t.Fatalf("live foreign lease recovery events = %#v, want pending request only", page.Events)
+		t.Fatalf("live foreign fence recovery events = %#v, want pending request only", page.Events)
 	}
 
-	now = now.Add(time.Minute + time.Nanosecond)
+	if err := runtimeService.ReleaseSessionFence(ctx, session.SessionFenceReleaseRequest(fence)); err != nil {
+		t.Fatal(err)
+	}
 	if err := SweepAbandonedApprovals(ctx, recoveryService); err != nil {
 		t.Fatal(err)
 	}

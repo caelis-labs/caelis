@@ -35,6 +35,21 @@ var (
 
 // NewStore constructs one new in-memory session store.
 func NewStore(cfg Config) *Store {
+	return newStore(cfg)
+}
+
+// NewStoreWithPriorHostFences constructs a Store plus a distinct privileged
+// capability for replacing fences left by a previous product Host. The Store
+// itself does not implement session.PriorHostFenceService.
+func NewStoreWithPriorHostFences(
+	cfg Config,
+	authorize func(context.Context) (release func(), ok bool),
+) (*Store, session.PriorHostFenceService) {
+	store := newStore(cfg)
+	return store, priorHostFenceService{store: store, authorize: authorize}
+}
+
+func newStore(cfg Config) *Store {
 	store := &Store{
 		sessionIDGenerator: cfg.SessionIDGenerator,
 		eventIDGenerator:   cfg.EventIDGenerator,
@@ -190,7 +205,7 @@ func (s *Store) AppendEventWithOutcome(
 	if !ok {
 		return session.AppendEventResult{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
 		return session.AppendEventResult{}, err
 	}
 
@@ -221,7 +236,7 @@ func (s *Store) AppendEventWithOutcomeConditional(
 	if !ok {
 		return session.AppendEventResult{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
 		return session.AppendEventResult{}, err
 	}
 	for _, precondition := range req.RelatedRevisions {
@@ -266,7 +281,7 @@ func (s *Store) SettlePendingApproval(
 	if !session.PendingApprovalMatches(current, req) {
 		return result, nil
 	}
-	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
 		return result, err
 	}
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
@@ -376,7 +391,7 @@ func (s *Store) AppendEvents(
 	if !ok {
 		return nil, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
 		return nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, nil, req.ExpectedRevision, "", "")
@@ -402,7 +417,7 @@ func (s *Store) AppendEventsAndUpdateState(
 	if !ok {
 		return nil, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
 		return nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, req.UpdateState, req.ExpectedRevision, req.TransactionID, req.MutationDigest)
@@ -484,7 +499,7 @@ func (s *Store) bindControllerRequest(req session.BindControllerRequest) (sessio
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
 		return session.Session{}, err
 	}
 	record.session.Controller = session.CloneControllerBinding(req.Binding)
@@ -503,7 +518,7 @@ func (s *Store) BindControllerWithEvent(
 	if !ok {
 		return session.Session{}, nil, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
 		return session.Session{}, nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(
@@ -541,7 +556,7 @@ func (s *Store) putParticipantRequest(req session.PutParticipantRequest) (sessio
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
 		return session.Session{}, err
 	}
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
@@ -574,7 +589,7 @@ func (s *Store) PutParticipantWithEvent(
 	if !ok {
 		return session.Session{}, nil, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
 		return session.Session{}, nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(
@@ -620,7 +635,7 @@ func (s *Store) removeParticipantRequest(req session.RemoveParticipantRequest) (
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
 		return session.Session{}, err
 	}
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
@@ -649,7 +664,7 @@ func (s *Store) RemoveParticipantWithEvent(
 	if !ok {
 		return session.Session{}, nil, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
 		return session.Session{}, nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(
@@ -704,7 +719,7 @@ func (s *Store) ReplaceState(
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
 		return session.Session{}, err
 	}
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
@@ -727,7 +742,7 @@ func (s *Store) UpdateState(
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
 		return session.Session{}, err
 	}
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
@@ -837,8 +852,8 @@ type record struct {
 	state                     map[string]any
 	appliedTransactions       map[string]bool
 	appliedTransactionDigests map[string]string
-	lease                     session.SessionLease
-	leaseEpoch                uint64
+	fence                     session.SessionFence
+	fenceEpoch                uint64
 }
 
 func (r *record) cloneSession() session.Session {

@@ -349,9 +349,13 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	controlCoordinator, err := controlplane.NewCoordinator(controlplane.CoordinatorConfig{
-		Sessions:    s.sessions,
-		Controllers: localCfg.Controllers,
-		Context:     contextRouter,
+		Sessions:         s.sessions,
+		Controllers:      localCfg.Controllers,
+		Context:          contextRouter,
+		FenceOwnerID:     strings.TrimSpace(s.authorities.fenceOwnerID),
+		PriorHostFences:  s.authorities.priorHostSessionFences,
+		LifecycleContext: s.authorities.lifecycleCtx,
+		Diagnostics:      s.authorities.diagnostics,
 	})
 	if err != nil {
 		bundle.Close()
@@ -364,25 +368,28 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	bundle.Engine = rt
-	leaseService, ok := s.sessions.(session.SessionLeaseService)
+	fenceService, ok := s.sessions.(session.SessionFenceService)
 	if !ok {
 		bundle.Close()
-		return nil, fmt.Errorf("gatewayapp: production session service does not support execution leases")
+		return nil, fmt.Errorf("gatewayapp: production session service does not support execution fences")
 	}
-	leasedRuntime, err := controlplane.NewLeasedRuntime(controlplane.LeasedRuntimeConfig{
-		Runtime: rt,
-		Leases:  leaseService,
-		OwnerID: strings.TrimSpace(s.authorities.leaseOwnerID),
+	fencedRuntime, err := controlplane.NewFencedRuntime(controlplane.FencedRuntimeConfig{
+		Runtime:          rt,
+		Fences:           fenceService,
+		OwnerID:          strings.TrimSpace(s.authorities.fenceOwnerID),
+		PriorHostFences:  s.authorities.priorHostSessionFences,
+		LifecycleContext: s.authorities.lifecycleCtx,
+		Diagnostics:      s.authorities.diagnostics,
 	})
 	if err != nil {
 		bundle.Close()
 		return nil, err
 	}
 	bundle.ACPControlPlane = acpControlPlane
-	bundle.Placement = leasedRuntime
+	bundle.Placement = fencedRuntime
 	sessionControl, err := controlplane.NewSessionControl(controlplane.SessionControlConfig{
 		Controllers:  controlCoordinator,
-		Participants: leasedRuntime,
+		Participants: fencedRuntime,
 	})
 	if err != nil {
 		bundle.Close()
@@ -439,7 +446,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	guardianApprover := s.newGuardianApprover()
 	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions:             s.sessions,
-		Runtime:              leasedRuntime,
+		Runtime:              fencedRuntime,
 		TurnStartGate:        s.authorities.approvalRecovery,
 		Control:              sessionControl,
 		Resolver:             resolver,

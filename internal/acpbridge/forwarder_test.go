@@ -6,7 +6,6 @@ import (
 	"iter"
 	"reflect"
 	"testing"
-	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -21,13 +20,12 @@ func TestForwardControllerEventsPreservesActiveTurnFence(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession := newTestSessionService(t, "sess-acp-forward-fenced")
-	lease, err := sessions.(session.SessionLeaseService).AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+	fence, err := sessions.(session.SessionFenceService).AcquireSessionFence(context.Background(), session.AcquireSessionFenceRequest{
 		SessionRef: activeSession.SessionRef,
 		OwnerID:    "turn-owner",
-		TTL:        time.Minute,
 	})
 	if err != nil {
-		t.Fatalf("AcquireSessionLease() error = %v", err)
+		t.Fatalf("AcquireSessionFence() error = %v", err)
 	}
 	forwarder := NewControllerForwarder(sessions)
 	request := agent.ControllerEventForwardRequest{
@@ -39,11 +37,11 @@ func TestForwardControllerEventsPreservesActiveTurnFence(t *testing.T) {
 		}}},
 		Publisher: newTestPublisher(),
 	}
-	if err := forwarder.ForwardControllerEvents(context.Background(), request); !errors.Is(err, session.ErrLeaseConflict) {
-		t.Fatalf("unfenced ForwardControllerEvents() error = %v, want ErrLeaseConflict", err)
+	if err := forwarder.ForwardControllerEvents(context.Background(), request); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("unfenced ForwardControllerEvents() error = %v, want ErrFenceConflict", err)
 	}
 
-	request.MutationGuard = session.RuntimeMutationGuard(session.ContextWithRuntimeLease(context.Background(), lease))
+	request.MutationGuard = session.RuntimeMutationGuard(session.ContextWithRuntimeFence(context.Background(), fence))
 	request.Publisher = newTestPublisher()
 	if err := forwarder.ForwardControllerEvents(context.Background(), request); err != nil {
 		t.Fatalf("fenced ForwardControllerEvents() error = %v", err)

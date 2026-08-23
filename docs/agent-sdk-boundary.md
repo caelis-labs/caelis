@@ -199,11 +199,29 @@ because a Surface rendered them.
 Control fences one canonical Turn per Session across the complete asynchronous
 producer lifetime. The fence serializes durable authority, not Agent identity:
 local, ACP, and authorized participant Turns follow the same rule.
+Session observation, replay, and mid-Turn input delivery do not acquire this
+fence and may proceed concurrently from other clients.
 
 Overlapping Control writes require an explicitly allowed purpose and the
 matching revision or fence. Handoff and controller binding are exclusive.
-Unknown mutation purposes, stale revisions, expired leases, and missing guards
-fail closed rather than retrying unfenced.
+Unknown mutation purposes, stale fences, and missing guards fail closed rather
+than retrying unfenced. Session execution fences derive liveness from the
+process-lifetime Host authority, not wall-clock expiry or a renewal loop. Only
+the narrow capability bound to the Store's live Host-ownership guard can
+replace a prior Host fence; the ordinary Store does not expose takeover and
+ordinary acquisition conflicts with every active producer.
+Acquisition returns an opaque bearer claim; `SessionFenceReader` deliberately
+redacts it so observed fence identity cannot authorize release or writes.
+Backends reporting a committed acquisition must return the exact claimed
+result because readback cannot and must not reconstruct producer authority.
+`RunnerCompletionRuntime` is the preflight promise required by Control's
+fencing decorator: every successful non-nil Runner must expose a completion
+waiter, and only nil completion proves final durable writes are quiescent.
+Release failures are read back through `SessionFenceService` and remain
+retryable instead of silently dropping the active fence bookkeeping.
+Host diagnostics may report fixed fence phase names, elapsed milliseconds, and
+fixed outcome classes, including startup-release retries, but must not include
+Session content or identity.
 
 Participant lifecycle is Control metadata with stable identity, delegation,
 generation, and revision checks. A parent fence never grants authority over a

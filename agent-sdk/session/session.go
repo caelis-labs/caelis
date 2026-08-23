@@ -41,9 +41,9 @@ var (
 	// canonical payload.
 	ErrEventConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: event conflict")
 
-	// ErrLeaseConflict reports that a live lease is owned elsewhere or that
-	// lease identity/revision CAS failed.
-	ErrLeaseConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: lease conflict")
+	// ErrFenceConflict reports that a durable execution fence is owned
+	// elsewhere or that fence identity CAS failed.
+	ErrFenceConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: fence conflict")
 
 	// ErrUnsupportedLegacyFormat reports an older on-disk session format that is
 	// no longer a supported replay source.
@@ -68,23 +68,23 @@ func (e *RevisionConflictError) Is(target error) bool { return target == ErrRevi
 
 func (e *RevisionConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
 
-// LeaseConflictError carries the session and stable reason for one failed
-// store-level execution lease operation.
-type LeaseConflictError struct {
+// FenceConflictError carries the session and stable reason for one failed
+// store-level execution fence operation.
+type FenceConflictError struct {
 	SessionID string
 	Detail    string
 }
 
-func (e *LeaseConflictError) Error() string {
+func (e *FenceConflictError) Error() string {
 	if e == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("%s: session %q: %s", ErrLeaseConflict, strings.TrimSpace(e.SessionID), strings.TrimSpace(e.Detail))
+	return fmt.Sprintf("%s: session %q: %s", ErrFenceConflict, strings.TrimSpace(e.SessionID), strings.TrimSpace(e.Detail))
 }
 
-func (e *LeaseConflictError) Is(target error) bool { return target == ErrLeaseConflict }
+func (e *FenceConflictError) Is(target error) bool { return target == ErrFenceConflict }
 
-func (e *LeaseConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
+func (e *FenceConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
 
 // CommittedError reports that a durable store committed a mutation even though
 // post-commit apply or reporting returned an error. Callers must treat the
@@ -333,45 +333,42 @@ type Session struct {
 	UpdatedAt    time.Time            `json:"updated_at,omitempty"`
 }
 
-// SessionLease is a neutral cloud-store coordination record for one canonical
-// Turn or exclusive controller-ownership transition. It is not a lock against
-// all Session collaboration: explicitly classified Control mutations may
-// coexist, while Runtime and exclusive Control mutations carry its fence.
-// Worker-placement and scheduling policy remain in Control.
-type SessionLease struct {
+// SessionFenceIsHeld reports whether a fence currently protects Session writes.
+// Liveness comes from the process-lifetime Host authority that owns the Store,
+// so a durable fence remains active until exact release or a later Host epoch
+// replaces it. It is intentionally independent of wall-clock scheduling.
+func SessionFenceIsHeld(fence SessionFence) bool {
+	return strings.TrimSpace(fence.FenceID) != ""
+}
+
+// SessionFence is the durable execution fence for one canonical Turn or
+// exclusive controller-ownership transition. It is not a lock against all
+// Session collaboration: explicitly classified Control mutations may coexist,
+// while Runtime and exclusive Control mutations carry its fence. Control owns
+// Host authorization, worker placement, and scheduling policy.
+type SessionFence struct {
 	SessionRef   SessionRef `json:"session_ref"`
-	LeaseID      string     `json:"lease_id,omitempty"`
+	FenceID      string     `json:"fence_id,omitempty"`
 	OwnerID      string     `json:"owner_id,omitempty"`
-	Revision     uint64     `json:"revision,omitempty"`
 	FencingToken uint64     `json:"fencing_token,omitempty"`
 	AcquiredAt   time.Time  `json:"acquired_at,omitempty"`
-	HeartbeatAt  time.Time  `json:"heartbeat_at,omitempty"`
-	ExpiresAt    time.Time  `json:"expires_at,omitempty"`
+	claimToken   string
+	claimDigest  string
 }
 
-// AcquireSessionLeaseRequest requests a store-level canonical execution or
-// controller-transition lease.
-type AcquireSessionLeaseRequest struct {
-	SessionRef SessionRef    `json:"session_ref"`
-	OwnerID    string        `json:"owner_id,omitempty"`
-	TTL        time.Duration `json:"ttl,omitempty"`
+// AcquireSessionFenceRequest requests a store-level canonical execution or
+// controller-transition fence.
+type AcquireSessionFenceRequest struct {
+	SessionRef SessionRef `json:"session_ref"`
+	OwnerID    string     `json:"owner_id,omitempty"`
 }
 
-// HeartbeatSessionLeaseRequest renews one existing lease with lease CAS.
-type HeartbeatSessionLeaseRequest struct {
-	SessionRef            SessionRef    `json:"session_ref"`
-	LeaseID               string        `json:"lease_id,omitempty"`
-	OwnerID               string        `json:"owner_id,omitempty"`
-	ExpectedLeaseRevision uint64        `json:"expected_lease_revision,omitempty"`
-	TTL                   time.Duration `json:"ttl,omitempty"`
-}
-
-// ReleaseSessionLeaseRequest releases one existing lease with lease CAS.
-type ReleaseSessionLeaseRequest struct {
-	SessionRef            SessionRef `json:"session_ref"`
-	LeaseID               string     `json:"lease_id,omitempty"`
-	OwnerID               string     `json:"owner_id,omitempty"`
-	ExpectedLeaseRevision uint64     `json:"expected_lease_revision,omitempty"`
+// ReleaseSessionFenceRequest releases one existing fence with fence CAS.
+type ReleaseSessionFenceRequest struct {
+	SessionRef SessionRef `json:"session_ref"`
+	FenceID    string     `json:"fence_id,omitempty"`
+	OwnerID    string     `json:"owner_id,omitempty"`
+	claimToken string
 }
 
 // LoadedSession is one loaded session plus canonical events and state.
@@ -815,17 +812,30 @@ type EventBatchStateService interface {
 	AppendEventsAndUpdateState(context.Context, AppendEventsAndUpdateStateRequest) ([]*Event, error)
 }
 
-// SessionLeaseService coordinates one canonical Turn or controller transition
-// across Runtime instances. Control owns placement and heartbeat policy;
-// stores own lease CAS and mutation-fence validation.
-type SessionLeaseService interface {
-	AcquireSessionLease(context.Context, AcquireSessionLeaseRequest) (SessionLease, error)
-	HeartbeatSessionLease(context.Context, HeartbeatSessionLeaseRequest) (SessionLease, error)
-	ReleaseSessionLease(context.Context, ReleaseSessionLeaseRequest) error
+// SessionFenceService coordinates one canonical Turn or controller transition
+// producer per Session. Ordinary acquisition conflicts with any active fence;
+// prior-Host replacement is a separate Store capability authorized against
+// the process-lifetime product Host guard. An acquisition that returns a
+// CommittedError must also return the exact acquired fence and its opaque
+// bearer claim. SessionFenceReader intentionally cannot reconstruct that claim;
+// callers fail closed when a backend violates the exact-result contract.
+type SessionFenceService interface {
+	SessionFenceReader
+	AcquireSessionFence(context.Context, AcquireSessionFenceRequest) (SessionFence, error)
+	ReleaseSessionFence(context.Context, ReleaseSessionFenceRequest) error
 }
 
-// SessionLeaseReader reloads the current durable lease after an unknown
-// reporting outcome. It does not acquire or renew ownership.
-type SessionLeaseReader interface {
-	SessionLease(context.Context, SessionRef) (SessionLease, error)
+// PriorHostFenceService replaces a fence left by a previous product Host.
+// Implementations must authorize each call against the process-lifetime Host
+// ownership guard at the persistence boundary; possession of a
+// SessionFenceService alone is not takeover authority. A committed replacement
+// follows the same exact-result contract as SessionFenceService acquisition.
+type PriorHostFenceService interface {
+	ReplacePriorHostSessionFence(context.Context, AcquireSessionFenceRequest) (SessionFence, error)
+}
+
+// SessionFenceReader reloads only observable fence identity. It never returns
+// the bearer claim required to mutate or release that fence.
+type SessionFenceReader interface {
+	SessionFence(context.Context, SessionRef) (SessionFence, error)
 }

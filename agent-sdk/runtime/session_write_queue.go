@@ -10,7 +10,7 @@ import (
 
 // sessionWriteQueue admits multi-stage Session mutations in arrival order.
 // It is a logical transaction queue, not a persistence lock: store revision
-// checks and Runtime lease fences remain authoritative across Runtime instances.
+// checks and Runtime execution fences remain authoritative across Runtime instances.
 type sessionWriteQueue struct {
 	mu    sync.Mutex
 	tails map[string]*sessionWriteTicket

@@ -6,7 +6,6 @@ import (
 	"iter"
 	"sync"
 	"testing"
-	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -15,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
-func TestParticipantPromptUsesLeaseFenceWithoutOrchestrationWatchdog(t *testing.T) {
+func TestParticipantPromptUsesSessionFenceWithoutOrchestrationWatchdog(t *testing.T) {
 	t.Parallel()
 
 	service := inmemory.NewStore(inmemory.Config{})
@@ -25,7 +24,7 @@ func TestParticipantPromptUsesLeaseFenceWithoutOrchestrationWatchdog(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	mainRunner := newLeaseTestRunner("main-run")
+	mainRunner := newFenceTestRunner("main-run")
 	inner := &participantEnvelopeRuntime{sessions: service, mainRunner: mainRunner, streams: &participantStreamService{}}
 	ownerA := newParticipantEnvelopeRuntime(t, inner, service, "host-a")
 	ownerB := newParticipantEnvelopeRuntime(t, inner, service, "host-b")
@@ -55,8 +54,8 @@ func TestParticipantPromptUsesLeaseFenceWithoutOrchestrationWatchdog(t *testing.
 	}
 	if _, err := ownerB.PromptParticipant(context.Background(), agent.PromptParticipantRequest{
 		SessionRef: active.SessionRef, ParticipantID: "reviewer", Input: "conflicting prompt",
-	}); !errors.Is(err, session.ErrLeaseConflict) {
-		t.Fatalf("cross-owner participant prompt error = %v, want ErrLeaseConflict", err)
+	}); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("cross-owner participant prompt error = %v, want ErrFenceConflict", err)
 	}
 	mainRunner.finish()
 	if err := drainControlplaneRunner(mainRun.Handle); err != nil {
@@ -91,31 +90,33 @@ func TestParticipantPromptUsesLeaseFenceWithoutOrchestrationWatchdog(t *testing.
 	}
 }
 
-func newParticipantEnvelopeRuntime(t *testing.T, inner agent.Runtime, sessions session.Service, owner string) *LeasedRuntime {
+func newParticipantEnvelopeRuntime(t *testing.T, inner agent.Runtime, sessions session.Service, owner string) *FencedRuntime {
 	t.Helper()
-	leasing, ok := sessions.(session.SessionLeaseService)
+	fences, ok := sessions.(session.SessionFenceService)
 	if !ok {
-		t.Fatal("session service does not support leases")
+		t.Fatal("session service does not support fences")
 	}
-	leased, err := NewLeasedRuntime(LeasedRuntimeConfig{
-		Runtime: inner, Leases: leasing, OwnerID: owner, TTL: time.Second, HeartbeatInterval: 500 * time.Millisecond,
+	fenced, err := NewFencedRuntime(FencedRuntimeConfig{
+		Runtime: inner, Fences: fences, OwnerID: owner,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return leased
+	return fenced
 }
 
 type participantEnvelopeRuntime struct {
 	sessions          session.Service
-	mainRunner        *leaseTestRunner
+	mainRunner        *fenceTestRunner
 	mu                sync.Mutex
 	promptCalls       int
 	promptGuard       session.MutationGuard
-	participantRunner *leaseTestRunner
+	participantRunner *fenceTestRunner
 	streams           stream.Service
 	approvals         int
 }
+
+func (*participantEnvelopeRuntime) RunnerCompletionWaiterGuaranteed() {}
 
 type participantStreamService struct{}
 
@@ -161,7 +162,7 @@ func (r *participantEnvelopeRuntime) PromptParticipant(ctx context.Context, req 
 	}); err != nil {
 		return agent.RunResult{}, err
 	}
-	runner := newLeaseTestRunner("participant-run")
+	runner := newFenceTestRunner("participant-run")
 	runner.finish()
 	r.mu.Lock()
 	r.promptCalls++

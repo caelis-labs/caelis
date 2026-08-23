@@ -42,7 +42,7 @@ func (s *runtimeComposition) compactSession(ctx context.Context, ref session.Ses
 }
 
 // withPlaced runs a synchronous Control operation inside the production
-// placement envelope (leased heartbeat, cancel-on-loss).
+// placement envelope (durable execution fence, cancel-on-loss).
 func (s *runtimeComposition) withPlaced(ctx context.Context, ref session.SessionRef, fn func(context.Context, *sdkruntime.Runtime) error) error {
 	if s == nil {
 		return fmt.Errorf("gatewayapp: stack is unavailable")

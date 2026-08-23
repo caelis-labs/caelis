@@ -119,7 +119,7 @@ func TestSettlePendingApprovalBuildsLargeLogIndexOnlyOnce(t *testing.T) {
 	}
 }
 
-func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndLeaseRelease(t *testing.T) {
+func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndFenceRelease(t *testing.T) {
 	root := t.TempDir()
 	service := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-settlement-cas" }})
 	ctx := context.Background()
@@ -127,16 +127,13 @@ func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndLeaseRel
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := service.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
-		SessionRef: active.SessionRef, OwnerID: "runtime-1", TTL: time.Minute,
+	fence, err := service.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "runtime-1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeGuard := session.MutationGuard{
-		Authority: session.MutationAuthorityRuntime, LeaseID: lease.LeaseID,
-		OwnerID: lease.OwnerID, FencingToken: lease.FencingToken,
-	}
+	runtimeGuard := session.RuntimeMutationGuard(session.ContextWithRuntimeFence(ctx, fence))
 	if _, err := service.AppendEvent(ctx, session.AppendEventRequest{
 		SessionRef: active.SessionRef, MutationGuard: runtimeGuard,
 		Event: pendingApprovalTestEvent("approval-settlement-cas"),
@@ -163,10 +160,7 @@ func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndLeaseRel
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.ReleaseSessionLease(ctx, session.ReleaseSessionLeaseRequest{
-		SessionRef: active.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID,
-		ExpectedLeaseRevision: lease.Revision,
-	}); err != nil {
+	if err := service.ReleaseSessionFence(ctx, session.SessionFenceReleaseRequest(fence)); err != nil {
 		t.Fatal(err)
 	}
 	expectedRevision := stale.Revision
@@ -311,8 +305,8 @@ func TestPendingApprovalsReleasesLocksBetweenLegacySessions(t *testing.T) {
 		}
 		sessions = append(sessions, active)
 	}
-	lease, err := setup.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
-		SessionRef: sessions[1].SessionRef, OwnerID: "runtime-1", TTL: time.Minute,
+	fence, err := setup.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
+		SessionRef: sessions[1].SessionRef, OwnerID: "runtime-1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -365,12 +359,9 @@ func TestPendingApprovalsReleasesLocksBetweenLegacySessions(t *testing.T) {
 	if err != nil || len(listed.Sessions) != len(sessions) {
 		t.Fatalf("ListSessions during paused recovery = %d, %v", len(listed.Sessions), err)
 	}
-	heartbeat, err := interactions.HeartbeatSessionLease(interactionCtx, session.HeartbeatSessionLeaseRequest{
-		SessionRef: sessions[1].SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID,
-		ExpectedLeaseRevision: lease.Revision, TTL: time.Minute,
-	})
-	if err != nil || heartbeat.Revision != lease.Revision+1 {
-		t.Fatalf("HeartbeatSessionLease during paused recovery = %#v, %v", heartbeat, err)
+	durable, err := interactions.SessionFence(interactionCtx, sessions[1].SessionRef)
+	if err != nil || durable.FenceID != fence.FenceID || durable.FencingToken != fence.FencingToken {
+		t.Fatalf("SessionFence during paused recovery = %#v, %v", durable, err)
 	}
 
 	close(releaseRecovery)

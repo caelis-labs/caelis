@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -21,6 +22,10 @@ type CoordinatorConfig struct {
 	Context               controller.ContextRouter
 	Clock                 func() time.Time
 	IDGenerator           func() string
+	FenceOwnerID          string
+	PriorHostFences       PriorHostFenceReplacer
+	LifecycleContext      context.Context
+	Diagnostics           *slog.Logger
 	LifecycleInterceptors []agent.LifecycleInterceptor
 	TraceSink             agent.TraceSink
 }
@@ -29,16 +34,17 @@ type CoordinatorConfig struct {
 // binding/event commit. Participant execution is delegated to the SDK's
 // neutral participant mechanism.
 type Coordinator struct {
-	sessions               session.Service
-	controllers            controller.Backend
-	context                controller.ContextRouter
-	clock                  func() time.Time
-	idGenerator            func() string
-	lifecycle              agent.LifecycleOptions
-	leases                 session.SessionLeaseService
-	leaseOwnerID           string
-	leaseTTL               time.Duration
-	leaseHeartbeatInterval time.Duration
+	sessions        session.Service
+	controllers     controller.Backend
+	context         controller.ContextRouter
+	clock           func() time.Time
+	idGenerator     func() string
+	lifecycle       agent.LifecycleOptions
+	fences          session.SessionFenceService
+	fenceOwnerID    string
+	priorHostFences PriorHostFenceReplacer
+	lifecycleCtx    context.Context
+	diagnostics     *fencePhaseDiagnostics
 }
 
 // NewCoordinator constructs one Control-owned session coordinator.
@@ -52,18 +58,29 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 	if cfg.Clock == nil {
 		cfg.Clock = time.Now
 	}
-	leases, _ := cfg.Sessions.(session.SessionLeaseService)
-	leaseTTL := defaultSessionLeaseTTL
+	fences, ok := cfg.Sessions.(session.SessionFenceService)
+	if !ok {
+		return nil, fmt.Errorf("controlplane: sessions service must provide execution fences")
+	}
+	fenceOwnerID := strings.TrimSpace(cfg.FenceOwnerID)
+	if fenceOwnerID == "" {
+		fenceOwnerID = "control-host-" + strings.ToLower(rand.Text())
+	}
+	lifecycleCtx := cfg.LifecycleContext
+	if lifecycleCtx == nil {
+		lifecycleCtx = context.Background()
+	}
 	return &Coordinator{
-		sessions:               cfg.Sessions,
-		controllers:            cfg.Controllers,
-		context:                cfg.Context,
-		clock:                  cfg.Clock,
-		idGenerator:            cfg.IDGenerator,
-		leases:                 leases,
-		leaseOwnerID:           "control-handoff-" + strings.ToLower(rand.Text()),
-		leaseTTL:               leaseTTL,
-		leaseHeartbeatInterval: leaseTTL / 3,
+		sessions:        cfg.Sessions,
+		controllers:     cfg.Controllers,
+		context:         cfg.Context,
+		clock:           cfg.Clock,
+		idGenerator:     cfg.IDGenerator,
+		fences:          fences,
+		fenceOwnerID:    fenceOwnerID,
+		priorHostFences: cfg.PriorHostFences,
+		lifecycleCtx:    lifecycleCtx,
+		diagnostics:     newFencePhaseDiagnostics(cfg.Diagnostics),
 		lifecycle: agent.LifecycleOptions{
 			Interceptors: append([]agent.LifecycleInterceptor(nil), cfg.LifecycleInterceptors...),
 			TraceSink:    cfg.TraceSink,
@@ -119,7 +136,7 @@ func (c *Coordinator) ReattachController(ctx context.Context, req controller.Rec
 	}
 	updated, err := c.sessions.BindController(ctx, session.BindControllerRequest{
 		SessionRef: ref,
-		MutationGuard: session.ControlMutationGuardWithRuntimeLease(
+		MutationGuard: session.ControlMutationGuardWithRuntimeFence(
 			ctx,
 			session.ControlMutationPurposeCoordinator,
 		),
@@ -147,15 +164,13 @@ func (c *Coordinator) HandoffController(ctx context.Context, req agent.HandoffCo
 			result, handoffErr = c.handoffController(executionCtx, req)
 			return handoffErr
 		}
-		if c.leases == nil {
-			return execute(callCtx)
-		}
-		return executeWithSessionLease(
+		return executeWithSessionFence(
 			callCtx,
-			c.leases,
-			c.leaseOwnerID,
-			c.leaseTTL,
-			c.leaseHeartbeatInterval,
+			c.fences,
+			c.fenceOwnerID,
+			c.priorHostFences,
+			c.lifecycleCtx,
+			c.diagnostics,
 			event.SessionRef,
 			execute,
 		)
@@ -173,7 +188,7 @@ func (c *Coordinator) handoffController(ctx context.Context, req agent.HandoffCo
 		return session.Session{}, err
 	}
 	// Recheck the caller's exact guard after acquiring the Session execution
-	// lease and before controller context, activation, or deactivation, so two
+	// fence and before controller context, activation, or deactivation, so two
 	// handoffs submitted from the same snapshot cannot both commit serially.
 	if err := session.CheckExpectedRevision(activeSession, req.ExpectedRevision); err != nil {
 		return activeSession, err
@@ -245,7 +260,7 @@ func (c *Coordinator) handoffController(ctx context.Context, req agent.HandoffCo
 	updated, _, err := handoffs.BindControllerWithEvent(ctx, session.BindControllerWithEventRequest{
 		SessionRef:       ref,
 		ExpectedRevision: &expected,
-		MutationGuard:    session.ControlMutationGuardWithRuntimeLease(ctx, session.ControlMutationPurposeHandoff),
+		MutationGuard:    session.ControlMutationGuardWithRuntimeFence(ctx, session.ControlMutationPurposeHandoff),
 		Binding:          to,
 		Event:            handoffEvent(from, to, strings.TrimSpace(req.Reason), c.clock()),
 	})
@@ -312,7 +327,7 @@ func (c *Coordinator) ensureSessionController(ctx context.Context, activeSession
 	}
 	return c.sessions.BindController(ctx, session.BindControllerRequest{
 		SessionRef:    activeSession.SessionRef,
-		MutationGuard: session.ControlMutationGuardWithRuntimeLease(ctx, session.ControlMutationPurposeCoordinator),
+		MutationGuard: session.ControlMutationGuardWithRuntimeFence(ctx, session.ControlMutationPurposeCoordinator),
 		Binding:       c.kernelControllerBinding("control"),
 	})
 }

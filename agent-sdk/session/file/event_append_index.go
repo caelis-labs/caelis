@@ -110,7 +110,7 @@ func (s *Store) prewarmEventAppendIndexContext(
 	}
 	prewarm := newEventAppendPrewarm()
 	// Path discovery runs before the Store mutex and root write lock so a cold
-	// index scan cannot starve lease heartbeats. The concurrent cache avoids a
+	// index scan cannot monopolize unrelated Session interactions. The cache avoids a
 	// namespace walk on every append; the locked transaction verifies the path.
 	pathKey := pathCacheKey(ref.SessionID, ref.WorkspaceKey)
 	cachedPath, _ := s.eventAppendPaths.Load(pathKey)

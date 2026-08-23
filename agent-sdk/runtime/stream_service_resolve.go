@@ -63,8 +63,8 @@ func (tm *taskRuntime) resolveStreamTask(ctx context.Context, ref session.Sessio
 
 	backfilled, err := tm.backfillCanonicalTaskEntry(ctx, ref, entry)
 	if err != nil {
-		var sessionLease *session.LeaseConflictError
-		if errors.As(err, &sessionLease) {
+		var sessionFence *session.FenceConflictError
+		if errors.As(err, &sessionFence) {
 			// Stream resolution is observation-only. If the producing Runtime
 			// owns the Session fence, abandon this observer's repair write and
 			// use the current durable Task without retrying unfenced.
@@ -77,7 +77,7 @@ func (tm *taskRuntime) resolveStreamTask(ctx context.Context, ref session.Sessio
 			} else {
 				err = errorcode.Wrap(
 					errorcode.Unavailable,
-					fmt.Sprintf("agent-sdk/runtime: reload lease-contended task stream metadata for %q", taskID),
+					fmt.Sprintf("agent-sdk/runtime: reload fence-contended task stream metadata for %q", taskID),
 					errors.Join(err, loadErr),
 				)
 			}

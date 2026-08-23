@@ -192,10 +192,10 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 		return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: system-managed agent staging session service is unavailable")
 	}
 	// A system-managed attempt is a distinct Runtime placement scope. The
-	// caller may be executing inside the parent Session's leased Turn; carrying
+	// caller may be executing inside the parent Session's fenced Turn; carrying
 	// that fence into the isolated staging Session makes every Runtime mutation
-	// fail closed against the wrong lease.
-	stagingCtx := session.ContextWithoutRuntimeLease(ctx)
+	// fail closed against the wrong fence.
+	stagingCtx := session.ContextWithoutRuntimeFence(ctx)
 	activeSession, err := startSystemManagedAgentStagingSession(stagingCtx, staging, plan.Session)
 	if err != nil {
 		return systemManagedAgentRunResult{}, err
@@ -298,7 +298,7 @@ func (r *systemManagedAgentRuntime) CompactContext(
 	if staging == nil {
 		return systemManagedAgentCompactResult{}, fmt.Errorf("gatewayapp: system-managed agent staging session service is unavailable")
 	}
-	stagingCtx := session.ContextWithoutRuntimeLease(ctx)
+	stagingCtx := session.ContextWithoutRuntimeFence(ctx)
 	activeSession, err := startSystemManagedAgentStagingSession(stagingCtx, staging, plan.Session)
 	if err != nil {
 		return systemManagedAgentCompactResult{}, err

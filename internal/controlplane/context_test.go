@@ -281,23 +281,34 @@ func TestCoordinatorOwnsActivationAndAtomicHandoffCommit(t *testing.T) {
 	}
 }
 
-func TestCoordinatorHandoffDoesNotBypassActiveTurnLease(t *testing.T) {
+func TestCoordinatorRequiresSessionFenceService(t *testing.T) {
+	t.Parallel()
+
+	sessions, _ := newControlTestSession(t, "handoff-requires-fence")
+	unfenced := struct{ session.Service }{Service: sessions}
+	router, err := NewContextRouter(unfenced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewCoordinator(CoordinatorConfig{Sessions: unfenced, Context: router}); err == nil || !strings.Contains(err.Error(), "must provide execution fences") {
+		t.Fatalf("NewCoordinator() error = %v, want required execution fence service", err)
+	}
+}
+
+func TestCoordinatorHandoffDoesNotBypassActiveTurnFence(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	sessions, activeSession := newControlTestSession(t, "handoff-active-turn")
-	lease, err := sessions.(session.SessionLeaseService).AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
+	fence, err := sessions.(session.SessionFenceService).AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
 		SessionRef: activeSession.SessionRef,
 		OwnerID:    "active-turn",
-		TTL:        time.Minute,
 	})
 	if err != nil {
-		t.Fatalf("AcquireSessionLease() error = %v", err)
+		t.Fatalf("AcquireSessionFence() error = %v", err)
 	}
 	t.Cleanup(func() {
-		_ = sessions.(session.SessionLeaseService).ReleaseSessionLease(context.Background(), session.ReleaseSessionLeaseRequest{
-			SessionRef: activeSession.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID, ExpectedLeaseRevision: lease.Revision,
-		})
+		_ = sessions.(session.SessionFenceService).ReleaseSessionFence(context.Background(), session.SessionFenceReleaseRequest(fence))
 	})
 	router, err := NewContextRouter(sessions)
 	if err != nil {
@@ -313,11 +324,11 @@ func TestCoordinatorHandoffDoesNotBypassActiveTurnLease(t *testing.T) {
 	_, err = coordinator.HandoffController(ctx, agent.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef, Kind: session.ControllerKindACP, Agent: "claude",
 	})
-	if !errors.Is(err, session.ErrLeaseConflict) {
-		t.Fatalf("HandoffController() error = %v, want active Turn ErrLeaseConflict", err)
+	if !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("HandoffController() error = %v, want active Turn ErrFenceConflict", err)
 	}
 	if backend.activate.Agent != "" || backend.deactivations != 0 {
-		t.Fatalf("backend activity = %#v/deactivations=%d, want no endpoint effect before lease ownership", backend.activate, backend.deactivations)
+		t.Fatalf("backend activity = %#v/deactivations=%d, want no endpoint effect before fence ownership", backend.activate, backend.deactivations)
 	}
 	loaded, err := sessions.Session(ctx, activeSession.SessionRef)
 	if err != nil {
@@ -367,7 +378,7 @@ func TestCoordinatorDeactivatesNewEndpointWhenAtomicCommitFails(t *testing.T) {
 	base, activeSession := newControlTestSession(t, "handoff-failure")
 	commitErr := errors.New("commit failed")
 	sessions := failingHandoffService{
-		Service: base, SessionLeaseService: base.(session.SessionLeaseService), err: commitErr,
+		Service: base, SessionFenceService: base.(session.SessionFenceService), err: commitErr,
 	}
 	router, err := NewContextRouter(sessions)
 	if err != nil {
@@ -408,7 +419,7 @@ func TestCoordinatorKeepsActivationWhenCommitReportsAlreadyCommitted(t *testing.
 	}
 	sessions := committedHandoffService{
 		Service:             base,
-		SessionLeaseService: base.(session.SessionLeaseService),
+		SessionFenceService: base.(session.SessionFenceService),
 		binding:             committedBinding,
 		err:                 &session.CommittedError{Err: errors.New("index write failed after commit")},
 	}
@@ -463,13 +474,13 @@ func TestCoordinatorOwnsControllerProcessReattachAndBindingRefresh(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := sessions.(session.SessionLeaseService).AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
-		SessionRef: activeSession.SessionRef, OwnerID: "runtime-owner", TTL: time.Minute,
+	fence, err := sessions.(session.SessionFenceService).AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
+		SessionRef: activeSession.SessionRef, OwnerID: "runtime-owner",
 	})
 	if err != nil {
-		t.Fatalf("AcquireSessionLease() error = %v", err)
+		t.Fatalf("AcquireSessionFence() error = %v", err)
 	}
-	ctx = session.ContextWithRuntimeLease(ctx, lease)
+	ctx = session.ContextWithRuntimeFence(ctx, fence)
 	updated, err := coordinator.ReattachController(ctx, controller.RecoveryRequest{
 		SessionRef: activeSession.SessionRef, Session: activeSession, ExcludeTurnID: "turn-current",
 	})
@@ -486,7 +497,7 @@ func TestCoordinatorOwnsControllerProcessReattachAndBindingRefresh(t *testing.T)
 
 type failingHandoffService struct {
 	session.Service
-	session.SessionLeaseService
+	session.SessionFenceService
 	err error
 }
 
@@ -496,7 +507,7 @@ func (s failingHandoffService) BindControllerWithEvent(context.Context, session.
 
 type committedHandoffService struct {
 	session.Service
-	session.SessionLeaseService
+	session.SessionFenceService
 	binding session.ControllerBinding
 	err     error
 }

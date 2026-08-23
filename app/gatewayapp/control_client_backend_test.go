@@ -11,6 +11,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
@@ -21,6 +22,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
 
@@ -30,8 +32,8 @@ import (
 	acptaskstream "github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
-func TestClassifyControlBackendErrorTreatsLeaseConflictAsConflict(t *testing.T) {
-	err := classifyControlBackendError(&session.LeaseConflictError{SessionID: "session-1", Detail: "active execution lease"})
+func TestClassifyControlBackendErrorTreatsFenceConflictAsConflict(t *testing.T) {
+	err := classifyControlBackendError(&session.FenceConflictError{SessionID: "session-1", Detail: "active execution fence"})
 	var outcomeErr *appserver.OutcomeError
 	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("classifyControlBackendError() = %v, want conflicted outcome", err)
@@ -674,12 +676,15 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := &controlClientLifecycleRuntime{
-		started: make(chan struct{}),
-		stopped: make(chan struct{}),
+	inner := newControlClientFencedRuntime(active)
+	fenced, err := controlplane.NewFencedRuntime(controlplane.FencedRuntimeConfig{
+		Runtime: inner, Fences: sessions, OwnerID: "host-epoch-a",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	kernel, err := kernelimpl.New(kernelimpl.Config{
-		Sessions: sessions, Runtime: runtime, Resolver: controlClientIngressResolver{},
+		Sessions: sessions, Runtime: fenced, Resolver: controlClientIngressResolver{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -751,7 +756,7 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	}
 	httpServer := testenv.NewHTTPServer(t, server.Handler())
 	defer httpServer.Close()
-	remote, err := httpclient.New(httpclient.Config{
+	remoteA, err := httpclient.New(httpclient.Config{
 		BaseURL: httpServer.URL, BearerToken: "0123456789abcdef0123456789abcdef",
 		HTTPClient:    httpServer.Client(),
 		Compatibility: appserver.CurrentCompatibility(),
@@ -759,9 +764,28 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	remoteB, err := httpclient.New(httpclient.Config{
+		BaseURL: httpServer.URL, BearerToken: "0123456789abcdef0123456789abcdef",
+		HTTPClient:    httpServer.Client(),
+		Compatibility: appserver.CurrentCompatibility(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observerState, err := remoteB.InspectSession(context.Background(), appserver.StateRequest{SessionID: active.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := remoteB.Reconnect(context.Background(), appserver.ReconnectRequest{
+		SessionID: active.SessionID, Cursor: observerState.BoundaryCursor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer observed.Subscription.Close()
 
 	admissionCtx, cancelAdmission := context.WithCancel(context.Background())
-	prompt, err := remote.Prompt(admissionCtx, appserver.PromptRequest{
+	prompt, err := remoteA.Prompt(admissionCtx, appserver.PromptRequest{
 		WriteBase: appserver.WriteBase{
 			OperationID: "operation-remote-host-prompt",
 			SessionID:   active.SessionID,
@@ -772,18 +796,52 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case <-runtime.started:
+	case <-inner.runner.started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("runtime did not start through the Control Host")
 	}
+	beforeSteer, err := sessions.SessionFence(context.Background(), active.SessionRef)
+	if err != nil || beforeSteer.FenceID == "" || beforeSteer.OwnerID != "host-epoch-a" {
+		t.Fatalf("fence after prompt admission = %#v, %v", beforeSteer, err)
+	}
 	cancelAdmission()
 	select {
-	case <-runtime.stopped:
+	case <-inner.runner.done:
 		t.Fatal("completed HTTP request owned the accepted Turn lifetime")
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	if _, err := remote.Cancel(context.Background(), appserver.CancelRequest{
+	observedTarget := waitForControlClientTurnTarget(t, observed.Subscription)
+	if observedTarget != prompt.Target {
+		t.Fatalf("client B observed target = %#v, want prompt target %#v", observedTarget, prompt.Target)
+	}
+	if _, err := remoteB.Steer(context.Background(), appserver.SteerRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID: "operation-remote-host-steer",
+			SessionID:   active.SessionID,
+		},
+		Target: observedTarget,
+		Input:  "midturn input from the second client",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case submission := <-inner.runner.submissions:
+		if submission.Text != "midturn input from the second client" {
+			t.Fatalf("runner submission = %#v", submission)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second client Steer did not reach the active runner")
+	}
+	durable, err := sessions.SessionFence(context.Background(), active.SessionRef)
+	if err != nil || durable.FenceID == "" || durable.OwnerID != "host-epoch-a" {
+		t.Fatalf("fence after second-client observation/steer = %#v, %v", durable, err)
+	}
+	if durable.FenceID != beforeSteer.FenceID || durable.OwnerID != beforeSteer.OwnerID || durable.FencingToken != beforeSteer.FencingToken {
+		t.Fatalf("second-client observation/steer changed durable fence: before=%#v after=%#v", beforeSteer, durable)
+	}
+
+	if _, err := remoteB.Cancel(context.Background(), appserver.CancelRequest{
 		WriteBase: appserver.WriteBase{
 			OperationID: "operation-remote-host-cancel",
 			SessionID:   active.SessionID,
@@ -794,10 +852,11 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case <-runtime.stopped:
+	case <-inner.runner.done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("remote Cancel did not stop the Host-owned Turn")
 	}
+	waitForControlClientFenceRelease(t, sessions, active.SessionRef)
 	if err := stack.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -883,6 +942,138 @@ type controlClientLifecycleRuntime struct {
 	stopped            chan struct{}
 	participantStarted chan struct{}
 	participantStopped chan struct{}
+}
+
+type controlClientFencedRuntime struct {
+	session session.Session
+	runner  *controlClientFencedRunner
+}
+
+func newControlClientFencedRuntime(active session.Session) *controlClientFencedRuntime {
+	return &controlClientFencedRuntime{
+		session: active,
+		runner: &controlClientFencedRunner{
+			ref:         active.SessionRef,
+			started:     make(chan struct{}),
+			done:        make(chan struct{}),
+			submissions: make(chan agent.Submission, 1),
+		},
+	}
+}
+
+func (runtime *controlClientFencedRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
+	close(runtime.runner.started)
+	return agent.RunResult{Session: runtime.session, Handle: runtime.runner}, nil
+}
+
+func (*controlClientFencedRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+	return agent.RunState{Status: agent.RunLifecycleStatusRunning}, nil
+}
+
+func (*controlClientFencedRuntime) RunnerCompletionWaiterGuaranteed() {}
+
+type controlClientFencedRunner struct {
+	ref         session.SessionRef
+	started     chan struct{}
+	done        chan struct{}
+	submissions chan agent.Submission
+	finishOnce  sync.Once
+}
+
+func (*controlClientFencedRunner) RunID() string { return "run-fenced-http" }
+
+func (runner *controlClientFencedRunner) Events() iter.Seq2[*session.Event, error] {
+	return func(yield func(*session.Event, error) bool) {
+		message := model.NewTextMessage(model.RoleAssistant, "working")
+		if !yield(&session.Event{
+			ID: "assistant-fenced-http", SessionID: runner.ref.SessionID, Type: session.EventTypeAssistant,
+			Visibility: session.VisibilityCanonical, Message: &message, Text: "working",
+		}, nil) {
+			return
+		}
+		<-runner.done
+	}
+}
+
+func (runner *controlClientFencedRunner) Submit(submission agent.Submission) error {
+	select {
+	case <-runner.done:
+		return errors.New("fenced test runner is closed")
+	case runner.submissions <- submission:
+		return nil
+	}
+}
+
+func (runner *controlClientFencedRunner) Cancel() agent.CancelResult {
+	runner.finishOnce.Do(func() { close(runner.done) })
+	return agent.CancelResult{Status: agent.CancelStatusCancelled}
+}
+
+func (runner *controlClientFencedRunner) Close() error {
+	runner.finishOnce.Do(func() { close(runner.done) })
+	return nil
+}
+
+func (runner *controlClientFencedRunner) WaitCompletion(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-runner.done:
+		return nil
+	}
+}
+
+func waitForControlClientFenceRelease(t *testing.T, reader session.SessionFenceReader, ref session.SessionRef) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		fence, err := reader.SessionFence(context.Background(), ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fence.FenceID == "" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Session fence remained held after producer completion: %#v", fence)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForControlClientTurnTarget(t *testing.T, subscription appserver.FeedSubscription) appserver.TurnTarget {
+	t.Helper()
+	if subscription == nil {
+		t.Fatal("client B reconnect returned no subscription")
+	}
+	backfill := subscription.Backfill()
+	events := subscription.Events()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for backfill != nil || events != nil {
+		select {
+		case envelope, ok := <-backfill:
+			if !ok {
+				backfill = nil
+				continue
+			}
+			if envelope.HandleID != "" && envelope.RunID != "" && envelope.TurnID != "" {
+				return appserver.TurnTarget{HandleID: envelope.HandleID, RunID: envelope.RunID, TurnID: envelope.TurnID}
+			}
+		case envelope, ok := <-events:
+			if !ok {
+				events = nil
+				continue
+			}
+			if envelope.HandleID != "" && envelope.RunID != "" && envelope.TurnID != "" {
+				return appserver.TurnTarget{HandleID: envelope.HandleID, RunID: envelope.RunID, TurnID: envelope.TurnID}
+			}
+		case <-timer.C:
+			t.Fatal("client B did not observe the active Turn target")
+		}
+	}
+	t.Fatal("client B feed closed before observing the active Turn target")
+	return appserver.TurnTarget{}
 }
 
 func (runtime *controlClientLifecycleRuntime) Run(ctx context.Context, _ agent.RunRequest) (agent.RunResult, error) {

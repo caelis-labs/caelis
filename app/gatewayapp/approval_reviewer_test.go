@@ -104,32 +104,32 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 	}
 }
 
-func TestApprovalReviewerWorksInsideParentRuntimeLease(t *testing.T) {
+func TestApprovalReviewerWorksInsideParentRuntimeFence(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	service, activeSession := newApprovalReviewerTestSession(t, ctx)
 	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please inspect the workspace.")
-	leases, ok := service.(session.SessionLeaseService)
+	fences, ok := service.(session.SessionFenceService)
 	if !ok {
-		t.Fatal("approval reviewer test service does not support leases")
+		t.Fatal("approval reviewer test service does not support fences")
 	}
-	lease, err := leases.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
-		SessionRef: activeSession.SessionRef, OwnerID: "parent-runtime", TTL: time.Minute,
+	fence, err := fences.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
+		SessionRef: activeSession.SessionRef, OwnerID: "parent-runtime",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaseCtx := session.ContextWithRuntimeLease(ctx, lease)
+	fenceCtx := session.ContextWithRuntimeFence(ctx, fence)
 	testModel := &approvalReviewerFakeModel{
 		responses: []string{`{"outcome":"allow","risk_level":"low","user_authorization":"medium","rationale":"read-only inspection"}`},
 	}
 	reviewer := newModelApprovalReviewer(service)
-	result, err := reviewer.ReviewApproval(leaseCtx, approvalReviewerTestRequest(
+	result, err := reviewer.ReviewApproval(fenceCtx, approvalReviewerTestRequest(
 		activeSession, testModel, "inspect workspace", map[string]any{"cmd": "rg TODO"},
 	))
 	if err != nil {
-		t.Fatalf("ReviewApproval() inherited the parent Session lease into Guardian staging: %v", err)
+		t.Fatalf("ReviewApproval() inherited the parent Session fence into Guardian staging: %v", err)
 	}
 	if !result.Approved {
 		t.Fatalf("Approved = false, want true: %#v", result)

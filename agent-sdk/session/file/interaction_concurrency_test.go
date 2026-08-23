@@ -11,7 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func TestSessionInteractionsProgressWithConcurrentWriterReaderAndLeaseHeartbeat(t *testing.T) {
+func TestSessionInteractionsProgressWithConcurrentWriterAndReaders(t *testing.T) {
 	// This stress test proves lock progress and durable logical readback; host
 	// sync latency and crash-boundary classification are tested separately.
 	root := t.TempDir()
@@ -24,15 +24,15 @@ func TestSessionInteractionsProgressWithConcurrentWriterReaderAndLeaseHeartbeat(
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := primary.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
-		SessionRef: active.SessionRef, OwnerID: "runtime-1", TTL: time.Minute,
+	fence, err := primary.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "runtime-1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	start := make(chan struct{})
-	errs := make(chan error, 5)
+	errs := make(chan error, 4)
 	latencies := make(chan time.Duration, 64)
 	var wg sync.WaitGroup
 	measure := func(operation func() error) error {
@@ -52,26 +52,6 @@ func TestSessionInteractionsProgressWithConcurrentWriterReaderAndLeaseHeartbeat(
 		}()
 	}
 
-	run(func(opCtx context.Context) error {
-		service := newLogicalTestStore(t, Config{RootDir: root})
-		current := lease
-		for i := 0; i < 10; i++ {
-			var next session.SessionLease
-			err := measure(func() error {
-				var heartbeatErr error
-				next, heartbeatErr = service.HeartbeatSessionLease(opCtx, session.HeartbeatSessionLeaseRequest{
-					SessionRef: active.SessionRef, LeaseID: current.LeaseID, OwnerID: current.OwnerID,
-					ExpectedLeaseRevision: current.Revision, TTL: time.Minute,
-				})
-				return heartbeatErr
-			})
-			if err != nil {
-				return fmt.Errorf("heartbeat %d: %w", i, err)
-			}
-			current = next
-		}
-		return nil
-	})
 	run(func(opCtx context.Context) error {
 		service := newLogicalTestStore(t, Config{RootDir: root})
 		for i := 0; i < 20; i++ {
@@ -177,11 +157,11 @@ func TestSessionInteractionsProgressWithConcurrentWriterReaderAndLeaseHeartbeat(
 	if err != nil || len(page.Events) != 20 {
 		t.Fatalf("durable events after concurrent writes = %d, %v, want 20", len(page.Events), err)
 	}
-	durableLease, err := reopened.SessionLease(context.Background(), active.SessionRef)
+	durableFence, err := reopened.SessionFence(context.Background(), active.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if durableLease.Revision != lease.Revision+10 {
-		t.Fatalf("lease revision after heartbeats = %d, want %d", durableLease.Revision, lease.Revision+10)
+	if durableFence.FenceID != fence.FenceID || durableFence.FencingToken != fence.FencingToken {
+		t.Fatalf("durable fence changed during concurrent interactions: got %#v, want %#v", durableFence, fence)
 	}
 }

@@ -60,7 +60,7 @@ func (s *TaskStore) put(ctx context.Context, entry *taskapi.Entry, expected *uin
 	err := s.store.withRootWriteLockContext(ctx, func() error {
 		doc, err := s.store.readDocumentForRef(entry.Session)
 		if err == nil {
-			if err := validateFileMutationGuard(activeDocumentLease(doc), guard, s.store.now()); err != nil {
+			if err := validateFileMutationGuard(activeDocumentFence(doc), guard); err != nil {
 				return err
 			}
 		} else {

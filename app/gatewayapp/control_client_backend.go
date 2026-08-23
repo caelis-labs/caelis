@@ -773,7 +773,7 @@ func classifyControlBackendError(err error) error {
 			return appserver.NewOutcomeError(appserver.OutcomeRejected, coded)
 		}
 	}
-	if errors.Is(err, session.ErrRevisionConflict) || errors.Is(err, session.ErrLeaseConflict) {
+	if errors.Is(err, session.ErrRevisionConflict) || errors.Is(err, session.ErrFenceConflict) {
 		coded := errorcode.Wrap(errorcode.Conflict, "gatewayapp: session conflict", err)
 		return appserver.NewOutcomeError(appserver.OutcomeConflicted, coded)
 	}

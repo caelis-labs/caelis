@@ -25,7 +25,7 @@ type failFromPutTaskStore struct {
 	err      error
 }
 
-type leaseContendedBackfillTaskStore struct {
+type fenceContendedBackfillTaskStore struct {
 	taskapi.Store
 	mu            sync.Mutex
 	authoritative *taskapi.Entry
@@ -33,7 +33,7 @@ type leaseContendedBackfillTaskStore struct {
 	putCalls      int
 }
 
-func (s *leaseContendedBackfillTaskStore) Get(ctx context.Context, taskID string) (*taskapi.Entry, error) {
+func (s *fenceContendedBackfillTaskStore) Get(ctx context.Context, taskID string) (*taskapi.Entry, error) {
 	s.mu.Lock()
 	if s.contended {
 		entry := taskapi.CloneEntry(s.authoritative)
@@ -44,19 +44,19 @@ func (s *leaseContendedBackfillTaskStore) Get(ctx context.Context, taskID string
 	return s.Store.Get(ctx, taskID)
 }
 
-func (s *leaseContendedBackfillTaskStore) Put(context.Context, taskapi.PutRequest) (*taskapi.Entry, error) {
+func (s *fenceContendedBackfillTaskStore) Put(context.Context, taskapi.PutRequest) (*taskapi.Entry, error) {
 	s.mu.Lock()
 	s.contended = true
 	s.putCalls++
 	sessionID := s.authoritative.Session.SessionID
 	s.mu.Unlock()
-	return nil, &session.LeaseConflictError{
+	return nil, &session.FenceConflictError{
 		SessionID: sessionID,
 		Detail:    "another live owner holds the lease",
 	}
 }
 
-func (s *leaseContendedBackfillTaskStore) calls() int {
+func (s *fenceContendedBackfillTaskStore) calls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.putCalls
@@ -1138,14 +1138,14 @@ func TestLookupCommandBackfillsCanonicalResultFromSessionHistory(t *testing.T) {
 	}
 }
 
-func TestTaskStreamBackfillDefersToActiveSessionLeaseOwner(t *testing.T) {
+func TestTaskStreamBackfillDefersToActiveSessionFenceOwner(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	baseStore := newFileTaskStoreForTest(t)
 	eventTime := time.Now().UTC()
 	stale := &taskapi.Entry{
-		TaskID:    "task-lease-contended-backfill",
+		TaskID:    "task-fence-contended-backfill",
 		Handle:    "command-7",
 		Kind:      taskapi.KindCommand,
 		Session:   activeSession.SessionRef,
@@ -1157,7 +1157,7 @@ func TestTaskStreamBackfillDefersToActiveSessionLeaseOwner(t *testing.T) {
 			"result":    "stale result\n",
 			"exit_code": 0,
 		},
-		Metadata: map[string]any{"parent_call": "run-lease-contended"},
+		Metadata: map[string]any{"parent_call": "run-fence-contended"},
 	}
 	if err := baseStore.Upsert(context.Background(), stale); err != nil {
 		t.Fatalf("Upsert() error = %v", err)
@@ -1174,7 +1174,7 @@ func TestTaskStreamBackfillDefersToActiveSessionLeaseOwner(t *testing.T) {
 		"result":    "producer-owned result\n",
 		"exit_code": 0,
 	}
-	store := &leaseContendedBackfillTaskStore{
+	store := &fenceContendedBackfillTaskStore{
 		Store:         baseStore,
 		authoritative: authoritative,
 	}
@@ -1185,7 +1185,7 @@ func TestTaskStreamBackfillDefersToActiveSessionLeaseOwner(t *testing.T) {
 			Type: session.EventTypeToolResult,
 			Time: eventTime,
 			Tool: &session.EventTool{
-				ID:     "run-lease-contended",
+				ID:     "run-fence-contended",
 				Name:   "RunCommand",
 				Status: "completed",
 				Output: map[string]any{
@@ -1217,7 +1217,7 @@ func TestTaskStreamBackfillDefersToActiveSessionLeaseOwner(t *testing.T) {
 	}
 }
 
-func TestTaskControlWriteFailsClosedWhenBackfillLosesSessionLease(t *testing.T) {
+func TestTaskControlWriteFailsClosedWhenBackfillLosesSessionFence(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -1247,7 +1247,7 @@ func TestTaskControlWriteFailsClosedWhenBackfillLosesSessionLease(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	runtime.tasks.store = &leaseContendedBackfillTaskStore{
+	runtime.tasks.store = &fenceContendedBackfillTaskStore{
 		Store:         baseStore,
 		authoritative: stored,
 	}
@@ -1280,11 +1280,11 @@ func TestTaskControlWriteFailsClosedWhenBackfillLosesSessionLease(t *testing.T) 
 		Input:     "unsafe input",
 		Principal: session.ActorKindTool,
 	})
-	if !errors.Is(err, session.ErrLeaseConflict) {
-		t.Fatalf("Task Write() error = %v, want Session lease conflict", err)
+	if !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("Task Write() error = %v, want Session fence conflict", err)
 	}
 	if calls := sessionProbe.writeCalls(); calls != 0 {
-		t.Fatalf("sandbox WriteInput calls = %d, want none after Session lease loss", calls)
+		t.Fatalf("sandbox WriteInput calls = %d, want none after Session fence loss", calls)
 	}
 }
 

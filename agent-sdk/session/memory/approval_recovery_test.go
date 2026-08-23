@@ -3,28 +3,24 @@ package inmemory
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndLeaseRelease(t *testing.T) {
+func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndFenceRelease(t *testing.T) {
 	service := NewStore(Config{SessionIDGenerator: func() string { return "session-settlement-cas" }})
 	ctx := context.Background()
 	active, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := service.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
-		SessionRef: active.SessionRef, OwnerID: "runtime-1", TTL: time.Minute,
+	fence, err := service.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "runtime-1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeGuard := session.MutationGuard{
-		Authority: session.MutationAuthorityRuntime, LeaseID: lease.LeaseID,
-		OwnerID: lease.OwnerID, FencingToken: lease.FencingToken,
-	}
+	runtimeGuard := session.RuntimeMutationGuard(session.ContextWithRuntimeFence(ctx, fence))
 	if _, err := service.AppendEvent(ctx, session.AppendEventRequest{
 		SessionRef: active.SessionRef, MutationGuard: runtimeGuard,
 		Event: pendingApprovalEvent("approval-settlement-cas"),
@@ -50,10 +46,7 @@ func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndLeaseRel
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.ReleaseSessionLease(ctx, session.ReleaseSessionLeaseRequest{
-		SessionRef: active.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID,
-		ExpectedLeaseRevision: lease.Revision,
-	}); err != nil {
+	if err := service.ReleaseSessionFence(ctx, session.SessionFenceReleaseRequest(fence)); err != nil {
 		t.Fatal(err)
 	}
 	expectedRevision := stale.Revision

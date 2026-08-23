@@ -33,8 +33,8 @@ func TestACPControllerCancelPersistsFencedRequestWhileRemoteTurnIsLive(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := service.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
-		SessionRef: active.SessionRef, OwnerID: "host-a", TTL: time.Minute,
+	fence, err := service.AcquireSessionFence(context.Background(), session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "host-a",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestACPControllerCancelPersistsFencedRequestWhileRemoteTurnIsLive(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := session.ContextWithRuntimeLease(context.Background(), lease)
+	ctx := session.ContextWithRuntimeFence(context.Background(), fence)
 	run, err := core.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "wait"})
 	if err != nil {
 		t.Fatal(err)

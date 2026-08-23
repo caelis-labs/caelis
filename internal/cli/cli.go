@@ -425,6 +425,7 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 		return err
 	}
 	defer func() { _ = ownership.Close() }()
+	cfg.HostOwnership = ownership
 	var cleanupChildCredential func() error
 	defer func() {
 		if cleanupChildCredential != nil {

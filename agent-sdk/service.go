@@ -142,6 +142,15 @@ type Runtime interface {
 	RunState(context.Context, session.SessionRef) (RunState, error)
 }
 
+// RunnerCompletionRuntime guarantees that every successful producer entry
+// point returning a non-nil Runner, including optional participant prompts,
+// also returns a RunnerCompletionWaiter. Control fencing decorators require
+// this capability before starting a producer.
+type RunnerCompletionRuntime interface {
+	Runtime
+	RunnerCompletionWaiterGuaranteed()
+}
+
 // LiveRunAttacher exposes process-local observation of an execution that is
 // still registered in the same Runtime instance. It never reconstructs or
 // continues a durable run after restart.

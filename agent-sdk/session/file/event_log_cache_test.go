@@ -279,70 +279,6 @@ func TestAppendEventsUsesCompactIndexBeyondFullHistoryCacheLimit(t *testing.T) {
 	}
 }
 
-func TestCompactIndexColdBuildDoesNotBlockLeaseHeartbeat(t *testing.T) {
-	store, active := newEventPageIndexFixture(t, 8)
-	store.eventLogCacheMaxBytes = 512
-	lease, err := store.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
-		SessionRef: active.SessionRef, OwnerID: "runtime-1", TTL: time.Minute,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	indexStarted := make(chan struct{})
-	releaseIndex := make(chan struct{})
-	var releaseOnce sync.Once
-	release := func() { releaseOnce.Do(func() { close(releaseIndex) }) }
-	defer release()
-	var blockOnce sync.Once
-	store.eventLogLineRead = func(_ string, _ int, _ int64) {
-		blockOnce.Do(func() {
-			close(indexStarted)
-			<-releaseIndex
-		})
-	}
-	appendDone := make(chan error, 1)
-	go func() {
-		_, appendErr := store.AppendEvent(context.Background(), session.AppendEventRequest{
-			SessionRef: active.SessionRef,
-			MutationGuard: session.MutationGuard{
-				Authority: session.MutationAuthorityRuntime,
-				LeaseID:   lease.LeaseID, OwnerID: lease.OwnerID, FencingToken: lease.FencingToken,
-			},
-			Event: &session.Event{
-				ID: "event-0009", Type: session.EventTypeLifecycle, Visibility: session.VisibilityCanonical,
-				Lifecycle: &session.EventLifecycle{Status: "completed", Reason: "event-0009"},
-			},
-		})
-		appendDone <- appendErr
-	}()
-	select {
-	case <-indexStarted:
-	case <-time.After(5 * time.Second):
-		t.Fatal("cold compact-index build did not start")
-	}
-
-	heartbeatCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	heartbeat, heartbeatErr := store.HeartbeatSessionLease(heartbeatCtx, session.HeartbeatSessionLeaseRequest{
-		SessionRef: active.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID,
-		ExpectedLeaseRevision: lease.Revision, TTL: time.Minute,
-	})
-	cancel()
-	if heartbeatErr != nil {
-		release()
-		t.Fatalf("HeartbeatSessionLease() while cold index is blocked = %v", heartbeatErr)
-	}
-	if heartbeat.Revision != lease.Revision+1 {
-		release()
-		t.Fatalf("heartbeat revision = %d, want %d", heartbeat.Revision, lease.Revision+1)
-	}
-
-	release()
-	if err := <-appendDone; err != nil {
-		t.Fatalf("AppendEvent() after cold index release = %v", err)
-	}
-}
-
 func TestCompactIndexColdBuildAcceptsConcurrentAppendOnlyGrowth(t *testing.T) {
 	store, active := newEventPageIndexFixture(t, 8)
 	store.eventLogCacheMaxBytes = 512
@@ -394,11 +330,11 @@ func TestCompactIndexColdBuildAcceptsConcurrentAppendOnlyGrowth(t *testing.T) {
 	}
 }
 
-func TestOversizedWALRecoveryDoesNotScanFullLogDuringLeaseHeartbeat(t *testing.T) {
+func TestOversizedWALRecoveryDoesNotScanFullLogDuringFenceRead(t *testing.T) {
 	store, active := newEventPageIndexFixture(t, 8)
 	store.eventLogCacheMaxBytes = 512
-	lease, err := store.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
-		SessionRef: active.SessionRef, OwnerID: "runtime-1", TTL: time.Minute,
+	fence, err := store.AcquireSessionFence(context.Background(), session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "runtime-1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -410,11 +346,8 @@ func TestOversizedWALRecoveryDoesNotScanFullLogDuringLeaseHeartbeat(t *testing.T
 		return nil
 	}
 	if _, err := store.AppendEvent(context.Background(), session.AppendEventRequest{
-		SessionRef: active.SessionRef,
-		MutationGuard: session.MutationGuard{
-			Authority: session.MutationAuthorityRuntime,
-			LeaseID:   lease.LeaseID, OwnerID: lease.OwnerID, FencingToken: lease.FencingToken,
-		},
+		SessionRef:    active.SessionRef,
+		MutationGuard: session.RuntimeMutationGuard(session.ContextWithRuntimeFence(context.Background(), fence)),
 		Event: &session.Event{
 			ID: "event-0009", Type: session.EventTypeLifecycle, Visibility: session.VisibilityCanonical,
 			Lifecycle: &session.EventLifecycle{Status: "completed", Reason: "event-0009"},
@@ -427,18 +360,15 @@ func TestOversizedWALRecoveryDoesNotScanFullLogDuringLeaseHeartbeat(t *testing.T
 	reopened.eventLogCacheMaxBytes = store.eventLogCacheMaxBytes
 	reads := 0
 	reopened.eventLogLineRead = func(_ string, _ int, _ int64) { reads++ }
-	heartbeat, err := reopened.HeartbeatSessionLease(context.Background(), session.HeartbeatSessionLeaseRequest{
-		SessionRef: active.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID,
-		ExpectedLeaseRevision: lease.Revision, TTL: time.Minute,
-	})
+	durable, err := reopened.SessionFence(context.Background(), active.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if heartbeat.Revision != lease.Revision+1 {
-		t.Fatalf("heartbeat revision = %d, want %d", heartbeat.Revision, lease.Revision+1)
+	if durable.FenceID != fence.FenceID || durable.FencingToken != fence.FencingToken {
+		t.Fatalf("durable fence = %#v, want %#v", durable, fence)
 	}
 	if reads != 0 {
-		t.Fatalf("WAL recovery during heartbeat decoded %d full-log lines, want bounded tail recovery", reads)
+		t.Fatalf("WAL recovery during fence read decoded %d full-log lines, want bounded tail recovery", reads)
 	}
 
 	reopened.eventLogLineRead = nil

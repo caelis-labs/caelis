@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -13,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
-func TestApprovalPersistenceUsesApprovalControlAuthorityDuringRuntimeLease(t *testing.T) {
+func TestApprovalPersistenceUsesApprovalControlAuthorityDuringRuntimeFence(t *testing.T) {
 	t.Parallel()
 
 	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
@@ -23,8 +22,8 @@ func TestApprovalPersistenceUsesApprovalControlAuthorityDuringRuntimeLease(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sessions.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
-		SessionRef: active.SessionRef, OwnerID: "runtime-a", TTL: time.Minute,
+	if _, err := sessions.AcquireSessionFence(context.Background(), session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "runtime-a",
 	}); err != nil {
 		t.Fatal(err)
 	}

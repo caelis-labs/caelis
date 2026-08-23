@@ -95,6 +95,40 @@ type persistedDocument struct {
 	PendingApprovals          map[string]*session.Event `json:"pending_approvals"`
 	AppliedTransactions       map[string]bool           `json:"applied_transactions,omitempty"`
 	AppliedTransactionDigests map[string]string         `json:"applied_transaction_digests,omitempty"`
-	Lease                     *session.SessionLease     `json:"lease,omitempty"`
-	LeaseEpoch                uint64                    `json:"lease_epoch,omitempty"`
+	Fence                     *persistedSessionFence    `json:"lease,omitempty"`
+	FenceEpoch                uint64                    `json:"lease_epoch,omitempty"`
+}
+
+// persistedSessionFence retains the current version-2 document encoding while
+// the unpublished SDK surface uses fence terminology. Changing this storage
+// shape requires an explicit document-version migration, not an SDK alias.
+type persistedSessionFence struct {
+	SessionRef  session.SessionRef `json:"session_ref"`
+	FenceID     string             `json:"lease_id,omitempty"`
+	OwnerID     string             `json:"owner_id,omitempty"`
+	ClaimDigest string             `json:"claim_digest,omitempty"`
+	// Revision is retained only in the version-2 storage encoding. Session
+	// fences have no renewable public revision; new documents write 1 so the
+	// existing on-disk shape remains stable and older values stay readable.
+	Revision     uint64    `json:"revision,omitempty"`
+	FencingToken uint64    `json:"fencing_token,omitempty"`
+	AcquiredAt   time.Time `json:"acquired_at,omitempty"`
+}
+
+func persistedFenceFromSession(fence session.SessionFence) *persistedSessionFence {
+	return &persistedSessionFence{
+		SessionRef: fence.SessionRef, FenceID: fence.FenceID, OwnerID: fence.OwnerID,
+		ClaimDigest: session.SessionFenceClaimDigest(fence), Revision: 1,
+		FencingToken: fence.FencingToken, AcquiredAt: fence.AcquiredAt,
+	}
+}
+
+func sessionFenceFromPersisted(fence *persistedSessionFence) session.SessionFence {
+	if fence == nil {
+		return session.SessionFence{}
+	}
+	return session.RestoreSessionFenceClaimDigest(session.SessionFence{
+		SessionRef: fence.SessionRef, FenceID: fence.FenceID, OwnerID: fence.OwnerID,
+		FencingToken: fence.FencingToken, AcquiredAt: fence.AcquiredAt,
+	}, fence.ClaimDigest)
 }

@@ -75,7 +75,7 @@ func finishFailedControlClientAttachment(
 		}
 	}
 	// The Session feed is unavailable, but the Runtime producer barrier still
-	// owns the execution lease. Drain the shared ingress until ACPEvents closes.
+	// owns the execution fence. Drain the shared ingress until ACPEvents closes.
 	for range events {
 	}
 }

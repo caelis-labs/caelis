@@ -4,17 +4,16 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"time"
 )
 
 // MutationAuthority identifies the explicit authority for a session mutation.
 type MutationAuthority string
 
 const (
-	// MutationAuthorityRuntime requires a live matching session lease fence.
+	// MutationAuthorityRuntime requires a live matching Session fence.
 	MutationAuthorityRuntime MutationAuthority = "runtime"
 	// MutationAuthorityControl is an explicit Control-owned mutation that does
-	// not inherit Runtime lease ownership. Control mutations still require a
+	// not inherit Runtime fence ownership. Control mutations still require a
 	// non-empty purpose so the bypass is inventoryable and never accidental.
 	MutationAuthorityControl MutationAuthority = "control"
 )
@@ -41,20 +40,22 @@ const (
 type MutationGuard struct {
 	Authority    MutationAuthority      `json:"authority,omitempty"`
 	Purpose      ControlMutationPurpose `json:"purpose,omitempty"`
-	LeaseID      string                 `json:"lease_id,omitempty"`
+	FenceID      string                 `json:"fence_id,omitempty"`
 	OwnerID      string                 `json:"owner_id,omitempty"`
 	FencingToken uint64                 `json:"fencing_token,omitempty"`
+	claimToken   string
 }
 
 type mutationGuardContextKey struct{}
 
-// ContextWithRuntimeLease scopes Runtime-owned mutations to one lease fence.
-func ContextWithRuntimeLease(ctx context.Context, lease SessionLease) context.Context {
+// ContextWithRuntimeFence scopes Runtime-owned mutations to one Session fence.
+func ContextWithRuntimeFence(ctx context.Context, fence SessionFence) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return context.WithValue(ctx, mutationGuardContextKey{}, MutationGuard{
-		Authority: MutationAuthorityRuntime, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID, FencingToken: lease.FencingToken,
+		Authority: MutationAuthorityRuntime, FenceID: fence.FenceID, OwnerID: fence.OwnerID, FencingToken: fence.FencingToken,
+		claimToken: fence.claimToken,
 	})
 }
 
@@ -67,20 +68,20 @@ func ContextWithControlMutation(ctx context.Context, purpose ControlMutationPurp
 	return context.WithValue(ctx, mutationGuardContextKey{}, ControlMutationGuard(purpose))
 }
 
-// ContextWithoutRuntimeLease starts a distinct Runtime placement scope while
+// ContextWithoutRuntimeFence starts a distinct Runtime placement scope while
 // preserving cancellation, deadlines, and unrelated context values. Nested
 // runtimes must use it before operating on a different Session; a parent
 // Session's fence is not valid authority for the nested Session. This does not
-// bypass an active store lease because an unguarded mutation still conflicts
-// while that lease is active.
-func ContextWithoutRuntimeLease(ctx context.Context) context.Context {
+// bypass an active store fence because an unguarded mutation still conflicts
+// while that fence is active.
+func ContextWithoutRuntimeFence(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return context.WithValue(ctx, mutationGuardContextKey{}, MutationGuard{})
 }
 
-// RuntimeMutationGuard returns the Runtime lease fence carried by ctx.
+// RuntimeMutationGuard returns the Runtime fence carried by ctx.
 func RuntimeMutationGuard(ctx context.Context) MutationGuard {
 	if ctx == nil {
 		return MutationGuard{}
@@ -89,19 +90,20 @@ func RuntimeMutationGuard(ctx context.Context) MutationGuard {
 	return guard
 }
 
-// ControlMutationGuardWithRuntimeLease marks a Control-owned mutation while
+// ControlMutationGuardWithRuntimeFence marks a Control-owned mutation while
 // retaining the execution fence carried by ctx. Exclusive Control operations
 // such as controller handoff use this form after acquiring the Session's
-// execution lease; losing that lease invalidates the mutation.
-func ControlMutationGuardWithRuntimeLease(ctx context.Context, purpose ControlMutationPurpose) MutationGuard {
+// execution fence; losing that fence invalidates the mutation.
+func ControlMutationGuardWithRuntimeFence(ctx context.Context, purpose ControlMutationPurpose) MutationGuard {
 	guard := ControlMutationGuard(purpose)
 	runtimeGuard := RuntimeMutationGuard(ctx)
 	if runtimeGuard.Authority != MutationAuthorityRuntime {
 		return guard
 	}
-	guard.LeaseID = strings.TrimSpace(runtimeGuard.LeaseID)
+	guard.FenceID = strings.TrimSpace(runtimeGuard.FenceID)
 	guard.OwnerID = strings.TrimSpace(runtimeGuard.OwnerID)
 	guard.FencingToken = runtimeGuard.FencingToken
+	guard.claimToken = runtimeGuard.claimToken
 	return guard
 }
 
@@ -119,72 +121,79 @@ func ValidateControlMutationGuard(guard MutationGuard) error {
 	}
 	purpose := ControlMutationPurpose(strings.TrimSpace(string(guard.Purpose)))
 	if purpose == "" {
-		return &LeaseConflictError{Detail: "control mutation requires a non-empty purpose"}
+		return &FenceConflictError{Detail: "control mutation requires a non-empty purpose"}
 	}
 	if !knownControlMutationPurpose(purpose) {
-		return &LeaseConflictError{Detail: "control mutation purpose is unknown"}
+		return &FenceConflictError{Detail: "control mutation purpose is unknown"}
 	}
-	hasLeaseID := strings.TrimSpace(guard.LeaseID) != ""
+	hasFenceID := strings.TrimSpace(guard.FenceID) != ""
 	hasOwnerID := strings.TrimSpace(guard.OwnerID) != ""
 	hasFence := guard.FencingToken != 0
-	if (hasLeaseID || hasOwnerID || hasFence) && (!hasLeaseID || !hasOwnerID || !hasFence) {
-		return &LeaseConflictError{Detail: "control mutation fence requires lease_id, owner_id, and fencing_token"}
+	if (hasFenceID || hasOwnerID || hasFence) && (!hasFenceID || !hasOwnerID || !hasFence) {
+		return &FenceConflictError{Detail: "control mutation fence requires fence_id, owner_id, and fencing_token"}
 	}
-	if !hasLeaseID && controlMutationRequiresFence(purpose) {
-		return &LeaseConflictError{Detail: "control mutation purpose requires a matching runtime lease fence"}
+	if !hasFenceID && controlMutationRequiresFence(purpose) {
+		return &FenceConflictError{Detail: "control mutation purpose requires a matching runtime fence"}
 	}
 	return nil
 }
 
-// AuthorizeMutationGuard applies the shared lease-fence decision for one
+// AuthorizeMutationGuard applies the shared fence decision for one
 // mutation. Persistence implementations call it while holding their own
 // transaction lock; it does not read or mutate backend state.
-func AuthorizeMutationGuard(active SessionLease, guard MutationGuard, now time.Time) error {
+func AuthorizeMutationGuard(active SessionFence, guard MutationGuard) error {
 	conflict := func(detail string) error {
-		return &LeaseConflictError{SessionID: NormalizeSessionRef(active.SessionRef).SessionID, Detail: detail}
+		return &FenceConflictError{SessionID: NormalizeSessionRef(active.SessionRef).SessionID, Detail: detail}
 	}
 	if guard.Authority == MutationAuthorityControl {
 		if err := ValidateControlMutationGuard(guard); err != nil {
-			var leaseErr *LeaseConflictError
-			if errors.As(err, &leaseErr) {
-				leaseErr.SessionID = NormalizeSessionRef(active.SessionRef).SessionID
+			var fenceErr *FenceConflictError
+			if errors.As(err, &fenceErr) {
+				fenceErr.SessionID = NormalizeSessionRef(active.SessionRef).SessionID
 			}
 			return err
 		}
-		hasFence := strings.TrimSpace(guard.LeaseID) != ""
+		hasFence := strings.TrimSpace(guard.FenceID) != ""
 		if hasFence {
-			if active.LeaseID == "" || !active.ExpiresAt.After(now) {
-				return conflict("control mutation fence is absent or expired")
+			if !SessionFenceIsHeld(active) {
+				return conflict("control mutation fence is absent")
 			}
-			if active.LeaseID != strings.TrimSpace(guard.LeaseID) || active.OwnerID != strings.TrimSpace(guard.OwnerID) || active.FencingToken != guard.FencingToken {
+			if !sessionFenceMutationAuthorized(active, guard) {
 				return conflict("control mutation fencing token is stale")
 			}
 			return nil
 		}
-		if active.LeaseID != "" && active.ExpiresAt.After(now) && !ControlMutationMayOverlapRuntimeLease(guard.Purpose) {
-			return conflict("active execution lease requires a matching control fence")
+		if SessionFenceIsHeld(active) && !ControlMutationMayOverlapRuntimeFence(guard.Purpose) {
+			return conflict("active execution fence requires a matching control fence")
 		}
 		return nil
 	}
 	if guard.Authority != MutationAuthorityRuntime {
-		if active.LeaseID == "" {
+		if active.FenceID == "" {
 			return nil
 		}
-		return conflict("active lease requires explicit mutation authority")
+		return conflict("active fence requires explicit mutation authority")
 	}
-	if active.LeaseID == "" || !active.ExpiresAt.After(now) {
-		return conflict("runtime lease is absent or expired")
+	if !SessionFenceIsHeld(active) {
+		return conflict("runtime fence is absent")
 	}
-	if active.LeaseID != strings.TrimSpace(guard.LeaseID) || active.OwnerID != strings.TrimSpace(guard.OwnerID) || active.FencingToken != guard.FencingToken {
+	if !sessionFenceMutationAuthorized(active, guard) {
 		return conflict("runtime fencing token is stale")
 	}
 	return nil
 }
 
-// ControlMutationMayOverlapRuntimeLease reports whether an unfenced Control
-// mutation is explicitly safe while a Turn owns the Session execution lease.
+func sessionFenceMutationAuthorized(active SessionFence, guard MutationGuard) bool {
+	return active.FenceID == strings.TrimSpace(guard.FenceID) &&
+		active.OwnerID == strings.TrimSpace(guard.OwnerID) &&
+		active.FencingToken == guard.FencingToken &&
+		sessionFenceClaimMatches(active.claimDigest, guard.claimToken)
+}
+
+// ControlMutationMayOverlapRuntimeFence reports whether an unfenced Control
+// mutation is explicitly safe while a Turn owns the Session execution fence.
 // Unknown purposes fail closed during guard validation.
-func ControlMutationMayOverlapRuntimeLease(purpose ControlMutationPurpose) bool {
+func ControlMutationMayOverlapRuntimeFence(purpose ControlMutationPurpose) bool {
 	switch ControlMutationPurpose(strings.TrimSpace(string(purpose))) {
 	case ControlMutationPurposeApproval,
 		ControlMutationPurposeParticipant,

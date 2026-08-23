@@ -1457,15 +1457,14 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PutParticipant() error = %v", err)
 	}
-	lease, err := sessions.(session.SessionLeaseService).AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+	fence, err := sessions.(session.SessionFenceService).AcquireSessionFence(context.Background(), session.AcquireSessionFenceRequest{
 		SessionRef: activeSession.SessionRef,
 		OwnerID:    "participant-turn-owner",
-		TTL:        time.Minute,
 	})
 	if err != nil {
-		t.Fatalf("AcquireSessionLease() error = %v", err)
+		t.Fatalf("AcquireSessionFence() error = %v", err)
 	}
-	turnCtx := session.ContextWithRuntimeLease(context.Background(), lease)
+	turnCtx := session.ContextWithRuntimeFence(context.Background(), fence)
 	turnReqCh := make(chan controller.ParticipantPromptRequest, 1)
 	testController := stubACPController{
 		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnResult, error) {
@@ -1859,15 +1858,14 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	lease, err := sessions.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+	fence, err := sessions.AcquireSessionFence(context.Background(), session.AcquireSessionFenceRequest{
 		SessionRef: activeSession.SessionRef,
 		OwnerID:    "acp-controller-turn-owner",
-		TTL:        time.Minute,
 	})
 	if err != nil {
-		t.Fatalf("AcquireSessionLease() error = %v", err)
+		t.Fatalf("AcquireSessionFence() error = %v", err)
 	}
-	runCtx := session.ContextWithRuntimeLease(context.Background(), lease)
+	runCtx := session.ContextWithRuntimeFence(context.Background(), fence)
 
 	result, err := runtime.Run(runCtx, agent.RunRequest{
 		SessionRef: activeSession.SessionRef,

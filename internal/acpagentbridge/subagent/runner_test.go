@@ -184,9 +184,9 @@ func TestRunnerResolvesTypedPlacementWithoutRegistryIdentity(t *testing.T) {
 }
 
 func TestDetachedChildContextClearsParentRuntimeFence(t *testing.T) {
-	parent := session.ContextWithRuntimeLease(
+	parent := session.ContextWithRuntimeFence(
 		context.WithValue(context.Background(), detachedChildContextMarker{}, "kept"),
-		session.SessionLease{LeaseID: "parent-lease", OwnerID: "parent-owner", FencingToken: 7},
+		session.SessionFence{FenceID: "parent-fence", OwnerID: "parent-owner", FencingToken: 7},
 	)
 	parent, cancel := context.WithCancel(parent)
 	child := detachedChildContext(parent)

@@ -33,7 +33,7 @@ client owns that adapter's server lifecycle.
 
 The existing `control/appserver` contract, durable Session store, Envelope cursor,
 feed/replay implementation, operation ledger, process-local exact-operation
-gates, durable domain receipts, Session producer leases, and Task stream remain
+gates, durable domain receipts, Session execution fences, and Task stream remain
 the semantic foundation. The design does not replace them with Codex
 JSON-RPC types or create a second state machine.
 
@@ -414,7 +414,13 @@ reset, and exit close the TUI's observation reference without cancelling Host
 work. The next work-bearing activation naturally rebuilds from current App
 configuration and workspace content. There is no timeout, generation persisted
 with the Session, client-visible reload command, or Session-level exclusion;
-Turn execution keeps its existing lease and observation remains multi-client.
+Turn execution keeps one Host-scoped durable fence and observation remains
+multi-client. That fence has no TTL or heartbeat. The product Host ownership
+guard supplies liveness; a newly admitted Host may explicitly replace an
+abandoned prior-Host fence and advance its fencing token. That replacement is
+performed through a Host-owned capability pinned across the Store mutation,
+not a cached configuration boolean. Exact release waits for proven producer
+quiescence and reconciles ambiguous Store outcomes before retrying.
 
 Headless, TUI, ACP, and maintained e2e fixtures bind typed AppServer clients.
 The production Headless package has no private `RunOnce` entry, the broad local
@@ -636,7 +642,7 @@ sequenceDiagram
 
 If the command result is lost, the client retries with the same operation ID.
 If the connection is lost, it reconnects from the last accepted cursor. It
-never retries a lease conflict through an unfenced path.
+never retries an execution-fence conflict through an unfenced path.
 
 ## Current Version Boundary
 

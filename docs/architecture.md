@@ -493,6 +493,27 @@ Control fences each canonical Session Turn across its complete asynchronous
 producer lifetime. Agent-loop safety remains inside the Agent implementation;
 one Agent must not inspect or cancel an unrelated external endpoint.
 
+The fence is scoped to the product Host epoch that already owns the Store. It
+has no TTL, renewal heartbeat, or client attachment semantics: observers and
+mid-Turn input may come from multiple clients without acquiring it. Exact
+release ends a producer; after the process-lifetime Host ownership guard admits
+a replacement Host, Control may explicitly replace an abandoned prior-Host
+fence and receives a higher fencing token. Ordinary Runtime admission cannot
+take over another live producer merely by choosing a different owner ID. The
+replacement capability pins that Host guard across the Store mutation. A
+fenced Runtime must guarantee a producer-completion waiter; only a nil
+completion result permits exact release. Ambiguous releases are reconciled by
+a fresh read and retried for the remaining Host lifecycle. Acquisition returns
+an opaque bearer claim used by mutation guards and exact release; observation
+returns identity only, so another client cannot turn a read into producer
+authority. A committed acquisition must return that exact claimed result or
+the caller fails closed until a later Host epoch performs startup recovery.
+Bounded runtime
+diagnostics classify slow or failed acquire, producer-start,
+release/reconciliation, startup-recovery, and startup-release phases, plus failed producer
+completion waits, by elapsed time only;
+they never record Session identity, prompt content, paths, or raw error text.
+
 ## Durable State
 
 `agent-sdk/session.Event` is the source of truth for persisted runtime context.

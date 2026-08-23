@@ -27,6 +27,8 @@ import (
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/controlplane"
+	"github.com/caelis-labs/caelis/internal/hostownership"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -45,10 +47,14 @@ type Config struct {
 	// DangerouslySkipPermissions enables the process-only Host escape mode. It
 	// is never loaded from or saved to AppConfig.
 	DangerouslySkipPermissions bool
-	ContextWindow              int
-	SystemPrompt               string
-	Assembly                   assembly.ResolvedAssembly
-	SkillDirs                  []string
+	// HostOwnership is the process-entry authority for StoreDir. NewLocalStack
+	// borrows but never closes it; only a live matching authority permits this
+	// Host epoch to replace a durable fence left by a prior Host.
+	HostOwnership *hostownership.Authority
+	ContextWindow int
+	SystemPrompt  string
+	Assembly      assembly.ResolvedAssembly
+	SkillDirs     []string
 	// ModelProfileID selects one Control-owned ModelProfile for this process.
 	// Runtime startup is read-only: profiles and provider credentials may only
 	// be created or replaced by the /connect owner.
@@ -325,6 +331,9 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if storeDir == "" {
 		storeDir = defaultStoreDir()
 	}
+	if cfg.HostOwnership != nil && !cfg.HostOwnership.Authorizes(storeDir) {
+		return nil, fmt.Errorf("gatewayapp: Host ownership does not authorize StoreDir")
+	}
 	configStore := newAppConfigStore(storeDir)
 	doc, err := configStore.Load()
 	if err != nil {
@@ -340,13 +349,39 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	effectiveApprovalMode := approvalMode(firstNonEmpty(cfg.ApprovalMode, doc.Runtime.ApprovalMode))
 	effectivePolicyProfile := policyProfile(firstNonEmpty(cfg.PolicyProfile, doc.Runtime.PolicyProfile))
 	baseAssembly := assembly.CloneResolvedAssembly(cfg.Assembly)
-	sessionStore := sessionfile.NewStore(sessionfile.Config{
+	fenceOwnerID, err := newStackFenceOwnerID()
+	if err != nil {
+		return nil, err
+	}
+	runtimeDiagnostics := newRuntimeDiagnosticsLogger(storeDir)
+	sessionStoreConfig := sessionfile.Config{
 		RootDir:     filepath.Join(storeDir, "sessions"),
-		Diagnostics: newRuntimeDiagnosticsLogger(storeDir),
-	})
+		Diagnostics: runtimeDiagnostics,
+	}
+	var sessionStore *sessionfile.Store
+	var priorHostFenceCapability session.PriorHostFenceService
+	if cfg.HostOwnership != nil {
+		sessionStore, priorHostFenceCapability = sessionfile.NewStoreWithPriorHostFences(sessionStoreConfig, func(context.Context) (func(), bool) {
+			if cfg.HostOwnership == nil {
+				return nil, false
+			}
+			return cfg.HostOwnership.Pin(storeDir)
+		})
+	} else {
+		sessionStore = sessionfile.NewStore(sessionStoreConfig)
+	}
 	sessions := sessionStore
 	taskStore := sessionfile.NewTaskStore(sessionStore)
-	approvalRecovery := appserver.NewApprovalRecoveryGate(sessions)
+	var priorHostFences appserver.PriorHostFenceReplacer
+	var runtimePriorHostFences controlplane.PriorHostFenceReplacer
+	if cfg.HostOwnership != nil {
+		replacer := approvalRecoveryFenceReplacer{fences: priorHostFenceCapability}
+		priorHostFences = replacer
+		runtimePriorHostFences = replacer
+	}
+	approvalRecovery := appserver.NewApprovalRecoveryGate(appserver.ApprovalRecoveryGateConfig{
+		Store: sessions, FenceOwnerID: fenceOwnerID, PriorHostFences: priorHostFences, Diagnostics: runtimeDiagnostics,
+	})
 	cursorSecret, err := loadOrCreateControlClientCursorSecret(storeDir)
 	if err != nil {
 		return nil, err
@@ -434,10 +469,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if securityPosture.RequiredSandboxBackend != "" {
 		sandboxCfg.RequestedType = string(securityPosture.RequiredSandboxBackend)
 	}
-	leaseOwnerID, err := newStackLeaseOwnerID()
-	if err != nil {
-		return nil, err
-	}
 	processConfig := newRuntimeProcessConfigSource(sessionRuntimeProcessSnapshot{
 		runtime:               runtimeCfg,
 		sandboxOverride:       cfg.Sandbox,
@@ -447,20 +478,22 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	stack := &Stack{
 		composition: runtimeComposition{
 			authorities: runtimeHostAuthorities{
-				appName:           appName,
-				userID:            userID,
-				store:             configStore,
-				storeDir:          storeDir,
-				configMigration:   configStore.MigrationReport(),
-				leaseOwnerID:      leaseOwnerID,
-				taskStore:         taskStore,
-				controlFeeds:      controlFeeds,
-				approvalRecovery:  approvalRecovery,
-				codexAuth:         codexAuth,
-				grokAuth:          grokAuth,
-				apiKeyCredentials: apiKeyCredentials,
-				providerUsage:     providerUsage,
-				sessionModelPins:  newSessionModelPinRegistry(),
+				appName:                appName,
+				userID:                 userID,
+				store:                  configStore,
+				storeDir:               storeDir,
+				diagnostics:            runtimeDiagnostics,
+				configMigration:        configStore.MigrationReport(),
+				fenceOwnerID:           fenceOwnerID,
+				priorHostSessionFences: runtimePriorHostFences,
+				taskStore:              taskStore,
+				controlFeeds:           controlFeeds,
+				approvalRecovery:       approvalRecovery,
+				codexAuth:              codexAuth,
+				grokAuth:               grokAuth,
+				apiKeyCredentials:      apiKeyCredentials,
+				providerUsage:          providerUsage,
+				sessionModelPins:       newSessionModelPinRegistry(),
 			},
 			sessions:  sessions,
 			workspace: workspace,
@@ -537,10 +570,10 @@ func (s *Stack) WaitApprovalRecovery(ctx context.Context) error {
 	return s.composition.authorities.approvalRecovery.Wait(ctx)
 }
 
-func newStackLeaseOwnerID() (string, error) {
+func newStackFenceOwnerID() (string, error) {
 	var value [16]byte
 	if _, err := rand.Read(value[:]); err != nil {
-		return "", fmt.Errorf("gatewayapp: generate runtime lease owner id: %w", err)
+		return "", fmt.Errorf("gatewayapp: generate runtime fence owner id: %w", err)
 	}
 	return "gateway-" + hex.EncodeToString(value[:]), nil
 }

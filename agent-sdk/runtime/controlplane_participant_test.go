@@ -56,7 +56,7 @@ func TestParticipantLifecycleIdempotencyIgnoresUnrelatedSessionRevision(t *testi
 	}
 }
 
-func TestRuntimeParticipantLifecycleMayOverlapActiveTurnLease(t *testing.T) {
+func TestRuntimeParticipantLifecycleMayOverlapActiveTurnFence(t *testing.T) {
 	t.Parallel()
 
 	sessions, active := newTestSessionService(t, "participant-control-overlap")
@@ -70,13 +70,12 @@ func TestRuntimeParticipantLifecycleMayOverlapActiveTurnLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BindController() error = %v", err)
 	}
-	lease, err := sessions.(session.SessionLeaseService).AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+	fence, err := sessions.(session.SessionFenceService).AcquireSessionFence(context.Background(), session.AcquireSessionFenceRequest{
 		SessionRef: active.SessionRef,
 		OwnerID:    "main-turn-owner",
-		TTL:        time.Minute,
 	})
 	if err != nil {
-		t.Fatalf("AcquireSessionLease() error = %v", err)
+		t.Fatalf("AcquireSessionFence() error = %v", err)
 	}
 	binding := session.ParticipantBinding{
 		ID: "claude-1", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar,
@@ -131,12 +130,12 @@ func TestRuntimeParticipantLifecycleMayOverlapActiveTurnLease(t *testing.T) {
 	if _, ok := participantBinding(detached, binding.ID); ok {
 		t.Fatalf("detached Session still contains participant: %#v", detached.Participants)
 	}
-	durableLease, err := sessions.(session.SessionLeaseReader).SessionLease(context.Background(), active.SessionRef)
+	durableFence, err := sessions.(session.SessionFenceReader).SessionFence(context.Background(), active.SessionRef)
 	if err != nil {
-		t.Fatalf("SessionLease() error = %v", err)
+		t.Fatalf("SessionFence() error = %v", err)
 	}
-	if durableLease.LeaseID != lease.LeaseID || durableLease.FencingToken != lease.FencingToken {
-		t.Fatalf("participant lifecycle changed active Turn lease: got %#v want %#v", durableLease, lease)
+	if durableFence.FenceID != fence.FenceID || durableFence.FencingToken != fence.FencingToken {
+		t.Fatalf("participant lifecycle changed active Turn fence: got %#v want %#v", durableFence, fence)
 	}
 }
 

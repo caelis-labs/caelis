@@ -84,14 +84,14 @@ func (s *committedFaultParticipantStore) RemoveParticipantWithEvent(ctx context.
 	return updated, event, err
 }
 
-func (s *committedFaultParticipantStore) AcquireSessionLease(ctx context.Context, req session.AcquireSessionLeaseRequest) (session.SessionLease, error) {
-	return s.participantBackend.(session.SessionLeaseService).AcquireSessionLease(ctx, req)
+func (s *committedFaultParticipantStore) AcquireSessionFence(ctx context.Context, req session.AcquireSessionFenceRequest) (session.SessionFence, error) {
+	return s.participantBackend.(session.SessionFenceService).AcquireSessionFence(ctx, req)
 }
 
-func (s *committedFaultParticipantStore) HeartbeatSessionLease(ctx context.Context, req session.HeartbeatSessionLeaseRequest) (session.SessionLease, error) {
-	return s.participantBackend.(session.SessionLeaseService).HeartbeatSessionLease(ctx, req)
+func (s *committedFaultParticipantStore) SessionFence(ctx context.Context, ref session.SessionRef) (session.SessionFence, error) {
+	return s.participantBackend.(session.SessionFenceReader).SessionFence(ctx, ref)
 }
 
-func (s *committedFaultParticipantStore) ReleaseSessionLease(ctx context.Context, req session.ReleaseSessionLeaseRequest) error {
-	return s.participantBackend.(session.SessionLeaseService).ReleaseSessionLease(ctx, req)
+func (s *committedFaultParticipantStore) ReleaseSessionFence(ctx context.Context, req session.ReleaseSessionFenceRequest) error {
+	return s.participantBackend.(session.SessionFenceService).ReleaseSessionFence(ctx, req)
 }

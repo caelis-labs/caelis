@@ -85,6 +85,12 @@ asynchronous lifetime. Overlapping Control mutations require an explicit
 purpose and matching revision or fence. Controller handoff is exclusive and
 commits only after the previous owner is quiescent.
 
+The execution fence is not an observation or input lock. Any number of clients
+may observe the Session, and an authorized client may deliver mid-Turn input to
+the active producer. The single product Host supplies liveness, so Control does
+not renew the fence on a timer; an explicitly authorized replacement Host
+advances the durable fencing token after process ownership changes.
+
 External effects use durable intent, stable identity, idempotency where
 available, and explicit recovery. Control must preserve `unknown_outcome` when
 it cannot prove whether an effect occurred; it must not convert uncertainty

@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 )
 
-func TestCloseSessionRequiresQuiescentLeaseAndIsIdempotent(t *testing.T) {
+func TestCloseSessionRequiresQuiescentFenceAndIsIdempotent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	service := sessionmemory.NewStore(sessionmemory.Config{})
@@ -20,23 +19,21 @@ func TestCloseSessionRequiresQuiescentLeaseAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaseStore := any(service).(session.SessionLeaseService)
-	lease, err := leaseStore.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
-		SessionRef: active.SessionRef, OwnerID: "runtime-1", TTL: time.Minute,
+	fenceStore := any(service).(session.SessionFenceService)
+	fence, err := fenceStore.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "runtime-1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CloseSession(ctx, service, active, "premature"); !errors.Is(err, session.ErrLeaseConflict) {
-		t.Fatalf("CloseSession() under runtime lease = %v, want ErrLeaseConflict", err)
+	if _, err := CloseSession(ctx, service, active, "premature"); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("CloseSession() under runtime fence = %v, want ErrFenceConflict", err)
 	}
 	if isClosed, err := IsSessionClosed(ctx, service, active.SessionRef); err != nil || isClosed {
 		t.Fatalf("IsSessionClosed() after rejected close = %v, %v", isClosed, err)
 	}
-	if err := leaseStore.ReleaseSessionLease(ctx, session.ReleaseSessionLeaseRequest{
-		SessionRef: active.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID, ExpectedLeaseRevision: lease.Revision,
-	}); err != nil {
-		t.Fatalf("release runtime lease: %v", err)
+	if err := fenceStore.ReleaseSessionFence(ctx, session.SessionFenceReleaseRequest(fence)); err != nil {
+		t.Fatalf("release runtime fence: %v", err)
 	}
 
 	closed, err := CloseSession(ctx, service, active, "done")

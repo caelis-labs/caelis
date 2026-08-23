@@ -9,7 +9,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -19,7 +18,7 @@ import (
 type ParticipantStore interface {
 	session.Service
 	session.ParticipantLifecycleService
-	session.SessionLeaseService
+	session.SessionFenceService
 	ParticipantCommittedFailureInjector
 }
 
@@ -184,12 +183,12 @@ func checkLifecycleParticipantCAS(t *testing.T, store ParticipantStore, active s
 func checkParticipantMutationGuard(t *testing.T, store ParticipantStore, active session.Session, binding session.ParticipantBinding) {
 	t.Helper()
 	ctx := context.Background()
-	lease, err := store.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{SessionRef: active.SessionRef, OwnerID: "owner-a", TTL: time.Minute})
+	fence, err := store.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "owner-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lease.FencingToken == 0 {
-		t.Fatal("acquired participant mutation lease has no fencing token")
+	if fence.FencingToken == 0 {
+		t.Fatal("acquired participant mutation fence has no fencing token")
 	}
 	baseline, err := store.Session(ctx, active.SessionRef)
 	if err != nil {
@@ -208,15 +207,15 @@ func checkParticipantMutationGuard(t *testing.T, store ParticipantStore, active 
 		{
 			name: "wrong owner",
 			guard: session.MutationGuard{
-				Authority: session.MutationAuthorityRuntime, LeaseID: lease.LeaseID,
-				OwnerID: "owner-b", FencingToken: lease.FencingToken,
+				Authority: session.MutationAuthorityRuntime, FenceID: fence.FenceID,
+				OwnerID: "owner-b", FencingToken: fence.FencingToken,
 			},
 		},
 		{
 			name: "stale fencing token",
 			guard: session.MutationGuard{
-				Authority: session.MutationAuthorityRuntime, LeaseID: lease.LeaseID,
-				OwnerID: "owner-a", FencingToken: lease.FencingToken - 1,
+				Authority: session.MutationAuthorityRuntime, FenceID: fence.FenceID,
+				OwnerID: "owner-a", FencingToken: fence.FencingToken - 1,
 			},
 		},
 	}
@@ -275,9 +274,9 @@ func assertParticipantMutationGuardRejected(
 	err error,
 ) {
 	t.Helper()
-	var conflict *session.LeaseConflictError
+	var conflict *session.FenceConflictError
 	if !errors.As(err, &conflict) {
-		t.Fatalf("%s mismatched mutation guard error = %v, want LeaseConflictError", operation, err)
+		t.Fatalf("%s mismatched mutation guard error = %v, want FenceConflictError", operation, err)
 	}
 	durable, loadErr := store.Session(context.Background(), baseline.SessionRef)
 	if loadErr != nil {

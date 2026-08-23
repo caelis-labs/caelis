@@ -20,11 +20,24 @@ type ApprovalRecoveryStore interface {
 
 // SweepAbandonedApprovals interrupts durable approval mirrors left without a
 // live waiter. It is idempotent and must run before new Turns are accepted.
-// A request protected by a live execution lease belongs to another active
-// Runtime and is left for a later sweep after that lease expires.
+// A request protected by an execution fence belongs to another active
+// Runtime and is left for a later sweep after that execution fence releases.
 func SweepAbandonedApprovals(ctx context.Context, store ApprovalRecoveryStore) error {
-	_, err := sweepAbandonedApprovals(ctx, store)
+	_, err := sweepAbandonedApprovals(ctx, store, approvalRecoveryAuthority{}, nil)
 	return err
+}
+
+type approvalRecoveryAuthority struct {
+	ownerID         string
+	priorHostFences PriorHostFenceReplacer
+}
+
+// PriorHostFenceReplacer is the Host-owned capability used only during
+// startup recovery after process-level Store ownership has been established.
+// Product composition supplies the implementation, while the Store verifies
+// the live process-level ownership pin before replacing durable state.
+type PriorHostFenceReplacer interface {
+	ReplacePriorHostFence(context.Context, session.AcquireSessionFenceRequest) (session.SessionFence, error)
 }
 
 type approvalRecoverySweep struct {
@@ -40,7 +53,12 @@ func (r *approvalRecoverySweep) deferUntil(candidate time.Time) {
 	}
 }
 
-func sweepAbandonedApprovals(ctx context.Context, store ApprovalRecoveryStore) (approvalRecoverySweep, error) {
+func sweepAbandonedApprovals(
+	ctx context.Context,
+	store ApprovalRecoveryStore,
+	authority approvalRecoveryAuthority,
+	diagnostics *approvalRecoveryDiagnostics,
+) (approvalRecoverySweep, error) {
 	var result approvalRecoverySweep
 	if store == nil {
 		return result, nil
@@ -59,7 +77,7 @@ func sweepAbandonedApprovals(ctx context.Context, store ApprovalRecoveryStore) (
 				continue
 			}
 			event := abandonedApprovalSettlement(approval.Request, requestID)
-			retryAt, err := settleAbandonedApproval(ctx, store, approval, event)
+			retryAt, err := settleAbandonedApproval(ctx, store, authority, approval, event, diagnostics)
 			if err != nil {
 				return result, err
 			}
@@ -74,7 +92,7 @@ func sweepAbandonedApprovals(ctx context.Context, store ApprovalRecoveryStore) (
 			return result, err
 		}
 		for _, summary := range list.Sessions {
-			retryAt, err := sweepSessionApprovals(ctx, store, summary.SessionRef)
+			retryAt, err := sweepSessionApprovals(ctx, store, authority, summary.SessionRef, diagnostics)
 			if err != nil {
 				return result, err
 			}
@@ -87,7 +105,13 @@ func sweepAbandonedApprovals(ctx context.Context, store ApprovalRecoveryStore) (
 	}
 }
 
-func sweepSessionApprovals(ctx context.Context, store ApprovalRecoveryStore, ref session.SessionRef) (time.Time, error) {
+func sweepSessionApprovals(
+	ctx context.Context,
+	store ApprovalRecoveryStore,
+	authority approvalRecoveryAuthority,
+	ref session.SessionRef,
+	diagnostics *approvalRecoveryDiagnostics,
+) (time.Time, error) {
 	pending := map[string]*session.Event{}
 	afterSeq := uint64(0)
 	for {
@@ -124,11 +148,11 @@ func sweepSessionApprovals(ctx context.Context, store ApprovalRecoveryStore, ref
 	var retryAt time.Time
 	for requestID, request := range pending {
 		event := abandonedApprovalSettlement(request, requestID)
-		candidate, err := settleAbandonedApproval(ctx, store, session.PendingApproval{
+		candidate, err := settleAbandonedApproval(ctx, store, authority, session.PendingApproval{
 			SessionRef: ref,
 			Revision:   active.Revision,
 			Request:    request,
-		}, event)
+		}, event, diagnostics)
 		if err != nil {
 			return time.Time{}, err
 		}
@@ -143,6 +167,7 @@ func abandonedApprovalSettlementRequest(
 	approval session.PendingApproval,
 	expectedRevision *uint64,
 	event *session.Event,
+	guard session.MutationGuard,
 ) session.SettlePendingApprovalRequest {
 	requestID := ""
 	requestEventID := ""
@@ -153,12 +178,9 @@ func abandonedApprovalSettlementRequest(
 		requestSeq = approval.Request.Seq
 	}
 	return session.SettlePendingApprovalRequest{
-		SessionRef:       approval.SessionRef,
-		ExpectedRevision: expectedRevision,
-		// Startup recovery is not a decision from the live approval plane. Use a
-		// non-overlapping lifecycle guard so the Store atomically rejects a
-		// foreign Runtime lease acquired between discovery and settlement.
-		MutationGuard:          session.ControlMutationGuard(session.ControlMutationPurposeLifecycle),
+		SessionRef:             approval.SessionRef,
+		ExpectedRevision:       expectedRevision,
+		MutationGuard:          guard,
 		ApprovalRequestID:      requestID,
 		ExpectedRequestEventID: requestEventID,
 		ExpectedRequestSeq:     requestSeq,
@@ -169,12 +191,23 @@ func abandonedApprovalSettlementRequest(
 func settleAbandonedApproval(
 	ctx context.Context,
 	store ApprovalRecoveryStore,
+	authority approvalRecoveryAuthority,
 	approval session.PendingApproval,
 	event *session.Event,
-) (time.Time, error) {
+	diagnostics *approvalRecoveryDiagnostics,
+) (retryAt time.Time, resultErr error) {
 	expectedRevision := approval.Revision
+	guard := session.ControlMutationGuard(session.ControlMutationPurposeLifecycle)
+	var acquired session.SessionFence
+	defer func() {
+		if strings.TrimSpace(acquired.FenceID) == "" {
+			return
+		}
+		fences := store.(session.SessionFenceService)
+		resultErr = errors.Join(resultErr, releaseApprovalRecoveryFence(ctx, fences, acquired, diagnostics))
+	}()
 	for range 8 {
-		_, err := store.SettlePendingApproval(ctx, abandonedApprovalSettlementRequest(approval, &expectedRevision, event))
+		_, err := store.SettlePendingApproval(ctx, abandonedApprovalSettlementRequest(approval, &expectedRevision, event, guard))
 		if err == nil {
 			return time.Time{}, nil
 		}
@@ -188,22 +221,100 @@ func settleAbandonedApproval(
 			// Settled=false because the request is no longer pending.
 			continue
 		}
-		if !errors.Is(err, session.ErrLeaseConflict) {
+		if !errors.Is(err, session.ErrFenceConflict) {
 			return time.Time{}, err
 		}
-		// Preserve progress without blocking startup. The gate schedules a scoped
-		// re-sweep at the foreign lease's durable expiry; a concurrent heartbeat may
-		// extend it and will simply return a later retry boundary.
-		retryAt := time.Now().Add(time.Second)
-		if reader, ok := store.(session.SessionLeaseReader); ok {
-			lease, readErr := reader.SessionLease(ctx, approval.SessionRef)
-			if readErr == nil && strings.TrimSpace(lease.LeaseID) != "" && !lease.ExpiresAt.IsZero() {
-				retryAt = lease.ExpiresAt
-			}
+		fences, ok := store.(session.SessionFenceService)
+		if !ok || strings.TrimSpace(authority.ownerID) == "" || authority.priorHostFences == nil || strings.TrimSpace(acquired.FenceID) != "" {
+			return time.Now().Add(time.Second), nil
 		}
-		return retryAt, nil
+		acquired, err = acquireApprovalRecoveryFence(ctx, fences, authority.priorHostFences, session.AcquireSessionFenceRequest{
+			SessionRef: approval.SessionRef, OwnerID: authority.ownerID,
+		})
+		if err != nil {
+			if errors.Is(err, session.ErrFenceConflict) {
+				return time.Now().Add(time.Second), nil
+			}
+			return time.Time{}, err
+		}
+		fenced := session.ContextWithRuntimeFence(ctx, acquired)
+		guard = session.ControlMutationGuardWithRuntimeFence(fenced, session.ControlMutationPurposeLifecycle)
 	}
 	return time.Now().Add(approvalRecoveryRetryFloor), nil
+}
+
+func releaseApprovalRecoveryFence(
+	ctx context.Context,
+	fences session.SessionFenceService,
+	fence session.SessionFence,
+	diagnostics *approvalRecoveryDiagnostics,
+) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	delay := 100 * time.Millisecond
+	for {
+		started := diagnostics.started()
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		err := fences.ReleaseSessionFence(releaseCtx, session.SessionFenceReleaseRequest(fence))
+		cancel()
+		diagnostics.observe(ctx, "startup_release", started, err)
+		if session.IsCommitted(err) || err == nil {
+			return nil
+		}
+
+		started = diagnostics.started()
+		readCtx, readCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		durable, readErr := fences.SessionFence(readCtx, fence.SessionRef)
+		readCancel()
+		diagnostics.observe(ctx, "startup_release_reconcile", started, readErr)
+		if readErr == nil && (strings.TrimSpace(durable.FenceID) == "" ||
+			durable.FenceID != fence.FenceID || durable.OwnerID != fence.OwnerID || durable.FencingToken != fence.FencingToken) {
+			return nil
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return errors.Join(err, readErr, ctxErr)
+		}
+
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return errors.Join(err, readErr, ctx.Err())
+		case <-timer.C:
+		}
+		if delay < 5*time.Second {
+			delay *= 2
+			if delay > 5*time.Second {
+				delay = 5 * time.Second
+			}
+		}
+	}
+}
+
+func acquireApprovalRecoveryFence(
+	ctx context.Context,
+	fences session.SessionFenceService,
+	replacer PriorHostFenceReplacer,
+	req session.AcquireSessionFenceRequest,
+) (session.SessionFence, error) {
+	acquired, err := replacer.ReplacePriorHostFence(ctx, req)
+	if !session.IsCommitted(err) {
+		return acquired, err
+	}
+	if approvalRecoveryFenceMatches(req, acquired) {
+		return acquired, nil
+	}
+	return acquired, err
+}
+
+func approvalRecoveryFenceMatches(req session.AcquireSessionFenceRequest, fence session.SessionFence) bool {
+	return session.NormalizeSessionRef(req.SessionRef) == session.NormalizeSessionRef(fence.SessionRef) &&
+		strings.TrimSpace(req.OwnerID) == strings.TrimSpace(fence.OwnerID) &&
+		strings.TrimSpace(fence.FenceID) != "" && fence.FencingToken > 0 &&
+		session.SessionFenceHasClaim(fence)
 }
 
 func abandonedApprovalSettlement(request *session.Event, requestID string) *session.Event {

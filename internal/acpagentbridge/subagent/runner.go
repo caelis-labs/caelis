@@ -461,7 +461,7 @@ func delegationStateCanStartTurn(state delegation.State) bool {
 }
 
 func detachedChildContext(ctx context.Context) context.Context {
-	return session.ContextWithoutRuntimeLease(context.WithoutCancel(ctx))
+	return session.ContextWithoutRuntimeFence(context.WithoutCancel(ctx))
 }
 
 func subagentSessionMeta(spawn subagent.SpawnContext) map[string]any {

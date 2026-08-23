@@ -97,8 +97,8 @@ type legacyV1Document struct {
 	PendingApprovals          map[string]*session.Event `json:"pending_approvals"`
 	AppliedTransactions       map[string]bool           `json:"applied_transactions,omitempty"`
 	AppliedTransactionDigests map[string]string         `json:"applied_transaction_digests,omitempty"`
-	Lease                     *session.SessionLease     `json:"lease,omitempty"`
-	LeaseEpoch                uint64                    `json:"lease_epoch,omitempty"`
+	Fence                     *persistedSessionFence    `json:"lease,omitempty"`
+	FenceEpoch                uint64                    `json:"lease_epoch,omitempty"`
 }
 
 type legacyV1Session struct {
@@ -211,7 +211,7 @@ func decodeLegacyV1DocumentWithReport(data []byte) (persistedDocument, Migration
 		PendingApprovals:          legacy.PendingApprovals,
 		AppliedTransactions:       legacy.AppliedTransactions,
 		AppliedTransactionDigests: legacy.AppliedTransactionDigests,
-		Lease:                     legacy.Lease,
-		LeaseEpoch:                legacy.LeaseEpoch,
+		Fence:                     legacy.Fence,
+		FenceEpoch:                legacy.FenceEpoch,
 	}, report, nil
 }
