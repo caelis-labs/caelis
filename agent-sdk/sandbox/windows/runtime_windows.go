@@ -1653,13 +1653,27 @@ func existingControlDirs(root string) []string {
 
 func resolveStateRoot(raw string) (string, error) {
 	if strings.TrimSpace(raw) != "" {
-		return filepath.Abs(strings.TrimSpace(raw))
+		root, err := pathutil.NormalizeWithBase("", raw)
+		if err != nil {
+			return "", err
+		}
+		if root == "" {
+			return "", fmt.Errorf("impl/sandbox/windows: canonical state root is required")
+		}
+		return root, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("impl/sandbox/windows: resolve user home: %w", err)
 	}
-	return filepath.Join(home, ".caelis"), nil
+	root, err := pathutil.NormalizeWithBase("", filepath.Join(home, ".caelis"))
+	if err != nil {
+		return "", fmt.Errorf("impl/sandbox/windows: resolve default state root: %w", err)
+	}
+	if root == "" {
+		return "", fmt.Errorf("impl/sandbox/windows: canonical default state root is required")
+	}
+	return root, nil
 }
 
 func firstNonEmpty(values ...string) string {

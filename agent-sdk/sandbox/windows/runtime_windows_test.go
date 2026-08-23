@@ -69,6 +69,18 @@ func TestRequiresElevatedACLRepairOnlyForTypedWriteAccessDenial(t *testing.T) {
 	}
 }
 
+func TestResolveStateRootCanonicalizesWindowsPathSpelling(t *testing.T) {
+	raw := t.TempDir()
+	got, err := resolveStateRoot(raw)
+	if err != nil {
+		t.Fatalf("resolveStateRoot() error = %v", err)
+	}
+	want := pathutil.Normalize(raw)
+	if !strings.EqualFold(got, want) {
+		t.Fatalf("resolveStateRoot(%q) = %q, want canonical %q", raw, got, want)
+	}
+}
+
 func TestHostRuntimeUseHelperProcess(t *testing.T) {
 	if os.Getenv(hostRuntimeUseHelper) != "1" {
 		return
@@ -759,11 +771,11 @@ func TestInternalRepairVerifiesAllReplacementsBeforeLegacyRetirement(t *testing.
 			{Path: workspaceEffect.Path, Entry: workspaceEffect.Entry, Receipt: workspaceReceipt},
 			{Path: externalEffect.Path, Entry: externalEffect.Entry, Receipt: externalReceipt},
 		},
-		RetireReceipts: []manifestReceipt{{Path: workspace, Entry: legacyEntry, Receipt: legacyReceipt, Applied: true}},
+		RetireReceipts: []manifestReceipt{{Path: legacyReceipt.Path, Entry: legacyEntry, Receipt: legacyReceipt, Applied: true}},
 	}
 	foreignOwner := request
 	foreignOwner.Receipts = append([]manifestReceipt(nil), request.Receipts...)
-	foreignOwner.Receipts[1].Receipt.OwnerSID = "S-1-5-32-544"
+	foreignOwner.Receipts[1].Receipt.OwnerSID = "S-1-5-18"
 	if err := runInternalRepairRequest(foreignOwner); err == nil || !strings.Contains(err.Error(), "not owned by the Host user") {
 		t.Fatalf("runInternalRepairRequest(foreign owner) error = %v, want Host-owner rejection", err)
 	}
@@ -1370,7 +1382,7 @@ func TestSharedExternalRootReceiptSurvivesCrossStateDirRetirement(t *testing.T) 
 	}
 	entry := allowEntries(policyA.sidForWriteRoot(externalRoot))[0]
 	if err := windowsA.withHostReceiptLedger(func(ledger *hostReceiptLedger) error {
-		index := hostReceiptIndex(*ledger, externalRoot, entry)
+		index := hostReceiptIndex(*ledger, pathutil.Normalize(externalRoot), entry)
 		if index < 0 {
 			t.Fatal("Host ledger has no cross-StateDir external-root receipt")
 		}
@@ -1624,7 +1636,8 @@ func TestRetiringReceiptRevivesWithoutReleasingHostReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read manifest B error = %v", err)
 	}
-	managedA := receiptIndex(manifest.ManagedReceipts, receiptEffectKey(rootA, entryA))
+	rootAKey := receiptEffectKey(pathutil.Normalize(rootA), entryA)
+	managedA := receiptIndex(manifest.ManagedReceipts, rootAKey)
 	if managedA < 0 {
 		t.Fatalf("manifest B managed receipts = %+v, want preserved root A before retirement", manifest.ManagedReceipts)
 	}
@@ -1637,7 +1650,7 @@ func TestRetiringReceiptRevivesWithoutReleasingHostReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read interrupted A-to-B manifest error = %v", err)
 	}
-	if receiptIndex(manifest.RetiringReceipts, receiptEffectKey(rootA, entryA)) < 0 {
+	if receiptIndex(manifest.RetiringReceipts, rootAKey) < 0 {
 		t.Fatalf("manifest B retiring receipts = %+v, want root A", manifest.RetiringReceipts)
 	}
 	windowsRT.cfg.WritableRoots = []string{rootA}
@@ -1655,7 +1668,7 @@ func TestRetiringReceiptRevivesWithoutReleasingHostReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read reactivated manifest error = %v", err)
 	}
-	if receiptIndex(manifest.ManagedReceipts, receiptEffectKey(rootA, entryA)) < 0 || receiptIndex(manifest.RetiringReceipts, receiptEffectKey(rootA, entryA)) >= 0 {
+	if receiptIndex(manifest.ManagedReceipts, rootAKey) < 0 || receiptIndex(manifest.RetiringReceipts, rootAKey) >= 0 {
 		t.Fatalf("reactivated manifest receipts = managed:%+v retiring:%+v, want root A managed only", manifest.ManagedReceipts, manifest.RetiringReceipts)
 	}
 	if missing, err := acl.MissingFileDACLEntries(rootA, entryA); err != nil || len(missing) != 0 {
@@ -1679,7 +1692,7 @@ func TestHostReceiptReleaseResumesAfterReferenceCommit(t *testing.T) {
 	entry := allowEntries(policy.sidForWriteRoot(externalRoot))[0]
 	reference := hostReceiptReferenceForManifest(windowsRT.manifestPath())
 	if err := windowsRT.withHostReceiptLedger(func(ledger *hostReceiptLedger) error {
-		index := hostReceiptIndex(*ledger, externalRoot, entry)
+		index := hostReceiptIndex(*ledger, pathutil.Normalize(externalRoot), entry)
 		if index < 0 {
 			t.Fatalf("Host ledger has no external-root receipt")
 		}

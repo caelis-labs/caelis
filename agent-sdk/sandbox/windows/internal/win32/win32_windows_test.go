@@ -29,6 +29,34 @@ func TestCurrentProcessUserSID(t *testing.T) {
 	}
 }
 
+func TestCurrentProcessAuthorizesOwner(t *testing.T) {
+	hostUserSID, err := CurrentProcessUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authorized, err := CurrentProcessAuthorizesOwner(hostUserSID, hostUserSID); err != nil || !authorized {
+		t.Fatalf("CurrentProcessAuthorizesOwner(Host user) = %v/%v, want true", authorized, err)
+	}
+	if authorized, err := CurrentProcessAuthorizesOwner(hostUserSID, "S-1-5-18"); err != nil || authorized {
+		t.Fatalf("CurrentProcessAuthorizesOwner(LocalSystem) = %v/%v, want false", authorized, err)
+	}
+	administratorsSID, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := windows.Token(0).IsMember(administratorsSID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := CurrentProcessAuthorizesOwner(hostUserSID, administratorsSID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("CurrentProcessAuthorizesOwner(Administrators) = %v, want enabled membership %v", got, want)
+	}
+}
+
 func TestRestrictedCurrentProcessTokenWithSIDsE2E(t *testing.T) {
 	if os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E") != "1" {
 		t.Skip("set CAELIS_WINDOWS_SANDBOX_E2E=1 to run restricted token e2e")

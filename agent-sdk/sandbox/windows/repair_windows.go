@@ -372,7 +372,11 @@ func validateRepairReceiptOwners(hostUserSID string, receiptSets ...[]manifestRe
 			if err != nil {
 				return fmt.Errorf("impl/sandbox/windows: elevated repair receipt owner on %s: %w", managed.Path, err)
 			}
-			if !strings.EqualFold(ownerSID, normalizedHostSID) {
+			authorized, err := win32.CurrentProcessAuthorizesOwner(normalizedHostSID, ownerSID)
+			if err != nil {
+				return fmt.Errorf("impl/sandbox/windows: authorize elevated repair receipt owner on %s: %w", managed.Path, err)
+			}
+			if !authorized {
 				return fmt.Errorf("impl/sandbox/windows: elevated repair refuses receipt on %s not owned by the Host user", managed.Path)
 			}
 		}
@@ -636,7 +640,11 @@ func validateRepairDirectory(label string, path string, hostUserSID string) erro
 	if err != nil {
 		return fmt.Errorf("impl/sandbox/windows: inspect %s owner %s: %w", label, path, err)
 	}
-	if !strings.EqualFold(strings.TrimSpace(daclInfo.OwnerSID), strings.TrimSpace(hostUserSID)) {
+	authorized, err := win32.CurrentProcessAuthorizesOwner(hostUserSID, daclInfo.OwnerSID)
+	if err != nil {
+		return fmt.Errorf("impl/sandbox/windows: authorize %s owner %s: %w", label, path, err)
+	}
+	if !authorized {
 		return fmt.Errorf("impl/sandbox/windows: elevated repair refuses %s path not owned by Host user %s: %s", label, hostUserSID, path)
 	}
 	return nil

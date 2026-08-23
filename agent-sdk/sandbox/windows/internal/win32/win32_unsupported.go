@@ -31,6 +31,11 @@ func CurrentProcessUserSID() (string, error) {
 	return "", fmt.Errorf("win32: current process user SID unsupported on %s", runtime.GOOS)
 }
 
+// CurrentProcessAuthorizesOwner is unavailable outside Windows.
+func CurrentProcessAuthorizesOwner(string, string) (bool, error) {
+	return false, fmt.Errorf("win32: current process owner authorization unsupported on %s", runtime.GOOS)
+}
+
 func NormalizeSID(string) (string, error) {
 	return "", fmt.Errorf("win32: SID normalization unsupported on %s", runtime.GOOS)
 }

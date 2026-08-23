@@ -104,6 +104,43 @@ func CurrentProcessUserSID() (string, error) {
 	return sid.String(), nil
 }
 
+// CurrentProcessAuthorizesOwner reports whether ownerSID is an acceptable
+// filesystem owner for elevated work performed on behalf of hostUserSID. The
+// Administrators group is accepted only when this process is still running as
+// the Host user and has that group enabled in its token.
+func CurrentProcessAuthorizesOwner(hostUserSID, ownerSID string) (bool, error) {
+	hostUserSID, err := NormalizeSID(hostUserSID)
+	if err != nil {
+		return false, err
+	}
+	ownerSID, err = NormalizeSID(ownerSID)
+	if err != nil {
+		return false, err
+	}
+	if strings.EqualFold(hostUserSID, ownerSID) {
+		return true, nil
+	}
+	administratorsSID, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		return false, fmt.Errorf("win32: resolve Administrators SID: %w", err)
+	}
+	if !strings.EqualFold(ownerSID, administratorsSID.String()) {
+		return false, nil
+	}
+	currentUserSID, err := CurrentProcessUserSID()
+	if err != nil {
+		return false, err
+	}
+	if !strings.EqualFold(hostUserSID, currentUserSID) {
+		return false, nil
+	}
+	member, err := windows.Token(0).IsMember(administratorsSID)
+	if err != nil {
+		return false, fmt.Errorf("win32: inspect current Administrators membership: %w", err)
+	}
+	return member, nil
+}
+
 // NormalizeSID validates and canonicalizes a string SID for durable identity
 // handoff between processes running under different Windows tokens.
 func NormalizeSID(value string) (string, error) {
