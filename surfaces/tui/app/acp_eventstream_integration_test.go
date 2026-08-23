@@ -840,6 +840,7 @@ func TestHandleACPEventEnvelopeMergesGrokGlobUpdate(t *testing.T) {
 func TestHandleACPEventEnvelopeMergesGrokShellUpdate(t *testing.T) {
 	t.Parallel()
 
+	const finalOutput = "commit 2e01e99694da5e29e1d68425b851daa7e41f209e\n"
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
@@ -874,18 +875,31 @@ func TestHandleACPEventEnvelopeMergesGrokShellUpdate(t *testing.T) {
 			},
 		},
 	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Final:     true,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "shell-1",
+			Status:        stringPtr(schema.ToolStatusCompleted),
+			Content: []schema.ToolCallContent{{
+				Type: "content", Content: schema.TextContent{Type: "text", Text: finalOutput},
+			}},
+		},
+	})
 
 	block := requireMainACPTurnBlockForTest(t, model)
 	if len(block.Events) != 1 {
 		t.Fatalf("main events = %#v, want one Grok shell event", block.Events)
 	}
 	event := block.Events[0]
-	if event.Name != "" || event.Args != "pwd" || event.ToolKind != schema.ToolKindExecute || event.Title != "Execute `pwd`" {
-		t.Fatalf("shell event = %#v, want merged execute kind with command args", event)
+	if event.Name != "" || event.Args != "pwd" || event.ToolKind != schema.ToolKindExecute || event.Title != "Execute `pwd`" || !event.Done || !strings.Contains(event.Output, strings.TrimSpace(finalOutput)) {
+		t.Fatalf("shell event = %#v, want sparse completion merged with execute kind and command args", event)
 	}
 	model.syncViewportContent()
 	plain := strings.Join(model.viewportPlainLines, "\n")
-	if !strings.Contains(plain, "Ran pwd") || strings.Contains(plain, "Ran Shell") {
+	if !strings.Contains(plain, "Ran pwd") || strings.Contains(plain, "Ran Shell") || strings.Contains(plain, "• Tool") {
 		t.Fatalf("viewport rendered unexpected shell header:\n%s", plain)
 	}
 }
