@@ -8,10 +8,11 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/hostownership"
 )
 
-func TestApprovalRecoveryFenceCapabilityTracksLiveHostOwnership(t *testing.T) {
+func TestApprovalRecoveryGateUsesFileStoreCapabilityUnderLiveHostOwnership(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	storeDir := t.TempDir()
@@ -50,11 +51,21 @@ func TestApprovalRecoveryFenceCapabilityTracksLiveHostOwnership(t *testing.T) {
 		func(context.Context) (func(), bool) { return currentAuthority.Pin(storeDir) },
 	)
 	replacer := approvalRecoveryFenceReplacer{fences: capability}
-	current, err := replacer.ReplacePriorHostFence(ctx, session.AcquireSessionFenceRequest{
+	gate := appserver.NewApprovalRecoveryGate(appserver.ApprovalRecoveryGateConfig{
+		Store: store, FenceOwnerID: "current-host", PriorHostFences: replacer,
+	})
+	t.Cleanup(gate.Close)
+	if err := gate.Wait(ctx); err != nil {
+		t.Fatalf("startup recovery gate = %v", err)
+	}
+	if durable, err := store.SessionFence(ctx, active.SessionRef); err != nil || durable.FenceID != "" {
+		t.Fatalf("fence after startup recovery = %#v, %v; want released", durable, err)
+	}
+	current, err := store.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
 		SessionRef: active.SessionRef, OwnerID: "current-host",
 	})
 	if err != nil || current.OwnerID != "current-host" {
-		t.Fatalf("replacement after Host restart = %#v, %v", current, err)
+		t.Fatalf("ordinary admission after Host restart = %#v, %v", current, err)
 	}
 	if err := currentAuthority.Close(); err != nil {
 		t.Fatal(err)

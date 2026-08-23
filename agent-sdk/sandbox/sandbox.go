@@ -156,7 +156,8 @@ type Config struct {
 	StateDir            string    `json:"state_dir,omitempty"`
 	// HostAuthorityDir optionally selects the Host-user authority base used by
 	// platform sandboxes for cross-StateDir coordination. It is process
-	// configuration, not workspace policy.
+	// configuration, not workspace policy, and must remain outside every
+	// sandbox-writable root.
 	HostAuthorityDir string   `json:"host_authority_dir,omitempty"`
 	WritableRoots    []string `json:"writable_roots,omitempty"`
 	ReadOnlySubpaths []string `json:"read_only_subpaths,omitempty"`

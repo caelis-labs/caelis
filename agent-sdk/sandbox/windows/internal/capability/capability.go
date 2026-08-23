@@ -40,7 +40,6 @@ const StoreVersion = 2
 // therefore cannot accumulate role-specific sandbox SIDs.
 type Scope struct {
 	HostUserSID    string
-	AuthorityID    string
 	WorkspaceRoot  string
 	SandboxEnvRoot string
 	WriteRoots     []string
@@ -190,9 +189,6 @@ func ConsumeLegacyV1(storePath string, consumed LegacyV1Store) error {
 }
 
 func bindWriteRoots(storePath string, scope Scope, create bool) (Binding, error) {
-	if strings.TrimSpace(scope.AuthorityID) == "" {
-		scope.AuthorityID = filepath.Dir(storePath)
-	}
 	scope, err := normalizeScope(scope)
 	if err != nil {
 		return Binding{}, err
@@ -257,10 +253,6 @@ func normalizeScope(scope Scope) (Scope, error) {
 	scope.WorkspaceRoot = pathutil.Normalize(scope.WorkspaceRoot)
 	if scope.WorkspaceRoot == "" {
 		return Scope{}, fmt.Errorf("capability: canonical workspace root is required")
-	}
-	scope.AuthorityID = pathutil.Normalize(scope.AuthorityID)
-	if scope.AuthorityID == "" {
-		return Scope{}, fmt.Errorf("capability: protection-domain authority is required")
 	}
 	scope.SandboxEnvRoot = pathutil.Normalize(scope.SandboxEnvRoot)
 	scope.WriteRoots = pathutil.Dedupe(scope.WriteRoots)

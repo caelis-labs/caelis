@@ -91,7 +91,7 @@ func main() {
 		localCfg.Subagents = controlPlane.Subagents
 	}
 	controlCoordinator, err := controlplane.NewCoordinator(controlplane.CoordinatorConfig{
-		Sessions: sessions, Controllers: localCfg.Controllers, Context: contextRouter,
+		Sessions: sessions, Controllers: localCfg.Controllers, Context: contextRouter, FenceOwnerID: "acp-e2e-host",
 	})
 	if err != nil {
 		log.Fatal(err)

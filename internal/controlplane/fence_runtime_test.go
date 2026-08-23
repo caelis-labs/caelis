@@ -149,7 +149,7 @@ func TestExecutePlacedCarriesFenceAndReleases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = executeWithSessionFence(context.Background(), service, "host-a", nil, context.Background(), nil, active.SessionRef, func(ctx context.Context) error {
+	err = executeWithSessionFence(context.Background(), service, "host-a", context.Background(), nil, active.SessionRef, func(ctx context.Context) error {
 		message := model.NewTextMessage(model.RoleAssistant, "fenced")
 		_, appendErr := service.AppendEvent(ctx, session.AppendEventRequest{
 			SessionRef: active.SessionRef, MutationGuard: session.RuntimeMutationGuard(ctx),
@@ -550,17 +550,6 @@ type committedAcquireFenceService struct {
 	session.SessionFenceService
 	once       sync.Once
 	dropResult bool
-}
-
-type testPriorHostFenceReplacer struct {
-	fences session.PriorHostFenceService
-}
-
-func (r testPriorHostFenceReplacer) ReplacePriorHostFence(
-	ctx context.Context,
-	req session.AcquireSessionFenceRequest,
-) (session.SessionFence, error) {
-	return r.fences.ReplacePriorHostSessionFence(ctx, req)
 }
 
 type transientReleaseFenceService struct {

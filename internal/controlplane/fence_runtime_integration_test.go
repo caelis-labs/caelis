@@ -21,7 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-func TestHostTakeoverFencesNonCooperativeToolResultAndReplaysUnknownOutcome(t *testing.T) {
+func TestStartupHostTakeoverFencesNonCooperativeToolResultAndReplaysUnknownOutcome(t *testing.T) {
 	t.Parallel()
 
 	clock := &fencingClock{now: time.Unix(1_000, 0)}
@@ -71,9 +71,24 @@ func TestHostTakeoverFencesNonCooperativeToolResultAndReplaysUnknownOutcome(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	fencedB, err := NewFencedRuntime(FencedRuntimeConfig{Runtime: runtimeB, Fences: service, OwnerID: "host-b", PriorHostFences: testPriorHostFenceReplacer{fences: priorHostFences}})
+	fencedB, err := NewFencedRuntime(FencedRuntimeConfig{Runtime: runtimeB, Fences: service, OwnerID: "host-b"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := fencedB.Run(context.Background(), agent.RunRequest{
+		SessionRef: active.SessionRef, Input: "must not take over from the Run hot path",
+		AgentSpec: agent.AgentSpec{Name: "chat", Model: recoveryModel},
+	}); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("ordinary Run admission error = %v, want ErrFenceConflict before startup recovery", err)
+	}
+	recoveredFence, err := priorHostFences.ReplacePriorHostSessionFence(context.Background(), session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "host-b-startup-recovery",
+	})
+	if err != nil {
+		t.Fatalf("startup fence recovery = %v", err)
+	}
+	if err := service.ReleaseSessionFence(context.Background(), session.SessionFenceReleaseRequest(recoveredFence)); err != nil {
+		t.Fatalf("release startup recovery fence = %v", err)
 	}
 	runB, err := fencedB.Run(context.Background(), agent.RunRequest{
 		SessionRef: active.SessionRef, Input: "recover without retrying",
@@ -108,7 +123,7 @@ func TestHostTakeoverFencesNonCooperativeToolResultAndReplaysUnknownOutcome(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	fencedC, err := NewFencedRuntime(FencedRuntimeConfig{Runtime: runtimeC, Fences: service, OwnerID: "host-c", PriorHostFences: testPriorHostFenceReplacer{fences: priorHostFences}})
+	fencedC, err := NewFencedRuntime(FencedRuntimeConfig{Runtime: runtimeC, Fences: service, OwnerID: "host-c"})
 	if err != nil {
 		t.Fatal(err)
 	}

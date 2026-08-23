@@ -561,10 +561,59 @@ func (r *runtime) ensureHostReceiptAuthority() error {
 	if !strings.EqualFold(strings.TrimSpace(info.OwnerSID), r.hostUserSID) {
 		return fmt.Errorf("impl/sandbox/windows: Host ACL receipt authority owner %s does not match Host user %s", info.OwnerSID, r.hostUserSID)
 	}
+	if err := protectHostAuthorityObject(r.hostReceiptAuthorityRoot, r.hostUserSID, true); err != nil {
+		return err
+	}
+	for _, path := range []string{r.hostReceiptLedgerPath(), r.hostReceiptLedgerPath() + ".lock"} {
+		childInfo, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("impl/sandbox/windows: inspect Host authority object %s: %w", path, err)
+		}
+		if childInfo.Mode()&os.ModeSymlink != 0 || !childInfo.Mode().IsRegular() {
+			return fmt.Errorf("impl/sandbox/windows: Host authority object %s is not a regular file", path)
+		}
+		if reparse, err := isReparsePoint(path); err != nil {
+			return fmt.Errorf("impl/sandbox/windows: inspect Host authority object %s: %w", path, err)
+		} else if reparse {
+			return fmt.Errorf("impl/sandbox/windows: Host authority object %s is a reparse point", path)
+		}
+		childACL, err := acl.InspectFileDACL(path)
+		if err != nil {
+			return err
+		}
+		if !strings.EqualFold(strings.TrimSpace(childACL.OwnerSID), r.hostUserSID) {
+			return fmt.Errorf("impl/sandbox/windows: Host authority object owner %s does not match Host user %s", childACL.OwnerSID, r.hostUserSID)
+		}
+		if err := protectHostAuthorityObject(path, r.hostUserSID, false); err != nil {
+			return err
+		}
+	}
 	if err := verifyDirectoryFileWrite(r.hostReceiptAuthorityRoot); err != nil {
 		return fmt.Errorf("impl/sandbox/windows: Host ACL receipt authority is not writable: %w", err)
 	}
 	r.hostAuthorityValidated = true
+	return nil
+}
+
+func protectHostAuthorityObject(path, hostUserSID string, inherit bool) error {
+	if err := acl.ReplaceFileDACL(path, true, acl.Entry{
+		Principal: hostUserSID,
+		Rights:    acl.FullControl,
+		Mode:      acl.Set,
+		Inherit:   inherit,
+	}); err != nil {
+		return fmt.Errorf("impl/sandbox/windows: protect Host authority object %s: %w", path, err)
+	}
+	info, err := acl.InspectFileDACL(path)
+	if err != nil {
+		return err
+	}
+	if !info.Protected || !info.HasDACL || info.HasInheritedACE {
+		return fmt.Errorf("impl/sandbox/windows: Host authority object %s does not have a protected explicit DACL", path)
+	}
 	return nil
 }
 

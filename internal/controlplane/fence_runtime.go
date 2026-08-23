@@ -28,16 +28,8 @@ type FencedRuntimeConfig struct {
 	Runtime          agent.Runtime
 	Fences           session.SessionFenceService
 	OwnerID          string
-	PriorHostFences  PriorHostFenceReplacer
 	LifecycleContext context.Context
 	Diagnostics      *slog.Logger
-}
-
-// PriorHostFenceReplacer is an opaque Host-owned capability. Product
-// composition supplies an implementation only after acquiring exclusive
-// process ownership of the durable Store.
-type PriorHostFenceReplacer interface {
-	ReplacePriorHostFence(context.Context, session.AcquireSessionFenceRequest) (session.SessionFence, error)
 }
 
 // FencedRuntime acquires a store-level execution fence before a main or
@@ -46,13 +38,12 @@ type PriorHostFenceReplacer interface {
 // not an unfenced writer.
 type FencedRuntime struct {
 	runtimeFacade
-	fences          session.SessionFenceService
-	ownerID         string
-	priorHostFences PriorHostFenceReplacer
-	lifecycleCtx    context.Context
-	diagnostics     *fencePhaseDiagnostics
-	executionsMu    sync.Mutex
-	executions      map[fencedExecutionKey]*activeFencedExecution
+	fences       session.SessionFenceService
+	ownerID      string
+	lifecycleCtx context.Context
+	diagnostics  *fencePhaseDiagnostics
+	executionsMu sync.Mutex
+	executions   map[fencedExecutionKey]*activeFencedExecution
 }
 
 func NewFencedRuntime(config FencedRuntimeConfig) (*FencedRuntime, error) {
@@ -74,13 +65,12 @@ func NewFencedRuntime(config FencedRuntimeConfig) (*FencedRuntime, error) {
 		lifecycleCtx = context.Background()
 	}
 	return &FencedRuntime{
-		runtimeFacade:   newRuntimeFacade(config.Runtime),
-		fences:          config.Fences,
-		ownerID:         ownerID,
-		priorHostFences: config.PriorHostFences,
-		lifecycleCtx:    lifecycleCtx,
-		diagnostics:     newFencePhaseDiagnostics(config.Diagnostics),
-		executions:      make(map[fencedExecutionKey]*activeFencedExecution),
+		runtimeFacade: newRuntimeFacade(config.Runtime),
+		fences:        config.Fences,
+		ownerID:       ownerID,
+		lifecycleCtx:  lifecycleCtx,
+		diagnostics:   newFencePhaseDiagnostics(config.Diagnostics),
+		executions:    make(map[fencedExecutionKey]*activeFencedExecution),
 	}, nil
 }
 
@@ -88,7 +78,7 @@ func NewFencedRuntime(config FencedRuntimeConfig) (*FencedRuntime, error) {
 // callback. Fence loss cancels the callback context so work cannot continue
 // under a replaced fence.
 func (r *FencedRuntime) ExecutePlaced(ctx context.Context, ref session.SessionRef, execute func(context.Context) error) error {
-	return executeWithSessionFence(ctx, r.fences, r.ownerID, r.priorHostFences, r.lifecycleCtx, r.diagnostics, ref, execute)
+	return executeWithSessionFence(ctx, r.fences, r.ownerID, r.lifecycleCtx, r.diagnostics, ref, execute)
 }
 
 func (r *FencedRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
@@ -148,14 +138,13 @@ func (r *FencedRuntime) runWithFence(ctx context.Context, ref session.SessionRef
 }
 
 func (r *FencedRuntime) acquireSessionFence(ctx context.Context, ref session.SessionRef) (session.SessionFence, error) {
-	return acquireSessionFence(ctx, r.fences, r.ownerID, r.priorHostFences, ref)
+	return acquireSessionFence(ctx, r.fences, r.ownerID, ref)
 }
 
 func executeWithSessionFence(
 	ctx context.Context,
 	fences session.SessionFenceService,
 	ownerID string,
-	priorHostFences PriorHostFenceReplacer,
 	lifecycleCtx context.Context,
 	diagnostics *fencePhaseDiagnostics,
 	ref session.SessionRef,
@@ -169,7 +158,7 @@ func executeWithSessionFence(
 	}
 	ref = session.NormalizeSessionRef(ref)
 	started := diagnostics.started()
-	fence, err := acquireSessionFence(ctx, fences, ownerID, priorHostFences, ref)
+	fence, err := acquireSessionFence(ctx, fences, ownerID, ref)
 	diagnostics.observe(ctx, "acquire", started, err)
 	if err != nil {
 		return err
@@ -187,20 +176,13 @@ func acquireSessionFence(
 	ctx context.Context,
 	fences session.SessionFenceService,
 	ownerID string,
-	priorHostFences PriorHostFenceReplacer,
 	ref session.SessionRef,
 ) (session.SessionFence, error) {
 	acquire := session.AcquireSessionFenceRequest{
 		SessionRef: ref,
 		OwnerID:    strings.TrimSpace(ownerID),
 	}
-	var fence session.SessionFence
-	var err error
-	if priorHostFences != nil {
-		fence, err = priorHostFences.ReplacePriorHostFence(ctx, acquire)
-	} else {
-		fence, err = fences.AcquireSessionFence(ctx, acquire)
-	}
+	fence, err := fences.AcquireSessionFence(ctx, acquire)
 	if session.IsCommitted(err) {
 		if matchesAcquiredSessionFence(acquire, fence) {
 			err = nil

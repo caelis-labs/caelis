@@ -354,7 +354,6 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		Controllers:      localCfg.Controllers,
 		Context:          contextRouter,
 		FenceOwnerID:     strings.TrimSpace(s.authorities.fenceOwnerID),
-		PriorHostFences:  s.authorities.priorHostSessionFences,
 		LifecycleContext: s.authorities.lifecycleCtx,
 		Diagnostics:      s.authorities.diagnostics,
 	})
@@ -378,7 +377,6 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		Runtime:          rt,
 		Fences:           fenceService,
 		OwnerID:          strings.TrimSpace(s.authorities.fenceOwnerID),
-		PriorHostFences:  s.authorities.priorHostSessionFences,
 		LifecycleContext: s.authorities.lifecycleCtx,
 		Diagnostics:      s.authorities.diagnostics,
 	})

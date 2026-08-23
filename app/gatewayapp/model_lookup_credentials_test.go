@@ -253,6 +253,96 @@ func TestHostCredentialRetirementRecoveryRestoresPreCASDeletion(t *testing.T) {
 	}
 }
 
+func TestHostCredentialRetirementRecoveryPreservesPostCASDeletion(t *testing.T) {
+	const (
+		helperRootEnv      = "CAELIS_RETIREMENT_POST_CAS_HELPER_ROOT"
+		helperRefEnv       = "CAELIS_RETIREMENT_POST_CAS_HELPER_REF"
+		helperRevisionEnv  = "CAELIS_RETIREMENT_POST_CAS_HELPER_REVISION"
+		helperProfileIDEnv = "CAELIS_RETIREMENT_POST_CAS_HELPER_PROFILE_ID"
+	)
+	if root := os.Getenv(helperRootEnv); root != "" {
+		ctx := context.Background()
+		credentials, err := credentialstore.New(root)
+		if err != nil {
+			panic(err)
+		}
+		revision, err := strconv.ParseUint(os.Getenv(helperRevisionEnv), 10, 64)
+		if err != nil {
+			panic(err)
+		}
+		if _, err := credentials.BeginRetirement(ctx, []string{os.Getenv(helperRefEnv)}, revision); err != nil {
+			panic(err)
+		}
+		store := newAppConfigStore(root)
+		doc, err := store.LoadContext(ctx)
+		if err != nil {
+			panic(err)
+		}
+		doc.ModelProfiles = modelprofile.Remove(doc.ModelProfiles, os.Getenv(helperProfileIDEnv))
+		if _, err := store.CompareAndSave(ctx, revision, doc); err != nil {
+			panic(err)
+		}
+		// Reproduce abrupt loss after the AppConfig CAS but before receipt
+		// removal and reference-lock release.
+		os.Exit(0)
+	}
+
+	ctx := context.Background()
+	stack, _ := newLocalStateTestStack(t)
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	before, err := stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseURL := "https://retirement-post-cas-recovery.example/v1"
+	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "retirement-post-cas-recovery-connect", ExpectedRevision: &before.ConfigurationRevision},
+		Config: appserver.ConnectConfig{
+			Provider: "openai", Model: "retirement-post-cas-recovery-model", BaseURL: baseURL, APIKey: "retirement-post-cas-recovery-secret",
+		},
+	})
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
+	}
+	configured, err := stack.composition.lookup.ResolveConfig("openai/retirement-post-cas-recovery-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := retainedAPIKeyReference("openai", "", baseURL)
+	storeRoot := filepath.Dir(stack.composition.authorities.store.path)
+	helper := exec.Command(os.Args[0], "-test.run=^TestHostCredentialRetirementRecoveryPreservesPostCASDeletion$")
+	helper.Env = append(os.Environ(),
+		helperRootEnv+"="+storeRoot,
+		helperRefEnv+"="+ref,
+		helperRevisionEnv+"="+strconv.FormatUint(connected.Revision, 10),
+		helperProfileIDEnv+"="+modelprofile.BuildProviderID(configured.ID),
+	)
+	if output, err := helper.CombinedOutput(); err != nil {
+		t.Fatalf("post-CAS retirement crash helper: %v\n%s", err, output)
+	}
+
+	restartedCredentials, err := credentialstore.New(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recoverProviderCredentialRetirements(ctx, newAppConfigStore(storeRoot), restartedCredentials); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restartedCredentials.LookupSource(ctx, ref); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("credential after post-CAS recovery = %v, want os.ErrNotExist", err)
+	}
+	callbackCalled := false
+	if err := restartedCredentials.RecoverRetirements(ctx, func(context.Context) (map[string]struct{}, error) {
+		callbackCalled = true
+		return nil, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if callbackCalled {
+		t.Fatal("post-CAS recovery left a retirement receipt for a second sweep")
+	}
+}
+
 func TestRuntimeCredentialSnapshotIgnoresOrphanModelWithRetiredCredential(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)

@@ -119,10 +119,37 @@ func newRuntimeWithHostIdentity(cfg Config, hostUserSID, authorityRoot string) (
 	}
 	r.stateCoordinator = sandboxCoordinatorFor(stateRoot)
 	r.registeredEnvRoot = r.sandboxEnvRoot(cfg.CWD)
+	configuredWriteRoots := []string{cfg.CWD, r.registeredEnvRoot}
+	for _, root := range cfg.WritableRoots {
+		normalized, normalizeErr := pathutil.NormalizeWithBase(cfg.CWD, root)
+		if normalizeErr == nil && normalized != "" {
+			configuredWriteRoots = append(configuredWriteRoots, normalized)
+		}
+	}
+	if err := validateHostAuthorityOutsideWriteRoots(authorityRoot, configuredWriteRoots); err != nil {
+		return nil, err
+	}
+	if err := r.ensureHostReceiptAuthority(); err != nil {
+		return nil, err
+	}
 	if err := r.stateCoordinator.registerRuntime(r.registeredEnvRoot); err != nil {
 		return nil, fmt.Errorf("impl/sandbox/windows: register runtime state: %w", err)
 	}
 	return r, nil
+}
+
+func validateHostAuthorityOutsideWriteRoots(authorityRoot string, writeRoots []string) error {
+	authorityRoot = pathutil.Normalize(authorityRoot)
+	for _, root := range pathutil.Dedupe(writeRoots) {
+		if pathutil.IsUnder(authorityRoot, root) {
+			return fmt.Errorf(
+				"impl/sandbox/windows: Host ACL receipt authority %s must remain outside sandbox writable root %s",
+				authorityRoot,
+				root,
+			)
+		}
+	}
+	return nil
 }
 
 func defaultHostReceiptAuthorityRoot(hostUserSID string) (string, error) {
@@ -670,6 +697,9 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindin
 	}
 	fullUserWriteRoots = pathutil.Dedupe(fullUserWriteRoots)
 	coreUserWriteRoots = pathutil.Dedupe(append(coreUserWriteRoots, commandSpecificWriteRoots...))
+	if err := validateHostAuthorityOutsideWriteRoots(r.hostReceiptAuthorityRoot, fullUserWriteRoots); err != nil {
+		return workspacePolicy{}, err
+	}
 	userWriteRoots := fullUserWriteRoots
 	if mode == ensureModeForegroundCore {
 		userWriteRoots = coreUserWriteRoots
@@ -730,7 +760,7 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindin
 		})
 	case bindingModeDerive:
 		binding, err = capability.DeriveWriteRoots(capability.Scope{
-			HostUserSID: r.hostUserSID, AuthorityID: r.hostReceiptAuthorityRoot, WorkspaceRoot: workspaceRoot, SandboxEnvRoot: envRoot, WriteRoots: writeRoots,
+			HostUserSID: r.hostUserSID, WorkspaceRoot: workspaceRoot, SandboxEnvRoot: envRoot, WriteRoots: writeRoots,
 		})
 	default:
 		err = fmt.Errorf("unsupported capability binding mode %q", bindingMode)

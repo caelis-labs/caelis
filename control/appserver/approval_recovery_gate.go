@@ -10,8 +10,9 @@ import (
 const approvalRecoveryRetryFloor = 25 * time.Millisecond
 
 // ApprovalRecoveryGate lets presentation startup proceed while preserving the
-// invariant that no new Turn begins before abandoned durable approvals have
-// been settled. A sweep error is retained and returned to every waiter.
+// invariant that no new Turn begins before prior-Host execution fences have
+// been retired and abandoned durable approvals have been settled. A sweep
+// error is retained and returned to every waiter.
 type ApprovalRecoveryGate struct {
 	startOnce   sync.Once
 	done        chan struct{}
@@ -75,7 +76,11 @@ func (g *ApprovalRecoveryGate) Start(ctx context.Context) {
 			defer g.workers.Done()
 			defer cancel()
 			started := g.diagnostics.started()
-			result, err := sweepAbandonedApprovals(workerCtx, g.store, g.authority, g.diagnostics)
+			var result approvalRecoverySweep
+			err := sweepPriorHostSessionFences(workerCtx, g.store, g.authority, g.diagnostics)
+			if err == nil {
+				result, err = sweepAbandonedApprovals(workerCtx, g.store)
+			}
 			g.mu.Lock()
 			g.err = err
 			g.mu.Unlock()
@@ -106,7 +111,7 @@ func (g *ApprovalRecoveryGate) retryDeferred(ctx context.Context, retryAt time.T
 		case <-timer.C:
 		}
 		started := g.diagnostics.started()
-		result, err := sweepAbandonedApprovals(ctx, g.store, g.authority, g.diagnostics)
+		result, err := sweepAbandonedApprovals(ctx, g.store)
 		g.diagnostics.observe(ctx, "startup_recovery_retry", started, err)
 		if err != nil {
 			if ctx.Err() != nil {

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
 	"golang.org/x/sys/windows"
 )
 
@@ -41,13 +42,13 @@ func TestReplaceFileAtomicWindowsRetriesTransientSharingViolation(t *testing.T) 
 		closed <- windows.CloseHandle(handle)
 	}()
 
-	replaceErr := replaceFileAtomic(source, destination)
+	replaceErr := atomicfile.Replace(source, destination)
 	closeErr := <-closed
 	if closeErr != nil {
 		t.Fatalf("CloseHandle() error = %v", closeErr)
 	}
 	if replaceErr != nil {
-		t.Fatalf("replaceFileAtomic() error = %v", replaceErr)
+		t.Fatalf("atomicfile.Replace() error = %v", replaceErr)
 	}
 	got, err := os.ReadFile(destination)
 	if err != nil {

@@ -247,7 +247,8 @@ func TestCoordinatorOwnsActivationAndAtomicHandoffCommit(t *testing.T) {
 	traceSink := &controlTraceSink{}
 	coordinator, err := NewCoordinator(CoordinatorConfig{
 		Sessions: sessions, Controllers: backend, Context: router,
-		Clock: func() time.Time { return time.Unix(20, 0) }, IDGenerator: func() string { return "epoch-kernel" },
+		FenceOwnerID: "test-host",
+		Clock:        func() time.Time { return time.Unix(20, 0) }, IDGenerator: func() string { return "epoch-kernel" },
 		TraceSink: traceSink,
 	})
 	if err != nil {
@@ -293,6 +294,9 @@ func TestCoordinatorRequiresSessionFenceService(t *testing.T) {
 	if _, err := NewCoordinator(CoordinatorConfig{Sessions: unfenced, Context: router}); err == nil || !strings.Contains(err.Error(), "must provide execution fences") {
 		t.Fatalf("NewCoordinator() error = %v, want required execution fence service", err)
 	}
+	if _, err := NewCoordinator(CoordinatorConfig{Sessions: sessions, Context: router}); err == nil || !strings.Contains(err.Error(), "requires fence_owner_id") {
+		t.Fatalf("NewCoordinator() error = %v, want explicit shared fence owner", err)
+	}
 }
 
 func TestCoordinatorHandoffDoesNotBypassActiveTurnFence(t *testing.T) {
@@ -317,7 +321,7 @@ func TestCoordinatorHandoffDoesNotBypassActiveTurnFence(t *testing.T) {
 	backend := &recordingControllerBackend{activation: session.ControllerBinding{
 		Kind: session.ControllerKindACP, ControllerID: "remote-1", AgentName: "claude", EpochID: "remote-epoch",
 	}}
-	coordinator, err := NewCoordinator(CoordinatorConfig{Sessions: sessions, Controllers: backend, Context: router})
+	coordinator, err := NewCoordinator(CoordinatorConfig{Sessions: sessions, Controllers: backend, Context: router, FenceOwnerID: "test-host"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +391,7 @@ func TestCoordinatorDeactivatesNewEndpointWhenAtomicCommitFails(t *testing.T) {
 	backend := &recordingControllerBackend{activation: session.ControllerBinding{
 		Kind: session.ControllerKindACP, ControllerID: "remote-1", AgentName: "codex", EpochID: "remote-epoch",
 	}}
-	coordinator, err := NewCoordinator(CoordinatorConfig{Sessions: sessions, Controllers: backend, Context: router})
+	coordinator, err := NewCoordinator(CoordinatorConfig{Sessions: sessions, Controllers: backend, Context: router, FenceOwnerID: "test-host"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +432,7 @@ func TestCoordinatorKeepsActivationWhenCommitReportsAlreadyCommitted(t *testing.
 		t.Fatal(err)
 	}
 	backend := &recordingControllerBackend{activation: committedBinding}
-	coordinator, err := NewCoordinator(CoordinatorConfig{Sessions: sessions, Controllers: backend, Context: router})
+	coordinator, err := NewCoordinator(CoordinatorConfig{Sessions: sessions, Controllers: backend, Context: router, FenceOwnerID: "test-host"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +474,7 @@ func TestCoordinatorOwnsControllerProcessReattachAndBindingRefresh(t *testing.T)
 		Kind: session.ControllerKindACP, ControllerID: "new-controller", AgentName: "codex",
 		EpochID: "new-epoch", RemoteSessionID: "new-session", ContextSyncSeq: 0,
 	}}
-	coordinator, err := NewCoordinator(CoordinatorConfig{Sessions: sessions, Controllers: backend, Context: router})
+	coordinator, err := NewCoordinator(CoordinatorConfig{Sessions: sessions, Controllers: backend, Context: router, FenceOwnerID: "test-host"})
 	if err != nil {
 		t.Fatal(err)
 	}

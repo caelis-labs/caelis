@@ -8,7 +8,7 @@ import (
 )
 
 // lostRunRecoverer is a Control-local optional Runtime capability. It may
-// quiesce only a process-local producer that has already lost durable lease
+// quiesce only a process-local producer that has already lost durable fence
 // authority; a healthy active run remains a normal single-flight conflict.
 type lostRunRecoverer interface {
 	RecoverLostRun(context.Context, session.SessionRef) (bool, error)

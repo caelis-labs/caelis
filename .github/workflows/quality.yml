@@ -74,6 +74,23 @@ jobs:
       - name: Focused Agent SDK race
         run: make sdk-race
 
+  control-race:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Fence, recovery, and credential race
+        run: go test -race -count=1 ./internal/controlplane ./control/appserver ./control/modelconfig/credentialstore ./app/gatewayapp
+
   product-acceptance:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -108,5 +125,8 @@ jobs:
       - name: Windows persistence product acceptance
         run: go test -count=1 ./agent-sdk/session/file
 
+      - name: Windows sandbox native unit coverage
+        run: go test -count=1 ./agent-sdk/sandbox/windows/...
+
       - name: Windows control and credential runtime
-        run: go test -count=1 ./control/appserver ./app/controlserver
+        run: go test -count=1 ./control/appserver ./control/modelconfig/credentialstore ./app/controlserver ./app/gatewayapp

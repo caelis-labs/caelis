@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
 )
 
 const schemaVersion = 1
@@ -264,7 +266,7 @@ func atomicWrite(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := atomicfile.Replace(tmpPath, path); err != nil {
 		return err
 	}
 	committed = true

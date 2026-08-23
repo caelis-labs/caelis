@@ -1,6 +1,8 @@
 //go:build windows
 
-package configstore
+// Package atomicfile owns the platform-specific final replacement primitive
+// shared by durable stores.
+package atomicfile
 
 import (
 	"errors"
@@ -15,7 +17,9 @@ const (
 	windowsReplaceRetryDelay = 10 * time.Millisecond
 )
 
-func replaceFileAtomic(source, destination string) error {
+// Replace retries transient Windows sharing and lock failures while preserving
+// the source temporary file for every retry attempt.
+func Replace(source, destination string) error {
 	var err error
 	for attempt := 0; attempt < windowsReplaceRetryLimit; attempt++ {
 		err = os.Rename(source, destination)

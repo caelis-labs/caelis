@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/plugin"
@@ -243,7 +244,7 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 		}
 	}
 	if ops.Rename == nil {
-		ops.Rename = replaceFileAtomic
+		ops.Rename = atomicfile.Replace
 	}
 	if ops.Chmod == nil {
 		ops.Chmod = os.Chmod

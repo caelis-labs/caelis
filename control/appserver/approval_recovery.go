@@ -3,6 +3,7 @@ package appserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -23,7 +24,7 @@ type ApprovalRecoveryStore interface {
 // A request protected by an execution fence belongs to another active
 // Runtime and is left for a later sweep after that execution fence releases.
 func SweepAbandonedApprovals(ctx context.Context, store ApprovalRecoveryStore) error {
-	_, err := sweepAbandonedApprovals(ctx, store, approvalRecoveryAuthority{}, nil)
+	_, err := sweepAbandonedApprovals(ctx, store)
 	return err
 }
 
@@ -56,8 +57,6 @@ func (r *approvalRecoverySweep) deferUntil(candidate time.Time) {
 func sweepAbandonedApprovals(
 	ctx context.Context,
 	store ApprovalRecoveryStore,
-	authority approvalRecoveryAuthority,
-	diagnostics *approvalRecoveryDiagnostics,
 ) (approvalRecoverySweep, error) {
 	var result approvalRecoverySweep
 	if store == nil {
@@ -77,7 +76,7 @@ func sweepAbandonedApprovals(
 				continue
 			}
 			event := abandonedApprovalSettlement(approval.Request, requestID)
-			retryAt, err := settleAbandonedApproval(ctx, store, authority, approval, event, diagnostics)
+			retryAt, err := settleAbandonedApproval(ctx, store, approval, event)
 			if err != nil {
 				return result, err
 			}
@@ -92,7 +91,7 @@ func sweepAbandonedApprovals(
 			return result, err
 		}
 		for _, summary := range list.Sessions {
-			retryAt, err := sweepSessionApprovals(ctx, store, authority, summary.SessionRef, diagnostics)
+			retryAt, err := sweepSessionApprovals(ctx, store, summary.SessionRef)
 			if err != nil {
 				return result, err
 			}
@@ -105,12 +104,62 @@ func sweepAbandonedApprovals(
 	}
 }
 
-func sweepSessionApprovals(
+// sweepPriorHostSessionFences is the only product path allowed to replace a
+// durable execution fence. Host ownership proves the prior process is gone,
+// and the startup gate completes this full sweep before admitting new Turns.
+func sweepPriorHostSessionFences(
 	ctx context.Context,
 	store ApprovalRecoveryStore,
 	authority approvalRecoveryAuthority,
-	ref session.SessionRef,
 	diagnostics *approvalRecoveryDiagnostics,
+) error {
+	ownerID := strings.TrimSpace(authority.ownerID)
+	if authority.priorHostFences == nil {
+		return nil
+	}
+	if ownerID == "" {
+		return fmt.Errorf("appserver: prior Host fence recovery requires fence_owner_id")
+	}
+	fences, ok := store.(session.SessionFenceService)
+	if !ok {
+		return fmt.Errorf("appserver: prior Host fence recovery requires a session fence service")
+	}
+	cursor := ""
+	for {
+		list, err := store.ListSessions(ctx, session.ListSessionsRequest{Cursor: cursor, Limit: 200})
+		if err != nil {
+			return err
+		}
+		for _, summary := range list.Sessions {
+			durable, err := fences.SessionFence(ctx, summary.SessionRef)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(durable.FenceID) == "" || strings.TrimSpace(durable.OwnerID) == ownerID {
+				continue
+			}
+			recovered, err := acquireApprovalRecoveryFence(ctx, authority.priorHostFences, session.AcquireSessionFenceRequest{
+				SessionRef: summary.SessionRef,
+				OwnerID:    ownerID,
+			})
+			if err != nil {
+				return err
+			}
+			if err := releaseApprovalRecoveryFence(ctx, fences, recovered, diagnostics); err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(list.NextCursor) == "" || list.NextCursor == cursor {
+			return nil
+		}
+		cursor = list.NextCursor
+	}
+}
+
+func sweepSessionApprovals(
+	ctx context.Context,
+	store ApprovalRecoveryStore,
+	ref session.SessionRef,
 ) (time.Time, error) {
 	pending := map[string]*session.Event{}
 	afterSeq := uint64(0)
@@ -148,11 +197,11 @@ func sweepSessionApprovals(
 	var retryAt time.Time
 	for requestID, request := range pending {
 		event := abandonedApprovalSettlement(request, requestID)
-		candidate, err := settleAbandonedApproval(ctx, store, authority, session.PendingApproval{
+		candidate, err := settleAbandonedApproval(ctx, store, session.PendingApproval{
 			SessionRef: ref,
 			Revision:   active.Revision,
 			Request:    request,
-		}, event, diagnostics)
+		}, event)
 		if err != nil {
 			return time.Time{}, err
 		}
@@ -191,21 +240,11 @@ func abandonedApprovalSettlementRequest(
 func settleAbandonedApproval(
 	ctx context.Context,
 	store ApprovalRecoveryStore,
-	authority approvalRecoveryAuthority,
 	approval session.PendingApproval,
 	event *session.Event,
-	diagnostics *approvalRecoveryDiagnostics,
-) (retryAt time.Time, resultErr error) {
+) (time.Time, error) {
 	expectedRevision := approval.Revision
 	guard := session.ControlMutationGuard(session.ControlMutationPurposeLifecycle)
-	var acquired session.SessionFence
-	defer func() {
-		if strings.TrimSpace(acquired.FenceID) == "" {
-			return
-		}
-		fences := store.(session.SessionFenceService)
-		resultErr = errors.Join(resultErr, releaseApprovalRecoveryFence(ctx, fences, acquired, diagnostics))
-	}()
 	for range 8 {
 		_, err := store.SettlePendingApproval(ctx, abandonedApprovalSettlementRequest(approval, &expectedRevision, event, guard))
 		if err == nil {
@@ -224,21 +263,7 @@ func settleAbandonedApproval(
 		if !errors.Is(err, session.ErrFenceConflict) {
 			return time.Time{}, err
 		}
-		fences, ok := store.(session.SessionFenceService)
-		if !ok || strings.TrimSpace(authority.ownerID) == "" || authority.priorHostFences == nil || strings.TrimSpace(acquired.FenceID) != "" {
-			return time.Now().Add(time.Second), nil
-		}
-		acquired, err = acquireApprovalRecoveryFence(ctx, fences, authority.priorHostFences, session.AcquireSessionFenceRequest{
-			SessionRef: approval.SessionRef, OwnerID: authority.ownerID,
-		})
-		if err != nil {
-			if errors.Is(err, session.ErrFenceConflict) {
-				return time.Now().Add(time.Second), nil
-			}
-			return time.Time{}, err
-		}
-		fenced := session.ContextWithRuntimeFence(ctx, acquired)
-		guard = session.ControlMutationGuardWithRuntimeFence(fenced, session.ControlMutationPurposeLifecycle)
+		return time.Now().Add(time.Second), nil
 	}
 	return time.Now().Add(approvalRecoveryRetryFloor), nil
 }
@@ -296,7 +321,6 @@ func releaseApprovalRecoveryFence(
 
 func acquireApprovalRecoveryFence(
 	ctx context.Context,
-	fences session.SessionFenceService,
 	replacer PriorHostFenceReplacer,
 	req session.AcquireSessionFenceRequest,
 ) (session.SessionFence, error) {

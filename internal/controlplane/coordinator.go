@@ -23,7 +23,6 @@ type CoordinatorConfig struct {
 	Clock                 func() time.Time
 	IDGenerator           func() string
 	FenceOwnerID          string
-	PriorHostFences       PriorHostFenceReplacer
 	LifecycleContext      context.Context
 	Diagnostics           *slog.Logger
 	LifecycleInterceptors []agent.LifecycleInterceptor
@@ -34,17 +33,16 @@ type CoordinatorConfig struct {
 // binding/event commit. Participant execution is delegated to the SDK's
 // neutral participant mechanism.
 type Coordinator struct {
-	sessions        session.Service
-	controllers     controller.Backend
-	context         controller.ContextRouter
-	clock           func() time.Time
-	idGenerator     func() string
-	lifecycle       agent.LifecycleOptions
-	fences          session.SessionFenceService
-	fenceOwnerID    string
-	priorHostFences PriorHostFenceReplacer
-	lifecycleCtx    context.Context
-	diagnostics     *fencePhaseDiagnostics
+	sessions     session.Service
+	controllers  controller.Backend
+	context      controller.ContextRouter
+	clock        func() time.Time
+	idGenerator  func() string
+	lifecycle    agent.LifecycleOptions
+	fences       session.SessionFenceService
+	fenceOwnerID string
+	lifecycleCtx context.Context
+	diagnostics  *fencePhaseDiagnostics
 }
 
 // NewCoordinator constructs one Control-owned session coordinator.
@@ -64,23 +62,22 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 	}
 	fenceOwnerID := strings.TrimSpace(cfg.FenceOwnerID)
 	if fenceOwnerID == "" {
-		fenceOwnerID = "control-host-" + strings.ToLower(rand.Text())
+		return nil, fmt.Errorf("controlplane: coordinator requires fence_owner_id")
 	}
 	lifecycleCtx := cfg.LifecycleContext
 	if lifecycleCtx == nil {
 		lifecycleCtx = context.Background()
 	}
 	return &Coordinator{
-		sessions:        cfg.Sessions,
-		controllers:     cfg.Controllers,
-		context:         cfg.Context,
-		clock:           cfg.Clock,
-		idGenerator:     cfg.IDGenerator,
-		fences:          fences,
-		fenceOwnerID:    fenceOwnerID,
-		priorHostFences: cfg.PriorHostFences,
-		lifecycleCtx:    lifecycleCtx,
-		diagnostics:     newFencePhaseDiagnostics(cfg.Diagnostics),
+		sessions:     cfg.Sessions,
+		controllers:  cfg.Controllers,
+		context:      cfg.Context,
+		clock:        cfg.Clock,
+		idGenerator:  cfg.IDGenerator,
+		fences:       fences,
+		fenceOwnerID: fenceOwnerID,
+		lifecycleCtx: lifecycleCtx,
+		diagnostics:  newFencePhaseDiagnostics(cfg.Diagnostics),
 		lifecycle: agent.LifecycleOptions{
 			Interceptors: append([]agent.LifecycleInterceptor(nil), cfg.LifecycleInterceptors...),
 			TraceSink:    cfg.TraceSink,
@@ -168,7 +165,6 @@ func (c *Coordinator) HandoffController(ctx context.Context, req agent.HandoffCo
 			callCtx,
 			c.fences,
 			c.fenceOwnerID,
-			c.priorHostFences,
 			c.lifecycleCtx,
 			c.diagnostics,
 			event.SessionRef,

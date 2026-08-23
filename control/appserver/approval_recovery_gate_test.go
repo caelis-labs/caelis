@@ -376,6 +376,59 @@ func TestApprovalRecoveryGateReplacesPriorHostFenceAtStartup(t *testing.T) {
 	}
 }
 
+func TestApprovalRecoveryGateRequiresOwnerForPriorHostCapability(t *testing.T) {
+	store, priorHostFences := inmemory.NewStoreWithPriorHostFences(inmemory.Config{}, allowPriorHostFence)
+	gate := NewApprovalRecoveryGate(ApprovalRecoveryGateConfig{
+		Store: store, PriorHostFences: testPriorHostFenceReplacer{fences: priorHostFences},
+	})
+	t.Cleanup(gate.Close)
+	err := gate.Wait(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "requires fence_owner_id") {
+		t.Fatalf("Wait() error = %v, want explicit Host fence owner", err)
+	}
+}
+
+func TestApprovalRecoveryGateReleasesPriorHostFenceWithoutPendingApproval(t *testing.T) {
+	store, priorHostFences := inmemory.NewStoreWithPriorHostFences(inmemory.Config{
+		SessionIDGenerator: func() string { return "prior-host-fence-only-session" },
+	}, allowPriorHostFence)
+	ctx := context.Background()
+	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := store.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "prior-host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gate := NewApprovalRecoveryGate(ApprovalRecoveryGateConfig{
+		Store: store, FenceOwnerID: "current-host", PriorHostFences: testPriorHostFenceReplacer{fences: priorHostFences},
+	})
+	t.Cleanup(gate.Close)
+	if err := gate.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	durable, err := store.SessionFence(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if durable.FenceID != "" {
+		t.Fatalf("startup fence-only recovery = %#v, want released prior fence %#v", durable, prior)
+	}
+	ordinary, err := store.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "current-host",
+	})
+	if err != nil {
+		t.Fatalf("ordinary admission after startup sweep = %v", err)
+	}
+	if ordinary.FencingToken <= prior.FencingToken {
+		t.Fatalf("ordinary fence token = %d, want after prior token %d", ordinary.FencingToken, prior.FencingToken)
+	}
+}
+
 func TestApprovalRecoveryGateRetriesTransientFenceRelease(t *testing.T) {
 	store, priorHostFences := inmemory.NewStoreWithPriorHostFences(inmemory.Config{
 		SessionIDGenerator: func() string { return "recovery-release-retry-session" },

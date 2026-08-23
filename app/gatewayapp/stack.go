@@ -27,7 +27,6 @@ import (
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/internal/controlplane"
 	"github.com/caelis-labs/caelis/internal/hostownership"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 
@@ -377,11 +376,9 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	sessions := sessionStore
 	taskStore := sessionfile.NewTaskStore(sessionStore)
 	var priorHostFences appserver.PriorHostFenceReplacer
-	var runtimePriorHostFences controlplane.PriorHostFenceReplacer
 	if cfg.HostOwnership != nil {
 		replacer := approvalRecoveryFenceReplacer{fences: priorHostFenceCapability}
 		priorHostFences = replacer
-		runtimePriorHostFences = replacer
 	}
 	approvalRecovery := appserver.NewApprovalRecoveryGate(appserver.ApprovalRecoveryGateConfig{
 		Store: sessions, FenceOwnerID: fenceOwnerID, PriorHostFences: priorHostFences, Diagnostics: runtimeDiagnostics,
@@ -490,7 +487,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 				diagnostics:             runtimeDiagnostics,
 				configMigration:         configStore.MigrationReport(),
 				fenceOwnerID:            fenceOwnerID,
-				priorHostSessionFences:  runtimePriorHostFences,
 				taskStore:               taskStore,
 				controlFeeds:            controlFeeds,
 				approvalRecovery:        approvalRecovery,

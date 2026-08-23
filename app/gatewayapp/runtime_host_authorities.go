@@ -11,7 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
-	"github.com/caelis-labs/caelis/internal/controlplane"
 )
 
 // runtimeHostAuthorities is the immutable set of process services borrowed by
@@ -28,7 +27,6 @@ type runtimeHostAuthorities struct {
 	diagnostics             *slog.Logger
 	configMigration         configstore.MigrationReport
 	fenceOwnerID            string
-	priorHostSessionFences  controlplane.PriorHostFenceReplacer
 	taskStore               task.Store
 	controlFeeds            appserver.FeedRegistry
 	approvalRecovery        *appserver.ApprovalRecoveryGate

@@ -915,6 +915,59 @@ func TestPolicyForRequestUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T
 	}
 }
 
+func TestNewRejectsHostAuthorityInsideWritableRoot(t *testing.T) {
+	workspace := t.TempDir()
+	_, err := New(sandbox.Config{
+		CWD:              workspace,
+		StateDir:         t.TempDir(),
+		HostAuthorityDir: filepath.Join(workspace, ".caelis-host-authority"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "must remain outside sandbox writable root") {
+		t.Fatalf("New(Host authority under workspace) error = %v, want writable-root overlap rejection", err)
+	}
+}
+
+func TestPolicyRejectsDynamicWriteRootCoveringHostAuthority(t *testing.T) {
+	workspace := t.TempDir()
+	authorityBase := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir(), HostAuthorityDir: authorityBase})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	_, err = windowsRT.policyForRequest(sandbox.CommandRequest{
+		Dir: workspace,
+		Constraints: sandbox.Constraints{
+			Route:      sandbox.RouteSandbox,
+			Backend:    sandbox.BackendWindows,
+			Permission: sandbox.PermissionWorkspaceWrite,
+			PathRules: []sandbox.PathRule{{
+				Path: authorityBase, Access: sandbox.PathAccessReadWrite,
+			}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "must remain outside sandbox writable root") {
+		t.Fatalf("policyForRequest(authority write rule) error = %v, want overlap rejection", err)
+	}
+}
+
+func TestNewProtectsHostAuthorityWithExplicitDACL(t *testing.T) {
+	rt, err := New(sandbox.Config{CWD: t.TempDir(), StateDir: t.TempDir(), HostAuthorityDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	info, err := acl.InspectFileDACL(windowsRT.hostReceiptAuthorityRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Protected || !info.HasDACL || info.HasInheritedACE || info.ACECount == 0 {
+		t.Fatalf("Host authority DACL = %+v, want protected explicit Host-user entries", info)
+	}
+}
+
 func TestFileSystemForIgnoresWindowsHiddenPathRules(t *testing.T) {
 	workspace := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside")
