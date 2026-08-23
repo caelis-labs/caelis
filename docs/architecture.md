@@ -88,12 +88,23 @@ Document responsibilities are intentionally separate:
   construction. Provider endpoints are infrastructure and are not selectable
   `ModelProfile` values. Persisted AppConfig contains only an opaque credential
   reference; credential material remains in the Control credential store.
-  API-key material is stable Host endpoint state rather than model-catalog
-  state: deleting the last model retains it so pinned Runtime generations keep
-  their immutable credential source and a later `/connect` can reuse it.
-  Explicit credential forgetting is a separate future Host capability that
-  must fence every cross-process Runtime generation; until then the credential
-  lifetime and removal condition are the Host state directory itself.
+  API-key material follows canonical ModelProfile reachability through its
+  provider endpoint. Deleting one of several profiles sharing a credential
+  retains it; deleting the final profile first persists a secure exact-byte
+  retirement receipt, then removes the source under the reference lock before
+  the AppConfig CAS. AppConfig persistence never falls back to an in-place
+  truncate when atomic replacement fails, so a rejected CAS leaves the previous
+  canonical document readable and restores the prior source before readers
+  resume. Startup and later model operations reconcile an interrupted receipt
+  against canonical reachability while holding the same reference locks, and
+  never overwrite a newer replacement. `/connect` reuses credentials only
+  through a still-reachable endpoint. Session Runtime activation pins only
+  canonically reachable API-key sources, plus an explicit process-local Session
+  pin, from a revision-stable AppConfig/credential observation into a
+  Runtime-owned process-local snapshot; Control extends that snapshot only when
+  a later model pin commits and copies child Session pins from it. Host
+  credential retirement therefore cannot interrupt work that already owns a
+  Runtime reference.
   Interactive Codex and Grok authentication is admitted by a
   fail-fast, process-local gate per OAuth flow. It never creates a durable
   command-lock file or waits behind another user interaction. Short credential
@@ -256,7 +267,7 @@ Document responsibilities are intentionally separate:
   document it read. Configuration writers use the configuration store's short
   atomic compare-and-save boundary; current-schema readers consume a complete
   atomic-replacement snapshot without taking the writer lock. Only legacy
-  migration and the bounded Windows non-atomic fallback enter a read-side lock.
+  migration enters a read-side lock.
   Writers do not scan or rewrite already activated Session state. Runtime
   release first hides its Runtime from routing, waits already-routed synchronous
   mutations and Runtime producers, and shutdown drains in-flight assembly and

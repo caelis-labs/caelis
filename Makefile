@@ -6,7 +6,7 @@ BUILD_VERSION ?= $(if $(and $(strip $(GIT_TAG)),$(filter-out dirty,$(GIT_DIRTY))
 BUILD_KIND ?= $(if $(filter dev,$(BUILD_VERSION)),dev,release)
 BUILD_ID ?= $(COMMIT)@$(DATE)
 LDFLAGS ?= -X github.com/caelis-labs/caelis/internal/version.Version=$(BUILD_VERSION) -X github.com/caelis-labs/caelis/internal/version.Commit=$(COMMIT) -X github.com/caelis-labs/caelis/internal/version.Date=$(DATE) -X github.com/caelis-labs/caelis/internal/version.BuildID=$(BUILD_ID) -X github.com/caelis-labs/caelis/internal/version.BuildKind=$(BUILD_KIND)
-GOFILES_CMD = if command -v rg >/dev/null 2>&1; then rg --files -0 -g '*.go'; else find . -type f -name '*.go' -print0; fi
+GOFILES_CMD = if command -v rg >/dev/null 2>&1; then rg --files -0 -g '*.go'; else find . -type f -name '*.go' ! -path './.git/*' ! -path './.tmp/*' -print0; fi
 GO_TEST_TIMEOUT ?= 5m
 EVAL_REGRESSION_SELECTOR ?= ^TestRegression
 TUI_GOLDEN_SELECTOR ?= ^TestRegressionACPEventstreamToolCallFrame120x32$$

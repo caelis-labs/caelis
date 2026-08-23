@@ -4047,6 +4047,7 @@ func TestRuntimeTerminalSubscribePreservesCompletionTailDuringTaskWait(t *testin
 		t.Fatalf("New() error = %v", err)
 	}
 	backend := hostRuntimeForTest(t, workdir)
+	t.Cleanup(func() { _ = backend.Close() })
 	runtime.tasks.registerSandboxRuntime(backend)
 
 	const prefix = "步骤 5/5: 处理中...\n"
@@ -4056,7 +4057,6 @@ func TestRuntimeTerminalSubscribePreservesCompletionTailDuringTaskWait(t *testin
 	yield := 5 * time.Millisecond
 	waitBudget := 3 * time.Second
 	if goruntime.GOOS == "windows" {
-		delay = 2 * time.Second
 		command = fmt.Sprintf("[Console]::Out.Write(%s); Start-Sleep -Milliseconds %d; [Console]::Out.Write(%s)",
 			powershellQuoteForTest(prefix), delay.Milliseconds(), powershellQuoteForTest(tail))
 		yield = 100 * time.Millisecond
@@ -4074,9 +4074,6 @@ func TestRuntimeTerminalSubscribePreservesCompletionTailDuringTaskWait(t *testin
 	if !snapshot.Running {
 		t.Fatalf("StartCommand() snapshot = %#v, want running task", snapshot)
 	}
-	initial := taskRawStringValue(snapshot.Result["latest_output"])
-	cursor, _ := taskInt64Value(snapshot.Metadata["output_cursor"])
-
 	type subscriptionResult struct {
 		frames []stream.Frame
 		err    error
@@ -4084,14 +4081,15 @@ func TestRuntimeTerminalSubscribePreservesCompletionTailDuringTaskWait(t *testin
 	streamCtx, cancel := context.WithTimeout(context.Background(), waitBudget)
 	defer cancel()
 	subscriptionDone := make(chan subscriptionResult, 1)
+	prefixObserved := make(chan struct{}, 1)
 	go func() {
 		var result subscriptionResult
+		var observed strings.Builder
 		for frame, streamErr := range runtime.Streams().Subscribe(streamCtx, stream.SubscribeRequest{
 			Ref: stream.Ref{
 				SessionID: activeSession.SessionID,
 				TaskID:    snapshot.Ref.TaskID,
 			},
-			Cursor: stream.Cursor{Output: cursor},
 		}) {
 			if streamErr != nil {
 				result.err = streamErr
@@ -4099,21 +4097,41 @@ func TestRuntimeTerminalSubscribePreservesCompletionTailDuringTaskWait(t *testin
 			}
 			if frame != nil {
 				result.frames = append(result.frames, stream.CloneFrame(*frame))
+				observed.WriteString(frame.Text)
+				if strings.Contains(observed.String(), prefix) {
+					select {
+					case prefixObserved <- struct{}{}:
+					default:
+					}
+				}
 			}
 		}
 		subscriptionDone <- result
 	}()
 
-	time.Sleep(min(delay/4, 50*time.Millisecond))
-	waited, err := runtime.tasks.Wait(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
-		TaskID:    snapshot.Ref.TaskID,
-		Yield:     waitBudget,
-		Principal: session.ActorKindController,
-	})
-	if err != nil {
-		t.Fatalf("TASK wait error = %v", err)
+	select {
+	case <-prefixObserved:
+	case early := <-subscriptionDone:
+		t.Fatalf("terminal subscription closed before prefix: %#v", early)
+	case <-streamCtx.Done():
+		t.Fatalf("terminal subscription did not observe prefix: %v", streamCtx.Err())
 	}
-	if waited.Running || waited.State != taskapi.StateCompleted {
+
+	var waited taskapi.Snapshot
+	for {
+		waited, err = runtime.tasks.Wait(streamCtx, activeSession.SessionRef, taskapi.ControlRequest{
+			TaskID:    snapshot.Ref.TaskID,
+			Yield:     waitBudget,
+			Principal: session.ActorKindController,
+		})
+		if err != nil {
+			t.Fatalf("TASK wait error = %v", err)
+		}
+		if !waited.Running {
+			break
+		}
+	}
+	if waited.State != taskapi.StateCompleted {
 		t.Fatalf("TASK wait snapshot = %#v, want completed", waited)
 	}
 	if waited.Metadata["parent_call"] != "call-terminal-task-wait-tail" || waited.Metadata["parent_tool"] != shell.RunCommandToolName {
@@ -4148,8 +4166,8 @@ func TestRuntimeTerminalSubscribePreservesCompletionTailDuringTaskWait(t *testin
 		}
 	}
 	want := taskRawStringValue(waited.Result["result"])
-	if got := initial + streamed.String(); got != want || want != prefix+tail {
-		t.Fatalf("initial + streamed output = %q, TASK result = %q, want %q", got, want, prefix+tail)
+	if got := streamed.String(); got != want || want != prefix+tail {
+		t.Fatalf("streamed output = %q, TASK result = %q, want %q", got, want, prefix+tail)
 	}
 	if tailIndex < 0 || closeIndex < 0 || tailIndex >= closeIndex {
 		t.Fatalf("frames = %#v, want completion tail before terminal close", subscribed.frames)

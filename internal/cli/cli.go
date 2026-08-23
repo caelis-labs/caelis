@@ -92,6 +92,8 @@ func workspaceAddressFromCWD(cwd string) (string, string, error) {
 	return workspace.Key, workspace.CWD, nil
 }
 
+var getWorkingDirectory = os.Getwd
+
 func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) (runErr error) {
 	return runWithProductClientOpener(ctx, args, stdin, stdout, stderr, openProductClients)
 }
@@ -110,7 +112,7 @@ func runWithProductClientOpener(
 	if len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "version") {
 		return runVersionSubcommand(args[1:], stdout)
 	}
-	cwd, err := os.Getwd()
+	cwd, err := getWorkingDirectory()
 	if err != nil {
 		if !helpRequested(args) {
 			return fmt.Errorf("cli: resolve current workspace: %w", err)

@@ -1411,9 +1411,13 @@ func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Req
 	if callIndex == 2 {
 		m.handle = mustFindTaskHandle(m.t, req)
 	}
+	state := taskapi.StateRunning
+	if callIndex > 2 {
+		state = mustFindTaskState(m.t, req, m.handle)
+	}
 	return func(yield func(*model.StreamEvent, error) bool) {
-		switch callIndex {
-		case 1:
+		switch {
+		case callIndex == 1:
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
@@ -1432,12 +1436,12 @@ func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Req
 					FinishReason: model.FinishReasonToolCalls,
 				},
 			}, nil)
-		case 2:
+		case taskStateRunning(state):
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-						ID:   "task-wait-1",
+						ID:   fmt.Sprintf("task-wait-%d", callIndex-1),
 						Name: tasktool.ToolName,
 						Args: string(mustJSONRaw(map[string]any{
 							"action": "wait",
@@ -1450,7 +1454,7 @@ func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Req
 					FinishReason: model.FinishReasonToolCalls,
 				},
 			}, nil)
-		default:
+		case state == taskapi.StateCompleted:
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
@@ -1461,6 +1465,8 @@ func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Req
 					FinishReason: model.FinishReasonStop,
 				},
 			}, nil)
+		default:
+			m.t.Fatalf("command Task state = %q, want running or completed", state)
 		}
 	}
 }
@@ -1489,6 +1495,33 @@ func mustFindTaskHandle(t *testing.T, req *model.Request) string {
 	}
 	raw, _ := json.MarshalIndent(req, "", "  ")
 	t.Fatalf("did not find yielded Task handle in request transcript:\n%s", string(raw))
+	return ""
+}
+
+func mustFindTaskState(t *testing.T, req *model.Request, handle string) taskapi.State {
+	t.Helper()
+	handle = strings.TrimSpace(handle)
+	if req != nil {
+		for messageIndex := len(req.Messages) - 1; messageIndex >= 0; messageIndex-- {
+			results := req.Messages[messageIndex].ToolResults()
+			for resultIndex := len(results) - 1; resultIndex >= 0; resultIndex-- {
+				for _, part := range results[resultIndex].Content {
+					if part.Kind != model.PartKindJSON || part.JSON == nil {
+						continue
+					}
+					var payload map[string]any
+					if err := json.Unmarshal(part.JSONValue(), &payload); err != nil || strings.TrimSpace(taskStringValue(payload["handle"])) != handle {
+						continue
+					}
+					if state := taskapi.State(strings.TrimSpace(taskStringValue(payload["state"]))); state != "" {
+						return state
+					}
+				}
+			}
+		}
+	}
+	raw, _ := json.MarshalIndent(req, "", "  ")
+	t.Fatalf("did not find state for Task handle %q in request transcript:\n%s", handle, string(raw))
 	return ""
 }
 

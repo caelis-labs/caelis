@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -75,6 +76,18 @@ func TestNewFromClientsRoutesStatusSlashThroughSharedPromptRouter(t *testing.T) 
 
 func TestNewFromClientsRunCommandPublishesTerminalBytesOnce(t *testing.T) {
 	const output = "异步任务执行完毕，耗时 6 秒\n"
+	command := "sleep 0.2; printf %s '" + strings.ReplaceAll(output, "'", "'\"'\"'") + "'"
+	if goruntime.GOOS == "windows" {
+		command = "Start-Sleep -Milliseconds 200; [Console]::Out.Write('" + strings.ReplaceAll(output, "'", "''") + "')"
+	}
+	toolArguments, err := json.Marshal(map[string]any{
+		"command":             command,
+		"sandbox_permissions": "require_escalated",
+		"justification":       "verify terminal output projection",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var providerCalls atomic.Int32
 	provider := testenv.NewHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
@@ -98,7 +111,7 @@ func TestNewFromClientsRunCommandPublishesTerminalBytesOnce(t *testing.T) {
 						"tool_calls": []map[string]any{{
 							"index": 0, "id": "call-shell", "type": "function",
 							"function": map[string]any{
-								"name": "RunCommand", "arguments": `{"command":"sleep 0.2; printf '异步任务执行完毕，耗时 6 秒\\n'","sandbox_permissions":"require_escalated","justification":"verify terminal output projection"}`,
+								"name": "RunCommand", "arguments": string(toolArguments),
 							},
 						}},
 					},
@@ -206,6 +219,7 @@ func acpTerminalOutputText(notifications []acp.SessionNotification, callID strin
 
 func TestNewFromClientsStatusSlashUsesClientWorkspaceSession(t *testing.T) {
 	ctx := context.Background()
+	testenv.SetHome(t, t.TempDir())
 	stackWorkspace := t.TempDir()
 	clientWorkspace := t.TempDir()
 	stack, err := newACPAgentTestStack(t, gatewayapp.Config{
@@ -253,13 +267,15 @@ func TestNewFromClientsStatusSlashUsesClientWorkspaceSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clientWorkspaceDisplay := canonicalClientWorkspace
-	if !strings.Contains(message, "Workspace: "+clientWorkspaceDisplay) {
-		t.Fatalf("status output = %q, want client workspace %q", message, clientWorkspaceDisplay)
+	if !strings.Contains(message, "Workspace: "+canonicalClientWorkspace) {
+		t.Fatalf("status output = %q, want client workspace %q", message, canonicalClientWorkspace)
 	}
-	stackWorkspaceDisplay := stackWorkspace
-	if strings.Contains(message, "Workspace: "+stackWorkspaceDisplay) {
-		t.Fatalf("status output = %q, should not use stack workspace %q", message, stackWorkspaceDisplay)
+	canonicalStackWorkspace, err := filepath.EvalSymlinks(stackWorkspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(message, "Workspace: "+canonicalStackWorkspace) {
+		t.Fatalf("status output = %q, should not use stack workspace %q", message, canonicalStackWorkspace)
 	}
 }
 
@@ -378,8 +394,7 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 }
 
 func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	workspace := t.TempDir()
 	provider := testenv.NewHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {

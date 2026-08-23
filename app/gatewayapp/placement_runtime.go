@@ -57,7 +57,7 @@ func (s *runtimeComposition) invalidateOwnPlacementSnapshot() {
 // and every model changed through the same shared provider endpoint as a
 // single detached Runtime update. Both views remain unreadable until the
 // matching durable Session revision CAS commits; rollback restores both.
-func (s *runtimeComposition) beginPinnedModelSelection(configured ModelConfig) (func(bool), error) {
+func (s *runtimeComposition) beginPinnedModelSelection(ctx context.Context, configured ModelConfig) (func(bool), error) {
 	if s == nil || s.lookup == nil {
 		return nil, fmt.Errorf("gatewayapp: Session Runtime model lookup is unavailable")
 	}
@@ -65,8 +65,16 @@ func (s *runtimeComposition) beginPinnedModelSelection(configured ModelConfig) (
 	if err != nil {
 		return nil, fmt.Errorf("gatewayapp: build pinned Session model profile: %w", err)
 	}
+	if s.activation == nil || s.activation.modelCatalog == nil {
+		return nil, fmt.Errorf("gatewayapp: Host model catalog is unavailable")
+	}
+	finishCredential, err := s.lookup.beginPinAPIKeyCredential(ctx, configured, s.activation.modelCatalog)
+	if err != nil {
+		return nil, fmt.Errorf("gatewayapp: pin Session Runtime model credential: %w", err)
+	}
 	affectedModels, finishLookup, err := s.lookup.beginPinnedUpsert(configured)
 	if err != nil {
+		finishCredential(false)
 		return nil, err
 	}
 
@@ -75,6 +83,7 @@ func (s *runtimeComposition) beginPinnedModelSelection(configured ModelConfig) (
 	if before == nil {
 		s.placementCacheMu.Unlock()
 		finishLookup(false)
+		finishCredential(false)
 		return nil, fmt.Errorf("gatewayapp: Session Runtime placement snapshot is unavailable")
 	}
 	next := &placementSnapshot{placement: before.placement}
@@ -88,6 +97,7 @@ func (s *runtimeComposition) beginPinnedModelSelection(configured ModelConfig) (
 	if err != nil {
 		s.placementCacheMu.Unlock()
 		finishLookup(false)
+		finishCredential(false)
 		return nil, fmt.Errorf("gatewayapp: pin Session Runtime placement: %w", err)
 	}
 	s.placementCache = next
@@ -99,6 +109,7 @@ func (s *runtimeComposition) beginPinnedModelSelection(configured ModelConfig) (
 				s.placementCache = before
 			}
 			finishLookup(committed)
+			finishCredential(committed)
 			s.placementCacheMu.Unlock()
 		})
 	}, nil

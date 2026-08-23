@@ -12,6 +12,7 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
 func (s *controlCommandBackend) executeHostModelConfigurationCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
@@ -83,9 +84,17 @@ func expectedConfigurationRevision(expected *uint64) uint64 {
 	return *expected
 }
 
-func (s *controlCommandBackend) preflightHostModelConnect(ctx context.Context, expected *uint64) (*modelLookup, error) {
-	_, candidate, err := s.loadModelConfigurationCandidate(ctx, expected)
-	return candidate, err
+type hostModelConnectPreflight struct {
+	lookup   *modelLookup
+	profiles modelprofile.Configuration
+}
+
+func (s *controlCommandBackend) preflightHostModelConnect(ctx context.Context, expected *uint64) (*hostModelConnectPreflight, error) {
+	doc, candidate, err := s.loadModelConfigurationCandidate(ctx, expected)
+	if err != nil {
+		return nil, err
+	}
+	return &hostModelConnectPreflight{lookup: candidate, profiles: doc.ModelProfiles}, nil
 }
 
 // beginHostModelAuthentication rejects overlapping interactive authentication
@@ -121,7 +130,7 @@ func (s *controlCommandBackend) beginHostModelAuthentication(provider string) (f
 	}, nil
 }
 
-func (s *controlCommandBackend) assembleHostModelConnect(ctx context.Context, cfg appserver.ConnectConfig, candidate *modelLookup) ([]ModelConfig, bool, error) {
+func (s *controlCommandBackend) assembleHostModelConnect(ctx context.Context, cfg appserver.ConnectConfig, candidate *hostModelConnectPreflight) ([]ModelConfig, bool, error) {
 	_, ok := modelconfig.LookupProvider(cfg.Provider)
 	if !ok {
 		return nil, false, fmt.Errorf("gatewayapp: provider %q is not supported", strings.TrimSpace(cfg.Provider))
@@ -143,8 +152,13 @@ func (s *controlCommandBackend) assembleHostModelConnect(ctx context.Context, cf
 		AuthType:                       cfg.AuthType,
 	}, modelconfig.ConnectOptions{
 		HasReusableAuth: func(ctx context.Context, provider, baseURL string) bool {
+			if candidate == nil {
+				return false
+			}
 			var reusable bool
-			reusableCredentialRef, reusable = s.composition.reusableProviderCredentialRef(ctx, candidate, provider, cfg.EndpointID, baseURL)
+			reusableCredentialRef, reusable = s.composition.reusableProviderCredentialRef(
+				ctx, candidate.lookup, candidate.profiles, provider, cfg.EndpointID, baseURL,
+			)
 			return reusable
 		},
 		Authenticate: authenticate,
@@ -156,7 +170,12 @@ func (s *controlCommandBackend) assembleHostModelConnect(ctx context.Context, cf
 	return assembled, authenticationStarted, err
 }
 
-func (s *runtimeComposition) reusableProviderCredentialRef(ctx context.Context, lookup *modelLookup, provider, endpointID, baseURL string) (string, bool) {
+func (s *runtimeComposition) reusableProviderCredentialRef(
+	ctx context.Context,
+	lookup *modelLookup,
+	profiles modelprofile.Configuration,
+	provider, endpointID, baseURL string,
+) (string, bool) {
 	if s == nil || s.authorities.apiKeyCredentials == nil {
 		return "", false
 	}
@@ -169,24 +188,34 @@ func (s *runtimeComposition) reusableProviderCredentialRef(ctx context.Context, 
 	provider = strings.TrimSpace(provider)
 	baseURL = modelconfig.NormalizeBaseURL(baseURL)
 	providerEndpointID := retainedProviderEndpointID(provider, endpointID, baseURL)
-	if lookup != nil {
-		lookup.mu.RLock()
-		endpoint, foundEndpoint := lookup.providerEndpoints[strings.ToLower(providerEndpointID)]
-		lookup.mu.RUnlock()
-		if foundEndpoint {
-			ref := strings.ToLower(strings.TrimSpace(endpoint.CredentialRef))
-			if !strings.HasPrefix(ref, "apikey:") {
-				return "", false
+	if lookup == nil {
+		return "", false
+	}
+	lookup.mu.RLock()
+	endpoint, foundEndpoint := lookup.providerEndpoints[strings.ToLower(providerEndpointID)]
+	reachable := false
+	if foundEndpoint {
+		for _, profile := range modelprofile.NormalizeConfiguration(profiles).Profiles {
+			if profile.Backend.Provider == nil {
+				continue
 			}
-			source, err := s.authorities.apiKeyCredentials.LookupSource(ctx, ref)
-			return ref, err == nil && strings.TrimSpace(source.APIKey) != ""
+			configured, ok := lookup.configs[profile.Backend.Provider.ModelConfigID]
+			if ok && strings.EqualFold(configured.ProviderEndpointID, endpoint.ID) {
+				reachable = true
+				break
+			}
 		}
 	}
-	ref := credentialstore.BuildReference(provider, providerEndpointID)
-	if source, err := s.authorities.apiKeyCredentials.LookupSource(ctx, ref); err == nil && strings.TrimSpace(source.APIKey) != "" {
-		return ref, true
+	lookup.mu.RUnlock()
+	if !foundEndpoint || !reachable {
+		return "", false
 	}
-	return "", false
+	ref := strings.ToLower(strings.TrimSpace(endpoint.CredentialRef))
+	if !strings.HasPrefix(ref, "apikey:") {
+		return "", false
+	}
+	source, err := s.authorities.apiKeyCredentials.LookupSource(ctx, ref)
+	return ref, err == nil && strings.TrimSpace(source.APIKey) != ""
 }
 
 func (s *controlCommandBackend) bindReusableAPIKeyCredential(ctx context.Context, configs []ModelConfig, reusableRef string) ([]ModelConfig, error) {

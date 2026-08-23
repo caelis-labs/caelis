@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 
@@ -243,9 +242,8 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 			return file.Sync()
 		}
 	}
-	renameProvided := ops.Rename != nil
 	if ops.Rename == nil {
-		ops.Rename = os.Rename
+		ops.Rename = replaceFileAtomic
 	}
 	if ops.Chmod == nil {
 		ops.Chmod = os.Chmod
@@ -284,20 +282,10 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 		return err
 	}
 	if err := ops.Rename(tmpPath, path); err != nil {
-		if !renameProvided && runtime.GOOS == "windows" {
-			fallbackCommitted, fallbackErr := writeFileInPlace(path, data, perm, ops.SyncFile, ops.Chmod)
-			if fallbackErr == nil {
-				if fsyncErr := ops.FsyncDir(dir); fsyncErr != nil {
-					return writeCommittedError(fsyncErr)
-				}
-				return nil
-			}
-			fallbackErr = errors.Join(err, fallbackErr)
-			if fallbackCommitted {
-				return writeCommittedError(fallbackErr)
-			}
-			return fallbackErr
-		}
+		// Never fall back to an in-place truncate-and-write. A failed atomic
+		// replacement must leave the previous canonical document intact so
+		// credential retirement recovery always has a readable reachability
+		// source after abrupt process termination.
 		return err
 	}
 	committed = true
@@ -308,37 +296,6 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 		return writeCommittedError(err)
 	}
 	return nil
-}
-
-func writeFileInPlace(
-	path string,
-	data []byte,
-	perm os.FileMode,
-	syncFile func(*os.File) error,
-	chmod func(string, os.FileMode) error,
-) (bool, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
-	if err != nil {
-		return false, err
-	}
-	committed := true
-	writeErr := func() error {
-		if _, err := file.Write(data); err != nil {
-			return err
-		}
-		return syncFile(file)
-	}()
-	closeErr := file.Close()
-	if writeErr != nil {
-		return committed, writeErr
-	}
-	if closeErr != nil {
-		return committed, closeErr
-	}
-	if chmod != nil {
-		return committed, chmod(path, perm)
-	}
-	return committed, nil
 }
 
 func normalizePersistedModelsForSave(models PersistedModelConfig) PersistedModelConfig {

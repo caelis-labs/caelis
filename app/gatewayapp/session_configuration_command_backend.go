@@ -162,7 +162,7 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 	// Runtime so a later App deletion cannot interrupt the active Session.
 	var finishPin func(bool)
 	if s.activation != nil && s.activation.modelCatalog != nil {
-		finishPin, err = s.beginPinnedModelSelection(configured)
+		finishPin, err = s.beginPinnedModelSelection(ctx, configured)
 		if err != nil {
 			return sessionCommandResult(active), sessionConfigurationRejectedError(err)
 		}

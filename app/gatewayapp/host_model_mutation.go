@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
@@ -129,11 +130,11 @@ func (s *controlCommandBackend) useHostModelAtRevision(ctx context.Context, alia
 	result.Revision = doc.ConfigurationRevision
 	cfg, err := candidate.ResolveConfig(alias)
 	if err != nil {
-		return result, err
+		return result, errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
 	}
 	reasoning := strings.TrimSpace(reasoningEffort)
 	if reasoning != "" && !modelConfigSupportsReasoningEffort(cfg, reasoning) {
-		return result, fmt.Errorf("gatewayapp: model %q does not support reasoning level %q", alias, reasoning)
+		return result, errorcode.New(errorcode.InvalidArgument, fmt.Sprintf("gatewayapp: model %q does not support reasoning level %q", alias, reasoning))
 	}
 	doc.ModelProfiles, err = modelprofile.SelectDefault(doc.ModelProfiles, modelprofile.BuildProviderID(cfg.ID), reasoning)
 	if err != nil {
@@ -172,6 +173,7 @@ func (s *controlCommandBackend) deleteHostModelAtRevision(ctx context.Context, a
 		return result, err
 	}
 	result.Revision = doc.ConfigurationRevision
+	beforeDoc := doc
 	cfg, err := candidate.ResolveConfig(alias)
 	if err != nil {
 		return result, err
@@ -198,6 +200,23 @@ func (s *controlCommandBackend) deleteHostModelAtRevision(ctx context.Context, a
 	}
 	doc.Models = candidate.Snapshot()
 
+	credentialTxn, err := s.prepareProviderCredentialRetirement(
+		ctx,
+		retiredAPIKeyCredentialRefs(beforeDoc, doc),
+		beforeDoc.ConfigurationRevision,
+	)
+	if err != nil {
+		if errors.Is(err, credentialstore.ErrRollbackIncomplete) {
+			result.EffectStarted = true
+		}
+		return result, err
+	}
+	defer func() {
+		if returnErr != nil {
+			returnErr = rollbackModelCredentials(credentialTxn, returnErr, &result)
+		}
+	}()
+
 	saved, persistWarning, persistErr := s.persistModelConfiguration(ctx, doc)
 	if persistErr != nil {
 		result.EffectStarted = configstore.WriteCommitted(persistErr)
@@ -205,14 +224,16 @@ func (s *controlCommandBackend) deleteHostModelAtRevision(ctx context.Context, a
 		if result.EffectStarted {
 			persistErr = errors.Join(
 				persistErr,
+				wrapOptionalError("gatewayapp: commit retired provider credentials", credentialTxn.commit()),
 				wrapOptionalError("gatewayapp: roll forward unobserved model configuration", s.observeCommittedModelConfiguration(ctx, saved)),
 			)
 		}
 		return result, persistErr
 	}
+	credentialCommitWarning := wrapOptionalError("gatewayapp: commit retired provider credentials", credentialTxn.commit())
 	result.EffectStarted = true
 	result.Revision = saved.ConfigurationRevision
-	result.Warning = errors.Join(persistWarning, s.observeCommittedModelConfiguration(ctx, saved))
+	result.Warning = errors.Join(persistWarning, credentialCommitWarning, s.observeCommittedModelConfiguration(ctx, saved))
 	return result, nil
 }
 
@@ -222,6 +243,13 @@ func (s *controlCommandBackend) loadModelConfigurationCandidate(ctx context.Cont
 	}
 	if s.composition.lookup == nil {
 		return AppConfig{}, nil, fmt.Errorf("gatewayapp: model lookup unavailable")
+	}
+	if err := recoverProviderCredentialRetirements(
+		ctx,
+		s.composition.authorities.store,
+		s.composition.authorities.apiKeyCredentials,
+	); err != nil {
+		return AppConfig{}, nil, err
 	}
 	doc, err := s.composition.authorities.store.LoadContext(contextOrBackground(ctx))
 	if err != nil {

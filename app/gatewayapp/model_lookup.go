@@ -27,6 +27,7 @@ type modelLookup struct {
 	resolveHTTPClient          func(context.Context, ModelConfig) (*http.Client, error)
 	resolveTransportHTTPClient func(context.Context, ModelConfig) (*http.Client, error)
 	resolveAPIKey              func(context.Context, string) (string, error)
+	pinnedAPIKeys              *runtimeAPIKeySnapshot
 }
 
 func newModelLookup(store *appConfigStore, contextWindow int) (*modelLookup, error) {

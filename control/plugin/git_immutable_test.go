@@ -37,7 +37,7 @@ func TestCloneGitRepoImmutableKeepsExistingPublishedRoot(t *testing.T) {
 	if filepath.Base(firstRoot) != firstSHA {
 		t.Fatalf("first root = %q, want content-addressed %s", firstRoot, firstSHA)
 	}
-	if got := readFile(t, filepath.Join(firstRoot, "marker.txt")); got != "v1\n" {
+	if got := readNormalizedTextFile(t, filepath.Join(firstRoot, "marker.txt")); got != "v1\n" {
 		t.Fatalf("first marker = %q", got)
 	}
 
@@ -58,10 +58,10 @@ func TestCloneGitRepoImmutableKeepsExistingPublishedRoot(t *testing.T) {
 	if secondRoot == firstRoot {
 		t.Fatal("second clone overwrote the first published root")
 	}
-	if got := readFile(t, filepath.Join(firstRoot, "marker.txt")); got != "v1\n" {
+	if got := readNormalizedTextFile(t, filepath.Join(firstRoot, "marker.txt")); got != "v1\n" {
 		t.Fatalf("old published root mutated: %q", got)
 	}
-	if got := readFile(t, filepath.Join(secondRoot, "marker.txt")); got != "v2\n" {
+	if got := readNormalizedTextFile(t, filepath.Join(secondRoot, "marker.txt")); got != "v2\n" {
 		t.Fatalf("new root marker = %q", got)
 	}
 }
@@ -196,11 +196,11 @@ func gitHEAD(t *testing.T, dir string) string {
 	return strings.TrimSpace(string(output))
 }
 
-func readFile(t *testing.T, path string) string {
+func readNormalizedTextFile(t *testing.T, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(raw)
+	return strings.ReplaceAll(string(raw), "\r\n", "\n")
 }

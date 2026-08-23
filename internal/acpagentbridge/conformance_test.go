@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"iter"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -570,13 +571,18 @@ func (m *runCommandThenTextModel) Generate(context.Context, *model.Request) iter
 	return func(yield func(*model.StreamEvent, error) bool) {
 		m.calls++
 		if m.calls == 1 {
+			command := "printf acp-run-command-test"
+			if goruntime.GOOS == "windows" {
+				command = "[Console]::Out.Write('acp-run-command-test')"
+			}
+			args, _ := json.Marshal(map[string]string{"command": command})
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
 					Message: model.MessageFromAssistantParts("I will run a command.", "Need command output.", []model.ToolCall{{
 						ID:   "call-shell",
 						Name: shell.RunCommandToolName,
-						Args: `{"command":"printf acp-run-command-test"}`,
+						Args: string(args),
 					}}),
 					TurnComplete: true,
 					StepComplete: true,

@@ -416,7 +416,7 @@ func TestHostModelReusableCredentialsAreScopedToExactEndpointIdentity(t *testing
 	}
 }
 
-func TestHostModelDeleteRetainsEndpointCredentialForPinnedRuntimeAndReconnect(t *testing.T) {
+func TestHostModelDeleteRetiresCredentialAfterLastProfileWithoutInterruptingPinnedRuntime(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
@@ -424,11 +424,11 @@ func TestHostModelDeleteRetainsEndpointCredentialForPinnedRuntimeAndReconnect(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseURL := "https://retained.example/v1"
+	baseURL := "https://retired.example/v1"
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
-		WriteBase: appserver.WriteBase{OperationID: "retained-auth-connect", ExpectedRevision: &revision},
+		WriteBase: appserver.WriteBase{OperationID: "retired-auth-connect", ExpectedRevision: &revision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "pinned-model", BaseURL: baseURL, APIKey: "retained-secret",
+			Provider: "openai", Model: "pinned-model,sibling-model", BaseURL: baseURL, APIKey: "retired-secret",
 		},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
@@ -442,48 +442,151 @@ func TestHostModelDeleteRetainsEndpointCredentialForPinnedRuntimeAndReconnect(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	deleted, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
-		WriteBase: appserver.WriteBase{OperationID: "retained-auth-delete", ExpectedRevision: &connected.Revision},
-		Model:     "openai/pinned-model",
-	})
-	if err != nil || deleted.Outcome != appserver.OutcomeCommitted {
-		t.Fatalf("DeleteModel() = %#v, %v", deleted, err)
-	}
-	doc, err := stack.composition.authorities.store.LoadContext(ctx)
-	if err != nil {
+	if err := pinned.pinAPIKeyCredentials(ctx, providerProfileAPIKeyCredentialRefs(pinnedDoc)); err != nil {
 		t.Fatal(err)
-	}
-	for _, endpoint := range doc.Models.ProviderEndpoints {
-		if endpoint.Provider == "openai" && modelconfig.NormalizeBaseURL(endpoint.BaseURL) == modelconfig.NormalizeBaseURL(baseURL) {
-			t.Fatalf("deleted provider endpoint remains in catalog: %#v", endpoint)
-		}
 	}
 	ref := retainedAPIKeyReference("openai", "", baseURL)
-	if source, lookupErr := stack.composition.authorities.apiKeyCredentials.LookupSource(ctx, ref); lookupErr != nil || source.APIKey != "retained-secret" {
-		t.Fatalf("retained endpoint credential = %#v, %v", source, lookupErr)
+
+	firstDelete, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "retired-auth-delete-first", ExpectedRevision: &connected.Revision},
+		Model:     "openai/pinned-model",
+	})
+	if err != nil || firstDelete.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("DeleteModel(first profile) = %#v, %v", firstDelete, err)
 	}
-	if _, resolveErr := pinned.ResolveModel(ctx, "openai/pinned-model", 0); resolveErr != nil {
-		t.Fatalf("pinned Runtime generation lost retained credential: %v", resolveErr)
+	if source, lookupErr := stack.composition.authorities.apiKeyCredentials.LookupSource(ctx, ref); lookupErr != nil || source.APIKey != "retired-secret" {
+		t.Fatalf("shared endpoint credential after first delete = %#v, %v", source, lookupErr)
 	}
+	if !stack.Models().HasReusableAuth(ctx, "openai", baseURL) {
+		t.Fatal("shared endpoint credential is not reusable while one ModelProfile remains")
+	}
+
+	lastDelete, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "retired-auth-delete-last", ExpectedRevision: &firstDelete.Revision},
+		Model:     "openai/sibling-model",
+	})
+	if err != nil || lastDelete.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("DeleteModel(last profile) = %#v, %v", lastDelete, err)
+	}
+	if _, lookupErr := stack.composition.authorities.apiKeyCredentials.LookupSource(ctx, ref); !errors.Is(lookupErr, os.ErrNotExist) {
+		t.Fatalf("retired endpoint credential lookup error = %v, want os.ErrNotExist", lookupErr)
+	}
+	if stack.Models().HasReusableAuth(ctx, "openai", baseURL) {
+		t.Fatal("deleted endpoint credential remains reusable")
+	}
+	for _, alias := range []string{"openai/pinned-model", "openai/sibling-model"} {
+		if _, resolveErr := pinned.ResolveModel(ctx, alias, 0); resolveErr != nil {
+			t.Fatalf("pinned Runtime generation lost %q credential: %v", alias, resolveErr)
+		}
+	}
+
 	reconnected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
-		WriteBase: appserver.WriteBase{OperationID: "retained-auth-reconnect", ExpectedRevision: &deleted.Revision},
+		WriteBase: appserver.WriteBase{OperationID: "retired-auth-reconnect", ExpectedRevision: &lastDelete.Revision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "reconnected-model", BaseURL: baseURL,
+			Provider: "openai", Model: "must-require-key", BaseURL: baseURL,
 		},
 	})
-	if err != nil || reconnected.Outcome != appserver.OutcomeCommitted || reconnected.Revision != deleted.Revision+1 {
-		t.Fatalf("ConnectModel(reuse retained auth) = %#v, %v", reconnected, err)
+	if err == nil || reconnected.Outcome != appserver.OutcomeRejected || !strings.Contains(err.Error(), "API key") {
+		t.Fatalf("ConnectModel(without retired key) = %#v, %v", reconnected, err)
 	}
-	reloaded, err := stack.composition.authorities.store.LoadContext(ctx)
+}
+
+func TestHostModelDeleteRestoresCredentialWhenConfigurationSaveFails(t *testing.T) {
+	ctx := context.Background()
+	stack, _ := newLocalStateTestStack(t)
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	foundRetainedRef := false
-	for _, endpoint := range reloaded.Models.ProviderEndpoints {
-		foundRetainedRef = foundRetainedRef || (endpoint.Provider == "openai" && endpoint.CredentialRef == ref)
+	baseURL := "https://retirement-rollback.example/v1"
+	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "retirement-rollback-connect", ExpectedRevision: &revision},
+		Config: appserver.ConnectConfig{
+			Provider: "openai", Model: "rollback-model", BaseURL: baseURL, APIKey: "accepted-secret",
+		},
+	})
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
 	}
-	if !foundRetainedRef {
-		t.Fatalf("reconnected endpoint = %#v, want retained ref %q", reloaded.Models.ProviderEndpoints, ref)
+	failure := errors.New("delete config save failed")
+	stack.composition.authorities.store.saveHook = func(AppConfig) error { return failure }
+	deleted, deleteErr := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "retirement-rollback-delete", ExpectedRevision: &connected.Revision},
+		Model:     "openai/rollback-model",
+	})
+	if !errors.Is(deleteErr, failure) || deleted.Outcome != appserver.OutcomeRejected {
+		t.Fatalf("DeleteModel() = %#v, %v", deleted, deleteErr)
+	}
+	ref := retainedAPIKeyReference("openai", "", baseURL)
+	if source, lookupErr := stack.composition.authorities.apiKeyCredentials.LookupSource(ctx, ref); lookupErr != nil || source.APIKey != "accepted-secret" {
+		t.Fatalf("credential after delete rollback = %#v, %v", source, lookupErr)
+	}
+	if !stack.composition.lookup.HasAlias("openai/rollback-model") {
+		t.Fatal("failed delete removed model from live catalog")
+	}
+}
+
+func TestHostModelDeleteRetiresCredentialAfterLastReachableProfile(t *testing.T) {
+	ctx := context.Background()
+	stack, _ := newLocalStateTestStack(t)
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseURL := "https://orphan-model.example/v1"
+	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "orphan-model-connect", ExpectedRevision: &revision},
+		Config: appserver.ConnectConfig{
+			Provider: "openai", Model: "reachable-model,orphan-model", BaseURL: baseURL, APIKey: "orphan-model-secret",
+		},
+	})
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
+	}
+
+	external := newAppConfigStore(filepath.Dir(stack.composition.authorities.store.path))
+	doc, err := external.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphanConfig, err := newModelLookupFromDocument(doc, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphan, err := orphanConfig.ResolveConfig("openai/orphan-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.ModelProfiles = modelprofile.Remove(doc.ModelProfiles, modelprofile.BuildProviderID(orphan.ID))
+	saved, err := external.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "orphan-model-delete-last-profile", ExpectedRevision: &saved.ConfigurationRevision},
+		Model:     "openai/reachable-model",
+	})
+	if err != nil || deleted.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("DeleteModel(last reachable profile) = %#v, %v", deleted, err)
+	}
+	ref := retainedAPIKeyReference("openai", "", baseURL)
+	if _, lookupErr := stack.composition.authorities.apiKeyCredentials.LookupSource(ctx, ref); !errors.Is(lookupErr, os.ErrNotExist) {
+		t.Fatalf("orphan endpoint credential lookup error = %v, want os.ErrNotExist", lookupErr)
+	}
+	if stack.Models().HasReusableAuth(ctx, "openai", baseURL) {
+		t.Fatal("orphan model kept endpoint credential reusable")
+	}
+	reconnected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "orphan-model-reconnect", ExpectedRevision: &deleted.Revision},
+		Config: appserver.ConnectConfig{
+			Provider: "openai", Model: "must-require-key", BaseURL: baseURL,
+		},
+	})
+	if err == nil || reconnected.Outcome != appserver.OutcomeRejected || !strings.Contains(err.Error(), "API key") {
+		t.Fatalf("ConnectModel(with orphan endpoint) = %#v, %v", reconnected, err)
 	}
 }
 

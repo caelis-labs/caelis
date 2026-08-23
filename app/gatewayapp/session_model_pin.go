@@ -99,7 +99,13 @@ func (s *runtimeComposition) prepareSpawnedACPSession(
 	if config.PinnedModel == nil {
 		return options, nil
 	}
-	pinned := cloneSessionModelConfig(*config.PinnedModel)
+	if s == nil || s.lookup == nil {
+		return controlagents.SessionOptions{}, errors.New("gatewayapp: Runtime model lookup is unavailable")
+	}
+	pinned, err := s.lookup.materializeAPIKeyCredential(ctx, *config.PinnedModel)
+	if err != nil {
+		return controlagents.SessionOptions{}, fmt.Errorf("gatewayapp: pin child Session model credential: %w", err)
+	}
 	if err := s.retainSpawnedSessionModelPin(sessionID, pinned); err != nil {
 		return controlagents.SessionOptions{}, err
 	}

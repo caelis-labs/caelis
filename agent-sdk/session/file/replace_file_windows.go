@@ -117,13 +117,16 @@ func retryWindowsFileOperation(
 		}
 		lastClass, lastCode = windowsFileError(err)
 		policy, retry := windowsFileRetryPolicyFor(operation, from, to, err)
-		if !retry || delay <= 0 || time.Since(started)+delay > policy.budget {
+		remaining := policy.budget - time.Since(started)
+		if !retry || delay <= 0 || remaining <= 0 {
 			return windowsFileOperationFailure(
 				ctx, logger, operation, from, to, attempts, started, lastClass, lastCode, "failed", err,
 			)
 		}
 
-		timer := time.NewTimer(delay)
+		// Use the remaining retry budget for one final attempt instead of
+		// failing early merely because the next exponential delay is longer.
+		timer := time.NewTimer(min(delay, remaining))
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {

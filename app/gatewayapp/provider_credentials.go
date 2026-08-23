@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 
 type providerCredentialTransaction struct {
 	replacement *credentialstore.ReplacementTransaction
+	retirement  *credentialstore.RetirementTransaction
 }
 
 func (s *controlCommandBackend) prepareProviderCredentials(ctx context.Context, configs []ModelConfig) ([]ModelConfig, *providerCredentialTransaction, error) {
@@ -71,16 +73,44 @@ func (s *controlCommandBackend) prepareProviderCredentials(ctx context.Context, 
 	return prepared, txn, nil
 }
 
+func (s *controlCommandBackend) prepareProviderCredentialRetirement(ctx context.Context, refs []string, baseConfigurationRevision uint64) (*providerCredentialTransaction, error) {
+	if len(refs) == 0 {
+		return &providerCredentialTransaction{}, nil
+	}
+	if s == nil || s.composition == nil || s.composition.authorities.apiKeyCredentials == nil {
+		return nil, fmt.Errorf("gatewayapp: provider credential store is unavailable")
+	}
+	retirement, err := s.composition.authorities.apiKeyCredentials.BeginRetirement(ctx, refs, baseConfigurationRevision)
+	if err != nil {
+		return nil, fmt.Errorf("gatewayapp: retire provider credentials: %w", err)
+	}
+	return &providerCredentialTransaction{retirement: retirement}, nil
+}
+
 func (t *providerCredentialTransaction) commit() error {
-	if t == nil || t.replacement == nil {
+	if t == nil {
 		return nil
 	}
-	return t.replacement.Commit()
+	var errs []error
+	if t.replacement != nil {
+		errs = append(errs, t.replacement.Commit())
+	}
+	if t.retirement != nil {
+		errs = append(errs, t.retirement.Commit())
+	}
+	return errors.Join(errs...)
 }
 
 func (t *providerCredentialTransaction) rollback() error {
-	if t == nil || t.replacement == nil {
+	if t == nil {
 		return nil
 	}
-	return t.replacement.Rollback()
+	var errs []error
+	if t.retirement != nil {
+		errs = append(errs, t.retirement.Rollback())
+	}
+	if t.replacement != nil {
+		errs = append(errs, t.replacement.Rollback())
+	}
+	return errors.Join(errs...)
 }

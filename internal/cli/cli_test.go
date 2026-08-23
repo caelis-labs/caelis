@@ -532,11 +532,11 @@ func TestRunHelpReturnsNil(t *testing.T) {
 }
 
 func TestRunVersionAndHelpDoNotRequireLiveWorkingDirectory(t *testing.T) {
-	workspace := t.TempDir()
-	t.Chdir(workspace)
-	if err := os.Remove(workspace); err != nil {
-		t.Fatal(err)
+	previousGetWorkingDirectory := getWorkingDirectory
+	getWorkingDirectory = func() (string, error) {
+		return "", errors.New("working directory no longer exists")
 	}
+	t.Cleanup(func() { getWorkingDirectory = previousGetWorkingDirectory })
 
 	var versionOutput bytes.Buffer
 	if err := run(context.Background(), []string{"version"}, nil, &versionOutput, io.Discard); err != nil {

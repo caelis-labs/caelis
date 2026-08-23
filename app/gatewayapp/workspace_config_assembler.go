@@ -34,9 +34,10 @@ func newWorkspaceConfigAssembler(deps sessionRuntimeAssemblyDeps) (*workspaceCon
 	return &workspaceConfigAssembler{deps: deps}, nil
 }
 
-// assembleSnapshot builds one Session-scoped composition from one AppConfig
-// read plus detached process configuration. It does not coordinate with later
-// Host mutations; the resulting Runtime owns this snapshot until release.
+// assembleSnapshot builds one Session-scoped composition from a revision-stable
+// AppConfig and credential read plus detached process configuration. It does not
+// coordinate with later Host mutations; the resulting Runtime owns this snapshot
+// until release.
 func (a *workspaceConfigAssembler) assembleSnapshot(
 	ctx context.Context,
 	active session.Session,
@@ -59,7 +60,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	if err != nil {
 		return nil, err
 	}
-	doc, err := authorities.store.LoadContext(ctx)
+	doc, lookup, err := a.loadRuntimeModelSnapshot(ctx, active)
 	if err != nil {
 		return nil, err
 	}
@@ -69,15 +70,6 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	securityPosture := resolveProcessSecurityPosture(runtimeConfig)
 	if securityPosture.RequiredSandboxBackend != "" {
 		sandboxConfig.RequestedType = string(securityPosture.RequiredSandboxBackend)
-	}
-	lookup, err := cloneSessionModelLookup(deps.modelCatalog, doc)
-	if err != nil {
-		return nil, err
-	}
-	if pinned, ok := authorities.sessionModelPins.config(active.SessionID); ok {
-		if _, err := lookup.upsert(pinned, false); err != nil {
-			return nil, fmt.Errorf("gatewayapp: inject pinned model for Session %q: %w", active.SessionID, err)
-		}
 	}
 	runtimeModel, err := resolveRuntimeProviderProfile(
 		doc.ModelProfiles,
@@ -123,6 +115,47 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 		)
 	}
 	return instance, nil
+}
+
+func (a *workspaceConfigAssembler) loadRuntimeModelSnapshot(ctx context.Context, active session.Session) (AppConfig, *modelLookup, error) {
+	const maxAttempts = 4
+	deps := a.deps
+	if err := recoverProviderCredentialRetirements(ctx, deps.authorities.store, deps.authorities.apiKeyCredentials); err != nil {
+		return AppConfig{}, nil, err
+	}
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		doc, err := deps.authorities.store.LoadContext(ctx)
+		if err != nil {
+			return AppConfig{}, nil, err
+		}
+		lookup, err := cloneSessionModelLookup(deps.modelCatalog, doc)
+		if err != nil {
+			return AppConfig{}, nil, err
+		}
+		credentialRefs := providerProfileAPIKeyCredentialRefs(doc)
+		if pinned, ok := deps.authorities.sessionModelPins.config(active.SessionID); ok {
+			if _, err := lookup.upsert(pinned, false); err != nil {
+				return AppConfig{}, nil, fmt.Errorf("gatewayapp: inject pinned model for Session %q: %w", active.SessionID, err)
+			}
+			credentialRefs = append(credentialRefs, pinned.CredentialRef)
+		}
+		pinErr := lookup.pinAPIKeyCredentials(ctx, credentialRefs)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return AppConfig{}, nil, ctxErr
+		}
+		observed, err := deps.authorities.store.LoadContext(ctx)
+		if err != nil {
+			return AppConfig{}, nil, err
+		}
+		if observed.ConfigurationRevision != doc.ConfigurationRevision {
+			continue
+		}
+		if pinErr != nil {
+			return AppConfig{}, nil, fmt.Errorf("gatewayapp: pin Session Runtime model credentials: %w", pinErr)
+		}
+		return doc, lookup, nil
+	}
+	return AppConfig{}, nil, errors.New("gatewayapp: AppConfig changed repeatedly while pinning Session Runtime model credentials")
 }
 
 func cloneSessionRuntimeConfig(config stackRuntimeConfig) stackRuntimeConfig {

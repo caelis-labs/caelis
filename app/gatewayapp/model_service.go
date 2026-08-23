@@ -79,16 +79,26 @@ func (s *runtimeComposition) ListModelChoices(ctx context.Context, ref session.S
 	return dedupeModelChoices(choices), nil
 }
 
-// HasReusableProviderAuth reports whether Control retains usable Host
-// authentication for the provider endpoint. API-key credentials outlive model
-// catalog entries so deleting a model cannot invalidate pinned Runtime
-// generations. Invalid legacy credentials must not make /connect skip API-key
-// collection.
+// HasReusableProviderAuth reports whether a configured provider endpoint still
+// references usable Host authentication. Detached Runtime generations pin the
+// API-key material they assembled, so deleting the last ModelProfile can retire
+// the Host credential without interrupting already activated work.
 func (s *runtimeComposition) HasReusableProviderAuth(ctx context.Context, provider string, baseURL string) bool {
-	if s == nil {
+	if s == nil || s.authorities.store == nil {
 		return false
 	}
-	_, reusable := s.reusableProviderCredentialRef(ctx, s.lookup, provider, "", baseURL)
+	if err := recoverProviderCredentialRetirements(ctx, s.authorities.store, s.authorities.apiKeyCredentials); err != nil {
+		return false
+	}
+	doc, err := s.authorities.store.LoadContext(contextOrBackground(ctx))
+	if err != nil {
+		return false
+	}
+	lookup, err := newModelLookupFromDocument(doc, 0)
+	if err != nil {
+		return false
+	}
+	_, reusable := s.reusableProviderCredentialRef(ctx, lookup, doc.ModelProfiles, provider, "", baseURL)
 	return reusable
 }
 

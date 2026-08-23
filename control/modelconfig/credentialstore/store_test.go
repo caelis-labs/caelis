@@ -3,9 +3,11 @@ package credentialstore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -145,6 +147,293 @@ func TestReplacementTransactionRollbackRestoresSourceBeforeUnblockingReader(t *t
 		}
 	case <-time.After(time.Second):
 		t.Fatal("LookupSource remained blocked after rollback")
+	}
+}
+
+func TestRetirementTransactionCommitRemovesSourceBeforeUnblockingReader(t *testing.T) {
+	root := t.TempDir()
+	owner, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := BuildReference("openrouter", "openrouter@default")
+	if err := owner.Put(context.Background(), ref, "retired-secret"); err != nil {
+		t.Fatal(err)
+	}
+	txn, err := owner.BeginRetirement(context.Background(), []string{ref}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = txn.Rollback() })
+
+	result := make(chan error, 1)
+	go func() {
+		_, lookupErr := reader.LookupSource(context.Background(), ref)
+		result <- lookupErr
+	}()
+	select {
+	case lookupErr := <-result:
+		t.Fatalf("LookupSource returned before retirement commit: %v", lookupErr)
+	case <-time.After(75 * time.Millisecond):
+	}
+	if err := txn.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case lookupErr := <-result:
+		if !errors.Is(lookupErr, os.ErrNotExist) {
+			t.Fatalf("LookupSource after retirement commit error = %v, want os.ErrNotExist", lookupErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("LookupSource remained blocked after retirement commit")
+	}
+}
+
+func TestRetirementTransactionRollbackRestoresSourceBeforeUnblockingReader(t *testing.T) {
+	root := t.TempDir()
+	owner, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := BuildReference("openrouter", "openrouter@default")
+	if err := owner.Put(context.Background(), ref, "accepted-secret"); err != nil {
+		t.Fatal(err)
+	}
+	txn, err := owner.BeginRetirement(context.Background(), []string{ref}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type lookupResult struct {
+		source Source
+		err    error
+	}
+	result := make(chan lookupResult, 1)
+	go func() {
+		source, lookupErr := reader.LookupSource(context.Background(), ref)
+		result <- lookupResult{source: source, err: lookupErr}
+	}()
+	select {
+	case got := <-result:
+		t.Fatalf("LookupSource returned before retirement rollback: %#v, %v", got.source, got.err)
+	case <-time.After(75 * time.Millisecond):
+	}
+	if err := txn.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-result:
+		if got.err != nil || got.source.APIKey != "accepted-secret" {
+			t.Fatalf("LookupSource after retirement rollback = %#v, %v", got.source, got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("LookupSource remained blocked after retirement rollback")
+	}
+}
+
+func TestRetirementTransactionDeleteFailureRestoresEarlierSources(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows open-file deletion fault injection")
+	}
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := []string{
+		BuildReference("openrouter", "retirement-failure-a"),
+		BuildReference("openrouter", "retirement-failure-b"),
+	}
+	sort.Strings(refs)
+	for index, ref := range refs {
+		if err := store.Put(context.Background(), ref, fmt.Sprintf("accepted-secret-%d", index)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	blocked, err := os.OpenFile(store.path(refs[1]), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BeginRetirement(context.Background(), refs, 7); err == nil {
+		_ = blocked.Close()
+		t.Fatal("BeginRetirement() succeeded while one credential could not be deleted")
+	}
+	if err := blocked.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for index, ref := range refs {
+		want := fmt.Sprintf("accepted-secret-%d", index)
+		if got, err := store.Get(context.Background(), ref); err != nil || got != want {
+			t.Fatalf("Get(%q) after failed retirement = %q, %v; want %q", ref, got, err, want)
+		}
+	}
+}
+
+func TestRetirementRecoveryRemovesInterruptedReceiptTempUnderJournalLock(t *testing.T) {
+	root := t.TempDir()
+	owner, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureDir(owner.retirementRoot()); err != nil {
+		t.Fatal(err)
+	}
+	tempPath := filepath.Join(owner.retirementRoot(), ".credential.interrupted.tmp")
+	if err := os.WriteFile(tempPath, []byte("retired-secret-copy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.RecoverRetirements(context.Background(), func(context.Context) (map[string]struct{}, error) {
+		t.Fatal("reachability callback called without a committed receipt")
+		return nil, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(tempPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("interrupted retirement temp error = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestRetirementRecoveryWaitsForActiveReceiptWriter(t *testing.T) {
+	root := t.TempDir()
+	owner, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contender, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := BuildReference("openrouter", "active-retirement-writer")
+	if err := owner.Put(context.Background(), ref, "retired-secret"); err != nil {
+		t.Fatal(err)
+	}
+	txn, err := owner.BeginRetirement(context.Background(), []string{ref}, 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = txn.Rollback() })
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := contender.RecoverRetirements(ctx, func(context.Context) (map[string]struct{}, error) {
+		return map[string]struct{}{ref: {}}, nil
+	}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("RecoverRetirements() during active writer error = %v, want deadline exceeded", err)
+	}
+	if err := txn.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRetirementRecoveryReconcilesInterruptedTransaction(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		reachable bool
+		wantKey   string
+	}{
+		{name: "configuration-still-references-source", reachable: true, wantKey: "recoverable-secret"},
+		{name: "configuration-committed-retirement", reachable: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			owner, err := New(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref := BuildReference("openrouter", tc.name)
+			if err := owner.Put(context.Background(), ref, "recoverable-secret"); err != nil {
+				t.Fatal(err)
+			}
+			txn, err := owner.BeginRetirement(context.Background(), []string{ref}, 41)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Simulate process termination: platform locks disappear, while the
+			// durable receipt and pre-CAS credential deletion remain.
+			if err := txn.releaseLocks(); err != nil {
+				t.Fatal(err)
+			}
+
+			restarted, err := New(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := restarted.RecoverRetirements(context.Background(), func(context.Context) (map[string]struct{}, error) {
+				if tc.reachable {
+					return map[string]struct{}{ref: {}}, nil
+				}
+				return map[string]struct{}{}, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			got, getErr := restarted.Get(context.Background(), ref)
+			if tc.wantKey == "" {
+				if !errors.Is(getErr, os.ErrNotExist) {
+					t.Fatalf("Get() after committed retirement = %q, %v; want os.ErrNotExist", got, getErr)
+				}
+			} else if getErr != nil || got != tc.wantKey {
+				t.Fatalf("Get() after pre-CAS crash recovery = %q, %v; want %q", got, getErr, tc.wantKey)
+			}
+			assertNoRetirementReceipts(t, restarted)
+		})
+	}
+}
+
+func TestRetirementRecoveryDoesNotOverwriteNewerReplacement(t *testing.T) {
+	root := t.TempDir()
+	owner, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := BuildReference("openrouter", "replaced-after-retirement-crash")
+	if err := owner.Put(context.Background(), ref, "retired-secret"); err != nil {
+		t.Fatal(err)
+	}
+	txn, err := owner.BeginRetirement(context.Background(), []string{ref}, 19)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := txn.releaseLocks(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Put(context.Background(), ref, "newer-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.RecoverRetirements(context.Background(), func(context.Context) (map[string]struct{}, error) {
+		return map[string]struct{}{ref: {}}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := restarted.Get(context.Background(), ref); err != nil || got != "newer-secret" {
+		t.Fatalf("Get() after recovery = %q, %v; want newer replacement", got, err)
+	}
+	assertNoRetirementReceipts(t, restarted)
+}
+
+func assertNoRetirementReceipts(t *testing.T, store *Store) {
+	t.Helper()
+	entries, err := os.ReadDir(store.retirementRoot())
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".json") {
+			t.Fatalf("retirement receipt remained after recovery: %s", entry.Name())
+		}
 	}
 }
 

@@ -150,6 +150,9 @@ func runInternalRepairHelper(args []string) error {
 	if opErr == nil {
 		opErr = runInternalRepairFromConfig(configFile)
 	}
+	if opErr != nil && strings.TrimSpace(resultFile) == "" {
+		return opErr
+	}
 	resultErr := writeElevatedRepairResult(resultFile, opErr)
 	if opErr != nil {
 		return errors.Join(opErr, resultErr)
@@ -247,9 +250,6 @@ func readElevatedRepairResult(path string) (elevatedRepairResult, error) {
 func writeElevatedRepairResult(path string, opErr error) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		if opErr != nil {
-			return nil
-		}
 		return fmt.Errorf("missing --result-file")
 	}
 	result := elevatedRepairResult{OK: opErr == nil}

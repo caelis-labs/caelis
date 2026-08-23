@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,7 @@ import (
 
 func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.T) {
 	ctx := t.Context()
+	testenv.SetHome(t, t.TempDir())
 	storeDir := t.TempDir()
 	workspaceA := t.TempDir()
 	workspaceB := t.TempDir()
@@ -695,7 +697,7 @@ func TestManagedProductFailureKeepsImplementationDetailsInPrivateLog(t *testing.
 	if statErr != nil {
 		t.Fatal(statErr)
 	}
-	if info.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		t.Fatalf("diagnostic log mode = %o", info.Mode().Perm())
 	}
 }

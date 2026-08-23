@@ -179,6 +179,9 @@ func TestRunnerAppliesBuiltInSessionOptionsAfterSessionNewBeforePrompt(t *testin
 	case <-ctx.Done():
 		t.Fatalf("timed out waiting for configured child: %v", ctx.Err())
 	}
+	if err := runner.Quiesce(ctx); err != nil {
+		t.Fatalf("Quiesce() error = %v", err)
+	}
 }
 
 func TestRunnerPromptRecoversConfiguredAuthentication(t *testing.T) {
@@ -221,6 +224,9 @@ func TestRunnerPromptRecoversConfiguredAuthentication(t *testing.T) {
 	if got.State != delegation.StateCompleted || got.Running {
 		t.Fatalf("Result = state %q running %v, want completed", got.State, got.Running)
 	}
+	if err := runner.Quiesce(ctx); err != nil {
+		t.Fatalf("Quiesce() error = %v", err)
+	}
 }
 
 func TestRunnerLoadHistoryUsesSessionLoadAndPreservesMultipleTurns(t *testing.T) {
@@ -246,7 +252,7 @@ func TestRunnerLoadHistoryUsesSessionLoadAndPreservesMultipleTurns(t *testing.T)
 		Reconnect: tasksubagent.ReconnectRequest{
 			Spawn: tasksubagent.SpawnContext{
 				SessionRef: session.SessionRef{SessionID: "parent-history"},
-				CWD:        "/tmp",
+				CWD:        os.TempDir(),
 				TaskID:     "task-history",
 				Handle:     "helper",
 			},
@@ -305,7 +311,7 @@ func TestRunnerLoadHistoryPassesMatchingCapabilityToBuiltInBridge(t *testing.T) 
 		Reconnect: tasksubagent.ReconnectRequest{
 			Spawn: tasksubagent.SpawnContext{
 				SessionRef: session.SessionRef{SessionID: "parent-history"},
-				CWD:        "/tmp",
+				CWD:        os.TempDir(),
 				TaskID:     "task-history",
 				Handle:     "self",
 			},
@@ -340,7 +346,7 @@ func TestRunnerLoadHistoryReportsUnsupportedCapability(t *testing.T) {
 		Reconnect: tasksubagent.ReconnectRequest{
 			Spawn: tasksubagent.SpawnContext{
 				SessionRef: session.SessionRef{SessionID: "parent-history"},
-				CWD:        "/tmp",
+				CWD:        os.TempDir(),
 				TaskID:     "task-history",
 				Handle:     "helper",
 			},
@@ -375,7 +381,7 @@ func TestRunnerLoadHistoryRejectsUpdatesFromAnotherSession(t *testing.T) {
 		Reconnect: tasksubagent.ReconnectRequest{
 			Spawn: tasksubagent.SpawnContext{
 				SessionRef: session.SessionRef{SessionID: "parent-history"},
-				CWD:        "/tmp",
+				CWD:        os.TempDir(),
 				TaskID:     "task-history",
 				Handle:     "helper",
 			},
@@ -491,7 +497,7 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 		case client.MethodSessionResume:
 			var req client.ResumeSessionRequest
 			if err := json.Unmarshal(msg.Params, &req); err != nil ||
-				req.SessionID != "child-reconnect" || req.CWD != "/tmp" ||
+				req.SessionID != "child-reconnect" || req.CWD != os.TempDir() ||
 				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionParentID) != "parent-reconnect" ||
 				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeTaskID) != "task-reconnect" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/resume request"}
@@ -502,7 +508,7 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 			}
 			var req client.LoadSessionRequest
-			if err := json.Unmarshal(msg.Params, &req); err != nil || req.SessionID != "child-history" || req.CWD != "/tmp" ||
+			if err := json.Unmarshal(msg.Params, &req); err != nil || req.SessionID != "child-history" || req.CWD != os.TempDir() ||
 				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionKind) != metautil.RuntimeSessionKindSubagent ||
 				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionParentID) != "parent-history" ||
 				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeTaskID) != "task-history" {

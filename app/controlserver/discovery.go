@@ -1,6 +1,7 @@
 package controlserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/internal/filelock"
 	"github.com/caelis-labs/caelis/internal/productpaths"
 )
 
@@ -52,8 +54,9 @@ func DefaultDiscoveryFile(storeDir string) string {
 	return filepath.Join(productpaths.ServiceRuntimeDir(storeDir), discoveryFilename)
 }
 
-// PublishDiscoveryRecord atomically publishes one ready Host instance. It may
-// replace stale metadata only while the caller owns product Host authority.
+// PublishDiscoveryRecord atomically publishes one ready Host instance. It
+// serializes replacement with instance-owned removal and may replace stale
+// metadata only while the caller owns product Host authority.
 func PublishDiscoveryRecord(path string, record DiscoveryRecord) error {
 	path = filepath.Clean(path)
 	if path == "." || path == string(filepath.Separator) {
@@ -92,13 +95,15 @@ func PublishDiscoveryRecord(path string, record DiscoveryRecord) error {
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("controlserver: close discovery temporary file: %w", err)
 	}
-	if err := replaceDiscoveryFile(temporaryPath, path); err != nil {
-		return fmt.Errorf("controlserver: publish discovery record: %w", err)
-	}
-	if err := syncTokenDirectory(filepath.Dir(path)); err != nil {
-		return fmt.Errorf("controlserver: sync discovery directory: %w", err)
-	}
-	return nil
+	return withDiscoveryMutationLock(path, func() error {
+		if err := replaceDiscoveryFile(temporaryPath, path); err != nil {
+			return fmt.Errorf("controlserver: publish discovery record: %w", err)
+		}
+		if err := syncTokenDirectory(filepath.Dir(path)); err != nil {
+			return fmt.Errorf("controlserver: sync discovery directory: %w", err)
+		}
+		return nil
+	})
 }
 
 // LoadDiscoveryRecord reads one stable, current-user-only discovery snapshot.
@@ -144,23 +149,42 @@ func LoadDiscoveryRecord(path string) (DiscoveryRecord, error) {
 }
 
 // RemoveDiscoveryRecord removes metadata only when it still identifies the
-// caller's Host instance. A replacement Host can never be unpublished by an
-// older process exiting late.
+// caller's Host instance. The comparison and deletion are serialized with
+// publication, so an older process exiting late cannot unpublish a replacement.
 func RemoveDiscoveryRecord(path string, instanceID string) error {
-	record, err := LoadDiscoveryRecord(path)
-	if errors.Is(err, os.ErrNotExist) {
+	path = filepath.Clean(path)
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
+	return withDiscoveryMutationLock(path, func() error {
+		record, err := LoadDiscoveryRecord(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if record.InstanceID != strings.TrimSpace(instanceID) {
+			return nil
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("controlserver: remove discovery record: %w", err)
+		}
+		return nil
+	})
+}
+
+func withDiscoveryMutationLock(path string, mutate func() error) (err error) {
+	lock, err := filelock.Acquire(context.Background(), filepath.Clean(path)+".lock")
 	if err != nil {
-		return err
+		return fmt.Errorf("controlserver: lock discovery record: %w", err)
 	}
-	if record.InstanceID != strings.TrimSpace(instanceID) {
-		return nil
-	}
-	if err := os.Remove(filepath.Clean(path)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("controlserver: remove discovery record: %w", err)
-	}
-	return nil
+	defer func() {
+		if closeErr := lock.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("controlserver: unlock discovery record: %w", closeErr))
+		}
+	}()
+	return mutate()
 }
 
 func normalizeDiscoveryRecord(record DiscoveryRecord) (DiscoveryRecord, error) {

@@ -10,8 +10,8 @@ import (
 	"sync"
 )
 
-// ErrRollbackIncomplete reports that a replacement could not be proven to
-// have restored every prior source. Callers must treat the effect as unknown.
+// ErrRollbackIncomplete reports that a credential transaction could not be
+// proven to have restored every prior source. Callers must treat the effect as unknown.
 var ErrRollbackIncomplete = errors.New("credential replacement rollback is incomplete")
 
 // Replacement describes one API-key source to replace transactionally.

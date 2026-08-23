@@ -155,11 +155,11 @@ func Start(cfg Config) (_ *Process, retErr error) {
 	}
 	environment := environmentBlock(cfg.Env)
 	startup := windows.StartupInfoEx{}
-	startup.StartupInfo.Cb = uint32(unsafe.Sizeof(startup))
-	startup.StartupInfo.Flags = windows.STARTF_USESTDHANDLES
-	startup.StartupInfo.StdInput = windows.InvalidHandle
-	startup.StartupInfo.StdOutput = windows.InvalidHandle
-	startup.StartupInfo.StdErr = windows.InvalidHandle
+	startup.Cb = uint32(unsafe.Sizeof(startup))
+	startup.Flags = windows.STARTF_USESTDHANDLES
+	startup.StdInput = windows.InvalidHandle
+	startup.StdOutput = windows.InvalidHandle
+	startup.StdErr = windows.InvalidHandle
 	startup.ProcThreadAttributeList = attributes.List()
 	processInfo := windows.ProcessInformation{}
 	flags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_UNICODE_ENVIRONMENT)
