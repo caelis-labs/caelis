@@ -108,6 +108,38 @@ func TestLiveExplorationGroupsSettledPendingStageWithoutCompletingIt(t *testing.
 	}
 }
 
+func TestFailedExplorationStaysInsideOneExploredGroup(t *testing.T) {
+	h := newLiveExplorationHarness(t, 100, 30)
+	h.start("read-1", "Read", "read", "a.go")
+	h.complete("read-1", "Read", "read", "a.go")
+	h.start("search-1", "Grep", "search", "first")
+	h.complete("search-1", "Grep", "search", "first")
+	h.start("read-failed", "Read", "read", "missing.go")
+	h.apply(liveExplorationToolFailedEnvelope("read-failed", "Read", "read", "missing.go"))
+	h.start("read-2", "Read", "read", "b.go")
+	h.complete("read-2", "Read", "read", "b.go")
+	h.start("search-2", "Grep", "search", "second")
+	h.complete("search-2", "Grep", "search", "second")
+	h.reason("reason-after-exploration", "continue after exploration")
+
+	block := requireMainACPTurnBlockForTest(t, h.model)
+	wantRun := []string{"read-1", "search-1", "read-failed", "read-2", "search-2"}
+	stableRuns := collectStableExplorationRuns(block.Events, block.Status)
+	if len(stableRuns) != 1 || !slices.Equal(stableRuns[0], wantRun) {
+		t.Fatalf("stable exploration runs = %#v, want one run %#v", stableRuns, wantRun)
+	}
+	plain := ansi.Strip(h.model.View().Content)
+	if got := countExactTrimmedLine(plain, "• Explored"); got != 1 {
+		t.Fatalf("exploration groups = %d, want one across failed Read:\n%s", got, plain)
+	}
+	if headers := standaloneExplorationHeaders(plain); len(headers) != 0 {
+		t.Fatalf("failed exploration rendered outside the Explored group as %q:\n%s", headers, plain)
+	}
+	if !strings.Contains(plain, "missing.go failed") {
+		t.Fatalf("Explored summary lost failed Read outcome:\n%s", plain)
+	}
+}
+
 func TestTerminalPendingExplorationDoesNotRenderAsActiveContainer(t *testing.T) {
 	block := NewMainACPTurnBlock("turn-terminal-pending")
 	block.UpdateToolWithMeta("read-1", "Read", "a.go", "", false, false, ToolUpdateMeta{ToolKind: "read"})
@@ -474,6 +506,19 @@ func liveExplorationToolStartEnvelope(callID, name, kind, arg string) eventstrea
 
 func liveExplorationToolCompleteEnvelope(callID, name, kind, arg string) eventstream.Envelope {
 	status := schema.ToolStatusCompleted
+	return liveExplorationEnvelope(schema.ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo,
+		ToolCallID:    callID,
+		Title:         &name,
+		Kind:          &kind,
+		Status:        &status,
+		RawInput:      liveExplorationToolInput(kind, arg),
+		Meta:          acpToolNameMeta(name),
+	})
+}
+
+func liveExplorationToolFailedEnvelope(callID, name, kind, arg string) eventstream.Envelope {
+	status := schema.ToolStatusFailed
 	return liveExplorationEnvelope(schema.ToolCallUpdate{
 		SessionUpdate: schema.UpdateToolCallInfo,
 		ToolCallID:    callID,

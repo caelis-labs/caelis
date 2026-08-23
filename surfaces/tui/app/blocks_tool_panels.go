@@ -519,5 +519,7 @@ func collectToolPanelCallIDs(events []SubagentEvent) []string {
 }
 
 func shouldDefaultCollapseToolEvent(ev SubagentEvent) bool {
-	return !ev.Err && surfaceIsExplorationTool(ev.Name, ev.ToolKind)
+	// Failed exploration remains part of the compact exploration presentation;
+	// its outcome must not split an otherwise contiguous Explored run.
+	return surfaceIsExplorationTool(ev.Name, ev.ToolKind)
 }
