@@ -969,8 +969,8 @@ func TestEventProjectorDoesNotInferSpawnIdentityFromRawInput(t *testing.T) {
 	if update.Kind == nil || *update.Kind != ToolKindExecute {
 		t.Fatalf("kind = %v, want %q", update.Kind, ToolKindExecute)
 	}
-	if update.Title == nil || *update.Title != ToolKindExecute {
-		t.Fatalf("title = %v, want generic execute title", update.Title)
+	if update.Title != nil {
+		t.Fatalf("title = %v, standard execute kind must not become an exact-name title", update.Title)
 	}
 	assertTerminalAnchor(t, update.Content, "terminal-1")
 	if _, ok := metautil.TerminalInfo(update.Meta); ok {

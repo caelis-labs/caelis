@@ -149,19 +149,23 @@ func terminalExitCode(raw any) *int {
 func protocolToolNameForUpdate(event *session.Event, update *session.ProtocolUpdate) string {
 	var updateMeta map[string]any
 	var eventMeta map[string]any
-	var kind string
+	var legacyKind string
 	if event != nil {
 		eventMeta = event.Meta
 	}
 	if update != nil {
 		updateMeta = update.Meta
-		kind = update.Kind
+		legacyKind = update.Kind
 	}
+	// Standard ACP kind and title are presentation fields, not exact tool
+	// identity. Only canonical Runtime facts or the maintained display extension
+	// may populate caelis.runtime.tool.name. Historical internal updates that put
+	// a non-standard exact Definition.Name in Kind retain that compatibility.
 	candidates := []string{
-		protocolToolNameFromKind(protocolCanonicalEventToolName(event, update)),
+		protocolCanonicalEventToolName(event, update),
 		protocolToolNameFromMeta(updateMeta),
 		protocolToolNameFromMeta(eventMeta),
-		protocolToolNameFromKind(kind),
+		protocolToolNameFromLegacyKind(legacyKind),
 	}
 	for _, candidate := range candidates {
 		if candidate = strings.TrimSpace(candidate); candidate != "" {
@@ -211,7 +215,7 @@ func protocolCanonicalEventToolName(event *session.Event, update *session.Protoc
 }
 
 func protocolToolNameFromMeta(meta map[string]any) string {
-	return protocolToolNameFromKind(metautil.String(
+	return strings.TrimSpace(metautil.String(
 		meta,
 		metautil.Root,
 		metautil.Runtime,
@@ -220,6 +224,14 @@ func protocolToolNameFromMeta(meta map[string]any) string {
 	))
 }
 
-func protocolToolNameFromKind(kind string) string {
-	return strings.TrimSpace(kind)
+func protocolToolNameFromLegacyKind(kind string) string {
+	kind = strings.TrimSpace(kind)
+	switch strings.ToLower(kind) {
+	case "", ToolKindRead, ToolKindEdit, ToolKindDelete, ToolKindMove,
+		ToolKindSearch, ToolKindExecute, ToolKindThink, ToolKindFetch,
+		ToolKindSwitch, ToolKindOther:
+		return ""
+	default:
+		return kind
+	}
 }

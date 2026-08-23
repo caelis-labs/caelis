@@ -212,13 +212,13 @@ func TestProtocolToolNameForUpdateKeepsCanonicalAndProtocolCandidatesOrdered(t *
 			name:   "raw input does not invent a tool identity",
 			event:  &session.Event{},
 			update: &session.ProtocolUpdate{RawInput: map[string]any{"command": "go test"}, Title: "Spawn orbit", Kind: "execute"},
-			want:   "execute",
+			want:   "",
 		},
 		{
 			name:   "title cannot promote a builtin over generic kind",
 			event:  &session.Event{},
 			update: &session.ProtocolUpdate{Title: "Task wait", Kind: "execute"},
-			want:   "execute",
+			want:   "",
 		},
 		{
 			name:   "unknown title without name stays anonymous",
@@ -233,16 +233,16 @@ func TestProtocolToolNameForUpdateKeepsCanonicalAndProtocolCandidatesOrdered(t *
 			want:   "",
 		},
 		{
-			name:   "generic kind wins unknown title",
+			name:   "generic kind remains separate from unknown title",
 			event:  &session.Event{},
 			update: &session.ProtocolUpdate{Title: "rg task stream", Kind: "execute"},
-			want:   "execute",
+			want:   "",
 		},
 		{
-			name:   "kind wins unknown title",
+			name:   "kind is not an exact tool name",
 			event:  &session.Event{},
 			update: &session.ProtocolUpdate{Title: "Custom action", Kind: "execute"},
-			want:   "execute",
+			want:   "",
 		},
 		{
 			name:   "title is never an identity fallback",

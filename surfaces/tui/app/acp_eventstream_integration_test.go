@@ -854,6 +854,11 @@ func TestHandleACPEventEnvelopeMergesGrokShellUpdate(t *testing.T) {
 			},
 		},
 	})
+	model.syncViewportContent()
+	initial := strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(initial, "Shell pwd") {
+		t.Fatalf("initial Grok shell frame lost raw command arguments:\n%s", initial)
+	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
@@ -882,6 +887,79 @@ func TestHandleACPEventEnvelopeMergesGrokShellUpdate(t *testing.T) {
 	plain := strings.Join(model.viewportPlainLines, "\n")
 	if !strings.Contains(plain, "Ran pwd") || strings.Contains(plain, "Ran Shell") {
 		t.Fatalf("viewport rendered unexpected shell header:\n%s", plain)
+	}
+}
+
+func TestProjectedGrokListUpdateKeepsOtherKindOutOfExactToolName(t *testing.T) {
+	t.Parallel()
+
+	const path = "/Users/xueyongzhi/WorkDir/caelis-labs/caelis/internal/filelock"
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	updates := []struct {
+		eventType session.EventType
+		update    *session.ProtocolUpdate
+	}{
+		{
+			eventType: session.EventTypeToolCall,
+			update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+				ToolCallID:    "list-1",
+				Title:         "list_dir",
+				RawInput:      map[string]any{"target_directory": path},
+			},
+		},
+		{
+			eventType: session.EventTypeToolResult,
+			update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+				ToolCallID:    "list-1",
+				Title:         "List `" + path + "`",
+				Kind:          schema.ToolKindOther,
+				RawInput:      map[string]any{"variant": "ListDir", "target_directory": path},
+			},
+		},
+	}
+	for _, item := range updates {
+		event := session.MarkUIOnly(&session.Event{
+			SessionID: "session-1",
+			Type:      item.eventType,
+			Protocol:  &session.EventProtocol{Update: item.update},
+		})
+		base := eventstream.Envelope{
+			SessionID: "session-1",
+			Scope:     eventstream.ScopeMain,
+			ScopeID:   "session-1",
+		}
+		for _, envelope := range acpprojector.ProjectSessionEventEnvelope(base, event) {
+			model = applyACPEnvelopeForTest(t, model, envelope)
+		}
+	}
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("projected Grok list events = %#v, want one merged tool event", block.Events)
+	}
+	if event := block.Events[0]; event.Name != "" || event.ToolKind != schema.ToolKindOther || event.Title != "List `"+path+"`" {
+		t.Fatalf("projected Grok list event = %#v, want standard kind/title without an exact name", event)
+	}
+	model.syncViewportContent()
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(plain, "List `"+path+"`") || strings.Contains(plain, "other List") {
+		t.Fatalf("projected Grok list rendered with kind as tool name:\n%s", plain)
+	}
+}
+
+func TestAnonymousProviderTitleRemainsAnAtomicLifecycleLabel(t *testing.T) {
+	t.Parallel()
+
+	const title = "List `/tmp/foo`"
+	got := standardToolLifecycleHeader(SubagentEvent{
+		ToolKind: schema.ToolKindOther,
+		Title:    title,
+		Args:     "foo",
+	}, false)
+	if want := "• " + title; got != want {
+		t.Fatalf("anonymous provider header = %q, want atomic title %q", got, want)
 	}
 }
 

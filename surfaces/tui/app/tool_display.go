@@ -79,6 +79,13 @@ func toolDisplayArgsForKind(name string, kind string, raw map[string]any, fallba
 	case surfaceToolSendMessage:
 		return display.AgentMessageFullDisplayArgs(raw)
 	}
+	if strings.TrimSpace(name) == "" &&
+		(strings.TrimSpace(kind) == "" || strings.EqualFold(strings.TrimSpace(kind), "other")) &&
+		len(fallback) > 0 && genericExecuteTitle(fallback[0]) {
+		if command := terminalCommandDisplay(raw); command != "" {
+			return display.NormalizeDisplayArg(command)
+		}
+	}
 	if summary := genericToolArgs(raw); summary != "" {
 		return summary
 	}
