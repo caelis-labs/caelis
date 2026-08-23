@@ -88,17 +88,20 @@ func TestListCatalogModelsIncludesBuiltinDefaults(t *testing.T) {
 		t.Fatal("ListCatalogModels(deepseek) returned no models")
 	}
 	foundFlash := false
+	foundVision := false
 	foundPro := false
 	for _, model := range models {
 		switch model {
 		case "deepseek-v4-flash":
 			foundFlash = true
+		case "deepseek-v4-flash-vision-exp":
+			foundVision = true
 		case "deepseek-v4-pro":
 			foundPro = true
 		}
 	}
-	if !foundFlash || !foundPro {
-		t.Fatalf("ListCatalogModels(deepseek) = %#v, want deepseek-v4-flash and deepseek-v4-pro", models)
+	if !foundFlash || !foundVision || !foundPro {
+		t.Fatalf("ListCatalogModels(deepseek) = %#v, want current Flash, Flash Vision, and Pro models", models)
 	}
 	for _, model := range models {
 		if model == "deepseek-chat" || model == "deepseek-reasoner" {
@@ -373,24 +376,35 @@ func TestGrok46StaticCapabilitiesIncludeXHighReasoning(t *testing.T) {
 	}
 }
 
-func TestDeepSeekStaticModelsExposeThinkingEfforts(t *testing.T) {
-	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-pro"} {
-		caps, ok := LookupModelCapabilities("deepseek", model)
+func TestDeepSeekStaticModelsExposeMaintainedCapabilities(t *testing.T) {
+	tests := []struct {
+		model  string
+		images bool
+	}{
+		{model: "deepseek-v4-flash"},
+		{model: "deepseek-v4-flash-vision-exp", images: true},
+		{model: "deepseek-v4-pro"},
+	}
+	for _, test := range tests {
+		caps, ok := LookupModelCapabilities("deepseek", test.model)
 		if !ok {
-			t.Fatalf("LookupModelCapabilities(deepseek, %q) = false, want true", model)
+			t.Fatalf("LookupModelCapabilities(deepseek, %q) = false, want true", test.model)
 		}
 		if !caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeToggle {
-			t.Fatalf("LookupModelCapabilities(deepseek, %q) = %#v, want toggle reasoning", model, caps)
+			t.Fatalf("LookupModelCapabilities(deepseek, %q) = %#v, want toggle reasoning", test.model, caps)
 		}
 		if caps.ContextWindowTokens != 1048576 || caps.MaxOutputTokens != 393216 || caps.DefaultMaxOutputTokens != 32768 {
 			t.Fatalf("LookupModelCapabilities(deepseek, %q) limits = %d/%d default %d, want 1048576/393216 default 32768",
-				model, caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens)
+				test.model, caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens)
+		}
+		if caps.SupportsImages != test.images || !caps.SupportsToolCalls || !caps.SupportsJSONOutput {
+			t.Fatalf("LookupModelCapabilities(deepseek, %q) capabilities = %#v, want images=%v, tools, and JSON", test.model, caps, test.images)
 		}
 		if !sameStrings(caps.ReasoningEfforts, []string{"high", "max"}) {
-			t.Fatalf("LookupModelCapabilities(deepseek, %q) efforts = %#v, want high/max", model, caps.ReasoningEfforts)
+			t.Fatalf("LookupModelCapabilities(deepseek, %q) efforts = %#v, want high/max", test.model, caps.ReasoningEfforts)
 		}
-		if levels := ReasoningLevelsForModel("deepseek", model); !sameStrings(levels, []string{"none", "high", "max"}) {
-			t.Fatalf("ReasoningLevelsForModel(deepseek, %q) = %#v, want none/high/max", model, levels)
+		if levels := ReasoningLevelsForModel("deepseek", test.model); !sameStrings(levels, []string{"none", "high", "max"}) {
+			t.Fatalf("ReasoningLevelsForModel(deepseek, %q) = %#v, want none/high/max", test.model, levels)
 		}
 	}
 }

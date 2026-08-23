@@ -127,8 +127,10 @@ func TestMaintainedSelectableModelsOnlyReturnsMetadataBackedModels(t *testing.T)
 	if err != nil {
 		t.Fatalf("MaintainedSelectableModels(deepseek) error = %v", err)
 	}
-	if selectableModelNamesContain(models, "private-deepseek") || !selectableModelNamesContain(models, "deepseek-v4-flash") {
-		t.Fatalf("known provider models = %#v, want only metadata-backed choices", models)
+	if selectableModelNamesContain(models, "private-deepseek") ||
+		!selectableModelNamesContain(models, "deepseek-v4-flash") ||
+		!selectableModelNamesContain(models, "deepseek-v4-flash-vision-exp") {
+		t.Fatalf("known provider models = %#v, want only metadata-backed choices including Flash Vision", models)
 	}
 	for _, item := range models {
 		if !item.MetadataComplete {
@@ -650,6 +652,13 @@ func TestBuildModelPropagatesMaintainedImageInputCapability(t *testing.T) {
 	t.Parallel()
 
 	tests := []Config{
+		{
+			Provider: "deepseek",
+			API:      model.APIDeepSeek,
+			Model:    "deepseek-v4-flash-vision-exp",
+			BaseURL:  "https://api.deepseek.com/anthropic",
+			Token:    "test-token",
+		},
 		{
 			Provider: "xai",
 			API:      model.APIOpenAI,

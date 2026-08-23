@@ -2,6 +2,8 @@ package providers
 
 import (
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 func TestDeepSeekCustomNonAnthropicEndpointUsesOpenAICompatFallback(t *testing.T) {
@@ -21,6 +23,19 @@ func TestDeepSeekCustomNonAnthropicEndpointUsesOpenAICompatFallback(t *testing.T
 	}
 	if typed.options.StructuredOutput != openAICompatStructuredOutputJSONOutput {
 		t.Fatalf("StructuredOutput = %q, want legacy DeepSeek json_object compatibility", typed.options.StructuredOutput)
+	}
+}
+
+func TestDeepSeekVisionModelSupportsThinkingOnOpenAICompatEndpoints(t *testing.T) {
+	payload := openAICompatRequest{Model: "deepseek-v4-flash-vision-exp"}
+
+	applyDeepSeekCompatThinkingReasoning(&payload, model.ReasoningConfig{Effort: "max"})
+
+	if payload.Thinking == nil || payload.Thinking.Type != "enabled" {
+		t.Fatalf("vision model thinking = %#v, want enabled", payload.Thinking)
+	}
+	if payload.ReasoningEffort != "max" {
+		t.Fatalf("vision model reasoning effort = %q, want max", payload.ReasoningEffort)
 	}
 }
 

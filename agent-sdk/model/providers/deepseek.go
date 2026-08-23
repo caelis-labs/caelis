@@ -104,7 +104,7 @@ func clearDeepSeekCompatReasoningFields(payload *openAICompatRequest) {
 
 func deepSeekModelSupportsThinking(modelName string) bool {
 	switch strings.ToLower(strings.TrimSpace(modelName)) {
-	case "deepseek-v4-flash", "deepseek-v4-pro":
+	case "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro":
 		return true
 	default:
 		return false
