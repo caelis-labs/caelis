@@ -114,6 +114,14 @@ func (r *runtime) runElevatedRepair(ctx context.Context) error {
 		_ = os.Remove(filepath.Join(authority.Path(), requestName))
 		_ = os.Remove(filepath.Join(authority.Path(), resultName))
 	}()
+	for _, path := range []string{
+		filepath.Join(authority.Path(), requestName),
+		filepath.Join(authority.Path(), resultName),
+	} {
+		if err := protectHostAuthorityObject(path, r.hostUserSID, false); err != nil {
+			return fmt.Errorf("impl/sandbox/windows: protect repair IPC file: %w", err)
+		}
+	}
 
 	cfg := sandbox.NormalizeConfig(r.cfg)
 	cfg.RequestedBackend = sandbox.BackendWindows
@@ -314,6 +322,15 @@ func readValidatedElevatedRepairRequest(data []byte) (elevatedRepairRequest, err
 }
 
 func runInternalRepairRequest(request elevatedRepairRequest) error {
+	var err error
+	request.Receipts, err = normalizeRepairReceiptPaths(request.Receipts)
+	if err != nil {
+		return fmt.Errorf("impl/sandbox/windows: normalize elevated repair receipts: %w", err)
+	}
+	request.RetireReceipts, err = normalizeRepairReceiptPaths(request.RetireReceipts)
+	if err != nil {
+		return fmt.Errorf("impl/sandbox/windows: normalize elevated retiring receipts: %w", err)
+	}
 	stateRoot, err := resolveStateRoot(request.Config.StateDir)
 	if err != nil {
 		return err
@@ -359,6 +376,41 @@ func runInternalRepairRequest(request elevatedRepairRequest) error {
 		}
 	}
 	return nil
+}
+
+func normalizeRepairReceiptPaths(receipts []manifestReceipt) ([]manifestReceipt, error) {
+	if len(receipts) == 0 {
+		return nil, nil
+	}
+	out := append([]manifestReceipt(nil), receipts...)
+	for i := range out {
+		managedPath, err := normalizeAbsoluteRepairPath(out[i].Path)
+		if err != nil {
+			return nil, fmt.Errorf("receipt %d path: %w", i, err)
+		}
+		receiptPath, err := normalizeAbsoluteRepairPath(out[i].Receipt.Path)
+		if err != nil {
+			return nil, fmt.Errorf("receipt %d provenance path: %w", i, err)
+		}
+		out[i].Path = managedPath
+		out[i].Receipt.Path = receiptPath
+	}
+	return out, nil
+}
+
+func normalizeAbsoluteRepairPath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" || !filepath.IsAbs(path) {
+		return "", fmt.Errorf("canonical absolute path is required")
+	}
+	normalized, err := pathutil.NormalizeWithBase("", path)
+	if err != nil {
+		return "", err
+	}
+	if normalized == "" || !filepath.IsAbs(normalized) {
+		return "", fmt.Errorf("canonical absolute path is required")
+	}
+	return normalized, nil
 }
 
 func validateRepairReceiptOwners(hostUserSID string, receiptSets ...[]manifestReceipt) error {

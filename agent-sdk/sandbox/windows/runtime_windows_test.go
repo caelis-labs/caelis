@@ -665,6 +665,15 @@ func TestRunElevatedRepairUsesInternalHelperRequest(t *testing.T) {
 		if request.HostUserSID != windowsRT.hostUserSID || pathutil.Key(request.HostReceiptAuthorityRoot) != pathutil.Key(windowsRT.hostReceiptAuthorityRoot) {
 			t.Fatalf("repair request Host authority = %q/%q, want Runtime authority", request.HostUserSID, request.HostReceiptAuthorityRoot)
 		}
+		for _, name := range []string{requestName, flagValue(args, "-result-name")} {
+			info, err := acl.InspectFileDACL(filepath.Join(authorityRoot, name))
+			if err != nil {
+				t.Fatalf("inspect repair IPC file %s: %v", name, err)
+			}
+			if !strings.EqualFold(info.OwnerSID, request.HostUserSID) || !info.Protected || !info.HasDACL || info.HasInheritedACE {
+				t.Fatalf("repair IPC file %s authority = owner %q protected=%v dacl=%v inherited=%v, want protected Host-owned DACL", name, info.OwnerSID, info.Protected, info.HasDACL, info.HasInheritedACE)
+			}
+		}
 		if err := runInternalRepairHelper(args[1:]); err != nil {
 			t.Fatalf("run repair helper: %v", err)
 		}
@@ -802,6 +811,29 @@ func TestInternalRepairVerifiesAllReplacementsBeforeLegacyRetirement(t *testing.
 	}
 	if count, err := acl.ExactFileDACLEntryCount(workspace, legacyEntry); err != nil || count != 0 {
 		t.Fatalf("legacy ACE after verified replacements = %d/%v, want retired", count, err)
+	}
+}
+
+func TestNormalizeRepairReceiptPathsCanonicalizesBothPaths(t *testing.T) {
+	path := t.TempDir()
+	extendedPath := `\\?\` + path
+	receipts := []manifestReceipt{{
+		Path: extendedPath,
+		Receipt: acl.ACEReceipt{
+			Path: extendedPath,
+		},
+	}}
+
+	got, err := normalizeRepairReceiptPaths(receipts)
+	if err != nil {
+		t.Fatalf("normalizeRepairReceiptPaths() error = %v", err)
+	}
+	want := pathutil.Normalize(path)
+	if len(got) != 1 || !strings.EqualFold(got[0].Path, want) || !strings.EqualFold(got[0].Receipt.Path, want) {
+		t.Fatalf("normalizeRepairReceiptPaths() = %#v, want both paths %q", got, want)
+	}
+	if receipts[0].Path != extendedPath || receipts[0].Receipt.Path != extendedPath {
+		t.Fatal("normalizeRepairReceiptPaths() mutated caller-owned receipts")
 	}
 }
 

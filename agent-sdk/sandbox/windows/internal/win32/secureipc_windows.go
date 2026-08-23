@@ -153,12 +153,18 @@ func (d *StableDirectory) OpenExpectedFile(name string, expected FileIdentity, o
 		return fail(err)
 	}
 	identity, err := secureFileIdentity(handle)
-	if err != nil || identity != expected {
-		return fail(fmt.Errorf("win32: repair IPC identity mismatch for %s: %w", name, err))
+	if err != nil {
+		return fail(fmt.Errorf("win32: inspect repair IPC identity for %s: %w", name, err))
+	}
+	if identity != expected {
+		return fail(fmt.Errorf("win32: repair IPC identity mismatch for %s", name))
 	}
 	owner, err := secureOwnerSID(handle)
-	if err != nil || (strings.TrimSpace(ownerSID) != "" && !strings.EqualFold(strings.TrimSpace(owner), strings.TrimSpace(ownerSID))) {
-		return fail(fmt.Errorf("win32: repair IPC owner %q does not match %q: %w", owner, ownerSID, err))
+	if err != nil {
+		return fail(fmt.Errorf("win32: inspect repair IPC owner for %s: %w", name, err))
+	}
+	if strings.TrimSpace(ownerSID) != "" && !strings.EqualFold(strings.TrimSpace(owner), strings.TrimSpace(ownerSID)) {
+		return fail(fmt.Errorf("win32: repair IPC owner %q does not match %q", owner, ownerSID))
 	}
 	return os.NewFile(uintptr(handle), filepath.Join(d.path, name)), nil
 }
