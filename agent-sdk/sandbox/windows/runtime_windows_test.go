@@ -963,6 +963,9 @@ func TestNewProtectsHostAuthorityWithExplicitDACL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.EqualFold(info.OwnerSID, windowsRT.hostUserSID) {
+		t.Fatalf("Host authority owner = %s, want Host user %s", info.OwnerSID, windowsRT.hostUserSID)
+	}
 	if !info.Protected || !info.HasDACL || info.HasInheritedACE || info.ACECount == 0 {
 		t.Fatalf("Host authority DACL = %+v, want protected explicit Host-user entries", info)
 	}

@@ -11,11 +11,7 @@ import (
 )
 
 func TestStableDirectoryCreatesIPCFilesExactlyOnce(t *testing.T) {
-	ownerSID, err := CurrentProcessUserSID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir, err := OpenStableDirectory(t.TempDir(), ownerSID)
+	dir, err := OpenStableDirectory(t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("OpenStableDirectory() error = %v", err)
 	}
@@ -30,6 +26,25 @@ func TestStableDirectoryCreatesIPCFilesExactlyOnce(t *testing.T) {
 	}
 	if _, _, err := dir.CreateNewFile("repair.result.json"); err == nil {
 		t.Fatal("CreateNewFile(existing) succeeded, want CREATE_NEW failure")
+	}
+}
+
+func TestOpenStableDirectoryRejectsUnexpectedOwner(t *testing.T) {
+	path := t.TempDir()
+	dir, err := OpenStableDirectory(path, "")
+	if err != nil {
+		t.Fatalf("OpenStableDirectory() error = %v", err)
+	}
+	ownerSID := dir.OwnerSID()
+	if err := dir.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	unexpected := "S-1-1-0"
+	if strings.EqualFold(ownerSID, unexpected) {
+		unexpected = "S-1-5-18"
+	}
+	if _, err := OpenStableDirectory(path, unexpected); err == nil || !strings.Contains(err.Error(), "owner") {
+		t.Fatalf("OpenStableDirectory(unexpected owner) error = %v, want owner mismatch", err)
 	}
 }
 

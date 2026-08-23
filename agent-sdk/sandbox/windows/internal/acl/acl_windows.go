@@ -188,10 +188,25 @@ func MissingFileDACLEntries(path string, entries ...Entry) ([]Entry, error) {
 }
 
 func ReplaceFileDACL(path string, protect bool, entries ...Entry) error {
-	return writeBuiltFileDACL(path, nil, protect, entries...)
+	return writeBuiltFileSecurity(path, nil, nil, protect, entries...)
+}
+
+// ReplaceFileOwnerAndDACL atomically replaces a filesystem object's owner and
+// DACL. It is used for Host-owned authority objects whose creator token may
+// default ownership to the Administrators group when the Host is elevated.
+func ReplaceFileOwnerAndDACL(path, owner string, protect bool, entries ...Entry) error {
+	_, ownerSID, err := trustee(strings.TrimSpace(owner))
+	if err != nil {
+		return err
+	}
+	return writeBuiltFileSecurity(path, ownerSID, nil, protect, entries...)
 }
 
 func writeBuiltFileDACL(path string, base *windows.SECURITY_DESCRIPTOR, protect bool, entries ...Entry) error {
+	return writeBuiltFileSecurity(path, nil, base, protect, entries...)
+}
+
+func writeBuiltFileSecurity(path string, owner *windows.SID, base *windows.SECURITY_DESCRIPTOR, protect bool, entries ...Entry) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return fmt.Errorf("acl: path is required")
@@ -213,12 +228,20 @@ func writeBuiltFileDACL(path string, base *windows.SECURITY_DESCRIPTOR, protect 
 		return fmt.Errorf("acl: build %s DACL: %w", path, err)
 	}
 	info := windows.SECURITY_INFORMATION(windows.DACL_SECURITY_INFORMATION)
+	if owner != nil {
+		info |= windows.OWNER_SECURITY_INFORMATION
+	}
 	if protect {
 		info |= windows.PROTECTED_DACL_SECURITY_INFORMATION
 	}
-	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, info, nil, nil, nextDACL, nil); err != nil {
-		return fmt.Errorf("acl: write %s DACL: %w", path, err)
+	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, info, owner, nil, nextDACL, nil); err != nil {
+		label := "DACL"
+		if owner != nil {
+			label = "owner/DACL"
+		}
+		return fmt.Errorf("acl: write %s %s: %w", path, label, err)
 	}
+	runtime.KeepAlive(owner)
 	runtime.KeepAlive(base)
 	runtime.KeepAlive(nextDACL)
 	return nil

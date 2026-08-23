@@ -167,11 +167,14 @@ func TestEnsureFileDACLReceiptRejectsInterveningDACLChange(t *testing.T) {
 	if err := ModifyFileDACL(dir, intervening); err != nil {
 		t.Fatalf("ModifyFileDACL(intervening) error = %v", err)
 	}
-	if err := EnsureFileDACLReceipt(dir, receipt); err == nil || !strings.Contains(err.Error(), "baseline changed") {
-		t.Fatalf("EnsureFileDACLReceipt() error = %v, want baseline-change rejection", err)
+	if err := EnsureFileDACLReceipt(dir, receipt); err == nil {
+		t.Fatal("EnsureFileDACLReceipt() error = nil, want intervening-change rejection")
 	}
 	if missing, err := MissingFileDACLEntries(dir, intervening); err != nil || len(missing) != 0 {
 		t.Fatalf("intervening ACE after ensure = %#v/%v, want present", missing, err)
+	}
+	if missing, err := MissingFileDACLEntries(dir, managed); err != nil || len(missing) != 1 {
+		t.Fatalf("managed ACE after rejected ensure = %#v/%v, want absent", missing, err)
 	}
 }
 

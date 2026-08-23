@@ -4,6 +4,7 @@ package acl
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -107,13 +108,24 @@ func TestReplaceAndWriteFileDACL(t *testing.T) {
 	if username == "" {
 		t.Skip("USERNAME unavailable")
 	}
-	if err := ReplaceFileDACL(dir, false, Entry{
+	if err := ReplaceFileOwnerAndDACL(dir, username, false, Entry{
 		Principal: username,
 		Rights:    Modify,
 		Mode:      Grant,
 		Inherit:   true,
 	}); err != nil {
-		t.Fatalf("ReplaceFileDACL() error = %v", err)
+		t.Fatalf("ReplaceFileOwnerAndDACL() error = %v", err)
+	}
+	_, ownerSID, err := trustee(username)
+	if err != nil {
+		t.Fatalf("trustee(%q) error = %v", username, err)
+	}
+	info, err := InspectFileDACL(dir)
+	if err != nil {
+		t.Fatalf("InspectFileDACL(after replace) error = %v", err)
+	}
+	if !strings.EqualFold(info.OwnerSID, ownerSID.String()) {
+		t.Fatalf("owner SID after replace = %s, want %s", info.OwnerSID, ownerSID)
 	}
 	descriptor, err := ReadFileDACL(dir)
 	if err != nil {

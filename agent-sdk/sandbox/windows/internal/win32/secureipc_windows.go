@@ -37,6 +37,10 @@ func OpenStableDirectory(path, ownerSID string) (*StableDirectory, error) {
 		return nil, fmt.Errorf("win32: canonical local directory is required")
 	}
 	path = filepath.Clean(path)
+	path, err = longDOSPath(path)
+	if err != nil {
+		return nil, fmt.Errorf("win32: resolve stable directory path %s: %w", path, err)
+	}
 	handle, err := ntOpenSecure(0, `\??\`+path, windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES|windows.FILE_LIST_DIRECTORY|windows.SYNCHRONIZE, windows.FILE_OPEN, windows.FILE_DIRECTORY_FILE|windows.FILE_OPEN_REPARSE_POINT|windows.FILE_OPEN_FOR_BACKUP_INTENT, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE)
 	if err != nil {
 		return nil, fmt.Errorf("win32: open stable directory %s: %w", path, err)
@@ -50,8 +54,11 @@ func OpenStableDirectory(path, ownerSID string) (*StableDirectory, error) {
 		return fail(err)
 	}
 	finalPath, err := finalDOSPath(handle)
-	if err != nil || !strings.EqualFold(filepath.Clean(finalPath), path) {
-		return fail(fmt.Errorf("win32: stable directory final path %q does not match %q: %w", finalPath, path, err))
+	if err != nil {
+		return fail(fmt.Errorf("win32: resolve stable directory final path %s: %w", path, err))
+	}
+	if !strings.EqualFold(filepath.Clean(finalPath), path) {
+		return fail(fmt.Errorf("win32: stable directory final path %q does not match %q", finalPath, path))
 	}
 	identity, err := secureFileIdentity(handle)
 	if err != nil {
@@ -245,6 +252,24 @@ func finalDOSPath(handle windows.Handle) (string, error) {
 			path := windows.UTF16ToString(buffer[:n])
 			path = strings.TrimPrefix(path, `\\?\`)
 			return path, nil
+		}
+		buffer = make([]uint16, n+1)
+	}
+}
+
+func longDOSPath(path string) (string, error) {
+	pathPtr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return "", err
+	}
+	buffer := make([]uint16, 512)
+	for {
+		n, err := windows.GetLongPathName(pathPtr, &buffer[0], uint32(len(buffer)))
+		if err != nil {
+			return "", err
+		}
+		if n < uint32(len(buffer)) {
+			return filepath.Clean(windows.UTF16ToString(buffer[:n])), nil
 		}
 		buffer = make([]uint16, n+1)
 	}

@@ -554,13 +554,6 @@ func (r *runtime) ensureHostReceiptAuthority() error {
 	if err := validateNoReparseAncestors(r.hostReceiptAuthorityRoot); err != nil {
 		return err
 	}
-	info, err := acl.InspectFileDACL(r.hostReceiptAuthorityRoot)
-	if err != nil {
-		return err
-	}
-	if !strings.EqualFold(strings.TrimSpace(info.OwnerSID), r.hostUserSID) {
-		return fmt.Errorf("impl/sandbox/windows: Host ACL receipt authority owner %s does not match Host user %s", info.OwnerSID, r.hostUserSID)
-	}
 	if err := protectHostAuthorityObject(r.hostReceiptAuthorityRoot, r.hostUserSID, true); err != nil {
 		return err
 	}
@@ -580,13 +573,6 @@ func (r *runtime) ensureHostReceiptAuthority() error {
 		} else if reparse {
 			return fmt.Errorf("impl/sandbox/windows: Host authority object %s is a reparse point", path)
 		}
-		childACL, err := acl.InspectFileDACL(path)
-		if err != nil {
-			return err
-		}
-		if !strings.EqualFold(strings.TrimSpace(childACL.OwnerSID), r.hostUserSID) {
-			return fmt.Errorf("impl/sandbox/windows: Host authority object owner %s does not match Host user %s", childACL.OwnerSID, r.hostUserSID)
-		}
 		if err := protectHostAuthorityObject(path, r.hostUserSID, false); err != nil {
 			return err
 		}
@@ -599,7 +585,7 @@ func (r *runtime) ensureHostReceiptAuthority() error {
 }
 
 func protectHostAuthorityObject(path, hostUserSID string, inherit bool) error {
-	if err := acl.ReplaceFileDACL(path, true, acl.Entry{
+	if err := acl.ReplaceFileOwnerAndDACL(path, hostUserSID, true, acl.Entry{
 		Principal: hostUserSID,
 		Rights:    acl.FullControl,
 		Mode:      acl.Set,
@@ -610,6 +596,9 @@ func protectHostAuthorityObject(path, hostUserSID string, inherit bool) error {
 	info, err := acl.InspectFileDACL(path)
 	if err != nil {
 		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(info.OwnerSID), hostUserSID) {
+		return fmt.Errorf("impl/sandbox/windows: Host authority object owner %s does not match Host user %s", info.OwnerSID, hostUserSID)
 	}
 	if !info.Protected || !info.HasDACL || info.HasInheritedACE {
 		return fmt.Errorf("impl/sandbox/windows: Host authority object %s does not have a protected explicit DACL", path)
