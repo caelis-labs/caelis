@@ -903,7 +903,9 @@ func TestPolicyForRequestUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T
 	extraWrite := filepath.Join(t.TempDir(), "extra-write")
 	hidden := filepath.Join(workspace, "secret")
 	outDir := filepath.Join(workspace, "out")
-	for _, dir := range []string{commandDir, extraWrite, hidden, outDir, filepath.Join(workspace, ".git"), filepath.Join(workspace, "vendor")} {
+	childGit := filepath.Join(workspace, "child", ".git")
+	deepGit := filepath.Join(workspace, "container", "child", ".git")
+	for _, dir := range []string{commandDir, extraWrite, hidden, outDir, filepath.Join(workspace, ".git"), childGit, deepGit, filepath.Join(workspace, "vendor")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
 		}
@@ -911,7 +913,7 @@ func TestPolicyForRequestUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T
 	rt, err := New(sandbox.Config{
 		CWD:              workspace,
 		StateDir:         t.TempDir(),
-		WritableRoots:    []string{extraWrite},
+		WritableRoots:    []string{workspace, extraWrite},
 		ReadOnlySubpaths: []string{"vendor"},
 	})
 	if err != nil {
@@ -949,10 +951,13 @@ func TestPolicyForRequestUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T
 	if containsPath(policy.WriteRoots, hidden) || containsPath(policy.DenyWritePaths, hidden) {
 		t.Fatalf("policy unexpectedly consumed hidden path %q: %+v", hidden, policy)
 	}
-	for _, want := range []string{filepath.Join(workspace, ".git"), filepath.Join(workspace, "vendor")} {
+	for _, want := range []string{filepath.Join(workspace, ".git"), childGit, filepath.Join(workspace, "vendor")} {
 		if !containsPath(policy.DenyWritePaths, want) {
 			t.Fatalf("DenyWritePaths = %#v, want %q", policy.DenyWritePaths, want)
 		}
+	}
+	if containsPath(policy.DenyWritePaths, deepGit) {
+		t.Fatalf("DenyWritePaths = %#v, did not want depth-two %q", policy.DenyWritePaths, deepGit)
 	}
 	if len(policy.CapabilitySIDs) == 0 {
 		t.Fatalf("CapabilitySIDs empty, want active write SID set")
@@ -965,9 +970,29 @@ func TestNewRejectsHostAuthorityInsideWritableRoot(t *testing.T) {
 		CWD:              workspace,
 		StateDir:         t.TempDir(),
 		HostAuthorityDir: filepath.Join(workspace, ".caelis-host-authority"),
+		WritableRoots:    []string{workspace},
 	})
 	if err == nil || !strings.Contains(err.Error(), "must remain outside sandbox writable root") {
 		t.Fatalf("New(Host authority under workspace) error = %v, want writable-root overlap rejection", err)
+	}
+}
+
+func TestNewAllowsHomeCWDWhenAuthorityIsNotAnEffectiveWritableRoot(t *testing.T) {
+	home := t.TempDir()
+	setHomeForWindowsTest(t, home)
+	authorityBase := filepath.Join(home, "AppData", "Local", "Caelis", "sandbox", "windows", "hosts")
+
+	rt, err := New(sandbox.Config{
+		CWD:              home,
+		StateDir:         t.TempDir(),
+		HostAuthorityDir: authorityBase,
+	})
+	if err != nil {
+		t.Fatalf("New(home CWD) error = %v", err)
+	}
+	defer rt.Close()
+	if windowsRT := rt.(*runtime); containsPath(windowsRT.cfg.WritableRoots, home) {
+		t.Fatalf("WritableRoots = %#v, did not want implicit home grant", windowsRT.cfg.WritableRoots)
 	}
 }
 
@@ -2705,7 +2730,7 @@ func TestSandboxedCommandSmoke(t *testing.T) {
 	rt, err := New(sandbox.Config{
 		CWD:              workspace,
 		StateDir:         t.TempDir(),
-		WritableRoots:    []string{filepath.Join(workspace, ".agents", "skills")},
+		WritableRoots:    []string{workspace, filepath.Join(workspace, ".agents", "skills")},
 		ReadOnlySubpaths: []string{"readonly"},
 	})
 	if err != nil {

@@ -119,13 +119,14 @@ func newRuntimeWithHostIdentity(cfg Config, hostUserSID, authorityRoot string) (
 	}
 	r.stateCoordinator = sandboxCoordinatorFor(stateRoot)
 	r.registeredEnvRoot = r.sandboxEnvRoot(cfg.CWD)
-	configuredWriteRoots := []string{cfg.CWD, r.registeredEnvRoot}
+	configuredWriteRoots := []string{r.registeredEnvRoot}
 	for _, root := range cfg.WritableRoots {
 		normalized, normalizeErr := pathutil.NormalizeWithBase(cfg.CWD, root)
 		if normalizeErr == nil && normalized != "" {
 			configuredWriteRoots = append(configuredWriteRoots, normalized)
 		}
 	}
+	configuredWriteRoots = safeWritableRoots(configuredWriteRoots)
 	if err := validateHostAuthorityOutsideWriteRoots(authorityRoot, configuredWriteRoots); err != nil {
 		return nil, err
 	}
@@ -601,8 +602,8 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindin
 	if err != nil {
 		return workspacePolicy{}, err
 	}
-	coreUserWriteRoots := []string{workspaceRoot, commandDir}
-	fullUserWriteRoots := append([]string(nil), coreUserWriteRoots...)
+	coreUserWriteRoots := []string{}
+	fullUserWriteRoots := []string{}
 	commandSpecificWriteRoots := []string{}
 	for _, root := range r.cfg.WritableRoots {
 		if normalized, err := pathutil.NormalizeWithBase(workspaceRoot, root); err == nil && normalized != "" {
@@ -623,6 +624,8 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindin
 	}
 	fullUserWriteRoots = pathutil.Dedupe(fullUserWriteRoots)
 	coreUserWriteRoots = pathutil.Dedupe(append(coreUserWriteRoots, commandSpecificWriteRoots...))
+	fullUserWriteRoots = safeWritableRoots(fullUserWriteRoots)
+	coreUserWriteRoots = safeWritableRoots(coreUserWriteRoots)
 	if err := validateHostAuthorityOutsideWriteRoots(r.hostReceiptAuthorityRoot, fullUserWriteRoots); err != nil {
 		return workspacePolicy{}, err
 	}
@@ -656,7 +659,7 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindin
 		denyWrite = append(denyWrite, existingControlDirs(root)...)
 		for _, subpath := range r.cfg.ReadOnlySubpaths {
 			subpath = strings.TrimSpace(subpath)
-			if subpath == "" {
+			if subpath == "" || (!filepath.IsAbs(subpath) && filepath.Clean(subpath) == ".git") {
 				continue
 			}
 			path := filepath.Join(root, subpath)
@@ -667,6 +670,23 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindin
 				return workspacePolicy{}, fmt.Errorf("impl/sandbox/windows: inspect deny-write path %s: %w", path, err)
 			}
 			denyWrite = append(denyWrite, path)
+		}
+	}
+	writeOverrides := make([]string, 0, len(constraints.PathRules))
+	for _, rule := range constraints.PathRules {
+		if rule.Access == sandbox.PathAccessReadWrite {
+			writeOverrides = append(writeOverrides, rule.Path)
+		}
+	}
+	gitPaths, err := policy.GitMetadataPaths(commandDir, userWriteRoots, writeOverrides)
+	if err != nil {
+		return workspacePolicy{}, fmt.Errorf("impl/sandbox/windows: resolve protected Git metadata: %w", err)
+	}
+	for _, path := range gitPaths {
+		if _, err := os.Lstat(path); err == nil {
+			denyWrite = append(denyWrite, path)
+		} else if !os.IsNotExist(err) {
+			return workspacePolicy{}, fmt.Errorf("impl/sandbox/windows: inspect protected Git metadata %s: %w", path, err)
 		}
 	}
 	denyWrite = pathutil.Dedupe(denyWrite)
@@ -731,12 +751,9 @@ func hashWorkspacePolicyFields(workspaceRoot, commandDir, envRoot string, writeR
 
 func existingWritableRoots(roots []string) ([]string, error) {
 	out := make([]string, 0, len(roots))
-	for _, root := range roots {
+	for _, root := range safeWritableRoots(roots) {
 		root = strings.TrimSpace(root)
 		if root == "" {
-			continue
-		}
-		if unsafeWritableRootReasonForCurrentUser(root) != "" {
 			continue
 		}
 		info, err := os.Stat(root)
@@ -752,6 +769,16 @@ func existingWritableRoots(roots []string) ([]string, error) {
 		out = append(out, root)
 	}
 	return pathutil.Dedupe(out), nil
+}
+
+func safeWritableRoots(roots []string) []string {
+	out := make([]string, 0, len(roots))
+	for _, root := range pathutil.Dedupe(roots) {
+		if unsafeWritableRootReasonForCurrentUser(root) == "" {
+			out = append(out, root)
+		}
+	}
+	return out
 }
 
 func unsafeWritableRootReasonForCurrentUser(root string) string {
@@ -1568,7 +1595,7 @@ func existingControlDirs(root string) []string {
 		return nil
 	}
 	var paths []string
-	for _, name := range []string{".git", ".codex", ".agents"} {
+	for _, name := range []string{".codex", ".agents"} {
 		path := filepath.Join(root, name)
 		if info, err := os.Stat(path); err == nil && info.IsDir() {
 			paths = append(paths, path)

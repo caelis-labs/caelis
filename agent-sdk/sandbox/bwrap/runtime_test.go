@@ -35,6 +35,44 @@ func TestBuildBwrapArgsPreservesHostReadsAndManagedMounts(t *testing.T) {
 	assertBwrapManagedMountsNotReadOnly(t, args)
 }
 
+func TestBuildBwrapArgsDoesNotTreatCWDAsImplicitWritableRoot(t *testing.T) {
+	workDir := t.TempDir()
+	p := policy.Default(sandbox.Config{CWD: workDir}, sandbox.Constraints{
+		Permission: sandbox.PermissionWorkspaceWrite,
+	})
+	args, err := buildBwrapArgs(p, workDir)
+	if err != nil {
+		t.Fatalf("buildBwrapArgs() error = %v", err)
+	}
+	if hasBwrapPair(args, "--bind", workDir, workDir) {
+		t.Fatalf("bwrap args = %#v, did not want implicit CWD write bind", args)
+	}
+}
+
+func TestBuildBwrapArgsProtectsGitMetadataAtDepthOneOnly(t *testing.T) {
+	workDir := t.TempDir()
+	childGit := filepath.Join(workDir, "child", ".git")
+	deepGit := filepath.Join(workDir, "container", "child", ".git")
+	for _, path := range []string{childGit, deepGit} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", path, err)
+		}
+	}
+	p := policy.Default(sandbox.Config{CWD: workDir, WritableRoots: []string{workDir}}, sandbox.Constraints{
+		Permission: sandbox.PermissionWorkspaceWrite,
+	})
+	args, err := buildBwrapArgs(p, workDir)
+	if err != nil {
+		t.Fatalf("buildBwrapArgs() error = %v", err)
+	}
+	if !hasBwrapPair(args, "--ro-bind", childGit, childGit) {
+		t.Fatalf("bwrap args = %#v, want direct child Git metadata read-only", args)
+	}
+	if hasBwrapPair(args, "--ro-bind", deepGit, deepGit) {
+		t.Fatalf("bwrap args = %#v, did not want depth-two Git metadata", args)
+	}
+}
+
 func TestBwrapWritableRootsSkipMissingRootWithoutCreatingIt(t *testing.T) {
 	root := t.TempDir()
 	workDir := filepath.Join(root, "workspace")

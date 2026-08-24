@@ -77,9 +77,9 @@ func ensurePathsWithinRoots(paths []string, roots []string, action string) error
 }
 
 func writableRoots(opts policy.ModeOptions) []string {
-	roots := make([]string, 0, 2+len(opts.ExtraWriteRoots))
-	roots = appendNonEmpty(roots, opts.WorkspaceRoot, opts.TempRoot)
-	roots = appendNonEmpty(roots, opts.ExtraWriteRoots...)
+	roots := make([]string, 0, 1+len(opts.WritableRoots))
+	roots = appendNonEmpty(roots, opts.TempRoot)
+	roots = appendNonEmpty(roots, opts.WritableRoots...)
 	return roots
 }
 
@@ -93,8 +93,8 @@ func appendNonEmpty(dst []string, values ...string) []string {
 }
 
 func approvedOverrideRoots(opts policy.ModeOptions) []string {
-	roots := make([]string, 0, len(opts.ExtraReadRoots)+len(opts.ExtraWriteRoots))
-	roots = appendNonEmpty(roots, opts.ExtraWriteRoots...)
+	roots := make([]string, 0, len(opts.ExtraReadRoots)+len(opts.WritableRoots))
+	roots = appendNonEmpty(roots, opts.WritableRoots...)
 	roots = appendNonEmpty(roots, opts.ExtraReadRoots...)
 	return roots
 }

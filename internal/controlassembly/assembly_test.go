@@ -63,7 +63,7 @@ func TestCloneResolvedAssemblyClonesNestedData(t *testing.T) {
 func TestApplyRuntimeOverridesMergesRuntimeMetadata(t *testing.T) {
 	metadata := map[string]any{
 		policyapi.MetadataLegacyPolicyMode: "legacy",
-		"policy_extra_read_roots":          []any{"/existing", "/shared"},
+		policyapi.MetadataExtraReadRoots:   []any{"/existing", "/shared"},
 	}
 	ApplyRuntimeOverrides(metadata, RuntimeOverrides{
 		PolicyMode:   "workspace-write",
@@ -87,10 +87,10 @@ func TestApplyRuntimeOverridesMergesRuntimeMetadata(t *testing.T) {
 		metadata["reasoning_budget_tokens"] != 4096 {
 		t.Fatalf("scalar runtime metadata = %#v", metadata)
 	}
-	if got, want := metadata["policy_extra_read_roots"], []string{"/existing", "/shared", "/new-read"}; !reflect.DeepEqual(got, want) {
+	if got, want := metadata[policyapi.MetadataExtraReadRoots], []string{"/existing", "/shared", "/new-read"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("read roots = %#v, want %#v", got, want)
 	}
-	if got, want := metadata["policy_extra_write_roots"], []string{"/new-write"}; !reflect.DeepEqual(got, want) {
+	if got, want := metadata[policyapi.MetadataWritableRoots], []string{"/new-write"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("write roots = %#v, want %#v", got, want)
 	}
 }

@@ -40,8 +40,8 @@ func modeOptionsFromSession(activeSession session.Session, spec agent.AgentSpec)
 	if values, ok := stringSliceMetadata(spec.Metadata, policy.MetadataExtraReadRoots); ok {
 		opts.ExtraReadRoots = values
 	}
-	if values, ok := stringSliceMetadata(spec.Metadata, policy.MetadataExtraWriteRoots); ok {
-		opts.ExtraWriteRoots = values
+	if values, ok := stringSliceMetadata(spec.Metadata, policy.MetadataWritableRoots); ok {
+		opts.WritableRoots = values
 	}
 	if value, ok := boolMetadata(spec.Metadata, "policy_network_enabled"); ok {
 		opts.NetworkEnabled = &value

@@ -158,7 +158,9 @@ type Config struct {
 	// platform sandboxes for cross-StateDir coordination. It is process
 	// configuration, not workspace policy, and must remain outside every
 	// sandbox-writable root.
-	HostAuthorityDir string   `json:"host_authority_dir,omitempty"`
+	HostAuthorityDir string `json:"host_authority_dir,omitempty"`
+	// WritableRoots are explicit write authorities. CWD identifies the command
+	// workspace but never grants write access by itself.
 	WritableRoots    []string `json:"writable_roots,omitempty"`
 	ReadOnlySubpaths []string `json:"read_only_subpaths,omitempty"`
 }

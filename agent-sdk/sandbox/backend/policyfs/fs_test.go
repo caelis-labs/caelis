@@ -76,6 +76,33 @@ func TestWriteDeniedReturnsSandboxPermissionWithoutHostPath(t *testing.T) {
 	}
 }
 
+func TestWriteProtectsGitMetadataAtDepthOneOnly(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	directGit := filepath.Join(root, "project", ".git")
+	deepGit := filepath.Join(root, "container", "project", ".git")
+	for _, path := range []string{directGit, deepGit} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", path, err)
+		}
+	}
+	fsys := New(testFileSystem{wd: root, home: t.TempDir(), allowWrite: true}, func() policy.Policy {
+		return policy.Policy{
+			Type:               policy.TypeWorkspaceWrite,
+			WritableRoots:      []string{root},
+			GitProtectionRoots: []string{root},
+			ReadOnlySubpaths:   []string{".git"},
+		}
+	})
+	if err := fsys.WriteFile(filepath.Join(directGit, "index"), nil, 0o600); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("direct child Git write error = %v, want os.ErrPermission", err)
+	}
+	if err := fsys.WriteFile(filepath.Join(deepGit, "index"), nil, 0o600); err != nil {
+		t.Fatalf("depth-two Git write error = %v, want allowed by bounded protection", err)
+	}
+}
+
 func TestWriteAllowedByConstraintPathRule(t *testing.T) {
 	t.Parallel()
 

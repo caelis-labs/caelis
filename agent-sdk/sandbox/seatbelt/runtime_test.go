@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -67,6 +68,47 @@ func TestSeatbeltWorkspaceWritePreservesBroadHostReads(t *testing.T) {
 	}
 	if !strings.Contains(profile, "(allow file-read*)\n") {
 		t.Fatalf("seatbelt profile does not preserve broad host reads:\n%s", profile)
+	}
+}
+
+func TestSeatbeltDoesNotTreatHomeCWDAsImplicitWritableRoot(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		t.Fatalf("UserHomeDir() = %q, %v", home, err)
+	}
+	p := policy.Default(sandbox.Config{CWD: home}, sandbox.Constraints{
+		Permission: sandbox.PermissionWorkspaceWrite,
+	})
+	profile, err := buildSeatbeltProfile(p, home)
+	if err != nil {
+		t.Fatalf("buildSeatbeltProfile() error = %v", err)
+	}
+	if strings.Contains(profile, "(allow file-write* (subpath "+strconv.Quote(home)+"))") {
+		t.Fatalf("seatbelt profile grants implicit home write:\n%s", profile)
+	}
+}
+
+func TestSeatbeltProtectsGitMetadataAtDepthOneOnly(t *testing.T) {
+	workspace := t.TempDir()
+	childGit := filepath.Join(workspace, "child", ".git")
+	deepGit := filepath.Join(workspace, "container", "child", ".git")
+	for _, path := range []string{childGit, deepGit} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", path, err)
+		}
+	}
+	p := policy.Default(sandbox.Config{CWD: workspace, WritableRoots: []string{workspace}}, sandbox.Constraints{
+		Permission: sandbox.PermissionWorkspaceWrite,
+	})
+	profile, err := buildSeatbeltProfile(p, workspace)
+	if err != nil {
+		t.Fatalf("buildSeatbeltProfile() error = %v", err)
+	}
+	if !strings.Contains(profile, strconv.Quote(childGit)) {
+		t.Fatalf("seatbelt profile does not protect direct child Git metadata:\n%s", profile)
+	}
+	if strings.Contains(profile, strconv.Quote(deepGit)) {
+		t.Fatalf("seatbelt profile unexpectedly protects depth-two Git metadata:\n%s", profile)
 	}
 }
 

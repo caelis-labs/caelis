@@ -343,7 +343,11 @@ func buildBwrapArgs(p policy.Policy, workDir string) ([]string, error) {
 			args = append(args, "--bind", root, root)
 		}
 	}
-	for _, sub := range bwrapReadOnlySubpaths(p, workDir) {
+	readOnlyPaths, err := policy.ReadOnlyPaths(p, workDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, sub := range filterExistingPaths(readOnlyPaths) {
 		args = append(args, "--ro-bind", sub, sub)
 	}
 	return args, nil
@@ -368,16 +372,6 @@ func bwrapWritableRoots(p policy.Policy, workDir string) ([]string, error) {
 		roots = append(roots, filepath.Join(home, ".cache"))
 	}
 	return filterExistingPaths(normalizeStringList(roots)), nil
-}
-
-func bwrapReadOnlySubpaths(p policy.Policy, workDir string) []string {
-	values := make([]string, 0, len(p.ReadOnlySubpaths))
-	for _, one := range p.ReadOnlySubpaths {
-		if resolved := resolveBwrapPath(workDir, one); resolved != "" {
-			values = append(values, resolved)
-		}
-	}
-	return filterExistingPaths(normalizeStringList(values))
 }
 
 func filterExistingPaths(paths []string) []string {

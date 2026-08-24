@@ -698,6 +698,7 @@ func TestEffectiveSandboxPolicyUsesBackendAndPolicyFacts(t *testing.T) {
 	}, descriptor, policy.ModeOptions{
 		WorkspaceRoot:  workspace,
 		TempRoot:       testTempRoot(),
+		WritableRoots:  []string{workspace},
 		NetworkEnabled: &networkEnabled,
 	})
 	if snapshot.Route != sandbox.RouteSandbox || snapshot.Backend != sandbox.BackendSeatbelt {
@@ -730,7 +731,7 @@ func TestEffectiveSandboxPolicyUsesBackendAndPolicyFacts(t *testing.T) {
 	}
 }
 
-func TestEffectiveSandboxPolicyRemovesExplicitReadOnlyOverride(t *testing.T) {
+func TestEffectiveSandboxPolicyRetainsSemanticGitProtectionWithWriteOverride(t *testing.T) {
 	t.Parallel()
 
 	workspace := testWorkspaceRoot()
@@ -739,11 +740,11 @@ func TestEffectiveSandboxPolicyRemovesExplicitReadOnlyOverride(t *testing.T) {
 		CWD:           workspace,
 		WritableRoots: []string{gitRoot},
 	}, sandboxCommandDescriptor(), policy.ModeOptions{
-		WorkspaceRoot:   workspace,
-		ExtraWriteRoots: []string{gitRoot},
+		WorkspaceRoot: workspace,
+		WritableRoots: []string{gitRoot},
 	})
-	if slices.Contains(snapshot.ReadOnlySubpaths, ".git") {
-		t.Fatalf("snapshot read-only subpaths = %#v, did not expect overridden .git", snapshot.ReadOnlySubpaths)
+	if !slices.Contains(snapshot.ReadOnlySubpaths, ".git") {
+		t.Fatalf("snapshot read-only subpaths = %#v, want semantic .git protection retained", snapshot.ReadOnlySubpaths)
 	}
 }
 
@@ -1195,6 +1196,7 @@ func writeCtx(path string) policy.ToolContext {
 		Options: policy.ModeOptions{
 			WorkspaceRoot: testWorkspaceRoot(),
 			TempRoot:      testTempRoot(),
+			WritableRoots: []string{testWorkspaceRoot()},
 		},
 		Sandbox: sandbox.Descriptor{Backend: sandbox.BackendHost},
 	}
@@ -1217,6 +1219,7 @@ func commandCtxWithArgs(args map[string]any) policy.ToolContext {
 		Options: policy.ModeOptions{
 			WorkspaceRoot: testWorkspaceRoot(),
 			TempRoot:      testTempRoot(),
+			WritableRoots: []string{testWorkspaceRoot()},
 		},
 		Sandbox: sandboxCommandDescriptor(),
 	}

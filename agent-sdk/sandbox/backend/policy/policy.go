@@ -19,80 +19,49 @@ const (
 )
 
 type Policy struct {
-	Type             Type
-	NetworkAccess    bool
-	WritableRoots    []string
+	Type          Type
+	NetworkAccess bool
+	WritableRoots []string
+	// GitProtectionRoots limits bounded metadata discovery to app-provided
+	// authorities rather than temporary and developer-cache write grants.
+	GitProtectionRoots []string
+	// WriteOverrides are request-scoped grants used to reopen one matching
+	// protected path without disabling the semantic protection globally.
+	WriteOverrides   []string
 	HiddenRoots      []string
 	ReadOnlySubpaths []string
 }
 
 func Default(cfg sandbox.Config, constraints sandbox.Constraints) Policy {
 	p := Policy{
-		Type:             TypeWorkspaceWrite,
-		NetworkAccess:    constraints.Network != sandbox.NetworkDisabled,
-		WritableRoots:    append([]string(nil), cfg.WritableRoots...),
-		ReadOnlySubpaths: append([]string(nil), cfg.ReadOnlySubpaths...),
+		Type:               TypeWorkspaceWrite,
+		NetworkAccess:      constraints.Network != sandbox.NetworkDisabled,
+		WritableRoots:      append([]string(nil), cfg.WritableRoots...),
+		GitProtectionRoots: append([]string(nil), cfg.WritableRoots...),
+		ReadOnlySubpaths:   append([]string(nil), cfg.ReadOnlySubpaths...),
 	}
 	switch constraints.Permission {
 	case sandbox.PermissionFullAccess:
 		p.Type = TypeDangerFull
 		p.NetworkAccess = true
 		p.WritableRoots = nil
+		p.GitProtectionRoots = nil
+		p.WriteOverrides = nil
 		p.HiddenRoots = nil
 		p.ReadOnlySubpaths = nil
 	default:
-		if len(p.WritableRoots) == 0 {
-			p.WritableRoots = []string{"."}
-		}
-		if len(p.ReadOnlySubpaths) == 0 {
-			p.ReadOnlySubpaths = []string{".git"}
-		}
+		p.ReadOnlySubpaths = append(p.ReadOnlySubpaths, ".git")
 		if constraints.Network == "" {
 			p.NetworkAccess = true
 		}
 		applyPathRules(&p, constraints.PathRules)
-		p.ReadOnlySubpaths = removeOverriddenReadOnlySubpaths(p.ReadOnlySubpaths, constraints.PathRules, cfg.CWD)
 	}
 	p.WritableRoots = normalizeStringList(p.WritableRoots)
+	p.GitProtectionRoots = normalizeStringList(p.GitProtectionRoots)
+	p.WriteOverrides = normalizeStringList(p.WriteOverrides)
 	p.HiddenRoots = normalizeStringList(p.HiddenRoots)
 	p.ReadOnlySubpaths = normalizeStringList(p.ReadOnlySubpaths)
 	return p
-}
-
-func removeOverriddenReadOnlySubpaths(subpaths []string, rules []sandbox.PathRule, cwd string) []string {
-	if len(subpaths) == 0 || len(rules) == 0 {
-		return subpaths
-	}
-	out := make([]string, 0, len(subpaths))
-	for _, subpath := range subpaths {
-		if readOnlySubpathOverridden(subpath, rules, cwd) {
-			continue
-		}
-		out = append(out, subpath)
-	}
-	return out
-}
-
-func readOnlySubpathOverridden(subpath string, rules []sandbox.PathRule, cwd string) bool {
-	readOnlyRoot := ResolveSandboxPath(cwd, subpath)
-	if readOnlyRoot == "" {
-		return false
-	}
-	readOnlyRoot = filepath.Clean(readOnlyRoot)
-	for _, rule := range rules {
-		if rule.Access != sandbox.PathAccessReadWrite {
-			continue
-		}
-		writeRoot := ResolveSandboxPath(cwd, rule.Path)
-		if writeRoot == "" {
-			continue
-		}
-		writeRoot = filepath.Clean(writeRoot)
-		if pathIsUnder(writeRoot, readOnlyRoot) {
-			return true
-		}
-	}
-	return false
 }
 
 func pathIsUnder(target, root string) bool {
@@ -123,6 +92,7 @@ func applyPathRules(p *Policy, rules []sandbox.PathRule) {
 		switch rule.Access {
 		case sandbox.PathAccessReadWrite:
 			p.WritableRoots = append(p.WritableRoots, path)
+			p.WriteOverrides = append(p.WriteOverrides, path)
 		case sandbox.PathAccessHidden:
 			p.HiddenRoots = append(p.HiddenRoots, path)
 		}

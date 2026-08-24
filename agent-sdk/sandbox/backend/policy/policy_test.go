@@ -32,6 +32,17 @@ func TestDefaultMergesWritableAndHiddenConstraintPathRules(t *testing.T) {
 	}
 }
 
+func TestDefaultDoesNotTreatCWDAsImplicitWritableRoot(t *testing.T) {
+	t.Parallel()
+
+	p := Default(sandbox.Config{CWD: testWorkspaceRoot()}, sandbox.Constraints{
+		Permission: sandbox.PermissionWorkspaceWrite,
+	})
+	if len(p.WritableRoots) != 0 {
+		t.Fatalf("WritableRoots = %#v, want no implicit CWD grant", p.WritableRoots)
+	}
+}
+
 func TestDefaultKeepsGitReadOnlyUnlessExplicitGitPathIsWritable(t *testing.T) {
 	t.Parallel()
 
@@ -58,8 +69,11 @@ func TestDefaultKeepsGitReadOnlyUnlessExplicitGitPathIsWritable(t *testing.T) {
 			{Path: gitPath, Access: sandbox.PathAccessReadWrite},
 		},
 	})
-	if slices.Contains(p.ReadOnlySubpaths, ".git") {
-		t.Fatalf("ReadOnlySubpaths = %#v, did not expect .git after explicit .git write grant", p.ReadOnlySubpaths)
+	if !slices.Contains(p.ReadOnlySubpaths, ".git") {
+		t.Fatalf("ReadOnlySubpaths = %#v, want semantic .git protection retained", p.ReadOnlySubpaths)
+	}
+	if !slices.Contains(p.WriteOverrides, gitPath) {
+		t.Fatalf("WriteOverrides = %#v, want %q", p.WriteOverrides, gitPath)
 	}
 
 	p = Default(sandbox.Config{
@@ -70,8 +84,8 @@ func TestDefaultKeepsGitReadOnlyUnlessExplicitGitPathIsWritable(t *testing.T) {
 			{Path: filepath.Join(gitPath, "hooks"), Access: sandbox.PathAccessReadWrite},
 		},
 	})
-	if slices.Contains(p.ReadOnlySubpaths, ".git") {
-		t.Fatalf("ReadOnlySubpaths = %#v, did not expect .git after explicit nested .git write grant", p.ReadOnlySubpaths)
+	if !slices.Contains(p.ReadOnlySubpaths, ".git") {
+		t.Fatalf("ReadOnlySubpaths = %#v, want semantic .git protection retained", p.ReadOnlySubpaths)
 	}
 }
 

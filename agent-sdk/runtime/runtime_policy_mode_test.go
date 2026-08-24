@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"slices"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -8,6 +9,22 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
+
+func TestModeOptionsFromSessionUsesExplicitWritableRootMetadataOnly(t *testing.T) {
+	t.Parallel()
+
+	workspace := "/session/workspace"
+	writable := "/approved/project"
+	opts := modeOptionsFromSession(session.Session{CWD: workspace}, agent.AgentSpec{
+		Metadata: map[string]any{policy.MetadataWritableRoots: []string{writable}},
+	})
+	if opts.WorkspaceRoot != workspace {
+		t.Fatalf("WorkspaceRoot = %q, want %q", opts.WorkspaceRoot, workspace)
+	}
+	if !slices.Equal(opts.WritableRoots, []string{writable}) {
+		t.Fatalf("WritableRoots = %#v, want explicit metadata root", opts.WritableRoots)
+	}
+}
 
 func TestPolicyModelFeedbackDistinguishesResolvedDenialFromPendingApproval(t *testing.T) {
 	t.Parallel()

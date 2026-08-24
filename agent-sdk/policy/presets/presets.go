@@ -241,7 +241,7 @@ func approvalTitle(name string, call map[string]any) string {
 
 func workspaceWriteConstraints(opts policy.ModeOptions) sandbox.Constraints {
 	devWriteRoots := defaultDeveloperWritableRoots()
-	rules := make([]sandbox.PathRule, 0, 2+len(devWriteRoots)+len(opts.ExtraWriteRoots))
+	rules := make([]sandbox.PathRule, 0, 1+len(devWriteRoots)+len(opts.WritableRoots))
 	appendRule := func(path string, access sandbox.PathAccess) {
 		path = strings.TrimSpace(path)
 		if path == "" {
@@ -249,14 +249,13 @@ func workspaceWriteConstraints(opts policy.ModeOptions) sandbox.Constraints {
 		}
 		rules = append(rules, sandbox.PathRule{Path: path, Access: access})
 	}
-	appendRule(opts.WorkspaceRoot, sandbox.PathAccessReadWrite)
 	if runtime.GOOS != "windows" {
 		appendRule(opts.TempRoot, sandbox.PathAccessReadWrite)
 	}
 	for _, path := range devWriteRoots {
 		appendRule(path, sandbox.PathAccessReadWrite)
 	}
-	for _, path := range opts.ExtraWriteRoots {
+	for _, path := range opts.WritableRoots {
 		appendRule(path, sandbox.PathAccessReadWrite)
 	}
 	return sandbox.Constraints{

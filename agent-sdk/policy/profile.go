@@ -8,7 +8,7 @@ const (
 	MetadataPolicyProfile    = "policy_profile"
 	MetadataLegacyPolicyMode = "policy_mode"
 	MetadataExtraReadRoots   = "policy_extra_read_roots"
-	MetadataExtraWriteRoots  = "policy_extra_write_roots"
+	MetadataWritableRoots    = "policy_writable_roots"
 	MetadataSandboxPolicy    = "runtime_sandbox_policy"
 )
 

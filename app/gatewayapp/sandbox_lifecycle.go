@@ -7,7 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 )
 
 type sandboxLifecycleAction = sandbox.LifecycleAction
@@ -160,7 +160,7 @@ func sandboxConfigToPort(cfg SandboxConfig, workspaceCWD string, storeDir string
 }
 
 func sandboxConfigToPortWithAuthority(cfg SandboxConfig, workspaceCWD string, storeDir string, authorityDir string) sandbox.Config {
-	cfg = configstore.DefaultSandboxConfig(cfg)
+	cfg = sandboxpolicy.EffectiveConfig(workspaceCWD, cfg)
 	return sandbox.Config{
 		CWD:              workspaceCWD,
 		RequestedBackend: sandbox.Backend(cfg.RequestedType),

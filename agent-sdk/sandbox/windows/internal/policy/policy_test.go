@@ -14,13 +14,13 @@ func TestBuildUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T) {
 	commandDir := filepath.Join(workspace, "cmd")
 	extraWrite := pathutil.Normalize(filepath.Join(t.TempDir(), "write"))
 	hidden := pathutil.Normalize(filepath.Join(workspace, "secret"))
-	for _, dir := range []string{commandDir, extraWrite, hidden, filepath.Join(workspace, ".git"), filepath.Join(workspace, "vendor")} {
+	for _, dir := range []string{commandDir, extraWrite, hidden, filepath.Join(extraWrite, ".git"), filepath.Join(extraWrite, "vendor")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
 		}
 	}
 
-	p := Build(Input{
+	p, err := Build(Input{
 		Config: sandbox.Config{
 			CWD:              workspace,
 			WritableRoots:    []string{extraWrite},
@@ -35,19 +35,27 @@ func TestBuildUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T) {
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
 
 	if p.Network != NetworkOnline {
 		t.Fatalf("Network = %q, want online/non-enforced", p.Network)
 	}
-	for _, want := range []string{workspace, commandDir, extraWrite} {
+	for _, want := range []string{extraWrite} {
 		if !containsPath(p.WriteRoots, want) {
 			t.Fatalf("WriteRoots = %#v, want %q", p.WriteRoots, want)
+		}
+	}
+	for _, unwanted := range []string{workspace, commandDir} {
+		if containsPath(p.WriteRoots, unwanted) {
+			t.Fatalf("WriteRoots = %#v, did not want implicit %q", p.WriteRoots, unwanted)
 		}
 	}
 	if containsPath(p.WriteRoots, hidden) || containsPath(p.DenyWritePaths, hidden) {
 		t.Fatalf("policy unexpectedly consumed hidden path %q: %+v", hidden, p)
 	}
-	for _, want := range []string{filepath.Join(workspace, ".git"), filepath.Join(workspace, "vendor")} {
+	for _, want := range []string{filepath.Join(extraWrite, ".git"), filepath.Join(extraWrite, "vendor")} {
 		if !containsPath(p.DenyWritePaths, want) {
 			t.Fatalf("DenyWritePaths = %#v, want %q", p.DenyWritePaths, want)
 		}
@@ -55,10 +63,13 @@ func TestBuildUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T) {
 }
 
 func TestBuildFullAccessSkipsRoots(t *testing.T) {
-	p := Build(Input{Constraints: sandbox.Constraints{
+	p, err := Build(Input{Constraints: sandbox.Constraints{
 		Permission: sandbox.PermissionFullAccess,
 		Network:    sandbox.NetworkDisabled,
 	}})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
 	if !p.FullAccess {
 		t.Fatal("FullAccess = false, want true")
 	}

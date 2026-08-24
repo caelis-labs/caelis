@@ -163,10 +163,10 @@ func ApplyRuntimeOverrides(metadata map[string]any, overrides RuntimeOverrides) 
 		metadata["reasoning_budget_tokens"] = overrides.Reasoning.BudgetTokens
 	}
 	if len(overrides.ExtraReadRoots) > 0 {
-		metadata["policy_extra_read_roots"] = mergeStringSliceMetadata(metadata["policy_extra_read_roots"], overrides.ExtraReadRoots)
+		metadata[policyapi.MetadataExtraReadRoots] = mergeStringSliceMetadata(metadata[policyapi.MetadataExtraReadRoots], overrides.ExtraReadRoots)
 	}
 	if len(overrides.ExtraWriteRoots) > 0 {
-		metadata["policy_extra_write_roots"] = mergeStringSliceMetadata(metadata["policy_extra_write_roots"], overrides.ExtraWriteRoots)
+		metadata[policyapi.MetadataWritableRoots] = mergeStringSliceMetadata(metadata[policyapi.MetadataWritableRoots], overrides.ExtraWriteRoots)
 	}
 }
 

@@ -4,35 +4,37 @@ import (
 	"slices"
 	"testing"
 
+	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 )
 
 func TestSandboxPolicyMetadataAddsConfiguredWrites(t *testing.T) {
 	got := sandboxpolicy.WithPolicyMetadata(map[string]any{
-		"policy_extra_write_roots": []any{"/existing-write"},
+		policyapi.MetadataWritableRoots: []any{"/existing-write"},
 	}, SandboxConfig{
 		WritableRoots: []string{"/configured-write"},
 	})
 
-	writeRoots, ok := got["policy_extra_write_roots"].([]string)
+	writeRoots, ok := got[policyapi.MetadataWritableRoots].([]string)
 	if !ok {
-		t.Fatalf("policy_extra_write_roots = %#v, want []string", got["policy_extra_write_roots"])
+		t.Fatalf("policy_writable_roots = %#v, want []string", got[policyapi.MetadataWritableRoots])
 	}
 	if want := []string{"/existing-write", "/configured-write"}; !slices.Equal(writeRoots, want) {
-		t.Fatalf("policy_extra_write_roots = %#v, want %#v", writeRoots, want)
+		t.Fatalf("policy_writable_roots = %#v, want %#v", writeRoots, want)
 	}
 }
 
-func TestSandboxConfigToPortPreservesOnlyConfiguredWritableRoots(t *testing.T) {
+func TestSandboxConfigToPortAddsSafeWorkspaceWithoutMutatingStoredRoots(t *testing.T) {
 	workspace := t.TempDir()
-	stored := SandboxConfig{WritableRoots: []string{"/configured-write"}}
+	configured := t.TempDir()
+	stored := SandboxConfig{WritableRoots: []string{configured}}
 
 	got := sandboxConfigToPort(stored, workspace, t.TempDir())
 
-	if want := []string{"/configured-write"}; !slices.Equal(stored.WritableRoots, want) {
+	if want := []string{configured}; !slices.Equal(stored.WritableRoots, want) {
 		t.Fatalf("stored WritableRoots mutated: %#v", stored.WritableRoots)
 	}
-	if want := []string{"/configured-write"}; !slices.Equal(got.WritableRoots, want) {
+	if want := []string{workspace, configured}; !slices.Equal(got.WritableRoots, want) {
 		t.Fatalf("port WritableRoots = %#v, want %#v", got.WritableRoots, want)
 	}
 }

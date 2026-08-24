@@ -327,7 +327,11 @@ func buildSeatbeltProfile(p policy.Policy, workDir string) (string, error) {
 	for _, root := range writableRoots {
 		fmt.Fprintf(&b, "(allow file-write* (subpath %s))\n", sbplString(root))
 	}
-	for _, sub := range seatbeltReadOnlySubpaths(p, workDir) {
+	readOnlyPaths, err := policy.ReadOnlyPaths(p, workDir)
+	if err != nil {
+		return "", err
+	}
+	for _, sub := range readOnlyPaths {
 		fmt.Fprintf(&b, "(deny file-write* (subpath %s))\n", sbplString(sub))
 	}
 	return b.String(), nil
@@ -378,16 +382,6 @@ func darwinUserCacheDir() string {
 		return cacheDir
 	}
 	return ""
-}
-
-func seatbeltReadOnlySubpaths(p policy.Policy, workDir string) []string {
-	values := make([]string, 0, len(p.ReadOnlySubpaths))
-	for _, one := range p.ReadOnlySubpaths {
-		if resolved := policy.ResolveSandboxPath(workDir, one); resolved != "" {
-			values = append(values, policy.SandboxPathVariants(resolved)...)
-		}
-	}
-	return normalizeStringList(values)
 }
 
 func sbplString(v string) string { return strconv.Quote(v) }

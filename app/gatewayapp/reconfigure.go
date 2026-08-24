@@ -24,6 +24,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
@@ -237,7 +238,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	runtimeCfg := plan.RuntimeConfig
-	sandboxCfg := plan.SandboxConfig
+	sandboxCfg := sandboxpolicy.EffectiveConfig(s.workspace.CWD, plan.SandboxConfig)
 	bundle := &gatewayRuntimeBundle{ReleasePluginCache: plan.ReleasePluginCache}
 	route, err := sandboxrouter.Current(sandbox.Backend(sandboxCfg.RequestedType))
 	if err != nil {
@@ -269,10 +270,10 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		sandboxPortConfig,
 		sandboxRuntime.Describe(),
 		policy.ModeOptions{
-			WorkspaceRoot:   s.workspace.CWD,
-			TempRoot:        os.TempDir(),
-			ExtraWriteRoots: append([]string(nil), sandboxCfg.WritableRoots...),
-			NetworkEnabled:  &networkEnabled,
+			WorkspaceRoot:  s.workspace.CWD,
+			TempRoot:       os.TempDir(),
+			WritableRoots:  append([]string(nil), sandboxCfg.WritableRoots...),
+			NetworkEnabled: &networkEnabled,
 		},
 	)
 	baseMetadata, err := buildStackBaseMetadata(

@@ -2,11 +2,111 @@ package sandboxpolicy
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
+	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 )
+
+// EffectiveConfig resolves the product-owned writable roots for one workspace.
+// The workspace remains the command CWD even when it is too broad to grant as
+// a write authority boundary.
+func EffectiveConfig(workspace string, cfg configstore.SandboxConfig) configstore.SandboxConfig {
+	home, _ := os.UserHomeDir()
+	return effectiveConfig(workspace, home, cfg)
+}
+
+func effectiveConfig(workspace, home string, cfg configstore.SandboxConfig) configstore.SandboxConfig {
+	cfg = configstore.DefaultSandboxConfig(cfg)
+	roots := make([]string, 0, 1+len(cfg.WritableRoots))
+	seen := map[string]struct{}{}
+	appendRoot := func(value string) {
+		root := resolveRoot(workspace, value)
+		if root == "" || broadWritableRoot(root, home) {
+			return
+		}
+		key := canonicalRoot(root)
+		if runtime.GOOS == "windows" {
+			key = strings.ToLower(key)
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		roots = append(roots, root)
+	}
+	appendRoot(workspace)
+	for _, root := range cfg.WritableRoots {
+		appendRoot(root)
+	}
+	cfg.WritableRoots = roots
+	return cfg
+}
+
+func resolveRoot(workspace, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if !filepath.IsAbs(value) {
+		workspace = strings.TrimSpace(workspace)
+		if workspace == "" {
+			return ""
+		}
+		value = filepath.Join(workspace, value)
+	}
+	abs, err := filepath.Abs(value)
+	if err != nil {
+		return ""
+	}
+	return filepath.Clean(abs)
+}
+
+func broadWritableRoot(root, home string) bool {
+	root = canonicalRoot(resolveRoot("", root))
+	if root == "" || filepath.Dir(root) == root {
+		return true
+	}
+	home = canonicalRoot(resolveRoot("", home))
+	return home != "" && pathContains(root, home)
+}
+
+func canonicalRoot(root string) string {
+	root = filepath.Clean(root)
+	current := root
+	missing := []string{}
+	for current != "" {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil && strings.TrimSpace(resolved) != "" {
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return filepath.Clean(resolved)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
+	return root
+}
+
+func pathContains(root, target string) bool {
+	if runtime.GOOS == "windows" {
+		root = strings.ToLower(root)
+		target = strings.ToLower(target)
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil || filepath.IsAbs(rel) {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
 
 func NormalizeBackend(backend string) (string, error) {
 	switch normalized := sandbox.CanonicalBackend(sandbox.Backend(backend)); normalized {
@@ -54,7 +154,7 @@ func WithPolicyMetadata(metadata map[string]any, cfg configstore.SandboxConfig) 
 	}
 	cfg = configstore.DefaultSandboxConfig(cfg)
 	if len(cfg.WritableRoots) > 0 {
-		out["policy_extra_write_roots"] = mergePolicyWriteRoots(out["policy_extra_write_roots"], cfg.WritableRoots)
+		out[policyapi.MetadataWritableRoots] = mergePolicyWriteRoots(out[policyapi.MetadataWritableRoots], cfg.WritableRoots)
 	}
 	out["policy_network_enabled"] = configstore.SandboxNetworkEnabled(cfg)
 	return out
