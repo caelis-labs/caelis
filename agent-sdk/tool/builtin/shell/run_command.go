@@ -111,12 +111,12 @@ func (t *RunCommandTool) Definition() tool.Definition {
 				},
 				"sandbox_permissions": map[string]any{
 					"type":        "string",
-					"description": "Execution route. Prefer use_default. Use require_escalated only after this command fails in the sandbox or policy/runtime requires Host; approval is one-shot.",
+					"description": "Execution route. Use use_default when the trusted runtime boundary permits the command or is uncertain. Use require_escalated directly when it proves Host is required, or once after a matching sandbox denial; approval is one-shot.",
 					"enum":        []string{"use_default", "require_escalated"},
 				},
 				"justification": map[string]any{
 					"type":        "string",
-					"description": "Required for require_escalated: one short sentence with command intent, the concrete sandbox failure or Host requirement, and the task link; reject vague reasons.",
+					"description": "Required for require_escalated: one short sentence with command intent, the trusted boundary or matching denial, and task relevance.",
 				},
 			},
 			"required":             []string{"command"},

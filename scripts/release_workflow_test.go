@@ -100,7 +100,7 @@ func TestR2PublisherUpdatesLatestAfterVerifiedAssets(t *testing.T) {
 	latestUpload := strings.Index(publisher, `"s3://${R2_BUCKET}/latest.txt"`)
 	assetVerification := strings.Index(publisher, `head-object`)
 	cleanup := strings.Index(publisher, `list-objects-v2`)
-	if assetVerification < 0 || latestUpload < 0 || cleanup < 0 || !(assetVerification < latestUpload && latestUpload < cleanup) {
+	if assetVerification < 0 || latestUpload < 0 || cleanup < 0 || assetVerification >= latestUpload || latestUpload >= cleanup {
 		t.Error("R2 publisher no longer verifies versioned assets, updates latest.txt, then cleans up old versions")
 	}
 }

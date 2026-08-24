@@ -3124,12 +3124,19 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 	t.Parallel()
 
 	sessions, activeSession := newTestSessionService(t, "sess-policy-approval")
+	sandboxPolicy := sandbox.PolicySnapshot{
+		Route:            sandbox.RouteSandbox,
+		Backend:          sandbox.BackendSeatbelt,
+		Permission:       sandbox.PermissionWorkspaceWrite,
+		ReadOnlySubpaths: []string{".git"},
+	}
 	runtime, err := New(Config{
 		Sessions: sessions,
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
 		DefaultPolicyMode: presets.ModeAutoReview,
+		SandboxPolicy:     sandboxPolicy,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -3151,6 +3158,10 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 		}
 		if req.Approval == nil || req.Approval.ToolCall.Name != shell.RunCommandToolName {
 			t.Fatalf("approval request = %+v, want RUN_COMMAND tool call", req.Approval)
+		}
+		got, ok := req.Metadata[policy.MetadataSandboxPolicy].(sandbox.PolicySnapshot)
+		if !ok || !reflect.DeepEqual(got, sandboxPolicy) {
+			t.Fatalf("approval sandbox policy = %#v, want %#v", got, sandboxPolicy)
 		}
 		return agent.ApprovalResponse{
 			Outcome:  "selected",

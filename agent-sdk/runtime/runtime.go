@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
@@ -30,6 +31,7 @@ type Config struct {
 	Compactor                compact.Engine
 	PolicyRegistry           policy.Registry
 	DefaultPolicyMode        string
+	SandboxPolicy            sandbox.PolicySnapshot
 	DefaultApprovalMode      string
 	Controllers              controller.Backend
 	ControllerContextRouter  controller.ContextRouter
@@ -60,6 +62,7 @@ type Runtime struct {
 	compactor                compact.Engine
 	policies                 policy.Registry
 	defaultPolicyMode        string
+	sandboxPolicy            sandbox.PolicySnapshot
 	defaultApprovalMode      approval.Mode
 	controllers              controller.Backend
 	controllerContextRouter  controller.ContextRouter
@@ -103,6 +106,7 @@ func New(cfg Config) (*Runtime, error) {
 		compaction:               normalizeCompactionConfig(cfg.Compaction),
 		policies:                 cfg.PolicyRegistry,
 		defaultPolicyMode:        strings.TrimSpace(cfg.DefaultPolicyMode),
+		sandboxPolicy:            sandbox.ClonePolicySnapshot(cfg.SandboxPolicy),
 		defaultApprovalMode:      approval.NormalizeMode(cfg.DefaultApprovalMode),
 		controllers:              cfg.Controllers,
 		controllerContextRouter:  cfg.ControllerContextRouter,

@@ -214,13 +214,15 @@ func (m *gatedStreamingModel) Generate(context.Context, *model.Request) iter.Seq
 				close(m.started)
 			}
 		}
-		yield(&model.StreamEvent{
+		if !yield(&model.StreamEvent{
 			Type: model.StreamEventPartDelta,
 			PartDelta: &model.PartDelta{
 				Kind:      model.PartKindText,
 				TextDelta: "hel",
 			},
-		}, nil)
+		}, nil) {
+			return
+		}
 		if m.releaseFinal != nil {
 			<-m.releaseFinal
 		}

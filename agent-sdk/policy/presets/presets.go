@@ -147,7 +147,7 @@ func askApproval(reason string, constraints sandbox.Constraints, input policy.To
 	if err != nil {
 		return policy.Decision{}, err
 	}
-	return policy.Decision{
+	decision := policy.Decision{
 		Action:      policy.ActionAskApproval,
 		Reason:      strings.TrimSpace(reason),
 		Constraints: constraints,
@@ -165,7 +165,13 @@ func askApproval(reason string, constraints sandbox.Constraints, input policy.To
 				{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
 			},
 		},
-	}, nil
+	}
+	if !sandbox.PolicySnapshotEmpty(input.SandboxPolicy) {
+		decision.Metadata = map[string]any{
+			policy.MetadataSandboxPolicy: sandbox.ClonePolicySnapshot(input.SandboxPolicy),
+		}
+	}
+	return decision, nil
 }
 
 func hostExecutionConstraints() sandbox.Constraints {

@@ -122,11 +122,12 @@ func TestGuardrailsNormalizeNilContextBeforeInvocation(t *testing.T) {
 		return input, nil
 	}}
 	runtime, active := newGuardrailRuntime(t, agent.GuardrailSpec{Guardrail: guardrail})
-	//nolint:staticcheck // This regression intentionally exercises the public nil-context normalization contract.
-	if _, err := runtime.applyGuardrails(nil, active, agent.RunRequest{SessionRef: active.SessionRef, Input: "input"}); err != nil {
+	if _, err := runtime.applyGuardrails(nilGuardrailContextForTest(), active, agent.RunRequest{SessionRef: active.SessionRef, Input: "input"}); err != nil {
 		t.Fatalf("applyGuardrails(nil) error = %v", err)
 	}
 }
+
+func nilGuardrailContextForTest() context.Context { return nil }
 
 func TestGuardrailOutstandingCallsAreBoundedWhenImplementationsIgnoreCancellation(t *testing.T) {
 	t.Parallel()

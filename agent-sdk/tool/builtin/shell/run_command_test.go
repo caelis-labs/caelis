@@ -47,8 +47,8 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 		"workdir":             "Working directory; defaults to the session cwd. Set this instead of prefixing command with cd.",
 		"yield_time_ms":       "Wait before a running command returns as an async Task; not the command timeout. Omit for the 10000 ms default. Use shorter only to yield known long-running or interactive work early; use longer only to await known medium-duration work.",
 		"tty":                 "Allocate a terminal for interactive commands. Leave false for ordinary commands so stdin is closed and output streams remain separate.",
-		"sandbox_permissions": "Execution route. Prefer use_default. Use require_escalated only after this command fails in the sandbox or policy/runtime requires Host; approval is one-shot.",
-		"justification":       "Required for require_escalated: one short sentence with command intent, the concrete sandbox failure or Host requirement, and the task link; reject vague reasons.",
+		"sandbox_permissions": "Execution route. Use use_default when the trusted runtime boundary permits the command or is uncertain. Use require_escalated directly when it proves Host is required, or once after a matching sandbox denial; approval is one-shot.",
+		"justification":       "Required for require_escalated: one short sentence with command intent, the trusted boundary or matching denial, and task relevance.",
 	}
 	if len(properties) != len(wantDescriptions) {
 		t.Fatalf("properties = %#v, want only %v", properties, sortedRunCommandPropertyKeys(wantDescriptions))

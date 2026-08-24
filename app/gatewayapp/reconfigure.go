@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -116,6 +117,7 @@ func (s *runtimeComposition) buildInitialGatewayRuntime(ctx context.Context) err
 type gatewayBuildPlan struct {
 	SandboxConfig      SandboxConfig
 	RuntimeConfig      stackRuntimeConfig
+	SkillDirs          []string
 	Plugins            plugin.Contributions
 	ReleasePluginCache func() error
 }
@@ -191,16 +193,11 @@ func (s *runtimeComposition) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runt
 	runtimeCfg.Assembly = configuredAssembly
 	runtimeCfg.Plugins = clonePluginConfigs(doc.Plugins)
 	runtimeCfg.PluginSkills = skill.ClonePluginBundles(contribs.SkillBundles)
-	baseMetadata, err := buildStackBaseMetadata(s.authorities.appName, s.workspace.CWD, runtimeCfg.SystemPrompt, runtimeCfg.Model, sandboxCfg, skillDirs, runtimeCfg.PluginSkills)
-	if err != nil {
-		return gatewayBuildPlan{}, err
-	}
-	runtimeCfg.BaseMetadata = baseMetadata.Metadata
-	runtimeCfg.SkillCatalog = baseMetadata.SkillCatalog
 	releaseOnError = false
 	return gatewayBuildPlan{
 		SandboxConfig:      sandboxCfg,
 		RuntimeConfig:      runtimeCfg,
+		SkillDirs:          skillDirs,
 		Plugins:            contribs,
 		ReleasePluginCache: releasePluginCache,
 	}, nil
@@ -247,7 +244,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, err
 	}
-	sandboxRuntime, err := sandbox.New(sandbox.Config{
+	sandboxPortConfig := sandbox.Config{
 		CWD:                 s.workspace.CWD,
 		RequestedBackend:    route.Backend,
 		BackendCandidates:   route.BackendCandidates,
@@ -257,12 +254,43 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		HostAuthorityDir:    s.authorities.sandboxHostAuthorityDir,
 		WritableRoots:       append([]string(nil), sandboxCfg.WritableRoots...),
 		ReadOnlySubpaths:    append([]string(nil), sandboxCfg.ReadOnlySubpaths...),
-	})
+	}
+	sandboxRuntime, err := sandbox.New(sandboxPortConfig)
 	if err != nil {
 		bundle.Close()
 		return nil, err
 	}
 	bundle.Exec = sandboxRuntime
+	securityPosture := resolveProcessSecurityPosture(runtimeCfg)
+	effectivePolicyProfile := securityPosture.PolicyMode
+	networkEnabled := configstore.SandboxNetworkEnabled(sandboxCfg)
+	sandboxPolicySnapshot := presets.EffectiveSandboxPolicy(
+		effectivePolicyProfile,
+		sandboxPortConfig,
+		sandboxRuntime.Describe(),
+		policy.ModeOptions{
+			WorkspaceRoot:   s.workspace.CWD,
+			TempRoot:        os.TempDir(),
+			ExtraWriteRoots: append([]string(nil), sandboxCfg.WritableRoots...),
+			NetworkEnabled:  &networkEnabled,
+		},
+	)
+	baseMetadata, err := buildStackBaseMetadata(
+		s.authorities.appName,
+		s.workspace.CWD,
+		runtimeCfg.SystemPrompt,
+		runtimeCfg.Model,
+		sandboxCfg,
+		sandboxPolicySnapshot,
+		plan.SkillDirs,
+		runtimeCfg.PluginSkills,
+	)
+	if err != nil {
+		bundle.Close()
+		return nil, err
+	}
+	runtimeCfg.BaseMetadata = baseMetadata.Metadata
+	runtimeCfg.SkillCatalog = baseMetadata.SkillCatalog
 
 	if err := ctx.Err(); err != nil {
 		bundle.Close()
@@ -279,8 +307,6 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 
-	securityPosture := resolveProcessSecurityPosture(runtimeCfg)
-	effectivePolicyProfile := securityPosture.PolicyMode
 	var policyRegistry policy.Registry
 	if securityPosture.FullAccessMode {
 		registry, registryErr := presets.NewRegistry()
@@ -329,6 +355,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		Sessions:                 s.sessions,
 		AgentFactory:             chat.Factory{},
 		DefaultPolicyMode:        effectivePolicyProfile,
+		SandboxPolicy:            sandboxPolicySnapshot,
 		PolicyRegistry:           policyRegistry,
 		DefaultApprovalMode:      string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
 		Compaction:               compactionCfg,

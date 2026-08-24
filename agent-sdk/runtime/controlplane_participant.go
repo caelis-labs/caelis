@@ -94,15 +94,12 @@ func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachPartici
 		}
 		return session.Session{}, confirmErr
 	}
-	if err != nil {
-		_ = r.controllers.Detach(context.WithoutCancel(ctx), controller.DetachRequest{
-			SessionRef: ref, Session: activeSession,
-			ParticipantID: strings.TrimSpace(binding.ID), DelegationID: strings.TrimSpace(binding.DelegationID),
-			AttachmentGeneration: strings.TrimSpace(binding.AttachmentGeneration), Source: strings.TrimSpace(req.Source),
-		})
-		return session.Session{}, err
-	}
-	return updatedSession, nil
+	_ = r.controllers.Detach(context.WithoutCancel(ctx), controller.DetachRequest{
+		SessionRef: ref, Session: activeSession,
+		ParticipantID: strings.TrimSpace(binding.ID), DelegationID: strings.TrimSpace(binding.DelegationID),
+		AttachmentGeneration: strings.TrimSpace(binding.AttachmentGeneration), Source: strings.TrimSpace(req.Source),
+	})
+	return session.Session{}, err
 }
 
 func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachParticipantRequest) (session.Session, error) {
@@ -164,22 +161,18 @@ func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachPartici
 			}
 			return session.Session{}, confirmErr
 		}
-		if err != nil {
-			latest, loadErr := r.sessions.Session(context.WithoutCancel(ctx), ref)
-			latestBinding, stillOwned := participantBinding(latest, binding.ID)
-			if loadErr == nil && (!stillOwned ||
-				strings.TrimSpace(latestBinding.DelegationID) != strings.TrimSpace(binding.DelegationID) ||
-				strings.TrimSpace(latestBinding.AttachmentGeneration) != strings.TrimSpace(binding.AttachmentGeneration)) {
-				return session.Session{}, err
-			}
-			if loadErr != nil {
-				return session.Session{}, errors.Join(err, loadErr)
-			}
-			restoreErr := r.restoreDetachedParticipant(context.WithoutCancel(ctx), ref, latest, binding, req.Source, mutationGuard)
-			return session.Session{}, errors.Join(err, restoreErr)
+		latest, loadErr := r.sessions.Session(context.WithoutCancel(ctx), ref)
+		latestBinding, stillOwned := participantBinding(latest, binding.ID)
+		if loadErr == nil && (!stillOwned ||
+			strings.TrimSpace(latestBinding.DelegationID) != strings.TrimSpace(binding.DelegationID) ||
+			strings.TrimSpace(latestBinding.AttachmentGeneration) != strings.TrimSpace(binding.AttachmentGeneration)) {
+			return session.Session{}, err
 		}
-		activeSession = updatedSession
-		return activeSession, nil
+		if loadErr != nil {
+			return session.Session{}, errors.Join(err, loadErr)
+		}
+		restoreErr := r.restoreDetachedParticipant(context.WithoutCancel(ctx), ref, latest, binding, req.Source, mutationGuard)
+		return session.Session{}, errors.Join(err, restoreErr)
 	}
 	_, err = r.sessions.RemoveParticipant(ctx, session.RemoveParticipantRequest{
 		SessionRef:       ref,

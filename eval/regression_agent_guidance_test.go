@@ -109,8 +109,8 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 	propertyGuidance := map[string][]string{
 		"workdir":             {"session cwd", "instead of prefixing command with cd"},
 		"yield_time_ms":       {"async Task", "10000 ms default", "shorter", "longer", "not the command timeout"},
-		"sandbox_permissions": {"Prefer use_default", "require_escalated", "one-shot"},
-		"justification":       {"one short sentence", "sandbox failure", "task link"},
+		"sandbox_permissions": {"trusted runtime boundary", "permits", "uncertain", "require_escalated directly", "matching sandbox denial", "one-shot"},
+		"justification":       {"one short sentence", "trusted boundary or matching denial", "task relevance"},
 	}
 	for property, wants := range propertyGuidance {
 		description := functionPropertyDescription(t, runCommandSpec, property)

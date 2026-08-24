@@ -65,6 +65,13 @@ func (r *Runtime) resolveEndpointApprovalByPolicy(
 				Isolation:  sandbox.IsolationHost,
 			},
 		},
+		SandboxPolicy: sandbox.PolicySnapshot{
+			Route:      sandbox.RouteHost,
+			Backend:    sandbox.BackendHost,
+			Permission: sandbox.PermissionFullAccess,
+			Isolation:  sandbox.IsolationHost,
+			Network:    sandbox.NetworkInherit,
+		},
 		Mode:    modeName,
 		Options: modeOptionsFromSession(request.Session, agent.AgentSpec{}),
 	})

@@ -2,6 +2,7 @@ package promptassembly
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -21,15 +23,14 @@ const (
 )
 
 type Config struct {
-	AppName           string
-	WorkspaceDir      string
-	BasePrompt        string
-	SkillDirs         []string
-	PluginSkills      []skill.PluginBundle
-	DelegationAgents  []delegation.Agent
-	RuntimeOS         string
-	SandboxMode       string
-	DefaultPermission string
+	AppName          string
+	WorkspaceDir     string
+	BasePrompt       string
+	SkillDirs        []string
+	PluginSkills     []skill.PluginBundle
+	DelegationAgents []delegation.Agent
+	RuntimeOS        string
+	SandboxPolicy    sandbox.PolicySnapshot
 }
 
 type fragmentKind string
@@ -184,15 +185,11 @@ func builtInPermissionBoundariesPrompt() string {
 	return strings.Join([]string{
 		"## Sandbox And Host Approval",
 		"",
-		"You work inside a restricted workspace-write sandbox by default (workspace and approved roots are writable; Host is not the default).",
-		"Stay in the sandbox unless a command truly cannot complete there.",
-		"If policy, a tool result, or the runtime explicitly requires Host for this exact command, retry it once with escalation; otherwise keep ordinary work sandboxed.",
-		"Host escalation asks the user to approve an exception; each grant is one-shot and does not authorize later similar commands.",
-		"Escalate only after a concrete sandbox failure on the same necessary command, or when the harness already requires Host for that action.",
-		"Keep escalations rare: repeated Host requests reduce user trust and slow the task.",
-		"Read-only inspection (including most read-only VCS inspection) should stay sandboxed; do not escalate \"just in case.\"",
-		"When escalating, state intent, the sandbox limit you hit, and the task link in one short justification—no generic \"need host\" phrasing.",
-		"Do not bypass sandbox limits with shell tricks; narrow the operation, retry once with Host only when required, or stop for the user.",
+		"Treat `<sandbox_policy>` as the trusted effective boundary for this Runtime.",
+		"Use default execution when the action is permitted. Request Host directly when the trusted boundary proves it cannot succeed. If uncertain, try the sandbox; after a concrete denial, retry only the same necessary action once.",
+		"Host approval is one-shot and action-scoped. A prior grant or failure does not authorize a later action.",
+		"Keep read-only inspection sandboxed unless the trusted boundary or a concrete denial requires Host.",
+		"For Host requests, give one short justification stating intent, the boundary or matching denial, and task relevance. Never bypass the boundary.",
 	}, "\n")
 }
 
@@ -210,15 +207,13 @@ func builtInEnvironmentContextPrompt(workspaceDir string, cfg Config) string {
 		return ""
 	}
 	osName := firstNonEmpty(strings.TrimSpace(cfg.RuntimeOS), runtime.GOOS)
-	sandboxMode := firstNonEmpty(strings.TrimSpace(cfg.SandboxMode), "restricted; workspace-write")
-	defaultPermission := firstNonEmpty(strings.TrimSpace(cfg.DefaultPermission), "sandbox default; Host only via one-shot approval")
+	sandboxPolicy, _ := json.Marshal(sandbox.SummarizePolicy(cfg.SandboxPolicy))
 	return fmt.Sprintf(`<environment_context>
   <cwd>%s</cwd>
   <os>%s</os>
   <shell>%s</shell>
-  <sandbox>%s</sandbox>
-  <default_permission>%s</default_permission>
-</environment_context>`, workspaceDir, osName, currentShellName(), sandboxMode, defaultPermission)
+  <sandbox_policy>%s</sandbox_policy>
+</environment_context>`, workspaceDir, osName, currentShellName(), sandboxPolicy)
 }
 
 func currentShellName() string {

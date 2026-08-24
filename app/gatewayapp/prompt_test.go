@@ -14,6 +14,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
@@ -49,6 +50,15 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 	prompt, err := buildSystemPrompt(promptConfig{
 		AppName:      "CAELIS",
 		WorkspaceDir: workspace,
+		SandboxPolicy: sandbox.PolicySnapshot{
+			Route:            sandbox.RouteSandbox,
+			Backend:          sandbox.BackendSeatbelt,
+			Permission:       sandbox.PermissionWorkspaceWrite,
+			Isolation:        sandbox.IsolationProcess,
+			Network:          sandbox.NetworkEnabled,
+			WritableRoots:    []string{resolvedWorkspace},
+			ReadOnlySubpaths: []string{".git"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("buildSystemPrompt() error = %v", err)
@@ -68,11 +78,11 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"changed / verified / remaining",
 		"one complete evidence-based answer",
 		"## Sandbox And Host Approval",
-		"You work inside a restricted workspace-write sandbox by default",
-		"policy, a tool result, or the runtime explicitly requires Host",
-		"otherwise keep ordinary work sandboxed",
-		"each grant is one-shot",
-		"Read-only inspection",
+		"trusted effective boundary",
+		"Request Host directly when the trusted boundary proves it cannot succeed",
+		"If uncertain, try the sandbox",
+		"Host approval is one-shot and action-scoped",
+		"Keep read-only inspection sandboxed",
 		"Tool-specific behavior belongs to each tool's own description and schema.",
 		"Do not invent facts when evidence can be inspected.",
 		"Stop searching once the available evidence is sufficient",
@@ -83,8 +93,11 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"<environment_context>",
 		"<cwd>" + resolvedWorkspace + "</cwd>",
 		"<os>",
-		"<sandbox>restricted; workspace-write</sandbox>",
-		"<default_permission>sandbox default; Host only via one-shot approval</default_permission>",
+		"<sandbox_policy>",
+		`"route":"sandbox"`,
+		`"permission":"workspace_write"`,
+		`"network":"enabled"`,
+		`"read_only_subpaths":[".git"]`,
 		"Skills provide specialized instructions and workflows for specific tasks.",
 		"use the `skill` tool to load it before taking task actions, then follow its routing instructions.",
 		"matching Caelis-selected ToolCall",
@@ -147,9 +160,9 @@ func TestBuildSystemPromptCoreContractIsConciseAndToolAgnostic(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## Sandbox And Host Approval",
-		"workspace-write sandbox",
+		"trusted effective boundary",
 		"one-shot",
-		"Read-only inspection",
+		"read-only inspection",
 	} {
 		if !strings.Contains(systemBlock, want) {
 			t.Fatalf("system instructions missing %q:\n%s", want, systemBlock)
@@ -267,23 +280,36 @@ func TestBuildSystemPromptOmitsDynamicTimeContext(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
+func TestBuildSystemPromptUsesCompactTrustedRuntimeSandboxPolicy(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
 	prompt, err := buildSystemPrompt(promptConfig{
 		AppName:      "CAELIS",
 		WorkspaceDir: workspace,
+		SandboxPolicy: sandbox.PolicySnapshot{
+			Route:            sandbox.RouteSandbox,
+			Backend:          sandbox.BackendSeatbelt,
+			Permission:       sandbox.PermissionWorkspaceWrite,
+			Isolation:        sandbox.IsolationProcess,
+			Network:          sandbox.NetworkDisabled,
+			WritableRoots:    []string{workspace, "/approved/cache", "/dependency/cache", "/compiler/cache"},
+			ReadOnlySubpaths: []string{".git", "vendor"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("buildSystemPrompt() error = %v", err)
 	}
 	for _, want := range []string{
 		"## Sandbox And Host Approval",
-		"You work inside a restricted workspace-write sandbox by default",
-		"each grant is one-shot",
-		"Read-only inspection",
-		"retry once with Host only when required",
+		"trusted effective boundary",
+		"Request Host directly when the trusted boundary proves it cannot succeed",
+		"If uncertain, try the sandbox",
+		"Host approval is one-shot and action-scoped",
+		`"route":"sandbox"`,
+		`"permission":"workspace_write"`,
+		`"network":"disabled"`,
+		`"read_only_subpaths":[".git","vendor"]`,
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing permission guidance %q:\n%s", want, prompt)
@@ -292,7 +318,17 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 	if strings.Contains(prompt, "git clean") || strings.Contains(prompt, "git reset") || strings.Contains(prompt, "git checkout") {
 		t.Fatalf("prompt includes scenario-specific Git cleanup commands:\n%s", prompt)
 	}
+	systemBlock := prompt[:strings.Index(prompt, "</system_instructions>")]
+	if strings.Contains(systemBlock, ".git") || strings.Contains(systemBlock, "vendor") {
+		t.Fatalf("static system rules hard-code runtime paths:\n%s", systemBlock)
+	}
 	for _, forbidden := range []string{
+		`"backend"`,
+		`"isolation"`,
+		`"writable_roots"`,
+		"/approved/cache",
+		"/dependency/cache",
+		"/compiler/cache",
 		"Default permission mode:",
 		"Sandbox backend request:",
 		"Start RUN_COMMAND commands",
@@ -300,8 +336,6 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 		"Default RUN_COMMAND execution uses the host route",
 		"Default RUN_COMMAND execution uses the host backend",
 		"Configured readable roots:",
-		"Configured writable roots:",
-		"Configured read-only subpaths:",
 		"Base instructions are stable",
 		"Active permissions are runtime policy state",
 		"with_additional_permissions",
@@ -423,6 +457,9 @@ func TestNewLocalStackLoadsPluginSkills(t *testing.T) {
 	systemPrompt, _ := stack.composition.activeRuntime.BaseMetadata["system_prompt"].(string)
 	if !strings.Contains(systemPrompt, "my-plugin:plugin-skill") {
 		t.Fatalf("expected system prompt to contain plugin skill, but it didn't.\nPrompt:\n%s", systemPrompt)
+	}
+	if !strings.Contains(systemPrompt, `<sandbox_policy>{"route":"host","permission":"danger_full_access","network":"inherit"`) {
+		t.Fatalf("system prompt missing effective Host Runtime policy:\n%s", systemPrompt)
 	}
 }
 

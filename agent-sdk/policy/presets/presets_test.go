@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -683,6 +684,89 @@ func TestDefaultModeRequiresApprovalForExplicitGitEscalation(t *testing.T) {
 				t.Fatalf("Metadata[sandbox_permissions] = %#v", got)
 			}
 		})
+	}
+}
+
+func TestEffectiveSandboxPolicyUsesBackendAndPolicyFacts(t *testing.T) {
+	t.Parallel()
+
+	workspace := testWorkspaceRoot()
+	networkEnabled := false
+	descriptor := sandboxCommandDescriptor()
+	snapshot := EffectiveSandboxPolicy(ModeWorkspaceWrite, sandbox.Config{
+		CWD: workspace,
+	}, descriptor, policy.ModeOptions{
+		WorkspaceRoot:  workspace,
+		TempRoot:       testTempRoot(),
+		NetworkEnabled: &networkEnabled,
+	})
+	if snapshot.Route != sandbox.RouteSandbox || snapshot.Backend != sandbox.BackendSeatbelt {
+		t.Fatalf("snapshot route/backend = %q/%q", snapshot.Route, snapshot.Backend)
+	}
+	if snapshot.Network != sandbox.NetworkDisabled {
+		t.Fatalf("snapshot network = %q, want disabled", snapshot.Network)
+	}
+	if !slices.Contains(snapshot.WritableRoots, workspace) {
+		t.Fatalf("snapshot writable roots = %#v, want workspace", snapshot.WritableRoots)
+	}
+	if !slices.Contains(snapshot.ReadOnlySubpaths, ".git") {
+		t.Fatalf("snapshot read-only subpaths = %#v, want default .git", snapshot.ReadOnlySubpaths)
+	}
+
+	hostSnapshot := EffectiveSandboxPolicy(ModeWorkspaceWrite, sandbox.Config{CWD: workspace}, sandbox.Descriptor{
+		Backend:   sandbox.BackendHost,
+		Isolation: sandbox.IsolationHost,
+		DefaultConstraints: sandbox.Constraints{
+			Route:      sandbox.RouteHost,
+			Backend:    sandbox.BackendHost,
+			Permission: sandbox.PermissionFullAccess,
+		},
+	}, policy.ModeOptions{WorkspaceRoot: workspace})
+	if hostSnapshot.Route != sandbox.RouteHost || hostSnapshot.Permission != sandbox.PermissionFullAccess {
+		t.Fatalf("host snapshot = %#v", hostSnapshot)
+	}
+	if len(hostSnapshot.WritableRoots) != 0 || len(hostSnapshot.ReadOnlySubpaths) != 0 {
+		t.Fatalf("host snapshot retained sandbox paths: %#v", hostSnapshot)
+	}
+}
+
+func TestEffectiveSandboxPolicyRemovesExplicitReadOnlyOverride(t *testing.T) {
+	t.Parallel()
+
+	workspace := testWorkspaceRoot()
+	gitRoot := filepath.Join(workspace, ".git")
+	snapshot := EffectiveSandboxPolicy(ModeWorkspaceWrite, sandbox.Config{
+		CWD:           workspace,
+		WritableRoots: []string{gitRoot},
+	}, sandboxCommandDescriptor(), policy.ModeOptions{
+		WorkspaceRoot:   workspace,
+		ExtraWriteRoots: []string{gitRoot},
+	})
+	if slices.Contains(snapshot.ReadOnlySubpaths, ".git") {
+		t.Fatalf("snapshot read-only subpaths = %#v, did not expect overridden .git", snapshot.ReadOnlySubpaths)
+	}
+}
+
+func TestApprovalMetadataCarriesRuntimeSandboxPolicy(t *testing.T) {
+	t.Parallel()
+
+	input := commandCtx("git commit -m fix", true)
+	input.SandboxPolicy = sandbox.PolicySnapshot{
+		Route:            sandbox.RouteSandbox,
+		Backend:          sandbox.BackendSeatbelt,
+		Permission:       sandbox.PermissionWorkspaceWrite,
+		ReadOnlySubpaths: []string{".git"},
+	}
+	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	got, ok := decision.Metadata[policy.MetadataSandboxPolicy].(sandbox.PolicySnapshot)
+	if !ok {
+		t.Fatalf("Metadata[%s] = %#v", policy.MetadataSandboxPolicy, decision.Metadata[policy.MetadataSandboxPolicy])
+	}
+	if !slices.Contains(got.ReadOnlySubpaths, ".git") {
+		t.Fatalf("sandbox policy metadata = %#v", got)
 	}
 }
 

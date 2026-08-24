@@ -129,9 +129,11 @@ func askCommandApproval(input policy.ToolContext, req commandSandboxRequest, cla
 	if err != nil {
 		return policy.Decision{}, err
 	}
-	decision.Metadata = req.approvalMetadata(reason)
 	if decision.Metadata == nil {
 		decision.Metadata = map[string]any{}
+	}
+	for key, value := range req.approvalMetadata(reason) {
+		decision.Metadata[key] = value
 	}
 	if risk := strings.TrimSpace(class.RiskClass); risk != "" {
 		decision.Metadata["risk_class"] = risk

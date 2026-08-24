@@ -29,14 +29,15 @@ type approvalContext struct {
 }
 
 type policyWrappedTool struct {
-	mode       string
-	policy     policy.Mode
-	session    session.Session
-	sessionRef session.SessionRef
-	state      map[string]any
-	options    policy.ModeOptions
-	tool       tool.Tool
-	approval   approvalContext
+	mode          string
+	policy        policy.Mode
+	session       session.Session
+	sessionRef    session.SessionRef
+	state         map[string]any
+	options       policy.ModeOptions
+	sandboxPolicy sandbox.PolicySnapshot
+	tool          tool.Tool
+	approval      approvalContext
 }
 
 type rejectedPolicyMode struct {
@@ -72,14 +73,15 @@ func (r *Runtime) wrapToolsForPolicy(
 			continue
 		}
 		out = append(out, policyWrappedTool{
-			mode:       modeName,
-			policy:     mode,
-			session:    session.CloneSession(activeSession),
-			sessionRef: session.NormalizeSessionRef(ref),
-			state:      session.CloneState(state),
-			options:    policy.CloneModeOptions(options),
-			tool:       one,
-			approval:   approval,
+			mode:          modeName,
+			policy:        mode,
+			session:       session.CloneSession(activeSession),
+			sessionRef:    session.NormalizeSessionRef(ref),
+			state:         session.CloneState(state),
+			options:       policy.CloneModeOptions(options),
+			sandboxPolicy: sandbox.ClonePolicySnapshot(r.sandboxPolicy),
+			tool:          one,
+			approval:      approval,
 		})
 	}
 	return out
@@ -120,13 +122,14 @@ func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 		return tool.Result{}, &policy.ProfileError{Profile: t.mode, Detail: "policy mode is unavailable"}
 	}
 	input := policy.ToolContext{
-		Session: t.session,
-		State:   session.CloneState(t.state),
-		Tool:    t.tool.Definition(),
-		Call:    tool.CloneCall(call),
-		Sandbox: t.describeSandbox(),
-		Mode:    t.mode,
-		Options: policy.CloneModeOptions(t.options),
+		Session:       t.session,
+		State:         session.CloneState(t.state),
+		Tool:          t.tool.Definition(),
+		Call:          tool.CloneCall(call),
+		Sandbox:       t.describeSandbox(),
+		SandboxPolicy: sandbox.ClonePolicySnapshot(t.sandboxPolicy),
+		Mode:          t.mode,
+		Options:       policy.CloneModeOptions(t.options),
 	}
 	decision, err := t.policy.DecideTool(ctx, input)
 	if err != nil {

@@ -584,16 +584,15 @@ type stackBaseMetadata struct {
 	SkillCatalog skill.Catalog
 }
 
-func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model ModelConfig, sandboxCfg SandboxConfig, skillDirs []string, pluginSkills []skill.PluginBundle) (stackBaseMetadata, error) {
+func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model ModelConfig, sandboxCfg SandboxConfig, sandboxPolicy sandbox.PolicySnapshot, skillDirs []string, pluginSkills []skill.PluginBundle) (stackBaseMetadata, error) {
 	baseMetadata := map[string]any{}
 	result, err := buildSystemPromptResult(promptConfig{
-		AppName:           appName,
-		WorkspaceDir:      workspaceCWD,
-		BasePrompt:        basePrompt,
-		SkillDirs:         skillDirs,
-		PluginSkills:      pluginSkills,
-		SandboxMode:       promptSandboxContextMode(sandboxCfg),
-		DefaultPermission: promptDefaultPermissionSummary(sandboxCfg),
+		AppName:       appName,
+		WorkspaceDir:  workspaceCWD,
+		BasePrompt:    basePrompt,
+		SkillDirs:     skillDirs,
+		PluginSkills:  pluginSkills,
+		SandboxPolicy: sandbox.ClonePolicySnapshot(sandboxPolicy),
 	})
 	if err != nil {
 		return stackBaseMetadata{}, err
@@ -608,25 +607,6 @@ func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model Mode
 		Metadata:     sandboxpolicy.WithPolicyMetadata(baseMetadata, sandboxCfg),
 		SkillCatalog: result.SkillCatalog,
 	}, nil
-}
-
-func promptSandboxContextMode(cfg SandboxConfig) string {
-	requested := strings.ToLower(strings.TrimSpace(cfg.RequestedType))
-	switch requested {
-	case "host":
-		return "host (no sandbox isolation)"
-	case "", "auto":
-		return "restricted; workspace-write; network=enabled (auto backend)"
-	default:
-		return requested + "; workspace-write; network=enabled"
-	}
-}
-
-func promptDefaultPermissionSummary(cfg SandboxConfig) string {
-	if strings.EqualFold(strings.TrimSpace(cfg.RequestedType), "host") {
-		return "host permissions; each sensitive action may still require approval"
-	}
-	return "sandbox default; Host only via one-shot approval"
 }
 
 // Quiesce permanently closes Control Turn admission and waits for every active

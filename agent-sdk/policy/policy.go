@@ -36,13 +36,14 @@ type ModeOptions struct {
 // ToolContext is the stable tool-authorization input consumed by runtime-local
 // policy decisions.
 type ToolContext struct {
-	Session session.Session    `json:"session"`
-	State   map[string]any     `json:"state,omitempty"`
-	Tool    tool.Definition    `json:"tool"`
-	Call    tool.Call          `json:"call"`
-	Sandbox sandbox.Descriptor `json:"sandbox"`
-	Mode    string             `json:"mode,omitempty"`
-	Options ModeOptions        `json:"options,omitempty"`
+	Session       session.Session        `json:"session"`
+	State         map[string]any         `json:"state,omitempty"`
+	Tool          tool.Definition        `json:"tool"`
+	Call          tool.Call              `json:"call"`
+	Sandbox       sandbox.Descriptor     `json:"sandbox"`
+	SandboxPolicy sandbox.PolicySnapshot `json:"sandbox_policy,omitempty"`
+	Mode          string                 `json:"mode,omitempty"`
+	Options       ModeOptions            `json:"options,omitempty"`
 }
 
 // Decision is the normalized policy result. Constraints are backend-neutral
@@ -190,6 +191,7 @@ func CloneToolContext(in ToolContext) ToolContext {
 	out.Tool = tool.CloneDefinition(in.Tool)
 	out.Call = tool.CloneCall(in.Call)
 	out.Sandbox = sandbox.CloneDescriptor(in.Sandbox)
+	out.SandboxPolicy = sandbox.ClonePolicySnapshot(in.SandboxPolicy)
 	out.Options = CloneModeOptions(in.Options)
 	return out
 }

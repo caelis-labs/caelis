@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
@@ -630,6 +632,9 @@ func selectGuardianTranscriptEntries(
 
 func guardianPlannedActionJSON(req kernel.ApprovalReviewRequest) (string, bool, error) {
 	action := map[string]any{}
+	if snapshot, ok := req.RuntimeRequest.Metadata[policy.MetadataSandboxPolicy].(sandbox.PolicySnapshot); ok && !sandbox.PolicySnapshotEmpty(snapshot) {
+		action["runtime_sandbox"] = sandbox.SummarizePolicy(snapshot)
+	}
 	toolName := ""
 	if req.Approval != nil {
 		toolName = strings.TrimSpace(req.Approval.ToolName)

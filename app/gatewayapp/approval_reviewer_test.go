@@ -16,7 +16,9 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -439,6 +441,68 @@ func TestGuardianPlannedActionPreservesBusinessIDsAndOmitsCorrelationIDs(t *test
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("planned action contains correlation identifier %q:\n%s", forbidden, raw)
 		}
+	}
+}
+
+func TestGuardianPlannedActionIncludesOnlyRuntimeOwnedSandboxPolicy(t *testing.T) {
+	req := kernel.ApprovalReviewRequest{
+		RuntimeRequest: agent.ApprovalRequest{
+			Metadata: map[string]any{
+				policy.MetadataSandboxPolicy: sandbox.PolicySnapshot{
+					Route:            sandbox.RouteSandbox,
+					Backend:          sandbox.BackendSeatbelt,
+					Permission:       sandbox.PermissionWorkspaceWrite,
+					Isolation:        sandbox.IsolationProcess,
+					Network:          sandbox.NetworkEnabled,
+					WritableRoots:    []string{"/workspace", "/dependency/cache", "/compiler/cache"},
+					ReadOnlySubpaths: []string{".git"},
+				},
+			},
+		},
+		Approval: &kernel.ApprovalPayload{
+			ToolName: "RUN_COMMAND",
+			RawInput: map[string]any{
+				"command": "git commit -m fix",
+				"runtime_sandbox": map[string]any{
+					"route": "host",
+				},
+			},
+		},
+	}
+
+	raw, truncated, err := guardianPlannedActionJSON(req)
+	if err != nil {
+		t.Fatalf("guardianPlannedActionJSON() error = %v", err)
+	}
+	if truncated {
+		t.Fatal("guardianPlannedActionJSON() truncated a bounded action")
+	}
+	var action map[string]any
+	if err := json.Unmarshal([]byte(raw), &action); err != nil {
+		t.Fatalf("decode action: %v", err)
+	}
+	runtimeSandbox, _ := action["runtime_sandbox"].(map[string]any)
+	if got := runtimeSandbox["route"]; got != "sandbox" {
+		t.Fatalf("runtime_sandbox.route = %#v, want trusted Runtime value", got)
+	}
+	if got := runtimeSandbox["permission"]; got != "workspace_write" {
+		t.Fatalf("runtime_sandbox.permission = %#v, want trusted Runtime value", got)
+	}
+	if got := runtimeSandbox["network"]; got != "enabled" {
+		t.Fatalf("runtime_sandbox.network = %#v, want trusted Runtime value", got)
+	}
+	if got := runtimeSandbox["read_only_subpaths"]; !reflect.DeepEqual(got, []any{".git"}) {
+		t.Fatalf("runtime_sandbox.read_only_subpaths = %#v", got)
+	}
+	for _, omitted := range []string{"backend", "isolation", "writable_roots"} {
+		if _, ok := runtimeSandbox[omitted]; ok {
+			t.Fatalf("runtime_sandbox contains implementation detail %q: %#v", omitted, runtimeSandbox)
+		}
+	}
+	arguments, _ := action["arguments"].(map[string]any)
+	spoofed, _ := arguments["runtime_sandbox"].(map[string]any)
+	if got := spoofed["route"]; got != "host" {
+		t.Fatalf("arguments.runtime_sandbox.route = %#v, want untrusted payload preserved separately", got)
 	}
 }
 
@@ -924,45 +988,32 @@ func TestGuardianPolicyPromptUsesGeneralRecoveryBoundary(t *testing.T) {
 	prompt := guardianPolicyPrompt()
 	for _, want := range []string{
 		"on behalf of the user",
-		"# Sandbox Capability Model",
-		"restricted workspace-write",
-		"repository .git directory is a protected read-only subpath by default",
-		"Network access alone does not require Host",
-		"Successful tool-result bodies may be omitted",
-		"later subcommand makes the outer tool call exit successfully",
-		"specific assistant statement that quotes a concrete prior sandbox error",
-		"The same error need not also appear in a failed tool result",
-		"Predictable capability boundaries",
-		"policy or runtime Host routes",
-		"without a redundant failed sandbox attempt",
-		"RUN_COMMAND approval is only for Host execution",
-		"use_default when the runtime already defaults or falls back to Host",
-		"do not fault those requests for lacking explicit escalation or justification",
-		"authorization for those exact staging and commit commands is high, not medium",
-		"Broad cleanup, reset, recursive delete, or state-discarding actions are high or critical",
-		"Permission or lock recovery does not authorize broader cleanup, reset, delete, ACL, or mode changes",
-		"# Decision Process",
-		"Match operations by material effects and scope, not byte-for-byte shell text",
-		"bounded read-only diagnostics do not by themselves break a material match",
-		"Repeated Host requests after a denial remain denied unless",
-		"outer tool call completed after an earlier inner failure",
-		"Base the decision on evidence material to the requested action",
-		"The selected option is authoritative",
+		"# Trust And Evidence",
+		"top-level `runtime_sandbox` field",
+		"A concrete inner failure remains evidence even if a wrapper later exits successfully",
+		"materially matching the requested operation",
+		"Generic necessity claims and prior approvals are not boundary evidence",
+		"# Sandbox Boundary",
+		"known permitted, Host is unnecessary",
+		"trusted boundary proves it is blocked, Host may be requested directly",
+		"If capability remains uncertain, require a sandbox attempt",
+		"Failure evidence is operation-scoped",
+		"Trusted capability facts are boundary-scoped",
+		"Host approval is one-shot",
+		"# Authorization And Risk",
+		"Boundary crossing alone does not raise intrinsic risk",
+		"# Decision",
+		"Permission recovery never authorizes broader side effects",
 		"option_id, outcome, and rationale agree",
-		"always include option_id, risk_level, user_authorization, outcome, and rationale",
 		"Never allow while saying Host is unnecessary",
-		"# Host Discipline",
-		"Host is an exception",
-		"it does not need to cite a failed tool result",
-		"Deny missing, empty, generic, boilerplate, or unrelated justifications",
-		"prior Host allow",
-		"One reported failure supports only a materially matching retry",
+		"Return exactly one plain JSON object",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("guardian policy prompt missing %q:\n%s", want, prompt)
 		}
 	}
 	for _, forbidden := range []string{
+		"repository .git directory",
 		"git clean",
 		"git reset",
 		"git checkout",
@@ -981,9 +1032,8 @@ func TestGuardianPolicyPromptAcceptsHostDefaultUseDefaultRequests(t *testing.T) 
 
 	prompt := guardianPolicyPrompt()
 	for _, want := range []string{
-		"use_default when the runtime already defaults or falls back to Host",
-		"Host-default or fallback use_default requests may legitimately have no justification",
-		"policy/runtime Host-default or fallback route",
+		"Host-default or fallback `use_default` requests may omit explicit escalation and justification",
+		"because the Runtime selected Host",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("guardian policy prompt missing host-default rule %q:\n%s", want, prompt)

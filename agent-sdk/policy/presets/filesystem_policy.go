@@ -31,10 +31,11 @@ func askPathWriteApproval(input policy.ToolContext, def sandbox.Constraints, pat
 	if err != nil {
 		return policy.Decision{}, err
 	}
-	decision.Metadata = map[string]any{
-		"approval_reason": reason,
-		"risk_class":      riskClassPathEscape,
+	if decision.Metadata == nil {
+		decision.Metadata = map[string]any{}
 	}
+	decision.Metadata["approval_reason"] = reason
+	decision.Metadata["risk_class"] = riskClassPathEscape
 	return decision, nil
 }
 
