@@ -14,7 +14,6 @@ type explorationProjectionState struct {
 type explorationContainerState struct {
 	StableID string
 	CallIDs  []string
-	Pending  bool
 }
 
 func (s *explorationProjectionState) preserveBeforeEventRemoval(events []SubagentEvent, status string) {
@@ -53,13 +52,7 @@ func (s *explorationProjectionState) seedReconnectReplay(events []SubagentEvent,
 	withBoundary := append([]SubagentEvent(nil), visible...)
 	withBoundary = append(withBoundary, SubagentEvent{Kind: SESemanticBoundary})
 	current := collectExplorationContainers(withBoundary, status)
-	completed := current[:0]
-	for _, container := range current {
-		if !container.Pending {
-			completed = append(completed, container)
-		}
-	}
-	s.Containers = reconcileLiveExplorationContainers(visible, s.Containers, completed)
+	s.Containers = reconcileLiveExplorationContainers(visible, s.Containers, current)
 }
 
 func renderStableExplorationRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
@@ -75,9 +68,8 @@ func (s *explorationProjectionState) reconcile(events []SubagentEvent, status st
 	}
 	current := collectExplorationContainers(events, status)
 	if isTerminalACPTranscriptStatus(status) {
-		// A terminal Turn cannot retain a formerly pending container. Only the
-		// explicit terminal tool lifecycles collected from the current events may
-		// render as settled exploration.
+		// A terminal Turn retains only the explicit terminal tool lifecycles
+		// collected from the current events.
 		s.Containers = current
 		return
 	}
@@ -158,7 +150,6 @@ func retainExplorationContainer(events []SubagentEvent, previous explorationCont
 	}
 	first := -1
 	last := -1
-	pending := false
 	next := 0
 	for index, event := range events {
 		if event.Kind != SEToolCall {
@@ -169,14 +160,13 @@ func retainExplorationContainer(events []SubagentEvent, previous explorationCont
 		if !ok {
 			continue
 		}
-		if position != next || !isExplorationToolEvent(event) {
+		if position != next || !event.Done || !isExplorationToolEvent(event) {
 			return explorationContainerState{}, false
 		}
 		if first < 0 {
 			first = index
 		}
 		last = index
-		pending = pending || !event.Done
 		next++
 		if next == len(previous.CallIDs) {
 			break
@@ -199,14 +189,12 @@ func retainExplorationContainer(events []SubagentEvent, previous explorationCont
 	return explorationContainerState{
 		StableID: strings.TrimSpace(previous.CallIDs[0]),
 		CallIDs:  append([]string(nil), previous.CallIDs...),
-		Pending:  pending,
 	}, true
 }
 
 func collectExplorationContainers(events []SubagentEvent, status string) []explorationContainerState {
 	var containers []explorationContainerState
 	var current []string
-	currentPending := false
 	flush := func() {
 		// One exploration tool has no density benefit: keep its narrative and
 		// tool row directly visible. Containers are reserved for runs with at
@@ -215,11 +203,9 @@ func collectExplorationContainers(events []SubagentEvent, status string) []explo
 			containers = append(containers, explorationContainerState{
 				StableID: current[0],
 				CallIDs:  append([]string(nil), current...),
-				Pending:  currentPending,
 			})
 		}
 		current = nil
-		currentPending = false
 	}
 	terminal := isTerminalACPTranscriptStatus(status)
 	for i := 0; i < len(events); {
@@ -229,22 +215,32 @@ func collectExplorationContainers(events []SubagentEvent, status string) []explo
 			i++
 			continue
 		}
-		hasLaterStep := hasLaterTranscriptStep(events, step.end+1)
-		// A later step only moves this batch out of the anti-jump live tail. It
-		// does not complete a pending tool. Group such a batch under the present-
-		// tense "Exploring" header, and promote it to "Explored" only after every
-		// member has an explicit terminal tool update.
-		settledForLayout := hasLaterStep
-		if terminal {
-			// A terminal Turn cannot keep advertising active exploration. Preserve
-			// the prior behavior: only explicitly completed tool lifecycles compact.
-			settledForLayout = step.completedExploration
-		}
-		if len(step.callIDs) > 0 && settledForLayout {
-			current = append(current, step.callIDs...)
-			currentPending = currentPending || !step.completedExploration
-		} else {
+		if len(step.callIDs) == 0 {
 			flush()
+			i = step.end + 1
+			continue
+		}
+		settledForLayout := terminal || hasLaterTranscriptStep(events, step.end+1)
+		if !settledForLayout {
+			flush()
+			i = step.end + 1
+			continue
+		}
+		// A later hidden control event can settle the layout without settling an
+		// earlier tool lifecycle. Keep the completed prefix in the stable
+		// Explored group, but never let one pending call downgrade or consume it.
+		// Ignore the remainder of this physical step until that call receives an
+		// explicit terminal update; its ordinary lifecycle row remains visible.
+		for eventIndex := step.start; eventIndex <= step.end; eventIndex++ {
+			event := events[eventIndex]
+			if event.Kind != SEToolCall {
+				continue
+			}
+			if !event.Done || !isExplorationToolEvent(event) {
+				flush()
+				break
+			}
+			current = append(current, strings.TrimSpace(event.CallID))
 		}
 		i = step.end + 1
 	}
@@ -256,18 +252,15 @@ func collectStableExplorationRuns(events []SubagentEvent, status string) [][]str
 	containers := collectExplorationContainers(events, status)
 	runs := make([][]string, 0, len(containers))
 	for _, container := range containers {
-		if !container.Pending {
-			runs = append(runs, append([]string(nil), container.CallIDs...))
-		}
+		runs = append(runs, append([]string(nil), container.CallIDs...))
 	}
 	return runs
 }
 
 type explorationRenderStep struct {
-	start                int
-	end                  int
-	callIDs              []string
-	completedExploration bool
+	start   int
+	end     int
+	callIDs []string
 }
 
 func collectExplorationRenderStep(events []SubagentEvent, idx int) (explorationRenderStep, bool) {
@@ -283,9 +276,8 @@ func collectExplorationRenderStep(events []SubagentEvent, idx int) (explorationR
 		return explorationRenderStep{}, false
 	}
 	step := explorationRenderStep{
-		start:                start,
-		end:                  i,
-		completedExploration: true,
+		start: start,
+		end:   i,
 	}
 	for i < len(events) && events[i].Kind == SEToolCall {
 		ev := events[i]
@@ -293,14 +285,8 @@ func collectExplorationRenderStep(events []SubagentEvent, idx int) (explorationR
 			break
 		}
 		step.callIDs = append(step.callIDs, strings.TrimSpace(ev.CallID))
-		if !ev.Done {
-			step.completedExploration = false
-		}
 		step.end = i
 		i++
-	}
-	if len(step.callIDs) == 0 {
-		step.completedExploration = false
 	}
 	return step, true
 }
@@ -371,10 +357,6 @@ func (s *explorationProjectionState) renderContainerAt(blockID string, events []
 	}
 	mode := explorationToolDetailSettled
 	header := "• Explored"
-	if container.Pending {
-		mode = explorationToolDetailLiveSummary
-		header = "• Exploring"
-	}
 	expandable := explorationContainerCanExpand(events, width, ctx, mode)
 	token := ""
 	if expandable {
@@ -384,7 +366,7 @@ func (s *explorationProjectionState) renderContainerAt(blockID string, events []
 	if expandable && opts.ExplorationExpanded != nil {
 		expanded = opts.ExplorationExpanded(key) || opts.ExplorationExpanded(explorationStageKey(events))
 	}
-	tone, dim := acpToolHeaderMark(ctx, false, !container.Pending)
+	tone, dim := acpToolHeaderMark(ctx, false, true)
 	if expanded {
 		rows := []RenderedRow{renderACPTranscriptHeaderRowMarked(blockID, header, width, ctx, token, tone, dim)}
 		rows = append(rows, explorationContainerExpandedRows(blockID, events, width, ctx, token, mode)...)

@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func TestLiveExplorationGroupsSettledPendingStageWithoutCompletingIt(t *testing.T) {
+func TestLiveExplorationKeepsCompletedGroupsStableAroundPendingStage(t *testing.T) {
 	const (
 		width  = 100
 		height = 30
@@ -51,51 +51,47 @@ func TestLiveExplorationGroupsSettledPendingStageWithoutCompletingIt(t *testing.
 	if pending.Done {
 		t.Fatal("later narrative incorrectly completed the pending middle exploration")
 	}
-	wantRun := []string{"read-1", "read-2", "search-middle", "read-middle", "read-last-1", "read-last-2"}
-	if stableRuns := collectStableExplorationRuns(block.Events, block.Status); len(stableRuns) != 0 {
-		t.Fatalf("pending exploration was reported as stable: %#v", stableRuns)
+	wantFirst := []string{"read-1", "read-2"}
+	wantLast := []string{"read-last-1", "read-last-2"}
+	stableRuns := collectStableExplorationRuns(block.Events, block.Status)
+	if len(stableRuns) != 2 || !slices.Equal(stableRuns[0], wantFirst) || !slices.Equal(stableRuns[1], wantLast) {
+		t.Fatalf("stable exploration runs = %#v, want completed runs %#v and %#v", stableRuns, wantFirst, wantLast)
 	}
-	if len(block.explorationProjection.Containers) != 1 {
-		t.Fatalf("exploration containers = %#v, want one pending run", block.explorationProjection.Containers)
-	}
-	container := block.explorationProjection.Containers[0]
-	if !container.Pending || !slices.Equal(container.CallIDs, wantRun) {
-		t.Fatalf("pending exploration container = %#v, want call IDs %#v", container, wantRun)
+	if len(block.explorationProjection.Containers) != 2 {
+		t.Fatalf("exploration containers = %#v, want two completed runs", block.explorationProjection.Containers)
 	}
 
 	pendingFrame := h.model.View().Content
 	plain := ansi.Strip(pendingFrame)
-	if got := countExactTrimmedLine(plain, "• Exploring"); got != 1 {
-		t.Fatalf("pending exploration groups = %d, want one merged live group:\n%s", got, plain)
+	if got := countExactTrimmedLine(plain, "• Explored"); got != 2 {
+		t.Fatalf("completed exploration groups = %d, want two stable groups:\n%s", got, plain)
 	}
-	if strings.Contains(plain, "• Explored") {
-		t.Fatalf("pending tool was rendered under past-tense Explored:\n%s", plain)
+	if strings.Contains(plain, "• Exploring") {
+		t.Fatalf("pending exploration introduced an aggregate Exploring state:\n%s", plain)
 	}
 	if !strings.Contains(plain, "needle") {
-		t.Fatalf("pending exploration summary hid the pending search:\n%s", plain)
-	}
-	if headers := standaloneExplorationHeaders(plain); len(headers) != 0 {
-		t.Fatalf("settled pending batch leaked standalone headers %q:\n%s", headers, plain)
+		t.Fatalf("pending exploration lifecycle disappeared beside stable groups:\n%s", plain)
 	}
 	updates := renderFullscreenFramesForTest(t, width, height, h.frames...)
 	assertPhysicalFullscreenFrame(t, width, height, pendingFrame, updates)
 
 	if !block.toggleExplorationExpanded("read-1") {
-		t.Fatal("pending exploration container did not expand")
+		t.Fatal("completed exploration container did not expand")
 	}
 	expanded := joinRenderedPlain(block.Render(h.model.blockRenderContext(width)))
-	if !strings.Contains(expanded, "Exploring") || !strings.Contains(expanded, "needle") {
-		t.Fatalf("expanded pending container lost its live lifecycle:\n%s", expanded)
+	if !strings.Contains(expanded, "Explored") || !strings.Contains(expanded, "a.go") {
+		t.Fatalf("expanded completed container lost its stable presentation:\n%s", expanded)
 	}
 
-	// Only the explicit result update promotes the same stable container key to
-	// the past-tense completed representation.
+	// Once the missing result arrives, the completed runs may coalesce without
+	// ever downgrading their aggregate presentation to an active state.
 	h.complete("search-middle", "Grep", "search", "needle")
 	block = requireMainACPTurnBlockForTest(t, h.model)
 	if event := requireToolEventForTest(t, block.Events, "search-middle"); !event.Done {
 		t.Fatal("explicit result update did not complete the pending search")
 	}
-	stableRuns := collectStableExplorationRuns(block.Events, block.Status)
+	wantRun := []string{"read-1", "read-2", "search-middle", "read-middle", "read-last-1", "read-last-2"}
+	stableRuns = collectStableExplorationRuns(block.Events, block.Status)
 	if len(stableRuns) != 1 || !slices.Equal(stableRuns[0], wantRun) {
 		t.Fatalf("stable exploration runs = %#v, want %#v", stableRuns, [][]string{wantRun})
 	}
@@ -104,7 +100,88 @@ func TestLiveExplorationGroupsSettledPendingStageWithoutCompletingIt(t *testing.
 		t.Fatalf("completed exploration groups = %d, want one:\n%s", got, completedPlain)
 	}
 	if strings.Contains(completedPlain, "• Exploring") {
-		t.Fatalf("completed exploration retained live header:\n%s", completedPlain)
+		t.Fatalf("completed exploration retained active aggregate header:\n%s", completedPlain)
+	}
+}
+
+func TestHiddenTaskWaitCannotDowngradeExploredSummary(t *testing.T) {
+	h := newLiveExplorationHarness(t, 100, 30)
+	completed := schema.ToolStatusCompleted
+
+	h.start("search-1", "Grep", schema.ToolKindSearch, "message")
+	h.apply(liveExplorationEnvelope(schema.ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo,
+		ToolCallID:    "search-1",
+		Status:        &completed,
+		RawInput:      map[string]any{"pattern": "message", "path": "."},
+		RawOutput:     map[string]any{"pattern": "message", "count": 100},
+		Meta:          acpToolNameMeta("Grep"),
+	}))
+	h.start("read-1", "Read", schema.ToolKindRead, "agent_input.go")
+	h.apply(liveExplorationEnvelope(schema.ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo,
+		ToolCallID:    "read-1",
+		Status:        &completed,
+		RawInput:      map[string]any{"path": "agent_input.go", "offset": 0, "limit": 55},
+		RawOutput:     map[string]any{"path": "agent_input.go", "start_line": 1, "end_line": 55},
+		Meta:          acpToolNameMeta("Read"),
+	}))
+	h.reason("reason-after-first-batch", "inspect the completed exploration")
+
+	beforePending := ansi.Strip(h.model.View().Content)
+	if got := countExactTrimmedLine(beforePending, "• Explored"); got != 1 ||
+		!strings.Contains(beforePending, `Search "message" 100 hits`) ||
+		!strings.Contains(beforePending, "Read agent_input.go 1~55") {
+		t.Fatalf("test setup did not establish the settled summary:\n%s", beforePending)
+	}
+
+	// This later Read has no terminal update. Task wait is hidden from the
+	// transcript but appends a semantic boundary, which used to merge this live
+	// tail into the completed container and re-tense the whole group.
+	h.start("read-pending", "Read", schema.ToolKindRead, "later.go")
+	h.apply(liveExplorationEnvelope(schema.ToolCall{
+		SessionUpdate: schema.UpdateToolCall,
+		ToolCallID:    "task-wait",
+		Title:         "Task wait orbit",
+		Kind:          schema.ToolKindOther,
+		Status:        schema.ToolStatusInProgress,
+		RawInput: map[string]any{
+			"action": "wait", "handle": "orbit", "target_kind": "subagent",
+		},
+		Meta: acpToolNameMeta("Task"),
+	}))
+
+	block := requireMainACPTurnBlockForTest(t, h.model)
+	wantRun := []string{"search-1", "read-1"}
+	stableRuns := collectStableExplorationRuns(block.Events, block.Status)
+	if len(stableRuns) != 1 || !slices.Equal(stableRuns[0], wantRun) {
+		t.Fatalf("stable exploration runs after Task wait = %#v, want %#v", stableRuns, [][]string{wantRun})
+	}
+	boundaries := 0
+	for _, event := range block.Events {
+		if event.Kind == SESemanticBoundary {
+			boundaries++
+		}
+		if event.Kind == SEToolCall && event.Name == surfaceToolTask {
+			t.Fatalf("hidden Task wait rendered a physical event: %#v", event)
+		}
+	}
+	if boundaries != 1 {
+		t.Fatalf("semantic boundaries = %d, want Task wait to append one", boundaries)
+	}
+
+	plain := ansi.Strip(h.model.View().Content)
+	if got := countExactTrimmedLine(plain, "• Explored"); got != 1 {
+		t.Fatalf("Explored group count after Task wait = %d, want one:\n%s", got, plain)
+	}
+	if strings.Contains(plain, "• Exploring") {
+		t.Fatalf("Task wait downgraded the completed group to Exploring:\n%s", plain)
+	}
+	if !strings.Contains(plain, `Search "message" 100 hits`) || !strings.Contains(plain, "Read agent_input.go 1~55") {
+		t.Fatalf("Task wait replaced settled Search/Read summaries with invocation arguments:\n%s", plain)
+	}
+	if !strings.Contains(plain, "• Read later.go") {
+		t.Fatalf("pending exploration lifecycle disappeared:\n%s", plain)
 	}
 }
 
@@ -147,8 +224,8 @@ func TestTerminalPendingExplorationDoesNotRenderAsActiveContainer(t *testing.T) 
 	block.AppendStreamEvent(SEReasoning, "later terminal narrative", narrativeTestSource())
 	ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(100)
 	running := joinRenderedPlain(block.Render(ctx))
-	if !strings.Contains(running, "• Exploring") {
-		t.Fatalf("test setup did not establish a pending exploration container:\n%s", running)
+	if strings.Contains(running, "• Exploring") || strings.Contains(running, "• Explored") {
+		t.Fatalf("pending exploration rendered as an aggregate state:\n%s", running)
 	}
 	block.Status = "completed"
 
@@ -162,16 +239,18 @@ func TestTerminalPendingExplorationDoesNotRenderAsActiveContainer(t *testing.T) 
 	}
 }
 
-func TestLiveExplorationReclassificationRemovesPendingContainerMembership(t *testing.T) {
+func TestLiveExplorationReclassificationDoesNotDisturbCompletedContainer(t *testing.T) {
 	h := newLiveExplorationHarness(t, 100, 30)
 	h.start("read-1", "Read", "read", "a.go")
 	h.complete("read-1", "Read", "read", "a.go")
+	h.start("read-2", "Read", "read", "b.go")
+	h.complete("read-2", "Read", "read", "b.go")
 	h.start("reclassified", "Read", "read", "before.go")
 	h.reason("reason-after-start", "continue after the pending batch")
 
 	block := requireMainACPTurnBlockForTest(t, h.model)
-	if len(block.explorationProjection.Containers) != 1 || !block.explorationProjection.Containers[0].Pending {
-		t.Fatalf("test setup did not create a pending exploration container: %#v", block.explorationProjection.Containers)
+	if len(block.explorationProjection.Containers) != 1 || !slices.Equal(block.explorationProjection.Containers[0].CallIDs, []string{"read-1", "read-2"}) {
+		t.Fatalf("test setup did not preserve the completed exploration container: %#v", block.explorationProjection.Containers)
 	}
 
 	name := "RunCommand"
@@ -191,14 +270,14 @@ func TestLiveExplorationReclassificationRemovesPendingContainerMembership(t *tes
 	if !reclassified.Done || reclassified.Name != "Read" || reclassified.ToolKind != kind || reclassified.Title != name || isExplorationToolEvent(reclassified) {
 		t.Fatalf("standard kind patch did not reclassify presentation while preserving exact identity: %#v", reclassified)
 	}
+	plain := ansi.Strip(h.model.View().Content)
 	for _, container := range block.explorationProjection.Containers {
 		if slices.Contains(container.CallIDs, "reclassified") {
-			t.Fatalf("reclassified tool remained in exploration container: %#v", container)
+			t.Fatalf("reclassified tool remained in exploration container after render: %#v", container)
 		}
 	}
-	plain := ansi.Strip(h.model.View().Content)
-	if strings.Contains(plain, "• Exploring") || strings.Contains(plain, "• Explored") {
-		t.Fatalf("stale exploration container survived reclassification:\n%s", plain)
+	if got := countExactTrimmedLine(plain, "• Explored"); got != 1 || strings.Contains(plain, "• Exploring") {
+		t.Fatalf("completed exploration container changed after reclassification:\n%s", plain)
 	}
 	if !strings.Contains(plain, "echo reviewed") {
 		t.Fatalf("ordinary tool lifecycle row was swallowed after reclassification:\n%s", plain)
