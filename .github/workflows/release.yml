@@ -94,3 +94,22 @@ jobs:
           ./npm/packages/caelis-windows-x64
       - name: Publish main package
         run: node ./npm/scripts/publish-release.mjs ./npm
+
+  publish-r2:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_BUCKET: caelis-releases
+    steps:
+      - uses: actions/checkout@v5
+      - name: Publish latest raw-install assets to R2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/publish_latest_to_r2.sh

@@ -41,6 +41,12 @@ func TestReleaseWaitsForExactSHAMainQualityBeforeArtifacts(t *testing.T) {
 		"goreleaser/goreleaser-action@v7",
 		"Publish platform packages",
 		"Publish main package",
+		"publish-r2:",
+		"needs: release",
+		"R2_ACCESS_KEY_ID",
+		"R2_SECRET_ACCESS_KEY",
+		"R2_ENDPOINT",
+		"./scripts/publish_latest_to_r2.sh",
 	} {
 		if !strings.Contains(release, want) {
 			t.Errorf("release workflow missing %q", want)
@@ -68,6 +74,34 @@ func TestReleaseWaitsForExactSHAMainQualityBeforeArtifacts(t *testing.T) {
 		if strings.Contains(quality, forbidden) {
 			t.Errorf("quality workflow still contains release-only behavior %q", forbidden)
 		}
+	}
+}
+
+func TestR2PublisherUpdatesLatestAfterVerifiedAssets(t *testing.T) {
+	t.Parallel()
+
+	publisher := readWorkflow(t, "./publish_latest_to_r2.sh")
+	for _, want := range []string{
+		`/releases/latest`,
+		`gh release download "${tag}"`,
+		`sha256sum -c checksums.txt`,
+		`versioned_prefix="releases/${tag}"`,
+		`head-object`,
+		`printf '%s\n' "${tag}"`,
+		`max-age=60, must-revalidate`,
+		`list-objects-v2`,
+		`refusing to delete unexpected R2 object`,
+	} {
+		if !strings.Contains(publisher, want) {
+			t.Errorf("R2 publisher missing %q", want)
+		}
+	}
+
+	latestUpload := strings.Index(publisher, `"s3://${R2_BUCKET}/latest.txt"`)
+	assetVerification := strings.Index(publisher, `head-object`)
+	cleanup := strings.Index(publisher, `list-objects-v2`)
+	if assetVerification < 0 || latestUpload < 0 || cleanup < 0 || !(assetVerification < latestUpload && latestUpload < cleanup) {
+		t.Error("R2 publisher no longer verifies versioned assets, updates latest.txt, then cleans up old versions")
 	}
 }
 
