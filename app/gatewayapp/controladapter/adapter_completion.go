@@ -151,7 +151,7 @@ func (d *assembler) CompleteSlashArg(ctx context.Context, command string, query 
 	case "connect":
 		return completeConnectArgs(ctx, d, "connect", query, limit)
 	}
-	if strings.HasPrefix(normalizedCommand, "connect-acp-model:") || strings.HasPrefix(normalizedCommand, "connect-acp-config:") {
+	if strings.HasPrefix(normalizedCommand, "connect-acp-model:") {
 		return nil, errors.New("app/gatewayapp/controladapter: ACP onboarding completion requires the principal-bound Agent preparation client")
 	}
 	if strings.HasPrefix(normalizedCommand, "connect-") {

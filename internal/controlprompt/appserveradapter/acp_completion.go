@@ -25,26 +25,6 @@ func projectConnectACPModels(snapshot controlagents.DiscoverySnapshot, query str
 	return filterSlashArgCandidates(candidates, query, limit)
 }
 
-func projectConnectACPConfig(snapshot controlagents.DiscoverySnapshot, query string, limit int) []controlprompt.SlashArgCandidate {
-	candidates := []controlprompt.SlashArgCandidate{{Value: "default", Display: "Agent default", Detail: "Keep the ACP Agent's default session options"}}
-	for _, option := range snapshot.ConfigOptions {
-		if strings.EqualFold(strings.TrimSpace(option.ID), strings.TrimSpace(snapshot.ModelControl.ConfigID)) || option.Purpose != controlagents.ConfigOptionPurposeReasoningEffort {
-			continue
-		}
-		for _, choice := range option.Options {
-			if strings.TrimSpace(choice.Value) == "" {
-				continue
-			}
-			candidates = append(candidates, controlprompt.SlashArgCandidate{
-				Value:   option.ID + "=" + choice.Value,
-				Display: firstNonEmpty(option.Name, option.ID) + ": " + firstNonEmpty(choice.Name, choice.Value),
-				Detail:  firstNonEmpty(choice.Description, option.Description, "remote ACP session default"),
-			})
-		}
-	}
-	return filterSlashArgCandidates(candidates, query, limit)
-}
-
 func filterSlashArgCandidates(candidates []controlprompt.SlashArgCandidate, query string, limit int) []controlprompt.SlashArgCandidate {
 	query = strings.ToLower(strings.TrimSpace(query))
 	out := make([]controlprompt.SlashArgCandidate, 0, len(candidates))

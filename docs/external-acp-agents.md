@@ -195,6 +195,12 @@ creates one product-only `Agent default` profile so the connection remains
 selectable. Its synthetic profile ID is never sent over ACP: runtime leaves the
 Session model selection empty and preserves the Agent's own default.
 
+Guided TUI onboarding selects the exact remote model but does not preselect a
+reasoning effort. The resulting ModelProfile records the Agent-advertised effort
+choices and current value as its capability and profile default. Fixed-handle
+bindings and participant attachment still choose one explicit canonical effort;
+the later selection, not onboarding, determines the effort sent for that work.
+
 ## Registry Snapshot
 
 The npx-compatible catalog is generated from:

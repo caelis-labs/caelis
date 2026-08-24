@@ -96,7 +96,6 @@ func TestSlashConnectMapsACPWizardSelectionToConnector(t *testing.T) {
 	service := &acpConnectControlStub{}
 	payload := buildACPConnectWizardPayload(map[string]string{
 		"acp_agent": "claude", "acp_launcher": "global", "acp_model": "opus",
-		"acp_config": formatACPConfigSelections([]string{"reasoning_effort=max", "instructions=short, exact=a=b"}),
 	})
 	result := slashConnectWithContext(context.Background(), service, service, nil, "acp "+payload)
 	if result.Err != nil {
@@ -111,11 +110,8 @@ func TestSlashConnectMapsACPWizardSelectionToConnector(t *testing.T) {
 	if service.req.ModelID != "opus" {
 		t.Fatalf("ConnectACP model ID = %q", service.req.ModelID)
 	}
-	if service.req.ConfigValues["reasoning_effort"] != "max" {
-		t.Fatalf("ConnectACP config values = %#v", service.req.ConfigValues)
-	}
-	if service.req.ConfigValues["instructions"] != "short, exact=a=b" {
-		t.Fatalf("ConnectACP punctuation-bearing config values = %#v", service.req.ConfigValues)
+	if len(service.req.ConfigValues) != 0 {
+		t.Fatalf("ConnectACP config values = %#v, want Agent defaults", service.req.ConfigValues)
 	}
 }
 

@@ -21,8 +21,9 @@ type pendingACPPreparationObservation struct {
 type pendingACPPreparationStage string
 
 const (
-	pendingACPPreparationPrepare pendingACPPreparationStage = "prepare"
-	pendingACPPreparationAuth    pendingACPPreparationStage = "prepare-auth"
+	pendingACPPreparationPrepare            pendingACPPreparationStage = "prepare"
+	pendingACPPreparationAuth               pendingACPPreparationStage = "prepare-auth"
+	unknownACPPreparationObservationTimeout                            = 5 * time.Second
 )
 
 func (a *SessionClientAdapter) observeCommittedACPPreparation(
@@ -134,6 +135,7 @@ func (a *SessionClientAdapter) observeACPPreparationReceipt(
 		if commandErr == nil {
 			commandErr = fmt.Errorf("%s outcome is %q: %s", operation, receipt.Outcome, strings.TrimSpace(receipt.Detail))
 		}
+		commandErr = errors.Join(commandErr, a.observeUnknownACPPreparationDiagnostic(ctx, operation, receipt))
 		return controlagents.ACPPreparation{}, &appserver.CommandReceiptError{Receipt: receipt, Err: commandErr}
 	}
 	if receipt.Resource == nil || receipt.Resource.Kind != appserver.CommandResourceACPPreparation ||
@@ -174,4 +176,35 @@ func (a *SessionClientAdapter) observeACPPreparationReceipt(
 		}
 	}
 	return preparation, nil
+}
+
+func (a *SessionClientAdapter) observeUnknownACPPreparationDiagnostic(
+	ctx context.Context,
+	operation string,
+	receipt appserver.CommandResult,
+) error {
+	if receipt.Outcome != appserver.OutcomeUnknown || receipt.Resource == nil ||
+		receipt.Resource.Kind != appserver.CommandResourceACPPreparation ||
+		strings.TrimSpace(receipt.Resource.Ref) == "" || strings.TrimSpace(receipt.Resource.Digest) == "" {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	observationCtx, cancel := context.WithTimeout(
+		context.WithoutCancel(ctx),
+		unknownACPPreparationObservationTimeout,
+	)
+	defer cancel()
+	preparation, err := a.agentClient.ACPPreparation(observationCtx, appserver.ACPPreparationRequest{Ref: receipt.Resource.Ref})
+	if err == nil && preparation.Ref == receipt.Resource.Ref && preparation.ContentDigest == receipt.Resource.Digest {
+		if warning := strings.TrimSpace(preparation.CleanupWarning); warning != "" {
+			return fmt.Errorf(
+				"app/gatewayapp/controladapter: %s preparation diagnostic: %s",
+				strings.TrimSpace(operation),
+				warning,
+			)
+		}
+	}
+	return nil
 }

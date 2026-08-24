@@ -75,7 +75,7 @@ func TestDefaultConnectWizardSeparatesModelAndACPConnectionSteps(t *testing.T) {
 		want []string
 	}{
 		{name: "model", def: connectModelWizard(), want: []string{"provider", "endpoint", "baseurl", "apikey", "model", "image_input", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
-		{name: "acp", def: connectACPWizard(), want: []string{"acp_agent", "acp_launcher", "acp_command", "acp_model", "acp_config"}},
+		{name: "acp", def: connectACPWizard(), want: []string{"acp_agent", "acp_launcher", "acp_command", "acp_model"}},
 		{name: "disconnect", def: disconnectACPWizard(), want: []string{"disconnect_agent", "disconnect_confirm"}},
 	}
 	for _, tt := range tests {
@@ -88,6 +88,14 @@ func TestDefaultConnectWizardSeparatesModelAndACPConnectionSteps(t *testing.T) {
 				t.Fatalf("steps = %#v, want %#v", keys, tt.want)
 			}
 		})
+	}
+}
+
+func TestConnectACPModelHintExplainsDiscoveryRecovery(t *testing.T) {
+	steps := connectACPWizard().Steps
+	modelHint := steps[len(steps)-1].FreeformHint
+	if !strings.Contains(modelHint, "retry discovery") || !strings.Contains(modelHint, "change launcher") {
+		t.Fatalf("ACP model hint = %q, want retry and launcher recovery guidance", modelHint)
 	}
 }
 

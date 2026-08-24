@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"encoding/json"
 	"runtime"
 	"strconv"
 	"strings"
@@ -341,20 +340,10 @@ func connectACPWizard() WizardDef {
 			},
 			{
 				Key: "acp_model", HintLabel: "/connect ACP model",
-				FreeformHint:     "/connect ACP model: wait for discovery, then pick one model",
+				FreeformHint:     "/connect ACP model: pick one model; press enter to retry discovery or go back to change launcher",
 				RequireCandidate: true,
 				CompletionCommand: func(state map[string]string) string {
 					return "connect-acp-model:" + buildACPConnectWizardPayload(state)
-				},
-			},
-			{
-				Key: "acp_config", HintLabel: "/connect ACP defaults",
-				FreeformHint:     "/connect ACP defaults: choose reasoning/config defaults or keep the Agent default",
-				RequireCandidate: true, MultiSelect: true,
-				MergeMultiSelect:  mergeACPConfigSelection,
-				FormatMultiSelect: formatACPConfigSelections,
-				CompletionCommand: func(state map[string]string) string {
-					return "connect-acp-config:" + buildACPConnectWizardPayload(state)
 				},
 			},
 		},
@@ -448,60 +437,12 @@ func buildConnectModelExecLine(state map[string]string) string {
 	return joinNonEmpty(fields, " ")
 }
 
-func mergeACPConfigSelection(values []string, value string) []string {
-	value = strings.TrimSpace(value)
-	if strings.EqualFold(value, "default") {
-		return []string{"default"}
-	}
-	configID, _, hasValue := strings.Cut(value, "=")
-	configID = strings.TrimSpace(configID)
-	next := make([]string, 0, len(values)+1)
-	for _, existing := range values {
-		existing = strings.TrimSpace(existing)
-		if existing == "" || strings.EqualFold(existing, "default") {
-			continue
-		}
-		existingID, _, existingHasValue := strings.Cut(existing, "=")
-		if hasValue && existingHasValue && strings.EqualFold(strings.TrimSpace(existingID), configID) {
-			continue
-		}
-		next = appendUniqueWizardValue(next, existing)
-	}
-	return appendUniqueWizardValue(next, value)
-}
-
-func formatACPConfigSelections(values []string) string {
-	configValues := map[string]string{}
-	for _, item := range values {
-		item = strings.TrimSpace(item)
-		if item == "" || strings.EqualFold(item, "default") {
-			continue
-		}
-		configID, value, ok := strings.Cut(item, "=")
-		if !ok || strings.TrimSpace(configID) == "" || strings.TrimSpace(value) == "" {
-			continue
-		}
-		configValues[strings.TrimSpace(configID)] = strings.TrimSpace(value)
-	}
-	payload, _ := json.Marshal(configValues)
-	return string(payload)
-}
-
-func parseACPConfigSelections(raw string) map[string]string {
-	var configValues map[string]string
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &configValues); err != nil {
-		return nil
-	}
-	return controlagents.NormalizeSessionOptions(controlagents.SessionOptions{ConfigValues: configValues}).ConfigValues
-}
-
 func buildACPConnectWizardPayload(state map[string]string) string {
 	return controlagents.EncodeConnectState(controlagents.ConnectState{
-		Agent:        strings.ToLower(strings.TrimSpace(state["acp_agent"])),
-		Launcher:     controlagents.LauncherChoice(strings.ToLower(strings.TrimSpace(state["acp_launcher"]))),
-		CommandLine:  strings.TrimSpace(state["acp_command"]),
-		Model:        strings.TrimSpace(state["acp_model"]),
-		ConfigValues: parseACPConfigSelections(state["acp_config"]),
+		Agent:       strings.ToLower(strings.TrimSpace(state["acp_agent"])),
+		Launcher:    controlagents.LauncherChoice(strings.ToLower(strings.TrimSpace(state["acp_launcher"]))),
+		CommandLine: strings.TrimSpace(state["acp_command"]),
+		Model:       strings.TrimSpace(state["acp_model"]),
 	})
 }
 

@@ -1510,6 +1510,37 @@ func TestSessionClientAdapterACPPreparationWarningPreservesReceiptAndCachedEvide
 	}
 }
 
+func TestSessionClientAdapterACPUnknownPreparationIncludesDurableDiagnostic(t *testing.T) {
+	remoteErr := errors.New("control http client: remote request failed with HTTP 202: effect outcome cannot be proven")
+	preparation := controlagents.ACPPreparation{
+		Ref: "prep-unknown", State: controlagents.PreparationStatePlanned,
+		ContentDigest: strings.Repeat("c", 64), ExpiresAt: time.Now().Add(time.Minute),
+		CleanupWarning: "initialize connection \"grok\" through package launcher \"npx\"; verify its package cache or choose another launcher",
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	agents := &acpOnboardingAgentClientProbe{
+		preparation: preparation, prepareOutcome: appserver.OutcomeUnknown, prepareErr: remoteErr,
+		prepareCancel: cancel, rejectCanceledObservation: true,
+	}
+	status := &sandboxStatusClientProbe{statuses: []controlstatus.StatusSnapshot{{
+		Configuration: controlstatus.StatusConfiguration{Revision: 82},
+	}}}
+	adapter := &SessionClientAdapter{agentClient: agents, statusClient: status, surface: "tui"}
+
+	_, err := adapter.DiscoverACPConnection(ctx, controlagents.ConnectRequest{
+		AdapterID: "grok", Launcher: controlagents.LauncherChoiceNPX, CWD: "/workspace",
+	})
+	var receiptErr *appserver.CommandReceiptError
+	if !errors.Is(err, remoteErr) || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != appserver.OutcomeUnknown ||
+		!strings.Contains(err.Error(), "preparation diagnostic") || !strings.Contains(err.Error(), "verify its package cache") {
+		t.Fatalf("DiscoverACPConnection(unknown) receipt = %#v, error = %v", receiptErr, err)
+	}
+	if agents.prepareCalls != 1 || agents.observeCalls != 1 || agents.connectCalls != 0 {
+		t.Fatalf("unknown calls prepare=%d observe=%d connect=%d", agents.prepareCalls, agents.observeCalls, agents.connectCalls)
+	}
+}
+
 func TestSessionClientAdapterACPPrepareObservationRetryDoesNotRepeatEffect(t *testing.T) {
 	preparation := controlagents.ACPPreparation{
 		Ref: "prep-pending", State: controlagents.PreparationStateReady,
@@ -2461,33 +2492,47 @@ type disconnectAgentClientProbe struct {
 
 type acpOnboardingAgentClientProbe struct {
 	appserver.AgentClient
-	preparation              controlagents.ACPPreparation
-	authenticatedPreparation controlagents.ACPPreparation
-	prepareDetail            string
-	authDetail               string
-	prepareRequest           appserver.PrepareACPRequest
-	authRequest              appserver.PrepareACPAuthenticationRequest
-	connectRequest           appserver.ConnectACPRequest
-	observeErrors            []error
-	prepareCalls             int
-	authCalls                int
-	observeCalls             int
-	connectCalls             int
+	preparation               controlagents.ACPPreparation
+	authenticatedPreparation  controlagents.ACPPreparation
+	prepareDetail             string
+	prepareOutcome            appserver.Outcome
+	prepareErr                error
+	prepareCancel             context.CancelFunc
+	rejectCanceledObservation bool
+	authDetail                string
+	prepareRequest            appserver.PrepareACPRequest
+	authRequest               appserver.PrepareACPAuthenticationRequest
+	connectRequest            appserver.ConnectACPRequest
+	observeErrors             []error
+	prepareCalls              int
+	authCalls                 int
+	observeCalls              int
+	connectCalls              int
 }
 
 func (c *acpOnboardingAgentClientProbe) PrepareACP(_ context.Context, request appserver.PrepareACPRequest) (appserver.CommandResult, error) {
 	c.prepareCalls++
 	c.prepareRequest = request
+	outcome := c.prepareOutcome
+	if outcome == "" {
+		outcome = appserver.OutcomeCommitted
+	}
+	if c.prepareCancel != nil {
+		c.prepareCancel()
+	}
 	return appserver.CommandResult{
-		OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted, Detail: c.prepareDetail,
+		OperationID: request.OperationID, Outcome: outcome, Detail: c.prepareDetail,
 		Resource: &appserver.CommandResource{
 			Kind: appserver.CommandResourceACPPreparation, Ref: c.preparation.Ref, Digest: c.preparation.ContentDigest,
 		},
-	}, nil
+	}, c.prepareErr
 }
 
-func (c *acpOnboardingAgentClientProbe) ACPPreparation(_ context.Context, _ appserver.ACPPreparationRequest) (controlagents.ACPPreparation, error) {
+func (c *acpOnboardingAgentClientProbe) ACPPreparation(ctx context.Context, _ appserver.ACPPreparationRequest) (controlagents.ACPPreparation, error) {
 	c.observeCalls++
+	if c.rejectCanceledObservation && ctx.Err() != nil {
+		return controlagents.ACPPreparation{}, ctx.Err()
+	}
 	if len(c.observeErrors) > 0 {
 		err := c.observeErrors[0]
 		c.observeErrors = c.observeErrors[1:]

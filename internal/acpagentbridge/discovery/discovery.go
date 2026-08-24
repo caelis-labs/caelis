@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -35,6 +36,14 @@ func (s Service) startInitializedClient(
 		TerminalAuth: controlagents.TerminalAuthenticationAvailable(ctx),
 	})
 	if err != nil {
+		if connection.Launcher.Kind == controlagents.LaunchKindPackageExec {
+			return nil, client.InitializeResponse{}, fmt.Errorf(
+				"internal/acpagentbridge/discovery: start connection %q through package launcher %q; verify its package cache or choose another launcher: %w",
+				connection.ID,
+				filepath.Base(connection.Launcher.Command),
+				err,
+			)
+		}
 		return nil, client.InitializeResponse{}, fmt.Errorf(
 			"internal/acpagentbridge/discovery: start connection %q: %w",
 			connection.ID,
@@ -44,6 +53,14 @@ func (s Service) startInitializedClient(
 	initialize, err := acpClient.Initialize(ctx)
 	if err != nil {
 		_ = acpcleanup.CloseClientWithin(ctx, acpClient, s.cleanupTimeout())
+		if connection.Launcher.Kind == controlagents.LaunchKindPackageExec {
+			return nil, client.InitializeResponse{}, fmt.Errorf(
+				"internal/acpagentbridge/discovery: initialize connection %q through package launcher %q; verify its package cache or choose another launcher: %w",
+				connection.ID,
+				filepath.Base(connection.Launcher.Command),
+				err,
+			)
+		}
 		return nil, client.InitializeResponse{}, fmt.Errorf(
 			"internal/acpagentbridge/discovery: initialize connection %q: %w",
 			connection.ID,

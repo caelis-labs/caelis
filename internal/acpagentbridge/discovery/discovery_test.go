@@ -338,6 +338,36 @@ func TestPreparePreservesNonAuthenticationSessionFailure(t *testing.T) {
 	}
 }
 
+func TestPreparePackageLauncherStartFailureIsActionable(t *testing.T) {
+	markerDir := t.TempDir()
+	connection := helperConnection(markerDir, "")
+	connection.Launcher.Kind = controlagents.LaunchKindPackageExec
+	connection.Launcher.Command = filepath.Join(markerDir, "missing-package-launcher")
+	connection.Launcher.Args = nil
+	_, err := (Service{}).Prepare(context.Background(), PrepareRequest{
+		Connection: connection, CWD: markerDir,
+	})
+	assertActionablePackageLauncherError(t, err)
+}
+
+func TestPreparePackageLauncherInitializeFailureIsActionable(t *testing.T) {
+	markerDir := t.TempDir()
+	connection := helperConnection(markerDir, "exit-before-initialize")
+	connection.Launcher.Kind = controlagents.LaunchKindPackageExec
+	_, err := (Service{}).Prepare(context.Background(), PrepareRequest{
+		Connection: connection, CWD: markerDir,
+	})
+	assertActionablePackageLauncherError(t, err)
+}
+
+func assertActionablePackageLauncherError(t *testing.T, err error) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "through package launcher") ||
+		!strings.Contains(err.Error(), "verify its package cache or choose another launcher") {
+		t.Fatalf("Prepare() error = %v, want actionable package launcher guidance", err)
+	}
+}
+
 func TestPrepareCancellationTerminatesProcess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("kill -0 liveness probe is Unix-specific")
@@ -488,6 +518,9 @@ func TestDiscoveryHelperProcess(t *testing.T) {
 	// when the client kills the helper immediately after the deadline.
 	if mode == "close-block" {
 		writeMarker("pid", strconv.Itoa(os.Getpid()))
+	}
+	if mode == "exit-before-initialize" {
+		os.Exit(1)
 	}
 	conn := jsonrpc.New(os.Stdin, os.Stdout)
 	_ = conn.Serve(context.Background(), func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {

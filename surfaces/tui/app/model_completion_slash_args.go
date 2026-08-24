@@ -389,24 +389,15 @@ func sameAsyncSlashArgCatalog(left string, right string) bool {
 
 func asyncSlashArgCatalogKey(command string) string {
 	command = strings.TrimSpace(command)
-	prefix := ""
-	raw := ""
-	switch {
-	case strings.HasPrefix(command, "connect-acp-model:"):
-		prefix = "model"
-		raw = strings.TrimPrefix(command, "connect-acp-model:")
-	case strings.HasPrefix(command, "connect-acp-config:"):
-		prefix = "config"
-		raw = strings.TrimPrefix(command, "connect-acp-config:")
-	default:
+	if !strings.HasPrefix(command, "connect-acp-model:") {
 		return command
 	}
-	payload, err := parseACPConnectWizardPayload(raw)
+	payload, err := parseACPConnectWizardPayload(strings.TrimPrefix(command, "connect-acp-model:"))
 	if err != nil {
 		return command
 	}
 	return strings.Join([]string{
-		prefix,
+		"model",
 		payload.Agent,
 		string(payload.Launcher),
 		payload.CommandLine,
@@ -416,7 +407,7 @@ func asyncSlashArgCatalogKey(command string) string {
 
 func isAsyncSlashArgCommand(command string) bool {
 	command = strings.TrimSpace(command)
-	if strings.HasPrefix(command, "connect-acp-model:") || strings.HasPrefix(command, "connect-acp-config:") {
+	if strings.HasPrefix(command, "connect-acp-model:") {
 		return true
 	}
 	if !strings.HasPrefix(command, "connect-model:") {
@@ -436,23 +427,13 @@ func slashArgLoadLabel(command string) string {
 		}
 		return "Starting " + provider + " sign-in"
 	}
-	prefix := "Preparing local ACP Agent"
-	raw := ""
-	switch {
-	case strings.HasPrefix(command, "connect-acp-model:"):
-		raw = strings.TrimPrefix(command, "connect-acp-model:")
-	case strings.HasPrefix(command, "connect-acp-config:"):
-		raw = strings.TrimPrefix(command, "connect-acp-config:")
-		prefix = "Loading ACP Agent options"
-	}
-	if payload, err := parseACPConnectWizardPayload(raw); err == nil && payload.Agent != "" {
-		name := acpSetupAdapterDisplayName(payload.Agent)
-		if strings.HasPrefix(command, "connect-acp-model:") {
-			return "Preparing " + name + " ACP Agent"
+	if strings.HasPrefix(command, "connect-acp-model:") {
+		raw := strings.TrimPrefix(command, "connect-acp-model:")
+		if payload, err := parseACPConnectWizardPayload(raw); err == nil && payload.Agent != "" {
+			return "Preparing " + acpSetupAdapterDisplayName(payload.Agent) + " ACP Agent"
 		}
-		return "Loading " + name + " model options"
 	}
-	return prefix
+	return "Preparing local ACP Agent"
 }
 
 func slashArgLoadFailureLabel(command string) string {

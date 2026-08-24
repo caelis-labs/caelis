@@ -99,7 +99,7 @@ func TestConnectTypingTrailingSpaceDoesNotOpenGenericPicker(t *testing.T) {
 	}
 }
 
-func TestConnectWizardACPFlowPicksLauncherModelAndDefaults(t *testing.T) {
+func TestConnectWizardACPFlowPicksLauncherAndModel(t *testing.T) {
 	called := ""
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
@@ -117,15 +117,13 @@ func TestConnectWizardACPFlowPicksLauncherModelAndDefaults(t *testing.T) {
 				return []SlashArgCandidate{{Value: "npx", Display: "npx"}}, nil
 			case strings.HasPrefix(command, "connect-acp-model:"):
 				return []SlashArgCandidate{{Value: "opus", Display: "Opus"}}, nil
-			case strings.HasPrefix(command, "connect-acp-config:"):
-				return []SlashArgCandidate{{Value: "default", Display: "Agent default"}}, nil
 			default:
 				return nil, nil
 			}
 		},
 	})
 	runConnectTestCmd(m, m.openSlashArgPicker("connect"))
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 4; i++ {
 		handled, cmd := m.handleWizardEnter()
 		if !handled {
 			t.Fatalf("wizard step %d was not handled; command=%q", i, m.slashArgCommand)
@@ -643,31 +641,6 @@ func TestACPCompletionCacheMissDoesNotCallCompleterOnUpdateLoop(t *testing.T) {
 		t.Fatalf("completion calls before background command runs = %d, want 0", calls)
 	}
 	m.clearSlashArg()
-}
-
-func TestACPConfigSelectionIsExclusiveByConfigID(t *testing.T) {
-	step := &WizardStepDef{MultiSelect: true, MergeMultiSelect: mergeACPConfigSelection, FormatMultiSelect: formatACPConfigSelections}
-	if !wizardCandidateSupportsMultiSelect(step, SlashArgCandidate{Value: "reasoning_effort=max"}) {
-		t.Fatal("ACP config candidate without model metadata should support multi-select")
-	}
-
-	values := mergeWizardMultiSelectValue(step, nil, "default")
-	values = mergeWizardMultiSelectValue(step, values, "reasoning_effort=max")
-	if got := strings.Join(values, ","); got != "reasoning_effort=max" {
-		t.Fatalf("explicit value after default = %q", got)
-	}
-	values = mergeWizardMultiSelectValue(step, values, "mode=manual")
-	values = mergeWizardMultiSelectValue(step, values, "reasoning_effort=high")
-	if got := strings.Join(values, ","); got != "mode=manual,reasoning_effort=high" {
-		t.Fatalf("values after same-ID replacement = %q", got)
-	}
-	values = mergeWizardMultiSelectValue(step, values, "default")
-	if got := strings.Join(values, ","); got != "default" {
-		t.Fatalf("default after explicit values = %q", got)
-	}
-	if got := formatWizardMultiSelect(step, []string{"instructions=short, exact=a=b"}); got != "{\"instructions\":\"short, exact=a=b\"}" {
-		t.Fatalf("formatted ACP config = %q", got)
-	}
 }
 
 func TestConnectWizardGlobalLauncherDoesNotAskForCommand(t *testing.T) {

@@ -53,20 +53,6 @@ func (a *SessionClientAdapter) CompleteSlashArg(ctx context.Context, command, qu
 		}
 		return projectConnectACPModels(snapshot, query, limit), nil
 	}
-	if raw, ok := strings.CutPrefix(trimmedCommand, "connect-acp-config:"); ok {
-		state, err := controlagents.DecodeConnectState(raw)
-		if err != nil {
-			return nil, err
-		}
-		if strings.TrimSpace(state.Model) == "" {
-			return nil, errors.New("app/gatewayapp/controladapter: ACP model is required before selecting defaults")
-		}
-		snapshot, err := a.DiscoverACPConnection(ctx, state.ConnectRequest(a.WorkspaceDir()))
-		if err != nil {
-			return nil, err
-		}
-		return projectConnectACPConfig(snapshot, query, limit), nil
-	}
 	request, err := a.completionRequest(ctx, query, limit)
 	if err != nil {
 		return nil, err
