@@ -18,9 +18,10 @@ process exits.
 
 Quality belongs to `quality.yml`, including its deterministic
 `product-acceptance` and real-Windows persistence jobs. The tag workflow waits
-for the successful `main` quality run with the exact tag SHA, then builds and
-publishes artifacts. It does not rerun ordinary tests, race suites, the broader
-regression target, proxy smoke, or release-dry-run.
+for the successful `main` quality run with the exact tag SHA, then builds with
+the Go version declared by `go.mod` and publishes artifacts. It does not rerun
+ordinary tests, race suites, the broader regression target, proxy smoke, or
+release-dry-run.
 
 ## Preflight
 
