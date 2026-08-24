@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/acl"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
@@ -939,6 +940,10 @@ func validatePreparedReceiptsForEffects(manifest workspaceManifest, desired []re
 }
 
 func (r *runtime) persistHostReceiptLedger(ledger hostReceiptLedger) error {
+	return r.persistHostReceiptLedgerWithReplace(ledger, atomicfile.Replace)
+}
+
+func (r *runtime) persistHostReceiptLedgerWithReplace(ledger hostReceiptLedger, replace func(string, string) error) error {
 	ledger.Version = hostReceiptLedgerVersion
 	data, err := json.MarshalIndent(ledger, "", "  ")
 	if err != nil {
@@ -974,7 +979,7 @@ func (r *runtime) persistHostReceiptLedger(ledger hostReceiptLedger) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := replace(tmpPath, path); err != nil {
 		return err
 	}
 	committed = true

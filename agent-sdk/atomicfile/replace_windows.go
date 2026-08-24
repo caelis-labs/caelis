@@ -20,14 +20,18 @@ const (
 // Replace retries transient Windows sharing and lock failures while preserving
 // the source temporary file for every retry attempt.
 func Replace(source, destination string) error {
+	return replaceWith(source, destination, os.Rename, time.Sleep)
+}
+
+func replaceWith(source, destination string, rename func(string, string) error, sleep func(time.Duration)) error {
 	var err error
 	for attempt := 0; attempt < windowsReplaceRetryLimit; attempt++ {
-		err = os.Rename(source, destination)
+		err = rename(source, destination)
 		if err == nil || !retryableWindowsReplaceError(err) {
 			return err
 		}
 		if attempt+1 < windowsReplaceRetryLimit {
-			time.Sleep(windowsReplaceRetryDelay)
+			sleep(windowsReplaceRetryDelay)
 		}
 	}
 	return err
