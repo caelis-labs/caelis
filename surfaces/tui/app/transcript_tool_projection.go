@@ -11,7 +11,8 @@ import (
 
 func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptEvent {
 	toolName := strings.TrimSpace(input.ToolName)
-	presentation := transcript.ResolveToolPresentation(toolName, input.ToolKind, input.ToolTitle)
+	explorationVerb := toolDisplayExplorationVerb(input.Meta)
+	presentation := transcript.ResolveToolPresentationWithHint(toolName, input.ToolKind, input.ToolTitle, explorationVerb)
 	status := transcript.NormalizeToolStartStatus(input.Status)
 	semanticName := toolName
 	rawInput := transcript.CloneAnyMap(input.RawInput)
@@ -23,6 +24,9 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 	content := acpToolContentToDisplay(input.Content)
 	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
 	outputCursor, outputCursorKnown, outputStartCursor, outputStartCursorKnown := transcriptToolOutputRange(input.Meta)
+	// Start input is standard ACP RawInput only. DisplayToolInput is a
+	// result-time recovery channel and is not authenticated on every external
+	// ACP ingress path.
 	displayInput := rawInput
 	if semanticName == surfaceToolTask {
 		displayInput = taskDisplayInputForResult(rawInput, toolDisplayMetaOutput(semanticName, input.Meta))
@@ -42,6 +46,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolName:                   toolName,
 		ToolKind:                   strings.TrimSpace(input.ToolKind),
 		ToolTitle:                  strings.TrimSpace(input.ToolTitle),
+		ToolExplorationVerb:        explorationVerb,
 		ToolArgs:                   toolArgs,
 		ToolFullArgs:               toolFullArgs,
 		ToolStatus:                 status,
@@ -61,7 +66,8 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 
 func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSuccessStatus string) (TranscriptEvent, bool) {
 	toolName := strings.TrimSpace(input.ToolName)
-	presentation := transcript.ResolveToolPresentation(toolName, input.ToolKind, input.ToolTitle)
+	explorationVerb := toolDisplayExplorationVerb(input.Meta)
+	presentation := transcript.ResolveToolPresentationWithHint(toolName, input.ToolKind, input.ToolTitle, explorationVerb)
 	semanticName := toolName
 	rawInput := transcript.CloneAnyMap(input.RawInput)
 	rawOutput := transcript.RawMap(input.RawOutput)
@@ -79,7 +85,14 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		taskOutput[key] = value
 	}
 	displayMeta := metautil.Section(input.Meta, metautil.Display)
-	displayInput := toolDisplayInputWithRecovered(rawInput, transcript.RawMap(displayMeta[metautil.DisplayToolInput]))
+	recoveredInput := transcript.RawMap(displayMeta[metautil.DisplayToolInput])
+	// DisplayToolInput is written by a strict controller-side completed-result
+	// recovery path, but not authenticated on every external ingress. Never let
+	// an in-progress or sparse live patch rewrite invocation arguments with it.
+	if !transcript.ToolStatusFinal(status, toolErr) {
+		recoveredInput = nil
+	}
+	displayInput := toolDisplayInputWithRecovered(rawInput, recoveredInput)
 	if semanticName == surfaceToolSpawn {
 		displayInput = spawnDisplayInputForResult(rawInput, displayOutput)
 	}
@@ -138,14 +151,14 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	}
 	toolOutputGapBefore := toolOutputHasTerminalData && transcript.MetaInt(input.Meta, "caelis", "runtime", "stream", "truncated_before") > 0
 	outputCursor, outputCursorKnown, outputStartCursor, outputStartCursorKnown := transcriptToolOutputRange(input.Meta)
-	if transcript.SuppressToolResultOutput(semanticName, input.ToolKind, toolOutput, toolOutputSynthetic, toolErr) {
+	if transcript.SuppressToolResultOutputWithHint(semanticName, input.ToolKind, explorationVerb, toolOutput, toolOutputSynthetic, toolErr) {
 		toolOutput = ""
 		// A suppressed completion acknowledgement is still synthetic. Retaining
 		// that fact prevents a contentless sparse final from erasing content that
 		// an earlier update already materialized for the same call.
 		toolOutputSynthetic = true
 	}
-	toolArgs, toolFullArgs := toolDisplayArguments(semanticName, input.ToolKind, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(presentation.DisplayName, displayInput))
+	toolArgs, toolFullArgs := toolDisplayArgumentsWithRecoveredInput(semanticName, input.ToolKind, displayInput, len(recoveredInput) > 0, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(presentation.DisplayName, displayInput))
 	toolTaskHandle := firstNonEmpty(
 		display.MapString(rawOutput, "handle"),
 		display.MapString(rawInput, "handle"),
@@ -218,6 +231,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolName:                   toolName,
 		ToolKind:                   strings.TrimSpace(input.ToolKind),
 		ToolTitle:                  strings.TrimSpace(input.ToolTitle),
+		ToolExplorationVerb:        explorationVerb,
 		ToolArgs:                   toolArgs,
 		ToolFullArgs:               toolFullArgs,
 		ToolOutput:                 toolOutput,
@@ -241,6 +255,10 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolMessageTarget:          toolMessageTarget,
 		Final:                      transcript.ToolStatusFinal(status, toolErr),
 	}, true
+}
+
+func toolDisplayExplorationVerb(meta map[string]any) string {
+	return metautil.String(meta, metautil.Root, metautil.Display, metautil.DisplayExplorationVerb)
 }
 
 func taskWriteFailureDisplayOutput(rawOutput map[string]any, meta map[string]any, output string, taskHandle string, status string, toolErr bool) string {

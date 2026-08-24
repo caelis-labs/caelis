@@ -58,7 +58,10 @@ type SubagentEvent struct {
 	// Title is the standard ACP human-readable tool title. It remains separate
 	// from exact Name and coarse ToolKind throughout reduction and rendering.
 	Title string
-	Args  string
+	// ExplorationVerb is a normalized display-only provider compatibility hint.
+	// It never becomes tool identity or changes the standard ACP kind.
+	ExplorationVerb string
+	Args            string
 	// StartArgs keeps live exploration rows stable when final summaries arrive.
 	StartArgs       string
 	FullArgs        string

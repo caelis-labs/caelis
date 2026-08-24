@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"fmt"
 	"os"
 	pathpkg "path"
 	"path/filepath"
@@ -17,6 +16,10 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 }
 
 func toolDisplayArgsForKind(name string, kind string, raw map[string]any, fallback ...string) string {
+	return toolDisplayArgsForKindWithQueryWrapper(name, kind, raw, !surfaceIsExplorationTool(name, kind, ""), fallback...)
+}
+
+func toolDisplayArgsForKindWithQueryWrapper(name string, kind string, raw map[string]any, wrapGenericQuery bool, fallback ...string) string {
 	if preview, _, ok := commandDisplayArguments(name, kind, raw); ok {
 		return preview
 	}
@@ -34,15 +37,15 @@ func toolDisplayArgsForKind(name string, kind string, raw map[string]any, fallba
 		path := toolPath(raw)
 		switch {
 		case query != "" && path != "":
-			return fmt.Sprintf("%q in %s", query, compactPathDisplay(path))
+			return query + " in " + compactPathDisplay(path)
 		case query != "":
-			return fmt.Sprintf("%q", query)
+			return query
 		case path != "":
 			return compactPathDisplay(path)
 		}
 	case surfaceToolWebSearch:
-		if display := display.WebSearchDisplayArg(raw); display != "" {
-			return display
+		if query := toolQuery(raw); query != "" {
+			return query
 		}
 	case surfaceToolWebFetch:
 		if display := display.WebFetchDisplayArg(raw); display != "" {
@@ -86,7 +89,7 @@ func toolDisplayArgsForKind(name string, kind string, raw map[string]any, fallba
 			return display.NormalizeDisplayArg(command)
 		}
 	}
-	if summary := genericToolArgs(raw); summary != "" {
+	if summary := genericToolArgs(raw, wrapGenericQuery); summary != "" {
 		return summary
 	}
 	if metadataOnlyToolArgs(raw) {
@@ -224,6 +227,10 @@ func isASCIILetter(ch byte) bool {
 // toolDisplayArguments owns the paired compact and full representations used
 // by expandable tool headers.
 func toolDisplayArguments(name string, kind string, raw map[string]any, fallback ...string) (string, string) {
+	return toolDisplayArgumentsWithRecoveredInput(name, kind, raw, false, fallback...)
+}
+
+func toolDisplayArgumentsWithRecoveredInput(name string, kind string, raw map[string]any, recoveredInput bool, fallback ...string) (string, string) {
 	if name == surfaceToolSendMessage {
 		if full := display.AgentMessageFullDisplayArgs(raw); full != "" {
 			preview, folded := longCommandDisplayPreview(full)
@@ -236,7 +243,8 @@ func toolDisplayArguments(name string, kind string, raw map[string]any, fallback
 	if preview, full, ok := commandDisplayArguments(name, kind, raw); ok {
 		return preview, full
 	}
-	args := toolDisplayArgsForKind(name, kind, raw, fallback...)
+	wrapGenericQuery := !recoveredInput && !surfaceIsExplorationTool(name, kind, "")
+	args := toolDisplayArgsForKindWithQueryWrapper(name, kind, raw, wrapGenericQuery, fallback...)
 	if preview, full, ok := commandTextDisplayArguments(name, kind, args); ok {
 		return preview, full
 	}
@@ -281,7 +289,7 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 	case surfaceToolGlob:
 		return globTitleDisplayArgs(title)
 	case surfaceToolRead, surfaceToolViewImage:
-		return prefixedTitleDetail(title, "Read", "View", "ViewImage")
+		return compactExplorationTitleDetail(prefixedTitleDetail(title, "Read", "View", "ViewImage"))
 	case surfaceToolGrep:
 		return searchTitleDisplayArgs(title)
 	case surfaceToolWrite, surfaceToolPatch:
@@ -293,13 +301,14 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 	case "execute":
 		return executeTitleDisplayArgs(title)
 	case "read":
-		return prefixedTitleDetail(title, "Read")
+		// The read category is already authoritative here. List only recovers a
+		// compact argument from the maintained display verb; it cannot classify
+		// the tool or become exact identity.
+		return compactExplorationTitleDetail(prefixedTitleDetail(title, "Read", "List"))
 	case "search":
 		return searchTitleDisplayArgs(title)
 	case "fetch":
-		if detail := prefixedTitleDetail(title, "Fetch", "Searching for:"); detail != "" {
-			return fmt.Sprintf("%q", detail)
-		}
+		return compactExplorationTitleDetail(prefixedTitleDetail(title, "Fetch", "Searching for:"))
 	case "edit", "delete", "move":
 		return compactMutationTitleDetail(prefixedTitleDetail(title, "Write", "Edit", "Patch", "Delete", "Move"))
 	}
@@ -355,7 +364,7 @@ func searchTitleDisplayArgs(title string) string {
 		return ""
 	}
 	if detail := prefixedTitleDetail(title, "Glob", "Globbing"); detail != "" {
-		return detail
+		return compactExplorationTitleDetail(detail)
 	}
 	detail := prefixedTitleDetail(title, "Search", "Find", "Searching for:", "Finding:")
 	if detail == "" {
@@ -364,7 +373,7 @@ func searchTitleDisplayArgs(title string) string {
 	if genericSearchTitle(detail) || searchTitleDetailIsPathOnly(detail) {
 		return ""
 	}
-	return fmt.Sprintf("%q", detail)
+	return compactExplorationTitleDetail(detail)
 }
 
 func globTitleDisplayArgs(title string) string {
@@ -373,7 +382,7 @@ func globTitleDisplayArgs(title string) string {
 		return ""
 	}
 	if detail := prefixedTitleDetail(title, "Glob", "Globbing", "Find files matching:"); detail != "" {
-		return detail
+		return compactExplorationTitleDetail(detail)
 	}
 	return title
 }
@@ -455,6 +464,22 @@ func titleEqualsToolName(title string, name string) bool {
 		return false
 	}
 	return strings.EqualFold(strings.ReplaceAll(title, "_", " "), strings.ReplaceAll(name, "_", " "))
+}
+
+func compactExplorationTitleDetail(detail string) string {
+	detail = strings.TrimSpace(detail)
+	if hasFullExplorationArgWrapper(detail) {
+		return strings.TrimSpace(detail[1 : len(detail)-1])
+	}
+	return detail
+}
+
+func hasFullExplorationArgWrapper(detail string) bool {
+	if len(detail) < 2 {
+		return false
+	}
+	first, last := detail[0], detail[len(detail)-1]
+	return first == '`' && last == '`' || first == '"' && last == '"'
 }
 
 func prefixedTitleDetail(title string, prefixes ...string) string {
@@ -614,7 +639,7 @@ func shellDisplayArg(arg string) string {
 	return strconv.Quote(arg)
 }
 
-func genericToolArgs(raw map[string]any) string {
+func genericToolArgs(raw map[string]any, wrapQuery bool) string {
 	query := firstTrimmed(toolQuery(raw), asString(raw["q"]))
 	url := toolURL(raw)
 	if action, ok := raw["action"].(map[string]any); ok {
@@ -623,7 +648,11 @@ func genericToolArgs(raw map[string]any) string {
 	}
 	switch {
 	case query != "":
-		return strconv.Quote(truncateTailDisplay(query, 96))
+		query = truncateTailDisplay(query, 96)
+		if wrapQuery {
+			return strconv.Quote(query)
+		}
+		return query
 	case url != "":
 		return truncateTailDisplay(url, 120)
 	case toolPath(raw) != "":
@@ -633,7 +662,7 @@ func genericToolArgs(raw map[string]any) string {
 	}
 }
 
-// toolDisplayInputWithRecovered merges explicit display-only invocation input
+// toolDisplayInputWithRecovered merges explicit result-time invocation input
 // produced by an ACP normalization boundary. RawInput remains authoritative
 // when both sources contain the same key.
 func toolDisplayInputWithRecovered(rawInput map[string]any, recovered map[string]any) map[string]any {
@@ -1191,7 +1220,7 @@ func searchDisplaySummary(input map[string]any, output map[string]any) string {
 	}
 	summary := ""
 	if query != "" {
-		summary = fmt.Sprintf("%q", query)
+		summary = query
 	}
 	if count >= 0 {
 		summary = strings.TrimSpace(summary + " " + pluralizeUnit(count, "hit"))
@@ -1206,6 +1235,8 @@ func toolPath(raw map[string]any) string {
 		asString(raw["filePath"]),
 		asString(raw["filepath"]),
 		asString(raw["target"]),
+		asString(raw["target_file"]),
+		asString(raw["target_directory"]),
 		parsedCommandField(raw, "path"),
 		parsedCommandField(raw, "name"),
 	)

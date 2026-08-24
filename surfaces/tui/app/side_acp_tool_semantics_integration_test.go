@@ -607,7 +607,7 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 		plain := joinRenderedPlain(block.Render(BlockRenderContext{
 			Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
 		}))
-		if countExactTrimmedLine(plain, "• Explored") != 1 || !strings.Contains(plain, "Read MEMORY.md, missing.go failed") || !strings.Contains(plain, "Search \"ToolCallStatus\"") || !strings.Contains(plain, "Start subagent task_invocation_review") {
+		if countExactTrimmedLine(plain, "• Explored") != 1 || !strings.Contains(plain, "Read MEMORY.md, missing.go failed") || !strings.Contains(plain, "Search ToolCallStatus") || !strings.Contains(plain, "Start subagent task_invocation_review") {
 			t.Fatalf("standard ACP presentation lost expected labels:\n%s", plain)
 		}
 		if strings.Contains(plain, "missing file") {
@@ -648,7 +648,7 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 			t.Fatal("subagent output overlay did not open")
 		}
 		overlay := subagentOutputOverlayPlain(model)
-		if strings.Count(overlay, "• Explored") != 1 || !strings.Contains(overlay, "Read MEMORY.md, missing.go failed") || !strings.Contains(overlay, "Search \"ToolCallStatus\"") || !strings.Contains(overlay, "Start subagent task_invocation_review") || strings.Contains(overlay, "missing file") || strings.Contains(overlay, "Other Start") {
+		if strings.Count(overlay, "• Explored") != 1 || !strings.Contains(overlay, "Read MEMORY.md, missing.go failed") || !strings.Contains(overlay, "Search ToolCallStatus") || !strings.Contains(overlay, "Start subagent task_invocation_review") || strings.Contains(overlay, "missing file") || strings.Contains(overlay, "Other Start") {
 			t.Fatalf("overlay diverged from participant transcript semantics:\n%s", overlay)
 		}
 	})

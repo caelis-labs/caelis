@@ -339,7 +339,7 @@ func acpStandardCollapsedClickToken(callID string, ev SubagentEvent, text string
 
 func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 	semanticName := ev.Name
-	presentation := transcript.ResolveToolPresentation(ev.Name, ev.ToolKind, ev.Title)
+	presentation := transcript.ResolveToolPresentationWithHint(ev.Name, ev.ToolKind, ev.Title, ev.ExplorationVerb)
 	switch semanticName {
 	case surfaceToolRunCommand, surfaceToolSpawn, surfaceToolSendMessage:
 		ev.Name = semanticName
@@ -368,7 +368,7 @@ func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 		if isExecuteToolKind(ev.ToolKind) {
 			return terminalLifecycleHeader(ev)
 		}
-		if verb := surfaceExplorationVerb(semanticName, ev.ToolKind); verb != "" {
+		if verb := surfaceExplorationVerb(semanticName, ev.ToolKind, ev.ExplorationVerb); verb != "" {
 			return standardVerbLifecycleHeader(verb, ev.Args, err)
 		}
 		return standardVerbLifecycleHeader(presentation.DisplayName, ev.Args, err)

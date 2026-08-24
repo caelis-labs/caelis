@@ -623,7 +623,7 @@ func renderExplorationNarrativeRows(blockID string, text string, width int, ctx 
 }
 
 func renderExplorationToolRowWithMode(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, token string, first bool, mode explorationToolDetailMode) RenderedRow {
-	verb := surfaceExplorationVerb(ev.Name, ev.ToolKind)
+	verb := surfaceExplorationVerb(ev.Name, ev.ToolKind, ev.ExplorationVerb)
 	if verb == "" {
 		verb = ev.Name
 	}
@@ -680,7 +680,7 @@ func explorationGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width i
 	grouped := map[string][]string{}
 	order := make([]string, 0, 4)
 	for _, ev := range events {
-		verb := surfaceExplorationVerb(ev.Name, ev.ToolKind)
+		verb := surfaceExplorationVerb(ev.Name, ev.ToolKind, ev.ExplorationVerb)
 		if verb == "" {
 			continue
 		}
@@ -740,7 +740,7 @@ func explorationToolDetailForDisplay(ev SubagentEvent, workspace string, mode ex
 	}
 	fromOutput := !fromArgs && item != ""
 	if item == "" {
-		if surfaceExplorationVerb(ev.Name, ev.ToolKind) != "" {
+		if surfaceExplorationVerb(ev.Name, ev.ToolKind, ev.ExplorationVerb) != "" {
 			return ""
 		}
 		item = ev.Name
@@ -762,13 +762,24 @@ func compactExplorationToolDetailWithWorkspace(ev SubagentEvent, detail string, 
 	if detail == "" {
 		return ""
 	}
+	// A complete boundary wrapper may be part of structured ACP input. Title
+	// fallbacks are normalized before reaching this path; generic rendering must
+	// preserve the argument and avoid path parsing it.
+	if hasFullExplorationArgWrapper(detail) {
+		return detail
+	}
 	semanticName := ev.Name
 	if semanticName == surfaceToolWebSearch || semanticName == surfaceToolWebFetch {
 		return detail
 	}
-	switch surfaceExplorationVerb(semanticName, ev.ToolKind) {
-	case "Read", "View", "List", "Glob", "Search":
+	switch surfaceExplorationVerb(semanticName, ev.ToolKind, ev.ExplorationVerb) {
+	case "Read", "View", "List", "Glob":
 		return compactExplorationPathDetailWithBase(detail, workspace)
+	case "Search":
+		// Queries may themselves contain slashes, commas, or path-like tokens.
+		// Their optional scope is already compacted when structured input becomes
+		// display arguments, so generic rendering must not parse it again.
+		return detail
 	default:
 		return detail
 	}
@@ -796,13 +807,6 @@ func compactExplorationPathDetailWithBase(detail string, workspace string) strin
 		}
 		if changed && len(out) > 0 {
 			return strings.Join(out, ", ")
-		}
-		return detail
-	}
-	if query, path, tagged, ok := splitExplorationQueryInPath(detail); ok {
-		compacted := compactExplorationPathDetailWithBase(path, workspace)
-		if compacted != "" && (compacted != path || tagged) {
-			return query + " in " + compacted
 		}
 		return detail
 	}
@@ -834,27 +838,6 @@ func compactExplorationPathDetailWithBase(detail string, workspace string) strin
 		return detail
 	}
 	return compact + rest
-}
-
-func splitExplorationQueryInPath(detail string) (query string, path string, tagged bool, ok bool) {
-	detail = strings.TrimSpace(detail)
-	if detail == "" {
-		return "", "", false, false
-	}
-	idx := strings.LastIndex(strings.ToLower(detail), " in ")
-	if idx < 0 {
-		return "", "", false, false
-	}
-	before := strings.TrimSpace(detail[:idx])
-	after := strings.TrimSpace(detail[idx+len(" in "):])
-	if before == "" || after == "" || !strings.HasPrefix(before, `"`) {
-		return "", "", false, false
-	}
-	pathPart, rest, pathOK, pathTagged := splitLeadingPathHeaderParts(after)
-	if !pathOK || (!pathTagged && !isLikelyDisplayPath(pathPart)) || strings.TrimSpace(rest) != "" {
-		return "", "", false, false
-	}
-	return before, pathPart, pathTagged, true
 }
 
 func displayPathHasGlobMeta(path string) bool {

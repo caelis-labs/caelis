@@ -28,12 +28,26 @@ type ToolPresentation struct {
 // fields, with exact built-in names providing optional label enrichment. The
 // result is ephemeral surface state, not a runtime or protocol authority.
 func ResolveToolPresentation(name string, kind string, title string) ToolPresentation {
+	return resolveToolPresentation(name, kind, title, "")
+}
+
+// ResolveToolPresentationWithHint applies one normalized display-only
+// compatibility hint after standard ACP kind and exact built-in presentation
+// have been resolved. The hint never becomes tool identity.
+func ResolveToolPresentationWithHint(name string, kind string, title string, explorationVerb string) ToolPresentation {
+	return resolveToolPresentation(name, kind, title, explorationVerb)
+}
+
+func resolveToolPresentation(name string, kind string, title string, explorationVerb string) ToolPresentation {
 	resolved := ToolPresentation{
 		Name:  strings.TrimSpace(name),
 		Kind:  strings.ToLower(strings.TrimSpace(kind)),
 		Title: strings.TrimSpace(title),
 	}
 	resolved.ExplorationVerb = toolExplorationVerb(resolved.Name, resolved.Kind)
+	if compatible := compatibleExplorationVerb(resolved.Name, resolved.Kind, resolved.ExplorationVerb, explorationVerb); compatible != "" {
+		resolved.ExplorationVerb = compatible
+	}
 	if resolved.Name != "" {
 		resolved.DisplayName = resolved.Name
 		return resolved
@@ -61,6 +75,22 @@ func ResolveToolPresentation(name string, kind string, title string) ToolPresent
 // name only refines the verb.
 func ToolIsExploration(name string, kind string) bool {
 	return toolExplorationVerb(strings.TrimSpace(name), strings.ToLower(strings.TrimSpace(kind))) != ""
+}
+
+// ToolIsExplorationWithHint reports compact exploration membership after a
+// normalized display hint has refined a compatible standard ACP read category.
+func ToolIsExplorationWithHint(name string, kind string, explorationVerb string) bool {
+	return ResolveToolPresentationWithHint(name, kind, "", explorationVerb).ExplorationVerb != ""
+}
+
+func compatibleExplorationVerb(name string, kind string, standardVerb string, hint string) string {
+	if strings.TrimSpace(name) == "" &&
+		strings.EqualFold(strings.TrimSpace(hint), "List") &&
+		strings.EqualFold(strings.TrimSpace(kind), "read") &&
+		standardVerb == "Read" {
+		return "List"
+	}
+	return ""
 }
 
 func toolExplorationVerb(name string, kind string) string {

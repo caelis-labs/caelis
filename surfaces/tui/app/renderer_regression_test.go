@@ -173,7 +173,7 @@ func TestWideTranscriptTwoLineMoveUsesHardScrollWithoutLosingText(t *testing.T) 
 		height,
 		"  › 复现一下当时 Grep 返回 0 的调用方式，确认是工具问题还是参数用法问题。",
 		"  • Read overview.md",
-		`  • Search "service_tag|resource_type|MonitorCloudInstance" in overview`,
+		`  • Search service_tag|resource_type|MonitorCloudInstance in overview`,
 	)
 	updates := renderFullscreenFramesForTest(t, width, height, before, after)
 	second := updates[1]
@@ -188,7 +188,7 @@ func TestLiveExplorationScrollbarHardScrollPreservesWideReasoning(t *testing.T) 
 		width     = 96
 		height    = 20
 		reasoning = "复现一下当时 Grep 返回 0 的调用方式，确认是工具问题还是参数用法问题。"
-		search    = `"service_tag|resource_type|MonitorCloudInstance" in overview, "service"`
+		search    = `service_tag|resource_type|MonitorCloudInstance in overview, service`
 	)
 	tests := []struct {
 		name         string
@@ -292,7 +292,7 @@ func normalizedTranscriptScrollFramesForTest(width int, height int, reasoning st
 		width,
 		height,
 		reasoning,
-		`  • Search "service_tag|resource_type|MonitorCloudInstance" in overview`,
+		`  • Search service_tag|resource_type|MonitorCloudInstance in overview`,
 	)
 }
 

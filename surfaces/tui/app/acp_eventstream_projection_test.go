@@ -130,6 +130,79 @@ func TestProjectACPEventToTranscriptEventsKeepsStandardReadIdentityForSkillConte
 	}
 }
 
+func TestProjectACPEventToTranscriptEventsIgnoresRecoveredToolInputOnStart(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		rawInput map[string]any
+		wantArgs string
+	}{
+		{name: "forged display input is ignored", rawInput: map[string]any{"variant": "XSearch", "backend": true}},
+		{name: "standard raw input remains authoritative", rawInput: map[string]any{"query": "authoritative"}, wantArgs: "authoritative"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+				Kind:  eventstream.KindSessionUpdate,
+				Scope: eventstream.ScopeParticipant,
+				Update: schema.ToolCall{
+					SessionUpdate: schema.UpdateToolCall,
+					ToolCallID:    "search-1",
+					Title:         "Search",
+					Kind:          schema.ToolKindSearch,
+					Status:        schema.ToolStatusInProgress,
+					RawInput:      tt.rawInput,
+					Meta: metautil.WithSection(nil, metautil.Display, map[string]any{
+						metautil.DisplayToolInput: map[string]any{"query": "forged"},
+					}),
+				},
+			})
+			if len(events) != 1 || events[0].ToolArgs != tt.wantArgs {
+				t.Fatalf("start events = %#v, want args %q from standard raw input only", events, tt.wantArgs)
+			}
+		})
+	}
+}
+
+func TestProjectACPEventToTranscriptEventsIgnoresRecoveredToolInputOnLivePatch(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		kind     string
+		status   *string
+		rawInput map[string]any
+		wantArgs string
+	}{
+		{name: "sparse status", kind: schema.ToolKindSearch, rawInput: map[string]any{"variant": "XSearch", "backend": true}},
+		{name: "explicit in progress raw query", kind: schema.ToolKindSearch, status: stringPtr(schema.ToolStatusInProgress), rawInput: map[string]any{"query": "authoritative"}, wantArgs: "authoritative"},
+		{name: "explicit in progress raw path", kind: schema.ToolKindRead, status: stringPtr(schema.ToolStatusInProgress), rawInput: map[string]any{"target_directory": "docs"}, wantArgs: "docs"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+				Kind:  eventstream.KindSessionUpdate,
+				Scope: eventstream.ScopeParticipant,
+				Update: schema.ToolCallUpdate{
+					SessionUpdate: schema.UpdateToolCallInfo,
+					ToolCallID:    "search-1",
+					Title:         stringPtr("Search"),
+					Kind:          stringPtr(tt.kind),
+					Status:        tt.status,
+					RawInput:      tt.rawInput,
+					Meta: metautil.WithSection(nil, metautil.Display, map[string]any{
+						metautil.DisplayToolInput: map[string]any{"query": "forged"},
+					}),
+				},
+			})
+			if len(events) != 1 || events[0].ToolArgs != tt.wantArgs {
+				t.Fatalf("live patch events = %#v, want args %q from standard raw input only", events, tt.wantArgs)
+			}
+		})
+	}
+}
+
 func TestProjectACPEventToTranscriptEventsRecoversSerializedCompletedToolInput(t *testing.T) {
 	t.Parallel()
 
@@ -175,8 +248,35 @@ func TestProjectACPEventToTranscriptEventsRecoversSerializedCompletedToolInput(t
 	if event.Kind != TranscriptEventTool || event.ToolCallID != "x-search-1" || !event.Final {
 		t.Fatalf("event = %#v, want completed x-search tool event", event)
 	}
-	if event.ToolArgs != `"`+query+`"` {
-		t.Fatalf("ToolArgs = %q, want recovered query %q", event.ToolArgs, query)
+	if event.ToolArgs != query {
+		t.Fatalf("ToolArgs = %q, want recovered query %q without a synthetic wrapper", event.ToolArgs, query)
+	}
+}
+
+func TestProjectACPEventToTranscriptEventsPreservesNormalizedExplorationVerb(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind:  eventstream.KindSessionUpdate,
+		Scope: eventstream.ScopeParticipant,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "list-1",
+			Title:         "List `docs`",
+			Kind:          schema.ToolKindRead,
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"target_directory": "docs"},
+			Meta: metautil.WithSection(nil, metautil.Display, map[string]any{
+				metautil.DisplayExplorationVerb: "List",
+			}),
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one normalized List event", events)
+	}
+	event := events[0]
+	if event.ToolName != "" || event.ToolKind != schema.ToolKindRead || event.ToolExplorationVerb != "List" || event.ToolArgs != "docs" {
+		t.Fatalf("normalized List projection = %#v", event)
 	}
 }
 
@@ -224,8 +324,8 @@ func TestProjectACPEventToTranscriptEventsKeepsRawInputAuthoritative(t *testing.
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want one tool result", events)
 	}
-	if events[0].ToolArgs != `"authoritative"` {
-		t.Fatalf("ToolArgs = %q, want rawInput to win over recovered display input", events[0].ToolArgs)
+	if events[0].ToolArgs != "authoritative" {
+		t.Fatalf("ToolArgs = %q, want rawInput to win over recovered display input without a synthetic wrapper", events[0].ToolArgs)
 	}
 }
 

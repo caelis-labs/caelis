@@ -130,7 +130,7 @@ func TestHiddenTaskWaitCannotDowngradeExploredSummary(t *testing.T) {
 
 	beforePending := ansi.Strip(h.model.View().Content)
 	if got := countExactTrimmedLine(beforePending, "• Explored"); got != 1 ||
-		!strings.Contains(beforePending, `Search "message" 100 hits`) ||
+		!strings.Contains(beforePending, `Search message 100 hits`) ||
 		!strings.Contains(beforePending, "Read agent_input.go 1~55") {
 		t.Fatalf("test setup did not establish the settled summary:\n%s", beforePending)
 	}
@@ -177,7 +177,7 @@ func TestHiddenTaskWaitCannotDowngradeExploredSummary(t *testing.T) {
 	if strings.Contains(plain, "• Exploring") {
 		t.Fatalf("Task wait downgraded the completed group to Exploring:\n%s", plain)
 	}
-	if !strings.Contains(plain, `Search "message" 100 hits`) || !strings.Contains(plain, "Read agent_input.go 1~55") {
+	if !strings.Contains(plain, `Search message 100 hits`) || !strings.Contains(plain, "Read agent_input.go 1~55") {
 		t.Fatalf("Task wait replaced settled Search/Read summaries with invocation arguments:\n%s", plain)
 	}
 	if !strings.Contains(plain, "• Read later.go") {
@@ -287,7 +287,7 @@ func TestLiveExplorationReclassificationDoesNotDisturbCompletedContainer(t *test
 func TestRetryNoticeKeepsCompletedExplorationCollapsed(t *testing.T) {
 	block := NewMainACPTurnBlock("turn-retry-notice")
 	block.UpdateToolWithMeta("read-1", "Read", "a.go", "", true, false, ToolUpdateMeta{ToolKind: "read"})
-	block.UpdateToolWithMeta("search-1", "Grep", `"needle" 3 hits`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
+	block.UpdateToolWithMeta("search-1", "Grep", `needle 3 hits`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
 	block.AddNotice("Retrying model request (1/5, retry in 1s)", time.Time{}, transcript.NoticeKindModelRetry)
 
 	wantRun := []string{"read-1", "search-1"}
@@ -314,7 +314,7 @@ func TestRetryNoticeKeepsCompletedExplorationCollapsed(t *testing.T) {
 func TestAttemptResetRetryNoticeDoesNotFlattenSettledExploration(t *testing.T) {
 	block := NewMainACPTurnBlock("turn-attempt-reset")
 	block.UpdateToolWithMeta("read-1", "Read", "a.go", "", true, false, ToolUpdateMeta{ToolKind: "read"})
-	block.UpdateToolWithMeta("search-1", "Grep", `"needle" 3 hits`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
+	block.UpdateToolWithMeta("search-1", "Grep", `needle 3 hits`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
 	block.AppendStreamEvent(SEReasoning, "inspect the first batch", narrativeTestSource())
 
 	ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(100)
@@ -444,10 +444,10 @@ func TestRetryRequestStartKeepsSettledExplorationCollapsedBeforeFirstRender(t *t
 func TestLaterWorkSuppressesRetryNoticeAndKeepsOneExploredGroup(t *testing.T) {
 	block := NewMainACPTurnBlock("turn-retry-then-continue")
 	block.UpdateToolWithMeta("read-1", "Read", "a.go", "", true, false, ToolUpdateMeta{ToolKind: "read"})
-	block.UpdateToolWithMeta("search-1", "Grep", `"needle" 3 hits`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
+	block.UpdateToolWithMeta("search-1", "Grep", `needle 3 hits`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
 	block.AddNotice("Retrying model request (1/5, retry in 1s)", time.Time{}, transcript.NoticeKindModelRetry)
 	block.UpdateToolWithMeta("read-2", "Read", "b.go", "", true, false, ToolUpdateMeta{ToolKind: "read"})
-	block.UpdateToolWithMeta("search-2", "Grep", `"other" 2 hits`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
+	block.UpdateToolWithMeta("search-2", "Grep", `other 2 hits`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
 	block.AppendStreamEvent(SEReasoning, "continue after retry", narrativeTestSource())
 
 	for _, event := range block.Events {
@@ -479,7 +479,7 @@ func TestLaterWorkSuppressesRetryNoticeAndKeepsOneExploredGroup(t *testing.T) {
 func TestTerminalLifecycleClearsRetryNotice(t *testing.T) {
 	block := NewMainACPTurnBlock("turn-retry-terminal")
 	block.UpdateToolWithMeta("read-1", "Read", "a.go", "", true, false, ToolUpdateMeta{ToolKind: "read"})
-	block.UpdateToolWithMeta("search-1", "Grep", `"needle" 3 hits`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
+	block.UpdateToolWithMeta("search-1", "Grep", `needle 3 hits`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
 	block.AddNotice("Retrying model request (1/5, retry in 1s)", time.Time{}, transcript.NoticeKindModelRetry)
 	block.SetStatus("failed", "", "", time.Time{})
 

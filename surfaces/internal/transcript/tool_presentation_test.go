@@ -33,3 +33,31 @@ func TestResolveToolPresentationKeepsExactNameSeparateFromStandardFields(t *test
 		})
 	}
 }
+
+func TestResolveToolPresentationWithHintOnlyRefinesStandardRead(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		exactName       string
+		kind            string
+		hint            string
+		wantExploration string
+	}{
+		{name: "normalized provider list", kind: "read", hint: "List", wantExploration: "List"},
+		{name: "hint cannot classify other", kind: "other", hint: "List"},
+		{name: "hint cannot classify execute", kind: "execute", hint: "List"},
+		{name: "hint cannot override exact glob", exactName: "Glob", kind: "read", hint: "List", wantExploration: "Glob"},
+		{name: "hint cannot override exact read", exactName: "Read", kind: "read", hint: "List", wantExploration: "Read"},
+		{name: "hint cannot override external name", exactName: "list_dir", kind: "read", hint: "List", wantExploration: "Read"},
+		{name: "unknown hint keeps standard read", kind: "read", hint: "Browse", wantExploration: "Read"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			presentation := ResolveToolPresentationWithHint(tt.exactName, tt.kind, "", tt.hint)
+			if presentation.ExplorationVerb != tt.wantExploration {
+				t.Fatalf("ResolveToolPresentationWithHint() = %#v, want exploration %q", presentation, tt.wantExploration)
+			}
+		})
+	}
+}

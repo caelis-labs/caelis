@@ -66,10 +66,17 @@ func StandardToolOutput(status string, isErr bool) string {
 }
 
 func SuppressToolResultOutput(toolName string, toolKind string, output string, synthetic bool, isErr bool) bool {
+	return SuppressToolResultOutputWithHint(toolName, toolKind, "", output, synthetic, isErr)
+}
+
+// SuppressToolResultOutputWithHint applies the same completion suppression to
+// provider-compatible exploration without treating its display hint as tool
+// identity.
+func SuppressToolResultOutputWithHint(toolName string, toolKind string, explorationVerb string, output string, synthetic bool, isErr bool) bool {
 	if isErr {
 		return false
 	}
-	if !ToolIsExploration(toolName, toolKind) {
+	if !ToolIsExplorationWithHint(toolName, toolKind, explorationVerb) {
 		return false
 	}
 	trimmed := strings.TrimSpace(output)

@@ -122,6 +122,80 @@ func TestToolDisplayArgsGlobUsesProviderPatternAlias(t *testing.T) {
 	}
 }
 
+func TestCompactExplorationArgsHaveNoOuterWrappers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		toolName string
+		kind     string
+		raw      map[string]any
+		title    string
+		want     string
+	}{
+		{name: "grok read raw path", kind: "read", raw: map[string]any{"target_file": "SKILL.md"}, want: "SKILL.md"},
+		{name: "grok list raw path", kind: "read", raw: map[string]any{"target_directory": "docs"}, want: "docs"},
+		{name: "grok list title fallback", kind: "read", title: "List `docs`", want: "docs"},
+		{name: "read backtick title", kind: "read", title: "Read `SKILL.md`", want: "SKILL.md"},
+		{name: "read quoted title", kind: "read", title: `Read "SKILL.md"`, want: "SKILL.md"},
+		{name: "search backtick title", kind: "search", title: "Search `tool call`", want: "tool call"},
+		{name: "search quoted title", kind: "search", title: `Search "tool call"`, want: "tool call"},
+		{name: "grep structured query", toolName: "Grep", kind: "search", raw: map[string]any{"query": "tool call", "path": "internal"}, want: "tool call in internal"},
+		{name: "grep slash query with path", toolName: "Grep", kind: "search", raw: map[string]any{"query": "foo/bar", "path": "internal"}, want: "foo/bar in internal"},
+		{name: "grep structured quoted query", toolName: "Grep", kind: "search", raw: map[string]any{"query": `"needle"`}, want: `"needle"`},
+		{name: "standard search structured backtick query", kind: "search", raw: map[string]any{"query": "`file`"}, want: "`file`"},
+		{name: "web search structured query", toolName: "WebSearch", kind: "search", raw: map[string]any{"query": "tool call"}, want: "tool call"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fallback := toolTitleDisplayArgs(tt.toolName, tt.kind, tt.title)
+			if got := toolDisplayArgsForKind(tt.toolName, tt.kind, tt.raw, fallback); got != tt.want {
+				t.Fatalf("toolDisplayArgsForKind() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	if got := toolDisplayArgsForKind("ExternalTool", "other", map[string]any{"query": "tool call"}); got != `"tool call"` {
+		t.Fatalf("generic non-exploration args = %q, want quoted compatibility display", got)
+	}
+}
+
+func TestCompactExplorationTitleDetailRemovesOnlyFullOuterWrapper(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"`SKILL.md`":          "SKILL.md",
+		`"C:\tmp\read"`:       `C:\tmp\read`,
+		`"say \"hi\""`:        `say \"hi\"`,
+		`"needle" 3 hits`:     `"needle" 3 hits`,
+		"`missing.go` failed": "`missing.go` failed",
+	}
+	for input, want := range tests {
+		if got := compactExplorationTitleDetail(input); got != want {
+			t.Fatalf("compactExplorationTitleDetail(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestExplorationDetailPreservesStructuredArguments(t *testing.T) {
+	t.Parallel()
+
+	tests := []SubagentEvent{
+		{Name: "Grep", ToolKind: "search", Args: `"needle"`},
+		{Name: "Grep", ToolKind: "search", Args: `site:example.com/docs`},
+		{Name: "Grep", ToolKind: "search", Args: `foo/bar in internal`},
+		{Name: "Grep", ToolKind: "search", Args: `alpha,beta`},
+		{Name: "Grep", ToolKind: "search", Args: `C:\tmp\read`},
+		{Name: "Glob", ToolKind: "search", Args: "`*.go`"},
+		{Name: "Read", ToolKind: "read", Args: `"C:\tmp\read"`},
+	}
+	for _, event := range tests {
+		if got := explorationToolDetailForDisplay(event, "", explorationToolDetailSettled); got != event.Args {
+			t.Fatalf("explorationToolDetailForDisplay(%q) = %q, want exact structured argument", event.Args, got)
+		}
+	}
+}
+
 func TestToolTitleDisplayArgsSuppressesGenericProviderTitles(t *testing.T) {
 	t.Parallel()
 
@@ -162,8 +236,8 @@ func TestSearchDisplaySummaryOmitsFileCount(t *testing.T) {
 	if got := searchDisplaySummary(
 		map[string]any{"pattern": "needle"},
 		map[string]any{"count": 3, "file_count": 2},
-	); got != `"needle" 3 hits` {
-		t.Fatalf("searchDisplaySummary() = %q, want %q", got, `"needle" 3 hits`)
+	); got != `needle 3 hits` {
+		t.Fatalf("searchDisplaySummary() = %q, want %q", got, `needle 3 hits`)
 	}
 }
 
@@ -182,11 +256,11 @@ func TestToolTitleDisplayArgsSearchPathScopesAndSlashQueries(t *testing.T) {
 		{name: "windows explicit relative directory", title: `Search .\internal\foo`, want: ""},
 		{name: "absolute path", title: "Search /home/dev/WorkDir/private/storage", want: ""},
 		{name: "windows absolute path", title: `Search D:\repo\storage`, want: ""},
-		{name: "scoped relative query", title: "Search ./internal/foo Needle", want: `"./internal/foo Needle"`},
-		{name: "scoped absolute query", title: "Search /tmp/foo Needle", want: `"/tmp/foo Needle"`},
-		{name: "slash query", title: "Search foo/bar", want: `"foo/bar"`},
-		{name: "relative path looking query", title: "Search internal/foo", want: `"internal/foo"`},
-		{name: "web-style query", title: "Search site:example.com/docs", want: `"site:example.com/docs"`},
+		{name: "scoped relative query", title: "Search ./internal/foo Needle", want: `./internal/foo Needle`},
+		{name: "scoped absolute query", title: "Search /tmp/foo Needle", want: `/tmp/foo Needle`},
+		{name: "slash query", title: "Search foo/bar", want: `foo/bar`},
+		{name: "relative path looking query", title: "Search internal/foo", want: `internal/foo`},
+		{name: "web-style query", title: "Search site:example.com/docs", want: `site:example.com/docs`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 	sdkmodel "github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	acpclient "github.com/caelis-labs/caelis/protocol/acp/client"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
@@ -827,12 +828,12 @@ func TestHandleACPEventEnvelopeMergesGrokGlobUpdate(t *testing.T) {
 		t.Fatalf("main events = %#v, want one Grok glob event", block.Events)
 	}
 	event := block.Events[0]
-	if event.Name != "" || event.ToolKind != schema.ToolKindSearch || event.Title != "Glob `**/*.py`" || event.Args != "`**/*.py`" {
+	if event.Name != "" || event.ToolKind != schema.ToolKindSearch || event.Title != "Glob `**/*.py`" || event.Args != "**/*.py" {
 		t.Fatalf("glob event = %#v, want merged search update with pattern args", event)
 	}
 	model.syncViewportContent()
 	plain := strings.Join(model.viewportPlainLines, "\n")
-	if !strings.Contains(plain, "Search `**/*.py`") || strings.Contains(plain, "Glob Glob") {
+	if !strings.Contains(plain, "Search **/*.py") || strings.Contains(plain, "Glob Glob") {
 		t.Fatalf("viewport rendered unexpected glob header:\n%s", plain)
 	}
 }
@@ -960,6 +961,68 @@ func TestProjectedGrokListUpdateKeepsOtherKindOutOfExactToolName(t *testing.T) {
 	plain := strings.Join(model.viewportPlainLines, "\n")
 	if !strings.Contains(plain, "List `"+path+"`") || strings.Contains(plain, "other List") {
 		t.Fatalf("projected Grok list rendered with kind as tool name:\n%s", plain)
+	}
+}
+
+func TestNormalizedGrokListJoinsExploredWithoutExactToolName(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	listMeta := map[string]any{"x.ai/tool": map[string]any{
+		"namespace": "grok_build",
+		"kind":      "list",
+		"read_only": true,
+	}}
+	tools := []struct {
+		callID string
+		title  string
+		kind   string
+		input  map[string]any
+		meta   map[string]any
+	}{
+		{callID: "list-1", title: "List `docs`", kind: schema.ToolKindOther, input: map[string]any{"target_directory": "docs"}, meta: listMeta},
+		{callID: "read-1", title: "Read `go.mod`", kind: schema.ToolKindRead, input: map[string]any{"target_file": "go.mod"}},
+		{callID: "search-1", title: `Search "projection"`, kind: schema.ToolKindSearch, input: map[string]any{"query": "projection"}},
+	}
+	for _, tool := range tools {
+		update := acpclient.NormalizeInboundUpdate(schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: tool.callID,
+			Title: tool.title, Kind: tool.kind, Status: schema.ToolStatusInProgress,
+			RawInput: tool.input, Meta: tool.meta,
+		}).(schema.ToolCall)
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+			Update: update,
+		})
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+			Update: schema.ToolCallUpdate{
+				SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: tool.callID,
+				Status: stringPtr(schema.ToolStatusCompleted),
+			},
+		})
+	}
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != len(tools) {
+		t.Fatalf("tool events = %#v, want %d", block.Events, len(tools))
+	}
+	list := block.Events[0]
+	if list.Name != "" || list.ToolKind != schema.ToolKindRead || list.ExplorationVerb != "List" || list.Args != "docs" || !list.Done {
+		t.Fatalf("normalized Grok List event = %#v", list)
+	}
+	block.Status = schema.ToolStatusCompleted
+	model.markViewportBlockDirty(block.BlockID())
+	model.syncViewportContent()
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if countExactTrimmedLine(plain, "• Explored") != 1 ||
+		!strings.Contains(plain, "List docs") ||
+		!strings.Contains(plain, "Read go.mod") ||
+		!strings.Contains(plain, "Search projection") {
+		t.Fatalf("normalized Grok List did not join compact exploration:\n%s", plain)
+	}
+	if strings.Contains(plain, "`docs`") || strings.Contains(plain, `"projection"`) {
+		t.Fatalf("compact exploration retained outer wrappers:\n%s", plain)
 	}
 }
 

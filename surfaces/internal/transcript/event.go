@@ -97,15 +97,16 @@ type Event struct {
 	AgentSourceRole string
 	AgentSourceName string
 
-	ToolCallID   string
-	ToolName     string
-	ToolKind     string
-	ToolTitle    string
-	ToolArgs     string
-	ToolFullArgs string
-	ToolOutput   string
-	ToolStream   string
-	ToolStatus   string
+	ToolCallID          string
+	ToolName            string
+	ToolKind            string
+	ToolTitle           string
+	ToolExplorationVerb string
+	ToolArgs            string
+	ToolFullArgs        string
+	ToolOutput          string
+	ToolStream          string
+	ToolStatus          string
 	// ToolStatusExplicit reports whether the source ACP update supplied status.
 	// Reducers use it to distinguish a stale lifecycle downgrade from a sparse
 	// content patch whose missing status must retain the settled lifecycle.

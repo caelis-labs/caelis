@@ -306,13 +306,39 @@ semantic behavior.
 
 Standard ACP `kind` owns the coarse display category independently of the exact
 tool name. In particular, `read`, `search`, and `fetch` share the compact
-exploration presentation for built-in and external Agents. The human-readable
-`title` is retained separately; for `other` or an unknown kind it may be used as
-the complete generic label, but it never becomes an exact tool name. Exact
-built-in names may refine a compatible label or result layout only after the
-standard kind has selected the category. Main transcript blocks, participant
-blocks, and detached child overlays consume this one derived presentation
-model and vary only their container controls.
+exploration presentation for built-in and external Agents. A specific standard
+kind always wins over provider metadata. The human-readable `title` is retained
+separately; for `other` or an unknown kind it may be used as the complete
+generic label, but it never selects permissions, an exploration category, or an
+exact tool name. Exact built-in names may refine a compatible label or result
+layout only after the standard kind has selected the category. Main transcript
+blocks, participant blocks, and detached child overlays consume this one
+derived presentation model and vary only their container controls.
+
+One maintained Grok compatibility profile is owned by
+`protocol/acp/client`. An inbound `x.ai/tool` object must match
+`namespace=grok_build`, `kind=list`, and boolean `read_only=true` exactly. Only
+then may a missing kind on a complete tool call or an explicit generic `other`
+kind be normalized to `read`; an omitted kind on a sparse tool update remains
+omitted. An existing `read` remains `read`, and `edit`, `search`, `execute`, or
+any other specific standard kind remains unchanged. The adapter preserves
+standard raw input and provider metadata, does not add a non-standard wire
+kind, and does not manufacture an exact tool name. It emits
+`caelis.display.exploration_verb` with `List` only as a presentation refinement
+of the resulting anonymous `read` category. Surfaces ignore that hint when an
+exact name is present or for every non-`read` category, so the hint cannot
+independently classify or authorize a tool. A title beginning with
+`List` is never sufficient. The category fallback can be removed when Grok
+emits a compatible standard read kind for directory listing; the display hint
+can be removed when standard ACP can represent the List verb without provider
+metadata.
+
+Compact exploration rows render path, glob, and search arguments without adding
+an outer pair of backticks or double quotes. A matched outer pair recovered from
+a provider title may be removed only from that title fallback. Structured ACP
+input remains authoritative for the argument itself, including meaningful
+boundary quotes or backticks. Shell commands, JSON, narrative text, and embedded
+quotes retain their existing semantics.
 
 Display extensions may preserve information that standard ACP content cannot
 represent without changing semantic ownership:

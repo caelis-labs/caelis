@@ -12,6 +12,7 @@ type ToolUpdateMeta struct {
 	MessageTarget      string
 	ToolKind           string
 	ToolTitle          string
+	ExplorationVerb    string
 	FullArgs           string
 	MessageID          string
 	ToolStatus         string
@@ -48,6 +49,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	args := strings.TrimSpace(update.Args)
 	toolKind := strings.TrimSpace(update.Meta.ToolKind)
 	toolTitle := strings.TrimSpace(update.Meta.ToolTitle)
+	explorationVerb := strings.TrimSpace(update.Meta.ExplorationVerb)
 	fullArgs := strings.TrimSpace(update.Meta.FullArgs)
 	messageID := strings.TrimSpace(update.Meta.MessageID)
 	taskHandle := strings.TrimSpace(update.Meta.TaskHandle)
@@ -106,6 +108,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			Name:              name,
 			ToolKind:          toolKind,
 			Title:             toolTitle,
+			ExplorationVerb:   explorationVerb,
 			Args:              args,
 			StartArgs:         args,
 			FullArgs:          fullArgs,
@@ -135,6 +138,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		Name:              name,
 		ToolKind:          toolKind,
 		Title:             toolTitle,
+		ExplorationVerb:   explorationVerb,
 		Args:              args,
 		StartArgs:         args,
 		FullArgs:          fullArgs,
@@ -279,6 +283,9 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 	if strings.TrimSpace(toolTitle) != "" {
 		ev.Title = toolTitle
 	}
+	if explorationVerb := strings.TrimSpace(meta.ExplorationVerb); explorationVerb != "" {
+		ev.ExplorationVerb = explorationVerb
+	}
 	preferredTaskHandle := preferredDisplayTaskHandle(ev.TaskHandle, taskHandle)
 	if strings.TrimSpace(args) != "" {
 		ev.Args = args
@@ -385,6 +392,9 @@ func fillFinalToolEventFromExisting(finalEvent *SubagentEvent, existing Subagent
 	if strings.TrimSpace(finalEvent.Title) == "" {
 		finalEvent.Title = strings.TrimSpace(existing.Title)
 	}
+	if strings.TrimSpace(finalEvent.ExplorationVerb) == "" {
+		finalEvent.ExplorationVerb = strings.TrimSpace(existing.ExplorationVerb)
+	}
 	if strings.TrimSpace(finalEvent.MessageTarget) == "" {
 		finalEvent.MessageTarget = strings.TrimSpace(existing.MessageTarget)
 	}
@@ -450,6 +460,9 @@ func fillMissingFinalToolEventFromExisting(finalEvent *SubagentEvent, existing S
 	if strings.TrimSpace(finalEvent.Title) == "" {
 		finalEvent.Title = strings.TrimSpace(existing.Title)
 	}
+	if strings.TrimSpace(finalEvent.ExplorationVerb) == "" {
+		finalEvent.ExplorationVerb = strings.TrimSpace(existing.ExplorationVerb)
+	}
 	if strings.TrimSpace(finalEvent.MessageTarget) == "" {
 		finalEvent.MessageTarget = strings.TrimSpace(existing.MessageTarget)
 	}
@@ -477,6 +490,7 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authorita
 	ev.Name = finalEvent.Name
 	ev.ToolKind = finalEvent.ToolKind
 	ev.Title = finalEvent.Title
+	ev.ExplorationVerb = finalEvent.ExplorationVerb
 	ev.Args = finalEvent.Args
 	mergeStartArgs(ev, finalEvent.StartArgs, finalEvent.Args)
 	ev.FullArgs = finalEvent.FullArgs

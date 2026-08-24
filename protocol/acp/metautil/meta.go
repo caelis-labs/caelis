@@ -13,13 +13,14 @@ const (
 	// treated as display metadata.
 	Root = "caelis"
 
-	Version          = "version"
-	Transient        = "transient"
-	Runtime          = "runtime"
-	Message          = "message"
-	MessageCitations = "citations"
-	Display          = "display"
-	DisplayToolInput = "tool_input"
+	Version                = "version"
+	Transient              = "transient"
+	Runtime                = "runtime"
+	Message                = "message"
+	MessageCitations       = "citations"
+	Display                = "display"
+	DisplayToolInput       = "tool_input"
+	DisplayExplorationVerb = "exploration_verb"
 
 	RuntimeTool             = "tool"
 	RuntimeToolName         = "name"

@@ -288,7 +288,7 @@ func TestExplorationSummaryKeepsWebFetchVerbAndFullURL(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	block.Status = "completed"
 	block.UpdateToolWithMeta("fetch-1", surfaceToolWebFetch, "https://example.com/a/b.md", "", true, false, ToolUpdateMeta{ToolKind: "search"})
-	block.UpdateToolWithMeta("search-1", surfaceToolWebSearch, `"surface projection"`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
+	block.UpdateToolWithMeta("search-1", surfaceToolWebSearch, `surface projection`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
 
 	rows := block.Render(BlockRenderContext{
 		Width:     100,
@@ -299,11 +299,28 @@ func TestExplorationSummaryKeepsWebFetchVerbAndFullURL(t *testing.T) {
 	if !strings.Contains(plain, "Fetch https://example.com/a/b.md") {
 		t.Fatalf("rendered rows lost WebFetch verb or compacted its URL\nplain:\n%s", plain)
 	}
-	if !strings.Contains(plain, `Search "surface projection"`) {
+	if !strings.Contains(plain, `Search surface projection`) {
 		t.Fatalf("rendered rows merged WebSearch into the Fetch summary\nplain:\n%s", plain)
 	}
 	if strings.Contains(plain, "Search b.md") {
 		t.Fatalf("rendered rows treated the WebFetch URL as a filesystem path\nplain:\n%s", plain)
+	}
+}
+
+func TestExplorationSummaryPreservesStructuredQueryWrappers(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	block.Status = "completed"
+	block.UpdateToolWithMeta("search-quoted", surfaceToolGrep, `"needle"`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
+	block.UpdateToolWithMeta("search-backtick", surfaceToolGrep, "`file`", "", true, false, ToolUpdateMeta{ToolKind: "search"})
+	block.UpdateToolWithMeta("search-slash", surfaceToolGrep, `site:example.com/docs`, "", true, false, ToolUpdateMeta{ToolKind: "search"})
+
+	plain := joinRenderedPlain(block.Render(BlockRenderContext{
+		Width:     100,
+		TermWidth: 100,
+		Theme:     tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY),
+	}))
+	if !strings.Contains(plain, `Search "needle", `+"`file`"+`, site:example.com/docs`) {
+		t.Fatalf("rendered rows rewrote structured search arguments\nplain:\n%s", plain)
 	}
 }
 

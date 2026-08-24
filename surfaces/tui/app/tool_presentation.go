@@ -72,12 +72,12 @@ func surfaceToolProfile(name string) (surfaceToolDisplayProfile, bool) {
 	}
 }
 
-func surfaceExplorationVerb(name string, kind string) string {
-	return transcript.ResolveToolPresentation(name, kind, "").ExplorationVerb
+func surfaceExplorationVerb(name string, kind string, explorationVerb string) string {
+	return transcript.ResolveToolPresentationWithHint(name, kind, "", explorationVerb).ExplorationVerb
 }
 
-func surfaceIsExplorationTool(name string, kind string) bool {
-	return transcript.ToolIsExploration(name, kind)
+func surfaceIsExplorationTool(name string, kind string, explorationVerb string) bool {
+	return transcript.ToolIsExplorationWithHint(name, kind, explorationVerb)
 }
 
 func surfaceIsTerminalPanelTool(name string) bool {
