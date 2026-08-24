@@ -148,7 +148,7 @@ func TestRuntimeStartRestrictedConPTYE2E(t *testing.T) {
 	}
 
 	workspace := t.TempDir()
-	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir(), WritableRoots: []string{workspace}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -276,7 +276,7 @@ func TestNonTTYTimeoutTerminatesContainedDescendant(t *testing.T) {
 		t.Skip("set CAELIS_WINDOWS_SANDBOX_E2E=1 to run restricted-token Job timeout e2e")
 	}
 	workspace := t.TempDir()
-	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir(), WritableRoots: []string{workspace}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -696,7 +696,7 @@ func TestRunElevatedRepairUsesInternalHelperRequest(t *testing.T) {
 
 func TestLegacyMigrationFailsBeforeReplacementWhenUnknownSIDNeedsElevation(t *testing.T) {
 	workspace := t.TempDir()
-	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir(), WritableRoots: []string{workspace}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -730,7 +730,7 @@ func TestInternalRepairVerifiesAllReplacementsBeforeLegacyRetirement(t *testing.
 	workspace := t.TempDir()
 	external := t.TempDir()
 	state := t.TempDir()
-	rt, err := New(sandbox.Config{CWD: workspace, StateDir: state, WritableRoots: []string{external}})
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: state, WritableRoots: []string{workspace, external}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -991,8 +991,16 @@ func TestNewAllowsHomeCWDWhenAuthorityIsNotAnEffectiveWritableRoot(t *testing.T)
 		t.Fatalf("New(home CWD) error = %v", err)
 	}
 	defer rt.Close()
-	if windowsRT := rt.(*runtime); containsPath(windowsRT.cfg.WritableRoots, home) {
+	windowsRT := rt.(*runtime)
+	if containsPath(windowsRT.cfg.WritableRoots, home) {
 		t.Fatalf("WritableRoots = %#v, did not want implicit home grant", windowsRT.cfg.WritableRoots)
+	}
+	policy, err := windowsRT.policyForRequest(sandbox.CommandRequest{Dir: home})
+	if err != nil {
+		t.Fatalf("policyForRequest(home CWD) error = %v", err)
+	}
+	if containsPath(policy.WriteRoots, home) {
+		t.Fatalf("WriteRoots = %#v, did not want implicit home grant", policy.WriteRoots)
 	}
 }
 
@@ -1059,8 +1067,9 @@ func TestFileSystemForIgnoresWindowsHiddenPathRules(t *testing.T) {
 	}
 
 	rt, err := New(sandbox.Config{
-		CWD:      workspace,
-		StateDir: t.TempDir(),
+		CWD:           workspace,
+		StateDir:      t.TempDir(),
+		WritableRoots: []string{workspace},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -1233,6 +1242,7 @@ func TestRefreshMigratesLegacyManifestAndCleansStaleDenyACL(t *testing.T) {
 	rt, err := New(sandbox.Config{
 		CWD:              workspace,
 		StateDir:         t.TempDir(),
+		WritableRoots:    []string{workspace},
 		ReadOnlySubpaths: []string{"readonly"},
 	})
 	if err != nil {
@@ -1609,7 +1619,7 @@ func TestDeletingEnvironmentRecoversBeforeRuntimeUse(t *testing.T) {
 func TestActiveManifestRejectsForeignUnappliedReceipt(t *testing.T) {
 	workspace := t.TempDir()
 	foreignRoot := t.TempDir()
-	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir(), WritableRoots: []string{workspace}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -2438,7 +2448,7 @@ func TestEnsureSkipsMissingWritableRootsAndRepairsWhenPresent(t *testing.T) {
 	rt, err := New(sandbox.Config{
 		CWD:              workspace,
 		StateDir:         stateDir,
-		WritableRoots:    []string{missingRoot},
+		WritableRoots:    []string{workspace, missingRoot},
 		ReadOnlySubpaths: []string{"readonly"},
 	})
 	if err != nil {
@@ -2538,6 +2548,7 @@ func TestEnsureForRequestCleansStaleDenyACLFromSatisfyingManifest(t *testing.T) 
 	rt, err := New(sandbox.Config{
 		CWD:              workspace,
 		StateDir:         t.TempDir(),
+		WritableRoots:    []string{workspace},
 		ReadOnlySubpaths: []string{"readonly"},
 	})
 	if err != nil {
