@@ -14,10 +14,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/protocol/acp/transport/stdio"
 )
 
 type detachedChildContextMarker struct{}
@@ -345,11 +344,12 @@ func TestRunnerPermissionCallbackNormalizesChildApprovalWithoutPublishingFrame(t
 func TestRunnerCancelReturnsRemoteNotificationFailure(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	stdoutReader, stdoutWriter := io.Pipe()
 	stdinReader, stdinWriter := io.Pipe()
-	remote := client.NewProcessClient(ctx, &stdio.Process{Stdin: stdinWriter, Stdout: stdoutReader}, client.Config{})
+	remote, err := client.NewStreamClient(stdinWriter, stdoutReader, client.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	_ = stdinReader.Close()
 	defer stdoutWriter.Close()
 	defer remote.Close(context.Background())
@@ -363,7 +363,7 @@ func TestRunnerCancelReturnsRemoteNotificationFailure(t *testing.T) {
 	}
 	runner := &Runner{clock: time.Now, runs: map[string]*childRun{"task-cancel": run}}
 
-	err := runner.Cancel(context.Background(), run.anchor)
+	err = runner.Cancel(context.Background(), run.anchor)
 	if err == nil {
 		t.Fatal("Cancel() error = nil, want remote notification failure")
 	}

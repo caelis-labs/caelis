@@ -15,11 +15,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/loader"
-	"github.com/caelis-labs/caelis/internal/acpagentbridge/terminal"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp"
@@ -58,11 +56,10 @@ type Config struct {
 	// ConfigurationClient owns all product ACP Session configuration writes.
 	// PresentationClient remains read-only.
 	ConfigurationClient appserver.ConfigurationClient
-	// PresentationClient and TerminalClient are the remaining product ACP
-	// facets. When SessionClient is set, product assembly supplies all four and
-	// does not expose Runtime, Stack, or ACP surface providers.
+	// PresentationClient is the remaining product ACP read facet. When
+	// SessionClient is set, product assembly supplies the focused typed clients
+	// and does not expose Runtime, Stack, or ACP surface providers.
 	PresentationClient appserver.PresentationClient
-	TerminalClient     appserver.TerminalClient
 	BuildAgentSpec     BuildAgentSpecFunc
 	Projector          projector.Projector
 	Loader             acp.SessionLoader
@@ -108,7 +105,6 @@ type RuntimeAgent struct {
 	sessionClient         appserver.SessionClient
 	configurationClient   appserver.ConfigurationClient
 	presentationClient    appserver.PresentationClient
-	terminalClient        appserver.TerminalClient
 	buildAgentSpec        BuildAgentSpecFunc
 	projector             projector.Projector
 	loader                acp.SessionLoader
@@ -133,7 +129,6 @@ type RuntimeAgent struct {
 	mu              sync.Mutex
 	cancels         map[string]context.CancelFunc
 	managedSessions map[string]struct{}
-	terminalRefs    map[string]stream.Ref
 	taskMuxes       map[string]map[*acpTaskStreamMux]struct{}
 }
 
@@ -152,8 +147,8 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		}
 	} else if cfg.PromptRouterFactory == nil {
 		return nil, errors.New("internal/acpagentbridge: typed Session client mode requires a prompt router")
-	} else if cfg.ConfigurationClient == nil || cfg.PresentationClient == nil || cfg.TerminalClient == nil {
-		return nil, errors.New("internal/acpagentbridge: typed Session client mode requires configuration, presentation, and terminal clients")
+	} else if cfg.ConfigurationClient == nil || cfg.PresentationClient == nil {
+		return nil, errors.New("internal/acpagentbridge: typed Session client mode requires configuration and presentation clients")
 	}
 	if cfg.PromptRouterFactory != nil && cfg.SlashResultFormatter == nil {
 		return nil, errors.New("internal/acpagentbridge: slash result formatter is required with prompt router factory")
@@ -200,7 +195,6 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		sessionClient:         cfg.SessionClient,
 		configurationClient:   cfg.ConfigurationClient,
 		presentationClient:    cfg.PresentationClient,
-		terminalClient:        cfg.TerminalClient,
 		buildAgentSpec:        cfg.BuildAgentSpec,
 		projector:             eventProjector,
 		loader:                sessionLoader,
@@ -223,7 +217,6 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		agentInfo:             normalizeAgentInfo(cfg.AgentInfo, appName),
 		cancels:               map[string]context.CancelFunc{},
 		managedSessions:       map[string]struct{}{},
-		terminalRefs:          map[string]stream.Ref{},
 		taskMuxes:             map[string]map[*acpTaskStreamMux]struct{}{},
 	}, nil
 }
@@ -905,7 +898,6 @@ func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, 
 			if item.event == nil {
 				continue
 			}
-			a.rememberTerminalRefFromEvent(item.event)
 			base := projector.EnvelopeBaseFromSessionEvent(ref, item.event, projector.SessionEventTransport{})
 			published := item.canonicalContentAlreadyPublished
 			if taskMux == nil {
@@ -1119,103 +1111,6 @@ func (a *RuntimeAgent) activeSessionRef(activeSession session.Session, sessionID
 	return ref
 }
 
-func (a *RuntimeAgent) Output(ctx context.Context, req acp.TerminalOutputRequest) (acp.TerminalOutputResponse, error) {
-	if a.terminalClient != nil {
-		if _, err := a.targetSession(ctx, req.SessionID); err != nil {
-			return acp.TerminalOutputResponse{}, err
-		}
-		result, err := a.terminalClient.TerminalOutput(ctx, appserver.TerminalRequest{SessionID: req.SessionID, TerminalID: req.TerminalID})
-		if err != nil {
-			return acp.TerminalOutputResponse{}, err
-		}
-		response := acp.TerminalOutputResponse{Output: result.Output, Truncated: result.Truncated}
-		if result.ExitStatus != nil {
-			response.ExitStatus = &acp.TerminalExitStatus{ExitCode: result.ExitStatus.ExitCode, Signal: result.ExitStatus.Signal}
-		}
-		return response, nil
-	}
-	adapter, ok := a.terminalAdapter()
-	if !ok {
-		return acp.TerminalOutputResponse{}, acp.ErrCapabilityUnsupported
-	}
-	if _, err := a.targetSession(ctx, req.SessionID); err != nil {
-		return acp.TerminalOutputResponse{}, err
-	}
-	return adapter.Output(ctx, req)
-}
-
-func (a *RuntimeAgent) WaitForExit(ctx context.Context, req acp.TerminalWaitForExitRequest) (acp.TerminalWaitForExitResponse, error) {
-	if a.terminalClient != nil {
-		if _, err := a.targetSession(ctx, req.SessionID); err != nil {
-			return acp.TerminalWaitForExitResponse{}, err
-		}
-		result, err := a.terminalClient.WaitTerminal(ctx, appserver.TerminalRequest{SessionID: req.SessionID, TerminalID: req.TerminalID})
-		return acp.TerminalWaitForExitResponse{ExitCode: result.ExitCode, Signal: result.Signal}, err
-	}
-	adapter, ok := a.terminalAdapter()
-	if !ok {
-		return acp.TerminalWaitForExitResponse{}, acp.ErrCapabilityUnsupported
-	}
-	if _, err := a.targetSession(ctx, req.SessionID); err != nil {
-		return acp.TerminalWaitForExitResponse{}, err
-	}
-	return adapter.WaitForExit(ctx, req)
-}
-
-func (a *RuntimeAgent) Kill(ctx context.Context, req acp.TerminalKillRequest) error {
-	if a.terminalClient != nil {
-		if _, err := a.targetSession(ctx, req.SessionID); err != nil {
-			return err
-		}
-		return a.terminalClient.KillTerminal(ctx, appserver.TerminalRequest{SessionID: req.SessionID, TerminalID: req.TerminalID})
-	}
-	adapter, ok := a.terminalAdapter()
-	if !ok {
-		return acp.ErrCapabilityUnsupported
-	}
-	if _, err := a.targetSession(ctx, req.SessionID); err != nil {
-		return err
-	}
-	return adapter.Kill(ctx, req)
-}
-
-func (a *RuntimeAgent) Release(ctx context.Context, req acp.TerminalReleaseRequest) error {
-	if a.terminalClient != nil {
-		if _, err := a.targetSession(ctx, req.SessionID); err != nil {
-			return err
-		}
-		return a.terminalClient.ReleaseTerminal(ctx, appserver.TerminalRequest{SessionID: req.SessionID, TerminalID: req.TerminalID})
-	}
-	adapter, ok := a.terminalAdapter()
-	if !ok {
-		return acp.ErrCapabilityUnsupported
-	}
-	if _, err := a.targetSession(ctx, req.SessionID); err != nil {
-		return err
-	}
-	return adapter.Release(ctx, req)
-}
-
-func (a *RuntimeAgent) rememberTerminalRefFromEvent(event *session.Event) {
-	if a == nil || event == nil {
-		return
-	}
-	ref, ok := terminal.RefFromEvent(event)
-	if !ok {
-		return
-	}
-	displayTerminalID := ""
-	if toolPayload := session.EventToolProjection(event); toolPayload != nil {
-		displayTerminalID = strings.TrimSpace(toolPayload.ID)
-	}
-	if displayTerminalID == "" {
-		if update := session.ProtocolUpdateOf(event); update != nil {
-			displayTerminalID = strings.TrimSpace(update.ToolCallID)
-		}
-	}
-	a.rememberTerminalRef(event.SessionID, displayTerminalID, ref)
-}
-
 func (a *RuntimeAgent) setCancel(sessionID string, cancel context.CancelFunc) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1374,62 +1269,4 @@ func (l defaultSessionLoader) LoadSession(
 	return l.inner.LoadSession(ctx, req, cb)
 }
 
-func (a *RuntimeAgent) terminalAdapter() (acp.TerminalAdapter, bool) {
-	provider, ok := a.runtime.(agent.StreamProvider)
-	if !ok || provider.Streams() == nil {
-		return nil, false
-	}
-	return terminal.LocalTerminalAdapter{Streams: provider.Streams(), ResolveRef: a.resolveTerminalRef}, true
-}
-
-func (a *RuntimeAgent) rememberTerminalRef(sessionID string, displayTerminalID string, ref stream.Ref) {
-	if a == nil {
-		return
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	displayTerminalID = strings.TrimSpace(displayTerminalID)
-	ref = stream.NormalizeRef(ref)
-	if sessionID == "" || displayTerminalID == "" || ref.TerminalID == "" {
-		return
-	}
-	if ref.SessionID == "" {
-		ref.SessionID = sessionID
-	}
-	a.mu.Lock()
-	if a.terminalRefs == nil {
-		a.terminalRefs = map[string]stream.Ref{}
-	}
-	a.terminalRefs[terminalRefKey(sessionID, displayTerminalID)] = ref
-	a.mu.Unlock()
-}
-
-func (a *RuntimeAgent) resolveTerminalRef(sessionID string, terminalID string) (stream.Ref, bool) {
-	if a == nil {
-		return stream.Ref{}, false
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	terminalID = strings.TrimSpace(terminalID)
-	if sessionID == "" || terminalID == "" {
-		return stream.Ref{}, false
-	}
-	a.mu.Lock()
-	ref, ok := a.terminalRefs[terminalRefKey(sessionID, terminalID)]
-	a.mu.Unlock()
-	if !ok {
-		return stream.Ref{}, false
-	}
-	ref = stream.NormalizeRef(ref)
-	if ref.SessionID == "" {
-		ref.SessionID = sessionID
-	}
-	return ref, true
-}
-
-func terminalRefKey(sessionID string, terminalID string) string {
-	return strings.TrimSpace(sessionID) + "\x00" + strings.TrimSpace(terminalID)
-}
-
-var (
-	_ acp.Agent           = (*RuntimeAgent)(nil)
-	_ acp.TerminalAdapter = (*RuntimeAgent)(nil)
-)
+var _ acp.Agent = (*RuntimeAgent)(nil)

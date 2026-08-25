@@ -51,6 +51,18 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	}
 
 	activeSession := startEvalSession(t, context.Background(), stack, "gateway-acp-main")
+	clients := evalAppServerClients(t, stack, activeSession.UserID)
+	runtimeLease, err := stack.ControlRuntimes().Acquire(
+		context.Background(),
+		appserver.Principal{ID: activeSession.UserID},
+		appserver.ActionSessionInspect,
+		activeSession.SessionID,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("ControlRuntimes().Acquire() error = %v", err)
+	}
+	t.Cleanup(func() { _ = runtimeLease.Close(context.Background()) })
 
 	updated := handoffEvalController(t, context.Background(), stack, activeSession, "codex", "gateway-acp-main-e2e")
 	if updated.Controller.Kind != session.ControllerKindACP {
@@ -61,31 +73,27 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	if state.Controller.Kind != session.ControllerKindACP || strings.TrimSpace(state.Controller.EpochID) == "" {
 		t.Fatalf("control state = %+v", state)
 	}
-	controllerStatus, found, err := stack.Agents().ControllerStatus(context.Background(), activeSession.SessionRef)
+	controllerStatus, err := clients.Status.SessionStatus(context.Background(), appserver.StatusRequest{
+		SessionID: activeSession.SessionID,
+		Surface:   "gateway-acp-main-e2e",
+	})
 	if err != nil {
-		t.Fatalf("ACPControllerStatus() error = %v", err)
+		t.Fatalf("SessionStatus() error = %v", err)
 	}
-	if !found {
-		t.Fatal("ACPControllerStatus() found = false")
+	if got := strings.TrimSpace(controllerStatus.Session.ModeLabel); got != "Default" {
+		t.Fatalf("SessionStatus().Session.ModeLabel = %q, want Default", got)
 	}
-	if got := strings.TrimSpace(controllerStatus.Mode); got != "default" {
-		t.Fatalf("ACPControllerStatus().Mode = %q, want default", got)
-	}
-	if got := len(controllerStatus.ModeOptions); got != 2 {
-		t.Fatalf("len(ACPControllerStatus().ModeOptions) = %d, want 2", got)
-	}
-	current, err := stack.Sessions().Session(context.Background(), activeSession.SessionRef)
+	current, err := clients.Sessions.InspectSession(context.Background(), appserver.StateRequest{SessionID: activeSession.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	revision := current.Revision
-	modeResult, err := stack.ConfigurationCommands().ConfigureSessionControllerMode(
+	modeResult, err := clients.Configuration.ConfigureSessionControllerMode(
 		context.Background(),
-		appserver.Principal{ID: stack.UserID()},
 		appserver.SessionControllerModeRequest{
 			WriteBase: appserver.WriteBase{
 				OperationID:             "eval-controller-mode-plan",
-				SessionID:               current.SessionID,
+				SessionID:               activeSession.SessionID,
 				ExpectedRevision:        &revision,
 				ExpectedControllerEpoch: current.Controller.EpochID,
 			},
@@ -95,12 +103,15 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	if err != nil || modeResult.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionControllerMode(plan) = %#v, %v", modeResult, err)
 	}
-	updatedStatus, found, err := stack.Agents().ControllerStatus(context.Background(), activeSession.SessionRef)
-	if err != nil || !found {
-		t.Fatalf("ACPControllerStatus(after mode) = %#v, %v, found=%v", updatedStatus, err, found)
+	updatedStatus, err := clients.Status.SessionStatus(context.Background(), appserver.StatusRequest{
+		SessionID: activeSession.SessionID,
+		Surface:   "gateway-acp-main-e2e",
+	})
+	if err != nil {
+		t.Fatalf("SessionStatus(after mode) error = %v", err)
 	}
-	if got := strings.TrimSpace(updatedStatus.Mode); got != "plan" {
-		t.Fatalf("ACPControllerStatus(after mode).Mode = %q, want plan", got)
+	if got := strings.TrimSpace(updatedStatus.Session.ModeLabel); got != "Plan" {
+		t.Fatalf("SessionStatus(after mode).Session.ModeLabel = %q, want Plan", got)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -113,7 +124,6 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	if got := strings.TrimSpace(result.Output); got != "gateway acp main ok" {
 		t.Fatalf("RunSessionOnce() output = %q, want %q", got, "gateway acp main ok")
 	}
-
 	loaded, err := stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{
 		SessionRef: activeSession.SessionRef,
 	})
@@ -224,7 +234,7 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 				sawCommandFinal = true
 			}
 			if update.ToolCallID == "task-wait-1" &&
-				stringPtrDebug(update.Kind) == schema.ToolKindExecute &&
+				stringPtrDebug(update.Kind) == schema.ToolKindOther &&
 				stringPtrDebug(update.Status) == schema.ToolStatusCompleted &&
 				!toolContentHasTerminal(update.Content) &&
 				terminalInfoID(update.Meta) == "" &&

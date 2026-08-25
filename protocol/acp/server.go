@@ -7,11 +7,22 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 )
+
+// serverMaxFrameSize accommodates the product's 32 MB decoded aggregate image
+// limit after base64 expansion and JSON envelope overhead while keeping the
+// formerly unbounded stdio reader finite.
+const serverMaxFrameSize = 64 * 1024 * 1024
+
+// New-session clients may bind their UI/session routing only after session/new
+// resolves. Preserve the established compatibility window for ordinary ACP
+// clients that do not provide a response hook.
+const availableCommandsAfterSessionNewDelay = 100 * time.Millisecond
 
 // ServeStdio serves one agent-side ACP connection over NDJSON stdio.
 func ServeStdio(ctx context.Context, agent Agent, in io.Reader, out io.Writer) error {
@@ -22,11 +33,35 @@ func ServeStdio(ctx context.Context, agent Agent, in io.Reader, out io.Writer) e
 		return errors.New("acp: stdio streams are required")
 	}
 	conn := &serverConn{
-		agent: agent,
-		rpc:   jsonrpc.New(in, out),
+		agent:     agent,
+		lifecycle: ctx,
+		rpcReady:  make(chan struct{}),
 	}
-	if err := conn.rpc.Serve(ctx, conn.handleRequest, conn.handleNotification); err != nil {
-		if err == nil || errors.Is(err, io.EOF) {
+	connectionInput, closeInputOnFailure, err := sdkOwnedServerInput(in)
+	if err != nil {
+		return err
+	}
+	connectionOutput, closeOutputOnFailure, err := sdkOwnedServerOutput(out)
+	if err != nil {
+		closeInputOnFailure()
+		return err
+	}
+	rpc, err := acpsdk.NewConnectionWithOptions(conn.handle, connectionOutput, connectionInput, acpsdk.ConnectionOptions{
+		MaxFrameSize: serverMaxFrameSize,
+	})
+	if err != nil {
+		closeInputOnFailure()
+		closeOutputOnFailure()
+		return err
+	}
+	conn.rpc.Store(rpc)
+	close(conn.rpcReady)
+	defer rpc.Close()
+	if err := rpc.Wait(ctx); err != nil {
+		if ctx.Err() != nil {
+			return context.Cause(ctx)
+		}
+		if errors.Is(err, acpsdk.ErrPeerClosed) || errors.Is(err, acpsdk.ErrConnectionClosed) {
 			return nil
 		}
 		return err
@@ -36,19 +71,61 @@ func ServeStdio(ctx context.Context, agent Agent, in io.Reader, out io.Writer) e
 
 type serverConn struct {
 	agent          Agent
-	rpc            *jsonrpc.Conn
+	rpc            atomic.Pointer[acpsdk.Connection]
+	rpcReady       chan struct{}
+	lifecycle      context.Context
 	clientTerminal atomic.Bool
 }
 
-// New-session clients may bind the UI thread only after session/new resolves,
-// so publish the first command catalog on a short delayed standard update.
-const availableCommandsAfterSessionNewDelay = 100 * time.Millisecond
+type serverInboundRequest struct {
+	mu       sync.Mutex
+	callback func(context.Context) error
+}
 
-func (c *serverConn) handleRequest(ctx context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
-	switch msg.Method {
+func (r *serverInboundRequest) runAfterResponse(ctx context.Context) error {
+	r.mu.Lock()
+	callback := r.callback
+	r.mu.Unlock()
+	if callback == nil {
+		return nil
+	}
+	return callback(ctx)
+}
+
+func (r *serverInboundRequest) setAfterResponse(callback func(context.Context) error) error {
+	if r == nil {
+		return acpsdk.ErrAfterResponseUnavailable
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.callback != nil {
+		return acpsdk.ErrAfterResponseRegistered
+	}
+	r.callback = callback
+	return nil
+}
+
+// handle restores the ACP request/notification split that the SDK's shared
+// MethodHandler intentionally leaves to product wire adapters. Registering the
+// one response hook also provides the SDK's public request-context signal.
+func (c *serverConn) handle(ctx context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
+	inbound := &serverInboundRequest{}
+	err := acpsdk.AfterResponse(ctx, inbound.runAfterResponse)
+	switch {
+	case err == nil:
+		return c.handleRequest(ctx, inbound, method, params)
+	case errors.Is(err, acpsdk.ErrAfterResponseUnavailable):
+		return c.handleNotification(ctx, method, params)
+	default:
+		return nil, responseError(err)
+	}
+}
+
+func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRequest, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
+	switch method {
 	case MethodInitialize:
 		var req InitializeRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
+		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
 		c.clientTerminal.Store(clientCapabilityBool(req.ClientCapabilities, "terminal"))
@@ -56,214 +133,185 @@ func (c *serverConn) handleRequest(ctx context.Context, msg jsonrpc.Message) (an
 		return responseOrError(resp, err)
 	case MethodAuthenticate:
 		var req AuthenticateRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
+		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
 		resp, err := c.agent.Authenticate(ctx, req)
 		return responseOrError(resp, err)
 	case MethodSessionNew:
 		var req NewSessionRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
+		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
 		resp, err := c.agent.NewSession(ctx, req)
 		if err != nil {
 			return responseOrError(resp, err)
 		}
-		return c.withAvailableCommands(ctx, resp, resp.SessionID, availableCommandsAfterSessionNewDelay), nil
+		if err := c.afterAvailableCommands(inbound, resp.SessionID, availableCommandsAfterSessionNewDelay); err != nil {
+			return nil, responseError(err)
+		}
+		return resp, nil
 	case MethodSessionList:
 		var req SessionListRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
+		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := AsSessionListAdapter(c.agent)
+		handler, ok := c.agent.(SessionListAdapter)
 		if !ok {
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+			return nil, methodNotFound()
 		}
 		resp, err := handler.ListSessions(ctx, req)
 		return responseOrError(resp, err)
 	case MethodSessionLoad:
 		var req LoadSessionRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
+		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
 		handler, ok := c.agent.(SessionLoader)
 		if !ok {
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+			return nil, methodNotFound()
 		}
 		resp, err := handler.LoadSession(ctx, req, c)
 		if err != nil {
 			return responseOrError(resp, err)
 		}
-		return c.withAvailableCommands(ctx, resp, req.SessionID, 0), nil
+		if err := c.afterAvailableCommands(inbound, req.SessionID, 0); err != nil {
+			return nil, responseError(err)
+		}
+		return resp, nil
 	case MethodSessionResume:
 		var req ResumeSessionRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
+		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := AsResumeSessionAdapter(c.agent)
+		handler, ok := c.agent.(ResumeSessionAdapter)
 		if !ok {
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+			return nil, methodNotFound()
 		}
 		resp, err := handler.ResumeSession(ctx, req)
 		if err != nil {
 			return responseOrError(resp, err)
 		}
-		return c.withAvailableCommands(ctx, resp, req.SessionID, 0), nil
+		if err := c.afterAvailableCommands(inbound, req.SessionID, 0); err != nil {
+			return nil, responseError(err)
+		}
+		return resp, nil
 	case MethodSessionClose:
 		var req CloseSessionRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
+		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := AsCloseSessionAdapter(c.agent)
+		handler, ok := c.agent.(CloseSessionAdapter)
 		if !ok {
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+			return nil, methodNotFound()
 		}
 		resp, err := handler.CloseSession(ctx, req)
 		return responseOrError(resp, err)
 	case MethodSessionSetMode:
 		var req SetSessionModeRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
+		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := AsSessionModeAdapter(c.agent)
+		handler, ok := c.agent.(SessionModeAdapter)
 		if !ok {
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+			return nil, methodNotFound()
 		}
 		resp, err := handler.SetSessionMode(ctx, req)
 		return responseOrError(resp, err)
 	case MethodSessionSetConfig:
 		var req SetSessionConfigOptionRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
+		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := AsSessionConfigAdapter(c.agent)
+		handler, ok := c.agent.(SessionConfigAdapter)
 		if !ok {
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+			return nil, methodNotFound()
 		}
 		resp, err := handler.SetSessionConfigOption(ctx, req)
 		return responseOrError(resp, err)
 	case MethodSessionSetModel:
 		var req SetSessionModelRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
+		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := AsSessionModelAdapter(c.agent)
+		handler, ok := c.agent.(SessionModelAdapter)
 		if !ok {
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+			return nil, methodNotFound()
 		}
 		resp, err := handler.SetSessionModel(ctx, req)
 		return responseOrError(resp, err)
 	case MethodSessionPrompt:
 		var req PromptRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
+		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
 		resp, err := c.agent.Prompt(ctx, req, c.promptCallbacks())
 		return responseOrError(resp, err)
 	case MethodSessionSteering:
 		var req SessionSteeringRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
+		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
 		if err := validateSessionSteeringRequest(req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := AsSessionSteeringAdapter(c.agent)
+		handler, ok := c.agent.(SessionSteeringAdapter)
 		if !ok {
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+			return nil, methodNotFound()
 		}
 		resp, err := handler.SteerSession(ctx, req)
 		return responseOrError(resp, err)
-	case MethodTerminalOutput:
-		var req TerminalOutputRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := AsTerminalAdapter(c.agent)
-		if !ok {
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
-		}
-		resp, err := handler.Output(ctx, req)
-		return responseOrError(resp, err)
-	case MethodTerminalWaitForExit:
-		var req TerminalWaitForExitRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := AsTerminalAdapter(c.agent)
-		if !ok {
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
-		}
-		resp, err := handler.WaitForExit(ctx, req)
-		return responseOrError(resp, err)
-	case MethodTerminalKill:
-		var req TerminalKillRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := AsTerminalAdapter(c.agent)
-		if !ok {
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
-		}
-		err := handler.Kill(ctx, req)
-		return responseOrError(struct{}{}, err)
-	case MethodTerminalRelease:
-		var req TerminalReleaseRequest
-		if err := decodeParams(msg.Params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := AsTerminalAdapter(c.agent)
-		if !ok {
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
-		}
-		err := handler.Release(ctx, req)
-		return responseOrError(struct{}{}, err)
 	default:
-		return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+		return nil, methodNotFound()
 	}
 }
 
-func (c *serverConn) handleNotification(ctx context.Context, msg jsonrpc.Message) {
-	if msg.Method == MethodSessionCancel {
+func (c *serverConn) handleNotification(ctx context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
+	switch method {
+	case MethodSessionCancel:
 		var req CancelNotification
-		if err := decodeParams(msg.Params, &req); err == nil {
-			_ = c.agent.Cancel(ctx, req)
+		if err := decodeParams(params, &req); err != nil {
+			return nil, invalidParams(err)
 		}
+		return responseOrError(struct{}{}, c.agent.Cancel(ctx, req))
+	default:
+		return nil, methodNotFound()
 	}
 }
 
 func (c *serverConn) SessionUpdate(_ context.Context, notification SessionNotification) error {
-	return c.rpc.Notify(MethodSessionUpdate, notification)
+	rpc, err := c.connection(c.lifecycle)
+	if err != nil {
+		return err
+	}
+	return rpc.SendNotification(c.lifecycle, MethodSessionUpdate, notification)
 }
 
-func (c *serverConn) withAvailableCommands(ctx context.Context, payload any, sessionID string, delay time.Duration) any {
+func (c *serverConn) afterAvailableCommands(inbound *serverInboundRequest, sessionID string, delay time.Duration) error {
 	handler, ok := c.agent.(CommandProvider)
 	sessionID = strings.TrimSpace(sessionID)
 	if !ok || sessionID == "" {
-		return payload
+		return nil
 	}
-	return jsonrpc.PostWriteResult{
-		Payload: payload,
-		AfterWrite: func() {
-			emit := func() {
-				c.emitAvailableCommands(context.WithoutCancel(ctx), handler, sessionID)
-			}
-			if delay <= 0 {
+	return inbound.setAfterResponse(func(callbackCtx context.Context) error {
+		emit := func() {
+			c.emitAvailableCommands(callbackCtx, handler, sessionID)
+		}
+		if delay <= 0 {
+			emit()
+			return nil
+		}
+		go func() {
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-callbackCtx.Done():
+			case <-timer.C:
 				emit()
-				return
 			}
-			go func() {
-				timer := time.NewTimer(delay)
-				defer timer.Stop()
-				select {
-				case <-ctx.Done():
-				case <-timer.C:
-					emit()
-				}
-			}()
-		},
-	}
+		}()
+		return nil
+	})
 }
 
 func (c *serverConn) emitAvailableCommands(ctx context.Context, handler CommandProvider, sessionID string) {
@@ -281,11 +329,11 @@ func (c *serverConn) emitAvailableCommands(ctx context.Context, handler CommandP
 }
 
 func (c *serverConn) RequestPermission(ctx context.Context, req RequestPermissionRequest) (RequestPermissionResponse, error) {
-	var resp RequestPermissionResponse
-	if err := c.rpc.Call(ctx, MethodSessionReqPermission, req, &resp); err != nil {
+	rpc, err := c.connection(ctx)
+	if err != nil {
 		return RequestPermissionResponse{}, err
 	}
-	return resp, nil
+	return acpsdk.SendRequest[RequestPermissionResponse](rpc, ctx, MethodSessionReqPermission, req)
 }
 
 type serverPromptCallbacks struct {
@@ -328,47 +376,74 @@ func (c *serverConn) CreateTerminal(ctx context.Context, req CreateTerminalReque
 	if !c.clientTerminal.Load() {
 		return CreateTerminalResponse{}, ErrCapabilityUnsupported
 	}
-	var resp CreateTerminalResponse
-	if err := c.rpc.Call(ctx, MethodTerminalCreate, req, &resp); err != nil {
+	rpc, err := c.connection(ctx)
+	if err != nil {
 		return CreateTerminalResponse{}, err
 	}
-	return resp, nil
+	return acpsdk.SendRequest[CreateTerminalResponse](rpc, ctx, MethodTerminalCreate, req)
 }
 
 func (c *serverConn) TerminalOutput(ctx context.Context, req TerminalOutputRequest) (TerminalOutputResponse, error) {
 	if !c.clientTerminal.Load() {
 		return TerminalOutputResponse{}, ErrCapabilityUnsupported
 	}
-	var resp TerminalOutputResponse
-	if err := c.rpc.Call(ctx, MethodTerminalOutput, req, &resp); err != nil {
+	rpc, err := c.connection(ctx)
+	if err != nil {
 		return TerminalOutputResponse{}, err
 	}
-	return resp, nil
+	return acpsdk.SendRequest[TerminalOutputResponse](rpc, ctx, MethodTerminalOutput, req)
 }
 
 func (c *serverConn) TerminalWaitForExit(ctx context.Context, req TerminalWaitForExitRequest) (TerminalWaitForExitResponse, error) {
 	if !c.clientTerminal.Load() {
 		return TerminalWaitForExitResponse{}, ErrCapabilityUnsupported
 	}
-	var resp TerminalWaitForExitResponse
-	if err := c.rpc.Call(ctx, MethodTerminalWaitForExit, req, &resp); err != nil {
+	rpc, err := c.connection(ctx)
+	if err != nil {
 		return TerminalWaitForExitResponse{}, err
 	}
-	return resp, nil
+	return acpsdk.SendRequest[TerminalWaitForExitResponse](rpc, ctx, MethodTerminalWaitForExit, req)
 }
 
 func (c *serverConn) TerminalKill(ctx context.Context, req TerminalKillRequest) error {
 	if !c.clientTerminal.Load() {
 		return ErrCapabilityUnsupported
 	}
-	return c.rpc.Call(ctx, MethodTerminalKill, req, nil)
+	rpc, err := c.connection(ctx)
+	if err != nil {
+		return err
+	}
+	return rpc.SendRequestNoResult(ctx, MethodTerminalKill, req)
 }
 
 func (c *serverConn) TerminalRelease(ctx context.Context, req TerminalReleaseRequest) error {
 	if !c.clientTerminal.Load() {
 		return ErrCapabilityUnsupported
 	}
-	return c.rpc.Call(ctx, MethodTerminalRelease, req, nil)
+	rpc, err := c.connection(ctx)
+	if err != nil {
+		return err
+	}
+	return rpc.SendRequestNoResult(ctx, MethodTerminalRelease, req)
+}
+
+func (c *serverConn) connection(ctx context.Context) (*acpsdk.Connection, error) {
+	if rpc := c.rpc.Load(); rpc != nil {
+		return rpc, nil
+	}
+	if c.rpcReady == nil {
+		return nil, errors.New("acp: server connection is not ready")
+	}
+	select {
+	case <-c.rpcReady:
+		rpc := c.rpc.Load()
+		if rpc == nil {
+			return nil, errors.New("acp: server connection is not ready")
+		}
+		return rpc, nil
+	case <-ctx.Done():
+		return nil, context.Cause(ctx)
+	}
 }
 
 func clientCapabilityBool(caps map[string]any, key string) bool {
@@ -404,21 +479,35 @@ func validateSessionSteeringRequest(req SessionSteeringRequest) error {
 	return err
 }
 
-func responseOrError(result any, err error) (any, *jsonrpc.RPCError) {
+func responseOrError(result any, err error) (any, *acpsdk.RequestError) {
 	if err == nil {
 		return result, nil
 	}
 	if errors.Is(err, ErrCapabilityUnsupported) {
-		return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+		return nil, methodNotFound()
 	}
-	return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+	return nil, responseError(err)
 }
 
-func invalidParams(err error) *jsonrpc.RPCError {
-	return &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+func responseError(err error) *acpsdk.RequestError {
+	var requestErr *acpsdk.RequestError
+	if errors.As(err, &requestErr) && requestErr != nil {
+		return requestErr
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return acpsdk.NewRequestCancelled(map[string]any{"error": err.Error()})
+	}
+	return acpsdk.NewInternalError(map[string]any{"error": err.Error()})
+}
+
+func invalidParams(err error) *acpsdk.RequestError {
+	return &acpsdk.RequestError{Code: -32602, Message: err.Error()}
+}
+
+func methodNotFound() *acpsdk.RequestError {
+	return &acpsdk.RequestError{Code: -32601, Message: "Method not found"}
 }
 
 var _ PromptCallbacks = serverPromptCallbacks{}
 var _ TerminalClientCallbacks = serverPromptCallbacks{}
 var _ TerminalClientCallbacks = (*serverConn)(nil)
-var _ = fmt.Sprintf

@@ -11,9 +11,9 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
-	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 

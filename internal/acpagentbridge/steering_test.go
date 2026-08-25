@@ -10,8 +10,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp"
-	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 

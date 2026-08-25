@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
 func normalizeACPUpdateEvent(

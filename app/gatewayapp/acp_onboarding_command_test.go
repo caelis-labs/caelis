@@ -19,9 +19,9 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	acpclient "github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	acpclient "github.com/caelis-labs/caelis/protocol/acp/client"
-	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 

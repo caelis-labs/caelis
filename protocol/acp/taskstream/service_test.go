@@ -2,6 +2,7 @@ package taskstream
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,87 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
+
+func TestProjectRecordPreservesStandardChildToolLifecycle(t *testing.T) {
+	t.Parallel()
+
+	descriptor := controltaskstream.TaskDescriptor{
+		SessionID: "session-1", TaskID: "task-1", Handle: "grok-child", AgentHandle: "grok", Kind: task.KindSubagent,
+		State: task.StateRunning, Running: true, CurrentTurnID: "child-turn-1",
+		ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
+	}
+	completed := schema.ToolStatusCompleted
+	tests := []struct {
+		name       string
+		eventType  session.EventType
+		update     *session.ProtocolUpdate
+		wantUpdate schema.Update
+	}{
+		{
+			name:      "complete tool snapshot",
+			eventType: session.EventTypeToolCall,
+			update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+				ToolCallID:    "read-1",
+				Title:         "Read `AGENTS.md`",
+				Kind:          schema.ToolKindRead,
+				Status:        schema.ToolStatusInProgress,
+				RawInput:      map[string]any{"target_file": "AGENTS.md"},
+			},
+			wantUpdate: schema.ToolCall{
+				SessionUpdate: schema.UpdateToolCall,
+				ToolCallID:    "read-1",
+				Title:         "Read `AGENTS.md`",
+				Kind:          schema.ToolKindRead,
+				Status:        schema.ToolStatusInProgress,
+				RawInput:      map[string]any{"target_file": "AGENTS.md"},
+			},
+		},
+		{
+			name:      "sparse terminal patch",
+			eventType: session.EventTypeToolResult,
+			update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+				ToolCallID:    "read-1",
+				Status:        completed,
+			},
+			wantUpdate: schema.ToolCallUpdate{
+				SessionUpdate: schema.UpdateToolCallInfo,
+				ToolCallID:    "read-1",
+				Status:        &completed,
+			},
+		},
+	}
+	for index, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			record := controltaskstream.Record{
+				Cursor: "cursor-" + tt.name, Generation: "generation-1", Sequence: uint64(index + 1), Task: descriptor,
+				Frame: &sdkstream.Frame{
+					Ref:     sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "child-turn-1"},
+					Running: true, Cursor: sdkstream.Cursor{Events: int64(index + 1)},
+					Event: &session.Event{
+						Type: tt.eventType,
+						Scope: &session.EventScope{Participant: session.ParticipantRef{
+							ID: "grok-child", Kind: session.ParticipantKindSubagent, DelegationID: "task-1",
+						}},
+						Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: tt.update},
+					},
+				},
+			}
+			projected := projectRecord(record)
+			if len(projected) != 1 {
+				t.Fatalf("projectRecord() = %#v, want one tool envelope", projected)
+			}
+			if projected[0].Scope != eventstream.ScopeSubagent || projected[0].ScopeID != "task-1" ||
+				projected[0].ParentTool == nil || projected[0].ParentTool.ToolCallID != "spawn-1" {
+				t.Fatalf("projected child identity = %#v", projected[0])
+			}
+			if !reflect.DeepEqual(projected[0].Update, tt.wantUpdate) {
+				t.Fatalf("projected tool update = %#v, want %#v", projected[0].Update, tt.wantUpdate)
+			}
+		})
+	}
+}
 
 func TestIdenticalChildPayloadsRemainBoundToTheirTaskStreams(t *testing.T) {
 	t.Parallel()

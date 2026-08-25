@@ -3,7 +3,7 @@ package acputil
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
 func SelectedOutcome(

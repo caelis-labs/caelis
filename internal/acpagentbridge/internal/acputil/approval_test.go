@@ -3,7 +3,7 @@ package acputil
 import (
 	"testing"
 
-	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
 func TestToolCallNamePreservesGenericExecuteKind(t *testing.T) {

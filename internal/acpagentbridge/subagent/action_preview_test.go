@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
 func TestRunnerActionSummaryKeepsFinalizingIntentAcrossSparseToolUpdate(t *testing.T) {

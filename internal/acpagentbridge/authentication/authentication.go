@@ -10,9 +10,8 @@ import (
 	"time"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
-	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -121,7 +120,7 @@ func IsRecoveryError(err error) bool {
 
 // IsRequired reports the stable ACP authentication-required error code.
 func IsRequired(err error) bool {
-	code, ok := jsonrpc.ErrorCode(err)
+	code, ok := client.ErrorCode(err)
 	return ok && code == client.ErrorCodeAuthRequired
 }
 

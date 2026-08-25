@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
 // Client is the ACP session-configuration subset used by Apply.

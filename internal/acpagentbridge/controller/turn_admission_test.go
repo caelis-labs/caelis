@@ -14,9 +14,9 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
-	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 )
 
 func TestControllerRunRejectsOverlappingTurns(t *testing.T) {

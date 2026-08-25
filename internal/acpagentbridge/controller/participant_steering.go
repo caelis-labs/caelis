@@ -11,8 +11,8 @@ import (
 	sdkcontroller "github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
 func (m *Manager) SteerParticipant(ctx context.Context, req sdkcontroller.ParticipantSteerRequest) error {

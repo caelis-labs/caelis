@@ -315,8 +315,8 @@ layout only after the standard kind has selected the category. Main transcript
 blocks, participant blocks, and detached child overlays consume this one
 derived presentation model and vary only their container controls.
 
-One maintained Grok compatibility profile is owned by
-`protocol/acp/client`. An inbound `x.ai/tool` object must match
+One maintained Grok compatibility profile is owned by the private external-ACP
+client adapter in `internal/acpagentbridge/client`. An inbound `x.ai/tool` object must match
 `namespace=grok_build`, `kind=list`, and boolean `read_only=true` exactly. Only
 then may a missing kind on a complete tool call or an explicit generic `other`
 kind be normalized to `read`; an omitted kind on a sparse tool update remains

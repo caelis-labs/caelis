@@ -8,6 +8,7 @@ import (
 	goruntime "runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,10 +23,46 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/protocol/acp"
-	"github.com/caelis-labs/caelis/protocol/acp/fixture"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	acpsemantic "github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
+
+type promptRecorder struct {
+	mu       sync.Mutex
+	updates  []acp.SessionNotification
+	response acp.RequestPermissionResponse
+}
+
+func newPromptRecorder(response acp.RequestPermissionResponse) *promptRecorder {
+	return &promptRecorder{response: response}
+}
+
+func (r *promptRecorder) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.updates = append(r.updates, notification)
+	return nil
+}
+
+func (r *promptRecorder) RequestPermission(_ context.Context, _ acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	return r.response, nil
+}
+
+func (r *promptRecorder) Notifications() []acp.SessionNotification {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.updates)
+}
+
+func updateKinds(items []acp.SessionNotification) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.Update != nil {
+			out = append(out, strings.TrimSpace(item.Update.SessionUpdateType()))
+		}
+	}
+	return out
+}
 
 func TestBuiltInProjectionAndExternalWireShareSDKSemantics(t *testing.T) {
 	t.Parallel()
@@ -162,7 +199,7 @@ func TestRuntimeAgentConformanceReplayOrdering(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AppendEvent(assistant) error = %v", err)
 	}
-	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
+	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
 	})
 	if _, err := agent.LoadSession(ctx, acp.LoadSessionRequest{
@@ -171,14 +208,14 @@ func TestRuntimeAgentConformanceReplayOrdering(t *testing.T) {
 	}, rec); err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
-	if got, want := fixture.UpdateKinds(rec.Notifications()), []string{acp.UpdateUserMessage, acp.UpdateAgentMessage}; !slices.Equal(got, want) {
+	if got, want := updateKinds(rec.Notifications()), []string{acp.UpdateUserMessage, acp.UpdateAgentMessage}; !slices.Equal(got, want) {
 		t.Fatalf("replay update kinds = %v, want %v", got, want)
 	}
 }
 
 func TestRuntimeAgentConformancePromptOrdering(t *testing.T) {
 	agent, _ := newTestRuntimeAgent(t, staticModel{text: "ok"})
-	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
+	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
 	})
 	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
@@ -191,7 +228,7 @@ func TestRuntimeAgentConformancePromptOrdering(t *testing.T) {
 	}, rec); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
-	kinds := fixture.UpdateKinds(rec.Notifications())
+	kinds := updateKinds(rec.Notifications())
 	if slices.Contains(kinds, acp.UpdateUserMessage) {
 		t.Fatalf("prompt update kinds = %v, live session/prompt should not echo user_message_chunk", kinds)
 	}
@@ -202,7 +239,7 @@ func TestRuntimeAgentConformancePromptOrdering(t *testing.T) {
 
 func TestRuntimeAgentConformancePromptWithImageDoesNotEchoUserMessage(t *testing.T) {
 	agent, _ := newTestRuntimeAgent(t, staticModel{text: "ok", imageInput: true})
-	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
+	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
 	})
 	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
@@ -218,7 +255,7 @@ func TestRuntimeAgentConformancePromptWithImageDoesNotEchoUserMessage(t *testing
 	}, rec); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
-	kinds := fixture.UpdateKinds(rec.Notifications())
+	kinds := updateKinds(rec.Notifications())
 	if slices.Contains(kinds, acp.UpdateUserMessage) {
 		t.Fatalf("prompt update kinds = %v, image prompts should not echo user text back to ACP clients", kinds)
 	}
@@ -258,7 +295,7 @@ func TestRuntimeAgentConformanceEmitsToolCallBeforeToolUpdate(t *testing.T) {
 		},
 	}
 	agent, _ := newTestRuntimeAgentWithTools(t, llm, []tool.Tool{echoTool})
-	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
+	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
 	})
 	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
@@ -307,7 +344,7 @@ func TestRuntimeAgentConformanceEmitsRunCommandToolCallBeforeTerminalUpdates(t *
 		t.Fatalf("shell.NewRunCommand() error = %v", err)
 	}
 	agent, _ := newTestRuntimeAgentWithTools(t, llm, []tool.Tool{runCommandTool})
-	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
+	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
 	})
 	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
@@ -350,7 +387,7 @@ func TestRuntimeAgentConformanceEmitsRunCommandToolCallBeforeTerminalUpdates(t *
 
 func TestRuntimeAgentConformanceStreamsDeltasWithoutFinalDuplicate(t *testing.T) {
 	agent, _ := newTestRuntimeAgent(t, streamingTextModel{})
-	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
+	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
 	})
 	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
@@ -375,7 +412,7 @@ func TestRuntimeAgentConformanceStreamsDeltasWithoutFinalDuplicate(t *testing.T)
 
 func TestRuntimeAgentConformanceForwardsAdjacentStreamChunksVerbatim(t *testing.T) {
 	agent, _ := newTestRuntimeAgent(t, duplicateStreamingTextModel{})
-	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
+	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
 	})
 	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
@@ -402,7 +439,7 @@ func TestRuntimeAgentConformanceCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
+	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
 	})
 	done := make(chan acp.PromptResponse, 1)

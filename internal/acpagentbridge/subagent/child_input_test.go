@@ -19,8 +19,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
-	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 

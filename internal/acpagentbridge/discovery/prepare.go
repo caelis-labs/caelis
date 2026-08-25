@@ -9,9 +9,9 @@ import (
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
 // PrepareState classifies the result of one non-prompting ACP prepare probe.

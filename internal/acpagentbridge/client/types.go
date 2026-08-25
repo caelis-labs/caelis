@@ -1,3 +1,5 @@
+// Package client adapts the product-neutral ACP SDK to Caelis's external-Agent
+// process and ingress policy. Transport and request lifecycle remain SDK-owned.
 package client
 
 import (
@@ -26,13 +28,6 @@ const (
 	MethodSessionSteering      = schema.MethodSessionSteering
 	MethodSessionUpdate        = schema.MethodSessionUpdate
 	MethodSessionReqPermission = schema.MethodSessionReqPermission
-	MethodReadTextFile         = schema.MethodReadTextFile
-	MethodWriteTextFile        = schema.MethodWriteTextFile
-	MethodTerminalCreate       = schema.MethodTerminalCreate
-	MethodTerminalOutput       = schema.MethodTerminalOutput
-	MethodTerminalWaitForExit  = schema.MethodTerminalWaitForExit
-	MethodTerminalKill         = schema.MethodTerminalKill
-	MethodTerminalRelease      = schema.MethodTerminalRelease
 )
 
 const (
@@ -101,20 +96,6 @@ type PermissionOption = schema.PermissionOption
 type RequestPermissionRequest = schema.RequestPermissionRequest
 type RequestPermissionResponse = schema.RequestPermissionResponse
 type PermissionOutcome = schema.PermissionOutcome
-type EnvVariable = schema.EnvVariable
-type CreateTerminalRequest = schema.CreateTerminalRequest
-type CreateTerminalResponse = schema.CreateTerminalResponse
-type TerminalOutputRequest = schema.TerminalOutputRequest
-type TerminalExitStatus = schema.TerminalExitStatus
-type TerminalOutputResponse = schema.TerminalOutputResponse
-type WaitForTerminalExitRequest = schema.TerminalWaitForExitRequest
-type WaitForTerminalExitResponse = schema.TerminalWaitForExitResponse
-type KillTerminalRequest = schema.TerminalKillRequest
-type ReleaseTerminalRequest = schema.TerminalReleaseRequest
-type ReadTextFileRequest = schema.ReadTextFileRequest
-type ReadTextFileResponse = schema.ReadTextFileResponse
-type WriteTextFileRequest = schema.WriteTextFileRequest
-type WriteTextFileResponse = schema.WriteTextFileResponse
 type TextContent = schema.TextContent
 type ImageContent = schema.ImageContent
 type RawUpdate = schema.RawUpdate
@@ -132,17 +113,14 @@ const (
 	SessionSteeringIdlePromptRequired = schema.SessionSteeringIdlePromptRequired
 )
 
-type CancelResponse struct{}
-
-// SessionNotification stays client-local so the raw update payload remains a
-// json.RawMessage for delayed, type-specific decoding.
+// SessionNotification retains the raw update union until provider
+// compatibility has been applied.
 type SessionNotification struct {
 	SessionID string          `json:"sessionId"`
 	Update    json.RawMessage `json:"update"`
 }
 
-// ContentChunk stays client-local for the same reason: callers want access to
-// the raw content payload before choosing a concrete content shape.
+// ContentChunk retains the raw content union for delayed decoding.
 type ContentChunk struct {
 	SessionUpdate string          `json:"sessionUpdate"`
 	Content       json.RawMessage `json:"content"`

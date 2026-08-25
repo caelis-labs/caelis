@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-
-	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
 )
 
 func TestServerRoutesSessionSteeringWithoutPromptCallbacks(t *testing.T) {
@@ -16,16 +14,13 @@ func TestServerRoutesSessionSteeringWithoutPromptCallbacks(t *testing.T) {
 	request := SessionSteeringRequest{
 		SessionID: "session-1",
 		Prompt: []json.RawMessage{
-			jsonrpc.MustMarshalRaw(TextContent{Type: "text", Text: "adjust the plan"}),
+			mustMarshalTestRaw(TextContent{Type: "text", Text: "adjust the plan"}),
 		},
 		Meta: map[string]json.RawMessage{
 			"steering": json.RawMessage(`{"idleBehavior":"promptRequired","future":42}`),
 		},
 	}
-	result, rpcErr := conn.handleRequest(context.Background(), jsonrpc.Message{
-		Method: MethodSessionSteering,
-		Params: jsonrpc.MustMarshalRaw(request),
-	})
+	result, rpcErr := conn.handleRequest(context.Background(), nil, MethodSessionSteering, mustMarshalTestRaw(request))
 	if rpcErr != nil {
 		t.Fatalf("steering RPC error = %#v", rpcErr)
 	}
@@ -45,13 +40,15 @@ func TestServerRejectsSessionSteeringWithoutAdapter(t *testing.T) {
 	t.Parallel()
 
 	conn := &serverConn{agent: commandAgent{}}
-	_, rpcErr := conn.handleRequest(context.Background(), jsonrpc.Message{
-		Method: MethodSessionSteering,
-		Params: jsonrpc.MustMarshalRaw(SessionSteeringRequest{
+	_, rpcErr := conn.handleRequest(
+		context.Background(),
+		nil,
+		MethodSessionSteering,
+		mustMarshalTestRaw(SessionSteeringRequest{
 			SessionID: "session-1",
 			Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"hello"}`)},
 		}),
-	})
+	)
 	if rpcErr == nil || rpcErr.Code != -32601 {
 		t.Fatalf("steering RPC error = %#v, want method not found", rpcErr)
 	}
@@ -66,8 +63,8 @@ func TestServerRejectsMalformedSessionSteeringParams(t *testing.T) {
 		params json.RawMessage
 	}{
 		{name: "wrong prompt type", params: json.RawMessage(`{"sessionId":"session-1","prompt":"hello"}`)},
-		{name: "missing session", params: jsonrpc.MustMarshalRaw(SessionSteeringRequest{Prompt: []json.RawMessage{json.RawMessage(`{"type":"text","text":"hello"}`)}})},
-		{name: "empty prompt", params: jsonrpc.MustMarshalRaw(SessionSteeringRequest{SessionID: "session-1"})},
+		{name: "missing session", params: mustMarshalTestRaw(SessionSteeringRequest{Prompt: []json.RawMessage{json.RawMessage(`{"type":"text","text":"hello"}`)}})},
+		{name: "empty prompt", params: mustMarshalTestRaw(SessionSteeringRequest{SessionID: "session-1"})},
 		{name: "steering options are null", params: json.RawMessage(`{"sessionId":"session-1","prompt":[{"type":"text","text":"hello"}],"_meta":{"steering":null}}`)},
 		{name: "idle behavior is not a string", params: json.RawMessage(`{"sessionId":"session-1","prompt":[{"type":"text","text":"hello"}],"_meta":{"steering":{"idleBehavior":true}}}`)},
 		{name: "idle behavior has surrounding whitespace", params: json.RawMessage(`{"sessionId":"session-1","prompt":[{"type":"text","text":"hello"}],"_meta":{"steering":{"idleBehavior":" promptRequired "}}}`)},
@@ -76,15 +73,20 @@ func TestServerRejectsMalformedSessionSteeringParams(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, rpcErr := conn.handleRequest(context.Background(), jsonrpc.Message{
-				Method: MethodSessionSteering,
-				Params: tt.params,
-			})
+			_, rpcErr := conn.handleRequest(context.Background(), nil, MethodSessionSteering, tt.params)
 			if rpcErr == nil || rpcErr.Code != -32602 {
 				t.Fatalf("steering RPC error = %#v, want invalid params", rpcErr)
 			}
 		})
 	}
+}
+
+func mustMarshalTestRaw(value any) json.RawMessage {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return raw
 }
 
 type steeringWireAgent struct {

@@ -153,6 +153,10 @@ HOME="$run_dir/acpx-home" "${acpx_base[@]}" prompt -s typed \
 HOME="$run_dir/acpx-home" "${acpx_base[@]}" prompt -s typed \
   "Use RunCommand, not Write or Patch, to run: printf '%s' ACP_TASK_FILE_OK > $run_dir/workspace/acp-task.txt && cat $run_dir/workspace/acp-task.txt. If Host permission is required, retry the same command with require_escalated and a concrete justification. Then reply exactly ACP_TASK_OK." \
   >"$run_dir/logs/prompt-task.jsonl" 2>"$run_dir/logs/prompt-task.stderr" || acpx_status=1
+# Prompt commands share the queue owner, while session/list opens a fresh ACP
+# connection. Let the one-second owner TTL expire before starting a second Host
+# against the same ephemeral Store.
+sleep 2
 HOME="$run_dir/acpx-home" "${acpx_base[@]}" sessions list --filter-cwd "$run_dir/workspace" \
   >"$run_dir/logs/session-list.jsonl" 2>"$run_dir/logs/session-list.stderr" || acpx_status=1
 HOME="$run_dir/acpx-home" "${acpx_base[@]}" sessions close typed \

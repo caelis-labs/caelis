@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
-	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
 type recordingAuthenticator struct {
@@ -466,10 +466,10 @@ func TestRecoverOperationExplicitTerminalRequiresRestart(t *testing.T) {
 }
 
 func authRequiredError() error {
-	return jsonrpc.FormatRPCError(&jsonrpc.RPCError{
+	return &acpsdk.RequestError{
 		Code:    client.ErrorCodeAuthRequired,
 		Message: "Authentication required",
-	})
+	}
 }
 
 func agentAuthenticationMethods() []controlagents.AuthenticationMethod {

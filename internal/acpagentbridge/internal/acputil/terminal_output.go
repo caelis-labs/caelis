@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 

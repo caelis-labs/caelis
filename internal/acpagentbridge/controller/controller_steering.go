@@ -12,7 +12,7 @@ import (
 	sdkcontroller "github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
 func (m *Manager) SteerController(ctx context.Context, req sdkcontroller.ControllerSteerRequest) error {

@@ -47,7 +47,6 @@ func NewFromClients(cfg ClientsConfig) (*runtimeacp.RuntimeAgent, error) {
 		SessionClient:              clients.Sessions,
 		ConfigurationClient:        clients.Configuration,
 		PresentationClient:         clients.Presentation,
-		TerminalClient:             clients.Terminal,
 		AppName:                    firstNonEmpty(cfg.AppName, "caelis"),
 		UserID:                     firstNonEmpty(cfg.UserID, "local-user"),
 		WorkspaceKey:               strings.TrimSpace(cfg.WorkspaceKey),

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
 // Service discovers the catalog declared by a temporary empty ACP session.

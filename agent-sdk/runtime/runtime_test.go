@@ -2054,6 +2054,108 @@ func TestRuntimeACPControllerInterruptedTurnDoesNotPersistLocalReplaySnapshot(t 
 	}
 }
 
+func TestRuntimeACPControllerUnknownOutcomePersistsJournalAndAllowsNextTurn(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-acp-unknown-outcome")
+	activeSession, err := sessions.BindController(context.Background(), session.BindControllerRequest{
+		SessionRef: activeSession.SessionRef,
+		Binding: session.ControllerBinding{
+			Kind:            session.ControllerKindACP,
+			ControllerID:    "acp-main",
+			AgentName:       "codex",
+			RemoteSessionID: "remote-main",
+			EpochID:         "epoch-unknown",
+			Source:          "test",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BindController() error = %v", err)
+	}
+	calls := 0
+	testController := stubACPController{
+		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
+			calls++
+			handle := newTestControllerTurnHandle(nil)
+			if calls == 1 {
+				handle.publishError(errorcode.New(errorcode.UnknownOutcome, "remote prompt outcome cannot be proven"))
+			}
+			handle.finish()
+			return controller.TurnResult{Handle: handle}, nil
+		},
+	}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions:       sessions,
+		AgentFactory:   chat.Factory{SystemPrompt: "Be terse."},
+		Controllers:    testController,
+		RunIDGenerator: func() string { return fmt.Sprintf("run-unknown-%d", calls+1) },
+	}))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	first, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "first input",
+	})
+	if err != nil {
+		t.Fatalf("Run(first) error = %v", err)
+	}
+	if _, err := drainRunnerEvents(t, first.Handle); !errorcode.Is(err, errorcode.UnknownOutcome) {
+		t.Fatalf("first Turn error = %v, want unknown_outcome", err)
+	}
+	waiter, ok := first.Handle.(agent.RunnerCompletionWaiter)
+	if !ok {
+		t.Fatal("first Turn handle does not expose completion waiting")
+	}
+	completionCtx, cancelCompletion := context.WithTimeout(context.Background(), time.Second)
+	defer cancelCompletion()
+	if err := waiter.WaitCompletion(completionCtx); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
+	}
+
+	paged, ok := sessions.(session.PagedReader)
+	if !ok {
+		t.Fatal("Session service does not expose durable event pages")
+	}
+	page, err := paged.EventsPage(context.Background(), session.EventPageRequest{
+		SessionRef: activeSession.SessionRef,
+		Limit:      100,
+		Visibility: session.EventPageAllDurable,
+	})
+	if err != nil {
+		t.Fatalf("EventsPage() error = %v", err)
+	}
+	latest := map[session.JournalKind]session.ExecutionRecord{}
+	for _, event := range page.Events {
+		if event == nil || event.Journal == nil || event.Journal.Execution == nil {
+			continue
+		}
+		record := *event.Journal.Execution
+		if previous, exists := latest[record.Kind]; !exists || record.Revision > previous.Revision {
+			latest[record.Kind] = record
+		}
+	}
+	for _, kind := range []session.JournalKind{session.JournalKindRun, session.JournalKindTurn} {
+		if got := latest[kind].Status; got != session.ExecutionUnknownOutcome {
+			t.Fatalf("latest %s journal status = %q, want %q", kind, got, session.ExecutionUnknownOutcome)
+		}
+	}
+
+	second, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "new input after recovery",
+	})
+	if err != nil {
+		t.Fatalf("Run(second) error = %v", err)
+	}
+	if _, err := drainRunnerEvents(t, second.Handle); err != nil {
+		t.Fatalf("second Turn error = %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("controller calls = %d, want two independently admitted Turns", calls)
+	}
+}
+
 func TestRuntimeRunReplaysPersistedHistoryFromFileStore(t *testing.T) {
 	t.Parallel()
 

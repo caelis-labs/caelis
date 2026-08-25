@@ -5,21 +5,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -52,6 +56,25 @@ func mustParticipantPlacement(t *testing.T, agentName string) placement.Placemen
 		t.Fatal(err)
 	}
 	return frozen
+}
+
+func closeActiveControllerClient(t *testing.T, manager *Manager, sessionID string) {
+	t.Helper()
+	manager.mu.RLock()
+	run := manager.controllers[sessionID]
+	manager.mu.RUnlock()
+	if run == nil {
+		t.Fatalf("controller run for %q is unavailable", sessionID)
+	}
+	run.mu.Lock()
+	acpClient := run.client
+	run.mu.Unlock()
+	if acpClient == nil {
+		t.Fatalf("controller client for %q is unavailable", sessionID)
+	}
+	if err := acpClient.Close(context.Background()); err != nil {
+		t.Fatalf("close controller client for %q: %v", sessionID, err)
+	}
 }
 
 func TestNormalizeACPUpdateEventPreservesContentChunkMessageIDAndMeta(t *testing.T) {
@@ -1144,7 +1167,7 @@ func TestManagerSetControllerModelReportsUnknownAfterPartialRemoteEffect(t *test
 	}
 }
 
-func TestManagerRunTurnReconnectsAfterBrokenPipe(t *testing.T) {
+func TestManagerRunTurnReportsUnknownAfterPossiblePromptSubmissionAndRecoversNextTurn(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	registry, err := subagent.NewRegistry([]subagent.AgentConfig{{
@@ -1203,13 +1226,159 @@ func TestManagerRunTurnReconnectsAfterBrokenPipe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
+	var turnErr error
 	for _, eventErr := range turn.Handle.Events() {
 		if eventErr != nil {
-			t.Fatalf("turn event error = %v", eventErr)
+			turnErr = eventErr
+		}
+	}
+	if turnErr == nil {
+		t.Fatal("turn error = nil, want ambiguous submitted prompt failure")
+	}
+	if !errorcode.Is(turnErr, errorcode.UnknownOutcome) {
+		t.Fatalf("turn error = %v, want unknown_outcome", turnErr)
+	}
+	if starts != 1 {
+		t.Fatalf("client starts = %d, want no reconnect after possible submission", starts)
+	}
+
+	recovery, err := manager.RunTurn(ctx, controller.TurnRequest{
+		SessionRef: parentSession.SessionRef,
+		Session:    parentSession,
+		TurnID:     "turn-recovery",
+		Input:      "continue with new input",
+	})
+	if err != nil {
+		t.Fatalf("RunTurn(recovery) error = %v", err)
+	}
+	for _, eventErr := range recovery.Handle.Events() {
+		if eventErr != nil {
+			t.Fatalf("recovery turn event error = %v", eventErr)
 		}
 	}
 	if starts != 2 {
-		t.Fatalf("client starts = %d, want activate plus reconnect", starts)
+		t.Fatalf("client starts after recovery = %d, want one reconnect for the new Turn", starts)
+	}
+}
+
+func TestManagerRunTurnCancelAfterPromptSubmissionReportsUnknownAndKeepsAdmissionOpen(t *testing.T) {
+	clientSide, peerSide := net.Pipe()
+	firstPromptReceived := make(chan struct{})
+	releaseFirstPrompt := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseFirst := func() {
+		releaseOnce.Do(func() { close(releaseFirstPrompt) })
+	}
+	var promptCalls atomic.Int32
+	peer := jsonrpc.New(peerSide, peerSide)
+	peerCtx, cancelPeer := context.WithCancel(context.Background())
+	peerDone := make(chan error, 1)
+	go func() {
+		peerDone <- peer.Serve(peerCtx, func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
+			if msg.Method != client.MethodSessionPrompt {
+				return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+			}
+			if promptCalls.Add(1) == 1 {
+				close(firstPromptReceived)
+				<-releaseFirstPrompt
+			}
+			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+		}, nil)
+	}()
+	acpClient, err := client.NewStreamClient(clientSide, clientSide, client.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		releaseFirst()
+		cancelPeer()
+		_ = acpClient.Close(context.Background())
+		_ = peer.Close()
+		_ = clientSide.Close()
+		_ = peerSide.Close()
+		select {
+		case <-peerDone:
+		case <-time.After(time.Second):
+			t.Error("ACP test peer did not stop")
+		}
+	})
+
+	registry, err := subagent.NewRegistry([]subagent.AgentConfig{{Name: "helper", Command: "helper-acp"}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	manager, err := NewManager(Config{Registry: registry})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	manager.startClient = func(
+		context.Context,
+		string,
+		subagent.AgentConfig,
+		string,
+		func(client.UpdateEnvelope),
+		func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		return acpClient, "remote-1", controllerClientState{}, nil
+	}
+	parentSession := session.Session{
+		SessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "cancel-after-submit", WorkspaceKey: "ws"},
+		CWD:        t.TempDir(),
+	}
+	if _, err := manager.Activate(context.Background(), controller.HandoffRequest{
+		Session: parentSession,
+		Agent:   "helper",
+		Source:  "test",
+	}); err != nil {
+		t.Fatalf("Activate() error = %v", err)
+	}
+
+	first, err := manager.RunTurn(context.Background(), controller.TurnRequest{
+		SessionRef: parentSession.SessionRef,
+		Session:    parentSession,
+		TurnID:     "turn-cancelled-after-submit",
+		Input:      "first input",
+	})
+	if err != nil {
+		t.Fatalf("RunTurn(first) error = %v", err)
+	}
+	select {
+	case <-firstPromptReceived:
+	case <-time.After(time.Second):
+		t.Fatal("first prompt was not submitted")
+	}
+	if got := first.Handle.Cancel().Status; got != controller.CancelStatusCancelled {
+		t.Fatalf("Cancel() status = %q, want %q", got, controller.CancelStatusCancelled)
+	}
+	var firstErr error
+	for _, eventErr := range first.Handle.Events() {
+		if eventErr != nil {
+			firstErr = eventErr
+		}
+	}
+	if !errorcode.Is(firstErr, errorcode.UnknownOutcome) {
+		t.Fatalf("first Turn error = %v, want unknown_outcome", firstErr)
+	}
+
+	releaseFirst()
+	secondCtx, cancelSecond := context.WithTimeout(context.Background(), time.Second)
+	defer cancelSecond()
+	second, err := manager.RunTurn(secondCtx, controller.TurnRequest{
+		SessionRef: parentSession.SessionRef,
+		Session:    parentSession,
+		TurnID:     "turn-after-unknown",
+		Input:      "new input",
+	})
+	if err != nil {
+		t.Fatalf("RunTurn(second) error = %v", err)
+	}
+	for _, eventErr := range second.Handle.Events() {
+		if eventErr != nil {
+			t.Fatalf("second Turn event error = %v", eventErr)
+		}
+	}
+	if got := promptCalls.Load(); got != 2 {
+		t.Fatalf("prompt calls = %d, want two independently admitted Turns", got)
 	}
 }
 
@@ -1330,6 +1499,7 @@ func TestManagerRunTurnReconnectReappliesSelectedModelAndEffort(t *testing.T) {
 	if status.Model != "gpt-next" || status.ReasoningEffort != "high" {
 		t.Fatalf("status model/effort = %q/%q, want gpt-next/high", status.Model, status.ReasoningEffort)
 	}
+	closeActiveControllerClient(t, manager, parentSession.SessionID)
 	turn, err := manager.RunTurn(ctx, controller.TurnRequest{
 		SessionRef: parentSession.SessionRef,
 		Session:    parentSession,
@@ -1409,6 +1579,7 @@ func TestManagerRunTurnReconnectReappliesModeWhenResumeReportsEmptyCurrentMode(t
 	if status.Mode != "code" {
 		t.Fatalf("status.Mode = %q, want code", status.Mode)
 	}
+	closeActiveControllerClient(t, manager, parentSession.SessionID)
 	turn, err := manager.RunTurn(ctx, controller.TurnRequest{
 		SessionRef: parentSession.SessionRef,
 		Session:    parentSession,

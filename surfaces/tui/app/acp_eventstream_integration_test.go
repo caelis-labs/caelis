@@ -14,7 +14,7 @@ import (
 	sdkmodel "github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	acpclient "github.com/caelis-labs/caelis/protocol/acp/client"
+	acpclient "github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"

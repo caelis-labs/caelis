@@ -649,6 +649,7 @@ func (m *scriptedInteractiveCommandLLM) Generate(_ context.Context, req *model.R
 					"command":       "printf 'interactive ready\\n'; while IFS= read -r line; do printf 'echo:%s\\n' \"$line\"; sleep 0.25; printf 'later:%s\\n' \"$line\"; done",
 					"workdir":       ".",
 					"yield_time_ms": 5,
+					"tty":           true,
 				})),
 			}}, "")
 		case 2:

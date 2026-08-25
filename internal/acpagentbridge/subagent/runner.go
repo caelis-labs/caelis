@@ -18,12 +18,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
-	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
@@ -368,7 +367,7 @@ func (r *Runner) dispatchInitialPrompt(
 		if prepared != nil {
 			prepared.Abandon()
 		}
-		if jsonrpc.DispatchMayHaveCommitted(err) {
+		if client.DispatchMayHaveCommitted(err) {
 			err = joinChildInputUnknown("internal/acpagentbridge/subagent: initial child prompt dispatch outcome cannot be proven", err)
 		}
 		go func() {

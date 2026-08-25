@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
 // BuildPromptParts converts provider-neutral prompt content into standard ACP

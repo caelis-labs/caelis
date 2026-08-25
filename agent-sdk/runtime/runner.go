@@ -377,6 +377,8 @@ func isCancellationError(ctx context.Context, err error) bool {
 
 func executionJournalStatus(ctx context.Context, err error) session.ExecutionStatus {
 	switch {
+	case errorcode.Is(err, errorcode.UnknownOutcome):
+		return session.ExecutionUnknownOutcome
 	case errorcode.Is(err, errorcode.Interrupted):
 		return session.ExecutionInterrupted
 	case isCancellationError(ctx, err):

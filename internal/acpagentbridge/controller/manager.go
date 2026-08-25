@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"strings"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
@@ -22,12 +22,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
@@ -309,8 +309,14 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 
 func (m *Manager) promptControllerRun(ctx context.Context, run *controllerRun, prompt []json.RawMessage) error {
 	if _, err := run.promptParts(ctx, prompt); err != nil {
+		if client.DispatchMayHaveCommitted(err) {
+			return errorcode.Wrap(errorcode.UnknownOutcome, "internal/acpagentbridge/controller: controller prompt outcome cannot be proven", err)
+		}
 		if !isACPClientConnectionError(err) {
 			return err
+		}
+		if !client.SubmissionProvenNotStarted(err) {
+			return errorcode.Wrap(errorcode.UnknownOutcome, "internal/acpagentbridge/controller: controller prompt outcome cannot be proven", err)
 		}
 		if reconnectErr := m.reconnectControllerRun(ctx, run); reconnectErr != nil {
 			return fmt.Errorf("%w; reconnect failed: %w", err, reconnectErr)
@@ -636,17 +642,7 @@ func (r *participantRun) promptParts(ctx context.Context, prompt []json.RawMessa
 }
 
 func isACPClientConnectionError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) {
-		return true
-	}
-	text := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(text, "broken pipe") ||
-		strings.Contains(text, "connection closed before response") ||
-		strings.Contains(text, "file already closed") ||
-		strings.Contains(text, "use of closed file")
+	return client.IsConnectionError(err)
 }
 
 func (m *Manager) Attach(ctx context.Context, req controller.AttachRequest) (session.ParticipantBinding, error) {

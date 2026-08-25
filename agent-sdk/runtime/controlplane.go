@@ -121,12 +121,16 @@ func (r *Runtime) executeACPControllerTurn(
 		}
 	}()
 	completed := false
+	var terminalErr error
 	defer func() {
 		status := session.ExecutionFailed
 		reason := "controller turn failed"
 		if completed {
 			status = session.ExecutionSucceeded
 			reason = ""
+		} else if terminalErr != nil {
+			status = executionJournalStatus(ctx, terminalErr)
+			reason = terminalErr.Error()
 		} else if ctx.Err() != nil {
 			status = session.ExecutionCancelled
 			reason = ctx.Err().Error()
@@ -139,6 +143,7 @@ func (r *Runtime) executeACPControllerTurn(
 
 	inputEvent, inputErr := buildInputEvent(activeSession, turnID, req.InputKind, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputCompaction)
 	if inputErr != nil {
+		terminalErr = inputErr
 		r.setRunState(ref.SessionID, agent.RunState{
 			Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID,
 			LastError: inputErr.Error(), UpdatedAt: r.now(),
@@ -153,6 +158,7 @@ func (r *Runtime) executeACPControllerTurn(
 			Event:         inputEvent,
 		})
 		if err != nil {
+			terminalErr = err
 			r.setRunState(ref.SessionID, agent.RunState{
 				Status:      interruptedOrFailedStatus(ctx, err),
 				ActiveRunID: runID,
@@ -183,6 +189,7 @@ func (r *Runtime) executeACPControllerTurn(
 	}
 	contextTransfer, contextSeq, err := r.buildControllerTurnContext(ctx, activeSession, ref, turnID)
 	if err != nil {
+		terminalErr = err
 		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
 		handle.publishError(err)
 		return
@@ -217,6 +224,7 @@ func (r *Runtime) executeACPControllerTurn(
 		})
 	})
 	if err != nil {
+		terminalErr = err
 		r.setRunState(ref.SessionID, agent.RunState{
 			Status:      interruptedOrFailedStatus(ctx, err),
 			ActiveRunID: runID,
@@ -251,6 +259,7 @@ func (r *Runtime) executeACPControllerTurn(
 			},
 			IsUserEcho: isACPControllerUserEcho,
 		}); err != nil {
+			terminalErr = err
 			r.setRunState(ref.SessionID, agent.RunState{
 				Status:      interruptedOrFailedStatus(ctx, err),
 				ActiveRunID: runID,
@@ -261,6 +270,7 @@ func (r *Runtime) executeACPControllerTurn(
 			return
 		}
 		if err := r.updateControllerContextCheckpoint(ctx, ref); err != nil {
+			terminalErr = err
 			r.setRunState(ref.SessionID, agent.RunState{
 				Status:      interruptedOrFailedStatus(ctx, err),
 				ActiveRunID: runID,
@@ -272,6 +282,7 @@ func (r *Runtime) executeACPControllerTurn(
 		}
 	} else {
 		err := fmt.Errorf("agent-sdk/runtime: main controller returned no Turn handle")
+		terminalErr = err
 		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
 		handle.publishError(err)
 		return

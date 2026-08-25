@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	acpclient "github.com/caelis-labs/caelis/protocol/acp/client"
-	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	acpclient "github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 

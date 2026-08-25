@@ -13,10 +13,7 @@ const (
 )
 
 // NormalizeInboundUpdate consumes maintained provider compatibility metadata
-// before an ACP update branches into canonical and native projections. Specific
-// standard ACP kinds remain authoritative; strict compatibility may refine a
-// read label or supply the read category when the standard kind is absent or
-// generic. Provider evidence and standard raw input remain unchanged.
+// before an update branches into canonical and native projections.
 func NormalizeInboundUpdate(update Update) Update {
 	switch typed := update.(type) {
 	case ContentChunk:
@@ -33,7 +30,7 @@ func NormalizeInboundUpdate(update Update) Update {
 		kind := stringValue(typed.Kind)
 		typed.Meta, kind = normalizeInboundToolDisplay(typed.Meta, kind)
 		if kind != stringValue(typed.Kind) {
-			typed.Kind = stringPointer(kind)
+			typed.Kind = &kind
 		}
 		return typed
 	default:
@@ -45,8 +42,7 @@ func normalizeInboundToolDisplay(meta map[string]any, standardKind string) (map[
 	meta = normalizeInboundToolMeta(meta)
 	provider := providerToolMeta(meta)
 	if mapString(provider, "namespace") != xAIToolNamespace ||
-		mapString(provider, "kind") != "list" ||
-		!providerToolReadOnly(provider) {
+		mapString(provider, "kind") != "list" || !providerToolReadOnly(provider) {
 		return meta, standardKind
 	}
 
@@ -88,8 +84,4 @@ func stringValue(value *string) string {
 		return ""
 	}
 	return strings.TrimSpace(*value)
-}
-
-func stringPointer(value string) *string {
-	return &value
 }

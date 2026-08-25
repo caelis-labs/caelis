@@ -11,7 +11,6 @@ type GatewayAgentConfig struct {
 	SessionClient       appserver.SessionClient
 	ConfigurationClient appserver.ConfigurationClient
 	PresentationClient  appserver.PresentationClient
-	TerminalClient      appserver.TerminalClient
 	AppName             string
 	UserID              string
 	WorkspaceKey        string
@@ -32,7 +31,6 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		SessionClient:              cfg.SessionClient,
 		ConfigurationClient:        cfg.ConfigurationClient,
 		PresentationClient:         cfg.PresentationClient,
-		TerminalClient:             cfg.TerminalClient,
 		PromptRouterFactory:        cfg.PromptRouterFactory,
 		SlashResultFormatter:       cfg.SlashResultFormatter,
 		TaskStreamClient:           cfg.TaskStreamClient,

@@ -13,9 +13,9 @@ import (
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
 func (r *Runner) reconnectChildEndpointLocked(

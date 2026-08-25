@@ -11,9 +11,9 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/discovery"
 	"github.com/caelis-labs/caelis/internal/version"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
 // DisconnectCandidates returns only user-configured external ACP Agents. It

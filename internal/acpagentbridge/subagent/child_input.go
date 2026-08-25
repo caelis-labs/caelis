@@ -3,9 +3,7 @@ package subagent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"sync"
 	"time"
@@ -18,9 +16,8 @@ import (
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
-	"github.com/caelis-labs/caelis/protocol/acp/client"
-	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/google/uuid"
 )
@@ -542,7 +539,7 @@ func (r *Runner) submitIdleChildInput(
 	fence.finishLocked(dispatchDone)
 	if dispatchErr != nil {
 		cancelResponse()
-		if jsonrpc.DispatchMayHaveCommitted(dispatchErr) {
+		if client.DispatchMayHaveCommitted(dispatchErr) {
 			unknown := joinChildInputUnknown("internal/acpagentbridge/subagent: child prompt dispatch outcome cannot be proven", dispatchErr)
 			terminalDone := r.finishDriveLocked(context.WithoutCancel(ctx), run, "", unknown)
 			slot.opMu.Unlock()
@@ -638,7 +635,7 @@ func (r *Runner) drivePreparedPrompt(
 			if dispatchErr := retry.DispatchWithAbort(callCtx, func() {
 				_ = activeClient.Close(context.Background())
 			}); dispatchErr != nil {
-				if jsonrpc.DispatchMayHaveCommitted(dispatchErr) {
+				if client.DispatchMayHaveCommitted(dispatchErr) {
 					return client.PromptResponse{}, joinChildInputUnknown("internal/acpagentbridge/subagent: authenticated child prompt retry is ambiguous", dispatchErr)
 				}
 				return client.PromptResponse{}, dispatchErr
@@ -647,7 +644,7 @@ func (r *Runner) drivePreparedPrompt(
 			return retry.Wait(callCtx)
 		},
 	)
-	if err != nil && ctx.Err() == nil && (childConnectionError(err) || jsonrpc.DispatchMayHaveCommitted(err)) {
+	if err != nil && ctx.Err() == nil && (childConnectionError(err) || client.DispatchMayHaveCommitted(err)) {
 		err = joinChildInputUnknown("internal/acpagentbridge/subagent: child prompt response outcome cannot be proven", err)
 	}
 	if ctx.Err() != nil {
@@ -663,24 +660,14 @@ func childInputEffectUnknown(err error) bool {
 	if err == nil {
 		return false
 	}
-	if jsonrpc.DispatchMayHaveCommitted(err) || childConnectionError(err) {
+	if client.DispatchMayHaveCommitted(err) || childConnectionError(err) {
 		return true
 	}
 	return false
 }
 
 func childConnectionError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) {
-		return true
-	}
-	text := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(text, "broken pipe") ||
-		strings.Contains(text, "connection closed before response") ||
-		strings.Contains(text, "file already closed") ||
-		strings.Contains(text, "use of closed file")
+	return client.IsConnectionError(err)
 }
 
 var (

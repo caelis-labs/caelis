@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
@@ -81,7 +81,7 @@ func TestPublicClientLifecycleAndLoadE2E(t *testing.T) {
 	}
 }
 
-func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
+func TestPublicClientPermissionAndTerminalProjectionE2E(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -179,23 +179,6 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 		t.Fatal("missing terminal id from tool_call_update content")
 	}
 
-	output, err := acpClient.TerminalOutput(ctx, session.SessionID, gotTerminalID)
-	if err != nil {
-		t.Fatalf("TerminalOutput() error = %v", err)
-	}
-	if !strings.Contains(output.Output, "child approval ok") {
-		t.Fatalf("terminal output = %q, want child approval text", output.Output)
-	}
-	wait, err := acpClient.TerminalWaitForExit(ctx, session.SessionID, gotTerminalID)
-	if err != nil {
-		t.Fatalf("TerminalWaitForExit() error = %v", err)
-	}
-	if wait.ExitCode == nil || *wait.ExitCode != 0 {
-		t.Fatalf("terminal exit = %#v, want exit code 0", wait)
-	}
-	if err := acpClient.TerminalRelease(ctx, session.SessionID, gotTerminalID); err != nil {
-		t.Fatalf("TerminalRelease() error = %v", err)
-	}
 	deadline := time.After(2 * time.Second)
 	for {
 		mu.Lock()
