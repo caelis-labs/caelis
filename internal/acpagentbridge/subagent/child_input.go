@@ -33,7 +33,7 @@ func (r *Runner) BindChildActivityObserver(
 	observer agent.ChildActivityObserver,
 ) error {
 	if r == nil || observer == nil {
-		return errorcode.New(errorcode.InvalidArgument, "internal/acpagentbridge/subagent: child activity observer is required")
+		return errorcode.New(errorcode.InvalidArgument, "Child activity observer is required")
 	}
 	if err := validateChildEndpointRef(target); err != nil {
 		return err
@@ -67,7 +67,7 @@ func (r *Runner) BindChildEndpoint(
 	spawn tasksubagent.SpawnContext,
 ) error {
 	if r == nil {
-		return errorcode.New(errorcode.FailedPrecondition, "internal/acpagentbridge/subagent: child runner is unavailable")
+		return errorcode.New(errorcode.FailedPrecondition, "Target Agent messaging is unavailable")
 	}
 	target = agent.NormalizeChildEndpointRef(target)
 	if err := validateChildEndpointRef(target); err != nil {
@@ -110,7 +110,7 @@ func (r *Runner) BindChildEndpoint(
 	}
 	run := slot.currentRun()
 	if run == nil {
-		return errorcode.New(errorcode.Conflict, "internal/acpagentbridge/subagent: child endpoint recovery state is unavailable")
+		return errorcode.New(errorcode.Conflict, "Target Agent recovery state is unavailable")
 	}
 	run.mu.Lock()
 	run.spawn = spawn
@@ -128,7 +128,7 @@ func (r *Runner) BindChildEndpoint(
 // driven only by child activity output.
 func (r *Runner) SubmitChildInput(ctx context.Context, raw agent.ChildInputRequest) (agent.ChildInputResult, error) {
 	if r == nil {
-		return agent.ChildInputResult{}, errorcode.New(errorcode.FailedPrecondition, "internal/acpagentbridge/subagent: child runner is unavailable")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.FailedPrecondition, "Target Agent messaging is unavailable")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -138,11 +138,11 @@ func (r *Runner) SubmitChildInput(ctx context.Context, raw agent.ChildInputReque
 		return agent.ChildInputResult{}, err
 	}
 	if err := session.ValidateAgentCommunicationActor(req.Source); err != nil {
-		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.InvalidArgument, "internal/acpagentbridge/subagent: invalid trusted child input source", err)
+		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.InvalidArgument, "Source Agent identity is invalid", err)
 	}
 	prompt := buildAgentCommunicationPrompt(req)
 	if len(prompt) == 0 {
-		return agent.ChildInputResult{}, errorcode.New(errorcode.InvalidArgument, "internal/acpagentbridge/subagent: child input is required")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.InvalidArgument, "Message content is required")
 	}
 	slot, err := r.lookupChildSlot(req.Target)
 	if err != nil {
@@ -173,7 +173,7 @@ func (r *Runner) SubmitChildInput(ctx context.Context, raw agent.ChildInputReque
 	run := slot.currentRun()
 	if run == nil {
 		slot.opMu.Unlock()
-		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, "internal/acpagentbridge/subagent: child endpoint is detached")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, "Target Agent is no longer active")
 	}
 	run.mu.RLock()
 	running := run.running || run.finishing
@@ -198,13 +198,13 @@ func buildAgentCommunicationPrompt(req agent.ChildInputRequest) []json.RawMessag
 func (r *Runner) lookupChildSlot(target agent.ChildEndpointRef) (*childSlot, error) {
 	key := strings.TrimSpace(target.EndpointKey)
 	if key == "" {
-		return nil, errorcode.New(errorcode.InvalidArgument, "internal/acpagentbridge/subagent: child endpoint key is required")
+		return nil, errorcode.New(errorcode.InvalidArgument, "Target Agent endpoint key is required")
 	}
 	r.mu.RLock()
 	slot := r.slots[key]
 	r.mu.RUnlock()
 	if slot == nil {
-		return nil, errorcode.New(errorcode.NotFound, fmt.Sprintf("internal/acpagentbridge/subagent: child endpoint %q is not active", key))
+		return nil, errorcode.New(errorcode.NotFound, "Target Agent is not active")
 	}
 	return slot, nil
 }
@@ -225,15 +225,15 @@ func (r *Runner) submitActiveChildInputLocked(
 	activityID := slot.activityCheckpoint().activityID
 	run.mu.RUnlock()
 	if !supportsSteering {
-		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "internal/acpagentbridge/subagent: child endpoint does not support ACP steering")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent cannot receive follow-up messages.")
 	}
 	if acputil.ContentPartsContainImage(req.ContentParts) && !supportsImages {
-		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "internal/acpagentbridge/subagent: child endpoint does not support image input")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent does not accept image input.")
 	}
 	rpcCtx, cancelRPC := context.WithCancel(ctx)
 	if !slot.beginSteering(cancelRPC) {
 		cancelRPC()
-		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, "internal/acpagentbridge/subagent: child input state changed")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, "Target Agent state changed before the message was sent.")
 	}
 	run.mu.Lock()
 	previousInputActor := run.inputActor
@@ -243,7 +243,7 @@ func (r *Runner) submitActiveChildInputLocked(
 	cancelRPC()
 	if err != nil {
 		if childInputEffectUnknown(err) {
-			unknown := joinChildInputUnknown("internal/acpagentbridge/subagent: child steering outcome cannot be proven", err)
+			unknown := joinChildInputUnknown("Message delivery outcome cannot be confirmed.", err)
 			slot.settleSteeringFrames(false)
 			r.finishDriveLocked(context.WithoutCancel(ctx), run, "", unknown)
 			return agent.ChildInputResult{}, unknown
@@ -252,7 +252,7 @@ func (r *Runner) submitActiveChildInputLocked(
 		run.mu.Lock()
 		run.inputActor = previousInputActor
 		run.mu.Unlock()
-		return agent.ChildInputResult{}, childInputProvenFailure("internal/acpagentbridge/subagent: child steering was rejected", err)
+		return agent.ChildInputResult{}, childInputProvenFailure("Target Agent rejected the message.", err)
 	}
 	switch response.Outcome {
 	case client.SessionSteeringInjected:
@@ -263,18 +263,14 @@ func (r *Runner) submitActiveChildInputLocked(
 		run.mu.Lock()
 		run.inputActor = previousInputActor
 		run.mu.Unlock()
-		return agent.ChildInputResult{}, errorcode.New(errorcode.FailedPrecondition, fmt.Sprintf(
-			"internal/acpagentbridge/subagent: child steering was not injected: %s", response.Outcome,
-		))
+		return agent.ChildInputResult{}, errorcode.New(errorcode.FailedPrecondition, "Target Agent did not accept the message.")
 	case client.SessionSteeringStartedNewTurn:
-		unknown := errorcode.New(errorcode.UnknownOutcome, "internal/acpagentbridge/subagent: child steering started an unaddressed remote Turn")
+		unknown := errorcode.New(errorcode.UnknownOutcome, "Message delivery outcome cannot be confirmed.")
 		slot.settleSteeringFrames(false)
 		r.finishDriveLocked(context.WithoutCancel(ctx), run, "", unknown)
 		return agent.ChildInputResult{}, unknown
 	default:
-		unknown := errorcode.New(errorcode.UnknownOutcome, fmt.Sprintf(
-			"internal/acpagentbridge/subagent: child steering returned unknown outcome %q", response.Outcome,
-		))
+		unknown := errorcode.New(errorcode.UnknownOutcome, "Message delivery outcome cannot be confirmed.")
 		slot.settleSteeringFrames(false)
 		r.finishDriveLocked(context.WithoutCancel(ctx), run, "", unknown)
 		return agent.ChildInputResult{}, unknown
@@ -290,7 +286,7 @@ func (r *Runner) callChildSteering(ctx context.Context, run *childRun, prompt []
 	methods := controlagents.CloneAuthenticationMethods(run.authenticationMethods)
 	run.mu.RUnlock()
 	if acpClient == nil || sessionID == "" {
-		return client.SessionSteeringResponse{}, errorcode.New(errorcode.Conflict, "internal/acpagentbridge/subagent: child steering transport is unavailable")
+		return client.SessionSteeringResponse{}, errorcode.New(errorcode.Conflict, "Target Agent messaging transport is unavailable")
 	}
 	return authentication.RecoverConfiguredCall(
 		ctx, acpClient, methods, agentID, configured,
@@ -337,16 +333,16 @@ func newPromptAuthRetryFence(slot *childSlot, dispatchDone chan struct{}, cancel
 
 func (f *promptAuthRetryFence) observeAuthRequired() error {
 	if f == nil || f.slot == nil {
-		return errorcode.New(errorcode.FailedPrecondition, "internal/acpagentbridge/subagent: authenticated prompt retry has no endpoint owner")
+		return errorcode.New(errorcode.FailedPrecondition, "Authenticated message retry has no Target Agent owner")
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.closed {
-		return errorcode.New(errorcode.FailedPrecondition, "internal/acpagentbridge/subagent: authenticated prompt response owner is closed")
+		return errorcode.New(errorcode.FailedPrecondition, "Authenticated message response owner is closed")
 	}
 	next, reserved := f.slot.transitionPromptDispatch(f.done, f.cancel)
 	if !reserved {
-		return errorcode.New(errorcode.Conflict, "internal/acpagentbridge/subagent: authenticated prompt retry conflicts with another dispatch")
+		return errorcode.New(errorcode.Conflict, "Authenticated message retry conflicts with another delivery")
 	}
 	f.done = next
 	return nil
@@ -457,7 +453,7 @@ func (r *Runner) submitIdleChildInput(
 	if !delegationStateCanStartTurn(state) {
 		slot.opMu.Unlock()
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, fmt.Sprintf(
-			"internal/acpagentbridge/subagent: child endpoint is %s", state,
+			"Target Agent is %s", state,
 		))
 	}
 	if state != delegation.StateCompleted {
@@ -466,7 +462,7 @@ func (r *Runner) submitIdleChildInput(
 		run, err = r.reconnectChildEndpointLocked(ctx, run.anchor, recovery, slot)
 		if err != nil {
 			slot.opMu.Unlock()
-			return agent.ChildInputResult{}, childInputProvenFailure("internal/acpagentbridge/subagent: resume child endpoint", err)
+			return agent.ChildInputResult{}, childInputProvenFailure("resume Target Agent", err)
 		}
 	}
 	run.mu.RLock()
@@ -477,16 +473,16 @@ func (r *Runner) submitIdleChildInput(
 	run.mu.RUnlock()
 	if acpClient == nil || sessionID == "" {
 		slot.opMu.Unlock()
-		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, "internal/acpagentbridge/subagent: child prompt transport is unavailable")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, "Target Agent messaging transport is unavailable")
 	}
 	if acputil.ContentPartsContainImage(req.ContentParts) && !supportsImages {
 		slot.opMu.Unlock()
-		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "internal/acpagentbridge/subagent: child endpoint does not support image input")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent does not accept image input.")
 	}
 	prepared, err := acpClient.PreparePromptParts(sessionID, prompt, nil)
 	if err != nil {
 		slot.opMu.Unlock()
-		return agent.ChildInputResult{}, childInputProvenFailure("internal/acpagentbridge/subagent: prepare child prompt", err)
+		return agent.ChildInputResult{}, childInputProvenFailure("prepare Target Agent message", err)
 	}
 	if producerCtx == nil {
 		producerCtx = detachedChildContext(ctx)
@@ -526,7 +522,7 @@ func (r *Runner) submitIdleChildInput(
 		cancelDispatch()
 		cancelResponse()
 		slot.opMu.Unlock()
-		return agent.ChildInputResult{}, childInputProvenFailure("internal/acpagentbridge/subagent: observe child prompt response", observeErr)
+		return agent.ChildInputResult{}, childInputProvenFailure("observe Target Agent response", observeErr)
 	}
 	slot.opMu.Unlock()
 
@@ -540,7 +536,7 @@ func (r *Runner) submitIdleChildInput(
 	if dispatchErr != nil {
 		cancelResponse()
 		if client.DispatchMayHaveCommitted(dispatchErr) {
-			unknown := joinChildInputUnknown("internal/acpagentbridge/subagent: child prompt dispatch outcome cannot be proven", dispatchErr)
+			unknown := joinChildInputUnknown("Message delivery outcome cannot be confirmed.", dispatchErr)
 			terminalDone := r.finishDriveLocked(context.WithoutCancel(ctx), run, "", unknown)
 			slot.opMu.Unlock()
 			if fence.current() != nil {
@@ -613,7 +609,7 @@ func (r *Runner) drivePreparedPrompt(
 			if slot == nil || retryDispatchDone == nil {
 				return client.PromptResponse{}, errorcode.New(
 					errorcode.FailedPrecondition,
-					"internal/acpagentbridge/subagent: authenticated prompt retry has no endpoint reservation",
+					"Authenticated message retry has no Target Agent reservation",
 				)
 			}
 			slot.opMu.Lock()
@@ -636,7 +632,7 @@ func (r *Runner) drivePreparedPrompt(
 				_ = activeClient.Close(context.Background())
 			}); dispatchErr != nil {
 				if client.DispatchMayHaveCommitted(dispatchErr) {
-					return client.PromptResponse{}, joinChildInputUnknown("internal/acpagentbridge/subagent: authenticated child prompt retry is ambiguous", dispatchErr)
+					return client.PromptResponse{}, joinChildInputUnknown("Authenticated message retry outcome cannot be confirmed.", dispatchErr)
 				}
 				return client.PromptResponse{}, dispatchErr
 			}
@@ -645,7 +641,7 @@ func (r *Runner) drivePreparedPrompt(
 		},
 	)
 	if err != nil && ctx.Err() == nil && (childConnectionError(err) || client.DispatchMayHaveCommitted(err)) {
-		err = joinChildInputUnknown("internal/acpagentbridge/subagent: child prompt response outcome cannot be proven", err)
+		err = joinChildInputUnknown("Message delivery outcome cannot be confirmed.", err)
 	}
 	if ctx.Err() != nil {
 		err = ctx.Err()

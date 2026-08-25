@@ -78,7 +78,7 @@ func (t *commandTask) retainParentRelationLocked() {
 
 func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask, error) {
 	if entry == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: task entry is required")
+		return nil, fmt.Errorf("task entry is required")
 	}
 	seededOutput, seededFromResult := rehydratedCommandOutput(entry)
 	checkpoint := parseCommandOutputCheckpoint(entry)
@@ -119,7 +119,7 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 	}
 	if eventCursor, ok := taskInt64Value(entry.Metadata[commandStreamEventCursorMeta]); ok && eventCursor >= 0 {
 		if eventCursor == math.MaxInt64 && (entry.Running || !stream.IsTerminalState(string(entry.State))) {
-			return nil, fmt.Errorf("agent-sdk/runtime: command stream event cursor is exhausted")
+			return nil, fmt.Errorf("command stream event cursor is exhausted")
 		}
 		// A terminal task cannot advance an exhausted event frontier, but it can
 		// still be observed through the terminal snapshot at that frontier.
@@ -374,6 +374,15 @@ func (t *commandTask) commandOutcomeUnattached() bool {
 	defer t.mu.Unlock()
 	phase := taskStringValue(t.metadata["command_phase"])
 	return strings.TrimSpace(t.ref.SessionID) == "" && (phase == commandPhaseEffectClaimed || phase == commandPhaseUnknown)
+}
+
+func (t *commandTask) observableCommandSession() sandbox.Session {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.session
 }
 
 func (t *commandTask) snapshotWithoutSession(now time.Time) taskapi.Snapshot {

@@ -783,13 +783,20 @@ type contextProbeModel struct {
 	replyText                   string
 }
 
+func isRuntimeCompactionRequest(req *model.Request) bool {
+	if strings.Contains(requestInstructionsText(req), "CONTEXT CHECKPOINT COMPACTION") {
+		return true
+	}
+	texts := requestMessageTexts(req)
+	return len(texts) > 0 && strings.TrimSpace(texts[len(texts)-1]) == inContextCompactionPrompt
+}
+
 func (m *contextProbeModel) Name() string { return "context-probe" }
 
 func (m *contextProbeModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.calls++
-	instructions := requestInstructionsText(req)
 	messages := requestMessageTexts(req)
-	if strings.Contains(instructions, "CONTEXT CHECKPOINT COMPACTION") {
+	if isRuntimeCompactionRequest(req) {
 		m.compactionCalls++
 		if m.checkCompactionStream && req.Stream != m.wantCompactionStream {
 			m.t.Fatalf("compaction request Stream = %v, want %v", req.Stream, m.wantCompactionStream)
@@ -897,8 +904,7 @@ type modelCheckpointProbe struct {
 func (m *modelCheckpointProbe) Name() string { return "model-checkpoint-probe" }
 
 func (m *modelCheckpointProbe) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	instructions := requestInstructionsText(req)
-	if strings.Contains(instructions, "CONTEXT CHECKPOINT COMPACTION") {
+	if isRuntimeCompactionRequest(req) {
 		m.compactionCalls++
 		body := `CONTEXT CHECKPOINT
 
@@ -982,13 +988,12 @@ func (m *overflowRecoveryModel) Name() string { return "overflow-recovery" }
 
 func (m *overflowRecoveryModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.calls++
-	instructions := requestInstructionsText(req)
-	if strings.Contains(instructions, "CONTEXT CHECKPOINT COMPACTION") {
+	if isRuntimeCompactionRequest(req) {
 		m.compactionCalls++
 		compactionInput := strings.Join(requestMessageTexts(req), "\n")
-		if !strings.Contains(compactionInput, `"source":"tool_result"`) ||
+		if !requestHasToolResult(req, "ECHO") && (!strings.Contains(compactionInput, `"source":"tool_result"`) ||
 			!strings.Contains(compactionInput, "tool: ECHO") ||
-			!strings.Contains(compactionInput, "value: pong") {
+			!strings.Contains(compactionInput, "value: pong")) {
 			m.t.Fatalf("compaction input missing tool result continuity: %q", compactionInput)
 		}
 		body := `CONTEXT CHECKPOINT

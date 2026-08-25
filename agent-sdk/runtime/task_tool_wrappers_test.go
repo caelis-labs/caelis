@@ -245,6 +245,21 @@ func TestRuntimeSendMessageToolRoutesUnknownHandleThroughExternal(t *testing.T) 
 	}
 }
 
+func TestRuntimeSendMessageToolErrorHasNoImplementationPrefix(t *testing.T) {
+	t.Parallel()
+
+	target := runtimeSendMessageTool{
+		base:       sendmessage.New(),
+		session:    session.Session{Controller: session.ControllerBinding{ControllerID: "controller-1"}},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+	}
+	raw, _ := json.Marshal(map[string]any{"to": "research", "message": "status"})
+	_, err := target.Call(context.Background(), tool.Call{ID: "message-call-1", Name: "SendMessage", Input: raw})
+	if err == nil || err.Error() != "target Agent messaging is unavailable" {
+		t.Fatalf("Call() error = %v", err)
+	}
+}
+
 func TestRuntimeSendMessageToolPrefersLocalSpawnTargetOverACPParent(t *testing.T) {
 	runner := &runtimeChildInputRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first done"}}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)

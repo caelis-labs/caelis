@@ -94,7 +94,7 @@ func RejectUnknownArgs(args map[string]any, allowed ...string) error {
 	}
 	for key := range args {
 		if _, ok := allowedSet[key]; !ok {
-			return NewError(ErrorCodeInvalidInput, fmt.Sprintf("tool: arg %q is not supported", key))
+			return NewError(ErrorCodeInvalidInput, fmt.Sprintf("arg %q is not supported", key))
 		}
 	}
 	return nil
@@ -111,7 +111,7 @@ func NormalizeCommandSandboxPermission(value string, allowLegacy bool) (string, 
 			return CommandSandboxPermissionUseDefault, nil
 		}
 	}
-	return "", NewError(ErrorCodeInvalidInput, fmt.Sprintf("tool: arg %q must be %s", "sandbox_permissions", CommandSandboxPermissionAllowedValues(allowLegacy)))
+	return "", NewError(ErrorCodeInvalidInput, fmt.Sprintf("arg %q must be %s", "sandbox_permissions", CommandSandboxPermissionAllowedValues(allowLegacy)))
 }
 
 func CommandSandboxPermissionAllowedValues(allowLegacy bool) string {
@@ -146,19 +146,11 @@ func ErrorPayload(err error) map[string]any {
 }
 
 func classifyErrorCode(err error) ErrorCode {
-	switch code := errorcode.CodeOf(err); code {
-	case errorcode.NotFound:
-		return ErrorCodeNotFound
-	case errorcode.PermissionDenied:
-		return ErrorCodePermissionDenied
-	case errorcode.Timeout:
-		return ErrorCodeTimeout
-	case errorcode.Cancelled:
-		return ErrorCodeCancelled
-	case errorcode.Unavailable:
-		return ErrorCodeSandboxUnavailable
-	case errorcode.Unsupported:
-		return ErrorCodeUnsupported
+	if code := errorcode.CodeOf(err); code != errorcode.Unknown {
+		if code == errorcode.InvalidArgument {
+			return ErrorCodeInvalidInput
+		}
+		return code
 	}
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -168,7 +160,7 @@ func classifyErrorCode(err error) ErrorCode {
 	case errors.Is(err, context.DeadlineExceeded):
 		return ErrorCodeTimeout
 	default:
-		return ErrorCodeInvalidInput
+		return errorcode.Unknown
 	}
 }
 

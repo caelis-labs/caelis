@@ -17,28 +17,32 @@ import (
 
 // compactSession forces a model-backed checkpoint compaction for the given
 // session.
-func (s *runtimeComposition) compactSession(ctx context.Context, ref session.SessionRef) error {
+func (s *runtimeComposition) compactSession(ctx context.Context, ref session.SessionRef, expectedRevision *uint64) (session.Session, error) {
 	if s == nil {
-		return fmt.Errorf("gatewayapp: stack is unavailable")
+		return session.Session{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	s.mu.RLock()
 	gw := s.gateway
 	s.mu.RUnlock()
 	if gw == nil || gw.Resolver() == nil {
-		return fmt.Errorf("gatewayapp: resolver is unavailable")
+		return session.Session{}, fmt.Errorf("gatewayapp: resolver is unavailable")
 	}
 	resolved, err := gw.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: ref})
 	if err != nil {
-		return err
+		return session.Session{}, err
 	}
-	return s.withPlaced(ctx, ref, func(runCtx context.Context, engine *sdkruntime.Runtime) error {
-		_, compactErr := engine.Compact(runCtx, sdkruntime.CompactRequest{
-			SessionRef: ref,
-			Model:      resolved.RunRequest.AgentSpec.Model,
-			Trigger:    "manual",
+	var compacted sdkruntime.CompactResult
+	err = s.withPlaced(ctx, ref, func(runCtx context.Context, engine *sdkruntime.Runtime) error {
+		var compactErr error
+		compacted, compactErr = engine.Compact(runCtx, sdkruntime.CompactRequest{
+			SessionRef:       ref,
+			ExpectedRevision: expectedRevision,
+			Model:            resolved.RunRequest.AgentSpec.Model,
+			Trigger:          "manual",
 		})
 		return compactErr
 	})
+	return compacted.Session, err
 }
 
 // withPlaced runs a synchronous Control operation inside the production

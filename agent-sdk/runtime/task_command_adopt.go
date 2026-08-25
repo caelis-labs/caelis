@@ -16,22 +16,22 @@ func (tm *taskRuntime) lookupCommand(ctx context.Context, ref session.SessionRef
 	tm.mu.RUnlock()
 	if ok && task != nil {
 		if strings.TrimSpace(task.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
-			return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+			return nil, fmt.Errorf("task %q not found", taskID)
 		}
 		return task, nil
 	}
 	if tm.store == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+		return nil, fmt.Errorf("task %q not found", taskID)
 	}
 	entry, err := tm.store.Get(ctx, strings.TrimSpace(taskID))
 	if err != nil || entry == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+		return nil, fmt.Errorf("task %q not found", taskID)
 	}
 	if strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+		return nil, fmt.Errorf("task %q not found", taskID)
 	}
 	if entry.Kind != taskapi.KindCommand {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+		return nil, fmt.Errorf("task %q not found", taskID)
 	}
 	entry, err = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
 	if err != nil {
@@ -58,10 +58,10 @@ func (tm *taskRuntime) lookupCommandCanonical(ctx context.Context, ref session.S
 	taskID = strings.TrimSpace(taskID)
 	entry, err := tm.store.Get(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: reload command task %q: %w", taskID, err)
+		return nil, fmt.Errorf("reload command Task %q: %w", taskID, err)
 	}
 	if !storedTaskEntryMatches(entry, ref, taskapi.KindCommand) {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+		return nil, fmt.Errorf("task %q not found", taskID)
 	}
 	entry, err = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
 	if err != nil {
@@ -77,7 +77,7 @@ func (tm *taskRuntime) lookupCommandCanonical(ctx context.Context, ref session.S
 
 func (tm *taskRuntime) commandFromDurableEntry(entry *taskapi.Entry) (*commandTask, error) {
 	if tm == nil || entry == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: task entry is required")
+		return nil, fmt.Errorf("task entry is required")
 	}
 	tm.mu.RLock()
 	current := tm.tasks[strings.TrimSpace(entry.TaskID)]

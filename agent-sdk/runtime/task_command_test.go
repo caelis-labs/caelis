@@ -41,6 +41,43 @@ type commandTerminalGateTaskStore struct {
 	once    sync.Once
 }
 
+type commandIntentGateTaskStore struct {
+	*sagaTaskStore
+	committed chan struct{}
+	release   chan struct{}
+	once      sync.Once
+}
+
+func newCommandIntentGateTaskStore() *commandIntentGateTaskStore {
+	return &commandIntentGateTaskStore{
+		sagaTaskStore: newSagaTaskStore(),
+		committed:     make(chan struct{}),
+		release:       make(chan struct{}),
+	}
+}
+
+func (s *commandIntentGateTaskStore) Put(ctx context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {
+	persisted, err := s.sagaTaskStore.Put(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	block := false
+	if req.Entry != nil && req.Entry.Kind == taskapi.KindCommand && taskStringValue(req.Entry.Metadata["command_phase"]) == commandPhaseIntent {
+		s.once.Do(func() {
+			block = true
+			close(s.committed)
+		})
+	}
+	if block {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-s.release:
+		}
+	}
+	return persisted, nil
+}
+
 func (s *commandTerminalGateTaskStore) Put(ctx context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {
 	block := false
 	if req.Entry != nil && req.Entry.Kind == taskapi.KindCommand && !req.Entry.Running && req.Entry.State == taskapi.StateCancelled {
@@ -403,6 +440,182 @@ func TestStartCommandRetryRollsForwardDurableIntentAfterClaimFailure(t *testing.
 	}
 	if second.Ref.TaskID != first.Ref.TaskID || backend.startCalls() != 1 || !second.Running {
 		t.Fatalf("second StartCommand() = %#v starts=%d; want one roll-forward Start", second, backend.startCalls())
+	}
+}
+
+func TestCommandTaskWaitJoinsCommandStartAfterDurableIntent(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	store := newCommandIntentGateTaskStore()
+	runtime.tasks.store = store
+	commandSession := newConcurrentCommandWaitSession()
+	backend := newCommandStartProbe(commandSession, nil)
+	const parentCall = "wait-during-intent-handoff"
+	taskID, err := commandTaskID(activeSession.SessionRef, parentCall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type commandStartResult struct {
+		snapshot taskapi.Snapshot
+		err      error
+	}
+	startDone := make(chan commandStartResult, 1)
+	go func() {
+		snapshot, startErr := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, backend, taskapi.CommandStartRequest{
+			Command: "sleep 60", Workdir: activeSession.CWD, ParentCall: parentCall, Yield: 0,
+		})
+		startDone <- commandStartResult{snapshot: snapshot, err: startErr}
+	}()
+	select {
+	case <-store.committed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("command intent was not durably committed")
+	}
+
+	const yield = 750 * time.Millisecond
+	type taskControlResult struct {
+		snapshot taskapi.Snapshot
+		err      error
+	}
+	waitDone := make(chan taskControlResult, 1)
+	go func() {
+		snapshot, waitErr := runtime.tasks.Wait(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+			TaskID: taskID, Yield: yield, Principal: session.ActorKindController,
+		})
+		waitDone <- taskControlResult{snapshot: snapshot, err: waitErr}
+	}()
+	select {
+	case result := <-waitDone:
+		t.Fatalf("Task wait returned before command intent handoff: %#v, %v", result.snapshot, result.err)
+	case <-time.After(40 * time.Millisecond):
+	}
+	close(store.release)
+
+	select {
+	case observedYield := <-commandSession.waitStarted:
+		if observedYield <= 0 || observedYield >= yield {
+			t.Fatalf("sandbox Wait() yield = %v, want positive remainder below total %v", observedYield, yield)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Task wait did not continue onto the attached sandbox Session")
+	}
+	if err := commandSession.Terminate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-waitDone:
+		if result.err != nil || result.snapshot.Running {
+			t.Fatalf("Task wait after intent handoff = %#v, %v; want terminal observation", result.snapshot, result.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Task wait did not return after sandbox termination")
+	}
+	select {
+	case result := <-startDone:
+		if result.err != nil || !result.snapshot.Running || backend.startCalls() != 1 {
+			t.Fatalf("StartCommand() = %#v, %v starts=%d; want one running command", result.snapshot, result.err, backend.startCalls())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("StartCommand() did not finish after releasing the intent gate")
+	}
+}
+
+func TestCommandTaskWaitIntentClaimTimeoutReturnsDurablePreparedState(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	store := newCommandIntentGateTaskStore()
+	runtime.tasks.store = store
+	commandSession := newConcurrentCommandWaitSession()
+	backend := newCommandStartProbe(commandSession, nil)
+	const parentCall = "wait-intent-timeout"
+	taskID, err := commandTaskID(activeSession.SessionRef, parentCall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type commandStartResult struct {
+		snapshot taskapi.Snapshot
+		err      error
+	}
+	startDone := make(chan commandStartResult, 1)
+	go func() {
+		snapshot, startErr := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, backend, taskapi.CommandStartRequest{
+			Command: "sleep 60", Workdir: activeSession.CWD, ParentCall: parentCall, Yield: 0,
+		})
+		startDone <- commandStartResult{snapshot: snapshot, err: startErr}
+	}()
+	select {
+	case <-store.committed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("command intent was not durably committed")
+	}
+
+	const yield = 120 * time.Millisecond
+	waitStarted := time.Now()
+	snapshot, err := runtime.tasks.Wait(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+		TaskID: taskID, Yield: yield, Principal: session.ActorKindController,
+	})
+	elapsed := time.Since(waitStarted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed < yield/2 || elapsed >= time.Second {
+		t.Fatalf("Task wait elapsed = %v, want bounded near %v", elapsed, yield)
+	}
+	if snapshot.State != taskapi.StatePrepared || snapshot.Running || taskStringValue(snapshot.Metadata["command_phase"]) != commandPhaseIntent {
+		t.Fatalf("Task wait snapshot = %#v, want durable prepared intent", snapshot)
+	}
+	if backend.startCalls() != 0 {
+		t.Fatalf("sandbox Start() calls = %d before producer release, want zero", backend.startCalls())
+	}
+
+	close(store.release)
+	select {
+	case result := <-startDone:
+		if result.err != nil || !result.snapshot.Running || backend.startCalls() != 1 {
+			t.Fatalf("StartCommand() = %#v, %v starts=%d; want one running command", result.snapshot, result.err, backend.startCalls())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("StartCommand() did not finish after releasing the intent gate")
+	}
+	if err := commandSession.Terminate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCommandTaskWaitOnDurableIntentDoesNotStartCommand(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	store := newSagaTaskStore()
+	store.failOnPut = 2 // intent commits; the first effect claim does not.
+	runtime.tasks.store = store
+	running := true
+	commandSession := &yieldProbeSandboxSession{statusRunning: &running}
+	backend := newCommandStartProbe(commandSession, nil)
+	started, startErr := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, backend, taskapi.CommandStartRequest{
+		Command: "sleep 60", Workdir: activeSession.CWD, ParentCall: "wait-orphan-intent", Yield: 0,
+	})
+	if startErr == nil || started.State != taskapi.StatePrepared || started.Running || backend.startCalls() != 0 {
+		t.Fatalf("StartCommand() = %#v, %v starts=%d; want durable intent without effect", started, startErr, backend.startCalls())
+	}
+
+	waitStarted := time.Now()
+	snapshot, err := runtime.tasks.Wait(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+		TaskID: started.Ref.TaskID, Yield: time.Second, Principal: session.ActorKindController,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(waitStarted); elapsed >= 500*time.Millisecond {
+		t.Fatalf("Task wait elapsed = %v, want immediate durable intent observation", elapsed)
+	}
+	if snapshot.State != taskapi.StatePrepared || snapshot.Running || taskStringValue(snapshot.Metadata["command_phase"]) != commandPhaseIntent {
+		t.Fatalf("Task wait snapshot = %#v, want prepared intent", snapshot)
+	}
+	if backend.startCalls() != 0 {
+		t.Fatalf("Task wait issued sandbox Start(); calls=%d, want zero", backend.startCalls())
 	}
 }
 

@@ -49,7 +49,7 @@ func TestDecodeArgs(t *testing.T) {
 		{
 			name:    "invalid json",
 			input:   json.RawMessage(`{"path":`),
-			wantErr: "tool: invalid json input:",
+			wantErr: "invalid JSON input:",
 		},
 	}
 

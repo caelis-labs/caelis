@@ -26,7 +26,7 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 	var args map[string]any
 	if len(call.Input) > 0 {
 		if err := json.Unmarshal(call.Input, &args); err != nil {
-			return tool.Result{}, fmt.Errorf("mcp: failed to parse tool input arguments: %w", err)
+			return tool.Result{}, fmt.Errorf("invalid MCP tool arguments: %w", err)
 		}
 	}
 

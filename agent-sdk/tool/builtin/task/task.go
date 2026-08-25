@@ -22,7 +22,7 @@ func ValidateArgs(args map[string]any) error {
 	if raw, present := args["append_newline"]; present && raw != nil {
 		value, ok := raw.(bool)
 		if !ok {
-			return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"append_newline\" must be boolean")
+			return tool.NewError(tool.ErrorCodeInvalidInput, "arg \"append_newline\" must be boolean")
 		}
 		appendExact = !value
 	}
@@ -31,16 +31,16 @@ func ValidateArgs(args map[string]any) error {
 	if inputPresent && rawInput != nil {
 		value, ok := rawInput.(string)
 		if !ok {
-			return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"input\" must be string")
+			return tool.NewError(tool.ErrorCodeInvalidInput, "arg \"input\" must be string")
 		}
 		input = value
 	}
 	if strings.EqualFold(strings.TrimSpace(action), "write") {
 		if input == "" || (strings.TrimSpace(input) == "" && !appendExact) {
-			return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"input\" is required when action is write")
+			return tool.NewError(tool.ErrorCodeInvalidInput, "arg \"input\" is required when action is write")
 		}
 	} else if inputPresent || args["append_newline"] != nil {
-		return tool.NewError(tool.ErrorCodeInvalidInput, "tool: args \"input\" and \"append_newline\" are valid only when action is write")
+		return tool.NewError(tool.ErrorCodeInvalidInput, "args \"input\" and \"append_newline\" are valid only when action is write")
 	}
 	return nil
 }
@@ -108,7 +108,7 @@ func (Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 	if err := ValidateArgs(args); err != nil {
 		return tool.Result{}, err
 	}
-	return tool.Result{}, fmt.Errorf("tool: Task must be executed by the runtime wrapper")
+	return tool.Result{}, fmt.Errorf("task must be executed by the runtime wrapper")
 }
 
 var _ tool.Tool = Tool{}

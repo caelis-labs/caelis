@@ -321,7 +321,7 @@ func (tm *taskRuntime) tryClaimSubagentOperation(ref session.SessionRef, taskID 
 
 func (tm *taskRuntime) waitForTaskOperationClaim(ctx context.Context, ref session.SessionRef, taskID string) (func(), error) {
 	if tm == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: task runtime is unavailable")
+		return nil, fmt.Errorf("task Runtime is unavailable")
 	}
 	if ctx == nil {
 		ctx = context.Background()

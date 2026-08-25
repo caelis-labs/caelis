@@ -48,7 +48,7 @@ type SessionService interface {
 	ResetSession(context.Context) error
 	ResumeSession(context.Context, string) (SessionSnapshot, error)
 	ListSessions(context.Context, int) ([]ResumeCandidate, error)
-	Compact(context.Context) error
+	Compact(context.Context) (bool, error)
 }
 
 type SessionModeService interface {
@@ -109,7 +109,7 @@ type RouterService interface {
 	ResetSession(context.Context) error
 	ResumeSession(context.Context, string) (SessionSnapshot, error)
 	ListSessions(context.Context, int) ([]ResumeCandidate, error)
-	Compact(context.Context) error
+	Compact(context.Context) (bool, error)
 	UseModel(context.Context, string, ...string) (controlstatus.StatusSnapshot, error)
 	DeleteModel(context.Context, string) error
 	RepairSandbox(context.Context) (controlstatus.StatusSnapshot, error)

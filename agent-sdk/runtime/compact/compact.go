@@ -44,6 +44,12 @@ type Request struct {
 	Events        []*session.Event
 	PendingEvents []*session.Event
 	Model         model.LLM
+	// InContextRequest is an exact, already assembled model request whose prefix
+	// may still be hot at the provider. The compactor clones it before use.
+	InContextRequest *model.Request
+	// RuntimeAppendix is deterministic continuity owned by Runtime rather than
+	// inferred by the summarizing model.
+	RuntimeAppendix string
 }
 
 type Result struct {

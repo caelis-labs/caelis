@@ -26,7 +26,7 @@ func commandUnknownWhileRunningPhase(phase string) bool {
 
 func (tm *taskRuntime) cancelCommandClaimed(ctx context.Context, task *commandTask) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: command task is required")
+		return taskapi.Snapshot{}, fmt.Errorf("command Task is required")
 	}
 	if task.commandOutcomeUnattached() {
 		return task.snapshotWithoutSession(tm.runtime.now()), nil
@@ -56,7 +56,7 @@ func (tm *taskRuntime) cancelCommandClaimed(ctx context.Context, task *commandTa
 
 func (tm *taskRuntime) executeClaimedCommandCancel(ctx context.Context, task *commandTask) (taskapi.Snapshot, error) {
 	if task == nil || task.session == nil {
-		return task.snapshotWithoutSession(tm.runtime.now()), errors.New("agent-sdk/runtime: claimed command cancellation has no live session")
+		return task.snapshotWithoutSession(tm.runtime.now()), errors.New("claimed command cancellation has no live Session")
 	}
 	if err := task.session.Terminate(ctx); err != nil {
 		status, statusErr := task.session.Status(context.WithoutCancel(ctx))
@@ -76,7 +76,7 @@ func (tm *taskRuntime) executeClaimedCommandCancel(ctx context.Context, task *co
 
 func (tm *taskRuntime) reconcileCommandCancel(ctx context.Context, task *commandTask, wait bool) (taskapi.Snapshot, error) {
 	if task == nil || task.session == nil {
-		return task.snapshotWithoutSession(tm.runtime.now()), errors.New("agent-sdk/runtime: command cancellation outcome has no live session")
+		return task.snapshotWithoutSession(tm.runtime.now()), errors.New("command cancellation outcome has no live Session")
 	}
 	if wait {
 		return tm.waitCommandCompletion(ctx, task, taskCancelWait)
@@ -96,7 +96,7 @@ func (tm *taskRuntime) reconcileCommandCancel(ctx context.Context, task *command
 
 func (tm *taskRuntime) persistCommandCancelPhase(ctx context.Context, task *commandTask, phase, reason string) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, errors.New("agent-sdk/runtime: command task is required")
+		return taskapi.Snapshot{}, errors.New("command Task is required")
 	}
 	task.mu.Lock()
 	entry := task.entrySnapshot(tm.runtime.now())

@@ -86,7 +86,7 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	}
 	bundle, err := t.loader.Load(ctx, skill.RefFromMeta(meta))
 	if err != nil {
-		return tool.Result{}, fmt.Errorf("skill: load %q: %w", meta.Name, err)
+		return tool.Result{}, fmt.Errorf("load skill %q: %w", meta.Name, err)
 	}
 	return tool.Result{
 		ID:   call.ID,

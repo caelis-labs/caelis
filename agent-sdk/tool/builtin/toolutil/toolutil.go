@@ -30,7 +30,7 @@ func DecodeArgs(call tool.Call) (map[string]any, error) {
 	}
 	var args map[string]any
 	if err := json.Unmarshal(call.Input, &args); err != nil {
-		return nil, fmt.Errorf("tool: invalid json input: %w", err)
+		return nil, fmt.Errorf("invalid JSON input: %w", err)
 	}
 	return args, nil
 }

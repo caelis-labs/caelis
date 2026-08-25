@@ -3,6 +3,7 @@ package gatewayapp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -43,10 +44,16 @@ func newGuardianApprovalReviewer(service session.Service) kernel.ApprovalReviewe
 	return newGuardianApprovalApprover(service)
 }
 
-func newGuardianApprovalApprover(service session.Service) *guardianApprovalReviewer {
+func newGuardianApprovalApprover(service session.Service, diagnostics ...*slog.Logger) *guardianApprovalReviewer {
+	var logger *slog.Logger
+	if len(diagnostics) > 0 {
+		logger = diagnostics[0]
+	}
 	return &guardianApprovalReviewer{
-		sessions:      service,
-		systemAgents:  newSystemManagedAgentRuntime(nil),
+		sessions: service,
+		systemAgents: newSystemManagedAgentRuntimeWithConfig(systemManagedAgentRuntimeConfig{
+			Diagnostics: logger,
+		}),
 		conversations: newGuardianConversationManager(),
 		accounting:    map[string]approvalReviewAccounting{},
 	}

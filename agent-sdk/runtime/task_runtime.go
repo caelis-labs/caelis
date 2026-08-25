@@ -22,7 +22,7 @@ const taskIDRandomBytes = 6
 func randomTaskID() (string, error) {
 	var raw [taskIDRandomBytes]byte
 	if _, err := rand.Read(raw[:]); err != nil {
-		return "", fmt.Errorf("agent-sdk/runtime: generate task id: %w", err)
+		return "", fmt.Errorf("generate Task identity: %w", err)
 	}
 	return hex.EncodeToString(raw[:]), nil
 }
@@ -420,14 +420,14 @@ func sameCommittedTaskEntry(persisted, requested *taskapi.Entry, expected uint64
 
 func (tm *taskRuntime) persistSpawnEntry(ctx context.Context, entry *taskapi.Entry) error {
 	if tm == nil || tm.store == nil || entry == nil {
-		return errors.New("agent-sdk/runtime: durable CAS task store is required before subagent spawn")
+		return errors.New("durable CAS Task store is required before subagent spawn")
 	}
 	if entry.Kind == taskapi.KindSubagent {
 		normalizeSubagentEntryResult(entry, entry.FailureDiagnostic)
 	}
 	store, ok := tm.store.(taskapi.CASStore)
 	if !ok {
-		return errors.New("agent-sdk/runtime: subagent spawn requires task.CASStore")
+		return errors.New("subagent spawn requires task.CASStore")
 	}
 	expected := entry.Revision
 	persisted, err := store.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: expected})
@@ -446,7 +446,7 @@ func (tm *taskRuntime) persistSpawnEntry(ctx context.Context, entry *taskapi.Ent
 		}
 	}
 	if persisted == nil {
-		return errors.New("agent-sdk/runtime: CAS task store returned no persisted spawn entry")
+		return errors.New("CAS Task store returned no persisted spawn entry")
 	}
 	*entry = *taskapi.CloneEntry(persisted)
 	tm.updateTaskPersistence(entry)

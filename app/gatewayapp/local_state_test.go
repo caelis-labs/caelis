@@ -1178,8 +1178,27 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	if err != nil || result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("AppServer CompactSession() = %#v, %v", result, err)
 	}
+	if result.Revision != revision+1 {
+		t.Fatalf("AppServer CompactSession().Revision = %d, want committed revision %d", result.Revision, revision+1)
+	}
 	if got := server.compactionCalls.Load(); got != 1 {
 		t.Fatalf("compactionCalls = %d, want 1", got)
+	}
+	noopRevision := result.Revision
+	noop, err := sessions.CompactSession(ctx, appserver.CompactSessionRequest{WriteBase: appserver.WriteBase{
+		OperationID:             "manual-compact-product-path-noop",
+		SessionID:               current.SessionID,
+		ExpectedRevision:        &noopRevision,
+		ExpectedControllerEpoch: current.Controller.EpochID,
+	}})
+	if err != nil || noop.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("AppServer no-op CompactSession() = %#v, %v", noop, err)
+	}
+	if noop.Revision != noopRevision {
+		t.Fatalf("AppServer no-op CompactSession().Revision = %d, want unchanged %d", noop.Revision, noopRevision)
+	}
+	if got := server.compactionCalls.Load(); got != 1 {
+		t.Fatalf("compactionCalls after no-op = %d, want unchanged 1", got)
 	}
 	loaded, err := stack.composition.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
 	if err != nil {

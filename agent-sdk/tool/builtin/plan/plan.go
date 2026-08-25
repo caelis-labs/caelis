@@ -109,7 +109,7 @@ func decodeArgs(raw json.RawMessage) (Args, error) {
 	}
 	var values map[string]any
 	if err := json.Unmarshal(raw, &values); err != nil {
-		return Args{}, fmt.Errorf("tool: decode args for %q: %w", ToolName, err)
+		return Args{}, fmt.Errorf("decode args for %q: %w", ToolName, err)
 	}
 	if err := tool.RejectUnknownArgs(values, "explanation", "entries"); err != nil {
 		return Args{}, err
@@ -131,16 +131,16 @@ func decodePlanEntries(raw any) ([]Entry, error) {
 	}
 	items, ok := raw.([]any)
 	if !ok {
-		return nil, fmt.Errorf("tool: %s entries must be an array", ToolName)
+		return nil, fmt.Errorf("%s entries must be an array", ToolName)
 	}
 	entries := make([]Entry, 0, len(items))
 	for idx, item := range items {
 		values, ok := item.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("tool: %s entries[%d] must be an object", ToolName, idx)
+			return nil, fmt.Errorf("%s entries[%d] must be an object", ToolName, idx)
 		}
 		if err := tool.RejectUnknownArgs(values, "content", "status"); err != nil {
-			return nil, fmt.Errorf("tool: %s entries[%d]: %w", ToolName, idx, err)
+			return nil, fmt.Errorf("%s entries[%d]: %w", ToolName, idx, err)
 		}
 		content, err := requiredPlanEntryString(values, idx, "content")
 		if err != nil {
@@ -162,7 +162,7 @@ func optionalPlanString(values map[string]any, key string) (string, error) {
 	}
 	value, ok := raw.(string)
 	if !ok {
-		return "", fmt.Errorf("tool: %s %s must be string", ToolName, key)
+		return "", fmt.Errorf("%s %s must be string", ToolName, key)
 	}
 	return value, nil
 }
@@ -170,11 +170,11 @@ func optionalPlanString(values map[string]any, key string) (string, error) {
 func requiredPlanEntryString(values map[string]any, idx int, key string) (string, error) {
 	raw, ok := values[key]
 	if !ok || raw == nil {
-		return "", fmt.Errorf("tool: %s entries[%d].%s is required", ToolName, idx, key)
+		return "", fmt.Errorf("%s entries[%d].%s is required", ToolName, idx, key)
 	}
 	value, ok := raw.(string)
 	if !ok {
-		return "", fmt.Errorf("tool: %s entries[%d].%s must be string", ToolName, idx, key)
+		return "", fmt.Errorf("%s entries[%d].%s must be string", ToolName, idx, key)
 	}
 	return value, nil
 }
@@ -188,11 +188,11 @@ func normalizeEntries(entries []Entry) ([]Entry, error) {
 	for _, item := range entries {
 		content := strings.TrimSpace(item.Content)
 		if content == "" {
-			return nil, fmt.Errorf("tool: %q entries.content is required", ToolName)
+			return nil, fmt.Errorf("%q entries.content is required", ToolName)
 		}
 		status := normalizeStatus(item.Status)
 		if status == "" {
-			return nil, fmt.Errorf("tool: %q entries.status must be pending, in_progress, or completed", ToolName)
+			return nil, fmt.Errorf("%q entries.status must be pending, in_progress, or completed", ToolName)
 		}
 		if status == StatusInProgress {
 			inProgress++
@@ -200,7 +200,7 @@ func normalizeEntries(entries []Entry) ([]Entry, error) {
 		out = append(out, Entry{Content: content, Status: status})
 	}
 	if inProgress > 1 {
-		return nil, fmt.Errorf("tool: %q allows at most one in_progress entry", ToolName)
+		return nil, fmt.Errorf("%q allows at most one in_progress entry", ToolName)
 	}
 	return out, nil
 }

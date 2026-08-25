@@ -38,13 +38,19 @@ func (r *Runtime) prepareInvocationContext(
 	if state == nil {
 		state = map[string]any{}
 	}
+	appendix, err := r.runtimeCompactionAppendix(ctx, ref, state)
+	if err != nil {
+		return invocationContext{}, err
+	}
 	compactCtx := r.withCompactActivity(ctx, loaded.Session, turnID, sink)
 	result, err := r.compactor.Prepare(compactCtx, compact.Request{
-		Session:       loaded.Session,
-		SessionRef:    ref,
-		Events:        events,
-		PendingEvents: pendingEventsForCompaction(pendingInput),
-		Model:         req.AgentSpec.Model,
+		Session:          loaded.Session,
+		SessionRef:       ref,
+		Events:           events,
+		PendingEvents:    pendingEventsForCompaction(pendingInput),
+		Model:            req.AgentSpec.Model,
+		InContextRequest: r.inContextRequest(ref, req.AgentSpec.Model, events),
+		RuntimeAppendix:  appendix,
 	})
 	if err != nil {
 		return invocationContext{}, wrapCompactionFailure("prepare", err)
@@ -75,11 +81,16 @@ type invocationContext struct {
 
 type CompactRequest struct {
 	SessionRef session.SessionRef
-	Model      model.LLM
-	Trigger    string
+	// ExpectedRevision is checked after this compaction is admitted to the
+	// Runtime's Session write queue. Nil accepts the latest admitted revision.
+	ExpectedRevision *uint64
+	Model            model.LLM
+	Trigger          string
 }
 
 type CompactResult struct {
+	// Session is the admitted Session snapshot, advanced to the committed
+	// revision when Compacted is true.
 	Session   session.Session
 	Compacted bool
 	Event     *session.Event
@@ -104,36 +115,69 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 		return CompactResult{}, err
 	}
 	activeSession := loaded.Session
-	events := loaded.Events
+	if err := session.CheckExpectedRevision(activeSession, req.ExpectedRevision); err != nil {
+		return CompactResult{Session: activeSession}, err
+	}
+	events := mainInvocationEvents(loaded.Events)
+	appendix, err := r.runtimeCompactionAppendix(ctx, ref, loaded.State)
+	if err != nil {
+		return CompactResult{}, err
+	}
 	forceCompactor, ok := r.compactor.(compact.ForceEngine)
 	if !ok {
 		return CompactResult{}, errors.New("agent-sdk/runtime: compactor does not support forced compaction")
 	}
-	result, err := forceCompactor.Force(ctx, compact.Request{
-		Session:    activeSession,
-		SessionRef: ref,
-		Events:     events,
-		Model:      req.Model,
-	}, req.Trigger)
+	scope := lifecycleScopeFromContext(ctx)
+	scope.sessionRef = ref
+	compactCtx := withLifecycleScope(ctx, scope)
+	var result compact.Result
+	var persisted *session.Event
+	err = r.executeLifecycle(compactCtx, r.lifecycleEvent(compactCtx, agent.LifecycleCompact, "", ""), func(callCtx context.Context) error {
+		var compactErr error
+		result, compactErr = forceCompactor.Force(callCtx, compact.Request{
+			Session:          activeSession,
+			SessionRef:       ref,
+			Events:           events,
+			Model:            req.Model,
+			InContextRequest: r.inContextRequest(ref, req.Model, events),
+			RuntimeAppendix:  appendix,
+		}, req.Trigger)
+		if compactErr != nil || !result.Compacted {
+			return compactErr
+		}
+		if result.CompactEvent == nil {
+			return errors.New("agent-sdk/runtime: compact event is required")
+		}
+		persisted, compactErr = r.persistCompactionArtifacts(
+			callCtx,
+			activeSession,
+			ref,
+			"",
+			loaded.Session.Revision,
+			result,
+		)
+		return compactErr
+	})
 	if err != nil {
-		return CompactResult{}, err
+		return CompactResult{Session: activeSession}, err
 	}
 	out := CompactResult{
 		Session:   activeSession,
-		Compacted: result.Compacted,
+		Compacted: persisted != nil,
 		Usage:     result.Usage,
 	}
-	if result.Compacted && result.CompactEvent != nil {
-		persisted, appendErr := r.persistCompactionArtifacts(ctx, activeSession, ref, "", loaded.Session.Revision, result)
-		if appendErr != nil {
-			return CompactResult{}, appendErr
-		}
+	if persisted != nil {
 		out.Event = persisted
+		out.Session.Revision = activeSession.Revision + 1
+		if !persisted.Time.IsZero() {
+			out.Session.UpdatedAt = persisted.Time
+		}
 	}
 	return out, nil
 }
 
-func (r *Runtime) updateCompactionUsageFromBatch(_ context.Context, _ session.SessionRef, _ []*session.Event) error {
+func (r *Runtime) updateCompactionUsageFromBatch(_ context.Context, ref session.SessionRef, events []*session.Event) error {
+	r.advanceCompactionRequest(ref, session.LastEventSeq(mainInvocationEvents(events)))
 	return nil
 }
 
@@ -163,6 +207,7 @@ func (r *Runtime) persistCompactionArtifacts(
 	if err != nil {
 		return nil, err
 	}
+	r.clearCompactionRequest(ref)
 	return persisted, nil
 }
 
@@ -175,14 +220,24 @@ func (r *Runtime) compactAfterOverflow(
 	cause error,
 	sink *runner,
 ) (compactionProgress, bool, error) {
-	return r.compactAndNotify(ctx, ref, turnID, sink, func(compactCtx context.Context, current session.Session, events []*session.Event) (compact.Result, error) {
+	return r.compactAndNotify(ctx, ref, turnID, sink, func(compactCtx context.Context, current session.Session, events []*session.Event, state map[string]any) (compact.Result, error) {
 		sourceEvents, pendingEvents := overflowCompactionEvents(events, currentTurnInput)
+		appendix, err := r.runtimeCompactionAppendix(compactCtx, ref, state)
+		if err != nil {
+			return compact.Result{}, err
+		}
+		var inContext *model.Request
+		if len(pendingEvents) == 0 {
+			inContext = r.inContextRequest(ref, req.AgentSpec.Model, sourceEvents)
+		}
 		return r.compactor.CompactOnOverflow(compactCtx, compact.Request{
-			Session:       current,
-			SessionRef:    ref,
-			Events:        sourceEvents,
-			PendingEvents: pendingEvents,
-			Model:         req.AgentSpec.Model,
+			Session:          current,
+			SessionRef:       ref,
+			Events:           sourceEvents,
+			PendingEvents:    pendingEvents,
+			Model:            req.AgentSpec.Model,
+			InContextRequest: inContext,
+			RuntimeAppendix:  appendix,
 		}, cause)
 	})
 }
@@ -235,12 +290,18 @@ func (r *Runtime) compactAfterModelRequestWatermark(
 	if trigger == "" {
 		trigger = "model_request_context_watermark"
 	}
-	return r.compactAndNotify(ctx, ref, turnID, sink, func(compactCtx context.Context, current session.Session, events []*session.Event) (compact.Result, error) {
+	return r.compactAndNotify(ctx, ref, turnID, sink, func(compactCtx context.Context, current session.Session, events []*session.Event, state map[string]any) (compact.Result, error) {
+		appendix, err := r.runtimeCompactionAppendix(compactCtx, ref, state)
+		if err != nil {
+			return compact.Result{}, err
+		}
 		return forceCompactor.Force(compactCtx, compact.Request{
-			Session:    current,
-			SessionRef: ref,
-			Events:     events,
-			Model:      decision.Model,
+			Session:          current,
+			SessionRef:       ref,
+			Events:           events,
+			Model:            decision.Model,
+			InContextRequest: model.CloneRequest(decision.Request),
+			RuntimeAppendix:  appendix,
 		}, trigger)
 	})
 }
@@ -250,7 +311,7 @@ func (r *Runtime) compactAndNotify(
 	ref session.SessionRef,
 	turnID string,
 	sink *runner,
-	compactFn func(context.Context, session.Session, []*session.Event) (compact.Result, error),
+	compactFn func(context.Context, session.Session, []*session.Event, map[string]any) (compact.Result, error),
 ) (compactionProgress, bool, error) {
 	if compactFn == nil {
 		return compactionProgress{}, false, errors.New("agent-sdk/runtime: compact function is required")
@@ -270,7 +331,7 @@ func (r *Runtime) compactAndNotify(
 	compactCtx := r.withCompactActivity(ctx, activeSession, turnID, sink)
 	err = r.executeLifecycle(compactCtx, r.lifecycleEvent(compactCtx, agent.LifecycleCompact, "", ""), func(callCtx context.Context) error {
 		var compactErr error
-		result, compactErr = compactFn(callCtx, activeSession, events)
+		result, compactErr = compactFn(callCtx, activeSession, events, loaded.State)
 		return compactErr
 	})
 	if err != nil {

@@ -52,7 +52,7 @@ func (e *GenerationLoopError) Error() string {
 	if e == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("agent-sdk/runtime/chat: generation loop interrupted: %s (streak %d)", e.Reason, e.Streak)
+	return fmt.Sprintf("generation loop interrupted: %s (streak %d)", e.Reason, e.Streak)
 }
 
 func (*GenerationLoopError) ErrorCode() errorcode.Code { return errorcode.Interrupted }

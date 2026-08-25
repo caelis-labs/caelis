@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -52,11 +53,12 @@ func normalizeCompactionConfig(cfg CompactionConfig) CompactionConfig {
 }
 
 type codexStyleCompactor struct {
-	cfg CompactionConfig
+	cfg         CompactionConfig
+	diagnostics *slog.Logger
 }
 
-func newCodexStyleCompactor(cfg CompactionConfig) compact.Engine {
-	return &codexStyleCompactor{cfg: normalizeCompactionConfig(cfg)}
+func newCodexStyleCompactor(cfg CompactionConfig, diagnostics *slog.Logger) compact.Engine {
+	return &codexStyleCompactor{cfg: normalizeCompactionConfig(cfg), diagnostics: diagnostics}
 }
 
 func (c *codexStyleCompactor) Prepare(ctx context.Context, req compact.Request) (compact.Result, error) {
@@ -125,7 +127,7 @@ func (c *codexStyleCompactor) decide(_ context.Context, usage compact.UsageSnaps
 
 func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, trigger string) (compact.Result, error) {
 	baseEvent, baseData, _ := compact.LatestCompactEvent(req.Events)
-	baseText := compactTextFromEvent(baseEvent)
+	baseText := stripRuntimeContinuity(compactTextFromEvent(baseEvent))
 	delta := compactableEvents(req.Events)
 	if len(delta) == 0 {
 		promptEvents := compact.PromptEventsFromLatestCompact(req.Events)
@@ -144,16 +146,38 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 	}
 
 	notifyCompactionStarted(ctx)
-	compactText, err := c.generateCompactMarkdown(ctx, req.Model, baseText, summaryEvents)
-	if err != nil {
-		return compact.Result{}, err
+	generator := "model_markdown"
+	compactText := ""
+	var err error
+	if req.InContextRequest != nil {
+		compactText, err = modelCompactMarkdownInContext(ctx, req.Model, req.InContextRequest)
+		if err == nil {
+			generator = "model_context"
+		} else if ctx.Err() != nil {
+			return compact.Result{}, ctx.Err()
+		} else {
+			c.logFallback(ctx, "in_context", "independent", classifyCompactionFailure(err))
+		}
+	}
+	if compactText == "" {
+		compactText, err = c.generateCompactMarkdown(ctx, req.Model, baseText, summaryEvents)
+		if err != nil {
+			if ctx.Err() != nil {
+				return compact.Result{}, ctx.Err()
+			}
+			return compact.Result{}, err
+		}
+	}
+	compactText = appendRuntimeContinuity(compactText, req.RuntimeAppendix)
+	if strings.TrimSpace(compactText) == "" {
+		return compact.Result{}, errors.New("agent-sdk/runtime: compaction produced no checkpoint")
 	}
 	data := compact.CompactEventData{
 		Revision:             baseData.Revision + 1,
 		ContractVersion:      compact.CompactContractVersion,
 		SummarizedThroughID:  lastEventID(delta),
 		SummarizedThroughSeq: lastEventSeq(delta),
-		Generator:            "model_markdown",
+		Generator:            generator,
 		Trigger:              strings.TrimSpace(trigger),
 		SourceEventCount:     len(summaryEvents),
 		DiscoveredTools:      discoveredToolNamesFromEvents(req.Events),
@@ -174,6 +198,33 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 		PromptEvents: promptEvents,
 		Usage:        usage,
 	}, nil
+}
+
+func (c *codexStyleCompactor) logFallback(ctx context.Context, from, to, reason string) {
+	if c == nil || c.diagnostics == nil {
+		return
+	}
+	c.diagnostics.WarnContext(ctx, "context compaction fallback",
+		slog.String("component", "context_compaction"),
+		slog.String("from", strings.TrimSpace(from)),
+		slog.String("to", strings.TrimSpace(to)),
+		slog.String("reason", strings.TrimSpace(reason)),
+	)
+}
+
+func classifyCompactionFailure(err error) string {
+	switch {
+	case err == nil:
+		return "unknown"
+	case isCompactionOverflowError(err):
+		return "context_overflow"
+	case errors.Is(err, errCompactionToolRequest):
+		return "tool_request"
+	case errors.Is(err, errCompactionUnusableOutput):
+		return "unusable_output"
+	default:
+		return "model_request"
+	}
 }
 
 func lastEventSeq(events []*session.Event) uint64 {

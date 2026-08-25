@@ -85,7 +85,7 @@ func (t *ReadTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 		return tool.Result{}, err
 	}
 	if offset < 0 {
-		return tool.Result{}, fmt.Errorf("tool: arg %q must be >= 0", "offset")
+		return tool.Result{}, fmt.Errorf("arg %q must be >= 0", "offset")
 	}
 	limit, err := argparse.Int(args, "limit", t.cfg.DefaultLimit)
 	if err != nil {

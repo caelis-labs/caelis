@@ -31,14 +31,14 @@ func ValidateArgs(args map[string]any) error {
 	}
 	value, ok := raw.(string)
 	if !ok {
-		return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"handle\" must be string")
+		return tool.NewError(tool.ErrorCodeInvalidInput, "arg \"handle\" must be string")
 	}
 	canonical, err := agenthandle.CanonicalRequested(value)
 	if err != nil {
 		return err
 	}
 	if canonical == "" {
-		return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"handle\" must be non-empty")
+		return tool.NewError(tool.ErrorCodeInvalidInput, "arg \"handle\" must be non-empty")
 	}
 	return nil
 }
@@ -101,7 +101,7 @@ func (t Tool) ResolveTarget(selector string) (Target, error) {
 			return Target{Selector: name, Placement: delegation.Placement{Kind: delegation.PlacementAgent, Agent: name}}, nil
 		}
 	}
-	return Target{}, fmt.Errorf("tool: Spawn agent %q is not available", selector)
+	return Target{}, fmt.Errorf("spawn agent %q is not available", selector)
 }
 
 func normalizeTarget(target Target) Target {
@@ -212,7 +212,7 @@ func (Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 	if err := ValidateArgs(args); err != nil {
 		return tool.Result{}, err
 	}
-	return tool.Result{}, fmt.Errorf("tool: Spawn must be executed by the runtime wrapper")
+	return tool.Result{}, fmt.Errorf("spawn must be executed by the runtime wrapper")
 }
 
 func agentNames(agents []delegation.Agent) []string {

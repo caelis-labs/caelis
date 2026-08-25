@@ -83,8 +83,8 @@ func TestRuntimeChildInputLeavesTaskUnchangedUntilOutputThenObservesGeneration(t
 		Target: started.Handle,
 		Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: childBinding.ID},
 		Input:  "self input",
-	}); !errorcode.Is(selfErr, errorcode.Conflict) {
-		t.Fatalf("self SubmitChildInput() error = %v, want conflict", selfErr)
+	}); !errorcode.Is(selfErr, errorcode.Conflict) || selfErr.Error() != "An Agent cannot send a message to itself" {
+		t.Fatalf("self SubmitChildInput() error = %v, want model-facing conflict", selfErr)
 	}
 	runner.mu.Lock()
 	deliveryCalls = runner.calls

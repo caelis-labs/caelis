@@ -238,6 +238,46 @@ func TestSendMessageSuccessRendersSingleLineWithoutDispatchAck(t *testing.T) {
 	}
 }
 
+func TestSendMessageFailureDoesNotClaimDelivery(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 120
+	model.height = 40
+	model.currentSessionID = "session-1"
+	failed := schema.ToolStatusFailed
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "message-1",
+			Title: "SendMessage", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"to": "orbit", "message": "validation recommendation"},
+			Meta:     acpToolNameMeta("SendMessage"),
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "message-1", Status: &failed,
+			Content: []schema.ToolCallContent{{
+				Type: "content", Content: schema.TextContent{Type: "text", Text: "Target Agent cannot receive follow-up messages."},
+			}},
+			RawOutput: map[string]any{
+				"error": "Target Agent cannot receive follow-up messages.", "error_code": "unsupported",
+			},
+			Meta: acpToolNameMeta("SendMessage"),
+		},
+	})
+
+	model.syncViewportContent()
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(plain, "• Failed to send orbit: validation recommendation") ||
+		!strings.Contains(plain, "Target Agent cannot receive follow-up messages.") {
+		t.Fatalf("failed SendMessage presentation mismatch:\n%s", plain)
+	}
+	if strings.Contains(plain, "• Sent ") || strings.Contains(plain, "internal/acpagentbridge") {
+		t.Fatalf("failed SendMessage claimed delivery or leaked an implementation path:\n%s", plain)
+	}
+}
+
 func TestSentHeaderUsesSpawnTargetStyling(t *testing.T) {
 	model := NewModel(Config{})
 	ctx := model.blockRenderContext(100)

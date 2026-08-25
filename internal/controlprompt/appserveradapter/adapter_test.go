@@ -808,8 +808,12 @@ func TestSessionClientAdapterRoutesCompactThroughTypedSessionClient(t *testing.T
 		},
 	}}
 	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
-	if err := adapter.Compact(context.Background()); err != nil {
+	compacted, err := adapter.Compact(context.Background())
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !compacted {
+		t.Fatal("Compact() = false, want committed compaction")
 	}
 	request := client.compact
 	if request.SessionID != "session-1" ||
@@ -817,6 +821,23 @@ func TestSessionClientAdapterRoutesCompactThroughTypedSessionClient(t *testing.T
 		request.ExpectedControllerEpoch != "epoch-1" ||
 		!strings.HasPrefix(request.OperationID, "compact-") {
 		t.Fatalf("typed compact request = %#v", request)
+	}
+}
+
+func TestSessionClientAdapterReportsCompactNoopFromUnchangedRevision(t *testing.T) {
+	t.Parallel()
+
+	client := &sessionClientAdapterTestClient{
+		state:       appserver.SessionState{SessionID: "session-noop", Revision: 9},
+		compactNoop: true,
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-noop", "cli-tui")
+	compacted, err := adapter.Compact(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compacted {
+		t.Fatal("Compact() = true, want no-op from unchanged committed revision")
 	}
 }
 
@@ -1037,7 +1058,7 @@ func TestTUISelectedRetiredExternalMainControllerRejectsParticipantContinuationA
 	if participants.prompt.OperationID != "" {
 		t.Fatalf("rejected ACP controller prompted a participant: %#v", participants.prompt)
 	}
-	if err := adapter.Compact(context.Background()); err == nil || !strings.Contains(err.Error(), "no longer supported in the TUI") {
+	if _, err := adapter.Compact(context.Background()); err == nil || !strings.Contains(err.Error(), "no longer supported in the TUI") {
 		t.Fatalf("Compact(retired ACP controller) error = %v", err)
 	}
 	if client.compact.OperationID != "" {
@@ -2163,6 +2184,7 @@ type sessionClientAdapterTestClient struct {
 	list                   session.SessionList
 	createSessionID        string
 	reconnectErr           error
+	compactNoop            bool
 
 	mu                  sync.Mutex
 	prompt              appserver.PromptRequest
@@ -2237,10 +2259,18 @@ func (c *sessionClientAdapterTestClient) CompactSession(_ context.Context, reque
 	c.mu.Lock()
 	c.compact = request
 	c.mu.Unlock()
+	revision := uint64(0)
+	if request.ExpectedRevision != nil {
+		revision = *request.ExpectedRevision
+		if !c.compactNoop {
+			revision++
+		}
+	}
 	return appserver.CommandResult{
 		OperationID: request.OperationID,
 		Outcome:     appserver.OutcomeCommitted,
 		SessionID:   request.SessionID,
+		Revision:    revision,
 	}, nil
 }
 

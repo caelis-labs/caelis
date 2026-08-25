@@ -39,7 +39,7 @@ type Agent struct {
 // New returns one concrete chat agent.
 func New(name string, model model.LLM, systemPrompt string) (*Agent, error) {
 	if model == nil {
-		return nil, errors.New("agent-sdk/runtime/chat: model is required")
+		return nil, errors.New("model is required")
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -69,11 +69,11 @@ func NewWithTools(name string, model model.LLM, tools []tool.Tool, systemPrompt 
 		name := definition.Name
 		switch {
 		case name == "":
-			return nil, fmt.Errorf("agent-sdk/runtime/chat: tool at index %d has an empty Definition.Name", index)
+			return nil, fmt.Errorf("tool at index %d has an empty Definition.Name", index)
 		case name != strings.TrimSpace(name):
-			return nil, fmt.Errorf("agent-sdk/runtime/chat: tool Definition.Name %q has surrounding whitespace", name)
+			return nil, fmt.Errorf("tool Definition.Name %q has surrounding whitespace", name)
 		case agent.toolsByName[name] != nil:
-			return nil, fmt.Errorf("agent-sdk/runtime/chat: duplicate tool Definition.Name %q", name)
+			return nil, fmt.Errorf("duplicate tool Definition.Name %q", name)
 		default:
 			agent.toolsByName[name] = configured
 		}
@@ -419,7 +419,7 @@ func (a *Agent) drainPendingSubmissions(
 		actor := session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
 		if submission.Kind == runtimeinput.ModelContext || submission.Kind == agent.SubmissionKindAgentCommunication {
 			if !session.ActorRefHasIdentity(submission.Actor) {
-				return accepted, fmt.Errorf("agent-sdk/runtime/chat: context submission requires source identity")
+				return accepted, fmt.Errorf("context submission requires source identity")
 			}
 			eventType = session.EventTypeContext
 			actor = session.CloneActorRef(submission.Actor)
@@ -443,7 +443,7 @@ func (a *Agent) drainPendingSubmissions(
 		} else if submission.Kind == agent.SubmissionKindAgentCommunication {
 			prefixed, err := agentcommunication.PrefixMessage(message, actor)
 			if err != nil {
-				return accepted, fmt.Errorf("agent-sdk/runtime/chat: %w", err)
+				return accepted, fmt.Errorf("submit model context: %w", err)
 			}
 			providerMessage = prefixed
 			event.Message = &providerMessage

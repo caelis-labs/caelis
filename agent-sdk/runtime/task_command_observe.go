@@ -23,13 +23,24 @@ func (tm *taskRuntime) waitCommandTask(
 	req taskapi.ControlRequest,
 ) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
-	}
-	if task.commandOutcomeUnattached() {
-		return task.snapshotWithoutSession(tm.runtime.now()), nil
+		return taskapi.Snapshot{}, fmt.Errorf("task is required")
 	}
 	waitStarted := time.Now()
-	status, waitErr := task.session.Wait(ctx, req.Yield)
+	commandSession := task.observableCommandSession()
+	commandYield := req.Yield
+	if commandSession == nil {
+		var fallback taskapi.Snapshot
+		var err error
+		task, commandSession, fallback, err = tm.commandWaitTarget(ctx, ref, task, commandWaitBudget(req.Yield, waitStarted))
+		if err != nil {
+			return fallback, err
+		}
+		if commandSession == nil {
+			return fallback, nil
+		}
+		commandYield = commandWaitBudget(req.Yield, waitStarted)
+	}
+	status, waitErr := commandSession.Wait(ctx, commandYield)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		if waitErr != nil {
 			return task.snapshotWithoutSession(tm.runtime.now()), waitErr
@@ -89,13 +100,13 @@ func (tm *taskRuntime) waitCommandTask(
 		}
 	}
 	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: command task is unavailable after wait")
+		return taskapi.Snapshot{}, fmt.Errorf("command Task is unavailable after wait")
 	}
 	tm.mu.RLock()
 	current := tm.tasks[task.ref.TaskID]
 	tm.mu.RUnlock()
 	if current == nil && tm.store == nil {
-		settledStatus, statusErr := task.session.Status(context.WithoutCancel(ctx))
+		settledStatus, statusErr := commandSession.Status(context.WithoutCancel(ctx))
 		if statusErr == nil {
 			status = settledStatus
 		}
@@ -107,10 +118,15 @@ func (tm *taskRuntime) waitCommandTask(
 	if current != nil {
 		task = current
 	}
-	if currentStatus, statusErr := task.session.Status(ctx); statusErr == nil {
+	commandSession = task.observableCommandSession()
+	if commandSession == nil {
+		fallback := task.snapshotWithoutSession(tm.runtime.now())
+		return fallback, waitErr
+	}
+	if currentStatus, statusErr := commandSession.Status(ctx); statusErr == nil {
 		status = currentStatus
 	}
-	if _, completed := task.session.(completedTaskSession); completed {
+	if _, completed := commandSession.(completedTaskSession); completed {
 		task.mu.Lock()
 		snapshot := task.snapshotLocked(status)
 		task.mu.Unlock()
@@ -123,20 +139,99 @@ func (tm *taskRuntime) waitCommandTask(
 	return tm.reconcileCommandStatus(ctx, task, status)
 }
 
+// commandWaitTarget waits only for an in-flight command operation to publish
+// its sandbox Session. It releases the short operation claim before the
+// lifecycle wait so cancellation and other command controls remain available.
+// A durable intent without a live producer is an observable prepared state;
+// Task wait must not resume the command or create a sandbox side effect.
+func (tm *taskRuntime) commandWaitTarget(
+	ctx context.Context,
+	ref session.SessionRef,
+	task *commandTask,
+	yield time.Duration,
+) (*commandTask, sandbox.Session, taskapi.Snapshot, error) {
+	if task == nil {
+		return nil, nil, taskapi.Snapshot{}, fmt.Errorf("task is required")
+	}
+	if commandSession := task.observableCommandSession(); commandSession != nil {
+		return task, commandSession, taskapi.Snapshot{}, nil
+	}
+
+	taskID := task.ref.TaskID
+	fallback := task.snapshotWithoutSession(tm.runtime.now())
+	claimCtx, cancelClaim := context.WithTimeout(ctx, max(yield, 0))
+	defer cancelClaim()
+	release, claimed := tm.tryClaimSubagentOperation(ref, taskID)
+	var (
+		durableFallback    taskapi.Snapshot
+		durableFallbackOK  bool
+		durableFallbackErr error
+	)
+	if !claimed && tm.store != nil {
+		durableFallback, durableFallbackErr = tm.durableCommandSnapshot(claimCtx, ref, taskID)
+		durableFallbackOK = durableFallbackErr == nil
+	}
+	var claimErr error
+	if !claimed {
+		release, claimErr = tm.waitForTaskOperationClaim(claimCtx, ref, taskID)
+	}
+	if claimErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return task, nil, fallback, ctxErr
+		}
+		if errors.Is(claimErr, context.DeadlineExceeded) {
+			if durableFallbackOK {
+				return task, nil, durableFallback, nil
+			}
+			if tm.store != nil {
+				return task, nil, fallback, errors.Join(claimErr, durableFallbackErr)
+			}
+			return task, nil, fallback, nil
+		}
+		return task, nil, fallback, claimErr
+	}
+	defer release()
+
+	if tm.store != nil {
+		current, lookupErr := tm.lookupCommandCanonical(ctx, ref, taskID)
+		if lookupErr != nil {
+			return task, nil, fallback, lookupErr
+		}
+		task = current
+	} else {
+		tm.mu.RLock()
+		current := tm.tasks[taskID]
+		tm.mu.RUnlock()
+		if current != nil {
+			task = current
+		}
+	}
+	if task == nil {
+		return nil, nil, taskapi.Snapshot{}, fmt.Errorf("command Task is unavailable before wait")
+	}
+	fallback = task.snapshotWithoutSession(tm.runtime.now())
+	return task, task.observableCommandSession(), fallback, nil
+}
+
+func commandWaitBudget(yield time.Duration, started time.Time) time.Duration {
+	remaining := yield - time.Since(started)
+	return max(remaining, 0)
+}
+
 func (tm *taskRuntime) durableCommandSnapshot(
 	ctx context.Context,
 	ref session.SessionRef,
 	taskID string,
 ) (taskapi.Snapshot, error) {
 	if tm == nil || tm.store == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: durable Task store is unavailable")
+		return taskapi.Snapshot{}, fmt.Errorf("durable Task store is unavailable")
 	}
 	entry, err := tm.store.Get(ctx, taskID)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
 	if !storedTaskEntryMatches(entry, ref, taskapi.KindCommand) {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+		return taskapi.Snapshot{}, fmt.Errorf("task %q was not found", taskID)
 	}
 	return commandSnapshotFromTaskEntry(entry), nil
 }
@@ -241,7 +336,7 @@ func (tm *taskRuntime) syncCommandOutput(
 	status sandbox.SessionStatus,
 ) error {
 	if task == nil || task.session == nil {
-		return fmt.Errorf("agent-sdk/runtime: command task has no observable sandbox session")
+		return fmt.Errorf("command Task has no observable sandbox session")
 	}
 	task.outputReadMu.Lock()
 	defer task.outputReadMu.Unlock()
@@ -281,10 +376,10 @@ func (tm *taskRuntime) observeRunningCommand(
 	status sandbox.SessionStatus,
 ) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
+		return taskapi.Snapshot{}, fmt.Errorf("task is required")
 	}
 	if !status.Running {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: running command observation requires a running status")
+		return taskapi.Snapshot{}, fmt.Errorf("running command observation requires a running status")
 	}
 	if err := tm.syncCommandOutput(ctx, task, status); err != nil {
 		snapshot, persistErr := tm.markCommandUnknown(context.WithoutCancel(ctx), task, err)

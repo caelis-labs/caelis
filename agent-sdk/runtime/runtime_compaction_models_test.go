@@ -25,7 +25,7 @@ func (m *stepWatermarkModel) ProviderName() string {
 }
 
 func (m *stepWatermarkModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	if strings.Contains(requestInstructionsText(req), "CONTEXT CHECKPOINT COMPACTION") {
+	if isRuntimeCompactionRequest(req) {
 		m.compactionCalls++
 		if m.compactionErr != nil {
 			return func(yield func(*model.StreamEvent, error) bool) {
@@ -76,7 +76,8 @@ func (m *stepWatermarkModel) Generate(_ context.Context, req *model.Request) ite
 			}), nil)
 		case 2:
 			requestText := strings.Join(requestMessageTexts(req), "\n")
-			if !strings.Contains(requestText, "CONTEXT CHECKPOINT") || !strings.Contains(requestText, "ECHO tool result completed") {
+			hasToolContinuity := strings.Contains(requestText, "ECHO tool result completed") || strings.Contains(requestText, "value: pong")
+			if !strings.Contains(requestText, "CONTEXT CHECKPOINT") || !hasToolContinuity {
 				m.t.Fatalf("post-compact request missing checkpoint continuity: %s", requestText)
 			}
 			m.sawCheckpointOnRetry = true
@@ -125,7 +126,7 @@ func (m *attachmentUsageModel) Capabilities() model.Capabilities {
 }
 
 func (m *attachmentUsageModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	if strings.Contains(requestInstructionsText(req), "CONTEXT CHECKPOINT COMPACTION") {
+	if isRuntimeCompactionRequest(req) {
 		m.compactionCalls++
 		return func(yield func(*model.StreamEvent, error) bool) {
 			yield(model.StreamEventFromResponse(&model.Response{
@@ -212,7 +213,7 @@ func (m *repeatedWatermarkModel) ProviderName() string {
 }
 
 func (m *repeatedWatermarkModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	if strings.Contains(requestInstructionsText(req), "CONTEXT CHECKPOINT COMPACTION") {
+	if isRuntimeCompactionRequest(req) {
 		m.compactionCalls++
 		return func(yield func(*model.StreamEvent, error) bool) {
 			yield(model.StreamEventFromResponse(&model.Response{
@@ -287,7 +288,7 @@ func (m *retryExhaustedHighWaterModel) ProviderName() string {
 }
 
 func (m *retryExhaustedHighWaterModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	if strings.Contains(requestInstructionsText(req), "CONTEXT CHECKPOINT COMPACTION") {
+	if isRuntimeCompactionRequest(req) {
 		m.compactionCalls++
 		return func(yield func(*model.StreamEvent, error) bool) {
 			yield(model.StreamEventFromResponse(&model.Response{

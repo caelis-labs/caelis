@@ -360,6 +360,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		PolicyRegistry:           policyRegistry,
 		DefaultApprovalMode:      string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
 		Compaction:               compactionCfg,
+		Diagnostics:              s.authorities.diagnostics,
 		ControllerContextRouter:  contextRouter,
 		ControllerEventForwarder: acpbridge.NewControllerForwarder(s.sessions),
 		TaskStore:                s.authorities.taskStore,

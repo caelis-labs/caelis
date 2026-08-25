@@ -158,12 +158,12 @@ func (t runtimeSendMessageTool) Call(ctx context.Context, call tool.Call) (tool.
 	switch {
 	case strings.EqualFold(input.Target, agent.AgentInputParent):
 		if t.external == nil {
-			return tool.Result{}, fmt.Errorf("agent-sdk/runtime: the main Agent has no parent target")
+			return tool.Result{}, fmt.Errorf("the main Agent has no parent target")
 		}
 		err = t.external.SendAgentInput(ctx, input)
 	case localTarget:
 		if t.runtime == nil {
-			return tool.Result{}, fmt.Errorf("agent-sdk/runtime: local Agent input service is unavailable")
+			return tool.Result{}, fmt.Errorf("target Agent messaging is unavailable")
 		}
 		_, err = t.runtime.SubmitChildInput(ctx, t.sessionRef, agent.ChildInputCommand{
 			Target: input.Target, Source: session.ControllerExecutor(t.session.Controller),
@@ -173,7 +173,7 @@ func (t runtimeSendMessageTool) Call(ctx context.Context, call tool.Call) (tool.
 		err = t.external.SendAgentInput(ctx, input)
 	default:
 		if t.runtime == nil {
-			return tool.Result{}, fmt.Errorf("agent-sdk/runtime: local Agent input service is unavailable")
+			return tool.Result{}, fmt.Errorf("target Agent messaging is unavailable")
 		}
 		_, err = t.runtime.SubmitChildInput(ctx, t.sessionRef, agent.ChildInputCommand{
 			Target: input.Target, Source: session.ControllerExecutor(t.session.Controller),
@@ -265,7 +265,7 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 	}
 	command, ok := stringArg(args, "command")
 	if !ok || strings.TrimSpace(command) == "" {
-		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "command")
+		return tool.Result{}, fmt.Errorf("arg %q is required", "command")
 	}
 	workdir, _ := stringArg(args, "workdir")
 	tty := false
@@ -379,7 +379,7 @@ func (t runtimeSpawnTool) Definition() tool.Definition {
 
 func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	if t.runner == nil {
-		return tool.Result{}, fmt.Errorf("agent-sdk/runtime: subagent runner is unavailable")
+		return tool.Result{}, fmt.Errorf("subagent execution is unavailable")
 	}
 	args, err := decodeJSONMap(call.Input)
 	if err != nil {
@@ -390,13 +390,13 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	}
 	prompt, ok := stringArg(args, "prompt")
 	if !ok || strings.TrimSpace(prompt) == "" {
-		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "prompt")
+		return tool.Result{}, fmt.Errorf("arg %q is required", "prompt")
 	}
 	var requestedHandle string
 	if _, exists := args["handle"]; exists {
 		handle, ok := stringArg(args, "handle")
 		if !ok || handle == "" {
-			return tool.Result{}, fmt.Errorf("tool: arg %q must be a non-empty string", "handle")
+			return tool.Result{}, fmt.Errorf("arg %q must be a non-empty string", "handle")
 		}
 		requestedHandle = handle
 	}
@@ -410,7 +410,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 		resolver, _ = t.base.(spawn.Resolver)
 	}
 	if resolver == nil {
-		return tool.Result{}, fmt.Errorf("agent-sdk/runtime: Spawn tool does not implement spawn.Resolver")
+		return tool.Result{}, fmt.Errorf("Spawn target resolution is unavailable")
 	}
 	target, err := resolver.ResolveTarget(requested)
 	if err != nil {
@@ -485,7 +485,7 @@ func resolveRuntimeSpawnToolAgent(def tool.Definition, activeSession session.Ses
 	enum := spawnAgentEnum(def)
 	if len(enum) == 0 {
 		if requested != "" && !strings.EqualFold(requested, "self") {
-			return "", fmt.Errorf("tool: Spawn agent %q is not available", requested)
+			return "", fmt.Errorf("Spawn agent %q is not available", requested)
 		}
 		return resolveSpawnAgent(activeSession, requested)
 	}
@@ -495,14 +495,14 @@ func resolveRuntimeSpawnToolAgent(def tool.Definition, activeSession session.Ses
 				return strings.TrimSpace(allowed), nil
 			}
 		}
-		return "", fmt.Errorf("tool: Spawn agent default is not available")
+		return "", fmt.Errorf("Spawn agent default is not available")
 	}
 	for _, allowed := range enum {
 		if strings.EqualFold(requested, allowed) {
 			return strings.TrimSpace(allowed), nil
 		}
 	}
-	return "", fmt.Errorf("tool: Spawn agent %q is not available", requested)
+	return "", fmt.Errorf("Spawn agent %q is not available", requested)
 }
 
 func spawnAgentEnum(def tool.Definition) []string {
@@ -644,15 +644,15 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	}
 	action, ok := stringArg(args, "action")
 	if !ok || strings.TrimSpace(action) == "" {
-		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "action")
+		return tool.Result{}, fmt.Errorf("arg %q is required", "action")
 	}
 	handle, ok := stringArg(args, "handle")
 	if !ok || strings.TrimSpace(handle) == "" {
-		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "handle")
+		return tool.Result{}, fmt.Errorf("arg %q is required", "handle")
 	}
 	handles := splitTaskControlHandles(handle)
 	if len(handles) == 0 {
-		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "handle")
+		return tool.Result{}, fmt.Errorf("arg %q is required", "handle")
 	}
 	input, _ := rawStringArg(args, "input")
 	appendNewline := optionalBoolArg(args, "append_newline")
@@ -660,10 +660,10 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	switch normalizedAction {
 	case "wait", "read", "write", "cancel":
 	default:
-		return tool.Result{}, fmt.Errorf("tool: invalid action %q", action)
+		return tool.Result{}, fmt.Errorf("invalid Task action %q", action)
 	}
 	if len(handles) > 1 && (normalizedAction == "read" || normalizedAction == "write") {
-		return tool.Result{}, fmt.Errorf("tool: action %q accepts exactly one handle", normalizedAction)
+		return tool.Result{}, fmt.Errorf("task action %q accepts exactly one handle", normalizedAction)
 	}
 	if len(handles) > 1 {
 		result := t.callBatchTaskControl(ctx, call, normalizedAction, handles, input)
@@ -674,7 +674,7 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		return tool.Result{}, err
 	}
 	if normalizedAction == "write" && identity.kind != taskapi.KindCommand {
-		return tool.Result{}, fmt.Errorf("agent-sdk/runtime: Task write accepts RunCommand handles only; use SendMessage for subagent %q", handles[0])
+		return tool.Result{}, fmt.Errorf("task write accepts RunCommand handles only; use SendMessage for subagent %q", handles[0])
 	}
 	yield := time.Duration(0)
 	switch normalizedAction {
@@ -876,7 +876,7 @@ func (t runtimeTaskTool) callTaskControl(ctx context.Context, action string, req
 	case "cancel":
 		return t.tasks.Cancel(ctx, t.sessionRef, normalizedReq)
 	default:
-		return taskapi.Snapshot{}, fmt.Errorf("tool: invalid action %q", action)
+		return taskapi.Snapshot{}, fmt.Errorf("invalid Task action %q", action)
 	}
 }
 

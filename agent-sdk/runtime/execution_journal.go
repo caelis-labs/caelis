@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -84,10 +86,70 @@ func (r *Runtime) transitionRunTurnJournal(ctx context.Context, ref session.Sess
 		}
 		updates = append(updates, executionJournalEvent(next))
 	}
+	if executionTerminal(status) {
+		return r.appendExecutionEventsAndClearActivePlan(ctx, ref, updates,
+			fmt.Sprintf("turn-terminal-plan:%s:%s:%s", strings.TrimSpace(runID), strings.TrimSpace(turnID), status))
+	}
 	if len(updates) == 0 {
 		return nil
 	}
 	return r.appendExecutionEvents(ctx, ref, updates)
+}
+
+func (r *Runtime) appendExecutionEventsAndClearActivePlan(
+	ctx context.Context,
+	ref session.SessionRef,
+	events []*session.Event,
+	transactionID string,
+) error {
+	state, err := r.sessions.SnapshotState(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if _, hasPlan := state["plan"]; !hasPlan {
+		return r.appendExecutionEvents(ctx, ref, events)
+	}
+	compound, ok := r.sessions.(session.EventBatchStateService)
+	if !ok {
+		return fmt.Errorf("agent-sdk/runtime: terminal Turn plan cleanup requires atomic event/state commit")
+	}
+	_, err = compound.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
+		SessionRef:     ref,
+		MutationGuard:  session.RuntimeMutationGuard(ctx),
+		TransactionID:  strings.TrimSpace(transactionID),
+		MutationDigest: "clear-active-plan-v1",
+		Events:         events,
+		UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
+			delete(state, "plan")
+			return state, nil
+		},
+	})
+	return err
+}
+
+func executionEventsContainTerminalRunOrTurn(events []*session.Event) bool {
+	for _, event := range events {
+		if event == nil || event.Journal == nil || event.Journal.Execution == nil {
+			continue
+		}
+		record := session.NormalizeExecutionRecord(*event.Journal.Execution)
+		if (record.Kind == session.JournalKindRun || record.Kind == session.JournalKindTurn) && executionTerminal(record.Status) {
+			return true
+		}
+	}
+	return false
+}
+
+func executionRecoveryPlanTransactionID(events []*session.Event) string {
+	keys := make([]string, 0, len(events))
+	for _, event := range events {
+		if event != nil {
+			keys = append(keys, strings.TrimSpace(event.IdempotencyKey))
+		}
+	}
+	sort.Strings(keys)
+	digest := sha256.Sum256([]byte(strings.Join(keys, "\n")))
+	return fmt.Sprintf("execution-recovery-plan:%x", digest[:12])
 }
 
 func latestRunTurnRecords(events []*session.Event, runID, turnID string) []session.ExecutionRecord {
@@ -189,6 +251,12 @@ func (r *Runtime) recoverIncompleteExecutionJournal(ctx context.Context, ref ses
 	}
 	if len(updates) == 0 {
 		return nil
+	}
+	sort.SliceStable(updates, func(i, j int) bool {
+		return strings.TrimSpace(updates[i].IdempotencyKey) < strings.TrimSpace(updates[j].IdempotencyKey)
+	})
+	if executionEventsContainTerminalRunOrTurn(updates) {
+		return r.appendExecutionEventsAndClearActivePlan(ctx, ref, updates, executionRecoveryPlanTransactionID(updates))
 	}
 	return r.appendExecutionEvents(ctx, ref, updates)
 }

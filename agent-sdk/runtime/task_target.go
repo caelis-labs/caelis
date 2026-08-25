@@ -50,7 +50,7 @@ func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req 
 	}
 	release, claimed := tm.tryClaimSubagentOperation(ref, identity.taskID)
 	if !claimed {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task %q already has an operation in progress", identity.taskID)
+		return taskapi.Snapshot{}, fmt.Errorf("task already has an operation in progress")
 	}
 	defer release()
 	target, err := tm.lookupControlTargetClaimed(ctx, ref, identity)
@@ -64,7 +64,7 @@ func (tm *taskRuntime) resolveControlIdentity(ctx context.Context, ref session.S
 	lookupID = strings.TrimSpace(lookupID)
 	ref = session.NormalizeSessionRef(ref)
 	if lookupID == "" {
-		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task id is required")
+		return taskControlIdentity{}, fmt.Errorf("task id is required")
 	}
 	tm.mu.RLock()
 	if command := tm.tasks[lookupID]; command != nil && strings.TrimSpace(command.sessionRef.SessionID) == strings.TrimSpace(ref.SessionID) {
@@ -77,11 +77,11 @@ func (tm *taskRuntime) resolveControlIdentity(ctx context.Context, ref session.S
 	}
 	tm.mu.RUnlock()
 	if tm.store == nil {
-		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task %q not found", lookupID)
+		return taskControlIdentity{}, fmt.Errorf("task is no longer available")
 	}
 	entry, err := tm.store.Get(ctx, lookupID)
 	if err != nil || entry == nil || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) {
-		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task %q not found", lookupID)
+		return taskControlIdentity{}, fmt.Errorf("task is no longer available")
 	}
 	return taskControlIdentity{taskID: strings.TrimSpace(entry.TaskID), kind: entry.Kind}, nil
 }
@@ -93,7 +93,7 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 	handle := normalizeTaskHandle(rawHandle)
 	ref = session.NormalizeSessionRef(ref)
 	if handle == "" {
-		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task handle is required")
+		return taskControlIdentity{}, fmt.Errorf("task handle is required")
 	}
 	tm.mu.RLock()
 	var matched taskControlIdentity
@@ -110,7 +110,7 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 		}
 		if matched.taskID != "" && matched.taskID != taskID {
 			tm.mu.RUnlock()
-			return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task handle %q is ambiguous", handle)
+			return taskControlIdentity{}, fmt.Errorf("task handle %q is ambiguous", handle)
 		}
 		matched = taskControlIdentity{taskID: taskID, kind: taskapi.KindSubagent}
 	}
@@ -119,11 +119,11 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 		return matched, nil
 	}
 	if tm.store == nil {
-		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task handle %q not found", handle)
+		return taskControlIdentity{}, fmt.Errorf("task handle %q not found", handle)
 	}
 	entry, err := tm.store.GetSessionTaskByHandle(ctx, ref, handle)
 	if err != nil || entry == nil || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) || normalizeTaskHandle(entry.Handle) != handle {
-		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task handle %q not found", handle)
+		return taskControlIdentity{}, fmt.Errorf("task handle %q not found", handle)
 	}
 	return taskControlIdentity{taskID: strings.TrimSpace(entry.TaskID), kind: entry.Kind}, nil
 }
@@ -143,7 +143,7 @@ func (tm *taskRuntime) lookupControlTargetClaimed(ctx context.Context, ref sessi
 		}
 		return subagentControlTarget{runtime: tm, task: task}, nil
 	default:
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", identity.taskID)
+		return nil, fmt.Errorf("task is no longer available")
 	}
 }
 
@@ -172,7 +172,7 @@ func validateTaskControlPrincipal(principal session.ActorKind) error {
 	case session.ActorKindUser, session.ActorKindController, session.ActorKindParticipant, session.ActorKindTool, session.ActorKindSystem:
 		return nil
 	default:
-		return fmt.Errorf("agent-sdk/runtime: unsupported control principal %q", principal)
+		return fmt.Errorf("unsupported control principal %q", principal)
 	}
 }
 
@@ -209,7 +209,7 @@ func (t commandControlTarget) Write(ctx context.Context, req taskapi.ControlRequ
 		return taskapi.Snapshot{}, err
 	}
 	if !status.SupportsInput {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: command task %q does not accept stdin", t.task.handle)
+		return taskapi.Snapshot{}, fmt.Errorf("command task %q does not accept stdin", t.task.handle)
 	}
 	input := normalizeTaskWriteInput(req.Input, req.AppendNewline, status.Terminal.Backend)
 	if err := t.task.session.WriteInput(ctx, []byte(input)); err != nil {
@@ -260,7 +260,7 @@ func (t subagentControlTarget) Read(ctx context.Context, req taskapi.ControlRequ
 func (t subagentControlTarget) Write(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
 	_ = ctx
 	_ = req
-	return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: Task write accepts RunCommand tasks only; use SendMessage for subagent %q", t.task.handle)
+	return taskapi.Snapshot{}, fmt.Errorf("task write accepts RunCommand tasks only; use SendMessage for subagent %q", t.task.handle)
 }
 
 func (t subagentControlTarget) Cancel(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {

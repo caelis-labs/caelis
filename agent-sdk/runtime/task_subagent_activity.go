@@ -39,17 +39,17 @@ func (o subagentActivityObserver) ObserveChildActivity(ctx context.Context, raw 
 // current state without appending the frame twice.
 func (o subagentActivityObserver) ObserveChildActivityLive(_ context.Context, raw agent.ChildActivityEvent) error {
 	if o.runtime == nil || o.taskID == "" {
-		return fmt.Errorf("agent-sdk/runtime: child activity observer is unavailable")
+		return fmt.Errorf("child activity observer is unavailable")
 	}
 	event := agent.CloneChildActivityEvent(raw)
 	if strings.TrimSpace(event.ActivityID) == "" || event.Cursor == 0 {
-		return fmt.Errorf("agent-sdk/runtime: child activity identity and cursor are required")
+		return fmt.Errorf("child activity identity and cursor are required")
 	}
 	if strings.TrimSpace(event.Target.EndpointKey) != o.taskID {
-		return fmt.Errorf("agent-sdk/runtime: child activity endpoint changed")
+		return fmt.Errorf("child activity endpoint changed")
 	}
 	if event.Frame == nil || event.Result != nil || event.Gap {
-		return fmt.Errorf("agent-sdk/runtime: live child activity observation requires one frame")
+		return fmt.Errorf("live child activity observation requires one frame")
 	}
 	o.runtime.mu.RLock()
 	task := o.runtime.subagents[o.taskID]
@@ -58,7 +58,7 @@ func (o subagentActivityObserver) ObserveChildActivityLive(_ context.Context, ra
 		// Initial Spawn output can precede Task installation. The endpoint journal
 		// keeps it for the durable observer; later live cursors remain fenced until
 		// that replay catches up.
-		return fmt.Errorf("agent-sdk/runtime: child Task %q is not installed yet", o.taskID)
+		return fmt.Errorf("child Task %q is not installed yet", o.taskID)
 	}
 	if err := validateTaskActivityTarget(task, event.Target); err != nil {
 		return err
@@ -73,7 +73,7 @@ func (o subagentActivityObserver) ObserveChildActivityLive(_ context.Context, ra
 // observation gap.
 func (o subagentActivityObserver) ObserveChildActivityBatch(ctx context.Context, raw []agent.ChildActivityEvent) error {
 	if o.runtime == nil || o.taskID == "" {
-		return fmt.Errorf("agent-sdk/runtime: child activity observer is unavailable")
+		return fmt.Errorf("child activity observer is unavailable")
 	}
 	if len(raw) == 0 {
 		return nil
@@ -84,16 +84,16 @@ func (o subagentActivityObserver) ObserveChildActivityBatch(ctx context.Context,
 	for _, item := range raw {
 		event := agent.CloneChildActivityEvent(item)
 		if strings.TrimSpace(event.ActivityID) == "" || event.Cursor == 0 {
-			return fmt.Errorf("agent-sdk/runtime: child activity identity and cursor are required")
+			return fmt.Errorf("child activity identity and cursor are required")
 		}
 		if strings.TrimSpace(event.Target.EndpointKey) != o.taskID {
-			return fmt.Errorf("agent-sdk/runtime: child activity endpoint changed")
+			return fmt.Errorf("child activity endpoint changed")
 		}
 		if previousCursor != 0 && event.Cursor <= previousCursor {
-			return fmt.Errorf("agent-sdk/runtime: child activity batch cursor is not increasing")
+			return fmt.Errorf("child activity batch cursor is not increasing")
 		}
 		if terminalSeen {
-			return fmt.Errorf("agent-sdk/runtime: child activity batch continued after terminal result")
+			return fmt.Errorf("child activity batch continued after terminal result")
 		}
 		terminalSeen = event.Result != nil
 		previousCursor = event.Cursor
@@ -105,11 +105,11 @@ func (o subagentActivityObserver) ObserveChildActivityBatch(ctx context.Context,
 	if task == nil {
 		// Spawn may emit before its post-spawn Task record becomes live. The
 		// runner journal retains the event and retries after installation.
-		return fmt.Errorf("agent-sdk/runtime: child Task %q is not installed yet", o.taskID)
+		return fmt.Errorf("child Task %q is not installed yet", o.taskID)
 	}
 	release, claimed := o.runtime.tryClaimSubagentOperation(task.sessionRef, o.taskID)
 	if !claimed {
-		return fmt.Errorf("agent-sdk/runtime: child Task %q observation is busy", o.taskID)
+		return fmt.Errorf("child Task %q observation is busy", o.taskID)
 	}
 	released := false
 	defer func() {
@@ -201,7 +201,7 @@ func (o subagentActivityObserver) applyChildActivityEvent(
 	event agent.ChildActivityEvent,
 ) (generation int64, pending bool, err error) {
 	if task == nil {
-		return 0, false, fmt.Errorf("agent-sdk/runtime: child Task is unavailable")
+		return 0, false, fmt.Errorf("child Task is unavailable")
 	}
 	task.activityApplyMu.Lock()
 	defer task.activityApplyMu.Unlock()
@@ -399,7 +399,7 @@ func activityFrameForGeneration(frame stream.Frame, task *subagentTask, generati
 
 func validateTaskActivityTarget(task *subagentTask, target agent.ChildEndpointRef) error {
 	if task == nil {
-		return fmt.Errorf("agent-sdk/runtime: child activity Task is unavailable")
+		return fmt.Errorf("child activity Task is unavailable")
 	}
 	target = agent.NormalizeChildEndpointRef(target)
 	task.mu.Lock()
@@ -414,7 +414,7 @@ func validateTaskActivityTarget(task *subagentTask, target agent.ChildEndpointRe
 	if target.ParticipantID != want.ParticipantID || target.SessionID != want.SessionID ||
 		target.EndpointKey != want.EndpointKey || target.Role != want.Role ||
 		!reflect.DeepEqual(target.Placement, want.Placement) {
-		return fmt.Errorf("agent-sdk/runtime: child activity endpoint no longer matches its Task")
+		return fmt.Errorf("child activity endpoint no longer matches its Task")
 	}
 	return nil
 }

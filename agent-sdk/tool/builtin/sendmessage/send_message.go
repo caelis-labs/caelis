@@ -22,7 +22,7 @@ func ValidateArgs(args map[string]any) error {
 	for _, name := range allowedArgs {
 		value, ok := args[name].(string)
 		if !ok || strings.TrimSpace(value) == "" {
-			return tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: arg %q is required", name))
+			return tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg %q is required", name))
 		}
 	}
 	return nil
@@ -36,7 +36,7 @@ func New() Tool { return Tool{} }
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Send an internal message to another Agent or the parent Agent.",
+		Description: "Send one input to another Agent or the parent. Success confirms dispatch, not task completion.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -46,7 +46,7 @@ func (Tool) Definition() tool.Definition {
 				},
 				"message": map[string]any{
 					"type": "string", "minLength": 1,
-					"description": "Internal Agent message to send.",
+					"description": "Message content.",
 				},
 			},
 			"required":             []string{"to", "message"},
@@ -64,7 +64,7 @@ func (Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 	if err := ValidateArgs(args); err != nil {
 		return tool.Result{}, err
 	}
-	return tool.Result{}, fmt.Errorf("tool: SendMessage must be executed by the runtime wrapper")
+	return tool.Result{}, fmt.Errorf("SendMessage must be executed by the runtime wrapper")
 }
 
 var _ tool.Tool = Tool{}

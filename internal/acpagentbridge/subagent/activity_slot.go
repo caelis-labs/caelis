@@ -3,7 +3,6 @@ package subagent
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -210,7 +209,7 @@ func (s *childSlot) beginSetup(run *childRun) {
 
 func (s *childSlot) finalizeTarget(target agent.ChildEndpointRef) error {
 	if s == nil {
-		return errorcode.New(errorcode.FailedPrecondition, "internal/acpagentbridge/subagent: child slot is unavailable")
+		return errorcode.New(errorcode.FailedPrecondition, "Target Agent state is unavailable")
 	}
 	target = agent.NormalizeChildEndpointRef(target)
 	if err := validateChildEndpointRef(target); err != nil {
@@ -732,7 +731,7 @@ func (o compatibilityActivityObserver) ObserveChildActivity(_ context.Context, e
 func validateChildEndpointRef(target agent.ChildEndpointRef) error {
 	target = agent.NormalizeChildEndpointRef(target)
 	if target.ParticipantID == "" || target.SessionID == "" || target.EndpointKey == "" || target.Role == "" {
-		return errorcode.New(errorcode.InvalidArgument, "internal/acpagentbridge/subagent: child endpoint identity is incomplete")
+		return errorcode.New(errorcode.InvalidArgument, "Target Agent identity is incomplete")
 	}
 	if err := placementValidationError(target); err != nil {
 		return err
@@ -742,16 +741,13 @@ func validateChildEndpointRef(target agent.ChildEndpointRef) error {
 
 func placementValidationError(target agent.ChildEndpointRef) error {
 	if target.Placement.Kind == "" {
-		return errorcode.New(errorcode.InvalidArgument, "internal/acpagentbridge/subagent: child endpoint placement is required")
+		return errorcode.New(errorcode.InvalidArgument, "Target Agent placement is required")
 	}
 	return nil
 }
 
-func childSlotTargetError(target agent.ChildEndpointRef) error {
-	return errorcode.New(errorcode.Conflict, fmt.Sprintf(
-		"internal/acpagentbridge/subagent: child endpoint %q no longer matches its durable binding",
-		strings.TrimSpace(target.EndpointKey),
-	))
+func childSlotTargetError(agent.ChildEndpointRef) error {
+	return errorcode.New(errorcode.Conflict, "Target Agent binding changed before the message was sent.")
 }
 
 func joinChildInputUnknown(message string, err error) error {

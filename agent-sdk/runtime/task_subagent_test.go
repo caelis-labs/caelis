@@ -1214,6 +1214,10 @@ func TestResolveTaskHandleUsesStoreHandleLookup(t *testing.T) {
 	if store.listCalled {
 		t.Fatal("ListSession was used for handle lookup")
 	}
+	_, err = runtime.tasks.resolveTaskHandle(ctx, activeSession.SessionRef, "@missing")
+	if err == nil || err.Error() != `task handle "missing" not found` {
+		t.Fatalf("resolveTaskHandle(missing) error = %v", err)
+	}
 }
 
 type handleLookupTaskStore struct {

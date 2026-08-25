@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -70,21 +71,77 @@ func TestRuntimeEmitsCompactLifecycle(t *testing.T) {
 	t.Parallel()
 
 	sessions, active := newTestSessionService(t, "lifecycle-compact")
+	appendTestEvent(t, sessions, active.SessionRef, userTextEvent("preserve manual compact lifecycle"))
 	sink := &concurrentTraceSink{}
 	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, TraceSink: sink})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	ctx := withLifecycleScope(context.Background(), lifecycleScope{sessionRef: active.SessionRef, runID: "run-1", turnID: "turn-1"})
-	_, _, err = runtime.compactAndNotify(ctx, active.SessionRef, "turn-1", nil, func(context.Context, session.Session, []*session.Event) (compact.Result, error) {
-		return compact.Result{}, nil
+	_, err = runtime.Compact(context.Background(), CompactRequest{
+		SessionRef: active.SessionRef,
+		Model:      staticModel{text: "CONTEXT CHECKPOINT\n\nManual compact lifecycle was preserved."},
+		Trigger:    "manual",
 	})
 	if err != nil {
-		t.Fatalf("compactAndNotify() error = %v", err)
+		t.Fatalf("Compact() error = %v", err)
 	}
 	if !sink.saw(agent.LifecycleCompact, agent.TraceStarted) || !sink.saw(agent.LifecycleCompact, agent.TraceCompleted) {
 		t.Fatalf("trace records = %#v, want compact lifecycle", sink.snapshot())
 	}
+	for _, record := range sink.snapshot() {
+		if record.Event.Operation == agent.LifecycleCompact && record.Event.SessionRef.SessionID != active.SessionID {
+			t.Fatalf("compact lifecycle SessionRef = %#v, want Session %q", record.Event.SessionRef, active.SessionID)
+		}
+	}
+}
+
+func TestRuntimeManualCompactLifecycleFailsWhenCheckpointPersistenceFails(t *testing.T) {
+	t.Parallel()
+
+	baseSessions, active := newTestSessionService(t, "lifecycle-compact-persist-failure")
+	appendTestEvent(t, baseSessions, active.SessionRef, userTextEvent("preserve failed compact lifecycle ordering"))
+	persistErr := errors.New("forced compact persistence failure")
+	sessions := &failCompactAppendSessionService{Service: baseSessions, err: persistErr}
+	sink := &concurrentTraceSink{}
+	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, TraceSink: sink})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	_, err = runtime.Compact(context.Background(), CompactRequest{
+		SessionRef: active.SessionRef,
+		Model:      staticModel{text: "CONTEXT CHECKPOINT\n\nThis checkpoint must fail to persist."},
+		Trigger:    "manual",
+	})
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("Compact() error = %v, want persistence failure", err)
+	}
+	if !sink.saw(agent.LifecycleCompact, agent.TraceStarted) || !sink.saw(agent.LifecycleCompact, agent.TraceFailed) {
+		t.Fatalf("trace records = %#v, want compact started and failed", sink.snapshot())
+	}
+	if sink.saw(agent.LifecycleCompact, agent.TraceCompleted) {
+		t.Fatalf("trace records = %#v, must not complete before checkpoint persistence", sink.snapshot())
+	}
+	loaded, loadErr := baseSessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if loadErr != nil {
+		t.Fatalf("LoadSession() error = %v", loadErr)
+	}
+	for _, event := range loaded.Events {
+		if compact.IsCompactEvent(event) {
+			t.Fatalf("failed persistence left compact event %#v", event)
+		}
+	}
+}
+
+type failCompactAppendSessionService struct {
+	session.Service
+	err error
+}
+
+func (s *failCompactAppendSessionService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+	if req.Event != nil && compact.IsCompactEvent(req.Event) {
+		return nil, s.err
+	}
+	return s.Service.AppendEvent(ctx, req)
 }
 
 type concurrentTraceSink struct {

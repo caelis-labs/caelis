@@ -69,12 +69,18 @@ func TestErrorPayloadUsesTypedCodeNotMessageGuessing(t *testing.T) {
 		t.Fatalf("typed error_code = %#v, want not_found", got)
 	}
 	untyped := ErrorPayload(errors.New("file not found"))
-	if got := untyped["error_code"]; got != string(ErrorCodeInvalidInput) {
-		t.Fatalf("message-only error_code = %#v, want invalid_input", got)
+	if got := untyped["error_code"]; got != string(errorcode.Unknown) {
+		t.Fatalf("message-only error_code = %#v, want unknown", got)
 	}
 	cancelled := ErrorPayload(context.Canceled)
 	if got := cancelled["error_code"]; got != string(ErrorCodeCancelled) {
 		t.Fatalf("cancelled error_code = %#v, want cancelled", got)
+	}
+	for _, code := range []errorcode.Code{errorcode.Conflict, errorcode.Unavailable, errorcode.UnknownOutcome, errorcode.Internal} {
+		payload := ErrorPayload(errorcode.New(code, "opaque"))
+		if got := payload["error_code"]; got != string(code) {
+			t.Fatalf("%s error_code = %#v", code, got)
+		}
 	}
 }
 
@@ -89,5 +95,18 @@ func TestNormalizeCommandSandboxPermission(t *testing.T) {
 	}
 	if got, err := NormalizeCommandSandboxPermission(" "+CommandSandboxPermissionRequireEscalated+" ", false); err != nil || got != CommandSandboxPermissionRequireEscalated {
 		t.Fatalf("NormalizeCommandSandboxPermission(require_escalated) = (%q, %v)", got, err)
+	}
+}
+
+func TestToolValidationErrorsHaveNoSubsystemPrefix(t *testing.T) {
+	t.Parallel()
+
+	err := RejectUnknownArgs(map[string]any{"unexpected": true})
+	if err == nil || strings.HasPrefix(err.Error(), "tool:") {
+		t.Fatalf("RejectUnknownArgs() error = %v", err)
+	}
+	_, err = NormalizeCommandSandboxPermission(CommandSandboxPermissionLegacyAdditional, false)
+	if err == nil || strings.HasPrefix(err.Error(), "tool:") {
+		t.Fatalf("NormalizeCommandSandboxPermission() error = %v", err)
 	}
 }

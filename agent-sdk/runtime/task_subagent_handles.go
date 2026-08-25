@@ -32,7 +32,7 @@ func (tm *taskRuntime) reserveTaskHandleValue(ctx context.Context, activeSession
 	if tm.store != nil && sessionID != "" {
 		entries, err := tm.store.ListSession(ctx, session.NormalizeSessionRef(ref))
 		if err != nil {
-			return "", fmt.Errorf("agent-sdk/runtime: list task handles: %w", err)
+			return "", fmt.Errorf("list Task handles: %w", err)
 		}
 		for _, entry := range entries {
 			if entry == nil {
@@ -73,7 +73,7 @@ func (tm *taskRuntime) reserveTaskHandleValue(ctx context.Context, activeSession
 	}
 	if requested != "" {
 		if _, exists := used[requested]; exists {
-			return "", fmt.Errorf("agent-sdk/runtime: task handle %q is already in use", requested)
+			return "", fmt.Errorf("task handle %q is already in use", requested)
 		}
 		tm.rememberTaskHandleLocked(sessionID, requested)
 		return requested, nil

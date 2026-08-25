@@ -3,6 +3,7 @@ package gatewayapp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"maps"
 	"sort"
 	"strings"
@@ -134,6 +135,7 @@ type systemManagedAgentRuntimeConfig struct {
 	LifecycleInterceptors []agent.LifecycleInterceptor
 	TraceSink             agent.TraceSink
 	Guardrails            []agent.GuardrailSpec
+	Diagnostics           *slog.Logger
 }
 
 type systemManagedAgentRegistry struct {
@@ -229,6 +231,7 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 		LifecycleInterceptors: config.LifecycleInterceptors,
 		TraceSink:             config.TraceSink,
 		Guardrails:            config.Guardrails,
+		Diagnostics:           config.Diagnostics,
 	})
 	if err != nil {
 		return systemManagedAgentRunResult{}, err
@@ -320,6 +323,7 @@ func (r *systemManagedAgentRuntime) CompactContext(
 		LifecycleInterceptors: config.LifecycleInterceptors,
 		TraceSink:             config.TraceSink,
 		Guardrails:            config.Guardrails,
+		Diagnostics:           config.Diagnostics,
 	})
 	if err != nil {
 		return systemManagedAgentCompactResult{}, err

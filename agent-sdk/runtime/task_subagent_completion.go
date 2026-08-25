@@ -271,7 +271,7 @@ func (tm *taskRuntime) applySubagentCompletion(completion *subagentCompletion, o
 // as a lifecycle trigger.
 func (tm *taskRuntime) persistSubagentCompletion(completion *subagentCompletion) error {
 	if tm == nil || completion == nil || completion.task == nil {
-		return errors.New("agent-sdk/runtime: subagent completion task is unavailable")
+		return errors.New("subagent completion Task is unavailable")
 	}
 	task := completion.task
 	task.mu.Lock()

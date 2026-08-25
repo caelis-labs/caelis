@@ -64,7 +64,7 @@ func (r *Runtime) buildSideSubagentPromptContext(
 	sinceSeq uint64,
 ) (agent.ContextTransfer, uint64, error) {
 	if r == nil || r.controllerContextRouter == nil {
-		return agent.ContextTransfer{}, 0, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
+		return agent.ContextTransfer{}, 0, fmt.Errorf("controller context routing is unavailable")
 	}
 	route, err := r.controllerContextRouter.ParticipantContext(ctx, controller.ParticipantContextRequest{
 		SessionRef: session.NormalizeSessionRef(ref),
@@ -102,7 +102,7 @@ func normalizeSubagentParticipantRole(role session.ParticipantRole) (session.Par
 	case session.ParticipantRoleSidecar:
 		return session.ParticipantRoleSidecar, nil
 	default:
-		return "", fmt.Errorf("agent-sdk/runtime: unsupported subagent participant role %q", role)
+		return "", fmt.Errorf("unsupported subagent participant role %q", role)
 	}
 }
 
@@ -110,16 +110,16 @@ func (tm *taskRuntime) authorizeSubagentControl(task *subagentTask, principal se
 	switch principal {
 	case session.ActorKindTool:
 		if isSideSubagentTask(task) {
-			return fmt.Errorf("agent-sdk/runtime: tool principal cannot %s sidecar subagent %q", strings.TrimSpace(action), task.handle)
+			return fmt.Errorf("tool principal cannot %s sidecar subagent %q", strings.TrimSpace(action), task.handle)
 		}
 	case session.ActorKindUser:
 		if !isSideSubagentTask(task) {
-			return fmt.Errorf("agent-sdk/runtime: user principal cannot %s delegated subagent %q", strings.TrimSpace(action), task.handle)
+			return fmt.Errorf("user principal cannot %s delegated subagent %q", strings.TrimSpace(action), task.handle)
 		}
 	case session.ActorKindController, session.ActorKindSystem:
 		return nil
 	default:
-		return fmt.Errorf("agent-sdk/runtime: unsupported control principal %q", principal)
+		return fmt.Errorf("unsupported control principal %q", principal)
 	}
 	return nil
 }
@@ -143,10 +143,10 @@ func (r *Runtime) StartSubagentWithOptions(
 	opts StartSubagentOptions,
 ) (taskapi.Snapshot, error) {
 	if r == nil || r.sessions == nil || r.tasks == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: runtime is unavailable")
+		return taskapi.Snapshot{}, fmt.Errorf("subagent Runtime is unavailable")
 	}
 	if r.subagents == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent runner is unavailable")
+		return taskapi.Snapshot{}, fmt.Errorf("subagent execution is unavailable")
 	}
 	ref = session.NormalizeSessionRef(ref)
 	activeSession, err := r.sessions.Session(ctx, ref)
@@ -162,7 +162,7 @@ func (r *Runtime) StartSubagentWithOptions(
 		return taskapi.Snapshot{}, err
 	}
 	if strings.TrimSpace(prompt) == "" {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent prompt is required")
+		return taskapi.Snapshot{}, fmt.Errorf("subagent prompt is required")
 	}
 	approvalMode := strings.TrimSpace(opts.ApprovalMode)
 	if approvalMode == "" {
@@ -203,11 +203,11 @@ func (r *Runtime) WaitSubagentTask(
 	yield time.Duration,
 ) (taskapi.Snapshot, error) {
 	if r == nil || r.tasks == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: runtime is unavailable")
+		return taskapi.Snapshot{}, fmt.Errorf("subagent Runtime is unavailable")
 	}
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent task id is required")
+		return taskapi.Snapshot{}, fmt.Errorf("subagent Task identity is required")
 	}
 	return r.tasks.Wait(ctx, session.NormalizeSessionRef(ref), taskapi.ControlRequest{
 		TaskID:    taskID,
@@ -219,7 +219,7 @@ func (r *Runtime) WaitSubagentTask(
 
 func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yield time.Duration) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
+		return taskapi.Snapshot{}, fmt.Errorf("task is required")
 	}
 	task.mu.Lock()
 	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata["cancel_phase"]))
@@ -261,7 +261,7 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 // successful sample may still promote newly observed canonical result state.
 func (tm *taskRuntime) observeSubagent(ctx context.Context, task *subagentTask) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
+		return taskapi.Snapshot{}, fmt.Errorf("task is required")
 	}
 	task.mu.Lock()
 	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata["cancel_phase"]))
@@ -412,19 +412,19 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRe
 	tm.mu.RUnlock()
 	if ok && task != nil {
 		if strings.TrimSpace(task.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
-			return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+			return nil, fmt.Errorf("task %q not found", taskID)
 		}
 		return task, nil
 	}
 	if tm.store == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+		return nil, fmt.Errorf("task %q not found", taskID)
 	}
 	entry, err := tm.store.Get(ctx, lookupID)
 	if err != nil || entry == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+		return nil, fmt.Errorf("task %q not found", taskID)
 	}
 	if strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) || entry.Kind != taskapi.KindSubagent {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+		return nil, fmt.Errorf("task %q not found", taskID)
 	}
 	entry, err = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
 	if err != nil {
@@ -435,7 +435,7 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRe
 	if current := tm.subagents[rehydrated.ref.TaskID]; current != nil {
 		tm.mu.Unlock()
 		if strings.TrimSpace(current.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
-			return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+			return nil, fmt.Errorf("task %q not found", taskID)
 		}
 		return current, nil
 	}
@@ -459,17 +459,17 @@ func (tm *taskRuntime) lookupSubagentCanonical(ctx context.Context, ref session.
 		if current != nil && strings.TrimSpace(current.sessionRef.SessionID) == strings.TrimSpace(ref.SessionID) {
 			return current, nil
 		}
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+		return nil, fmt.Errorf("task %q not found", taskID)
 	}
 	entry, err := tm.store.Get(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: reload subagent task %q: %w", taskID, err)
+		return nil, fmt.Errorf("reload subagent Task %q: %w", taskID, err)
 	}
 	if entry == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+		return nil, fmt.Errorf("task %q not found", taskID)
 	}
 	if entry.Kind != taskapi.KindSubagent || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+		return nil, fmt.Errorf("task %q not found", taskID)
 	}
 	entry, err = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
 	if err != nil {
@@ -564,7 +564,7 @@ func interruptedSubagentEntry(entry *taskapi.Entry, reason string) *taskapi.Entr
 
 func (tm *taskRuntime) interruptSubagentTask(ctx context.Context, task *subagentTask, reason string) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
+		return taskapi.Snapshot{}, fmt.Errorf("task is required")
 	}
 	task.mu.Lock()
 	task.applyInterruptedLocked(reason)

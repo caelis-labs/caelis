@@ -26,7 +26,7 @@ const (
 
 func (tm *taskRuntime) cancelSubagentSaga(ctx context.Context, task *subagentTask) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
+		return taskapi.Snapshot{}, fmt.Errorf("task is required")
 	}
 	task.mu.Lock()
 	running := task.running
@@ -40,7 +40,7 @@ func (tm *taskRuntime) cancelSubagentSaga(ctx context.Context, task *subagentTas
 		return tm.advanceSubagentCancel(ctx, task, phase, 10)
 	}
 	if runner == nil {
-		return task.snapshot(), fmt.Errorf("agent-sdk/runtime: subagent %q cannot be cancelled because its runner is unavailable", task.ref.TaskID)
+		return task.snapshot(), fmt.Errorf("subagent %q cannot be cancelled because its runner is unavailable", task.ref.TaskID)
 	}
 	if err := tm.persistSubagentCancelPhase(ctx, task, subagentCancelPhaseClaimed,
 		"subagent cancellation was claimed; remote outcome is not yet known", nil, false); err != nil {
@@ -65,7 +65,7 @@ func (tm *taskRuntime) advanceSubagentCancel(
 	yieldMS int,
 ) (taskapi.Snapshot, error) {
 	if task == nil || task.runner == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent cancellation cannot be reconciled without a runner")
+		return taskapi.Snapshot{}, fmt.Errorf("subagent cancellation cannot be reconciled without a runner")
 	}
 	result, err := task.runner.Wait(ctx, delegation.CloneAnchor(task.anchor), yieldMS)
 	if err != nil {

@@ -18,7 +18,7 @@ type constraintAwareFileSystemRuntime interface {
 
 func runtimeOrDefault(runtime sandbox.Runtime) (sandbox.Runtime, error) {
 	if runtime == nil {
-		return nil, fmt.Errorf("tool: sandbox runtime is required")
+		return nil, fmt.Errorf("sandbox runtime is required")
 	}
 	return runtime, nil
 }
@@ -66,10 +66,10 @@ func constraintsFromMetadata(meta map[string]any) sandbox.Constraints {
 
 func normalizePathWithFS(fsys sandbox.FileSystem, value string) (string, error) {
 	if fsys == nil {
-		return "", fmt.Errorf("tool: filesystem is required")
+		return "", fmt.Errorf("filesystem is required")
 	}
 	if value == "" {
-		return "", fmt.Errorf("tool: empty path")
+		return "", fmt.Errorf("path is required")
 	}
 	if strings.HasPrefix(value, "~/") {
 		home, err := fsys.UserHomeDir()
@@ -90,7 +90,7 @@ func normalizePathWithFS(fsys sandbox.FileSystem, value string) (string, error) 
 
 func walkDir(fsys sandbox.FileSystem, root string, fn fs.WalkDirFunc) error {
 	if fsys == nil {
-		return fmt.Errorf("tool: filesystem is required")
+		return fmt.Errorf("filesystem is required")
 	}
 	return fsys.WalkDir(root, fn)
 }

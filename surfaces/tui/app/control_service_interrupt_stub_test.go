@@ -64,7 +64,7 @@ func (*interruptBridgeStub) ResumeSession(context.Context, string) (controlpromp
 func (*interruptBridgeStub) ListSessions(context.Context, int) ([]controlprompt.ResumeCandidate, error) {
 	return nil, nil
 }
-func (*interruptBridgeStub) Compact(context.Context) error { return nil }
+func (*interruptBridgeStub) Compact(context.Context) (bool, error) { return true, nil }
 func (*interruptBridgeStub) CycleSessionMode(context.Context) (controlstatus.StatusSnapshot, error) {
 	return controlstatus.StatusSnapshot{}, nil
 }

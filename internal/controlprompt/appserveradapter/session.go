@@ -11,16 +11,18 @@ import (
 
 // Compact routes manual Session compaction through the same typed Control
 // command and Session Runtime selection used by every other AppServer client.
-func (a *SessionClientAdapter) Compact(ctx context.Context) error {
+// It reports whether the command committed a checkpoint; false with a nil error
+// means the admitted Session had nothing new to compact.
+func (a *SessionClientAdapter) Compact(ctx context.Context) (bool, error) {
 	if a == nil || a.sessionClient == nil {
-		return errors.New("app/gatewayapp/controladapter: Session client is unavailable")
+		return false, errors.New("app/gatewayapp/controladapter: Session client is unavailable")
 	}
 	state, err := a.currentClientSessionState(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	revision := state.Revision
-	_, err = a.sessionClient.CompactSession(ctx, appserver.CompactSessionRequest{
+	result, err := a.sessionClient.CompactSession(ctx, appserver.CompactSessionRequest{
 		WriteBase: appserver.WriteBase{
 			OperationID:             "compact-" + uuid.NewString(),
 			SessionID:               state.SessionID,
@@ -28,5 +30,8 @@ func (a *SessionClientAdapter) Compact(ctx context.Context) error {
 			ExpectedControllerEpoch: state.Controller.EpochID,
 		},
 	})
-	return err
+	if err != nil {
+		return false, err
+	}
+	return result.Revision > revision, nil
 }

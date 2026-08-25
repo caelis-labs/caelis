@@ -2764,16 +2764,8 @@ func TestRuntimeRunPersistsPlanLoopAndState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SnapshotState() error = %v", err)
 	}
-	planState, ok := state["plan"].(map[string]any)
-	if !ok {
-		t.Fatalf("state[plan] = %#v, want plan map", state["plan"])
-	}
-	entries, _ := planState["entries"].([]map[string]any)
-	if len(entries) == 0 {
-		rawEntries, _ := planState["entries"].([]any)
-		if got, want := len(rawEntries), 2; got != want {
-			t.Fatalf("len(state plan entries) = %d, want %d", got, want)
-		}
+	if _, ok := state["plan"]; ok {
+		t.Fatalf("state[plan] = %#v, want active plan cleared after terminal Turn", state["plan"])
 	}
 }
 
@@ -3438,6 +3430,16 @@ func TestRuntimeRecoveryInterruptsOrphanedApprovalPause(t *testing.T) {
 	if err := runtime.transitionRunTurnJournal(context.Background(), activeSession.SessionRef, "run-orphaned", "turn-orphaned", session.ExecutionWaitingApproval, "approval required"); err != nil {
 		t.Fatalf("transitionRunTurnJournal(waiting) error = %v", err)
 	}
+	if _, err := sessions.UpdateState(context.Background(), session.UpdateStateRequest{
+		SessionRef:    activeSession.SessionRef,
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		Update: func(state map[string]any) (map[string]any, error) {
+			state["plan"] = map[string]any{"version": 1, "entries": []any{map[string]any{"content": "stale after recovery", "status": "in_progress"}}}
+			return state, nil
+		},
+	}); err != nil {
+		t.Fatalf("UpdateState(plan) error = %v", err)
+	}
 	now := time.Unix(500, 0).UTC()
 	token := session.PauseToken{
 		Schema: session.ExecutionJournalSchemaVersion, TokenID: "pause-orphaned", SessionID: activeSession.SessionID,
@@ -3472,6 +3474,13 @@ func TestRuntimeRecoveryInterruptsOrphanedApprovalPause(t *testing.T) {
 	recoveredToken, err := reopened.pauseToken(context.Background(), activeSession.SessionRef, "pause-orphaned")
 	if err != nil || recoveredToken.Status != session.PauseTokenCancelled {
 		t.Fatalf("recovered pause token = %+v, %v; want cancelled", recoveredToken, err)
+	}
+	recoveredSessionState, err := reopenedSessions.SnapshotState(context.Background(), activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("SnapshotState(recovered) error = %v", err)
+	}
+	if _, ok := recoveredSessionState["plan"]; ok {
+		t.Fatalf("recovered state retained terminal Turn plan: %#v", recoveredSessionState["plan"])
 	}
 }
 

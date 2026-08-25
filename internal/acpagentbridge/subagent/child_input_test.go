@@ -118,6 +118,22 @@ func TestActiveChildInputPreservesStandardACPImageContent(t *testing.T) {
 	}
 }
 
+func TestActiveChildInputUnsupportedErrorIsModelFacing(t *testing.T) {
+	t.Parallel()
+
+	run := &childRun{}
+	slot := newChildSlot(agent.ChildEndpointRef{EndpointKey: "child"}, run)
+	_, err := (&Runner{}).submitActiveChildInputLocked(
+		context.Background(), slot, run, agent.ChildInputRequest{}, nil,
+	)
+	if !errorcode.Is(err, errorcode.Unsupported) {
+		t.Fatalf("error = %v, want unsupported", err)
+	}
+	if got := err.Error(); got != "Target Agent cannot receive follow-up messages." {
+		t.Fatalf("error = %q", got)
+	}
+}
+
 func TestBuildAgentCommunicationPromptCarriesTrustedSource(t *testing.T) {
 	t.Parallel()
 

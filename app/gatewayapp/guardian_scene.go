@@ -3,5 +3,5 @@ package gatewayapp
 const guardianSceneID = "guardian"
 
 func (s *runtimeComposition) newGuardianApprover() *guardianApprovalReviewer {
-	return newGuardianApprovalApprover(s.sessions)
+	return newGuardianApprovalApprover(s.sessions, s.authorities.diagnostics)
 }

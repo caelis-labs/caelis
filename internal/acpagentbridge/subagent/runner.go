@@ -134,7 +134,7 @@ func (run *childRun) installChildSlot(slot *childSlot) {
 
 func NewRunner(cfg RunnerConfig) (*Runner, error) {
 	if cfg.Registry == nil {
-		return nil, fmt.Errorf("internal/acpagentbridge/subagent: registry is required")
+		return nil, fmt.Errorf("agent registry is required")
 	}
 	clock := cfg.Clock
 	if clock == nil {
@@ -313,7 +313,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		r.mu.Unlock()
 		childCancel()
 		_ = acpClient.Close(ctx)
-		return delegation.Anchor{}, delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child run %q already registered", runKey)
+		return delegation.Anchor{}, delegation.Result{}, fmt.Errorf("subagent run %q is already registered", runKey)
 	}
 	r.runs[runKey] = run
 	r.slots[runKey] = slot
@@ -368,7 +368,7 @@ func (r *Runner) dispatchInitialPrompt(
 			prepared.Abandon()
 		}
 		if client.DispatchMayHaveCommitted(err) {
-			err = joinChildInputUnknown("internal/acpagentbridge/subagent: initial child prompt dispatch outcome cannot be proven", err)
+			err = joinChildInputUnknown("Initial subagent message delivery outcome cannot be confirmed.", err)
 		}
 		go func() {
 			r.finishDrive(producerCtx, run, "", err)
@@ -384,7 +384,7 @@ func spawnedACPSetupError(stage string, cfg AgentConfig, err error) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"internal/acpagentbridge/subagent: %s spawned ACP child %q: %w",
+		"%s spawned ACP child %q: %w",
 		strings.TrimSpace(stage),
 		firstNonEmpty(strings.TrimSpace(cfg.Name), "unknown"),
 		err,
@@ -396,7 +396,7 @@ func (r *Runner) resolveSpawnConfig(ctx context.Context, spawn subagent.SpawnCon
 	switch placement.Kind {
 	case delegation.PlacementModel:
 		if r.placementResolver == nil {
-			return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: model placement resolver is unavailable")
+			return AgentConfig{}, fmt.Errorf("model placement resolution is unavailable")
 		}
 		cfg, err := r.placementResolver(ctx, spawn, req)
 		if err != nil {
@@ -404,13 +404,13 @@ func (r *Runner) resolveSpawnConfig(ctx context.Context, spawn subagent.SpawnCon
 		}
 		cfg = normalizeAgentConfig(cfg)
 		if cfg.Name == "" || cfg.Command == "" {
-			return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: model placement resolved an invalid Agent configuration")
+			return AgentConfig{}, fmt.Errorf("model placement resolved an invalid Agent configuration")
 		}
 		return cfg, nil
 	case delegation.PlacementAgent:
 		if placement.ConfigFingerprint != "" {
 			if r.placementResolver == nil {
-				return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: configured placement resolver is unavailable")
+				return AgentConfig{}, fmt.Errorf("configured placement resolution is unavailable")
 			}
 			cfg, err := r.placementResolver(ctx, spawn, req)
 			if err != nil {
@@ -418,15 +418,15 @@ func (r *Runner) resolveSpawnConfig(ctx context.Context, spawn subagent.SpawnCon
 			}
 			cfg = normalizeAgentConfig(cfg)
 			if cfg.Name == "" || cfg.Command == "" {
-				return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: configured placement resolved an invalid Agent configuration")
+				return AgentConfig{}, fmt.Errorf("configured placement resolved an invalid Agent configuration")
 			}
 			return cfg, nil
 		}
 		return r.registry.Resolve(strings.TrimSpace(placement.Agent))
 	case "":
-		return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: placement is required")
+		return AgentConfig{}, fmt.Errorf("subagent placement is required")
 	default:
-		return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: unsupported placement kind %q", placement.Kind)
+		return AgentConfig{}, fmt.Errorf("unsupported subagent placement kind %q", placement.Kind)
 	}
 }
 
@@ -776,14 +776,14 @@ func (r *Runner) lookup(anchor delegation.Anchor) (*childRun, error) {
 	run := r.runs[key]
 	r.mu.RUnlock()
 	if run == nil {
-		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child run %q not found", key)
+		return nil, fmt.Errorf("subagent run %q was not found", key)
 	}
 	// Defensive isolation: reject anchors whose remote session drifted from the
 	// registered child (two endpoints must not share a process-local binding).
 	if sessionID := strings.TrimSpace(anchor.SessionID); sessionID != "" &&
 		strings.TrimSpace(run.anchor.SessionID) != "" &&
 		sessionID != strings.TrimSpace(run.anchor.SessionID) {
-		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child run %q session mismatch", key)
+		return nil, fmt.Errorf("subagent run %q belongs to another Session", key)
 	}
 	return run, nil
 }
@@ -794,7 +794,7 @@ func (r *Runner) lookup(anchor delegation.Anchor) (*childRun, error) {
 func childRunKey(anchor delegation.Anchor) (string, error) {
 	taskID := strings.TrimSpace(anchor.TaskID)
 	if taskID == "" {
-		return "", fmt.Errorf("internal/acpagentbridge/subagent: task_id is required")
+		return "", fmt.Errorf("subagent task identity is required")
 	}
 	return taskID, nil
 }

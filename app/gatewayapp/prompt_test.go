@@ -207,6 +207,9 @@ func TestSystemPromptWithSharedWorkspaceGuidanceIsIdempotentAndChildOnly(t *test
 	if strings.Contains(parent, sharedWorkspaceGuidance) {
 		t.Fatalf("parent delegation guidance unexpectedly includes child workspace reminder:\n%s", parent)
 	}
+	if !strings.Contains(parent, "Verify only delegated findings that affect the next action; do not repeat the investigation.") {
+		t.Fatalf("parent delegation guidance missing bounded verification:\n%s", parent)
+	}
 }
 
 func TestBuildSystemPromptProtectsWorkspaceDeliveryBoundary(t *testing.T) {

@@ -27,20 +27,20 @@ import (
 // execution configuration, or closes the durable Session.
 func (r *Runner) LoadHistory(ctx context.Context, raw tasksubagent.HistoryRequest) (session.LoadedSession, error) {
 	if r == nil {
-		return session.LoadedSession{}, fmt.Errorf("internal/acpagentbridge/subagent: runner is unavailable")
+		return session.LoadedSession{}, fmt.Errorf("subagent history is unavailable")
 	}
 	if ctx == nil {
-		return session.LoadedSession{}, fmt.Errorf("internal/acpagentbridge/subagent: history context is required")
+		return session.LoadedSession{}, fmt.Errorf("subagent history context is required")
 	}
 	req := tasksubagent.CloneHistoryRequest(raw)
 	anchor := req.Anchor
 	reconnect := req.Reconnect
 	spawn := reconnect.Spawn
 	if strings.TrimSpace(anchor.TaskID) == "" || strings.TrimSpace(anchor.SessionID) == "" {
-		return session.LoadedSession{}, fmt.Errorf("internal/acpagentbridge/subagent: child history anchor is incomplete")
+		return session.LoadedSession{}, fmt.Errorf("subagent history anchor is incomplete")
 	}
 	if strings.TrimSpace(spawn.TaskID) != strings.TrimSpace(anchor.TaskID) || strings.TrimSpace(spawn.SessionRef.SessionID) == "" {
-		return session.LoadedSession{}, fmt.Errorf("internal/acpagentbridge/subagent: child history identity does not match its durable Task")
+		return session.LoadedSession{}, fmt.Errorf("subagent history identity does not match its Task")
 	}
 	if err := delegation.ValidateTarget(reconnect.Target); err != nil {
 		return session.LoadedSession{}, err
@@ -63,7 +63,7 @@ func (r *Runner) LoadHistory(ctx context.Context, raw tasksubagent.HistoryReques
 		if _, builtIn := launchEnv[acpagentenv.EnvManagedSessionHistoryToken]; builtIn {
 			tokenBytes := make([]byte, 32)
 			if _, err := rand.Read(tokenBytes); err != nil {
-				return session.LoadedSession{}, fmt.Errorf("internal/acpagentbridge/subagent: create managed history capability: %w", err)
+				return session.LoadedSession{}, fmt.Errorf("create managed subagent history capability: %w", err)
 			}
 			historyToken = hex.EncodeToString(tokenBytes)
 			launchEnv[acpagentenv.EnvManagedSessionHistoryToken] = historyToken
@@ -89,7 +89,7 @@ func (r *Runner) LoadHistory(ctx context.Context, raw tasksubagent.HistoryReques
 	if !initialize.AgentCapabilities.LoadSession {
 		return session.LoadedSession{}, errorcode.New(
 			errorcode.Unsupported,
-			fmt.Sprintf("internal/acpagentbridge/subagent: child Agent %q does not support session/load", cfg.Name),
+			fmt.Sprintf("Target Agent %q does not support session/load", cfg.Name),
 		)
 	}
 	methods := authentication.Methods(initialize)
@@ -163,7 +163,7 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 	if gotSessionID != wantSessionID {
 		if c.err == nil {
 			c.err = fmt.Errorf(
-				"internal/acpagentbridge/subagent: session/load update belongs to Session %q, want %q",
+				"session/load update belongs to Session %q, want %q",
 				gotSessionID,
 				wantSessionID,
 			)

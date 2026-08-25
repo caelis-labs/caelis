@@ -38,7 +38,7 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSess
 	role := subagentParticipantRole(task)
 	lifecycle, ok := tm.runtime.sessions.(session.ParticipantLifecycleService)
 	if !ok {
-		return fmt.Errorf("agent-sdk/runtime: participant lifecycle store does not support atomic subagent attachment")
+		return fmt.Errorf("participant lifecycle store does not support atomic subagent attachment")
 	}
 	var lastErr error
 	for range subagentParticipantAttachAttempts {

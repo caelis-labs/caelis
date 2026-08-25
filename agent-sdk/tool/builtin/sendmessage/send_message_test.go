@@ -14,6 +14,9 @@ func TestSendMessageSchemaKeepsOnlyRoutingEssentials(t *testing.T) {
 	t.Parallel()
 
 	def := New().Definition()
+	if got := def.Description; got != "Send one input to another Agent or the parent. Success confirms dispatch, not task completion." {
+		t.Fatalf("description = %q", got)
+	}
 	properties, _ := def.InputSchema["properties"].(map[string]any)
 	if len(properties) != 2 || properties["to"] == nil || properties["message"] == nil {
 		t.Fatalf("properties = %#v, want only to and message", properties)

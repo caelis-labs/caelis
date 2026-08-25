@@ -507,6 +507,9 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 		}
 	}
 	header := terminalLifecycleHeader(headerEvent)
+	if sendMessage && err {
+		header = failedSendMessageHeader(headerEvent)
+	}
 	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, text, final, err))
 	tone, dim := acpToolHeaderMark(ctx, err, final)
 	var headerRow RenderedRow
@@ -530,6 +533,13 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 	text = summarizeACPToolPanelText(text, final)
 	rows = append(rows, renderACPToolPanelRows(blockID, callID, ev.Name, text, width, ctx, err, token, opts)...)
 	return rows
+}
+
+func failedSendMessageHeader(ev SubagentEvent) string {
+	if args := strings.TrimSpace(ev.Args); args != "" {
+		return "• Failed to send " + args
+	}
+	return "• Failed to send"
 }
 
 func isSpawnToolEvent(ev SubagentEvent) bool {

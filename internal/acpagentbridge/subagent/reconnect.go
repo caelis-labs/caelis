@@ -25,18 +25,18 @@ func (r *Runner) reconnectChildEndpointLocked(
 	slot *childSlot,
 ) (*childRun, error) {
 	if recovery == nil {
-		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child reconnect context is required")
+		return nil, fmt.Errorf("target Agent reconnect context is required")
 	}
 	recovery = tasksubagent.CloneReconnectRequest(recovery)
 	spawn := recovery.Spawn
 	anchor = delegation.CloneAnchor(anchor)
 	if strings.TrimSpace(anchor.TaskID) == "" || strings.TrimSpace(anchor.SessionID) == "" ||
 		strings.TrimSpace(anchor.AgentID) == "" {
-		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child reconnect anchor is incomplete")
+		return nil, fmt.Errorf("target Agent reconnect anchor is incomplete")
 	}
 	if strings.TrimSpace(spawn.TaskID) != strings.TrimSpace(anchor.TaskID) ||
 		strings.TrimSpace(spawn.SessionRef.SessionID) == "" {
-		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child reconnect identity does not match its durable Task")
+		return nil, fmt.Errorf("target Agent reconnect identity does not match its Task")
 	}
 	if err := delegation.ValidateTarget(recovery.Target); err != nil {
 		return nil, err
@@ -106,12 +106,12 @@ func (r *Runner) reconnectChildEndpointLocked(
 	if err != nil {
 		childCancel()
 		closeErr := acpcleanup.CloseClient(ctx, acpClient)
-		return nil, fmt.Errorf("internal/acpagentbridge/subagent: negotiate ACP steering capability: %w", errors.Join(err, closeErr))
+		return nil, fmt.Errorf("negotiate Target Agent messaging capability: %w", errors.Join(err, closeErr))
 	}
 	if !hasACPSessionCapability(initialize, "resume") {
 		childCancel()
 		_ = acpcleanup.CloseClient(ctx, acpClient)
-		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child Agent %q does not support session/resume", cfg.Name)
+		return nil, fmt.Errorf("target Agent %q does not support session/resume", cfg.Name)
 	}
 	authenticationMethods := authentication.Methods(initialize)
 	recovered, err := authentication.ResumeSession(ctx, authentication.RecoveryConfig{

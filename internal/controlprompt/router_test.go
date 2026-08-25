@@ -714,6 +714,21 @@ func TestRouterCoreCommandAllowedDispatchesAllowedCommand(t *testing.T) {
 	}
 }
 
+func TestRouterCompactReportsNoop(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeService{compactNoop: true}
+	result, err := New(RouterConfig{Service: svc}).Route(context.Background(), Request{
+		Submission: Submission{Text: "/compact"},
+	})
+	if err != nil {
+		t.Fatalf("Route(/compact) error = %v", err)
+	}
+	if !svc.compacted || firstNotice(result) != "Nothing to compact" {
+		t.Fatalf("Route(/compact) compacted=%v notice=%q, want explicit no-op", svc.compacted, firstNotice(result))
+	}
+}
+
 func TestRouterModelDeleteIsAppScoped(t *testing.T) {
 	svc := &fakeService{}
 	router := New(RouterConfig{Service: svc})
@@ -752,6 +767,7 @@ type fakeService struct {
 	usedReasoning      string
 	deletedModel       string
 	compacted          bool
+	compactNoop        bool
 	startedAgent       string
 	startedPrompt      string
 	startedAttachments []Attachment
@@ -816,9 +832,9 @@ func (s *fakeService) ResumeSession(context.Context, string) (SessionSnapshot, e
 func (s *fakeService) ListSessions(context.Context, int) ([]ResumeCandidate, error) {
 	return nil, nil
 }
-func (s *fakeService) Compact(context.Context) error {
+func (s *fakeService) Compact(context.Context) (bool, error) {
 	s.compacted = true
-	return nil
+	return !s.compactNoop, nil
 }
 
 type routerReconnect struct{ state appserver.SessionState }

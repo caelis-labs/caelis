@@ -112,7 +112,7 @@ func (tm *taskRuntime) startSubagentTarget(
 	legacyDigest bool,
 ) (taskapi.Snapshot, error) {
 	if runner == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent runner is required")
+		return taskapi.Snapshot{}, fmt.Errorf("subagent execution is required")
 	}
 	taskID, err := subagentSpawnTaskID(ref, req.SpawnID)
 	if err != nil {
@@ -133,7 +133,7 @@ func (tm *taskRuntime) startSubagentTarget(
 	}
 	if delegationTargetRequiresPlacementRunner(target) {
 		if _, ok := runner.(subagent.PlacementRunner); !ok {
-			return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent runner does not support typed placements")
+			return taskapi.Snapshot{}, fmt.Errorf("subagent execution does not support typed placements")
 		}
 	}
 	requestedHandle, err := agenthandle.CanonicalRequested(req.Handle)
@@ -260,15 +260,15 @@ func (tm *taskRuntime) beginSubagentSpawn(
 	runner subagent.Runner,
 ) (spawnBeginOutcome, error) {
 	if tm == nil || tm.store == nil {
-		return spawnBeginOutcome{}, errors.New("agent-sdk/runtime: durable task store is required before subagent spawn")
+		return spawnBeginOutcome{}, errors.New("durable Task store is required before subagent spawn")
 	}
 	if _, ok := tm.store.(taskapi.CASStore); !ok {
-		return spawnBeginOutcome{}, errors.New("agent-sdk/runtime: subagent spawn requires task.CASStore")
+		return spawnBeginOutcome{}, errors.New("subagent spawn requires task.CASStore")
 	}
 	if existing, err := tm.store.Get(ctx, taskID); err == nil && existing != nil {
 		if taskSpecString(existing.Spec, "spawn_identity") != strings.TrimSpace(spawnID) ||
 			taskSpecString(existing.Spec, "spawn_request_digest") != strings.TrimSpace(requestDigest) {
-			return spawnBeginOutcome{}, fmt.Errorf("agent-sdk/runtime: spawn identity %q conflicts with durable intent", spawnID)
+			return spawnBeginOutcome{}, fmt.Errorf("spawn identity %q conflicts with durable intent", spawnID)
 		}
 		return tm.resumeExistingSpawn(ctx, existing, spawnID, runner)
 	}
@@ -347,18 +347,18 @@ func (tm *taskRuntime) resumeExistingSpawn(ctx context.Context, existing *taskap
 		setSpawnEntryPhase(recovered, spawnPhaseUnknownOutcome, subagentSpawnUnknownDiagnostic)
 		persistErr := tm.persistSpawnEntry(context.WithoutCancel(ctx), recovered)
 		return spawnBeginOutcome{Entry: recovered, Snapshot: snapshotFromTaskEntry(recovered), Terminal: true}, errors.Join(
-			fmt.Errorf("agent-sdk/runtime: subagent spawn %q crossed the external effect boundary; refusing blind respawn and recording unknown outcome", spawnID),
+			fmt.Errorf("subagent spawn %q crossed the external effect boundary; refusing blind respawn and recording unknown outcome", spawnID),
 			persistErr,
 		)
 	case spawnPhaseUnknownOutcome:
 		return spawnBeginOutcome{Entry: existing, Snapshot: snapshotFromTaskEntry(existing), Terminal: true},
-			fmt.Errorf("agent-sdk/runtime: subagent spawn %q has unknown outcome; refusing blind respawn", spawnID)
+			fmt.Errorf("subagent spawn %q has unknown outcome; refusing blind respawn", spawnID)
 	case spawnPhaseCompensated:
 		return spawnBeginOutcome{Entry: existing, Snapshot: snapshotFromTaskEntry(existing), Terminal: true},
-			fmt.Errorf("agent-sdk/runtime: subagent spawn %q was compensated", spawnID)
+			fmt.Errorf("subagent spawn %q was compensated", spawnID)
 	default:
 		return spawnBeginOutcome{Entry: existing, Snapshot: snapshotFromTaskEntry(existing), Terminal: true},
-			fmt.Errorf("agent-sdk/runtime: subagent spawn %q has invalid durable status %q", spawnID, phase)
+			fmt.Errorf("subagent spawn %q has invalid durable status %q", spawnID, phase)
 	}
 }
 
@@ -369,7 +369,7 @@ func (tm *taskRuntime) claimSpawnExternalEffect(ctx context.Context, entry *task
 		var conflict *taskapi.RevisionConflictError
 		if errors.As(err, &conflict) {
 			return spawnBeginOutcome{Entry: entry, Snapshot: snapshotFromTaskEntry(entry), Terminal: true},
-				fmt.Errorf("agent-sdk/runtime: subagent spawn %q was claimed concurrently: %w", spawnID, err)
+				fmt.Errorf("subagent spawn %q was claimed concurrently: %w", spawnID, err)
 		}
 		return spawnBeginOutcome{}, err
 	}
@@ -437,7 +437,7 @@ func spawnContextFromSpec(spec map[string]any) agent.ContextTransfer {
 func hashSubagentSpawnPayload(payload any) (string, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("agent-sdk/runtime: encode subagent spawn identity: %w", err)
+		return "", fmt.Errorf("encode subagent spawn identity: %w", err)
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
@@ -501,23 +501,23 @@ func spawnSubagentTarget(
 
 func validateSubagentSpawnResult(taskID string, anchor delegation.Anchor, result delegation.Result) error {
 	if strings.TrimSpace(anchor.SessionID) == "" {
-		return errors.New("agent-sdk/runtime: spawned subagent anchor requires session_id")
+		return errors.New("spawned subagent anchor requires session_id")
 	}
 	if strings.TrimSpace(anchor.AgentID) == "" {
-		return errors.New("agent-sdk/runtime: spawned subagent anchor requires agent_id")
+		return errors.New("spawned subagent anchor requires agent_id")
 	}
 	if anchorTaskID := strings.TrimSpace(anchor.TaskID); anchorTaskID != "" && anchorTaskID != strings.TrimSpace(taskID) {
-		return fmt.Errorf("agent-sdk/runtime: spawned subagent anchor task_id %q does not match %q", anchorTaskID, taskID)
+		return fmt.Errorf("spawned subagent anchor task_id %q does not match %q", anchorTaskID, taskID)
 	}
 	if resultTaskID := strings.TrimSpace(result.TaskID); resultTaskID != "" && resultTaskID != strings.TrimSpace(taskID) {
-		return fmt.Errorf("agent-sdk/runtime: spawned subagent result task_id %q does not match %q", resultTaskID, taskID)
+		return fmt.Errorf("spawned subagent result task_id %q does not match %q", resultTaskID, taskID)
 	}
 	switch result.State {
 	case delegation.StateRunning, delegation.StateCompleted, delegation.StateFailed, delegation.StateCancelled,
 		delegation.StateInterrupted, delegation.StateUnknownOutcome, delegation.StateWaitingApproval:
 		return nil
 	default:
-		return fmt.Errorf("agent-sdk/runtime: spawned subagent result has invalid state %q", result.State)
+		return fmt.Errorf("spawned subagent result has invalid state %q", result.State)
 	}
 }
 
@@ -638,7 +638,7 @@ func (tm *taskRuntime) advanceSubagentSpawn(
 	prompt string,
 ) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, errors.New("agent-sdk/runtime: subagent spawn task is required")
+		return taskapi.Snapshot{}, errors.New("subagent spawn Task is required")
 	}
 	phase := spawnPhaseOfTask(task)
 	if phase == spawnPhaseCompensating || phase == spawnPhaseChildCancelled {
@@ -649,7 +649,7 @@ func (tm *taskRuntime) advanceSubagentSpawn(
 		return task.snapshot(), nil
 	}
 	if phase != spawnPhasePostSpawn {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: cannot advance subagent spawn from phase %q", phase)
+		return taskapi.Snapshot{}, fmt.Errorf("cannot advance subagent spawn from phase %q", phase)
 	}
 	// Single post_spawn roll-forward: attach (idempotent) + canonical dialogue
 	// (idempotent keys) + one committed mark. No pure marker phases.
@@ -745,9 +745,9 @@ func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task
 		// made discoverable. Cancellation is now the durable authority, so release
 		// any queued producer and reject later completion for this Spawn attempt.
 		tm.discardSubagentCompletion(task.ref.TaskID)
-		return fmt.Errorf("agent-sdk/runtime: subagent spawn %q was compensated: %w", taskStringValue(task.metadata["spawn_identity"]), cause)
+		return fmt.Errorf("subagent spawn %q was compensated: %w", taskStringValue(task.metadata["spawn_identity"]), cause)
 	}
-	return errors.Join(cause, fmt.Errorf("agent-sdk/runtime: cannot resume compensation from phase %q", phase))
+	return errors.Join(cause, fmt.Errorf("cannot resume compensation from phase %q", phase))
 }
 
 func (tm *taskRuntime) detachSubagentParticipant(ctx context.Context, task *subagentTask) error {
@@ -755,7 +755,7 @@ func (tm *taskRuntime) detachSubagentParticipant(ctx context.Context, task *suba
 	defer tm.runtime.participantMu.Unlock()
 	lifecycle, ok := tm.runtime.sessions.(session.ParticipantLifecycleService)
 	if !ok {
-		return errors.New("agent-sdk/runtime: participant lifecycle store does not support atomic compensation")
+		return errors.New("participant lifecycle store does not support atomic compensation")
 	}
 	active, err := tm.runtime.sessions.Session(ctx, task.sessionRef)
 	if err != nil {

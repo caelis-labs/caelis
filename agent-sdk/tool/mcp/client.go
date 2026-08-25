@@ -59,7 +59,7 @@ func startClientWithHTTPClient(ctx context.Context, spec ServerSpec, httpClient 
 	session, err := connectWithTimeout(ctx, client, lifetimeCtx, cancel, transport, 15*time.Second)
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("mcp: connect %s server %s/%s failed: %w", transportName, spec.PluginID, spec.Name, err)
+		return nil, fmt.Errorf("connect %s MCP server %s/%s: %w", transportName, spec.PluginID, spec.Name, err)
 	}
 	return &Client{
 		spec:      spec,
@@ -101,11 +101,11 @@ func transportForSpecWithHTTPClient(spec ServerSpec, httpClient *http.Client) (m
 	case TransportStdio:
 		workDir := strings.TrimSpace(spec.WorkDir)
 		if workDir == "" {
-			return nil, "", fmt.Errorf("mcp: workDir is required for stdio server %s/%s", spec.PluginID, spec.Name)
+			return nil, "", fmt.Errorf("workDir is required for stdio MCP server %s/%s", spec.PluginID, spec.Name)
 		}
 		command := strings.TrimSpace(spec.Command)
 		if command == "" {
-			return nil, "", fmt.Errorf("mcp: command is required for stdio server %s/%s", spec.PluginID, spec.Name)
+			return nil, "", fmt.Errorf("command is required for stdio MCP server %s/%s", spec.PluginID, spec.Name)
 		}
 		cmd := exec.Command(resolveExecutable(command, workDir), spec.Args...)
 		cmd.Dir = workDir
@@ -117,7 +117,7 @@ func transportForSpecWithHTTPClient(spec ServerSpec, httpClient *http.Client) (m
 	case TransportStreamableHTTP:
 		endpoint := strings.TrimSpace(spec.URL)
 		if endpoint == "" {
-			return nil, "", fmt.Errorf("mcp: url is required for streamable HTTP server %s/%s", spec.PluginID, spec.Name)
+			return nil, "", fmt.Errorf("URL is required for streamable HTTP MCP server %s/%s", spec.PluginID, spec.Name)
 		}
 		return &mcpsdk.StreamableClientTransport{
 			Endpoint:             endpoint,
@@ -127,14 +127,14 @@ func transportForSpecWithHTTPClient(spec ServerSpec, httpClient *http.Client) (m
 	case TransportSSE:
 		endpoint := strings.TrimSpace(spec.URL)
 		if endpoint == "" {
-			return nil, "", fmt.Errorf("mcp: url is required for SSE server %s/%s", spec.PluginID, spec.Name)
+			return nil, "", fmt.Errorf("URL is required for SSE MCP server %s/%s", spec.PluginID, spec.Name)
 		}
 		return &mcpsdk.SSEClientTransport{
 			Endpoint:   endpoint,
 			HTTPClient: httpClientWithHeaders(httpClient, spec.Headers),
 		}, transportName, nil
 	default:
-		return nil, "", fmt.Errorf("mcp: unsupported transport %q for server %s/%s", spec.Transport, spec.PluginID, spec.Name)
+		return nil, "", fmt.Errorf("unsupported transport %q for MCP server %s/%s", spec.Transport, spec.PluginID, spec.Name)
 	}
 }
 

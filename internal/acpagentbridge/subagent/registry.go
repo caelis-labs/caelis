@@ -35,10 +35,10 @@ func NewRegistry(configs []AgentConfig) (*Registry, error) {
 func (r *Registry) Register(cfg AgentConfig) error {
 	cfg = normalizeAgentConfig(cfg)
 	if cfg.Name == "" {
-		return fmt.Errorf("internal/acpagentbridge/subagent: agent name is required")
+		return fmt.Errorf("agent name is required")
 	}
 	if strings.TrimSpace(cfg.Command) == "" {
-		return fmt.Errorf("internal/acpagentbridge/subagent: command is required for agent %q", cfg.Name)
+		return fmt.Errorf("command is required for Agent %q", cfg.Name)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -51,10 +51,10 @@ func (r *Registry) Replace(configs []AgentConfig) error {
 	for _, cfg := range configs {
 		cfg = normalizeAgentConfig(cfg)
 		if cfg.Name == "" {
-			return fmt.Errorf("internal/acpagentbridge/subagent: agent name is required")
+			return fmt.Errorf("agent name is required")
 		}
 		if strings.TrimSpace(cfg.Command) == "" {
-			return fmt.Errorf("internal/acpagentbridge/subagent: command is required for agent %q", cfg.Name)
+			return fmt.Errorf("command is required for Agent %q", cfg.Name)
 		}
 		next[cfg.Name] = cfg
 	}
@@ -88,7 +88,7 @@ func (r *Registry) Resolve(name string) (AgentConfig, error) {
 
 func (r *Registry) lookup(name string) (AgentConfig, error) {
 	if r == nil {
-		return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: registry is unavailable")
+		return AgentConfig{}, fmt.Errorf("agent registry is unavailable")
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -98,7 +98,7 @@ func (r *Registry) lookup(name string) (AgentConfig, error) {
 	defer r.mu.RUnlock()
 	cfg, ok := r.agents[name]
 	if !ok {
-		return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: agent %q not found", name)
+		return AgentConfig{}, fmt.Errorf("agent %q is not available", name)
 	}
 	return normalizeAgentConfig(cfg), nil
 }

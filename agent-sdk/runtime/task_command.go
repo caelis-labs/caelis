@@ -118,12 +118,12 @@ func (tm *taskRuntime) StartCommand(
 	}
 	if tm.store != nil {
 		if _, ok := tm.store.(taskapi.CASStore); !ok {
-			return taskapi.Snapshot{}, errors.New("agent-sdk/runtime: durable command start requires task.CASStore")
+			return taskapi.Snapshot{}, errors.New("durable command start requires task.CASStore")
 		}
 	}
 	release, claimed := tm.tryClaimSubagentOperation(ref, taskID)
 	if !claimed {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: command %q already has an operation in progress", taskID)
+		return taskapi.Snapshot{}, fmt.Errorf("command %q already has an operation in progress", taskID)
 	}
 	defer release()
 	if existing, ok, existingErr := tm.existingCommandForStart(ctx, ref, taskID, requestDigest); existingErr != nil {
@@ -197,7 +197,7 @@ func (tm *taskRuntime) resumeCommandStart(
 	req taskapi.CommandStartRequest,
 ) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, errors.New("agent-sdk/runtime: command task is required")
+		return taskapi.Snapshot{}, errors.New("command task is required")
 	}
 	task.mu.Lock()
 	phase := taskStringValue(task.metadata["command_phase"])
@@ -236,7 +236,7 @@ func (tm *taskRuntime) startClaimedCommand(
 		return tm.handleCommandStartFailure(ctx, task, sessionHandle, err)
 	}
 	if sessionHandle == nil {
-		return tm.handleCommandStartFailure(ctx, task, nil, errors.New("agent-sdk/runtime: sandbox start returned no session"))
+		return tm.handleCommandStartFailure(ctx, task, nil, errors.New("sandbox start returned no session"))
 	}
 	task.mu.Lock()
 	task.session = sessionHandle
@@ -320,7 +320,7 @@ func (tm *taskRuntime) existingCommandForStart(ctx context.Context, ref session.
 		storedDigest := cached.requestDigest
 		cached.mu.Unlock()
 		if storedDigest != requestDigest {
-			return nil, false, fmt.Errorf("agent-sdk/runtime: command identity %q was reused with a different request", taskID)
+			return nil, false, fmt.Errorf("command identity %q was reused with a different request", taskID)
 		}
 		return cached, true, nil
 	}
@@ -344,10 +344,10 @@ func (tm *taskRuntime) existingCommandForStart(ctx context.Context, ref session.
 		return nil, false, nil
 	}
 	if !storedTaskEntryMatches(entry, ref, taskapi.KindCommand) {
-		return nil, false, fmt.Errorf("agent-sdk/runtime: command identity %q belongs to another session or task kind", taskID)
+		return nil, false, fmt.Errorf("command identity %q belongs to another Session or Task kind", taskID)
 	}
 	if storedDigest := taskSpecString(entry.Spec, "command_request_digest"); storedDigest != requestDigest {
-		return nil, false, fmt.Errorf("agent-sdk/runtime: command identity %q was reused with a different request", taskID)
+		return nil, false, fmt.Errorf("command identity %q was reused with a different request", taskID)
 	}
 	command, err := tm.commandFromDurableEntry(entry)
 	if err != nil {
@@ -359,7 +359,7 @@ func (tm *taskRuntime) existingCommandForStart(ctx context.Context, ref session.
 
 func (tm *taskRuntime) snapshotExistingCommand(ctx context.Context, task *commandTask, yield time.Duration) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: command task is required")
+		return taskapi.Snapshot{}, fmt.Errorf("command task is required")
 	}
 	if task.commandOutcomeUnattached() {
 		return task.snapshotWithoutSession(tm.runtime.now()), nil
@@ -546,7 +546,7 @@ func (tm *taskRuntime) retainCommandAfterFailedInitialPersistence(
 // command early.
 func (tm *taskRuntime) waitCommandCompletion(ctx context.Context, task *commandTask, yield time.Duration) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
+		return taskapi.Snapshot{}, fmt.Errorf("task is required")
 	}
 	if task.commandOutcomeUnattached() {
 		return task.snapshotWithoutSession(tm.runtime.now()), nil
@@ -583,7 +583,7 @@ func (tm *taskRuntime) reconcileCommandWaitError(ctx context.Context, task *comm
 
 func (tm *taskRuntime) markCommandUnknown(ctx context.Context, task *commandTask, cause error) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, errors.New("agent-sdk/runtime: task is required")
+		return taskapi.Snapshot{}, errors.New("task is required")
 	}
 	reason := strings.TrimSpace(errorText(cause))
 	if reason == "" {

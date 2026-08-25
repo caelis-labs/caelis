@@ -380,7 +380,7 @@ func forceGateRuntimeForWrapTest() *Runtime {
 	cfg := normalizeCompactionConfig(CompactionConfig{Enabled: true})
 	return &Runtime{
 		compaction: cfg,
-		compactor:  newCodexStyleCompactor(cfg),
+		compactor:  newCodexStyleCompactor(cfg, nil),
 	}
 }
 

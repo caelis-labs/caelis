@@ -68,6 +68,9 @@ func TestProductAgentFinalModelRequestIncludesCanonicalTaskCommunicationTools(t 
 	taskFunction := finalToolFunction(t, functions, tasktool.ToolName)
 	assertFinalToolProperties(t, taskFunction, "action", "handle", "input")
 	sendFunction := finalToolFunction(t, functions, sendmessage.ToolName)
+	if got, _ := sendFunction["description"].(string); got != "Send one input to another Agent or the parent. Success confirms dispatch, not task completion." {
+		t.Fatalf("final SendMessage description = %q", got)
+	}
 	assertFinalToolProperties(t, sendFunction, "to", "message")
 	sendParameters := finalToolParameters(sendFunction)
 	if required := stringSliceFromFinalToolValue(sendParameters["required"]); !slices.Equal(required, []string{"to", "message"}) {

@@ -25,10 +25,10 @@ func (tm *taskRuntime) resolveStreamTask(ctx context.Context, ref session.Sessio
 	ref = session.NormalizeSessionRef(ref)
 	taskID = strings.TrimSpace(taskID)
 	if tm == nil {
-		return resolvedStreamTask{}, errorcode.New(errorcode.Unavailable, "agent-sdk/runtime: task stream service is unavailable")
+		return resolvedStreamTask{}, errorcode.New(errorcode.Unavailable, "Task stream service is unavailable")
 	}
 	if taskID == "" {
-		return resolvedStreamTask{}, errorcode.New(errorcode.InvalidArgument, "agent-sdk/runtime: task id is required")
+		return resolvedStreamTask{}, errorcode.New(errorcode.InvalidArgument, "Task identity is required")
 	}
 	if resolved, found, err := tm.resolveLiveStreamTask(ref, taskID); found || err != nil {
 		return resolved, err
@@ -41,7 +41,7 @@ func (tm *taskRuntime) resolveStreamTask(ctx context.Context, ref session.Sessio
 	if err != nil {
 		return resolvedStreamTask{}, wrapStreamTaskResolutionError(
 			errorcode.Unavailable,
-			fmt.Sprintf("agent-sdk/runtime: load task stream metadata for %q", taskID),
+			fmt.Sprintf("load Task stream metadata for %q", taskID),
 			err,
 		)
 	}
@@ -51,13 +51,13 @@ func (tm *taskRuntime) resolveStreamTask(ctx context.Context, ref session.Sessio
 	if strings.TrimSpace(entry.TaskID) != taskID {
 		return resolvedStreamTask{}, errorcode.New(
 			errorcode.FailedPrecondition,
-			fmt.Sprintf("agent-sdk/runtime: durable task identity for %q does not match", taskID),
+			fmt.Sprintf("durable Task identity for %q does not match", taskID),
 		)
 	}
 	if entry.Kind != taskapi.KindCommand && entry.Kind != taskapi.KindSubagent {
 		return resolvedStreamTask{}, errorcode.New(
 			errorcode.FailedPrecondition,
-			fmt.Sprintf("agent-sdk/runtime: task %q has unsupported stream kind %q", taskID, entry.Kind),
+			fmt.Sprintf("Task %q has unsupported stream kind %q", taskID, entry.Kind),
 		)
 	}
 
@@ -77,7 +77,7 @@ func (tm *taskRuntime) resolveStreamTask(ctx context.Context, ref session.Sessio
 			} else {
 				err = errorcode.Wrap(
 					errorcode.Unavailable,
-					fmt.Sprintf("agent-sdk/runtime: reload fence-contended task stream metadata for %q", taskID),
+					fmt.Sprintf("reload fence-contended Task stream metadata for %q", taskID),
 					errors.Join(err, loadErr),
 				)
 			}
@@ -88,7 +88,7 @@ func (tm *taskRuntime) resolveStreamTask(ctx context.Context, ref session.Sessio
 	if err != nil {
 		return resolvedStreamTask{}, wrapStreamTaskResolutionError(
 			errorcode.Unavailable,
-			fmt.Sprintf("agent-sdk/runtime: recover canonical task stream metadata for %q", taskID),
+			fmt.Sprintf("recover canonical Task stream metadata for %q", taskID),
 			err,
 		)
 	}
@@ -98,7 +98,7 @@ func (tm *taskRuntime) resolveStreamTask(ctx context.Context, ref session.Sessio
 		if err != nil {
 			return resolvedStreamTask{}, wrapStreamTaskResolutionError(
 				errorcode.FailedPrecondition,
-				fmt.Sprintf("agent-sdk/runtime: rehydrate command task stream %q", taskID),
+				fmt.Sprintf("rehydrate command Task stream %q", taskID),
 				err,
 			)
 		}
@@ -109,7 +109,7 @@ func (tm *taskRuntime) resolveStreamTask(ctx context.Context, ref session.Sessio
 		if subagent == nil {
 			return resolvedStreamTask{}, errorcode.New(
 				errorcode.FailedPrecondition,
-				fmt.Sprintf("agent-sdk/runtime: rehydrate subagent task stream %q", taskID),
+				fmt.Sprintf("rehydrate subagent Task stream %q", taskID),
 			)
 		}
 		tm.mu.Lock()
@@ -123,7 +123,7 @@ func (tm *taskRuntime) resolveStreamTask(ctx context.Context, ref session.Sessio
 		tm.mu.Unlock()
 		return resolvedStreamTask{kind: taskapi.KindSubagent, subagent: subagent}, nil
 	}
-	return resolvedStreamTask{}, errorcode.New(errorcode.Internal, "agent-sdk/runtime: resolved task stream kind was not handled")
+	return resolvedStreamTask{}, errorcode.New(errorcode.Internal, "resolved Task stream kind was not handled")
 }
 
 func (tm *taskRuntime) resolveLiveStreamTask(ref session.SessionRef, taskID string) (resolvedStreamTask, bool, error) {
@@ -140,7 +140,7 @@ func (tm *taskRuntime) resolveLiveStreamTask(ref session.SessionRef, taskID stri
 	case commandMatches && subagentMatches:
 		return resolvedStreamTask{}, true, errorcode.New(
 			errorcode.FailedPrecondition,
-			fmt.Sprintf("agent-sdk/runtime: task %q has ambiguous live stream ownership", taskID),
+			fmt.Sprintf("Task %q has ambiguous live stream ownership", taskID),
 		)
 	case commandMatches:
 		return resolvedStreamTask{kind: taskapi.KindCommand, command: command}, true, nil
@@ -154,7 +154,7 @@ func (tm *taskRuntime) resolveLiveStreamTask(ref session.SessionRef, taskID stri
 }
 
 func streamTaskNotFound(taskID string) error {
-	return errorcode.New(errorcode.NotFound, fmt.Sprintf("agent-sdk/runtime: task %q not found", strings.TrimSpace(taskID)))
+	return errorcode.New(errorcode.NotFound, fmt.Sprintf("task %q not found", strings.TrimSpace(taskID)))
 }
 
 func wrapStreamTaskResolutionError(fallback errorcode.Code, message string, err error) error {

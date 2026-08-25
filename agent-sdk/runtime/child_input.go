@@ -22,14 +22,14 @@ func (r *Runtime) SubmitChildInput(
 	raw agent.ChildInputCommand,
 ) (agent.ChildInputResult, error) {
 	if r == nil || r.sessions == nil || r.tasks == nil {
-		return agent.ChildInputResult{}, errorcode.New(errorcode.FailedPrecondition, "agent-sdk/runtime: child input service is unavailable")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.FailedPrecondition, "Target Agent messaging is unavailable")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	command := agent.CloneChildInputCommand(raw)
 	if command.Target == "" || !session.ActorRefHasIdentity(command.Source) {
-		return agent.ChildInputResult{}, errorcode.New(errorcode.InvalidArgument, "agent-sdk/runtime: child input target and trusted source are required")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.InvalidArgument, "Target Agent and Source Agent identities are required")
 	}
 	r.participantMu.Lock()
 	defer r.participantMu.Unlock()
@@ -61,18 +61,18 @@ func (r *Runtime) SubmitParticipantInput(
 	submitParent func(context.Context, session.Session, session.ActorRef, agent.AgentInput) error,
 ) error {
 	if r == nil || r.sessions == nil {
-		return errorcode.New(errorcode.FailedPrecondition, "agent-sdk/runtime: participant input service is unavailable")
+		return errorcode.New(errorcode.FailedPrecondition, "Agent messaging is unavailable")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	input := agent.CloneAgentInput(raw)
 	if input.Target == "" || input.Input == "" && len(input.ContentParts) == 0 {
-		return errorcode.New(errorcode.InvalidArgument, "agent-sdk/runtime: participant input target and content are required")
+		return errorcode.New(errorcode.InvalidArgument, "Message target and content are required")
 	}
 	expectedSource = session.CloneParticipantBinding(expectedSource)
 	if expectedSource.ID == "" || expectedSource.SessionID == "" || expectedSource.DelegationID == "" {
-		return errorcode.New(errorcode.InvalidArgument, "agent-sdk/runtime: participant input source binding is incomplete")
+		return errorcode.New(errorcode.InvalidArgument, "Source Agent binding is incomplete")
 	}
 
 	r.participantMu.Lock()
@@ -88,12 +88,12 @@ func (r *Runtime) SubmitParticipantInput(
 	}
 	if strings.EqualFold(input.Target, agent.AgentInputParent) {
 		if submitParent == nil {
-			return errorcode.New(errorcode.FailedPrecondition, "agent-sdk/runtime: parent input admission is unavailable")
+			return errorcode.New(errorcode.FailedPrecondition, "Main Agent messaging is unavailable")
 		}
 		return submitParent(ctx, active, source, input)
 	}
 	if r.tasks == nil {
-		return errorcode.New(errorcode.FailedPrecondition, "agent-sdk/runtime: child input service is unavailable")
+		return errorcode.New(errorcode.FailedPrecondition, "Target Agent messaging is unavailable")
 	}
 	_, err = r.submitChildInputLocked(ctx, ref, active, agent.ChildInputCommand{
 		Target: input.Target, Source: source, Input: input.Input,
@@ -115,7 +115,7 @@ func (r *Runtime) submitChildInputLocked(
 		return agent.ChildInputResult{}, err
 	}
 	if sourceBinding != nil && strings.TrimSpace(sourceBinding.ID) == strings.TrimSpace(binding.ID) {
-		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, "agent-sdk/runtime: a child endpoint cannot steer itself")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, "An Agent cannot send a message to itself")
 	}
 	target, err := childEndpointFromBinding(binding)
 	if err != nil {
@@ -126,7 +126,7 @@ func (r *Runtime) submitChildInputLocked(
 		return agent.ChildInputResult{}, err
 	}
 	if err := validateTaskActivityTarget(task, target); err != nil {
-		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.Conflict, "agent-sdk/runtime: child binding is stale", err)
+		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.Conflict, "Target Agent binding changed", err)
 	}
 	observer := newSubagentActivityObserver(r.tasks, target.EndpointKey)
 	if endpointBinder, ok := task.runner.(agent.ChildEndpointBinder); ok && endpointBinder != nil {
@@ -147,11 +147,11 @@ func (r *Runtime) submitChildInputLocked(
 	}
 	runner, ok := task.runner.(agent.ChildInputRunner)
 	if !ok || runner == nil {
-		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "agent-sdk/runtime: child runner does not support Agent communication")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent cannot receive follow-up messages")
 	}
 	binder, ok := task.runner.(agent.ChildActivityObserverBinder)
 	if !ok || binder == nil {
-		return agent.ChildInputResult{}, errorcode.New(errorcode.FailedPrecondition, "agent-sdk/runtime: child runner has no output observer binding")
+		return agent.ChildInputResult{}, errorcode.New(errorcode.FailedPrecondition, "Target Agent activity observation is unavailable")
 	}
 	if err := binder.BindChildActivityObserver(ctx, target, subagentActivityCursor(task), observer); err != nil {
 		return agent.ChildInputResult{}, err
@@ -179,7 +179,7 @@ func resolveExactParticipantInputSource(
 		trusted := session.ParticipantExecutor(*binding)
 		return trusted, binding, nil
 	}
-	return session.ActorRef{}, nil, errorcode.New(errorcode.PermissionDenied, "agent-sdk/runtime: participant input source is detached or replaced")
+	return session.ActorRef{}, nil, errorcode.New(errorcode.PermissionDenied, "Source Agent is detached or replaced")
 }
 
 func resolveTrustedChildInputSource(
@@ -191,7 +191,7 @@ func resolveTrustedChildInputSource(
 	case session.ActorKindController:
 		if strings.TrimSpace(active.Controller.ControllerID) == "" ||
 			strings.TrimSpace(source.ID) != strings.TrimSpace(active.Controller.ControllerID) {
-			return session.ActorRef{}, nil, errorcode.New(errorcode.PermissionDenied, "agent-sdk/runtime: child input controller source is stale")
+			return session.ActorRef{}, nil, errorcode.New(errorcode.PermissionDenied, "Source Agent controller identity is stale")
 		}
 		return session.ControllerExecutor(active.Controller), nil, nil
 	case session.ActorKindParticipant:
@@ -204,9 +204,9 @@ func resolveTrustedChildInputSource(
 			trusted := session.ParticipantExecutor(*binding)
 			return trusted, binding, nil
 		}
-		return session.ActorRef{}, nil, errorcode.New(errorcode.PermissionDenied, "agent-sdk/runtime: child input participant source is detached")
+		return session.ActorRef{}, nil, errorcode.New(errorcode.PermissionDenied, "Source Agent is detached")
 	default:
-		return session.ActorRef{}, nil, errorcode.New(errorcode.PermissionDenied, "agent-sdk/runtime: child input source must be the Session controller or an attached participant")
+		return session.ActorRef{}, nil, errorcode.New(errorcode.PermissionDenied, "Source Agent must be the Session controller or an attached participant")
 	}
 }
 
@@ -227,13 +227,13 @@ func resolveChildInputBinding(active session.Session, target string) (session.Pa
 			continue
 		}
 		if matched != nil {
-			return session.ParticipantBinding{}, errorcode.New(errorcode.Conflict, fmt.Sprintf("agent-sdk/runtime: child input target %q is ambiguous", target))
+			return session.ParticipantBinding{}, errorcode.New(errorcode.Conflict, fmt.Sprintf("Target Agent %q is ambiguous", target))
 		}
 		clone := session.CloneParticipantBinding(*binding)
 		matched = &clone
 	}
 	if matched == nil {
-		return session.ParticipantBinding{}, errorcode.New(errorcode.NotFound, fmt.Sprintf("agent-sdk/runtime: child input target %q is not attached", target))
+		return session.ParticipantBinding{}, errorcode.New(errorcode.NotFound, fmt.Sprintf("Target Agent %q is not attached", target))
 	}
 	return *matched, nil
 }
@@ -241,15 +241,15 @@ func resolveChildInputBinding(active session.Session, target string) (session.Pa
 func childEndpointFromBinding(binding session.ParticipantBinding) (agent.ChildEndpointRef, error) {
 	if binding.Kind != session.ParticipantKindSubagent || strings.TrimSpace(binding.ID) == "" ||
 		strings.TrimSpace(binding.SessionID) == "" || strings.TrimSpace(binding.DelegationID) == "" {
-		return agent.ChildEndpointRef{}, errorcode.New(errorcode.Conflict, "agent-sdk/runtime: child participant binding is incomplete")
+		return agent.ChildEndpointRef{}, errorcode.New(errorcode.Conflict, "Target Agent binding is incomplete")
 	}
 	role, err := normalizeSubagentParticipantRole(binding.Role)
 	if err != nil {
-		return agent.ChildEndpointRef{}, errorcode.Wrap(errorcode.Conflict, "agent-sdk/runtime: child participant role is invalid", err)
+		return agent.ChildEndpointRef{}, errorcode.Wrap(errorcode.Conflict, "Target Agent role is invalid", err)
 	}
 	frozen := placement.Normalize(binding.Placement)
 	if err := placement.Validate(frozen); err != nil {
-		return agent.ChildEndpointRef{}, errorcode.Wrap(errorcode.Conflict, "agent-sdk/runtime: child participant placement is invalid", err)
+		return agent.ChildEndpointRef{}, errorcode.Wrap(errorcode.Conflict, "Target Agent placement is invalid", err)
 	}
 	return agent.NormalizeChildEndpointRef(agent.ChildEndpointRef{
 		ParticipantID: strings.TrimSpace(binding.ID),

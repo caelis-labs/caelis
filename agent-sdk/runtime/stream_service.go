@@ -48,7 +48,7 @@ func (s *streamService) resolveReader(
 		return nil, nil, "", err
 	}
 	if s == nil {
-		return nil, nil, "", fmt.Errorf("agent-sdk/runtime: task stream service is unavailable")
+		return nil, nil, "", fmt.Errorf("task stream service is unavailable")
 	}
 	resolved, err := s.tasks.resolveStreamTask(
 		ctx,
@@ -74,7 +74,7 @@ func (s *streamService) resolveReader(
 				return s.awaitSubagent(awaitCtx, subagent, cursor)
 			}, task.KindSubagent, nil
 	default:
-		return nil, nil, "", fmt.Errorf("agent-sdk/runtime: unsupported resolved task kind %q", resolved.kind)
+		return nil, nil, "", fmt.Errorf("unsupported resolved Task kind %q", resolved.kind)
 	}
 }
 
@@ -232,7 +232,7 @@ func (s *streamService) await(ctx context.Context, req stream.ReadRequest) (stre
 
 func (s *streamService) awaitCommand(ctx context.Context, task *commandTask, cursor stream.Cursor) (stream.Snapshot, error) {
 	if task == nil || task.session == nil {
-		return stream.Snapshot{}, fmt.Errorf("agent-sdk/runtime: command task has no observable sandbox session")
+		return stream.Snapshot{}, fmt.Errorf("command Task has no observable sandbox Session")
 	}
 	type backendObservation struct {
 		observation sandbox.OutputObservation
@@ -253,7 +253,7 @@ func (s *streamService) awaitCommand(ctx context.Context, task *commandTask, cur
 			if err == nil && observation.Status.Running &&
 				observation.Cursor.Stdout <= backendCursor.Stdout &&
 				observation.Cursor.Stderr <= backendCursor.Stderr {
-				err = fmt.Errorf("agent-sdk/runtime: command output observer returned without output or terminal progress")
+				err = fmt.Errorf("command output observer returned without output or terminal progress")
 			}
 			result := backendObservation{observation: observation, err: err}
 			select {
@@ -303,7 +303,7 @@ func (s *streamService) awaitCommand(ctx context.Context, task *commandTask, cur
 		case <-wait:
 		case result, ok := <-backendResults:
 			if !ok {
-				return stream.Snapshot{}, fmt.Errorf("agent-sdk/runtime: command output observer stopped before the stream advanced")
+				return stream.Snapshot{}, fmt.Errorf("command output observer stopped before the stream advanced")
 			}
 			if result.err != nil {
 				return stream.Snapshot{}, result.err
@@ -350,12 +350,12 @@ func streamSnapshotReady(snap stream.Snapshot, cursor stream.Cursor) bool {
 
 func commandStatusWithoutSession(task *commandTask) (sandbox.SessionStatus, error) {
 	if task == nil {
-		return sandbox.SessionStatus{}, fmt.Errorf("agent-sdk/runtime: command task is required")
+		return sandbox.SessionStatus{}, fmt.Errorf("command Task is required")
 	}
 	task.mu.Lock()
 	defer task.mu.Unlock()
 	if task.running || !stream.IsTerminalState(string(task.state)) {
-		return sandbox.SessionStatus{}, fmt.Errorf("agent-sdk/runtime: command task %q has no observable sandbox session", task.ref.TaskID)
+		return sandbox.SessionStatus{}, fmt.Errorf("command Task %q has no observable sandbox Session", task.ref.TaskID)
 	}
 	return sandbox.SessionStatus{
 		Terminal: sandbox.TerminalRef{
@@ -370,7 +370,7 @@ func commandStatusWithoutSession(task *commandTask) (sandbox.SessionStatus, erro
 
 func (s *streamService) readSubagent(_ context.Context, sub *subagentTask, cursor stream.Cursor) (stream.Snapshot, error) {
 	if sub == nil {
-		return stream.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent task is required")
+		return stream.Snapshot{}, fmt.Errorf("subagent Task is required")
 	}
 	sub.streamMu.Lock()
 	defer sub.streamMu.Unlock()
@@ -617,7 +617,7 @@ func (s *streamService) Release(ctx context.Context, ref stream.Ref) error {
 // TASK control plane and must never be routed through this resolver.
 func (s *streamService) resolveTerminalCommand(ctx context.Context, ref stream.Ref) (*commandTask, error) {
 	if s == nil || s.tasks == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: terminal service is unavailable")
+		return nil, fmt.Errorf("terminal service is unavailable")
 	}
 	if err := stream.ValidateRef(ref); err != nil {
 		return nil, err

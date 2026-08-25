@@ -184,10 +184,15 @@ func (r router) dispatchCompact(ctx context.Context, args string) (Result, error
 	if strings.TrimSpace(args) != "" {
 		return r.noticeResult("usage: /compact"), nil
 	}
-	if err := r.service.Compact(ctx); err != nil {
+	compacted, err := r.service.Compact(ctx)
+	if err != nil {
 		return Result{}, FriendlyCommandError("compact", err)
 	}
-	result := r.noticeResult(compact.CompactNoticeLabel)
+	notice := compact.CompactNoticeLabel
+	if !compacted {
+		notice = "Nothing to compact"
+	}
+	result := r.noticeResult(notice)
 	if status, err := r.service.Status(ctx); err == nil {
 		result.StatusUpdate = &status
 	}

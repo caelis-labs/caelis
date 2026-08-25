@@ -47,11 +47,11 @@ func planWriteMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	}
 	rawContent, exists := args["content"]
 	if !exists {
-		return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: missing required arg %q", "content"))
+		return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg %q is required", "content"))
 	}
 	content, ok := rawContent.(string)
 	if !ok {
-		return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: arg %q must be string", "content"))
+		return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg %q must be string", "content"))
 	}
 	ifRevision, err := argparse.String(args, "if_revision", false)
 	if err != nil {
@@ -70,7 +70,7 @@ func planWriteMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	switch {
 	case statErr == nil:
 		if info.IsDir() {
-			return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: target %q is directory", target))
+			return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("target %q is a directory", target))
 		}
 		mode = info.Mode()
 		raw, err := fsys.ReadFile(target)
@@ -126,13 +126,13 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	}
 	if fileExists {
 		if fileInfo.IsDir() {
-			return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: target %q is directory", target))
+			return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("target %q is a directory", target))
 		}
 		mode = fileInfo.Mode()
 	}
 
 	if !fileExists {
-		err := tool.NewError(tool.ErrorCodeNotFound, "tool: Patch target does not exist; use Write to create files")
+		err := tool.NewError(tool.ErrorCodeNotFound, "Patch target does not exist; use Write to create files")
 		err.Retryable = true
 		return fileMutationPlan{}, err
 	}
@@ -173,30 +173,30 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 func parsePatchEdits(args map[string]any) ([]patchEdit, error) {
 	raw, ok := args["edits"]
 	if !ok || raw == nil {
-		return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: missing required arg %q", "edits"))
+		return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg %q is required", "edits"))
 	}
 	rawItems, ok := raw.([]any)
 	if !ok {
-		return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: arg %q must be an array", "edits"))
+		return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg %q must be an array", "edits"))
 	}
 	if len(rawItems) == 0 {
-		return nil, tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"edits\" must include at least one edit")
+		return nil, tool.NewError(tool.ErrorCodeInvalidInput, "arg \"edits\" must include at least one edit")
 	}
 	edits := make([]patchEdit, 0, len(rawItems))
 	for idx, rawItem := range rawItems {
 		item, ok := rawItem.(map[string]any)
 		if !ok {
-			return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: arg \"edits[%d]\" must be an object", idx))
+			return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg \"edits[%d]\" must be an object", idx))
 		}
 		if err := tool.RejectUnknownArgs(item, "old", "new", "replace_all", "expected_replacements"); err != nil {
-			return nil, fmt.Errorf("tool: Patch edits[%d]: %w", idx, err)
+			return nil, fmt.Errorf("patch edits[%d]: %w", idx, err)
 		}
 		oldValue, err := requiredPatchEditString(item, idx, "old")
 		if err != nil {
 			return nil, err
 		}
 		if oldValue == "" {
-			return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: arg \"edits[%d].old\" must be non-empty", idx))
+			return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg \"edits[%d].old\" must be non-empty", idx))
 		}
 		newValue, err := requiredPatchEditString(item, idx, "new")
 		if err != nil {
@@ -215,11 +215,11 @@ func parsePatchEdits(args map[string]any) ([]patchEdit, error) {
 				return nil, err
 			}
 			if expected < 1 {
-				return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: arg \"edits[%d].expected_replacements\" must be >= 1", idx))
+				return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg \"edits[%d].expected_replacements\" must be >= 1", idx))
 			}
 		}
 		if replaceAll && !expectedProvided {
-			return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: arg \"edits[%d].expected_replacements\" is required when replace_all is true", idx))
+			return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg \"edits[%d].expected_replacements\" is required when replace_all is true", idx))
 		}
 		edits = append(edits, patchEdit{
 			old:              oldValue,
@@ -235,11 +235,11 @@ func parsePatchEdits(args map[string]any) ([]patchEdit, error) {
 func requiredPatchEditString(args map[string]any, editIndex int, key string) (string, error) {
 	raw, ok := args[key]
 	if !ok || raw == nil {
-		return "", tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: missing required arg \"edits[%d].%s\"", editIndex, key))
+		return "", tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg \"edits[%d].%s\" is required", editIndex, key))
 	}
 	value, ok := raw.(string)
 	if !ok {
-		return "", tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: arg \"edits[%d].%s\" must be string", editIndex, key))
+		return "", tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg \"edits[%d].%s\" must be string", editIndex, key))
 	}
 	return value, nil
 }
@@ -250,7 +250,7 @@ func collectPatchReplacements(content string, edits []patchEdit) ([]patchReplace
 		matches := patchMatchRanges(content, edit.old)
 		count := len(matches)
 		if count == 0 {
-			err := tool.NewError(tool.ErrorCodeOldTextNotFound, fmt.Sprintf("tool: Patch edit %d did not contain an exact match for old", idx))
+			err := tool.NewError(tool.ErrorCodeOldTextNotFound, fmt.Sprintf("Patch edit %d did not contain an exact match for old", idx))
 			err.Hint = "Read the file again and retry Patch with the current text."
 			err.Retryable = true
 			return nil, err
@@ -259,7 +259,7 @@ func collectPatchReplacements(content string, edits []patchEdit) ([]patchReplace
 			return nil, replacementCountError(idx, edit.expected, count)
 		}
 		if !edit.replaceAll && count != 1 {
-			err := tool.NewError(tool.ErrorCodeTooManyMatches, fmt.Sprintf("tool: Patch edit %d requires exact single match, found %d", idx, count))
+			err := tool.NewError(tool.ErrorCodeTooManyMatches, fmt.Sprintf("Patch edit %d requires exact single match, found %d", idx, count))
 			err.Hint = "Use a more specific old text or set replace_all with expected_replacements."
 			err.Retryable = true
 			return nil, err
@@ -426,7 +426,7 @@ func validatePatchReplacementRanges(replacements []patchReplacement) error {
 		prev := replacements[idx-1]
 		next := replacements[idx]
 		if next.start < prev.end {
-			err := tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: Patch has overlapping edits %d and %d", prev.editIndex, next.editIndex))
+			err := tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("Patch has overlapping edits %d and %d", prev.editIndex, next.editIndex))
 			err.Hint = "Use non-overlapping old text in each edit."
 			err.Retryable = true
 			return err
@@ -450,7 +450,7 @@ func applyPatchReplacements(content string, replacements []patchReplacement) str
 }
 
 func replacementCountError(editIndex int, expected int, actual int) error {
-	err := tool.NewError(tool.ErrorCodeUnexpectedMatchCount, fmt.Sprintf("tool: Patch edit %d expected %d replacement(s), found %d", editIndex, expected, actual))
+	err := tool.NewError(tool.ErrorCodeUnexpectedMatchCount, fmt.Sprintf("Patch edit %d expected %d replacement(s), found %d", editIndex, expected, actual))
 	err.Hint = "Read the file again and retry Patch with the current expected_replacements value."
 	err.Retryable = true
 	return err

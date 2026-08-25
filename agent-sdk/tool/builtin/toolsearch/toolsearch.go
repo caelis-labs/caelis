@@ -173,13 +173,13 @@ func parseRequest(raw json.RawMessage) (request, error) {
 	}
 	var values map[string]any
 	if err := json.Unmarshal(raw, &values); err != nil {
-		return args, fmt.Errorf("ToolSearch: decode input: %w", err)
+		return args, fmt.Errorf("decode ToolSearch input: %w", err)
 	}
 	if err := tool.RejectUnknownArgs(values, "query", "limit"); err != nil {
 		return args, err
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return args, fmt.Errorf("ToolSearch: decode input: %w", err)
+		return args, fmt.Errorf("decode ToolSearch input: %w", err)
 	}
 	args.Query = strings.TrimSpace(args.Query)
 	if args.Query == "" {

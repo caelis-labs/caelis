@@ -31,7 +31,7 @@ func ValidateRunCommandArgs(args map[string]any) error {
 	if raw, present := args["sandbox_permissions"]; present && raw != nil {
 		value, ok := raw.(string)
 		if !ok {
-			return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"sandbox_permissions\" must be string")
+			return tool.NewError(tool.ErrorCodeInvalidInput, "arg \"sandbox_permissions\" must be string")
 		}
 		normalized, err := tool.NormalizeCommandSandboxPermission(value, true)
 		if err != nil {
@@ -43,7 +43,7 @@ func ValidateRunCommandArgs(args map[string]any) error {
 	if raw, present := args["justification"]; present && raw != nil {
 		value, ok := raw.(string)
 		if !ok {
-			return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"justification\" must be string")
+			return tool.NewError(tool.ErrorCodeInvalidInput, "arg \"justification\" must be string")
 		}
 		justification = value
 	}
@@ -52,7 +52,7 @@ func ValidateRunCommandArgs(args map[string]any) error {
 	}
 	if permission == tool.CommandSandboxPermissionRequireEscalated {
 		if strings.TrimSpace(justification) == "" {
-			return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"justification\" is required when sandbox_permissions is require_escalated")
+			return tool.NewError(tool.ErrorCodeInvalidInput, "arg \"justification\" is required when sandbox_permissions is require_escalated")
 		}
 	}
 	return nil
@@ -419,7 +419,7 @@ func plainCommandExitError(err error) bool {
 
 func runtimeOrDefault(runtime sandbox.Runtime) (sandbox.Runtime, error) {
 	if runtime == nil {
-		return nil, fmt.Errorf("tool: sandbox runtime is required")
+		return nil, fmt.Errorf("sandbox runtime is required")
 	}
 	return runtime, nil
 }

@@ -197,7 +197,7 @@ func delegationGuidanceLines() []string {
 	return []string{
 		"- Delegate only when the subtask has clear independent scope, useful parallelism, or a focused review/investigation role.",
 		"- Make delegated prompts self-contained: goal, scope, constraints, edit permission, and expected output.",
-		"- Keep architecture, integration, validation, and user-facing judgment in the main session.",
+		"- Keep architecture, integration, validation, and user-facing judgment in the main session. Verify only delegated findings that affect the next action; do not repeat the investigation.",
 	}
 }
 

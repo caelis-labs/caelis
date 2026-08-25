@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -23,12 +24,15 @@ import (
 
 // Config defines one baseline local runtime instance.
 type Config struct {
-	Sessions                 session.Service
-	AgentFactory             agent.AgentFactory
-	RunIDGenerator           func() string
-	Clock                    func() time.Time
-	Compaction               CompactionConfig
-	Compactor                compact.Engine
+	Sessions       session.Service
+	AgentFactory   agent.AgentFactory
+	RunIDGenerator func() string
+	Clock          func() time.Time
+	Compaction     CompactionConfig
+	Compactor      compact.Engine
+	// Diagnostics receives fixed Runtime classifications only. Callers must not
+	// attach user content, Session identities, or workspace paths.
+	Diagnostics              *slog.Logger
 	PolicyRegistry           policy.Registry
 	DefaultPolicyMode        string
 	SandboxPolicy            sandbox.PolicySnapshot
@@ -60,6 +64,9 @@ type Runtime struct {
 	clock                    func() time.Time
 	compaction               CompactionConfig
 	compactor                compact.Engine
+	diagnostics              *slog.Logger
+	compactionRequestMu      sync.RWMutex
+	compactionRequests       map[string]compactionRequestSnapshot
 	policies                 policy.Registry
 	defaultPolicyMode        string
 	sandboxPolicy            sandbox.PolicySnapshot
@@ -104,6 +111,8 @@ func New(cfg Config) (*Runtime, error) {
 		runIDGenerator:           cfg.RunIDGenerator,
 		clock:                    cfg.Clock,
 		compaction:               normalizeCompactionConfig(cfg.Compaction),
+		diagnostics:              cfg.Diagnostics,
+		compactionRequests:       map[string]compactionRequestSnapshot{},
 		policies:                 cfg.PolicyRegistry,
 		defaultPolicyMode:        strings.TrimSpace(cfg.DefaultPolicyMode),
 		sandboxPolicy:            sandbox.ClonePolicySnapshot(cfg.SandboxPolicy),
@@ -148,7 +157,7 @@ func New(cfg Config) (*Runtime, error) {
 	}
 	r.compactor = cfg.Compactor
 	if r.compactor == nil {
-		r.compactor = newCodexStyleCompactor(r.compaction)
+		r.compactor = newCodexStyleCompactor(r.compaction, r.diagnostics)
 	}
 	r.tasks = newTaskRuntime(r, cfg.TaskStore, cfg.TaskActivityChanged)
 	r.tasks.taskCommitted = cfg.TaskCommitted

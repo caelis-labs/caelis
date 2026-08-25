@@ -13,7 +13,7 @@ func Bool(args map[string]any, key string, defaultValue bool) (bool, error) {
 	}
 	value, ok := raw.(bool)
 	if !ok {
-		return false, fmt.Errorf("tool: arg %q must be boolean", key)
+		return false, fmt.Errorf("arg %q must be boolean", key)
 	}
 	return value, nil
 }
@@ -23,16 +23,16 @@ func String(args map[string]any, key string, required bool) (string, error) {
 	raw, ok := args[key]
 	if !ok || raw == nil {
 		if required {
-			return "", fmt.Errorf("tool: missing required arg %q", key)
+			return "", fmt.Errorf("arg %q is required", key)
 		}
 		return "", nil
 	}
 	value, ok := raw.(string)
 	if !ok {
-		return "", fmt.Errorf("tool: arg %q must be string", key)
+		return "", fmt.Errorf("arg %q must be string", key)
 	}
 	if required && value == "" {
-		return "", fmt.Errorf("tool: arg %q must be non-empty", key)
+		return "", fmt.Errorf("arg %q must be non-empty", key)
 	}
 	return value, nil
 }
@@ -57,12 +57,12 @@ func Int(args map[string]any, key string, defaultValue int) (int, error) {
 		return int(v), nil
 	case int64:
 		if v > int64(maxInt) || v < int64(minInt) {
-			return 0, fmt.Errorf("tool: arg %q is out of int range", key)
+			return 0, fmt.Errorf("arg %q is out of int range", key)
 		}
 		return int(v), nil
 	case uint:
 		if v > uint(maxInt) {
-			return 0, fmt.Errorf("tool: arg %q is out of int range", key)
+			return 0, fmt.Errorf("arg %q is out of int range", key)
 		}
 		return int(v), nil
 	case uint8:
@@ -71,28 +71,28 @@ func Int(args map[string]any, key string, defaultValue int) (int, error) {
 		return int(v), nil
 	case uint32:
 		if uint64(v) > uint64(maxInt) {
-			return 0, fmt.Errorf("tool: arg %q is out of int range", key)
+			return 0, fmt.Errorf("arg %q is out of int range", key)
 		}
 		return int(v), nil
 	case uint64:
 		if v > uint64(maxInt) {
-			return 0, fmt.Errorf("tool: arg %q is out of int range", key)
+			return 0, fmt.Errorf("arg %q is out of int range", key)
 		}
 		return int(v), nil
 	case float32:
 		if math.Trunc(float64(v)) != float64(v) {
-			return 0, fmt.Errorf("tool: arg %q must be integer", key)
+			return 0, fmt.Errorf("arg %q must be integer", key)
 		}
 		return int(v), nil
 	case float64:
 		if math.Trunc(v) != v {
-			return 0, fmt.Errorf("tool: arg %q must be integer", key)
+			return 0, fmt.Errorf("arg %q must be integer", key)
 		}
 		if v > float64(maxInt) || v < float64(minInt) {
-			return 0, fmt.Errorf("tool: arg %q is out of int range", key)
+			return 0, fmt.Errorf("arg %q is out of int range", key)
 		}
 		return int(v), nil
 	default:
-		return 0, fmt.Errorf("tool: arg %q must be integer", key)
+		return 0, fmt.Errorf("arg %q must be integer", key)
 	}
 }

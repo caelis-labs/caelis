@@ -22,10 +22,10 @@ func (tm *taskRuntime) finalizeTerminalCommand(
 	status sandbox.SessionStatus,
 ) (taskapi.Snapshot, error) {
 	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
+		return taskapi.Snapshot{}, fmt.Errorf("task is required")
 	}
 	if status.Running {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: terminal command finalization requires a terminal status")
+		return taskapi.Snapshot{}, fmt.Errorf("terminal command finalization requires a terminal status")
 	}
 	if err := tm.syncCommandOutput(ctx, task, status); err != nil {
 		snapshot, persistErr := tm.markCommandUnknown(context.WithoutCancel(ctx), task, err)

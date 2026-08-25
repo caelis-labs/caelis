@@ -38,7 +38,7 @@ func (s completedTaskSession) Terminal() sandbox.TerminalRef {
 }
 
 func (completedTaskSession) WriteInput(_ context.Context, _ []byte) error {
-	return fmt.Errorf("agent-sdk/runtime: task is not running")
+	return fmt.Errorf("task is not running")
 }
 
 func (s completedTaskSession) ReadOutput(_ context.Context, stdoutMarker, stderrMarker int64) ([]byte, []byte, int64, int64, error) {

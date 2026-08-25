@@ -13,11 +13,13 @@ import (
 )
 
 type autoCompactDecision struct {
-	Reason        string
-	Kind          compactionRecoveryKind
-	Usage         compact.UsageSnapshot
-	RequestTokens int
-	Model         model.LLM
+	Reason           string
+	Kind             compactionRecoveryKind
+	Usage            compact.UsageSnapshot
+	RequestTokens    int
+	Model            model.LLM
+	Request          *model.Request
+	SourceThroughSeq uint64
 }
 
 type autoCompactRequiredError struct {
@@ -101,15 +103,20 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 			yield(nil, errors.New("model: llm is nil"))
 			return
 		}
-		if decision, err := l.runtime.autoCompactDecisionBeforeModelRequest(ctx, l.sessionRef, l.inner, req); err != nil {
+		decision, err := l.runtime.autoCompactDecisionBeforeModelRequest(ctx, l.sessionRef, l.inner, req)
+		if err != nil {
 			yield(nil, err)
 			return
 		} else if strings.TrimSpace(decision.Reason) != "" {
 			yield(nil, &autoCompactRequiredError{decision: decision})
 			return
 		}
+		l.runtime.rememberCompactionRequest(l.sessionRef, l.inner, req, decision.SourceThroughSeq)
+		var final *model.Response
+		failed := false
 		for event, err := range l.inner.Generate(ctx, model.CloneRequest(req)) {
 			if err != nil {
+				failed = true
 				if decision, compact, decisionErr := l.runtime.autoCompactDecisionAfterModelRequestFailure(ctx, l.sessionRef, l.inner, req, err); decisionErr != nil {
 					yield(nil, decisionErr)
 					return
@@ -118,9 +125,20 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 					return
 				}
 			}
+			if event != nil {
+				response := event.Response
+				if response != nil && response.TurnComplete {
+					cloned := *response
+					cloned.Message = model.CloneMessage(response.Message)
+					final = &cloned
+				}
+			}
 			if !yield(event, err) {
 				return
 			}
+		}
+		if !failed && final != nil {
+			l.runtime.completeCompactionRequest(l.sessionRef, l.inner, req, final, decision.SourceThroughSeq)
 		}
 	}
 }
@@ -168,17 +186,23 @@ func (r *Runtime) autoCompactDecisionBeforeModelRequest(
 	if err != nil || !ok {
 		return autoCompactDecision{}, err
 	}
+	decision := autoCompactDecision{
+		Model:            llm,
+		SourceThroughSeq: view.sourceThroughSeq,
+	}
+	if !view.eligible {
+		return decision, nil
+	}
 	trigger := evaluateWatermark(view.usage, r.compaction)
 	if !trigger.ShouldCompact {
-		return autoCompactDecision{}, nil
+		return decision, nil
 	}
-	return autoCompactDecision{
-		Reason:        modelRequestWatermarkReason(trigger.Reason),
-		Kind:          compactionRecoveryKindWatermark,
-		Usage:         view.usage,
-		RequestTokens: view.requestTokens,
-		Model:         llm,
-	}, nil
+	decision.Reason = modelRequestWatermarkReason(trigger.Reason)
+	decision.Kind = compactionRecoveryKindWatermark
+	decision.Usage = view.usage
+	decision.RequestTokens = view.requestTokens
+	decision.Request = model.CloneRequest(req)
+	return decision, nil
 }
 
 func (r *Runtime) autoCompactDecisionAfterModelRequestFailure(
@@ -196,21 +220,28 @@ func (r *Runtime) autoCompactDecisionAfterModelRequestFailure(
 	if err != nil || !ok {
 		return autoCompactDecision{}, false, err
 	}
+	if !view.eligible {
+		return autoCompactDecision{}, false, nil
+	}
 	if !evaluateEmergencyWatermark(view.usage, r.compaction) {
 		return autoCompactDecision{}, false, nil
 	}
 	return autoCompactDecision{
-		Reason:        "model_request_retry_exhausted_high_water",
-		Kind:          compactionRecoveryKindRetryExhausted,
-		Usage:         view.usage,
-		RequestTokens: view.requestTokens,
-		Model:         llm,
+		Reason:           "model_request_retry_exhausted_high_water",
+		Kind:             compactionRecoveryKindRetryExhausted,
+		Usage:            view.usage,
+		RequestTokens:    view.requestTokens,
+		Model:            llm,
+		Request:          model.CloneRequest(req),
+		SourceThroughSeq: view.sourceThroughSeq,
 	}, true, nil
 }
 
 type autoCompactModelRequestView struct {
-	usage         compact.UsageSnapshot
-	requestTokens int
+	usage            compact.UsageSnapshot
+	requestTokens    int
+	sourceThroughSeq uint64
+	eligible         bool
 }
 
 func (r *Runtime) autoCompactModelRequestView(
@@ -233,18 +264,26 @@ func (r *Runtime) autoCompactModelRequestView(
 	events = mainInvocationEvents(events)
 	delta := compactableEvents(events)
 	if len(delta) == 0 {
-		return autoCompactModelRequestView{}, false, nil
+		return autoCompactModelRequestView{sourceThroughSeq: session.LastEventSeq(events)}, true, nil
 	}
 	usage, requestTokens, prefixChanged := usageForModelRequestDetails(events, llm, req, r.compaction)
 	if !prefixChanged && !autoCompactGateHasModelProgress(delta) {
-		return autoCompactModelRequestView{}, false, nil
+		return autoCompactModelRequestView{
+			usage: usage, requestTokens: requestTokens,
+			sourceThroughSeq: session.LastEventSeq(events),
+		}, true, nil
 	}
 	if usage.EffectiveInputBudget <= 0 {
-		return autoCompactModelRequestView{}, false, nil
+		return autoCompactModelRequestView{
+			usage: usage, requestTokens: requestTokens,
+			sourceThroughSeq: session.LastEventSeq(events),
+		}, true, nil
 	}
 	return autoCompactModelRequestView{
-		usage:         usage,
-		requestTokens: requestTokens,
+		usage:            usage,
+		requestTokens:    requestTokens,
+		sourceThroughSeq: session.LastEventSeq(events),
+		eligible:         true,
 	}, true, nil
 }
 

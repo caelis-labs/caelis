@@ -90,7 +90,7 @@ func collectFinalResponse(
 		}
 	}
 	if final == nil {
-		return nil, errors.New("agent-sdk/runtime/chat: model returned no final response")
+		return nil, errors.New("model returned no final response")
 	}
 	if err := watchdog.finishModelStep(final); err != nil {
 		return nil, err
