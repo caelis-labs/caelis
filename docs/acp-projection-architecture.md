@@ -316,22 +316,29 @@ blocks, participant blocks, and detached child overlays consume this one
 derived presentation model and vary only their container controls.
 
 One maintained Grok compatibility profile is owned by the private external-ACP
-client adapter in `internal/acpagentbridge/client`. An inbound `x.ai/tool` object must match
-`namespace=grok_build`, `kind=list`, and boolean `read_only=true` exactly. Only
-then may a missing kind on a complete tool call or an explicit generic `other`
-kind be normalized to `read`; an omitted kind on a sparse tool update remains
-omitted. An existing `read` remains `read`, and `edit`, `search`, `execute`, or
-any other specific standard kind remains unchanged. The adapter preserves
-standard raw input and provider metadata, does not add a non-standard wire
-kind, and does not manufacture an exact tool name. It emits
-`caelis.display.exploration_verb` with `List` only as a presentation refinement
-of the resulting anonymous `read` category. Surfaces ignore that hint when an
-exact name is present or for every non-`read` category, so the hint cannot
-independently classify or authorize a tool. A title beginning with
-`List` is never sufficient. The category fallback can be removed when Grok
-emits a compatible standard read kind for directory listing; the display hint
-can be removed when standard ACP can represent the List verb without provider
-metadata.
+client adapter in `internal/acpagentbridge/client`. An inbound `x.ai/tool`
+object must use the exact `namespace=grok_build` provider shape before it may
+refine a missing standard display category. On a complete tool call, exact
+provider kinds `read` and `search` require boolean `read_only=true`, while
+`edit` and `execute` require boolean `read_only=false`; only then may the
+adapter restore that same standard ACP kind. An omitted kind on a sparse tool
+update remains omitted, and any explicit standard kind, including generic
+`other`, wins. Unknown, case-variant, malformed, or mutability-inconsistent
+provider kinds remain generic.
+
+The same profile treats exact provider `kind=list` with boolean
+`read_only=true` as an anonymous `read` category only when the standard kind is
+missing. An existing `read` remains `read` and receives the display refinement,
+while every other explicit standard kind remains unchanged. The adapter preserves standard raw
+input and provider metadata, does not add a non-standard wire kind, and never
+copies provider `name`, `label`, or `title` into exact Runtime tool identity. It
+emits `caelis.display.exploration_verb` with `List` only as a presentation
+refinement of the resulting anonymous `read` category. Surfaces ignore that
+hint when an exact name is present or for every non-`read` category, so the hint
+cannot independently classify or authorize a tool. A title beginning with
+`List` is never sufficient. The category fallbacks can be removed when Grok
+emits compatible standard kinds; the display hint can be removed when standard
+ACP can represent the List verb without provider metadata.
 
 Compact exploration rows render path, glob, and search arguments without adding
 an outer pair of backticks or double quotes. A matched outer pair recovered from

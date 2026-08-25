@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	acpclient "github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
@@ -500,6 +501,15 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 		completed := schema.ToolStatusCompleted
 		inProgress := schema.ToolStatusInProgress
 		failed := schema.ToolStatusFailed
+		grokExecute := acpclient.NormalizeInboundUpdate(schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "execute-1",
+			Title: "run_terminal_command", Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"command": "git status --short"},
+			Meta: map[string]any{"x.ai/tool": map[string]any{
+				"version": 1, "name": "run_terminal_command", "kind": "execute",
+				"namespace": "grok_build", "label": "Run Command", "read_only": false,
+			}},
+		}).(schema.ToolCall)
 		return []eventstream.Envelope{
 			{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
@@ -556,6 +566,18 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 			{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+				Update: grokExecute,
+			},
+			{
+				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+				Update: schema.ToolCallUpdate{
+					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-1", Status: &completed,
+				},
+			},
+			{
+				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
 				Update: schema.ToolCall{
 					SessionUpdate: schema.UpdateToolCall, ToolCallID: "subagent-1",
 					Title: "Start subagent task_invocation_review", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
@@ -582,10 +604,11 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 				tools = append(tools, event)
 			}
 		}
-		if len(tools) != 4 {
-			t.Fatalf("tool events = %#v, want four standard ACP tools", tools)
+		if len(tools) != 5 {
+			t.Fatalf("tool events = %#v, want five standard ACP tools", tools)
 		}
 		failedReadFound := false
+		executeFound := false
 		for _, event := range tools {
 			if event.Name != "" || !event.Done {
 				t.Fatalf("tool event = %#v, want no forged exact name and settled lifecycle", event)
@@ -600,20 +623,26 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 			if event.CallID == "read-failed" {
 				failedReadFound = event.Err && strings.Contains(event.Output, "missing file")
 			}
+			if event.CallID == "execute-1" {
+				executeFound = event.ToolKind == schema.ToolKindExecute && event.Args == "git status --short"
+			}
 		}
 		if !failedReadFound {
 			t.Fatalf("failed Read lost its lifecycle error: %#v", tools)
 		}
+		if !executeFound {
+			t.Fatalf("Grok execute lost its anonymous standard presentation: %#v", tools)
+		}
 		plain := joinRenderedPlain(block.Render(BlockRenderContext{
 			Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
 		}))
-		if countExactTrimmedLine(plain, "• Explored") != 1 || !strings.Contains(plain, "Read MEMORY.md, missing.go failed") || !strings.Contains(plain, "Search ToolCallStatus") || !strings.Contains(plain, "Start subagent task_invocation_review") {
+		if countExactTrimmedLine(plain, "• Explored") != 1 || !strings.Contains(plain, "Read MEMORY.md, missing.go failed") || !strings.Contains(plain, "Search ToolCallStatus") || !strings.Contains(plain, "Ran git status --short") || !strings.Contains(plain, "Start subagent task_invocation_review") {
 			t.Fatalf("standard ACP presentation lost expected labels:\n%s", plain)
 		}
 		if strings.Contains(plain, "missing file") {
 			t.Fatalf("failed exploration rendered a separate error detail:\n%s", plain)
 		}
-		if strings.Contains(plain, "• read") || strings.Contains(plain, "• search") || strings.Contains(plain, "Other Start") || strings.Contains(plain, "• Other") {
+		if strings.Contains(plain, "• read") || strings.Contains(plain, "• search") || strings.Contains(plain, "Other Start") || strings.Contains(plain, "• Other") || strings.Contains(plain, "• Tool") {
 			t.Fatalf("standard ACP presentation leaked kind-as-name compatibility rows:\n%s", plain)
 		}
 	}
@@ -648,7 +677,7 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 			t.Fatal("subagent output overlay did not open")
 		}
 		overlay := subagentOutputOverlayPlain(model)
-		if strings.Count(overlay, "• Explored") != 1 || !strings.Contains(overlay, "Read MEMORY.md, missing.go failed") || !strings.Contains(overlay, "Search ToolCallStatus") || !strings.Contains(overlay, "Start subagent task_invocation_review") || strings.Contains(overlay, "missing file") || strings.Contains(overlay, "Other Start") {
+		if strings.Count(overlay, "• Explored") != 1 || !strings.Contains(overlay, "Read MEMORY.md, missing.go failed") || !strings.Contains(overlay, "Search ToolCallStatus") || !strings.Contains(overlay, "Ran git status --short") || !strings.Contains(overlay, "Start subagent task_invocation_review") || strings.Contains(overlay, "missing file") || strings.Contains(overlay, "Other Start") || strings.Contains(overlay, "• Tool") {
 			t.Fatalf("overlay diverged from participant transcript semantics:\n%s", overlay)
 		}
 	})

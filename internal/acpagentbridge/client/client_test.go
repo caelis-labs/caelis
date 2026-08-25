@@ -12,6 +12,8 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestPendingPromptAndSteeringResponsesShareUpdateBarrier(t *testing.T) {
@@ -343,6 +345,109 @@ func TestSDKWireIngressPreservesStandardGrokToolLifecycle(t *testing.T) {
 	}
 	if update := got[1].Update.(ToolCallUpdate); update.Title != nil || update.Kind != nil || update.RawInput != nil {
 		t.Fatalf("sparse terminal update = %#v, want omitted fields to remain absent", update)
+	}
+}
+
+func TestSDKWireIngressRestoresMissingGrokExecuteKindWithoutExactIdentity(t *testing.T) {
+	t.Parallel()
+
+	clientSide, peerSide := net.Pipe()
+	updates := make(chan UpdateEnvelope, 1)
+	acpClient, err := NewStreamClient(clientSide, clientSide, Config{
+		OnUpdate: func(update UpdateEnvelope) { updates <- update },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer acpClient.Close(context.Background())
+	peer, err := acpsdk.NewConnectionWithOptions(nil, peerSide, peerSide, acpsdk.ConnectionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	wire := json.RawMessage(`{"sessionId":"grok-session","update":{"sessionUpdate":"tool_call","toolCallId":"execute-1","title":"run_terminal_command","rawInput":{"command":"git status --short"},"_meta":{"x.ai/tool":{"version":1,"name":"run_terminal_command","kind":"execute","namespace":"grok_build","label":"Run Command","read_only":false}}}}`)
+	if err := peer.SendNotification(ctx, MethodSessionUpdate, wire); err != nil {
+		t.Fatalf("session/update notification error = %v", err)
+	}
+
+	var got UpdateEnvelope
+	select {
+	case got = <-updates:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for Grok execute tool call")
+	}
+	call, ok := got.Update.(ToolCall)
+	if !ok {
+		t.Fatalf("wire update = %T, want ToolCall", got.Update)
+	}
+	rawInput, _ := call.RawInput.(map[string]any)
+	if call.Kind != schema.ToolKindExecute || call.Title != "run_terminal_command" || rawInput["command"] != "git status --short" {
+		t.Fatalf("normalized Grok execute call = %#v", call)
+	}
+	if exactName := metautil.String(call.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); exactName != "" {
+		t.Fatalf("runtime exact tool name = %q, want provider name to remain presentation-only evidence", exactName)
+	}
+	var rawCall map[string]any
+	if err := json.Unmarshal(got.Raw, &rawCall); err != nil {
+		t.Fatalf("decode retained raw execute call: %v", err)
+	}
+	if _, present := rawCall["kind"]; present {
+		t.Fatalf("retained raw execute call = %#v, want original missing standard kind", rawCall)
+	}
+}
+
+func TestSDKWireIngressPreservesOrderedIdenticalAssistantDeltas(t *testing.T) {
+	t.Parallel()
+
+	clientSide, peerSide := net.Pipe()
+	updates := make(chan UpdateEnvelope, 3)
+	acpClient, err := NewStreamClient(clientSide, clientSide, Config{
+		OnUpdate: func(update UpdateEnvelope) { updates <- update },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer acpClient.Close(context.Background())
+	peer, err := acpsdk.NewConnectionWithOptions(nil, peerSide, peerSide, acpsdk.ConnectionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for _, text := range []string{"ha", "ha", "!"} {
+		params := json.RawMessage(`{"sessionId":"child-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":` + string(mustMarshalRaw(text)) + `}}}`)
+		if err := peer.SendNotification(ctx, MethodSessionUpdate, params); err != nil {
+			t.Fatalf("session/update notification error = %v", err)
+		}
+	}
+
+	var got []string
+	for range 3 {
+		select {
+		case envelope := <-updates:
+			chunk, ok := envelope.Update.(ContentChunk)
+			if !ok {
+				t.Fatalf("wire update = %T, want ContentChunk", envelope.Update)
+			}
+			if chunk.MessageID != "" {
+				t.Fatalf("message id = %q, want real Grok omission preserved", chunk.MessageID)
+			}
+			var content TextChunk
+			if err := json.Unmarshal(chunk.Content, &content); err != nil {
+				t.Fatalf("decode assistant chunk content: %v", err)
+			}
+			got = append(got, content.Text)
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for assistant deltas")
+		}
+	}
+	if !reflect.DeepEqual(got, []string{"ha", "ha", "!"}) {
+		t.Fatalf("assistant deltas = %#v, want ordered exact wire chunks", got)
 	}
 }
 

@@ -980,7 +980,7 @@ func TestNormalizedGrokListJoinsExploredWithoutExactToolName(t *testing.T) {
 		input  map[string]any
 		meta   map[string]any
 	}{
-		{callID: "list-1", title: "List `docs`", kind: schema.ToolKindOther, input: map[string]any{"target_directory": "docs"}, meta: listMeta},
+		{callID: "list-1", title: "List `docs`", input: map[string]any{"target_directory": "docs"}, meta: listMeta},
 		{callID: "read-1", title: "Read `go.mod`", kind: schema.ToolKindRead, input: map[string]any{"target_file": "go.mod"}},
 		{callID: "search-1", title: `Search "projection"`, kind: schema.ToolKindSearch, input: map[string]any{"query": "projection"}},
 	}

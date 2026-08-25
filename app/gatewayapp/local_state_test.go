@@ -1055,6 +1055,7 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
+	t.Cleanup(func() { _ = stack.Close() })
 	activeSession, err := startGatewayAppTestSession(ctx, stack, "auto compact session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -1113,6 +1114,7 @@ func TestLocalStackAutoCompactCountsPromptPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
+	t.Cleanup(func() { _ = stack.Close() })
 	activeSession, err := startGatewayAppTestSession(ctx, stack, "auto compact prefix session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -1150,6 +1152,7 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
+	t.Cleanup(func() { _ = stack.Close() })
 	activeSession, err := startGatewayAppTestSession(ctx, stack, "manual compact session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)

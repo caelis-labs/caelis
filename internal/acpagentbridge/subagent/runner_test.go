@@ -486,6 +486,46 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 	}
 }
 
+func TestRunnerRestoresGrokExecutePresentationForSpawnStream(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingStreams{}
+	run := &childRun{
+		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "grok", AgentID: "agent-1"},
+		taskID:  "task-1",
+		sink:    sink,
+		state:   delegation.StateRunning,
+		running: true,
+	}
+	runner := &Runner{clock: time.Now}
+
+	runner.handleUpdate(run, client.UpdateEnvelope{
+		SessionID: "child-1",
+		Update: client.ToolCall{
+			SessionUpdate: client.UpdateToolCall,
+			ToolCallID:    "execute-1",
+			Title:         "run_terminal_command",
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"command": "git status --short"},
+			Meta: map[string]any{"x.ai/tool": map[string]any{
+				"version": 1, "name": "run_terminal_command", "kind": "execute",
+				"namespace": "grok_build", "label": "Run Command", "read_only": false,
+			}},
+		},
+	})
+
+	if len(sink.frames) != 1 || sink.frames[0].Event == nil {
+		t.Fatalf("Spawn stream frames = %#v, want one Grok execute event", sink.frames)
+	}
+	update := session.ProtocolUpdateOf(sink.frames[0].Event)
+	if update == nil || update.Kind != schema.ToolKindExecute || update.Title != "run_terminal_command" {
+		t.Fatalf("Spawn Grok execute update = %#v, want anonymous standard execute presentation", update)
+	}
+	if exactName := metautil.String(update.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); exactName != "" {
+		t.Fatalf("Spawn runtime exact tool name = %q, want none", exactName)
+	}
+}
+
 func TestRunnerDoesNotInventBuiltinIdentityForGenericFetch(t *testing.T) {
 	t.Parallel()
 
@@ -718,8 +758,8 @@ func TestRunnerHandleUpdatePublishesRepeatedAgentMessageDeltas(t *testing.T) {
 	}
 	runner := &Runner{clock: time.Now}
 
-	runner.handleUpdate(run, contentUpdateWithMessageID(t, client.UpdateAgentMessage, "repeat-1", "ha"))
-	runner.handleUpdate(run, contentUpdateWithMessageID(t, client.UpdateAgentMessage, "repeat-1", "ha"))
+	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "ha"))
+	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "ha"))
 
 	if got := len(sink.frames); got != 2 {
 		t.Fatalf("stream frames = %#v, want both repeated ACP deltas", sink.frames)
@@ -728,6 +768,9 @@ func TestRunnerHandleUpdatePublishesRepeatedAgentMessageDeltas(t *testing.T) {
 	for i, frame := range sink.frames {
 		if frame.Event == nil || frame.Event.Text != "ha" {
 			t.Fatalf("stream frame %d = %#v, want exact ha delta", i, frame)
+		}
+		if update := session.ProtocolUpdateOf(frame.Event); update == nil || update.MessageID != "" {
+			t.Fatalf("stream frame %d update = %#v, want real Grok message ID omission preserved", i, update)
 		}
 		rendered += frame.Event.Text
 	}

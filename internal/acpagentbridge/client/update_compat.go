@@ -41,13 +41,21 @@ func NormalizeInboundUpdate(update Update) Update {
 func normalizeInboundToolDisplay(meta map[string]any, standardKind string) (map[string]any, string) {
 	meta = normalizeInboundToolMeta(meta)
 	provider := providerToolMeta(meta)
-	if mapString(provider, "namespace") != xAIToolNamespace ||
-		mapString(provider, "kind") != "list" || !providerToolReadOnly(provider) {
+	if mapString(provider, "namespace") != xAIToolNamespace {
+		return meta, standardKind
+	}
+
+	if strings.TrimSpace(standardKind) == "" {
+		if providerKind, ok := grokStandardToolKind(provider); ok {
+			return meta, providerKind
+		}
+	}
+	if mapString(provider, "kind") != "list" || !providerToolReadOnly(provider) {
 		return meta, standardKind
 	}
 
 	switch strings.ToLower(strings.TrimSpace(standardKind)) {
-	case "", schema.ToolKindOther:
+	case "":
 		standardKind = schema.ToolKindRead
 	case schema.ToolKindRead:
 	default:
@@ -57,6 +65,21 @@ func normalizeInboundToolDisplay(meta map[string]any, standardKind string) (map[
 		metautil.DisplayExplorationVerb: "List",
 	})
 	return meta, standardKind
+}
+
+func grokStandardToolKind(provider map[string]any) (string, bool) {
+	readOnly, hasReadOnly := provider["read_only"].(bool)
+	if !hasReadOnly {
+		return "", false
+	}
+	switch kind := mapString(provider, "kind"); kind {
+	case schema.ToolKindRead, schema.ToolKindSearch:
+		return kind, readOnly
+	case schema.ToolKindEdit, schema.ToolKindExecute:
+		return kind, !readOnly
+	default:
+		return "", false
+	}
 }
 
 func normalizeInboundToolMeta(meta map[string]any) map[string]any {
