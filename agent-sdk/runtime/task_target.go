@@ -193,7 +193,7 @@ type commandControlTarget struct {
 }
 
 func (t commandControlTarget) Wait(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return t.runtime.waitCommandProgress(ctx, t.task, req.Yield)
+	return t.runtime.waitCommandCompletion(ctx, t.task, req.Yield)
 }
 
 func (t commandControlTarget) Write(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
@@ -215,7 +215,7 @@ func (t commandControlTarget) Write(ctx context.Context, req taskapi.ControlRequ
 	if err := t.task.session.WriteInput(ctx, []byte(input)); err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	if err := t.runtime.observeCommandOutput(ctx, t.task, baseline, req.Yield); err != nil {
+	if err := t.runtime.observeCommandWriteOutput(ctx, t.task, baseline, req.Yield); err != nil {
 		return taskapi.Snapshot{}, err
 	}
 	return t.runtime.snapshotObservedCommand(ctx, t.task)

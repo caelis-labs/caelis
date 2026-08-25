@@ -41,6 +41,21 @@ func (o taskToolObserver) ObserveTaskSnapshot(snapshot taskapi.Snapshot) {
 }
 
 func (tm *taskRuntime) Wait(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	normalized := normalizeTaskControlRequest(req)
+	if err := validateTaskControlPrincipal(normalized.Principal); err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	identity, err := tm.resolveControlIdentity(ctx, ref, normalized.TaskID)
+	if err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	if identity.kind == taskapi.KindCommand {
+		task, err := tm.lookupCommand(ctx, ref, identity.taskID)
+		if err != nil {
+			return taskapi.Snapshot{}, err
+		}
+		return tm.waitCommandTask(ctx, ref, task, normalized)
+	}
 	return tm.control(ctx, ref, req, taskControlObserve, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
 		return target.Wait(ctx, normalized)
 	})

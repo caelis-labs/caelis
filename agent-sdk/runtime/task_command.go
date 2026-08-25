@@ -540,9 +540,10 @@ func (tm *taskRuntime) retainCommandAfterFailedInitialPersistence(
 	return snapshot, errors.Join(persistErr, terminateErr, statusErr, recoveryPersistErr)
 }
 
-// waitCommandCompletion preserves RunCommand's initial-yield contract: wait
-// for command completion until the requested yield expires. Output activity
-// alone must not return the command to the caller early.
+// waitCommandCompletion is the claimed lifecycle wait used by RunCommand's
+// initial yield and short cancellation reconciliation. It waits for completion
+// until the requested yield expires; output activity alone never returns the
+// command early.
 func (tm *taskRuntime) waitCommandCompletion(ctx context.Context, task *commandTask, yield time.Duration) (taskapi.Snapshot, error) {
 	if task == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")

@@ -7,17 +7,20 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
-// waitCommandProgress implements Task wait. It first exposes any output that
-// is already unread; otherwise it waits for the next output or terminal state.
-// This is intentionally distinct from RunCommand's completion-oriented yield.
-func (tm *taskRuntime) waitCommandProgress(
+// waitCommandTask observes the sandbox lifecycle without retaining the Task
+// mutation claim. Once the sandbox wait finishes, it acquires that claim only
+// for authoritative status reconciliation, so concurrent cancel/read/write
+// operations remain available during the bounded wait.
+func (tm *taskRuntime) waitCommandTask(
 	ctx context.Context,
+	ref session.SessionRef,
 	task *commandTask,
-	wait time.Duration,
+	req taskapi.ControlRequest,
 ) (taskapi.Snapshot, error) {
 	if task == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
@@ -25,19 +28,123 @@ func (tm *taskRuntime) waitCommandProgress(
 	if task.commandOutcomeUnattached() {
 		return task.snapshotWithoutSession(tm.runtime.now()), nil
 	}
-	baseline, unread, err := tm.syncCommandStream(ctx, task)
+	waitStarted := time.Now()
+	status, waitErr := task.session.Wait(ctx, req.Yield)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		if waitErr != nil {
+			return task.snapshotWithoutSession(tm.runtime.now()), waitErr
+		}
+		return task.snapshotWithoutSession(tm.runtime.now()), ctxErr
+	}
+	claimBudget := req.Yield - time.Since(waitStarted)
+	if claimBudget < 0 {
+		claimBudget = 0
+	}
+	claimCtx, cancelClaim := context.WithTimeout(ctx, claimBudget)
+	defer cancelClaim()
+	release, claimed := tm.tryClaimSubagentOperation(ref, task.ref.TaskID)
+	var (
+		durableFallback    taskapi.Snapshot
+		durableFallbackOK  bool
+		durableFallbackErr error
+	)
+	if !claimed && tm.store != nil {
+		durableFallback, durableFallbackErr = tm.durableCommandSnapshot(claimCtx, ref, task.ref.TaskID)
+		durableFallbackOK = durableFallbackErr == nil
+	}
+	var claimErr error
+	if !claimed {
+		release, claimErr = tm.waitForTaskOperationClaim(claimCtx, ref, task.ref.TaskID)
+	}
+	if claimErr != nil {
+		fallback := task.snapshotWithoutSession(tm.runtime.now())
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fallback, errors.Join(waitErr, ctxErr)
+		}
+		if errors.Is(claimErr, context.DeadlineExceeded) {
+			if durableFallbackOK {
+				return durableFallback, waitErr
+			}
+			if tm.store != nil {
+				return fallback, errors.Join(waitErr, claimErr, durableFallbackErr)
+			}
+			return fallback, waitErr
+		}
+		return fallback, errors.Join(waitErr, claimErr)
+	}
+	defer release()
+
+	if tm.store != nil {
+		current, lookupErr := tm.lookupCommandCanonical(ctx, ref, task.ref.TaskID)
+		if lookupErr != nil {
+			return task.snapshotWithoutSession(tm.runtime.now()), errors.Join(waitErr, lookupErr)
+		}
+		task = current
+	} else {
+		tm.mu.RLock()
+		current := tm.tasks[task.ref.TaskID]
+		tm.mu.RUnlock()
+		if current != nil {
+			task = current
+		}
+	}
+	if task == nil {
+		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: command task is unavailable after wait")
+	}
+	tm.mu.RLock()
+	current := tm.tasks[task.ref.TaskID]
+	tm.mu.RUnlock()
+	if current == nil && tm.store == nil {
+		settledStatus, statusErr := task.session.Status(context.WithoutCancel(ctx))
+		if statusErr == nil {
+			status = settledStatus
+		}
+		task.mu.Lock()
+		snapshot := task.snapshotLocked(status)
+		task.mu.Unlock()
+		return snapshot, nil
+	}
+	if current != nil {
+		task = current
+	}
+	if currentStatus, statusErr := task.session.Status(ctx); statusErr == nil {
+		status = currentStatus
+	}
+	if _, completed := task.session.(completedTaskSession); completed {
+		task.mu.Lock()
+		snapshot := task.snapshotLocked(status)
+		task.mu.Unlock()
+		tm.removeCommandTask(task)
+		return snapshot, nil
+	}
+	if waitErr != nil {
+		return tm.reconcileCommandWaitError(ctx, task, waitErr)
+	}
+	return tm.reconcileCommandStatus(ctx, task, status)
+}
+
+func (tm *taskRuntime) durableCommandSnapshot(
+	ctx context.Context,
+	ref session.SessionRef,
+	taskID string,
+) (taskapi.Snapshot, error) {
+	if tm == nil || tm.store == nil {
+		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: durable Task store is unavailable")
+	}
+	entry, err := tm.store.Get(ctx, taskID)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	if !unread {
-		if err := tm.observeCommandOutput(ctx, task, baseline, wait); err != nil {
-			return taskapi.Snapshot{}, err
-		}
+	if !storedTaskEntryMatches(entry, ref, taskapi.KindCommand) {
+		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
 	}
-	return tm.snapshotObservedCommand(ctx, task)
+	return commandSnapshotFromTaskEntry(entry), nil
 }
 
-func (tm *taskRuntime) observeCommandOutput(
+// observeCommandWriteOutput gives an interactive Task write a bounded chance
+// to return the resulting command output. Output activity deliberately ends
+// this write observation; Task wait uses the completion-oriented lifecycle path.
+func (tm *taskRuntime) observeCommandWriteOutput(
 	ctx context.Context,
 	task *commandTask,
 	baseline stream.Cursor,
@@ -63,13 +170,13 @@ func (tm *taskRuntime) observeCommandOutput(
 		}
 		return err
 	}
-	if !snapshot.Running || taskOutputQuietPeriod <= 0 {
+	if !snapshot.Running || taskWriteOutputQuietPeriod <= 0 {
 		return nil
 	}
 
 	cursor := stream.CloneCursor(snapshot.Cursor)
 	for {
-		quietCtx, quietCancel := context.WithTimeout(waitCtx, taskOutputQuietPeriod)
+		quietCtx, quietCancel := context.WithTimeout(waitCtx, taskWriteOutputQuietPeriod)
 		next, awaitErr := service.await(quietCtx, stream.ReadRequest{
 			Ref:    commandTaskStreamRef(task),
 			Cursor: cursor,

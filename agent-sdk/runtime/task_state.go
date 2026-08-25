@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"context"
+	"fmt"
 	stdruntime "runtime"
 	"strings"
 	"sync"
@@ -20,7 +22,7 @@ const (
 	defaultCommandYield             = 10 * time.Second
 	taskWaitMaxYield                = time.Minute
 	taskWriteOutputWait             = 2 * time.Second
-	taskOutputQuietPeriod           = 100 * time.Millisecond
+	taskWriteOutputQuietPeriod      = 100 * time.Millisecond
 	taskCancelWait                  = 10 * time.Millisecond
 	commandLiveOutputBufferCapBytes = 64 * 1024
 	// Subagent observation deliberately keeps two bounded, process-local views:
@@ -50,6 +52,10 @@ type taskRuntime struct {
 	backends   map[sandbox.Backend]sandbox.Runtime
 	handles    map[string]map[string]struct{}
 	operations map[string]struct{}
+	// operationChanged broadcasts release of a session-scoped Task mutation
+	// claim. Command waits observe process lifecycle without a claim, then use
+	// this signal to serialize their short reconciliation phase.
+	operationChanged map[string]chan struct{}
 	// streamActivity is a TaskID-stable condition variable for subagent stream
 	// activity. Concrete subagentTask values may be removed and rehydrated after
 	// completion, so a cross-activity observer must never wait on one instance.
@@ -276,6 +282,7 @@ func newTaskRuntime(
 		backends:           map[sandbox.Backend]sandbox.Runtime{},
 		handles:            map[string]map[string]struct{}{},
 		operations:         map[string]struct{}{},
+		operationChanged:   map[string]chan struct{}{},
 		streamActivity:     map[string]*taskStreamActivitySignal{},
 		completions:        map[string]*subagentCompletion{},
 		completionApplying: map[string]struct{}{},
@@ -300,12 +307,50 @@ func (tm *taskRuntime) tryClaimSubagentOperation(ref session.SessionRef, taskID 
 	return func() {
 		tm.mu.Lock()
 		delete(tm.operations, operationKey)
+		if changed := tm.operationChanged[operationKey]; changed != nil {
+			close(changed)
+			delete(tm.operationChanged, operationKey)
+		}
 		completion, completionOperationKey := tm.startSubagentCompletionLocked(strings.TrimSpace(taskID))
 		tm.mu.Unlock()
 		if completion != nil {
 			go tm.applySubagentCompletion(completion, completionOperationKey)
 		}
 	}, true
+}
+
+func (tm *taskRuntime) waitForTaskOperationClaim(ctx context.Context, ref session.SessionRef, taskID string) (func(), error) {
+	if tm == nil {
+		return nil, fmt.Errorf("agent-sdk/runtime: task runtime is unavailable")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	operationKey := taskOperationKey(ref, taskID)
+	for {
+		if release, claimed := tm.tryClaimSubagentOperation(ref, taskID); claimed {
+			return release, nil
+		}
+		tm.mu.Lock()
+		if _, active := tm.operations[operationKey]; !active {
+			tm.mu.Unlock()
+			continue
+		}
+		if tm.operationChanged == nil {
+			tm.operationChanged = map[string]chan struct{}{}
+		}
+		changed := tm.operationChanged[operationKey]
+		if changed == nil {
+			changed = make(chan struct{})
+			tm.operationChanged[operationKey] = changed
+		}
+		tm.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-changed:
+		}
+	}
 }
 
 func (tm *taskRuntime) hasSubagentOperation(ref session.SessionRef, taskID string) bool {

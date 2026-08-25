@@ -35,6 +35,36 @@ func (t *commandTask) snapshotLocked(status sandbox.SessionStatus) taskapi.Snaps
 	})
 }
 
+func commandSnapshotFromTaskEntry(entry *taskapi.Entry) taskapi.Snapshot {
+	if entry == nil {
+		return taskapi.Snapshot{}
+	}
+	return taskapi.CloneSnapshot(taskapi.Snapshot{
+		Ref: taskapi.Ref{
+			TaskID:     strings.TrimSpace(entry.TaskID),
+			SessionID:  firstNonEmpty(entry.Terminal.SessionID, taskSpecString(entry.Spec, "session_id")),
+			TerminalID: firstNonEmpty(entry.Terminal.TerminalID, taskSpecString(entry.Spec, "terminal_id")),
+		},
+		Handle:         firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"])),
+		Revision:       entry.Revision,
+		Kind:           taskapi.KindCommand,
+		Title:          entry.Title,
+		State:          entry.State,
+		Running:        entry.Running,
+		SupportsInput:  entry.SupportsInput && entry.Running,
+		SupportsCancel: true,
+		CreatedAt:      entry.CreatedAt,
+		UpdatedAt:      entry.UpdatedAt,
+		Lease:          taskapi.CloneLease(entry.Lease),
+		StdoutCursor:   entry.StdoutCursor,
+		StderrCursor:   entry.StderrCursor,
+		EventCursor:    entry.EventCursor,
+		Result:         session.CloneState(entry.Result),
+		Metadata:       session.CloneState(entry.Metadata),
+		Terminal:       entry.Terminal,
+	})
+}
+
 func (t *commandTask) retainParentRelationLocked() {
 	if t == nil || strings.TrimSpace(t.parentCall) == "" {
 		return

@@ -1918,7 +1918,6 @@ type yieldProbeSandboxSession struct {
 	awaitErr      error
 	awaitOutput   string
 	awaitOnce     sync.Once
-	lastAwait     time.Duration
 	statusErr     error
 	statusRunning *bool
 	terminated    bool
@@ -1977,9 +1976,6 @@ func (s *yieldProbeSandboxSession) AwaitOutput(ctx context.Context, cursor sandb
 	}
 	emitted := false
 	s.awaitOnce.Do(func() {
-		if deadline, ok := ctx.Deadline(); ok {
-			s.lastAwait = time.Until(deadline)
-		}
 		if s.awaitOutput == "" {
 			return
 		}
@@ -2041,6 +2037,81 @@ func (s *yieldProbeSandboxSession) Result(context.Context) (sandbox.CommandResul
 func (s *yieldProbeSandboxSession) Terminate(context.Context) error {
 	s.terminated = true
 	return s.terminateErr
+}
+
+type concurrentCommandWaitSession struct {
+	*yieldProbeSandboxSession
+
+	mu               sync.Mutex
+	running          bool
+	done             chan struct{}
+	waitStarted      chan time.Duration
+	waitErrorRelease chan struct{}
+	finishOnce       sync.Once
+}
+
+func newConcurrentCommandWaitSession() *concurrentCommandWaitSession {
+	return &concurrentCommandWaitSession{
+		yieldProbeSandboxSession: newYieldProbeSandboxSession(),
+		running:                  true,
+		done:                     make(chan struct{}),
+		waitStarted:              make(chan time.Duration, 1),
+	}
+}
+
+func (s *concurrentCommandWaitSession) Status(context.Context) (sandbox.SessionStatus, error) {
+	s.mu.Lock()
+	running := s.running
+	s.mu.Unlock()
+	exitCode := 0
+	if !running {
+		exitCode = -1
+	}
+	return sandbox.SessionStatus{
+		SessionRef: s.Ref(), Terminal: s.Terminal(), Running: running,
+		ExitCode: exitCode, UpdatedAt: time.Now(),
+	}, nil
+}
+
+func (s *concurrentCommandWaitSession) Wait(ctx context.Context, timeout time.Duration) (sandbox.SessionStatus, error) {
+	if timeout <= 0 {
+		return s.Status(ctx)
+	}
+	select {
+	case s.waitStarted <- timeout:
+	default:
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	if s.waitErr != nil && s.waitErrorRelease != nil && timeout > taskCancelWait {
+		select {
+		case <-ctx.Done():
+			return sandbox.SessionStatus{}, ctx.Err()
+		case <-s.waitErrorRelease:
+			return sandbox.SessionStatus{}, s.waitErr
+		case <-timer.C:
+			return s.Status(ctx)
+		}
+	}
+	select {
+	case <-ctx.Done():
+		return sandbox.SessionStatus{}, ctx.Err()
+	case <-s.done:
+		if s.waitErr != nil && s.waitErrorRelease == nil {
+			return sandbox.SessionStatus{}, s.waitErr
+		}
+		return s.Status(ctx)
+	case <-timer.C:
+		return s.Status(ctx)
+	}
+}
+
+func (s *concurrentCommandWaitSession) Terminate(context.Context) error {
+	s.mu.Lock()
+	s.running = false
+	s.mu.Unlock()
+	s.finishOnce.Do(func() { close(s.done) })
+	return nil
 }
 
 func probeOutputFromCursor(text string, cursor int64) ([]byte, int64) {

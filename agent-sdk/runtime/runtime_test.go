@@ -3734,16 +3734,24 @@ func TestRuntimeRunCommandClosesStdinAndTaskWriteRejectsInput(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}
-	readyResult := callRuntimeTaskTool(t, taskTool, map[string]any{
-		"action": "wait",
-		"handle": handle,
-	})
-	readyPayload := testToolResultPayload(t, readyResult)
-	if readyPayload["state"] != string(taskapi.StateRunning) {
-		t.Fatalf("task readiness result = %#v, want interactive command to remain running", readyPayload)
-	}
-	if latest, _ := readyPayload["latest_output"].(string); !strings.Contains(latest, "stdin-eof") {
-		t.Fatalf("task readiness output = %q, want stdin EOF observation", latest)
+	var readyPayload map[string]any
+	readyDeadline := time.Now().Add(5 * time.Second)
+	for {
+		readyResult := callRuntimeTaskTool(t, taskTool, map[string]any{
+			"action": "read",
+			"handle": handle,
+		})
+		readyPayload = testToolResultPayload(t, readyResult)
+		if latest, _ := readyPayload["latest_output"].(string); strings.Contains(latest, "stdin-eof") {
+			break
+		}
+		if readyPayload["state"] != string(taskapi.StateRunning) {
+			t.Fatalf("task readiness result = %#v, want command running until stdin EOF is observed", readyPayload)
+		}
+		if time.Now().After(readyDeadline) {
+			t.Fatalf("task readiness output = %#v, want stdin EOF observation", readyPayload)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 
 	raw, err := json.Marshal(map[string]any{
@@ -3767,7 +3775,7 @@ func TestRuntimeRunCommandClosesStdinAndTaskWriteRejectsInput(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskReadIsImmediateAndWaitObservesNewOutput(t *testing.T) {
+func TestRuntimeTaskReadIsImmediateAndWaitIgnoresNewOutputUntilTerminal(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -3778,7 +3786,7 @@ func TestRuntimeTaskReadIsImmediateAndWaitObservesNewOutput(t *testing.T) {
 		tasks:      runtime.tasks,
 	}
 	runCommandResult := callRuntimeRunCommandTool(t, runCommandTool, map[string]any{
-		"command":       shellSleepPrintThenSleepForTest("wait-ready\n", time.Second, 10*time.Second),
+		"command":       shellSleepPrintThenSleepForTest("wait-ready\n", 200*time.Millisecond, 500*time.Millisecond),
 		"workdir":       ".",
 		"yield_time_ms": shellRunningYieldMillisForTest(0),
 	})
@@ -3815,7 +3823,6 @@ func TestRuntimeTaskReadIsImmediateAndWaitObservesNewOutput(t *testing.T) {
 	if delta, _ := taskMeta["output_delta"].(string); strings.Contains(delta, "wait-ready") {
 		t.Fatalf("task read output_delta = %q, want no future output", delta)
 	}
-	start = time.Now()
 	waitResult := callRuntimeTaskTool(t, runtimeTaskTool{
 		base:       tasktool.New(),
 		sessionRef: activeSession.SessionRef,
@@ -3824,21 +3831,236 @@ func TestRuntimeTaskReadIsImmediateAndWaitObservesNewOutput(t *testing.T) {
 		"action": "wait",
 		"handle": handle,
 	})
-	if elapsed := time.Since(start); elapsed >= 5*time.Second {
-		t.Fatalf("TASK wait elapsed = %v, want output-driven return before command exit", elapsed)
-	}
 	waitPayload := testToolResultPayload(t, waitResult)
-	if latest, _ := waitPayload["latest_output"].(string); !strings.Contains(latest, "wait-ready") {
-		t.Fatalf("task wait latest_output = %q, want newly emitted output", latest)
+	if waitPayload["state"] != string(taskapi.StateCompleted) {
+		t.Fatalf("task wait result = %#v, want command terminal after intermediate output", waitPayload)
 	}
-	callRuntimeTaskTool(t, runtimeTaskTool{
-		base:       tasktool.New(),
+	if result, _ := waitPayload["result"].(string); !strings.Contains(result, "wait-ready") {
+		t.Fatalf("task wait result output = %q, want intermediate output retained at terminal", result)
+	}
+}
+
+func TestRuntimeTaskWaitIgnoresUnreadOutputUntilTerminal(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	runCommandResult := callRuntimeRunCommandTool(t, runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, hostRuntimeForTest(t, activeSession.CWD)),
+		session:    activeSession,
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action": "cancel",
-		"handle": handle,
+		"command":       shellPrintThenSleepForTest("already-unread\n", time.Second),
+		"workdir":       ".",
+		"yield_time_ms": shellRunningYieldMillisForTest(0),
 	})
+	handle, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	identity, err := runtime.tasks.resolveTaskHandle(context.Background(), activeSession.SessionRef, handle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.tasks.mu.RLock()
+	commandTask := runtime.tasks.tasks[identity.taskID]
+	runtime.tasks.mu.RUnlock()
+	if commandTask == nil {
+		t.Fatalf("command task %q is unavailable", handle)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		commandTask.mu.Lock()
+		output := commandTask.output
+		commandTask.mu.Unlock()
+		if strings.Contains(output, "already-unread") {
+			status, statusErr := commandTask.session.Status(context.Background())
+			if statusErr != nil {
+				t.Fatal(statusErr)
+			}
+			if !status.Running {
+				t.Fatal("command reached terminal before unread-output wait began")
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("command output was not published before deadline")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	started := time.Now()
+	waitResult := callRuntimeTaskTool(t, runtimeTaskTool{
+		base: tasktool.New(), sessionRef: activeSession.SessionRef, tasks: runtime.tasks,
+	}, map[string]any{"action": "wait", "handle": handle})
+	if elapsed := time.Since(started); elapsed < 250*time.Millisecond {
+		t.Fatalf("TASK wait elapsed = %v, want unread output ignored until terminal", elapsed)
+	}
+	payload := testToolResultPayload(t, waitResult)
+	if payload["state"] != string(taskapi.StateCompleted) {
+		t.Fatalf("task wait result = %#v, want terminal command", payload)
+	}
+	if result, _ := payload["result"].(string); !strings.Contains(result, "already-unread") {
+		t.Fatalf("task wait result output = %q, want unread output retained at terminal", result)
+	}
+}
+
+func TestRuntimeCommandTaskWaitReturnsRunningOnlyAfterYieldExpires(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	runCommandResult := callRuntimeRunCommandTool(t, runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, hostRuntimeForTest(t, activeSession.CWD)),
+		session:    activeSession,
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"command":       shellPrintThenSleepForTest("still-running\n", 3*time.Second),
+		"workdir":       ".",
+		"yield_time_ms": shellRunningYieldMillisForTest(0),
+	})
+	handle, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	identity, err := runtime.tasks.resolveTaskHandle(context.Background(), activeSession.SessionRef, handle)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const yield = 300 * time.Millisecond
+	started := time.Now()
+	snapshot, err := runtime.tasks.Wait(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+		TaskID: identity.taskID, Yield: yield, Principal: session.ActorKindController,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed < 200*time.Millisecond {
+		t.Fatalf("command Task wait elapsed = %v, want bounded lifecycle wait near %v", elapsed, yield)
+	}
+	if !snapshot.Running || snapshot.State != taskapi.StateRunning {
+		t.Fatalf("command Task wait snapshot = %#v, want running only after yield expiry", snapshot)
+	}
+	if _, err := runtime.tasks.Cancel(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+		TaskID: identity.taskID, Principal: session.ActorKindController,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeCommandTaskWaitKeepsConcurrentCancelAvailable(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	commandSession := newConcurrentCommandWaitSession()
+	backend := newCommandStartProbe(commandSession, nil)
+	started, err := runtime.tasks.StartCommand(
+		context.Background(),
+		activeSession,
+		activeSession.SessionRef,
+		backend,
+		taskapi.CommandStartRequest{
+			Command: "sleep 60",
+			Workdir: activeSession.CWD,
+			Yield:   0,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !started.Running {
+		t.Fatalf("started command = %#v, want running", started)
+	}
+
+	type taskControlResult struct {
+		snapshot taskapi.Snapshot
+		err      error
+	}
+	waitDone := make(chan taskControlResult, 1)
+	go func() {
+		snapshot, waitErr := runtime.tasks.Wait(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+			TaskID: started.Ref.TaskID, Yield: 5 * time.Second, Principal: session.ActorKindController,
+		})
+		waitDone <- taskControlResult{snapshot: snapshot, err: waitErr}
+	}()
+
+	select {
+	case yield := <-commandSession.waitStarted:
+		if yield != 5*time.Second {
+			t.Fatalf("command Task wait yield = %v, want 5s", yield)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("command Task wait did not begin lifecycle observation")
+	}
+
+	cancelDone := make(chan taskControlResult, 1)
+	go func() {
+		snapshot, cancelErr := runtime.tasks.Cancel(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+			TaskID: started.Ref.TaskID, Principal: session.ActorKindController,
+		})
+		cancelDone <- taskControlResult{snapshot: snapshot, err: cancelErr}
+	}()
+
+	select {
+	case cancelled := <-cancelDone:
+		if cancelled.err != nil {
+			t.Fatalf("concurrent Task cancel error = %v", cancelled.err)
+		}
+		if cancelled.snapshot.Running || cancelled.snapshot.State != taskapi.StateCancelled {
+			t.Fatalf("concurrent Task cancel snapshot = %#v, want cancelled terminal", cancelled.snapshot)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent Task cancel was unavailable while wait was observing")
+	}
+
+	select {
+	case waited := <-waitDone:
+		if waited.err != nil {
+			t.Fatalf("Task wait after concurrent cancel error = %v", waited.err)
+		}
+		if waited.snapshot.Running || waited.snapshot.State != taskapi.StateCancelled {
+			t.Fatalf("Task wait after concurrent cancel snapshot = %#v, want cancelled terminal", waited.snapshot)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Task wait did not reconcile concurrent cancellation")
+	}
+}
+
+func TestRuntimeCommandTaskWaitIncludesClaimContentionInYieldBudget(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	commandSession := newYieldProbeSandboxSession()
+	started, err := runtime.tasks.StartCommand(
+		context.Background(),
+		activeSession,
+		activeSession.SessionRef,
+		newCommandStartProbe(commandSession, nil),
+		taskapi.CommandStartRequest{
+			Command: "sleep 60",
+			Workdir: activeSession.CWD,
+			Yield:   0,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, claimed := runtime.tasks.tryClaimSubagentOperation(activeSession.SessionRef, started.Ref.TaskID)
+	if !claimed {
+		t.Fatal("failed to establish concurrent Task operation")
+	}
+	defer release()
+
+	const yield = 150 * time.Millisecond
+	waitStarted := time.Now()
+	snapshot, err := runtime.tasks.Wait(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+		TaskID: started.Ref.TaskID, Yield: yield, Principal: session.ActorKindController,
+	})
+	elapsed := time.Since(waitStarted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed < 75*time.Millisecond || elapsed >= time.Second {
+		t.Fatalf("Task wait under claim contention elapsed = %v, want bounded near %v", elapsed, yield)
+	}
+	if !snapshot.Running || snapshot.State != taskapi.StateRunning {
+		t.Fatalf("Task wait under claim contention snapshot = %#v, want current running state", snapshot)
+	}
 }
 
 func TestCompletedCommandObservationKeepsExactInterleavedCallbackOutput(t *testing.T) {
@@ -4499,7 +4721,7 @@ func TestRuntimeTaskWaitErrorDoesNotTerminateRunningCommand(t *testing.T) {
 	}
 
 	waitErr := errors.New("transient wait failure")
-	fakeSession.awaitErr = waitErr
+	fakeSession.waitErr = waitErr
 	raw, err := json.Marshal(map[string]any{
 		"action": "wait",
 		"handle": handle,
@@ -4534,7 +4756,7 @@ func TestRuntimeTaskWaitErrorDoesNotTerminateRunningCommand(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskWaitUsesFixedMaximumYield(t *testing.T) {
+func TestRuntimeTaskWaitPassesFixedMaximumYieldToCompletionWait(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -4554,8 +4776,6 @@ func TestRuntimeTaskWaitUsesFixedMaximumYield(t *testing.T) {
 	if strings.TrimSpace(taskID) == "" {
 		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
 	}
-	fake.session.awaitOutput = "progress\n"
-
 	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
 		base:       tasktool.New(),
 		sessionRef: activeSession.SessionRef,
@@ -4565,11 +4785,8 @@ func TestRuntimeTaskWaitUsesFixedMaximumYield(t *testing.T) {
 		"handle": taskID,
 	})
 
-	if got := fake.session.lastWait; got != 0 {
-		t.Fatalf("TASK wait called completion Wait(%v), want initial RunCommand wait only", got)
-	}
-	if got := fake.session.lastAwait; got > taskWaitMaxYield || got < taskWaitMaxYield-time.Second {
-		t.Fatalf("TASK wait observation budget = %v, want near %v", got, taskWaitMaxYield)
+	if got := fake.session.lastWait; got != taskWaitMaxYield {
+		t.Fatalf("TASK wait completion budget = %v, want %v", got, taskWaitMaxYield)
 	}
 	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
 	if got := toolMeta["effective_yield_time_ms"]; got != float64(60000) && got != 60000 {
@@ -4656,8 +4873,6 @@ func TestRuntimeTaskWaitAcceptsCommaSeparatedTaskIDs(t *testing.T) {
 	fakeTwo := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
 	taskOne := startProbeCommandTask(t, activeSession, runtime, fakeOne)
 	taskTwo := startProbeCommandTask(t, activeSession, runtime, fakeTwo)
-	fakeOne.session.awaitOutput = "one\n"
-	fakeTwo.session.awaitOutput = "two\n"
 
 	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
 		base:       tasktool.New(),
@@ -4668,8 +4883,8 @@ func TestRuntimeTaskWaitAcceptsCommaSeparatedTaskIDs(t *testing.T) {
 		"handle": taskOne + ", " + taskTwo,
 	})
 
-	if fakeOne.session.lastWait != 0 || fakeTwo.session.lastWait != 0 {
-		t.Fatalf("completion waits = %v/%v, want Task wait to use output observers", fakeOne.session.lastWait, fakeTwo.session.lastWait)
+	if fakeOne.session.lastWait != taskWaitMaxYield || fakeTwo.session.lastWait != taskWaitMaxYield {
+		t.Fatalf("completion waits = %v/%v, want %v shared budgets", fakeOne.session.lastWait, fakeTwo.session.lastWait, taskWaitMaxYield)
 	}
 	payload := testToolResultPayload(t, taskResult)
 	if got, _ := payload["action"].(string); got != "wait" {
@@ -4694,7 +4909,7 @@ func TestRuntimeTaskWaitAcceptsCommaSeparatedTaskIDs(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskBatchWaitUsesConcurrentOutputObservers(t *testing.T) {
+func TestRuntimeTaskBatchWaitUsesConcurrentCompletionObservers(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -4702,8 +4917,6 @@ func TestRuntimeTaskBatchWaitUsesConcurrentOutputObservers(t *testing.T) {
 	fakeTwo := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
 	taskOne := startProbeCommandTask(t, activeSession, runtime, fakeOne)
 	taskTwo := startProbeCommandTask(t, activeSession, runtime, fakeTwo)
-	fakeOne.session.awaitOutput = "one\n"
-	fakeTwo.session.awaitOutput = "two\n"
 
 	_ = callRuntimeTaskTool(t, runtimeTaskTool{
 		base:       tasktool.New(),
@@ -4714,14 +4927,65 @@ func TestRuntimeTaskBatchWaitUsesConcurrentOutputObservers(t *testing.T) {
 		"handle": taskOne + "," + taskTwo,
 	})
 
-	if len(fakeOne.session.waitCalls) != 1 || len(fakeTwo.session.waitCalls) != 1 {
-		t.Fatalf("completion wait calls = %#v/%#v, want RunCommand initial waits only", fakeOne.session.waitCalls, fakeTwo.session.waitCalls)
+	if len(fakeOne.session.waitCalls) != 2 || len(fakeTwo.session.waitCalls) != 2 {
+		t.Fatalf("completion wait calls = %#v/%#v, want initial and Task waits", fakeOne.session.waitCalls, fakeTwo.session.waitCalls)
 	}
-	if got := fakeOne.session.lastAwait; got > taskWaitMaxYield || got < taskWaitMaxYield-time.Second {
-		t.Fatalf("first observer budget = %v, want near %v", got, taskWaitMaxYield)
+	if got := fakeOne.session.lastWait; got != taskWaitMaxYield {
+		t.Fatalf("first completion budget = %v, want %v", got, taskWaitMaxYield)
 	}
-	if got := fakeTwo.session.lastAwait; got > taskWaitMaxYield || got < taskWaitMaxYield-time.Second {
-		t.Fatalf("second observer budget = %v, want near %v", got, taskWaitMaxYield)
+	if got := fakeTwo.session.lastWait; got != taskWaitMaxYield {
+		t.Fatalf("second completion budget = %v, want %v", got, taskWaitMaxYield)
+	}
+}
+
+func TestRuntimeCommandTaskBatchWaitDoesNotTreatOutputAsWinner(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	commandTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, hostRuntimeForTest(t, activeSession.CWD)),
+		session:    activeSession,
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}
+	longResult := callRuntimeRunCommandTool(t, commandTool, map[string]any{
+		"command":       shellPrintThenSleepForTest("long-progress\n", 3*time.Second),
+		"workdir":       ".",
+		"yield_time_ms": shellRunningYieldMillisForTest(0),
+	})
+	shortResult := callRuntimeRunCommandTool(t, commandTool, map[string]any{
+		"command":       shellPrintThenSleepForTest("short-progress\n", 500*time.Millisecond),
+		"workdir":       ".",
+		"yield_time_ms": shellRunningYieldMillisForTest(0),
+	})
+	longHandle, _ := testToolResultRuntimeMeta(t, longResult, "task")["handle"].(string)
+	shortHandle, _ := testToolResultRuntimeMeta(t, shortResult, "task")["handle"].(string)
+
+	waitResult := callRuntimeTaskTool(t, runtimeTaskTool{
+		base: tasktool.New(), sessionRef: activeSession.SessionRef, tasks: runtime.tasks,
+	}, map[string]any{"action": "wait", "handle": longHandle + "," + shortHandle})
+	payload := testToolResultPayload(t, waitResult)
+	items, _ := payload["tasks"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("batch tasks = %#v, want two command snapshots", payload["tasks"])
+	}
+	longSnapshot, _ := items[0].(map[string]any)
+	shortSnapshot, _ := items[1].(map[string]any)
+	if longSnapshot["state"] != string(taskapi.StateRunning) {
+		t.Fatalf("long command snapshot = %#v, want current running loser", longSnapshot)
+	}
+	if shortSnapshot["state"] != string(taskapi.StateCompleted) {
+		t.Fatalf("short command snapshot = %#v, want terminal winner after its output", shortSnapshot)
+	}
+
+	longIdentity, err := runtime.tasks.resolveTaskHandle(context.Background(), activeSession.SessionRef, longHandle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.tasks.Cancel(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+		TaskID: longIdentity.taskID, Principal: session.ActorKindController,
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

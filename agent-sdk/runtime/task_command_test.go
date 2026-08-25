@@ -33,6 +33,35 @@ type fenceContendedBackfillTaskStore struct {
 	putCalls      int
 }
 
+type commandTerminalGateTaskStore struct {
+	*sagaTaskStore
+	started chan struct{}
+	release chan struct{}
+	err     error
+	once    sync.Once
+}
+
+func (s *commandTerminalGateTaskStore) Put(ctx context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {
+	block := false
+	if req.Entry != nil && req.Entry.Kind == taskapi.KindCommand && !req.Entry.Running && req.Entry.State == taskapi.StateCancelled {
+		s.once.Do(func() {
+			block = true
+			close(s.started)
+		})
+	}
+	if block {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-s.release:
+		}
+		if s.err != nil {
+			return nil, s.err
+		}
+	}
+	return s.sagaTaskStore.Put(ctx, req)
+}
+
 func (s *fenceContendedBackfillTaskStore) Get(ctx context.Context, taskID string) (*taskapi.Entry, error) {
 	s.mu.Lock()
 	if s.contended {
@@ -634,6 +663,210 @@ func TestCommandCancelClaimRollsForwardAfterCacheLoss(t *testing.T) {
 	}
 	if handle.terminateCalls() != 1 || snapshot.Running || snapshot.State == taskapi.StateRunning {
 		t.Fatalf("Cancel() = %#v terminate=%d; want claimed effect rolled forward without unknown->running regression", snapshot, handle.terminateCalls())
+	}
+}
+
+func TestCommandTaskWaitClaimTimeoutReturnsDurableState(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	persistErr := errors.New("forced terminal command persistence failure")
+	store := &commandTerminalGateTaskStore{
+		sagaTaskStore: newSagaTaskStore(),
+		started:       make(chan struct{}),
+		release:       make(chan struct{}),
+		err:           persistErr,
+	}
+	runtime.tasks.store = store
+	commandSession := newConcurrentCommandWaitSession()
+	backend := newCommandStartProbe(commandSession, nil)
+	runtime.tasks.registerSandboxRuntime(backend)
+	started, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, backend, taskapi.CommandStartRequest{
+		Command: "sleep 60",
+		Workdir: activeSession.CWD,
+		Yield:   0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type taskControlResult struct {
+		snapshot taskapi.Snapshot
+		err      error
+	}
+	cancelDone := make(chan taskControlResult, 1)
+	go func() {
+		snapshot, cancelErr := runtime.tasks.Cancel(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+			TaskID: started.Ref.TaskID, Principal: session.ActorKindController,
+		})
+		cancelDone <- taskControlResult{snapshot: snapshot, err: cancelErr}
+	}()
+
+	select {
+	case <-store.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent cancel did not reach terminal command persistence")
+	}
+	durable, err := store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if durable.State == taskapi.StateCancelled {
+		t.Fatalf("durable state = %#v, want pre-terminal canonical state while Put is blocked", durable)
+	}
+
+	const yield = 100 * time.Millisecond
+	waitStarted := time.Now()
+	waited, err := runtime.tasks.Wait(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+		TaskID: started.Ref.TaskID, Yield: yield, Principal: session.ActorKindController,
+	})
+	elapsed := time.Since(waitStarted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed < 50*time.Millisecond || elapsed >= time.Second {
+		t.Fatalf("Task wait under durable claim contention elapsed = %v, want bounded near %v", elapsed, yield)
+	}
+	if waited.State != durable.State || waited.Running != durable.Running || waited.Revision != durable.Revision {
+		t.Fatalf("Task wait snapshot = %#v, want durable canonical state %#v", waited, durable)
+	}
+
+	close(store.release)
+	select {
+	case cancelled := <-cancelDone:
+		if !errors.Is(cancelled.err, persistErr) {
+			t.Fatalf("concurrent cancel error = %v, want %v", cancelled.err, persistErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent cancel did not return after terminal persistence was released")
+	}
+}
+
+func TestCommandTaskWaitPrefersConcurrentDurableTerminalOverWaitError(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	store := newSagaTaskStore()
+	runtime.tasks.store = store
+	commandSession := newConcurrentCommandWaitSession()
+	commandSession.waitErr = errors.New("transient sandbox wait failure")
+	commandSession.waitErrorRelease = make(chan struct{})
+	backend := newCommandStartProbe(commandSession, nil)
+	runtime.tasks.registerSandboxRuntime(backend)
+	started, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, backend, taskapi.CommandStartRequest{
+		Command: "sleep 60",
+		Workdir: activeSession.CWD,
+		Yield:   0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type taskControlResult struct {
+		snapshot taskapi.Snapshot
+		err      error
+	}
+	waitDone := make(chan taskControlResult, 1)
+	go func() {
+		snapshot, waitErr := runtime.tasks.Wait(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+			TaskID: started.Ref.TaskID, Yield: 5 * time.Second, Principal: session.ActorKindController,
+		})
+		waitDone <- taskControlResult{snapshot: snapshot, err: waitErr}
+	}()
+	select {
+	case <-commandSession.waitStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("command Task wait did not begin lifecycle observation")
+	}
+
+	cancelled, err := runtime.tasks.Cancel(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindController,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.Running || cancelled.State != taskapi.StateCancelled {
+		t.Fatalf("concurrent cancel snapshot = %#v, want cancelled terminal", cancelled)
+	}
+	store.mu.Lock()
+	putsAfterCancel := store.puts
+	entryAfterCancel := taskapi.CloneEntry(store.entries[started.Ref.TaskID])
+	store.mu.Unlock()
+	if entryAfterCancel == nil || entryAfterCancel.State != taskapi.StateCancelled {
+		t.Fatalf("durable command after cancel = %#v, want cancelled terminal", entryAfterCancel)
+	}
+	close(commandSession.waitErrorRelease)
+
+	select {
+	case waited := <-waitDone:
+		if waited.err != nil {
+			t.Fatalf("Task wait error = %v, want canonical terminal to suppress stale wait error", waited.err)
+		}
+		if waited.snapshot.Running || waited.snapshot.State != taskapi.StateCancelled {
+			t.Fatalf("Task wait snapshot = %#v, want canonical cancelled terminal", waited.snapshot)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Task wait did not return the concurrently committed terminal state")
+	}
+
+	store.mu.Lock()
+	puts := store.puts
+	entry := taskapi.CloneEntry(store.entries[started.Ref.TaskID])
+	store.mu.Unlock()
+	if puts != putsAfterCancel || entry == nil || entry.Revision != entryAfterCancel.Revision {
+		t.Fatalf(
+			"durable command changed during wait: before puts %d entry %#v; after puts %d entry %#v",
+			putsAfterCancel, entryAfterCancel, puts, entry,
+		)
+	}
+}
+
+func TestCommandTaskWaitRemovesRehydratedDurableTerminalFromLiveRegistry(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	store := newSagaTaskStore()
+	runtime.tasks.store = store
+	running := false
+	commandSession := &yieldProbeSandboxSession{statusRunning: &running}
+	started, err := runtime.tasks.StartCommand(
+		context.Background(),
+		activeSession,
+		activeSession.SessionRef,
+		newCommandStartProbe(commandSession, nil),
+		taskapi.CommandStartRequest{
+			Command: "printf 'done'",
+			Workdir: activeSession.CWD,
+			Yield:   0,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.Running || started.State != taskapi.StateCompleted {
+		t.Fatalf("started command = %#v, want completed", started)
+	}
+	runtime.tasks.mu.RLock()
+	_, active := runtime.tasks.tasks[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	if active {
+		t.Fatalf("terminal command %q remained live after initial finalization", started.Ref.TaskID)
+	}
+
+	waited, err := runtime.tasks.Wait(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+		TaskID: started.Ref.TaskID, Yield: time.Second, Principal: session.ActorKindController,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waited.Running || waited.State != taskapi.StateCompleted {
+		t.Fatalf("Task wait snapshot = %#v, want completed durable command", waited)
+	}
+	runtime.tasks.mu.RLock()
+	_, active = runtime.tasks.tasks[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	if active {
+		t.Fatalf("Task wait retained rehydrated terminal command %q in live registry", started.Ref.TaskID)
 	}
 }
 

@@ -123,6 +123,9 @@ participants, or third-party children.
 Cancellation requested is distinct from proven terminal cancellation.
 Similarly, a completed Task control call is not evidence that its target
 completed, and a failed target is not evidence that the control call failed.
+`Task read` samples current state immediately. For a command target, `Task wait`
+waits for terminal state until its bounded observation window expires;
+intermediate command output is not a wait completion condition.
 Unknown side-effect outcomes remain explicit and must not be retried
 blindly. Task cancel ends the current child Turn but does not detach or retire
 the stable child identity. Its model-facing acknowledgement describes the
