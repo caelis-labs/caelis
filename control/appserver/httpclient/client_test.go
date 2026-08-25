@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -583,6 +584,52 @@ func TestReconnectReturnsTypedAtomicSubscription(t *testing.T) {
 	}
 	if err := result.Subscription.Err(); err != nil {
 		t.Fatalf("subscription error = %v", err)
+	}
+}
+
+func TestRemoteSubscriptionLastCursorLinearWithDelivery(t *testing.T) {
+	// Under concurrency, receiving an event must not observe a stale LastCursor.
+	for range 200 {
+		reader, writer := io.Pipe()
+		response := &http.Response{Body: reader}
+		scanner := bufio.NewScanner(reader)
+		scanner.Buffer(make([]byte, 64<<10), defaultRemoteMaxEvent)
+		subscription := newRemoteSubscription(response, scanner, 8, "cursor-client")
+
+		_, _ = io.WriteString(writer, "id: cursor-backfill\ndata: {\"kind\":\"notice\",\"cursor\":\"cursor-backfill\",\"session_id\":\"s1\",\"notice\":\"b\"}\n\n")
+		select {
+		case envelope := <-subscription.Backfill():
+			if envelope.Cursor != "cursor-backfill" {
+				t.Fatalf("backfill envelope = %#v", envelope)
+			}
+			if got := subscription.LastCursor(); got != "cursor-backfill" {
+				t.Fatalf("LastCursor() = %q immediately after backfill, want cursor-backfill", got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for backfill")
+		}
+
+		_, _ = io.WriteString(writer, "event: "+wirev1.BackfillDoneEventName+"\ndata: {}\n\n")
+		select {
+		case <-subscription.BackfillDone():
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for backfill marker")
+		}
+
+		_, _ = io.WriteString(writer, "id: cursor-live\ndata: {\"kind\":\"notice\",\"cursor\":\"cursor-live\",\"session_id\":\"s1\",\"notice\":\"l\"}\n\n")
+		select {
+		case envelope := <-subscription.Events():
+			if envelope.Cursor != "cursor-live" {
+				t.Fatalf("live envelope = %#v", envelope)
+			}
+			if got := subscription.LastCursor(); got != "cursor-live" {
+				t.Fatalf("LastCursor() = %q immediately after live receive, want cursor-live", got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for live event")
+		}
+		_ = writer.Close()
+		_ = subscription.Close()
 	}
 }
 

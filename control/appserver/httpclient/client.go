@@ -853,24 +853,36 @@ func (s *remoteSubscription) read() {
 			if backfillOpen {
 				target = s.backfill
 			}
-			select {
-			case target <- envelope:
-				s.mu.Lock()
-				s.last = envelope.Cursor
-				s.mu.Unlock()
-			default:
-				s.setError(&appserver.FeedGapError{
-					Cause:        appserver.ErrSlowConsumer,
-					RetryCursor:  s.LastCursor(),
-					Mode:         appserver.ResumeModeDurableFallback,
-					TransientGap: true,
-				})
+			if !s.publish(target, envelope) {
 				return
 			}
 		default:
 			s.setError(fmt.Errorf("control http client: unsupported reconnect SSE event %q", frame.event))
 			return
 		}
+	}
+}
+
+func (s *remoteSubscription) publish(target chan<- eventstream.Envelope, envelope eventstream.Envelope) bool {
+	// Hold the cursor lock across the non-blocking send so a receiver that sees
+	// the event cannot observe a stale LastCursor. Failed delivery does not
+	// advance last, so reconnect cannot skip an undelivered event.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case target <- envelope:
+		s.last = envelope.Cursor
+		return true
+	default:
+		if s.err == nil {
+			s.err = &appserver.FeedGapError{
+				Cause:        appserver.ErrSlowConsumer,
+				RetryCursor:  s.last,
+				Mode:         appserver.ResumeModeDurableFallback,
+				TransientGap: true,
+			}
+		}
+		return false
 	}
 }
 
