@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
 func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
@@ -85,6 +86,14 @@ func TestSubagentOverlayBindingPickerUsesModelFirstLabels(t *testing.T) {
 	longProfile.ID = "provider:terra"
 	longProfile.DisplayName = "openai-codex/gpt-5.6-terra"
 	longProfile.Backend.Provider.ModelConfigID = longProfile.DisplayName
+	longProfile.Effort.Choices = []modelprofile.EffortChoice{
+		{Canonical: "low", WireValue: "low"},
+		{Canonical: "medium", WireValue: "medium"},
+		{Canonical: "high", WireValue: "high"},
+		{Canonical: "xhigh", WireValue: "xhigh"},
+		{Canonical: "max", WireValue: "max"},
+		{Canonical: "ultra", WireValue: "ultra"},
+	}
 	model.subagentOverlay.status.Targets = append(model.subagentOverlay.status.Targets, longProfile)
 	selectSubagentTestRow(t, model, "handle:orbit")
 	_ = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
@@ -93,11 +102,21 @@ func TestSubagentOverlayBindingPickerUsesModelFirstLabels(t *testing.T) {
 		"openai-codex/gpt-5.6-sol",
 		"openai-codex/gpt-5.6-terra",
 		"Claude — Opus",
+		"[low | medium | high | xhigh | max | ultra]",
 		"[none]  · ACP",
 	} {
 		if !strings.Contains(frame, want) {
 			t.Fatalf("binding picker omitted %q\n%s", want, frame)
 		}
+	}
+	profileRows := 0
+	for _, row := range model.subagentOverlay.rows {
+		if row.binding.ProfileID != "" {
+			profileRows++
+		}
+	}
+	if profileRows != 3 {
+		t.Fatalf("binding picker profile rows = %d, want one row for each of 3 profiles", profileRows)
 	}
 	for _, unwanted := range []string{"provider:sol", "acp:claude:opus"} {
 		if strings.Contains(frame, unwanted) {
@@ -188,7 +207,8 @@ func TestSubagentOverlayKeyboardBindsAndCreatesRole(t *testing.T) {
 		t.Fatal("opening binding picker returned mutation command")
 	}
 	model.renderSubagentOverlay()
-	selectSubagentTestRow(t, model, "binding:provider:sol:high")
+	selectSubagentTestRow(t, model, "binding:provider:sol")
+	_ = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyRight))
 	cmd := model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
 	if cmd == nil {
 		t.Fatal("binding selection returned nil command")
@@ -200,7 +220,7 @@ func TestSubagentOverlayKeyboardBindsAndCreatesRole(t *testing.T) {
 	updated, _ := model.Update(msg)
 	model = updated.(*Model)
 	if service.bindRequest != (agentbinding.Binding{
-		Handle: agentbinding.HandleOrbit, ProfileID: "provider:sol", Effort: "high",
+		Handle: agentbinding.HandleOrbit, ProfileID: "provider:sol", Effort: "xhigh",
 	}) {
 		t.Fatalf("binding request = %#v", service.bindRequest)
 	}
@@ -215,7 +235,7 @@ func TestSubagentOverlayKeyboardBindsAndCreatesRole(t *testing.T) {
 	_ = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyDown))
 	_ = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
 	model.renderSubagentOverlay()
-	selectSubagentTestRow(t, model, "binding:acp:claude:opus:none")
+	selectSubagentTestRow(t, model, "binding:acp:claude:opus")
 	_ = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
 	model.renderSubagentOverlay()
 	bindingRow := model.subagentOverlay.rows[2]

@@ -44,16 +44,18 @@ const (
 )
 
 type subagentOverlayRow struct {
-	action  subagentOverlayAction
-	key     string
-	section string
-	label   string
-	detail  string
-	handle  agentbinding.Handle
-	binding agentbinding.Binding
-	reset   bool
-	enabled bool
-	custom  bool
+	action      subagentOverlayAction
+	key         string
+	section     string
+	label       string
+	detail      string
+	efforts     []string
+	effortIndex int
+	handle      agentbinding.Handle
+	binding     agentbinding.Binding
+	reset       bool
+	enabled     bool
+	custom      bool
 }
 
 type subagentOverlayGeometry struct {
@@ -83,8 +85,9 @@ type subagentOverlayState struct {
 	geometry   subagentOverlayGeometry
 	pressedKey string
 
-	bindingHandle agentbinding.Handle
-	creatingRole  bool
+	bindingHandle           agentbinding.Handle
+	selectedEffortByProfile map[string]string
+	creatingRole            bool
 
 	roleHandle      string
 	roleDescription string
@@ -304,7 +307,7 @@ func (m *Model) renderSubagentRow(row subagentOverlayRow, selected bool, width i
 	}
 	labelWidth := minInt(24, maxInt(14, width/3))
 	if m.subagentOverlay != nil && m.subagentOverlay.page == subagentPageBinding {
-		labelWidth = minInt(52, maxInt(24, width*3/5))
+		labelWidth = minInt(44, maxInt(24, width*2/5))
 	}
 	labelWidth = minInt(labelWidth, maxInt(1, width-displayColumns(marker)-3))
 	label := truncateTailDisplay(row.label, labelWidth)
@@ -312,10 +315,18 @@ func (m *Model) renderSubagentRow(row subagentOverlayRow, selected bool, width i
 	detail := truncateTailDisplay(row.detail, detailWidth)
 	labelSegment := marker + padRightDisplay(label, labelWidth) + "  "
 	detailSegment := padRightDisplay(detail, detailWidth)
+	styledEffortDetail := false
+	if len(row.efforts) > 0 && displayColumns(row.detail) <= detailWidth {
+		detailSegment = m.renderSubagentEffortDetail(row, selected, detailWidth)
+		styledEffortDetail = true
+	}
 	switch {
 	case selected && row.enabled:
 		selection := m.theme.SelectionStyle()
-		return selection.Bold(true).Render(labelSegment) + selection.Render(detailSegment)
+		if !styledEffortDetail {
+			detailSegment = selection.Render(detailSegment)
+		}
+		return selection.Bold(true).Render(labelSegment) + detailSegment
 	case selected:
 		return m.theme.MutedTextStyle().Render(labelSegment + detailSegment)
 	case !row.enabled:
@@ -334,7 +345,42 @@ func (m *Model) renderSubagentRow(row subagentOverlayRow, selected bool, width i
 		subagentActionCommitSet:
 		labelStyle = labelStyle.Bold(true)
 	}
-	return labelStyle.Render(labelSegment) + m.theme.HelpHintTextStyle().Render(detailSegment)
+	if !styledEffortDetail {
+		detailSegment = m.theme.HelpHintTextStyle().Render(detailSegment)
+	}
+	return labelStyle.Render(labelSegment) + detailSegment
+}
+
+func (m *Model) renderSubagentEffortDetail(row subagentOverlayRow, selected bool, width int) string {
+	baseStyle := m.theme.HelpHintTextStyle()
+	activeStyle := m.theme.TextStyle().Bold(true).Underline(true)
+	if selected {
+		baseStyle = m.theme.SelectionStyle()
+		activeStyle = baseStyle.Bold(true).Underline(true)
+	}
+	choices := "[" + strings.Join(row.efforts, " | ") + "]"
+	var detail strings.Builder
+	detail.WriteString(baseStyle.Render("["))
+	for index, effort := range row.efforts {
+		if index > 0 {
+			detail.WriteString(baseStyle.Render(" | "))
+		}
+		style := baseStyle
+		if index == row.effortIndex {
+			style = activeStyle
+		}
+		detail.WriteString(style.Render(effort))
+	}
+	detail.WriteString(baseStyle.Render("]"))
+	plainWidth := displayColumns(choices)
+	if suffix := strings.TrimPrefix(row.detail, choices); suffix != "" {
+		detail.WriteString(baseStyle.Render(suffix))
+		plainWidth += displayColumns(suffix)
+	}
+	if padding := width - plainWidth; padding > 0 {
+		detail.WriteString(baseStyle.Render(strings.Repeat(" ", padding)))
+	}
+	return detail.String()
 }
 
 func (m *Model) subagentRows() []subagentOverlayRow {
@@ -426,31 +472,81 @@ func (m *Model) subagentBindingRows() []subagentOverlayRow {
 		if !agentbinding.SupportsProfile(handle, profile) {
 			continue
 		}
-		for _, choice := range profile.Effort.Choices {
-			effort := strings.TrimSpace(choice.Canonical)
-			if effort == "" {
-				continue
-			}
-			binding := agentbinding.Binding{Handle: handle, ProfileID: profile.ID, Effort: effort}
-			section := ""
-			if len(rows) == 0 {
-				section = "Choose binding"
-			}
-			rows = append(rows, subagentOverlayRow{
-				action:  subagentActionOpenBinding,
-				key:     "binding:" + profile.ID + ":" + effort,
-				section: section,
-				label:   subagentProfileDisplayName(profile),
-				detail: subagentTargetDetail(
-					profile,
-					effort,
-					nameCounts[subagentProfileNameKey(profile)] > 1,
-				),
-				handle: handle, binding: binding, enabled: true,
-			})
+		efforts := subagentProfileEfforts(profile)
+		if len(efforts) == 0 {
+			continue
 		}
+		effort := state.subagentBindingEffort(profile, efforts)
+		effortIndex := indexOfString(efforts, effort)
+		binding := agentbinding.Binding{Handle: handle, ProfileID: profile.ID, Effort: effort}
+		section := ""
+		if len(rows) == 0 {
+			section = "Choose binding"
+		}
+		rows = append(rows, subagentOverlayRow{
+			action:  subagentActionOpenBinding,
+			key:     "binding:" + profile.ID,
+			section: section,
+			label:   subagentProfileDisplayName(profile),
+			detail: subagentTargetDetail(
+				profile,
+				efforts,
+				nameCounts[subagentProfileNameKey(profile)] > 1,
+			),
+			efforts: efforts, effortIndex: effortIndex,
+			handle: handle, binding: binding, enabled: true,
+		})
 	}
 	return rows
+}
+
+func subagentProfileEfforts(profile modelprofile.ModelProfile) []string {
+	efforts := make([]string, 0, len(profile.Effort.Choices))
+	for _, choice := range profile.Effort.Choices {
+		if effort := strings.TrimSpace(choice.Canonical); effort != "" {
+			efforts = append(efforts, effort)
+		}
+	}
+	return efforts
+}
+
+func (s *subagentOverlayState) subagentBindingEffort(profile modelprofile.ModelProfile, efforts []string) string {
+	if s.selectedEffortByProfile == nil {
+		s.selectedEffortByProfile = make(map[string]string)
+	}
+	profileID := modelprofile.NormalizeID(profile.ID)
+	if effort := strings.TrimSpace(s.selectedEffortByProfile[profileID]); indexOfString(efforts, effort) >= 0 {
+		return effort
+	}
+	seed := agentbinding.Binding{}
+	if s.creatingRole {
+		seed = s.roleBinding
+	} else {
+		for _, item := range s.status.Handles {
+			if item.Definition.Handle == s.bindingHandle || item.Binding.Handle == s.bindingHandle {
+				seed = item.Binding
+				break
+			}
+		}
+	}
+	effort := strings.TrimSpace(profile.Effort.DefaultEffort)
+	if modelprofile.NormalizeID(seed.ProfileID) == profileID && indexOfString(efforts, strings.TrimSpace(seed.Effort)) >= 0 {
+		effort = strings.TrimSpace(seed.Effort)
+	}
+	if indexOfString(efforts, effort) < 0 {
+		effort = efforts[0]
+	}
+	s.selectedEffortByProfile[profileID] = effort
+	return effort
+}
+
+func indexOfString(values []string, target string) int {
+	for index, value := range values {
+		if value == target {
+			return index
+		}
+	}
+	return -1
 }
 
 func (m *Model) subagentSetRows() []subagentOverlayRow {
@@ -537,8 +633,8 @@ func subagentProfileNameCounts(
 	return counts
 }
 
-func subagentTargetDetail(profile modelprofile.ModelProfile, effort string, duplicateName bool) string {
-	detail := "[" + effort + "]"
+func subagentTargetDetail(profile modelprofile.ModelProfile, efforts []string, duplicateName bool) string {
+	detail := "[" + strings.Join(efforts, " | ") + "]"
 	switch profile.Kind() {
 	case modelprofile.BackendACP:
 		detail += "  · ACP"
@@ -597,6 +693,8 @@ func (m *Model) subagentFooter() string {
 		return "↑/↓ or Tab fields · type name · Enter save · Esc back"
 	case subagentPageSets:
 		return "↑/↓/j/k navigate · Enter apply · s save · d delete · Esc back"
+	case subagentPageBinding:
+		return "↑/↓/j/k model · ←/→/h/l effort · Enter choose · Esc back"
 	default:
 		return "↑/↓/j/k navigate · Enter choose · Esc back"
 	}

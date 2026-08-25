@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
 func (m *Model) handleSubagentOverlayKey(msg tea.KeyMsg) tea.Cmd {
@@ -21,6 +22,12 @@ func (m *Model) handleSubagentOverlayKey(msg tea.KeyMsg) tea.Cmd {
 	switch keyEvent.Code {
 	case tea.KeyEscape:
 		m.backSubagentOverlay()
+		return nil
+	case tea.KeyLeft:
+		m.moveSubagentEffort(-1)
+		return nil
+	case tea.KeyRight:
+		m.moveSubagentEffort(1)
 		return nil
 	case tea.KeyTab:
 		m.moveSubagentSelection(1)
@@ -52,6 +59,10 @@ func (m *Model) handleSubagentOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		m.moveSubagentSelection(1)
 	case "k":
 		m.moveSubagentSelection(-1)
+	case "h":
+		m.moveSubagentEffort(-1)
+	case "l":
+		m.moveSubagentEffort(1)
 	case "p":
 		if state.page == subagentPageMain {
 			m.openSubagentPage(subagentPageSets, 0)
@@ -169,6 +180,27 @@ func (m *Model) moveSubagentSelection(delta int) {
 	state.pressedKey = ""
 }
 
+func (m *Model) moveSubagentEffort(delta int) {
+	state := m.subagentOverlay
+	if state == nil || state.page != subagentPageBinding || delta == 0 || len(state.rows) == 0 {
+		return
+	}
+	row := m.currentSubagentRow()
+	if len(row.efforts) < 2 || row.binding.ProfileID == "" {
+		return
+	}
+	index := (row.effortIndex + delta + len(row.efforts)) % len(row.efforts)
+	effort := row.efforts[index]
+	profileID := modelprofile.NormalizeID(row.binding.ProfileID)
+	if state.selectedEffortByProfile == nil {
+		state.selectedEffortByProfile = make(map[string]string)
+	}
+	state.selectedEffortByProfile[profileID] = effort
+	state.rows[state.index].effortIndex = index
+	state.rows[state.index].binding.Effort = effort
+	state.pressedKey = ""
+}
+
 func (m *Model) openSubagentPage(page subagentOverlayPage, index int) {
 	if m.subagentOverlay == nil {
 		return
@@ -213,6 +245,7 @@ func (m *Model) activateSubagentRow(row subagentOverlayRow) tea.Cmd {
 		}
 		state.bindingHandle = row.handle
 		state.creatingRole = false
+		state.selectedEffortByProfile = nil
 		m.openSubagentPage(subagentPageBinding, 0)
 	case subagentActionNewRole:
 		m.openNewSubagentRole()
@@ -227,6 +260,7 @@ func (m *Model) activateSubagentRow(row subagentOverlayRow) tea.Cmd {
 		handle := agentbinding.NormalizeHandle(agentbinding.Handle(state.roleHandle))
 		state.bindingHandle = handle
 		state.creatingRole = true
+		state.selectedEffortByProfile = nil
 		m.openSubagentPage(subagentPageBinding, 0)
 	case subagentActionCreateRole:
 		return m.createSubagentRole()
