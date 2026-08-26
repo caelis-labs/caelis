@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
@@ -130,6 +131,39 @@ func TestExplorationSummaryStylesViewAsToolAction(t *testing.T) {
 	actionText := ansiTextForForeground(t, viewRow.Styled, model.theme.ToolActionStyle(tuikit.ToolActionNeutral).GetForeground())
 	if actionText != "View" {
 		t.Fatalf("tool action foreground covers %q, want View only\nstyled=%q", actionText, viewRow.Styled)
+	}
+}
+
+func TestExplorationSummaryStylesNormalizedListLikeStandaloneToolHeader(t *testing.T) {
+	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	ctx := BlockRenderContext{Width: 80, TermWidth: 80, Theme: model.theme}
+	block := NewMainACPTurnBlock("turn-list")
+	block.UpdateToolWithMeta("list-1", "", "docs", "", true, false, ToolUpdateMeta{
+		ToolKind: schema.ToolKindOther, ToolTitle: "List `docs`", ExplorationVerb: "List",
+	})
+	block.UpdateToolWithMeta("read-1", "", "go.mod", "", true, false, ToolUpdateMeta{ToolKind: schema.ToolKindRead})
+	block.Status = schema.ToolStatusCompleted
+
+	var listRow RenderedRow
+	for _, row := range block.Render(ctx) {
+		if strings.Contains(row.Plain, "List docs") {
+			listRow = row
+			break
+		}
+	}
+	if listRow.Plain == "" {
+		t.Fatal("Explored summary omitted normalized List row")
+	}
+	if got := strings.TrimRight(ansi.Strip(listRow.Styled), " "); got != listRow.Plain {
+		t.Fatalf("styled strips to %q, want %q", got, listRow.Plain)
+	}
+	actionText := ansiTextForForeground(t, listRow.Styled, model.theme.ToolActionStyle(tuikit.ToolActionNeutral).GetForeground())
+	if actionText != "List" {
+		t.Fatalf("tool action foreground covers %q, want List only\nstyled=%q", actionText, listRow.Styled)
+	}
+	argsText := normalizeInlineStyleText(ansiTextForForeground(t, listRow.Styled, model.theme.ToolArgsStyle().GetForeground()))
+	if !strings.Contains(argsText, "docs") || strings.Contains(argsText, "List") {
+		t.Fatalf("tool args foreground covers %q, want docs without List\nstyled=%q", argsText, listRow.Styled)
 	}
 }
 

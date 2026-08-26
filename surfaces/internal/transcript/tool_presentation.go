@@ -52,7 +52,7 @@ func resolveToolPresentation(name string, kind string, title string, exploration
 		resolved.DisplayName = resolved.Name
 		return resolved
 	}
-	if resolved.Kind == "other" && resolved.Title != "" {
+	if resolved.Kind == "other" && resolved.Title != "" && resolved.ExplorationVerb == "" {
 		resolved.DisplayName = resolved.Title
 		resolved.TitleAsLabel = true
 		return resolved
@@ -78,17 +78,25 @@ func ToolIsExploration(name string, kind string) bool {
 }
 
 // ToolIsExplorationWithHint reports compact exploration membership after a
-// normalized display hint has refined a compatible standard ACP read category.
+// normalized display hint has refined a compatible standard ACP read or generic
+// other category. The original kind remains available on ToolPresentation.
 func ToolIsExplorationWithHint(name string, kind string, explorationVerb string) bool {
 	return ResolveToolPresentationWithHint(name, kind, "", explorationVerb).ExplorationVerb != ""
 }
 
 func compatibleExplorationVerb(name string, kind string, standardVerb string, hint string) string {
-	if strings.TrimSpace(name) == "" &&
-		strings.EqualFold(strings.TrimSpace(hint), "List") &&
-		strings.EqualFold(strings.TrimSpace(kind), "read") &&
-		standardVerb == "Read" {
-		return "List"
+	if strings.TrimSpace(name) != "" || !strings.EqualFold(strings.TrimSpace(hint), "List") {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "read":
+		if standardVerb == "Read" {
+			return "List"
+		}
+	case "other":
+		if standardVerb == "" {
+			return "List"
+		}
 	}
 	return ""
 }

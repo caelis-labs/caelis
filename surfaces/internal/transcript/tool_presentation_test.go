@@ -34,7 +34,7 @@ func TestResolveToolPresentationKeepsExactNameSeparateFromStandardFields(t *test
 	}
 }
 
-func TestResolveToolPresentationWithHintOnlyRefinesStandardRead(t *testing.T) {
+func TestResolveToolPresentationWithHintRefinesReadAndGenericOtherOnly(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -43,9 +43,10 @@ func TestResolveToolPresentationWithHintOnlyRefinesStandardRead(t *testing.T) {
 		kind            string
 		hint            string
 		wantExploration string
+		wantTitleLabel  bool
 	}{
 		{name: "normalized provider list", kind: "read", hint: "List", wantExploration: "List"},
-		{name: "hint cannot classify other", kind: "other", hint: "List"},
+		{name: "normalized provider list refines generic other", kind: "other", hint: "List", wantExploration: "List"},
 		{name: "hint cannot classify execute", kind: "execute", hint: "List"},
 		{name: "hint cannot override exact glob", exactName: "Glob", kind: "read", hint: "List", wantExploration: "Glob"},
 		{name: "hint cannot override exact read", exactName: "Read", kind: "read", hint: "List", wantExploration: "Read"},
@@ -54,9 +55,9 @@ func TestResolveToolPresentationWithHintOnlyRefinesStandardRead(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			presentation := ResolveToolPresentationWithHint(tt.exactName, tt.kind, "", tt.hint)
-			if presentation.ExplorationVerb != tt.wantExploration {
-				t.Fatalf("ResolveToolPresentationWithHint() = %#v, want exploration %q", presentation, tt.wantExploration)
+			presentation := ResolveToolPresentationWithHint(tt.exactName, tt.kind, "List `docs`", tt.hint)
+			if presentation.ExplorationVerb != tt.wantExploration || presentation.TitleAsLabel != tt.wantTitleLabel {
+				t.Fatalf("ResolveToolPresentationWithHint() = %#v, want exploration %q titleLabel=%v", presentation, tt.wantExploration, tt.wantTitleLabel)
 			}
 		})
 	}

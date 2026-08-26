@@ -110,7 +110,7 @@ func TestNormalizeInboundUpdateRestoresGrokStandardKindWithoutForgingToolIdentit
 	}
 }
 
-func TestNormalizeInboundUpdateGrokListCompatibilityDefersToSpecificStandardKinds(t *testing.T) {
+func TestNormalizeInboundUpdateGrokListCompatibilityRefinesGenericOtherWithoutOverridingSpecificKinds(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -121,7 +121,7 @@ func TestNormalizeInboundUpdateGrokListCompatibilityDefersToSpecificStandardKind
 		wantVerb string
 	}{
 		{name: "missing standard kind", meta: grokListMeta(true), wantKind: schema.ToolKindRead, wantVerb: "List"},
-		{name: "explicit generic standard kind wins", kind: schema.ToolKindOther, meta: grokListMeta(true), wantKind: schema.ToolKindOther},
+		{name: "generic other keeps wire category and refines display", kind: schema.ToolKindOther, meta: grokListMeta(true), wantKind: schema.ToolKindOther, wantVerb: "List"},
 		{name: "standard read keeps category and refines verb", kind: schema.ToolKindRead, meta: grokListMeta(true), wantKind: schema.ToolKindRead, wantVerb: "List"},
 		{name: "standard search wins", kind: schema.ToolKindSearch, meta: grokListMeta(true), wantKind: schema.ToolKindSearch},
 		{name: "standard edit wins", kind: schema.ToolKindEdit, meta: grokListMeta(true), wantKind: schema.ToolKindEdit},
@@ -195,6 +195,31 @@ func TestNormalizeInboundUpdateGrokListIsIdempotentForExplicitUpdateKind(t *test
 	}
 	if !reflect.DeepEqual(second.RawInput, input) || !reflect.DeepEqual(second.Meta[xAIToolMetaKey], meta[xAIToolMetaKey]) {
 		t.Fatalf("second normalization changed provider evidence: %#v", second)
+	}
+}
+
+func TestNormalizeInboundUpdateGrokListIsIdempotentForExplicitOtherUpdate(t *testing.T) {
+	t.Parallel()
+
+	kind := schema.ToolKindOther
+	update := ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo,
+		ToolCallID:    "list-other-1",
+		Kind:          &kind,
+		RawInput:      map[string]any{"variant": "ListDir", "target_directory": "docs"},
+		Meta:          grokListMeta(true),
+	}
+
+	first := NormalizeInboundUpdate(update).(ToolCallUpdate)
+	second := NormalizeInboundUpdate(first).(ToolCallUpdate)
+	if first.Kind == nil || *first.Kind != schema.ToolKindOther || second.Kind == nil || *second.Kind != schema.ToolKindOther {
+		t.Fatalf("normalized kinds = %v then %v, want explicit other preserved", first.Kind, second.Kind)
+	}
+	if explorationVerb(first.Meta) != "List" || explorationVerb(second.Meta) != "List" {
+		t.Fatalf("normalized verbs = %q then %q, want List", explorationVerb(first.Meta), explorationVerb(second.Meta))
+	}
+	if !reflect.DeepEqual(second.Meta[xAIToolMetaKey], update.Meta[xAIToolMetaKey]) {
+		t.Fatalf("second normalization changed provider evidence: %#v", second.Meta[xAIToolMetaKey])
 	}
 }
 

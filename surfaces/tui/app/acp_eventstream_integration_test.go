@@ -1026,6 +1026,87 @@ func TestNormalizedGrokListJoinsExploredWithoutExactToolName(t *testing.T) {
 	}
 }
 
+func TestNormalizedGrokLiveOtherMatchesLoadedListPresentation(t *testing.T) {
+	t.Parallel()
+
+	listMeta := func() map[string]any {
+		return map[string]any{"x.ai/tool": map[string]any{
+			"version": 1, "name": "list_dir", "kind": "list",
+			"namespace": "grok_build", "label": "List Files", "read_only": true,
+		}}
+	}
+	applyNormalized := func(t *testing.T, model *Model, update acpclient.Update) *Model {
+		t.Helper()
+		inbound := acpclient.NormalizeInboundUpdate(update)
+		normalized, ok := inbound.(schema.Update)
+		if !ok {
+			t.Fatalf("normalized update type = %T, want schema.Update", inbound)
+		}
+		return applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+			Update: normalized,
+		})
+	}
+
+	live := NewModel(Config{NoColor: true, NoAnimation: true})
+	live = applyNormalized(t, live, schema.ToolCall{
+		SessionUpdate: schema.UpdateToolCall, ToolCallID: "list-1", Title: "list_dir",
+		Status: schema.ToolStatusInProgress, RawInput: map[string]any{"target_directory": "docs"}, Meta: listMeta(),
+	})
+	other := schema.ToolKindOther
+	live = applyNormalized(t, live, schema.ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "list-1", Kind: &other,
+		Title: stringPtr("List `docs`"), RawInput: map[string]any{"variant": "ListDir", "target_directory": "docs"}, Meta: listMeta(),
+	})
+	live = applyNormalized(t, live, schema.ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "list-1", Status: stringPtr(schema.ToolStatusCompleted),
+	})
+
+	loaded := NewModel(Config{NoColor: true, NoAnimation: true})
+	loaded = applyNormalized(t, loaded, schema.ToolCall{
+		SessionUpdate: schema.UpdateToolCall, ToolCallID: "list-1", Title: "List `docs`",
+		Status: schema.ToolStatusCompleted, RawInput: map[string]any{"variant": "ListDir", "target_directory": "docs"}, Meta: listMeta(),
+	})
+
+	settle := func(t *testing.T, model *Model) (SubagentEvent, string) {
+		t.Helper()
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+			Update: schema.ToolCall{
+				SessionUpdate: schema.UpdateToolCall, ToolCallID: "read-1", Title: "Read `go.mod`",
+				Kind: schema.ToolKindRead, Status: schema.ToolStatusCompleted,
+				RawInput: map[string]any{"target_file": "go.mod"},
+			},
+		})
+		block := requireMainACPTurnBlockForTest(t, model)
+		if len(block.Events) != 2 {
+			t.Fatalf("tool events = %#v, want List and Read", block.Events)
+		}
+		list := block.Events[0]
+		block.Status = schema.ToolStatusCompleted
+		model.markViewportBlockDirty(block.BlockID())
+		model.syncViewportContent()
+		return list, strings.Join(model.viewportPlainLines, "\n")
+	}
+
+	liveList, livePlain := settle(t, live)
+	loadedList, loadedPlain := settle(t, loaded)
+	if liveList.ToolKind != schema.ToolKindOther || loadedList.ToolKind != schema.ToolKindRead {
+		t.Fatalf("wire kinds = live %q, load %q; want other preserved live and compatibility read on load", liveList.ToolKind, loadedList.ToolKind)
+	}
+	for profile, event := range map[string]SubagentEvent{"live": liveList, "load": loadedList} {
+		if event.Name != "" || event.ExplorationVerb != "List" || event.Args != "docs" || !event.Done {
+			t.Fatalf("%s normalized List event = %#v", profile, event)
+		}
+	}
+	if livePlain != loadedPlain {
+		t.Fatalf("live and loaded List presentation diverged\nlive:\n%s\nloaded:\n%s", livePlain, loadedPlain)
+	}
+	if countExactTrimmedLine(livePlain, "• Explored") != 1 || !strings.Contains(livePlain, "List docs") || strings.Contains(livePlain, "`docs`") {
+		t.Fatalf("normalized live/load List did not share compact exploration:\n%s", livePlain)
+	}
+}
+
 func TestAnonymousProviderTitleRemainsAnAtomicLifecycleLabel(t *testing.T) {
 	t.Parallel()
 

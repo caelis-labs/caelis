@@ -634,7 +634,7 @@ func renderExplorationToolRowWithMode(blockID string, ev SubagentEvent, width in
 	styled := ctx.Theme.TranscriptMetaStyle().Render(prefix) +
 		toolActionStyle(ctx, verb).Render(verb)
 	if detail != "" {
-		styled += " " + styleExplorationDetail(detail, ctx)
+		styled += " " + styleExplorationDetail(detail, verb, ctx)
 	}
 	return StyledPlainClickableRow(blockID, plain, styled, token)
 }
@@ -914,22 +914,26 @@ func styleExplorationSummaryRow(row string, ctx BlockRenderContext) string {
 	verb, detail, _ := strings.Cut(strings.TrimSpace(content), " ")
 	styled := ctx.Theme.TranscriptMetaStyle().Render(plainPrefix)
 	if verb != "" && !isExplorationSummaryVerb(verb) {
-		return styled + styleExplorationDetail(content, ctx)
+		return styled + styleExplorationDetail(content, "", ctx)
 	}
 	if verb != "" {
 		styled += toolActionStyle(ctx, verb).Render(verb)
 	}
 	if detail != "" {
-		styled += " " + styleExplorationDetail(detail, ctx)
+		styled += " " + styleExplorationDetail(detail, verb, ctx)
 	}
 	return styled
 }
 
-func styleExplorationDetail(detail string, ctx BlockRenderContext) string {
+func styleExplorationDetail(detail string, verb string, ctx BlockRenderContext) string {
+	baseStyle := ctx.Theme.SecondaryTextStyle()
+	if strings.EqualFold(strings.TrimSpace(verb), "List") {
+		baseStyle = ctx.Theme.ToolArgsStyle()
+	}
 	failIdx := nextExplorationFailedWordIndex(detail)
 	numIdx, _ := nextToolDetailNumberIndex(detail)
 	if failIdx < 0 && numIdx < 0 {
-		return ctx.Theme.SecondaryTextStyle().Render(detail)
+		return baseStyle.Render(detail)
 	}
 	var styled strings.Builder
 	remaining := detail
@@ -937,7 +941,7 @@ func styleExplorationDetail(detail string, ctx BlockRenderContext) string {
 		nextFailIdx := nextExplorationFailedWordIndex(remaining)
 		nextNumIdx, nextNumLen := nextToolDetailNumberIndex(remaining)
 		if nextFailIdx < 0 && nextNumIdx < 0 {
-			styled.WriteString(ctx.Theme.SecondaryTextStyle().Render(remaining))
+			styled.WriteString(baseStyle.Render(remaining))
 			break
 		}
 		idx := nextFailIdx
@@ -949,7 +953,7 @@ func styleExplorationDetail(detail string, ctx BlockRenderContext) string {
 			tokenStyle = toolDetailNumberStyle(ctx)
 		}
 		if idx > 0 {
-			styled.WriteString(ctx.Theme.SecondaryTextStyle().Render(remaining[:idx]))
+			styled.WriteString(baseStyle.Render(remaining[:idx]))
 		}
 		styled.WriteString(tokenStyle.Render(remaining[idx : idx+tokenLen]))
 		remaining = remaining[idx+tokenLen:]
@@ -996,7 +1000,7 @@ func isASCIIAlphaNum(ch byte) bool {
 
 func isExplorationSummaryVerb(verb string) bool {
 	switch strings.ToLower(strings.TrimSpace(verb)) {
-	case "read", "view", "glob", "search", "fetch", "skill":
+	case "read", "view", "glob", "search", "fetch", "skill", "list":
 		return true
 	default:
 		return false

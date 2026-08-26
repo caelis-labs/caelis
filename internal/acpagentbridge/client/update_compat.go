@@ -57,7 +57,7 @@ func normalizeInboundToolDisplay(meta map[string]any, standardKind string) (map[
 	switch strings.ToLower(strings.TrimSpace(standardKind)) {
 	case "":
 		standardKind = schema.ToolKindRead
-	case schema.ToolKindRead:
+	case schema.ToolKindRead, schema.ToolKindOther:
 	default:
 		return meta, standardKind
 	}
