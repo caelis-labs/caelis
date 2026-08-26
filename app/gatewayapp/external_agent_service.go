@@ -86,10 +86,10 @@ func (s *controlCommandBackend) disconnectACPAtRevision(ctx context.Context, age
 		if profile.Kind() != modelprofile.BackendACP || profile.Backend.ACP.AgentID != result.Agent.ID {
 			continue
 		}
-		doc.AgentBindings, err = agentbinding.PrepareProfileRemoval(doc.AgentBindings, profile.ID)
-		if err != nil {
-			return mutation, controlagents.DisconnectResult{}, err
-		}
+		// Disconnect confirmation authorizes removal of the complete external
+		// Agent dependency chain, including system-Agent bindings. Ordinary model
+		// deletion keeps the stricter explicit rebind/reset protection.
+		doc.AgentBindings, _ = agentbinding.RemoveProfileBindings(doc.AgentBindings, profile.ID)
 		doc.ModelProfiles = modelprofile.Remove(doc.ModelProfiles, profile.ID)
 	}
 	doc.ExternalAgents = next

@@ -21,7 +21,7 @@ import (
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
-func TestDisconnectACPRemovesSiblingProfilesAndRetainsInstallation(t *testing.T) {
+func TestDisconnectACPRemovesSiblingProfilesAndAllBindingsWhileRetainingInstallation(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	installed := writeExternalAgentExecutable(t, t.TempDir(), "shared-acp")
 	connection := controlagents.Connection{
@@ -35,6 +35,7 @@ func TestDisconnectACPRemovesSiblingProfilesAndRetainsInstallation(t *testing.T)
 	doc.AgentBindings = agentbinding.Configuration{Bindings: []agentbinding.Binding{
 		{Handle: agentbinding.HandleBreeze, ProfileID: "acp:shared:opus", Effort: "none"},
 		{Handle: agentbinding.HandleOrbit, ProfileID: "acp:shared:sonnet", Effort: "none"},
+		{Handle: agentbinding.HandleReviewer, ProfileID: "acp:shared:opus", Effort: "none"},
 	}}
 	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatal(err)

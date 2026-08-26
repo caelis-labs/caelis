@@ -168,10 +168,13 @@ Spawn workspace and Task-stream contract.
 ## Disconnect Safety
 
 Disconnect is a Host-scoped AppServer command with an idempotency key and an
-expected Host configuration revision. It removes the external Agent, its ACP
-profiles, and eligible bindings in one configuration compare-and-save. A
-committed configuration write is never undone with an unconditional rollback;
-later assembly refresh failures are reported as committed warnings.
+expected Host configuration revision. Its explicit confirmation authorizes
+removal of the external Agent, its ACP profiles, and every binding to those
+profiles, including a system-Agent binding, in one configuration
+compare-and-save. This lifecycle cleanup is intentionally stronger than ordinary
+model deletion, which still requires a system Agent to be rebound or reset
+first. A committed configuration write is never undone with an unconditional
+rollback; later assembly refresh failures are reported as committed warnings.
 
 Disconnect changes the Host configuration available to future Session Runtime
 activations. It does not scan durable Sessions, rewrite their controller or
