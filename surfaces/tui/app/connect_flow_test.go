@@ -1700,12 +1700,43 @@ func runConnectTestCmd(m *Model, cmd tea.Cmd) {
 	}
 }
 
+func taskResultMessageForTest(msg tea.Msg, m *Model) (TaskResultMsg, bool) {
+	if result, ok := msg.(TaskResultMsg); ok {
+		return result, true
+	}
+	switch msg.(type) {
+	case submissionDispatchMsg:
+		_, nextCmd := m.Update(msg)
+		if nextCmd == nil {
+			return TaskResultMsg{}, false
+		}
+		return taskResultMessageForTest(nextCmd(), m)
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, cmd := range batch {
+			if cmd == nil {
+				continue
+			}
+			if result, ok := taskResultMessageForTest(cmd(), m); ok {
+				return result, true
+			}
+		}
+	}
+	return TaskResultMsg{}, false
+}
+
 func findAndRunTaskResult(msg tea.Msg, m *Model) bool {
 	if _, ok := msg.(TaskResultMsg); ok {
 		m.Update(msg)
 		return true
 	}
 	switch msg.(type) {
+	case submissionDispatchMsg:
+		_, nextCmd := m.Update(msg)
+		if nextCmd == nil {
+			return false
+		}
+		return findAndRunTaskResult(nextCmd(), m)
 	case slashArgLoadResultMsg, slashArgCompletionResultMsg:
 		_, nextCmd := m.Update(msg)
 		runConnectTestCmd(m, nextCmd)

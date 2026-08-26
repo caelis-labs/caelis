@@ -405,6 +405,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clipboardCopyResultMsg:
 		return m, m.handleClipboardCopyResult(typed)
 
+	case submissionDispatchMsg:
+		return m.handleSubmissionDispatch(typed)
+
 	case ctrlCExpireMsg:
 		if m.ctrlCArmSeq == typed.seq && m.lastCtrlCAt.Equal(typed.armedAt) {
 			m.ctrlCArmed = false

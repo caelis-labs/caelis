@@ -104,7 +104,7 @@ func TestCollapsedPasteSubmitsExpandedTextToTranscript(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected execute command")
 	}
-	runTeaCmds(t, cmd)
+	runTeaCmds(t, m, cmd)
 
 	last := fmt.Sprintf("submit-line-%02d", pasteCollapseMinLines-1)
 	if !strings.Contains(got.Text, "submit-line-00") || !strings.Contains(got.Text, last) {
@@ -281,18 +281,18 @@ func TestLongSingleLinePasteCollapsesByRuneBudget(t *testing.T) {
 	assertComposerRenderContains(t, m, "[Pasted: 1 line]")
 }
 
-func runTeaCmds(t *testing.T, cmd tea.Cmd) {
+func runTeaCmds(t *testing.T, model *Model, cmd tea.Cmd) {
 	t.Helper()
 	if cmd == nil {
 		return
 	}
 	msg := cmd()
-	switch typed := msg.(type) {
-	case tea.BatchMsg:
-		for _, child := range typed {
-			runTeaCmds(t, child)
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, child := range batch {
+			runTeaCmds(t, model, child)
 		}
-	default:
-		_ = typed
+		return
 	}
+	_, nextCmd := model.Update(msg)
+	runTeaCmds(t, model, nextCmd)
 }

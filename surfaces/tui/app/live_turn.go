@@ -22,10 +22,15 @@ func (m *Model) beginLiveTurn(mode SubmissionMode, divider bool, startedAt time.
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
+	m.nextLiveTurnGeneration++
+	if m.nextLiveTurnGeneration == 0 {
+		m.nextLiveTurnGeneration++
+	}
 	m.liveTurn.Active = true
 	m.liveTurn.Mode = mode
 	m.liveTurn.Divider = divider
 	m.liveTurn.StartedAt = startedAt
+	m.liveTurn.generation = m.nextLiveTurnGeneration
 	m.liveTurn.LastDuration = 0
 	m.liveTurn.HasLastDuration = false
 	m.compactNoticePair = compactNoticePairState{}

@@ -8,6 +8,7 @@ type pendingPromptState uint8
 
 const (
 	pendingPromptQueued pendingPromptState = iota
+	pendingPromptDispatchScheduled
 	pendingPromptDispatched
 	pendingPromptAwaitingActiveDisplay
 	pendingPromptRendered
@@ -29,8 +30,6 @@ type pendingPromptEnqueueOptions struct {
 	displayLine    string
 	attachments    []Attachment
 	deferUntilIdle bool
-	deferDisplay   bool
-	submissionMode SubmissionMode
 }
 
 func (q *pendingPromptQueue) enqueue(opts pendingPromptEnqueueOptions) {
@@ -39,10 +38,7 @@ func (q *pendingPromptQueue) enqueue(opts pendingPromptEnqueueOptions) {
 	}
 	state := pendingPromptQueued
 	if !opts.deferUntilIdle {
-		state = pendingPromptDispatched
-		if !opts.deferDisplay && opts.submissionMode == SubmissionModeActiveTurn {
-			state = pendingPromptAwaitingActiveDisplay
-		}
+		state = pendingPromptDispatchScheduled
 	}
 	*q = append(*q, pendingPrompt{
 		localID:     opts.localID,
@@ -71,6 +67,9 @@ func (q *pendingPromptQueue) removeMatching(texts ...string) (pendingPrompt, boo
 		return pendingPrompt{}, false
 	}
 	for i, pending := range *q {
+		if pending.dispatchScheduled() {
+			continue
+		}
 		for _, needle := range needles {
 			if pending.matchesUserMessage(needle) {
 				*q = append((*q)[:i], (*q)[i+1:]...)
@@ -82,20 +81,56 @@ func (q *pendingPromptQueue) removeMatching(texts ...string) (pendingPrompt, boo
 }
 
 func (q *pendingPromptQueue) removeSubmission(submission Submission) (pendingPrompt, bool) {
-	if q == nil || len(*q) == 0 {
-		return pendingPrompt{}, false
-	}
 	if submission.localID != 0 {
-		for i, pending := range *q {
-			if pending.localID != submission.localID {
-				continue
-			}
-			*q = append((*q)[:i], (*q)[i+1:]...)
-			return pending, true
-		}
-		return pendingPrompt{}, false
+		return q.removeLocalID(submission.localID)
 	}
 	return q.removeMatching(submission.Text, submission.DisplayText)
+}
+
+func (q *pendingPromptQueue) removeLocalID(localID uint64) (pendingPrompt, bool) {
+	if q == nil || localID == 0 {
+		return pendingPrompt{}, false
+	}
+	for i, pending := range *q {
+		if pending.localID != localID {
+			continue
+		}
+		*q = append((*q)[:i], (*q)[i+1:]...)
+		return pending, true
+	}
+	return pendingPrompt{}, false
+}
+
+func (q *pendingPromptQueue) markDispatched(localID uint64, deferDisplay bool, mode SubmissionMode) bool {
+	if q == nil || localID == 0 {
+		return false
+	}
+	for i := range *q {
+		pending := &(*q)[i]
+		if pending.localID != localID || !pending.dispatchScheduled() {
+			continue
+		}
+		pending.state = pendingPromptDispatched
+		if !deferDisplay && mode == SubmissionModeActiveTurn {
+			pending.state = pendingPromptAwaitingActiveDisplay
+		}
+		return true
+	}
+	return false
+}
+
+func (q *pendingPromptQueue) takeScheduled(localID uint64) (pendingPrompt, bool) {
+	if q == nil || localID == 0 {
+		return pendingPrompt{}, false
+	}
+	for i, pending := range *q {
+		if pending.localID != localID || !pending.dispatchScheduled() {
+			continue
+		}
+		*q = append((*q)[:i], (*q)[i+1:]...)
+		return pending, true
+	}
+	return pendingPrompt{}, false
 }
 
 func (q pendingPromptQueue) visibleCount() int {
@@ -183,7 +218,7 @@ func (q *pendingPromptQueue) discardDispatched() {
 	}
 	out := (*q)[:0]
 	for _, pending := range *q {
-		if pending.canDispatchAfterIdle() || pending.needsGatewayEchoCorrelation() {
+		if pending.canDispatchAfterIdle() || pending.dispatchScheduled() || pending.needsGatewayEchoCorrelation() {
 			out = append(out, pending)
 		}
 	}
@@ -207,6 +242,10 @@ func (p pendingPrompt) matchesUserMessage(text string) bool {
 
 func (p pendingPrompt) canDispatchAfterIdle() bool {
 	return p.state == pendingPromptQueued
+}
+
+func (p pendingPrompt) dispatchScheduled() bool {
+	return p.state == pendingPromptDispatchScheduled
 }
 
 func (p pendingPrompt) isVisiblePending() bool {

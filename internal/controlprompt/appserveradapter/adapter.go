@@ -392,6 +392,35 @@ func cleanupAdmittedTurn(turn appserver.TargetTurn) {
 	_ = turn.Close()
 }
 
+// CanSubmitRunningPrompt reports whether this adapter currently holds a
+// steerable exact Turn target. This local snapshot avoids a status round trip;
+// the eventual Control Steer command still validates the target and outcome.
+func (a *SessionClientAdapter) CanSubmitRunningPrompt() bool {
+	if a == nil {
+		return false
+	}
+	a.activeMu.Lock()
+	defer a.activeMu.Unlock()
+	if a.starting != 0 {
+		return false
+	}
+	if a.active != nil && a.active.turn != nil {
+		if _, ok := a.active.turn.(appserver.SessionTurn); ok {
+			return completeTurnTarget(a.active.turn.Target())
+		}
+	}
+	return a.reconnect != nil &&
+		a.reconnect.client != nil &&
+		a.reconnect.state.Run.Active &&
+		completeTurnTarget(a.reconnect.target())
+}
+
+func completeTurnTarget(target appserver.TurnTarget) bool {
+	return strings.TrimSpace(target.HandleID) != "" &&
+		strings.TrimSpace(target.RunID) != "" &&
+		strings.TrimSpace(target.TurnID) != ""
+}
+
 func (a *SessionClientAdapter) activeTurn() *sessionClientTurn {
 	if a == nil {
 		return nil
@@ -628,4 +657,5 @@ func closedEnvelopeChannel() <-chan eventstream.Envelope {
 }
 
 var _ controlprompt.RouterService = (*SessionClientAdapter)(nil)
+var _ controlprompt.RunningPromptAdmissionProvider = (*SessionClientAdapter)(nil)
 var _ controlprompt.Turn = (*sessionClientTurn)(nil)

@@ -253,6 +253,7 @@ func (s *ProgramSender) waitForwarders(timeout time.Duration) bool {
 // TUI. ACP onboarding remains separate from this presentation-only aggregate.
 type ControlServices interface {
 	controlprompt.RouterService
+	controlprompt.RunningPromptAdmissionProvider
 	WorkspaceDir() string
 	Interrupt(context.Context) error
 	Connect(context.Context, controlprompt.ConnectConfig) (controlstatus.StatusSnapshot, error)
@@ -309,9 +310,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 		}
 	}
 	if base.CanSubmitRunningPrompt == nil {
-		base.CanSubmitRunningPrompt = func() bool {
-			return controlServiceCanSubmitRunningPrompt(ctx, service)
-		}
+		base.CanSubmitRunningPrompt = service.CanSubmitRunningPrompt
 	}
 
 	if base.RefreshStatus == nil {

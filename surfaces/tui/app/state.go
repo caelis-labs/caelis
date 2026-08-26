@@ -55,6 +55,7 @@ type liveTurnState struct {
 	StartedAt       time.Time
 	LastDuration    time.Duration
 	HasLastDuration bool
+	generation      uint64
 }
 
 type compactNoticePairState struct {
@@ -338,16 +339,18 @@ type Model struct {
 	participantTurnIDs             map[string]string
 	activeParticipantTurnSessionID string
 
-	streamLine         string
-	pendingLogBuffer   logChunkBuffer
-	logStreamBuffer    logStreamBuffer
-	lastCommittedStyle tuikit.LineStyle
-	lastCommittedRaw   string
-	hasCommittedLine   bool
-	planEntries        []planEntryState
-	welcomeCardPending bool
-	liveTurn           liveTurnState
-	compactNoticePair  compactNoticePairState
+	streamLine             string
+	pendingLogBuffer       logChunkBuffer
+	logStreamBuffer        logStreamBuffer
+	lastCommittedStyle     tuikit.LineStyle
+	lastCommittedRaw       string
+	hasCommittedLine       bool
+	planEntries            []planEntryState
+	welcomeCardPending     bool
+	liveTurn               liveTurnState
+	nextLiveTurnGeneration uint64
+	submissionDispatches   map[uint64]scheduledSubmissionDispatch
+	compactNoticePair      compactNoticePairState
 
 	// Task output is transient and independently subscribed from the Session
 	// feed. Spawn output views and RunCommand panels own subscriptions by their

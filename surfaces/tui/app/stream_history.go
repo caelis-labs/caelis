@@ -29,6 +29,7 @@ func (m *Model) resetConversationView() {
 	m.lastCommittedRaw = ""
 	m.transientIsRetry = false
 	m.pendingQueue = nil
+	m.submissionDispatches = nil
 	m.hintEntries = nil
 	m.hint = ""
 	m.liveTurn = liveTurnState{}

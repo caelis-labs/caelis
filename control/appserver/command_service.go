@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 	"unicode"
@@ -454,17 +455,17 @@ func validatePromptContent(kind string, input string, parts []model.ContentPart)
 				return fmt.Errorf("controlclient: %s content_parts[%d] image MIME type is required", kind, index)
 			}
 			data := strings.TrimSpace(part.Data)
-			decoded, err := base64.StdEncoding.DecodeString(data)
-			if err != nil || len(decoded) == 0 {
+			decodedBytes, err := decodedPromptImageByteCount(data)
+			if err != nil || decodedBytes == 0 {
 				return fmt.Errorf("controlclient: %s content_parts[%d] image data must be non-empty base64", kind, index)
 			}
-			if len(decoded) > MaxPromptImageBytes {
-				return fmt.Errorf("controlclient: %s content_parts[%d] image is too large (%d bytes, limit %d)", kind, index, len(decoded), MaxPromptImageBytes)
+			if decodedBytes > MaxPromptImageBytes {
+				return fmt.Errorf("controlclient: %s content_parts[%d] image is too large (%d bytes, limit %d)", kind, index, decodedBytes, MaxPromptImageBytes)
 			}
-			if len(decoded) > MaxPromptImageTotalBytes-totalImageBytes {
+			if decodedBytes > MaxPromptImageTotalBytes-totalImageBytes {
 				return fmt.Errorf("controlclient: %s image content exceeds the aggregate limit of %d bytes", kind, MaxPromptImageTotalBytes)
 			}
-			totalImageBytes += len(decoded)
+			totalImageBytes += decodedBytes
 			hasMeaningfulContent = true
 		default:
 			return fmt.Errorf("controlclient: %s content_parts[%d] has unsupported type %q", kind, index, part.Type)
@@ -474,6 +475,47 @@ func validatePromptContent(kind string, input string, parts []model.ContentPart)
 		return fmt.Errorf("controlclient: %s input is required", kind)
 	}
 	return nil
+}
+
+// decodedPromptImageByteCount counts decoded image bytes without retaining them.
+// Trailing data after padding is rejected because base64.NewDecoder can accept
+// another quantum after a buffer-aligned padded block. Oversize input is
+// rejected after MaxPromptImageBytes+1 decoded bytes without scanning the rest.
+func decodedPromptImageByteCount(data string) (int, error) {
+	if data == "" {
+		return 0, io.ErrUnexpectedEOF
+	}
+	decoder := base64.NewDecoder(base64.StdEncoding, strings.NewReader(data))
+	var buf [8 * 1024]byte
+	n, err := io.CopyBuffer(io.Discard, io.LimitReader(decoder, int64(MaxPromptImageBytes)+1), buf[:])
+	if err != nil {
+		return 0, err
+	}
+	if n == 0 {
+		return 0, io.ErrUnexpectedEOF
+	}
+	if n <= int64(MaxPromptImageBytes) && stdBase64HasDataAfterPadding(data) {
+		return 0, base64.CorruptInputError(0)
+	}
+	return int(n), nil
+}
+
+func stdBase64HasDataAfterPadding(data string) bool {
+	seenPadding := false
+	for i := 0; i < len(data); i++ {
+		c := data[i]
+		if c == '\r' || c == '\n' {
+			continue
+		}
+		if c == '=' {
+			seenPadding = true
+			continue
+		}
+		if seenPadding {
+			return true
+		}
+	}
+	return false
 }
 
 func requireSession(sessionID string) error {

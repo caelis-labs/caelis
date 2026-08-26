@@ -38,7 +38,8 @@ func (s *interruptBridgeStub) markSubmitted() {
 func (s *interruptBridgeStub) Status(context.Context) (controlstatus.StatusSnapshot, error) {
 	return controlstatus.StatusSnapshot{}, nil
 }
-func (*interruptBridgeStub) WorkspaceDir() string { return "" }
+func (*interruptBridgeStub) WorkspaceDir() string         { return "" }
+func (*interruptBridgeStub) CanSubmitRunningPrompt() bool { return true }
 func (s *interruptBridgeStub) Submit(ctx context.Context, _ controlprompt.Submission) (controlprompt.Turn, error) {
 	s.markSubmitted()
 	s.mu.Lock()

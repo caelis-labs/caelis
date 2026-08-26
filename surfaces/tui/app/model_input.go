@@ -1286,6 +1286,18 @@ func (m *Model) resetComposerAfterOverlayOpen() {
 
 func (m *Model) requestRunningInterrupt() (tea.Model, tea.Cmd) {
 	m.clearInputOverlays()
+	if m.revokeProvisionalTurnDispatch() {
+		finishCmd := m.finishLiveTurn(time.Now(), true, nil)
+		return m, tea.Batch(
+			finishCmd,
+			m.showHint("submission cancelled", hintOptions{
+				priority:       HintPriorityHigh,
+				clearOnMessage: true,
+				clearAfter:     copyHintDuration,
+			}),
+		)
+	}
+	m.revokeSubmissionDispatchesForTurn(m.liveTurn.generation)
 	if m.cfg.CancelRunning == nil {
 		return m, nil
 	}
@@ -1320,7 +1332,10 @@ func (m *Model) submitLineWithDisplayAndAttachments(execLine string, displayLine
 }
 
 type submitLineOptions struct {
-	recordHistory bool
+	recordHistory    bool
+	forceIdle        bool
+	preserveComposer bool
+	localID          uint64
 }
 
 type resolvedSubmission struct {
@@ -1332,7 +1347,14 @@ type resolvedSubmission struct {
 func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, displayLine string, attachments []Attachment, opts submitLineOptions) (tea.Model, tea.Cmd) {
 	m.revokeUpdateOffer()
 	alreadyRunning := m.turnRunning()
-	resolved := m.resolveSubmission(execLine, alreadyRunning)
+	resolved := resolvedSubmission{
+		uiMode:         SubmissionModeDefault,
+		gatewayMode:    SubmissionModeDefault,
+		deferUntilIdle: alreadyRunning,
+	}
+	if !opts.forceIdle {
+		resolved = m.resolveSubmission(execLine, alreadyRunning)
+	}
 	mode := resolved.uiMode
 	if alreadyRunning && mode != SubmissionModeOverlay && m.isConfiguredSlashControlLine(execLine) && !isSessionSelectionLine(execLine) {
 		return m, m.showHint("A turn is still running. Wait for it to finish or interrupt it before sending another prompt.", hintOptions{
@@ -1343,7 +1365,10 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 	}
 	deferUntilIdle := resolved.deferUntilIdle
 	layoutMayChange := mode == SubmissionModeOverlay
-	localID := m.allocateSubmissionID()
+	localID := opts.localID
+	if localID == 0 {
+		localID = m.allocateSubmissionID()
+	}
 	attachments = cloneAttachments(attachments)
 	displayLine = strings.TrimSpace(displayLine)
 	switch mode {
@@ -1358,8 +1383,6 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 				displayLine:    displayLine,
 				attachments:    attachments,
 				deferUntilIdle: deferUntilIdle,
-				deferDisplay:   deferDisplayLine,
-				submissionMode: resolved.gatewayMode,
 			})
 		} else if !deferDisplayLine {
 			m.commitUserDisplayLine(displayLine)
@@ -1382,16 +1405,17 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		localID:     localID,
 	}
 
-	// Clear input.
-	m.textarea.SetValue("")
-	m.textarea.CursorStart()
-	m.adjustTextareaHeight()
-	m.input = m.input[:0]
-	m.cursor = 0
-	m.clearInputAttachments()
-	m.clearInputOverlays()
-	if layoutMayChange {
-		m.ensureViewportLayout()
+	if !opts.preserveComposer {
+		m.textarea.SetValue("")
+		m.textarea.CursorStart()
+		m.input = m.input[:0]
+		m.cursor = 0
+		m.clearInputAttachments()
+		m.adjustTextareaHeight()
+		m.clearInputOverlays()
+		if layoutMayChange {
+			m.ensureViewportLayout()
+		}
 	}
 
 	if !alreadyRunning && mode != SubmissionModeOverlay && isTUIExitLine(execLine) {
@@ -1416,7 +1440,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		return m, nil
 	}
 	cmds := []tea.Cmd{
-		m.executeLineCmd(submission),
+		m.scheduleSubmissionDispatch(submission),
 		m.scheduleSpinnerTick(),
 	}
 	return m, tea.Batch(cmds...)
@@ -1535,7 +1559,17 @@ func (m *Model) canSubmitRunningPromptNow() bool {
 }
 
 func (m *Model) submitPendingPrompt(prompt pendingPrompt) (tea.Model, tea.Cmd) {
-	return m.submitLineWithDisplayAndAttachmentsOptions(prompt.execLine, prompt.displayLine, prompt.attachments, submitLineOptions{})
+	return m.submitLineWithDisplayAndAttachmentsOptions(prompt.execLine, prompt.displayLine, prompt.attachments, submitLineOptions{
+		localID: prompt.localID,
+	})
+}
+
+func (m *Model) submitPendingPromptAsIdle(prompt pendingPrompt) (tea.Model, tea.Cmd) {
+	return m.submitLineWithDisplayAndAttachmentsOptions(prompt.execLine, prompt.displayLine, prompt.attachments, submitLineOptions{
+		forceIdle:        true,
+		preserveComposer: true,
+		localID:          prompt.localID,
+	})
 }
 
 func (m *Model) isConfiguredAgentSlashLine(line string) bool {
@@ -1678,6 +1712,7 @@ func (m *Model) handleBTWOverlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch {
 	case key.Matches(msg, m.keys.Back):
+		m.revokeOverlaySubmissionDispatches()
 		m.dropPendingStreamSmoothing(streamSmoothingKey("btw", "", "answer", ""))
 		m.btwOverlay = nil
 		m.btwDismissed = true

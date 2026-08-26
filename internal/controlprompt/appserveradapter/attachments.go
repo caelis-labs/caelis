@@ -1,8 +1,10 @@
 package appserveradapter
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,6 +17,8 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
+
+const imageMIMESampleBytes = 512
 
 func contentPartsFromSubmission(input string, items []controlprompt.Attachment, workspace string) ([]model.ContentPart, error) {
 	if len(items) == 0 {
@@ -161,30 +165,95 @@ func imageContentPartFromAttachment(item controlprompt.Attachment, workspace str
 	if err != nil {
 		return model.ContentPart{}, 0, err
 	}
-	info, err := os.Stat(path)
+	file, err := os.Open(path)
+	if err != nil {
+		return model.ContentPart{}, 0, fmt.Errorf("read image attachment %q: %w", raw, err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
 		return model.ContentPart{}, 0, fmt.Errorf("stat image attachment %q: %w", raw, err)
 	}
 	if info.Size() > appserver.MaxPromptImageBytes {
 		return model.ContentPart{}, 0, fmt.Errorf("image attachment %q is too large (%d bytes, limit %d)", raw, info.Size(), appserver.MaxPromptImageBytes)
 	}
-	data, err := os.ReadFile(path)
+	mimeType, data, imageBytes, err := readAndEncodeImageAttachment(file, raw, info.Size())
 	if err != nil {
-		return model.ContentPart{}, 0, fmt.Errorf("read image attachment %q: %w", raw, err)
-	}
-	if len(data) == 0 {
-		return model.ContentPart{}, 0, fmt.Errorf("image attachment %q is empty", raw)
-	}
-	mimeType, ok := detectSupportedImageMimeType(data)
-	if !ok {
-		return model.ContentPart{}, 0, fmt.Errorf("attachment %q is not a supported image (detected %s)", raw, imageMimeType(data))
+		return model.ContentPart{}, 0, err
 	}
 	return model.ContentPart{
 		Type:     model.ContentPartImage,
 		MimeType: mimeType,
-		Data:     base64.StdEncoding.EncodeToString(data),
+		Data:     data,
 		FileName: filepath.Base(path),
-	}, len(data), nil
+	}, imageBytes, nil
+}
+
+// readAndEncodeImageAttachment detects and encodes one forward-only byte
+// sequence. The detected prefix is replayed into the encoder; re-seeking would
+// allow an in-place rewrite to replace that trusted prefix before encoding.
+func readAndEncodeImageAttachment(r io.Reader, raw string, statSize int64) (string, string, int, error) {
+	sample, err := readImageMIMESample(r)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("read image attachment %q: %w", raw, err)
+	}
+	if len(sample) == 0 {
+		return "", "", 0, fmt.Errorf("image attachment %q is empty", raw)
+	}
+	mimeType, ok := detectSupportedImageMimeType(sample)
+	if !ok {
+		return "", "", 0, fmt.Errorf("attachment %q is not a supported image (detected %s)", raw, imageMimeType(sample))
+	}
+	data, imageBytes, err := encodeImageAttachmentBase64(
+		io.MultiReader(bytes.NewReader(sample), r),
+		raw,
+		statSize,
+	)
+	if err != nil {
+		return "", "", 0, err
+	}
+	return mimeType, data, imageBytes, nil
+}
+
+func readImageMIMESample(r io.Reader) ([]byte, error) {
+	var buf [imageMIMESampleBytes]byte
+	n, err := io.ReadFull(r, buf[:])
+	if err == io.EOF || err == io.ErrUnexpectedEOF {
+		err = nil
+	}
+	return buf[:n], err
+}
+
+// encodeImageAttachmentBase64 streams file bytes into standard base64 without
+// retaining the raw image. LimitReader stops one byte past the per-image cap so
+// growth after Stat cannot admit an oversized payload; the copy count is the
+// admitted size when the file shrinks or grows under the cap.
+func encodeImageAttachmentBase64(r io.Reader, raw string, statSize int64) (string, int, error) {
+	var encoded strings.Builder
+	if statSize > 0 {
+		growTo := statSize
+		if growTo > appserver.MaxPromptImageBytes {
+			growTo = appserver.MaxPromptImageBytes
+		}
+		encoded.Grow(base64.StdEncoding.EncodedLen(int(growTo)))
+	}
+	encoder := base64.NewEncoder(base64.StdEncoding, &encoded)
+	var buf [32 * 1024]byte
+	written, err := io.CopyBuffer(encoder, io.LimitReader(r, int64(appserver.MaxPromptImageBytes)+1), buf[:])
+	closeErr := encoder.Close()
+	if err != nil {
+		return "", 0, fmt.Errorf("read image attachment %q: %w", raw, err)
+	}
+	if closeErr != nil {
+		return "", 0, fmt.Errorf("read image attachment %q: %w", raw, closeErr)
+	}
+	if written == 0 {
+		return "", 0, fmt.Errorf("image attachment %q is empty", raw)
+	}
+	if written > appserver.MaxPromptImageBytes {
+		return "", 0, fmt.Errorf("image attachment %q is too large (%d bytes, limit %d)", raw, written, appserver.MaxPromptImageBytes)
+	}
+	return encoded.String(), int(written), nil
 }
 
 func imageContentPartFromInlineAttachment(item controlprompt.Attachment) (model.ContentPart, int, bool, error) {

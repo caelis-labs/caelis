@@ -44,6 +44,13 @@ type TurnService interface {
 	Interrupt(context.Context) error
 }
 
+// RunningPromptAdmissionProvider reports whether this client currently holds a
+// steerable exact Turn target. It is a local client snapshot only: Control's
+// exact-target Steer validation and command ledger remain authoritative.
+type RunningPromptAdmissionProvider interface {
+	CanSubmitRunningPrompt() bool
+}
+
 type SessionService interface {
 	ResetSession(context.Context) error
 	ResumeSession(context.Context, string) (SessionSnapshot, error)

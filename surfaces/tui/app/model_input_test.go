@@ -1575,6 +1575,9 @@ func TestRejectedConcurrentDuplicateSubmissionRestoresExactImage(t *testing.T) {
 		t.Fatalf("restored duplicate composer=%q / %q / %#v, want exact B attachment", exec, display, restored)
 	}
 
+	if _, ok := taskResultMessageForTest(firstCmd(), model); !ok {
+		t.Fatal("first duplicate submission did not reach execution")
+	}
 	model = model.handleUserMessageMsg(UserMessageMsg{Text: displayLine}).(*Model)
 	if len(model.pendingQueue) != 0 {
 		t.Fatalf("gateway echo for A left pendingQueue=%#v", model.pendingQueue)
@@ -1612,12 +1615,15 @@ func TestAcceptedDuplicateEchoBeforeRejectedResultReconcilesExactImage(t *testin
 	}
 
 	// B is accepted and its durable echo reaches Bubble Tea before A's rejected
-	// command result. Text-only dequeue initially consumes A, so rejection must
-	// reconcile the remaining equivalent entry before restoring exact A.
-	secondResult := secondCmd()
+	// command result. The still-undispatched A entry is not eligible for echo
+	// correlation, so B's echo removes the exact in-flight candidate.
+	secondResult, ok := taskResultMessageForTest(secondCmd(), model)
+	if !ok {
+		t.Fatal("second duplicate submission did not reach execution")
+	}
 	model = model.handleUserMessageMsg(UserMessageMsg{Text: displayLine}).(*Model)
-	if len(model.pendingQueue) != 1 || model.pendingQueue[0].attachments[0].Name != "b.png" {
-		t.Fatalf("pendingQueue after early B echo = %#v, want unmatched B before reconciliation", model.pendingQueue)
+	if len(model.pendingQueue) != 1 || model.pendingQueue[0].attachments[0].Name != "a.png" {
+		t.Fatalf("pendingQueue after early B echo = %#v, want scheduled A preserved", model.pendingQueue)
 	}
 	if !findAndRunTaskResult(firstCmd(), model) {
 		t.Fatal("first duplicate rejection did not return a task result")

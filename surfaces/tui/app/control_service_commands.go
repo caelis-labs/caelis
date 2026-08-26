@@ -69,29 +69,6 @@ func executeTUIPrivateSlashCommandWithContext(ctx context.Context, service Contr
 	return dispatchTUIPrivateSlashCommandWithContext(ctx, service, sender, cmd, args), true
 }
 
-type activeTurnStatusService interface {
-	AgentStatus(context.Context) (controlprompt.AgentStatusSnapshot, error)
-}
-
-func controlServiceCanSubmitRunningPrompt(ctx context.Context, service activeTurnStatusService) bool {
-	if service == nil {
-		return true
-	}
-	status, err := service.AgentStatus(contextOrBackground(ctx))
-	if err != nil {
-		return false
-	}
-	if !status.HasActiveTurn {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(status.ActiveTurnKind)) {
-	case "kernel", "participant":
-		return true
-	default:
-		return false
-	}
-}
-
 func runSubagentTurn(ctx context.Context, sender *ProgramSender, turn controlprompt.Turn) executeLineResult {
 	if turn == nil {
 		return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: true}}

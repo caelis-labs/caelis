@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
@@ -940,6 +941,127 @@ func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) 
 	if !presence.closed || adapter.clientSessionID() != "" {
 		t.Fatalf("ResetSession did not detach presence: closed=%v active=%q", presence.closed, adapter.clientSessionID())
 	}
+}
+
+func TestCanSubmitRunningPromptUsesExactClientTargetSnapshot(t *testing.T) {
+	completeTarget := appserver.TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
+	for _, name := range []string{"main", "participant"} {
+		t.Run("active "+name, func(t *testing.T) {
+			adapter := &SessionClientAdapter{}
+			turn := &sessionClientTurn{turn: &admissionSessionTurn{admissionTargetTurn: admissionTargetTurn{target: completeTarget}}}
+			turn.onClose = func() { adapter.clearActiveTurn(turn) }
+			adapter.setActiveTurn(turn)
+			if !adapter.CanSubmitRunningPrompt() {
+				t.Fatal("active steerable exact target was not admitted")
+			}
+			if err := turn.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if adapter.CanSubmitRunningPrompt() {
+				t.Fatal("closed target remained admitted")
+			}
+		})
+	}
+
+	t.Run("reconnect active", func(t *testing.T) {
+		adapter := &SessionClientAdapter{reconnect: &clientSessionReconnect{
+			client: &sessionClientAdapterTestClient{},
+			state: appserver.SessionState{Run: appserver.RunState{
+				Active: true, HandleID: completeTarget.HandleID, RunID: completeTarget.RunID, TurnID: completeTarget.TurnID,
+			}},
+		}}
+		if !adapter.CanSubmitRunningPrompt() {
+			t.Fatal("active reconnect exact target was not admitted")
+		}
+	})
+
+	for _, test := range []struct {
+		name    string
+		adapter *SessionClientAdapter
+	}{
+		{name: "nil adapter"},
+		{name: "idle", adapter: &SessionClientAdapter{}},
+		{name: "starting", adapter: &SessionClientAdapter{
+			starting: 1,
+			active: &sessionClientTurn{turn: &admissionSessionTurn{
+				admissionTargetTurn: admissionTargetTurn{target: completeTarget},
+			}},
+		}},
+		{name: "approval only reconnect", adapter: &SessionClientAdapter{reconnect: &clientSessionReconnect{
+			client: &sessionClientAdapterTestClient{},
+			state:  appserver.SessionState{Approval: appserver.ApprovalState{Active: &appserver.ActiveApproval{}}},
+		}}},
+		{name: "non steerable active target", adapter: &SessionClientAdapter{active: &sessionClientTurn{
+			turn: &admissionTargetTurn{target: completeTarget},
+		}}},
+		{name: "incomplete active target", adapter: &SessionClientAdapter{active: &sessionClientTurn{
+			turn: &admissionSessionTurn{admissionTargetTurn: admissionTargetTurn{
+				target: appserver.TurnTarget{HandleID: "handle-1", RunID: "run-1"},
+			}},
+		}}},
+		{name: "reconnect without client", adapter: &SessionClientAdapter{reconnect: &clientSessionReconnect{
+			state: appserver.SessionState{Run: appserver.RunState{
+				Active: true, HandleID: completeTarget.HandleID, RunID: completeTarget.RunID, TurnID: completeTarget.TurnID,
+			}},
+		}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if test.adapter != nil && test.adapter.CanSubmitRunningPrompt() {
+				t.Fatal("non-steerable client snapshot was admitted")
+			}
+			if test.adapter == nil {
+				var adapter *SessionClientAdapter
+				if adapter.CanSubmitRunningPrompt() {
+					t.Fatal("nil adapter was admitted")
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkCanSubmitRunningPrompt(b *testing.B) {
+	adapter := &SessionClientAdapter{active: &sessionClientTurn{turn: &admissionSessionTurn{
+		admissionTargetTurn: admissionTargetTurn{target: appserver.TurnTarget{
+			HandleID: "handle-benchmark", RunID: "run-benchmark", TurnID: "turn-benchmark",
+		}},
+	}}}
+	b.ReportAllocs()
+	for range b.N {
+		if !adapter.CanSubmitRunningPrompt() {
+			b.Fatal("active exact target was not admitted")
+		}
+	}
+}
+
+func TestCanSubmitRunningPromptConcurrentLifecycleSnapshot(t *testing.T) {
+	adapter := &SessionClientAdapter{}
+	target := &admissionSessionTurn{admissionTargetTurn: admissionTargetTurn{target: appserver.TurnTarget{
+		HandleID: "handle-race", RunID: "run-race", TurnID: "turn-race",
+	}}}
+	const iterations = 1000
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range iterations {
+			adapter.activeMu.Lock()
+			adapter.active = &sessionClientTurn{turn: target}
+			adapter.reconnect = nil
+			adapter.starting = 0
+			adapter.activeMu.Unlock()
+			adapter.activeMu.Lock()
+			adapter.active = nil
+			adapter.starting = 1
+			adapter.activeMu.Unlock()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range iterations {
+			_ = adapter.CanSubmitRunningPrompt()
+		}
+	}()
+	wg.Wait()
 }
 
 func TestResetSessionDetachesActiveTurnWithoutCancellingHostWork(t *testing.T) {
@@ -2208,6 +2330,29 @@ type sessionClientAdapterTestClient struct {
 	cancelCalled        chan appserver.CancelRequest
 	cancelStarted       chan struct{}
 	cancelRelease       chan struct{}
+}
+
+type admissionTargetTurn struct {
+	target appserver.TurnTarget
+}
+
+func (*admissionTargetTurn) SessionID() string                   { return "session-admission" }
+func (t *admissionTargetTurn) Target() appserver.TurnTarget      { return t.target }
+func (*admissionTargetTurn) Events() <-chan eventstream.Envelope { return closedEnvelopeChannel() }
+func (*admissionTargetTurn) ResolveApproval(context.Context, appserver.ApprovalResolution) error {
+	return nil
+}
+func (*admissionTargetTurn) Cancel(context.Context, string) error { return nil }
+func (*admissionTargetTurn) LastCursor() string                   { return "" }
+func (*admissionTargetTurn) Err() error                           { return nil }
+func (*admissionTargetTurn) Close() error                         { return nil }
+
+type admissionSessionTurn struct {
+	admissionTargetTurn
+}
+
+func (*admissionSessionTurn) Steer(context.Context, string, string, []model.ContentPart) error {
+	return nil
 }
 
 type detachOnlyTargetTurn struct {
