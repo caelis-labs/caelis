@@ -303,7 +303,7 @@ func ValidateACPPrepareRequest(in ACPPrepareRequest) error {
 		return errors.New("control/agents: ACP preparation adapter must use a canonical name")
 	}
 	switch in.Launcher {
-	case LauncherChoiceNPX, LauncherChoiceGlobal, LauncherChoiceManaged, LauncherChoiceInstalled:
+	case LauncherChoiceNPX, LauncherChoiceGlobal, LauncherChoiceManaged, LauncherChoiceInstalled, LauncherChoiceHosted:
 		if in.CommandLine != "" {
 			return errors.New("control/agents: ACP preparation command line requires the command launcher")
 		}

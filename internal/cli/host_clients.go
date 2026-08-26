@@ -291,7 +291,7 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 		}
 		build := version.BuildInfo()
 		handler, handlerErr := controlserver.Handler(controlserver.Dependencies{
-			Services: appServer.Services,
+			Services: appServer.Services, AdapterHost: stack.AdapterHost(),
 		}, controlserver.Config{
 			Authenticator: authenticator,
 			AllowedHosts:  []string{"127.0.0.1"},

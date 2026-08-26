@@ -21,14 +21,21 @@ const (
 // AgentConfig is one pure ACP agent declaration resolved by the app layer.
 // Runtime code consumes these values to build concrete registries and managers.
 type AgentConfig struct {
-	Name           string
-	Description    string
-	Command        string
-	Args           []string
-	Env            map[string]string
-	WorkDir        string
-	Authentication controlagents.Authentication
-	SessionOptions controlagents.SessionOptions
+	Name        string
+	Description string
+	// SystemSceneID marks a Host-owned scene without overloading the child
+	// process environment.
+	SystemSceneID string
+	// HostedAdapterID identifies a logical Host-managed endpoint. When set,
+	// Command, Args, Env, and WorkDir must remain empty and are resolved only at
+	// each process launch boundary.
+	HostedAdapterID string
+	Command         string
+	Args            []string
+	Env             map[string]string
+	WorkDir         string
+	Authentication  controlagents.Authentication
+	SessionOptions  controlagents.SessionOptions
 	// PinnedModel carries one Control-resolved provider configuration for a
 	// built-in child. It never crosses ACP or process boundaries; the owning
 	// Host consumes it through the in-process child Session preparation hook.
@@ -94,6 +101,8 @@ type ResolvedAssembly struct {
 // CloneAgentConfig returns one detached copy of the config.
 func CloneAgentConfig(in AgentConfig) AgentConfig {
 	out := in
+	out.SystemSceneID = strings.TrimSpace(in.SystemSceneID)
+	out.HostedAdapterID = strings.ToLower(strings.TrimSpace(in.HostedAdapterID))
 	if len(in.Args) > 0 {
 		out.Args = append([]string(nil), in.Args...)
 	}

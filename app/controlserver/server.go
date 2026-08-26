@@ -12,14 +12,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 // Dependencies contains only the Control contracts exposed over HTTP.
 // Product assembly remains outside the listener package.
 type Dependencies struct {
-	Services  appserver.AppServerServices
-	Lifecycle interface {
+	Services    appserver.AppServerServices
+	AdapterHost controladapterhost.Service
+	Lifecycle   interface {
 		Quiesce(context.Context) error
 	}
 }
@@ -58,7 +60,7 @@ func Handler(deps Dependencies, config Config) (http.Handler, error) {
 		return nil, errors.New("controlserver: authenticator is required for an HTTP handler")
 	}
 	server, err := New(HandlerConfig{
-		Services: deps.Services, Authenticator: config.Authenticator,
+		Services: deps.Services, AdapterHost: deps.AdapterHost, Authenticator: config.Authenticator,
 		AllowedHosts: append([]string(nil), config.AllowedHosts...), Heartbeat: config.Heartbeat,
 		ServerInfo: config.ServerInfo, Ready: config.Ready, Shutdown: config.Shutdown,
 	})

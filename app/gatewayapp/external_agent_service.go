@@ -126,5 +126,5 @@ func (s *controlCommandBackend) acpDiscoveryService() discovery.Service {
 	return discovery.Service{ClientInfo: &client.Implementation{
 		Name:    firstNonEmpty(s.composition.authorities.appName, "caelis"),
 		Version: version.String(),
-	}}
+	}, EndpointResolver: s.composition.authorities.acpEndpointResolver}
 }

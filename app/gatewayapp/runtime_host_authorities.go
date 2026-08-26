@@ -6,11 +6,13 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 )
 
 // runtimeHostAuthorities is the immutable set of process services borrowed by
@@ -34,6 +36,8 @@ type runtimeHostAuthorities struct {
 	grokAuth                *grokauth.Manager
 	apiKeyCredentials       *credentialstore.Store
 	providerUsage           *providerusage.Registry
+	adapterHost             controladapterhost.Service
+	acpEndpointResolver     endpoint.Resolver
 	sessionModelPins        *sessionModelPinRegistry
 	lifecycleCtx            context.Context
 	// hostedChildInput is the Host-owned parent/sibling route borrowed by

@@ -212,7 +212,10 @@ func (s *runtimeComposition) withReviewerAgent(resolved assembly.ResolvedAssembl
 	}
 	reviewer.Name = reviewerAgentID
 	reviewer.Description = "Review current workspace changes"
-	reviewer.Env = withSystemSceneEnv(reviewer.Env, reviewerAgentID)
+	reviewer.SystemSceneID = reviewerAgentID
+	if strings.TrimSpace(reviewer.HostedAdapterID) == "" {
+		reviewer.Env = withSystemSceneEnv(reviewer.Env, reviewerAgentID)
+	}
 	out.Agents = append(out.Agents, reviewer)
 	return out, nil
 }
@@ -261,13 +264,14 @@ func (s *runtimeComposition) materializeExternalAgent(agent controlagents.Agent,
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: external Agent %q has no matching ACP connection", agent.ID)
 	}
 	return assembly.AgentConfig{
-		Name:           agent.ID,
-		Description:    agent.Name,
-		Command:        connection.Launcher.Command,
-		Args:           append([]string(nil), connection.Launcher.Args...),
-		Env:            maps.Clone(connection.Launcher.Env),
-		WorkDir:        connection.Launcher.WorkDir,
-		Authentication: connection.Authentication,
+		Name:            agent.ID,
+		Description:     agent.Name,
+		HostedAdapterID: connection.Launcher.AdapterID,
+		Command:         connection.Launcher.Command,
+		Args:            append([]string(nil), connection.Launcher.Args...),
+		Env:             maps.Clone(connection.Launcher.Env),
+		WorkDir:         connection.Launcher.WorkDir,
+		Authentication:  connection.Authentication,
 	}, nil
 }
 
@@ -331,7 +335,7 @@ func withSystemSceneEnv(env map[string]string, sceneID string) map[string]string
 }
 
 func isSystemSceneAgent(agent assembly.AgentConfig) bool {
-	return strings.TrimSpace(agent.Env[systemSceneEnvKey]) != ""
+	return strings.TrimSpace(agent.SystemSceneID) != "" || strings.TrimSpace(agent.Env[systemSceneEnvKey]) != ""
 }
 
 func reservedSlashCommandName(name string) bool {

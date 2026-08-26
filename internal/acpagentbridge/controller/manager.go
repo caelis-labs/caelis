@@ -23,6 +23,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
@@ -33,16 +34,18 @@ import (
 )
 
 type Config struct {
-	Registry   *subagent.Registry
-	ClientInfo *client.Implementation
-	Clock      func() time.Time
+	Registry         *subagent.Registry
+	ClientInfo       *client.Implementation
+	Clock            func() time.Time
+	EndpointResolver endpoint.Resolver
 }
 
 type Manager struct {
-	registry    *subagent.Registry
-	clientInfo  *client.Implementation
-	clock       func() time.Time
-	startClient clientStarter
+	registry         *subagent.Registry
+	clientInfo       *client.Implementation
+	clock            func() time.Time
+	startClient      clientStarter
+	endpointResolver endpoint.Resolver
 
 	counter atomic.Uint64
 
@@ -157,11 +160,12 @@ func NewManager(cfg Config) (*Manager, error) {
 		clock = time.Now
 	}
 	manager := &Manager{
-		registry:     cfg.Registry,
-		clientInfo:   cfg.ClientInfo,
-		clock:        clock,
-		controllers:  map[string]*controllerRun{},
-		participants: map[participantRunKey]*participantRun{},
+		registry:         cfg.Registry,
+		clientInfo:       cfg.ClientInfo,
+		clock:            clock,
+		endpointResolver: cfg.EndpointResolver,
+		controllers:      map[string]*controllerRun{},
+		participants:     map[participantRunKey]*participantRun{},
 	}
 	manager.startClient = manager.startACPClient
 	return manager, nil
@@ -895,12 +899,15 @@ func (m *Manager) startACPClient(
 		return nil, "", controllerClientState{}, err
 	}
 	acpClient, err := client.Start(context.WithoutCancel(ctx), client.Config{
-		Command:    cfg.Command,
-		Args:       append([]string(nil), cfg.Args...),
-		Env:        maps.Clone(cfg.Env),
-		WorkDir:    pickWorkDir(cfg.WorkDir, cwd),
-		ClientInfo: m.clientInfo,
-		OnUpdate:   onUpdate,
+		HostedAdapterID:  cfg.HostedAdapterID,
+		ConnectionID:     cfg.Name,
+		EndpointResolver: m.endpointResolver,
+		Command:          cfg.Command,
+		Args:             append([]string(nil), cfg.Args...),
+		Env:              maps.Clone(cfg.Env),
+		WorkDir:          pickWorkDir(cfg.WorkDir, cwd),
+		ClientInfo:       m.clientInfo,
+		OnUpdate:         onUpdate,
 		OnPermissionRequest: func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
 			return onPermission(ctx, req)
 		},

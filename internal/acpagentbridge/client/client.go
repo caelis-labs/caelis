@@ -16,6 +16,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	sdkstdio "github.com/caelis-labs/acp-go-sdk/transport/stdio"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -27,6 +28,9 @@ const processShutdownGrace = 2 * time.Second
 type PermissionHandler func(context.Context, RequestPermissionRequest) (RequestPermissionResponse, error)
 
 type Config struct {
+	HostedAdapterID     string
+	ConnectionID        string
+	EndpointResolver    endpoint.Resolver
 	Command             string
 	Args                []string
 	Env                 map[string]string
@@ -45,35 +49,61 @@ type Client struct {
 	proc *sdkstdio.Process
 	cfg  Config
 
-	stderrMu  sync.Mutex
-	stderrBuf bytes.Buffer
+	stderrMu    sync.Mutex
+	stderrBuf   bytes.Buffer
+	releaseOnce sync.Once
+	release     func()
 }
 
 func Start(ctx context.Context, cfg Config) (*Client, error) {
 	if ctx == nil {
 		return nil, errors.New("acp client context is required")
 	}
-	workDir, err := absoluteWorkDir(cfg.WorkDir)
-	if err != nil {
-		return nil, err
+	if adapterID := strings.TrimSpace(cfg.HostedAdapterID); adapterID != "" {
+		if strings.TrimSpace(cfg.Command) != "" || len(cfg.Args) != 0 || len(cfg.Env) != 0 {
+			return nil, errors.New("acp client: hosted endpoint cannot include a process declaration")
+		}
+		process, err := endpoint.Resolve(ctx, cfg.EndpointResolver, endpoint.Request{
+			AdapterID: adapterID, ConnectionID: firstNonEmpty(cfg.ConnectionID, adapterID), CWD: cfg.WorkDir,
+		})
+		if err != nil {
+			return nil, err
+		}
+		cfg.Command = process.Command
+		cfg.Args = process.Args
+		cfg.Env = process.Env
+		cfg.WorkDir = firstNonEmpty(process.WorkDir, cfg.WorkDir)
+		client := &Client{cfg: cfg, release: process.Release}
+		return client.start(ctx)
 	}
 	client := &Client{cfg: cfg}
+	return client.start(ctx)
+}
+
+func (c *Client) start(ctx context.Context) (*Client, error) {
+	workDir, err := absoluteWorkDir(c.cfg.WorkDir)
+	if err != nil {
+		c.releaseEndpoint()
+		return nil, err
+	}
 	proc, err := sdkstdio.Start(ctx, sdkstdio.Command{
-		Executable: cfg.Command,
-		Args:       append([]string(nil), cfg.Args...),
+		Executable: c.cfg.Command,
+		Args:       append([]string(nil), c.cfg.Args...),
 		Dir:        workDir,
-		Env:        mergedEnv(cfg.Env),
-		Stderr:     stderrBufferWriter{client: client},
+		Env:        mergedEnv(c.cfg.Env),
+		Stderr:     stderrBufferWriter{client: c},
 	})
 	if err != nil {
+		c.releaseEndpoint()
 		return nil, err
 	}
-	client.proc = proc
-	if err := client.bind(proc.Input(), proc.Output()); err != nil {
+	c.proc = proc
+	if err := c.bind(proc.Input(), proc.Output()); err != nil {
 		_ = proc.Close()
+		c.releaseEndpoint()
 		return nil, err
 	}
-	return client, nil
+	return c, nil
 }
 
 // NewStreamClient binds an already-owned stream pair. It exists for focused
@@ -367,7 +397,28 @@ func (c *Client) Close(ctx context.Context) error {
 			}
 		}
 	}
+	c.releaseEndpoint()
 	return errors.Join(errs...)
+}
+
+func (c *Client) releaseEndpoint() {
+	if c == nil {
+		return
+	}
+	c.releaseOnce.Do(func() {
+		if c.release != nil {
+			c.release()
+		}
+	})
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (c *Client) StderrTail(limit int) string {

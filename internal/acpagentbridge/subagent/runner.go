@@ -19,6 +19,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
@@ -61,6 +62,7 @@ type RunnerConfig struct {
 	PermissionBridge  PermissionBridge
 	PlacementResolver PlacementResolver
 	SessionPreparer   SessionPreparer
+	EndpointResolver  endpoint.Resolver
 }
 
 type Runner struct {
@@ -71,6 +73,7 @@ type Runner struct {
 	permissionBridge  PermissionBridge
 	placementResolver PlacementResolver
 	sessionPreparer   SessionPreparer
+	endpointResolver  endpoint.Resolver
 
 	counter atomic.Uint64
 	mu      sync.RWMutex
@@ -148,6 +151,7 @@ func NewRunner(cfg RunnerConfig) (*Runner, error) {
 		permissionBridge:  cfg.PermissionBridge,
 		placementResolver: cfg.PlacementResolver,
 		sessionPreparer:   cfg.SessionPreparer,
+		endpointResolver:  cfg.EndpointResolver,
 		runs:              map[string]*childRun{},
 		slots:             map[string]*childSlot{},
 	}, nil
@@ -213,12 +217,15 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		launchEnv["SDK_ACP_CHILD_NO_SPAWN"] = "1"
 	}
 	acpClient, err := client.Start(childCtx, client.Config{
-		Command:    cfg.Command,
-		Args:       append([]string(nil), cfg.Args...),
-		Env:        launchEnv,
-		WorkDir:    pickWorkDir(cfg.WorkDir, spawn.CWD),
-		ClientInfo: r.clientInfo,
-		OnUpdate:   func(env client.UpdateEnvelope) { r.handleUpdate(run, env) },
+		HostedAdapterID:  cfg.HostedAdapterID,
+		ConnectionID:     cfg.Name,
+		EndpointResolver: r.endpointResolver,
+		Command:          cfg.Command,
+		Args:             append([]string(nil), cfg.Args...),
+		Env:              launchEnv,
+		WorkDir:          pickWorkDir(cfg.WorkDir, spawn.CWD),
+		ClientInfo:       r.clientInfo,
+		OnUpdate:         func(env client.UpdateEnvelope) { r.handleUpdate(run, env) },
 		OnPermissionRequest: func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
 			return r.permissionCallback(spawn, cfg, agentID)(ctx, req)
 		},
@@ -403,7 +410,7 @@ func (r *Runner) resolveSpawnConfig(ctx context.Context, spawn subagent.SpawnCon
 			return AgentConfig{}, err
 		}
 		cfg = normalizeAgentConfig(cfg)
-		if cfg.Name == "" || cfg.Command == "" {
+		if cfg.Name == "" || validateAgentEndpoint(cfg) != nil {
 			return AgentConfig{}, fmt.Errorf("model placement resolved an invalid Agent configuration")
 		}
 		return cfg, nil
@@ -417,7 +424,7 @@ func (r *Runner) resolveSpawnConfig(ctx context.Context, spawn subagent.SpawnCon
 				return AgentConfig{}, err
 			}
 			cfg = normalizeAgentConfig(cfg)
-			if cfg.Name == "" || cfg.Command == "" {
+			if cfg.Name == "" || validateAgentEndpoint(cfg) != nil {
 				return AgentConfig{}, fmt.Errorf("configured placement resolved an invalid Agent configuration")
 			}
 			return cfg, nil

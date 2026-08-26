@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -49,6 +50,7 @@ func (f AuthenticatorFunc) Authenticate(request *http.Request) (appserver.Princi
 // server runner.
 type HandlerConfig struct {
 	Services      appserver.AppServerServices
+	AdapterHost   controladapterhost.Service
 	Authenticator Authenticator
 	AllowedHosts  []string
 	Heartbeat     time.Duration
@@ -123,6 +125,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/events", s.taskEvents)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/subscribe", s.subscribeTask)
 	s.focusedRoutes()
+	s.adapterRoutes()
 }
 
 func (s *Server) initialize(w http.ResponseWriter, r *http.Request) {

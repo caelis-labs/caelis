@@ -37,8 +37,8 @@ func (r *Registry) Register(cfg AgentConfig) error {
 	if cfg.Name == "" {
 		return fmt.Errorf("agent name is required")
 	}
-	if strings.TrimSpace(cfg.Command) == "" {
-		return fmt.Errorf("command is required for Agent %q", cfg.Name)
+	if err := validateAgentEndpoint(cfg); err != nil {
+		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -53,8 +53,8 @@ func (r *Registry) Replace(configs []AgentConfig) error {
 		if cfg.Name == "" {
 			return fmt.Errorf("agent name is required")
 		}
-		if strings.TrimSpace(cfg.Command) == "" {
-			return fmt.Errorf("command is required for Agent %q", cfg.Name)
+		if err := validateAgentEndpoint(cfg); err != nil {
+			return err
 		}
 		next[cfg.Name] = cfg
 	}
@@ -107,6 +107,8 @@ func normalizeAgentConfig(in AgentConfig) AgentConfig {
 	out := in
 	out.Name = strings.TrimSpace(in.Name)
 	out.Description = strings.TrimSpace(in.Description)
+	out.SystemSceneID = strings.TrimSpace(in.SystemSceneID)
+	out.HostedAdapterID = strings.ToLower(strings.TrimSpace(in.HostedAdapterID))
 	out.Command = strings.TrimSpace(in.Command)
 	out.WorkDir = strings.TrimSpace(in.WorkDir)
 	if len(in.Args) > 0 {
@@ -125,4 +127,16 @@ func normalizeAgentConfig(in AgentConfig) AgentConfig {
 		out.PinnedModel = &pinned
 	}
 	return out
+}
+
+func validateAgentEndpoint(cfg AgentConfig) error {
+	hosted := strings.TrimSpace(cfg.HostedAdapterID) != ""
+	executable := strings.TrimSpace(cfg.Command) != ""
+	if hosted == executable {
+		return fmt.Errorf("agent %q requires exactly one executable or hosted adapter endpoint", cfg.Name)
+	}
+	if hosted && (len(cfg.Args) != 0 || len(cfg.Env) != 0 || strings.TrimSpace(cfg.WorkDir) != "") {
+		return fmt.Errorf("hosted Agent %q cannot retain a process declaration", cfg.Name)
+	}
+	return nil
 }

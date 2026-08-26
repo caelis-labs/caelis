@@ -166,6 +166,11 @@ func connectACPLauncherCandidate(
 		return label
 	}
 	switch launcher {
+	case controlagents.LauncherChoiceHosted:
+		return controlprompt.SlashArgCandidate{
+			Value: string(launcher), Display: display("Built in"),
+			Detail: "Use the adapter managed by the running Caelis Host",
+		}, true
 	case controlagents.LauncherChoiceInstalled:
 		installed, ok := agentregistry.LookupInstalledAgent(agent.ID)
 		if !ok {

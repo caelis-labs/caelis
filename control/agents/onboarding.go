@@ -21,6 +21,8 @@ const (
 	LauncherChoiceManaged   LauncherChoice = "managed"
 	LauncherChoiceInstalled LauncherChoice = "installed"
 	LauncherChoiceCommand   LauncherChoice = "command"
+	// LauncherChoiceHosted selects a Caelis Host-managed built-in adapter.
+	LauncherChoiceHosted LauncherChoice = "hosted"
 )
 
 // ConnectRequest carries one guided local-ACP onboarding selection. One

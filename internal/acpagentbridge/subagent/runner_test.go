@@ -182,6 +182,34 @@ func TestRunnerResolvesTypedPlacementWithoutRegistryIdentity(t *testing.T) {
 	}
 }
 
+func TestRunnerResolvesConfiguredPlacementToHostedAdapter(t *testing.T) {
+	registry, err := NewRegistry([]AgentConfig{{Name: "helper", Command: "helper-acp"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewRunner(RunnerConfig{
+		Registry: registry,
+		PlacementResolver: func(_ context.Context, _ tasksubagent.SpawnContext, _ delegation.TargetRequest) (AgentConfig, error) {
+			return AgentConfig{Name: "codex", HostedAdapterID: "codex"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := runner.resolveSpawnConfig(context.Background(), tasksubagent.SpawnContext{}, delegation.TargetRequest{Target: delegation.Target{
+		Selector: "codex-demo",
+		Placement: delegation.Placement{
+			Kind: delegation.PlacementAgent, Agent: "codex", ConfigFingerprint: "config-v1", Fingerprint: "placement-v1",
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "codex" || got.HostedAdapterID != "codex" || got.Command != "" {
+		t.Fatalf("resolved config = %#v", got)
+	}
+}
+
 func TestDetachedChildContextClearsParentRuntimeFence(t *testing.T) {
 	parent := session.ContextWithRuntimeFence(
 		context.WithValue(context.Background(), detachedChildContextMarker{}, "kept"),

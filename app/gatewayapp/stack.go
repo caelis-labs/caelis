@@ -17,6 +17,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	hostacpendpoint "github.com/caelis-labs/caelis/app/gatewayapp/internal/acpendpoint"
+	adapterhostimpl "github.com/caelis-labs/caelis/app/gatewayapp/internal/adapterhost"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
@@ -113,6 +115,7 @@ const DefaultControlOperationRetention = appserver.DefaultOperationTerminalReten
 
 type Stack struct {
 	composition               runtimeComposition
+	adapterHost               *adapterhostimpl.Manager
 	controlOperationRetention time.Duration
 	commandBackend            *controlCommandBackend
 	controlClient             appserver.Service
@@ -507,6 +510,22 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			sandbox: sandboxCfg,
 		},
 	}
+	stack.adapterHost, err = newHostedAdapterManager()
+	if err != nil {
+		return nil, err
+	}
+	stack.composition.authorities.adapterHost = stack.adapterHost
+	stack.composition.authorities.acpEndpointResolver, err = hostacpendpoint.New(hostacpendpoint.Config{
+		Service:  stack.adapterHost,
+		StoreDir: storeDir,
+		ControlURL: func() string {
+			return processConfig.snapshot().childControlURL
+		},
+	})
+	if err != nil {
+		_ = stack.Close()
+		return nil, err
+	}
 	stack.modelRecovery = newSessionModelRecovery(
 		stack.composition.authorities.store,
 		stack.composition.authorities.sessionModelPins,
@@ -514,15 +533,18 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	)
 	stack.commandBackend, err = newControlCommandBackend(&stack.composition, stack.modelRecovery)
 	if err != nil {
+		_ = stack.Close()
 		return nil, err
 	}
 	stack.composition.placementCache = newPlacementSnapshot(doc)
 	configStore.savedHook = stack.composition.invalidateOwnPlacementSnapshot
 	controlAssembly, err := assembleHostControlServices(stack, cfg, storeDir, cursorSecret)
 	if err != nil {
+		_ = stack.Close()
 		return nil, err
 	}
 	if err := activateHostRuntime(stack, controlAssembly); err != nil {
+		_ = stack.Close()
 		return nil, err
 	}
 	return stack, nil
@@ -643,17 +665,30 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 		if err := drain.wait(ctx); err != nil {
 			errs = append(errs, err)
 		}
+		if s.adapterHost != nil {
+			if err := s.adapterHost.Quiesce(ctx); err != nil {
+				errs = append(errs, err)
+			}
+		}
 		return errors.Join(errs...)
 	}
+	var errs []error
 	if gateway := s.composition.currentGateway(); gateway != nil {
-		gatewayErr := gateway.Quiesce(ctx)
-		var childErr error
-		if s.composition.acpControlPlane != nil {
-			childErr = s.composition.acpControlPlane.Quiesce(ctx)
+		if err := gateway.Quiesce(ctx); err != nil {
+			errs = append(errs, err)
 		}
-		return errors.Join(gatewayErr, childErr)
+		if s.composition.acpControlPlane != nil {
+			if err := s.composition.acpControlPlane.Quiesce(ctx); err != nil {
+				errs = append(errs, err)
+			}
+		}
 	}
-	return nil
+	if s.adapterHost != nil {
+		if err := s.adapterHost.Quiesce(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (s *Stack) Close() error {
@@ -690,6 +725,12 @@ func (s *Stack) Close() error {
 		if err := controlOperations.Close(); err != nil {
 			errs = append(errs, err)
 		}
+	}
+	if s.adapterHost != nil {
+		if err := s.adapterHost.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		s.adapterHost = nil
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("gatewayapp stack: close failed: %w", errors.Join(errs...))

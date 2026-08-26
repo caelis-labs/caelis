@@ -72,6 +72,7 @@ func (r *Runner) LoadHistory(ctx context.Context, raw tasksubagent.HistoryReques
 		launchEnv["SDK_ACP_CHILD_NO_SPAWN"] = "1"
 	}
 	acpClient, err := client.Start(ctx, client.Config{
+		HostedAdapterID: cfg.HostedAdapterID, ConnectionID: cfg.Name, EndpointResolver: r.endpointResolver,
 		Command: cfg.Command, Args: append([]string(nil), cfg.Args...), Env: launchEnv,
 		WorkDir: pickWorkDir(cfg.WorkDir, spawn.CWD), ClientInfo: r.clientInfo,
 		OnUpdate: collector.observe,

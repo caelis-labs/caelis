@@ -8,6 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	acpcontroller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	acpsubagent "github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
@@ -28,6 +29,7 @@ type ControlPlaneConfig struct {
 	Agents            []assembly.AgentConfig
 	PlacementResolver acpsubagent.PlacementResolver
 	SessionPreparer   acpsubagent.SessionPreparer
+	EndpointResolver  endpoint.Resolver
 }
 
 // NewControlPlane constructs controller and subagent runner instances backed
@@ -41,11 +43,12 @@ func NewControlPlane(cfg ControlPlaneConfig) (*ControlPlane, error) {
 		Registry:          registry,
 		PlacementResolver: cfg.PlacementResolver,
 		SessionPreparer:   cfg.SessionPreparer,
+		EndpointResolver:  cfg.EndpointResolver,
 	})
 	if err != nil {
 		return nil, err
 	}
-	manager, err := acpcontroller.NewManager(acpcontroller.Config{Registry: registry})
+	manager, err := acpcontroller.NewManager(acpcontroller.Config{Registry: registry, EndpointResolver: cfg.EndpointResolver})
 	if err != nil {
 		return nil, err
 	}

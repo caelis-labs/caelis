@@ -8,21 +8,25 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
-func TestCompleteConnectACPIncludesOnlyNativeAgentCatalogAndCustomCommand(t *testing.T) {
+func TestCompleteConnectACPIncludesBuiltInNativeCatalogAndCustomCommand(t *testing.T) {
 	candidates := completeConnectACPAgents("", 20)
 	nativeAgents := []string{
 		"grok", "kimi", "opencode", "copilot", "qoder", "gemini", "qwen-code",
 		"auggie", "cline", "factory-droid", "goose", "kilo",
 	}
-	for _, want := range append(append([]string(nil), nativeAgents...), "custom") {
+	for _, want := range append(append([]string{"codex"}, nativeAgents...), "custom") {
 		if !slashCandidatesHaveValue(candidates, want) {
 			t.Fatalf("ACP Agent candidates = %#v, want %q", candidates, want)
 		}
 	}
-	for _, removed := range []string{"codex", "claude", "deepagents", "glm-acp-agent", "pi-acp"} {
+	for _, removed := range []string{"claude", "deepagents", "glm-acp-agent", "pi-acp"} {
 		if slashCandidatesHaveValue(candidates, removed) {
 			t.Fatalf("ACP Agent candidates = %#v, removed Registry entry %q remains", candidates, removed)
 		}
+	}
+	codex := completeConnectACPLaunchers("codex", "", 10)
+	if len(codex) != 1 || codex[0].Value != "hosted" || !strings.Contains(codex[0].Display, "Recommended") {
+		t.Fatalf("codex launchers = %#v, want built-in Host adapter only", codex)
 	}
 	for _, native := range nativeAgents {
 		launchers := completeConnectACPLaunchers(native, "", 10)

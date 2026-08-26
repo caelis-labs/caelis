@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/control/plugin"
 )
 
-func (*controlCommandBackend) resolveACPConnectionLauncher(_ context.Context, req controlagents.ConnectRequest) (controlagents.Connection, error) {
+func (s *controlCommandBackend) resolveACPConnectionLauncher(ctx context.Context, req controlagents.ConnectRequest) (controlagents.Connection, error) {
 	req = controlagents.NormalizeConnectRequest(req)
 	if req.AdapterID == "" {
 		return controlagents.Connection{}, fmt.Errorf("gatewayapp: ACP adapter is required")
@@ -29,6 +29,21 @@ func (*controlCommandBackend) resolveACPConnectionLauncher(_ context.Context, re
 		)
 	}
 	switch req.Launcher {
+	case controlagents.LauncherChoiceHosted:
+		if s == nil || s.composition == nil || s.composition.authorities.adapterHost == nil {
+			return controlagents.Connection{}, fmt.Errorf("gatewayapp: built-in ACP adapter service is unavailable")
+		}
+		descriptor, err := s.composition.authorities.adapterHost.Inspect(ctx, req.AdapterID)
+		if err != nil {
+			return controlagents.Connection{}, fmt.Errorf("gatewayapp: inspect built-in ACP adapter %q: %w", req.AdapterID, err)
+		}
+		if !descriptor.Available {
+			return controlagents.Connection{}, fmt.Errorf("gatewayapp: built-in ACP adapter %q is unavailable: %s", req.AdapterID, descriptor.Diagnostic)
+		}
+		connection.Name = firstNonEmpty(descriptor.Name, req.AdapterID)
+		connection.Launcher = controlagents.Launcher{
+			Kind: controlagents.LaunchKindHostedAdapter, AdapterID: req.AdapterID,
+		}
 	case controlagents.LauncherChoiceCommand:
 		command, args, err := splitACPCommandLine(req.CommandLine)
 		if err != nil {

@@ -11,6 +11,7 @@ func TestStackPublicMethodsStayAtDeclaredHostBoundary(t *testing.T) {
 
 	want := map[string]bool{
 		"ACPPreparationReads": true, "AgentBindings": true,
+		"AdapterHost":   true,
 		"AgentCommands": true, "Agents": true,
 		"AppName": true, "Close": true,
 		"ConfigurationCommands": true,

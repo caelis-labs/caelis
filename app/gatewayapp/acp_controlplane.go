@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	sdksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	acpsubagent "github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
@@ -39,6 +40,7 @@ func injectACPControlPlane(
 	resolved assembly.ResolvedAssembly,
 	placementResolver acpsubagent.PlacementResolver,
 	sessionPreparer acpsubagent.SessionPreparer,
+	endpointResolver endpoint.Resolver,
 ) (runtime.Config, *acpassembly.ControlPlane, error) {
 	if len(resolved.Agents) == 0 {
 		return cfg, nil, nil
@@ -47,6 +49,7 @@ func injectACPControlPlane(
 		Agents:            resolved.Agents,
 		PlacementResolver: placementResolver,
 		SessionPreparer:   sessionPreparer,
+		EndpointResolver:  endpointResolver,
 	})
 	if err != nil {
 		return cfg, nil, err

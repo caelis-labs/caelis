@@ -188,6 +188,8 @@ func runWithProductClientOpener(
 		controlHosts     = fs.String("control-allowed-hosts", envOr("CAELIS_CONTROL_ALLOWED_HOSTS", ""), "Comma-separated Host allowlist for the Control server")
 		controlTLSCert   = fs.String("control-tls-cert", envOr("CAELIS_CONTROL_TLS_CERT", ""), "TLS certificate file for the Control server")
 		controlTLSKey    = fs.String("control-tls-key", envOr("CAELIS_CONTROL_TLS_KEY", ""), "TLS private key file for the Control server")
+		acpAdapter       = fs.String("adapter", "", "Serve a built-in ACP adapter (codex)")
+		adapterGrantFile = fs.String("adapter-grant-file", "", "Internal one-use built-in adapter channel grant")
 	)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -289,6 +291,23 @@ func runWithProductClientOpener(
 			TokenFile: strings.TrimSpace(*controlTokenFile), AllowedHosts: splitCommaSeparated(*controlHosts),
 			TLSCertFile: strings.TrimSpace(*controlTLSCert), TLSKeyFile: strings.TrimSpace(*controlTLSKey),
 		})
+	}
+	if acpSubcommand && strings.TrimSpace(*acpAdapter) != "" {
+		if *embeddedHost {
+			return errors.New("cli: --adapter cannot be combined with --embedded")
+		}
+		return runAdapterACPProxy(ctx, cfg, productClientOptions{
+			Mode: productClientModeManaged, ControlURL: strings.TrimSpace(*controlURL),
+			Token: strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN")), TokenFile: strings.TrimSpace(*controlTokenFile),
+			StoreDir: cfg.StoreDir, WorkspaceKey: cfg.WorkspaceKey, WorkspaceCWD: cfg.WorkspaceCWD,
+			UserID: cfg.UserID, AppName: cfg.AppName,
+		}, strings.TrimSpace(*acpAdapter), strings.TrimSpace(*adapterGrantFile), stdin, stdout)
+	}
+	if strings.TrimSpace(*adapterGrantFile) != "" {
+		return errors.New("cli: --adapter-grant-file requires caelis acp --adapter")
+	}
+	if strings.TrimSpace(*acpAdapter) != "" {
+		return errors.New("cli: --adapter requires the caelis acp subcommand")
 	}
 
 	clientMode, err := resolveProductClientMode(*embeddedHost, *controlURL)
@@ -515,7 +534,7 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 	serverConfig.Authenticator = authenticator
 	serverConfig.TokenFile = tokenFile
 	return runControlServerCommand(ctx, controlserver.Dependencies{
-		Services: appServer.Services, Lifecycle: stack,
+		Services: appServer.Services, AdapterHost: stack.AdapterHost(), Lifecycle: stack,
 	}, serverConfig)
 }
 

@@ -24,6 +24,9 @@ const (
 	// LaunchKindManaged invokes a legacy executable already installed in
 	// Caelis-managed storage. New onboarding never creates this kind.
 	LaunchKindManaged LaunchKind = "managed"
+	// LaunchKindHostedAdapter resolves one built-in adapter channel through the
+	// running Caelis Host. It never persists a Host URL or credential.
+	LaunchKindHostedAdapter LaunchKind = "hosted_adapter"
 )
 
 // DefaultRemoteModelID is the product-level identity used when an ACP Agent
@@ -34,11 +37,12 @@ const DefaultRemoteModelID = "caelis:agent-default"
 // Model selection deliberately does not belong in this type; standard
 // ModelProfiles own remote model and default selection.
 type Launcher struct {
-	Kind    LaunchKind        `json:"kind,omitempty"`
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	WorkDir string            `json:"work_dir,omitempty"`
+	Kind      LaunchKind        `json:"kind,omitempty"`
+	AdapterID string            `json:"adapter_id,omitempty"`
+	Command   string            `json:"command,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	WorkDir   string            `json:"work_dir,omitempty"`
 }
 
 // Connection is one reusable external ACP endpoint.
@@ -198,10 +202,11 @@ func ResolveAgent(in Configuration, id string) (Agent, Connection, error) {
 // NormalizeLauncher returns a detached canonical launcher value.
 func NormalizeLauncher(in Launcher) Launcher {
 	out := Launcher{
-		Kind:    LaunchKind(strings.ToLower(strings.TrimSpace(string(in.Kind)))),
-		Command: strings.TrimSpace(in.Command),
-		WorkDir: strings.TrimSpace(in.WorkDir),
-		Env:     maps.Clone(in.Env),
+		Kind:      LaunchKind(strings.ToLower(strings.TrimSpace(string(in.Kind)))),
+		AdapterID: normalizeID(in.AdapterID),
+		Command:   strings.TrimSpace(in.Command),
+		WorkDir:   strings.TrimSpace(in.WorkDir),
+		Env:       maps.Clone(in.Env),
 	}
 	if len(in.Args) > 0 {
 		out.Args = append([]string(nil), in.Args...)
@@ -218,14 +223,25 @@ func ValidateConnection(in Connection) error {
 	if connection.ID == "" {
 		return fmt.Errorf("control/agents: connection id is required")
 	}
-	if connection.Launcher.Command == "" {
-		return fmt.Errorf("control/agents: connection %q command is required", connection.ID)
-	}
 	if err := ValidateAuthentication(connection.Authentication); err != nil {
 		return fmt.Errorf("control/agents: connection %q: %w", connection.ID, err)
 	}
 	switch connection.Launcher.Kind {
 	case LaunchKindExecutable, LaunchKindPackageExec, LaunchKindManaged:
+		if connection.Launcher.Command == "" {
+			return fmt.Errorf("control/agents: connection %q command is required", connection.ID)
+		}
+		if connection.Launcher.AdapterID != "" {
+			return fmt.Errorf("control/agents: executable connection %q cannot name a hosted adapter", connection.ID)
+		}
+		return nil
+	case LaunchKindHostedAdapter:
+		if connection.Launcher.AdapterID == "" {
+			return fmt.Errorf("control/agents: hosted connection %q adapter id is required", connection.ID)
+		}
+		if connection.Launcher.Command != "" || len(connection.Launcher.Args) != 0 || len(connection.Launcher.Env) != 0 || connection.Launcher.WorkDir != "" {
+			return fmt.Errorf("control/agents: hosted connection %q cannot persist a process declaration", connection.ID)
+		}
 		return nil
 	default:
 		return fmt.Errorf("control/agents: connection %q has unsupported launch kind %q", connection.ID, connection.Launcher.Kind)

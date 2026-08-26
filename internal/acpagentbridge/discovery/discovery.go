@@ -12,14 +12,16 @@ import (
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 )
 
 // Service discovers the catalog declared by a temporary empty ACP session.
 type Service struct {
-	ClientInfo     *client.Implementation
-	Clock          func() time.Time
-	CleanupTimeout time.Duration
+	ClientInfo       *client.Implementation
+	Clock            func() time.Time
+	CleanupTimeout   time.Duration
+	EndpointResolver endpoint.Resolver
 }
 
 func (s Service) startInitializedClient(
@@ -28,12 +30,15 @@ func (s Service) startInitializedClient(
 	workDir string,
 ) (*client.Client, client.InitializeResponse, error) {
 	acpClient, err := client.Start(ctx, client.Config{
-		Command:      connection.Launcher.Command,
-		Args:         append([]string(nil), connection.Launcher.Args...),
-		Env:          maps.Clone(connection.Launcher.Env),
-		WorkDir:      workDir,
-		ClientInfo:   s.ClientInfo,
-		TerminalAuth: controlagents.TerminalAuthenticationAvailable(ctx),
+		HostedAdapterID:  connection.Launcher.AdapterID,
+		ConnectionID:     connection.ID,
+		EndpointResolver: s.EndpointResolver,
+		Command:          connection.Launcher.Command,
+		Args:             append([]string(nil), connection.Launcher.Args...),
+		Env:              maps.Clone(connection.Launcher.Env),
+		WorkDir:          workDir,
+		ClientInfo:       s.ClientInfo,
+		TerminalAuth:     controlagents.TerminalAuthenticationAvailable(ctx),
 	})
 	if err != nil {
 		if connection.Launcher.Kind == controlagents.LaunchKindPackageExec {

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
@@ -54,6 +55,15 @@ var installedConnectableAgents = []installedConnectableAgent{
 	nativeACPAgent("kilo", "Kilo", "Kilo coding agent with a native ACP stdio command", 120, "kilo", "acp"),
 }
 
+var hostedConnectableAgents = []ConnectableAgent{{
+	ID:          controladapterhost.CodexAdapterID,
+	DisplayName: "Codex CLI (built in)",
+	Description: "Codex CLI through the Caelis built-in app-server adapter",
+	Priority:    5,
+	Preferred:   controlagents.LauncherChoiceHosted,
+	Launchers:   []controlagents.LauncherChoice{controlagents.LauncherChoiceHosted},
+}}
+
 var customConnectableAgent = ConnectableAgent{
 	ID:          "custom",
 	DisplayName: "Custom command",
@@ -65,7 +75,10 @@ var customConnectableAgent = ConnectableAgent{
 
 // ConnectableAgents returns the detached local ACP onboarding catalog.
 func ConnectableAgents() []ConnectableAgent {
-	out := make([]ConnectableAgent, 0, len(installedConnectableAgents)+1)
+	out := make([]ConnectableAgent, 0, len(hostedConnectableAgents)+len(installedConnectableAgents)+1)
+	for _, hosted := range hostedConnectableAgents {
+		out = append(out, cloneConnectableAgent(hosted))
+	}
 	for _, installed := range installedConnectableAgents {
 		agent, ok := LookupConnectableAgent(installed.Agent.ID)
 		if ok {
@@ -84,6 +97,11 @@ func LookupConnectableAgent(name string) (ConnectableAgent, bool) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name == customConnectableAgent.ID {
 		return cloneConnectableAgent(customConnectableAgent), true
+	}
+	for _, hosted := range hostedConnectableAgents {
+		if name == hosted.ID {
+			return cloneConnectableAgent(hosted), true
+		}
 	}
 	for _, installed := range installedConnectableAgents {
 		if name != installed.Agent.ID {
