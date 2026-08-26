@@ -119,9 +119,6 @@ func (m *Model) slashArgLoadStatusText() string {
 			parts = append(parts, formatACPSetupElapsed(elapsed))
 		}
 	}
-	if m.slashArgLoadBytes > 0 {
-		parts = append(parts, formatACPSetupBytes(m.slashArgLoadBytes)+" written")
-	}
 	parts = append(parts, "Esc cancels")
 	return strings.Join(parts, " · ")
 }
@@ -134,24 +131,6 @@ func formatACPSetupElapsed(elapsed time.Duration) string {
 	minutes := int(elapsed / time.Minute)
 	seconds := int(elapsed%time.Minute) / int(time.Second)
 	return fmt.Sprintf("%dm %02ds elapsed", minutes, seconds)
-}
-
-func formatACPSetupBytes(size int64) string {
-	const (
-		kiB = int64(1024)
-		miB = 1024 * kiB
-		giB = 1024 * miB
-	)
-	switch {
-	case size >= giB:
-		return fmt.Sprintf("%.1f GB", float64(size)/float64(giB))
-	case size >= miB:
-		return fmt.Sprintf("%.1f MB", float64(size)/float64(miB))
-	case size >= kiB:
-		return fmt.Sprintf("%.0f KB", float64(size)/float64(kiB))
-	default:
-		return fmt.Sprintf("%d B", size)
-	}
 }
 
 func (m *Model) runningIndicatorActive() bool {

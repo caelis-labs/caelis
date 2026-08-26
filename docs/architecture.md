@@ -148,7 +148,7 @@ Document responsibilities are intentionally separate:
   `ModelProfile` entries and never become synthetic Agents or Agent-owned
   defaults. Live ACP Session IDs remain execution state and are never persisted
   as discovery configuration. Authentication recovery, Agent-default behavior,
-  and Registry snapshot maintenance are defined in
+  and external endpoint installation ownership are defined in
   [External ACP Agents](external-acp-agents.md).
   The configured Agent catalog entry is the canonical read projection consumed
   by Host adapters; adapters do not mirror its name and description fields.

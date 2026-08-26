@@ -15,7 +15,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
-func TestCuratedACPModelCatalogE2E(t *testing.T) {
+func TestCustomRegistryAdapterModelCatalogE2E(t *testing.T) {
 	tests := []struct {
 		name         string
 		commandEnv   string
@@ -57,7 +57,7 @@ func TestCuratedACPModelCatalogE2E(t *testing.T) {
 			active := startEvalSession(t, ctx, stack, "acp-catalog-"+test.name)
 			driver := newEvalAppServerAdapter(t, stack, active, "acp-catalog-e2e")
 			snapshot, err := driver.DiscoverACPConnection(ctx, controlagents.ConnectRequest{
-				AdapterID: test.name, Launcher: controlagents.LauncherChoiceGlobal, CWD: workspace,
+				AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand, CommandLine: test.commandName, CWD: workspace,
 			})
 			if err != nil {
 				t.Fatalf("DiscoverACPConnection(%s) error = %v", test.name, err)

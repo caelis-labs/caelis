@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"path/filepath"
-	goruntime "runtime"
 	"sort"
 	"strings"
 
@@ -94,12 +92,6 @@ func spawnedCaelisSessionOptions(in controlagents.SessionOptions, bridgeApproval
 		out.ConfigValues[acpConfigModeID] = "manual"
 	}
 	return out
-}
-
-type builtinACPAdapterPackage = agentregistry.BuiltinAdapterPackage
-
-func builtinACPAdapterPackageFor(name string) (builtinACPAdapterPackage, bool) {
-	return agentregistry.BuiltinAdapterPackageFor(name)
 }
 
 func (s *runtimeComposition) configuredAssembly(base assembly.ResolvedAssembly, plugins []PluginConfig, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
@@ -340,25 +332,6 @@ func withSystemSceneEnv(env map[string]string, sceneID string) map[string]string
 
 func isSystemSceneAgent(agent assembly.AgentConfig) bool {
 	return strings.TrimSpace(agent.Env[systemSceneEnvKey]) != ""
-}
-
-func builtinACPAdapterInstallSpec(pkg builtinACPAdapterPackage) string {
-	if strings.TrimSpace(pkg.Version) != "" {
-		return strings.TrimSpace(pkg.Package) + "@" + strings.TrimSpace(pkg.Version)
-	}
-	return strings.TrimSpace(pkg.Package) + "@latest"
-}
-
-func npmInstallSpecForExec(npmPath string, spec string) string {
-	if goruntime.GOOS != "windows" {
-		return spec
-	}
-	switch strings.ToLower(filepath.Ext(strings.TrimSpace(npmPath))) {
-	case ".bat", ".cmd":
-		return strings.ReplaceAll(spec, "^", "^^^^")
-	default:
-		return spec
-	}
 }
 
 func reservedSlashCommandName(name string) bool {

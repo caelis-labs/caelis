@@ -8,43 +8,35 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
-func TestCompleteConnectACPLaunchersDistinguishesGlobalAndManaged(t *testing.T) {
-	candidates := completeConnectACPLaunchers("claude", "", 10)
-	if len(candidates) == 0 || candidates[0].Value != "managed" || !strings.Contains(candidates[0].Display, "Recommended") || !strings.Contains(candidates[0].Detail, "safe to cancel or retry") {
-		t.Fatalf("launcher candidates = %#v, want productized managed recommendation first", candidates)
-	}
-	for _, want := range []string{"npx", "global", "managed"} {
-		if !slashCandidatesHaveValue(candidates, want) {
-			t.Fatalf("launcher candidates = %#v, want %q", candidates, want)
-		}
-	}
-	if slashCandidatesHaveValue(candidates, "path") {
-		t.Fatalf("launcher candidates = %#v, global install must not be mislabeled as PATH", candidates)
-	}
-}
-
-func TestCompleteConnectACPIncludesRegistryAndNativeAgentCatalog(t *testing.T) {
+func TestCompleteConnectACPIncludesOnlyNativeAgentCatalogAndCustomCommand(t *testing.T) {
 	candidates := completeConnectACPAgents("", 20)
-	for _, want := range []string{"codex", "claude", "copilot", "gemini", "grok", "opencode", "factory-droid", "custom"} {
+	nativeAgents := []string{
+		"grok", "kimi", "opencode", "copilot", "qoder", "gemini", "qwen-code",
+		"auggie", "cline", "factory-droid", "goose", "kilo",
+	}
+	for _, want := range append(append([]string(nil), nativeAgents...), "custom") {
 		if !slashCandidatesHaveValue(candidates, want) {
 			t.Fatalf("ACP Agent candidates = %#v, want %q", candidates, want)
 		}
 	}
-	qwen := completeConnectACPAgents("qwen", 10)
-	if len(qwen) != 1 || qwen[0].Value != "qwen-code" || !strings.Contains(qwen[0].Detail, "ACP Registry v0.21.0") {
-		t.Fatalf("qwen registry candidate = %#v, want searchable Registry metadata", qwen)
+	for _, removed := range []string{"codex", "claude", "deepagents", "glm-acp-agent", "pi-acp"} {
+		if slashCandidatesHaveValue(candidates, removed) {
+			t.Fatalf("ACP Agent candidates = %#v, removed Registry entry %q remains", candidates, removed)
+		}
 	}
-	launchers := completeConnectACPLaunchers("opencode", "", 10)
-	if len(launchers) != 1 || launchers[0].Value != "installed" {
-		t.Fatalf("opencode launchers = %#v, want installed only", launchers)
+	for _, native := range nativeAgents {
+		launchers := completeConnectACPLaunchers(native, "", 10)
+		if len(launchers) != 1 || launchers[0].Value != "installed" || !strings.Contains(launchers[0].Display, "Recommended") {
+			t.Fatalf("%s launchers = %#v, want installed command only", native, launchers)
+		}
 	}
-	grok := completeConnectACPLaunchers("grok", "", 10)
-	if len(grok) != 2 || grok[0].Value != "npx" || grok[1].Value != "installed" {
-		t.Fatalf("grok launchers = %#v, want Registry npx and installed command", grok)
+	qoder := completeConnectACPLaunchers("qoder", "", 10)
+	if len(qoder) != 1 || !strings.Contains(qoder[0].Detail, `"qoder" or "qodercli"`) {
+		t.Fatalf("qoder launchers = %#v, want both official PATH command names", qoder)
 	}
-	factory := completeConnectACPLaunchers("factory-droid", "", 10)
-	if len(factory) != 1 || factory[0].Value != "npx" || !strings.Contains(factory[0].Display, "Recommended") {
-		t.Fatalf("factory-droid launchers = %#v, want Registry npx", factory)
+	custom := completeConnectACPLaunchers("custom", "", 10)
+	if len(custom) != 1 || custom[0].Value != "command" {
+		t.Fatalf("custom launchers = %#v, want custom command only", custom)
 	}
 }
 

@@ -447,9 +447,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case subagentOverlayResultMsg:
 		return m, m.handleSubagentOverlayResult(typed)
 
-	case acpSetupProgressMsg:
-		m.handleACPSetupProgress(typed)
-		return m, nil
 	case modelAuthProgressMsg:
 		m.handleModelAuthProgress(typed)
 		return m, nil

@@ -296,7 +296,6 @@ func (m *Model) clearWizard() {
 	m.slashArgLoadCommand = ""
 	m.slashArgLoadLabel = ""
 	m.slashArgLoadStartedAt = time.Time{}
-	m.slashArgLoadBytes = 0
 	m.slashArgLoadAuthURL = ""
 	m.slashArgLoadAuthCode = ""
 	m.slashArgLoadAuthPrompt = nil

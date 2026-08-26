@@ -11,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 )
@@ -112,9 +111,9 @@ func TestConnectWizardACPFlowPicksLauncherAndModel(t *testing.T) {
 			case command == "connect":
 				return []SlashArgCandidate{{Value: "acp", Display: "Local ACP Agent"}}, nil
 			case command == "connect-acp-agent":
-				return []SlashArgCandidate{{Value: "claude", Display: "Claude Code"}}, nil
-			case command == "connect-acp-launcher:claude":
-				return []SlashArgCandidate{{Value: "npx", Display: "npx"}}, nil
+				return []SlashArgCandidate{{Value: "grok", Display: "Grok Build"}}, nil
+			case command == "connect-acp-launcher:grok":
+				return []SlashArgCandidate{{Value: "installed", Display: "Installed command"}}, nil
 			case strings.HasPrefix(command, "connect-acp-model:"):
 				return []SlashArgCandidate{{Value: "opus", Display: "Opus"}}, nil
 			default:
@@ -140,7 +139,7 @@ func TestConnectWizardACPFlowPicksLauncherAndModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseACPConnectWizardPayload() error = %v", err)
 	}
-	if payload.Agent != "claude" || payload.Launcher != "npx" || payload.Model != "opus" || len(payload.ConfigValues) != 0 {
+	if payload.Agent != "grok" || payload.Launcher != "installed" || payload.Model != "opus" || len(payload.ConfigValues) != 0 {
 		t.Fatalf("ACP connect payload = %#v", payload)
 	}
 }
@@ -223,14 +222,14 @@ func TestConnectWizardLoadsACPModelsInBackgroundWithRunningSpinner(t *testing.T)
 	})
 	m.slashArgActive = true
 	m.slashArgCommand = "connect-acp-model:" + buildACPConnectWizardPayload(map[string]string{
-		"acp_agent": "claude", "acp_launcher": "managed",
+		"acp_agent": "grok", "acp_launcher": "installed",
 	})
 
 	cmd := m.beginSlashArgLoad()
 	if cmd == nil || !m.slashArgLoadPending || !m.runningIndicatorActive() {
 		t.Fatalf("beginSlashArgLoad() = cmd:%v pending:%v running:%v", cmd, m.slashArgLoadPending, m.runningIndicatorActive())
 	}
-	if hint := ansi.Strip(m.buildHintText()); !strings.Contains(hint, "Preparing Claude Code ACP Agent") || !strings.Contains(hint, "Esc cancels") {
+	if hint := ansi.Strip(m.buildHintText()); !strings.Contains(hint, "Preparing Grok ACP Agent") || !strings.Contains(hint, "Esc cancels") {
 		t.Fatalf("buildHintText() = %q, want setup activity", hint)
 	}
 	msg := cmd()
@@ -261,56 +260,6 @@ func TestConnectWizardLoadsACPModelsInBackgroundWithRunningSpinner(t *testing.T)
 	}
 	if len(m.slashArgCandidates) != 1 || m.slashArgCandidates[0].Value != "opus" {
 		t.Fatalf("slashArgCandidates = %#v, want loaded Opus", m.slashArgCandidates)
-	}
-}
-
-func TestConnectWizardStreamsManagedInstallProgress(t *testing.T) {
-	messages := make(chan tea.Msg, 4)
-	release := make(chan struct{})
-	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
-	m := NewModel(Config{
-		Context:       context.Background(),
-		ProgramSender: sender,
-		SlashArgComplete: func(ctx context.Context, _ string, _ string, _ int) ([]SlashArgCandidate, error) {
-			controlagents.ReportSetupProgress(ctx, controlagents.SetupProgress{
-				AdapterID: "claude", Phase: controlagents.SetupPhaseDownloading, Bytes: 128 * 1024 * 1024,
-			})
-			<-release
-			return []SlashArgCandidate{{Value: "opus"}}, nil
-		},
-	})
-	m.slashArgActive = true
-	m.slashArgCommand = "connect-acp-model:" + buildACPConnectWizardPayload(map[string]string{
-		"acp_agent": "claude", "acp_launcher": "managed",
-	})
-
-	msg := m.beginSlashArgLoad()()
-	batch, ok := msg.(tea.BatchMsg)
-	if !ok || len(batch) == 0 {
-		t.Fatalf("beginSlashArgLoad() message = %T, want tea.BatchMsg", msg)
-	}
-	result := make(chan tea.Msg, 1)
-	go func() { result <- batch[0]() }()
-	select {
-	case progress := <-messages:
-		m.Update(progress)
-	case <-time.After(time.Second):
-		close(release)
-		t.Fatal("managed install progress was not forwarded to the TUI")
-	}
-	hint := ansi.Strip(m.buildHintText())
-	for _, want := range []string{"Downloading and unpacking Claude Code ACP Agent", "128.0 MB written", "Esc cancels"} {
-		if !strings.Contains(hint, want) {
-			close(release)
-			t.Fatalf("buildHintText() = %q, want %q", hint, want)
-		}
-	}
-	close(release)
-	select {
-	case loaded := <-result:
-		m.Update(loaded)
-	case <-time.After(time.Second):
-		t.Fatal("ACP model load did not finish")
 	}
 }
 
@@ -555,7 +504,7 @@ func TestConnectWizardIgnoresStaleACPModelLoadAfterCancel(t *testing.T) {
 	}})
 	m.slashArgActive = true
 	m.slashArgCommand = "connect-acp-model:" + buildACPConnectWizardPayload(map[string]string{
-		"acp_agent": "claude", "acp_launcher": "managed",
+		"acp_agent": "grok", "acp_launcher": "installed",
 	})
 	if cmd := m.beginSlashArgLoad(); cmd == nil {
 		t.Fatal("beginSlashArgLoad() command = nil")
@@ -585,7 +534,7 @@ func TestConnectWizardCancelCancelsACPDiscoveryRequest(t *testing.T) {
 	})
 	m.slashArgActive = true
 	m.slashArgCommand = "connect-acp-model:" + buildACPConnectWizardPayload(map[string]string{
-		"acp_agent": "claude", "acp_launcher": "managed",
+		"acp_agent": "grok", "acp_launcher": "installed",
 	})
 
 	msg := m.beginSlashArgLoad()()
@@ -622,7 +571,7 @@ func TestACPCompletionCacheMissDoesNotCallCompleterOnUpdateLoop(t *testing.T) {
 	}})
 	m.slashArgActive = true
 	m.slashArgCommand = "connect-acp-model:" + buildACPConnectWizardPayload(map[string]string{
-		"acp_agent": "claude", "acp_launcher": "managed",
+		"acp_agent": "grok", "acp_launcher": "installed",
 	})
 	m.setInputText("/" + m.slashArgCommand + " ")
 	m.syncTextareaFromInput()
@@ -643,7 +592,7 @@ func TestACPCompletionCacheMissDoesNotCallCompleterOnUpdateLoop(t *testing.T) {
 	m.clearSlashArg()
 }
 
-func TestConnectWizardGlobalLauncherDoesNotAskForCommand(t *testing.T) {
+func TestConnectWizardInstalledLauncherDoesNotAskForCommand(t *testing.T) {
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
@@ -651,9 +600,9 @@ func TestConnectWizardGlobalLauncherDoesNotAskForCommand(t *testing.T) {
 			case "connect":
 				return []SlashArgCandidate{{Value: "acp"}}, nil
 			case "connect-acp-agent":
-				return []SlashArgCandidate{{Value: "claude"}}, nil
-			case "connect-acp-launcher:claude":
-				return []SlashArgCandidate{{Value: "global"}}, nil
+				return []SlashArgCandidate{{Value: "grok"}}, nil
+			case "connect-acp-launcher:grok":
+				return []SlashArgCandidate{{Value: "installed"}}, nil
 			default:
 				if strings.HasPrefix(command, "connect-acp-model:") {
 					return []SlashArgCandidate{{Value: "opus"}}, nil
@@ -671,7 +620,7 @@ func TestConnectWizardGlobalLauncherDoesNotAskForCommand(t *testing.T) {
 		runConnectTestCmd(m, cmd)
 	}
 	if !strings.HasPrefix(m.slashArgCommand, "connect-acp-model:") {
-		t.Fatalf("slashArgCommand = %q, global launcher should skip command step", m.slashArgCommand)
+		t.Fatalf("slashArgCommand = %q, installed launcher should skip command step", m.slashArgCommand)
 	}
 }
 

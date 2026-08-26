@@ -318,7 +318,7 @@ func connectACPWizard() WizardDef {
 		Steps: []WizardStepDef{
 			{
 				Key: "acp_agent", HintLabel: "/connect ACP agent",
-				FreeformHint:      "/connect ACP agent: choose an ACP Registry Agent or a custom local ACP command",
+				FreeformHint:      "/connect ACP agent: choose an installed native ACP Agent or a custom ACP command",
 				RequireCandidate:  true,
 				CompletionCommand: func(map[string]string) string { return "connect-acp-agent" },
 			},
@@ -335,7 +335,7 @@ func connectACPWizard() WizardDef {
 				FreeformHint: "/connect ACP command: choose an installed executable or type an absolute command path",
 				ShouldSkip: func(state map[string]string) bool {
 					launcher := strings.ToLower(strings.TrimSpace(state["acp_launcher"]))
-					return launcher == "npx" || launcher == "global" || launcher == "managed" || launcher == "installed"
+					return launcher == "installed"
 				},
 			},
 			{

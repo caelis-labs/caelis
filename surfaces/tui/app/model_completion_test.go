@@ -1064,7 +1064,7 @@ func TestMentionEnterAndTabWaitForPendingCompletion(t *testing.T) {
 
 func TestAsyncSlashArgCatalogRefiltersOnComposerInput(t *testing.T) {
 	command := "connect-acp-model:" + buildACPConnectWizardPayload(map[string]string{
-		"acp_agent": "claude", "acp_launcher": "managed",
+		"acp_agent": "grok", "acp_launcher": "installed",
 	})
 	calls := 0
 	def := WizardDef{
@@ -1109,7 +1109,7 @@ func TestAsyncSlashArgCatalogRefiltersOnComposerInput(t *testing.T) {
 
 func TestAsyncSlashArgCatalogUsesLatestQueryWhenLoadCompletes(t *testing.T) {
 	command := "connect-acp-model:" + buildACPConnectWizardPayload(map[string]string{
-		"acp_agent": "claude", "acp_launcher": "managed",
+		"acp_agent": "grok", "acp_launcher": "installed",
 	})
 	started := make(chan struct{})
 	release := make(chan struct{})

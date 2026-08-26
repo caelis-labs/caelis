@@ -81,7 +81,6 @@ type OverlayState struct {
 	slashArgLoadCommand       string
 	slashArgLoadLabel         string
 	slashArgLoadStartedAt     time.Time
-	slashArgLoadBytes         int64
 	slashArgLoadAuthURL       string
 	slashArgLoadAuthCode      string
 	slashArgLoadAuthPrompt    chan PromptResponse

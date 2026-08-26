@@ -19,12 +19,6 @@ type DefaultSelfConfig struct {
 	ControlTokenFile string
 }
 
-type BuiltinAdapterPackage struct {
-	Package string
-	Version string
-	Bin     string
-}
-
 // WithSelfAgent adds the private Caelis child endpoint when the host did not
 // already provide one.
 func WithSelfAgent(resolved assembly.ResolvedAssembly, self assembly.AgentConfig) assembly.ResolvedAssembly {
@@ -100,23 +94,6 @@ func configuredSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
 	}, nil
 }
 
-func BuiltinAdapterPackageFor(name string) (BuiltinAdapterPackage, bool) {
-	registered, ok := lookupRegistryNPXAgent(name)
-	managedBin := managedBinFor(name)
-	if !ok || managedBin == "" {
-		return BuiltinAdapterPackage{}, false
-	}
-	versionSuffix := "@" + strings.TrimSpace(registered.Agent.Version)
-	if !strings.HasSuffix(registered.Package, versionSuffix) {
-		return BuiltinAdapterPackage{}, false
-	}
-	return BuiltinAdapterPackage{
-		Package: strings.TrimSuffix(registered.Package, versionSuffix),
-		Version: registered.Agent.Version,
-		Bin:     managedBin,
-	}, true
-}
-
 func ReservedSlashCommandName(name string) bool {
 	name = strings.TrimSpace(name)
 	return controlprompt.IsKnown(name) || strings.EqualFold(name, "sandbox") || strings.EqualFold(name, "lead")
@@ -131,13 +108,4 @@ func cloneStringMap(in map[string]string) map[string]string {
 		out[key] = value
 	}
 	return out
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }

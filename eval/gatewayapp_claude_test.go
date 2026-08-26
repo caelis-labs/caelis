@@ -6,7 +6,6 @@ import (
 	"context"
 	"os"
 	osexec "os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
-func TestLocalStackClaudeBuiltInACPE2E(t *testing.T) {
+func TestLocalStackClaudeCustomAdapterE2E(t *testing.T) {
 	requireClaudeACPE2E(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -132,16 +131,8 @@ func requireClaudeACPE2E(t *testing.T) {
 	if strings.TrimSpace(os.Getenv("CAELIS_RUN_CLAUDE_ACP_E2E")) != "1" {
 		t.Skip("set CAELIS_RUN_CLAUDE_ACP_E2E=1 to run the local Claude Code ACP e2e")
 	}
-	if _, err := osexec.LookPath("npx"); err != nil {
-		t.Skip("npx is not available")
-	}
-	if strings.TrimSpace(os.Getenv("CAELIS_CLAUDE_ACP_E2E_INSTALL")) == "1" {
-		if _, err := osexec.LookPath("npm"); err != nil {
-			t.Skip("npm is not available")
-		}
-	}
-	if strings.TrimSpace(os.Getenv("npm_config_cache")) == "" {
-		t.Setenv("npm_config_cache", filepath.Join(os.TempDir(), "caelis-npm-cache"))
+	if _, err := osexec.LookPath("claude-agent-acp"); err != nil {
+		t.Skip("claude-agent-acp is not available on PATH")
 	}
 }
 
@@ -154,11 +145,10 @@ func connectClaudeAgentForE2E(
 ) string {
 	t.Helper()
 	driver := newEvalAppServerAdapter(t, stack, active, "claude-acp-e2e")
-	launcher := controlagents.LauncherChoiceNPX
-	if strings.TrimSpace(os.Getenv("CAELIS_CLAUDE_ACP_E2E_INSTALL")) == "1" {
-		launcher = controlagents.LauncherChoiceManaged
+	launcher := controlagents.LauncherChoiceCommand
+	req := controlagents.ConnectRequest{
+		AdapterID: "custom", Launcher: launcher, CommandLine: "claude-agent-acp", CWD: stack.Workspace().CWD,
 	}
-	req := controlagents.ConnectRequest{AdapterID: "claude", Launcher: launcher, CWD: stack.Workspace().CWD}
 	discovered, err := driver.DiscoverACPConnection(ctx, req)
 	if err != nil {
 		t.Fatalf("DiscoverACPConnection(claude, %s) error = %v", launcher, err)

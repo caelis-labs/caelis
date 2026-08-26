@@ -2,14 +2,14 @@
 
 This document owns the maintained product contract for local external ACP
 Agent onboarding, authentication recovery, default model behavior, and the
-checked-in ACP Registry snapshot. Layer ownership remains defined by
+user-owned endpoint catalog. Layer ownership remains defined by
 [Caelis Architecture](architecture.md).
 
 ## Onboarding Commands
 
 External ACP onboarding has three Host-scoped, principal-bound AppServer
-commands. `prepare` records a durable intent before launcher installation,
-process startup, Session creation, or authentication can begin. It returns an
+commands. `prepare` records a durable intent before process startup, Session
+creation, or authentication can begin. It returns an
 opaque preparation reference and exact content digest in the command receipt.
 If the Agent requires authentication, the preparation becomes `needs_auth` and
 publishes only wire-safe method identities; the initiating presentation layer
@@ -201,30 +201,53 @@ choices and current value as its capability and profile default. Fixed-handle
 bindings and participant attachment still choose one explicit canonical effort;
 the later selection, not onboarding, determines the effort sent for that work.
 
-## Registry Snapshot
+## Endpoint Catalog and Installation Ownership
 
-The npx-compatible catalog is generated from:
+The guided `/connect` catalog contains a curated set of official CLIs with
+native ACP stdio entry points, plus one generic Custom command entry:
 
-`https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`
+| Catalog ID | PATH command and arguments |
+| --- | --- |
+| `grok` | `grok agent stdio` |
+| `kimi` | `kimi acp` |
+| `opencode` | `opencode acp` |
+| `copilot` | `copilot --acp` |
+| `qoder` | `qoder --acp`, falling back to `qodercli --acp` |
+| `gemini` | `gemini --acp` |
+| `qwen-code` | `qwen --acp` |
+| `auggie` | `auggie --acp` |
+| `cline` | `cline --acp` |
+| `factory-droid` | `droid exec --output-format acp-daemon` |
+| `goose` | `goose acp` |
+| `kilo` | `kilo acp` |
 
-Control external-Agent onboarding owns the checked-in snapshot and its product
-overlay:
+A native preset is only unversioned command metadata; one of its executable
+names must already be visible on the Caelis Host process `PATH`. The catalog is
+not a mirror of every ACP Registry entry. Adding another preset requires a
+stable official installed command, while a package version or Registry-only
+distribution remains outside this contract.
 
-- `catalog_registry_generated.go` contains generated upstream identity,
-  description, version, package, arguments, and environment values;
-- `catalog.go` owns Caelis IDs, display priority, preferred launcher, verified
-  managed binaries, installed-command entries, and the custom-command entry;
-- binary and uvx distributions remain excluded until Caelis owns verified,
-  cross-platform installers for them.
+The Custom command entry is the generic integration point for an ACP Registry
+adapter or any other ACP stdio executable. Users install, select, update, and
+remove those adapters themselves. Caelis validates that the command is visible
+in the same execution environment during preparation and persists the logical
+command and arguments, so later process starts use the current user-managed
+executable. Caelis does not fetch the ACP Registry, run `npx`, invoke a package
+manager, copy adapters into its store, pin adapter versions, or repair an
+adapter installation. Codex and Claude therefore have no built-in adapter in
+this contract; a user-installed adapter remains available through Custom
+command.
 
-Refresh from the repository root with:
+Catalog or `PATH` presence is discovery evidence only. It does not authorize an
+Agent to run as a subagent. Product use still requires an explicit
+`/subagent bind` handle, and dispatch resolves that binding rather than treating
+executable detection as availability authority.
 
-```sh
-cd app/gatewayapp/internal/agentregistry
-go generate
-```
-
-Review the generated diff for version changes, package/argument/environment
-changes, stable product-ID mappings, and unexpected additions or removals.
-Then run the registry, launcher, `/connect`, architecture, and full quality
-gates. Do not hand-edit the generated file.
+Persisted connections created by older Caelis versions may still contain
+`package_exec` or `managed` launchers. Runtime keeps those stored launchers
+read-compatible so an upgrade does not silently break an existing connection,
+but `/connect` cannot create either form and Caelis no longer updates or repairs
+their installations. This compatibility path remains only until an explicit
+configuration migration can convert every supported upgrade source to a
+user-owned executable command; it must not be used as precedent for new
+onboarding behavior.

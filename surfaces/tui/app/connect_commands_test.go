@@ -95,7 +95,7 @@ func (s *acpConnectControlStub) DisconnectACP(_ context.Context, agentID string)
 func TestSlashConnectMapsACPWizardSelectionToConnector(t *testing.T) {
 	service := &acpConnectControlStub{}
 	payload := buildACPConnectWizardPayload(map[string]string{
-		"acp_agent": "claude", "acp_launcher": "global", "acp_model": "opus",
+		"acp_agent": "custom", "acp_launcher": "command", "acp_command": "claude-agent-acp", "acp_model": "opus",
 	})
 	result := slashConnectWithContext(context.Background(), service, service, nil, "acp "+payload)
 	if result.Err != nil {
@@ -104,7 +104,7 @@ func TestSlashConnectMapsACPWizardSelectionToConnector(t *testing.T) {
 	if !result.SuppressTurnDivider {
 		t.Fatalf("slashConnectWithContext() = %#v, want local connect result", result)
 	}
-	if service.req.AdapterID != "claude" || service.req.Launcher != controlagents.LauncherChoiceGlobal {
+	if service.req.AdapterID != "custom" || service.req.Launcher != controlagents.LauncherChoiceCommand || service.req.CommandLine != "claude-agent-acp" {
 		t.Fatalf("ConnectACP request = %#v", service.req)
 	}
 	if service.req.ModelID != "opus" {

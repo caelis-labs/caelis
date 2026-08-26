@@ -19,9 +19,10 @@ type LaunchKind string
 const (
 	// LaunchKindExecutable invokes an installed executable directly.
 	LaunchKindExecutable LaunchKind = "executable"
-	// LaunchKindPackageExec invokes a package runner such as npx.
+	// LaunchKindPackageExec invokes a legacy stored package runner such as npx.
 	LaunchKindPackageExec LaunchKind = "package_exec"
-	// LaunchKindManaged invokes an executable installed into Caelis-managed storage.
+	// LaunchKindManaged invokes a legacy executable already installed in
+	// Caelis-managed storage. New onboarding never creates this kind.
 	LaunchKindManaged LaunchKind = "managed"
 )
 

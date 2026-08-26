@@ -2,7 +2,6 @@ package gatewayapp
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,127 +12,97 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
-func TestResolveACPConnectionLauncherUsesExistingGlobalAdapter(t *testing.T) {
-	binDir := t.TempDir()
-	bin := writeExternalAgentExecutable(t, binDir, "claude-agent-acp")
-	t.Setenv("PATH", binDir)
-	previous := runGlobalACPAgentInstall
-	previousMatches := installedACPAdapterPackageMatches
-	t.Cleanup(func() {
-		runGlobalACPAgentInstall = previous
-		installedACPAdapterPackageMatches = previousMatches
-	})
-	installedACPAdapterPackageMatches = func(string, builtinACPAdapterPackage) bool { return true }
-	installCalls := 0
-	runGlobalACPAgentInstall = func(context.Context, globalACPAgentInstallRequest) error {
-		installCalls++
-		return nil
+func TestResolveACPConnectionLauncherUsesInstalledNativeACPCommand(t *testing.T) {
+	tests := []struct {
+		adapter string
+		command string
+		args    []string
+		env     map[string]string
+	}{
+		{adapter: "grok", command: "grok", args: []string{"agent", "stdio"}},
+		{adapter: "kimi", command: "kimi", args: []string{"acp"}},
+		{adapter: "opencode", command: "opencode", args: []string{"acp"}},
+		{adapter: "copilot", command: "copilot", args: []string{"--acp"}},
+		{adapter: "qoder", command: "qoder", args: []string{"--acp"}},
+		{adapter: "gemini", command: "gemini", args: []string{"--acp"}},
+		{adapter: "qwen-code", command: "qwen", args: []string{"--acp"}},
+		{
+			adapter: "auggie", command: "auggie", args: []string{"--acp"},
+			env: map[string]string{"AUGMENT_DISABLE_AUTO_UPDATE": "1"},
+		},
+		{adapter: "cline", command: "cline", args: []string{"--acp"}},
+		{
+			adapter: "factory-droid", command: "droid", args: []string{"exec", "--output-format", "acp-daemon"},
+			env: map[string]string{
+				"DROID_DISABLE_AUTO_UPDATE":         "true",
+				"FACTORY_DROID_AUTO_UPDATE_ENABLED": "false",
+			},
+		},
+		{adapter: "goose", command: "goose", args: []string{"acp"}},
+		{adapter: "kilo", command: "kilo", args: []string{"acp"}},
 	}
+	for _, test := range tests {
+		t.Run(test.adapter, func(t *testing.T) {
+			binDir := t.TempDir()
+			writeExternalAgentExecutable(t, binDir, test.command)
+			t.Setenv("PATH", binDir)
+
+			connection, err := (&controlCommandBackend{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
+				AdapterID: test.adapter, Launcher: controlagents.LauncherChoiceInstalled,
+			})
+			if err != nil {
+				t.Fatalf("resolveACPConnectionLauncher() error = %v", err)
+			}
+			if connection.ID != test.adapter || connection.Launcher.Command != test.command || connection.Launcher.Kind != controlagents.LaunchKindExecutable {
+				t.Fatalf("connection = %#v, want PATH command %q", connection, test.command)
+			}
+			if !reflect.DeepEqual(connection.Launcher.Args, test.args) {
+				t.Fatalf("launcher args = %#v, want %#v", connection.Launcher.Args, test.args)
+			}
+			if !reflect.DeepEqual(connection.Launcher.Env, test.env) {
+				t.Fatalf("launcher env = %#v, want %#v", connection.Launcher.Env, test.env)
+			}
+		})
+	}
+}
+
+func TestResolveACPConnectionLauncherUsesQoderCommandAlias(t *testing.T) {
+	binDir := t.TempDir()
+	writeExternalAgentExecutable(t, binDir, "qodercli")
+	t.Setenv("PATH", binDir)
 
 	connection, err := (&controlCommandBackend{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
-		AdapterID: "claude", Launcher: controlagents.LauncherChoiceGlobal,
+		AdapterID: "qoder", Launcher: controlagents.LauncherChoiceInstalled,
 	})
 	if err != nil {
 		t.Fatalf("resolveACPConnectionLauncher() error = %v", err)
 	}
-	if connection.Launcher.Command != bin || connection.Launcher.Kind != controlagents.LaunchKindExecutable {
-		t.Fatalf("connection launcher = %#v, want existing global %q", connection.Launcher, bin)
-	}
-	if installCalls != 0 {
-		t.Fatalf("global install calls = %d, want none", installCalls)
+	if connection.Launcher.Command != "qodercli" || !reflect.DeepEqual(connection.Launcher.Args, []string{"--acp"}) {
+		t.Fatalf("connection launcher = %#v, want qodercli alias", connection.Launcher)
 	}
 }
 
-func TestResolveACPConnectionLauncherInstallsMissingGlobalAdapter(t *testing.T) {
-	binDir := t.TempDir()
-	t.Setenv("PATH", binDir)
-	previous := runGlobalACPAgentInstall
-	previousMatches := installedACPAdapterPackageMatches
-	t.Cleanup(func() {
-		runGlobalACPAgentInstall = previous
-		installedACPAdapterPackageMatches = previousMatches
-	})
-	installed := false
-	var gotSpec string
-	var installedBin string
-	installedACPAdapterPackageMatches = func(string, builtinACPAdapterPackage) bool { return installed }
-	runGlobalACPAgentInstall = func(_ context.Context, req globalACPAgentInstallRequest) error {
-		gotSpec = req.InstallSpec
-		installedBin = writeExternalAgentExecutable(t, binDir, "codex-acp")
-		installed = true
-		return nil
-	}
+func TestResolveACPConnectionLauncherRequiresNativeCommandOnPATH(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 
 	connection, err := (&controlCommandBackend{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
-		AdapterID: "codex", Launcher: controlagents.LauncherChoiceGlobal,
+		AdapterID: "grok", Launcher: controlagents.LauncherChoiceInstalled,
 	})
-	if err != nil {
-		t.Fatalf("resolveACPConnectionLauncher() error = %v", err)
-	}
-	if gotSpec != "@agentclientprotocol/codex-acp@1.1.7" || connection.Launcher.Command != installedBin {
-		t.Fatalf("installed connection = %#v, spec=%q", connection, gotSpec)
-	}
-}
-
-func TestResolveACPConnectionLauncherUsesRegistryNPXMetadata(t *testing.T) {
-	binDir := t.TempDir()
-	npx := writeExternalAgentExecutable(t, binDir, "npx")
-	t.Setenv("PATH", binDir)
-
-	connection, err := (&controlCommandBackend{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
-		AdapterID: "factory-droid", Launcher: controlagents.LauncherChoiceNPX,
-	})
-	if err != nil {
-		t.Fatalf("resolveACPConnectionLauncher() error = %v", err)
-	}
-	if connection.ID != "factory-droid" || connection.Launcher.Command != npx || connection.Launcher.Kind != controlagents.LaunchKindPackageExec {
-		t.Fatalf("connection = %#v, want Registry npx launcher", connection)
-	}
-	wantArgs := []string{"-y", "droid@0.181.0", "exec", "--output-format", "acp-daemon"}
-	if !reflect.DeepEqual(connection.Launcher.Args, wantArgs) {
-		t.Fatalf("launcher args = %#v, want %#v", connection.Launcher.Args, wantArgs)
-	}
-}
-
-func TestResolveACPConnectionLauncherGlobalInstallFailureDoesNotFallbackToNPX(t *testing.T) {
-	binDir := t.TempDir()
-	writeExternalAgentExecutable(t, binDir, "npx")
-	t.Setenv("PATH", binDir)
-	previous := runGlobalACPAgentInstall
-	previousMatches := installedACPAdapterPackageMatches
-	t.Cleanup(func() {
-		runGlobalACPAgentInstall = previous
-		installedACPAdapterPackageMatches = previousMatches
-	})
-	installedACPAdapterPackageMatches = func(string, builtinACPAdapterPackage) bool { return false }
-	runGlobalACPAgentInstall = func(context.Context, globalACPAgentInstallRequest) error {
-		return errors.New("permission denied")
-	}
-
-	connection, err := (&controlCommandBackend{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
-		AdapterID: "claude", Launcher: controlagents.LauncherChoiceGlobal,
-	})
-	if err == nil || !strings.Contains(err.Error(), "permission denied") || connection.Launcher.Command != "" {
+	if err == nil || !strings.Contains(err.Error(), `"grok" is available on PATH`) || connection.Launcher.Command != "" {
 		t.Fatalf("resolveACPConnectionLauncher() = %#v, %v", connection, err)
 	}
 }
 
-func TestManagedACPAdapterPackageMatchChecksPackageAndVersion(t *testing.T) {
-	root := t.TempDir()
-	pkg := builtinACPAdapterPackage{Package: "@agentclientprotocol/codex-acp", Version: "1.1.2", Bin: "codex-acp"}
-	dir := filepath.Join(root, "node_modules", "@agentclientprotocol", "codex-acp")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"@agentclientprotocol/codex-acp","version":"1.1.2"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if !managedACPAdapterPackageMatches(root, pkg) {
-		t.Fatal("managedACPAdapterPackageMatches() = false for curated package")
-	}
-	pkg.Version = "1.1.3"
-	if managedACPAdapterPackageMatches(root, pkg) {
-		t.Fatal("managedACPAdapterPackageMatches() = true for stale version")
+func TestResolveACPConnectionLauncherRejectsRemovedRegistryLaunchers(t *testing.T) {
+	for _, req := range []controlagents.ConnectRequest{
+		{AdapterID: "codex", Launcher: controlagents.LauncherChoiceManaged},
+		{AdapterID: "claude", Launcher: controlagents.LauncherChoiceGlobal},
+		{AdapterID: "factory-droid", Launcher: controlagents.LauncherChoiceNPX},
+		{AdapterID: "grok", Launcher: controlagents.LauncherChoiceNPX},
+	} {
+		if _, err := (&controlCommandBackend{}).resolveACPConnectionLauncher(context.Background(), req); err == nil {
+			t.Fatalf("resolveACPConnectionLauncher(%#v) succeeded, want removed launcher rejected", req)
+		}
 	}
 }
 
@@ -149,6 +118,35 @@ func TestSplitACPCommandLinePreservesQuotedExecutableAndArguments(t *testing.T) 
 	}
 	if command != wantCommand || len(args) != 2 || args[0] != "--mode" || args[1] != "deep review" {
 		t.Fatalf("split command = %q %#v", command, args)
+	}
+}
+
+func TestSplitACPCommandLineKeepsPATHCommandLogical(t *testing.T) {
+	binDir := t.TempDir()
+	writeExternalAgentExecutable(t, binDir, "codex-acp")
+	t.Setenv("PATH", binDir)
+
+	command, args, err := splitACPCommandLine("codex-acp --profile latest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command != "codex-acp" || !reflect.DeepEqual(args, []string{"--profile", "latest"}) {
+		t.Fatalf("split command = %q %#v, want logical PATH entry", command, args)
+	}
+}
+
+func TestSplitACPCommandLineCanonicalizesRelativeExecutable(t *testing.T) {
+	binDir := t.TempDir()
+	wantCommand := writeExternalAgentExecutable(t, binDir, "relative-acp")
+	t.Chdir(binDir)
+
+	commandLine := "." + string(filepath.Separator) + filepath.Base(wantCommand) + " --profile local"
+	command, args, err := splitACPCommandLine(commandLine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command != wantCommand || !reflect.DeepEqual(args, []string{"--profile", "local"}) {
+		t.Fatalf("split command = %q %#v, want absolute %q", command, args, wantCommand)
 	}
 }
 

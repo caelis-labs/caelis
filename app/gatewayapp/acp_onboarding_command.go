@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -140,9 +139,6 @@ func (s *controlCommandBackend) prepareACPAtRevision(
 	}
 
 	if connection.ID == "" {
-		if prepared.Launcher == controlagents.LauncherChoiceGlobal || prepared.Launcher == controlagents.LauncherChoiceManaged {
-			result.EffectStarted = true
-		}
 		connection, err = s.resolveACPConnectionLauncher(ctx, connectRequestFromACPPrepare(prepared))
 		if err != nil {
 			return result, err
@@ -367,10 +363,6 @@ func (s *controlCommandBackend) connectPreparedACPAtRevision(
 		)
 	}
 	mutation.Warning = wrapOptionalError("gatewayapp: external Agent configuration durability warning", persistErr)
-	if preparation.Connection.Launcher.Kind == controlagents.LaunchKindManaged &&
-		pathWithinRoot(preparation.Connection.Launcher.Command, filepath.Join(s.managedACPAgentRoot(), "installations")) {
-		s.cleanupLegacyManagedACPInstallIfUnused()
-	}
 	return mutation, profile, nil
 }
 

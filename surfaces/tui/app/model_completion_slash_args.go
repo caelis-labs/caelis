@@ -20,11 +20,6 @@ type slashArgLoadResultMsg struct {
 	err        error
 }
 
-type acpSetupProgressMsg struct {
-	seq      uint64
-	progress controlagents.SetupProgress
-}
-
 func (m *Model) clearSlashArg() {
 	m.clearWizard()
 }
@@ -213,7 +208,6 @@ func (m *Model) beginSlashArgLoad() tea.Cmd {
 	m.slashArgLoadCommand = command
 	m.slashArgLoadLabel = slashArgLoadLabel(command)
 	m.slashArgLoadStartedAt = time.Now()
-	m.slashArgLoadBytes = 0
 	m.slashArgLoadAuthURL = ""
 	m.slashArgLoadAuthCode = ""
 	m.slashArgLoadAuthPrompt = nil
@@ -227,9 +221,6 @@ func (m *Model) beginSlashArgLoad() tea.Cmd {
 	}
 	requestCtx, cancel := context.WithCancel(contextOrBackground(m.cfg.Context))
 	if sender := m.cfg.ProgramSender; sender != nil {
-		requestCtx = controlagents.WithSetupProgress(requestCtx, func(progress controlagents.SetupProgress) {
-			sender.SendMsg(acpSetupProgressMsg{seq: seq, progress: progress})
-		})
 		requestCtx = modelconfig.WithAuthProgress(requestCtx, func(progress modelconfig.AuthProgress) {
 			sender.SendMsg(modelAuthProgressMsg{seq: seq, progress: progress})
 		})
@@ -293,7 +284,6 @@ func (m *Model) handleSlashArgLoadResult(msg slashArgLoadResultMsg) tea.Cmd {
 	m.slashArgLoadCommand = ""
 	m.slashArgLoadLabel = ""
 	m.slashArgLoadStartedAt = time.Time{}
-	m.slashArgLoadBytes = 0
 	m.slashArgLoadAuthURL = ""
 	m.slashArgLoadAuthCode = ""
 	m.slashArgLoadAuthPrompt = nil
@@ -332,37 +322,6 @@ func (m *Model) handleSlashArgLoadResult(msg slashArgLoadResultMsg) tea.Cmd {
 		})
 	}
 	return nil
-}
-
-func (m *Model) handleACPSetupProgress(msg acpSetupProgressMsg) {
-	if m == nil || msg.seq != m.slashArgLoadSeq || !m.slashArgLoadPending {
-		return
-	}
-	progress := msg.progress
-	name := acpSetupAdapterDisplayName(progress.AdapterID)
-	switch progress.Phase {
-	case controlagents.SetupPhaseChecking:
-		m.slashArgLoadLabel = "Checking the " + name + " ACP Agent installation"
-	case controlagents.SetupPhaseWaiting:
-		m.slashArgLoadLabel = "Another Caelis session is installing " + name + "; waiting safely"
-	case controlagents.SetupPhaseInstalling:
-		m.slashArgLoadLabel = "Installing " + name + " ACP Agent; the runtime download may take several minutes"
-	case controlagents.SetupPhaseDownloading:
-		m.slashArgLoadLabel = "Downloading and unpacking " + name + " ACP Agent"
-	case controlagents.SetupPhaseVerifying:
-		m.slashArgLoadLabel = "Verifying the " + name + " adapter and platform runtime"
-	case controlagents.SetupPhaseReady:
-		m.slashArgLoadLabel = name + " ACP Agent is ready"
-	case controlagents.SetupPhaseDiscovering:
-		m.slashArgLoadLabel = "Starting " + name + " ACP Agent and discovering models"
-	default:
-		if detail := strings.TrimSpace(progress.Detail); detail != "" {
-			m.slashArgLoadLabel = detail
-		}
-	}
-	if progress.Bytes > m.slashArgLoadBytes {
-		m.slashArgLoadBytes = progress.Bytes
-	}
 }
 
 func (m *Model) cancelSlashArgLoad() {

@@ -6,14 +6,18 @@ import (
 	"strings"
 )
 
-// LauncherChoice is the user-selected setup strategy for a local ACP endpoint.
-// It remains distinct from Launcher.Kind because global and custom commands
-// both become executable launchers after setup.
+// LauncherChoice is the requested onboarding strategy for a local ACP
+// endpoint. New product catalogs declare only Installed or Command. The npx,
+// global, and managed values remain wire-readable for persisted preparations
+// created by older Caelis versions and must not be offered by new onboarding.
 type LauncherChoice string
 
 const (
-	LauncherChoiceNPX       LauncherChoice = "npx"
-	LauncherChoiceGlobal    LauncherChoice = "global"
+	// LauncherChoiceNPX is retained only for legacy preparation compatibility.
+	LauncherChoiceNPX LauncherChoice = "npx"
+	// LauncherChoiceGlobal is retained only for legacy preparation compatibility.
+	LauncherChoiceGlobal LauncherChoice = "global"
+	// LauncherChoiceManaged is retained only for legacy preparation compatibility.
 	LauncherChoiceManaged   LauncherChoice = "managed"
 	LauncherChoiceInstalled LauncherChoice = "installed"
 	LauncherChoiceCommand   LauncherChoice = "command"

@@ -62,7 +62,7 @@ func completeConnectArgs(ctx context.Context, driver *assembler, command string,
 func completeConnectSources(ctx context.Context, driver *assembler, query string, limit int) []controlprompt.SlashArgCandidate {
 	candidates := []controlprompt.SlashArgCandidate{
 		{Value: "model", Display: "Model provider", Detail: "Connect an API or local model provider"},
-		{Value: "acp", Display: "Local ACP Agent", Detail: "Connect an ACP Registry Agent or another local ACP command"},
+		{Value: "acp", Display: "Local ACP Agent", Detail: "Connect an installed native ACP Agent or another local ACP command"},
 	}
 	if driver != nil {
 		if connected, err := driver.DisconnectCandidates(ctx); err == nil && len(connected) > 0 {
@@ -166,29 +166,23 @@ func connectACPLauncherCandidate(
 		return label
 	}
 	switch launcher {
-	case controlagents.LauncherChoiceManaged:
-		return controlprompt.SlashArgCandidate{
-			Value: string(launcher), Display: display("Managed by Caelis"),
-			Detail: "Isolated, verified install; safe to cancel or retry. The first runtime download can be several hundred MB",
-		}, true
-	case controlagents.LauncherChoiceNPX:
-		return controlprompt.SlashArgCandidate{
-			Value: string(launcher), Display: display("npx cache"),
-			Detail: "Run the pinned ACP Registry package through npx",
-		}, true
-	case controlagents.LauncherChoiceGlobal:
-		return controlprompt.SlashArgCandidate{
-			Value: string(launcher), Display: display("Global npm install"),
-			Detail: "Use or modify the adapter in your global npm environment",
-		}, true
 	case controlagents.LauncherChoiceInstalled:
 		installed, ok := agentregistry.LookupInstalledAgent(agent.ID)
 		if !ok {
 			return controlprompt.SlashArgCandidate{}, false
 		}
+		commands := agentregistry.InstalledAgentCommandCandidates(agent.ID)
+		detail := fmt.Sprintf("Use %q from PATH", installed.Command)
+		if len(commands) > 1 {
+			quoted := make([]string, 0, len(commands))
+			for _, command := range commands {
+				quoted = append(quoted, fmt.Sprintf("%q", command))
+			}
+			detail = "Use " + strings.Join(quoted, " or ") + " from PATH"
+		}
 		return controlprompt.SlashArgCandidate{
 			Value: string(launcher), Display: display("Installed command"),
-			Detail: fmt.Sprintf("Use %q from PATH", installed.Command),
+			Detail: detail,
 		}, true
 	case controlagents.LauncherChoiceCommand:
 		return controlprompt.SlashArgCandidate{
@@ -201,15 +195,7 @@ func connectACPLauncherCandidate(
 }
 
 func connectableACPAgentDetail(agent agentregistry.ConnectableAgent) string {
-	detail := strings.TrimSpace(agent.Description)
-	if agent.RegistryID == "" {
-		return detail
-	}
-	source := "ACP Registry"
-	if version := strings.TrimSpace(agent.Version); version != "" {
-		source += " v" + version
-	}
-	return firstNonEmpty(detail+" · "+source, source)
+	return strings.TrimSpace(agent.Description)
 }
 
 func completeConnectProviders(ctx context.Context, driver *assembler, query string, limit int) []controlprompt.SlashArgCandidate {

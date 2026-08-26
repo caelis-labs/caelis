@@ -88,139 +88,109 @@ func TestConfiguredSelfAgentWithoutChildBridgeScrubsParentCredentials(t *testing
 	}
 }
 
-func TestManagedACPAdaptersMatchRegistrySnapshot(t *testing.T) {
+func TestConnectableAgentsContainsOnlyNativeACPCommandsAndCustom(t *testing.T) {
+	t.Parallel()
+
+	agents := ConnectableAgents()
+	if got, want := len(agents), 13; got != want {
+		t.Fatalf("ConnectableAgents() count = %d, want %d", got, want)
+	}
+	gotIDs := make([]string, 0, len(agents))
+	for _, agent := range agents {
+		gotIDs = append(gotIDs, agent.ID)
+	}
+	wantIDs := []string{
+		"grok", "kimi", "opencode", "copilot", "qoder", "gemini", "qwen-code",
+		"auggie", "cline", "factory-droid", "goose", "kilo", "custom",
+	}
+	if !reflect.DeepEqual(gotIDs, wantIDs) {
+		t.Fatalf("ConnectableAgents() order = %#v, want %#v", gotIDs, wantIDs)
+	}
+	for _, agent := range agents {
+		if !controlagents.IsName(agent.ID) || ReservedSlashCommandName(agent.ID) {
+			t.Fatalf("ConnectableAgents() id %q is not available to the Agent roster", agent.ID)
+		}
+		if !SupportsLauncher(agent.ID, agent.Preferred) {
+			t.Fatalf("%s preferred launcher %q is not declared in %#v", agent.ID, agent.Preferred, agent.Launchers)
+		}
+		if len(agent.Launchers) != 1 {
+			t.Fatalf("%s launchers = %#v, want one user-owned launcher", agent.ID, agent.Launchers)
+		}
+	}
+	for _, removed := range []string{"codex", "claude", "deepagents", "glm-acp-agent", "pi-acp"} {
+		if got, ok := LookupConnectableAgent(removed); ok {
+			t.Fatalf("LookupConnectableAgent(%q) = %#v, want removed from guided catalog", removed, got)
+		}
+	}
+}
+
+func TestNativeACPLaunchersPreserveCommandsAndDetachedArguments(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name    string
-		pkg     string
-		version string
+		command string
+		args    []string
+		env     map[string]string
 	}{
-		{name: "codex", pkg: "@agentclientprotocol/codex-acp", version: "1.1.7"},
-		{name: "claude", pkg: "@agentclientprotocol/claude-agent-acp", version: "0.63.0"},
+		{name: "grok", command: "grok", args: []string{"agent", "stdio"}},
+		{name: "kimi", command: "kimi", args: []string{"acp"}},
+		{name: "opencode", command: "opencode", args: []string{"acp"}},
+		{name: "copilot", command: "copilot", args: []string{"--acp"}},
+		{name: "qoder", command: "qoder", args: []string{"--acp"}},
+		{name: "gemini", command: "gemini", args: []string{"--acp"}},
+		{name: "qwen-code", command: "qwen", args: []string{"--acp"}},
+		{
+			name: "auggie", command: "auggie", args: []string{"--acp"},
+			env: map[string]string{"AUGMENT_DISABLE_AUTO_UPDATE": "1"},
+		},
+		{name: "cline", command: "cline", args: []string{"--acp"}},
+		{
+			name: "factory-droid", command: "droid", args: []string{"exec", "--output-format", "acp-daemon"},
+			env: map[string]string{
+				"DROID_DISABLE_AUTO_UPDATE":         "true",
+				"FACTORY_DROID_AUTO_UPDATE_ENABLED": "false",
+			},
+		},
+		{name: "goose", command: "goose", args: []string{"acp"}},
+		{name: "kilo", command: "kilo", args: []string{"acp"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, ok := BuiltinAdapterPackageFor(test.name)
+			preset, ok := LookupInstalledAgent(test.name)
 			if !ok {
-				t.Fatalf("BuiltinAdapterPackageFor(%q) not found", test.name)
+				t.Fatalf("LookupInstalledAgent(%q) not found", test.name)
 			}
-			if got.Package != test.pkg || got.Version != test.version {
-				t.Fatalf("BuiltinAdapterPackageFor(%q) = %#v, want %s@%s", test.name, got, test.pkg, test.version)
+			if preset.Command != test.command || !reflect.DeepEqual(preset.Args, test.args) {
+				t.Fatalf("LookupInstalledAgent(%q) = %#v, want %q %#v", test.name, preset, test.command, test.args)
+			}
+			if !reflect.DeepEqual(preset.Env, test.env) {
+				t.Fatalf("LookupInstalledAgent(%q) env = %#v, want %#v", test.name, preset.Env, test.env)
+			}
+			preset.Args[0] = "changed"
+			if preset.Env != nil {
+				preset.Env["changed"] = "true"
+			}
+			again, _ := LookupInstalledAgent(test.name)
+			if reflect.DeepEqual(again.Args, preset.Args) {
+				t.Fatalf("LookupInstalledAgent(%q) returned aliased args", test.name)
+			}
+			if _, aliased := again.Env["changed"]; aliased {
+				t.Fatalf("LookupInstalledAgent(%q) returned aliased env", test.name)
 			}
 		})
 	}
 }
 
-func TestConnectableAgentsIncludesRegistryNPXAndInstalledCatalog(t *testing.T) {
+func TestNativeACPCommandCandidatesPreserveQoderInstallerNames(t *testing.T) {
 	t.Parallel()
 
-	if got, want := len(registeredNPXAgents), 21; got != want {
-		t.Fatalf("registeredNPXAgents count = %d, want Registry snapshot count %d", got, want)
+	commands := InstalledAgentCommandCandidates("qoder")
+	if want := []string{"qoder", "qodercli"}; !reflect.DeepEqual(commands, want) {
+		t.Fatalf("InstalledAgentCommandCandidates(qoder) = %#v, want %#v", commands, want)
 	}
-	seen := map[string]ConnectableAgent{}
-	for _, agent := range ConnectableAgents() {
-		if _, duplicate := seen[agent.ID]; duplicate {
-			t.Fatalf("ConnectableAgents() has duplicate id %q", agent.ID)
-		}
-		if !controlagents.IsName(agent.ID) || ReservedSlashCommandName(agent.ID) {
-			t.Fatalf("ConnectableAgents() id %q is not available to the Agent roster", agent.ID)
-		}
-		seen[agent.ID] = agent
-	}
-	if got, want := len(seen), 23; got != want {
-		t.Fatalf("ConnectableAgents() count = %d, want %d unique launchable entries", got, want)
-	}
-	for _, name := range []string{
-		"codex", "claude", "copilot", "gemini", "grok", "opencode",
-		"auggie", "cline", "factory-droid", "kilo", "qwen-code", "custom",
-	} {
-		if _, ok := seen[name]; !ok {
-			t.Fatalf("ConnectableAgents() missing %q", name)
-		}
-	}
-	if seen["codex"].RegistryID != "codex-acp" || seen["opencode"].RegistryID != "opencode" {
-		t.Fatalf("ConnectableAgents() registry identities = codex %#v, opencode %#v", seen["codex"], seen["opencode"])
-	}
-	agents := ConnectableAgents()
-	if len(agents) < 3 || agents[0].ID != "codex" || agents[1].ID != "claude" || agents[2].ID != "custom" {
-		t.Fatalf("ConnectableAgents() priority order = %#v, want declared codex, claude, custom", agents[:min(3, len(agents))])
-	}
-	if !reflect.DeepEqual(seen["codex"].Launchers, []controlagents.LauncherChoice{
-		controlagents.LauncherChoiceManaged,
-		controlagents.LauncherChoiceNPX,
-		controlagents.LauncherChoiceGlobal,
-	}) {
-		t.Fatalf("codex launchers = %#v, want data-declared managed, npx, global", seen["codex"].Launchers)
-	}
-}
-
-func TestRegistryNPXLauncherPreservesPinnedArgumentsAndEnvironment(t *testing.T) {
-	t.Parallel()
-
-	factory, ok := LookupNPXAgent("factory-droid")
-	if !ok {
-		t.Fatal("LookupNPXAgent(factory-droid) not found")
-	}
-	if got, want := factory.Args, []string{"-y", "droid@0.181.0", "exec", "--output-format", "acp-daemon"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("factory-droid args = %#v, want %#v", got, want)
-	}
-	wantEnv := map[string]string{
-		"DROID_DISABLE_AUTO_UPDATE":         "true",
-		"FACTORY_DROID_AUTO_UPDATE_ENABLED": "false",
-	}
-	if !reflect.DeepEqual(factory.Env, wantEnv) {
-		t.Fatalf("factory-droid env = %#v, want %#v", factory.Env, wantEnv)
-	}
-	factory.Args[0] = "changed"
-	factory.Env["DROID_DISABLE_AUTO_UPDATE"] = "changed"
-	again, ok := LookupNPXAgent("factory-droid")
-	if !ok || again.Args[0] != "-y" || again.Env["DROID_DISABLE_AUTO_UPDATE"] != "true" {
-		t.Fatalf("LookupNPXAgent() returned aliased launcher: %#v", again)
-	}
-}
-
-func TestRegistryIdentityDoesNotBecomeSecondConnectionID(t *testing.T) {
-	t.Parallel()
-
-	for _, upstream := range []string{"codex-acp", "claude-acp", "github-copilot-cli", "grok-build"} {
-		if got, ok := LookupConnectableAgent(upstream); ok {
-			t.Fatalf("LookupConnectableAgent(%q) = %#v, want Registry ID kept as provenance only", upstream, got)
-		}
-	}
-}
-
-func TestCatalogLauncherDeclarationsHaveResolvablePresets(t *testing.T) {
-	t.Parallel()
-
-	for _, agent := range ConnectableAgents() {
-		if !SupportsLauncher(agent.ID, agent.Preferred) {
-			t.Errorf("%s preferred launcher %q is not declared in %#v", agent.ID, agent.Preferred, agent.Launchers)
-		}
-		for _, launcher := range agent.Launchers {
-			switch launcher {
-			case controlagents.LauncherChoiceCommand:
-				if agent.ID != customConnectableAgent.ID {
-					t.Errorf("%s declares command launcher outside the custom entry", agent.ID)
-				}
-			case controlagents.LauncherChoiceNPX:
-				if _, ok := LookupNPXAgent(agent.ID); !ok {
-					t.Errorf("%s declares npx launcher without an npx preset", agent.ID)
-				}
-			case controlagents.LauncherChoiceManaged, controlagents.LauncherChoiceGlobal:
-				if _, ok := LookupNPXAgent(agent.ID); !ok {
-					t.Errorf("%s declares %s launcher without an npx install preset", agent.ID, launcher)
-				}
-				if _, ok := BuiltinAdapterPackageFor(agent.ID); !ok {
-					t.Errorf("%s declares %s launcher without a managed package", agent.ID, launcher)
-				}
-			case controlagents.LauncherChoiceInstalled:
-				if _, ok := LookupInstalledAgent(agent.ID); !ok {
-					t.Errorf("%s declares installed launcher without an installed-command preset", agent.ID)
-				}
-			default:
-				t.Errorf("%s declares unsupported launcher %q", agent.ID, launcher)
-			}
-		}
+	commands[0] = "changed"
+	if again := InstalledAgentCommandCandidates("qoder"); again[0] != "qoder" {
+		t.Fatalf("InstalledAgentCommandCandidates(qoder) returned aliased values: %#v", again)
 	}
 }
