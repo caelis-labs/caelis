@@ -185,7 +185,7 @@ func (m *Model) applyTranscriptToolToMain(event TranscriptEvent, mutation transc
 // outcome belongs on the RunCommand or Spawn owner. Task write remains visible
 // as a compact interaction row.
 func hiddenTaskControlAction(event TranscriptEvent) (string, bool) {
-	if event.ToolName != surfaceToolTask {
+	if event.ToolName != surfaceToolTask && !standardACPWaitControl(event) {
 		return "", false
 	}
 	action := strings.ToLower(strings.TrimSpace(event.ToolTaskAction))

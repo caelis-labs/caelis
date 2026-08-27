@@ -104,6 +104,24 @@ func (s *sessionState) selectDefaultEffortLocked() {
 	}
 }
 
+func (s *sessionState) reasoningSummaryModeLocked(accountType string) string {
+	if strings.EqualFold(strings.TrimSpace(accountType), "apiKey") {
+		return "none"
+	}
+	for _, model := range s.models {
+		if modelName(model) != s.model || len(model.SupportedEfforts) == 0 {
+			continue
+		}
+		for _, effort := range model.SupportedEfforts {
+			if !strings.EqualFold(strings.TrimSpace(effort.ReasoningEffort), "none") {
+				return "auto"
+			}
+		}
+		return "none"
+	}
+	return "auto"
+}
+
 func (s *sessionState) configOptions() []acp.SessionConfigOption {
 	s.mu.Lock()
 	defer s.mu.Unlock()

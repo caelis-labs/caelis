@@ -235,11 +235,10 @@ func TestParticipantACPEventsDriveForegroundActivity(t *testing.T) {
 	apply(schema.ToolCall{
 		SessionUpdate: schema.UpdateToolCall,
 		ToolCallID:    "review-command-1",
-		Title:         "RunCommand go test ./...",
+		Title:         "go test ./...",
 		Kind:          schema.ToolKindExecute,
 		Status:        schema.ToolStatusInProgress,
 		RawInput:      map[string]any{"command": "go test ./..."},
-		Meta:          acpToolNameMeta("RunCommand"),
 	})
 	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetShell {
 		t.Fatalf("participant tool activity = %#v, want Waiting on shell", m.runningActivity)
@@ -261,6 +260,120 @@ func TestParticipantACPEventsDriveForegroundActivity(t *testing.T) {
 	})
 	if m.runningActivity.Phase != runningPhaseResponding {
 		t.Fatalf("participant response activity = %#v, want Responding", m.runningActivity)
+	}
+}
+
+func TestStandardACPKindPrecedesTerminalMetadataInHint(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.liveTurn.Active = true
+	m.runningHintTracker.beginTurn(time.Unix(100, 0))
+	m.refreshRunningActivity()
+	before := m.runningActivity
+
+	m.applyTranscriptRunningActivity(TranscriptEvent{
+		Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
+		ToolCallID: "read-with-terminal-meta", ToolKind: schema.ToolKindRead, ToolTerminal: true,
+	})
+	if m.runningActivity != before {
+		t.Fatalf("read activity = %#v, want standard kind to preserve %#v", m.runningActivity, before)
+	}
+
+	m.applyTranscriptRunningActivity(TranscriptEvent{
+		Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
+		ToolCallID: "search-1", ToolKind: schema.ToolKindSearch,
+	})
+	if m.runningActivity.Phase != runningPhaseSearch {
+		t.Fatalf("search activity = %#v, want standard search phase", m.runningActivity)
+	}
+}
+
+func TestStandardACPWaitUsesTaskWaitHintSemantics(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.liveTurn.Active = true
+	m.runningHintTracker.beginTurn(time.Unix(100, 0))
+	m.refreshRunningActivity()
+	wait := TranscriptEvent{
+		Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
+		ToolCallID: "codex-wait-1", ToolKind: schema.ToolKindOther, ToolTitle: "wait",
+		ToolTaskAction: "wait", ToolTaskTargetKind: "subagent",
+	}
+	m.applyTranscriptRunningActivity(wait)
+	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetSubagent {
+		t.Fatalf("wait activity = %#v, want Task-wait subagent semantics", m.runningActivity)
+	}
+	wait.Final = true
+	m.applyTranscriptRunningActivity(wait)
+	if m.runningActivity.Phase != runningPhaseModelWait {
+		t.Fatalf("completed wait activity = %#v, want model waiting", m.runningActivity)
+	}
+}
+
+func TestCodexWaitSourcesRemainDistinct(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		event      TranscriptEvent
+		wantPhase  runningActivityPhase
+		wantTarget runningActivityTarget
+		wantHidden bool
+	}{
+		{
+			name: "asynchronous shell wait",
+			event: TranscriptEvent{
+				Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
+				ToolCallID: "shell-wait-1", ToolKind: schema.ToolKindExecute,
+				ToolTitle: "wait", ToolTerminal: true,
+			},
+			wantPhase: runningPhaseToolWait, wantTarget: runningTargetShell,
+		},
+		{
+			name: "collaboration wait",
+			event: TranscriptEvent{
+				Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
+				ToolCallID: "collab-wait-1", ToolKind: schema.ToolKindOther,
+				ToolTitle: "wait", ToolTaskAction: "wait", ToolTaskTargetKind: "subagent",
+			},
+			wantPhase: runningPhaseToolWait, wantTarget: runningTargetSubagent, wantHidden: true,
+		},
+		{
+			name: "provider sleep",
+			event: TranscriptEvent{
+				Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
+				ToolCallID: "sleep-1", ToolKind: schema.ToolKindOther, ToolTitle: "Wait",
+			},
+			wantPhase: runningPhaseModelWait,
+		},
+		{
+			name: "untyped dynamic wait",
+			event: TranscriptEvent{
+				Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
+				ToolCallID: "dynamic-wait-1", ToolKind: schema.ToolKindOther,
+				ToolTitle: "wait", ToolTaskAction: "wait",
+			},
+			wantPhase: runningPhaseModelWait,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			m := NewModel(Config{NoColor: true, NoAnimation: true})
+			m.liveTurn.Active = true
+			m.runningHintTracker.beginTurn(time.Unix(100, 0))
+			m.refreshRunningActivity()
+			m.applyTranscriptRunningActivity(test.event)
+			if m.runningActivity.Phase != test.wantPhase || m.runningActivity.Target != test.wantTarget {
+				t.Fatalf("running activity = %#v, want phase %q target %q", m.runningActivity, test.wantPhase, test.wantTarget)
+			}
+			_, hidden := hiddenTaskControlAction(test.event)
+			if hidden != test.wantHidden {
+				t.Fatalf("hiddenTaskControlAction() hidden = %v, want %v", hidden, test.wantHidden)
+			}
+		})
 	}
 }
 

@@ -23,6 +23,11 @@ type agent struct {
 
 	mu       sync.Mutex
 	sessions map[string]*sessionState
+	// accountType and terminalMode are negotiated once for this ACP
+	// connection. Authentication is Host-owned, so this adapter exposes no
+	// mutation that can make the cached account stale during the connection.
+	accountType  string
+	terminalMode terminalOutputMode
 }
 
 const sessionSteeringMethod = "_session/steering"
@@ -31,6 +36,22 @@ func (a *agent) Initialize(ctx context.Context, request acp.InitializeRequest) (
 	if err := a.waitConnection(ctx); err != nil {
 		return acp.InitializeResponse{}, err
 	}
+	var account struct {
+		Account *struct {
+			Type string `json:"type"`
+		} `json:"account"`
+	}
+	if err := a.backend.rpc.Request(ctx, "account/read", map[string]any{}, &account); err != nil {
+		return acp.InitializeResponse{}, fmt.Errorf("codex adapter: read account: %w", err)
+	}
+	a.mu.Lock()
+	a.terminalMode = terminalOutputModeForCapabilities(request.ClientCapabilities)
+	if account.Account != nil {
+		a.accountType = strings.TrimSpace(account.Account.Type)
+	} else {
+		a.accountType = ""
+	}
+	a.mu.Unlock()
 	protocol := acp.ProtocolVersion(acp.WireProtocolVersion)
 	if request.ProtocolVersion < protocol {
 		protocol = request.ProtocolVersion
@@ -212,6 +233,7 @@ func (a *agent) Prompt(ctx context.Context, request acp.PromptRequest) (acp.Prom
 	if routeErr := state.route.failure(); routeErr != nil {
 		return acp.PromptResponse{}, routeErr
 	}
+	accountType := a.cachedAccountType()
 	state.mu.Lock()
 	if state.activeTurnID != "" {
 		state.mu.Unlock()
@@ -220,8 +242,14 @@ func (a *agent) Prompt(ctx context.Context, request acp.PromptRequest) (acp.Prom
 	state.turnDone = make(chan turnResult, 1)
 	done := state.turnDone
 	model, effort := state.model, state.effort
+	summary := state.reasoningSummaryModeLocked(accountType)
 	state.mu.Unlock()
-	params := map[string]any{"threadId": state.threadID, "input": input, "cwd": state.cwd}
+	params := map[string]any{
+		"threadId": state.threadID,
+		"input":    input,
+		"cwd":      state.cwd,
+		"summary":  summary,
+	}
 	if model != "" {
 		params["model"] = model
 	}
@@ -267,6 +295,27 @@ func (a *agent) Prompt(ctx context.Context, request acp.PromptRequest) (acp.Prom
 		}
 		return acp.PromptResponse{StopReason: result.stopReason}, nil
 	}
+}
+
+func (a *agent) cachedAccountType() string {
+	if a == nil {
+		return ""
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.accountType
+}
+
+func (a *agent) negotiatedTerminalOutputMode() terminalOutputMode {
+	if a == nil {
+		return terminalOutputLegacy
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.terminalMode == terminalOutputCanonical {
+		return terminalOutputCanonical
+	}
+	return terminalOutputLegacy
 }
 
 func (a *agent) finishCancelledTurn(state *sessionState, done chan turnResult) (acp.PromptResponse, error) {

@@ -79,7 +79,7 @@ func (a *agent) loadSession(ctx context.Context, request acp.LoadSessionRequest)
 	if storedErr != nil || requestedErr != nil || stored != requested {
 		return fail(acp.NewInvalidRequest(map[string]any{"error": "loaded Codex Thread cwd changed during authorization"}), false)
 	}
-	updates, err := historyUpdates(thread)
+	updates, err := historyUpdates(thread, a.negotiatedTerminalOutputMode())
 	if err != nil {
 		return fail(err, false)
 	}
@@ -156,11 +156,11 @@ func canonicalJSON(raw json.RawMessage) ([]byte, error) {
 	return json.Marshal(value)
 }
 
-func historyUpdates(thread historyThread) ([]acp.SessionUpdate, error) {
+func historyUpdates(thread historyThread, outputMode terminalOutputMode) ([]acp.SessionUpdate, error) {
 	updates := make([]acp.SessionUpdate, 0)
 	for _, turn := range thread.Turns {
 		for _, raw := range turn.Items {
-			itemUpdates, err := historyItemUpdates(thread.ID, raw)
+			itemUpdates, err := historyItemUpdates(thread.ID, raw, outputMode)
 			if err != nil {
 				return nil, err
 			}
@@ -170,7 +170,7 @@ func historyUpdates(thread historyThread) ([]acp.SessionUpdate, error) {
 	return updates, nil
 }
 
-func historyItemUpdates(threadID string, raw json.RawMessage) ([]acp.SessionUpdate, error) {
+func historyItemUpdates(threadID string, raw json.RawMessage, outputMode terminalOutputMode) ([]acp.SessionUpdate, error) {
 	var item threadItem
 	if err := json.Unmarshal(raw, &item); err != nil {
 		return nil, fmt.Errorf("codex adapter: decode history item: %w", err)
@@ -234,7 +234,7 @@ func historyItemUpdates(threadID string, raw json.RawMessage) ([]acp.SessionUpda
 			if item.Status == "inProgress" {
 				return updates, nil
 			}
-			updates = append(updates, toolComplete(threadID, item))
+			updates = append(updates, toolComplete(threadID, item, true, false, outputMode))
 			return updates, nil
 		}
 		return nil, acp.NewInvalidRequest(map[string]any{"error": "unsupported Codex history item type: " + item.Type})

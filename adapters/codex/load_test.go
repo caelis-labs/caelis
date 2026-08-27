@@ -144,6 +144,8 @@ func serveLoadFakeAppServer(input io.Reader, output io.Writer, cwd string, resul
 		var response any = map[string]any{}
 		switch request.Method {
 		case "initialize":
+		case "account/read":
+			response = map[string]any{"account": map[string]any{"type": "chatgpt"}, "requiresOpenaiAuth": true}
 		case "thread/read":
 			var includeTurns bool
 			_ = json.Unmarshal(request.Params["includeTurns"], &includeTurns)

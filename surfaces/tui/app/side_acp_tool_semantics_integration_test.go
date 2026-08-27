@@ -410,16 +410,27 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 
 	running := schema.ToolStatusInProgress
 	completed := schema.ToolStatusCompleted
+	narrative := func(scope eventstream.Scope, scopeID, participantID, actor, update, text string) eventstream.Envelope {
+		return eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+			Update: schema.ContentChunk{
+				SessionUpdate: update, MessageID: update + "-1",
+				Content: schema.TextContent{Type: "text", Text: text},
+			},
+		}
+	}
 	start := func(scope eventstream.Scope, scopeID, participantID, actor string) eventstream.Envelope {
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
 			Update: schema.ToolCall{
 				SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-1",
-				Title: "RunCommand printf ok", Kind: schema.ToolKindExecute,
+				Title: "printf ok", Kind: schema.ToolKindExecute,
 				Status:   schema.ToolStatusInProgress,
 				RawInput: map[string]any{"command": "printf ok"},
-				Meta:     metautil.WithTerminalInfo(acpToolNameMeta("RunCommand"), "command-1"),
+				Content:  []schema.ToolCallContent{{Type: "terminal", TerminalID: "command-1"}},
+				Meta:     metautil.WithTerminalInfo(nil, "command-1"),
 			},
 		}
 	}
@@ -448,9 +459,11 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 
 	t.Run("participant transcript", func(t *testing.T) {
 		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		model = applyACPEnvelopeForTest(t, model, narrative(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer", schema.UpdateAgentThought, "SHARED_REASONING"))
 		model = applyACPEnvelopeForTest(t, model, start(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer"))
 		model = applyACPEnvelopeForTest(t, model, delta(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer"))
 		model = applyACPEnvelopeForTest(t, model, finish(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer"))
+		model = applyACPEnvelopeForTest(t, model, narrative(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer", schema.UpdateAgentMessage, "SHARED_ASSISTANT"))
 		block := model.findParticipantTurnBlock("participant-turn-1")
 		if block == nil {
 			t.Fatal("participant turn block missing")
@@ -458,7 +471,8 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 		plain := joinRenderedPlain(block.Render(BlockRenderContext{
 			Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
 		}))
-		if strings.Count(plain, "SHARED_TOOL_OUTPUT") != 1 || strings.Contains(plain, "tool update") {
+		if strings.Count(plain, "SHARED_TOOL_OUTPUT") != 1 || !strings.Contains(plain, "SHARED_REASONING") ||
+			!strings.Contains(plain, "SHARED_ASSISTANT") || strings.Contains(plain, "tool update") {
 			t.Fatalf("participant sparse tool update rendered incorrectly:\n%s", plain)
 		}
 	})
@@ -474,6 +488,9 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 				RawInput: map[string]any{"agent": "zenith", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
 			},
 		})
+		childThought := narrative(eventstream.ScopeSubagent, "task-1", "codex", "@zenith", schema.UpdateAgentThought, "SHARED_REASONING")
+		childThought.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		model = applyACPEnvelopeForTest(t, model, childThought)
 		childStart := start(eventstream.ScopeSubagent, "task-1", "codex", "@zenith")
 		childStart.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
 		model = applyACPEnvelopeForTest(t, model, childStart)
@@ -483,13 +500,96 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 		childFinish := finish(eventstream.ScopeSubagent, "task-1", "codex", "@zenith")
 		childFinish.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
 		model = applyACPEnvelopeForTest(t, model, childFinish)
+		childAnswer := narrative(eventstream.ScopeSubagent, "task-1", "codex", "@zenith", schema.UpdateAgentMessage, "SHARED_ASSISTANT")
+		childAnswer.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		model = applyACPEnvelopeForTest(t, model, childAnswer)
 		block := requireMainACPTurnBlockForTest(t, model)
 		if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-1") {
 			t.Fatal("subagent output overlay did not open")
 		}
 		overlay := subagentOutputOverlayPlain(model)
-		if strings.Count(overlay, "SHARED_TOOL_OUTPUT") != 1 || strings.Contains(overlay, "tool update") {
+		if strings.Count(overlay, "SHARED_TOOL_OUTPUT") != 1 || !strings.Contains(overlay, "SHARED_REASONING") ||
+			!strings.Contains(overlay, "SHARED_ASSISTANT") || strings.Contains(overlay, "tool update") {
 			t.Fatalf("subagent sparse tool update rendered incorrectly:\n%s", overlay)
+		}
+	})
+}
+
+func TestStandardACPWaitIsHiddenLikeTaskWaitAcrossParticipantAndOverlay(t *testing.T) {
+	t.Parallel()
+
+	completed := schema.ToolStatusCompleted
+	narrative := func(scope eventstream.Scope, scopeID, participantID, actor string) eventstream.Envelope {
+		return eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentThought, MessageID: "thought-1",
+				Content: schema.TextContent{Type: "text", Text: "checking child agents"},
+			},
+		}
+	}
+	waitUpdates := func(scope eventstream.Scope, scopeID, participantID, actor string) []eventstream.Envelope {
+		base := eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+		}
+		start := base
+		start.Update = schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "codex-wait-1",
+			Title: "wait", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"action": "wait", "target_kind": "subagent"},
+		}
+		finish := base
+		finish.Update = schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "codex-wait-1", Status: &completed,
+		}
+		return []eventstream.Envelope{start, finish}
+	}
+
+	t.Run("participant transcript", func(t *testing.T) {
+		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		model = applyACPEnvelopeForTest(t, model, narrative(eventstream.ScopeParticipant, "participant-turn-1", "codex", "@reviewer"))
+		for _, envelope := range waitUpdates(eventstream.ScopeParticipant, "participant-turn-1", "codex", "@reviewer") {
+			model = applyACPEnvelopeForTest(t, model, envelope)
+		}
+		block := model.findParticipantTurnBlock("participant-turn-1")
+		if block == nil {
+			t.Fatal("participant block missing")
+		}
+		plain := joinRenderedPlain(block.Render(BlockRenderContext{
+			Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
+		}))
+		if strings.Contains(strings.ToLower(plain), "wait") {
+			t.Fatalf("participant transcript exposed collaboration wait row:\n%s", plain)
+		}
+	})
+
+	t.Run("subagent overlay", func(t *testing.T) {
+		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		model.width, model.height = 96, 28
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+			Update: schema.ToolCall{
+				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn reviewer: inspect",
+				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+				RawInput: map[string]any{"agent": "reviewer", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
+			},
+		})
+		thought := narrative(eventstream.ScopeSubagent, "task-1", "codex", "@reviewer")
+		thought.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		model = applyACPEnvelopeForTest(t, model, thought)
+		for _, envelope := range waitUpdates(eventstream.ScopeSubagent, "task-1", "codex", "@reviewer") {
+			envelope.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+			model = applyACPEnvelopeForTest(t, model, envelope)
+		}
+		block := requireMainACPTurnBlockForTest(t, model)
+		if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-1") {
+			t.Fatal("subagent output overlay did not open")
+		}
+		overlay := subagentOutputOverlayPlain(model)
+		if strings.Contains(strings.ToLower(overlay), "wait") {
+			t.Fatalf("subagent overlay exposed collaboration wait row:\n%s", overlay)
 		}
 	})
 }

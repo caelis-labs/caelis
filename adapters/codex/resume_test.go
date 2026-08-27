@@ -109,6 +109,8 @@ func serveResumeFakeAppServer(input io.Reader, output io.Writer, cwd string, res
 		var response any = map[string]any{}
 		switch request.Method {
 		case "initialize":
+		case "account/read":
+			response = map[string]any{"account": map[string]any{"type": "chatgpt"}, "requiresOpenaiAuth": true}
 		case "thread/read":
 			response = map[string]any{"thread": map[string]any{"id": "thread-resume-1", "cwd": cwd}}
 		case "thread/resume":

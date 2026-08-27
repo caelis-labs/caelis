@@ -184,7 +184,36 @@ func (m *Model) applyToolRunningActivity(event TranscriptEvent) {
 		case "cancel":
 			m.setRunningToolActivity(runningPhaseCancel, target, key, event.ToolCallID)
 		}
+	default:
+		// Standard ACP kind is the primary presentation category for anonymous
+		// provider tools. Terminal metadata supplements only an otherwise generic
+		// category; it must not turn a read/edit/think operation into a shell wait.
+		switch strings.ToLower(strings.TrimSpace(event.ToolKind)) {
+		case schema.ToolKindExecute:
+			m.setRunningToolActivity(runningPhaseToolWait, runningTargetShell, key, event.ToolCallID)
+		case schema.ToolKindSearch:
+			m.setRunningToolActivity(runningPhaseSearch, "", key, event.ToolCallID)
+		case schema.ToolKindFetch:
+			m.setRunningToolActivity(runningPhaseFetch, "", key, event.ToolCallID)
+		case schema.ToolKindOther, "":
+			if standardACPWaitControl(event) {
+				m.setRunningToolActivity(runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
+			} else if event.ToolTerminal {
+				m.setRunningToolActivity(runningPhaseToolWait, runningTargetShell, key, event.ToolCallID)
+			}
+		}
 	}
+}
+
+// standardACPWaitControl recognizes the narrow standard-ACP shape emitted for
+// provider collaboration waits. ACP has no dedicated wait kind, so kind=other
+// remains authoritative and title/input only refine this presentation choice.
+func standardACPWaitControl(event TranscriptEvent) bool {
+	return strings.TrimSpace(event.ToolName) == "" &&
+		strings.EqualFold(strings.TrimSpace(event.ToolKind), schema.ToolKindOther) &&
+		strings.EqualFold(strings.TrimSpace(event.ToolTitle), "wait") &&
+		strings.EqualFold(strings.TrimSpace(event.ToolTaskAction), "wait") &&
+		strings.EqualFold(strings.TrimSpace(event.ToolTaskTargetKind), "subagent")
 }
 
 // observeRunningActivityTargets builds a presentation-only owner index from

@@ -27,23 +27,25 @@ type sessionRoute struct {
 	agent *agent
 	state *sessionState
 
-	mu         sync.Mutex
-	mode       routeMode
-	barrier    uint64
-	buffer     []appserver.Notification
-	notify     chan appserver.Notification
-	closed     chan struct{}
-	closeErr   error
-	seenItem   map[string]bool
-	workerOnce sync.Once
-	closeOnce  sync.Once
+	mu          sync.Mutex
+	mode        routeMode
+	barrier     uint64
+	buffer      []appserver.Notification
+	notify      chan appserver.Notification
+	closed      chan struct{}
+	closeErr    error
+	seenItem    map[string]bool
+	startedTool map[string]bool
+	toolOutput  map[string]bool
+	workerOnce  sync.Once
+	closeOnce   sync.Once
 }
 
 func newSessionRoute(agent *agent, state *sessionState, mode routeMode) *sessionRoute {
 	route := &sessionRoute{
 		agent: agent, state: state, mode: mode,
 		notify: make(chan appserver.Notification, 256), closed: make(chan struct{}),
-		seenItem: make(map[string]bool),
+		seenItem: make(map[string]bool), startedTool: make(map[string]bool), toolOutput: make(map[string]bool),
 	}
 	route.workerOnce.Do(func() { go route.run() })
 	return route
@@ -335,13 +337,74 @@ func (r *sessionRoute) translateNotification(notification appserver.Notification
 		update.AgentThoughtChunk.MessageId = &id
 		r.markSeen(value.ItemID)
 		return []acp.SessionUpdate{update}, nil, nil
+	case "item/reasoning/summaryPartAdded":
+		var value struct {
+			ItemID string `json:"itemId"`
+		}
+		_ = json.Unmarshal(notification.Params, &value)
+		if value.ItemID == "" {
+			return nil, nil, nil
+		}
+		update := acp.UpdateAgentThoughtText("\n\n")
+		id := acp.MessageId(stableID(r.state.threadID, value.ItemID, "reasoning"))
+		update.AgentThoughtChunk.MessageId = &id
+		r.markSeen(value.ItemID)
+		return []acp.SessionUpdate{update}, nil, nil
+	case "turn/plan/updated":
+		var value struct {
+			Plan []struct {
+				Step   string `json:"step"`
+				Status string `json:"status"`
+			} `json:"plan"`
+		}
+		_ = json.Unmarshal(notification.Params, &value)
+		entries := make([]acp.PlanEntry, 0, len(value.Plan))
+		for _, step := range value.Plan {
+			status := acp.PlanEntryStatus(step.Status)
+			if step.Status == "inProgress" {
+				status = acp.PlanEntryStatusInProgress
+			}
+			entries = append(entries, acp.PlanEntry{
+				Content: step.Step, Priority: acp.PlanEntryPriorityMedium, Status: status,
+			})
+		}
+		return []acp.SessionUpdate{acp.UpdatePlan(entries...)}, nil, nil
+	case "thread/tokenUsage/updated":
+		var value struct {
+			TokenUsage struct {
+				Last struct {
+					TotalTokens int64 `json:"totalTokens"`
+				} `json:"last"`
+				ModelContextWindow *int64 `json:"modelContextWindow"`
+			} `json:"tokenUsage"`
+		}
+		_ = json.Unmarshal(notification.Params, &value)
+		if value.TokenUsage.Last.TotalTokens < 0 || value.TokenUsage.ModelContextWindow == nil ||
+			*value.TokenUsage.ModelContextWindow <= 0 {
+			return nil, nil, nil
+		}
+		return []acp.SessionUpdate{{UsageUpdate: &acp.SessionUsageUpdate{
+			Used: uint64(value.TokenUsage.Last.TotalTokens), Size: uint64(*value.TokenUsage.ModelContextWindow),
+		}}}, nil, nil
 	case "item/started":
 		item := params["item"]
-		return liveItemStarted(r.state.threadID, item)
+		updates, terminal, err := liveItemStarted(r.state.threadID, item)
+		if err == nil && len(updates) > 0 && updates[0].ToolCall != nil {
+			r.markToolStarted(item)
+		}
+		return updates, terminal, err
 	case "item/completed":
 		item := params["item"]
-		return liveItemCompleted(r.state.threadID, item, r.itemSeen(item))
-	case "item/commandExecution/outputDelta", "command/exec/outputDelta":
+		started := r.takeToolStarted(item)
+		return liveItemCompleted(
+			r.state.threadID,
+			item,
+			r.itemSeen(item),
+			started,
+			r.takeToolOutput(item),
+			r.agent.negotiatedTerminalOutputMode(),
+		)
+	case "item/commandExecution/outputDelta":
 		var value struct {
 			ItemID string `json:"itemId"`
 			Delta  string `json:"delta"`
@@ -350,10 +413,17 @@ func (r *sessionRoute) translateNotification(notification appserver.Notification
 		if value.ItemID == "" || value.Delta == "" {
 			return nil, nil, nil
 		}
-		return []acp.SessionUpdate{acp.UpdateToolCall(
-			acp.ToolCallId(stableID(r.state.threadID, value.ItemID, "tool")),
-			acp.WithUpdateRawOutput(value.Delta),
-		)}, nil, nil
+		return []acp.SessionUpdate{r.terminalOutputUpdate(value.ItemID, value.Delta)}, nil, nil
+	case "item/commandExecution/terminalInteraction":
+		var value struct {
+			ItemID string `json:"itemId"`
+			Stdin  string `json:"stdin"`
+		}
+		_ = json.Unmarshal(notification.Params, &value)
+		if value.ItemID == "" || value.Stdin == "" {
+			return nil, nil, nil
+		}
+		return []acp.SessionUpdate{r.terminalOutputUpdate(value.ItemID, "\n"+value.Stdin+"\n")}, nil, nil
 	case "turn/completed":
 		var value struct {
 			Turn struct {
@@ -391,6 +461,88 @@ func (r *sessionRoute) markSeen(itemID string) {
 	r.mu.Lock()
 	r.seenItem[itemID] = true
 	r.mu.Unlock()
+}
+
+func (r *sessionRoute) markToolOutput(itemID string, negotiated bool) {
+	itemID = strings.TrimSpace(itemID)
+	if itemID == "" {
+		return
+	}
+	r.mu.Lock()
+	if r.toolOutput == nil {
+		r.toolOutput = make(map[string]bool)
+	}
+	compatible, exists := r.toolOutput[itemID]
+	if !exists {
+		r.toolOutput[itemID] = negotiated
+	} else {
+		r.toolOutput[itemID] = compatible && negotiated
+	}
+	r.mu.Unlock()
+}
+
+func (r *sessionRoute) terminalOutputUpdate(itemID, data string) acp.SessionUpdate {
+	terminalID := stableID(r.state.threadID, itemID, "tool")
+	update := acp.UpdateToolCall(acp.ToolCallId(terminalID))
+	negotiatedMode := r.agent.negotiatedTerminalOutputMode()
+	mode := negotiatedMode
+	if mode == terminalOutputCanonical && !r.toolStarted(itemID) {
+		// Canonical terminal output requires a declared terminal. Match the
+		// compatibility behavior until a completion-only snapshot can publish
+		// terminal_info and the authoritative aggregate.
+		mode = terminalOutputLegacy
+	}
+	r.markToolOutput(itemID, mode == negotiatedMode)
+	update.ToolCallUpdate.Meta = encodeMeta(withTerminalOutput(nil, mode, terminalID, data))
+	return update
+}
+
+func (r *sessionRoute) markToolStarted(raw json.RawMessage) {
+	var item struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(raw, &item)
+	item.ID = strings.TrimSpace(item.ID)
+	if item.ID == "" {
+		return
+	}
+	r.mu.Lock()
+	if r.startedTool == nil {
+		r.startedTool = make(map[string]bool)
+	}
+	r.startedTool[item.ID] = true
+	r.mu.Unlock()
+}
+
+func (r *sessionRoute) toolStarted(itemID string) bool {
+	r.mu.Lock()
+	started := r.startedTool[strings.TrimSpace(itemID)]
+	r.mu.Unlock()
+	return started
+}
+
+func (r *sessionRoute) takeToolStarted(raw json.RawMessage) bool {
+	var item struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(raw, &item)
+	r.mu.Lock()
+	started := r.startedTool[item.ID]
+	delete(r.startedTool, item.ID)
+	r.mu.Unlock()
+	return started
+}
+
+func (r *sessionRoute) takeToolOutput(raw json.RawMessage) bool {
+	var item struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(raw, &item)
+	r.mu.Lock()
+	seen := r.toolOutput[item.ID]
+	delete(r.toolOutput, item.ID)
+	r.mu.Unlock()
+	return seen
 }
 
 func (r *sessionRoute) itemSeen(raw json.RawMessage) bool {
