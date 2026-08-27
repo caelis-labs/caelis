@@ -306,6 +306,18 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "product ACP assembly must use principal-bound AppServer clients, not Runtime or Kernel",
 		},
 		{
+			name:       "product ACP Surface rejects prompt router assembly",
+			rel:        "surfaces/acp/agent.go",
+			importPath: modulePath + "/internal/controlprompt/appserveradapter",
+			want:       "product ACP Surface must not select Session authority or assemble prompt routing; use internal/acpagentbridge gateway assembly",
+		},
+		{
+			name:       "product ACP Surface rejects system Session selection",
+			rel:        "surfaces/acp/agent.go",
+			importPath: modulePath + "/control/sessionvisibility",
+			want:       "product ACP Surface must not select Session authority or assemble prompt routing; use internal/acpagentbridge gateway assembly",
+		},
+		{
 			name:       "production file rejects testing dependency",
 			rel:        "internal/acpagentbridge/fakes.go",
 			importPath: "testing",

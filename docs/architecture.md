@@ -67,10 +67,12 @@ Document responsibilities are intentionally separate:
 
 - `cmd/caelis`, `internal/cli`: process entry and mode selection.
 - `surfaces/tui`, `surfaces/headless`, `surfaces/acp`: concrete presentation
-  entities. Product ACP owns both its AppServer-client assembly and stdio
-  transport adapter here, including the connection-facing Agent dispatch
-  contract; it receives the aggregate AppServer clients and no Host, Runtime,
-  Kernel, persistence, or assembly handle.
+  entities. Product ACP owns its stdio transport adapter, connection-facing
+  Agent dispatch contract, per-connection updates and permission callbacks,
+  and slash-result formatting here. Its thin constructor forwards the complete
+  aggregate AppServer clients to Host-private ACP bridge assembly; it does not
+  select Session authority, assemble the prompt router, or receive a Host,
+  Runtime, Kernel, persistence, or assembly handle.
 - `surfaces/internal/promptview`, `surfaces/internal/statusbar`,
   `surfaces/internal/transcript`: private shared presentation projection used
   by concrete Surfaces. These packages are not independent product surfaces or
@@ -380,6 +382,9 @@ Document responsibilities are intentionally separate:
   assembly supplies principal-bound Session, presentation,
   terminal, participant, Task, status, configuration, Agent, completion, and
   plugin clients; prompt and slash operations fail closed on those clients.
+  The product gateway assembly selects the authorized ordinary or system
+  Session client for each target and owns prompt-router and dynamic-command
+  composition; the Surface injects only its plain-text slash formatter.
   Child input uses the reusable Runtime capability and standard ACP prompt or
   steering methods; Task observation is derived from child output and never
   exposes a Kernel Turn handle. The direct
@@ -421,7 +426,8 @@ The current first package-convergence boundary is therefore:
 ```text
 product client composition
     -> control/appserver (obtain and validate one complete aggregate)
-        -> surfaces/acp (receives complete aggregate)
+        -> internal/acpagentbridge (product ACP Agent assembly)
+            -> surfaces/acp (stdio dispatch and connection callbacks)
         -> surfaces/tui (focused prompt clients plus Task observation)
         -> surfaces/headless (focused Session/Turn client)
 

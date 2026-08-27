@@ -543,6 +543,11 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 			target == "agent-sdk/runtime" || strings.HasPrefix(target, "agent-sdk/runtime/")) {
 		return "product ACP assembly must use principal-bound AppServer clients, not Runtime or Kernel"
 	}
+	if strings.HasPrefix(rel, "surfaces/acp/") &&
+		(target == "control/sessionvisibility" ||
+			target == "internal/controlprompt" || strings.HasPrefix(target, "internal/controlprompt/")) {
+		return "product ACP Surface must not select Session authority or assemble prompt routing; use internal/acpagentbridge gateway assembly"
+	}
 	if target == "ports/gateway" || strings.HasPrefix(target, "ports/gateway/") {
 		return "production code must not depend on ports/gateway; use internal/kernel"
 	}
