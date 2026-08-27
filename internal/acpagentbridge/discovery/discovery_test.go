@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestPrepareUsesTemporarySessionAndCleansUpProcess(t *testing.T) {
@@ -531,7 +531,7 @@ func TestDiscoveryHelperProcess(t *testing.T) {
 				writeMarker("initialize-ready", "yes")
 				select {}
 			}
-			response := client.InitializeResponse{ProtocolVersion: 1, AgentCapabilities: schema.AgentCapabilities{SessionCapabilities: map[string]json.RawMessage{"close": json.RawMessage(`{}`)}}}
+			response := client.InitializeResponse{ProtocolVersion: 1, AgentCapabilities: client.AgentCapabilities{SessionCapabilities: map[string]json.RawMessage{"close": json.RawMessage(`{}`)}}}
 			if mode == "auth" {
 				response.AuthMethods = []json.RawMessage{json.RawMessage(`{"id":"login","name":"Login"}`)}
 			}
@@ -545,15 +545,15 @@ func TestDiscoveryHelperProcess(t *testing.T) {
 				}
 			}
 			if mode == "terminal-auth-required" || mode == "terminal-auth-required-unconditional" {
-				var request client.InitializeRequest
+				var request acpsdk.InitializeRequest
 				if err := json.Unmarshal(msg.Params, &request); err != nil {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 				}
-				auth, _ := request.ClientCapabilities["auth"].(map[string]any)
-				if mode == "terminal-auth-required" && auth["terminal"] != true {
+				terminalAuth := request.ClientCapabilities.Auth.Terminal
+				if mode == "terminal-auth-required" && !terminalAuth {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: "terminal auth capability missing"}
 				}
-				if auth["terminal"] == true {
+				if terminalAuth {
 					writeMarker("terminal-capability", "yes")
 				}
 				response.AuthMethods = []json.RawMessage{json.RawMessage(

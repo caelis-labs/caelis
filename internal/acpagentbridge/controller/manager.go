@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -29,20 +30,19 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type Config struct {
 	Registry         *subagent.Registry
-	ClientInfo       *client.Implementation
+	ClientInfo       *acpsdk.Implementation
 	Clock            func() time.Time
 	EndpointResolver endpoint.Resolver
 }
 
 type Manager struct {
 	registry         *subagent.Registry
-	clientInfo       *client.Implementation
+	clientInfo       *acpsdk.Implementation
 	clock            func() time.Time
 	startClient      clientStarter
 	endpointResolver endpoint.Resolver
@@ -78,7 +78,7 @@ type controllerRun struct {
 	supportsClose         bool
 	supportsSteering      bool
 	authenticationMethods []controlagents.AuthenticationMethod
-	promptCapabilities    schema.PromptCapabilities
+	promptCapabilities    acpsdk.PromptCapabilities
 	binding               session.ControllerBinding
 	context               agent.ContextTransfer
 	contextPending        bool
@@ -118,7 +118,7 @@ type controllerClientState struct {
 	supportsClose         bool
 	supportsSteering      bool
 	authenticationMethods []controlagents.AuthenticationMethod
-	promptCapabilities    schema.PromptCapabilities
+	promptCapabilities    acpsdk.PromptCapabilities
 }
 
 type participantRun struct {
@@ -131,7 +131,7 @@ type participantRun struct {
 	authentication        controlagents.Authentication
 	authenticationMethods []controlagents.AuthenticationMethod
 	supportsSteering      bool
-	promptCapabilities    schema.PromptCapabilities
+	promptCapabilities    acpsdk.PromptCapabilities
 	closeOnce             sync.Once
 	closeErr              error
 

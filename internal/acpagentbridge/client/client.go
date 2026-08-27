@@ -35,7 +35,7 @@ type Config struct {
 	Args                []string
 	Env                 map[string]string
 	WorkDir             string
-	ClientInfo          *Implementation
+	ClientInfo          *acpsdk.Implementation
 	OnUpdate            func(UpdateEnvelope)
 	OnPermissionRequest PermissionHandler
 	TerminalAuth        bool
@@ -131,15 +131,16 @@ func (c *Client) bind(peerInput io.Writer, peerOutput io.Reader) error {
 }
 
 func (c *Client) Initialize(ctx context.Context) (InitializeResponse, error) {
-	clientCapabilities := map[string]any{
-		"terminal": false,
-		"_meta":    map[string]any{metautil.TerminalOutputKey: true},
+	clientCapabilities := acpsdk.ClientCapabilities{
+		Meta: map[string]json.RawMessage{
+			metautil.TerminalOutputKey: json.RawMessage("true"),
+		},
 	}
 	if c.cfg.TerminalAuth {
-		clientCapabilities["auth"] = map[string]any{"terminal": true}
+		clientCapabilities.Auth.Terminal = true
 	}
-	return sendRequest[InitializeResponse](c, ctx, MethodInitialize, InitializeRequest{
-		ProtocolVersion:    1,
+	return sendRequest[InitializeResponse](c, ctx, MethodInitialize, acpsdk.InitializeRequest{
+		ProtocolVersion:    acpsdk.ProtocolVersionNumber,
 		ClientCapabilities: clientCapabilities,
 		ClientInfo:         c.cfg.ClientInfo,
 	})

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
@@ -295,7 +296,7 @@ func startE2EClient(ctx context.Context, t *testing.T, cfg e2eClientConfig) *cli
 		Env:                 env,
 		OnUpdate:            cfg.OnUpdate,
 		OnPermissionRequest: cfg.OnPermissionRequest,
-		ClientInfo: &client.Implementation{
+		ClientInfo: &acpsdk.Implementation{
 			Name:    "sdk-acp-client-test",
 			Version: "0.1.0",
 		},

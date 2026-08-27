@@ -10,7 +10,6 @@ import (
 
 	acpclient "github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestAdapterACPHelperProcess(t *testing.T) {
@@ -27,7 +26,7 @@ func TestAdapterACPHelperProcess(t *testing.T) {
 		case acpclient.MethodInitialize:
 			return acpclient.InitializeResponse{
 				ProtocolVersion:   1,
-				AgentCapabilities: schema.AgentCapabilities{},
+				AgentCapabilities: acpclient.AgentCapabilities{},
 				AgentInfo: &acpclient.Implementation{
 					Name:    "adapter-test-acp",
 					Title:   "Assembler Test ACP",

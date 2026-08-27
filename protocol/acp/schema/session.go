@@ -11,46 +11,6 @@ const (
 	StopReasonCancelled = "cancelled"
 )
 
-type Implementation struct {
-	Name    string `json:"name"`
-	Title   string `json:"title,omitempty"`
-	Version string `json:"version"`
-}
-
-type InitializeRequest struct {
-	ProtocolVersion    int             `json:"protocolVersion"`
-	ClientCapabilities map[string]any  `json:"clientCapabilities,omitempty"`
-	ClientInfo         *Implementation `json:"clientInfo,omitempty"`
-}
-
-type AgentCapabilities struct {
-	Auth                map[string]any             `json:"auth,omitempty"`
-	LoadSession         bool                       `json:"loadSession,omitempty"`
-	MCPCapabilities     MCPCapabilities            `json:"mcpCapabilities,omitempty"`
-	PromptCapabilities  PromptCapabilities         `json:"promptCapabilities,omitempty"`
-	SessionCapabilities map[string]json.RawMessage `json:"sessionCapabilities,omitempty"`
-	Meta                map[string]json.RawMessage `json:"_meta,omitempty"`
-}
-
-type MCPCapabilities struct {
-	HTTP bool `json:"http"`
-	SSE  bool `json:"sse"`
-}
-
-type PromptCapabilities struct {
-	Audio           bool `json:"audio"`
-	EmbeddedContext bool `json:"embeddedContext"`
-	Image           bool `json:"image"`
-}
-
-type InitializeResponse struct {
-	ProtocolVersion   int                        `json:"protocolVersion"`
-	AgentCapabilities AgentCapabilities          `json:"agentCapabilities"`
-	AgentInfo         *Implementation            `json:"agentInfo,omitempty"`
-	AuthMethods       []json.RawMessage          `json:"authMethods,omitempty"`
-	Meta              map[string]json.RawMessage `json:"_meta,omitempty"`
-}
-
 type NewSessionRequest struct {
 	CWD        string            `json:"cwd"`
 	MCPServers []json.RawMessage `json:"mcpServers"`

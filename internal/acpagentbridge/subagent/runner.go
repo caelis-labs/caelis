@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -57,7 +58,7 @@ type PermissionRequest struct {
 
 type RunnerConfig struct {
 	Registry          *Registry
-	ClientInfo        *client.Implementation
+	ClientInfo        *acpsdk.Implementation
 	Clock             func() time.Time
 	PermissionHandler PermissionHandler
 	PermissionBridge  PermissionBridge
@@ -68,7 +69,7 @@ type RunnerConfig struct {
 
 type Runner struct {
 	registry          *Registry
-	clientInfo        *client.Implementation
+	clientInfo        *acpsdk.Implementation
 	clock             func() time.Time
 	permissionHandler PermissionHandler
 	permissionBridge  PermissionBridge
@@ -90,7 +91,7 @@ type childRun struct {
 	authenticationMethods []controlagents.AuthenticationMethod
 	spawn                 subagent.SpawnContext
 	supportsSteering      bool
-	promptCapabilities    acpschema.PromptCapabilities
+	promptCapabilities    acpsdk.PromptCapabilities
 	taskID                string
 	sink                  stream.Sink
 	completion            delegation.CompletionSink

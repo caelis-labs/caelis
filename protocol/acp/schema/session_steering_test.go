@@ -6,58 +6,6 @@ import (
 	"testing"
 )
 
-func TestInitializeResponsePreservesTopLevelExtensionMeta(t *testing.T) {
-	t.Parallel()
-
-	raw := []byte(`{
-		"protocolVersion":1,
-		"agentCapabilities":{"_meta":{"legacy":{"supported":true}}},
-		"_meta":{
-			"steering":{"supported":true},
-			"vendor.example":{"revision":2,"features":["alpha"]}
-		}
-	}`)
-	var response InitializeResponse
-	if err := json.Unmarshal(raw, &response); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := response.Meta["steering"]; !ok {
-		t.Fatalf("top-level initialize _meta = %#v, want steering", response.Meta)
-	}
-	if _, ok := response.Meta["vendor.example"]; !ok {
-		t.Fatalf("top-level initialize _meta = %#v, want vendor extension", response.Meta)
-	}
-	if _, ok := response.AgentCapabilities.Meta["legacy"]; !ok {
-		t.Fatalf("agent capabilities _meta = %#v, want independent legacy extension", response.AgentCapabilities.Meta)
-	}
-
-	encoded, err := json.Marshal(response)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var encodedObject map[string]json.RawMessage
-	if err := json.Unmarshal(encoded, &encodedObject); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := encodedObject["_meta"]; !ok {
-		t.Fatalf("encoded initialize response = %s, want top-level _meta", encoded)
-	}
-	var encodedCapabilities map[string]json.RawMessage
-	if err := json.Unmarshal(encodedObject["agentCapabilities"], &encodedCapabilities); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := encodedCapabilities["_meta"]; !ok {
-		t.Fatalf("encoded agent capabilities = %s, want independent _meta", encodedObject["agentCapabilities"])
-	}
-	var roundTrip InitializeResponse
-	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(roundTrip.Meta, response.Meta) || !reflect.DeepEqual(roundTrip.AgentCapabilities.Meta, response.AgentCapabilities.Meta) {
-		t.Fatalf("initialize extension round trip = %#v / %#v, want %#v / %#v", roundTrip.Meta, roundTrip.AgentCapabilities.Meta, response.Meta, response.AgentCapabilities.Meta)
-	}
-}
-
 func TestSessionSteeringRequestPreservesContentAndExtensionMeta(t *testing.T) {
 	t.Parallel()
 

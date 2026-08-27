@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -873,8 +874,8 @@ func TestChildInputHelperProcess(t *testing.T) {
 				Meta: map[string]json.RawMessage{
 					client.SessionSteeringMetaKey: json.RawMessage(`{"supported":true}`),
 				},
-				AgentCapabilities: schema.AgentCapabilities{
-					PromptCapabilities:  schema.PromptCapabilities{Image: true},
+				AgentCapabilities: client.AgentCapabilities{
+					PromptCapabilities:  acpsdk.PromptCapabilities{Image: true},
 					SessionCapabilities: map[string]json.RawMessage{"resume": json.RawMessage(`{}`)},
 				},
 			}

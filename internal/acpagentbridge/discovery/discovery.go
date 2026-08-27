@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
@@ -18,7 +19,7 @@ import (
 
 // Service discovers the catalog declared by a temporary empty ACP session.
 type Service struct {
-	ClientInfo       *client.Implementation
+	ClientInfo       *acpsdk.Implementation
 	Clock            func() time.Time
 	CleanupTimeout   time.Duration
 	EndpointResolver endpoint.Resolver

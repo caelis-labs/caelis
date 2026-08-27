@@ -43,9 +43,36 @@ const (
 	UpdateSessionInfo   = schema.UpdateSessionInfo
 )
 
-type Implementation = schema.Implementation
-type InitializeRequest = schema.InitializeRequest
-type InitializeResponse = schema.InitializeResponse
+// Implementation is the tolerant external-Agent implementation descriptor.
+// The Host-private client keeps the compatibility representation separate
+// from the strict SDK type used by the product's agent-side Surface.
+type Implementation struct {
+	Name    string `json:"name"`
+	Title   string `json:"title,omitempty"`
+	Version string `json:"version"`
+}
+
+// AgentCapabilities retains open external-Agent capability sections that the
+// Host must inspect without rejecting newer peers.
+type AgentCapabilities struct {
+	Auth                map[string]any             `json:"auth,omitempty"`
+	LoadSession         bool                       `json:"loadSession,omitempty"`
+	McpCapabilities     acpsdk.McpCapabilities     `json:"mcpCapabilities,omitempty"`
+	PromptCapabilities  acpsdk.PromptCapabilities  `json:"promptCapabilities,omitempty"`
+	SessionCapabilities map[string]json.RawMessage `json:"sessionCapabilities,omitempty"`
+	Meta                map[string]json.RawMessage `json:"_meta,omitempty"`
+}
+
+// InitializeResponse intentionally retains raw authentication methods and an
+// open session-capability map. External Agent ingress must remain tolerant of
+// newer descriptors while the Surface-owned agent side uses acp-go-sdk types.
+type InitializeResponse struct {
+	ProtocolVersion   int                        `json:"protocolVersion"`
+	AgentCapabilities AgentCapabilities          `json:"agentCapabilities"`
+	AgentInfo         *Implementation            `json:"agentInfo,omitempty"`
+	AuthMethods       []json.RawMessage          `json:"authMethods,omitempty"`
+	Meta              map[string]json.RawMessage `json:"_meta,omitempty"`
+}
 type AuthenticateRequest = acpsdk.AuthenticateRequest
 type AuthenticateResponse = acpsdk.AuthenticateResponse
 type NewSessionRequest = schema.NewSessionRequest

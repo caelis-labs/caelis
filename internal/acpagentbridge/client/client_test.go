@@ -16,6 +16,84 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
+func TestInitializeUsesSDKClientCapabilities(t *testing.T) {
+	t.Parallel()
+
+	clientSide, peerSide := net.Pipe()
+	defer peerSide.Close()
+	acpClient, err := NewStreamClient(clientSide, clientSide, Config{
+		TerminalAuth: true,
+		ClientInfo: &acpsdk.Implementation{
+			Name:    "caelis-test",
+			Version: "test",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer acpClient.Close(context.Background())
+
+	requestCh := make(chan acpsdk.InitializeRequest, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(peerSide)
+		if !scanner.Scan() {
+			errCh <- scanner.Err()
+			return
+		}
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
+			errCh <- err
+			return
+		}
+		var initialize acpsdk.InitializeRequest
+		if err := json.Unmarshal(request.Params, &initialize); err != nil {
+			errCh <- err
+			return
+		}
+		requestCh <- initialize
+		response, err := json.Marshal(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      request.ID,
+			"result": InitializeResponse{
+				ProtocolVersion: 1,
+				AuthMethods:     []json.RawMessage{},
+			},
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		_, err = peerSide.Write(append(response, '\n'))
+		errCh <- err
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := acpClient.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	request := <-requestCh
+	if request.ProtocolVersion != acpsdk.ProtocolVersionNumber {
+		t.Fatalf("protocol version = %d, want %d", request.ProtocolVersion, acpsdk.ProtocolVersionNumber)
+	}
+	if !request.ClientCapabilities.Auth.Terminal {
+		t.Fatal("terminal auth capability = false, want true")
+	}
+	if got := string(request.ClientCapabilities.Meta[metautil.TerminalOutputKey]); got != "true" {
+		t.Fatalf("terminal output capability = %s, want true", got)
+	}
+	if request.ClientInfo == nil || request.ClientInfo.Name != "caelis-test" || request.ClientInfo.Version != "test" {
+		t.Fatalf("client info = %#v, want SDK implementation", request.ClientInfo)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPendingPromptAndSteeringResponsesShareUpdateBarrier(t *testing.T) {
 	t.Parallel()
 

@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
-	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/discovery"
 	"github.com/caelis-labs/caelis/internal/version"
 )
@@ -123,7 +123,7 @@ func (s *controlCommandBackend) reconcileCommittedExternalAgents(ctx context.Con
 }
 
 func (s *controlCommandBackend) acpDiscoveryService() discovery.Service {
-	return discovery.Service{ClientInfo: &client.Implementation{
+	return discovery.Service{ClientInfo: &acpsdk.Implementation{
 		Name:    firstNonEmpty(s.composition.authorities.appName, "caelis"),
 		Version: version.String(),
 	}, EndpointResolver: s.composition.authorities.acpEndpointResolver}

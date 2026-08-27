@@ -22,7 +22,6 @@ import (
 	acpclient "github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *testing.T) {
@@ -612,7 +611,7 @@ func TestGatewayACPOnboardingHelperProcess(t *testing.T) {
 			}
 			response := acpclient.InitializeResponse{
 				ProtocolVersion: 1,
-				AgentCapabilities: schema.AgentCapabilities{
+				AgentCapabilities: acpclient.AgentCapabilities{
 					SessionCapabilities: map[string]json.RawMessage{"close": json.RawMessage(`{}`)},
 				},
 			}

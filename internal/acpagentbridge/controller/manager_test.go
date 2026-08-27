@@ -2155,7 +2155,7 @@ func TestManagerACPResumeFallbackHelperProcess(t *testing.T) {
 		case client.MethodInitialize:
 			return client.InitializeResponse{
 				ProtocolVersion: 1,
-				AgentCapabilities: schema.AgentCapabilities{
+				AgentCapabilities: client.AgentCapabilities{
 					SessionCapabilities: map[string]json.RawMessage{
 						"resume": json.RawMessage("{}"),
 					},
@@ -2214,7 +2214,7 @@ func TestManagerACPControllerReconnectHelperProcess(t *testing.T) {
 		case client.MethodInitialize:
 			return client.InitializeResponse{
 				ProtocolVersion: 1,
-				AgentCapabilities: schema.AgentCapabilities{
+				AgentCapabilities: client.AgentCapabilities{
 					SessionCapabilities: map[string]json.RawMessage{
 						"resume": json.RawMessage("{}"),
 					},
@@ -2355,7 +2355,7 @@ func TestManagerACPControllerReapplyHelperProcess(t *testing.T) {
 		case client.MethodInitialize:
 			return client.InitializeResponse{
 				ProtocolVersion: 1,
-				AgentCapabilities: schema.AgentCapabilities{
+				AgentCapabilities: client.AgentCapabilities{
 					SessionCapabilities: map[string]json.RawMessage{
 						"resume": json.RawMessage("{}"),
 					},
@@ -2460,7 +2460,7 @@ func TestManagerACPControllerModeReapplyHelperProcess(t *testing.T) {
 		case client.MethodInitialize:
 			return client.InitializeResponse{
 				ProtocolVersion: 1,
-				AgentCapabilities: schema.AgentCapabilities{
+				AgentCapabilities: client.AgentCapabilities{
 					SessionCapabilities: map[string]json.RawMessage{
 						"resume": json.RawMessage("{}"),
 					},

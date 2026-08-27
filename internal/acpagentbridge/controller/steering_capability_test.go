@@ -19,7 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestStartACPClientNegotiatesSteeringForNewAndResumedSessions(t *testing.T) {
@@ -1123,7 +1122,7 @@ func TestManagerSteeringCapabilityHelperProcess(t *testing.T) {
 		case client.MethodInitialize:
 			return client.InitializeResponse{
 				ProtocolVersion: 1,
-				AgentCapabilities: schema.AgentCapabilities{SessionCapabilities: map[string]json.RawMessage{
+				AgentCapabilities: client.AgentCapabilities{SessionCapabilities: map[string]json.RawMessage{
 					"resume": json.RawMessage(`{}`),
 				}},
 				Meta: map[string]json.RawMessage{
