@@ -341,7 +341,15 @@ func (c *serverConn) RequestPermission(ctx context.Context, req protocolacp.Requ
 	if err != nil {
 		return protocolacp.RequestPermissionResponse{}, err
 	}
-	return acpsdk.SendRequest[protocolacp.RequestPermissionResponse](rpc, ctx, acpsdk.ClientMethodSessionRequestPermission, req)
+	wireRequest, err := permissionRequestToSDK(req)
+	if err != nil {
+		return protocolacp.RequestPermissionResponse{}, err
+	}
+	wireResponse, err := acpsdk.SendRequest[acpsdk.RequestPermissionResponse](rpc, ctx, acpsdk.ClientMethodSessionRequestPermission, wireRequest)
+	if err != nil {
+		return protocolacp.RequestPermissionResponse{}, err
+	}
+	return permissionResponseFromSDK(wireResponse)
 }
 
 type serverPromptCallbacks struct {
