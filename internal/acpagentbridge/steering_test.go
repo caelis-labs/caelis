@@ -59,7 +59,7 @@ func TestRuntimeAgentSteersExactActiveMainTurnWithoutRevisionCAS(t *testing.T) {
 	agent := steeringTestAgent(client)
 	prompt := []json.RawMessage{
 		jsonrpc.MustMarshalRaw(acp.TextContent{Type: "text", Text: "adjust the plan"}),
-		jsonrpc.MustMarshalRaw(acp.ImageContent{Type: "image", MimeType: "image/png", Data: "aW1hZ2U=", Name: "plan.png"}),
+		json.RawMessage(`{"type":"image","mimeType":"image/png","data":"aW1hZ2U=","name":"plan.png"}`),
 	}
 	response, err := agent.SteerSession(context.Background(), acp.SessionSteeringRequest{
 		SessionID: state.SessionID,

@@ -520,18 +520,8 @@ func decodeUpdate(raw json.RawMessage) (Update, error) {
 			return nil, err
 		}
 		return update, nil
-	case UpdateAvailableCmds:
-		var update AvailableCommandsUpdate
-		if err := json.Unmarshal(raw, &update); err != nil {
-			return nil, err
-		}
-		return update, nil
-	case UpdateConfigOption:
-		var update ConfigOptionUpdate
-		if err := json.Unmarshal(raw, &update); err != nil {
-			return nil, err
-		}
-		return update, nil
+	case UpdateAvailableCmds, UpdateConfigOption, UpdateCurrentMode, UpdateSessionInfo:
+		return decodeStandardSessionStateUpdate(raw, probe.SessionUpdate)
 	default:
 		return schema.DecodeUpdateJSON(raw)
 	}

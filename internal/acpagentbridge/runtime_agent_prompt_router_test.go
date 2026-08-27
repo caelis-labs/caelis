@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -485,14 +486,23 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 			t.Fatalf("notification sessionID = %q, want %q: %#v", notification.SessionID, activeSession.SessionID, notification)
 		}
 		switch update := notification.Update.(type) {
-		case acp.SessionInfoUpdate:
-			seenSessionInfo = update.SessionUpdate == acp.UpdateSessionInfo
-		case acp.CurrentModeUpdate:
-			seenMode = update.SessionUpdate == acp.UpdateCurrentMode && update.CurrentModeID == "default"
 		case acp.ConfigOptionUpdate:
 			seenConfig = update.SessionUpdate == acp.UpdateConfigOption && len(update.ConfigOptions) == 1
-		case acp.AvailableCommandsUpdate:
-			seenCommands = update.SessionUpdate == acp.UpdateAvailableCmds && len(update.AvailableCommands) == 1 && update.AvailableCommands[0].Name == "status"
+		case acp.RawUpdate:
+			switch update.SessionUpdate {
+			case acp.UpdateSessionInfo:
+				var decoded acpsdk.SessionSessionInfoUpdate
+				seenSessionInfo = json.Unmarshal(update.Raw, &decoded) == nil && decoded.SessionUpdate == acp.UpdateSessionInfo
+			case acp.UpdateCurrentMode:
+				var decoded acpsdk.SessionCurrentModeUpdate
+				seenMode = json.Unmarshal(update.Raw, &decoded) == nil &&
+					decoded.SessionUpdate == acp.UpdateCurrentMode && decoded.CurrentModeId == "default"
+			case acp.UpdateAvailableCmds:
+				var decoded acpsdk.SessionAvailableCommandsUpdate
+				seenCommands = json.Unmarshal(update.Raw, &decoded) == nil &&
+					decoded.SessionUpdate == acp.UpdateAvailableCmds &&
+					len(decoded.AvailableCommands) == 1 && decoded.AvailableCommands[0].Name == "status"
+			}
 		}
 	}
 	if !seenSessionInfo || !seenMode || !seenConfig || !seenCommands {

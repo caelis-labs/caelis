@@ -683,7 +683,7 @@ func requireCommittedACPConfiguration(action string, result appserver.CommandRes
 	return &appserver.CommandReceiptError{Receipt: result, Err: err}
 }
 
-func (a *RuntimeAgent) AvailableCommands(ctx context.Context, sessionID string) ([]acp.AvailableCommand, error) {
+func (a *RuntimeAgent) AvailableCommands(ctx context.Context, sessionID string) ([]acpsdk.AvailableCommand, error) {
 	if a.presentationClient != nil {
 		if _, err := a.targetSession(ctx, sessionID); err != nil {
 			return nil, err

@@ -82,7 +82,7 @@ func TestServeStdioSendsAvailableCommandsAfterNewSession(t *testing.T) {
 			t.Fatalf("availableCommands = %#v, want agent command", got.Update.AvailableCommands)
 		}
 		input := got.Update.AvailableCommands[0].Input
-		if input == nil || input.Hint != "use|add|install|list|remove" {
+		if input == nil || input.Unstructured == nil || input.Unstructured.Hint != "use|add|install|list|remove" {
 			t.Fatalf("available command input = %#v, want hint", input)
 		}
 	case <-ctx.Done():
@@ -487,8 +487,8 @@ func TestServeStdioHandlesStableSessionLifecycleMethods(t *testing.T) {
 type availableCommandsNotification struct {
 	SessionID string `json:"sessionId"`
 	Update    struct {
-		SessionUpdate     string                         `json:"sessionUpdate"`
-		AvailableCommands []protocolacp.AvailableCommand `json:"availableCommands"`
+		SessionUpdate     string                    `json:"sessionUpdate"`
+		AvailableCommands []acpsdk.AvailableCommand `json:"availableCommands"`
 	} `json:"update"`
 }
 
@@ -532,11 +532,13 @@ func (commandAgent) Cancel(context.Context, acpsdk.CancelNotification) error {
 	return nil
 }
 
-func (commandAgent) AvailableCommands(context.Context, string) ([]protocolacp.AvailableCommand, error) {
-	return []protocolacp.AvailableCommand{{
+func (commandAgent) AvailableCommands(context.Context, string) ([]acpsdk.AvailableCommand, error) {
+	return []acpsdk.AvailableCommand{{
 		Name:        "agent",
 		Description: "Manage ACP agents",
-		Input:       &protocolacp.AvailableCommandInput{Hint: "use|add|install|list|remove"},
+		Input: &acpsdk.AvailableCommandInput{Unstructured: &acpsdk.UnstructuredCommandInput{
+			Hint: "use|add|install|list|remove",
+		}},
 	}}, nil
 }
 

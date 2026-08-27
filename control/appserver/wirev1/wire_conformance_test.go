@@ -134,7 +134,6 @@ func TestStatusConfigurationRevisionWireRoundTrip(t *testing.T) {
 func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 	text := schema.TextContent{Type: "text", Text: "hello"}
 	title := "tool"
-	updatedAt := "2026-07-13T00:00:00Z"
 	updates := []schema.Update{
 		schema.ContentChunk{SessionUpdate: schema.UpdateUserMessage, Content: text},
 		schema.ContentChunk{SessionUpdate: schema.UpdateAgentMessage, Content: text, MessageID: "message-1"},
@@ -144,10 +143,7 @@ func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 		schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "tool-1", Title: &title, Status: stringPointer(schema.ToolStatusCompleted)},
 		schema.PlanUpdate{SessionUpdate: schema.UpdatePlan, Entries: []schema.PlanEntry{{Content: "Inspect", Status: "completed", Priority: "high"}}},
 		schema.UsageUpdate{SessionUpdate: schema.UpdateUsage, Size: 200000, Used: 42000, Cost: &schema.UsageCost{Total: 0.47, Currency: "USD"}},
-		schema.CurrentModeUpdate{SessionUpdate: schema.UpdateCurrentMode, CurrentModeID: "manual"},
 		schema.ConfigOptionUpdate{SessionUpdate: schema.UpdateConfigOption, ConfigOptions: []schema.SessionConfigOption{}},
-		schema.SessionInfoUpdate{SessionUpdate: schema.UpdateSessionInfo, Title: &title, UpdatedAt: &updatedAt},
-		schema.AvailableCommandsUpdate{SessionUpdate: schema.UpdateAvailableCmds, AvailableCommands: []schema.AvailableCommand{{Name: "review"}}},
 		schema.RawUpdate{SessionUpdate: "vendor/custom", Raw: json.RawMessage(`{"sessionUpdate":"vendor/custom","value":42,"nested":{"ok":true}}`)},
 	}
 	for _, update := range updates {

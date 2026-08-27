@@ -2,10 +2,13 @@ package acpagentbridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -361,9 +364,15 @@ func (a *RuntimeAgent) emitPromptRouterSessionState(ctx context.Context, cb Prom
 		return err
 	}
 	if includeSessionInfo {
+		update, err := standardSessionUpdate(acp.UpdateSessionInfo, acpsdk.SessionSessionInfoUpdate{
+			SessionUpdate: acp.UpdateSessionInfo,
+		})
+		if err != nil {
+			return err
+		}
 		if err := cb.SessionUpdate(ctx, acp.SessionNotification{
 			SessionID: sessionID,
-			Update:    acp.SessionInfoUpdate{SessionUpdate: acp.UpdateSessionInfo},
+			Update:    update,
 		}); err != nil {
 			return err
 		}
@@ -374,12 +383,16 @@ func (a *RuntimeAgent) emitPromptRouterSessionState(ctx context.Context, cb Prom
 			return err
 		}
 		if modes != nil && strings.TrimSpace(modes.CurrentModeID) != "" {
+			update, err := standardSessionUpdate(acp.UpdateCurrentMode, acpsdk.SessionCurrentModeUpdate{
+				SessionUpdate: acp.UpdateCurrentMode,
+				CurrentModeId: acpsdk.SessionModeId(strings.TrimSpace(modes.CurrentModeID)),
+			})
+			if err != nil {
+				return err
+			}
 			if err := cb.SessionUpdate(ctx, acp.SessionNotification{
 				SessionID: sessionID,
-				Update: acp.CurrentModeUpdate{
-					SessionUpdate: acp.UpdateCurrentMode,
-					CurrentModeID: strings.TrimSpace(modes.CurrentModeID),
-				},
+				Update:    update,
 			}); err != nil {
 				return err
 			}
@@ -419,13 +432,28 @@ func (a *RuntimeAgent) emitAvailableCommandsUpdate(ctx context.Context, cb Promp
 	if err != nil {
 		return err
 	}
+	update, err := standardSessionUpdate(acp.UpdateAvailableCmds, acpsdk.SessionAvailableCommandsUpdate{
+		SessionUpdate:     acp.UpdateAvailableCmds,
+		AvailableCommands: commands,
+	})
+	if err != nil {
+		return err
+	}
 	return cb.SessionUpdate(ctx, acp.SessionNotification{
 		SessionID: strings.TrimSpace(sessionID),
-		Update: acp.AvailableCommandsUpdate{
-			SessionUpdate:     acp.UpdateAvailableCmds,
-			AvailableCommands: commands,
-		},
+		Update:    update,
 	})
+}
+
+// standardSessionUpdate keeps standard ACP session-state wire members owned by
+// acp-go-sdk while the bridge still routes other projection updates through the
+// transitional schema.Update callback.
+func standardSessionUpdate(updateType string, update any) (acp.RawUpdate, error) {
+	raw, err := json.Marshal(update)
+	if err != nil {
+		return acp.RawUpdate{}, fmt.Errorf("internal/acpagentbridge: encode %s: %w", updateType, err)
+	}
+	return acp.RawUpdate{SessionUpdate: strings.TrimSpace(updateType), Raw: raw}, nil
 }
 
 func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbacks, fallbackSessionID string, turn controlprompt.Turn, env eventstream.Envelope, outboundFilter *acpNarrativeFilter) error {

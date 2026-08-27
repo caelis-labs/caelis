@@ -1221,18 +1221,25 @@ func (r *controllerRun) applySessionUpdateLocked(clock func() time.Time, update 
 		r.mode = firstNonEmpty(currentModeFromConfigOptions(r.configOptions), r.legacyMode)
 		r.modeOptions = mergeControllerModes(controllerModesFromConfigOptions(r.configOptions), r.legacyModeOptions)
 	case client.CurrentModeUpdate:
-		r.legacyMode = strings.TrimSpace(typed.CurrentModeID)
+		r.legacyMode = strings.TrimSpace(string(typed.CurrentModeId))
 		r.mode = firstNonEmpty(currentModeFromConfigOptions(r.configOptions), r.legacyMode)
 	case client.SessionInfoUpdate:
-		if typed.Title != nil {
-			r.remoteTitle = strings.TrimSpace(*typed.Title)
-		}
-		if typed.UpdatedAt != nil {
-			if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(*typed.UpdatedAt)); err == nil {
-				r.updatedAt = parsed
-				return
+		if typed.TitlePresent {
+			r.remoteTitle = ""
+			if typed.Title != nil {
+				r.remoteTitle = strings.TrimSpace(*typed.Title)
 			}
 		}
+		if typed.UpdatedAtPresent {
+			if typed.UpdatedAt == nil {
+				r.updatedAt = time.Time{}
+				return
+			}
+			if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(*typed.UpdatedAt)); err == nil {
+				r.updatedAt = parsed
+			}
+		}
+		return
 	default:
 		return
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -28,7 +29,7 @@ type SessionLoader interface {
 // CommandProvider supplies direct-runtime conformance with ACP command
 // discovery. Product assembly reads commands from AppServer presentation.
 type CommandProvider interface {
-	AvailableCommands(context.Context, string) ([]schema.AvailableCommand, error)
+	AvailableCommands(context.Context, string) ([]acpsdk.AvailableCommand, error)
 }
 
 // SessionModeReader supplies the bridge with the current ACP mode projection.

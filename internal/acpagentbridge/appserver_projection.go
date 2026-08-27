@@ -1,11 +1,12 @@
 package acpagentbridge
 
 import (
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
-func acpPresentationSnapshot(snapshot appserver.PresentationSnapshot) (*acp.SessionModeState, []acp.SessionConfigOption, []acp.AvailableCommand) {
+func acpPresentationSnapshot(snapshot appserver.PresentationSnapshot) (*acp.SessionModeState, []acp.SessionConfigOption, []acpsdk.AvailableCommand) {
 	var modes *acp.SessionModeState
 	if snapshot.Modes != nil && snapshot.Modes.Target != appserver.PresentationModeTargetApproval {
 		modes = &acp.SessionModeState{CurrentModeID: snapshot.Modes.CurrentModeID}
@@ -14,11 +15,11 @@ func acpPresentationSnapshot(snapshot appserver.PresentationSnapshot) (*acp.Sess
 		}
 	}
 	configs := acpPresentationConfigOptions(snapshot.ConfigOptions)
-	commands := make([]acp.AvailableCommand, 0, len(snapshot.Commands))
+	commands := make([]acpsdk.AvailableCommand, 0, len(snapshot.Commands))
 	for _, command := range snapshot.Commands {
-		mapped := acp.AvailableCommand{Name: command.Name, Description: command.Description}
+		mapped := acpsdk.AvailableCommand{Name: command.Name, Description: command.Description}
 		if command.Input != nil {
-			mapped.Input = &acp.AvailableCommandInput{Hint: command.Input.Hint}
+			mapped.Input = &acpsdk.AvailableCommandInput{Unstructured: &acpsdk.UnstructuredCommandInput{Hint: command.Input.Hint}}
 		}
 		commands = append(commands, mapped)
 	}

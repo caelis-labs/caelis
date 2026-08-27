@@ -1035,10 +1035,10 @@ func (testConfigProvider) SetSessionConfigOption(context.Context, acp.SetSession
 	return acp.SetSessionConfigOptionResponse{}, nil
 }
 
-type availableCommandProvider []acp.AvailableCommand
+type availableCommandProvider []acpsdk.AvailableCommand
 
-func (p availableCommandProvider) AvailableCommands(context.Context, string) ([]acp.AvailableCommand, error) {
-	return append([]acp.AvailableCommand(nil), p...), nil
+func (p availableCommandProvider) AvailableCommands(context.Context, string) ([]acpsdk.AvailableCommand, error) {
+	return append([]acpsdk.AvailableCommand(nil), p...), nil
 }
 
 type testControlTurn struct {

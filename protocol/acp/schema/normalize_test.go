@@ -193,41 +193,19 @@ func TestUsageUpdateRoundTripsFullUint64Range(t *testing.T) {
 	}
 }
 
-func TestAvailableCommandsUpdateMarshalUsesACPCommandInputShape(t *testing.T) {
+func TestDecodeUpdateJSONPreservesSDKOwnedSessionStateUpdate(t *testing.T) {
 	t.Parallel()
 
-	raw, err := json.Marshal(AvailableCommandsUpdate{
-		SessionUpdate: UpdateAvailableCmds,
-		AvailableCommands: []AvailableCommand{{
-			Name:        "agent",
-			Description: "Manage ACP agents",
-			Input:       &AvailableCommandInput{Hint: "use|list"},
-		}, {
-			Name:        "status",
-			Description: "Show status",
-		}},
-	})
+	raw := json.RawMessage(`{"sessionUpdate":"current_mode_update","currentModeId":"review","_meta":{"vendor":{"trace":"abc"}}}`)
+	update, err := DecodeUpdateJSON(raw)
 	if err != nil {
-		t.Fatalf("json.Marshal(AvailableCommandsUpdate) error = %v", err)
+		t.Fatal(err)
 	}
-	var decoded map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal(AvailableCommandsUpdate) error = %v", err)
+	preserved, ok := update.(RawUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want RawUpdate for SDK-owned member", update)
 	}
-	commands, _ := decoded["availableCommands"].([]any)
-	if len(commands) != 2 {
-		t.Fatalf("availableCommands = %#v, want two commands", decoded["availableCommands"])
-	}
-	first, _ := commands[0].(map[string]any)
-	input, _ := first["input"].(map[string]any)
-	if input["hint"] != "use|list" {
-		t.Fatalf("input = %#v, want ACP hint", input)
-	}
-	if _, ok := input["type"]; ok {
-		t.Fatalf("input = %#v, should not include non-standard type", input)
-	}
-	second, _ := commands[1].(map[string]any)
-	if _, ok := second["input"]; ok {
-		t.Fatalf("status command = %#v, input should be omitted", second)
+	if preserved.SessionUpdate != UpdateCurrentMode || string(preserved.Raw) != string(raw) {
+		t.Fatalf("preserved update = %#v, want exact SDK-owned wire", preserved)
 	}
 }

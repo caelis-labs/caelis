@@ -970,7 +970,12 @@ func TestChildInputHelperProcess(t *testing.T) {
 				if err := json.Unmarshal(request.Prompt[0], &header); err != nil || !strings.Contains(header.Text, "[Internal agent message]") {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: "missing Agent sender header"}
 				}
-				var image client.ImageContent
+				var image struct {
+					Type     string `json:"type"`
+					MimeType string `json:"mimeType"`
+					Data     string `json:"data"`
+					Name     string `json:"name"`
+				}
 				if err := json.Unmarshal(request.Prompt[1], &image); err != nil || image.Type != "image" || image.MimeType != "image/png" || image.Data != "aW1hZ2U=" || image.Name != "guide.png" {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: "invalid image prompt"}
 				}

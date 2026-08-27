@@ -6,14 +6,18 @@ import (
 )
 
 const (
-	UpdateUserMessage  = "user_message_chunk"
-	UpdateAgentMessage = "agent_message_chunk"
-	UpdateAgentThought = "agent_thought_chunk"
-	UpdateToolCall     = "tool_call"
-	UpdateToolCallInfo = "tool_call_update"
-	UpdatePlan         = "plan"
-	UpdateCompact      = "compact"
-	UpdateUsage        = "usage_update"
+	UpdateUserMessage   = "user_message_chunk"
+	UpdateAgentMessage  = "agent_message_chunk"
+	UpdateAgentThought  = "agent_thought_chunk"
+	UpdateToolCall      = "tool_call"
+	UpdateToolCallInfo  = "tool_call_update"
+	UpdatePlan          = "plan"
+	UpdateCompact       = "compact"
+	UpdateUsage         = "usage_update"
+	UpdateAvailableCmds = "available_commands_update"
+	UpdateCurrentMode   = "current_mode_update"
+	UpdateConfigOption  = "config_option_update"
+	UpdateSessionInfo   = "session_info_update"
 )
 
 const (
@@ -43,8 +47,8 @@ type Update interface {
 	SessionUpdateType() string
 }
 
-// DecodeUpdateJSON decodes one ACP update union member while preserving
-// unknown vendor updates as RawUpdate.
+// DecodeUpdateJSON decodes one transitional projection update while preserving
+// standard members owned by acp-go-sdk and unknown vendor members as RawUpdate.
 func DecodeUpdateJSON(raw json.RawMessage) (Update, error) {
 	var probe struct {
 		SessionUpdate string `json:"sessionUpdate"`
@@ -64,14 +68,8 @@ func DecodeUpdateJSON(raw json.RawMessage) (Update, error) {
 		target = &PlanUpdate{}
 	case UpdateUsage:
 		target = &UsageUpdate{}
-	case UpdateAvailableCmds:
-		target = &AvailableCommandsUpdate{}
-	case UpdateCurrentMode:
-		target = &CurrentModeUpdate{}
 	case UpdateConfigOption:
 		target = &ConfigOptionUpdate{}
-	case UpdateSessionInfo:
-		target = &SessionInfoUpdate{}
 	default:
 		return RawUpdate{
 			SessionUpdate: strings.TrimSpace(probe.SessionUpdate),
@@ -92,19 +90,15 @@ func DecodeUpdateJSON(raw json.RawMessage) (Update, error) {
 		return *typed, nil
 	case *UsageUpdate:
 		return *typed, nil
-	case *AvailableCommandsUpdate:
-		return *typed, nil
-	case *CurrentModeUpdate:
-		return *typed, nil
 	case *ConfigOptionUpdate:
-		return *typed, nil
-	case *SessionInfoUpdate:
 		return *typed, nil
 	default:
 		panic("unreachable ACP update target")
 	}
 }
 
+// RawUpdate preserves an ACP update that this transitional schema does not own.
+// Its raw object remains authoritative so SDK-owned and vendor fields round-trip.
 type RawUpdate struct {
 	SessionUpdate string          `json:"sessionUpdate"`
 	Raw           json.RawMessage `json:"-"`
@@ -214,6 +208,15 @@ type UsageUpdate struct {
 }
 
 func (u UsageUpdate) SessionUpdateType() string { return u.SessionUpdate }
+
+// ConfigOptionUpdate is retained until the legacy flat configuration-option
+// model is translated to the acp-go-sdk union at its Host-private owner.
+type ConfigOptionUpdate struct {
+	SessionUpdate string                `json:"sessionUpdate"`
+	ConfigOptions []SessionConfigOption `json:"configOptions"`
+}
+
+func (u ConfigOptionUpdate) SessionUpdateType() string { return u.SessionUpdate }
 
 type PermissionOption struct {
 	OptionID string `json:"optionId"`

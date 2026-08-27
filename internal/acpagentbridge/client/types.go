@@ -85,17 +85,13 @@ type PlanEntry = schema.PlanEntry
 type PlanUpdate = schema.PlanUpdate
 type UsageUpdate = schema.UsageUpdate
 type UsageCost = schema.UsageCost
-type CurrentModeUpdate = schema.CurrentModeUpdate
-type SessionInfoUpdate = schema.SessionInfoUpdate
+type CurrentModeUpdate = acpsdk.SessionCurrentModeUpdate
 type PermissionOption = schema.PermissionOption
 type RequestPermissionRequest = schema.RequestPermissionRequest
 type RequestPermissionResponse = schema.RequestPermissionResponse
 type PermissionOutcome = schema.PermissionOutcome
 type TextContent = schema.TextContent
-type ImageContent = schema.ImageContent
 type RawUpdate = schema.RawUpdate
-type AvailableCommand = schema.AvailableCommand
-type AvailableCommandInput = schema.AvailableCommandInput
 
 const (
 	SessionSteeringMetaKey = schema.SessionSteeringMetaKey
@@ -128,14 +124,22 @@ type TextChunk struct {
 	Text string `json:"text"`
 }
 
-type AvailableCommandsUpdate struct {
-	SessionUpdate     string           `json:"sessionUpdate"`
-	AvailableCommands []map[string]any `json:"availableCommands"`
-}
+type AvailableCommandsUpdate = acpsdk.SessionAvailableCommandsUpdate
 
 type ConfigOptionUpdate struct {
 	SessionUpdate string                `json:"sessionUpdate"`
 	ConfigOptions []SessionConfigOption `json:"configOptions"`
+}
+
+// SessionInfoUpdate retains field presence after the SDK has validated the
+// standard wire variant. ACP uses an explicit null to clear either field, while
+// an absent field leaves the existing value unchanged.
+type SessionInfoUpdate struct {
+	SessionUpdate    string
+	Title            *string
+	TitlePresent     bool
+	UpdatedAt        *string
+	UpdatedAtPresent bool
 }
 
 type Update any

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -129,7 +130,12 @@ func TestBuildPromptPartsPreservesContentPartWhitespace(t *testing.T) {
 	if err := json.Unmarshal(parts[0], &first); err != nil {
 		t.Fatal(err)
 	}
-	var image client.ImageContent
+	var image struct {
+		Type     string `json:"type"`
+		MimeType string `json:"mimeType"`
+		Data     string `json:"data"`
+		Name     string `json:"name"`
+	}
 	if err := json.Unmarshal(parts[1], &image); err != nil {
 		t.Fatal(err)
 	}
@@ -473,8 +479,8 @@ func TestControllerRunApplyStartupStatePreservesPreSessionUpdates(t *testing.T) 
 	run := &controllerRun{}
 	run.applySessionUpdateLocked(func() time.Time { return time.Unix(1, 0) }, client.AvailableCommandsUpdate{
 		SessionUpdate: client.UpdateAvailableCmds,
-		AvailableCommands: []map[string]any{
-			{"name": "/search", "description": "remote search"},
+		AvailableCommands: []acpsdk.AvailableCommand{
+			{Name: "/search", Description: "remote search"},
 		},
 	})
 	run.applySessionUpdateLocked(func() time.Time { return time.Unix(2, 0) }, client.ConfigOptionUpdate{
@@ -487,7 +493,7 @@ func TestControllerRunApplyStartupStatePreservesPreSessionUpdates(t *testing.T) 
 	})
 	run.applySessionUpdateLocked(func() time.Time { return time.Unix(3, 0) }, client.CurrentModeUpdate{
 		SessionUpdate: client.UpdateCurrentMode,
-		CurrentModeID: "review",
+		CurrentModeId: "review",
 	})
 
 	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
@@ -531,9 +537,11 @@ func TestControllerRunAppliesSessionInfoUpdate(t *testing.T) {
 	updatedAt := "2026-05-04T12:34:56Z"
 	run := &controllerRun{}
 	run.applySessionUpdateLocked(func() time.Time { return time.Unix(1, 0) }, client.SessionInfoUpdate{
-		SessionUpdate: client.UpdateSessionInfo,
-		Title:         &title,
-		UpdatedAt:     &updatedAt,
+		SessionUpdate:    client.UpdateSessionInfo,
+		Title:            &title,
+		TitlePresent:     true,
+		UpdatedAt:        &updatedAt,
+		UpdatedAtPresent: true,
 	})
 
 	status := run.controllerStatusLocked(session.SessionRef{SessionID: "parent"})
@@ -542,6 +550,58 @@ func TestControllerRunAppliesSessionInfoUpdate(t *testing.T) {
 	}
 	if got := status.UpdatedAt.Format(time.RFC3339); got != updatedAt {
 		t.Fatalf("UpdatedAt = %q, want %q", got, updatedAt)
+	}
+
+	run.applySessionUpdateLocked(func() time.Time { return time.Unix(2, 0) }, client.SessionInfoUpdate{
+		SessionUpdate: client.UpdateSessionInfo,
+	})
+	status = run.controllerStatusLocked(session.SessionRef{SessionID: "parent"})
+	if got := status.RemoteTitle; got != "Remote title" {
+		t.Fatalf("RemoteTitle after absent title = %q, want retained value", got)
+	}
+	if got := status.UpdatedAt.Format(time.RFC3339); got != updatedAt {
+		t.Fatalf("UpdatedAt after absent field = %q, want retained %q", got, updatedAt)
+	}
+
+	run.applySessionUpdateLocked(func() time.Time { return time.Unix(3, 0) }, client.SessionInfoUpdate{
+		SessionUpdate: client.UpdateSessionInfo,
+		TitlePresent:  true,
+	})
+	status = run.controllerStatusLocked(session.SessionRef{SessionID: "parent"})
+	if got := status.RemoteTitle; got != "" {
+		t.Fatalf("RemoteTitle after null title = %q, want cleared value", got)
+	}
+	if got := status.UpdatedAt.Format(time.RFC3339); got != updatedAt {
+		t.Fatalf("UpdatedAt after title-only update = %q, want retained %q", got, updatedAt)
+	}
+
+	run.applySessionUpdateLocked(func() time.Time { return time.Unix(4, 0) }, client.SessionInfoUpdate{
+		SessionUpdate:    client.UpdateSessionInfo,
+		UpdatedAtPresent: true,
+	})
+	if got := run.controllerStatusLocked(session.SessionRef{SessionID: "parent"}).UpdatedAt; !got.IsZero() {
+		t.Fatalf("UpdatedAt after null = %v, want zero", got)
+	}
+
+	newUpdatedAt := "2026-05-05T12:34:56.123Z"
+	run.applySessionUpdateLocked(func() time.Time { return time.Unix(5, 0) }, client.SessionInfoUpdate{
+		SessionUpdate:    client.UpdateSessionInfo,
+		UpdatedAt:        &newUpdatedAt,
+		UpdatedAtPresent: true,
+	})
+	status = run.controllerStatusLocked(session.SessionRef{SessionID: "parent"})
+	if got := status.UpdatedAt.Format(time.RFC3339Nano); got != newUpdatedAt {
+		t.Fatalf("UpdatedAt after new value = %q, want %q", got, newUpdatedAt)
+	}
+
+	invalidUpdatedAt := "not-a-timestamp"
+	run.applySessionUpdateLocked(func() time.Time { return time.Unix(6, 0) }, client.SessionInfoUpdate{
+		SessionUpdate:    client.UpdateSessionInfo,
+		UpdatedAt:        &invalidUpdatedAt,
+		UpdatedAtPresent: true,
+	})
+	if got := run.controllerStatusLocked(session.SessionRef{SessionID: "parent"}).UpdatedAt.Format(time.RFC3339Nano); got != newUpdatedAt {
+		t.Fatalf("UpdatedAt after invalid value = %q, want retained %q", got, newUpdatedAt)
 	}
 }
 
@@ -878,9 +938,9 @@ func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
 		}
 		onUpdate(client.UpdateEnvelope{Update: client.AvailableCommandsUpdate{
 			SessionUpdate: client.UpdateAvailableCmds,
-			AvailableCommands: []map[string]any{{
-				"name":        "/search",
-				"description": "remote search",
+			AvailableCommands: []acpsdk.AvailableCommand{{
+				Name:        "/search",
+				Description: "remote search",
 			}},
 		}})
 		return nil, remoteID, controllerClientState{

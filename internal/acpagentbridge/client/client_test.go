@@ -74,6 +74,88 @@ func TestPendingPromptAndSteeringResponsesShareUpdateBarrier(t *testing.T) {
 	}
 }
 
+func TestDecodeStandardSessionStateUpdatesUsesSDKValidation(t *testing.T) {
+	t.Parallel()
+
+	mode, err := decodeUpdate(json.RawMessage(`{"sessionUpdate":"current_mode_update","currentModeId":"review"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modeUpdate, ok := mode.(CurrentModeUpdate)
+	if !ok || modeUpdate.SessionUpdate != UpdateCurrentMode || modeUpdate.CurrentModeId != "review" {
+		t.Fatalf("mode update = %#v (%T), want SDK current-mode update", mode, mode)
+	}
+
+	commands, err := decodeUpdate(json.RawMessage(`{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"search","description":"remote search"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandUpdate, ok := commands.(AvailableCommandsUpdate)
+	if !ok || len(commandUpdate.AvailableCommands) != 1 || commandUpdate.AvailableCommands[0].Name != "search" {
+		t.Fatalf("available commands update = %#v (%T), want SDK available-commands update", commands, commands)
+	}
+
+	config, err := decodeUpdate(json.RawMessage(`{"sessionUpdate":"config_option_update","configOptions":[{"type":"select","id":"model","name":"Model","currentValue":"fast","options":[{"value":"fast","name":"Fast"}]},{"type":"boolean","id":"verbose","name":"Verbose","currentValue":true}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configUpdate, ok := config.(ConfigOptionUpdate)
+	if !ok || len(configUpdate.ConfigOptions) != 2 || configUpdate.ConfigOptions[0].CurrentValue != "fast" || configUpdate.ConfigOptions[1].CurrentValue != true {
+		t.Fatalf("config option update = %#v (%T), want SDK-validated normalized update", config, config)
+	}
+
+	info, err := decodeUpdate(json.RawMessage(`{"sessionUpdate":"session_info_update","title":"Remote title","updatedAt":"2026-08-28T00:00:00Z"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	infoUpdate, ok := info.(SessionInfoUpdate)
+	if !ok || infoUpdate.SessionUpdate != UpdateSessionInfo || !infoUpdate.TitlePresent || infoUpdate.Title == nil || *infoUpdate.Title != "Remote title" || !infoUpdate.UpdatedAtPresent {
+		t.Fatalf("session info update = %#v (%T), want SDK session-info update", info, info)
+	}
+}
+
+func TestDecodeSessionInfoUpdatePreservesAbsentAndNull(t *testing.T) {
+	t.Parallel()
+
+	missing, err := decodeUpdate(json.RawMessage(`{"sessionUpdate":"session_info_update"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingUpdate := missing.(SessionInfoUpdate)
+	if missingUpdate.TitlePresent || missingUpdate.UpdatedAtPresent {
+		t.Fatalf("missing fields = %#v, want both absent", missingUpdate)
+	}
+
+	cleared, err := decodeUpdate(json.RawMessage(`{"sessionUpdate":"session_info_update","title":null,"updatedAt":null}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clearedUpdate := cleared.(SessionInfoUpdate)
+	if !clearedUpdate.TitlePresent || clearedUpdate.Title != nil || !clearedUpdate.UpdatedAtPresent || clearedUpdate.UpdatedAt != nil {
+		t.Fatalf("null fields = %#v, want present nil values", clearedUpdate)
+	}
+}
+
+func TestDecodeStandardSessionStateUpdatesRejectsInvalidVariants(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]json.RawMessage{
+		"current mode missing id":               json.RawMessage(`{"sessionUpdate":"current_mode_update"}`),
+		"available command missing description": json.RawMessage(`{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"search"}]}`),
+		"available commands null":               json.RawMessage(`{"sessionUpdate":"available_commands_update","availableCommands":null}`),
+		"config option missing name":            json.RawMessage(`{"sessionUpdate":"config_option_update","configOptions":[{"type":"boolean","id":"verbose","currentValue":true}]}`),
+	}
+	for name, raw := range tests {
+		name, raw := name, raw
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if update, err := decodeUpdate(raw); err == nil {
+				t.Fatalf("decodeUpdate() = %#v, want strict SDK validation error", update)
+			}
+		})
+	}
+}
+
 func servePromptAndSteering(t *testing.T, peer net.Conn, responsesWritten chan<- struct{}) {
 	t.Helper()
 	scanner := bufio.NewScanner(peer)

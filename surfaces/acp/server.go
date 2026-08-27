@@ -319,11 +319,18 @@ func (c *serverConn) emitAvailableCommands(ctx context.Context, handler commandP
 	if err != nil || len(cmds) == 0 {
 		return
 	}
+	raw, err := json.Marshal(acpsdk.SessionAvailableCommandsUpdate{
+		SessionUpdate:     protocolacp.UpdateAvailableCmds,
+		AvailableCommands: cmds,
+	})
+	if err != nil {
+		return
+	}
 	_ = c.SessionUpdate(ctx, protocolacp.SessionNotification{
 		SessionID: sessionID,
-		Update: protocolacp.AvailableCommandsUpdate{
-			SessionUpdate:     protocolacp.UpdateAvailableCmds,
-			AvailableCommands: cmds,
+		Update: protocolacp.RawUpdate{
+			SessionUpdate: protocolacp.UpdateAvailableCmds,
+			Raw:           raw,
 		},
 	})
 }

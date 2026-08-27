@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
@@ -44,19 +45,14 @@ func contentChunkText(chunk client.ContentChunk) string {
 	return acpingress.ContentChunkText(chunk)
 }
 
-func controllerCommandsFromACP(in []map[string]any) []ControllerCommand {
+func controllerCommandsFromACP(in []acpsdk.AvailableCommand) []ControllerCommand {
 	if len(in) == 0 {
 		return nil
 	}
 	out := make([]ControllerCommand, 0, len(in))
 	seen := map[string]struct{}{}
 	for _, item := range in {
-		name := normalizeACPCommandName(firstNonEmpty(
-			stringMapValue(item, "name"),
-			stringMapValue(item, "command"),
-			stringMapValue(item, "id"),
-			stringMapValue(item, "title"),
-		))
+		name := normalizeACPCommandName(item.Name)
 		if name == "" {
 			continue
 		}
@@ -66,7 +62,7 @@ func controllerCommandsFromACP(in []map[string]any) []ControllerCommand {
 		}
 		out = append(out, ControllerCommand{
 			Name:        name,
-			Description: firstNonEmpty(stringMapValue(item, "description"), stringMapValue(item, "detail")),
+			Description: strings.TrimSpace(item.Description),
 		})
 		seen[key] = struct{}{}
 	}

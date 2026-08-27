@@ -128,7 +128,7 @@ func (a *ProductAgent) SteerSession(ctx context.Context, req protocolacp.Session
 	return a.inner.SteerSession(ctx, req)
 }
 
-func (a *ProductAgent) AvailableCommands(ctx context.Context, sessionID string) ([]protocolacp.AvailableCommand, error) {
+func (a *ProductAgent) AvailableCommands(ctx context.Context, sessionID string) ([]acpsdk.AvailableCommand, error) {
 	return a.inner.AvailableCommands(ctx, sessionID)
 }
 
@@ -161,7 +161,7 @@ type sessionConfigSetter interface {
 }
 
 type commandProvider interface {
-	AvailableCommands(context.Context, string) ([]protocolacp.AvailableCommand, error)
+	AvailableCommands(context.Context, string) ([]acpsdk.AvailableCommand, error)
 }
 
 type sessionSteerer interface {
