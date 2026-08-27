@@ -240,7 +240,7 @@ func TestForwardSessionReconnectPreservesFeedGapAndDoesNotCompleteTurn(t *testin
 		t.Fatalf("result = %#v, messages = %#v, want one queued interrupted terminal", result, messages)
 	}
 	terminal, ok := messages[0].(eventstream.Envelope)
-	if !ok || !eventstream.IsTerminalLifecycle(terminal) || terminal.Lifecycle.State != eventstream.LifecycleStateInterrupted {
+	if !ok || !eventstream.IsTurnTerminalLifecycle(terminal) || terminal.Lifecycle.State != eventstream.LifecycleStateInterrupted {
 		t.Fatalf("terminal = %#v, want interrupted lifecycle", messages[0])
 	}
 	var gotGap *appserver.FeedGapError

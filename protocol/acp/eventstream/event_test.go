@@ -602,7 +602,7 @@ func TestTurnLifecycleConstructors(t *testing.T) {
 	}
 }
 
-func TestIsTerminalLifecycle(t *testing.T) {
+func TestIsTurnTerminalLifecycleRequiresTerminalLifecycle(t *testing.T) {
 	for _, state := range []string{
 		LifecycleStateCompleted,
 		LifecycleStateFailed,
@@ -611,16 +611,16 @@ func TestIsTerminalLifecycle(t *testing.T) {
 		"canceled",
 		"terminated",
 	} {
-		if !IsTerminalLifecycle(Envelope{Kind: KindLifecycle, Lifecycle: &Lifecycle{State: state}}) {
+		if !IsTurnTerminalLifecycle(Envelope{Kind: KindLifecycle, Lifecycle: &Lifecycle{State: state}}) {
 			t.Fatalf("state %q should be terminal", state)
 		}
 	}
 	for _, state := range []string{"", LifecycleStateRunning, "queued"} {
-		if IsTerminalLifecycle(Envelope{Kind: KindLifecycle, Lifecycle: &Lifecycle{State: state}}) {
+		if IsTurnTerminalLifecycle(Envelope{Kind: KindLifecycle, Lifecycle: &Lifecycle{State: state}}) {
 			t.Fatalf("state %q should not be terminal", state)
 		}
 	}
-	if IsTerminalLifecycle(Envelope{Kind: KindError, Lifecycle: &Lifecycle{State: LifecycleStateCompleted}}) {
+	if IsTurnTerminalLifecycle(Envelope{Kind: KindError, Lifecycle: &Lifecycle{State: LifecycleStateCompleted}}) {
 		t.Fatal("non-lifecycle envelope should not be terminal")
 	}
 }

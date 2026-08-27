@@ -311,7 +311,7 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 	mainEvents <- eventstream.TurnCompleted(handle.HandleID(), handle.RunID(), handle.TurnID(), time.Now())
 	close(mainEvents)
 	terminal := receiveControlClientIngressEnvelope(t, subscription.Events())
-	if !eventstream.IsTerminalLifecycle(terminal) {
+	if !eventstream.IsTurnTerminalLifecycle(terminal) {
 		t.Fatalf("last envelope = %#v, want terminal lifecycle", terminal)
 	}
 }
@@ -356,7 +356,7 @@ func TestAttachControlClientHandleFailureCancelsAndPublishesAfterProducerBarrier
 	close(handle.releaseProducer)
 
 	terminal := receiveControlClientIngressEnvelope(t, published)
-	if !eventstream.IsTerminalLifecycle(terminal) || terminal.Lifecycle.State != eventstream.LifecycleStateFailed {
+	if !eventstream.IsTurnTerminalLifecycle(terminal) || terminal.Lifecycle.State != eventstream.LifecycleStateFailed {
 		t.Fatalf("terminal = %#v, want one failed terminal", terminal)
 	}
 	select {

@@ -59,7 +59,7 @@ func TestForwardTurnEventStreamCoalescesNarrativeWithoutCorruptingEnvelopeIdenti
 		t.Fatalf("pre-terminal narrative = %q, want flushed before terminal", got)
 	}
 	last, ok := sent[4].(eventstream.Envelope)
-	if !ok || !eventstream.IsTerminalLifecycle(last) {
+	if !ok || !eventstream.IsTurnTerminalLifecycle(last) {
 		t.Fatalf("last message = %#v, want terminal", sent[4])
 	}
 }

@@ -181,7 +181,7 @@ func TestFeedBrokerMainTerminalReconcilesCommittedAssistantFirst(t *testing.T) {
 	if !ok || chunk.SessionUpdate != schema.UpdateAgentMessage || schema.ExtractTextValue(chunk.Content) != "committed final answer" {
 		t.Fatalf("first event = %#v, want committed assistant", got[0])
 	}
-	if !eventstream.IsTerminalLifecycle(got[1]) {
+	if !eventstream.IsTurnTerminalLifecycle(got[1]) {
 		t.Fatalf("second event = %#v, want terminal", got[1])
 	}
 }
@@ -384,7 +384,7 @@ func TestFeedBrokerExactReconnectDeliversBashSpawnAndFinalExactlyOnce(t *testing
 		case schema.ToolCallUpdate:
 			seen[update.ToolCallID]++
 		default:
-			if eventstream.IsTerminalLifecycle(envelope) {
+			if eventstream.IsTurnTerminalLifecycle(envelope) {
 				seen["final"]++
 			}
 		}

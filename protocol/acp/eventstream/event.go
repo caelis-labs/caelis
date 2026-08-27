@@ -254,19 +254,12 @@ func TurnCancelled(handleID string, runID string, turnID string, reason string, 
 	return TurnLifecycle(handleID, runID, turnID, LifecycleStateCancelled, reason, string(acpsdk.StopReasonCancelled), occurredAt)
 }
 
-func IsTerminalLifecycle(env Envelope) bool {
-	if env.Kind != KindLifecycle || env.Lifecycle == nil {
-		return false
-	}
-	return IsTerminalLifecycleState(env.Lifecycle.State)
-}
-
 // IsTurnTerminalLifecycle reports whether an Envelope closes one main Turn.
 // Other domain lifecycles may use the same terminal states; in particular, an
 // approval settlement carries ApprovalRequestID and must not end its owning
 // Turn. An empty Scope is accepted for unstamped Runtime output.
 func IsTurnTerminalLifecycle(env Envelope) bool {
-	if !IsTerminalLifecycle(env) {
+	if env.Kind != KindLifecycle || env.Lifecycle == nil || !IsTerminalLifecycleState(env.Lifecycle.State) {
 		return false
 	}
 	if env.Scope != "" && env.Scope != ScopeMain {

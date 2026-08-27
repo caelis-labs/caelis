@@ -2631,7 +2631,7 @@ func TestForwardTurnEventStreamQueuesLiveACPEnvelopes(t *testing.T) {
 		t.Fatalf("first message = %#v, want session/update envelope", sent[0])
 	}
 	last, ok := sent[1].(eventstream.Envelope)
-	if !ok || !eventstream.IsTerminalLifecycle(last) || last.Lifecycle.State != eventstream.LifecycleStateCompleted {
+	if !ok || !eventstream.IsTurnTerminalLifecycle(last) || last.Lifecycle.State != eventstream.LifecycleStateCompleted {
 		t.Fatalf("last message = %#v, want completed terminal lifecycle", sent[1])
 	}
 
