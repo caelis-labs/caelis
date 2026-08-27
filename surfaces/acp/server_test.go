@@ -113,20 +113,17 @@ func TestServeStdioSendsAvailableCommandsAfterNewSession(t *testing.T) {
 		serverErr <- ServeStdio(ctx, commandAgent{}, clientToServerReader, serverToClientWriter)
 	}()
 
-	type observedUpdate struct {
-		notification availableCommandsNotification
-	}
-	updates := make(chan observedUpdate, 1)
+	updates := make(chan acpsdk.SessionNotification, 1)
 	conn, err := acpsdk.NewConnectionWithOptions(
 		func(_ context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
 			if method != acpsdk.ClientMethodSessionUpdate {
 				return nil, acpsdk.NewMethodNotFound(method)
 			}
-			var notification availableCommandsNotification
+			var notification acpsdk.SessionNotification
 			if err := json.Unmarshal(params, &notification); err != nil {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 			}
-			updates <- observedUpdate{notification: notification}
+			updates <- notification
 			return nil, nil
 		},
 		clientToServerWriter,
@@ -151,18 +148,18 @@ func TestServeStdioSendsAvailableCommandsAfterNewSession(t *testing.T) {
 	case <-time.After(availableCommandsAfterSessionNewDelay / 2):
 	}
 	select {
-	case observed := <-updates:
-		got := observed.notification
-		if got.SessionID != "session-1" {
-			t.Fatalf("notification sessionId = %q, want session-1", got.SessionID)
+	case got := <-updates:
+		if got.SessionId != "session-1" {
+			t.Fatalf("notification sessionId = %q, want session-1", got.SessionId)
 		}
-		if got.Update.SessionUpdate != protocolacp.UpdateAvailableCmds {
-			t.Fatalf("sessionUpdate = %q, want %q", got.Update.SessionUpdate, protocolacp.UpdateAvailableCmds)
+		update := got.Update.AvailableCommandsUpdate
+		if update == nil || update.SessionUpdate != protocolacp.UpdateAvailableCmds {
+			t.Fatalf("session update = %#v, want available_commands_update", got.Update)
 		}
-		if len(got.Update.AvailableCommands) != 1 || got.Update.AvailableCommands[0].Name != "agent" {
-			t.Fatalf("availableCommands = %#v, want agent command", got.Update.AvailableCommands)
+		if len(update.AvailableCommands) != 1 || update.AvailableCommands[0].Name != "agent" {
+			t.Fatalf("availableCommands = %#v, want agent command", update.AvailableCommands)
 		}
-		input := got.Update.AvailableCommands[0].Input
+		input := update.AvailableCommands[0].Input
 		if input == nil || input.Unstructured == nil || input.Unstructured.Hint != "use|add|install|list|remove" {
 			t.Fatalf("available command input = %#v, want hint", input)
 		}
@@ -602,14 +599,6 @@ func TestServeStdioHandlesStableSessionLifecycleMethods(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("server did not stop after context cancellation")
 	}
-}
-
-type availableCommandsNotification struct {
-	SessionID string `json:"sessionId"`
-	Update    struct {
-		SessionUpdate     string                    `json:"sessionUpdate"`
-		AvailableCommands []acpsdk.AvailableCommand `json:"availableCommands"`
-	} `json:"update"`
 }
 
 type commandAgent struct{}

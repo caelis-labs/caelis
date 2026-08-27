@@ -285,7 +285,11 @@ func (c *serverConn) SessionUpdate(_ context.Context, notification protocolacp.S
 	if err != nil {
 		return err
 	}
-	return rpc.SendNotification(c.lifecycle, acpsdk.ClientMethodSessionUpdate, notification)
+	wire, err := sessionNotificationForWire(notification)
+	if err != nil {
+		return err
+	}
+	return rpc.SendNotification(c.lifecycle, acpsdk.ClientMethodSessionUpdate, wire)
 }
 
 func (c *serverConn) afterAvailableCommands(inbound *serverInboundRequest, sessionID string, delay time.Duration) error {
