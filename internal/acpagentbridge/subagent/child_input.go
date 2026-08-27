@@ -222,10 +222,17 @@ func (r *Runner) submitActiveChildInputLocked(
 	run.mu.RLock()
 	supportsSteering := run.supportsSteering
 	supportsImages := run.promptCapabilities.Image
+	targetHandle := strings.TrimPrefix(strings.TrimSpace(run.spawn.Handle), "@")
 	activityID := slot.activityCheckpoint().activityID
 	run.mu.RUnlock()
 	if !supportsSteering {
-		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent cannot receive follow-up messages.")
+		if targetHandle == "" {
+			targetHandle = strings.TrimPrefix(firstNonEmpty(req.Target.ParticipantID, req.Target.EndpointKey), "@")
+		}
+		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, fmt.Sprintf(
+			"ACP Agent @%s lacks _session/steering; cancel turn, retry SendMessage.",
+			targetHandle,
+		))
 	}
 	if acputil.ContentPartsContainImage(req.ContentParts) && !supportsImages {
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent does not accept image input.")

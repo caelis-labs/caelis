@@ -5514,6 +5514,28 @@ func TestTaskControlSnapshotToolResultDescribesSubagentInterruption(t *testing.T
 	}
 }
 
+func TestTaskControlSnapshotToolResultDoesNotClaimPendingSubagentCancellation(t *testing.T) {
+	t.Parallel()
+
+	result := taskControlSnapshotToolResult(
+		tool.Call{ID: "task-cancel-1", Name: tasktool.ToolName},
+		tool.Definition{Name: tasktool.ToolName},
+		taskapi.Snapshot{
+			Ref:     taskapi.Ref{TaskID: "task-1", SessionID: "session-1"},
+			Handle:  "nova",
+			Kind:    taskapi.KindSubagent,
+			State:   taskapi.StateUnknownOutcome,
+			Running: true,
+		},
+		"cancel",
+		0,
+	)
+
+	if len(result.Content) != 1 || result.Content[0].Text == nil || result.Content[0].Text.Text != "Cancel requested for @nova; wait for it to stop." {
+		t.Fatalf("cancel result content = %#v, want pending cancellation guidance", result.Content)
+	}
+}
+
 func TestTaskSnapshotToolResultLeavesTruncationToAgentLoop(t *testing.T) {
 	t.Parallel()
 

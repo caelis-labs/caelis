@@ -406,6 +406,62 @@ func TestRunnerCancelReturnsRemoteNotificationFailure(t *testing.T) {
 	}
 }
 
+func TestRunnerCancelNaturalTerminalIsEndpointNoop(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		state      delegation.State
+		finishing  bool
+		result     string
+		diagnostic string
+	}{
+		{name: "completed", state: delegation.StateCompleted, result: "natural final"},
+		{name: "failed finishing", state: delegation.StateFailed, finishing: true, diagnostic: "natural failure"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			stdoutReader, stdoutWriter := io.Pipe()
+			stdinReader, stdinWriter := io.Pipe()
+			remote, err := client.NewStreamClient(stdinWriter, stdoutReader, client.Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = stdinReader.Close()
+			defer stdoutWriter.Close()
+			defer remote.Close(context.Background())
+			localCancelled := false
+			run := &childRun{
+				anchor: delegation.Anchor{
+					TaskID: "task-natural-" + test.name, SessionID: "child-natural", AgentID: "helper-1",
+				},
+				taskID: "task-natural-" + test.name, client: remote,
+				state: test.state, result: test.result, failureDetail: test.diagnostic,
+				finishing: test.finishing, cancel: func() { localCancelled = true },
+			}
+			runner := &Runner{clock: time.Now, runs: map[string]*childRun{run.taskID: run}}
+
+			if err := runner.Cancel(context.Background(), run.anchor); err != nil {
+				t.Fatalf("Cancel() error = %v, want terminal endpoint no-op", err)
+			}
+			run.mu.RLock()
+			cancelRequested := run.cancelRequested
+			state := run.state
+			finishing := run.finishing
+			run.mu.RUnlock()
+			if cancelRequested || localCancelled || state != test.state || finishing != test.finishing {
+				t.Fatalf("terminal run after Cancel = state %q finishing=%v cancelRequested=%v localCancelled=%v", state, finishing, cancelRequested, localCancelled)
+			}
+			observed, err := runner.Wait(context.Background(), run.anchor, 0)
+			if err != nil || observed.Running || observed.State != test.state || observed.Result != test.result || observed.Error != test.diagnostic {
+				t.Fatalf("Wait() = %#v, %v; want original terminal result", observed, err)
+			}
+		})
+	}
+}
+
 func TestDelegationTerminalStatesRemainEligibleForAnotherTurn(t *testing.T) {
 	t.Parallel()
 

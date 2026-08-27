@@ -124,13 +124,14 @@ func TestActiveChildInputUnsupportedErrorIsModelFacing(t *testing.T) {
 	run := &childRun{}
 	slot := newChildSlot(agent.ChildEndpointRef{EndpointKey: "child"}, run)
 	_, err := (&Runner{}).submitActiveChildInputLocked(
-		context.Background(), slot, run, agent.ChildInputRequest{}, nil,
+		context.Background(), slot, run, agent.ChildInputRequest{Target: slot.target}, nil,
 	)
 	if !errorcode.Is(err, errorcode.Unsupported) {
 		t.Fatalf("error = %v, want unsupported", err)
 	}
-	if got := err.Error(); got != "Target Agent cannot receive follow-up messages." {
-		t.Fatalf("error = %q", got)
+	want := "ACP Agent @child lacks _session/steering; cancel turn, retry SendMessage."
+	if got := err.Error(); got != want {
+		t.Fatalf("error = %q, want %q", got, want)
 	}
 }
 

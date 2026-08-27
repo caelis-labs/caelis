@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 )
@@ -27,7 +29,10 @@ type taskControlAccess uint8
 const (
 	taskControlObserve taskControlAccess = iota
 	taskControlExclusive
+	taskControlCancel
 )
+
+const subagentCancelOperationClaimTimeout = time.Second
 
 func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest, access taskControlAccess, fn func(taskControlTarget, taskapi.ControlRequest) (taskapi.Snapshot, error)) (taskapi.Snapshot, error) {
 	req = normalizeTaskControlRequest(req)
@@ -48,11 +53,35 @@ func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req 
 		}
 		return fn(subagentControlTarget{runtime: tm, task: task}, req)
 	}
-	release, claimed := tm.tryClaimSubagentOperation(ref, identity.taskID)
-	if !claimed {
-		return taskapi.Snapshot{}, fmt.Errorf("task already has an operation in progress")
+	var release func()
+	if access == taskControlCancel && identity.kind == taskapi.KindSubagent {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		claimCtx, cancelClaim := context.WithTimeout(ctx, subagentCancelOperationClaimTimeout)
+		defer cancelClaim()
+		release, err = tm.waitForTaskOperationClaim(claimCtx, ref, identity.taskID)
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return taskapi.Snapshot{}, ctxErr
+			}
+			return taskapi.Snapshot{}, errorcode.Wrap(
+				errorcode.Timeout,
+				fmt.Sprintf("task cancel timed out after %s waiting for task state update", subagentCancelOperationClaimTimeout),
+				err,
+			)
+		}
+	} else {
+		var claimed bool
+		release, claimed = tm.tryClaimSubagentOperation(ref, identity.taskID)
+		if !claimed {
+			return taskapi.Snapshot{}, fmt.Errorf("task already has an operation in progress")
+		}
 	}
 	defer release()
+	// Reload after claim admission. A producer that completed while cancel was
+	// waiting wins, and cancelSubagentSaga rechecks that canonical running state
+	// before it can publish or send a cancellation effect.
 	target, err := tm.lookupControlTargetClaimed(ctx, ref, identity)
 	if err != nil {
 		return taskapi.Snapshot{}, err

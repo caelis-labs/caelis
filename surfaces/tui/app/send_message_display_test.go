@@ -258,10 +258,10 @@ func TestSendMessageFailureDoesNotClaimDelivery(t *testing.T) {
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "message-1", Status: &failed,
 			Content: []schema.ToolCallContent{{
-				Type: "content", Content: schema.TextContent{Type: "text", Text: "Target Agent cannot receive follow-up messages."},
+				Type: "content", Content: schema.TextContent{Type: "text", Text: "ACP Agent @orbit lacks _session/steering; cancel turn, retry SendMessage."},
 			}},
 			RawOutput: map[string]any{
-				"error": "Target Agent cannot receive follow-up messages.", "error_code": "unsupported",
+				"error": "ACP Agent @orbit lacks _session/steering; cancel turn, retry SendMessage.", "error_code": "unsupported",
 			},
 			Meta: acpToolNameMeta("SendMessage"),
 		},
@@ -270,7 +270,7 @@ func TestSendMessageFailureDoesNotClaimDelivery(t *testing.T) {
 	model.syncViewportContent()
 	plain := strings.Join(model.viewportPlainLines, "\n")
 	if !strings.Contains(plain, "• Failed to send orbit: validation recommendation") ||
-		!strings.Contains(plain, "Target Agent cannot receive follow-up messages.") {
+		!strings.Contains(plain, "ACP Agent @orbit lacks _session/steering; cancel turn, retry SendMessage.") {
 		t.Fatalf("failed SendMessage presentation mismatch:\n%s", plain)
 	}
 	if strings.Contains(plain, "• Sent ") || strings.Contains(plain, "internal/acpagentbridge") {

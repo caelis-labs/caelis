@@ -306,17 +306,25 @@ func (tm *taskRuntime) tryClaimSubagentOperation(ref session.SessionRef, taskID 
 	tm.mu.Unlock()
 	return func() {
 		tm.mu.Lock()
-		delete(tm.operations, operationKey)
-		if changed := tm.operationChanged[operationKey]; changed != nil {
-			close(changed)
-			delete(tm.operationChanged, operationKey)
-		}
+		tm.releaseTaskOperationLocked(operationKey)
 		completion, completionOperationKey := tm.startSubagentCompletionLocked(strings.TrimSpace(taskID))
 		tm.mu.Unlock()
 		if completion != nil {
 			go tm.applySubagentCompletion(completion, completionOperationKey)
 		}
 	}, true
+}
+
+// releaseTaskOperationLocked releases one operation owner and notifies every
+// waiter before the slot may transfer to a queued producer completion. Woken
+// waiters recheck ownership and keep waiting when such a transfer occurs.
+// Callers must hold tm.mu.
+func (tm *taskRuntime) releaseTaskOperationLocked(operationKey string) {
+	delete(tm.operations, operationKey)
+	if changed := tm.operationChanged[operationKey]; changed != nil {
+		close(changed)
+		delete(tm.operationChanged, operationKey)
+	}
 }
 
 func (tm *taskRuntime) waitForTaskOperationClaim(ctx context.Context, ref session.SessionRef, taskID string) (func(), error) {

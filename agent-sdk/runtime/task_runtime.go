@@ -74,7 +74,7 @@ func (tm *taskRuntime) Write(ctx context.Context, ref session.SessionRef, req ta
 }
 
 func (tm *taskRuntime) Cancel(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return tm.control(ctx, ref, req, taskControlExclusive, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return tm.control(ctx, ref, req, taskControlCancel, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
 		return target.Cancel(ctx, normalized)
 	})
 }
@@ -203,7 +203,15 @@ func taskCancelToolPayload(snapshot taskapi.Snapshot) map[string]any {
 
 func subagentInterruptedText(snapshot taskapi.Snapshot) string {
 	handle := strings.TrimPrefix(taskPublicHandle(snapshot), "@")
-	return fmt.Sprintf("Subagent @%s is interrupted.", handle)
+	if snapshot.Running {
+		return fmt.Sprintf("Cancel requested for @%s; wait for it to stop.", handle)
+	}
+	switch snapshot.State {
+	case taskapi.StateCompleted, taskapi.StateFailed:
+		return fmt.Sprintf("Subagent @%s is already %s.", handle, snapshot.State)
+	default:
+		return fmt.Sprintf("Subagent @%s is interrupted.", handle)
+	}
 }
 
 func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {

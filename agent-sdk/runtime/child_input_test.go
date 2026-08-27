@@ -174,6 +174,171 @@ func TestRuntimeChildInputLeavesTaskUnchangedUntilOutputThenObservesGeneration(t
 	}
 }
 
+func TestRuntimeCancelBeforeFirstFrameKeepsScopedJournalThroughLiveDurableAndRecovery(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	runner := &runtimeChildInputRunner{
+		spawnResult:           delegation.Result{State: delegation.StateCompleted, Result: "initial result"},
+		waitResult:            delegation.Result{State: delegation.StateRunning, Running: true},
+		waitResultAfterCancel: &delegation.Result{State: delegation.StateCompleted, Result: "turn two final"},
+	}
+	runtime, active := newSubagentTaskTestRuntime(t, runner)
+	var err error
+	active, err = runtime.sessions.BindController(ctx, session.BindControllerRequest{
+		SessionRef:    active.SessionRef,
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		Binding: session.ControllerBinding{
+			Kind: session.ControllerKindKernel, ControllerID: "controller-1", AgentName: "main",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := runtime.tasks.StartSubagent(ctx, active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "cancel-before-frame", Agent: "helper", Prompt: "initial", Role: session.ParticipantRoleDelegated,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.tasks.mu.RLock()
+	current := runtime.tasks.subagents[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	current.mu.Lock()
+	target := agent.ChildEndpointRef{
+		ParticipantID: current.anchor.AgentID,
+		SessionID:     current.anchor.SessionID,
+		EndpointKey:   current.ref.TaskID,
+		Role:          subagentParticipantRole(current),
+		Placement:     current.target.Placement,
+	}
+	current.mu.Unlock()
+	runner.mu.Lock()
+	observer := runner.observer
+	runner.mu.Unlock()
+	if err := observer.ObserveChildActivity(ctx, agent.ChildActivityEvent{
+		Target: target, ActivityID: "activity-1", Cursor: 1, Initial: true,
+		Result: &delegation.Result{
+			TaskID: started.Ref.TaskID, State: delegation.StateCompleted,
+			Result: "initial result", UpdatedAt: time.Now(),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runtime.tasks.markSubagentFinalResponseObserved(current.snapshot())
+
+	input, err := runtime.SubmitChildInput(ctx, active.SessionRef, agent.ChildInputCommand{
+		Target: started.Handle,
+		Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
+		Input:  "continue before output",
+	})
+	if err != nil || !input.StartedActivity || input.ActivityID != "activity-2" {
+		t.Fatalf("SubmitChildInput() = (%#v, %v)", input, err)
+	}
+	cancelReq := taskapi.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Source: "agent_tool",
+	}
+	cancelled, err := runtime.tasks.Cancel(ctx, active.SessionRef, cancelReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if phase := subagentCancelPhase(taskStringValue(cancelled.Metadata[subagentCancelPhaseKey])); phase != subagentCancelPhaseApplied {
+		t.Fatalf("cancel phase = %q, want %q", phase, subagentCancelPhaseApplied)
+	}
+	if cancelTurnSeq, ok := subagentCancelTurnSeq(cancelled.Metadata); !ok || cancelTurnSeq != 2 {
+		t.Fatalf("cancel turn = %d, %v; want scoped Turn 2", cancelTurnSeq, ok)
+	}
+	if turnSeq, _ := taskInt64Value(cancelled.Metadata["turn_seq"]); turnSeq != 1 {
+		t.Fatalf("pending cancellation Task Turn = %d, want prior observed Turn 1", turnSeq)
+	}
+	if got := runtime.tasks.consumeSubagentFinalResponses(cancelled); len(taskFinalResponses(got.Result)) != 0 {
+		t.Fatalf("pending cancellation exposed future FinalResponses: %#v", got.Result)
+	}
+	runner.mu.Lock()
+	observer = runner.observer
+	cancelCalls := runner.cancelCalls
+	runner.mu.Unlock()
+	if cancelCalls != 1 {
+		t.Fatalf("Runner.Cancel calls = %d, want one", cancelCalls)
+	}
+	live, ok := observer.(agent.ChildActivityLiveObserver)
+	if !ok {
+		t.Fatalf("activity observer = %T, want live observer", observer)
+	}
+	firstFrame := agent.ChildActivityEvent{
+		Target: target, ActivityID: input.ActivityID, Cursor: 2,
+		Frame: &stream.Frame{Running: true, Event: &session.Event{
+			ID: "turn-2-first-frame", Type: session.EventTypeAssistant,
+			Visibility: session.VisibilityUIOnly, Text: "turn two output", Time: time.Now(),
+		}},
+	}
+	if err := live.ObserveChildActivityLive(ctx, firstFrame); err != nil {
+		t.Fatal(err)
+	}
+	runtime.tasks.mu.RLock()
+	current = runtime.tasks.subagents[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	liveSnapshot := current.snapshot()
+	if turnSeq, _ := taskInt64Value(liveSnapshot.Metadata["turn_seq"]); turnSeq != 2 {
+		t.Fatalf("live Turn = %d, want 2", turnSeq)
+	}
+	if phase := subagentCancelPhase(taskStringValue(liveSnapshot.Metadata[subagentCancelPhaseKey])); phase != subagentCancelPhaseApplied {
+		t.Fatalf("live cancel phase = %q, want preserved", phase)
+	}
+	if cancelTurnSeq, ok := subagentCancelTurnSeq(liveSnapshot.Metadata); !ok || cancelTurnSeq != 2 {
+		t.Fatalf("live cancel Turn = %d, %v; want 2", cancelTurnSeq, ok)
+	}
+	if err := observer.ObserveChildActivity(ctx, firstFrame); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := runtime.tasks.store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if phase := subagentCancelPhase(taskStringValue(stored.Metadata[subagentCancelPhaseKey])); phase != subagentCancelPhaseApplied {
+		t.Fatalf("durable cancel phase = %q, want preserved", phase)
+	}
+	if cancelTurnSeq, ok := subagentCancelTurnSeq(stored.Metadata); !ok || cancelTurnSeq != 2 {
+		t.Fatalf("durable metadata cancel Turn = %d, %v; want 2", cancelTurnSeq, ok)
+	}
+	if cancelTurnSeq, ok := subagentCancelTurnSeq(stored.Spec); !ok || cancelTurnSeq != 2 {
+		t.Fatalf("durable spec cancel Turn = %d, %v; want 2", cancelTurnSeq, ok)
+	}
+
+	terminal, err := runtime.tasks.Cancel(ctx, active.SessionRef, cancelReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal.Running || terminal.State != taskapi.StateCompleted {
+		t.Fatalf("reconciled cancellation = %#v, want completed Turn 2", terminal)
+	}
+	if turnSeq, _ := taskInt64Value(terminal.Metadata["turn_seq"]); turnSeq != 2 {
+		t.Fatalf("reconciled Task Turn = %d, want 2", turnSeq)
+	}
+	observedFinal := runtime.tasks.consumeSubagentFinalResponses(terminal)
+	responses := taskFinalResponses(observedFinal.Result)
+	if len(responses) != 1 || taskStringValue(responses[0]["turn_id"]) != subagentTurnID(started.Ref.TaskID, 2) ||
+		taskRawStringValue(responses[0]["final_message"]) != "turn two final" {
+		t.Fatalf("reconciled final_responses = %#v, want one Turn 2 Final", responses)
+	}
+	if repeated := taskFinalResponses(runtime.tasks.consumeSubagentFinalResponses(terminal).Result); len(repeated) != 0 {
+		t.Fatalf("repeated cancellation reconciliation returned Finals: %#v", repeated)
+	}
+	runtime.tasks.mu.Lock()
+	delete(runtime.tasks.subagents, started.Ref.TaskID)
+	runtime.tasks.mu.Unlock()
+	if _, err := runtime.tasks.Cancel(ctx, active.SessionRef, cancelReq); err != nil {
+		t.Fatal(err)
+	}
+	runner.mu.Lock()
+	cancelCalls = runner.cancelCalls
+	runner.mu.Unlock()
+	if cancelCalls != 1 {
+		t.Fatalf("Runner.Cancel calls after retry and rehydrate = %d, want one", cancelCalls)
+	}
+}
+
 func TestRuntimeChildActivityBatchUsesOneRunningWriteAndKeepsGapNonTerminal(t *testing.T) {
 	t.Parallel()
 
@@ -835,12 +1000,28 @@ func TestRuntimeChildInputDetachFirstRejectsSiblingDispatch(t *testing.T) {
 }
 
 type runtimeChildInputRunner struct {
-	mu          sync.Mutex
-	spawnResult delegation.Result
-	observer    agent.ChildActivityObserver
-	target      agent.ChildEndpointRef
-	request     agent.ChildInputRequest
-	calls       int
+	mu                    sync.Mutex
+	spawnResult           delegation.Result
+	waitResult            delegation.Result
+	waitResultAfterCancel *delegation.Result
+	observer              agent.ChildActivityObserver
+	target                agent.ChildEndpointRef
+	request               agent.ChildInputRequest
+	calls                 int
+	waitCalls             int
+	cancelCalls           int
+}
+
+func taskFinalResponses(result map[string]any) []map[string]any {
+	raw, _ := result[subagentFinalResponsesResultKey].([]any)
+	responses := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		response, _ := item.(map[string]any)
+		if response != nil {
+			responses = append(responses, response)
+		}
+	}
+	return responses
 }
 
 type fastTerminalActivityRunner struct {
@@ -990,11 +1171,22 @@ func (r *runtimeChildInputRunner) SpawnTarget(_ context.Context, spawn subagent.
 	}, delegation.CloneResult(r.spawnResult), nil
 }
 
-func (*runtimeChildInputRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
-	return delegation.Result{}, nil
+func (r *runtimeChildInputRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.waitCalls++
+	if r.cancelCalls > 0 && r.waitResultAfterCancel != nil {
+		return delegation.CloneResult(*r.waitResultAfterCancel), nil
+	}
+	return delegation.CloneResult(r.waitResult), nil
 }
 
-func (*runtimeChildInputRunner) Cancel(context.Context, delegation.Anchor) error { return nil }
+func (r *runtimeChildInputRunner) Cancel(context.Context, delegation.Anchor) error {
+	r.mu.Lock()
+	r.cancelCalls++
+	r.mu.Unlock()
+	return nil
+}
 
 func (r *runtimeChildInputRunner) BindChildActivityObserver(_ context.Context, target agent.ChildEndpointRef, _ uint64, observer agent.ChildActivityObserver) error {
 	r.mu.Lock()

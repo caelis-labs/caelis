@@ -327,7 +327,8 @@ func (tm *taskRuntime) rebaseObservedSubagentTask(task *subagentTask, current *t
 		mergedMetadata[key] = value
 	}
 	for _, key := range []string{
-		"final_event_persisted", "continue_phase", "continue_prompt", "continue_context", "continue_digest", "continue_turn_seq", "continue_reason",
+		"final_event_persisted", subagentCancelPhaseKey, subagentCancelTurnSeqKey,
+		"continue_phase", "continue_prompt", "continue_context", "continue_digest", "continue_turn_seq", "continue_reason",
 	} {
 		if _, kept := liveMetadata[key]; !kept {
 			delete(mergedMetadata, key)
@@ -356,6 +357,11 @@ func (tm *taskRuntime) rebaseObservedSubagentTask(task *subagentTask, current *t
 	for key, value := range rebased.Spec {
 		mergedSpec[key] = value
 	}
+	for _, key := range []string{subagentCancelPhaseKey, subagentCancelTurnSeqKey} {
+		if _, kept := rebased.Spec[key]; !kept {
+			delete(mergedSpec, key)
+		}
+	}
 	for _, key := range []string{"continue_phase", "continue_digest", "continue_turn_seq"} {
 		delete(mergedSpec, key)
 	}
@@ -379,6 +385,15 @@ func beginObservedSubagentActivityLocked(task *subagentTask) {
 	task.applyResult(delegation.Result{
 		TaskID: task.ref.TaskID, State: delegation.StateRunning, Running: true,
 	})
+	// Cancellation phases are owned by one child Turn. Preserve the journal
+	// when this first observation opens its preselected generation; a strictly
+	// later activity, or a legacy unscoped phase, clears it for a fresh effect.
+	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata[subagentCancelPhaseKey]))
+	cancelTurnSeq, cancelTurnScoped := subagentCancelTurnSeq(task.metadata)
+	if cancelPhase == subagentCancelPhaseNone || !cancelTurnScoped || cancelTurnSeq != task.turnSeq {
+		delete(task.metadata, subagentCancelPhaseKey)
+		delete(task.metadata, subagentCancelTurnSeqKey)
+	}
 	delete(task.metadata, "final_event_persisted")
 }
 

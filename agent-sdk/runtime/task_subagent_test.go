@@ -13,6 +13,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
@@ -952,9 +953,10 @@ func TestSubagentReadDoesNotAdvanceCancellationReconciliation(t *testing.T) {
 	runtime.tasks.mu.RLock()
 	subagentTask := runtime.tasks.subagents[started.Ref.TaskID]
 	runtime.tasks.mu.RUnlock()
-	if err := runtime.tasks.persistSubagentCancelPhase(
+	if _, err := runtime.tasks.persistSubagentCancelPhase(
 		ctx,
 		subagentTask,
+		subagentTask.turnSeq,
 		subagentCancelPhaseApplied,
 		"remote cancellation is pending terminal confirmation",
 		nil,
@@ -1283,6 +1285,305 @@ func TestTaskCancelEndsTurnWithoutRetiringSubagentIdentity(t *testing.T) {
 	}
 	if len(updated.Participants) != 1 || updated.Participants[0].DelegationID != started.Ref.TaskID {
 		t.Fatalf("participants after cancel = %#v, want stable child binding retained", updated.Participants)
+	}
+}
+
+func TestTaskCancelWaitsForOperationClaimThenRechecksTerminalState(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		waitResult:  delegation.Result{State: delegation.StateCancelled},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep this test on the process-local canonical Task so the simulated owner
+	// can publish its terminal state immediately before releasing the claim.
+	runtime.tasks.store = nil
+	release, claimed := runtime.tasks.tryClaimSubagentOperation(activeSession.SessionRef, started.Ref.TaskID)
+	if !claimed {
+		t.Fatal("failed to hold Task operation claim")
+	}
+	type cancelResult struct {
+		snapshot task.Snapshot
+		err      error
+	}
+	startedCancel := make(chan struct{})
+	cancelled := make(chan cancelResult, 1)
+	go func() {
+		close(startedCancel)
+		snapshot, cancelErr := runtime.tasks.Cancel(ctx, activeSession.SessionRef, task.ControlRequest{
+			TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Source: "agent_tool",
+		})
+		cancelled <- cancelResult{snapshot: snapshot, err: cancelErr}
+	}()
+	<-startedCancel
+	select {
+	case result := <-cancelled:
+		release()
+		t.Fatalf("Cancel() returned before operation claim release: %#v, %v", result.snapshot, result.err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	runtime.tasks.mu.RLock()
+	current := runtime.tasks.subagents[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	current.mu.Lock()
+	current.applyResult(delegation.Result{TaskID: started.Ref.TaskID, State: delegation.StateCompleted})
+	current.mu.Unlock()
+	release()
+
+	select {
+	case result := <-cancelled:
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if result.snapshot.Running || result.snapshot.State != task.StateCompleted {
+			t.Fatalf("Cancel() = %#v, want completed state published by prior owner", result.snapshot)
+		}
+		if runner.cancelCalls != 0 {
+			t.Fatalf("runner Cancel calls = %d, want no remote effect after terminal recheck", runner.cancelCalls)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Cancel() did not acquire the released operation claim")
+	}
+}
+
+func TestTaskCancelOperationClaimWaitIsBoundedBeforeRemoteEffect(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		waitResult:  delegation.Result{State: delegation.StateCancelled},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, claimed := runtime.tasks.tryClaimSubagentOperation(activeSession.SessionRef, started.Ref.TaskID)
+	if !claimed {
+		t.Fatal("failed to hold Task operation claim")
+	}
+	defer release()
+
+	startedAt := time.Now()
+	_, err = runtime.tasks.Cancel(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Source: "agent_tool",
+	})
+	if !errorcode.Is(err, errorcode.Timeout) || !strings.Contains(err.Error(), subagentCancelOperationClaimTimeout.String()) {
+		t.Fatalf("Cancel() error = %v, want explicit %s claim timeout", err, subagentCancelOperationClaimTimeout)
+	}
+	if elapsed := time.Since(startedAt); elapsed < subagentCancelOperationClaimTimeout {
+		t.Fatalf("Cancel() claim wait = %s, want at least %s", elapsed, subagentCancelOperationClaimTimeout)
+	}
+	if runner.cancelCalls != 0 {
+		t.Fatalf("runner Cancel calls = %d, want timeout before remote effect", runner.cancelCalls)
+	}
+}
+
+func TestPersistSubagentCancelTerminalRequiresExplicitResult(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.tasks.mu.RLock()
+	current := runtime.tasks.subagents[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	current.mu.Lock()
+	turnSeq := current.turnSeq
+	current.mu.Unlock()
+	if _, err := runtime.tasks.persistSubagentCancelPhase(
+		ctx, current, turnSeq, subagentCancelPhaseCompleted, "", nil, true,
+	); err == nil || !strings.Contains(err.Error(), "explicit terminal result") {
+		t.Fatalf("terminal persist error = %v, want explicit result rejection", err)
+	}
+	stored, err := runtime.tasks.store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.State != task.StateRunning || !stored.Running || taskStringValue(stored.Metadata[subagentCancelPhaseKey]) != "" {
+		t.Fatalf("rejected terminal persist mutated Task: %#v", stored)
+	}
+}
+
+func TestTaskCancelSendsRemoteEffectForRunnerTurnBeforeFirstActivity(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first done"},
+		waitResult:  delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.tasks.mu.RLock()
+	current := runtime.tasks.subagents[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	if _, err := runtime.tasks.persistSubagentCancelPhase(
+		ctx,
+		current,
+		current.turnSeq,
+		subagentCancelPhaseCompleted,
+		"",
+		&delegation.Result{State: delegation.StateCancelled},
+		true,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := runtime.tasks.Cancel(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Source: "agent_tool",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runner.cancelCalls != 1 {
+		t.Fatalf("runner Cancel calls = %d, want fresh effect for unobserved live Turn", runner.cancelCalls)
+	}
+	if snapshot.State != task.StateUnknownOutcome || !snapshot.Running {
+		t.Fatalf("Cancel() = %#v, want pending cancellation for live runner Turn", snapshot)
+	}
+	if phase := subagentCancelPhase(taskStringValue(snapshot.Metadata[subagentCancelPhaseKey])); phase != subagentCancelPhaseApplied {
+		t.Fatalf("Cancel() phase = %q, want fresh applied phase", phase)
+	}
+	if cancelTurnSeq, ok := subagentCancelTurnSeq(snapshot.Metadata); !ok || cancelTurnSeq != 2 {
+		t.Fatalf("Cancel() target Turn = %d, %v; want 2", cancelTurnSeq, ok)
+	}
+}
+
+func TestTaskCancelPendingDiagnosticDoesNotClaimCompletion(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	waitErr := errors.New("forced cancel reconciliation failure")
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		waitErr:     waitErr,
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.tasks.Cancel(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Source: "agent_tool",
+	})
+	if !errors.Is(err, waitErr) {
+		t.Fatalf("Cancel() error = %v, want reconciliation failure", err)
+	}
+	if runner.cancelCalls != 1 {
+		t.Fatalf("runner Cancel calls = %d, want one accepted remote request", runner.cancelCalls)
+	}
+
+	snapshot, err := runtime.tasks.Read(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Source: "agent_tool",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "remote subagent cancellation was requested; terminal result is pending"
+	if snapshot.State != task.StateUnknownOutcome || !snapshot.Running || taskStringValue(snapshot.Result["error"]) != want {
+		t.Fatalf("pending cancellation snapshot = %#v, want running unknown outcome with %q", snapshot, want)
+	}
+}
+
+func TestTaskCancelPhaseDoesNotSuppressCancellationOfLaterTurn(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		waitResult:  delegation.Result{State: delegation.StateCancelled},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelReq := task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Source: "agent_tool",
+	}
+	if _, err := runtime.tasks.Cancel(ctx, activeSession.SessionRef, cancelReq); err != nil {
+		t.Fatal(err)
+	}
+	if runner.cancelCalls != 1 {
+		t.Fatalf("first Turn runner Cancel calls = %d, want 1", runner.cancelCalls)
+	}
+
+	runtime.tasks.mu.RLock()
+	current := runtime.tasks.subagents[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	current.mu.Lock()
+	current.metadata[subagentCancelPhaseKey] = string(subagentCancelPhaseApplied)
+	current.metadata[subagentCancelTurnSeqKey] = current.turnSeq + 1
+	preservedTurn := current.turnSeq + 1
+	beginObservedSubagentActivityLocked(current)
+	preservedPhase := taskStringValue(current.metadata[subagentCancelPhaseKey])
+	preservedScope, preservedScoped := subagentCancelTurnSeq(current.metadata)
+	beginObservedSubagentActivityLocked(current)
+	phase := taskStringValue(current.metadata[subagentCancelPhaseKey])
+	_, scoped := subagentCancelTurnSeq(current.metadata)
+	current.mu.Unlock()
+	if preservedPhase != string(subagentCancelPhaseApplied) || !preservedScoped || preservedScope != preservedTurn {
+		t.Fatalf("scoped Turn %d journal = %q/%d/%v, want preserved", preservedTurn, preservedPhase, preservedScope, preservedScoped)
+	}
+	if phase != "" || scoped {
+		t.Fatalf("strictly later Turn retained cancel journal %q scoped=%v", phase, scoped)
+	}
+	current.mu.Lock()
+	conflicting := current.entrySnapshot(runtime.now())
+	current.mu.Unlock()
+	conflicting.Metadata[subagentCancelPhaseKey] = string(subagentCancelPhaseCompleted)
+	conflicting.Metadata[subagentCancelTurnSeqKey] = preservedTurn
+	conflicting.Spec[subagentCancelPhaseKey] = string(subagentCancelPhaseCompleted)
+	conflicting.Spec[subagentCancelTurnSeqKey] = preservedTurn
+	rebased := runtime.tasks.rebaseObservedSubagentTask(current, conflicting)
+	if phase := taskStringValue(rebased.Metadata[subagentCancelPhaseKey]); phase != "" {
+		t.Fatalf("new Turn rebase restored cancel metadata phase %q", phase)
+	}
+	if _, scoped := subagentCancelTurnSeq(rebased.Metadata); scoped {
+		t.Fatalf("new Turn rebase restored cancel metadata scope %#v", rebased.Metadata[subagentCancelTurnSeqKey])
+	}
+	if phase := taskStringValue(rebased.Spec[subagentCancelPhaseKey]); phase != "" {
+		t.Fatalf("new Turn rebase restored cancel spec phase %q", phase)
+	}
+	if _, scoped := subagentCancelTurnSeq(rebased.Spec); scoped {
+		t.Fatalf("new Turn rebase restored cancel spec scope %#v", rebased.Spec[subagentCancelTurnSeqKey])
+	}
+
+	if _, err := runtime.tasks.Cancel(ctx, activeSession.SessionRef, cancelReq); err != nil {
+		t.Fatal(err)
+	}
+	if runner.cancelCalls != 2 {
+		t.Fatalf("second Turn runner Cancel calls = %d, want a fresh remote effect", runner.cancelCalls)
 	}
 }
 
@@ -2459,6 +2760,7 @@ type recordingSubagentRunner struct {
 	spawnTargetRequest delegation.TargetRequest
 	waitYieldMS        int
 	waitCalls          int
+	cancelCalls        int
 	waitHook           func()
 	waitErr            error
 	publishOnSpawn     bool
@@ -2509,5 +2811,6 @@ func (r *recordingSubagentRunner) Wait(_ context.Context, _ delegation.Anchor, y
 }
 
 func (r *recordingSubagentRunner) Cancel(context.Context, delegation.Anchor) error {
+	r.cancelCalls++
 	return nil
 }

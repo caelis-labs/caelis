@@ -346,7 +346,7 @@ func (s *sagaSessionService) AppendEvent(ctx context.Context, req session.Append
 	return persisted, err
 }
 
-func TestSubagentProducerCompletionAcknowledgesDurableCommit(t *testing.T) {
+func TestSubagentProducerCompletionAcknowledgesDurableCommitAndWakesCancelWaiter(t *testing.T) {
 	baseStore := newSagaTaskStore()
 	store := &completionGateTaskStore{
 		base:    baseStore,
@@ -384,11 +384,52 @@ func TestSubagentProducerCompletionAcknowledgesDurableCommit(t *testing.T) {
 		t.Fatal("PublishSubagentCompletion returned before durable terminal commit")
 	default:
 	}
+
+	type cancelOutcome struct {
+		snapshot taskapi.Snapshot
+		err      error
+	}
+	cancelled := make(chan cancelOutcome, 1)
+	cancelCtx, cancelWait := context.WithCancel(context.Background())
+	defer cancelWait()
+	go func() {
+		snapshot, cancelErr := runtime.tasks.Cancel(cancelCtx, active.SessionRef, taskapi.ControlRequest{
+			TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Source: "agent_tool",
+		})
+		cancelled <- cancelOutcome{snapshot: snapshot, err: cancelErr}
+	}()
+	operationKey := taskOperationKey(active.SessionRef, started.Ref.TaskID)
+	waitDeadline := time.Now().Add(time.Second)
+	for {
+		runtime.tasks.mu.RLock()
+		waiting := runtime.tasks.operationChanged[operationKey] != nil
+		runtime.tasks.mu.RUnlock()
+		if waiting {
+			break
+		}
+		if time.Now().After(waitDeadline) {
+			close(store.release)
+			t.Fatal("Task cancel did not wait for the producer completion claim")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
 	close(store.release)
 	select {
 	case <-published:
 	case <-time.After(time.Second):
 		t.Fatal("PublishSubagentCompletion did not acknowledge durable terminal commit")
+	}
+	select {
+	case outcome := <-cancelled:
+		if outcome.err != nil || outcome.snapshot.Running || outcome.snapshot.State != taskapi.StateCompleted {
+			t.Fatalf("Cancel() after producer completion = %#v, %v; want completed without remote cancel", outcome.snapshot, outcome.err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Task cancel was not woken by producer completion claim release")
+	}
+	if runner.cancelCalls != 0 {
+		t.Fatalf("runner Cancel calls = %d, want no remote effect after producer completion", runner.cancelCalls)
 	}
 	entry, err := store.Get(context.Background(), started.Ref.TaskID)
 	if err != nil || entry.Running || entry.State != taskapi.StateCompleted {

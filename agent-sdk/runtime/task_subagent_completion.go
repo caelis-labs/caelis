@@ -248,7 +248,7 @@ func (tm *taskRuntime) applySubagentCompletion(completion *subagentCompletion, o
 		})
 		return
 	}
-	delete(tm.operations, operationKey)
+	tm.releaseTaskOperationLocked(operationKey)
 	delete(tm.completionApplying, taskID)
 	if err == nil && current == completion {
 		delete(tm.completions, taskID)

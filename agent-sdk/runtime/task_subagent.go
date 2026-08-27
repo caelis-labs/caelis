@@ -222,7 +222,7 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 		return taskapi.Snapshot{}, fmt.Errorf("task is required")
 	}
 	task.mu.Lock()
-	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata["cancel_phase"]))
+	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata[subagentCancelPhaseKey]))
 	runner := task.runner
 	running := task.running
 	hasUnreadFinalResponses := task.hasUnreadFinalResponsesLocked()
@@ -264,7 +264,7 @@ func (tm *taskRuntime) observeSubagent(ctx context.Context, task *subagentTask) 
 		return taskapi.Snapshot{}, fmt.Errorf("task is required")
 	}
 	task.mu.Lock()
-	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata["cancel_phase"]))
+	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata[subagentCancelPhaseKey]))
 	runner := task.runner
 	running := task.running
 	anchor := delegation.CloneAnchor(task.anchor)
@@ -304,13 +304,17 @@ func (tm *taskRuntime) observePendingSubagentCancel(
 	}
 	canonical.mu.Lock()
 	turnSeq := canonical.turnSeq
-	phase := subagentCancelPhase(taskStringValue(canonical.metadata["cancel_phase"]))
+	phase := subagentCancelPhase(taskStringValue(canonical.metadata[subagentCancelPhaseKey]))
+	cancelTurnSeq, cancelTurnScoped := subagentCancelTurnSeq(canonical.metadata)
 	snapshot := canonical.snapshotLocked()
 	canonical.mu.Unlock()
 	if turnSeq != expectedTurnSeq || phase == subagentCancelPhaseNone || phase == subagentCancelPhaseCompleted {
 		return snapshot, nil
 	}
-	return tm.advanceSubagentCancel(ctx, canonical, phase, yieldMS)
+	if !cancelTurnScoped {
+		cancelTurnSeq = turnSeq
+	}
+	return tm.advanceSubagentCancel(ctx, canonical, phase, cancelTurnSeq, yieldMS)
 }
 
 // interruptObservedSubagent converts a failed wait into the existing bounded
@@ -932,7 +936,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"spawn_identity":       taskStringValue(t.metadata["spawn_identity"]),
 			"spawn_request_digest": taskStringValue(t.metadata["spawn_request_digest"]),
 			"spawn_phase":          taskStringValue(t.metadata["spawn_status"]),
-			"cancel_phase":         taskStringValue(t.metadata["cancel_phase"]),
+			subagentCancelPhaseKey: taskStringValue(t.metadata[subagentCancelPhaseKey]),
 			"session_id":           t.anchor.SessionID,
 			"agent_id":             t.anchor.AgentID,
 			"handle":               t.handle,
@@ -944,6 +948,14 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		},
 		Result:   subagentTaskEntryResult(t.result, t.running),
 		Metadata: metadata,
+	}
+	if phase := subagentCancelPhase(taskStringValue(t.metadata[subagentCancelPhaseKey])); phase == subagentCancelPhaseNone {
+		delete(entry.Spec, subagentCancelPhaseKey)
+	}
+	if cancelTurnSeq, ok := subagentCancelTurnSeq(t.metadata); ok {
+		entry.Spec[subagentCancelTurnSeqKey] = cancelTurnSeq
+	} else {
+		delete(entry.Spec, subagentCancelTurnSeqKey)
 	}
 	normalizeSubagentEntryResult(entry, taskRawStringValue(t.result["error"]))
 	return entry
