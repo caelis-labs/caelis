@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestBindSessionClientMatchesPrincipalBoundClientContract(t *testing.T) {
@@ -21,7 +21,7 @@ func TestBindSessionClientMatchesPrincipalBoundClientContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.ProtocolVersion != schema.CurrentProtocolVersion ||
+	if info.ProtocolVersion != acpsdk.ProtocolVersionNumber ||
 		info.EnvelopeVersion != EnvelopeVersion ||
 		info.APIVersion != HTTPAPIVersion {
 		t.Fatalf("Initialize() = %#v", info)

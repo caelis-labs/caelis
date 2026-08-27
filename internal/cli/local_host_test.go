@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
@@ -28,7 +29,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/servicelifecycle"
 	"github.com/caelis-labs/caelis/internal/testenv"
 	"github.com/caelis-labs/caelis/internal/version"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.T) {
@@ -79,7 +79,7 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 		t.Fatal(err)
 	}
 	info := appserver.ServerInfo{
-		ProtocolVersion:     schema.CurrentProtocolVersion,
+		ProtocolVersion:     acpsdk.ProtocolVersionNumber,
 		EnvelopeVersion:     appserver.EnvelopeVersion,
 		APIVersion:          appserver.HTTPAPIVersion,
 		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
@@ -323,7 +323,7 @@ func TestExplicitRemoteHostRequiresCWDSessionListingCapability(t *testing.T) {
 			return
 		}
 		_ = json.NewEncoder(writer).Encode(appserver.ServerInfo{
-			ProtocolVersion: schema.CurrentProtocolVersion,
+			ProtocolVersion: acpsdk.ProtocolVersionNumber,
 			EnvelopeVersion: appserver.EnvelopeVersion,
 			APIVersion:      appserver.HTTPAPIVersion,
 			ServerID:        appserver.ServerIdentity,
@@ -352,7 +352,7 @@ func TestManagedHostOwnershipPreventsEmbeddedFallback(t *testing.T) {
 		SchemaVersion: controlserver.DiscoverySchemaVersion,
 		ServerID:      appserver.ServerIdentity, InstanceID: uuid.NewString(),
 		AppName: "caelis", PrincipalID: "local-user", PID: 1, Endpoint: "http://127.0.0.1:7777",
-		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+		ProtocolVersion: acpsdk.ProtocolVersionNumber, EnvelopeVersion: appserver.EnvelopeVersion,
 		APIVersion: appserver.HTTPAPIVersion, Capabilities: appserver.RequiredManagedHostCapabilities(),
 		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
 		Transports: []string{"http"}, StartedAt: time.Now().UTC(),
@@ -450,7 +450,7 @@ func TestManagedLocalHostRecoversStaleDiscoveryAndConvergesConcurrentClients(t *
 	instanceID := uuid.NewString()
 	build := version.BuildInfo()
 	info := appserver.ServerInfo{
-		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+		ProtocolVersion: acpsdk.ProtocolVersionNumber, EnvelopeVersion: appserver.EnvelopeVersion,
 		APIVersion: appserver.HTTPAPIVersion, ServerID: appserver.ServerIdentity,
 		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
 		InstanceID: instanceID, Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},
@@ -475,7 +475,7 @@ func TestManagedLocalHostRecoversStaleDiscoveryAndConvergesConcurrentClients(t *
 		SchemaVersion: controlserver.DiscoverySchemaVersion,
 		ServerID:      appserver.ServerIdentity, InstanceID: uuid.NewString(),
 		AppName: "caelis-test", PrincipalID: "local-user", PID: 1,
-		Endpoint: "http://127.0.0.1:65534", ProtocolVersion: schema.CurrentProtocolVersion,
+		Endpoint: "http://127.0.0.1:65534", ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		EnvelopeVersion: appserver.EnvelopeVersion, APIVersion: appserver.HTTPAPIVersion,
 		DistributionVersion: "v1.2.2", BuildID: "stale-build", BuildKind: "release",
 		Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"}, StartedAt: time.Now().UTC(),
@@ -570,7 +570,7 @@ func TestManagedLocalHostRejectsDiscoveryEndpointInstanceMismatch(t *testing.T) 
 				return
 			}
 			_ = json.NewEncoder(writer).Encode(appserver.ServerInfo{
-				ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+				ProtocolVersion: acpsdk.ProtocolVersionNumber, EnvelopeVersion: appserver.EnvelopeVersion,
 				APIVersion: appserver.HTTPAPIVersion, ServerID: appserver.ServerIdentity,
 				DistributionVersion: "v1.2.3", BuildID: "server-build", BuildKind: "release",
 				InstanceID: serverInstanceID, Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},
@@ -583,7 +583,7 @@ func TestManagedLocalHostRejectsDiscoveryEndpointInstanceMismatch(t *testing.T) 
 		SchemaVersion: controlserver.DiscoverySchemaVersion,
 		ServerID:      appserver.ServerIdentity, InstanceID: uuid.NewString(),
 		AppName: "caelis", PrincipalID: "local-user", PID: 1, Endpoint: server.URL,
-		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+		ProtocolVersion: acpsdk.ProtocolVersionNumber, EnvelopeVersion: appserver.EnvelopeVersion,
 		APIVersion: appserver.HTTPAPIVersion, Capabilities: appserver.RequiredManagedHostCapabilities(),
 		DistributionVersion: "v1.2.3", BuildID: "discovery-build", BuildKind: "release",
 		Transports: []string{"http"}, StartedAt: time.Now().UTC(),
@@ -617,7 +617,7 @@ func TestManagedLifecycleProbeIgnoresSurfaceCapabilityCompatibility(t *testing.T
 	}
 	instanceID := uuid.NewString()
 	info := appserver.ServerInfo{
-		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+		ProtocolVersion: acpsdk.ProtocolVersionNumber, EnvelopeVersion: appserver.EnvelopeVersion,
 		APIVersion: appserver.HTTPAPIVersion, ServerID: appserver.ServerIdentity,
 		DistributionVersion: "v2.0.0", BuildID: "future-build", BuildKind: version.BuildKindRelease,
 		InstanceID: instanceID, Capabilities: []string{"future-surface-v2"}, Transports: []string{"http"},
@@ -723,7 +723,7 @@ func TestManagedLocalHostRejectsDifferentAppOrPrincipalForSameStore(t *testing.T
 		SchemaVersion: controlserver.DiscoverySchemaVersion,
 		ServerID:      appserver.ServerIdentity, InstanceID: uuid.NewString(),
 		AppName: "caelis", PrincipalID: "owner-a", PID: 1, Endpoint: "http://127.0.0.1:65534",
-		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+		ProtocolVersion: acpsdk.ProtocolVersionNumber, EnvelopeVersion: appserver.EnvelopeVersion,
 		APIVersion: appserver.HTTPAPIVersion, Capabilities: appserver.RequiredManagedHostCapabilities(),
 		DistributionVersion: "v1.2.3", BuildID: "test-build", BuildKind: "release",
 		Transports: []string{"http"}, StartedAt: time.Now().UTC(),
@@ -758,7 +758,7 @@ func TestLocalHostStatusAndStopUseDiscoveredInstanceWithoutLoopbackListener(t *t
 	}
 	instanceID := uuid.NewString()
 	info := appserver.ServerInfo{
-		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+		ProtocolVersion: acpsdk.ProtocolVersionNumber, EnvelopeVersion: appserver.EnvelopeVersion,
 		APIVersion: appserver.HTTPAPIVersion, ServerID: appserver.ServerIdentity,
 		DistributionVersion: "v1.2.3", BuildID: "test-build", BuildKind: "release",
 		InstanceID: instanceID, Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},

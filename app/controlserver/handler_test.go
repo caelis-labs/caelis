@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -204,7 +205,7 @@ func TestReconnectSSEBootstrapsStateBeforeBackfillAndLiveEvents(t *testing.T) {
 	service := &fakeService{
 		subscription: subscription,
 		reconnectState: appserver.SessionState{
-			ProtocolVersion: schema.CurrentProtocolVersion,
+			ProtocolVersion: acpsdk.ProtocolVersionNumber,
 			EnvelopeVersion: appserver.EnvelopeVersion,
 			APIVersion:      appserver.HTTPAPIVersion,
 			SessionID:       "session-1", Revision: math.MaxUint64,
@@ -249,7 +250,7 @@ func TestReconnectReportsTypedGapWithRetryCursor(t *testing.T) {
 	server := newTestServer(t, &fakeService{
 		subscription: subscription,
 		reconnectState: appserver.SessionState{
-			ProtocolVersion: schema.CurrentProtocolVersion,
+			ProtocolVersion: acpsdk.ProtocolVersionNumber,
 			EnvelopeVersion: appserver.EnvelopeVersion,
 			APIVersion:      appserver.HTTPAPIVersion,
 			SessionID:       "session-1",

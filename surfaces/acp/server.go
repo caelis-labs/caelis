@@ -26,6 +26,10 @@ const serverMaxFrameSize = 64 * 1024 * 1024
 // clients that do not provide a response hook.
 const availableCommandsAfterSessionNewDelay = 100 * time.Millisecond
 
+// methodSessionSteering is the interoperable ACP extension for steering a
+// running Session after support is advertised in initialize _meta.steering.
+const methodSessionSteering = "_session/steering"
+
 // ServeStdio serves one agent-side ACP connection over NDJSON stdio.
 func ServeStdio(ctx context.Context, agent Agent, in io.Reader, out io.Writer) error {
 	if agent == nil {
@@ -240,7 +244,7 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		}
 		resp, err := c.agent.Prompt(ctx, req, c.promptCallbacks())
 		return responseOrError(resp, err)
-	case protocolacp.MethodSessionSteering:
+	case methodSessionSteering:
 		var req protocolacp.SessionSteeringRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)

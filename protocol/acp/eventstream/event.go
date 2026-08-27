@@ -6,14 +6,15 @@ import (
 	"strings"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type Kind string
 
 const (
-	KindSessionUpdate      Kind = schema.MethodSessionUpdate
-	KindRequestPermission  Kind = schema.MethodSessionReqPermission
+	KindSessionUpdate      Kind = acpsdk.ClientMethodSessionUpdate
+	KindRequestPermission  Kind = acpsdk.ClientMethodSessionRequestPermission
 	KindNotice             Kind = "caelis/notice"
 	KindParticipant        Kind = "caelis/participant"
 	KindLifecycle          Kind = "caelis/lifecycle"

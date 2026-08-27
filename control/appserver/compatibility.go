@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 )
 
 // CompatibilityPolicy is owned by a Surface and declares the server contract
@@ -21,7 +21,7 @@ type CompatibilityPolicy struct {
 // CurrentCompatibility returns the policy implemented by this source tree.
 func CurrentCompatibility(requiredCapabilities ...string) CompatibilityPolicy {
 	return CompatibilityPolicy{
-		ProtocolVersions: []int{schema.CurrentProtocolVersion},
+		ProtocolVersions: []int{acpsdk.ProtocolVersionNumber},
 		EnvelopeVersions: []string{EnvelopeVersion},
 		APIVersions:      []string{HTTPAPIVersion},
 		RequiredCaps:     append([]string(nil), requiredCapabilities...),

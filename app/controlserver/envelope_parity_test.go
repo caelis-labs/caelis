@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
@@ -134,7 +134,7 @@ func (s parityService) Reconnect(ctx context.Context, _ appserver.Principal, req
 	}
 	return appserver.ReconnectResult{
 		State: appserver.SessionState{
-			ProtocolVersion: schema.CurrentProtocolVersion,
+			ProtocolVersion: acpsdk.ProtocolVersionNumber,
 			EnvelopeVersion: appserver.EnvelopeVersion,
 			APIVersion:      appserver.HTTPAPIVersion,
 			SessionID:       req.SessionID,

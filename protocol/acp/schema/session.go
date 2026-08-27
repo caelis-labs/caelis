@@ -4,34 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-
-	acpsdk "github.com/caelis-labs/acp-go-sdk"
 )
 
 const (
-	JSONRPCVersion         = "2.0"
-	CurrentProtocolVersion = acpsdk.ProtocolVersionNumber
-
-	MethodInitialize       = acpsdk.AgentMethodInitialize
-	MethodAuthenticate     = acpsdk.AgentMethodAuthenticate
-	MethodSessionNew       = acpsdk.AgentMethodSessionNew
-	MethodSessionLoad      = acpsdk.AgentMethodSessionLoad
-	MethodSessionResume    = acpsdk.AgentMethodSessionResume
-	MethodSessionClose     = acpsdk.AgentMethodSessionClose
-	MethodSessionSetMode   = acpsdk.AgentMethodSessionSetMode
-	MethodSessionSetConfig = acpsdk.AgentMethodSessionSetConfigOption
-	MethodSessionSetModel  = "session/set_model"
-	MethodSessionPrompt    = acpsdk.AgentMethodSessionPrompt
-	MethodSessionCancel    = acpsdk.AgentMethodSessionCancel
-	// MethodSessionSteering is the interoperable ACP extension for steering a
-	// running Session. Support is advertised through the top-level initialize
-	// response _meta.steering entry.
-	MethodSessionSteering = "_session/steering"
-
 	StopReasonEndTurn   = "end_turn"
 	StopReasonCancelled = "cancelled"
-
-	ErrorCodeAuthRequired = -32000
 )
 
 type Implementation struct {

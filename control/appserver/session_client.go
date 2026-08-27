@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // SessionClient is the principal-bound Control contract consumed by a
@@ -55,7 +55,7 @@ func (c *boundSessionClient) Initialize(ctx context.Context) (ServerInfo, error)
 		return ServerInfo{}, err
 	}
 	return ServerInfo{
-		ProtocolVersion: schema.CurrentProtocolVersion,
+		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		EnvelopeVersion: EnvelopeVersion,
 		APIVersion:      HTTPAPIVersion,
 		ServerID:        ServerIdentity,

@@ -22,7 +22,7 @@ func TestServerRoutesSessionSteeringWithoutPromptCallbacks(t *testing.T) {
 			"steering": json.RawMessage(`{"idleBehavior":"promptRequired","future":42}`),
 		},
 	}
-	result, rpcErr := conn.handleRequest(context.Background(), nil, protocolacp.MethodSessionSteering, mustMarshalTestRaw(request))
+	result, rpcErr := conn.handleRequest(context.Background(), nil, methodSessionSteering, mustMarshalTestRaw(request))
 	if rpcErr != nil {
 		t.Fatalf("steering RPC error = %#v", rpcErr)
 	}
@@ -45,7 +45,7 @@ func TestServerRejectsSessionSteeringWithoutAdapter(t *testing.T) {
 	_, rpcErr := conn.handleRequest(
 		context.Background(),
 		nil,
-		protocolacp.MethodSessionSteering,
+		methodSessionSteering,
 		mustMarshalTestRaw(protocolacp.SessionSteeringRequest{
 			SessionID: "session-1",
 			Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"hello"}`)},
@@ -75,7 +75,7 @@ func TestServerRejectsMalformedSessionSteeringParams(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, rpcErr := conn.handleRequest(context.Background(), nil, protocolacp.MethodSessionSteering, tt.params)
+			_, rpcErr := conn.handleRequest(context.Background(), nil, methodSessionSteering, tt.params)
 			if rpcErr == nil || rpcErr.Code != -32602 {
 				t.Fatalf("steering RPC error = %#v, want invalid params", rpcErr)
 			}

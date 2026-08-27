@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
@@ -26,7 +27,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/updater"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRunServeStartsProductControlServer(t *testing.T) {
@@ -72,7 +72,7 @@ func TestRunServeDefaultsToPersistentTokenFile(t *testing.T) {
 	runControlServerCommand = func(_ context.Context, _ controlserver.Dependencies, config controlserver.Config) error {
 		captured = config
 		info := config.ServerInfo
-		info.ProtocolVersion = schema.CurrentProtocolVersion
+		info.ProtocolVersion = acpsdk.ProtocolVersionNumber
 		info.EnvelopeVersion = appserver.EnvelopeVersion
 		info.APIVersion = appserver.HTTPAPIVersion
 		info.Transports = []string{"http"}

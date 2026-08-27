@@ -5,29 +5,28 @@ package client
 import (
 	"encoding/json"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const (
-	JSONRPCVersion = schema.JSONRPCVersion
+	ErrorCodeAuthRequired = -32000
 
-	ErrorCodeAuthRequired = schema.ErrorCodeAuthRequired
-
-	MethodInitialize           = schema.MethodInitialize
-	MethodAuthenticate         = schema.MethodAuthenticate
-	MethodSessionNew           = schema.MethodSessionNew
-	MethodSessionList          = schema.MethodSessionList
-	MethodSessionLoad          = schema.MethodSessionLoad
-	MethodSessionResume        = schema.MethodSessionResume
-	MethodSessionClose         = schema.MethodSessionClose
-	MethodSessionSetMode       = schema.MethodSessionSetMode
-	MethodSessionSetConfig     = schema.MethodSessionSetConfig
-	MethodSessionSetModel      = schema.MethodSessionSetModel
-	MethodSessionPrompt        = schema.MethodSessionPrompt
-	MethodSessionCancel        = schema.MethodSessionCancel
-	MethodSessionSteering      = schema.MethodSessionSteering
-	MethodSessionUpdate        = schema.MethodSessionUpdate
-	MethodSessionReqPermission = schema.MethodSessionReqPermission
+	MethodInitialize           = acpsdk.AgentMethodInitialize
+	MethodAuthenticate         = acpsdk.AgentMethodAuthenticate
+	MethodSessionNew           = acpsdk.AgentMethodSessionNew
+	MethodSessionList          = acpsdk.AgentMethodSessionList
+	MethodSessionLoad          = acpsdk.AgentMethodSessionLoad
+	MethodSessionResume        = acpsdk.AgentMethodSessionResume
+	MethodSessionClose         = acpsdk.AgentMethodSessionClose
+	MethodSessionSetMode       = acpsdk.AgentMethodSessionSetMode
+	MethodSessionSetConfig     = acpsdk.AgentMethodSessionSetConfigOption
+	MethodSessionSetModel      = "session/set_model"
+	MethodSessionPrompt        = acpsdk.AgentMethodSessionPrompt
+	MethodSessionCancel        = acpsdk.AgentMethodSessionCancel
+	MethodSessionSteering      = "_session/steering"
+	MethodSessionUpdate        = acpsdk.ClientMethodSessionUpdate
+	MethodSessionReqPermission = acpsdk.ClientMethodSessionRequestPermission
 )
 
 const (

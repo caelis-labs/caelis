@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -45,7 +46,7 @@ func TestNewRequiresExplicitCompatibilityPolicy(t *testing.T) {
 func TestRemoteStateValidationDoesNotRepeatHostCapabilityHandshake(t *testing.T) {
 	client := &Client{compatibility: appserver.CurrentCompatibility("required-host-capability")}
 	if err := client.validateRemoteState(appserver.SessionState{
-		ProtocolVersion: schema.CurrentProtocolVersion,
+		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		EnvelopeVersion: appserver.EnvelopeVersion,
 		APIVersion:      appserver.HTTPAPIVersion,
 	}); err != nil {
@@ -86,7 +87,7 @@ func TestPromptPreservesTypedWriteContract(t *testing.T) {
 		switch r.URL.Path {
 		case wirev1.APIPrefix + "/initialize":
 			writeFixtureJSON(t, w, http.StatusOK, appserver.ServerInfo{
-				ProtocolVersion: schema.CurrentProtocolVersion,
+				ProtocolVersion: acpsdk.ProtocolVersionNumber,
 				EnvelopeVersion: appserver.EnvelopeVersion,
 				APIVersion:      appserver.HTTPAPIVersion,
 			})
@@ -115,7 +116,7 @@ func TestPromptPreservesTypedWriteContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.ProtocolVersion != schema.CurrentProtocolVersion ||
+	if info.ProtocolVersion != acpsdk.ProtocolVersionNumber ||
 		info.EnvelopeVersion != appserver.EnvelopeVersion ||
 		info.APIVersion != appserver.HTTPAPIVersion {
 		t.Fatalf("Initialize result = %#v", info)
@@ -525,7 +526,7 @@ func TestReconnectReturnsTypedAtomicSubscription(t *testing.T) {
 		},
 	}
 	state := appserver.SessionState{
-		ProtocolVersion: schema.CurrentProtocolVersion,
+		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		EnvelopeVersion: appserver.EnvelopeVersion,
 		APIVersion:      appserver.HTTPAPIVersion,
 		SessionID:       "session-1",
@@ -642,7 +643,7 @@ func TestReconnectDisconnectsSlowConsumerWithCursor(t *testing.T) {
 		}
 	}
 	state := appserver.SessionState{
-		ProtocolVersion: schema.CurrentProtocolVersion,
+		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		EnvelopeVersion: appserver.EnvelopeVersion,
 		APIVersion:      appserver.HTTPAPIVersion,
 		SessionID:       "session-1",

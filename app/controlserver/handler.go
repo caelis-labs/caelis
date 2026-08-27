@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const apiPrefix = wirev1.APIPrefix
@@ -170,7 +170,7 @@ func (s *Server) shutdown(w http.ResponseWriter, r *http.Request) {
 }
 
 func normalizeServerInfo(info appserver.ServerInfo) appserver.ServerInfo {
-	info.ProtocolVersion = schema.CurrentProtocolVersion
+	info.ProtocolVersion = acpsdk.ProtocolVersionNumber
 	info.EnvelopeVersion = appserver.EnvelopeVersion
 	info.APIVersion = appserver.HTTPAPIVersion
 	info.DistributionVersion = strings.TrimSpace(info.DistributionVersion)
