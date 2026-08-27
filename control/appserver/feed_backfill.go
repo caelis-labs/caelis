@@ -121,7 +121,7 @@ func (b *FeedBroker) captureCheckpoint(
 	if id := strings.TrimSpace(checkpoint.Session.SessionID); id != "" && id != b.ref.SessionID {
 		return session.EventCheckpoint{}, nil, 0, false, ErrCursorSessionMismatch
 	}
-	if requested.DurableAnchor().Seq > checkpoint.ThroughSeq {
+	if durableAnchor(requested).Seq > checkpoint.ThroughSeq {
 		return session.EventCheckpoint{}, nil, 0, false, ErrInvalidCursor
 	}
 
@@ -132,7 +132,7 @@ func (b *FeedBroker) captureCheckpoint(
 	}
 	checkpointPosition := checkpointBoundaryPosition(b.ref, checkpoint.LastClientReplayEvent)
 	if b.latestDurable.Seq > 0 && (checkpointPosition == nil || checkpointPosition.Durable == nil ||
-		eventstream.CompareDurablePosition(b.latestDurable, *checkpointPosition.Durable) > 0) {
+		compareDurablePosition(b.latestDurable, *checkpointPosition.Durable) > 0) {
 		b.mu.Unlock()
 		return session.EventCheckpoint{}, nil, 0, false, errDurableCheckpointBehindAcceptedFeed
 	}
@@ -168,7 +168,7 @@ func (b *FeedBroker) installColdCheckpointLocked(checkpoint session.EventCheckpo
 	}
 	position := checkpointBoundaryPosition(b.ref, checkpoint.LastClientReplayEvent)
 	if position != nil && position.Durable != nil &&
-		eventstream.CompareDurablePosition(*position.Durable, b.latestDurable) > 0 {
+		compareDurablePosition(*position.Durable, b.latestDurable) > 0 {
 		b.latestDurable = *position.Durable
 	}
 	if checkpoint.ThroughSeq > 0 {
@@ -500,7 +500,7 @@ func (it *durableEnvelopeIterator) projectPage(page session.EventPage) ([]events
 }
 
 func durablePageRequest(ref session.SessionRef, requested eventstream.FeedPosition, throughSeq uint64) session.EventPageRequest {
-	afterSeq := requested.DurableAnchor().Seq
+	afterSeq := durableAnchor(requested).Seq
 	if requested.Durable != nil && afterSeq > 0 {
 		afterSeq--
 	}
@@ -526,9 +526,9 @@ func validateBackfillPage(request session.EventPageRequest, page session.EventPa
 func durablePositionAfterRequested(position eventstream.DurableFeedPosition, requested eventstream.FeedPosition) bool {
 	switch {
 	case requested.Durable != nil:
-		return eventstream.CompareDurablePosition(position, *requested.Durable) > 0
+		return compareDurablePosition(position, *requested.Durable) > 0
 	case requested.Transient != nil:
-		return eventstream.CompareDurablePosition(position, requested.Transient.Anchor) > 0
+		return compareDurablePosition(position, requested.Transient.Anchor) > 0
 	default:
 		return true
 	}
@@ -562,9 +562,9 @@ func laterBoundaryPosition(left, right *eventstream.FeedPosition) *eventstream.F
 	if right == nil {
 		return eventstream.CloneFeedPosition(left)
 	}
-	leftAnchor := left.DurableAnchor()
-	rightAnchor := right.DurableAnchor()
-	comparison := eventstream.CompareDurablePosition(leftAnchor, rightAnchor)
+	leftAnchor := durableAnchor(*left)
+	rightAnchor := durableAnchor(*right)
+	comparison := compareDurablePosition(leftAnchor, rightAnchor)
 	if comparison > 0 || (comparison == 0 && left.Transient != nil && right.Transient == nil) {
 		return eventstream.CloneFeedPosition(left)
 	}
@@ -577,9 +577,9 @@ func durableEnvelopeBeforeRing(envelope eventstream.Envelope, ringPosition *even
 	}
 	switch {
 	case ringPosition.Durable != nil:
-		return eventstream.CompareDurablePosition(*envelope.Position.Durable, *ringPosition.Durable) < 0
+		return compareDurablePosition(*envelope.Position.Durable, *ringPosition.Durable) < 0
 	case ringPosition.Transient != nil:
-		return eventstream.CompareDurablePosition(*envelope.Position.Durable, ringPosition.Transient.Anchor) <= 0
+		return compareDurablePosition(*envelope.Position.Durable, ringPosition.Transient.Anchor) <= 0
 	default:
 		return false
 	}
@@ -587,7 +587,7 @@ func durableEnvelopeBeforeRing(envelope eventstream.Envelope, ringPosition *even
 
 func sameDurablePosition(left, right *eventstream.FeedPosition) bool {
 	return left != nil && right != nil && left.Durable != nil && right.Durable != nil &&
-		eventstream.CompareDurablePosition(*left.Durable, *right.Durable) == 0
+		compareDurablePosition(*left.Durable, *right.Durable) == 0
 }
 
 func firstNonEmptyCursor(values ...string) string {

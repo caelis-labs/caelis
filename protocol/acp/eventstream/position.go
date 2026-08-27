@@ -43,17 +43,6 @@ func (p FeedPosition) Validate() error {
 	}
 }
 
-// DurableAnchor returns the durable position at or before this position.
-func (p FeedPosition) DurableAnchor() DurableFeedPosition {
-	if p.Durable != nil {
-		return *p.Durable
-	}
-	if p.Transient != nil {
-		return p.Transient.Anchor
-	}
-	return DurableFeedPosition{}
-}
-
 // CloneFeedPosition returns an isolated position copy.
 func CloneFeedPosition(in *FeedPosition) *FeedPosition {
 	if in == nil {
@@ -69,20 +58,4 @@ func CloneFeedPosition(in *FeedPosition) *FeedPosition {
 		out.Transient = &transient
 	}
 	return &out
-}
-
-// CompareDurablePosition compares two durable positions.
-func CompareDurablePosition(left, right DurableFeedPosition) int {
-	switch {
-	case left.Seq < right.Seq:
-		return -1
-	case left.Seq > right.Seq:
-		return 1
-	case left.ProjectionIndex < right.ProjectionIndex:
-		return -1
-	case left.ProjectionIndex > right.ProjectionIndex:
-		return 1
-	default:
-		return 0
-	}
 }

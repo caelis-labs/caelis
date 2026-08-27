@@ -90,7 +90,7 @@ func selectFreshReplayDurableSource(
 	owner *eventstream.ParentToolRelation,
 ) {
 	current := selected[key]
-	if !current.selected || eventstream.CompareDurablePosition(position, current.position) > 0 {
+	if !current.selected || compareDurablePosition(position, current.position) > 0 {
 		current.position = position
 		current.selected = true
 	}
@@ -351,7 +351,7 @@ func selectFreshReplayDurableEnvelope(
 	}
 	position := *envelope.Position.Durable
 	if key, ok := freshReplayNarrativeKey(envelope); ok {
-		if chosen, found := selected[key]; found && chosen.selected && eventstream.CompareDurablePosition(position, chosen.position) != 0 {
+		if chosen, found := selected[key]; found && chosen.selected && compareDurablePosition(position, chosen.position) != 0 {
 			return eventstream.Envelope{}, false
 		}
 		return envelope, true
@@ -361,7 +361,7 @@ func selectFreshReplayDurableEnvelope(
 		return envelope, true
 	}
 	chosen, found := freshReplaySelectedSourceForKeys(selected, keys)
-	if !found || !chosen.selected || eventstream.CompareDurablePosition(position, chosen.position) == 0 {
+	if !found || !chosen.selected || compareDurablePosition(position, chosen.position) == 0 {
 		if found && chosen.parentTool != nil && envelope.ParentTool == nil && freshReplayEnvelopeToolCallID(envelope) != chosen.parentTool.ToolCallID {
 			parent := *chosen.parentTool
 			envelope.ParentTool = &parent
@@ -395,7 +395,7 @@ func freshReplaySelectedSourceForKeys(
 			parent := *candidate.parentTool
 			out.parentTool = &parent
 		}
-		if candidate.selected && (!out.selected || eventstream.CompareDurablePosition(candidate.position, out.position) > 0) {
+		if candidate.selected && (!out.selected || compareDurablePosition(candidate.position, out.position) > 0) {
 			parent := out.parentTool
 			out = candidate
 			if out.parentTool == nil {

@@ -244,7 +244,7 @@ func (b *FeedBroker) primeStorageLocked(
 				if envelope.Position == nil || envelope.Position.Durable == nil {
 					continue
 				}
-				if before != nil && eventstream.CompareDurablePosition(*envelope.Position.Durable, *before) >= 0 {
+				if before != nil && compareDurablePosition(*envelope.Position.Durable, *before) >= 0 {
 					continue
 				}
 				accepted, _, err := b.publishSerialized(envelope, skipTarget)
@@ -415,7 +415,7 @@ func (b *FeedBroker) publishLocked(
 	if err := b.prepareEnvelopeLocked(&envelope); err != nil {
 		return false, eventstream.Envelope{}, err
 	}
-	if isDurableFeedEnvelope(envelope) && eventstream.CompareDurablePosition(*envelope.Position.Durable, b.latestDurable) <= 0 {
+	if isDurableFeedEnvelope(envelope) && compareDurablePosition(*envelope.Position.Durable, b.latestDurable) <= 0 {
 		return false, eventstream.Envelope{}, nil
 	}
 	dedupeKey := feedDedupeKey(envelope)

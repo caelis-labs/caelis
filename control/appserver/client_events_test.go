@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 func TestClientEventsNeverCrossesCapturedBoundaryDuringLiveSplice(t *testing.T) {
@@ -68,7 +67,7 @@ func TestClientEventsNeverCrossesCapturedBoundaryDuringLiveSplice(t *testing.T) 
 			t.Fatalf("iteration %d: decode boundary: %v", iteration, err)
 		}
 		position := got.batch.Events[0].Position
-		if position == nil || position.Durable == nil || boundary.Durable == nil || eventstream.CompareDurablePosition(*position.Durable, *boundary.Durable) > 0 {
+		if position == nil || position.Durable == nil || boundary.Durable == nil || compareDurablePosition(*position.Durable, *boundary.Durable) > 0 {
 			t.Fatalf("iteration %d: event position %#v crosses boundary %#v", iteration, position, boundary)
 		}
 	}

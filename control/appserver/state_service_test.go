@@ -339,7 +339,7 @@ func TestReconnectStateUsesExactFeedCutModeGapAndBoundary(t *testing.T) {
 	}
 	decoded, err := codec.Decode("session-1", fallback.State.BoundaryCursor)
 	if err != nil || decoded.Durable == nil || fallback.State.BoundaryPosition == nil || fallback.State.BoundaryPosition.Durable == nil ||
-		eventstream.CompareDurablePosition(*decoded.Durable, *fallback.State.BoundaryPosition.Durable) != 0 {
+		compareDurablePosition(*decoded.Durable, *fallback.State.BoundaryPosition.Durable) != 0 {
 		t.Fatalf("fallback boundary cursor/position = %q / %#v, decode=%#v err=%v", fallback.State.BoundaryCursor, fallback.State.BoundaryPosition, decoded, err)
 	}
 	backfill := receiveEnvelopes(t, fallback.Subscription.Backfill(), 1)
