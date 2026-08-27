@@ -23,7 +23,16 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 	}
 	content := acpToolContentToDisplay(input.Content)
 	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
+	toolOutput := toolDisplayPanelOutput(semanticName, acpprojector.FormatToolContent(content))
+	toolOutputCollection := input.ContentPresent
 	outputCursor, outputCursorKnown, outputStartCursor, outputStartCursorKnown := transcriptToolOutputRange(input.Meta)
+	if toolOutputCollection {
+		// Standard ACP content is a replaceable lifecycle snapshot, not an
+		// incremental terminal byte range, even when it includes a terminal
+		// reference that selects the shell presentation.
+		outputCursor, outputCursorKnown = 0, false
+		outputStartCursor, outputStartCursorKnown = 0, false
+	}
 	// Start input is standard ACP RawInput only. DisplayToolInput is a
 	// result-time recovery channel and is not authenticated on every external
 	// ACP ingress path.
@@ -49,9 +58,11 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolExplorationVerb:        explorationVerb,
 		ToolArgs:                   toolArgs,
 		ToolFullArgs:               toolFullArgs,
+		ToolOutput:                 toolOutput,
 		ToolStatus:                 status,
 		ToolStatusExplicit:         input.StatusExplicit,
 		ToolTerminal:               toolTerminal,
+		ToolOutputCollection:       toolOutputCollection,
 		ToolOutputCursor:           outputCursor,
 		ToolOutputCursorKnown:      outputCursorKnown,
 		ToolOutputStartCursor:      outputStartCursor,
@@ -73,6 +84,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	rawOutput := transcript.RawMap(input.RawOutput)
 	status, toolErr := transcript.NormalizeToolResultStatus(input.Status, rawOutput, input.Error, defaultSuccessStatus)
 	content := acpToolContentToDisplay(input.Content)
+	toolOutputCollection := input.ContentPresent
 	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
 	suppressRunningSnapshotOutput := suppressRunningTerminalSnapshotOutput(semanticName, input.Meta, status, toolErr)
 	summaryOutput := toolDisplaySummaryOutput(semanticName, rawOutput, input.Meta)
@@ -116,13 +128,14 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 			toolOutputHasTerminalData = toolTerminal
 			if strings.TrimSpace(toolOutput) == "" {
 				toolOutput = terminalOutput
+				toolOutputCollection = false
 			}
 		}
 	}
-	if strings.TrimSpace(toolOutput) == "" && !toolOutputHasTerminalData {
+	if !toolOutputCollection && strings.TrimSpace(toolOutput) == "" && !toolOutputHasTerminalData {
 		toolOutput = transcript.DelegatedTaskResultText(fallbackInput)
 	}
-	if strings.TrimSpace(toolOutput) == "" && !toolOutputHasTerminalData {
+	if !toolOutputCollection && strings.TrimSpace(toolOutput) == "" && !toolOutputHasTerminalData {
 		if exitText := transcript.TerminalExitCodeOutputText(fallbackInput); exitText != "" {
 			toolOutput = exitText
 			toolOutputSynthetic = true
@@ -141,6 +154,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	if semanticName == surfaceToolTask {
 		if delta, ok := transcriptToolObservationDelta(input.Meta); ok {
 			toolOutput = delta
+			toolOutputCollection = false
 			toolOutputHasTerminalData = true
 			toolOutputSynthetic = false
 		} else {
@@ -151,6 +165,10 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	}
 	toolOutputGapBefore := toolOutputHasTerminalData && transcript.MetaInt(input.Meta, "caelis", "runtime", "stream", "truncated_before") > 0
 	outputCursor, outputCursorKnown, outputStartCursor, outputStartCursorKnown := transcriptToolOutputRange(input.Meta)
+	if toolOutputCollection {
+		outputCursor, outputCursorKnown = 0, false
+		outputStartCursor, outputStartCursorKnown = 0, false
+	}
 	if transcript.SuppressToolResultOutputWithHint(semanticName, input.ToolKind, explorationVerb, toolOutput, toolOutputSynthetic, toolErr) {
 		toolOutput = ""
 		// A suppressed completion acknowledgement is still synthetic. Retaining
@@ -241,6 +259,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolError:                  toolErr,
 		ToolTerminal:               toolTerminal,
 		ToolOutputSynthetic:        toolOutputSynthetic,
+		ToolOutputCollection:       toolOutputCollection,
 		ToolOutputTerminal:         toolOutputHasTerminalData,
 		ToolOutputCursor:           outputCursor,
 		ToolOutputCursorKnown:      outputCursorKnown,

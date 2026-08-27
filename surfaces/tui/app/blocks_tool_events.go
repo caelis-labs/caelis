@@ -23,6 +23,7 @@ type ToolUpdateMeta struct {
 	OutputAuthoritative    bool
 	Terminal               bool
 	OutputSynthetic        bool
+	OutputCollection       bool
 	OutputTerminal         bool
 	OutputGapBefore        bool
 	OutputCursor           int64
@@ -118,6 +119,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			OutputNarrative:   update.Meta.OutputNarrative,
 			Terminal:          update.Meta.Terminal,
 			OutputSynthetic:   update.Meta.OutputSynthetic,
+			OutputCollection:  update.Meta.OutputCollection,
 			OutputTerminal:    update.Meta.OutputTerminal,
 			OutputGapBefore:   update.Meta.OutputGapBefore,
 			OutputCursor:      update.Meta.OutputCursor,
@@ -148,6 +150,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		OutputNarrative:   update.Meta.OutputNarrative,
 		Terminal:          update.Meta.Terminal,
 		OutputSynthetic:   update.Meta.OutputSynthetic,
+		OutputCollection:  update.Meta.OutputCollection,
 		OutputTerminal:    update.Meta.OutputTerminal,
 		OutputGapBefore:   update.Meta.OutputGapBefore,
 		OutputCursor:      update.Meta.OutputCursor,
@@ -225,6 +228,24 @@ func normalizeToolEventOutput(output string, effectiveName string, terminal bool
 		return output
 	}
 	return strings.TrimSpace(output)
+}
+
+// toolEventOwnsTerminalOutput is deliberately narrower than terminal-panel
+// presentation. Standard ACP kind=execute and terminal anchors earn shell
+// presentation, but only received terminal bytes or the built-in RunCommand
+// identity make the retained output an append-only byte stream.
+func toolEventOwnsTerminalOutput(ev SubagentEvent) bool {
+	if isTaskControlEvent(ev) || ev.Name == surfaceToolSpawn {
+		return false
+	}
+	return ev.OutputTerminal || ev.Name == surfaceToolRunCommand
+}
+
+func toolUpdateOwnsTerminalOutput(ev SubagentEvent, meta ToolUpdateMeta) bool {
+	if isTaskControlEvent(ev) || ev.Name == surfaceToolSpawn {
+		return false
+	}
+	return meta.OutputTerminal || ev.Name == surfaceToolRunCommand
 }
 
 func openToolEventIndexForUpdate(events []SubagentEvent, update toolEventUpdate, toolIndex map[string]int) int {
@@ -320,9 +341,19 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 	// Spawn may carry a terminal relation for Task linkage, but its live output
 	// is structured child narrative rather than terminal bytes and must retain
 	// message scope.
-	terminalOutput := isTerminalPanelToolEvent(*ev) && semanticName != surfaceToolSpawn
-	if shouldMergeOpenToolOutput(semanticName, output, terminalOutput) {
-		if terminalOutput {
+	terminalOutput := toolUpdateOwnsTerminalOutput(*ev, meta)
+	replaceCollection := meta.OutputCollection && !meta.OutputNarrative
+	preserveCollection := ev.OutputCollection && !meta.OutputCollection && !meta.OutputTerminal && !meta.OutputNarrative
+	if !preserveCollection && (replaceCollection || shouldMergeOpenToolOutput(semanticName, output, terminalOutput)) {
+		if replaceCollection {
+			resetToolEventOutputMode(ev)
+			ev.Output = output
+			ev.OutputCollection = true
+		} else if terminalOutput {
+			if meta.OutputTerminal && !ev.OutputTerminal && (semanticName != surfaceToolRunCommand || ev.OutputCollection) {
+				resetToolEventOutputMode(ev)
+				ev.OutputGapBefore = meta.OutputGapBefore
+			}
 			if meta.OutputTerminal && meta.OutputCursorKnown {
 				mergeTerminalOutputByCursor(ev, output, meta)
 			} else if meta.OutputTerminal {
@@ -332,7 +363,12 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 			} else {
 				ev.Output = mergeCommandStreamChunk(ev.Output, output)
 			}
-		} else {
+			ev.OutputCollection = false
+			ev.OutputTerminal = true
+		} else if meta.OutputNarrative || ev.OutputNarrative || semanticName == surfaceToolSpawn {
+			if meta.OutputNarrative && ev.OutputCollection {
+				resetToolEventOutputMode(ev)
+			}
 			if meta.OutputNarrative && ev.OutputNarrativeBoundary {
 				ev.Output = joinSubagentNarrativeMessages(ev.Output, output)
 				ev.OutputMessage = output
@@ -344,13 +380,35 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 			if messageID != "" {
 				ev.OutputMessageID = messageID
 			}
+		} else {
+			// Standard ToolCallUpdate.Content replaces the content collection.
+			// Only explicit child narrative and terminal byte streams append.
+			ev.Output = output
+			ev.OutputMessage = ""
+			ev.OutputMessageID = ""
+			ev.OutputCollection = false
+			ev.OutputTerminal = false
 		}
 		ev.OutputNarrative = ev.OutputNarrative || meta.OutputNarrative
 		ev.OutputSynthetic = false
-		if terminalOutput {
-			ev.OutputTerminal = true
-		}
 	}
+}
+
+func resetToolEventOutputMode(ev *SubagentEvent) {
+	if ev == nil {
+		return
+	}
+	ev.Output = ""
+	ev.OutputMessage = ""
+	ev.OutputMessageID = ""
+	ev.OutputSynthetic = false
+	ev.OutputNarrative = false
+	ev.OutputNarrativeBoundary = false
+	ev.OutputCollection = false
+	ev.OutputTerminal = false
+	ev.OutputGapBefore = false
+	ev.OutputCursor = 0
+	ev.OutputCursorKnown = false
 }
 
 func clearTaskWriteTerminalOwnership(ev *SubagentEvent) {
@@ -359,6 +417,7 @@ func clearTaskWriteTerminalOwnership(ev *SubagentEvent) {
 	}
 	ev.Terminal = false
 	ev.OutputTerminal = false
+	ev.OutputCollection = false
 	ev.OutputGapBefore = false
 }
 
@@ -401,7 +460,7 @@ func fillFinalToolEventFromExisting(finalEvent *SubagentEvent, existing Subagent
 	if !finalEvent.Terminal {
 		finalEvent.Terminal = existing.Terminal
 	}
-	if !finalEvent.OutputCursorKnown && existing.OutputCursorKnown {
+	if !finalEvent.OutputCollection && !finalEvent.OutputCursorKnown && existing.OutputCursorKnown {
 		finalEvent.OutputCursor = existing.OutputCursor
 		finalEvent.OutputCursorKnown = true
 	}
@@ -504,7 +563,13 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authorita
 		ev.OutputMessageID = finalEvent.OutputMessageID
 		ev.OutputMessage = finalEvent.OutputMessage
 		ev.OutputSynthetic = finalEvent.OutputSynthetic
+		ev.OutputCollection = finalEvent.OutputCollection
 		ev.OutputTerminal = finalEvent.OutputTerminal
+		if finalEvent.OutputCollection {
+			ev.OutputGapBefore = false
+			ev.OutputCursor = 0
+			ev.OutputCursorKnown = false
+		}
 		outputReplaced = true
 	}
 	// A contentless close frame proves lifecycle completion, not delivery of
@@ -556,6 +621,16 @@ func finalToolOutputShouldReplace(existing SubagentEvent, finalEvent SubagentEve
 	if authoritativeFinal && subagentTool && renderableTextHasContent(finalEvent.Output) {
 		return true
 	}
+	if finalEvent.OutputCollection && semanticName != surfaceToolSpawn &&
+		(semanticName != surfaceToolRunCommand || existing.OutputCollection) {
+		return true
+	}
+	// An omitted final content field closes the lifecycle but does not replace
+	// the latest standard ACP collection. Presence is authoritative even when
+	// that collection is explicitly empty.
+	if existing.OutputCollection && !finalEvent.OutputCollection && !finalEvent.OutputTerminal {
+		return false
+	}
 	if finalEvent.OutputSynthetic && renderableTextHasContent(existing.Output) {
 		return false
 	}
@@ -565,7 +640,7 @@ func finalToolOutputShouldReplace(existing SubagentEvent, finalEvent SubagentEve
 	// A terminal close/final frame may legitimately carry no bytes. Repeated
 	// canonical finals must never turn an already rendered command transcript
 	// into an empty panel merely because the first final marked it Done.
-	if isTerminalPanelToolEvent(existing) &&
+	if toolEventOwnsTerminalOutput(existing) &&
 		renderableTextHasContent(existing.Output) &&
 		!renderableTextHasContent(finalEvent.Output) {
 		return false
@@ -573,7 +648,7 @@ func finalToolOutputShouldReplace(existing SubagentEvent, finalEvent SubagentEve
 	if existing.Done {
 		return true
 	}
-	if !isTerminalPanelToolEvent(existing) {
+	if !toolEventOwnsTerminalOutput(existing) {
 		return true
 	}
 	if shouldPreserveTerminalOutputFromNonTerminalFinal(existing, finalEvent) {

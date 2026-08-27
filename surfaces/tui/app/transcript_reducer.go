@@ -260,7 +260,7 @@ func absorbCommandTaskObservationIntoEvents(events []SubagentEvent, mutation *tr
 		owner := &events[i]
 		ownerName := owner.Name
 		if owner.Kind != SEToolCall || !sameTaskHandle(owner.TaskHandle, taskHandle) ||
-			!isTerminalPanelToolEvent(*owner) || ownerName == surfaceToolSpawn || ownerName == surfaceToolTask {
+			!toolEventOwnsTerminalOutput(*owner) || ownerName == surfaceToolSpawn || ownerName == surfaceToolTask {
 			continue
 		}
 		switch {

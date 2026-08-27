@@ -114,7 +114,10 @@ type Event struct {
 	ToolError           bool
 	ToolTerminal        bool
 	ToolOutputSynthetic bool
-	ToolOutputTerminal  bool
+	// ToolOutputCollection marks a present standard ACP content collection.
+	// Reducers replace the prior collection even when ToolOutput is empty.
+	ToolOutputCollection bool
+	ToolOutputTerminal   bool
 	// ToolOutputCursor is the cumulative terminal-output byte position after
 	// ToolOutput. ToolOutputStartCursor is present for durable observation
 	// snapshots whose display text may be compacted rather than byte-exact.

@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"errors"
 	"fmt"
+	"image/color"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -387,6 +388,49 @@ func TestSubagentOutputWorkspaceRendersMultipleTurnsAsOneChronologicalTranscript
 	}
 	if len(view.turnBlocks) != 2 {
 		t.Fatalf("internal Turn groups = %d, want two", len(view.turnBlocks))
+	}
+}
+
+func TestSubagentOutputOverlayPaintsOneBackgroundAcrossStyledTranscript(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoAnimation: true})
+	model.theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	model.theme.ModalBg = lipgloss.Color("#263244")
+	model.theme.InvalidateTokens()
+	model.themeCacheKey = ""
+	model.width, model.height = 96, 28
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.observeChildEvent(TranscriptEvent{
+		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "turn-1",
+		NarrativeKind: TranscriptNarrativeReasoning, Text: "检查 Shell 的 ACP 线序",
+	})
+	view.observeChildEvent(TranscriptEvent{
+		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "turn-1",
+		NarrativeKind: TranscriptNarrativeAssistant, Text: "统一渲染完成",
+	})
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1", followTail: true}
+
+	frame := model.renderSubagentOutputOverlay()
+	layout := model.subagentOutputOverlay.layout
+	screen := uv.NewScreenBuffer(layout.frameWidth, layout.frameHeight)
+	screen.Method = ansi.GraphemeWidth
+	uv.NewStyledString(frame).Draw(screen, screen.Bounds())
+	wantR, wantG, wantB, wantA := model.theme.ModalBg.RGBA()
+	for y := 0; y < layout.frameHeight; y++ {
+		for x := 0; x < layout.frameWidth; x++ {
+			cell := screen.CellAt(x, y)
+			if cell != nil && cell.Width == 0 {
+				continue
+			}
+			if cell == nil || cell.Style.Bg == nil {
+				t.Fatalf("overlay cell (%d,%d) has no background", x, y)
+			}
+			gotR, gotG, gotB, gotA := cell.Style.Bg.RGBA()
+			if gotR != wantR || gotG != wantG || gotB != wantB || gotA != wantA {
+				t.Fatalf("overlay cell (%d,%d) background = %v, want %v", x, y, cell.Style.Bg, model.theme.ModalBg)
+			}
+		}
 	}
 }
 
@@ -1313,9 +1357,40 @@ func TestSubagentOutputOverlayFixedComposerMatchesResponsiveFrame(t *testing.T) 
 
 			got := model.renderSubagentOutputOverlay()
 			want := legacySubagentOutputOverlayFrameForTest(model)
+			want = paintLegacyOverlayBodyBackgroundForTest(want, model.overlayUsesBorder(), model.theme.Tokens().OverlayBg.GetBackground())
 			assertStyledOverlayFramesEqual(t, got, want, size.width, size.height)
 		})
 	}
+}
+
+func paintLegacyOverlayBodyBackgroundForTest(frame string, bordered bool, background color.Color) string {
+	if background == nil {
+		return frame
+	}
+	width := lipgloss.Width(frame)
+	height := len(strings.Split(frame, "\n"))
+	screen := uv.NewScreenBuffer(width, height)
+	screen.Method = ansi.GraphemeWidth
+	uv.NewStyledString(frame).Draw(screen, screen.Bounds())
+	startX, endX := 0, width
+	startY, endY := 0, height
+	if bordered {
+		startX, endX = 2, width-2
+		startY, endY = 1, height-1
+	}
+	for y := startY; y < endY; y++ {
+		for x := startX; x < endX; x++ {
+			cell := screen.CellAt(x, y)
+			if cell != nil && cell.Style.Bg == nil {
+				cell.Style.Bg = background
+			}
+		}
+	}
+	lines := make([]string, height)
+	for y := range height {
+		lines[y] = screen.Line(y).Render()
+	}
+	return strings.Join(lines, "\n")
 }
 
 func assertStyledOverlayFramesEqual(t *testing.T, got string, want string, width int, height int) {

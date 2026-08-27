@@ -732,6 +732,7 @@ func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 		ToolStatusExplicit:     event.ToolStatusExplicit,
 		Terminal:               event.ToolTerminal,
 		OutputSynthetic:        event.ToolOutputSynthetic,
+		OutputCollection:       event.ToolOutputCollection,
 		OutputTerminal:         event.ToolOutputTerminal,
 		OutputGapBefore:        event.ToolOutputGapBefore,
 		OutputCursor:           event.ToolOutputCursor,

@@ -370,18 +370,25 @@ func TestCanonicalToolCallKeepsOneAssistantMessageOnOneRenderedRow(t *testing.T)
 	}
 }
 
-func TestNarrativeStreamFallsBackToSourceEventIdentity(t *testing.T) {
+func TestNarrativeStreamBucketsAnonymousDeltasByOutputType(t *testing.T) {
 	t.Parallel()
 
 	block := NewMainACPTurnBlock("turn-1")
 	block.AppendStreamEvent(SEReasoning, "first", newNarrativeSourceIdentity("", "event-1", "projection-1"))
-	block.AppendStreamEvent(SEReasoning, "second", newNarrativeSourceIdentity("", "event-2", "projection-2"))
+	block.AppendStreamEvent(SEReasoning, " second", newNarrativeSourceIdentity("", "event-2", "projection-2"))
+	block.AppendStreamEvent(SEAssistant, "answer", newNarrativeSourceIdentity("", "event-3", "projection-3"))
+	block.AppendStreamEvent(SEAssistant, " complete", newNarrativeSourceIdentity("", "event-4", "projection-4"))
+	block.AppendStreamEvent(SEReasoning, "verify", newNarrativeSourceIdentity("typed-reasoning", "event-5", "projection-5"))
+	block.AppendStreamEvent(SEAssistant, "final", newNarrativeSourceIdentity("", "event-6", "projection-6"))
 
-	if len(block.Events) != 2 {
-		t.Fatalf("events = %#v, want distinct source events to remain distinct", block.Events)
+	if len(block.Events) != 4 {
+		t.Fatalf("events = %#v, want four contiguous output-type buckets", block.Events)
 	}
-	if block.Events[0].Text != "first" || block.Events[1].Text != "second" {
-		t.Fatalf("events = %#v, want source order preserved", block.Events)
+	if block.Events[0].Kind != SEReasoning || block.Events[0].Text != "first second" ||
+		block.Events[1].Kind != SEAssistant || block.Events[1].Text != "answer complete" ||
+		block.Events[2].Kind != SEReasoning || block.Events[2].Text != "verify" ||
+		block.Events[3].Kind != SEAssistant || block.Events[3].Text != "final" {
+		t.Fatalf("events = %#v, want anonymous deltas joined only within contiguous output-type runs", block.Events)
 	}
 }
 
@@ -1313,7 +1320,7 @@ func narrativeTestToolResultEvent(
 	}
 }
 
-func TestTranscriptNarrativeSourceIdentityPrefersMessageThenEvent(t *testing.T) {
+func TestTranscriptNarrativeSourceIdentityUsesOnlyCanonicalMessageID(t *testing.T) {
 	t.Parallel()
 
 	source := narrativeSourceIdentityFromTranscriptEvent(transcript.Event{
@@ -1325,8 +1332,8 @@ func TestTranscriptNarrativeSourceIdentityPrefersMessageThenEvent(t *testing.T) 
 		t.Fatalf("stable key = %q, want message identity", got)
 	}
 	source.MessageID = ""
-	if got := source.stableKey(); got != "event:event-1" {
-		t.Fatalf("stable key = %q, want source event identity", got)
+	if got := source.stableKey(); got != "" {
+		t.Fatalf("stable key = %q, want anonymous type bucket despite transport event identity", got)
 	}
 }
 

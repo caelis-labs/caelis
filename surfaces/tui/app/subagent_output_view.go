@@ -58,7 +58,11 @@ type subagentOutputRenderCache struct {
 	workspace string
 	rows      []RenderedRow
 	fixedRows []string
-	renders   uint64
+	// paintedRows lazily caches the physical background pass for stable rows.
+	// Live revisions reuse the unchanged prefix instead of reparsing every
+	// visible ANSI row on every 50 ms render tick.
+	paintedRows []string
+	renders     uint64
 }
 
 func (m *Model) observeSubagentOutputEvents(events []TranscriptEvent) bool {

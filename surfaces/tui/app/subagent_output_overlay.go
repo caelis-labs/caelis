@@ -228,28 +228,43 @@ func (m *Model) renderSubagentOutputOverlay() string {
 		&frame,
 		layout,
 		surface,
-		normalizeFullscreenFrameLine(m.renderSubagentOutputTitle(view, layout.innerWidth), layout.innerWidth),
+		renderSubagentOutputContentLine(
+			surface,
+			layout.innerWidth,
+			normalizeFullscreenFrameLine(m.renderSubagentOutputTitle(view, layout.innerWidth), layout.innerWidth),
+		),
 	)
 	appendSubagentOutputContentLine(&frame, layout, surface, layout.separator)
 	for index := 0; index < layout.contentRows; index++ {
-		line := layout.blank
+		content := layout.blank
 		if index < len(visible) {
 			row := visible[index]
 			rowTokens[index] = row.ClickToken
 			if index < len(visibleFixedRows) {
-				line = visibleFixedRows[index]
+				content = m.paintSubagentOutputRow(
+					view,
+					state.offset+index,
+					visibleFixedRows[index],
+					layout.innerWidth,
+					surface,
+					!state.selecting,
+				)
 			}
 		}
-		appendSubagentOutputContentLine(&frame, layout, surface, line)
+		appendSubagentOutputContentLine(&frame, layout, surface, content)
 	}
 	appendSubagentOutputContentLine(&frame, layout, surface, layout.separator)
 	appendSubagentOutputContentLine(
 		&frame,
 		layout,
 		surface,
-		normalizeFullscreenFrameLine(
-			m.renderSubagentOutputFooter(state.offset, end, len(rows), layout.innerWidth),
+		renderSubagentOutputContentLine(
+			surface,
 			layout.innerWidth,
+			normalizeFullscreenFrameLine(
+				m.renderSubagentOutputFooter(state.offset, end, len(rows), layout.innerWidth),
+				layout.innerWidth,
+			),
 		),
 	)
 	appendSubagentOutputFrameLine(&frame, layout.bottomBorder)
@@ -356,6 +371,8 @@ func (m *Model) subagentOutputLayout(state *subagentOutputOverlayState) subagent
 		contentInset = 2
 	}
 	surface := m.theme.Tokens().OverlayBg
+	blank := strings.Repeat(" ", innerWidth)
+	separator := normalizeFullscreenFrameLine(m.theme.SeparatorStyle().Render(strings.Repeat("─", innerWidth)), innerWidth)
 	layout := subagentOutputOverlayLayout{
 		termWidth:    m.width,
 		termHeight:   m.height,
@@ -369,8 +386,8 @@ func (m *Model) subagentOutputLayout(state *subagentOutputOverlayState) subagent
 		startY:       maxInt(0, (m.height-frameHeight)/2),
 		borderInset:  borderInset,
 		contentInset: contentInset,
-		blank:        strings.Repeat(" ", innerWidth),
-		separator:    normalizeFullscreenFrameLine(m.theme.SeparatorStyle().Render(strings.Repeat("─", innerWidth)), innerWidth),
+		blank:        renderSubagentOutputContentLine(surface, innerWidth, blank),
+		separator:    renderSubagentOutputContentLine(surface, innerWidth, separator),
 	}
 	if useBorder {
 		borderStyle := m.theme.Tokens().OverlayBorder.Background(surface.GetBackground())
@@ -397,7 +414,7 @@ func appendSubagentOutputContentLine(
 	frame *strings.Builder,
 	layout subagentOutputOverlayLayout,
 	surface lipgloss.Style,
-	line string,
+	content string,
 ) {
 	if frame == nil {
 		return
@@ -409,11 +426,38 @@ func appendSubagentOutputContentLine(
 		frame.WriteString(layout.leftBorder)
 		frame.WriteString(surface.Render(" "))
 	}
-	frame.WriteString(surface.Width(layout.innerWidth).Render(strings.TrimRight(line, " ")))
+	frame.WriteString(content)
 	if layout.useBorder {
 		frame.WriteString(surface.Render(" "))
 		frame.WriteString(layout.rightBorder)
 	}
+}
+
+func renderSubagentOutputContentLine(surface lipgloss.Style, width int, line string) string {
+	content := surface.Width(width).Render(strings.TrimRight(line, " "))
+	return tuikit.PaintLineBackground(content, width, surface.GetBackground())
+}
+
+func (m *Model) paintSubagentOutputRow(
+	view *subagentOutputView,
+	index int,
+	line string,
+	width int,
+	surface lipgloss.Style,
+	cacheable bool,
+) string {
+	if cacheable && view != nil && index >= 0 && index < len(view.renderCache.paintedRows) &&
+		index < len(view.renderCache.fixedRows) && view.renderCache.fixedRows[index] == line {
+		if painted := view.renderCache.paintedRows[index]; painted != "" {
+			return painted
+		}
+	}
+	painted := renderSubagentOutputContentLine(surface, width, line)
+	if cacheable && view != nil && index >= 0 && index < len(view.renderCache.paintedRows) &&
+		index < len(view.renderCache.fixedRows) && view.renderCache.fixedRows[index] == line {
+		view.renderCache.paintedRows[index] = painted
+	}
+	return painted
 }
 
 func reuseSubagentOutputGeometryRows(rows []string, size int) []string {
@@ -433,6 +477,7 @@ func subagentOutputFixedRows(view *subagentOutputView, rows []RenderedRow, width
 		return view.renderCache.fixedRows
 	}
 	view.renderCache.fixedRows = fixedSubagentOutputRows(rows, width)
+	view.renderCache.paintedRows = make([]string, len(rows))
 	return view.renderCache.fixedRows
 }
 
@@ -473,16 +518,29 @@ func (m *Model) subagentOutputRows(view *subagentOutputView, width, height int) 
 		)}
 	}
 	if view != nil {
+		previous := view.renderCache
+		fixedRows := fixedSubagentOutputRows(rows, width)
+		paintedRows := make([]string, len(fixedRows))
+		if previous.width == width && previous.termWidth == m.width &&
+			previous.themeKey == ctx.renderThemeKey() && previous.workspace == strings.TrimSpace(ctx.Workspace) {
+			for index := 0; index < len(fixedRows) && index < len(previous.fixedRows) && index < len(previous.paintedRows); index++ {
+				if fixedRows[index] != previous.fixedRows[index] {
+					break
+				}
+				paintedRows[index] = previous.paintedRows[index]
+			}
+		}
 		view.renderCache = subagentOutputRenderCache{
-			revision:  view.revision,
-			width:     width,
-			height:    height,
-			termWidth: m.width,
-			themeKey:  ctx.renderThemeKey(),
-			workspace: strings.TrimSpace(ctx.Workspace),
-			rows:      rows,
-			fixedRows: fixedSubagentOutputRows(rows, width),
-			renders:   view.renderCache.renders + 1,
+			revision:    view.revision,
+			width:       width,
+			height:      height,
+			termWidth:   m.width,
+			themeKey:    ctx.renderThemeKey(),
+			workspace:   strings.TrimSpace(ctx.Workspace),
+			rows:        rows,
+			fixedRows:   fixedRows,
+			paintedRows: paintedRows,
+			renders:     previous.renders + 1,
 		}
 		view.renderReady = false
 	}

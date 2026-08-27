@@ -28,7 +28,7 @@ func renderCachedToolPanelRows(cache *map[string]toolOutputRenderCache, request 
 		callID = strings.TrimSpace(request.ToolName)
 	}
 	renderRequest := request
-	renderRequest.Text = toolPanelCacheText(request.ToolName, request.Text, request.Width)
+	renderRequest.Text = toolPanelCacheText(request.ToolName, request.TerminalPanel, request.Text, request.Width)
 	key := toolPanelRenderCacheKey(renderRequest, scroll)
 	entry := (*cache)[callID]
 	if entry.key == key && entry.rows != nil {
@@ -49,6 +49,8 @@ func toolPanelRenderCacheKey(request toolPanelRenderRequest, scroll toolPanelScr
 	b.WriteByte(0)
 	b.WriteString(strings.TrimSpace(request.ToolName))
 	b.WriteByte(0)
+	b.WriteString(strconv.FormatBool(request.TerminalPanel))
+	b.WriteByte(0)
 	b.WriteString(strconv.Itoa(request.Width))
 	b.WriteByte(0)
 	b.WriteString(request.Ctx.renderThemeKey())
@@ -67,9 +69,9 @@ func toolPanelRenderCacheKey(request toolPanelRenderRequest, scroll toolPanelScr
 	return b.String()
 }
 
-func toolPanelCacheText(toolName string, text string, width int) string {
+func toolPanelCacheText(toolName string, terminalPanel bool, text string, width int) string {
 	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
-	if !surfaceIsTerminalPanelTool(toolName) {
+	if !terminalPanel && !surfaceIsTerminalPanelTool(toolName) {
 		return boundedGenericToolPanelText(text)
 	}
 	segments := tailWrappedTerminalSegmentsFromEnd(text, maxInt(1, width), acpTerminalPanelMaxLines)
@@ -117,8 +119,8 @@ func suffixByBytes(text string, limit int) string {
 	return text[start:]
 }
 
-func toolOutputRenderKey(toolName string, output string, width int) string {
-	text := toolPanelCacheText(toolName, output, width)
+func toolOutputRenderKey(toolName string, terminalPanel bool, output string, width int) string {
+	text := toolPanelCacheText(toolName, terminalPanel, output, width)
 	return strconv.Itoa(len(text)) + ":" + hashString64(text)
 }
 

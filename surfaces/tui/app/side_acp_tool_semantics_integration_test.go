@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -780,5 +781,395 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 		if strings.Count(overlay, "• Explored") != 1 || !strings.Contains(overlay, "Read MEMORY.md, missing.go failed") || !strings.Contains(overlay, "Search ToolCallStatus") || !strings.Contains(overlay, "Ran git status --short") || !strings.Contains(overlay, "Start subagent task_invocation_review") || strings.Contains(overlay, "missing file") || strings.Contains(overlay, "Other Start") || strings.Contains(overlay, "• Tool") {
 			t.Fatalf("overlay diverged from participant transcript semantics:\n%s", overlay)
 		}
+	})
+}
+
+func TestCapturedGrokBuildShellAndAnonymousFinalStreamRenderAcrossParticipantAndOverlay(t *testing.T) {
+	t.Parallel()
+
+	execute := schema.ToolKindExecute
+	executeTitle := "Execute `printf 'SHELL_ACP_43\\n'`"
+	completed := schema.ToolStatusCompleted
+	updates := []schema.Update{
+		acpclient.NormalizeInboundUpdate(schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "execute-1",
+			Title: "run_terminal_command", Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"command": "printf 'SHELL_ACP_43\\n'"},
+			Meta: map[string]any{"x.ai/tool": map[string]any{
+				"version": 1, "name": "run_terminal_command", "kind": "execute",
+				"namespace": "grok_build", "label": "Run Command", "read_only": false,
+			}},
+		}).(schema.ToolCall),
+		acpclient.NormalizeInboundUpdate(schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-1",
+			Title: &executeTitle, Kind: &execute,
+			RawInput: map[string]any{"variant": "Bash", "command": "printf 'SHELL_ACP_43\\n'"},
+			Content: []schema.ToolCallContent{{
+				Type: "content", Content: schema.TextContent{Type: "text", Text: "Execute the shell command"},
+			}},
+		}).(schema.ToolCallUpdate),
+		acpclient.NormalizeInboundUpdate(schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-1", Status: &completed,
+			Content: []schema.ToolCallContent{{
+				Type: "content", Content: schema.TextContent{Type: "text", Text: "SHELL_ACP_43\n"},
+			}},
+			RawOutput: map[string]any{
+				"type": "Bash", "command": "printf 'SHELL_ACP_43\\n'",
+				"output":            []any{float64(83), float64(72), float64(69), float64(76), float64(76), float64(95), float64(65), float64(67), float64(80), float64(95), float64(52), float64(51), float64(10)},
+				"output_for_prompt": "exit: 0\nSHELL_ACP_43\n", "exit_code": float64(0),
+			},
+		}).(schema.ToolCallUpdate),
+	}
+	for _, chunk := range []string{"第一", "段", "完成", "。", "第二", "段", "完成", "。"} {
+		updates = append(updates, schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: chunk},
+		})
+	}
+
+	apply := func(t *testing.T, model *Model, scope eventstream.Scope, parent *eventstream.ParentToolRelation) *Model {
+		t.Helper()
+		for index, update := range updates {
+			model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+				Kind: eventstream.KindSessionUpdate, EventID: fmt.Sprintf("captured-grok-%d", index),
+				ProjectionID: fmt.Sprintf("captured-grok-%d:0", index),
+				SessionID:    "session-1", TurnID: "grok-turn-1", Scope: scope, ScopeID: "grok-task-1",
+				ParticipantID: "grok", Actor: "@grok", ParentTool: parent, Update: update,
+			})
+		}
+		return model
+	}
+	assertTranscript := func(t *testing.T, model *Model, block *ParticipantTurnBlock) {
+		t.Helper()
+		if block == nil {
+			t.Fatal("Grok transcript block missing")
+		}
+		var tools []SubagentEvent
+		var answers []SubagentEvent
+		for _, event := range block.Events {
+			switch event.Kind {
+			case SEToolCall:
+				tools = append(tools, event)
+			case SEAssistant:
+				answers = append(answers, event)
+			}
+		}
+		if len(tools) != 1 || tools[0].ToolKind != schema.ToolKindExecute || tools[0].Terminal || !isTerminalPanelToolEvent(tools[0]) || !tools[0].Done {
+			t.Fatalf("Grok shell events = %#v, want terminal presentation without claiming terminal-byte ownership", tools)
+		}
+		if len(answers) != 1 || answers[0].Text != "第一段完成。第二段完成。" {
+			t.Fatalf("Grok final response events = %#v, want one ordered anonymous assistant bucket", answers)
+		}
+		plain := joinRenderedPlain(block.Render(BlockRenderContext{
+			Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
+		}))
+		if !strings.Contains(plain, "Ran printf") || !strings.Contains(plain, "SHELL_ACP_43") || strings.Contains(plain, "• Tool") {
+			t.Fatalf("captured Grok shell degraded from standard execute presentation:\n%s", plain)
+		}
+		if strings.Count(plain, "第一段完成。第二段完成。") != 1 {
+			t.Fatalf("captured Grok final response was split or reordered:\n%s", plain)
+		}
+	}
+
+	t.Run("participant transcript", func(t *testing.T) {
+		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		model = apply(t, model, eventstream.ScopeParticipant, nil)
+		assertTranscript(t, model, model.findParticipantTurnBlock("grok-turn-1"))
+	})
+
+	t.Run("subagent overlay", func(t *testing.T) {
+		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		model.width, model.height = 96, 28
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+			Update: schema.ToolCall{
+				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn grok: inspect shell",
+				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+				RawInput: map[string]any{"agent": "grok", "prompt": "inspect shell"}, Meta: acpToolNameMeta("Spawn"),
+			},
+		})
+		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		model = apply(t, model, eventstream.ScopeSubagent, parent)
+		view := requireSubagentOutputViewForTest(t, model, "spawn-1")
+		assertTranscript(t, model, view.block)
+		mainBlock := requireMainACPTurnBlockForTest(t, model)
+		if !model.openSubagentOutputOverlay(mainBlock.BlockID(), "spawn-1") {
+			t.Fatal("subagent output overlay did not open")
+		}
+		overlay := subagentOutputOverlayPlain(model)
+		if !strings.Contains(overlay, "Ran printf") || !strings.Contains(overlay, "SHELL_ACP_43") ||
+			strings.Count(overlay, "第一段完成。第二段完成。") != 1 || strings.Contains(overlay, "• Tool") {
+			t.Fatalf("subagent overlay diverged from captured Grok ACP semantics:\n%s", overlay)
+		}
+	})
+}
+
+func TestStandardExecuteContentPatchesReplaceWithoutClaimingTerminalBytes(t *testing.T) {
+	t.Parallel()
+
+	inProgress := schema.ToolStatusInProgress
+	updates := []schema.Update{
+		schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "execute-1",
+			Title: "Execute code", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"command": "run phases"},
+		},
+		schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-1", Status: &inProgress,
+			Content: []schema.ToolCallContent{{
+				Type: "content", Content: schema.TextContent{Type: "text", Text: "phase 1"},
+			}},
+		},
+		schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-1", Status: &inProgress,
+			Content: []schema.ToolCallContent{{
+				Type: "content", Content: schema.TextContent{Type: "text", Text: "phase 2"},
+			}},
+		},
+	}
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	for index, update := range updates {
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, EventID: fmt.Sprintf("execute-replace-%d", index),
+			SessionID: "session-1", TurnID: "execute-turn-1", Scope: eventstream.ScopeParticipant,
+			ScopeID: "participant-1", ParticipantID: "executor", Actor: "@executor", Update: update,
+		})
+	}
+	block := model.findParticipantTurnBlock("execute-turn-1")
+	if block == nil || len(block.Events) != 1 {
+		t.Fatalf("execute transcript events = %#v, want one sparse-merged tool", block)
+	}
+	event := block.Events[0]
+	if event.Kind != SEToolCall || event.Output != "phase 2" {
+		t.Fatalf("execute output = %#v, want latest standard content collection", event)
+	}
+	if event.Terminal || !isTerminalPanelToolEvent(event) {
+		t.Fatalf("execute terminal state = %#v, want terminal presentation without byte-stream ownership", event)
+	}
+}
+
+func TestSideACPContentPresenceSurvivesSparseStatusAcrossParticipantAndSubagent(t *testing.T) {
+	t.Parallel()
+
+	inProgress := schema.ToolStatusInProgress
+	completed := schema.ToolStatusCompleted
+	updates := []schema.Update{
+		schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "content-presence-1",
+			Title: "Execute phases", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"command": "run phases"}, Meta: acpToolNameMeta("Shell"),
+			Content: []schema.ToolCallContent{{
+				Type: "content", Content: schema.TextContent{Type: "text", Text: "phase 1"},
+			}},
+		},
+		schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "content-presence-1", Status: &inProgress,
+		},
+		schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "content-presence-1",
+			Content: []schema.ToolCallContent{},
+		},
+		schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "content-presence-1", Status: &completed,
+		},
+		schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "content-presence-1", Status: &completed,
+		},
+	}
+	run := func(t *testing.T, model *Model, scope eventstream.Scope, parent *eventstream.ParentToolRelation, current func(*Model) SubagentEvent) {
+		t.Helper()
+		for index, update := range updates {
+			model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+				Kind: eventstream.KindSessionUpdate, EventID: fmt.Sprintf("content-presence-%d", index),
+				SessionID: "session-1", TurnID: "content-presence-turn", Scope: scope,
+				ScopeID: "content-presence-task", ParticipantID: "executor", Actor: "@executor",
+				ParentTool: parent, Update: update,
+			})
+			event := current(model)
+			switch index {
+			case 0, 1:
+				if event.Output != "phase 1" || !event.OutputCollection || event.Done {
+					t.Fatalf("step %d event = %#v, want initial content collection preserved by sparse running status", index, event)
+				}
+			case 2:
+				if event.Output != "" || !event.OutputCollection || event.Done {
+					t.Fatalf("empty collection event = %#v, want explicit empty snapshot", event)
+				}
+			default:
+				if event.Output != "" || !event.OutputCollection || !event.Done {
+					t.Fatalf("final step %d event = %#v, want status-only final and duplicate final to retain empty snapshot", index, event)
+				}
+			}
+		}
+	}
+
+	t.Run("participant", func(t *testing.T) {
+		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		run(t, model, eventstream.ScopeParticipant, nil, func(model *Model) SubagentEvent {
+			block := model.findParticipantTurnBlock("content-presence-turn")
+			if block == nil || len(block.Events) != 1 {
+				t.Fatalf("participant block = %#v, want one tool event", block)
+			}
+			return block.Events[0]
+		})
+	})
+
+	t.Run("subagent", func(t *testing.T) {
+		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+			Update: schema.ToolCall{
+				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-content-presence", Title: "Spawn executor",
+				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+				RawInput: map[string]any{"agent": "executor"}, Meta: acpToolNameMeta("Spawn"),
+			},
+		})
+		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-content-presence", ToolName: "Spawn"}
+		run(t, model, eventstream.ScopeSubagent, parent, func(model *Model) SubagentEvent {
+			block := requireSubagentOutputViewForTest(t, model, "spawn-content-presence").block
+			if len(block.Events) != 1 {
+				t.Fatalf("subagent block = %#v, want one tool event", block.Events)
+			}
+			return block.Events[0]
+		})
+	})
+}
+
+func TestSideACPProjectedStandardExecuteContentReplacesEarlierTerminalBytesAcrossParticipantAndSubagent(t *testing.T) {
+	t.Parallel()
+
+	inProgress := schema.ToolStatusInProgress
+	completed := schema.ToolStatusCompleted
+	updates := []schema.Update{
+		schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "execute-terminal-1",
+			Title: "Execute phases", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"command": "run phases"},
+		},
+		schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-terminal-1", Status: &inProgress,
+			Meta: metautil.WithTerminalOutput(nil, "terminal-1", "terminal phase\n"),
+		},
+		schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-terminal-1", Status: &inProgress,
+			Content: []schema.ToolCallContent{{
+				Type: "content", Content: schema.TextContent{Type: "text", Text: "collection phase"},
+			}},
+		},
+		schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-terminal-1", Status: &completed,
+			Content: []schema.ToolCallContent{{
+				Type: "content", Content: schema.TextContent{Type: "text", Text: "collection final"},
+			}},
+		},
+	}
+	apply := func(t *testing.T, model *Model, scope eventstream.Scope, parent *eventstream.ParentToolRelation) *Model {
+		t.Helper()
+		for index, update := range updates {
+			model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+				Kind: eventstream.KindSessionUpdate, EventID: fmt.Sprintf("terminal-collection-%d", index),
+				SessionID: "session-1", TurnID: "terminal-collection-turn", Scope: scope,
+				ScopeID: "terminal-collection-task", ParticipantID: "executor", Actor: "@executor",
+				ParentTool: parent, Update: update,
+			})
+		}
+		return model
+	}
+	assertResult := func(t *testing.T, model *Model, block *ParticipantTurnBlock) {
+		t.Helper()
+		if block == nil || len(block.Events) != 1 {
+			t.Fatalf("terminal/content events = %#v, want one merged tool", block)
+		}
+		event := block.Events[0]
+		if !event.Done || !event.Terminal || event.OutputTerminal || !event.OutputCollection || event.Output != "collection final" {
+			t.Fatalf("terminal/content event = %#v, want final collection to replace terminal bytes while retaining shell presentation", event)
+		}
+		plain := joinRenderedPlain(block.Render(BlockRenderContext{
+			Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
+		}))
+		if !strings.Contains(plain, "collection final") || strings.Contains(plain, "terminal phase") {
+			t.Fatalf("terminal/content presentation retained stale terminal bytes:\n%s", plain)
+		}
+	}
+
+	t.Run("participant", func(t *testing.T) {
+		model := apply(t, NewModel(Config{NoColor: true, NoAnimation: true}), eventstream.ScopeParticipant, nil)
+		assertResult(t, model, model.findParticipantTurnBlock("terminal-collection-turn"))
+	})
+
+	t.Run("subagent", func(t *testing.T) {
+		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+			Update: schema.ToolCall{
+				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-terminal-collection", Title: "Spawn executor",
+				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+				RawInput: map[string]any{"agent": "executor"}, Meta: acpToolNameMeta("Spawn"),
+			},
+		})
+		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-terminal-collection", ToolName: "Spawn"}
+		model = apply(t, model, eventstream.ScopeSubagent, parent)
+		assertResult(t, model, requireSubagentOutputViewForTest(t, model, "spawn-terminal-collection").block)
+	})
+}
+
+func TestMixedIdentityNarrativeRunsStayOrderedAcrossParticipantAndSubagent(t *testing.T) {
+	t.Parallel()
+
+	updates := []schema.Update{
+		schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "匿名答复甲"},
+		},
+		schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentThought, MessageID: "reasoning-1",
+			Content: schema.TextContent{Type: "text", Text: "具名推理中"},
+		},
+		schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "匿名答复乙"},
+		},
+	}
+	apply := func(t *testing.T, model *Model, scope eventstream.Scope, parent *eventstream.ParentToolRelation) *Model {
+		t.Helper()
+		for index, update := range updates {
+			model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+				Kind: eventstream.KindSessionUpdate, EventID: fmt.Sprintf("mixed-narrative-%d", index),
+				SessionID: "session-1", TurnID: "mixed-turn-1", Scope: scope, ScopeID: "mixed-task-1",
+				ParticipantID: "mixed", Actor: "@mixed", ParentTool: parent, Final: index == 1, Update: update,
+			})
+		}
+		return model
+	}
+	assertOrder := func(t *testing.T, block *ParticipantTurnBlock) {
+		t.Helper()
+		if block == nil || len(block.Events) != 3 {
+			t.Fatalf("mixed narrative events = %#v, want three ordered runs", block)
+		}
+		if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "匿名答复甲" ||
+			block.Events[1].Kind != SEReasoning || block.Events[1].Text != "具名推理中" ||
+			block.Events[2].Kind != SEAssistant || block.Events[2].Text != "匿名答复乙" {
+			t.Fatalf("mixed narrative events = %#v, want wire order preserved", block.Events)
+		}
+	}
+
+	t.Run("participant transcript", func(t *testing.T) {
+		model := apply(t, NewModel(Config{NoColor: true, NoAnimation: true}), eventstream.ScopeParticipant, nil)
+		assertOrder(t, model.findParticipantTurnBlock("mixed-turn-1"))
+	})
+
+	t.Run("subagent transcript", func(t *testing.T) {
+		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+			Update: schema.ToolCall{
+				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-mixed", Title: "Spawn mixed",
+				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+				RawInput: map[string]any{"agent": "mixed"}, Meta: acpToolNameMeta("Spawn"),
+			},
+		})
+		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-mixed", ToolName: "Spawn"}
+		model = apply(t, model, eventstream.ScopeSubagent, parent)
+		assertOrder(t, requireSubagentOutputViewForTest(t, model, "spawn-mixed").block)
 	})
 }

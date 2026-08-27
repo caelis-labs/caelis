@@ -224,6 +224,7 @@ func TestProjectACPEventToEventsDelegatesToolUpdate(t *testing.T) {
 			Kind:          &kind,
 			Status:        &status,
 			RawOutput:     map[string]any{"stdout": "done\n"},
+			Content:       []schema.ToolCallContent{},
 		},
 	}, testSurfaceProjector{
 		resultCapture:  &captured,
@@ -237,8 +238,8 @@ func TestProjectACPEventToEventsDelegatesToolUpdate(t *testing.T) {
 		t.Fatalf("event = %#v, want delegated tool event", events[0])
 	}
 	rawOutput := RawMap(captured.RawOutput)
-	if !captured.GatewayProjection || rawOutput["stdout"] != "done\n" || captured.RawOutput == nil {
-		t.Fatalf("captured = %#v, want gateway projection and raw output", captured)
+	if !captured.GatewayProjection || !captured.ContentPresent || rawOutput["stdout"] != "done\n" || captured.RawOutput == nil {
+		t.Fatalf("captured = %#v, want gateway projection, explicit empty content, and raw output", captured)
 	}
 }
 

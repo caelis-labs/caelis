@@ -69,7 +69,7 @@ func linkedTerminalCommandForTask(events []SubagentEvent, taskID string) string 
 	}
 	for i := len(events) - 1; i >= 0; i-- {
 		ev := events[i]
-		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskHandle) != taskID || !isTerminalPanelToolEvent(ev) {
+		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskHandle) != taskID || !toolEventOwnsTerminalOutput(ev) {
 			continue
 		}
 		if ev.Name == surfaceToolSpawn {

@@ -79,8 +79,11 @@ type SubagentEvent struct {
 	OutputNarrativeBoundary bool
 	Terminal                bool
 	OutputSynthetic         bool
-	OutputTerminal          bool
-	OutputGapBefore         bool
+	// OutputCollection marks the current output as one standard ACP content
+	// collection snapshot rather than an append-only terminal/narrative stream.
+	OutputCollection bool
+	OutputTerminal   bool
+	OutputGapBefore  bool
 	// OutputCursor is the cumulative byte position represented by terminal
 	// output or a durable compact observation in this panel.
 	OutputCursor      int64

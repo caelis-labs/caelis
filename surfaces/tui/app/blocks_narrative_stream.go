@@ -6,10 +6,11 @@ import (
 )
 
 // narrativeSourceIdentity is transient Surface reducer state. MessageID is the
-// canonical ACP message identity when present; SourceEventID is the durable
-// fallback. SourceProjectionID is retained for diagnostics but is not a merge
-// key because sibling projections of one source event may have different
-// semantics.
+// canonical ACP message identity when present. SourceEventID and
+// SourceProjectionID are retained for diagnostics but are not merge keys:
+// standard ACP content chunks may omit MessageID, and every delta still has a
+// distinct transport event identity. Anonymous deltas are correlated by their
+// narrative kind inside the current presentation segment instead.
 type narrativeSourceIdentity struct {
 	MessageID          string
 	SourceEventID      string
@@ -28,9 +29,6 @@ func (s narrativeSourceIdentity) stableKey() string {
 	if messageID := strings.TrimSpace(s.MessageID); messageID != "" {
 		return "message:" + messageID
 	}
-	if eventID := strings.TrimSpace(s.SourceEventID); eventID != "" {
-		return "event:" + eventID
-	}
 	return ""
 }
 
@@ -42,10 +40,12 @@ type narrativeStreamTarget struct {
 }
 
 type narrativeStreamState struct {
-	epoch   uint64
-	segment uint64
-	targets map[narrativeStreamTarget]int
-	pending map[narrativeStreamTarget]string
+	epoch           uint64
+	segment         uint64
+	anonymousKind   SubagentEventKind
+	anonymousActive bool
+	targets         map[narrativeStreamTarget]int
+	pending         map[narrativeStreamTarget]string
 }
 
 func (b *MainACPTurnBlock) AppendStreamEvent(kind SubagentEventKind, chunk string, source narrativeSourceIdentity, occurredAt ...time.Time) {
@@ -74,9 +74,8 @@ func (b *MainACPTurnBlock) ClearActiveBuffers() {
 }
 
 // advanceNarrativeBoundary closes only identity-free streams. A typed ACP
-// MessageID or source EventID owns its narrative event across unrelated tool,
-// plan, approval, and notice mutations; those events cannot close another
-// message.
+// MessageID owns its narrative event across unrelated tool, plan, approval,
+// and notice mutations; those events cannot close another message.
 func (b *MainACPTurnBlock) advanceNarrativeBoundary() {
 	if b == nil {
 		return
@@ -179,7 +178,17 @@ func appendNarrativeSemanticBoundary(events *[]SubagentEvent, stream *narrativeS
 }
 
 func (s *narrativeStreamState) append(events []SubagentEvent, kind SubagentEventKind, chunk string, source narrativeSourceIdentity, at time.Time) []SubagentEvent {
-	target := s.target(kind, source.stableKey())
+	identity := source.stableKey()
+	boundaryChanged := false
+	if identity == "" {
+		boundaryChanged = s.prepareAnonymousRun(kind)
+	} else {
+		boundaryChanged = s.closeAnonymousRun()
+	}
+	if boundaryChanged {
+		sealNarrativeBuffers(events)
+	}
+	target := s.target(kind, identity)
 	if idx, ok := s.targetIndex(events, target); ok {
 		if events[idx].narrativeFinal {
 			return events
@@ -201,7 +210,22 @@ func (s *narrativeStreamState) append(events []SubagentEvent, kind SubagentEvent
 }
 
 func (s *narrativeStreamState) replaceFinal(events []SubagentEvent, kind SubagentEventKind, chunk string, source narrativeSourceIdentity, at time.Time) []SubagentEvent {
-	target := s.target(kind, source.stableKey())
+	identity := source.stableKey()
+	if identity != "" {
+		// A typed canonical final may first adopt the immediately adjacent
+		// anonymous provisional of the same kind. Once reconciliation finishes,
+		// any remaining anonymous run must close so later id-less output cannot
+		// append across this typed final.
+		defer func() {
+			if s.closeAnonymousRun() {
+				sealNarrativeBuffers(events)
+			}
+		}()
+	}
+	if identity == "" && s.prepareAnonymousRun(kind) {
+		sealNarrativeBuffers(events)
+	}
+	target := s.target(kind, identity)
 	chunk = s.prependPending(target, chunk, true)
 	if !renderableTextHasContent(chunk) {
 		return events
@@ -328,10 +352,36 @@ func (s *narrativeStreamState) target(kind SubagentEventKind, identity string) n
 	return narrativeStreamTarget{epoch: s.epoch, segment: s.segment, kind: kind, identity: identity}
 }
 
+// prepareAnonymousRun keeps an id-less ACP stream correlated only while its
+// output type is contiguous. If the wire switches assistant -> reasoning ->
+// assistant, the second assistant run must remain after the reasoning instead
+// of appending back into the first assistant event.
+func (s *narrativeStreamState) prepareAnonymousRun(kind SubagentEventKind) bool {
+	if s == nil || !activeNarrativeEventKind(kind) {
+		return false
+	}
+	changed := s.anonymousActive && s.anonymousKind != kind
+	if changed {
+		s.advanceBoundary()
+	}
+	s.anonymousKind = kind
+	s.anonymousActive = true
+	return changed
+}
+
+func (s *narrativeStreamState) closeAnonymousRun() bool {
+	if s == nil || !s.anonymousActive {
+		return false
+	}
+	s.advanceBoundary()
+	return true
+}
+
 func (s *narrativeStreamState) advanceBoundary() {
 	if s == nil {
 		return
 	}
+	s.anonymousActive = false
 	s.segment++
 	for target := range s.targets {
 		if target.identity == "" {

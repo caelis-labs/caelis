@@ -35,8 +35,12 @@ type ToolProjectionInput struct {
 	RawInput  map[string]any
 	RawOutput any
 	Content   []schema.ToolCallContent
-	Locations []schema.ToolCallLocation
-	Error     bool
+	// ContentPresent distinguishes an omitted sparse-patch field from an
+	// explicitly empty ACP content collection. A present collection replaces
+	// the previous collection even when it renders no text.
+	ContentPresent bool
+	Locations      []schema.ToolCallLocation
+	Error          bool
 
 	GatewayProjection bool
 }
@@ -276,6 +280,7 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			RawInput:       RawMap(update.RawInput),
 			RawOutput:      update.RawOutput,
 			Content:        update.Content,
+			ContentPresent: update.Content != nil,
 			Locations:      update.Locations,
 		}
 		// ACP permits tool_call to carry any lifecycle status. Some agents emit a
@@ -313,6 +318,7 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			RawInput:          RawMap(update.RawInput),
 			RawOutput:         update.RawOutput,
 			Content:           update.Content,
+			ContentPresent:    update.Content != nil,
 			Locations:         update.Locations,
 			Error:             ToolUpdateError(update),
 			GatewayProjection: GatewayProjection(meta),

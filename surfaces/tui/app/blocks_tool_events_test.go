@@ -94,6 +94,135 @@ func TestApplyToolEventUpdatePreservesRepeatedExactTerminalDeltas(t *testing.T) 
 	}
 }
 
+func TestApplyToolEventUpdateSwitchesCollectionAndTerminalOutputModes(t *testing.T) {
+	t.Parallel()
+
+	index := map[string]int{}
+	events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
+		CallID: "execute-1", Output: "collection phase", Meta: ToolUpdateMeta{
+			ToolKind: "execute", OutputCollection: true,
+		},
+	}, index)
+	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
+		CallID: "execute-1", Output: "terminal bytes\n", Meta: ToolUpdateMeta{
+			ToolKind: "execute", Terminal: true, OutputTerminal: true,
+		},
+	}, index)
+	if len(events) != 1 || events[0].Output != "terminal bytes\n" || !events[0].OutputTerminal || events[0].OutputCollection {
+		t.Fatalf("terminal transition = %#v, want terminal bytes to replace the prior collection mode", events)
+	}
+
+	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
+		CallID: "execute-1", Meta: ToolUpdateMeta{
+			ToolKind: "execute", OutputCollection: true,
+		},
+	}, index)
+	if len(events) != 1 || events[0].Output != "" || events[0].OutputTerminal || !events[0].OutputCollection || !events[0].Terminal {
+		t.Fatalf("collection transition = %#v, want explicit empty collection to clear terminal bytes without losing terminal presentation", events)
+	}
+}
+
+func TestRunCommandTerminalDeltaReplacesExplicitContentCollection(t *testing.T) {
+	t.Parallel()
+
+	index := map[string]int{}
+	events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
+		CallID: "command-collection-1", Name: "RunCommand", Output: "preview",
+		Meta: ToolUpdateMeta{ToolKind: "execute", Terminal: true, OutputCollection: true},
+	}, index)
+	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
+		CallID: "command-collection-1", Name: "RunCommand", Output: "actual\n",
+		Meta: ToolUpdateMeta{ToolKind: "execute", Terminal: true, OutputTerminal: true, OutputGapBefore: true},
+	}, index)
+
+	if len(events) != 1 || events[0].Output != "actual\n" || !events[0].OutputTerminal || events[0].OutputCollection || !events[0].OutputGapBefore {
+		t.Fatalf("RunCommand transition = %#v, want terminal bytes to replace explicit collection", events)
+	}
+}
+
+func TestSpawnNarrativeReplacesExplicitContentCollection(t *testing.T) {
+	t.Parallel()
+
+	index := map[string]int{}
+	events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
+		CallID: "spawn-collection-1", Name: "Spawn", Output: "starting",
+		Meta: ToolUpdateMeta{ToolKind: "execute", OutputCollection: true},
+	}, index)
+	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
+		CallID: "spawn-collection-1", Name: "Spawn", Output: "answer",
+		Meta: ToolUpdateMeta{ToolKind: "execute", MessageID: "child-1", OutputNarrative: true},
+	}, index)
+
+	if len(events) != 1 || events[0].Output != "answer" || !events[0].OutputNarrative || events[0].OutputCollection {
+		t.Fatalf("Spawn transition = %#v, want child narrative to replace explicit collection", events)
+	}
+}
+
+func TestExactNameToolsReplaceExplicitContentCollections(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"RunCommand", "Spawn"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			index := map[string]int{}
+			events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
+				CallID: name + "-collection", Name: name, Output: "phase 1",
+				Meta: ToolUpdateMeta{ToolKind: "execute", OutputCollection: true},
+			}, index)
+			events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
+				CallID: name + "-collection", Name: name, Output: "phase 2",
+				Meta: ToolUpdateMeta{ToolKind: "execute", OutputCollection: true},
+			}, index)
+			if len(events) != 1 || events[0].Output != "phase 2" || !events[0].OutputCollection || events[0].OutputTerminal || events[0].OutputNarrative {
+				t.Fatalf("%s events = %#v, want the latest explicit collection snapshot", name, events)
+			}
+		})
+	}
+}
+
+func TestRunCommandFinalCollectionReplacesEarlierCollectionDespiteTerminalPresentation(t *testing.T) {
+	t.Parallel()
+
+	index := map[string]int{}
+	events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
+		CallID: "command-final-collection", Name: "RunCommand", Output: "phase 1",
+		Meta: ToolUpdateMeta{ToolKind: "execute", Terminal: true, OutputCollection: true},
+	}, index)
+	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
+		CallID: "command-final-collection", Name: "RunCommand", Output: "phase 2", Final: true,
+		Meta: ToolUpdateMeta{ToolKind: "execute", Terminal: true, OutputCollection: true},
+	}, index)
+
+	if len(events) != 1 || !events[0].Done || events[0].Output != "phase 2" || !events[0].OutputCollection || events[0].OutputTerminal {
+		t.Fatalf("RunCommand final collection = %#v, want the final snapshot to replace the earlier collection", events)
+	}
+}
+
+func TestSpawnCollectionClearsPriorNarrativeProvenanceBeforeFinalSnapshot(t *testing.T) {
+	t.Parallel()
+
+	index := map[string]int{}
+	events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
+		CallID: "spawn-mode-1", Name: "Spawn", Output: "answer",
+		Meta: ToolUpdateMeta{ToolKind: "execute", MessageID: "child-1", OutputNarrative: true},
+	}, index)
+	events[0].OutputNarrativeBoundary = true
+	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
+		CallID: "spawn-mode-1", Name: "Spawn", Output: "status",
+		Meta: ToolUpdateMeta{ToolKind: "execute", OutputCollection: true},
+	}, index)
+	if events[0].Output != "status" || !events[0].OutputCollection || events[0].OutputNarrative || events[0].OutputNarrativeBoundary {
+		t.Fatalf("Spawn running collection = %#v, want collection mode without stale narrative provenance", events[0])
+	}
+	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
+		CallID: "spawn-mode-1", Name: "Spawn", Output: "final", Final: true,
+		Meta: ToolUpdateMeta{ToolKind: "execute", OutputCollection: true},
+	}, index)
+	if len(events) != 1 || !events[0].Done || events[0].Output != "final" || !events[0].OutputCollection || events[0].OutputNarrative {
+		t.Fatalf("Spawn final collection = %#v, want final snapshot to replace running collection", events)
+	}
+}
+
 func TestCompletedRunCommandDuplicateEmptyFinalPreservesStreamedOutput(t *testing.T) {
 	t.Parallel()
 

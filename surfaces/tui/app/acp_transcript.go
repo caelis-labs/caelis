@@ -36,14 +36,15 @@ type acpTranscriptRenderOptions struct {
 }
 
 type toolPanelRenderRequest struct {
-	BlockID    string
-	CallID     string
-	ToolName   string
-	Text       string
-	Width      int
-	Ctx        BlockRenderContext
-	Err        bool
-	ClickToken string
+	BlockID       string
+	CallID        string
+	ToolName      string
+	TerminalPanel bool
+	Text          string
+	Width         int
+	Ctx           BlockRenderContext
+	Err           bool
+	ClickToken    string
 }
 
 const (
@@ -859,17 +860,17 @@ func acpToolPanelScrollToken(callID string) string {
 }
 
 func terminalToolPanelLineCount(events []SubagentEvent, callID string, ctx BlockRenderContext) int {
-	toolName, text, err, ok := terminalToolPanelPayload(events, callID)
-	if !ok || !shouldRenderACPToolPanel(text, err) || !surfaceIsTerminalPanelTool(toolName) {
+	_, terminal, text, err, ok := terminalToolPanelPayload(events, callID)
+	if !ok || !shouldRenderACPToolPanel(text, err) || !terminal {
 		return 0
 	}
 	return len(renderACPTerminalPanelBody(text, maxInt(1, ctx.Width-2), ctx, err))
 }
 
-func terminalToolPanelPayload(events []SubagentEvent, callID string) (toolName string, text string, err bool, ok bool) {
+func terminalToolPanelPayload(events []SubagentEvent, callID string) (toolName string, terminal bool, text string, err bool, ok bool) {
 	callID = strings.TrimSpace(callID)
 	if callID == "" {
-		return "", "", false, false
+		return "", false, "", false, false
 	}
 	var start SubagentEvent
 	var final SubagentEvent
@@ -900,9 +901,10 @@ func terminalToolPanelPayload(events []SubagentEvent, callID string) (toolName s
 		}
 	}
 	if !hasStart && !hasFinal {
-		return "", "", false, false
+		return "", false, "", false, false
 	}
 	toolName = finalPanelToolName(start, final, hasFinal)
+	terminal = isTerminalPanelToolEvent(start) || hasFinal && isTerminalPanelToolEvent(final)
 	text = preview
 	err = false
 	if hasFinal {
@@ -912,7 +914,7 @@ func terminalToolPanelPayload(events []SubagentEvent, callID string) (toolName s
 			text = "completed"
 		}
 	}
-	return toolName, text, err, true
+	return toolName, terminal, text, err, true
 }
 
 func renderACPToolPanelBody(text string, width int, ctx BlockRenderContext, err bool) []string {

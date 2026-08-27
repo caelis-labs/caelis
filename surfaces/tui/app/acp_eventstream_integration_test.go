@@ -1211,8 +1211,9 @@ func TestHandleACPEventEnvelopePreservesSparseExplorationContentAfterSettlement(
 		t.Fatalf("settled read = %#v, want prior visible content retained", block.Events)
 	}
 
-	// A post-settlement patch that omits status augments content without
-	// reopening the lifecycle. An explicit in_progress patch remains stale.
+	// A post-settlement patch that omits status replaces the standard ACP
+	// content collection without reopening the lifecycle. An explicit
+	// in_progress patch remains stale.
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
@@ -1230,6 +1231,21 @@ func TestHandleACPEventEnvelopePreservesSparseExplorationContentAfterSettlement(
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "read-1",
+			Content:       []schema.ToolCallContent{},
+		},
+	})
+
+	block = requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 || !block.Events[0].Done || block.Events[0].Output != "" || !block.Events[0].OutputCollection {
+		t.Fatalf("empty settled read = %#v, want explicit empty content collection to clear prior output", block.Events)
+	}
+
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "read-1",
 			Status:        &inProgress,
 			Content: []schema.ToolCallContent{{
 				Type: "content", Content: schema.TextContent{Type: "text", Text: " stale detail"},
@@ -1238,8 +1254,8 @@ func TestHandleACPEventEnvelopePreservesSparseExplorationContentAfterSettlement(
 	})
 
 	block = requireMainACPTurnBlockForTest(t, model)
-	if len(block.Events) != 1 || !block.Events[0].Done || block.Events[0].Output != "first resultlate detail" {
-		t.Fatalf("sparse settled read = %#v, want status-less content merged and explicit downgrade ignored", block.Events)
+	if len(block.Events) != 1 || !block.Events[0].Done || block.Events[0].Output != "" || !block.Events[0].OutputCollection {
+		t.Fatalf("sparse settled read = %#v, want empty content replacement retained and explicit downgrade ignored", block.Events)
 	}
 }
 

@@ -1,6 +1,7 @@
 package tuikit
 
 import (
+	"image/color"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -53,6 +54,25 @@ func RenderResponsiveOverlayFrame(theme Theme, m ResponsiveOverlayFrameModel) st
 		box = box.Width(width)
 	}
 	return box.Render(body)
+}
+
+// PaintLineBackground makes background paint survive nested ANSI resets. It
+// fills only transparent cells, preserving explicit backgrounds such as text
+// selection and inline code.
+func PaintLineBackground(line string, width int, background color.Color) string {
+	if width <= 0 || background == nil {
+		return line
+	}
+	screen := uv.NewScreenBuffer(width, 1)
+	screen.Method = ansi.GraphemeWidth
+	uv.NewStyledString(line).Draw(screen, screen.Bounds())
+	for x := 0; x < width; x++ {
+		cell := screen.CellAt(x, 0)
+		if cell != nil && cell.Style.Bg == nil {
+			cell.Style.Bg = background
+		}
+	}
+	return screen.Line(0).Render()
 }
 
 // RenderOverlayFrame renders a bordered overlay frame with optional title.
