@@ -73,6 +73,28 @@ func TestExtractTextValue(t *testing.T) {
 	}
 }
 
+func TestExtractTextValuePreservesRawMessageFallbacks(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value json.RawMessage
+		want  string
+	}{
+		{name: "empty", value: nil, want: ""},
+		{name: "encoded text", value: json.RawMessage(`{"type":"text","text":"hello"}`), want: "hello"},
+		{name: "invalid json", value: json.RawMessage("  not-json  "), want: "not-json"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ExtractTextValue(test.value); got != test.want {
+				t.Fatalf("ExtractTextValue() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestContentChunkRoundTripPreservesACPMetadata(t *testing.T) {
 	t.Parallel()
 

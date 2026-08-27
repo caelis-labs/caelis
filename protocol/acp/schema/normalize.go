@@ -38,17 +38,6 @@ func NormalizeRawMap(raw any) map[string]any {
 	}
 }
 
-func TextFromRawContent(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var content any
-	if err := json.Unmarshal(raw, &content); err != nil {
-		return strings.TrimSpace(string(raw))
-	}
-	return ExtractTextValue(content)
-}
-
 func ExtractTextValue(value any) string {
 	switch typed := value.(type) {
 	case nil:
@@ -63,7 +52,14 @@ func ExtractTextValue(value any) string {
 		}
 		return typed.Text
 	case json.RawMessage:
-		return TextFromRawContent(typed)
+		if len(typed) == 0 {
+			return ""
+		}
+		var content any
+		if err := json.Unmarshal(typed, &content); err != nil {
+			return strings.TrimSpace(string(typed))
+		}
+		return ExtractTextValue(content)
 	case []any:
 		var out strings.Builder
 		for _, item := range typed {

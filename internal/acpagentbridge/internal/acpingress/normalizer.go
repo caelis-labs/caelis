@@ -64,9 +64,9 @@ func ContentChunkText(chunk client.ContentChunk) string {
 		if text.Text != "" {
 			return text.Text
 		}
-		return acpschema.TextFromRawContent(chunk.Content)
+		return acpschema.ExtractTextValue(chunk.Content)
 	}
-	return acpschema.TextFromRawContent(chunk.Content)
+	return acpschema.ExtractTextValue(chunk.Content)
 }
 
 func normalizeContentChunk(chunk client.ContentChunk, opts Options) *session.Event {
