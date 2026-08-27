@@ -21,6 +21,7 @@ import (
 	adapterhostimpl "github.com/caelis-labs/caelis/app/gatewayapp/internal/adapterhost"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
@@ -31,9 +32,6 @@ import (
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/hostownership"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-
-	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 type Config struct {
@@ -390,7 +388,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	cursorCodec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: cursorSecret})
+	cursorCodec, err := appserver.NewCursorCodec(appserver.CursorCodecConfig{Secret: cursorSecret})
 	if err != nil {
 		return nil, err
 	}

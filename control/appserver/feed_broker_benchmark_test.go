@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 func BenchmarkFeedBrokerReconnectFirstEnvelope(b *testing.B) {
@@ -41,7 +40,7 @@ func BenchmarkFeedBrokerReconnectFirstEnvelope(b *testing.B) {
 
 func newBenchmarkFeedBroker(b *testing.B, reader session.PagedReader) (*FeedBroker, error) {
 	b.Helper()
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{
+	codec, err := NewCursorCodec(CursorCodecConfig{
 		Secret: []byte("0123456789abcdef0123456789abcdef"),
 	})
 	if err != nil {

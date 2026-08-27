@@ -1788,12 +1788,9 @@ func TestFeedBrokerPrimeRefreshesDurableTailAfterInitialScan(t *testing.T) {
 	}
 }
 
-func newTestFeedBroker(t *testing.T, reader session.PagedReader, override FeedBrokerConfig) (*FeedBroker, *eventstream.CursorCodec) {
+func newTestFeedBroker(t *testing.T, reader session.PagedReader, override FeedBrokerConfig) (*FeedBroker, *CursorCodec) {
 	t.Helper()
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
-	if err != nil {
-		t.Fatal(err)
-	}
+	codec := newTestCursorCodec(t)
 	override.SessionRef = session.SessionRef{SessionID: "session-1"}
 	override.Reader = reader
 	override.CursorCodec = codec

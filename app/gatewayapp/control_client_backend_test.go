@@ -227,7 +227,7 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{
+	codec, err := appserver.NewCursorCodec(appserver.CursorCodecConfig{
 		Secret: []byte("0123456789abcdef0123456789abcdef"),
 	})
 	if err != nil {
@@ -445,7 +445,7 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	codec, err := appserver.NewCursorCodec(appserver.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -520,7 +520,7 @@ func TestControlClientPromptUsesHostLifecycleAfterAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{
+	codec, err := appserver.NewCursorCodec(appserver.CursorCodecConfig{
 		Secret: []byte("0123456789abcdef0123456789abcdef"),
 	})
 	if err != nil {
@@ -603,7 +603,7 @@ func TestControlClientParticipantPromptUsesHostLifecycleAfterAdmission(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{
+	codec, err := appserver.NewCursorCodec(appserver.CursorCodecConfig{
 		Secret: []byte("0123456789abcdef0123456789abcdef"),
 	})
 	if err != nil {
@@ -689,7 +689,7 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{
+	codec, err := appserver.NewCursorCodec(appserver.CursorCodecConfig{
 		Secret: []byte("0123456789abcdef0123456789abcdef"),
 	})
 	if err != nil {

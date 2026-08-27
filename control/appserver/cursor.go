@@ -1,4 +1,4 @@
-package eventstream
+package appserver
 
 import (
 	"crypto/hmac"
@@ -8,17 +8,19 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 const (
-	ResumeCursorVersion = 1
+	resumeCursorVersion = 1
 	resumeCursorPrefix  = "c1"
 )
 
 var (
-	ErrInvalidCursor         = errors.New("eventstream: invalid resume cursor")
-	ErrCursorSessionMismatch = errors.New("eventstream: resume cursor belongs to another session")
-	ErrCursorVersion         = errors.New("eventstream: unsupported resume cursor version")
+	ErrInvalidCursor         = errors.New("appserver: invalid resume cursor")
+	ErrCursorSessionMismatch = errors.New("appserver: resume cursor belongs to another session")
+	ErrCursorVersion         = errors.New("appserver: unsupported resume cursor version")
 )
 
 // CursorCodecConfig configures one persistent signed resume-token codec.
@@ -27,17 +29,18 @@ type CursorCodecConfig struct {
 	KeyID  string
 }
 
-// CursorCodec signs and verifies the sole public client resume token.
+// CursorCodec signs and verifies the sole public client resume token issued by
+// the Control Session feed.
 type CursorCodec struct {
 	secret []byte
 	keyID  string
 }
 
 type resumeCursorPayload struct {
-	Version   int          `json:"v"`
-	KeyID     string       `json:"kid"`
-	SessionID string       `json:"sid"`
-	Position  FeedPosition `json:"pos"`
+	Version   int                      `json:"v"`
+	KeyID     string                   `json:"kid"`
+	SessionID string                   `json:"sid"`
+	Position  eventstream.FeedPosition `json:"pos"`
 }
 
 // NewCursorCodec constructs a signed cursor codec. A 256-bit secret is
@@ -54,7 +57,7 @@ func NewCursorCodec(cfg CursorCodecConfig) (*CursorCodec, error) {
 }
 
 // Encode returns a signed opaque Cursor bound to one Session and position.
-func (c *CursorCodec) Encode(sessionID string, position FeedPosition) (string, error) {
+func (c *CursorCodec) Encode(sessionID string, position eventstream.FeedPosition) (string, error) {
 	if c == nil || len(c.secret) < sha256.Size {
 		return "", ErrInvalidCursor
 	}
@@ -63,7 +66,7 @@ func (c *CursorCodec) Encode(sessionID string, position FeedPosition) (string, e
 		return "", ErrInvalidCursor
 	}
 	payload, err := json.Marshal(resumeCursorPayload{
-		Version: ResumeCursorVersion, KeyID: c.keyID, SessionID: sessionID, Position: position,
+		Version: resumeCursorVersion, KeyID: c.keyID, SessionID: sessionID, Position: position,
 	})
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrInvalidCursor, err)
@@ -74,39 +77,39 @@ func (c *CursorCodec) Encode(sessionID string, position FeedPosition) (string, e
 }
 
 // Decode verifies and returns one Cursor position for the expected Session.
-func (c *CursorCodec) Decode(expectedSessionID string, cursor string) (FeedPosition, error) {
+func (c *CursorCodec) Decode(expectedSessionID string, cursor string) (eventstream.FeedPosition, error) {
 	if c == nil || len(c.secret) < sha256.Size {
-		return FeedPosition{}, ErrInvalidCursor
+		return eventstream.FeedPosition{}, ErrInvalidCursor
 	}
 	parts := strings.Split(strings.TrimSpace(cursor), ".")
 	if len(parts) != 3 {
-		return FeedPosition{}, ErrInvalidCursor
+		return eventstream.FeedPosition{}, ErrInvalidCursor
 	}
 	if parts[0] != resumeCursorPrefix {
-		return FeedPosition{}, ErrCursorVersion
+		return eventstream.FeedPosition{}, ErrCursorVersion
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return FeedPosition{}, ErrInvalidCursor
+		return eventstream.FeedPosition{}, ErrInvalidCursor
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil || !hmac.Equal(signature, c.signature([]byte(parts[0]+"."+parts[1]))) {
-		return FeedPosition{}, ErrInvalidCursor
+		return eventstream.FeedPosition{}, ErrInvalidCursor
 	}
 	var decoded resumeCursorPayload
 	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return FeedPosition{}, ErrInvalidCursor
+		return eventstream.FeedPosition{}, ErrInvalidCursor
 	}
-	if decoded.Version != ResumeCursorVersion || strings.TrimSpace(decoded.KeyID) != c.keyID {
-		return FeedPosition{}, ErrCursorVersion
+	if decoded.Version != resumeCursorVersion || strings.TrimSpace(decoded.KeyID) != c.keyID {
+		return eventstream.FeedPosition{}, ErrCursorVersion
 	}
 	if strings.TrimSpace(decoded.SessionID) != strings.TrimSpace(expectedSessionID) {
-		return FeedPosition{}, ErrCursorSessionMismatch
+		return eventstream.FeedPosition{}, ErrCursorSessionMismatch
 	}
 	if err := decoded.Position.Validate(); err != nil {
-		return FeedPosition{}, ErrInvalidCursor
+		return eventstream.FeedPosition{}, ErrInvalidCursor
 	}
-	return *CloneFeedPosition(&decoded.Position), nil
+	return *eventstream.CloneFeedPosition(&decoded.Position), nil
 }
 
 func (c *CursorCodec) signature(value []byte) []byte {

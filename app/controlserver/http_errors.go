@@ -6,16 +6,15 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 func statusForError(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
-	if errors.Is(err, eventstream.ErrInvalidCursor) ||
-		errors.Is(err, eventstream.ErrCursorSessionMismatch) ||
-		errors.Is(err, eventstream.ErrCursorVersion) {
+	if errors.Is(err, appserver.ErrInvalidCursor) ||
+		errors.Is(err, appserver.ErrCursorSessionMismatch) ||
+		errors.Is(err, appserver.ErrCursorVersion) {
 		return http.StatusBadRequest
 	}
 	switch errorcode.CodeOf(err) {

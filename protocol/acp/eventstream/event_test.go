@@ -502,6 +502,15 @@ func TestCloneEnvelopeDeepCopiesRelationAndDelivery(t *testing.T) {
 	}
 }
 
+func TestCloneEnvelopeClonesPosition(t *testing.T) {
+	original := Envelope{Position: &FeedPosition{Durable: &DurableFeedPosition{Seq: 9, ProjectionIndex: 2}}}
+	cloned := CloneEnvelope(original)
+	cloned.Position.Durable.Seq = 10
+	if original.Position.Durable.Seq != 9 {
+		t.Fatalf("CloneEnvelope shared position: %#v", original.Position)
+	}
+}
+
 func assertGoldenJSON(t *testing.T, path string, value any) {
 	t.Helper()
 	data, err := json.MarshalIndent(value, "", "  ")

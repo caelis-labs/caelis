@@ -50,7 +50,7 @@ func (b *FeedBroker) subscribeCheckpoint(
 		ctx = context.Background()
 	}
 	if strings.TrimSpace(req.SessionID) != b.ref.SessionID {
-		return SubscribeResult{}, session.EventCheckpoint{}, eventstream.ErrCursorSessionMismatch
+		return SubscribeResult{}, session.EventCheckpoint{}, ErrCursorSessionMismatch
 	}
 	var requested eventstream.FeedPosition
 	var err error
@@ -119,10 +119,10 @@ func (b *FeedBroker) captureCheckpoint(
 	checkpoint.Session = session.CloneSession(checkpoint.Session)
 	checkpoint.LastClientReplayEvent = session.CloneEvent(checkpoint.LastClientReplayEvent)
 	if id := strings.TrimSpace(checkpoint.Session.SessionID); id != "" && id != b.ref.SessionID {
-		return session.EventCheckpoint{}, nil, 0, false, eventstream.ErrCursorSessionMismatch
+		return session.EventCheckpoint{}, nil, 0, false, ErrCursorSessionMismatch
 	}
 	if requested.DurableAnchor().Seq > checkpoint.ThroughSeq {
-		return session.EventCheckpoint{}, nil, 0, false, eventstream.ErrInvalidCursor
+		return session.EventCheckpoint{}, nil, 0, false, ErrInvalidCursor
 	}
 
 	b.mu.Lock()

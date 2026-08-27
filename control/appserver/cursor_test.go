@@ -1,4 +1,4 @@
-package eventstream
+package appserver
 
 import (
 	"crypto/hmac"
@@ -8,11 +8,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 func TestCursorCodecRoundTripAndSessionBinding(t *testing.T) {
 	codec := newTestCursorCodec(t)
-	want := FeedPosition{Durable: &DurableFeedPosition{Seq: 42, ProjectionIndex: 3}}
+	want := eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{Seq: 42, ProjectionIndex: 3}}
 	cursor, err := codec.Encode("session-a", want)
 	if err != nil {
 		t.Fatal(err)
@@ -34,8 +36,8 @@ func TestCursorCodecRoundTripAndSessionBinding(t *testing.T) {
 
 func TestCursorCodecRejectsForgeryAndVersion(t *testing.T) {
 	codec := newTestCursorCodec(t)
-	cursor, err := codec.Encode("session-a", FeedPosition{Transient: &TransientFeedPosition{
-		Anchor: DurableFeedPosition{Seq: 7, ProjectionIndex: 1}, Generation: "generation-a", Sequence: 2,
+	cursor, err := codec.Encode("session-a", eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
+		Anchor: eventstream.DurableFeedPosition{Seq: 7, ProjectionIndex: 1}, Generation: "generation-a", Sequence: 2,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -52,8 +54,8 @@ func TestCursorCodecRejectsForgeryAndVersion(t *testing.T) {
 	}
 
 	payload, err := json.Marshal(resumeCursorPayload{
-		Version: ResumeCursorVersion + 1, KeyID: codec.keyID, SessionID: "session-a",
-		Position: FeedPosition{Durable: &DurableFeedPosition{Seq: 1}},
+		Version: resumeCursorVersion + 1, KeyID: codec.keyID, SessionID: "session-a",
+		Position: eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{Seq: 1}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -68,16 +70,7 @@ func TestCursorCodecRejectsForgeryAndVersion(t *testing.T) {
 	}
 }
 
-func TestCloneEnvelopeClonesPosition(t *testing.T) {
-	original := Envelope{Position: &FeedPosition{Durable: &DurableFeedPosition{Seq: 9, ProjectionIndex: 2}}}
-	cloned := CloneEnvelope(original)
-	cloned.Position.Durable.Seq = 10
-	if original.Position.Durable.Seq != 9 {
-		t.Fatalf("CloneEnvelope shared position: %#v", original.Position)
-	}
-}
-
-func newTestCursorCodec(t *testing.T) *CursorCodec {
+func newTestCursorCodec(t testing.TB) *CursorCodec {
 	t.Helper()
 	codec, err := NewCursorCodec(CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {

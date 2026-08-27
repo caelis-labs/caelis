@@ -28,7 +28,7 @@ const (
 type FeedBrokerConfig struct {
 	SessionRef      session.SessionRef
 	Reader          session.PagedReader
-	CursorCodec     *eventstream.CursorCodec
+	CursorCodec     *CursorCodec
 	RingEvents      int
 	RingBytes       int
 	RingTTL         time.Duration
@@ -52,7 +52,7 @@ type feedRingItem struct {
 type FeedBroker struct {
 	ref          session.SessionRef
 	reader       session.PagedReader
-	codec        *eventstream.CursorCodec
+	codec        *CursorCodec
 	ringEvents   int
 	ringBytes    int
 	ringTTL      time.Duration
@@ -1225,7 +1225,7 @@ type feedRegistry struct {
 // FeedRegistryConfig supplies shared broker dependencies and limits.
 type FeedRegistryConfig struct {
 	Reader                 session.PagedReader
-	CursorCodec            *eventstream.CursorCodec
+	CursorCodec            *CursorCodec
 	RingEvents             int
 	RingBytes              int
 	RingTTL                time.Duration

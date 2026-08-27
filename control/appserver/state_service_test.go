@@ -13,7 +13,7 @@ import (
 )
 
 func TestStateServiceReturnsTypedConsistentBootstrapBySessionID(t *testing.T) {
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	codec, err := NewCursorCodec(CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestStateServiceReturnsTypedConsistentBootstrapBySessionID(t *testing.T) {
 }
 
 func TestStateServiceDoesNotStarveWhileSessionRevisionChanges(t *testing.T) {
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	codec, err := NewCursorCodec(CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestStateServiceDoesNotStarveWhileSessionRevisionChanges(t *testing.T) {
 }
 
 func TestStateServicePreparesExplicitReconnectButKeepsInspectPure(t *testing.T) {
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	codec, err := NewCursorCodec(CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestStateServicePreparesExplicitReconnectButKeepsInspectPure(t *testing.T) 
 }
 
 func TestStateServiceReconnectSucceedsDuringContinuousPublish(t *testing.T) {
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	codec, err := NewCursorCodec(CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestStateServiceReconnectSucceedsDuringContinuousPublish(t *testing.T) {
 }
 
 func TestStateServiceMapsCheckpointLagToRevisionConflict(t *testing.T) {
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	codec, err := NewCursorCodec(CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestStateServiceMapsCheckpointLagToRevisionConflict(t *testing.T) {
 }
 
 func TestStateServiceAcceptsCheckpointCoveredByNonProjectingCanonicalEvent(t *testing.T) {
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	codec, err := NewCursorCodec(CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestStateServiceAcceptsCheckpointCoveredByNonProjectingCanonicalEvent(t *te
 }
 
 func TestReconnectStateUsesExactFeedCutModeGapAndBoundary(t *testing.T) {
-	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	codec, err := NewCursorCodec(CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {
 		t.Fatal(err)
 	}
