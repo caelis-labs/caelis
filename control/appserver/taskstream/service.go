@@ -15,7 +15,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 // Product Task semantics and directory DTOs have one owner in
@@ -42,8 +41,12 @@ var ErrSlowConsumer = controltaskstream.ErrSlowConsumer
 // Programmatic clients retain the typed fact and cursor; first-party human
 // surfaces may silently continue from the advertised current state.
 func IsTransientGapEnvelope(envelope eventstream.Envelope) bool {
-	return envelope.Kind == eventstream.KindNotice &&
-		metautil.Bool(envelope.Meta, "task_stream", "transient_gap")
+	if envelope.Kind != eventstream.KindNotice {
+		return false
+	}
+	taskStream, _ := envelope.Meta["task_stream"].(map[string]any)
+	transientGap, _ := taskStream["transient_gap"].(bool)
+	return transientGap
 }
 
 type Batch struct {

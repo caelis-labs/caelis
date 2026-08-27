@@ -121,7 +121,7 @@ func TestProjectTaskFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	if got := toolTerminalOutputText(t, update); got != "ok\n" {
 		t.Fatalf("terminal output = %q, want ok output", got)
 	}
-	if metautil.Bool(update.Meta, metautil.Root, metautil.Transient) {
+	if hasLegacyTransientMetadata(update.Meta) {
 		t.Fatalf("update.Meta = %#v, want typed delivery without legacy transient shadow", update.Meta)
 	}
 	streamMeta := metautil.RuntimeSection(update.Meta, metautil.RuntimeStream)
@@ -839,9 +839,15 @@ func assertNoLegacyRelationDeliveryMetadata(t *testing.T, env eventstream.Envelo
 	if parentTool := metautil.String(env.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamParentTool); parentTool != "" {
 		t.Fatalf("envelope meta parent_tool = %q, want typed-only relation; meta=%#v", parentTool, env.Meta)
 	}
-	if metautil.Bool(env.Meta, metautil.Root, metautil.Transient) {
+	if hasLegacyTransientMetadata(env.Meta) {
 		t.Fatalf("envelope meta = %#v, want no legacy delivery shadow", env.Meta)
 	}
+}
+
+func hasLegacyTransientMetadata(meta map[string]any) bool {
+	caelis, _ := meta[metautil.Root].(map[string]any)
+	transient, _ := caelis[metautil.Transient].(bool)
+	return transient
 }
 
 func assertStreamDelivery(t *testing.T, env eventstream.Envelope, transient bool) {

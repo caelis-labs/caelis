@@ -125,20 +125,6 @@ func String(values map[string]any, path ...string) string {
 	return strings.TrimSpace(text)
 }
 
-// Bool returns a boolean from _meta using a stable path.
-func Bool(values map[string]any, path ...string) bool {
-	var current any = values
-	for _, key := range path {
-		mapped, ok := current.(map[string]any)
-		if !ok {
-			return false
-		}
-		current = mapped[key]
-	}
-	value, _ := current.(bool)
-	return value
-}
-
 // Int64 returns an integer from _meta together with whether the complete path
 // contains a supported numeric representation.
 func Int64(values map[string]any, path ...string) (int64, bool) {
