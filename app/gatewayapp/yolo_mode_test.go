@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -151,9 +152,9 @@ func (p *recordingModeProvider) SessionModes(context.Context, session.Session) (
 	}, nil
 }
 
-func (p *recordingModeProvider) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+func (p *recordingModeProvider) SetSessionMode(context.Context, acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
 	p.setCalls++
-	return acp.SetSessionModeResponse{}, nil
+	return acpsdk.SetSessionModeResponse{}, nil
 }
 
 func TestDangerouslySkipPermissionsIsNotPersisted(t *testing.T) {

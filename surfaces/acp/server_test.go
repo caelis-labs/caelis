@@ -139,6 +139,45 @@ func TestAuthenticateRequiresOptionalAgentCapability(t *testing.T) {
 	}
 }
 
+func TestDecodeRequiredStandardParamsUsesSDKValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		raw    json.RawMessage
+		target any
+	}{
+		"authenticate missing method": {
+			raw:    json.RawMessage(`{}`),
+			target: &acpsdk.AuthenticateRequest{},
+		},
+		"close null params": {
+			raw:    json.RawMessage(`null`),
+			target: &acpsdk.CloseSessionRequest{},
+		},
+		"set mode missing mode": {
+			raw:    json.RawMessage(`{"sessionId":"session-1"}`),
+			target: &acpsdk.SetSessionModeRequest{},
+		},
+	}
+	for name, test := range tests {
+		name, test := name, test
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if err := decodeRequiredParams(test.raw, test.target); err == nil {
+				t.Fatal("decodeRequiredParams() error = nil, want SDK validation failure")
+			}
+		})
+	}
+
+	var closeRequest acpsdk.CloseSessionRequest
+	if err := decodeRequiredParams(json.RawMessage(`{"sessionId":"session-1"}`), &closeRequest); err != nil {
+		t.Fatalf("valid close params: %v", err)
+	}
+	if closeRequest.SessionId != "session-1" {
+		t.Fatalf("close session id = %q, want session-1", closeRequest.SessionId)
+	}
+}
+
 func TestRetiredSetModelMethodIsNotDispatched(t *testing.T) {
 	t.Parallel()
 
@@ -370,7 +409,7 @@ func TestServeStdioRejectsWrongACPMessageDirection(t *testing.T) {
 	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"}); err != nil {
 		t.Fatalf("session/prompt notification error = %v", err)
 	}
-	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionClose, protocolacp.CloseSessionRequest{SessionID: "session-1"}); err != nil {
+	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionClose, acpsdk.CloseSessionRequest{SessionId: "session-1"}); err != nil {
 		t.Fatalf("session/close notification error = %v", err)
 	}
 	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionCancel, nil); err != nil {
@@ -406,7 +445,7 @@ func TestServeStdioRejectsWrongACPMessageDirection(t *testing.T) {
 	if _, err := acpsdk.SendRequest[protocolacp.PromptResponse](conn, ctx, acpsdk.AgentMethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"}); err != nil {
 		t.Fatalf("session/prompt request error = %v", err)
 	}
-	if _, err := acpsdk.SendRequest[protocolacp.CloseSessionResponse](conn, ctx, acpsdk.AgentMethodSessionClose, protocolacp.CloseSessionRequest{SessionID: "session-1"}); err != nil {
+	if _, err := acpsdk.SendRequest[acpsdk.CloseSessionResponse](conn, ctx, acpsdk.AgentMethodSessionClose, acpsdk.CloseSessionRequest{SessionId: "session-1"}); err != nil {
 		t.Fatalf("session/close request error = %v", err)
 	}
 	if got := agent.promptCalls.Load(); got != 1 {
@@ -465,7 +504,7 @@ func TestServeStdioHandlesStableSessionLifecycleMethods(t *testing.T) {
 		t.Fatalf("session/resume id = %q, want session-1", agent.resumeSessionID)
 	}
 
-	if _, err := acpsdk.SendRequest[protocolacp.CloseSessionResponse](conn, ctx, acpsdk.AgentMethodSessionClose, protocolacp.CloseSessionRequest{SessionID: "session-1"}); err != nil {
+	if _, err := acpsdk.SendRequest[acpsdk.CloseSessionResponse](conn, ctx, acpsdk.AgentMethodSessionClose, acpsdk.CloseSessionRequest{SessionId: "session-1"}); err != nil {
 		t.Fatalf("session/close call error = %v", err)
 	}
 	if agent.closeSessionID != "session-1" {
@@ -516,8 +555,8 @@ func (commandAgent) Initialize(context.Context, protocolacp.InitializeRequest) (
 	return protocolacp.InitializeResponse{}, nil
 }
 
-func (commandAgent) Authenticate(context.Context, protocolacp.AuthenticateRequest) (protocolacp.AuthenticateResponse, error) {
-	return protocolacp.AuthenticateResponse{}, nil
+func (commandAgent) Authenticate(context.Context, acpsdk.AuthenticateRequest) (acpsdk.AuthenticateResponse, error) {
+	return acpsdk.AuthenticateResponse{}, nil
 }
 
 func (commandAgent) NewSession(context.Context, protocolacp.NewSessionRequest) (protocolacp.NewSessionResponse, error) {
@@ -578,9 +617,9 @@ func (a *messageDirectionAgent) Prompt(context.Context, protocolacp.PromptReques
 	return protocolacp.PromptResponse{StopReason: protocolacp.StopReasonEndTurn}, nil
 }
 
-func (a *messageDirectionAgent) CloseSession(_ context.Context, _ protocolacp.CloseSessionRequest) (protocolacp.CloseSessionResponse, error) {
+func (a *messageDirectionAgent) CloseSession(_ context.Context, _ acpsdk.CloseSessionRequest) (acpsdk.CloseSessionResponse, error) {
 	a.closeCalls.Add(1)
-	return protocolacp.CloseSessionResponse{}, nil
+	return acpsdk.CloseSessionResponse{}, nil
 }
 
 func (a *messageDirectionAgent) Cancel(context.Context, acpsdk.CancelNotification) error {
@@ -637,9 +676,9 @@ func (a *stableLifecycleAgent) ResumeSession(_ context.Context, req protocolacp.
 	return protocolacp.ResumeSessionResponse{}, nil
 }
 
-func (a *stableLifecycleAgent) CloseSession(_ context.Context, req protocolacp.CloseSessionRequest) (protocolacp.CloseSessionResponse, error) {
-	a.closeSessionID = req.SessionID
-	return protocolacp.CloseSessionResponse{}, nil
+func (a *stableLifecycleAgent) CloseSession(_ context.Context, req acpsdk.CloseSessionRequest) (acpsdk.CloseSessionResponse, error) {
+	a.closeSessionID = string(req.SessionId)
+	return acpsdk.CloseSessionResponse{}, nil
 }
 
 func testStringPointer(value string) *string {

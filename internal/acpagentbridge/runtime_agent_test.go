@@ -355,7 +355,7 @@ func TestRuntimeAgentListResumeAndCloseSession(t *testing.T) {
 		t.Fatalf("len(ResumeSession().ConfigOptions) = %d, want %d", got, want)
 	}
 
-	if _, err := agent.CloseSession(ctx, acp.CloseSessionRequest{SessionID: activeSession.SessionID}); err != nil {
+	if _, err := agent.CloseSession(ctx, acpsdk.CloseSessionRequest{SessionId: acpsdk.SessionId(activeSession.SessionID)}); err != nil {
 		t.Fatalf("CloseSession() error = %v", err)
 	}
 }
@@ -703,7 +703,7 @@ func TestRuntimeAgentPromptOmitsOwnedNarrativeFinalAcrossToolBoundary(t *testing
 
 func TestRuntimeAgentOptionalMethodsUnsupportedByDefault(t *testing.T) {
 	agent, _ := newRuntimeAgentWithConfig(t, runtimeacp.Config{})
-	if _, err := agent.SetSessionMode(context.Background(), acp.SetSessionModeRequest{}); !errors.Is(err, runtimeacp.ErrCapabilityUnsupported) {
+	if _, err := agent.SetSessionMode(context.Background(), acpsdk.SetSessionModeRequest{}); !errors.Is(err, runtimeacp.ErrCapabilityUnsupported) {
 		t.Fatalf("SetSessionMode() error = %v, want ErrCapabilityUnsupported", err)
 	}
 	if _, err := agent.SetSessionConfigOption(context.Background(), acp.SetSessionConfigOptionRequest{}); !errors.Is(err, runtimeacp.ErrCapabilityUnsupported) {
@@ -974,8 +974,8 @@ func (testModeProvider) SessionModes(context.Context, session.Session) (*acp.Ses
 	}, nil
 }
 
-func (testModeProvider) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
-	return acp.SetSessionModeResponse{}, nil
+func (testModeProvider) SetSessionMode(context.Context, acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
+	return acpsdk.SetSessionModeResponse{}, nil
 }
 
 type recordingModeProvider struct {
@@ -990,8 +990,8 @@ func (p *recordingModeProvider) SessionModes(_ context.Context, activeSession se
 	}, nil
 }
 
-func (p *recordingModeProvider) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
-	return acp.SetSessionModeResponse{}, nil
+func (p *recordingModeProvider) SetSessionMode(context.Context, acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
+	return acpsdk.SetSessionModeResponse{}, nil
 }
 
 type staticApprovalModeProvider struct {
@@ -1012,8 +1012,8 @@ func (p staticApprovalModeProvider) SessionModes(context.Context, session.Sessio
 	}, nil
 }
 
-func (p staticApprovalModeProvider) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
-	return acp.SetSessionModeResponse{}, nil
+func (p staticApprovalModeProvider) SetSessionMode(context.Context, acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
+	return acpsdk.SetSessionModeResponse{}, nil
 }
 
 type testConfigProvider struct{}

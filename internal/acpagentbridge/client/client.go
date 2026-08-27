@@ -148,7 +148,7 @@ func (c *Client) Initialize(ctx context.Context) (InitializeResponse, error) {
 // Authenticate invokes the stable ACP v1 agent-managed authentication flow.
 func (c *Client) Authenticate(ctx context.Context, methodID string) error {
 	_, err := sendRequest[AuthenticateResponse](c, ctx, MethodAuthenticate, AuthenticateRequest{
-		MethodID: strings.TrimSpace(methodID),
+		MethodId: acpsdk.AuthMethodId(strings.TrimSpace(methodID)),
 	})
 	return err
 }
@@ -185,15 +185,15 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, cwd string
 
 func (c *Client) CloseSession(ctx context.Context, sessionID string) error {
 	_, err := sendRequest[CloseSessionResponse](c, ctx, MethodSessionClose, CloseSessionRequest{
-		SessionID: strings.TrimSpace(sessionID),
+		SessionId: acpsdk.SessionId(strings.TrimSpace(sessionID)),
 	})
 	return err
 }
 
 func (c *Client) SetMode(ctx context.Context, sessionID string, modeID string) error {
 	_, err := sendRequest[SetSessionModeResponse](c, ctx, MethodSessionSetMode, SetSessionModeRequest{
-		SessionID: sessionID,
-		ModeID:    modeID,
+		SessionId: acpsdk.SessionId(sessionID),
+		ModeId:    acpsdk.SessionModeId(modeID),
 	})
 	return err
 }

@@ -112,11 +112,11 @@ func (a *ProductAgent) ResumeSession(ctx context.Context, req protocolacp.Resume
 	return a.inner.ResumeSession(ctx, req)
 }
 
-func (a *ProductAgent) CloseSession(ctx context.Context, req protocolacp.CloseSessionRequest) (protocolacp.CloseSessionResponse, error) {
+func (a *ProductAgent) CloseSession(ctx context.Context, req acpsdk.CloseSessionRequest) (acpsdk.CloseSessionResponse, error) {
 	return a.inner.CloseSession(ctx, req)
 }
 
-func (a *ProductAgent) SetSessionMode(ctx context.Context, req protocolacp.SetSessionModeRequest) (protocolacp.SetSessionModeResponse, error) {
+func (a *ProductAgent) SetSessionMode(ctx context.Context, req acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
 	return a.inner.SetSessionMode(ctx, req)
 }
 
@@ -133,7 +133,7 @@ func (a *ProductAgent) AvailableCommands(ctx context.Context, sessionID string) 
 }
 
 type agentAuthenticator interface {
-	Authenticate(context.Context, protocolacp.AuthenticateRequest) (protocolacp.AuthenticateResponse, error)
+	Authenticate(context.Context, acpsdk.AuthenticateRequest) (acpsdk.AuthenticateResponse, error)
 }
 
 type sessionLister interface {
@@ -149,11 +149,11 @@ type sessionResumer interface {
 }
 
 type sessionCloser interface {
-	CloseSession(context.Context, protocolacp.CloseSessionRequest) (protocolacp.CloseSessionResponse, error)
+	CloseSession(context.Context, acpsdk.CloseSessionRequest) (acpsdk.CloseSessionResponse, error)
 }
 
 type sessionModeSetter interface {
-	SetSessionMode(context.Context, protocolacp.SetSessionModeRequest) (protocolacp.SetSessionModeResponse, error)
+	SetSessionMode(context.Context, acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error)
 }
 
 type sessionConfigSetter interface {

@@ -136,8 +136,8 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		resp, err := c.agent.Initialize(ctx, req)
 		return responseOrError(resp, err)
 	case acpsdk.AgentMethodAuthenticate:
-		var req protocolacp.AuthenticateRequest
-		if err := decodeParams(params, &req); err != nil {
+		var req acpsdk.AuthenticateRequest
+		if err := decodeRequiredParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
 		handler, ok := c.agent.(agentAuthenticator)
@@ -205,8 +205,8 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		}
 		return resp, nil
 	case acpsdk.AgentMethodSessionClose:
-		var req protocolacp.CloseSessionRequest
-		if err := decodeParams(params, &req); err != nil {
+		var req acpsdk.CloseSessionRequest
+		if err := decodeRequiredParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
 		handler, ok := c.agent.(sessionCloser)
@@ -216,8 +216,8 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		resp, err := handler.CloseSession(ctx, req)
 		return responseOrError(resp, err)
 	case acpsdk.AgentMethodSessionSetMode:
-		var req protocolacp.SetSessionModeRequest
-		if err := decodeParams(params, &req); err != nil {
+		var req acpsdk.SetSessionModeRequest
+		if err := decodeRequiredParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
 		handler, ok := c.agent.(sessionModeSetter)
@@ -381,6 +381,13 @@ func (c *serverConn) connection(ctx context.Context) (*acpsdk.Connection, error)
 func decodeParams(raw json.RawMessage, target any) error {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil
+	}
+	return json.Unmarshal(raw, target)
+}
+
+func decodeRequiredParams(raw json.RawMessage, target any) error {
+	if len(raw) == 0 {
+		return fmt.Errorf("params are required")
 	}
 	return json.Unmarshal(raw, target)
 }

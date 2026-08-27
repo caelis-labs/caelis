@@ -40,7 +40,7 @@ type SessionModeReader interface {
 // SessionModeWriter applies one ACP mode mutation for direct-runtime
 // conformance. Product assembly sends configuration through AppServer instead.
 type SessionModeWriter interface {
-	SetSessionMode(context.Context, schema.SetSessionModeRequest) (schema.SetSessionModeResponse, error)
+	SetSessionMode(context.Context, acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error)
 }
 
 // SessionConfigReader supplies the bridge with ACP configuration projection.

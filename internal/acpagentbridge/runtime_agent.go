@@ -502,13 +502,13 @@ func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionR
 	return resp, nil
 }
 
-func (a *RuntimeAgent) CloseSession(ctx context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
-	activeSession, err := a.targetSession(ctx, req.SessionID)
+func (a *RuntimeAgent) CloseSession(ctx context.Context, req acpsdk.CloseSessionRequest) (acpsdk.CloseSessionResponse, error) {
+	sessionID := strings.TrimSpace(string(req.SessionId))
+	activeSession, err := a.targetSession(ctx, sessionID)
 	if err != nil {
-		return acp.CloseSessionResponse{}, err
+		return acpsdk.CloseSessionResponse{}, err
 	}
 	if a.sessionClient != nil {
-		sessionID := strings.TrimSpace(req.SessionID)
 		result, err := a.sessionClient.CloseSession(ctx, appserver.CloseSessionRequest{WriteBase: appserver.WriteBase{
 			OperationID:             newACPSessionOperationID("close"),
 			SessionID:               sessionID,
@@ -516,21 +516,21 @@ func (a *RuntimeAgent) CloseSession(ctx context.Context, req acp.CloseSessionReq
 			ExpectedControllerEpoch: strings.TrimSpace(activeSession.Controller.EpochID),
 		}})
 		if err != nil {
-			return acp.CloseSessionResponse{}, err
+			return acpsdk.CloseSessionResponse{}, err
 		}
 		if result.Outcome != appserver.OutcomeCommitted && result.Outcome != appserver.OutcomeAccepted {
-			return acp.CloseSessionResponse{}, fmt.Errorf(
+			return acpsdk.CloseSessionResponse{}, fmt.Errorf(
 				"internal/acpagentbridge: close Session operation %q ended with outcome %q",
 				result.OperationID,
 				result.Outcome,
 			)
 		}
 		a.clearSessionDelivery(sessionID)
-		return acp.CloseSessionResponse{}, nil
+		return acpsdk.CloseSessionResponse{}, nil
 	}
-	a.cancelSession(req.SessionID)
-	a.clearSessionDelivery(req.SessionID)
-	return acp.CloseSessionResponse{}, nil
+	a.cancelSession(sessionID)
+	a.clearSessionDelivery(sessionID)
+	return acpsdk.CloseSessionResponse{}, nil
 }
 
 func (a *RuntimeAgent) clearSessionDelivery(sessionID string) {
@@ -541,18 +541,20 @@ func (a *RuntimeAgent) clearSessionDelivery(sessionID string) {
 	a.closeACPTaskStreamMuxes(sessionID)
 }
 
-func (a *RuntimeAgent) SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+func (a *RuntimeAgent) SetSessionMode(ctx context.Context, req acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
+	sessionID := strings.TrimSpace(string(req.SessionId))
+	modeID := strings.TrimSpace(string(req.ModeId))
 	if a.configurationClient != nil {
-		active, err := a.targetSession(ctx, req.SessionID)
+		active, err := a.targetSession(ctx, sessionID)
 		if err != nil {
-			return acp.SetSessionModeResponse{}, err
+			return acpsdk.SetSessionModeResponse{}, err
 		}
 		snapshot, err := a.presentationClient.PresentationSnapshot(ctx, appserver.PresentationRequest{SessionID: active.SessionID})
 		if err != nil {
-			return acp.SetSessionModeResponse{}, err
+			return acpsdk.SetSessionModeResponse{}, err
 		}
 		if snapshot.Modes == nil {
-			return acp.SetSessionModeResponse{}, ErrCapabilityUnsupported
+			return acpsdk.SetSessionModeResponse{}, ErrCapabilityUnsupported
 		}
 		base := acpSessionConfigurationWriteBase(active, "mode")
 		var result appserver.CommandResult
@@ -560,23 +562,23 @@ func (a *RuntimeAgent) SetSessionMode(ctx context.Context, req acp.SetSessionMod
 		case appserver.PresentationModeTargetApp:
 			result, err = a.configurationClient.ConfigureSessionPresentationMode(ctx, appserver.SessionPresentationModeRequest{
 				WriteBase: base,
-				Mode:      strings.TrimSpace(req.ModeID),
+				Mode:      modeID,
 			})
 		case appserver.PresentationModeTargetController:
 			result, err = a.configurationClient.ConfigureSessionControllerMode(ctx, appserver.SessionControllerModeRequest{
 				WriteBase: base,
-				Mode:      strings.TrimSpace(req.ModeID),
+				Mode:      modeID,
 			})
 		default:
-			return acp.SetSessionModeResponse{}, ErrCapabilityUnsupported
+			return acpsdk.SetSessionModeResponse{}, ErrCapabilityUnsupported
 		}
-		return acp.SetSessionModeResponse{}, requireCommittedACPConfiguration("set mode", result, err)
+		return acpsdk.SetSessionModeResponse{}, requireCommittedACPConfiguration("set mode", result, err)
 	}
 	if a.modeWriter == nil {
-		return acp.SetSessionModeResponse{}, ErrCapabilityUnsupported
+		return acpsdk.SetSessionModeResponse{}, ErrCapabilityUnsupported
 	}
-	if _, err := a.targetSession(ctx, req.SessionID); err != nil {
-		return acp.SetSessionModeResponse{}, err
+	if _, err := a.targetSession(ctx, sessionID); err != nil {
+		return acpsdk.SetSessionModeResponse{}, err
 	}
 	return a.modeWriter.SetSessionMode(ctx, req)
 }

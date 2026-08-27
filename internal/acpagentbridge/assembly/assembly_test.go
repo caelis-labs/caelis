@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
@@ -63,9 +64,9 @@ func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {
 		t.Fatalf("CurrentModeID = %q, want %q", got, "default")
 	}
 
-	if _, err := providers.ModeWriter.SetSessionMode(context.Background(), acp.SetSessionModeRequest{
-		SessionID: session.SessionID,
-		ModeID:    "plan",
+	if _, err := providers.ModeWriter.SetSessionMode(context.Background(), acpsdk.SetSessionModeRequest{
+		SessionId: acpsdk.SessionId(session.SessionID),
+		ModeId:    "plan",
 	}); err != nil {
 		t.Fatalf("SetSessionMode() error = %v", err)
 	}

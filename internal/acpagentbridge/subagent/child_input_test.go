@@ -896,7 +896,7 @@ func TestChildInputHelperProcess(t *testing.T) {
 				return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 			}
 			var request client.AuthenticateRequest
-			if err := json.Unmarshal(message.Params, &request); err != nil || request.MethodID != "agent-login" {
+			if err := json.Unmarshal(message.Params, &request); err != nil || request.MethodId != "agent-login" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected authentication request"}
 			}
 			if err := os.WriteFile(os.Getenv("CAELIS_ACP_CHILD_INPUT_AUTH_READY"), []byte("ready"), 0o600); err != nil {

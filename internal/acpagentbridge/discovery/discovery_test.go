@@ -563,10 +563,10 @@ func TestDiscoveryHelperProcess(t *testing.T) {
 			return response, nil
 		case client.MethodAuthenticate:
 			var request client.AuthenticateRequest
-			if err := json.Unmarshal(msg.Params, &request); err != nil || request.MethodID != "agent-login" {
+			if err := json.Unmarshal(msg.Params, &request); err != nil || request.MethodId != "agent-login" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected authenticate request"}
 			}
-			writeMarker("authenticate", request.MethodID)
+			writeMarker("authenticate", string(request.MethodId))
 			return client.AuthenticateResponse{}, nil
 		case client.MethodSessionNew:
 			writeMarker("session-new", "yes")
@@ -614,7 +614,7 @@ func TestDiscoveryHelperProcess(t *testing.T) {
 			}}}, nil
 		case client.MethodSessionClose:
 			var request client.CloseSessionRequest
-			if err := json.Unmarshal(msg.Params, &request); err != nil || request.SessionID != "discovery-session" {
+			if err := json.Unmarshal(msg.Params, &request); err != nil || request.SessionId != "discovery-session" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/close"}
 			}
 			writeMarker("session-close", "yes")

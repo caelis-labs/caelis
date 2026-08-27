@@ -353,12 +353,12 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 	}, &recordingCallbacks{}); !errors.Is(err, session.ErrSessionNotFound) {
 		t.Fatalf("Prompt(foreign system-managed child) error = %v, want session not found", err)
 	}
-	if _, err := agent.SetSessionMode(ctx, acp.SetSessionModeRequest{
-		SessionID: foreign.SessionID, ModeID: "manual",
+	if _, err := agent.SetSessionMode(ctx, acpsdk.SetSessionModeRequest{
+		SessionId: acpsdk.SessionId(foreign.SessionID), ModeId: "manual",
 	}); !errors.Is(err, session.ErrSessionNotFound) {
 		t.Fatalf("SetSessionMode(foreign system-managed child) error = %v, want session not found", err)
 	}
-	if _, err := agent.CloseSession(ctx, acp.CloseSessionRequest{SessionID: foreign.SessionID}); !errors.Is(err, session.ErrSessionNotFound) {
+	if _, err := agent.CloseSession(ctx, acpsdk.CloseSessionRequest{SessionId: acpsdk.SessionId(foreign.SessionID)}); !errors.Is(err, session.ErrSessionNotFound) {
 		t.Fatalf("CloseSession(foreign system-managed child) error = %v, want session not found", err)
 	}
 	foreignAfter, err := stack.Sessions().Session(ctx, foreign.SessionRef)
@@ -469,7 +469,7 @@ func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 	if replayed.firstAgentMessage() != "typed ACP ok" {
 		t.Fatalf("LoadSession replay = %q, want typed ACP output", replayed.firstAgentMessage())
 	}
-	if _, err := agent.CloseSession(ctx, acp.CloseSessionRequest{SessionID: created.SessionID}); err != nil {
+	if _, err := agent.CloseSession(ctx, acpsdk.CloseSessionRequest{SessionId: acpsdk.SessionId(created.SessionID)}); err != nil {
 		t.Fatal(err)
 	}
 	bound, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: stack.UserID()})

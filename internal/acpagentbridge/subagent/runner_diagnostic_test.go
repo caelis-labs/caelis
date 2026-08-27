@@ -543,7 +543,7 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 			return client.LoadSessionResponse{}, nil
 		case client.MethodAuthenticate:
 			var req client.AuthenticateRequest
-			if err := json.Unmarshal(msg.Params, &req); err != nil || req.MethodID != "agent-login" {
+			if err := json.Unmarshal(msg.Params, &req); err != nil || req.MethodId != "agent-login" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected authenticate request"}
 			}
 			authenticated = true

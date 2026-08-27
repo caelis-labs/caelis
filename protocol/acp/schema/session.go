@@ -51,12 +51,6 @@ type InitializeResponse struct {
 	Meta              map[string]json.RawMessage `json:"_meta,omitempty"`
 }
 
-type AuthenticateRequest struct {
-	MethodID string `json:"methodId"`
-}
-
-type AuthenticateResponse struct{}
-
 type NewSessionRequest struct {
 	CWD        string            `json:"cwd"`
 	MCPServers []json.RawMessage `json:"mcpServers"`
@@ -96,12 +90,6 @@ type ResumeSessionResponse struct {
 	Models        *SessionModelState    `json:"models,omitempty"`
 }
 
-type CloseSessionRequest struct {
-	SessionID string `json:"sessionId"`
-}
-
-type CloseSessionResponse struct{}
-
 type SessionMode struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -112,13 +100,6 @@ type SessionModeState struct {
 	AvailableModes []SessionMode `json:"availableModes"`
 	CurrentModeID  string        `json:"currentModeId"`
 }
-
-type SetSessionModeRequest struct {
-	SessionID string `json:"sessionId"`
-	ModeID    string `json:"modeId"`
-}
-
-type SetSessionModeResponse struct{}
 
 type ModelInfo struct {
 	ModelID     string `json:"modelId"`

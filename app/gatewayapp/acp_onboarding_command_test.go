@@ -622,7 +622,7 @@ func TestGatewayACPOnboardingHelperProcess(t *testing.T) {
 			return response, nil
 		case acpclient.MethodAuthenticate:
 			var request acpclient.AuthenticateRequest
-			if err := json.Unmarshal(message.Params, &request); err != nil || request.MethodID != "agent-login" {
+			if err := json.Unmarshal(message.Params, &request); err != nil || request.MethodId != "agent-login" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected authenticate request"}
 			}
 			authenticated = true

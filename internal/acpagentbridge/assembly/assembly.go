@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -29,7 +30,7 @@ type ModeReader interface {
 
 // ModeWriter exposes only the assembly-backed ACP mode mutation.
 type ModeWriter interface {
-	SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error)
+	SetSessionMode(context.Context, acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error)
 }
 
 // ConfigReader exposes only the assembly-backed ACP config projection.
@@ -164,37 +165,37 @@ func (p *modeProvider) SessionModes(ctx context.Context, session session.Session
 	}, nil
 }
 
-func (p *modeProvider) SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+func (p *modeProvider) SetSessionMode(ctx context.Context, req acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
 	if p == nil {
-		return acp.SetSessionModeResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: mode provider is unavailable")
+		return acpsdk.SetSessionModeResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: mode provider is unavailable")
 	}
-	sessionID := strings.TrimSpace(req.SessionID)
-	modeID := strings.TrimSpace(req.ModeID)
+	sessionID := strings.TrimSpace(string(req.SessionId))
+	modeID := strings.TrimSpace(string(req.ModeId))
 	if sessionID == "" {
-		return acp.SetSessionModeResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: session id is required")
+		return acpsdk.SetSessionModeResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: session id is required")
 	}
 	if modeID == "" {
-		return acp.SetSessionModeResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: mode id is required")
+		return acpsdk.SetSessionModeResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: mode id is required")
 	}
 	if !p.hasMode(modeID) {
-		return acp.SetSessionModeResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: mode %q not found", modeID)
+		return acpsdk.SetSessionModeResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: mode %q not found", modeID)
 	}
 	if p.sessions != nil {
 		ref, err := resolveProviderSessionRef(ctx, p.sessions, p.appName, p.userID, sessionID)
 		if err != nil {
-			return acp.SetSessionModeResponse{}, err
+			return acpsdk.SetSessionModeResponse{}, err
 		}
 		if err := updateProviderSessionState(ctx, p.sessions, ref, func(state map[string]any) (map[string]any, error) {
 			return assembly.SetCurrentModeID(state, modeID), nil
 		}); err != nil {
-			return acp.SetSessionModeResponse{}, err
+			return acpsdk.SetSessionModeResponse{}, err
 		}
-		return acp.SetSessionModeResponse{}, nil
+		return acpsdk.SetSessionModeResponse{}, nil
 	}
 	p.mu.Lock()
 	p.current[sessionID] = modeID
 	p.mu.Unlock()
-	return acp.SetSessionModeResponse{}, nil
+	return acpsdk.SetSessionModeResponse{}, nil
 }
 
 func (p *modeProvider) hasMode(modeID string) bool {
