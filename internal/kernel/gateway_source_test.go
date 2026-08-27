@@ -213,6 +213,9 @@ func TestForwardSourceEventsPublishesPairedNativeContentBeforeCanonicalUsage(t *
 		eventstream.UpdateType(got[1].Update) != schema.UpdateUsage {
 		t.Fatalf("paired source projection = %#v, want native content followed by canonical usage", got)
 	}
+	if got[1].ProjectionID != eventstream.FormatProjectionID("assistant-final", 1) {
+		t.Fatalf("usage projection ID = %q, want canonical sibling index 1", got[1].ProjectionID)
+	}
 }
 
 func TestForwardSourceEventsKeepsPairedNativeTerminalAsSingleLiveAuthority(t *testing.T) {

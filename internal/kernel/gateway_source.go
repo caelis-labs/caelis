@@ -37,7 +37,7 @@ func (g *Gateway) forwardSourceEvents(activeSession session.Session, handle *tur
 				// The paired native envelope owns live content and state. Usage is
 				// still canonical accounting and must not disappear with the
 				// duplicate content projection.
-				project = acpprojector.ProjectSessionEventUsageEnvelope
+				project = projectSessionEventUsageEnvelope
 			case sourceEvent.CanonicalContentAlreadyPublished != 0:
 				published := sourceEvent.CanonicalContentAlreadyPublished
 				project = func(base eventstream.Envelope, event *session.Event) []eventstream.Envelope {
@@ -59,4 +59,17 @@ func (g *Gateway) forwardSourceEvents(activeSession session.Session, handle *tur
 			g.noteSessionCursor(activeSession.SessionID, sourceEvent.Canonical.ID)
 		}
 	}
+}
+
+// projectSessionEventUsageEnvelope keeps canonical accounting when the paired
+// native ACP envelope already owns the event's live content and state.
+func projectSessionEventUsageEnvelope(base eventstream.Envelope, event *session.Event) []eventstream.Envelope {
+	projected := acpprojector.ProjectSessionEventEnvelope(base, event)
+	out := make([]eventstream.Envelope, 0, 1)
+	for _, env := range projected {
+		if eventstream.UpdateType(env.Update) == schema.UpdateUsage {
+			out = append(out, env)
+		}
+	}
+	return out
 }

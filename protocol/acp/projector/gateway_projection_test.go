@@ -233,11 +233,6 @@ func TestProjectSessionEventLiveSupplementSeparatesFinalNarrativeFromUsage(t *te
 	if len(live) != 1 || eventstream.UpdateType(live[0].Update) != schema.UpdateUsage {
 		t.Fatalf("live final projection = %#v, want usage without repeated narrative", live)
 	}
-	usageOnly := ProjectSessionEventUsageEnvelope(base, event)
-	if len(usageOnly) != 1 || usageOnly[0].ProjectionID != replay[1].ProjectionID ||
-		eventstream.UpdateType(usageOnly[0].Update) != schema.UpdateUsage {
-		t.Fatalf("usage-only projection = %#v, want the canonical usage sibling", usageOnly)
-	}
 }
 
 func TestProjectSessionEventLiveSupplementKeepsTerminalFinalStateWithoutBytes(t *testing.T) {

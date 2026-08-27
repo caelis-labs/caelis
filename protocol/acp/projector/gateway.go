@@ -33,20 +33,6 @@ func ProjectSessionEventLiveSupplementEnvelope(base eventstream.Envelope, event 
 	return withoutLiveFinalContent(out, published)
 }
 
-// ProjectSessionEventUsageEnvelope projects only the accounting update carried
-// by one canonical event. It is used when another live source owns the event's
-// content and state but the canonical final remains the usage authority.
-func ProjectSessionEventUsageEnvelope(base eventstream.Envelope, event *session.Event) []eventstream.Envelope {
-	projected := ProjectSessionEventEnvelope(base, event)
-	out := make([]eventstream.Envelope, 0, 1)
-	for _, env := range projected {
-		if eventstream.UpdateType(env.Update) == schema.UpdateUsage {
-			out = append(out, env)
-		}
-	}
-	return out
-}
-
 func withoutLiveFinalContent(events []eventstream.Envelope, published agentsdk.PublishedContent) []eventstream.Envelope {
 	out := make([]eventstream.Envelope, 0, len(events))
 	for _, env := range events {
