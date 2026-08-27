@@ -15,23 +15,6 @@ type ImageContent struct {
 	URI      string `json:"uri,omitempty"`
 }
 
-type SessionSummary struct {
-	SessionID string `json:"sessionId"`
-	CWD       string `json:"cwd,omitempty"`
-	Title     string `json:"title,omitempty"`
-	UpdatedAt string `json:"updatedAt,omitempty"`
-}
-
-type SessionListRequest struct {
-	Cursor string `json:"cursor,omitempty"`
-	CWD    string `json:"cwd,omitempty"`
-}
-
-type SessionListResponse struct {
-	Sessions   []SessionSummary `json:"sessions"`
-	NextCursor string           `json:"nextCursor,omitempty"`
-}
-
 type CurrentModeUpdate struct {
 	SessionUpdate string `json:"sessionUpdate"`
 	CurrentModeID string `json:"currentModeId"`

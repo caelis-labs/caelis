@@ -379,11 +379,11 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 	if result.StopReason != acp.StopReasonEndTurn || callbacks.firstAgentMessage() != "managed child ok" {
 		t.Fatalf("Prompt(system-managed child) = %#v, message %q", result, callbacks.firstAgentMessage())
 	}
-	listed, err := agent.ListSessions(ctx, acp.SessionListRequest{CWD: workspace})
+	listed, err := agent.ListSessions(ctx, acpsdk.ListSessionsRequest{Cwd: testStringPointer(workspace)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Sessions) != 1 || listed.Sessions[0].SessionID != ordinary.SessionID {
+	if len(listed.Sessions) != 1 || string(listed.Sessions[0].SessionId) != ordinary.SessionID {
 		t.Fatalf("ListSessions() = %#v, want only ordinary Session %q", listed.Sessions, ordinary.SessionID)
 	}
 	if _, err := agent.LoadSession(ctx, acp.LoadSessionRequest{SessionID: child.SessionID, CWD: workspace}, &recordingCallbacks{}); !errors.Is(err, session.ErrSessionNotFound) {
@@ -437,11 +437,11 @@ func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listed, err := agent.ListSessions(ctx, acp.SessionListRequest{CWD: workspace})
+	listed, err := agent.ListSessions(ctx, acpsdk.ListSessionsRequest{Cwd: testStringPointer(workspace)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Sessions) != 1 || listed.Sessions[0].SessionID != created.SessionID {
+	if len(listed.Sessions) != 1 || string(listed.Sessions[0].SessionId) != created.SessionID {
 		t.Fatalf("ListSessions() = %#v, want created Session", listed)
 	}
 	active, err := stack.Sessions().Session(ctx, session.SessionRef{SessionID: created.SessionID})
@@ -725,4 +725,8 @@ func (c *recordingCallbacks) firstAgentMessage() string {
 		}
 	}
 	return ""
+}
+
+func testStringPointer(value string) *string {
+	return &value
 }

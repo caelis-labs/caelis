@@ -161,8 +161,8 @@ func (c *Client) NewSession(ctx context.Context, cwd string, meta map[string]any
 	})
 }
 
-func (c *Client) ListSessions(ctx context.Context, req SessionListRequest) (SessionListResponse, error) {
-	return sendRequest[SessionListResponse](c, ctx, MethodSessionList, req)
+func (c *Client) ListSessions(ctx context.Context, req acpsdk.ListSessionsRequest) (acpsdk.ListSessionsResponse, error) {
+	return sendRequest[acpsdk.ListSessionsResponse](c, ctx, MethodSessionList, req)
 }
 
 func (c *Client) LoadSession(ctx context.Context, sessionID string, cwd string, meta map[string]any) (LoadSessionResponse, error) {

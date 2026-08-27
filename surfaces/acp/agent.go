@@ -100,7 +100,7 @@ func (a *ProductAgent) Cancel(ctx context.Context, req acpsdk.CancelNotification
 	return a.inner.Cancel(ctx, req)
 }
 
-func (a *ProductAgent) ListSessions(ctx context.Context, req protocolacp.SessionListRequest) (protocolacp.SessionListResponse, error) {
+func (a *ProductAgent) ListSessions(ctx context.Context, req acpsdk.ListSessionsRequest) (acpsdk.ListSessionsResponse, error) {
 	return a.inner.ListSessions(ctx, req)
 }
 
@@ -137,7 +137,7 @@ type agentAuthenticator interface {
 }
 
 type sessionLister interface {
-	ListSessions(context.Context, protocolacp.SessionListRequest) (protocolacp.SessionListResponse, error)
+	ListSessions(context.Context, acpsdk.ListSessionsRequest) (acpsdk.ListSessionsResponse, error)
 }
 
 type sessionLoader interface {

@@ -361,40 +361,42 @@ func (a *RuntimeAgent) newSessionResponse(ctx context.Context, activeSession ses
 	return resp, nil
 }
 
-func (a *RuntimeAgent) ListSessions(ctx context.Context, req acp.SessionListRequest) (acp.SessionListResponse, error) {
+func (a *RuntimeAgent) ListSessions(ctx context.Context, req acpsdk.ListSessionsRequest) (acpsdk.ListSessionsResponse, error) {
+	cwd := optionalString(req.Cwd)
+	cursor := optionalString(req.Cursor)
 	var list session.SessionList
 	var err error
 	if a.sessionClient != nil {
 		list, err = a.sessionClient.ListSessions(ctx, appserver.ListSessionsRequest{
-			WorkspaceKey: a.workspaceKeyForCWD(req.CWD),
-			Cursor:       strings.TrimSpace(req.Cursor),
+			WorkspaceKey: a.workspaceKeyForCWD(cwd),
+			Cursor:       cursor,
 		})
 	} else {
 		list, err = a.sessions.ListSessions(ctx, session.ListSessionsRequest{
 			AppName:      a.appName,
 			UserID:       a.userID,
-			WorkspaceKey: strings.TrimSpace(req.CWD),
-			Cursor:       strings.TrimSpace(req.Cursor),
+			WorkspaceKey: cwd,
+			Cursor:       cursor,
 		})
 	}
 	if err != nil {
-		return acp.SessionListResponse{}, err
+		return acpsdk.ListSessionsResponse{}, err
 	}
-	resp := acp.SessionListResponse{
-		Sessions:   make([]acp.SessionSummary, 0, len(list.Sessions)),
-		NextCursor: strings.TrimSpace(list.NextCursor),
+	resp := acpsdk.ListSessionsResponse{
+		Sessions:   make([]acpsdk.SessionInfo, 0, len(list.Sessions)),
+		NextCursor: stringPtr(list.NextCursor),
 	}
 	for _, stored := range list.Sessions {
 		if sessionvisibility.IsSystemManagedSummary(stored) {
 			continue
 		}
-		summary := acp.SessionSummary{
-			SessionID: strings.TrimSpace(stored.SessionID),
-			CWD:       strings.TrimSpace(stored.CWD),
-			Title:     strings.TrimSpace(stored.Title),
+		summary := acpsdk.SessionInfo{
+			SessionId: acpsdk.SessionId(strings.TrimSpace(stored.SessionID)),
+			Cwd:       strings.TrimSpace(stored.CWD),
+			Title:     stringPtr(stored.Title),
 		}
 		if !stored.UpdatedAt.IsZero() {
-			summary.UpdatedAt = stored.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
+			summary.UpdatedAt = stringPtr(stored.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"))
 		}
 		resp.Sessions = append(resp.Sessions, summary)
 	}
@@ -1078,6 +1080,13 @@ func stringPtr(v string) *string {
 		return nil
 	}
 	return &v
+}
+
+func optionalString(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return strings.TrimSpace(*v)
 }
 
 func newACPSessionOperationID(action string) string {

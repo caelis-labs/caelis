@@ -160,7 +160,7 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		}
 		return resp, nil
 	case acpsdk.AgentMethodSessionList:
-		var req protocolacp.SessionListRequest
+		var req acpsdk.ListSessionsRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}

@@ -336,11 +336,11 @@ func TestRuntimeAgentListResumeAndCloseSession(t *testing.T) {
 		t.Fatalf("StartSession(managed) error = %v", err)
 	}
 
-	list, err := agent.ListSessions(ctx, acp.SessionListRequest{CWD: "/tmp/acp-list"})
+	list, err := agent.ListSessions(ctx, acpsdk.ListSessionsRequest{Cwd: testStringPointer("/tmp/acp-list")})
 	if err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
 	}
-	if len(list.Sessions) != 1 || list.Sessions[0].SessionID != activeSession.SessionID || list.Sessions[0].Title != "Listed session" {
+	if len(list.Sessions) != 1 || string(list.Sessions[0].SessionId) != activeSession.SessionID || testOptionalStringValue(list.Sessions[0].Title) != "Listed session" {
 		t.Fatalf("ListSessions() = %#v, want listed session", list)
 	}
 
@@ -2013,4 +2013,15 @@ func terminalContentText(content []acp.ToolCallContent, terminalID string) strin
 		return text.Text
 	}
 	return ""
+}
+
+func testStringPointer(value string) *string {
+	return &value
+}
+
+func testOptionalStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
 }

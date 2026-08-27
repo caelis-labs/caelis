@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -446,11 +447,11 @@ func TestServeStdioHandlesStableSessionLifecycleMethods(t *testing.T) {
 	}
 	defer conn.Close()
 
-	listResp, err := acpsdk.SendRequest[protocolacp.SessionListResponse](conn, ctx, acpsdk.AgentMethodSessionList, protocolacp.SessionListRequest{CWD: "/tmp/project"})
+	listResp, err := acpsdk.SendRequest[acpsdk.ListSessionsResponse](conn, ctx, acpsdk.AgentMethodSessionList, acpsdk.ListSessionsRequest{Cwd: testStringPointer("/tmp/project")})
 	if err != nil {
 		t.Fatalf("session/list call error = %v", err)
 	}
-	if len(listResp.Sessions) != 1 || listResp.Sessions[0].SessionID != "session-1" {
+	if len(listResp.Sessions) != 1 || listResp.Sessions[0].SessionId != "session-1" {
 		t.Fatalf("session/list response = %#v, want session-1", listResp)
 	}
 	if agent.listCWD != "/tmp/project" {
@@ -617,14 +618,14 @@ type stableLifecycleAgent struct {
 	closeSessionID  string
 }
 
-func (a *stableLifecycleAgent) ListSessions(_ context.Context, req protocolacp.SessionListRequest) (protocolacp.SessionListResponse, error) {
-	a.listCWD = req.CWD
-	return protocolacp.SessionListResponse{
-		Sessions: []protocolacp.SessionSummary{{
-			SessionID: "session-1",
-			CWD:       "/tmp/project",
-			Title:     "Existing session",
-			UpdatedAt: "2026-05-04T00:00:00Z",
+func (a *stableLifecycleAgent) ListSessions(_ context.Context, req acpsdk.ListSessionsRequest) (acpsdk.ListSessionsResponse, error) {
+	a.listCWD = testOptionalStringValue(req.Cwd)
+	return acpsdk.ListSessionsResponse{
+		Sessions: []acpsdk.SessionInfo{{
+			SessionId: "session-1",
+			Cwd:       "/tmp/project",
+			Title:     testStringPointer("Existing session"),
+			UpdatedAt: testStringPointer("2026-05-04T00:00:00Z"),
 		}},
 	}, nil
 }
@@ -637,4 +638,15 @@ func (a *stableLifecycleAgent) ResumeSession(_ context.Context, req protocolacp.
 func (a *stableLifecycleAgent) CloseSession(_ context.Context, req protocolacp.CloseSessionRequest) (protocolacp.CloseSessionResponse, error) {
 	a.closeSessionID = req.SessionID
 	return protocolacp.CloseSessionResponse{}, nil
+}
+
+func testStringPointer(value string) *string {
+	return &value
+}
+
+func testOptionalStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
 }
