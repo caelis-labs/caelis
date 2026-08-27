@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ---------------------------------------------------------------------------
@@ -39,11 +41,12 @@ type ResponsiveOverlayFrameModel struct {
 func RenderResponsiveOverlayFrame(theme Theme, m ResponsiveOverlayFrameModel) string {
 	width := maxInt(20, m.Width)
 	body := strings.Join(m.Body, "\n")
-	box := lipgloss.NewStyle()
+	tok := theme.Tokens()
+	box := tok.OverlayBg
 	if m.UseBorder {
-		tok := theme.Tokens()
 		box = box.BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(tok.OverlayBorder.GetForeground()).
+			BorderBackground(tok.OverlayBg.GetBackground()).
 			Padding(0, 1).
 			Width(width)
 	} else {
@@ -163,39 +166,58 @@ func OverlayCenter(base string, overlay string, screenWidth, screenHeight int) s
 
 	overlayWidth := 0
 	for _, line := range overlayLines {
-		w := lipgloss.Width(line)
-		if w > overlayWidth {
+		if w := lipgloss.Width(line); w > overlayWidth {
 			overlayWidth = w
 		}
+	}
+	if overlayWidth > screenWidth {
+		overlayWidth = screenWidth
 	}
 
 	startY := maxInt(0, (screenHeight-len(overlayLines))/2)
 	startX := maxInt(0, (screenWidth-overlayWidth)/2)
-
+	compositor := newOverlayLineCompositor(screenWidth)
 	for i, overlayLine := range overlayLines {
 		row := startY + i
 		if row >= len(baseLines) {
 			break
 		}
-		baseLines[row] = placeOverlayOnLine(baseLines[row], overlayLine, startX, screenWidth)
+		baseLines[row] = compositor.compose(baseLines[row], overlayLine, overlayWidth, startX)
 	}
 
 	return strings.Join(baseLines, "\n")
 }
 
-// placeOverlayOnLine replaces a portion of a base line with overlay content
-// at the given x offset.
-func placeOverlayOnLine(baseLine, overlayLine string, startX, screenWidth int) string {
-	if startX < 0 {
-		startX = 0
+type overlayLineCompositor struct {
+	screen uv.ScreenBuffer
+	width  int
+}
+
+func newOverlayLineCompositor(width int) overlayLineCompositor {
+	if width <= 0 {
+		return overlayLineCompositor{}
 	}
-	_ = baseLine
-	prefix := strings.Repeat(" ", startX)
-	overlayWidth := lipgloss.Width(overlayLine)
-	remaining := screenWidth - startX - overlayWidth
-	suffix := ""
-	if remaining > 0 {
-		suffix = strings.Repeat(" ", remaining)
+	screen := uv.NewScreenBuffer(width, 1)
+	screen.Method = ansi.GraphemeWidth
+	return overlayLineCompositor{screen: screen, width: width}
+}
+
+func (c overlayLineCompositor) compose(baseLine string, overlayLine string, overlayWidth int, startX int) string {
+	if c.width <= 0 {
+		return baseLine
 	}
-	return prefix + overlayLine + suffix
+	startX = maxInt(0, startX)
+	if startX >= c.width {
+		return ansi.Truncate(baseLine, c.width, "")
+	}
+	overlayWidth = min(maxInt(0, overlayWidth), c.width-startX)
+
+	c.screen.Clear()
+	uv.NewStyledString(baseLine).Draw(c.screen, c.screen.Bounds())
+	if overlayWidth > 0 {
+		overlayBounds := uv.Rect(startX, 0, overlayWidth, 1)
+		c.screen.ClearArea(overlayBounds)
+		uv.NewStyledString(overlayLine).Draw(c.screen, overlayBounds)
+	}
+	return c.screen.Line(0).Render()
 }

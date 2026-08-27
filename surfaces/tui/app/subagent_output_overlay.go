@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -205,6 +207,7 @@ func (m *Model) renderSubagentOutputOverlay() string {
 	state := m.subagentOutputOverlay
 	view := m.subagentOutputViews[state.callID]
 	layout := m.subagentOutputLayout(state)
+	surface := m.theme.Tokens().OverlayBg
 	rows := m.subagentOutputRows(view, layout.innerWidth, layout.contentRows)
 	fixedRows := subagentOutputFixedRows(view, rows, layout.innerWidth)
 	maxOffset := maxInt(0, len(rows)-layout.contentRows)
@@ -224,9 +227,10 @@ func (m *Model) renderSubagentOutputOverlay() string {
 	appendSubagentOutputContentLine(
 		&frame,
 		layout,
+		surface,
 		normalizeFullscreenFrameLine(m.renderSubagentOutputTitle(view, layout.innerWidth), layout.innerWidth),
 	)
-	appendSubagentOutputContentLine(&frame, layout, layout.separator)
+	appendSubagentOutputContentLine(&frame, layout, surface, layout.separator)
 	for index := 0; index < layout.contentRows; index++ {
 		line := layout.blank
 		if index < len(visible) {
@@ -236,12 +240,13 @@ func (m *Model) renderSubagentOutputOverlay() string {
 				line = visibleFixedRows[index]
 			}
 		}
-		appendSubagentOutputContentLine(&frame, layout, line)
+		appendSubagentOutputContentLine(&frame, layout, surface, line)
 	}
-	appendSubagentOutputContentLine(&frame, layout, layout.separator)
+	appendSubagentOutputContentLine(&frame, layout, surface, layout.separator)
 	appendSubagentOutputContentLine(
 		&frame,
 		layout,
+		surface,
 		normalizeFullscreenFrameLine(
 			m.renderSubagentOutputFooter(state.offset, end, len(rows), layout.innerWidth),
 			layout.innerWidth,
@@ -350,6 +355,7 @@ func (m *Model) subagentOutputLayout(state *subagentOutputOverlayState) subagent
 		borderInset = 1
 		contentInset = 2
 	}
+	surface := m.theme.Tokens().OverlayBg
 	layout := subagentOutputOverlayLayout{
 		termWidth:    m.width,
 		termHeight:   m.height,
@@ -367,7 +373,7 @@ func (m *Model) subagentOutputLayout(state *subagentOutputOverlayState) subagent
 		separator:    normalizeFullscreenFrameLine(m.theme.SeparatorStyle().Render(strings.Repeat("─", innerWidth)), innerWidth),
 	}
 	if useBorder {
-		borderStyle := m.theme.Tokens().OverlayBorder
+		borderStyle := m.theme.Tokens().OverlayBorder.Background(surface.GetBackground())
 		layout.topBorder = borderStyle.Render("╭" + strings.Repeat("─", frameWidth-2) + "╮")
 		layout.bottomBorder = borderStyle.Render("╰" + strings.Repeat("─", frameWidth-2) + "╯")
 		layout.leftBorder = borderStyle.Render("│")
@@ -387,7 +393,12 @@ func appendSubagentOutputFrameLine(frame *strings.Builder, line string) {
 	frame.WriteString(line)
 }
 
-func appendSubagentOutputContentLine(frame *strings.Builder, layout subagentOutputOverlayLayout, line string) {
+func appendSubagentOutputContentLine(
+	frame *strings.Builder,
+	layout subagentOutputOverlayLayout,
+	surface lipgloss.Style,
+	line string,
+) {
 	if frame == nil {
 		return
 	}
@@ -396,11 +407,11 @@ func appendSubagentOutputContentLine(frame *strings.Builder, layout subagentOutp
 	}
 	if layout.useBorder {
 		frame.WriteString(layout.leftBorder)
-		frame.WriteByte(' ')
+		frame.WriteString(surface.Render(" "))
 	}
-	frame.WriteString(line)
+	frame.WriteString(surface.Width(layout.innerWidth).Render(strings.TrimRight(line, " ")))
 	if layout.useBorder {
-		frame.WriteByte(' ')
+		frame.WriteString(surface.Render(" "))
 		frame.WriteString(layout.rightBorder)
 	}
 }

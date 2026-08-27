@@ -12,9 +12,13 @@ import (
 )
 
 const (
-	subagentRosterIdentityMaxColumns = 24
+	subagentRosterIdentityMaxColumns = 32
 	subagentRosterPromptMaxColumns   = 64
 	subagentRosterPromptMinColumns   = 12
+
+	subagentRosterOverlayMinWidth    = 68
+	subagentRosterOverlayMaxWidth    = 120
+	subagentRosterOverlayScreenInset = 16
 )
 
 type subagentRosterRow struct {
@@ -209,10 +213,7 @@ func (m *Model) renderSubagentRosterOverlay() string {
 	}
 	m.reconcileSubagentRosterSelection()
 
-	width := minInt(maxInt(60, m.fixedRowWidth()-20), 92)
-	if m.width > 0 {
-		width = minInt(width, maxInt(20, m.width-4))
-	}
+	width := m.subagentRosterOverlayWidth()
 	innerWidth := maxInt(16, width-m.overlayBorderChromeWidth())
 	body := []string{
 		m.renderSubagentRosterTitle(innerWidth),
@@ -220,7 +221,7 @@ func (m *Model) renderSubagentRosterOverlay() string {
 	}
 	rowLines, rowOffsets := m.renderSubagentRosterRows(state.rows, innerWidth, len(body), time.Now())
 	body = append(body, rowLines...)
-	body = append(body, "", m.theme.HelpHintTextStyle().Render(truncateTailDisplay("↑↓ select  Enter open  Esc close", innerWidth)))
+	body = append(body, "", m.renderSubagentRosterFooter(innerWidth))
 
 	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
 		Body:      body,
@@ -256,11 +257,38 @@ func (m *Model) renderSubagentRosterOverlay() string {
 	return frame
 }
 
+func (m *Model) subagentRosterOverlayWidth() int {
+	if m == nil || m.width <= 0 {
+		return subagentRosterOverlayMinWidth
+	}
+	if !m.overlayUsesBorder() {
+		return maxInt(20, m.width)
+	}
+	width := clampInt(
+		m.fixedRowWidth()-subagentRosterOverlayScreenInset,
+		subagentRosterOverlayMinWidth,
+		subagentRosterOverlayMaxWidth,
+	)
+	return minInt(width, maxInt(20, m.width-4))
+}
+
 func (m *Model) renderSubagentRosterTitle(width int) string {
 	title := m.theme.TitleStyle().Render("Subagents")
 	close := m.theme.HelpHintTextStyle().Render("×")
 	gap := maxInt(1, width-displayColumns(title)-displayColumns(close))
 	return title + strings.Repeat(" ", gap) + close
+}
+
+func (m *Model) renderSubagentRosterFooter(width int) string {
+	const plain = "↑↓ select  Enter open  Esc close"
+	if displayColumns(plain) > width {
+		return m.theme.HelpHintTextStyle().Render(truncateTailDisplay(plain, width))
+	}
+	key := m.theme.KeyLabelStyle().Bold(true)
+	description := m.theme.HelpHintTextStyle()
+	return key.Render("↑↓") + " " + description.Render("select") +
+		"  " + key.Render("Enter") + " " + description.Render("open") +
+		"  " + key.Render("Esc") + " " + description.Render("close")
 }
 
 func (m *Model) renderSubagentRosterRows(rows []subagentRosterRow, width int, bodyOffset int, now time.Time) ([]string, []subagentRosterRowGeometry) {

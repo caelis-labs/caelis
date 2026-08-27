@@ -189,6 +189,48 @@ func TestSubagentRosterRowsKeepPromptAndTimeOnSingleLine(t *testing.T) {
 	}
 }
 
+func TestSubagentRosterOverlayUsesExpandedWideBudgetAndFullWidthNarrowSheet(t *testing.T) {
+	model := newSubagentRosterTestModel()
+	addSubagentRosterTestView(
+		model,
+		"spawn-overlay-review",
+		"overlay-ux-review",
+		"overlay-ux-review[orbit]: inspect centered overlay composition and renderer performance",
+		"completed",
+		time.Unix(90, 0),
+		time.Unix(120, 0),
+	)
+	if !model.openSubagentRosterOverlay() {
+		t.Fatal("openSubagentRosterOverlay() = false")
+	}
+
+	for _, size := range []struct {
+		width int
+		want  int
+	}{
+		{width: 180, want: subagentRosterOverlayMaxWidth},
+		{width: 100, want: 84},
+		{width: 60, want: 60},
+	} {
+		model.width = size.width
+		_ = model.renderSubagentRosterOverlay()
+		if got := model.subagentRosterOverlay.geometry.width; got != size.want {
+			t.Fatalf("terminal width %d roster width = %d, want %d", size.width, got, size.want)
+		}
+	}
+
+	model.width = 180
+	plain := ansi.Strip(model.renderSubagentRosterOverlay())
+	if !strings.Contains(plain, "overlay-ux-review") || strings.Contains(plain, "overlay-ux-r...") {
+		t.Fatalf("wide roster did not use expanded identity budget:\n%s", plain)
+	}
+	for _, want := range []string{"↑↓ select", "Enter open", "Esc close"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("wide roster footer omitted %q:\n%s", want, plain)
+		}
+	}
+}
+
 func TestSubagentRosterPromptUsesBoundedMiddleFold(t *testing.T) {
 	t.Parallel()
 

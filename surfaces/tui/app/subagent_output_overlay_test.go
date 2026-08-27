@@ -16,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -1312,10 +1313,27 @@ func TestSubagentOutputOverlayFixedComposerMatchesResponsiveFrame(t *testing.T) 
 
 			got := model.renderSubagentOutputOverlay()
 			want := legacySubagentOutputOverlayFrameForTest(model)
-			if got != want {
-				t.Fatalf("fixed-width overlay changed the responsive frame:\n--- got ---\n%s\n--- want ---\n%s", got, want)
-			}
+			assertStyledOverlayFramesEqual(t, got, want, size.width, size.height)
 		})
+	}
+}
+
+func assertStyledOverlayFramesEqual(t *testing.T, got string, want string, width int, height int) {
+	t.Helper()
+	gotScreen := uv.NewScreenBuffer(width, height)
+	gotScreen.Method = ansi.GraphemeWidth
+	uv.NewStyledString(got).Draw(gotScreen, gotScreen.Bounds())
+	wantScreen := uv.NewScreenBuffer(width, height)
+	wantScreen.Method = ansi.GraphemeWidth
+	uv.NewStyledString(want).Draw(wantScreen, wantScreen.Bounds())
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			gotCell := gotScreen.CellAt(x, y)
+			wantCell := wantScreen.CellAt(x, y)
+			if gotCell == nil || !gotCell.Equal(wantCell) {
+				t.Fatalf("fixed-width overlay cell (%d,%d) = %#v, want %#v", x, y, gotCell, wantCell)
+			}
+		}
 	}
 }
 

@@ -541,6 +541,146 @@ func TestNormalizeFullscreenFrameLineReseatsRepaintSentinelAtScreenEdge(t *testi
 	}
 }
 
+func TestSubagentRosterOverlayStaysOpaqueWhileTranscriptStreamsUnderIt(t *testing.T) {
+	const (
+		width  = 160
+		height = 32
+	)
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	model = updated.(*Model)
+	addSubagentRosterTestView(
+		model,
+		"spawn-overlay-review",
+		"overlay-ux-review",
+		"overlay-ux-review[orbit]: inspect floating roster composition",
+		"completed",
+		time.Unix(90, 0),
+		time.Unix(120, 0),
+	)
+
+	transcriptLine := "underlay " + strings.Repeat("0123456789", 13) + " edge"
+	for range 40 {
+		model.doc.Append(NewUserNarrativeBlock(transcriptLine))
+	}
+	model.markViewportStructureDirty()
+	model.syncViewportContent()
+	model.viewport.GotoBottom()
+	model.refreshViewportFollowStateFromOffset()
+	if !model.openSubagentRosterOverlay() {
+		t.Fatal("openSubagentRosterOverlay() = false")
+	}
+
+	frames := make([]string, 0, 6)
+	previousOffset := model.viewport.YOffset()
+	offsetAdvances := 0
+	var fixedGeometry subagentRosterOverlayGeometry
+	captureFrame := func(frameIndex int) {
+		t.Helper()
+		state := model.subagentRosterOverlay
+		model.subagentRosterOverlay = nil
+		base := model.View().Content
+		model.subagentRosterOverlay = state
+
+		normalizeBefore := model.diag.FullscreenNormalizeCalls
+		frame := model.View().Content
+		if got := model.diag.FullscreenNormalizeCalls - normalizeBefore; got != 2 {
+			t.Fatalf("roster frame %d fullscreen normalization calls = %d, want 2", frameIndex, got)
+		}
+		overlay := model.renderSubagentRosterOverlay()
+		geometry := model.subagentRosterOverlay.geometry
+		if frameIndex == 0 {
+			fixedGeometry = geometry
+		} else if geometry.x != fixedGeometry.x || geometry.y != fixedGeometry.y ||
+			geometry.width != fixedGeometry.width || geometry.height != fixedGeometry.height {
+			t.Fatalf("roster geometry moved in frame %d: got (%d,%d %dx%d), want (%d,%d %dx%d)",
+				frameIndex,
+				geometry.x, geometry.y, geometry.width, geometry.height,
+				fixedGeometry.x, fixedGeometry.y, fixedGeometry.width, fixedGeometry.height,
+			)
+		}
+
+		lines := strings.Split(frame, "\n")
+		if len(lines) != height {
+			t.Fatalf("roster frame %d height = %d, want %d", frameIndex, len(lines), height)
+		}
+		for row, line := range lines {
+			if got := displayColumns(line); got != width {
+				t.Fatalf("roster frame %d row %d width = %d, want %d", frameIndex, row, got, width)
+			}
+		}
+
+		baseScreen := uv.NewScreenBuffer(width, height)
+		baseScreen.Method = ansi.GraphemeWidth
+		uv.NewStyledString(base).Draw(baseScreen, baseScreen.Bounds())
+		frameScreen := uv.NewScreenBuffer(width, height)
+		frameScreen.Method = ansi.GraphemeWidth
+		uv.NewStyledString(frame).Draw(frameScreen, frameScreen.Bounds())
+		overlayScreen := uv.NewScreenBuffer(geometry.width, geometry.height)
+		overlayScreen.Method = ansi.GraphemeWidth
+		uv.NewStyledString(overlay).Draw(overlayScreen, overlayScreen.Bounds())
+
+		preservedTranscriptCells := 0
+		coveredTranscriptCells := 0
+		for y := 0; y < height; y++ {
+			for x := 0; x < width; x++ {
+				baseCell := baseScreen.CellAt(x, y)
+				frameCell := frameScreen.CellAt(x, y)
+				inside := x >= geometry.x && x < geometry.x+geometry.width &&
+					y >= geometry.y && y < geometry.y+geometry.height
+				if !inside {
+					if frameCell == nil || !frameCell.Equal(baseCell) {
+						t.Fatalf("roster frame %d changed base cell outside overlay at (%d,%d): got %#v, want %#v", frameIndex, x, y, frameCell, baseCell)
+					}
+					if y >= geometry.y && y < geometry.y+geometry.height &&
+						baseCell != nil && baseCell.Content != "" && baseCell.Content != " " {
+						preservedTranscriptCells++
+					}
+					continue
+				}
+
+				overlayCell := overlayScreen.CellAt(x-geometry.x, y-geometry.y)
+				if frameCell == nil || !frameCell.Equal(overlayCell) {
+					t.Fatalf("roster frame %d leaked base through overlay at (%d,%d): got %#v, want %#v", frameIndex, x, y, frameCell, overlayCell)
+				}
+				if baseCell != nil && baseCell.Content != "" && baseCell.Content != " " {
+					coveredTranscriptCells++
+				}
+			}
+		}
+		if preservedTranscriptCells == 0 {
+			t.Fatalf("roster frame %d did not exercise transcript text beside the overlay", frameIndex)
+		}
+		if coveredTranscriptCells == 0 {
+			t.Fatalf("roster frame %d did not cover transcript text inside the overlay rectangle", frameIndex)
+		}
+		frames = append(frames, frame)
+	}
+
+	captureFrame(0)
+	for index, suffix := range []string{"alpha", "beta", "gamma", "delta", "epsilon"} {
+		model.doc.Append(NewUserNarrativeBlock("stream " + suffix + " " + strings.Repeat("abcdefghij", 13) + " edge"))
+		model.markViewportStructureDirty()
+		model.syncViewportContent()
+		if current := model.viewport.YOffset(); current > previousOffset {
+			offsetAdvances++
+			previousOffset = current
+		}
+		captureFrame(index + 1)
+	}
+	if offsetAdvances < 3 {
+		t.Fatalf("streaming transcript advanced viewport offset %d time(s), want at least three", offsetAdvances)
+	}
+
+	updates := renderFullscreenFramesForTest(t, width, height, frames...)
+	for index := range frames {
+		if index > 0 && frameContainsCSICommand(updates[index], "@LMP") {
+			t.Fatalf("streaming-under-roster update %d used ICH/IL/DL/DCH while the base moved: %q", index, updates[index])
+		}
+		assertPhysicalFullscreenFrame(t, width, height, frames[index], updates[:index+1])
+	}
+}
+
 func TestSubagentOutputOverlayActiveNarrativeKeepsPhysicalBorderAligned(t *testing.T) {
 	const (
 		width  = 100
