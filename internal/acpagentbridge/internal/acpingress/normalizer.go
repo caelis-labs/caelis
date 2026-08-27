@@ -147,7 +147,26 @@ func ingressToolMeta(meta map[string]any) map[string]any {
 	// Tool name is UI-only presentation identity supplied by the producing ACP
 	// Agent. Binding metadata is different: it can claim durable Task/result
 	// relations, so ingress must continue to remove it.
-	return metautil.WithoutRuntimeSections(meta, "binding")
+	out := metautil.CloneMap(meta)
+	if len(out) == 0 {
+		return out
+	}
+	caelis, _ := out[metautil.Root].(map[string]any)
+	runtime, _ := caelis[metautil.Runtime].(map[string]any)
+	if len(runtime) == 0 {
+		return out
+	}
+	delete(runtime, "binding")
+	if len(runtime) == 0 {
+		delete(caelis, metautil.Runtime)
+	}
+	if len(caelis) == 0 {
+		delete(out, metautil.Root)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func normalizePlanUpdate(update client.PlanUpdate, opts Options) *session.Event {

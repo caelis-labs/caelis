@@ -185,6 +185,34 @@ func TestNormalizeExternalToolCallPreservesPresentationNameButStripsBinding(t *t
 	}
 }
 
+func TestIngressToolMetaStripsBindingWithoutAliasingInput(t *testing.T) {
+	t.Parallel()
+
+	meta := map[string]any{
+		"vendor": map[string]any{"trace": "keep"},
+		metautil.Root: map[string]any{
+			metautil.Runtime: map[string]any{
+				"binding": map[string]any{"task_result": true},
+			},
+		},
+	}
+	got := ingressToolMeta(meta)
+	if _, ok := got[metautil.Root]; ok {
+		t.Fatalf("ingressToolMeta() retained empty Caelis metadata: %#v", got)
+	}
+	vendor, _ := got["vendor"].(map[string]any)
+	vendor["trace"] = "changed"
+	originalVendor, _ := meta["vendor"].(map[string]any)
+	if originalVendor["trace"] != "keep" {
+		t.Fatalf("ingressToolMeta() aliased provider metadata: %#v", meta)
+	}
+	caelis, _ := meta[metautil.Root].(map[string]any)
+	runtime, _ := caelis[metautil.Runtime].(map[string]any)
+	if _, ok := runtime["binding"]; !ok {
+		t.Fatalf("ingressToolMeta() mutated input binding: %#v", meta)
+	}
+}
+
 func TestNormalizeRejectsProtocolOnlyCanonicalToolAndPlan(t *testing.T) {
 	t.Parallel()
 
