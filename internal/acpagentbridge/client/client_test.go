@@ -214,6 +214,19 @@ func TestDecodeSessionInfoUpdatePreservesAbsentAndNull(t *testing.T) {
 	}
 }
 
+func TestDecodeUsageUpdateUsesSDKCost(t *testing.T) {
+	t.Parallel()
+
+	decoded, err := decodeUpdate(json.RawMessage(`{"sessionUpdate":"usage_update","size":200000,"used":42000,"cost":{"amount":0.47,"currency":"USD","_meta":{"vendor":{"trace":"abc"}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, ok := decoded.(UsageUpdate)
+	if !ok || usage.Cost == nil || usage.Cost.Amount != 0.47 || usage.Cost.Currency != "USD" || string(usage.Cost.Meta["vendor"]) != `{"trace":"abc"}` {
+		t.Fatalf("usage update = %#v (%T), want SDK cost amount/currency/meta", decoded, decoded)
+	}
+}
+
 func TestDecodeStandardSessionStateUpdatesRejectsInvalidVariants(t *testing.T) {
 	t.Parallel()
 
@@ -222,6 +235,7 @@ func TestDecodeStandardSessionStateUpdatesRejectsInvalidVariants(t *testing.T) {
 		"available command missing description": json.RawMessage(`{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"search"}]}`),
 		"available commands null":               json.RawMessage(`{"sessionUpdate":"available_commands_update","availableCommands":null}`),
 		"config option missing name":            json.RawMessage(`{"sessionUpdate":"config_option_update","configOptions":[{"type":"boolean","id":"verbose","currentValue":true}]}`),
+		"usage cost missing standard amount":    json.RawMessage(`{"sessionUpdate":"usage_update","size":200000,"used":42000,"cost":{"total":0.47,"currency":"USD"}}`),
 	}
 	for name, raw := range tests {
 		name, raw := name, raw

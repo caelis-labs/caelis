@@ -122,26 +122,26 @@ func TestSessionNotificationForWirePreservesSessionInfoNull(t *testing.T) {
 	}
 }
 
-func TestSessionNotificationForWirePreservesTransitionalUsageCost(t *testing.T) {
+func TestSessionNotificationForWireUsesSDKForStandardUsageCost(t *testing.T) {
 	notification := protocolacp.SessionNotification{
 		SessionID: "session-1",
 		Update: protocolacp.UsageUpdate{
 			SessionUpdate: protocolacp.UpdateUsage,
 			Size:          200_000,
 			Used:          42_000,
-			Cost:          &protocolacp.UsageCost{Input: 0.1, Output: 0.2, Total: 0.3, Currency: "USD"},
+			Cost:          &acpsdk.Cost{Amount: 0.3, Currency: "USD"},
 		},
 	}
 	wireValue, err := sessionNotificationForWire(notification)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wire, ok := wireValue.(protocolacp.SessionNotification)
+	wire, ok := wireValue.(acpsdk.SessionNotification)
 	if !ok {
-		t.Fatalf("wire = %T, want compatibility notification", wireValue)
+		t.Fatalf("wire = %T, want SDK notification", wireValue)
 	}
-	update, ok := wire.Update.(protocolacp.UsageUpdate)
-	if !ok || update.Cost == nil || update.Cost.Total != 0.3 || update.Cost.Currency != "USD" {
+	update := wire.Update.UsageUpdate
+	if update == nil || update.Cost == nil || update.Cost.Amount != 0.3 || update.Cost.Currency != "USD" {
 		t.Fatalf("usage wire = %#v", wire)
 	}
 }

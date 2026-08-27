@@ -312,7 +312,7 @@ func TestEnvelopeV1ACPUsageUpdateGolden(t *testing.T) {
 			SessionUpdate: schema.UpdateUsage,
 			Size:          200000,
 			Used:          42000,
-			Cost:          &schema.UsageCost{Total: 0.47, Currency: "USD"},
+			Cost:          &acpsdk.Cost{Amount: 0.47, Currency: "USD"},
 			Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
 		},
 	}
@@ -480,6 +480,27 @@ func TestCloneUpdateDeepCopiesToolCallUpdate(t *testing.T) {
 	cloned.RawInput.(map[string]any)["command"] = "mutated"
 	if update.Title == nil || *update.Title != "RunCommand" || update.RawInput.(map[string]any)["command"] != "make test" {
 		t.Fatalf("source tool update mutated: %#v", update)
+	}
+}
+
+func TestCloneUpdateDeepCopiesUsageCostMetadata(t *testing.T) {
+	t.Parallel()
+
+	update := schema.UsageUpdate{
+		SessionUpdate: schema.UpdateUsage,
+		Cost: &acpsdk.Cost{
+			Amount:   0.47,
+			Currency: "USD",
+			Meta:     map[string]json.RawMessage{"vendor": json.RawMessage(`{"trace":"abc"}`)},
+		},
+	}
+	cloned, ok := CloneUpdate(update).(schema.UsageUpdate)
+	if !ok {
+		t.Fatalf("CloneUpdate() = %T, want UsageUpdate", CloneUpdate(update))
+	}
+	cloned.Cost.Meta["vendor"][0] = '['
+	if string(update.Cost.Meta["vendor"]) != `{"trace":"abc"}` {
+		t.Fatalf("source cost metadata mutated: %s", update.Cost.Meta["vendor"])
 	}
 }
 

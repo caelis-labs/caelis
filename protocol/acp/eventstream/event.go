@@ -510,6 +510,7 @@ func CloneUpdate(update schema.Update) schema.Update {
 	case schema.UsageUpdate:
 		if typed.Cost != nil {
 			cost := *typed.Cost
+			cost.Meta = cloneRawMessageMap(cost.Meta)
 			typed.Cost = &cost
 		}
 		typed.Meta = cloneAnyMap(typed.Meta)
@@ -603,6 +604,17 @@ func cloneAnyMap(in map[string]any) map[string]any {
 	out := maps.Clone(in)
 	for key, value := range out {
 		out[key] = cloneAny(value)
+	}
+	return out
+}
+
+func cloneRawMessageMap(in map[string]json.RawMessage) map[string]json.RawMessage {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(in))
+	for key, value := range in {
+		out[key] = append(json.RawMessage(nil), value...)
 	}
 	return out
 }

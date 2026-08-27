@@ -24,12 +24,6 @@ func sessionNotificationForWire(notification protocolacp.SessionNotification) (a
 	if err != nil {
 		return nil, fmt.Errorf("acp surface: encode session notification: %w", err)
 	}
-	// The transitional product DTO predates standard cost.amount. Preserve its
-	// cost object until the product Envelope wire adopts the SDK cost shape;
-	// no-cost usage updates still use the SDK below.
-	if updateType == protocolacp.UpdateUsage && sessionUsageUpdateHasCost(notification.Update) {
-		return notification, nil
-	}
 	var wire acpsdk.SessionNotification
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		// External Agents may emit future content-block variants inside an
@@ -67,17 +61,6 @@ func standardSessionUpdateType(updateType string) bool {
 		protocolacp.UpdateSessionInfo,
 		protocolacp.UpdateUsage:
 		return true
-	default:
-		return false
-	}
-}
-
-func sessionUsageUpdateHasCost(update protocolacp.Update) bool {
-	switch typed := update.(type) {
-	case protocolacp.UsageUpdate:
-		return typed.Cost != nil
-	case *protocolacp.UsageUpdate:
-		return typed != nil && typed.Cost != nil
 	default:
 		return false
 	}

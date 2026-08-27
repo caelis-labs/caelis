@@ -216,7 +216,6 @@ type ToolCallUpdate = schema.ToolCallUpdate
 type PlanEntry = schema.PlanEntry
 type PlanUpdate = schema.PlanUpdate
 type UsageUpdate = schema.UsageUpdate
-type UsageCost = schema.UsageCost
 type CurrentModeUpdate = acpsdk.SessionCurrentModeUpdate
 type PermissionOption = schema.PermissionOption
 type RequestPermissionRequest = schema.RequestPermissionRequest

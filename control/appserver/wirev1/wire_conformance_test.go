@@ -149,7 +149,7 @@ func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 		schema.ToolCall{SessionUpdate: schema.UpdateToolCall, ToolCallID: "tool-1", Title: "Read", Kind: schema.ToolKindRead, Status: schema.ToolStatusPending},
 		schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "tool-1", Title: &title, Status: stringPointer(schema.ToolStatusCompleted)},
 		schema.PlanUpdate{SessionUpdate: schema.UpdatePlan, Entries: []schema.PlanEntry{{Content: "Inspect", Status: "completed", Priority: "high"}}},
-		schema.UsageUpdate{SessionUpdate: schema.UpdateUsage, Size: 200000, Used: 42000, Cost: &schema.UsageCost{Total: 0.47, Currency: "USD"}},
+		schema.UsageUpdate{SessionUpdate: schema.UpdateUsage, Size: 200000, Used: 42000, Cost: &acpsdk.Cost{Amount: 0.47, Currency: "USD"}},
 		schema.RawUpdate{SessionUpdate: schema.UpdateConfigOption, Raw: configOptionRaw},
 		schema.RawUpdate{SessionUpdate: "vendor/custom", Raw: json.RawMessage(`{"sessionUpdate":"vendor/custom","value":42,"nested":{"ok":true}}`)},
 	}

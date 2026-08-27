@@ -3,6 +3,8 @@ package schema
 import (
 	"encoding/json"
 	"strings"
+
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 )
 
 const (
@@ -186,20 +188,11 @@ type PlanUpdate struct {
 
 func (u PlanUpdate) SessionUpdateType() string { return u.SessionUpdate }
 
-type UsageCost struct {
-	Input      float64 `json:"input,omitempty"`
-	Output     float64 `json:"output,omitempty"`
-	CacheRead  float64 `json:"cache_read,omitempty"`
-	CacheWrite float64 `json:"cache_write,omitempty"`
-	Total      float64 `json:"total,omitempty"`
-	Currency   string  `json:"currency,omitempty"`
-}
-
 type UsageUpdate struct {
 	SessionUpdate string         `json:"sessionUpdate"`
 	Size          uint64         `json:"size"`
 	Used          uint64         `json:"used"`
-	Cost          *UsageCost     `json:"cost,omitempty"`
+	Cost          *acpsdk.Cost   `json:"cost,omitempty"`
 	Meta          map[string]any `json:"_meta,omitempty"`
 }
 

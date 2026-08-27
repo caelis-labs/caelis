@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -523,6 +524,73 @@ func TestUsageUpdateUsesDecimalStringsBeyondJavaScriptSafeInteger(t *testing.T) 
 			}
 			if err := openAPIValidator(t, "Envelope").Validate(decodeJSONWithNumbers(t, raw)); err != nil {
 				t.Fatalf("usage Envelope does not conform: %v\nJSON: %s", err, raw)
+			}
+		})
+	}
+}
+
+func TestControlV1UsageCostBridgesStandardAndLegacyFields(t *testing.T) {
+	envelope := baseEnvelope(eventstream.KindSessionUpdate)
+	envelope.Update = schema.UsageUpdate{
+		SessionUpdate: schema.UpdateUsage,
+		Size:          200000,
+		Used:          42000,
+		Cost:          &acpsdk.Cost{Amount: 0.47, Currency: "USD"},
+	}
+	raw := mustMarshalEnvelope(t, envelope)
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatal(err)
+	}
+	var update map[string]json.RawMessage
+	if err := json.Unmarshal(root["update"], &update); err != nil {
+		t.Fatal(err)
+	}
+	var cost map[string]json.RawMessage
+	if err := json.Unmarshal(update["cost"], &cost); err != nil {
+		t.Fatal(err)
+	}
+	if string(cost["amount"]) != "0.47" || string(cost["total"]) != "0.47" {
+		t.Fatalf("Control v1 cost = %s, want standard amount plus legacy total", update["cost"])
+	}
+	if err := openAPIValidator(t, "Envelope").Validate(decodeJSONWithNumbers(t, raw)); err != nil {
+		t.Fatalf("usage Envelope does not conform: %v\nJSON: %s", err, raw)
+	}
+
+	legacyCases := []struct {
+		name         string
+		cost         string
+		wantAmount   float64
+		wantCurrency string
+	}{
+		{name: "total", cost: `{"total":0.47,"currency":"USD"}`, wantAmount: 0.47, wantCurrency: "USD"},
+		{name: "components", cost: `{"input":0.1,"output":0.2,"cache_read":0.03,"cache_write":0.04,"currency":"USD"}`, wantAmount: 0.37, wantCurrency: "USD"},
+		{name: "missing currency", cost: `{"input":0.1,"output":0.2}`, wantAmount: 0.3},
+		{name: "empty", cost: `{}`},
+	}
+	for _, test := range legacyCases {
+		t.Run(test.name, func(t *testing.T) {
+			legacyValue := decodeJSONWithNumbers(t, []byte(test.cost))
+			if err := openAPIValidator(t, "UsageCost").Validate(legacyValue); err != nil {
+				t.Fatalf("legacy UsageCost does not conform: %v\nJSON: %s", err, test.cost)
+			}
+			update["cost"] = json.RawMessage(test.cost)
+			legacyUpdate, err := json.Marshal(update)
+			if err != nil {
+				t.Fatal(err)
+			}
+			root["update"] = legacyUpdate
+			legacyEnvelope, err := json.Marshal(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := UnmarshalEnvelope(legacyEnvelope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			usage, ok := decoded.Update.(schema.UsageUpdate)
+			if !ok || usage.Cost == nil || math.Abs(usage.Cost.Amount-test.wantAmount) > 1e-12 || usage.Cost.Currency != test.wantCurrency {
+				t.Fatalf("legacy Control v1 cost = %#v (%T), want amount=%v currency=%q", decoded.Update, decoded.Update, test.wantAmount, test.wantCurrency)
 			}
 		})
 	}

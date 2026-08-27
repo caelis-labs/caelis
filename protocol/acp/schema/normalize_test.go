@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"math"
 	"testing"
+
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 )
 
 type stringValue string
@@ -128,12 +130,12 @@ func TestUsageUpdateRoundTripPreservesCostAndMetadata(t *testing.T) {
 		SessionUpdate: UpdateUsage,
 		Size:          200000,
 		Used:          42000,
-		Cost: &UsageCost{
-			Input:     0.12,
-			Output:    0.34,
-			CacheRead: 0.01,
-			Total:     0.47,
-			Currency:  "USD",
+		Cost: &acpsdk.Cost{
+			Amount:   0.47,
+			Currency: "USD",
+			Meta: map[string]json.RawMessage{
+				"vendor": json.RawMessage(`{"trace":"cost-abc"}`),
+			},
 		},
 		Meta: map[string]any{"vendor": map[string]any{"trace": "abc"}},
 	})
@@ -147,8 +149,8 @@ func TestUsageUpdateRoundTripPreservesCostAndMetadata(t *testing.T) {
 	if decoded.SessionUpdate != UpdateUsage || decoded.Size != 200000 || decoded.Used != 42000 {
 		t.Fatalf("decoded usage = %#v, want size/used preserved", decoded)
 	}
-	if decoded.Cost == nil || decoded.Cost.Total != 0.47 || decoded.Cost.Currency != "USD" {
-		t.Fatalf("decoded cost = %#v, want total/currency", decoded.Cost)
+	if decoded.Cost == nil || decoded.Cost.Amount != 0.47 || decoded.Cost.Currency != "USD" || string(decoded.Cost.Meta["vendor"]) != `{"trace":"cost-abc"}` {
+		t.Fatalf("decoded cost = %#v, want amount/currency/meta", decoded.Cost)
 	}
 	vendor, _ := decoded.Meta["vendor"].(map[string]any)
 	if vendor["trace"] != "abc" {

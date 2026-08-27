@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -196,7 +197,73 @@ func normalizeUpdateJSON(raw json.RawMessage) (json.RawMessage, error) {
 	if probe.SessionUpdate != schema.UpdateUsage {
 		return raw, nil
 	}
-	return normalizeObjectUint64Fields(raw, "size", "used")
+	normalized, err := normalizeObjectUint64Fields(raw, "size", "used")
+	if err != nil {
+		return nil, err
+	}
+	return normalizeUsageCostJSON(normalized)
+}
+
+func normalizeUsageCostJSON(raw json.RawMessage) (json.RawMessage, error) {
+	var update map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &update); err != nil {
+		return nil, err
+	}
+	costRaw, ok := update["cost"]
+	if !ok || len(costRaw) == 0 || bytes.Equal(bytes.TrimSpace(costRaw), []byte("null")) {
+		return raw, nil
+	}
+	var cost map[string]json.RawMessage
+	if err := json.Unmarshal(costRaw, &cost); err != nil {
+		return nil, err
+	}
+	if _, hasAmount := cost["amount"]; hasAmount {
+		return raw, nil
+	}
+	// Older Control Envelope v1 peers emitted an optional pre-standard total
+	// and component breakdown. Keep this fallback at the v1 reader boundary
+	// only; external ACP ingress remains SDK-strict. Remove it when
+	// EnvelopeVersion advances beyond v1.
+	if legacyTotal, hasLegacyTotal := cost["total"]; hasLegacyTotal {
+		cost["amount"] = append(json.RawMessage(nil), legacyTotal...)
+	} else {
+		amount, err := legacyUsageCostAmount(cost)
+		if err != nil {
+			return nil, err
+		}
+		cost["amount"], err = json.Marshal(amount)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if _, hasCurrency := cost["currency"]; !hasCurrency {
+		cost["currency"] = json.RawMessage(`""`)
+	}
+	normalizedCost, err := json.Marshal(cost)
+	if err != nil {
+		return nil, err
+	}
+	update["cost"] = normalizedCost
+	return json.Marshal(update)
+}
+
+func legacyUsageCostAmount(cost map[string]json.RawMessage) (float64, error) {
+	var amount float64
+	for _, name := range []string{"input", "output", "cache_read", "cache_write"} {
+		raw, ok := cost[name]
+		if !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			continue
+		}
+		var component float64
+		if err := json.Unmarshal(raw, &component); err != nil {
+			return 0, fmt.Errorf("control wire v1: legacy usage cost %s: %w", name, err)
+		}
+		amount += component
+	}
+	if math.IsInf(amount, 0) || math.IsNaN(amount) {
+		return 0, fmt.Errorf("control wire v1: legacy usage cost is not finite")
+	}
+	return amount, nil
 }
 
 func normalizeFeedPositionJSON(raw json.RawMessage) (json.RawMessage, error) {

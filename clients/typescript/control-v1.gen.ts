@@ -1539,6 +1539,8 @@ export interface UpdateMarketplaceRequest {
 }
 
 export interface UsageCost {
+  _meta?: ACPMetadata;
+  amount?: number;
   cache_read?: number;
   cache_write?: number;
   currency?: string;

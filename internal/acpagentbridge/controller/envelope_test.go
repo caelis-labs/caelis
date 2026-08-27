@@ -1,9 +1,11 @@
 package controller
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -98,8 +100,12 @@ func TestACPEnvelopeFromUpdatePassesThroughUsageUpdate(t *testing.T) {
 			SessionUpdate: client.UpdateUsage,
 			Size:          200000,
 			Used:          42000,
-			Cost:          &client.UsageCost{Total: 0.47, Currency: "USD"},
-			Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
+			Cost: &acpsdk.Cost{
+				Amount:   0.47,
+				Currency: "USD",
+				Meta:     map[string]json.RawMessage{"vendor": json.RawMessage(`{"trace":"cost-abc"}`)},
+			},
+			Meta: map[string]any{"vendor": map[string]any{"trace": "abc"}},
 		},
 	}, nil, nil)
 	if env == nil {
@@ -112,7 +118,7 @@ func TestACPEnvelopeFromUpdatePassesThroughUsageUpdate(t *testing.T) {
 	if update.Size != 200000 || update.Used != 42000 {
 		t.Fatalf("usage update = %#v, want size/used preserved", update)
 	}
-	if update.Cost == nil || update.Cost.Total != 0.47 || update.Cost.Currency != "USD" {
-		t.Fatalf("usage cost = %#v, want total/currency", update.Cost)
+	if update.Cost == nil || update.Cost.Amount != 0.47 || update.Cost.Currency != "USD" || string(update.Cost.Meta["vendor"]) != `{"trace":"cost-abc"}` {
+		t.Fatalf("usage cost = %#v, want amount/currency/meta", update.Cost)
 	}
 }

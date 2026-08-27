@@ -422,6 +422,24 @@ func marshalUsageUpdate(update schema.UsageUpdate) (json.RawMessage, error) {
 	}
 	fields["size"] = decimalRaw(update.Size)
 	fields["used"] = decimalRaw(update.Used)
+	if update.Cost != nil {
+		cost, err := marshalObject(update.Cost)
+		if err != nil {
+			return nil, err
+		}
+		// Control Envelope v1 dual-writes the retired total field so an older
+		// v1 Surface does not silently read a standard ACP cost as zero. Remove
+		// this writer and the matching reader fallback when EnvelopeVersion
+		// advances beyond v1.
+		cost["total"], err = json.Marshal(update.Cost.Amount)
+		if err != nil {
+			return nil, err
+		}
+		fields["cost"], err = json.Marshal(cost)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return json.Marshal(fields)
 }
 
