@@ -510,7 +510,7 @@ func (c *Client) handleRequest(ctx context.Context, method string, params json.R
 			}
 			return resp, nil
 		}
-		return PermissionSelectedOutcome("reject_once"), nil
+		return RequestPermissionResponse{Outcome: acpsdk.NewRequestPermissionOutcomeSelected("reject_once")}, nil
 	default:
 		return nil, acpsdk.NewMethodNotFound(method)
 	}

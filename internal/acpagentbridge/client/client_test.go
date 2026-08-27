@@ -417,7 +417,7 @@ func TestClientRejectsWrongACPMessageDirection(t *testing.T) {
 	acpClient, err := NewStreamClient(clientSide, clientSide, Config{
 		OnPermissionRequest: func(context.Context, RequestPermissionRequest) (RequestPermissionResponse, error) {
 			permissionCalls++
-			return PermissionSelectedOutcome("allow_once"), nil
+			return RequestPermissionResponse{Outcome: acpsdk.NewRequestPermissionOutcomeSelected("allow_once")}, nil
 		},
 		OnUpdate: func(UpdateEnvelope) {
 			updateCalls++

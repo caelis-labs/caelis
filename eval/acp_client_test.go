@@ -107,7 +107,7 @@ func TestPublicClientPermissionAndTerminalProjectionE2E(t *testing.T) {
 			mu.Lock()
 			permissionCount++
 			mu.Unlock()
-			return client.PermissionSelectedOutcome("allow_once"), nil
+			return client.RequestPermissionResponse{Outcome: acpsdk.NewRequestPermissionOutcomeSelected("allow_once")}, nil
 		},
 		OnUpdate: func(update client.UpdateEnvelope) {
 			switch call := update.Update.(type) {

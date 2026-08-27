@@ -3,6 +3,7 @@ package acputil
 import (
 	"strings"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
@@ -17,11 +18,17 @@ func SelectedOutcome(
 	if optionID == "" {
 		return client.RequestPermissionResponse{}, false
 	}
-	return client.PermissionSelectedOutcome(optionID), true
+	return selectedOutcome(optionID), true
 }
 
 func RejectOnce() client.RequestPermissionResponse {
-	return client.PermissionSelectedOutcome("reject_once")
+	return selectedOutcome("reject_once")
+}
+
+func selectedOutcome(optionID string) client.RequestPermissionResponse {
+	return client.RequestPermissionResponse{
+		Outcome: acpsdk.NewRequestPermissionOutcomeSelected(acpsdk.PermissionOptionId(strings.TrimSpace(optionID))),
+	}
 }
 
 func ToolCallName(update client.ToolCallUpdate) string {
