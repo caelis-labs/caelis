@@ -1,4 +1,4 @@
-package projector
+package taskstream
 
 import (
 	"strings"
@@ -12,19 +12,16 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
-func TestProjectTaskStreamFrameDoesNotProjectChildPermissionOutsideControl(t *testing.T) {
+func TestProjectTaskFrameDoesNotProjectChildPermissionOutsideControl(t *testing.T) {
 	t.Parallel()
 
-	req := StreamRequest{
-		HandleID:   "handle-1",
-		RunID:      "run-1",
-		TurnID:     "turn-1",
-		SessionRef: session.SessionRef{SessionID: "root-session"},
-		CallID:     "spawn-call-1",
-		ToolName:   "Spawn",
-		RawInput:   map[string]any{"agent": "helper", "prompt": "inspect"},
-		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "child-terminal-1"},
-		Scope:      eventstream.ScopeMain,
+	req := taskFrameProjectionRequest{
+		TurnID:    "turn-1",
+		SessionID: "root-session",
+		CallID:    "spawn-call-1",
+		ToolName:  "Spawn",
+		Ref:       stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "child-terminal-1"},
+		Scope:     eventstream.ScopeMain,
 	}
 	frame := stream.Frame{
 		Ref:       req.Ref,
@@ -68,24 +65,21 @@ func TestProjectTaskStreamFrameDoesNotProjectChildPermissionOutsideControl(t *te
 		},
 	}
 
-	events := ProjectTaskStreamFrame(req, frame)
+	events := projectTaskStreamFrame(req, frame)
 	if len(events) != 0 {
-		t.Fatalf("ProjectTaskStreamFrame() = %#v, want child permission withheld for Control routing", events)
+		t.Fatalf("projectTaskStreamFrame() = %#v, want child permission withheld for Control routing", events)
 	}
 }
 
-func TestProjectTaskStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
+func TestProjectTaskFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	t.Parallel()
 
-	req := StreamRequest{
-		HandleID:   "handle-1",
-		RunID:      "run-1",
+	req := taskFrameProjectionRequest{
 		TurnID:     "turn-1",
-		SessionRef: session.SessionRef{SessionID: "session-1"},
+		SessionID:  "session-1",
 		CallID:     "call-1",
 		ToolName:   "RunCommand",
 		TaskHandle: "command",
-		RawInput:   map[string]any{"command": "echo ok"},
 		Ref: stream.Ref{
 			SessionID:  "session-1",
 			TaskID:     "task-1",
@@ -95,7 +89,7 @@ func TestProjectTaskStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 		Scope:             eventstream.ScopeMain,
 	}
 
-	events := ProjectTaskStreamFrame(req, stream.Frame{
+	events := projectTaskStreamFrame(req, stream.Frame{
 		Ref:             req.Ref,
 		Text:            "ok\n",
 		Cursor:          stream.Cursor{Output: 15},
@@ -104,11 +98,11 @@ func TestProjectTaskStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 		UpdatedAt:       time.Unix(100, 0),
 	})
 	if len(events) != 1 {
-		t.Fatalf("ProjectTaskStreamFrame() returned %d events: %#v", len(events), events)
+		t.Fatalf("projectTaskStreamFrame() returned %d events: %#v", len(events), events)
 	}
 	env := events[0]
-	if env.Kind != eventstream.KindSessionUpdate || env.SessionID != "session-1" || env.HandleID != "handle-1" {
-		t.Fatalf("env = %#v, want session/update with transport ids", env)
+	if env.Kind != eventstream.KindSessionUpdate || env.SessionID != "session-1" {
+		t.Fatalf("env = %#v, want session/update for session-1", env)
 	}
 	update, ok := env.Update.(schema.ToolCallUpdate)
 	if !ok {
@@ -147,42 +141,41 @@ func TestProjectTaskStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	assertStreamDelivery(t, env, true)
 }
 
-func TestProjectTaskStreamFrameKeepsOneEnvelopeWhenNarrativeCarriesUsage(t *testing.T) {
+func TestProjectTaskFrameKeepsOneEnvelopeWhenNarrativeCarriesUsage(t *testing.T) {
 	t.Parallel()
 
-	req := spawnStreamRequestForTest()
+	req := spawnProjectionRequestForTest()
 	event := childMessageEventForStreamTest("child answer")
 	event.Meta = map[string]any{"usage": map[string]any{
 		"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5,
 	}}
-	events := ProjectTaskStreamFrame(req, stream.Frame{
+	events := projectTaskStreamFrame(req, stream.Frame{
 		Ref:     req.Ref,
 		Cursor:  stream.Cursor{Events: 1},
 		Running: true,
 		Event:   event,
 	})
 	if len(events) != 1 {
-		t.Fatalf("ProjectTaskStreamFrame() returned %d envelopes, want one cursor-resumable unit: %#v", len(events), events)
+		t.Fatalf("projectTaskStreamFrame() returned %d envelopes, want one cursor-resumable unit: %#v", len(events), events)
 	}
 	if eventstream.UpdateType(events[0].Update) == schema.UpdateUsage {
 		t.Fatalf("Task frame projected only sibling usage and lost its narrative: %#v", events[0])
 	}
 }
 
-func TestProjectTaskStreamFramePreservesClosedCommandExitCode(t *testing.T) {
+func TestProjectTaskFramePreservesClosedCommandExitCode(t *testing.T) {
 	t.Parallel()
 
 	exitCode := 7
-	req := StreamRequest{
-		SessionRef:        session.SessionRef{SessionID: "session-1"},
+	req := taskFrameProjectionRequest{
+		SessionID:         "session-1",
 		CallID:            "call-1",
 		ToolName:          "RunCommand",
-		RawInput:          map[string]any{"command": "false"},
 		Ref:               stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "term-1"},
 		DisplayTerminalID: "call-1",
 		Scope:             eventstream.ScopeMain,
 	}
-	events := ProjectTaskStreamFrame(req, stream.Frame{
+	events := projectTaskStreamFrame(req, stream.Frame{
 		Ref:      req.Ref,
 		Cursor:   stream.Cursor{Output: 3},
 		Closed:   true,
@@ -190,7 +183,7 @@ func TestProjectTaskStreamFramePreservesClosedCommandExitCode(t *testing.T) {
 		ExitCode: &exitCode,
 	})
 	if len(events) != 1 {
-		t.Fatalf("ProjectTaskStreamFrame() returned %d events: %#v", len(events), events)
+		t.Fatalf("projectTaskStreamFrame() returned %d events: %#v", len(events), events)
 	}
 	update := requireToolUpdate(t, events[0])
 	if got := stringPtrValue(update.Status); got != schema.ToolStatusFailed {
@@ -206,16 +199,15 @@ func TestProjectTaskStreamFramePreservesClosedCommandExitCode(t *testing.T) {
 	}
 }
 
-func TestProjectTaskStreamFramePreservesSplitNewlineFrame(t *testing.T) {
+func TestProjectTaskFramePreservesSplitNewlineFrame(t *testing.T) {
 	t.Parallel()
 
-	req := StreamRequest{
-		SessionRef: session.SessionRef{SessionID: "session-1"},
-		CallID:     "call-1",
-		ToolName:   "RunCommand",
-		RawInput:   map[string]any{"command": "echo lines"},
-		Ref:        stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "terminal-1"},
-		Scope:      eventstream.ScopeMain,
+	req := taskFrameProjectionRequest{
+		SessionID: "session-1",
+		CallID:    "call-1",
+		ToolName:  "RunCommand",
+		Ref:       stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "terminal-1"},
+		Scope:     eventstream.ScopeMain,
 	}
 	var projected strings.Builder
 	for _, frame := range []stream.Frame{
@@ -223,9 +215,9 @@ func TestProjectTaskStreamFramePreservesSplitNewlineFrame(t *testing.T) {
 		{Ref: req.Ref, Text: "\n", Cursor: stream.Cursor{Output: 9}, Running: true},
 		{Ref: req.Ref, Text: "Step 2/2\n", Cursor: stream.Cursor{Output: 18}, Running: true},
 	} {
-		events := ProjectTaskStreamFrame(req, frame)
+		events := projectTaskStreamFrame(req, frame)
 		if len(events) != 1 {
-			t.Fatalf("ProjectTaskStreamFrame(%q) returned %d events: %#v", frame.Text, len(events), events)
+			t.Fatalf("projectTaskStreamFrame(%q) returned %d events: %#v", frame.Text, len(events), events)
 		}
 		update, ok := events[0].Update.(schema.ToolCallUpdate)
 		if !ok {
@@ -238,18 +230,17 @@ func TestProjectTaskStreamFramePreservesSplitNewlineFrame(t *testing.T) {
 	}
 }
 
-func TestProjectTaskStreamFrameFinalDoesNotRepeatStreamedOutput(t *testing.T) {
+func TestProjectTaskFrameFinalDoesNotRepeatStreamedOutput(t *testing.T) {
 	t.Parallel()
 
-	req := StreamRequest{
-		SessionRef: session.SessionRef{SessionID: "root-session"},
-		CallID:     "command-1",
-		ToolName:   "RunCommand",
-		RawInput:   map[string]any{"command": "printf ok"},
-		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
-		Scope:      eventstream.ScopeMain,
+	req := taskFrameProjectionRequest{
+		SessionID: "root-session",
+		CallID:    "command-1",
+		ToolName:  "RunCommand",
+		Ref:       stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
+		Scope:     eventstream.ScopeMain,
 	}
-	events := ProjectTaskStreamFrame(req, stream.Frame{
+	events := projectTaskStreamFrame(req, stream.Frame{
 		Ref:     req.Ref,
 		Text:    "ok\n",
 		Cursor:  stream.Cursor{Output: 3},
@@ -258,7 +249,7 @@ func TestProjectTaskStreamFrameFinalDoesNotRepeatStreamedOutput(t *testing.T) {
 		State:   "completed",
 	})
 	if len(events) != 1 {
-		t.Fatalf("ProjectTaskStreamFrame(RUN_COMMAND closed) returned %d events: %#v", len(events), events)
+		t.Fatalf("projectTaskStreamFrame(RUN_COMMAND closed) returned %d events: %#v", len(events), events)
 	}
 	update := requireToolUpdate(t, events[0])
 	if got := stringPtrValue(update.Status); got != schema.ToolStatusCompleted {
@@ -267,19 +258,18 @@ func TestProjectTaskStreamFrameFinalDoesNotRepeatStreamedOutput(t *testing.T) {
 	assertTerminalAnchor(t, update.Content, "command-1")
 }
 
-func TestProjectTaskStreamFrameProjectsDelegatedTaskSemanticsWithoutParentText(t *testing.T) {
+func TestProjectTaskFrameProjectsDelegatedTaskSemanticsWithoutParentText(t *testing.T) {
 	t.Parallel()
 
-	req := StreamRequest{
-		SessionRef:        session.SessionRef{SessionID: "root-session"},
+	req := taskFrameProjectionRequest{
+		SessionID:         "root-session",
 		CallID:            "task-call-1",
 		ToolName:          "Task",
-		RawInput:          map[string]any{"action": "write", "task_id": "jack"},
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
 		DisplayTerminalID: "task-call-1",
 		Scope:             eventstream.ScopeMain,
 	}
-	events := ProjectTaskStreamFrame(req, stream.Frame{
+	events := projectTaskStreamFrame(req, stream.Frame{
 		Ref:       req.Ref,
 		Text:      "child output\n",
 		Cursor:    stream.Cursor{Output: 13, Events: 1},
@@ -302,7 +292,7 @@ func TestProjectTaskStreamFrameProjectsDelegatedTaskSemanticsWithoutParentText(t
 		},
 	})
 	if len(events) != 1 {
-		t.Fatalf("ProjectTaskStreamFrame() returned %d events: %#v, want one embedded child event", len(events), events)
+		t.Fatalf("projectTaskStreamFrame() returned %d events: %#v, want one embedded child event", len(events), events)
 	}
 	embedded := events[0]
 	if embedded.Scope != eventstream.ScopeSubagent || embedded.ScopeID != "jack" || eventstream.UpdateType(embedded.Update) != schema.UpdateAgentMessage {
@@ -318,25 +308,24 @@ func TestProjectTaskStreamFrameProjectsDelegatedTaskSemanticsWithoutParentText(t
 	}
 }
 
-func TestProjectTaskStreamFrameKeepsNoOutputPlaceholderOutOfTerminalBytes(t *testing.T) {
+func TestProjectTaskFrameKeepsNoOutputPlaceholderOutOfTerminalBytes(t *testing.T) {
 	t.Parallel()
 
-	req := StreamRequest{
-		SessionRef: session.SessionRef{SessionID: "root-session"},
-		CallID:     "command-1",
-		ToolName:   "RunCommand",
-		RawInput:   map[string]any{"command": "false"},
-		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
-		Scope:      eventstream.ScopeMain,
+	req := taskFrameProjectionRequest{
+		SessionID: "root-session",
+		CallID:    "command-1",
+		ToolName:  "RunCommand",
+		Ref:       stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
+		Scope:     eventstream.ScopeMain,
 	}
-	events := ProjectTaskStreamFrame(req, stream.Frame{
+	events := projectTaskStreamFrame(req, stream.Frame{
 		Ref:     req.Ref,
 		Closed:  true,
 		Running: false,
 		State:   "failed",
 	})
 	if len(events) != 1 {
-		t.Fatalf("ProjectTaskStreamFrame(RUN_COMMAND closed) returned %d events: %#v", len(events), events)
+		t.Fatalf("projectTaskStreamFrame(RUN_COMMAND closed) returned %d events: %#v", len(events), events)
 	}
 	update := requireToolUpdate(t, events[0])
 	if stringPtrValue(update.Status) != schema.ToolStatusFailed {
@@ -347,20 +336,16 @@ func TestProjectTaskStreamFrameKeepsNoOutputPlaceholderOutOfTerminalBytes(t *tes
 	}
 }
 
-func TestProjectTaskStreamFrameProjectsSubagentSemanticEventWithoutParentTerminal(t *testing.T) {
+func TestProjectTaskFrameProjectsSubagentSemanticEventWithoutParentTerminal(t *testing.T) {
 	t.Parallel()
 
-	req := StreamRequest{
-		HandleID:          "handle-1",
-		RunID:             "run-1",
+	req := taskFrameProjectionRequest{
 		TurnID:            "turn-1",
-		SessionRef:        session.SessionRef{SessionID: "root-session"},
+		SessionID:         "root-session",
 		CallID:            "spawn-call-1",
 		ToolName:          "Spawn",
-		RawInput:          map[string]any{"agent": "self", "prompt": "inspect"},
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
 		DisplayTerminalID: "spawn-call-1",
-		Origin:            &StreamOrigin{Scope: eventstream.ScopeMain, ScopeID: "root-session", Actor: "assistant"},
 		Scope:             eventstream.ScopeMain,
 	}
 	frame := stream.Frame{
@@ -394,9 +379,9 @@ func TestProjectTaskStreamFrameProjectsSubagentSemanticEventWithoutParentTermina
 		},
 	}
 
-	events := ProjectTaskStreamFrame(req, frame)
+	events := projectTaskStreamFrame(req, frame)
 	if len(events) != 1 {
-		t.Fatalf("ProjectTaskStreamFrame() returned %d events, want child semantic event only: %#v", len(events), events)
+		t.Fatalf("projectTaskStreamFrame() returned %d events, want child semantic event only: %#v", len(events), events)
 	}
 	assertSpawnSemanticEnvelope(t, events[0], "jack", "spawn-call-1")
 	message, ok := events[0].Update.(schema.ContentChunk)
@@ -412,11 +397,11 @@ func TestProjectTaskStreamFrameProjectsSubagentSemanticEventWithoutParentTermina
 	}
 }
 
-func TestProjectTaskStreamFrameProjectsEventOnlySpawnChildSemantics(t *testing.T) {
+func TestProjectTaskFrameProjectsEventOnlySpawnChildSemantics(t *testing.T) {
 	t.Parallel()
 
 	oldText := "old line\n"
-	req := spawnStreamRequestForTest()
+	req := spawnProjectionRequestForTest()
 	cases := []struct {
 		name   string
 		event  *session.Event
@@ -541,13 +526,13 @@ func TestProjectTaskStreamFrameProjectsEventOnlySpawnChildSemantics(t *testing.T
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			events := ProjectTaskStreamFrame(req, stream.Frame{
+			events := projectTaskStreamFrame(req, stream.Frame{
 				Ref:     req.Ref,
 				Running: true,
 				Event:   tc.event,
 			})
 			if len(events) != 1 {
-				t.Fatalf("ProjectTaskStreamFrame() returned %d events, want one child semantic event: %#v", len(events), events)
+				t.Fatalf("projectTaskStreamFrame() returned %d events, want one child semantic event: %#v", len(events), events)
 			}
 			assertSpawnSemanticEnvelope(t, events[0], "jack", "spawn-call-1")
 			tc.assert(t, events[0])
@@ -559,30 +544,30 @@ func eventProtocolPtrForTest(protocol session.EventProtocol) *session.EventProto
 	return &protocol
 }
 
-func TestProjectTaskStreamFrameDropsDelegatedTextOnlyRunningFrame(t *testing.T) {
+func TestProjectTaskFrameDropsDelegatedTextOnlyRunningFrame(t *testing.T) {
 	t.Parallel()
 
-	req := spawnStreamRequestForTest()
-	events := ProjectTaskStreamFrame(req, stream.Frame{
+	req := spawnProjectionRequestForTest()
+	events := projectTaskStreamFrame(req, stream.Frame{
 		Ref:     req.Ref,
 		Text:    "child stream text\n",
 		Running: true,
 	})
 	if len(events) != 0 {
-		t.Fatalf("ProjectTaskStreamFrame(text-only) = %#v, want no compatibility output", events)
+		t.Fatalf("projectTaskStreamFrame(text-only) = %#v, want no compatibility output", events)
 	}
 
-	events = ProjectTaskStreamFrame(req, stream.Frame{Ref: req.Ref, Running: true})
+	events = projectTaskStreamFrame(req, stream.Frame{Ref: req.Ref, Running: true})
 	if len(events) != 0 {
-		t.Fatalf("ProjectTaskStreamFrame(empty) = %#v, want no output", events)
+		t.Fatalf("projectTaskStreamFrame(empty) = %#v, want no output", events)
 	}
 }
 
-func TestProjectTaskStreamFrameMarksClosedSpawnEventFinalWithoutParentCopy(t *testing.T) {
+func TestProjectTaskFrameMarksClosedSpawnEventFinalWithoutParentCopy(t *testing.T) {
 	t.Parallel()
 
-	req := spawnStreamRequestForTest()
-	events := ProjectTaskStreamFrame(req, stream.Frame{
+	req := spawnProjectionRequestForTest()
+	events := projectTaskStreamFrame(req, stream.Frame{
 		Ref:    req.Ref,
 		Cursor: stream.Cursor{Output: 19},
 		Closed: true,
@@ -604,7 +589,7 @@ func TestProjectTaskStreamFrameMarksClosedSpawnEventFinalWithoutParentCopy(t *te
 		},
 	})
 	if len(events) != 1 {
-		t.Fatalf("ProjectTaskStreamFrame() returned %d events, want only the child semantic event: %#v", len(events), events)
+		t.Fatalf("projectTaskStreamFrame() returned %d events, want only the child semantic event: %#v", len(events), events)
 	}
 	assertSpawnSemanticEnvelope(t, events[0], "jack", "spawn-call-1")
 	if !events[0].Final {
@@ -615,15 +600,15 @@ func TestProjectTaskStreamFrameMarksClosedSpawnEventFinalWithoutParentCopy(t *te
 	}
 }
 
-func TestProjectTaskStreamFrameSubagentFinalStatesAreLifecycleOnly(t *testing.T) {
+func TestProjectTaskFrameSubagentFinalStatesAreLifecycleOnly(t *testing.T) {
 	t.Parallel()
 
 	cases := []string{"completed", "failed", "cancelled", "interrupted", "terminated", "unknown_outcome"}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc, func(t *testing.T) {
-			req := spawnStreamRequestForTest()
-			events := ProjectTaskStreamFrame(req, stream.Frame{
+			req := spawnProjectionRequestForTest()
+			events := projectTaskStreamFrame(req, stream.Frame{
 				Ref:    req.Ref,
 				Text:   "### accumulated child output\n",
 				Cursor: stream.Cursor{Output: 27},
@@ -631,7 +616,7 @@ func TestProjectTaskStreamFrameSubagentFinalStatesAreLifecycleOnly(t *testing.T)
 				State:  tc,
 			})
 			if len(events) != 1 {
-				t.Fatalf("ProjectTaskStreamFrame(%s) returned %d events, want one Task lifecycle: %#v", tc, len(events), events)
+				t.Fatalf("projectTaskStreamFrame(%s) returned %d events, want one Task lifecycle: %#v", tc, len(events), events)
 			}
 			if events[0].Kind != eventstream.KindLifecycle || events[0].Lifecycle == nil || events[0].Lifecycle.State != tc || !events[0].Final {
 				t.Fatalf("Task terminal = %#v, want final lifecycle %q", events[0], tc)
@@ -646,19 +631,18 @@ func TestProjectTaskStreamFrameSubagentFinalStatesAreLifecycleOnly(t *testing.T)
 	}
 }
 
-func TestProjectTaskStreamFrameDoesNotPromoteDelegatedResultIntoParentTool(t *testing.T) {
+func TestProjectTaskFrameDoesNotPromoteDelegatedResultIntoParentTool(t *testing.T) {
 	t.Parallel()
 
-	req := StreamRequest{
-		SessionRef:        session.SessionRef{SessionID: "root-session"},
+	req := taskFrameProjectionRequest{
+		SessionID:         "root-session",
 		CallID:            "spawn-call-1",
 		ToolName:          "Spawn",
-		RawInput:          map[string]any{"agent": "self", "prompt": "inspect"},
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
 		DisplayTerminalID: "spawn-call-1",
 		Scope:             eventstream.ScopeMain,
 	}
-	events := ProjectTaskStreamFrame(req, stream.Frame{
+	events := projectTaskStreamFrame(req, stream.Frame{
 		Ref:     stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack-turn-1"},
 		Text:    "Final child result\n",
 		Closed:  true,
@@ -666,25 +650,24 @@ func TestProjectTaskStreamFrameDoesNotPromoteDelegatedResultIntoParentTool(t *te
 		State:   "completed",
 	})
 	if len(events) != 1 {
-		t.Fatalf("ProjectTaskStreamFrame() returned %d events, want Task lifecycle: %#v", len(events), events)
+		t.Fatalf("projectTaskStreamFrame() returned %d events, want Task lifecycle: %#v", len(events), events)
 	}
 	if events[0].Kind != eventstream.KindLifecycle || events[0].Lifecycle == nil || events[0].Lifecycle.State != eventstream.LifecycleStateCompleted || events[0].Update != nil {
 		t.Fatalf("Task terminal = %#v, want lifecycle-only completion", events[0])
 	}
 }
 
-func TestProjectTaskStreamFrameSuppressesEmbeddedParentToolEcho(t *testing.T) {
+func TestProjectTaskFrameSuppressesEmbeddedParentToolEcho(t *testing.T) {
 	t.Parallel()
 
-	req := StreamRequest{
-		SessionRef: session.SessionRef{SessionID: "root-session"},
-		CallID:     "spawn-call-1",
-		ToolName:   "Spawn",
-		RawInput:   map[string]any{"agent": "self", "prompt": "inspect"},
-		Ref:        stream.Ref{SessionID: "root-session", TaskID: "jack"},
-		Scope:      eventstream.ScopeMain,
+	req := taskFrameProjectionRequest{
+		SessionID: "root-session",
+		CallID:    "spawn-call-1",
+		ToolName:  "Spawn",
+		Ref:       stream.Ref{SessionID: "root-session", TaskID: "jack"},
+		Scope:     eventstream.ScopeMain,
 	}
-	events := ProjectTaskStreamFrame(req, stream.Frame{
+	events := projectTaskStreamFrame(req, stream.Frame{
 		Ref:     req.Ref,
 		Running: true,
 		Event: &session.Event{
@@ -713,7 +696,7 @@ func TestProjectTaskStreamFrameSuppressesEmbeddedParentToolEcho(t *testing.T) {
 		},
 	})
 	if len(events) != 0 {
-		t.Fatalf("ProjectTaskStreamFrame() = %#v, want parent SPAWN tool echo suppressed", events)
+		t.Fatalf("projectTaskStreamFrame() = %#v, want parent SPAWN tool echo suppressed", events)
 	}
 }
 
@@ -811,15 +794,12 @@ func childToolUpdateEventForStreamTest() *session.Event {
 	}
 }
 
-func spawnStreamRequestForTest() StreamRequest {
-	return StreamRequest{
-		HandleID:          "handle-1",
-		RunID:             "run-1",
+func spawnProjectionRequestForTest() taskFrameProjectionRequest {
+	return taskFrameProjectionRequest{
 		TurnID:            "turn-1",
-		SessionRef:        session.SessionRef{SessionID: "root-session"},
+		SessionID:         "root-session",
 		CallID:            "spawn-call-1",
 		ToolName:          "Spawn",
-		RawInput:          map[string]any{"agent": "self", "prompt": "inspect"},
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
 		DisplayTerminalID: "spawn-call-1",
 		Scope:             eventstream.ScopeMain,
@@ -903,6 +883,23 @@ func assertStreamTerminalInfo(t *testing.T, meta map[string]any, terminalID stri
 	}
 }
 
+func assertTerminalAnchor(t *testing.T, content []schema.ToolCallContent, terminalID string) {
+	t.Helper()
+	if len(content) != 1 || content[0].Type != "terminal" || content[0].TerminalID != terminalID {
+		t.Fatalf("content = %#v, want one terminal anchor %q", content, terminalID)
+	}
+	if text := schema.ExtractTextValue(content[0].Content); text != "" {
+		t.Fatalf("terminal anchor content text = %q, want empty", text)
+	}
+}
+
+func stringPtrValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
 func runtimeTaskMeta(meta map[string]any) map[string]any {
 	caelis, _ := meta[metautil.Root].(map[string]any)
 	runtimeMeta, _ := caelis[metautil.Runtime].(map[string]any)
@@ -913,7 +910,7 @@ func runtimeTaskMeta(meta map[string]any) map[string]any {
 func TestStreamParentEchoMatchingUsesExactToolName(t *testing.T) {
 	t.Parallel()
 
-	req := StreamRequest{ParentCallID: "call-1", ParentToolName: "Spawn"}
+	req := taskFrameProjectionRequest{CallID: "call-1", ToolName: "Spawn"}
 	event := &session.Event{Tool: &session.EventTool{ID: "call-1", Name: "SPAWN"}}
 	if streamFrameSessionEventIsParentToolEcho(req, event) {
 		t.Fatal("SPAWN alias unexpectedly matched exact Spawn parent")

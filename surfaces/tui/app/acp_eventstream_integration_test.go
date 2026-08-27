@@ -13,7 +13,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	sdkmodel "github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	taskstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	acpclient "github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -86,18 +85,7 @@ func TestHandleACPEventEnvelopeDisplaysTaskOwnedRunCommandOutputOnce(t *testing.
 			RawInput: map[string]any{"command": "sleep 6"}, Meta: acpToolNameMeta("RunCommand"),
 		},
 	})
-	ref := taskstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "terminal-1"}
-	frames := acpprojector.ProjectTaskStreamFrame(acpprojector.StreamRequest{
-		SessionRef: session.SessionRef{SessionID: "session-1"}, CallID: "command-1",
-		ToolName: "RunCommand", Ref: ref, Scope: eventstream.ScopeMain,
-	}, taskstream.Frame{
-		Ref: ref, Text: output, Cursor: taskstream.Cursor{Output: int64(len([]byte(output)))},
-		Running: true, State: "running",
-	})
-	if len(frames) != 1 {
-		t.Fatalf("task stream projection = %#v, want one terminal frame", frames)
-	}
-	model = applyACPEnvelopeForTest(t, model, frames[0])
+	model = applyACPEnvelopeForTest(t, model, commandTaskStreamEnvelopeForTest("session-1", "command-1", "", output))
 
 	meta := metautil.WithRuntimeSection(acpToolNameMeta("RunCommand"), metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID: "task-1", "kind": "command",
@@ -156,18 +144,7 @@ func TestHandleACPEventEnvelopeRendersTaskWriteInteractionAndKeepsUTF8RunCommand
 			Meta:     commandMeta,
 		},
 	})
-	ref := taskstream.Ref{SessionID: "session-1", TaskID: "task-4", TerminalID: "terminal-4"}
-	frames := acpprojector.ProjectTaskStreamFrame(acpprojector.StreamRequest{
-		SessionRef: session.SessionRef{SessionID: "session-1"}, CallID: "command-call-4",
-		ToolName: "RunCommand", TaskHandle: "command-4", Ref: ref, Scope: eventstream.ScopeMain,
-	}, taskstream.Frame{
-		Ref: ref, Text: output, Cursor: taskstream.Cursor{Output: int64(len([]byte(output)))},
-		Running: true, State: "running",
-	})
-	if len(frames) != 1 {
-		t.Fatalf("task stream projection = %#v, want one terminal frame", frames)
-	}
-	model = applyACPEnvelopeForTest(t, model, frames[0])
+	model = applyACPEnvelopeForTest(t, model, commandTaskStreamEnvelopeForTest("session-1", "command-call-4", "command-4", output))
 
 	taskInput := map[string]any{
 		"action": "write", "handle": "command-4", "target_kind": "command", "input": "小明",
@@ -4466,6 +4443,36 @@ func assertMainTurnDocumentOrder(t *testing.T, model *Model, oldText string, pro
 	want := []string{"old", "user", "new"}
 	if !slices.Equal(order, want) {
 		t.Fatalf("document order = %#v, want %#v", order, want)
+	}
+}
+
+func commandTaskStreamEnvelopeForTest(sessionID string, callID string, taskHandle string, output string) eventstream.Envelope {
+	streamMeta := map[string]any{
+		metautil.RuntimeStreamMode:   "append",
+		metautil.RuntimeOutputCursor: int64(len([]byte(output))),
+	}
+	meta := metautil.WithCompactRuntimeSection(nil, metautil.RuntimeStream, streamMeta)
+	toolMeta := map[string]any{metautil.RuntimeToolName: "RunCommand"}
+	if taskHandle != "" {
+		toolMeta[metautil.RuntimeTargetHandle] = taskHandle
+	}
+	meta = metautil.WithRuntimeSection(meta, metautil.RuntimeTool, toolMeta)
+	meta = metautil.WithTerminalOutput(meta, callID, output)
+	meta = metautil.WithTerminalInfo(meta, callID)
+	status := schema.ToolStatusInProgress
+	return eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: sessionID,
+		Scope:     eventstream.ScopeMain,
+		ScopeID:   sessionID,
+		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    callID,
+			Status:        &status,
+			Content:       []schema.ToolCallContent{{Type: "terminal", TerminalID: callID}},
+			Meta:          meta,
+		},
 	}
 }
 

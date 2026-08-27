@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	sdkstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
@@ -17,7 +16,6 @@ import (
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
 // Product Task semantics and directory DTOs have one owner in
@@ -205,15 +203,15 @@ func projectRecord(record controltaskstream.Record) []eventstream.Envelope {
 	if frame.Ref.TaskID == "" {
 		frame.Ref.TaskID = record.Task.TaskID
 	}
-	request := projectorRequest(record.Task, frame)
-	projected := projector.ProjectTaskStreamFrame(request, frame)
+	request := taskFrameProjectionRequestFor(record.Task, frame)
+	projected := projectTaskStreamFrame(request, frame)
 	for index := range projected {
 		projected[index] = stampEnvelope(record, projected[index])
 	}
 	return projected
 }
 
-func projectorRequest(descriptor controltaskstream.TaskDescriptor, frame sdkstream.Frame) projector.StreamRequest {
+func taskFrameProjectionRequestFor(descriptor controltaskstream.TaskDescriptor, frame sdkstream.Frame) taskFrameProjectionRequest {
 	toolName := strings.TrimSpace(descriptor.ParentTool.ToolName)
 	if toolName == "" {
 		switch descriptor.Kind {
@@ -235,10 +233,9 @@ func projectorRequest(descriptor controltaskstream.TaskDescriptor, frame sdkstre
 		// stdio terminal output and exit metadata target the mounted call.
 		displayTerminalID = strings.TrimSpace(descriptor.ParentTool.ToolCallID)
 	}
-	return projector.StreamRequest{
-		TurnID: terminalID, SessionRef: session.SessionRef{SessionID: descriptor.SessionID},
-		SourceID: terminalID, CallID: descriptor.ParentTool.ToolCallID, ToolName: toolName,
-		ParentCallID: descriptor.ParentTool.ToolCallID, ParentToolName: toolName, TaskHandle: descriptor.Handle,
+	return taskFrameProjectionRequest{
+		TurnID: terminalID, SessionID: descriptor.SessionID,
+		CallID: descriptor.ParentTool.ToolCallID, ToolName: toolName, TaskHandle: descriptor.Handle,
 		Ref:               sdkstream.Ref{SessionID: descriptor.SessionID, TaskID: descriptor.TaskID, TerminalID: terminalID},
 		DisplayTerminalID: displayTerminalID, Scope: scope, ParticipantID: descriptor.ParticipantID,
 	}

@@ -1,4 +1,4 @@
-package projector
+package taskstream
 
 import (
 	"strings"
@@ -6,57 +6,35 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
-// StreamRequest is one non-durable output subscription derived from a standard
-// running tool update. The kernel extracts this request from runtime state;
-// projector owns the ACP envelope shape emitted for live clients.
-type StreamRequest struct {
-	HandleID   string
-	RunID      string
-	TurnID     string
-	SessionRef session.SessionRef
-	// SourceID identifies the physical task stream independently from the
-	// tool call that happened to observe it. Subagent turns use their stable
-	// runtime turn ID; terminal-backed commands fall back to Ref.TerminalID.
-	SourceID       string
-	CallID         string
-	ToolName       string
-	ParentCallID   string
-	ParentToolName string
+// taskFrameProjectionRequest carries only the Control Task descriptor facts
+// required to project one observation frame for a presentation client.
+type taskFrameProjectionRequest struct {
+	TurnID    string
+	SessionID string
+	CallID    string
+	ToolName  string
 	// TaskHandle is the Session-scoped public Task identity used only for
 	// display metadata. Ref.TaskID remains the typed stream address.
 	TaskHandle        string
-	RawInput          map[string]any
 	Ref               stream.Ref
 	DisplayTerminalID string
-	Cursor            stream.Cursor
-	Origin            *StreamOrigin
-	Actor             string
 	Scope             eventstream.Scope
 	ParticipantID     string
 }
 
-// StreamOrigin carries the protocol-level source scope for live stream frames.
-type StreamOrigin struct {
-	Scope                eventstream.Scope
-	ScopeID              string
-	Source               string
-	Actor                string
-	ParticipantID        string
-	ParticipantKind      string
-	ParticipantSessionID string
-}
-
-// ProjectTaskStreamFrame projects one frame for the Task-owned stream. It never
+// projectTaskStreamFrame projects one frame for the Task-owned stream. It never
 // manufactures a parent Spawn or Task update. Parent status and results remain
 // on the Session feed.
-func ProjectTaskStreamFrame(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
+func projectTaskStreamFrame(req taskFrameProjectionRequest, frame stream.Frame) []eventstream.Envelope {
 	if !delegatedParentStream(req) {
 		return commandTaskStreamFrameEvents(req, frame)
 	}
@@ -82,11 +60,11 @@ func ProjectTaskStreamFrame(req StreamRequest, frame stream.Frame) []eventstream
 	}
 	return []eventstream.Envelope{{
 		Kind:       eventstream.KindLifecycle,
-		SessionID:  strings.TrimSpace(req.SessionRef.SessionID),
-		TurnID:     firstNonEmpty(strings.TrimSpace(frame.Ref.TerminalID), strings.TrimSpace(req.SourceID)),
+		SessionID:  strings.TrimSpace(req.SessionID),
+		TurnID:     firstString(strings.TrimSpace(frame.Ref.TerminalID), strings.TrimSpace(req.TurnID)),
 		OccurredAt: occurredAt,
 		Scope:      eventstream.ScopeSubagent,
-		ScopeID:    firstNonEmpty(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID)),
+		ScopeID:    firstString(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID)),
 		ParentTool: streamParentToolRelation(req),
 		Delivery:   streamFrameDelivery(),
 		Lifecycle:  &eventstream.Lifecycle{State: state},
@@ -94,7 +72,7 @@ func ProjectTaskStreamFrame(req StreamRequest, frame stream.Frame) []eventstream
 	}}
 }
 
-func commandTaskStreamFrameEvents(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
+func commandTaskStreamFrameEvents(req taskFrameProjectionRequest, frame stream.Frame) []eventstream.Envelope {
 	if frame.Closed {
 		return []eventstream.Envelope{streamFinalFrameEvent(req, frame)}
 	}
@@ -104,15 +82,15 @@ func commandTaskStreamFrameEvents(req StreamRequest, frame stream.Frame) []event
 	return nil
 }
 
-func delegatedParentStream(req StreamRequest) bool {
+func delegatedParentStream(req taskFrameProjectionRequest) bool {
 	return req.ToolName == spawn.ToolName || req.ToolName == tasktool.ToolName
 }
 
-func streamFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
+func streamFrameEvent(req taskFrameProjectionRequest, frame stream.Frame) eventstream.Envelope {
 	return streamToolUpdateEnvelope(req, frame, toolStatusRunning, true, false, frame.Text, streamFrameMeta("append", frame.Cursor.Output), true)
 }
 
-func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
+func streamFinalFrameEvent(req taskFrameProjectionRequest, frame stream.Frame) eventstream.Envelope {
 	status, isErr := subagentFinalToolStatus(frame)
 	finalText := ""
 	if frame.Cursor.Output == 0 {
@@ -121,18 +99,18 @@ func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.En
 	return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, streamFrameMeta("final", frame.Cursor.Output), true)
 }
 
-func streamDisplayTerminalID(req StreamRequest, frame stream.Frame) string {
-	return firstNonEmpty(req.DisplayTerminalID, frame.Ref.TerminalID, req.Ref.TerminalID, req.CallID)
+func streamDisplayTerminalID(req taskFrameProjectionRequest, frame stream.Frame) string {
+	return firstString(req.DisplayTerminalID, frame.Ref.TerminalID, req.Ref.TerminalID, req.CallID)
 }
 
-func streamTerminalExitID(req StreamRequest, frame stream.Frame) string {
-	if terminalID, ok := projectedDisplayTerminalID(req.CallID, req.ToolName); ok {
+func streamTerminalExitID(req taskFrameProjectionRequest, frame stream.Frame) string {
+	if terminalID, ok := commandDisplayTerminalID(req.CallID, req.ToolName); ok {
 		return terminalID
 	}
 	return streamDisplayTerminalID(req, frame)
 }
 
-func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status string, includeStatus bool, isErr bool, terminalText string, meta map[string]any, includeDisplayTerminal bool) eventstream.Envelope {
+func streamToolUpdateEnvelope(req taskFrameProjectionRequest, frame stream.Frame, status string, includeStatus bool, isErr bool, terminalText string, meta map[string]any, includeDisplayTerminal bool) eventstream.Envelope {
 	if frame.TruncatedBefore > 0 {
 		meta = metautil.WithCompactRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
 			metautil.RuntimeStreamTruncated: true,
@@ -146,19 +124,19 @@ func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status stri
 	update := schema.ToolCallUpdate{
 		SessionUpdate: schema.UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(req.CallID),
-		Meta:          streamFrameToolMeta(meta, req.RawInput, nil, "", req.TaskHandle),
+		Meta:          streamFrameToolMeta(meta, req.TaskHandle),
 	}
 	if terminalText != "" {
 		update.Meta = metautil.WithTerminalOutput(update.Meta, streamDisplayTerminalID(req, frame), terminalText)
 	}
 	if includeStatus {
-		statusText := acpToolStatus(status)
-		update.Status = stringPtr(statusText)
+		statusText := taskStreamToolStatus(status)
+		update.Status = &statusText
 	}
 	if includeDisplayTerminal {
-		update = withDisplayTerminalUpdate(update, req.CallID, req.ToolName)
+		update = withCommandDisplayTerminal(update, req.CallID, req.ToolName)
 		if frame.Closed {
-			// withDisplayTerminalUpdate preserves the Zed-compatible empty terminal
+			// withCommandDisplayTerminal preserves the Zed-compatible empty terminal
 			// anchor and installs the final terminal metadata. The stream close frame
 			// is the authoritative runtime exit-code carrier, so retain it here.
 			update.Meta = metautil.WithTerminalExit(update.Meta, streamTerminalExitID(req, frame), frame.ExitCode, nil)
@@ -170,14 +148,11 @@ func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status stri
 	}
 	return eventstream.Envelope{
 		Kind:          eventstream.KindSessionUpdate,
-		SessionID:     strings.TrimSpace(req.SessionRef.SessionID),
-		HandleID:      strings.TrimSpace(req.HandleID),
-		RunID:         strings.TrimSpace(req.RunID),
+		SessionID:     strings.TrimSpace(req.SessionID),
 		TurnID:        strings.TrimSpace(req.TurnID),
 		OccurredAt:    occurredAt,
 		Scope:         scope,
 		ScopeID:       streamRequestScopeID(req),
-		Actor:         strings.TrimSpace(req.Actor),
 		ParticipantID: strings.TrimSpace(req.ParticipantID),
 		Delivery:      streamFrameDelivery(),
 		Update:        update,
@@ -185,15 +160,49 @@ func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status stri
 	}
 }
 
+func withCommandDisplayTerminal(update schema.ToolCallUpdate, toolCallID string, toolName string) schema.ToolCallUpdate {
+	toolName = strings.TrimSpace(toolName)
+	if toolName != "" {
+		update.Meta = metautil.WithRuntimeSection(update.Meta, metautil.RuntimeTool, map[string]any{
+			metautil.RuntimeToolName: toolName,
+		})
+	}
+	terminalID, ok := commandDisplayTerminalID(toolCallID, toolName)
+	if !ok {
+		return update
+	}
+	update.Meta = metautil.WithTerminalInfo(update.Meta, terminalID)
+	update.Content = []schema.ToolCallContent{{Type: "terminal", TerminalID: terminalID}}
+	return update
+}
+
+func commandDisplayTerminalID(toolCallID string, toolName string) (string, bool) {
+	if toolName != shell.RunCommandToolName {
+		return "", false
+	}
+	terminalID := strings.TrimSpace(toolCallID)
+	return terminalID, terminalID != ""
+}
+
+func taskStreamToolStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "", schema.ToolStatusPending, schema.ToolStatusInProgress, schema.ToolStatusCompleted, schema.ToolStatusFailed:
+		return strings.TrimSpace(status)
+	case "started", "running", "waiting_approval":
+		return schema.ToolStatusInProgress
+	case "cancelled", "canceled", "interrupted", "terminated", "timed_out", "timeout":
+		return schema.ToolStatusFailed
+	default:
+		return strings.TrimSpace(status)
+	}
+}
+
 func streamFrameDelivery() *eventstream.Delivery {
 	return &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
 }
 
-func streamRequestScopeID(req StreamRequest) string {
-	if req.Origin != nil && strings.TrimSpace(req.Origin.ScopeID) != "" {
-		return strings.TrimSpace(req.Origin.ScopeID)
-	}
-	return firstNonEmpty(strings.TrimSpace(req.SessionRef.SessionID), strings.TrimSpace(req.TurnID))
+func streamRequestScopeID(req taskFrameProjectionRequest) string {
+	return firstString(strings.TrimSpace(req.SessionID), strings.TrimSpace(req.TurnID))
 }
 
 func streamFrameMetaForEnvelope(isErr bool) map[string]any {
@@ -232,23 +241,14 @@ func streamFinalTerminalText(text string) string {
 	return text
 }
 
-func streamFrameToolMeta(meta map[string]any, input map[string]any, output map[string]any, action string, taskHandle string) map[string]any {
-	values := map[string]any{}
-	if action = firstNonEmpty(action, stringValue(output["action"]), stringValue(input["action"])); action != "" {
-		values[metautil.RuntimeToolAction] = action
-	}
-	if taskHandle = firstNonEmpty(taskHandle, stringValue(output["handle"]), stringValue(input["handle"])); taskHandle != "" {
-		values[metautil.RuntimeTargetHandle] = taskHandle
-	}
-	for _, key := range []string{"agent", "handle", "mention", "prompt", "target_kind", "input"} {
-		if value := firstNonEmpty(stringValue(output[key]), stringValue(input[key])); value != "" {
-			values[key] = value
-		}
-	}
-	if len(values) == 0 {
+func streamFrameToolMeta(meta map[string]any, taskHandle string) map[string]any {
+	taskHandle = strings.TrimSpace(taskHandle)
+	if taskHandle == "" {
 		return meta
 	}
-	return metautil.WithCompactRuntimeSection(meta, metautil.RuntimeTool, values)
+	return metautil.WithCompactRuntimeSection(meta, metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeTargetHandle: taskHandle,
+	})
 }
 
 func shouldProjectFrameTextToParentTool(frame stream.Frame) bool {
@@ -258,13 +258,13 @@ func shouldProjectFrameTextToParentTool(frame stream.Frame) bool {
 	return true
 }
 
-func streamFrameEmbeddedEvents(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
+func streamFrameEmbeddedEvents(req taskFrameProjectionRequest, frame stream.Frame) []eventstream.Envelope {
 	event := session.CloneEvent(frame.Event)
 	if event == nil {
 		return nil
 	}
 	if event.Scope != nil && event.Scope.Participant.Kind == session.ParticipantKindSubagent {
-		taskID := firstNonEmpty(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID))
+		taskID := firstString(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID))
 		if taskID != "" && event.Scope.Participant.DelegationID == "" {
 			event.Scope.Participant.DelegationID = taskID
 		}
@@ -283,14 +283,12 @@ func streamFrameEmbeddedEvents(req StreamRequest, frame stream.Frame) []eventstr
 	}
 	parentTool := streamParentToolRelation(req)
 	event.Meta = streamFrameEventMeta(event.Meta)
-	base := EnvelopeBaseFromSessionEvent(req.SessionRef, event, SessionEventTransport{
-		HandleID: req.HandleID,
-		RunID:    req.RunID,
-		TurnID:   req.TurnID,
+	base := acpprojector.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: req.SessionID}, event, acpprojector.SessionEventTransport{
+		TurnID: req.TurnID,
 	})
-	out := ProjectSessionEventEnvelope(base, event)
+	out := acpprojector.ProjectSessionEventEnvelope(base, event)
 	out = taskStreamPrimaryEnvelope(out)
-	if taskID := firstNonEmpty(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID)); taskID != "" {
+	if taskID := firstString(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID)); taskID != "" {
 		for i := range out {
 			if out[i].Scope == eventstream.ScopeSubagent {
 				out[i].ScopeID = taskID
@@ -328,19 +326,19 @@ func taskStreamPrimaryEnvelope(events []eventstream.Envelope) []eventstream.Enve
 	return events[:1]
 }
 
-func streamParentToolRelation(req StreamRequest) *eventstream.ParentToolRelation {
-	toolCallID := firstNonEmpty(strings.TrimSpace(req.ParentCallID), strings.TrimSpace(req.CallID))
+func streamParentToolRelation(req taskFrameProjectionRequest) *eventstream.ParentToolRelation {
+	toolCallID := strings.TrimSpace(req.CallID)
 	if toolCallID == "" {
 		return nil
 	}
 	return &eventstream.ParentToolRelation{
 		ToolCallID: toolCallID,
-		ToolName:   firstNonEmpty(strings.TrimSpace(req.ParentToolName), strings.TrimSpace(req.ToolName)),
+		ToolName:   strings.TrimSpace(req.ToolName),
 	}
 }
 
-func streamFrameSessionEventIsParentToolEcho(req StreamRequest, event *session.Event) bool {
-	parentCallID := firstNonEmpty(strings.TrimSpace(req.ParentCallID), strings.TrimSpace(req.CallID))
+func streamFrameSessionEventIsParentToolEcho(req taskFrameProjectionRequest, event *session.Event) bool {
+	parentCallID := strings.TrimSpace(req.CallID)
 	if parentCallID == "" || event == nil {
 		return false
 	}
@@ -358,7 +356,7 @@ func streamFrameSessionEventIsParentToolEcho(req StreamRequest, event *session.E
 	if callID == "" || callID != parentCallID {
 		return false
 	}
-	parentTool := firstNonEmpty(strings.TrimSpace(req.ParentToolName), strings.TrimSpace(req.ToolName))
+	parentTool := strings.TrimSpace(req.ToolName)
 	return parentTool == "" || toolName == "" || parentTool == toolName
 }
 
@@ -380,10 +378,3 @@ const (
 	toolStatusInterrupted = "interrupted"
 	toolStatusCancelled   = "cancelled"
 )
-
-func stringValue(value any) string {
-	if text, ok := value.(string); ok {
-		return strings.TrimSpace(text)
-	}
-	return ""
-}

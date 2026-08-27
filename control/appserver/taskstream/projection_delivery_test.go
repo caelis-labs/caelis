@@ -1,22 +1,21 @@
-package projector
+package taskstream
 
 import (
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
-func TestProjectTaskStreamFrameSeparatesDelegatedSemanticsFromCommandTerminalOutput(t *testing.T) {
+func TestProjectTaskFrameSeparatesDelegatedSemanticsFromCommandTerminalOutput(t *testing.T) {
 	t.Parallel()
 
-	taskRequest := spawnStreamRequestForTest()
+	taskRequest := spawnProjectionRequestForTest()
 	taskRequest.CallID = "task-call-1"
 	taskRequest.ToolName = "Task"
 	taskRequest.DisplayTerminalID = "task-call-1"
-	commandRequest := StreamRequest{
-		SessionRef:        session.SessionRef{SessionID: "root-session"},
+	commandRequest := taskFrameProjectionRequest{
+		SessionID:         "root-session",
 		CallID:            "command-call-1",
 		ToolName:          "RunCommand",
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "command-task-1", TerminalID: "command-terminal-1"},
@@ -25,7 +24,7 @@ func TestProjectTaskStreamFrameSeparatesDelegatedSemanticsFromCommandTerminalOut
 	}
 	tests := []struct {
 		name  string
-		req   StreamRequest
+		req   taskFrameProjectionRequest
 		frame stream.Frame
 		want  []streamFrameEnvelopeExpectation
 	}{
@@ -44,18 +43,18 @@ func TestProjectTaskStreamFrameSeparatesDelegatedSemanticsFromCommandTerminalOut
 		},
 		{
 			name: "spawn text only",
-			req:  spawnStreamRequestForTest(),
+			req:  spawnProjectionRequestForTest(),
 			frame: stream.Frame{
-				Ref:     spawnStreamRequestForTest().Ref,
+				Ref:     spawnProjectionRequestForTest().Ref,
 				Text:    "child text only\n",
 				Running: true,
 			},
 		},
 		{
 			name: "spawn final result has no terminal replay",
-			req:  spawnStreamRequestForTest(),
+			req:  spawnProjectionRequestForTest(),
 			frame: stream.Frame{
-				Ref:    spawnStreamRequestForTest().Ref,
+				Ref:    spawnProjectionRequestForTest().Ref,
 				Text:   "final child result\n",
 				Closed: true,
 				State:  "completed",
@@ -93,9 +92,9 @@ func TestProjectTaskStreamFrameSeparatesDelegatedSemanticsFromCommandTerminalOut
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			events := ProjectTaskStreamFrame(tt.req, tt.frame)
+			events := projectTaskStreamFrame(tt.req, tt.frame)
 			if len(events) != len(tt.want) {
-				t.Fatalf("ProjectTaskStreamFrame() returned %d events, want %d: %#v", len(events), len(tt.want), events)
+				t.Fatalf("projectTaskStreamFrame() returned %d events, want %d: %#v", len(events), len(tt.want), events)
 			}
 			for i, want := range tt.want {
 				assertStreamFrameEnvelopeExpectation(t, events[i], want)

@@ -171,12 +171,12 @@ func canonicalTaskParentToolRelation(event *session.Event) *eventstream.ParentTo
 	if session.EventTypeOf(event) != session.EventTypeToolResult || !canonicalTaskResultFinal(event.Tool.Status) {
 		return nil
 	}
-	action := strings.ToLower(stringValue(event.Tool.Input["action"]))
+	action := strings.ToLower(display.MapString(event.Tool.Input, "action"))
 	if event.Tool.Name != tasktool.ToolName || (action != "read" && action != "wait") {
 		return nil
 	}
 	var expectedParent string
-	switch strings.ToLower(stringValue(event.Tool.Output["target_kind"])) {
+	switch strings.ToLower(display.MapString(event.Tool.Output, "target_kind")) {
 	case "subagent":
 		expectedParent = spawn.ToolName
 	case "command", "terminal":
@@ -184,8 +184,8 @@ func canonicalTaskParentToolRelation(event *session.Event) *eventstream.ParentTo
 	default:
 		return nil
 	}
-	parentCall := stringValue(event.Tool.Output["parent_call"])
-	parentName := stringValue(event.Tool.Output["parent_tool"])
+	parentCall := display.MapString(event.Tool.Output, "parent_call")
+	parentName := display.MapString(event.Tool.Output, "parent_tool")
 	if parentCall == "" || parentName != expectedParent {
 		return nil
 	}
