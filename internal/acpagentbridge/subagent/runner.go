@@ -871,7 +871,7 @@ func translateApprovalRequest(
 	agentID string,
 	req client.RequestPermissionRequest,
 ) (subagent.ApprovalRequest, error) {
-	_, approval, _, err := semantic.DecodePermissionRequest(req)
+	approval, err := semantic.DecodePermissionRequest(req)
 	if err != nil {
 		return subagent.ApprovalRequest{}, err
 	}

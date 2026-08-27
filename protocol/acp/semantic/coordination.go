@@ -10,9 +10,9 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
-// DecodePermissionRequest converts the ACP permission wire request into the
-// normalized SDK approval semantics plus its session identity and wire meta.
-func DecodePermissionRequest(wire schema.RequestPermissionRequest) (session.SessionRef, *session.ProtocolApproval, map[string]any, error) {
+// DecodePermissionRequest converts the ACP permission wire request into
+// normalized SDK approval semantics.
+func DecodePermissionRequest(wire schema.RequestPermissionRequest) (*session.ProtocolApproval, error) {
 	toolCall := permissionToolCallFromWire(wire.ToolCall)
 	meta := metautil.Merge(wire.ToolCall.Meta, wire.Meta)
 	toolCall.Name = canonicalPermissionToolName(meta, toolCall)
@@ -20,7 +20,7 @@ func DecodePermissionRequest(wire schema.RequestPermissionRequest) (session.Sess
 	for _, option := range wire.Options {
 		approval.Options = append(approval.Options, session.ProtocolApprovalOption{ID: strings.TrimSpace(option.OptionID), Name: strings.TrimSpace(option.Name), Kind: strings.TrimSpace(option.Kind)})
 	}
-	return session.SessionRef{SessionID: strings.TrimSpace(wire.SessionID)}, ptrApproval(*approval), session.CloneState(wire.Meta), nil
+	return approval, nil
 }
 
 // EncodePermissionRequest converts normalized SDK approval semantics into the
@@ -50,11 +50,6 @@ func EncodePermissionRequest(ref session.SessionRef, approval *session.ProtocolA
 		wire.Options = append(wire.Options, schema.PermissionOption{OptionID: option.ID, Name: option.Name, Kind: option.Kind})
 	}
 	return wire, nil
-}
-
-func ptrApproval(in session.ProtocolApproval) *session.ProtocolApproval {
-	out := session.CloneProtocolApproval(in)
-	return &out
 }
 
 func permissionToolCallFromWire(wire schema.ToolCallUpdate) session.ProtocolToolCall {

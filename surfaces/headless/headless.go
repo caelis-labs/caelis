@@ -224,7 +224,7 @@ func approvalPayloadFromPermission(req *schema.RequestPermissionRequest) *approv
 	if req == nil {
 		return nil
 	}
-	_, decoded, _, err := semantic.DecodePermissionRequest(*req)
+	decoded, err := semantic.DecodePermissionRequest(*req)
 	if err != nil || decoded == nil {
 		return nil
 	}

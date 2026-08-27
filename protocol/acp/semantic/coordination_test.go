@@ -38,6 +38,12 @@ func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncodePermissionRequest() error = %v", err)
 	}
+	if wire.SessionID != wantRef.SessionID {
+		t.Fatalf("wire session id = %q, want %q", wire.SessionID, wantRef.SessionID)
+	}
+	if !reflect.DeepEqual(wire.Meta, wantMeta) {
+		t.Fatalf("wire meta = %#v, want %#v", wire.Meta, wantMeta)
+	}
 	if got := metautil.String(wire.ToolCall.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != wantApproval.ToolCall.Name {
 		t.Fatalf("wire tool name = %q, want %q", got, wantApproval.ToolCall.Name)
 	}
@@ -49,18 +55,12 @@ func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
 	if err := json.Unmarshal(raw, &external); err != nil {
 		t.Fatal(err)
 	}
-	gotRef, gotApproval, gotMeta, err := semantic.DecodePermissionRequest(external)
+	gotApproval, err := semantic.DecodePermissionRequest(external)
 	if err != nil {
 		t.Fatalf("DecodePermissionRequest() error = %v", err)
 	}
-	if gotRef != wantRef {
-		t.Fatalf("session ref = %#v, want %#v", gotRef, wantRef)
-	}
 	if !reflect.DeepEqual(gotApproval, &wantApproval) {
 		t.Fatalf("approval = %#v, want %#v", gotApproval, &wantApproval)
-	}
-	if !reflect.DeepEqual(gotMeta, wantMeta) {
-		t.Fatalf("meta = %#v, want %#v", gotMeta, wantMeta)
 	}
 }
 
@@ -68,7 +68,7 @@ func TestPermissionDecodeFallsBackFromMissingToolName(t *testing.T) {
 	t.Parallel()
 
 	kind := schema.ToolKindExecute
-	_, approval, _, err := semantic.DecodePermissionRequest(schema.RequestPermissionRequest{
+	approval, err := semantic.DecodePermissionRequest(schema.RequestPermissionRequest{
 		SessionID: "session-1",
 		ToolCall: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,

@@ -1086,7 +1086,7 @@ func translateApprovalRequest(
 	mode string,
 	req client.RequestPermissionRequest,
 ) (controller.ApprovalRequest, error) {
-	_, approval, _, err := semantic.DecodePermissionRequest(req)
+	approval, err := semantic.DecodePermissionRequest(req)
 	if err != nil {
 		return controller.ApprovalRequest{}, err
 	}

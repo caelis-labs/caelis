@@ -507,61 +507,6 @@ func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.Prot
 	return withDisplayTerminalUpdate(out, id, name), nil
 }
 
-func toolCallUpdateFromProtocol(call session.ProtocolToolCall) (schema.ToolCallUpdate, error) {
-	id := strings.TrimSpace(call.ID)
-	if id == "" {
-		return schema.ToolCallUpdate{}, fmt.Errorf("protocol/acp/projector: approval or tool update missing tool call id")
-	}
-	update := schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
-		ToolCallID:    id,
-	}
-	if title := strings.TrimSpace(call.Title); title != "" {
-		update.Title = stringPtr(title)
-	} else if title := projectedToolTitle(call.Name, call.RawInput); title != "" {
-		update.Title = stringPtr(title)
-	}
-	if kind := firstNonEmpty(strings.TrimSpace(call.Kind), projectedToolKind(call.Name)); kind != "" {
-		update.Kind = stringPtr(kind)
-	}
-	if status := acpToolStatus(call.Status); status != "" {
-		update.Status = stringPtr(status)
-	}
-	if input := cloneAnyMap(call.RawInput); len(input) > 0 {
-		update.RawInput = input
-	}
-	if output := cloneAnyMap(call.RawOutput); len(output) > 0 {
-		update.RawOutput = output
-	}
-	displayTerminalID, _ := projectedDisplayTerminalID(call.ID, call.Name)
-	update.Content = projectToolContent(call.Content, displayTerminalID)
-	return withDisplayTerminalUpdate(update, call.ID, call.Name), nil
-}
-
-func projectToolContentForTool(content []session.ProtocolToolCallContent, toolCallID string, name string) []schema.ToolCallContent {
-	displayTerminalID, _ := projectedDisplayTerminalID(toolCallID, name)
-	return projectToolContent(content, displayTerminalID)
-}
-
-func projectToolLocations(locations []session.ProtocolToolCallLocation) []schema.ToolCallLocation {
-	if len(locations) == 0 {
-		return nil
-	}
-	out := make([]schema.ToolCallLocation, 0, len(locations))
-	for _, item := range locations {
-		var line *int
-		if item.Line != nil {
-			value := *item.Line
-			line = &value
-		}
-		out = append(out, schema.ToolCallLocation{
-			Path: strings.TrimSpace(item.Path),
-			Line: line,
-		})
-	}
-	return out
-}
-
 func projectEventToolLocations(locations []session.EventToolLocation) []schema.ToolCallLocation {
 	if len(locations) == 0 {
 		return nil
@@ -646,13 +591,6 @@ func projectToolContent(content []session.ProtocolToolCallContent, displayTermin
 	return out
 }
 
-func eventMeta(event *session.Event) map[string]any {
-	if event == nil {
-		return nil
-	}
-	return event.Meta
-}
-
 func acpToolStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "", schema.ToolStatusPending, schema.ToolStatusInProgress, schema.ToolStatusCompleted, schema.ToolStatusFailed:
@@ -664,10 +602,6 @@ func acpToolStatus(status string) string {
 	default:
 		return strings.TrimSpace(status)
 	}
-}
-
-func planUpdateFromProtocol(plan session.ProtocolPlan) schema.PlanUpdate {
-	return planUpdateFromEntries(plan.Entries)
 }
 
 func planUpdateForEvent(event *session.Event) (schema.PlanUpdate, bool) {
@@ -759,7 +693,7 @@ func reasoningForAssistantEvent(event *session.Event) string {
 			return reasoning
 		}
 	}
-	if reasoning := nestedString(event.Meta, "caelis", "runtime", "replay", "reasoning_text"); reasoning != "" {
+	if reasoning := metautil.String(event.Meta, "caelis", "runtime", "replay", "reasoning_text"); reasoning != "" {
 		return reasoning
 	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
@@ -821,23 +755,6 @@ func protocolUpdateMeta(event *session.Event) map[string]any {
 		return cloneAnyMap(update.Meta)
 	}
 	return nil
-}
-
-func mergeMeta(base map[string]any, extra map[string]any) map[string]any {
-	return metautil.Merge(base, extra)
-}
-
-func nestedString(values map[string]any, path ...string) string {
-	var current any = values
-	for _, key := range path {
-		m, ok := current.(map[string]any)
-		if !ok {
-			return ""
-		}
-		current = m[key]
-	}
-	text, _ := current.(string)
-	return strings.TrimSpace(text)
 }
 
 func firstNonEmpty(values ...string) string {

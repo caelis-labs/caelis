@@ -470,7 +470,7 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbac
 		if env.Permission == nil {
 			return nil
 		}
-		_, approval, _, err := semantic.DecodePermissionRequest(*env.Permission)
+		approval, err := semantic.DecodePermissionRequest(*env.Permission)
 		if err != nil {
 			return err
 		}
