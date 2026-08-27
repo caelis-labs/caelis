@@ -220,9 +220,9 @@ func TestRuntimeAgentConformanceReplayOrdering(t *testing.T) {
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
-	if _, err := agent.LoadSession(ctx, acp.LoadSessionRequest{
-		SessionID: activeSession.SessionID,
-		CWD:       activeSession.CWD,
+	if _, err := agent.LoadSession(ctx, acpsdk.LoadSessionRequest{
+		SessionId: acpsdk.SessionId(activeSession.SessionID),
+		Cwd:       activeSession.CWD,
 	}, rec); err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
@@ -236,12 +236,12 @@ func TestRuntimeAgentConformancePromptOrdering(t *testing.T) {
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
-	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	resp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: resp.SessionID,
+		SessionID: string(resp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"Reply with exactly: ok"}`)},
 	}, rec); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
@@ -260,12 +260,12 @@ func TestRuntimeAgentConformancePromptWithImageDoesNotEchoUserMessage(t *testing
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
-	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	resp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: resp.SessionID,
+		SessionID: string(resp.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"image","mimeType":"image/png","data":"aW1n","name":"icon.png"}`),
 			json.RawMessage(`{"type":"text","text":"这是什么app的图标"}`),
@@ -316,12 +316,12 @@ func TestRuntimeAgentConformanceEmitsToolCallBeforeToolUpdate(t *testing.T) {
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
-	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	resp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: resp.SessionID,
+		SessionID: string(resp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"call echo"}`)},
 	}, rec); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
@@ -365,12 +365,12 @@ func TestRuntimeAgentConformanceEmitsRunCommandToolCallBeforeTerminalUpdates(t *
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
-	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	resp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: resp.SessionID,
+		SessionID: string(resp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"run command"}`)},
 	}, rec); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
@@ -408,19 +408,19 @@ func TestRuntimeAgentConformanceStreamsDeltasWithoutFinalDuplicate(t *testing.T)
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
-	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	resp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: resp.SessionID,
+		SessionID: string(resp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"stream hello"}`)},
 	}, rec); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
 	for _, notification := range rec.Notifications() {
-		if notification.SessionID != resp.SessionID {
-			t.Fatalf("notification sessionId = %q, want %q for update %#v", notification.SessionID, resp.SessionID, notification.Update)
+		if notification.SessionID != string(resp.SessionId) {
+			t.Fatalf("notification sessionId = %q, want %q for update %#v", notification.SessionID, resp.SessionId, notification.Update)
 		}
 	}
 	if got, want := agentMessageTexts(rec.Notifications()), []string{"hel", "lo"}; !slices.Equal(got, want) {
@@ -433,12 +433,12 @@ func TestRuntimeAgentConformanceForwardsAdjacentStreamChunksVerbatim(t *testing.
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
-	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	resp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: resp.SessionID,
+		SessionID: string(resp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"stream duplicate"}`)},
 	}, rec); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
@@ -453,7 +453,7 @@ func TestRuntimeAgentConformanceForwardsAdjacentStreamChunksVerbatim(t *testing.
 
 func TestRuntimeAgentConformanceCancellation(t *testing.T) {
 	agent, _ := newTestRuntimeAgent(t, cancelModel{})
-	sessionResp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	sessionResp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
@@ -464,7 +464,7 @@ func TestRuntimeAgentConformanceCancellation(t *testing.T) {
 	errs := make(chan error, 1)
 	go func() {
 		resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
-			SessionID: sessionResp.SessionID,
+			SessionID: string(sessionResp.SessionId),
 			Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"hang until cancelled"}`)},
 		}, rec)
 		if err != nil {
@@ -474,7 +474,7 @@ func TestRuntimeAgentConformanceCancellation(t *testing.T) {
 		done <- resp
 	}()
 	time.Sleep(50 * time.Millisecond)
-	if err := agent.Cancel(context.Background(), acpsdk.CancelNotification{SessionId: acpsdk.SessionId(sessionResp.SessionID)}); err != nil {
+	if err := agent.Cancel(context.Background(), acpsdk.CancelNotification{SessionId: sessionResp.SessionId}); err != nil {
 		t.Fatalf("Cancel() error = %v", err)
 	}
 	select {

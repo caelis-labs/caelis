@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -232,15 +231,18 @@ func TestManagerSessionDefaultsHelperProcess(t *testing.T) {
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 			}
-			switch strings.TrimSpace(req.ConfigID) {
+			if req.ValueId == nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "expected string config value"}
+			}
+			switch strings.TrimSpace(string(req.ValueId.ConfigId)) {
 			case "model":
-				if fmt.Sprint(req.Value) != "opus" {
+				if req.ValueId.Value != "opus" {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected model"}
 				}
 				modelApplied = true
 				return client.SetSessionConfigOptionResponse{ConfigOptions: modelConfig("opus", "high")}, nil
 			case "effort":
-				if !modelApplied || fmt.Sprint(req.Value) != "max" {
+				if !modelApplied || req.ValueId.Value != "max" {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: "effort applied before model"}
 				}
 				effortApplied = true

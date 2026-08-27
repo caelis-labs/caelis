@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {
@@ -60,7 +59,7 @@ func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SessionModes() error = %v", err)
 	}
-	if got := state.CurrentModeID; got != "default" {
+	if got := string(state.CurrentModeId); got != "default" {
 		t.Fatalf("CurrentModeID = %q, want %q", got, "default")
 	}
 
@@ -75,7 +74,7 @@ func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SessionModes() after set error = %v", err)
 	}
-	if got := state.CurrentModeID; got != "plan" {
+	if got := string(state.CurrentModeId); got != "plan" {
 		t.Fatalf("CurrentModeID after set = %q, want %q", got, "plan")
 	}
 
@@ -86,19 +85,21 @@ func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {
 	if got, want := len(options), 1; got != want {
 		t.Fatalf("len(SessionConfigOptions) = %d, want %d", got, want)
 	}
-	if got := options[0].CurrentValue; got != "balanced" {
+	if got := string(options[0].Select.CurrentValue); got != "balanced" {
 		t.Fatalf("default config value = %#v, want balanced", got)
 	}
 
-	resp, err := providers.ConfigWriter.SetSessionConfigOption(context.Background(), acp.SetSessionConfigOptionRequest{
-		SessionID: session.SessionID,
-		ConfigID:  "effort",
-		Value:     "deep",
+	resp, err := providers.ConfigWriter.SetSessionConfigOption(context.Background(), acpsdk.SetSessionConfigOptionRequest{
+		ValueId: &acpsdk.SetSessionConfigOptionValueId{
+			SessionId: acpsdk.SessionId(session.SessionID),
+			ConfigId:  "effort",
+			Value:     "deep",
+		},
 	})
 	if err != nil {
 		t.Fatalf("SetSessionConfigOption() error = %v", err)
 	}
-	if got := resp.ConfigOptions[0].CurrentValue; got != "deep" {
+	if got := string(resp.ConfigOptions[0].Select.CurrentValue); got != "deep" {
 		t.Fatalf("updated config value = %#v, want deep", got)
 	}
 }

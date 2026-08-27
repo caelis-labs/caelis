@@ -53,13 +53,13 @@ func TestNewFromClientsRoutesStatusSlashThroughSharedPromptRouter(t *testing.T) 
 	if err != nil {
 		t.Fatalf("newTestAgentFromStack() error = %v", err)
 	}
-	session, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: workdir})
+	session, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: workdir})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingCallbacks{}
 	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: session.SessionID,
+		SessionID: string(session.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/status"}`),
 		},
@@ -151,13 +151,13 @@ func TestNewFromClientsRunCommandPublishesTerminalBytesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	active, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: workspace})
+	active, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: workspace})
 	if err != nil {
 		t.Fatal(err)
 	}
 	callbacks := &allowingRecordingCallbacks{}
 	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: active.SessionID,
+		SessionID: string(active.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"run command"}`)},
 	}, callbacks); err != nil {
 		t.Fatal(err)
@@ -246,13 +246,13 @@ func TestNewFromClientsStatusSlashUsesClientWorkspaceSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newTestAgentFromStack() error = %v", err)
 	}
-	session, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: clientWorkspace})
+	session, err := agent.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: clientWorkspace})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingCallbacks{}
 	resp, err := agent.Prompt(ctx, acp.PromptRequest{
-		SessionID: session.SessionID,
+		SessionID: string(session.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/status"}`),
 		},
@@ -314,20 +314,20 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ordinary, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: workspace})
+	ordinary, err := agent.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: workspace})
 	if err != nil {
 		t.Fatal(err)
 	}
 	meta := metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
 		metautil.RuntimeSessionKind:     metautil.RuntimeSessionKindSubagent,
-		metautil.RuntimeSessionParentID: ordinary.SessionID,
+		metautil.RuntimeSessionParentID: ordinary.SessionId,
 		metautil.RuntimeTaskID:          "task-1",
 	})
-	child, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: workspace, Meta: meta})
+	child, err := agent.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: workspace, Meta: sdkRawMeta(t, meta)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	childSession, err := stack.Sessions().Session(ctx, session.SessionRef{SessionID: child.SessionID})
+	childSession, err := stack.Sessions().Session(ctx, session.SessionRef{SessionID: string(child.SessionId)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +370,7 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 	}
 	callbacks := &recordingCallbacks{}
 	result, err := agent.Prompt(ctx, acp.PromptRequest{
-		SessionID: child.SessionID,
+		SessionID: string(child.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"reply once"}`)},
 	}, callbacks)
 	if err != nil {
@@ -383,13 +383,13 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Sessions) != 1 || string(listed.Sessions[0].SessionId) != ordinary.SessionID {
-		t.Fatalf("ListSessions() = %#v, want only ordinary Session %q", listed.Sessions, ordinary.SessionID)
+	if len(listed.Sessions) != 1 || listed.Sessions[0].SessionId != ordinary.SessionId {
+		t.Fatalf("ListSessions() = %#v, want only ordinary Session %q", listed.Sessions, ordinary.SessionId)
 	}
-	if _, err := agent.LoadSession(ctx, acp.LoadSessionRequest{SessionID: child.SessionID, CWD: workspace}, &recordingCallbacks{}); !errors.Is(err, session.ErrSessionNotFound) {
+	if _, err := agent.LoadSession(ctx, acpsdk.LoadSessionRequest{SessionId: child.SessionId, Cwd: workspace}, &recordingCallbacks{}); !errors.Is(err, session.ErrSessionNotFound) {
 		t.Fatalf("LoadSession(system-managed child) error = %v, want session not found", err)
 	}
-	if _, err := agent.ResumeSession(ctx, acp.ResumeSessionRequest{SessionID: child.SessionID, CWD: workspace}); !errors.Is(err, session.ErrSessionNotFound) {
+	if _, err := agent.ResumeSession(ctx, acpsdk.ResumeSessionRequest{SessionId: child.SessionId, Cwd: workspace}); !errors.Is(err, session.ErrSessionNotFound) {
 		t.Fatalf("ResumeSession(system-managed child) error = %v, want session not found", err)
 	}
 }
@@ -433,7 +433,7 @@ func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: workspace})
+	created, err := agent.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: workspace})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,10 +441,10 @@ func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Sessions) != 1 || string(listed.Sessions[0].SessionId) != created.SessionID {
+	if len(listed.Sessions) != 1 || listed.Sessions[0].SessionId != created.SessionId {
 		t.Fatalf("ListSessions() = %#v, want created Session", listed)
 	}
-	active, err := stack.Sessions().Session(ctx, session.SessionRef{SessionID: created.SessionID})
+	active, err := stack.Sessions().Session(ctx, session.SessionRef{SessionID: string(created.SessionId)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,7 +453,7 @@ func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 	}
 	callbacks := &recordingCallbacks{}
 	result, err := agent.Prompt(ctx, acp.PromptRequest{
-		SessionID: created.SessionID,
+		SessionID: string(created.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"reply once"}`)},
 	}, callbacks)
 	if err != nil {
@@ -463,13 +463,13 @@ func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 		t.Fatalf("Prompt() = %#v, message %q", result, callbacks.firstAgentMessage())
 	}
 	replayed := &recordingCallbacks{}
-	if _, err := agent.LoadSession(ctx, acp.LoadSessionRequest{SessionID: created.SessionID, CWD: workspace}, replayed); err != nil {
+	if _, err := agent.LoadSession(ctx, acpsdk.LoadSessionRequest{SessionId: created.SessionId, Cwd: workspace}, replayed); err != nil {
 		t.Fatal(err)
 	}
 	if replayed.firstAgentMessage() != "typed ACP ok" {
 		t.Fatalf("LoadSession replay = %q, want typed ACP output", replayed.firstAgentMessage())
 	}
-	if _, err := agent.CloseSession(ctx, acpsdk.CloseSessionRequest{SessionId: acpsdk.SessionId(created.SessionID)}); err != nil {
+	if _, err := agent.CloseSession(ctx, acpsdk.CloseSessionRequest{SessionId: created.SessionId}); err != nil {
 		t.Fatal(err)
 	}
 	bound, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: stack.UserID()})
@@ -477,7 +477,7 @@ func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = bound.Prompt(ctx, appserver.PromptRequest{
-		WriteBase: appserver.WriteBase{OperationID: "prompt-after-acp-close", SessionID: created.SessionID},
+		WriteBase: appserver.WriteBase{OperationID: "prompt-after-acp-close", SessionID: string(created.SessionId)},
 		Input:     "must be rejected",
 	})
 	if !errorcode.Is(err, errorcode.FailedPrecondition) {
@@ -519,7 +519,7 @@ func TestNewFromClientsSetConfigOptionUsesNewSessionCWDWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newTestAgentFromStack() error = %v", err)
 	}
-	sessionResp, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: clientWorkspace})
+	sessionResp, err := agent.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: clientWorkspace})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
@@ -534,40 +534,28 @@ func TestNewFromClientsSetConfigOptionUsesNewSessionCWDWorkspace(t *testing.T) {
 	if _, ok := sessionWire["models"]; ok {
 		t.Fatalf("NewSession() wire = %s, want standard model config option only", encodedSession)
 	}
-	if _, err := agent.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
-		SessionID: sessionResp.SessionID,
-		ConfigID:  "mode",
-		Value:     "manual",
-	}); err != nil {
+	if _, err := agent.SetSessionConfigOption(ctx, setSessionConfigValueRequest(sessionResp.SessionId, "mode", "manual")); err != nil {
 		t.Fatalf("SetSessionConfigOption(mode) error = %v", err)
 	}
-	if _, err := agent.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
-		SessionID: sessionResp.SessionID,
-		ConfigID:  "model",
-		Value:     requiredConfigOptionString(t, sessionResp.ConfigOptions, "model"),
-	}); err != nil {
+	if _, err := agent.SetSessionConfigOption(ctx, setSessionConfigValueRequest(
+		sessionResp.SessionId, "model", requiredConfigOptionString(t, sessionResp.ConfigOptions, "model"),
+	)); err != nil {
 		t.Fatalf("SetSessionConfigOption(model) error = %v", err)
 	}
 	if value, ok := configOptionString(sessionResp.ConfigOptions, "reasoning_effort"); ok {
-		if _, err := agent.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
-			SessionID: sessionResp.SessionID,
-			ConfigID:  "reasoning_effort",
-			Value:     value,
-		}); err != nil {
+		if _, err := agent.SetSessionConfigOption(ctx, setSessionConfigValueRequest(
+			sessionResp.SessionId, "reasoning_effort", value,
+		)); err != nil {
 			t.Fatalf("SetSessionConfigOption(reasoning_effort) error = %v", err)
 		}
 	}
-	if _, err := agent.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
-		SessionID: sessionResp.SessionID,
-		ConfigID:  "tone",
-		Value:     "loud",
-	}); err != nil {
+	if _, err := agent.SetSessionConfigOption(ctx, setSessionConfigValueRequest(sessionResp.SessionId, "tone", "loud")); err != nil {
 		t.Fatalf("SetSessionConfigOption(tone) error = %v", err)
 	}
 	state, err := stack.ControlStatus().SessionRuntimeState(ctx, session.SessionRef{
 		AppName:      stack.AppName(),
 		UserID:       stack.UserID(),
-		SessionID:    sessionResp.SessionID,
+		SessionID:    string(sessionResp.SessionId),
 		WorkspaceKey: clientWorkspace,
 	})
 	if err != nil {
@@ -576,7 +564,7 @@ func TestNewFromClientsSetConfigOptionUsesNewSessionCWDWorkspace(t *testing.T) {
 	if state.SessionMode != "auto-review" {
 		t.Fatalf("client workspace approval mode = %q, want unchanged auto-review", state.SessionMode)
 	}
-	stored, err := stack.Sessions().SnapshotState(ctx, session.SessionRef{SessionID: sessionResp.SessionID})
+	stored, err := stack.Sessions().SnapshotState(ctx, session.SessionRef{SessionID: string(sessionResp.SessionId)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -610,28 +598,24 @@ func TestNewFromClientsSetConfigOptionRoutesAdvertisedApprovalMode(t *testing.T)
 	if err != nil {
 		t.Fatalf("newTestAgentFromStack() error = %v", err)
 	}
-	created, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: workspace})
+	created, err := agent.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: workspace})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	if got := requiredConfigOptionString(t, created.ConfigOptions, "mode"); got != "auto-review" {
 		t.Fatalf("NewSession() mode = %q, want auto-review", got)
 	}
-	if _, err := agent.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
-		SessionID: created.SessionID,
-		ConfigID:  "mode",
-		Value:     "manual",
-	}); err != nil {
+	if _, err := agent.SetSessionConfigOption(ctx, setSessionConfigValueRequest(created.SessionId, "mode", "manual")); err != nil {
 		t.Fatalf("SetSessionConfigOption(mode) error = %v", err)
 	}
-	loaded, err := agent.LoadSession(ctx, acp.LoadSessionRequest{SessionID: created.SessionID, CWD: workspace}, &recordingCallbacks{})
+	loaded, err := agent.LoadSession(ctx, acpsdk.LoadSessionRequest{SessionId: created.SessionId, Cwd: workspace}, &recordingCallbacks{})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
 	if got := requiredConfigOptionString(t, loaded.ConfigOptions, "mode"); got != "manual" {
 		t.Fatalf("LoadSession() mode = %q, want manual", got)
 	}
-	resumed, err := agent.ResumeSession(ctx, acp.ResumeSessionRequest{SessionID: created.SessionID, CWD: workspace})
+	resumed, err := agent.ResumeSession(ctx, acpsdk.ResumeSessionRequest{SessionId: created.SessionId, Cwd: workspace})
 	if err != nil {
 		t.Fatalf("ResumeSession() error = %v", err)
 	}
@@ -639,7 +623,7 @@ func TestNewFromClientsSetConfigOptionRoutesAdvertisedApprovalMode(t *testing.T)
 		t.Fatalf("ResumeSession() mode = %q, want manual", got)
 	}
 	state, err := stack.ControlStatus().SessionRuntimeState(ctx, session.SessionRef{
-		AppName: stack.AppName(), UserID: stack.UserID(), SessionID: created.SessionID, WorkspaceKey: workspace,
+		AppName: stack.AppName(), UserID: stack.UserID(), SessionID: string(created.SessionId), WorkspaceKey: workspace,
 	})
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
@@ -647,7 +631,7 @@ func TestNewFromClientsSetConfigOptionRoutesAdvertisedApprovalMode(t *testing.T)
 	if state.SessionMode != "manual" {
 		t.Fatalf("approval mode = %q, want manual", state.SessionMode)
 	}
-	stored, err := stack.Sessions().SnapshotState(ctx, session.SessionRef{SessionID: created.SessionID})
+	stored, err := stack.Sessions().SnapshotState(ctx, session.SessionRef{SessionID: string(created.SessionId)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -656,7 +640,7 @@ func TestNewFromClientsSetConfigOptionRoutesAdvertisedApprovalMode(t *testing.T)
 	}
 }
 
-func requiredConfigOptionString(t *testing.T, options []acp.SessionConfigOption, id string) string {
+func requiredConfigOptionString(t *testing.T, options []acpsdk.SessionConfigOption, id string) string {
 	t.Helper()
 	value, ok := configOptionString(options, id)
 	if !ok {
@@ -665,15 +649,39 @@ func requiredConfigOptionString(t *testing.T, options []acp.SessionConfigOption,
 	return value
 }
 
-func configOptionString(options []acp.SessionConfigOption, id string) (string, bool) {
+func configOptionString(options []acpsdk.SessionConfigOption, id string) (string, bool) {
 	for _, option := range options {
-		if strings.TrimSpace(option.ID) != id {
+		if option.Select == nil || strings.TrimSpace(string(option.Select.Id)) != id {
 			continue
 		}
-		value, ok := option.CurrentValue.(string)
-		return strings.TrimSpace(value), ok && strings.TrimSpace(value) != ""
+		value := strings.TrimSpace(string(option.Select.CurrentValue))
+		return value, value != ""
 	}
 	return "", false
+}
+
+func setSessionConfigValueRequest(sessionID acpsdk.SessionId, configID string, value string) acpsdk.SetSessionConfigOptionRequest {
+	return acpsdk.SetSessionConfigOptionRequest{ValueId: &acpsdk.SetSessionConfigOptionValueId{
+		SessionId: sessionID,
+		ConfigId:  acpsdk.SessionConfigId(configID),
+		Value:     acpsdk.SessionConfigValueId(value),
+	}}
+}
+
+func sdkRawMeta(t *testing.T, meta map[string]any) map[string]json.RawMessage {
+	t.Helper()
+	if len(meta) == 0 {
+		return nil
+	}
+	result := make(map[string]json.RawMessage, len(meta))
+	for key, value := range meta {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatalf("marshal metadata %q: %v", key, err)
+		}
+		result[key] = raw
+	}
+	return result
 }
 
 func newACPAgentTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack, error) {

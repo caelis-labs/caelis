@@ -601,7 +601,8 @@ func TestDiscoveryHelperProcess(t *testing.T) {
 			}, nil
 		case client.MethodSessionSetConfig:
 			var request client.SetSessionConfigOptionRequest
-			if err := json.Unmarshal(msg.Params, &request); err != nil || request.SessionID != "discovery-session" || request.ConfigID != "model" || fmt.Sprint(request.Value) != "opus" {
+			if err := json.Unmarshal(msg.Params, &request); err != nil || request.ValueId == nil ||
+				request.ValueId.SessionId != "discovery-session" || request.ValueId.ConfigId != "model" || request.ValueId.Value != "opus" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/set_config_option"}
 			}
 			writeMarker("model-selected", "opus")

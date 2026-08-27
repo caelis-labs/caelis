@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
@@ -108,9 +109,9 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 	}
 
 	callbacks := &recordingPromptCallbacks{}
-	if _, err := agent.LoadSession(ctx, acp.LoadSessionRequest{
-		SessionID: active.SessionID,
-		CWD:       active.CWD,
+	if _, err := agent.LoadSession(ctx, acpsdk.LoadSessionRequest{
+		SessionId: acpsdk.SessionId(active.SessionID),
+		Cwd:       active.CWD,
 	}, callbacks); err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}

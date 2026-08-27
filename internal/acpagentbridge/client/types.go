@@ -75,9 +75,62 @@ type InitializeResponse struct {
 }
 type AuthenticateRequest = acpsdk.AuthenticateRequest
 type AuthenticateResponse = acpsdk.AuthenticateResponse
-type NewSessionRequest = schema.NewSessionRequest
-type LoadSessionRequest = schema.LoadSessionRequest
-type ResumeSessionRequest = schema.ResumeSessionRequest
+type NewSessionRequest = acpsdk.NewSessionRequest
+type LoadSessionRequest = acpsdk.LoadSessionRequest
+type ResumeSessionRequest = acpsdk.ResumeSessionRequest
+
+// SessionMode is the tolerant external-Agent mode descriptor.
+type SessionMode struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// SessionModeState retains the external Agent's optional initial mode state.
+type SessionModeState struct {
+	AvailableModes []SessionMode `json:"availableModes"`
+	CurrentModeID  string        `json:"currentModeId"`
+}
+
+// SessionConfigSelectOption is one external-Agent select choice.
+type SessionConfigSelectOption struct {
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// SessionConfigOption retains a tolerant external-Agent configuration option.
+// Standard options are validated through acp-go-sdk before update ingress is
+// adapted to this Host-private compatibility shape.
+type SessionConfigOption struct {
+	Type         string                      `json:"type"`
+	ID           string                      `json:"id"`
+	Name         string                      `json:"name"`
+	Description  string                      `json:"description,omitempty"`
+	Category     string                      `json:"category,omitempty"`
+	CurrentValue any                         `json:"currentValue"`
+	Options      []SessionConfigSelectOption `json:"options,omitempty"`
+}
+
+// UnmarshalJSON prefers the SDK's standard config-option union so grouped
+// select choices and boolean options are normalized correctly. Older Agents
+// that emit the retired flat shape remain readable through the fallback.
+func (o *SessionConfigOption) UnmarshalJSON(data []byte) error {
+	var standard acpsdk.SessionConfigOption
+	if err := json.Unmarshal(data, &standard); err == nil {
+		if normalized := sessionConfigOptionsFromSDK([]acpsdk.SessionConfigOption{standard}); len(normalized) == 1 {
+			*o = normalized[0]
+			return nil
+		}
+	}
+	type flatSessionConfigOption SessionConfigOption
+	var flat flatSessionConfigOption
+	if err := json.Unmarshal(data, &flat); err != nil {
+		return err
+	}
+	*o = SessionConfigOption(flat)
+	return nil
+}
 
 // NewSessionResponse retains the legacy models field only for external Agents
 // that do not expose the standard model session config option.
@@ -129,8 +182,13 @@ type SetSessionModelRequest struct {
 
 // SetSessionModelResponse is the empty legacy model mutation response.
 type SetSessionModelResponse struct{}
-type SetSessionConfigOptionRequest = schema.SetSessionConfigOptionRequest
-type SetSessionConfigOptionResponse = schema.SetSessionConfigOptionResponse
+type SetSessionConfigOptionRequest = acpsdk.SetSessionConfigOptionRequest
+
+// SetSessionConfigOptionResponse is the Host-private normalized view of the
+// SDK response used by external-Agent configuration policy.
+type SetSessionConfigOptionResponse struct {
+	ConfigOptions []SessionConfigOption `json:"configOptions"`
+}
 type PromptRequest = schema.PromptRequest
 type PromptResponse = schema.PromptResponse
 type SessionSteeringOutcome = schema.SessionSteeringOutcome
@@ -139,10 +197,6 @@ type SessionSteeringCapability = schema.SessionSteeringCapability
 type SessionSteeringOptions = schema.SessionSteeringOptions
 type SessionSteeringRequest = schema.SessionSteeringRequest
 type SessionSteeringResponse = schema.SessionSteeringResponse
-type SessionMode = schema.SessionMode
-type SessionModeState = schema.SessionModeState
-type SessionConfigSelectOption = schema.SessionConfigSelectOption
-type SessionConfigOption = schema.SessionConfigOption
 type CancelRequest = acpsdk.CancelNotification
 type ToolCallLocation = schema.ToolCallLocation
 type ToolCallContent = schema.ToolCallContent

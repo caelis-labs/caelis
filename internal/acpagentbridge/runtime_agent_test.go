@@ -69,14 +69,14 @@ func TestRuntimeAgentNewSessionIncludesInjectedModesAndConfig(t *testing.T) {
 		Modes:  testModeProvider{},
 		Config: testConfigProvider{},
 	})
-	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
-		CWD:        t.TempDir(),
-		MCPServers: nil,
+	resp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{
+		Cwd:        t.TempDir(),
+		McpServers: []acpsdk.McpServer{},
 	})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if resp.Modes == nil || resp.Modes.CurrentModeID != "default" {
+	if resp.Modes == nil || resp.Modes.CurrentModeId != "default" {
 		t.Fatalf("resp.Modes = %#v, want injected mode state", resp.Modes)
 	}
 	if got, want := len(resp.ConfigOptions), 1; got != want {
@@ -95,11 +95,11 @@ func TestRuntimeAgentNewSessionNormalizesManagedSubagentMetadata(t *testing.T) {
 		metautil.RuntimeSessionParentID: "parent-session",
 		metautil.RuntimeTaskID:          "task-1",
 	})
-	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir(), Meta: meta})
+	resp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir(), Meta: testSDKRawMeta(t, meta)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := sessions.Session(context.Background(), session.SessionRef{SessionID: resp.SessionID})
+	created, err := sessions.Session(context.Background(), session.SessionRef{SessionID: string(resp.SessionId)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,14 +112,14 @@ func TestRuntimeAgentNewSessionNormalizesManagedSubagentMetadata(t *testing.T) {
 		t.Fatalf("created Session metadata = %#v, want %#v", created.Metadata, want)
 	}
 
-	ordinary, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
-		CWD:  t.TempDir(),
-		Meta: map[string]any{"system_managed_agent": "guardian"},
+	ordinary, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{
+		Cwd:  t.TempDir(),
+		Meta: testSDKRawMeta(t, map[string]any{"system_managed_agent": "guardian"}),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ordinarySession, err := sessions.Session(context.Background(), session.SessionRef{SessionID: ordinary.SessionID})
+	ordinarySession, err := sessions.Session(context.Background(), session.SessionRef{SessionID: string(ordinary.SessionId)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,19 +133,19 @@ func TestRuntimeAgentManagedLoadAndResumeIgnoreMetaAndRequireTrustedOwnership(t 
 
 	sessions := inmemory.NewStore(inmemory.Config{})
 	agent, _ := newRuntimeAgentWithSessionsAndConfig(t, sessions, runtimeacp.Config{})
-	created, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
-		CWD: t.TempDir(),
-		Meta: metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
+	created, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{
+		Cwd: t.TempDir(),
+		Meta: testSDKRawMeta(t, metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
 			metautil.RuntimeSessionKind:     metautil.RuntimeSessionKindSubagent,
 			metautil.RuntimeSessionParentID: "parent-session",
 			metautil.RuntimeTaskID:          "task-1",
-		}),
+		})),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	loaded, err := sessions.Session(context.Background(), session.SessionRef{SessionID: created.SessionID})
+	loaded, err := sessions.Session(context.Background(), session.SessionRef{SessionID: string(created.SessionId)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,26 +154,26 @@ func TestRuntimeAgentManagedLoadAndResumeIgnoreMetaAndRequireTrustedOwnership(t 
 		metautil.RuntimeSessionParentID: "parent-session",
 		metautil.RuntimeTaskID:          "task-1",
 	})
-	if _, err := agent.LoadSession(context.Background(), acp.LoadSessionRequest{
-		SessionID: created.SessionID, CWD: loaded.CWD,
+	if _, err := agent.LoadSession(context.Background(), acpsdk.LoadSessionRequest{
+		SessionId: created.SessionId, Cwd: loaded.CWD,
 	}, &recordingPromptCallbacks{}); err != nil {
 		t.Fatalf("LoadSession(owned, no metadata) error = %v", err)
 	}
-	if _, err := agent.ResumeSession(context.Background(), acp.ResumeSessionRequest{
-		SessionID: created.SessionID, CWD: loaded.CWD,
+	if _, err := agent.ResumeSession(context.Background(), acpsdk.ResumeSessionRequest{
+		SessionId: created.SessionId, Cwd: loaded.CWD,
 	}); err != nil {
 		t.Fatalf("ResumeSession(owned, no metadata) error = %v", err)
 	}
 
 	for _, untrustedMeta := range []map[string]any{nil, claim} {
 		isolated, _ := newRuntimeAgentWithSessionsAndConfig(t, sessions, runtimeacp.Config{})
-		if _, err := isolated.LoadSession(context.Background(), acp.LoadSessionRequest{
-			SessionID: created.SessionID, CWD: loaded.CWD, Meta: untrustedMeta,
+		if _, err := isolated.LoadSession(context.Background(), acpsdk.LoadSessionRequest{
+			SessionId: created.SessionId, Cwd: loaded.CWD, Meta: testSDKRawMeta(t, untrustedMeta),
 		}, &recordingPromptCallbacks{}); !errors.Is(err, session.ErrSessionNotFound) {
 			t.Fatalf("LoadSession(unowned, metadata=%#v) error = %v, want Session not found", untrustedMeta, err)
 		}
-		if _, err := isolated.ResumeSession(context.Background(), acp.ResumeSessionRequest{
-			SessionID: created.SessionID, CWD: loaded.CWD, Meta: untrustedMeta,
+		if _, err := isolated.ResumeSession(context.Background(), acpsdk.ResumeSessionRequest{
+			SessionId: created.SessionId, Cwd: loaded.CWD, Meta: testSDKRawMeta(t, untrustedMeta),
 		}); !errors.Is(err, session.ErrSessionNotFound) {
 			t.Fatalf("ResumeSession(unowned, metadata=%#v) error = %v, want Session not found", untrustedMeta, err)
 		}
@@ -206,19 +206,19 @@ func TestRuntimeAgentNewSessionIncludesAssemblyModesAndConfig(t *testing.T) {
 		Modes:  providers.Modes,
 		Config: providers.Config,
 	})
-	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
-		CWD: t.TempDir(),
+	resp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{
+		Cwd: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if resp.Modes == nil || resp.Modes.CurrentModeID != "default" {
+	if resp.Modes == nil || resp.Modes.CurrentModeId != "default" {
 		t.Fatalf("resp.Modes = %#v, want assembly-backed mode state", resp.Modes)
 	}
 	if got, want := len(resp.ConfigOptions), 1; got != want {
 		t.Fatalf("len(resp.ConfigOptions) = %d, want %d", got, want)
 	}
-	if got := resp.ConfigOptions[0].CurrentValue; got != "balanced" {
+	if got := string(resp.ConfigOptions[0].Select.CurrentValue); got != "balanced" {
 		t.Fatalf("resp.ConfigOptions[0].CurrentValue = %#v, want balanced", got)
 	}
 }
@@ -273,9 +273,9 @@ func TestRuntimeAgentLoadSessionReplaysDurableEvents(t *testing.T) {
 	}
 
 	cb := &recordingPromptCallbacks{}
-	resp, err := agent.LoadSession(ctx, acp.LoadSessionRequest{
-		SessionID: activeSession.SessionID,
-		CWD:       activeSession.CWD,
+	resp, err := agent.LoadSession(ctx, acpsdk.LoadSessionRequest{
+		SessionId: acpsdk.SessionId(activeSession.SessionID),
+		Cwd:       activeSession.CWD,
 	}, cb)
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
@@ -343,11 +343,11 @@ func TestRuntimeAgentListResumeAndCloseSession(t *testing.T) {
 		t.Fatalf("ListSessions() = %#v, want listed session", list)
 	}
 
-	resumed, err := agent.ResumeSession(ctx, acp.ResumeSessionRequest{SessionID: activeSession.SessionID, CWD: activeSession.CWD})
+	resumed, err := agent.ResumeSession(ctx, acpsdk.ResumeSessionRequest{SessionId: acpsdk.SessionId(activeSession.SessionID), Cwd: activeSession.CWD})
 	if err != nil {
 		t.Fatalf("ResumeSession() error = %v", err)
 	}
-	if resumed.Modes == nil || resumed.Modes.CurrentModeID != "default" {
+	if resumed.Modes == nil || resumed.Modes.CurrentModeId != "default" {
 		t.Fatalf("ResumeSession().Modes = %#v, want default mode", resumed.Modes)
 	}
 	if got, want := len(resumed.ConfigOptions), 1; got != want {
@@ -436,15 +436,15 @@ func TestRuntimeAgentResumeSessionIgnoresCWDForIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	if _, err := agent.ResumeSession(ctx, acp.ResumeSessionRequest{
-		SessionID: "shared-session",
-		CWD:       "ws-a",
+	if _, err := agent.ResumeSession(ctx, acpsdk.ResumeSessionRequest{
+		SessionId: "shared-session",
+		Cwd:       "ws-a",
 	}); err != nil {
 		t.Fatalf("ResumeSession(ws-a) error = %v", err)
 	}
-	if _, err := agent.ResumeSession(ctx, acp.ResumeSessionRequest{
-		SessionID: "shared-session",
-		CWD:       "ws-b",
+	if _, err := agent.ResumeSession(ctx, acpsdk.ResumeSessionRequest{
+		SessionId: "shared-session",
+		Cwd:       "ws-b",
 	}); err != nil {
 		t.Fatalf("ResumeSession(ws-b) error = %v", err)
 	}
@@ -487,9 +487,9 @@ func TestRuntimeAgentUnscopedPromptUsesGlobalSessionIDAfterResumeWithDifferentCW
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
 	for _, workspaceKey := range []string{"ws-a", "ws-b", "ws-b"} {
-		if _, err := agent.ResumeSession(ctx, acp.ResumeSessionRequest{
-			SessionID: "shared-session",
-			CWD:       workspaceKey,
+		if _, err := agent.ResumeSession(ctx, acpsdk.ResumeSessionRequest{
+			SessionId: "shared-session",
+			Cwd:       workspaceKey,
 		}); err != nil {
 			t.Fatalf("ResumeSession(%s) error = %v", workspaceKey, err)
 		}
@@ -529,12 +529,12 @@ func TestRuntimeAgentPromptConvertsLocalTerminalTextToTerminalMetaForACPStdio(t 
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: string(activeSession.SessionId)}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
 	if !hasTerminalInfo(cb.notifications, "call-1", "call-1") {
@@ -561,12 +561,12 @@ func TestRuntimeAgentPromptContinuesAfterObservationGap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	active, err := bridge.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	active, err := bridge.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	callbacks := &recordingPromptCallbacks{}
-	response, err := bridge.Prompt(context.Background(), acp.PromptRequest{SessionID: active.SessionID}, callbacks)
+	response, err := bridge.Prompt(context.Background(), acp.PromptRequest{SessionID: string(active.SessionId)}, callbacks)
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
@@ -606,12 +606,12 @@ func TestRuntimeAgentPromptForwardsNarrativeChunksWithoutContentRewriting(t *tes
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: string(activeSession.SessionId)}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
 	got := agentMessageChunks(cb.notifications)
@@ -643,12 +643,12 @@ func TestRuntimeAgentPromptOmitsOwnedFinalReasoningMaterialization(t *testing.T)
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: string(activeSession.SessionId)}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
 	got := agentThoughtChunks(cb.notifications)
@@ -676,12 +676,12 @@ func TestRuntimeAgentPromptOmitsOwnedNarrativeFinalAcrossToolBoundary(t *testing
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: string(activeSession.SessionId)}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
 	if got, want := agentThoughtChunks(cb.notifications), []string{"thinking"}; strings.Join(got, "|") != strings.Join(want, "|") {
@@ -705,7 +705,7 @@ func TestRuntimeAgentOptionalMethodsUnsupportedByDefault(t *testing.T) {
 	if _, err := agent.SetSessionMode(context.Background(), acpsdk.SetSessionModeRequest{}); !errors.Is(err, runtimeacp.ErrCapabilityUnsupported) {
 		t.Fatalf("SetSessionMode() error = %v, want ErrCapabilityUnsupported", err)
 	}
-	if _, err := agent.SetSessionConfigOption(context.Background(), acp.SetSessionConfigOptionRequest{}); !errors.Is(err, runtimeacp.ErrCapabilityUnsupported) {
+	if _, err := agent.SetSessionConfigOption(context.Background(), acpsdk.SetSessionConfigOptionRequest{}); !errors.Is(err, runtimeacp.ErrCapabilityUnsupported) {
 		t.Fatalf("SetSessionConfigOption() error = %v, want ErrCapabilityUnsupported", err)
 	}
 }
@@ -728,13 +728,13 @@ func TestRuntimeAgentPromptAutoReviewUsesReviewerInsteadOfClientPermission(t *te
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	sessionResp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	sessionResp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &permissionCountingCallbacks{}
 	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: sessionResp.SessionID,
+		SessionID: string(sessionResp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"clean workspace"}`)},
 	}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
@@ -787,13 +787,13 @@ func TestRuntimeAgentPromptAutoReviewNormalizesTextAfterSelectedOption(t *testin
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	sessionResp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	sessionResp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &permissionCountingCallbacks{}
 	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: sessionResp.SessionID,
+		SessionID: string(sessionResp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"clean workspace"}`)},
 	}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
@@ -826,13 +826,13 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	sessionResp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	sessionResp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &permissionCountingCallbacks{}
 	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: sessionResp.SessionID,
+		SessionID: string(sessionResp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"clean workspace"}`)},
 	}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
@@ -840,7 +840,7 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 	if cb.permissions != 1 {
 		t.Fatalf("client permission requests = %d, want 1 under manual mode", cb.permissions)
 	}
-	if cb.last.SessionID != sessionResp.SessionID || cb.last.ToolCall.ToolCallID != "call-1" {
+	if cb.last.SessionID != string(sessionResp.SessionId) || cb.last.ToolCall.ToolCallID != "call-1" {
 		t.Fatalf("client permission request = %#v, want normalized session and call identity", cb.last)
 	}
 	if got := metautil.String(cb.last.ToolCall.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RunCommand" {
@@ -877,16 +877,16 @@ func TestRuntimeAgentPromptUsesDedicatedApprovalModes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	sessionResp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	sessionResp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if sessionResp.Modes == nil || sessionResp.Modes.CurrentModeID != "plan" {
+	if sessionResp.Modes == nil || sessionResp.Modes.CurrentModeId != "plan" {
 		t.Fatalf("NewSession().Modes = %#v, want client-visible plan mode", sessionResp.Modes)
 	}
 	cb := &permissionCountingCallbacks{}
 	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: sessionResp.SessionID,
+		SessionID: string(sessionResp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"clean workspace"}`)},
 	}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
@@ -966,10 +966,10 @@ func (m runtimeAgentTestModel) Generate(context.Context, *model.Request) iter.Se
 
 type testModeProvider struct{}
 
-func (testModeProvider) SessionModes(context.Context, session.Session) (*acp.SessionModeState, error) {
-	return &acp.SessionModeState{
-		AvailableModes: []acp.SessionMode{{ID: "default", Name: "Default"}},
-		CurrentModeID:  "default",
+func (testModeProvider) SessionModes(context.Context, session.Session) (*acpsdk.SessionModeState, error) {
+	return &acpsdk.SessionModeState{
+		AvailableModes: []acpsdk.SessionMode{{Id: "default", Name: "Default"}},
+		CurrentModeId:  "default",
 	}, nil
 }
 
@@ -981,11 +981,11 @@ type recordingModeProvider struct {
 	sessions []session.Session
 }
 
-func (p *recordingModeProvider) SessionModes(_ context.Context, activeSession session.Session) (*acp.SessionModeState, error) {
+func (p *recordingModeProvider) SessionModes(_ context.Context, activeSession session.Session) (*acpsdk.SessionModeState, error) {
 	p.sessions = append(p.sessions, session.CloneSession(activeSession))
-	return &acp.SessionModeState{
-		AvailableModes: []acp.SessionMode{{ID: "default", Name: "Default"}},
-		CurrentModeID:  "default",
+	return &acpsdk.SessionModeState{
+		AvailableModes: []acpsdk.SessionMode{{Id: "default", Name: "Default"}},
+		CurrentModeId:  "default",
 	}, nil
 }
 
@@ -997,17 +997,17 @@ type staticApprovalModeProvider struct {
 	current string
 }
 
-func (p staticApprovalModeProvider) SessionModes(context.Context, session.Session) (*acp.SessionModeState, error) {
+func (p staticApprovalModeProvider) SessionModes(context.Context, session.Session) (*acpsdk.SessionModeState, error) {
 	current := strings.TrimSpace(p.current)
 	if current == "" {
 		current = "auto-review"
 	}
-	return &acp.SessionModeState{
-		AvailableModes: []acp.SessionMode{
-			{ID: "auto-review", Name: "Auto Review"},
-			{ID: "manual", Name: "Manual"},
+	return &acpsdk.SessionModeState{
+		AvailableModes: []acpsdk.SessionMode{
+			{Id: "auto-review", Name: "Auto Review"},
+			{Id: "manual", Name: "Manual"},
 		},
-		CurrentModeID: current,
+		CurrentModeId: acpsdk.SessionModeId(current),
 	}, nil
 }
 
@@ -1017,24 +1017,41 @@ func (p staticApprovalModeProvider) SetSessionMode(context.Context, acpsdk.SetSe
 
 type testConfigProvider struct{}
 
-func (testConfigProvider) SessionConfigOptions(context.Context, session.Session) ([]acp.SessionConfigOption, error) {
-	return []acp.SessionConfigOption{{
+func (testConfigProvider) SessionConfigOptions(context.Context, session.Session) ([]acpsdk.SessionConfigOption, error) {
+	options := acpsdk.SessionConfigSelectOptionsUngrouped{{
+		Value: "default",
+		Name:  "Default",
+	}}
+	return []acpsdk.SessionConfigOption{{Select: &acpsdk.SessionConfigOptionSelect{
 		Type:         "select",
-		ID:           "mode",
+		Id:           "mode",
 		Name:         "Mode",
 		CurrentValue: "default",
-		Options: []acp.SessionConfigSelectOption{{
-			Value: "default",
-			Name:  "Default",
-		}},
-	}}, nil
+		Options:      acpsdk.SessionConfigSelectOptions{Ungrouped: &options},
+	}}}, nil
 }
 
-func (testConfigProvider) SetSessionConfigOption(context.Context, acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	return acp.SetSessionConfigOptionResponse{}, nil
+func (testConfigProvider) SetSessionConfigOption(context.Context, acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {
+	return acpsdk.SetSessionConfigOptionResponse{}, nil
 }
 
 type availableCommandProvider []acpsdk.AvailableCommand
+
+func testSDKRawMeta(t *testing.T, meta map[string]any) map[string]json.RawMessage {
+	t.Helper()
+	if len(meta) == 0 {
+		return nil
+	}
+	result := make(map[string]json.RawMessage, len(meta))
+	for key, value := range meta {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatalf("marshal metadata %q: %v", key, err)
+		}
+		result[key] = raw
+	}
+	return result
+}
 
 func (p availableCommandProvider) AvailableCommands(context.Context, string) ([]acpsdk.AvailableCommand, error) {
 	return append([]acpsdk.AvailableCommand(nil), p...), nil

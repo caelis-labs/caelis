@@ -57,12 +57,12 @@ func TestServeStdioSendsAvailableCommandsAfterNewSession(t *testing.T) {
 	}
 	defer conn.Close()
 
-	resp, err := acpsdk.SendRequest[protocolacp.NewSessionResponse](conn, ctx, acpsdk.AgentMethodSessionNew, protocolacp.NewSessionRequest{CWD: t.TempDir()})
+	resp, err := acpsdk.SendRequest[acpsdk.NewSessionResponse](conn, ctx, acpsdk.AgentMethodSessionNew, acpsdk.NewSessionRequest{Cwd: t.TempDir(), McpServers: []acpsdk.McpServer{}})
 	if err != nil {
 		t.Fatalf("session/new call error = %v", err)
 	}
-	if resp.SessionID != "session-1" {
-		t.Fatalf("SessionID = %q, want session-1", resp.SessionID)
+	if resp.SessionId != "session-1" {
+		t.Fatalf("SessionID = %q, want session-1", resp.SessionId)
 	}
 	select {
 	case <-updates:
@@ -497,7 +497,7 @@ func TestServeStdioHandlesStableSessionLifecycleMethods(t *testing.T) {
 		t.Fatalf("session/list cwd = %q, want /tmp/project", agent.listCWD)
 	}
 
-	if _, err := acpsdk.SendRequest[protocolacp.ResumeSessionResponse](conn, ctx, acpsdk.AgentMethodSessionResume, protocolacp.ResumeSessionRequest{SessionID: "session-1", CWD: "/tmp/project"}); err != nil {
+	if _, err := acpsdk.SendRequest[acpsdk.ResumeSessionResponse](conn, ctx, acpsdk.AgentMethodSessionResume, acpsdk.ResumeSessionRequest{SessionId: "session-1", Cwd: "/tmp/project"}); err != nil {
 		t.Fatalf("session/resume call error = %v", err)
 	}
 	if agent.resumeSessionID != "session-1" {
@@ -539,8 +539,8 @@ func (noAuthAgent) Initialize(context.Context, acpsdk.InitializeRequest) (acpsdk
 	return acpsdk.InitializeResponse{}, nil
 }
 
-func (noAuthAgent) NewSession(context.Context, protocolacp.NewSessionRequest) (protocolacp.NewSessionResponse, error) {
-	return protocolacp.NewSessionResponse{}, nil
+func (noAuthAgent) NewSession(context.Context, acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
+	return acpsdk.NewSessionResponse{}, nil
 }
 
 func (noAuthAgent) Prompt(context.Context, protocolacp.PromptRequest, PromptCallbacks) (protocolacp.PromptResponse, error) {
@@ -559,8 +559,8 @@ func (commandAgent) Authenticate(context.Context, acpsdk.AuthenticateRequest) (a
 	return acpsdk.AuthenticateResponse{}, nil
 }
 
-func (commandAgent) NewSession(context.Context, protocolacp.NewSessionRequest) (protocolacp.NewSessionResponse, error) {
-	return protocolacp.NewSessionResponse{SessionID: "session-1"}, nil
+func (commandAgent) NewSession(context.Context, acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
+	return acpsdk.NewSessionResponse{SessionId: "session-1"}, nil
 }
 
 func (commandAgent) Prompt(context.Context, protocolacp.PromptRequest, PromptCallbacks) (protocolacp.PromptResponse, error) {
@@ -671,9 +671,9 @@ func (a *stableLifecycleAgent) ListSessions(_ context.Context, req acpsdk.ListSe
 	}, nil
 }
 
-func (a *stableLifecycleAgent) ResumeSession(_ context.Context, req protocolacp.ResumeSessionRequest) (protocolacp.ResumeSessionResponse, error) {
-	a.resumeSessionID = req.SessionID
-	return protocolacp.ResumeSessionResponse{}, nil
+func (a *stableLifecycleAgent) ResumeSession(_ context.Context, req acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
+	a.resumeSessionID = string(req.SessionId)
+	return acpsdk.ResumeSessionResponse{}, nil
 }
 
 func (a *stableLifecycleAgent) CloseSession(_ context.Context, req acpsdk.CloseSessionRequest) (acpsdk.CloseSessionResponse, error) {

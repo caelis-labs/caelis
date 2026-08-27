@@ -68,8 +68,6 @@ func DecodeUpdateJSON(raw json.RawMessage) (Update, error) {
 		target = &PlanUpdate{}
 	case UpdateUsage:
 		target = &UsageUpdate{}
-	case UpdateConfigOption:
-		target = &ConfigOptionUpdate{}
 	default:
 		return RawUpdate{
 			SessionUpdate: strings.TrimSpace(probe.SessionUpdate),
@@ -89,8 +87,6 @@ func DecodeUpdateJSON(raw json.RawMessage) (Update, error) {
 	case *PlanUpdate:
 		return *typed, nil
 	case *UsageUpdate:
-		return *typed, nil
-	case *ConfigOptionUpdate:
 		return *typed, nil
 	default:
 		panic("unreachable ACP update target")
@@ -208,15 +204,6 @@ type UsageUpdate struct {
 }
 
 func (u UsageUpdate) SessionUpdateType() string { return u.SessionUpdate }
-
-// ConfigOptionUpdate is retained until the legacy flat configuration-option
-// model is translated to the acp-go-sdk union at its Host-private owner.
-type ConfigOptionUpdate struct {
-	SessionUpdate string                `json:"sessionUpdate"`
-	ConfigOptions []SessionConfigOption `json:"configOptions"`
-}
-
-func (u ConfigOptionUpdate) SessionUpdateType() string { return u.SessionUpdate }
 
 type PermissionOption struct {
 	OptionID string `json:"optionId"`

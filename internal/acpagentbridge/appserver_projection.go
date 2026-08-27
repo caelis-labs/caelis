@@ -1,17 +1,23 @@
 package acpagentbridge
 
 import (
+	"fmt"
+	"strings"
+
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
-func acpPresentationSnapshot(snapshot appserver.PresentationSnapshot) (*acp.SessionModeState, []acp.SessionConfigOption, []acpsdk.AvailableCommand) {
-	var modes *acp.SessionModeState
+func acpPresentationSnapshot(snapshot appserver.PresentationSnapshot) (*acpsdk.SessionModeState, []acpsdk.SessionConfigOption, []acpsdk.AvailableCommand) {
+	var modes *acpsdk.SessionModeState
 	if snapshot.Modes != nil && snapshot.Modes.Target != appserver.PresentationModeTargetApproval {
-		modes = &acp.SessionModeState{CurrentModeID: snapshot.Modes.CurrentModeID}
+		modes = &acpsdk.SessionModeState{CurrentModeId: acpsdk.SessionModeId(snapshot.Modes.CurrentModeID)}
 		for _, mode := range snapshot.Modes.AvailableModes {
-			modes.AvailableModes = append(modes.AvailableModes, acp.SessionMode{ID: mode.ID, Name: mode.Name, Description: mode.Description})
+			mapped := acpsdk.SessionMode{Id: acpsdk.SessionModeId(mode.ID), Name: mode.Name}
+			if description := strings.TrimSpace(mode.Description); description != "" {
+				mapped.Description = &description
+			}
+			modes.AvailableModes = append(modes.AvailableModes, mapped)
 		}
 	}
 	configs := acpPresentationConfigOptions(snapshot.ConfigOptions)
@@ -26,17 +32,57 @@ func acpPresentationSnapshot(snapshot appserver.PresentationSnapshot) (*acp.Sess
 	return modes, configs, commands
 }
 
-func acpPresentationConfigOptions(options []appserver.PresentationConfigOption) []acp.SessionConfigOption {
-	result := make([]acp.SessionConfigOption, 0, len(options))
+func acpPresentationConfigOptions(options []appserver.PresentationConfigOption) []acpsdk.SessionConfigOption {
+	result := make([]acpsdk.SessionConfigOption, 0, len(options))
 	for _, option := range options {
-		mapped := acp.SessionConfigOption{
-			Type: option.Type, ID: option.ID, Name: option.Name, Description: option.Description,
-			Category: option.Category, CurrentValue: option.CurrentValue,
+		switch strings.TrimSpace(option.Type) {
+		case "select":
+			currentValue, ok := option.CurrentValue.(string)
+			if !ok {
+				continue
+			}
+			selectOption := acpsdk.SessionConfigOptionSelect{
+				Type:         "select",
+				Id:           acpsdk.SessionConfigId(option.ID),
+				Name:         option.Name,
+				CurrentValue: acpsdk.SessionConfigValueId(currentValue),
+			}
+			applyACPConfigOptionDisplay(&selectOption.Description, &selectOption.Category, option)
+			choices := make(acpsdk.SessionConfigSelectOptionsUngrouped, 0, len(option.Options))
+			for _, choice := range option.Options {
+				mapped := acpsdk.SessionConfigSelectOption{
+					Value: acpsdk.SessionConfigValueId(choice.Value),
+					Name:  choice.Name,
+				}
+				if description := strings.TrimSpace(choice.Description); description != "" {
+					mapped.Description = &description
+				}
+				choices = append(choices, mapped)
+			}
+			selectOption.Options = acpsdk.SessionConfigSelectOptions{Ungrouped: &choices}
+			result = append(result, acpsdk.SessionConfigOption{Select: &selectOption})
 		}
-		for _, choice := range option.Options {
-			mapped.Options = append(mapped.Options, acp.SessionConfigSelectOption{Value: choice.Value, Name: choice.Name, Description: choice.Description})
-		}
-		result = append(result, mapped)
 	}
 	return result
+}
+
+func applyACPConfigOptionDisplay(description **string, category **acpsdk.SessionConfigOptionCategory, option appserver.PresentationConfigOption) {
+	if value := strings.TrimSpace(option.Description); value != "" {
+		*description = &value
+	}
+	if value := strings.TrimSpace(option.Category); value != "" {
+		typed := acpsdk.SessionConfigOptionCategory(value)
+		*category = &typed
+	}
+}
+
+func acpSessionConfigMutation(req acpsdk.SetSessionConfigOptionRequest) (sessionID string, configID string, value any, err error) {
+	switch {
+	case req.ValueId != nil:
+		return strings.TrimSpace(string(req.ValueId.SessionId)), strings.TrimSpace(string(req.ValueId.ConfigId)), string(req.ValueId.Value), nil
+	case req.Boolean != nil:
+		return strings.TrimSpace(string(req.Boolean.SessionId)), strings.TrimSpace(string(req.Boolean.ConfigId)), req.Boolean.Value, nil
+	default:
+		return "", "", nil, fmt.Errorf("internal/acpagentbridge: session config request has no value")
+	}
 }

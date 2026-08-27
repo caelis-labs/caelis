@@ -52,7 +52,7 @@ func NewFromClients(cfg ClientsConfig) (*ProductAgent, error) {
 // routing while the wire connection itself remains owned by acp-go-sdk.
 type Agent interface {
 	Initialize(context.Context, acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error)
-	NewSession(context.Context, protocolacp.NewSessionRequest) (protocolacp.NewSessionResponse, error)
+	NewSession(context.Context, acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error)
 	Prompt(context.Context, protocolacp.PromptRequest, PromptCallbacks) (protocolacp.PromptResponse, error)
 	Cancel(context.Context, acpsdk.CancelNotification) error
 }
@@ -88,7 +88,7 @@ func (a *ProductAgent) Initialize(ctx context.Context, req acpsdk.InitializeRequ
 	return a.inner.Initialize(ctx, req)
 }
 
-func (a *ProductAgent) NewSession(ctx context.Context, req protocolacp.NewSessionRequest) (protocolacp.NewSessionResponse, error) {
+func (a *ProductAgent) NewSession(ctx context.Context, req acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
 	return a.inner.NewSession(ctx, req)
 }
 
@@ -104,11 +104,11 @@ func (a *ProductAgent) ListSessions(ctx context.Context, req acpsdk.ListSessions
 	return a.inner.ListSessions(ctx, req)
 }
 
-func (a *ProductAgent) LoadSession(ctx context.Context, req protocolacp.LoadSessionRequest, callbacks PromptCallbacks) (protocolacp.LoadSessionResponse, error) {
+func (a *ProductAgent) LoadSession(ctx context.Context, req acpsdk.LoadSessionRequest, callbacks PromptCallbacks) (acpsdk.LoadSessionResponse, error) {
 	return a.inner.LoadSession(ctx, req, callbacks)
 }
 
-func (a *ProductAgent) ResumeSession(ctx context.Context, req protocolacp.ResumeSessionRequest) (protocolacp.ResumeSessionResponse, error) {
+func (a *ProductAgent) ResumeSession(ctx context.Context, req acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
 	return a.inner.ResumeSession(ctx, req)
 }
 
@@ -120,7 +120,7 @@ func (a *ProductAgent) SetSessionMode(ctx context.Context, req acpsdk.SetSession
 	return a.inner.SetSessionMode(ctx, req)
 }
 
-func (a *ProductAgent) SetSessionConfigOption(ctx context.Context, req protocolacp.SetSessionConfigOptionRequest) (protocolacp.SetSessionConfigOptionResponse, error) {
+func (a *ProductAgent) SetSessionConfigOption(ctx context.Context, req acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {
 	return a.inner.SetSessionConfigOption(ctx, req)
 }
 
@@ -141,11 +141,11 @@ type sessionLister interface {
 }
 
 type sessionLoader interface {
-	LoadSession(context.Context, protocolacp.LoadSessionRequest, PromptCallbacks) (protocolacp.LoadSessionResponse, error)
+	LoadSession(context.Context, acpsdk.LoadSessionRequest, PromptCallbacks) (acpsdk.LoadSessionResponse, error)
 }
 
 type sessionResumer interface {
-	ResumeSession(context.Context, protocolacp.ResumeSessionRequest) (protocolacp.ResumeSessionResponse, error)
+	ResumeSession(context.Context, acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error)
 }
 
 type sessionCloser interface {
@@ -157,7 +157,7 @@ type sessionModeSetter interface {
 }
 
 type sessionConfigSetter interface {
-	SetSessionConfigOption(context.Context, protocolacp.SetSessionConfigOptionRequest) (protocolacp.SetSessionConfigOptionResponse, error)
+	SetSessionConfigOption(context.Context, acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error)
 }
 
 type commandProvider interface {

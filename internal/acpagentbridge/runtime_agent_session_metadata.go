@@ -1,6 +1,7 @@
 package acpagentbridge
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -11,6 +12,24 @@ import (
 const (
 	systemManagedSubagentSessionKind = "subagent"
 )
+
+func acpRawMeta(meta map[string]json.RawMessage) map[string]any {
+	if len(meta) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(meta))
+	for key, raw := range meta {
+		var value any
+		if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
 
 // normalizedACPSessionMetadata promotes only the recognized built-in
 // subagent classification emitted by the Host-owned ACP bridge into product

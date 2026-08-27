@@ -150,7 +150,7 @@ func (a *surfaceRuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest,
 	return a.RuntimeAgent.Prompt(ctx, req, callbacks)
 }
 
-func (a *surfaceRuntimeAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest, callbacks surfaceacp.PromptCallbacks) (acp.LoadSessionResponse, error) {
+func (a *surfaceRuntimeAgent) LoadSession(ctx context.Context, req acpsdk.LoadSessionRequest, callbacks surfaceacp.PromptCallbacks) (acpsdk.LoadSessionResponse, error) {
 	return a.RuntimeAgent.LoadSession(ctx, req, callbacks)
 }
 
@@ -405,10 +405,11 @@ func selectedAssemblyMetadata(
 		if err != nil {
 			return nil, err
 		}
-		if state != nil && strings.TrimSpace(state.CurrentModeID) != "" {
-			mode, ok := assemblyapi.LookupMode(resolved, state.CurrentModeID)
+		if state != nil && strings.TrimSpace(string(state.CurrentModeId)) != "" {
+			modeID := strings.TrimSpace(string(state.CurrentModeId))
+			mode, ok := assemblyapi.LookupMode(resolved, modeID)
 			if !ok {
-				return nil, fmt.Errorf("acpe2eagent: selected mode %q is not declared", state.CurrentModeID)
+				return nil, fmt.Errorf("acpe2eagent: selected mode %q is not declared", modeID)
 			}
 			assemblyapi.ApplyRuntimeOverrides(metadata, mode.Runtime)
 		}
@@ -419,13 +420,17 @@ func selectedAssemblyMetadata(
 			return nil, err
 		}
 		for _, current := range options {
-			value, ok := current.CurrentValue.(string)
-			if !ok || strings.TrimSpace(value) == "" {
-				return nil, fmt.Errorf("acpe2eagent: selected config %q has a non-string value", current.ID)
+			if current.Select == nil {
+				return nil, fmt.Errorf("acpe2eagent: selected config is not a select option")
 			}
-			option, ok := assemblyapi.LookupConfigSelectOption(resolved, current.ID, value)
+			configID := strings.TrimSpace(string(current.Select.Id))
+			value := strings.TrimSpace(string(current.Select.CurrentValue))
+			if value == "" {
+				return nil, fmt.Errorf("acpe2eagent: selected config %q has an empty value", configID)
+			}
+			option, ok := assemblyapi.LookupConfigSelectOption(resolved, configID, value)
 			if !ok {
-				return nil, fmt.Errorf("acpe2eagent: selected config %q value %q is not declared", current.ID, value)
+				return nil, fmt.Errorf("acpe2eagent: selected config %q value %q is not declared", configID, value)
 			}
 			assemblyapi.ApplyRuntimeOverrides(metadata, option.Runtime)
 		}

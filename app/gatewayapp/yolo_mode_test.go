@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
@@ -143,11 +142,11 @@ type recordingModeProvider struct {
 	setCalls int
 }
 
-func (p *recordingModeProvider) SessionModes(context.Context, session.Session) (*acp.SessionModeState, error) {
-	return &acp.SessionModeState{
-		CurrentModeID: "manual",
-		AvailableModes: []acp.SessionMode{
-			{ID: "manual", Name: "Manual"},
+func (p *recordingModeProvider) SessionModes(context.Context, session.Session) (*acpsdk.SessionModeState, error) {
+	return &acpsdk.SessionModeState{
+		CurrentModeId: "manual",
+		AvailableModes: []acpsdk.SessionMode{
+			{Id: "manual", Name: "Manual"},
 		},
 	}, nil
 }

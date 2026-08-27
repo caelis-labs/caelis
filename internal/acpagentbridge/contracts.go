@@ -23,7 +23,7 @@ type PromptCallbacks interface {
 // SessionLoader supplies the lower-level direct-runtime bridge with durable
 // ACP replay. Product AppServer assembly uses its typed Session client instead.
 type SessionLoader interface {
-	LoadSession(context.Context, schema.LoadSessionRequest, PromptCallbacks) (schema.LoadSessionResponse, error)
+	LoadSession(context.Context, acpsdk.LoadSessionRequest, PromptCallbacks) (acpsdk.LoadSessionResponse, error)
 }
 
 // CommandProvider supplies direct-runtime conformance with ACP command
@@ -34,7 +34,7 @@ type CommandProvider interface {
 
 // SessionModeReader supplies the bridge with the current ACP mode projection.
 type SessionModeReader interface {
-	SessionModes(context.Context, session.Session) (*schema.SessionModeState, error)
+	SessionModes(context.Context, session.Session) (*acpsdk.SessionModeState, error)
 }
 
 // SessionModeWriter applies one ACP mode mutation for direct-runtime
@@ -45,11 +45,11 @@ type SessionModeWriter interface {
 
 // SessionConfigReader supplies the bridge with ACP configuration projection.
 type SessionConfigReader interface {
-	SessionConfigOptions(context.Context, session.Session) ([]schema.SessionConfigOption, error)
+	SessionConfigOptions(context.Context, session.Session) ([]acpsdk.SessionConfigOption, error)
 }
 
 // SessionConfigWriter applies one ACP configuration mutation for direct-runtime
 // conformance. Product assembly sends configuration through AppServer instead.
 type SessionConfigWriter interface {
-	SetSessionConfigOption(context.Context, schema.SetSessionConfigOptionRequest) (schema.SetSessionConfigOptionResponse, error)
+	SetSessionConfigOption(context.Context, acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error)
 }

@@ -71,13 +71,13 @@ func TestRuntimeAgentPromptSlashCommandUsesPromptRouterBeforeMainRuntime(t *test
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
 	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
+		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/status"}`),
 		},
@@ -140,13 +140,13 @@ func TestRuntimeAgentPromptRouterSuppressesLiveUserMessageEcho(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
 	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
+		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"hello"}`),
 		},
@@ -197,13 +197,13 @@ func TestRuntimeAgentPromptRouterHandlesSharedSlashWithImagePart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
 	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
+		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/review inspect the screenshot"}`),
 			json.RawMessage(`{"type":"image","mimeType":"image/png","name":"shot.png","data":"` + imageData + `"}`),
@@ -267,13 +267,13 @@ func TestRuntimeAgentPromptRouterHandlesDynamicSlashWithImagePart(t *testing.T) 
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
 	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
+		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/helper inspect the screenshot"}`),
 			json.RawMessage(`{"type":"image","mimeType":"image/png","name":"shot.png","data":"` + imageData + `"}`),
@@ -330,13 +330,13 @@ func TestRuntimeAgentPromptRouterHandlesNormalPromptWithImagePart(t *testing.T) 
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
 	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
+		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"inspect the screenshot"}`),
 			json.RawMessage(`{"type":"image","mimeType":"image/png","name":"shot.png","data":"` + imageData + `"}`),
@@ -459,14 +459,14 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	router.result.StatusUpdate.Session.ID = activeSession.SessionID
+	router.result.StatusUpdate.Session.ID = string(activeSession.SessionId)
 	cb := &recordingPromptCallbacks{}
 	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
+		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/model use fast"}`),
 		},
@@ -482,12 +482,10 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 	seenConfig := false
 	seenCommands := false
 	for _, notification := range cb.notifications {
-		if notification.SessionID != activeSession.SessionID {
-			t.Fatalf("notification sessionID = %q, want %q: %#v", notification.SessionID, activeSession.SessionID, notification)
+		if notification.SessionID != string(activeSession.SessionId) {
+			t.Fatalf("notification sessionID = %q, want %q: %#v", notification.SessionID, string(activeSession.SessionId), notification)
 		}
 		switch update := notification.Update.(type) {
-		case acp.ConfigOptionUpdate:
-			seenConfig = update.SessionUpdate == acp.UpdateConfigOption && len(update.ConfigOptions) == 1
 		case acp.RawUpdate:
 			switch update.SessionUpdate {
 			case acp.UpdateSessionInfo:
@@ -502,6 +500,10 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 				seenCommands = json.Unmarshal(update.Raw, &decoded) == nil &&
 					decoded.SessionUpdate == acp.UpdateAvailableCmds &&
 					len(decoded.AvailableCommands) == 1 && decoded.AvailableCommands[0].Name == "status"
+			case acp.UpdateConfigOption:
+				var decoded acpsdk.SessionConfigOptionUpdate
+				seenConfig = json.Unmarshal(update.Raw, &decoded) == nil &&
+					decoded.SessionUpdate == acp.UpdateConfigOption && len(decoded.ConfigOptions) == 1
 			}
 		}
 	}
@@ -550,14 +552,14 @@ func TestRuntimeAgentPromptRouterTurnFeedReturnsEmitErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	wantErr := errors.New("session update failed")
 	cb := &errorOnAgentMessageCallbacks{err: wantErr}
 	_, err = agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
+		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/review"}`),
 		},
@@ -636,13 +638,13 @@ func TestRuntimeAgentPromptRouterTurnFeedEmitsTerminalMetaForACPStdio(t *testing
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
 	_, err = agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
+		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/review"}`),
 		},
@@ -724,13 +726,13 @@ func TestRuntimeAgentPromptRouterDoesNotRewriteCumulativeFinalContent(t *testing
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
 	_, err = agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
+		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/review"}`),
 		},
@@ -919,13 +921,13 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
 	_, err = agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
+		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/review"}`),
 		},

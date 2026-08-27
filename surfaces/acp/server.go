@@ -147,7 +147,7 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		resp, err := handler.Authenticate(ctx, req)
 		return responseOrError(resp, err)
 	case acpsdk.AgentMethodSessionNew:
-		var req protocolacp.NewSessionRequest
+		var req acpsdk.NewSessionRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
@@ -155,7 +155,7 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		if err != nil {
 			return responseOrError(resp, err)
 		}
-		if err := c.afterAvailableCommands(inbound, resp.SessionID, availableCommandsAfterSessionNewDelay); err != nil {
+		if err := c.afterAvailableCommands(inbound, string(resp.SessionId), availableCommandsAfterSessionNewDelay); err != nil {
 			return nil, responseError(err)
 		}
 		return resp, nil
@@ -171,7 +171,7 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		resp, err := handler.ListSessions(ctx, req)
 		return responseOrError(resp, err)
 	case acpsdk.AgentMethodSessionLoad:
-		var req protocolacp.LoadSessionRequest
+		var req acpsdk.LoadSessionRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
@@ -183,12 +183,12 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		if err != nil {
 			return responseOrError(resp, err)
 		}
-		if err := c.afterAvailableCommands(inbound, req.SessionID, 0); err != nil {
+		if err := c.afterAvailableCommands(inbound, string(req.SessionId), 0); err != nil {
 			return nil, responseError(err)
 		}
 		return resp, nil
 	case acpsdk.AgentMethodSessionResume:
-		var req protocolacp.ResumeSessionRequest
+		var req acpsdk.ResumeSessionRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
@@ -200,7 +200,7 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		if err != nil {
 			return responseOrError(resp, err)
 		}
-		if err := c.afterAvailableCommands(inbound, req.SessionID, 0); err != nil {
+		if err := c.afterAvailableCommands(inbound, string(req.SessionId), 0); err != nil {
 			return nil, responseError(err)
 		}
 		return resp, nil
@@ -227,7 +227,7 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		resp, err := handler.SetSessionMode(ctx, req)
 		return responseOrError(resp, err)
 	case acpsdk.AgentMethodSessionSetConfigOption:
-		var req protocolacp.SetSessionConfigOptionRequest
+		var req acpsdk.SetSessionConfigOptionRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
@@ -16,11 +17,11 @@ type promptCallbacks interface {
 }
 
 type modeReader interface {
-	SessionModes(context.Context, session.Session) (*schema.SessionModeState, error)
+	SessionModes(context.Context, session.Session) (*acpsdk.SessionModeState, error)
 }
 
 type configReader interface {
-	SessionConfigOptions(context.Context, session.Session) ([]schema.SessionConfigOption, error)
+	SessionConfigOptions(context.Context, session.Session) ([]acpsdk.SessionConfigOption, error)
 }
 
 // SessionServiceLoaderConfig configures one default ACP session/load adapter
@@ -77,19 +78,19 @@ func firstNonEmptyString(values ...string) string {
 // returns optional mode/config metadata for the loaded session.
 func (l *SessionServiceLoader) LoadSession(
 	ctx context.Context,
-	req schema.LoadSessionRequest,
+	req acpsdk.LoadSessionRequest,
 	cb promptCallbacks,
-) (schema.LoadSessionResponse, error) {
+) (acpsdk.LoadSessionResponse, error) {
 	ref := session.SessionRef{
 		AppName:   l.appName,
 		UserID:    l.userID,
-		SessionID: strings.TrimSpace(req.SessionID),
+		SessionID: strings.TrimSpace(string(req.SessionId)),
 	}
 	loaded, err := l.sessions.LoadSession(ctx, session.LoadSessionRequest{
 		SessionRef: ref,
 	})
 	if err != nil {
-		return schema.LoadSessionResponse{}, err
+		return acpsdk.LoadSessionResponse{}, err
 	}
 
 	if cb != nil {
@@ -100,39 +101,39 @@ func (l *SessionServiceLoader) LoadSession(
 			}
 			base := projector.EnvelopeBaseFromSessionEvent(loaded.Session.SessionRef, event, projector.SessionEventTransport{})
 			notifications, err := projector.ProjectSessionEventNotifications(eventstream.Envelope{
-				SessionID: strings.TrimSpace(req.SessionID),
+				SessionID: strings.TrimSpace(string(req.SessionId)),
 			}, event, l.projector)
 			if err != nil {
-				return schema.LoadSessionResponse{}, err
+				return acpsdk.LoadSessionResponse{}, err
 			}
 			for _, notification := range notifications {
 				notification = spawnReplay.normalize(event, notification)
 				if err := cb.SessionUpdate(ctx, notification); err != nil {
-					return schema.LoadSessionResponse{}, err
+					return acpsdk.LoadSessionResponse{}, err
 				}
 				base.Kind = eventstream.KindSessionUpdate
 				base.Update = notification.Update
 				for _, parentClose := range spawnReplay.observedParentCloses(base, notification.SessionID) {
 					if err := cb.SessionUpdate(ctx, parentClose); err != nil {
-						return schema.LoadSessionResponse{}, err
+						return acpsdk.LoadSessionResponse{}, err
 					}
 				}
 			}
 		}
 	}
 
-	resp := schema.LoadSessionResponse{}
+	resp := acpsdk.LoadSessionResponse{}
 	if l.modes != nil {
 		modes, err := l.modes.SessionModes(ctx, loaded.Session)
 		if err != nil {
-			return schema.LoadSessionResponse{}, err
+			return acpsdk.LoadSessionResponse{}, err
 		}
 		resp.Modes = modes
 	}
 	if l.config != nil {
 		options, err := l.config.SessionConfigOptions(ctx, loaded.Session)
 		if err != nil {
-			return schema.LoadSessionResponse{}, err
+			return acpsdk.LoadSessionResponse{}, err
 		}
 		resp.ConfigOptions = options
 	}

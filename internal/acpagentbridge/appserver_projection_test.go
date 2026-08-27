@@ -3,6 +3,7 @@ package acpagentbridge
 import (
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
@@ -23,7 +24,23 @@ func TestACPPresentationSnapshotDoesNotExposeApprovalRoutingAsACPMode(t *testing
 		AvailableModes: []appserver.PresentationMode{{ID: "focus", Name: "Focus"}},
 	}
 	modes, _, _ := acpPresentationSnapshot(appOwned)
-	if modes == nil || modes.CurrentModeID != "focus" || len(modes.AvailableModes) != 1 {
+	if modes == nil || modes.CurrentModeId != "focus" || len(modes.AvailableModes) != 1 {
 		t.Fatalf("app-owned ACP modes = %#v", modes)
+	}
+}
+
+func TestACPPresentationConfigOptionsPublishesOnlyMutableSelectOptions(t *testing.T) {
+	options := acpPresentationConfigOptions([]appserver.PresentationConfigOption{
+		{
+			Type: "select", ID: "model", Name: "Model", Category: "model", CurrentValue: "mimo",
+			Options: []appserver.PresentationSelectOption{{Value: "mimo", Name: "MiMo"}},
+		},
+		{Type: "boolean", ID: "verbose", Name: "Verbose", CurrentValue: true},
+	})
+	if len(options) != 1 || options[0].Select == nil {
+		t.Fatalf("projected config options = %#v, want only the mutable select variant", options)
+	}
+	if got := options[0].Select.CurrentValue; got != acpsdk.SessionConfigValueId("mimo") {
+		t.Fatalf("select current value = %q, want mimo", got)
 	}
 }

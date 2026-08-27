@@ -286,22 +286,22 @@ func (a *RuntimeAgent) Initialize(ctx context.Context, _ acpsdk.InitializeReques
 	}, nil
 }
 
-func (a *RuntimeAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
-	metadata := normalizedACPSessionMetadata(req.Meta)
+func (a *RuntimeAgent) NewSession(ctx context.Context, req acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
+	metadata := normalizedACPSessionMetadata(acpRawMeta(req.Meta))
 	if a.sessionClient != nil {
 		created, err := a.sessionClient.CreateSession(ctx, appserver.CreateSessionRequest{
 			WriteBase: appserver.WriteBase{
 				OperationID: newACPSessionOperationID("create"),
 			},
-			WorkspaceKey: a.workspaceKeyForCWD(req.CWD),
-			CWD:          strings.TrimSpace(req.CWD),
+			WorkspaceKey: a.workspaceKeyForCWD(req.Cwd),
+			CWD:          strings.TrimSpace(req.Cwd),
 			Metadata:     metadata,
 		})
 		if err != nil {
-			return acp.NewSessionResponse{}, err
+			return acpsdk.NewSessionResponse{}, err
 		}
 		if created.Outcome != appserver.OutcomeCommitted && created.Outcome != appserver.OutcomeAccepted {
-			return acp.NewSessionResponse{}, fmt.Errorf(
+			return acpsdk.NewSessionResponse{}, fmt.Errorf(
 				"internal/acpagentbridge: create Session operation %q ended with outcome %q",
 				created.OperationID,
 				created.Outcome,
@@ -309,7 +309,7 @@ func (a *RuntimeAgent) NewSession(ctx context.Context, req acp.NewSessionRequest
 		}
 		activeSession, err := a.session(ctx, created.SessionID)
 		if err != nil {
-			return acp.NewSessionResponse{}, err
+			return acpsdk.NewSessionResponse{}, err
 		}
 		return a.newSessionResponse(ctx, activeSession)
 	}
@@ -317,13 +317,13 @@ func (a *RuntimeAgent) NewSession(ctx context.Context, req acp.NewSessionRequest
 		AppName: a.appName,
 		UserID:  a.userID,
 		Workspace: session.WorkspaceRef{
-			Key: strings.TrimSpace(req.CWD),
-			CWD: strings.TrimSpace(req.CWD),
+			Key: strings.TrimSpace(req.Cwd),
+			CWD: strings.TrimSpace(req.Cwd),
 		},
 		Metadata: metadata,
 	})
 	if err != nil {
-		return acp.NewSessionResponse{}, err
+		return acpsdk.NewSessionResponse{}, err
 	}
 	_, _ = a.sessions.BindController(ctx, session.BindControllerRequest{
 		SessionRef: activeSession.SessionRef,
@@ -338,13 +338,13 @@ func (a *RuntimeAgent) NewSession(ctx context.Context, req acp.NewSessionRequest
 	return a.newSessionResponse(ctx, activeSession)
 }
 
-func (a *RuntimeAgent) newSessionResponse(ctx context.Context, activeSession session.Session) (acp.NewSessionResponse, error) {
+func (a *RuntimeAgent) newSessionResponse(ctx context.Context, activeSession session.Session) (acpsdk.NewSessionResponse, error) {
 	a.rememberManagedSession(activeSession)
-	resp := acp.NewSessionResponse{SessionID: activeSession.SessionID}
+	resp := acpsdk.NewSessionResponse{SessionId: acpsdk.SessionId(activeSession.SessionID)}
 	if a.presentationClient != nil {
 		snapshot, err := a.presentationClient.PresentationSnapshot(ctx, appserver.PresentationRequest{SessionID: activeSession.SessionID})
 		if err != nil {
-			return acp.NewSessionResponse{}, err
+			return acpsdk.NewSessionResponse{}, err
 		}
 		resp.Modes, resp.ConfigOptions, _ = acpPresentationSnapshot(snapshot)
 		return resp, nil
@@ -352,14 +352,14 @@ func (a *RuntimeAgent) newSessionResponse(ctx context.Context, activeSession ses
 	if a.modes != nil {
 		modes, err := a.modes.SessionModes(ctx, activeSession)
 		if err != nil {
-			return acp.NewSessionResponse{}, err
+			return acpsdk.NewSessionResponse{}, err
 		}
 		resp.Modes = modes
 	}
 	if a.config != nil {
 		options, err := a.config.SessionConfigOptions(ctx, activeSession)
 		if err != nil {
-			return acp.NewSessionResponse{}, err
+			return acpsdk.NewSessionResponse{}, err
 		}
 		resp.ConfigOptions = options
 	}
@@ -431,55 +431,57 @@ func canonicalACPWorkspacePath(path string) string {
 	return filepath.Clean(absolute)
 }
 
-func (a *RuntimeAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest, cb PromptCallbacks) (acp.LoadSessionResponse, error) {
+func (a *RuntimeAgent) LoadSession(ctx context.Context, req acpsdk.LoadSessionRequest, cb PromptCallbacks) (acpsdk.LoadSessionResponse, error) {
 	if a.loader == nil && a.sessionClient == nil {
-		return acp.LoadSessionResponse{}, ErrCapabilityUnsupported
+		return acpsdk.LoadSessionResponse{}, ErrCapabilityUnsupported
 	}
-	activeSession, err := a.session(ctx, req.SessionID)
+	sessionID := strings.TrimSpace(string(req.SessionId))
+	activeSession, err := a.session(ctx, sessionID)
 	if err != nil {
-		return acp.LoadSessionResponse{}, err
+		return acpsdk.LoadSessionResponse{}, err
 	}
-	if !a.authorizeManagedSessionLoad(activeSession, req.Meta) {
-		return acp.LoadSessionResponse{}, session.ErrSessionNotFound
+	if !a.authorizeManagedSessionLoad(activeSession, acpRawMeta(req.Meta)) {
+		return acpsdk.LoadSessionResponse{}, session.ErrSessionNotFound
 	}
 	loadCallbacks := cb
 	if cb != nil {
 		loadCallbacks = normalizingPromptCallbacks{inner: cb}
 	}
-	var resp acp.LoadSessionResponse
+	var resp acpsdk.LoadSessionResponse
 	if a.sessionClient != nil {
 		resp, err = a.loadSessionFromClient(ctx, req, loadCallbacks)
 	} else {
 		resp, err = a.loader.LoadSession(ctx, req, loadCallbacks)
 	}
 	if err != nil {
-		return acp.LoadSessionResponse{}, err
+		return acpsdk.LoadSessionResponse{}, err
 	}
 	if a.presentationClient != nil {
-		snapshot, err := a.presentationClient.PresentationSnapshot(ctx, appserver.PresentationRequest{SessionID: req.SessionID})
+		snapshot, err := a.presentationClient.PresentationSnapshot(ctx, appserver.PresentationRequest{SessionID: sessionID})
 		if err != nil {
-			return acp.LoadSessionResponse{}, err
+			return acpsdk.LoadSessionResponse{}, err
 		}
 		resp.Modes, resp.ConfigOptions, _ = acpPresentationSnapshot(snapshot)
 	}
 	return resp, nil
 }
 
-func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
-	activeSession, err := a.session(ctx, req.SessionID)
+func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
+	sessionID := strings.TrimSpace(string(req.SessionId))
+	activeSession, err := a.session(ctx, sessionID)
 	if err != nil {
-		return acp.ResumeSessionResponse{}, err
+		return acpsdk.ResumeSessionResponse{}, err
 	}
 	managedSession := sessionvisibility.IsSystemManagedSession(activeSession)
-	if !a.authorizeManagedSessionResume(activeSession, req.Meta) {
-		return acp.ResumeSessionResponse{}, session.ErrSessionNotFound
+	if !a.authorizeManagedSessionResume(activeSession, acpRawMeta(req.Meta)) {
+		return acpsdk.ResumeSessionResponse{}, session.ErrSessionNotFound
 	}
-	claimManagedSession := managedSession && !a.ownsManagedSession(req.SessionID)
-	resp := acp.ResumeSessionResponse{}
+	claimManagedSession := managedSession && !a.ownsManagedSession(sessionID)
+	resp := acpsdk.ResumeSessionResponse{}
 	if a.presentationClient != nil {
-		snapshot, err := a.presentationClient.PresentationSnapshot(ctx, appserver.PresentationRequest{SessionID: req.SessionID})
+		snapshot, err := a.presentationClient.PresentationSnapshot(ctx, appserver.PresentationRequest{SessionID: sessionID})
 		if err != nil {
-			return acp.ResumeSessionResponse{}, err
+			return acpsdk.ResumeSessionResponse{}, err
 		}
 		resp.Modes, resp.ConfigOptions, _ = acpPresentationSnapshot(snapshot)
 		if claimManagedSession {
@@ -490,14 +492,14 @@ func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionR
 	if a.modes != nil {
 		modes, err := a.modes.SessionModes(ctx, activeSession)
 		if err != nil {
-			return acp.ResumeSessionResponse{}, err
+			return acpsdk.ResumeSessionResponse{}, err
 		}
 		resp.Modes = modes
 	}
 	if a.config != nil {
 		options, err := a.config.SessionConfigOptions(ctx, activeSession)
 		if err != nil {
-			return acp.ResumeSessionResponse{}, err
+			return acpsdk.ResumeSessionResponse{}, err
 		}
 		resp.ConfigOptions = options
 	}
@@ -588,26 +590,33 @@ func (a *RuntimeAgent) SetSessionMode(ctx context.Context, req acpsdk.SetSession
 	return a.modeWriter.SetSessionMode(ctx, req)
 }
 
-func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {
+	if a.configurationClient == nil && a.configWriter == nil {
+		return acpsdk.SetSessionConfigOptionResponse{}, ErrCapabilityUnsupported
+	}
+	sessionID, configID, rawValue, mutationErr := acpSessionConfigMutation(req)
+	if mutationErr != nil {
+		return acpsdk.SetSessionConfigOptionResponse{}, mutationErr
+	}
 	if a.configurationClient != nil {
-		active, err := a.targetSession(ctx, req.SessionID)
+		active, err := a.targetSession(ctx, sessionID)
 		if err != nil {
-			return acp.SetSessionConfigOptionResponse{}, err
+			return acpsdk.SetSessionConfigOptionResponse{}, err
 		}
-		value, ok := req.Value.(string)
+		value, ok := rawValue.(string)
 		if !ok {
-			return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge: config value for %q must be a string", strings.TrimSpace(req.ConfigID))
+			return acpsdk.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge: config value for %q must be a string", configID)
 		}
 		base := acpSessionConfigurationWriteBase(active, "config")
 		var result appserver.CommandResult
-		switch strings.ToLower(strings.TrimSpace(req.ConfigID)) {
+		switch strings.ToLower(configID) {
 		case "mode":
 			snapshot, snapshotErr := a.presentationClient.PresentationSnapshot(ctx, appserver.PresentationRequest{SessionID: active.SessionID})
 			if snapshotErr != nil {
-				return acp.SetSessionConfigOptionResponse{}, snapshotErr
+				return acpsdk.SetSessionConfigOptionResponse{}, snapshotErr
 			}
 			if snapshot.Modes == nil {
-				return acp.SetSessionConfigOptionResponse{}, ErrCapabilityUnsupported
+				return acpsdk.SetSessionConfigOptionResponse{}, ErrCapabilityUnsupported
 			}
 			if strings.TrimSpace(snapshot.Modes.Target) == appserver.PresentationModeTargetApp {
 				result, err = a.configurationClient.ConfigureSessionPresentationMode(ctx, appserver.SessionPresentationModeRequest{WriteBase: base, Mode: strings.TrimSpace(value)})
@@ -616,7 +625,7 @@ func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSe
 			} else if strings.TrimSpace(snapshot.Modes.Target) == appserver.PresentationModeTargetApproval {
 				result, err = a.configurationClient.ConfigureSessionMode(ctx, appserver.SessionModeRequest{WriteBase: base, Mode: strings.TrimSpace(value)})
 			} else {
-				return acp.SetSessionConfigOptionResponse{}, ErrCapabilityUnsupported
+				return acpsdk.SetSessionConfigOptionResponse{}, ErrCapabilityUnsupported
 			}
 		case "model":
 			result, err = a.configurationClient.UseSessionModel(ctx, appserver.SessionModelRequest{
@@ -626,10 +635,10 @@ func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSe
 		case "reasoning_effort":
 			snapshot, snapshotErr := a.presentationClient.PresentationSnapshot(ctx, appserver.PresentationRequest{SessionID: active.SessionID})
 			if snapshotErr != nil {
-				return acp.SetSessionConfigOptionResponse{}, snapshotErr
+				return acpsdk.SetSessionConfigOptionResponse{}, snapshotErr
 			}
 			if snapshot.Models == nil || strings.TrimSpace(snapshot.Models.CurrentModelID) == "" {
-				return acp.SetSessionConfigOptionResponse{}, errors.New("internal/acpagentbridge: current Session model is unavailable")
+				return acpsdk.SetSessionConfigOptionResponse{}, errors.New("internal/acpagentbridge: current Session model is unavailable")
 			}
 			result, err = a.configurationClient.UseSessionModel(ctx, appserver.SessionModelRequest{
 				WriteBase:       base,
@@ -639,27 +648,27 @@ func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSe
 		default:
 			result, err = a.configurationClient.ConfigureSessionPresentation(ctx, appserver.SessionPresentationConfigRequest{
 				WriteBase: base,
-				ConfigID:  strings.TrimSpace(req.ConfigID),
+				ConfigID:  configID,
 				Value:     strings.TrimSpace(value),
 			})
 		}
 		if err := requireCommittedACPConfiguration("set config option", result, err); err != nil {
-			return acp.SetSessionConfigOptionResponse{}, err
+			return acpsdk.SetSessionConfigOptionResponse{}, err
 		}
 		snapshot, err := a.presentationClient.PresentationSnapshot(ctx, appserver.PresentationRequest{SessionID: active.SessionID})
 		if err != nil {
-			return acp.SetSessionConfigOptionResponse{}, &appserver.CommandReceiptError{
+			return acpsdk.SetSessionConfigOptionResponse{}, &appserver.CommandReceiptError{
 				Receipt: result,
 				Err:     fmt.Errorf("internal/acpagentbridge: configuration committed but presentation observation failed; do not retry blindly: %w", err),
 			}
 		}
-		return acp.SetSessionConfigOptionResponse{ConfigOptions: acpPresentationConfigOptions(snapshot.ConfigOptions)}, nil
+		return acpsdk.SetSessionConfigOptionResponse{ConfigOptions: acpPresentationConfigOptions(snapshot.ConfigOptions)}, nil
 	}
 	if a.configWriter == nil {
-		return acp.SetSessionConfigOptionResponse{}, ErrCapabilityUnsupported
+		return acpsdk.SetSessionConfigOptionResponse{}, ErrCapabilityUnsupported
 	}
-	if _, err := a.targetSession(ctx, req.SessionID); err != nil {
-		return acp.SetSessionConfigOptionResponse{}, err
+	if _, err := a.targetSession(ctx, sessionID); err != nil {
+		return acpsdk.SetSessionConfigOptionResponse{}, err
 	}
 	return a.configWriter.SetSessionConfigOption(ctx, req)
 }
@@ -722,7 +731,7 @@ func (a *RuntimeAgent) promptApprovalMode(ctx context.Context, activeSession ses
 	if modes == nil {
 		return approval.ModeAutoReview, nil
 	}
-	return approval.NormalizeMode(modes.CurrentModeID), nil
+	return approval.NormalizeMode(string(modes.CurrentModeId)), nil
 }
 
 func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb PromptCallbacks) (acp.PromptResponse, error) {
@@ -1106,44 +1115,44 @@ func newACPSessionOperationID(action string) string {
 
 func (a *RuntimeAgent) loadSessionFromClient(
 	ctx context.Context,
-	req acp.LoadSessionRequest,
+	req acpsdk.LoadSessionRequest,
 	cb PromptCallbacks,
-) (acp.LoadSessionResponse, error) {
-	sessionID := strings.TrimSpace(req.SessionID)
+) (acpsdk.LoadSessionResponse, error) {
+	sessionID := strings.TrimSpace(string(req.SessionId))
 	reconnected, err := a.sessionClient.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
 	if err != nil {
-		return acp.LoadSessionResponse{}, err
+		return acpsdk.LoadSessionResponse{}, err
 	}
 	if reconnected.Subscription == nil {
-		return acp.LoadSessionResponse{}, errors.New("internal/acpagentbridge: Session reconnect returned no subscription")
+		return acpsdk.LoadSessionResponse{}, errors.New("internal/acpagentbridge: Session reconnect returned no subscription")
 	}
 	defer reconnected.Subscription.Close()
 	if cb != nil {
 		filter := newACPNarrativeFilter(false)
 		for envelope := range reconnected.Subscription.Backfill() {
 			if err := a.emitControlBackfillEnvelope(ctx, cb, sessionID, envelope, filter); err != nil {
-				return acp.LoadSessionResponse{}, err
+				return acpsdk.LoadSessionResponse{}, err
 			}
 		}
 	}
 	if err := reconnected.Subscription.Err(); err != nil {
-		return acp.LoadSessionResponse{}, err
+		return acpsdk.LoadSessionResponse{}, err
 	}
 	activeSession, err := a.session(ctx, sessionID)
 	if err != nil {
-		return acp.LoadSessionResponse{}, err
+		return acpsdk.LoadSessionResponse{}, err
 	}
-	resp := acp.LoadSessionResponse{}
+	resp := acpsdk.LoadSessionResponse{}
 	if a.modes != nil {
 		resp.Modes, err = a.modes.SessionModes(ctx, activeSession)
 		if err != nil {
-			return acp.LoadSessionResponse{}, err
+			return acpsdk.LoadSessionResponse{}, err
 		}
 	}
 	if a.config != nil {
 		resp.ConfigOptions, err = a.config.SessionConfigOptions(ctx, activeSession)
 		if err != nil {
-			return acp.LoadSessionResponse{}, err
+			return acpsdk.LoadSessionResponse{}, err
 		}
 	}
 	return resp, nil
@@ -1223,11 +1232,11 @@ type defaultSessionLoader struct {
 
 func (l defaultSessionLoader) LoadSession(
 	ctx context.Context,
-	req acp.LoadSessionRequest,
+	req acpsdk.LoadSessionRequest,
 	cb PromptCallbacks,
-) (acp.LoadSessionResponse, error) {
+) (acpsdk.LoadSessionResponse, error) {
 	if l.inner == nil {
-		return acp.LoadSessionResponse{}, ErrCapabilityUnsupported
+		return acpsdk.LoadSessionResponse{}, ErrCapabilityUnsupported
 	}
 	return l.inner.LoadSession(ctx, req, cb)
 }

@@ -472,19 +472,19 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 			}
 			var req client.SetSessionConfigOptionRequest
-			if err := json.Unmarshal(msg.Params, &req); err != nil || req.SessionID != "child-session-options" {
+			if err := json.Unmarshal(msg.Params, &req); err != nil || req.ValueId == nil || req.ValueId.SessionId != "child-session-options" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session config request"}
 			}
-			value, _ := req.Value.(string)
+			value := string(req.ValueId.Value)
 			expected := [][2]string{
 				{"model", "model-selected"},
 				{"mode", "manual"},
 				{"reasoning_effort", "high"},
 			}
-			if configurationStep >= len(expected) || req.ConfigID != expected[configurationStep][0] || value != expected[configurationStep][1] {
-				return nil, &jsonrpc.RPCError{Code: -32602, Message: fmt.Sprintf("configuration step %d = %s:%s", configurationStep, req.ConfigID, value)}
+			if configurationStep >= len(expected) || string(req.ValueId.ConfigId) != expected[configurationStep][0] || value != expected[configurationStep][1] {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: fmt.Sprintf("configuration step %d = %s:%s", configurationStep, req.ValueId.ConfigId, value)}
 			}
-			switch req.ConfigID {
+			switch req.ValueId.ConfigId {
 			case "model":
 				configuredModel = value
 			case "mode":
@@ -496,10 +496,13 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 			return client.SetSessionConfigOptionResponse{ConfigOptions: configurationOptions()}, nil
 		case client.MethodSessionResume:
 			var req client.ResumeSessionRequest
-			if err := json.Unmarshal(msg.Params, &req); err != nil ||
-				req.SessionID != "child-reconnect" || req.CWD != os.TempDir() ||
-				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionParentID) != "parent-reconnect" ||
-				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeTaskID) != "task-reconnect" {
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			meta := diagnosticRawMeta(req.Meta)
+			if req.SessionId != "child-reconnect" || req.Cwd != os.TempDir() ||
+				metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionParentID) != "parent-reconnect" ||
+				metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeTaskID) != "task-reconnect" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/resume request"}
 			}
 			return client.ResumeSessionResponse{}, nil
@@ -508,14 +511,18 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 			}
 			var req client.LoadSessionRequest
-			if err := json.Unmarshal(msg.Params, &req); err != nil || req.SessionID != "child-history" || req.CWD != os.TempDir() ||
-				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionKind) != metautil.RuntimeSessionKindSubagent ||
-				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionParentID) != "parent-history" ||
-				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeTaskID) != "task-history" {
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			meta := diagnosticRawMeta(req.Meta)
+			if req.SessionId != "child-history" || req.Cwd != os.TempDir() ||
+				metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionKind) != metautil.RuntimeSessionKindSubagent ||
+				metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionParentID) != "parent-history" ||
+				metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeTaskID) != "task-history" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/load request"}
 			}
 			if mode == "history-load-capability" {
-				requestToken := metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionHistoryToken)
+				requestToken := metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionHistoryToken)
 				if processToken := strings.TrimSpace(os.Getenv(acpagentenv.EnvManagedSessionHistoryToken)); len(processToken) != 64 || requestToken != processToken {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: "managed history capability mismatch"}
 				}
@@ -529,7 +536,7 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				client.ContentChunk{SessionUpdate: client.UpdateAgentMessage, MessageID: "assistant-2", Content: jsonrpc.MustMarshalRaw(client.TextContent{Type: "text", Text: "second answer"})},
 			}
 			for _, update := range updates {
-				sessionID := req.SessionID
+				sessionID := string(req.SessionId)
 				if mode == "history-load-mismatch" {
 					sessionID = "other-child"
 				}
@@ -578,6 +585,20 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 }
 
 type completionSinkFunc func(delegation.Result)
+
+func diagnosticRawMeta(raw map[string]json.RawMessage) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	result := make(map[string]any, len(raw))
+	for key, value := range raw {
+		var decoded any
+		if json.Unmarshal(value, &decoded) == nil {
+			result[key] = decoded
+		}
+	}
+	return result
+}
 
 func (sink completionSinkFunc) PublishSubagentCompletion(result delegation.Result) {
 	sink(result)

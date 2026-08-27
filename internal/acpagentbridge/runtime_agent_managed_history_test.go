@@ -2,17 +2,18 @@ package acpagentbridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 var managedHistoryTestToken = strings.Repeat("ab", 32)
@@ -34,10 +35,10 @@ func TestRuntimeAgentProductLoadAcceptsExactManagedHistoryClaimWithoutOwnership(
 	agent.managedHistoryToken = managedHistoryTestToken
 	claim := managedHistoryClaim("parent-session", "task-1", managedHistoryTestToken)
 
-	if _, err := agent.LoadSession(context.Background(), acp.LoadSessionRequest{
-		SessionID: state.SessionID,
-		CWD:       state.CWD,
-		Meta:      claim,
+	if _, err := agent.LoadSession(context.Background(), acpsdk.LoadSessionRequest{
+		SessionId: acpsdk.SessionId(state.SessionID),
+		Cwd:       state.CWD,
+		Meta:      managedHistoryRawMeta(t, claim),
 	}, nil); err != nil {
 		t.Fatalf("LoadSession(exact managed history claim) error = %v", err)
 	}
@@ -47,10 +48,10 @@ func TestRuntimeAgentProductLoadAcceptsExactManagedHistoryClaimWithoutOwnership(
 	if agent.ownsManagedSession(state.SessionID) {
 		t.Fatal("read-only session/load claimed managed Session execution ownership")
 	}
-	if _, err := agent.ResumeSession(context.Background(), acp.ResumeSessionRequest{
-		SessionID: state.SessionID,
-		CWD:       state.CWD,
-		Meta:      claim,
+	if _, err := agent.ResumeSession(context.Background(), acpsdk.ResumeSessionRequest{
+		SessionId: acpsdk.SessionId(state.SessionID),
+		Cwd:       state.CWD,
+		Meta:      managedHistoryRawMeta(t, claim),
 	}); !errors.Is(err, session.ErrSessionNotFound) {
 		t.Fatalf("ResumeSession(history claim) error = %v, want Session not found", err)
 	}
@@ -78,10 +79,10 @@ func TestRuntimeAgentProductLoadRejectsMismatchedManagedHistoryClaim(t *testing.
 		managedHistoryClaim("parent-session", "task-1", strings.Repeat("cd", 32)),
 		managedHistoryClaim("parent-session", "task-1", ""),
 	} {
-		if _, err := agent.LoadSession(context.Background(), acp.LoadSessionRequest{
-			SessionID: state.SessionID,
-			CWD:       state.CWD,
-			Meta:      meta,
+		if _, err := agent.LoadSession(context.Background(), acpsdk.LoadSessionRequest{
+			SessionId: acpsdk.SessionId(state.SessionID),
+			Cwd:       state.CWD,
+			Meta:      managedHistoryRawMeta(t, meta),
 		}, nil); !errors.Is(err, session.ErrSessionNotFound) {
 			t.Fatalf("LoadSession(metadata=%#v) error = %v, want Session not found", meta, err)
 		}
@@ -89,10 +90,10 @@ func TestRuntimeAgentProductLoadRejectsMismatchedManagedHistoryClaim(t *testing.
 	// Product ACP does not gain lifecycle-load permission merely because this
 	// bridge instance previously created or prompted the managed child.
 	agent.managedSessions[state.SessionID] = struct{}{}
-	if _, err := agent.LoadSession(context.Background(), acp.LoadSessionRequest{
-		SessionID: state.SessionID,
-		CWD:       state.CWD,
-		Meta:      managedHistoryClaim("parent-session", "task-1", ""),
+	if _, err := agent.LoadSession(context.Background(), acpsdk.LoadSessionRequest{
+		SessionId: acpsdk.SessionId(state.SessionID),
+		Cwd:       state.CWD,
+		Meta:      managedHistoryRawMeta(t, managedHistoryClaim("parent-session", "task-1", "")),
 	}, nil); !errors.Is(err, session.ErrSessionNotFound) {
 		t.Fatalf("LoadSession(owned managed Session without capability) error = %v, want Session not found", err)
 	}
@@ -115,10 +116,10 @@ func TestRuntimeAgentProductResumeKeepsExecutionAndHistoryBridgesDisjoint(t *tes
 	}
 	claim := managedHistoryClaim("parent-session", "task-1", "")
 	execution := steeringTestAgent(&managedHistorySessionClient{state: state})
-	if _, err := execution.ResumeSession(context.Background(), acp.ResumeSessionRequest{
-		SessionID: state.SessionID,
-		CWD:       state.CWD,
-		Meta:      claim,
+	if _, err := execution.ResumeSession(context.Background(), acpsdk.ResumeSessionRequest{
+		SessionId: acpsdk.SessionId(state.SessionID),
+		Cwd:       state.CWD,
+		Meta:      managedHistoryRawMeta(t, claim),
 	}); err != nil {
 		t.Fatalf("ResumeSession(exact execution relation) error = %v", err)
 	}
@@ -128,10 +129,10 @@ func TestRuntimeAgentProductResumeKeepsExecutionAndHistoryBridgesDisjoint(t *tes
 
 	history := steeringTestAgent(&managedHistorySessionClient{state: state})
 	history.managedHistoryToken = managedHistoryTestToken
-	if _, err := history.ResumeSession(context.Background(), acp.ResumeSessionRequest{
-		SessionID: state.SessionID,
-		CWD:       state.CWD,
-		Meta:      managedHistoryClaim("parent-session", "task-1", managedHistoryTestToken),
+	if _, err := history.ResumeSession(context.Background(), acpsdk.ResumeSessionRequest{
+		SessionId: acpsdk.SessionId(state.SessionID),
+		Cwd:       state.CWD,
+		Meta:      managedHistoryRawMeta(t, managedHistoryClaim("parent-session", "task-1", managedHistoryTestToken)),
 	}); !errors.Is(err, session.ErrSessionNotFound) {
 		t.Fatalf("ResumeSession(read-only history bridge) error = %v, want Session not found", err)
 	}
@@ -147,6 +148,22 @@ func managedHistoryClaim(parentSessionID, taskID, token string) map[string]any {
 		metautil.RuntimeTaskID:              taskID,
 		metautil.RuntimeSessionHistoryToken: token,
 	})
+}
+
+func managedHistoryRawMeta(t *testing.T, meta map[string]any) map[string]json.RawMessage {
+	t.Helper()
+	if len(meta) == 0 {
+		return nil
+	}
+	result := make(map[string]json.RawMessage, len(meta))
+	for key, value := range meta {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatalf("marshal metadata %q: %v", key, err)
+		}
+		result[key] = raw
+	}
+	return result
 }
 
 type managedHistorySessionClient struct {

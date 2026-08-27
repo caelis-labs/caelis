@@ -10,7 +10,6 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // ProviderConfig configures one set of app-owned ACP providers built from pure
@@ -25,7 +24,7 @@ type ProviderConfig struct {
 
 // ModeReader exposes only the assembly-backed ACP mode projection.
 type ModeReader interface {
-	SessionModes(context.Context, session.Session) (*acp.SessionModeState, error)
+	SessionModes(context.Context, session.Session) (*acpsdk.SessionModeState, error)
 }
 
 // ModeWriter exposes only the assembly-backed ACP mode mutation.
@@ -35,12 +34,12 @@ type ModeWriter interface {
 
 // ConfigReader exposes only the assembly-backed ACP config projection.
 type ConfigReader interface {
-	SessionConfigOptions(context.Context, session.Session) ([]acp.SessionConfigOption, error)
+	SessionConfigOptions(context.Context, session.Session) ([]acpsdk.SessionConfigOption, error)
 }
 
 // ConfigWriter exposes only the assembly-backed ACP config mutation.
 type ConfigWriter interface {
-	SetSessionConfigOption(context.Context, acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error)
+	SetSessionConfigOption(context.Context, acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error)
 }
 
 // Providers is a capability set, not an aggregate provider. Each absent
@@ -103,7 +102,7 @@ func SkillBundles(resolved assembly.ResolvedAssembly) []assembly.SkillBundle {
 }
 
 type modeProvider struct {
-	available []acp.SessionMode
+	available []acpsdk.SessionMode
 	defaultID string
 	sessions  session.Service
 	appName   string
@@ -114,17 +113,19 @@ type modeProvider struct {
 }
 
 func newModeProvider(modes []assembly.ModeConfig, sessions session.Service, appName string, userID string) *modeProvider {
-	available := make([]acp.SessionMode, 0, len(modes))
+	available := make([]acpsdk.SessionMode, 0, len(modes))
 	defaultID := ""
 	for _, one := range modes {
 		id := strings.TrimSpace(one.ID)
 		if id == "" {
 			continue
 		}
-		mode := acp.SessionMode{
-			ID:          id,
-			Name:        strings.TrimSpace(one.Name),
-			Description: strings.TrimSpace(one.Description),
+		mode := acpsdk.SessionMode{
+			Id:   acpsdk.SessionModeId(id),
+			Name: strings.TrimSpace(one.Name),
+		}
+		if description := strings.TrimSpace(one.Description); description != "" {
+			mode.Description = &description
 		}
 		if mode.Name == "" {
 			mode.Name = id
@@ -147,9 +148,9 @@ func newModeProvider(modes []assembly.ModeConfig, sessions session.Service, appN
 	}
 }
 
-func (p *modeProvider) SessionModes(ctx context.Context, session session.Session) (*acp.SessionModeState, error) {
+func (p *modeProvider) SessionModes(ctx context.Context, session session.Session) (*acpsdk.SessionModeState, error) {
 	if p == nil || len(p.available) == 0 {
-		return &acp.SessionModeState{}, nil
+		return &acpsdk.SessionModeState{}, nil
 	}
 	currentID := p.defaultID
 	selected, err := p.currentModeID(ctx, session.SessionRef)
@@ -159,9 +160,9 @@ func (p *modeProvider) SessionModes(ctx context.Context, session session.Session
 	if strings.TrimSpace(selected) != "" {
 		currentID = selected
 	}
-	return &acp.SessionModeState{
-		AvailableModes: append([]acp.SessionMode(nil), p.available...),
-		CurrentModeID:  currentID,
+	return &acpsdk.SessionModeState{
+		AvailableModes: append([]acpsdk.SessionMode(nil), p.available...),
+		CurrentModeId:  acpsdk.SessionModeId(currentID),
 	}, nil
 }
 
@@ -200,7 +201,7 @@ func (p *modeProvider) SetSessionMode(ctx context.Context, req acpsdk.SetSession
 
 func (p *modeProvider) hasMode(modeID string) bool {
 	for _, one := range p.available {
-		if one.ID == modeID {
+		if string(one.Id) == modeID {
 			return true
 		}
 	}
@@ -278,7 +279,7 @@ func newConfigProvider(configs []assembly.ConfigOption, sessions session.Service
 	}
 }
 
-func (p *configProvider) SessionConfigOptions(ctx context.Context, session session.Session) ([]acp.SessionConfigOption, error) {
+func (p *configProvider) SessionConfigOptions(ctx context.Context, session session.Session) ([]acpsdk.SessionConfigOption, error) {
 	if p == nil || len(p.configs) == 0 {
 		return nil, nil
 	}
@@ -289,45 +290,45 @@ func (p *configProvider) SessionConfigOptions(ctx context.Context, session sessi
 	return p.renderOptions(selected), nil
 }
 
-func (p *configProvider) SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+func (p *configProvider) SetSessionConfigOption(ctx context.Context, req acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {
 	if p == nil {
-		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: config provider is unavailable")
+		return acpsdk.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: config provider is unavailable")
 	}
-	sessionID := strings.TrimSpace(req.SessionID)
-	configID := strings.TrimSpace(req.ConfigID)
+	if req.ValueId == nil {
+		return acpsdk.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: config value must be a string selection")
+	}
+	sessionID := strings.TrimSpace(string(req.ValueId.SessionId))
+	configID := strings.TrimSpace(string(req.ValueId.ConfigId))
 	if sessionID == "" {
-		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: session id is required")
+		return acpsdk.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: session id is required")
 	}
 	if configID == "" {
-		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: config id is required")
+		return acpsdk.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: config id is required")
 	}
-	value, ok := req.Value.(string)
-	if !ok {
-		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: config value for %q must be a string", configID)
-	}
+	value := string(req.ValueId.Value)
 	cfg, ok := p.lookup(configID)
 	if !ok {
-		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: config %q not found", configID)
+		return acpsdk.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: config %q not found", configID)
 	}
 	value = strings.TrimSpace(value)
 	if !hasConfigValue(cfg, value) {
-		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: invalid value %q for config %q", value, configID)
+		return acpsdk.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: invalid value %q for config %q", value, configID)
 	}
 	if p.sessions != nil {
 		ref, err := resolveProviderSessionRef(ctx, p.sessions, p.appName, p.userID, sessionID)
 		if err != nil {
-			return acp.SetSessionConfigOptionResponse{}, err
+			return acpsdk.SetSessionConfigOptionResponse{}, err
 		}
 		if err := updateProviderSessionState(ctx, p.sessions, ref, func(state map[string]any) (map[string]any, error) {
 			return assembly.SetCurrentConfigValue(state, configID, value), nil
 		}); err != nil {
-			return acp.SetSessionConfigOptionResponse{}, err
+			return acpsdk.SetSessionConfigOptionResponse{}, err
 		}
 		selected, err := p.currentValues(ctx, ref)
 		if err != nil {
-			return acp.SetSessionConfigOptionResponse{}, err
+			return acpsdk.SetSessionConfigOptionResponse{}, err
 		}
-		return acp.SetSessionConfigOptionResponse{
+		return acpsdk.SetSessionConfigOptionResponse{
 			ConfigOptions: p.renderOptions(selected),
 		}, nil
 	}
@@ -338,7 +339,7 @@ func (p *configProvider) SetSessionConfigOption(ctx context.Context, req acp.Set
 	p.current[sessionID][configID] = value
 	selected := mapsCloneStringMap(p.current[sessionID])
 	p.mu.Unlock()
-	return acp.SetSessionConfigOptionResponse{
+	return acpsdk.SetSessionConfigOptionResponse{
 		ConfigOptions: p.renderOptions(selected),
 	}, nil
 }
@@ -371,30 +372,34 @@ func (p *configProvider) lookup(configID string) (assembly.ConfigOption, bool) {
 	return assembly.ConfigOption{}, false
 }
 
-func (p *configProvider) renderOptions(selected map[string]string) []acp.SessionConfigOption {
-	out := make([]acp.SessionConfigOption, 0, len(p.configs))
+func (p *configProvider) renderOptions(selected map[string]string) []acpsdk.SessionConfigOption {
+	out := make([]acpsdk.SessionConfigOption, 0, len(p.configs))
 	for _, one := range p.configs {
 		value := strings.TrimSpace(selected[one.ID])
 		if value == "" || !hasConfigValue(one, value) {
 			value = one.DefaultValue
 		}
-		options := make([]acp.SessionConfigSelectOption, 0, len(one.Options))
+		options := make(acpsdk.SessionConfigSelectOptionsUngrouped, 0, len(one.Options))
 		for _, option := range one.Options {
-			options = append(options, acp.SessionConfigSelectOption{
-				Value:       option.Value,
-				Name:        option.Name,
-				Description: option.Description,
-			})
+			mapped := acpsdk.SessionConfigSelectOption{Value: acpsdk.SessionConfigValueId(option.Value), Name: option.Name}
+			if description := strings.TrimSpace(option.Description); description != "" {
+				mapped.Description = &description
+			}
+			options = append(options, mapped)
 		}
-		out = append(out, acp.SessionConfigOption{
-			Type:         "select",
-			ID:           one.ID,
-			Name:         one.Name,
-			Description:  one.Description,
-			Category:     one.Category,
-			CurrentValue: value,
-			Options:      options,
-		})
+		selectOption := acpsdk.SessionConfigOptionSelect{
+			Type: "select", Id: acpsdk.SessionConfigId(one.ID), Name: one.Name,
+			CurrentValue: acpsdk.SessionConfigValueId(value),
+			Options:      acpsdk.SessionConfigSelectOptions{Ungrouped: &options},
+		}
+		if description := strings.TrimSpace(one.Description); description != "" {
+			selectOption.Description = &description
+		}
+		if category := strings.TrimSpace(one.Category); category != "" {
+			typed := acpsdk.SessionConfigOptionCategory(category)
+			selectOption.Category = &typed
+		}
+		out = append(out, acpsdk.SessionConfigOption{Select: &selectOption})
 	}
 	return out
 }

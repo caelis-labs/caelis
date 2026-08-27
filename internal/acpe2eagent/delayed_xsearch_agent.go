@@ -40,13 +40,13 @@ func (a *delayedXSearchAgent) Initialize(context.Context, acpsdk.InitializeReque
 	}, nil
 }
 
-func (a *delayedXSearchAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (a *delayedXSearchAgent) NewSession(context.Context, acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
 	sessionID := newSessionID()
 	a.mu.Lock()
 	a.current[sessionID] = map[string]string{"model": "sonnet", "effort": "high"}
 	options := a.configOptionsLocked(sessionID)
 	a.mu.Unlock()
-	return acp.NewSessionResponse{SessionID: sessionID, ConfigOptions: options}, nil
+	return acpsdk.NewSessionResponse{SessionId: acpsdk.SessionId(sessionID), ConfigOptions: options}, nil
 }
 
 func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acp.PromptRequest, callbacks surfaceacp.PromptCallbacks) (acp.PromptResponse, error) {
@@ -122,22 +122,24 @@ func (*delayedXSearchAgent) Cancel(context.Context, acpsdk.CancelNotification) e
 	return nil
 }
 
-func (a *delayedXSearchAgent) SessionConfigOptions(context.Context, session.Session) ([]acp.SessionConfigOption, error) {
+func (a *delayedXSearchAgent) SessionConfigOptions(context.Context, session.Session) ([]acpsdk.SessionConfigOption, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.configOptionsLocked(""), nil
 }
 
-func (a *delayedXSearchAgent) SetSessionConfigOption(_ context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	sessionID := strings.TrimSpace(req.SessionID)
-	configID := strings.TrimSpace(req.ConfigID)
-	value, ok := req.Value.(string)
-	if sessionID == "" || !ok {
-		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("acpe2eagent: invalid config update")
+func (a *delayedXSearchAgent) SetSessionConfigOption(_ context.Context, req acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {
+	if req.ValueId == nil {
+		return acpsdk.SetSessionConfigOptionResponse{}, fmt.Errorf("acpe2eagent: invalid config update")
 	}
-	value = strings.TrimSpace(value)
+	sessionID := strings.TrimSpace(string(req.ValueId.SessionId))
+	configID := strings.TrimSpace(string(req.ValueId.ConfigId))
+	value := strings.TrimSpace(string(req.ValueId.Value))
+	if sessionID == "" {
+		return acpsdk.SetSessionConfigOptionResponse{}, fmt.Errorf("acpe2eagent: invalid config update")
+	}
 	if !validDelayedXSearchConfig(configID, value) {
-		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("acpe2eagent: invalid value %q for config %q", value, configID)
+		return acpsdk.SetSessionConfigOptionResponse{}, fmt.Errorf("acpe2eagent: invalid value %q for config %q", value, configID)
 	}
 	a.mu.Lock()
 	if a.current[sessionID] == nil {
@@ -146,10 +148,10 @@ func (a *delayedXSearchAgent) SetSessionConfigOption(_ context.Context, req acp.
 	a.current[sessionID][configID] = value
 	options := a.configOptionsLocked(sessionID)
 	a.mu.Unlock()
-	return acp.SetSessionConfigOptionResponse{ConfigOptions: options}, nil
+	return acpsdk.SetSessionConfigOptionResponse{ConfigOptions: options}, nil
 }
 
-func (a *delayedXSearchAgent) configOptionsLocked(sessionID string) []acp.SessionConfigOption {
+func (a *delayedXSearchAgent) configOptionsLocked(sessionID string) []acpsdk.SessionConfigOption {
 	current := a.current[sessionID]
 	modelID := "sonnet"
 	effort := "high"
@@ -157,16 +159,24 @@ func (a *delayedXSearchAgent) configOptionsLocked(sessionID string) []acp.Sessio
 		modelID = firstNonEmpty(current["model"], modelID)
 		effort = firstNonEmpty(current["effort"], effort)
 	}
-	return []acp.SessionConfigOption{
-		{
-			Type: "select", ID: "model", Name: "Model", Category: "model", CurrentValue: modelID,
-			Options: []acp.SessionConfigSelectOption{{Value: "sonnet", Name: "Sonnet"}, {Value: "opus", Name: "Opus"}},
-		},
-		{
-			Type: "select", ID: "effort", Name: "Reasoning effort", Category: "reasoning", CurrentValue: effort,
-			Options: []acp.SessionConfigSelectOption{{Value: "high", Name: "High"}, {Value: "max", Name: "Max"}},
-		},
+	return []acpsdk.SessionConfigOption{
+		delayedConfigOption("model", "Model", "model", modelID, []acpsdk.SessionConfigSelectOption{
+			{Value: "sonnet", Name: "Sonnet"}, {Value: "opus", Name: "Opus"},
+		}),
+		delayedConfigOption("effort", "Reasoning effort", "reasoning", effort, []acpsdk.SessionConfigSelectOption{
+			{Value: "high", Name: "High"}, {Value: "max", Name: "Max"},
+		}),
 	}
+}
+
+func delayedConfigOption(id string, name string, category string, current string, choices []acpsdk.SessionConfigSelectOption) acpsdk.SessionConfigOption {
+	ungrouped := acpsdk.SessionConfigSelectOptionsUngrouped(choices)
+	typedCategory := acpsdk.SessionConfigOptionCategory(category)
+	return acpsdk.SessionConfigOption{Select: &acpsdk.SessionConfigOptionSelect{
+		Type: "select", Id: acpsdk.SessionConfigId(id), Name: name, Category: &typedCategory,
+		CurrentValue: acpsdk.SessionConfigValueId(current),
+		Options:      acpsdk.SessionConfigSelectOptions{Ungrouped: &ungrouped},
+	}}
 }
 
 func validDelayedXSearchConfig(configID string, value string) bool {

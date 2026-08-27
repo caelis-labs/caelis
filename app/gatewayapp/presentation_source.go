@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -14,7 +15,6 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const (
@@ -39,11 +39,11 @@ type gatewayPresentationSource struct {
 }
 
 type presentationModeReader interface {
-	SessionModes(context.Context, session.Session) (*acp.SessionModeState, error)
+	SessionModes(context.Context, session.Session) (*acpsdk.SessionModeState, error)
 }
 
 type presentationConfigReader interface {
-	SessionConfigOptions(context.Context, session.Session) ([]acp.SessionConfigOption, error)
+	SessionConfigOptions(context.Context, session.Session) ([]acpsdk.SessionConfigOption, error)
 }
 
 type gatewayPresentationSourceDeps struct {
@@ -119,9 +119,9 @@ func (p gatewayPresentationSource) SessionConfigOptions(ctx context.Context, ses
 			return nil, err
 		}
 		if p.fullAccessMode() {
-			fallback = slices.DeleteFunc(fallback, func(option acp.SessionConfigOption) bool {
-				return strings.EqualFold(strings.TrimSpace(option.ID), acpConfigModeID) ||
-					strings.EqualFold(strings.TrimSpace(option.Category), acpConfigModeID)
+			fallback = slices.DeleteFunc(fallback, func(option acpsdk.SessionConfigOption) bool {
+				id, category := acpConfigOptionIdentity(option)
+				return strings.EqualFold(id, acpConfigModeID) || strings.EqualFold(category, acpConfigModeID)
 			})
 		}
 		options = append(options, presentationConfigOptionsFromACP(fallback)...)
@@ -531,34 +531,94 @@ func availableCommandHint(usage string) string {
 	return strings.Join(fields[1:], " ")
 }
 
-func presentationModesFromACP(modes *acp.SessionModeState) *appserver.PresentationModeState {
+func presentationModesFromACP(modes *acpsdk.SessionModeState) *appserver.PresentationModeState {
 	if modes == nil {
 		return nil
 	}
-	result := &appserver.PresentationModeState{CurrentModeID: modes.CurrentModeID}
+	result := &appserver.PresentationModeState{CurrentModeID: string(modes.CurrentModeId)}
 	for _, mode := range modes.AvailableModes {
+		description := ""
+		if mode.Description != nil {
+			description = *mode.Description
+		}
 		result.AvailableModes = append(result.AvailableModes, appserver.PresentationMode{
-			ID: mode.ID, Name: mode.Name, Description: mode.Description,
+			ID: string(mode.Id), Name: mode.Name, Description: description,
 		})
 	}
 	return result
 }
 
-func presentationConfigOptionsFromACP(configs []acp.SessionConfigOption) []appserver.PresentationConfigOption {
+func presentationConfigOptionsFromACP(configs []acpsdk.SessionConfigOption) []appserver.PresentationConfigOption {
 	result := make([]appserver.PresentationConfigOption, 0, len(configs))
 	for _, config := range configs {
-		mapped := appserver.PresentationConfigOption{
-			Type: config.Type, ID: config.ID, Name: config.Name, Description: config.Description,
-			Category: config.Category, CurrentValue: config.CurrentValue,
-		}
-		for _, option := range config.Options {
-			mapped.Options = append(mapped.Options, appserver.PresentationSelectOption{
-				Value: option.Value, Name: option.Name, Description: option.Description,
-			})
+		mapped := appserver.PresentationConfigOption{}
+		switch {
+		case config.Select != nil:
+			selectOption := config.Select
+			mapped = appserver.PresentationConfigOption{
+				Type: selectOption.Type, ID: string(selectOption.Id), Name: selectOption.Name,
+				CurrentValue: string(selectOption.CurrentValue),
+			}
+			applyPresentationConfigDisplay(&mapped, selectOption.Description, selectOption.Category)
+			var choices []acpsdk.SessionConfigSelectOption
+			switch {
+			case selectOption.Options.Ungrouped != nil:
+				choices = append(choices, (*selectOption.Options.Ungrouped)...)
+			case selectOption.Options.Grouped != nil:
+				for _, group := range *selectOption.Options.Grouped {
+					choices = append(choices, group.Options...)
+				}
+			}
+			for _, option := range choices {
+				description := ""
+				if option.Description != nil {
+					description = *option.Description
+				}
+				mapped.Options = append(mapped.Options, appserver.PresentationSelectOption{
+					Value: string(option.Value), Name: option.Name, Description: description,
+				})
+			}
+		case config.Boolean != nil:
+			booleanOption := config.Boolean
+			mapped = appserver.PresentationConfigOption{
+				Type: booleanOption.Type, ID: string(booleanOption.Id), Name: booleanOption.Name,
+				CurrentValue: booleanOption.CurrentValue,
+			}
+			applyPresentationConfigDisplay(&mapped, booleanOption.Description, booleanOption.Category)
+		default:
+			continue
 		}
 		result = append(result, mapped)
 	}
 	return result
+}
+
+func applyPresentationConfigDisplay(mapped *appserver.PresentationConfigOption, description *string, category *acpsdk.SessionConfigOptionCategory) {
+	if description != nil {
+		mapped.Description = *description
+	}
+	if category != nil {
+		mapped.Category = string(*category)
+	}
+}
+
+func acpConfigOptionIdentity(option acpsdk.SessionConfigOption) (string, string) {
+	switch {
+	case option.Select != nil:
+		category := ""
+		if option.Select.Category != nil {
+			category = string(*option.Select.Category)
+		}
+		return strings.TrimSpace(string(option.Select.Id)), strings.TrimSpace(category)
+	case option.Boolean != nil:
+		category := ""
+		if option.Boolean.Category != nil {
+			category = string(*option.Boolean.Category)
+		}
+		return strings.TrimSpace(string(option.Boolean.Id)), strings.TrimSpace(category)
+	default:
+		return "", ""
+	}
 }
 
 var _ PresentationSource = gatewayPresentationSource{}

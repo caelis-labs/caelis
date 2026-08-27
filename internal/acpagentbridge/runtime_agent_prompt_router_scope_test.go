@@ -148,13 +148,13 @@ func TestRuntimeAgentPromptDirectPathScopesNarrativesAndPermissionReset(t *testi
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := runtimeAgent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := runtimeAgent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &permissionCountingCallbacks{}
 	if _, err := runtimeAgent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
+		SessionID: string(activeSession.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"run"}`)},
 	}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
@@ -244,11 +244,11 @@ func newPromptRouterAgentForScopeTest(t *testing.T, turn *testControlTurn) (*run
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := runtimeAgent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := runtimeAgent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	return runtimeAgent, activeSession.SessionID
+	return runtimeAgent, string(activeSession.SessionId)
 }
 
 func promptRouterTurnForScopeTest(t *testing.T, runtimeAgent *runtimeacp.RuntimeAgent, sessionID string, cb runtimeacp.PromptCallbacks) {

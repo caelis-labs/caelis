@@ -42,8 +42,15 @@ func decodeStandardSessionStateUpdate(raw json.RawMessage, discriminator string)
 }
 
 func configOptionUpdateFromSDK(update acpsdk.SessionConfigOptionUpdate) ConfigOptionUpdate {
-	options := make([]SessionConfigOption, 0, len(update.ConfigOptions))
-	for _, option := range update.ConfigOptions {
+	return ConfigOptionUpdate{
+		SessionUpdate: update.SessionUpdate,
+		ConfigOptions: sessionConfigOptionsFromSDK(update.ConfigOptions),
+	}
+}
+
+func sessionConfigOptionsFromSDK(in []acpsdk.SessionConfigOption) []SessionConfigOption {
+	options := make([]SessionConfigOption, 0, len(in))
+	for _, option := range in {
 		switch {
 		case option.Select != nil:
 			selectOption := option.Select
@@ -78,10 +85,7 @@ func configOptionUpdateFromSDK(update acpsdk.SessionConfigOptionUpdate) ConfigOp
 			options = append(options, normalized)
 		}
 	}
-	return ConfigOptionUpdate{
-		SessionUpdate: update.SessionUpdate,
-		ConfigOptions: options,
-	}
+	return options
 }
 
 func sessionConfigChoicesFromSDK(options acpsdk.SessionConfigSelectOptions) []SessionConfigSelectOption {

@@ -382,10 +382,10 @@ func (a *RuntimeAgent) emitPromptRouterSessionState(ctx context.Context, cb Prom
 		if err != nil {
 			return err
 		}
-		if modes != nil && strings.TrimSpace(modes.CurrentModeID) != "" {
+		if modes != nil && strings.TrimSpace(string(modes.CurrentModeId)) != "" {
 			update, err := standardSessionUpdate(acp.UpdateCurrentMode, acpsdk.SessionCurrentModeUpdate{
 				SessionUpdate: acp.UpdateCurrentMode,
-				CurrentModeId: acpsdk.SessionModeId(strings.TrimSpace(modes.CurrentModeID)),
+				CurrentModeId: acpsdk.SessionModeId(strings.TrimSpace(string(modes.CurrentModeId))),
 			})
 			if err != nil {
 				return err
@@ -403,12 +403,16 @@ func (a *RuntimeAgent) emitPromptRouterSessionState(ctx context.Context, cb Prom
 		if err != nil {
 			return err
 		}
+		update, err := standardSessionUpdate(acp.UpdateConfigOption, acpsdk.SessionConfigOptionUpdate{
+			SessionUpdate: acp.UpdateConfigOption,
+			ConfigOptions: options,
+		})
+		if err != nil {
+			return err
+		}
 		if err := cb.SessionUpdate(ctx, acp.SessionNotification{
 			SessionID: sessionID,
-			Update: acp.ConfigOptionUpdate{
-				SessionUpdate: acp.UpdateConfigOption,
-				ConfigOptions: options,
-			},
+			Update:    update,
 		}); err != nil {
 			return err
 		}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -376,11 +377,11 @@ func newSpawnGoldenDirectRunnerAgent(
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := runtimeAgent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := runtimeAgent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	return runtimeAgent, activeSession.SessionID
+	return runtimeAgent, string(activeSession.SessionId)
 }
 
 func newSpawnGoldenAgent(t *testing.T, turn *testControlTurn, streams taskstream.Service) (*runtimeacp.RuntimeAgent, string) {
@@ -403,12 +404,12 @@ func newSpawnGoldenAgent(t *testing.T, turn *testControlTurn, streams taskstream
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	activeSession, err := runtimeAgent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	activeSession, err := runtimeAgent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	router.result.ActiveSessionID = "session-1"
-	return runtimeAgent, activeSession.SessionID
+	return runtimeAgent, string(activeSession.SessionId)
 }
 
 func sendGoldenRunnerEvent(

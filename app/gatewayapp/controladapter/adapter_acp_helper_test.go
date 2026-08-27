@@ -38,7 +38,7 @@ func TestAdapterACPHelperProcess(t *testing.T) {
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 			}
-			if strings.TrimSpace(req.CWD) == "" {
+			if strings.TrimSpace(req.Cwd) == "" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "session/new cwd is required"}
 			}
 			return acpclient.NewSessionResponse{SessionID: remoteSessionID}, nil
@@ -47,7 +47,7 @@ func TestAdapterACPHelperProcess(t *testing.T) {
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 			}
-			if strings.TrimSpace(req.SessionID) == "" {
+			if strings.TrimSpace(string(req.SessionId)) == "" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "session/resume id is required"}
 			}
 			return acpclient.ResumeSessionResponse{}, nil

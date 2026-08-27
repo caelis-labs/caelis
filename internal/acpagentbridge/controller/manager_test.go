@@ -2166,7 +2166,7 @@ func TestManagerACPResumeFallbackHelperProcess(t *testing.T) {
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 			}
-			if req.SessionID != "stale-remote-session" {
+			if req.SessionId != "stale-remote-session" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/resume id"}
 			}
 			return nil, &jsonrpc.RPCError{Code: -32004, Message: "session not found"}
@@ -2175,7 +2175,7 @@ func TestManagerACPResumeFallbackHelperProcess(t *testing.T) {
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 			}
-			if strings.TrimSpace(req.CWD) == "" {
+			if strings.TrimSpace(req.Cwd) == "" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "session/new cwd is required"}
 			}
 			return client.NewSessionResponse{SessionID: "new-session"}, nil
@@ -2230,7 +2230,7 @@ func TestManagerACPControllerReconnectHelperProcess(t *testing.T) {
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 			}
-			if req.SessionID != "remote-reconnect" {
+			if req.SessionId != "remote-reconnect" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/resume id"}
 			}
 			sawResume = true
@@ -2243,7 +2243,7 @@ func TestManagerACPControllerReconnectHelperProcess(t *testing.T) {
 			if !sawResume {
 				os.Exit(0)
 			}
-			if req.SessionID != "remote-reconnect" || req.ConfigID != "model" || fmt.Sprint(req.Value) != "gpt-next" {
+			if req.ValueId == nil || req.ValueId.SessionId != "remote-reconnect" || req.ValueId.ConfigId != "model" || req.ValueId.Value != "gpt-next" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/set_config_option request"}
 			}
 			return client.SetSessionConfigOptionResponse{ConfigOptions: modelConfig("gpt-next")}, nil
@@ -2371,7 +2371,7 @@ func TestManagerACPControllerReapplyHelperProcess(t *testing.T) {
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 			}
-			if req.SessionID != "remote-reapply" {
+			if req.SessionId != "remote-reapply" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/resume id"}
 			}
 			sawResume = true
@@ -2381,18 +2381,18 @@ func TestManagerACPControllerReapplyHelperProcess(t *testing.T) {
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 			}
-			if req.SessionID != "remote-reapply" {
+			if req.ValueId == nil || req.ValueId.SessionId != "remote-reapply" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/set_config_option session"}
 			}
-			switch req.ConfigID {
+			switch req.ValueId.ConfigId {
 			case "model":
-				if fmt.Sprint(req.Value) != "gpt-next" {
+				if req.ValueId.Value != "gpt-next" {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected model value"}
 				}
 				modelApplied = true
 				return client.SetSessionConfigOptionResponse{ConfigOptions: configWithEffort("gpt-next", "low")}, nil
 			case "effort":
-				if fmt.Sprint(req.Value) != "high" || !modelApplied {
+				if req.ValueId.Value != "high" || !modelApplied {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected effort value"}
 				}
 				if os.Getenv("CAELIS_ACP_FAIL_EFFORT") == "1" {
@@ -2477,7 +2477,7 @@ func TestManagerACPControllerModeReapplyHelperProcess(t *testing.T) {
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 			}
-			if req.SessionID != "remote-mode-reapply" {
+			if req.SessionId != "remote-mode-reapply" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/resume id"}
 			}
 			sawResume = true
@@ -2490,7 +2490,7 @@ func TestManagerACPControllerModeReapplyHelperProcess(t *testing.T) {
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 			}
-			if req.SessionID != "remote-mode-reapply" || req.ConfigID != "mode" || fmt.Sprint(req.Value) != "code" {
+			if req.ValueId == nil || req.ValueId.SessionId != "remote-mode-reapply" || req.ValueId.ConfigId != "mode" || req.ValueId.Value != "code" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/set_config_option request"}
 			}
 			modeApplied = true

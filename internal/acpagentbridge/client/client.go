@@ -155,10 +155,14 @@ func (c *Client) Authenticate(ctx context.Context, methodID string) error {
 }
 
 func (c *Client) NewSession(ctx context.Context, cwd string, meta map[string]any) (NewSessionResponse, error) {
+	rawMeta, err := rawMessagesFromValues(meta)
+	if err != nil {
+		return NewSessionResponse{}, err
+	}
 	return sendRequest[NewSessionResponse](c, ctx, MethodSessionNew, NewSessionRequest{
-		CWD:        cwd,
-		MCPServers: []json.RawMessage{},
-		Meta:       metautil.CloneMap(meta),
+		Cwd:        cwd,
+		McpServers: []acpsdk.McpServer{},
+		Meta:       rawMeta,
 	})
 }
 
@@ -167,20 +171,28 @@ func (c *Client) ListSessions(ctx context.Context, req acpsdk.ListSessionsReques
 }
 
 func (c *Client) LoadSession(ctx context.Context, sessionID string, cwd string, meta map[string]any) (LoadSessionResponse, error) {
+	rawMeta, err := rawMessagesFromValues(meta)
+	if err != nil {
+		return LoadSessionResponse{}, err
+	}
 	return sendRequest[LoadSessionResponse](c, ctx, MethodSessionLoad, LoadSessionRequest{
-		SessionID:  sessionID,
-		CWD:        cwd,
-		MCPServers: []json.RawMessage{},
-		Meta:       metautil.CloneMap(meta),
+		SessionId:  acpsdk.SessionId(sessionID),
+		Cwd:        cwd,
+		McpServers: []acpsdk.McpServer{},
+		Meta:       rawMeta,
 	})
 }
 
 func (c *Client) ResumeSession(ctx context.Context, sessionID string, cwd string, meta map[string]any) (ResumeSessionResponse, error) {
+	rawMeta, err := rawMessagesFromValues(meta)
+	if err != nil {
+		return ResumeSessionResponse{}, err
+	}
 	return sendRequest[ResumeSessionResponse](c, ctx, MethodSessionResume, ResumeSessionRequest{
-		SessionID:  sessionID,
-		CWD:        cwd,
-		MCPServers: []json.RawMessage{},
-		Meta:       metautil.CloneMap(meta),
+		SessionId:  acpsdk.SessionId(sessionID),
+		Cwd:        cwd,
+		McpServers: []acpsdk.McpServer{},
+		Meta:       rawMeta,
 	})
 }
 
@@ -200,11 +212,29 @@ func (c *Client) SetMode(ctx context.Context, sessionID string, modeID string) e
 }
 
 func (c *Client) SetConfigOption(ctx context.Context, sessionID string, configID string, value any) (SetSessionConfigOptionResponse, error) {
-	return sendRequest[SetSessionConfigOptionResponse](c, ctx, MethodSessionSetConfig, SetSessionConfigOptionRequest{
-		SessionID: sessionID,
-		ConfigID:  configID,
-		Value:     value,
-	})
+	request := SetSessionConfigOptionRequest{}
+	switch typed := value.(type) {
+	case string:
+		request.ValueId = &acpsdk.SetSessionConfigOptionValueId{
+			SessionId: acpsdk.SessionId(sessionID),
+			ConfigId:  acpsdk.SessionConfigId(configID),
+			Value:     acpsdk.SessionConfigValueId(typed),
+		}
+	case bool:
+		request.Boolean = &acpsdk.SetSessionConfigOptionBoolean{
+			SessionId: acpsdk.SessionId(sessionID),
+			ConfigId:  acpsdk.SessionConfigId(configID),
+			Type:      "boolean",
+			Value:     typed,
+		}
+	default:
+		return SetSessionConfigOptionResponse{}, fmt.Errorf("acp client: unsupported config value %T", value)
+	}
+	wire, err := sendRequest[acpsdk.SetSessionConfigOptionResponse](c, ctx, MethodSessionSetConfig, request)
+	if err != nil {
+		return SetSessionConfigOptionResponse{}, err
+	}
+	return SetSessionConfigOptionResponse{ConfigOptions: sessionConfigOptionsFromSDK(wire.ConfigOptions)}, nil
 }
 
 func (c *Client) SetModel(ctx context.Context, sessionID string, modelID string) error {
@@ -353,6 +383,21 @@ func cloneRawMessages(in map[string]json.RawMessage) map[string]json.RawMessage 
 		out[key] = append(json.RawMessage(nil), value...)
 	}
 	return out
+}
+
+func rawMessagesFromValues(in map[string]any) (map[string]json.RawMessage, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]json.RawMessage, len(in))
+	for key, value := range in {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return nil, fmt.Errorf("acp client: encode _meta.%s: %w", key, err)
+		}
+		out[key] = raw
+	}
+	return out, nil
 }
 
 func (c *Client) Cancel(ctx context.Context, sessionID string) error {

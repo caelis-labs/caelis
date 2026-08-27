@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
@@ -65,14 +66,14 @@ func TestProductACPStreamingChunksShareOneMessageID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: workspace})
+	created, err := agent.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: workspace})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	live := &recordingCallbacks{}
 	result, err := agent.Prompt(ctx, acp.PromptRequest{
-		SessionID: created.SessionID,
+		SessionID: string(created.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"reply once"}`)},
 	}, live)
 	if err != nil {
@@ -98,9 +99,9 @@ func TestProductACPStreamingChunksShareOneMessageID(t *testing.T) {
 	}
 
 	replayed := &recordingCallbacks{}
-	if _, err := agent.LoadSession(ctx, acp.LoadSessionRequest{
-		SessionID: created.SessionID,
-		CWD:       workspace,
+	if _, err := agent.LoadSession(ctx, acpsdk.LoadSessionRequest{
+		SessionId: created.SessionId,
+		Cwd:       workspace,
 	}, replayed); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +126,7 @@ func TestProductACPStreamingChunksShareOneMessageID(t *testing.T) {
 	// A later logical assistant message must rotate identity.
 	second := &recordingCallbacks{}
 	if _, err := agent.Prompt(ctx, acp.PromptRequest{
-		SessionID: created.SessionID,
+		SessionID: string(created.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"reply again"}`)},
 	}, second); err != nil {
 		t.Fatal(err)
@@ -140,9 +141,9 @@ func TestProductACPStreamingChunksShareOneMessageID(t *testing.T) {
 
 	// Durable history must still distinguish the two logical messages after reconnect.
 	reloaded := &recordingCallbacks{}
-	if _, err := agent.LoadSession(ctx, acp.LoadSessionRequest{
-		SessionID: created.SessionID,
-		CWD:       workspace,
+	if _, err := agent.LoadSession(ctx, acpsdk.LoadSessionRequest{
+		SessionId: created.SessionId,
+		Cwd:       workspace,
 	}, reloaded); err != nil {
 		t.Fatal(err)
 	}
