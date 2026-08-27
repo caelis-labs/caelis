@@ -33,7 +33,7 @@ func projectionTrace(envs []eventstream.Envelope) []projectionTraceEntry {
 		if chunk, ok := env.Update.(schema.ContentChunk); ok {
 			entry.Text = schema.ExtractTextValue(chunk.Content)
 		}
-		if call, ok := eventstream.ToolCallFromEnvelope(env); ok {
+		if call, ok := env.Update.(schema.ToolCall); env.Kind == eventstream.KindSessionUpdate && ok {
 			entry.ToolCallID = call.ToolCallID
 			entry.ToolCallName = call.Kind
 			entry.ToolCallStatus = call.Status

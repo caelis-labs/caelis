@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
-func TestCommandTaskResultsFromEnvelopeUsesTypedSingularParent(t *testing.T) {
+func TestTaskOwnerRepairsFromEnvelopeUsesTypedSingularCommandParent(t *testing.T) {
 	t.Parallel()
 
 	completed := schema.ToolStatusCompleted
@@ -34,18 +34,18 @@ func TestCommandTaskResultsFromEnvelopeUsesTypedSingularParent(t *testing.T) {
 		ParentCallID: "command-call",
 		Handle:       "command-3",
 	}}
-	if got := CommandTaskResultsFromEnvelope(env); !reflect.DeepEqual(got, want) {
-		t.Fatalf("CommandTaskResultsFromEnvelope() = %#v, want %#v", got, want)
+	if got := TaskOwnerRepairsFromEnvelope(env).Commands; !reflect.DeepEqual(got, want) {
+		t.Fatalf("TaskOwnerRepairsFromEnvelope().Commands = %#v, want %#v", got, want)
 	}
 
 	env.ParentTool = nil
 	env.Meta = map[string]any{"parent_call": "command-call", "parent_tool": "RunCommand"}
-	if got := CommandTaskResultsFromEnvelope(env); len(got) != 0 {
+	if got := TaskOwnerRepairsFromEnvelope(env).Commands; len(got) != 0 {
 		t.Fatalf("metadata-only parent produced command results %#v", got)
 	}
 }
 
-func TestCommandTaskResultsFromEnvelopeFiltersBatchItems(t *testing.T) {
+func TestTaskOwnerRepairsFromEnvelopeFiltersBatchItems(t *testing.T) {
 	t.Parallel()
 
 	completed := schema.ToolStatusCompleted
@@ -79,9 +79,6 @@ func TestCommandTaskResultsFromEnvelopeFiltersBatchItems(t *testing.T) {
 		ParentCallID: "command-call-1",
 		Handle:       "command-1",
 	}}
-	if got := CommandTaskResultsFromEnvelope(env); !reflect.DeepEqual(got, want) {
-		t.Fatalf("CommandTaskResultsFromEnvelope() = %#v, want %#v", got, want)
-	}
 	repairs := TaskOwnerRepairsFromEnvelope(env)
 	if !reflect.DeepEqual(repairs.Commands, want) || len(repairs.Spawns) != 1 ||
 		repairs.Spawns[0].ParentCallID != "spawn-1" {

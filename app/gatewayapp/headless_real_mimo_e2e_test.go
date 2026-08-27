@@ -134,7 +134,7 @@ func TestHeadlessRealMimoTerminalBenchStyleParallel(t *testing.T) {
 					ApprovalPolicy: headless.ApprovalPolicyApproveAll,
 					ObserveEnvelope: func(envelope eventstream.Envelope) error {
 						observation.envelopes++
-						if _, ok := eventstream.ToolCallFromEnvelope(envelope); ok {
+						if envelope.Kind == eventstream.KindSessionUpdate && eventstream.UpdateType(envelope.Update) == "tool_call" {
 							observation.toolCalls++
 						}
 						return nil

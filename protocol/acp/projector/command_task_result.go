@@ -2,7 +2,6 @@ package projector
 
 import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 // CommandTaskResult identifies one terminal RunCommand observed through a
@@ -11,14 +10,6 @@ import (
 type CommandTaskResult struct {
 	ParentCallID string
 	Handle       string
-}
-
-// CommandTaskResultsFromEnvelope returns terminal RunCommand targets observed
-// by one final Task read or wait update. Singular observations require the
-// typed Envelope parent. Batch waits use each canonical tasks[] relation
-// because one Envelope cannot identify multiple parents.
-func CommandTaskResultsFromEnvelope(env eventstream.Envelope) []CommandTaskResult {
-	return commandTaskResultsFromObservations(terminalTaskObservationsFromEnvelope(env))
 }
 
 func commandTaskResultsFromObservations(observations []terminalTaskObservation) []CommandTaskResult {
