@@ -62,7 +62,10 @@ func (b *Broker) Done() <-chan struct{} {
 // Events starts the broker and returns only the main Session feed ingress.
 func (b *Broker) Events() <-chan eventstream.Envelope {
 	if b == nil {
-		return eventstream.EnsureTerminalLifecycle(nil, "", "", "")
+		events := make(chan eventstream.Envelope, 1)
+		events <- eventstream.TurnCompleted("", "", "", time.Now())
+		close(events)
+		return events
 	}
 	b.start()
 	return b.events

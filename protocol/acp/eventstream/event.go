@@ -256,47 +256,6 @@ func TurnCancelled(handleID string, runID string, turnID string, reason string, 
 	return TurnLifecycle(handleID, runID, turnID, LifecycleStateCancelled, reason, string(acpsdk.StopReasonCancelled), occurredAt)
 }
 
-func EnsureTerminalLifecycle(events <-chan Envelope, handleID string, runID string, turnID string) <-chan Envelope {
-	out := make(chan Envelope, 32)
-	go func() {
-		defer close(out)
-		if events == nil {
-			out <- TurnCompleted(handleID, runID, turnID, time.Now())
-			return
-		}
-		terminalSeen := false
-		failureReason := ""
-		cancelled := false
-		for env := range events {
-			if terminalSeen {
-				continue
-			}
-			if IsTurnTerminalLifecycle(env) {
-				terminalSeen = true
-				out <- env
-				continue
-			}
-			if env.Err != nil || env.Kind == KindError {
-				failureReason = strings.TrimSpace(firstNonEmpty(env.Error, errorString(env.Err)))
-				cancelled = IsCancelledReason(failureReason)
-			}
-			out <- env
-		}
-		if terminalSeen {
-			return
-		}
-		switch {
-		case cancelled:
-			out <- TurnCancelled(handleID, runID, turnID, failureReason, time.Now())
-		case failureReason != "":
-			out <- TurnFailed(handleID, runID, turnID, failureReason, time.Now())
-		default:
-			out <- TurnCompleted(handleID, runID, turnID, time.Now())
-		}
-	}()
-	return out
-}
-
 func IsTerminalLifecycle(env Envelope) bool {
 	if env.Kind != KindLifecycle || env.Lifecycle == nil {
 		return false
@@ -333,22 +292,6 @@ func IsTerminalLifecycleState(state string) bool {
 	default:
 		return false
 	}
-}
-
-func errorString(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 func CloneEnvelope(in Envelope) Envelope {

@@ -55,6 +55,17 @@ func TestTurnIdentityMatchesKnownIDs(t *testing.T) {
 	}
 }
 
+func TestNilBrokerEventsReturnsCompletedTerminal(t *testing.T) {
+	t.Parallel()
+
+	var broker *Broker
+	got := collectBrokerBarrierEvents(broker.Events())
+	if len(got) != 1 || !eventstream.IsTurnTerminalLifecycle(got[0]) ||
+		got[0].Lifecycle.State != eventstream.LifecycleStateCompleted {
+		t.Fatalf("nil Broker events = %#v, want one completed Turn terminal", got)
+	}
+}
+
 func TestBrokerHoldsSourceTerminalUntilProducerChannelCloses(t *testing.T) {
 	handle := newBarrierTestHandle()
 	broker := New(handle)
@@ -73,6 +84,21 @@ func TestBrokerHoldsSourceTerminalUntilProducerChannelCloses(t *testing.T) {
 	if len(got) != 1 || got[0].Lifecycle == nil ||
 		got[0].Lifecycle.State != eventstream.LifecycleStateCompleted {
 		t.Fatalf("events after producer close = %#v", got)
+	}
+}
+
+func TestBrokerKeepsFirstProducerTerminal(t *testing.T) {
+	t.Parallel()
+
+	handle := newBarrierTestHandle()
+	handle.events <- eventstream.TurnCompleted(handle.HandleID(), handle.RunID(), handle.TurnID(), time.Now())
+	handle.events <- eventstream.TurnFailed(handle.HandleID(), handle.RunID(), handle.TurnID(), "late terminal", time.Now())
+	close(handle.events)
+
+	got := collectBrokerBarrierEvents(New(handle).Events())
+	if len(got) != 1 || got[0].Lifecycle == nil ||
+		got[0].Lifecycle.State != eventstream.LifecycleStateCompleted {
+		t.Fatalf("events = %#v, want first producer terminal only", got)
 	}
 }
 

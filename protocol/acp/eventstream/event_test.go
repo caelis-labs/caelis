@@ -2,7 +2,6 @@ package eventstream
 
 import (
 	"encoding/json"
-	"errors"
 	"math"
 	"os"
 	"strings"
@@ -645,88 +644,6 @@ func TestIsTurnTerminalLifecycleExcludesOtherDomainLifecycles(t *testing.T) {
 	}
 }
 
-func TestEnsureTerminalLifecycleSynthesizesCompletedForEmptyStream(t *testing.T) {
-	out := collectLifecycleTestEnvelopes(EnsureTerminalLifecycle(nil, "h", "r", "t"))
-	if len(out) != 1 {
-		t.Fatalf("events = %#v, want synthesized completion only", out)
-	}
-	assertLifecycleState(t, out[0], LifecycleStateCompleted)
-	if out[0].HandleID != "h" || out[0].RunID != "r" || out[0].TurnID != "t" {
-		t.Fatalf("ids = (%q, %q, %q), want h/r/t", out[0].HandleID, out[0].RunID, out[0].TurnID)
-	}
-}
-
-func TestEnsureTerminalLifecycleSynthesizesFailedAfterError(t *testing.T) {
-	src := make(chan Envelope, 1)
-	src <- Error(errors.New("provider failed"))
-	close(src)
-
-	out := collectLifecycleTestEnvelopes(EnsureTerminalLifecycle(src, "h", "r", "t"))
-	if len(out) != 2 {
-		t.Fatalf("events = %#v, want error plus failed lifecycle", out)
-	}
-	if out[0].Kind != KindError {
-		t.Fatalf("first event = %#v, want error", out[0])
-	}
-	assertLifecycleState(t, out[1], LifecycleStateFailed)
-	if out[1].Lifecycle.Reason != "provider failed" {
-		t.Fatalf("failure reason = %q", out[1].Lifecycle.Reason)
-	}
-}
-
-func TestEnsureTerminalLifecycleSynthesizesCancelledAfterCancelError(t *testing.T) {
-	src := make(chan Envelope, 1)
-	src <- Error(errors.New("providers: context canceled"))
-	close(src)
-
-	out := collectLifecycleTestEnvelopes(EnsureTerminalLifecycle(src, "h", "r", "t"))
-	if len(out) != 2 {
-		t.Fatalf("events = %#v, want error plus cancelled lifecycle", out)
-	}
-	assertLifecycleState(t, out[1], LifecycleStateCancelled)
-	if out[1].Lifecycle.StopReason != string(acpsdk.StopReasonCancelled) {
-		t.Fatalf("stopReason = %q, want cancelled", out[1].Lifecycle.StopReason)
-	}
-}
-
-func TestEnsureTerminalLifecycleForwardsExplicitTerminalOnce(t *testing.T) {
-	src := make(chan Envelope, 4)
-	src <- Envelope{Kind: KindNotice, Notice: "hello"}
-	src <- TurnCompleted("h", "r", "t", time.Time{})
-	src <- TurnFailed("h", "r", "t", "late", time.Time{})
-	src <- Envelope{Kind: KindNotice, Notice: "late"}
-	close(src)
-
-	out := collectLifecycleTestEnvelopes(EnsureTerminalLifecycle(src, "h", "r", "t"))
-	if len(out) != 2 {
-		t.Fatalf("events = %#v, want pre-terminal notice plus first terminal", out)
-	}
-	if out[0].Kind != KindNotice {
-		t.Fatalf("first event = %#v, want notice", out[0])
-	}
-	assertLifecycleState(t, out[1], LifecycleStateCompleted)
-}
-
-func TestEnsureTerminalLifecycleDoesNotTreatApprovalSettlementAsTurnTerminal(t *testing.T) {
-	src := make(chan Envelope, 2)
-	src <- Envelope{
-		Kind:              KindLifecycle,
-		Scope:             ScopeMain,
-		ApprovalRequestID: "approval-1",
-		Lifecycle:         &Lifecycle{State: LifecycleStateCompleted, Reason: "resolved"},
-	}
-	src <- Envelope{Kind: KindNotice, Notice: "turn continued"}
-	close(src)
-
-	out := collectLifecycleTestEnvelopes(EnsureTerminalLifecycle(src, "h", "r", "t"))
-	if len(out) != 3 || out[0].ApprovalRequestID != "approval-1" || out[1].Notice != "turn continued" {
-		t.Fatalf("events = %#v, want settlement, continued output, and synthesized terminal", out)
-	}
-	if !IsTurnTerminalLifecycle(out[2]) || out[2].Lifecycle.State != LifecycleStateCompleted {
-		t.Fatalf("last event = %#v, want synthesized Turn completion", out[2])
-	}
-}
-
 func TestIsCancelledReason(t *testing.T) {
 	for _, reason := range []string{"context canceled", "providers: context canceled", "cancelled by user", "canceled"} {
 		if !IsCancelledReason(reason) {
@@ -737,23 +654,5 @@ func TestIsCancelledReason(t *testing.T) {
 		if IsCancelledReason(reason) {
 			t.Fatalf("IsCancelledReason(%q) = true", reason)
 		}
-	}
-}
-
-func collectLifecycleTestEnvelopes(events <-chan Envelope) []Envelope {
-	var out []Envelope
-	for env := range events {
-		out = append(out, env)
-	}
-	return out
-}
-
-func assertLifecycleState(t *testing.T, env Envelope, state string) {
-	t.Helper()
-	if !IsTerminalLifecycle(env) {
-		t.Fatalf("env = %#v, want terminal lifecycle", env)
-	}
-	if env.Lifecycle == nil || env.Lifecycle.State != state {
-		t.Fatalf("lifecycle = %#v, want state %q", env.Lifecycle, state)
 	}
 }
