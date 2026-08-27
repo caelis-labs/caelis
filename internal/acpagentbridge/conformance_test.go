@@ -22,8 +22,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 	acpsemantic "github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 

@@ -12,7 +12,8 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
-	protocolacp "github.com/caelis-labs/caelis/protocol/acp"
+	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
+	protocolacp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // serverMaxFrameSize accommodates the product's 32 MB decoded aggregate image
@@ -280,7 +281,7 @@ func (c *serverConn) SessionUpdate(_ context.Context, notification protocolacp.S
 }
 
 func (c *serverConn) afterAvailableCommands(inbound *serverInboundRequest, sessionID string, delay time.Duration) error {
-	handler, ok := c.agent.(protocolacp.CommandProvider)
+	handler, ok := c.agent.(commandProvider)
 	sessionID = strings.TrimSpace(sessionID)
 	if !ok || sessionID == "" {
 		return nil
@@ -306,7 +307,7 @@ func (c *serverConn) afterAvailableCommands(inbound *serverInboundRequest, sessi
 	})
 }
 
-func (c *serverConn) emitAvailableCommands(ctx context.Context, handler protocolacp.CommandProvider, sessionID string) {
+func (c *serverConn) emitAvailableCommands(ctx context.Context, handler commandProvider, sessionID string) {
 	cmds, err := handler.AvailableCommands(ctx, sessionID)
 	if err != nil || len(cmds) == 0 {
 		return
@@ -340,7 +341,7 @@ func (c serverPromptCallbacks) RequestPermission(ctx context.Context, req protoc
 	return c.conn.RequestPermission(ctx, req)
 }
 
-func (c *serverConn) promptCallbacks() protocolacp.PromptCallbacks {
+func (c *serverConn) promptCallbacks() PromptCallbacks {
 	return serverPromptCallbacks{conn: c}
 }
 
@@ -385,7 +386,7 @@ func responseOrError(result any, err error) (any, *acpsdk.RequestError) {
 	if err == nil {
 		return result, nil
 	}
-	if errors.Is(err, protocolacp.ErrCapabilityUnsupported) {
+	if errors.Is(err, runtimeacp.ErrCapabilityUnsupported) {
 		return nil, methodNotFound()
 	}
 	return nil, responseError(err)
@@ -410,4 +411,4 @@ func methodNotFound() *acpsdk.RequestError {
 	return &acpsdk.RequestError{Code: -32601, Message: "Method not found"}
 }
 
-var _ protocolacp.PromptCallbacks = serverPromptCallbacks{}
+var _ PromptCallbacks = serverPromptCallbacks{}

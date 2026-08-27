@@ -22,9 +22,9 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/loader"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/version"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 	"github.com/google/uuid"
 )
@@ -63,14 +63,16 @@ type Config struct {
 	PresentationClient appserver.PresentationClient
 	BuildAgentSpec     BuildAgentSpecFunc
 	Projector          projector.Projector
-	Loader             acp.SessionLoader
-	Modes              acp.ModeProvider
+	Loader             SessionLoader
+	Modes              SessionModeReader
+	ModeWriter         SessionModeWriter
 	// ApprovalModes is the dedicated approval-routing mode source. Do not point
 	// this at app-owned assembly modes; those are client-visible session modes,
 	// while approval routing is restricted to manual/auto-review.
-	ApprovalModes       acp.ModeProvider
-	Config              acp.ConfigProvider
-	Commands            acp.CommandProvider
+	ApprovalModes       SessionModeReader
+	Config              SessionConfigReader
+	ConfigWriter        SessionConfigWriter
+	Commands            CommandProvider
 	PromptRouterFactory PromptRouterFactory
 	// SlashResultFormatter is required when PromptRouterFactory is configured.
 	SlashResultFormatter SlashResultFormatter
@@ -106,11 +108,13 @@ type RuntimeAgent struct {
 	presentationClient    appserver.PresentationClient
 	buildAgentSpec        BuildAgentSpecFunc
 	projector             projector.Projector
-	loader                acp.SessionLoader
-	modes                 acp.ModeProvider
-	approvalModes         acp.ModeProvider
-	config                acp.ConfigProvider
-	commands              acp.CommandProvider
+	loader                SessionLoader
+	modes                 SessionModeReader
+	modeWriter            SessionModeWriter
+	approvalModes         SessionModeReader
+	config                SessionConfigReader
+	configWriter          SessionConfigWriter
+	commands              CommandProvider
 	promptRouterFactory   PromptRouterFactory
 	slashResultFormatter  SlashResultFormatter
 	taskStreamClient      taskstream.Client
@@ -196,8 +200,10 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		projector:             eventProjector,
 		loader:                sessionLoader,
 		modes:                 cfg.Modes,
+		modeWriter:            cfg.ModeWriter,
 		approvalModes:         approvalModes,
 		config:                cfg.Config,
+		configWriter:          cfg.ConfigWriter,
 		commands:              cfg.Commands,
 		promptRouterFactory:   cfg.PromptRouterFactory,
 		slashResultFormatter:  cfg.SlashResultFormatter,
@@ -419,9 +425,9 @@ func canonicalACPWorkspacePath(path string) string {
 	return filepath.Clean(absolute)
 }
 
-func (a *RuntimeAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest, cb acp.PromptCallbacks) (acp.LoadSessionResponse, error) {
+func (a *RuntimeAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest, cb PromptCallbacks) (acp.LoadSessionResponse, error) {
 	if a.loader == nil && a.sessionClient == nil {
-		return acp.LoadSessionResponse{}, acp.ErrCapabilityUnsupported
+		return acp.LoadSessionResponse{}, ErrCapabilityUnsupported
 	}
 	activeSession, err := a.session(ctx, req.SessionID)
 	if err != nil {
@@ -547,7 +553,7 @@ func (a *RuntimeAgent) SetSessionMode(ctx context.Context, req acp.SetSessionMod
 			return acp.SetSessionModeResponse{}, err
 		}
 		if snapshot.Modes == nil {
-			return acp.SetSessionModeResponse{}, acp.ErrCapabilityUnsupported
+			return acp.SetSessionModeResponse{}, ErrCapabilityUnsupported
 		}
 		base := acpSessionConfigurationWriteBase(active, "mode")
 		var result appserver.CommandResult
@@ -563,17 +569,17 @@ func (a *RuntimeAgent) SetSessionMode(ctx context.Context, req acp.SetSessionMod
 				Mode:      strings.TrimSpace(req.ModeID),
 			})
 		default:
-			return acp.SetSessionModeResponse{}, acp.ErrCapabilityUnsupported
+			return acp.SetSessionModeResponse{}, ErrCapabilityUnsupported
 		}
 		return acp.SetSessionModeResponse{}, requireCommittedACPConfiguration("set mode", result, err)
 	}
-	if a.modes == nil {
-		return acp.SetSessionModeResponse{}, acp.ErrCapabilityUnsupported
+	if a.modeWriter == nil {
+		return acp.SetSessionModeResponse{}, ErrCapabilityUnsupported
 	}
 	if _, err := a.targetSession(ctx, req.SessionID); err != nil {
 		return acp.SetSessionModeResponse{}, err
 	}
-	return a.modes.SetSessionMode(ctx, req)
+	return a.modeWriter.SetSessionMode(ctx, req)
 }
 
 func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
@@ -595,7 +601,7 @@ func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSe
 				return acp.SetSessionConfigOptionResponse{}, snapshotErr
 			}
 			if snapshot.Modes == nil {
-				return acp.SetSessionConfigOptionResponse{}, acp.ErrCapabilityUnsupported
+				return acp.SetSessionConfigOptionResponse{}, ErrCapabilityUnsupported
 			}
 			if strings.TrimSpace(snapshot.Modes.Target) == appserver.PresentationModeTargetApp {
 				result, err = a.configurationClient.ConfigureSessionPresentationMode(ctx, appserver.SessionPresentationModeRequest{WriteBase: base, Mode: strings.TrimSpace(value)})
@@ -604,7 +610,7 @@ func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSe
 			} else if strings.TrimSpace(snapshot.Modes.Target) == appserver.PresentationModeTargetApproval {
 				result, err = a.configurationClient.ConfigureSessionMode(ctx, appserver.SessionModeRequest{WriteBase: base, Mode: strings.TrimSpace(value)})
 			} else {
-				return acp.SetSessionConfigOptionResponse{}, acp.ErrCapabilityUnsupported
+				return acp.SetSessionConfigOptionResponse{}, ErrCapabilityUnsupported
 			}
 		case "model":
 			result, err = a.configurationClient.UseSessionModel(ctx, appserver.SessionModelRequest{
@@ -643,13 +649,13 @@ func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSe
 		}
 		return acp.SetSessionConfigOptionResponse{ConfigOptions: acpPresentationConfigOptions(snapshot.ConfigOptions)}, nil
 	}
-	if a.config == nil {
-		return acp.SetSessionConfigOptionResponse{}, acp.ErrCapabilityUnsupported
+	if a.configWriter == nil {
+		return acp.SetSessionConfigOptionResponse{}, ErrCapabilityUnsupported
 	}
 	if _, err := a.targetSession(ctx, req.SessionID); err != nil {
 		return acp.SetSessionConfigOptionResponse{}, err
 	}
-	return a.config.SetSessionConfigOption(ctx, req)
+	return a.configWriter.SetSessionConfigOption(ctx, req)
 }
 
 func acpSessionConfigurationWriteBase(active session.Session, action string) appserver.WriteBase {
@@ -713,7 +719,7 @@ func (a *RuntimeAgent) promptApprovalMode(ctx context.Context, activeSession ses
 	return approval.NormalizeMode(modes.CurrentModeID), nil
 }
 
-func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp.PromptCallbacks) (acp.PromptResponse, error) {
+func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb PromptCallbacks) (acp.PromptResponse, error) {
 	activeSession, err := a.targetSession(ctx, req.SessionID)
 	if err != nil {
 		return acp.PromptResponse{}, err
@@ -781,7 +787,7 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 }
 
-func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, cb acp.PromptCallbacks, ref session.SessionRef, handle agent.Runner, suppressUserEcho bool) error {
+func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, cb PromptCallbacks, ref session.SessionRef, handle agent.Runner, suppressUserEcho bool) error {
 	if handle == nil {
 		return nil
 	}
@@ -1084,7 +1090,7 @@ func newACPSessionOperationID(action string) string {
 func (a *RuntimeAgent) loadSessionFromClient(
 	ctx context.Context,
 	req acp.LoadSessionRequest,
-	cb acp.PromptCallbacks,
+	cb PromptCallbacks,
 ) (acp.LoadSessionResponse, error) {
 	sessionID := strings.TrimSpace(req.SessionID)
 	reconnected, err := a.sessionClient.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
@@ -1201,10 +1207,10 @@ type defaultSessionLoader struct {
 func (l defaultSessionLoader) LoadSession(
 	ctx context.Context,
 	req acp.LoadSessionRequest,
-	cb acp.PromptCallbacks,
+	cb PromptCallbacks,
 ) (acp.LoadSessionResponse, error) {
 	if l.inner == nil {
-		return acp.LoadSessionResponse{}, acp.ErrCapabilityUnsupported
+		return acp.LoadSessionResponse{}, ErrCapabilityUnsupported
 	}
 	return l.inner.LoadSession(ctx, req, cb)
 }

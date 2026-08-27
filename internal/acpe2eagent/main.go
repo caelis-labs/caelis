@@ -32,7 +32,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
-	"github.com/caelis-labs/caelis/protocol/acp"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 	surfaceacp "github.com/caelis-labs/caelis/surfaces/acp"
 )
 
@@ -62,7 +62,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	modeProvider, configProvider := bridgeassembly.ProvidersFromAssembly(bridgeassembly.ProviderConfig{
+	providers := bridgeassembly.ProvidersFromAssembly(bridgeassembly.ProviderConfig{
 		Assembly: assembly,
 		Sessions: sessions,
 		AppName:  "caelis",
@@ -120,19 +120,37 @@ func main() {
 			Version: "0.1.0",
 		},
 		BuildAgentSpec: func(ctx context.Context, active session.Session, _ acp.PromptRequest) (agent.AgentSpec, error) {
-			return buildSpec(ctx, active, llm, assembly, modeProvider, configProvider)
+			return buildSpec(ctx, active, llm, assembly, providers.Modes, providers.Config)
 		},
-		Modes:               modeProvider,
-		Config:              configProvider,
+		Modes:               providers.Modes,
+		ModeWriter:          providers.ModeWriter,
+		Config:              providers.Config,
+		ConfigWriter:        providers.ConfigWriter,
 		TaskStreams:         acptaskstream.New(controlTaskStreams),
 		TaskStreamPrincipal: acptaskstream.Principal{ID: "acp"},
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := surfaceacp.ServeStdio(context.Background(), agent, os.Stdin, os.Stdout); err != nil {
+	if err := surfaceacp.ServeStdio(context.Background(), &surfaceRuntimeAgent{RuntimeAgent: agent}, os.Stdin, os.Stdout); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// surfaceRuntimeAgent keeps the wire fixture's direct Runtime bridge behind
+// the Surface-owned per-connection callback contract.
+type surfaceRuntimeAgent struct {
+	*runtimeacp.RuntimeAgent
+}
+
+var _ surfaceacp.Agent = (*surfaceRuntimeAgent)(nil)
+
+func (a *surfaceRuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, callbacks surfaceacp.PromptCallbacks) (acp.PromptResponse, error) {
+	return a.RuntimeAgent.Prompt(ctx, req, callbacks)
+}
+
+func (a *surfaceRuntimeAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest, callbacks surfaceacp.PromptCallbacks) (acp.LoadSessionResponse, error) {
+	return a.RuntimeAgent.LoadSession(ctx, req, callbacks)
 }
 
 type acpe2eTaskStreamAuthorizer struct {
@@ -338,8 +356,8 @@ func buildSpec(
 	active session.Session,
 	llm model.LLM,
 	assembly assemblyapi.ResolvedAssembly,
-	modes acp.ModeProvider,
-	configs acp.ConfigProvider,
+	modes runtimeacp.SessionModeReader,
+	configs runtimeacp.SessionConfigReader,
 ) (agent.AgentSpec, error) {
 	rt, err := host.New(host.Config{CWD: active.CWD})
 	if err != nil {
@@ -377,8 +395,8 @@ func selectedAssemblyMetadata(
 	ctx context.Context,
 	active session.Session,
 	resolved assemblyapi.ResolvedAssembly,
-	modes acp.ModeProvider,
-	configs acp.ConfigProvider,
+	modes runtimeacp.SessionModeReader,
+	configs runtimeacp.SessionConfigReader,
 ) (map[string]any, error) {
 	metadata := map[string]any{}
 	if modes != nil {

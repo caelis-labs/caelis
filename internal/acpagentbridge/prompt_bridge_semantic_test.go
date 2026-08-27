@@ -3,7 +3,7 @@ package acpagentbridge
 import (
 	"testing"
 
-	"github.com/caelis-labs/caelis/protocol/acp"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestApprovalDecisionUsesSharedSemanticCodec(t *testing.T) {

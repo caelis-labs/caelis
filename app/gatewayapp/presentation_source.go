@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const (
@@ -33,9 +33,17 @@ type gatewayPresentationSource struct {
 	bindingStatusFn    func(context.Context) (agentbinding.Status, error)
 	controllerStatusFn func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
 	listAgentsFn       func() []ACPAgentInfo
-	fallbackModes      acp.ModeProvider
+	fallbackModes      presentationModeReader
 	useFallbackModes   bool
-	fallbackConfig     acp.ConfigProvider
+	fallbackConfig     presentationConfigReader
+}
+
+type presentationModeReader interface {
+	SessionModes(context.Context, session.Session) (*acp.SessionModeState, error)
+}
+
+type presentationConfigReader interface {
+	SessionConfigOptions(context.Context, session.Session) ([]acp.SessionConfigOption, error)
 }
 
 type gatewayPresentationSourceDeps struct {
@@ -50,7 +58,7 @@ type gatewayPresentationSourceDeps struct {
 	listAgentsFn       func() []ACPAgentInfo
 }
 
-func newGatewayPresentationSource(deps gatewayPresentationSourceDeps, fallbackModes acp.ModeProvider, useFallbackModes bool, fallbackConfig acp.ConfigProvider) gatewayPresentationSource {
+func newGatewayPresentationSource(deps gatewayPresentationSourceDeps, fallbackModes presentationModeReader, useFallbackModes bool, fallbackConfig presentationConfigReader) gatewayPresentationSource {
 	return gatewayPresentationSource{
 		sessions:           deps.sessions,
 		appName:            deps.appName,

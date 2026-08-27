@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	protocolacp "github.com/caelis-labs/caelis/protocol/acp"
+	protocolacp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestServerRoutesSessionSteeringWithoutPromptCallbacks(t *testing.T) {

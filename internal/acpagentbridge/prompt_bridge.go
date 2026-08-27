@@ -9,13 +9,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
-func (a *RuntimeAgent) runPromptRouter(runCtx context.Context, bridgeCtx context.Context, activeSession session.Session, input string, contentParts []model.ContentPart, cb acp.PromptCallbacks) (bool, error) {
+func (a *RuntimeAgent) runPromptRouter(runCtx context.Context, bridgeCtx context.Context, activeSession session.Session, input string, contentParts []model.ContentPart, cb PromptCallbacks) (bool, error) {
 	if a == nil || a.promptRouterFactory == nil {
 		return false, nil
 	}
@@ -79,7 +79,7 @@ func promptRouterAttachmentsFromContentParts(input string, parts []model.Content
 	return out
 }
 
-func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession session.Session, result controlprompt.Result, cb acp.PromptCallbacks, suppressUserEcho bool) error {
+func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession session.Session, result controlprompt.Result, cb PromptCallbacks, suppressUserEcho bool) error {
 	if cb == nil {
 		return nil
 	}
@@ -206,7 +206,7 @@ const acpTaskStreamParentDrainTimeout = 2 * time.Second
 // stream mounted by that envelope.
 func (a *RuntimeAgent) emitTaskAwareControlEnvelope(
 	ctx context.Context,
-	cb acp.PromptCallbacks,
+	cb PromptCallbacks,
 	sessionID string,
 	turn controlprompt.Turn,
 	taskMux *acpTaskStreamMux,
@@ -232,7 +232,7 @@ func (a *RuntimeAgent) emitTaskAwareControlEnvelope(
 // observation from delaying the canonical Task result indefinitely.
 func (a *RuntimeAgent) drainACPTaskStreamBeforeParentClose(
 	ctx context.Context,
-	cb acp.PromptCallbacks,
+	cb PromptCallbacks,
 	sessionID string,
 	taskMux *acpTaskStreamMux,
 	taskEvents *<-chan eventstream.Envelope,
@@ -282,7 +282,7 @@ func (a *RuntimeAgent) drainACPTaskStreamBeforeParentClose(
 
 func (a *RuntimeAgent) drainReadyACPTaskStream(
 	ctx context.Context,
-	cb acp.PromptCallbacks,
+	cb PromptCallbacks,
 	sessionID string,
 	taskEvents *<-chan eventstream.Envelope,
 	outboundFilter *acpNarrativeFilter,
@@ -309,7 +309,7 @@ func (a *RuntimeAgent) drainReadyACPTaskStream(
 // active approval bootstrap may call RequestPermission after reconnect.
 func (a *RuntimeAgent) emitControlBackfillEnvelope(
 	ctx context.Context,
-	cb acp.PromptCallbacks,
+	cb PromptCallbacks,
 	sessionID string,
 	env eventstream.Envelope,
 	outboundFilter *acpNarrativeFilter,
@@ -342,7 +342,7 @@ func promptRouterResultSessionID(activeSession session.Session, result controlpr
 	return strings.TrimSpace(activeSession.SessionID)
 }
 
-func (a *RuntimeAgent) emitPromptRouterSideEffects(ctx context.Context, cb acp.PromptCallbacks, activeSession session.Session, result controlprompt.Result) error {
+func (a *RuntimeAgent) emitPromptRouterSideEffects(ctx context.Context, cb PromptCallbacks, activeSession session.Session, result controlprompt.Result) error {
 	sessionID := promptRouterResultSessionID(activeSession, result)
 	if result.StatusUpdate != nil || result.ClearHistory || result.RefreshStatus {
 		if err := a.emitPromptRouterSessionState(ctx, cb, activeSession, sessionID, result.ClearHistory); err != nil {
@@ -355,7 +355,7 @@ func (a *RuntimeAgent) emitPromptRouterSideEffects(ctx context.Context, cb acp.P
 	return nil
 }
 
-func (a *RuntimeAgent) emitPromptRouterSessionState(ctx context.Context, cb acp.PromptCallbacks, activeSession session.Session, sessionID string, includeSessionInfo bool) error {
+func (a *RuntimeAgent) emitPromptRouterSessionState(ctx context.Context, cb PromptCallbacks, activeSession session.Session, sessionID string, includeSessionInfo bool) error {
 	targetSession, err := a.promptRouterTargetSession(ctx, activeSession, sessionID)
 	if err != nil {
 		return err
@@ -411,7 +411,7 @@ func (a *RuntimeAgent) promptRouterTargetSession(ctx context.Context, activeSess
 	return a.session(ctx, sessionID)
 }
 
-func (a *RuntimeAgent) emitAvailableCommandsUpdate(ctx context.Context, cb acp.PromptCallbacks, sessionID string) error {
+func (a *RuntimeAgent) emitAvailableCommandsUpdate(ctx context.Context, cb PromptCallbacks, sessionID string) error {
 	if a.commands == nil {
 		return nil
 	}
@@ -428,7 +428,7 @@ func (a *RuntimeAgent) emitAvailableCommandsUpdate(ctx context.Context, cb acp.P
 	})
 }
 
-func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCallbacks, fallbackSessionID string, turn controlprompt.Turn, env eventstream.Envelope, outboundFilter *acpNarrativeFilter) error {
+func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbacks, fallbackSessionID string, turn controlprompt.Turn, env eventstream.Envelope, outboundFilter *acpNarrativeFilter) error {
 	if cb == nil {
 		return nil
 	}
@@ -514,7 +514,7 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCal
 
 func emitACPNotice(
 	ctx context.Context,
-	cb acp.PromptCallbacks,
+	cb PromptCallbacks,
 	sessionID string,
 	env eventstream.Envelope,
 	fallbackMessageID string,
@@ -552,7 +552,7 @@ func firstNonEmptyNoticeMessageID(values ...string) string {
 	return ""
 }
 
-func emitFilteredSessionUpdate(ctx context.Context, cb acp.PromptCallbacks, notification acp.SessionNotification, outboundFilter *acpNarrativeFilter) error {
+func emitFilteredSessionUpdate(ctx context.Context, cb PromptCallbacks, notification acp.SessionNotification, outboundFilter *acpNarrativeFilter) error {
 	if outboundFilter != nil {
 		filtered, ok := outboundFilter.FilterNotification(notification)
 		if !ok {

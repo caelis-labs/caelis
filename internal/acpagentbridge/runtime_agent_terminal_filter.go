@@ -5,13 +5,12 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type normalizingPromptCallbacks struct {
-	inner acp.PromptCallbacks
+	inner PromptCallbacks
 }
 
 func (c normalizingPromptCallbacks) SessionUpdate(ctx context.Context, notification acp.SessionNotification) error {
@@ -118,7 +117,7 @@ func terminalExtensionMetaFromACPContent(meta map[string]any, terminalID string,
 		} else if terminalID == "" {
 			terminalID = defaultTerminalID
 		}
-		text.WriteString(schema.ExtractTextValue(item.Content))
+		text.WriteString(acp.ExtractTextValue(item.Content))
 	}
 	if !hasTerminalContent && terminalID == "" {
 		return meta, content

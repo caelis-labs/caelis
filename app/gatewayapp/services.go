@@ -15,7 +15,6 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
-	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
 type ModelService struct {
@@ -71,7 +70,7 @@ func (s *Stack) ControlStatus() StatusService {
 	return s.composition.Status()
 }
 
-func (s *Stack) PresentationSource(modes acp.ModeProvider, useFallbackModes bool, configs acp.ConfigProvider) PresentationSource {
+func (s *Stack) PresentationSource(modes presentationModeReader, useFallbackModes bool, configs presentationConfigReader) PresentationSource {
 	if s == nil {
 		return newGatewayPresentationSource(gatewayPresentationSourceDeps{}, modes, useFallbackModes, configs)
 	}

@@ -13,8 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/internal/testenv"
-	"github.com/caelis-labs/caelis/protocol/acp"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestProductACPStreamingChunksShareOneMessageID(t *testing.T) {
@@ -220,10 +219,10 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
-func usageUpdates(notifications []acp.SessionNotification) []schema.UsageUpdate {
-	out := make([]schema.UsageUpdate, 0, 1)
+func usageUpdates(notifications []acp.SessionNotification) []acp.UsageUpdate {
+	out := make([]acp.UsageUpdate, 0, 1)
 	for _, notification := range notifications {
-		if usage, ok := notification.Update.(schema.UsageUpdate); ok {
+		if usage, ok := notification.Update.(acp.UsageUpdate); ok {
 			out = append(out, usage)
 		}
 	}

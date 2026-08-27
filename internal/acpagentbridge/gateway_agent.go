@@ -4,7 +4,7 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/internal/version"
-	"github.com/caelis-labs/caelis/protocol/acp"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type GatewayAgentConfig struct {

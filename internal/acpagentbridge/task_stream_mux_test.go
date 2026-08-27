@@ -14,10 +14,9 @@ import (
 	sdkstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
@@ -37,8 +36,8 @@ func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
 	meta := metautil.WithTerminalInfo(nil, "command-1")
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "command-1",
 			RawOutput: map[string]any{"handle": "command", "state": "running", "target_kind": "command"}, Meta: meta,
 		},
 	})
@@ -54,7 +53,7 @@ func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
 	terminalMeta := metautil.WithTerminalOutput(nil, "command-1", "line\n")
 	sub.events <- eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1", Meta: terminalMeta},
+		Update: acp.ToolCallUpdate{SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "command-1", Meta: terminalMeta},
 	}
 	select {
 	case envelope := <-mux.Events():
@@ -68,7 +67,7 @@ func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
 
 	sub.events <- eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
-		Update: schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "nested", Meta: terminalMeta},
+		Update: acp.ToolCallUpdate{SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "nested", Meta: terminalMeta},
 	}
 	select {
 	case envelope := <-mux.Events():
@@ -78,8 +77,8 @@ func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
 	exitCode := 7
 	sub.events <- eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "command-1",
 			Meta: metautil.WithTerminalExit(nil, "command-1", &exitCode, nil),
 		},
 	}
@@ -122,8 +121,8 @@ func TestACPTaskStreamMuxSilencesRecoverableSubagentGap(t *testing.T) {
 	defer mux.Close()
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo,
 			ToolCallID:    "spawn-1",
 			RawOutput: map[string]any{
 				"handle": "maia", "state": "running", "target_kind": "subagent",
@@ -156,10 +155,10 @@ func TestACPTaskStreamMuxSilencesRecoverableSubagentGap(t *testing.T) {
 	sub.events <- eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1",
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", ParentTool: parent,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
+		Update: acp.ContentChunk{
+			SessionUpdate: acp.UpdateAgentMessage,
 			MessageID:     "child-message",
-			Content:       schema.TextContent{Type: "text", Text: "current child output"},
+			Content:       acp.TextContent{Type: "text", Text: "current child output"},
 		},
 	}
 	select {
@@ -252,8 +251,8 @@ func TestACPTaskStreamMuxDetachedDeliveryOutlivesParentPrompt(t *testing.T) {
 	meta := acpMuxCommandMeta()
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "command-1",
 			RawOutput: map[string]any{"handle": "command", "state": "running", "target_kind": "command"}, Meta: meta,
 		},
 	})
@@ -267,8 +266,8 @@ func TestACPTaskStreamMuxDetachedDeliveryOutlivesParentPrompt(t *testing.T) {
 	agent.detachACPTaskStreamMux(context.Background(), mux, callbacks, "session-1", newACPNarrativeFilter(false))
 	sub.events <- eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "command-1",
 			Meta: metautil.WithTerminalOutput(nil, "command-1", "after parent\n"),
 		},
 	}
@@ -284,8 +283,8 @@ func TestACPTaskStreamMuxDetachedDeliveryOutlivesParentPrompt(t *testing.T) {
 	exitCode := 0
 	sub.events <- eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "command-1",
 			Meta: metautil.WithTerminalExit(nil, "command-1", &exitCode, nil),
 		},
 	}
@@ -318,10 +317,10 @@ func TestEmitTaskAwareControlEnvelopeSuppressesChildStreamAndClosesParentOnceFro
 			ToolCallID: "spawn-1",
 			ToolName:   "Spawn",
 		},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
+		Update: acp.ContentChunk{
+			SessionUpdate: acp.UpdateAgentMessage,
 			MessageID:     "child-message-1",
-			Content:       schema.TextContent{Type: "text", Text: "retained child output"},
+			Content:       acp.TextContent{Type: "text", Text: "retained child output"},
 		},
 	}
 	var taskEventStream <-chan eventstream.Envelope = taskEvents
@@ -335,14 +334,14 @@ func TestEmitTaskAwareControlEnvelopeSuppressesChildStreamAndClosesParentOnceFro
 	}
 	mux.signalBoundary("spawn-1")
 
-	completed := schema.ToolStatusCompleted
+	completed := acp.ToolStatusCompleted
 	waitEnvelope := eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
 		Scope:     eventstream.ScopeMain,
 		Final:     true,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo,
 			ToolCallID:    "wait-1",
 			Status:        &completed,
 			RawInput:      map[string]any{"action": "wait", "handle": "yara"},
@@ -383,18 +382,18 @@ func TestEmitTaskAwareControlEnvelopeSuppressesChildStreamAndClosesParentOnceFro
 	}
 	parentCloses := 0
 	for _, notification := range notifications {
-		if chunk, ok := notification.Update.(schema.ContentChunk); ok {
+		if chunk, ok := notification.Update.(acp.ContentChunk); ok {
 			_, _, text, _ := acpContentChunkText(chunk)
 			if strings.Contains(text, "retained child output") {
 				t.Fatalf("child stream leaked as ACP narrative: %#v", notification)
 			}
 		}
-		update, ok := notification.Update.(schema.ToolCallUpdate)
-		if !ok || update.ToolCallID != "spawn-1" || update.Status == nil || *update.Status != schema.ToolStatusCompleted {
+		update, ok := notification.Update.(acp.ToolCallUpdate)
+		if !ok || update.ToolCallID != "spawn-1" || update.Status == nil || *update.Status != acp.ToolStatusCompleted {
 			continue
 		}
 		parentCloses++
-		assertACPChildFinalResult(t, notification, schema.ToolStatusCompleted, "fallback final")
+		assertACPChildFinalResult(t, notification, acp.ToolStatusCompleted, "fallback final")
 	}
 	if parentCloses != 1 {
 		t.Fatalf("Spawn parent closes = %d, want exactly one standard result after repeated Task wait", parentCloses)
@@ -418,8 +417,8 @@ func TestACPTaskStreamMuxProjectsControlTaskRecordThroughACPAdapter(t *testing.T
 	meta := acpMuxCommandMeta()
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "command-1",
 			RawOutput: map[string]any{"handle": "command", "state": "running", "target_kind": "command"}, Meta: meta,
 		},
 	})
@@ -471,8 +470,8 @@ func TestACPTaskStreamMuxMakesSubscribeFailureVisible(t *testing.T) {
 	meta := acpMuxCommandMeta()
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "command-1",
 			RawOutput: map[string]any{"handle": "command", "state": "running", "target_kind": "command"}, Meta: meta,
 		},
 	})
@@ -508,8 +507,8 @@ func TestACPTaskStreamMuxRetriesAnchorAfterEarlyDirectoryMiss(t *testing.T) {
 	meta := acpMuxCommandMeta()
 	anchor := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "command-1",
 			RawOutput: map[string]any{"handle": "command", "state": "running", "target_kind": "command"}, Meta: meta,
 		},
 	}
@@ -553,8 +552,8 @@ func TestACPTaskStreamMuxExhaustsRetryWithOneSanitizedNotice(t *testing.T) {
 	meta := acpMuxCommandMeta()
 	anchor := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "command-1",
 			RawOutput: map[string]any{"handle": "command-43", "state": "running", "target_kind": "command"}, Meta: meta,
 		},
 	}
@@ -774,9 +773,9 @@ func TestACPTaskStreamMuxDoesNotRetryAfterParentTerminalOrSeal(t *testing.T) {
 			t.Fatal("initial bounded attach miss emitted no availability notice")
 		}
 		calls := service.subscribeCallCount()
-		completed := schema.ToolStatusCompleted
+		completed := acp.ToolStatusCompleted
 		terminal := anchor
-		update := terminal.Update.(schema.ToolCallUpdate)
+		update := terminal.Update.(acp.ToolCallUpdate)
 		update.Status = &completed
 		update.RawOutput = map[string]any{"handle": "command", "state": "completed", "target_kind": "command"}
 		terminal.Update = update
@@ -812,14 +811,14 @@ func TestACPTaskStreamAnchorUsesTypedToolStatusForParentTerminal(t *testing.T) {
 	t.Parallel()
 
 	rawTerminal := acpMuxCommandAnchor("command")
-	rawUpdate := rawTerminal.Update.(schema.ToolCallUpdate)
+	rawUpdate := rawTerminal.Update.(acp.ToolCallUpdate)
 	rawUpdate.RawOutput = map[string]any{"handle": "command", "state": "completed", "target_kind": "command"}
 	rawTerminal.Update = rawUpdate
 	anchor, ok := acpTaskStreamAnchorFromEnvelope(rawTerminal)
 	if !ok {
 		meta := eventstream.UpdateMeta(rawTerminal.Update)
 		info, hasInfo := metautil.TerminalInfo(meta)
-		update := rawTerminal.Update.(schema.ToolCallUpdate)
+		update := rawTerminal.Update.(acp.ToolCallUpdate)
 		output, _ := update.RawOutput.(map[string]any)
 		t.Fatalf("raw-output anchor was not recognized: target_kind=%q terminal=%#v/%t meta=%#v output=%#v",
 			display.ToolTaskTargetKind(nil, output, meta), info, hasInfo, meta, output)
@@ -829,8 +828,8 @@ func TestACPTaskStreamAnchorUsesTypedToolStatusForParentTerminal(t *testing.T) {
 	}
 
 	typedTerminal := rawTerminal
-	completed := schema.ToolStatusCompleted
-	typedUpdate := typedTerminal.Update.(schema.ToolCallUpdate)
+	completed := acp.ToolStatusCompleted
+	typedUpdate := typedTerminal.Update.(acp.ToolCallUpdate)
 	typedUpdate.Status = &completed
 	typedTerminal.Update = typedUpdate
 	anchor, ok = acpTaskStreamAnchorFromEnvelope(typedTerminal)
@@ -861,8 +860,8 @@ func TestACPTaskStreamAnchorDoesNotTrustRuntimeToolName(t *testing.T) {
 			})
 			envelope := eventstream.Envelope{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-				Update: schema.ToolCallUpdate{
-					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: tc.callID,
+				Update: acp.ToolCallUpdate{
+					SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: tc.callID,
 					RawOutput: tc.output, Meta: meta,
 				},
 			}
@@ -883,8 +882,8 @@ func TestACPTaskStreamMuxStopsInFlightAttachRetryAtObservationBoundary(t *testin
 		{
 			name: "parent terminal",
 			stop: func(mux *acpTaskStreamMux, anchor eventstream.Envelope) {
-				completed := schema.ToolStatusCompleted
-				update := anchor.Update.(schema.ToolCallUpdate)
+				completed := acp.ToolStatusCompleted
+				update := anchor.Update.(acp.ToolCallUpdate)
 				update.Status = &completed
 				update.RawOutput = map[string]any{"handle": "command", "state": "completed", "target_kind": "command"}
 				anchor.Update = update
@@ -970,8 +969,8 @@ func TestACPTaskStreamMuxKeepsHardResolutionReasonsExplicit(t *testing.T) {
 			defer mux.Close()
 			mux.Observe(eventstream.Envelope{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-				Update: schema.ToolCallUpdate{
-					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
+				Update: acp.ToolCallUpdate{
+					SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "command-1",
 					RawOutput: map[string]any{"handle": "command", "state": "running", "target_kind": "command"},
 					Meta:      acpMuxCommandMeta(),
 				},

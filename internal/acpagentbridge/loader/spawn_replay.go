@@ -6,11 +6,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // spawnReplayProjector reconstructs final-only stdio Spawn results from durable
@@ -66,7 +65,7 @@ func (p *spawnReplayProjector) normalize(
 	if !ok || !toolStatusFinal(update.Status) || !sessionEventOwnsSpawnCall(event, update.ToolCallID) {
 		return notification
 	}
-	rawOutput := schema.NormalizeRawMap(update.RawOutput)
+	rawOutput := acp.NormalizeRawMap(update.RawOutput)
 	update = withSpawnReplayResult(update, rawOutput)
 	p.closed[spawnReplayKeyForRawOutput(update.ToolCallID, rawOutput)] = struct{}{}
 	notification.Update = update

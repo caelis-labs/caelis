@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/protocol/acp"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // SteerSession injects standard ACP prompt content into the currently active
@@ -17,7 +17,7 @@ func (a *RuntimeAgent) SteerSession(
 	request acp.SessionSteeringRequest,
 ) (acp.SessionSteeringResponse, error) {
 	if a == nil || a.sessionClient == nil {
-		return acp.SessionSteeringResponse{}, acp.ErrCapabilityUnsupported
+		return acp.SessionSteeringResponse{}, ErrCapabilityUnsupported
 	}
 	if _, err := a.targetSession(ctx, request.SessionID); err != nil {
 		return acp.SessionSteeringResponse{}, err

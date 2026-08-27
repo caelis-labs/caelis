@@ -12,9 +12,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRuntimeAgentPromptRouterForwardsScopedNarrativeDeltasVerbatim(t *testing.T) {
@@ -250,7 +250,7 @@ func newPromptRouterAgentForScopeTest(t *testing.T, turn *testControlTurn) (*run
 	return runtimeAgent, activeSession.SessionID
 }
 
-func promptRouterTurnForScopeTest(t *testing.T, runtimeAgent *runtimeacp.RuntimeAgent, sessionID string, cb acp.PromptCallbacks) {
+func promptRouterTurnForScopeTest(t *testing.T, runtimeAgent *runtimeacp.RuntimeAgent, sessionID string, cb runtimeacp.PromptCallbacks) {
 	t.Helper()
 	if _, err := runtimeAgent.Prompt(context.Background(), acp.PromptRequest{
 		SessionID: sessionID,

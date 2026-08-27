@@ -10,17 +10,16 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func acpMuxCommandAnchor(handle string) eventstream.Envelope {
 	return eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "command-1",
 			RawOutput: map[string]any{"handle": handle, "state": "running", "target_kind": "command"},
 			Meta:      acpMuxCommandMeta(),
 		},
@@ -36,8 +35,8 @@ func acpMuxCommandMeta() map[string]any {
 
 func acpMuxTerminalCommandAnchor(handle string) eventstream.Envelope {
 	envelope := acpMuxCommandAnchor(handle)
-	completed := schema.ToolStatusCompleted
-	update := envelope.Update.(schema.ToolCallUpdate)
+	completed := acp.ToolStatusCompleted
+	update := envelope.Update.(acp.ToolCallUpdate)
 	update.Status = &completed
 	update.RawOutput = map[string]any{"handle": handle, "state": "completed", "target_kind": "command"}
 	envelope.Update = update
@@ -48,8 +47,8 @@ func acpMuxCommandOutputEnvelope(cursor string, output string) eventstream.Envel
 	return eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Cursor: cursor,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo,
 			ToolCallID:    "command-1",
 			Meta:          metautil.WithTerminalOutput(nil, "command-1", output),
 		},
@@ -59,8 +58,8 @@ func acpMuxCommandOutputEnvelope(cursor string, output string) eventstream.Envel
 func acpMuxSubagentAnchor(handle string) eventstream.Envelope {
 	return eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1",
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "spawn-1",
 			RawOutput: map[string]any{
 				"handle": handle, "state": "running", "target_kind": "subagent",
 				"parent_call": "spawn-1", "parent_tool": "Spawn",
@@ -87,9 +86,9 @@ func acpMuxSubagentMessageEnvelope(cursor string, turnID string, messageID strin
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
 		ScopeID: "task-1", TurnID: turnID, Cursor: cursor,
 		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage, MessageID: messageID,
-			Content: schema.TextContent{Type: "text", Text: text},
+		Update: acp.ContentChunk{
+			SessionUpdate: acp.UpdateAgentMessage, MessageID: messageID,
+			Content: acp.TextContent{Type: "text", Text: text},
 		},
 	}
 }

@@ -17,10 +17,9 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
@@ -270,9 +269,9 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 			Content: acp.TextContent{Type: "text", Text: "nested output\n"},
 		}},
 	}, false)
-	subscription.events <- child(schema.PlanUpdate{
-		SessionUpdate: schema.UpdatePlan,
-		Entries:       []schema.PlanEntry{{Content: "inspect child output", Status: "in_progress"}},
+	subscription.events <- child(acp.PlanUpdate{
+		SessionUpdate: acp.UpdatePlan,
+		Entries:       []acp.PlanEntry{{Content: "inspect child output", Status: "in_progress"}},
 	}, false)
 
 	subscription.events <- child(acp.ContentChunk{

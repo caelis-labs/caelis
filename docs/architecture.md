@@ -75,11 +75,12 @@ Document responsibilities are intentionally separate:
   `surfaces/internal/transcript`: private shared presentation projection used
   by concrete Surfaces. These packages are not independent product surfaces or
   application-layer entry points.
-- `protocol/acp`: transitional ACP schema aliases/extensions, eventstream
-  envelopes, projection helpers, compatibility handling, and documented
-  `_meta` contracts. It owns no transport dispatch interfaces or new aggregate
-  product boundary. Standard method identities, wire contracts, and connection
-  behavior come from `acp-go-sdk`; residual packages migrate by semantic owner.
+- `protocol/acp/*`: transitional ACP schema extensions, eventstream envelopes,
+  projection helpers, compatibility handling, and documented `_meta` contracts.
+  The root facade has retired; consumers import only the owning subpackage. The
+  tree owns no transport dispatch interfaces or new aggregate product boundary.
+  Standard method identities, wire contracts, and connection behavior come
+  from `acp-go-sdk`; residual packages migrate by semantic owner.
 - `agent-sdk/*`: reusable SDK package tree. It owns runtime, model, tool, session,
   sandbox, task, policy, skill, and display contracts and reusable
   implementations.
@@ -490,7 +491,7 @@ Product hosts provide model, session, sandbox, tool, policy, and task
 implementations through SDK contracts instead of making the runtime know where
 credentials, state, or execution environments live.
 
-The ban on importing the root `protocol/acp/*` implementation does not ban ACP
+The ban on importing product `protocol/acp/*` packages from the SDK does not ban ACP
 semantics from the SDK. Dependency direction is from standard wire bindings and
 product adapters toward reusable SDK contracts, never the reverse.
 

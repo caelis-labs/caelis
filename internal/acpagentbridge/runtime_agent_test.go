@@ -26,11 +26,10 @@ import (
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRuntimeAgentInitializeCapabilitiesDefault(t *testing.T) {
@@ -183,7 +182,7 @@ func TestRuntimeAgentManagedLoadAndResumeIgnoreMetaAndRequireTrustedOwnership(t 
 
 func TestRuntimeAgentNewSessionIncludesAssemblyModesAndConfig(t *testing.T) {
 	sessions := inmemory.NewStore(inmemory.Config{})
-	modes, configs := bridgeassembly.ProvidersFromAssembly(bridgeassembly.ProviderConfig{
+	providers := bridgeassembly.ProvidersFromAssembly(bridgeassembly.ProviderConfig{
 		Assembly: assemblyapi.ResolvedAssembly{
 			Modes: []assemblyapi.ModeConfig{
 				{ID: "default", Name: "Default"},
@@ -204,8 +203,8 @@ func TestRuntimeAgentNewSessionIncludesAssemblyModesAndConfig(t *testing.T) {
 		UserID:   "user-1",
 	})
 	agent, _ := newRuntimeAgentWithSessionsAndConfig(t, sessions, runtimeacp.Config{
-		Modes:  modes,
-		Config: configs,
+		Modes:  providers.Modes,
+		Config: providers.Config,
 	})
 	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
 		CWD: t.TempDir(),
@@ -293,10 +292,10 @@ func TestRuntimeAgentLoadSessionReplaysDurableEvents(t *testing.T) {
 	if got := cb.notifications[1].Update.SessionUpdateType(); got != acp.UpdateAgentMessage {
 		t.Fatalf("second replay update = %q, want %q", got, acp.UpdateAgentMessage)
 	}
-	if got := cb.notifications[2].Update.SessionUpdateType(); got != schema.UpdateUsage {
+	if got := cb.notifications[2].Update.SessionUpdateType(); got != acp.UpdateUsage {
 		t.Fatalf("third replay update = %q, want usage_update", got)
 	}
-	usage, ok := cb.notifications[2].Update.(schema.UsageUpdate)
+	usage, ok := cb.notifications[2].Update.(acp.UsageUpdate)
 	if !ok || usage.Used != 17 || usage.Size != 128000 {
 		t.Fatalf("usage replay update = %#v, want usage_update size=128000 used=17", cb.notifications[2].Update)
 	}
@@ -703,10 +702,10 @@ func TestRuntimeAgentPromptOmitsOwnedNarrativeFinalAcrossToolBoundary(t *testing
 
 func TestRuntimeAgentOptionalMethodsUnsupportedByDefault(t *testing.T) {
 	agent, _ := newRuntimeAgentWithConfig(t, runtimeacp.Config{})
-	if _, err := agent.SetSessionMode(context.Background(), acp.SetSessionModeRequest{}); !errors.Is(err, acp.ErrCapabilityUnsupported) {
+	if _, err := agent.SetSessionMode(context.Background(), acp.SetSessionModeRequest{}); !errors.Is(err, runtimeacp.ErrCapabilityUnsupported) {
 		t.Fatalf("SetSessionMode() error = %v, want ErrCapabilityUnsupported", err)
 	}
-	if _, err := agent.SetSessionConfigOption(context.Background(), acp.SetSessionConfigOptionRequest{}); !errors.Is(err, acp.ErrCapabilityUnsupported) {
+	if _, err := agent.SetSessionConfigOption(context.Background(), acp.SetSessionConfigOptionRequest{}); !errors.Is(err, runtimeacp.ErrCapabilityUnsupported) {
 		t.Fatalf("SetSessionConfigOption() error = %v, want ErrCapabilityUnsupported", err)
 	}
 }
@@ -847,7 +846,7 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 	if got := metautil.String(cb.last.ToolCall.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RunCommand" {
 		t.Fatalf("client permission tool name = %q, want RUN_COMMAND", got)
 	}
-	if got := schema.NormalizeRawMap(cb.last.ToolCall.RawInput)["command"]; got != "git restore hello.py" {
+	if got := acp.NormalizeRawMap(cb.last.ToolCall.RawInput)["command"]; got != "git restore hello.py" {
 		t.Fatalf("client permission raw command = %#v, want git restore hello.py", got)
 	}
 	if reviewer.calls != 0 {

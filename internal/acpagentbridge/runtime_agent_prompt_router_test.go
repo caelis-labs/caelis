@@ -14,10 +14,9 @@ import (
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRuntimeAgentNewRequiresSlashResultFormatterWithPromptRouter(t *testing.T) {
@@ -660,7 +659,7 @@ func TestRuntimeAgentPromptRouterTurnFeedEmitsTerminalMetaForACPStdio(t *testing
 		t.Fatalf("notifications = %#v, want completed update", cb.notifications)
 	}
 	for _, item := range finalUpdate.Content {
-		if text := schema.ExtractTextValue(item.Content); text != "" {
+		if text := acp.ExtractTextValue(item.Content); text != "" {
 			t.Fatalf("completed update = %#v, final status should not repeat streamed terminal content", *finalUpdate)
 		}
 	}
@@ -841,9 +840,9 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 			ScopeID:    "task-1",
 			ParentTool: parentTool,
 			Delivery:   childDelivery,
-			Update: schema.PlanUpdate{
-				SessionUpdate: schema.UpdatePlan,
-				Entries: []schema.PlanEntry{{
+			Update: acp.PlanUpdate{
+				SessionUpdate: acp.UpdatePlan,
+				Entries: []acp.PlanEntry{{
 					Content: "inspect child output",
 					Status:  "in_progress",
 				}},

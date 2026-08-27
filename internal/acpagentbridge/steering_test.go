@@ -11,8 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
-	"github.com/caelis-labs/caelis/protocol/acp"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRuntimeAgentAdvertisesSteeringOnlyWithAppServerBackend(t *testing.T) {
@@ -40,7 +39,7 @@ func TestRuntimeAgentAdvertisesSteeringOnlyWithAppServerBackend(t *testing.T) {
 	if _, ok := directResponse.Meta[acp.SessionSteeringMetaKey]; ok {
 		t.Fatalf("direct Runtime initialize _meta = %#v, want no steering capability", directResponse.Meta)
 	}
-	if _, err := direct.SteerSession(context.Background(), acp.SessionSteeringRequest{}); !errors.Is(err, acp.ErrCapabilityUnsupported) {
+	if _, err := direct.SteerSession(context.Background(), acp.SessionSteeringRequest{}); !errors.Is(err, ErrCapabilityUnsupported) {
 		t.Fatalf("direct Runtime SteerSession error = %v, want capability unsupported", err)
 	}
 }
@@ -60,7 +59,7 @@ func TestRuntimeAgentSteersExactActiveMainTurnWithoutRevisionCAS(t *testing.T) {
 	agent := steeringTestAgent(client)
 	prompt := []json.RawMessage{
 		jsonrpc.MustMarshalRaw(acp.TextContent{Type: "text", Text: "adjust the plan"}),
-		jsonrpc.MustMarshalRaw(schema.ImageContent{Type: "image", MimeType: "image/png", Data: "aW1hZ2U=", Name: "plan.png"}),
+		jsonrpc.MustMarshalRaw(acp.ImageContent{Type: "image", MimeType: "image/png", Data: "aW1hZ2U=", Name: "plan.png"}),
 	}
 	response, err := agent.SteerSession(context.Background(), acp.SessionSteeringRequest{
 		SessionID: state.SessionID,

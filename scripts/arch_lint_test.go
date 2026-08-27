@@ -144,6 +144,12 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "",
 		},
 		{
+			name:       "production rejects retired root ACP facade",
+			rel:        "surfaces/acp/server.go",
+			importPath: modulePath + "/protocol/acp",
+			want:       "production code must not depend on the retired root protocol/acp facade; import the owning ACP subpackage",
+		},
+		{
 			name:       "production rejects retired ACP Task observation",
 			rel:        "control/appserver/appserver.go",
 			importPath: modulePath + "/protocol/acp/taskstream",
@@ -746,6 +752,12 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			rel:     "internal/controlpromptrouter/router.go",
 			want:    "must not recreate internal/controlpromptrouter; prompt contracts and routing belong to internal/controlprompt",
 			wantSub: "internal/controlpromptrouter",
+		},
+		{
+			name:    "deleted root ACP facade fails",
+			rel:     "protocol/acp/agent.go",
+			want:    "must not recreate the root protocol/acp facade; standard wire contracts belong to acp-go-sdk and residual code to an owning ACP subpackage",
+			wantSub: "protocol/acp",
 		},
 		{
 			name:    "deleted protocol control path fails",

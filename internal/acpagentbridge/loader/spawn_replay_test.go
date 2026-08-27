@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestSpawnReplayCanonicalParentResultWinsOverEarlierTaskWait(t *testing.T) {

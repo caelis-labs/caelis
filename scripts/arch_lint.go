@@ -579,6 +579,9 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if target == "internal/controlpromptrouter" || strings.HasPrefix(target, "internal/controlpromptrouter/") {
 		return "production code must not depend on internal/controlpromptrouter; use internal/controlprompt"
 	}
+	if target == "protocol/acp" {
+		return "production code must not depend on the retired root protocol/acp facade; import the owning ACP subpackage"
+	}
 	if target == "protocol/acp/control" || strings.HasPrefix(target, "protocol/acp/control/") {
 		return "production code must not depend on retired protocol/acp/control; use internal/controlprompt, control/status, or surfaces/internal/promptview"
 	}
@@ -856,6 +859,8 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "must not recreate ports/controlcommand; use internal/controlprompt", pkg, 1
 	case pkg == "internal/controlpromptrouter" || strings.HasPrefix(pkg, "internal/controlpromptrouter/"):
 		return "must not recreate internal/controlpromptrouter; prompt contracts and routing belong to internal/controlprompt", pkg, 1
+	case pkg == "protocol/acp":
+		return "must not recreate the root protocol/acp facade; standard wire contracts belong to acp-go-sdk and residual code to an owning ACP subpackage", pkg, 1
 	case pkg == "protocol/acp/control" || strings.HasPrefix(pkg, "protocol/acp/control/"):
 		return "must not recreate protocol/acp/control; prompt contracts belong to internal/controlprompt, status data to control/status, and rendering to surfaces/internal/promptview", pkg, 1
 	case pkg == "impl/model/catalog" || strings.HasPrefix(pkg, "impl/model/catalog/"):

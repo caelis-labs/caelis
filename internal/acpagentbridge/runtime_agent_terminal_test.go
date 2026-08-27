@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	protocolacp "github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	protocolacp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestACPChildTerminalProjectorEmitsOnlyFinalResponseContent(t *testing.T) {

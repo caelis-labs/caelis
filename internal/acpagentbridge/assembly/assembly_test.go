@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/protocol/acp"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {
@@ -40,14 +40,14 @@ func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {
 		}},
 	}
 
-	modes, configs := bridgeassembly.ProvidersFromAssembly(bridgeassembly.ProviderConfig{
+	providers := bridgeassembly.ProvidersFromAssembly(bridgeassembly.ProviderConfig{
 		Assembly: assembly,
 		Sessions: sessions,
 		AppName:  "caelis",
 		UserID:   "user-1",
 	})
-	if modes == nil || configs == nil {
-		t.Fatalf("ProvidersFromAssembly() = (%T, %T), want non-nil providers", modes, configs)
+	if providers.Modes == nil || providers.ModeWriter == nil || providers.Config == nil || providers.ConfigWriter == nil {
+		t.Fatalf("ProvidersFromAssembly() = %#v, want all capabilities", providers)
 	}
 
 	session, err := sessions.Session(context.Background(), started.SessionRef)
@@ -55,7 +55,7 @@ func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {
 		t.Fatalf("Session() error = %v", err)
 	}
 
-	state, err := modes.SessionModes(context.Background(), session)
+	state, err := providers.Modes.SessionModes(context.Background(), session)
 	if err != nil {
 		t.Fatalf("SessionModes() error = %v", err)
 	}
@@ -63,14 +63,14 @@ func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {
 		t.Fatalf("CurrentModeID = %q, want %q", got, "default")
 	}
 
-	if _, err := modes.SetSessionMode(context.Background(), acp.SetSessionModeRequest{
+	if _, err := providers.ModeWriter.SetSessionMode(context.Background(), acp.SetSessionModeRequest{
 		SessionID: session.SessionID,
 		ModeID:    "plan",
 	}); err != nil {
 		t.Fatalf("SetSessionMode() error = %v", err)
 	}
 
-	state, err = modes.SessionModes(context.Background(), session)
+	state, err = providers.Modes.SessionModes(context.Background(), session)
 	if err != nil {
 		t.Fatalf("SessionModes() after set error = %v", err)
 	}
@@ -78,7 +78,7 @@ func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {
 		t.Fatalf("CurrentModeID after set = %q, want %q", got, "plan")
 	}
 
-	options, err := configs.SessionConfigOptions(context.Background(), session)
+	options, err := providers.Config.SessionConfigOptions(context.Background(), session)
 	if err != nil {
 		t.Fatalf("SessionConfigOptions() error = %v", err)
 	}
@@ -89,7 +89,7 @@ func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {
 		t.Fatalf("default config value = %#v, want balanced", got)
 	}
 
-	resp, err := configs.SetSessionConfigOption(context.Background(), acp.SetSessionConfigOptionRequest{
+	resp, err := providers.ConfigWriter.SetSessionConfigOption(context.Background(), acp.SetSessionConfigOptionRequest{
 		SessionID: session.SessionID,
 		ConfigID:  "effort",
 		Value:     "deep",
@@ -99,6 +99,13 @@ func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {
 	}
 	if got := resp.ConfigOptions[0].CurrentValue; got != "deep" {
 		t.Fatalf("updated config value = %#v, want deep", got)
+	}
+}
+
+func TestProvidersFromAssemblyEmptyPreservesAbsentCapabilities(t *testing.T) {
+	providers := bridgeassembly.ProvidersFromAssembly(bridgeassembly.ProviderConfig{})
+	if providers.Modes != nil || providers.ModeWriter != nil || providers.Config != nil || providers.ConfigWriter != nil {
+		t.Fatalf("ProvidersFromAssembly(empty) = %#v, want no capabilities", providers)
 	}
 }
 

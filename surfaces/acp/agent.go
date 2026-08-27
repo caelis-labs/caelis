@@ -12,7 +12,7 @@ import (
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
-	protocolacp "github.com/caelis-labs/caelis/protocol/acp"
+	protocolacp "github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/promptview"
 )
 
@@ -35,7 +35,7 @@ type ClientsConfig struct {
 }
 
 // NewFromClients builds the product ACP surface from focused clients only.
-func NewFromClients(cfg ClientsConfig) (*runtimeacp.RuntimeAgent, error) {
+func NewFromClients(cfg ClientsConfig) (*ProductAgent, error) {
 	if err := cfg.Clients.Validate(); err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func NewFromClients(cfg ClientsConfig) (*runtimeacp.RuntimeAgent, error) {
 	if systemSessionClient == nil {
 		systemSessionClient = clients.Sessions
 	}
-	return runtimeacp.NewGatewayAgent(runtimeacp.GatewayAgentConfig{
+	agent, err := runtimeacp.NewGatewayAgent(runtimeacp.GatewayAgentConfig{
 		SessionClient:              clients.Sessions,
 		ConfigurationClient:        clients.Configuration,
 		PresentationClient:         clients.Presentation,
@@ -94,6 +94,10 @@ func NewFromClients(cfg ClientsConfig) (*runtimeacp.RuntimeAgent, error) {
 			return router, nil
 		},
 	})
+	if err != nil {
+		return nil, err
+	}
+	return &ProductAgent{inner: agent}, nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -143,8 +147,83 @@ func acpDirectAgentRuns(status controlprompt.AgentStatusSnapshot) []controlagent
 type Agent interface {
 	Initialize(context.Context, protocolacp.InitializeRequest) (protocolacp.InitializeResponse, error)
 	NewSession(context.Context, protocolacp.NewSessionRequest) (protocolacp.NewSessionResponse, error)
-	Prompt(context.Context, protocolacp.PromptRequest, protocolacp.PromptCallbacks) (protocolacp.PromptResponse, error)
+	Prompt(context.Context, protocolacp.PromptRequest, PromptCallbacks) (protocolacp.PromptResponse, error)
 	Cancel(context.Context, protocolacp.CancelNotification) error
+}
+
+// PromptCallbacks belongs to the connection Surface: updates and permission
+// requests must return through the exact client connection that submitted the
+// prompt.
+type PromptCallbacks interface {
+	SessionUpdate(context.Context, protocolacp.SessionNotification) error
+	RequestPermission(context.Context, protocolacp.RequestPermissionRequest) (protocolacp.RequestPermissionResponse, error)
+}
+
+// ProductAgent is the Surface-owned connection contract around Caelis's
+// private AppServer-to-ACP bridge. Callers do not receive the concrete bridge
+// implementation through product composition.
+type ProductAgent struct {
+	inner *runtimeacp.RuntimeAgent
+}
+
+var (
+	_ Agent               = (*ProductAgent)(nil)
+	_ sessionLister       = (*ProductAgent)(nil)
+	_ sessionLoader       = (*ProductAgent)(nil)
+	_ sessionResumer      = (*ProductAgent)(nil)
+	_ sessionCloser       = (*ProductAgent)(nil)
+	_ sessionModeSetter   = (*ProductAgent)(nil)
+	_ sessionConfigSetter = (*ProductAgent)(nil)
+	_ sessionSteerer      = (*ProductAgent)(nil)
+	_ commandProvider     = (*ProductAgent)(nil)
+)
+
+func (a *ProductAgent) Initialize(ctx context.Context, req protocolacp.InitializeRequest) (protocolacp.InitializeResponse, error) {
+	return a.inner.Initialize(ctx, req)
+}
+
+func (a *ProductAgent) NewSession(ctx context.Context, req protocolacp.NewSessionRequest) (protocolacp.NewSessionResponse, error) {
+	return a.inner.NewSession(ctx, req)
+}
+
+func (a *ProductAgent) Prompt(ctx context.Context, req protocolacp.PromptRequest, callbacks PromptCallbacks) (protocolacp.PromptResponse, error) {
+	return a.inner.Prompt(ctx, req, callbacks)
+}
+
+func (a *ProductAgent) Cancel(ctx context.Context, req protocolacp.CancelNotification) error {
+	return a.inner.Cancel(ctx, req)
+}
+
+func (a *ProductAgent) ListSessions(ctx context.Context, req protocolacp.SessionListRequest) (protocolacp.SessionListResponse, error) {
+	return a.inner.ListSessions(ctx, req)
+}
+
+func (a *ProductAgent) LoadSession(ctx context.Context, req protocolacp.LoadSessionRequest, callbacks PromptCallbacks) (protocolacp.LoadSessionResponse, error) {
+	return a.inner.LoadSession(ctx, req, callbacks)
+}
+
+func (a *ProductAgent) ResumeSession(ctx context.Context, req protocolacp.ResumeSessionRequest) (protocolacp.ResumeSessionResponse, error) {
+	return a.inner.ResumeSession(ctx, req)
+}
+
+func (a *ProductAgent) CloseSession(ctx context.Context, req protocolacp.CloseSessionRequest) (protocolacp.CloseSessionResponse, error) {
+	return a.inner.CloseSession(ctx, req)
+}
+
+func (a *ProductAgent) SetSessionMode(ctx context.Context, req protocolacp.SetSessionModeRequest) (protocolacp.SetSessionModeResponse, error) {
+	return a.inner.SetSessionMode(ctx, req)
+}
+
+func (a *ProductAgent) SetSessionConfigOption(ctx context.Context, req protocolacp.SetSessionConfigOptionRequest) (protocolacp.SetSessionConfigOptionResponse, error) {
+	return a.inner.SetSessionConfigOption(ctx, req)
+}
+
+func (a *ProductAgent) SteerSession(ctx context.Context, req protocolacp.SessionSteeringRequest) (protocolacp.SessionSteeringResponse, error) {
+	return a.inner.SteerSession(ctx, req)
+}
+
+func (a *ProductAgent) AvailableCommands(ctx context.Context, sessionID string) ([]protocolacp.AvailableCommand, error) {
+	return a.inner.AvailableCommands(ctx, sessionID)
 }
 
 type agentAuthenticator interface {
@@ -156,7 +235,7 @@ type sessionLister interface {
 }
 
 type sessionLoader interface {
-	LoadSession(context.Context, protocolacp.LoadSessionRequest, protocolacp.PromptCallbacks) (protocolacp.LoadSessionResponse, error)
+	LoadSession(context.Context, protocolacp.LoadSessionRequest, PromptCallbacks) (protocolacp.LoadSessionResponse, error)
 }
 
 type sessionResumer interface {
@@ -173,6 +252,10 @@ type sessionModeSetter interface {
 
 type sessionConfigSetter interface {
 	SetSessionConfigOption(context.Context, protocolacp.SetSessionConfigOptionRequest) (protocolacp.SetSessionConfigOptionResponse, error)
+}
+
+type commandProvider interface {
+	AvailableCommands(context.Context, string) ([]protocolacp.AvailableCommand, error)
 }
 
 type sessionSteerer interface {

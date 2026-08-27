@@ -6,11 +6,10 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	surfaceacp "github.com/caelis-labs/caelis/surfaces/acp"
 )
 
-func newTestAgentFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
+func newTestAgentFromStack(stack *gatewayapp.Stack) (*surfaceacp.ProductAgent, error) {
 	appServer, err := local.NewAppServer(stack)
 	if err != nil {
 		return nil, err

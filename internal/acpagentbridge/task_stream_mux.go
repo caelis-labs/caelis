@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -85,7 +84,7 @@ func (a *RuntimeAgent) startACPTaskStreamMux(parent context.Context, sessionID s
 // detachACPTaskStreamMux seals discovery after the parent Prompt ends, then
 // keeps forwarding already-subscribed terminal delivery until those Task
 // streams end or the Session is closed.
-func (a *RuntimeAgent) detachACPTaskStreamMux(parent context.Context, mux *acpTaskStreamMux, cb acp.PromptCallbacks, sessionID string, filter *acpNarrativeFilter) {
+func (a *RuntimeAgent) detachACPTaskStreamMux(parent context.Context, mux *acpTaskStreamMux, cb PromptCallbacks, sessionID string, filter *acpNarrativeFilter) {
 	if a == nil || mux == nil {
 		return
 	}

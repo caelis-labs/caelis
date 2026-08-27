@@ -7,12 +7,11 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type approvalRequester struct {
-	callbacks     acp.PromptCallbacks
+	callbacks     PromptCallbacks
 	reviewer      approval.Reviewer
 	modelResolver ApprovalModelResolver
 	mode          approval.Mode

@@ -5,11 +5,23 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
+
+type promptCallbacks interface {
+	SessionUpdate(context.Context, schema.SessionNotification) error
+	RequestPermission(context.Context, schema.RequestPermissionRequest) (schema.RequestPermissionResponse, error)
+}
+
+type modeReader interface {
+	SessionModes(context.Context, session.Session) (*schema.SessionModeState, error)
+}
+
+type configReader interface {
+	SessionConfigOptions(context.Context, session.Session) ([]schema.SessionConfigOption, error)
+}
 
 // SessionServiceLoaderConfig configures one default ACP session/load adapter
 // backed by the SDK session service.
@@ -19,8 +31,8 @@ type SessionServiceLoaderConfig struct {
 	AppName      string
 	UserID       string
 	WorkspaceKey string
-	Modes        acp.ModeProvider
-	Config       acp.ConfigProvider
+	Modes        modeReader
+	Config       configReader
 }
 
 // SessionServiceLoader replays one durable SDK session through ACP
@@ -31,8 +43,8 @@ type SessionServiceLoader struct {
 	appName      string
 	userID       string
 	workspaceKey string
-	modes        acp.ModeProvider
-	config       acp.ConfigProvider
+	modes        modeReader
+	config       configReader
 }
 
 // NewSessionServiceLoader constructs one default session/load adapter.
@@ -66,7 +78,7 @@ func firstNonEmptyString(values ...string) string {
 func (l *SessionServiceLoader) LoadSession(
 	ctx context.Context,
 	req schema.LoadSessionRequest,
-	cb acp.PromptCallbacks,
+	cb promptCallbacks,
 ) (schema.LoadSessionResponse, error) {
 	ref := session.SessionRef{
 		AppName:   l.appName,

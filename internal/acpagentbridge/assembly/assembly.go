@@ -9,7 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/protocol/acp"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // ProviderConfig configures one set of app-owned ACP providers built from pure
@@ -22,20 +22,52 @@ type ProviderConfig struct {
 	UserID   string
 }
 
+// ModeReader exposes only the assembly-backed ACP mode projection.
+type ModeReader interface {
+	SessionModes(context.Context, session.Session) (*acp.SessionModeState, error)
+}
+
+// ModeWriter exposes only the assembly-backed ACP mode mutation.
+type ModeWriter interface {
+	SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error)
+}
+
+// ConfigReader exposes only the assembly-backed ACP config projection.
+type ConfigReader interface {
+	SessionConfigOptions(context.Context, session.Session) ([]acp.SessionConfigOption, error)
+}
+
+// ConfigWriter exposes only the assembly-backed ACP config mutation.
+type ConfigWriter interface {
+	SetSessionConfigOption(context.Context, acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error)
+}
+
+// Providers is a capability set, not an aggregate provider. Each absent
+// capability remains a nil interface when the resolved assembly omits it.
+type Providers struct {
+	Modes        ModeReader
+	ModeWriter   ModeWriter
+	Config       ConfigReader
+	ConfigWriter ConfigWriter
+}
+
 // ProvidersFromAssembly builds app-owned ACP mode/config providers from one
 // pure resolved assembly. When the assembly does not declare a capability, the
 // returned provider is nil.
-func ProvidersFromAssembly(cfg ProviderConfig) (acp.ModeProvider, acp.ConfigProvider) {
+func ProvidersFromAssembly(cfg ProviderConfig) Providers {
 	resolved := assembly.CloneResolvedAssembly(cfg.Assembly)
-	var modes acp.ModeProvider
-	var configs acp.ConfigProvider
+	providers := Providers{}
 	if len(resolved.Modes) > 0 {
-		modes = newModeProvider(resolved.Modes, cfg.Sessions, cfg.AppName, cfg.UserID)
+		modes := newModeProvider(resolved.Modes, cfg.Sessions, cfg.AppName, cfg.UserID)
+		providers.Modes = modes
+		providers.ModeWriter = modes
 	}
 	if len(resolved.Configs) > 0 {
-		configs = newConfigProvider(resolved.Configs, cfg.Sessions, cfg.AppName, cfg.UserID)
+		configs := newConfigProvider(resolved.Configs, cfg.Sessions, cfg.AppName, cfg.UserID)
+		providers.Config = configs
+		providers.ConfigWriter = configs
 	}
-	return modes, configs
+	return providers
 }
 
 // SkillBundles returns normalized pure skill-bundle declarations. Empty roots
@@ -134,7 +166,7 @@ func (p *modeProvider) SessionModes(ctx context.Context, session session.Session
 
 func (p *modeProvider) SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
 	if p == nil {
-		return acp.SetSessionModeResponse{}, acp.ErrCapabilityUnsupported
+		return acp.SetSessionModeResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: mode provider is unavailable")
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	modeID := strings.TrimSpace(req.ModeID)
@@ -258,7 +290,7 @@ func (p *configProvider) SessionConfigOptions(ctx context.Context, session sessi
 
 func (p *configProvider) SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
 	if p == nil {
-		return acp.SetSessionConfigOptionResponse{}, acp.ErrCapabilityUnsupported
+		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("internal/acpagentbridge/assembly: config provider is unavailable")
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	configID := strings.TrimSpace(req.ConfigID)

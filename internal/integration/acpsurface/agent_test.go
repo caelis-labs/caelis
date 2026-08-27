@@ -23,8 +23,8 @@ import (
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 	"github.com/caelis-labs/caelis/internal/testenv"
-	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestNewFromClientsRoutesStatusSlashThroughSharedPromptRouter(t *testing.T) {

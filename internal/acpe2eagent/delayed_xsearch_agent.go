@@ -11,7 +11,8 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp"
+	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
+	surfaceacp "github.com/caelis-labs/caelis/surfaces/acp"
 )
 
 // delayedXSearchAgent is an external wire-level ACP fixture. Its repeated
@@ -21,10 +22,6 @@ type delayedXSearchAgent struct {
 	mu      sync.Mutex
 	current map[string]map[string]string
 }
-
-var (
-	_ acp.ConfigProvider = (*delayedXSearchAgent)(nil)
-)
 
 func newDelayedXSearchAgent() *delayedXSearchAgent {
 	return &delayedXSearchAgent{current: map[string]map[string]string{}}
@@ -57,7 +54,7 @@ func (a *delayedXSearchAgent) NewSession(context.Context, acp.NewSessionRequest)
 	return acp.NewSessionResponse{SessionID: sessionID, ConfigOptions: options}, nil
 }
 
-func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acp.PromptRequest, callbacks acp.PromptCallbacks) (acp.PromptResponse, error) {
+func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acp.PromptRequest, callbacks surfaceacp.PromptCallbacks) (acp.PromptResponse, error) {
 	for index := 1; index <= 6; index++ {
 		toolCallID := fmt.Sprintf("x-search-%d", index)
 		if err := callbacks.SessionUpdate(ctx, acp.SessionNotification{

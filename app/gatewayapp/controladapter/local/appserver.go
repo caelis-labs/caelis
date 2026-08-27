@@ -92,15 +92,15 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	modes, configs := bridgeassembly.ProvidersFromAssembly(bridgeassembly.ProviderConfig{
+	providers := bridgeassembly.ProvidersFromAssembly(bridgeassembly.ProviderConfig{
 		AppName: dependencies.AppName, UserID: dependencies.UserID,
 		Assembly: dependencies.Assembly, Sessions: dependencies.Sessions,
 	})
 	presentation, err := newPresentationService(
 		dependencies.Sessions,
-		host.PresentationSource(modes, len(dependencies.Assembly.Modes) > 0, configs),
+		host.PresentationSource(providers.Modes, len(dependencies.Assembly.Modes) > 0, providers.Config),
 		agentReads.ControllerStatus,
-		len(dependencies.Assembly.Modes) > 0 && modes != nil,
+		len(dependencies.Assembly.Modes) > 0 && providers.Modes != nil,
 	)
 	if err != nil {
 		return nil, err

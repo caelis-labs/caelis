@@ -12,7 +12,7 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
-	protocolacp "github.com/caelis-labs/caelis/protocol/acp"
+	protocolacp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestServeStdioSendsAvailableCommandsAfterNewSession(t *testing.T) {
@@ -497,7 +497,7 @@ func (noAuthAgent) NewSession(context.Context, protocolacp.NewSessionRequest) (p
 	return protocolacp.NewSessionResponse{}, nil
 }
 
-func (noAuthAgent) Prompt(context.Context, protocolacp.PromptRequest, protocolacp.PromptCallbacks) (protocolacp.PromptResponse, error) {
+func (noAuthAgent) Prompt(context.Context, protocolacp.PromptRequest, PromptCallbacks) (protocolacp.PromptResponse, error) {
 	return protocolacp.PromptResponse{}, nil
 }
 
@@ -517,7 +517,7 @@ func (commandAgent) NewSession(context.Context, protocolacp.NewSessionRequest) (
 	return protocolacp.NewSessionResponse{SessionID: "session-1"}, nil
 }
 
-func (commandAgent) Prompt(context.Context, protocolacp.PromptRequest, protocolacp.PromptCallbacks) (protocolacp.PromptResponse, error) {
+func (commandAgent) Prompt(context.Context, protocolacp.PromptRequest, PromptCallbacks) (protocolacp.PromptResponse, error) {
 	return protocolacp.PromptResponse{}, nil
 }
 
@@ -539,7 +539,7 @@ type cancelAwareAgent struct {
 	canceled chan error
 }
 
-func (a *cancelAwareAgent) Prompt(ctx context.Context, _ protocolacp.PromptRequest, _ protocolacp.PromptCallbacks) (protocolacp.PromptResponse, error) {
+func (a *cancelAwareAgent) Prompt(ctx context.Context, _ protocolacp.PromptRequest, _ PromptCallbacks) (protocolacp.PromptResponse, error) {
 	close(a.started)
 	<-ctx.Done()
 	err := context.Cause(ctx)
@@ -564,7 +564,7 @@ type messageDirectionAgent struct {
 	cancelObserved chan struct{}
 }
 
-func (a *messageDirectionAgent) Prompt(context.Context, protocolacp.PromptRequest, protocolacp.PromptCallbacks) (protocolacp.PromptResponse, error) {
+func (a *messageDirectionAgent) Prompt(context.Context, protocolacp.PromptRequest, PromptCallbacks) (protocolacp.PromptResponse, error) {
 	a.promptCalls.Add(1)
 	return protocolacp.PromptResponse{StopReason: protocolacp.StopReasonEndTurn}, nil
 }
@@ -583,7 +583,7 @@ func (a *messageDirectionAgent) Cancel(context.Context, protocolacp.CancelNotifi
 	return nil
 }
 
-func (a *sessionCancelAgent) Prompt(ctx context.Context, _ protocolacp.PromptRequest, _ protocolacp.PromptCallbacks) (protocolacp.PromptResponse, error) {
+func (a *sessionCancelAgent) Prompt(ctx context.Context, _ protocolacp.PromptRequest, _ PromptCallbacks) (protocolacp.PromptResponse, error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	a.mu.Lock()
 	a.cancel = cancel
