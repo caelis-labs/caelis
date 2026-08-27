@@ -7,6 +7,7 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -70,14 +71,7 @@ type Delivery struct {
 	Mode DeliveryMode `json:"mode"`
 }
 
-type UsageSnapshot struct {
-	PromptTokens        int `json:"prompt_tokens,omitempty"`
-	CachedInputTokens   int `json:"cached_input_tokens,omitempty"`
-	CompletionTokens    int `json:"completion_tokens,omitempty"`
-	ReasoningTokens     int `json:"reasoning_tokens,omitempty"`
-	TotalTokens         int `json:"total_tokens,omitempty"`
-	ContextWindowTokens int `json:"context_window_tokens,omitempty"`
-}
+type UsageSnapshot = session.UsageSnapshot
 
 func UsageUpdateFromSnapshot(usage UsageSnapshot, meta map[string]any) schema.UsageUpdate {
 	used := nonNegativeUsage(usage.TotalTokens)

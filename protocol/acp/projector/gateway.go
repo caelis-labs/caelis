@@ -420,14 +420,7 @@ func gatewayUsageEnvelope(base eventstream.Envelope, usage *session.UsageSnapsho
 		ParticipantID: base.ParticipantID,
 		ParentTool:    cloneParentToolRelation(base.ParentTool),
 		Delivery:      cloneDelivery(base.Delivery),
-		Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
-			PromptTokens:        usage.PromptTokens,
-			CachedInputTokens:   usage.CachedInputTokens,
-			CompletionTokens:    usage.CompletionTokens,
-			ReasoningTokens:     usage.ReasoningTokens,
-			TotalTokens:         usage.TotalTokens,
-			ContextWindowTokens: usage.ContextWindowTokens,
-		}, base.Meta),
+		Update:        eventstream.UsageUpdateFromSnapshot(*usage, base.Meta),
 	}
 }
 
