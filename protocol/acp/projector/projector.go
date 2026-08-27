@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
-	acpsemantic "github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type Update = schema.Update
@@ -452,12 +451,19 @@ func toolCallFromEventToolPayload(tool *session.EventTool) ToolCall {
 }
 
 func toolCallFromProtocolUpdate(event *session.Event, update *session.ProtocolUpdate) ToolCall {
+	update = cloneProtocolUpdateForProjection(update)
 	name := protocolToolNameForUpdate(event, update)
 	rawInput := cloneAnyMap(update.RawInput)
-	wire, err := acpsemantic.EncodeUpdate(update)
-	call, ok := wire.(schema.ToolCall)
-	if err != nil || !ok {
-		return ToolCall{SessionUpdate: UpdateToolCall}
+	call := ToolCall{
+		SessionUpdate: update.SessionUpdate,
+		ToolCallID:    update.ToolCallID,
+		Title:         update.Title,
+		Kind:          update.Kind,
+		Status:        update.Status,
+		RawInput:      cloneAnyMapPayload(update.RawInput),
+		RawOutput:     cloneAnyMapPayload(update.RawOutput),
+		Locations:     protocolLocationsForProjection(update.Locations),
+		Meta:          cloneAnyMap(update.Meta),
 	}
 	call.Title = firstNonEmpty(strings.TrimSpace(call.Title), projectedToolTitle(name, rawInput), strings.TrimSpace(name))
 	call.Kind = firstNonEmpty(strings.TrimSpace(call.Kind), projectedToolKind(name))
@@ -536,18 +542,22 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string
 }
 
 func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.ProtocolUpdate) (ToolCallUpdate, error) {
+	update = cloneProtocolUpdateForProjection(update)
 	id := strings.TrimSpace(update.ToolCallID)
 	if id == "" {
 		return ToolCallUpdate{}, fmt.Errorf("protocol/acp/projector: tool update missing tool call id")
 	}
 	name := protocolToolNameForUpdate(event, update)
-	wire, err := acpsemantic.EncodeUpdate(update)
-	if err != nil {
-		return ToolCallUpdate{}, err
-	}
-	out, ok := wire.(schema.ToolCallUpdate)
-	if !ok {
-		return ToolCallUpdate{}, fmt.Errorf("protocol/acp/projector: semantic codec returned %T for tool update", wire)
+	out := ToolCallUpdate{
+		SessionUpdate: update.SessionUpdate,
+		ToolCallID:    update.ToolCallID,
+		Title:         stringPtr(update.Title),
+		Kind:          stringPtr(update.Kind),
+		Status:        stringPtr(update.Status),
+		RawInput:      cloneAnyMapPayload(update.RawInput),
+		RawOutput:     cloneAnyMapPayload(update.RawOutput),
+		Locations:     protocolLocationsForProjection(update.Locations),
+		Meta:          cloneAnyMap(update.Meta),
 	}
 	displayTerminalID, _ := projectedDisplayTerminalID(id, name)
 	out.Content = projectToolContent(session.ProtocolToolCallContentOf(update), displayTerminalID)
@@ -749,23 +759,15 @@ func planUpdateForEvent(event *session.Event) (PlanUpdate, bool) {
 }
 
 func planUpdateFromEntries(protocolEntries []session.ProtocolPlanEntry) PlanUpdate {
-	entries := make([]session.ProtocolPlanEntry, 0, len(protocolEntries))
+	entries := make([]PlanEntry, 0, len(protocolEntries))
 	for _, item := range protocolEntries {
-		entries = append(entries, session.ProtocolPlanEntry{
+		entries = append(entries, PlanEntry{
 			Content:  strings.TrimSpace(item.Content),
 			Status:   strings.TrimSpace(item.Status),
 			Priority: firstNonEmpty(strings.TrimSpace(item.Priority), "medium"),
 		})
 	}
-	wire, err := acpsemantic.EncodeUpdate(&session.ProtocolUpdate{
-		SessionUpdate: UpdatePlan,
-		Entries:       entries,
-	})
-	if err != nil {
-		return PlanUpdate{SessionUpdate: UpdatePlan}
-	}
-	update, _ := wire.(schema.PlanUpdate)
-	return update
+	return PlanUpdate{SessionUpdate: UpdatePlan, Entries: entries}
 }
 
 func planUpdateFromPayload(payload session.EventPlanPayload) PlanUpdate {
@@ -929,6 +931,30 @@ func stringPtr(value string) *string {
 
 func cloneAnyMap(values map[string]any) map[string]any {
 	return metautil.CloneMap(values)
+}
+
+func cloneProtocolUpdateForProjection(update *session.ProtocolUpdate) *session.ProtocolUpdate {
+	if update == nil {
+		return nil
+	}
+	protocol := session.CloneEventProtocol(session.EventProtocol{Update: update})
+	return protocol.Update
+}
+
+func protocolLocationsForProjection(in []session.ProtocolToolCallLocation) []ToolCallLocation {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ToolCallLocation, 0, len(in))
+	for _, item := range in {
+		var line *int
+		if item.Line != nil {
+			value := *item.Line
+			line = &value
+		}
+		out = append(out, ToolCallLocation{Path: item.Path, Line: line})
+	}
+	return out
 }
 
 func cloneAnyMapPayload(values map[string]any) any {

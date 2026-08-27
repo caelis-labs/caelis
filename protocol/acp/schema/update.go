@@ -36,9 +36,9 @@ const (
 	ToolKindOther   = "other"
 )
 
-// Update is the ACP wire union used by the product transport. The normalized
-// reusable semantics are owned by agent-sdk/session; protocol/acp/semantic is
-// the only codec boundary between those semantics and these wire DTOs.
+// Update is the ACP wire union retained by transitional product adapters.
+// Host-private ingress and presentation projectors translate these values at
+// their owning boundaries; reusable semantics remain in agent-sdk/session.
 type Update interface {
 	SessionUpdateType() string
 }

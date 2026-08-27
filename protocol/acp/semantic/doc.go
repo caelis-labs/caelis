@@ -1,8 +1,7 @@
-// Package semantic translates between ACP wire payloads and the normalized
-// protocol semantics owned by agent-sdk/session.
+// Package semantic adapts ACP permission coordination payloads to the
+// normalized approval semantics owned by Agent SDK contracts.
 //
 // This package is a product transport adapter. It may depend on Agent SDK
-// semantic DTOs; Agent SDK packages must not depend on this package or on ACP
-// wire schemas. The codecs intentionally do not apply display policy,
-// orchestration policy, or Caelis-specific metadata extensions.
+// contracts; Agent SDK packages must not depend on this package or on ACP wire
+// schemas. The adapter does not apply display or orchestration policy.
 package semantic

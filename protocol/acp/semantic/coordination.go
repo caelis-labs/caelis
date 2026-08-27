@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -13,13 +14,10 @@ import (
 // DecodePermissionRequest converts the ACP permission wire request into the
 // normalized SDK approval semantics plus its session identity and wire meta.
 func DecodePermissionRequest(wire schema.RequestPermissionRequest) (session.SessionRef, *session.ProtocolApproval, map[string]any, error) {
-	update := decodeToolCallUpdate(wire.ToolCall)
-	meta := metautil.Merge(update.Meta, wire.Meta)
-	approval := &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{
-		ID: update.ToolCallID, Name: canonicalPermissionToolName(meta, update), Kind: update.Kind, Title: update.Title, Status: update.Status,
-		RawInput: session.CloneState(update.RawInput), RawOutput: session.CloneState(update.RawOutput),
-		Content: session.CloneProtocolToolCallContent(session.ProtocolToolCallContentOf(&update)),
-	}}
+	toolCall := permissionToolCallFromWire(wire.ToolCall)
+	meta := metautil.Merge(wire.ToolCall.Meta, wire.Meta)
+	toolCall.Name = canonicalPermissionToolName(meta, toolCall)
+	approval := &session.ProtocolApproval{ToolCall: toolCall}
 	for _, option := range wire.Options {
 		approval.Options = append(approval.Options, session.ProtocolApprovalOption{ID: strings.TrimSpace(option.OptionID), Name: strings.TrimSpace(option.Name), Kind: strings.TrimSpace(option.Kind)})
 	}
@@ -33,13 +31,16 @@ func EncodePermissionRequest(ref session.SessionRef, approval *session.ProtocolA
 		return schema.RequestPermissionRequest{}, fmt.Errorf("protocol/acp/semantic: permission approval is required")
 	}
 	normalized := session.CloneProtocolApproval(*approval)
-	title, kind, status := optionalString(normalized.ToolCall.Title), optionalString(normalized.ToolCall.Kind), optionalString(normalized.ToolCall.Status)
+	title := permissionOptionalString(normalized.ToolCall.Title)
+	kind := permissionOptionalString(normalized.ToolCall.Kind)
+	status := permissionOptionalString(normalized.ToolCall.Status)
 	wire := schema.RequestPermissionRequest{
 		SessionID: strings.TrimSpace(ref.SessionID),
 		ToolCall: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: normalized.ToolCall.ID,
-			Title: title, Kind: kind, Status: status, RawInput: mapOrNil(normalized.ToolCall.RawInput), RawOutput: mapOrNil(normalized.ToolCall.RawOutput),
-			Content: encodeToolContent(normalized.ToolCall.Content),
+			Title: title, Kind: kind, Status: status,
+			RawInput: permissionMapOrNil(normalized.ToolCall.RawInput), RawOutput: permissionMapOrNil(normalized.ToolCall.RawOutput),
+			Content: permissionToolContentToWire(normalized.ToolCall.Content),
 			Meta: metautil.WithRuntimeSection(meta, metautil.RuntimeTool, map[string]any{
 				metautil.RuntimeToolName: normalized.ToolCall.Name,
 			}),
@@ -73,12 +74,101 @@ func ptrApproval(in session.ProtocolApproval) *session.ProtocolApproval {
 	return &out
 }
 
-func canonicalPermissionToolName(meta map[string]any, update session.ProtocolUpdate) string {
+func permissionToolCallFromWire(wire schema.ToolCallUpdate) session.ProtocolToolCall {
+	var content []session.ProtocolToolCallContent
+	if len(wire.Content) > 0 {
+		content = make([]session.ProtocolToolCallContent, 0, len(wire.Content))
+	}
+	for _, item := range wire.Content {
+		content = append(content, session.ProtocolToolCallContent{
+			Type:       item.Type,
+			Content:    normalizePermissionWireValue(item.Content),
+			TerminalID: item.TerminalID,
+			Path:       item.Path,
+			OldText:    permissionStringPointer(item.OldText),
+			NewText:    item.NewText,
+		})
+	}
+	return session.ProtocolToolCall{
+		ID:        wire.ToolCallID,
+		Kind:      permissionStringValue(wire.Kind),
+		Title:     permissionStringValue(wire.Title),
+		Status:    permissionStringValue(wire.Status),
+		RawInput:  schema.NormalizeRawMap(wire.RawInput),
+		RawOutput: schema.NormalizeRawMap(wire.RawOutput),
+		Content:   content,
+	}
+}
+
+func permissionToolContentToWire(in []session.ProtocolToolCallContent) []schema.ToolCallContent {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]schema.ToolCallContent, 0, len(in))
+	for _, item := range in {
+		out = append(out, schema.ToolCallContent{
+			Type:       item.Type,
+			Content:    item.Content,
+			TerminalID: item.TerminalID,
+			Path:       item.Path,
+			OldText:    permissionStringPointer(item.OldText),
+			NewText:    item.NewText,
+		})
+	}
+	return out
+}
+
+func normalizePermissionWireValue(in any) any {
+	if in == nil {
+		return nil
+	}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		return in
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return in
+	}
+	return out
+}
+
+func permissionOptionalString(in string) *string {
+	if in == "" {
+		return nil
+	}
+	value := in
+	return &value
+}
+
+func permissionStringValue(in *string) string {
+	if in == nil {
+		return ""
+	}
+	return *in
+}
+
+func permissionStringPointer(in *string) *string {
+	if in == nil {
+		return nil
+	}
+	value := *in
+	return &value
+}
+
+func permissionMapOrNil(in map[string]any) any {
+	if len(in) == 0 {
+		return nil
+	}
+	return in
+}
+
+func canonicalPermissionToolName(meta map[string]any, toolCall session.ProtocolToolCall) string {
 	if name := metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); name != "" {
 		return name
 	}
-	if title := strings.TrimSpace(update.Title); title != "" {
+	if title := strings.TrimSpace(toolCall.Title); title != "" {
 		return title
 	}
-	return strings.TrimSpace(update.Kind)
+	return strings.TrimSpace(toolCall.Kind)
 }

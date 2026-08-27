@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
-	acpsemantic "github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type VisibilityPolicy func(updateType string, eventType session.EventType) session.Visibility
@@ -88,7 +87,7 @@ func normalizeContentChunk(chunk client.ContentChunk, opts Options) *session.Eve
 	event := baseEvent(updateType, eventType, text, actor, opts)
 	msg := messageForContentChunk(chunk, text)
 	event.Message = &msg
-	update, err := acpsemantic.DecodeRawContentUpdate(updateType, chunk.Content, chunk.MessageID, chunk.Meta)
+	update, err := protocolUpdateFromContentChunk(chunk)
 	if err != nil {
 		return nil
 	}
@@ -100,10 +99,7 @@ func normalizeContentChunk(chunk client.ContentChunk, opts Options) *session.Eve
 
 func normalizeToolCall(call client.ToolCall, opts Options) *session.Event {
 	updateType := strings.TrimSpace(call.SessionUpdate)
-	protocolUpdate, err := acpsemantic.DecodeUpdate(call)
-	if err != nil || protocolUpdate == nil {
-		return nil
-	}
+	protocolUpdate := protocolUpdateFromToolCall(call)
 	protocolUpdate.Meta = ingressToolMeta(protocolUpdate.Meta)
 	protocolUpdate.Status = firstNonEmpty(protocolUpdate.Status, acpschema.ToolStatusPending)
 	event := baseEvent(
@@ -124,10 +120,7 @@ func normalizeToolCallUpdate(update client.ToolCallUpdate, opts Options) *sessio
 	updateType := strings.TrimSpace(update.SessionUpdate)
 	status := derefString(update.Status)
 	eventType := toolEventTypeFromStatus(status)
-	protocolUpdate, err := acpsemantic.DecodeUpdate(update)
-	if err != nil || protocolUpdate == nil {
-		return nil
-	}
+	protocolUpdate := protocolUpdateFromToolCallUpdate(update)
 	protocolUpdate.Meta = ingressToolMeta(protocolUpdate.Meta)
 	event := baseEvent(
 		updateType,
@@ -171,10 +164,7 @@ func ingressToolMeta(meta map[string]any) map[string]any {
 
 func normalizePlanUpdate(update client.PlanUpdate, opts Options) *session.Event {
 	updateType := strings.TrimSpace(update.SessionUpdate)
-	protocolUpdate, err := acpsemantic.DecodeUpdate(update)
-	if err != nil || protocolUpdate == nil {
-		return nil
-	}
+	protocolUpdate := protocolUpdateFromPlanUpdate(update)
 	event := baseEvent(
 		updateType,
 		session.EventTypePlan,

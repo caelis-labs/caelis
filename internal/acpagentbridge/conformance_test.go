@@ -23,9 +23,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
-	acpsemantic "github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type promptRecorder struct {
@@ -65,7 +66,7 @@ func updateKinds(items []acp.SessionNotification) []string {
 	return out
 }
 
-func TestBuiltInProjectionAndExternalWireShareSDKSemantics(t *testing.T) {
+func TestBuiltInProjectionAndExternalIngressRoundTripShareSemantics(t *testing.T) {
 	t.Parallel()
 
 	assistant := model.NewTextMessage(model.RoleAssistant, "hello")
@@ -119,46 +120,62 @@ func TestBuiltInProjectionAndExternalWireShareSDKSemantics(t *testing.T) {
 		if len(updates) != 1 {
 			t.Fatalf("ProjectEvent(%s) updates = %d, want 1", event.Type, len(updates))
 		}
-		builtIn, err := acpsemantic.DecodeUpdate(updates[0])
-		if err != nil {
-			t.Fatalf("DecodeUpdate(built-in %s) error = %v", event.Type, err)
+		ingressEvent := acpingress.NormalizeUpdate(externalWireRoundTrip(t, updates[0]), acpingress.Options{
+			At:         time.Unix(1, 0),
+			Scope:      session.EventScope{Source: "acp", TurnID: "turn-1"},
+			Actor:      session.ActorRef{Kind: session.ActorKindController, Name: "external"},
+			Visibility: acpingress.UIOnlyVisibility,
+		})
+		if ingressEvent == nil {
+			t.Fatalf("NormalizeUpdate(external %s) = nil", event.Type)
 		}
-		externalWire := externalWireRoundTrip(t, updates[0])
-		external, err := acpsemantic.DecodeUpdate(externalWire)
-		if err != nil {
-			t.Fatalf("DecodeUpdate(external %s) error = %v", event.Type, err)
+		roundTrip, err := (projector.EventProjector{}).ProjectEvent(ingressEvent)
+		if err != nil || len(roundTrip) != 1 {
+			t.Fatalf("ProjectEvent(external %s) = %#v, %v; want one update", event.Type, roundTrip, err)
 		}
-		builtInJSON, builtInErr := json.Marshal(builtIn)
-		externalJSON, externalErr := json.Marshal(external)
+		builtInJSON, builtInErr := json.Marshal(updates[0])
+		externalJSON, externalErr := json.Marshal(roundTrip[0])
 		if builtInErr != nil || externalErr != nil || !bytes.Equal(externalJSON, builtInJSON) {
-			t.Fatalf("external %s semantics = %#v, built-in = %#v", event.Type, external, builtIn)
+			t.Fatalf("external %s wire = %s, built-in = %s", event.Type, externalJSON, builtInJSON)
 		}
 	}
 }
 
-func externalWireRoundTrip(t *testing.T, update acp.Update) acp.Update {
+func externalWireRoundTrip(t *testing.T, update acp.Update) client.Update {
 	t.Helper()
 	raw, err := json.Marshal(update)
 	if err != nil {
 		t.Fatalf("json.Marshal(%T) error = %v", update, err)
 	}
-	var target acp.Update
 	switch update.(type) {
 	case acp.ContentChunk:
-		target = &acp.ContentChunk{}
+		var target client.ContentChunk
+		if err := json.Unmarshal(raw, &target); err != nil {
+			t.Fatalf("json.Unmarshal(%T) error = %v", update, err)
+		}
+		return target
 	case acp.ToolCall:
-		target = &acp.ToolCall{}
+		var target client.ToolCall
+		if err := json.Unmarshal(raw, &target); err != nil {
+			t.Fatalf("json.Unmarshal(%T) error = %v", update, err)
+		}
+		return target
 	case acp.ToolCallUpdate:
-		target = &acp.ToolCallUpdate{}
+		var target client.ToolCallUpdate
+		if err := json.Unmarshal(raw, &target); err != nil {
+			t.Fatalf("json.Unmarshal(%T) error = %v", update, err)
+		}
+		return target
 	case acp.PlanUpdate:
-		target = &acp.PlanUpdate{}
+		var target client.PlanUpdate
+		if err := json.Unmarshal(raw, &target); err != nil {
+			t.Fatalf("json.Unmarshal(%T) error = %v", update, err)
+		}
+		return target
 	default:
 		t.Fatalf("unsupported conformance update %T", update)
 	}
-	if err := json.Unmarshal(raw, target); err != nil {
-		t.Fatalf("json.Unmarshal(%T) error = %v", update, err)
-	}
-	return target
+	return nil
 }
 
 func TestRuntimeAgentConformanceReplayOrdering(t *testing.T) {
