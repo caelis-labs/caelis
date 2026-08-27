@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -456,7 +457,7 @@ func TestRuntimeAgentConformanceCancellation(t *testing.T) {
 		done <- resp
 	}()
 	time.Sleep(50 * time.Millisecond)
-	if err := agent.Cancel(context.Background(), acp.CancelNotification{SessionID: sessionResp.SessionID}); err != nil {
+	if err := agent.Cancel(context.Background(), acpsdk.CancelNotification{SessionId: acpsdk.SessionId(sessionResp.SessionID)}); err != nil {
 		t.Fatalf("Cancel() error = %v", err)
 	}
 	select {

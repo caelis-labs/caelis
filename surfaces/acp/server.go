@@ -266,9 +266,12 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 func (c *serverConn) handleNotification(ctx context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
 	switch method {
 	case acpsdk.AgentMethodSessionCancel:
-		var req protocolacp.CancelNotification
+		var req acpsdk.CancelNotification
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
+		}
+		if strings.TrimSpace(string(req.SessionId)) == "" {
+			return nil, invalidParams(errors.New("sessionId is required"))
 		}
 		return responseOrError(struct{}{}, c.agent.Cancel(ctx, req))
 	default:

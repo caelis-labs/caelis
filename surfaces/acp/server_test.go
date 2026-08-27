@@ -285,7 +285,7 @@ func TestServeStdioCancelsPromptFromSessionCancel(t *testing.T) {
 
 	agent := &sessionCancelAgent{
 		started:  make(chan struct{}),
-		canceled: make(chan protocolacp.CancelNotification, 1),
+		canceled: make(chan acpsdk.CancelNotification, 1),
 	}
 	serverErr := make(chan error, 1)
 	go func() {
@@ -313,13 +313,13 @@ func TestServeStdioCancelsPromptFromSessionCancel(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for prompt handler")
 	}
-	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionCancel, protocolacp.CancelNotification{SessionID: "session-1"}); err != nil {
+	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionCancel, acpsdk.CancelNotification{SessionId: "session-1"}); err != nil {
 		t.Fatalf("session/cancel notification error = %v", err)
 	}
 	select {
 	case req := <-agent.canceled:
-		if req.SessionID != "session-1" {
-			t.Fatalf("cancel sessionId = %q, want session-1", req.SessionID)
+		if req.SessionId != "session-1" {
+			t.Fatalf("cancel sessionId = %q, want session-1", req.SessionId)
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for Agent.Cancel")
@@ -372,7 +372,13 @@ func TestServeStdioRejectsWrongACPMessageDirection(t *testing.T) {
 	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionClose, protocolacp.CloseSessionRequest{SessionID: "session-1"}); err != nil {
 		t.Fatalf("session/close notification error = %v", err)
 	}
-	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionCancel, protocolacp.CancelNotification{SessionID: "session-1"}); err != nil {
+	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionCancel, nil); err != nil {
+		t.Fatalf("session/cancel missing params error = %v", err)
+	}
+	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionCancel, json.RawMessage("null")); err != nil {
+		t.Fatalf("session/cancel null params error = %v", err)
+	}
+	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionCancel, acpsdk.CancelNotification{SessionId: "session-1"}); err != nil {
 		t.Fatalf("session/cancel notification error = %v", err)
 	}
 	select {
@@ -387,7 +393,7 @@ func TestServeStdioRejectsWrongACPMessageDirection(t *testing.T) {
 		t.Fatalf("close calls after notification = %d, want 0", got)
 	}
 
-	_, err = acpsdk.SendRequest[struct{}](conn, ctx, acpsdk.AgentMethodSessionCancel, protocolacp.CancelNotification{SessionID: "session-1"})
+	_, err = acpsdk.SendRequest[struct{}](conn, ctx, acpsdk.AgentMethodSessionCancel, acpsdk.CancelNotification{SessionId: "session-1"})
 	var requestErr *acpsdk.RequestError
 	if !errors.As(err, &requestErr) || requestErr.Code != -32601 {
 		t.Fatalf("session/cancel request error = %v, want method not found", err)
@@ -501,7 +507,7 @@ func (noAuthAgent) Prompt(context.Context, protocolacp.PromptRequest, PromptCall
 	return protocolacp.PromptResponse{}, nil
 }
 
-func (noAuthAgent) Cancel(context.Context, protocolacp.CancelNotification) error {
+func (noAuthAgent) Cancel(context.Context, acpsdk.CancelNotification) error {
 	return nil
 }
 
@@ -521,7 +527,7 @@ func (commandAgent) Prompt(context.Context, protocolacp.PromptRequest, PromptCal
 	return protocolacp.PromptResponse{}, nil
 }
 
-func (commandAgent) Cancel(context.Context, protocolacp.CancelNotification) error {
+func (commandAgent) Cancel(context.Context, acpsdk.CancelNotification) error {
 	return nil
 }
 
@@ -550,7 +556,7 @@ func (a *cancelAwareAgent) Prompt(ctx context.Context, _ protocolacp.PromptReque
 type sessionCancelAgent struct {
 	commandAgent
 	started  chan struct{}
-	canceled chan protocolacp.CancelNotification
+	canceled chan acpsdk.CancelNotification
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -574,7 +580,7 @@ func (a *messageDirectionAgent) CloseSession(_ context.Context, _ protocolacp.Cl
 	return protocolacp.CloseSessionResponse{}, nil
 }
 
-func (a *messageDirectionAgent) Cancel(context.Context, protocolacp.CancelNotification) error {
+func (a *messageDirectionAgent) Cancel(context.Context, acpsdk.CancelNotification) error {
 	a.cancelCalls.Add(1)
 	select {
 	case a.cancelObserved <- struct{}{}:
@@ -593,7 +599,7 @@ func (a *sessionCancelAgent) Prompt(ctx context.Context, _ protocolacp.PromptReq
 	return protocolacp.PromptResponse{StopReason: protocolacp.StopReasonCancelled}, nil
 }
 
-func (a *sessionCancelAgent) Cancel(_ context.Context, req protocolacp.CancelNotification) error {
+func (a *sessionCancelAgent) Cancel(_ context.Context, req acpsdk.CancelNotification) error {
 	a.mu.Lock()
 	cancel := a.cancel
 	a.mu.Unlock()

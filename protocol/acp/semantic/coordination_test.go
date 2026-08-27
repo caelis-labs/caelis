@@ -123,13 +123,3 @@ func TestPermissionDecodeFallsBackFromMissingToolName(t *testing.T) {
 		t.Fatalf("tool name = %q, want kind fallback %q", approval.ToolCall.Name, schema.ToolKindExecute)
 	}
 }
-
-func TestCancelWireRoundTripPreservesSDKSessionIdentity(t *testing.T) {
-	t.Parallel()
-
-	want := session.SessionRef{SessionID: "session-1"}
-	wire := schema.CancelNotification{SessionID: want.SessionID}
-	if got := semantic.DecodeCancelNotification(wire); got != want {
-		t.Fatalf("cancel round trip = %#v, want %#v", got, want)
-	}
-}

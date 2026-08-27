@@ -122,7 +122,7 @@ func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acp.PromptRequest,
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 }
 
-func (*delayedXSearchAgent) Cancel(context.Context, acp.CancelNotification) error {
+func (*delayedXSearchAgent) Cancel(context.Context, acpsdk.CancelNotification) error {
 	recordDelayedXSearchInterruption("session/cancel")
 	return nil
 }

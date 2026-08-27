@@ -162,6 +162,48 @@ func TestSubmissionProvenNotStartedRequiresSDKClassification(t *testing.T) {
 	}
 }
 
+func TestCancelUsesSDKNotificationContract(t *testing.T) {
+	t.Parallel()
+
+	clientSide, peerSide := net.Pipe()
+	defer peerSide.Close()
+	acpClient, err := NewStreamClient(clientSide, clientSide, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer acpClient.Close(context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cancelErr := make(chan error, 1)
+	go func() { cancelErr <- acpClient.Cancel(ctx, "session-1") }()
+
+	var notification struct {
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+	}
+	scanner := bufio.NewScanner(peerSide)
+	if !scanner.Scan() {
+		t.Fatal("peer received no cancellation notification")
+	}
+	if err := json.Unmarshal(scanner.Bytes(), &notification); err != nil {
+		t.Fatalf("decode cancellation notification: %v", err)
+	}
+	if notification.Method != acpsdk.AgentMethodSessionCancel {
+		t.Fatalf("cancel method = %q, want %q", notification.Method, acpsdk.AgentMethodSessionCancel)
+	}
+	var req acpsdk.CancelNotification
+	if err := json.Unmarshal(notification.Params, &req); err != nil {
+		t.Fatalf("decode SDK cancel params: %v", err)
+	}
+	if req.SessionId != "session-1" {
+		t.Fatalf("cancel sessionId = %q, want session-1", req.SessionId)
+	}
+	if err := <-cancelErr; err != nil {
+		t.Fatalf("Cancel() error = %v", err)
+	}
+}
+
 func TestDefaultPermissionPolicyRejectsOnce(t *testing.T) {
 	t.Parallel()
 

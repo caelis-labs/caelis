@@ -68,11 +68,6 @@ func DecodePermissionResponse(wire schema.RequestPermissionResponse, approval *s
 	return out
 }
 
-// DecodeCancelNotification normalizes the standard ACP cancellation identity.
-func DecodeCancelNotification(wire schema.CancelNotification) session.SessionRef {
-	return session.NormalizeSessionRef(session.SessionRef{SessionID: wire.SessionID})
-}
-
 func ptrApproval(in session.ProtocolApproval) *session.ProtocolApproval {
 	out := session.CloneProtocolApproval(in)
 	return &out

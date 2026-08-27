@@ -358,7 +358,7 @@ func (c *Client) Cancel(ctx context.Context, sessionID string) error {
 	if c == nil || c.conn == nil {
 		return errors.New("acp client is unavailable")
 	}
-	return c.conn.SendNotification(ctx, MethodSessionCancel, CancelRequest{SessionID: sessionID})
+	return c.conn.SendNotification(ctx, MethodSessionCancel, CancelRequest{SessionId: acpsdk.SessionId(sessionID)})
 }
 
 func (c *Client) Close(ctx context.Context) error {

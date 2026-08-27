@@ -25,7 +25,6 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 	"github.com/google/uuid"
 )
 
@@ -527,9 +526,7 @@ func (a *RuntimeAgent) CloseSession(ctx context.Context, req acp.CloseSessionReq
 		a.clearSessionDelivery(sessionID)
 		return acp.CloseSessionResponse{}, nil
 	}
-	if err := a.Cancel(ctx, acp.CancelNotification(req)); err != nil {
-		return acp.CloseSessionResponse{}, err
-	}
+	a.cancelSession(req.SessionID)
 	a.clearSessionDelivery(req.SessionID)
 	return acp.CloseSessionResponse{}, nil
 }
@@ -905,15 +902,19 @@ func runtimeRunnerEvents(ctx context.Context, handle agent.Runner) <-chan runtim
 	return events
 }
 
-func (a *RuntimeAgent) Cancel(_ context.Context, req acp.CancelNotification) error {
-	ref := semantic.DecodeCancelNotification(req)
+func (a *RuntimeAgent) Cancel(_ context.Context, req acpsdk.CancelNotification) error {
+	a.cancelSession(string(req.SessionId))
+	return nil
+}
+
+func (a *RuntimeAgent) cancelSession(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
 	a.mu.Lock()
-	cancel := a.cancels[ref.SessionID]
+	cancel := a.cancels[sessionID]
 	a.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	return nil
 }
 
 func (a *RuntimeAgent) session(ctx context.Context, sessionID string) (session.Session, error) {

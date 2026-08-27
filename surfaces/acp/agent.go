@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	protocolacp "github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -53,7 +54,7 @@ type Agent interface {
 	Initialize(context.Context, protocolacp.InitializeRequest) (protocolacp.InitializeResponse, error)
 	NewSession(context.Context, protocolacp.NewSessionRequest) (protocolacp.NewSessionResponse, error)
 	Prompt(context.Context, protocolacp.PromptRequest, PromptCallbacks) (protocolacp.PromptResponse, error)
-	Cancel(context.Context, protocolacp.CancelNotification) error
+	Cancel(context.Context, acpsdk.CancelNotification) error
 }
 
 // PromptCallbacks belongs to the connection Surface: updates and permission
@@ -95,7 +96,7 @@ func (a *ProductAgent) Prompt(ctx context.Context, req protocolacp.PromptRequest
 	return a.inner.Prompt(ctx, req, callbacks)
 }
 
-func (a *ProductAgent) Cancel(ctx context.Context, req protocolacp.CancelNotification) error {
+func (a *ProductAgent) Cancel(ctx context.Context, req acpsdk.CancelNotification) error {
 	return a.inner.Cancel(ctx, req)
 }
 

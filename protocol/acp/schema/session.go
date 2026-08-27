@@ -295,7 +295,3 @@ func DecodeSessionSteeringOptions(meta map[string]json.RawMessage) (SessionSteer
 	}
 	return options, nil
 }
-
-type CancelNotification struct {
-	SessionID string `json:"sessionId"`
-}
