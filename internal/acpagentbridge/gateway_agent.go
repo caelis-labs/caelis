@@ -3,9 +3,9 @@ package acpagentbridge
 import (
 	"strings"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/version"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type GatewayAgentConfig struct {
@@ -45,7 +45,7 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		WorkspaceKey:               cfg.WorkspaceKey,
 		WorkspaceCWD:               cfg.WorkspaceCWD,
 		ManagedSessionHistoryToken: cfg.ManagedSessionHistoryToken,
-		AgentInfo:                  &acp.Implementation{Name: cfg.AppName, Version: version.String()},
+		AgentInfo:                  &acpsdk.Implementation{Name: cfg.AppName, Version: version.String()},
 	})
 }
 

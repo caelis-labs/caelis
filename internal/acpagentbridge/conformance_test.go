@@ -284,12 +284,12 @@ func TestRuntimeAgentConformancePromptWithImageDoesNotEchoUserMessage(t *testing
 
 func TestRuntimeAgentConformanceInitializeDoesNotDeclareMCP(t *testing.T) {
 	agent, _ := newTestRuntimeAgent(t, staticModel{text: "ok"})
-	resp, err := agent.Initialize(context.Background(), acp.InitializeRequest{})
+	resp, err := agent.Initialize(context.Background(), acpsdk.InitializeRequest{})
 	if err != nil {
 		t.Fatalf("Initialize() error = %v", err)
 	}
-	if resp.AgentCapabilities.MCPCapabilities.HTTP || resp.AgentCapabilities.MCPCapabilities.SSE {
-		t.Fatalf("mcp capabilities = %#v, want http+sse disabled until ACP mcpServers are wired", resp.AgentCapabilities.MCPCapabilities)
+	if resp.AgentCapabilities.McpCapabilities.Http || resp.AgentCapabilities.McpCapabilities.Sse {
+		t.Fatalf("mcp capabilities = %#v, want http+sse disabled until ACP mcpServers are wired", resp.AgentCapabilities.McpCapabilities)
 	}
 }
 
@@ -698,7 +698,7 @@ func newTestRuntimeAgentWithTools(t *testing.T, model model.LLM, tools []tool.To
 		},
 		AppName: "caelis",
 		UserID:  "user-1",
-		AgentInfo: &acp.Implementation{
+		AgentInfo: &acpsdk.Implementation{
 			Name:    "caelis-sdk",
 			Version: "0.1.0",
 		},

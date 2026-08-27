@@ -27,21 +27,16 @@ func newDelayedXSearchAgent() *delayedXSearchAgent {
 	return &delayedXSearchAgent{current: map[string]map[string]string{}}
 }
 
-func (a *delayedXSearchAgent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
-	return acp.InitializeResponse{
-		ProtocolVersion: acpsdk.ProtocolVersionNumber,
-		AgentCapabilities: acp.AgentCapabilities{
-			Auth:                map[string]any{},
-			MCPCapabilities:     acp.MCPCapabilities{},
-			PromptCapabilities:  acp.PromptCapabilities{},
-			SessionCapabilities: map[string]json.RawMessage{},
-		},
-		AgentInfo: &acp.Implementation{
+func (a *delayedXSearchAgent) Initialize(context.Context, acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error) {
+	return acpsdk.InitializeResponse{
+		ProtocolVersion:   acpsdk.ProtocolVersionNumber,
+		AgentCapabilities: acpsdk.AgentCapabilities{},
+		AgentInfo: &acpsdk.Implementation{
 			Name:    "caelis-acp-wire-e2e",
-			Title:   "Caelis ACP Wire E2E Agent",
+			Title:   acpsdk.Ptr("Caelis ACP Wire E2E Agent"),
 			Version: "0.1.0",
 		},
-		AuthMethods: []json.RawMessage{},
+		AuthMethods: []acpsdk.AuthMethod{},
 	}, nil
 }
 

@@ -94,7 +94,7 @@ type Config struct {
 	// by a short-lived product ACP bridge to load one managed child history.
 	// It does not authorize prompt, resume, discovery, or lifecycle mutations.
 	ManagedSessionHistoryToken string
-	AgentInfo                  *acp.Implementation
+	AgentInfo                  *acpsdk.Implementation
 }
 
 // RuntimeAgent adapts Agent SDK runtime and session contracts into the standard
@@ -124,7 +124,7 @@ type RuntimeAgent struct {
 	workspaceKey          string
 	workspaceCWD          string
 	managedHistoryToken   string
-	agentInfo             *acp.Implementation
+	agentInfo             *acpsdk.Implementation
 
 	mu              sync.Mutex
 	cancels         map[string]context.CancelFunc
@@ -221,23 +221,30 @@ func New(cfg Config) (*RuntimeAgent, error) {
 	}, nil
 }
 
-func normalizeAgentInfo(info *acp.Implementation, appName string) *acp.Implementation {
-	normalized := acp.Implementation{}
+func normalizeAgentInfo(info *acpsdk.Implementation, appName string) *acpsdk.Implementation {
+	normalized := acpsdk.Implementation{}
 	if info != nil {
 		normalized = *info
 	}
 	if normalized.Name = strings.TrimSpace(normalized.Name); normalized.Name == "" {
 		normalized.Name = strings.TrimSpace(appName)
 	}
-	normalized.Title = strings.TrimSpace(normalized.Title)
+	if normalized.Title != nil {
+		title := strings.TrimSpace(*normalized.Title)
+		if title == "" {
+			normalized.Title = nil
+		} else {
+			normalized.Title = &title
+		}
+	}
 	if normalized.Version = strings.TrimSpace(normalized.Version); normalized.Version == "" {
 		normalized.Version = version.String()
 	}
 	return &normalized
 }
 
-func (a *RuntimeAgent) Initialize(ctx context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
-	promptCaps := acp.PromptCapabilities{
+func (a *RuntimeAgent) Initialize(ctx context.Context, _ acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error) {
+	promptCaps := acpsdk.PromptCapabilities{
 		Audio:           false,
 		EmbeddedContext: false,
 		Image:           false,
@@ -245,38 +252,36 @@ func (a *RuntimeAgent) Initialize(ctx context.Context, _ acp.InitializeRequest) 
 	if a.presentationClient != nil {
 		caps, err := a.presentationClient.PresentationCapabilities(ctx)
 		if err != nil {
-			return acp.InitializeResponse{}, err
+			return acpsdk.InitializeResponse{}, err
 		}
-		promptCaps = acp.PromptCapabilities{Audio: caps.Audio, EmbeddedContext: caps.EmbeddedContext, Image: caps.Image}
+		promptCaps = acpsdk.PromptCapabilities{Audio: caps.Audio, EmbeddedContext: caps.EmbeddedContext, Image: caps.Image}
 	}
-	caps := acp.AgentCapabilities{
-		Auth: map[string]any{},
-		MCPCapabilities: acp.MCPCapabilities{
-			HTTP: false,
-			SSE:  false,
+	caps := acpsdk.AgentCapabilities{
+		Auth:               acpsdk.AgentAuthCapabilities{},
+		McpCapabilities:    acpsdk.McpCapabilities{},
+		PromptCapabilities: promptCaps,
+		SessionCapabilities: acpsdk.SessionCapabilities{
+			List:   &acpsdk.SessionListCapabilities{},
+			Resume: &acpsdk.SessionResumeCapabilities{},
+			Close:  &acpsdk.SessionCloseCapabilities{},
 		},
-		PromptCapabilities:  promptCaps,
-		SessionCapabilities: map[string]json.RawMessage{},
 	}
 	if a.loader != nil || a.sessionClient != nil {
 		caps.LoadSession = true
 	}
-	caps.SessionCapabilities["list"] = json.RawMessage(`{}`)
-	caps.SessionCapabilities["resume"] = json.RawMessage(`{}`)
-	caps.SessionCapabilities["close"] = json.RawMessage(`{}`)
 	var meta map[string]json.RawMessage
 	if a.sessionClient != nil {
 		steering, err := json.Marshal(acp.SessionSteeringCapability{Supported: true})
 		if err != nil {
-			return acp.InitializeResponse{}, err
+			return acpsdk.InitializeResponse{}, err
 		}
 		meta = map[string]json.RawMessage{acp.SessionSteeringMetaKey: steering}
 	}
-	return acp.InitializeResponse{
+	return acpsdk.InitializeResponse{
 		ProtocolVersion:   acpsdk.ProtocolVersionNumber,
 		AgentCapabilities: caps,
 		AgentInfo:         a.agentInfo,
-		AuthMethods:       []json.RawMessage{},
+		AuthMethods:       []acpsdk.AuthMethod{},
 		Meta:              meta,
 	}, nil
 }

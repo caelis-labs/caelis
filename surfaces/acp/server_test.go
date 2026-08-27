@@ -535,8 +535,8 @@ type commandAgent struct{}
 
 type noAuthAgent struct{}
 
-func (noAuthAgent) Initialize(context.Context, protocolacp.InitializeRequest) (protocolacp.InitializeResponse, error) {
-	return protocolacp.InitializeResponse{}, nil
+func (noAuthAgent) Initialize(context.Context, acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error) {
+	return acpsdk.InitializeResponse{}, nil
 }
 
 func (noAuthAgent) NewSession(context.Context, protocolacp.NewSessionRequest) (protocolacp.NewSessionResponse, error) {
@@ -551,8 +551,8 @@ func (noAuthAgent) Cancel(context.Context, acpsdk.CancelNotification) error {
 	return nil
 }
 
-func (commandAgent) Initialize(context.Context, protocolacp.InitializeRequest) (protocolacp.InitializeResponse, error) {
-	return protocolacp.InitializeResponse{}, nil
+func (commandAgent) Initialize(context.Context, acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error) {
+	return acpsdk.InitializeResponse{}, nil
 }
 
 func (commandAgent) Authenticate(context.Context, acpsdk.AuthenticateRequest) (acpsdk.AuthenticateResponse, error) {

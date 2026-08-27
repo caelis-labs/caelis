@@ -129,7 +129,7 @@ func (c *serverConn) handle(ctx context.Context, method string, params json.RawM
 func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRequest, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
 	switch method {
 	case acpsdk.AgentMethodInitialize:
-		var req protocolacp.InitializeRequest
+		var req acpsdk.InitializeRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}

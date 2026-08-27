@@ -35,25 +35,24 @@ import (
 
 func TestRuntimeAgentInitializeCapabilitiesDefault(t *testing.T) {
 	agent, _ := newRuntimeAgentWithConfig(t, runtimeacp.Config{})
-	resp, err := agent.Initialize(context.Background(), acp.InitializeRequest{})
+	resp, err := agent.Initialize(context.Background(), acpsdk.InitializeRequest{})
 	if err != nil {
 		t.Fatalf("Initialize() error = %v", err)
 	}
 	if !resp.AgentCapabilities.LoadSession {
 		t.Fatal("LoadSession capability = false, want true by default")
 	}
-	for _, capability := range []string{"list", "resume", "close"} {
-		if _, ok := resp.AgentCapabilities.SessionCapabilities[capability]; !ok {
-			t.Fatalf("sessionCapabilities[%q] missing", capability)
-		}
+	capabilities := resp.AgentCapabilities.SessionCapabilities
+	if capabilities.List == nil || capabilities.Resume == nil || capabilities.Close == nil {
+		t.Fatalf("session capabilities = %#v, want list, resume, and close", capabilities)
 	}
 }
 
 func TestRuntimeAgentInitializeFillsAgentInfoVersion(t *testing.T) {
 	agent, _ := newRuntimeAgentWithConfig(t, runtimeacp.Config{
-		AgentInfo: &acp.Implementation{Name: "caelis"},
+		AgentInfo: &acpsdk.Implementation{Name: "caelis"},
 	})
-	resp, err := agent.Initialize(context.Background(), acp.InitializeRequest{})
+	resp, err := agent.Initialize(context.Background(), acpsdk.InitializeRequest{})
 	if err != nil {
 		t.Fatalf("Initialize() error = %v", err)
 	}
@@ -522,7 +521,7 @@ func TestRuntimeAgentPromptConvertsLocalTerminalTextToTerminalMetaForACPStdio(t 
 		},
 		AppName: "caelis",
 		UserID:  "user-1",
-		AgentInfo: &acp.Implementation{
+		AgentInfo: &acpsdk.Implementation{
 			Name:    "caelis-sdk",
 			Version: "0.1.0",
 		},
@@ -599,7 +598,7 @@ func TestRuntimeAgentPromptForwardsNarrativeChunksWithoutContentRewriting(t *tes
 		},
 		AppName: "caelis",
 		UserID:  "user-1",
-		AgentInfo: &acp.Implementation{
+		AgentInfo: &acpsdk.Implementation{
 			Name:    "caelis-sdk",
 			Version: "0.1.0",
 		},
@@ -636,7 +635,7 @@ func TestRuntimeAgentPromptOmitsOwnedFinalReasoningMaterialization(t *testing.T)
 		},
 		AppName: "caelis",
 		UserID:  "user-1",
-		AgentInfo: &acp.Implementation{
+		AgentInfo: &acpsdk.Implementation{
 			Name:    "caelis-sdk",
 			Version: "0.1.0",
 		},
@@ -669,7 +668,7 @@ func TestRuntimeAgentPromptOmitsOwnedNarrativeFinalAcrossToolBoundary(t *testing
 		},
 		AppName: "caelis",
 		UserID:  "user-1",
-		AgentInfo: &acp.Implementation{
+		AgentInfo: &acpsdk.Implementation{
 			Name:    "caelis-sdk",
 			Version: "0.1.0",
 		},
@@ -925,7 +924,7 @@ func newRuntimeAgentWithSessionsAndConfig(t *testing.T, sessions session.Service
 		},
 		AppName: "caelis",
 		UserID:  "user-1",
-		AgentInfo: &acp.Implementation{
+		AgentInfo: &acpsdk.Implementation{
 			Name:    "caelis-sdk",
 			Version: "0.1.0",
 		},

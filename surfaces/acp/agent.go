@@ -51,7 +51,7 @@ func NewFromClients(cfg ClientsConfig) (*ProductAgent, error) {
 // prompt and load methods preserve Caelis's per-connection update and approval
 // routing while the wire connection itself remains owned by acp-go-sdk.
 type Agent interface {
-	Initialize(context.Context, protocolacp.InitializeRequest) (protocolacp.InitializeResponse, error)
+	Initialize(context.Context, acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error)
 	NewSession(context.Context, protocolacp.NewSessionRequest) (protocolacp.NewSessionResponse, error)
 	Prompt(context.Context, protocolacp.PromptRequest, PromptCallbacks) (protocolacp.PromptResponse, error)
 	Cancel(context.Context, acpsdk.CancelNotification) error
@@ -84,7 +84,7 @@ var (
 	_ commandProvider     = (*ProductAgent)(nil)
 )
 
-func (a *ProductAgent) Initialize(ctx context.Context, req protocolacp.InitializeRequest) (protocolacp.InitializeResponse, error) {
+func (a *ProductAgent) Initialize(ctx context.Context, req acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error) {
 	return a.inner.Initialize(ctx, req)
 }
 

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -19,7 +20,7 @@ func TestRuntimeAgentAdvertisesSteeringOnlyWithAppServerBackend(t *testing.T) {
 
 	client := &steeringTestSessionClient{state: activeSteeringTestState()}
 	typed := steeringTestAgent(client)
-	response, err := typed.Initialize(context.Background(), acp.InitializeRequest{})
+	response, err := typed.Initialize(context.Background(), acpsdk.InitializeRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,7 @@ func TestRuntimeAgentAdvertisesSteeringOnlyWithAppServerBackend(t *testing.T) {
 	}
 
 	direct := steeringTestAgent(nil)
-	directResponse, err := direct.Initialize(context.Background(), acp.InitializeRequest{})
+	directResponse, err := direct.Initialize(context.Background(), acpsdk.InitializeRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}

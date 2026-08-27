@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -114,9 +115,9 @@ func main() {
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  rt,
 		Sessions: sessions,
-		AgentInfo: &acp.Implementation{
+		AgentInfo: &acpsdk.Implementation{
 			Name:    "caelis-sdk",
-			Title:   "Caelis SDK ACP Agent",
+			Title:   acpsdk.Ptr("Caelis SDK ACP Agent"),
 			Version: "0.1.0",
 		},
 		BuildAgentSpec: func(ctx context.Context, active session.Session, _ acp.PromptRequest) (agent.AgentSpec, error) {
