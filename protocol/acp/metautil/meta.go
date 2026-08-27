@@ -90,14 +90,6 @@ func WithSection(meta map[string]any, section string, values map[string]any) map
 	return out
 }
 
-// Section returns a copy of one direct _meta.caelis section.
-func Section(meta map[string]any, section string) map[string]any {
-	if section == "" {
-		return nil
-	}
-	return CloneMap(mapAt(mapAt(meta, Root), section))
-}
-
 // WithoutSectionKeys returns a copy of meta without selected keys from one
 // direct _meta.caelis section. Empty parent maps are retained so unrelated
 // provider and Caelis metadata keep their original shape.

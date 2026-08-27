@@ -251,7 +251,7 @@ func TestNormalizeACPUpdateEventPreservesGrokSerializedToolInput(t *testing.T) {
 	if got := update.RawOutput["name"]; got != "x_keyword_search" {
 		t.Fatalf("raw output name = %#v, want x_keyword_search", got)
 	}
-	displayMeta := metautil.Section(update.Meta, metautil.Display)
+	displayMeta := testDisplayMeta(update.Meta)
 	displayInput, _ := displayMeta[metautil.DisplayToolInput].(map[string]any)
 	if got := displayInput["query"]; got != "CAELIS_ACP_QUERY_PROBE_7F31" {
 		t.Fatalf("display tool input = %#v, want normalized query", displayInput)
@@ -285,7 +285,7 @@ func TestNormalizeACPUpdateEventDoesNotTreatArbitraryRawOutputInputAsInvocation(
 	if event == nil || update == nil {
 		t.Fatalf("event = %#v, want structured tool update", event)
 	}
-	displayMeta := metautil.Section(update.Meta, metautil.Display)
+	displayMeta := testDisplayMeta(update.Meta)
 	if _, exists := displayMeta[metautil.DisplayToolInput]; exists {
 		t.Fatalf("display meta = %#v, want external tool_input removed", displayMeta)
 	}
@@ -318,7 +318,7 @@ func TestNormalizeACPUpdateEventRequiresCompletedXSearchForDisplayInput(t *testi
 	if event == nil || update == nil {
 		t.Fatalf("event = %#v, want structured tool update", event)
 	}
-	if displayMeta := metautil.Section(update.Meta, metautil.Display); len(displayMeta) != 0 {
+	if displayMeta := testDisplayMeta(update.Meta); len(displayMeta) != 0 {
 		t.Fatalf("display meta = %#v, want incomplete x-search to fail closed", displayMeta)
 	}
 }
@@ -346,7 +346,7 @@ func TestNormalizeACPUpdateEventStripsExternalDisplayInputFromToolStart(t *testi
 	if event == nil || update == nil {
 		t.Fatalf("event = %#v, want structured tool call", event)
 	}
-	displayMeta := metautil.Section(update.Meta, metautil.Display)
+	displayMeta := testDisplayMeta(update.Meta)
 	if _, exists := displayMeta[metautil.DisplayToolInput]; exists {
 		t.Fatalf("display meta = %#v, want external start tool_input removed", displayMeta)
 	}
@@ -2795,7 +2795,7 @@ func TestParticipantRunNormalizesDelayedXSearchDisplayInput(t *testing.T) {
 	if rawOutput["name"] != "x_keyword_search" || rawOutput["input"] != serializedInput {
 		t.Fatalf("raw output = %#v, want provider result preserved", rawOutput)
 	}
-	displayMeta := metautil.Section(update.Meta, metautil.Display)
+	displayMeta := testDisplayMeta(update.Meta)
 	displayInput, _ := displayMeta[metautil.DisplayToolInput].(map[string]any)
 	if got := displayInput["query"]; got != "CAELIS_ACP_QUERY_PROBE_7F31" {
 		t.Fatalf("display tool input = %#v, want normalized query on live participant envelope", displayInput)
@@ -2988,6 +2988,12 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func testDisplayMeta(meta map[string]any) map[string]any {
+	caelisMeta, _ := meta[metautil.Root].(map[string]any)
+	displayMeta, _ := caelisMeta[metautil.Display].(map[string]any)
+	return metautil.CloneMap(displayMeta)
 }
 
 func testStringPtr(value string) *string {

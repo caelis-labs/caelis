@@ -96,8 +96,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	for key, value := range rawOutput {
 		taskOutput[key] = value
 	}
-	displayMeta := metautil.Section(input.Meta, metautil.Display)
-	recoveredInput := transcript.RawMap(displayMeta[metautil.DisplayToolInput])
+	recoveredInput := transcriptRecoveredToolInput(input.Meta)
 	// DisplayToolInput is written by a strict controller-side completed-result
 	// recovery path, but not authenticated on every external ingress. Never let
 	// an in-progress or sparse live patch rewrite invocation arguments with it.
@@ -274,6 +273,13 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolMessageTarget:          toolMessageTarget,
 		Final:                      transcript.ToolStatusFinal(status, toolErr),
 	}, true
+}
+
+func transcriptRecoveredToolInput(meta map[string]any) map[string]any {
+	caelisMeta, _ := meta[metautil.Root].(map[string]any)
+	displayMeta, _ := caelisMeta[metautil.Display].(map[string]any)
+	recoveredInput, _ := displayMeta[metautil.DisplayToolInput].(map[string]any)
+	return metautil.CloneMap(recoveredInput)
 }
 
 func toolDisplayExplorationVerb(meta map[string]any) string {
