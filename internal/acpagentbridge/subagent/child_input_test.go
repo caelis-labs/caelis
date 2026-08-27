@@ -22,7 +22,6 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type childActivityObserverFunc func(context.Context, agent.ChildActivityEvent) error
@@ -931,7 +930,7 @@ func TestChildInputHelperProcess(t *testing.T) {
 						return nil, &jsonrpc.RPCError{Code: -32000, Message: "post-auth steering timeout"}
 					}
 				}
-				return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+				return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 			}
 			if (mode == "active" || mode == "unknown" || mode == "image" || mode == "failed" || mode == "malformed-steering") && count == 1 || mode == "second-active" && count == 2 {
 				select {
@@ -947,7 +946,7 @@ func TestChildInputHelperProcess(t *testing.T) {
 					return map[string]any{"stopReason": 42}, nil
 				}
 			}
-			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+			return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 		case client.MethodSessionSteering:
 			if strings.HasPrefix(mode, "auth-") {
 				if err := appendChildInputTestFile(os.Getenv("CAELIS_ACP_CHILD_INPUT_STEER_MARKER"), "steer\n"); err != nil {

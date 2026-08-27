@@ -240,7 +240,7 @@ func TestRuntimeAgentConformancePromptOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(resp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"Reply with exactly: ok"}`)},
 	}, rec); err != nil {
@@ -264,7 +264,7 @@ func TestRuntimeAgentConformancePromptWithImageDoesNotEchoUserMessage(t *testing
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(resp.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"image","mimeType":"image/png","data":"aW1n","name":"icon.png"}`),
@@ -320,7 +320,7 @@ func TestRuntimeAgentConformanceEmitsToolCallBeforeToolUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(resp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"call echo"}`)},
 	}, rec); err != nil {
@@ -369,7 +369,7 @@ func TestRuntimeAgentConformanceEmitsRunCommandToolCallBeforeTerminalUpdates(t *
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(resp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"run command"}`)},
 	}, rec); err != nil {
@@ -412,7 +412,7 @@ func TestRuntimeAgentConformanceStreamsDeltasWithoutFinalDuplicate(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(resp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"stream hello"}`)},
 	}, rec); err != nil {
@@ -437,7 +437,7 @@ func TestRuntimeAgentConformanceForwardsAdjacentStreamChunksVerbatim(t *testing.
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(resp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"stream duplicate"}`)},
 	}, rec); err != nil {
@@ -460,10 +460,10 @@ func TestRuntimeAgentConformanceCancellation(t *testing.T) {
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
-	done := make(chan acp.PromptResponse, 1)
+	done := make(chan acpsdk.PromptResponse, 1)
 	errs := make(chan error, 1)
 	go func() {
-		resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		resp, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 			SessionID: string(sessionResp.SessionId),
 			Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"hang until cancelled"}`)},
 		}, rec)
@@ -481,8 +481,8 @@ func TestRuntimeAgentConformanceCancellation(t *testing.T) {
 	case err := <-errs:
 		t.Fatalf("Prompt() error = %v, want cancelled response", err)
 	case resp := <-done:
-		if resp.StopReason != acp.StopReasonCancelled {
-			t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonCancelled)
+		if resp.StopReason != acpsdk.StopReasonCancelled {
+			t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonCancelled)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Prompt() did not return after cancellation")
@@ -693,7 +693,7 @@ func newTestRuntimeAgentWithTools(t *testing.T, model model.LLM, tools []tool.To
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "chat", Model: model, Tools: tools}, nil
 		},
 		AppName: "caelis",

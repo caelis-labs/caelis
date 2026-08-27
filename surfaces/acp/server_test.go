@@ -13,8 +13,89 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	protocolacp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
+
+func testPromptRequest(sessionID string) acpsdk.PromptRequest {
+	return acpsdk.PromptRequest{
+		SessionId: acpsdk.SessionId(sessionID),
+		Prompt: []acpsdk.ContentBlock{{
+			Text: &acpsdk.ContentBlockText{Type: "text", Text: "test prompt"},
+		}},
+	}
+}
+
+func TestDecodePromptRequestUsesSDKWireValidation(t *testing.T) {
+	for _, raw := range []json.RawMessage{
+		nil,
+		json.RawMessage(`null`),
+		json.RawMessage(`{"sessionId":"session-1","prompt":[{"type":"vendor","value":"unsupported"}]}`),
+		json.RawMessage(`{"sessionId":"session-1","prompt":[{"type":"text"}]}`),
+	} {
+		var request acpsdk.PromptRequest
+		if err := decodeRequiredParams(raw, &request); err == nil {
+			t.Fatalf("decodeRequiredParams(%s) error = nil", raw)
+		}
+	}
+
+	var request acpsdk.PromptRequest
+	if err := decodeRequiredParams(json.RawMessage(`{"sessionId":"session-1","prompt":[{"type":"text","text":"hello"}],"_meta":{"trace":"kept"}}`), &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.SessionId != "session-1" || len(request.Prompt) != 1 || request.Prompt[0].Text == nil || request.Prompt[0].Text.Text != "hello" || string(request.Meta["trace"]) != `"kept"` {
+		t.Fatalf("decoded request = %#v", request)
+	}
+}
+
+func TestServeStdioPreservesLegacyPromptImageName(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	defer clientToServerReader.Close()
+	defer clientToServerWriter.Close()
+	defer serverToClientReader.Close()
+	defer serverToClientWriter.Close()
+
+	agent := &legacyPromptImageAgent{input: make(chan runtimeacp.PromptInput, 1)}
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- ServeStdio(ctx, agent, clientToServerReader, serverToClientWriter)
+	}()
+	conn, err := acpsdk.NewConnectionWithOptions(nil, clientToServerWriter, serverToClientReader, acpsdk.ConnectionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	request := map[string]any{
+		"sessionId": "session-1",
+		"prompt": []map[string]any{{
+			"type": "image", "mimeType": "image/png", "data": "aGVsbG8=", "name": "shot.png",
+		}},
+	}
+	if _, err := acpsdk.SendRequest[acpsdk.PromptResponse](conn, ctx, acpsdk.AgentMethodSessionPrompt, request); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case input := <-agent.input:
+		var block map[string]any
+		if len(input.Prompt) != 1 || json.Unmarshal(input.Prompt[0], &block) != nil || block["name"] != "shot.png" {
+			t.Fatalf("normalized prompt = %#v, block = %#v", input, block)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for normalized prompt")
+	}
+
+	cancel()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("ServeStdio did not stop")
+	}
+}
 
 func TestServeStdioSendsAvailableCommandsAfterNewSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -278,7 +359,7 @@ func TestServeStdioCancelsPromptFromJSONRPCCancelRequest(t *testing.T) {
 	callCtx, cancelCall := context.WithCancel(ctx)
 	callErr := make(chan error, 1)
 	go func() {
-		_, err := acpsdk.SendRequest[protocolacp.PromptResponse](conn, callCtx, acpsdk.AgentMethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"})
+		_, err := acpsdk.SendRequest[acpsdk.PromptResponse](conn, callCtx, acpsdk.AgentMethodSessionPrompt, testPromptRequest("session-1"))
 		callErr <- err
 	}()
 	select {
@@ -338,10 +419,10 @@ func TestServeStdioCancelsPromptFromSessionCancel(t *testing.T) {
 	}
 	defer conn.Close()
 
-	promptResult := make(chan protocolacp.PromptResponse, 1)
+	promptResult := make(chan acpsdk.PromptResponse, 1)
 	promptErr := make(chan error, 1)
 	go func() {
-		resp, err := acpsdk.SendRequest[protocolacp.PromptResponse](conn, ctx, acpsdk.AgentMethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"})
+		resp, err := acpsdk.SendRequest[acpsdk.PromptResponse](conn, ctx, acpsdk.AgentMethodSessionPrompt, testPromptRequest("session-1"))
 		if err != nil {
 			promptErr <- err
 			return
@@ -368,8 +449,8 @@ func TestServeStdioCancelsPromptFromSessionCancel(t *testing.T) {
 	case err := <-promptErr:
 		t.Fatalf("session/prompt error = %v, want cancelled response", err)
 	case resp := <-promptResult:
-		if resp.StopReason != protocolacp.StopReasonCancelled {
-			t.Fatalf("stopReason = %q, want %q", resp.StopReason, protocolacp.StopReasonCancelled)
+		if resp.StopReason != acpsdk.StopReasonCancelled {
+			t.Fatalf("stopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonCancelled)
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for cancelled session/prompt response")
@@ -406,7 +487,7 @@ func TestServeStdioRejectsWrongACPMessageDirection(t *testing.T) {
 	}
 	defer conn.Close()
 
-	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"}); err != nil {
+	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionPrompt, testPromptRequest("session-1")); err != nil {
 		t.Fatalf("session/prompt notification error = %v", err)
 	}
 	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionClose, acpsdk.CloseSessionRequest{SessionId: "session-1"}); err != nil {
@@ -442,7 +523,7 @@ func TestServeStdioRejectsWrongACPMessageDirection(t *testing.T) {
 		t.Fatalf("cancel calls after request = %d, want only the notification", got)
 	}
 
-	if _, err := acpsdk.SendRequest[protocolacp.PromptResponse](conn, ctx, acpsdk.AgentMethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"}); err != nil {
+	if _, err := acpsdk.SendRequest[acpsdk.PromptResponse](conn, ctx, acpsdk.AgentMethodSessionPrompt, testPromptRequest("session-1")); err != nil {
 		t.Fatalf("session/prompt request error = %v", err)
 	}
 	if _, err := acpsdk.SendRequest[acpsdk.CloseSessionResponse](conn, ctx, acpsdk.AgentMethodSessionClose, acpsdk.CloseSessionRequest{SessionId: "session-1"}); err != nil {
@@ -535,6 +616,20 @@ type commandAgent struct{}
 
 type noAuthAgent struct{}
 
+type legacyPromptImageAgent struct {
+	commandAgent
+	input chan runtimeacp.PromptInput
+}
+
+func (a *legacyPromptImageAgent) Prompt(_ context.Context, request acpsdk.PromptRequest, _ PromptCallbacks) (acpsdk.PromptResponse, error) {
+	input, err := runtimeacp.PromptInputFromACP(request)
+	if err != nil {
+		return acpsdk.PromptResponse{}, err
+	}
+	a.input <- input
+	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
+}
+
 func (noAuthAgent) Initialize(context.Context, acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error) {
 	return acpsdk.InitializeResponse{}, nil
 }
@@ -543,8 +638,8 @@ func (noAuthAgent) NewSession(context.Context, acpsdk.NewSessionRequest) (acpsdk
 	return acpsdk.NewSessionResponse{}, nil
 }
 
-func (noAuthAgent) Prompt(context.Context, protocolacp.PromptRequest, PromptCallbacks) (protocolacp.PromptResponse, error) {
-	return protocolacp.PromptResponse{}, nil
+func (noAuthAgent) Prompt(context.Context, acpsdk.PromptRequest, PromptCallbacks) (acpsdk.PromptResponse, error) {
+	return acpsdk.PromptResponse{}, nil
 }
 
 func (noAuthAgent) Cancel(context.Context, acpsdk.CancelNotification) error {
@@ -563,8 +658,8 @@ func (commandAgent) NewSession(context.Context, acpsdk.NewSessionRequest) (acpsd
 	return acpsdk.NewSessionResponse{SessionId: "session-1"}, nil
 }
 
-func (commandAgent) Prompt(context.Context, protocolacp.PromptRequest, PromptCallbacks) (protocolacp.PromptResponse, error) {
-	return protocolacp.PromptResponse{}, nil
+func (commandAgent) Prompt(context.Context, acpsdk.PromptRequest, PromptCallbacks) (acpsdk.PromptResponse, error) {
+	return acpsdk.PromptResponse{}, nil
 }
 
 func (commandAgent) Cancel(context.Context, acpsdk.CancelNotification) error {
@@ -587,12 +682,12 @@ type cancelAwareAgent struct {
 	canceled chan error
 }
 
-func (a *cancelAwareAgent) Prompt(ctx context.Context, _ protocolacp.PromptRequest, _ PromptCallbacks) (protocolacp.PromptResponse, error) {
+func (a *cancelAwareAgent) Prompt(ctx context.Context, _ acpsdk.PromptRequest, _ PromptCallbacks) (acpsdk.PromptResponse, error) {
 	close(a.started)
 	<-ctx.Done()
 	err := context.Cause(ctx)
 	a.canceled <- err
-	return protocolacp.PromptResponse{}, err
+	return acpsdk.PromptResponse{}, err
 }
 
 type sessionCancelAgent struct {
@@ -612,9 +707,9 @@ type messageDirectionAgent struct {
 	cancelObserved chan struct{}
 }
 
-func (a *messageDirectionAgent) Prompt(context.Context, protocolacp.PromptRequest, PromptCallbacks) (protocolacp.PromptResponse, error) {
+func (a *messageDirectionAgent) Prompt(context.Context, acpsdk.PromptRequest, PromptCallbacks) (acpsdk.PromptResponse, error) {
 	a.promptCalls.Add(1)
-	return protocolacp.PromptResponse{StopReason: protocolacp.StopReasonEndTurn}, nil
+	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 }
 
 func (a *messageDirectionAgent) CloseSession(_ context.Context, _ acpsdk.CloseSessionRequest) (acpsdk.CloseSessionResponse, error) {
@@ -631,14 +726,14 @@ func (a *messageDirectionAgent) Cancel(context.Context, acpsdk.CancelNotificatio
 	return nil
 }
 
-func (a *sessionCancelAgent) Prompt(ctx context.Context, _ protocolacp.PromptRequest, _ PromptCallbacks) (protocolacp.PromptResponse, error) {
+func (a *sessionCancelAgent) Prompt(ctx context.Context, _ acpsdk.PromptRequest, _ PromptCallbacks) (acpsdk.PromptResponse, error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	a.mu.Lock()
 	a.cancel = cancel
 	a.mu.Unlock()
 	close(a.started)
 	<-runCtx.Done()
-	return protocolacp.PromptResponse{StopReason: protocolacp.StopReasonCancelled}, nil
+	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonCancelled}, nil
 }
 
 func (a *sessionCancelAgent) Cancel(_ context.Context, req acpsdk.CancelNotification) error {

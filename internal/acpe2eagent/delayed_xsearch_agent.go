@@ -49,11 +49,12 @@ func (a *delayedXSearchAgent) NewSession(context.Context, acpsdk.NewSessionReque
 	return acpsdk.NewSessionResponse{SessionId: acpsdk.SessionId(sessionID), ConfigOptions: options}, nil
 }
 
-func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acp.PromptRequest, callbacks surfaceacp.PromptCallbacks) (acp.PromptResponse, error) {
+func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acpsdk.PromptRequest, callbacks surfaceacp.PromptCallbacks) (acpsdk.PromptResponse, error) {
+	sessionID := strings.TrimSpace(string(req.SessionId))
 	for index := 1; index <= 6; index++ {
 		toolCallID := fmt.Sprintf("x-search-%d", index)
 		if err := callbacks.SessionUpdate(ctx, acp.SessionNotification{
-			SessionID: req.SessionID,
+			SessionID: sessionID,
 			Update: acp.ToolCall{
 				SessionUpdate: acp.UpdateToolCall,
 				ToolCallID:    toolCallID,
@@ -64,7 +65,7 @@ func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acp.PromptRequest,
 			},
 		}); err != nil {
 			recordDelayedXSearchInterruption("start update: " + err.Error())
-			return acp.PromptResponse{}, err
+			return acpsdk.PromptResponse{}, err
 		}
 		title := "X search:"
 		status := acp.ToolStatusCompleted
@@ -75,10 +76,10 @@ func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acp.PromptRequest,
 			"mode":  "Latest",
 		})
 		if err != nil {
-			return acp.PromptResponse{}, err
+			return acpsdk.PromptResponse{}, err
 		}
 		if err := callbacks.SessionUpdate(ctx, acp.SessionNotification{
-			SessionID: req.SessionID,
+			SessionID: sessionID,
 			Update: acp.ToolCallUpdate{
 				SessionUpdate: acp.UpdateToolCallInfo,
 				ToolCallID:    toolCallID,
@@ -91,7 +92,7 @@ func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acp.PromptRequest,
 			},
 		}); err != nil {
 			recordDelayedXSearchInterruption("completed update: " + err.Error())
-			return acp.PromptResponse{}, err
+			return acpsdk.PromptResponse{}, err
 		}
 	}
 
@@ -100,11 +101,11 @@ func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acp.PromptRequest,
 	select {
 	case <-ctx.Done():
 		recordDelayedXSearchInterruption("prompt context: " + ctx.Err().Error())
-		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, ctx.Err()
+		return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonCancelled}, ctx.Err()
 	case <-timer.C:
 	}
 	if err := callbacks.SessionUpdate(ctx, acp.SessionNotification{
-		SessionID: req.SessionID,
+		SessionID: sessionID,
 		Update: acp.ContentChunk{
 			SessionUpdate: acp.UpdateAgentMessage,
 			Content:       acp.TextContent{Type: "text", Text: "external xsearch sequence complete"},
@@ -112,9 +113,9 @@ func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acp.PromptRequest,
 		},
 	}); err != nil {
 		recordDelayedXSearchInterruption("final update: " + err.Error())
-		return acp.PromptResponse{}, err
+		return acpsdk.PromptResponse{}, err
 	}
-	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 }
 
 func (*delayedXSearchAgent) Cancel(context.Context, acpsdk.CancelNotification) error {

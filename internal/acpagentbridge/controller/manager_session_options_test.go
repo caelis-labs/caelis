@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestStartACPClientAppliesAgentDefaultsBeforeFirstPrompt(t *testing.T) {
@@ -143,7 +143,7 @@ func TestControllerPromptRecoversConfiguredAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promptParts() error = %v", err)
 	}
-	if resp.StopReason != schema.StopReasonEndTurn {
+	if resp.StopReason != string(acpsdk.StopReasonEndTurn) {
 		t.Fatalf("promptParts() stop reason = %q", resp.StopReason)
 	}
 }
@@ -165,7 +165,7 @@ func TestParticipantPromptRecoversConfiguredAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promptParts() error = %v", err)
 	}
-	if resp.StopReason != schema.StopReasonEndTurn {
+	if resp.StopReason != string(acpsdk.StopReasonEndTurn) {
 		t.Fatalf("promptParts() stop reason = %q", resp.StopReason)
 	}
 }
@@ -254,7 +254,7 @@ func TestManagerSessionDefaultsHelperProcess(t *testing.T) {
 			if !modelApplied || !effortApplied {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "prompt arrived before defaults"}
 			}
-			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+			return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 		default:
 			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 		}
@@ -316,7 +316,7 @@ func TestManagerAuthenticationHelperProcess(t *testing.T) {
 			if !authenticated {
 				return nil, &jsonrpc.RPCError{Code: client.ErrorCodeAuthRequired, Message: "Authentication required"}
 			}
-			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+			return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 		default:
 			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 		}

@@ -6,21 +6,6 @@ import (
 	"fmt"
 )
 
-const (
-	StopReasonEndTurn   = "end_turn"
-	StopReasonCancelled = "cancelled"
-)
-
-type PromptRequest struct {
-	SessionID string            `json:"sessionId"`
-	MessageID *string           `json:"messageId,omitempty"`
-	Prompt    []json.RawMessage `json:"prompt"`
-}
-
-type PromptResponse struct {
-	StopReason string `json:"stopReason"`
-}
-
 // SessionSteeringOutcome is the Agent-selected disposition of one steering
 // request. Unknown values are retained so newer peer outcomes can cross the
 // wire without requiring a schema update.

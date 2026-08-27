@@ -238,10 +238,11 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		resp, err := handler.SetSessionConfigOption(ctx, req)
 		return responseOrError(resp, err)
 	case acpsdk.AgentMethodSessionPrompt:
-		var req protocolacp.PromptRequest
-		if err := decodeParams(params, &req); err != nil {
+		var req acpsdk.PromptRequest
+		if err := decodeRequiredParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
+		runtimeacp.PreserveLegacyPromptImageNames(params, &req)
 		resp, err := c.agent.Prompt(ctx, req, c.promptCallbacks())
 		return responseOrError(resp, err)
 	case methodSessionSteering:

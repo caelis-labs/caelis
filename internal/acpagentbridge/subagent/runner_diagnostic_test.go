@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -19,7 +20,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRunnerPromptFailureBeforeFirstUpdateDoesNotPersistRawDiagnostics(t *testing.T) {
@@ -560,13 +560,13 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				if configurationStep != 3 {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: fmt.Sprintf("prompt before configuration completed at step %d", configurationStep)}
 				}
-				return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+				return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 			}
 			if mode == "prompt-authentication" {
 				if !authenticated {
 					return nil, &jsonrpc.RPCError{Code: client.ErrorCodeAuthRequired, Message: "Authentication required"}
 				}
-				return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+				return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 			}
 			fmt.Fprintln(os.Stderr, "OPENAI_API_KEY=sk-stderr-super-secret cwd=/Users/private/workspace")
 			return nil, &jsonrpc.RPCError{

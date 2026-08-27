@@ -2,7 +2,6 @@ package acpsurface
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -72,14 +71,11 @@ func TestProductACPStreamingChunksShareOneMessageID(t *testing.T) {
 	}
 
 	live := &recordingCallbacks{}
-	result, err := agent.Prompt(ctx, acp.PromptRequest{
-		SessionID: string(created.SessionId),
-		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"reply once"}`)},
-	}, live)
+	result, err := agent.Prompt(ctx, textPromptRequest(string(created.SessionId), "reply once"), live)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.StopReason != acp.StopReasonEndTurn {
+	if result.StopReason != acpsdk.StopReasonEndTurn {
 		t.Fatalf("StopReason = %q, want end_turn", result.StopReason)
 	}
 
@@ -125,10 +121,7 @@ func TestProductACPStreamingChunksShareOneMessageID(t *testing.T) {
 
 	// A later logical assistant message must rotate identity.
 	second := &recordingCallbacks{}
-	if _, err := agent.Prompt(ctx, acp.PromptRequest{
-		SessionID: string(created.SessionId),
-		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"reply again"}`)},
-	}, second); err != nil {
+	if _, err := agent.Prompt(ctx, textPromptRequest(string(created.SessionId), "reply again"), second); err != nil {
 		t.Fatal(err)
 	}
 	secondIDs, _ := agentMessageIdentities(second.notifications)

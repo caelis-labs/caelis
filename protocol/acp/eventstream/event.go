@@ -245,7 +245,7 @@ func TurnLifecycle(handleID string, runID string, turnID string, state string, r
 }
 
 func TurnCompleted(handleID string, runID string, turnID string, occurredAt time.Time) Envelope {
-	return TurnLifecycle(handleID, runID, turnID, LifecycleStateCompleted, "", schema.StopReasonEndTurn, occurredAt)
+	return TurnLifecycle(handleID, runID, turnID, LifecycleStateCompleted, "", string(acpsdk.StopReasonEndTurn), occurredAt)
 }
 
 func TurnFailed(handleID string, runID string, turnID string, reason string, occurredAt time.Time) Envelope {
@@ -253,7 +253,7 @@ func TurnFailed(handleID string, runID string, turnID string, reason string, occ
 }
 
 func TurnCancelled(handleID string, runID string, turnID string, reason string, occurredAt time.Time) Envelope {
-	return TurnLifecycle(handleID, runID, turnID, LifecycleStateCancelled, reason, schema.StopReasonCancelled, occurredAt)
+	return TurnLifecycle(handleID, runID, turnID, LifecycleStateCancelled, reason, string(acpsdk.StopReasonCancelled), occurredAt)
 }
 
 func EnsureTerminalLifecycle(events <-chan Envelope, handleID string, runID string, turnID string) <-chan Envelope {

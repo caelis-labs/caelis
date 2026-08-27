@@ -1342,7 +1342,7 @@ func TestManagerRunTurnCancelAfterPromptSubmissionReportsUnknownAndKeepsAdmissio
 				close(firstPromptReceived)
 				<-releaseFirstPrompt
 			}
-			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+			return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 		}, nil)
 	}()
 	acpClient, err := client.NewStreamClient(clientSide, clientSide, client.Config{})
@@ -2258,7 +2258,7 @@ func TestManagerACPControllerReconnectHelperProcess(t *testing.T) {
 			if req.SessionID != "remote-reconnect" || len(req.Prompt) == 0 {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/prompt request"}
 			}
-			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+			return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 		default:
 			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 		}
@@ -2304,7 +2304,7 @@ func TestManagerACPDurableHelperProcess(t *testing.T) {
 			if req.SessionID != "remote-durable" || len(req.Prompt) == 0 {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/prompt request"}
 			}
-			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+			return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 		default:
 			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 		}
@@ -2414,7 +2414,7 @@ func TestManagerACPControllerReapplyHelperProcess(t *testing.T) {
 			if req.SessionID != "remote-reapply" || len(req.Prompt) == 0 || !modelApplied || !effortApplied {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "prompt before reapplying model/effort"}
 			}
-			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+			return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 		default:
 			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 		}
@@ -2508,7 +2508,7 @@ func TestManagerACPControllerModeReapplyHelperProcess(t *testing.T) {
 			if req.SessionID != "remote-mode-reapply" || len(req.Prompt) == 0 || !sawResume || !modeApplied {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "prompt before reapplying mode"}
 			}
-			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+			return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 		default:
 			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 		}

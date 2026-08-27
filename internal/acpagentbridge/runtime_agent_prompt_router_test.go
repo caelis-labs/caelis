@@ -25,7 +25,7 @@ func TestRuntimeAgentNewRequiresSlashResultFormatterWithPromptRouter(t *testing.
 	_, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  &promptRouterRuntime{sessions: sessions},
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, nil
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
@@ -55,7 +55,7 @@ func TestRuntimeAgentPromptSlashCommandUsesPromptRouterBeforeMainRuntime(t *test
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for slash command")
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
@@ -76,7 +76,7 @@ func TestRuntimeAgentPromptSlashCommandUsesPromptRouterBeforeMainRuntime(t *test
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	resp, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/status"}`),
@@ -85,8 +85,8 @@ func TestRuntimeAgentPromptSlashCommandUsesPromptRouterBeforeMainRuntime(t *test
 	if err != nil {
 		t.Fatalf("Prompt(/status) error = %v", err)
 	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	if resp.StopReason != acpsdk.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonEndTurn)
 	}
 	if runtime.runCalled {
 		t.Fatal("main runtime Run was called for handled slash command")
@@ -127,7 +127,7 @@ func TestRuntimeAgentPromptRouterSuppressesLiveUserMessageEcho(t *testing.T) {
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for routed prompt")
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
@@ -145,7 +145,7 @@ func TestRuntimeAgentPromptRouterSuppressesLiveUserMessageEcho(t *testing.T) {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	resp, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"hello"}`),
@@ -154,8 +154,8 @@ func TestRuntimeAgentPromptRouterSuppressesLiveUserMessageEcho(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	if resp.StopReason != acpsdk.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonEndTurn)
 	}
 	for _, notification := range cb.notifications {
 		if notification.Update.SessionUpdateType() == acp.UpdateUserMessage {
@@ -184,7 +184,7 @@ func TestRuntimeAgentPromptRouterHandlesSharedSlashWithImagePart(t *testing.T) {
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for shared slash command")
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
@@ -202,7 +202,7 @@ func TestRuntimeAgentPromptRouterHandlesSharedSlashWithImagePart(t *testing.T) {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	resp, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/review inspect the screenshot"}`),
@@ -212,8 +212,8 @@ func TestRuntimeAgentPromptRouterHandlesSharedSlashWithImagePart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prompt(/review + image) error = %v", err)
 	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	if resp.StopReason != acpsdk.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonEndTurn)
 	}
 	if runtime.runCalled {
 		t.Fatal("main runtime Run was called for shared slash command with image")
@@ -253,7 +253,7 @@ func TestRuntimeAgentPromptRouterHandlesDynamicSlashWithImagePart(t *testing.T) 
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for dynamic slash command")
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
@@ -272,7 +272,7 @@ func TestRuntimeAgentPromptRouterHandlesDynamicSlashWithImagePart(t *testing.T) 
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	resp, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/helper inspect the screenshot"}`),
@@ -282,8 +282,8 @@ func TestRuntimeAgentPromptRouterHandlesDynamicSlashWithImagePart(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Prompt(/helper + image) error = %v", err)
 	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	if resp.StopReason != acpsdk.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonEndTurn)
 	}
 	if runtime.attach.Agent != "" || runtime.runCalled {
 		t.Fatalf("runtime attach=%#v runCalled=%v, want prompt router before main runtime", runtime.attach, runtime.runCalled)
@@ -317,7 +317,7 @@ func TestRuntimeAgentPromptRouterHandlesNormalPromptWithImagePart(t *testing.T) 
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for normal image prompt")
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
@@ -335,7 +335,7 @@ func TestRuntimeAgentPromptRouterHandlesNormalPromptWithImagePart(t *testing.T) 
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	resp, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"inspect the screenshot"}`),
@@ -345,8 +345,8 @@ func TestRuntimeAgentPromptRouterHandlesNormalPromptWithImagePart(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Prompt(normal + image) error = %v", err)
 	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	if resp.StopReason != acpsdk.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonEndTurn)
 	}
 	if runtime.runCalled {
 		t.Fatal("main runtime Run was called for normal image prompt")
@@ -395,7 +395,7 @@ func TestRuntimeAgentPromptResolvesSessionByGlobalID(t *testing.T) {
 		Runtime:      runtime,
 		Sessions:     sessions,
 		WorkspaceKey: "ws-a",
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for routed prompt")
 		},
 		PromptRouterFactory: func(_ context.Context, activeSession session.Session) (controlprompt.Router, error) {
@@ -411,7 +411,7 @@ func TestRuntimeAgentPromptResolvesSessionByGlobalID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	resp, err := agent.Prompt(ctx, acp.PromptRequest{
+	resp, err := agent.Prompt(ctx, runtimeacp.PromptInput{
 		SessionID: "shared-session",
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/status"}`),
@@ -420,8 +420,8 @@ func TestRuntimeAgentPromptResolvesSessionByGlobalID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	if resp.StopReason != acpsdk.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonEndTurn)
 	}
 }
 
@@ -443,7 +443,7 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for handled slash command")
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
@@ -465,7 +465,7 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 	}
 	router.result.StatusUpdate.Session.ID = string(activeSession.SessionId)
 	cb := &recordingPromptCallbacks{}
-	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	resp, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/model use fast"}`),
@@ -474,8 +474,8 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prompt(/model use fast) error = %v", err)
 	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	if resp.StopReason != acpsdk.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonEndTurn)
 	}
 	seenSessionInfo := false
 	seenMode := false
@@ -539,7 +539,7 @@ func TestRuntimeAgentPromptRouterTurnFeedReturnsEmitErrors(t *testing.T) {
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for handled slash command")
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
@@ -558,7 +558,7 @@ func TestRuntimeAgentPromptRouterTurnFeedReturnsEmitErrors(t *testing.T) {
 	}
 	wantErr := errors.New("session update failed")
 	cb := &errorOnAgentMessageCallbacks{err: wantErr}
-	_, err = agent.Prompt(context.Background(), acp.PromptRequest{
+	_, err = agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/review"}`),
@@ -625,7 +625,7 @@ func TestRuntimeAgentPromptRouterTurnFeedEmitsTerminalMetaForACPStdio(t *testing
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for handled slash command")
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
@@ -643,7 +643,7 @@ func TestRuntimeAgentPromptRouterTurnFeedEmitsTerminalMetaForACPStdio(t *testing
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	_, err = agent.Prompt(context.Background(), acp.PromptRequest{
+	_, err = agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/review"}`),
@@ -713,7 +713,7 @@ func TestRuntimeAgentPromptRouterDoesNotRewriteCumulativeFinalContent(t *testing
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for handled slash command")
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
@@ -731,7 +731,7 @@ func TestRuntimeAgentPromptRouterDoesNotRewriteCumulativeFinalContent(t *testing
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	_, err = agent.Prompt(context.Background(), acp.PromptRequest{
+	_, err = agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/review"}`),
@@ -908,7 +908,7 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for handled slash command")
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
@@ -926,7 +926,7 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	_, err = agent.Prompt(context.Background(), acp.PromptRequest{
+	_, err = agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"/review"}`),

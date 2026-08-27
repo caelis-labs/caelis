@@ -53,7 +53,7 @@ func NewFromClients(cfg ClientsConfig) (*ProductAgent, error) {
 type Agent interface {
 	Initialize(context.Context, acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error)
 	NewSession(context.Context, acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error)
-	Prompt(context.Context, protocolacp.PromptRequest, PromptCallbacks) (protocolacp.PromptResponse, error)
+	Prompt(context.Context, acpsdk.PromptRequest, PromptCallbacks) (acpsdk.PromptResponse, error)
 	Cancel(context.Context, acpsdk.CancelNotification) error
 }
 
@@ -92,8 +92,12 @@ func (a *ProductAgent) NewSession(ctx context.Context, req acpsdk.NewSessionRequ
 	return a.inner.NewSession(ctx, req)
 }
 
-func (a *ProductAgent) Prompt(ctx context.Context, req protocolacp.PromptRequest, callbacks PromptCallbacks) (protocolacp.PromptResponse, error) {
-	return a.inner.Prompt(ctx, req, callbacks)
+func (a *ProductAgent) Prompt(ctx context.Context, req acpsdk.PromptRequest, callbacks PromptCallbacks) (acpsdk.PromptResponse, error) {
+	input, err := runtimeacp.PromptInputFromACP(req)
+	if err != nil {
+		return acpsdk.PromptResponse{}, err
+	}
+	return a.inner.Prompt(ctx, input, callbacks)
 }
 
 func (a *ProductAgent) Cancel(ctx context.Context, req acpsdk.CancelNotification) error {

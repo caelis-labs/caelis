@@ -39,7 +39,7 @@ func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
 	callbacks := &spawnGoldenCallbacks{updates: make(chan acp.SessionNotification, 16)}
 	promptErr := make(chan error, 1)
 	go func() {
-		_, err := runtimeAgent.Prompt(context.Background(), acp.PromptRequest{
+		_, err := runtimeAgent.Prompt(context.Background(), runtimeacp.PromptInput{
 			SessionID: sessionID,
 			Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"run"}`)},
 		}, callbacks)
@@ -196,7 +196,7 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 	callbacks := &spawnGoldenCallbacks{updates: make(chan acp.SessionNotification, 32)}
 	promptErr := make(chan error, 1)
 	go func() {
-		_, err := runtimeAgent.Prompt(context.Background(), acp.PromptRequest{
+		_, err := runtimeAgent.Prompt(context.Background(), runtimeacp.PromptInput{
 			SessionID: sessionID,
 			Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"run"}`)},
 		}, callbacks)
@@ -369,7 +369,7 @@ func newSpawnGoldenDirectRunnerAgent(
 	runtimeAgent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime: spawnGoldenDirectRuntime{events: events}, Sessions: sessions, TaskStreams: streams,
 		TaskStreamPrincipal: taskstream.Principal{ID: "user-1"},
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "golden-direct-runtime"}, nil
 		},
 		AppName: "caelis", UserID: "user-1",
@@ -392,7 +392,7 @@ func newSpawnGoldenAgent(t *testing.T, turn *testControlTurn, streams taskstream
 	runtimeAgent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime: runtime, Sessions: sessions, TaskStreams: streams,
 		TaskStreamPrincipal: taskstream.Principal{ID: "user-1"},
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for handled prompt")
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {

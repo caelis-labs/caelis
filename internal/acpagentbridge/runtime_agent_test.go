@@ -378,7 +378,7 @@ func TestRuntimeAgentPromptPassesResolvedWorkspaceRefToMainRuntime(t *testing.T)
 		Runtime:      runtime,
 		Sessions:     sessions,
 		WorkspaceKey: "ws-a",
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "chat"}, nil
 		},
 		AppName: "caelis",
@@ -387,7 +387,7 @@ func TestRuntimeAgentPromptPassesResolvedWorkspaceRefToMainRuntime(t *testing.T)
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
 	}
-	resp, err := agent.Prompt(ctx, acp.PromptRequest{
+	resp, err := agent.Prompt(ctx, runtimeacp.PromptInput{
 		SessionID: "shared-session",
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"hello"}`),
@@ -396,8 +396,8 @@ func TestRuntimeAgentPromptPassesResolvedWorkspaceRefToMainRuntime(t *testing.T)
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	if resp.StopReason != acpsdk.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonEndTurn)
 	}
 	if got := runtime.request.SessionRef.WorkspaceKey; got != "ws-b" {
 		t.Fatalf("runtime SessionRef.WorkspaceKey = %q, want ws-b", got)
@@ -427,7 +427,7 @@ func TestRuntimeAgentResumeSessionIgnoresCWDForIdentity(t *testing.T) {
 		Sessions:     sessions,
 		Modes:        modes,
 		WorkspaceKey: "ws-a",
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "chat"}, nil
 		},
 		AppName: "caelis",
@@ -477,7 +477,7 @@ func TestRuntimeAgentUnscopedPromptUsesGlobalSessionIDAfterResumeWithDifferentCW
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "chat"}, nil
 		},
 		AppName: "caelis",
@@ -494,7 +494,7 @@ func TestRuntimeAgentUnscopedPromptUsesGlobalSessionIDAfterResumeWithDifferentCW
 			t.Fatalf("ResumeSession(%s) error = %v", workspaceKey, err)
 		}
 	}
-	resp, err := agent.Prompt(ctx, acp.PromptRequest{
+	resp, err := agent.Prompt(ctx, runtimeacp.PromptInput{
 		SessionID: "shared-session",
 		Prompt: []json.RawMessage{
 			json.RawMessage(`{"type":"text","text":"hello"}`),
@@ -503,8 +503,8 @@ func TestRuntimeAgentUnscopedPromptUsesGlobalSessionIDAfterResumeWithDifferentCW
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	if resp.StopReason != acpsdk.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonEndTurn)
 	}
 	if got := runtime.request.SessionRef.WorkspaceKey; got != "ws-b" {
 		t.Fatalf("runtime SessionRef.WorkspaceKey = %q, want ws-b", got)
@@ -516,7 +516,7 @@ func TestRuntimeAgentPromptConvertsLocalTerminalTextToTerminalMetaForACPStdio(t 
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  terminalBridgeRuntime{includeFinalEvent: true},
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "fake"}, nil
 		},
 		AppName: "caelis",
@@ -534,7 +534,7 @@ func TestRuntimeAgentPromptConvertsLocalTerminalTextToTerminalMetaForACPStdio(t 
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: string(activeSession.SessionId)}, cb); err != nil {
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{SessionID: string(activeSession.SessionId)}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
 	if !hasTerminalInfo(cb.notifications, "call-1", "call-1") {
@@ -552,7 +552,7 @@ func TestRuntimeAgentPromptContinuesAfterObservationGap(t *testing.T) {
 	bridge, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  observationGapRuntime{},
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "fake"}, nil
 		},
 		AppName: "caelis",
@@ -566,12 +566,12 @@ func TestRuntimeAgentPromptContinuesAfterObservationGap(t *testing.T) {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	callbacks := &recordingPromptCallbacks{}
-	response, err := bridge.Prompt(context.Background(), acp.PromptRequest{SessionID: string(active.SessionId)}, callbacks)
+	response, err := bridge.Prompt(context.Background(), runtimeacp.PromptInput{SessionID: string(active.SessionId)}, callbacks)
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
-	if response.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", response.StopReason, acp.StopReasonEndTurn)
+	if response.StopReason != acpsdk.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", response.StopReason, acpsdk.StopReasonEndTurn)
 	}
 	chunks := agentMessageChunks(callbacks.notifications)
 	if len(chunks) != 2 || chunks[0] != projector.RuntimeObservationGapNotice || chunks[1] != "durable final" {
@@ -593,7 +593,7 @@ func TestRuntimeAgentPromptForwardsNarrativeChunksWithoutContentRewriting(t *tes
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  narrativeReplayRuntime{},
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "fake"}, nil
 		},
 		AppName: "caelis",
@@ -611,7 +611,7 @@ func TestRuntimeAgentPromptForwardsNarrativeChunksWithoutContentRewriting(t *tes
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: string(activeSession.SessionId)}, cb); err != nil {
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{SessionID: string(activeSession.SessionId)}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
 	got := agentMessageChunks(cb.notifications)
@@ -630,7 +630,7 @@ func TestRuntimeAgentPromptOmitsOwnedFinalReasoningMaterialization(t *testing.T)
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  narrativeThoughtReplayRuntime{},
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "fake"}, nil
 		},
 		AppName: "caelis",
@@ -648,7 +648,7 @@ func TestRuntimeAgentPromptOmitsOwnedFinalReasoningMaterialization(t *testing.T)
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: string(activeSession.SessionId)}, cb); err != nil {
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{SessionID: string(activeSession.SessionId)}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
 	got := agentThoughtChunks(cb.notifications)
@@ -663,7 +663,7 @@ func TestRuntimeAgentPromptOmitsOwnedNarrativeFinalAcrossToolBoundary(t *testing
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  narrativeToolBoundaryReplayRuntime{},
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "fake"}, nil
 		},
 		AppName: "caelis",
@@ -681,7 +681,7 @@ func TestRuntimeAgentPromptOmitsOwnedNarrativeFinalAcrossToolBoundary(t *testing
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: string(activeSession.SessionId)}, cb); err != nil {
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{SessionID: string(activeSession.SessionId)}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
 	if got, want := agentThoughtChunks(cb.notifications), []string{"thinking"}; strings.Join(got, "|") != strings.Join(want, "|") {
@@ -717,7 +717,7 @@ func TestRuntimeAgentPromptAutoReviewUsesReviewerInsteadOfClientPermission(t *te
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "chat", Metadata: map[string]any{"policy_mode": "workspace-write"}}, nil
 		},
 		AppName:               "caelis",
@@ -733,7 +733,7 @@ func TestRuntimeAgentPromptAutoReviewUsesReviewerInsteadOfClientPermission(t *te
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &permissionCountingCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(sessionResp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"clean workspace"}`)},
 	}, cb); err != nil {
@@ -776,7 +776,7 @@ func TestRuntimeAgentPromptAutoReviewNormalizesTextAfterSelectedOption(t *testin
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "chat", Metadata: map[string]any{"policy_mode": "workspace-write"}}, nil
 		},
 		AppName:               "caelis",
@@ -792,7 +792,7 @@ func TestRuntimeAgentPromptAutoReviewNormalizesTextAfterSelectedOption(t *testin
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &permissionCountingCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(sessionResp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"clean workspace"}`)},
 	}, cb); err != nil {
@@ -814,7 +814,7 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "chat", Metadata: map[string]any{"policy_mode": "workspace-write"}}, nil
 		},
 		AppName:               "caelis",
@@ -831,7 +831,7 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &permissionCountingCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(sessionResp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"clean workspace"}`)},
 	}, cb); err != nil {
@@ -864,7 +864,7 @@ func TestRuntimeAgentPromptUsesDedicatedApprovalModes(t *testing.T) {
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "chat", Metadata: map[string]any{"policy_mode": "workspace-write"}}, nil
 		},
 		AppName:               "caelis",
@@ -885,7 +885,7 @@ func TestRuntimeAgentPromptUsesDedicatedApprovalModes(t *testing.T) {
 		t.Fatalf("NewSession().Modes = %#v, want client-visible plan mode", sessionResp.Modes)
 	}
 	cb := &permissionCountingCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+	if _, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(sessionResp.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"clean workspace"}`)},
 	}, cb); err != nil {
@@ -919,7 +919,7 @@ func newRuntimeAgentWithSessionsAndConfig(t *testing.T, sessions session.Service
 	cfg := runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "chat", Model: runtimeAgentTestModel{text: "ok"}}, nil
 		},
 		AppName: "caelis",

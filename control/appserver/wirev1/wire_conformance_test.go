@@ -172,7 +172,7 @@ func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 	participant := baseEnvelope(eventstream.KindParticipant)
 	participant.Participant = &eventstream.Participant{State: "attached"}
 	lifecycle := baseEnvelope(eventstream.KindLifecycle)
-	lifecycle.Lifecycle = &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted, StopReason: schema.StopReasonEndTurn}
+	lifecycle.Lifecycle = &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted, StopReason: string(acpsdk.StopReasonEndTurn)}
 	communication := baseEnvelope(eventstream.KindAgentCommunication)
 	communication.AgentCommunication = &eventstream.AgentCommunication{
 		Source: eventstream.ActorIdentity{Kind: "participant", ID: "reviewer-1", Role: "delegated", Name: "reviewer"},

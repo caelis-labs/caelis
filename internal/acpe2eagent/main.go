@@ -33,7 +33,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 	surfaceacp "github.com/caelis-labs/caelis/surfaces/acp"
 )
 
@@ -120,7 +119,7 @@ func main() {
 			Title:   acpsdk.Ptr("Caelis SDK ACP Agent"),
 			Version: "0.1.0",
 		},
-		BuildAgentSpec: func(ctx context.Context, active session.Session, _ acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(ctx context.Context, active session.Session, _ runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return buildSpec(ctx, active, llm, assembly, providers.Modes, providers.Config)
 		},
 		Modes:               providers.Modes,
@@ -146,8 +145,12 @@ type surfaceRuntimeAgent struct {
 
 var _ surfaceacp.Agent = (*surfaceRuntimeAgent)(nil)
 
-func (a *surfaceRuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, callbacks surfaceacp.PromptCallbacks) (acp.PromptResponse, error) {
-	return a.RuntimeAgent.Prompt(ctx, req, callbacks)
+func (a *surfaceRuntimeAgent) Prompt(ctx context.Context, req acpsdk.PromptRequest, callbacks surfaceacp.PromptCallbacks) (acpsdk.PromptResponse, error) {
+	input, err := runtimeacp.PromptInputFromACP(req)
+	if err != nil {
+		return acpsdk.PromptResponse{}, err
+	}
+	return a.RuntimeAgent.Prompt(ctx, input, callbacks)
 }
 
 func (a *surfaceRuntimeAgent) LoadSession(ctx context.Context, req acpsdk.LoadSessionRequest, callbacks surfaceacp.PromptCallbacks) (acpsdk.LoadSessionResponse, error) {

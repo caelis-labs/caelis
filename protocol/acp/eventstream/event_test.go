@@ -563,7 +563,7 @@ func TestTurnLifecycleConstructors(t *testing.T) {
 	if completed.Kind != KindLifecycle || completed.HandleID != "handle" || completed.RunID != "run" || completed.TurnID != "turn" {
 		t.Fatalf("completed envelope = %#v", completed)
 	}
-	if completed.Lifecycle == nil || completed.Lifecycle.State != LifecycleStateCompleted || completed.Lifecycle.StopReason != schema.StopReasonEndTurn {
+	if completed.Lifecycle == nil || completed.Lifecycle.State != LifecycleStateCompleted || completed.Lifecycle.StopReason != string(acpsdk.StopReasonEndTurn) {
 		t.Fatalf("completed lifecycle = %#v", completed.Lifecycle)
 	}
 	if !completed.OccurredAt.Equal(at) || completed.Scope != ScopeMain {
@@ -576,7 +576,7 @@ func TestTurnLifecycleConstructors(t *testing.T) {
 	}
 
 	cancelled := TurnCancelled("h", "r", "t", " context canceled ", at)
-	if cancelled.Lifecycle == nil || cancelled.Lifecycle.State != LifecycleStateCancelled || cancelled.Lifecycle.Reason != "context canceled" || cancelled.Lifecycle.StopReason != schema.StopReasonCancelled {
+	if cancelled.Lifecycle == nil || cancelled.Lifecycle.State != LifecycleStateCancelled || cancelled.Lifecycle.Reason != "context canceled" || cancelled.Lifecycle.StopReason != string(acpsdk.StopReasonCancelled) {
 		t.Fatalf("cancelled lifecycle = %#v", cancelled.Lifecycle)
 	}
 }
@@ -663,7 +663,7 @@ func TestEnsureTerminalLifecycleSynthesizesCancelledAfterCancelError(t *testing.
 		t.Fatalf("events = %#v, want error plus cancelled lifecycle", out)
 	}
 	assertLifecycleState(t, out[1], LifecycleStateCancelled)
-	if out[1].Lifecycle.StopReason != schema.StopReasonCancelled {
+	if out[1].Lifecycle.StopReason != string(acpsdk.StopReasonCancelled) {
 		t.Fatalf("stopReason = %q, want cancelled", out[1].Lifecycle.StopReason)
 	}
 }

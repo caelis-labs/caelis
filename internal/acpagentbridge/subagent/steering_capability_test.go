@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestSpawnedChildRetainsNegotiatedSteeringCapability(t *testing.T) {
@@ -130,7 +130,7 @@ func TestRunnerSteeringCapabilityHelperProcess(t *testing.T) {
 			markSessionEffect()
 			return client.ResumeSessionResponse{}, nil
 		case client.MethodSessionPrompt:
-			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+			return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 		default:
 			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 		}

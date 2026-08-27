@@ -28,9 +28,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// BuildAgentSpecFunc assembles the runtime-facing agent spec for one ACP
-// prompt.
-type BuildAgentSpecFunc func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error)
+// BuildAgentSpecFunc assembles the runtime-facing agent spec for one normalized
+// ACP prompt.
+type BuildAgentSpecFunc func(context.Context, session.Session, PromptInput) (agent.AgentSpec, error)
 
 // ApprovalModelResolver resolves the model used by automatic approval review.
 type ApprovalModelResolver = approval.ModelResolver
@@ -734,14 +734,14 @@ func (a *RuntimeAgent) promptApprovalMode(ctx context.Context, activeSession ses
 	return approval.NormalizeMode(string(modes.CurrentModeId)), nil
 }
 
-func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb PromptCallbacks) (acp.PromptResponse, error) {
+func (a *RuntimeAgent) Prompt(ctx context.Context, req PromptInput, cb PromptCallbacks) (acpsdk.PromptResponse, error) {
 	activeSession, err := a.targetSession(ctx, req.SessionID)
 	if err != nil {
-		return acp.PromptResponse{}, err
+		return acpsdk.PromptResponse{}, err
 	}
 	input, contentParts, err := promptContent(req.Prompt)
 	if err != nil {
-		return acp.PromptResponse{}, err
+		return acpsdk.PromptResponse{}, err
 	}
 	ref := a.activeSessionRef(activeSession, req.SessionID)
 
@@ -753,25 +753,25 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb Pro
 	handled, err := a.runPromptRouter(runCtx, ctx, activeSession, input, contentParts, cb)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+			return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonCancelled}, nil
 		}
-		return acp.PromptResponse{}, err
+		return acpsdk.PromptResponse{}, err
 	}
 	if handled {
-		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+		return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 	}
 	if a.sessionClient != nil {
-		return acp.PromptResponse{}, errors.New("internal/acpagentbridge: typed Session client prompt was not handled by the shared router")
+		return acpsdk.PromptResponse{}, errors.New("internal/acpagentbridge: typed Session client prompt was not handled by the shared router")
 	}
 
 	approvalMode, err := a.promptApprovalMode(ctx, activeSession)
 	if err != nil {
-		return acp.PromptResponse{}, err
+		return acpsdk.PromptResponse{}, err
 	}
 
 	spec, err := a.buildAgentSpec(ctx, activeSession, req)
 	if err != nil {
-		return acp.PromptResponse{}, err
+		return acpsdk.PromptResponse{}, err
 	}
 
 	result, err := a.runtime.Run(runCtx, agent.RunRequest{
@@ -789,17 +789,17 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb Pro
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+			return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonCancelled}, nil
 		}
-		return acp.PromptResponse{}, err
+		return acpsdk.PromptResponse{}, err
 	}
 	if err := a.emitRunEvents(runCtx, ctx, cb, ref, result.Handle, true); err != nil {
 		if errors.Is(err, context.Canceled) {
-			return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+			return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonCancelled}, nil
 		}
-		return acp.PromptResponse{}, err
+		return acpsdk.PromptResponse{}, err
 	}
-	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 }
 
 func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, cb PromptCallbacks, ref session.SessionRef, handle agent.Runner, suppressUserEcho bool) error {

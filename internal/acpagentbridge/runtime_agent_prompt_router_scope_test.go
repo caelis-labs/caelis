@@ -139,7 +139,7 @@ func TestRuntimeAgentPromptDirectPathScopesNarrativesAndPermissionReset(t *testi
 	runtimeAgent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  directScopedNarrativeRuntime{},
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{Name: "direct-scope-test"}, nil
 		},
 		AppName: "caelis",
@@ -153,7 +153,7 @@ func TestRuntimeAgentPromptDirectPathScopesNarrativesAndPermissionReset(t *testi
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &permissionCountingCallbacks{}
-	if _, err := runtimeAgent.Prompt(context.Background(), acp.PromptRequest{
+	if _, err := runtimeAgent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(activeSession.SessionId),
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"run"}`)},
 	}, cb); err != nil {
@@ -231,7 +231,7 @@ func newPromptRouterAgentForScopeTest(t *testing.T, turn *testControlTurn) (*run
 	runtimeAgent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for handled slash command")
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
@@ -253,7 +253,7 @@ func newPromptRouterAgentForScopeTest(t *testing.T, turn *testControlTurn) (*run
 
 func promptRouterTurnForScopeTest(t *testing.T, runtimeAgent *runtimeacp.RuntimeAgent, sessionID string, cb runtimeacp.PromptCallbacks) {
 	t.Helper()
-	if _, err := runtimeAgent.Prompt(context.Background(), acp.PromptRequest{
+	if _, err := runtimeAgent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: sessionID,
 		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"/review"}`)},
 	}, cb); err != nil {

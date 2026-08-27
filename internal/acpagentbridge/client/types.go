@@ -189,8 +189,19 @@ type SetSessionConfigOptionRequest = acpsdk.SetSessionConfigOptionRequest
 type SetSessionConfigOptionResponse struct {
 	ConfigOptions []SessionConfigOption `json:"configOptions"`
 }
-type PromptRequest = schema.PromptRequest
-type PromptResponse = schema.PromptResponse
+
+// PromptRequest is the Host-private tolerant request sent to external Agents.
+// Product agent-side wire handling uses the SDK type directly.
+type PromptRequest struct {
+	SessionID string            `json:"sessionId"`
+	Prompt    []json.RawMessage `json:"prompt"`
+}
+
+// PromptResponse retains unknown future stop reasons from external Agents.
+// Product agent-side responses use acp-go-sdk directly.
+type PromptResponse struct {
+	StopReason string `json:"stopReason"`
+}
 type SessionSteeringOutcome = schema.SessionSteeringOutcome
 type SessionSteeringIdleBehavior = schema.SessionSteeringIdleBehavior
 type SessionSteeringCapability = schema.SessionSteeringCapability

@@ -28,6 +28,15 @@ import (
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
+func textPromptRequest(sessionID string, text string) acpsdk.PromptRequest {
+	return acpsdk.PromptRequest{
+		SessionId: acpsdk.SessionId(sessionID),
+		Prompt: []acpsdk.ContentBlock{{
+			Text: &acpsdk.ContentBlockText{Type: "text", Text: text},
+		}},
+	}
+}
+
 func TestNewFromClientsRoutesStatusSlashThroughSharedPromptRouter(t *testing.T) {
 	workdir := t.TempDir()
 	stack, err := newACPAgentTestStack(t, gatewayapp.Config{
@@ -58,17 +67,12 @@ func TestNewFromClientsRoutesStatusSlashThroughSharedPromptRouter(t *testing.T) 
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingCallbacks{}
-	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: string(session.SessionId),
-		Prompt: []json.RawMessage{
-			json.RawMessage(`{"type":"text","text":"/status"}`),
-		},
-	}, cb)
+	resp, err := agent.Prompt(context.Background(), textPromptRequest(string(session.SessionId), "/status"), cb)
 	if err != nil {
 		t.Fatalf("Prompt(/status) error = %v", err)
 	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	if resp.StopReason != acpsdk.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonEndTurn)
 	}
 	if got := cb.firstAgentMessage(); !strings.Contains(got, "Model:") || !strings.Contains(got, "Session:") {
 		t.Fatalf("agent message = %q, want status output", got)
@@ -156,10 +160,7 @@ func TestNewFromClientsRunCommandPublishesTerminalBytesOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	callbacks := &allowingRecordingCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: string(active.SessionId),
-		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"run command"}`)},
-	}, callbacks); err != nil {
+	if _, err := agent.Prompt(context.Background(), textPromptRequest(string(active.SessionId), "run command"), callbacks); err != nil {
 		t.Fatal(err)
 	}
 	if got := acpTerminalOutputText(callbacks.notifications, "call-shell"); got != output {
@@ -251,17 +252,12 @@ func TestNewFromClientsStatusSlashUsesClientWorkspaceSession(t *testing.T) {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingCallbacks{}
-	resp, err := agent.Prompt(ctx, acp.PromptRequest{
-		SessionID: string(session.SessionId),
-		Prompt: []json.RawMessage{
-			json.RawMessage(`{"type":"text","text":"/status"}`),
-		},
-	}, cb)
+	resp, err := agent.Prompt(ctx, textPromptRequest(string(session.SessionId), "/status"), cb)
 	if err != nil {
 		t.Fatalf("Prompt(/status) error = %v", err)
 	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	if resp.StopReason != acpsdk.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonEndTurn)
 	}
 	message := cb.firstAgentMessage()
 	canonicalClientWorkspace, err := filepath.EvalSymlinks(clientWorkspace)
@@ -347,10 +343,7 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreignBefore := foreign
-	if _, err := agent.Prompt(ctx, acp.PromptRequest{
-		SessionID: foreign.SessionID,
-		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"must not run"}`)},
-	}, &recordingCallbacks{}); !errors.Is(err, session.ErrSessionNotFound) {
+	if _, err := agent.Prompt(ctx, textPromptRequest(foreign.SessionID, "must not run"), &recordingCallbacks{}); !errors.Is(err, session.ErrSessionNotFound) {
 		t.Fatalf("Prompt(foreign system-managed child) error = %v, want session not found", err)
 	}
 	if _, err := agent.SetSessionMode(ctx, acpsdk.SetSessionModeRequest{
@@ -369,14 +362,11 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 		t.Fatalf("foreign managed Session changed: before=%#v after=%#v", foreignBefore, foreignAfter)
 	}
 	callbacks := &recordingCallbacks{}
-	result, err := agent.Prompt(ctx, acp.PromptRequest{
-		SessionID: string(child.SessionId),
-		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"reply once"}`)},
-	}, callbacks)
+	result, err := agent.Prompt(ctx, textPromptRequest(string(child.SessionId), "reply once"), callbacks)
 	if err != nil {
 		t.Fatalf("Prompt(system-managed child) error = %v", err)
 	}
-	if result.StopReason != acp.StopReasonEndTurn || callbacks.firstAgentMessage() != "managed child ok" {
+	if result.StopReason != acpsdk.StopReasonEndTurn || callbacks.firstAgentMessage() != "managed child ok" {
 		t.Fatalf("Prompt(system-managed child) = %#v, message %q", result, callbacks.firstAgentMessage())
 	}
 	listed, err := agent.ListSessions(ctx, acpsdk.ListSessionsRequest{Cwd: testStringPointer(workspace)})
@@ -452,14 +442,11 @@ func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 		t.Fatalf("created WorkspaceKey = %q, want stable Host workspace key", active.WorkspaceKey)
 	}
 	callbacks := &recordingCallbacks{}
-	result, err := agent.Prompt(ctx, acp.PromptRequest{
-		SessionID: string(created.SessionId),
-		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"reply once"}`)},
-	}, callbacks)
+	result, err := agent.Prompt(ctx, textPromptRequest(string(created.SessionId), "reply once"), callbacks)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.StopReason != acp.StopReasonEndTurn || callbacks.firstAgentMessage() != "typed ACP ok" {
+	if result.StopReason != acpsdk.StopReasonEndTurn || callbacks.firstAgentMessage() != "typed ACP ok" {
 		t.Fatalf("Prompt() = %#v, message %q", result, callbacks.firstAgentMessage())
 	}
 	replayed := &recordingCallbacks{}
