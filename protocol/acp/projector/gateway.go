@@ -322,7 +322,7 @@ func ProjectSessionEventNotifications(base eventstream.Envelope, event *session.
 	if projector == nil {
 		projector = EventProjector{}
 	}
-	notifications, err := projector.ProjectNotifications(event)
+	notifications, err := projectNotifications(projector, event)
 	if err != nil {
 		return nil, err
 	}
@@ -333,6 +333,24 @@ func ProjectSessionEventNotifications(base eventstream.Envelope, event *session.
 			SessionID: sessionNotificationID(usageEnv.SessionID, base, event),
 			Update:    eventstream.CloneUpdate(usageEnv.Update),
 		})
+	}
+	return out, nil
+}
+
+func projectNotifications(projector Projector, event *session.Event) ([]schema.SessionNotification, error) {
+	updates, err := projector.ProjectEvent(event)
+	if err != nil || len(updates) == 0 {
+		return nil, err
+	}
+	sessionID := ""
+	if event != nil {
+		sessionID = strings.TrimSpace(event.SessionID)
+	}
+	out := make([]schema.SessionNotification, 0, len(updates))
+	for _, update := range updates {
+		if update != nil {
+			out = append(out, schema.SessionNotification{SessionID: sessionID, Update: update})
+		}
 	}
 	return out, nil
 }

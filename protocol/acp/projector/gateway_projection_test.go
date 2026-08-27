@@ -507,7 +507,7 @@ func TestSessionEventFinalKeepsCanonicalAssistantBoundaryFinal(t *testing.T) {
 	}
 }
 
-func TestProjectSessionEventNotificationsPreservesCustomNotificationsAndAppendsUsage(t *testing.T) {
+func TestProjectSessionEventNotificationsWrapsCustomUpdatesAndAppendsUsage(t *testing.T) {
 	notifications, err := ProjectSessionEventNotifications(eventstream.Envelope{
 		SessionID: "base-session",
 	}, &session.Event{
@@ -520,7 +520,7 @@ func TestProjectSessionEventNotificationsPreservesCustomNotificationsAndAppendsU
 				"total_tokens":      7,
 			},
 		},
-	}, notificationOverrideProjector{})
+	}, updateOverrideProjector{})
 	if err != nil {
 		t.Fatalf("ProjectSessionEventNotifications() error = %v", err)
 	}
@@ -528,8 +528,8 @@ func TestProjectSessionEventNotificationsPreservesCustomNotificationsAndAppendsU
 		t.Fatalf("ProjectSessionEventNotifications() produced %d notifications, want custom notification + usage: %#v", len(notifications), notifications)
 	}
 	chunk, ok := notifications[0].Update.(schema.ContentChunk)
-	if !ok || notifications[0].SessionID != "custom-session" || schema.ExtractTextValue(chunk.Content) != "from notifications" {
-		t.Fatalf("first notification = %#v, want custom ProjectNotifications output", notifications[0])
+	if !ok || notifications[0].SessionID != "event-session" || schema.ExtractTextValue(chunk.Content) != "from updates" {
+		t.Fatalf("first notification = %#v, want wrapped custom ProjectEvent output", notifications[0])
 	}
 	usage, ok := notifications[1].Update.(schema.UsageUpdate)
 	if !ok || notifications[1].SessionID != "base-session" || usage.Used != 7 {
@@ -681,23 +681,18 @@ func TestProjectSessionEventEnvelopeProjectsParticipantAndLifecycleExtensions(t 
 	}
 }
 
-type notificationOverrideProjector struct{}
+type updateOverrideProjector struct{}
 
-func (notificationOverrideProjector) ProjectEvent(*session.Event) ([]schema.Update, error) {
-	return nil, nil
-}
-
-func (notificationOverrideProjector) ProjectNotifications(*session.Event) ([]schema.SessionNotification, error) {
-	return []schema.SessionNotification{{
-		SessionID: "custom-session",
-		Update: schema.ContentChunk{
+func (updateOverrideProjector) ProjectEvent(*session.Event) ([]schema.Update, error) {
+	return []schema.Update{
+		schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "from notifications"},
+			Content:       schema.TextContent{Type: "text", Text: "from updates"},
 		},
-	}}, nil
+	}, nil
 }
 
-func (notificationOverrideProjector) ProjectPermissionRequest(*session.Event) (*schema.RequestPermissionRequest, bool, error) {
+func (updateOverrideProjector) ProjectPermissionRequest(*session.Event) (*schema.RequestPermissionRequest, bool, error) {
 	return nil, false, nil
 }
 

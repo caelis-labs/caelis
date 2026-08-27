@@ -58,12 +58,12 @@ func TestEventProjectorProjectsEventToolSemanticNameInStandardNotifications(t *t
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			notifications, err := (EventProjector{}).ProjectNotifications(tt.event)
+			notifications, err := projectNotifications(EventProjector{}, tt.event)
 			if err != nil {
-				t.Fatalf("ProjectNotifications() error = %v", err)
+				t.Fatalf("projectNotifications() error = %v", err)
 			}
 			if len(notifications) != 1 {
-				t.Fatalf("ProjectNotifications() produced %d notifications, want 1", len(notifications))
+				t.Fatalf("projectNotifications() produced %d notifications, want 1", len(notifications))
 			}
 			meta := toolUpdateMeta(t, notifications[0].Update)
 			assertRuntimeToolName(t, meta, tt.wantName)
@@ -125,12 +125,12 @@ func TestEventProjectorProjectsProtocolToolSemanticNameWithoutEventMetaLeak(t *t
 				event.Protocol.Update.Status = schema.ToolStatusCompleted
 			}
 
-			notifications, err := (EventProjector{}).ProjectNotifications(event)
+			notifications, err := projectNotifications(EventProjector{}, event)
 			if err != nil {
-				t.Fatalf("ProjectNotifications() error = %v", err)
+				t.Fatalf("projectNotifications() error = %v", err)
 			}
 			if len(notifications) != 1 {
-				t.Fatalf("ProjectNotifications() produced %d notifications, want 1", len(notifications))
+				t.Fatalf("projectNotifications() produced %d notifications, want 1", len(notifications))
 			}
 			meta := toolUpdateMeta(t, notifications[0].Update)
 			assertRuntimeToolName(t, meta, tt.toolName)

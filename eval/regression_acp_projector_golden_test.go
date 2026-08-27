@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -315,8 +316,7 @@ func TestRegressionACPProjectorPermissionRequest(t *testing.T) {
 func TestRegressionACPProjectorNotifications(t *testing.T) {
 	t.Parallel()
 
-	p := projector.EventProjector{}
-	notifs, err := p.ProjectNotifications(&session.Event{
+	notifs, err := projector.ProjectSessionEventNotifications(eventstream.Envelope{}, &session.Event{
 		SessionID: "sess-notif",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
@@ -327,9 +327,9 @@ func TestRegressionACPProjectorNotifications(t *testing.T) {
 				Status:        "completed",
 			},
 		},
-	})
+	}, projector.EventProjector{})
 	if err != nil {
-		t.Fatalf("ProjectNotifications() error = %v", err)
+		t.Fatalf("ProjectSessionEventNotifications() error = %v", err)
 	}
 	if len(notifs) != 1 {
 		t.Fatalf("expected 1 notification, got %d", len(notifs))

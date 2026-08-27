@@ -731,7 +731,7 @@ func TestEventProjectorPreservesPartialProtocolToolUpdate(t *testing.T) {
 }
 
 func TestEventProjectorNotificationsSerializePartialToolUpdate(t *testing.T) {
-	notifications, err := (EventProjector{}).ProjectNotifications(&session.Event{
+	notifications, err := projectNotifications(EventProjector{}, &session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
@@ -743,10 +743,10 @@ func TestEventProjectorNotificationsSerializePartialToolUpdate(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("ProjectNotifications() error = %v", err)
+		t.Fatalf("projectNotifications() error = %v", err)
 	}
 	if len(notifications) != 1 {
-		t.Fatalf("ProjectNotifications() produced %d notifications, want 1", len(notifications))
+		t.Fatalf("projectNotifications() produced %d notifications, want 1", len(notifications))
 	}
 	raw, err := json.Marshal(notifications[0])
 	if err != nil {
@@ -863,12 +863,12 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			notifications, err := (EventProjector{}).ProjectNotifications(tt.event)
+			notifications, err := projectNotifications(EventProjector{}, tt.event)
 			if err != nil {
-				t.Fatalf("ProjectNotifications() error = %v", err)
+				t.Fatalf("projectNotifications() error = %v", err)
 			}
 			if len(notifications) != 1 {
-				t.Fatalf("ProjectNotifications() produced %d notifications, want 1", len(notifications))
+				t.Fatalf("projectNotifications() produced %d notifications, want 1", len(notifications))
 			}
 			if notifications[0].SessionID != "session-1" {
 				t.Fatalf("SessionID = %q, want session-1", notifications[0].SessionID)
