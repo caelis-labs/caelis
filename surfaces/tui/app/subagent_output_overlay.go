@@ -391,10 +391,22 @@ func (m *Model) subagentOutputLayout(state *subagentOutputOverlayState) subagent
 	}
 	if useBorder {
 		borderStyle := m.theme.Tokens().OverlayBorder.Background(surface.GetBackground())
-		layout.topBorder = borderStyle.Render("╭" + strings.Repeat("─", frameWidth-2) + "╮")
-		layout.bottomBorder = borderStyle.Render("╰" + strings.Repeat("─", frameWidth-2) + "╯")
-		layout.leftBorder = borderStyle.Render("│")
-		layout.rightBorder = borderStyle.Render("│")
+		layout.topBorder = tuikit.PaintLineBackground(
+			borderStyle.Render("╭"+strings.Repeat("─", frameWidth-2)+"╮"),
+			frameWidth,
+			surface.GetBackground(),
+		)
+		layout.bottomBorder = tuikit.PaintLineBackground(
+			borderStyle.Render("╰"+strings.Repeat("─", frameWidth-2)+"╯"),
+			frameWidth,
+			surface.GetBackground(),
+		)
+		layout.leftBorder = tuikit.PaintLineBackground(
+			borderStyle.Render("│"),
+			1,
+			surface.GetBackground(),
+		)
+		layout.rightBorder = layout.leftBorder
 	}
 	state.layout = layout
 	return layout
@@ -422,15 +434,22 @@ func appendSubagentOutputContentLine(
 	if frame.Len() > 0 {
 		frame.WriteByte('\n')
 	}
+	var line strings.Builder
+	line.Grow(layout.frameWidth)
 	if layout.useBorder {
-		frame.WriteString(layout.leftBorder)
-		frame.WriteString(surface.Render(" "))
+		line.WriteString(layout.leftBorder)
+		line.WriteString(surface.Render(" "))
 	}
-	frame.WriteString(content)
+	line.WriteString(content)
 	if layout.useBorder {
-		frame.WriteString(surface.Render(" "))
-		frame.WriteString(layout.rightBorder)
+		line.WriteString(surface.Render(" "))
+		line.WriteString(layout.rightBorder)
 	}
+	frame.WriteString(tuikit.PaintLineBackground(
+		line.String(),
+		layout.frameWidth,
+		surface.GetBackground(),
+	))
 }
 
 func renderSubagentOutputContentLine(surface lipgloss.Style, width int, line string) string {

@@ -46,10 +46,24 @@ func (a *steeringAdmission) wait(ctx context.Context) error {
 		ctx = context.Background()
 	}
 	select {
-	case <-ctx.Done():
-		return ctx.Err()
 	case <-a.done:
+		return a.result()
+	default:
 	}
+	select {
+	case <-ctx.Done():
+		select {
+		case <-a.done:
+			return a.result()
+		default:
+			return ctx.Err()
+		}
+	case <-a.done:
+		return a.result()
+	}
+}
+
+func (a *steeringAdmission) result() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.err

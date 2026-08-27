@@ -53,7 +53,8 @@ func RenderResponsiveOverlayFrame(theme Theme, m ResponsiveOverlayFrameModel) st
 	} else {
 		box = box.Width(width)
 	}
-	return box.Render(body)
+	frame := box.Render(body)
+	return paintBlockBackground(frame, lipgloss.Width(frame), tok.OverlayBg.GetBackground())
 }
 
 // PaintLineBackground makes background paint survive nested ANSI resets. It
@@ -63,16 +64,32 @@ func PaintLineBackground(line string, width int, background color.Color) string 
 	if width <= 0 || background == nil {
 		return line
 	}
-	screen := uv.NewScreenBuffer(width, 1)
+	return paintBlockBackground(line, width, background)
+}
+
+// paintBlockBackground canonicalizes the final physical cells rather than
+// relying on an outer ANSI background surviving resets from nested styles.
+// Explicit cell backgrounds remain authoritative.
+func paintBlockBackground(block string, width int, background color.Color) string {
+	if width <= 0 || background == nil {
+		return block
+	}
+	lines := strings.Split(block, "\n")
+	screen := uv.NewScreenBuffer(width, len(lines))
 	screen.Method = ansi.GraphemeWidth
-	uv.NewStyledString(line).Draw(screen, screen.Bounds())
-	for x := 0; x < width; x++ {
-		cell := screen.CellAt(x, 0)
-		if cell != nil && cell.Style.Bg == nil {
-			cell.Style.Bg = background
+	uv.NewStyledString(block).Draw(screen, screen.Bounds())
+	for y := range len(lines) {
+		for x := 0; x < width; x++ {
+			cell := screen.CellAt(x, y)
+			if cell != nil && cell.Style.Bg == nil {
+				cell.Style.Bg = background
+			}
 		}
 	}
-	return screen.Line(0).Render()
+	for y := range lines {
+		lines[y] = screen.Line(y).Render()
+	}
+	return strings.Join(lines, "\n")
 }
 
 // RenderOverlayFrame renders a bordered overlay frame with optional title.

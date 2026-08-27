@@ -684,65 +684,44 @@ func TestRuntimeParticipantSteeringWaitsForAdmissionAndCommitsFIFOInputs(t *test
 	}
 }
 
-func TestRuntimeParticipantSteeringReportsInitialPromptFailureAsNoEffect(t *testing.T) {
+func TestRuntimeParticipantSteeringAdmissionFailureIsNoEffect(t *testing.T) {
 	t.Parallel()
 
-	sessions, active := newTestSessionService(t, "participant-runtime-steering-admission-failure")
 	binding := session.ParticipantBinding{
 		ID: "helper", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar,
 		AgentName: "helper", Label: "@helper", SessionID: "remote-helper",
 	}
-	active, err := sessions.PutParticipant(context.Background(), session.PutParticipantRequest{
-		SessionRef: active.SessionRef, Binding: binding,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	promptStarted := make(chan struct{})
-	releasePrompt := make(chan struct{})
 	promptErr := errors.New("initial participant prompt failed")
 	steerCalled := false
 	backend := steeringACPController{
-		stubACPController: stubACPController{
-			promptParticipant: func(context.Context, controller.ParticipantPromptRequest) (controller.TurnResult, error) {
-				close(promptStarted)
-				<-releasePrompt
-				return controller.TurnResult{}, promptErr
-			},
-		},
 		steerParticipant: func(context.Context, controller.ParticipantSteerRequest) error {
 			steerCalled = true
 			return nil
 		},
 	}
-	runtime, err := New(testConfigWithACPForwarder(Config{
-		Sessions: sessions, AgentFactory: chat.Factory{}, Controllers: backend,
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := runtime.PromptParticipant(context.Background(), agent.PromptParticipantRequest{
-		SessionRef: active.SessionRef, ParticipantID: binding.ID, Input: "initial",
+	admission := newSteeringAdmission()
+	admission.resolve(promptErr)
+	submissionCtx, cancelSubmission := context.WithCancel(context.Background())
+	cancelSubmission()
+	runtime := &Runtime{controllers: backend}
+	handler := runtime.participantSteeringHandler(
+		context.Background(),
+		session.Session{},
+		session.SessionRef{SessionID: "participant-runtime-steering-admission-failure"},
+		binding,
+		"participant-turn",
+		nil,
+		admission,
+	)
+	err := handler(submissionCtx, agent.Submission{
+		Kind: agent.SubmissionKindConversation,
+		Text: "guide",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	contextual := result.Handle.(agent.ContextSubmissionRunner)
-	submitResult := make(chan error, 1)
-	go func() {
-		submitResult <- contextual.SubmitContext(context.Background(), agent.Submission{
-			Kind: agent.SubmissionKindConversation, Text: "guide",
-		})
-	}()
-	<-promptStarted
-	close(releasePrompt)
-	if err := <-submitResult; errorcode.CodeOf(err) != errorcode.FailedPrecondition || !errors.Is(err, promptErr) {
-		t.Fatalf("SubmitContext() error = %v, want failed_precondition retaining prompt failure", err)
+	if errorcode.CodeOf(err) != errorcode.FailedPrecondition || !errors.Is(err, promptErr) {
+		t.Fatalf("participantSteeringHandler() error = %v, want failed_precondition retaining prompt failure", err)
 	}
 	if steerCalled {
 		t.Fatal("initial prompt failure dispatched participant steering")
-	}
-	for range result.Handle.Events() {
 	}
 }
 

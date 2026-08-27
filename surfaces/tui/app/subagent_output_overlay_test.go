@@ -413,25 +413,7 @@ func TestSubagentOutputOverlayPaintsOneBackgroundAcrossStyledTranscript(t *testi
 
 	frame := model.renderSubagentOutputOverlay()
 	layout := model.subagentOutputOverlay.layout
-	screen := uv.NewScreenBuffer(layout.frameWidth, layout.frameHeight)
-	screen.Method = ansi.GraphemeWidth
-	uv.NewStyledString(frame).Draw(screen, screen.Bounds())
-	wantR, wantG, wantB, wantA := model.theme.ModalBg.RGBA()
-	for y := 0; y < layout.frameHeight; y++ {
-		for x := 0; x < layout.frameWidth; x++ {
-			cell := screen.CellAt(x, y)
-			if cell != nil && cell.Width == 0 {
-				continue
-			}
-			if cell == nil || cell.Style.Bg == nil {
-				t.Fatalf("overlay cell (%d,%d) has no background", x, y)
-			}
-			gotR, gotG, gotB, gotA := cell.Style.Bg.RGBA()
-			if gotR != wantR || gotG != wantG || gotB != wantB || gotA != wantA {
-				t.Fatalf("overlay cell (%d,%d) background = %v, want %v", x, y, cell.Style.Bg, model.theme.ModalBg)
-			}
-		}
-	}
+	assertOverlayCellBackgrounds(t, frame, layout.frameWidth, layout.frameHeight, model.theme.ModalBg)
 }
 
 func TestOpeningSubagentOutputOverlayDoesNotCompleteRunningChild(t *testing.T) {

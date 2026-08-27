@@ -1,13 +1,17 @@
 package tuiapp
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 func TestRenderSlashArgListUsesWizardHintInsteadOfInternalConnectPayload(t *testing.T) {
@@ -52,6 +56,12 @@ func TestRenderSlashArgListDistinguishesCandidateTextFromDetail(t *testing.T) {
 		Commands: DefaultCommands(),
 		Wizards:  DefaultWizards(),
 	})
+	model.theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	model.theme.ModalBg = lipgloss.Color("#20283a")
+	model.theme.CommandText = lipgloss.Color("#dce3f0")
+	model.theme.HelpHintFg = lipgloss.Color("#8190aa")
+	model.theme.InvalidateTokens()
+	model.themeCacheKey = ""
 	def := connectModelWizard()
 	model.wizard = &wizardRuntime{
 		def:       &def,
@@ -67,13 +77,23 @@ func TestRenderSlashArgListDistinguishesCandidateTextFromDetail(t *testing.T) {
 	model.slashArgIndex = 0
 
 	rendered := model.renderSlashArgList()
-	wantCandidate := model.theme.CommandStyle().Render("token plan cn")
-	wantDetail := model.theme.HelpHintTextStyle().Render("coding-plan endpoint")
-	if !strings.Contains(rendered, wantCandidate) {
-		t.Fatalf("rendered slash arg list = %q, want candidate text styled with CommandStyle %q", rendered, wantCandidate)
+	line := styledLineContaining(t, rendered, "token plan cn")
+	plain := ansi.Strip(line)
+	candidateX := strings.Index(plain, "token plan cn")
+	detailX := strings.Index(plain, "coding-plan endpoint")
+	if candidateX < 0 || detailX < 0 {
+		t.Fatalf("unselected completion row = %q", plain)
 	}
-	if !strings.Contains(rendered, wantDetail) {
-		t.Fatalf("rendered slash arg list = %q, want detail text styled with HelpHintTextStyle %q", rendered, wantDetail)
+	screen := uv.NewScreenBuffer(lipgloss.Width(line), 1)
+	screen.Method = ansi.GraphemeWidth
+	uv.NewStyledString(line).Draw(screen, screen.Bounds())
+	candidate := screen.CellAt(candidateX, 0)
+	detail := screen.CellAt(detailX, 0)
+	if candidate == nil || !colorInSet(candidate.Style.Fg, []color.Color{model.theme.CommandText}) {
+		t.Fatalf("candidate foreground = %v, want %v", candidate, model.theme.CommandText)
+	}
+	if detail == nil || !colorInSet(detail.Style.Fg, []color.Color{model.theme.HelpHintFg}) {
+		t.Fatalf("detail foreground = %v, want %v", detail, model.theme.HelpHintFg)
 	}
 }
 

@@ -1,10 +1,16 @@
 package tuiapp
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 func TestSlashArgPickerHintHidesModelOperationalRemarks(t *testing.T) {
@@ -86,6 +92,12 @@ func TestRenderSlashArgListHidesModelOperationalRemarks(t *testing.T) {
 func TestRenderSlashArgListKeepsSelectedHintContrast(t *testing.T) {
 	model := NewModel(Config{Commands: DefaultCommands(), Wizards: DefaultWizards()})
 	model.width = 120
+	model.theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	model.theme.ModalBg = lipgloss.Color("#20283a")
+	model.theme.CommandActive = lipgloss.Color("#30466f")
+	model.theme.SelectionBg = model.theme.CommandActive
+	model.theme.InvalidateTokens()
+	model.themeCacheKey = ""
 	model.slashArgActive = true
 	model.slashArgCommand = "connect-provider"
 	model.slashArgCandidates = []SlashArgCandidate{
@@ -99,20 +111,42 @@ func TestRenderSlashArgListKeepsSelectedHintContrast(t *testing.T) {
 		{identity: "codex", hint: "ChatGPT subscription models through Codex"},
 		{identity: "grok", hint: "Grok models through an eligible xAI subscription"},
 	}, model.completionRowInnerWidth())
-	identityPad := padRightDisplay("codex", identityWidth)
-	base := model.theme.CommandActiveStyle().Padding(0, 0).UnsetBold()
-	wantIdentity := base.Bold(true).Render(" " + identityPad)
-	wantHint := strings.TrimSuffix(base.Render("  ChatGPT"), "\x1b[m")
-	if !strings.Contains(rendered, wantIdentity) {
-		t.Fatalf("selected identity style missing: raw=%q want=%q", rendered, wantIdentity)
+	line := styledLineContaining(t, rendered, "ChatGPT subscription models through Codex")
+	plain := ansi.Strip(line)
+	identityX := strings.Index(plain, "codex")
+	hintX := strings.Index(plain, "ChatGPT")
+	if identityX < 0 || hintX < 0 {
+		t.Fatalf("selected completion row = %q", plain)
 	}
-	if !strings.Contains(rendered, wantHint) {
-		t.Fatalf("selected hint style missing: raw=%q want=%q", rendered, wantHint)
+	screen := uv.NewScreenBuffer(lipgloss.Width(line), 1)
+	screen.Method = ansi.GraphemeWidth
+	uv.NewStyledString(line).Draw(screen, screen.Bounds())
+	identity := screen.CellAt(identityX, 0)
+	hint := screen.CellAt(hintX, 0)
+	if identity == nil || identity.Style.Attrs&uv.AttrBold == 0 {
+		t.Fatalf("selected identity cell = %#v, want bold", identity)
 	}
-	flat := model.theme.CommandActiveStyle().Render(identityPad + "  ChatGPT subscription models through Codex")
-	if strings.Contains(rendered, flat) {
-		t.Fatalf("selected row still uses a flattened CommandActiveStyle paint: %q", rendered)
+	if hint == nil || hint.Style.Attrs&uv.AttrBold != 0 {
+		t.Fatalf("selected hint cell = %#v, want non-bold", hint)
 	}
+	if !colorInSet(identity.Style.Bg, []color.Color{model.theme.CommandActive}) ||
+		!colorInSet(hint.Style.Bg, []color.Color{model.theme.CommandActive}) {
+		t.Fatalf("selected row backgrounds = identity %v hint %v, want %v", identity.Style.Bg, hint.Style.Bg, model.theme.CommandActive)
+	}
+	if got := displayColumns(ansi.Cut(plain, identityX, identityX+identityWidth)); got != identityWidth {
+		t.Fatalf("selected identity width = %d, want %d", got, identityWidth)
+	}
+}
+
+func styledLineContaining(t *testing.T, rendered string, needle string) string {
+	t.Helper()
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.Contains(ansi.Strip(line), needle) {
+			return line
+		}
+	}
+	t.Fatalf("rendered output omitted line containing %q: %q", needle, ansi.Strip(rendered))
+	return ""
 }
 
 func TestRenderSlashCommandListAlignsDescriptions(t *testing.T) {

@@ -230,7 +230,8 @@ func TestRenderResponsiveOverlayFramePaintsCompleteSurface(t *testing.T) {
 		Body: []string{
 			theme.TitleStyle().Render("Subagents"),
 			"",
-			theme.MutedTextStyle().Render("Done  1"),
+			theme.TextStyle().Bold(true).Render("  orbit       ") +
+				theme.MutedTextStyle().Render("grok [none]   "),
 		},
 		Width:     32,
 		UseBorder: true,
