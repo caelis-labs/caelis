@@ -26,10 +26,10 @@ import (
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
 
+	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
-	acptaskstream "github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 func TestClassifyControlBackendErrorTreatsFenceConflictAsConflict(t *testing.T) {

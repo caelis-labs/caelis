@@ -249,7 +249,7 @@ func surfaceGatewayConsumptionRule(rel string, file *ast.File, fset *token.FileS
 		}
 		if selector.Sel.Name == "Events" && gatewayTurnHandles[ident.Name] {
 			subject = ident.Name + ".Events()"
-			rule = "surfaces must consume ACPEventsFromGatewayHandle/eventstream.Envelope instead of kernel.TurnHandle.Events"
+			rule = "surfaces must consume Control eventstream.Envelope values instead of kernel.TurnHandle.Events"
 			line = fset.Position(selector.Pos()).Line
 			return false
 		}
@@ -582,6 +582,9 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if target == "protocol/acp/control" || strings.HasPrefix(target, "protocol/acp/control/") {
 		return "production code must not depend on retired protocol/acp/control; use internal/controlprompt, control/status, or surfaces/internal/promptview"
 	}
+	if target == "protocol/acp/taskstream" || strings.HasPrefix(target, "protocol/acp/taskstream/") {
+		return "production code must not depend on retired protocol/acp/taskstream; use control/appserver/taskstream"
+	}
 	if strings.HasPrefix(rel, "app/controlserver/") &&
 		(target == "app/gatewayapp" || strings.HasPrefix(target, "app/gatewayapp/")) {
 		return "app/controlserver must depend on explicit Control contracts, not gatewayapp assembly"
@@ -594,8 +597,7 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	}
 	if strings.HasPrefix(rel, "app/gatewayapp/controladapter/local/") &&
 		!strings.HasSuffix(rel, "_test.go") &&
-		(target == "protocol/acp" || strings.HasPrefix(target, "protocol/acp/")) &&
-		target != "protocol/acp/taskstream" && !strings.HasPrefix(target, "protocol/acp/taskstream/") {
+		(target == "protocol/acp" || strings.HasPrefix(target, "protocol/acp/")) {
 		return "controladapter/local presentation must consume protocol-neutral control/appserver types, not ACP wire types"
 	}
 	if target == "app/gatewayapp/controladapter" {
@@ -738,7 +740,6 @@ func allowedAppServerProtocolTarget(rel string, target string) bool {
 		"protocol/acp/metautil",
 		"protocol/acp/projector",
 		"protocol/acp/schema",
-		"protocol/acp/taskstream",
 	)
 }
 

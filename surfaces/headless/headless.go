@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -223,7 +224,7 @@ func runSessionOnce(
 // Final is the semantic boundary: EventID is intentionally not required because
 // SDK-only and other process-local producers may not have durable identity.
 type assistantOutputReducer struct {
-	assistant schema.FinalAssistantAccumulator
+	assistant acpbridge.FinalAssistantAccumulator
 }
 
 func (r *assistantOutputReducer) Observe(env eventstream.Envelope) (string, bool) {

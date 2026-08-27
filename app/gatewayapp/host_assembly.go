@@ -6,8 +6,8 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
-	acptaskstream "github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 // hostControlAssembly holds the focused late-binding points produced while

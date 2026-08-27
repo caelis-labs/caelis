@@ -12,8 +12,9 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 func TestTaskHTTPRoutesBindPrincipalAndPreserveEnvelopeWire(t *testing.T) {
@@ -113,10 +114,10 @@ func TestTaskHTTPDirectoryWatchStreamsReplaceableStatusSnapshots(t *testing.T) {
 	server.ServeHTTP(recorder, request)
 	body := recorder.Body.String()
 	if recorder.Code != http.StatusOK ||
-		!strings.Contains(body, "event: "+taskstream.DirectorySnapshotEventName) ||
+		!strings.Contains(body, "event: "+wirev1.TaskDirectorySnapshotEventName) ||
 		!strings.Contains(body, `"revision":"18446744073709551615"`) ||
 		!strings.Contains(body, `"activity_id":"activity-2"`) ||
-		!strings.Contains(body, "event: "+taskstream.StreamDoneEventName) {
+		!strings.Contains(body, "event: "+wirev1.TaskStreamDoneEventName) {
 		t.Fatalf("Task directory SSE status=%d body=%s", recorder.Code, body)
 	}
 	if tasks.principal.ID != "trusted-owner" || tasks.request.SessionID != "session-1" {
@@ -130,8 +131,8 @@ func TestTaskHTTPSSEMarksCleanAndFailedSubscriptionEnds(t *testing.T) {
 		streamErr error
 		wantEvent string
 	}{
-		{name: "clean", wantEvent: taskstream.StreamDoneEventName},
-		{name: "slow consumer", streamErr: taskstream.ErrSlowConsumer, wantEvent: taskstream.StreamErrorEventName},
+		{name: "clean", wantEvent: wirev1.TaskStreamDoneEventName},
+		{name: "slow consumer", streamErr: taskstream.ErrSlowConsumer, wantEvent: wirev1.TaskStreamErrorEventName},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			subscription := newTaskTestSubscription(test.streamErr, eventstream.Envelope{

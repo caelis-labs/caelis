@@ -5,73 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
-
-func TestProjectApprovalPayloadEnvelopeUsesPermissionProjectorPolicy(t *testing.T) {
-	t.Parallel()
-
-	events := ProjectApprovalPayloadEnvelope(eventstream.Envelope{
-		SessionID: "session-1",
-		Meta: map[string]any{
-			"request_id": "approval-1",
-		},
-	}, &approval.Payload{
-		ToolCallID: "call-1",
-		ToolName:   "RunCommand",
-		RawInput:   map[string]any{"command": "go test ./..."},
-		RawOutput:  map[string]any{"preview": "would run tests"},
-		Content: []session.ProtocolToolCallContent{{
-			Type:    "content",
-			Content: session.ProtocolTextContent("permission detail"),
-		}},
-		Reason:             "needs execution",
-		Justification:      "requested by user",
-		SandboxPermissions: "workspace-write",
-		Status:             approval.StatusPending,
-		Options: []approval.Option{{
-			ID:   "allow_once",
-			Name: "Allow once",
-			Kind: "allow_once",
-		}},
-	})
-
-	if len(events) != 1 || events[0].Kind != eventstream.KindRequestPermission || events[0].Permission == nil {
-		t.Fatalf("ProjectApprovalPayloadEnvelope() = %#v, want request_permission", events)
-	}
-	permission := events[0].Permission
-	if permission.SessionID != "session-1" {
-		t.Fatalf("permission.SessionID = %q, want session-1", permission.SessionID)
-	}
-	if stringPtrValue(permission.ToolCall.Kind) != schema.ToolKindExecute {
-		t.Fatalf("permission tool kind = %q, want displaypolicy execute kind", stringPtrValue(permission.ToolCall.Kind))
-	}
-	if stringPtrValue(permission.ToolCall.Title) != "RunCommand go test ./..." {
-		t.Fatalf("permission tool title = %q, want summarized title", stringPtrValue(permission.ToolCall.Title))
-	}
-	rawInput, ok := permission.ToolCall.RawInput.(map[string]any)
-	if !ok {
-		t.Fatalf("permission raw input = %#v, want map", permission.ToolCall.RawInput)
-	}
-	if rawInput["approval_reason"] != "needs execution" || rawInput["justification"] != "requested by user" || rawInput["sandbox_permissions"] != "workspace-write" {
-		t.Fatalf("permission raw input = %#v, want approval prompt fields", rawInput)
-	}
-	if rawOutput, ok := permission.ToolCall.RawOutput.(map[string]any); !ok || rawOutput["preview"] != "would run tests" {
-		t.Fatalf("permission raw output = %#v, want preserved preview", permission.ToolCall.RawOutput)
-	}
-	if len(permission.ToolCall.Content) != 1 || permission.ToolCall.Content[0].Type != "content" {
-		t.Fatalf("permission content = %#v, want preserved canonical content", permission.ToolCall.Content)
-	}
-	payload := ApprovalPayloadFromPermission(permission)
-	if payload == nil || payload.ToolName != "RunCommand" || len(payload.Content) != 1 {
-		t.Fatalf("approval payload = %#v, want canonical RUN_COMMAND tool name", payload)
-	}
-}
 
 func TestProjectTaskStreamFrameDoesNotProjectChildPermissionOutsideControl(t *testing.T) {
 	t.Parallel()

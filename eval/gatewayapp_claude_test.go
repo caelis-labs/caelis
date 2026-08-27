@@ -15,9 +15,9 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
@@ -49,7 +49,7 @@ func TestLocalStackClaudeCustomAdapterE2E(t *testing.T) {
 		t.Fatalf("StartAgentRun(zenith) error = %v", err)
 	}
 	defer turn.Close()
-	var assistant schema.FinalAssistantAccumulator
+	var assistant acpbridge.FinalAssistantAccumulator
 	terminalState := ""
 	for envelope := range turn.Events() {
 		if envelope.Update != nil {

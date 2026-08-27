@@ -9,7 +9,7 @@ boundary. Agent ownership and Runtime rules live in
 Built-in or external Agent
   -> normalized SDK semantics
   -> Control-owned lifecycle and feeds
-  -> protocol/acp projection
+  -> owner-local ACP projection
   -> eventstream.Envelope
   -> Surface
 ```
@@ -18,11 +18,16 @@ Built-in or external Agent
 
 - `agent-sdk/*` owns reusable messages, tools, plans, approvals, participants,
   lifecycle, cancellation, and controller semantics.
-- `protocol/acp/schema` owns public wire shapes.
-- `protocol/acp/semantic` normalizes between wire DTOs and SDK semantics.
+- `acp-go-sdk` owns standard ACP wire contracts and connection behavior.
+- Remaining `protocol/acp/schema` extensions and
+  `protocol/acp/semantic` adapters are transitional compatibility code; they
+  must shrink into the Control, Surface, reusable SDK, or Host-private owner
+  that uses them.
 - Control owns authorization, lifecycle, ordering, replay coordination,
   permission routing, and endpoint selection.
-- `protocol/acp/projector` and focused protocol adapters create Envelopes.
+- The focused Control or presentation adapter creates Envelopes. The remaining
+  shared `protocol/acp/projector` package is a migration source, not a new
+  product authority.
 - Surfaces render Envelopes and collect input. They do not reconstruct Runtime,
   persistence, replay, permission, or orchestration semantics.
 
@@ -134,7 +139,7 @@ Task observation and main-Turn delivery are separate authorities:
 - main-Turn ingress carries only the main Runtime producer;
 - the Control Task stream owns Session-authorized Task directory, retained
   observation, and subscriptions;
-- the ACP Task adapter projects Task records into transient Envelopes.
+- `control/appserver/taskstream` projects Task records into transient Envelopes.
 
 People and models address Tasks by a Session-unique public handle. Opaque Task
 IDs are resolved through the authorized directory and remain protocol

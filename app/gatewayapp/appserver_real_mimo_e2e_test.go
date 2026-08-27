@@ -15,10 +15,10 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/internal/testenv"
 
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const (
@@ -367,7 +367,7 @@ func observeRealMimoTurn(
 			result.err = err
 		}
 	}()
-	var accumulator schema.FinalAssistantAccumulator
+	var accumulator acpbridge.FinalAssistantAccumulator
 	observe := func(envelope eventstream.Envelope) bool {
 		result.envelopes++
 		if envelope.SessionID != sessionID {

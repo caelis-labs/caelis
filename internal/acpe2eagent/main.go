@@ -25,6 +25,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
@@ -32,14 +33,14 @@ import (
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	"github.com/caelis-labs/caelis/protocol/acp"
-	acptaskstream "github.com/caelis-labs/caelis/protocol/acp/taskstream"
+	surfaceacp "github.com/caelis-labs/caelis/surfaces/acp"
 )
 
 func main() {
 	if mode := strings.TrimSpace(os.Getenv("SDK_ACP_WIRE_MODE")); mode != "" {
 		switch mode {
 		case "delayed_xsearch":
-			if err := acp.ServeStdio(context.Background(), newDelayedXSearchAgent(), os.Stdin, os.Stdout); err != nil {
+			if err := surfaceacp.ServeStdio(context.Background(), newDelayedXSearchAgent(), os.Stdin, os.Stdout); err != nil {
 				log.Fatal(err)
 			}
 			return
@@ -129,7 +130,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := acp.ServeStdio(context.Background(), agent, os.Stdin, os.Stdout); err != nil {
+	if err := surfaceacp.ServeStdio(context.Background(), agent, os.Stdin, os.Stdout); err != nil {
 		log.Fatal(err)
 	}
 }

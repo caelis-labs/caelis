@@ -11,8 +11,8 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 func (c *TaskClient) WatchDirectory(
@@ -97,7 +97,7 @@ func (s *remoteTaskDirectorySubscription) readLoop() {
 			return
 		}
 		switch frame.event {
-		case taskstream.DirectorySnapshotEventName:
+		case wirev1.TaskDirectorySnapshotEventName:
 			snapshot, decodeErr := decodeTaskDirectorySnapshot(frame.data)
 			if decodeErr != nil {
 				s.setErr(errorcode.Wrap(errorcode.InvalidArgument, "control http client: decode Task directory snapshot", decodeErr))
@@ -106,15 +106,15 @@ func (s *remoteTaskDirectorySubscription) readLoop() {
 			if !s.publish(snapshot) {
 				return
 			}
-		case taskstream.StreamDoneEventName:
+		case wirev1.TaskStreamDoneEventName:
 			return
-		case taskstream.StreamErrorEventName:
-			var wire taskstream.StreamError
+		case wirev1.TaskStreamErrorEventName:
+			var wire wirev1.TaskStreamError
 			if unmarshalErr := json.Unmarshal(frame.data, &wire); unmarshalErr != nil {
 				s.setErr(errorcode.Wrap(errorcode.InvalidArgument, "control http client: decode Task directory SSE error", unmarshalErr))
 				return
 			}
-			s.setErr(taskstream.DecodeStreamError(wire))
+			s.setErr(wirev1.DecodeTaskStreamError(wire))
 			return
 		default:
 			// Ignore heartbeats and unknown event names.

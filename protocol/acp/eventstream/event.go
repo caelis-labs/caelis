@@ -2,7 +2,6 @@ package eventstream
 
 import (
 	"encoding/json"
-	"errors"
 	"maps"
 	"strings"
 	"time"
@@ -548,10 +547,6 @@ func UpdateMeta(update schema.Update) map[string]any {
 	default:
 		return nil
 	}
-}
-
-func IsError(err error, target error) bool {
-	return errors.Is(err, target)
 }
 
 func cloneToolCallUpdate(in schema.ToolCallUpdate) schema.ToolCallUpdate {

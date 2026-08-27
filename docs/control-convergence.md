@@ -40,9 +40,11 @@ Control should own:
   Loop.
 
 The SDK should own reusable Runtime, model, tool, Session, sandbox, task, and
-normalized collaboration contracts. Protocol packages should own
-product-neutral wire schema, compatibility, and projection. A transport codec
-that directly serializes one Control domain stays with that Control owner.
+normalized collaboration contracts. `acp-go-sdk` should supply standard ACP
+wire contracts and connections. Product compatibility and projection belong
+to the focused Control, Surface, or Host-private adapter that consumes them; a
+transport codec that directly serializes one Control domain stays with that
+Control owner.
 Surfaces should own presentation and input only.
 
 ## Client Boundary
@@ -105,8 +107,8 @@ removes real coupling or a duplicate path.
 - stable product domains converge under focused `control/*` packages;
 - composition and host-specific adapters remain private;
 - presentation code remains under `surfaces/*`;
-- product-neutral wire types remain under `protocol/*`; domain-bound codecs
-  remain with their semantic owner.
+- standard wire types come from their upstream SDK; product extensions and
+  domain-bound codecs remain with their semantic owner.
 
 Do not recreate `ports/*`, grow private prompt or Surface facades into product
 APIs, or move packages merely to make the tree look complete. When a replacement

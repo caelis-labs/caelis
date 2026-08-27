@@ -1,3 +1,5 @@
-// Package acp defines ACP protocol contracts, schema aliases, and the
-// JSON-RPC stdio server implementation used by Caelis surfaces and adapters.
+// Package acp contains transitional Caelis ACP aliases and adapter contracts.
+// Standard wire contracts and connections come from acp-go-sdk; concrete
+// transport, Control, and presentation behavior belongs to its functional
+// owner rather than this package.
 package acp

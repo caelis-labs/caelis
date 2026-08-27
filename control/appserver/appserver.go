@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
 
 // AppServerServices is the complete transport-neutral product capability set

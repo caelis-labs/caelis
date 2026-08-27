@@ -7,10 +7,10 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // acpChildTerminalProjector is the ACP stdio compatibility renderer for
@@ -42,7 +42,7 @@ type acpChildTerminalSeries struct {
 }
 
 type acpChildTerminalState struct {
-	finalResponse schema.FinalAssistantAccumulator
+	finalResponse acpbridge.FinalAssistantAccumulator
 	closed        bool
 }
 
@@ -120,7 +120,7 @@ func (p *acpChildTerminalProjector) closeChildTurnLocked(key acpChildTerminalKey
 		return
 	}
 	state.closed = true
-	state.finalResponse = schema.FinalAssistantAccumulator{}
+	state.finalResponse = acpbridge.FinalAssistantAccumulator{}
 	delete(p.turns, key)
 	p.markChildTurnClosedLocked(key)
 }
@@ -330,7 +330,7 @@ func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, f
 		text = strings.TrimSpace(env.Lifecycle.Reason)
 	}
 	if strings.TrimSpace(text) == "" {
-		state.finalResponse = schema.FinalAssistantAccumulator{}
+		state.finalResponse = acpbridge.FinalAssistantAccumulator{}
 		delete(p.turns, key)
 		p.mu.Unlock()
 		return acp.SessionNotification{}, true

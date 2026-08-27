@@ -82,22 +82,14 @@ func WorkspaceWriteMode() policy.Mode {
 	}
 }
 
-// DangerFullAccessMode allows tools to execute directly on the Host while
-// retaining the small machine-level command denylist. Callers must
-// register this mode explicitly; it is not a substitute for sandbox isolation.
+// DangerFullAccessMode allows every assembled tool to execute directly on the
+// Host without policy approval or command filtering. Callers must register
+// this exceptional mode explicitly; it is not a substitute for sandbox
+// isolation.
 func DangerFullAccessMode() policy.Mode {
 	return policy.NamedMode{
 		ID: ModeDangerFullAccess,
-		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
-			if policyClass(input) == builtinPolicyCommand {
-				command, err := commandArg(input)
-				if err != nil {
-					return policy.Decision{}, err
-				}
-				if class := scanCommandTree(command, input.Options, classifyMachineHardDeny); class.Action == policy.ActionDeny {
-					return deny(class.Reason), nil
-				}
-			}
+		Decide: func(_ context.Context, _ policy.ToolContext) (policy.Decision, error) {
 			return allow(hostExecutionConstraints()), nil
 		},
 	}

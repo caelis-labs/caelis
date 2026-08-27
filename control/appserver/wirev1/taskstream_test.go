@@ -1,21 +1,22 @@
-package taskstream
+package wirev1
 
 import (
 	"errors"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 )
 
 func TestStreamErrorWirePreservesRetryClassWithoutLeakingDetail(t *testing.T) {
 	t.Parallel()
 
-	slow := DecodeStreamError(EncodeStreamError(ErrSlowConsumer))
-	if !errors.Is(slow, ErrSlowConsumer) {
+	slow := DecodeTaskStreamError(EncodeTaskStreamError(controltaskstream.ErrSlowConsumer))
+	if !errors.Is(slow, controltaskstream.ErrSlowConsumer) {
 		t.Fatalf("slow consumer round trip = %v", slow)
 	}
 
-	wire := EncodeStreamError(errorcode.Wrap(
+	wire := EncodeTaskStreamError(errorcode.Wrap(
 		errorcode.Unavailable,
 		"provider secret must not cross the wire",
 		errors.New("token=secret"),
@@ -24,7 +25,7 @@ func TestStreamErrorWirePreservesRetryClassWithoutLeakingDetail(t *testing.T) {
 		wire.Message != "Task stream is unavailable" {
 		t.Fatalf("wire error = %#v", wire)
 	}
-	if got := DecodeStreamError(wire); errorcode.CodeOf(got) != errorcode.Unavailable {
+	if got := DecodeTaskStreamError(wire); errorcode.CodeOf(got) != errorcode.Unavailable {
 		t.Fatalf("decoded code = %q, error = %v", errorcode.CodeOf(got), got)
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/loader"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -24,7 +25,6 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 	"github.com/google/uuid"
 )
 

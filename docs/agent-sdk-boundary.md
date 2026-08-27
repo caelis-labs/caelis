@@ -11,7 +11,7 @@ by more than one host; it does not require repository extraction.
 | --- | --- | --- |
 | Agent SDK | Agent/run values, model and tool contracts, canonical Session semantics, Runtime mechanics, policy and approval primitives, sandbox, task/delegation, normalized ACP-compatible controller and participant contracts | Caelis configuration, credentials, Agent selection, product wire transport, presentation, or Manage Loop decisions |
 | Caelis Control | Product configuration and placement, Agent assembly, endpoint lifecycle, permissions and review routing, system Agents, dynamic orchestration, active-controller selection, and handoff commit | Presentation rendering or autonomous model-driven ownership transfer |
-| Product ACP | Wire schema, transport, compatibility, normalization adapters, Envelope projection, and documented `_meta` | Agent-selection policy or a second copy of canonical model truth |
+| ACP boundaries | `acp-go-sdk` standard wire contracts and connections; owner-local Control, Surface, or Host-private compatibility and Envelope adapters | A standalone product-semantics layer, Agent-selection policy, or a second copy of canonical model truth |
 | Surfaces | Rendering Envelopes and collecting input | Runtime, persistence, replay, tool, sandbox, permission, or handoff decisions |
 
 Ownership follows semantics rather than directory churn. Stable product
@@ -51,8 +51,9 @@ Built-in and external Agents expose the same effective language for:
 - cancellation, completion, controller, and handoff facts.
 
 Native ACP means semantic equivalence, not mandatory JSON-RPC for in-process
-Agents. SDK contracts own normalized semantics; product ACP packages own wire
-encoding and compatibility. External input is normalized before it can enter
+Agents. SDK contracts own normalized semantics; `acp-go-sdk` supplies standard
+wire behavior, while product compatibility and projection live with the
+Control, Surface, or Host-private adapter that needs them. External input is normalized before it can enter
 durable state.
 
 Remote is a transport choice, not a separate Agent category. The SDK does not

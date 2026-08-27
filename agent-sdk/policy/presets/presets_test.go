@@ -116,7 +116,7 @@ func TestDangerFullAccessModeAllowsHostWithoutApproval(t *testing.T) {
 	}
 }
 
-func TestDangerFullAccessModeRetainsMachineHardDenies(t *testing.T) {
+func TestDangerFullAccessModeAllowsCommandsWithoutFiltering(t *testing.T) {
 	t.Parallel()
 
 	for _, command := range []string{
@@ -129,19 +129,23 @@ func TestDangerFullAccessModeRetainsMachineHardDenies(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%q DecideTool() error = %v", command, err)
 		}
-		if decision.Action != policy.ActionDeny {
-			t.Fatalf("%q action = %q, want hard deny", command, decision.Action)
+		if decision.Action != policy.ActionAllow {
+			t.Fatalf("%q action = %q, want allow", command, decision.Action)
 		}
 	}
 }
 
-func TestDangerFullAccessModeRejectsMalformedCommandInput(t *testing.T) {
+func TestDangerFullAccessModeDoesNotParseCommandInput(t *testing.T) {
 	t.Parallel()
 
 	input := commandCtx("go test ./...", false)
 	input.Call.Input = []byte(`{"command":`)
-	if _, err := DangerFullAccessMode().DecideTool(context.Background(), input); err == nil {
-		t.Fatal("DecideTool() error = nil, want malformed command input to fail closed")
+	decision, err := DangerFullAccessMode().DecideTool(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != policy.ActionAllow {
+		t.Fatalf("action = %q, want allow", decision.Action)
 	}
 }
 

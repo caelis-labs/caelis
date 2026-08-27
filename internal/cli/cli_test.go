@@ -794,7 +794,7 @@ func TestSandboxStartupEscapeErrorSuggestsExplicitDangerousMode(t *testing.T) {
 	message := wrapped.Error()
 	for _, want := range []string{
 		"--dangerously-skip-permissions",
-		"disables sandbox isolation, human approval, and Guardian review",
+		"disables sandbox isolation, human approval, Guardian review, and policy command filtering",
 		"not a security boundary",
 	} {
 		if !strings.Contains(message, want) {

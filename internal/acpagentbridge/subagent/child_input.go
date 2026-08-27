@@ -18,7 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
-	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/google/uuid"
 )
 
@@ -312,7 +312,7 @@ type childIdleCheckpoint struct {
 	result          string
 	agentText       string
 	actionSummary   subagentActionSummary
-	finalAssistant  acpschema.FinalAssistantAccumulator
+	finalAssistant  acpbridge.FinalAssistantAccumulator
 	inputActor      session.ActorRef
 	updatedAt       time.Time
 	running         bool

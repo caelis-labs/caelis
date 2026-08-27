@@ -15,9 +15,9 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 // TaskClient is the authenticated HTTP implementation of the independent Task
@@ -259,15 +259,15 @@ func (s *remoteTaskSubscription) readLoop() {
 			if !s.publish(envelope) {
 				return
 			}
-		case taskstream.StreamDoneEventName:
+		case wirev1.TaskStreamDoneEventName:
 			return
-		case taskstream.StreamErrorEventName:
-			var wire taskstream.StreamError
+		case wirev1.TaskStreamErrorEventName:
+			var wire wirev1.TaskStreamError
 			if unmarshalErr := json.Unmarshal(frame.data, &wire); unmarshalErr != nil {
 				s.setErr(errorcode.Wrap(errorcode.InvalidArgument, "control http client: decode Task SSE error", unmarshalErr))
 				return
 			}
-			s.setErr(taskstream.DecodeStreamError(wire))
+			s.setErr(wirev1.DecodeTaskStreamError(wire))
 			return
 		default:
 			// Ignore heartbeats and unknown event names.

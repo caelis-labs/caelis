@@ -53,21 +53,6 @@ type StreamOrigin struct {
 	ParticipantSessionID string
 }
 
-// Key returns one stable subscription identity for deduplicating live output
-// streams across repeated running snapshots.
-func (r StreamRequest) Key() string {
-	sourceID := firstNonEmpty(
-		strings.TrimSpace(r.SourceID),
-		strings.TrimSpace(r.Ref.TerminalID),
-		strings.TrimSpace(r.Ref.TaskID),
-	)
-	return strings.Join([]string{
-		strings.TrimSpace(r.SessionRef.SessionID),
-		strings.TrimSpace(r.Ref.TaskID),
-		sourceID,
-	}, "|")
-}
-
 // ProjectTaskStreamFrame projects one frame for the Task-owned stream. It never
 // manufactures a parent Spawn or Task update. Parent status and results remain
 // on the Session feed.

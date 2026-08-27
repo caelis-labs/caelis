@@ -5,12 +5,11 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type narrativeAccumulator struct {
-	final              acpschema.FinalAssistantAccumulator
-	reasoning          acpschema.FinalAssistantAccumulator
+	final              FinalAssistantAccumulator
+	reasoning          FinalAssistantAccumulator
 	lastNarrativeEvent *session.Event
 	lastAssistantEvent *session.Event
 }
@@ -152,8 +151,4 @@ func setNarrativeEventText(event *session.Event, updateType string, text string)
 		message := model.NewTextMessage(model.RoleAssistant, text)
 		event.Message = &message
 	}
-}
-
-func appendNarrativeText(existing string, incoming string) (string, string) {
-	return acpschema.AppendAssistantText(existing, incoming)
 }

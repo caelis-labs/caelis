@@ -128,7 +128,7 @@ func TestCancelWireRoundTripPreservesSDKSessionIdentity(t *testing.T) {
 	t.Parallel()
 
 	want := session.SessionRef{SessionID: "session-1"}
-	wire := semantic.EncodeCancelNotification(want)
+	wire := schema.CancelNotification{SessionID: want.SessionID}
 	if got := semantic.DecodeCancelNotification(wire); got != want {
 		t.Fatalf("cancel round trip = %#v, want %#v", got, want)
 	}
@@ -138,7 +138,7 @@ func TestParticipantAndHandoffWireRoundTripPreservesSDKSemantics(t *testing.T) {
 	t.Parallel()
 
 	participant := session.ProtocolParticipant{Action: "attached"}
-	participantWire := jsonRoundTripProtocol(t, semantic.EncodeParticipant(participant))
+	participantWire := jsonRoundTripProtocol(t, session.NewParticipantProtocol(participant))
 	gotParticipant, err := semantic.DecodeParticipant(participantWire)
 	if err != nil {
 		t.Fatalf("DecodeParticipant() error = %v", err)
@@ -148,7 +148,7 @@ func TestParticipantAndHandoffWireRoundTripPreservesSDKSemantics(t *testing.T) {
 	}
 
 	handoff := session.ProtocolHandoff{Phase: "committed"}
-	handoffWire := jsonRoundTripProtocol(t, semantic.EncodeHandoff(handoff))
+	handoffWire := jsonRoundTripProtocol(t, session.NewHandoffProtocol(handoff))
 	gotHandoff, err := semantic.DecodeHandoff(handoffWire)
 	if err != nil {
 		t.Fatalf("DecodeHandoff() error = %v", err)

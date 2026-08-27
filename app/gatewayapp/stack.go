@@ -32,8 +32,8 @@ import (
 	"github.com/caelis-labs/caelis/internal/hostownership"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 
+	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	acptaskstream "github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 type Config struct {

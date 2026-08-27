@@ -1,14 +1,11 @@
 package schema
 
 const (
-	MethodSessionList    = "session/list"
-	MethodReadTextFile   = "fs/read_text_file"
-	MethodWriteTextFile  = "fs/write_text_file"
-	MethodTerminalCreate = "terminal/create"
-	UpdateAvailableCmds  = "available_commands_update"
-	UpdateCurrentMode    = "current_mode_update"
-	UpdateConfigOption   = "config_option_update"
-	UpdateSessionInfo    = "session_info_update"
+	MethodSessionList   = "session/list"
+	UpdateAvailableCmds = "available_commands_update"
+	UpdateCurrentMode   = "current_mode_update"
+	UpdateConfigOption  = "config_option_update"
+	UpdateSessionInfo   = "session_info_update"
 )
 
 type ImageContent struct {
@@ -74,40 +71,3 @@ type AvailableCommandsUpdate struct {
 }
 
 func (u AvailableCommandsUpdate) SessionUpdateType() string { return u.SessionUpdate }
-
-type EnvVariable struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
-type CreateTerminalRequest struct {
-	SessionID       string        `json:"sessionId"`
-	Command         string        `json:"command"`
-	Args            []string      `json:"args,omitempty"`
-	CWD             string        `json:"cwd,omitempty"`
-	Env             []EnvVariable `json:"env,omitempty"`
-	OutputByteLimit *int          `json:"outputByteLimit,omitempty"`
-}
-
-type CreateTerminalResponse struct {
-	TerminalID string `json:"terminalId"`
-}
-
-type ReadTextFileRequest struct {
-	SessionID string `json:"sessionId"`
-	Path      string `json:"path"`
-	Line      *int   `json:"line,omitempty"`
-	Limit     *int   `json:"limit,omitempty"`
-}
-
-type ReadTextFileResponse struct {
-	Content string `json:"content"`
-}
-
-type WriteTextFileRequest struct {
-	SessionID string `json:"sessionId"`
-	Path      string `json:"path"`
-	Content   string `json:"content"`
-}
-
-type WriteTextFileResponse struct{}

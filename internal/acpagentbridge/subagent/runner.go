@@ -24,6 +24,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
@@ -104,7 +105,7 @@ type childRun struct {
 	failureDetail   string
 	result          string
 	agentText       string
-	finalAssistant  acpschema.FinalAssistantAccumulator
+	finalAssistant  acpbridge.FinalAssistantAccumulator
 	inputActor      session.ActorRef
 	updatedAt       time.Time
 	running         bool

@@ -1,12 +1,12 @@
-// Package taskstream projects Control-owned Task stream records into ACP-shaped
-// envelopes for presentation surfaces. It owns no Task lifecycle or storage.
+// Package taskstream adapts Control-owned Task observation into the Envelope
+// contract consumed by presentation clients. It owns no Task lifecycle,
+// storage, authorization, cursor, or transport wire semantics.
 package taskstream
 
 import (
 	"context"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -20,73 +20,21 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
-// Principal is authenticated product-wire context supplied by a Surface host.
-type Principal struct {
-	ID    string
-	Roles []string
-}
-
-// ResumeMode describes whether the requested process-local observation
-// boundary was retained.
-type ResumeMode string
-
-// ParentTool identifies the canonical parent tool call for one Task stream.
-type ParentTool struct {
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	ToolName   string `json:"tool_name,omitempty"`
-}
-
-// TaskDescriptor is the ACP-facing Task directory entry. It intentionally
-// excludes transient output bodies.
-type TaskDescriptor struct {
-	SessionID      string     `json:"session_id"`
-	TaskID         string     `json:"task_id"`
-	Handle         string     `json:"handle"`
-	AgentHandle    string     `json:"agent_handle,omitempty"`
-	Kind           task.Kind  `json:"kind"`
-	Title          string     `json:"title,omitempty"`
-	State          task.State `json:"state"`
-	Running        bool       `json:"running"`
-	SupportsInput  bool       `json:"supports_input,omitempty"`
-	SupportsCancel bool       `json:"supports_cancel,omitempty"`
-	ParentTool     ParentTool `json:"parent_tool,omitempty"`
-	ParticipantID  string     `json:"participant_id,omitempty"`
-	ActivityID     string     `json:"activity_id,omitempty"`
-	CurrentTurnID  string     `json:"current_turn_id,omitempty"`
-	UpdatedAt      time.Time  `json:"updated_at,omitempty"`
-}
-
-// ListRequest selects the Task directory for one Session.
-type ListRequest struct {
-	SessionID string `json:"session_id"`
-}
-
-// ListResult is the ACP-facing Task directory.
-type ListResult struct {
-	Tasks []TaskDescriptor `json:"tasks,omitempty"`
-}
-
-// ReadRequest selects one Task stream and public Envelope cursor.
-type ReadRequest struct {
-	SessionID          string `json:"session_id"`
-	TaskID             string `json:"task_id"`
-	Cursor             string `json:"cursor,omitempty"`
-	ExpectedActivityID string `json:"expected_activity_id,omitempty"`
-}
-
-// SubscribeRequest selects one independently delivered Task stream.
-type SubscribeRequest struct {
-	SessionID string `json:"session_id"`
-	TaskID    string `json:"task_id"`
-	Cursor    string `json:"cursor,omitempty"`
-	// Follow keeps a subagent Task timeline attached across activity periods
-	// until the observer closes it. It never changes Task lifecycle.
-	Follow bool `json:"follow,omitempty"`
-}
+// Product Task semantics and directory DTOs have one owner in
+// control/taskstream. This adapter aliases those values instead of maintaining
+// a second ACP-shaped mirror.
+type Principal = controltaskstream.Principal
+type ResumeMode = controltaskstream.ResumeMode
+type ParentTool = controltaskstream.ParentTool
+type TaskDescriptor = controltaskstream.TaskDescriptor
+type ListRequest = controltaskstream.ListRequest
+type ListResult = controltaskstream.ListResult
+type ReadRequest = controltaskstream.ReadRequest
+type SubscribeRequest = controltaskstream.SubscribeRequest
 
 const (
-	ResumeModeExact        ResumeMode = "exact"
-	ResumeModeCurrentState ResumeMode = "current_state"
+	ResumeModeExact        = controltaskstream.ResumeModeExact
+	ResumeModeCurrentState = controltaskstream.ResumeModeCurrentState
 )
 
 var ErrSlowConsumer = controltaskstream.ErrSlowConsumer
@@ -144,22 +92,11 @@ func New(control controltaskstream.Service) Service {
 }
 
 func (s *service) List(ctx context.Context, principal Principal, req ListRequest) (ListResult, error) {
-	result, err := s.control.List(ctx, controlPrincipal(principal), controltaskstream.ListRequest{SessionID: req.SessionID})
-	if err != nil {
-		return ListResult{}, err
-	}
-	tasks := make([]TaskDescriptor, 0, len(result.Tasks))
-	for _, descriptor := range result.Tasks {
-		tasks = append(tasks, taskDescriptorFromControl(descriptor))
-	}
-	return ListResult{Tasks: tasks}, nil
+	return s.control.List(ctx, principal, req)
 }
 
 func (s *service) Events(ctx context.Context, principal Principal, req ReadRequest) (Batch, error) {
-	result, err := s.control.Events(ctx, controlPrincipal(principal), controltaskstream.ReadRequest{
-		SessionID: req.SessionID, TaskID: req.TaskID, Cursor: req.Cursor,
-		ExpectedActivityID: req.ExpectedActivityID,
-	})
+	result, err := s.control.Events(ctx, principal, req)
 	if err != nil {
 		return Batch{}, err
 	}
@@ -169,15 +106,13 @@ func (s *service) Events(ctx context.Context, principal Principal, req ReadReque
 	}
 	return Batch{
 		Events: events, ActivityID: result.ActivityID,
-		ResumeMode: ResumeMode(result.ResumeMode), TransientGap: result.TransientGap,
+		ResumeMode: result.ResumeMode, TransientGap: result.TransientGap,
 		BoundaryCursor: result.BoundaryCursor,
 	}, nil
 }
 
 func (s *service) Subscribe(ctx context.Context, principal Principal, req SubscribeRequest) (SubscribeResult, error) {
-	result, err := s.control.Subscribe(ctx, controlPrincipal(principal), controltaskstream.SubscribeRequest{
-		SessionID: req.SessionID, TaskID: req.TaskID, Cursor: req.Cursor, Follow: req.Follow,
-	})
+	result, err := s.control.Subscribe(ctx, principal, req)
 	if err != nil {
 		return SubscribeResult{}, err
 	}
@@ -186,7 +121,7 @@ func (s *service) Subscribe(ctx context.Context, principal Principal, req Subscr
 	}
 	sub := newSubscription(ctx, result.Subscription)
 	return SubscribeResult{
-		Subscription: sub, ResumeMode: ResumeMode(result.ResumeMode), TransientGap: result.TransientGap,
+		Subscription: sub, ResumeMode: result.ResumeMode, TransientGap: result.TransientGap,
 		BoundaryCursor: result.BoundaryCursor,
 	}, nil
 }
@@ -306,25 +241,6 @@ func projectorRequest(descriptor controltaskstream.TaskDescriptor, frame sdkstre
 		ParentCallID: descriptor.ParentTool.ToolCallID, ParentToolName: toolName, TaskHandle: descriptor.Handle,
 		Ref:               sdkstream.Ref{SessionID: descriptor.SessionID, TaskID: descriptor.TaskID, TerminalID: terminalID},
 		DisplayTerminalID: displayTerminalID, Scope: scope, ParticipantID: descriptor.ParticipantID,
-	}
-}
-
-func controlPrincipal(principal Principal) controltaskstream.Principal {
-	return controltaskstream.Principal{ID: strings.TrimSpace(principal.ID), Roles: append([]string(nil), principal.Roles...)}
-}
-
-func taskDescriptorFromControl(descriptor controltaskstream.TaskDescriptor) TaskDescriptor {
-	return TaskDescriptor{
-		SessionID: descriptor.SessionID, TaskID: descriptor.TaskID, Kind: descriptor.Kind,
-		Handle: descriptor.Handle, AgentHandle: descriptor.AgentHandle,
-		Title: descriptor.Title, State: descriptor.State, Running: descriptor.Running,
-		SupportsInput: descriptor.SupportsInput, SupportsCancel: descriptor.SupportsCancel,
-		ParentTool: ParentTool{
-			ToolCallID: descriptor.ParentTool.ToolCallID,
-			ToolName:   descriptor.ParentTool.ToolName,
-		},
-		ParticipantID: descriptor.ParticipantID, ActivityID: descriptor.ActivityID, CurrentTurnID: descriptor.CurrentTurnID,
-		UpdatedAt: descriptor.UpdatedAt,
 	}
 }
 

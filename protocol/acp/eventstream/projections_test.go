@@ -50,24 +50,3 @@ func TestToolCallUpdateFromEnvelopeReturnsACPToolCallUpdate(t *testing.T) {
 		t.Fatalf("source tool update mutated: %#v", source)
 	}
 }
-
-func TestPermissionRequestFromEnvelopeReturnsACPRequest(t *testing.T) {
-	t.Parallel()
-	title := "RunCommand"
-	status := schema.ToolStatusPending
-	env := Envelope{Kind: KindRequestPermission, Permission: &schema.RequestPermissionRequest{
-		SessionID: "session-1",
-		ToolCall: schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "call-approval", Title: &title, Status: &status,
-			RawInput: map[string]any{"command": "make test"}},
-		Options: []schema.PermissionOption{{OptionID: schema.PermAllowOnce, Name: "Allow once", Kind: schema.PermAllowOnce}},
-	}}
-	request, ok := PermissionRequestFromEnvelope(env)
-	if !ok || request.SessionID != "session-1" || len(request.Options) != 1 {
-		t.Fatalf("permission request = %#v, %v", request, ok)
-	}
-	request.Options[0].OptionID = "mutated"
-	request.ToolCall.RawInput.(map[string]any)["command"] = "mutated"
-	if env.Permission.Options[0].OptionID != schema.PermAllowOnce || env.Permission.ToolCall.RawInput.(map[string]any)["command"] != "make test" {
-		t.Fatalf("source permission request mutated: %#v", env.Permission)
-	}
-}

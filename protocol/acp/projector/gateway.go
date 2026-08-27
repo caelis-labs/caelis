@@ -16,24 +16,6 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
-// ACPEventHandle is the protocol-facing subset needed to consume one live ACP
-// event stream.
-type ACPEventHandle interface {
-	HandleID() string
-	RunID() string
-	TurnID() string
-	ACPEvents() <-chan eventstream.Envelope
-}
-
-// ACPEventsFromGatewayHandle returns the ACP-native event stream for one
-// gateway turn handle.
-func ACPEventsFromGatewayHandle(handle ACPEventHandle) <-chan eventstream.Envelope {
-	if handle == nil {
-		return eventstream.EnsureTerminalLifecycle(nil, "", "", "")
-	}
-	return eventstream.EnsureTerminalLifecycle(handle.ACPEvents(), handle.HandleID(), handle.RunID(), handle.TurnID())
-}
-
 // ProjectSessionEventEnvelope projects one canonical session event into
 // ACP-native client envelopes using the supplied envelope metadata as the
 // transport context.
@@ -108,23 +90,6 @@ func withoutLiveFinalContent(events []eventstream.Envelope, published agentsdk.P
 func withoutPublishedTerminalContent(meta map[string]any) map[string]any {
 	meta = metautil.WithoutTerminalOutput(meta)
 	return metautil.WithoutRuntimeSectionKeys(meta, metautil.RuntimeTask, metautil.RuntimeOutputDelta)
-}
-
-// ProjectApprovalPayloadEnvelope projects one live gateway approval request
-// through the same ACP permission path used for durable replay.
-func ProjectApprovalPayloadEnvelope(base eventstream.Envelope, payload *approval.Payload) []eventstream.Envelope {
-	approval := protocolApprovalFromPayload(payload)
-	if approval == nil {
-		return nil
-	}
-	permission := permissionRequestFromProtocol(strings.TrimSpace(base.SessionID), base.Meta, approval)
-	if permission == nil {
-		return nil
-	}
-	next := base
-	next.Kind = eventstream.KindRequestPermission
-	next.Permission = permission
-	return []eventstream.Envelope{next}
 }
 
 // SessionEventTransport carries live transport ids that are unavailable from
@@ -699,35 +664,6 @@ func ApprovalPayloadFromPermission(req *schema.RequestPermissionRequest) *approv
 		}
 	}
 	return payload
-}
-
-func protocolApprovalFromPayload(payload *approval.Payload) *session.ProtocolApproval {
-	return approval.ProtocolApprovalFromPayload(payload)
-}
-
-func approvalRawInput(payload *approval.Payload) map[string]any {
-	if payload == nil {
-		return nil
-	}
-	raw := cloneAnyMap(payload.RawInput)
-	raw = putApprovalRawStringIfMissing(raw, "approval_reason", payload.Reason)
-	raw = putApprovalRawStringIfMissing(raw, "justification", payload.Justification)
-	raw = putApprovalRawStringIfMissing(raw, "sandbox_permissions", payload.SandboxPermissions)
-	return raw
-}
-
-func putApprovalRawStringIfMissing(raw map[string]any, key string, value string) map[string]any {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return raw
-	}
-	if raw == nil {
-		raw = map[string]any{}
-	}
-	if _, exists := raw[key]; !exists {
-		raw[key] = value
-	}
-	return raw
 }
 
 func rawString(values map[string]any, key string) string {

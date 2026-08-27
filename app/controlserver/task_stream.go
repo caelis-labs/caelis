@@ -9,8 +9,8 @@ import (
 	"time"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
@@ -70,13 +70,13 @@ func (s *Server) watchTaskDirectory(w http.ResponseWriter, r *http.Request) {
 		case snapshot, open := <-result.Subscription.Snapshots():
 			if !open {
 				if streamErr := result.Subscription.Err(); streamErr != nil {
-					encoded, marshalErr := json.Marshal(taskstream.EncodeStreamError(streamErr))
+					encoded, marshalErr := json.Marshal(wirev1.EncodeTaskStreamError(streamErr))
 					if marshalErr == nil {
-						_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", taskstream.StreamErrorEventName, encoded)
+						_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", wirev1.TaskStreamErrorEventName, encoded)
 						flusher.Flush()
 					}
 				} else {
-					_, _ = fmt.Fprintf(w, "event: %s\ndata: {}\n\n", taskstream.StreamDoneEventName)
+					_, _ = fmt.Fprintf(w, "event: %s\ndata: {}\n\n", wirev1.TaskStreamDoneEventName)
 					flusher.Flush()
 				}
 				return
@@ -85,7 +85,7 @@ func (s *Server) watchTaskDirectory(w http.ResponseWriter, r *http.Request) {
 			if marshalErr != nil {
 				return
 			}
-			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", taskstream.DirectorySnapshotEventName, data)
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", wirev1.TaskDirectorySnapshotEventName, data)
 			flusher.Flush()
 		}
 	}
@@ -171,13 +171,13 @@ func (s *Server) subscribeTask(w http.ResponseWriter, r *http.Request) {
 		case envelope, open := <-result.Subscription.Events():
 			if !open {
 				if streamErr := result.Subscription.Err(); streamErr != nil {
-					encoded, marshalErr := json.Marshal(taskstream.EncodeStreamError(streamErr))
+					encoded, marshalErr := json.Marshal(wirev1.EncodeTaskStreamError(streamErr))
 					if marshalErr == nil {
-						_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", taskstream.StreamErrorEventName, encoded)
+						_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", wirev1.TaskStreamErrorEventName, encoded)
 						flusher.Flush()
 					}
 				} else {
-					_, _ = fmt.Fprintf(w, "event: %s\ndata: {}\n\n", taskstream.StreamDoneEventName)
+					_, _ = fmt.Fprintf(w, "event: %s\ndata: {}\n\n", wirev1.TaskStreamDoneEventName)
 					flusher.Flush()
 				}
 				return

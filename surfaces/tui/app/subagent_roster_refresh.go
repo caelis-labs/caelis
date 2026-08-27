@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
 
 type subagentDirectoryOpenedMsg struct {

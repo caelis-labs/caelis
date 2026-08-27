@@ -2,9 +2,9 @@ package acpagentbridge
 
 import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 type GatewayAgentConfig struct {

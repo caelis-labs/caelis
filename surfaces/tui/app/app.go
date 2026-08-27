@@ -17,7 +17,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 

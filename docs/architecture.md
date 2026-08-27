@@ -39,9 +39,12 @@ and participant semantics. Native ACP means semantic equivalence; an in-process
 built-in Agent does not need to serialize calls through JSON-RPC.
 
 The SDK owns reusable normalized semantics without importing the Caelis product
-`protocol/acp` implementation. The root `protocol/acp` packages own ACP wire
-schema, transport compatibility, and surface projection. Canonical runtime events still
-carry model and tool truth below that protocol view. More detail lives in
+ACP adapters. Standard wire contracts and connections come from
+`acp-go-sdk`. Remaining root `protocol/acp` packages are transitional: each
+compatibility or projection capability must move to its Control, Surface,
+reusable SDK, or Host-private adapter owner rather than make that tree a
+permanent standalone layer. Canonical runtime events still carry model and tool
+truth below that protocol view. More detail lives in
 [docs/agent-sdk-boundary.md](agent-sdk-boundary.md) and
 [docs/acp-projection-architecture.md](acp-projection-architecture.md).
 
@@ -71,9 +74,11 @@ Document responsibilities are intentionally separate:
   `surfaces/internal/transcript`: private shared presentation projection used
   by concrete Surfaces. These packages are not independent product surfaces or
   application-layer entry points.
-- `protocol/acp`: product ACP wire schema and transport, eventstream envelopes,
-  projection helpers, compatibility handling, and documented `_meta`
-  contracts. Reusable normalized ACP semantics may live in the SDK.
+- `protocol/acp`: transitional ACP schema aliases/extensions, eventstream
+  envelopes, projection helpers, compatibility handling, and documented
+  `_meta` contracts. It owns no new aggregate product boundary. Standard wire
+  and connection behavior comes from `acp-go-sdk`; residual packages migrate
+  by semantic owner.
 - `agent-sdk/*`: reusable SDK package tree. It owns runtime, model, tool, session,
   sandbox, task, policy, skill, and display contracts and reusable
   implementations.
@@ -138,8 +143,9 @@ Document responsibilities are intentionally separate:
   snapshots are complete and replaceable, retain no Task content, and exist
   only while at least one observer watches the Session. This adds no Execution
   lifecycle, durable output store, or schema.
-  `protocol/acp/taskstream` is the protocol adapter that projects those records
-  into transient Envelopes for Surfaces.
+  `control/appserver/taskstream` is the Control AppServer adapter that projects
+  those records into transient Envelopes for Surfaces; its HTTP/SSE codec lives
+  with the AppServer wire implementation in `control/appserver/wirev1`.
 - `control/agents`: external ACP connection identity and lifecycle. Host-scoped
   prepare, explicit authentication, and connect operations use the shared
   Control command ledger; a secret-free, expiring preparation record binds
@@ -385,7 +391,7 @@ The stable skeleton is defined by semantic ownership, not by a package named
 | Category | Current owners | Contract |
 | --- | --- | --- |
 | Reusable Runtime skeleton | `agent-sdk/*` | Runtime, Session, model, tool, sandbox, policy, and Task contracts stay independent of the Caelis product Host and wire implementation. |
-| Stable product skeleton | `control/appserver`, focused `control/*` packages, and `protocol/acp/*` | AppServer is the one aggregate capability boundary obtained and validated by product client composition. A concrete Surface receives the aggregate or only the focused members it consumes. Focused Control packages own product state and policy; ACP packages own wire compatibility and projection. |
+| Stable product skeleton | `control/appserver` and focused `control/*` packages | AppServer is the one aggregate capability boundary obtained and validated by product client composition. A concrete Surface receives the aggregate or only the focused members it consumes. Focused Control packages own product state and policy; feature-bound wire codecs and projection stay with their semantic owner. |
 | Private lifecycle skeleton | `internal/kernel`, `internal/controlplane`, `app/gatewayapp` | Session/Turn coordination, controller ownership, Host authority, Runtime activation, reference counting, and shutdown ordering are mandatory product invariants, but remain private until their contracts can be separated without changing lifecycle semantics. |
 
 Concrete implementations are composed around that skeleton. They are
@@ -481,8 +487,8 @@ implementations through SDK contracts instead of making the runtime know where
 credentials, state, or execution environments live.
 
 The ban on importing the root `protocol/acp/*` implementation does not ban ACP
-semantics from the SDK. Dependency direction is from the product wire and
-projection implementation toward reusable SDK contracts, never the reverse.
+semantics from the SDK. Dependency direction is from standard wire bindings and
+product adapters toward reusable SDK contracts, never the reverse.
 
 Package-level ownership and the supported public import set are defined by
 [Agent SDK Boundary](agent-sdk-boundary.md),

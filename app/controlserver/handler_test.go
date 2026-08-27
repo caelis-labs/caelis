@@ -20,12 +20,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 func TestHostHealthReadinessAndInitializeExposeOneInstance(t *testing.T) {

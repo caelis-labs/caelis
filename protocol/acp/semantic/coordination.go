@@ -68,25 +68,9 @@ func DecodePermissionResponse(wire schema.RequestPermissionResponse, approval *s
 	return out
 }
 
-// EncodePermissionResponse converts the normalized runtime decision to ACP.
-func EncodePermissionResponse(response agent.ApprovalResponse) schema.RequestPermissionResponse {
-	return schema.RequestPermissionResponse{Outcome: schema.PermissionOutcome{Outcome: strings.TrimSpace(response.Outcome), OptionID: strings.TrimSpace(response.OptionID)}}
-}
-
 // DecodeCancelNotification normalizes the standard ACP cancellation identity.
 func DecodeCancelNotification(wire schema.CancelNotification) session.SessionRef {
 	return session.NormalizeSessionRef(session.SessionRef{SessionID: wire.SessionID})
-}
-
-// EncodeCancelNotification converts a normalized session identity to ACP.
-func EncodeCancelNotification(ref session.SessionRef) schema.CancelNotification {
-	return schema.CancelNotification{SessionID: session.NormalizeSessionRef(ref).SessionID}
-}
-
-// EncodeParticipant creates the SDK-owned normalized participant lifecycle
-// protocol payload used by built-in and external adapters.
-func EncodeParticipant(participant session.ProtocolParticipant) session.EventProtocol {
-	return session.NewParticipantProtocol(participant)
 }
 
 // DecodeParticipant validates and decodes normalized participant lifecycle.
@@ -96,12 +80,6 @@ func DecodeParticipant(protocol session.EventProtocol) (session.ProtocolParticip
 		return session.ProtocolParticipant{}, fmt.Errorf("protocol/acp/semantic: invalid participant lifecycle payload")
 	}
 	return session.ProtocolParticipant{Action: strings.TrimSpace(protocol.Update.SessionUpdate)}, nil
-}
-
-// EncodeHandoff creates the normalized handoff fact. It does not authorize or
-// commit controller transfer; that authority remains in Control.
-func EncodeHandoff(handoff session.ProtocolHandoff) session.EventProtocol {
-	return session.NewHandoffProtocol(handoff)
 }
 
 // DecodeHandoff validates and decodes one already-authorized Control fact.

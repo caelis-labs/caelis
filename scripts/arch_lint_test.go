@@ -138,10 +138,16 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "",
 		},
 		{
-			name:       "AppServer accepts projected Task observation",
+			name:       "AppServer accepts Control-owned Task observation",
+			rel:        "control/appserver/appserver.go",
+			importPath: modulePath + "/control/appserver/taskstream",
+			want:       "",
+		},
+		{
+			name:       "production rejects retired ACP Task observation",
 			rel:        "control/appserver/appserver.go",
 			importPath: modulePath + "/protocol/acp/taskstream",
-			want:       "",
+			want:       "production code must not depend on retired protocol/acp/taskstream; use control/appserver/taskstream",
 		},
 		{
 			name:       "other control packages reject ACP protocol dependencies",
@@ -198,9 +204,9 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "controladapter/local presentation must consume protocol-neutral control/appserver types, not ACP wire types",
 		},
 		{
-			name:       "local terminal adapter accepts independent Task projection",
+			name:       "local terminal adapter accepts Control Task projection",
 			rel:        "app/gatewayapp/controladapter/local/terminal_service.go",
-			importPath: modulePath + "/protocol/acp/taskstream",
+			importPath: modulePath + "/control/appserver/taskstream",
 			want:       "",
 		},
 		{
@@ -229,7 +235,7 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 		},
 		{
 			name:       "protocol rejects repository internals",
-			rel:        "protocol/acp/server.go",
+			rel:        "protocol/acp/adapter.go",
 			importPath: modulePath + "/internal/kernel",
 			want:       "protocol must not depend on internal packages",
 		},

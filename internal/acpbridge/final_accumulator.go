@@ -1,6 +1,8 @@
-package schema
+package acpbridge
 
 import "strings"
+
+import acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 
 // FinalAssistantAccumulator retains the latest assistant message while
 // appending ACP narrative frames with exact delta semantics.
@@ -16,31 +18,24 @@ type AssistantTextUpdate struct {
 	Barrier   bool
 }
 
-func (a *FinalAssistantAccumulator) ObserveUpdate(update Update) AssistantTextUpdate {
+func (a *FinalAssistantAccumulator) ObserveUpdate(update acpschema.Update) AssistantTextUpdate {
 	if a == nil || update == nil {
 		return AssistantTextUpdate{}
 	}
 	switch typed := update.(type) {
-	case ContentChunk:
+	case acpschema.ContentChunk:
 		return a.observeContentChunk(typed.SessionUpdate, typed.Content, typed.MessageID)
-	case *ContentChunk:
+	case *acpschema.ContentChunk:
 		if typed == nil {
 			return AssistantTextUpdate{}
 		}
 		return a.observeContentChunk(typed.SessionUpdate, typed.Content, typed.MessageID)
-	case ToolCall, *ToolCall, ToolCallUpdate, *ToolCallUpdate, PlanUpdate, *PlanUpdate:
+	case acpschema.ToolCall, *acpschema.ToolCall, acpschema.ToolCallUpdate, *acpschema.ToolCallUpdate, acpschema.PlanUpdate, *acpschema.PlanUpdate:
 		a.Reset()
 		return AssistantTextUpdate{Barrier: true}
 	default:
 		return AssistantTextUpdate{}
 	}
-}
-
-func (a *FinalAssistantAccumulator) ObserveContentChunk(updateType string, content any) AssistantTextUpdate {
-	if a == nil {
-		return AssistantTextUpdate{}
-	}
-	return a.observeContentChunk(updateType, content, "")
 }
 
 // ObserveFrame appends one ACP narrative text frame without applying an
@@ -77,9 +72,9 @@ func (a *FinalAssistantAccumulator) Reset() {
 
 func (a *FinalAssistantAccumulator) observeContentChunk(updateType string, content any, messageID string) AssistantTextUpdate {
 	switch strings.TrimSpace(updateType) {
-	case UpdateAgentMessage:
-		return a.ObserveFrame(messageID, ExtractTextValue(content))
-	case UpdateAgentThought:
+	case acpschema.UpdateAgentMessage:
+		return a.ObserveFrame(messageID, acpschema.ExtractTextValue(content))
+	case acpschema.UpdateAgentThought:
 		a.Reset()
 		return AssistantTextUpdate{Barrier: true}
 	default:
@@ -98,12 +93,4 @@ func (a *FinalAssistantAccumulator) appendAssistantFrame(incoming string) string
 	}
 	a.text += incoming
 	return incoming
-}
-
-// AppendAssistantText appends one exact ACP assistant delta.
-func AppendAssistantText(existing string, incoming string) (string, string) {
-	if incoming == "" {
-		return existing, ""
-	}
-	return existing + incoming, incoming
 }

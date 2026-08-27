@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 func TestRemoteTaskDirectoryWatchPreservesRevisionAndActivityIdentity(t *testing.T) {
@@ -21,9 +21,9 @@ func TestRemoteTaskDirectoryWatchPreservesRevisionAndActivityIdentity(t *testing
 			return
 		}
 		writer.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(writer, "event: "+taskstream.DirectorySnapshotEventName+"\n"+
+		_, _ = io.WriteString(writer, "event: "+wirev1.TaskDirectorySnapshotEventName+"\n"+
 			"data: {\"revision\":\"18446744073709551615\",\"tasks\":[{\"session_id\":\"session-1\",\"task_id\":\"task-1\",\"handle\":\"child-1\",\"kind\":\"subagent\",\"state\":\"running\",\"running\":true,\"activity_id\":\"activity-2\",\"current_turn_id\":\"task-1:2\"}]}\n\n")
-		_, _ = io.WriteString(writer, "event: "+taskstream.StreamDoneEventName+"\ndata: {}\n\n")
+		_, _ = io.WriteString(writer, "event: "+wirev1.TaskStreamDoneEventName+"\ndata: {}\n\n")
 	})
 	defer closeServer()
 	tasks, err := NewTaskClient(client)

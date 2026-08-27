@@ -88,28 +88,36 @@ func (r *Runtime) wrapToolsForPolicy(
 }
 
 func (r *Runtime) policyForName(ctx context.Context, modeName string) (string, policy.Mode) {
+	normalized, mode, err := r.lookupPolicyMode(ctx, modeName)
+	if err != nil {
+		return normalized, rejectedPolicyMode{name: normalized, err: err}
+	}
+	return normalized, mode
+}
+
+func (r *Runtime) lookupPolicyMode(ctx context.Context, modeName string) (string, policy.Mode, error) {
 	normalized := normalizePolicyMode(modeName)
 	if r == nil || r.policies == nil {
-		return normalized, rejectedPolicyMode{name: normalized, err: &policy.ProfileError{
+		return normalized, nil, &policy.ProfileError{
 			Profile: normalized,
 			Detail:  "policy registry is unavailable",
-		}}
+		}
 	}
 	mode, ok, err := r.policies.Lookup(ctx, normalized)
 	if err != nil {
-		return normalized, rejectedPolicyMode{name: normalized, err: &policy.ProfileError{
+		return normalized, nil, &policy.ProfileError{
 			Profile: normalized,
 			Detail:  "registry lookup failed",
 			Err:     err,
-		}}
+		}
 	}
 	if !ok || mode == nil {
-		return normalized, rejectedPolicyMode{name: normalized, err: &policy.ProfileError{
+		return normalized, nil, &policy.ProfileError{
 			Profile: normalized,
 			Detail:  "unknown policy profile",
-		}}
+		}
 	}
-	return normalized, mode
+	return normalized, mode, nil
 }
 
 func (t policyWrappedTool) Definition() tool.Definition {

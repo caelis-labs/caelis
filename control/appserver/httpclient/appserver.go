@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
 
 // AppServerClients returns the complete focused AppServer client set backed by

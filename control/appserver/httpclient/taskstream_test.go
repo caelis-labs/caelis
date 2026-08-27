@@ -11,8 +11,9 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 func TestRemoteTaskSubscriptionCloseUnblocksFullBuffer(t *testing.T) {
@@ -200,7 +201,7 @@ func TestRemoteTaskSubscriptionExplicitDoneIsCleanEnd(t *testing.T) {
 	subscription := newRemoteTaskSubscription(response, scanner, 4)
 
 	_, _ = io.WriteString(writer, "id: delivered-1\ndata: {\"kind\":\"notice\",\"cursor\":\"delivered-1\",\"session_id\":\"s1\",\"notice\":\"a\"}\n\n")
-	_, _ = io.WriteString(writer, "event: "+taskstream.StreamDoneEventName+"\ndata: {}\n\n")
+	_, _ = io.WriteString(writer, "event: "+wirev1.TaskStreamDoneEventName+"\ndata: {}\n\n")
 	_ = writer.Close()
 
 	select {

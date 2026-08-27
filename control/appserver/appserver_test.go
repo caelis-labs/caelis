@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
 
 type appServerTestTasks struct {

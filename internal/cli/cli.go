@@ -42,7 +42,7 @@ const (
 	defaultAppName                  = "caelis"
 	defaultPrincipalID              = "local-user"
 
-	dangerouslySkipPermissionsWarning = "DANGER: YOLO mode is active. Tools run directly on the host with no sandbox, human approval, or Guardian review.\nThe built-in destructive-command blacklist remains active, but it is limited and is not a security boundary."
+	dangerouslySkipPermissionsWarning = "DANGER: YOLO mode is active. Tools run directly on the host with no sandbox, human approval, Guardian review, or policy command filtering.\nThis mode allows every assembled tool and is not a security boundary."
 )
 
 type runResult struct {
@@ -994,7 +994,7 @@ func sandboxStartupEscapeError(err error) error {
 		return err
 	}
 	return fmt.Errorf(
-		"%w Escape option: restart with --dangerously-skip-permissions to run directly on the host. WARNING: this disables sandbox isolation, human approval, and Guardian review; the remaining destructive-command blacklist is limited and is not a security boundary",
+		"%w Escape option: restart with --dangerously-skip-permissions to run directly on the host. WARNING: this disables sandbox isolation, human approval, Guardian review, and policy command filtering; every assembled tool is allowed and this mode is not a security boundary",
 		err,
 	)
 }

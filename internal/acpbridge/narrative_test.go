@@ -177,25 +177,6 @@ func TestNarrativeAccumulatorPlanBarrierResetsFinalAssistant(t *testing.T) {
 	}
 }
 
-func TestAppendNarrativeTextAppendsExactACPDeltas(t *testing.T) {
-	t.Parallel()
-
-	appended, delta := appendNarrativeText("hel", "lo")
-	if appended != "hello" || delta != "lo" {
-		t.Fatalf("append delta = (%q, %q), want (hello, lo)", appended, delta)
-	}
-
-	appended, delta = appendNarrativeText("hel", "hello")
-	if appended != "helhello" || delta != "hello" {
-		t.Fatalf("append prefix-growing delta = (%q, %q), want (helhello, hello)", appended, delta)
-	}
-
-	appended, delta = appendNarrativeText("hello", "hel")
-	if appended != "hellohel" || delta != "hel" {
-		t.Fatalf("append short-prefix delta = (%q, %q), want (hellohel, hel)", appended, delta)
-	}
-}
-
 func TestNarrativeAccumulatorSeparatesAssistantMessageIDs(t *testing.T) {
 	t.Parallel()
 
