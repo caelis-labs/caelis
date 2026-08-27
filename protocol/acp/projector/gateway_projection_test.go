@@ -87,7 +87,7 @@ func TestProjectSessionEventEnvelopeDemotesUnpositionedDurableDelivery(t *testin
 	}
 }
 
-func TestSessionEventFinalIgnoresAuditSource(t *testing.T) {
+func TestEnvelopeBaseFinalIgnoresAuditSource(t *testing.T) {
 	t.Parallel()
 
 	for _, source := range []string{"acp", "slash", "renamed-product-source"} {
@@ -98,7 +98,7 @@ func TestSessionEventFinalIgnoresAuditSource(t *testing.T) {
 				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
 			}},
 		}
-		if SessionEventFinal(event) {
+		if EnvelopeBaseFromSessionEvent(session.SessionRef{}, event, SessionEventTransport{}).Final {
 			t.Fatalf("source %q changed live narrative finality", source)
 		}
 	}
@@ -486,7 +486,7 @@ func TestEnvelopeBaseKeepsCanonicalizedDurableChildDeltaNonFinal(t *testing.T) {
 	}
 }
 
-func TestSessionEventFinalKeepsCanonicalAssistantBoundaryFinal(t *testing.T) {
+func TestEnvelopeBaseKeepsCanonicalAssistantBoundaryFinal(t *testing.T) {
 	event := &session.Event{
 		ID:         "assistant-1",
 		Visibility: session.VisibilityCanonical,
@@ -496,7 +496,7 @@ func TestSessionEventFinalKeepsCanonicalAssistantBoundaryFinal(t *testing.T) {
 			Content:       session.ProtocolTextContent("complete assistant message"),
 		}},
 	}
-	if !SessionEventFinal(event) {
+	if !EnvelopeBaseFromSessionEvent(session.SessionRef{}, event, SessionEventTransport{}).Final {
 		t.Fatal("ordinary durable canonical assistant event lost its final boundary")
 	}
 }

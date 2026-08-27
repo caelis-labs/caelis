@@ -27,7 +27,7 @@ func ProjectSessionEventEnvelope(base eventstream.Envelope, event *session.Event
 // Final state, usage, and unowned content streams still flow.
 func ProjectSessionEventLiveSupplementEnvelope(base eventstream.Envelope, event *session.Event, published agentsdk.PublishedContent) []eventstream.Envelope {
 	out := projectSessionEventEnvelope(base, event)
-	if !SessionEventFinal(event) {
+	if event == nil || event.Visibility == session.VisibilityUIOnly || isLiveStreamingNarrativeEvent(event) {
 		return out
 	}
 	return withoutLiveFinalContent(out, published)
@@ -97,7 +97,7 @@ func EnvelopeBaseFromSessionEvent(ref session.SessionRef, event *session.Event, 
 	base.ApprovalRequestID = eventstream.ApprovalRequestID(strings.TrimSpace(event.ApprovalRequestID))
 	base.TurnID = firstNonEmpty(sessionEventTurnID(event), strings.TrimSpace(transport.TurnID))
 	base.OccurredAt = event.Time
-	base.Final = SessionEventFinal(event)
+	base.Final = event.Visibility != session.VisibilityUIOnly && !isLiveStreamingNarrativeEvent(event)
 	base.Delivery = sessionEventDelivery(event)
 	base.Meta = cloneAnyMap(event.Meta)
 	base.Actor = firstNonEmpty(strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID))
@@ -196,15 +196,6 @@ func sessionEventDelivery(event *session.Event) *eventstream.Delivery {
 	default:
 		return nil
 	}
-}
-
-// SessionEventFinal reports whether a projected session event should be treated
-// as a final transcript/update boundary.
-func SessionEventFinal(event *session.Event) bool {
-	if event == nil {
-		return false
-	}
-	return event.Visibility != session.VisibilityUIOnly && !isLiveStreamingNarrativeEvent(event)
 }
 
 func isLiveStreamingNarrativeEvent(event *session.Event) bool {
