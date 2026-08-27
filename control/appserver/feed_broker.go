@@ -327,7 +327,7 @@ func (b *FeedBroker) publish(
 	// Reject malformed durable declarations before they can enter the storage
 	// sequencer. Validation inside publishSerialized remains the final defense,
 	// but it is too late to protect scannedSeq from an invalid gap-fill target.
-	if err := eventstream.ValidateEnvelopeDelivery(envelope); err != nil {
+	if err := ValidateEnvelopeDelivery(envelope); err != nil {
 		return false, false, fmt.Errorf("controlclient: feed envelope delivery: %w", err)
 	}
 	if isDurableFeedEnvelope(envelope) && b.reader != nil {
@@ -612,7 +612,7 @@ func (b *FeedBroker) prepareEnvelopeLocked(envelope *eventstream.Envelope) error
 	if envelope.Delivery != nil {
 		mode = envelope.Delivery.Mode
 	}
-	if err := eventstream.ValidateEnvelopeDelivery(*envelope); err != nil {
+	if err := ValidateEnvelopeDelivery(*envelope); err != nil {
 		return fmt.Errorf("controlclient: feed envelope delivery: %w", err)
 	}
 	switch mode {

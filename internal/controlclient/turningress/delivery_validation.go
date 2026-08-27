@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -35,7 +36,7 @@ func (e *ingressDeliveryError) Unwrap() error {
 }
 
 func validateIngressEnvelope(envelope eventstream.Envelope) error {
-	if err := eventstream.ValidateEnvelopeDelivery(envelope); err != nil {
+	if err := appserver.ValidateEnvelopeDelivery(envelope); err != nil {
 		return newIngressDeliveryError(envelope, err)
 	}
 	return nil
