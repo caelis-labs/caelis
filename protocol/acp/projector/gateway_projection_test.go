@@ -507,36 +507,6 @@ func TestSessionEventFinalKeepsCanonicalAssistantBoundaryFinal(t *testing.T) {
 	}
 }
 
-func TestProjectSessionEventNotificationsWrapsCustomUpdatesAndAppendsUsage(t *testing.T) {
-	notifications, err := ProjectSessionEventNotifications(eventstream.Envelope{
-		SessionID: "base-session",
-	}, &session.Event{
-		SessionID: "event-session",
-		Type:      session.EventTypeAssistant,
-		Meta: map[string]any{
-			"usage": map[string]any{
-				"prompt_tokens":     3,
-				"completion_tokens": 4,
-				"total_tokens":      7,
-			},
-		},
-	}, updateOverrideProjector{})
-	if err != nil {
-		t.Fatalf("ProjectSessionEventNotifications() error = %v", err)
-	}
-	if len(notifications) != 2 {
-		t.Fatalf("ProjectSessionEventNotifications() produced %d notifications, want custom notification + usage: %#v", len(notifications), notifications)
-	}
-	chunk, ok := notifications[0].Update.(schema.ContentChunk)
-	if !ok || notifications[0].SessionID != "event-session" || schema.ExtractTextValue(chunk.Content) != "from updates" {
-		t.Fatalf("first notification = %#v, want wrapped custom ProjectEvent output", notifications[0])
-	}
-	usage, ok := notifications[1].Update.(schema.UsageUpdate)
-	if !ok || notifications[1].SessionID != "base-session" || usage.Used != 7 {
-		t.Fatalf("usage notification = %#v, want appended usage_update used=7 on base session", notifications[1])
-	}
-}
-
 func TestProjectSessionEventEnvelopeProjectsContextCompactingAsTransientLifecycle(t *testing.T) {
 	event := session.MarkUIOnly(&session.Event{
 		Type: session.EventTypeLifecycle,
@@ -679,21 +649,6 @@ func TestProjectSessionEventEnvelopeProjectsParticipantAndLifecycleExtensions(t 
 	if len(handoff) != 1 || handoff[0].Kind != eventstream.KindLifecycle || handoff[0].Lifecycle == nil || handoff[0].Lifecycle.State != "activation" {
 		t.Fatalf("handoff projection = %#v, want lifecycle activation", handoff)
 	}
-}
-
-type updateOverrideProjector struct{}
-
-func (updateOverrideProjector) ProjectEvent(*session.Event) ([]schema.Update, error) {
-	return []schema.Update{
-		schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "from updates"},
-		},
-	}, nil
-}
-
-func (updateOverrideProjector) ProjectPermissionRequest(*session.Event) (*schema.RequestPermissionRequest, bool, error) {
-	return nil, false, nil
 }
 
 func stringPtrValue(value *string) string {

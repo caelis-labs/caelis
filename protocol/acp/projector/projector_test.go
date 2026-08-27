@@ -730,8 +730,8 @@ func TestEventProjectorPreservesPartialProtocolToolUpdate(t *testing.T) {
 	}
 }
 
-func TestEventProjectorNotificationsSerializePartialToolUpdate(t *testing.T) {
-	notifications, err := projectNotifications(EventProjector{}, &session.Event{
+func TestEventProjectorUpdateSerializesAsPartialNotification(t *testing.T) {
+	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
@@ -743,12 +743,12 @@ func TestEventProjectorNotificationsSerializePartialToolUpdate(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("projectNotifications() error = %v", err)
+		t.Fatalf("ProjectEvent() error = %v", err)
 	}
-	if len(notifications) != 1 {
-		t.Fatalf("projectNotifications() produced %d notifications, want 1", len(notifications))
+	if len(updates) != 1 {
+		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 	}
-	raw, err := json.Marshal(notifications[0])
+	raw, err := json.Marshal(schema.SessionNotification{SessionID: "session-1", Update: updates[0]})
 	if err != nil {
 		t.Fatalf("json.Marshal(notification) error = %v", err)
 	}
@@ -863,19 +863,16 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			notifications, err := projectNotifications(EventProjector{}, tt.event)
+			updates, err := (EventProjector{}).ProjectEvent(tt.event)
 			if err != nil {
-				t.Fatalf("projectNotifications() error = %v", err)
+				t.Fatalf("ProjectEvent() error = %v", err)
 			}
-			if len(notifications) != 1 {
-				t.Fatalf("projectNotifications() produced %d notifications, want 1", len(notifications))
+			if len(updates) != 1 {
+				t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 			}
-			if notifications[0].SessionID != "session-1" {
-				t.Fatalf("SessionID = %q, want session-1", notifications[0].SessionID)
-			}
-			chunk, ok := notifications[0].Update.(schema.ContentChunk)
+			chunk, ok := updates[0].(schema.ContentChunk)
 			if !ok {
-				t.Fatalf("update = %T, want ContentChunk", notifications[0].Update)
+				t.Fatalf("update = %T, want ContentChunk", updates[0])
 			}
 			if chunk.SessionUpdate != tt.updateType {
 				t.Fatalf("SessionUpdate = %q, want %q", chunk.SessionUpdate, tt.updateType)

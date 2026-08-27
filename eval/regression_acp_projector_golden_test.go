@@ -6,7 +6,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -310,31 +309,5 @@ func TestRegressionACPProjectorPermissionRequest(t *testing.T) {
 	}
 	if req.Options[0].OptionID != "allow_once" {
 		t.Fatalf("options[0].option_id = %q, want allow_once", req.Options[0].OptionID)
-	}
-}
-
-func TestRegressionACPProjectorNotifications(t *testing.T) {
-	t.Parallel()
-
-	notifs, err := projector.ProjectSessionEventNotifications(eventstream.Envelope{}, &session.Event{
-		SessionID: "sess-notif",
-		Type:      session.EventTypeToolResult,
-		Protocol: &session.EventProtocol{
-			Update: &session.ProtocolUpdate{
-				SessionUpdate: schema.UpdateToolCallInfo,
-				ToolCallID:    "call-1",
-				Kind:          schema.ToolKindExecute,
-				Status:        "completed",
-			},
-		},
-	}, projector.EventProjector{})
-	if err != nil {
-		t.Fatalf("ProjectSessionEventNotifications() error = %v", err)
-	}
-	if len(notifs) != 1 {
-		t.Fatalf("expected 1 notification, got %d", len(notifs))
-	}
-	if notifs[0].SessionID != "sess-notif" {
-		t.Fatalf("notification session_id = %q, want sess-notif", notifs[0].SessionID)
 	}
 }

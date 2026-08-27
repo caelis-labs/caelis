@@ -58,14 +58,14 @@ func TestEventProjectorProjectsEventToolSemanticNameInStandardNotifications(t *t
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			notifications, err := projectNotifications(EventProjector{}, tt.event)
+			updates, err := (EventProjector{}).ProjectEvent(tt.event)
 			if err != nil {
-				t.Fatalf("projectNotifications() error = %v", err)
+				t.Fatalf("ProjectEvent() error = %v", err)
 			}
-			if len(notifications) != 1 {
-				t.Fatalf("projectNotifications() produced %d notifications, want 1", len(notifications))
+			if len(updates) != 1 {
+				t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 			}
-			meta := toolUpdateMeta(t, notifications[0].Update)
+			meta := toolUpdateMeta(t, updates[0])
 			assertRuntimeToolName(t, meta, tt.wantName)
 			if _, leaked := meta["event_only"]; leaked {
 				t.Fatalf("tool update meta = %#v, copied unrelated Event meta", meta)
@@ -125,14 +125,14 @@ func TestEventProjectorProjectsProtocolToolSemanticNameWithoutEventMetaLeak(t *t
 				event.Protocol.Update.Status = schema.ToolStatusCompleted
 			}
 
-			notifications, err := projectNotifications(EventProjector{}, event)
+			updates, err := (EventProjector{}).ProjectEvent(event)
 			if err != nil {
-				t.Fatalf("projectNotifications() error = %v", err)
+				t.Fatalf("ProjectEvent() error = %v", err)
 			}
-			if len(notifications) != 1 {
-				t.Fatalf("projectNotifications() produced %d notifications, want 1", len(notifications))
+			if len(updates) != 1 {
+				t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 			}
-			meta := toolUpdateMeta(t, notifications[0].Update)
+			meta := toolUpdateMeta(t, updates[0])
 			assertRuntimeToolName(t, meta, tt.toolName)
 			vendor, _ := meta["vendor"].(map[string]any)
 			if vendor["trace"] != "keep" {

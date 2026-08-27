@@ -100,9 +100,7 @@ func (l *SessionServiceLoader) LoadSession(
 				continue
 			}
 			base := projector.EnvelopeBaseFromSessionEvent(loaded.Session.SessionRef, event, projector.SessionEventTransport{})
-			notifications, err := projector.ProjectSessionEventNotifications(eventstream.Envelope{
-				SessionID: strings.TrimSpace(string(req.SessionId)),
-			}, event, l.projector)
+			notifications, err := projectSessionEventNotifications(strings.TrimSpace(string(req.SessionId)), event, l.projector)
 			if err != nil {
 				return acpsdk.LoadSessionResponse{}, err
 			}

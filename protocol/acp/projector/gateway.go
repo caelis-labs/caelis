@@ -315,70 +315,6 @@ func demoteUnpositionedDurableProjections(events []eventstream.Envelope) []event
 	return out
 }
 
-// ProjectSessionEventNotifications projects one canonical session event into
-// ACP session/update notifications. Eventstream-only extensions and historical
-// request_permission prompts are intentionally not replayed through session/load.
-func ProjectSessionEventNotifications(base eventstream.Envelope, event *session.Event, projector Projector) ([]schema.SessionNotification, error) {
-	if projector == nil {
-		projector = EventProjector{}
-	}
-	notifications, err := projectNotifications(projector, event)
-	if err != nil {
-		return nil, err
-	}
-	out := cloneSessionNotifications(notifications, base, event)
-	if usage := session.UsageSnapshotFromSessionEvent(event); usage != nil && !containsUsageNotification(out) {
-		usageEnv := gatewayUsageEnvelope(base, usage)
-		out = append(out, schema.SessionNotification{
-			SessionID: sessionNotificationID(usageEnv.SessionID, base, event),
-			Update:    eventstream.CloneUpdate(usageEnv.Update),
-		})
-	}
-	return out, nil
-}
-
-func projectNotifications(projector Projector, event *session.Event) ([]schema.SessionNotification, error) {
-	updates, err := projector.ProjectEvent(event)
-	if err != nil || len(updates) == 0 {
-		return nil, err
-	}
-	sessionID := ""
-	if event != nil {
-		sessionID = strings.TrimSpace(event.SessionID)
-	}
-	out := make([]schema.SessionNotification, 0, len(updates))
-	for _, update := range updates {
-		if update != nil {
-			out = append(out, schema.SessionNotification{SessionID: sessionID, Update: update})
-		}
-	}
-	return out, nil
-}
-
-func cloneSessionNotifications(notifications []schema.SessionNotification, base eventstream.Envelope, event *session.Event) []schema.SessionNotification {
-	out := make([]schema.SessionNotification, 0, len(notifications))
-	for _, notification := range notifications {
-		if notification.Update == nil {
-			continue
-		}
-		out = append(out, schema.SessionNotification{
-			SessionID: sessionNotificationID(notification.SessionID, base, event),
-			Update:    eventstream.CloneUpdate(notification.Update),
-		})
-	}
-	return out
-}
-
-func sessionNotificationID(candidate string, base eventstream.Envelope, event *session.Event) string {
-	if sessionID := firstNonEmpty(candidate, base.SessionID); sessionID != "" {
-		return sessionID
-	}
-	if event == nil {
-		return ""
-	}
-	return strings.TrimSpace(event.SessionID)
-}
-
 func projectSessionEventToACPEnvelopes(base eventstream.Envelope, sessionEvent *session.Event, projector Projector) []eventstream.Envelope {
 	out := make([]eventstream.Envelope, 0, 2)
 	if permission, ok, err := projector.ProjectPermissionRequest(sessionEvent); err != nil {
@@ -460,15 +396,6 @@ func cloneDelivery(in *eventstream.Delivery) *eventstream.Delivery {
 func containsUsageUpdate(events []eventstream.Envelope) bool {
 	for _, env := range events {
 		if eventstream.UpdateType(env.Update) == schema.UpdateUsage {
-			return true
-		}
-	}
-	return false
-}
-
-func containsUsageNotification(notifications []schema.SessionNotification) bool {
-	for _, notification := range notifications {
-		if eventstream.UpdateType(notification.Update) == schema.UpdateUsage {
 			return true
 		}
 	}
