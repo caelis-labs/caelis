@@ -12,7 +12,6 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type agentAuthenticator interface {
@@ -127,25 +126,12 @@ func IsRequired(err error) bool {
 // Methods converts tolerant wire descriptors into the Control-owned auth
 // selection shape.
 func Methods(initialize client.InitializeResponse) []controlagents.AuthenticationMethod {
-	wireMethods := schema.DecodeAuthMethods(initialize.AuthMethods)
+	wireMethods := decodeAuthMethods(initialize.AuthMethods)
 	out := make([]controlagents.AuthenticationMethod, 0, len(wireMethods))
 	for _, method := range wireMethods {
-		out = append(out, MethodFromWire(method))
+		out = append(out, methodFromWire(method))
 	}
 	return controlagents.CloneAuthenticationMethods(out)
-}
-
-// MethodFromWire makes the schema-to-Control authentication vocabulary
-// conversion explicit at the bridge boundary.
-func MethodFromWire(method schema.AuthMethod) controlagents.AuthenticationMethod {
-	return controlagents.NormalizeAuthenticationMethod(controlagents.AuthenticationMethod{
-		ID:          method.ID,
-		Name:        method.Name,
-		Description: method.Description,
-		Type:        controlagents.AuthenticationType(method.Type),
-		Args:        append([]string(nil), method.Args...),
-		Env:         maps.Clone(method.Env),
-	})
 }
 
 // Select resolves the exact declared method. A persisted selection wins; one
