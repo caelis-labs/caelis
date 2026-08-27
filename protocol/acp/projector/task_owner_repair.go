@@ -66,7 +66,7 @@ func terminalTaskObservationsFromEnvelope(env eventstream.Envelope) []terminalTa
 		(env.Scope != "" && env.Scope != eventstream.ScopeMain) {
 		return nil
 	}
-	update, ok := eventstream.ToolCallUpdateFromEnvelope(env)
+	update, ok := eventstream.CloneUpdate(env.Update).(schema.ToolCallUpdate)
 	if !ok || !taskObserverStatusFinal(update.Status) {
 		return nil
 	}

@@ -32,9 +32,9 @@
 // actor/message, while lifecycle terminal states close the turn stream.
 // ParentTool and Delivery are Caelis Envelope fields, never custom fields in
 // an ACP update payload. ParentTool carries only a real delegated parent tool
-// relationship. Delivery is one of canonical, mirror, or transient. Consumers use
-// ResolveRelationDelivery for typed-first legacy compatibility; neither role
-// has replay or model-context authority. Caelis-specific display hints
+// relationship. Delivery is one of canonical, mirror, or transient. Legacy
+// relation metadata fallback belongs to the presentation consumer that still
+// requires it; neither role has replay or model-context authority. Caelis-specific display hints
 // belong under _meta.caelis and must not be the only copy of model-critical
 // data.
 package eventstream

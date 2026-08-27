@@ -38,7 +38,7 @@ func projectionTrace(envs []eventstream.Envelope) []projectionTraceEntry {
 			entry.ToolCallName = call.Kind
 			entry.ToolCallStatus = call.Status
 		}
-		if update, ok := eventstream.ToolCallUpdateFromEnvelope(env); ok {
+		if update, ok := eventstream.CloneUpdate(env.Update).(schema.ToolCallUpdate); env.Kind == eventstream.KindSessionUpdate && ok {
 			entry.ToolCallID = update.ToolCallID
 			entry.ToolCallName = stringPtrValue(update.Kind)
 			entry.ToolCallStatus = stringPtrValue(update.Status)

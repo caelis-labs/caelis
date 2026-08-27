@@ -742,7 +742,10 @@ func assertStreamFrameEnvelopeExpectation(t *testing.T, env eventstream.Envelope
 }
 
 func streamEnvelopeTerminalOutput(env eventstream.Envelope) (string, bool) {
-	update, ok := eventstream.ToolCallUpdateFromEnvelope(env)
+	if env.Kind != eventstream.KindSessionUpdate {
+		return "", false
+	}
+	update, ok := eventstream.CloneUpdate(env.Update).(schema.ToolCallUpdate)
 	if !ok {
 		return "", false
 	}
@@ -873,7 +876,10 @@ func assertStreamDelivery(t *testing.T, env eventstream.Envelope, transient bool
 
 func requireToolUpdate(t *testing.T, env eventstream.Envelope) schema.ToolCallUpdate {
 	t.Helper()
-	update, ok := eventstream.ToolCallUpdateFromEnvelope(env)
+	if env.Kind != eventstream.KindSessionUpdate {
+		t.Fatalf("env kind = %q, want %q", env.Kind, eventstream.KindSessionUpdate)
+	}
+	update, ok := eventstream.CloneUpdate(env.Update).(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("env = %#v, want ToolCallUpdate", env)
 	}

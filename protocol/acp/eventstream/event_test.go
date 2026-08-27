@@ -461,6 +461,27 @@ func TestCloneEnvelopePreservesContentChunkMetadata(t *testing.T) {
 	}
 }
 
+func TestCloneUpdateDeepCopiesToolCallUpdate(t *testing.T) {
+	t.Parallel()
+
+	title := "RunCommand"
+	update := schema.ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo,
+		ToolCallID:    "call-1",
+		Title:         &title,
+		RawInput:      map[string]any{"command": "make test"},
+	}
+	cloned, ok := CloneUpdate(update).(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("CloneUpdate() = %T, want ToolCallUpdate", CloneUpdate(update))
+	}
+	*cloned.Title = "mutated"
+	cloned.RawInput.(map[string]any)["command"] = "mutated"
+	if update.Title == nil || *update.Title != "RunCommand" || update.RawInput.(map[string]any)["command"] != "make test" {
+		t.Fatalf("source tool update mutated: %#v", update)
+	}
+}
+
 func TestCloneEnvelopeDeepCopiesRelationAndDelivery(t *testing.T) {
 	t.Parallel()
 

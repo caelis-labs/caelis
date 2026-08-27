@@ -205,6 +205,30 @@ func TestProjectACPEventToEventsFallsBackToLegacyRelationAndDeliveryMetadata(t *
 	}
 }
 
+func TestProjectACPEventToEventsFallsBackToLegacyRelationMetadataInUpdate(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToEvents(eventstream.Envelope{
+		Kind:    eventstream.KindSessionUpdate,
+		Scope:   eventstream.ScopeSubagent,
+		ScopeID: "task-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "legacy update metadata"},
+			Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"stream": map[string]any{
+				"parent_call_id": "spawn-1",
+				"parent_tool":    "Spawn",
+			}}}},
+		},
+	}, nil)
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	if event := events[0]; event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "Spawn" || event.Observation {
+		t.Fatalf("event = %#v, want legacy update relation without typed observation authority", event)
+	}
+}
+
 func TestProjectACPEventToEventsDelegatesToolUpdate(t *testing.T) {
 	t.Parallel()
 

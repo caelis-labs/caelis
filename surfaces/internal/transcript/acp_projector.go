@@ -49,16 +49,10 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 	scope := ACPEventScope(env.Scope)
 	scopeID := ACPEventScopeID(env)
 	occurredAt := env.OccurredAt
-	meta := MergeMeta(ACPUpdateMeta(env.Update), env.Meta)
-	relationDelivery := eventstream.ResolveRelationDelivery(env)
+	meta := MergeMeta(eventstream.UpdateMeta(env.Update), env.Meta)
 	typedObservation := env.Delivery != nil && env.Delivery.Mode == eventstream.DeliveryTransient &&
 		env.ParentTool != nil && strings.TrimSpace(env.ParentTool.ToolCallID) != ""
-	parentToolCallID := ""
-	parentToolName := ""
-	if parentTool := relationDelivery.ParentTool; parentTool != nil {
-		parentToolCallID = parentTool.ToolCallID
-		parentToolName = parentTool.ToolName
-	}
+	parentToolCallID, parentToolName := acpParentToolRelation(env, meta)
 	out := make([]Event, 0, 2)
 	switch env.Kind {
 	case eventstream.KindSessionUpdate:
@@ -177,6 +171,17 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 		out[i].AnchorToolName = parentToolName
 	}
 	return out
+}
+
+// acpParentToolRelation keeps the legacy metadata fallback at its sole
+// presentation consumer. Typed Envelope identity always wins, including an
+// explicitly present zero-value relation.
+func acpParentToolRelation(env eventstream.Envelope, meta map[string]any) (string, string) {
+	if env.ParentTool != nil {
+		return strings.TrimSpace(env.ParentTool.ToolCallID), strings.TrimSpace(env.ParentTool.ToolName)
+	}
+	return MetaString(meta, "caelis", "runtime", "stream", "parent_call_id"),
+		MetaString(meta, "caelis", "runtime", "stream", "parent_tool")
 }
 
 func attemptResetSurfaceMeta(state string, meta map[string]any) map[string]any {
@@ -511,19 +516,6 @@ func ACPEventScopeID(env eventstream.Envelope) string {
 		return sessionID
 	}
 	return strings.TrimSpace(env.TurnID)
-}
-
-func ACPUpdateMeta(update schema.Update) map[string]any {
-	switch typed := update.(type) {
-	case schema.ContentChunk:
-		return CloneAnyMap(typed.Meta)
-	case schema.ToolCall:
-		return CloneAnyMap(typed.Meta)
-	case schema.ToolCallUpdate:
-		return CloneAnyMap(typed.Meta)
-	default:
-		return nil
-	}
 }
 
 func ToolIsPlan(values ...string) bool {
