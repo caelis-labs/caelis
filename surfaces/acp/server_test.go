@@ -37,7 +37,7 @@ func TestServeStdioSendsAvailableCommandsAfterNewSession(t *testing.T) {
 	updates := make(chan observedUpdate, 1)
 	conn, err := acpsdk.NewConnectionWithOptions(
 		func(_ context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
-			if method != protocolacp.MethodSessionUpdate {
+			if method != acpsdk.ClientMethodSessionUpdate {
 				return nil, acpsdk.NewMethodNotFound(method)
 			}
 			var notification availableCommandsNotification
@@ -56,7 +56,7 @@ func TestServeStdioSendsAvailableCommandsAfterNewSession(t *testing.T) {
 	}
 	defer conn.Close()
 
-	resp, err := acpsdk.SendRequest[protocolacp.NewSessionResponse](conn, ctx, protocolacp.MethodSessionNew, protocolacp.NewSessionRequest{CWD: t.TempDir()})
+	resp, err := acpsdk.SendRequest[protocolacp.NewSessionResponse](conn, ctx, acpsdk.AgentMethodSessionNew, protocolacp.NewSessionRequest{CWD: t.TempDir()})
 	if err != nil {
 		t.Fatalf("session/new call error = %v", err)
 	}
@@ -120,6 +120,36 @@ func TestResponseErrorPreservesProtocolErrorsAndSeparatesInternalFailures(t *tes
 	}
 	if got := responseError(context.Canceled); got.Code != -32800 {
 		t.Fatalf("responseError(context.Canceled) code = %d, want -32800", got.Code)
+	}
+}
+
+func TestAuthenticateRequiresOptionalAgentCapability(t *testing.T) {
+	t.Parallel()
+
+	conn := &serverConn{agent: noAuthAgent{}}
+	_, rpcErr := conn.handleRequest(
+		context.Background(),
+		nil,
+		acpsdk.AgentMethodAuthenticate,
+		json.RawMessage(`{"methodId":"agent"}`),
+	)
+	if rpcErr == nil || rpcErr.Code != -32601 {
+		t.Fatalf("authenticate error = %#v, want method not found", rpcErr)
+	}
+}
+
+func TestRetiredSetModelMethodIsNotDispatched(t *testing.T) {
+	t.Parallel()
+
+	conn := &serverConn{agent: commandAgent{}}
+	_, rpcErr := conn.handleRequest(
+		context.Background(),
+		nil,
+		"session/set_model",
+		json.RawMessage(`{"sessionId":"session-1","modelId":"model-1"}`),
+	)
+	if rpcErr == nil || rpcErr.Code != -32601 {
+		t.Fatalf("session/set_model error = %#v, want method not found", rpcErr)
 	}
 }
 
@@ -208,7 +238,7 @@ func TestServeStdioCancelsPromptFromJSONRPCCancelRequest(t *testing.T) {
 	callCtx, cancelCall := context.WithCancel(ctx)
 	callErr := make(chan error, 1)
 	go func() {
-		_, err := acpsdk.SendRequest[protocolacp.PromptResponse](conn, callCtx, protocolacp.MethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"})
+		_, err := acpsdk.SendRequest[protocolacp.PromptResponse](conn, callCtx, acpsdk.AgentMethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"})
 		callErr <- err
 	}()
 	select {
@@ -271,7 +301,7 @@ func TestServeStdioCancelsPromptFromSessionCancel(t *testing.T) {
 	promptResult := make(chan protocolacp.PromptResponse, 1)
 	promptErr := make(chan error, 1)
 	go func() {
-		resp, err := acpsdk.SendRequest[protocolacp.PromptResponse](conn, ctx, protocolacp.MethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"})
+		resp, err := acpsdk.SendRequest[protocolacp.PromptResponse](conn, ctx, acpsdk.AgentMethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"})
 		if err != nil {
 			promptErr <- err
 			return
@@ -283,7 +313,7 @@ func TestServeStdioCancelsPromptFromSessionCancel(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for prompt handler")
 	}
-	if err := conn.SendNotification(ctx, protocolacp.MethodSessionCancel, protocolacp.CancelNotification{SessionID: "session-1"}); err != nil {
+	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionCancel, protocolacp.CancelNotification{SessionID: "session-1"}); err != nil {
 		t.Fatalf("session/cancel notification error = %v", err)
 	}
 	select {
@@ -336,13 +366,13 @@ func TestServeStdioRejectsWrongACPMessageDirection(t *testing.T) {
 	}
 	defer conn.Close()
 
-	if err := conn.SendNotification(ctx, protocolacp.MethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"}); err != nil {
+	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"}); err != nil {
 		t.Fatalf("session/prompt notification error = %v", err)
 	}
-	if err := conn.SendNotification(ctx, protocolacp.MethodSessionClose, protocolacp.CloseSessionRequest{SessionID: "session-1"}); err != nil {
+	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionClose, protocolacp.CloseSessionRequest{SessionID: "session-1"}); err != nil {
 		t.Fatalf("session/close notification error = %v", err)
 	}
-	if err := conn.SendNotification(ctx, protocolacp.MethodSessionCancel, protocolacp.CancelNotification{SessionID: "session-1"}); err != nil {
+	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionCancel, protocolacp.CancelNotification{SessionID: "session-1"}); err != nil {
 		t.Fatalf("session/cancel notification error = %v", err)
 	}
 	select {
@@ -357,7 +387,7 @@ func TestServeStdioRejectsWrongACPMessageDirection(t *testing.T) {
 		t.Fatalf("close calls after notification = %d, want 0", got)
 	}
 
-	_, err = acpsdk.SendRequest[struct{}](conn, ctx, protocolacp.MethodSessionCancel, protocolacp.CancelNotification{SessionID: "session-1"})
+	_, err = acpsdk.SendRequest[struct{}](conn, ctx, acpsdk.AgentMethodSessionCancel, protocolacp.CancelNotification{SessionID: "session-1"})
 	var requestErr *acpsdk.RequestError
 	if !errors.As(err, &requestErr) || requestErr.Code != -32601 {
 		t.Fatalf("session/cancel request error = %v, want method not found", err)
@@ -366,10 +396,10 @@ func TestServeStdioRejectsWrongACPMessageDirection(t *testing.T) {
 		t.Fatalf("cancel calls after request = %d, want only the notification", got)
 	}
 
-	if _, err := acpsdk.SendRequest[protocolacp.PromptResponse](conn, ctx, protocolacp.MethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"}); err != nil {
+	if _, err := acpsdk.SendRequest[protocolacp.PromptResponse](conn, ctx, acpsdk.AgentMethodSessionPrompt, protocolacp.PromptRequest{SessionID: "session-1"}); err != nil {
 		t.Fatalf("session/prompt request error = %v", err)
 	}
-	if _, err := acpsdk.SendRequest[protocolacp.CloseSessionResponse](conn, ctx, protocolacp.MethodSessionClose, protocolacp.CloseSessionRequest{SessionID: "session-1"}); err != nil {
+	if _, err := acpsdk.SendRequest[protocolacp.CloseSessionResponse](conn, ctx, acpsdk.AgentMethodSessionClose, protocolacp.CloseSessionRequest{SessionID: "session-1"}); err != nil {
 		t.Fatalf("session/close request error = %v", err)
 	}
 	if got := agent.promptCalls.Load(); got != 1 {
@@ -410,7 +440,7 @@ func TestServeStdioHandlesStableSessionLifecycleMethods(t *testing.T) {
 	}
 	defer conn.Close()
 
-	listResp, err := acpsdk.SendRequest[protocolacp.SessionListResponse](conn, ctx, protocolacp.MethodSessionList, protocolacp.SessionListRequest{CWD: "/tmp/project"})
+	listResp, err := acpsdk.SendRequest[protocolacp.SessionListResponse](conn, ctx, acpsdk.AgentMethodSessionList, protocolacp.SessionListRequest{CWD: "/tmp/project"})
 	if err != nil {
 		t.Fatalf("session/list call error = %v", err)
 	}
@@ -421,14 +451,14 @@ func TestServeStdioHandlesStableSessionLifecycleMethods(t *testing.T) {
 		t.Fatalf("session/list cwd = %q, want /tmp/project", agent.listCWD)
 	}
 
-	if _, err := acpsdk.SendRequest[protocolacp.ResumeSessionResponse](conn, ctx, protocolacp.MethodSessionResume, protocolacp.ResumeSessionRequest{SessionID: "session-1", CWD: "/tmp/project"}); err != nil {
+	if _, err := acpsdk.SendRequest[protocolacp.ResumeSessionResponse](conn, ctx, acpsdk.AgentMethodSessionResume, protocolacp.ResumeSessionRequest{SessionID: "session-1", CWD: "/tmp/project"}); err != nil {
 		t.Fatalf("session/resume call error = %v", err)
 	}
 	if agent.resumeSessionID != "session-1" {
 		t.Fatalf("session/resume id = %q, want session-1", agent.resumeSessionID)
 	}
 
-	if _, err := acpsdk.SendRequest[protocolacp.CloseSessionResponse](conn, ctx, protocolacp.MethodSessionClose, protocolacp.CloseSessionRequest{SessionID: "session-1"}); err != nil {
+	if _, err := acpsdk.SendRequest[protocolacp.CloseSessionResponse](conn, ctx, acpsdk.AgentMethodSessionClose, protocolacp.CloseSessionRequest{SessionID: "session-1"}); err != nil {
 		t.Fatalf("session/close call error = %v", err)
 	}
 	if agent.closeSessionID != "session-1" {
@@ -456,6 +486,24 @@ type availableCommandsNotification struct {
 }
 
 type commandAgent struct{}
+
+type noAuthAgent struct{}
+
+func (noAuthAgent) Initialize(context.Context, protocolacp.InitializeRequest) (protocolacp.InitializeResponse, error) {
+	return protocolacp.InitializeResponse{}, nil
+}
+
+func (noAuthAgent) NewSession(context.Context, protocolacp.NewSessionRequest) (protocolacp.NewSessionResponse, error) {
+	return protocolacp.NewSessionResponse{}, nil
+}
+
+func (noAuthAgent) Prompt(context.Context, protocolacp.PromptRequest, protocolacp.PromptCallbacks) (protocolacp.PromptResponse, error) {
+	return protocolacp.PromptResponse{}, nil
+}
+
+func (noAuthAgent) Cancel(context.Context, protocolacp.CancelNotification) error {
+	return nil
+}
 
 func (commandAgent) Initialize(context.Context, protocolacp.InitializeRequest) (protocolacp.InitializeResponse, error) {
 	return protocolacp.InitializeResponse{}, nil

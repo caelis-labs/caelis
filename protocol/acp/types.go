@@ -3,12 +3,6 @@ package acp
 import "github.com/caelis-labs/caelis/protocol/acp/schema"
 
 const (
-	MethodSessionUpdate        = schema.MethodSessionUpdate
-	MethodSessionReqPermission = schema.MethodSessionReqPermission
-	MethodSessionList          = schema.MethodSessionList
-)
-
-const (
 	UpdateUserMessage   = schema.UpdateUserMessage
 	UpdateAgentMessage  = schema.UpdateAgentMessage
 	UpdateAgentThought  = schema.UpdateAgentThought
@@ -31,21 +25,13 @@ const (
 const (
 	ToolKindRead    = schema.ToolKindRead
 	ToolKindEdit    = schema.ToolKindEdit
-	ToolKindDelete  = schema.ToolKindDelete
-	ToolKindMove    = schema.ToolKindMove
 	ToolKindSearch  = schema.ToolKindSearch
 	ToolKindExecute = schema.ToolKindExecute
-	ToolKindThink   = schema.ToolKindThink
-	ToolKindFetch   = schema.ToolKindFetch
-	ToolKindSwitch  = schema.ToolKindSwitch
-	ToolKindOther   = schema.ToolKindOther
 )
 
 const (
-	PermAllowOnce    = schema.PermAllowOnce
-	PermAllowAlways  = schema.PermAllowAlways
-	PermRejectOnce   = schema.PermRejectOnce
-	PermRejectAlways = schema.PermRejectAlways
+	PermAllowOnce  = schema.PermAllowOnce
+	PermRejectOnce = schema.PermRejectOnce
 )
 
 type Update = schema.Update

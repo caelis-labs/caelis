@@ -3,11 +3,13 @@ package schema
 import (
 	"encoding/json"
 	"strings"
+
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 )
 
 const (
-	MethodSessionUpdate        = "session/update"
-	MethodSessionReqPermission = "session/request_permission"
+	MethodSessionUpdate        = acpsdk.ClientMethodSessionUpdate
+	MethodSessionReqPermission = acpsdk.ClientMethodSessionRequestPermission
 )
 
 const (

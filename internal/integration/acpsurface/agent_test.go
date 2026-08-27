@@ -522,6 +522,9 @@ func TestNewFromClientsSetConfigOptionUsesNewSessionCWDWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
+	if sessionResp.Models != nil {
+		t.Fatalf("NewSession().Models = %#v, want standard model config option only", sessionResp.Models)
+	}
 	if _, err := agent.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
 		SessionID: sessionResp.SessionID,
 		ConfigID:  "mode",

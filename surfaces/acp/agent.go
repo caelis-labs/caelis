@@ -12,6 +12,7 @@ import (
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
+	protocolacp "github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/surfaces/internal/promptview"
 )
 
@@ -134,4 +135,46 @@ func acpDirectAgentRuns(status controlprompt.AgentStatusSnapshot) []controlagent
 		runs = append(runs, controlagents.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))
 	}
 	return runs
+}
+
+// Agent is the product ACP surface consumed by ServeStdio. Its callback-aware
+// prompt and load methods preserve Caelis's per-connection update and approval
+// routing while the wire connection itself remains owned by acp-go-sdk.
+type Agent interface {
+	Initialize(context.Context, protocolacp.InitializeRequest) (protocolacp.InitializeResponse, error)
+	NewSession(context.Context, protocolacp.NewSessionRequest) (protocolacp.NewSessionResponse, error)
+	Prompt(context.Context, protocolacp.PromptRequest, protocolacp.PromptCallbacks) (protocolacp.PromptResponse, error)
+	Cancel(context.Context, protocolacp.CancelNotification) error
+}
+
+type agentAuthenticator interface {
+	Authenticate(context.Context, protocolacp.AuthenticateRequest) (protocolacp.AuthenticateResponse, error)
+}
+
+type sessionLister interface {
+	ListSessions(context.Context, protocolacp.SessionListRequest) (protocolacp.SessionListResponse, error)
+}
+
+type sessionLoader interface {
+	LoadSession(context.Context, protocolacp.LoadSessionRequest, protocolacp.PromptCallbacks) (protocolacp.LoadSessionResponse, error)
+}
+
+type sessionResumer interface {
+	ResumeSession(context.Context, protocolacp.ResumeSessionRequest) (protocolacp.ResumeSessionResponse, error)
+}
+
+type sessionCloser interface {
+	CloseSession(context.Context, protocolacp.CloseSessionRequest) (protocolacp.CloseSessionResponse, error)
+}
+
+type sessionModeSetter interface {
+	SetSessionMode(context.Context, protocolacp.SetSessionModeRequest) (protocolacp.SetSessionModeResponse, error)
+}
+
+type sessionConfigSetter interface {
+	SetSessionConfigOption(context.Context, protocolacp.SetSessionConfigOptionRequest) (protocolacp.SetSessionConfigOptionResponse, error)
+}
+
+type sessionSteerer interface {
+	SteerSession(context.Context, protocolacp.SessionSteeringRequest) (protocolacp.SessionSteeringResponse, error)
 }

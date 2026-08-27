@@ -933,11 +933,9 @@ func newRuntimeAgentWithSessionsAndConfig(t *testing.T, sessions session.Service
 		Modes:                override.Modes,
 		ApprovalModes:        override.ApprovalModes,
 		Config:               override.Config,
-		Models:               override.Models,
 		Commands:             override.Commands,
 		PromptRouterFactory:  override.PromptRouterFactory,
 		SlashResultFormatter: override.SlashResultFormatter,
-		PromptCaps:           override.PromptCaps,
 	}
 	if override.AgentInfo != nil {
 		cfg.AgentInfo = override.AgentInfo

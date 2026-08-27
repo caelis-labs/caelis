@@ -10,35 +10,13 @@ import (
 )
 
 const (
-	JSONRPCVersion         = schema.JSONRPCVersion
-	CurrentProtocolVersion = schema.CurrentProtocolVersion
-
-	MethodInitialize       = schema.MethodInitialize
-	MethodAuthenticate     = schema.MethodAuthenticate
-	MethodSessionNew       = schema.MethodSessionNew
-	MethodSessionLoad      = schema.MethodSessionLoad
-	MethodSessionResume    = schema.MethodSessionResume
-	MethodSessionClose     = schema.MethodSessionClose
-	MethodSessionSetMode   = schema.MethodSessionSetMode
-	MethodSessionSetConfig = schema.MethodSessionSetConfig
-	MethodSessionSetModel  = schema.MethodSessionSetModel
-	MethodSessionPrompt    = schema.MethodSessionPrompt
-	MethodSessionCancel    = schema.MethodSessionCancel
-	MethodSessionSteering  = schema.MethodSessionSteering
+	MethodSessionSteering = schema.MethodSessionSteering
 
 	StopReasonEndTurn   = schema.StopReasonEndTurn
 	StopReasonCancelled = schema.StopReasonCancelled
 )
 
 var ErrCapabilityUnsupported = errors.New("acp: capability unsupported")
-
-type Agent interface {
-	Initialize(context.Context, InitializeRequest) (InitializeResponse, error)
-	Authenticate(context.Context, AuthenticateRequest) (AuthenticateResponse, error)
-	NewSession(context.Context, NewSessionRequest) (NewSessionResponse, error)
-	Prompt(context.Context, PromptRequest, PromptCallbacks) (PromptResponse, error)
-	Cancel(context.Context, CancelNotification) error
-}
 
 type PromptCallbacks interface {
 	SessionUpdate(context.Context, SessionNotification) error
@@ -57,15 +35,6 @@ type ModeProvider interface {
 type ConfigProvider interface {
 	SessionConfigOptions(context.Context, session.Session) ([]SessionConfigOption, error)
 	SetSessionConfigOption(context.Context, SetSessionConfigOptionRequest) (SetSessionConfigOptionResponse, error)
-}
-
-type ModelProvider interface {
-	SessionModels(context.Context, session.Session) (*SessionModelState, error)
-	SetSessionModel(context.Context, SetSessionModelRequest) (SetSessionModelResponse, error)
-}
-
-type PromptCapabilitiesProvider interface {
-	PromptCapabilities(context.Context) (PromptCapabilities, error)
 }
 
 type CommandProvider interface {
@@ -92,10 +61,6 @@ type SessionMode = schema.SessionMode
 type SessionModeState = schema.SessionModeState
 type SetSessionModeRequest = schema.SetSessionModeRequest
 type SetSessionModeResponse = schema.SetSessionModeResponse
-type ModelInfo = schema.ModelInfo
-type SessionModelState = schema.SessionModelState
-type SetSessionModelRequest = schema.SetSessionModelRequest
-type SetSessionModelResponse = schema.SetSessionModelResponse
 type SessionConfigSelectOption = schema.SessionConfigSelectOption
 type SessionConfigOption = schema.SessionConfigOption
 type SetSessionConfigOptionRequest = schema.SetSessionConfigOptionRequest
@@ -103,7 +68,6 @@ type SetSessionConfigOptionResponse = schema.SetSessionConfigOptionResponse
 type PromptRequest = schema.PromptRequest
 type PromptResponse = schema.PromptResponse
 type SessionSteeringOutcome = schema.SessionSteeringOutcome
-type SessionSteeringIdleBehavior = schema.SessionSteeringIdleBehavior
 type SessionSteeringCapability = schema.SessionSteeringCapability
 type SessionSteeringOptions = schema.SessionSteeringOptions
 type SessionSteeringRequest = schema.SessionSteeringRequest
@@ -117,7 +81,6 @@ const (
 	SessionSteeringMetaKey = schema.SessionSteeringMetaKey
 
 	SessionSteeringInjected       = schema.SessionSteeringInjected
-	SessionSteeringStartedNewTurn = schema.SessionSteeringStartedNewTurn
 	SessionSteeringPromptRequired = schema.SessionSteeringPromptRequired
 	SessionSteeringFailed         = schema.SessionSteeringFailed
 

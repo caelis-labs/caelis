@@ -12,7 +12,7 @@ func TestACPPresentationSnapshotDoesNotExposeApprovalRoutingAsACPMode(t *testing
 		CurrentModeID:  "manual",
 		AvailableModes: []appserver.PresentationMode{{ID: "manual", Name: "Manual"}},
 	}}
-	if modes, _, _, _ := acpPresentationSnapshot(approval); modes != nil {
+	if modes, _, _ := acpPresentationSnapshot(approval); modes != nil {
 		t.Fatalf("approval routing projected as ACP mode: %#v", modes)
 	}
 
@@ -22,7 +22,7 @@ func TestACPPresentationSnapshotDoesNotExposeApprovalRoutingAsACPMode(t *testing
 		CurrentModeID:  "focus",
 		AvailableModes: []appserver.PresentationMode{{ID: "focus", Name: "Focus"}},
 	}
-	modes, _, _, _ := acpPresentationSnapshot(appOwned)
+	modes, _, _ := acpPresentationSnapshot(appOwned)
 	if modes == nil || modes.CurrentModeID != "focus" || len(modes.AvailableModes) != 1 {
 		t.Fatalf("app-owned ACP modes = %#v", modes)
 	}

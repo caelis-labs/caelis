@@ -1,7 +1,9 @@
 package schema
 
+import acpsdk "github.com/caelis-labs/acp-go-sdk"
+
 const (
-	MethodSessionList   = "session/list"
+	MethodSessionList   = acpsdk.AgentMethodSessionList
 	UpdateAvailableCmds = "available_commands_update"
 	UpdateCurrentMode   = "current_mode_update"
 	UpdateConfigOption  = "config_option_update"

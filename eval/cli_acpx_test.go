@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/protocol/acp"
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 )
 
 func TestCLIACPXExecE2E(t *testing.T) {
@@ -37,7 +37,7 @@ func TestCLIACPXLoadSessionE2E(t *testing.T) {
 	if !strings.Contains(output, "caelis load ok") {
 		t.Fatalf("acpx output = %q, want assistant reply", output)
 	}
-	if !strings.Contains(output, acp.MethodSessionLoad) {
+	if !strings.Contains(output, acpsdk.AgentMethodSessionLoad) {
 		t.Fatalf("acpx verbose output = %q, want session/load call", output)
 	}
 }

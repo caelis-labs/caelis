@@ -5,7 +5,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
-func acpPresentationSnapshot(snapshot appserver.PresentationSnapshot) (*acp.SessionModeState, []acp.SessionConfigOption, *acp.SessionModelState, []acp.AvailableCommand) {
+func acpPresentationSnapshot(snapshot appserver.PresentationSnapshot) (*acp.SessionModeState, []acp.SessionConfigOption, []acp.AvailableCommand) {
 	var modes *acp.SessionModeState
 	if snapshot.Modes != nil && snapshot.Modes.Target != appserver.PresentationModeTargetApproval {
 		modes = &acp.SessionModeState{CurrentModeID: snapshot.Modes.CurrentModeID}
@@ -14,13 +14,6 @@ func acpPresentationSnapshot(snapshot appserver.PresentationSnapshot) (*acp.Sess
 		}
 	}
 	configs := acpPresentationConfigOptions(snapshot.ConfigOptions)
-	var models *acp.SessionModelState
-	if snapshot.Models != nil {
-		models = &acp.SessionModelState{CurrentModelID: snapshot.Models.CurrentModelID}
-		for _, model := range snapshot.Models.AvailableModels {
-			models.AvailableModels = append(models.AvailableModels, acp.ModelInfo{ModelID: model.ID, Name: model.Name, Description: model.Description})
-		}
-	}
 	commands := make([]acp.AvailableCommand, 0, len(snapshot.Commands))
 	for _, command := range snapshot.Commands {
 		mapped := acp.AvailableCommand{Name: command.Name, Description: command.Description}
@@ -29,7 +22,7 @@ func acpPresentationSnapshot(snapshot appserver.PresentationSnapshot) (*acp.Sess
 		}
 		commands = append(commands, mapped)
 	}
-	return modes, configs, models, commands
+	return modes, configs, commands
 }
 
 func acpPresentationConfigOptions(options []appserver.PresentationConfigOption) []acp.SessionConfigOption {

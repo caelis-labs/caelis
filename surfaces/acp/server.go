@@ -26,7 +26,7 @@ const serverMaxFrameSize = 64 * 1024 * 1024
 const availableCommandsAfterSessionNewDelay = 100 * time.Millisecond
 
 // ServeStdio serves one agent-side ACP connection over NDJSON stdio.
-func ServeStdio(ctx context.Context, agent protocolacp.Agent, in io.Reader, out io.Writer) error {
+func ServeStdio(ctx context.Context, agent Agent, in io.Reader, out io.Writer) error {
 	if agent == nil {
 		return errors.New("acp: agent is required")
 	}
@@ -71,7 +71,7 @@ func ServeStdio(ctx context.Context, agent protocolacp.Agent, in io.Reader, out 
 }
 
 type serverConn struct {
-	agent     protocolacp.Agent
+	agent     Agent
 	rpc       atomic.Pointer[acpsdk.Connection]
 	rpcReady  chan struct{}
 	lifecycle context.Context
@@ -123,21 +123,25 @@ func (c *serverConn) handle(ctx context.Context, method string, params json.RawM
 
 func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRequest, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
 	switch method {
-	case protocolacp.MethodInitialize:
+	case acpsdk.AgentMethodInitialize:
 		var req protocolacp.InitializeRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
 		resp, err := c.agent.Initialize(ctx, req)
 		return responseOrError(resp, err)
-	case protocolacp.MethodAuthenticate:
+	case acpsdk.AgentMethodAuthenticate:
 		var req protocolacp.AuthenticateRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		resp, err := c.agent.Authenticate(ctx, req)
+		handler, ok := c.agent.(agentAuthenticator)
+		if !ok {
+			return nil, methodNotFound()
+		}
+		resp, err := handler.Authenticate(ctx, req)
 		return responseOrError(resp, err)
-	case protocolacp.MethodSessionNew:
+	case acpsdk.AgentMethodSessionNew:
 		var req protocolacp.NewSessionRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
@@ -150,23 +154,23 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 			return nil, responseError(err)
 		}
 		return resp, nil
-	case protocolacp.MethodSessionList:
+	case acpsdk.AgentMethodSessionList:
 		var req protocolacp.SessionListRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := c.agent.(protocolacp.SessionListAdapter)
+		handler, ok := c.agent.(sessionLister)
 		if !ok {
 			return nil, methodNotFound()
 		}
 		resp, err := handler.ListSessions(ctx, req)
 		return responseOrError(resp, err)
-	case protocolacp.MethodSessionLoad:
+	case acpsdk.AgentMethodSessionLoad:
 		var req protocolacp.LoadSessionRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := c.agent.(protocolacp.SessionLoader)
+		handler, ok := c.agent.(sessionLoader)
 		if !ok {
 			return nil, methodNotFound()
 		}
@@ -178,12 +182,12 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 			return nil, responseError(err)
 		}
 		return resp, nil
-	case protocolacp.MethodSessionResume:
+	case acpsdk.AgentMethodSessionResume:
 		var req protocolacp.ResumeSessionRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := c.agent.(protocolacp.ResumeSessionAdapter)
+		handler, ok := c.agent.(sessionResumer)
 		if !ok {
 			return nil, methodNotFound()
 		}
@@ -195,51 +199,40 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 			return nil, responseError(err)
 		}
 		return resp, nil
-	case protocolacp.MethodSessionClose:
+	case acpsdk.AgentMethodSessionClose:
 		var req protocolacp.CloseSessionRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := c.agent.(protocolacp.CloseSessionAdapter)
+		handler, ok := c.agent.(sessionCloser)
 		if !ok {
 			return nil, methodNotFound()
 		}
 		resp, err := handler.CloseSession(ctx, req)
 		return responseOrError(resp, err)
-	case protocolacp.MethodSessionSetMode:
+	case acpsdk.AgentMethodSessionSetMode:
 		var req protocolacp.SetSessionModeRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := c.agent.(protocolacp.SessionModeAdapter)
+		handler, ok := c.agent.(sessionModeSetter)
 		if !ok {
 			return nil, methodNotFound()
 		}
 		resp, err := handler.SetSessionMode(ctx, req)
 		return responseOrError(resp, err)
-	case protocolacp.MethodSessionSetConfig:
+	case acpsdk.AgentMethodSessionSetConfigOption:
 		var req protocolacp.SetSessionConfigOptionRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := c.agent.(protocolacp.SessionConfigAdapter)
+		handler, ok := c.agent.(sessionConfigSetter)
 		if !ok {
 			return nil, methodNotFound()
 		}
 		resp, err := handler.SetSessionConfigOption(ctx, req)
 		return responseOrError(resp, err)
-	case protocolacp.MethodSessionSetModel:
-		var req protocolacp.SetSessionModelRequest
-		if err := decodeParams(params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := c.agent.(protocolacp.SessionModelAdapter)
-		if !ok {
-			return nil, methodNotFound()
-		}
-		resp, err := handler.SetSessionModel(ctx, req)
-		return responseOrError(resp, err)
-	case protocolacp.MethodSessionPrompt:
+	case acpsdk.AgentMethodSessionPrompt:
 		var req protocolacp.PromptRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
@@ -254,7 +247,7 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		if err := validateSessionSteeringRequest(req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := c.agent.(protocolacp.SessionSteeringAdapter)
+		handler, ok := c.agent.(sessionSteerer)
 		if !ok {
 			return nil, methodNotFound()
 		}
@@ -267,7 +260,7 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 
 func (c *serverConn) handleNotification(ctx context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
 	switch method {
-	case protocolacp.MethodSessionCancel:
+	case acpsdk.AgentMethodSessionCancel:
 		var req protocolacp.CancelNotification
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
@@ -283,7 +276,7 @@ func (c *serverConn) SessionUpdate(_ context.Context, notification protocolacp.S
 	if err != nil {
 		return err
 	}
-	return rpc.SendNotification(c.lifecycle, protocolacp.MethodSessionUpdate, notification)
+	return rpc.SendNotification(c.lifecycle, acpsdk.ClientMethodSessionUpdate, notification)
 }
 
 func (c *serverConn) afterAvailableCommands(inbound *serverInboundRequest, sessionID string, delay time.Duration) error {
@@ -332,7 +325,7 @@ func (c *serverConn) RequestPermission(ctx context.Context, req protocolacp.Requ
 	if err != nil {
 		return protocolacp.RequestPermissionResponse{}, err
 	}
-	return acpsdk.SendRequest[protocolacp.RequestPermissionResponse](rpc, ctx, protocolacp.MethodSessionReqPermission, req)
+	return acpsdk.SendRequest[protocolacp.RequestPermissionResponse](rpc, ctx, acpsdk.ClientMethodSessionRequestPermission, req)
 }
 
 type serverPromptCallbacks struct {

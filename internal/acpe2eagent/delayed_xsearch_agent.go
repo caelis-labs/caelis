@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
@@ -22,7 +23,6 @@ type delayedXSearchAgent struct {
 }
 
 var (
-	_ acp.Agent          = (*delayedXSearchAgent)(nil)
 	_ acp.ConfigProvider = (*delayedXSearchAgent)(nil)
 )
 
@@ -32,7 +32,7 @@ func newDelayedXSearchAgent() *delayedXSearchAgent {
 
 func (a *delayedXSearchAgent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
 	return acp.InitializeResponse{
-		ProtocolVersion: acp.CurrentProtocolVersion,
+		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		AgentCapabilities: acp.AgentCapabilities{
 			Auth:                map[string]any{},
 			MCPCapabilities:     acp.MCPCapabilities{},
@@ -46,10 +46,6 @@ func (a *delayedXSearchAgent) Initialize(context.Context, acp.InitializeRequest)
 		},
 		AuthMethods: []json.RawMessage{},
 	}, nil
-}
-
-func (*delayedXSearchAgent) Authenticate(context.Context, acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
-	return acp.AuthenticateResponse{}, nil
 }
 
 func (a *delayedXSearchAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {

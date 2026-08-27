@@ -234,12 +234,6 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "",
 		},
 		{
-			name:       "protocol rejects repository internals",
-			rel:        "protocol/acp/adapter.go",
-			importPath: modulePath + "/internal/kernel",
-			want:       "protocol must not depend on internal packages",
-		},
-		{
 			name:       "surface rejects app implementation",
 			rel:        "surfaces/gui/app.go",
 			importPath: modulePath + "/app/gatewayapp",

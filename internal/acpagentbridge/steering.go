@@ -86,5 +86,3 @@ func committedSteeringError(result appserver.CommandResult, err error) error {
 	}
 	return &appserver.CommandReceiptError{Receipt: result, Err: err}
 }
-
-var _ acp.SessionSteeringAdapter = (*RuntimeAgent)(nil)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -69,12 +70,10 @@ type Config struct {
 	// while approval routing is restricted to manual/auto-review.
 	ApprovalModes       acp.ModeProvider
 	Config              acp.ConfigProvider
-	Models              acp.ModelProvider
 	Commands            acp.CommandProvider
 	PromptRouterFactory PromptRouterFactory
 	// SlashResultFormatter is required when PromptRouterFactory is configured.
 	SlashResultFormatter SlashResultFormatter
-	PromptCaps           acp.PromptCapabilitiesProvider
 	TaskStreamClient     taskstream.Client
 	// TaskStreams and TaskStreamPrincipal are inputs to the lower-level direct
 	// Runtime conformance path. Product assembly binds TaskStreamClient once at
@@ -111,11 +110,9 @@ type RuntimeAgent struct {
 	modes                 acp.ModeProvider
 	approvalModes         acp.ModeProvider
 	config                acp.ConfigProvider
-	models                acp.ModelProvider
 	commands              acp.CommandProvider
 	promptRouterFactory   PromptRouterFactory
 	slashResultFormatter  SlashResultFormatter
-	promptCaps            acp.PromptCapabilitiesProvider
 	taskStreamClient      taskstream.Client
 	approvalReviewer      approval.Reviewer
 	approvalModelResolver ApprovalModelResolver
@@ -201,11 +198,9 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		modes:                 cfg.Modes,
 		approvalModes:         approvalModes,
 		config:                cfg.Config,
-		models:                cfg.Models,
 		commands:              cfg.Commands,
 		promptRouterFactory:   cfg.PromptRouterFactory,
 		slashResultFormatter:  cfg.SlashResultFormatter,
-		promptCaps:            cfg.PromptCaps,
 		taskStreamClient:      taskStreamClient,
 		approvalReviewer:      cfg.ApprovalReviewer,
 		approvalModelResolver: cfg.ApprovalModelResolver,
@@ -248,12 +243,6 @@ func (a *RuntimeAgent) Initialize(ctx context.Context, _ acp.InitializeRequest) 
 			return acp.InitializeResponse{}, err
 		}
 		promptCaps = acp.PromptCapabilities{Audio: caps.Audio, EmbeddedContext: caps.EmbeddedContext, Image: caps.Image}
-	} else if a.promptCaps != nil {
-		caps, err := a.promptCaps.PromptCapabilities(ctx)
-		if err != nil {
-			return acp.InitializeResponse{}, err
-		}
-		promptCaps = caps
 	}
 	caps := acp.AgentCapabilities{
 		Auth: map[string]any{},
@@ -279,16 +268,12 @@ func (a *RuntimeAgent) Initialize(ctx context.Context, _ acp.InitializeRequest) 
 		meta = map[string]json.RawMessage{acp.SessionSteeringMetaKey: steering}
 	}
 	return acp.InitializeResponse{
-		ProtocolVersion:   acp.CurrentProtocolVersion,
+		ProtocolVersion:   acpsdk.ProtocolVersionNumber,
 		AgentCapabilities: caps,
 		AgentInfo:         a.agentInfo,
 		AuthMethods:       []json.RawMessage{},
 		Meta:              meta,
 	}, nil
-}
-
-func (a *RuntimeAgent) Authenticate(context.Context, acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
-	return acp.AuthenticateResponse{}, nil
 }
 
 func (a *RuntimeAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
@@ -351,7 +336,7 @@ func (a *RuntimeAgent) newSessionResponse(ctx context.Context, activeSession ses
 		if err != nil {
 			return acp.NewSessionResponse{}, err
 		}
-		resp.Modes, resp.ConfigOptions, resp.Models, _ = acpPresentationSnapshot(snapshot)
+		resp.Modes, resp.ConfigOptions, _ = acpPresentationSnapshot(snapshot)
 		return resp, nil
 	}
 	if a.modes != nil {
@@ -367,13 +352,6 @@ func (a *RuntimeAgent) newSessionResponse(ctx context.Context, activeSession ses
 			return acp.NewSessionResponse{}, err
 		}
 		resp.ConfigOptions = options
-	}
-	if a.models != nil {
-		models, err := a.models.SessionModels(ctx, activeSession)
-		if err != nil {
-			return acp.NewSessionResponse{}, err
-		}
-		resp.Models = models
 	}
 	return resp, nil
 }
@@ -470,17 +448,7 @@ func (a *RuntimeAgent) LoadSession(ctx context.Context, req acp.LoadSessionReque
 		if err != nil {
 			return acp.LoadSessionResponse{}, err
 		}
-		resp.Modes, resp.ConfigOptions, resp.Models, _ = acpPresentationSnapshot(snapshot)
-	} else if a.models != nil {
-		session, err := a.session(ctx, req.SessionID)
-		if err != nil {
-			return acp.LoadSessionResponse{}, err
-		}
-		models, err := a.models.SessionModels(ctx, session)
-		if err != nil {
-			return acp.LoadSessionResponse{}, err
-		}
-		resp.Models = models
+		resp.Modes, resp.ConfigOptions, _ = acpPresentationSnapshot(snapshot)
 	}
 	return resp, nil
 }
@@ -501,7 +469,7 @@ func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionR
 		if err != nil {
 			return acp.ResumeSessionResponse{}, err
 		}
-		resp.Modes, resp.ConfigOptions, resp.Models, _ = acpPresentationSnapshot(snapshot)
+		resp.Modes, resp.ConfigOptions, _ = acpPresentationSnapshot(snapshot)
 		if claimManagedSession {
 			a.rememberManagedSession(activeSession)
 		}
@@ -520,13 +488,6 @@ func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionR
 			return acp.ResumeSessionResponse{}, err
 		}
 		resp.ConfigOptions = options
-	}
-	if a.models != nil {
-		models, err := a.models.SessionModels(ctx, activeSession)
-		if err != nil {
-			return acp.ResumeSessionResponse{}, err
-		}
-		resp.Models = models
 	}
 	if claimManagedSession {
 		a.rememberManagedSession(activeSession)
@@ -691,27 +652,6 @@ func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSe
 	return a.config.SetSessionConfigOption(ctx, req)
 }
 
-func (a *RuntimeAgent) SetSessionModel(ctx context.Context, req acp.SetSessionModelRequest) (acp.SetSessionModelResponse, error) {
-	if a.configurationClient != nil {
-		active, err := a.targetSession(ctx, req.SessionID)
-		if err != nil {
-			return acp.SetSessionModelResponse{}, err
-		}
-		result, err := a.configurationClient.UseSessionModel(ctx, appserver.SessionModelRequest{
-			WriteBase: acpSessionConfigurationWriteBase(active, "model"),
-			Model:     strings.TrimSpace(req.ModelID),
-		})
-		return acp.SetSessionModelResponse{}, requireCommittedACPConfiguration("set model", result, err)
-	}
-	if a.models == nil {
-		return acp.SetSessionModelResponse{}, acp.ErrCapabilityUnsupported
-	}
-	if _, err := a.targetSession(ctx, req.SessionID); err != nil {
-		return acp.SetSessionModelResponse{}, err
-	}
-	return a.models.SetSessionModel(ctx, req)
-}
-
 func acpSessionConfigurationWriteBase(active session.Session, action string) appserver.WriteBase {
 	revision := active.Revision
 	return appserver.WriteBase{
@@ -747,7 +687,7 @@ func (a *RuntimeAgent) AvailableCommands(ctx context.Context, sessionID string) 
 		if err != nil {
 			return nil, err
 		}
-		_, _, _, commands := acpPresentationSnapshot(snapshot)
+		_, _, commands := acpPresentationSnapshot(snapshot)
 		return commands, nil
 	}
 	if a.commands == nil {
@@ -1268,5 +1208,3 @@ func (l defaultSessionLoader) LoadSession(
 	}
 	return l.inner.LoadSession(ctx, req, cb)
 }
-
-var _ acp.Agent = (*RuntimeAgent)(nil)

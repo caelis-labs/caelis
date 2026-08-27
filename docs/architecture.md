@@ -68,17 +68,18 @@ Document responsibilities are intentionally separate:
 - `cmd/caelis`, `internal/cli`: process entry and mode selection.
 - `surfaces/tui`, `surfaces/headless`, `surfaces/acp`: concrete presentation
   entities. Product ACP owns both its AppServer-client assembly and stdio
-  transport adapter here; it receives the aggregate AppServer clients and no
-  Host, Runtime, Kernel, persistence, or assembly handle.
+  transport adapter here, including the connection-facing Agent dispatch
+  contract; it receives the aggregate AppServer clients and no Host, Runtime,
+  Kernel, persistence, or assembly handle.
 - `surfaces/internal/promptview`, `surfaces/internal/statusbar`,
   `surfaces/internal/transcript`: private shared presentation projection used
   by concrete Surfaces. These packages are not independent product surfaces or
   application-layer entry points.
 - `protocol/acp`: transitional ACP schema aliases/extensions, eventstream
   envelopes, projection helpers, compatibility handling, and documented
-  `_meta` contracts. It owns no new aggregate product boundary. Standard wire
-  and connection behavior comes from `acp-go-sdk`; residual packages migrate
-  by semantic owner.
+  `_meta` contracts. It owns no transport dispatch interfaces or new aggregate
+  product boundary. Standard method identities, wire contracts, and connection
+  behavior come from `acp-go-sdk`; residual packages migrate by semantic owner.
 - `agent-sdk/*`: reusable SDK package tree. It owns runtime, model, tool, session,
   sandbox, task, policy, skill, and display contracts and reusable
   implementations.
@@ -367,8 +368,11 @@ Document responsibilities are intentionally separate:
   ACP endpoint as the Session's main controller or project that endpoint's
   slash/model catalog. A legacy ACP-controller Session cannot be resumed or
   activated for work by the TUI. This presentation boundary is separate from
-  Caelis serving inbound ACP clients, whose model selection uses the ACP model
-  channel rather than a `/model` command.
+  Caelis serving inbound ACP clients, whose model selection uses the standard
+  ACP `model` configuration option rather than the retired `models` response
+  field, `session/set_model`, or a `/model` command. The external-Agent client
+  retains the old model channel only as a compatibility fallback for peers that
+  do not advertise a model configuration option.
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
   product integration adapters that make external endpoints implement the same
   SDK controller/participant contracts used by built-in Agents. Product
