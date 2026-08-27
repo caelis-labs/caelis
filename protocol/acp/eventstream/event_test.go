@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -132,8 +133,8 @@ func TestEnvelopeV1RequestPermissionGolden(t *testing.T) {
 				RawInput:      map[string]any{"command": "make test"},
 			},
 			Options: []schema.PermissionOption{
-				{OptionID: schema.PermAllowOnce, Name: "Allow once", Kind: schema.PermAllowOnce},
-				{OptionID: schema.PermRejectOnce, Name: "Reject", Kind: schema.PermRejectOnce},
+				{OptionID: string(acpsdk.PermissionOptionKindAllowOnce), Name: "Allow once", Kind: string(acpsdk.PermissionOptionKindAllowOnce)},
+				{OptionID: string(acpsdk.PermissionOptionKindRejectOnce), Name: "Reject", Kind: string(acpsdk.PermissionOptionKindRejectOnce)},
 			},
 			Meta: map[string]any{
 				"caelis": map[string]any{

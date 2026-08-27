@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -198,9 +199,9 @@ func scopedPermissionEnvelope(scopeID string) eventstream.Envelope {
 				Status:        &status,
 			},
 			Options: []acp.PermissionOption{{
-				OptionID: acp.PermAllowOnce,
+				OptionID: string(acpsdk.PermissionOptionKindAllowOnce),
 				Name:     "Allow once",
-				Kind:     acp.PermAllowOnce,
+				Kind:     string(acpsdk.PermissionOptionKindAllowOnce),
 			}},
 		},
 	}
@@ -308,7 +309,7 @@ func directPermissionEvent(sessionID string, scope *session.EventScope) *session
 		Protocol: &session.EventProtocol{Permission: &session.ProtocolApproval{
 			ToolCall: session.ProtocolToolCall{ID: "child-permission", Name: "Write", Status: "pending"},
 			Options: []session.ProtocolApprovalOption{{
-				ID: acp.PermAllowOnce, Name: "Allow once", Kind: acp.PermAllowOnce,
+				ID: string(acpsdk.PermissionOptionKindAllowOnce), Name: "Allow once", Kind: string(acpsdk.PermissionOptionKindAllowOnce),
 			}},
 		}},
 	}

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
@@ -696,7 +697,7 @@ type allowingRecordingCallbacks struct {
 
 func (c *allowingRecordingCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	return acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	}, nil
 }
 

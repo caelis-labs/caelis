@@ -36,13 +36,6 @@ const (
 	ToolKindOther   = "other"
 )
 
-const (
-	PermAllowOnce    = "allow_once"
-	PermAllowAlways  = "allow_always"
-	PermRejectOnce   = "reject_once"
-	PermRejectAlways = "reject_always"
-)
-
 // Update is the ACP wire union used by the product transport. The normalized
 // reusable semantics are owned by agent-sdk/session; protocol/acp/semantic is
 // the only codec boundary between those semantics and these wire DTOs.

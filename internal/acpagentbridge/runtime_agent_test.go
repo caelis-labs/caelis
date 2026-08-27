@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -745,7 +746,7 @@ func TestRuntimeAgentPromptAutoReviewUsesReviewerInsteadOfClientPermission(t *te
 	if reviewer.calls != 1 {
 		t.Fatalf("reviewer calls = %d, want 1", reviewer.calls)
 	}
-	if !runtime.response.Approved || runtime.response.OptionID != acp.PermAllowOnce {
+	if !runtime.response.Approved || runtime.response.OptionID != string(acpsdk.PermissionOptionKindAllowOnce) {
 		t.Fatalf("approval response = %#v, want approved allow_once", runtime.response)
 	}
 	if reviewer.last.Model == nil {
@@ -765,7 +766,7 @@ func TestRuntimeAgentPromptAutoReviewNormalizesTextAfterSelectedOption(t *testin
 	reviewResult := approval.ReviewResult{
 		Approved:      true,
 		Outcome:       string(approval.StatusApproved),
-		OptionID:      acp.PermRejectOnce,
+		OptionID:      string(acpsdk.PermissionOptionKindRejectOnce),
 		Risk:          "low",
 		Authorization: "explicit",
 		Rationale:     "model selected reject option",
@@ -799,7 +800,7 @@ func TestRuntimeAgentPromptAutoReviewNormalizesTextAfterSelectedOption(t *testin
 		t.Fatalf("Prompt() error = %v", err)
 	}
 
-	if runtime.response.Approved || runtime.response.OptionID != acp.PermRejectOnce {
+	if runtime.response.Approved || runtime.response.OptionID != string(acpsdk.PermissionOptionKindRejectOnce) {
 		t.Fatalf("approval response = %#v, want selected reject_once denial", runtime.response)
 	}
 	if !strings.Contains(runtime.response.ReviewText, "denied") {
@@ -852,7 +853,7 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 	if reviewer.calls != 0 {
 		t.Fatalf("reviewer calls = %d, want 0 under manual mode", reviewer.calls)
 	}
-	if !runtime.response.Approved || runtime.response.OptionID != acp.PermAllowOnce {
+	if !runtime.response.Approved || runtime.response.OptionID != string(acpsdk.PermissionOptionKindAllowOnce) {
 		t.Fatalf("approval response = %#v, want approved allow_once", runtime.response)
 	}
 }
@@ -1087,7 +1088,7 @@ func (c *recordingPromptCallbacks) SessionUpdate(_ context.Context, notification
 
 func (c *recordingPromptCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	return acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	}, nil
 }
 
@@ -1262,7 +1263,7 @@ func (c *permissionCountingCallbacks) RequestPermission(_ context.Context, req a
 	c.permissions++
 	c.last = req
 	return acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	}, nil
 }
 
@@ -1292,8 +1293,8 @@ func (r *approvalReviewRuntime) Run(ctx context.Context, req agent.RunRequest) (
 					},
 				},
 				Options: []session.ProtocolApprovalOption{
-					{ID: acp.PermAllowOnce, Name: "Allow once", Kind: "allow_once"},
-					{ID: acp.PermRejectOnce, Name: "Reject once", Kind: "reject_once"},
+					{ID: string(acpsdk.PermissionOptionKindAllowOnce), Name: "Allow once", Kind: string(acpsdk.PermissionOptionKindAllowOnce)},
+					{ID: string(acpsdk.PermissionOptionKindRejectOnce), Name: "Reject once", Kind: string(acpsdk.PermissionOptionKindRejectOnce)},
 				},
 			},
 		})

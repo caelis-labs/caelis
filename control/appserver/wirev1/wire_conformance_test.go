@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -37,7 +38,7 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		"PromptRequest":          appserver.PromptRequest{WriteBase: base, Input: "hello", DisplayInput: "hello", ContentParts: contentParts},
 		"SteerRequest":           appserver.SteerRequest{WriteBase: base, Target: target, ContentParts: contentParts},
 		"CancelRequest":          appserver.CancelRequest{WriteBase: base, Target: target, Reason: "stop"},
-		"ResolveApprovalRequest": appserver.ResolveApprovalRequest{WriteBase: base, Target: target, ApprovalRequestID: "approval-1", Outcome: "selected", OptionID: schema.PermAllowOnce, Approved: true},
+		"ResolveApprovalRequest": appserver.ResolveApprovalRequest{WriteBase: base, Target: target, ApprovalRequestID: "approval-1", Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce), Approved: true},
 		"SessionModeRequest":     appserver.SessionModeRequest{WriteBase: base, Mode: "manual"},
 		"SessionModelRequest": appserver.SessionModelRequest{
 			WriteBase: base, Model: "mimo", ReasoningEffort: "high",
@@ -163,7 +164,7 @@ func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 	permission.Permission = &schema.RequestPermissionRequest{
 		SessionID: "session-1",
 		ToolCall:  schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "tool-1", Title: &title},
-		Options:   []schema.PermissionOption{{OptionID: schema.PermAllowOnce, Name: "Allow once", Kind: schema.PermAllowOnce}},
+		Options:   []schema.PermissionOption{{OptionID: string(acpsdk.PermissionOptionKindAllowOnce), Name: "Allow once", Kind: string(acpsdk.PermissionOptionKindAllowOnce)}},
 	}
 	participant := baseEnvelope(eventstream.KindParticipant)
 	participant.Participant = &eventstream.Participant{State: "attached"}

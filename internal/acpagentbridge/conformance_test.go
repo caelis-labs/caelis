@@ -201,7 +201,7 @@ func TestRuntimeAgentConformanceReplayOrdering(t *testing.T) {
 		t.Fatalf("AppendEvent(assistant) error = %v", err)
 	}
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
 	if _, err := agent.LoadSession(ctx, acp.LoadSessionRequest{
 		SessionID: activeSession.SessionID,
@@ -217,7 +217,7 @@ func TestRuntimeAgentConformanceReplayOrdering(t *testing.T) {
 func TestRuntimeAgentConformancePromptOrdering(t *testing.T) {
 	agent, _ := newTestRuntimeAgent(t, staticModel{text: "ok"})
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
 	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
 	if err != nil {
@@ -241,7 +241,7 @@ func TestRuntimeAgentConformancePromptOrdering(t *testing.T) {
 func TestRuntimeAgentConformancePromptWithImageDoesNotEchoUserMessage(t *testing.T) {
 	agent, _ := newTestRuntimeAgent(t, staticModel{text: "ok", imageInput: true})
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
 	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
 	if err != nil {
@@ -297,7 +297,7 @@ func TestRuntimeAgentConformanceEmitsToolCallBeforeToolUpdate(t *testing.T) {
 	}
 	agent, _ := newTestRuntimeAgentWithTools(t, llm, []tool.Tool{echoTool})
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
 	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
 	if err != nil {
@@ -346,7 +346,7 @@ func TestRuntimeAgentConformanceEmitsRunCommandToolCallBeforeTerminalUpdates(t *
 	}
 	agent, _ := newTestRuntimeAgentWithTools(t, llm, []tool.Tool{runCommandTool})
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
 	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
 	if err != nil {
@@ -389,7 +389,7 @@ func TestRuntimeAgentConformanceEmitsRunCommandToolCallBeforeTerminalUpdates(t *
 func TestRuntimeAgentConformanceStreamsDeltasWithoutFinalDuplicate(t *testing.T) {
 	agent, _ := newTestRuntimeAgent(t, streamingTextModel{})
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
 	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
 	if err != nil {
@@ -414,7 +414,7 @@ func TestRuntimeAgentConformanceStreamsDeltasWithoutFinalDuplicate(t *testing.T)
 func TestRuntimeAgentConformanceForwardsAdjacentStreamChunksVerbatim(t *testing.T) {
 	agent, _ := newTestRuntimeAgent(t, duplicateStreamingTextModel{})
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
 	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
 	if err != nil {
@@ -441,7 +441,7 @@ func TestRuntimeAgentConformanceCancellation(t *testing.T) {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	rec := newPromptRecorder(acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
 	})
 	done := make(chan acp.PromptResponse, 1)
 	errs := make(chan error, 1)
