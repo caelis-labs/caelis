@@ -60,47 +60,6 @@ func TestTerminalMetaRoundTrip(t *testing.T) {
 	}
 }
 
-func TestNormalizeTerminalOutputConsumesCodexACPDeltaCompatibilityMeta(t *testing.T) {
-	t.Parallel()
-
-	meta := map[string]any{
-		TerminalOutputDeltaKey: map[string]any{
-			"terminal_id": "command-1",
-			"data":        "provider output\n",
-		},
-	}
-	normalized := NormalizeTerminalOutput(meta)
-	output, ok := TerminalOutput(normalized)
-	if !ok || output.TerminalID != "command-1" || output.Data != "provider output\n" {
-		t.Fatalf("normalized TerminalOutput() = %#v, %v; want codex-acp delta compatibility output", output, ok)
-	}
-	if _, ok := normalized[TerminalOutputDeltaKey]; ok {
-		t.Fatalf("NormalizeTerminalOutput() retained provider alias: %#v", normalized)
-	}
-	if _, ok := meta[TerminalOutputKey]; ok {
-		t.Fatalf("NormalizeTerminalOutput() mutated provider metadata: %#v", meta)
-	}
-}
-
-func TestNormalizeTerminalOutputDropsMalformedCompatibilityAlias(t *testing.T) {
-	t.Parallel()
-
-	meta := map[string]any{
-		TerminalOutputDeltaKey: map[string]any{"data": "missing terminal id\n"},
-		"kept":                 true,
-	}
-	normalized := NormalizeTerminalOutput(meta)
-	if _, ok := normalized[TerminalOutputDeltaKey]; ok {
-		t.Fatalf("NormalizeTerminalOutput() retained malformed provider alias: %#v", normalized)
-	}
-	if _, ok := TerminalOutput(normalized); ok || normalized["kept"] != true {
-		t.Fatalf("NormalizeTerminalOutput() = %#v, want unrelated metadata without terminal output", normalized)
-	}
-	if _, ok := meta[TerminalOutputDeltaKey]; !ok {
-		t.Fatalf("NormalizeTerminalOutput() mutated provider metadata: %#v", meta)
-	}
-}
-
 func TestCanonicalTerminalOutputWinsAndClearsProviderAlias(t *testing.T) {
 	t.Parallel()
 

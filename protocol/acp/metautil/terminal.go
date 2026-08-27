@@ -48,27 +48,6 @@ func WithTerminalOutput(meta map[string]any, terminalID string, data string) map
 	})
 }
 
-// NormalizeTerminalOutput converts the maintained codex-acp compatibility
-// extension into Caelis' canonical terminal output metadata. Provider-specific
-// keys are consumed at ACP ingress and must not flow into projection, replay,
-// or Surface deduplication paths.
-func NormalizeTerminalOutput(meta map[string]any) map[string]any {
-	out := CloneMap(meta)
-	if output, ok := terminalOutputAt(out, TerminalOutputKey); ok {
-		delete(out, TerminalOutputDeltaKey)
-		return WithTerminalOutput(out, output.TerminalID, output.Data)
-	}
-	output, ok := terminalOutputAt(out, TerminalOutputDeltaKey)
-	delete(out, TerminalOutputDeltaKey)
-	if !ok {
-		if len(out) == 0 {
-			return nil
-		}
-		return out
-	}
-	return WithTerminalOutput(out, output.TerminalID, output.Data)
-}
-
 // WithoutTerminalOutput removes canonical terminal output and every maintained
 // provider alias so a suppressed payload cannot reappear through fallback
 // lookup after another layer has removed the canonical key.

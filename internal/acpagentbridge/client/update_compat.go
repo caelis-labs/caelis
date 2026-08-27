@@ -17,7 +17,7 @@ const (
 func NormalizeInboundUpdate(update Update) Update {
 	switch typed := update.(type) {
 	case ContentChunk:
-		typed.Meta = metautil.NormalizeTerminalOutput(typed.Meta)
+		typed.Meta = normalizeInboundTerminalOutput(typed.Meta)
 		return typed
 	case ToolCall:
 		typed.Meta, typed.Kind = normalizeInboundToolDisplay(typed.Meta, typed.Kind)
@@ -83,8 +83,39 @@ func grokStandardToolKind(provider map[string]any) (string, bool) {
 }
 
 func normalizeInboundToolMeta(meta map[string]any) map[string]any {
-	meta = metautil.NormalizeTerminalOutput(meta)
+	meta = normalizeInboundTerminalOutput(meta)
 	return metautil.WithoutSectionKeys(meta, metautil.Display, metautil.DisplayExplorationVerb)
+}
+
+// normalizeInboundTerminalOutput consumes the maintained codex-acp alias at
+// the external-Agent ingress boundary. Provider-specific keys must not flow
+// into canonical projection, replay, or Surface deduplication paths.
+func normalizeInboundTerminalOutput(meta map[string]any) map[string]any {
+	out := metautil.CloneMap(meta)
+	if output, ok := metautil.TerminalOutput(out); ok {
+		delete(out, metautil.TerminalOutputDeltaKey)
+		return metautil.WithTerminalOutput(out, output.TerminalID, output.Data)
+	}
+	output, ok := inboundTerminalOutputAlias(out)
+	delete(out, metautil.TerminalOutputDeltaKey)
+	if !ok {
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	return metautil.WithTerminalOutput(out, output.TerminalID, output.Data)
+}
+
+func inboundTerminalOutputAlias(meta map[string]any) (metautil.TerminalOutputMeta, bool) {
+	values, _ := meta[metautil.TerminalOutputDeltaKey].(map[string]any)
+	terminalID, _ := values["terminal_id"].(string)
+	data, _ := values["data"].(string)
+	terminalID = strings.TrimSpace(terminalID)
+	if terminalID == "" || data == "" {
+		return metautil.TerminalOutputMeta{}, false
+	}
+	return metautil.TerminalOutputMeta{TerminalID: terminalID, Data: data}, true
 }
 
 func providerToolMeta(meta map[string]any) map[string]any {

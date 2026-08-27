@@ -83,7 +83,7 @@ func WithSection(meta map[string]any, section string, values map[string]any) map
 		sectionMap = map[string]any{}
 	}
 	for key, value := range values {
-		sectionMap[key] = CloneAny(value)
+		sectionMap[key] = cloneAny(value)
 	}
 	caelis[section] = sectionMap
 	out[Root] = caelis
@@ -205,7 +205,7 @@ func WithRuntimeSection(meta map[string]any, section string, values map[string]a
 		sectionMap = map[string]any{}
 	}
 	for key, value := range values {
-		sectionMap[key] = CloneAny(value)
+		sectionMap[key] = cloneAny(value)
 	}
 	runtime[section] = sectionMap
 	caelis[Runtime] = runtime
@@ -234,7 +234,7 @@ func compactRuntimeValues(values map[string]any) map[string]any {
 			continue
 		}
 		if value != nil {
-			out[key] = CloneAny(value)
+			out[key] = cloneAny(value)
 		}
 	}
 	if len(out) == 0 {
@@ -331,19 +331,19 @@ func Merge(base map[string]any, extra map[string]any) map[string]any {
 				continue
 			}
 		}
-		out[key] = CloneAny(value)
+		out[key] = cloneAny(value)
 	}
 	return out
 }
 
-func CloneAny(value any) any {
+func cloneAny(value any) any {
 	switch typed := value.(type) {
 	case map[string]any:
 		return CloneMap(typed)
 	case []any:
 		out := make([]any, len(typed))
 		for i, item := range typed {
-			out[i] = CloneAny(item)
+			out[i] = cloneAny(item)
 		}
 		return out
 	default:
@@ -357,7 +357,7 @@ func CloneMap(in map[string]any) map[string]any {
 	}
 	out := maps.Clone(in)
 	for key, value := range out {
-		out[key] = CloneAny(value)
+		out[key] = cloneAny(value)
 	}
 	return out
 }

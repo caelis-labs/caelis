@@ -8,6 +8,67 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
+func TestNormalizeInboundUpdateConsumesTerminalOutputCompatibilityAlias(t *testing.T) {
+	t.Parallel()
+
+	meta := map[string]any{
+		metautil.TerminalOutputDeltaKey: map[string]any{
+			"terminal_id": "command-1",
+			"data":        "provider output\n",
+		},
+	}
+	normalized := NormalizeInboundUpdate(ContentChunk{Meta: meta}).(ContentChunk)
+	output, ok := metautil.TerminalOutput(normalized.Meta)
+	if !ok || output.TerminalID != "command-1" || output.Data != "provider output\n" {
+		t.Fatalf("normalized terminal output = %#v, %v; want codex-acp compatibility output", output, ok)
+	}
+	if _, ok := normalized.Meta[metautil.TerminalOutputDeltaKey]; ok {
+		t.Fatalf("NormalizeInboundUpdate() retained provider alias: %#v", normalized.Meta)
+	}
+	if _, ok := meta[metautil.TerminalOutputKey]; ok {
+		t.Fatalf("NormalizeInboundUpdate() mutated provider metadata: %#v", meta)
+	}
+}
+
+func TestNormalizeInboundUpdateDropsMalformedTerminalOutputCompatibilityAlias(t *testing.T) {
+	t.Parallel()
+
+	meta := map[string]any{
+		metautil.TerminalOutputDeltaKey: map[string]any{"data": "missing terminal id\n"},
+		"kept":                          true,
+	}
+	normalized := NormalizeInboundUpdate(ContentChunk{Meta: meta}).(ContentChunk)
+	if _, ok := normalized.Meta[metautil.TerminalOutputDeltaKey]; ok {
+		t.Fatalf("NormalizeInboundUpdate() retained malformed provider alias: %#v", normalized.Meta)
+	}
+	if _, ok := metautil.TerminalOutput(normalized.Meta); ok || normalized.Meta["kept"] != true {
+		t.Fatalf("NormalizeInboundUpdate() metadata = %#v, want unrelated metadata without terminal output", normalized.Meta)
+	}
+	if _, ok := meta[metautil.TerminalOutputDeltaKey]; !ok {
+		t.Fatalf("NormalizeInboundUpdate() mutated provider metadata: %#v", meta)
+	}
+}
+
+func TestNormalizeInboundUpdateCanonicalTerminalOutputWinsOverCompatibilityAlias(t *testing.T) {
+	t.Parallel()
+
+	normalized := NormalizeInboundUpdate(ContentChunk{Meta: map[string]any{
+		metautil.TerminalOutputKey: map[string]any{
+			"terminal_id": "command-1", "data": "canonical output\n",
+		},
+		metautil.TerminalOutputDeltaKey: map[string]any{
+			"terminal_id": "command-1", "data": "stale provider output\n",
+		},
+	}}).(ContentChunk)
+	output, ok := metautil.TerminalOutput(normalized.Meta)
+	if !ok || output.Data != "canonical output\n" {
+		t.Fatalf("normalized terminal output = %#v, %v; want canonical output", output, ok)
+	}
+	if _, ok := normalized.Meta[metautil.TerminalOutputDeltaKey]; ok {
+		t.Fatalf("NormalizeInboundUpdate() retained provider alias: %#v", normalized.Meta)
+	}
+}
+
 func TestNormalizeInboundUpdateExtendsGrokListWithoutForgingToolIdentity(t *testing.T) {
 	t.Parallel()
 
