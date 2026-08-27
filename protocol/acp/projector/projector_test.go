@@ -12,7 +12,7 @@ import (
 )
 
 func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
@@ -48,7 +48,7 @@ func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
 func TestEventProjectorDoesNotPromoteTraceTextIntoSparseToolUpdateContent(t *testing.T) {
 	t.Parallel()
 
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
 		Text:      "tool update",
@@ -119,7 +119,7 @@ func TestProjectPermissionRequestUsesDurablePermissionAfterRoundTrip(t *testing.
 		t.Fatalf("decoded protocol = %#v, want durable permission", decoded.Protocol)
 	}
 
-	req, ok, err := (EventProjector{}).ProjectPermissionRequest(&decoded)
+	req, ok, err := projectPermissionRequest(&decoded)
 	if err != nil {
 		t.Fatalf("ProjectPermissionRequest() error = %v", err)
 	}
@@ -140,7 +140,7 @@ func TestProjectPermissionRequestUsesDurablePermissionAfterRoundTrip(t *testing.
 }
 
 func TestEventProjectorRemapsBuiltinTerminalContentToDisplayID(t *testing.T) {
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
@@ -211,7 +211,7 @@ func assertTerminalExit(t *testing.T, meta map[string]any, terminalID string) {
 }
 
 func TestEventProjectorConcatenatesMultipleTerminalContentItems(t *testing.T) {
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
@@ -245,7 +245,7 @@ func TestEventProjectorConcatenatesMultipleTerminalContentItems(t *testing.T) {
 }
 
 func TestEventProjectorKeepsGenericProtocolTerminalContentWithoutPromotingExecuteKind(t *testing.T) {
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
@@ -298,7 +298,7 @@ func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
 	if userEvent.Message == nil {
 		t.Fatalf("canonical user event = %#v, want durable message", userEvent)
 	}
-	userUpdates, err := (EventProjector{}).ProjectEvent(userEvent)
+	userUpdates, err := ProjectEvent(userEvent)
 	if err != nil {
 		t.Fatalf("ProjectEvent(user) error = %v", err)
 	}
@@ -322,7 +322,7 @@ func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
 	if assistantEvent.Message == nil {
 		t.Fatalf("canonical assistant event = %#v, want durable message", assistantEvent)
 	}
-	assistantUpdates, err := (EventProjector{}).ProjectEvent(assistantEvent)
+	assistantUpdates, err := ProjectEvent(assistantEvent)
 	if err != nil {
 		t.Fatalf("ProjectEvent(assistant) error = %v", err)
 	}
@@ -350,7 +350,7 @@ func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
 		Type:      session.EventTypeAssistant,
 		Message:   &reasoningOnly,
 	})
-	reasoningUpdates, err := (EventProjector{}).ProjectEvent(reasoningEvent)
+	reasoningUpdates, err := ProjectEvent(reasoningEvent)
 	if err != nil {
 		t.Fatalf("ProjectEvent(reasoning-only) error = %v", err)
 	}
@@ -367,7 +367,7 @@ func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
 		Type:      session.EventTypeSystem,
 		Message:   &systemMessage,
 	})
-	systemUpdates, err := (EventProjector{}).ProjectEvent(systemEvent)
+	systemUpdates, err := ProjectEvent(systemEvent)
 	if err != nil {
 		t.Fatalf("ProjectEvent(system) error = %v", err)
 	}
@@ -377,7 +377,7 @@ func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
 }
 
 func TestEventProjectorSplitsProtocolAssistantSnapshotReasoning(t *testing.T) {
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeAssistant,
 		Text:      "partial answer",
@@ -430,7 +430,7 @@ func TestEventProjectorProjectsDurableContentChunkMessageIDAndMeta(t *testing.T)
 			},
 		},
 	})
-	updates, err := (EventProjector{}).ProjectEvent(event)
+	updates, err := ProjectEvent(event)
 	if err != nil {
 		t.Fatalf("ProjectEvent() error = %v", err)
 	}
@@ -468,7 +468,7 @@ func TestEventProjectorDoesNotAttachMismatchedProtocolMetaToAssistantChunk(t *te
 			},
 		},
 	})
-	updates, err := (EventProjector{}).ProjectEvent(event)
+	updates, err := ProjectEvent(event)
 	if err != nil {
 		t.Fatalf("ProjectEvent() error = %v", err)
 	}
@@ -499,7 +499,7 @@ func TestEventProjectorProjectsCompactCheckpoint(t *testing.T) {
 		Type:      session.EventTypeCompact,
 		Message:   &compactMessage,
 	})
-	updates, err := (EventProjector{}).ProjectEvent(event)
+	updates, err := ProjectEvent(event)
 	if err != nil {
 		t.Fatalf("ProjectEvent(compact) error = %v", err)
 	}
@@ -545,7 +545,7 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 	if callEvent.Tool == nil || callEvent.Message == nil {
 		t.Fatalf("canonical tool call event = %#v, want durable message and tool", callEvent)
 	}
-	callUpdates, err := (EventProjector{}).ProjectEvent(callEvent)
+	callUpdates, err := ProjectEvent(callEvent)
 	if err != nil {
 		t.Fatalf("ProjectEvent(tool call) error = %v", err)
 	}
@@ -608,7 +608,7 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 	if resultEvent.Tool == nil || resultEvent.Message == nil {
 		t.Fatalf("canonical tool result event = %#v, want durable message and tool", resultEvent)
 	}
-	resultUpdates, err := (EventProjector{}).ProjectEvent(resultEvent)
+	resultUpdates, err := ProjectEvent(resultEvent)
 	if err != nil {
 		t.Fatalf("ProjectEvent(tool result) error = %v", err)
 	}
@@ -649,7 +649,7 @@ func TestEventProjectorProjectsPlanPayload(t *testing.T) {
 	if event.PlanPayload == nil {
 		t.Fatalf("canonical plan event = %#v, want plan payload", event)
 	}
-	updates, err := (EventProjector{}).ProjectEvent(event)
+	updates, err := ProjectEvent(event)
 	if err != nil {
 		t.Fatalf("ProjectEvent(plan) error = %v", err)
 	}
@@ -672,7 +672,7 @@ func TestEventProjectorProjectsPlanPayload(t *testing.T) {
 }
 
 func TestEventProjectorPreservesExplicitEmptyPlanUpdate(t *testing.T) {
-	updates, err := (EventProjector{}).ProjectEvent(session.CanonicalizeEvent(&session.Event{
+	updates, err := ProjectEvent(session.CanonicalizeEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypePlan,
 		Protocol: &session.EventProtocol{
@@ -698,7 +698,7 @@ func TestEventProjectorPreservesExplicitEmptyPlanUpdate(t *testing.T) {
 }
 
 func TestEventProjectorPreservesPartialProtocolToolUpdate(t *testing.T) {
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
@@ -731,7 +731,7 @@ func TestEventProjectorPreservesPartialProtocolToolUpdate(t *testing.T) {
 }
 
 func TestEventProjectorUpdateSerializesAsPartialNotification(t *testing.T) {
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
@@ -767,7 +767,7 @@ func TestEventProjectorUpdateSerializesAsPartialNotification(t *testing.T) {
 
 func TestEventProjectorPreservesStandardDiffContent(t *testing.T) {
 	oldText := "old line\n"
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
@@ -863,7 +863,7 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			updates, err := (EventProjector{}).ProjectEvent(tt.event)
+			updates, err := ProjectEvent(tt.event)
 			if err != nil {
 				t.Fatalf("ProjectEvent() error = %v", err)
 			}
@@ -898,7 +898,7 @@ func TestEventProjectorProjectsCanonicalAssistantMessageWithToolCalls(t *testing
 		Name: "ECHO",
 		Args: `{"value":"done"}`,
 	}})
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
 		Message:   &message,
@@ -936,7 +936,7 @@ func TestEventProjectorProjectsCanonicalAssistantMessageWithToolCalls(t *testing
 }
 
 func TestEventProjectorDoesNotInferSpawnIdentityFromRawInput(t *testing.T) {
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
@@ -977,7 +977,7 @@ func TestEventProjectorDoesNotInferSpawnIdentityFromRawInput(t *testing.T) {
 }
 
 func TestEventProjectorDoesNotAddTerminalInfoToGenericRunningToolUpdate(t *testing.T) {
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
@@ -1029,7 +1029,7 @@ func TestEventProjectorProjectsRunCommandDisplayTerminalMetadata(t *testing.T) {
 		Name: "RunCommand",
 		Args: `{"command":"echo hi","workdir":"/tmp/work"}`,
 	}})
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
 		Message:   &message,
@@ -1065,7 +1065,7 @@ func TestEventProjectorProjectsRunCommandDisplayTerminalMetadata(t *testing.T) {
 
 func TestEventProjectorPreservesReasoningBoundaryWhitespace(t *testing.T) {
 	message := model.NewReasoningMessage(model.RoleAssistant, "think ", model.ReasoningVisibilityVisible)
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeAssistant,
 		Message:   &message,

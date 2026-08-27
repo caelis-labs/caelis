@@ -24,7 +24,7 @@ func TestProtocolToolUpdateProjectionClonesAndPreservesWireFields(t *testing.T) 
 		Locations: []session.ProtocolToolCallLocation{{Path: " README.md ", Line: &line}},
 		Meta:      map[string]any{"nested": map[string]any{"value": "before"}},
 	}
-	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+	updates, err := ProjectEvent(&session.Event{
 		Type:     session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{Update: protocolUpdate},
 	})

@@ -19,20 +19,14 @@ import (
 // ACP-native client envelopes using the supplied envelope metadata as the
 // transport context.
 func ProjectSessionEventEnvelope(base eventstream.Envelope, event *session.Event) []eventstream.Envelope {
-	return ProjectSessionEventEnvelopeWithProjector(base, event, EventProjector{})
+	return projectSessionEventEnvelope(base, event)
 }
 
 // ProjectSessionEventLiveSupplementEnvelope projects a canonical final while
 // omitting only the content streams with a separate live incremental owner.
 // Final state, usage, and unowned content streams still flow.
 func ProjectSessionEventLiveSupplementEnvelope(base eventstream.Envelope, event *session.Event, published agentsdk.PublishedContent) []eventstream.Envelope {
-	return ProjectSessionEventLiveSupplementEnvelopeWithProjector(base, event, EventProjector{}, published)
-}
-
-// ProjectSessionEventLiveSupplementEnvelopeWithProjector is the caller-supplied
-// projector variant of ProjectSessionEventLiveSupplementEnvelope.
-func ProjectSessionEventLiveSupplementEnvelopeWithProjector(base eventstream.Envelope, event *session.Event, projector Projector, published agentsdk.PublishedContent) []eventstream.Envelope {
-	out := ProjectSessionEventEnvelopeWithProjector(base, event, projector)
+	out := projectSessionEventEnvelope(base, event)
 	if !SessionEventFinal(event) {
 		return out
 	}
@@ -261,14 +255,8 @@ func sessionEventTurnID(event *session.Event) string {
 	return strings.TrimSpace(event.Scope.TurnID)
 }
 
-// ProjectSessionEventEnvelopeWithProjector projects one canonical session event
-// with a caller-supplied ACP projector, then appends standard usage_update when
-// provider usage is attached to the source event.
-func ProjectSessionEventEnvelopeWithProjector(base eventstream.Envelope, event *session.Event, projector Projector) []eventstream.Envelope {
-	if projector == nil {
-		projector = EventProjector{}
-	}
-	out := projectSessionEventToACPEnvelopes(base, event, projector)
+func projectSessionEventEnvelope(base eventstream.Envelope, event *session.Event) []eventstream.Envelope {
+	out := projectSessionEventToACPEnvelopes(base, event)
 	if len(out) == 0 {
 		out = append(out, projectSessionEventstreamOnlyEvents(base, event)...)
 	}
@@ -315,9 +303,9 @@ func demoteUnpositionedDurableProjections(events []eventstream.Envelope) []event
 	return out
 }
 
-func projectSessionEventToACPEnvelopes(base eventstream.Envelope, sessionEvent *session.Event, projector Projector) []eventstream.Envelope {
+func projectSessionEventToACPEnvelopes(base eventstream.Envelope, sessionEvent *session.Event) []eventstream.Envelope {
 	out := make([]eventstream.Envelope, 0, 2)
-	if permission, ok, err := projector.ProjectPermissionRequest(sessionEvent); err != nil {
+	if permission, ok, err := projectPermissionRequest(sessionEvent); err != nil {
 		return []eventstream.Envelope{eventstream.Error(err)}
 	} else if ok && permission != nil {
 		next := base
@@ -329,7 +317,7 @@ func projectSessionEventToACPEnvelopes(base eventstream.Envelope, sessionEvent *
 		next.Permission = permission
 		out = append(out, next)
 	}
-	updates, err := projector.ProjectEvent(sessionEvent)
+	updates, err := ProjectEvent(sessionEvent)
 	if err != nil {
 		return []eventstream.Envelope{eventstream.Error(err)}
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -17,8 +18,7 @@ func ptrStr(s string) *string { return &s }
 func TestRegressionACPProjectorGoldenTerminalOutput(t *testing.T) {
 	t.Parallel()
 
-	p := projector.EventProjector{}
-	updates, err := p.ProjectEvent(&session.Event{
+	updates, err := projector.ProjectEvent(&session.Event{
 		SessionID: "sess-1",
 		Type:      session.EventTypeToolResult,
 		Tool: &session.EventTool{
@@ -73,9 +73,8 @@ func TestRegressionACPProjectorGoldenTerminalOutput(t *testing.T) {
 func TestRegressionACPProjectorGoldenDiffTitle(t *testing.T) {
 	t.Parallel()
 
-	p := projector.EventProjector{}
 	oldText := "line 1\nline 2\nline 3\n"
-	updates, err := p.ProjectEvent(&session.Event{
+	updates, err := projector.ProjectEvent(&session.Event{
 		SessionID: "sess-1",
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
@@ -115,8 +114,7 @@ func TestRegressionACPProjectorGoldenDiffTitle(t *testing.T) {
 func TestRegressionACPProjectorGoldenApprovalRequest(t *testing.T) {
 	t.Parallel()
 
-	p := projector.EventProjector{}
-	updates, err := p.ProjectEvent(&session.Event{
+	updates, err := projector.ProjectEvent(&session.Event{
 		SessionID: "sess-1",
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
@@ -154,8 +152,6 @@ func TestRegressionACPProjectorGoldenApprovalRequest(t *testing.T) {
 func TestRegressionACPProjectorGoldenLifecycleStatusMapping(t *testing.T) {
 	t.Parallel()
 
-	p := projector.EventProjector{}
-
 	statusTests := []struct {
 		name       string
 		status     string
@@ -175,7 +171,7 @@ func TestRegressionACPProjectorGoldenLifecycleStatusMapping(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			updates, err := p.ProjectEvent(&session.Event{
+			updates, err := projector.ProjectEvent(&session.Event{
 				SessionID: "sess-1",
 				Type:      session.EventTypeToolResult,
 				Protocol: &session.EventProtocol{
@@ -210,8 +206,7 @@ func TestRegressionACPProjectorGoldenLifecycleStatusMapping(t *testing.T) {
 func TestRegressionACPProjectorGoldenAssistantMessage(t *testing.T) {
 	t.Parallel()
 
-	p := projector.EventProjector{}
-	updates, err := p.ProjectEvent(&session.Event{
+	updates, err := projector.ProjectEvent(&session.Event{
 		SessionID: "sess-1",
 		Type:      session.EventTypeAssistant,
 		Protocol: &session.EventProtocol{
@@ -274,8 +269,7 @@ func TestRegressionACPProjectorTUIFormatGolden(t *testing.T) {
 func TestRegressionACPProjectorPermissionRequest(t *testing.T) {
 	t.Parallel()
 
-	p := projector.EventProjector{}
-	req, ok, err := p.ProjectPermissionRequest(&session.Event{
+	projected := projector.ProjectSessionEventEnvelope(eventstream.Envelope{}, &session.Event{
 		SessionID: "sess-1",
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
@@ -292,12 +286,10 @@ func TestRegressionACPProjectorPermissionRequest(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("ProjectPermissionRequest() error = %v", err)
+	if len(projected) != 1 || projected[0].Kind != eventstream.KindRequestPermission || projected[0].Permission == nil {
+		t.Fatalf("ProjectSessionEventEnvelope() = %#v, want one permission request", projected)
 	}
-	if !ok {
-		t.Fatal("ProjectPermissionRequest() ok = false, want true for approval event")
-	}
+	req := projected[0].Permission
 	if req.SessionID != "sess-1" {
 		t.Fatalf("session_id = %q, want sess-1", req.SessionID)
 	}

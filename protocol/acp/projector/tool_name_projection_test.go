@@ -58,7 +58,7 @@ func TestEventProjectorProjectsEventToolSemanticNameInStandardNotifications(t *t
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			updates, err := (EventProjector{}).ProjectEvent(tt.event)
+			updates, err := ProjectEvent(tt.event)
 			if err != nil {
 				t.Fatalf("ProjectEvent() error = %v", err)
 			}
@@ -125,7 +125,7 @@ func TestEventProjectorProjectsProtocolToolSemanticNameWithoutEventMetaLeak(t *t
 				event.Protocol.Update.Status = schema.ToolStatusCompleted
 			}
 
-			updates, err := (EventProjector{}).ProjectEvent(event)
+			updates, err := ProjectEvent(event)
 			if err != nil {
 				t.Fatalf("ProjectEvent() error = %v", err)
 			}

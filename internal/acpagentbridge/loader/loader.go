@@ -28,7 +28,6 @@ type configReader interface {
 // backed by the SDK session service.
 type SessionServiceLoaderConfig struct {
 	Sessions     session.Service
-	Projector    projector.Projector
 	AppName      string
 	UserID       string
 	WorkspaceKey string
@@ -40,7 +39,6 @@ type SessionServiceLoaderConfig struct {
 // session/update notifications.
 type SessionServiceLoader struct {
 	sessions     session.Service
-	projector    projector.Projector
 	appName      string
 	userID       string
 	workspaceKey string
@@ -50,13 +48,8 @@ type SessionServiceLoader struct {
 
 // NewSessionServiceLoader constructs one default session/load adapter.
 func NewSessionServiceLoader(cfg SessionServiceLoaderConfig) *SessionServiceLoader {
-	eventProjector := cfg.Projector
-	if eventProjector == nil {
-		eventProjector = projector.EventProjector{}
-	}
 	return &SessionServiceLoader{
 		sessions:     cfg.Sessions,
-		projector:    eventProjector,
 		appName:      strings.TrimSpace(cfg.AppName),
 		userID:       strings.TrimSpace(cfg.UserID),
 		workspaceKey: strings.TrimSpace(cfg.WorkspaceKey),
@@ -100,7 +93,7 @@ func (l *SessionServiceLoader) LoadSession(
 				continue
 			}
 			base := projector.EnvelopeBaseFromSessionEvent(loaded.Session.SessionRef, event, projector.SessionEventTransport{})
-			notifications, err := projectSessionEventNotifications(strings.TrimSpace(string(req.SessionId)), event, l.projector)
+			notifications, err := projectSessionEventNotifications(strings.TrimSpace(string(req.SessionId)), event)
 			if err != nil {
 				return acpsdk.LoadSessionResponse{}, err
 			}

@@ -113,7 +113,7 @@ func TestBuiltInProjectionAndExternalIngressRoundTripShareSemantics(t *testing.T
 	}
 
 	for _, event := range events {
-		updates, err := (projector.EventProjector{}).ProjectEvent(event)
+		updates, err := projector.ProjectEvent(event)
 		if err != nil {
 			t.Fatalf("ProjectEvent(%s) error = %v", event.Type, err)
 		}
@@ -129,7 +129,7 @@ func TestBuiltInProjectionAndExternalIngressRoundTripShareSemantics(t *testing.T
 		if ingressEvent == nil {
 			t.Fatalf("NormalizeUpdate(external %s) = nil", event.Type)
 		}
-		roundTrip, err := (projector.EventProjector{}).ProjectEvent(ingressEvent)
+		roundTrip, err := projector.ProjectEvent(ingressEvent)
 		if err != nil || len(roundTrip) != 1 {
 			t.Fatalf("ProjectEvent(external %s) = %#v, %v; want one update", event.Type, roundTrip, err)
 		}

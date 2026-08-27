@@ -12,11 +12,8 @@ import (
 // projectSessionEventNotifications owns the session/load-specific wrapping of
 // durable events as ACP notifications. Eventstream-only extensions and stored
 // permission prompts are intentionally not replayed through this adapter.
-func projectSessionEventNotifications(fallbackSessionID string, event *session.Event, eventProjector projector.Projector) ([]schema.SessionNotification, error) {
-	if eventProjector == nil {
-		eventProjector = projector.EventProjector{}
-	}
-	updates, err := eventProjector.ProjectEvent(event)
+func projectSessionEventNotifications(fallbackSessionID string, event *session.Event) ([]schema.SessionNotification, error) {
+	updates, err := projector.ProjectEvent(event)
 	if err != nil {
 		return nil, err
 	}

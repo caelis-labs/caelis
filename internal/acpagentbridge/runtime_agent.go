@@ -62,7 +62,6 @@ type Config struct {
 	// and does not expose Runtime, Stack, or ACP surface providers.
 	PresentationClient appserver.PresentationClient
 	BuildAgentSpec     BuildAgentSpecFunc
-	Projector          projector.Projector
 	Loader             SessionLoader
 	Modes              SessionModeReader
 	ModeWriter         SessionModeWriter
@@ -107,7 +106,6 @@ type RuntimeAgent struct {
 	configurationClient   appserver.ConfigurationClient
 	presentationClient    appserver.PresentationClient
 	buildAgentSpec        BuildAgentSpecFunc
-	projector             projector.Projector
 	loader                SessionLoader
 	modes                 SessionModeReader
 	modeWriter            SessionModeWriter
@@ -154,10 +152,6 @@ func New(cfg Config) (*RuntimeAgent, error) {
 	if cfg.PromptRouterFactory != nil && cfg.SlashResultFormatter == nil {
 		return nil, errors.New("internal/acpagentbridge: slash result formatter is required with prompt router factory")
 	}
-	eventProjector := cfg.Projector
-	if eventProjector == nil {
-		eventProjector = projector.EventProjector{}
-	}
 	appName := strings.TrimSpace(cfg.AppName)
 	if appName == "" {
 		appName = "caelis"
@@ -170,7 +164,6 @@ func New(cfg Config) (*RuntimeAgent, error) {
 	if sessionLoader == nil && cfg.SessionClient == nil {
 		sessionLoader = defaultSessionLoader{inner: loader.NewSessionServiceLoader(loader.SessionServiceLoaderConfig{
 			Sessions:     cfg.Sessions,
-			Projector:    eventProjector,
 			AppName:      appName,
 			UserID:       userID,
 			WorkspaceKey: strings.TrimSpace(cfg.WorkspaceKey),
@@ -197,7 +190,6 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		configurationClient:   cfg.ConfigurationClient,
 		presentationClient:    cfg.PresentationClient,
 		buildAgentSpec:        cfg.BuildAgentSpec,
-		projector:             eventProjector,
 		loader:                sessionLoader,
 		modes:                 cfg.Modes,
 		modeWriter:            cfg.ModeWriter,
@@ -868,12 +860,11 @@ func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, 
 				// only deliverable terminal-content source.
 				published &^= agent.PublishedTerminal
 			}
-			projected := projector.ProjectSessionEventEnvelopeWithProjector(base, item.event, a.projector)
+			projected := projector.ProjectSessionEventEnvelope(base, item.event)
 			if published != 0 {
-				projected = projector.ProjectSessionEventLiveSupplementEnvelopeWithProjector(
+				projected = projector.ProjectSessionEventLiveSupplementEnvelope(
 					base,
 					item.event,
-					a.projector,
 					published,
 				)
 			}

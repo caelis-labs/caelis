@@ -20,7 +20,7 @@ func TestEventProjectorAddsStructuredCitationsToAgentMessageMeta(t *testing.T) {
 			URL:   "https://example.com/source",
 		}},
 	}}))
-	updates, err := (EventProjector{}).ProjectEvent(session.CanonicalizeEvent(&session.Event{
+	updates, err := ProjectEvent(session.CanonicalizeEvent(&session.Event{
 		Type:    session.EventTypeAssistant,
 		Message: &message,
 	}))

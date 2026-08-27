@@ -11,23 +11,12 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
-// Projector converts canonical session events into ACP-compatible updates and
-// request_permission payloads.
-type Projector interface {
-	ProjectEvent(*session.Event) ([]schema.Update, error)
-	ProjectPermissionRequest(*session.Event) (*schema.RequestPermissionRequest, bool, error)
-}
-
-// EventProjector is the baseline ACP projection implementation for canonical
-// SDK session events.
-type EventProjector struct{}
-
 // ProjectEvent converts one canonical event into ACP-compatible update payloads.
-func (EventProjector) ProjectEvent(event *session.Event) ([]schema.Update, error) {
+func ProjectEvent(event *session.Event) ([]schema.Update, error) {
 	if event == nil {
 		return nil, nil
 	}
-	if _, ok, err := (EventProjector{}).ProjectPermissionRequest(event); err != nil {
+	if _, ok, err := projectPermissionRequest(event); err != nil {
 		return nil, err
 	} else if ok {
 		return nil, nil
@@ -39,9 +28,7 @@ func (EventProjector) ProjectEvent(event *session.Event) ([]schema.Update, error
 	return inferredUpdates(event), nil
 }
 
-// ProjectPermissionRequest converts one canonical approval event into one
-// ACP-compatible session/request_permission payload.
-func (EventProjector) ProjectPermissionRequest(event *session.Event) (*schema.RequestPermissionRequest, bool, error) {
+func projectPermissionRequest(event *session.Event) (*schema.RequestPermissionRequest, bool, error) {
 	if event == nil || event.Protocol == nil {
 		return nil, false, nil
 	}
