@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type ApprovalPolicy string
@@ -165,7 +166,7 @@ func runSessionOnce(
 					cancelTurn("headless context cancelled")
 					continue
 				}
-				payload := projector.ApprovalPayloadFromPermission(env.Permission)
+				payload := approvalPayloadFromPermission(env.Permission)
 				approvalReq := ApprovalRequest{RequestID: env.ApprovalRequestID, Payload: payload}
 				decision, resolveErr := resolveApproval(ctx, opts, approvalReq)
 				if resolveErr != nil {
@@ -217,6 +218,51 @@ func runSessionOnce(
 		cancelErr,
 		drainErr,
 	)
+}
+
+func approvalPayloadFromPermission(req *schema.RequestPermissionRequest) *approval.Payload {
+	if req == nil {
+		return nil
+	}
+	_, decoded, _, err := semantic.DecodePermissionRequest(*req)
+	if err != nil || decoded == nil {
+		return nil
+	}
+	normalized := session.CloneProtocolApproval(*decoded)
+	reason := approvalPromptField(normalized.ToolCall.RawInput, "approval_reason")
+	if reason == "" {
+		reason = approvalPromptField(normalized.ToolCall.RawInput, "reason")
+	}
+	payload := &approval.Payload{
+		ToolCallID:         normalized.ToolCall.ID,
+		ToolName:           normalized.ToolCall.Name,
+		ToolKind:           normalized.ToolCall.Kind,
+		ToolTitle:          normalized.ToolCall.Title,
+		ToolStatus:         normalized.ToolCall.Status,
+		RawInput:           normalized.ToolCall.RawInput,
+		RawOutput:          normalized.ToolCall.RawOutput,
+		Content:            normalized.ToolCall.Content,
+		Reason:             reason,
+		Justification:      approvalPromptField(normalized.ToolCall.RawInput, "justification"),
+		SandboxPermissions: approvalPromptField(normalized.ToolCall.RawInput, "sandbox_permissions"),
+		Status:             approval.StatusPending,
+	}
+	if len(normalized.Options) > 0 {
+		payload.Options = make([]approval.Option, 0, len(normalized.Options))
+		for _, option := range normalized.Options {
+			payload.Options = append(payload.Options, approval.Option{
+				ID:   option.ID,
+				Name: option.Name,
+				Kind: option.Kind,
+			})
+		}
+	}
+	return payload
+}
+
+func approvalPromptField(values map[string]any, key string) string {
+	text, _ := values[key].(string)
+	return strings.TrimSpace(text)
 }
 
 // assistantOutputReducer keeps exact ACP delta semantics for live updates while

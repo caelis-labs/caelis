@@ -254,30 +254,34 @@ func TestRunSessionOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 	t.Parallel()
 
 	title := "RunCommand"
+	permission := &schema.RequestPermissionRequest{
+		SessionID: "s1",
+		ToolCall: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Title:         &title,
+			RawInput: map[string]any{
+				"command":             "go test ./...",
+				"approval_reason":     "needs execution",
+				"justification":       "requested by user",
+				"sandbox_permissions": "host",
+				"nested": map[string]any{
+					"value": "original",
+				},
+			},
+		},
+		Options: []schema.PermissionOption{{
+			OptionID: "allow_once",
+			Name:     "Allow once",
+			Kind:     "allow_once",
+		}},
+	}
 	handle := newFakeACPHandle([]eventstream.Envelope{
 		{
 			Cursor:            "a1",
 			Kind:              eventstream.KindRequestPermission,
 			ApprovalRequestID: eventstream.ApprovalRequestID("approval-2"),
-			Permission: &schema.RequestPermissionRequest{
-				SessionID: "s1",
-				ToolCall: schema.ToolCallUpdate{
-					SessionUpdate: schema.UpdateToolCallInfo,
-					ToolCallID:    "call-1",
-					Title:         &title,
-					RawInput: map[string]any{
-						"command":             "go test ./...",
-						"approval_reason":     "needs execution",
-						"justification":       "requested by user",
-						"sandbox_permissions": "host",
-					},
-				},
-				Options: []schema.PermissionOption{{
-					OptionID: "allow_once",
-					Name:     "Allow once",
-					Kind:     "allow_once",
-				}},
-			},
+			Permission:        permission,
 		},
 	})
 	gw := fakeStarter{
@@ -296,6 +300,14 @@ func TestRunSessionOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 			if req.Payload.Reason != "needs execution" || req.Payload.Justification != "requested by user" || req.Payload.SandboxPermissions != "host" {
 				t.Fatalf("approval fields = (%q, %q, %q), want restored prompt fields", req.Payload.Reason, req.Payload.Justification, req.Payload.SandboxPermissions)
 			}
+			if len(req.Payload.Options) != 1 || req.Payload.Options[0] != (approval.Option{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}) {
+				t.Fatalf("approval options = %#v, want copied allow_once option", req.Payload.Options)
+			}
+			nested, ok := req.Payload.RawInput["nested"].(map[string]any)
+			if !ok {
+				t.Fatalf("approval nested input = %#v, want map", req.Payload.RawInput["nested"])
+			}
+			nested["value"] = "changed"
 			return approval.Decision{Approved: true, Outcome: string(approval.StatusApproved)}, nil
 		},
 	})
@@ -310,6 +322,22 @@ func TestRunSessionOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 	}
 	if handle.submissions[0].RequestID != "approval-2" {
 		t.Fatalf("approval request id = %q, want approval-2", handle.submissions[0].RequestID)
+	}
+	rawInput, ok := permission.ToolCall.RawInput.(map[string]any)
+	if !ok {
+		t.Fatalf("source raw input = %#v, want map", permission.ToolCall.RawInput)
+	}
+	nested, ok := rawInput["nested"].(map[string]any)
+	if !ok || nested["value"] != "original" {
+		t.Fatalf("source nested input = %#v, want isolated original value", rawInput["nested"])
+	}
+}
+
+func TestApprovalPayloadFromPermissionNil(t *testing.T) {
+	t.Parallel()
+
+	if payload := approvalPayloadFromPermission(nil); payload != nil {
+		t.Fatalf("approvalPayloadFromPermission(nil) = %#v, want nil", payload)
 	}
 }
 

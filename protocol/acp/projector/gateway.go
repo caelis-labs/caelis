@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	agentsdk "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
@@ -615,50 +614,6 @@ func permissionRequestFromProtocol(sessionID string, meta map[string]any, approv
 		return nil
 	}
 	return &req
-}
-
-func ApprovalPayloadFromPermission(req *schema.RequestPermissionRequest) *approval.Payload {
-	if req == nil {
-		return nil
-	}
-	_, normalized, _, err := semantic.DecodePermissionRequest(*req)
-	if err != nil || normalized == nil {
-		return nil
-	}
-	rawInput := cloneAnyMap(normalized.ToolCall.RawInput)
-	payload := &approval.Payload{
-		ToolCallID:         strings.TrimSpace(normalized.ToolCall.ID),
-		ToolName:           strings.TrimSpace(normalized.ToolCall.Name),
-		ToolKind:           strings.TrimSpace(normalized.ToolCall.Kind),
-		ToolTitle:          strings.TrimSpace(normalized.ToolCall.Title),
-		ToolStatus:         strings.TrimSpace(normalized.ToolCall.Status),
-		RawInput:           rawInput,
-		RawOutput:          cloneAnyMap(normalized.ToolCall.RawOutput),
-		Content:            session.CloneProtocolToolCallContent(normalized.ToolCall.Content),
-		Reason:             firstNonEmpty(rawString(rawInput, "approval_reason"), rawString(rawInput, "reason")),
-		Justification:      rawString(rawInput, "justification"),
-		SandboxPermissions: rawString(rawInput, "sandbox_permissions"),
-		Status:             approval.StatusPending,
-	}
-	if len(normalized.Options) > 0 {
-		payload.Options = make([]approval.Option, 0, len(normalized.Options))
-		for _, option := range normalized.Options {
-			payload.Options = append(payload.Options, approval.Option{
-				ID:   strings.TrimSpace(option.ID),
-				Name: strings.TrimSpace(option.Name),
-				Kind: strings.TrimSpace(option.Kind),
-			})
-		}
-	}
-	return payload
-}
-
-func rawString(values map[string]any, key string) string {
-	if len(values) == 0 {
-		return ""
-	}
-	text, _ := values[key].(string)
-	return strings.TrimSpace(text)
 }
 
 func stringFromPtr(value *string) string {
