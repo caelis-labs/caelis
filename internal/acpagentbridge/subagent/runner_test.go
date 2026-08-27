@@ -355,7 +355,7 @@ func TestRunnerPermissionCallbackNormalizesChildApprovalWithoutPublishingFrame(t
 	if err != nil {
 		t.Fatalf("permission callback error = %v", err)
 	}
-	if response.Outcome.Outcome != "selected" || response.Outcome.OptionID != "allow_once" {
+	if response.Outcome.Selected == nil || response.Outcome.Selected.OptionId != "allow_once" {
 		t.Fatalf("permission callback response = %#v, want selected allow_once", response)
 	}
 	if len(sink.frames) != 0 {

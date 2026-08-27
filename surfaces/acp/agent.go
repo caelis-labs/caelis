@@ -62,7 +62,7 @@ type Agent interface {
 // prompt.
 type PromptCallbacks interface {
 	SessionUpdate(context.Context, protocolacp.SessionNotification) error
-	RequestPermission(context.Context, protocolacp.RequestPermissionRequest) (protocolacp.RequestPermissionResponse, error)
+	RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error)
 }
 
 // ProductAgent is the Surface-owned connection contract around Caelis's

@@ -340,20 +340,22 @@ func (c *serverConn) emitAvailableCommands(ctx context.Context, handler commandP
 	})
 }
 
-func (c *serverConn) RequestPermission(ctx context.Context, req protocolacp.RequestPermissionRequest) (protocolacp.RequestPermissionResponse, error) {
+func (c *serverConn) RequestPermission(ctx context.Context, req acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
 	rpc, err := c.connection(ctx)
 	if err != nil {
-		return protocolacp.RequestPermissionResponse{}, err
+		return acpsdk.RequestPermissionResponse{}, err
 	}
-	wireRequest, err := permissionRequestToSDK(req)
+	if err := req.Validate(); err != nil {
+		return acpsdk.RequestPermissionResponse{}, fmt.Errorf("acp surface: validate permission request: %w", err)
+	}
+	wireResponse, err := acpsdk.SendRequest[acpsdk.RequestPermissionResponse](rpc, ctx, acpsdk.ClientMethodSessionRequestPermission, req)
 	if err != nil {
-		return protocolacp.RequestPermissionResponse{}, err
+		return acpsdk.RequestPermissionResponse{}, err
 	}
-	wireResponse, err := acpsdk.SendRequest[acpsdk.RequestPermissionResponse](rpc, ctx, acpsdk.ClientMethodSessionRequestPermission, wireRequest)
-	if err != nil {
-		return protocolacp.RequestPermissionResponse{}, err
+	if err := wireResponse.Validate(); err != nil {
+		return acpsdk.RequestPermissionResponse{}, fmt.Errorf("acp surface: validate permission response: %w", err)
 	}
-	return permissionResponseFromSDK(wireResponse)
+	return wireResponse, nil
 }
 
 type serverPromptCallbacks struct {
@@ -364,7 +366,7 @@ func (c serverPromptCallbacks) SessionUpdate(ctx context.Context, req protocolac
 	return c.conn.SessionUpdate(ctx, req)
 }
 
-func (c serverPromptCallbacks) RequestPermission(ctx context.Context, req protocolacp.RequestPermissionRequest) (protocolacp.RequestPermissionResponse, error) {
+func (c serverPromptCallbacks) RequestPermission(ctx context.Context, req acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
 	return c.conn.RequestPermission(ctx, req)
 }
 

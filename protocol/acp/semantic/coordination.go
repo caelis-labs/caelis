@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -51,22 +50,6 @@ func EncodePermissionRequest(ref session.SessionRef, approval *session.ProtocolA
 		wire.Options = append(wire.Options, schema.PermissionOption{OptionID: option.ID, Name: option.Name, Kind: option.Kind})
 	}
 	return wire, nil
-}
-
-// DecodePermissionResponse converts one wire outcome into the shared runtime
-// approval response and derives Approved only from a selected allow option.
-func DecodePermissionResponse(wire schema.RequestPermissionResponse, approval *session.ProtocolApproval) agent.ApprovalResponse {
-	out := agent.ApprovalResponse{Outcome: strings.TrimSpace(wire.Outcome.Outcome), OptionID: strings.TrimSpace(wire.Outcome.OptionID)}
-	if out.Outcome != "selected" || approval == nil {
-		return out
-	}
-	for _, option := range approval.Options {
-		if strings.TrimSpace(option.ID) == out.OptionID && strings.HasPrefix(strings.ToLower(strings.TrimSpace(option.Kind)), "allow") {
-			out.Approved = true
-			break
-		}
-	}
-	return out
 }
 
 func ptrApproval(in session.ProtocolApproval) *session.ProtocolApproval {

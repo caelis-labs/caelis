@@ -470,11 +470,19 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbac
 		if env.Permission == nil {
 			return nil
 		}
-		resp, err := cb.RequestPermission(ctx, *env.Permission)
+		_, approval, _, err := semantic.DecodePermissionRequest(*env.Permission)
+		if err != nil {
+			return err
+		}
+		request, err := sdkPermissionRequestFromSchema(*env.Permission)
+		if err != nil {
+			return err
+		}
+		resp, err := cb.RequestPermission(ctx, request)
 		if err != nil || turn == nil {
 			return err
 		}
-		return turn.SubmitApproval(ctx, approvalDecisionFromACPResponse(env.ApprovalRequestID, env.Permission.Options, resp))
+		return turn.SubmitApproval(ctx, approvalDecisionFromACPResponse(env.ApprovalRequestID, approval, resp))
 	case eventstream.KindSessionUpdate:
 		if env.Update == nil {
 			return nil
@@ -595,14 +603,8 @@ func emitFilteredSessionUpdate(ctx context.Context, cb PromptCallbacks, notifica
 	return cb.SessionUpdate(ctx, notification)
 }
 
-func approvalDecisionFromACPResponse(requestID eventstream.ApprovalRequestID, options []acp.PermissionOption, resp acp.RequestPermissionResponse) controlprompt.ApprovalDecision {
-	approval := &session.ProtocolApproval{Options: make([]session.ProtocolApprovalOption, 0, len(options))}
-	for _, option := range options {
-		approval.Options = append(approval.Options, session.ProtocolApprovalOption{
-			ID: strings.TrimSpace(option.OptionID), Name: strings.TrimSpace(option.Name), Kind: strings.TrimSpace(option.Kind),
-		})
-	}
-	decision := semantic.DecodePermissionResponse(resp, approval)
+func approvalDecisionFromACPResponse(requestID eventstream.ApprovalRequestID, approval *session.ProtocolApproval, resp acpsdk.RequestPermissionResponse) controlprompt.ApprovalDecision {
+	decision := approvalResponseFromSDK(resp, approval)
 	return controlprompt.ApprovalDecision{
 		RequestID: requestID,
 		Outcome:   decision.Outcome, OptionID: decision.OptionID, Approved: decision.Approved,

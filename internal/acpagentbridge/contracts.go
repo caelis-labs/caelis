@@ -17,7 +17,7 @@ var ErrCapabilityUnsupported = errors.New("internal/acpagentbridge: capability u
 // requests back to the exact client connection that submitted it.
 type PromptCallbacks interface {
 	SessionUpdate(context.Context, schema.SessionNotification) error
-	RequestPermission(context.Context, schema.RequestPermissionRequest) (schema.RequestPermissionResponse, error)
+	RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error)
 }
 
 // SessionLoader supplies the lower-level direct-runtime bridge with durable

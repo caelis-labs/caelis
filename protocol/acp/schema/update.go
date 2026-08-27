@@ -210,12 +210,3 @@ type RequestPermissionRequest struct {
 	Options   []PermissionOption `json:"options"`
 	Meta      map[string]any     `json:"_meta,omitempty"`
 }
-
-type PermissionOutcome struct {
-	Outcome  string `json:"outcome"`
-	OptionID string `json:"optionId,omitempty"`
-}
-
-type RequestPermissionResponse struct {
-	Outcome PermissionOutcome `json:"outcome"`
-}

@@ -13,7 +13,7 @@ import (
 
 type promptCallbacks interface {
 	SessionUpdate(context.Context, schema.SessionNotification) error
-	RequestPermission(context.Context, schema.RequestPermissionRequest) (schema.RequestPermissionResponse, error)
+	RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error)
 }
 
 type modeReader interface {

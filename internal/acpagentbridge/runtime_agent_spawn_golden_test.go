@@ -454,8 +454,8 @@ func (c *spawnGoldenCallbacks) SessionUpdate(_ context.Context, notification acp
 	return nil
 }
 
-func (*spawnGoldenCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	return acp.RequestPermissionResponse{}, nil
+func (*spawnGoldenCallbacks) RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
+	return acpsdk.RequestPermissionResponse{}, nil
 }
 
 func (c *spawnGoldenCallbacks) snapshot() []acp.SessionNotification {

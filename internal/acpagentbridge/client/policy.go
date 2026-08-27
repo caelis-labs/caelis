@@ -1,12 +1,15 @@
 package client
 
-import "strings"
+import (
+	"strings"
+
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
+)
 
 func PermissionSelectedOutcome(optionID string) RequestPermissionResponse {
-	return RequestPermissionResponse{Outcome: PermissionOutcome{
-		Outcome:  "selected",
-		OptionID: strings.TrimSpace(optionID),
-	}}
+	return RequestPermissionResponse{Outcome: acpsdk.NewRequestPermissionOutcomeSelected(
+		acpsdk.PermissionOptionId(strings.TrimSpace(optionID)),
+	)}
 }
 
 func SelectPermissionOptionID(options []PermissionOption, allowed bool) string {

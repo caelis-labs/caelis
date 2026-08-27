@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -62,45 +61,6 @@ func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotMeta, wantMeta) {
 		t.Fatalf("meta = %#v, want %#v", gotMeta, wantMeta)
-	}
-}
-
-func TestPermissionResponseUsesSharedAllowSemantics(t *testing.T) {
-	t.Parallel()
-
-	approval := &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{
-		{ID: "allow_once", Kind: "allow_once"},
-		{ID: "reject_once", Kind: "reject_once"},
-	}}
-	tests := []struct {
-		name string
-		wire schema.RequestPermissionResponse
-		want agent.ApprovalResponse
-	}{
-		{
-			name: "allow selection",
-			wire: schema.RequestPermissionResponse{Outcome: schema.PermissionOutcome{Outcome: "selected", OptionID: "allow_once"}},
-			want: agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true},
-		},
-		{
-			name: "reject selection",
-			wire: schema.RequestPermissionResponse{Outcome: schema.PermissionOutcome{Outcome: "selected", OptionID: "reject_once"}},
-			want: agent.ApprovalResponse{Outcome: "selected", OptionID: "reject_once"},
-		},
-		{
-			name: "cancelled outcome cannot approve",
-			wire: schema.RequestPermissionResponse{Outcome: schema.PermissionOutcome{Outcome: "cancelled", OptionID: "allow_once"}},
-			want: agent.ApprovalResponse{Outcome: "cancelled", OptionID: "allow_once"},
-		},
-	}
-	for _, test := range tests {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			if got := semantic.DecodePermissionResponse(test.wire, approval); !reflect.DeepEqual(got, test.want) {
-				t.Fatalf("DecodePermissionResponse() = %#v, want %#v", got, test.want)
-			}
-		})
 	}
 }
 

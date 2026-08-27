@@ -219,8 +219,7 @@ type UsageUpdate = schema.UsageUpdate
 type CurrentModeUpdate = acpsdk.SessionCurrentModeUpdate
 type PermissionOption = schema.PermissionOption
 type RequestPermissionRequest = schema.RequestPermissionRequest
-type RequestPermissionResponse = schema.RequestPermissionResponse
-type PermissionOutcome = schema.PermissionOutcome
+type RequestPermissionResponse = acpsdk.RequestPermissionResponse
 type TextContent = schema.TextContent
 type RawUpdate = schema.RawUpdate
 

@@ -840,10 +840,18 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 	if cb.permissions != 1 {
 		t.Fatalf("client permission requests = %d, want 1 under manual mode", cb.permissions)
 	}
-	if cb.last.SessionID != string(sessionResp.SessionId) || cb.last.ToolCall.ToolCallID != "call-1" {
+	if cb.last.SessionId != sessionResp.SessionId || cb.last.ToolCall.ToolCallId != "call-1" {
 		t.Fatalf("client permission request = %#v, want normalized session and call identity", cb.last)
 	}
-	if got := metautil.String(cb.last.ToolCall.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RunCommand" {
+	var toolMeta map[string]any
+	rawToolMeta, err := json.Marshal(cb.last.ToolCall.Meta)
+	if err != nil {
+		t.Fatalf("marshal client permission tool metadata: %v", err)
+	}
+	if err := json.Unmarshal(rawToolMeta, &toolMeta); err != nil {
+		t.Fatalf("decode client permission tool metadata: %v", err)
+	}
+	if got := metautil.String(toolMeta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RunCommand" {
 		t.Fatalf("client permission tool name = %q, want RUN_COMMAND", got)
 	}
 	if got := acp.NormalizeRawMap(cb.last.ToolCall.RawInput)["command"]; got != "git restore hello.py" {
@@ -1102,9 +1110,9 @@ func (c *recordingPromptCallbacks) SessionUpdate(_ context.Context, notification
 	return nil
 }
 
-func (c *recordingPromptCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	return acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
+func (c *recordingPromptCallbacks) RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
+	return acpsdk.RequestPermissionResponse{
+		Outcome: acpsdk.NewRequestPermissionOutcomeSelected(acpsdk.PermissionOptionId(acpsdk.PermissionOptionKindAllowOnce)),
 	}, nil
 }
 
@@ -1119,8 +1127,8 @@ func (c *errorOnAgentMessageCallbacks) SessionUpdate(_ context.Context, notifica
 	return nil
 }
 
-func (c *errorOnAgentMessageCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	return acp.RequestPermissionResponse{}, nil
+func (c *errorOnAgentMessageCallbacks) RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
+	return acpsdk.RequestPermissionResponse{}, nil
 }
 
 func firstAgentMessageChunk(notifications []acp.SessionNotification) string {
@@ -1272,14 +1280,14 @@ func (r promptRouterRun) Close() error { return nil }
 type permissionCountingCallbacks struct {
 	recordingPromptCallbacks
 	permissions int
-	last        acp.RequestPermissionRequest
+	last        acpsdk.RequestPermissionRequest
 }
 
-func (c *permissionCountingCallbacks) RequestPermission(_ context.Context, req acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+func (c *permissionCountingCallbacks) RequestPermission(_ context.Context, req acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
 	c.permissions++
 	c.last = req
-	return acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
+	return acpsdk.RequestPermissionResponse{
+		Outcome: acpsdk.NewRequestPermissionOutcomeSelected(acpsdk.PermissionOptionId(acpsdk.PermissionOptionKindAllowOnce)),
 	}, nil
 }
 
@@ -1825,8 +1833,8 @@ func (c *terminalBridgeCallbacks) SessionUpdate(_ context.Context, notification 
 	return nil
 }
 
-func (c *terminalBridgeCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	return acp.RequestPermissionResponse{}, nil
+func (c *terminalBridgeCallbacks) RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
+	return acpsdk.RequestPermissionResponse{}, nil
 }
 
 func (c *terminalBridgeCallbacks) snapshot() []acp.SessionNotification {

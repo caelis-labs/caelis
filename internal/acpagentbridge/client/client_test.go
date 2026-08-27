@@ -387,7 +387,7 @@ func TestDefaultPermissionPolicyRejectsOnce(t *testing.T) {
 		t.Fatal(rpcErr)
 	}
 	response, ok := result.(RequestPermissionResponse)
-	if !ok || response.Outcome.Outcome != "selected" || response.Outcome.OptionID != "reject_once" {
+	if !ok || response.Outcome.Selected == nil || response.Outcome.Selected.OptionId != "reject_once" {
 		t.Fatalf("permission response = %#v", result)
 	}
 }
@@ -472,7 +472,7 @@ func TestClientRejectsWrongACPMessageDirection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request_permission request error = %v", err)
 	}
-	if response.Outcome.Outcome != "selected" || response.Outcome.OptionID != "allow_once" {
+	if response.Outcome.Selected == nil || response.Outcome.Selected.OptionId != "allow_once" {
 		t.Fatalf("permission response = %#v", response)
 	}
 	if permissionCalls != 1 {

@@ -7,7 +7,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type approvalRequester struct {
@@ -65,7 +64,7 @@ func (r approvalRequester) requestClientPermission(
 	if r.callbacks == nil || req.Approval == nil {
 		return agent.ApprovalResponse{}, nil
 	}
-	request, err := semantic.EncodePermissionRequest(req.SessionRef, req.Approval, nil)
+	request, err := sdkPermissionRequestFromApproval(req.SessionRef, req.Approval, nil)
 	if err != nil {
 		return agent.ApprovalResponse{}, err
 	}
@@ -73,5 +72,5 @@ func (r approvalRequester) requestClientPermission(
 	if err != nil {
 		return agent.ApprovalResponse{}, err
 	}
-	return semantic.DecodePermissionResponse(response, req.Approval), nil
+	return approvalResponseFromSDK(response, req.Approval), nil
 }

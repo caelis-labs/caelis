@@ -698,9 +698,9 @@ type allowingRecordingCallbacks struct {
 	recordingCallbacks
 }
 
-func (c *allowingRecordingCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	return acp.RequestPermissionResponse{
-		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce)},
+func (c *allowingRecordingCallbacks) RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
+	return acpsdk.RequestPermissionResponse{
+		Outcome: acpsdk.NewRequestPermissionOutcomeSelected(acpsdk.PermissionOptionId(acpsdk.PermissionOptionKindAllowOnce)),
 	}, nil
 }
 
@@ -709,8 +709,8 @@ func (c *recordingCallbacks) SessionUpdate(_ context.Context, notification acp.S
 	return nil
 }
 
-func (c *recordingCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	return acp.RequestPermissionResponse{}, nil
+func (c *recordingCallbacks) RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
+	return acpsdk.RequestPermissionResponse{}, nil
 }
 
 func (c *recordingCallbacks) firstAgentMessage() string {

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
@@ -151,8 +152,8 @@ func (c *acpMuxPromptCallbacks) SessionUpdate(_ context.Context, notification ac
 	return nil
 }
 
-func (*acpMuxPromptCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	return acp.RequestPermissionResponse{}, nil
+func (*acpMuxPromptCallbacks) RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
+	return acpsdk.RequestPermissionResponse{}, nil
 }
 
 func (s *acpMuxRetryService) List(context.Context, taskstream.Principal, taskstream.ListRequest) (taskstream.ListResult, error) {

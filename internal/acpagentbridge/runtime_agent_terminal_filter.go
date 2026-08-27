@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -20,9 +21,9 @@ func (c normalizingPromptCallbacks) SessionUpdate(ctx context.Context, notificat
 	return c.inner.SessionUpdate(ctx, normalizeACPStdioTerminalExtension(notification))
 }
 
-func (c normalizingPromptCallbacks) RequestPermission(ctx context.Context, req acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+func (c normalizingPromptCallbacks) RequestPermission(ctx context.Context, req acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
 	if c.inner == nil {
-		return acp.RequestPermissionResponse{}, nil
+		return acpsdk.RequestPermissionResponse{}, nil
 	}
 	return c.inner.RequestPermission(ctx, req)
 }
