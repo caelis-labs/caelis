@@ -964,7 +964,7 @@ func collectHandleEvents(t *testing.T, handle TurnHandle) []eventstream.Envelope
 	}
 }
 
-func firstUsageSnapshot(events []eventstream.Envelope) *eventstream.UsageSnapshot {
+func firstUsageSnapshot(events []eventstream.Envelope) *session.UsageSnapshot {
 	for _, env := range events {
 		if usage := eventstream.UsageSnapshotFromEnvelope(env); usage != nil {
 			return usage

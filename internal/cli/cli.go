@@ -46,16 +46,16 @@ const (
 )
 
 type runResult struct {
-	SchemaVersion string                     `json:"schema_version"`
-	Type          string                     `json:"type"`
-	SessionID     string                     `json:"session_id"`
-	Turn          appserver.TurnTarget       `json:"turn"`
-	Status        string                     `json:"status"`
-	StopReason    string                     `json:"stop_reason,omitempty"`
-	Output        string                     `json:"output"`
-	Cursor        string                     `json:"cursor,omitempty"`
-	Usage         *eventstream.UsageSnapshot `json:"usage,omitempty"`
-	PromptTokens  int                        `json:"prompt_tokens,omitempty"`
+	SchemaVersion string                 `json:"schema_version"`
+	Type          string                 `json:"type"`
+	SessionID     string                 `json:"session_id"`
+	Turn          appserver.TurnTarget   `json:"turn"`
+	Status        string                 `json:"status"`
+	StopReason    string                 `json:"stop_reason,omitempty"`
+	Output        string                 `json:"output"`
+	Cursor        string                 `json:"cursor,omitempty"`
+	Usage         *session.UsageSnapshot `json:"usage,omitempty"`
+	PromptTokens  int                    `json:"prompt_tokens,omitempty"`
 }
 
 type sandboxCommandFunc func(context.Context, gatewayapp.Config, productClientOptions, outputFormat, io.Writer) error
@@ -643,7 +643,7 @@ func runHeadless(
 		Cursor:        strings.TrimSpace(result.LastCursor),
 		PromptTokens:  result.PromptTokens,
 	}
-	if result.Usage != (eventstream.UsageSnapshot{}) {
+	if result.Usage != (session.UsageSnapshot{}) {
 		usage := result.Usage
 		summary.Usage = &usage
 	}

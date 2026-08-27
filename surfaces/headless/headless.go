@@ -47,7 +47,7 @@ type Result struct {
 	Output         string
 	LastCursor     string
 	PromptTokens   int
-	Usage          eventstream.UsageSnapshot
+	Usage          session.UsageSnapshot
 	LifecycleState string
 	StopReason     string
 	Target         appserver.TurnTarget

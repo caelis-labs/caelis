@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/internal/promptview"
 )
@@ -134,7 +135,7 @@ func TestModelInitSchedulesStatusRefreshCommand(t *testing.T) {
 	}
 	updated, _ := final.Update(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
+		Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{
 			TotalTokens: 1_600,
 		}, nil),
 	})
@@ -152,7 +153,7 @@ func TestMainACPUsageUpdatesStatusContextForLiveAndReplay(t *testing.T) {
 	usage := eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
-		Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
+		Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{
 			TotalTokens:         1600,
 			ContextWindowTokens: 100000,
 		}, nil),
@@ -170,7 +171,7 @@ func TestMainACPUsageUpdatesStatusContextForLiveAndReplay(t *testing.T) {
 	totalOnly := eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
-		Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
+		Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{
 			TotalTokens: 2_400,
 		}, nil),
 	}
@@ -183,7 +184,7 @@ func TestMainACPUsageUpdatesStatusContextForLiveAndReplay(t *testing.T) {
 	model.applyTranscriptUsage(TranscriptEvent{
 		Kind:  TranscriptEventUsage,
 		Scope: ACPProjectionSubagent,
-		Usage: &eventstream.UsageSnapshot{TotalTokens: 9999, ContextWindowTokens: 10000},
+		Usage: &session.UsageSnapshot{TotalTokens: 9999, ContextWindowTokens: 10000},
 	})
 	if model.statusContext != want {
 		t.Fatalf("child usage overwrote main status = %q, want %q", model.statusContext, want)

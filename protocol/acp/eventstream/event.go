@@ -71,9 +71,7 @@ type Delivery struct {
 	Mode DeliveryMode `json:"mode"`
 }
 
-type UsageSnapshot = session.UsageSnapshot
-
-func UsageUpdateFromSnapshot(usage UsageSnapshot, meta map[string]any) schema.UsageUpdate {
+func UsageUpdateFromSnapshot(usage session.UsageSnapshot, meta map[string]any) schema.UsageUpdate {
 	used := nonNegativeUsage(usage.TotalTokens)
 	size := usage.ContextWindowTokens
 	if size <= 0 {
@@ -87,13 +85,13 @@ func UsageUpdateFromSnapshot(usage UsageSnapshot, meta map[string]any) schema.Us
 	}
 }
 
-func UsageSnapshotFromUpdate(update schema.UsageUpdate) *UsageSnapshot {
+func usageSnapshotFromUpdate(update schema.UsageUpdate) *session.UsageSnapshot {
 	usage := usageSnapshotFromMeta(update.Meta)
 	if usage == nil && update.Used == 0 {
 		return nil
 	}
 	if usage == nil {
-		usage = &UsageSnapshot{}
+		usage = &session.UsageSnapshot{}
 	}
 	if usage.TotalTokens == 0 && update.Used <= uint64(maxInt()) {
 		usage.TotalTokens = int(update.Used)
@@ -113,7 +111,7 @@ func nonNegativeUsage(value int) uint64 {
 
 func maxInt() int { return int(^uint(0) >> 1) }
 
-func UsageSnapshotFromEnvelope(env Envelope) *UsageSnapshot {
+func UsageSnapshotFromEnvelope(env Envelope) *session.UsageSnapshot {
 	if env.Kind != KindSessionUpdate {
 		return nil
 	}
@@ -121,7 +119,7 @@ func UsageSnapshotFromEnvelope(env Envelope) *UsageSnapshot {
 	if !ok {
 		return nil
 	}
-	return UsageSnapshotFromUpdate(update)
+	return usageSnapshotFromUpdate(update)
 }
 
 type Envelope struct {
@@ -346,7 +344,7 @@ func CloneEnvelopes(in []Envelope) []Envelope {
 	return out
 }
 
-func usageUpdateMeta(meta map[string]any, usage UsageSnapshot) map[string]any {
+func usageUpdateMeta(meta map[string]any, usage session.UsageSnapshot) map[string]any {
 	out := cloneAnyMap(meta)
 	if out == nil {
 		out = map[string]any{}
@@ -372,12 +370,12 @@ func usageUpdateMeta(meta map[string]any, usage UsageSnapshot) map[string]any {
 	return out
 }
 
-func usageSnapshotFromMeta(meta map[string]any) *UsageSnapshot {
+func usageSnapshotFromMeta(meta map[string]any) *session.UsageSnapshot {
 	usageMeta := mapAt(mapAt(meta, "caelis"), "usage")
 	if len(usageMeta) == 0 {
 		return nil
 	}
-	usage := UsageSnapshot{
+	usage := session.UsageSnapshot{
 		PromptTokens:        intFromAny(usageMeta["prompt_tokens"]),
 		CachedInputTokens:   intFromAny(usageMeta["cached_input_tokens"]),
 		CompletionTokens:    intFromAny(usageMeta["completion_tokens"]),
@@ -391,7 +389,7 @@ func usageSnapshotFromMeta(meta map[string]any) *UsageSnapshot {
 	return &usage
 }
 
-func usageSnapshotEmpty(usage UsageSnapshot) bool {
+func usageSnapshotEmpty(usage session.UsageSnapshot) bool {
 	return usage.PromptTokens == 0 &&
 		usage.CachedInputTokens == 0 &&
 		usage.CompletionTokens == 0 &&

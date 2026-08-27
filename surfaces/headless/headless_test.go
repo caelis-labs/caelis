@@ -9,6 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -29,7 +30,7 @@ func TestRunSessionOnceDrainsAssistantOutput(t *testing.T) {
 		{
 			Cursor: "u1",
 			Kind:   eventstream.KindSessionUpdate,
-			Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{PromptTokens: 11, TotalTokens: 17}, nil),
+			Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{PromptTokens: 11, TotalTokens: 17}, nil),
 		},
 	})
 	gw := fakeStarter{
@@ -181,7 +182,7 @@ func TestRunSessionOnceIgnoresScopedTraceOutput(t *testing.T) {
 			Cursor: "usage-main",
 			Kind:   eventstream.KindSessionUpdate,
 			Scope:  eventstream.ScopeMain,
-			Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{PromptTokens: 11, TotalTokens: 17}, nil),
+			Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{PromptTokens: 11, TotalTokens: 17}, nil),
 		},
 		{
 			Cursor:  "child-1",
@@ -197,7 +198,7 @@ func TestRunSessionOnceIgnoresScopedTraceOutput(t *testing.T) {
 			Cursor: "usage-child",
 			Kind:   eventstream.KindSessionUpdate,
 			Scope:  eventstream.ScopeSubagent,
-			Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{PromptTokens: 99}, nil),
+			Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{PromptTokens: 99}, nil),
 		},
 	})
 	gw := fakeStarter{
@@ -410,7 +411,7 @@ func TestRunSessionOnceProjectsTargetedResultAndStructuredObservation(t *testing
 			RunID:     target.RunID,
 			TurnID:    target.TurnID,
 			Cursor:    "cursor-usage",
-			Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
+			Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{
 				PromptTokens: 11,
 				TotalTokens:  17,
 			}, nil),

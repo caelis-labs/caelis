@@ -232,7 +232,7 @@ func TestHeadlessJSONLUsesVersionedEnvelopeAndTerminalResultRecords(t *testing.T
 	if err := writeHeadlessEnvelope(&output, envelope); err != nil {
 		t.Fatal(err)
 	}
-	usage := eventstream.UsageSnapshot{PromptTokens: 11, TotalTokens: 17}
+	usage := session.UsageSnapshot{PromptTokens: 11, TotalTokens: 17}
 	if err := writeResult(&output, outputJSONL, runResult{
 		SchemaVersion: headlessOutputSchemaVersion,
 		Type:          headlessOutputTypeResult,

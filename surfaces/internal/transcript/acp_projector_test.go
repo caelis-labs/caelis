@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -343,7 +344,7 @@ func TestProjectACPEventToEventsProjectsUsageUpdate(t *testing.T) {
 
 	events := ProjectACPEventToEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
+		Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{
 			PromptTokens:      12,
 			CachedInputTokens: 3,
 			CompletionTokens:  5,

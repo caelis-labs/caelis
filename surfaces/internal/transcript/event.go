@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 type Scope string
@@ -158,7 +158,7 @@ type Event struct {
 	Reason     string
 	StopReason string
 
-	Usage *eventstream.UsageSnapshot
+	Usage *session.UsageSnapshot
 
 	RawSessionUpdate string
 	RawUpdate        json.RawMessage

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -321,7 +322,7 @@ func TestEnvelopeV1ACPUsageUpdateGolden(t *testing.T) {
 func TestUsageUpdateFromSnapshotStoresBreakdownInMeta(t *testing.T) {
 	t.Parallel()
 
-	update := UsageUpdateFromSnapshot(UsageSnapshot{
+	update := UsageUpdateFromSnapshot(session.UsageSnapshot{
 		PromptTokens:        12,
 		CachedInputTokens:   3,
 		CompletionTokens:    5,
@@ -335,9 +336,9 @@ func TestUsageUpdateFromSnapshotStoresBreakdownInMeta(t *testing.T) {
 	if update.Used != 17 || update.Size != 200000 {
 		t.Fatalf("usage size/used = %d/%d, want context window size and used total", update.Size, update.Used)
 	}
-	roundTripped := UsageSnapshotFromUpdate(update)
+	roundTripped := usageSnapshotFromUpdate(update)
 	if roundTripped == nil || roundTripped.PromptTokens != 12 || roundTripped.CachedInputTokens != 3 || roundTripped.CompletionTokens != 5 || roundTripped.ReasoningTokens != 2 || roundTripped.TotalTokens != 17 || roundTripped.ContextWindowTokens != 200000 {
-		t.Fatalf("UsageSnapshotFromUpdate() = %#v", roundTripped)
+		t.Fatalf("usageSnapshotFromUpdate() = %#v", roundTripped)
 	}
 	caelis, _ := update.Meta["caelis"].(map[string]any)
 	if caelis["version"] != 1 {
@@ -352,7 +353,7 @@ func TestUsageUpdateFromSnapshotStoresBreakdownInMeta(t *testing.T) {
 func TestUsageUpdateFromSnapshotDefaultsUnknownSizeToUsed(t *testing.T) {
 	t.Parallel()
 
-	update := UsageUpdateFromSnapshot(UsageSnapshot{TotalTokens: 17}, nil)
+	update := UsageUpdateFromSnapshot(session.UsageSnapshot{TotalTokens: 17}, nil)
 	if update.Used != 17 || update.Size != 17 {
 		t.Fatalf("usage size/used = %d/%d, want required size fallback to used total", update.Size, update.Used)
 	}
@@ -364,15 +365,15 @@ func TestUsageSnapshotFromUpdateNeverWrapsFullUint64Counters(t *testing.T) {
 	update := schema.UsageUpdate{
 		SessionUpdate: schema.UpdateUsage, Size: math.MaxUint64, Used: math.MaxUint64,
 	}
-	if usage := UsageSnapshotFromUpdate(update); usage != nil {
-		t.Fatalf("UsageSnapshotFromUpdate() = %#v, want no lossy machine-int projection", usage)
+	if usage := usageSnapshotFromUpdate(update); usage != nil {
+		t.Fatalf("usageSnapshotFromUpdate() = %#v, want no lossy machine-int projection", usage)
 	}
 }
 
 func TestUsageUpdateFromSnapshotDoesNotPreserveStaleUsageMeta(t *testing.T) {
 	t.Parallel()
 
-	update := UsageUpdateFromSnapshot(UsageSnapshot{
+	update := UsageUpdateFromSnapshot(session.UsageSnapshot{
 		PromptTokens: 12,
 		TotalTokens:  17,
 	}, map[string]any{
@@ -384,12 +385,12 @@ func TestUsageUpdateFromSnapshotDoesNotPreserveStaleUsageMeta(t *testing.T) {
 			},
 		},
 	})
-	usage := UsageSnapshotFromUpdate(update)
+	usage := usageSnapshotFromUpdate(update)
 	if usage == nil || usage.PromptTokens != 12 || usage.TotalTokens != 17 {
-		t.Fatalf("UsageSnapshotFromUpdate() = %#v, want current prompt/total tokens", usage)
+		t.Fatalf("usageSnapshotFromUpdate() = %#v, want current prompt/total tokens", usage)
 	}
 	if usage.CompletionTokens != 0 || usage.ReasoningTokens != 0 {
-		t.Fatalf("UsageSnapshotFromUpdate() = %#v, want stale usage fields removed", usage)
+		t.Fatalf("usageSnapshotFromUpdate() = %#v, want stale usage fields removed", usage)
 	}
 	caelis, _ := update.Meta["caelis"].(map[string]any)
 	if _, ok := caelis["invocation"].(map[string]any); !ok {

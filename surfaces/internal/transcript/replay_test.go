@@ -3,6 +3,7 @@ package transcript
 import (
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -150,7 +151,7 @@ func TestProjectReplayEventsProjectsUsageUpdate(t *testing.T) {
 
 	events := ProjectReplayEvents([]eventstream.Envelope{{
 		Kind: eventstream.KindSessionUpdate,
-		Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
+		Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{
 			PromptTokens: 12,
 			TotalTokens:  17,
 		}, nil),

@@ -199,11 +199,10 @@ func TestProjectSessionEventEnvelopeProjectsUsageAsACPUsageUpdate(t *testing.T) 
 	if len(events) != 1 {
 		t.Fatalf("ProjectSessionEventEnvelope() returned %d events, want usage update: %#v", len(events), events)
 	}
-	update, ok := events[0].Update.(schema.UsageUpdate)
-	if !ok {
+	if _, ok := events[0].Update.(schema.UsageUpdate); !ok {
 		t.Fatalf("update = %#v, want UsageUpdate", events[0].Update)
 	}
-	usage := eventstream.UsageSnapshotFromUpdate(update)
+	usage := eventstream.UsageSnapshotFromEnvelope(events[0])
 	if usage == nil || usage.PromptTokens != 12 || usage.CachedInputTokens != 3 || usage.CompletionTokens != 5 || usage.ReasoningTokens != 2 || usage.TotalTokens != 17 {
 		t.Fatalf("usage snapshot = %#v", usage)
 	}

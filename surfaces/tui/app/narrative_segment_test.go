@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	sdkmodel "github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
@@ -657,7 +656,7 @@ func TestTranscriptUsageTelemetryDoesNotAdvanceNarrativeBoundary(t *testing.T) {
 		},
 		{
 			Kind: TranscriptEventUsage, Scope: ACPProjectionMain, TurnID: "turn-1",
-			Usage: &eventstream.UsageSnapshot{TotalTokens: 10, ContextWindowTokens: 100},
+			Usage: &session.UsageSnapshot{TotalTokens: 10, ContextWindowTokens: 100},
 		},
 		{
 			Kind: TranscriptEventNarrative, Scope: ACPProjectionMain, TurnID: "turn-1",
