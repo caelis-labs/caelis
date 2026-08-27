@@ -8,6 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 )
 
@@ -23,7 +24,7 @@ func TestRegressionACPProjectorGoldenTerminalOutput(t *testing.T) {
 		Tool: &session.EventTool{
 			ID:     "call-ls",
 			Name:   shell.RunCommandToolName,
-			Kind:   projector.ToolKindExecute,
+			Kind:   schema.ToolKindExecute,
 			Status: "completed",
 			Content: []session.EventToolContent{{
 				Type:       "terminal",
@@ -39,19 +40,19 @@ func TestRegressionACPProjectorGoldenTerminalOutput(t *testing.T) {
 		t.Fatalf("expected 1 update, got %d", len(updates))
 	}
 
-	update, ok := updates[0].(projector.ToolCallUpdate)
+	update, ok := updates[0].(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
 	if update.ToolCallID != "call-ls" {
 		t.Fatalf("tool_call_id = %q, want call-ls", update.ToolCallID)
 	}
-	if update.Status == nil || *update.Status != projector.ToolStatusCompleted {
+	if update.Status == nil || *update.Status != schema.ToolStatusCompleted {
 		statusStr := "<nil>"
 		if update.Status != nil {
 			statusStr = *update.Status
 		}
-		t.Fatalf("status = %q, want %q", statusStr, projector.ToolStatusCompleted)
+		t.Fatalf("status = %q, want %q", statusStr, schema.ToolStatusCompleted)
 	}
 	if len(update.Content) != 1 || update.Content[0].Type != "terminal" || update.Content[0].TerminalID != "call-ls" {
 		t.Fatalf("content = %#v, want one terminal anchor", update.Content)
@@ -79,9 +80,9 @@ func TestRegressionACPProjectorGoldenDiffTitle(t *testing.T) {
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: projector.UpdateToolCallInfo,
+				SessionUpdate: schema.UpdateToolCallInfo,
 				ToolCallID:    "call-write",
-				Kind:          projector.ToolKindEdit,
+				Kind:          schema.ToolKindEdit,
 				Status:        "completed",
 				RawInput: map[string]any{
 					"path": "/workspace/main.go",
@@ -102,12 +103,12 @@ func TestRegressionACPProjectorGoldenDiffTitle(t *testing.T) {
 		t.Fatalf("expected 1 update, got %d", len(updates))
 	}
 
-	update, ok := updates[0].(projector.ToolCallUpdate)
+	update, ok := updates[0].(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
-	if update.Kind == nil || *update.Kind != projector.ToolKindEdit {
-		t.Fatalf("kind = %v, want %q", update.Kind, projector.ToolKindEdit)
+	if update.Kind == nil || *update.Kind != schema.ToolKindEdit {
+		t.Fatalf("kind = %v, want %q", update.Kind, schema.ToolKindEdit)
 	}
 }
 
@@ -120,9 +121,9 @@ func TestRegressionACPProjectorGoldenApprovalRequest(t *testing.T) {
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: projector.UpdateToolCallInfo,
+				SessionUpdate: schema.UpdateToolCallInfo,
 				ToolCallID:    "call-rm",
-				Kind:          projector.ToolKindExecute,
+				Kind:          schema.ToolKindExecute,
 				Status:        "waiting_approval",
 				RawInput: map[string]any{
 					"command": "rm -rf /tmp/demo",
@@ -137,16 +138,16 @@ func TestRegressionACPProjectorGoldenApprovalRequest(t *testing.T) {
 		t.Fatalf("expected 1 update, got %d", len(updates))
 	}
 
-	update, ok := updates[0].(projector.ToolCallUpdate)
+	update, ok := updates[0].(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
-	if update.Status == nil || *update.Status != projector.ToolStatusInProgress {
+	if update.Status == nil || *update.Status != schema.ToolStatusInProgress {
 		statusStr := "<nil>"
 		if update.Status != nil {
 			statusStr = *update.Status
 		}
-		t.Fatalf("status = %q, want %q (waiting_approval maps to in_progress in ACP)", statusStr, projector.ToolStatusInProgress)
+		t.Fatalf("status = %q, want %q (waiting_approval maps to in_progress in ACP)", statusStr, schema.ToolStatusInProgress)
 	}
 }
 
@@ -160,14 +161,14 @@ func TestRegressionACPProjectorGoldenLifecycleStatusMapping(t *testing.T) {
 		status     string
 		wantStatus string
 	}{
-		{"running", "running", projector.ToolStatusInProgress},
-		{"completed", "completed", projector.ToolStatusCompleted},
-		{"failed", "failed", projector.ToolStatusFailed},
-		{"pending", "pending", projector.ToolStatusPending},
-		{"waiting_approval", "waiting_approval", projector.ToolStatusInProgress},
-		{"interrupted", "interrupted", projector.ToolStatusFailed},
-		{"terminated", "terminated", projector.ToolStatusFailed},
-		{"timed_out", "timed_out", projector.ToolStatusFailed},
+		{"running", "running", schema.ToolStatusInProgress},
+		{"completed", "completed", schema.ToolStatusCompleted},
+		{"failed", "failed", schema.ToolStatusFailed},
+		{"pending", "pending", schema.ToolStatusPending},
+		{"waiting_approval", "waiting_approval", schema.ToolStatusInProgress},
+		{"interrupted", "interrupted", schema.ToolStatusFailed},
+		{"terminated", "terminated", schema.ToolStatusFailed},
+		{"timed_out", "timed_out", schema.ToolStatusFailed},
 	}
 
 	for _, tt := range statusTests {
@@ -179,9 +180,9 @@ func TestRegressionACPProjectorGoldenLifecycleStatusMapping(t *testing.T) {
 				Type:      session.EventTypeToolResult,
 				Protocol: &session.EventProtocol{
 					Update: &session.ProtocolUpdate{
-						SessionUpdate: projector.UpdateToolCallInfo,
+						SessionUpdate: schema.UpdateToolCallInfo,
 						ToolCallID:    "call-1",
-						Kind:          projector.ToolKindExecute,
+						Kind:          schema.ToolKindExecute,
 						Status:        tt.status,
 					},
 				},
@@ -192,7 +193,7 @@ func TestRegressionACPProjectorGoldenLifecycleStatusMapping(t *testing.T) {
 			if len(updates) == 0 {
 				t.Fatal("ProjectEvent() produced 0 updates")
 			}
-			update, ok := updates[0].(projector.ToolCallUpdate)
+			update, ok := updates[0].(schema.ToolCallUpdate)
 			if !ok {
 				t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 			}
@@ -215,7 +216,7 @@ func TestRegressionACPProjectorGoldenAssistantMessage(t *testing.T) {
 		Type:      session.EventTypeAssistant,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: projector.UpdateAgentMessage,
+				SessionUpdate: schema.UpdateAgentMessage,
 				Content:       session.ProtocolTextContent("The answer is 42."),
 			},
 		},
@@ -227,12 +228,12 @@ func TestRegressionACPProjectorGoldenAssistantMessage(t *testing.T) {
 		t.Fatal("ProjectEvent() produced 0 updates for assistant message")
 	}
 
-	chunk, ok := updates[0].(projector.ContentChunk)
+	chunk, ok := updates[0].(schema.ContentChunk)
 	if !ok {
 		t.Fatalf("update = %T, want ContentChunk", updates[0])
 	}
-	if chunk.SessionUpdate != projector.UpdateAgentMessage {
-		t.Fatalf("session_update = %q, want %q", chunk.SessionUpdate, projector.UpdateAgentMessage)
+	if chunk.SessionUpdate != schema.UpdateAgentMessage {
+		t.Fatalf("session_update = %q, want %q", chunk.SessionUpdate, schema.UpdateAgentMessage)
 	}
 }
 
@@ -320,9 +321,9 @@ func TestRegressionACPProjectorNotifications(t *testing.T) {
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: projector.UpdateToolCallInfo,
+				SessionUpdate: schema.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Kind:          projector.ToolKindExecute,
+				Kind:          schema.ToolKindExecute,
 				Status:        "completed",
 			},
 		},

@@ -8,6 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
@@ -16,9 +17,9 @@ func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: UpdateToolCallInfo,
+				SessionUpdate: schema.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Kind:          ToolKindOther,
+				Kind:          schema.ToolKindOther,
 				Status:        "running",
 				RawInput: map[string]any{
 					"prompt": "child work",
@@ -35,12 +36,12 @@ func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 	}
-	update, ok := updates[0].(ToolCallUpdate)
+	update, ok := updates[0].(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
-	if update.Status == nil || *update.Status != ToolStatusInProgress {
-		t.Fatalf("status = %v, want %q", update.Status, ToolStatusInProgress)
+	if update.Status == nil || *update.Status != schema.ToolStatusInProgress {
+		t.Fatalf("status = %v, want %q", update.Status, schema.ToolStatusInProgress)
 	}
 }
 
@@ -52,9 +53,9 @@ func TestEventProjectorDoesNotPromoteTraceTextIntoSparseToolUpdateContent(t *tes
 		Type:      session.EventTypeToolResult,
 		Text:      "tool update",
 		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-			SessionUpdate: UpdateToolCallInfo,
+			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
-			Status:        ToolStatusCompleted,
+			Status:        schema.ToolStatusCompleted,
 			RawOutput:     map[string]any{"formatted_output": "ok\n", "exit_code": 0},
 			Meta:          metautil.WithTerminalOutput(nil, "call-1", "ok\n"),
 		}},
@@ -65,7 +66,7 @@ func TestEventProjectorDoesNotPromoteTraceTextIntoSparseToolUpdateContent(t *tes
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 	}
-	update, ok := updates[0].(ToolCallUpdate)
+	update, ok := updates[0].(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
@@ -94,7 +95,7 @@ func TestProjectPermissionRequestUsesDurablePermissionAfterRoundTrip(t *testing.
 				ToolCall: session.ProtocolToolCall{
 					ID:       "call-rm",
 					Name:     "RunCommand",
-					Kind:     ToolKindExecute,
+					Kind:     schema.ToolKindExecute,
 					Title:    "RUN_COMMAND rm",
 					Status:   "waiting_approval",
 					RawInput: map[string]any{"command": "rm -rf tmp"},
@@ -144,7 +145,7 @@ func TestEventProjectorRemapsBuiltinTerminalContentToDisplayID(t *testing.T) {
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: UpdateToolCallInfo,
+				SessionUpdate: schema.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
 				Kind:          "RunCommand",
 				Status:        "running",
@@ -162,7 +163,7 @@ func TestEventProjectorRemapsBuiltinTerminalContentToDisplayID(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 	}
-	update, ok := updates[0].(ToolCallUpdate)
+	update, ok := updates[0].(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
@@ -171,7 +172,7 @@ func TestEventProjectorRemapsBuiltinTerminalContentToDisplayID(t *testing.T) {
 	assertTerminalOutput(t, update.Meta, "call-1", "line\n")
 }
 
-func assertTerminalAnchor(t *testing.T, content []ToolCallContent, terminalID string) {
+func assertTerminalAnchor(t *testing.T, content []schema.ToolCallContent, terminalID string) {
 	t.Helper()
 	if len(content) != 1 {
 		t.Fatalf("content = %#v, want one terminal anchor", content)
@@ -215,7 +216,7 @@ func TestEventProjectorConcatenatesMultipleTerminalContentItems(t *testing.T) {
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: UpdateToolCallInfo,
+				SessionUpdate: schema.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
 				Kind:          "RunCommand",
 				Status:        "completed",
@@ -233,7 +234,7 @@ func TestEventProjectorConcatenatesMultipleTerminalContentItems(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 	}
-	update, ok := updates[0].(ToolCallUpdate)
+	update, ok := updates[0].(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
@@ -249,11 +250,11 @@ func TestEventProjectorKeepsGenericProtocolTerminalContentWithoutPromotingExecut
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: UpdateToolCall,
+				SessionUpdate: schema.UpdateToolCall,
 				ToolCallID:    "call-1",
 				Title:         "RUN_COMMAND date",
-				Kind:          ToolKindExecute,
-				Status:        ToolStatusPending,
+				Kind:          schema.ToolKindExecute,
+				Status:        schema.ToolStatusPending,
 				RawInput:      map[string]any{"command": "date"},
 				Content: []session.ProtocolToolCallContent{{
 					Type:       "terminal",
@@ -269,11 +270,11 @@ func TestEventProjectorKeepsGenericProtocolTerminalContentWithoutPromotingExecut
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent() produced %d updates, want protocol tool_call only", len(updates))
 	}
-	call, ok := updates[0].(ToolCall)
+	call, ok := updates[0].(schema.ToolCall)
 	if !ok {
 		t.Fatalf("update = %T, want ToolCall", updates[0])
 	}
-	if call.ToolCallID != "call-1" || call.Kind != ToolKindExecute || call.Title != "RUN_COMMAND date" {
+	if call.ToolCallID != "call-1" || call.Kind != schema.ToolKindExecute || call.Title != "RUN_COMMAND date" {
 		t.Fatalf("tool call = %#v, want durable protocol identity", call)
 	}
 	if len(call.Content) != 1 || call.Content[0].Type != "terminal" || call.Content[0].TerminalID != "call-1" {
@@ -304,11 +305,11 @@ func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
 	if len(userUpdates) != 1 {
 		t.Fatalf("ProjectEvent(user) produced %d updates, want 1", len(userUpdates))
 	}
-	userChunk, ok := userUpdates[0].(ContentChunk)
-	if !ok || userChunk.SessionUpdate != UpdateUserMessage {
+	userChunk, ok := userUpdates[0].(schema.ContentChunk)
+	if !ok || userChunk.SessionUpdate != schema.UpdateUserMessage {
 		t.Fatalf("user update = %#v, want user message chunk", userUpdates[0])
 	}
-	if content, ok := userChunk.Content.(TextContent); !ok || content.Text != "hello" {
+	if content, ok := userChunk.Content.(schema.TextContent); !ok || content.Text != "hello" {
 		t.Fatalf("user content = %#v, want hello text", userChunk.Content)
 	}
 
@@ -328,18 +329,18 @@ func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
 	if len(assistantUpdates) != 2 {
 		t.Fatalf("ProjectEvent(assistant) produced %d updates, want thought + message: %#v", len(assistantUpdates), assistantUpdates)
 	}
-	thought, ok := assistantUpdates[0].(ContentChunk)
-	if !ok || thought.SessionUpdate != UpdateAgentThought {
+	thought, ok := assistantUpdates[0].(schema.ContentChunk)
+	if !ok || thought.SessionUpdate != schema.UpdateAgentThought {
 		t.Fatalf("assistant updates[0] = %#v, want thought chunk", assistantUpdates[0])
 	}
-	if content, ok := thought.Content.(TextContent); !ok || content.Text != "thinking" {
+	if content, ok := thought.Content.(schema.TextContent); !ok || content.Text != "thinking" {
 		t.Fatalf("thought content = %#v, want thinking", thought.Content)
 	}
-	messageChunk, ok := assistantUpdates[1].(ContentChunk)
-	if !ok || messageChunk.SessionUpdate != UpdateAgentMessage {
+	messageChunk, ok := assistantUpdates[1].(schema.ContentChunk)
+	if !ok || messageChunk.SessionUpdate != schema.UpdateAgentMessage {
 		t.Fatalf("assistant updates[1] = %#v, want message chunk", assistantUpdates[1])
 	}
-	if content, ok := messageChunk.Content.(TextContent); !ok || content.Text != "done" {
+	if content, ok := messageChunk.Content.(schema.TextContent); !ok || content.Text != "done" {
 		t.Fatalf("message content = %#v, want done", messageChunk.Content)
 	}
 
@@ -356,7 +357,7 @@ func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
 	if len(reasoningUpdates) != 1 {
 		t.Fatalf("ProjectEvent(reasoning-only) produced %d updates, want thought only: %#v", len(reasoningUpdates), reasoningUpdates)
 	}
-	if chunk, ok := reasoningUpdates[0].(ContentChunk); !ok || chunk.SessionUpdate != UpdateAgentThought {
+	if chunk, ok := reasoningUpdates[0].(schema.ContentChunk); !ok || chunk.SessionUpdate != schema.UpdateAgentThought {
 		t.Fatalf("reasoning-only update = %#v, want thought chunk", reasoningUpdates[0])
 	}
 
@@ -397,18 +398,18 @@ func TestEventProjectorSplitsProtocolAssistantSnapshotReasoning(t *testing.T) {
 	if len(updates) != 2 {
 		t.Fatalf("ProjectEvent() produced %d updates, want thought + message: %#v", len(updates), updates)
 	}
-	thought, ok := updates[0].(ContentChunk)
-	if !ok || thought.SessionUpdate != UpdateAgentThought {
+	thought, ok := updates[0].(schema.ContentChunk)
+	if !ok || thought.SessionUpdate != schema.UpdateAgentThought {
 		t.Fatalf("updates[0] = %#v, want thought chunk", updates[0])
 	}
-	if content, ok := thought.Content.(TextContent); !ok || content.Text != "partial thought" {
+	if content, ok := thought.Content.(schema.TextContent); !ok || content.Text != "partial thought" {
 		t.Fatalf("thought content = %#v, want partial thought", thought.Content)
 	}
-	message, ok := updates[1].(ContentChunk)
-	if !ok || message.SessionUpdate != UpdateAgentMessage {
+	message, ok := updates[1].(schema.ContentChunk)
+	if !ok || message.SessionUpdate != schema.UpdateAgentMessage {
 		t.Fatalf("updates[1] = %#v, want message chunk", updates[1])
 	}
-	if content, ok := message.Content.(TextContent); !ok || content.Text != "partial answer" {
+	if content, ok := message.Content.(schema.TextContent); !ok || content.Text != "partial answer" {
 		t.Fatalf("message content = %#v, want partial answer", message.Content)
 	}
 }
@@ -436,7 +437,7 @@ func TestEventProjectorProjectsDurableContentChunkMessageIDAndMeta(t *testing.T)
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent() produced %d updates, want 1: %#v", len(updates), updates)
 	}
-	chunk, ok := updates[0].(ContentChunk)
+	chunk, ok := updates[0].(schema.ContentChunk)
 	if !ok {
 		t.Fatalf("update = %T, want ContentChunk", updates[0])
 	}
@@ -459,9 +460,9 @@ func TestEventProjectorDoesNotAttachMismatchedProtocolMetaToAssistantChunk(t *te
 		Message:   &message,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: UpdateToolCall,
+				SessionUpdate: schema.UpdateToolCall,
 				ToolCallID:    "call-1",
-				Kind:          ToolKindExecute,
+				Kind:          schema.ToolKindExecute,
 				Title:         "RUN_COMMAND date",
 				Meta:          map[string]any{"vendor": map[string]any{"trace": "tool-meta"}},
 			},
@@ -474,14 +475,14 @@ func TestEventProjectorDoesNotAttachMismatchedProtocolMetaToAssistantChunk(t *te
 	if len(updates) != 2 {
 		t.Fatalf("ProjectEvent() produced %d updates, want assistant chunk + tool call: %#v", len(updates), updates)
 	}
-	chunk, ok := updates[0].(ContentChunk)
+	chunk, ok := updates[0].(schema.ContentChunk)
 	if !ok {
 		t.Fatalf("first update = %T, want ContentChunk", updates[0])
 	}
 	if len(chunk.Meta) != 0 || chunk.MessageID != "" {
 		t.Fatalf("assistant chunk = %#v, want no mismatched tool metadata", chunk)
 	}
-	call, ok := updates[1].(ToolCall)
+	call, ok := updates[1].(schema.ToolCall)
 	if !ok {
 		t.Fatalf("second update = %T, want ToolCall", updates[1])
 	}
@@ -505,11 +506,11 @@ func TestEventProjectorProjectsCompactCheckpoint(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent(compact) produced %d updates, want 1", len(updates))
 	}
-	chunk, ok := updates[0].(ContentChunk)
-	if !ok || chunk.SessionUpdate != UpdateCompact {
+	chunk, ok := updates[0].(schema.ContentChunk)
+	if !ok || chunk.SessionUpdate != schema.UpdateCompact {
 		t.Fatalf("compact update = %#v, want compact content chunk", updates[0])
 	}
-	if content, ok := chunk.Content.(TextContent); !ok || !strings.Contains(content.Text, "CONTEXT CHECKPOINT") {
+	if content, ok := chunk.Content.(schema.TextContent); !ok || !strings.Contains(content.Text, "CONTEXT CHECKPOINT") {
 		t.Fatalf("compact content = %#v, want checkpoint text", chunk.Content)
 	}
 }
@@ -531,9 +532,9 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 		Tool: &session.EventTool{
 			ID:     "call-1",
 			Name:   "RunCommand",
-			Kind:   ToolKindExecute,
+			Kind:   schema.ToolKindExecute,
 			Title:  "RUN_COMMAND date",
-			Status: ToolStatusPending,
+			Status: schema.ToolStatusPending,
 			Input:  map[string]any{"command": "date", "workdir": "/tmp/work"},
 			Content: []session.EventToolContent{{
 				Type:       "terminal",
@@ -551,29 +552,29 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 	if len(callUpdates) != 3 {
 		t.Fatalf("ProjectEvent(tool call) produced %d updates, want thought + message + tool_call: %#v", len(callUpdates), callUpdates)
 	}
-	thought, ok := callUpdates[0].(ContentChunk)
-	if !ok || thought.SessionUpdate != UpdateAgentThought {
+	thought, ok := callUpdates[0].(schema.ContentChunk)
+	if !ok || thought.SessionUpdate != schema.UpdateAgentThought {
 		t.Fatalf("first update = %#v, want reasoning sibling", callUpdates[0])
 	}
-	if content, ok := thought.Content.(TextContent); !ok || content.Text != "Need output first." {
+	if content, ok := thought.Content.(schema.TextContent); !ok || content.Text != "Need output first." {
 		t.Fatalf("reasoning sibling content = %#v, want exact durable reasoning", thought.Content)
 	}
-	assistant, ok := callUpdates[1].(ContentChunk)
-	if !ok || assistant.SessionUpdate != UpdateAgentMessage {
+	assistant, ok := callUpdates[1].(schema.ContentChunk)
+	if !ok || assistant.SessionUpdate != schema.UpdateAgentMessage {
 		t.Fatalf("second update = %#v, want assistant sibling", callUpdates[1])
 	}
-	if content, ok := assistant.Content.(TextContent); !ok || content.Text != "I will run it." {
+	if content, ok := assistant.Content.(schema.TextContent); !ok || content.Text != "I will run it." {
 		t.Fatalf("assistant sibling content = %#v, want exact durable text", assistant.Content)
 	}
-	call, ok := callUpdates[2].(ToolCall)
+	call, ok := callUpdates[2].(schema.ToolCall)
 	if !ok {
 		t.Fatalf("tool call update = %T, want ToolCall", callUpdates[2])
 	}
-	if call.ToolCallID != "call-1" || call.Kind != ToolKindExecute || call.Title != "RUN_COMMAND date" {
+	if call.ToolCallID != "call-1" || call.Kind != schema.ToolKindExecute || call.Title != "RUN_COMMAND date" {
 		t.Fatalf("tool call = %#v, want RUN_COMMAND execute call", call)
 	}
 	for _, update := range callUpdates {
-		if extra, ok := update.(ToolCall); ok && extra.ToolCallID == "call-2" {
+		if extra, ok := update.(schema.ToolCall); ok && extra.ToolCallID == "call-2" {
 			t.Fatalf("canonical event duplicated sibling tool_use call-2: %#v", callUpdates)
 		}
 	}
@@ -591,9 +592,9 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 		Tool: &session.EventTool{
 			ID:     "call-1",
 			Name:   "RunCommand",
-			Kind:   ToolKindExecute,
+			Kind:   schema.ToolKindExecute,
 			Title:  "RUN_COMMAND echo ok",
-			Status: ToolStatusCompleted,
+			Status: schema.ToolStatusCompleted,
 			Input:  map[string]any{"command": "echo ok"},
 			Output: map[string]any{"stdout": "ok\n", "exit_code": 0},
 			Content: []session.EventToolContent{{
@@ -614,11 +615,11 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 	if len(resultUpdates) != 1 {
 		t.Fatalf("ProjectEvent(tool result) produced %d updates, want 1", len(resultUpdates))
 	}
-	result, ok := resultUpdates[0].(ToolCallUpdate)
+	result, ok := resultUpdates[0].(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("tool result update = %T, want ToolCallUpdate", resultUpdates[0])
 	}
-	if result.ToolCallID != "call-1" || result.Status == nil || *result.Status != ToolStatusCompleted {
+	if result.ToolCallID != "call-1" || result.Status == nil || *result.Status != schema.ToolStatusCompleted {
 		t.Fatalf("tool result = %#v, want completed call-1", result)
 	}
 	if output, ok := result.RawOutput.(map[string]any); !ok || output["stdout"] != "ok\n" {
@@ -655,7 +656,7 @@ func TestEventProjectorProjectsPlanPayload(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent(plan) produced %d updates, want 1", len(updates))
 	}
-	plan, ok := updates[0].(PlanUpdate)
+	plan, ok := updates[0].(schema.PlanUpdate)
 	if !ok {
 		t.Fatalf("update = %T, want PlanUpdate", updates[0])
 	}
@@ -676,7 +677,7 @@ func TestEventProjectorPreservesExplicitEmptyPlanUpdate(t *testing.T) {
 		Type:      session.EventTypePlan,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: UpdatePlan,
+				SessionUpdate: schema.UpdatePlan,
 				Entries:       []session.ProtocolPlanEntry{},
 			},
 		},
@@ -687,7 +688,7 @@ func TestEventProjectorPreservesExplicitEmptyPlanUpdate(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent(empty plan) produced %d updates, want 1: %#v", len(updates), updates)
 	}
-	plan, ok := updates[0].(PlanUpdate)
+	plan, ok := updates[0].(schema.PlanUpdate)
 	if !ok {
 		t.Fatalf("update = %T, want PlanUpdate", updates[0])
 	}
@@ -702,9 +703,9 @@ func TestEventProjectorPreservesPartialProtocolToolUpdate(t *testing.T) {
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: UpdateToolCallInfo,
+				SessionUpdate: schema.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Status:        ToolStatusCompleted,
+				Status:        schema.ToolStatusCompleted,
 			},
 		},
 	})
@@ -714,7 +715,7 @@ func TestEventProjectorPreservesPartialProtocolToolUpdate(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 	}
-	update, ok := updates[0].(ToolCallUpdate)
+	update, ok := updates[0].(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
@@ -724,8 +725,8 @@ func TestEventProjectorPreservesPartialProtocolToolUpdate(t *testing.T) {
 	if update.Kind != nil {
 		t.Fatalf("kind = %q, want nil for partial status update", *update.Kind)
 	}
-	if update.Status == nil || *update.Status != ToolStatusCompleted {
-		t.Fatalf("status = %v, want %q", update.Status, ToolStatusCompleted)
+	if update.Status == nil || *update.Status != schema.ToolStatusCompleted {
+		t.Fatalf("status = %v, want %q", update.Status, schema.ToolStatusCompleted)
 	}
 }
 
@@ -735,9 +736,9 @@ func TestEventProjectorNotificationsSerializePartialToolUpdate(t *testing.T) {
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: UpdateToolCallInfo,
+				SessionUpdate: schema.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Status:        ToolStatusCompleted,
+				Status:        schema.ToolStatusCompleted,
 			},
 		},
 	})
@@ -771,7 +772,7 @@ func TestEventProjectorPreservesStandardDiffContent(t *testing.T) {
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: UpdateToolCallInfo,
+				SessionUpdate: schema.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
 				Kind:          "Patch",
 				Status:        "completed",
@@ -790,7 +791,7 @@ func TestEventProjectorPreservesStandardDiffContent(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 	}
-	update, ok := updates[0].(ToolCallUpdate)
+	update, ok := updates[0].(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
@@ -817,12 +818,12 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 				Type:      session.EventTypeUser,
 				Protocol: &session.EventProtocol{
 					Update: &session.ProtocolUpdate{
-						SessionUpdate: UpdateUserMessage,
+						SessionUpdate: schema.UpdateUserMessage,
 						Content:       session.ProtocolTextContent("stored user"),
 					},
 				},
 			},
-			updateType: UpdateUserMessage,
+			updateType: schema.UpdateUserMessage,
 			want:       "stored user",
 		},
 		{
@@ -832,12 +833,12 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 				Type:      session.EventTypeAssistant,
 				Protocol: &session.EventProtocol{
 					Update: &session.ProtocolUpdate{
-						SessionUpdate: UpdateAgentMessage,
+						SessionUpdate: schema.UpdateAgentMessage,
 						Content:       session.ProtocolTextContent("stored assistant"),
 					},
 				},
 			},
-			updateType: UpdateAgentMessage,
+			updateType: schema.UpdateAgentMessage,
 			want:       "stored assistant",
 		},
 		{
@@ -847,7 +848,7 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 				Type:      session.EventTypeAssistant,
 				Protocol: &session.EventProtocol{
 					Update: &session.ProtocolUpdate{
-						SessionUpdate: UpdateAgentThought,
+						SessionUpdate: schema.UpdateAgentThought,
 						Content: map[string]any{
 							"type":          "assistant_snapshot",
 							"reasoningText": "stored thought",
@@ -855,7 +856,7 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 					},
 				},
 			},
-			updateType: UpdateAgentThought,
+			updateType: schema.UpdateAgentThought,
 			want:       "stored thought",
 		},
 	}
@@ -872,14 +873,14 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 			if notifications[0].SessionID != "session-1" {
 				t.Fatalf("SessionID = %q, want session-1", notifications[0].SessionID)
 			}
-			chunk, ok := notifications[0].Update.(ContentChunk)
+			chunk, ok := notifications[0].Update.(schema.ContentChunk)
 			if !ok {
 				t.Fatalf("update = %T, want ContentChunk", notifications[0].Update)
 			}
 			if chunk.SessionUpdate != tt.updateType {
 				t.Fatalf("SessionUpdate = %q, want %q", chunk.SessionUpdate, tt.updateType)
 			}
-			content, ok := chunk.Content.(TextContent)
+			content, ok := chunk.Content.(schema.TextContent)
 			if !ok {
 				t.Fatalf("Content = %T, want TextContent", chunk.Content)
 			}
@@ -911,24 +912,24 @@ func TestEventProjectorProjectsCanonicalAssistantMessageWithToolCalls(t *testing
 	if got, want := len(updates), 4; got != want {
 		t.Fatalf("ProjectEvent() produced %d updates, want %d: %#v", got, want, updates)
 	}
-	thought, ok := updates[0].(ContentChunk)
-	if !ok || thought.SessionUpdate != UpdateAgentThought {
+	thought, ok := updates[0].(schema.ContentChunk)
+	if !ok || thought.SessionUpdate != schema.UpdateAgentThought {
 		t.Fatalf("updates[0] = %#v, want agent thought chunk", updates[0])
 	}
-	messageChunk, ok := updates[1].(ContentChunk)
-	if !ok || messageChunk.SessionUpdate != UpdateAgentMessage {
+	messageChunk, ok := updates[1].(schema.ContentChunk)
+	if !ok || messageChunk.SessionUpdate != schema.UpdateAgentMessage {
 		t.Fatalf("updates[1] = %#v, want agent message chunk", updates[1])
 	}
-	firstCall, ok := updates[2].(ToolCall)
+	firstCall, ok := updates[2].(schema.ToolCall)
 	if !ok {
 		t.Fatalf("updates[2] = %T, want ToolCall", updates[2])
 	}
-	if firstCall.ToolCallID != "call-1" || firstCall.Kind != ToolKindExecute {
+	if firstCall.ToolCallID != "call-1" || firstCall.Kind != schema.ToolKindExecute {
 		t.Fatalf("first call = %#v, want RUN_COMMAND execute call", firstCall)
 	}
 	assertTerminalAnchor(t, firstCall.Content, "call-1")
 	assertTerminalInfo(t, firstCall.Meta, "call-1")
-	secondCall, ok := updates[3].(ToolCall)
+	secondCall, ok := updates[3].(schema.ToolCall)
 	if !ok {
 		t.Fatalf("updates[3] = %T, want ToolCall", updates[3])
 	}
@@ -943,9 +944,9 @@ func TestEventProjectorDoesNotInferSpawnIdentityFromRawInput(t *testing.T) {
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: UpdateToolCallInfo,
+				SessionUpdate: schema.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Kind:          ToolKindExecute,
+				Kind:          schema.ToolKindExecute,
 				Status:        "running",
 				RawInput: map[string]any{
 					"agent":  "codex",
@@ -962,12 +963,12 @@ func TestEventProjectorDoesNotInferSpawnIdentityFromRawInput(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 	}
-	update, ok := updates[0].(ToolCallUpdate)
+	update, ok := updates[0].(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
-	if update.Kind == nil || *update.Kind != ToolKindExecute {
-		t.Fatalf("kind = %v, want %q", update.Kind, ToolKindExecute)
+	if update.Kind == nil || *update.Kind != schema.ToolKindExecute {
+		t.Fatalf("kind = %v, want %q", update.Kind, schema.ToolKindExecute)
 	}
 	if update.Title != nil {
 		t.Fatalf("title = %v, standard execute kind must not become an exact-name title", update.Title)
@@ -984,9 +985,9 @@ func TestEventProjectorDoesNotAddTerminalInfoToGenericRunningToolUpdate(t *testi
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: UpdateToolCallInfo,
+				SessionUpdate: schema.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Kind:          ToolKindExecute,
+				Kind:          schema.ToolKindExecute,
 				Status:        "running",
 				RawInput:      map[string]any{"command": "echo hi"},
 				RawOutput:     map[string]any{"state": "running", "task_id": "task-1"},
@@ -1010,11 +1011,11 @@ func TestEventProjectorDoesNotAddTerminalInfoToGenericRunningToolUpdate(t *testi
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 	}
-	update, ok := updates[0].(ToolCallUpdate)
+	update, ok := updates[0].(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
-	if got := stringPtrValue(update.Status); got != ToolStatusInProgress {
+	if got := stringPtrValue(update.Status); got != schema.ToolStatusInProgress {
 		t.Fatalf("status = %q, want in_progress", got)
 	}
 	if len(update.Content) != 0 {
@@ -1037,9 +1038,9 @@ func TestEventProjectorProjectsRunCommandDisplayTerminalMetadata(t *testing.T) {
 		Message:   &message,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
-				SessionUpdate: UpdateToolCall,
+				SessionUpdate: schema.UpdateToolCall,
 				ToolCallID:    "call-1",
-				Kind:          ToolKindExecute,
+				Kind:          schema.ToolKindExecute,
 				Status:        "pending",
 				RawInput: map[string]any{
 					"command": "echo hi",
@@ -1054,12 +1055,12 @@ func TestEventProjectorProjectsRunCommandDisplayTerminalMetadata(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent() produced %d updates, want tool_call only", len(updates))
 	}
-	call, ok := updates[0].(ToolCall)
+	call, ok := updates[0].(schema.ToolCall)
 	if !ok {
 		t.Fatalf("updates[0] = %T, want ToolCall", updates[0])
 	}
-	if call.Kind != ToolKindExecute {
-		t.Fatalf("kind = %q, want %q", call.Kind, ToolKindExecute)
+	if call.Kind != schema.ToolKindExecute {
+		t.Fatalf("kind = %q, want %q", call.Kind, schema.ToolKindExecute)
 	}
 	assertTerminalAnchor(t, call.Content, "call-1")
 	assertTerminalInfo(t, call.Meta, "call-1")
@@ -1073,7 +1074,7 @@ func TestEventProjectorPreservesReasoningBoundaryWhitespace(t *testing.T) {
 		Message:   &message,
 		Text:      "think ",
 		Protocol: &session.EventProtocol{
-			Update: &session.ProtocolUpdate{SessionUpdate: UpdateAgentThought},
+			Update: &session.ProtocolUpdate{SessionUpdate: schema.UpdateAgentThought},
 		},
 	})
 	if err != nil {
@@ -1082,11 +1083,11 @@ func TestEventProjectorPreservesReasoningBoundaryWhitespace(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 	}
-	update, ok := updates[0].(ContentChunk)
+	update, ok := updates[0].(schema.ContentChunk)
 	if !ok {
 		t.Fatalf("update = %T, want ContentChunk", updates[0])
 	}
-	content, ok := update.Content.(TextContent)
+	content, ok := update.Content.(schema.TextContent)
 	if !ok {
 		t.Fatalf("update.Content = %T, want TextContent", update.Content)
 	}

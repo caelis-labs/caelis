@@ -143,8 +143,8 @@ func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status stri
 	if occurredAt.IsZero() {
 		occurredAt = time.Now()
 	}
-	update := ToolCallUpdate{
-		SessionUpdate: UpdateToolCallInfo,
+	update := schema.ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(req.CallID),
 		Meta:          streamFrameToolMeta(meta, req.RawInput, nil, "", req.TaskHandle),
 	}

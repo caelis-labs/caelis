@@ -5,6 +5,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestEventProjectorAddsStructuredCitationsToAgentMessageMeta(t *testing.T) {
@@ -29,7 +30,7 @@ func TestEventProjectorAddsStructuredCitationsToAgentMessageMeta(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("updates = %#v", updates)
 	}
-	chunk, ok := updates[0].(ContentChunk)
+	chunk, ok := updates[0].(schema.ContentChunk)
 	if !ok {
 		t.Fatalf("update = %T, want ContentChunk", updates[0])
 	}

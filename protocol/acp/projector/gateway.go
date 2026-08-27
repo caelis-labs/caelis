@@ -3,7 +3,7 @@ package projector
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk"
+	agentsdk "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -319,7 +319,7 @@ func demoteUnpositionedDurableProjections(events []eventstream.Envelope) []event
 // ProjectSessionEventNotifications projects one canonical session event into
 // ACP session/update notifications. Eventstream-only extensions and historical
 // request_permission prompts are intentionally not replayed through session/load.
-func ProjectSessionEventNotifications(base eventstream.Envelope, event *session.Event, projector Projector) ([]SessionNotification, error) {
+func ProjectSessionEventNotifications(base eventstream.Envelope, event *session.Event, projector Projector) ([]schema.SessionNotification, error) {
 	if projector == nil {
 		projector = EventProjector{}
 	}
@@ -330,7 +330,7 @@ func ProjectSessionEventNotifications(base eventstream.Envelope, event *session.
 	out := cloneSessionNotifications(notifications, base, event)
 	if usage := session.UsageSnapshotFromSessionEvent(event); usage != nil && !containsUsageNotification(out) {
 		usageEnv := gatewayUsageEnvelope(base, usage)
-		out = append(out, SessionNotification{
+		out = append(out, schema.SessionNotification{
 			SessionID: sessionNotificationID(usageEnv.SessionID, base, event),
 			Update:    eventstream.CloneUpdate(usageEnv.Update),
 		})
@@ -338,13 +338,13 @@ func ProjectSessionEventNotifications(base eventstream.Envelope, event *session.
 	return out, nil
 }
 
-func cloneSessionNotifications(notifications []SessionNotification, base eventstream.Envelope, event *session.Event) []SessionNotification {
-	out := make([]SessionNotification, 0, len(notifications))
+func cloneSessionNotifications(notifications []schema.SessionNotification, base eventstream.Envelope, event *session.Event) []schema.SessionNotification {
+	out := make([]schema.SessionNotification, 0, len(notifications))
 	for _, notification := range notifications {
 		if notification.Update == nil {
 			continue
 		}
-		out = append(out, SessionNotification{
+		out = append(out, schema.SessionNotification{
 			SessionID: sessionNotificationID(notification.SessionID, base, event),
 			Update:    eventstream.CloneUpdate(notification.Update),
 		})
@@ -456,7 +456,7 @@ func containsUsageUpdate(events []eventstream.Envelope) bool {
 	return false
 }
 
-func containsUsageNotification(notifications []SessionNotification) bool {
+func containsUsageNotification(notifications []schema.SessionNotification) bool {
 	for _, notification := range notifications {
 		if eventstream.UpdateType(notification.Update) == schema.UpdateUsage {
 			return true

@@ -6,13 +6,14 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func terminalTextContent(content any) string {
 	switch typed := content.(type) {
 	case nil:
 		return ""
-	case TextContent:
+	case schema.TextContent:
 		if strings.EqualFold(strings.TrimSpace(typed.Type), "text") {
 			return typed.Text
 		}
@@ -27,7 +28,7 @@ func terminalTextContent(content any) string {
 		if len(typed) == 0 {
 			return ""
 		}
-		var decoded TextContent
+		var decoded schema.TextContent
 		if err := json.Unmarshal(typed, &decoded); err == nil && strings.EqualFold(strings.TrimSpace(decoded.Type), "text") {
 			return decoded.Text
 		}
@@ -41,7 +42,7 @@ func terminalTextContent(content any) string {
 		if err != nil || len(raw) == 0 {
 			return ""
 		}
-		var decoded TextContent
+		var decoded schema.TextContent
 		if err := json.Unmarshal(raw, &decoded); err == nil && strings.EqualFold(strings.TrimSpace(decoded.Type), "text") {
 			return decoded.Text
 		}
@@ -49,7 +50,7 @@ func terminalTextContent(content any) string {
 	}
 }
 
-func withDisplayTerminal(call ToolCall, name string, args map[string]any) ToolCall {
+func withDisplayTerminal(call schema.ToolCall, name string, args map[string]any) schema.ToolCall {
 	call.Meta = acpMetaWithToolName(call.Meta, name)
 	terminalID, ok := projectedDisplayTerminalID(call.ToolCallID, name)
 	if !ok {
@@ -60,7 +61,7 @@ func withDisplayTerminal(call ToolCall, name string, args map[string]any) ToolCa
 	return call
 }
 
-func withDisplayTerminalUpdate(update ToolCallUpdate, toolCallID string, name string) ToolCallUpdate {
+func withDisplayTerminalUpdate(update schema.ToolCallUpdate, toolCallID string, name string) schema.ToolCallUpdate {
 	update.Meta = acpMetaWithToolName(update.Meta, name)
 	terminalID, ok := projectedDisplayTerminalID(toolCallID, name)
 	if !ok || strings.TrimSpace(terminalID) == "" {
@@ -74,15 +75,15 @@ func withDisplayTerminalUpdate(update ToolCallUpdate, toolCallID string, name st
 	return update
 }
 
-func terminalExtensionMetaFromContent(meta map[string]any, terminalID string, content []ToolCallContent) (map[string]any, []ToolCallContent) {
+func terminalExtensionMetaFromContent(meta map[string]any, terminalID string, content []schema.ToolCallContent) (map[string]any, []schema.ToolCallContent) {
 	terminalID = strings.TrimSpace(terminalID)
 	if terminalID == "" {
 		return meta, content
 	}
 	if len(content) == 0 {
-		return metautil.WithTerminalInfo(meta, terminalID), []ToolCallContent{terminalAnchorContent(terminalID)}
+		return metautil.WithTerminalInfo(meta, terminalID), []schema.ToolCallContent{terminalAnchorContent(terminalID)}
 	}
-	out := make([]ToolCallContent, 0, len(content))
+	out := make([]schema.ToolCallContent, 0, len(content))
 	var text strings.Builder
 	for _, item := range content {
 		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
@@ -107,8 +108,8 @@ func terminalExtensionMetaFromContent(meta map[string]any, terminalID string, co
 	return meta, out
 }
 
-func terminalAnchorContent(terminalID string) ToolCallContent {
-	return ToolCallContent{
+func terminalAnchorContent(terminalID string) schema.ToolCallContent {
+	return schema.ToolCallContent{
 		Type:       "terminal",
 		TerminalID: strings.TrimSpace(terminalID),
 	}
@@ -119,7 +120,7 @@ func updateStatusFinal(status *string) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(*status)) {
-	case ToolStatusCompleted, ToolStatusFailed, "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout":
+	case schema.ToolStatusCompleted, schema.ToolStatusFailed, "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout":
 		return true
 	default:
 		return false
@@ -227,9 +228,9 @@ func protocolToolNameFromMeta(meta map[string]any) string {
 func protocolToolNameFromLegacyKind(kind string) string {
 	kind = strings.TrimSpace(kind)
 	switch strings.ToLower(kind) {
-	case "", ToolKindRead, ToolKindEdit, ToolKindDelete, ToolKindMove,
-		ToolKindSearch, ToolKindExecute, ToolKindThink, ToolKindFetch,
-		ToolKindSwitch, ToolKindOther:
+	case "", schema.ToolKindRead, schema.ToolKindEdit, schema.ToolKindDelete, schema.ToolKindMove,
+		schema.ToolKindSearch, schema.ToolKindExecute, schema.ToolKindThink, schema.ToolKindFetch,
+		schema.ToolKindSwitch, schema.ToolKindOther:
 		return ""
 	default:
 		return kind

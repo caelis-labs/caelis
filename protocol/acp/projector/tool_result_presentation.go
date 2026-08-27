@@ -8,15 +8,16 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
-func projectedToolResultContent(toolCallID string, name string, input, output, meta map[string]any, status string) []ToolCallContent {
+func projectedToolResultContent(toolCallID string, name string, input, output, meta map[string]any, status string) []schema.ToolCallContent {
 	profile, known := projectedBuiltinToolProfile(name)
 	displayOutput := projectedToolDisplayOutput(profile, known, output, meta)
 	if known && profile.result == projectedResultTask && projectedSuppressTaskControlContent(display.ToolTaskAction(input, displayOutput, meta)) {
 		return nil
 	}
-	isErr := strings.EqualFold(strings.TrimSpace(status), ToolStatusFailed)
+	isErr := strings.EqualFold(strings.TrimSpace(status), schema.ToolStatusFailed)
 	text := projectedToolResultText(profile, known, input, displayOutput, meta, status, isErr)
 	if strings.TrimSpace(text) == "" && projectedSuccessfulEmptyTerminal(profile, known, status, isErr) {
 		return nil
@@ -37,9 +38,9 @@ func projectedToolResultContent(toolCallID string, name string, input, output, m
 			strings.TrimSpace(toolCallID),
 		)
 	}
-	return []ToolCallContent{{
+	return []schema.ToolCallContent{{
 		Type:       contentType,
-		Content:    TextContent{Type: "text", Text: text},
+		Content:    schema.TextContent{Type: "text", Text: text},
 		TerminalID: terminalID,
 	}}
 }
@@ -112,7 +113,7 @@ func projectedToolResultText(profile projectedToolProfile, known bool, input, ou
 	case projectedResultWebFetch:
 		return display.WebFetchSummary(input, output)
 	case projectedResultMutation:
-		if isErr || strings.EqualFold(status, ToolStatusFailed) {
+		if isErr || strings.EqualFold(status, schema.ToolStatusFailed) {
 			return firstNonEmpty(projectedToolString(output["error"]), projectedToolString(output["summary"]))
 		}
 		return projectedMutationResultSummary(input, output)
@@ -246,7 +247,7 @@ func projectedTerminalResultText(output map[string]any, status string, isErr boo
 	if text := projectedToolRawString(output["error"]); projectedOutputHasNonBlankLine(text) {
 		return text
 	}
-	if isErr || strings.EqualFold(status, ToolStatusFailed) {
+	if isErr || strings.EqualFold(status, schema.ToolStatusFailed) {
 		if exitCode := projectedToolInt(output["exit_code"]); exitCode > 0 {
 			return "exit " + strconv.Itoa(exitCode)
 		}
@@ -255,7 +256,7 @@ func projectedTerminalResultText(output map[string]any, status string, isErr boo
 }
 
 func projectedSpawnResultText(output map[string]any, status string, isErr bool) string {
-	if isErr || strings.EqualFold(status, ToolStatusFailed) {
+	if isErr || strings.EqualFold(status, schema.ToolStatusFailed) {
 		if text := projectedToolRawString(output["stderr"]); projectedOutputHasNonBlankLine(text) {
 			return text
 		}
@@ -304,11 +305,11 @@ func projectedGenericResultText(output map[string]any, isErr bool) string {
 
 func projectedToolResultStatusText(status string, isErr bool) string {
 	normalized := strings.ToLower(strings.TrimSpace(status))
-	if isErr || normalized == ToolStatusFailed {
+	if isErr || normalized == schema.ToolStatusFailed {
 		return "failed"
 	}
 	switch normalized {
-	case ToolStatusCompleted, "interrupted", "terminated":
+	case schema.ToolStatusCompleted, "interrupted", "terminated":
 		return normalized
 	case "cancelled", "canceled":
 		return "cancelled"
@@ -327,7 +328,7 @@ func projectedSuppressTaskControlContent(action string) bool {
 }
 
 func projectedSuccessfulEmptyTerminal(profile projectedToolProfile, known bool, status string, isErr bool) bool {
-	return known && profile.terminalKnown && profile.terminalPanel && !isErr && strings.EqualFold(strings.TrimSpace(status), ToolStatusCompleted)
+	return known && profile.terminalKnown && profile.terminalPanel && !isErr && strings.EqualFold(strings.TrimSpace(status), schema.ToolStatusCompleted)
 }
 
 func projectedToolStatusFinal(status string, isErr bool) bool {
@@ -335,7 +336,7 @@ func projectedToolStatusFinal(status string, isErr bool) bool {
 		return true
 	}
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case ToolStatusCompleted, ToolStatusFailed, "interrupted", "cancelled", "canceled", "terminated":
+	case schema.ToolStatusCompleted, schema.ToolStatusFailed, "interrupted", "cancelled", "canceled", "terminated":
 		return true
 	default:
 		return false

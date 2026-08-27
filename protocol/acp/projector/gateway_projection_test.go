@@ -683,12 +683,12 @@ func TestProjectSessionEventEnvelopeProjectsParticipantAndLifecycleExtensions(t 
 
 type notificationOverrideProjector struct{}
 
-func (notificationOverrideProjector) ProjectEvent(*session.Event) ([]Update, error) {
+func (notificationOverrideProjector) ProjectEvent(*session.Event) ([]schema.Update, error) {
 	return nil, nil
 }
 
-func (notificationOverrideProjector) ProjectNotifications(*session.Event) ([]SessionNotification, error) {
-	return []SessionNotification{{
+func (notificationOverrideProjector) ProjectNotifications(*session.Event) ([]schema.SessionNotification, error) {
+	return []schema.SessionNotification{{
 		SessionID: "custom-session",
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentMessage,
@@ -697,7 +697,7 @@ func (notificationOverrideProjector) ProjectNotifications(*session.Event) ([]Ses
 	}}, nil
 }
 
-func (notificationOverrideProjector) ProjectPermissionRequest(*session.Event) (*RequestPermissionRequest, bool, error) {
+func (notificationOverrideProjector) ProjectPermissionRequest(*session.Event) (*schema.RequestPermissionRequest, bool, error) {
 	return nil, false, nil
 }
 
