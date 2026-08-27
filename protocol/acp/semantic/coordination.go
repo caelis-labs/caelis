@@ -73,24 +73,6 @@ func DecodeCancelNotification(wire schema.CancelNotification) session.SessionRef
 	return session.NormalizeSessionRef(session.SessionRef{SessionID: wire.SessionID})
 }
 
-// DecodeParticipant validates and decodes normalized participant lifecycle.
-func DecodeParticipant(protocol session.EventProtocol) (session.ProtocolParticipant, error) {
-	protocol = session.CloneEventProtocol(protocol)
-	if protocol.Method != session.ProtocolMethodParticipantUpdate || protocol.Update == nil {
-		return session.ProtocolParticipant{}, fmt.Errorf("protocol/acp/semantic: invalid participant lifecycle payload")
-	}
-	return session.ProtocolParticipant{Action: strings.TrimSpace(protocol.Update.SessionUpdate)}, nil
-}
-
-// DecodeHandoff validates and decodes one already-authorized Control fact.
-func DecodeHandoff(protocol session.EventProtocol) (session.ProtocolHandoff, error) {
-	protocol = session.CloneEventProtocol(protocol)
-	if protocol.Method != session.ProtocolMethodControllerHandoff || protocol.Update == nil {
-		return session.ProtocolHandoff{}, fmt.Errorf("protocol/acp/semantic: invalid handoff lifecycle payload")
-	}
-	return session.ProtocolHandoff{Phase: strings.TrimSpace(protocol.Update.SessionUpdate)}, nil
-}
-
 func ptrApproval(in session.ProtocolApproval) *session.ProtocolApproval {
 	out := session.CloneProtocolApproval(in)
 	return &out

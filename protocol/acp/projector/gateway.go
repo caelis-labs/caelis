@@ -499,20 +499,14 @@ func projectSessionEventstreamOnlyEvents(base eventstream.Envelope, event *sessi
 		next.NoticeKind = projectNoticeKind(notice)
 		return []eventstream.Envelope{next}
 	case session.EventTypeParticipant:
-		if event.Protocol == nil {
-			return nil
-		}
-		participant, err := semantic.DecodeParticipant(*event.Protocol)
-		if err != nil {
+		participant := session.ProtocolParticipantOf(event)
+		if participant == nil {
 			return nil
 		}
 		return participantEventstreamEnvelope(base, participant.Action, firstNonEmpty(strings.TrimSpace(base.Actor), strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID)))
 	case session.EventTypeHandoff:
-		if event.Protocol == nil {
-			return nil
-		}
-		handoff, err := semantic.DecodeHandoff(*event.Protocol)
-		if err != nil {
+		handoff := session.ProtocolHandoffOf(event)
+		if handoff == nil {
 			return nil
 		}
 		return lifecycleEventstreamEnvelope(base, handoff.Phase, "", firstNonEmpty(strings.TrimSpace(base.Actor), strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID)))
