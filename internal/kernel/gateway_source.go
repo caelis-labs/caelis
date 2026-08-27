@@ -17,7 +17,7 @@ func (g *Gateway) forwardSourceEvents(activeSession session.Session, handle *tur
 	for sourceEvent, seqErr := range source.Events {
 		if seqErr != nil {
 			if gap, ok := agent.AsEventStreamGap(seqErr); ok {
-				handle.publishACP(acpprojector.ProjectRuntimeObservationGap(gap.Dropped), "runtime_observation")
+				handle.publishACP(acpbridge.RuntimeObservationGapEnvelope(gap.Dropped), "runtime_observation")
 				continue
 			}
 			handle.publishError(seqErr)

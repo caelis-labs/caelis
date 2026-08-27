@@ -25,11 +25,11 @@ import (
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -574,7 +574,7 @@ func TestRuntimeAgentPromptContinuesAfterObservationGap(t *testing.T) {
 		t.Fatalf("StopReason = %q, want %q", response.StopReason, acpsdk.StopReasonEndTurn)
 	}
 	chunks := agentMessageChunks(callbacks.notifications)
-	if len(chunks) != 2 || chunks[0] != projector.RuntimeObservationGapNotice || chunks[1] != "durable final" {
+	if len(chunks) != 2 || chunks[0] != acpbridge.RuntimeObservationGapNotice || chunks[1] != "durable final" {
 		t.Fatalf("agent messages = %#v, want gap notice then final message", chunks)
 	}
 	gapUpdate, ok := callbacks.notifications[0].Update.(acp.ContentChunk)

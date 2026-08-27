@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -47,7 +46,7 @@ func TestForwardSourceEventsKeepsObservationGapTransientAndContinues(t *testing.
 	if got[1].Kind != eventstream.KindNotice || got[1].Delivery == nil || got[1].Delivery.Mode != eventstream.DeliveryTransient {
 		t.Fatalf("gap envelope = %#v, want transient notice", got[1])
 	}
-	if got[1].Notice != acpprojector.RuntimeObservationGapNotice {
+	if got[1].Notice != acpbridge.RuntimeObservationGapNotice {
 		t.Fatalf("gap Notice = %q, want stable presentation text", got[1].Notice)
 	}
 	observation := metautil.RuntimeSection(got[1].Meta, metautil.RuntimeObservation)

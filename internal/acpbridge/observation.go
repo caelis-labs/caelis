@@ -1,4 +1,4 @@
-package projector
+package acpbridge
 
 import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -10,10 +10,10 @@ import (
 // not this text, for classification.
 const RuntimeObservationGapNotice = "Some live runtime updates were skipped; durable Session history remains available."
 
-// ProjectRuntimeObservationGap returns the transient product projection for an
-// SDK observer gap. It is diagnostic live state, never an execution failure or
-// a durable replay fact.
-func ProjectRuntimeObservationGap(dropped uint64) eventstream.Envelope {
+// RuntimeObservationGapEnvelope adapts one SDK observer gap into transient ACP
+// bridge output. It is diagnostic live state, never an execution failure or a
+// durable replay fact.
+func RuntimeObservationGapEnvelope(dropped uint64) eventstream.Envelope {
 	return eventstream.Envelope{
 		Kind:     eventstream.KindNotice,
 		Notice:   RuntimeObservationGapNotice,

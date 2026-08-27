@@ -20,6 +20,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/loader"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -837,7 +838,7 @@ func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, 
 			if item.err != nil {
 				if gap, ok := agent.AsEventStreamGap(item.err); ok {
 					observationGapSequence++
-					notice := projector.ProjectRuntimeObservationGap(gap.Dropped)
+					notice := acpbridge.RuntimeObservationGapEnvelope(gap.Dropped)
 					notice.SessionID = strings.TrimSpace(ref.SessionID)
 					if err := emitACPNotice(
 						runCtx,
