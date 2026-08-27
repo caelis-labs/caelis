@@ -21,7 +21,6 @@ type NewSessionResponse struct {
 	SessionID     string                `json:"sessionId"`
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 	Modes         *SessionModeState     `json:"modes,omitempty"`
-	Models        *SessionModelState    `json:"models,omitempty"`
 }
 
 type LoadSessionRequest struct {
@@ -34,7 +33,6 @@ type LoadSessionRequest struct {
 type LoadSessionResponse struct {
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 	Modes         *SessionModeState     `json:"modes,omitempty"`
-	Models        *SessionModelState    `json:"models,omitempty"`
 }
 
 type ResumeSessionRequest struct {
@@ -47,7 +45,6 @@ type ResumeSessionRequest struct {
 type ResumeSessionResponse struct {
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 	Modes         *SessionModeState     `json:"modes,omitempty"`
-	Models        *SessionModelState    `json:"models,omitempty"`
 }
 
 type SessionMode struct {
@@ -60,24 +57,6 @@ type SessionModeState struct {
 	AvailableModes []SessionMode `json:"availableModes"`
 	CurrentModeID  string        `json:"currentModeId"`
 }
-
-type ModelInfo struct {
-	ModelID     string `json:"modelId"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-}
-
-type SessionModelState struct {
-	CurrentModelID  string      `json:"currentModelId"`
-	AvailableModels []ModelInfo `json:"availableModels"`
-}
-
-type SetSessionModelRequest struct {
-	SessionID string `json:"sessionId"`
-	ModelID   string `json:"modelId"`
-}
-
-type SetSessionModelResponse struct{}
 
 type SessionConfigSelectOption struct {
 	Value       string `json:"value"`

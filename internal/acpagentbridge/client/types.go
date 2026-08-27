@@ -76,17 +76,59 @@ type InitializeResponse struct {
 type AuthenticateRequest = acpsdk.AuthenticateRequest
 type AuthenticateResponse = acpsdk.AuthenticateResponse
 type NewSessionRequest = schema.NewSessionRequest
-type NewSessionResponse = schema.NewSessionResponse
 type LoadSessionRequest = schema.LoadSessionRequest
-type LoadSessionResponse = schema.LoadSessionResponse
 type ResumeSessionRequest = schema.ResumeSessionRequest
-type ResumeSessionResponse = schema.ResumeSessionResponse
+
+// NewSessionResponse retains the legacy models field only for external Agents
+// that do not expose the standard model session config option.
+type NewSessionResponse struct {
+	SessionID     string                `json:"sessionId"`
+	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
+	Modes         *SessionModeState     `json:"modes,omitempty"`
+	Models        *SessionModelState    `json:"models,omitempty"`
+}
+
+// LoadSessionResponse is the external-Agent load response compatibility DTO.
+type LoadSessionResponse struct {
+	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
+	Modes         *SessionModeState     `json:"modes,omitempty"`
+	Models        *SessionModelState    `json:"models,omitempty"`
+}
+
+// ResumeSessionResponse is the external-Agent resume response compatibility DTO.
+type ResumeSessionResponse struct {
+	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
+	Modes         *SessionModeState     `json:"modes,omitempty"`
+	Models        *SessionModelState    `json:"models,omitempty"`
+}
+
+// ModelInfo is one legacy external-Agent model descriptor.
+type ModelInfo struct {
+	ModelID     string `json:"modelId"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// SessionModelState is the retired ACP model channel retained as a fallback
+// for external Agents that advertise no standard model config option.
+type SessionModelState struct {
+	CurrentModelID  string      `json:"currentModelId"`
+	AvailableModels []ModelInfo `json:"availableModels"`
+}
+
 type CloseSessionRequest = acpsdk.CloseSessionRequest
 type CloseSessionResponse = acpsdk.CloseSessionResponse
 type SetSessionModeRequest = acpsdk.SetSessionModeRequest
 type SetSessionModeResponse = acpsdk.SetSessionModeResponse
-type SetSessionModelRequest = schema.SetSessionModelRequest
-type SetSessionModelResponse = schema.SetSessionModelResponse
+
+// SetSessionModelRequest is the legacy external-Agent model mutation request.
+type SetSessionModelRequest struct {
+	SessionID string `json:"sessionId"`
+	ModelID   string `json:"modelId"`
+}
+
+// SetSessionModelResponse is the empty legacy model mutation response.
+type SetSessionModelResponse struct{}
 type SetSessionConfigOptionRequest = schema.SetSessionConfigOptionRequest
 type SetSessionConfigOptionResponse = schema.SetSessionConfigOptionResponse
 type PromptRequest = schema.PromptRequest
@@ -99,8 +141,6 @@ type SessionSteeringRequest = schema.SessionSteeringRequest
 type SessionSteeringResponse = schema.SessionSteeringResponse
 type SessionMode = schema.SessionMode
 type SessionModeState = schema.SessionModeState
-type ModelInfo = schema.ModelInfo
-type SessionModelState = schema.SessionModelState
 type SessionConfigSelectOption = schema.SessionConfigSelectOption
 type SessionConfigOption = schema.SessionConfigOption
 type CancelRequest = acpsdk.CancelNotification

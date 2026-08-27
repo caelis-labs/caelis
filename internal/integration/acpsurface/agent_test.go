@@ -523,8 +523,16 @@ func TestNewFromClientsSetConfigOptionUsesNewSessionCWDWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if sessionResp.Models != nil {
-		t.Fatalf("NewSession().Models = %#v, want standard model config option only", sessionResp.Models)
+	encodedSession, err := json.Marshal(sessionResp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessionWire map[string]json.RawMessage
+	if err := json.Unmarshal(encodedSession, &sessionWire); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sessionWire["models"]; ok {
+		t.Fatalf("NewSession() wire = %s, want standard model config option only", encodedSession)
 	}
 	if _, err := agent.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
 		SessionID: sessionResp.SessionID,
