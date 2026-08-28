@@ -8,7 +8,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type SurfaceProjector interface {
@@ -35,12 +34,12 @@ type ToolProjectionInput struct {
 
 	RawInput  map[string]any
 	RawOutput any
-	Content   []schema.ToolCallContent
+	Content   []eventstream.ToolCallContent
 	// ContentPresent distinguishes an omitted sparse-patch field from an
 	// explicitly empty ACP content collection. A present collection replaces
 	// the previous collection even when it renders no text.
 	ContentPresent bool
-	Locations      []schema.ToolCallLocation
+	Locations      []eventstream.ToolCallLocation
 	Error          bool
 
 	GatewayProjection bool
@@ -265,9 +264,9 @@ func retryNoticeDelayText(milliseconds int) string {
 
 func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scope Scope, scopeID string, surface SurfaceProjector) []Event {
 	switch update := env.Update.(type) {
-	case schema.ContentChunk:
+	case eventstream.ContentChunk:
 		return projectACPContentChunk(env, update, meta, scope, scopeID)
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		if surface == nil || ToolIsPlan(update.Title, update.Kind) {
 			return nil
 		}
@@ -293,14 +292,14 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 		// complete one-shot snapshot instead of a start followed by a patch, so
 		// terminal status must use the same final projection authority.
 		if ToolStatusFinal(update.Status, false) {
-			event, ok := surface.ProjectToolResult(input, schema.ToolStatusCompleted)
+			event, ok := surface.ProjectToolResult(input, eventstream.ToolStatusCompleted)
 			if !ok {
 				return nil
 			}
 			return []Event{event}
 		}
 		return []Event{surface.ProjectToolCall(input)}
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		if surface == nil {
 			return nil
 		}
@@ -333,7 +332,7 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			return nil
 		}
 		return []Event{event}
-	case schema.PlanUpdate:
+	case eventstream.PlanUpdate:
 		entries := make([]PlanEntry, 0, len(update.Entries))
 		for _, entry := range update.Entries {
 			entries = append(entries, PlanEntry{Content: entry.Content, Status: entry.Status, Priority: entry.Priority})
@@ -350,7 +349,7 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			Meta:        meta,
 			PlanEntries: entries,
 		}}
-	case schema.UsageUpdate:
+	case eventstream.UsageUpdate:
 		usage := eventstream.UsageSnapshotFromEnvelope(env)
 		if usage == nil {
 			return nil
@@ -363,7 +362,7 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			OccurredAt: env.OccurredAt,
 			Usage:      usage,
 		}}
-	case schema.RawUpdate:
+	case eventstream.RawUpdate:
 		raw := append(json.RawMessage(nil), update.Raw...)
 		if len(raw) == 0 {
 			raw, _ = json.Marshal(update)
@@ -391,13 +390,13 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk, meta map[string]any, scope Scope, scopeID string) []Event {
+func projectACPContentChunk(env eventstream.Envelope, update eventstream.ContentChunk, meta map[string]any, scope Scope, scopeID string) []Event {
 	text := ProtocolTextContent(update.Content)
 	if text == "" {
 		return nil
 	}
 	switch strings.TrimSpace(update.SessionUpdate) {
-	case schema.UpdateUserMessage:
+	case eventstream.UpdateUserMessage:
 		if scope != ScopeMain && scope != ScopeParticipant && scope != ScopeSubagent {
 			return nil
 		}
@@ -413,7 +412,7 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 			Text:          strings.TrimSpace(text),
 			Final:         true,
 		}}
-	case schema.UpdateAgentMessage:
+	case eventstream.UpdateAgentMessage:
 		return []Event{{
 			Kind:          EventNarrative,
 			Scope:         scope,
@@ -427,7 +426,7 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 			Final:         env.Final,
 			Citations:     CitationsFromMeta(meta, text),
 		}}
-	case schema.UpdateAgentThought:
+	case eventstream.UpdateAgentThought:
 		return []Event{{
 			Kind:          EventNarrative,
 			Scope:         scope,
@@ -440,7 +439,7 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 			Text:          text,
 			Final:         env.Final,
 		}}
-	case schema.UpdateCompact:
+	case eventstream.UpdateCompact:
 		return []Event{{
 			Kind:          EventNotice,
 			Scope:         scope,
@@ -528,7 +527,7 @@ func ToolIsPlan(values ...string) bool {
 	return false
 }
 
-func ToolUpdateError(update schema.ToolCallUpdate) bool {
+func ToolUpdateError(update eventstream.ToolCallUpdate) bool {
 	status := strings.ToLower(strings.TrimSpace(StringFromPtr(update.Status)))
 	if status == "failed" || status == "error" {
 		return true

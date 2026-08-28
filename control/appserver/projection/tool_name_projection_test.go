@@ -5,8 +5,8 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestEventProjectorProjectsEventToolSemanticNameInStandardNotifications(t *testing.T) {
@@ -26,9 +26,9 @@ func TestEventProjectorProjectsEventToolSemanticNameInStandardNotifications(t *t
 				Tool: &session.EventTool{
 					ID:     "call-task",
 					Name:   "Task",
-					Kind:   schema.ToolKindExecute,
+					Kind:   eventstream.ToolKindExecute,
 					Title:  "Task wait command-1",
-					Status: schema.ToolStatusPending,
+					Status: eventstream.ToolStatusPending,
 					Input:  map[string]any{"action": "wait", "task_id": "command-1"},
 				},
 			},
@@ -43,9 +43,9 @@ func TestEventProjectorProjectsEventToolSemanticNameInStandardNotifications(t *t
 				Tool: &session.EventTool{
 					ID:     "call-spawn",
 					Name:   "Spawn",
-					Kind:   schema.ToolKindExecute,
+					Kind:   eventstream.ToolKindExecute,
 					Title:  "Spawn orbit: inspect",
-					Status: schema.ToolStatusCompleted,
+					Status: eventstream.ToolStatusCompleted,
 					Input:  map[string]any{"agent": "orbit", "prompt": "inspect"},
 					Output: map[string]any{"state": "completed"},
 				},
@@ -85,13 +85,13 @@ func TestEventProjectorProjectsProtocolToolSemanticNameWithoutEventMetaLeak(t *t
 	}{
 		{
 			name:       "task call",
-			updateType: schema.UpdateToolCall,
+			updateType: eventstream.UpdateToolCall,
 			toolName:   "Task",
 			title:      "Task wait command-1",
 		},
 		{
 			name:       "spawn update",
-			updateType: schema.UpdateToolCallInfo,
+			updateType: eventstream.UpdateToolCallInfo,
 			toolName:   "Spawn",
 			title:      "Spawn orbit: inspect",
 		},
@@ -114,15 +114,15 @@ func TestEventProjectorProjectsProtocolToolSemanticNameWithoutEventMetaLeak(t *t
 						SessionUpdate: tt.updateType,
 						ToolCallID:    "call-1",
 						Title:         tt.title,
-						Kind:          schema.ToolKindExecute,
-						Status:        schema.ToolStatusPending,
+						Kind:          eventstream.ToolKindExecute,
+						Status:        eventstream.ToolStatusPending,
 						Meta:          map[string]any{"vendor": map[string]any{"trace": "keep"}},
 					},
 				},
 			}
-			if tt.updateType == schema.UpdateToolCallInfo {
+			if tt.updateType == eventstream.UpdateToolCallInfo {
 				event.Type = session.EventTypeToolResult
-				event.Protocol.Update.Status = schema.ToolStatusCompleted
+				event.Protocol.Update.Status = eventstream.ToolStatusCompleted
 			}
 
 			updates, err := ProjectEvent(event)
@@ -263,12 +263,12 @@ func TestProtocolToolNameForUpdateKeepsCanonicalAndProtocolCandidatesOrdered(t *
 	}
 }
 
-func toolUpdateMeta(t *testing.T, update schema.Update) map[string]any {
+func toolUpdateMeta(t *testing.T, update eventstream.Update) map[string]any {
 	t.Helper()
 	switch typed := update.(type) {
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		return typed.Meta
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		return typed.Meta
 	default:
 		t.Fatalf("update = %T, want ToolCall or ToolCallUpdate", update)

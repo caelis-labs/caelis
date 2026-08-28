@@ -8,7 +8,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // TaskOwnerRepairs groups presentation repairs derived from one canonical
@@ -67,7 +66,7 @@ func terminalTaskObservationsFromEnvelope(env eventstream.Envelope) []terminalTa
 		(env.Scope != "" && env.Scope != eventstream.ScopeMain) {
 		return nil
 	}
-	update, ok := eventstream.CloneUpdate(env.Update).(schema.ToolCallUpdate)
+	update, ok := eventstream.CloneUpdate(env.Update).(eventstream.ToolCallUpdate)
 	if !ok || !taskObserverStatusFinal(update.Status) {
 		return nil
 	}
@@ -206,7 +205,7 @@ func taskObserverStatusFinal(status *string) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(*status)) {
-	case schema.ToolStatusCompleted, schema.ToolStatusFailed, "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout":
+	case eventstream.ToolStatusCompleted, eventstream.ToolStatusFailed, "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout":
 		return true
 	default:
 		return false

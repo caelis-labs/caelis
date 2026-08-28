@@ -9,8 +9,8 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
@@ -122,8 +122,8 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 	}
 	seenFinal := map[string]int{}
 	for _, notification := range callbacks.notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
-		if !ok || update.Status == nil || *update.Status != acp.ToolStatusCompleted {
+		update, ok := notification.Update.(eventstream.ToolCallUpdate)
+		if !ok || update.Status == nil || *update.Status != eventstream.ToolStatusCompleted {
 			continue
 		}
 		wantText, isSpawn := wantFinal[update.ToolCallID]
@@ -134,7 +134,7 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 		if update.Meta != nil || len(update.Content) != 1 || update.Content[0].Type != "content" {
 			t.Fatalf("Spawn %s result = %#v, want one standard content result", update.ToolCallID, update)
 		}
-		text, ok := update.Content[0].Content.(acp.TextContent)
+		text, ok := update.Content[0].Content.(eventstream.TextContent)
 		if !ok || text.Text != wantText {
 			t.Fatalf("Spawn %s content = %#v, want exact FinalResponse %q", update.ToolCallID, update.Content, wantText)
 		}
@@ -184,7 +184,7 @@ type loadGoldenNarrativeExpectation struct {
 
 func assertLoadGoldenToolNarrativeSiblings(
 	t *testing.T,
-	notifications []acp.SessionNotification,
+	notifications []eventstream.SessionNotification,
 	expectations []loadGoldenNarrativeExpectation,
 ) {
 	t.Helper()
@@ -192,7 +192,7 @@ func assertLoadGoldenToolNarrativeSiblings(
 	for _, expectation := range expectations {
 		callIndexes := make([]int, 0, 1)
 		for index, notification := range notifications {
-			call, ok := notification.Update.(acp.ToolCall)
+			call, ok := notification.Update.(eventstream.ToolCall)
 			if ok && call.ToolCallID == expectation.ToolCallID {
 				callIndexes = append(callIndexes, index)
 			}
@@ -204,19 +204,19 @@ func assertLoadGoldenToolNarrativeSiblings(
 		if callIndex < 2 {
 			t.Fatalf("tool_call %s index = %d, want reasoning and assistant siblings first", expectation.ToolCallID, callIndex)
 		}
-		assertLoadGoldenContentChunk(t, notifications[callIndex-2], acp.UpdateAgentThought, expectation.Reasoning)
-		assertLoadGoldenContentChunk(t, notifications[callIndex-1], acp.UpdateAgentMessage, expectation.Assistant)
+		assertLoadGoldenContentChunk(t, notifications[callIndex-2], eventstream.UpdateAgentThought, expectation.Reasoning)
+		assertLoadGoldenContentChunk(t, notifications[callIndex-1], eventstream.UpdateAgentMessage, expectation.Assistant)
 	}
 }
 
-func assertLoadGoldenContentChunk(t *testing.T, notification acp.SessionNotification, kind string, text string) {
+func assertLoadGoldenContentChunk(t *testing.T, notification eventstream.SessionNotification, kind string, text string) {
 	t.Helper()
 
-	chunk, ok := notification.Update.(acp.ContentChunk)
+	chunk, ok := notification.Update.(eventstream.ContentChunk)
 	if !ok || chunk.SessionUpdate != kind {
 		t.Fatalf("notification update = %#v, want %s content chunk", notification.Update, kind)
 	}
-	content, ok := chunk.Content.(acp.TextContent)
+	content, ok := chunk.Content.(eventstream.TextContent)
 	if !ok || content.Text != text {
 		t.Fatalf("%s content = %#v, want exact text %q", kind, chunk.Content, text)
 	}

@@ -13,9 +13,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
@@ -194,9 +194,9 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 	var sawTaskFinal bool
 	for env := range turn.Events() {
 		switch update := env.Update.(type) {
-		case schema.ToolCall:
+		case eventstream.ToolCall:
 			if update.ToolCallID == "command-async-1" &&
-				update.Kind == schema.ToolKindExecute &&
+				update.Kind == eventstream.ToolKindExecute &&
 				toolContentHasTerminal(update.Content) &&
 				terminalInfoID(update.Meta) == "command-async-1" {
 				sawCommandCall = true
@@ -210,10 +210,10 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 				debugJSON(update.Meta),
 				debugJSON(update.Content),
 			)
-		case schema.ToolCallUpdate:
+		case eventstream.ToolCallUpdate:
 			if update.ToolCallID == "command-async-1" &&
-				stringPtrDebug(update.Kind) == schema.ToolKindExecute &&
-				stringPtrDebug(update.Status) == schema.ToolStatusInProgress &&
+				stringPtrDebug(update.Kind) == eventstream.ToolKindExecute &&
+				stringPtrDebug(update.Status) == eventstream.ToolStatusInProgress &&
 				toolContentHasTerminal(update.Content) &&
 				terminalInfoID(update.Meta) == "command-async-1" {
 				sawCommandUpdate = true
@@ -227,15 +227,15 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 				sawCommandOutput = true
 			}
 			if update.ToolCallID == "command-async-1" &&
-				stringPtrDebug(update.Status) == schema.ToolStatusCompleted &&
+				stringPtrDebug(update.Status) == eventstream.ToolStatusCompleted &&
 				toolContentHasTerminal(update.Content) &&
 				terminalInfoID(update.Meta) == "command-async-1" &&
 				terminalExitID(update.Meta) == "command-async-1" {
 				sawCommandFinal = true
 			}
 			if update.ToolCallID == "task-wait-1" &&
-				stringPtrDebug(update.Kind) == schema.ToolKindOther &&
-				stringPtrDebug(update.Status) == schema.ToolStatusCompleted &&
+				stringPtrDebug(update.Kind) == eventstream.ToolKindOther &&
+				stringPtrDebug(update.Status) == eventstream.ToolStatusCompleted &&
 				!toolContentHasTerminal(update.Content) &&
 				terminalInfoID(update.Meta) == "" &&
 				terminalExitID(update.Meta) == "" &&
@@ -321,7 +321,7 @@ func TestLocalStackGatewayACPInteractiveTaskReadWriteE2E(t *testing.T) {
 		sawCancel     bool
 	)
 	for env := range turn.Events() {
-		update, ok := env.Update.(schema.ToolCallUpdate)
+		update, ok := env.Update.(eventstream.ToolCallUpdate)
 		if !ok {
 			continue
 		}
@@ -329,7 +329,7 @@ func TestLocalStackGatewayACPInteractiveTaskReadWriteE2E(t *testing.T) {
 			commandOutput.WriteString(output.Data)
 		}
 		raw, _ := update.RawOutput.(map[string]any)
-		if stringPtrDebug(update.Status) != schema.ToolStatusCompleted {
+		if stringPtrDebug(update.Status) != eventstream.ToolStatusCompleted {
 			continue
 		}
 		switch update.ToolCallID {
@@ -403,7 +403,7 @@ func stringPtrDebug(value *string) string {
 	return *value
 }
 
-func toolContentHasTerminal(content []schema.ToolCallContent) bool {
+func toolContentHasTerminal(content []eventstream.ToolCallContent) bool {
 	for _, item := range content {
 		if item.Type == "terminal" && strings.TrimSpace(item.TerminalID) != "" {
 			return true

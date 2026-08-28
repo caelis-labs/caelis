@@ -6,7 +6,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func (g *Gateway) forwardHandleSourceEvents(activeSession session.Session, handle *turnHandle, source acpbridge.EventHandle) {
@@ -31,7 +30,7 @@ func (g *Gateway) forwardSourceEvents(activeSession session.Session, handle *tur
 		if sourceEvent.Canonical != nil {
 			project := acpprojector.ProjectSessionEventEnvelope
 			switch {
-			case sourceEvent.ACP != nil && eventstream.UpdateType(sourceEvent.ACP.Update) == schema.UpdateUsage:
+			case sourceEvent.ACP != nil && eventstream.UpdateType(sourceEvent.ACP.Update) == eventstream.UpdateUsage:
 				project = nil
 			case sourceEvent.ACP != nil:
 				// The paired native envelope owns live content and state. Usage is
@@ -67,7 +66,7 @@ func projectSessionEventUsageEnvelope(base eventstream.Envelope, event *session.
 	projected := acpprojector.ProjectSessionEventEnvelope(base, event)
 	out := make([]eventstream.Envelope, 0, 1)
 	for _, env := range projected {
-		if eventstream.UpdateType(env.Update) == schema.UpdateUsage {
+		if eventstream.UpdateType(env.Update) == eventstream.UpdateUsage {
 			out = append(out, env)
 		}
 	}

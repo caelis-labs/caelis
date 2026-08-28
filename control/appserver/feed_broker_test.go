@@ -15,7 +15,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestFeedBrokerRejectsDurableEnvelopeWithoutPosition(t *testing.T) {
@@ -177,8 +176,8 @@ func TestFeedBrokerMainTerminalReconcilesCommittedAssistantFirst(t *testing.T) {
 	}
 
 	got := receiveEnvelopes(t, subscription.Events(), 2)
-	chunk, ok := got[0].Update.(schema.ContentChunk)
-	if !ok || chunk.SessionUpdate != schema.UpdateAgentMessage || session.ExtractProtocolText(chunk.Content) != "committed final answer" {
+	chunk, ok := got[0].Update.(eventstream.ContentChunk)
+	if !ok || chunk.SessionUpdate != eventstream.UpdateAgentMessage || session.ExtractProtocolText(chunk.Content) != "committed final answer" {
 		t.Fatalf("first event = %#v, want committed assistant", got[0])
 	}
 	if !eventstream.IsTurnTerminalLifecycle(got[1]) {
@@ -366,8 +365,8 @@ func TestFeedBrokerExactReconnectDeliversBashSpawnAndFinalExactlyOnce(t *testing
 	}
 	defer result.Subscription.Close()
 	for _, envelope := range []eventstream.Envelope{
-		{Kind: eventstream.KindSessionUpdate, Update: schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "bash-1"}},
-		{Kind: eventstream.KindSessionUpdate, Update: schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1"}},
+		{Kind: eventstream.KindSessionUpdate, Update: eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "bash-1"}},
+		{Kind: eventstream.KindSessionUpdate, Update: eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1"}},
 		eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(20, 0)),
 	} {
 		if err := broker.Publish(envelope); err != nil {
@@ -381,7 +380,7 @@ func TestFeedBrokerExactReconnectDeliversBashSpawnAndFinalExactlyOnce(t *testing
 	seen := map[string]int{}
 	for _, envelope := range got {
 		switch update := envelope.Update.(type) {
-		case schema.ToolCallUpdate:
+		case eventstream.ToolCallUpdate:
 			seen[update.ToolCallID]++
 		default:
 			if eventstream.IsTurnTerminalLifecycle(envelope) {
@@ -454,10 +453,10 @@ func TestFeedBrokerFreshReplaySelectsCanonicalNarrativeInsteadOfRetainedDeltas(t
 			Kind:      eventstream.KindSessionUpdate,
 			SessionID: "session-1",
 			Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
 				MessageID:     "message-1",
-				Content:       schema.TextContent{Type: "text", Text: text},
+				Content:       eventstream.TextContent{Type: "text", Text: text},
 			},
 		}); err != nil {
 			t.Fatal(err)
@@ -469,10 +468,10 @@ func TestFeedBrokerFreshReplaySelectsCanonicalNarrativeInsteadOfRetainedDeltas(t
 		Final:     true,
 		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
 		Position:  &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{Seq: 1}},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
 			MessageID:     "message-1",
-			Content:       schema.TextContent{Type: "text", Text: "CAELIS"},
+			Content:       eventstream.TextContent{Type: "text", Text: "CAELIS"},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -484,7 +483,7 @@ func TestFeedBrokerFreshReplaySelectsCanonicalNarrativeInsteadOfRetainedDeltas(t
 	}
 	defer result.Subscription.Close()
 	got := receiveEnvelopes(t, result.Subscription.Backfill(), 1)
-	chunk, ok := got[0].Update.(schema.ContentChunk)
+	chunk, ok := got[0].Update.(eventstream.ContentChunk)
 	if !ok || chunk.MessageID != "message-1" || session.ExtractProtocolText(chunk.Content) != "CAELIS" || !isDurableFeedEnvelope(got[0]) {
 		t.Fatalf("fresh replay = %#v, want one durable complete message", got)
 	}
@@ -500,15 +499,15 @@ func TestFeedBrokerFreshReplaySelectsCanonicalTerminalInsteadOfRetainedDeltas(t 
 			t.Fatal(err)
 		}
 	}
-	status := schema.ToolStatusCompleted
+	status := eventstream.ToolStatusCompleted
 	if err := broker.Publish(eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
 		Final:     true,
 		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
 		Position:  &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{Seq: 1}},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "command-1",
 			Status:        &status,
 			Meta:          metautil.WithTerminalOutput(nil, "command-1", "line 1\nline 2\n"),
@@ -538,15 +537,15 @@ func TestFeedBrokerFreshReplayRetainsTerminalDeltasBesideStateOnlyFinal(t *testi
 			t.Fatal(err)
 		}
 	}
-	status := schema.ToolStatusCompleted
+	status := eventstream.ToolStatusCompleted
 	if err := broker.Publish(eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
 		Final:     true,
 		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
 		Position:  &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{Seq: 1}},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "command-1",
 			Status:        &status,
 			Meta:          metautil.WithTerminalExit(nil, "command-1", nil, nil),
@@ -566,8 +565,8 @@ func TestFeedBrokerFreshReplayRetainsTerminalDeltasBesideStateOnlyFinal(t *testi
 			t.Fatalf("terminal delta %d = %#v, want %q", index, got[index], want)
 		}
 	}
-	final, ok := got[2].Update.(schema.ToolCallUpdate)
-	if !ok || final.Status == nil || *final.Status != schema.ToolStatusCompleted || !isDurableFeedEnvelope(got[2]) {
+	final, ok := got[2].Update.(eventstream.ToolCallUpdate)
+	if !ok || final.Status == nil || *final.Status != eventstream.ToolStatusCompleted || !isDurableFeedEnvelope(got[2]) {
 		t.Fatalf("terminal final = %#v, want one durable state-only completion", got[2])
 	}
 }
@@ -586,9 +585,9 @@ func TestFeedBrokerFreshReplaySelectsStoredCanonicalNarrativeOverRetainedDeltas(
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1",
 			Scope: eventstream.ScopeMain, ScopeID: "turn-1",
 			Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage, MessageID: "message-1",
-				Content: schema.TextContent{Type: "text", Text: text},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "message-1",
+				Content: eventstream.TextContent{Type: "text", Text: text},
 			},
 		}); err != nil {
 			t.Fatal(err)
@@ -606,7 +605,7 @@ func TestFeedBrokerFreshReplaySelectsStoredCanonicalNarrativeOverRetainedDeltas(
 	}
 	defer result.Subscription.Close()
 	got := receiveEnvelopes(t, result.Subscription.Backfill(), 1)
-	chunk, ok := got[0].Update.(schema.ContentChunk)
+	chunk, ok := got[0].Update.(eventstream.ContentChunk)
 	if !ok || session.ExtractProtocolText(chunk.Content) != "CAELIS" || !isDurableFeedEnvelope(got[0]) {
 		t.Fatalf("fresh replay = %#v, want the stored complete narrative once", got)
 	}
@@ -642,14 +641,14 @@ func TestFeedBrokerFreshReplayLetsStoredTerminalOutputWinAfterRingEviction(t *te
 			t.Fatal(err)
 		}
 	}
-	status := schema.ToolStatusCompleted
+	status := eventstream.ToolStatusCompleted
 	if err := broker.Publish(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Final: true,
 		Scope: eventstream.ScopeMain, ScopeID: "turn-1",
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
 		Position: &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{Seq: 2}},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1", Status: &status,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1", Status: &status,
 			Meta: metautil.WithTerminalExit(nil, "command-1", nil, nil),
 		},
 	}); err != nil {
@@ -760,8 +759,8 @@ func TestFreshReplayTerminalOwnerRequiresTypedCommandAnchor(t *testing.T) {
 	})
 	envelope := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-spoof",
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-spoof",
 			RawOutput: map[string]any{"handle": "command"}, Meta: nameOnly,
 		},
 	}
@@ -770,7 +769,7 @@ func TestFreshReplayTerminalOwnerRequiresTypedCommandAnchor(t *testing.T) {
 	}
 
 	typed := metautil.WithTerminalInfo(nameOnly, "command-spoof")
-	update := envelope.Update.(schema.ToolCallUpdate)
+	update := envelope.Update.(eventstream.ToolCallUpdate)
 	update.RawOutput = map[string]any{"handle": "command", "target_kind": "command"}
 	update.Meta = typed
 	envelope.Update = update
@@ -1821,9 +1820,9 @@ func projectedEnvelope(seq uint64, text string) eventstream.Envelope {
 		ProjectionID: "test-projection:" + eventID,
 		Position:     &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{Seq: seq}},
 		Delivery:     &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: text},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: text},
 		},
 	}
 }
@@ -1832,7 +1831,7 @@ func terminalEnvelope(text string) eventstream.Envelope {
 	return eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1",
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		Update:   schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1"},
+		Update:   eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1"},
 		Meta:     map[string]any{"terminal_output": text},
 	}
 }
@@ -1848,8 +1847,8 @@ func terminalEnvelopeAtCursor(text string, cursor int64) eventstream.Envelope {
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
 		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "command-1",
 			Meta:          meta,
 		},
@@ -1857,7 +1856,7 @@ func terminalEnvelopeAtCursor(text string, cursor int64) eventstream.Envelope {
 }
 
 func terminalEnvelopeOutput(envelope eventstream.Envelope) (string, bool) {
-	update, ok := envelope.Update.(schema.ToolCallUpdate)
+	update, ok := envelope.Update.(eventstream.ToolCallUpdate)
 	if !ok {
 		return "", false
 	}

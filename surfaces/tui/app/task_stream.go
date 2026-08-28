@@ -14,7 +14,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const (
@@ -134,12 +133,12 @@ func (m *Model) observeTaskPanelStreamOwner(env eventstream.Envelope) {
 	m.reconcileTaskStreamOwner(callID, handle)
 }
 
-func taskStreamToolValues(update schema.Update) (map[string]any, map[string]any) {
+func taskStreamToolValues(update eventstream.Update) (map[string]any, map[string]any) {
 	var rawInput, rawOutput any
 	switch typed := update.(type) {
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		rawInput, rawOutput = typed.RawInput, typed.RawOutput
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		rawInput, rawOutput = typed.RawInput, typed.RawOutput
 	}
 	input, _ := rawInput.(map[string]any)
@@ -147,11 +146,11 @@ func taskStreamToolValues(update schema.Update) (map[string]any, map[string]any)
 	return input, output
 }
 
-func taskStreamToolCallID(update schema.Update) string {
+func taskStreamToolCallID(update eventstream.Update) string {
 	switch typed := update.(type) {
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		return strings.TrimSpace(typed.ToolCallID)
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		return strings.TrimSpace(typed.ToolCallID)
 	default:
 		return ""

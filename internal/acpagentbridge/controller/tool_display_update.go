@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const xKeywordSearchToolName = "x_keyword_search"
@@ -21,7 +21,7 @@ func normalizeACPToolDisplayUpdate(update client.Update) client.Update {
 		return typed
 	case client.ToolCallUpdate:
 		typed.Meta = metautil.WithoutSectionKeys(typed.Meta, metautil.Display, metautil.DisplayToolInput)
-		if !strings.EqualFold(strings.TrimSpace(derefString(typed.Status)), schema.ToolStatusCompleted) {
+		if !strings.EqualFold(strings.TrimSpace(derefString(typed.Status)), eventstream.ToolStatusCompleted) {
 			return typed
 		}
 		input := delayedXSearchDisplayInput(typed.RawOutput)

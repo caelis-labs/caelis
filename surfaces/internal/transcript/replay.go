@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func ProjectReplayEvents(events []eventstream.Envelope, surface SurfaceProjector) []Event {
@@ -53,7 +52,7 @@ func replayableACPMirrorEvent(env eventstream.Envelope, surface SurfaceProjector
 		return ProjectACPEventToEvents(env, surface)
 	case eventstream.KindSessionUpdate:
 		switch env.Update.(type) {
-		case schema.ContentChunk, schema.ToolCall, schema.ToolCallUpdate, schema.PlanUpdate, schema.UsageUpdate:
+		case eventstream.ContentChunk, eventstream.ToolCall, eventstream.ToolCallUpdate, eventstream.PlanUpdate, eventstream.UsageUpdate:
 			return ProjectACPEventToEvents(env, surface)
 		}
 	}
@@ -61,10 +60,10 @@ func replayableACPMirrorEvent(env eventstream.Envelope, surface SurfaceProjector
 }
 
 func replayableACPSessionUpdate(env eventstream.Envelope, surface SurfaceProjector) []Event {
-	update, ok := env.Update.(schema.ContentChunk)
+	update, ok := env.Update.(eventstream.ContentChunk)
 	if !ok {
 		switch env.Update.(type) {
-		case schema.ToolCall, schema.ToolCallUpdate, schema.PlanUpdate, schema.UsageUpdate:
+		case eventstream.ToolCall, eventstream.ToolCallUpdate, eventstream.PlanUpdate, eventstream.UsageUpdate:
 			return replayableACPTraceEvent(env, surface)
 		default:
 			return nil
@@ -75,9 +74,9 @@ func replayableACPSessionUpdate(env eventstream.Envelope, surface SurfaceProject
 		return nil
 	}
 	switch strings.TrimSpace(update.SessionUpdate) {
-	case schema.UpdateUserMessage:
+	case eventstream.UpdateUserMessage:
 		return projected
-	case schema.UpdateAgentMessage, schema.UpdateAgentThought:
+	case eventstream.UpdateAgentMessage, eventstream.UpdateAgentThought:
 		if !env.Final {
 			return nil
 		}

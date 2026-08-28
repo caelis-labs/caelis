@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type renderEventLane string
@@ -76,18 +75,18 @@ func renderEventPolicyForACPEnvelope(env eventstream.Envelope) renderEventPolicy
 	switch env.Kind {
 	case eventstream.KindSessionUpdate:
 		switch eventstream.UpdateType(env.Update) {
-		case schema.UpdateAgentMessage, schema.UpdateAgentThought:
+		case eventstream.UpdateAgentMessage, eventstream.UpdateAgentThought:
 			if !env.Final {
 				return renderEventPolicy{lane: renderLaneMainStream, flushLogChunks: true, dismissHints: true}
 			}
 			return renderEventPolicy{lane: renderLaneMainStream, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
-		case schema.UpdateUserMessage:
+		case eventstream.UpdateUserMessage:
 			return renderEventPolicy{lane: renderLaneMainStream, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
-		case schema.UpdateToolCall, schema.UpdateToolCallInfo:
+		case eventstream.UpdateToolCall, eventstream.UpdateToolCallInfo:
 			return renderEventPolicy{lane: renderLaneToolStream, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
-		case schema.UpdatePlan:
+		case eventstream.UpdatePlan:
 			return renderEventPolicy{lane: renderLaneUIState, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
-		case schema.UpdateUsage:
+		case eventstream.UpdateUsage:
 			return renderEventPolicy{lane: renderLaneUIState}
 		default:
 			return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
@@ -337,7 +336,7 @@ func (m *Model) flushImmediateViewportSyncForMsg(msg tea.Msg) tea.Cmd {
 		}
 		if typed.Kind == eventstream.KindSessionUpdate {
 			switch eventstream.UpdateType(typed.Update) {
-			case schema.UpdateToolCall, schema.UpdateToolCallInfo, schema.UpdatePlan:
+			case eventstream.UpdateToolCall, eventstream.UpdateToolCallInfo, eventstream.UpdatePlan:
 				return m.flushPendingViewportSync()
 			}
 		}

@@ -7,7 +7,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestObservedSpawnResultUsesHandleWhenCallIDIsReusedAcrossTurns(t *testing.T) {
@@ -23,7 +22,7 @@ func TestObservedSpawnResultUsesHandleWhenCallIDIsReusedAcrossTurns(t *testing.T
 
 	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 		ParentCallID: "spawn-1",
-		Status:       schema.ToolStatusCompleted,
+		Status:       eventstream.ToolStatusCompleted,
 		RawOutput: map[string]any{
 			"handle": "alpha", "state": "completed", "final_message": "alpha final",
 		},
@@ -67,7 +66,7 @@ func TestObservedSpawnResultDoesNotInjectParentTaskResultIntoOpenOutputOverlay(t
 
 	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 		ParentCallID: "spawn-1",
-		Status:       schema.ToolStatusCompleted,
+		Status:       eventstream.ToolStatusCompleted,
 		RawOutput: map[string]any{
 			"handle":        "alpha",
 			"state":         "completed",
@@ -100,13 +99,13 @@ func TestObservedSpawnResultBatchClosesReusedCallIDByHandle(t *testing.T) {
 
 	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{
 		{
-			ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
+			ParentCallID: "spawn-1", Status: eventstream.ToolStatusCompleted,
 			RawOutput: map[string]any{
 				"handle": "alpha", "state": "completed", "final_message": "alpha final",
 			},
 		},
 		{
-			ParentCallID: "spawn-1", Status: schema.ToolStatusFailed,
+			ParentCallID: "spawn-1", Status: eventstream.ToolStatusFailed,
 			RawOutput: map[string]any{
 				"handle": "beta", "state": "failed", "error": "beta failed",
 			},
@@ -131,7 +130,7 @@ func TestObservedSpawnResultFailsClosedOnHandleMismatch(t *testing.T) {
 
 	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 		ParentCallID: "spawn-1",
-		Status:       schema.ToolStatusCompleted,
+		Status:       eventstream.ToolStatusCompleted,
 		RawOutput: map[string]any{
 			"handle": "alpha", "state": "completed", "final_message": "stale alpha",
 		},
@@ -164,7 +163,7 @@ func TestObservedSpawnResultNeverOverridesCanonicalOrFirstFallbackFinal(t *testi
 			initialOutput: "first fallback",
 			complete: func(model *Model, _ *MainACPTurnBlock) {
 				model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
-					ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
+					ParentCallID: "spawn-1", Status: eventstream.ToolStatusCompleted,
 					RawOutput: map[string]any{
 						"handle": "alpha", "state": "completed", "final_message": "first fallback",
 					},
@@ -184,7 +183,7 @@ func TestObservedSpawnResultNeverOverridesCanonicalOrFirstFallbackFinal(t *testi
 			test.complete(model, block)
 
 			model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
-				ParentCallID: "spawn-1", Status: schema.ToolStatusFailed,
+				ParentCallID: "spawn-1", Status: eventstream.ToolStatusFailed,
 				RawOutput: map[string]any{
 					"handle": "alpha", "state": "failed", "final_message": "stale replacement",
 				},
@@ -210,7 +209,7 @@ func TestObservedSpawnResultWithoutHandleRequiresUniqueOpenOwner(t *testing.T) {
 	appendObservedSpawnOwner(model, second, "spawn-1", "")
 
 	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
-		ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
+		ParentCallID: "spawn-1", Status: eventstream.ToolStatusCompleted,
 		RawOutput: map[string]any{"state": "completed", "final_message": "ambiguous"},
 	}})
 
@@ -231,7 +230,7 @@ func TestObservedSpawnResultWithHandleFailsClosedAcrossEmptyAndMismatchedOwners(
 	appendObservedSpawnOwner(model, beta, "spawn-1", "beta")
 
 	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
-		ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
+		ParentCallID: "spawn-1", Status: eventstream.ToolStatusCompleted,
 		RawOutput: map[string]any{
 			"handle": "alpha", "state": "completed", "final_message": "stale alpha",
 		},
@@ -255,7 +254,7 @@ func TestObservedSpawnResultIgnoresClosedReusedCallOwnerDuringFallback(t *testin
 	appendObservedSpawnOwner(model, open, "spawn-1", "")
 
 	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
-		ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
+		ParentCallID: "spawn-1", Status: eventstream.ToolStatusCompleted,
 		RawOutput: map[string]any{
 			"handle": "alpha", "state": "completed", "final_message": "alpha done",
 		},
@@ -275,7 +274,7 @@ func TestObservedSpawnResultWithoutHandleClosesUniqueOpenOwner(t *testing.T) {
 	appendObservedSpawnOwner(model, block, "spawn-1", "")
 
 	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
-		ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
+		ParentCallID: "spawn-1", Status: eventstream.ToolStatusCompleted,
 		RawOutput: map[string]any{"state": "completed", "final_message": "unique final"},
 	}})
 
@@ -303,7 +302,7 @@ func TestObservedSpawnResultClosesBlockAndActivityThroughSameOwner(t *testing.T)
 	})
 
 	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
-		ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
+		ParentCallID: "spawn-1", Status: eventstream.ToolStatusCompleted,
 		RawOutput: map[string]any{
 			"handle": "alpha", "state": "completed", "final_message": "done",
 		},
@@ -344,7 +343,7 @@ func TestObservedSpawnResultDoesNotSplitActiveAssistantMessage(t *testing.T) {
 	)
 	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 		ParentCallID: "spawn-1",
-		Status:       schema.ToolStatusCompleted,
+		Status:       eventstream.ToolStatusCompleted,
 		RawOutput: map[string]any{
 			"handle": "eira", "state": "completed", "final_message": "8",
 		},
@@ -407,7 +406,7 @@ func TestTerminalTaskReadRepairsSpawnBlockAndActivity(t *testing.T) {
 		ToolTaskHandle: "alpha",
 	})
 
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	taskMeta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
 		metautil.RuntimeToolName:     "Task",
 		metautil.RuntimeToolAction:   "read",
@@ -423,8 +422,8 @@ func TestTerminalTaskReadRepairsSpawnBlockAndActivity(t *testing.T) {
 			ToolCallID: "spawn-1",
 			ToolName:   "Spawn",
 		},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "task-read-1",
 			Status:        &completed,
 			RawInput:      map[string]any{"action": "read", "handle": "alpha"},

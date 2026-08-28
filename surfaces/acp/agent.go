@@ -6,8 +6,8 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
-	protocolacp "github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/promptview"
 )
 
@@ -61,7 +61,7 @@ type Agent interface {
 // requests must return through the exact client connection that submitted the
 // prompt.
 type PromptCallbacks interface {
-	SessionUpdate(context.Context, protocolacp.SessionNotification) error
+	SessionUpdate(context.Context, eventstream.SessionNotification) error
 	RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error)
 }
 

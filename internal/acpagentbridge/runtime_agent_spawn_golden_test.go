@@ -20,7 +20,6 @@ import (
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
@@ -36,7 +35,7 @@ func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
 		},
 	}
 	runtimeAgent, sessionID := newSpawnGoldenDirectRunnerAgent(t, runnerEvents, streams)
-	callbacks := &spawnGoldenCallbacks{updates: make(chan acp.SessionNotification, 16)}
+	callbacks := &spawnGoldenCallbacks{updates: make(chan eventstream.SessionNotification, 16)}
 	promptErr := make(chan error, 1)
 	go func() {
 		_, err := runtimeAgent.Prompt(context.Background(), runtimeacp.PromptInput{
@@ -83,10 +82,10 @@ func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1",
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-yara", ParentTool: parent,
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		Update: acp.ContentChunk{
-			SessionUpdate: acp.UpdateAgentMessage,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
 			MessageID:     "child-message-1",
-			Content:       acp.TextContent{Type: "text", Text: "child output before wait"},
+			Content:       eventstream.TextContent{Type: "text", Text: "child output before wait"},
 		},
 	}
 	// Direct Runtime delivery still consumes Task output while the parent Runner
@@ -139,15 +138,15 @@ func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
 	notifications := callbacks.snapshot()
 	spawnCompleted := 0
 	for _, notification := range notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
-		if !ok || update.ToolCallID != "spawn-call-1" || update.Status == nil || *update.Status != acp.ToolStatusCompleted {
+		update, ok := notification.Update.(eventstream.ToolCallUpdate)
+		if !ok || update.ToolCallID != "spawn-call-1" || update.Status == nil || *update.Status != eventstream.ToolStatusCompleted {
 			continue
 		}
 		spawnCompleted++
 		if update.Meta != nil || len(update.Content) != 1 || update.Content[0].Type != "content" {
 			t.Fatalf("Spawn fallback update = %#v, want one standard result without terminal metadata", update)
 		}
-		text, ok := update.Content[0].Content.(acp.TextContent)
+		text, ok := update.Content[0].Content.(eventstream.TextContent)
 		if !ok || text.Text != "exact fallback final" {
 			t.Fatalf("Spawn fallback content = %#v, want exact final message", update.Content)
 		}
@@ -171,12 +170,12 @@ func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
 }
 
 func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
-	spawnStatus := acp.ToolStatusInProgress
-	completed := acp.ToolStatusCompleted
+	spawnStatus := eventstream.ToolStatusInProgress
+	completed := eventstream.ToolStatusCompleted
 	spawnTitle := "Spawn breeze: explain your capability"
-	spawnKind := acp.ToolKindExecute
+	spawnKind := eventstream.ToolKindExecute
 	waitTitle := "Task wait"
-	waitKind := acp.ToolKindExecute
+	waitKind := eventstream.ToolKindExecute
 	spawnMeta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
 		metautil.RuntimeToolName: "Spawn",
 	})
@@ -193,7 +192,7 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 		},
 	}
 	runtimeAgent, sessionID := newSpawnGoldenAgent(t, turn, streams)
-	callbacks := &spawnGoldenCallbacks{updates: make(chan acp.SessionNotification, 32)}
+	callbacks := &spawnGoldenCallbacks{updates: make(chan eventstream.SessionNotification, 32)}
 	promptErr := make(chan error, 1)
 	go func() {
 		_, err := runtimeAgent.Prompt(context.Background(), runtimeacp.PromptInput{
@@ -205,25 +204,25 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 
 	sendGoldenTurnEnvelope(t, turn, callbacks, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: acp.ToolCall{
-			SessionUpdate: acp.UpdateToolCall, ToolCallID: "spawn-call-1", Title: spawnTitle,
-			Kind: spawnKind, Status: acp.ToolStatusPending,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-call-1", Title: spawnTitle,
+			Kind: spawnKind, Status: eventstream.ToolStatusPending,
 			RawInput: map[string]any{"agent": "breeze", "prompt": "explain your capability"},
-			Content:  []acp.ToolCallContent{{Type: "terminal", TerminalID: "spawn-call-1"}},
+			Content:  []eventstream.ToolCallContent{{Type: "terminal", TerminalID: "spawn-call-1"}},
 			Meta:     spawnMeta,
 		},
 	})
 	sendGoldenTurnEnvelope(t, turn, callbacks, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: acp.ToolCallUpdate{
-			SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "spawn-call-1", Title: &spawnTitle,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-call-1", Title: &spawnTitle,
 			Kind: &spawnKind, Status: &spawnStatus,
 			RawInput: map[string]any{"agent": "breeze", "prompt": "explain your capability"},
 			RawOutput: map[string]any{
 				"handle": "yara", "parent_call": "spawn-call-1", "parent_tool": "Spawn",
 				"state": "running", "target_kind": "subagent",
 			},
-			Content: []acp.ToolCallContent{{Type: "terminal", TerminalID: "spawn-call-1"}},
+			Content: []eventstream.ToolCallContent{{Type: "terminal", TerminalID: "spawn-call-1"}},
 			Meta:    spawnMeta,
 		},
 	})
@@ -236,20 +235,20 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 		t.Fatal("ACP bridge did not subscribe the Spawn Task stream")
 	}
 
-	child := func(update acp.Update, final bool) eventstream.Envelope {
+	child := func(update eventstream.Update, final bool) eventstream.Envelope {
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1",
 			Scope: eventstream.ScopeSubagent, ScopeID: "task-yara", ParentTool: parent,
 			Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient}, Final: final, Update: update,
 		}
 	}
-	subscription.events <- child(acp.ContentChunk{
-		SessionUpdate: acp.UpdateAgentMessage, MessageID: "child-progress-message",
-		Content: acp.TextContent{Type: "text", Text: "I will inspect the request."},
+	subscription.events <- child(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "child-progress-message",
+		Content: eventstream.TextContent{Type: "text", Text: "I will inspect the request."},
 	}, false)
-	subscription.events <- child(acp.ContentChunk{
-		SessionUpdate: acp.UpdateAgentThought,
-		Content:       acp.TextContent{Type: "text", Text: "child thought"},
+	subscription.events <- child(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentThought,
+		Content:       eventstream.TextContent{Type: "text", Text: "child thought"},
 	}, false)
 	subscription.events <- eventstream.Envelope{
 		Kind: eventstream.KindNotice, SessionID: "session-1",
@@ -257,31 +256,31 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Notice:   "child live output resumed after a transient gap",
 	}
-	subscription.events <- child(acp.ToolCall{
-		SessionUpdate: acp.UpdateToolCall, ToolCallID: "child-patch-1",
-		Title: "Apply child patch", Kind: acp.ToolKindEdit, Status: acp.ToolStatusInProgress,
+	subscription.events <- child(eventstream.ToolCall{
+		SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "child-patch-1",
+		Title: "Apply child patch", Kind: eventstream.ToolKindEdit, Status: eventstream.ToolStatusInProgress,
 	}, false)
 	childCommandTitle := "Run child command"
-	subscription.events <- child(acp.ToolCallUpdate{
-		SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "child-command-1",
+	subscription.events <- child(eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "child-command-1",
 		Title: &childCommandTitle, Status: &spawnStatus,
-		Content: []acp.ToolCallContent{{
+		Content: []eventstream.ToolCallContent{{
 			Type: "terminal", TerminalID: "child-terminal-1",
-			Content: acp.TextContent{Type: "text", Text: "nested output\n"},
+			Content: eventstream.TextContent{Type: "text", Text: "nested output\n"},
 		}},
 	}, false)
-	subscription.events <- child(acp.PlanUpdate{
-		SessionUpdate: acp.UpdatePlan,
-		Entries:       []acp.PlanEntry{{Content: "inspect child output", Status: "in_progress"}},
+	subscription.events <- child(eventstream.PlanUpdate{
+		SessionUpdate: eventstream.UpdatePlan,
+		Entries:       []eventstream.PlanEntry{{Content: "inspect child output", Status: "in_progress"}},
 	}, false)
 
-	subscription.events <- child(acp.ContentChunk{
-		SessionUpdate: acp.UpdateAgentMessage, MessageID: "child-final-message",
-		Content: acp.TextContent{Type: "text", Text: "I can inspect, "},
+	subscription.events <- child(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "child-final-message",
+		Content: eventstream.TextContent{Type: "text", Text: "I can inspect, "},
 	}, false)
-	subscription.events <- child(acp.ContentChunk{
-		SessionUpdate: acp.UpdateAgentMessage, MessageID: "child-final-message",
-		Content: acp.TextContent{Type: "text", Text: "edit, test, and review code."},
+	subscription.events <- child(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "child-final-message",
+		Content: eventstream.TextContent{Type: "text", Text: "edit, test, and review code."},
 	}, false)
 	subscription.events <- eventstream.Envelope{
 		Kind: eventstream.KindLifecycle, SessionID: "session-1",
@@ -304,16 +303,16 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 	// result, but must not emit a second parent FinalResponse.
 	sendGoldenTurnEnvelope(t, turn, callbacks, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: acp.ToolCall{
-			SessionUpdate: acp.UpdateToolCall, ToolCallID: "wait-call-1", Title: waitTitle,
-			Kind: waitKind, Status: acp.ToolStatusPending,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "wait-call-1", Title: waitTitle,
+			Kind: waitKind, Status: eventstream.ToolStatusPending,
 			RawInput: map[string]any{"action": "wait", "handle": "yara"},
 		},
 	})
 	sendGoldenTurnEnvelope(t, turn, callbacks, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain, Final: true,
-		Update: acp.ToolCallUpdate{
-			SessionUpdate: acp.UpdateToolCallInfo, ToolCallID: "wait-call-1", Title: &waitTitle,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "wait-call-1", Title: &waitTitle,
 			Kind: &waitKind, Status: &completed,
 			RawInput: map[string]any{"action": "wait", "handle": "yara"},
 			RawOutput: map[string]any{
@@ -429,24 +428,24 @@ func sendGoldenTurnEnvelope(t *testing.T, turn *testControlTurn, callbacks *spaw
 	waitGoldenNotification(t, callbacks)
 }
 
-func waitGoldenNotification(t *testing.T, callbacks *spawnGoldenCallbacks) acp.SessionNotification {
+func waitGoldenNotification(t *testing.T, callbacks *spawnGoldenCallbacks) eventstream.SessionNotification {
 	t.Helper()
 	select {
 	case notification := <-callbacks.updates:
 		return notification
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for ACP session/update")
-		return acp.SessionNotification{}
+		return eventstream.SessionNotification{}
 	}
 }
 
 type spawnGoldenCallbacks struct {
 	mu            sync.Mutex
-	notifications []acp.SessionNotification
-	updates       chan acp.SessionNotification
+	notifications []eventstream.SessionNotification
+	updates       chan eventstream.SessionNotification
 }
 
-func (c *spawnGoldenCallbacks) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {
+func (c *spawnGoldenCallbacks) SessionUpdate(_ context.Context, notification eventstream.SessionNotification) error {
 	c.mu.Lock()
 	c.notifications = append(c.notifications, notification)
 	c.mu.Unlock()
@@ -458,10 +457,10 @@ func (*spawnGoldenCallbacks) RequestPermission(context.Context, acpsdk.RequestPe
 	return acpsdk.RequestPermissionResponse{}, nil
 }
 
-func (c *spawnGoldenCallbacks) snapshot() []acp.SessionNotification {
+func (c *spawnGoldenCallbacks) snapshot() []eventstream.SessionNotification {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]acp.SessionNotification(nil), c.notifications...)
+	return append([]eventstream.SessionNotification(nil), c.notifications...)
 }
 
 type spawnGoldenDirectRuntime struct {

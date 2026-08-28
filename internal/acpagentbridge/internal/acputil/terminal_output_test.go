@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
-	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestStripTerminalConsoleFenceText(t *testing.T) {
@@ -58,10 +58,10 @@ func TestStripTerminalConsoleFenceToolCallUpdate(t *testing.T) {
 		RawOutput: map[string]any{"stdout": fenced},
 		Content: []client.ToolCallContent{{
 			Type:    "terminal",
-			Content: acpschema.TextContent{Type: "text", Text: fenced},
+			Content: eventstream.TextContent{Type: "text", Text: fenced},
 		}, {
 			Type:    "content",
-			Content: acpschema.TextContent{Type: "text", Text: fenced},
+			Content: eventstream.TextContent{Type: "text", Text: fenced},
 		}},
 	})
 
@@ -83,12 +83,12 @@ func TestStripTerminalConsoleFenceToolCallUpdateStripsExecuteContent(t *testing.
 	t.Parallel()
 
 	fenced := "```console\nclean\n```\n"
-	kind := acpschema.ToolKindExecute
+	kind := eventstream.ToolKindExecute
 	got := StripTerminalConsoleFenceToolCallUpdate(client.ToolCallUpdate{
 		Kind: &kind,
 		Content: []client.ToolCallContent{{
 			Type:    "content",
-			Content: acpschema.TextContent{Type: "text", Text: fenced},
+			Content: eventstream.TextContent{Type: "text", Text: fenced},
 		}},
 	})
 
@@ -106,7 +106,7 @@ func TestStripTerminalConsoleFenceToolCallUpdateStripsClaudeBashContent(t *testi
 		RawOutput: "Fri Jun 26 14:35:27 CST 2026",
 		Content: []client.ToolCallContent{{
 			Type:    "content",
-			Content: acpschema.TextContent{Type: "text", Text: fenced},
+			Content: eventstream.TextContent{Type: "text", Text: fenced},
 		}},
 		Meta: map[string]any{
 			"claudeCode": map[string]any{
@@ -124,7 +124,7 @@ func TestStripTerminalConsoleFenceToolCallUpdateStripsDecodedTextMapContent(t *t
 	t.Parallel()
 
 	fenced := "```console\nhello\n```\n"
-	kind := acpschema.ToolKindExecute
+	kind := eventstream.ToolKindExecute
 	got := StripTerminalConsoleFenceToolCallUpdate(client.ToolCallUpdate{
 		Kind: &kind,
 		Content: []client.ToolCallContent{{

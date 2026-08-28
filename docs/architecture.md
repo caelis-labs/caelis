@@ -78,12 +78,12 @@ Document responsibilities are intentionally separate:
   `surfaces/internal/transcript`: private shared presentation projection used
   by concrete Surfaces. These packages are not independent product surfaces or
   application-layer entry points.
-- `protocol/acp/*`: transitional ACP schema extensions, compatibility handling,
-  and documented `_meta` contracts.
+- `protocol/acp/*`: transitional documented `_meta` compatibility contracts.
   The root facade has retired; consumers import only the owning subpackage. The
   tree owns no transport dispatch interfaces or new aggregate product boundary.
   Standard method identities, wire contracts, and connection behavior come
-  from `acp-go-sdk`; residual packages migrate by semantic owner.
+  from `acp-go-sdk`; the remaining metadata compatibility migrates by semantic
+  owner.
 - `agent-sdk/*`: reusable SDK package tree. It owns runtime, model, tool, session,
   sandbox, task, policy, skill, and display contracts and reusable
   implementations.
@@ -194,7 +194,8 @@ Document responsibilities are intentionally separate:
   list/bootstrap/reconnect state, feed/replay coordination, legacy-child-mirror
   filtering, approval recovery, the aggregate client, the durable idempotency
   operation ledger, and the Session lifecycle write gate. Its
-  `eventstream.Envelope` package owns the Control-to-Surface feed vocabulary;
+  `eventstream.Envelope` package owns the Control-to-Surface feed vocabulary,
+  including its ACP-shaped update union and permission payload;
   the shared projection, authorization, state, and broker remain with their
   focused Control owners. Its
   aggregate includes Task observation as an independently delivered typed

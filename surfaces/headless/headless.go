@@ -12,7 +12,6 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type ApprovalPolicy string
@@ -220,7 +219,7 @@ func runSessionOnce(
 	)
 }
 
-func approvalPayloadFromPermission(req *schema.RequestPermissionRequest) *approval.Payload {
+func approvalPayloadFromPermission(req *eventstream.RequestPermissionRequest) *approval.Payload {
 	if req == nil {
 		return nil
 	}
@@ -287,12 +286,12 @@ func (r *assistantOutputReducer) Observe(env eventstream.Envelope) (string, bool
 	return update.Text, update.Assistant && update.Text != ""
 }
 
-func assistantMessageUpdate(update schema.Update) bool {
+func assistantMessageUpdate(update eventstream.Update) bool {
 	switch typed := update.(type) {
-	case schema.ContentChunk:
-		return typed.SessionUpdate == schema.UpdateAgentMessage
-	case *schema.ContentChunk:
-		return typed != nil && typed.SessionUpdate == schema.UpdateAgentMessage
+	case eventstream.ContentChunk:
+		return typed.SessionUpdate == eventstream.UpdateAgentMessage
+	case *eventstream.ContentChunk:
+		return typed != nil && typed.SessionUpdate == eventstream.UpdateAgentMessage
 	default:
 		return false
 	}

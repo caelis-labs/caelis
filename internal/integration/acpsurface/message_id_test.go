@@ -12,8 +12,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/testenv"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestProductACPStreamingChunksShareOneMessageID(t *testing.T) {
@@ -150,17 +150,17 @@ func TestProductACPStreamingChunksShareOneMessageID(t *testing.T) {
 	}
 }
 
-func agentMessageIdentities(notifications []acp.SessionNotification) ([]string, string) {
+func agentMessageIdentities(notifications []eventstream.SessionNotification) ([]string, string) {
 	ids := make([]string, 0, len(notifications))
 	var text strings.Builder
 	for _, notification := range notifications {
-		chunk, ok := notification.Update.(acp.ContentChunk)
-		if !ok || chunk.SessionUpdate != acp.UpdateAgentMessage {
+		chunk, ok := notification.Update.(eventstream.ContentChunk)
+		if !ok || chunk.SessionUpdate != eventstream.UpdateAgentMessage {
 			continue
 		}
 		ids = append(ids, strings.TrimSpace(chunk.MessageID))
 		switch content := chunk.Content.(type) {
-		case acp.TextContent:
+		case eventstream.TextContent:
 			text.WriteString(content.Text)
 		case map[string]any:
 			if value, _ := content["text"].(string); value != "" {
@@ -213,10 +213,10 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
-func usageUpdates(notifications []acp.SessionNotification) []acp.UsageUpdate {
-	out := make([]acp.UsageUpdate, 0, 1)
+func usageUpdates(notifications []eventstream.SessionNotification) []eventstream.UsageUpdate {
+	out := make([]eventstream.UsageUpdate, 0, 1)
 	for _, notification := range notifications {
-		if usage, ok := notification.Update.(acp.UsageUpdate); ok {
+		if usage, ok := notification.Update.(eventstream.UsageUpdate); ok {
 			out = append(out, usage)
 		}
 	}

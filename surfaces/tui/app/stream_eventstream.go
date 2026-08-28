@@ -8,7 +8,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -75,7 +74,7 @@ func (m *Model) suppressPairedCompactNotice(env eventstream.Envelope) bool {
 	}
 	source := compactNoticeSource(0)
 	switch {
-	case env.Kind == eventstream.KindSessionUpdate && eventstream.UpdateType(env.Update) == schema.UpdateCompact:
+	case env.Kind == eventstream.KindSessionUpdate && eventstream.UpdateType(env.Update) == eventstream.UpdateCompact:
 		source = compactNoticeSourceCanonical
 	case env.Kind == eventstream.KindNotice && strings.TrimSpace(env.Notice) == transcript.CompactNoticeLabel:
 		source = compactNoticeSourceTransient

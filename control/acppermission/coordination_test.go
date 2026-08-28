@@ -7,8 +7,8 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/acppermission"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
@@ -19,9 +19,9 @@ func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
 		ToolCall: session.ProtocolToolCall{
 			ID:       "call-1",
 			Name:     "RunCommand",
-			Kind:     schema.ToolKindExecute,
+			Kind:     eventstream.ToolKindExecute,
 			Title:    "Run command",
-			Status:   schema.ToolStatusPending,
+			Status:   eventstream.ToolStatusPending,
 			RawInput: map[string]any{"command": "go test ./..."},
 			Content: []session.ProtocolToolCallContent{{
 				Type: "content", Content: map[string]any{"type": "text", "text": "approval needed"},
@@ -51,7 +51,7 @@ func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var external schema.RequestPermissionRequest
+	var external eventstream.RequestPermissionRequest
 	if err := json.Unmarshal(raw, &external); err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +67,11 @@ func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
 func TestPermissionDecodeFallsBackFromMissingToolName(t *testing.T) {
 	t.Parallel()
 
-	kind := schema.ToolKindExecute
-	approval, err := acppermission.DecodePermissionRequest(schema.RequestPermissionRequest{
+	kind := eventstream.ToolKindExecute
+	approval, err := acppermission.DecodePermissionRequest(eventstream.RequestPermissionRequest{
 		SessionID: "session-1",
-		ToolCall: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		ToolCall: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Kind:          &kind,
 		},
@@ -79,7 +79,7 @@ func TestPermissionDecodeFallsBackFromMissingToolName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodePermissionRequest() error = %v", err)
 	}
-	if approval.ToolCall.Name != schema.ToolKindExecute {
-		t.Fatalf("tool name = %q, want kind fallback %q", approval.ToolCall.Name, schema.ToolKindExecute)
+	if approval.ToolCall.Name != eventstream.ToolKindExecute {
+		t.Fatalf("tool name = %q, want kind fallback %q", approval.ToolCall.Name, eventstream.ToolKindExecute)
 	}
 }

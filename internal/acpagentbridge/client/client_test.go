@@ -12,8 +12,8 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestInitializeUsesSDKClientCapabilities(t *testing.T) {
@@ -614,7 +614,7 @@ func TestSDKWireIngressRestoresMissingGrokExecuteKindWithoutExactIdentity(t *tes
 		t.Fatalf("wire update = %T, want ToolCall", got.Update)
 	}
 	rawInput, _ := call.RawInput.(map[string]any)
-	if call.Kind != schema.ToolKindExecute || call.Title != "run_terminal_command" || rawInput["command"] != "git status --short" {
+	if call.Kind != eventstream.ToolKindExecute || call.Title != "run_terminal_command" || rawInput["command"] != "git status --short" {
 		t.Fatalf("normalized Grok execute call = %#v", call)
 	}
 	if exactName := metautil.String(call.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); exactName != "" {

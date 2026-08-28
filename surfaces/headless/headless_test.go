@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRunSessionOnceDrainsAssistantOutput(t *testing.T) {
@@ -23,9 +22,9 @@ func TestRunSessionOnceDrainsAssistantOutput(t *testing.T) {
 		{
 			Cursor: "e1",
 			Kind:   eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "done"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "done"},
 			},
 		},
 		{
@@ -56,18 +55,18 @@ func TestRunSessionOnceAppendsPrefixGrowingACPMessageDeltasExactly(t *testing.T)
 	handle := newFakeACPHandle([]eventstream.Envelope{
 		{
 			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
 				MessageID:     "message-1",
-				Content:       schema.TextContent{Type: "text", Text: "a"},
+				Content:       eventstream.TextContent{Type: "text", Text: "a"},
 			},
 		},
 		{
 			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
 				MessageID:     "message-1",
-				Content:       schema.TextContent{Type: "text", Text: "ab"},
+				Content:       eventstream.TextContent{Type: "text", Text: "ab"},
 			},
 		},
 	})
@@ -88,9 +87,9 @@ func TestRunSessionOnceReplacesTransientAssistantWithCanonicalFinal(t *testing.T
 			Kind:     eventstream.KindSessionUpdate,
 			Scope:    eventstream.ScopeMain,
 			Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "provisional"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "provisional"},
 			},
 		},
 		{
@@ -100,9 +99,9 @@ func TestRunSessionOnceReplacesTransientAssistantWithCanonicalFinal(t *testing.T
 			Scope:        eventstream.ScopeMain,
 			Final:        true,
 			Delivery:     &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "canonical answer"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "canonical answer"},
 			},
 		},
 	})
@@ -121,18 +120,18 @@ func TestRunSessionOncePreservesIdenticalAssistantDeltas(t *testing.T) {
 	handle := newFakeACPHandle([]eventstream.Envelope{
 		{
 			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
 				MessageID:     "message-1",
-				Content:       schema.TextContent{Type: "text", Text: "ha"},
+				Content:       eventstream.TextContent{Type: "text", Text: "ha"},
 			},
 		},
 		{
 			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
 				MessageID:     "message-1",
-				Content:       schema.TextContent{Type: "text", Text: "ha"},
+				Content:       eventstream.TextContent{Type: "text", Text: "ha"},
 			},
 		},
 	})
@@ -152,9 +151,9 @@ func TestRunSessionOnceKeepsSDKOnlyAssistantWithoutDurableIdentity(t *testing.T)
 		Kind:     eventstream.KindSessionUpdate,
 		Scope:    eventstream.ScopeMain,
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "sdk-only"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "sdk-only"},
 		},
 	}})
 	result, err := RunSessionOnce(context.Background(), fakeStarter{turn: handle}, appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
@@ -174,9 +173,9 @@ func TestRunSessionOnceIgnoresScopedTraceOutput(t *testing.T) {
 			Cursor: "main-1",
 			Kind:   eventstream.KindSessionUpdate,
 			Scope:  eventstream.ScopeMain,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "main answer"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "main answer"},
 			},
 		},
 		{
@@ -190,9 +189,9 @@ func TestRunSessionOnceIgnoresScopedTraceOutput(t *testing.T) {
 			Kind:    eventstream.KindSessionUpdate,
 			Scope:   eventstream.ScopeSubagent,
 			ScopeID: "task-1",
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "child trace"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "child trace"},
 			},
 		},
 		{
@@ -227,10 +226,10 @@ func TestRunSessionOnceAutoDeniesApprovalByDefault(t *testing.T) {
 			Cursor:            "a1",
 			Kind:              eventstream.KindRequestPermission,
 			ApprovalRequestID: eventstream.ApprovalRequestID("approval-1"),
-			Permission: &schema.RequestPermissionRequest{
+			Permission: &eventstream.RequestPermissionRequest{
 				SessionID: "s1",
-				ToolCall: schema.ToolCallUpdate{
-					SessionUpdate: schema.UpdateToolCallInfo,
+				ToolCall: eventstream.ToolCallUpdate{
+					SessionUpdate: eventstream.UpdateToolCallInfo,
 					ToolCallID:    "call-1",
 					Title:         &title,
 				},
@@ -256,10 +255,10 @@ func TestRunSessionOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 	t.Parallel()
 
 	title := "RunCommand"
-	permission := &schema.RequestPermissionRequest{
+	permission := &eventstream.RequestPermissionRequest{
 		SessionID: "s1",
-		ToolCall: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		ToolCall: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Title:         &title,
 			RawInput: map[string]any{
@@ -358,9 +357,9 @@ func TestRunSessionOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 		{
 			Cursor: "r2",
 			Kind:   eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "done"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "done"},
 			},
 		},
 	})
@@ -400,9 +399,9 @@ func TestRunSessionOnceProjectsTargetedResultAndStructuredObservation(t *testing
 			RunID:     target.RunID,
 			TurnID:    target.TurnID,
 			Cursor:    "cursor-output",
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "done"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "done"},
 			},
 		},
 		{

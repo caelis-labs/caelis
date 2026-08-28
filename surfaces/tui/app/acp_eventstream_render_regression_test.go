@@ -11,7 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/evalharness"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
@@ -35,20 +34,20 @@ func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
 			Kind:      eventstream.KindSessionUpdate,
 			SessionID: "sess-regression",
 			Final:     true,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateUserMessage,
-				Content:       schema.TextContent{Type: "text", Text: "run the smoke check"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateUserMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "run the smoke check"},
 			},
 		},
 		{
 			Kind:      eventstream.KindSessionUpdate,
 			SessionID: "sess-regression",
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall,
 				ToolCallID:    "call-1",
 				Title:         "go test ./surfaces/tui/app",
-				Kind:          schema.ToolKindExecute,
-				Status:        schema.ToolStatusInProgress,
+				Kind:          eventstream.ToolKindExecute,
+				Status:        eventstream.ToolStatusInProgress,
 				RawInput:      map[string]any{"command": "go test ./surfaces/tui/app"},
 				Meta:          acpToolNameMeta("RunCommand"),
 			},
@@ -57,12 +56,12 @@ func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
 			Kind:      eventstream.KindSessionUpdate,
 			SessionID: "sess-regression",
 			Final:     true,
-			Update: schema.ToolCallUpdate{
-				SessionUpdate: schema.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
 				Title:         stringPtr("go test ./surfaces/tui/app"),
-				Kind:          stringPtr(schema.ToolKindExecute),
-				Status:        stringPtr(schema.ToolStatusCompleted),
+				Kind:          stringPtr(eventstream.ToolKindExecute),
+				Status:        stringPtr(eventstream.ToolStatusCompleted),
 				RawInput:      map[string]any{"command": "go test ./surfaces/tui/app"},
 				RawOutput:     map[string]any{"exit_code": 0},
 				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "ok\nPASS\n"),
@@ -72,9 +71,9 @@ func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
 			Kind:      eventstream.KindSessionUpdate,
 			SessionID: "sess-regression",
 			Final:     true,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "Smoke check passed."},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "Smoke check passed."},
 			},
 		},
 		completedRegressionTurn("sess-regression", ""),
@@ -120,21 +119,21 @@ func TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBefore
 			Kind:      eventstream.KindSessionUpdate,
 			SessionID: "sess-regression",
 			TurnID:    "turn-whitespace-tool",
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "\n"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "\n"},
 			},
 		},
 		{
 			Kind:      eventstream.KindSessionUpdate,
 			SessionID: "sess-regression",
 			TurnID:    "turn-whitespace-tool",
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall,
 				ToolCallID:    "call-1",
 				Title:         "cmpctl list ebs --json 2>&1",
-				Kind:          schema.ToolKindExecute,
-				Status:        schema.ToolStatusInProgress,
+				Kind:          eventstream.ToolKindExecute,
+				Status:        eventstream.ToolStatusInProgress,
 				RawInput:      map[string]any{"command": "cmpctl list ebs --json 2>&1"},
 				Meta:          acpToolNameMeta("RunCommand"),
 			},
@@ -144,12 +143,12 @@ func TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBefore
 			SessionID: "sess-regression",
 			TurnID:    "turn-whitespace-tool",
 			Final:     true,
-			Update: schema.ToolCallUpdate{
-				SessionUpdate: schema.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
 				Title:         stringPtr("cmpctl list ebs --json 2>&1"),
-				Kind:          stringPtr(schema.ToolKindExecute),
-				Status:        stringPtr(schema.ToolStatusFailed),
+				Kind:          stringPtr(eventstream.ToolKindExecute),
+				Status:        stringPtr(eventstream.ToolStatusFailed),
 				RawInput:      map[string]any{"command": "cmpctl list ebs --json 2>&1"},
 				RawOutput:     map[string]any{"exit_code": 1},
 				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "{\"status\":\"error\"}\n"),
@@ -160,9 +159,9 @@ func TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBefore
 			SessionID: "sess-regression",
 			TurnID:    "turn-whitespace-tool",
 			Final:     true,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "没有查到云硬盘。"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "没有查到云硬盘。"},
 			},
 		},
 		completedRegressionTurn("sess-regression", "turn-whitespace-tool"),
@@ -225,9 +224,9 @@ func TestRegressionACPEventstreamContextCompactingHint120x32(t *testing.T) {
 			SessionID: "sess-regression",
 			TurnID:    "turn-compact",
 			Scope:     eventstream.ScopeMain,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentThought,
-				Content:       schema.TextContent{Type: "text", Text: "Reviewing the remaining context budget."},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentThought,
+				Content:       eventstream.TextContent{Type: "text", Text: "Reviewing the remaining context budget."},
 			},
 		},
 		{

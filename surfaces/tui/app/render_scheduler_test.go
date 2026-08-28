@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRenderSchedulerCoalescesACPAssistantEnvelopesToOneMutation(t *testing.T) {
@@ -33,11 +32,11 @@ func TestRenderSchedulerCoalescesACPAssistantEnvelopesToOneMutation(t *testing.T
 	if !ok {
 		t.Fatalf("pending item = %T, want eventstream.Envelope", model.pendingRenderEvents.items[0].msg)
 	}
-	update, ok := pending.Update.(schema.ContentChunk)
+	update, ok := pending.Update.(eventstream.ContentChunk)
 	if !ok {
 		t.Fatalf("pending update = %T, want ContentChunk", pending.Update)
 	}
-	if got := strings.Count(update.Content.(schema.TextContent).Text, "x"); got != 100 {
+	if got := strings.Count(update.Content.(eventstream.TextContent).Text, "x"); got != 100 {
 		t.Fatalf("coalesced assistant chunks = %d, want 100", got)
 	}
 
@@ -62,11 +61,11 @@ func TestEventStreamNarrativeBatchKeyPreservesMessageIDBoundary(t *testing.T) {
 	t.Parallel()
 
 	first := schedulerACPAssistantEnvelope("first")
-	firstUpdate := first.Update.(schema.ContentChunk)
+	firstUpdate := first.Update.(eventstream.ContentChunk)
 	firstUpdate.MessageID = "message-1"
 	first.Update = firstUpdate
 	second := schedulerACPAssistantEnvelope("second")
-	secondUpdate := second.Update.(schema.ContentChunk)
+	secondUpdate := second.Update.(eventstream.ContentChunk)
 	secondUpdate.MessageID = "message-2"
 	second.Update = secondUpdate
 
@@ -89,9 +88,9 @@ func schedulerACPAssistantEnvelope(text string) eventstream.Envelope {
 		TurnID:    "turn-1",
 		Scope:     eventstream.ScopeMain,
 		ScopeID:   "session-1",
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: text},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: text},
 		},
 	}
 }

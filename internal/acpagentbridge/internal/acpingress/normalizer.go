@@ -7,9 +7,9 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type VisibilityPolicy func(updateType string, eventType session.EventType) session.Visibility
@@ -101,7 +101,7 @@ func normalizeToolCall(call client.ToolCall, opts Options) *session.Event {
 	updateType := strings.TrimSpace(call.SessionUpdate)
 	protocolUpdate := protocolUpdateFromToolCall(call)
 	protocolUpdate.Meta = ingressToolMeta(protocolUpdate.Meta)
-	protocolUpdate.Status = firstNonEmpty(protocolUpdate.Status, acpschema.ToolStatusPending)
+	protocolUpdate.Status = firstNonEmpty(protocolUpdate.Status, eventstream.ToolStatusPending)
 	event := baseEvent(
 		updateType,
 		session.EventTypeToolCall,

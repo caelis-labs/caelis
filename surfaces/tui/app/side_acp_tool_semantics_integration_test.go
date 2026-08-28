@@ -11,7 +11,6 @@ import (
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	acpclient "github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestMainProjectedTaskWaitMatchesNativeSubagentSemantics(t *testing.T) {
@@ -224,9 +223,9 @@ func TestParticipantSpawnRendersStandardFinalResultWithoutSubagentUI(t *testing.
 		turnID = "participant-turn-1"
 		callID = "participant-spawn-1"
 	)
-	pending := schema.ToolStatusPending
+	pending := eventstream.ToolStatusPending
 	spawnTitle := "Spawn orbit: inspect"
-	spawnKind := schema.ToolKindExecute
+	spawnKind := eventstream.ToolKindExecute
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
 		metautil.RuntimeToolName: "Spawn",
 	})
@@ -236,8 +235,8 @@ func TestParticipantSpawnRendersStandardFinalResultWithoutSubagentUI(t *testing.
 		text   string
 		err    bool
 	}{
-		{name: "completed", status: schema.ToolStatusCompleted, text: "nested final response"},
-		{name: "failed", status: schema.ToolStatusFailed, text: "nested child failed", err: true},
+		{name: "completed", status: eventstream.ToolStatusCompleted, text: "nested final response"},
+		{name: "failed", status: eventstream.ToolStatusFailed, text: "nested child failed", err: true},
 	} {
 		result := result
 		for _, mode := range []string{"live", "replay"} {
@@ -248,8 +247,8 @@ func TestParticipantSpawnRendersStandardFinalResultWithoutSubagentUI(t *testing.
 					{
 						Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: turnID,
 						Scope: eventstream.ScopeParticipant, ScopeID: turnID, ParticipantID: "reviewer", Actor: "@reviewer",
-						Update: schema.ToolCall{
-							SessionUpdate: schema.UpdateToolCall, ToolCallID: callID, Title: spawnTitle,
+						Update: eventstream.ToolCall{
+							SessionUpdate: eventstream.UpdateToolCall, ToolCallID: callID, Title: spawnTitle,
 							Kind: spawnKind, Status: pending,
 							RawInput: map[string]any{"agent": "orbit", "prompt": "inspect"},
 							Meta:     meta,
@@ -258,11 +257,11 @@ func TestParticipantSpawnRendersStandardFinalResultWithoutSubagentUI(t *testing.
 					{
 						Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: turnID,
 						Scope: eventstream.ScopeParticipant, ScopeID: turnID, ParticipantID: "reviewer", Actor: "@reviewer", Final: true,
-						Update: schema.ToolCallUpdate{
-							SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: callID, Title: &spawnTitle,
+						Update: eventstream.ToolCallUpdate{
+							SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: callID, Title: &spawnTitle,
 							Kind: &spawnKind, Status: &status,
-							Content: []schema.ToolCallContent{{
-								Type: "content", Content: schema.TextContent{Type: "text", Text: result.text},
+							Content: []eventstream.ToolCallContent{{
+								Type: "content", Content: eventstream.TextContent{Type: "text", Text: result.text},
 							}},
 						},
 					},
@@ -315,10 +314,10 @@ func TestParticipantSpawnToolPanelExpandsFullFinalResponse(t *testing.T) {
 		turnID = "participant-turn-long"
 		callID = "participant-spawn-long"
 	)
-	pending := schema.ToolStatusPending
-	completed := schema.ToolStatusCompleted
+	pending := eventstream.ToolStatusPending
+	completed := eventstream.ToolStatusCompleted
 	spawnTitle := "Spawn orbit: read-only strict review"
-	spawnKind := schema.ToolKindExecute
+	spawnKind := eventstream.ToolKindExecute
 	finalResponse := strings.Join([]string{
 		"review summary",
 		"finding one",
@@ -332,8 +331,8 @@ func TestParticipantSpawnToolPanelExpandsFullFinalResponse(t *testing.T) {
 		{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: turnID,
 			Scope: eventstream.ScopeParticipant, ScopeID: turnID, ParticipantID: "reviewer", Actor: "@reviewer",
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall, ToolCallID: callID, Title: spawnTitle,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: callID, Title: spawnTitle,
 				Kind: spawnKind, Status: pending,
 				RawInput: map[string]any{"agent": "orbit", "prompt": "read-only strict review"},
 				Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
@@ -344,10 +343,10 @@ func TestParticipantSpawnToolPanelExpandsFullFinalResponse(t *testing.T) {
 		{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: turnID,
 			Scope: eventstream.ScopeParticipant, ScopeID: turnID, ParticipantID: "reviewer", Actor: "@reviewer", Final: true,
-			Update: schema.ToolCallUpdate{
-				SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: callID, Status: &completed,
-				Content: []schema.ToolCallContent{{
-					Type: "content", Content: schema.TextContent{Type: "text", Text: finalResponse},
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: callID, Status: &completed,
+				Content: []eventstream.ToolCallContent{{
+					Type: "content", Content: eventstream.TextContent{Type: "text", Text: finalResponse},
 				}},
 			},
 		},
@@ -409,15 +408,15 @@ func TestParticipantSpawnToolPanelExpandsFullFinalResponse(t *testing.T) {
 func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testing.T) {
 	t.Parallel()
 
-	running := schema.ToolStatusInProgress
-	completed := schema.ToolStatusCompleted
+	running := eventstream.ToolStatusInProgress
+	completed := eventstream.ToolStatusCompleted
 	narrative := func(scope eventstream.Scope, scopeID, participantID, actor, update, text string) eventstream.Envelope {
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-			Update: schema.ContentChunk{
+			Update: eventstream.ContentChunk{
 				SessionUpdate: update, MessageID: update + "-1",
-				Content: schema.TextContent{Type: "text", Text: text},
+				Content: eventstream.TextContent{Type: "text", Text: text},
 			},
 		}
 	}
@@ -425,12 +424,12 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-1",
-				Title: "printf ok", Kind: schema.ToolKindExecute,
-				Status:   schema.ToolStatusInProgress,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "command-1",
+				Title: "printf ok", Kind: eventstream.ToolKindExecute,
+				Status:   eventstream.ToolStatusInProgress,
 				RawInput: map[string]any{"command": "printf ok"},
-				Content:  []schema.ToolCallContent{{Type: "terminal", TerminalID: "command-1"}},
+				Content:  []eventstream.ToolCallContent{{Type: "terminal", TerminalID: "command-1"}},
 				Meta:     metautil.WithTerminalInfo(nil, "command-1"),
 			},
 		}
@@ -439,8 +438,8 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-			Update: schema.ToolCallUpdate{
-				SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1", Status: &running,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1", Status: &running,
 				Meta: metautil.WithTerminalOutput(nil, "command-1", "SHARED_TOOL_OUTPUT\n"),
 			},
 		}
@@ -450,8 +449,8 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-			Update: schema.ToolCallUpdate{
-				SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1", Status: &completed,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1", Status: &completed,
 				RawOutput: map[string]any{"formatted_output": "SHARED_TOOL_OUTPUT\n", "exit_code": 0},
 				Meta:      metautil.WithTerminalExit(nil, "command-1", &exitCode, nil),
 			},
@@ -460,11 +459,11 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 
 	t.Run("participant transcript", func(t *testing.T) {
 		model := NewModel(Config{NoColor: true, NoAnimation: true})
-		model = applyACPEnvelopeForTest(t, model, narrative(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer", schema.UpdateAgentThought, "SHARED_REASONING"))
+		model = applyACPEnvelopeForTest(t, model, narrative(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer", eventstream.UpdateAgentThought, "SHARED_REASONING"))
 		model = applyACPEnvelopeForTest(t, model, start(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer"))
 		model = applyACPEnvelopeForTest(t, model, delta(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer"))
 		model = applyACPEnvelopeForTest(t, model, finish(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer"))
-		model = applyACPEnvelopeForTest(t, model, narrative(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer", schema.UpdateAgentMessage, "SHARED_ASSISTANT"))
+		model = applyACPEnvelopeForTest(t, model, narrative(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer", eventstream.UpdateAgentMessage, "SHARED_ASSISTANT"))
 		block := model.findParticipantTurnBlock("participant-turn-1")
 		if block == nil {
 			t.Fatal("participant turn block missing")
@@ -483,13 +482,13 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 		model.width, model.height = 96, 28
 		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn zenith: inspect",
-				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn zenith: inspect",
+				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 				RawInput: map[string]any{"agent": "zenith", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
 			},
 		})
-		childThought := narrative(eventstream.ScopeSubagent, "task-1", "codex", "@zenith", schema.UpdateAgentThought, "SHARED_REASONING")
+		childThought := narrative(eventstream.ScopeSubagent, "task-1", "codex", "@zenith", eventstream.UpdateAgentThought, "SHARED_REASONING")
 		childThought.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
 		model = applyACPEnvelopeForTest(t, model, childThought)
 		childStart := start(eventstream.ScopeSubagent, "task-1", "codex", "@zenith")
@@ -501,7 +500,7 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 		childFinish := finish(eventstream.ScopeSubagent, "task-1", "codex", "@zenith")
 		childFinish.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
 		model = applyACPEnvelopeForTest(t, model, childFinish)
-		childAnswer := narrative(eventstream.ScopeSubagent, "task-1", "codex", "@zenith", schema.UpdateAgentMessage, "SHARED_ASSISTANT")
+		childAnswer := narrative(eventstream.ScopeSubagent, "task-1", "codex", "@zenith", eventstream.UpdateAgentMessage, "SHARED_ASSISTANT")
 		childAnswer.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
 		model = applyACPEnvelopeForTest(t, model, childAnswer)
 		block := requireMainACPTurnBlockForTest(t, model)
@@ -519,14 +518,14 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 func TestStandardACPWaitIsHiddenLikeTaskWaitAcrossParticipantAndOverlay(t *testing.T) {
 	t.Parallel()
 
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	narrative := func(scope eventstream.Scope, scopeID, participantID, actor string) eventstream.Envelope {
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentThought, MessageID: "thought-1",
-				Content: schema.TextContent{Type: "text", Text: "checking child agents"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentThought, MessageID: "thought-1",
+				Content: eventstream.TextContent{Type: "text", Text: "checking child agents"},
 			},
 		}
 	}
@@ -536,14 +535,14 @@ func TestStandardACPWaitIsHiddenLikeTaskWaitAcrossParticipantAndOverlay(t *testi
 			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
 		}
 		start := base
-		start.Update = schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "codex-wait-1",
-			Title: "wait", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
+		start.Update = eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "codex-wait-1",
+			Title: "wait", Kind: eventstream.ToolKindOther, Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"action": "wait", "target_kind": "subagent"},
 		}
 		finish := base
-		finish.Update = schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "codex-wait-1", Status: &completed,
+		finish.Update = eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "codex-wait-1", Status: &completed,
 		}
 		return []eventstream.Envelope{start, finish}
 	}
@@ -571,9 +570,9 @@ func TestStandardACPWaitIsHiddenLikeTaskWaitAcrossParticipantAndOverlay(t *testi
 		model.width, model.height = 96, 28
 		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn reviewer: inspect",
-				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn reviewer: inspect",
+				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 				RawInput: map[string]any{"agent": "reviewer", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
 			},
 		})
@@ -599,68 +598,68 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 	t.Parallel()
 
 	toolUpdates := func(scope eventstream.Scope, scopeID, participantID, actor string) []eventstream.Envelope {
-		completed := schema.ToolStatusCompleted
-		inProgress := schema.ToolStatusInProgress
-		failed := schema.ToolStatusFailed
-		grokExecute := acpclient.NormalizeInboundUpdate(schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "execute-1",
-			Title: "run_terminal_command", Status: schema.ToolStatusInProgress,
+		completed := eventstream.ToolStatusCompleted
+		inProgress := eventstream.ToolStatusInProgress
+		failed := eventstream.ToolStatusFailed
+		grokExecute := acpclient.NormalizeInboundUpdate(eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "execute-1",
+			Title: "run_terminal_command", Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"command": "git status --short"},
 			Meta: map[string]any{"x.ai/tool": map[string]any{
 				"version": 1, "name": "run_terminal_command", "kind": "execute",
 				"namespace": "grok_build", "label": "Run Command", "read_only": false,
 			}},
-		}).(schema.ToolCall)
+		}).(eventstream.ToolCall)
 		return []eventstream.Envelope{
 			{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-				Update: schema.ToolCall{
-					SessionUpdate: schema.UpdateToolCall, ToolCallID: "read-1",
-					Title: "Read MEMORY.md", Kind: schema.ToolKindRead, Status: schema.ToolStatusInProgress,
+				Update: eventstream.ToolCall{
+					SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "read-1",
+					Title: "Read MEMORY.md", Kind: eventstream.ToolKindRead, Status: eventstream.ToolStatusInProgress,
 					RawInput: map[string]any{"path": "MEMORY.md"},
 				},
 			},
 			{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-				Update: schema.ToolCallUpdate{
-					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "read-1", Status: &completed,
+				Update: eventstream.ToolCallUpdate{
+					SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "read-1", Status: &completed,
 				},
 			},
 			{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-				Update: schema.ToolCall{
-					SessionUpdate: schema.UpdateToolCall, ToolCallID: "search-1",
-					Title: "Search ToolCallStatus", Kind: schema.ToolKindSearch, Status: schema.ToolStatusCompleted,
+				Update: eventstream.ToolCall{
+					SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "search-1",
+					Title: "Search ToolCallStatus", Kind: eventstream.ToolKindSearch, Status: eventstream.ToolStatusCompleted,
 					RawInput: map[string]any{"query": "ToolCallStatus"},
 				},
 			},
 			{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-				Update: schema.ToolCallUpdate{
-					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "search-1", Status: &completed,
+				Update: eventstream.ToolCallUpdate{
+					SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "search-1", Status: &completed,
 				},
 			},
 			{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-				Update: schema.ToolCallUpdate{
-					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "search-1", Status: &inProgress,
+				Update: eventstream.ToolCallUpdate{
+					SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "search-1", Status: &inProgress,
 					RawOutput: map[string]any{"result": "stale running snapshot"},
 				},
 			},
 			{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-				Update: schema.ToolCall{
-					SessionUpdate: schema.UpdateToolCall, ToolCallID: "read-failed",
-					Title: "Read missing.go", Kind: schema.ToolKindRead, Status: failed,
+				Update: eventstream.ToolCall{
+					SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "read-failed",
+					Title: "Read missing.go", Kind: eventstream.ToolKindRead, Status: failed,
 					RawInput: map[string]any{"path": "missing.go"},
-					Content: []schema.ToolCallContent{{
-						Type: "content", Content: schema.TextContent{Type: "text", Text: "missing file"},
+					Content: []eventstream.ToolCallContent{{
+						Type: "content", Content: eventstream.TextContent{Type: "text", Text: "missing file"},
 					}},
 				},
 			},
@@ -672,24 +671,24 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 			{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-				Update: schema.ToolCallUpdate{
-					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-1", Status: &completed,
+				Update: eventstream.ToolCallUpdate{
+					SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "execute-1", Status: &completed,
 				},
 			},
 			{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-				Update: schema.ToolCall{
-					SessionUpdate: schema.UpdateToolCall, ToolCallID: "subagent-1",
-					Title: "Start subagent task_invocation_review", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
+				Update: eventstream.ToolCall{
+					SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "subagent-1",
+					Title: "Start subagent task_invocation_review", Kind: eventstream.ToolKindOther, Status: eventstream.ToolStatusInProgress,
 					RawInput: map[string]any{"activityKind": "start", "agentPath": "task_invocation_review"},
 				},
 			},
 			{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 				Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
-				Update: schema.ToolCallUpdate{
-					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "subagent-1", Status: &completed,
+				Update: eventstream.ToolCallUpdate{
+					SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "subagent-1", Status: &completed,
 				},
 			},
 		}
@@ -725,7 +724,7 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 				failedReadFound = event.Err && strings.Contains(event.Output, "missing file")
 			}
 			if event.CallID == "execute-1" {
-				executeFound = event.ToolKind == schema.ToolKindExecute && event.Args == "git status --short"
+				executeFound = event.ToolKind == eventstream.ToolKindExecute && event.Args == "git status --short"
 			}
 		}
 		if !failedReadFound {
@@ -761,9 +760,9 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 		model.width, model.height = 96, 28
 		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn reviewer: inspect",
-				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn reviewer: inspect",
+				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 				RawInput: map[string]any{"agent": "reviewer", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
 			},
 		})
@@ -787,43 +786,43 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 func TestCapturedGrokBuildShellAndAnonymousFinalStreamRenderAcrossParticipantAndOverlay(t *testing.T) {
 	t.Parallel()
 
-	execute := schema.ToolKindExecute
+	execute := eventstream.ToolKindExecute
 	executeTitle := "Execute `printf 'SHELL_ACP_43\\n'`"
-	completed := schema.ToolStatusCompleted
-	updates := []schema.Update{
-		acpclient.NormalizeInboundUpdate(schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "execute-1",
-			Title: "run_terminal_command", Status: schema.ToolStatusInProgress,
+	completed := eventstream.ToolStatusCompleted
+	updates := []eventstream.Update{
+		acpclient.NormalizeInboundUpdate(eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "execute-1",
+			Title: "run_terminal_command", Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"command": "printf 'SHELL_ACP_43\\n'"},
 			Meta: map[string]any{"x.ai/tool": map[string]any{
 				"version": 1, "name": "run_terminal_command", "kind": "execute",
 				"namespace": "grok_build", "label": "Run Command", "read_only": false,
 			}},
-		}).(schema.ToolCall),
-		acpclient.NormalizeInboundUpdate(schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-1",
+		}).(eventstream.ToolCall),
+		acpclient.NormalizeInboundUpdate(eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "execute-1",
 			Title: &executeTitle, Kind: &execute,
 			RawInput: map[string]any{"variant": "Bash", "command": "printf 'SHELL_ACP_43\\n'"},
-			Content: []schema.ToolCallContent{{
-				Type: "content", Content: schema.TextContent{Type: "text", Text: "Execute the shell command"},
+			Content: []eventstream.ToolCallContent{{
+				Type: "content", Content: eventstream.TextContent{Type: "text", Text: "Execute the shell command"},
 			}},
-		}).(schema.ToolCallUpdate),
-		acpclient.NormalizeInboundUpdate(schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-1", Status: &completed,
-			Content: []schema.ToolCallContent{{
-				Type: "content", Content: schema.TextContent{Type: "text", Text: "SHELL_ACP_43\n"},
+		}).(eventstream.ToolCallUpdate),
+		acpclient.NormalizeInboundUpdate(eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "execute-1", Status: &completed,
+			Content: []eventstream.ToolCallContent{{
+				Type: "content", Content: eventstream.TextContent{Type: "text", Text: "SHELL_ACP_43\n"},
 			}},
 			RawOutput: map[string]any{
 				"type": "Bash", "command": "printf 'SHELL_ACP_43\\n'",
 				"output":            []any{float64(83), float64(72), float64(69), float64(76), float64(76), float64(95), float64(65), float64(67), float64(80), float64(95), float64(52), float64(51), float64(10)},
 				"output_for_prompt": "exit: 0\nSHELL_ACP_43\n", "exit_code": float64(0),
 			},
-		}).(schema.ToolCallUpdate),
+		}).(eventstream.ToolCallUpdate),
 	}
 	for _, chunk := range []string{"第一", "段", "完成", "。", "第二", "段", "完成", "。"} {
-		updates = append(updates, schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: chunk},
+		updates = append(updates, eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: chunk},
 		})
 	}
 
@@ -854,7 +853,7 @@ func TestCapturedGrokBuildShellAndAnonymousFinalStreamRenderAcrossParticipantAnd
 				answers = append(answers, event)
 			}
 		}
-		if len(tools) != 1 || tools[0].ToolKind != schema.ToolKindExecute || tools[0].Terminal || !isTerminalPanelToolEvent(tools[0]) || !tools[0].Done {
+		if len(tools) != 1 || tools[0].ToolKind != eventstream.ToolKindExecute || tools[0].Terminal || !isTerminalPanelToolEvent(tools[0]) || !tools[0].Done {
 			t.Fatalf("Grok shell events = %#v, want terminal presentation without claiming terminal-byte ownership", tools)
 		}
 		if len(answers) != 1 || answers[0].Text != "第一段完成。第二段完成。" {
@@ -882,9 +881,9 @@ func TestCapturedGrokBuildShellAndAnonymousFinalStreamRenderAcrossParticipantAnd
 		model.width, model.height = 96, 28
 		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn grok: inspect shell",
-				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn grok: inspect shell",
+				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 				RawInput: map[string]any{"agent": "grok", "prompt": "inspect shell"}, Meta: acpToolNameMeta("Spawn"),
 			},
 		})
@@ -907,23 +906,23 @@ func TestCapturedGrokBuildShellAndAnonymousFinalStreamRenderAcrossParticipantAnd
 func TestStandardExecuteContentPatchesReplaceWithoutClaimingTerminalBytes(t *testing.T) {
 	t.Parallel()
 
-	inProgress := schema.ToolStatusInProgress
-	updates := []schema.Update{
-		schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "execute-1",
-			Title: "Execute code", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+	inProgress := eventstream.ToolStatusInProgress
+	updates := []eventstream.Update{
+		eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "execute-1",
+			Title: "Execute code", Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"command": "run phases"},
 		},
-		schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-1", Status: &inProgress,
-			Content: []schema.ToolCallContent{{
-				Type: "content", Content: schema.TextContent{Type: "text", Text: "phase 1"},
+		eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "execute-1", Status: &inProgress,
+			Content: []eventstream.ToolCallContent{{
+				Type: "content", Content: eventstream.TextContent{Type: "text", Text: "phase 1"},
 			}},
 		},
-		schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-1", Status: &inProgress,
-			Content: []schema.ToolCallContent{{
-				Type: "content", Content: schema.TextContent{Type: "text", Text: "phase 2"},
+		eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "execute-1", Status: &inProgress,
+			Content: []eventstream.ToolCallContent{{
+				Type: "content", Content: eventstream.TextContent{Type: "text", Text: "phase 2"},
 			}},
 		},
 	}
@@ -951,29 +950,29 @@ func TestStandardExecuteContentPatchesReplaceWithoutClaimingTerminalBytes(t *tes
 func TestSideACPContentPresenceSurvivesSparseStatusAcrossParticipantAndSubagent(t *testing.T) {
 	t.Parallel()
 
-	inProgress := schema.ToolStatusInProgress
-	completed := schema.ToolStatusCompleted
-	updates := []schema.Update{
-		schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "content-presence-1",
-			Title: "Execute phases", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+	inProgress := eventstream.ToolStatusInProgress
+	completed := eventstream.ToolStatusCompleted
+	updates := []eventstream.Update{
+		eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "content-presence-1",
+			Title: "Execute phases", Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"command": "run phases"}, Meta: acpToolNameMeta("Shell"),
-			Content: []schema.ToolCallContent{{
-				Type: "content", Content: schema.TextContent{Type: "text", Text: "phase 1"},
+			Content: []eventstream.ToolCallContent{{
+				Type: "content", Content: eventstream.TextContent{Type: "text", Text: "phase 1"},
 			}},
 		},
-		schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "content-presence-1", Status: &inProgress,
+		eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "content-presence-1", Status: &inProgress,
 		},
-		schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "content-presence-1",
-			Content: []schema.ToolCallContent{},
+		eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "content-presence-1",
+			Content: []eventstream.ToolCallContent{},
 		},
-		schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "content-presence-1", Status: &completed,
+		eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "content-presence-1", Status: &completed,
 		},
-		schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "content-presence-1", Status: &completed,
+		eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "content-presence-1", Status: &completed,
 		},
 	}
 	run := func(t *testing.T, model *Model, scope eventstream.Scope, parent *eventstream.ParentToolRelation, current func(*Model) SubagentEvent) {
@@ -1018,9 +1017,9 @@ func TestSideACPContentPresenceSurvivesSparseStatusAcrossParticipantAndSubagent(
 		model := NewModel(Config{NoColor: true, NoAnimation: true})
 		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-content-presence", Title: "Spawn executor",
-				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-content-presence", Title: "Spawn executor",
+				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 				RawInput: map[string]any{"agent": "executor"}, Meta: acpToolNameMeta("Spawn"),
 			},
 		})
@@ -1038,28 +1037,28 @@ func TestSideACPContentPresenceSurvivesSparseStatusAcrossParticipantAndSubagent(
 func TestSideACPProjectedStandardExecuteContentReplacesEarlierTerminalBytesAcrossParticipantAndSubagent(t *testing.T) {
 	t.Parallel()
 
-	inProgress := schema.ToolStatusInProgress
-	completed := schema.ToolStatusCompleted
-	updates := []schema.Update{
-		schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "execute-terminal-1",
-			Title: "Execute phases", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+	inProgress := eventstream.ToolStatusInProgress
+	completed := eventstream.ToolStatusCompleted
+	updates := []eventstream.Update{
+		eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "execute-terminal-1",
+			Title: "Execute phases", Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"command": "run phases"},
 		},
-		schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-terminal-1", Status: &inProgress,
+		eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "execute-terminal-1", Status: &inProgress,
 			Meta: metautil.WithTerminalOutput(nil, "terminal-1", "terminal phase\n"),
 		},
-		schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-terminal-1", Status: &inProgress,
-			Content: []schema.ToolCallContent{{
-				Type: "content", Content: schema.TextContent{Type: "text", Text: "collection phase"},
+		eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "execute-terminal-1", Status: &inProgress,
+			Content: []eventstream.ToolCallContent{{
+				Type: "content", Content: eventstream.TextContent{Type: "text", Text: "collection phase"},
 			}},
 		},
-		schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "execute-terminal-1", Status: &completed,
-			Content: []schema.ToolCallContent{{
-				Type: "content", Content: schema.TextContent{Type: "text", Text: "collection final"},
+		eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "execute-terminal-1", Status: &completed,
+			Content: []eventstream.ToolCallContent{{
+				Type: "content", Content: eventstream.TextContent{Type: "text", Text: "collection final"},
 			}},
 		},
 	}
@@ -1101,9 +1100,9 @@ func TestSideACPProjectedStandardExecuteContentReplacesEarlierTerminalBytesAcros
 		model := NewModel(Config{NoColor: true, NoAnimation: true})
 		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-terminal-collection", Title: "Spawn executor",
-				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-terminal-collection", Title: "Spawn executor",
+				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 				RawInput: map[string]any{"agent": "executor"}, Meta: acpToolNameMeta("Spawn"),
 			},
 		})
@@ -1116,18 +1115,18 @@ func TestSideACPProjectedStandardExecuteContentReplacesEarlierTerminalBytesAcros
 func TestMixedIdentityNarrativeRunsStayOrderedAcrossParticipantAndSubagent(t *testing.T) {
 	t.Parallel()
 
-	updates := []schema.Update{
-		schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "匿名答复甲"},
+	updates := []eventstream.Update{
+		eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "匿名答复甲"},
 		},
-		schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentThought, MessageID: "reasoning-1",
-			Content: schema.TextContent{Type: "text", Text: "具名推理中"},
+		eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentThought, MessageID: "reasoning-1",
+			Content: eventstream.TextContent{Type: "text", Text: "具名推理中"},
 		},
-		schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "匿名答复乙"},
+		eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "匿名答复乙"},
 		},
 	}
 	apply := func(t *testing.T, model *Model, scope eventstream.Scope, parent *eventstream.ParentToolRelation) *Model {
@@ -1162,9 +1161,9 @@ func TestMixedIdentityNarrativeRunsStayOrderedAcrossParticipantAndSubagent(t *te
 		model := NewModel(Config{NoColor: true, NoAnimation: true})
 		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-mixed", Title: "Spawn mixed",
-				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-mixed", Title: "Spawn mixed",
+				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 				RawInput: map[string]any{"agent": "mixed"}, Meta: acpToolNameMeta("Spawn"),
 			},
 		})

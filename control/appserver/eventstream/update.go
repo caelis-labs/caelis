@@ -1,4 +1,4 @@
-package schema
+package eventstream
 
 import (
 	"encoding/json"
@@ -42,14 +42,14 @@ const (
 	ToolKindOther   = "other"
 )
 
-// Update is the ACP wire union retained by transitional product adapters.
-// Host-private ingress and presentation projectors translate these values at
-// their owning boundaries; reusable semantics remain in agent-sdk/session.
+// Update is the Control-to-Surface ACP-shaped update union carried by Envelope.
+// Host-private ingress and presentation projectors translate external or SDK
+// semantics into these values at their owning boundaries.
 type Update interface {
 	SessionUpdateType() string
 }
 
-// DecodeUpdateJSON decodes one transitional projection update while preserving
+// DecodeUpdateJSON decodes one Control Envelope update while preserving
 // standard members owned by acp-go-sdk and unknown vendor members as RawUpdate.
 func DecodeUpdateJSON(raw json.RawMessage) (Update, error) {
 	var probe struct {
@@ -95,7 +95,7 @@ func DecodeUpdateJSON(raw json.RawMessage) (Update, error) {
 	}
 }
 
-// RawUpdate preserves an ACP update that this transitional schema does not own.
+// RawUpdate preserves an ACP update that Control does not project structurally.
 // Its raw object remains authoritative so SDK-owned and vendor fields round-trip.
 type RawUpdate struct {
 	SessionUpdate string          `json:"sessionUpdate"`

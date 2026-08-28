@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestACPTaskStreamMuxDoesNotTreatChildLifecycleAsObservationControl(t *testing.T) {
@@ -447,8 +446,8 @@ func TestACPTaskStreamMuxSealPreservesActiveResumeToTerminal(t *testing.T) {
 	resumed.events <- eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Cursor: "cursor-terminal",
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "command-1",
 			Meta:          metautil.WithTerminalExit(nil, "command-1", &exitCode, nil),
 		},

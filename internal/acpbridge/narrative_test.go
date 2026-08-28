@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestNarrativeAccumulatorMessageChunksEmitDeltasOnly(t *testing.T) {
@@ -235,10 +234,10 @@ func TestEnvelopeWithNarrativeTextPreservesEnvelopeShape(t *testing.T) {
 			"vendor": "acp-test",
 			"nested": map[string]any{"key": "value"},
 		},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
 			MessageID:     "msg-1",
-			Content:       schema.TextContent{Type: "text", Text: "hello world"},
+			Content:       eventstream.TextContent{Type: "text", Text: "hello world"},
 			Meta: map[string]any{
 				"chunk_meta": true,
 			},
@@ -284,11 +283,11 @@ func TestEnvelopeWithNarrativeTextPreservesEnvelopeShape(t *testing.T) {
 	if !reflect.DeepEqual(repaired.Meta, original.Meta) {
 		t.Fatalf("repaired meta = %#v, want %#v", repaired.Meta, original.Meta)
 	}
-	chunk, ok := repaired.Update.(schema.ContentChunk)
+	chunk, ok := repaired.Update.(eventstream.ContentChunk)
 	if !ok {
 		t.Fatalf("repaired update = %#v, want ContentChunk", repaired.Update)
 	}
-	if chunk.SessionUpdate != schema.UpdateAgentMessage {
+	if chunk.SessionUpdate != eventstream.UpdateAgentMessage {
 		t.Fatalf("repaired session_update = %q, want agent_message_chunk", chunk.SessionUpdate)
 	}
 	if got, want := session.ExtractProtocolText(chunk.Content), "lo"; got != want {
@@ -301,9 +300,9 @@ func TestEnvelopeWithNarrativeTextDerivesMetaFromUpdateWhenAbsent(t *testing.T) 
 
 	original := &eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "hello"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "hello"},
 			Meta: map[string]any{
 				"from_update": true,
 			},

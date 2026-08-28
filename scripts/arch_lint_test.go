@@ -138,9 +138,9 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "",
 		},
 		{
-			name:       "Control ACP permission accepts transitional schema",
+			name:       "Control ACP permission accepts Control event stream",
 			rel:        "control/acppermission/coordination.go",
-			importPath: modulePath + "/protocol/acp/schema",
+			importPath: modulePath + "/control/appserver/eventstream",
 			want:       "",
 		},
 		{
@@ -638,6 +638,12 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			rel:     "protocol/acp/eventstream/event.go",
 			want:    "must not recreate protocol/acp/eventstream; the Control client event contract belongs to control/appserver/eventstream",
 			wantSub: "protocol/acp/eventstream",
+		},
+		{
+			name:    "deleted ACP schema path fails",
+			rel:     "protocol/acp/schema/update.go",
+			want:    "must not recreate protocol/acp/schema; Control Envelope update and permission payloads belong to control/appserver/eventstream",
+			wantSub: "protocol/acp/schema",
 		},
 		{
 			name:    "deleted ACP semantic path fails",

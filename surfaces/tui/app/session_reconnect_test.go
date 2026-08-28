@@ -17,7 +17,6 @@ import (
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	protocoltaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestSessionReconnectMessageInstallsSessionBeforeSubagentBackfill(t *testing.T) {
@@ -164,8 +163,8 @@ func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing
 			Kind: eventstream.KindRequestPermission, SessionID: "session-1",
 			HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1",
 			ApprovalRequestID: "approval-original",
-			Permission: &schema.RequestPermissionRequest{
-				SessionID: "session-1", ToolCall: schema.ToolCallUpdate{ToolCallID: "call-1"},
+			Permission: &eventstream.RequestPermissionRequest{
+				SessionID: "session-1", ToolCall: eventstream.ToolCallUpdate{ToolCallID: "call-1"},
 				Options: []acpsdk.PermissionOption{{OptionId: "allow_once", Name: "Allow once", Kind: acpsdk.PermissionOptionKindAllowOnce}},
 			},
 		}},
@@ -300,7 +299,7 @@ func TestStreamReconnectBackfillCarriesNormalizedObservedSpawnResult(t *testing.
 	}
 	result := message.OwnerRepairs.Spawns[0]
 	if result.ParentCallID != "spawn-call-1" ||
-		result.Status != schema.ToolStatusCompleted ||
+		result.Status != eventstream.ToolStatusCompleted ||
 		result.RawOutput["final_message"] != structuredFinalMessageForFidelityTest {
 		t.Fatalf("observed Spawn result = %#v, want exact durable terminal child payload", result)
 	}
@@ -375,7 +374,7 @@ func TestApplySessionReconnectStateAtomicallyResetsTaskStreamSession(t *testing.
 				token:     7,
 				events: []eventstream.Envelope{{
 					Kind: eventstream.KindSessionUpdate, SessionID: test.staleBatchSession,
-					Update: schema.ContentChunk{SessionUpdate: schema.UpdateAgentMessage},
+					Update: eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage},
 				}},
 			})
 			model = next.(*Model)

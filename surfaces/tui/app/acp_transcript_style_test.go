@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
@@ -139,10 +139,10 @@ func TestExplorationSummaryStylesNormalizedListLikeStandaloneToolHeader(t *testi
 	ctx := BlockRenderContext{Width: 80, TermWidth: 80, Theme: model.theme}
 	block := NewMainACPTurnBlock("turn-list")
 	block.UpdateToolWithMeta("list-1", "", "docs", "", true, false, ToolUpdateMeta{
-		ToolKind: schema.ToolKindOther, ToolTitle: "List `docs`", ExplorationVerb: "List",
+		ToolKind: eventstream.ToolKindOther, ToolTitle: "List `docs`", ExplorationVerb: "List",
 	})
-	block.UpdateToolWithMeta("read-1", "", "go.mod", "", true, false, ToolUpdateMeta{ToolKind: schema.ToolKindRead})
-	block.Status = schema.ToolStatusCompleted
+	block.UpdateToolWithMeta("read-1", "", "go.mod", "", true, false, ToolUpdateMeta{ToolKind: eventstream.ToolKindRead})
+	block.Status = eventstream.ToolStatusCompleted
 
 	var listRow RenderedRow
 	for _, row := range block.Render(ctx) {

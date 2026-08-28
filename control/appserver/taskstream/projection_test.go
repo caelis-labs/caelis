@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestProjectTaskFrameDoesNotProjectChildPermissionOutsideControl(t *testing.T) {
@@ -104,7 +103,7 @@ func TestProjectTaskFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	if env.Kind != eventstream.KindSessionUpdate || env.SessionID != "session-1" {
 		t.Fatalf("env = %#v, want session/update for session-1", env)
 	}
-	update, ok := env.Update.(schema.ToolCallUpdate)
+	update, ok := env.Update.(eventstream.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("env.Update = %#v, want ToolCallUpdate", env.Update)
 	}
@@ -114,7 +113,7 @@ func TestProjectTaskFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	if update.Kind != nil || update.Title != nil || update.RawInput != nil {
 		t.Fatalf("tool update = %#v, stream append should not repeat stable tool fields", update)
 	}
-	if got := stringPtrValue(update.Status); got != schema.ToolStatusInProgress {
+	if got := stringPtrValue(update.Status); got != eventstream.ToolStatusInProgress {
 		t.Fatalf("status = %q, want in_progress for terminal append", got)
 	}
 	assertTerminalAnchor(t, update.Content, "call-1")
@@ -158,7 +157,7 @@ func TestProjectTaskFrameKeepsOneEnvelopeWhenNarrativeCarriesUsage(t *testing.T)
 	if len(events) != 1 {
 		t.Fatalf("projectTaskStreamFrame() returned %d envelopes, want one cursor-resumable unit: %#v", len(events), events)
 	}
-	if eventstream.UpdateType(events[0].Update) == schema.UpdateUsage {
+	if eventstream.UpdateType(events[0].Update) == eventstream.UpdateUsage {
 		t.Fatalf("Task frame projected only sibling usage and lost its narrative: %#v", events[0])
 	}
 }
@@ -186,7 +185,7 @@ func TestProjectTaskFramePreservesClosedCommandExitCode(t *testing.T) {
 		t.Fatalf("projectTaskStreamFrame() returned %d events: %#v", len(events), events)
 	}
 	update := requireToolUpdate(t, events[0])
-	if got := stringPtrValue(update.Status); got != schema.ToolStatusFailed {
+	if got := stringPtrValue(update.Status); got != eventstream.ToolStatusFailed {
 		t.Fatalf("final status = %q, want failed", got)
 	}
 	exit, ok := metautil.TerminalExit(update.Meta)
@@ -219,7 +218,7 @@ func TestProjectTaskFramePreservesSplitNewlineFrame(t *testing.T) {
 		if len(events) != 1 {
 			t.Fatalf("projectTaskStreamFrame(%q) returned %d events: %#v", frame.Text, len(events), events)
 		}
-		update, ok := events[0].Update.(schema.ToolCallUpdate)
+		update, ok := events[0].Update.(eventstream.ToolCallUpdate)
 		if !ok {
 			t.Fatalf("Update = %T, want ToolCallUpdate", events[0].Update)
 		}
@@ -252,7 +251,7 @@ func TestProjectTaskFrameFinalDoesNotRepeatStreamedOutput(t *testing.T) {
 		t.Fatalf("projectTaskStreamFrame(RUN_COMMAND closed) returned %d events: %#v", len(events), events)
 	}
 	update := requireToolUpdate(t, events[0])
-	if got := stringPtrValue(update.Status); got != schema.ToolStatusCompleted {
+	if got := stringPtrValue(update.Status); got != eventstream.ToolStatusCompleted {
 		t.Fatalf("status = %q, want completed", got)
 	}
 	assertTerminalAnchor(t, update.Content, "command-1")
@@ -295,7 +294,7 @@ func TestProjectTaskFrameProjectsDelegatedTaskSemanticsWithoutParentText(t *test
 		t.Fatalf("projectTaskStreamFrame() returned %d events: %#v, want one embedded child event", len(events), events)
 	}
 	embedded := events[0]
-	if embedded.Scope != eventstream.ScopeSubagent || embedded.ScopeID != "jack" || eventstream.UpdateType(embedded.Update) != schema.UpdateAgentMessage {
+	if embedded.Scope != eventstream.ScopeSubagent || embedded.ScopeID != "jack" || eventstream.UpdateType(embedded.Update) != eventstream.UpdateAgentMessage {
 		t.Fatalf("embedded event = %#v, want subagent agent message", embedded)
 	}
 	if embedded.ParentTool == nil || embedded.ParentTool.ToolCallID != "task-call-1" || embedded.ParentTool.ToolName != "Task" {
@@ -328,7 +327,7 @@ func TestProjectTaskFrameKeepsNoOutputPlaceholderOutOfTerminalBytes(t *testing.T
 		t.Fatalf("projectTaskStreamFrame(RUN_COMMAND closed) returned %d events: %#v", len(events), events)
 	}
 	update := requireToolUpdate(t, events[0])
-	if stringPtrValue(update.Status) != schema.ToolStatusFailed {
+	if stringPtrValue(update.Status) != eventstream.ToolStatusFailed {
 		t.Fatalf("update = %+v, want failed RUN_COMMAND result", update)
 	}
 	if output, ok := metautil.TerminalOutput(update.Meta); ok {
@@ -384,12 +383,12 @@ func TestProjectTaskFrameProjectsSubagentSemanticEventWithoutParentTerminal(t *t
 		t.Fatalf("projectTaskStreamFrame() returned %d events, want child semantic event only: %#v", len(events), events)
 	}
 	assertSpawnSemanticEnvelope(t, events[0], "jack", "spawn-call-1")
-	message, ok := events[0].Update.(schema.ContentChunk)
+	message, ok := events[0].Update.(eventstream.ContentChunk)
 	if !ok {
 		t.Fatalf("child update = %T, want ContentChunk", events[0].Update)
 	}
-	content, ok := message.Content.(schema.TextContent)
-	if !ok || message.SessionUpdate != schema.UpdateAgentMessage || message.MessageID != "child-message-1" || content.Text != "The user wants a file" {
+	content, ok := message.Content.(eventstream.TextContent)
+	if !ok || message.SessionUpdate != eventstream.UpdateAgentMessage || message.MessageID != "child-message-1" || content.Text != "The user wants a file" {
 		t.Fatalf("child message = %#v, want original ACP message chunk fields", message)
 	}
 	if _, ok := streamEnvelopeTerminalOutput(events[0]); ok {
@@ -443,12 +442,12 @@ func TestProjectTaskFrameProjectsEventOnlySpawnChildSemantics(t *testing.T) {
 			},
 			assert: func(t *testing.T, env eventstream.Envelope) {
 				t.Helper()
-				update, ok := env.Update.(schema.ContentChunk)
+				update, ok := env.Update.(eventstream.ContentChunk)
 				if !ok {
 					t.Fatalf("child update = %T, want ContentChunk", env.Update)
 				}
-				content, ok := update.Content.(schema.TextContent)
-				if !ok || update.SessionUpdate != schema.UpdateAgentMessage || update.MessageID != "child-message-1" || content.Text != "child answer" {
+				content, ok := update.Content.(eventstream.TextContent)
+				if !ok || update.SessionUpdate != eventstream.UpdateAgentMessage || update.MessageID != "child-message-1" || content.Text != "child answer" {
 					t.Fatalf("child message update = %#v, want original message fields", update)
 				}
 			},
@@ -466,7 +465,7 @@ func TestProjectTaskFrameProjectsEventOnlySpawnChildSemantics(t *testing.T) {
 						SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 						ToolCallID:    "child-patch-1",
 						Kind:          "Patch",
-						Status:        schema.ToolStatusCompleted,
+						Status:        eventstream.ToolStatusCompleted,
 						Content: []session.ProtocolToolCallContent{{
 							Type:    "diff",
 							Path:    "/workspace/demo.txt",
@@ -512,7 +511,7 @@ func TestProjectTaskFrameProjectsEventOnlySpawnChildSemantics(t *testing.T) {
 			},
 			assert: func(t *testing.T, env eventstream.Envelope) {
 				t.Helper()
-				update, ok := env.Update.(schema.PlanUpdate)
+				update, ok := env.Update.(eventstream.PlanUpdate)
 				if !ok {
 					t.Fatalf("child update = %T, want PlanUpdate", env.Update)
 				}
@@ -595,7 +594,7 @@ func TestProjectTaskFrameMarksClosedSpawnEventFinalWithoutParentCopy(t *testing.
 	if !events[0].Final {
 		t.Fatalf("closed child semantic envelope = %#v, want final Task-stream frame", events[0])
 	}
-	if update, ok := events[0].Update.(schema.ContentChunk); !ok || update.MessageID != "child-message-final" {
+	if update, ok := events[0].Update.(eventstream.ContentChunk); !ok || update.MessageID != "child-message-final" {
 		t.Fatalf("closed child semantic update = %#v, want final child message", events[0].Update)
 	}
 }
@@ -728,7 +727,7 @@ func streamEnvelopeTerminalOutput(env eventstream.Envelope) (string, bool) {
 	if env.Kind != eventstream.KindSessionUpdate {
 		return "", false
 	}
-	update, ok := eventstream.CloneUpdate(env.Update).(schema.ToolCallUpdate)
+	update, ok := eventstream.CloneUpdate(env.Update).(eventstream.ToolCallUpdate)
 	if !ok {
 		return "", false
 	}
@@ -788,7 +787,7 @@ func childToolUpdateEventForStreamTest() *session.Event {
 				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 				ToolCallID:    "child-tool-stream-1",
 				Kind:          "Patch",
-				Status:        schema.ToolStatusCompleted,
+				Status:        eventstream.ToolStatusCompleted,
 			},
 		},
 	}
@@ -860,19 +859,19 @@ func assertStreamDelivery(t *testing.T, env eventstream.Envelope, transient bool
 	}
 }
 
-func requireToolUpdate(t *testing.T, env eventstream.Envelope) schema.ToolCallUpdate {
+func requireToolUpdate(t *testing.T, env eventstream.Envelope) eventstream.ToolCallUpdate {
 	t.Helper()
 	if env.Kind != eventstream.KindSessionUpdate {
 		t.Fatalf("env kind = %q, want %q", env.Kind, eventstream.KindSessionUpdate)
 	}
-	update, ok := eventstream.CloneUpdate(env.Update).(schema.ToolCallUpdate)
+	update, ok := eventstream.CloneUpdate(env.Update).(eventstream.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("env = %#v, want ToolCallUpdate", env)
 	}
 	return update
 }
 
-func toolTerminalOutputText(t *testing.T, update schema.ToolCallUpdate) string {
+func toolTerminalOutputText(t *testing.T, update eventstream.ToolCallUpdate) string {
 	t.Helper()
 	output, ok := metautil.TerminalOutput(update.Meta)
 	if !ok {
@@ -889,7 +888,7 @@ func assertStreamTerminalInfo(t *testing.T, meta map[string]any, terminalID stri
 	}
 }
 
-func assertTerminalAnchor(t *testing.T, content []schema.ToolCallContent, terminalID string) {
+func assertTerminalAnchor(t *testing.T, content []eventstream.ToolCallContent, terminalID string) {
 	t.Helper()
 	if len(content) != 1 || content[0].Type != "terminal" || content[0].TerminalID != terminalID {
 		t.Fatalf("content = %#v, want one terminal anchor %q", content, terminalID)

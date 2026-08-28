@@ -20,7 +20,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	jsonschema "github.com/google/jsonschema-go/jsonschema"
 )
 
@@ -132,26 +131,26 @@ func TestStatusConfigurationRevisionWireRoundTrip(t *testing.T) {
 }
 
 func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
-	text := schema.TextContent{Type: "text", Text: "hello"}
+	text := eventstream.TextContent{Type: "text", Text: "hello"}
 	title := "tool"
 	configOptionRaw, err := json.Marshal(acpsdk.SessionConfigOptionUpdate{
-		SessionUpdate: schema.UpdateConfigOption,
+		SessionUpdate: eventstream.UpdateConfigOption,
 		ConfigOptions: []acpsdk.SessionConfigOption{},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	updates := []schema.Update{
-		schema.ContentChunk{SessionUpdate: schema.UpdateUserMessage, Content: text},
-		schema.ContentChunk{SessionUpdate: schema.UpdateAgentMessage, Content: text, MessageID: "message-1"},
-		schema.ContentChunk{SessionUpdate: schema.UpdateAgentThought, Content: text},
-		schema.ContentChunk{SessionUpdate: schema.UpdateCompact, Content: text},
-		schema.ToolCall{SessionUpdate: schema.UpdateToolCall, ToolCallID: "tool-1", Title: "Read", Kind: schema.ToolKindRead, Status: schema.ToolStatusPending},
-		schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "tool-1", Title: &title, Status: stringPointer(schema.ToolStatusCompleted)},
-		schema.PlanUpdate{SessionUpdate: schema.UpdatePlan, Entries: []schema.PlanEntry{{Content: "Inspect", Status: "completed", Priority: "high"}}},
-		schema.UsageUpdate{SessionUpdate: schema.UpdateUsage, Size: 200000, Used: 42000, Cost: &acpsdk.Cost{Amount: 0.47, Currency: "USD"}},
-		schema.RawUpdate{SessionUpdate: schema.UpdateConfigOption, Raw: configOptionRaw},
-		schema.RawUpdate{SessionUpdate: "vendor/custom", Raw: json.RawMessage(`{"sessionUpdate":"vendor/custom","value":42,"nested":{"ok":true}}`)},
+	updates := []eventstream.Update{
+		eventstream.ContentChunk{SessionUpdate: eventstream.UpdateUserMessage, Content: text},
+		eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, Content: text, MessageID: "message-1"},
+		eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentThought, Content: text},
+		eventstream.ContentChunk{SessionUpdate: eventstream.UpdateCompact, Content: text},
+		eventstream.ToolCall{SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "tool-1", Title: "Read", Kind: eventstream.ToolKindRead, Status: eventstream.ToolStatusPending},
+		eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "tool-1", Title: &title, Status: stringPointer(eventstream.ToolStatusCompleted)},
+		eventstream.PlanUpdate{SessionUpdate: eventstream.UpdatePlan, Entries: []eventstream.PlanEntry{{Content: "Inspect", Status: "completed", Priority: "high"}}},
+		eventstream.UsageUpdate{SessionUpdate: eventstream.UpdateUsage, Size: 200000, Used: 42000, Cost: &acpsdk.Cost{Amount: 0.47, Currency: "USD"}},
+		eventstream.RawUpdate{SessionUpdate: eventstream.UpdateConfigOption, Raw: configOptionRaw},
+		eventstream.RawUpdate{SessionUpdate: "vendor/custom", Raw: json.RawMessage(`{"sessionUpdate":"vendor/custom","value":42,"nested":{"ok":true}}`)},
 	}
 	for _, update := range updates {
 		update := update
@@ -164,9 +163,9 @@ func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 
 	permission := baseEnvelope(eventstream.KindRequestPermission)
 	permission.ApprovalRequestID = "approval-1"
-	permission.Permission = &schema.RequestPermissionRequest{
+	permission.Permission = &eventstream.RequestPermissionRequest{
 		SessionID: "session-1",
-		ToolCall:  schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "tool-1", Title: &title},
+		ToolCall:  eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "tool-1", Title: &title},
 		Options: []acpsdk.PermissionOption{{
 			OptionId: acpsdk.PermissionOptionId(acpsdk.PermissionOptionKindAllowOnce),
 			Name:     "Allow once",
@@ -206,7 +205,7 @@ func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 func TestRawACPUpdateSchemaRejectsKnownStandardDiscriminator(t *testing.T) {
 	validateWireValue(t, "ACPRawUpdate", map[string]any{"sessionUpdate": "vendor/custom", "value": 42})
 	validator := openAPIValidator(t, "ACPRawUpdate")
-	if err := validator.Validate(map[string]any{"sessionUpdate": schema.UpdateToolCall, "vendor": true}); err == nil {
+	if err := validator.Validate(map[string]any{"sessionUpdate": eventstream.UpdateToolCall, "vendor": true}); err == nil {
 		t.Fatal("ACPRawUpdate accepted a known standard discriminator")
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestContinueRunningDoesNotRenderMidTurnUserLine(t *testing.T) {
@@ -118,9 +117,9 @@ func TestActiveTurnPromptAbortWithoutEchoClearsPending(t *testing.T) {
 				SessionID: "session-1",
 				ScopeID:   "session-1",
 				TurnID:    "turn-1",
-				Update: schema.ContentChunk{
-					SessionUpdate: schema.UpdateUserMessage,
-					Content:       schema.TextContent{Type: "text", Text: prompt},
+				Update: eventstream.ContentChunk{
+					SessionUpdate: eventstream.UpdateUserMessage,
+					Content:       eventstream.TextContent{Type: "text", Text: prompt},
 				},
 			})
 			if got := countUserNarrativeBlocksForTest(model, prompt); got != 1 {

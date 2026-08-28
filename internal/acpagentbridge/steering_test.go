@@ -11,9 +11,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRuntimeAgentAdvertisesSteeringOnlyWithAppServerBackend(t *testing.T) {
@@ -60,7 +60,7 @@ func TestRuntimeAgentSteersExactActiveMainTurnWithoutRevisionCAS(t *testing.T) {
 	}
 	agent := steeringTestAgent(client)
 	prompt := []json.RawMessage{
-		jsonrpc.MustMarshalRaw(acp.TextContent{Type: "text", Text: "adjust the plan"}),
+		jsonrpc.MustMarshalRaw(eventstream.TextContent{Type: "text", Text: "adjust the plan"}),
 		json.RawMessage(`{"type":"image","mimeType":"image/png","data":"aW1hZ2U=","name":"plan.png"}`),
 	}
 	response, err := agent.SteerSession(context.Background(), steeringwire.SessionSteeringRequest{
@@ -157,7 +157,7 @@ func TestRuntimeAgentSteeringWithoutActiveMainTurnHasNoControlEffect(t *testing.
 			response, err := agent.SteerSession(context.Background(), steeringwire.SessionSteeringRequest{
 				SessionID: state.SessionID,
 				Prompt: []json.RawMessage{
-					jsonrpc.MustMarshalRaw(acp.TextContent{Type: "text", Text: "continue"}),
+					jsonrpc.MustMarshalRaw(eventstream.TextContent{Type: "text", Text: "continue"}),
 				},
 				Meta: tt.meta,
 			})
@@ -202,7 +202,7 @@ func TestRuntimeAgentReportsOnlyCommittedSteeringAsInjected(t *testing.T) {
 			response, err := steeringTestAgent(client).SteerSession(context.Background(), steeringwire.SessionSteeringRequest{
 				SessionID: state.SessionID,
 				Prompt: []json.RawMessage{
-					jsonrpc.MustMarshalRaw(acp.TextContent{Type: "text", Text: "continue"}),
+					jsonrpc.MustMarshalRaw(eventstream.TextContent{Type: "text", Text: "continue"}),
 				},
 			})
 			if err == nil {

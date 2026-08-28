@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestEmitControlPermissionEnvelopePreservesStandardWire(t *testing.T) {
@@ -18,20 +17,20 @@ func TestEmitControlPermissionEnvelopePreservesStandardWire(t *testing.T) {
 	line := 17
 	oldText := "before"
 	title := "Run command"
-	kind := acp.ToolKindExecute
-	status := acp.ToolStatusPending
-	permission := acp.RequestPermissionRequest{
+	kind := eventstream.ToolKindExecute
+	status := eventstream.ToolStatusPending
+	permission := eventstream.RequestPermissionRequest{
 		SessionID: "session-1",
-		ToolCall: acp.ToolCallUpdate{
+		ToolCall: eventstream.ToolCallUpdate{
 			ToolCallID: "call-1",
 			Title:      &title,
 			Kind:       &kind,
 			Status:     &status,
 			RawInput:   []any{"printf", "ok"},
 			RawOutput:  "pending",
-			Locations:  []acp.ToolCallLocation{{Path: "/tmp/file", Line: &line}},
-			Content: []acp.ToolCallContent{
-				{Type: "content", Content: acp.TextContent{Type: "text", Text: "detail"}},
+			Locations:  []eventstream.ToolCallLocation{{Path: "/tmp/file", Line: &line}},
+			Content: []eventstream.ToolCallContent{
+				{Type: "content", Content: eventstream.TextContent{Type: "text", Text: "detail"}},
 				{Type: "diff", Path: "/tmp/file", OldText: &oldText, NewText: "after"},
 				{Type: "terminal", TerminalID: "terminal-1"},
 			},
@@ -74,7 +73,7 @@ func TestSDKPermissionRequestFromApprovalUsesStrictStandardWire(t *testing.T) {
 
 	request, err := sdkPermissionRequestFromApproval(session.SessionRef{SessionID: "session-1"}, &session.ProtocolApproval{
 		ToolCall: session.ProtocolToolCall{
-			ID: "call-1", Name: "RunCommand", Kind: acp.ToolKindExecute,
+			ID: "call-1", Name: "RunCommand", Kind: eventstream.ToolKindExecute,
 			RawInput: map[string]any{"command": "go test ./..."},
 			Content: []session.ProtocolToolCallContent{{
 				Type: "content", Content: map[string]any{"type": "text", "text": "detail"},
@@ -120,7 +119,7 @@ type permissionWireCallbacks struct {
 	request acpsdk.RequestPermissionRequest
 }
 
-func (*permissionWireCallbacks) SessionUpdate(context.Context, acp.SessionNotification) error {
+func (*permissionWireCallbacks) SessionUpdate(context.Context, eventstream.SessionNotification) error {
 	return nil
 }
 

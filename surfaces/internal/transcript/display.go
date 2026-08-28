@@ -1,6 +1,6 @@
 package transcript
 
-import "github.com/caelis-labs/caelis/protocol/acp/schema"
+import "github.com/caelis-labs/caelis/control/appserver/eventstream"
 
 // ToolStatusStarted and ToolStatusRunning are runtime-facing intermediate
 // states. Completed and failed intentionally reuse ACP schema values; the
@@ -8,8 +8,8 @@ import "github.com/caelis-labs/caelis/protocol/acp/schema"
 const (
 	ToolStatusStarted     = "started"
 	ToolStatusRunning     = "running"
-	ToolStatusCompleted   = schema.ToolStatusCompleted
-	ToolStatusFailed      = schema.ToolStatusFailed
+	ToolStatusCompleted   = eventstream.ToolStatusCompleted
+	ToolStatusFailed      = eventstream.ToolStatusFailed
 	ToolStatusInterrupted = "interrupted"
 	ToolStatusCancelled   = "cancelled"
 )

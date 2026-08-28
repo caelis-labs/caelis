@@ -6,7 +6,6 @@ import (
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestAgentCommunicationEnvelopeUsesDedicatedTimelinePresentation(t *testing.T) {
@@ -48,17 +47,17 @@ func TestReceivedAgentCommunicationOpensSourceOverlayFromWholeRow(t *testing.T) 
 	model.currentSessionID = "session-1"
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
-			Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
+			Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
-	running := schema.ToolStatusInProgress
+	running := eventstream.ToolStatusInProgress
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
 			RawOutput: map[string]any{"handle": "kian", "state": "running"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})

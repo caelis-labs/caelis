@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 // FinalAssistantAccumulator retains the latest assistant message while
@@ -21,19 +21,19 @@ type AssistantTextUpdate struct {
 	Barrier   bool
 }
 
-func (a *FinalAssistantAccumulator) ObserveUpdate(update acpschema.Update) AssistantTextUpdate {
+func (a *FinalAssistantAccumulator) ObserveUpdate(update eventstream.Update) AssistantTextUpdate {
 	if a == nil || update == nil {
 		return AssistantTextUpdate{}
 	}
 	switch typed := update.(type) {
-	case acpschema.ContentChunk:
+	case eventstream.ContentChunk:
 		return a.observeContentChunk(typed.SessionUpdate, typed.Content, typed.MessageID)
-	case *acpschema.ContentChunk:
+	case *eventstream.ContentChunk:
 		if typed == nil {
 			return AssistantTextUpdate{}
 		}
 		return a.observeContentChunk(typed.SessionUpdate, typed.Content, typed.MessageID)
-	case acpschema.ToolCall, *acpschema.ToolCall, acpschema.ToolCallUpdate, *acpschema.ToolCallUpdate, acpschema.PlanUpdate, *acpschema.PlanUpdate:
+	case eventstream.ToolCall, *eventstream.ToolCall, eventstream.ToolCallUpdate, *eventstream.ToolCallUpdate, eventstream.PlanUpdate, *eventstream.PlanUpdate:
 		a.Reset()
 		return AssistantTextUpdate{Barrier: true}
 	default:
@@ -75,9 +75,9 @@ func (a *FinalAssistantAccumulator) Reset() {
 
 func (a *FinalAssistantAccumulator) observeContentChunk(updateType string, content any, messageID string) AssistantTextUpdate {
 	switch strings.TrimSpace(updateType) {
-	case acpschema.UpdateAgentMessage:
+	case eventstream.UpdateAgentMessage:
 		return a.ObserveFrame(messageID, session.ExtractProtocolText(content))
-	case acpschema.UpdateAgentThought:
+	case eventstream.UpdateAgentThought:
 		a.Reset()
 		return AssistantTextUpdate{Barrier: true}
 	default:

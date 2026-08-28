@@ -8,7 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -106,20 +105,20 @@ func TestLiveExplorationKeepsCompletedGroupsStableAroundPendingStage(t *testing.
 
 func TestHiddenTaskWaitCannotDowngradeExploredSummary(t *testing.T) {
 	h := newLiveExplorationHarness(t, 100, 30)
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 
-	h.start("search-1", "Grep", schema.ToolKindSearch, "message")
-	h.apply(liveExplorationEnvelope(schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+	h.start("search-1", "Grep", eventstream.ToolKindSearch, "message")
+	h.apply(liveExplorationEnvelope(eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    "search-1",
 		Status:        &completed,
 		RawInput:      map[string]any{"pattern": "message", "path": "."},
 		RawOutput:     map[string]any{"pattern": "message", "count": 100},
 		Meta:          acpToolNameMeta("Grep"),
 	}))
-	h.start("read-1", "Read", schema.ToolKindRead, "agent_input.go")
-	h.apply(liveExplorationEnvelope(schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+	h.start("read-1", "Read", eventstream.ToolKindRead, "agent_input.go")
+	h.apply(liveExplorationEnvelope(eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    "read-1",
 		Status:        &completed,
 		RawInput:      map[string]any{"path": "agent_input.go", "offset": 0, "limit": 55},
@@ -138,13 +137,13 @@ func TestHiddenTaskWaitCannotDowngradeExploredSummary(t *testing.T) {
 	// This later Read has no terminal update. Task wait is hidden from the
 	// transcript but appends a semantic boundary, which used to merge this live
 	// tail into the completed container and re-tense the whole group.
-	h.start("read-pending", "Read", schema.ToolKindRead, "later.go")
-	h.apply(liveExplorationEnvelope(schema.ToolCall{
-		SessionUpdate: schema.UpdateToolCall,
+	h.start("read-pending", "Read", eventstream.ToolKindRead, "later.go")
+	h.apply(liveExplorationEnvelope(eventstream.ToolCall{
+		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    "task-wait",
 		Title:         "Task wait orbit",
-		Kind:          schema.ToolKindOther,
-		Status:        schema.ToolStatusInProgress,
+		Kind:          eventstream.ToolKindOther,
+		Status:        eventstream.ToolStatusInProgress,
 		RawInput: map[string]any{
 			"action": "wait", "handle": "orbit", "target_kind": "subagent",
 		},
@@ -255,9 +254,9 @@ func TestLiveExplorationReclassificationDoesNotDisturbCompletedContainer(t *test
 
 	name := "RunCommand"
 	kind := "execute"
-	status := schema.ToolStatusCompleted
-	h.apply(liveExplorationEnvelope(schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+	status := eventstream.ToolStatusCompleted
+	h.apply(liveExplorationEnvelope(eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    "reclassified",
 		Title:         &name,
 		Kind:          &kind,
@@ -564,29 +563,29 @@ func requireToolEventForTest(t *testing.T, events []SubagentEvent, callID string
 }
 
 func liveExplorationNarrativeEnvelope(messageID, text string) eventstream.Envelope {
-	return liveExplorationEnvelope(schema.ContentChunk{
-		SessionUpdate: schema.UpdateAgentThought,
+	return liveExplorationEnvelope(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentThought,
 		MessageID:     messageID,
-		Content:       schema.TextContent{Type: "text", Text: text},
+		Content:       eventstream.TextContent{Type: "text", Text: text},
 	})
 }
 
 func liveExplorationToolStartEnvelope(callID, name, kind, arg string) eventstream.Envelope {
-	return liveExplorationEnvelope(schema.ToolCall{
-		SessionUpdate: schema.UpdateToolCall,
+	return liveExplorationEnvelope(eventstream.ToolCall{
+		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    callID,
 		Title:         name,
 		Kind:          kind,
-		Status:        schema.ToolStatusPending,
+		Status:        eventstream.ToolStatusPending,
 		RawInput:      liveExplorationToolInput(kind, arg),
 		Meta:          acpToolNameMeta(name),
 	})
 }
 
 func liveExplorationToolCompleteEnvelope(callID, name, kind, arg string) eventstream.Envelope {
-	status := schema.ToolStatusCompleted
-	return liveExplorationEnvelope(schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+	status := eventstream.ToolStatusCompleted
+	return liveExplorationEnvelope(eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    callID,
 		Title:         &name,
 		Kind:          &kind,
@@ -597,9 +596,9 @@ func liveExplorationToolCompleteEnvelope(callID, name, kind, arg string) eventst
 }
 
 func liveExplorationToolFailedEnvelope(callID, name, kind, arg string) eventstream.Envelope {
-	status := schema.ToolStatusFailed
-	return liveExplorationEnvelope(schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+	status := eventstream.ToolStatusFailed
+	return liveExplorationEnvelope(eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    callID,
 		Title:         &name,
 		Kind:          &kind,
@@ -632,7 +631,7 @@ func liveExplorationLifecycleEnvelope(state string) eventstream.Envelope {
 	return envelope
 }
 
-func liveExplorationEnvelope(update schema.Update) eventstream.Envelope {
+func liveExplorationEnvelope(update eventstream.Update) eventstream.Envelope {
 	return eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-live-exploration",

@@ -5,7 +5,6 @@ import (
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
@@ -13,11 +12,11 @@ func eventStreamTerminalBatchKey(env eventstream.Envelope) (string, bool) {
 	if env.Err != nil || env.Kind != eventstream.KindSessionUpdate {
 		return "", false
 	}
-	update, ok := env.Update.(schema.ToolCallUpdate)
+	update, ok := env.Update.(eventstream.ToolCallUpdate)
 	if !ok {
 		return "", false
 	}
-	if transcript.StringFromPtr(update.Status) != schema.ToolStatusInProgress {
+	if transcript.StringFromPtr(update.Status) != eventstream.ToolStatusInProgress {
 		return "", false
 	}
 	text, terminalID := acpTerminalOutput(update)
@@ -44,13 +43,13 @@ func mergeEventStreamTerminalEnvelope(dst *eventstream.Envelope, src eventstream
 	if dst == nil {
 		return
 	}
-	dstUpdate, ok := dst.Update.(schema.ToolCallUpdate)
+	dstUpdate, ok := dst.Update.(eventstream.ToolCallUpdate)
 	if !ok {
 		return
 	}
 	dst.Cursor = src.Cursor
 	dst.OccurredAt = src.OccurredAt
-	if srcUpdate, ok := src.Update.(schema.ToolCallUpdate); ok {
+	if srcUpdate, ok := src.Update.(eventstream.ToolCallUpdate); ok {
 		if text, terminalID := acpTerminalOutput(srcUpdate); text != "" {
 			existing, existingTerminalID := acpTerminalOutput(dstUpdate)
 			// ACP terminal_output contains exact incremental bytes. Scheduler
@@ -65,7 +64,7 @@ func mergeEventStreamTerminalEnvelope(dst *eventstream.Envelope, src eventstream
 	}
 }
 
-func acpTerminalOutput(update schema.ToolCallUpdate) (string, string) {
+func acpTerminalOutput(update eventstream.ToolCallUpdate) (string, string) {
 	output, ok := metautil.TerminalOutput(update.Meta)
 	if ok {
 		return output.Data, output.TerminalID
@@ -82,10 +81,10 @@ func setACPTerminalEnvelopeOutput(env *eventstream.Envelope, text string, termin
 		return
 	}
 	switch update := env.Update.(type) {
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		update.Meta = metautil.WithTerminalOutput(update.Meta, terminalID, text)
 		env.Update = update
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		update.Meta = metautil.WithTerminalOutput(update.Meta, terminalID, text)
 		env.Update = update
 	}

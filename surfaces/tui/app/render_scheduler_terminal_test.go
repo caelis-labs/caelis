@@ -6,7 +6,6 @@ import (
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRenderSchedulerMergesTerminalContent(t *testing.T) {
@@ -56,7 +55,7 @@ func assertRenderSchedulerTerminalMerge(t *testing.T, envelope func(string, stri
 	if !ok {
 		t.Fatalf("pending message = %T, want eventstream.Envelope", model.pendingRenderEvents.items[0].msg)
 	}
-	update, ok := merged.Update.(schema.ToolCallUpdate)
+	update, ok := merged.Update.(eventstream.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("env.Update = %T, want ToolCallUpdate", merged.Update)
 	}
@@ -72,12 +71,12 @@ func terminalMetaStreamEnvelope(callID string, text string) eventstream.Envelope
 		HandleID:  "handle-1",
 		RunID:     "run-1",
 		TurnID:    "turn-1",
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    callID,
 			Title:         stringPtr("RunCommand"),
-			Kind:          stringPtr(schema.ToolKindExecute),
-			Status:        stringPtr(schema.ToolStatusInProgress),
+			Kind:          stringPtr(eventstream.ToolKindExecute),
+			Status:        stringPtr(eventstream.ToolStatusInProgress),
 			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "terminal-1", text),
 		},
 	}
@@ -90,12 +89,12 @@ func genericTerminalStreamEnvelope(callID string, text string) eventstream.Envel
 		HandleID:  "handle-1",
 		RunID:     "run-1",
 		TurnID:    "turn-1",
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    callID,
 			Title:         stringPtr("shell output"),
-			Kind:          stringPtr(schema.ToolKindExecute),
-			Status:        stringPtr(schema.ToolStatusInProgress),
+			Kind:          stringPtr(eventstream.ToolKindExecute),
+			Status:        stringPtr(eventstream.ToolStatusInProgress),
 			Meta:          metautil.WithTerminalOutput(nil, "terminal-1", text),
 		},
 	}

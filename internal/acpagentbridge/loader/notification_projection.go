@@ -6,13 +6,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // projectSessionEventNotifications owns the session/load-specific wrapping of
 // durable events as ACP notifications. Eventstream-only extensions and stored
 // permission prompts are intentionally not replayed through this adapter.
-func projectSessionEventNotifications(fallbackSessionID string, event *session.Event) ([]schema.SessionNotification, error) {
+func projectSessionEventNotifications(fallbackSessionID string, event *session.Event) ([]eventstream.SessionNotification, error) {
 	updates, err := projection.ProjectEvent(event)
 	if err != nil {
 		return nil, err
@@ -21,18 +20,18 @@ func projectSessionEventNotifications(fallbackSessionID string, event *session.E
 	if event != nil {
 		eventSessionID = strings.TrimSpace(event.SessionID)
 	}
-	out := make([]schema.SessionNotification, 0, len(updates)+1)
+	out := make([]eventstream.SessionNotification, 0, len(updates)+1)
 	for _, update := range updates {
 		if update == nil {
 			continue
 		}
-		out = append(out, schema.SessionNotification{
+		out = append(out, eventstream.SessionNotification{
 			SessionID: firstNonEmptyString(eventSessionID, fallbackSessionID),
 			Update:    eventstream.CloneUpdate(update),
 		})
 	}
 	if usage := session.UsageSnapshotFromSessionEvent(event); usage != nil && !containsUsageNotification(out) {
-		out = append(out, schema.SessionNotification{
+		out = append(out, eventstream.SessionNotification{
 			SessionID: firstNonEmptyString(fallbackSessionID, eventSessionID),
 			Update:    eventstream.UsageUpdateFromSnapshot(*usage, nil),
 		})
@@ -40,9 +39,9 @@ func projectSessionEventNotifications(fallbackSessionID string, event *session.E
 	return out, nil
 }
 
-func containsUsageNotification(notifications []schema.SessionNotification) bool {
+func containsUsageNotification(notifications []eventstream.SessionNotification) bool {
 	for _, notification := range notifications {
-		if eventstream.UpdateType(notification.Update) == schema.UpdateUsage {
+		if eventstream.UpdateType(notification.Update) == eventstream.UpdateUsage {
 			return true
 		}
 	}

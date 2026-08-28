@@ -5,13 +5,12 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestTaskOwnerRepairsFromEnvelopeUsesTypedSingularCommandParent(t *testing.T) {
 	t.Parallel()
 
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	env := eventstream.Envelope{
 		Kind:  eventstream.KindSessionUpdate,
 		Scope: eventstream.ScopeMain,
@@ -19,8 +18,8 @@ func TestTaskOwnerRepairsFromEnvelopeUsesTypedSingularCommandParent(t *testing.T
 			ToolCallID: "command-call",
 			ToolName:   "RunCommand",
 		},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "read-command",
 			Status:        &completed,
 			RawInput:      map[string]any{"action": "read", "handle": "command-3"},
@@ -48,12 +47,12 @@ func TestTaskOwnerRepairsFromEnvelopeUsesTypedSingularCommandParent(t *testing.T
 func TestTaskOwnerRepairsFromEnvelopeFiltersBatchItems(t *testing.T) {
 	t.Parallel()
 
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	env := eventstream.Envelope{
 		Kind:  eventstream.KindSessionUpdate,
 		Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "wait-batch",
 			Status:        &completed,
 			RawInput:      map[string]any{"action": "wait", "handle": "command-1,command-2,maia"},

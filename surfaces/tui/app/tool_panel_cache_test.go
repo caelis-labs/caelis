@@ -7,14 +7,13 @@ import (
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestACPToolPanelRenderCacheReusesUnchangedTerminalBody(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	model = applyACPEnvelopeForTest(t, model, acpToolPanelUpdate("call-1", "go test", strings.Join(numberedToolLines(24), "\n"), schema.ToolStatusCompleted))
+	model = applyACPEnvelopeForTest(t, model, acpToolPanelUpdate("call-1", "go test", strings.Join(numberedToolLines(24), "\n"), eventstream.ToolStatusCompleted))
 	block := requireMainACPTurnBlockForTest(t, model)
 	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme)}
 
@@ -36,7 +35,7 @@ func TestACPToolPanelRenderCacheReusesUnchangedTerminalBody(t *testing.T) {
 		t.Fatalf("unchanged body renders = %d, want cache reuse at 1", cache.bodyRenders)
 	}
 
-	model = applyACPEnvelopeForTest(t, model, acpToolPanelUpdate("call-1", "go test", strings.Join(numberedToolLines(25), "\n"), schema.ToolStatusCompleted))
+	model = applyACPEnvelopeForTest(t, model, acpToolPanelUpdate("call-1", "go test", strings.Join(numberedToolLines(25), "\n"), eventstream.ToolStatusCompleted))
 	block = requireMainACPTurnBlockForTest(t, model)
 	rows = block.Render(ctx)
 	if !renderedRowsContainPlain(rows, "line 025") {
@@ -101,12 +100,12 @@ func acpToolPanelUpdate(callID string, command string, output string, status str
 	return eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
-		Final:     status != schema.ToolStatusInProgress,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Final:     status != eventstream.ToolStatusInProgress,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    callID,
 			Title:         stringPtr(command),
-			Kind:          stringPtr(schema.ToolKindExecute),
+			Kind:          stringPtr(eventstream.ToolKindExecute),
 			Status:        stringPtr(status),
 			RawInput:      map[string]any{"command": command},
 			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), callID, output),

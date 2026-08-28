@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // ProjectSessionEventEnvelope projects one canonical session event into
@@ -38,24 +37,24 @@ func withoutLiveFinalContent(events []eventstream.Envelope, published agentsdk.P
 	out := make([]eventstream.Envelope, 0, len(events))
 	for _, env := range events {
 		switch update := env.Update.(type) {
-		case schema.ContentChunk:
+		case eventstream.ContentChunk:
 			switch eventstream.UpdateType(update) {
-			case schema.UpdateAgentMessage:
+			case eventstream.UpdateAgentMessage:
 				if published.Has(agentsdk.PublishedAssistantMessage) {
 					continue
 				}
-			case schema.UpdateAgentThought:
+			case eventstream.UpdateAgentThought:
 				if published.Has(agentsdk.PublishedAssistantThought) {
 					continue
 				}
 			}
-		case schema.ToolCall:
+		case eventstream.ToolCall:
 			if published.Has(agentsdk.PublishedTerminal) {
 				update.Meta = withoutPublishedTerminalContent(update.Meta)
 				env.Meta = withoutPublishedTerminalContent(env.Meta)
 				env.Update = update
 			}
-		case schema.ToolCallUpdate:
+		case eventstream.ToolCallUpdate:
 			if published.Has(agentsdk.PublishedTerminal) {
 				update.Meta = withoutPublishedTerminalContent(update.Meta)
 				env.Meta = withoutPublishedTerminalContent(env.Meta)
@@ -361,7 +360,7 @@ func cloneDelivery(in *eventstream.Delivery) *eventstream.Delivery {
 
 func containsUsageUpdate(events []eventstream.Envelope) bool {
 	for _, env := range events {
-		if eventstream.UpdateType(env.Update) == schema.UpdateUsage {
+		if eventstream.UpdateType(env.Update) == eventstream.UpdateUsage {
 			return true
 		}
 	}
@@ -492,7 +491,7 @@ func acpMetaWithToolName(meta map[string]any, toolName string) map[string]any {
 	})
 }
 
-func permissionRequestFromProtocol(sessionID string, meta map[string]any, approval *session.ProtocolApproval) *schema.RequestPermissionRequest {
+func permissionRequestFromProtocol(sessionID string, meta map[string]any, approval *session.ProtocolApproval) *eventstream.RequestPermissionRequest {
 	if approval == nil {
 		return nil
 	}

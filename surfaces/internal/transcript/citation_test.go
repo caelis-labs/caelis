@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestProjectACPContentChunkParsesCitationsForFutureSurfaces(t *testing.T) {
@@ -30,9 +29,9 @@ func TestProjectACPContentChunkParsesCitationsForFutureSurfaces(t *testing.T) {
 	}
 	events := ProjectACPEventToEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: text},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: text},
 			Meta:          meta,
 		},
 		Final: true,

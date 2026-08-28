@@ -10,20 +10,19 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestACPEnvelopeFromUpdatePassesThroughStandardToolLifecycle(t *testing.T) {
 	t.Parallel()
 
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	updates := []client.Update{
 		client.ToolCall{
 			SessionUpdate: client.UpdateToolCall,
 			ToolCallID:    "read-1",
 			Title:         "Read `AGENTS.md`",
-			Kind:          schema.ToolKindRead,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindRead,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"target_file": "AGENTS.md"},
 			Content: []client.ToolCallContent{{
 				Type:    "content",
@@ -64,10 +63,10 @@ func TestACPEnvelopeFromUpdateRestoresGrokExecutePresentationForSideParticipant(
 	env := acpEnvelopeFromUpdate(client.UpdateEnvelope{
 		SessionID: "grok-session",
 		Update: client.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "execute-1",
 			Title:         "run_terminal_command",
-			Status:        schema.ToolStatusInProgress,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": "git status --short"},
 			Meta: map[string]any{"x.ai/tool": map[string]any{
 				"version": 1, "name": "run_terminal_command", "kind": "execute",
@@ -82,8 +81,8 @@ func TestACPEnvelopeFromUpdateRestoresGrokExecutePresentationForSideParticipant(
 	if env == nil || env.Scope != eventstream.ScopeParticipant || env.ParticipantID != "grok-1" {
 		t.Fatalf("participant envelope = %#v", env)
 	}
-	call, ok := env.Update.(schema.ToolCall)
-	if !ok || call.Kind != schema.ToolKindExecute || call.Title != "run_terminal_command" {
+	call, ok := env.Update.(eventstream.ToolCall)
+	if !ok || call.Kind != eventstream.ToolKindExecute || call.Title != "run_terminal_command" {
 		t.Fatalf("participant Grok execute update = %#v, want anonymous standard execute presentation", env.Update)
 	}
 	if exactName := metautil.String(call.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); exactName != "" {
@@ -111,9 +110,9 @@ func TestACPEnvelopeFromUpdatePassesThroughUsageUpdate(t *testing.T) {
 	if env == nil {
 		t.Fatal("acpEnvelopeFromUpdate() = nil, want usage_update envelope")
 	}
-	update, ok := env.Update.(schema.UsageUpdate)
+	update, ok := env.Update.(eventstream.UsageUpdate)
 	if !ok {
-		t.Fatalf("Update = %T, want schema.UsageUpdate", env.Update)
+		t.Fatalf("Update = %T, want eventstream.UsageUpdate", env.Update)
 	}
 	if update.Size != 200000 || update.Used != 42000 {
 		t.Fatalf("usage update = %#v, want size/used preserved", update)

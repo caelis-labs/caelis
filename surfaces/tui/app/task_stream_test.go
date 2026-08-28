@@ -20,7 +20,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestTUISubagentWorkspaceObservesOnlyWhileOpenAndResumesCursor(t *testing.T) {
@@ -55,17 +54,17 @@ func TestTUISubagentWorkspaceObservesOnlyWhileOpenAndResumesCursor(t *testing.T)
 	})
 	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn helper",
-			Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn helper",
+			Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"agent": "self", "prompt": "inspect"}, Meta: meta,
 		},
 	})
-	running := schema.ToolStatusInProgress
+	running := eventstream.ToolStatusInProgress
 	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
 			RawOutput: map[string]any{"handle": "zuri", "state": "running"}, Meta: meta,
 		},
 	})
@@ -272,9 +271,9 @@ func TestTUITaskControlToolsDoNotAffectVisibleSubagentStream(t *testing.T) {
 
 			model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-				Update: schema.ToolCall{
-					SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-control-" + action,
-					Title: "Task " + action, Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
+				Update: eventstream.ToolCall{
+					SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "task-control-" + action,
+					Title: "Task " + action, Kind: eventstream.ToolKindOther, Status: eventstream.ToolStatusInProgress,
 					RawInput: map[string]any{"action": action, "handle": "akio"}, Meta: acpToolNameMeta("Task"),
 				},
 			})
@@ -333,17 +332,17 @@ func TestTUIVisibleSubagentObservationRetriesDirectoryAndSubscriptionFailures(t 
 	})
 	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn helper",
-			Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn helper",
+			Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"agent": "self", "prompt": "inspect"}, Meta: meta,
 		},
 	})
-	running := schema.ToolStatusInProgress
+	running := eventstream.ToolStatusInProgress
 	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
 			RawOutput: map[string]any{"handle": "zuri", "state": "running"}, Meta: meta,
 		},
 	})
@@ -413,17 +412,17 @@ func TestTUIVisibleSubagentObservationKeepsResolvingByParentCall(t *testing.T) {
 	})
 	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn helper",
-			Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn helper",
+			Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"agent": "self", "prompt": "inspect"}, Meta: meta,
 		},
 	})
-	running := schema.ToolStatusInProgress
+	running := eventstream.ToolStatusInProgress
 	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
 			RawOutput: map[string]any{"handle": "provisional-child", "state": "running"}, Meta: meta,
 		},
 	})
@@ -518,11 +517,11 @@ func TestTUIVisibleSubagentObservationSurvivesSpawnTerminalAndStopsOnClose(t *te
 	model.taskStreamTokens["task-1"] = 7
 	model.taskStreamSubscriptions["task-1"] = subscription
 
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &completed,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &completed,
 			RawOutput: map[string]any{"handle": "provisional-child", "state": "completed", "final_response": "done"},
 			Meta:      acpToolNameMeta("Spawn"),
 		},
@@ -573,9 +572,9 @@ func TestTUIVisibleSubagentWaitsForTaskLifecycleBeforeSealingAndHydrating(t *tes
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Cursor: "cursor-1", OccurredAt: startedAt,
 		Delivery:   &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage, MessageID: "answer-2",
-			Content: schema.TextContent{Type: "text", Text: "- **overlay result**"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "answer-2",
+			Content: eventstream.TextContent{Type: "text", Text: "- **overlay result**"},
 		},
 	}
 	next, _ := model.handleTaskStreamBatch(taskStreamBatchMsg{
@@ -639,9 +638,9 @@ func TestTUIVisibleSubagentWaitsForTaskLifecycleBeforeSealingAndHydrating(t *tes
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "task-1:3",
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Cursor: "cursor-3", OccurredAt: startedAt.Add(3 * time.Second),
 		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage, MessageID: "answer-3",
-			Content: schema.TextContent{Type: "text", Text: "second activity arrived on the same follower"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "answer-3",
+			Content: eventstream.TextContent{Type: "text", Text: "second activity arrived on the same follower"},
 		},
 	}
 	next, _ = model.handleTaskStreamBatch(taskStreamBatchMsg{
@@ -689,9 +688,9 @@ func TestTUILiveTaskStreamBatchesUseOneCoalescedOverlayFrame(t *testing.T) {
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "task-1:1",
 				Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Cursor: fmt.Sprintf("cursor-%d", index+1),
 				ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
-				Update: schema.ContentChunk{
-					SessionUpdate: schema.UpdateAgentMessage, MessageID: "message-1",
-					Content: schema.TextContent{Type: "text", Text: text},
+				Update: eventstream.ContentChunk{
+					SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "message-1",
+					Content: eventstream.TextContent{Type: "text", Text: text},
 				},
 			}},
 		})
@@ -1033,9 +1032,9 @@ func TestTUIIdleHistoryReplacesVisibleOverlayOnlyAfterCleanClose(t *testing.T) {
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "task-1:1",
 			Scope: eventstream.ScopeSubagent, ScopeID: "task-1", OccurredAt: startedAt,
 			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage, MessageID: "history-message-1",
-				Content: schema.TextContent{Type: "text", Text: "complete historical result"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "history-message-1",
+				Content: eventstream.TextContent{Type: "text", Text: "complete historical result"},
 			},
 		}, {
 			Kind: eventstream.KindLifecycle, SessionID: "session-1", TurnID: "task-1:1",
@@ -1188,9 +1187,9 @@ func TestTUILiveSuccessorActivityWaitsForDirectoryBeforeLoadingHistory(t *testin
 			ActivityID: "activity-b", Scope: eventstream.ScopeSubagent, ScopeID: "task-1",
 			OccurredAt: startedAt,
 			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage, MessageID: "answer-b",
-				Content: schema.TextContent{Type: "text", Text: "activity B final answer"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "answer-b",
+				Content: eventstream.TextContent{Type: "text", Text: "activity B final answer"},
 			},
 		}, {
 			Kind: eventstream.KindLifecycle, SessionID: "session-1", TurnID: "turn-b",
@@ -1268,10 +1267,10 @@ func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 			ParentTool: &eventstream.ParentToolRelation{
 				ToolCallID: "spawn-1", ToolName: "Spawn",
 			},
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentThought,
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentThought,
 				MessageID:     "reasoning-turn-1",
-				Content:       schema.TextContent{Type: "text", Text: "complete rebuilt first reasoning"},
+				Content:       eventstream.TextContent{Type: "text", Text: "complete rebuilt first reasoning"},
 			},
 		}, {
 			Kind:       eventstream.KindSessionUpdate,
@@ -1284,10 +1283,10 @@ func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 			ParentTool: &eventstream.ParentToolRelation{
 				ToolCallID: "spawn-1", ToolName: "Spawn",
 			},
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
 				MessageID:     "final-turn-1",
-				Content:       schema.TextContent{Type: "text", Text: "first exact Final Message"},
+				Content:       eventstream.TextContent{Type: "text", Text: "first exact Final Message"},
 			},
 		}, {
 			Kind:       eventstream.KindLifecycle,
@@ -1312,10 +1311,10 @@ func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 			ParentTool: &eventstream.ParentToolRelation{
 				ToolCallID: "spawn-1", ToolName: "Spawn",
 			},
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentThought,
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentThought,
 				MessageID:     "reasoning-turn-2",
-				Content:       schema.TextContent{Type: "text", Text: "complete rebuilt second reasoning"},
+				Content:       eventstream.TextContent{Type: "text", Text: "complete rebuilt second reasoning"},
 			},
 		}, {
 			Kind:       eventstream.KindSessionUpdate,
@@ -1328,10 +1327,10 @@ func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 			ParentTool: &eventstream.ParentToolRelation{
 				ToolCallID: "spawn-1", ToolName: "Spawn",
 			},
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
 				MessageID:     "final-turn-2",
-				Content:       schema.TextContent{Type: "text", Text: "second exact Final Message"},
+				Content:       eventstream.TextContent{Type: "text", Text: "second exact Final Message"},
 			},
 		}, {
 			Kind:       eventstream.KindLifecycle,

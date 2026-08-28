@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // freshReplayContentKey identifies one append-only content stream. It contains
@@ -147,12 +146,12 @@ func freshReplayAnyCompleteSource(complete map[freshReplayContentKey]struct{}, k
 }
 
 func freshReplayNarrativeKey(envelope eventstream.Envelope) (freshReplayContentKey, bool) {
-	chunk, ok := envelope.Update.(schema.ContentChunk)
+	chunk, ok := envelope.Update.(eventstream.ContentChunk)
 	if !ok {
 		return freshReplayContentKey{}, false
 	}
 	updateType := strings.TrimSpace(chunk.SessionUpdate)
-	if updateType != schema.UpdateAgentMessage && updateType != schema.UpdateAgentThought {
+	if updateType != eventstream.UpdateAgentMessage && updateType != eventstream.UpdateAgentThought {
 		return freshReplayContentKey{}, false
 	}
 	messageID := strings.TrimSpace(chunk.MessageID)
@@ -165,9 +164,9 @@ func freshReplayNarrativeKey(envelope eventstream.Envelope) (freshReplayContentK
 func freshReplayTerminalKey(envelope eventstream.Envelope) (freshReplayContentKey, bool) {
 	var toolCallID string
 	switch update := envelope.Update.(type) {
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		toolCallID = update.ToolCallID
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		toolCallID = update.ToolCallID
 	default:
 		return freshReplayContentKey{}, false
@@ -188,7 +187,7 @@ func freshReplayTerminalKey(envelope eventstream.Envelope) (freshReplayContentKe
 	if toolCallID == "" {
 		return freshReplayContentKey{}, false
 	}
-	return freshReplayEnvelopeKey(envelope, schema.UpdateToolCallInfo, toolCallID), true
+	return freshReplayEnvelopeKey(envelope, eventstream.UpdateToolCallInfo, toolCallID), true
 }
 
 func freshReplayTerminalKeys(envelope eventstream.Envelope) []freshReplayContentKey {
@@ -246,10 +245,10 @@ func terminalMaterializationComplete(envelope eventstream.Envelope) bool {
 	var status string
 	var rawOutput map[string]any
 	switch update := envelope.Update.(type) {
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		status = update.Status
 		rawOutput = session.NormalizeProtocolRawMap(update.RawOutput)
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		if update.Status != nil {
 			status = *update.Status
 		}
@@ -290,9 +289,9 @@ func freshReplayTerminalMaterialization(envelope eventstream.Envelope) (terminal
 func freshReplayTerminalMeta(envelope eventstream.Envelope) map[string]any {
 	var updateMeta map[string]any
 	switch update := envelope.Update.(type) {
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		updateMeta = update.Meta
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		updateMeta = update.Meta
 	}
 	return metautil.Merge(envelope.Meta, updateMeta)
@@ -302,11 +301,11 @@ func freshReplayTerminalOwner(envelope eventstream.Envelope) *eventstream.Parent
 	var callID string
 	var input, output map[string]any
 	switch update := envelope.Update.(type) {
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		callID = update.ToolCallID
 		input, _ = update.RawInput.(map[string]any)
 		output, _ = update.RawOutput.(map[string]any)
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		callID = update.ToolCallID
 		input, _ = update.RawInput.(map[string]any)
 		output, _ = update.RawOutput.(map[string]any)
@@ -371,10 +370,10 @@ func selectFreshReplayDurableEnvelope(
 		return envelope, true
 	}
 	switch update := envelope.Update.(type) {
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		update.Meta = withoutFreshReplayTerminalContent(update.Meta)
 		envelope.Update = update
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		update.Meta = withoutFreshReplayTerminalContent(update.Meta)
 		envelope.Update = update
 	}
@@ -411,9 +410,9 @@ func freshReplaySelectedSourceForKeys(
 
 func freshReplayEnvelopeToolCallID(envelope eventstream.Envelope) string {
 	switch update := envelope.Update.(type) {
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		return strings.TrimSpace(update.ToolCallID)
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		return strings.TrimSpace(update.ToolCallID)
 	default:
 		return ""

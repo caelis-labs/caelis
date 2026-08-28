@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestForwardControllerEventsPreservesActiveTurnFence(t *testing.T) {
@@ -71,7 +70,7 @@ func TestForwardControllerEventsPublishesPersistedCanonicalWhenACPPresent(t *tes
 		},
 		ACP: &eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate,
-			Update: schema.RawUpdate{
+			Update: eventstream.RawUpdate{
 				SessionUpdate: "vendor/custom",
 				Raw:           []byte(`{"sessionUpdate":"vendor/custom","value":1}`),
 			},
@@ -191,7 +190,7 @@ func TestForwardControllerEventsPublishesNarrativeDeltasWithRepairedNativeACP(t 
 			liveTexts = append(liveTexts, session.EventText(event.Canonical))
 		}
 		if env, ok := event.Native.(*eventstream.Envelope); ok && env != nil {
-			chunk, ok := env.Update.(schema.ContentChunk)
+			chunk, ok := env.Update.(eventstream.ContentChunk)
 			if !ok {
 				t.Fatalf("native ACP update = %#v, want ContentChunk", env.Update)
 			}
@@ -247,9 +246,9 @@ func TestForwardControllerEventsSuppressesACPControllerUserEcho(t *testing.T) {
 		},
 		ACP: &eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateUserMessage,
-				Content:       schema.TextContent{Type: "text", Text: "echoed prompt"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateUserMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "echoed prompt"},
 			},
 		},
 	}}}
@@ -354,11 +353,11 @@ func TestForwardControllerEventsPreservesLegacyUIOnlyWhenACPPresent(t *testing.T
 				},
 				ACP: &eventstream.Envelope{
 					Kind: eventstream.KindSessionUpdate,
-					Update: schema.ToolCall{
-						SessionUpdate: schema.UpdateToolCall,
+					Update: eventstream.ToolCall{
+						SessionUpdate: eventstream.UpdateToolCall,
 						ToolCallID:    "call-1",
 						Title:         "Search",
-						Status:        schema.ToolStatusInProgress,
+						Status:        eventstream.ToolStatusInProgress,
 					},
 				},
 			}}}
@@ -456,9 +455,9 @@ func acpNarrativeEnvelope(text string, meta map[string]any) *eventstream.Envelop
 		ScopeID:       "emma",
 		ParticipantID: "emma",
 		Meta:          meta,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: text},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: text},
 		},
 	}
 }

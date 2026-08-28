@@ -11,7 +11,6 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func unmarshalWireValue(raw []byte, target any) error {
@@ -100,7 +99,7 @@ func unmarshalWireEnvelope(raw []byte) (eventstream.Envelope, error) {
 		if err != nil {
 			return eventstream.Envelope{}, err
 		}
-		envelope.Update, err = schema.DecodeUpdateJSON(update)
+		envelope.Update, err = eventstream.DecodeUpdateJSON(update)
 		if err != nil {
 			return eventstream.Envelope{}, err
 		}
@@ -110,16 +109,16 @@ func unmarshalWireEnvelope(raw []byte) (eventstream.Envelope, error) {
 		return eventstream.Envelope{}, err
 	}
 	switch typed := envelope.Update.(type) {
-	case schema.ContentChunk:
+	case eventstream.ContentChunk:
 		typed.Meta, err = parseKnownMetadata(typed.Meta)
 		envelope.Update = typed
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		typed.Meta, err = parseKnownMetadata(typed.Meta)
 		envelope.Update = typed
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		typed.Meta, err = parseKnownMetadata(typed.Meta)
 		envelope.Update = typed
-	case schema.UsageUpdate:
+	case eventstream.UsageUpdate:
 		typed.Meta, err = parseKnownMetadata(typed.Meta)
 		envelope.Update = typed
 	}
@@ -194,7 +193,7 @@ func normalizeUpdateJSON(raw json.RawMessage) (json.RawMessage, error) {
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return nil, err
 	}
-	if probe.SessionUpdate != schema.UpdateUsage {
+	if probe.SessionUpdate != eventstream.UpdateUsage {
 		return raw, nil
 	}
 	normalized, err := normalizeObjectUint64Fields(raw, "size", "used")

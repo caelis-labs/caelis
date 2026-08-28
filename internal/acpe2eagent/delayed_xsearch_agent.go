@@ -11,7 +11,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	surfaceacp "github.com/caelis-labs/caelis/surfaces/acp"
 )
 
@@ -53,14 +53,14 @@ func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acpsdk.PromptReque
 	sessionID := strings.TrimSpace(string(req.SessionId))
 	for index := 1; index <= 6; index++ {
 		toolCallID := fmt.Sprintf("x-search-%d", index)
-		if err := callbacks.SessionUpdate(ctx, acp.SessionNotification{
+		if err := callbacks.SessionUpdate(ctx, eventstream.SessionNotification{
 			SessionID: sessionID,
-			Update: acp.ToolCall{
-				SessionUpdate: acp.UpdateToolCall,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall,
 				ToolCallID:    toolCallID,
 				Title:         "X search:",
-				Kind:          acp.ToolKindSearch,
-				Status:        acp.ToolStatusInProgress,
+				Kind:          eventstream.ToolKindSearch,
+				Status:        eventstream.ToolStatusInProgress,
 				RawInput:      map[string]any{"variant": "XSearch", "backend": true},
 			},
 		}); err != nil {
@@ -68,7 +68,7 @@ func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acpsdk.PromptReque
 			return acpsdk.PromptResponse{}, err
 		}
 		title := "X search:"
-		status := acp.ToolStatusCompleted
+		status := eventstream.ToolStatusCompleted
 		query := fmt.Sprintf("CAELIS_ACP_XSEARCH_QUERY_%d", index)
 		serializedInput, err := json.Marshal(map[string]any{
 			"query": query,
@@ -78,10 +78,10 @@ func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acpsdk.PromptReque
 		if err != nil {
 			return acpsdk.PromptResponse{}, err
 		}
-		if err := callbacks.SessionUpdate(ctx, acp.SessionNotification{
+		if err := callbacks.SessionUpdate(ctx, eventstream.SessionNotification{
 			SessionID: sessionID,
-			Update: acp.ToolCallUpdate{
-				SessionUpdate: acp.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    toolCallID,
 				Title:         &title,
 				Status:        &status,
@@ -104,11 +104,11 @@ func (a *delayedXSearchAgent) Prompt(ctx context.Context, req acpsdk.PromptReque
 		return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonCancelled}, ctx.Err()
 	case <-timer.C:
 	}
-	if err := callbacks.SessionUpdate(ctx, acp.SessionNotification{
+	if err := callbacks.SessionUpdate(ctx, eventstream.SessionNotification{
 		SessionID: sessionID,
-		Update: acp.ContentChunk{
-			SessionUpdate: acp.UpdateAgentMessage,
-			Content:       acp.TextContent{Type: "text", Text: "external xsearch sequence complete"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "external xsearch sequence complete"},
 			MessageID:     "xsearch-final",
 		},
 	}); err != nil {

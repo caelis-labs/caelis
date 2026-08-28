@@ -14,7 +14,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const structuredFinalMessageForFidelityTest = "# 完成\n\n已创建文件。\n\n---\n\n### 结果\n\n- 第一项\n- 第二项\n\n| 文件 | 状态 |\n| --- | --- |\n| `hello.go` | 好 |\n\n```go\nfmt.Println(\"你好\")\n```\n\n创建文件\n\n> **结果**"
@@ -226,26 +225,26 @@ func TestHiddenChildToolWithoutMessageIDCreatesMarkdownBoundary(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-call-1",
-			Title: "Spawn explorer: inspect", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-call-1",
+			Title: "Spawn explorer: inspect", Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
-	child := func(update schema.Update) eventstream.Envelope {
+	child := func(update eventstream.Update) eventstream.Envelope {
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeSubagent, ScopeID: "task-1",
 			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"}, Update: update,
 		}
 	}
-	model = applyACPEnvelopeForTest(t, model, child(schema.ContentChunk{
-		SessionUpdate: schema.UpdateAgentMessage, Content: schema.TextContent{Type: "text", Text: "任务 3 完成。\n---"},
+	model = applyACPEnvelopeForTest(t, model, child(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentMessage, Content: eventstream.TextContent{Type: "text", Text: "任务 3 完成。\n---"},
 	}))
-	model = applyACPEnvelopeForTest(t, model, child(schema.ToolCall{
-		SessionUpdate: schema.UpdateToolCall, ToolCallID: "child-tool-1", Title: "Write", Kind: schema.ToolKindEdit, Status: schema.ToolStatusInProgress,
+	model = applyACPEnvelopeForTest(t, model, child(eventstream.ToolCall{
+		SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "child-tool-1", Title: "Write", Kind: eventstream.ToolKindEdit, Status: eventstream.ToolStatusInProgress,
 	}))
-	model = applyACPEnvelopeForTest(t, model, child(schema.ContentChunk{
-		SessionUpdate: schema.UpdateAgentMessage, Content: schema.TextContent{Type: "text", Text: "### 任务 4：创建文件"},
+	model = applyACPEnvelopeForTest(t, model, child(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentMessage, Content: eventstream.TextContent{Type: "text", Text: "### 任务 4：创建文件"},
 	}))
 
 	view := requireSubagentOutputViewForTest(t, model, "spawn-call-1")
@@ -265,10 +264,10 @@ func TestTerminalGapIsRenderedOnceWithoutChangingExactBytes(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-1", Title: "RunCommand long job",
-			Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
-			RawInput: map[string]any{"command": "long job"}, Content: []schema.ToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "command-1", Title: "RunCommand long job",
+			Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
+			RawInput: map[string]any{"command": "long job"}, Content: []eventstream.ToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
 			Meta: acpToolNameMeta("RunCommand"),
 		},
 	})
@@ -278,20 +277,20 @@ func TestTerminalGapIsRenderedOnceWithoutChangingExactBytes(t *testing.T) {
 		metautil.RuntimeStreamTruncated: true,
 		metautil.RuntimeStreamBefore:    int64(65539),
 	})
-	running := schema.ToolStatusInProgress
+	running := eventstream.ToolStatusInProgress
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1", Status: &running, Meta: runningMeta,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1", Status: &running, Meta: runningMeta,
 		},
 	})
 
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	finalMeta := metautil.WithTerminalInfo(acpToolNameMeta("RunCommand"), "terminal-1")
 	final := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1", Status: &completed, Meta: finalMeta,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1", Status: &completed, Meta: finalMeta,
 		},
 	}
 	model = applyACPEnvelopeForTest(t, model, final)

@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStreamAnchor, bool) {
@@ -20,11 +19,11 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 	var input, output map[string]any
 	var status string
 	switch update := envelope.Update.(type) {
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		input, _ = update.RawInput.(map[string]any)
 		output, _ = update.RawOutput.(map[string]any)
 		status = update.Status
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		input, _ = update.RawInput.(map[string]any)
 		output, _ = update.RawOutput.(map[string]any)
 		if update.Status != nil {
@@ -64,7 +63,7 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 		// Only the target state may close Task observation.
 		targetState := strings.ToLower(strings.TrimSpace(display.MapString(output, "state")))
 		parentTerminal = eventstream.IsTerminalLifecycleState(targetState) ||
-			(targetState == "" && strings.EqualFold(strings.TrimSpace(status), schema.ToolStatusFailed))
+			(targetState == "" && strings.EqualFold(strings.TrimSpace(status), eventstream.ToolStatusFailed))
 	}
 	return acpTaskStreamAnchor{
 		callID:         callID,
@@ -112,11 +111,11 @@ func taskStreamParentToolName(kind task.Kind) string {
 	}
 }
 
-func taskStreamToolCallID(update schema.Update) string {
+func taskStreamToolCallID(update eventstream.Update) string {
 	switch typed := update.(type) {
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		return typed.ToolCallID
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		return typed.ToolCallID
 	default:
 		return ""

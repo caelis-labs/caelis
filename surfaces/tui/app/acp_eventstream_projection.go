@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 )
@@ -51,7 +50,7 @@ func (tuiTranscriptProjector) ApprovalCommandPreview(raw map[string]any) string 
 	return approvalCommandPreview(raw)
 }
 
-func acpToolContentToDisplay(in []schema.ToolCallContent) []acpprojector.ToolContent {
+func acpToolContentToDisplay(in []eventstream.ToolCallContent) []acpprojector.ToolContent {
 	if len(in) == 0 {
 		return nil
 	}

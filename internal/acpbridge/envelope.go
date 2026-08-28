@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func envelopeWithNarrativeText(env *eventstream.Envelope, updateType string, text string) *eventstream.Envelope {
@@ -13,9 +12,9 @@ func envelopeWithNarrativeText(env *eventstream.Envelope, updateType string, tex
 	}
 	out := eventstream.CloneEnvelope(*env)
 	out.Kind = eventstream.KindSessionUpdate
-	out.Update = schema.ContentChunk{
+	out.Update = eventstream.ContentChunk{
 		SessionUpdate: strings.TrimSpace(updateType),
-		Content: schema.TextContent{
+		Content: eventstream.TextContent{
 			Type: "text",
 			Text: text,
 		},

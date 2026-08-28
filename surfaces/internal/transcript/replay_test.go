@@ -5,7 +5,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestProjectReplayEventsKeepsFinalAssistantChunksOnly(t *testing.T) {
@@ -14,16 +13,16 @@ func TestProjectReplayEventsKeepsFinalAssistantChunksOnly(t *testing.T) {
 	events := ProjectReplayEvents([]eventstream.Envelope{
 		{
 			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "partial"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "partial"},
 			},
 		},
 		{
 			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "final"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "final"},
 			},
 			Final: true,
 		},
@@ -42,16 +41,16 @@ func TestProjectReplayEventsKeepsFinalThoughtChunksOnly(t *testing.T) {
 	events := ProjectReplayEvents([]eventstream.Envelope{
 		{
 			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentThought,
-				Content:       schema.TextContent{Type: "text", Text: "partial thought"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentThought,
+				Content:       eventstream.TextContent{Type: "text", Text: "partial thought"},
 			},
 		},
 		{
 			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentThought,
-				Content:       schema.TextContent{Type: "text", Text: "final thought"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentThought,
+				Content:       eventstream.TextContent{Type: "text", Text: "final thought"},
 			},
 			Final: true,
 		},
@@ -69,9 +68,9 @@ func TestProjectReplayEventsSkipsCompactNotice(t *testing.T) {
 
 	events := ProjectReplayEvents([]eventstream.Envelope{{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateCompact,
-			Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateCompact,
+			Content:       eventstream.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
 		},
 		Final: true,
 	}}, nil)
@@ -97,23 +96,23 @@ func TestProjectReplayEventsSkipsTransientEnvelope(t *testing.T) {
 func TestProjectReplayEventsProjectsMainDurableTrace(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusCompleted
-	kind := schema.ToolKindExecute
+	status := eventstream.ToolStatusCompleted
+	kind := eventstream.ToolKindExecute
 	events := ProjectReplayEvents([]eventstream.Envelope{
 		{
 			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall,
 				ToolCallID:    "call-1",
 				Kind:          "RunCommand",
-				Status:        schema.ToolStatusInProgress,
+				Status:        eventstream.ToolStatusInProgress,
 				RawInput:      map[string]any{"command": "go test ./..."},
 			},
 		},
 		{
 			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ToolCallUpdate{
-				SessionUpdate: schema.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
 				Kind:          &kind,
 				Status:        &status,
@@ -122,9 +121,9 @@ func TestProjectReplayEventsProjectsMainDurableTrace(t *testing.T) {
 		},
 		{
 			Kind: eventstream.KindSessionUpdate,
-			Update: schema.PlanUpdate{
-				SessionUpdate: schema.UpdatePlan,
-				Entries:       []schema.PlanEntry{{Content: "run tests", Status: "in_progress"}},
+			Update: eventstream.PlanUpdate{
+				SessionUpdate: eventstream.UpdatePlan,
+				Entries:       []eventstream.PlanEntry{{Content: "run tests", Status: "in_progress"}},
 			},
 		},
 		{
@@ -167,17 +166,17 @@ func TestProjectReplayEventsProjectsUsageUpdate(t *testing.T) {
 func TestProjectReplayEventsKeepsStandardSideACPToolTrace(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusCompleted
+	status := eventstream.ToolStatusCompleted
 	var projected ToolProjectionInput
 	events := ProjectReplayEvents([]eventstream.Envelope{{
 		Kind:  eventstream.KindSessionUpdate,
 		Scope: eventstream.ScopeParticipant,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "side-call",
 			Status:        &status,
-			Content: []schema.ToolCallContent{{
-				Type: "content", Content: schema.TextContent{Type: "text", Text: "side result"},
+			Content: []eventstream.ToolCallContent{{
+				Type: "content", Content: eventstream.TextContent{Type: "text", Text: "side result"},
 			}},
 		},
 	}}, testSurfaceProjector{resultCapture: &projected})
@@ -195,22 +194,22 @@ func TestProjectReplayEventsKeepsStandardSideACPToolTrace(t *testing.T) {
 func TestProjectReplayEventsKeepsDurableChildMirrorHistory(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusCompleted
+	status := eventstream.ToolStatusCompleted
 	delivery := &eventstream.Delivery{Mode: eventstream.DeliveryMirror}
 	events := ProjectReplayEvents([]eventstream.Envelope{
 		{
 			Kind: eventstream.KindSessionUpdate, Scope: eventstream.ScopeSubagent, ScopeID: "task-1",
 			Delivery: delivery,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "streamed child answer"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "streamed child answer"},
 			},
 		},
 		{
 			Kind: eventstream.KindSessionUpdate, Scope: eventstream.ScopeSubagent, ScopeID: "task-1",
 			Delivery: delivery,
-			Update: schema.ToolCallUpdate{
-				SessionUpdate: schema.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "child-call",
 				Status:        &status,
 			},
@@ -218,9 +217,9 @@ func TestProjectReplayEventsKeepsDurableChildMirrorHistory(t *testing.T) {
 		{
 			Kind: eventstream.KindSessionUpdate, Scope: eventstream.ScopeSubagent, ScopeID: "task-1",
 			Delivery: delivery,
-			Update: schema.PlanUpdate{
-				SessionUpdate: schema.UpdatePlan,
-				Entries:       []schema.PlanEntry{{Content: "inspect package", Status: "completed"}},
+			Update: eventstream.PlanUpdate{
+				SessionUpdate: eventstream.UpdatePlan,
+				Entries:       []eventstream.PlanEntry{{Content: "inspect package", Status: "completed"}},
 			},
 		},
 		{
@@ -256,9 +255,9 @@ func TestProjectReplayEventsProjectsParticipantUserPrompt(t *testing.T) {
 		Kind:  eventstream.KindSessionUpdate,
 		Scope: eventstream.ScopeParticipant,
 		Meta:  map[string]any{"mention": "@claude"},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateUserMessage,
-			Content:       schema.TextContent{Type: "text", Text: "summarize"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateUserMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "summarize"},
 		},
 	}}, nil)
 	if len(events) != 1 {

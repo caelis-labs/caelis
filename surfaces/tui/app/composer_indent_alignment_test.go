@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/evalharness"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -38,20 +37,20 @@ func TestComposerSitsOneColumnPastTranscriptGutter(t *testing.T) {
 					Kind:      eventstream.KindSessionUpdate,
 					SessionID: "sess",
 					Final:     true,
-					Update: schema.ContentChunk{
-						SessionUpdate: schema.UpdateUserMessage,
-						Content:       schema.TextContent{Type: "text", Text: "hello user prompt"},
+					Update: eventstream.ContentChunk{
+						SessionUpdate: eventstream.UpdateUserMessage,
+						Content:       eventstream.TextContent{Type: "text", Text: "hello user prompt"},
 					},
 				},
 				{
 					Kind:      eventstream.KindSessionUpdate,
 					SessionID: "sess",
-					Update: schema.ToolCall{
-						SessionUpdate: schema.UpdateToolCall,
+					Update: eventstream.ToolCall{
+						SessionUpdate: eventstream.UpdateToolCall,
 						ToolCallID:    "call-1",
 						Title:         "ls -la ~",
-						Kind:          schema.ToolKindExecute,
-						Status:        schema.ToolStatusInProgress,
+						Kind:          eventstream.ToolKindExecute,
+						Status:        eventstream.ToolStatusInProgress,
 						RawInput:      map[string]any{"command": "ls -la ~"},
 						Meta:          acpToolNameMeta("RunCommand"),
 					},
@@ -60,12 +59,12 @@ func TestComposerSitsOneColumnPastTranscriptGutter(t *testing.T) {
 					Kind:      eventstream.KindSessionUpdate,
 					SessionID: "sess",
 					Final:     true,
-					Update: schema.ToolCallUpdate{
-						SessionUpdate: schema.UpdateToolCallInfo,
+					Update: eventstream.ToolCallUpdate{
+						SessionUpdate: eventstream.UpdateToolCallInfo,
 						ToolCallID:    "call-1",
 						Title:         stringPtr("ls -la ~"),
-						Kind:          stringPtr(schema.ToolKindExecute),
-						Status:        stringPtr(schema.ToolStatusCompleted),
+						Kind:          stringPtr(eventstream.ToolKindExecute),
+						Status:        stringPtr(eventstream.ToolStatusCompleted),
 						RawInput:      map[string]any{"command": "ls -la ~"},
 						RawOutput:     map[string]any{"exit_code": 0},
 						Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "ok\n"),

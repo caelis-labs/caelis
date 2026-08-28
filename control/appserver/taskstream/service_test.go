@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestProjectRecordPreservesStandardChildToolLifecycle(t *testing.T) {
@@ -24,12 +23,12 @@ func TestProjectRecordPreservesStandardChildToolLifecycle(t *testing.T) {
 		State: task.StateRunning, Running: true, CurrentTurnID: "child-turn-1",
 		ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 	}
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	tests := []struct {
 		name       string
 		eventType  session.EventType
 		update     *session.ProtocolUpdate
-		wantUpdate schema.Update
+		wantUpdate eventstream.Update
 	}{
 		{
 			name:      "complete tool snapshot",
@@ -38,16 +37,16 @@ func TestProjectRecordPreservesStandardChildToolLifecycle(t *testing.T) {
 				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
 				ToolCallID:    "read-1",
 				Title:         "Read `AGENTS.md`",
-				Kind:          schema.ToolKindRead,
-				Status:        schema.ToolStatusInProgress,
+				Kind:          eventstream.ToolKindRead,
+				Status:        eventstream.ToolStatusInProgress,
 				RawInput:      map[string]any{"target_file": "AGENTS.md"},
 			},
-			wantUpdate: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall,
+			wantUpdate: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall,
 				ToolCallID:    "read-1",
 				Title:         "Read `AGENTS.md`",
-				Kind:          schema.ToolKindRead,
-				Status:        schema.ToolStatusInProgress,
+				Kind:          eventstream.ToolKindRead,
+				Status:        eventstream.ToolStatusInProgress,
 				RawInput:      map[string]any{"target_file": "AGENTS.md"},
 			},
 		},
@@ -59,8 +58,8 @@ func TestProjectRecordPreservesStandardChildToolLifecycle(t *testing.T) {
 				ToolCallID:    "read-1",
 				Status:        completed,
 			},
-			wantUpdate: schema.ToolCallUpdate{
-				SessionUpdate: schema.UpdateToolCallInfo,
+			wantUpdate: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "read-1",
 				Status:        &completed,
 			},
@@ -286,7 +285,7 @@ func TestProjectRecordKeepsOneEnvelopePerCursorWhenEventCarriesUsage(t *testing.
 	if len(projected) != 1 || projected[0].Cursor != "cursor-1" {
 		t.Fatalf("projectRecord() = %#v, want one Envelope for one resumable cursor", projected)
 	}
-	if eventstream.UpdateType(projected[0].Update) == schema.UpdateUsage {
+	if eventstream.UpdateType(projected[0].Update) == eventstream.UpdateUsage {
 		t.Fatalf("projectRecord() lost narrative in favor of sibling usage: %#v", projected[0])
 	}
 }

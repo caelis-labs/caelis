@@ -14,10 +14,9 @@ import (
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func modelMessagePtr(message model.Message) *model.Message {
@@ -1816,7 +1815,7 @@ func TestBeginTurnLoadsSessionResolvesIntentRunsRuntimeAndPublishesEvents(t *tes
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
 	got := collectHandleEvents(t, result.Handle)
-	if len(got) == 0 || got[len(got)-1].EventID != "e1" || eventstream.UpdateType(got[len(got)-1].Update) != schema.UpdateAgentMessage {
+	if len(got) == 0 || got[len(got)-1].EventID != "e1" || eventstream.UpdateType(got[len(got)-1].Update) != eventstream.UpdateAgentMessage {
 		t.Fatalf("published events = %#v, want assistant event e1", got)
 	}
 	if rt.lastReq.SessionRef != activeSession.SessionRef || rt.lastReq.Input != "hello" {

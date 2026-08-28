@@ -9,7 +9,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/acppermission"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 // sdkPermissionRequestFromApproval keeps live ACP callback wire ownership in
@@ -24,7 +24,7 @@ func sdkPermissionRequestFromApproval(ref session.SessionRef, approval *session.
 
 // sdkPermissionRequestFromSchema strictly normalizes a durable compatibility
 // request without first reducing it to the narrower Runtime approval model.
-func sdkPermissionRequestFromSchema(request acp.RequestPermissionRequest) (acpsdk.RequestPermissionRequest, error) {
+func sdkPermissionRequestFromSchema(request eventstream.RequestPermissionRequest) (acpsdk.RequestPermissionRequest, error) {
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return acpsdk.RequestPermissionRequest{}, fmt.Errorf("internal/acpagentbridge: encode permission request: %w", err)

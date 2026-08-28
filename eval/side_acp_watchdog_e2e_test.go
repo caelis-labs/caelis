@@ -21,7 +21,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestSideACPDistinctXSearchBypassesOrchestrationWatchdogE2E(t *testing.T) {
@@ -111,13 +110,13 @@ func TestSideACPDistinctXSearchBypassesOrchestrationWatchdogE2E(t *testing.T) {
 			completedTurn = true
 		}
 		switch update := envelope.Update.(type) {
-		case schema.ToolCall:
-			if update.SessionUpdate != schema.UpdateToolCall ||
+		case eventstream.ToolCall:
+			if update.SessionUpdate != eventstream.UpdateToolCall ||
 				!strings.HasPrefix(update.ToolCallID, "x-search-") {
 				continue
 			}
-			if update.Title != "X search:" || update.Kind != schema.ToolKindSearch ||
-				update.Status != schema.ToolStatusInProgress {
+			if update.Title != "X search:" || update.Kind != eventstream.ToolKindSearch ||
+				update.Status != eventstream.ToolStatusInProgress {
 				t.Fatalf("XSearch start = %#v", update)
 			}
 			rawInput, ok := update.RawInput.(map[string]any)
@@ -125,12 +124,12 @@ func TestSideACPDistinctXSearchBypassesOrchestrationWatchdogE2E(t *testing.T) {
 				t.Fatalf("XSearch %q rawInput = %#v, want fixed XSearch marker", update.ToolCallID, update.RawInput)
 			}
 			startIDs = append(startIDs, update.ToolCallID)
-		case schema.ToolCallUpdate:
-			if update.SessionUpdate != schema.UpdateToolCallInfo ||
+		case eventstream.ToolCallUpdate:
+			if update.SessionUpdate != eventstream.UpdateToolCallInfo ||
 				!strings.HasPrefix(update.ToolCallID, "x-search-") {
 				continue
 			}
-			if update.Status == nil || *update.Status != schema.ToolStatusCompleted {
+			if update.Status == nil || *update.Status != eventstream.ToolStatusCompleted {
 				t.Fatalf("XSearch completion = %#v", update)
 			}
 			query := delayedXSearchQuery(t, update.RawOutput)
@@ -145,8 +144,8 @@ func TestSideACPDistinctXSearchBypassesOrchestrationWatchdogE2E(t *testing.T) {
 				t.Fatalf("XSearch %q display query = %q, want %q", update.ToolCallID, displayQuery, query)
 			}
 			completedQueries = append(completedQueries, query)
-		case schema.ContentChunk:
-			if update.SessionUpdate != schema.UpdateAgentMessage ||
+		case eventstream.ContentChunk:
+			if update.SessionUpdate != eventstream.UpdateAgentMessage ||
 				strings.TrimSpace(session.ExtractProtocolText(update.Content)) != "external xsearch sequence complete" {
 				continue
 			}

@@ -5,15 +5,15 @@ import (
 	"testing"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
-	protocolacp "github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 func TestSessionNotificationForWireUsesSDKForStandardUpdate(t *testing.T) {
-	notification := protocolacp.SessionNotification{
+	notification := eventstream.SessionNotification{
 		SessionID: "session-1",
-		Update: protocolacp.ContentChunk{
-			SessionUpdate: protocolacp.UpdateAgentMessage,
-			Content:       protocolacp.TextContent{Type: "text", Text: "hello"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "hello"},
 			MessageID:     "message-1",
 			Meta:          map[string]any{"trace": "kept"},
 		},
@@ -37,10 +37,10 @@ func TestSessionNotificationForWireUsesSDKForStandardUpdate(t *testing.T) {
 }
 
 func TestSessionNotificationForWireRejectsMalformedStandardUpdate(t *testing.T) {
-	_, err := sessionNotificationForWire(protocolacp.SessionNotification{
+	_, err := sessionNotificationForWire(eventstream.SessionNotification{
 		SessionID: "session-1",
-		Update: protocolacp.ContentChunk{
-			SessionUpdate: protocolacp.UpdateAgentMessage,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
 			Content:       map[string]any{"type": "text"},
 		},
 	})
@@ -50,12 +50,12 @@ func TestSessionNotificationForWireRejectsMalformedStandardUpdate(t *testing.T) 
 }
 
 func TestSessionNotificationForWirePreservesExtensionContent(t *testing.T) {
-	notification := protocolacp.SessionNotification{
+	notification := eventstream.SessionNotification{
 		SessionID: "session-1",
-		Update: protocolacp.ToolCallUpdate{
-			SessionUpdate: protocolacp.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
-			Content: []protocolacp.ToolCallContent{{
+			Content: []eventstream.ToolCallContent{{
 				Type: "vendor", Content: map[string]any{"value": "kept"},
 			}},
 		},
@@ -64,13 +64,13 @@ func TestSessionNotificationForWirePreservesExtensionContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := wireValue.(protocolacp.SessionNotification); !ok {
+	if _, ok := wireValue.(eventstream.SessionNotification); !ok {
 		t.Fatalf("wire = %T, want compatibility notification", wireValue)
 	}
 }
 
 func TestSessionNotificationForWireDoesNotLetExtensionHideMalformedStandardContent(t *testing.T) {
-	tests := map[string]protocolacp.ToolCallContent{
+	tests := map[string]eventstream.ToolCallContent{
 		"text": {
 			Type: "content", Content: map[string]any{"type": "text"},
 		},
@@ -83,12 +83,12 @@ func TestSessionNotificationForWireDoesNotLetExtensionHideMalformedStandardConte
 	}
 	for name, malformed := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := sessionNotificationForWire(protocolacp.SessionNotification{
+			_, err := sessionNotificationForWire(eventstream.SessionNotification{
 				SessionID: "session-1",
-				Update: protocolacp.ToolCallUpdate{
-					SessionUpdate: protocolacp.UpdateToolCallInfo,
+				Update: eventstream.ToolCallUpdate{
+					SessionUpdate: eventstream.UpdateToolCallInfo,
 					ToolCallID:    "call-1",
-					Content: []protocolacp.ToolCallContent{
+					Content: []eventstream.ToolCallContent{
 						{Type: "vendor", Content: map[string]any{"value": "kept"}},
 						malformed,
 					},
@@ -102,10 +102,10 @@ func TestSessionNotificationForWireDoesNotLetExtensionHideMalformedStandardConte
 }
 
 func TestSessionNotificationForWirePreservesSessionInfoNull(t *testing.T) {
-	notification := protocolacp.SessionNotification{
+	notification := eventstream.SessionNotification{
 		SessionID: "session-1",
-		Update: protocolacp.RawUpdate{
-			SessionUpdate: protocolacp.UpdateSessionInfo,
+		Update: eventstream.RawUpdate{
+			SessionUpdate: eventstream.UpdateSessionInfo,
 			Raw:           json.RawMessage(`{"sessionUpdate":"session_info_update","title":null,"updatedAt":null}`),
 		},
 	}
@@ -123,10 +123,10 @@ func TestSessionNotificationForWirePreservesSessionInfoNull(t *testing.T) {
 }
 
 func TestSessionNotificationForWireUsesSDKForStandardUsageCost(t *testing.T) {
-	notification := protocolacp.SessionNotification{
+	notification := eventstream.SessionNotification{
 		SessionID: "session-1",
-		Update: protocolacp.UsageUpdate{
-			SessionUpdate: protocolacp.UpdateUsage,
+		Update: eventstream.UsageUpdate{
+			SessionUpdate: eventstream.UpdateUsage,
 			Size:          200_000,
 			Used:          42_000,
 			Cost:          &acpsdk.Cost{Amount: 0.3, Currency: "USD"},
@@ -147,10 +147,10 @@ func TestSessionNotificationForWireUsesSDKForStandardUsageCost(t *testing.T) {
 }
 
 func TestSessionNotificationForWireUsesSDKForUsageWithoutCost(t *testing.T) {
-	wireValue, err := sessionNotificationForWire(protocolacp.SessionNotification{
+	wireValue, err := sessionNotificationForWire(eventstream.SessionNotification{
 		SessionID: "session-1",
-		Update: protocolacp.UsageUpdate{
-			SessionUpdate: protocolacp.UpdateUsage,
+		Update: eventstream.UsageUpdate{
+			SessionUpdate: eventstream.UpdateUsage,
 			Size:          200_000,
 			Used:          42_000,
 		},
@@ -166,23 +166,23 @@ func TestSessionNotificationForWireUsesSDKForUsageWithoutCost(t *testing.T) {
 
 func TestStandardSessionUpdateTypeMatchesSDKUnion(t *testing.T) {
 	for _, updateType := range []string{
-		protocolacp.UpdateUserMessage,
-		protocolacp.UpdateAgentMessage,
-		protocolacp.UpdateAgentThought,
-		protocolacp.UpdateToolCall,
-		protocolacp.UpdateToolCallInfo,
-		protocolacp.UpdatePlan,
-		protocolacp.UpdateAvailableCmds,
-		protocolacp.UpdateCurrentMode,
-		protocolacp.UpdateConfigOption,
-		protocolacp.UpdateSessionInfo,
-		protocolacp.UpdateUsage,
+		eventstream.UpdateUserMessage,
+		eventstream.UpdateAgentMessage,
+		eventstream.UpdateAgentThought,
+		eventstream.UpdateToolCall,
+		eventstream.UpdateToolCallInfo,
+		eventstream.UpdatePlan,
+		eventstream.UpdateAvailableCmds,
+		eventstream.UpdateCurrentMode,
+		eventstream.UpdateConfigOption,
+		eventstream.UpdateSessionInfo,
+		eventstream.UpdateUsage,
 	} {
 		if !standardSessionUpdateType(updateType) {
 			t.Fatalf("standardSessionUpdateType(%q) = false", updateType)
 		}
 	}
-	for _, updateType := range []string{"", protocolacp.UpdateCompact, "vendor_update"} {
+	for _, updateType := range []string{"", eventstream.UpdateCompact, "vendor_update"} {
 		if standardSessionUpdateType(updateType) {
 			t.Fatalf("standardSessionUpdateType(%q) = true", updateType)
 		}
@@ -191,18 +191,18 @@ func TestStandardSessionUpdateTypeMatchesSDKUnion(t *testing.T) {
 
 func TestSessionNotificationForWirePreservesExtensionUpdate(t *testing.T) {
 	tests := map[string]struct {
-		update protocolacp.Update
+		update eventstream.Update
 		want   string
 	}{
 		"compact": {
-			update: protocolacp.ContentChunk{
-				SessionUpdate: protocolacp.UpdateCompact,
-				Content:       protocolacp.TextContent{Type: "text", Text: "Compacted"},
+			update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateCompact,
+				Content:       eventstream.TextContent{Type: "text", Text: "Compacted"},
 			},
 			want: `{"sessionId":"session-1","update":{"sessionUpdate":"compact","content":{"type":"text","text":"Compacted"}}}`,
 		},
 		"unknown vendor update": {
-			update: protocolacp.RawUpdate{
+			update: eventstream.RawUpdate{
 				SessionUpdate: "vendor_update",
 				Raw:           json.RawMessage(`{"sessionUpdate":"vendor_update","value":{"nested":true}}`),
 			},
@@ -211,16 +211,16 @@ func TestSessionNotificationForWirePreservesExtensionUpdate(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			wireValue, err := sessionNotificationForWire(protocolacp.SessionNotification{
+			wireValue, err := sessionNotificationForWire(eventstream.SessionNotification{
 				SessionID: "session-1",
 				Update:    test.update,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			wire, ok := wireValue.(protocolacp.SessionNotification)
+			wire, ok := wireValue.(eventstream.SessionNotification)
 			if !ok {
-				t.Fatalf("wire = %T, want protocolacp.SessionNotification", wireValue)
+				t.Fatalf("wire = %T, want eventstream.SessionNotification", wireValue)
 			}
 			encoded, err := json.Marshal(wire)
 			if err != nil {
@@ -234,7 +234,7 @@ func TestSessionNotificationForWirePreservesExtensionUpdate(t *testing.T) {
 }
 
 func TestSessionNotificationForWireRejectsMissingUpdate(t *testing.T) {
-	if _, err := sessionNotificationForWire(protocolacp.SessionNotification{SessionID: "session-1"}); err == nil {
+	if _, err := sessionNotificationForWire(eventstream.SessionNotification{SessionID: "session-1"}); err == nil {
 		t.Fatal("sessionNotificationForWire() error = nil")
 	}
 }

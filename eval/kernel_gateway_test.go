@@ -14,7 +14,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestGatewayProviderLiveReasoningBoundaryFromLocalConfigE2E(t *testing.T) {
@@ -80,18 +79,18 @@ func (t *liveReasoningTrace) capture(env eventstream.Envelope) {
 	if t == nil || env.Kind != eventstream.KindSessionUpdate {
 		return
 	}
-	chunk, ok := env.Update.(schema.ContentChunk)
+	chunk, ok := env.Update.(eventstream.ContentChunk)
 	if !ok {
 		return
 	}
 	text := strings.TrimSpace(session.ExtractProtocolText(chunk.Content))
 	switch chunk.SessionUpdate {
-	case schema.UpdateAgentThought:
+	case eventstream.UpdateAgentThought:
 		t.reasoningChunks = append(t.reasoningChunks, text)
 		if env.Final {
 			t.finalRawReasoning = text
 		}
-	case schema.UpdateAgentMessage:
+	case eventstream.UpdateAgentMessage:
 		t.answerChunks = append(t.answerChunks, text)
 		if env.Final {
 			t.finalRawText = text

@@ -754,13 +754,11 @@ func isProductionTestSupportPackage(rel string) bool {
 func allowedControlProtocolTarget(rel string, target string) bool {
 	if strings.HasPrefix(rel, "control/acppermission/") && pathIn(target,
 		"protocol/acp/metautil",
-		"protocol/acp/schema",
 	) {
 		return true
 	}
 	return strings.HasPrefix(rel, "control/appserver/") && pathIn(target,
 		"protocol/acp/metautil",
-		"protocol/acp/schema",
 	)
 }
 
@@ -883,6 +881,8 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "must not recreate protocol/acp/control; prompt contracts belong to internal/controlprompt, status data to control/status, and rendering to surfaces/internal/promptview", pkg, 1
 	case pkg == "protocol/acp/eventstream" || strings.HasPrefix(pkg, "protocol/acp/eventstream/"):
 		return "must not recreate protocol/acp/eventstream; the Control client event contract belongs to control/appserver/eventstream", pkg, 1
+	case pkg == "protocol/acp/schema" || strings.HasPrefix(pkg, "protocol/acp/schema/"):
+		return "must not recreate protocol/acp/schema; Control Envelope update and permission payloads belong to control/appserver/eventstream", pkg, 1
 	case pkg == "protocol/acp/projector" || strings.HasPrefix(pkg, "protocol/acp/projector/"):
 		return "must not recreate protocol/acp/projector; canonical Session projection belongs to control/appserver/projection", pkg, 1
 	case pkg == "protocol/acp/semantic" || strings.HasPrefix(pkg, "protocol/acp/semantic/"):

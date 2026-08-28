@@ -30,7 +30,6 @@ import (
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRuntimeAgentInitializeCapabilitiesDefault(t *testing.T) {
@@ -286,16 +285,16 @@ func TestRuntimeAgentLoadSessionReplaysDurableEvents(t *testing.T) {
 	if got, want := len(cb.notifications), 3; got != want {
 		t.Fatalf("len(notifications) = %d, want %d", got, want)
 	}
-	if got := cb.notifications[0].Update.SessionUpdateType(); got != acp.UpdateUserMessage {
-		t.Fatalf("first replay update = %q, want %q", got, acp.UpdateUserMessage)
+	if got := cb.notifications[0].Update.SessionUpdateType(); got != eventstream.UpdateUserMessage {
+		t.Fatalf("first replay update = %q, want %q", got, eventstream.UpdateUserMessage)
 	}
-	if got := cb.notifications[1].Update.SessionUpdateType(); got != acp.UpdateAgentMessage {
-		t.Fatalf("second replay update = %q, want %q", got, acp.UpdateAgentMessage)
+	if got := cb.notifications[1].Update.SessionUpdateType(); got != eventstream.UpdateAgentMessage {
+		t.Fatalf("second replay update = %q, want %q", got, eventstream.UpdateAgentMessage)
 	}
-	if got := cb.notifications[2].Update.SessionUpdateType(); got != acp.UpdateUsage {
+	if got := cb.notifications[2].Update.SessionUpdateType(); got != eventstream.UpdateUsage {
 		t.Fatalf("third replay update = %q, want usage_update", got)
 	}
-	usage, ok := cb.notifications[2].Update.(acp.UsageUpdate)
+	usage, ok := cb.notifications[2].Update.(eventstream.UsageUpdate)
 	if !ok || usage.Used != 17 || usage.Size != 128000 {
 		t.Fatalf("usage replay update = %#v, want usage_update size=128000 used=17", cb.notifications[2].Update)
 	}
@@ -577,7 +576,7 @@ func TestRuntimeAgentPromptContinuesAfterObservationGap(t *testing.T) {
 	if len(chunks) != 2 || chunks[0] != acpbridge.RuntimeObservationGapNotice || chunks[1] != "durable final" {
 		t.Fatalf("agent messages = %#v, want gap notice then final message", chunks)
 	}
-	gapUpdate, ok := callbacks.notifications[0].Update.(acp.ContentChunk)
+	gapUpdate, ok := callbacks.notifications[0].Update.(eventstream.ContentChunk)
 	if !ok || strings.TrimSpace(gapUpdate.MessageID) == "" {
 		t.Fatalf("gap update = %#v, want independently keyed ACP notice", callbacks.notifications[0].Update)
 	}
@@ -1100,10 +1099,10 @@ func (t *testControlTurn) Close() error {
 
 type recordingPromptCallbacks struct {
 	mu            sync.Mutex
-	notifications []acp.SessionNotification
+	notifications []eventstream.SessionNotification
 }
 
-func (c *recordingPromptCallbacks) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {
+func (c *recordingPromptCallbacks) SessionUpdate(_ context.Context, notification eventstream.SessionNotification) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.notifications = append(c.notifications, notification)
@@ -1120,8 +1119,8 @@ type errorOnAgentMessageCallbacks struct {
 	err error
 }
 
-func (c *errorOnAgentMessageCallbacks) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {
-	if chunk, ok := notification.Update.(acp.ContentChunk); ok && chunk.SessionUpdate == acp.UpdateAgentMessage {
+func (c *errorOnAgentMessageCallbacks) SessionUpdate(_ context.Context, notification eventstream.SessionNotification) error {
+	if chunk, ok := notification.Update.(eventstream.ContentChunk); ok && chunk.SessionUpdate == eventstream.UpdateAgentMessage {
 		return c.err
 	}
 	return nil
@@ -1131,13 +1130,13 @@ func (c *errorOnAgentMessageCallbacks) RequestPermission(context.Context, acpsdk
 	return acpsdk.RequestPermissionResponse{}, nil
 }
 
-func firstAgentMessageChunk(notifications []acp.SessionNotification) string {
+func firstAgentMessageChunk(notifications []eventstream.SessionNotification) string {
 	for _, notification := range notifications {
-		chunk, ok := notification.Update.(acp.ContentChunk)
-		if !ok || chunk.SessionUpdate != acp.UpdateAgentMessage {
+		chunk, ok := notification.Update.(eventstream.ContentChunk)
+		if !ok || chunk.SessionUpdate != eventstream.UpdateAgentMessage {
 			continue
 		}
-		content, ok := chunk.Content.(acp.TextContent)
+		content, ok := chunk.Content.(eventstream.TextContent)
 		if ok {
 			return content.Text
 		}
@@ -1245,7 +1244,7 @@ func (r *promptRouterRuntime) PromptParticipant(ctx context.Context, req agent.P
 		Message:    &msg,
 		Text:       msg.TextContent(),
 		Protocol: &session.EventProtocol{
-			Update: &session.ProtocolUpdate{SessionUpdate: acp.UpdateAgentMessage},
+			Update: &session.ProtocolUpdate{SessionUpdate: eventstream.UpdateAgentMessage},
 		},
 	}
 	return agent.RunResult{Session: activeSession, Handle: promptRouterRun{event: event}}, nil
@@ -1823,10 +1822,10 @@ func terminalFrameFailedForTest(state string) bool {
 
 type terminalBridgeCallbacks struct {
 	mu            sync.Mutex
-	notifications []acp.SessionNotification
+	notifications []eventstream.SessionNotification
 }
 
-func (c *terminalBridgeCallbacks) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {
+func (c *terminalBridgeCallbacks) SessionUpdate(_ context.Context, notification eventstream.SessionNotification) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.notifications = append(c.notifications, notification)
@@ -1837,16 +1836,16 @@ func (c *terminalBridgeCallbacks) RequestPermission(context.Context, acpsdk.Requ
 	return acpsdk.RequestPermissionResponse{}, nil
 }
 
-func (c *terminalBridgeCallbacks) snapshot() []acp.SessionNotification {
+func (c *terminalBridgeCallbacks) snapshot() []eventstream.SessionNotification {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]acp.SessionNotification(nil), c.notifications...)
+	return append([]eventstream.SessionNotification(nil), c.notifications...)
 }
 
-func terminalOutputPayloads(notifications []acp.SessionNotification, toolCallID string) []string {
+func terminalOutputPayloads(notifications []eventstream.SessionNotification, toolCallID string) []string {
 	out := []string{}
 	for _, notification := range notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
+		update, ok := notification.Update.(eventstream.ToolCallUpdate)
 		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
 			continue
 		}
@@ -1857,10 +1856,10 @@ func terminalOutputPayloads(notifications []acp.SessionNotification, toolCallID 
 	return out
 }
 
-func standardToolResultPayloads(notifications []acp.SessionNotification, toolCallID string) []string {
+func standardToolResultPayloads(notifications []eventstream.SessionNotification, toolCallID string) []string {
 	var out []string
 	for _, notification := range notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
+		update, ok := notification.Update.(eventstream.ToolCallUpdate)
 		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
 			continue
 		}
@@ -1868,7 +1867,7 @@ func standardToolResultPayloads(notifications []acp.SessionNotification, toolCal
 			if !strings.EqualFold(strings.TrimSpace(item.Type), "content") {
 				continue
 			}
-			if text, ok := item.Content.(acp.TextContent); ok {
+			if text, ok := item.Content.(eventstream.TextContent); ok {
 				out = append(out, text.Text)
 			}
 		}
@@ -1876,9 +1875,9 @@ func standardToolResultPayloads(notifications []acp.SessionNotification, toolCal
 	return out
 }
 
-func hasToolUpdateContent(notifications []acp.SessionNotification, toolCallID string) bool {
+func hasToolUpdateContent(notifications []eventstream.SessionNotification, toolCallID string) bool {
 	for _, notification := range notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
+		update, ok := notification.Update.(eventstream.ToolCallUpdate)
 		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
 			continue
 		}
@@ -1889,14 +1888,14 @@ func hasToolUpdateContent(notifications []acp.SessionNotification, toolCallID st
 	return false
 }
 
-func hasToolCallNotification(notifications []acp.SessionNotification, toolCallID string) bool {
+func hasToolCallNotification(notifications []eventstream.SessionNotification, toolCallID string) bool {
 	for _, notification := range notifications {
 		switch update := notification.Update.(type) {
-		case acp.ToolCall:
+		case eventstream.ToolCall:
 			if strings.TrimSpace(update.ToolCallID) == toolCallID {
 				return true
 			}
-		case acp.ToolCallUpdate:
+		case eventstream.ToolCallUpdate:
 			if strings.TrimSpace(update.ToolCallID) == toolCallID {
 				return true
 			}
@@ -1905,9 +1904,9 @@ func hasToolCallNotification(notifications []acp.SessionNotification, toolCallID
 	return false
 }
 
-func hasTerminalContent(notifications []acp.SessionNotification, toolCallID string, terminalID string, text string) bool {
+func hasTerminalContent(notifications []eventstream.SessionNotification, toolCallID string, terminalID string, text string) bool {
 	for _, notification := range notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
+		update, ok := notification.Update.(eventstream.ToolCallUpdate)
 		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
 			continue
 		}
@@ -1919,17 +1918,17 @@ func hasTerminalContent(notifications []acp.SessionNotification, toolCallID stri
 	return false
 }
 
-func hasTerminalInfo(notifications []acp.SessionNotification, toolCallID string, terminalID string) bool {
+func hasTerminalInfo(notifications []eventstream.SessionNotification, toolCallID string, terminalID string) bool {
 	for _, notification := range notifications {
 		switch update := notification.Update.(type) {
-		case acp.ToolCall:
+		case eventstream.ToolCall:
 			if strings.TrimSpace(update.ToolCallID) != toolCallID {
 				continue
 			}
 			if info, ok := metautil.TerminalInfo(update.Meta); ok && strings.TrimSpace(info.TerminalID) == terminalID {
 				return true
 			}
-		case acp.ToolCallUpdate:
+		case eventstream.ToolCallUpdate:
 			if strings.TrimSpace(update.ToolCallID) != toolCallID {
 				continue
 			}
@@ -1954,28 +1953,28 @@ func transientTerminalStreamMetaForTest(mode string) map[string]any {
 	}
 }
 
-func firstCompletedToolUpdateIndex(notifications []acp.SessionNotification, terminalID string) int {
+func firstCompletedToolUpdateIndex(notifications []eventstream.SessionNotification, terminalID string) int {
 	for i, notification := range notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
+		update, ok := notification.Update.(eventstream.ToolCallUpdate)
 		if !ok || strings.TrimSpace(update.ToolCallID) != terminalID || update.Status == nil {
 			continue
 		}
-		if *update.Status == acp.ToolStatusCompleted {
+		if *update.Status == eventstream.ToolStatusCompleted {
 			return i
 		}
 	}
 	return -1
 }
 
-func agentMessageChunks(notifications []acp.SessionNotification) []string {
+func agentMessageChunks(notifications []eventstream.SessionNotification) []string {
 	out := make([]string, 0, len(notifications))
 	for _, notification := range notifications {
-		chunk, ok := notification.Update.(acp.ContentChunk)
-		if !ok || chunk.SessionUpdate != acp.UpdateAgentMessage {
+		chunk, ok := notification.Update.(eventstream.ContentChunk)
+		if !ok || chunk.SessionUpdate != eventstream.UpdateAgentMessage {
 			continue
 		}
 		switch content := chunk.Content.(type) {
-		case acp.TextContent:
+		case eventstream.TextContent:
 			out = append(out, content.Text)
 		case map[string]any:
 			if text, _ := content["text"].(string); text != "" {
@@ -1986,18 +1985,18 @@ func agentMessageChunks(notifications []acp.SessionNotification) []string {
 	return out
 }
 
-func agentMessageIDs(notifications []acp.SessionNotification) []string {
-	return contentChunkMessageIDs(notifications, acp.UpdateAgentMessage)
+func agentMessageIDs(notifications []eventstream.SessionNotification) []string {
+	return contentChunkMessageIDs(notifications, eventstream.UpdateAgentMessage)
 }
 
-func agentThoughtIDs(notifications []acp.SessionNotification) []string {
-	return contentChunkMessageIDs(notifications, acp.UpdateAgentThought)
+func agentThoughtIDs(notifications []eventstream.SessionNotification) []string {
+	return contentChunkMessageIDs(notifications, eventstream.UpdateAgentThought)
 }
 
-func contentChunkMessageIDs(notifications []acp.SessionNotification, updateType string) []string {
+func contentChunkMessageIDs(notifications []eventstream.SessionNotification, updateType string) []string {
 	out := make([]string, 0, len(notifications))
 	for _, notification := range notifications {
-		chunk, ok := notification.Update.(acp.ContentChunk)
+		chunk, ok := notification.Update.(eventstream.ContentChunk)
 		if !ok || chunk.SessionUpdate != updateType {
 			continue
 		}
@@ -2006,15 +2005,15 @@ func contentChunkMessageIDs(notifications []acp.SessionNotification, updateType 
 	return out
 }
 
-func agentThoughtChunks(notifications []acp.SessionNotification) []string {
+func agentThoughtChunks(notifications []eventstream.SessionNotification) []string {
 	out := make([]string, 0, len(notifications))
 	for _, notification := range notifications {
-		chunk, ok := notification.Update.(acp.ContentChunk)
-		if !ok || chunk.SessionUpdate != acp.UpdateAgentThought {
+		chunk, ok := notification.Update.(eventstream.ContentChunk)
+		if !ok || chunk.SessionUpdate != eventstream.UpdateAgentThought {
 			continue
 		}
 		switch content := chunk.Content.(type) {
-		case acp.TextContent:
+		case eventstream.TextContent:
 			out = append(out, content.Text)
 		case map[string]any:
 			if text, _ := content["text"].(string); text != "" {
@@ -2025,12 +2024,12 @@ func agentThoughtChunks(notifications []acp.SessionNotification) []string {
 	return out
 }
 
-func terminalContentText(content []acp.ToolCallContent, terminalID string) string {
+func terminalContentText(content []eventstream.ToolCallContent, terminalID string) string {
 	for _, item := range content {
 		if item.Type != "terminal" || item.TerminalID != terminalID {
 			continue
 		}
-		text, ok := item.Content.(acp.TextContent)
+		text, ok := item.Content.(eventstream.TextContent)
 		if !ok {
 			continue
 		}

@@ -8,7 +8,6 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type Kind string
@@ -71,21 +70,21 @@ type Delivery struct {
 	Mode DeliveryMode `json:"mode"`
 }
 
-func UsageUpdateFromSnapshot(usage session.UsageSnapshot, meta map[string]any) schema.UsageUpdate {
+func UsageUpdateFromSnapshot(usage session.UsageSnapshot, meta map[string]any) UsageUpdate {
 	used := nonNegativeUsage(usage.TotalTokens)
 	size := usage.ContextWindowTokens
 	if size <= 0 {
 		size = usage.TotalTokens
 	}
-	return schema.UsageUpdate{
-		SessionUpdate: schema.UpdateUsage,
+	return UsageUpdate{
+		SessionUpdate: UpdateUsage,
 		Size:          nonNegativeUsage(size),
 		Used:          used,
 		Meta:          usageUpdateMeta(meta, usage),
 	}
 }
 
-func usageSnapshotFromUpdate(update schema.UsageUpdate) *session.UsageSnapshot {
+func usageSnapshotFromUpdate(update UsageUpdate) *session.UsageSnapshot {
 	usage := usageSnapshotFromMeta(update.Meta)
 	if usage == nil && update.Used == 0 {
 		return nil
@@ -115,7 +114,7 @@ func UsageSnapshotFromEnvelope(env Envelope) *session.UsageSnapshot {
 	if env.Kind != KindSessionUpdate {
 		return nil
 	}
-	update, ok := env.Update.(schema.UsageUpdate)
+	update, ok := env.Update.(UsageUpdate)
 	if !ok {
 		return nil
 	}
@@ -149,10 +148,10 @@ type Envelope struct {
 	// payload so standard RequestPermissionRequest wire shape remains unchanged.
 	ApprovalRequestID ApprovalRequestID `json:"approval_request_id,omitempty"`
 
-	Update     schema.Update                    `json:"update,omitempty"`
-	Permission *schema.RequestPermissionRequest `json:"permission,omitempty"`
-	Notice     string                           `json:"notice,omitempty"`
-	NoticeKind NoticeKind                       `json:"notice_kind,omitempty"`
+	Update     Update                    `json:"update,omitempty"`
+	Permission *RequestPermissionRequest `json:"permission,omitempty"`
+	Notice     string                    `json:"notice,omitempty"`
+	NoticeKind NoticeKind                `json:"notice_kind,omitempty"`
 
 	ApprovalReview     *ApprovalReview     `json:"approval_review,omitempty"`
 	Participant        *Participant        `json:"participant,omitempty"`
@@ -416,35 +415,35 @@ func intFromAny(value any) int {
 	}
 }
 
-func CloneUpdate(update schema.Update) schema.Update {
+func CloneUpdate(update Update) Update {
 	switch typed := update.(type) {
 	case nil:
 		return nil
-	case schema.ContentChunk:
+	case ContentChunk:
 		typed.Content = cloneAny(typed.Content)
 		typed.Meta = cloneAnyMap(typed.Meta)
 		return typed
-	case schema.ToolCall:
+	case ToolCall:
 		typed.RawInput = cloneAny(typed.RawInput)
 		typed.RawOutput = cloneAny(typed.RawOutput)
 		typed.Content = cloneToolCallContent(typed.Content)
-		typed.Locations = append([]schema.ToolCallLocation(nil), typed.Locations...)
+		typed.Locations = append([]ToolCallLocation(nil), typed.Locations...)
 		typed.Meta = cloneAnyMap(typed.Meta)
 		return typed
-	case schema.ToolCallUpdate:
+	case ToolCallUpdate:
 		typed.Title = cloneStringPtr(typed.Title)
 		typed.Kind = cloneStringPtr(typed.Kind)
 		typed.Status = cloneStringPtr(typed.Status)
 		typed.RawInput = cloneAny(typed.RawInput)
 		typed.RawOutput = cloneAny(typed.RawOutput)
 		typed.Content = cloneToolCallContent(typed.Content)
-		typed.Locations = append([]schema.ToolCallLocation(nil), typed.Locations...)
+		typed.Locations = append([]ToolCallLocation(nil), typed.Locations...)
 		typed.Meta = cloneAnyMap(typed.Meta)
 		return typed
-	case schema.PlanUpdate:
-		typed.Entries = append([]schema.PlanEntry(nil), typed.Entries...)
+	case PlanUpdate:
+		typed.Entries = append([]PlanEntry(nil), typed.Entries...)
 		return typed
-	case schema.UsageUpdate:
+	case UsageUpdate:
 		if typed.Cost != nil {
 			cost := *typed.Cost
 			cost.Meta = cloneRawMessageMap(cost.Meta)
@@ -452,7 +451,7 @@ func CloneUpdate(update schema.Update) schema.Update {
 		}
 		typed.Meta = cloneAnyMap(typed.Meta)
 		return typed
-	case schema.RawUpdate:
+	case RawUpdate:
 		typed.Raw = append([]byte(nil), typed.Raw...)
 		return typed
 	default:
@@ -460,36 +459,36 @@ func CloneUpdate(update schema.Update) schema.Update {
 	}
 }
 
-func UpdateType(update schema.Update) string {
+func UpdateType(update Update) string {
 	if update == nil {
 		return ""
 	}
 	return strings.TrimSpace(update.SessionUpdateType())
 }
 
-func UpdateMeta(update schema.Update) map[string]any {
+func UpdateMeta(update Update) map[string]any {
 	switch typed := update.(type) {
-	case schema.ContentChunk:
+	case ContentChunk:
 		return cloneAnyMap(typed.Meta)
-	case schema.ToolCall:
+	case ToolCall:
 		return cloneAnyMap(typed.Meta)
-	case schema.ToolCallUpdate:
+	case ToolCallUpdate:
 		return cloneAnyMap(typed.Meta)
-	case schema.UsageUpdate:
+	case UsageUpdate:
 		return cloneAnyMap(typed.Meta)
 	default:
 		return nil
 	}
 }
 
-func cloneToolCallUpdate(in schema.ToolCallUpdate) schema.ToolCallUpdate {
+func cloneToolCallUpdate(in ToolCallUpdate) ToolCallUpdate {
 	in.Title = cloneStringPtr(in.Title)
 	in.Kind = cloneStringPtr(in.Kind)
 	in.Status = cloneStringPtr(in.Status)
 	in.RawInput = cloneAny(in.RawInput)
 	in.RawOutput = cloneAny(in.RawOutput)
 	in.Content = cloneToolCallContent(in.Content)
-	in.Locations = append([]schema.ToolCallLocation(nil), in.Locations...)
+	in.Locations = append([]ToolCallLocation(nil), in.Locations...)
 	in.Meta = cloneAnyMap(in.Meta)
 	return in
 }
@@ -502,11 +501,11 @@ func cloneStringPtr(in *string) *string {
 	return &out
 }
 
-func cloneToolCallContent(in []schema.ToolCallContent) []schema.ToolCallContent {
+func cloneToolCallContent(in []ToolCallContent) []ToolCallContent {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]schema.ToolCallContent, 0, len(in))
+	out := make([]ToolCallContent, 0, len(in))
 	for _, item := range in {
 		copy := item
 		if item.OldText != nil {

@@ -29,7 +29,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestClassifyControlBackendErrorTreatsFenceConflictAsConflict(t *testing.T) {
@@ -271,7 +270,7 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 	handle := &controlClientIngressHandle{events: mainEvents}
 	stack.composition.attachControlClientHandle(handle)
 
-	status := schema.ToolStatusInProgress
+	status := eventstream.ToolStatusInProgress
 	title := "RunCommand"
 	mainEvents <- eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
@@ -280,8 +279,8 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 		RunID:     handle.RunID(),
 		TurnID:    handle.TurnID(),
 		Scope:     eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "run-command-1",
 			Title:         &title,
 			Status:        &status,
@@ -1314,7 +1313,7 @@ func waitControlClientIngressSignal(t *testing.T, signal <-chan struct{}) {
 
 func assertControlClientIngressTool(t *testing.T, envelope eventstream.Envelope, callID string) {
 	t.Helper()
-	update, ok := envelope.Update.(schema.ToolCallUpdate)
+	update, ok := envelope.Update.(eventstream.ToolCallUpdate)
 	if !ok || update.ToolCallID != callID {
 		t.Fatalf("tool update = %#v, want call %q", envelope.Update, callID)
 	}

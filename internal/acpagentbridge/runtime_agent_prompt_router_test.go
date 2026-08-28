@@ -17,7 +17,6 @@ import (
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRuntimeAgentNewRequiresSlashResultFormatterWithPromptRouter(t *testing.T) {
@@ -111,9 +110,9 @@ func TestRuntimeAgentPromptRouterSuppressesLiveUserMessageEcho(t *testing.T) {
 			Events: []eventstream.Envelope{
 				{
 					Kind: eventstream.KindSessionUpdate,
-					Update: acp.ContentChunk{
-						SessionUpdate: acp.UpdateUserMessage,
-						Content:       acp.TextContent{Type: "text", Text: "hello"},
+					Update: eventstream.ContentChunk{
+						SessionUpdate: eventstream.UpdateUserMessage,
+						Content:       eventstream.TextContent{Type: "text", Text: "hello"},
 					},
 				},
 				{
@@ -158,7 +157,7 @@ func TestRuntimeAgentPromptRouterSuppressesLiveUserMessageEcho(t *testing.T) {
 		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonEndTurn)
 	}
 	for _, notification := range cb.notifications {
-		if notification.Update.SessionUpdateType() == acp.UpdateUserMessage {
+		if notification.Update.SessionUpdateType() == eventstream.UpdateUserMessage {
 			t.Fatalf("notifications = %#v, live ACP prompt should not emit user_message_chunk", cb.notifications)
 		}
 	}
@@ -486,24 +485,24 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 			t.Fatalf("notification sessionID = %q, want %q: %#v", notification.SessionID, string(activeSession.SessionId), notification)
 		}
 		switch update := notification.Update.(type) {
-		case acp.RawUpdate:
+		case eventstream.RawUpdate:
 			switch update.SessionUpdate {
-			case acp.UpdateSessionInfo:
+			case eventstream.UpdateSessionInfo:
 				var decoded acpsdk.SessionSessionInfoUpdate
-				seenSessionInfo = json.Unmarshal(update.Raw, &decoded) == nil && decoded.SessionUpdate == acp.UpdateSessionInfo
-			case acp.UpdateCurrentMode:
+				seenSessionInfo = json.Unmarshal(update.Raw, &decoded) == nil && decoded.SessionUpdate == eventstream.UpdateSessionInfo
+			case eventstream.UpdateCurrentMode:
 				var decoded acpsdk.SessionCurrentModeUpdate
 				seenMode = json.Unmarshal(update.Raw, &decoded) == nil &&
-					decoded.SessionUpdate == acp.UpdateCurrentMode && decoded.CurrentModeId == "default"
-			case acp.UpdateAvailableCmds:
+					decoded.SessionUpdate == eventstream.UpdateCurrentMode && decoded.CurrentModeId == "default"
+			case eventstream.UpdateAvailableCmds:
 				var decoded acpsdk.SessionAvailableCommandsUpdate
 				seenCommands = json.Unmarshal(update.Raw, &decoded) == nil &&
-					decoded.SessionUpdate == acp.UpdateAvailableCmds &&
+					decoded.SessionUpdate == eventstream.UpdateAvailableCmds &&
 					len(decoded.AvailableCommands) == 1 && decoded.AvailableCommands[0].Name == "status"
-			case acp.UpdateConfigOption:
+			case eventstream.UpdateConfigOption:
 				var decoded acpsdk.SessionConfigOptionUpdate
 				seenConfig = json.Unmarshal(update.Raw, &decoded) == nil &&
-					decoded.SessionUpdate == acp.UpdateConfigOption && len(decoded.ConfigOptions) == 1
+					decoded.SessionUpdate == eventstream.UpdateConfigOption && len(decoded.ConfigOptions) == 1
 			}
 		}
 	}
@@ -518,12 +517,12 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 func TestRuntimeAgentPromptRouterTurnFeedReturnsEmitErrors(t *testing.T) {
 	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
-	status := acp.ToolStatusInProgress
+	status := eventstream.ToolStatusInProgress
 	turn := newTestControlTurn(
 		eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate,
-			Update: acp.ToolCallUpdate{
-				SessionUpdate: acp.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
 				Status:        &status,
 			},
@@ -575,16 +574,16 @@ func TestRuntimeAgentPromptRouterTurnFeedReturnsEmitErrors(t *testing.T) {
 func TestRuntimeAgentPromptRouterTurnFeedEmitsTerminalMetaForACPStdio(t *testing.T) {
 	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
-	running := acp.ToolStatusInProgress
-	completed := acp.ToolStatusCompleted
+	running := eventstream.ToolStatusInProgress
+	completed := eventstream.ToolStatusCompleted
 	turn := newTestControlTurn(
 		eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate,
-			Update: acp.ToolCallUpdate{
-				SessionUpdate: acp.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
 				Status:        &running,
-				Content: []acp.ToolCallContent{{
+				Content: []eventstream.ToolCallContent{{
 					Type:       "terminal",
 					TerminalID: "call-1",
 				}},
@@ -592,24 +591,24 @@ func TestRuntimeAgentPromptRouterTurnFeedEmitsTerminalMetaForACPStdio(t *testing
 		},
 		eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate,
-			Update: acp.ToolCallUpdate{
-				SessionUpdate: acp.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Content: []acp.ToolCallContent{{
+				Content: []eventstream.ToolCallContent{{
 					Type:       "terminal",
 					TerminalID: "call-1",
-					Content:    acp.TextContent{Type: "text", Text: "streamed output\n"},
+					Content:    eventstream.TextContent{Type: "text", Text: "streamed output\n"},
 				}},
 				Meta: transientTerminalStreamMetaForTest("append"),
 			},
 		},
 		eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate,
-			Update: acp.ToolCallUpdate{
-				SessionUpdate: acp.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
 				Status:        &completed,
-				Content: []acp.ToolCallContent{{
+				Content: []eventstream.ToolCallContent{{
 					Type:       "terminal",
 					TerminalID: "call-1",
 				}},
@@ -658,10 +657,10 @@ func TestRuntimeAgentPromptRouterTurnFeedEmitsTerminalMetaForACPStdio(t *testing
 	if !hasTerminalInfo(cb.notifications, "call-1", "call-1") {
 		t.Fatalf("notifications = %#v, want local terminal info for ACP stdio", cb.notifications)
 	}
-	var finalUpdate *acp.ToolCallUpdate
+	var finalUpdate *eventstream.ToolCallUpdate
 	for _, notification := range cb.notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
-		if !ok || strings.TrimSpace(update.ToolCallID) != "call-1" || update.Status == nil || *update.Status != acp.ToolStatusCompleted {
+		update, ok := notification.Update.(eventstream.ToolCallUpdate)
+		if !ok || strings.TrimSpace(update.ToolCallID) != "call-1" || update.Status == nil || *update.Status != eventstream.ToolStatusCompleted {
 			continue
 		}
 		finalUpdate = &update
@@ -683,24 +682,24 @@ func TestRuntimeAgentPromptRouterDoesNotRewriteCumulativeFinalContent(t *testing
 	turn := newTestControlTurn(
 		eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate,
-			Update: acp.ContentChunk{
-				SessionUpdate: acp.UpdateAgentMessage,
-				Content:       acp.TextContent{Type: "text", Text: "好的！"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "好的！"},
 			},
 		},
 		eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate,
-			Update: acp.ContentChunk{
-				SessionUpdate: acp.UpdateAgentMessage,
-				Content:       acp.TextContent{Type: "text", Text: "让我"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "让我"},
 			},
 		},
 		eventstream.Envelope{
 			Kind:  eventstream.KindSessionUpdate,
 			Final: true,
-			Update: acp.ContentChunk{
-				SessionUpdate: acp.UpdateAgentMessage,
-				Content:       acp.TextContent{Type: "text", Text: "好的！让我"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "好的！让我"},
 			},
 		},
 	)
@@ -748,8 +747,8 @@ func TestRuntimeAgentPromptRouterDoesNotRewriteCumulativeFinalContent(t *testing
 func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnResult(t *testing.T) {
 	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
-	status := acp.ToolStatusInProgress
-	completed := acp.ToolStatusCompleted
+	status := eventstream.ToolStatusInProgress
+	completed := eventstream.ToolStatusCompleted
 	spawnKind := "Spawn"
 	childTitle := "Apply child patch"
 	childCommandTitle := "Run child command"
@@ -759,8 +758,8 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 	main := eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
-		Update: acp.ToolCallUpdate{
-			SessionUpdate: acp.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "spawn-1",
 			Kind:          &spawnKind,
 			Status:        &status,
@@ -774,10 +773,10 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 			ScopeID:    "task-1",
 			ParentTool: parentTool,
 			Delivery:   childDelivery,
-			Update: acp.ContentChunk{
-				SessionUpdate: acp.UpdateAgentMessage,
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
 				MessageID:     "child-message-1",
-				Content:       acp.TextContent{Type: "text", Text: "child opening\n"},
+				Content:       eventstream.TextContent{Type: "text", Text: "child opening\n"},
 			},
 		},
 		{
@@ -787,9 +786,9 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 			ScopeID:    "task-1",
 			ParentTool: parentTool,
 			Delivery:   childDelivery,
-			Update: acp.ContentChunk{
-				SessionUpdate: acp.UpdateAgentThought,
-				Content:       acp.TextContent{Type: "text", Text: "child thought"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentThought,
+				Content:       eventstream.TextContent{Type: "text", Text: "child thought"},
 			},
 		},
 		{
@@ -799,12 +798,12 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 			ScopeID:    "task-1",
 			ParentTool: parentTool,
 			Delivery:   childDelivery,
-			Update: acp.ToolCall{
-				SessionUpdate: acp.UpdateToolCall,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall,
 				ToolCallID:    "child-list-1",
 				Title:         childTitle,
 				Kind:          "Patch",
-				Status:        acp.ToolStatusInProgress,
+				Status:        eventstream.ToolStatusInProgress,
 			},
 		},
 		{
@@ -814,12 +813,12 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 			ScopeID:    "task-1",
 			ParentTool: parentTool,
 			Delivery:   childDelivery,
-			Update: acp.ToolCallUpdate{
-				SessionUpdate: acp.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "child-list-1",
 				Status:        &completed,
-				Locations:     []acp.ToolCallLocation{{Path: "child.txt", Line: &line}},
-				Content: []acp.ToolCallContent{{
+				Locations:     []eventstream.ToolCallLocation{{Path: "child.txt", Line: &line}},
+				Content: []eventstream.ToolCallContent{{
 					Type:    "diff",
 					Path:    "child.txt",
 					NewText: "new child text\n",
@@ -833,15 +832,15 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 			ScopeID:    "task-1",
 			ParentTool: parentTool,
 			Delivery:   childDelivery,
-			Update: acp.ToolCallUpdate{
-				SessionUpdate: acp.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "child-command-1",
 				Title:         &childCommandTitle,
 				Status:        &status,
-				Content: []acp.ToolCallContent{{
+				Content: []eventstream.ToolCallContent{{
 					Type:       "terminal",
 					TerminalID: "child-terminal-1",
-					Content:    acp.TextContent{Type: "text", Text: "nested output\n"},
+					Content:    eventstream.TextContent{Type: "text", Text: "nested output\n"},
 				}},
 			},
 		},
@@ -852,9 +851,9 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 			ScopeID:    "task-1",
 			ParentTool: parentTool,
 			Delivery:   childDelivery,
-			Update: acp.PlanUpdate{
-				SessionUpdate: acp.UpdatePlan,
-				Entries: []acp.PlanEntry{{
+			Update: eventstream.PlanUpdate{
+				SessionUpdate: eventstream.UpdatePlan,
+				Entries: []eventstream.PlanEntry{{
 					Content: "inspect child output",
 					Status:  "in_progress",
 				}},
@@ -868,10 +867,10 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 			ParentTool: parentTool,
 			Delivery:   childDelivery,
 			Final:      true,
-			Update: acp.ContentChunk{
-				SessionUpdate: acp.UpdateAgentMessage,
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
 				MessageID:     "child-message-final",
-				Content:       acp.TextContent{Type: "text", Text: "child final"},
+				Content:       eventstream.TextContent{Type: "text", Text: "child final"},
 			},
 		},
 		{
@@ -888,8 +887,8 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 		{
 			Kind:      eventstream.KindSessionUpdate,
 			SessionID: "session-1",
-			Update: acp.ToolCallUpdate{
-				SessionUpdate: acp.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "spawn-1",
 				Status:        &completed,
 				Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{
@@ -961,25 +960,25 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 	}
 }
 
-func countPlanNotifications(notifications []acp.SessionNotification) int {
+func countPlanNotifications(notifications []eventstream.SessionNotification) int {
 	count := 0
 	for _, notification := range notifications {
-		if _, ok := notification.Update.(acp.PlanUpdate); ok {
+		if _, ok := notification.Update.(eventstream.PlanUpdate); ok {
 			count++
 		}
 	}
 	return count
 }
 
-func countToolCallNotifications(notifications []acp.SessionNotification, toolCallID string) int {
+func countToolCallNotifications(notifications []eventstream.SessionNotification, toolCallID string) int {
 	count := 0
 	for _, notification := range notifications {
 		switch update := notification.Update.(type) {
-		case acp.ToolCall:
+		case eventstream.ToolCall:
 			if strings.TrimSpace(update.ToolCallID) == toolCallID {
 				count++
 			}
-		case acp.ToolCallUpdate:
+		case eventstream.ToolCallUpdate:
 			if strings.TrimSpace(update.ToolCallID) == toolCallID {
 				count++
 			}
@@ -988,24 +987,24 @@ func countToolCallNotifications(notifications []acp.SessionNotification, toolCal
 	return count
 }
 
-func hasCompletedToolUpdate(notifications []acp.SessionNotification, toolCallID string) bool {
+func hasCompletedToolUpdate(notifications []eventstream.SessionNotification, toolCallID string) bool {
 	for _, notification := range notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
-		if ok && strings.TrimSpace(update.ToolCallID) == toolCallID && update.Status != nil && *update.Status == acp.ToolStatusCompleted {
+		update, ok := notification.Update.(eventstream.ToolCallUpdate)
+		if ok && strings.TrimSpace(update.ToolCallID) == toolCallID && update.Status != nil && *update.Status == eventstream.ToolStatusCompleted {
 			return true
 		}
 	}
 	return false
 }
 
-func hasTerminalExitForTool(notifications []acp.SessionNotification, toolCallID string) bool {
+func hasTerminalExitForTool(notifications []eventstream.SessionNotification, toolCallID string) bool {
 	return countTerminalExitsForTool(notifications, toolCallID) > 0
 }
 
-func countTerminalExitsForTool(notifications []acp.SessionNotification, toolCallID string) int {
+func countTerminalExitsForTool(notifications []eventstream.SessionNotification, toolCallID string) int {
 	count := 0
 	for _, notification := range notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
+		update, ok := notification.Update.(eventstream.ToolCallUpdate)
 		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
 			continue
 		}

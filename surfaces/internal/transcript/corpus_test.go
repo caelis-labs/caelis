@@ -11,7 +11,6 @@ import (
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const (
@@ -51,32 +50,32 @@ type corpusUsageUpdate struct {
 }
 
 type corpusWireEnvelope struct {
-	Kind              eventstream.Kind                 `json:"kind"`
-	Cursor            string                           `json:"cursor"`
-	EventID           string                           `json:"event_id"`
-	ProjectionID      string                           `json:"projection_id"`
-	SessionID         string                           `json:"session_id"`
-	HandleID          string                           `json:"handle_id"`
-	RunID             string                           `json:"run_id"`
-	TurnID            string                           `json:"turn_id"`
-	Scope             eventstream.Scope                `json:"scope"`
-	ScopeID           string                           `json:"scope_id"`
-	Actor             string                           `json:"actor"`
-	ParticipantID     string                           `json:"participant_id"`
-	Final             bool                             `json:"final"`
-	ParentTool        *eventstream.ParentToolRelation  `json:"parent_tool"`
-	Delivery          *eventstream.Delivery            `json:"delivery"`
-	ApprovalRequestID eventstream.ApprovalRequestID    `json:"approval_request_id"`
-	Update            json.RawMessage                  `json:"update"`
-	Permission        *schema.RequestPermissionRequest `json:"permission"`
-	Notice            string                           `json:"notice"`
-	NoticeKind        eventstream.NoticeKind           `json:"notice_kind"`
-	ApprovalReview    *eventstream.ApprovalReview      `json:"approval_review"`
-	Participant       *eventstream.Participant         `json:"participant"`
-	Lifecycle         *eventstream.Lifecycle           `json:"lifecycle"`
-	Meta              map[string]any                   `json:"_meta"`
-	Error             string                           `json:"error"`
-	Position          corpusWirePosition               `json:"position"`
+	Kind              eventstream.Kind                      `json:"kind"`
+	Cursor            string                                `json:"cursor"`
+	EventID           string                                `json:"event_id"`
+	ProjectionID      string                                `json:"projection_id"`
+	SessionID         string                                `json:"session_id"`
+	HandleID          string                                `json:"handle_id"`
+	RunID             string                                `json:"run_id"`
+	TurnID            string                                `json:"turn_id"`
+	Scope             eventstream.Scope                     `json:"scope"`
+	ScopeID           string                                `json:"scope_id"`
+	Actor             string                                `json:"actor"`
+	ParticipantID     string                                `json:"participant_id"`
+	Final             bool                                  `json:"final"`
+	ParentTool        *eventstream.ParentToolRelation       `json:"parent_tool"`
+	Delivery          *eventstream.Delivery                 `json:"delivery"`
+	ApprovalRequestID eventstream.ApprovalRequestID         `json:"approval_request_id"`
+	Update            json.RawMessage                       `json:"update"`
+	Permission        *eventstream.RequestPermissionRequest `json:"permission"`
+	Notice            string                                `json:"notice"`
+	NoticeKind        eventstream.NoticeKind                `json:"notice_kind"`
+	ApprovalReview    *eventstream.ApprovalReview           `json:"approval_review"`
+	Participant       *eventstream.Participant              `json:"participant"`
+	Lifecycle         *eventstream.Lifecycle                `json:"lifecycle"`
+	Meta              map[string]any                        `json:"_meta"`
+	Error             string                                `json:"error"`
+	Position          corpusWirePosition                    `json:"position"`
 }
 
 type corpusWirePosition struct {
@@ -172,31 +171,31 @@ func decodeTranscriptCorpusEnvelope(t *testing.T, raw json.RawMessage) decodedCo
 		t.Fatalf("decode update discriminator: %v", err)
 	}
 	switch discriminator.SessionUpdate {
-	case schema.UpdateUserMessage, schema.UpdateAgentMessage, schema.UpdateAgentThought, schema.UpdateCompact:
+	case eventstream.UpdateUserMessage, eventstream.UpdateAgentMessage, eventstream.UpdateAgentThought, eventstream.UpdateCompact:
 		decodeCorpusUpdate(t, wire.Update, &decoded.Envelope.Update)
-	case schema.UpdateToolCall:
-		var update schema.ToolCall
+	case eventstream.UpdateToolCall:
+		var update eventstream.ToolCall
 		decodeCorpusRaw(t, wire.Update, &update)
 		decoded.Envelope.Update = update
-	case schema.UpdateToolCallInfo:
-		var update schema.ToolCallUpdate
+	case eventstream.UpdateToolCallInfo:
+		var update eventstream.ToolCallUpdate
 		decodeCorpusRaw(t, wire.Update, &update)
 		decoded.Envelope.Update = update
-	case schema.UpdatePlan:
-		var update schema.PlanUpdate
+	case eventstream.UpdatePlan:
+		var update eventstream.PlanUpdate
 		decodeCorpusRaw(t, wire.Update, &update)
 		decoded.Envelope.Update = update
-	case schema.UpdateUsage:
+	case eventstream.UpdateUsage:
 		var usage corpusUsageUpdate
 		decodeCorpusRaw(t, wire.Update, &usage)
 		decoded.Usage = &usage
-		decoded.Envelope.Update = schema.UsageUpdate{
-			SessionUpdate: schema.UpdateUsage,
+		decoded.Envelope.Update = eventstream.UsageUpdate{
+			SessionUpdate: eventstream.UpdateUsage,
 			Size:          parseCorpusUint64(t, usage.Size),
 			Used:          parseCorpusUint64(t, usage.Used),
 		}
 	default:
-		decoded.Envelope.Update = schema.RawUpdate{
+		decoded.Envelope.Update = eventstream.RawUpdate{
 			SessionUpdate: discriminator.SessionUpdate,
 			Raw:           append(json.RawMessage(nil), wire.Update...),
 		}
@@ -204,9 +203,9 @@ func decodeTranscriptCorpusEnvelope(t *testing.T, raw json.RawMessage) decodedCo
 	return decoded
 }
 
-func decodeCorpusUpdate(t *testing.T, raw json.RawMessage, target *schema.Update) {
+func decodeCorpusUpdate(t *testing.T, raw json.RawMessage, target *eventstream.Update) {
 	t.Helper()
-	var update schema.ContentChunk
+	var update eventstream.ContentChunk
 	decodeCorpusRaw(t, raw, &update)
 	*target = update
 }
@@ -400,8 +399,8 @@ func (s *corpusTranscriptState) reduceTool(env eventstream.Envelope, event Event
 		item = cloneCorpusMap(s.items[index])
 	} else {
 		item = corpusOrigin(env)
-		item["content"] = []schema.ToolCallContent{}
-		item["locations"] = []schema.ToolCallLocation{}
+		item["content"] = []eventstream.ToolCallContent{}
+		item["locations"] = []eventstream.ToolCallLocation{}
 	}
 	item["cursor"] = env.Cursor
 	if !parentObserver {
@@ -428,11 +427,11 @@ func (s *corpusTranscriptState) reduceTool(env eventstream.Envelope, event Event
 	if rawOutput, ok := event.Meta[corpusRawOutputKey]; ok && rawOutput != nil {
 		item["rawOutput"] = rawOutput
 	}
-	if content, ok := event.Meta[corpusContentKey].([]schema.ToolCallContent); ok && len(content) > 0 {
-		current, _ := item["content"].([]schema.ToolCallContent)
+	if content, ok := event.Meta[corpusContentKey].([]eventstream.ToolCallContent); ok && len(content) > 0 {
+		current, _ := item["content"].([]eventstream.ToolCallContent)
 		item["content"] = append(current, content...)
 	}
-	if locations, ok := event.Meta[corpusLocationsKey].([]schema.ToolCallLocation); ok && len(locations) > 0 {
+	if locations, ok := event.Meta[corpusLocationsKey].([]eventstream.ToolCallLocation); ok && len(locations) > 0 {
 		item["locations"] = locations
 	}
 	if terminalInfo, ok := metautil.TerminalInfo(event.Meta); ok {
@@ -512,8 +511,8 @@ func corpusToolEvent(input ToolProjectionInput, status string, isErr bool) Event
 	}
 	meta[corpusRawInputKey] = input.RawInput
 	meta[corpusRawOutputKey] = input.RawOutput
-	meta[corpusContentKey] = append([]schema.ToolCallContent(nil), input.Content...)
-	meta[corpusLocationsKey] = append([]schema.ToolCallLocation(nil), input.Locations...)
+	meta[corpusContentKey] = append([]eventstream.ToolCallContent(nil), input.Content...)
+	meta[corpusLocationsKey] = append([]eventstream.ToolCallLocation(nil), input.Locations...)
 	if exitCode, ok := rawExitCode(RawMap(input.RawOutput)); ok && exitCode > 0 {
 		isErr = true
 	}

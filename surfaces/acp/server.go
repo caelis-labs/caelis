@@ -12,8 +12,8 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
-	protocolacp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // serverMaxFrameSize accommodates the product's 32 MB decoded aggregate image
@@ -280,7 +280,7 @@ func (c *serverConn) handleNotification(ctx context.Context, method string, para
 	}
 }
 
-func (c *serverConn) SessionUpdate(_ context.Context, notification protocolacp.SessionNotification) error {
+func (c *serverConn) SessionUpdate(_ context.Context, notification eventstream.SessionNotification) error {
 	rpc, err := c.connection(c.lifecycle)
 	if err != nil {
 		return err
@@ -325,16 +325,16 @@ func (c *serverConn) emitAvailableCommands(ctx context.Context, handler commandP
 		return
 	}
 	raw, err := json.Marshal(acpsdk.SessionAvailableCommandsUpdate{
-		SessionUpdate:     protocolacp.UpdateAvailableCmds,
+		SessionUpdate:     eventstream.UpdateAvailableCmds,
 		AvailableCommands: cmds,
 	})
 	if err != nil {
 		return
 	}
-	_ = c.SessionUpdate(ctx, protocolacp.SessionNotification{
+	_ = c.SessionUpdate(ctx, eventstream.SessionNotification{
 		SessionID: sessionID,
-		Update: protocolacp.RawUpdate{
-			SessionUpdate: protocolacp.UpdateAvailableCmds,
+		Update: eventstream.RawUpdate{
+			SessionUpdate: eventstream.UpdateAvailableCmds,
 			Raw:           raw,
 		},
 	})
@@ -362,7 +362,7 @@ type serverPromptCallbacks struct {
 	conn *serverConn
 }
 
-func (c serverPromptCallbacks) SessionUpdate(ctx context.Context, req protocolacp.SessionNotification) error {
+func (c serverPromptCallbacks) SessionUpdate(ctx context.Context, req eventstream.SessionNotification) error {
 	return c.conn.SessionUpdate(ctx, req)
 }
 

@@ -11,7 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/internal/evalharness"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type projectionTraceEntry struct {
@@ -30,15 +29,15 @@ func projectionTrace(envs []eventstream.Envelope) []projectionTraceEntry {
 			Kind:       string(env.Kind),
 			UpdateType: eventstream.UpdateType(env.Update),
 		}
-		if chunk, ok := env.Update.(schema.ContentChunk); ok {
+		if chunk, ok := env.Update.(eventstream.ContentChunk); ok {
 			entry.Text = session.ExtractProtocolText(chunk.Content)
 		}
-		if call, ok := env.Update.(schema.ToolCall); env.Kind == eventstream.KindSessionUpdate && ok {
+		if call, ok := env.Update.(eventstream.ToolCall); env.Kind == eventstream.KindSessionUpdate && ok {
 			entry.ToolCallID = call.ToolCallID
 			entry.ToolCallName = call.Kind
 			entry.ToolCallStatus = call.Status
 		}
-		if update, ok := eventstream.CloneUpdate(env.Update).(schema.ToolCallUpdate); env.Kind == eventstream.KindSessionUpdate && ok {
+		if update, ok := eventstream.CloneUpdate(env.Update).(eventstream.ToolCallUpdate); env.Kind == eventstream.KindSessionUpdate && ok {
 			entry.ToolCallID = update.ToolCallID
 			entry.ToolCallName = stringPtrValue(update.Kind)
 			entry.ToolCallStatus = stringPtrValue(update.Status)
@@ -120,10 +119,10 @@ func TestRegressionProjectionGoldenReasoning(t *testing.T) {
 	if len(trace) != 2 {
 		t.Fatalf("expected thought + answer projections, got %d: %#v", len(trace), trace)
 	}
-	if trace[0].UpdateType != schema.UpdateAgentThought || trace[0].Text != "internal chain of thought" {
+	if trace[0].UpdateType != eventstream.UpdateAgentThought || trace[0].Text != "internal chain of thought" {
 		t.Fatalf("thought trace = %#v, want reasoning thought", trace[0])
 	}
-	if trace[1].UpdateType != schema.UpdateAgentMessage || trace[1].Text != "the answer" {
+	if trace[1].UpdateType != eventstream.UpdateAgentMessage || trace[1].Text != "the answer" {
 		t.Fatalf("answer trace = %#v, want final answer", trace[1])
 	}
 }
@@ -162,9 +161,9 @@ func TestRegressionProjectionGoldenMultiTool(t *testing.T) {
 	toolUpdateCount := 0
 	for _, entry := range trace {
 		switch entry.UpdateType {
-		case schema.UpdateToolCall:
+		case eventstream.UpdateToolCall:
 			toolCallCount++
-		case schema.UpdateToolCallInfo:
+		case eventstream.UpdateToolCallInfo:
 			toolUpdateCount++
 		}
 	}

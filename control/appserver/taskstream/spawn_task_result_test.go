@@ -5,11 +5,10 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestSpawnTaskResultsFromEnvelopeUsesTypedSingularParent(t *testing.T) {
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	env := eventstream.Envelope{
 		Kind:  eventstream.KindSessionUpdate,
 		Scope: eventstream.ScopeMain,
@@ -17,8 +16,8 @@ func TestSpawnTaskResultsFromEnvelopeUsesTypedSingularParent(t *testing.T) {
 			ToolCallID: "spawn-alpha",
 			ToolName:   "Spawn",
 		},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "wait-alpha",
 			Status:        &completed,
 			RawInput:      map[string]any{"action": "wait", "handle": "alpha"},
@@ -30,7 +29,7 @@ func TestSpawnTaskResultsFromEnvelopeUsesTypedSingularParent(t *testing.T) {
 	}
 	want := []SpawnTaskResult{{
 		ParentCallID: "spawn-alpha",
-		Status:       schema.ToolStatusCompleted,
+		Status:       eventstream.ToolStatusCompleted,
 		RawOutput: map[string]any{
 			"handle": "alpha", "parent_call": "spawn-alpha", "parent_tool": "Spawn",
 			"state": "completed", "target_kind": "subagent", "final_message": "alpha done",
@@ -40,7 +39,7 @@ func TestSpawnTaskResultsFromEnvelopeUsesTypedSingularParent(t *testing.T) {
 		t.Fatalf("SpawnTaskResultsFromEnvelope() = %#v, want %#v", got, want)
 	}
 
-	readUpdate := env.Update.(schema.ToolCallUpdate)
+	readUpdate := env.Update.(eventstream.ToolCallUpdate)
 	readUpdate.ToolCallID = "read-alpha"
 	readUpdate.RawInput = map[string]any{"action": "read", "handle": "alpha"}
 	env.Update = readUpdate
@@ -62,7 +61,7 @@ func TestSpawnTaskResultsFromEnvelopeUsesTypedSingularParent(t *testing.T) {
 func TestSpawnTaskResultsFromEnvelopeExpandsUnreadTurnFinalResponses(t *testing.T) {
 	t.Parallel()
 
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	env := eventstream.Envelope{
 		Kind:  eventstream.KindSessionUpdate,
 		Scope: eventstream.ScopeMain,
@@ -70,8 +69,8 @@ func TestSpawnTaskResultsFromEnvelopeExpandsUnreadTurnFinalResponses(t *testing.
 			ToolCallID: "spawn-alpha",
 			ToolName:   "Spawn",
 		},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "read-alpha",
 			Status:        &completed,
 			RawInput:      map[string]any{"action": "read", "handle": "alpha"},
@@ -87,7 +86,7 @@ func TestSpawnTaskResultsFromEnvelopeExpandsUnreadTurnFinalResponses(t *testing.
 	}
 
 	got := SpawnTaskResultsFromEnvelope(env)
-	if len(got) != 2 || got[0].Status != schema.ToolStatusCompleted || got[1].Status != schema.ToolStatusCompleted {
+	if len(got) != 2 || got[0].Status != eventstream.ToolStatusCompleted || got[1].Status != eventstream.ToolStatusCompleted {
 		t.Fatalf("SpawnTaskResultsFromEnvelope() = %#v, want two completed Turn results", got)
 	}
 	if got[0].RawOutput["turn_id"] != "task-1:1" || got[0].RawOutput["final_message"] != "\nfirst done\n" ||
@@ -102,7 +101,7 @@ func TestSpawnTaskResultsFromEnvelopeExpandsUnreadTurnFinalResponses(t *testing.
 func TestSpawnTaskResultsFromEnvelopeKeepsCurrentFailureAfterUnreadFinals(t *testing.T) {
 	t.Parallel()
 
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	env := eventstream.Envelope{
 		Kind:  eventstream.KindSessionUpdate,
 		Scope: eventstream.ScopeMain,
@@ -110,8 +109,8 @@ func TestSpawnTaskResultsFromEnvelopeKeepsCurrentFailureAfterUnreadFinals(t *tes
 			ToolCallID: "spawn-alpha",
 			ToolName:   "Spawn",
 		},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "read-alpha",
 			Status:        &completed,
 			RawInput:      map[string]any{"action": "read", "handle": "alpha"},
@@ -127,7 +126,7 @@ func TestSpawnTaskResultsFromEnvelopeKeepsCurrentFailureAfterUnreadFinals(t *tes
 	}
 
 	got := SpawnTaskResultsFromEnvelope(env)
-	if len(got) != 2 || got[0].Status != schema.ToolStatusCompleted || got[1].Status != schema.ToolStatusFailed {
+	if len(got) != 2 || got[0].Status != eventstream.ToolStatusCompleted || got[1].Status != eventstream.ToolStatusFailed {
 		t.Fatalf("SpawnTaskResultsFromEnvelope() = %#v, want prior completion plus current failure", got)
 	}
 	if got[1].RawOutput["turn_id"] != "task-1:2" || got[1].RawOutput["error"] != "second Turn failed" {
@@ -139,12 +138,12 @@ func TestSpawnTaskResultsFromEnvelopeKeepsCurrentFailureAfterUnreadFinals(t *tes
 }
 
 func TestSpawnTaskResultsFromEnvelopeFiltersBatchItems(t *testing.T) {
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	env := eventstream.Envelope{
 		Kind:  eventstream.KindSessionUpdate,
 		Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "wait-batch",
 			Status:        &completed,
 			RawInput:      map[string]any{"action": "wait", "handle": "alpha,beta,gamma"},
@@ -184,21 +183,21 @@ func TestSpawnTaskResultsFromEnvelopeFiltersBatchItems(t *testing.T) {
 		},
 	}
 	got := SpawnTaskResultsFromEnvelope(env)
-	if len(got) != 4 || got[0].ParentCallID != "spawn-alpha" || got[0].Status != schema.ToolStatusCompleted ||
-		got[1].ParentCallID != "spawn-gamma" || got[1].Status != schema.ToolStatusFailed ||
+	if len(got) != 4 || got[0].ParentCallID != "spawn-alpha" || got[0].Status != eventstream.ToolStatusCompleted ||
+		got[1].ParentCallID != "spawn-gamma" || got[1].Status != eventstream.ToolStatusFailed ||
 		got[2].ParentCallID != "spawn-alpha" || got[2].RawOutput["handle"] != "delta" ||
-		got[3].ParentCallID != "spawn-epsilon" || got[3].Status != schema.ToolStatusFailed {
+		got[3].ParentCallID != "spawn-epsilon" || got[3].Status != eventstream.ToolStatusFailed {
 		t.Fatalf("SpawnTaskResultsFromEnvelope() = %#v, want alpha/gamma/delta plus failed unknown-outcome epsilon", got)
 	}
 }
 
 func TestSpawnTaskResultsFromEnvelopeDoesNotDeduplicateMissingHandles(t *testing.T) {
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	env := eventstream.Envelope{
 		Kind:  eventstream.KindSessionUpdate,
 		Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "wait-batch",
 			Status:        &completed,
 			RawInput:      map[string]any{"action": "wait"},

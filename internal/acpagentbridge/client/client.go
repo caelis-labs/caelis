@@ -16,10 +16,10 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	sdkstdio "github.com/caelis-labs/acp-go-sdk/transport/stdio"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const maxFrameSize = 64 * 1024 * 1024
@@ -570,7 +570,7 @@ func decodeUpdate(raw json.RawMessage) (Update, error) {
 	case UpdateAvailableCmds, UpdateConfigOption, UpdateCurrentMode, UpdateSessionInfo:
 		return decodeStandardSessionStateUpdate(raw, probe.SessionUpdate)
 	default:
-		return schema.DecodeUpdateJSON(raw)
+		return eventstream.DecodeUpdateJSON(raw)
 	}
 }
 

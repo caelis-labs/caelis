@@ -7,8 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // applyObservedSpawnResults closes Spawn presentation owners from the same
@@ -32,7 +32,7 @@ func (m *Model) applyObservedSpawnResults(results []taskstream.SpawnTaskResult) 
 		}
 		state := display.MapString(result.RawOutput, "state")
 		output := display.SubagentTaskFinalText(state, result.RawOutput)
-		failed := strings.EqualFold(strings.TrimSpace(result.Status), schema.ToolStatusFailed)
+		failed := strings.EqualFold(strings.TrimSpace(result.Status), eventstream.ToolStatusFailed)
 		finalEvent := SubagentEvent{
 			Kind:          SEToolCall,
 			CallID:        parentCallID,

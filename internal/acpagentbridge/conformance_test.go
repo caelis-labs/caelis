@@ -19,19 +19,19 @@ import (
 	sdkchat "github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type promptRecorder struct {
 	mu       sync.Mutex
-	updates  []acp.SessionNotification
+	updates  []eventstream.SessionNotification
 	response acpsdk.RequestPermissionResponse
 }
 
@@ -45,7 +45,7 @@ func allowOncePermissionResponse() acpsdk.RequestPermissionResponse {
 	}
 }
 
-func (r *promptRecorder) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {
+func (r *promptRecorder) SessionUpdate(_ context.Context, notification eventstream.SessionNotification) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.updates = append(r.updates, notification)
@@ -56,13 +56,13 @@ func (r *promptRecorder) RequestPermission(_ context.Context, _ acpsdk.RequestPe
 	return r.response, nil
 }
 
-func (r *promptRecorder) Notifications() []acp.SessionNotification {
+func (r *promptRecorder) Notifications() []eventstream.SessionNotification {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return slices.Clone(r.updates)
 }
 
-func updateKinds(items []acp.SessionNotification) []string {
+func updateKinds(items []eventstream.SessionNotification) []string {
 	out := make([]string, 0, len(items))
 	for _, item := range items {
 		if item.Update != nil {
@@ -82,7 +82,7 @@ func TestBuiltInProjectionAndExternalIngressRoundTripShareSemantics(t *testing.T
 			Text:    "hello",
 			Message: &assistant,
 			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-				SessionUpdate: acp.UpdateAgentMessage,
+				SessionUpdate: eventstream.UpdateAgentMessage,
 				MessageID:     "message-1",
 				Meta:          map[string]any{"provider": "built-in"},
 			}},
@@ -90,27 +90,27 @@ func TestBuiltInProjectionAndExternalIngressRoundTripShareSemantics(t *testing.T
 		{
 			Type: session.EventTypeToolCall,
 			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-				SessionUpdate: acp.UpdateToolCall,
+				SessionUpdate: eventstream.UpdateToolCall,
 				ToolCallID:    "call-1",
 				Title:         "Read file",
-				Kind:          acp.ToolKindRead,
-				Status:        acp.ToolStatusPending,
+				Kind:          eventstream.ToolKindRead,
+				Status:        eventstream.ToolStatusPending,
 				RawInput:      map[string]any{"path": "README.md"},
 			}},
 		},
 		{
 			Type: session.EventTypeToolResult,
 			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-				SessionUpdate: acp.UpdateToolCallInfo,
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Status:        acp.ToolStatusCompleted,
+				Status:        eventstream.ToolStatusCompleted,
 				RawOutput:     map[string]any{"content": "done"},
 			}},
 		},
 		{
 			Type: session.EventTypePlan,
 			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-				SessionUpdate: acp.UpdatePlan,
+				SessionUpdate: eventstream.UpdatePlan,
 				Entries: []session.ProtocolPlanEntry{{
 					Content: "Run tests", Status: "in_progress", Priority: "high",
 				}},
@@ -147,32 +147,32 @@ func TestBuiltInProjectionAndExternalIngressRoundTripShareSemantics(t *testing.T
 	}
 }
 
-func externalWireRoundTrip(t *testing.T, update acp.Update) client.Update {
+func externalWireRoundTrip(t *testing.T, update eventstream.Update) client.Update {
 	t.Helper()
 	raw, err := json.Marshal(update)
 	if err != nil {
 		t.Fatalf("json.Marshal(%T) error = %v", update, err)
 	}
 	switch update.(type) {
-	case acp.ContentChunk:
+	case eventstream.ContentChunk:
 		var target client.ContentChunk
 		if err := json.Unmarshal(raw, &target); err != nil {
 			t.Fatalf("json.Unmarshal(%T) error = %v", update, err)
 		}
 		return target
-	case acp.ToolCall:
+	case eventstream.ToolCall:
 		var target client.ToolCall
 		if err := json.Unmarshal(raw, &target); err != nil {
 			t.Fatalf("json.Unmarshal(%T) error = %v", update, err)
 		}
 		return target
-	case acp.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		var target client.ToolCallUpdate
 		if err := json.Unmarshal(raw, &target); err != nil {
 			t.Fatalf("json.Unmarshal(%T) error = %v", update, err)
 		}
 		return target
-	case acp.PlanUpdate:
+	case eventstream.PlanUpdate:
 		var target client.PlanUpdate
 		if err := json.Unmarshal(raw, &target); err != nil {
 			t.Fatalf("json.Unmarshal(%T) error = %v", update, err)
@@ -230,7 +230,7 @@ func TestRuntimeAgentConformanceReplayOrdering(t *testing.T) {
 	}, rec); err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
-	if got, want := updateKinds(rec.Notifications()), []string{acp.UpdateUserMessage, acp.UpdateAgentMessage}; !slices.Equal(got, want) {
+	if got, want := updateKinds(rec.Notifications()), []string{eventstream.UpdateUserMessage, eventstream.UpdateAgentMessage}; !slices.Equal(got, want) {
 		t.Fatalf("replay update kinds = %v, want %v", got, want)
 	}
 }
@@ -249,10 +249,10 @@ func TestRuntimeAgentConformancePromptOrdering(t *testing.T) {
 		t.Fatalf("Prompt() error = %v", err)
 	}
 	kinds := updateKinds(rec.Notifications())
-	if slices.Contains(kinds, acp.UpdateUserMessage) {
+	if slices.Contains(kinds, eventstream.UpdateUserMessage) {
 		t.Fatalf("prompt update kinds = %v, live session/prompt should not echo user_message_chunk", kinds)
 	}
-	if !slices.Contains(kinds, acp.UpdateAgentMessage) {
+	if !slices.Contains(kinds, eventstream.UpdateAgentMessage) {
 		t.Fatalf("prompt update kinds = %v, want assistant message update", kinds)
 	}
 }
@@ -274,10 +274,10 @@ func TestRuntimeAgentConformancePromptWithImageDoesNotEchoUserMessage(t *testing
 		t.Fatalf("Prompt() error = %v", err)
 	}
 	kinds := updateKinds(rec.Notifications())
-	if slices.Contains(kinds, acp.UpdateUserMessage) {
+	if slices.Contains(kinds, eventstream.UpdateUserMessage) {
 		t.Fatalf("prompt update kinds = %v, image prompts should not echo user text back to ACP clients", kinds)
 	}
-	if !slices.Contains(kinds, acp.UpdateAgentMessage) {
+	if !slices.Contains(kinds, eventstream.UpdateAgentMessage) {
 		t.Fatalf("prompt update kinds = %v, want assistant message update", kinds)
 	}
 }
@@ -328,11 +328,11 @@ func TestRuntimeAgentConformanceEmitsToolCallBeforeToolUpdate(t *testing.T) {
 	firstUpdate := -1
 	for i, notification := range rec.Notifications() {
 		switch update := notification.Update.(type) {
-		case acp.ToolCall:
+		case eventstream.ToolCall:
 			if update.ToolCallID == "call-echo" && firstCall < 0 {
 				firstCall = i
 			}
-		case acp.ToolCallUpdate:
+		case eventstream.ToolCallUpdate:
 			if update.ToolCallID == "call-echo" && firstUpdate < 0 {
 				firstUpdate = i
 			}
@@ -375,11 +375,11 @@ func TestRuntimeAgentConformanceEmitsRunCommandToolCallBeforeTerminalUpdates(t *
 	firstUpdate := -1
 	for i, notification := range rec.Notifications() {
 		switch update := notification.Update.(type) {
-		case acp.ToolCall:
+		case eventstream.ToolCall:
 			if update.ToolCallID == "call-shell" && firstCall < 0 {
 				firstCall = i
 			}
-		case acp.ToolCallUpdate:
+		case eventstream.ToolCallUpdate:
 			if update.ToolCallID == "call-shell" && firstUpdate < 0 {
 				firstUpdate = i
 			}
@@ -648,14 +648,14 @@ func (m *runCommandThenTextModel) Generate(context.Context, *model.Request) iter
 	}
 }
 
-func agentMessageTexts(notifications []acp.SessionNotification) []string {
+func agentMessageTexts(notifications []eventstream.SessionNotification) []string {
 	out := make([]string, 0, len(notifications))
 	for _, notification := range notifications {
-		chunk, ok := notification.Update.(acp.ContentChunk)
-		if !ok || chunk.SessionUpdate != acp.UpdateAgentMessage {
+		chunk, ok := notification.Update.(eventstream.ContentChunk)
+		if !ok || chunk.SessionUpdate != eventstream.UpdateAgentMessage {
 			continue
 		}
-		content, ok := chunk.Content.(acp.TextContent)
+		content, ok := chunk.Content.(eventstream.TextContent)
 		if !ok {
 			continue
 		}

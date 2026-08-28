@@ -17,7 +17,6 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
@@ -504,8 +503,8 @@ func TestUsageUpdateUsesDecimalStringsBeyondJavaScriptSafeInteger(t *testing.T) 
 		value := value
 		t.Run(strconv.FormatUint(value, 10), func(t *testing.T) {
 			envelope := baseEnvelope(eventstream.KindSessionUpdate)
-			envelope.Update = schema.UsageUpdate{
-				SessionUpdate: schema.UpdateUsage, Size: value, Used: value,
+			envelope.Update = eventstream.UsageUpdate{
+				SessionUpdate: eventstream.UpdateUsage, Size: value, Used: value,
 			}
 			raw := mustMarshalEnvelope(t, envelope)
 			var root struct {
@@ -531,8 +530,8 @@ func TestUsageUpdateUsesDecimalStringsBeyondJavaScriptSafeInteger(t *testing.T) 
 
 func TestControlV1UsageCostBridgesStandardAndLegacyFields(t *testing.T) {
 	envelope := baseEnvelope(eventstream.KindSessionUpdate)
-	envelope.Update = schema.UsageUpdate{
-		SessionUpdate: schema.UpdateUsage,
+	envelope.Update = eventstream.UsageUpdate{
+		SessionUpdate: eventstream.UpdateUsage,
 		Size:          200000,
 		Used:          42000,
 		Cost:          &acpsdk.Cost{Amount: 0.47, Currency: "USD"},
@@ -588,7 +587,7 @@ func TestControlV1UsageCostBridgesStandardAndLegacyFields(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			usage, ok := decoded.Update.(schema.UsageUpdate)
+			usage, ok := decoded.Update.(eventstream.UsageUpdate)
 			if !ok || usage.Cost == nil || math.Abs(usage.Cost.Amount-test.wantAmount) > 1e-12 || usage.Cost.Currency != test.wantCurrency {
 				t.Fatalf("legacy Control v1 cost = %#v (%T), want amount=%v currency=%q", decoded.Update, decoded.Update, test.wantAmount, test.wantCurrency)
 			}
@@ -665,14 +664,14 @@ func TestUint64DecimalSchemasRejectOverflowAndZeroSequence(t *testing.T) {
 
 func TestUnsafeExtensionIntegerMustUseDecimalString(t *testing.T) {
 	envelope := baseEnvelope(eventstream.KindSessionUpdate)
-	envelope.Update = schema.RawUpdate{
+	envelope.Update = eventstream.RawUpdate{
 		SessionUpdate: "vendor/custom",
 		Raw:           json.RawMessage(`{"sessionUpdate":"vendor/custom","unsafe":9007199254740993}`),
 	}
 	if _, err := MarshalEnvelope(envelope); err == nil {
 		t.Fatal("unsafe extension JSON number was emitted")
 	}
-	envelope.Update = schema.RawUpdate{
+	envelope.Update = eventstream.RawUpdate{
 		SessionUpdate: "vendor/custom",
 		Raw:           json.RawMessage(`{"sessionUpdate":"vendor/custom","unsafe":"9007199254740993"}`),
 	}

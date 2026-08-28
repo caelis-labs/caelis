@@ -8,11 +8,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type promptCallbacks interface {
-	SessionUpdate(context.Context, schema.SessionNotification) error
+	SessionUpdate(context.Context, eventstream.SessionNotification) error
 	RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error)
 }
 

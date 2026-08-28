@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	protocolacp "github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 func TestServerRoutesSessionSteeringWithoutPromptCallbacks(t *testing.T) {
@@ -16,7 +16,7 @@ func TestServerRoutesSessionSteeringWithoutPromptCallbacks(t *testing.T) {
 	request := SessionSteeringRequest{
 		SessionID: "session-1",
 		Prompt: []json.RawMessage{
-			mustMarshalTestRaw(protocolacp.TextContent{Type: "text", Text: "adjust the plan"}),
+			mustMarshalTestRaw(eventstream.TextContent{Type: "text", Text: "adjust the plan"}),
 		},
 		Meta: map[string]json.RawMessage{
 			"steering": json.RawMessage(`{"idleBehavior":"promptRequired","future":42}`),

@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestNormalizeInboundUpdateConsumesTerminalOutputCompatibilityAlias(t *testing.T) {
@@ -76,7 +76,7 @@ func TestNormalizeInboundUpdateExtendsGrokListWithoutForgingToolIdentity(t *test
 	meta := grokListMeta(true)
 
 	normalized, ok := NormalizeInboundUpdate(ToolCall{
-		SessionUpdate: schema.UpdateToolCall,
+		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    "list-1",
 		Title:         "List `docs`",
 		RawInput:      input,
@@ -85,7 +85,7 @@ func TestNormalizeInboundUpdateExtendsGrokListWithoutForgingToolIdentity(t *test
 	if !ok {
 		t.Fatalf("NormalizeInboundUpdate() type = %T, want ToolCall", normalized)
 	}
-	if normalized.Kind != schema.ToolKindRead {
+	if normalized.Kind != eventstream.ToolKindRead {
 		t.Fatalf("normalized kind = %q, want compatibility read kind", normalized.Kind)
 	}
 	if normalized.Title != "List `docs`" {
@@ -110,28 +110,28 @@ func TestNormalizeInboundUpdateRestoresGrokStandardKindWithoutForgingToolIdentit
 		provider map[string]any
 		wantKind string
 	}{
-		{name: "read", provider: grokToolMeta("read_file", schema.ToolKindRead, "Read", true), wantKind: schema.ToolKindRead},
-		{name: "search", provider: grokToolMeta("grep", schema.ToolKindSearch, "Search", true), wantKind: schema.ToolKindSearch},
-		{name: "edit", provider: grokToolMeta("search_replace", schema.ToolKindEdit, "Edit", false), wantKind: schema.ToolKindEdit},
-		{name: "execute", provider: grokToolMeta("run_terminal_command", schema.ToolKindExecute, "Run Command", false), wantKind: schema.ToolKindExecute},
+		{name: "read", provider: grokToolMeta("read_file", eventstream.ToolKindRead, "Read", true), wantKind: eventstream.ToolKindRead},
+		{name: "search", provider: grokToolMeta("grep", eventstream.ToolKindSearch, "Search", true), wantKind: eventstream.ToolKindSearch},
+		{name: "edit", provider: grokToolMeta("search_replace", eventstream.ToolKindEdit, "Edit", false), wantKind: eventstream.ToolKindEdit},
+		{name: "execute", provider: grokToolMeta("run_terminal_command", eventstream.ToolKindExecute, "Run Command", false), wantKind: eventstream.ToolKindExecute},
 		{name: "wrong namespace", provider: map[string]any{
-			"namespace": "other", "kind": schema.ToolKindExecute, "read_only": false,
+			"namespace": "other", "kind": eventstream.ToolKindExecute, "read_only": false,
 		}},
 		{name: "missing read only", provider: map[string]any{
-			"namespace": xAIToolNamespace, "kind": schema.ToolKindExecute,
+			"namespace": xAIToolNamespace, "kind": eventstream.ToolKindExecute,
 		}},
-		{name: "execute marked read only", provider: grokToolMeta("run_terminal_command", schema.ToolKindExecute, "Run Command", true)},
-		{name: "read marked mutating", provider: grokToolMeta("read_file", schema.ToolKindRead, "Read", false)},
+		{name: "execute marked read only", provider: grokToolMeta("run_terminal_command", eventstream.ToolKindExecute, "Run Command", true)},
+		{name: "read marked mutating", provider: grokToolMeta("read_file", eventstream.ToolKindRead, "Read", false)},
 		{name: "unknown provider kind", provider: grokToolMeta("todo_write", "plan", "Plan", false)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			meta := map[string]any{xAIToolMetaKey: tt.provider}
 			normalized := NormalizeInboundUpdate(ToolCall{
-				SessionUpdate: schema.UpdateToolCall,
+				SessionUpdate: eventstream.UpdateToolCall,
 				ToolCallID:    "grok-tool-1",
 				Title:         "provider title",
-				Status:        schema.ToolStatusInProgress,
+				Status:        eventstream.ToolStatusInProgress,
 				Meta:          meta,
 			}).(ToolCall)
 			if normalized.Kind != tt.wantKind {
@@ -146,10 +146,10 @@ func TestNormalizeInboundUpdateRestoresGrokStandardKindWithoutForgingToolIdentit
 		})
 	}
 
-	providerMeta := map[string]any{xAIToolMetaKey: grokToolMeta("run_terminal_command", schema.ToolKindExecute, "Run Command", false)}
-	for _, explicitKind := range []string{schema.ToolKindOther, schema.ToolKindSearch} {
+	providerMeta := map[string]any{xAIToolMetaKey: grokToolMeta("run_terminal_command", eventstream.ToolKindExecute, "Run Command", false)}
+	for _, explicitKind := range []string{eventstream.ToolKindOther, eventstream.ToolKindSearch} {
 		explicit := NormalizeInboundUpdate(ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "specific-1",
 			Kind:          explicitKind,
 			Meta:          providerMeta,
@@ -159,14 +159,14 @@ func TestNormalizeInboundUpdateRestoresGrokStandardKindWithoutForgingToolIdentit
 		}
 	}
 
-	explicitOther := schema.ToolKindOther
+	explicitOther := eventstream.ToolKindOther
 	update := NormalizeInboundUpdate(ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    "specific-update-1",
 		Kind:          &explicitOther,
 		Meta:          providerMeta,
 	}).(ToolCallUpdate)
-	if update.Kind == nil || *update.Kind != schema.ToolKindOther {
+	if update.Kind == nil || *update.Kind != eventstream.ToolKindOther {
 		t.Fatalf("explicit update kind = %v, want other to win over provider execute", update.Kind)
 	}
 }
@@ -181,37 +181,37 @@ func TestNormalizeInboundUpdateGrokListCompatibilityRefinesGenericOtherWithoutOv
 		wantKind string
 		wantVerb string
 	}{
-		{name: "missing standard kind", meta: grokListMeta(true), wantKind: schema.ToolKindRead, wantVerb: "List"},
-		{name: "generic other keeps wire category and refines display", kind: schema.ToolKindOther, meta: grokListMeta(true), wantKind: schema.ToolKindOther, wantVerb: "List"},
-		{name: "standard read keeps category and refines verb", kind: schema.ToolKindRead, meta: grokListMeta(true), wantKind: schema.ToolKindRead, wantVerb: "List"},
-		{name: "standard search wins", kind: schema.ToolKindSearch, meta: grokListMeta(true), wantKind: schema.ToolKindSearch},
-		{name: "standard edit wins", kind: schema.ToolKindEdit, meta: grokListMeta(true), wantKind: schema.ToolKindEdit},
-		{name: "standard execute wins", kind: schema.ToolKindExecute, meta: grokListMeta(true), wantKind: schema.ToolKindExecute},
-		{name: "provider says mutating", kind: schema.ToolKindOther, meta: grokListMeta(false), wantKind: schema.ToolKindOther},
-		{name: "provider read only missing", kind: schema.ToolKindOther, meta: map[string]any{xAIToolMetaKey: map[string]any{
+		{name: "missing standard kind", meta: grokListMeta(true), wantKind: eventstream.ToolKindRead, wantVerb: "List"},
+		{name: "generic other keeps wire category and refines display", kind: eventstream.ToolKindOther, meta: grokListMeta(true), wantKind: eventstream.ToolKindOther, wantVerb: "List"},
+		{name: "standard read keeps category and refines verb", kind: eventstream.ToolKindRead, meta: grokListMeta(true), wantKind: eventstream.ToolKindRead, wantVerb: "List"},
+		{name: "standard search wins", kind: eventstream.ToolKindSearch, meta: grokListMeta(true), wantKind: eventstream.ToolKindSearch},
+		{name: "standard edit wins", kind: eventstream.ToolKindEdit, meta: grokListMeta(true), wantKind: eventstream.ToolKindEdit},
+		{name: "standard execute wins", kind: eventstream.ToolKindExecute, meta: grokListMeta(true), wantKind: eventstream.ToolKindExecute},
+		{name: "provider says mutating", kind: eventstream.ToolKindOther, meta: grokListMeta(false), wantKind: eventstream.ToolKindOther},
+		{name: "provider read only missing", kind: eventstream.ToolKindOther, meta: map[string]any{xAIToolMetaKey: map[string]any{
 			"kind": "list", "namespace": xAIToolNamespace,
-		}}, wantKind: schema.ToolKindOther},
-		{name: "unrecognized provider namespace", kind: schema.ToolKindOther, meta: map[string]any{xAIToolMetaKey: map[string]any{
+		}}, wantKind: eventstream.ToolKindOther},
+		{name: "unrecognized provider namespace", kind: eventstream.ToolKindOther, meta: map[string]any{xAIToolMetaKey: map[string]any{
 			"kind": "list", "namespace": "other", "read_only": true,
-		}}, wantKind: schema.ToolKindOther},
-		{name: "explicit generic kind wins over standard provider kind", kind: schema.ToolKindOther, meta: map[string]any{xAIToolMetaKey: map[string]any{
+		}}, wantKind: eventstream.ToolKindOther},
+		{name: "explicit generic kind wins over standard provider kind", kind: eventstream.ToolKindOther, meta: map[string]any{xAIToolMetaKey: map[string]any{
 			"kind": "read", "namespace": xAIToolNamespace, "read_only": true,
-		}}, wantKind: schema.ToolKindOther},
-		{name: "provider kind is case sensitive", kind: schema.ToolKindOther, meta: map[string]any{xAIToolMetaKey: map[string]any{
+		}}, wantKind: eventstream.ToolKindOther},
+		{name: "provider kind is case sensitive", kind: eventstream.ToolKindOther, meta: map[string]any{xAIToolMetaKey: map[string]any{
 			"kind": "LIST", "namespace": xAIToolNamespace, "read_only": true,
-		}}, wantKind: schema.ToolKindOther},
-		{name: "provider kind rejects whitespace", kind: schema.ToolKindOther, meta: map[string]any{xAIToolMetaKey: map[string]any{
+		}}, wantKind: eventstream.ToolKindOther},
+		{name: "provider kind rejects whitespace", kind: eventstream.ToolKindOther, meta: map[string]any{xAIToolMetaKey: map[string]any{
 			"kind": " list ", "namespace": xAIToolNamespace, "read_only": true,
-		}}, wantKind: schema.ToolKindOther},
-		{name: "provider namespace rejects whitespace", kind: schema.ToolKindOther, meta: map[string]any{xAIToolMetaKey: map[string]any{
+		}}, wantKind: eventstream.ToolKindOther},
+		{name: "provider namespace rejects whitespace", kind: eventstream.ToolKindOther, meta: map[string]any{xAIToolMetaKey: map[string]any{
 			"kind": "list", "namespace": " grok_build ", "read_only": true,
-		}}, wantKind: schema.ToolKindOther},
-		{name: "title alone is not classification", kind: schema.ToolKindOther, wantKind: schema.ToolKindOther},
+		}}, wantKind: eventstream.ToolKindOther},
+		{name: "title alone is not classification", kind: eventstream.ToolKindOther, wantKind: eventstream.ToolKindOther},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			normalized := NormalizeInboundUpdate(ToolCall{
-				SessionUpdate: schema.UpdateToolCall,
+				SessionUpdate: eventstream.UpdateToolCall,
 				ToolCallID:    "list-1",
 				Title:         "List `docs`",
 				Kind:          tt.kind,
@@ -234,9 +234,9 @@ func TestNormalizeInboundUpdateGrokListIsIdempotentForExplicitUpdateKind(t *test
 	input := map[string]any{"target_directory": "docs"}
 	meta := grokListMeta(true)
 	meta = metautil.WithSection(meta, metautil.Display, map[string]any{"unrelated": "kept"})
-	kind := schema.ToolKindRead
+	kind := eventstream.ToolKindRead
 	update := ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    "list-1",
 		Kind:          &kind,
 		RawInput:      input,
@@ -245,7 +245,7 @@ func TestNormalizeInboundUpdateGrokListIsIdempotentForExplicitUpdateKind(t *test
 
 	first := NormalizeInboundUpdate(update).(ToolCallUpdate)
 	second := NormalizeInboundUpdate(first).(ToolCallUpdate)
-	if first.Kind == nil || *first.Kind != schema.ToolKindRead || second.Kind == nil || *second.Kind != schema.ToolKindRead {
+	if first.Kind == nil || *first.Kind != eventstream.ToolKindRead || second.Kind == nil || *second.Kind != eventstream.ToolKindRead {
 		t.Fatalf("normalized kinds = %v then %v, want explicit read preserved", first.Kind, second.Kind)
 	}
 	if explorationVerb(first.Meta) != "List" || explorationVerb(second.Meta) != "List" {
@@ -262,9 +262,9 @@ func TestNormalizeInboundUpdateGrokListIsIdempotentForExplicitUpdateKind(t *test
 func TestNormalizeInboundUpdateGrokListIsIdempotentForExplicitOtherUpdate(t *testing.T) {
 	t.Parallel()
 
-	kind := schema.ToolKindOther
+	kind := eventstream.ToolKindOther
 	update := ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    "list-other-1",
 		Kind:          &kind,
 		RawInput:      map[string]any{"variant": "ListDir", "target_directory": "docs"},
@@ -273,7 +273,7 @@ func TestNormalizeInboundUpdateGrokListIsIdempotentForExplicitOtherUpdate(t *tes
 
 	first := NormalizeInboundUpdate(update).(ToolCallUpdate)
 	second := NormalizeInboundUpdate(first).(ToolCallUpdate)
-	if first.Kind == nil || *first.Kind != schema.ToolKindOther || second.Kind == nil || *second.Kind != schema.ToolKindOther {
+	if first.Kind == nil || *first.Kind != eventstream.ToolKindOther || second.Kind == nil || *second.Kind != eventstream.ToolKindOther {
 		t.Fatalf("normalized kinds = %v then %v, want explicit other preserved", first.Kind, second.Kind)
 	}
 	if explorationVerb(first.Meta) != "List" || explorationVerb(second.Meta) != "List" {
@@ -291,7 +291,7 @@ func TestNormalizeInboundUpdateSparseKindDoesNotOverridePriorStandardKind(t *tes
 		metautil.DisplayExplorationVerb: "List",
 	})
 	normalized := NormalizeInboundUpdate(ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    "specific-1",
 		Meta:          meta,
 	}).(ToolCallUpdate)
@@ -313,13 +313,13 @@ func TestNormalizeInboundUpdateRejectsForgedExplorationVerbWithoutStrictProvider
 		metautil.DisplayExplorationVerb: "List",
 	})
 	normalized := NormalizeInboundUpdate(ToolCall{
-		SessionUpdate: schema.UpdateToolCall,
+		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    "other-1",
 		Title:         "List `docs`",
-		Kind:          schema.ToolKindOther,
+		Kind:          eventstream.ToolKindOther,
 		Meta:          meta,
 	}).(ToolCall)
-	if normalized.Kind != schema.ToolKindOther {
+	if normalized.Kind != eventstream.ToolKindOther {
 		t.Fatalf("normalized kind = %q, want other", normalized.Kind)
 	}
 	if got := explorationVerb(normalized.Meta); got != "" {

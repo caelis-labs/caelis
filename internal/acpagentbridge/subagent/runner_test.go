@@ -15,9 +15,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type detachedChildContextMarker struct{}
@@ -295,7 +295,7 @@ func TestTranslateApprovalRequestPreservesCanonicalToolPayload(t *testing.T) {
 	req := client.RequestPermissionRequest{
 		SessionID: "child-1",
 		ToolCall: client.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Title:         stringPtr("write file"),
 			Status:        stringPtr("pending"),
@@ -339,7 +339,7 @@ func TestRunnerPermissionCallbackNormalizesChildApprovalWithoutPublishingFrame(t
 	response, err := handler(context.Background(), client.RequestPermissionRequest{
 		SessionID: "child-session",
 		ToolCall: client.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "child-call-1",
 			Kind:          stringPtr("edit"),
 			Title:         stringPtr("Write child file"),
@@ -590,7 +590,7 @@ func TestRunnerRestoresGrokExecutePresentationForSpawnStream(t *testing.T) {
 			SessionUpdate: client.UpdateToolCall,
 			ToolCallID:    "execute-1",
 			Title:         "run_terminal_command",
-			Status:        schema.ToolStatusInProgress,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": "git status --short"},
 			Meta: map[string]any{"x.ai/tool": map[string]any{
 				"version": 1, "name": "run_terminal_command", "kind": "execute",
@@ -603,7 +603,7 @@ func TestRunnerRestoresGrokExecutePresentationForSpawnStream(t *testing.T) {
 		t.Fatalf("Spawn stream frames = %#v, want one Grok execute event", sink.frames)
 	}
 	update := session.ProtocolUpdateOf(sink.frames[0].Event)
-	if update == nil || update.Kind != schema.ToolKindExecute || update.Title != "run_terminal_command" {
+	if update == nil || update.Kind != eventstream.ToolKindExecute || update.Title != "run_terminal_command" {
 		t.Fatalf("Spawn Grok execute update = %#v, want anonymous standard execute presentation", update)
 	}
 	if exactName := metautil.String(update.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); exactName != "" {

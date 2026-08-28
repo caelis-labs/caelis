@@ -22,9 +22,12 @@ Control layer.
 
 ACP-compatible controller, participant, event, permission, cancellation, and
 transfer semantics are intentionally reusable SDK contracts. ACP is the native
-collaboration language shared by built-in and external Agents. The product
-`protocol/acp` packages own wire transport, compatibility, and surface
-projection rather than those reusable semantics.
+collaboration language shared by built-in and external Agents. `acp-go-sdk`
+owns standard ACP wire contracts and connections. Control owns its
+Surface-facing update and permission DTOs plus canonical projection in
+`control/appserver/eventstream` and `control/appserver/projection`; the
+remaining product `protocol/acp` code is transitional metadata compatibility
+that must converge into the owner that uses it.
 
 ## Package Layout
 

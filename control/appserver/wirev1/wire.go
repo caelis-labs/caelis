@@ -15,7 +15,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const APIPrefix = "/api/control/v1"
@@ -354,7 +353,7 @@ func marshalEnvelope(envelope eventstream.Envelope) ([]byte, error) {
 			return nil, err
 		}
 	}
-	if update, ok := wireEnvelope.Update.(schema.UsageUpdate); ok {
+	if update, ok := wireEnvelope.Update.(eventstream.UsageUpdate); ok {
 		fields["update"], err = marshalUsageUpdate(update)
 		if err != nil {
 			return nil, err
@@ -380,22 +379,22 @@ func prepareEnvelopeMetadata(envelope *eventstream.Envelope) error {
 		return err
 	}
 	switch update := envelope.Update.(type) {
-	case schema.ContentChunk:
+	case eventstream.ContentChunk:
 		update.Meta, err = decimalizeKnownMetadata(update.Meta)
 		envelope.Update = update
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		err = validateLocations(update.Locations)
 		if err == nil {
 			update.Meta, err = decimalizeKnownMetadata(update.Meta)
 		}
 		envelope.Update = update
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		err = validateLocations(update.Locations)
 		if err == nil {
 			update.Meta, err = decimalizeKnownMetadata(update.Meta)
 		}
 		envelope.Update = update
-	case schema.UsageUpdate:
+	case eventstream.UsageUpdate:
 		update.Meta, err = decimalizeKnownMetadata(update.Meta)
 		envelope.Update = update
 	}
@@ -415,7 +414,7 @@ func prepareEnvelopeMetadata(envelope *eventstream.Envelope) error {
 	return err
 }
 
-func marshalUsageUpdate(update schema.UsageUpdate) (json.RawMessage, error) {
+func marshalUsageUpdate(update eventstream.UsageUpdate) (json.RawMessage, error) {
 	fields, err := marshalObject(update)
 	if err != nil {
 		return nil, err
@@ -443,7 +442,7 @@ func marshalUsageUpdate(update schema.UsageUpdate) (json.RawMessage, error) {
 	return json.Marshal(fields)
 }
 
-func validateLocations(locations []schema.ToolCallLocation) error {
+func validateLocations(locations []eventstream.ToolCallLocation) error {
 	for _, location := range locations {
 		if location.Line != nil {
 			if err := validateSafeInt("tool location line", *location.Line); err != nil {

@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestProjectSessionEventEnvelopeProjectsToolUpdate(t *testing.T) {
@@ -41,11 +40,11 @@ func TestProjectSessionEventEnvelopeProjectsToolUpdate(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("ProjectSessionEventEnvelope() returned %d events, want 1: %#v", len(events), events)
 	}
-	update, ok := events[0].Update.(schema.ToolCallUpdate)
+	update, ok := events[0].Update.(eventstream.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("update = %#v, want ToolCallUpdate", events[0].Update)
 	}
-	if update.ToolCallID != "call-1" || stringPtrValue(update.Kind) != "RunCommand" || stringPtrValue(update.Status) != schema.ToolStatusInProgress {
+	if update.ToolCallID != "call-1" || stringPtrValue(update.Kind) != "RunCommand" || stringPtrValue(update.Status) != eventstream.ToolStatusInProgress {
 		t.Fatalf("tool update = %#v, want RUN_COMMAND in_progress call-1", update)
 	}
 	assertTerminalAnchor(t, update.Content, "call-1")
@@ -199,7 +198,7 @@ func TestProjectSessionEventEnvelopeProjectsUsageAsACPUsageUpdate(t *testing.T) 
 	if len(events) != 1 {
 		t.Fatalf("ProjectSessionEventEnvelope() returned %d events, want usage update: %#v", len(events), events)
 	}
-	if _, ok := events[0].Update.(schema.UsageUpdate); !ok {
+	if _, ok := events[0].Update.(eventstream.UsageUpdate); !ok {
 		t.Fatalf("update = %#v, want UsageUpdate", events[0].Update)
 	}
 	usage := eventstream.UsageSnapshotFromEnvelope(events[0])
@@ -224,12 +223,12 @@ func TestProjectSessionEventLiveSupplementSeparatesFinalNarrativeFromUsage(t *te
 	base := EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, event, SessionEventTransport{})
 
 	replay := ProjectSessionEventEnvelope(base, event)
-	if len(replay) != 2 || eventstream.UpdateType(replay[0].Update) != schema.UpdateAgentMessage ||
-		eventstream.UpdateType(replay[1].Update) != schema.UpdateUsage {
+	if len(replay) != 2 || eventstream.UpdateType(replay[0].Update) != eventstream.UpdateAgentMessage ||
+		eventstream.UpdateType(replay[1].Update) != eventstream.UpdateUsage {
 		t.Fatalf("replay projection = %#v, want complete narrative plus usage", replay)
 	}
 	live := ProjectSessionEventLiveSupplementEnvelope(base, event, agent.PublishedAssistantMessage)
-	if len(live) != 1 || eventstream.UpdateType(live[0].Update) != schema.UpdateUsage {
+	if len(live) != 1 || eventstream.UpdateType(live[0].Update) != eventstream.UpdateUsage {
 		t.Fatalf("live final projection = %#v, want usage without repeated narrative", live)
 	}
 }
@@ -265,7 +264,7 @@ func TestProjectSessionEventLiveSupplementKeepsTerminalFinalStateWithoutBytes(t 
 	base := EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, event, SessionEventTransport{})
 
 	replay := ProjectSessionEventEnvelope(base, event)
-	replayUpdate := replay[0].Update.(schema.ToolCallUpdate)
+	replayUpdate := replay[0].Update.(eventstream.ToolCallUpdate)
 	if output, ok := metautil.TerminalOutput(replayUpdate.Meta); !ok || output.Data != "ok\n" {
 		t.Fatalf("replay terminal output = %#v, want one complete materialization", replayUpdate.Meta)
 	}
@@ -276,7 +275,7 @@ func TestProjectSessionEventLiveSupplementKeepsTerminalFinalStateWithoutBytes(t 
 	if len(live) != 1 {
 		t.Fatalf("live terminal final = %#v, want one state update", live)
 	}
-	liveUpdate := live[0].Update.(schema.ToolCallUpdate)
+	liveUpdate := live[0].Update.(eventstream.ToolCallUpdate)
 	if _, ok := metautil.TerminalOutput(liveUpdate.Meta); ok {
 		t.Fatalf("live terminal final meta = %#v, want no second terminal byte source", liveUpdate.Meta)
 	}
@@ -286,7 +285,7 @@ func TestProjectSessionEventLiveSupplementKeepsTerminalFinalStateWithoutBytes(t 
 	if taskMeta := metautil.RuntimeSection(live[0].Meta, metautil.RuntimeTask); taskMeta[metautil.RuntimeOutputDelta] != nil {
 		t.Fatalf("live terminal final envelope meta = %#v, want no merged compatibility terminal delta", taskMeta)
 	}
-	if stringPtrValue(liveUpdate.Status) != schema.ToolStatusCompleted {
+	if stringPtrValue(liveUpdate.Status) != eventstream.ToolStatusCompleted {
 		t.Fatalf("live terminal final status = %#v, want completed", liveUpdate.Status)
 	}
 	if exit, ok := metautil.TerminalExit(liveUpdate.Meta); !ok || exit.ExitCode == nil || *exit.ExitCode != 0 {
@@ -312,11 +311,11 @@ func TestProjectSessionEventEnvelopeKeepsUserMessagesForGatewayConsumers(t *test
 	if len(events) != 1 {
 		t.Fatalf("ProjectSessionEventEnvelope(user) returned %d events, want 1: %#v", len(events), events)
 	}
-	chunk, ok := events[0].Update.(schema.ContentChunk)
-	if !ok || chunk.SessionUpdate != schema.UpdateUserMessage {
+	chunk, ok := events[0].Update.(eventstream.ContentChunk)
+	if !ok || chunk.SessionUpdate != eventstream.UpdateUserMessage {
 		t.Fatalf("update = %#v, want user_message_chunk for gateway/TUI consumers", events[0].Update)
 	}
-	content, ok := chunk.Content.(schema.TextContent)
+	content, ok := chunk.Content.(eventstream.TextContent)
 	if !ok || content.Text != "hello" {
 		t.Fatalf("content = %#v, want hello text", chunk.Content)
 	}
@@ -340,11 +339,11 @@ func TestProjectSessionEventEnvelopeUsesUserDisplayTextWhenMessageIsProjected(t 
 	if len(events) != 1 {
 		t.Fatalf("ProjectSessionEventEnvelope(user) returned %d events, want 1: %#v", len(events), events)
 	}
-	chunk, ok := events[0].Update.(schema.ContentChunk)
-	if !ok || chunk.SessionUpdate != schema.UpdateUserMessage {
+	chunk, ok := events[0].Update.(eventstream.ContentChunk)
+	if !ok || chunk.SessionUpdate != eventstream.UpdateUserMessage {
 		t.Fatalf("update = %#v, want user_message_chunk for gateway/TUI consumers", events[0].Update)
 	}
-	content, ok := chunk.Content.(schema.TextContent)
+	content, ok := chunk.Content.(eventstream.TextContent)
 	if !ok || content.Text != "$cmpctl archive preflight" {
 		t.Fatalf("content = %#v, want display text", chunk.Content)
 	}
@@ -374,13 +373,13 @@ func TestProjectSessionEventEnvelopeKeepsLiveAndReplayNarrativeAligned(t *testin
 	if len(live) != 3 {
 		t.Fatalf("live projection produced %d events, want thought, message, and tool call: %#v", len(live), live)
 	}
-	if eventstream.UpdateType(live[0].Update) != schema.UpdateAgentThought ||
-		eventstream.UpdateType(live[1].Update) != schema.UpdateAgentMessage ||
-		eventstream.UpdateType(live[2].Update) != schema.UpdateToolCall {
+	if eventstream.UpdateType(live[0].Update) != eventstream.UpdateAgentThought ||
+		eventstream.UpdateType(live[1].Update) != eventstream.UpdateAgentMessage ||
+		eventstream.UpdateType(live[2].Update) != eventstream.UpdateToolCall {
 		t.Fatalf("live projection = %#v, want narrative chunks followed by tool call", live)
 	}
 	for i := 0; i < 2; i++ {
-		chunk, ok := live[i].Update.(schema.ContentChunk)
+		chunk, ok := live[i].Update.(eventstream.ContentChunk)
 		if !ok || chunk.MessageID != "message-1" {
 			t.Fatalf("live narrative[%d] = %#v, want shared typed message identity", i, live[i].Update)
 		}
@@ -400,7 +399,7 @@ func TestProjectSessionEventEnvelopeKeepsLiveAndReplayNarrativeAligned(t *testin
 		}
 	}
 	for i := 0; i < 2; i++ {
-		chunk, ok := replay[i].Update.(schema.ContentChunk)
+		chunk, ok := replay[i].Update.(eventstream.ContentChunk)
 		if !ok || chunk.MessageID != "message-1" {
 			t.Fatalf("replay narrative[%d] = %#v, want shared typed message identity", i, replay[i].Update)
 		}
@@ -480,8 +479,8 @@ func TestEnvelopeBaseKeepsCanonicalizedDurableChildDeltaNonFinal(t *testing.T) {
 	if len(events) != 1 || events[0].Final {
 		t.Fatalf("ProjectSessionEventEnvelope() = %#v, want one non-final child delta", events)
 	}
-	chunk, ok := events[0].Update.(schema.ContentChunk)
-	if !ok || chunk.SessionUpdate != schema.UpdateAgentMessage || session.ExtractProtocolText(chunk.Content) != "。" {
+	chunk, ok := events[0].Update.(eventstream.ContentChunk)
+	if !ok || chunk.SessionUpdate != eventstream.UpdateAgentMessage || session.ExtractProtocolText(chunk.Content) != "。" {
 		t.Fatalf("projected child delta = %#v", events[0].Update)
 	}
 }

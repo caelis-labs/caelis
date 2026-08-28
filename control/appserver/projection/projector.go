@@ -7,12 +7,12 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // ProjectEvent converts one canonical event into ACP-compatible update payloads.
-func ProjectEvent(event *session.Event) ([]schema.Update, error) {
+func ProjectEvent(event *session.Event) ([]eventstream.Update, error) {
 	if event == nil {
 		return nil, nil
 	}
@@ -28,7 +28,7 @@ func ProjectEvent(event *session.Event) ([]schema.Update, error) {
 	return inferredUpdates(event), nil
 }
 
-func projectPermissionRequest(event *session.Event) (*schema.RequestPermissionRequest, bool, error) {
+func projectPermissionRequest(event *session.Event) (*eventstream.RequestPermissionRequest, bool, error) {
 	if event == nil || event.Protocol == nil {
 		return nil, false, nil
 	}
@@ -44,9 +44,9 @@ func projectPermissionRequest(event *session.Event) (*schema.RequestPermissionRe
 	return req, true, nil
 }
 
-func permissionToolCallUpdateFromProtocol(call session.ProtocolToolCall) schema.ToolCallUpdate {
-	update := schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+func permissionToolCallUpdateFromProtocol(call session.ProtocolToolCall) eventstream.ToolCallUpdate {
+	update := eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(call.ID),
 	}
 	if title := strings.TrimSpace(call.Title); title != "" {
@@ -71,39 +71,39 @@ func permissionToolCallUpdateFromProtocol(call session.ProtocolToolCall) schema.
 	return withDisplayTerminalUpdate(update, call.ID, call.Name)
 }
 
-func explicitUpdates(event *session.Event) []schema.Update {
+func explicitUpdates(event *session.Event) []eventstream.Update {
 	if event == nil || event.Protocol == nil {
 		return nil
 	}
 	switch protocolUpdateType(event) {
-	case schema.UpdateUserMessage:
-		return contentUpdateForEvent(event, schema.UpdateUserMessage, textForUserEvent(event))
-	case schema.UpdateAgentMessage:
+	case eventstream.UpdateUserMessage:
+		return contentUpdateForEvent(event, eventstream.UpdateUserMessage, textForUserEvent(event))
+	case eventstream.UpdateAgentMessage:
 		return explicitAssistantMessageUpdates(event)
-	case schema.UpdateAgentThought:
-		return contentUpdateForEvent(event, schema.UpdateAgentThought, reasoningForAssistantEvent(event))
-	case schema.UpdateToolCall:
+	case eventstream.UpdateAgentThought:
+		return contentUpdateForEvent(event, eventstream.UpdateAgentThought, reasoningForAssistantEvent(event))
+	case eventstream.UpdateToolCall:
 		return explicitToolCallUpdates(event)
-	case schema.UpdateToolCallInfo:
+	case eventstream.UpdateToolCallInfo:
 		update, ok, err := toolCallUpdateForEvent(event)
 		if err != nil || !ok {
 			return nil
 		}
-		return []schema.Update{update}
-	case schema.UpdatePlan:
+		return []eventstream.Update{update}
+	case eventstream.UpdatePlan:
 		if event.Protocol.Update != nil {
 			update := session.ProtocolUpdateOf(event)
 			if update != nil {
-				return []schema.Update{planUpdateFromEntries(update.Entries)}
+				return []eventstream.Update{planUpdateFromEntries(update.Entries)}
 			}
 		}
 		update, ok := planUpdateForEvent(event)
 		if !ok {
 			return nil
 		}
-		return []schema.Update{update}
-	case schema.UpdateCompact:
-		return contentUpdateForEvent(event, schema.UpdateCompact, textForUserEvent(event))
+		return []eventstream.Update{update}
+	case eventstream.UpdateCompact:
+		return contentUpdateForEvent(event, eventstream.UpdateCompact, textForUserEvent(event))
 	case "":
 		return nil
 	default:
@@ -118,13 +118,13 @@ func protocolUpdateType(event *session.Event) string {
 	return ""
 }
 
-func inferredUpdates(event *session.Event) []schema.Update {
+func inferredUpdates(event *session.Event) []eventstream.Update {
 	if event == nil {
 		return nil
 	}
 	switch session.EventTypeOf(event) {
 	case session.EventTypeUser:
-		return contentUpdateForEvent(event, schema.UpdateUserMessage, textForUserEvent(event))
+		return contentUpdateForEvent(event, eventstream.UpdateUserMessage, textForUserEvent(event))
 	case session.EventTypeAssistant:
 		return inferredAssistantUpdates(event)
 	case session.EventTypeToolCall:
@@ -134,21 +134,21 @@ func inferredUpdates(event *session.Event) []schema.Update {
 		if err != nil || !ok {
 			return nil
 		}
-		return []schema.Update{update}
+		return []eventstream.Update{update}
 	case session.EventTypePlan:
 		update, ok := planUpdateForEvent(event)
 		if !ok {
 			return nil
 		}
-		return []schema.Update{update}
+		return []eventstream.Update{update}
 	case session.EventTypeCompact:
-		return contentUpdateForEvent(event, schema.UpdateCompact, textForUserEvent(event))
+		return contentUpdateForEvent(event, eventstream.UpdateCompact, textForUserEvent(event))
 	default:
 		return nil
 	}
 }
 
-func inferredAssistantUpdates(event *session.Event) []schema.Update {
+func inferredAssistantUpdates(event *session.Event) []eventstream.Update {
 	if event == nil {
 		return nil
 	}
@@ -159,33 +159,33 @@ func inferredAssistantUpdates(event *session.Event) []schema.Update {
 		}
 	}
 	if message == nil {
-		return contentUpdateForEvent(event, schema.UpdateAgentMessage, textForAssistantEvent(event))
+		return contentUpdateForEvent(event, eventstream.UpdateAgentMessage, textForAssistantEvent(event))
 	}
-	out := make([]schema.Update, 0, 2)
+	out := make([]eventstream.Update, 0, 2)
 	if reasoning := reasoningForAssistantEvent(event); reasoning != "" {
-		out = append(out, contentChunkForEvent(event, schema.UpdateAgentThought, reasoning))
+		out = append(out, contentChunkForEvent(event, eventstream.UpdateAgentThought, reasoning))
 	}
 	if text := textForAssistantEvent(event); text != "" {
-		out = append(out, contentChunkForEvent(event, schema.UpdateAgentMessage, text))
+		out = append(out, contentChunkForEvent(event, eventstream.UpdateAgentMessage, text))
 	}
 	return out
 }
 
-func explicitAssistantMessageUpdates(event *session.Event) []schema.Update {
+func explicitAssistantMessageUpdates(event *session.Event) []eventstream.Update {
 	if event == nil {
 		return nil
 	}
-	out := make([]schema.Update, 0, 2)
+	out := make([]eventstream.Update, 0, 2)
 	if reasoning := reasoningForAssistantEvent(event); reasoning != "" {
-		out = append(out, contentChunkForEvent(event, schema.UpdateAgentThought, reasoning))
+		out = append(out, contentChunkForEvent(event, eventstream.UpdateAgentThought, reasoning))
 	}
 	if text := textForAssistantEvent(event); text != "" {
-		out = append(out, contentChunkForEvent(event, schema.UpdateAgentMessage, text))
+		out = append(out, contentChunkForEvent(event, eventstream.UpdateAgentMessage, text))
 	}
 	return out
 }
 
-func explicitToolCallUpdates(event *session.Event) []schema.Update {
+func explicitToolCallUpdates(event *session.Event) []eventstream.Update {
 	// Runtime stores the complete assistant response on the first canonical
 	// tool-call event, while Event.Tool identifies the one physical call owned
 	// by that event. Project the durable narrative siblings first, then exactly
@@ -200,7 +200,7 @@ func explicitToolCallUpdates(event *session.Event) []schema.Update {
 	return out
 }
 
-func inferredAssistantMessageOnly(event *session.Event) []schema.Update {
+func inferredAssistantMessageOnly(event *session.Event) []eventstream.Update {
 	if event == nil {
 		return nil
 	}
@@ -211,17 +211,17 @@ func inferredAssistantMessageOnly(event *session.Event) []schema.Update {
 	} else if message, ok := session.ModelMessageOf(event); !ok || message.Role != model.RoleAssistant {
 		return nil
 	}
-	out := make([]schema.Update, 0, 2)
+	out := make([]eventstream.Update, 0, 2)
 	if reasoning := reasoningForAssistantEvent(event); reasoning != "" {
-		out = append(out, contentChunkForEvent(event, schema.UpdateAgentThought, reasoning))
+		out = append(out, contentChunkForEvent(event, eventstream.UpdateAgentThought, reasoning))
 	}
 	if text := textForAssistantEvent(event); text != "" {
-		out = append(out, contentChunkForEvent(event, schema.UpdateAgentMessage, text))
+		out = append(out, contentChunkForEvent(event, eventstream.UpdateAgentMessage, text))
 	}
 	return out
 }
 
-func inferredToolCallUpdates(event *session.Event) []schema.Update {
+func inferredToolCallUpdates(event *session.Event) []eventstream.Update {
 	if event == nil {
 		return nil
 	}
@@ -240,12 +240,12 @@ func inferredToolCallUpdates(event *session.Event) []schema.Update {
 	}
 	for _, call := range message.ToolCalls() {
 		args := parseObject(call.Args)
-		update := schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		update := eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    strings.TrimSpace(call.ID),
 			Title:         projectedToolTitle(call.Name, args),
 			Kind:          projectedToolKind(call.Name),
-			Status:        schema.ToolStatusPending,
+			Status:        eventstream.ToolStatusPending,
 			RawInput:      cloneAnyMapPayload(args),
 		}
 		update = withDisplayTerminal(update, call.Name, args)
@@ -254,21 +254,21 @@ func inferredToolCallUpdates(event *session.Event) []schema.Update {
 	return out
 }
 
-func contentUpdateForEvent(event *session.Event, kind string, text string) []schema.Update {
+func contentUpdateForEvent(event *session.Event, kind string, text string) []eventstream.Update {
 	if text == "" {
 		return nil
 	}
-	return []schema.Update{contentChunkForEvent(event, kind, text)}
+	return []eventstream.Update{contentChunkForEvent(event, kind, text)}
 }
 
-func contentChunk(kind string, text string) schema.ContentChunk {
-	return schema.ContentChunk{
+func contentChunk(kind string, text string) eventstream.ContentChunk {
+	return eventstream.ContentChunk{
 		SessionUpdate: kind,
-		Content:       schema.TextContent{Type: "text", Text: text},
+		Content:       eventstream.TextContent{Type: "text", Text: text},
 	}
 }
 
-func contentChunkForEvent(event *session.Event, kind string, text string) schema.ContentChunk {
+func contentChunkForEvent(event *session.Event, kind string, text string) eventstream.ContentChunk {
 	chunk := contentChunk(kind, text)
 	chunk.MessageID = session.EventMessageID(event)
 	// ProtocolUpdate metadata describes that exact ACP update. Do not attach
@@ -276,7 +276,7 @@ func contentChunkForEvent(event *session.Event, kind string, text string) schema
 	if update := session.ProtocolUpdateOf(event); update != nil && normalizeUpdateType(update.SessionUpdate) == kind {
 		chunk.Meta = cloneAnyMap(update.Meta)
 	}
-	if kind == schema.UpdateAgentMessage && event != nil {
+	if kind == eventstream.UpdateAgentMessage && event != nil {
 		message := event.Message
 		if message == nil {
 			if projected, ok := session.ModelMessageOf(event); ok {
@@ -328,48 +328,48 @@ func putNonEmptyString(out map[string]any, key string, value string) {
 	}
 }
 
-func toolCallForEvent(event *session.Event) (schema.ToolCall, bool, error) {
+func toolCallForEvent(event *session.Event) (eventstream.ToolCall, bool, error) {
 	if event == nil {
-		return schema.ToolCall{}, false, nil
+		return eventstream.ToolCall{}, false, nil
 	}
 	if event.Tool != nil {
 		return toolCallFromEventToolPayload(event.Tool), true, nil
 	}
-	if update := session.ProtocolUpdateOf(event); update != nil && normalizeUpdateType(update.SessionUpdate) == schema.UpdateToolCall {
+	if update := session.ProtocolUpdateOf(event); update != nil && normalizeUpdateType(update.SessionUpdate) == eventstream.UpdateToolCall {
 		return toolCallFromProtocolUpdate(event, update), true, nil
 	}
 	if event.Message == nil {
-		return schema.ToolCall{}, false, nil
+		return eventstream.ToolCall{}, false, nil
 	}
 	calls := event.Message.ToolCalls()
 	if len(calls) == 0 {
-		return schema.ToolCall{}, false, nil
+		return eventstream.ToolCall{}, false, nil
 	}
 	args := parseObject(calls[0].Args)
-	call := schema.ToolCall{
-		SessionUpdate: schema.UpdateToolCall,
+	call := eventstream.ToolCall{
+		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    strings.TrimSpace(calls[0].ID),
 		Title:         projectedToolTitle(calls[0].Name, args),
 		Kind:          projectedToolKind(calls[0].Name),
-		Status:        schema.ToolStatusPending,
+		Status:        eventstream.ToolStatusPending,
 		RawInput:      cloneAnyMapPayload(args),
 	}
 	call = withDisplayTerminal(call, calls[0].Name, args)
 	return call, true, nil
 }
 
-func toolCallFromEventToolPayload(tool *session.EventTool) schema.ToolCall {
+func toolCallFromEventToolPayload(tool *session.EventTool) eventstream.ToolCall {
 	if tool == nil {
-		return schema.ToolCall{SessionUpdate: schema.UpdateToolCall}
+		return eventstream.ToolCall{SessionUpdate: eventstream.UpdateToolCall}
 	}
 	rawInput := cloneAnyMap(tool.Input)
 	displayTerminalID, _ := projectedDisplayTerminalID(tool.ID, tool.Name)
-	call := schema.ToolCall{
-		SessionUpdate: schema.UpdateToolCall,
+	call := eventstream.ToolCall{
+		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    strings.TrimSpace(tool.ID),
 		Title:         firstNonEmpty(strings.TrimSpace(tool.Title), projectedToolTitle(tool.Name, rawInput), strings.TrimSpace(tool.Name)),
 		Kind:          firstNonEmpty(strings.TrimSpace(tool.Kind), projectedToolKind(tool.Name)),
-		Status:        firstNonEmpty(acpToolStatus(tool.Status), schema.ToolStatusPending),
+		Status:        firstNonEmpty(acpToolStatus(tool.Status), eventstream.ToolStatusPending),
 		RawInput:      cloneAnyMapPayload(rawInput),
 		RawOutput:     cloneAnyMapPayload(tool.Output),
 		Content:       projectEventToolContent(tool.Content, displayTerminalID),
@@ -378,11 +378,11 @@ func toolCallFromEventToolPayload(tool *session.EventTool) schema.ToolCall {
 	return withDisplayTerminal(call, tool.Name, rawInput)
 }
 
-func toolCallFromProtocolUpdate(event *session.Event, update *session.ProtocolUpdate) schema.ToolCall {
+func toolCallFromProtocolUpdate(event *session.Event, update *session.ProtocolUpdate) eventstream.ToolCall {
 	update = cloneProtocolUpdateForProjection(update)
 	name := protocolToolNameForUpdate(event, update)
 	rawInput := cloneAnyMap(update.RawInput)
-	call := schema.ToolCall{
+	call := eventstream.ToolCall{
 		SessionUpdate: update.SessionUpdate,
 		ToolCallID:    update.ToolCallID,
 		Title:         update.Title,
@@ -395,41 +395,41 @@ func toolCallFromProtocolUpdate(event *session.Event, update *session.ProtocolUp
 	}
 	call.Title = firstNonEmpty(strings.TrimSpace(call.Title), projectedToolTitle(name, rawInput), strings.TrimSpace(name))
 	call.Kind = firstNonEmpty(strings.TrimSpace(call.Kind), projectedToolKind(name))
-	call.Status = firstNonEmpty(acpToolStatus(call.Status), schema.ToolStatusPending)
+	call.Status = firstNonEmpty(acpToolStatus(call.Status), eventstream.ToolStatusPending)
 	displayTerminalID, _ := projectedDisplayTerminalID(call.ToolCallID, name)
 	call.Content = projectToolContent(session.ProtocolToolCallContentOf(update), displayTerminalID)
 	return withDisplayTerminal(call, name, rawInput)
 }
 
-func toolCallUpdateForEvent(event *session.Event) (schema.ToolCallUpdate, bool, error) {
+func toolCallUpdateForEvent(event *session.Event) (eventstream.ToolCallUpdate, bool, error) {
 	if event == nil {
-		return schema.ToolCallUpdate{}, false, nil
+		return eventstream.ToolCallUpdate{}, false, nil
 	}
 	if event.Tool != nil {
 		return toolCallUpdateFromEventToolPayload(event.Tool, event.Meta), true, nil
 	}
-	if update := session.ProtocolUpdateOf(event); update != nil && normalizeUpdateType(update.SessionUpdate) == schema.UpdateToolCallInfo {
+	if update := session.ProtocolUpdateOf(event); update != nil && normalizeUpdateType(update.SessionUpdate) == eventstream.UpdateToolCallInfo {
 		projected, err := toolCallUpdateFromProtocolUpdate(event, update)
 		if err != nil {
-			return schema.ToolCallUpdate{}, false, err
+			return eventstream.ToolCallUpdate{}, false, err
 		}
 		return projected, true, nil
 	}
 	if event.Message == nil {
-		return schema.ToolCallUpdate{}, false, nil
+		return eventstream.ToolCallUpdate{}, false, nil
 	}
 	resp := event.Message.ToolResponse()
 	if resp == nil {
-		return schema.ToolCallUpdate{}, false, nil
+		return eventstream.ToolCallUpdate{}, false, nil
 	}
-	status := schema.ToolStatusCompleted
+	status := eventstream.ToolStatusCompleted
 	if raw, ok := event.Meta["is_error"].(bool); ok && raw {
-		status = schema.ToolStatusFailed
+		status = eventstream.ToolStatusFailed
 	}
 	name := strings.TrimSpace(resp.Name)
 	kind := projectedToolKind(name)
-	out := schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+	out := eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(resp.ID),
 		Kind:          stringPtr(kind),
 		Status:        stringPtr(status),
@@ -439,13 +439,13 @@ func toolCallUpdateForEvent(event *session.Event) (schema.ToolCallUpdate, bool, 
 	return withDisplayTerminalUpdate(out, resp.ID, name), true, nil
 }
 
-func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string]any) schema.ToolCallUpdate {
+func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string]any) eventstream.ToolCallUpdate {
 	if tool == nil {
-		return schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo}
+		return eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo}
 	}
 	displayTerminalID, _ := projectedDisplayTerminalID(tool.ID, tool.Name)
-	out := schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+	out := eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(tool.ID),
 		RawInput:      cloneAnyMapPayload(tool.Input),
 		RawOutput:     cloneAnyMapPayload(tool.Output),
@@ -469,14 +469,14 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string
 	return withDisplayTerminalUpdate(out, tool.ID, tool.Name)
 }
 
-func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.ProtocolUpdate) (schema.ToolCallUpdate, error) {
+func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.ProtocolUpdate) (eventstream.ToolCallUpdate, error) {
 	update = cloneProtocolUpdateForProjection(update)
 	id := strings.TrimSpace(update.ToolCallID)
 	if id == "" {
-		return schema.ToolCallUpdate{}, fmt.Errorf("control/appserver/projection: tool update missing tool call id")
+		return eventstream.ToolCallUpdate{}, fmt.Errorf("control/appserver/projection: tool update missing tool call id")
 	}
 	name := protocolToolNameForUpdate(event, update)
-	out := schema.ToolCallUpdate{
+	out := eventstream.ToolCallUpdate{
 		SessionUpdate: update.SessionUpdate,
 		ToolCallID:    update.ToolCallID,
 		Title:         stringPtr(update.Title),
@@ -507,18 +507,18 @@ func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.Prot
 	return withDisplayTerminalUpdate(out, id, name), nil
 }
 
-func projectEventToolLocations(locations []session.EventToolLocation) []schema.ToolCallLocation {
+func projectEventToolLocations(locations []session.EventToolLocation) []eventstream.ToolCallLocation {
 	if len(locations) == 0 {
 		return nil
 	}
-	out := make([]schema.ToolCallLocation, 0, len(locations))
+	out := make([]eventstream.ToolCallLocation, 0, len(locations))
 	for _, item := range locations {
 		var line *int
 		if item.Line != nil {
 			value := *item.Line
 			line = &value
 		}
-		out = append(out, schema.ToolCallLocation{
+		out = append(out, eventstream.ToolCallLocation{
 			Path: strings.TrimSpace(item.Path),
 			Line: line,
 		})
@@ -526,17 +526,17 @@ func projectEventToolLocations(locations []session.EventToolLocation) []schema.T
 	return out
 }
 
-func projectEventToolContent(content []session.EventToolContent, displayTerminalID string) []schema.ToolCallContent {
+func projectEventToolContent(content []session.EventToolContent, displayTerminalID string) []eventstream.ToolCallContent {
 	if len(content) == 0 {
 		return nil
 	}
-	out := make([]schema.ToolCallContent, 0, len(content))
+	out := make([]eventstream.ToolCallContent, 0, len(content))
 	for _, item := range content {
 		contentType := strings.TrimSpace(item.Type)
 		terminalID := strings.TrimSpace(item.TerminalID)
 		var payload any
 		if strings.TrimSpace(item.Text) != "" {
-			payload = schema.TextContent{Type: "text", Text: item.Text}
+			payload = eventstream.TextContent{Type: "text", Text: item.Text}
 		}
 		if strings.EqualFold(contentType, "terminal") {
 			if strings.TrimSpace(displayTerminalID) != "" {
@@ -548,7 +548,7 @@ func projectEventToolContent(content []session.EventToolContent, displayTerminal
 			value := *item.OldText
 			oldText = &value
 		}
-		out = append(out, schema.ToolCallContent{
+		out = append(out, eventstream.ToolCallContent{
 			Type:       contentType,
 			Content:    payload,
 			TerminalID: terminalID,
@@ -560,11 +560,11 @@ func projectEventToolContent(content []session.EventToolContent, displayTerminal
 	return out
 }
 
-func projectToolContent(content []session.ProtocolToolCallContent, displayTerminalID string) []schema.ToolCallContent {
+func projectToolContent(content []session.ProtocolToolCallContent, displayTerminalID string) []eventstream.ToolCallContent {
 	if len(content) == 0 {
 		return nil
 	}
-	out := make([]schema.ToolCallContent, 0, len(content))
+	out := make([]eventstream.ToolCallContent, 0, len(content))
 	for _, item := range content {
 		contentType := strings.TrimSpace(item.Type)
 		terminalID := strings.TrimSpace(item.TerminalID)
@@ -579,7 +579,7 @@ func projectToolContent(content []session.ProtocolToolCallContent, displayTermin
 			value := *item.OldText
 			oldText = &value
 		}
-		out = append(out, schema.ToolCallContent{
+		out = append(out, eventstream.ToolCallContent{
 			Type:       contentType,
 			Content:    contentPayload,
 			TerminalID: terminalID,
@@ -593,56 +593,56 @@ func projectToolContent(content []session.ProtocolToolCallContent, displayTermin
 
 func acpToolStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "", schema.ToolStatusPending, schema.ToolStatusInProgress, schema.ToolStatusCompleted, schema.ToolStatusFailed:
+	case "", eventstream.ToolStatusPending, eventstream.ToolStatusInProgress, eventstream.ToolStatusCompleted, eventstream.ToolStatusFailed:
 		return strings.TrimSpace(status)
 	case "started", "running", "waiting_approval":
-		return schema.ToolStatusInProgress
+		return eventstream.ToolStatusInProgress
 	case "cancelled", "canceled", "interrupted", "terminated", "timed_out", "timeout":
-		return schema.ToolStatusFailed
+		return eventstream.ToolStatusFailed
 	default:
 		return strings.TrimSpace(status)
 	}
 }
 
-func planUpdateForEvent(event *session.Event) (schema.PlanUpdate, bool) {
+func planUpdateForEvent(event *session.Event) (eventstream.PlanUpdate, bool) {
 	if event == nil {
-		return schema.PlanUpdate{}, false
+		return eventstream.PlanUpdate{}, false
 	}
 	if event.Protocol != nil {
-		if update := session.ProtocolUpdateOf(event); update != nil && (len(update.Entries) > 0 || normalizeUpdateType(update.SessionUpdate) == schema.UpdatePlan) {
+		if update := session.ProtocolUpdateOf(event); update != nil && (len(update.Entries) > 0 || normalizeUpdateType(update.SessionUpdate) == eventstream.UpdatePlan) {
 			return planUpdateFromEntries(update.Entries), true
 		}
 	}
 	payload := session.PlanPayloadOf(event)
 	if payload == nil {
-		return schema.PlanUpdate{}, false
+		return eventstream.PlanUpdate{}, false
 	}
 	return planUpdateFromPayload(*payload), true
 }
 
-func planUpdateFromEntries(protocolEntries []session.ProtocolPlanEntry) schema.PlanUpdate {
-	entries := make([]schema.PlanEntry, 0, len(protocolEntries))
+func planUpdateFromEntries(protocolEntries []session.ProtocolPlanEntry) eventstream.PlanUpdate {
+	entries := make([]eventstream.PlanEntry, 0, len(protocolEntries))
 	for _, item := range protocolEntries {
-		entries = append(entries, schema.PlanEntry{
+		entries = append(entries, eventstream.PlanEntry{
 			Content:  strings.TrimSpace(item.Content),
 			Status:   strings.TrimSpace(item.Status),
 			Priority: firstNonEmpty(strings.TrimSpace(item.Priority), "medium"),
 		})
 	}
-	return schema.PlanUpdate{SessionUpdate: schema.UpdatePlan, Entries: entries}
+	return eventstream.PlanUpdate{SessionUpdate: eventstream.UpdatePlan, Entries: entries}
 }
 
-func planUpdateFromPayload(payload session.EventPlanPayload) schema.PlanUpdate {
-	entries := make([]schema.PlanEntry, 0, len(payload.Entries))
+func planUpdateFromPayload(payload session.EventPlanPayload) eventstream.PlanUpdate {
+	entries := make([]eventstream.PlanEntry, 0, len(payload.Entries))
 	for _, item := range payload.Entries {
-		entries = append(entries, schema.PlanEntry{
+		entries = append(entries, eventstream.PlanEntry{
 			Content:  strings.TrimSpace(item.Content),
 			Status:   strings.TrimSpace(item.Status),
 			Priority: firstNonEmpty(strings.TrimSpace(item.Priority), "medium"),
 		})
 	}
-	return schema.PlanUpdate{
-		SessionUpdate: schema.UpdatePlan,
+	return eventstream.PlanUpdate{
+		SessionUpdate: eventstream.UpdatePlan,
 		Entries:       entries,
 	}
 }
@@ -700,7 +700,7 @@ func reasoningForAssistantEvent(event *session.Event) string {
 		if reasoning := reasoningFromProtocolContent(update.Content); reasoning != "" {
 			return reasoning
 		}
-		if normalizeUpdateType(update.SessionUpdate) == schema.UpdateAgentThought {
+		if normalizeUpdateType(update.SessionUpdate) == eventstream.UpdateAgentThought {
 			return session.EventText(event)
 		}
 	}
@@ -786,18 +786,18 @@ func cloneProtocolUpdateForProjection(update *session.ProtocolUpdate) *session.P
 	return protocol.Update
 }
 
-func protocolLocationsForProjection(in []session.ProtocolToolCallLocation) []schema.ToolCallLocation {
+func protocolLocationsForProjection(in []session.ProtocolToolCallLocation) []eventstream.ToolCallLocation {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]schema.ToolCallLocation, 0, len(in))
+	out := make([]eventstream.ToolCallLocation, 0, len(in))
 	for _, item := range in {
 		var line *int
 		if item.Line != nil {
 			value := *item.Line
 			line = &value
 		}
-		out = append(out, schema.ToolCallLocation{Path: item.Path, Line: line})
+		out = append(out, eventstream.ToolCallLocation{Path: item.Path, Line: line})
 	}
 	return out
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/control/acppermission"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
@@ -28,7 +29,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/google/uuid"
 )
 
@@ -1124,8 +1124,8 @@ func (run *childRun) appendAgentMessageChunkLocked(messageID string, text string
 	if run == nil {
 		return ""
 	}
-	update := run.finalAssistant.ObserveUpdate(acpschema.ContentChunk{
-		SessionUpdate: acpschema.UpdateAgentMessage,
+	update := run.finalAssistant.ObserveUpdate(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentMessage,
 		MessageID:     strings.TrimSpace(messageID),
 		Content:       text,
 	})

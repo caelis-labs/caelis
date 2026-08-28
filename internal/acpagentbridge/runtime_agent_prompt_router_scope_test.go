@@ -10,37 +10,36 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRuntimeAgentPromptRouterForwardsScopedNarrativeDeltasVerbatim(t *testing.T) {
 	turn := newTestControlTurn(
-		scopedNarrativeEnvelope(eventstream.ScopeMain, "root", acp.UpdateAgentMessage, "main-message", "main live", false),
-		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", acp.UpdateAgentMessage, "child-message", "shared message", false),
-		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-b", acp.UpdateAgentMessage, "child-message", "shared message", false),
-		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", acp.UpdateAgentMessage, "child-message-2", "shared message", false),
-		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", acp.UpdateAgentMessage, "child-message", "shared message one", false),
-		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-b", acp.UpdateAgentMessage, "child-message", "shared message two", false),
-		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", acp.UpdateAgentThought, "", "shared thought", false),
-		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-b", acp.UpdateAgentThought, "", "shared thought", false),
-		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", acp.UpdateAgentThought, "", "shared thought one", false),
-		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-b", acp.UpdateAgentThought, "", "shared thought two", false),
+		scopedNarrativeEnvelope(eventstream.ScopeMain, "root", eventstream.UpdateAgentMessage, "main-message", "main live", false),
+		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", eventstream.UpdateAgentMessage, "child-message", "shared message", false),
+		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-b", eventstream.UpdateAgentMessage, "child-message", "shared message", false),
+		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", eventstream.UpdateAgentMessage, "child-message-2", "shared message", false),
+		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", eventstream.UpdateAgentMessage, "child-message", "shared message one", false),
+		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-b", eventstream.UpdateAgentMessage, "child-message", "shared message two", false),
+		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", eventstream.UpdateAgentThought, "", "shared thought", false),
+		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-b", eventstream.UpdateAgentThought, "", "shared thought", false),
+		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", eventstream.UpdateAgentThought, "", "shared thought one", false),
+		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-b", eventstream.UpdateAgentThought, "", "shared thought two", false),
 		eventstream.Envelope{
 			Kind:      eventstream.KindSessionUpdate,
 			SessionID: "session-1",
 			Scope:     eventstream.ScopeSubagent,
 			ScopeID:   "task-b",
-			Update: acp.ToolCallUpdate{
-				SessionUpdate: acp.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "child-tool-1",
 			},
 		},
-		scopedNarrativeEnvelope(eventstream.ScopeMain, "root", acp.UpdateAgentMessage, "main-message", "main live", true),
+		scopedNarrativeEnvelope(eventstream.ScopeMain, "root", eventstream.UpdateAgentMessage, "main-message", "main live", true),
 	)
 	runtimeAgent, sessionID := newPromptRouterAgentForScopeTest(t, turn)
 	cb := &recordingPromptCallbacks{}
@@ -60,11 +59,11 @@ func TestRuntimeAgentPromptRouterForwardsScopedNarrativeDeltasVerbatim(t *testin
 
 func TestRuntimeAgentPromptRouterChildPermissionDoesNotRewriteOtherNarratives(t *testing.T) {
 	turn := newTestControlTurn(
-		scopedNarrativeEnvelope(eventstream.ScopeMain, "root", acp.UpdateAgentMessage, "main-message", "main live", false),
-		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-b", acp.UpdateAgentMessage, "sibling-message", "sibling live", false),
+		scopedNarrativeEnvelope(eventstream.ScopeMain, "root", eventstream.UpdateAgentMessage, "main-message", "main live", false),
+		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-b", eventstream.UpdateAgentMessage, "sibling-message", "sibling live", false),
 		scopedPermissionEnvelope("task-a"),
-		scopedNarrativeEnvelope(eventstream.ScopeMain, "root", acp.UpdateAgentMessage, "main-message", "main live", true),
-		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-b", acp.UpdateAgentMessage, "sibling-message", "sibling live", true),
+		scopedNarrativeEnvelope(eventstream.ScopeMain, "root", eventstream.UpdateAgentMessage, "main-message", "main live", true),
+		scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-b", eventstream.UpdateAgentMessage, "sibling-message", "sibling live", true),
 	)
 	runtimeAgent, sessionID := newPromptRouterAgentForScopeTest(t, turn)
 	cb := &permissionCountingCallbacks{}
@@ -79,7 +78,7 @@ func TestRuntimeAgentPromptRouterChildPermissionDoesNotRewriteOtherNarratives(t 
 }
 
 func TestRuntimeAgentPromptRouterKeepsSiblingTerminalOutputsWithSharedToolIDs(t *testing.T) {
-	completed := acp.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	output := "shared child terminal output\n"
 	turn := newTestControlTurn(
 		scopedTerminalEnvelope("task-a", "shared-tool", "shared-terminal", completed, output),
@@ -96,13 +95,13 @@ func TestRuntimeAgentPromptRouterKeepsSiblingTerminalOutputsWithSharedToolIDs(t 
 
 func TestRuntimeAgentPromptRouterChildTerminalKeepsOnlyLatestAssistantMessage(t *testing.T) {
 	parentTool := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
-	first := scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", acp.UpdateAgentMessage, "message-a", "repeat", false)
+	first := scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", eventstream.UpdateAgentMessage, "message-a", "repeat", false)
 	first.ParentTool = parentTool
-	firstFinalReplay := scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", acp.UpdateAgentMessage, "message-a", "repeat", true)
+	firstFinalReplay := scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", eventstream.UpdateAgentMessage, "message-a", "repeat", true)
 	firstFinalReplay.ParentTool = parentTool
-	second := scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", acp.UpdateAgentMessage, "message-b", "repeat", true)
+	second := scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", eventstream.UpdateAgentMessage, "message-b", "repeat", true)
 	second.ParentTool = parentTool
-	completed := acp.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	turn := newTestControlTurn(first, firstFinalReplay, second,
 		eventstream.Envelope{
 			Kind: eventstream.KindLifecycle, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
@@ -112,8 +111,8 @@ func TestRuntimeAgentPromptRouterChildTerminalKeepsOnlyLatestAssistantMessage(t 
 		eventstream.Envelope{
 			Kind:      eventstream.KindSessionUpdate,
 			SessionID: "session-1",
-			Update: acp.ToolCallUpdate{
-				SessionUpdate: acp.UpdateToolCallInfo,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "spawn-1",
 				Status:        &completed,
 			},
@@ -175,26 +174,26 @@ func scopedNarrativeEnvelope(scope eventstream.Scope, scopeID string, updateType
 		Scope:     scope,
 		ScopeID:   scopeID,
 		Final:     final,
-		Update: acp.ContentChunk{
+		Update: eventstream.ContentChunk{
 			SessionUpdate: updateType,
 			MessageID:     messageID,
-			Content:       acp.TextContent{Type: "text", Text: text},
+			Content:       eventstream.TextContent{Type: "text", Text: text},
 		},
 	}
 }
 
 func scopedPermissionEnvelope(scopeID string) eventstream.Envelope {
-	status := acp.ToolStatusPending
+	status := eventstream.ToolStatusPending
 	return eventstream.Envelope{
 		Kind:              eventstream.KindRequestPermission,
 		SessionID:         "session-1",
 		Scope:             eventstream.ScopeSubagent,
 		ScopeID:           scopeID,
 		ApprovalRequestID: "child-approval-1",
-		Permission: &acp.RequestPermissionRequest{
+		Permission: &eventstream.RequestPermissionRequest{
 			SessionID: "session-1",
-			ToolCall: acp.ToolCallUpdate{
-				SessionUpdate: acp.UpdateToolCallInfo,
+			ToolCall: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "child-permission",
 				Status:        &status,
 			},
@@ -214,8 +213,8 @@ func scopedTerminalEnvelope(scopeID string, toolCallID string, terminalID string
 		Scope:     eventstream.ScopeSubagent,
 		ScopeID:   scopeID,
 		Final:     true,
-		Update: acp.ToolCallUpdate{
-			SessionUpdate: acp.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    toolCallID,
 			Status:        &status,
 			Meta:          metautil.WithTerminalOutput(nil, terminalID, output),
@@ -294,7 +293,7 @@ func directNarrativeEvent(sessionID string, eventID string, scope *session.Event
 		Scope:      scope,
 		Text:       text,
 		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-			SessionUpdate: acp.UpdateAgentMessage,
+			SessionUpdate: eventstream.UpdateAgentMessage,
 			MessageID:     messageID,
 		}},
 	}

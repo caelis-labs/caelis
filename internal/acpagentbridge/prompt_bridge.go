@@ -15,7 +15,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func (a *RuntimeAgent) runPromptRouter(runCtx context.Context, bridgeCtx context.Context, activeSession session.Session, input string, contentParts []model.ContentPart, cb PromptCallbacks) (bool, error) {
@@ -364,13 +363,13 @@ func (a *RuntimeAgent) emitPromptRouterSessionState(ctx context.Context, cb Prom
 		return err
 	}
 	if includeSessionInfo {
-		update, err := standardSessionUpdate(acp.UpdateSessionInfo, acpsdk.SessionSessionInfoUpdate{
-			SessionUpdate: acp.UpdateSessionInfo,
+		update, err := standardSessionUpdate(eventstream.UpdateSessionInfo, acpsdk.SessionSessionInfoUpdate{
+			SessionUpdate: eventstream.UpdateSessionInfo,
 		})
 		if err != nil {
 			return err
 		}
-		if err := cb.SessionUpdate(ctx, acp.SessionNotification{
+		if err := cb.SessionUpdate(ctx, eventstream.SessionNotification{
 			SessionID: sessionID,
 			Update:    update,
 		}); err != nil {
@@ -383,14 +382,14 @@ func (a *RuntimeAgent) emitPromptRouterSessionState(ctx context.Context, cb Prom
 			return err
 		}
 		if modes != nil && strings.TrimSpace(string(modes.CurrentModeId)) != "" {
-			update, err := standardSessionUpdate(acp.UpdateCurrentMode, acpsdk.SessionCurrentModeUpdate{
-				SessionUpdate: acp.UpdateCurrentMode,
+			update, err := standardSessionUpdate(eventstream.UpdateCurrentMode, acpsdk.SessionCurrentModeUpdate{
+				SessionUpdate: eventstream.UpdateCurrentMode,
 				CurrentModeId: acpsdk.SessionModeId(strings.TrimSpace(string(modes.CurrentModeId))),
 			})
 			if err != nil {
 				return err
 			}
-			if err := cb.SessionUpdate(ctx, acp.SessionNotification{
+			if err := cb.SessionUpdate(ctx, eventstream.SessionNotification{
 				SessionID: sessionID,
 				Update:    update,
 			}); err != nil {
@@ -403,14 +402,14 @@ func (a *RuntimeAgent) emitPromptRouterSessionState(ctx context.Context, cb Prom
 		if err != nil {
 			return err
 		}
-		update, err := standardSessionUpdate(acp.UpdateConfigOption, acpsdk.SessionConfigOptionUpdate{
-			SessionUpdate: acp.UpdateConfigOption,
+		update, err := standardSessionUpdate(eventstream.UpdateConfigOption, acpsdk.SessionConfigOptionUpdate{
+			SessionUpdate: eventstream.UpdateConfigOption,
 			ConfigOptions: options,
 		})
 		if err != nil {
 			return err
 		}
-		if err := cb.SessionUpdate(ctx, acp.SessionNotification{
+		if err := cb.SessionUpdate(ctx, eventstream.SessionNotification{
 			SessionID: sessionID,
 			Update:    update,
 		}); err != nil {
@@ -436,14 +435,14 @@ func (a *RuntimeAgent) emitAvailableCommandsUpdate(ctx context.Context, cb Promp
 	if err != nil {
 		return err
 	}
-	update, err := standardSessionUpdate(acp.UpdateAvailableCmds, acpsdk.SessionAvailableCommandsUpdate{
-		SessionUpdate:     acp.UpdateAvailableCmds,
+	update, err := standardSessionUpdate(eventstream.UpdateAvailableCmds, acpsdk.SessionAvailableCommandsUpdate{
+		SessionUpdate:     eventstream.UpdateAvailableCmds,
 		AvailableCommands: commands,
 	})
 	if err != nil {
 		return err
 	}
-	return cb.SessionUpdate(ctx, acp.SessionNotification{
+	return cb.SessionUpdate(ctx, eventstream.SessionNotification{
 		SessionID: strings.TrimSpace(sessionID),
 		Update:    update,
 	})
@@ -451,13 +450,13 @@ func (a *RuntimeAgent) emitAvailableCommandsUpdate(ctx context.Context, cb Promp
 
 // standardSessionUpdate keeps standard ACP session-state wire members owned by
 // acp-go-sdk while the bridge still routes other projection updates through the
-// transitional schema.Update callback.
-func standardSessionUpdate(updateType string, update any) (acp.RawUpdate, error) {
+// Control eventstream.Update callback.
+func standardSessionUpdate(updateType string, update any) (eventstream.RawUpdate, error) {
 	raw, err := json.Marshal(update)
 	if err != nil {
-		return acp.RawUpdate{}, fmt.Errorf("internal/acpagentbridge: encode %s: %w", updateType, err)
+		return eventstream.RawUpdate{}, fmt.Errorf("internal/acpagentbridge: encode %s: %w", updateType, err)
 	}
-	return acp.RawUpdate{SessionUpdate: strings.TrimSpace(updateType), Raw: raw}, nil
+	return eventstream.RawUpdate{SessionUpdate: strings.TrimSpace(updateType), Raw: raw}, nil
 }
 
 func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbacks, fallbackSessionID string, turn controlprompt.Turn, env eventstream.Envelope, outboundFilter *acpNarrativeFilter) error {
@@ -490,7 +489,7 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbac
 		if outboundFilter != nil && outboundFilter.childTerminal != nil && isACPChildTerminalEnvelope(env) {
 			outboundFilter.childTerminal.track(env, sessionID)
 			filtered, ok := outboundFilter.FilterNotification(
-				acp.SessionNotification{SessionID: sessionID, Update: env.Update},
+				eventstream.SessionNotification{SessionID: sessionID, Update: env.Update},
 			)
 			if !ok {
 				return nil
@@ -505,7 +504,7 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbac
 				return cb.SessionUpdate(ctx, normalizeACPStdioTerminalExtension(notification))
 			}
 		}
-		notification := acp.SessionNotification{SessionID: sessionID, Update: env.Update}
+		notification := eventstream.SessionNotification{SessionID: sessionID, Update: env.Update}
 		if err := emitFilteredSessionUpdate(ctx, cb, notification, outboundFilter); err != nil {
 			return err
 		}
@@ -547,7 +546,7 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbac
 		}
 	}
 	if env.Update != nil {
-		return emitFilteredSessionUpdate(ctx, cb, acp.SessionNotification{SessionID: sessionID, Update: env.Update}, outboundFilter)
+		return emitFilteredSessionUpdate(ctx, cb, eventstream.SessionNotification{SessionID: sessionID, Update: env.Update}, outboundFilter)
 	}
 	return nil
 }
@@ -567,11 +566,11 @@ func emitACPNotice(
 	if text == "" {
 		return nil
 	}
-	return emitFilteredSessionUpdate(ctx, cb, acp.SessionNotification{
+	return emitFilteredSessionUpdate(ctx, cb, eventstream.SessionNotification{
 		SessionID: sessionID,
-		Update: acp.ContentChunk{
-			SessionUpdate: acp.UpdateAgentMessage,
-			Content:       acp.TextContent{Type: "text", Text: text},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: text},
 			MessageID: firstNonEmptyNoticeMessageID(
 				strings.TrimSpace(env.ProjectionID),
 				strings.TrimSpace(env.EventID),
@@ -592,7 +591,7 @@ func firstNonEmptyNoticeMessageID(values ...string) string {
 	return ""
 }
 
-func emitFilteredSessionUpdate(ctx context.Context, cb PromptCallbacks, notification acp.SessionNotification, outboundFilter *acpNarrativeFilter) error {
+func emitFilteredSessionUpdate(ctx context.Context, cb PromptCallbacks, notification eventstream.SessionNotification, outboundFilter *acpNarrativeFilter) error {
 	if outboundFilter != nil {
 		filtered, ok := outboundFilter.FilterNotification(notification)
 		if !ok {

@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const (
@@ -31,17 +31,17 @@ const (
 )
 
 const (
-	UpdateUserMessage   = schema.UpdateUserMessage
-	UpdateAgentMessage  = schema.UpdateAgentMessage
-	UpdateAgentThought  = schema.UpdateAgentThought
-	UpdateToolCall      = schema.UpdateToolCall
-	UpdateToolCallState = schema.UpdateToolCallInfo
-	UpdateAvailableCmds = schema.UpdateAvailableCmds
-	UpdatePlan          = schema.UpdatePlan
-	UpdateUsage         = schema.UpdateUsage
-	UpdateCurrentMode   = schema.UpdateCurrentMode
-	UpdateConfigOption  = schema.UpdateConfigOption
-	UpdateSessionInfo   = schema.UpdateSessionInfo
+	UpdateUserMessage   = eventstream.UpdateUserMessage
+	UpdateAgentMessage  = eventstream.UpdateAgentMessage
+	UpdateAgentThought  = eventstream.UpdateAgentThought
+	UpdateToolCall      = eventstream.UpdateToolCall
+	UpdateToolCallState = eventstream.UpdateToolCallInfo
+	UpdateAvailableCmds = eventstream.UpdateAvailableCmds
+	UpdatePlan          = eventstream.UpdatePlan
+	UpdateUsage         = eventstream.UpdateUsage
+	UpdateCurrentMode   = eventstream.UpdateCurrentMode
+	UpdateConfigOption  = eventstream.UpdateConfigOption
+	UpdateSessionInfo   = eventstream.UpdateSessionInfo
 )
 
 // Implementation is the tolerant external-Agent implementation descriptor.
@@ -210,18 +210,18 @@ type SessionSteeringOptions = steeringwire.SessionSteeringOptions
 type SessionSteeringRequest = steeringwire.SessionSteeringRequest
 type SessionSteeringResponse = steeringwire.SessionSteeringResponse
 type CancelRequest = acpsdk.CancelNotification
-type ToolCallLocation = schema.ToolCallLocation
-type ToolCallContent = schema.ToolCallContent
-type ToolCall = schema.ToolCall
-type ToolCallUpdate = schema.ToolCallUpdate
-type PlanEntry = schema.PlanEntry
-type PlanUpdate = schema.PlanUpdate
-type UsageUpdate = schema.UsageUpdate
+type ToolCallLocation = eventstream.ToolCallLocation
+type ToolCallContent = eventstream.ToolCallContent
+type ToolCall = eventstream.ToolCall
+type ToolCallUpdate = eventstream.ToolCallUpdate
+type PlanEntry = eventstream.PlanEntry
+type PlanUpdate = eventstream.PlanUpdate
+type UsageUpdate = eventstream.UsageUpdate
 type CurrentModeUpdate = acpsdk.SessionCurrentModeUpdate
-type RequestPermissionRequest = schema.RequestPermissionRequest
+type RequestPermissionRequest = eventstream.RequestPermissionRequest
 type RequestPermissionResponse = acpsdk.RequestPermissionResponse
-type TextContent = schema.TextContent
-type RawUpdate = schema.RawUpdate
+type TextContent = eventstream.TextContent
+type RawUpdate = eventstream.RawUpdate
 
 const (
 	SessionSteeringMetaKey = steeringwire.SessionSteeringMetaKey

@@ -12,7 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	protocoltaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
@@ -368,9 +367,9 @@ func TestSubagentRosterColdResumeLoadsOnlySelectedWorkspace(t *testing.T) {
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-old", TurnID: selectedTaskID + ":1",
 			Scope: eventstream.ScopeSubagent, ScopeID: selectedTaskID,
 			ParentTool: &eventstream.ParentToolRelation{ToolCallID: selectedCallID, ToolName: "Spawn"},
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage, MessageID: "history-answer",
-				Content: schema.TextContent{Type: "text", Text: "restored complete child history"},
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "history-answer",
+				Content: eventstream.TextContent{Type: "text", Text: "restored complete child history"},
 			},
 		}, {
 			Kind: eventstream.KindLifecycle, SessionID: "session-old", TurnID: selectedTaskID + ":1",
@@ -741,15 +740,15 @@ func TestSubagentDirectoryNewActivityReopensVisibleContentBeforeParentFinal(t *t
 	}
 	first := base
 	first.Cursor = "cursor-turn-2-1"
-	first.Update = schema.ContentChunk{
-		SessionUpdate: schema.UpdateAgentMessage, MessageID: "answer-turn-2",
-		Content: schema.TextContent{Type: "text", Text: "Here's the "},
+	first.Update = eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "answer-turn-2",
+		Content: eventstream.TextContent{Type: "text", Text: "Here's the "},
 	}
 	second := base
 	second.Cursor = "cursor-turn-2-2"
-	second.Update = schema.ContentChunk{
-		SessionUpdate: schema.UpdateAgentMessage, MessageID: "answer-turn-2",
-		Content: schema.TextContent{Type: "text", Text: "result:"},
+	second.Update = eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "answer-turn-2",
+		Content: eventstream.TextContent{Type: "text", Text: "result:"},
 	}
 	go func() {
 		subscription.events <- first

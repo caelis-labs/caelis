@@ -6,7 +6,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestProjectSessionEventEnvelopeKeepsStreamingAndFinalMessageID(t *testing.T) {
@@ -42,15 +41,15 @@ func TestProjectSessionEventEnvelopeKeepsStreamingAndFinalMessageID(t *testing.T
 	var texts []string
 	for _, event := range append(streamChunks, final) {
 		for _, env := range ProjectSessionEventEnvelope(base, event) {
-			chunk, ok := env.Update.(schema.ContentChunk)
-			if !ok || chunk.SessionUpdate != schema.UpdateAgentMessage {
+			chunk, ok := env.Update.(eventstream.ContentChunk)
+			if !ok || chunk.SessionUpdate != eventstream.UpdateAgentMessage {
 				continue
 			}
 			if chunk.MessageID == "" {
 				t.Fatalf("projected agent_message_chunk missing messageId: %#v", chunk)
 			}
 			wireIDs = append(wireIDs, chunk.MessageID)
-			if content, ok := chunk.Content.(schema.TextContent); ok {
+			if content, ok := chunk.Content.(eventstream.TextContent); ok {
 				texts = append(texts, content.Text)
 			}
 		}
@@ -109,8 +108,8 @@ func TestProjectSessionEventEnvelopeKeepsPreToolAndPostToolMessageIDsDistinct(t 
 	var agentMessageIDs []string
 	for _, event := range events {
 		for _, env := range ProjectSessionEventEnvelope(base, event) {
-			chunk, ok := env.Update.(schema.ContentChunk)
-			if !ok || chunk.SessionUpdate != schema.UpdateAgentMessage {
+			chunk, ok := env.Update.(eventstream.ContentChunk)
+			if !ok || chunk.SessionUpdate != eventstream.UpdateAgentMessage {
 				continue
 			}
 			if chunk.MessageID == "" {
@@ -176,11 +175,11 @@ func TestProjectSessionEventEnvelopeReplayPreservesCanonicalMessageID(t *testing
 	if len(live) == 0 || len(replay) == 0 {
 		t.Fatalf("live=%#v replay=%#v, want narrative projection", live, replay)
 	}
-	liveChunk, ok := live[0].Update.(schema.ContentChunk)
+	liveChunk, ok := live[0].Update.(eventstream.ContentChunk)
 	if !ok || liveChunk.MessageID != "replay-message-1" {
 		t.Fatalf("live projection = %#v, want messageId replay-message-1", live[0].Update)
 	}
-	replayChunk, ok := replay[0].Update.(schema.ContentChunk)
+	replayChunk, ok := replay[0].Update.(eventstream.ContentChunk)
 	if !ok || replayChunk.MessageID != "replay-message-1" {
 		t.Fatalf("replay projection = %#v, want messageId replay-message-1", replay[0].Update)
 	}

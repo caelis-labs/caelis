@@ -8,7 +8,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
@@ -66,9 +65,9 @@ func foregroundRunningActivityEvent(env eventstream.Envelope, event TranscriptEv
 		return TranscriptEvent{}, false
 	}
 	switch env.Update.(type) {
-	case schema.ToolCall:
+	case eventstream.ToolCall:
 		return event, true
-	case schema.ToolCallUpdate:
+	case eventstream.ToolCallUpdate:
 		if !env.Final && !event.Final {
 			return TranscriptEvent{}, false
 		}
@@ -189,13 +188,13 @@ func (m *Model) applyToolRunningActivity(event TranscriptEvent) {
 		// provider tools. Terminal metadata supplements only an otherwise generic
 		// category; it must not turn a read/edit/think operation into a shell wait.
 		switch strings.ToLower(strings.TrimSpace(event.ToolKind)) {
-		case schema.ToolKindExecute:
+		case eventstream.ToolKindExecute:
 			m.setRunningToolActivity(runningPhaseToolWait, runningTargetShell, key, event.ToolCallID)
-		case schema.ToolKindSearch:
+		case eventstream.ToolKindSearch:
 			m.setRunningToolActivity(runningPhaseSearch, "", key, event.ToolCallID)
-		case schema.ToolKindFetch:
+		case eventstream.ToolKindFetch:
 			m.setRunningToolActivity(runningPhaseFetch, "", key, event.ToolCallID)
-		case schema.ToolKindOther, "":
+		case eventstream.ToolKindOther, "":
 			if standardACPWaitControl(event) {
 				m.setRunningToolActivity(runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
 			} else if event.ToolTerminal {
@@ -210,7 +209,7 @@ func (m *Model) applyToolRunningActivity(event TranscriptEvent) {
 // remains authoritative and title/input only refine this presentation choice.
 func standardACPWaitControl(event TranscriptEvent) bool {
 	return strings.TrimSpace(event.ToolName) == "" &&
-		strings.EqualFold(strings.TrimSpace(event.ToolKind), schema.ToolKindOther) &&
+		strings.EqualFold(strings.TrimSpace(event.ToolKind), eventstream.ToolKindOther) &&
 		strings.EqualFold(strings.TrimSpace(event.ToolTitle), "wait") &&
 		strings.EqualFold(strings.TrimSpace(event.ToolTaskAction), "wait") &&
 		strings.EqualFold(strings.TrimSpace(event.ToolTaskTargetKind), "subagent")

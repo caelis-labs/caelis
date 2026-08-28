@@ -7,13 +7,13 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // DecodePermissionRequest converts the ACP permission wire request into
 // normalized SDK approval semantics.
-func DecodePermissionRequest(wire schema.RequestPermissionRequest) (*session.ProtocolApproval, error) {
+func DecodePermissionRequest(wire eventstream.RequestPermissionRequest) (*session.ProtocolApproval, error) {
 	toolCall := permissionToolCallFromWire(wire.ToolCall)
 	meta := metautil.Merge(wire.ToolCall.Meta, wire.Meta)
 	toolCall.Name = canonicalPermissionToolName(meta, toolCall)
@@ -30,18 +30,18 @@ func DecodePermissionRequest(wire schema.RequestPermissionRequest) (*session.Pro
 
 // EncodePermissionRequest converts normalized SDK approval semantics into the
 // standard ACP request_permission wire shape.
-func EncodePermissionRequest(ref session.SessionRef, approval *session.ProtocolApproval, meta map[string]any) (schema.RequestPermissionRequest, error) {
+func EncodePermissionRequest(ref session.SessionRef, approval *session.ProtocolApproval, meta map[string]any) (eventstream.RequestPermissionRequest, error) {
 	if approval == nil {
-		return schema.RequestPermissionRequest{}, fmt.Errorf("control/acppermission: permission approval is required")
+		return eventstream.RequestPermissionRequest{}, fmt.Errorf("control/acppermission: permission approval is required")
 	}
 	normalized := session.CloneProtocolApproval(*approval)
 	title := permissionOptionalString(normalized.ToolCall.Title)
 	kind := permissionOptionalString(normalized.ToolCall.Kind)
 	status := permissionOptionalString(normalized.ToolCall.Status)
-	wire := schema.RequestPermissionRequest{
+	wire := eventstream.RequestPermissionRequest{
 		SessionID: strings.TrimSpace(ref.SessionID),
-		ToolCall: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: normalized.ToolCall.ID,
+		ToolCall: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: normalized.ToolCall.ID,
 			Title: title, Kind: kind, Status: status,
 			RawInput: permissionMapOrNil(normalized.ToolCall.RawInput), RawOutput: permissionMapOrNil(normalized.ToolCall.RawOutput),
 			Content: permissionToolContentToWire(normalized.ToolCall.Content),
@@ -61,7 +61,7 @@ func EncodePermissionRequest(ref session.SessionRef, approval *session.ProtocolA
 	return wire, nil
 }
 
-func permissionToolCallFromWire(wire schema.ToolCallUpdate) session.ProtocolToolCall {
+func permissionToolCallFromWire(wire eventstream.ToolCallUpdate) session.ProtocolToolCall {
 	var content []session.ProtocolToolCallContent
 	if len(wire.Content) > 0 {
 		content = make([]session.ProtocolToolCallContent, 0, len(wire.Content))
@@ -87,13 +87,13 @@ func permissionToolCallFromWire(wire schema.ToolCallUpdate) session.ProtocolTool
 	}
 }
 
-func permissionToolContentToWire(in []session.ProtocolToolCallContent) []schema.ToolCallContent {
+func permissionToolContentToWire(in []session.ProtocolToolCallContent) []eventstream.ToolCallContent {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]schema.ToolCallContent, 0, len(in))
+	out := make([]eventstream.ToolCallContent, 0, len(in))
 	for _, item := range in {
-		out = append(out, schema.ToolCallContent{
+		out = append(out, eventstream.ToolCallContent{
 			Type:       item.Type,
 			Content:    item.Content,
 			TerminalID: item.TerminalID,

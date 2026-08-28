@@ -13,7 +13,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
@@ -35,24 +34,24 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 		SessionID: "session-1",
 		TurnID:    "turn-1",
 		Scope:     eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "spawn-1",
 			Title:         "Spawn explorer: inspect task streams",
-			Kind:          schema.ToolKindExecute,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindExecute,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect task streams"},
 			Meta:          acpToolNameMeta("Spawn"),
 		},
 	})
-	running := schema.ToolStatusInProgress
+	running := eventstream.ToolStatusInProgress
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
 		TurnID:    "turn-1",
 		Scope:     eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "spawn-1",
 			Status:        &running,
 			RawOutput:     map[string]any{"handle": "zuri", "state": "running"},
@@ -60,7 +59,7 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 		},
 	})
 
-	child := func(update schema.Update) eventstream.Envelope {
+	child := func(update eventstream.Update) eventstream.Envelope {
 		return eventstream.Envelope{
 			Kind:      eventstream.KindSessionUpdate,
 			SessionID: "session-1",
@@ -75,37 +74,37 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 			Update: update,
 		}
 	}
-	model = applyACPEnvelopeForTest(t, model, child(schema.ContentChunk{
-		SessionUpdate: schema.UpdateAgentThought,
+	model = applyACPEnvelopeForTest(t, model, child(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentThought,
 		MessageID:     "thought-1",
-		Content:       schema.TextContent{Type: "text", Text: "checking the task directory"},
+		Content:       eventstream.TextContent{Type: "text", Text: "checking the task directory"},
 	}))
-	model = applyACPEnvelopeForTest(t, model, child(schema.PlanUpdate{
-		SessionUpdate: schema.UpdatePlan,
-		Entries: []schema.PlanEntry{{
+	model = applyACPEnvelopeForTest(t, model, child(eventstream.PlanUpdate{
+		SessionUpdate: eventstream.UpdatePlan,
+		Entries: []eventstream.PlanEntry{{
 			Content: "inspect stream ownership",
 			Status:  "in_progress",
 		}},
 	}))
-	model = applyACPEnvelopeForTest(t, model, child(schema.ToolCall{
-		SessionUpdate: schema.UpdateToolCall,
+	model = applyACPEnvelopeForTest(t, model, child(eventstream.ToolCall{
+		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    "child-tool-1",
 		Title:         "Search taskstream",
-		Kind:          schema.ToolKindRead,
-		Status:        schema.ToolStatusInProgress,
+		Kind:          eventstream.ToolKindRead,
+		Status:        eventstream.ToolStatusInProgress,
 		RawInput:      map[string]any{"query": "taskstream"},
 	}))
-	completed := schema.ToolStatusCompleted
-	model = applyACPEnvelopeForTest(t, model, child(schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+	completed := eventstream.ToolStatusCompleted
+	model = applyACPEnvelopeForTest(t, model, child(eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    "child-tool-1",
 		Status:        &completed,
 		RawOutput:     map[string]any{"matches": 4},
 	}))
-	model = applyACPEnvelopeForTest(t, model, child(schema.ContentChunk{
-		SessionUpdate: schema.UpdateAgentMessage,
+	model = applyACPEnvelopeForTest(t, model, child(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentMessage,
 		MessageID:     "answer-1",
-		Content:       schema.TextContent{Type: "text", Text: "The stream is Control-owned."},
+		Content:       eventstream.TextContent{Type: "text", Text: "The stream is Control-owned."},
 	}))
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindNotice,
@@ -196,12 +195,12 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 			SessionID: "session-1",
 			TurnID:    "parent-turn",
 			Scope:     eventstream.ScopeMain,
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall,
 				ToolCallID:    "spawn-1",
 				Title:         "Spawn breeze: inspect process state",
-				Kind:          schema.ToolKindExecute,
-				Status:        schema.ToolStatusInProgress,
+				Kind:          eventstream.ToolKindExecute,
+				Status:        eventstream.ToolStatusInProgress,
 				RawInput:      map[string]any{"agent": "breeze", "prompt": "inspect process state"},
 				Meta:          acpToolNameMeta("Spawn"),
 			},
@@ -218,12 +217,12 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 			ToolCallID: "spawn-1",
 			ToolName:   "Spawn",
 		},
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "child-command-1",
 			Title:         "ps aux | head -5",
-			Kind:          schema.ToolKindExecute,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindExecute,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": "ps aux | head -5"},
 		},
 	}

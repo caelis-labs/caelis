@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -210,7 +209,7 @@ func TestSparseTaskWaitFinalClosesInvocation(t *testing.T) {
 func TestParticipantACPEventsDriveForegroundActivity(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
 	m.beginLiveTurn(SubmissionModeDefault, false, time.Unix(100, 0))
-	apply := func(update schema.Update) {
+	apply := func(update eventstream.Update) {
 		t.Helper()
 		m = applyACPEnvelopeForTest(t, m, eventstream.Envelope{
 			Kind:          eventstream.KindSessionUpdate,
@@ -224,29 +223,29 @@ func TestParticipantACPEventsDriveForegroundActivity(t *testing.T) {
 		})
 	}
 
-	apply(schema.ContentChunk{
-		SessionUpdate: schema.UpdateAgentThought,
-		Content:       schema.TextContent{Type: "text", Text: "inspecting the change"},
+	apply(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentThought,
+		Content:       eventstream.TextContent{Type: "text", Text: "inspecting the change"},
 	})
 	if m.runningActivity.Phase != runningPhaseThinking {
 		t.Fatalf("participant thought activity = %#v, want Thinking", m.runningActivity)
 	}
 
-	apply(schema.ToolCall{
-		SessionUpdate: schema.UpdateToolCall,
+	apply(eventstream.ToolCall{
+		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    "review-command-1",
 		Title:         "go test ./...",
-		Kind:          schema.ToolKindExecute,
-		Status:        schema.ToolStatusInProgress,
+		Kind:          eventstream.ToolKindExecute,
+		Status:        eventstream.ToolStatusInProgress,
 		RawInput:      map[string]any{"command": "go test ./..."},
 	})
 	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetShell {
 		t.Fatalf("participant tool activity = %#v, want Waiting on shell", m.runningActivity)
 	}
 
-	completed := schema.ToolStatusCompleted
-	apply(schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+	completed := eventstream.ToolStatusCompleted
+	apply(eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    "review-command-1",
 		Status:        &completed,
 	})
@@ -254,9 +253,9 @@ func TestParticipantACPEventsDriveForegroundActivity(t *testing.T) {
 		t.Fatalf("participant tool final activity = %#v, want completed invocation closed", m.runningActivity)
 	}
 
-	apply(schema.ContentChunk{
-		SessionUpdate: schema.UpdateAgentMessage,
-		Content:       schema.TextContent{Type: "text", Text: "review complete"},
+	apply(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentMessage,
+		Content:       eventstream.TextContent{Type: "text", Text: "review complete"},
 	})
 	if m.runningActivity.Phase != runningPhaseResponding {
 		t.Fatalf("participant response activity = %#v, want Responding", m.runningActivity)
@@ -274,7 +273,7 @@ func TestStandardACPKindPrecedesTerminalMetadataInHint(t *testing.T) {
 
 	m.applyTranscriptRunningActivity(TranscriptEvent{
 		Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
-		ToolCallID: "read-with-terminal-meta", ToolKind: schema.ToolKindRead, ToolTerminal: true,
+		ToolCallID: "read-with-terminal-meta", ToolKind: eventstream.ToolKindRead, ToolTerminal: true,
 	})
 	if m.runningActivity != before {
 		t.Fatalf("read activity = %#v, want standard kind to preserve %#v", m.runningActivity, before)
@@ -282,7 +281,7 @@ func TestStandardACPKindPrecedesTerminalMetadataInHint(t *testing.T) {
 
 	m.applyTranscriptRunningActivity(TranscriptEvent{
 		Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
-		ToolCallID: "search-1", ToolKind: schema.ToolKindSearch,
+		ToolCallID: "search-1", ToolKind: eventstream.ToolKindSearch,
 	})
 	if m.runningActivity.Phase != runningPhaseSearch {
 		t.Fatalf("search activity = %#v, want standard search phase", m.runningActivity)
@@ -298,7 +297,7 @@ func TestStandardACPWaitUsesTaskWaitHintSemantics(t *testing.T) {
 	m.refreshRunningActivity()
 	wait := TranscriptEvent{
 		Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
-		ToolCallID: "codex-wait-1", ToolKind: schema.ToolKindOther, ToolTitle: "wait",
+		ToolCallID: "codex-wait-1", ToolKind: eventstream.ToolKindOther, ToolTitle: "wait",
 		ToolTaskAction: "wait", ToolTaskTargetKind: "subagent",
 	}
 	m.applyTranscriptRunningActivity(wait)
@@ -326,7 +325,7 @@ func TestCodexWaitSourcesRemainDistinct(t *testing.T) {
 			name: "asynchronous shell wait",
 			event: TranscriptEvent{
 				Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
-				ToolCallID: "shell-wait-1", ToolKind: schema.ToolKindExecute,
+				ToolCallID: "shell-wait-1", ToolKind: eventstream.ToolKindExecute,
 				ToolTitle: "wait", ToolTerminal: true,
 			},
 			wantPhase: runningPhaseToolWait, wantTarget: runningTargetShell,
@@ -335,7 +334,7 @@ func TestCodexWaitSourcesRemainDistinct(t *testing.T) {
 			name: "collaboration wait",
 			event: TranscriptEvent{
 				Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
-				ToolCallID: "collab-wait-1", ToolKind: schema.ToolKindOther,
+				ToolCallID: "collab-wait-1", ToolKind: eventstream.ToolKindOther,
 				ToolTitle: "wait", ToolTaskAction: "wait", ToolTaskTargetKind: "subagent",
 			},
 			wantPhase: runningPhaseToolWait, wantTarget: runningTargetSubagent, wantHidden: true,
@@ -344,7 +343,7 @@ func TestCodexWaitSourcesRemainDistinct(t *testing.T) {
 			name: "provider sleep",
 			event: TranscriptEvent{
 				Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
-				ToolCallID: "sleep-1", ToolKind: schema.ToolKindOther, ToolTitle: "Wait",
+				ToolCallID: "sleep-1", ToolKind: eventstream.ToolKindOther, ToolTitle: "Wait",
 			},
 			wantPhase: runningPhaseModelWait,
 		},
@@ -352,7 +351,7 @@ func TestCodexWaitSourcesRemainDistinct(t *testing.T) {
 			name: "untyped dynamic wait",
 			event: TranscriptEvent{
 				Kind: TranscriptEventTool, Scope: ACPProjectionParticipant,
-				ToolCallID: "dynamic-wait-1", ToolKind: schema.ToolKindOther,
+				ToolCallID: "dynamic-wait-1", ToolKind: eventstream.ToolKindOther,
 				ToolTitle: "wait", ToolTaskAction: "wait",
 			},
 			wantPhase: runningPhaseModelWait,

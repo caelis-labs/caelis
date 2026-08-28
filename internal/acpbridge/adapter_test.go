@@ -7,7 +7,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestSourceEventFromAgentAdaptsNativeACPEnvelope(t *testing.T) {
@@ -15,7 +14,7 @@ func TestSourceEventFromAgentAdaptsNativeACPEnvelope(t *testing.T) {
 
 	envelope := &eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.RawUpdate{
+		Update: eventstream.RawUpdate{
 			SessionUpdate: "vendor/custom",
 			Raw:           []byte(`{"sessionUpdate":"vendor/custom"}`),
 		},
@@ -38,7 +37,7 @@ func TestSourceEventFromAgentAdaptsNativeACPEnvelope(t *testing.T) {
 	if !adapted.CanonicalContentAlreadyPublished.Has(agent.PublishedAssistantMessage) {
 		t.Fatal("adapted source event lost live content ownership")
 	}
-	if update, ok := adapted.ACP.Update.(schema.RawUpdate); !ok || update.SessionUpdate != "vendor/custom" {
+	if update, ok := adapted.ACP.Update.(eventstream.RawUpdate); !ok || update.SessionUpdate != "vendor/custom" {
 		t.Fatalf("adapted ACP update = %#v, want vendor/custom passthrough", adapted.ACP.Update)
 	}
 }

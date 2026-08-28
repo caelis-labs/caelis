@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
@@ -16,17 +15,17 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1",
-			Title: "Spawn orbit: inspect", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1",
+			Title: "Spawn orbit: inspect", Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"agent": "orbit", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
-	running := schema.ToolStatusInProgress
+	running := eventstream.ToolStatusInProgress
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
 			RawOutput: map[string]any{"handle": "command-48", "state": "running"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
@@ -36,9 +35,9 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-wait-1",
-			Title: "Task wait command-48", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "task-wait-1",
+			Title: "Task wait command-48", Kind: eventstream.ToolKindOther, Status: eventstream.ToolStatusInProgress,
 			RawInput: taskInput, Meta: acpToolNameMeta("Task"),
 		},
 	})
@@ -53,15 +52,15 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 	} else if physical := physicalTranscriptEventsForTest(blocks[0].Events); len(physical) != 1 || physical[0].CallID != "spawn-1" {
 		t.Fatalf("main events = %#v, want only the physical Spawn row", blocks[0].Events)
 	}
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
 			ToolName:   "Spawn",
 		},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "task-wait-1", Status: &completed,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "task-wait-1", Status: &completed,
 			RawInput: taskInput, RawOutput: map[string]any{
 				"action": "wait", "handle": "command-48", "target_kind": "subagent",
 				"state": "running", "parent_call": "spawn-1", "parent_tool": "Spawn",
@@ -80,9 +79,9 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-cancel-1",
-			Title: "Task cancel command-48", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "task-cancel-1",
+			Title: "Task cancel command-48", Kind: eventstream.ToolKindOther, Status: eventstream.ToolStatusInProgress,
 			RawInput: cancelInput, Meta: acpToolNameMeta("Task"),
 		},
 	})
@@ -91,8 +90,8 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "task-cancel-1", Status: &completed,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "task-cancel-1", Status: &completed,
 			RawInput: cancelInput, RawOutput: map[string]any{
 				"action": "cancel", "handle": "command-48", "target_kind": "subagent", "state": "cancelled",
 			},
@@ -114,8 +113,8 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 			ToolCallID: "spawn-1",
 			ToolName:   "Spawn",
 		},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "task-wait-1", Status: &completed,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "task-wait-1", Status: &completed,
 			RawInput: taskInput, RawOutput: map[string]any{
 				"action": "wait", "handle": "command-48", "target_kind": "subagent",
 				"state": "completed", "parent_call": "spawn-1", "parent_tool": "Spawn", "final_message": "done",
@@ -128,8 +127,8 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &completed,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &completed,
 			RawOutput: map[string]any{"handle": "command-48", "state": "completed"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
@@ -137,19 +136,19 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		t.Fatalf("runningActivity = %#v, want model waiting after the Spawn and Task controls complete", model.runningActivity)
 	}
 
-	failed := schema.ToolStatusFailed
+	failed := eventstream.ToolStatusFailed
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-cancel-failed",
-			Title: "Task cancel command-48", Kind: schema.ToolKindOther, Status: schema.ToolStatusInProgress,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "task-cancel-failed",
+			Title: "Task cancel command-48", Kind: eventstream.ToolKindOther, Status: eventstream.ToolStatusInProgress,
 			RawInput: cancelInput, Meta: acpToolNameMeta("Task"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "task-cancel-failed", Status: &failed,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "task-cancel-failed", Status: &failed,
 			RawInput: cancelInput, RawOutput: map[string]any{
 				"action": "cancel", "handle": "command-48", "target_kind": "subagent", "error": "cancel denied",
 			},
@@ -184,21 +183,21 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 	}
 	apply(eventstream.Envelope{
 		EventID: "spawn-start",
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "spawn-1",
 			Title:         "Spawn orbit: inspect",
-			Kind:          schema.ToolKindExecute,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindExecute,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "orbit", "prompt": "inspect"},
 			Meta:          acpToolNameMeta("Spawn"),
 		},
 	})
-	running := schema.ToolStatusInProgress
+	running := eventstream.ToolStatusInProgress
 	apply(eventstream.Envelope{
 		EventID: "spawn-running",
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "spawn-1",
 			Status:        &running,
 			RawOutput:     map[string]any{"handle": "orbit", "state": "running"},
@@ -207,23 +206,23 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 	})
 	apply(eventstream.Envelope{
 		EventID: "reasoning-1", ProjectionID: "acp-projection:cmVhc29uaW5nLTE:0", Final: true,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentThought,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentThought,
 			MessageID:     "reasoning-1",
-			Content:       schema.TextContent{Type: "text", Text: "The sub-agent has been spawned. I will wait."},
+			Content:       eventstream.TextContent{Type: "text", Text: "The sub-agent has been spawned. I will wait."},
 		},
 	})
 
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	firstWaitInput := map[string]any{"action": "wait", "handle": "orbit"}
 	apply(eventstream.Envelope{
 		EventID: "wait-1-start",
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "wait-1",
 			Title:         "Task wait orbit",
-			Kind:          schema.ToolKindOther,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindOther,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      firstWaitInput,
 			Meta:          acpToolNameMeta("Task"),
 		},
@@ -234,8 +233,8 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 			ToolCallID: "spawn-1",
 			ToolName:   "Spawn",
 		},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "wait-1",
 			Status:        &completed,
 			RawInput:      firstWaitInput,
@@ -248,22 +247,22 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 	})
 	apply(eventstream.Envelope{
 		EventID: "reasoning-2", ProjectionID: "acp-projection:cmVhc29uaW5nLTI:0", Final: true,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentThought,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentThought,
 			MessageID:     "reasoning-2",
-			Content:       schema.TextContent{Type: "text", Text: "The task is still running. I will wait again."},
+			Content:       eventstream.TextContent{Type: "text", Text: "The task is still running. I will wait again."},
 		},
 	})
 
 	secondWaitInput := map[string]any{"action": "wait", "handle": "orbit"}
 	apply(eventstream.Envelope{
 		EventID: "wait-2-start",
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "wait-2",
 			Title:         "Task wait orbit",
-			Kind:          schema.ToolKindOther,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindOther,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      secondWaitInput,
 			Meta:          acpToolNameMeta("Task"),
 		},
@@ -274,8 +273,8 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 			ToolCallID: "spawn-1",
 			ToolName:   "Spawn",
 		},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "wait-2",
 			Status:        &completed,
 			RawInput:      secondWaitInput,
@@ -289,18 +288,18 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 	})
 	apply(eventstream.Envelope{
 		EventID: "reasoning-3", ProjectionID: "acp-projection:cmVhc29uaW5nLTM:0", Final: true,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentThought,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentThought,
 			MessageID:     "reasoning-3",
-			Content:       schema.TextContent{Type: "text", Text: "The sub-agent completed. I will verify the result."},
+			Content:       eventstream.TextContent{Type: "text", Text: "The sub-agent completed. I will verify the result."},
 		},
 	})
 	apply(eventstream.Envelope{
 		EventID: "assistant-1", ProjectionID: "acp-projection:YXNzaXN0YW50LTE:0", Final: true,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
 			MessageID:     "assistant-1",
-			Content:       schema.TextContent{Type: "text", Text: "Verification complete."},
+			Content:       eventstream.TextContent{Type: "text", Text: "Verification complete."},
 		},
 	})
 

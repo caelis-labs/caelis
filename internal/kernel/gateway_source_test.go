@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestForwardSourceEventsKeepsObservationGapTransientAndContinues(t *testing.T) {
@@ -127,8 +126,8 @@ func TestForwardSourceEventsPublishesTaskOwnedRunCommandFinalWithoutTerminalByte
 	if len(got) != 1 {
 		t.Fatalf("live source projection = %#v, want one final state update", got)
 	}
-	update, ok := got[0].Update.(schema.ToolCallUpdate)
-	if !ok || stringPtrValue(update.Status) != schema.ToolStatusCompleted {
+	update, ok := got[0].Update.(eventstream.ToolCallUpdate)
+	if !ok || stringPtrValue(update.Status) != eventstream.ToolStatusCompleted {
 		t.Fatalf("live final update = %#v, want completed ToolCallUpdate", got[0].Update)
 	}
 	if _, ok := metautil.TerminalOutput(update.Meta); ok {
@@ -172,8 +171,8 @@ func TestForwardSourceEventsKeepsAnswerWhenOnlyThoughtWasPublished(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || eventstream.UpdateType(got[0].Update) != schema.UpdateAgentThought ||
-		eventstream.UpdateType(got[1].Update) != schema.UpdateAgentMessage {
+	if len(got) != 2 || eventstream.UpdateType(got[0].Update) != eventstream.UpdateAgentThought ||
+		eventstream.UpdateType(got[1].Update) != eventstream.UpdateAgentMessage {
 		t.Fatalf("live source projection = %#v, want thought delta followed by the unpublished final answer", got)
 	}
 }
@@ -185,10 +184,10 @@ func TestForwardSourceEventsPublishesPairedNativeContentBeforeCanonicalUsage(t *
 	message := model.NewTextMessage(model.RoleAssistant, "complete")
 	native := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
 			MessageID:     "message-1",
-			Content:       schema.TextContent{Type: "text", Text: "delta"},
+			Content:       eventstream.TextContent{Type: "text", Text: "delta"},
 		},
 	}
 	source := acpbridge.SourceStream{Events: func(yield func(acpbridge.SourceEvent, error) bool) {
@@ -209,8 +208,8 @@ func TestForwardSourceEventsPublishesPairedNativeContentBeforeCanonicalUsage(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || eventstream.UpdateType(got[0].Update) != schema.UpdateAgentMessage ||
-		eventstream.UpdateType(got[1].Update) != schema.UpdateUsage {
+	if len(got) != 2 || eventstream.UpdateType(got[0].Update) != eventstream.UpdateAgentMessage ||
+		eventstream.UpdateType(got[1].Update) != eventstream.UpdateUsage {
 		t.Fatalf("paired source projection = %#v, want native content followed by canonical usage", got)
 	}
 	if got[1].ProjectionID != "acp-projection:YXNzaXN0YW50LWZpbmFs:1" {
@@ -223,11 +222,11 @@ func TestForwardSourceEventsKeepsPairedNativeTerminalAsSingleLiveAuthority(t *te
 
 	handle := newTestTurnHandle()
 	meta := metautil.WithTerminalOutput(nil, "command-1", "exact terminal delta\n")
-	status := schema.ToolStatusInProgress
+	status := eventstream.ToolStatusInProgress
 	native := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "command-1",
 			Status:        &status,
 			Meta:          meta,
@@ -239,7 +238,7 @@ func TestForwardSourceEventsKeepsPairedNativeTerminalAsSingleLiveAuthority(t *te
 				ID:   "terminal-delta",
 				Type: session.EventTypeToolCall,
 				Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-					SessionUpdate: schema.UpdateToolCallInfo,
+					SessionUpdate: eventstream.UpdateToolCallInfo,
 					ToolCallID:    "command-1",
 					Status:        status,
 					Meta:          meta,
@@ -257,7 +256,7 @@ func TestForwardSourceEventsKeepsPairedNativeTerminalAsSingleLiveAuthority(t *te
 	if len(got) != 1 {
 		t.Fatalf("paired terminal projection = %#v, want one native terminal delta", got)
 	}
-	update, ok := got[0].Update.(schema.ToolCallUpdate)
+	update, ok := got[0].Update.(eventstream.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("terminal update = %T, want ToolCallUpdate", got[0].Update)
 	}
@@ -273,7 +272,7 @@ func TestForwardSourceEventsDoesNotDuplicateNativeUsage(t *testing.T) {
 	handle := newTestTurnHandle()
 	native := eventstream.Envelope{
 		Kind:   eventstream.KindSessionUpdate,
-		Update: schema.UsageUpdate{SessionUpdate: schema.UpdateUsage, Used: 9, Size: 9},
+		Update: eventstream.UsageUpdate{SessionUpdate: eventstream.UpdateUsage, Used: 9, Size: 9},
 	}
 	source := acpbridge.SourceStream{Events: func(yield func(acpbridge.SourceEvent, error) bool) {
 		yield(acpbridge.SourceEvent{
@@ -293,7 +292,7 @@ func TestForwardSourceEventsDoesNotDuplicateNativeUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || eventstream.UpdateType(got[0].Update) != schema.UpdateUsage {
+	if len(got) != 1 || eventstream.UpdateType(got[0].Update) != eventstream.UpdateUsage {
 		t.Fatalf("paired native usage = %#v, want exactly one usage update", got)
 	}
 }

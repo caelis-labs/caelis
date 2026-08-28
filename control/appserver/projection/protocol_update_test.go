@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 func TestProtocolToolUpdateProjectionClonesAndPreservesWireFields(t *testing.T) {
@@ -12,11 +12,11 @@ func TestProtocolToolUpdateProjectionClonesAndPreservesWireFields(t *testing.T) 
 
 	line := 17
 	protocolUpdate := &session.ProtocolUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    "call-1",
 		Title:         " Tool result ",
-		Kind:          schema.ToolKindRead,
-		Status:        schema.ToolStatusCompleted,
+		Kind:          eventstream.ToolKindRead,
+		Status:        eventstream.ToolStatusCompleted,
 		RawInput:      map[string]any{"nested": map[string]any{"value": "before"}},
 		Content: []session.ProtocolToolCallContent{{
 			Type: "content", Content: map[string]any{"nested": map[string]any{"value": "before"}},
@@ -31,7 +31,7 @@ func TestProtocolToolUpdateProjectionClonesAndPreservesWireFields(t *testing.T) 
 	if err != nil || len(updates) != 1 {
 		t.Fatalf("ProjectEvent() = %#v, %v; want one update", updates, err)
 	}
-	wire, ok := updates[0].(schema.ToolCallUpdate)
+	wire, ok := updates[0].(eventstream.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("ProjectEvent() update = %T, want ToolCallUpdate", updates[0])
 	}

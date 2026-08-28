@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -19,12 +18,12 @@ func TestProjectACPToolCallFoldsLongCommandAndKeepsFullArgs(t *testing.T) {
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "command-1",
 			Title:         "RunCommand python3",
-			Kind:          schema.ToolKindExecute,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindExecute,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": command},
 			Meta:          acpToolNameMeta("RunCommand"),
 		},
@@ -50,12 +49,12 @@ func TestProjectACPToolCallFoldsLongCommandAndKeepsFullArgs(t *testing.T) {
 	generic := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "command-generic",
 			Title:         "Shell",
-			Kind:          schema.ToolKindExecute,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindExecute,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": singleLine},
 		},
 	})
@@ -71,12 +70,12 @@ func TestProjectACPToolCallFoldsLongCommandAndKeepsFullArgs(t *testing.T) {
 	short := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "command-2",
 			Title:         "RunCommand go test ./...",
-			Kind:          schema.ToolKindExecute,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindExecute,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": "go test ./..."},
 			Meta:          acpToolNameMeta("RunCommand"),
 		},
@@ -93,12 +92,12 @@ func TestProjectACPToolCallFoldsLongCommandFromTitleWithoutRawInput(t *testing.T
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "command-title-only",
 			Title:         "RunCommand " + command,
-			Kind:          schema.ToolKindExecute,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindExecute,
+			Status:        eventstream.ToolStatusInProgress,
 			Meta:          acpToolNameMeta("RunCommand"),
 		},
 	})
@@ -125,25 +124,25 @@ func TestLongCommandHeaderClickExpandsAndCollapsesCommand(t *testing.T) {
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "command-1",
 			Title:         "RunCommand python3",
-			Kind:          schema.ToolKindExecute,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindExecute,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": command},
 			Meta:          acpToolNameMeta("RunCommand"),
 		},
 	})
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	title := "RunCommand python3"
-	kind := schema.ToolKindExecute
+	kind := eventstream.ToolKindExecute
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
 		Final:     true,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "command-1",
 			Title:         &title,
 			Kind:          &kind,

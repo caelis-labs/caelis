@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestForwardTurnEventStreamCoalescesNarrativeWithoutCorruptingEnvelopeIdentity(t *testing.T) {
@@ -107,10 +106,10 @@ func narrativeBatchEnvelope(eventID string, cursor string, sequence uint64, mess
 			Generation: "generation-1", Sequence: sequence,
 		}},
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
 			MessageID:     messageID,
-			Content:       schema.TextContent{Type: "text", Text: text},
+			Content:       eventstream.TextContent{Type: "text", Text: text},
 		},
 	}
 }
@@ -126,13 +125,13 @@ func requireNarrativeBatchEnvelope(t *testing.T, message tea.Msg) eventstream.En
 
 func narrativeBatchText(t *testing.T, envelope eventstream.Envelope) string {
 	t.Helper()
-	update, ok := envelope.Update.(schema.ContentChunk)
+	update, ok := envelope.Update.(eventstream.ContentChunk)
 	if !ok {
-		t.Fatalf("update = %T, want schema.ContentChunk", envelope.Update)
+		t.Fatalf("update = %T, want eventstream.ContentChunk", envelope.Update)
 	}
-	content, ok := update.Content.(schema.TextContent)
+	content, ok := update.Content.(eventstream.TextContent)
 	if !ok {
-		t.Fatalf("content = %T, want schema.TextContent", update.Content)
+		t.Fatalf("content = %T, want eventstream.TextContent", update.Content)
 	}
 	return content.Text
 }

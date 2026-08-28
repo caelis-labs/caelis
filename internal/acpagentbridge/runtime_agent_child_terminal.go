@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // acpChildTerminalProjector is the ACP stdio compatibility renderer for
@@ -196,13 +195,13 @@ func (p *acpChildTerminalProjector) childTurnOpenLocked(sessionID, toolCallID, t
 // standard ACP payload that contributes to the child's FinalResponse; thought,
 // plan, nested tool, and notice updates remain process-local. No update is
 // emitted until typed child lifecycle proves the Turn terminal.
-func (p *acpChildTerminalProjector) project(env eventstream.Envelope, fallbackSessionID string) (acp.SessionNotification, bool) {
+func (p *acpChildTerminalProjector) project(env eventstream.Envelope, fallbackSessionID string) (eventstream.SessionNotification, bool) {
 	if p == nil || !isACPChildTerminalEnvelope(env) {
-		return acp.SessionNotification{}, false
+		return eventstream.SessionNotification{}, false
 	}
 	parentCallID := strings.TrimSpace(env.ParentTool.ToolCallID)
 	if parentCallID == "" {
-		return acp.SessionNotification{}, false
+		return eventstream.SessionNotification{}, false
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -213,10 +212,10 @@ func (p *acpChildTerminalProjector) project(env eventstream.Envelope, fallbackSe
 		true,
 	)
 	if state.closed {
-		return acp.SessionNotification{}, true
+		return eventstream.SessionNotification{}, true
 	}
 	state.finalResponse.ObserveUpdate(env.Update)
-	return acp.SessionNotification{}, true
+	return eventstream.SessionNotification{}, true
 }
 
 type acpObservedParentClose struct {
@@ -247,7 +246,7 @@ func acpObservedParentClosesFromEnvelope(env eventstream.Envelope) []acpObserved
 // delivery was unavailable. The canonical Task read/wait result supplies the
 // authoritative FinalResponse. A per-parent Turn gate prevents a later stream
 // terminal or repeated observer result from emitting it again.
-func (p *acpChildTerminalProjector) projectObservedParentCloses(env eventstream.Envelope, fallbackSessionID string) []acp.SessionNotification {
+func (p *acpChildTerminalProjector) projectObservedParentCloses(env eventstream.Envelope, fallbackSessionID string) []eventstream.SessionNotification {
 	if p == nil {
 		return nil
 	}
@@ -255,7 +254,7 @@ func (p *acpChildTerminalProjector) projectObservedParentCloses(env eventstream.
 	if len(observedParents) == 0 {
 		return nil
 	}
-	notifications := make([]acp.SessionNotification, 0, len(observedParents))
+	notifications := make([]eventstream.SessionNotification, 0, len(observedParents))
 	for _, observed := range observedParents {
 		if notification, ok := p.projectObservedParentClose(env, fallbackSessionID, observed); ok {
 			notifications = append(notifications, notification)
@@ -268,11 +267,11 @@ func (p *acpChildTerminalProjector) projectObservedParentClose(
 	env eventstream.Envelope,
 	fallbackSessionID string,
 	observed acpObservedParentClose,
-) (acp.SessionNotification, bool) {
+) (eventstream.SessionNotification, bool) {
 	sessionID := childTerminalSessionID(env.SessionID, fallbackSessionID)
 	parentCallID := strings.TrimSpace(observed.parentCallID)
 	if parentCallID == "" {
-		return acp.SessionNotification{}, false
+		return eventstream.SessionNotification{}, false
 	}
 	status := observed.status
 	if !acpToolStatusFinalString(status) {
@@ -284,7 +283,7 @@ func (p *acpChildTerminalProjector) projectObservedParentClose(
 	state, key := p.childTurnStateLocked(sessionID, parentCallID, observed.turnID, false)
 	if state.closed {
 		p.mu.Unlock()
-		return acp.SessionNotification{}, false
+		return eventstream.SessionNotification{}, false
 	}
 	p.closeChildTurnLocked(key, state)
 	p.mu.Unlock()
@@ -305,14 +304,14 @@ func (p *acpChildTerminalProjector) parentOpen(sessionID string, parentCallID st
 // The terminal status is normalized to ACP v1's completed/failed vocabulary;
 // the FinalResponse is ordinary tool result content, never an agent message or
 // Caelis terminal-stream extension.
-func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, fallbackSessionID string) (acp.SessionNotification, bool) {
+func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, fallbackSessionID string) (eventstream.SessionNotification, bool) {
 	if p == nil || env.Kind != eventstream.KindLifecycle || env.Scope != eventstream.ScopeSubagent ||
 		env.ParentTool == nil || env.Lifecycle == nil || !eventstream.IsTerminalLifecycleState(env.Lifecycle.State) {
-		return acp.SessionNotification{}, false
+		return eventstream.SessionNotification{}, false
 	}
 	parentCallID := strings.TrimSpace(env.ParentTool.ToolCallID)
 	if parentCallID == "" || env.ParentTool.ToolName != spawn.ToolName {
-		return acp.SessionNotification{}, false
+		return eventstream.SessionNotification{}, false
 	}
 	sessionID := childTerminalSessionID(env.SessionID, fallbackSessionID)
 
@@ -321,10 +320,10 @@ func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, f
 	state, key := p.childTurnStateLocked(sessionID, parentCallID, env.TurnID, true)
 	if state.closed {
 		p.mu.Unlock()
-		return acp.SessionNotification{}, true
+		return eventstream.SessionNotification{}, true
 	}
 	text := state.finalResponse.FinalText()
-	if status == acp.ToolStatusFailed {
+	if status == eventstream.ToolStatusFailed {
 		text = strings.TrimSpace(env.Lifecycle.Reason)
 	} else if strings.TrimSpace(text) == "" {
 		text = strings.TrimSpace(env.Lifecycle.Reason)
@@ -333,7 +332,7 @@ func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, f
 		state.finalResponse = acpbridge.FinalAssistantAccumulator{}
 		delete(p.turns, key)
 		p.mu.Unlock()
-		return acp.SessionNotification{}, true
+		return eventstream.SessionNotification{}, true
 	}
 	p.closeChildTurnLocked(key, state)
 	p.mu.Unlock()
@@ -342,33 +341,33 @@ func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, f
 }
 
 // projectNotice consumes child notices without crossing the process boundary.
-func (p *acpChildTerminalProjector) projectNotice(env eventstream.Envelope, _ string) (acp.SessionNotification, bool) {
+func (p *acpChildTerminalProjector) projectNotice(env eventstream.Envelope, _ string) (eventstream.SessionNotification, bool) {
 	if p == nil || env.Kind != eventstream.KindNotice || env.Scope != eventstream.ScopeSubagent ||
 		env.ParentTool == nil {
-		return acp.SessionNotification{}, false
+		return eventstream.SessionNotification{}, false
 	}
 	parentCallID := strings.TrimSpace(env.ParentTool.ToolCallID)
 	if parentCallID == "" || env.ParentTool.ToolName != spawn.ToolName {
-		return acp.SessionNotification{}, false
+		return eventstream.SessionNotification{}, false
 	}
-	return acp.SessionNotification{}, true
+	return eventstream.SessionNotification{}, true
 }
 
 func observedSpawnStatus(taskStatus *string, rawOutput map[string]any) string {
 	switch strings.ToLower(strings.TrimSpace(display.MapString(rawOutput, "state"))) {
 	case "completed", "complete", "succeeded", "success", "done":
-		return acp.ToolStatusCompleted
+		return eventstream.ToolStatusCompleted
 	case "failed", "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout", "unknown_outcome":
-		return acp.ToolStatusFailed
+		return eventstream.ToolStatusFailed
 	}
-	if taskStatus != nil && strings.EqualFold(strings.TrimSpace(*taskStatus), acp.ToolStatusFailed) {
-		return acp.ToolStatusFailed
+	if taskStatus != nil && strings.EqualFold(strings.TrimSpace(*taskStatus), eventstream.ToolStatusFailed) {
+		return eventstream.ToolStatusFailed
 	}
-	return acp.ToolStatusCompleted
+	return eventstream.ToolStatusCompleted
 }
 
 func childTerminalResultText(status string, rawOutput map[string]any) string {
-	if strings.EqualFold(strings.TrimSpace(status), acp.ToolStatusFailed) {
+	if strings.EqualFold(strings.TrimSpace(status), eventstream.ToolStatusFailed) {
 		return firstChildTerminalText(
 			display.MapString(rawOutput, "error"),
 			display.MapString(rawOutput, "reason"),
@@ -392,9 +391,9 @@ func childTerminalResultNotification(
 	status string,
 	text string,
 	rawOutput map[string]any,
-) acp.SessionNotification {
-	update := acp.ToolCallUpdate{
-		SessionUpdate: acp.UpdateToolCallInfo,
+) eventstream.SessionNotification {
+	update := eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(parentCallID),
 		Status:        &status,
 	}
@@ -402,12 +401,12 @@ func childTerminalResultNotification(
 		update.RawOutput = rawOutput
 	}
 	if strings.TrimSpace(text) != "" {
-		update.Content = []acp.ToolCallContent{{
+		update.Content = []eventstream.ToolCallContent{{
 			Type:    "content",
-			Content: acp.TextContent{Type: "text", Text: text},
+			Content: eventstream.TextContent{Type: "text", Text: text},
 		}}
 	}
-	return acp.SessionNotification{
+	return eventstream.SessionNotification{
 		SessionID: strings.TrimSpace(sessionID),
 		Update:    update,
 	}

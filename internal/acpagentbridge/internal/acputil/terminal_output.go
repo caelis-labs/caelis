@@ -4,8 +4,8 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
-	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // StripTerminalConsoleFenceText removes a whole-output ```console fence added
@@ -68,10 +68,10 @@ func stripTerminalConsoleFenceContentValue(value any) any {
 		return nil
 	case string:
 		return StripTerminalConsoleFenceText(typed)
-	case acpschema.TextContent:
+	case eventstream.TextContent:
 		typed.Text = StripTerminalConsoleFenceText(typed.Text)
 		return typed
-	case *acpschema.TextContent:
+	case *eventstream.TextContent:
 		if typed == nil {
 			return nil
 		}
@@ -92,7 +92,7 @@ func stripTerminalConsoleFenceContentValue(value any) any {
 }
 
 func shouldStripConsoleFenceFromContent(kind string, meta map[string]any) bool {
-	if strings.EqualFold(strings.TrimSpace(kind), acpschema.ToolKindExecute) {
+	if strings.EqualFold(strings.TrimSpace(kind), eventstream.ToolKindExecute) {
 		return true
 	}
 	claudeCode, _ := meta["claudeCode"].(map[string]any)

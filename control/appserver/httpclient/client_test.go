@@ -21,7 +21,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestNewRejectsInsecureRemoteOrigin(t *testing.T) {
@@ -503,9 +502,9 @@ func TestReconnectReturnsTypedAtomicSubscription(t *testing.T) {
 			Seq: math.MaxUint64,
 		}},
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "replayed"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "replayed"},
 		},
 		Meta: map[string]any{"compact": map[string]any{
 			"summarized_through_seq": uint64(math.MaxUint64),
@@ -519,8 +518,8 @@ func TestReconnectReturnsTypedAtomicSubscription(t *testing.T) {
 			Sequence:   math.MaxUint64,
 		}},
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		Update: schema.UsageUpdate{
-			SessionUpdate: schema.UpdateUsage,
+		Update: eventstream.UsageUpdate{
+			SessionUpdate: eventstream.UpdateUsage,
 			Size:          math.MaxUint64,
 			Used:          math.MaxUint64,
 		},
@@ -564,7 +563,7 @@ func TestReconnectReturnsTypedAtomicSubscription(t *testing.T) {
 	if !ok || compact["summarized_through_seq"] != uint64(math.MaxUint64) {
 		t.Fatalf("backfill metadata = %#v", replayed.Meta)
 	}
-	if _, ok := replayed.Update.(schema.ContentChunk); !ok {
+	if _, ok := replayed.Update.(eventstream.ContentChunk); !ok {
 		t.Fatalf("backfill update = %T", replayed.Update)
 	}
 	select {
@@ -573,7 +572,7 @@ func TestReconnectReturnsTypedAtomicSubscription(t *testing.T) {
 		t.Fatal("backfill marker was not delivered")
 	}
 	continued := receiveRemoteEnvelope(t, result.Subscription.Events())
-	usage, ok := continued.Update.(schema.UsageUpdate)
+	usage, ok := continued.Update.(eventstream.UsageUpdate)
 	if !ok || usage.Size != math.MaxUint64 || usage.Used != math.MaxUint64 ||
 		continued.Position == nil ||
 		continued.Position.Transient == nil ||

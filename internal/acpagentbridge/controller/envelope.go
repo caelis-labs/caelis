@@ -8,7 +8,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type acpEnvelopeParticipantScope struct {
@@ -76,12 +75,12 @@ func applyACPParticipantDisplayMeta(meta map[string]any, binding session.Partici
 	return out
 }
 
-func schemaUpdateFromClientUpdate(env client.UpdateEnvelope) schema.Update {
+func schemaUpdateFromClientUpdate(env client.UpdateEnvelope) eventstream.Update {
 	switch typed := client.NormalizeInboundUpdate(env.Update).(type) {
 	case nil:
 		return nil
 	case client.ContentChunk:
-		return schema.ContentChunk{
+		return eventstream.ContentChunk{
 			SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
 			Content:       rawContentValue(typed.Content),
 			MessageID:     strings.TrimSpace(typed.MessageID),
@@ -94,23 +93,23 @@ func schemaUpdateFromClientUpdate(env client.UpdateEnvelope) schema.Update {
 	case client.PlanUpdate:
 		return typed
 	case client.CurrentModeUpdate:
-		return schema.RawUpdate{SessionUpdate: strings.TrimSpace(typed.SessionUpdate), Raw: cloneRaw(env.Raw)}
+		return eventstream.RawUpdate{SessionUpdate: strings.TrimSpace(typed.SessionUpdate), Raw: cloneRaw(env.Raw)}
 	case client.ConfigOptionUpdate:
-		return schema.RawUpdate{SessionUpdate: strings.TrimSpace(typed.SessionUpdate), Raw: cloneRaw(env.Raw)}
+		return eventstream.RawUpdate{SessionUpdate: strings.TrimSpace(typed.SessionUpdate), Raw: cloneRaw(env.Raw)}
 	case client.SessionInfoUpdate:
-		return schema.RawUpdate{SessionUpdate: strings.TrimSpace(typed.SessionUpdate), Raw: cloneRaw(env.Raw)}
+		return eventstream.RawUpdate{SessionUpdate: strings.TrimSpace(typed.SessionUpdate), Raw: cloneRaw(env.Raw)}
 	case client.AvailableCommandsUpdate:
-		return schema.RawUpdate{SessionUpdate: strings.TrimSpace(typed.SessionUpdate), Raw: cloneRaw(env.Raw)}
+		return eventstream.RawUpdate{SessionUpdate: strings.TrimSpace(typed.SessionUpdate), Raw: cloneRaw(env.Raw)}
 	case client.RawUpdate:
 		raw := cloneRaw(typed.Raw)
 		if len(raw) == 0 {
 			raw = cloneRaw(env.Raw)
 		}
-		return schema.RawUpdate{SessionUpdate: strings.TrimSpace(typed.SessionUpdate), Raw: raw}
-	case schema.Update:
+		return eventstream.RawUpdate{SessionUpdate: strings.TrimSpace(typed.SessionUpdate), Raw: raw}
+	case eventstream.Update:
 		return typed
 	default:
-		return schema.RawUpdate{SessionUpdate: sessionUpdateTypeFromRaw(env.Raw), Raw: cloneRaw(env.Raw)}
+		return eventstream.RawUpdate{SessionUpdate: sessionUpdateTypeFromRaw(env.Raw), Raw: cloneRaw(env.Raw)}
 	}
 }
 

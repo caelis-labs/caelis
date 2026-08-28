@@ -6,7 +6,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 // ErrCapabilityUnsupported marks an optional ACP Agent method that the
@@ -16,7 +16,7 @@ var ErrCapabilityUnsupported = errors.New("internal/acpagentbridge: capability u
 // PromptCallbacks routes one product ACP prompt's updates and approval
 // requests back to the exact client connection that submitted it.
 type PromptCallbacks interface {
-	SessionUpdate(context.Context, schema.SessionNotification) error
+	SessionUpdate(context.Context, eventstream.SessionNotification) error
 	RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error)
 }
 

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestSendMessageToolRendersActionTargetAndOpensTargetFromWholeRow(t *testing.T) {
@@ -15,17 +14,17 @@ func TestSendMessageToolRendersActionTargetAndOpensTargetFromWholeRow(t *testing
 	model.currentSessionID = "session-1"
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
-			Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
+			Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
-	running := schema.ToolStatusInProgress
+	running := eventstream.ToolStatusInProgress
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
 			RawOutput: map[string]any{"handle": "ziva", "state": "running"}, Meta: acpToolNameMeta("Spawn"),
 		},
 	})
@@ -38,10 +37,10 @@ func TestSendMessageToolRendersActionTargetAndOpensTargetFromWholeRow(t *testing
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1",
 		Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "message-1",
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "message-1",
 			Title: `Ran SendMessage {"message":"raw-json-should-not-render","to":"parent"}`,
-			Kind:  schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Kind:  eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 			RawInput: rawInput, Meta: acpToolNameMeta("SendMessage"),
 		},
 	})
@@ -102,10 +101,10 @@ func TestSendMessageToolRendersActionTargetAndOpensTargetFromWholeRow(t *testing
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2",
 		Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "message-2",
-			Title: "SendMessage across a later Turn", Kind: schema.ToolKindExecute,
-			Status:   schema.ToolStatusInProgress,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "message-2",
+			Title: "SendMessage across a later Turn", Kind: eventstream.ToolKindExecute,
+			Status:   eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"to": "ziva", "message": "second Turn update"},
 			Meta:     acpToolNameMeta("SendMessage"),
 		},
@@ -137,28 +136,28 @@ func TestSendMessageReplayBatchResolvesEarlierSpawnTarget(t *testing.T) {
 	model.width = 120
 	model.height = 40
 	model.currentSessionID = "session-1"
-	running := schema.ToolStatusInProgress
+	running := eventstream.ToolStatusInProgress
 	envelopes := []eventstream.Envelope{
 		{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
-				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
+				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 				RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("Spawn"),
 			},
 		},
 		{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-			Update: schema.ToolCallUpdate{
-				SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
+			Update: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
 				RawOutput: map[string]any{"handle": "ziva", "state": "running"}, Meta: acpToolNameMeta("Spawn"),
 			},
 		},
 		{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-			Update: schema.ToolCall{
-				SessionUpdate: schema.UpdateToolCall, ToolCallID: "message-1", Title: "SendMessage after Spawn",
-				Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "message-1", Title: "SendMessage after Spawn",
+				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 				RawInput: map[string]any{"to": "ziva", "message": "continue from the replay batch"}, Meta: acpToolNameMeta("SendMessage"),
 			},
 		},
@@ -206,22 +205,22 @@ func TestSendMessageSuccessRendersSingleLineWithoutDispatchAck(t *testing.T) {
 	model.width = 120
 	model.height = 40
 	model.currentSessionID = "session-1"
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "message-1",
-			Title: "SendMessage", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "message-1",
+			Title: "SendMessage", Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"to": "parent", "message": "status update for parent"},
 			Meta:     acpToolNameMeta("SendMessage"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "message-1", Status: &completed,
-			Content: []schema.ToolCallContent{{
-				Type: "content", Content: schema.TextContent{Type: "text", Text: "Message sent."},
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "message-1", Status: &completed,
+			Content: []eventstream.ToolCallContent{{
+				Type: "content", Content: eventstream.TextContent{Type: "text", Text: "Message sent."},
 			}},
 			RawOutput: map[string]any{"accepted": true, "state": "delivered", "to": "parent"},
 			Meta:      acpToolNameMeta("SendMessage"),
@@ -243,22 +242,22 @@ func TestSendMessageFailureDoesNotClaimDelivery(t *testing.T) {
 	model.width = 120
 	model.height = 40
 	model.currentSessionID = "session-1"
-	failed := schema.ToolStatusFailed
+	failed := eventstream.ToolStatusFailed
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall, ToolCallID: "message-1",
-			Title: "SendMessage", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "message-1",
+			Title: "SendMessage", Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"to": "orbit", "message": "validation recommendation"},
 			Meta:     acpToolNameMeta("SendMessage"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "message-1", Status: &failed,
-			Content: []schema.ToolCallContent{{
-				Type: "content", Content: schema.TextContent{Type: "text", Text: "ACP Agent @orbit lacks _session/steering; cancel turn, retry SendMessage."},
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "message-1", Status: &failed,
+			Content: []eventstream.ToolCallContent{{
+				Type: "content", Content: eventstream.TextContent{Type: "text", Text: "ACP Agent @orbit lacks _session/steering; cancel turn, retry SendMessage."},
 			}},
 			RawOutput: map[string]any{
 				"error": "ACP Agent @orbit lacks _session/steering; cancel turn, retry SendMessage.", "error_code": "unsupported",

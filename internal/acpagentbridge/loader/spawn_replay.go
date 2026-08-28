@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // spawnReplayProjector reconstructs final-only stdio Spawn results from durable
@@ -56,12 +55,12 @@ func newSpawnReplayProjector(events []*session.Event) *spawnReplayProjector {
 
 func (p *spawnReplayProjector) normalize(
 	event *session.Event,
-	notification acp.SessionNotification,
-) acp.SessionNotification {
+	notification eventstream.SessionNotification,
+) eventstream.SessionNotification {
 	if p == nil {
 		return notification
 	}
-	update, ok := notification.Update.(acp.ToolCallUpdate)
+	update, ok := notification.Update.(eventstream.ToolCallUpdate)
 	if !ok || !toolStatusFinal(update.Status) || !sessionEventOwnsSpawnCall(event, update.ToolCallID) {
 		return notification
 	}
@@ -72,7 +71,7 @@ func (p *spawnReplayProjector) normalize(
 	return notification
 }
 
-func (p *spawnReplayProjector) observedParentCloses(env eventstream.Envelope, sessionID string) []acp.SessionNotification {
+func (p *spawnReplayProjector) observedParentCloses(env eventstream.Envelope, sessionID string) []eventstream.SessionNotification {
 	if p == nil {
 		return nil
 	}
@@ -80,7 +79,7 @@ func (p *spawnReplayProjector) observedParentCloses(env eventstream.Envelope, se
 	if len(results) == 0 {
 		return nil
 	}
-	out := make([]acp.SessionNotification, 0, len(results))
+	out := make([]eventstream.SessionNotification, 0, len(results))
 	for _, result := range results {
 		parentCallID := strings.TrimSpace(result.ParentCallID)
 		if parentCallID == "" {
@@ -98,13 +97,13 @@ func (p *spawnReplayProjector) observedParentCloses(env eventstream.Envelope, se
 		}
 		p.closed[key] = struct{}{}
 		status := result.Status
-		update := withSpawnReplayResult(acp.ToolCallUpdate{
-			SessionUpdate: acp.UpdateToolCallInfo,
+		update := withSpawnReplayResult(eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    parentCallID,
 			Status:        &status,
 			RawOutput:     result.RawOutput,
 		}, result.RawOutput)
-		out = append(out, acp.SessionNotification{
+		out = append(out, eventstream.SessionNotification{
 			SessionID: strings.TrimSpace(sessionID),
 			Update:    update,
 		})
@@ -112,7 +111,7 @@ func (p *spawnReplayProjector) observedParentCloses(env eventstream.Envelope, se
 	return out
 }
 
-func withSpawnReplayResult(update acp.ToolCallUpdate, rawOutput map[string]any) acp.ToolCallUpdate {
+func withSpawnReplayResult(update eventstream.ToolCallUpdate, rawOutput map[string]any) eventstream.ToolCallUpdate {
 	if strings.TrimSpace(update.ToolCallID) == "" {
 		return update
 	}
@@ -125,7 +124,7 @@ func withSpawnReplayResult(update acp.ToolCallUpdate, rawOutput map[string]any) 
 		update.Status = &status
 	}
 	text := spawnReplayResultText(status, rawOutput)
-	if strings.TrimSpace(text) == "" && !strings.EqualFold(strings.TrimSpace(status), acp.ToolStatusFailed) {
+	if strings.TrimSpace(text) == "" && !strings.EqualFold(strings.TrimSpace(status), eventstream.ToolStatusFailed) {
 		if output, ok := metautil.TerminalOutput(update.Meta); ok {
 			text = output.Data
 		}
@@ -139,14 +138,14 @@ func withSpawnReplayResult(update acp.ToolCallUpdate, rawOutput map[string]any) 
 	}
 	update.Meta = meta
 
-	content := make([]acp.ToolCallContent, 0, len(update.Content)+1)
+	content := make([]eventstream.ToolCallContent, 0, len(update.Content)+1)
 	hasResult := false
 	for _, item := range update.Content {
 		if strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(item.Type), "content") {
-			if strings.EqualFold(strings.TrimSpace(status), acp.ToolStatusFailed) {
+			if strings.EqualFold(strings.TrimSpace(status), eventstream.ToolStatusFailed) {
 				continue
 			}
 			hasResult = true
@@ -154,9 +153,9 @@ func withSpawnReplayResult(update acp.ToolCallUpdate, rawOutput map[string]any) 
 		content = append(content, item)
 	}
 	if !hasResult && strings.TrimSpace(text) != "" {
-		content = append(content, acp.ToolCallContent{
+		content = append(content, eventstream.ToolCallContent{
 			Type:    "content",
-			Content: acp.TextContent{Type: "text", Text: text},
+			Content: eventstream.TextContent{Type: "text", Text: text},
 		})
 	}
 	update.Content = content
@@ -164,7 +163,7 @@ func withSpawnReplayResult(update acp.ToolCallUpdate, rawOutput map[string]any) 
 }
 
 func spawnReplayResultText(status string, rawOutput map[string]any) string {
-	if strings.EqualFold(strings.TrimSpace(status), acp.ToolStatusFailed) {
+	if strings.EqualFold(strings.TrimSpace(status), eventstream.ToolStatusFailed) {
 		for _, key := range []string{"error", "reason"} {
 			if text := display.MapString(rawOutput, key); strings.TrimSpace(text) != "" {
 				return text
@@ -291,14 +290,14 @@ func finalSpawnEventFingerprint(event *session.Event) spawnReplayTerminalFingerp
 func spawnReplayStatus(status string, rawOutput map[string]any) string {
 	switch strings.ToLower(strings.TrimSpace(display.MapString(rawOutput, "state"))) {
 	case "completed", "complete", "succeeded", "success", "done":
-		return acp.ToolStatusCompleted
+		return eventstream.ToolStatusCompleted
 	case "failed", "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout", "unknown_outcome":
-		return acp.ToolStatusFailed
+		return eventstream.ToolStatusFailed
 	}
-	if strings.EqualFold(strings.TrimSpace(status), acp.ToolStatusCompleted) {
-		return acp.ToolStatusCompleted
+	if strings.EqualFold(strings.TrimSpace(status), eventstream.ToolStatusCompleted) {
+		return eventstream.ToolStatusCompleted
 	}
-	return acp.ToolStatusFailed
+	return eventstream.ToolStatusFailed
 }
 
 func toolStatusFinal(status *string) bool {
@@ -310,7 +309,7 @@ func toolStatusFinal(status *string) bool {
 
 func toolStatusFinalString(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case acp.ToolStatusCompleted, acp.ToolStatusFailed, "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout", "unknown_outcome":
+	case eventstream.ToolStatusCompleted, eventstream.ToolStatusFailed, "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout", "unknown_outcome":
 		return true
 	default:
 		return false

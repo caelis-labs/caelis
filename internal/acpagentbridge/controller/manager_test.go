@@ -26,7 +26,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestContentChunkTextPreservesStreamWhitespace(t *testing.T) {
@@ -314,7 +313,7 @@ func TestNormalizeACPUpdateEventRequiresCompletedXSearchForDisplayInput(t *testi
 		SessionUpdate: client.UpdateToolCallState,
 		ToolCallID:    "x-search-1",
 		Title:         testStringPtr("X search:"),
-		Status:        testStringPtr(schema.ToolStatusInProgress),
+		Status:        testStringPtr(eventstream.ToolStatusInProgress),
 		RawOutput: map[string]any{
 			"name":  "x_keyword_search",
 			"input": `{"query":"not-completed"}`,
@@ -340,7 +339,7 @@ func TestNormalizeACPUpdateEventStripsExternalDisplayInputFromToolStart(t *testi
 		SessionUpdate: client.UpdateToolCall,
 		ToolCallID:    "read-1",
 		Title:         "Read",
-		Status:        schema.ToolStatusInProgress,
+		Status:        eventstream.ToolStatusInProgress,
 		Meta: metautil.WithSection(map[string]any{
 			"vendor": map[string]any{"trace": "keep"},
 		}, metautil.Display, map[string]any{
@@ -2559,7 +2558,7 @@ func TestControllerRunPublishesACPSourceEvent(t *testing.T) {
 		handle:     handle,
 	}
 	title := "Read"
-	status := schema.ToolStatusInProgress
+	status := eventstream.ToolStatusInProgress
 	line := 7
 	raw := json.RawMessage(`{"sessionUpdate":"tool_call_update","toolCallId":"call-1","title":"Read","status":"in_progress","locations":[{"path":"main.go","line":7}],"_meta":{"vendor":{"trace":"abc"}}}`)
 	run.handleUpdate(func() time.Time { return time.Unix(10, 0) }, client.UpdateEnvelope{
@@ -2593,7 +2592,7 @@ func TestControllerRunPublishesACPSourceEvent(t *testing.T) {
 	if events[0].ACP == nil {
 		t.Fatal("source ACP envelope is nil")
 	}
-	update, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
+	update, ok := events[0].ACP.Update.(eventstream.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("ACP update = %T, want ToolCallUpdate", events[0].ACP.Update)
 	}
@@ -2628,7 +2627,7 @@ func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 			SessionUpdate: client.UpdateToolCallState,
 			ToolCallID:    "call-1",
 			Kind:          testStringPtr("execute"),
-			Status:        testStringPtr(schema.ToolStatusCompleted),
+			Status:        testStringPtr(eventstream.ToolStatusCompleted),
 			RawOutput:     map[string]any{"stdout": fenced},
 			Content: []client.ToolCallContent{{
 				Type:       "terminal",
@@ -2661,7 +2660,7 @@ func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 	if got := session.ExtractProtocolText(canonicalContent[0].Content); got != want {
 		t.Fatalf("canonical terminal content = %q, want %q", got, want)
 	}
-	acpUpdate, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
+	acpUpdate, ok := events[0].ACP.Update.(eventstream.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("ACP update = %T, want ToolCallUpdate", events[0].ACP.Update)
 	}
@@ -2691,14 +2690,14 @@ func TestControllerRunStripsConsoleFenceFromExecuteContentAtUpdateIngress(t *tes
 	}
 	fenced := "```console\nclean\n```\n"
 	want := "clean\n"
-	kind := schema.ToolKindExecute
+	kind := eventstream.ToolKindExecute
 	run.handleUpdate(func() time.Time { return time.Unix(10, 0) }, client.UpdateEnvelope{
 		SessionID: "remote-1",
 		Update: client.ToolCallUpdate{
 			SessionUpdate: client.UpdateToolCallState,
 			ToolCallID:    "call-1",
 			Kind:          &kind,
-			Status:        testStringPtr(schema.ToolStatusCompleted),
+			Status:        testStringPtr(eventstream.ToolStatusCompleted),
 			Content: []client.ToolCallContent{{
 				Type:    "content",
 				Content: client.TextContent{Type: "text", Text: fenced},
@@ -2726,7 +2725,7 @@ func TestControllerRunStripsConsoleFenceFromExecuteContentAtUpdateIngress(t *tes
 	if got := session.ExtractProtocolText(canonicalContent[0].Content); got != want {
 		t.Fatalf("canonical execute content = %q, want %q", got, want)
 	}
-	acpUpdate, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
+	acpUpdate, ok := events[0].ACP.Update.(eventstream.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("ACP update = %T, want ToolCallUpdate", events[0].ACP.Update)
 	}
@@ -2757,7 +2756,7 @@ func TestControllerRunStripsConsoleFenceFromClaudeBashContentAtUpdateIngress(t *
 		Update: client.ToolCallUpdate{
 			SessionUpdate: client.UpdateToolCallState,
 			ToolCallID:    "call-1",
-			Status:        testStringPtr(schema.ToolStatusCompleted),
+			Status:        testStringPtr(eventstream.ToolStatusCompleted),
 			RawOutput:     "Fri Jun 26 14:35:27 CST 2026",
 			Content: []client.ToolCallContent{{
 				Type:    "content",
@@ -2791,7 +2790,7 @@ func TestControllerRunStripsConsoleFenceFromClaudeBashContentAtUpdateIngress(t *
 	if got := session.ExtractProtocolText(canonicalContent[0].Content); got != want {
 		t.Fatalf("canonical claude bash content = %q, want %q", got, want)
 	}
-	acpUpdate, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
+	acpUpdate, ok := events[0].ACP.Update.(eventstream.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("ACP update = %T, want ToolCallUpdate", events[0].ACP.Update)
 	}
@@ -2821,7 +2820,7 @@ func TestParticipantRunNormalizesDelayedXSearchDisplayInput(t *testing.T) {
 		handle:     handle,
 	}
 	title := "X search:"
-	status := schema.ToolStatusCompleted
+	status := eventstream.ToolStatusCompleted
 	run.handleUpdate(func() time.Time { return time.Unix(10, 0) }, client.UpdateEnvelope{
 		SessionID: "remote-participant",
 		Update: client.ToolCallUpdate{
@@ -2847,7 +2846,7 @@ func TestParticipantRunNormalizesDelayedXSearchDisplayInput(t *testing.T) {
 	if len(events) != 1 || events[0].ACP == nil {
 		t.Fatalf("source events = %#v, want one ACP envelope", events)
 	}
-	update, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
+	update, ok := events[0].ACP.Update.(eventstream.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("ACP update = %T, want ToolCallUpdate", events[0].ACP.Update)
 	}
@@ -2886,8 +2885,8 @@ func TestParticipantRunSharesCanonicalTerminalCompatibilityAcrossSourceViews(t *
 		Update: client.ToolCallUpdate{
 			SessionUpdate: client.UpdateToolCallState,
 			ToolCallID:    "command-1",
-			Kind:          testStringPtr(schema.ToolKindExecute),
-			Status:        testStringPtr(schema.ToolStatusInProgress),
+			Kind:          testStringPtr(eventstream.ToolKindExecute),
+			Status:        testStringPtr(eventstream.ToolStatusInProgress),
 			Meta: map[string]any{
 				metautil.TerminalOutputDeltaKey: map[string]any{
 					"terminal_id": "command-1",
@@ -2912,7 +2911,7 @@ func TestParticipantRunSharesCanonicalTerminalCompatibilityAcrossSourceViews(t *
 	if canonicalUpdate == nil {
 		t.Fatal("canonical protocol update is nil")
 	}
-	nativeUpdate, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
+	nativeUpdate, ok := events[0].ACP.Update.(eventstream.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("native ACP update = %T, want ToolCallUpdate", events[0].ACP.Update)
 	}
@@ -2984,7 +2983,7 @@ func TestParticipantPassthroughOnlyACPUpdatePreservesScope(t *testing.T) {
 	if env.Actor != "@otto" || env.TurnID != "turn-1" {
 		t.Fatalf("ACP actor/turn = %q/%q, want @otto/turn-1", env.Actor, env.TurnID)
 	}
-	update, ok := env.Update.(schema.RawUpdate)
+	update, ok := env.Update.(eventstream.RawUpdate)
 	if !ok {
 		t.Fatalf("ACP update = %T, want RawUpdate", env.Update)
 	}

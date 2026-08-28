@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type concurrentSpawnTask struct {
@@ -93,9 +92,9 @@ func TestConcurrentSpawnForwarderPreservesEveryToolEnvelope(t *testing.T) {
 			continue
 		}
 		switch update := envelope.Update.(type) {
-		case schema.ToolCall:
+		case eventstream.ToolCall:
 			counts[update.ToolCallID]++
-		case schema.ToolCallUpdate:
+		case eventstream.ToolCallUpdate:
 			counts[update.ToolCallID]++
 		}
 	}
@@ -127,27 +126,27 @@ func faultShapeConcurrentSpawnTasks() []concurrentSpawnTask {
 }
 
 func concurrentSpawnStartEnvelope(sequence int, task concurrentSpawnTask) eventstream.Envelope {
-	return concurrentSpawnEnvelope(sequence, schema.ToolCall{
-		SessionUpdate: schema.UpdateToolCall,
+	return concurrentSpawnEnvelope(sequence, eventstream.ToolCall{
+		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    task.callID,
 		Title:         "Spawn breeze: " + task.prompt,
-		Kind:          schema.ToolKindExecute,
-		Status:        schema.ToolStatusInProgress,
+		Kind:          eventstream.ToolKindExecute,
+		Status:        eventstream.ToolStatusInProgress,
 		RawInput:      map[string]any{"agent": "breeze", "prompt": task.prompt},
 		Meta:          acpToolNameMeta("Spawn"),
 	})
 }
 
 func concurrentSpawnResultEnvelope(sequence int, task concurrentSpawnTask) eventstream.Envelope {
-	completed := schema.ToolStatusCompleted
+	completed := eventstream.ToolStatusCompleted
 	meta := metautil.WithRuntimeSection(acpToolNameMeta("Spawn"), metautil.RuntimeTask, map[string]any{
 		"agent": "breeze", "handle": task.handle, "prompt": task.prompt, "target_kind": "subagent",
 	})
-	return concurrentSpawnEnvelope(sequence, schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+	return concurrentSpawnEnvelope(sequence, eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    task.callID,
 		Title:         stringPtr("Spawn breeze: " + task.prompt),
-		Kind:          stringPtr(schema.ToolKindExecute),
+		Kind:          stringPtr(eventstream.ToolKindExecute),
 		Status:        &completed,
 		RawInput:      map[string]any{"agent": "breeze", "prompt": task.prompt},
 		RawOutput: map[string]any{
@@ -158,7 +157,7 @@ func concurrentSpawnResultEnvelope(sequence int, task concurrentSpawnTask) event
 	})
 }
 
-func concurrentSpawnEnvelope(sequence int, update schema.Update) eventstream.Envelope {
+func concurrentSpawnEnvelope(sequence int, update eventstream.Update) eventstream.Envelope {
 	eventID := "event-spawn-" + string(rune('0'+sequence))
 	return eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1",

@@ -11,7 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestSessionTurnClientAttachesBeforePromptAndFiltersExactTarget(t *testing.T) {
@@ -735,9 +734,9 @@ func sessionTurnTestMessage(
 		TurnID:    target.TurnID,
 		Scope:     eventstream.ScopeMain,
 		Cursor:    cursor,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: text},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: text},
 		},
 	}
 }

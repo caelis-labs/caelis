@@ -9,7 +9,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/charmbracelet/colorprofile"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -94,7 +93,7 @@ func TestStreamAppendPhysicalScreenPreservesTextAfterComplexGrapheme(t *testing.
 	envelope := func(text string, final bool) eventstream.Envelope {
 		msg := schedulerACPAssistantEnvelope(text)
 		msg.Final = final
-		update := msg.Update.(schema.ContentChunk)
+		update := msg.Update.(eventstream.ContentChunk)
 		update.MessageID = "physical-markdown-stream"
 		msg.Update = update
 		return msg

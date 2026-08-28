@@ -20,7 +20,6 @@ import (
 	controlassembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	tuiapp "github.com/caelis-labs/caelis/surfaces/tui/app"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -129,7 +128,7 @@ func TestSideACPAgentDirectRunEnvelopeE2E(t *testing.T) {
 	for _, envelope := range envelopes {
 		updateType, text := sideACPNarrative(envelope.Update)
 		switch updateType {
-		case schema.UpdateUserMessage:
+		case eventstream.UpdateUserMessage:
 			if strings.TrimSpace(text) == "introduce yourself" {
 				userCount++
 				if got := strings.TrimSpace(envelope.TurnID); got != turnID {
@@ -145,7 +144,7 @@ func TestSideACPAgentDirectRunEnvelopeE2E(t *testing.T) {
 				}
 				displayAddress = wantAddress
 			}
-		case schema.UpdateAgentMessage:
+		case eventstream.UpdateAgentMessage:
 			if strings.Contains(text, "opus owns this turn") {
 				assistantCount++
 				if got := strings.TrimSpace(envelope.TurnID); got != turnID {
@@ -244,8 +243,8 @@ func asStringValue(value any) string {
 	return text
 }
 
-func sideACPNarrative(update schema.Update) (string, string) {
-	chunk, ok := update.(schema.ContentChunk)
+func sideACPNarrative(update eventstream.Update) (string, string) {
+	chunk, ok := update.(eventstream.ContentChunk)
 	if !ok {
 		return "", ""
 	}

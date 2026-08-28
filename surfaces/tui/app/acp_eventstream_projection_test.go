@@ -6,7 +6,6 @@ import (
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
@@ -18,9 +17,9 @@ func TestProjectACPEventToTranscriptEventsUsesEnvelopeScope(t *testing.T) {
 		Scope:   eventstream.ScopeSubagent,
 		ScopeID: "task-1",
 		Actor:   "copilot",
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "subagent output"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "subagent output"},
 		},
 		Final: true,
 	})
@@ -94,9 +93,9 @@ func TestProjectACPEventToTranscriptEventsProjectsCompactNotice(t *testing.T) {
 
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateCompact,
-			Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateCompact,
+			Content:       eventstream.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
 		},
 		Final: true,
 	})
@@ -113,19 +112,19 @@ func TestProjectACPEventToTranscriptEventsKeepsStandardReadIdentityForSkillConte
 
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "skill-review-1",
 			Title:         `Read <skill_content name="review">`,
-			Kind:          schema.ToolKindRead,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindRead,
+			Status:        eventstream.ToolStatusInProgress,
 		},
 	})
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want one transcript event", events)
 	}
 	event := events[0]
-	if event.Kind != TranscriptEventTool || event.ToolName != "" || event.ToolArgs != "review" || event.ToolKind != schema.ToolKindRead || event.ToolTitle != `Read <skill_content name="review">` {
+	if event.Kind != TranscriptEventTool || event.ToolName != "" || event.ToolArgs != "review" || event.ToolKind != eventstream.ToolKindRead || event.ToolTitle != `Read <skill_content name="review">` {
 		t.Fatalf("event = %#v, want standard Read review tool event without a forged exact name", event)
 	}
 }
@@ -146,12 +145,12 @@ func TestProjectACPEventToTranscriptEventsIgnoresRecoveredToolInputOnStart(t *te
 			events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 				Kind:  eventstream.KindSessionUpdate,
 				Scope: eventstream.ScopeParticipant,
-				Update: schema.ToolCall{
-					SessionUpdate: schema.UpdateToolCall,
+				Update: eventstream.ToolCall{
+					SessionUpdate: eventstream.UpdateToolCall,
 					ToolCallID:    "search-1",
 					Title:         "Search",
-					Kind:          schema.ToolKindSearch,
-					Status:        schema.ToolStatusInProgress,
+					Kind:          eventstream.ToolKindSearch,
+					Status:        eventstream.ToolStatusInProgress,
 					RawInput:      tt.rawInput,
 					Meta: metautil.WithSection(nil, metautil.Display, map[string]any{
 						metautil.DisplayToolInput: map[string]any{"query": "forged"},
@@ -175,17 +174,17 @@ func TestProjectACPEventToTranscriptEventsIgnoresRecoveredToolInputOnLivePatch(t
 		rawInput map[string]any
 		wantArgs string
 	}{
-		{name: "sparse status", kind: schema.ToolKindSearch, rawInput: map[string]any{"variant": "XSearch", "backend": true}},
-		{name: "explicit in progress raw query", kind: schema.ToolKindSearch, status: stringPtr(schema.ToolStatusInProgress), rawInput: map[string]any{"query": "authoritative"}, wantArgs: "authoritative"},
-		{name: "explicit in progress raw path", kind: schema.ToolKindRead, status: stringPtr(schema.ToolStatusInProgress), rawInput: map[string]any{"target_directory": "docs"}, wantArgs: "docs"},
+		{name: "sparse status", kind: eventstream.ToolKindSearch, rawInput: map[string]any{"variant": "XSearch", "backend": true}},
+		{name: "explicit in progress raw query", kind: eventstream.ToolKindSearch, status: stringPtr(eventstream.ToolStatusInProgress), rawInput: map[string]any{"query": "authoritative"}, wantArgs: "authoritative"},
+		{name: "explicit in progress raw path", kind: eventstream.ToolKindRead, status: stringPtr(eventstream.ToolStatusInProgress), rawInput: map[string]any{"target_directory": "docs"}, wantArgs: "docs"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 				Kind:  eventstream.KindSessionUpdate,
 				Scope: eventstream.ScopeParticipant,
-				Update: schema.ToolCallUpdate{
-					SessionUpdate: schema.UpdateToolCallInfo,
+				Update: eventstream.ToolCallUpdate{
+					SessionUpdate: eventstream.UpdateToolCallInfo,
 					ToolCallID:    "search-1",
 					Title:         stringPtr("Search"),
 					Kind:          stringPtr(tt.kind),
@@ -210,12 +209,12 @@ func TestProjectACPEventToTranscriptEventsRecoversSerializedCompletedToolInput(t
 	start := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind:  eventstream.KindSessionUpdate,
 		Scope: eventstream.ScopeParticipant,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "x-search-1",
 			Title:         "X search:",
-			Kind:          schema.ToolKindSearch,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindSearch,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"variant": "XSearch", "backend": true},
 		},
 	})
@@ -226,11 +225,11 @@ func TestProjectACPEventToTranscriptEventsRecoversSerializedCompletedToolInput(t
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind:  eventstream.KindSessionUpdate,
 		Scope: eventstream.ScopeParticipant,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "x-search-1",
 			Title:         stringPtr("X search:"),
-			Status:        stringPtr(schema.ToolStatusCompleted),
+			Status:        stringPtr(eventstream.ToolStatusCompleted),
 			RawOutput: map[string]any{
 				"name":  "x_keyword_search",
 				"input": `{"query":"` + query + `","limit":"3","mode":"Latest"}`,
@@ -259,12 +258,12 @@ func TestProjectACPEventToTranscriptEventsPreservesNormalizedExplorationVerb(t *
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind:  eventstream.KindSessionUpdate,
 		Scope: eventstream.ScopeParticipant,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "list-1",
 			Title:         "List `docs`",
-			Kind:          schema.ToolKindRead,
-			Status:        schema.ToolStatusInProgress,
+			Kind:          eventstream.ToolKindRead,
+			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"target_directory": "docs"},
 			Meta: metautil.WithSection(nil, metautil.Display, map[string]any{
 				metautil.DisplayExplorationVerb: "List",
@@ -275,7 +274,7 @@ func TestProjectACPEventToTranscriptEventsPreservesNormalizedExplorationVerb(t *
 		t.Fatalf("events = %#v, want one normalized List event", events)
 	}
 	event := events[0]
-	if event.ToolName != "" || event.ToolKind != schema.ToolKindRead || event.ToolExplorationVerb != "List" || event.ToolArgs != "docs" {
+	if event.ToolName != "" || event.ToolKind != eventstream.ToolKindRead || event.ToolExplorationVerb != "List" || event.ToolArgs != "docs" {
 		t.Fatalf("normalized List projection = %#v", event)
 	}
 }
@@ -286,11 +285,11 @@ func TestProjectACPEventToTranscriptEventsRequiresExplicitRecoveredToolInput(t *
 	const resultText = "returned-result-or-sensitive-text"
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "read-1",
 			Title:         stringPtr("Read"),
-			Status:        stringPtr(schema.ToolStatusCompleted),
+			Status:        stringPtr(eventstream.ToolStatusCompleted),
 			RawOutput: map[string]any{
 				"name":  "read",
 				"input": `{"query":"` + resultText + `"}`,
@@ -310,11 +309,11 @@ func TestProjectACPEventToTranscriptEventsKeepsRawInputAuthoritative(t *testing.
 
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "search-1",
 			Title:         stringPtr("Search"),
-			Status:        stringPtr(schema.ToolStatusCompleted),
+			Status:        stringPtr(eventstream.ToolStatusCompleted),
 			RawInput:      map[string]any{"query": "authoritative"},
 			Meta: metautil.WithSection(nil, metautil.Display, map[string]any{
 				metautil.DisplayToolInput: map[string]any{"query": "recovered"},
@@ -332,12 +331,12 @@ func TestProjectACPEventToTranscriptEventsKeepsRawInputAuthoritative(t *testing.
 func TestProjectACPEventToTranscriptEventsDisplaysStandardRawTerminalOutput(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusCompleted
-	kind := schema.ToolKindExecute
+	status := eventstream.ToolStatusCompleted
+	kind := eventstream.ToolKindExecute
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Kind:          &kind,
 			Status:        &status,
@@ -359,13 +358,13 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardRawTerminalOutput(t *t
 func TestProjectACPEventToTranscriptEventsDisplaysStandardRawOutputWithoutToolKind(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusCompleted
+	status := eventstream.ToolStatusCompleted
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
-			Kind:          stringPtr(schema.ToolKindExecute),
+			Kind:          stringPtr(eventstream.ToolKindExecute),
 			Status:        &status,
 			RawOutput:     map[string]any{"stdout": "side acp output\n"},
 			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RunCommand"), "call-1"),
@@ -382,14 +381,14 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardRawOutputWithoutToolKi
 func TestProjectACPEventToTranscriptEventsDisplaysStandardTerminalContentWithoutToolKind(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusCompleted
+	status := eventstream.ToolStatusCompleted
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Status:        &status,
-			Kind:          stringPtr(schema.ToolKindExecute),
+			Kind:          stringPtr(eventstream.ToolKindExecute),
 			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "terminal content\n"),
 		},
 	})
@@ -404,18 +403,18 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardTerminalContentWithout
 func TestProjectACPEventToTranscriptEventsPrefersStandardContentOverTerminalExtension(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusCompleted
-	kind := schema.ToolKindExecute
+	status := eventstream.ToolStatusCompleted
+	kind := eventstream.ToolKindExecute
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Kind:          &kind,
 			Status:        &status,
-			Content: []schema.ToolCallContent{{
+			Content: []eventstream.ToolCallContent{{
 				Type:    "content",
-				Content: schema.TextContent{Type: "text", Text: "standard ACP content\n"},
+				Content: eventstream.TextContent{Type: "text", Text: "standard ACP content\n"},
 			}},
 			Meta: metautil.WithTerminalOutput(nil, "call-1", "extension fallback\n"),
 		},
@@ -431,14 +430,14 @@ func TestProjectACPEventToTranscriptEventsPrefersStandardContentOverTerminalExte
 func TestProjectACPEventToTranscriptEventsDisplaysTerminalContentWithoutToolKind(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusCompleted
+	status := eventstream.ToolStatusCompleted
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Status:        &status,
-			Kind:          stringPtr(schema.ToolKindExecute),
+			Kind:          stringPtr(eventstream.ToolKindExecute),
 			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "terminal content output\n"),
 		},
 	})
@@ -456,14 +455,14 @@ func TestProjectACPEventToTranscriptEventsDisplaysTerminalContentWithoutToolKind
 func TestProjectACPEventToTranscriptEventsDisplaysStringRawOutput(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusCompleted
+	status := eventstream.ToolStatusCompleted
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Status:        &status,
-			Kind:          stringPtr(schema.ToolKindExecute),
+			Kind:          stringPtr(eventstream.ToolKindExecute),
 			RawOutput:     "string raw output\n",
 			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RunCommand"), "call-1"),
 		},
@@ -479,8 +478,8 @@ func TestProjectACPEventToTranscriptEventsDisplaysStringRawOutput(t *testing.T) 
 func TestProjectACPEventToTranscriptEventsDoesNotDisplayGatewayProjectedRawTerminalOutput(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusCompleted
-	kind := schema.ToolKindExecute
+	status := eventstream.ToolStatusCompleted
+	kind := eventstream.ToolKindExecute
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
 		Meta: map[string]any{
@@ -488,8 +487,8 @@ func TestProjectACPEventToTranscriptEventsDoesNotDisplayGatewayProjectedRawTermi
 				"bridge": map[string]any{"source": "gateway_projection"},
 			},
 		},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Kind:          &kind,
 			Status:        &status,
@@ -507,12 +506,12 @@ func TestProjectACPEventToTranscriptEventsDoesNotDisplayGatewayProjectedRawTermi
 func TestProjectACPEventToTranscriptEventsSuppressesRunningSnapshotTerminalOutputWhenStreamable(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusInProgress
-	kind := schema.ToolKindExecute
+	status := eventstream.ToolStatusInProgress
+	kind := eventstream.ToolKindExecute
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Title:         stringPtr("RunCommand echo ok"),
 			Kind:          &kind,
@@ -536,12 +535,12 @@ func TestProjectACPEventToTranscriptEventsSuppressesRunningSnapshotTerminalOutpu
 func TestProjectACPEventToTranscriptEventsDisplaysTerminalStreamFrameOutput(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusInProgress
-	kind := schema.ToolKindExecute
+	status := eventstream.ToolStatusInProgress
+	kind := eventstream.ToolKindExecute
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Title:         stringPtr("RunCommand echo ok"),
 			Kind:          &kind,
@@ -563,8 +562,8 @@ func TestProjectACPEventToTranscriptEventsDisplaysTerminalStreamFrameOutput(t *t
 func TestProjectACPEventToTranscriptEventsMarksUnavailableTerminalPrefix(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusInProgress
-	kind := schema.ToolKindExecute
+	status := eventstream.ToolStatusInProgress
+	kind := eventstream.ToolKindExecute
 	meta := runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "retained tail\n", "append")
 	meta = metautil.WithRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
 		metautil.RuntimeStreamMode:      "append",
@@ -573,8 +572,8 @@ func TestProjectACPEventToTranscriptEventsMarksUnavailableTerminalPrefix(t *test
 	})
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Title:         stringPtr("RunCommand long job"),
 			Kind:          &kind,
@@ -593,12 +592,12 @@ func TestProjectACPEventToTranscriptEventsMarksUnavailableTerminalPrefix(t *test
 func TestProjectACPEventToTranscriptEventsPreservesTerminalNewlineFrameOutput(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusInProgress
-	kind := schema.ToolKindExecute
+	status := eventstream.ToolStatusInProgress
+	kind := eventstream.ToolKindExecute
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Title:         stringPtr("RunCommand echo ok"),
 			Kind:          &kind,

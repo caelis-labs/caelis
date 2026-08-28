@@ -6,7 +6,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestProjectACPEventToEventsUsesTypedRelationAndDeliveryWithoutMetadata(t *testing.T) {
@@ -25,9 +24,9 @@ func TestProjectACPEventToEventsUsesTypedRelationAndDeliveryWithoutMetadata(t *t
 			ToolName:   "Spawn",
 		},
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "subagent output"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "subagent output"},
 			MessageID:     "message-1",
 		},
 		Final: true,
@@ -122,9 +121,9 @@ func TestProjectACPEventToEventsPrefersTypedRelationAndDeliveryOverConflictingLe
 				},
 			},
 		},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "typed wins"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "typed wins"},
 		},
 	}, nil)
 	if len(events) != 1 {
@@ -148,9 +147,9 @@ func TestProjectACPEventToEventsRetainsEventOnlyPlanParentRelation(t *testing.T)
 			ToolName:   "Spawn",
 		},
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		Update: schema.PlanUpdate{
-			SessionUpdate: schema.UpdatePlan,
-			Entries: []schema.PlanEntry{{
+		Update: eventstream.PlanUpdate{
+			SessionUpdate: eventstream.UpdatePlan,
+			Entries: []eventstream.PlanEntry{{
 				Content: "inspect semantic delivery",
 				Status:  "in_progress",
 			}},
@@ -185,9 +184,9 @@ func TestProjectACPEventToEventsFallsBackToLegacyRelationAndDeliveryMetadata(t *
 				},
 			},
 		},
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "subagent output"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "subagent output"},
 		},
 		Final: true,
 	}, nil)
@@ -213,9 +212,9 @@ func TestProjectACPEventToEventsFallsBackToLegacyRelationMetadataInUpdate(t *tes
 		Kind:    eventstream.KindSessionUpdate,
 		Scope:   eventstream.ScopeSubagent,
 		ScopeID: "task-1",
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "legacy update metadata"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "legacy update metadata"},
 			Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"stream": map[string]any{
 				"parent_call_id": "spawn-1",
 				"parent_tool":    "Spawn",
@@ -233,8 +232,8 @@ func TestProjectACPEventToEventsFallsBackToLegacyRelationMetadataInUpdate(t *tes
 func TestProjectACPEventToEventsDelegatesToolUpdate(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusCompleted
-	kind := schema.ToolKindExecute
+	status := eventstream.ToolStatusCompleted
+	kind := eventstream.ToolKindExecute
 	var captured ToolProjectionInput
 	events := ProjectACPEventToEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
@@ -243,13 +242,13 @@ func TestProjectACPEventToEventsDelegatesToolUpdate(t *testing.T) {
 				"bridge": map[string]any{"source": "gateway_projection"},
 			},
 		},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Kind:          &kind,
 			Status:        &status,
 			RawOutput:     map[string]any{"stdout": "done\n"},
-			Content:       []schema.ToolCallContent{},
+			Content:       []eventstream.ToolCallContent{},
 		},
 	}, testSurfaceProjector{
 		resultCapture:  &captured,
@@ -275,25 +274,25 @@ func TestProjectACPEventToEventsTreatsTerminalToolCallAsFinalSnapshot(t *testing
 	var captured ToolProjectionInput
 	events := ProjectACPEventToEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    "read-1",
 			Title:         "Read AGENTS.md",
-			Kind:          schema.ToolKindRead,
-			Status:        schema.ToolStatusCompleted,
+			Kind:          eventstream.ToolKindRead,
+			Status:        eventstream.ToolStatusCompleted,
 			RawInput:      map[string]any{"path": "AGENTS.md"},
 			RawOutput:     map[string]any{"result": "done"},
 		},
 	}, testSurfaceProjector{
 		t:              t,
 		resultCapture:  &captured,
-		requireDefault: schema.ToolStatusCompleted,
+		requireDefault: eventstream.ToolStatusCompleted,
 		callCalled:     &callCalled,
 	})
 	if callCalled || len(events) != 1 {
 		t.Fatalf("call projection = %v, events = %#v, want one final result projection", callCalled, events)
 	}
-	if captured.ToolName != "" || captured.ToolKind != schema.ToolKindRead || captured.ToolTitle != "Read AGENTS.md" {
+	if captured.ToolName != "" || captured.ToolKind != eventstream.ToolKindRead || captured.ToolTitle != "Read AGENTS.md" {
 		t.Fatalf("captured identity = %#v, want exact name empty with standard kind/title preserved", captured)
 	}
 	if RawMap(captured.RawOutput)["result"] != "done" {
@@ -307,7 +306,7 @@ func TestProjectACPEventToEventsSkipsPlanTools(t *testing.T) {
 	called := false
 	events := ProjectACPEventToEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ToolCall{
+		Update: eventstream.ToolCall{
 			ToolCallID: "plan-1",
 			Title:      "Plan",
 		},
@@ -415,9 +414,9 @@ func TestProjectACPEventToEventsProjectsCompactNoticeOnly(t *testing.T) {
 
 	events := ProjectACPEventToEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateCompact,
-			Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateCompact,
+			Content:       eventstream.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
 		},
 		Final: true,
 	}, nil)

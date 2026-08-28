@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
-	protocolacp "github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
-func sessionNotificationForWire(notification protocolacp.SessionNotification) (any, error) {
+func sessionNotificationForWire(notification eventstream.SessionNotification) (any, error) {
 	if notification.Update == nil {
 		return nil, fmt.Errorf("acp surface: session update is required")
 	}
@@ -41,7 +41,7 @@ func sessionNotificationForWire(notification protocolacp.SessionNotification) (a
 	// that clears it. The current SDK pointer shape validates both but cannot
 	// preserve that presence bit when re-encoding, so send the validated raw
 	// product notification until the SDK exposes a presence-aware type.
-	if updateType == protocolacp.UpdateSessionInfo {
+	if updateType == eventstream.UpdateSessionInfo {
 		return notification, nil
 	}
 	return wire, nil
@@ -49,17 +49,17 @@ func sessionNotificationForWire(notification protocolacp.SessionNotification) (a
 
 func standardSessionUpdateType(updateType string) bool {
 	switch updateType {
-	case protocolacp.UpdateUserMessage,
-		protocolacp.UpdateAgentMessage,
-		protocolacp.UpdateAgentThought,
-		protocolacp.UpdateToolCall,
-		protocolacp.UpdateToolCallInfo,
-		protocolacp.UpdatePlan,
-		protocolacp.UpdateAvailableCmds,
-		protocolacp.UpdateCurrentMode,
-		protocolacp.UpdateConfigOption,
-		protocolacp.UpdateSessionInfo,
-		protocolacp.UpdateUsage:
+	case eventstream.UpdateUserMessage,
+		eventstream.UpdateAgentMessage,
+		eventstream.UpdateAgentThought,
+		eventstream.UpdateToolCall,
+		eventstream.UpdateToolCallInfo,
+		eventstream.UpdatePlan,
+		eventstream.UpdateAvailableCmds,
+		eventstream.UpdateCurrentMode,
+		eventstream.UpdateConfigOption,
+		eventstream.UpdateSessionInfo,
+		eventstream.UpdateUsage:
 		return true
 	default:
 		return false
@@ -81,13 +81,13 @@ func sessionUpdateAllowsExtensionContent(notification []byte, updateType string)
 	}
 	hasExtension := false
 	switch updateType {
-	case protocolacp.UpdateUserMessage, protocolacp.UpdateAgentMessage, protocolacp.UpdateAgentThought:
+	case eventstream.UpdateUserMessage, eventstream.UpdateAgentMessage, eventstream.UpdateAgentThought:
 		if !contentBlockUsesExtension(content) {
 			return false
 		}
 		hasExtension = true
 		updateObject["content"] = standardTextContentBlock()
-	case protocolacp.UpdateToolCall, protocolacp.UpdateToolCallInfo:
+	case eventstream.UpdateToolCall, eventstream.UpdateToolCallInfo:
 		var items []json.RawMessage
 		if json.Unmarshal(content, &items) != nil {
 			return false

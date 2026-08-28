@@ -1,4 +1,4 @@
-package schema
+package eventstream
 
 import (
 	"encoding/json"

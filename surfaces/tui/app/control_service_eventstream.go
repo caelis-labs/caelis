@@ -11,7 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
@@ -226,7 +225,7 @@ func eventStreamNarrativeBatchKey(env eventstream.Envelope) (string, bool) {
 	if env.Err != nil || env.Kind != eventstream.KindSessionUpdate || env.Final {
 		return "", false
 	}
-	update, ok := env.Update.(schema.ContentChunk)
+	update, ok := env.Update.(eventstream.ContentChunk)
 	if !ok {
 		return "", false
 	}
@@ -235,7 +234,7 @@ func eventStreamNarrativeBatchKey(env eventstream.Envelope) (string, bool) {
 		return "", false
 	}
 	updateType := strings.TrimSpace(update.SessionUpdate)
-	if updateType != schema.UpdateAgentMessage && updateType != schema.UpdateAgentThought {
+	if updateType != eventstream.UpdateAgentMessage && updateType != eventstream.UpdateAgentThought {
 		return "", false
 	}
 	return strings.Join([]string{
@@ -260,11 +259,11 @@ func mergeEventStreamNarrativeEnvelope(dst *eventstream.Envelope, src eventstrea
 	if dst == nil {
 		return
 	}
-	dstUpdate, ok := dst.Update.(schema.ContentChunk)
+	dstUpdate, ok := dst.Update.(eventstream.ContentChunk)
 	if !ok {
 		return
 	}
-	srcUpdate, ok := src.Update.(schema.ContentChunk)
+	srcUpdate, ok := src.Update.(eventstream.ContentChunk)
 	if !ok {
 		return
 	}
@@ -279,11 +278,11 @@ func mergeEventStreamNarrativeEnvelope(dst *eventstream.Envelope, src eventstrea
 	// cumulative-stream normalization belongs before the Surface boundary.
 	merged := dstText + srcText
 	latest := eventstream.CloneEnvelope(src)
-	latestUpdate, ok := latest.Update.(schema.ContentChunk)
+	latestUpdate, ok := latest.Update.(eventstream.ContentChunk)
 	if !ok {
 		return
 	}
-	latestUpdate.Content = schema.TextContent{Type: "text", Text: merged}
+	latestUpdate.Content = eventstream.TextContent{Type: "text", Text: merged}
 	latest.Update = latestUpdate
 	*dst = latest
 }

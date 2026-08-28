@@ -21,11 +21,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 	"github.com/caelis-labs/caelis/internal/testenv"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func textPromptRequest(sessionID string, text string) acpsdk.PromptRequest {
@@ -169,11 +169,11 @@ func TestNewFromClientsRunCommandPublishesTerminalBytesOnce(t *testing.T) {
 	for _, notification := range callbacks.notifications {
 		var meta map[string]any
 		switch update := notification.Update.(type) {
-		case acp.ToolCall:
+		case eventstream.ToolCall:
 			if strings.TrimSpace(update.ToolCallID) == "call-shell" {
 				meta = update.Meta
 			}
-		case acp.ToolCallUpdate:
+		case eventstream.ToolCallUpdate:
 			if strings.TrimSpace(update.ToolCallID) == "call-shell" {
 				meta = update.Meta
 			}
@@ -198,16 +198,16 @@ func writeACPAgentTestSSE(w http.ResponseWriter, payload map[string]any) {
 	}
 }
 
-func acpTerminalOutputText(notifications []acp.SessionNotification, callID string) string {
+func acpTerminalOutputText(notifications []eventstream.SessionNotification, callID string) string {
 	var out strings.Builder
 	for _, notification := range notifications {
 		var meta map[string]any
 		switch update := notification.Update.(type) {
-		case acp.ToolCall:
+		case eventstream.ToolCall:
 			if strings.TrimSpace(update.ToolCallID) == callID {
 				meta = update.Meta
 			}
-		case acp.ToolCallUpdate:
+		case eventstream.ToolCallUpdate:
 			if strings.TrimSpace(update.ToolCallID) == callID {
 				meta = update.Meta
 			}
@@ -691,7 +691,7 @@ func newACPAgentTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stac
 }
 
 type recordingCallbacks struct {
-	notifications []acp.SessionNotification
+	notifications []eventstream.SessionNotification
 }
 
 type allowingRecordingCallbacks struct {
@@ -704,7 +704,7 @@ func (c *allowingRecordingCallbacks) RequestPermission(context.Context, acpsdk.R
 	}, nil
 }
 
-func (c *recordingCallbacks) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {
+func (c *recordingCallbacks) SessionUpdate(_ context.Context, notification eventstream.SessionNotification) error {
 	c.notifications = append(c.notifications, notification)
 	return nil
 }
@@ -715,11 +715,11 @@ func (c *recordingCallbacks) RequestPermission(context.Context, acpsdk.RequestPe
 
 func (c *recordingCallbacks) firstAgentMessage() string {
 	for _, notification := range c.notifications {
-		chunk, ok := notification.Update.(acp.ContentChunk)
-		if !ok || chunk.SessionUpdate != acp.UpdateAgentMessage {
+		chunk, ok := notification.Update.(eventstream.ContentChunk)
+		if !ok || chunk.SessionUpdate != eventstream.UpdateAgentMessage {
 			continue
 		}
-		content, ok := chunk.Content.(acp.TextContent)
+		content, ok := chunk.Content.(eventstream.TextContent)
 		if !ok {
 			continue
 		}

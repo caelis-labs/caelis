@@ -10,16 +10,15 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestEnvelopeMarshalIncludesACPUpdate(t *testing.T) {
 	env := Envelope{
 		Kind:      KindSessionUpdate,
 		SessionID: "session-1",
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "hello"},
+		Update: ContentChunk{
+			SessionUpdate: UpdateAgentMessage,
+			Content:       TextContent{Type: "text", Text: "hello"},
 		},
 	}
 
@@ -46,10 +45,10 @@ func TestApprovalRequestIDStaysOnEnvelopeOutsideACPWirePayload(t *testing.T) {
 	env := Envelope{
 		Kind:              KindRequestPermission,
 		ApprovalRequestID: "approval-1",
-		Permission: &schema.RequestPermissionRequest{
+		Permission: &RequestPermissionRequest{
 			SessionID: "session-1",
-			ToolCall: schema.ToolCallUpdate{
-				SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCall: ToolCallUpdate{
+				SessionUpdate: UpdateToolCallInfo,
 				ToolCallID:    "call-1",
 			},
 		},
@@ -89,9 +88,9 @@ func TestEnvelopeV1SessionUpdateGolden(t *testing.T) {
 		OccurredAt:   time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC),
 		Scope:        ScopeMain,
 		Final:        true,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "hello"},
+		Update: ContentChunk{
+			SessionUpdate: UpdateAgentMessage,
+			Content:       TextContent{Type: "text", Text: "hello"},
 			MessageID:     "msg-1",
 			Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
 		},
@@ -110,8 +109,8 @@ func TestEnvelopeV1RequestPermissionGolden(t *testing.T) {
 	t.Parallel()
 
 	title := "RunCommand"
-	kind := schema.ToolKindExecute
-	status := schema.ToolStatusPending
+	kind := ToolKindExecute
+	status := ToolStatusPending
 	env := Envelope{
 		Kind:              KindRequestPermission,
 		Cursor:            "turn-1:0002",
@@ -122,10 +121,10 @@ func TestEnvelopeV1RequestPermissionGolden(t *testing.T) {
 		OccurredAt:        time.Date(2026, 6, 27, 12, 0, 1, 0, time.UTC),
 		Scope:             ScopeMain,
 		ApprovalRequestID: "approval-1",
-		Permission: &schema.RequestPermissionRequest{
+		Permission: &RequestPermissionRequest{
 			SessionID: "session-1",
-			ToolCall: schema.ToolCallUpdate{
-				SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCall: ToolCallUpdate{
+				SessionUpdate: UpdateToolCallInfo,
 				ToolCallID:    "call-1",
 				Title:         &title,
 				Kind:          &kind,
@@ -159,14 +158,14 @@ func TestEnvelopeV1ToolCallGolden(t *testing.T) {
 		TurnID:     "turn-1",
 		OccurredAt: time.Date(2026, 6, 27, 12, 0, 2, 0, time.UTC),
 		Scope:      ScopeMain,
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: ToolCall{
+			SessionUpdate: UpdateToolCall,
 			ToolCallID:    "call-1",
 			Title:         "Read file",
-			Kind:          schema.ToolKindRead,
-			Status:        schema.ToolStatusPending,
+			Kind:          ToolKindRead,
+			Status:        ToolStatusPending,
 			RawInput:      map[string]any{"path": "main.go"},
-			Locations:     []schema.ToolCallLocation{{Path: "main.go", Line: &line}},
+			Locations:     []ToolCallLocation{{Path: "main.go", Line: &line}},
 			Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
 		},
 	}
@@ -177,8 +176,8 @@ func TestEnvelopeV1ToolCallUpdateGolden(t *testing.T) {
 	t.Parallel()
 
 	title := "Run tests"
-	kind := schema.ToolKindExecute
-	status := schema.ToolStatusInProgress
+	kind := ToolKindExecute
+	status := ToolStatusInProgress
 	env := Envelope{
 		Kind:       KindSessionUpdate,
 		Cursor:     "turn-1:0004",
@@ -188,17 +187,17 @@ func TestEnvelopeV1ToolCallUpdateGolden(t *testing.T) {
 		TurnID:     "turn-1",
 		OccurredAt: time.Date(2026, 6, 27, 12, 0, 3, 0, time.UTC),
 		Scope:      ScopeMain,
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: ToolCallUpdate{
+			SessionUpdate: UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Title:         &title,
 			Kind:          &kind,
 			Status:        &status,
 			RawOutput:     map[string]any{"stdout": "ok\n"},
-			Content: []schema.ToolCallContent{{
+			Content: []ToolCallContent{{
 				Type:       "terminal",
 				TerminalID: "term-1",
-				Content:    schema.TextContent{Type: "text", Text: "ok\n"},
+				Content:    TextContent{Type: "text", Text: "ok\n"},
 			}},
 			Meta: map[string]any{
 				"caelis": map[string]any{
@@ -231,12 +230,12 @@ func TestEnvelopeV1SpawnChildSemanticGolden(t *testing.T) {
 			ToolName:   "Spawn",
 		},
 		Delivery: &Delivery{Mode: DeliveryTransient},
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
+		Update: ToolCall{
+			SessionUpdate: UpdateToolCall,
 			ToolCallID:    "child-read-1",
 			Title:         "Read README.md",
-			Kind:          schema.ToolKindRead,
-			Status:        schema.ToolStatusCompleted,
+			Kind:          ToolKindRead,
+			Status:        ToolStatusCompleted,
 			RawInput:      map[string]any{"path": "README.md"},
 		},
 	}
@@ -247,7 +246,7 @@ func TestEnvelopeV1SpawnChildSemanticGolden(t *testing.T) {
 func TestEnvelopeV1RunCommandTransientGolden(t *testing.T) {
 	t.Parallel()
 
-	status := schema.ToolStatusInProgress
+	status := ToolStatusInProgress
 	env := Envelope{
 		Kind:       KindSessionUpdate,
 		Cursor:     "stream:command-1",
@@ -258,11 +257,11 @@ func TestEnvelopeV1RunCommandTransientGolden(t *testing.T) {
 		OccurredAt: time.Date(2026, 7, 12, 10, 0, 2, 0, time.UTC),
 		Scope:      ScopeMain,
 		Delivery:   &Delivery{Mode: DeliveryTransient},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
+		Update: ToolCallUpdate{
+			SessionUpdate: UpdateToolCallInfo,
 			ToolCallID:    "command-call-1",
 			Status:        &status,
-			Content: []schema.ToolCallContent{{
+			Content: []ToolCallContent{{
 				Type:       "terminal",
 				TerminalID: "command-call-1",
 			}},
@@ -284,9 +283,9 @@ func TestEnvelopeV1PlanGolden(t *testing.T) {
 		TurnID:     "turn-1",
 		OccurredAt: time.Date(2026, 6, 27, 12, 0, 4, 0, time.UTC),
 		Scope:      ScopeMain,
-		Update: schema.PlanUpdate{
-			SessionUpdate: schema.UpdatePlan,
-			Entries: []schema.PlanEntry{{
+		Update: PlanUpdate{
+			SessionUpdate: UpdatePlan,
+			Entries: []PlanEntry{{
 				Content:  "Inspect replay",
 				Status:   "completed",
 				Priority: "high",
@@ -308,8 +307,8 @@ func TestEnvelopeV1ACPUsageUpdateGolden(t *testing.T) {
 		TurnID:     "turn-1",
 		OccurredAt: time.Date(2026, 6, 27, 12, 0, 6, 0, time.UTC),
 		Scope:      ScopeMain,
-		Update: schema.UsageUpdate{
-			SessionUpdate: schema.UpdateUsage,
+		Update: UsageUpdate{
+			SessionUpdate: UpdateUsage,
 			Size:          200000,
 			Used:          42000,
 			Cost:          &acpsdk.Cost{Amount: 0.47, Currency: "USD"},
@@ -330,7 +329,7 @@ func TestUsageUpdateFromSnapshotStoresBreakdownInMeta(t *testing.T) {
 		TotalTokens:         17,
 		ContextWindowTokens: 200000,
 	}, map[string]any{"caelis": map[string]any{"invocation": map[string]any{"model": "m"}}})
-	if update.SessionUpdate != schema.UpdateUsage {
+	if update.SessionUpdate != UpdateUsage {
 		t.Fatalf("SessionUpdate = %q, want usage_update", update.SessionUpdate)
 	}
 	if update.Used != 17 || update.Size != 200000 {
@@ -362,8 +361,8 @@ func TestUsageUpdateFromSnapshotDefaultsUnknownSizeToUsed(t *testing.T) {
 func TestUsageSnapshotFromUpdateNeverWrapsFullUint64Counters(t *testing.T) {
 	t.Parallel()
 
-	update := schema.UsageUpdate{
-		SessionUpdate: schema.UpdateUsage, Size: math.MaxUint64, Used: math.MaxUint64,
+	update := UsageUpdate{
+		SessionUpdate: UpdateUsage, Size: math.MaxUint64, Used: math.MaxUint64,
 	}
 	if usage := usageSnapshotFromUpdate(update); usage != nil {
 		t.Fatalf("usageSnapshotFromUpdate() = %#v, want no lossy machine-int projection", usage)
@@ -435,15 +434,15 @@ func TestCloneEnvelopePreservesContentChunkMetadata(t *testing.T) {
 	env := Envelope{
 		Kind:      KindSessionUpdate,
 		SessionID: "session-1",
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
+		Update: ContentChunk{
+			SessionUpdate: UpdateAgentMessage,
 			MessageID:     "msg-1",
-			Content:       schema.TextContent{Type: "text", Text: "hello"},
+			Content:       TextContent{Type: "text", Text: "hello"},
 			Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
 		},
 	}
 	cloned := CloneEnvelope(env)
-	chunk, ok := cloned.Update.(schema.ContentChunk)
+	chunk, ok := cloned.Update.(ContentChunk)
 	if !ok {
 		t.Fatalf("cloned update = %T, want ContentChunk", cloned.Update)
 	}
@@ -455,7 +454,7 @@ func TestCloneEnvelopePreservesContentChunkMetadata(t *testing.T) {
 		t.Fatalf("chunk meta = %#v, want vendor trace", chunk.Meta)
 	}
 	chunk.Meta["vendor"].(map[string]any)["trace"] = "mutated"
-	original := env.Update.(schema.ContentChunk)
+	original := env.Update.(ContentChunk)
 	originalVendor, _ := original.Meta["vendor"].(map[string]any)
 	if originalVendor["trace"] != "abc" {
 		t.Fatalf("original meta mutated = %#v", original.Meta)
@@ -466,7 +465,7 @@ func TestCloneEnvelopeDeepCopiesPermissionOptionMetadata(t *testing.T) {
 	t.Parallel()
 
 	env := Envelope{
-		Permission: &schema.RequestPermissionRequest{
+		Permission: &RequestPermissionRequest{
 			Options: []acpsdk.PermissionOption{{
 				OptionId: "allow_once",
 				Name:     "Allow once",
@@ -488,13 +487,13 @@ func TestCloneUpdateDeepCopiesToolCallUpdate(t *testing.T) {
 	t.Parallel()
 
 	title := "RunCommand"
-	update := schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+	update := ToolCallUpdate{
+		SessionUpdate: UpdateToolCallInfo,
 		ToolCallID:    "call-1",
 		Title:         &title,
 		RawInput:      map[string]any{"command": "make test"},
 	}
-	cloned, ok := CloneUpdate(update).(schema.ToolCallUpdate)
+	cloned, ok := CloneUpdate(update).(ToolCallUpdate)
 	if !ok {
 		t.Fatalf("CloneUpdate() = %T, want ToolCallUpdate", CloneUpdate(update))
 	}
@@ -508,15 +507,15 @@ func TestCloneUpdateDeepCopiesToolCallUpdate(t *testing.T) {
 func TestCloneUpdateDeepCopiesUsageCostMetadata(t *testing.T) {
 	t.Parallel()
 
-	update := schema.UsageUpdate{
-		SessionUpdate: schema.UpdateUsage,
+	update := UsageUpdate{
+		SessionUpdate: UpdateUsage,
 		Cost: &acpsdk.Cost{
 			Amount:   0.47,
 			Currency: "USD",
 			Meta:     map[string]json.RawMessage{"vendor": json.RawMessage(`{"trace":"abc"}`)},
 		},
 	}
-	cloned, ok := CloneUpdate(update).(schema.UsageUpdate)
+	cloned, ok := CloneUpdate(update).(UsageUpdate)
 	if !ok {
 		t.Fatalf("CloneUpdate() = %T, want UsageUpdate", CloneUpdate(update))
 	}

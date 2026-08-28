@@ -19,9 +19,11 @@ Built-in or external Agent
 - `agent-sdk/*` owns reusable messages, tools, plans, approvals, participants,
   lifecycle, cancellation, and controller semantics.
 - `acp-go-sdk` owns standard ACP wire contracts and connection behavior.
-- Remaining `protocol/acp/schema` extensions are transitional compatibility
-  code and must shrink into the Control, Surface, reusable SDK, or Host-private
-  owner that uses them. `control/acppermission` owns the standard ACP
+- `control/appserver/eventstream` owns the ACP-shaped update and permission
+  payloads carried by its Control-to-Surface Envelope. Remaining
+  `protocol/acp/metautil` extensions are transitional compatibility code and
+  must shrink into the Control, Surface, reusable SDK, or Host-private owner
+  that uses them. `control/acppermission` owns the standard ACP
   `request_permission` translation to and from normalized SDK approval
   semantics; it applies no approval policy.
 - Control owns authorization, lifecycle, ordering, replay coordination,

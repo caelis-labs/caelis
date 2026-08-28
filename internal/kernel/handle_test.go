@@ -16,7 +16,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestTurnHandleReplaysEventstreamAfterCursor(t *testing.T) {
@@ -51,7 +50,7 @@ func TestTurnHandleACPEventsProjectsCanonicalAndPassesThroughTransient(t *testin
 	handle.publishSessionEvent(&session.Event{ID: "e1", Seq: 1, Type: session.EventTypeAssistant, Message: &msg})
 	handle.publishACP(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.RawUpdate{
+		Update: eventstream.RawUpdate{
 			SessionUpdate: "vendor/custom",
 		},
 	}, "acp_passthrough")
@@ -61,10 +60,10 @@ func TestTurnHandleACPEventsProjectsCanonicalAndPassesThroughTransient(t *testin
 	if len(got) != 2 {
 		t.Fatalf("ACPEvents() produced %d events, want 2: %#v", len(got), got)
 	}
-	if update, ok := got[0].Update.(schema.ContentChunk); !ok || update.SessionUpdate != schema.UpdateAgentMessage {
+	if update, ok := got[0].Update.(eventstream.ContentChunk); !ok || update.SessionUpdate != eventstream.UpdateAgentMessage {
 		t.Fatalf("first ACP update = %#v, want projected assistant chunk", got[0].Update)
 	}
-	if update, ok := got[1].Update.(schema.RawUpdate); !ok || update.SessionUpdate != "vendor/custom" {
+	if update, ok := got[1].Update.(eventstream.RawUpdate); !ok || update.SessionUpdate != "vendor/custom" {
 		t.Fatalf("second ACP update = %#v, want passthrough raw update", got[1].Update)
 	}
 	if got[0].Cursor != "h1-acp-000001" || got[1].Cursor != "h1-acp-000002" {
@@ -86,7 +85,7 @@ func TestTurnHandleCanSuppressCanonicalProjectionForNativePassthrough(t *testing
 	handle.publishSessionEventWithACPProjection(&session.Event{ID: "e1", Type: session.EventTypeAssistant, Message: &msg}, false)
 	handle.publishACP(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
-		Update: schema.RawUpdate{
+		Update: eventstream.RawUpdate{
 			SessionUpdate: "vendor/custom",
 		},
 	}, "acp_passthrough")
@@ -98,7 +97,7 @@ func TestTurnHandleCanSuppressCanonicalProjectionForNativePassthrough(t *testing
 	if len(replayed) != 1 {
 		t.Fatalf("eventsAfter() = %#v, want only native passthrough", replayed)
 	}
-	if update, ok := replayed[0].Update.(schema.RawUpdate); !ok || update.SessionUpdate != "vendor/custom" {
+	if update, ok := replayed[0].Update.(eventstream.RawUpdate); !ok || update.SessionUpdate != "vendor/custom" {
 		t.Fatalf("ACP update = %#v, want native raw passthrough", replayed[0].Update)
 	}
 }
@@ -132,7 +131,7 @@ func TestTurnHandlePublishesApprovalAsACPPermission(t *testing.T) {
 	if replayed[0].ApprovalRequestID != pending.id {
 		t.Fatalf("approval request id = %q, want %q", replayed[0].ApprovalRequestID, pending.id)
 	}
-	if permission.ToolCall.ToolCallID != "call-1" || stringPtrValue(permission.ToolCall.Kind) != schema.ToolKindExecute {
+	if permission.ToolCall.ToolCallID != "call-1" || stringPtrValue(permission.ToolCall.Kind) != eventstream.ToolKindExecute {
 		t.Fatalf("permission tool call = %#v, want execute call-1", permission.ToolCall)
 	}
 	if got := metautil.String(permission.ToolCall.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RunCommand" {

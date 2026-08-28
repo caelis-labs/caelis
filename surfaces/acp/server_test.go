@@ -13,8 +13,8 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
-	protocolacp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func testPromptRequest(sessionID string) acpsdk.PromptRequest {
@@ -153,7 +153,7 @@ func TestServeStdioSendsAvailableCommandsAfterNewSession(t *testing.T) {
 			t.Fatalf("notification sessionId = %q, want session-1", got.SessionId)
 		}
 		update := got.Update.AvailableCommandsUpdate
-		if update == nil || update.SessionUpdate != protocolacp.UpdateAvailableCmds {
+		if update == nil || update.SessionUpdate != eventstream.UpdateAvailableCmds {
 			t.Fatalf("session update = %#v, want available_commands_update", got.Update)
 		}
 		if len(update.AvailableCommands) != 1 || update.AvailableCommands[0].Name != "agent" {

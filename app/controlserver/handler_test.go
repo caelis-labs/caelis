@@ -26,7 +26,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestHostHealthReadinessAndInitializeExposeOneInstance(t *testing.T) {
@@ -188,16 +187,16 @@ func TestHTTPStatusAddressesSessionAndDiagnostics(t *testing.T) {
 func TestReconnectSSEBootstrapsStateBeforeBackfillAndLiveEvents(t *testing.T) {
 	backfill := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, Cursor: "cursor-backfill", SessionID: "session-1",
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "backfill"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "backfill"},
 		},
 	}
 	live := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, Cursor: "cursor-live", SessionID: "session-1",
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "live"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "live"},
 		},
 	}
 	subscription := newTestSubscription(live)

@@ -7,7 +7,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // SpawnTaskResult is one terminal child result observed through a canonical
@@ -54,7 +53,7 @@ func spawnTaskResultsFromObservations(observations []terminalTaskObservation) []
 				}
 				out = append(out, SpawnTaskResult{
 					ParentCallID: observation.ParentCallID,
-					Status:       schema.ToolStatusCompleted,
+					Status:       eventstream.ToolStatusCompleted,
 					RawOutput:    rawOutput,
 				})
 			}
@@ -85,12 +84,12 @@ func spawnTaskResultsFromObservations(observations []terminalTaskObservation) []
 func spawnObservedTaskStatus(observerStatus string, rawOutput map[string]any) string {
 	switch strings.ToLower(strings.TrimSpace(display.MapString(rawOutput, "state"))) {
 	case "completed", "complete", "succeeded", "success", "done":
-		return schema.ToolStatusCompleted
+		return eventstream.ToolStatusCompleted
 	case "failed", "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout", "unknown_outcome":
-		return schema.ToolStatusFailed
+		return eventstream.ToolStatusFailed
 	}
-	if strings.EqualFold(strings.TrimSpace(observerStatus), schema.ToolStatusFailed) {
-		return schema.ToolStatusFailed
+	if strings.EqualFold(strings.TrimSpace(observerStatus), eventstream.ToolStatusFailed) {
+		return eventstream.ToolStatusFailed
 	}
-	return schema.ToolStatusCompleted
+	return eventstream.ToolStatusCompleted
 }

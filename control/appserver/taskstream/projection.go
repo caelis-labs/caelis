@@ -12,7 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // taskFrameProjectionRequest carries only the Control Task descriptor facts
@@ -121,8 +120,8 @@ func streamToolUpdateEnvelope(req taskFrameProjectionRequest, frame stream.Frame
 	if occurredAt.IsZero() {
 		occurredAt = time.Now()
 	}
-	update := schema.ToolCallUpdate{
-		SessionUpdate: schema.UpdateToolCallInfo,
+	update := eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(req.CallID),
 		Meta:          streamFrameToolMeta(meta, req.TaskHandle),
 	}
@@ -160,7 +159,7 @@ func streamToolUpdateEnvelope(req taskFrameProjectionRequest, frame stream.Frame
 	}
 }
 
-func withCommandDisplayTerminal(update schema.ToolCallUpdate, toolCallID string, toolName string) schema.ToolCallUpdate {
+func withCommandDisplayTerminal(update eventstream.ToolCallUpdate, toolCallID string, toolName string) eventstream.ToolCallUpdate {
 	toolName = strings.TrimSpace(toolName)
 	if toolName != "" {
 		update.Meta = metautil.WithRuntimeSection(update.Meta, metautil.RuntimeTool, map[string]any{
@@ -172,7 +171,7 @@ func withCommandDisplayTerminal(update schema.ToolCallUpdate, toolCallID string,
 		return update
 	}
 	update.Meta = metautil.WithTerminalInfo(update.Meta, terminalID)
-	update.Content = []schema.ToolCallContent{{Type: "terminal", TerminalID: terminalID}}
+	update.Content = []eventstream.ToolCallContent{{Type: "terminal", TerminalID: terminalID}}
 	return update
 }
 
@@ -186,12 +185,12 @@ func commandDisplayTerminalID(toolCallID string, toolName string) (string, bool)
 
 func taskStreamToolStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "", schema.ToolStatusPending, schema.ToolStatusInProgress, schema.ToolStatusCompleted, schema.ToolStatusFailed:
+	case "", eventstream.ToolStatusPending, eventstream.ToolStatusInProgress, eventstream.ToolStatusCompleted, eventstream.ToolStatusFailed:
 		return strings.TrimSpace(status)
 	case "started", "running", "waiting_approval":
-		return schema.ToolStatusInProgress
+		return eventstream.ToolStatusInProgress
 	case "cancelled", "canceled", "interrupted", "terminated", "timed_out", "timeout":
-		return schema.ToolStatusFailed
+		return eventstream.ToolStatusFailed
 	default:
 		return strings.TrimSpace(status)
 	}
@@ -216,9 +215,9 @@ func subagentFinalToolStatus(frame stream.Frame) (string, bool) {
 	state := strings.ToLower(strings.TrimSpace(frame.State))
 	switch state {
 	case "completed":
-		return schema.ToolStatusCompleted, false
+		return eventstream.ToolStatusCompleted, false
 	case "failed":
-		return schema.ToolStatusFailed, true
+		return eventstream.ToolStatusFailed, true
 	case "interrupted":
 		return toolStatusInterrupted, true
 	case "cancelled", "canceled":
@@ -319,7 +318,7 @@ func taskStreamPrimaryEnvelope(events []eventstream.Envelope) []eventstream.Enve
 	// both with the frame cursor would make a mid-record resume lossy. Keep the
 	// semantic event; a usage-only frame still projects its usage envelope.
 	for _, envelope := range events {
-		if eventstream.UpdateType(envelope.Update) != schema.UpdateUsage {
+		if eventstream.UpdateType(envelope.Update) != eventstream.UpdateUsage {
 			return []eventstream.Envelope{envelope}
 		}
 	}

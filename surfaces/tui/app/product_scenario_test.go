@@ -16,7 +16,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/internal/evalharness"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
@@ -38,7 +37,7 @@ func TestProductScenarioContextCompactionRuntimeToPhysicalTUI(t *testing.T) {
 			},
 			envelopeFacts: []evalharness.EnvelopeFact{
 				{Kind: eventstream.KindLifecycle, LifecycleState: session.LifecycleStatusContextCompacting, Delivery: eventstream.DeliveryTransient},
-				{Kind: eventstream.KindSessionUpdate, UpdateType: schema.UpdateCompact, Delivery: eventstream.DeliveryCanonical},
+				{Kind: eventstream.KindSessionUpdate, UpdateType: eventstream.UpdateCompact, Delivery: eventstream.DeliveryCanonical},
 				{Kind: eventstream.KindNotice, NoticeKind: eventstream.NoticeKindCompact, Delivery: eventstream.DeliveryTransient},
 			},
 			terminalFrame: evalharness.FrameExpectation{
