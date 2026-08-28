@@ -1,8 +1,11 @@
 package acp
 
 import (
+	"fmt"
 	"io"
 	"os"
+
+	sdkstdio "github.com/caelis-labs/acp-go-sdk/transport/stdio"
 )
 
 // sdkOwnedServerInput gives the SDK an independently closable handle for file
@@ -13,9 +16,9 @@ func sdkOwnedServerInput(in io.Reader) (io.Reader, func(), error) {
 	if !ok {
 		return in, func() {}, nil
 	}
-	duplicate, err := duplicateServerFile(file, "input")
+	duplicate, err := sdkstdio.DuplicateFile(file)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("acp: duplicate server input: %w", err)
 	}
 	return duplicate, func() { _ = duplicate.Close() }, nil
 }
@@ -29,9 +32,9 @@ func sdkOwnedServerOutput(out io.Writer) (io.Writer, func(), error) {
 	if !ok {
 		return out, func() {}, nil
 	}
-	duplicate, err := duplicateServerFile(file, "output")
+	duplicate, err := sdkstdio.DuplicateFile(file)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("acp: duplicate server output: %w", err)
 	}
 	return duplicate, func() { _ = duplicate.Close() }, nil
 }

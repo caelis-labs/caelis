@@ -705,21 +705,21 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 			return "AppServer prompt adapter must depend on Control clients and surface-neutral contracts, not Host, Surface, Runtime, or Kernel"
 		}
 	case strings.HasPrefix(rel, "internal/sandboxrouter/"):
-		if strings.HasSuffix(rel, "_test.go") {
+		if strings.HasSuffix(rel, "_test.go") && !strings.HasPrefix(target, "protocol/acp/") {
 			return ""
 		}
 		if target == "ports/sandbox" || strings.HasPrefix(target, "ports/sandbox/") {
 			return "internal/sandboxrouter must not depend on ports/sandbox; use agent-sdk/sandbox"
 		}
 	case strings.HasPrefix(rel, "app/gatewayapp/internal/sandboxpolicy/"):
-		if strings.HasSuffix(rel, "_test.go") {
+		if strings.HasSuffix(rel, "_test.go") && !strings.HasPrefix(target, "protocol/acp/") {
 			return ""
 		}
 		if target == "ports/sandbox" || strings.HasPrefix(target, "ports/sandbox/") {
 			return "app/gatewayapp/internal/sandboxpolicy must not depend on ports/sandbox; use agent-sdk/sandbox"
 		}
 	case strings.HasPrefix(rel, "app/gatewayapp/internal/skilldiscovery/"):
-		if strings.HasSuffix(rel, "_test.go") {
+		if strings.HasSuffix(rel, "_test.go") && !strings.HasPrefix(target, "protocol/acp/") {
 			return ""
 		}
 		if !isAllowedSkillDiscoveryTarget(target) {
@@ -758,6 +758,9 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		if strings.HasPrefix(target, "internal/") || startsWithAny(target, "app/", "kernel/", "ports/", "impl/", "surfaces/", "protocol/") {
 			return "cmd/caelis should only enter internal/cli and startup bootstrap"
 		}
+	}
+	if strings.HasPrefix(target, "protocol/acp/") {
+		return "production code must not depend on the retired protocol/acp tree; standard ACP wire contracts belong to acp-go-sdk and residual compatibility belongs to its Control, Host, adapter, or Surface owner"
 	}
 	return ""
 }
@@ -895,6 +898,8 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "must not recreate protocol/acp/projector; canonical Session projection belongs to control/appserver/projection", pkg, 1
 	case pkg == "protocol/acp/semantic" || strings.HasPrefix(pkg, "protocol/acp/semantic/"):
 		return "must not recreate protocol/acp/semantic; ACP permission translation belongs to control/acppermission", pkg, 1
+	case strings.HasPrefix(pkg, "protocol/acp/"):
+		return "must not recreate the retired protocol/acp tree; standard ACP wire contracts belong to acp-go-sdk and residual compatibility belongs to its Control, Host, adapter, or Surface owner", pkg, 1
 	case pkg == "impl/model/catalog" || strings.HasPrefix(pkg, "impl/model/catalog/"):
 		return "must not recreate impl/model/catalog; concrete model catalogs belong to Control", pkg, 1
 	case pkg == "agent-sdk/model/catalog" || strings.HasPrefix(pkg, "agent-sdk/model/catalog/"):

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"reflect"
 	"sync"
@@ -308,6 +309,44 @@ func TestDispatchMayHaveCommittedClassifiesCompletedResponses(t *testing.T) {
 	}
 	if !DispatchMayHaveCommitted(&acpsdk.ResponseDecodeError{Err: errors.New("bad result")}) {
 		t.Fatal("successful undecodable response classified as retry-safe")
+	}
+}
+
+func TestIsConnectionErrorUsesSDKTransportClassification(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "connection closed", err: acpsdk.ErrConnectionClosed, want: true},
+		{name: "peer closed", err: acpsdk.ErrPeerClosed, want: true},
+		{
+			name: "wrapped transport read",
+			err: fmt.Errorf("wait for peer: %w", &acpsdk.TransportError{
+				Op:    acpsdk.TransportOperationRead,
+				Cause: errors.New("read failed"),
+			}),
+			want: true,
+		},
+		{
+			name: "wrapped transport write",
+			err: fmt.Errorf("send prompt: %w", &acpsdk.TransportError{
+				Op:    acpsdk.TransportOperationWrite,
+				Cause: errors.New("write failed"),
+			}),
+			want: true,
+		},
+		{name: "ordinary product error", err: errors.New("model backend reported broken pipe"), want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsConnectionError(test.err); got != test.want {
+				t.Fatalf("IsConnectionError(%v) = %v, want %v", test.err, got, test.want)
+			}
+		})
 	}
 }
 

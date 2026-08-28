@@ -37,13 +37,6 @@ func sessionNotificationForWire(notification eventstream.SessionNotification) (a
 	if err := wire.Validate(); err != nil {
 		return nil, fmt.Errorf("acp surface: validate session notification: %w", err)
 	}
-	// ACP distinguishes an absent session-info field from an explicit null
-	// that clears it. The current SDK pointer shape validates both but cannot
-	// preserve that presence bit when re-encoding, so send the validated raw
-	// product notification until the SDK exposes a presence-aware type.
-	if updateType == eventstream.UpdateSessionInfo {
-		return notification, nil
-	}
 	return wire, nil
 }
 

@@ -26,26 +26,38 @@ func testPromptRequest(sessionID string) acpsdk.PromptRequest {
 	}
 }
 
-func TestDecodePromptRequestUsesSDKWireValidation(t *testing.T) {
-	for _, raw := range []json.RawMessage{
-		nil,
-		json.RawMessage(`null`),
-		json.RawMessage(`{"sessionId":"session-1","prompt":[{"type":"vendor","value":"unsupported"}]}`),
-		json.RawMessage(`{"sessionId":"session-1","prompt":[{"type":"text"}]}`),
-	} {
-		var request acpsdk.PromptRequest
-		if err := decodeRequiredParams(raw, &request); err == nil {
-			t.Fatalf("decodeRequiredParams(%s) error = nil", raw)
-		}
-	}
-
-	var request acpsdk.PromptRequest
-	if err := decodeRequiredParams(json.RawMessage(`{"sessionId":"session-1","prompt":[{"type":"text","text":"hello"}],"_meta":{"trace":"kept"}}`), &request); err != nil {
+func newTestServerConnection(t *testing.T, agent Agent) (context.Context, *acpsdk.Connection) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- ServeStdio(ctx, agent, clientToServerReader, serverToClientWriter)
+	}()
+	conn, err := acpsdk.NewConnectionWithOptions(nil, clientToServerWriter, serverToClientReader, acpsdk.ConnectionOptions{})
+	if err != nil {
+		cancel()
+		_ = clientToServerReader.Close()
+		_ = clientToServerWriter.Close()
+		_ = serverToClientReader.Close()
+		_ = serverToClientWriter.Close()
 		t.Fatal(err)
 	}
-	if request.SessionId != "session-1" || len(request.Prompt) != 1 || request.Prompt[0].Text == nil || request.Prompt[0].Text.Text != "hello" || string(request.Meta["trace"]) != `"kept"` {
-		t.Fatalf("decoded request = %#v", request)
-	}
+	t.Cleanup(func() {
+		cancel()
+		_ = conn.Close()
+		_ = clientToServerReader.Close()
+		_ = clientToServerWriter.Close()
+		_ = serverToClientReader.Close()
+		_ = serverToClientWriter.Close()
+		select {
+		case <-serverErr:
+		case <-time.After(time.Second):
+			t.Error("ServeStdio did not stop")
+		}
+	})
+	return ctx, conn
 }
 
 func TestServeStdioPreservesLegacyPromptImageName(t *testing.T) {
@@ -87,6 +99,59 @@ func TestServeStdioPreservesLegacyPromptImageName(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for normalized prompt")
+	}
+
+	cancel()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("ServeStdio did not stop")
+	}
+}
+
+func TestServeStdioPreservesCompatibleSessionUpdate(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	defer clientToServerReader.Close()
+	defer clientToServerWriter.Close()
+	defer serverToClientReader.Close()
+	defer serverToClientWriter.Close()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- ServeStdio(ctx, compatibleUpdateAgent{}, clientToServerReader, serverToClientWriter)
+	}()
+	updates := make(chan json.RawMessage, 1)
+	conn, err := acpsdk.NewConnectionWithOptions(
+		func(_ context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
+			if method != acpsdk.ClientMethodSessionUpdate {
+				return nil, acpsdk.NewMethodNotFound(method)
+			}
+			updates <- append(json.RawMessage(nil), params...)
+			return nil, nil
+		},
+		clientToServerWriter,
+		serverToClientReader,
+		acpsdk.ConnectionOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := acpsdk.SendRequest[acpsdk.PromptResponse](conn, ctx, acpsdk.AgentMethodSessionPrompt, testPromptRequest("session-1")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case raw := <-updates:
+		const want = `{"sessionId":"session-1","update":{"sessionUpdate":"vendor_update","value":{"nested":true}}}`
+		if string(raw) != want {
+			t.Fatalf("compatible session/update = %s, want %s", raw, want)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for compatible session/update")
 	}
 
 	cancel()
@@ -187,87 +252,35 @@ func TestServerFrameLimitCoversProductImagePayload(t *testing.T) {
 	}
 }
 
-func TestResponseErrorPreservesProtocolErrorsAndSeparatesInternalFailures(t *testing.T) {
-	t.Parallel()
-
-	authRequired := acpsdk.NewAuthRequired(map[string]any{"method": "oauth"})
-	if got := responseError(authRequired); got != authRequired {
-		t.Fatalf("responseError(auth_required) = %#v, want original structured error", got)
-	}
-	if got := responseError(errors.New("runtime failed")); got.Code != -32603 {
-		t.Fatalf("responseError(runtime failure) code = %d, want -32603", got.Code)
-	}
-	if got := responseError(context.Canceled); got.Code != -32800 {
-		t.Fatalf("responseError(context.Canceled) code = %d, want -32800", got.Code)
-	}
-}
-
 func TestAuthenticateRequiresOptionalAgentCapability(t *testing.T) {
 	t.Parallel()
 
-	conn := &serverConn{agent: noAuthAgent{}}
-	_, rpcErr := conn.handleRequest(
-		context.Background(),
-		nil,
+	ctx, conn := newTestServerConnection(t, noAuthAgent{})
+	_, err := acpsdk.SendRequest[acpsdk.AuthenticateResponse](
+		conn,
+		ctx,
 		acpsdk.AgentMethodAuthenticate,
-		json.RawMessage(`{"methodId":"agent"}`),
+		acpsdk.AuthenticateRequest{MethodId: "agent"},
 	)
-	if rpcErr == nil || rpcErr.Code != -32601 {
-		t.Fatalf("authenticate error = %#v, want method not found", rpcErr)
-	}
-}
-
-func TestDecodeRequiredStandardParamsUsesSDKValidation(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		raw    json.RawMessage
-		target any
-	}{
-		"authenticate missing method": {
-			raw:    json.RawMessage(`{}`),
-			target: &acpsdk.AuthenticateRequest{},
-		},
-		"close null params": {
-			raw:    json.RawMessage(`null`),
-			target: &acpsdk.CloseSessionRequest{},
-		},
-		"set mode missing mode": {
-			raw:    json.RawMessage(`{"sessionId":"session-1"}`),
-			target: &acpsdk.SetSessionModeRequest{},
-		},
-	}
-	for name, test := range tests {
-		name, test := name, test
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			if err := decodeRequiredParams(test.raw, test.target); err == nil {
-				t.Fatal("decodeRequiredParams() error = nil, want SDK validation failure")
-			}
-		})
-	}
-
-	var closeRequest acpsdk.CloseSessionRequest
-	if err := decodeRequiredParams(json.RawMessage(`{"sessionId":"session-1"}`), &closeRequest); err != nil {
-		t.Fatalf("valid close params: %v", err)
-	}
-	if closeRequest.SessionId != "session-1" {
-		t.Fatalf("close session id = %q, want session-1", closeRequest.SessionId)
+	var requestErr *acpsdk.RequestError
+	if !errors.As(err, &requestErr) || requestErr.Code != -32601 {
+		t.Fatalf("authenticate error = %v, want method not found", err)
 	}
 }
 
 func TestRetiredSetModelMethodIsNotDispatched(t *testing.T) {
 	t.Parallel()
 
-	conn := &serverConn{agent: commandAgent{}}
-	_, rpcErr := conn.handleRequest(
-		context.Background(),
-		nil,
+	ctx, conn := newTestServerConnection(t, commandAgent{})
+	_, err := acpsdk.SendRequest[struct{}](
+		conn,
+		ctx,
 		"session/set_model",
 		json.RawMessage(`{"sessionId":"session-1","modelId":"model-1"}`),
 	)
-	if rpcErr == nil || rpcErr.Code != -32601 {
-		t.Fatalf("session/set_model error = %#v, want method not found", rpcErr)
+	var requestErr *acpsdk.RequestError
+	if !errors.As(err, &requestErr) || requestErr.Code != -32601 {
+		t.Fatalf("session/set_model error = %v, want method not found", err)
 	}
 }
 
@@ -602,6 +615,21 @@ func TestServeStdioHandlesStableSessionLifecycleMethods(t *testing.T) {
 }
 
 type commandAgent struct{}
+
+type compatibleUpdateAgent struct {
+	commandAgent
+}
+
+func (compatibleUpdateAgent) Prompt(ctx context.Context, request acpsdk.PromptRequest, callbacks PromptCallbacks) (acpsdk.PromptResponse, error) {
+	err := callbacks.SessionUpdate(ctx, eventstream.SessionNotification{
+		SessionID: string(request.SessionId),
+		Update: eventstream.RawUpdate{
+			SessionUpdate: "vendor_update",
+			Raw:           json.RawMessage(`{"sessionUpdate":"vendor_update","value":{"nested":true}}`),
+		},
+	})
+	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, err
+}
 
 type noAuthAgent struct{}
 

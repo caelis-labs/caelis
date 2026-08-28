@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
@@ -38,11 +36,6 @@ func ServeStdio(ctx context.Context, agent Agent, in io.Reader, out io.Writer) e
 	if in == nil || out == nil {
 		return errors.New("acp: stdio streams are required")
 	}
-	conn := &serverConn{
-		agent:     agent,
-		lifecycle: ctx,
-		rpcReady:  make(chan struct{}),
-	}
 	connectionInput, closeInputOnFailure, err := sdkOwnedServerInput(in)
 	if err != nil {
 		return err
@@ -52,18 +45,19 @@ func ServeStdio(ctx context.Context, agent Agent, in io.Reader, out io.Writer) e
 		closeInputOnFailure()
 		return err
 	}
-	rpc, err := acpsdk.NewConnectionWithOptions(conn.handle, connectionOutput, connectionInput, acpsdk.ConnectionOptions{
-		MaxFrameSize: serverMaxFrameSize,
-	})
+	peer, err := acpsdk.NewAgentSideConnectionWithOptions(
+		&serverAgent{agent: agent},
+		connectionOutput,
+		connectionInput,
+		acpsdk.ConnectionOptions{MaxFrameSize: serverMaxFrameSize},
+	)
 	if err != nil {
 		closeInputOnFailure()
 		closeOutputOnFailure()
 		return err
 	}
-	conn.rpc.Store(rpc)
-	close(conn.rpcReady)
-	defer rpc.Close()
-	if err := rpc.Wait(ctx); err != nil {
+	defer peer.Close()
+	if err := peer.Wait(ctx); err != nil {
 		if ctx.Err() != nil {
 			return context.Cause(ctx)
 		}
@@ -75,232 +69,165 @@ func ServeStdio(ctx context.Context, agent Agent, in io.Reader, out io.Writer) e
 	return nil
 }
 
-type serverConn struct {
-	agent     Agent
-	rpc       atomic.Pointer[acpsdk.Connection]
-	rpcReady  chan struct{}
-	lifecycle context.Context
+// serverAgent adapts the callback-aware product Agent to the SDK's typed
+// agent-side dispatcher. The SDK owns standard method decoding, validation,
+// direction checks, request cancellation, and connection lifecycle.
+type serverAgent struct {
+	agent Agent
 }
 
-type serverInboundRequest struct {
-	mu       sync.Mutex
-	callback func(context.Context) error
+func (a *serverAgent) Initialize(ctx context.Context, req acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error) {
+	resp, err := a.agent.Initialize(ctx, req)
+	return resp, productMethodError(acpsdk.AgentMethodInitialize, err)
 }
 
-func (r *serverInboundRequest) runAfterResponse(ctx context.Context) error {
-	r.mu.Lock()
-	callback := r.callback
-	r.mu.Unlock()
-	if callback == nil {
-		return nil
+func (a *serverAgent) Authenticate(ctx context.Context, req acpsdk.AuthenticateRequest) (acpsdk.AuthenticateResponse, error) {
+	handler, ok := a.agent.(agentAuthenticator)
+	if !ok {
+		return acpsdk.AuthenticateResponse{}, acpsdk.NewMethodNotFound(acpsdk.AgentMethodAuthenticate)
 	}
-	return callback(ctx)
+	resp, err := handler.Authenticate(ctx, req)
+	return resp, productMethodError(acpsdk.AgentMethodAuthenticate, err)
 }
 
-func (r *serverInboundRequest) setAfterResponse(callback func(context.Context) error) error {
-	if r == nil {
-		return acpsdk.ErrAfterResponseUnavailable
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.callback != nil {
-		return acpsdk.ErrAfterResponseRegistered
-	}
-	r.callback = callback
-	return nil
-}
-
-// handle restores the ACP request/notification split that the SDK's shared
-// MethodHandler intentionally leaves to product wire adapters. Registering the
-// one response hook also provides the SDK's public request-context signal.
-func (c *serverConn) handle(ctx context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
-	inbound := &serverInboundRequest{}
-	err := acpsdk.AfterResponse(ctx, inbound.runAfterResponse)
-	switch {
-	case err == nil:
-		return c.handleRequest(ctx, inbound, method, params)
-	case errors.Is(err, acpsdk.ErrAfterResponseUnavailable):
-		return c.handleNotification(ctx, method, params)
-	default:
-		return nil, responseError(err)
-	}
-}
-
-func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRequest, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
-	switch method {
-	case acpsdk.AgentMethodInitialize:
-		var req acpsdk.InitializeRequest
-		if err := decodeParams(params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		resp, err := c.agent.Initialize(ctx, req)
-		return responseOrError(resp, err)
-	case acpsdk.AgentMethodAuthenticate:
-		var req acpsdk.AuthenticateRequest
-		if err := decodeRequiredParams(params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := c.agent.(agentAuthenticator)
-		if !ok {
-			return nil, methodNotFound()
-		}
-		resp, err := handler.Authenticate(ctx, req)
-		return responseOrError(resp, err)
-	case acpsdk.AgentMethodSessionNew:
-		var req acpsdk.NewSessionRequest
-		if err := decodeParams(params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		resp, err := c.agent.NewSession(ctx, req)
-		if err != nil {
-			return responseOrError(resp, err)
-		}
-		if err := c.afterAvailableCommands(inbound, string(resp.SessionId), availableCommandsAfterSessionNewDelay); err != nil {
-			return nil, responseError(err)
-		}
-		return resp, nil
-	case acpsdk.AgentMethodSessionList:
-		var req acpsdk.ListSessionsRequest
-		if err := decodeParams(params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := c.agent.(sessionLister)
-		if !ok {
-			return nil, methodNotFound()
-		}
-		resp, err := handler.ListSessions(ctx, req)
-		return responseOrError(resp, err)
-	case acpsdk.AgentMethodSessionLoad:
-		var req acpsdk.LoadSessionRequest
-		if err := decodeParams(params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := c.agent.(sessionLoader)
-		if !ok {
-			return nil, methodNotFound()
-		}
-		resp, err := handler.LoadSession(ctx, req, c)
-		if err != nil {
-			return responseOrError(resp, err)
-		}
-		if err := c.afterAvailableCommands(inbound, string(req.SessionId), 0); err != nil {
-			return nil, responseError(err)
-		}
-		return resp, nil
-	case acpsdk.AgentMethodSessionResume:
-		var req acpsdk.ResumeSessionRequest
-		if err := decodeParams(params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := c.agent.(sessionResumer)
-		if !ok {
-			return nil, methodNotFound()
-		}
-		resp, err := handler.ResumeSession(ctx, req)
-		if err != nil {
-			return responseOrError(resp, err)
-		}
-		if err := c.afterAvailableCommands(inbound, string(req.SessionId), 0); err != nil {
-			return nil, responseError(err)
-		}
-		return resp, nil
-	case acpsdk.AgentMethodSessionClose:
-		var req acpsdk.CloseSessionRequest
-		if err := decodeRequiredParams(params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := c.agent.(sessionCloser)
-		if !ok {
-			return nil, methodNotFound()
-		}
-		resp, err := handler.CloseSession(ctx, req)
-		return responseOrError(resp, err)
-	case acpsdk.AgentMethodSessionSetMode:
-		var req acpsdk.SetSessionModeRequest
-		if err := decodeRequiredParams(params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := c.agent.(sessionModeSetter)
-		if !ok {
-			return nil, methodNotFound()
-		}
-		resp, err := handler.SetSessionMode(ctx, req)
-		return responseOrError(resp, err)
-	case acpsdk.AgentMethodSessionSetConfigOption:
-		var req acpsdk.SetSessionConfigOptionRequest
-		if err := decodeParams(params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := c.agent.(sessionConfigSetter)
-		if !ok {
-			return nil, methodNotFound()
-		}
-		resp, err := handler.SetSessionConfigOption(ctx, req)
-		return responseOrError(resp, err)
-	case acpsdk.AgentMethodSessionPrompt:
-		var req acpsdk.PromptRequest
-		if err := decodeRequiredParams(params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		runtimeacp.PreserveLegacyPromptImageNames(params, &req)
-		resp, err := c.agent.Prompt(ctx, req, c.promptCallbacks())
-		return responseOrError(resp, err)
-	case methodSessionSteering:
-		var req SessionSteeringRequest
-		if err := decodeParams(params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		if err := validateSessionSteeringRequest(req); err != nil {
-			return nil, invalidParams(err)
-		}
-		handler, ok := c.agent.(sessionSteerer)
-		if !ok {
-			return nil, methodNotFound()
-		}
-		resp, err := handler.SteerSession(ctx, req)
-		return responseOrError(resp, err)
-	default:
-		return nil, methodNotFound()
-	}
-}
-
-func (c *serverConn) handleNotification(ctx context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
-	switch method {
-	case acpsdk.AgentMethodSessionCancel:
-		var req acpsdk.CancelNotification
-		if err := decodeParams(params, &req); err != nil {
-			return nil, invalidParams(err)
-		}
-		if strings.TrimSpace(string(req.SessionId)) == "" {
-			return nil, invalidParams(errors.New("sessionId is required"))
-		}
-		return responseOrError(struct{}{}, c.agent.Cancel(ctx, req))
-	default:
-		return nil, methodNotFound()
-	}
-}
-
-func (c *serverConn) SessionUpdate(_ context.Context, notification eventstream.SessionNotification) error {
-	rpc, err := c.connection(c.lifecycle)
+func (a *serverAgent) NewSession(ctx context.Context, req acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
+	resp, err := a.agent.NewSession(ctx, req)
 	if err != nil {
-		return err
+		return resp, productMethodError(acpsdk.AgentMethodSessionNew, err)
 	}
-	wire, err := sessionNotificationForWire(notification)
-	if err != nil {
-		return err
+	if err := a.afterAvailableCommands(ctx, string(resp.SessionId), availableCommandsAfterSessionNewDelay); err != nil {
+		return acpsdk.NewSessionResponse{}, err
 	}
-	return rpc.SendNotification(c.lifecycle, acpsdk.ClientMethodSessionUpdate, wire)
+	return resp, nil
 }
 
-func (c *serverConn) afterAvailableCommands(inbound *serverInboundRequest, sessionID string, delay time.Duration) error {
-	handler, ok := c.agent.(commandProvider)
+func (a *serverAgent) ListSessions(ctx context.Context, req acpsdk.ListSessionsRequest) (acpsdk.ListSessionsResponse, error) {
+	handler, ok := a.agent.(sessionLister)
+	if !ok {
+		return acpsdk.ListSessionsResponse{}, acpsdk.NewMethodNotFound(acpsdk.AgentMethodSessionList)
+	}
+	resp, err := handler.ListSessions(ctx, req)
+	return resp, productMethodError(acpsdk.AgentMethodSessionList, err)
+}
+
+func (a *serverAgent) LoadSession(ctx context.Context, req acpsdk.LoadSessionRequest) (acpsdk.LoadSessionResponse, error) {
+	handler, ok := a.agent.(sessionLoader)
+	if !ok {
+		return acpsdk.LoadSessionResponse{}, acpsdk.NewMethodNotFound(acpsdk.AgentMethodSessionLoad)
+	}
+	callbacks, err := serverCallbacksFromContext(ctx)
+	if err != nil {
+		return acpsdk.LoadSessionResponse{}, err
+	}
+	resp, err := handler.LoadSession(ctx, req, callbacks)
+	if err != nil {
+		return resp, productMethodError(acpsdk.AgentMethodSessionLoad, err)
+	}
+	if err := a.afterAvailableCommands(ctx, string(req.SessionId), 0); err != nil {
+		return acpsdk.LoadSessionResponse{}, err
+	}
+	return resp, nil
+}
+
+func (a *serverAgent) ResumeSession(ctx context.Context, req acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
+	handler, ok := a.agent.(sessionResumer)
+	if !ok {
+		return acpsdk.ResumeSessionResponse{}, acpsdk.NewMethodNotFound(acpsdk.AgentMethodSessionResume)
+	}
+	resp, err := handler.ResumeSession(ctx, req)
+	if err != nil {
+		return resp, productMethodError(acpsdk.AgentMethodSessionResume, err)
+	}
+	if err := a.afterAvailableCommands(ctx, string(req.SessionId), 0); err != nil {
+		return acpsdk.ResumeSessionResponse{}, err
+	}
+	return resp, nil
+}
+
+func (a *serverAgent) CloseSession(ctx context.Context, req acpsdk.CloseSessionRequest) (acpsdk.CloseSessionResponse, error) {
+	handler, ok := a.agent.(sessionCloser)
+	if !ok {
+		return acpsdk.CloseSessionResponse{}, acpsdk.NewMethodNotFound(acpsdk.AgentMethodSessionClose)
+	}
+	resp, err := handler.CloseSession(ctx, req)
+	return resp, productMethodError(acpsdk.AgentMethodSessionClose, err)
+}
+
+func (a *serverAgent) SetSessionMode(ctx context.Context, req acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
+	handler, ok := a.agent.(sessionModeSetter)
+	if !ok {
+		return acpsdk.SetSessionModeResponse{}, acpsdk.NewMethodNotFound(acpsdk.AgentMethodSessionSetMode)
+	}
+	resp, err := handler.SetSessionMode(ctx, req)
+	return resp, productMethodError(acpsdk.AgentMethodSessionSetMode, err)
+}
+
+func (a *serverAgent) SetSessionConfigOption(ctx context.Context, req acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {
+	handler, ok := a.agent.(sessionConfigSetter)
+	if !ok {
+		return acpsdk.SetSessionConfigOptionResponse{}, acpsdk.NewMethodNotFound(acpsdk.AgentMethodSessionSetConfigOption)
+	}
+	resp, err := handler.SetSessionConfigOption(ctx, req)
+	return resp, productMethodError(acpsdk.AgentMethodSessionSetConfigOption, err)
+}
+
+func (a *serverAgent) Prompt(ctx context.Context, req acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
+	raw, ok := acpsdk.InboundParamsFromContext(ctx)
+	if !ok {
+		return acpsdk.PromptResponse{}, acpsdk.NewInternalError(map[string]any{"error": "ACP inbound params are unavailable"})
+	}
+	runtimeacp.PreserveLegacyPromptImageNames(raw, &req)
+	callbacks, err := serverCallbacksFromContext(ctx)
+	if err != nil {
+		return acpsdk.PromptResponse{}, err
+	}
+	resp, err := a.agent.Prompt(ctx, req, callbacks)
+	return resp, productMethodError(acpsdk.AgentMethodSessionPrompt, err)
+}
+
+func (a *serverAgent) Cancel(ctx context.Context, req acpsdk.CancelNotification) error {
+	return productMethodError(acpsdk.AgentMethodSessionCancel, a.agent.Cancel(ctx, req))
+}
+
+func (a *serverAgent) HandleExtensionMethod(ctx context.Context, method string, params json.RawMessage) (any, error) {
+	inbound, ok := acpsdk.InboundInfoFromContext(ctx)
+	if !ok {
+		return nil, acpsdk.NewInternalError(map[string]any{"error": "ACP inbound message metadata is unavailable"})
+	}
+	if inbound.Kind != acpsdk.InboundRequest {
+		return nil, acpsdk.NewMethodNotFound(method)
+	}
+	if method != methodSessionSteering {
+		return nil, acpsdk.NewMethodNotFound(method)
+	}
+	var req SessionSteeringRequest
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
+	}
+	if err := validateSessionSteeringRequest(req); err != nil {
+		return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
+	}
+	handler, ok := a.agent.(sessionSteerer)
+	if !ok {
+		return nil, acpsdk.NewMethodNotFound(method)
+	}
+	resp, err := handler.SteerSession(ctx, req)
+	return resp, productMethodError(method, err)
+}
+
+func (a *serverAgent) afterAvailableCommands(ctx context.Context, sessionID string, delay time.Duration) error {
+	handler, ok := a.agent.(commandProvider)
 	sessionID = strings.TrimSpace(sessionID)
 	if !ok || sessionID == "" {
 		return nil
 	}
-	return inbound.setAfterResponse(func(callbackCtx context.Context) error {
+	peer, ok := acpsdk.AgentSideConnectionFromContext(ctx)
+	if !ok {
+		return acpsdk.NewInternalError(map[string]any{"error": "ACP agent-side connection is unavailable"})
+	}
+	return acpsdk.AfterResponse(ctx, func(callbackCtx context.Context) error {
 		emit := func() {
-			c.emitAvailableCommands(callbackCtx, handler, sessionID)
+			a.emitAvailableCommands(callbackCtx, peer, handler, sessionID)
 		}
 		if delay <= 0 {
 			emit()
@@ -319,7 +246,7 @@ func (c *serverConn) afterAvailableCommands(inbound *serverInboundRequest, sessi
 	})
 }
 
-func (c *serverConn) emitAvailableCommands(ctx context.Context, handler commandProvider, sessionID string) {
+func (a *serverAgent) emitAvailableCommands(ctx context.Context, peer *acpsdk.AgentSideConnection, handler commandProvider, sessionID string) {
 	cmds, err := handler.AvailableCommands(ctx, sessionID)
 	if err != nil || len(cmds) == 0 {
 		return
@@ -331,7 +258,7 @@ func (c *serverConn) emitAvailableCommands(ctx context.Context, handler commandP
 	if err != nil {
 		return
 	}
-	_ = c.SessionUpdate(ctx, eventstream.SessionNotification{
+	_ = sendSessionUpdate(ctx, peer, eventstream.SessionNotification{
 		SessionID: sessionID,
 		Update: eventstream.RawUpdate{
 			SessionUpdate: eventstream.UpdateAvailableCmds,
@@ -340,15 +267,19 @@ func (c *serverConn) emitAvailableCommands(ctx context.Context, handler commandP
 	})
 }
 
-func (c *serverConn) RequestPermission(ctx context.Context, req acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
-	rpc, err := c.connection(ctx)
-	if err != nil {
-		return acpsdk.RequestPermissionResponse{}, err
-	}
+type serverPromptCallbacks struct {
+	peer *acpsdk.AgentSideConnection
+}
+
+func (c serverPromptCallbacks) SessionUpdate(ctx context.Context, notification eventstream.SessionNotification) error {
+	return sendSessionUpdate(ctx, c.peer, notification)
+}
+
+func (c serverPromptCallbacks) RequestPermission(ctx context.Context, req acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
 	if err := req.Validate(); err != nil {
 		return acpsdk.RequestPermissionResponse{}, fmt.Errorf("acp surface: validate permission request: %w", err)
 	}
-	wireResponse, err := acpsdk.SendRequest[acpsdk.RequestPermissionResponse](rpc, ctx, acpsdk.ClientMethodSessionRequestPermission, req)
+	wireResponse, err := c.peer.RequestPermission(ctx, req)
 	if err != nil {
 		return acpsdk.RequestPermissionResponse{}, err
 	}
@@ -358,53 +289,31 @@ func (c *serverConn) RequestPermission(ctx context.Context, req acpsdk.RequestPe
 	return wireResponse, nil
 }
 
-type serverPromptCallbacks struct {
-	conn *serverConn
-}
-
-func (c serverPromptCallbacks) SessionUpdate(ctx context.Context, req eventstream.SessionNotification) error {
-	return c.conn.SessionUpdate(ctx, req)
-}
-
-func (c serverPromptCallbacks) RequestPermission(ctx context.Context, req acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
-	return c.conn.RequestPermission(ctx, req)
-}
-
-func (c *serverConn) promptCallbacks() PromptCallbacks {
-	return serverPromptCallbacks{conn: c}
-}
-
-func (c *serverConn) connection(ctx context.Context) (*acpsdk.Connection, error) {
-	if rpc := c.rpc.Load(); rpc != nil {
-		return rpc, nil
+func serverCallbacksFromContext(ctx context.Context) (serverPromptCallbacks, error) {
+	peer, ok := acpsdk.AgentSideConnectionFromContext(ctx)
+	if !ok {
+		return serverPromptCallbacks{}, acpsdk.NewInternalError(map[string]any{"error": "ACP agent-side connection is unavailable"})
 	}
-	if c.rpcReady == nil {
-		return nil, errors.New("acp: server connection is not ready")
+	return serverPromptCallbacks{peer: peer}, nil
+}
+
+func sendSessionUpdate(ctx context.Context, peer *acpsdk.AgentSideConnection, notification eventstream.SessionNotification) error {
+	wire, err := sessionNotificationForWire(notification)
+	if err != nil {
+		return err
 	}
-	select {
-	case <-c.rpcReady:
-		rpc := c.rpc.Load()
-		if rpc == nil {
-			return nil, errors.New("acp: server connection is not ready")
+	switch typed := wire.(type) {
+	case acpsdk.SessionNotification:
+		return peer.SessionUpdate(ctx, typed)
+	case eventstream.SessionNotification:
+		raw, err := json.Marshal(typed)
+		if err != nil {
+			return fmt.Errorf("acp surface: encode compatible session notification: %w", err)
 		}
-		return rpc, nil
-	case <-ctx.Done():
-		return nil, context.Cause(ctx)
+		return peer.SessionUpdateRaw(ctx, raw)
+	default:
+		return fmt.Errorf("acp surface: unsupported session notification wire type %T", wire)
 	}
-}
-
-func decodeParams(raw json.RawMessage, target any) error {
-	if len(raw) == 0 || string(raw) == "null" {
-		return nil
-	}
-	return json.Unmarshal(raw, target)
-}
-
-func decodeRequiredParams(raw json.RawMessage, target any) error {
-	if len(raw) == 0 {
-		return fmt.Errorf("params are required")
-	}
-	return json.Unmarshal(raw, target)
 }
 
 func validateSessionSteeringRequest(req SessionSteeringRequest) error {
@@ -418,33 +327,22 @@ func validateSessionSteeringRequest(req SessionSteeringRequest) error {
 	return err
 }
 
-func responseOrError(result any, err error) (any, *acpsdk.RequestError) {
-	if err == nil {
-		return result, nil
-	}
+func productMethodError(method string, err error) error {
 	if errors.Is(err, runtimeacp.ErrCapabilityUnsupported) {
-		return nil, methodNotFound()
+		return acpsdk.NewMethodNotFound(method)
 	}
-	return nil, responseError(err)
+	return err
 }
 
-func responseError(err error) *acpsdk.RequestError {
-	var requestErr *acpsdk.RequestError
-	if errors.As(err, &requestErr) && requestErr != nil {
-		return requestErr
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return acpsdk.NewRequestCancelled(map[string]any{"error": err.Error()})
-	}
-	return acpsdk.NewInternalError(map[string]any{"error": err.Error()})
-}
-
-func invalidParams(err error) *acpsdk.RequestError {
-	return &acpsdk.RequestError{Code: -32602, Message: err.Error()}
-}
-
-func methodNotFound() *acpsdk.RequestError {
-	return &acpsdk.RequestError{Code: -32601, Message: "Method not found"}
-}
-
-var _ PromptCallbacks = serverPromptCallbacks{}
+var (
+	_ acpsdk.Agent                  = (*serverAgent)(nil)
+	_ acpsdk.AgentAuthenticator     = (*serverAgent)(nil)
+	_ acpsdk.AgentSessionLister     = (*serverAgent)(nil)
+	_ acpsdk.AgentLoader            = (*serverAgent)(nil)
+	_ acpsdk.AgentSessionResumer    = (*serverAgent)(nil)
+	_ acpsdk.AgentSessionCloser     = (*serverAgent)(nil)
+	_ acpsdk.AgentSessionMode       = (*serverAgent)(nil)
+	_ acpsdk.AgentSessionConfig     = (*serverAgent)(nil)
+	_ acpsdk.ExtensionMethodHandler = (*serverAgent)(nil)
+	_ PromptCallbacks               = serverPromptCallbacks{}
+)

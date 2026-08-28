@@ -35,7 +35,7 @@ func decodeStandardSessionStateUpdate(raw json.RawMessage, discriminator string)
 		if update.SessionInfoUpdate == nil {
 			return nil, fmt.Errorf("ACP update %q did not decode as the expected SDK variant", discriminator)
 		}
-		return sessionInfoUpdateFromSDK(raw, *update.SessionInfoUpdate)
+		return sessionInfoUpdateFromSDK(*update.SessionInfoUpdate), nil
 	default:
 		return nil, fmt.Errorf("ACP update %q is not a standard session-state variant", discriminator)
 	}
@@ -115,18 +115,12 @@ func sessionConfigChoicesFromSDK(options acpsdk.SessionConfigSelectOptions) []Se
 	return normalized
 }
 
-func sessionInfoUpdateFromSDK(raw json.RawMessage, update acpsdk.SessionSessionInfoUpdate) (SessionInfoUpdate, error) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return SessionInfoUpdate{}, err
-	}
-	_, titlePresent := fields["title"]
-	_, updatedAtPresent := fields["updatedAt"]
+func sessionInfoUpdateFromSDK(update acpsdk.SessionSessionInfoUpdate) SessionInfoUpdate {
 	return SessionInfoUpdate{
 		SessionUpdate:    update.SessionUpdate,
 		Title:            update.Title,
-		TitlePresent:     titlePresent,
+		TitlePresent:     update.TitleState() != acpsdk.NullableFieldAbsent,
 		UpdatedAt:        update.UpdatedAt,
-		UpdatedAtPresent: updatedAtPresent,
-	}, nil
+		UpdatedAtPresent: update.UpdatedAtState() != acpsdk.NullableFieldAbsent,
+	}
 }

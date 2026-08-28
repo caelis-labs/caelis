@@ -3,8 +3,11 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"sync/atomic"
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
@@ -12,7 +15,7 @@ func TestServerRoutesSessionSteeringWithoutPromptCallbacks(t *testing.T) {
 	t.Parallel()
 
 	agent := &steeringWireAgent{}
-	conn := &serverConn{agent: agent}
+	ctx, conn := newTestServerConnection(t, agent)
 	request := SessionSteeringRequest{
 		SessionID: "session-1",
 		Prompt: []json.RawMessage{
@@ -22,13 +25,12 @@ func TestServerRoutesSessionSteeringWithoutPromptCallbacks(t *testing.T) {
 			"steering": json.RawMessage(`{"idleBehavior":"promptRequired","future":42}`),
 		},
 	}
-	result, rpcErr := conn.handleRequest(context.Background(), nil, methodSessionSteering, mustMarshalTestRaw(request))
-	if rpcErr != nil {
-		t.Fatalf("steering RPC error = %#v", rpcErr)
+	response, err := acpsdk.SendRequest[SessionSteeringResponse](conn, ctx, methodSessionSteering, request)
+	if err != nil {
+		t.Fatal(err)
 	}
-	response, ok := result.(SessionSteeringResponse)
-	if !ok || response.Outcome != SessionSteeringPromptRequired || response.Reason != "noRunningTurn" {
-		t.Fatalf("steering response = %#v", result)
+	if response.Outcome != SessionSteeringPromptRequired || response.Reason != "noRunningTurn" {
+		t.Fatalf("steering response = %#v", response)
 	}
 	if agent.request.SessionID != request.SessionID || len(agent.request.Prompt) != 1 {
 		t.Fatalf("adapter request = %#v", agent.request)
@@ -41,25 +43,25 @@ func TestServerRoutesSessionSteeringWithoutPromptCallbacks(t *testing.T) {
 func TestServerRejectsSessionSteeringWithoutAdapter(t *testing.T) {
 	t.Parallel()
 
-	conn := &serverConn{agent: commandAgent{}}
-	_, rpcErr := conn.handleRequest(
-		context.Background(),
-		nil,
+	ctx, conn := newTestServerConnection(t, commandAgent{})
+	_, err := acpsdk.SendRequest[SessionSteeringResponse](
+		conn,
+		ctx,
 		methodSessionSteering,
-		mustMarshalTestRaw(SessionSteeringRequest{
+		SessionSteeringRequest{
 			SessionID: "session-1",
 			Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"hello"}`)},
-		}),
+		},
 	)
-	if rpcErr == nil || rpcErr.Code != -32601 {
-		t.Fatalf("steering RPC error = %#v, want method not found", rpcErr)
+	var requestErr *acpsdk.RequestError
+	if !errors.As(err, &requestErr) || requestErr.Code != -32601 {
+		t.Fatalf("steering error = %v, want method not found", err)
 	}
 }
 
 func TestServerRejectsMalformedSessionSteeringParams(t *testing.T) {
 	t.Parallel()
 
-	conn := &serverConn{agent: &steeringWireAgent{}}
 	tests := []struct {
 		name   string
 		params json.RawMessage
@@ -75,11 +77,38 @@ func TestServerRejectsMalformedSessionSteeringParams(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, rpcErr := conn.handleRequest(context.Background(), nil, methodSessionSteering, tt.params)
-			if rpcErr == nil || rpcErr.Code != -32602 {
-				t.Fatalf("steering RPC error = %#v, want invalid params", rpcErr)
+			ctx, conn := newTestServerConnection(t, &steeringWireAgent{})
+			_, err := acpsdk.SendRequest[SessionSteeringResponse](conn, ctx, methodSessionSteering, tt.params)
+			var requestErr *acpsdk.RequestError
+			if !errors.As(err, &requestErr) || requestErr.Code != -32602 {
+				t.Fatalf("steering error = %v, want invalid params", err)
 			}
 		})
+	}
+}
+
+func TestServerRejectsSessionSteeringNotification(t *testing.T) {
+	t.Parallel()
+
+	agent := &directionSteeringAgent{cancelObserved: make(chan struct{}, 1)}
+	ctx, conn := newTestServerConnection(t, agent)
+	request := SessionSteeringRequest{
+		SessionID: "session-1",
+		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"hello"}`)},
+	}
+	if err := conn.SendNotification(ctx, methodSessionSteering, request); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.SendNotification(ctx, acpsdk.AgentMethodSessionCancel, acpsdk.CancelNotification{SessionId: "session-1"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-agent.cancelObserved:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for notification barrier")
+	}
+	if got := agent.steerCalls.Load(); got != 0 {
+		t.Fatalf("steering calls after notification = %d, want 0", got)
 	}
 }
 
@@ -102,4 +131,20 @@ func (a *steeringWireAgent) SteerSession(_ context.Context, request SessionSteer
 		Outcome: SessionSteeringPromptRequired,
 		Reason:  "noRunningTurn",
 	}, nil
+}
+
+type directionSteeringAgent struct {
+	commandAgent
+	steerCalls     atomic.Int32
+	cancelObserved chan struct{}
+}
+
+func (a *directionSteeringAgent) SteerSession(context.Context, SessionSteeringRequest) (SessionSteeringResponse, error) {
+	a.steerCalls.Add(1)
+	return SessionSteeringResponse{}, nil
+}
+
+func (a *directionSteeringAgent) Cancel(context.Context, acpsdk.CancelNotification) error {
+	a.cancelObserved <- struct{}{}
+	return nil
 }

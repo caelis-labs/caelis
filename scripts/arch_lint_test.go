@@ -162,6 +162,18 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "production code must not depend on the retired root protocol/acp facade; import the owning ACP subpackage",
 		},
 		{
+			name:       "production rejects future retired ACP package",
+			rel:        "surfaces/headless/headless.go",
+			importPath: modulePath + "/protocol/acp/futurewire",
+			want:       "production code must not depend on the retired protocol/acp tree; standard ACP wire contracts belong to acp-go-sdk and residual compatibility belongs to its Control, Host, adapter, or Surface owner",
+		},
+		{
+			name:       "production rejects ACP compatibility package",
+			rel:        "surfaces/headless/headless.go",
+			importPath: modulePath + "/protocol/acp/compat",
+			want:       "production code must not depend on the retired protocol/acp tree; standard ACP wire contracts belong to acp-go-sdk and residual compatibility belongs to its Control, Host, adapter, or Surface owner",
+		},
+		{
 			name:       "production rejects retired ACP metadata facade",
 			rel:        "control/appserver/projection/gateway.go",
 			importPath: modulePath + "/protocol/acp/metautil",
@@ -844,6 +856,18 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			rel:     "protocol/acp/agent.go",
 			want:    "must not recreate the root protocol/acp facade; standard wire contracts belong to acp-go-sdk and residual code to an owning ACP subpackage",
 			wantSub: "protocol/acp",
+		},
+		{
+			name:    "future retired ACP package fails",
+			rel:     "protocol/acp/futurewire/types.go",
+			want:    "must not recreate the retired protocol/acp tree; standard ACP wire contracts belong to acp-go-sdk and residual compatibility belongs to its Control, Host, adapter, or Surface owner",
+			wantSub: "protocol/acp/futurewire",
+		},
+		{
+			name:    "ACP compatibility package fails",
+			rel:     "protocol/acp/compat/types.go",
+			want:    "must not recreate the retired protocol/acp tree; standard ACP wire contracts belong to acp-go-sdk and residual compatibility belongs to its Control, Host, adapter, or Surface owner",
+			wantSub: "protocol/acp/compat",
 		},
 		{
 			name:    "deleted protocol control path fails",

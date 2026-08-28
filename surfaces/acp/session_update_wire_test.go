@@ -113,7 +113,15 @@ func TestSessionNotificationForWirePreservesSessionInfoNull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := json.Marshal(wireValue)
+	wire, ok := wireValue.(acpsdk.SessionNotification)
+	if !ok {
+		t.Fatalf("wire = %T, want acpsdk.SessionNotification", wireValue)
+	}
+	update := wire.Update.SessionInfoUpdate
+	if update == nil || update.TitleState() != acpsdk.NullableFieldNull || update.UpdatedAtState() != acpsdk.NullableFieldNull {
+		t.Fatalf("SDK session info update = %#v", update)
+	}
+	encoded, err := json.Marshal(wire)
 	if err != nil {
 		t.Fatal(err)
 	}

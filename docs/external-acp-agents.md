@@ -204,6 +204,19 @@ choices and current value as its capability and profile default. Fixed-handle
 bindings and participant attachment still choose one explicit canonical effort;
 the later selection, not onboarding, determines the effort sent for that work.
 
+## External ACP Wire Compatibility
+
+External-Agent wire compatibility stays in the Host-private ACP bridge and never
+becomes a second product protocol. Compatibility is selected from the observed
+message shape or advertised Session state, not from a guessed peer version or a
+calendar deadline.
+
+| Compatibility path | Owner | Enabled condition and standard precedence | Removal event |
+| --- | --- | --- | --- |
+| Flat Session configuration options | `internal/acpagentbridge/client` lifecycle-response ingress | The SDK standard config-option union is decoded and normalized first. The flat decoder runs only when one response option cannot be normalized as a standard select or boolean option; standard options always win. | Remove when the supported external-Agent interoperability set and supported upgrade fixtures contain no lifecycle response that emits the flat option shape. |
+| Legacy `models` and `session/set_model` | Host-private `internal/acpagentbridge/client` wire adaptation and `internal/acpagentbridge/sessionconfig` selection | A standard model Session config option has priority even if `models` is also present. The legacy catalog and mutation method are used only when no standard model config option is advertised and the requested model appears in `models.availableModels`. | Remove both fields and the mutation method together when every supported Agent that exposes model selection uses the standard model config option and no supported upgrade fixture requires the legacy channel. |
+| Prompt image `name` | `internal/acpagentbridge` prompt adaptation, with `surfaces/acp` recovering the lossless params supplied to its typed callback by the SDK | Standard ACP image decoding and validation owns `type`, `data`, `mimeType`, and `uri`. A non-empty top-level `name` is retained only as Host-private attachment display metadata; malformed or unrelated fields are ignored and never replace standard image content. | Remove when supported Caelis peers use the standard image `uri` for attachment naming or reference and no supported interoperability fixture requires the top-level `name` extension. |
+
 ## Endpoint Catalog and Installation Ownership
 
 The guided `/connect` catalog contains a curated set of official CLIs with

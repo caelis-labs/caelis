@@ -426,22 +426,11 @@ func (c *Client) Close(ctx context.Context) error {
 	}
 	if c.proc != nil {
 		graceCtx, cancel := context.WithTimeout(ctx, processShutdownGrace)
-		waitErr := c.proc.Wait(graceCtx)
-		graceExpired := graceCtx.Err() != nil
+		// Shutdown joins forced process-tree cleanup before returning. Preserve
+		// its deadline cause so callers can distinguish a graceful exit from
+		// escalation without losing any joined cleanup error.
+		errs = append(errs, c.proc.Shutdown(graceCtx))
 		cancel()
-		if !graceExpired {
-			errs = append(errs, waitErr)
-		} else {
-			closeErr := c.proc.Close()
-			if closeErr != nil {
-				errs = append(errs, closeErr)
-			}
-			if ctx.Err() != nil {
-				errs = append(errs, context.Cause(ctx))
-			} else {
-				_ = c.proc.Wait(ctx)
-			}
-		}
 	}
 	c.releaseEndpoint()
 	return errors.Join(errs...)
@@ -481,18 +470,19 @@ func (c *Client) StderrTail(limit int) string {
 }
 
 // handleMethod restores the ACP request/notification split that the SDK's
-// shared MethodHandler leaves to the adapter. AfterResponse availability is the
-// SDK's public request-context signal; this client does not otherwise need the
-// registered no-op hook.
+// shared MethodHandler intentionally leaves to the adapter.
 func (c *Client) handleMethod(ctx context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
-	err := acpsdk.AfterResponse(ctx, func(context.Context) error { return nil })
-	switch {
-	case err == nil:
+	inbound, ok := acpsdk.InboundInfoFromContext(ctx)
+	if !ok {
+		return nil, acpsdk.NewInternalError(map[string]any{"error": "ACP inbound message metadata is unavailable"})
+	}
+	switch inbound.Kind {
+	case acpsdk.InboundRequest:
 		return c.handleRequest(ctx, method, params)
-	case errors.Is(err, acpsdk.ErrAfterResponseUnavailable):
+	case acpsdk.InboundNotification:
 		return c.handleNotification(method, params)
 	default:
-		return nil, acpsdk.NewInternalError(map[string]any{"error": err.Error()})
+		return nil, acpsdk.NewInternalError(map[string]any{"error": fmt.Sprintf("unknown ACP inbound message kind %d", inbound.Kind)})
 	}
 }
 
@@ -601,15 +591,9 @@ func IsConnectionError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, acpsdk.ErrConnectionClosed) || errors.Is(err, acpsdk.ErrPeerClosed) ||
-		errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) {
-		return true
-	}
-	text := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(text, "broken pipe") ||
-		strings.Contains(text, "connection closed before response") ||
-		strings.Contains(text, "file already closed") ||
-		strings.Contains(text, "use of closed file")
+	return errors.Is(err, acpsdk.ErrConnectionClosed) ||
+		errors.Is(err, acpsdk.ErrPeerClosed) ||
+		errors.Is(err, acpsdk.ErrTransportFailure)
 }
 
 func mustMarshalRaw(value any) json.RawMessage {
