@@ -17,9 +17,9 @@ func TestRuntimeObservationGapEnvelope(t *testing.T) {
 	if envelope.Delivery == nil || envelope.Delivery.Mode != eventstream.DeliveryTransient || envelope.Position != nil {
 		t.Fatalf("delivery = %#v position = %#v, want unstamped transient", envelope.Delivery, envelope.Position)
 	}
-	observation := metautil.RuntimeSection(envelope.Meta, metautil.RuntimeObservation)
-	if observation[metautil.RuntimeObservationCode] != metautil.RuntimeObservationGap ||
-		observation[metautil.RuntimeObservationDropped] != uint64(7) {
+	observation := metautil.RuntimeSection(envelope.Meta, runtimeObservationSection)
+	if observation[runtimeObservationCode] != runtimeObservationGap ||
+		observation[runtimeObservationDropped] != uint64(7) {
 		t.Fatalf("observation meta = %#v", observation)
 	}
 }

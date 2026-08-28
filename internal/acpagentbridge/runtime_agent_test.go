@@ -567,9 +567,8 @@ func TestRuntimeAgentPromptContinuesAfterObservationGap(t *testing.T) {
 	if !ok || strings.TrimSpace(gapUpdate.MessageID) == "" {
 		t.Fatalf("gap update = %#v, want independently keyed ACP notice", callbacks.notifications[0].Update)
 	}
-	observation := metautil.RuntimeSection(gapUpdate.Meta, metautil.RuntimeObservation)
-	if observation[metautil.RuntimeObservationCode] != metautil.RuntimeObservationGap ||
-		observation[metautil.RuntimeObservationDropped] != uint64(17) {
+	observation := metautil.RuntimeSection(gapUpdate.Meta, "observation")
+	if observation["code"] != "observation_gap" || observation["dropped"] != uint64(17) {
 		t.Fatalf("gap metadata = %#v", observation)
 	}
 }

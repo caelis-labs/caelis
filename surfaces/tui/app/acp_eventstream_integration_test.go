@@ -165,8 +165,8 @@ func TestHandleACPEventEnvelopeRendersTaskWriteInteractionAndKeepsUTF8RunCommand
 		"action": "write", "handle": "command-4", "target_kind": "command", "input": "小明",
 	}
 	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "write",
-		"input": "小明", metautil.RuntimeTargetKind: "command", metautil.RuntimeTargetHandle: "command-4",
+		metautil.RuntimeToolName: "Task", "action": "write",
+		"input": "小明", "target_kind": "command", metautil.RuntimeTargetHandle: "command-4",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
@@ -223,8 +223,8 @@ func TestHandleACPEventEnvelopeRendersTaskWriteFailureWithoutInternalHandle(t *t
 		"action": "write", "handle": "command-10", "target_kind": "command", "input": "test",
 	}
 	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "write",
-		"input": "test", metautil.RuntimeTargetKind: "command", metautil.RuntimeTargetHandle: "command-10",
+		metautil.RuntimeToolName: "Task", "action": "write",
+		"input": "test", "target_kind": "command", metautil.RuntimeTargetHandle: "command-10",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
@@ -275,8 +275,8 @@ func TestHandleACPEventEnvelopeRendersTerminalTaggedCommandTaskWriteAsShellInter
 		"action": "write", "handle": "command-82", "target_kind": "command", "input": input,
 	}
 	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "write",
-		"input": input, metautil.RuntimeTargetKind: "command", metautil.RuntimeTargetHandle: "command-82",
+		metautil.RuntimeToolName: "Task", "action": "write",
+		"input": input, "target_kind": "command", metautil.RuntimeTargetHandle: "command-82",
 	})
 	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID: "task-82", metautil.RuntimeTaskTerminalID: "terminal-82",
@@ -413,8 +413,8 @@ func TestTaskWaitOfFailedCommandStaysHiddenAndFoldsIntoOwner(t *testing.T) {
 
 	taskInput := map[string]any{"action": "wait", "handle": "command-2"}
 	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "wait",
-		metautil.RuntimeTargetHandle: "command-2", metautil.RuntimeTargetKind: "command",
+		metautil.RuntimeToolName: "Task", "action": "wait",
+		metautil.RuntimeTargetHandle: "command-2", "target_kind": "command",
 	})
 	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID: "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
@@ -495,8 +495,8 @@ func TestTaskWaitControlTransportFailureStaysVisibleWithoutFoldingIntoOwner(t *t
 
 	taskInput := map[string]any{"action": "wait", "handle": "command-2"}
 	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "wait",
-		metautil.RuntimeTargetHandle: "command-2", metautil.RuntimeTargetKind: "command",
+		metautil.RuntimeToolName: "Task", "action": "wait",
+		metautil.RuntimeTargetHandle: "command-2", "target_kind": "command",
 		"error": true,
 	})
 	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
@@ -588,8 +588,8 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(243, 0))
 	taskInput := map[string]any{"action": "wait", "task_id": "task-1", "target_kind": "command"}
 	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "wait",
-		"target_id": "task-1", metautil.RuntimeTargetKind: "command",
+		metautil.RuntimeToolName: "Task", "action": "wait",
+		"target_id": "task-1", "target_kind": "command",
 	})
 	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID: "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
@@ -683,8 +683,8 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 
 	readInput := map[string]any{"action": "read", "handle": "command-3"}
 	readMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "read",
-		metautil.RuntimeTargetHandle: "command-3", metautil.RuntimeTargetKind: "command",
+		metautil.RuntimeToolName: "Task", "action": "read",
+		metautil.RuntimeTargetHandle: "command-3", "target_kind": "command",
 	})
 	readMeta = metautil.WithRuntimeSection(readMeta, metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID: "command-task", metautil.RuntimeTaskTerminalID: "terminal-1",
@@ -750,8 +750,8 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 
 	terminalReadInput := map[string]any{"action": "read", "handle": "command-3"}
 	terminalReadMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "read",
-		metautil.RuntimeTargetHandle: "command-3", metautil.RuntimeTargetKind: "command",
+		metautil.RuntimeToolName: "Task", "action": "read",
+		metautil.RuntimeTargetHandle: "command-3", "target_kind": "command",
 	})
 	apply(eventstream.ToolCall{
 		SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "task-read-terminal",
@@ -4341,8 +4341,8 @@ func TestMainTimelineRoutesCrossTurnTaskObserverStreamToOriginalCommandPanel(t *
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(271, 0))
 	taskInput := map[string]any{"action": "wait", "task_id": "task-1", "target_kind": "terminal"}
 	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", metautil.RuntimeToolAction: "wait",
-		"target_id": "task-1", metautil.RuntimeTargetKind: "terminal",
+		metautil.RuntimeToolName: "Task", "action": "wait",
+		"target_id": "task-1", "target_kind": "terminal",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2", Scope: eventstream.ScopeMain,

@@ -21,12 +21,9 @@ const (
 	DisplayToolInput       = "tool_input"
 	DisplayExplorationVerb = "exploration_verb"
 
-	RuntimeTool             = "tool"
-	RuntimeToolName         = "name"
-	RuntimeToolAction       = "action"
-	RuntimeToolStatusDetail = "status_detail"
-	RuntimeTargetKind       = "target_kind"
-	RuntimeTargetHandle     = "target_handle"
+	RuntimeTool         = "tool"
+	RuntimeToolName     = "name"
+	RuntimeTargetHandle = "target_handle"
 
 	RuntimeTask           = "task"
 	RuntimeTaskID         = "task_id"
@@ -34,11 +31,6 @@ const (
 	RuntimeOutputCursor   = "output_cursor"
 	RuntimeOutputStart    = "output_start_cursor"
 	RuntimeOutputDelta    = "output_delta"
-
-	RuntimeObservation        = "observation"
-	RuntimeObservationCode    = "code"
-	RuntimeObservationDropped = "dropped"
-	RuntimeObservationGap     = "observation_gap"
 
 	RuntimeStream             = "stream"
 	RuntimeStreamMode         = "mode"

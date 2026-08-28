@@ -48,12 +48,12 @@ func TestForwardSourceEventsKeepsObservationGapTransientAndContinues(t *testing.
 	if got[1].Notice != acpbridge.RuntimeObservationGapNotice {
 		t.Fatalf("gap Notice = %q, want stable presentation text", got[1].Notice)
 	}
-	observation := metautil.RuntimeSection(got[1].Meta, metautil.RuntimeObservation)
-	if observation[metautil.RuntimeObservationCode] != metautil.RuntimeObservationGap {
-		t.Fatalf("gap observation code = %#v, want %q", observation[metautil.RuntimeObservationCode], metautil.RuntimeObservationGap)
+	observation := metautil.RuntimeSection(got[1].Meta, "observation")
+	if observation["code"] != "observation_gap" {
+		t.Fatalf("gap observation code = %#v, want observation_gap", observation["code"])
 	}
-	if observation[metautil.RuntimeObservationDropped] != uint64(7) {
-		t.Fatalf("gap dropped = %#v, want 7", observation[metautil.RuntimeObservationDropped])
+	if observation["dropped"] != uint64(7) {
+		t.Fatalf("gap dropped = %#v, want 7", observation["dropped"])
 	}
 	if handle.failed {
 		t.Fatal("observation gap marked the Runtime turn failed")
