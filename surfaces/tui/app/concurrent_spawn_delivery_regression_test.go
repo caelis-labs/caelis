@@ -164,7 +164,7 @@ func concurrentSpawnEnvelope(sequence int, update schema.Update) eventstream.Env
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1",
 		HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1",
 		Scope: eventstream.ScopeMain, ScopeID: "session-1",
-		EventID: eventID, ProjectionID: eventstream.FormatProjectionID(eventID, 0),
+		EventID: eventID, ProjectionID: "test-projection:" + eventID,
 		Update: update,
 	}
 }

@@ -1815,9 +1815,10 @@ func durableProtocolEvent(seq uint64, text string) *session.Event {
 }
 
 func projectedEnvelope(seq uint64, text string) eventstream.Envelope {
+	eventID := "event-" + string(rune('0'+seq))
 	return eventstream.Envelope{
-		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", EventID: "event-" + string(rune('0'+seq)),
-		ProjectionID: eventstream.FormatProjectionID("event-"+string(rune('0'+seq)), 0),
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", EventID: eventID,
+		ProjectionID: "test-projection:" + eventID,
 		Position:     &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{Seq: seq}},
 		Delivery:     &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
 		Update: schema.ContentChunk{

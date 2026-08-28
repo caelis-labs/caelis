@@ -253,7 +253,7 @@ func stampDurableProjectionPositions(event *session.Event, events []eventstream.
 	out := make([]eventstream.Envelope, len(events))
 	for index, env := range events {
 		env.EventID = strings.TrimSpace(event.ID)
-		env.ProjectionID = eventstream.FormatProjectionID(event.ID, index)
+		env.ProjectionID = formatProjectionID(event.ID, index)
 		env.Position = &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{
 			Seq:             event.Seq,
 			ProjectionIndex: uint32(index),

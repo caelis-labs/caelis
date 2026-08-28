@@ -96,7 +96,7 @@ func TestRunSessionOnceReplacesTransientAssistantWithCanonicalFinal(t *testing.T
 		{
 			Kind:         eventstream.KindSessionUpdate,
 			EventID:      "assistant-1",
-			ProjectionID: eventstream.FormatProjectionID("assistant-1", 0),
+			ProjectionID: "acp-projection:YXNzaXN0YW50LTE:0",
 			Scope:        eventstream.ScopeMain,
 			Final:        true,
 			Delivery:     &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},

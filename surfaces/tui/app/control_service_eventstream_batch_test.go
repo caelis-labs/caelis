@@ -102,7 +102,7 @@ func narrativeBatchEnvelope(eventID string, cursor string, sequence uint64, mess
 	return eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", HandleID: "handle-1",
 		RunID: "run-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		EventID: eventID, ProjectionID: eventstream.FormatProjectionID(eventID, 0), Cursor: cursor,
+		EventID: eventID, ProjectionID: "test-projection:" + eventID, Cursor: cursor,
 		Position: &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
 			Generation: "generation-1", Sequence: sequence,
 		}},

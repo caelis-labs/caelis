@@ -206,7 +206,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 		},
 	})
 	apply(eventstream.Envelope{
-		EventID: "reasoning-1", ProjectionID: eventstream.FormatProjectionID("reasoning-1", 0), Final: true,
+		EventID: "reasoning-1", ProjectionID: "acp-projection:cmVhc29uaW5nLTE:0", Final: true,
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentThought,
 			MessageID:     "reasoning-1",
@@ -247,7 +247,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 		},
 	})
 	apply(eventstream.Envelope{
-		EventID: "reasoning-2", ProjectionID: eventstream.FormatProjectionID("reasoning-2", 0), Final: true,
+		EventID: "reasoning-2", ProjectionID: "acp-projection:cmVhc29uaW5nLTI:0", Final: true,
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentThought,
 			MessageID:     "reasoning-2",
@@ -288,7 +288,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 		},
 	})
 	apply(eventstream.Envelope{
-		EventID: "reasoning-3", ProjectionID: eventstream.FormatProjectionID("reasoning-3", 0), Final: true,
+		EventID: "reasoning-3", ProjectionID: "acp-projection:cmVhc29uaW5nLTM:0", Final: true,
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentThought,
 			MessageID:     "reasoning-3",
@@ -296,7 +296,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 		},
 	})
 	apply(eventstream.Envelope{
-		EventID: "assistant-1", ProjectionID: eventstream.FormatProjectionID("assistant-1", 0), Final: true,
+		EventID: "assistant-1", ProjectionID: "acp-projection:YXNzaXN0YW50LTE:0", Final: true,
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentMessage,
 			MessageID:     "assistant-1",

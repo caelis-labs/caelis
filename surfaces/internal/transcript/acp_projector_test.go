@@ -15,7 +15,7 @@ func TestProjectACPEventToEventsUsesTypedRelationAndDeliveryWithoutMetadata(t *t
 	events := ProjectACPEventToEvents(eventstream.Envelope{
 		Kind:         eventstream.KindSessionUpdate,
 		EventID:      "event-1",
-		ProjectionID: eventstream.FormatProjectionID("event-1", 0),
+		ProjectionID: "acp-projection:ZXZlbnQtMQ:0",
 		TurnID:       "turn-1",
 		Scope:        eventstream.ScopeSubagent,
 		ScopeID:      "task-1",
@@ -45,7 +45,7 @@ func TestProjectACPEventToEventsUsesTypedRelationAndDeliveryWithoutMetadata(t *t
 	if event.SourceEventID != "event-1" {
 		t.Fatalf("typed event source event id = %q, want event-1", event.SourceEventID)
 	}
-	if event.SourceProjectionID != eventstream.FormatProjectionID("event-1", 0) {
+	if event.SourceProjectionID != "acp-projection:ZXZlbnQtMQ:0" {
 		t.Fatalf("typed event source projection id = %q, want stable projection identity", event.SourceProjectionID)
 	}
 }
