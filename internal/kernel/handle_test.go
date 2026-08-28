@@ -48,7 +48,7 @@ func TestTurnHandleACPEventsProjectsCanonicalAndPassesThroughTransient(t *testin
 	handle := newTestTurnHandle()
 	acpEvents := handle.ACPEvents()
 	msg := model.NewTextMessage(model.RoleAssistant, "done")
-	handle.publishSessionEvent(&session.Event{ID: "e1", Type: session.EventTypeAssistant, Message: &msg})
+	handle.publishSessionEvent(&session.Event{ID: "e1", Seq: 1, Type: session.EventTypeAssistant, Message: &msg})
 	handle.publishACP(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
 		Update: schema.RawUpdate{

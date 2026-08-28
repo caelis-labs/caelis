@@ -27,8 +27,7 @@ func projectSessionACPEventWith(
 		TurnID:   turnID,
 	})
 	base.Meta = sessionACPEventMeta(event)
-	out := project(base, event)
-	return stampSessionACPProjectionIDs(strings.TrimSpace(event.ID), out)
+	return project(base, event)
 }
 
 func sessionACPEventMeta(event *session.Event) map[string]any {
@@ -52,24 +51,4 @@ func sessionACPEventMeta(event *session.Event) map[string]any {
 			},
 		},
 	})
-}
-
-func stampSessionACPProjectionIDs(eventID string, events []eventstream.Envelope) []eventstream.Envelope {
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" || len(events) == 0 {
-		return events
-	}
-	out := make([]eventstream.Envelope, len(events))
-	for i, env := range events {
-		env.EventID = eventID
-		if strings.TrimSpace(env.ProjectionID) == "" {
-			env.ProjectionID = formatACPProjectionCursor(eventID, i)
-		}
-		out[i] = env
-	}
-	return out
-}
-
-func formatACPProjectionCursor(eventID string, index int) string {
-	return eventstream.FormatProjectionID(eventID, index)
 }
