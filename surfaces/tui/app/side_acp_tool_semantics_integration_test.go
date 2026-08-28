@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	acpclient "github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 

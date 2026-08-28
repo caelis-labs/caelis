@@ -6,8 +6,8 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -92,7 +92,7 @@ func (l *SessionServiceLoader) LoadSession(
 			if event == nil {
 				continue
 			}
-			base := projector.EnvelopeBaseFromSessionEvent(loaded.Session.SessionRef, event, projector.SessionEventTransport{})
+			base := projection.EnvelopeBaseFromSessionEvent(loaded.Session.SessionRef, event, projection.SessionEventTransport{})
 			notifications, err := projectSessionEventNotifications(strings.TrimSpace(string(req.SessionId)), event)
 			if err != nil {
 				return acpsdk.LoadSessionResponse{}, err

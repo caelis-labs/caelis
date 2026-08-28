@@ -9,9 +9,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 

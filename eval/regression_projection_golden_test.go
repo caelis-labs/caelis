@@ -8,9 +8,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/internal/evalharness"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -228,11 +228,11 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
     "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "call-1",
-      "title": "RunCommand go test ./protocol/acp/projector",
+      "title": "RunCommand go test ./control/appserver/projection",
       "kind": "execute",
       "status": "pending",
       "rawInput": {
-        "command": "go test ./protocol/acp/projector"
+        "command": "go test ./control/appserver/projection"
       },
       "content": [
         {
@@ -267,11 +267,11 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "call-1",
-      "title": "RunCommand go test ./protocol/acp/projector",
+      "title": "RunCommand go test ./control/appserver/projection",
       "kind": "execute",
       "status": "completed",
       "rawInput": {
-        "command": "go test ./protocol/acp/projector"
+        "command": "go test ./control/appserver/projection"
       },
       "rawOutput": {
         "exit_code": 0
@@ -502,7 +502,7 @@ func projectionGoldenFixtureEvents() []*session.Event {
 				ID:     "call-1",
 				Name:   "RunCommand",
 				Status: "pending",
-				Input:  map[string]any{"command": "go test ./protocol/acp/projector"},
+				Input:  map[string]any{"command": "go test ./control/appserver/projection"},
 			},
 			Scope: &session.EventScope{TurnID: "turn-1"},
 		},
@@ -516,7 +516,7 @@ func projectionGoldenFixtureEvents() []*session.Event {
 				ID:     "call-1",
 				Name:   "RunCommand",
 				Status: "completed",
-				Input:  map[string]any{"command": "go test ./protocol/acp/projector"},
+				Input:  map[string]any{"command": "go test ./control/appserver/projection"},
 				Output: map[string]any{"exit_code": 0},
 				Content: []session.EventToolContent{{
 					Type:       "terminal",

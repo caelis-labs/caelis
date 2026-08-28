@@ -4,8 +4,8 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -13,7 +13,7 @@ import (
 // durable events as ACP notifications. Eventstream-only extensions and stored
 // permission prompts are intentionally not replayed through this adapter.
 func projectSessionEventNotifications(fallbackSessionID string, event *session.Event) ([]schema.SessionNotification, error) {
-	updates, err := projector.ProjectEvent(event)
+	updates, err := projection.ProjectEvent(event)
 	if err != nil {
 		return nil, err
 	}

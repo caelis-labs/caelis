@@ -25,9 +25,10 @@ Built-in or external Agent
   that uses them.
 - Control owns authorization, lifecycle, ordering, replay coordination,
   permission routing, and endpoint selection.
-- The focused Control or presentation adapter creates Envelopes. The remaining
-  shared `protocol/acp/projector` package is a migration source, not a new
-  product authority.
+- The focused Control or presentation adapter creates Envelopes. Canonical
+  Session-event projection delivered through the AppServer feed belongs to
+  `control/appserver/projection`; owner-local Surface and Host adapters retain
+  only their own presentation or compatibility projection.
 - Surfaces render Envelopes and collect input. They do not reconstruct Runtime,
   persistence, replay, permission, or orchestration semantics.
 

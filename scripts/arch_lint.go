@@ -593,6 +593,9 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if target == "protocol/acp/taskstream" || strings.HasPrefix(target, "protocol/acp/taskstream/") {
 		return "production code must not depend on retired protocol/acp/taskstream; use control/appserver/taskstream"
 	}
+	if target == "protocol/acp/projector" || strings.HasPrefix(target, "protocol/acp/projector/") {
+		return "production code must not depend on retired protocol/acp/projector; use control/appserver/projection"
+	}
 	if strings.HasPrefix(rel, "app/controlserver/") &&
 		(target == "app/gatewayapp" || strings.HasPrefix(target, "app/gatewayapp/")) {
 		return "app/controlserver must depend on explicit Control contracts, not gatewayapp assembly"
@@ -743,10 +746,12 @@ func isProductionTestSupportPackage(rel string) bool {
 }
 
 func allowedAppServerProtocolTarget(rel string, target string) bool {
+	if strings.HasPrefix(rel, "control/appserver/projection/") && target == "protocol/acp/semantic" {
+		return true
+	}
 	return strings.HasPrefix(rel, "control/appserver/") && pathIn(target,
 		"protocol/acp/eventstream",
 		"protocol/acp/metautil",
-		"protocol/acp/projector",
 		"protocol/acp/schema",
 	)
 }
@@ -868,6 +873,8 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "must not recreate the root protocol/acp facade; standard wire contracts belong to acp-go-sdk and residual code to an owning ACP subpackage", pkg, 1
 	case pkg == "protocol/acp/control" || strings.HasPrefix(pkg, "protocol/acp/control/"):
 		return "must not recreate protocol/acp/control; prompt contracts belong to internal/controlprompt, status data to control/status, and rendering to surfaces/internal/promptview", pkg, 1
+	case pkg == "protocol/acp/projector" || strings.HasPrefix(pkg, "protocol/acp/projector/"):
+		return "must not recreate protocol/acp/projector; canonical Session projection belongs to control/appserver/projection", pkg, 1
 	case pkg == "impl/model/catalog" || strings.HasPrefix(pkg, "impl/model/catalog/"):
 		return "must not recreate impl/model/catalog; concrete model catalogs belong to Control", pkg, 1
 	case pkg == "agent-sdk/model/catalog" || strings.HasPrefix(pkg, "agent-sdk/model/catalog/"):

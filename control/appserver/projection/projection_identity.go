@@ -1,4 +1,4 @@
-package projector
+package projection
 
 import (
 	"encoding/base64"

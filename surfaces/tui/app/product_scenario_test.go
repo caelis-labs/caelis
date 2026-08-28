@@ -13,9 +13,9 @@ import (
 	"github.com/charmbracelet/x/vt"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/internal/evalharness"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )

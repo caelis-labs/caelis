@@ -9,8 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	sdkmodel "github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 

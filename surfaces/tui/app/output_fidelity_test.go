@@ -11,9 +11,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 

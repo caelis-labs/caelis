@@ -17,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/loader"
@@ -25,7 +26,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/google/uuid"
 )
 
@@ -852,7 +852,7 @@ func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, 
 			if item.event == nil {
 				continue
 			}
-			base := projector.EnvelopeBaseFromSessionEvent(ref, item.event, projector.SessionEventTransport{})
+			base := projection.EnvelopeBaseFromSessionEvent(ref, item.event, projection.SessionEventTransport{})
 			published := item.canonicalContentAlreadyPublished
 			if taskMux == nil {
 				// The direct Runtime conformance bridge may be assembled without a
@@ -860,9 +860,9 @@ func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, 
 				// only deliverable terminal-content source.
 				published &^= agent.PublishedTerminal
 			}
-			projected := projector.ProjectSessionEventEnvelope(base, item.event)
+			projected := projection.ProjectSessionEventEnvelope(base, item.event)
 			if published != 0 {
-				projected = projector.ProjectSessionEventLiveSupplementEnvelope(
+				projected = projection.ProjectSessionEventLiveSupplementEnvelope(
 					base,
 					item.event,
 					published,

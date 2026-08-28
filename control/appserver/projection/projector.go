@@ -1,4 +1,4 @@
-package projector
+package projection
 
 import (
 	"encoding/json"
@@ -473,7 +473,7 @@ func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.Prot
 	update = cloneProtocolUpdateForProjection(update)
 	id := strings.TrimSpace(update.ToolCallID)
 	if id == "" {
-		return schema.ToolCallUpdate{}, fmt.Errorf("protocol/acp/projector: tool update missing tool call id")
+		return schema.ToolCallUpdate{}, fmt.Errorf("control/appserver/projection: tool update missing tool call id")
 	}
 	name := protocolToolNameForUpdate(event, update)
 	out := schema.ToolCallUpdate{

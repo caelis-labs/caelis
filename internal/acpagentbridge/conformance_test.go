@@ -22,10 +22,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
-	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -119,7 +119,7 @@ func TestBuiltInProjectionAndExternalIngressRoundTripShareSemantics(t *testing.T
 	}
 
 	for _, event := range events {
-		updates, err := projector.ProjectEvent(event)
+		updates, err := projection.ProjectEvent(event)
 		if err != nil {
 			t.Fatalf("ProjectEvent(%s) error = %v", event.Type, err)
 		}
@@ -135,7 +135,7 @@ func TestBuiltInProjectionAndExternalIngressRoundTripShareSemantics(t *testing.T
 		if ingressEvent == nil {
 			t.Fatalf("NormalizeUpdate(external %s) = nil", event.Type)
 		}
-		roundTrip, err := projector.ProjectEvent(ingressEvent)
+		roundTrip, err := projection.ProjectEvent(ingressEvent)
 		if err != nil || len(roundTrip) != 1 {
 			t.Fatalf("ProjectEvent(external %s) = %#v, %v; want one update", event.Type, roundTrip, err)
 		}

@@ -132,10 +132,16 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "",
 		},
 		{
-			name:       "AppServer accepts shared ACP projector",
-			rel:        "control/appserver/feed_backfill.go",
-			importPath: modulePath + "/protocol/acp/projector",
+			name:       "AppServer projection accepts transitional ACP permission semantics",
+			rel:        "control/appserver/projection/gateway.go",
+			importPath: modulePath + "/protocol/acp/semantic",
 			want:       "",
+		},
+		{
+			name:       "AppServer feed rejects projection-only ACP permission semantics",
+			rel:        "control/appserver/feed.go",
+			importPath: modulePath + "/protocol/acp/semantic",
+			want:       "control must depend only on Control peers and reusable SDK packages",
 		},
 		{
 			name:       "AppServer accepts Control-owned Task observation",
@@ -154,6 +160,12 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			rel:        "control/appserver/appserver.go",
 			importPath: modulePath + "/protocol/acp/taskstream",
 			want:       "production code must not depend on retired protocol/acp/taskstream; use control/appserver/taskstream",
+		},
+		{
+			name:       "production rejects retired ACP projector",
+			rel:        "internal/kernel/gateway_projection.go",
+			importPath: modulePath + "/protocol/acp/projector",
+			want:       "production code must not depend on retired protocol/acp/projector; use control/appserver/projection",
 		},
 		{
 			name:       "other control packages reject ACP protocol dependencies",
@@ -492,7 +504,7 @@ func readAlias(event *session.Event) bool {
 	return event.Protocol.ToolCall != nil
 }
 `
-	rule, subject, _ := semanticRuleForSource(t, "protocol/acp/projector/demo.go", source, modulePath)
+	rule, subject, _ := semanticRuleForSource(t, "control/appserver/projection/demo.go", source, modulePath)
 	if !strings.Contains(rule, "EventProtocol") || subject != "EventProtocol.ToolCall" {
 		t.Fatalf("semantic rule = (%q, %q), want direct EventProtocol alias rejection", rule, subject)
 	}
@@ -578,7 +590,7 @@ var meta = map[string]any{
 	"terminal_output": "stdout",
 }
 `
-	rule, subject, _ := semanticRuleForSource(t, "protocol/acp/projector/demo.go", source, modulePath)
+	rule, subject, _ := semanticRuleForSource(t, "control/appserver/projection/demo.go", source, modulePath)
 	if !strings.Contains(rule, "metautil terminal helpers") || subject != "terminal_output" {
 		t.Fatalf("semantic rule = (%q, %q), want top-level terminal metadata rejection", rule, subject)
 	}
@@ -608,6 +620,12 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			rel:     "control/client/service.go",
 			want:    "must not recreate control/client; the surface-facing product boundary belongs to control/appserver",
 			wantSub: "control/client",
+		},
+		{
+			name:    "deleted ACP projector path fails",
+			rel:     "protocol/acp/projector/projector.go",
+			want:    "must not recreate protocol/acp/projector; canonical Session projection belongs to control/appserver/projection",
+			wantSub: "protocol/acp/projector",
 		},
 		{
 			name:    "deleted appserver surface fails",
