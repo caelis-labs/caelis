@@ -11,7 +11,7 @@ func TestWithoutRuntimeSectionKeysClonesAndRetainsSiblings(t *testing.T) {
 	meta := map[string]any{
 		"provider": map[string]any{"trace": []any{"a"}},
 		metautil.Root: map[string]any{
-			metautil.Version: 1,
+			"version": 1,
 			metautil.Runtime: map[string]any{
 				metautil.RuntimeTask: map[string]any{
 					metautil.RuntimeTaskTerminalID: "terminal-1",
@@ -26,7 +26,7 @@ func TestWithoutRuntimeSectionKeysClonesAndRetainsSiblings(t *testing.T) {
 	want := map[string]any{
 		"provider": map[string]any{"trace": []any{"a"}},
 		metautil.Root: map[string]any{
-			metautil.Version: 1,
+			"version": 1,
 			metautil.Runtime: map[string]any{
 				metautil.RuntimeTask: map[string]any{
 					metautil.RuntimeTaskTerminalID: "terminal-1",

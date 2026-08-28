@@ -9,6 +9,12 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 )
 
+const (
+	toolDisplayMetaSection        = "display"
+	toolDisplayMetaInputKey       = "tool_input"
+	toolDisplayMetaExplorationKey = "exploration_verb"
+)
+
 func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptEvent {
 	toolName := strings.TrimSpace(input.ToolName)
 	explorationVerb := toolDisplayExplorationVerb(input.Meta)
@@ -277,13 +283,13 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 
 func transcriptRecoveredToolInput(meta map[string]any) map[string]any {
 	caelisMeta, _ := meta[metautil.Root].(map[string]any)
-	displayMeta, _ := caelisMeta[metautil.Display].(map[string]any)
-	recoveredInput, _ := displayMeta[metautil.DisplayToolInput].(map[string]any)
+	displayMeta, _ := caelisMeta[toolDisplayMetaSection].(map[string]any)
+	recoveredInput, _ := displayMeta[toolDisplayMetaInputKey].(map[string]any)
 	return metautil.CloneMap(recoveredInput)
 }
 
 func toolDisplayExplorationVerb(meta map[string]any) string {
-	return metautil.String(meta, metautil.Root, metautil.Display, metautil.DisplayExplorationVerb)
+	return metautil.String(meta, metautil.Root, toolDisplayMetaSection, toolDisplayMetaExplorationKey)
 }
 
 func taskWriteFailureDisplayOutput(rawOutput map[string]any, meta map[string]any, output string, taskHandle string, status string, toolErr bool) string {

@@ -153,7 +153,7 @@ func TestProjectACPEventToTranscriptEventsIgnoresRecoveredToolInputOnStart(t *te
 					Status:        eventstream.ToolStatusInProgress,
 					RawInput:      tt.rawInput,
 					Meta: testACPDisplayMeta(map[string]any{
-						metautil.DisplayToolInput: map[string]any{"query": "forged"},
+						"tool_input": map[string]any{"query": "forged"},
 					}),
 				},
 			})
@@ -191,7 +191,7 @@ func TestProjectACPEventToTranscriptEventsIgnoresRecoveredToolInputOnLivePatch(t
 					Status:        tt.status,
 					RawInput:      tt.rawInput,
 					Meta: testACPDisplayMeta(map[string]any{
-						metautil.DisplayToolInput: map[string]any{"query": "forged"},
+						"tool_input": map[string]any{"query": "forged"},
 					}),
 				},
 			})
@@ -235,7 +235,7 @@ func TestProjectACPEventToTranscriptEventsRecoversSerializedCompletedToolInput(t
 				"input": `{"query":"` + query + `","limit":"3","mode":"Latest"}`,
 			},
 			Meta: testACPDisplayMeta(map[string]any{
-				metautil.DisplayToolInput: map[string]any{"query": query},
+				"tool_input": map[string]any{"query": query},
 			}),
 		},
 	})
@@ -266,7 +266,7 @@ func TestProjectACPEventToTranscriptEventsPreservesNormalizedExplorationVerb(t *
 			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"target_directory": "docs"},
 			Meta: testACPDisplayMeta(map[string]any{
-				metautil.DisplayExplorationVerb: "List",
+				"exploration_verb": "List",
 			}),
 		},
 	})
@@ -316,7 +316,7 @@ func TestProjectACPEventToTranscriptEventsKeepsRawInputAuthoritative(t *testing.
 			Status:        stringPtr(eventstream.ToolStatusCompleted),
 			RawInput:      map[string]any{"query": "authoritative"},
 			Meta: testACPDisplayMeta(map[string]any{
-				metautil.DisplayToolInput: map[string]any{"query": "recovered"},
+				"tool_input": map[string]any{"query": "recovered"},
 			}),
 		},
 	})

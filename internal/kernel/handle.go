@@ -654,7 +654,7 @@ func (h *turnHandle) enrichEnvelopeLocked(env eventstream.Envelope, bridgeSource
 
 func mergeCaelisBridgeMeta(meta map[string]any, bridgeSource string) map[string]any {
 	caelis := map[string]any{
-		metautil.Version: 1,
+		"version": 1,
 	}
 	if strings.TrimSpace(bridgeSource) != "" {
 		caelis["bridge"] = map[string]any{

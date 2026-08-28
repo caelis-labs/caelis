@@ -44,7 +44,7 @@ func sessionACPEventMeta(event *session.Event) map[string]any {
 	}
 	return metautil.Merge(meta, map[string]any{
 		metautil.Root: map[string]any{
-			metautil.Version: 1,
+			"version": 1,
 			"invocation": map[string]any{
 				"provider": strings.TrimSpace(invocation.Provider),
 				"model":    strings.TrimSpace(invocation.Model),

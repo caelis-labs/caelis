@@ -136,8 +136,8 @@ func TestSideACPDistinctXSearchBypassesOrchestrationWatchdogE2E(t *testing.T) {
 			displayQuery := metautil.String(
 				update.Meta,
 				metautil.Root,
-				metautil.Display,
-				metautil.DisplayToolInput,
+				"display",
+				"tool_input",
 				"query",
 			)
 			if displayQuery != query {

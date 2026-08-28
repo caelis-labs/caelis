@@ -251,7 +251,7 @@ func TestNormalizeInboundUpdateGrokListIsIdempotentForExplicitUpdateKind(t *test
 	if explorationVerb(first.Meta) != "List" || explorationVerb(second.Meta) != "List" {
 		t.Fatalf("normalized verbs = %q then %q, want List", explorationVerb(first.Meta), explorationVerb(second.Meta))
 	}
-	if got := metautil.String(second.Meta, metautil.Root, metautil.Display, "unrelated"); got != "kept" {
+	if got := metautil.String(second.Meta, metautil.Root, "display", "unrelated"); got != "kept" {
 		t.Fatalf("unrelated display metadata = %q, want kept", got)
 	}
 	if !reflect.DeepEqual(second.RawInput, input) || !reflect.DeepEqual(second.Meta[xAIToolMetaKey], meta[xAIToolMetaKey]) {
@@ -341,5 +341,5 @@ func grokToolMeta(name, kind, label string, readOnly bool) map[string]any {
 }
 
 func explorationVerb(meta map[string]any) string {
-	return metautil.String(meta, metautil.Root, metautil.Display, metautil.DisplayExplorationVerb)
+	return metautil.String(meta, metautil.Root, "display", "exploration_verb")
 }

@@ -7,17 +7,15 @@ import (
 	"strings"
 )
 
+const metaVersionKey = "version"
+
 const (
 	// Root is the Caelis-owned ACP extension namespace. Renderers may consume
 	// values under this namespace, but provider-visible tool JSON must not be
 	// treated as display metadata.
 	Root = "caelis"
 
-	Version                = "version"
-	Runtime                = "runtime"
-	Display                = "display"
-	DisplayToolInput       = "tool_input"
-	DisplayExplorationVerb = "exploration_verb"
+	Runtime = "runtime"
 
 	RuntimeTool         = "tool"
 	RuntimeToolName     = "name"
@@ -101,7 +99,7 @@ func WithRuntimeSection(meta map[string]any, section string, values map[string]a
 	if caelis == nil {
 		caelis = map[string]any{}
 	}
-	caelis[Version] = 1
+	caelis[metaVersionKey] = 1
 	runtime := CloneMap(mapAt(caelis, Runtime))
 	if runtime == nil {
 		runtime = map[string]any{}
