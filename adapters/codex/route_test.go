@@ -8,7 +8,6 @@ import (
 	acp "github.com/caelis-labs/acp-go-sdk"
 
 	"github.com/caelis-labs/caelis/adapters/codex/internal/appserver"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestRouteStreamsReasoningSectionsWithoutRepeatingCompletedItem(t *testing.T) {
@@ -76,7 +75,7 @@ func TestRouteStreamsTerminalOutputMetadataAndSparseCompletion(t *testing.T) {
 	if err != nil || len(updates) != 1 || updates[0].ToolCallUpdate == nil {
 		t.Fatalf("output delta = %#v, err=%v", updates, err)
 	}
-	if raw := updates[0].ToolCallUpdate.Meta[metautil.TerminalOutputDeltaKey]; !json.Valid(raw) ||
+	if raw := updates[0].ToolCallUpdate.Meta[terminalOutputDeltaMetaKey]; !json.Valid(raw) ||
 		!jsonContainsString(raw, "data", "ACP_TOOL_RESULT_42\n") {
 		t.Fatalf("output delta metadata = %#v", updates[0].ToolCallUpdate.Meta)
 	}
@@ -87,7 +86,7 @@ func TestRouteStreamsTerminalOutputMetadataAndSparseCompletion(t *testing.T) {
 	if err != nil || len(updates) != 1 || updates[0].ToolCallUpdate == nil {
 		t.Fatalf("terminal interaction = %#v, err=%v", updates, err)
 	}
-	if raw := updates[0].ToolCallUpdate.Meta[metautil.TerminalOutputDeltaKey]; !jsonContainsString(raw, "data", "\nyes\n") {
+	if raw := updates[0].ToolCallUpdate.Meta[terminalOutputDeltaMetaKey]; !jsonContainsString(raw, "data", "\nyes\n") {
 		t.Fatalf("terminal interaction metadata = %#v", updates[0].ToolCallUpdate.Meta)
 	}
 
@@ -99,10 +98,10 @@ func TestRouteStreamsTerminalOutputMetadataAndSparseCompletion(t *testing.T) {
 		updates[0].ToolCallUpdate.Status == nil || *updates[0].ToolCallUpdate.Status != acp.ToolCallStatusCompleted {
 		t.Fatalf("command completion = %#v, err=%v", updates, err)
 	}
-	if _, duplicated := updates[0].ToolCallUpdate.Meta[metautil.TerminalOutputDeltaKey]; duplicated {
+	if _, duplicated := updates[0].ToolCallUpdate.Meta[terminalOutputDeltaMetaKey]; duplicated {
 		t.Fatalf("completion repeated streamed output: %#v", updates[0].ToolCallUpdate.Meta)
 	}
-	if raw := updates[0].ToolCallUpdate.Meta[metautil.TerminalExitKey]; !json.Valid(raw) {
+	if raw := updates[0].ToolCallUpdate.Meta[terminalExitMetaKey]; !json.Valid(raw) {
 		t.Fatalf("terminal exit metadata = %#v", updates[0].ToolCallUpdate.Meta)
 	}
 }
@@ -116,8 +115,8 @@ func TestRouteNegotiatesCanonicalAndLegacyTerminalOutputWireKeys(t *testing.T) {
 		wantKey string
 		dropKey string
 	}{
-		{name: "canonical", mode: terminalOutputCanonical, wantKey: metautil.TerminalOutputKey, dropKey: metautil.TerminalOutputDeltaKey},
-		{name: "legacy", mode: terminalOutputLegacy, wantKey: metautil.TerminalOutputDeltaKey, dropKey: metautil.TerminalOutputKey},
+		{name: "canonical", mode: terminalOutputCanonical, wantKey: terminalOutputMetaKey, dropKey: terminalOutputDeltaMetaKey},
+		{name: "legacy", mode: terminalOutputLegacy, wantKey: terminalOutputDeltaMetaKey, dropKey: terminalOutputMetaKey},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			route := &sessionRoute{
@@ -203,7 +202,7 @@ func TestRouteCompletionWithoutTerminalStartRetainsCanonicalAggregate(t *testing
 	if err != nil || len(updates) != 1 || updates[0].ToolCallUpdate == nil {
 		t.Fatalf("pre-start output = %#v, err=%v", updates, err)
 	}
-	if _, ok := updates[0].ToolCallUpdate.Meta[metautil.TerminalOutputDeltaKey]; !ok {
+	if _, ok := updates[0].ToolCallUpdate.Meta[terminalOutputDeltaMetaKey]; !ok {
 		t.Fatalf("pre-start output did not use compatibility key: %#v", updates[0].ToolCallUpdate.Meta)
 	}
 	updates, _, err = route.translateNotification(appserver.Notification{
@@ -213,10 +212,10 @@ func TestRouteCompletionWithoutTerminalStartRetainsCanonicalAggregate(t *testing
 	if err != nil || len(updates) != 1 || updates[0].ToolCall == nil {
 		t.Fatalf("completion-only command = %#v, err=%v", updates, err)
 	}
-	if _, ok := updates[0].ToolCall.Meta[metautil.TerminalInfoKey]; !ok {
+	if _, ok := updates[0].ToolCall.Meta[terminalInfoMetaKey]; !ok {
 		t.Fatalf("completion snapshot omitted terminal info: %#v", updates[0].ToolCall.Meta)
 	}
-	if raw := updates[0].ToolCall.Meta[metautil.TerminalOutputKey]; !jsonContainsString(raw, "data", "partial\n") {
+	if raw := updates[0].ToolCall.Meta[terminalOutputMetaKey]; !jsonContainsString(raw, "data", "partial\n") {
 		t.Fatalf("completion snapshot omitted canonical aggregate: %#v", updates[0].ToolCall.Meta)
 	}
 }

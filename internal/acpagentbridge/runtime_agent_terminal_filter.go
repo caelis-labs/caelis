@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
 type normalizingPromptCallbacks struct {
@@ -68,7 +68,7 @@ func normalizeACPStdioTerminalExtension(notification eventstream.SessionNotifica
 		} else {
 			update.Meta, update.Content = terminalExtensionMetaFromACPContent(update.Meta, update.ToolCallID, update.Content)
 			if terminalID := terminalIDFromMeta(update.Meta); terminalID != "" && acpToolUpdateStatusFinal(update.Status) {
-				update.Meta = metautil.WithTerminalExit(update.Meta, terminalID, terminalExitCodeFromRawOutput(update.RawOutput), nil)
+				update.Meta = acpmeta.WithTerminalExit(update.Meta, terminalID, terminalExitCodeFromRawOutput(update.RawOutput), nil)
 			}
 		}
 		notification.Update = update
@@ -81,14 +81,14 @@ func normalizeACPStdioTerminalExtension(notification eventstream.SessionNotifica
 // the final-only wire profile. The product Main feed and its typed Task stream
 // do not pass through this normalizer.
 func acpStdioFinalOnlySpawn(meta map[string]any) bool {
-	toolName := metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName)
+	toolName := acpmeta.ToolName(meta)
 	return toolName == spawn.ToolName
 }
 
 func withoutACPStdioTerminalMount(meta map[string]any, content []eventstream.ToolCallContent) (map[string]any, []eventstream.ToolCallContent) {
-	meta = metautil.WithoutTerminalOutput(meta)
-	delete(meta, metautil.TerminalInfoKey)
-	delete(meta, metautil.TerminalExitKey)
+	meta = acpmeta.WithoutTerminalOutput(meta)
+	delete(meta, acpmeta.TerminalInfoKey)
+	delete(meta, acpmeta.TerminalExitKey)
 	if len(meta) == 0 {
 		meta = nil
 	}
@@ -125,9 +125,9 @@ func terminalExtensionMetaFromACPContent(meta map[string]any, terminalID string,
 		return meta, content
 	}
 	if terminalID != "" {
-		meta = metautil.WithTerminalInfo(meta, terminalID)
+		meta = acpmeta.WithTerminalInfo(meta, terminalID)
 		if text.Len() > 0 {
-			meta = metautil.WithTerminalOutput(meta, terminalID, text.String())
+			meta = acpmeta.WithTerminalOutput(meta, terminalID, text.String())
 		}
 		out = append(out, eventstream.ToolCallContent{
 			Type:       "terminal",
@@ -138,13 +138,13 @@ func terminalExtensionMetaFromACPContent(meta map[string]any, terminalID string,
 }
 
 func terminalIDFromMeta(meta map[string]any) string {
-	if output, ok := metautil.TerminalOutput(meta); ok {
+	if output, ok := acpmeta.ReadTerminalOutput(meta); ok {
 		return strings.TrimSpace(output.TerminalID)
 	}
-	if info, ok := metautil.TerminalInfo(meta); ok {
+	if info, ok := acpmeta.ReadTerminalInfo(meta); ok {
 		return strings.TrimSpace(info.TerminalID)
 	}
-	if exit, ok := metautil.TerminalExit(meta); ok {
+	if exit, ok := acpmeta.ReadTerminalExit(meta); ok {
 		return strings.TrimSpace(exit.TerminalID)
 	}
 	return ""

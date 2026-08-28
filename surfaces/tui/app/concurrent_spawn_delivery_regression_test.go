@@ -8,7 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 type concurrentSpawnTask struct {
@@ -139,7 +138,7 @@ func concurrentSpawnStartEnvelope(sequence int, task concurrentSpawnTask) events
 
 func concurrentSpawnResultEnvelope(sequence int, task concurrentSpawnTask) eventstream.Envelope {
 	completed := eventstream.ToolStatusCompleted
-	meta := metautil.WithRuntimeSection(acpToolNameMeta("Spawn"), metautil.RuntimeTask, map[string]any{
+	meta := testMeta.WithRuntimeSection(acpToolNameMeta("Spawn"), testMeta.RuntimeTask, map[string]any{
 		"agent": "breeze", "handle": task.handle, "prompt": task.prompt, "target_kind": "subagent",
 	})
 	return concurrentSpawnEnvelope(sequence, eventstream.ToolCallUpdate{

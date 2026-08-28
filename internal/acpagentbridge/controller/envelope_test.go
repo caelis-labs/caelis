@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
 func TestACPEnvelopeFromUpdateProjectsStandardToolLifecycle(t *testing.T) {
@@ -87,7 +87,7 @@ func TestACPEnvelopeFromUpdateRestoresGrokExecutePresentationForSideParticipant(
 	if !ok || call.Kind != eventstream.ToolKindExecute || call.Title != "run_terminal_command" {
 		t.Fatalf("participant Grok execute update = %#v, want anonymous standard execute presentation", env.Update)
 	}
-	if exactName := metautil.String(call.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); exactName != "" {
+	if exactName := acpmeta.ToolName(call.Meta); exactName != "" {
 		t.Fatalf("participant runtime exact tool name = %q, want none", exactName)
 	}
 }

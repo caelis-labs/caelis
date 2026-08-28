@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 const (
@@ -434,14 +433,14 @@ func (s *corpusTranscriptState) reduceTool(env eventstream.Envelope, event Event
 	if locations, ok := event.Meta[corpusLocationsKey].([]eventstream.ToolCallLocation); ok && len(locations) > 0 {
 		item["locations"] = locations
 	}
-	if terminalInfo, ok := metautil.TerminalInfo(event.Meta); ok {
+	if terminalInfo, ok := ReadTerminalInfo(event.Meta); ok {
 		item["terminalId"] = terminalInfo.TerminalID
 	}
-	if terminalOutput, ok := metautil.TerminalOutput(event.Meta); ok {
+	if terminalOutput, ok := ReadTerminalOutput(event.Meta); ok {
 		item["terminalId"] = terminalOutput.TerminalID
 		item["terminalOutput"] = corpusMapString(item, "terminalOutput") + terminalOutput.Data
 	}
-	if terminalExit, ok := metautil.TerminalExit(event.Meta); ok {
+	if terminalExit, ok := ReadTerminalExit(event.Meta); ok {
 		item["terminalId"] = terminalExit.TerminalID
 		if terminalExit.ExitCode != nil {
 			item["terminalExitCode"] = *terminalExit.ExitCode
@@ -516,7 +515,7 @@ func corpusToolEvent(input ToolProjectionInput, status string, isErr bool) Event
 	if exitCode, ok := rawExitCode(RawMap(input.RawOutput)); ok && exitCode > 0 {
 		isErr = true
 	}
-	_, hasExit := metautil.TerminalExit(meta)
+	_, hasExit := ReadTerminalExit(meta)
 	return Event{
 		Kind: EventTool, Scope: input.Scope, ScopeID: input.ScopeID, Actor: input.Actor, OccurredAt: input.OccurredAt,
 		Meta: meta, ToolCallID: input.CallID, ToolName: input.ToolName, ToolKind: input.ToolKind,

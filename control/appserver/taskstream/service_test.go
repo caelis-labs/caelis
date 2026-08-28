@@ -11,8 +11,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	sdkstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestProjectRecordPreservesStandardChildToolLifecycle(t *testing.T) {
@@ -228,7 +228,7 @@ func TestProjectRecordMountsRunCommandOutputOnParentTerminal(t *testing.T) {
 		t.Fatalf("output projection = %#v, want one Envelope", output)
 	}
 	outputMeta := eventstream.UpdateMeta(output[0].Update)
-	if terminalOutput, ok := metautil.TerminalOutput(outputMeta); !ok ||
+	if terminalOutput, ok := eventmeta.TerminalOutput(outputMeta); !ok ||
 		terminalOutput.TerminalID != "command-1" ||
 		terminalOutput.Data != "line\n" {
 		t.Fatalf("terminal output = %#v, want parent command terminal", outputMeta)
@@ -248,7 +248,7 @@ func TestProjectRecordMountsRunCommandOutputOnParentTerminal(t *testing.T) {
 		t.Fatalf("final projection = %#v, want one Envelope", final)
 	}
 	finalMeta := eventstream.UpdateMeta(final[0].Update)
-	if terminalExit, ok := metautil.TerminalExit(finalMeta); !ok ||
+	if terminalExit, ok := eventmeta.TerminalExit(finalMeta); !ok ||
 		terminalExit.TerminalID != "command-1" ||
 		terminalExit.ExitCode == nil ||
 		*terminalExit.ExitCode != 0 {

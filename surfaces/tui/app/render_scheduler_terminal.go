@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
@@ -65,11 +64,11 @@ func mergeEventStreamTerminalEnvelope(dst *eventstream.Envelope, src eventstream
 }
 
 func acpTerminalOutput(update eventstream.ToolCallUpdate) (string, string) {
-	output, ok := metautil.TerminalOutput(update.Meta)
+	output, ok := transcript.ReadTerminalOutput(update.Meta)
 	if ok {
 		return output.Data, output.TerminalID
 	}
-	info, ok := metautil.TerminalInfo(update.Meta)
+	info, ok := transcript.ReadTerminalInfo(update.Meta)
 	if ok {
 		return "", info.TerminalID
 	}
@@ -82,10 +81,10 @@ func setACPTerminalEnvelopeOutput(env *eventstream.Envelope, text string, termin
 	}
 	switch update := env.Update.(type) {
 	case eventstream.ToolCallUpdate:
-		update.Meta = metautil.WithTerminalOutput(update.Meta, terminalID, text)
+		update.Meta = transcript.WithTerminalOutput(update.Meta, terminalID, text)
 		env.Update = update
 	case eventstream.ToolCall:
-		update.Meta = metautil.WithTerminalOutput(update.Meta, terminalID, text)
+		update.Meta = transcript.WithTerminalOutput(update.Meta, terminalID, text)
 		env.Update = update
 	}
 }

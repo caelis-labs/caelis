@@ -3,35 +3,33 @@ package eventmeta
 import (
 	"reflect"
 	"testing"
-
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestWithoutRuntimeSectionKeysClonesAndRetainsSiblings(t *testing.T) {
 	meta := map[string]any{
 		"provider": map[string]any{"trace": []any{"a"}},
-		metautil.Root: map[string]any{
+		Root: map[string]any{
 			"version": 1,
-			metautil.Runtime: map[string]any{
-				metautil.RuntimeTask: map[string]any{
-					metautil.RuntimeTaskTerminalID: "terminal-1",
-					metautil.RuntimeOutputDelta:    "duplicate",
+			Runtime: map[string]any{
+				RuntimeTask: map[string]any{
+					RuntimeTaskTerminalID: "terminal-1",
+					RuntimeOutputDelta:    "duplicate",
 				},
-				metautil.RuntimeStream: map[string]any{metautil.RuntimeStreamMode: "canonical"},
+				RuntimeStream: map[string]any{RuntimeStreamMode: "canonical"},
 			},
 		},
 	}
 
-	got := WithoutRuntimeSectionKeys(meta, metautil.RuntimeTask, metautil.RuntimeOutputDelta)
+	got := WithoutRuntimeSectionKeys(meta, RuntimeTask, RuntimeOutputDelta)
 	want := map[string]any{
 		"provider": map[string]any{"trace": []any{"a"}},
-		metautil.Root: map[string]any{
+		Root: map[string]any{
 			"version": 1,
-			metautil.Runtime: map[string]any{
-				metautil.RuntimeTask: map[string]any{
-					metautil.RuntimeTaskTerminalID: "terminal-1",
+			Runtime: map[string]any{
+				RuntimeTask: map[string]any{
+					RuntimeTaskTerminalID: "terminal-1",
 				},
-				metautil.RuntimeStream: map[string]any{metautil.RuntimeStreamMode: "canonical"},
+				RuntimeStream: map[string]any{RuntimeStreamMode: "canonical"},
 			},
 		},
 	}
@@ -40,22 +38,22 @@ func TestWithoutRuntimeSectionKeysClonesAndRetainsSiblings(t *testing.T) {
 	}
 
 	got["provider"].(map[string]any)["trace"].([]any)[0] = "changed"
-	got[metautil.Root].(map[string]any)[metautil.Runtime].(map[string]any)[metautil.RuntimeTask].(map[string]any)[metautil.RuntimeTaskTerminalID] = "changed"
+	got[Root].(map[string]any)[Runtime].(map[string]any)[RuntimeTask].(map[string]any)[RuntimeTaskTerminalID] = "changed"
 	if !reflect.DeepEqual(meta["provider"], map[string]any{"trace": []any{"a"}}) ||
-		meta[metautil.Root].(map[string]any)[metautil.Runtime].(map[string]any)[metautil.RuntimeTask].(map[string]any)[metautil.RuntimeTaskTerminalID] != "terminal-1" {
+		meta[Root].(map[string]any)[Runtime].(map[string]any)[RuntimeTask].(map[string]any)[RuntimeTaskTerminalID] != "terminal-1" {
 		t.Fatalf("input metadata mutated: %#v", meta)
 	}
 }
 
 func TestWithoutRuntimeSectionKeysRemovesEmptyParents(t *testing.T) {
 	meta := map[string]any{
-		metautil.Root: map[string]any{
-			metautil.Runtime: map[string]any{
-				metautil.RuntimeTask: map[string]any{metautil.RuntimeOutputDelta: "duplicate"},
+		Root: map[string]any{
+			Runtime: map[string]any{
+				RuntimeTask: map[string]any{RuntimeOutputDelta: "duplicate"},
 			},
 		},
 	}
-	if got := WithoutRuntimeSectionKeys(meta, metautil.RuntimeTask, metautil.RuntimeOutputDelta); got != nil {
+	if got := WithoutRuntimeSectionKeys(meta, RuntimeTask, RuntimeOutputDelta); got != nil {
 		t.Fatalf("WithoutRuntimeSectionKeys() = %#v, want nil", got)
 	}
 }

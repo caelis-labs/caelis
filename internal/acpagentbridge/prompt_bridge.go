@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/control/acppermission"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/jsonvalue"
 )
 
 func (a *RuntimeAgent) runPromptRouter(runCtx context.Context, bridgeCtx context.Context, activeSession session.Session, input string, contentParts []model.ContentPart, cb PromptCallbacks) (bool, error) {
@@ -577,7 +577,7 @@ func emitACPNotice(
 				strings.TrimSpace(env.Cursor),
 				strings.TrimSpace(fallbackMessageID),
 			),
-			Meta: metautil.CloneMap(env.Meta),
+			Meta: jsonvalue.CloneMap(env.Meta),
 		},
 	}, outboundFilter)
 }

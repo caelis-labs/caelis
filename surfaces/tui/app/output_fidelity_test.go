@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 const structuredFinalMessageForFidelityTest = "# 完成\n\n已创建文件。\n\n---\n\n### 结果\n\n- 第一项\n- 第二项\n\n| 文件 | 状态 |\n| --- | --- |\n| `hello.go` | 好 |\n\n```go\nfmt.Println(\"你好\")\n```\n\n创建文件\n\n> **结果**"
@@ -272,8 +271,8 @@ func TestTerminalGapIsRenderedOnceWithoutChangingExactBytes(t *testing.T) {
 		},
 	})
 	runningMeta := runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", retained, "append")
-	runningMeta = metautil.WithRuntimeSection(runningMeta, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamMode: "append",
+	runningMeta = testMeta.WithRuntimeSection(runningMeta, testMeta.RuntimeStream, map[string]any{
+		testMeta.RuntimeStreamMode: "append",
 		"truncated":                true,
 		"truncated_before":         int64(65539),
 	})
@@ -286,7 +285,7 @@ func TestTerminalGapIsRenderedOnceWithoutChangingExactBytes(t *testing.T) {
 	})
 
 	completed := eventstream.ToolStatusCompleted
-	finalMeta := metautil.WithTerminalInfo(acpToolNameMeta("RunCommand"), "terminal-1")
+	finalMeta := testMeta.WithTerminalInfo(acpToolNameMeta("RunCommand"), "terminal-1")
 	final := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{

@@ -10,7 +10,8 @@
 // commands hold one process-local exact-operation gate through receipt
 // completion so observational recovery cannot race the active Host creator;
 // restart recovery relies on durable intent plus domain receipts. The
-// Session feed uses protocol/acp projection and eventstream packages for the
-// shared surface-facing Envelope vocabulary; those packages do not own Control
-// authorization, state assembly, replay coordination, or broker lifecycle.
+// Session feed uses this boundary's projection and eventstream packages for
+// the shared surface-facing Envelope vocabulary; those packages do not own
+// Control authorization, state assembly, replay coordination, or broker
+// lifecycle.
 package appserver

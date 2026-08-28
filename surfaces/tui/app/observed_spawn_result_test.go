@@ -6,7 +6,6 @@ import (
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestObservedSpawnResultUsesHandleWhenCallIDIsReusedAcrossTurns(t *testing.T) {
@@ -407,8 +406,8 @@ func TestTerminalTaskReadRepairsSpawnBlockAndActivity(t *testing.T) {
 	})
 
 	completed := eventstream.ToolStatusCompleted
-	taskMeta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task",
+	taskMeta := testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Task",
 		"action":                 "read",
 		"target_kind":            "subagent",
 		"target_handle":          "alpha",

@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/jsonvalue"
 )
 
 type VisibilityPolicy func(updateType string, eventType session.EventType) session.Visibility
@@ -140,21 +140,21 @@ func ingressToolMeta(meta map[string]any) map[string]any {
 	// Tool name is UI-only presentation identity supplied by the producing ACP
 	// Agent. Binding metadata is different: it can claim durable Task/result
 	// relations, so ingress must continue to remove it.
-	out := metautil.CloneMap(meta)
+	out := jsonvalue.CloneMap(meta)
 	if len(out) == 0 {
 		return out
 	}
-	caelis, _ := out[metautil.Root].(map[string]any)
-	runtime, _ := caelis[metautil.Runtime].(map[string]any)
+	caelis, _ := out["caelis"].(map[string]any)
+	runtime, _ := caelis["runtime"].(map[string]any)
 	if len(runtime) == 0 {
 		return out
 	}
 	delete(runtime, "binding")
 	if len(runtime) == 0 {
-		delete(caelis, metautil.Runtime)
+		delete(caelis, "runtime")
 	}
 	if len(caelis) == 0 {
-		delete(out, metautil.Root)
+		delete(out, "caelis")
 	}
 	if len(out) == 0 {
 		return nil
@@ -197,7 +197,7 @@ func baseEvent(updateType string, eventType session.EventType, text string, acto
 		Actor:      actor,
 		Scope:      &scope,
 		Text:       text,
-		Meta:       metautil.CloneMap(opts.Meta),
+		Meta:       jsonvalue.CloneMap(opts.Meta),
 	}
 }
 

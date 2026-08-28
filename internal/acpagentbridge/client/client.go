@@ -17,8 +17,8 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	sdkstdio "github.com/caelis-labs/acp-go-sdk/transport/stdio"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 const maxFrameSize = 64 * 1024 * 1024
@@ -133,7 +133,7 @@ func (c *Client) bind(peerInput io.Writer, peerOutput io.Reader) error {
 func (c *Client) Initialize(ctx context.Context) (InitializeResponse, error) {
 	clientCapabilities := acpsdk.ClientCapabilities{
 		Meta: map[string]json.RawMessage{
-			metautil.TerminalOutputKey: json.RawMessage("true"),
+			acpmeta.TerminalOutputKey: json.RawMessage("true"),
 		},
 	}
 	if c.cfg.TerminalAuth {

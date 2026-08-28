@@ -6,7 +6,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 )
 
 func TestEventProjectorProjectsEventToolSemanticNameInStandardNotifications(t *testing.T) {
@@ -104,10 +104,10 @@ func TestEventProjectorProjectsProtocolToolSemanticNameWithoutEventMetaLeak(t *t
 			event := &session.Event{
 				SessionID: "session-1",
 				Type:      session.EventTypeToolCall,
-				Meta: metautil.WithRuntimeSection(
+				Meta: eventmeta.WithRuntimeSection(
 					map[string]any{"event_only": "do not project"},
-					metautil.RuntimeTool,
-					map[string]any{metautil.RuntimeToolName: tt.toolName},
+					eventmeta.RuntimeTool,
+					map[string]any{eventmeta.RuntimeToolName: tt.toolName},
 				),
 				Protocol: &session.EventProtocol{
 					Update: &session.ProtocolUpdate{
@@ -149,8 +149,8 @@ func TestProtocolToolNameForUpdateKeepsCanonicalAndProtocolCandidatesOrdered(t *
 	t.Parallel()
 
 	runtimeToolMeta := func(name string) map[string]any {
-		return metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-			metautil.RuntimeToolName: name,
+		return eventmeta.WithRuntimeSection(nil, eventmeta.RuntimeTool, map[string]any{
+			eventmeta.RuntimeToolName: name,
 		})
 	}
 	tests := []struct {
@@ -278,7 +278,7 @@ func toolUpdateMeta(t *testing.T, update eventstream.Update) map[string]any {
 
 func assertRuntimeToolName(t *testing.T, meta map[string]any, want string) {
 	t.Helper()
-	if got := metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != want {
+	if got := eventmeta.String(meta, eventmeta.Root, eventmeta.Runtime, eventmeta.RuntimeTool, eventmeta.RuntimeToolName); got != want {
 		t.Fatalf("runtime tool name = %q, want %q; meta=%#v", got, want, meta)
 	}
 }

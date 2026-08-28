@@ -7,7 +7,6 @@ import (
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func narrativeTestSource() narrativeSourceIdentity {
@@ -15,9 +14,9 @@ func narrativeTestSource() narrativeSourceIdentity {
 }
 
 func parentToolStreamMeta(callID string, toolName string) map[string]any {
-	return metautil.WithRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamParentCallID: strings.TrimSpace(callID),
-		metautil.RuntimeStreamParentTool:   strings.TrimSpace(toolName),
+	return testMeta.WithRuntimeSection(nil, testMeta.RuntimeStream, map[string]any{
+		testMeta.RuntimeStreamParentCallID: strings.TrimSpace(callID),
+		testMeta.RuntimeStreamParentTool:   strings.TrimSpace(toolName),
 	})
 }
 

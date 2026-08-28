@@ -15,7 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
 func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
@@ -32,7 +32,7 @@ func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
 	}
 	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
 	defer mux.Close()
-	meta := metautil.WithTerminalInfo(nil, "command-1")
+	meta := acpmeta.WithTerminalInfo(nil, "command-1")
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
@@ -49,14 +49,14 @@ func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
 		t.Fatal("RunCommand Task stream was not subscribed")
 	}
 
-	terminalMeta := metautil.WithTerminalOutput(nil, "command-1", "line\n")
+	terminalMeta := acpmeta.WithTerminalOutput(nil, "command-1", "line\n")
 	sub.events <- eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1", Meta: terminalMeta},
 	}
 	select {
 	case envelope := <-mux.Events():
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "line\n" {
 			t.Fatalf("projected terminal output = %#v", envelope)
 		}
@@ -78,12 +78,12 @@ func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1",
-			Meta: metautil.WithTerminalExit(nil, "command-1", &exitCode, nil),
+			Meta: acpmeta.WithTerminalExit(nil, "command-1", &exitCode, nil),
 		},
 	}
 	select {
 	case envelope := <-mux.Events():
-		exit, ok := metautil.TerminalExit(eventstream.UpdateMeta(envelope.Update))
+		exit, ok := acpmeta.ReadTerminalExit(eventstream.UpdateMeta(envelope.Update))
 		if !ok || exit.ExitCode == nil || *exit.ExitCode != exitCode {
 			t.Fatalf("projected terminal exit = %#v", envelope)
 		}
@@ -127,9 +127,7 @@ func TestACPTaskStreamMuxSilencesRecoverableSubagentGap(t *testing.T) {
 				"handle": "maia", "state": "running", "target_kind": "subagent",
 				"parent_call": "spawn-1", "parent_tool": "Spawn",
 			},
-			Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-				metautil.RuntimeToolName: "Spawn",
-			}),
+			Meta: acpmeta.WithToolName(nil, "Spawn"),
 		},
 	})
 	select {
@@ -267,12 +265,12 @@ func TestACPTaskStreamMuxDetachedDeliveryOutlivesParentPrompt(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1",
-			Meta: metautil.WithTerminalOutput(nil, "command-1", "after parent\n"),
+			Meta: acpmeta.WithTerminalOutput(nil, "command-1", "after parent\n"),
 		},
 	}
 	select {
 	case notification := <-callbacks.updates:
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(notification.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(notification.Update))
 		if !ok || output.Data != "after parent\n" {
 			t.Fatalf("detached Task delivery = %#v", notification)
 		}
@@ -284,12 +282,12 @@ func TestACPTaskStreamMuxDetachedDeliveryOutlivesParentPrompt(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1",
-			Meta: metautil.WithTerminalExit(nil, "command-1", &exitCode, nil),
+			Meta: acpmeta.WithTerminalExit(nil, "command-1", &exitCode, nil),
 		},
 	}
 	select {
 	case notification := <-callbacks.updates:
-		exit, ok := metautil.TerminalExit(eventstream.UpdateMeta(notification.Update))
+		exit, ok := acpmeta.ReadTerminalExit(eventstream.UpdateMeta(notification.Update))
 		if !ok || exit.ExitCode == nil || *exit.ExitCode != exitCode {
 			t.Fatalf("detached terminal exit = %#v", notification)
 		}
@@ -444,7 +442,7 @@ func TestACPTaskStreamMuxProjectsControlTaskRecordThroughACPAdapter(t *testing.T
 
 	select {
 	case envelope := <-mux.Events():
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "from control\n" || envelope.Cursor != "cursor-1" {
 			t.Fatalf("Control→ACP→mux terminal output = %#v", envelope)
 		}
@@ -635,7 +633,7 @@ func TestACPTaskStreamMuxLaterAnchorAttachesAfterRecoveryWindow(t *testing.T) {
 	sub.events <- acpMuxCommandOutputEnvelope("cursor-late", "late attach\n")
 	select {
 	case envelope := <-mux.Events():
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "late attach\n" {
 			t.Fatalf("later anchor output = %#v", envelope)
 		}
@@ -732,7 +730,7 @@ func TestACPTaskStreamMuxRetryGenerationCannotSignalLaterAttachmentBoundary(t *t
 	sub.events <- acpMuxCommandOutputEnvelope("cursor-later", "later generation\n")
 	select {
 	case envelope := <-mux.Events():
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "later generation\n" {
 			t.Fatalf("later generation output = %#v", envelope)
 		}
@@ -816,7 +814,7 @@ func TestACPTaskStreamAnchorUsesTypedToolStatusForParentTerminal(t *testing.T) {
 	anchor, ok := acpTaskStreamAnchorFromEnvelope(rawTerminal)
 	if !ok {
 		meta := eventstream.UpdateMeta(rawTerminal.Update)
-		info, hasInfo := metautil.TerminalInfo(meta)
+		info, hasInfo := acpmeta.ReadTerminalInfo(meta)
 		update := rawTerminal.Update.(eventstream.ToolCallUpdate)
 		output, _ := update.RawOutput.(map[string]any)
 		t.Fatalf("raw-output anchor was not recognized: target_kind=%q terminal=%#v/%t meta=%#v output=%#v",
@@ -854,9 +852,7 @@ func TestACPTaskStreamAnchorDoesNotTrustRuntimeToolName(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-				metautil.RuntimeToolName: tc.toolName,
-			})
+			meta := acpmeta.WithToolName(nil, tc.toolName)
 			envelope := eventstream.Envelope{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 				Update: eventstream.ToolCallUpdate{

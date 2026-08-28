@@ -8,7 +8,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 )
 
@@ -59,11 +58,10 @@ func TestRegressionACPProjectorGoldenTerminalOutput(t *testing.T) {
 	if update.Content[0].Content != nil {
 		t.Fatalf("terminal anchor content = %#v, want empty", update.Content[0].Content)
 	}
-	info, ok := metautil.TerminalInfo(update.Meta)
-	if !ok || info.TerminalID != "call-ls" {
+	if terminalID := evalTerminalID(update.Meta, "terminal_info"); terminalID != "call-ls" {
 		t.Fatalf("terminal_info = %#v, want call-ls", update.Meta)
 	}
-	output, ok := metautil.TerminalOutput(update.Meta)
+	output, ok := evalTerminalOutput(update.Meta)
 	if !ok || output.TerminalID != "call-ls" || output.Data != "total 0\n" {
 		t.Fatalf("terminal_output = %#v, want total output for call-ls", update.Meta)
 	}

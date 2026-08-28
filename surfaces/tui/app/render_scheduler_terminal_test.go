@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestRenderSchedulerMergesTerminalContent(t *testing.T) {
@@ -77,7 +76,7 @@ func terminalMetaStreamEnvelope(callID string, text string) eventstream.Envelope
 			Title:         stringPtr("RunCommand"),
 			Kind:          stringPtr(eventstream.ToolKindExecute),
 			Status:        stringPtr(eventstream.ToolStatusInProgress),
-			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "terminal-1", text),
+			Meta:          testMeta.WithTerminalOutput(acpToolNameMeta("RunCommand"), "terminal-1", text),
 		},
 	}
 }
@@ -95,7 +94,7 @@ func genericTerminalStreamEnvelope(callID string, text string) eventstream.Envel
 			Title:         stringPtr("shell output"),
 			Kind:          stringPtr(eventstream.ToolKindExecute),
 			Status:        stringPtr(eventstream.ToolStatusInProgress),
-			Meta:          metautil.WithTerminalOutput(nil, "terminal-1", text),
+			Meta:          testMeta.WithTerminalOutput(nil, "terminal-1", text),
 		},
 	}
 }

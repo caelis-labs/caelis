@@ -13,7 +13,6 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestPublicClientLifecycleAndLoadE2E(t *testing.T) {
@@ -126,7 +125,7 @@ func TestPublicClientPermissionAndTerminalProjectionE2E(t *testing.T) {
 					displayTerminalDone = true
 					mu.Unlock()
 				}
-				if output, ok := metautil.TerminalOutput(call.Meta); ok &&
+				if output, ok := evalTerminalOutput(call.Meta); ok &&
 					output.TerminalID == "command-approval-1" &&
 					strings.Contains(output.Data, "child approval ok") {
 					mu.Lock()

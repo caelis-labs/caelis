@@ -3,7 +3,8 @@ package client
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
+	"github.com/caelis-labs/caelis/internal/jsonvalue"
 )
 
 const (
@@ -88,31 +89,31 @@ func normalizeInboundToolMeta(meta map[string]any) map[string]any {
 // the external-Agent ingress boundary. Provider-specific keys must not flow
 // into canonical projection, replay, or Surface deduplication paths.
 func normalizeInboundTerminalOutput(meta map[string]any) map[string]any {
-	out := metautil.CloneMap(meta)
-	if output, ok := metautil.TerminalOutput(out); ok {
-		delete(out, metautil.TerminalOutputDeltaKey)
-		return metautil.WithTerminalOutput(out, output.TerminalID, output.Data)
+	out := jsonvalue.CloneMap(meta)
+	if output, ok := acpmeta.ReadTerminalOutput(out); ok {
+		delete(out, acpmeta.TerminalOutputDeltaKey)
+		return acpmeta.WithTerminalOutput(out, output.TerminalID, output.Data)
 	}
 	output, ok := inboundTerminalOutputAlias(out)
-	delete(out, metautil.TerminalOutputDeltaKey)
+	delete(out, acpmeta.TerminalOutputDeltaKey)
 	if !ok {
 		if len(out) == 0 {
 			return nil
 		}
 		return out
 	}
-	return metautil.WithTerminalOutput(out, output.TerminalID, output.Data)
+	return acpmeta.WithTerminalOutput(out, output.TerminalID, output.Data)
 }
 
-func inboundTerminalOutputAlias(meta map[string]any) (metautil.TerminalOutputMeta, bool) {
-	values, _ := meta[metautil.TerminalOutputDeltaKey].(map[string]any)
+func inboundTerminalOutputAlias(meta map[string]any) (acpmeta.TerminalOutput, bool) {
+	values, _ := meta[acpmeta.TerminalOutputDeltaKey].(map[string]any)
 	terminalID, _ := values["terminal_id"].(string)
 	data, _ := values["data"].(string)
 	terminalID = strings.TrimSpace(terminalID)
 	if terminalID == "" || data == "" {
-		return metautil.TerminalOutputMeta{}, false
+		return acpmeta.TerminalOutput{}, false
 	}
-	return metautil.TerminalOutputMeta{TerminalID: terminalID, Data: data}, true
+	return acpmeta.TerminalOutput{TerminalID: terminalID, Data: data}, true
 }
 
 func providerToolMeta(meta map[string]any) map[string]any {

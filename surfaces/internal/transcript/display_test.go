@@ -1,10 +1,6 @@
 package transcript
 
-import (
-	"testing"
-
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-)
+import "testing"
 
 func TestApprovalReviewDisplayPartsParsesFallbackText(t *testing.T) {
 	t.Parallel()
@@ -150,7 +146,7 @@ func TestSuppressToolResultOutput(t *testing.T) {
 func TestTerminalToolOutputTextUsesRuntimeTerminalOutput(t *testing.T) {
 	t.Parallel()
 
-	meta := metautil.WithTerminalOutput(acpToolNameMetaForDisplayTest("RunCommand"), "call-1", "\n")
+	meta := WithTerminalOutput(acpToolNameMetaForDisplayTest("RunCommand"), "call-1", "\n")
 	output := TerminalToolOutputText(ToolOutputFallbackInput{
 		ToolName:  "RunCommand",
 		ToolKind:  "execute",
@@ -208,7 +204,7 @@ func TestTerminalToolOutputTextPreservesRawWhitespace(t *testing.T) {
 	output := TerminalToolOutputText(ToolOutputFallbackInput{
 		ToolName:  "RunCommand",
 		ToolKind:  "execute",
-		Meta:      metautil.WithTerminalInfo(nil, "call-1"),
+		Meta:      terminalInfoMetaForDisplayTest("call-1"),
 		Status:    ToolStatusRunning,
 		RawOutput: map[string]any{"latest_output": "\n  still running\n"},
 	})
@@ -278,7 +274,7 @@ func TestTerminalFallbacksForNoOutputAndExitCode(t *testing.T) {
 	completed := ToolOutputFallbackInput{
 		ToolName: "RunCommand",
 		ToolKind: "execute",
-		Meta:     metautil.WithTerminalInfo(nil, "call-1"),
+		Meta:     terminalInfoMetaForDisplayTest("call-1"),
 		Status:   ToolStatusCompleted,
 	}
 	if !TerminalNoOutputPlaceholder(completed) {

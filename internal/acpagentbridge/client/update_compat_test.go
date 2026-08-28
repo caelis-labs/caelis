@@ -5,27 +5,28 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
+	"github.com/caelis-labs/caelis/internal/jsonvalue"
 )
 
 func TestNormalizeInboundUpdateConsumesTerminalOutputCompatibilityAlias(t *testing.T) {
 	t.Parallel()
 
 	meta := map[string]any{
-		metautil.TerminalOutputDeltaKey: map[string]any{
+		acpmeta.TerminalOutputDeltaKey: map[string]any{
 			"terminal_id": "command-1",
 			"data":        "provider output\n",
 		},
 	}
 	normalized := NormalizeInboundUpdate(ContentChunk{Meta: meta}).(ContentChunk)
-	output, ok := metautil.TerminalOutput(normalized.Meta)
+	output, ok := acpmeta.ReadTerminalOutput(normalized.Meta)
 	if !ok || output.TerminalID != "command-1" || output.Data != "provider output\n" {
 		t.Fatalf("normalized terminal output = %#v, %v; want codex-acp compatibility output", output, ok)
 	}
-	if _, ok := normalized.Meta[metautil.TerminalOutputDeltaKey]; ok {
+	if _, ok := normalized.Meta[acpmeta.TerminalOutputDeltaKey]; ok {
 		t.Fatalf("NormalizeInboundUpdate() retained provider alias: %#v", normalized.Meta)
 	}
-	if _, ok := meta[metautil.TerminalOutputKey]; ok {
+	if _, ok := meta[acpmeta.TerminalOutputKey]; ok {
 		t.Fatalf("NormalizeInboundUpdate() mutated provider metadata: %#v", meta)
 	}
 }
@@ -34,17 +35,17 @@ func TestNormalizeInboundUpdateDropsMalformedTerminalOutputCompatibilityAlias(t 
 	t.Parallel()
 
 	meta := map[string]any{
-		metautil.TerminalOutputDeltaKey: map[string]any{"data": "missing terminal id\n"},
-		"kept":                          true,
+		acpmeta.TerminalOutputDeltaKey: map[string]any{"data": "missing terminal id\n"},
+		"kept":                         true,
 	}
 	normalized := NormalizeInboundUpdate(ContentChunk{Meta: meta}).(ContentChunk)
-	if _, ok := normalized.Meta[metautil.TerminalOutputDeltaKey]; ok {
+	if _, ok := normalized.Meta[acpmeta.TerminalOutputDeltaKey]; ok {
 		t.Fatalf("NormalizeInboundUpdate() retained malformed provider alias: %#v", normalized.Meta)
 	}
-	if _, ok := metautil.TerminalOutput(normalized.Meta); ok || normalized.Meta["kept"] != true {
+	if _, ok := acpmeta.ReadTerminalOutput(normalized.Meta); ok || normalized.Meta["kept"] != true {
 		t.Fatalf("NormalizeInboundUpdate() metadata = %#v, want unrelated metadata without terminal output", normalized.Meta)
 	}
-	if _, ok := meta[metautil.TerminalOutputDeltaKey]; !ok {
+	if _, ok := meta[acpmeta.TerminalOutputDeltaKey]; !ok {
 		t.Fatalf("NormalizeInboundUpdate() mutated provider metadata: %#v", meta)
 	}
 }
@@ -53,18 +54,18 @@ func TestNormalizeInboundUpdateCanonicalTerminalOutputWinsOverCompatibilityAlias
 	t.Parallel()
 
 	normalized := NormalizeInboundUpdate(ContentChunk{Meta: map[string]any{
-		metautil.TerminalOutputKey: map[string]any{
+		acpmeta.TerminalOutputKey: map[string]any{
 			"terminal_id": "command-1", "data": "canonical output\n",
 		},
-		metautil.TerminalOutputDeltaKey: map[string]any{
+		acpmeta.TerminalOutputDeltaKey: map[string]any{
 			"terminal_id": "command-1", "data": "stale provider output\n",
 		},
 	}}).(ContentChunk)
-	output, ok := metautil.TerminalOutput(normalized.Meta)
+	output, ok := acpmeta.ReadTerminalOutput(normalized.Meta)
 	if !ok || output.Data != "canonical output\n" {
 		t.Fatalf("normalized terminal output = %#v, %v; want canonical output", output, ok)
 	}
-	if _, ok := normalized.Meta[metautil.TerminalOutputDeltaKey]; ok {
+	if _, ok := normalized.Meta[acpmeta.TerminalOutputDeltaKey]; ok {
 		t.Fatalf("NormalizeInboundUpdate() retained provider alias: %#v", normalized.Meta)
 	}
 }
@@ -137,7 +138,7 @@ func TestNormalizeInboundUpdateRestoresGrokStandardKindWithoutForgingToolIdentit
 			if normalized.Kind != tt.wantKind {
 				t.Fatalf("normalized kind = %q, want %q", normalized.Kind, tt.wantKind)
 			}
-			if got := metautil.String(normalized.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "" {
+			if got := acpmeta.ToolName(normalized.Meta); got != "" {
 				t.Fatalf("runtime exact tool name = %q, want no identity forged from provider metadata", got)
 			}
 			if !reflect.DeepEqual(normalized.Meta[xAIToolMetaKey], tt.provider) {
@@ -251,7 +252,7 @@ func TestNormalizeInboundUpdateGrokListIsIdempotentForExplicitUpdateKind(t *test
 	if explorationVerb(first.Meta) != "List" || explorationVerb(second.Meta) != "List" {
 		t.Fatalf("normalized verbs = %q then %q, want List", explorationVerb(first.Meta), explorationVerb(second.Meta))
 	}
-	if got := metautil.String(second.Meta, metautil.Root, "display", "unrelated"); got != "kept" {
+	if got := jsonvalue.StringAt(second.Meta, "caelis", "display", "unrelated"); got != "kept" {
 		t.Fatalf("unrelated display metadata = %q, want kept", got)
 	}
 	if !reflect.DeepEqual(second.RawInput, input) || !reflect.DeepEqual(second.Meta[xAIToolMetaKey], meta[xAIToolMetaKey]) {
@@ -341,5 +342,5 @@ func grokToolMeta(name, kind, label string, readOnly bool) map[string]any {
 }
 
 func explorationVerb(meta map[string]any) string {
-	return metautil.String(meta, metautil.Root, "display", "exploration_verb")
+	return jsonvalue.StringAt(meta, "caelis", "display", "exploration_verb")
 }

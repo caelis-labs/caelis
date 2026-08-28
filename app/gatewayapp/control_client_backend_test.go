@@ -28,7 +28,6 @@ import (
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestClassifyControlBackendErrorTreatsFenceConflictAsConflict(t *testing.T) {
@@ -286,14 +285,14 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 			Status:        &status,
 		},
 		Meta: map[string]any{
-			metautil.Root: map[string]any{
-				metautil.Runtime: map[string]any{
-					metautil.RuntimeTool: map[string]any{
-						metautil.RuntimeToolName: "RunCommand",
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"tool": map[string]any{
+						"name": "RunCommand",
 					},
-					metautil.RuntimeTask: map[string]any{
-						"task_id":                      "task-1",
-						metautil.RuntimeTaskTerminalID: "terminal-1",
+					"task": map[string]any{
+						"task_id":     "task-1",
+						"terminal_id": "terminal-1",
 					},
 				},
 			},

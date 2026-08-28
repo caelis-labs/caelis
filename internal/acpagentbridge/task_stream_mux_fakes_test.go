@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
 func acpMuxCommandAnchor(handle string) eventstream.Envelope {
@@ -27,10 +27,8 @@ func acpMuxCommandAnchor(handle string) eventstream.Envelope {
 }
 
 func acpMuxCommandMeta() map[string]any {
-	meta := metautil.WithTerminalInfo(nil, "command-1")
-	return metautil.WithRuntimeSection(meta, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "RunCommand",
-	})
+	meta := acpmeta.WithTerminalInfo(nil, "command-1")
+	return acpmeta.WithToolName(meta, "RunCommand")
 }
 
 func acpMuxTerminalCommandAnchor(handle string) eventstream.Envelope {
@@ -50,7 +48,7 @@ func acpMuxCommandOutputEnvelope(cursor string, output string) eventstream.Envel
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "command-1",
-			Meta:          metautil.WithTerminalOutput(nil, "command-1", output),
+			Meta:          acpmeta.WithTerminalOutput(nil, "command-1", output),
 		},
 	}
 }
@@ -64,9 +62,7 @@ func acpMuxSubagentAnchor(handle string) eventstream.Envelope {
 				"handle": handle, "state": "running", "target_kind": "subagent",
 				"parent_call": "spawn-1", "parent_tool": "Spawn",
 			},
-			Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-				metautil.RuntimeToolName: "Spawn",
-			}),
+			Meta: acpmeta.WithToolName(nil, "Spawn"),
 		},
 	}
 }

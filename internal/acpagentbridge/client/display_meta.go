@@ -1,6 +1,6 @@
 package client
 
-import "github.com/caelis-labs/caelis/protocol/acp/metautil"
+import "github.com/caelis-labs/caelis/internal/jsonvalue"
 
 const (
 	displayMetaRootKey        = "caelis"
@@ -22,7 +22,7 @@ func withoutDisplayExplorationVerb(meta map[string]any) map[string]any {
 // Host-private external ACP compatibility adapter.
 func WithDisplayToolInput(meta map[string]any, input map[string]any) map[string]any {
 	if len(input) == 0 {
-		return metautil.CloneMap(meta)
+		return jsonvalue.CloneMap(meta)
 	}
 	return withDisplayMetaValues(meta, map[string]any{displayMetaToolInputKey: input})
 }
@@ -35,9 +35,9 @@ func WithoutDisplayToolInput(meta map[string]any) map[string]any {
 
 func withDisplayMetaValues(meta map[string]any, values map[string]any) map[string]any {
 	if len(values) == 0 {
-		return metautil.CloneMap(meta)
+		return jsonvalue.CloneMap(meta)
 	}
-	return metautil.Merge(meta, map[string]any{
+	return jsonvalue.MergeMap(meta, map[string]any{
 		displayMetaRootKey: map[string]any{
 			displayMetaVersionKey: 1,
 			displayMetaSectionKey: values,
@@ -46,12 +46,12 @@ func withDisplayMetaValues(meta map[string]any, values map[string]any) map[strin
 }
 
 func withoutDisplayMetaKeys(meta map[string]any, keys ...string) map[string]any {
-	out := metautil.CloneMap(meta)
+	out := jsonvalue.CloneMap(meta)
 	if len(out) == 0 || len(keys) == 0 {
 		return out
 	}
-	caelis := metautil.CloneMap(displayMetaMapAt(out, displayMetaRootKey))
-	display := metautil.CloneMap(displayMetaMapAt(caelis, displayMetaSectionKey))
+	caelis := jsonvalue.CloneMap(displayMetaMapAt(out, displayMetaRootKey))
+	display := jsonvalue.CloneMap(displayMetaMapAt(caelis, displayMetaSectionKey))
 	if len(display) == 0 {
 		return out
 	}

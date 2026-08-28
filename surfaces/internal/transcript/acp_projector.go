@@ -632,34 +632,6 @@ func MetaInt(meta map[string]any, path ...string) int {
 	}
 }
 
-func MergeMeta(base map[string]any, overlay map[string]any) map[string]any {
-	if len(base) == 0 {
-		return CloneAnyMap(overlay)
-	}
-	out := CloneAnyMap(base)
-	for key, value := range overlay {
-		if baseMap, ok := out[key].(map[string]any); ok {
-			if overlayMap, ok := value.(map[string]any); ok {
-				out[key] = MergeMeta(baseMap, overlayMap)
-				continue
-			}
-		}
-		out[key] = value
-	}
-	return out
-}
-
-func CloneAnyMap(values map[string]any) map[string]any {
-	if values == nil {
-		return nil
-	}
-	out := make(map[string]any, len(values))
-	for key, value := range values {
-		out[key] = value
-	}
-	return out
-}
-
 func ProtocolTextContent(raw any) string {
 	switch typed := raw.(type) {
 	case nil:

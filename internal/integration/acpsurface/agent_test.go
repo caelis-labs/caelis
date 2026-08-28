@@ -25,7 +25,6 @@ import (
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 	"github.com/caelis-labs/caelis/internal/testenv"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func textPromptRequest(sessionID string, text string) acpsdk.PromptRequest {
@@ -178,7 +177,7 @@ func TestNewFromClientsRunCommandPublishesTerminalBytesOnce(t *testing.T) {
 				meta = update.Meta
 			}
 		}
-		if delta, _ := metautil.RuntimeSection(meta, metautil.RuntimeTask)[metautil.RuntimeOutputDelta].(string); delta != "" {
+		if delta, _ := integrationRuntimeSection(meta, "task")["output_delta"].(string); delta != "" {
 			t.Fatalf("RunCommand live final exposed a second terminal byte source %q; notification = %#v", delta, notification)
 		}
 	}
@@ -212,8 +211,8 @@ func acpTerminalOutputText(notifications []eventstream.SessionNotification, call
 				meta = update.Meta
 			}
 		}
-		if output, ok := metautil.TerminalOutput(meta); ok {
-			out.WriteString(output.Data)
+		if output, ok := integrationTerminalOutput(meta); ok {
+			out.WriteString(output)
 		}
 	}
 	return out.String()
@@ -739,4 +738,18 @@ func (c *recordingCallbacks) firstAgentMessage() string {
 
 func testStringPointer(value string) *string {
 	return &value
+}
+
+func integrationRuntimeSection(meta map[string]any, section string) map[string]any {
+	caelisMeta, _ := meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelisMeta["runtime"].(map[string]any)
+	values, _ := runtimeMeta[section].(map[string]any)
+	return values
+}
+
+func integrationTerminalOutput(meta map[string]any) (string, bool) {
+	values, _ := meta["terminal_output"].(map[string]any)
+	terminalID, _ := values["terminal_id"].(string)
+	data, _ := values["data"].(string)
+	return data, terminalID != "" && data != ""
 }

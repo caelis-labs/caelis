@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 // freshReplayContentKey identifies one append-only content stream. It contains
@@ -269,20 +268,20 @@ func terminalMaterializationComplete(envelope eventstream.Envelope) bool {
 
 func freshReplayTerminalMaterialization(envelope eventstream.Envelope) (terminalID string, output string, ok bool) {
 	meta := freshReplayTerminalMeta(envelope)
-	terminalID = metautil.String(
+	terminalID = eventmeta.String(
 		meta,
-		metautil.Root,
-		metautil.Runtime,
-		metautil.RuntimeTask,
-		metautil.RuntimeTaskTerminalID,
+		eventmeta.Root,
+		eventmeta.Runtime,
+		eventmeta.RuntimeTask,
+		eventmeta.RuntimeTaskTerminalID,
 	)
-	if terminalOutput, found := metautil.TerminalOutput(meta); found {
+	if terminalOutput, found := eventmeta.TerminalOutput(meta); found {
 		if terminalID == "" {
 			terminalID = strings.TrimSpace(terminalOutput.TerminalID)
 		}
 		return terminalID, terminalOutput.Data, true
 	}
-	output, ok = metautil.RuntimeSection(meta, metautil.RuntimeTask)[metautil.RuntimeOutputDelta].(string)
+	output, ok = eventmeta.RuntimeSection(meta, eventmeta.RuntimeTask)[eventmeta.RuntimeOutputDelta].(string)
 	return terminalID, output, ok
 }
 
@@ -294,7 +293,7 @@ func freshReplayTerminalMeta(envelope eventstream.Envelope) map[string]any {
 	case eventstream.ToolCallUpdate:
 		updateMeta = update.Meta
 	}
-	return metautil.Merge(envelope.Meta, updateMeta)
+	return eventmeta.Merge(envelope.Meta, updateMeta)
 }
 
 func freshReplayTerminalOwner(envelope eventstream.Envelope) *eventstream.ParentToolRelation {
@@ -314,7 +313,7 @@ func freshReplayTerminalOwner(envelope eventstream.Envelope) *eventstream.Parent
 		return nil
 	}
 	meta := freshReplayTerminalMeta(envelope)
-	terminalInfo, hasTerminalInfo := metautil.TerminalInfo(meta)
+	terminalInfo, hasTerminalInfo := eventmeta.TerminalInfo(meta)
 	if !strings.EqualFold(display.ToolTaskTargetKind(input, output, meta), string(task.KindCommand)) ||
 		!hasTerminalInfo || strings.TrimSpace(terminalInfo.TerminalID) != callID {
 		return nil
@@ -323,22 +322,22 @@ func freshReplayTerminalOwner(envelope eventstream.Envelope) *eventstream.Parent
 }
 
 func terminalMaterializationStartsAtZero(meta map[string]any, data string) bool {
-	start, hasStart := metautil.Int64(
+	start, hasStart := eventmeta.Int64(
 		meta,
-		metautil.Root,
-		metautil.Runtime,
-		metautil.RuntimeTask,
-		metautil.RuntimeOutputStart,
+		eventmeta.Root,
+		eventmeta.Runtime,
+		eventmeta.RuntimeTask,
+		eventmeta.RuntimeOutputStart,
 	)
 	if hasStart && start != 0 {
 		return false
 	}
-	cursor, hasCursor := metautil.Int64(
+	cursor, hasCursor := eventmeta.Int64(
 		meta,
-		metautil.Root,
-		metautil.Runtime,
-		metautil.RuntimeTask,
-		metautil.RuntimeOutputCursor,
+		eventmeta.Root,
+		eventmeta.Runtime,
+		eventmeta.RuntimeTask,
+		eventmeta.RuntimeOutputCursor,
 	)
 	return !hasCursor || cursor == int64(len([]byte(data)))
 }
@@ -420,6 +419,6 @@ func freshReplayEnvelopeToolCallID(envelope eventstream.Envelope) string {
 }
 
 func withoutFreshReplayTerminalContent(meta map[string]any) map[string]any {
-	meta = metautil.WithoutTerminalOutput(meta)
-	return eventmeta.WithoutRuntimeSectionKeys(meta, metautil.RuntimeTask, metautil.RuntimeOutputDelta)
+	meta = eventmeta.WithoutTerminalOutput(meta)
+	return eventmeta.WithoutRuntimeSectionKeys(meta, eventmeta.RuntimeTask, eventmeta.RuntimeOutputDelta)
 }

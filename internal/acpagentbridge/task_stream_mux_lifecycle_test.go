@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
 func TestACPTaskStreamMuxDoesNotTreatChildLifecycleAsObservationControl(t *testing.T) {
@@ -129,7 +129,7 @@ func TestACPTaskStreamMuxResumesActiveStreamFromLastCursorAndFiltersGap(t *testi
 	first.events <- acpMuxCommandOutputEnvelope("cursor-1", "before disconnect\n")
 	select {
 	case envelope := <-mux.Events():
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "before disconnect\n" {
 			t.Fatalf("initial Task output = %#v", envelope)
 		}
@@ -155,7 +155,7 @@ func TestACPTaskStreamMuxResumesActiveStreamFromLastCursorAndFiltersGap(t *testi
 	resumed.events <- acpMuxCommandOutputEnvelope("cursor-2", "after resume\n")
 	select {
 	case envelope := <-mux.Events():
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "after resume\n" {
 			t.Fatalf("post-resume envelope = %#v, want typed gap filtered before output", envelope)
 		}
@@ -183,7 +183,7 @@ func TestACPTaskStreamMuxResumesAfterUnexpectedEOFFromLastAcceptedCursor(t *test
 	first.events <- acpMuxCommandOutputEnvelope("cursor-accepted", "accepted\n")
 	select {
 	case envelope := <-mux.Events():
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "accepted\n" {
 			t.Fatalf("accepted Task output = %#v", envelope)
 		}
@@ -204,7 +204,7 @@ func TestACPTaskStreamMuxResumesAfterUnexpectedEOFFromLastAcceptedCursor(t *test
 	resumed.events <- acpMuxCommandOutputEnvelope("cursor-after", "after abrupt disconnect\n")
 	select {
 	case envelope := <-mux.Events():
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "after abrupt disconnect\n" {
 			t.Fatalf("post-abrupt-disconnect output = %#v", envelope)
 		}
@@ -229,7 +229,7 @@ func TestACPTaskStreamMuxResumesAfterSlowConsumerFromLastAcceptedCursor(t *testi
 	first.events <- acpMuxCommandOutputEnvelope("cursor-accepted", "accepted\n")
 	select {
 	case envelope := <-mux.Events():
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "accepted\n" {
 			t.Fatalf("accepted Task output = %#v", envelope)
 		}
@@ -250,7 +250,7 @@ func TestACPTaskStreamMuxResumesAfterSlowConsumerFromLastAcceptedCursor(t *testi
 	resumed.events <- acpMuxCommandOutputEnvelope("cursor-after", "after slow consumer\n")
 	select {
 	case envelope := <-mux.Events():
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "after slow consumer\n" {
 			t.Fatalf("post-slow-consumer output = %#v", envelope)
 		}
@@ -284,7 +284,7 @@ func TestACPTaskStreamMuxGivesEachInterruptionAFreshResumeBudget(t *testing.T) {
 		subscriptions[index].events <- acpMuxCommandOutputEnvelope(cursor, output)
 		select {
 		case envelope := <-mux.Events():
-			terminalOutput, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+			terminalOutput, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 			if !ok || terminalOutput.Data != output {
 				t.Fatalf("interruption %d output = %#v", index+1, envelope)
 			}
@@ -301,7 +301,7 @@ func TestACPTaskStreamMuxGivesEachInterruptionAFreshResumeBudget(t *testing.T) {
 	subscriptions[interruptions].events <- acpMuxCommandOutputEnvelope("cursor-final", "after reconnects\n")
 	select {
 	case envelope := <-mux.Events():
-		terminalOutput, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		terminalOutput, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || terminalOutput.Data != "after reconnects\n" {
 			t.Fatalf("final reconnected output = %#v", envelope)
 		}
@@ -426,7 +426,7 @@ func TestACPTaskStreamMuxSealPreservesActiveResumeToTerminal(t *testing.T) {
 	first.events <- acpMuxCommandOutputEnvelope("cursor-before-seal", "before seal\n")
 	select {
 	case envelope := <-mux.Events():
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "before seal\n" {
 			t.Fatalf("pre-Seal Task output = %#v", envelope)
 		}
@@ -449,12 +449,12 @@ func TestACPTaskStreamMuxSealPreservesActiveResumeToTerminal(t *testing.T) {
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "command-1",
-			Meta:          metautil.WithTerminalExit(nil, "command-1", &exitCode, nil),
+			Meta:          acpmeta.WithTerminalExit(nil, "command-1", &exitCode, nil),
 		},
 	}
 	select {
 	case envelope := <-mux.Events():
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "after seal\n" {
 			t.Fatalf("post-Seal resumed output = %#v", envelope)
 		}
@@ -463,7 +463,7 @@ func TestACPTaskStreamMuxSealPreservesActiveResumeToTerminal(t *testing.T) {
 	}
 	select {
 	case envelope := <-mux.Events():
-		exit, ok := metautil.TerminalExit(eventstream.UpdateMeta(envelope.Update))
+		exit, ok := acpmeta.ReadTerminalExit(eventstream.UpdateMeta(envelope.Update))
 		if !ok || exit.TerminalID != "command-1" || exit.ExitCode == nil || *exit.ExitCode != 0 {
 			t.Fatalf("post-Seal terminal delivery = %#v", envelope)
 		}
@@ -732,7 +732,7 @@ func TestACPTaskStreamMuxSealKeepsInFlightResumeAlive(t *testing.T) {
 	resumed.events <- acpMuxCommandOutputEnvelope("cursor-after-seal", "after seal\n")
 	select {
 	case envelope := <-mux.Events():
-		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "after seal\n" {
 			t.Fatalf("resumed output after Seal = %#v", envelope)
 		}

@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 )
 
 // ProjectEvent converts one canonical event into ACP-compatible update payloads.
@@ -285,8 +285,8 @@ func contentChunkForEvent(event *session.Event, kind string, text string) events
 		}
 		if message != nil {
 			if citations := message.TextContentCitations(); len(citations) > 0 {
-				chunk.Meta = metautil.Merge(chunk.Meta, map[string]any{
-					metautil.Root: map[string]any{
+				chunk.Meta = eventmeta.Merge(chunk.Meta, map[string]any{
+					eventmeta.Root: map[string]any{
 						"version": 1,
 						"message": map[string]any{
 							"citations": citationMetaPayload(citations),
@@ -698,7 +698,7 @@ func reasoningForAssistantEvent(event *session.Event) string {
 			return reasoning
 		}
 	}
-	if reasoning := metautil.String(event.Meta, "caelis", "runtime", "replay", "reasoning_text"); reasoning != "" {
+	if reasoning := eventmeta.String(event.Meta, "caelis", "runtime", "replay", "reasoning_text"); reasoning != "" {
 		return reasoning
 	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
@@ -780,7 +780,7 @@ func stringPtr(value string) *string {
 }
 
 func cloneAnyMap(values map[string]any) map[string]any {
-	return metautil.CloneMap(values)
+	return eventmeta.CloneMap(values)
 }
 
 func cloneProtocolUpdateForProjection(update *session.ProtocolUpdate) *session.ProtocolUpdate {

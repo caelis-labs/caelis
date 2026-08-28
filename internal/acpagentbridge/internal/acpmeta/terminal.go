@@ -1,8 +1,12 @@
-package metautil
+// Package acpmeta owns Caelis metadata compatibility at the external ACP Host
+// boundary. It is private to the ACP Agent bridge and is not a product protocol.
+package acpmeta
 
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/caelis-labs/caelis/internal/jsonvalue"
 )
 
 const (
@@ -12,16 +16,16 @@ const (
 	TerminalExitKey        = "terminal_exit"
 )
 
-type TerminalInfoMeta struct {
+type TerminalInfo struct {
 	TerminalID string
 }
 
-type TerminalOutputMeta struct {
+type TerminalOutput struct {
 	TerminalID string
 	Data       string
 }
 
-type TerminalExitMeta struct {
+type TerminalExit struct {
 	TerminalID string
 	ExitCode   *int
 	Signal     *string
@@ -30,29 +34,24 @@ type TerminalExitMeta struct {
 func WithTerminalInfo(meta map[string]any, terminalID string) map[string]any {
 	terminalID = strings.TrimSpace(terminalID)
 	if terminalID == "" {
-		return CloneMap(meta)
+		return jsonvalue.CloneMap(meta)
 	}
-	return withTopLevelTerminalMeta(meta, TerminalInfoKey, map[string]any{
-		"terminal_id": terminalID,
-	})
+	return withTerminalMeta(meta, TerminalInfoKey, map[string]any{"terminal_id": terminalID})
 }
 
 func WithTerminalOutput(meta map[string]any, terminalID string, data string) map[string]any {
 	terminalID = strings.TrimSpace(terminalID)
 	if terminalID == "" || data == "" {
-		return CloneMap(meta)
+		return jsonvalue.CloneMap(meta)
 	}
-	return withTopLevelTerminalMeta(WithoutTerminalOutput(meta), TerminalOutputKey, map[string]any{
+	return withTerminalMeta(WithoutTerminalOutput(meta), TerminalOutputKey, map[string]any{
 		"terminal_id": terminalID,
 		"data":        data,
 	})
 }
 
-// WithoutTerminalOutput removes canonical terminal output and every maintained
-// provider alias so a suppressed payload cannot reappear through fallback
-// lookup after another layer has removed the canonical key.
 func WithoutTerminalOutput(meta map[string]any) map[string]any {
-	out := CloneMap(meta)
+	out := jsonvalue.CloneMap(meta)
 	delete(out, TerminalOutputKey)
 	delete(out, TerminalOutputDeltaKey)
 	if len(out) == 0 {
@@ -64,52 +63,44 @@ func WithoutTerminalOutput(meta map[string]any) map[string]any {
 func WithTerminalExit(meta map[string]any, terminalID string, exitCode *int, signal *string) map[string]any {
 	terminalID = strings.TrimSpace(terminalID)
 	if terminalID == "" {
-		return CloneMap(meta)
+		return jsonvalue.CloneMap(meta)
 	}
-	values := map[string]any{
-		"terminal_id": terminalID,
-		"signal":      nil,
-	}
+	values := map[string]any{"terminal_id": terminalID, "signal": nil}
 	if exitCode != nil {
-		code := *exitCode
-		values["exit_code"] = code
+		values["exit_code"] = *exitCode
 	}
 	if signal != nil {
 		values["signal"] = *signal
 	}
-	return withTopLevelTerminalMeta(meta, TerminalExitKey, values)
+	return withTerminalMeta(meta, TerminalExitKey, values)
 }
 
-func TerminalInfo(meta map[string]any) (TerminalInfoMeta, bool) {
-	values := topLevelTerminalMeta(meta, TerminalInfoKey)
+func ReadTerminalInfo(meta map[string]any) (TerminalInfo, bool) {
+	values := terminalMeta(meta, TerminalInfoKey)
 	id := strings.TrimSpace(stringAt(values, "terminal_id"))
 	if id == "" {
-		return TerminalInfoMeta{}, false
+		return TerminalInfo{}, false
 	}
-	return TerminalInfoMeta{TerminalID: id}, true
+	return TerminalInfo{TerminalID: id}, true
 }
 
-func TerminalOutput(meta map[string]any) (TerminalOutputMeta, bool) {
-	return terminalOutputAt(meta, TerminalOutputKey)
-}
-
-func terminalOutputAt(meta map[string]any, key string) (TerminalOutputMeta, bool) {
-	values := topLevelTerminalMeta(meta, key)
+func ReadTerminalOutput(meta map[string]any) (TerminalOutput, bool) {
+	values := terminalMeta(meta, TerminalOutputKey)
 	id := strings.TrimSpace(stringAt(values, "terminal_id"))
 	data, _ := values["data"].(string)
 	if id == "" || data == "" {
-		return TerminalOutputMeta{}, false
+		return TerminalOutput{}, false
 	}
-	return TerminalOutputMeta{TerminalID: id, Data: data}, true
+	return TerminalOutput{TerminalID: id, Data: data}, true
 }
 
-func TerminalExit(meta map[string]any) (TerminalExitMeta, bool) {
-	values := topLevelTerminalMeta(meta, TerminalExitKey)
+func ReadTerminalExit(meta map[string]any) (TerminalExit, bool) {
+	values := terminalMeta(meta, TerminalExitKey)
 	id := strings.TrimSpace(stringAt(values, "terminal_id"))
 	if id == "" {
-		return TerminalExitMeta{}, false
+		return TerminalExit{}, false
 	}
-	out := TerminalExitMeta{TerminalID: id}
+	out := TerminalExit{TerminalID: id}
 	if code, ok := intAt(values, "exit_code"); ok {
 		out.ExitCode = &code
 	}
@@ -119,37 +110,26 @@ func TerminalExit(meta map[string]any) (TerminalExitMeta, bool) {
 	return out, true
 }
 
-func withTopLevelTerminalMeta(meta map[string]any, key string, values map[string]any) map[string]any {
-	if key == "" || len(values) == 0 {
-		return CloneMap(meta)
-	}
-	out := CloneMap(meta)
+func withTerminalMeta(meta map[string]any, key string, values map[string]any) map[string]any {
+	out := jsonvalue.CloneMap(meta)
 	if out == nil {
 		out = map[string]any{}
 	}
-	out[key] = CloneMap(values)
+	out[key] = jsonvalue.CloneMap(values)
 	return out
 }
 
-func topLevelTerminalMeta(meta map[string]any, key string) map[string]any {
-	if len(meta) == 0 || key == "" {
-		return nil
-	}
-	return CloneMap(mapAt(meta, key))
+func terminalMeta(meta map[string]any, key string) map[string]any {
+	values, _ := meta[key].(map[string]any)
+	return jsonvalue.CloneMap(values)
 }
 
 func stringAt(values map[string]any, key string) string {
-	if len(values) == 0 {
-		return ""
-	}
 	text, _ := values[key].(string)
 	return text
 }
 
 func intAt(values map[string]any, key string) (int, bool) {
-	if len(values) == 0 {
-		return 0, false
-	}
 	switch typed := values[key].(type) {
 	case int:
 		return typed, true

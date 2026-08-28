@@ -13,8 +13,8 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 const APIPrefix = "/api/control/v1"
@@ -475,7 +475,7 @@ func transformKnownMetadata(
 	meta map[string]any,
 	transform func(map[string]any, string) error,
 ) (map[string]any, error) {
-	out := metautil.CloneMap(meta)
+	out := eventmeta.CloneMap(meta)
 	if len(out) == 0 {
 		return out, nil
 	}
@@ -501,16 +501,16 @@ func transformKnownMetadata(
 			}
 		}
 	}
-	caelis, present, err := childMap(out, metautil.Root)
+	caelis, present, err := childMap(out, eventmeta.Root)
 	if err != nil || !present {
 		return out, err
 	}
-	runtime, hasRuntime, err := childMap(caelis, metautil.Runtime)
+	runtime, hasRuntime, err := childMap(caelis, eventmeta.Runtime)
 	if err != nil {
 		return nil, err
 	}
 	if hasRuntime {
-		if task, present, mapErr := childMap(runtime, metautil.RuntimeTask); mapErr != nil {
+		if task, present, mapErr := childMap(runtime, eventmeta.RuntimeTask); mapErr != nil {
 			return nil, mapErr
 		} else if present {
 			for _, key := range []string{"output_cursor", "event_cursor", "turn_seq"} {
@@ -519,7 +519,7 @@ func transformKnownMetadata(
 				}
 			}
 		}
-		if stream, present, mapErr := childMap(runtime, metautil.RuntimeStream); mapErr != nil {
+		if stream, present, mapErr := childMap(runtime, eventmeta.RuntimeStream); mapErr != nil {
 			return nil, mapErr
 		} else if present {
 			if err := transform(stream, runtimeStreamTruncatedBeforeMetaKey); err != nil {

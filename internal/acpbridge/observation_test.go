@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestRuntimeObservationGapEnvelope(t *testing.T) {
@@ -17,7 +16,9 @@ func TestRuntimeObservationGapEnvelope(t *testing.T) {
 	if envelope.Delivery == nil || envelope.Delivery.Mode != eventstream.DeliveryTransient || envelope.Position != nil {
 		t.Fatalf("delivery = %#v position = %#v, want unstamped transient", envelope.Delivery, envelope.Position)
 	}
-	observation := metautil.RuntimeSection(envelope.Meta, runtimeObservationSection)
+	caelisMeta, _ := envelope.Meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelisMeta["runtime"].(map[string]any)
+	observation, _ := runtimeMeta[runtimeObservationSection].(map[string]any)
 	if observation[runtimeObservationCode] != runtimeObservationGap ||
 		observation[runtimeObservationDropped] != uint64(7) {
 		t.Fatalf("observation meta = %#v", observation)

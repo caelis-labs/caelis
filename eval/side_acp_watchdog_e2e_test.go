@@ -20,7 +20,7 @@ import (
 	controlassembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/jsonvalue"
 )
 
 func TestSideACPDistinctXSearchBypassesOrchestrationWatchdogE2E(t *testing.T) {
@@ -133,13 +133,7 @@ func TestSideACPDistinctXSearchBypassesOrchestrationWatchdogE2E(t *testing.T) {
 				t.Fatalf("XSearch completion = %#v", update)
 			}
 			query := delayedXSearchQuery(t, update.RawOutput)
-			displayQuery := metautil.String(
-				update.Meta,
-				metautil.Root,
-				"display",
-				"tool_input",
-				"query",
-			)
+			displayQuery := jsonvalue.StringAt(update.Meta, "caelis", "display", "tool_input", "query")
 			if displayQuery != query {
 				t.Fatalf("XSearch %q display query = %q, want %q", update.ToolCallID, displayQuery, query)
 			}

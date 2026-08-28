@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
 func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStreamAnchor, bool) {
@@ -35,7 +35,7 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 	callID := strings.TrimSpace(taskStreamToolCallID(envelope.Update))
 	kind := task.Kind("")
 	targetKind := strings.ToLower(strings.TrimSpace(display.ToolTaskTargetKind(input, output, meta)))
-	terminalInfo, hasTerminalInfo := metautil.TerminalInfo(meta)
+	terminalInfo, hasTerminalInfo := acpmeta.ReadTerminalInfo(meta)
 	switch {
 	case targetKind == string(task.KindCommand) &&
 		hasTerminalInfo &&
@@ -124,10 +124,10 @@ func taskStreamToolCallID(update eventstream.Update) string {
 
 func envelopeHasTerminalDelivery(envelope eventstream.Envelope) bool {
 	meta := eventstream.UpdateMeta(envelope.Update)
-	output, ok := metautil.TerminalOutput(meta)
+	output, ok := acpmeta.ReadTerminalOutput(meta)
 	if ok && output.Data != "" {
 		return true
 	}
-	_, ok = metautil.TerminalExit(meta)
+	_, ok = acpmeta.ReadTerminalExit(meta)
 	return ok
 }

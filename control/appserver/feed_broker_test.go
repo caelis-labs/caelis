@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 )
 
 func TestFeedBrokerRejectsDurableEnvelopeWithoutPosition(t *testing.T) {
@@ -510,7 +510,7 @@ func TestFeedBrokerFreshReplaySelectsCanonicalTerminalInsteadOfRetainedDeltas(t 
 			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "command-1",
 			Status:        &status,
-			Meta:          metautil.WithTerminalOutput(nil, "command-1", "line 1\nline 2\n"),
+			Meta:          eventmeta.WithTerminalOutput(nil, "command-1", "line 1\nline 2\n"),
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -548,7 +548,7 @@ func TestFeedBrokerFreshReplayRetainsTerminalDeltasBesideStateOnlyFinal(t *testi
 			SessionUpdate: eventstream.UpdateToolCallInfo,
 			ToolCallID:    "command-1",
 			Status:        &status,
-			Meta:          metautil.WithTerminalExit(nil, "command-1", nil, nil),
+			Meta:          eventmeta.WithTerminalExit(nil, "command-1", nil, nil),
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -649,7 +649,7 @@ func TestFeedBrokerFreshReplayLetsStoredTerminalOutputWinAfterRingEviction(t *te
 		Position: &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{Seq: 2}},
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1", Status: &status,
-			Meta: metautil.WithTerminalExit(nil, "command-1", nil, nil),
+			Meta: eventmeta.WithTerminalExit(nil, "command-1", nil, nil),
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -671,16 +671,16 @@ func TestFeedBrokerFreshReplayLetsStoredTerminalOutputWinAfterRingEviction(t *te
 
 func TestFeedBrokerFreshReplaySelectsFinalCommandTaskMaterialization(t *testing.T) {
 	terminalMeta := func(name, terminalID string, start, cursor int64, text string) map[string]any {
-		meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTask, map[string]any{
-			"task_id":                      "task-1",
-			metautil.RuntimeTaskTerminalID: "terminal-1",
-			metautil.RuntimeOutputStart:    start,
-			metautil.RuntimeOutputCursor:   cursor,
-			metautil.RuntimeOutputDelta:    text,
+		meta := eventmeta.WithRuntimeSection(nil, eventmeta.RuntimeTask, map[string]any{
+			"task_id":                       "task-1",
+			eventmeta.RuntimeTaskTerminalID: "terminal-1",
+			eventmeta.RuntimeOutputStart:    start,
+			eventmeta.RuntimeOutputCursor:   cursor,
+			eventmeta.RuntimeOutputDelta:    text,
 		})
-		meta = metautil.WithTerminalInfo(meta, terminalID)
-		return metautil.WithRuntimeSection(meta, metautil.RuntimeTool, map[string]any{
-			metautil.RuntimeToolName: name,
+		meta = eventmeta.WithTerminalInfo(meta, terminalID)
+		return eventmeta.WithRuntimeSection(meta, eventmeta.RuntimeTool, map[string]any{
+			eventmeta.RuntimeToolName: name,
 		})
 	}
 	toolResult := func(
@@ -754,8 +754,8 @@ func TestFeedBrokerFreshReplaySelectsFinalCommandTaskMaterialization(t *testing.
 func TestFreshReplayTerminalOwnerRequiresTypedCommandAnchor(t *testing.T) {
 	t.Parallel()
 
-	nameOnly := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "RunCommand",
+	nameOnly := eventmeta.WithRuntimeSection(nil, eventmeta.RuntimeTool, map[string]any{
+		eventmeta.RuntimeToolName: "RunCommand",
 	})
 	envelope := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
@@ -768,7 +768,7 @@ func TestFreshReplayTerminalOwnerRequiresTypedCommandAnchor(t *testing.T) {
 		t.Fatalf("runtime tool-name spoof claimed replay owner %#v", owner)
 	}
 
-	typed := metautil.WithTerminalInfo(nameOnly, "command-spoof")
+	typed := eventmeta.WithTerminalInfo(nameOnly, "command-spoof")
 	update := envelope.Update.(eventstream.ToolCallUpdate)
 	update.RawOutput = map[string]any{"handle": "command", "target_kind": "command"}
 	update.Meta = typed
@@ -1837,11 +1837,11 @@ func terminalEnvelope(text string) eventstream.Envelope {
 }
 
 func terminalEnvelopeAtCursor(text string, cursor int64) eventstream.Envelope {
-	meta := metautil.WithTerminalOutput(nil, "command-1", text)
-	meta = metautil.WithCompactRuntimeSection(meta, metautil.RuntimeTask, map[string]any{
-		"task_id":                      "task-1",
-		metautil.RuntimeTaskTerminalID: "terminal-1",
-		"output_cursor":                cursor,
+	meta := eventmeta.WithTerminalOutput(nil, "command-1", text)
+	meta = eventmeta.WithCompactRuntimeSection(meta, eventmeta.RuntimeTask, map[string]any{
+		"task_id":                       "task-1",
+		eventmeta.RuntimeTaskTerminalID: "terminal-1",
+		"output_cursor":                 cursor,
 	})
 	return eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
@@ -1860,14 +1860,14 @@ func terminalEnvelopeOutput(envelope eventstream.Envelope) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	output, ok := metautil.TerminalOutput(update.Meta)
+	output, ok := eventmeta.TerminalOutput(update.Meta)
 	if !ok {
-		output, ok = metautil.TerminalOutput(envelope.Meta)
+		output, ok = eventmeta.TerminalOutput(envelope.Meta)
 	}
 	if ok {
 		return output.Data, true
 	}
-	delta, ok := metautil.RuntimeSection(envelope.Meta, metautil.RuntimeTask)[metautil.RuntimeOutputDelta].(string)
+	delta, ok := eventmeta.RuntimeSection(envelope.Meta, eventmeta.RuntimeTask)[eventmeta.RuntimeOutputDelta].(string)
 	return delta, ok
 }
 

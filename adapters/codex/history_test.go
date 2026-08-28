@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	acp "github.com/caelis-labs/acp-go-sdk"
-
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestCommandExecutionProjectionMatchesCodexACPShape(t *testing.T) {
@@ -25,7 +23,7 @@ func TestCommandExecutionProjectionMatchesCodexACPShape(t *testing.T) {
 		t.Fatalf("command start = %#v", start)
 	}
 	terminalID := string(start.ToolCall.Content[0].Terminal.TerminalId)
-	if terminalID == "" || !strings.Contains(string(start.ToolCall.Meta[metautil.TerminalInfoKey]), terminalID) {
+	if terminalID == "" || !strings.Contains(string(start.ToolCall.Meta[terminalInfoMetaKey]), terminalID) {
 		t.Fatalf("command terminal metadata = %#v", start.ToolCall.Meta)
 	}
 
@@ -38,13 +36,13 @@ func TestCommandExecutionProjectionMatchesCodexACPShape(t *testing.T) {
 	if !ok || rawOutput["formatted_output"] != "ACP_TOOL_RESULT_42\n" {
 		t.Fatalf("command rawOutput = %#v", complete.ToolCallUpdate.RawOutput)
 	}
-	if !strings.Contains(string(complete.ToolCallUpdate.Meta[metautil.TerminalOutputDeltaKey]), "ACP_TOOL_RESULT_42") ||
-		!strings.Contains(string(complete.ToolCallUpdate.Meta[metautil.TerminalExitKey]), terminalID) {
+	if !strings.Contains(string(complete.ToolCallUpdate.Meta[terminalOutputDeltaMetaKey]), "ACP_TOOL_RESULT_42") ||
+		!strings.Contains(string(complete.ToolCallUpdate.Meta[terminalExitMetaKey]), terminalID) {
 		t.Fatalf("command completion metadata = %#v", complete.ToolCallUpdate.Meta)
 	}
 
 	streamed := toolComplete("thread-1", item, true, true, terminalOutputLegacy)
-	if _, duplicated := streamed.ToolCallUpdate.Meta[metautil.TerminalOutputDeltaKey]; duplicated {
+	if _, duplicated := streamed.ToolCallUpdate.Meta[terminalOutputDeltaMetaKey]; duplicated {
 		t.Fatalf("streamed completion repeated terminal output: %#v", streamed.ToolCallUpdate.Meta)
 	}
 

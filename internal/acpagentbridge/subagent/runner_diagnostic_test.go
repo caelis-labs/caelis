@@ -17,10 +17,10 @@ import (
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestRunnerPromptFailureBeforeFirstUpdateDoesNotPersistRawDiagnostics(t *testing.T) {
@@ -531,7 +531,7 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				client.ContentChunk{SessionUpdate: client.UpdateUserMessage, MessageID: "user-1", Content: jsonrpc.MustMarshalRaw(client.TextContent{Type: "text", Text: "first prompt"})},
 				client.ContentChunk{SessionUpdate: client.UpdateAgentMessage, MessageID: "assistant-1", Content: jsonrpc.MustMarshalRaw(client.TextContent{Type: "text", Text: "first answer"})},
 				client.ToolCall{SessionUpdate: client.UpdateToolCall, ToolCallID: "command-1", Title: "RUN_COMMAND printf", Kind: "execute", Status: "in_progress"},
-				client.ToolCallUpdate{SessionUpdate: client.UpdateToolCallState, ToolCallID: "command-1", Status: stringPtr("completed"), RawOutput: map[string]any{"formatted_output": "HISTORY_TOOL_OUTPUT\n", "exit_code": 0}, Meta: metautil.WithTerminalOutput(nil, "command-1", "HISTORY_TOOL_OUTPUT\n")},
+				client.ToolCallUpdate{SessionUpdate: client.UpdateToolCallState, ToolCallID: "command-1", Status: stringPtr("completed"), RawOutput: map[string]any{"formatted_output": "HISTORY_TOOL_OUTPUT\n", "exit_code": 0}, Meta: acpmeta.WithTerminalOutput(nil, "command-1", "HISTORY_TOOL_OUTPUT\n")},
 				client.ContentChunk{SessionUpdate: client.UpdateUserMessage, MessageID: "user-2", Content: jsonrpc.MustMarshalRaw(client.TextContent{Type: "text", Text: "second prompt"})},
 				client.ContentChunk{SessionUpdate: client.UpdateAgentMessage, MessageID: "assistant-2", Content: jsonrpc.MustMarshalRaw(client.TextContent{Type: "text", Text: "second answer"})},
 			}

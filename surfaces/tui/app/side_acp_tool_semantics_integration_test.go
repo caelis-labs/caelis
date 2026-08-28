@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	acpclient "github.com/caelis-labs/caelis/internal/acpagentbridge/client"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestMainProjectedTaskWaitMatchesNativeSubagentSemantics(t *testing.T) {
@@ -45,8 +44,8 @@ func TestMainProjectedTaskWaitMatchesNativeSubagentSemantics(t *testing.T) {
 			Status: "pending",
 			Input:  map[string]any{"agent": "orbit", "prompt": "inspect"},
 		},
-		Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-			metautil.RuntimeToolName: "Spawn",
+		Meta: testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
+			testMeta.RuntimeToolName: "Spawn",
 		}),
 	})
 	project(&session.Event{
@@ -77,8 +76,8 @@ func TestMainProjectedTaskWaitMatchesNativeSubagentSemantics(t *testing.T) {
 			Status: "pending",
 			Input:  map[string]any{"action": "wait", "handle": "orbit"},
 		},
-		Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-			metautil.RuntimeToolName: "Task",
+		Meta: testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
+			testMeta.RuntimeToolName: "Task",
 		}),
 	})
 
@@ -226,8 +225,8 @@ func TestParticipantSpawnRendersStandardFinalResultWithoutSubagentUI(t *testing.
 	pending := eventstream.ToolStatusPending
 	spawnTitle := "Spawn orbit: inspect"
 	spawnKind := eventstream.ToolKindExecute
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Spawn",
+	meta := testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Spawn",
 	})
 	for _, result := range []struct {
 		name   string
@@ -335,8 +334,8 @@ func TestParticipantSpawnToolPanelExpandsFullFinalResponse(t *testing.T) {
 				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: callID, Title: spawnTitle,
 				Kind: spawnKind, Status: pending,
 				RawInput: map[string]any{"agent": "orbit", "prompt": "read-only strict review"},
-				Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-					metautil.RuntimeToolName: "Spawn",
+				Meta: testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
+					testMeta.RuntimeToolName: "Spawn",
 				}),
 			},
 		},
@@ -430,7 +429,7 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 				Status:   eventstream.ToolStatusInProgress,
 				RawInput: map[string]any{"command": "printf ok"},
 				Content:  []eventstream.ToolCallContent{{Type: "terminal", TerminalID: "command-1"}},
-				Meta:     metautil.WithTerminalInfo(nil, "command-1"),
+				Meta:     testMeta.WithTerminalInfo(nil, "command-1"),
 			},
 		}
 	}
@@ -440,7 +439,7 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
 			Update: eventstream.ToolCallUpdate{
 				SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1", Status: &running,
-				Meta: metautil.WithTerminalOutput(nil, "command-1", "SHARED_TOOL_OUTPUT\n"),
+				Meta: testMeta.WithTerminalOutput(nil, "command-1", "SHARED_TOOL_OUTPUT\n"),
 			},
 		}
 	}
@@ -452,7 +451,7 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 			Update: eventstream.ToolCallUpdate{
 				SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1", Status: &completed,
 				RawOutput: map[string]any{"formatted_output": "SHARED_TOOL_OUTPUT\n", "exit_code": 0},
-				Meta:      metautil.WithTerminalExit(nil, "command-1", &exitCode, nil),
+				Meta:      testMeta.WithTerminalExit(nil, "command-1", &exitCode, nil),
 			},
 		}
 	}
@@ -1047,7 +1046,7 @@ func TestSideACPProjectedStandardExecuteContentReplacesEarlierTerminalBytesAcros
 		},
 		eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "execute-terminal-1", Status: &inProgress,
-			Meta: metautil.WithTerminalOutput(nil, "terminal-1", "terminal phase\n"),
+			Meta: testMeta.WithTerminalOutput(nil, "terminal-1", "terminal phase\n"),
 		},
 		eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "execute-terminal-1", Status: &inProgress,

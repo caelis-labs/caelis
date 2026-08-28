@@ -8,8 +8,9 @@
   translation and Host-owned producer-lifetime coverage;
 - TUI Side ACP and Subagent overlay live/replay fidelity;
 - real stdio initialize/new/prompt, process restart plus load/resume, terminal
-  Task output with ACP client approval, session/list, structured JSON events,
-  and local `acpx` session-record close using the configured MiMo ModelProfile.
+  Task output approved by the Host's default `auto-review` path without an ACP
+  client permission request, session/list, structured JSON events, and local
+  `acpx` session-record close using the configured MiMo ModelProfile.
 
 The final `acpx sessions close` checks the client-side saved-session lifecycle;
 it does not send ACP `session/close`. Durable product Session close is covered by

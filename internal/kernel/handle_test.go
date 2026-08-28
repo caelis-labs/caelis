@@ -15,7 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/jsonvalue"
 )
 
 func TestTurnHandleReplaysEventstreamAfterCursor(t *testing.T) {
@@ -134,7 +134,7 @@ func TestTurnHandlePublishesApprovalAsACPPermission(t *testing.T) {
 	if permission.ToolCall.ToolCallID != "call-1" || stringPtrValue(permission.ToolCall.Kind) != eventstream.ToolKindExecute {
 		t.Fatalf("permission tool call = %#v, want execute call-1", permission.ToolCall)
 	}
-	if got := metautil.String(permission.ToolCall.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RunCommand" {
+	if got := jsonvalue.StringAt(permission.ToolCall.Meta, "caelis", "runtime", "tool", "name"); got != "RunCommand" {
 		t.Fatalf("permission tool meta = %#v, want RUN_COMMAND tool name", permission.ToolCall.Meta)
 	}
 	if len(permission.Options) != 1 || permission.Options[0].OptionId != "allow_once" {

@@ -349,7 +349,7 @@ func isSessionCoordinationMethod(expr ast.Expr, sessionNames map[string]bool) bo
 }
 
 func topLevelTerminalMetaRule(rel string, file *ast.File, fset *token.FileSet) (string, string, int) {
-	if file == nil || strings.HasSuffix(rel, "_test.go") || rel == "scripts/arch_lint.go" || rel == "protocol/acp/metautil/terminal.go" {
+	if file == nil || strings.HasSuffix(rel, "_test.go") || rel == "scripts/arch_lint.go" || terminalMetaOwnerFile(rel) {
 		return "", "", 0
 	}
 	var subject string
@@ -367,7 +367,7 @@ func topLevelTerminalMetaRule(rel string, file *ast.File, fset *token.FileSet) (
 			return true
 		}
 		switch value {
-		case "terminal_info", "terminal_output", "terminal_exit":
+		case "terminal_info", "terminal_output", "terminal_output_delta", "terminal_exit":
 			subject = value
 			line = fset.Position(lit.Pos()).Line
 			return false
@@ -378,7 +378,19 @@ func topLevelTerminalMetaRule(rel string, file *ast.File, fset *token.FileSet) (
 	if subject == "" {
 		return "", "", 0
 	}
-	return "production code must use protocol/acp/metautil terminal helpers instead of raw top-level terminal metadata keys", subject, line
+	return "production code must keep top-level terminal metadata inside its Control, Host, adapter, or Surface owner codec", subject, line
+}
+
+func terminalMetaOwnerFile(rel string) bool {
+	switch rel {
+	case "adapters/codex/terminal_meta.go",
+		"control/appserver/internal/eventmeta/terminal.go",
+		"internal/acpagentbridge/internal/acpmeta/terminal.go",
+		"surfaces/internal/transcript/terminal_meta.go":
+		return true
+	default:
+		return false
+	}
 }
 
 func eventProtocolAliasVars(file *ast.File, sessionNames map[string]bool) map[string]bool {
@@ -587,6 +599,9 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if target == "protocol/acp" {
 		return "production code must not depend on the retired root protocol/acp facade; import the owning ACP subpackage"
 	}
+	if target == "protocol/acp/metautil" || strings.HasPrefix(target, "protocol/acp/metautil/") {
+		return "production code must not depend on retired protocol/acp/metautil; keep compatibility metadata in its Control, Host, adapter, or Surface owner"
+	}
 	if target == "protocol/acp/control" || strings.HasPrefix(target, "protocol/acp/control/") {
 		return "production code must not depend on retired protocol/acp/control; use internal/controlprompt, control/status, or surfaces/internal/promptview"
 	}
@@ -649,9 +664,6 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	}
 	switch {
 	case strings.HasPrefix(rel, "control/"):
-		if allowedControlProtocolTarget(rel, target) {
-			return ""
-		}
 		if startsWithAny(target, "app/", "surfaces/", "protocol/", "ports/", "internal/") {
 			return "control must depend only on Control peers and reusable SDK packages"
 		}
@@ -754,17 +766,6 @@ func isProductionTestSupportPackage(rel string) bool {
 	return strings.HasPrefix(rel, "agent-sdk/session/sessiontest/") ||
 		strings.HasPrefix(rel, "internal/evalharness/") ||
 		strings.HasPrefix(rel, "internal/testenv/")
-}
-
-func allowedControlProtocolTarget(rel string, target string) bool {
-	if strings.HasPrefix(rel, "control/acppermission/") && pathIn(target,
-		"protocol/acp/metautil",
-	) {
-		return true
-	}
-	return strings.HasPrefix(rel, "control/appserver/") && pathIn(target,
-		"protocol/acp/metautil",
-	)
 }
 
 type deletedSDKImplPath struct {
@@ -882,6 +883,8 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "must not recreate internal/controlpromptrouter; prompt contracts and routing belong to internal/controlprompt", pkg, 1
 	case pkg == "protocol/acp":
 		return "must not recreate the root protocol/acp facade; standard wire contracts belong to acp-go-sdk and residual code to an owning ACP subpackage", pkg, 1
+	case pkg == "protocol/acp/metautil" || strings.HasPrefix(pkg, "protocol/acp/metautil/"):
+		return "must not recreate protocol/acp/metautil; compatibility metadata belongs to its Control, Host, adapter, or Surface owner", pkg, 1
 	case pkg == "protocol/acp/control" || strings.HasPrefix(pkg, "protocol/acp/control/"):
 		return "must not recreate protocol/acp/control; prompt contracts belong to internal/controlprompt, status data to control/status, and rendering to surfaces/internal/promptview", pkg, 1
 	case pkg == "protocol/acp/eventstream" || strings.HasPrefix(pkg, "protocol/acp/eventstream/"):

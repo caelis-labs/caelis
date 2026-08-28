@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
 // spawnReplayProjector reconstructs final-only stdio Spawn results from durable
@@ -125,14 +125,14 @@ func withSpawnReplayResult(update eventstream.ToolCallUpdate, rawOutput map[stri
 	}
 	text := spawnReplayResultText(status, rawOutput)
 	if strings.TrimSpace(text) == "" && !strings.EqualFold(strings.TrimSpace(status), eventstream.ToolStatusFailed) {
-		if output, ok := metautil.TerminalOutput(update.Meta); ok {
+		if output, ok := acpmeta.ReadTerminalOutput(update.Meta); ok {
 			text = output.Data
 		}
 	}
 
-	meta := metautil.WithoutTerminalOutput(update.Meta)
-	delete(meta, metautil.TerminalInfoKey)
-	delete(meta, metautil.TerminalExitKey)
+	meta := acpmeta.WithoutTerminalOutput(update.Meta)
+	delete(meta, acpmeta.TerminalInfoKey)
+	delete(meta, acpmeta.TerminalExitKey)
 	if len(meta) == 0 {
 		meta = nil
 	}

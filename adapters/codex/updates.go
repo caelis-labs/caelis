@@ -9,8 +9,6 @@ import (
 	"strings"
 
 	acp "github.com/caelis-labs/acp-go-sdk"
-
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 type terminalOutputMode uint8
@@ -22,7 +20,7 @@ const (
 
 func terminalOutputModeForCapabilities(capabilities acp.ClientCapabilities) terminalOutputMode {
 	var supported bool
-	if json.Unmarshal(capabilities.Meta[metautil.TerminalOutputKey], &supported) == nil && supported {
+	if json.Unmarshal(capabilities.Meta[terminalOutputMetaKey], &supported) == nil && supported {
 		return terminalOutputCanonical
 	}
 	return terminalOutputLegacy
@@ -176,7 +174,7 @@ func toolComplete(
 	}
 	if commandExecutionUsesTerminal(item) {
 		terminalID := stableID(threadID, item.ID, "tool")
-		meta := metautil.WithTerminalExit(nil, terminalID, item.ExitCode, nil)
+		meta := withTerminalExitMeta(nil, terminalID, item.ExitCode)
 		if !started {
 			meta = terminalInfoMetaWithBase(meta, terminalID, item.CWD)
 			update.ToolCall.Content = []acp.ToolCallContent{acp.ToolTerminalRef(terminalID)}
@@ -357,22 +355,22 @@ func terminalInfoMeta(terminalID, cwd string) map[string]any {
 }
 
 func terminalInfoMetaWithBase(meta map[string]any, terminalID, cwd string) map[string]any {
-	meta = metautil.WithTerminalInfo(meta, terminalID)
-	if info, ok := meta[metautil.TerminalInfoKey].(map[string]any); ok && strings.TrimSpace(cwd) != "" {
+	meta = withTerminalInfoMeta(meta, terminalID)
+	if info, ok := meta[terminalInfoMetaKey].(map[string]any); ok && strings.TrimSpace(cwd) != "" {
 		info["cwd"] = cwd
 	}
 	return meta
 }
 
 func withTerminalOutput(meta map[string]any, mode terminalOutputMode, terminalID, data string) map[string]any {
-	out := metautil.WithTerminalOutput(meta, terminalID, data)
+	out := withCanonicalTerminalOutputMeta(meta, terminalID, data)
 	if mode == terminalOutputCanonical {
 		return out
 	}
-	output, ok := out[metautil.TerminalOutputKey]
-	delete(out, metautil.TerminalOutputKey)
+	output, ok := out[terminalOutputMetaKey]
+	delete(out, terminalOutputMetaKey)
 	if ok {
-		out[metautil.TerminalOutputDeltaKey] = output
+		out[terminalOutputDeltaMetaKey] = output
 	}
 	return out
 }

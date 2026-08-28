@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/acppermission"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
@@ -45,7 +44,7 @@ func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
 	if !reflect.DeepEqual(wire.Meta, wantMeta) {
 		t.Fatalf("wire meta = %#v, want %#v", wire.Meta, wantMeta)
 	}
-	if got := metautil.String(wire.ToolCall.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != wantApproval.ToolCall.Name {
+	if got := permissionToolNameForTest(wire.ToolCall.Meta); got != wantApproval.ToolCall.Name {
 		t.Fatalf("wire tool name = %q, want %q", got, wantApproval.ToolCall.Name)
 	}
 	raw, err := json.Marshal(wire)
@@ -63,6 +62,14 @@ func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
 	if !reflect.DeepEqual(gotApproval, &wantApproval) {
 		t.Fatalf("approval = %#v, want %#v", gotApproval, &wantApproval)
 	}
+}
+
+func permissionToolNameForTest(meta map[string]any) string {
+	caelis, _ := meta["caelis"].(map[string]any)
+	runtime, _ := caelis["runtime"].(map[string]any)
+	tool, _ := runtime["tool"].(map[string]any)
+	name, _ := tool["name"].(string)
+	return name
 }
 
 func TestPermissionDecodeFallsBackFromMissingToolName(t *testing.T) {

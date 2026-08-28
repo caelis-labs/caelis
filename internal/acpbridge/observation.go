@@ -1,9 +1,6 @@
 package acpbridge
 
-import (
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-)
+import "github.com/caelis-labs/caelis/control/appserver/eventstream"
 
 // RuntimeObservationGapNotice is stable presentation copy for a skipped suffix
 // in a Runtime observer stream. Consumers must use the structured metadata,
@@ -24,9 +21,14 @@ func RuntimeObservationGapEnvelope(dropped uint64) eventstream.Envelope {
 		Kind:     eventstream.KindNotice,
 		Notice:   RuntimeObservationGapNotice,
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		Meta: metautil.WithRuntimeSection(nil, runtimeObservationSection, map[string]any{
-			runtimeObservationCode:    runtimeObservationGap,
-			runtimeObservationDropped: dropped,
-		}),
+		Meta: map[string]any{"caelis": map[string]any{
+			"version": 1,
+			"runtime": map[string]any{
+				runtimeObservationSection: map[string]any{
+					runtimeObservationCode:    runtimeObservationGap,
+					runtimeObservationDropped: dropped,
+				},
+			},
+		}},
 	}
 }

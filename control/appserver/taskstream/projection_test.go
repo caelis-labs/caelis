@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 )
 
 func TestProjectTaskFrameDoesNotProjectChildPermissionOutsideControl(t *testing.T) {
@@ -123,14 +123,14 @@ func TestProjectTaskFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	if hasLegacyTransientMetadata(update.Meta) {
 		t.Fatalf("update.Meta = %#v, want typed delivery without legacy transient shadow", update.Meta)
 	}
-	streamMeta := metautil.RuntimeSection(update.Meta, metautil.RuntimeStream)
+	streamMeta := eventmeta.RuntimeSection(update.Meta, eventmeta.RuntimeStream)
 	if streamMeta["truncated"] != true || streamMeta["truncated_before"] != int64(12) {
 		t.Fatalf("stream meta = %#v, want typed truncation boundary", streamMeta)
 	}
-	if got, ok := metautil.Int64(update.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeOutputCursor); !ok || got != 15 {
+	if got, ok := eventmeta.Int64(update.Meta, eventmeta.Root, eventmeta.Runtime, eventmeta.RuntimeStream, eventmeta.RuntimeOutputCursor); !ok || got != 15 {
 		t.Fatalf("stream output cursor = %d, %v; want 15, true", got, ok)
 	}
-	toolMeta := metautil.RuntimeSection(update.Meta, metautil.RuntimeTool)
+	toolMeta := eventmeta.RuntimeSection(update.Meta, eventmeta.RuntimeTool)
 	if toolMeta["target_handle"] != "command" {
 		t.Fatalf("tool meta = %#v, want public Task handle", toolMeta)
 	}
@@ -188,12 +188,12 @@ func TestProjectTaskFramePreservesClosedCommandExitCode(t *testing.T) {
 	if got := stringPtrValue(update.Status); got != eventstream.ToolStatusFailed {
 		t.Fatalf("final status = %q, want failed", got)
 	}
-	exit, ok := metautil.TerminalExit(update.Meta)
+	exit, ok := eventmeta.TerminalExit(update.Meta)
 	if !ok || exit.TerminalID != "call-1" || exit.ExitCode == nil || *exit.ExitCode != exitCode {
 		t.Fatalf("terminal exit = %#v, %v; want exit code %d", exit, ok, exitCode)
 	}
 	assertTerminalAnchor(t, update.Content, "call-1")
-	if got, ok := metautil.Int64(update.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeOutputCursor); !ok || got != 3 {
+	if got, ok := eventmeta.Int64(update.Meta, eventmeta.Root, eventmeta.Runtime, eventmeta.RuntimeStream, eventmeta.RuntimeOutputCursor); !ok || got != 3 {
 		t.Fatalf("final stream output cursor = %d, %v; want 3, true", got, ok)
 	}
 }
@@ -330,7 +330,7 @@ func TestProjectTaskFrameKeepsNoOutputPlaceholderOutOfTerminalBytes(t *testing.T
 	if stringPtrValue(update.Status) != eventstream.ToolStatusFailed {
 		t.Fatalf("update = %+v, want failed RUN_COMMAND result", update)
 	}
-	if output, ok := metautil.TerminalOutput(update.Meta); ok {
+	if output, ok := eventmeta.TerminalOutput(update.Meta); ok {
 		t.Fatalf("terminal output = %#v, want no synthetic bytes for silent failure", output)
 	}
 }
@@ -731,7 +731,7 @@ func streamEnvelopeTerminalOutput(env eventstream.Envelope) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	output, ok := metautil.TerminalOutput(update.Meta)
+	output, ok := eventmeta.TerminalOutput(update.Meta)
 	if !ok {
 		return "", false
 	}
@@ -832,10 +832,10 @@ func assertSpawnSemanticEnvelope(t *testing.T, env eventstream.Envelope, taskID 
 
 func assertNoLegacyRelationDeliveryMetadata(t *testing.T, env eventstream.Envelope) {
 	t.Helper()
-	if parentCallID := metautil.String(env.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamParentCallID); parentCallID != "" {
+	if parentCallID := eventmeta.String(env.Meta, eventmeta.Root, eventmeta.Runtime, eventmeta.RuntimeStream, eventmeta.RuntimeStreamParentCallID); parentCallID != "" {
 		t.Fatalf("envelope meta parent_call_id = %q, want typed-only relation; meta=%#v", parentCallID, env.Meta)
 	}
-	if parentTool := metautil.String(env.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamParentTool); parentTool != "" {
+	if parentTool := eventmeta.String(env.Meta, eventmeta.Root, eventmeta.Runtime, eventmeta.RuntimeStream, eventmeta.RuntimeStreamParentTool); parentTool != "" {
 		t.Fatalf("envelope meta parent_tool = %q, want typed-only relation; meta=%#v", parentTool, env.Meta)
 	}
 	if hasLegacyTransientMetadata(env.Meta) {
@@ -844,7 +844,7 @@ func assertNoLegacyRelationDeliveryMetadata(t *testing.T, env eventstream.Envelo
 }
 
 func hasLegacyTransientMetadata(meta map[string]any) bool {
-	caelis, _ := meta[metautil.Root].(map[string]any)
+	caelis, _ := meta[eventmeta.Root].(map[string]any)
 	transient, _ := caelis["transient"].(bool)
 	return transient
 }
@@ -873,7 +873,7 @@ func requireToolUpdate(t *testing.T, env eventstream.Envelope) eventstream.ToolC
 
 func toolTerminalOutputText(t *testing.T, update eventstream.ToolCallUpdate) string {
 	t.Helper()
-	output, ok := metautil.TerminalOutput(update.Meta)
+	output, ok := eventmeta.TerminalOutput(update.Meta)
 	if !ok {
 		t.Fatalf("meta = %#v, want terminal_output", update.Meta)
 	}
@@ -882,7 +882,7 @@ func toolTerminalOutputText(t *testing.T, update eventstream.ToolCallUpdate) str
 
 func assertStreamTerminalInfo(t *testing.T, meta map[string]any, terminalID string) {
 	t.Helper()
-	info, ok := metautil.TerminalInfo(meta)
+	info, ok := eventmeta.TerminalInfo(meta)
 	if !ok || info.TerminalID != terminalID {
 		t.Fatalf("terminal_info = %#v, want %q", meta, terminalID)
 	}
@@ -906,9 +906,9 @@ func stringPtrValue(value *string) string {
 }
 
 func runtimeTaskMeta(meta map[string]any) map[string]any {
-	caelis, _ := meta[metautil.Root].(map[string]any)
-	runtimeMeta, _ := caelis[metautil.Runtime].(map[string]any)
-	taskMeta, _ := runtimeMeta[metautil.RuntimeTask].(map[string]any)
+	caelis, _ := meta[eventmeta.Root].(map[string]any)
+	runtimeMeta, _ := caelis[eventmeta.Runtime].(map[string]any)
+	taskMeta, _ := runtimeMeta[eventmeta.RuntimeTask].(map[string]any)
 	return taskMeta
 }
 

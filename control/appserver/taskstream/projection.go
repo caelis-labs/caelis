@@ -10,8 +10,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 const (
@@ -117,7 +117,7 @@ func streamTerminalExitID(req taskFrameProjectionRequest, frame stream.Frame) st
 
 func streamToolUpdateEnvelope(req taskFrameProjectionRequest, frame stream.Frame, status string, includeStatus bool, isErr bool, terminalText string, meta map[string]any, includeDisplayTerminal bool) eventstream.Envelope {
 	if frame.TruncatedBefore > 0 {
-		meta = metautil.WithCompactRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
+		meta = eventmeta.WithCompactRuntimeSection(meta, eventmeta.RuntimeStream, map[string]any{
 			runtimeStreamTruncatedMetaKey:   true,
 			runtimeStreamTruncatedBeforeKey: frame.TruncatedBefore,
 		})
@@ -132,7 +132,7 @@ func streamToolUpdateEnvelope(req taskFrameProjectionRequest, frame stream.Frame
 		Meta:          streamFrameToolMeta(meta, req.TaskHandle),
 	}
 	if terminalText != "" {
-		update.Meta = metautil.WithTerminalOutput(update.Meta, streamDisplayTerminalID(req, frame), terminalText)
+		update.Meta = eventmeta.WithTerminalOutput(update.Meta, streamDisplayTerminalID(req, frame), terminalText)
 	}
 	if includeStatus {
 		statusText := taskStreamToolStatus(status)
@@ -144,7 +144,7 @@ func streamToolUpdateEnvelope(req taskFrameProjectionRequest, frame stream.Frame
 			// withCommandDisplayTerminal preserves the Zed-compatible empty terminal
 			// anchor and installs the final terminal metadata. The stream close frame
 			// is the authoritative runtime exit-code carrier, so retain it here.
-			update.Meta = metautil.WithTerminalExit(update.Meta, streamTerminalExitID(req, frame), frame.ExitCode, nil)
+			update.Meta = eventmeta.WithTerminalExit(update.Meta, streamTerminalExitID(req, frame), frame.ExitCode, nil)
 		}
 	}
 	scope := req.Scope
@@ -168,15 +168,15 @@ func streamToolUpdateEnvelope(req taskFrameProjectionRequest, frame stream.Frame
 func withCommandDisplayTerminal(update eventstream.ToolCallUpdate, toolCallID string, toolName string) eventstream.ToolCallUpdate {
 	toolName = strings.TrimSpace(toolName)
 	if toolName != "" {
-		update.Meta = metautil.WithRuntimeSection(update.Meta, metautil.RuntimeTool, map[string]any{
-			metautil.RuntimeToolName: toolName,
+		update.Meta = eventmeta.WithRuntimeSection(update.Meta, eventmeta.RuntimeTool, map[string]any{
+			eventmeta.RuntimeToolName: toolName,
 		})
 	}
 	terminalID, ok := commandDisplayTerminalID(toolCallID, toolName)
 	if !ok {
 		return update
 	}
-	update.Meta = metautil.WithTerminalInfo(update.Meta, terminalID)
+	update.Meta = eventmeta.WithTerminalInfo(update.Meta, terminalID)
 	update.Content = []eventstream.ToolCallContent{{Type: "terminal", TerminalID: terminalID}}
 	return update
 }
@@ -214,7 +214,7 @@ func streamFrameMetaForEnvelope(isErr bool) map[string]any {
 	if !isErr {
 		return nil
 	}
-	return metautil.WithCompactRuntimeSection(nil, metautil.RuntimeTool, map[string]any{"error": true})
+	return eventmeta.WithCompactRuntimeSection(nil, eventmeta.RuntimeTool, map[string]any{"error": true})
 }
 
 func subagentFinalToolStatus(frame stream.Frame) (string, bool) {
@@ -251,7 +251,7 @@ func streamFrameToolMeta(meta map[string]any, taskHandle string) map[string]any 
 	if taskHandle == "" {
 		return meta
 	}
-	return metautil.WithCompactRuntimeSection(meta, metautil.RuntimeTool, map[string]any{
+	return eventmeta.WithCompactRuntimeSection(meta, eventmeta.RuntimeTool, map[string]any{
 		runtimeToolTargetHandleMetaKey: taskHandle,
 	})
 }
@@ -366,15 +366,15 @@ func streamFrameSessionEventIsParentToolEcho(req taskFrameProjectionRequest, eve
 }
 
 func streamFrameEventMeta(meta map[string]any) map[string]any {
-	return metautil.WithCompactRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamMode: "append",
+	return eventmeta.WithCompactRuntimeSection(meta, eventmeta.RuntimeStream, map[string]any{
+		eventmeta.RuntimeStreamMode: "append",
 	})
 }
 
 func streamFrameMeta(mode string, outputCursor int64) map[string]any {
-	return metautil.WithCompactRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamMode:   strings.TrimSpace(mode),
-		metautil.RuntimeOutputCursor: max(outputCursor, 0),
+	return eventmeta.WithCompactRuntimeSection(nil, eventmeta.RuntimeStream, map[string]any{
+		eventmeta.RuntimeStreamMode:   strings.TrimSpace(mode),
+		eventmeta.RuntimeOutputCursor: max(outputCursor, 0),
 	})
 }
 

@@ -62,7 +62,7 @@ jq -e \
       profiles: [.model_profiles.profiles[] | select(.id == $profile)]
     },
     sandbox: {requested_type: "host"},
-    runtime: {approval_mode: "manual", policy_profile: "workspace-write"},
+    runtime: {approval_mode: "auto-review", policy_profile: "workspace-write"},
     agent_bindings: {},
     plugins: []
   }
@@ -127,7 +127,6 @@ acpx_base=(
   acpx
   --agent "$agent_command"
   --cwd "$run_dir/workspace"
-  --approve-all
   --non-interactive-permissions fail
   --format json
   --json-strict
@@ -151,7 +150,7 @@ HOME="$run_dir/acpx-home" "${acpx_base[@]}" prompt -s typed \
   'This process must load the existing ACP Session. Reply exactly ACP_RESUME_OK.' \
   >"$run_dir/logs/prompt-resume.jsonl" 2>"$run_dir/logs/prompt-resume.stderr" || acpx_status=1
 HOME="$run_dir/acpx-home" "${acpx_base[@]}" prompt -s typed \
-  "Use RunCommand, not Write or Patch, to run: printf '%s' ACP_TASK_FILE_OK > $run_dir/workspace/acp-task.txt && cat $run_dir/workspace/acp-task.txt. If Host permission is required, retry the same command with require_escalated and a concrete justification. Then reply exactly ACP_TASK_OK." \
+  "Use RunCommand, not Write or Patch, to run: printf '%s' ACP_TASK_FILE_OK > $run_dir/workspace/acp-task.txt && cat $run_dir/workspace/acp-task.txt. Then reply exactly ACP_TASK_OK." \
   >"$run_dir/logs/prompt-task.jsonl" 2>"$run_dir/logs/prompt-task.stderr" || acpx_status=1
 # Prompt commands share the queue owner, while session/list opens a fresh ACP
 # connection. Let the one-second owner TTL expire before starting a second Host
@@ -203,7 +202,7 @@ jq -e -s '
     and .params.update.kind == "execute"
     and .params.update.status == "completed")
 ' "$run_dir/logs/prompt-task.jsonl" >/dev/null || structured_status=1
-jq -e -s 'any(.[]; .method == "session/request_permission")' \
+jq -e -s 'all(.[]; .method != "session/request_permission")' \
   "$run_dir/logs/prompt-task.jsonl" >/dev/null || structured_status=1
 jq -e --arg session_id "$acpx_session_id" --arg cwd "$run_dir/workspace" '
   .cwd == $cwd
@@ -239,7 +238,7 @@ jq -n \
   printf -- '- Run: `%s`\n' "$run_id"
   printf -- '- Commit: `%s`\n' "$commit"
   printf -- '- Deterministic protocol/product/TUI gates: `%s`\n' "$gate_status"
-  printf -- '- Real acpx initialize/resume/prompt/task/list and local record close: `%s`\n' "$acpx_status"
+  printf -- '- Real acpx initialize/resume/prompt/task/list under Host auto-review and local record close: `%s`\n' "$acpx_status"
   printf -- '- Structured JSON and marker validation: `%s`\n' "$structured_status"
   printf -- '- Passed: `%s`\n' "$passed"
 } >"$run_dir/report.md"

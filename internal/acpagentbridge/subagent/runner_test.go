@@ -17,8 +17,8 @@ import (
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 type detachedChildContextMarker struct{}
@@ -48,9 +48,7 @@ func TestSubagentSessionMetaMarksParentAndTask(t *testing.T) {
 func TestChildACPUpdatePreservesUIOnlyRuntimeToolIdentity(t *testing.T) {
 	t.Parallel()
 
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "SendMessage",
-	})
+	meta := acpmeta.WithToolName(nil, "SendMessage")
 	envelope := client.UpdateEnvelope{
 		SessionID: "child-session",
 		Update: client.ToolCall{
@@ -70,7 +68,7 @@ func TestChildACPUpdatePreservesUIOnlyRuntimeToolIdentity(t *testing.T) {
 	if update == nil {
 		t.Fatal("acpUpdateEvent() = nil, want tool event")
 	}
-	got := metautil.String(update.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName)
+	got := acpmeta.ToolName(update.Meta)
 	if got != "SendMessage" {
 		t.Fatalf("runtime tool name = %q, want external UI-only presentation identity preserved", got)
 	}
@@ -595,7 +593,7 @@ func TestRunnerRestoresGrokExecutePresentationForSpawnStream(t *testing.T) {
 	if update == nil || update.Kind != eventstream.ToolKindExecute || update.Title != "run_terminal_command" {
 		t.Fatalf("Spawn Grok execute update = %#v, want anonymous standard execute presentation", update)
 	}
-	if exactName := metautil.String(update.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); exactName != "" {
+	if exactName := acpmeta.ToolName(update.Meta); exactName != "" {
 		t.Fatalf("Spawn runtime exact tool name = %q, want none", exactName)
 	}
 }

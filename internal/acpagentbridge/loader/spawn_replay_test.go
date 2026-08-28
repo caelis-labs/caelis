@@ -5,7 +5,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
 func TestSpawnReplayCanonicalParentResultWinsOverEarlierTaskWait(t *testing.T) {
@@ -279,7 +279,7 @@ func TestSpawnReplayDropsStaleSuccessWhenFailureHasNoReason(t *testing.T) {
 		Content: []eventstream.ToolCallContent{{
 			Type: "content", Content: eventstream.TextContent{Type: "text", Text: "stale completed final"},
 		}},
-		Meta: metautil.WithTerminalOutput(nil, "spawn-alpha", "stale completed final"),
+		Meta: acpmeta.WithTerminalOutput(nil, "spawn-alpha", "stale completed final"),
 	}, map[string]any{
 		"state": "cancelled", "turn_id": "turn-1", "final_message": "stale completed final",
 	})

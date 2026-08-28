@@ -7,7 +7,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/jsonvalue"
 )
 
 type acpEnvelopeParticipantScope struct {
@@ -61,7 +61,7 @@ func applyACPParticipantEnvelopeScope(env *eventstream.Envelope, binding session
 }
 
 func applyACPParticipantDisplayMeta(meta map[string]any, binding session.ParticipantBinding, agent string) map[string]any {
-	out := metautil.CloneMap(meta)
+	out := jsonvalue.CloneMap(meta)
 	if out == nil {
 		out = map[string]any{}
 	}
@@ -84,7 +84,7 @@ func eventstreamUpdateFromClient(env client.UpdateEnvelope) eventstream.Update {
 			SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
 			Content:       rawContentValue(typed.Content),
 			MessageID:     strings.TrimSpace(typed.MessageID),
-			Meta:          metautil.CloneMap(typed.Meta),
+			Meta:          jsonvalue.CloneMap(typed.Meta),
 		}
 	case client.ToolCall:
 		return decodeEventstreamUpdate(typed, env.Raw)

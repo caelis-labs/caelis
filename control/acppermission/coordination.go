@@ -9,7 +9,6 @@ import (
 	sdkapproval "github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 // DecodePermissionRequest converts the ACP permission wire request into
@@ -27,7 +26,7 @@ func DecodePermissionRequest(wire eventstream.RequestPermissionRequest) (*sessio
 		return nil, fmt.Errorf("control/acppermission: invalid permission options: %w", err)
 	}
 	toolCall := permissionToolCallFromWire(wire.ToolCall)
-	meta := metautil.Merge(wire.ToolCall.Meta, wire.Meta)
+	meta := mergePermissionMeta(wire.ToolCall.Meta, wire.Meta)
 	toolCall.Name = canonicalPermissionToolName(meta, toolCall)
 	approval := &session.ProtocolApproval{ToolCall: toolCall}
 	for _, option := range wire.Options {
@@ -57,9 +56,7 @@ func EncodePermissionRequest(ref session.SessionRef, approval *session.ProtocolA
 			Title: title, Kind: kind, Status: status,
 			RawInput: permissionMapOrNil(normalized.ToolCall.RawInput), RawOutput: permissionMapOrNil(normalized.ToolCall.RawOutput),
 			Content: permissionToolContentToWire(normalized.ToolCall.Content),
-			Meta: metautil.WithRuntimeSection(meta, metautil.RuntimeTool, map[string]any{
-				metautil.RuntimeToolName: normalized.ToolCall.Name,
-			}),
+			Meta:    permissionToolMeta(meta, normalized.ToolCall.Name),
 		},
 		Meta: session.CloneState(meta),
 	}
@@ -163,7 +160,7 @@ func permissionMapOrNil(in map[string]any) any {
 }
 
 func canonicalPermissionToolName(meta map[string]any, toolCall session.ProtocolToolCall) string {
-	if name := metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); name != "" {
+	if name := permissionToolName(meta); name != "" {
 		return name
 	}
 	if title := strings.TrimSpace(toolCall.Title); title != "" {

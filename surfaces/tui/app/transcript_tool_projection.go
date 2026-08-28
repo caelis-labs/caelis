@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 )
@@ -282,14 +281,14 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 }
 
 func transcriptRecoveredToolInput(meta map[string]any) map[string]any {
-	caelisMeta, _ := meta[metautil.Root].(map[string]any)
+	caelisMeta, _ := meta["caelis"].(map[string]any)
 	displayMeta, _ := caelisMeta[toolDisplayMetaSection].(map[string]any)
 	recoveredInput, _ := displayMeta[toolDisplayMetaInputKey].(map[string]any)
-	return metautil.CloneMap(recoveredInput)
+	return transcript.CloneAnyMap(recoveredInput)
 }
 
 func toolDisplayExplorationVerb(meta map[string]any) string {
-	return metautil.String(meta, metautil.Root, toolDisplayMetaSection, toolDisplayMetaExplorationKey)
+	return transcript.MetaString(meta, "caelis", toolDisplayMetaSection, toolDisplayMetaExplorationKey)
 }
 
 func taskWriteFailureDisplayOutput(rawOutput map[string]any, meta map[string]any, output string, taskHandle string, status string, toolErr bool) string {
@@ -316,17 +315,13 @@ func taskWriteFailureDisplayOutput(rawOutput map[string]any, meta map[string]any
 }
 
 func transcriptToolOutputRange(meta map[string]any) (end int64, endKnown bool, start int64, startKnown bool) {
-	streamMode := metautil.String(meta,
-		metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamMode)
+	streamMode := transcript.MetaString(meta, "caelis", "runtime", "stream", "mode")
 	if streamMode != "" {
-		end, endKnown = metautil.Int64(meta,
-			metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeOutputCursor)
+		end, endKnown = transcript.MetaInt64(meta, "caelis", "runtime", "stream", "output_cursor")
 	} else {
-		end, endKnown = metautil.Int64(meta,
-			metautil.Root, metautil.Runtime, metautil.RuntimeTask, metautil.RuntimeOutputCursor)
+		end, endKnown = transcript.MetaInt64(meta, "caelis", "runtime", "task", "output_cursor")
 	}
-	start, startKnown = metautil.Int64(meta,
-		metautil.Root, metautil.Runtime, metautil.RuntimeTask, metautil.RuntimeOutputStart)
+	start, startKnown = transcript.MetaInt64(meta, "caelis", "runtime", "task", "output_start_cursor")
 	if end < 0 {
 		end, endKnown = 0, false
 	}
@@ -337,8 +332,8 @@ func transcriptToolOutputRange(meta map[string]any) (end int64, endKnown bool, s
 }
 
 func transcriptToolObservationDelta(meta map[string]any) (string, bool) {
-	taskMeta := metautil.RuntimeSection(meta, metautil.RuntimeTask)
-	delta, ok := taskMeta[metautil.RuntimeOutputDelta].(string)
+	taskMeta := transcript.RuntimeTaskMeta(meta)
+	delta, ok := taskMeta["output_delta"].(string)
 	return delta, ok && delta != ""
 }
 

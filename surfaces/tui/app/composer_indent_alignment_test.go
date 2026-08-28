@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/evalharness"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -67,7 +66,7 @@ func TestComposerSitsOneColumnPastTranscriptGutter(t *testing.T) {
 						Status:        stringPtr(eventstream.ToolStatusCompleted),
 						RawInput:      map[string]any{"command": "ls -la ~"},
 						RawOutput:     map[string]any{"exit_code": 0},
-						Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "ok\n"),
+						Meta:          testMeta.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "ok\n"),
 					},
 				},
 				completedRegressionTurn("sess", ""),

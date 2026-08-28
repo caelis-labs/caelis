@@ -26,10 +26,10 @@ import (
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestRuntimeAgentInitializeCapabilitiesDefault(t *testing.T) {
@@ -567,7 +567,9 @@ func TestRuntimeAgentPromptContinuesAfterObservationGap(t *testing.T) {
 	if !ok || strings.TrimSpace(gapUpdate.MessageID) == "" {
 		t.Fatalf("gap update = %#v, want independently keyed ACP notice", callbacks.notifications[0].Update)
 	}
-	observation := metautil.RuntimeSection(gapUpdate.Meta, "observation")
+	caelisMeta, _ := gapUpdate.Meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelisMeta["runtime"].(map[string]any)
+	observation, _ := runtimeMeta["observation"].(map[string]any)
 	if observation["code"] != "observation_gap" || observation["dropped"] != uint64(17) {
 		t.Fatalf("gap metadata = %#v", observation)
 	}
@@ -836,7 +838,7 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 	if err := json.Unmarshal(rawToolMeta, &toolMeta); err != nil {
 		t.Fatalf("decode client permission tool metadata: %v", err)
 	}
-	if got := metautil.String(toolMeta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RunCommand" {
+	if got := acpmeta.ToolName(toolMeta); got != "RunCommand" {
 		t.Fatalf("client permission tool name = %q, want RUN_COMMAND", got)
 	}
 	if got := session.NormalizeProtocolRawMap(cb.last.ToolCall.RawInput)["command"]; got != "git restore hello.py" {
@@ -1852,7 +1854,7 @@ func terminalOutputPayloads(notifications []eventstream.SessionNotification, too
 		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
 			continue
 		}
-		if output, ok := metautil.TerminalOutput(update.Meta); ok {
+		if output, ok := acpmeta.ReadTerminalOutput(update.Meta); ok {
 			out = append(out, output.Data)
 		}
 	}
@@ -1913,7 +1915,7 @@ func hasTerminalContent(notifications []eventstream.SessionNotification, toolCal
 		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
 			continue
 		}
-		output, ok := metautil.TerminalOutput(update.Meta)
+		output, ok := acpmeta.ReadTerminalOutput(update.Meta)
 		if ok && strings.TrimSpace(output.TerminalID) == terminalID && strings.Contains(output.Data, text) {
 			return true
 		}
@@ -1928,14 +1930,14 @@ func hasTerminalInfo(notifications []eventstream.SessionNotification, toolCallID
 			if strings.TrimSpace(update.ToolCallID) != toolCallID {
 				continue
 			}
-			if info, ok := metautil.TerminalInfo(update.Meta); ok && strings.TrimSpace(info.TerminalID) == terminalID {
+			if info, ok := acpmeta.ReadTerminalInfo(update.Meta); ok && strings.TrimSpace(info.TerminalID) == terminalID {
 				return true
 			}
 		case eventstream.ToolCallUpdate:
 			if strings.TrimSpace(update.ToolCallID) != toolCallID {
 				continue
 			}
-			if info, ok := metautil.TerminalInfo(update.Meta); ok && strings.TrimSpace(info.TerminalID) == terminalID {
+			if info, ok := acpmeta.ReadTerminalInfo(update.Meta); ok && strings.TrimSpace(info.TerminalID) == terminalID {
 				return true
 			}
 		}

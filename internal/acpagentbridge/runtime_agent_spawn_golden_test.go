@@ -18,8 +18,8 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
@@ -176,9 +176,7 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 	spawnKind := eventstream.ToolKindExecute
 	waitTitle := "Task wait"
 	waitKind := eventstream.ToolKindExecute
-	spawnMeta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Spawn",
-	})
+	spawnMeta := acpmeta.WithToolName(nil, "Spawn")
 	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"}
 	turn := &testControlTurn{events: make(chan eventstream.Envelope)}
 	subscription := &spawnGoldenSubscription{events: make(chan eventstream.Envelope), closed: make(chan struct{})}

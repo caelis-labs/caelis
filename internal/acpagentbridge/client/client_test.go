@@ -13,7 +13,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
 func TestInitializeUsesSDKClientCapabilities(t *testing.T) {
@@ -83,7 +83,7 @@ func TestInitializeUsesSDKClientCapabilities(t *testing.T) {
 	if !request.ClientCapabilities.Auth.Terminal {
 		t.Fatal("terminal auth capability = false, want true")
 	}
-	if got := string(request.ClientCapabilities.Meta[metautil.TerminalOutputKey]); got != "true" {
+	if got := string(request.ClientCapabilities.Meta[acpmeta.TerminalOutputKey]); got != "true" {
 		t.Fatalf("terminal output capability = %s, want true", got)
 	}
 	if request.ClientInfo == nil || request.ClientInfo.Name != "caelis-test" || request.ClientInfo.Version != "test" {
@@ -656,7 +656,7 @@ func TestSDKWireIngressRestoresMissingGrokExecuteKindWithoutExactIdentity(t *tes
 	if call.Kind != eventstream.ToolKindExecute || call.Title != "run_terminal_command" || rawInput["command"] != "git status --short" {
 		t.Fatalf("normalized Grok execute call = %#v", call)
 	}
-	if exactName := metautil.String(call.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); exactName != "" {
+	if exactName := acpmeta.ToolName(call.Meta); exactName != "" {
 		t.Fatalf("runtime exact tool name = %q, want provider name to remain presentation-only evidence", exactName)
 	}
 	var rawCall map[string]any

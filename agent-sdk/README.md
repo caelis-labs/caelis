@@ -26,8 +26,9 @@ collaboration language shared by built-in and external Agents. `acp-go-sdk`
 owns standard ACP wire contracts and connections. Control owns its
 Surface-facing update and permission DTOs plus canonical projection in
 `control/appserver/eventstream` and `control/appserver/projection`; the
-remaining product `protocol/acp` code is transitional metadata compatibility
-that must converge into the owner that uses it.
+retired product `protocol/acp` tree is guarded against recreation, and Caelis
+compatibility metadata remains private to its Control, Host, adapter, or
+Surface owner.
 
 ## Package Layout
 

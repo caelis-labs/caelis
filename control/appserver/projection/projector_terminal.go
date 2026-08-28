@@ -6,7 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 )
 
 func terminalTextContent(content any) string {
@@ -56,7 +56,7 @@ func withDisplayTerminal(call eventstream.ToolCall, name string, args map[string
 	if !ok {
 		return call
 	}
-	call.Meta = metautil.WithTerminalInfo(call.Meta, terminalID)
+	call.Meta = eventmeta.WithTerminalInfo(call.Meta, terminalID)
 	call.Meta, call.Content = terminalExtensionMetaFromContent(call.Meta, terminalID, call.Content)
 	return call
 }
@@ -67,10 +67,10 @@ func withDisplayTerminalUpdate(update eventstream.ToolCallUpdate, toolCallID str
 	if !ok || strings.TrimSpace(terminalID) == "" {
 		return update
 	}
-	update.Meta = metautil.WithTerminalInfo(update.Meta, terminalID)
+	update.Meta = eventmeta.WithTerminalInfo(update.Meta, terminalID)
 	update.Meta, update.Content = terminalExtensionMetaFromContent(update.Meta, terminalID, update.Content)
 	if updateStatusFinal(update.Status) {
-		update.Meta = metautil.WithTerminalExit(update.Meta, terminalID, terminalExitCode(update.RawOutput), nil)
+		update.Meta = eventmeta.WithTerminalExit(update.Meta, terminalID, terminalExitCode(update.RawOutput), nil)
 	}
 	return update
 }
@@ -81,7 +81,7 @@ func terminalExtensionMetaFromContent(meta map[string]any, terminalID string, co
 		return meta, content
 	}
 	if len(content) == 0 {
-		return metautil.WithTerminalInfo(meta, terminalID), []eventstream.ToolCallContent{terminalAnchorContent(terminalID)}
+		return eventmeta.WithTerminalInfo(meta, terminalID), []eventstream.ToolCallContent{terminalAnchorContent(terminalID)}
 	}
 	out := make([]eventstream.ToolCallContent, 0, len(content))
 	var text strings.Builder
@@ -100,9 +100,9 @@ func terminalExtensionMetaFromContent(meta map[string]any, terminalID string, co
 	if terminalID == "" {
 		return meta, out
 	}
-	meta = metautil.WithTerminalInfo(meta, terminalID)
+	meta = eventmeta.WithTerminalInfo(meta, terminalID)
 	if text.Len() > 0 {
-		meta = metautil.WithTerminalOutput(meta, terminalID, text.String())
+		meta = eventmeta.WithTerminalOutput(meta, terminalID, text.String())
 	}
 	out = append(out, terminalAnchorContent(terminalID))
 	return meta, out
@@ -216,12 +216,12 @@ func protocolCanonicalEventToolName(event *session.Event, update *session.Protoc
 }
 
 func protocolToolNameFromMeta(meta map[string]any) string {
-	return strings.TrimSpace(metautil.String(
+	return strings.TrimSpace(eventmeta.String(
 		meta,
-		metautil.Root,
-		metautil.Runtime,
-		metautil.RuntimeTool,
-		metautil.RuntimeToolName,
+		eventmeta.Root,
+		eventmeta.Runtime,
+		eventmeta.RuntimeTool,
+		eventmeta.RuntimeToolName,
 	))
 }
 

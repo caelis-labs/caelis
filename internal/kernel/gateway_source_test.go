@@ -8,7 +8,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestForwardSourceEventsKeepsObservationGapTransientAndContinues(t *testing.T) {
@@ -48,7 +47,7 @@ func TestForwardSourceEventsKeepsObservationGapTransientAndContinues(t *testing.
 	if got[1].Notice != acpbridge.RuntimeObservationGapNotice {
 		t.Fatalf("gap Notice = %q, want stable presentation text", got[1].Notice)
 	}
-	observation := metautil.RuntimeSection(got[1].Meta, "observation")
+	observation := testRuntimeMetaSection(got[1].Meta, "observation")
 	if observation["code"] != "observation_gap" {
 		t.Fatalf("gap observation code = %#v, want observation_gap", observation["code"])
 	}
@@ -99,8 +98,8 @@ func TestForwardSourceEventsPublishesTaskOwnedRunCommandFinalWithoutTerminalByte
 	t.Parallel()
 
 	handle := newTestTurnHandle()
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTask, map[string]any{
-		"task_id": "task-1", metautil.RuntimeOutputDelta: "ok\n",
+	meta := testRuntimeMeta("task", map[string]any{
+		"task_id": "task-1", "output_delta": "ok\n",
 		"kind": "command", "state": "completed", "running": false,
 	})
 	source := acpbridge.SourceStream{Events: func(yield func(acpbridge.SourceEvent, error) bool) {
@@ -130,10 +129,10 @@ func TestForwardSourceEventsPublishesTaskOwnedRunCommandFinalWithoutTerminalByte
 	if !ok || stringPtrValue(update.Status) != eventstream.ToolStatusCompleted {
 		t.Fatalf("live final update = %#v, want completed ToolCallUpdate", got[0].Update)
 	}
-	if _, ok := metautil.TerminalOutput(update.Meta); ok {
+	if _, ok := testTerminalOutputData(update.Meta); ok {
 		t.Fatalf("live final update meta = %#v, want no terminal bytes", update.Meta)
 	}
-	if delta := metautil.RuntimeSection(got[0].Meta, metautil.RuntimeTask)[metautil.RuntimeOutputDelta]; delta != nil {
+	if delta := testRuntimeMetaSection(got[0].Meta, "task")["output_delta"]; delta != nil {
 		t.Fatalf("live final envelope meta output_delta = %#v, want Task stream ownership", delta)
 	}
 }
@@ -221,7 +220,7 @@ func TestForwardSourceEventsKeepsPairedNativeTerminalAsSingleLiveAuthority(t *te
 	t.Parallel()
 
 	handle := newTestTurnHandle()
-	meta := metautil.WithTerminalOutput(nil, "command-1", "exact terminal delta\n")
+	meta := testTerminalOutputMeta("command-1", "exact terminal delta\n")
 	status := eventstream.ToolStatusInProgress
 	native := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,
@@ -260,10 +259,38 @@ func TestForwardSourceEventsKeepsPairedNativeTerminalAsSingleLiveAuthority(t *te
 	if !ok {
 		t.Fatalf("terminal update = %T, want ToolCallUpdate", got[0].Update)
 	}
-	output, ok := metautil.TerminalOutput(update.Meta)
-	if !ok || output.Data != "exact terminal delta\n" {
+	output, ok := testTerminalOutputData(update.Meta)
+	if !ok || output != "exact terminal delta\n" {
 		t.Fatalf("terminal output = %#v, %v; want exact native delta", output, ok)
 	}
+}
+
+func testRuntimeMeta(section string, values map[string]any) map[string]any {
+	return map[string]any{"caelis": map[string]any{
+		"version": 1,
+		"runtime": map[string]any{section: values},
+	}}
+}
+
+func testRuntimeMetaSection(meta map[string]any, section string) map[string]any {
+	caelisMeta, _ := meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelisMeta["runtime"].(map[string]any)
+	values, _ := runtimeMeta[section].(map[string]any)
+	return values
+}
+
+func testTerminalOutputMeta(terminalID, data string) map[string]any {
+	return map[string]any{"terminal_output": map[string]any{
+		"terminal_id": terminalID,
+		"data":        data,
+	}}
+}
+
+func testTerminalOutputData(meta map[string]any) (string, bool) {
+	values, _ := meta["terminal_output"].(map[string]any)
+	terminalID, _ := values["terminal_id"].(string)
+	data, _ := values["data"].(string)
+	return data, terminalID != "" && data != ""
 }
 
 func TestForwardSourceEventsDoesNotDuplicateNativeUsage(t *testing.T) {

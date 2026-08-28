@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 type turnHandleConfig struct {
@@ -411,12 +410,10 @@ func approvalEventMeta(req *agent.ApprovalRequest, invocation *session.EventInvo
 		return meta
 	}
 	invocationCopy := session.CloneEventInvocation(*invocation)
-	return metautil.Merge(meta, map[string]any{
-		metautil.Root: map[string]any{
-			"invocation": map[string]any{
-				"provider": strings.TrimSpace(invocationCopy.Provider),
-				"model":    strings.TrimSpace(invocationCopy.Model),
-			},
+	return mergeKernelMeta(meta, map[string]any{
+		"invocation": map[string]any{
+			"provider": strings.TrimSpace(invocationCopy.Provider),
+			"model":    strings.TrimSpace(invocationCopy.Model),
 		},
 	})
 }
@@ -446,11 +443,7 @@ func canonicalApprovalEventMeta(req *agent.ApprovalRequest) map[string]any {
 	if parentCallID == "" && parentTool == "" && parentTaskID == "" {
 		return nil
 	}
-	return metautil.WithCompactRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamParentCallID: parentCallID,
-		metautil.RuntimeStreamParentTool:   parentTool,
-		metautil.RuntimeStreamParentTaskID: parentTaskID,
-	})
+	return approvalRelationMeta(parentCallID, parentTool, parentTaskID)
 }
 
 func approvalParentToolRelation(req *agent.ApprovalRequest) *eventstream.ParentToolRelation {
@@ -661,7 +654,7 @@ func mergeCaelisBridgeMeta(meta map[string]any, bridgeSource string) map[string]
 			"source": strings.TrimSpace(bridgeSource),
 		}
 	}
-	return metautil.Merge(meta, map[string]any{metautil.Root: caelis})
+	return mergeKernelMeta(meta, caelis)
 }
 
 func cloneMap(in map[string]any) map[string]any {

@@ -41,11 +41,11 @@ built-in Agent does not need to serialize calls through JSON-RPC.
 
 The SDK owns reusable normalized semantics without importing the Caelis product
 ACP adapters. Standard wire contracts and connections come from
-`acp-go-sdk`. Remaining root `protocol/acp` packages are transitional: each
-compatibility or projection capability must move to its Control, Surface,
-reusable SDK, or Host-private adapter owner rather than make that tree a
-permanent standalone layer. Canonical runtime events still carry model and tool
-truth below that protocol view. More detail lives in
+`acp-go-sdk`. The former root `protocol/acp` tree has retired: ACP-shaped
+product envelopes and permission translation live in Control, rendering lives
+in Surface-private projection, and provider compatibility lives at the
+Host-private adapter boundary. Canonical runtime events still carry model and
+tool truth below that protocol view. More detail lives in
 [docs/agent-sdk-boundary.md](agent-sdk-boundary.md) and
 [docs/acp-projection-architecture.md](acp-projection-architecture.md).
 
@@ -78,12 +78,10 @@ Document responsibilities are intentionally separate:
   `surfaces/internal/transcript`: private shared presentation projection used
   by concrete Surfaces. These packages are not independent product surfaces or
   application-layer entry points.
-- `protocol/acp/*`: transitional documented `_meta` compatibility contracts.
-  The root facade has retired; consumers import only the owning subpackage. The
-  tree owns no transport dispatch interfaces or new aggregate product boundary.
-  Standard method identities, wire contracts, and connection behavior come
-  from `acp-go-sdk`; the remaining metadata compatibility migrates by semantic
-  owner.
+- `protocol/acp/*`: retired and guarded against recreation. Standard method
+  identities, wire contracts, and connection behavior come from `acp-go-sdk`;
+  Caelis compatibility metadata is private to the Control, Host, adapter, or
+  Surface owner that produces or consumes it.
 - `agent-sdk/*`: reusable SDK package tree. It owns runtime, model, tool, session,
   sandbox, task, policy, skill, and display contracts and reusable
   implementations.
@@ -343,9 +341,9 @@ Document responsibilities are intentionally separate:
   contracts, and their current implementation. The contracts formerly exposed
   by `ports/gateway` now have one authority here rather than a forwarding port.
   Reusable approval-state and Session-usage semantics remain owned by
-  `agent-sdk/*`, while ACP metadata shape remains owned by
-  `protocol/acp/metautil`; Kernel consumes those owners directly instead of
-  mirroring their helpers.
+  `agent-sdk/*`. Kernel emits only its private legacy presentation fallback;
+  typed Envelope relation fields remain authoritative and no shared ACP
+  metadata facade sits between Kernel and its consumers.
 - other `internal/control*` packages: current Control integration
   implementations that may converge with adjacent `app/*` and `control/*`
   ownership before any later package split.

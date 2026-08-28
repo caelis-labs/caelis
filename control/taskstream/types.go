@@ -120,8 +120,9 @@ type Gap struct {
 	State     task.State `json:"state"`
 }
 
-// Record is one cursor-stamped Task frame or gap. ACP projection belongs to
-// protocol/acp; Control owns authorization, cursor binding, and fan-out.
+// Record is one cursor-stamped Task frame or gap. ACP-shaped Surface projection
+// belongs to control/appserver/taskstream; Control owns authorization, cursor
+// binding, and fan-out.
 type Record struct {
 	Cursor     string         `json:"cursor"`
 	Generation string         `json:"generation"`

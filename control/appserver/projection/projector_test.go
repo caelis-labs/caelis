@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 )
 
 func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
@@ -57,7 +57,7 @@ func TestEventProjectorDoesNotPromoteTraceTextIntoSparseToolUpdateContent(t *tes
 			ToolCallID:    "call-1",
 			Status:        eventstream.ToolStatusCompleted,
 			RawOutput:     map[string]any{"formatted_output": "ok\n", "exit_code": 0},
-			Meta:          metautil.WithTerminalOutput(nil, "call-1", "ok\n"),
+			Meta:          eventmeta.WithTerminalOutput(nil, "call-1", "ok\n"),
 		}},
 	})
 	if err != nil {
@@ -73,7 +73,7 @@ func TestEventProjectorDoesNotPromoteTraceTextIntoSparseToolUpdateContent(t *tes
 	if len(update.Content) != 0 {
 		t.Fatalf("content = %#v, want standard sparse update to remain sparse", update.Content)
 	}
-	if output, ok := metautil.TerminalOutput(update.Meta); !ok || output.Data != "ok\n" {
+	if output, ok := eventmeta.TerminalOutput(update.Meta); !ok || output.Data != "ok\n" {
 		t.Fatalf("terminal output meta = %#v, want provider compatibility output preserved", update.Meta)
 	}
 }
@@ -188,7 +188,7 @@ func assertTerminalAnchor(t *testing.T, content []eventstream.ToolCallContent, t
 
 func assertTerminalInfo(t *testing.T, meta map[string]any, terminalID string) {
 	t.Helper()
-	info, ok := metautil.TerminalInfo(meta)
+	info, ok := eventmeta.TerminalInfo(meta)
 	if !ok || info.TerminalID != terminalID {
 		t.Fatalf("terminal_info = %#v, want terminal id %q", meta, terminalID)
 	}
@@ -196,7 +196,7 @@ func assertTerminalInfo(t *testing.T, meta map[string]any, terminalID string) {
 
 func assertTerminalOutput(t *testing.T, meta map[string]any, terminalID string, text string) {
 	t.Helper()
-	output, ok := metautil.TerminalOutput(meta)
+	output, ok := eventmeta.TerminalOutput(meta)
 	if !ok || output.TerminalID != terminalID || output.Data != text {
 		t.Fatalf("terminal_output = %#v, want terminal id %q text %q", meta, terminalID, text)
 	}
@@ -204,7 +204,7 @@ func assertTerminalOutput(t *testing.T, meta map[string]any, terminalID string, 
 
 func assertTerminalExit(t *testing.T, meta map[string]any, terminalID string) {
 	t.Helper()
-	exit, ok := metautil.TerminalExit(meta)
+	exit, ok := eventmeta.TerminalExit(meta)
 	if !ok || exit.TerminalID != terminalID {
 		t.Fatalf("terminal_exit = %#v, want terminal id %q", meta, terminalID)
 	}
@@ -283,7 +283,7 @@ func TestEventProjectorKeepsGenericProtocolTerminalContentWithoutPromotingExecut
 	if got := terminalTextContent(call.Content[0].Content); got != "ignored body\n" {
 		t.Fatalf("terminal content = %q, want preserved generic body", got)
 	}
-	if _, ok := metautil.TerminalInfo(call.Meta); ok {
+	if _, ok := eventmeta.TerminalInfo(call.Meta); ok {
 		t.Fatalf("meta = %#v, generic execute kind must not gain terminal ownership", call.Meta)
 	}
 }
@@ -971,7 +971,7 @@ func TestEventProjectorDoesNotInferSpawnIdentityFromRawInput(t *testing.T) {
 		t.Fatalf("title = %v, standard execute kind must not become an exact-name title", update.Title)
 	}
 	assertTerminalAnchor(t, update.Content, "terminal-1")
-	if _, ok := metautil.TerminalInfo(update.Meta); ok {
+	if _, ok := eventmeta.TerminalInfo(update.Meta); ok {
 		t.Fatalf("meta = %#v, raw input and generic execute kind must not gain terminal ownership", update.Meta)
 	}
 }
@@ -1018,7 +1018,7 @@ func TestEventProjectorDoesNotAddTerminalInfoToGenericRunningToolUpdate(t *testi
 	if len(update.Content) != 0 {
 		t.Fatalf("content = %#v, want no inferred terminal anchor", update.Content)
 	}
-	if _, ok := metautil.TerminalInfo(update.Meta); ok {
+	if _, ok := eventmeta.TerminalInfo(update.Meta); ok {
 		t.Fatalf("meta = %#v, generic execute kind must not gain terminal ownership", update.Meta)
 	}
 }

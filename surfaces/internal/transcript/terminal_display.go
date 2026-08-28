@@ -7,7 +7,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TerminalFinalWithoutContent(input ToolOutputFallbackInput) bool {
@@ -154,20 +153,20 @@ func TerminalTaskStillRunning(rawOutput map[string]any, meta map[string]any) boo
 }
 
 func HasTerminalPanelMeta(meta map[string]any) bool {
-	if _, ok := metautil.TerminalInfo(meta); ok {
+	if _, ok := ReadTerminalInfo(meta); ok {
 		return true
 	}
-	if _, ok := metautil.TerminalOutput(meta); ok {
+	if _, ok := ReadTerminalOutput(meta); ok {
 		return true
 	}
-	if _, ok := metautil.TerminalExit(meta); ok {
+	if _, ok := ReadTerminalExit(meta); ok {
 		return true
 	}
 	return false
 }
 
 func TerminalRuntimeOutputText(meta map[string]any) string {
-	if output, ok := metautil.TerminalOutput(meta); ok {
+	if output, ok := ReadTerminalOutput(meta); ok {
 		return output.Data
 	}
 	return ""

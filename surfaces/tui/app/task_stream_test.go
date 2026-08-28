@@ -19,7 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestTUISubagentWorkspaceObservesOnlyWhileOpenAndResumesCursor(t *testing.T) {
@@ -49,8 +48,8 @@ func TestTUISubagentWorkspaceObservesOnlyWhileOpenAndResumesCursor(t *testing.T)
 	model.width = 100
 	model.height = 28
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Spawn",
+	meta := testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Spawn",
 	})
 	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
@@ -327,8 +326,8 @@ func TestTUIVisibleSubagentObservationRetriesDirectoryAndSubscriptionFailures(t 
 		TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender,
 	})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Spawn",
+	meta := testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Spawn",
 	})
 	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
@@ -407,8 +406,8 @@ func TestTUIVisibleSubagentObservationKeepsResolvingByParentCall(t *testing.T) {
 		TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender,
 	})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Spawn",
+	meta := testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Spawn",
 	})
 	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,

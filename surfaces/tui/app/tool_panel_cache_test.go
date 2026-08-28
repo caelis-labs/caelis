@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestACPToolPanelRenderCacheReusesUnchangedTerminalBody(t *testing.T) {
@@ -108,7 +107,7 @@ func acpToolPanelUpdate(callID string, command string, output string, status str
 			Kind:          stringPtr(eventstream.ToolKindExecute),
 			Status:        stringPtr(status),
 			RawInput:      map[string]any{"command": command},
-			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), callID, output),
+			Meta:          testMeta.WithTerminalOutput(acpToolNameMeta("RunCommand"), callID, output),
 		},
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
 func TestACPChildTerminalProjectorEmitsOnlyFinalResponseContent(t *testing.T) {
@@ -557,7 +557,7 @@ func TestNormalizeACPStdioTerminalExtensionDoesNotInventTerminalForPlainTool(t *
 	if !ok {
 		t.Fatalf("update = %T, want ToolCall", notification.Update)
 	}
-	if _, ok := metautil.TerminalInfo(call.Meta); ok {
+	if _, ok := acpmeta.ReadTerminalInfo(call.Meta); ok {
 		t.Fatalf("meta = %#v, want no terminal_info for plain tool", call.Meta)
 	}
 	if len(call.Content) != 0 {
@@ -578,16 +578,14 @@ func TestNormalizeACPStdioTerminalExtensionDoesNotInventTerminalForPlainTool(t *
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", notification.Update)
 	}
-	if _, ok := metautil.TerminalExit(update.Meta); ok {
+	if _, ok := acpmeta.ReadTerminalExit(update.Meta); ok {
 		t.Fatalf("meta = %#v, want no terminal_exit for plain tool", update.Meta)
 	}
 }
 
 func TestNormalizeACPStdioTerminalExtensionDoesNotMountFinalOnlySpawn(t *testing.T) {
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Spawn",
-	})
-	meta = metautil.WithTerminalInfo(meta, "spawn-1")
+	meta := acpmeta.WithToolName(nil, "Spawn")
+	meta = acpmeta.WithTerminalInfo(meta, "spawn-1")
 	notification := normalizeACPStdioTerminalExtension(eventstream.SessionNotification{
 		SessionID: "session-1",
 		Update: eventstream.ToolCall{
@@ -607,10 +605,10 @@ func TestNormalizeACPStdioTerminalExtensionDoesNotMountFinalOnlySpawn(t *testing
 	if len(call.Content) != 0 {
 		t.Fatalf("Spawn content = %#v, want no terminal mount", call.Content)
 	}
-	if _, ok := metautil.TerminalInfo(call.Meta); ok {
+	if _, ok := acpmeta.ReadTerminalInfo(call.Meta); ok {
 		t.Fatalf("Spawn meta = %#v, want no terminal_info", call.Meta)
 	}
-	if got := metautil.String(call.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "Spawn" {
+	if got := acpmeta.ToolName(call.Meta); got != "Spawn" {
 		t.Fatalf("Spawn runtime tool name = %q, want preserved", got)
 	}
 }
@@ -641,13 +639,13 @@ func TestNormalizeACPStdioTerminalExtensionKeepsAnchorAndMovesOutputToMeta(t *te
 	if update.Content[0].Content != nil {
 		t.Fatalf("terminal anchor content = %#v, want empty", update.Content[0].Content)
 	}
-	if info, ok := metautil.TerminalInfo(update.Meta); !ok || info.TerminalID != "terminal-1" {
+	if info, ok := acpmeta.ReadTerminalInfo(update.Meta); !ok || info.TerminalID != "terminal-1" {
 		t.Fatalf("terminal_info = %#v, want terminal-1", update.Meta)
 	}
-	if output, ok := metautil.TerminalOutput(update.Meta); !ok || output.TerminalID != "terminal-1" || output.Data != "line\n" {
+	if output, ok := acpmeta.ReadTerminalOutput(update.Meta); !ok || output.TerminalID != "terminal-1" || output.Data != "line\n" {
 		t.Fatalf("terminal_output = %#v, want line output", update.Meta)
 	}
-	if exit, ok := metautil.TerminalExit(update.Meta); !ok || exit.TerminalID != "terminal-1" {
+	if exit, ok := acpmeta.ReadTerminalExit(update.Meta); !ok || exit.TerminalID != "terminal-1" {
 		t.Fatalf("terminal_exit = %#v, want terminal-1", update.Meta)
 	}
 }
@@ -662,14 +660,14 @@ func TestACPNarrativeFilterForwardsTerminalDeltasVerbatim(t *testing.T) {
 				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
 				Status:        &running,
-				Meta:          metautil.WithTerminalOutput(nil, "terminal-1", text),
+				Meta:          acpmeta.WithTerminalOutput(nil, "terminal-1", text),
 			},
 		})
 		if !ok {
 			t.Fatalf("terminal delta %q was suppressed", text)
 		}
 		update := filtered.Update.(eventstream.ToolCallUpdate)
-		output, exists := metautil.TerminalOutput(update.Meta)
+		output, exists := acpmeta.ReadTerminalOutput(update.Meta)
 		if !exists || output.Data != text {
 			t.Fatalf("terminal delta = %#v, want exact producer bytes %q", update.Meta, text)
 		}

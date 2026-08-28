@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
@@ -341,7 +340,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardRawTerminalOutput(t *t
 			Kind:          &kind,
 			Status:        &status,
 			RawOutput:     map[string]any{"stdout": "side acp output\n"},
-			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RunCommand"), "call-1"),
+			Meta:          testMeta.WithTerminalInfo(acpToolNameMeta("RunCommand"), "call-1"),
 		},
 	})
 	if len(events) != 1 {
@@ -367,7 +366,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardRawOutputWithoutToolKi
 			Kind:          stringPtr(eventstream.ToolKindExecute),
 			Status:        &status,
 			RawOutput:     map[string]any{"stdout": "side acp output\n"},
-			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RunCommand"), "call-1"),
+			Meta:          testMeta.WithTerminalInfo(acpToolNameMeta("RunCommand"), "call-1"),
 		},
 	})
 	if len(events) != 1 {
@@ -389,7 +388,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardTerminalContentWithout
 			ToolCallID:    "call-1",
 			Status:        &status,
 			Kind:          stringPtr(eventstream.ToolKindExecute),
-			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "terminal content\n"),
+			Meta:          testMeta.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "terminal content\n"),
 		},
 	})
 	if len(events) != 1 {
@@ -416,7 +415,7 @@ func TestProjectACPEventToTranscriptEventsPrefersStandardContentOverTerminalExte
 				Type:    "content",
 				Content: eventstream.TextContent{Type: "text", Text: "standard ACP content\n"},
 			}},
-			Meta: metautil.WithTerminalOutput(nil, "call-1", "extension fallback\n"),
+			Meta: testMeta.WithTerminalOutput(nil, "call-1", "extension fallback\n"),
 		},
 	})
 	if len(events) != 1 {
@@ -438,7 +437,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysTerminalContentWithoutToolKind
 			ToolCallID:    "call-1",
 			Status:        &status,
 			Kind:          stringPtr(eventstream.ToolKindExecute),
-			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "terminal content output\n"),
+			Meta:          testMeta.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "terminal content output\n"),
 		},
 	})
 	if len(events) != 1 {
@@ -464,7 +463,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysStringRawOutput(t *testing.T) 
 			Status:        &status,
 			Kind:          stringPtr(eventstream.ToolKindExecute),
 			RawOutput:     "string raw output\n",
-			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RunCommand"), "call-1"),
+			Meta:          testMeta.WithTerminalInfo(acpToolNameMeta("RunCommand"), "call-1"),
 		},
 	})
 	if len(events) != 1 {
@@ -565,8 +564,8 @@ func TestProjectACPEventToTranscriptEventsMarksUnavailableTerminalPrefix(t *test
 	status := eventstream.ToolStatusInProgress
 	kind := eventstream.ToolKindExecute
 	meta := runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "retained tail\n", "append")
-	meta = metautil.WithRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamMode: "append",
+	meta = testMeta.WithRuntimeSection(meta, testMeta.RuntimeStream, map[string]any{
+		testMeta.RuntimeStreamMode: "append",
 		"truncated":                true,
 		"truncated_before":         int64(65539),
 	})
@@ -632,9 +631,9 @@ func runningSnapshotTerminalMeta(toolName string, taskID string, terminalID stri
 			"runtime": runtime,
 		},
 	}
-	meta = metautil.WithTerminalInfo(meta, terminalID)
+	meta = testMeta.WithTerminalInfo(meta, terminalID)
 	if streamMode != "" {
-		meta = metautil.WithTerminalOutput(meta, terminalID, output)
+		meta = testMeta.WithTerminalOutput(meta, terminalID, output)
 	}
 	return meta
 }

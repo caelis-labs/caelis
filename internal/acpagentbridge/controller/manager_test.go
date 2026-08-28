@@ -22,10 +22,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/jsonvalue"
 )
 
 func TestContentChunkTextPreservesStreamWhitespace(t *testing.T) {
@@ -2888,7 +2889,7 @@ func TestParticipantRunSharesCanonicalTerminalCompatibilityAcrossSourceViews(t *
 			Kind:          testStringPtr(eventstream.ToolKindExecute),
 			Status:        testStringPtr(eventstream.ToolStatusInProgress),
 			Meta: map[string]any{
-				metautil.TerminalOutputDeltaKey: map[string]any{
+				acpmeta.TerminalOutputDeltaKey: map[string]any{
 					"terminal_id": "command-1",
 					"data":        "participant output\n",
 				},
@@ -2919,11 +2920,11 @@ func TestParticipantRunSharesCanonicalTerminalCompatibilityAcrossSourceViews(t *
 		"canonical": canonicalUpdate.Meta,
 		"native":    nativeUpdate.Meta,
 	} {
-		output, ok := metautil.TerminalOutput(meta)
+		output, ok := acpmeta.ReadTerminalOutput(meta)
 		if !ok || output.TerminalID != "command-1" || output.Data != "participant output\n" {
 			t.Fatalf("%s terminal output = %#v, %v; want shared canonical output", name, output, ok)
 		}
-		if _, ok := meta[metautil.TerminalOutputDeltaKey]; ok {
+		if _, ok := meta[acpmeta.TerminalOutputDeltaKey]; ok {
 			t.Fatalf("%s metadata retained provider alias: %#v", name, meta)
 		}
 	}
@@ -3050,14 +3051,14 @@ func equalStrings(a, b []string) bool {
 }
 
 func testDisplayMeta(meta map[string]any) map[string]any {
-	caelisMeta, _ := meta[metautil.Root].(map[string]any)
+	caelisMeta, _ := meta["caelis"].(map[string]any)
 	displayMeta, _ := caelisMeta["display"].(map[string]any)
-	return metautil.CloneMap(displayMeta)
+	return jsonvalue.CloneMap(displayMeta)
 }
 
 func withTestDisplayMeta(meta map[string]any, values map[string]any) map[string]any {
-	return metautil.Merge(meta, map[string]any{
-		metautil.Root: map[string]any{
+	return jsonvalue.MergeMap(meta, map[string]any{
+		"caelis": map[string]any{
 			"version": 1,
 			"display": values,
 		},

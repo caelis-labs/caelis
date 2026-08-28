@@ -162,6 +162,12 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "production code must not depend on the retired root protocol/acp facade; import the owning ACP subpackage",
 		},
 		{
+			name:       "production rejects retired ACP metadata facade",
+			rel:        "control/appserver/projection/gateway.go",
+			importPath: modulePath + "/protocol/acp/metautil",
+			want:       "production code must not depend on retired protocol/acp/metautil; keep compatibility metadata in its Control, Host, adapter, or Surface owner",
+		},
+		{
 			name:       "production rejects retired ACP Task observation",
 			rel:        "control/appserver/appserver.go",
 			importPath: modulePath + "/protocol/acp/taskstream",
@@ -603,8 +609,22 @@ var meta = map[string]any{
 }
 `
 	rule, subject, _ := semanticRuleForSource(t, "control/appserver/projection/demo.go", source, modulePath)
-	if !strings.Contains(rule, "metautil terminal helpers") || subject != "terminal_output" {
+	if !strings.Contains(rule, "owner codec") || subject != "terminal_output" {
 		t.Fatalf("semantic rule = (%q, %q), want top-level terminal metadata rejection", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleAllowsOwnerLocalTerminalCodec(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/caelis-labs/caelis"
+	const source = `package eventmeta
+
+const terminalOutputKey = "terminal_output"
+`
+	rule, subject, _ := semanticRuleForSource(t, "control/appserver/internal/eventmeta/terminal.go", source, modulePath)
+	if rule != "" || subject != "" {
+		t.Fatalf("semantic rule = (%q, %q), want owner-local codec allowed", rule, subject)
 	}
 }
 
@@ -656,6 +676,12 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			rel:     "protocol/acp/semantic/coordination.go",
 			want:    "must not recreate protocol/acp/semantic; ACP permission translation belongs to control/acppermission",
 			wantSub: "protocol/acp/semantic",
+		},
+		{
+			name:    "deleted ACP metadata path fails",
+			rel:     "protocol/acp/metautil/meta.go",
+			want:    "must not recreate protocol/acp/metautil; compatibility metadata belongs to its Control, Host, adapter, or Surface owner",
+			wantSub: "protocol/acp/metautil",
 		},
 		{
 			name:    "deleted appserver surface fails",

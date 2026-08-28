@@ -15,7 +15,6 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
@@ -218,7 +217,7 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 				terminalInfoID(update.Meta) == "command-async-1" {
 				sawCommandUpdate = true
 			}
-			if output, ok := metautil.TerminalOutput(update.Meta); update.ToolCallID == "command-async-1" &&
+			if output, ok := evalTerminalOutput(update.Meta); update.ToolCallID == "command-async-1" &&
 				ok &&
 				output.TerminalID == "command-async-1" &&
 				strings.Contains(output.Data, "acpx async command ok") &&
@@ -325,7 +324,7 @@ func TestLocalStackGatewayACPInteractiveTaskReadWriteE2E(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if output, ok := metautil.TerminalOutput(update.Meta); ok && update.ToolCallID == "command-interactive-1" {
+		if output, ok := evalTerminalOutput(update.Meta); ok && update.ToolCallID == "command-interactive-1" {
 			commandOutput.WriteString(output.Data)
 		}
 		raw, _ := update.RawOutput.(map[string]any)
@@ -413,17 +412,9 @@ func toolContentHasTerminal(content []eventstream.ToolCallContent) bool {
 }
 
 func terminalInfoID(meta map[string]any) string {
-	info, ok := metautil.TerminalInfo(meta)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(info.TerminalID)
+	return strings.TrimSpace(evalTerminalID(meta, "terminal_info"))
 }
 
 func terminalExitID(meta map[string]any) string {
-	exit, ok := metautil.TerminalExit(meta)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(exit.TerminalID)
+	return strings.TrimSpace(evalTerminalID(meta, "terminal_exit"))
 }

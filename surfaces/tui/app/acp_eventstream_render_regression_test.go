@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/evalharness"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
@@ -64,7 +63,7 @@ func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
 				Status:        stringPtr(eventstream.ToolStatusCompleted),
 				RawInput:      map[string]any{"command": "go test ./surfaces/tui/app"},
 				RawOutput:     map[string]any{"exit_code": 0},
-				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "ok\nPASS\n"),
+				Meta:          testMeta.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "ok\nPASS\n"),
 			},
 		},
 		{
@@ -151,7 +150,7 @@ func TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBefore
 				Status:        stringPtr(eventstream.ToolStatusFailed),
 				RawInput:      map[string]any{"command": "cmpctl list ebs --json 2>&1"},
 				RawOutput:     map[string]any{"exit_code": 1},
-				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "{\"status\":\"error\"}\n"),
+				Meta:          testMeta.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", "{\"status\":\"error\"}\n"),
 			},
 		},
 		{
@@ -252,8 +251,8 @@ func TestRegressionACPEventstreamContextCompactingHint120x32(t *testing.T) {
 }
 
 func acpToolNameMeta(name string) map[string]any {
-	return metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: name,
+	return testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: name,
 	})
 }
 

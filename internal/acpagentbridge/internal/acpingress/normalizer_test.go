@@ -7,7 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
 func TestNormalizeControllerUserMessageIsCanonicalDurableMessage(t *testing.T) {
@@ -108,7 +108,7 @@ func TestNormalizeSparseToolUpdateDoesNotInventDisplayContent(t *testing.T) {
 		Status:        &status,
 		RawOutput:     map[string]any{"formatted_output": "ok\n", "exit_code": 0},
 		Meta: map[string]any{
-			metautil.TerminalOutputDeltaKey: map[string]any{"terminal_id": "call-1", "data": "ok\n"},
+			acpmeta.TerminalOutputDeltaKey: map[string]any{"terminal_id": "call-1", "data": "ok\n"},
 		},
 	}, Options{
 		At:         time.Unix(1, 0),
@@ -126,10 +126,10 @@ func TestNormalizeSparseToolUpdateDoesNotInventDisplayContent(t *testing.T) {
 	if update == nil || update.ToolCallID != "call-1" || update.Status != status || len(session.ProtocolToolCallContentOf(update)) != 0 {
 		t.Fatalf("protocol update = %#v, want exact sparse ACP update", update)
 	}
-	if output, ok := metautil.TerminalOutput(update.Meta); !ok || output.Data != "ok\n" {
+	if output, ok := acpmeta.ReadTerminalOutput(update.Meta); !ok || output.Data != "ok\n" {
 		t.Fatalf("provider terminal output = %#v, want compatibility delta normalized", update.Meta)
 	}
-	if _, ok := update.Meta[metautil.TerminalOutputDeltaKey]; ok {
+	if _, ok := update.Meta[acpmeta.TerminalOutputDeltaKey]; ok {
 		t.Fatalf("provider terminal alias escaped ingress normalization: %#v", update.Meta)
 	}
 }
@@ -156,12 +156,13 @@ func TestNormalizeToolCallDefaultsMissingStatusToPending(t *testing.T) {
 func TestNormalizeExternalToolCallPreservesPresentationNameButStripsBinding(t *testing.T) {
 	t.Parallel()
 
-	meta := metautil.WithRuntimeSection(
+	meta := acpmeta.WithToolName(
 		map[string]any{"vendor": map[string]any{"trace": "keep"}},
-		metautil.RuntimeTool,
-		map[string]any{metautil.RuntimeToolName: "RunCommand"},
+		"RunCommand",
 	)
-	meta = metautil.WithRuntimeSection(meta, "binding", map[string]any{"task_result": true})
+	caelisMeta := meta["caelis"].(map[string]any)
+	runtimeMeta := caelisMeta["runtime"].(map[string]any)
+	runtimeMeta["binding"] = map[string]any{"task_result": true}
 	event := NormalizeUpdate(client.ToolCall{
 		SessionUpdate: client.UpdateToolCall,
 		ToolCallID:    "call-1",
@@ -173,11 +174,13 @@ func TestNormalizeExternalToolCallPreservesPresentationNameButStripsBinding(t *t
 	if update == nil {
 		t.Fatal("NormalizeUpdate() = nil, want UI-only tool event")
 	}
-	if got := metautil.String(update.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RunCommand" {
+	if got := acpmeta.ToolName(update.Meta); got != "RunCommand" {
 		t.Fatalf("external runtime tool name = %q, want UI-only presentation identity preserved", got)
 	}
-	if got := metautil.RuntimeSection(update.Meta, "binding"); len(got) != 0 {
-		t.Fatalf("external runtime binding = %#v, want stripped", got)
+	updateCaelis, _ := update.Meta["caelis"].(map[string]any)
+	updateRuntime, _ := updateCaelis["runtime"].(map[string]any)
+	if binding, _ := updateRuntime["binding"].(map[string]any); len(binding) != 0 {
+		t.Fatalf("external runtime binding = %#v, want stripped", binding)
 	}
 	vendor, _ := update.Meta["vendor"].(map[string]any)
 	if vendor["trace"] != "keep" {
@@ -190,14 +193,14 @@ func TestIngressToolMetaStripsBindingWithoutAliasingInput(t *testing.T) {
 
 	meta := map[string]any{
 		"vendor": map[string]any{"trace": "keep"},
-		metautil.Root: map[string]any{
-			metautil.Runtime: map[string]any{
+		"caelis": map[string]any{
+			"runtime": map[string]any{
 				"binding": map[string]any{"task_result": true},
 			},
 		},
 	}
 	got := ingressToolMeta(meta)
-	if _, ok := got[metautil.Root]; ok {
+	if _, ok := got["caelis"]; ok {
 		t.Fatalf("ingressToolMeta() retained empty Caelis metadata: %#v", got)
 	}
 	vendor, _ := got["vendor"].(map[string]any)
@@ -206,8 +209,8 @@ func TestIngressToolMetaStripsBindingWithoutAliasingInput(t *testing.T) {
 	if originalVendor["trace"] != "keep" {
 		t.Fatalf("ingressToolMeta() aliased provider metadata: %#v", meta)
 	}
-	caelis, _ := meta[metautil.Root].(map[string]any)
-	runtime, _ := caelis[metautil.Runtime].(map[string]any)
+	caelis, _ := meta["caelis"].(map[string]any)
+	runtime, _ := caelis["runtime"].(map[string]any)
 	if _, ok := runtime["binding"]; !ok {
 		t.Fatalf("ingressToolMeta() mutated input binding: %#v", meta)
 	}

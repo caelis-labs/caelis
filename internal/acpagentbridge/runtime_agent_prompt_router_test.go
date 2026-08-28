@@ -15,8 +15,8 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestRuntimeAgentNewRequiresSlashResultFormatterWithPromptRouter(t *testing.T) {
@@ -1008,7 +1008,7 @@ func countTerminalExitsForTool(notifications []eventstream.SessionNotification, 
 		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
 			continue
 		}
-		if exit, ok := metautil.TerminalExit(update.Meta); ok && exit.TerminalID == toolCallID {
+		if exit, ok := acpmeta.ReadTerminalExit(update.Meta); ok && exit.TerminalID == toolCallID {
 			count++
 		}
 	}

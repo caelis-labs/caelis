@@ -18,7 +18,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	acpclient "github.com/caelis-labs/caelis/internal/acpagentbridge/client"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
@@ -51,7 +50,7 @@ func TestHandleACPEventEnvelopeAppliesToolTerminalSequence(t *testing.T) {
 			Status:        eventstream.ToolStatusPending,
 			RawInput:      map[string]any{"command": "echo ok"},
 			Content:       []eventstream.ToolCallContent{{Type: "terminal", TerminalID: "call-1"}},
-			Meta:          metautil.WithTerminalInfo(nil, "call-1"),
+			Meta:          testMeta.WithTerminalInfo(nil, "call-1"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -65,7 +64,7 @@ func TestHandleACPEventEnvelopeAppliesToolTerminalSequence(t *testing.T) {
 			Status:        stringPtr(eventstream.ToolStatusCompleted),
 			RawInput:      map[string]any{"command": "echo ok"},
 			Content:       []eventstream.ToolCallContent{{Type: "terminal", TerminalID: "call-1"}},
-			Meta:          metautil.WithTerminalOutput(nil, "call-1", "ok\n"),
+			Meta:          testMeta.WithTerminalOutput(nil, "call-1", "ok\n"),
 		},
 	})
 
@@ -102,9 +101,9 @@ func TestHandleACPEventEnvelopeDisplaysTaskOwnedRunCommandOutputOnce(t *testing.
 	})
 	model = applyACPEnvelopeForTest(t, model, commandTaskStreamEnvelopeForTest("session-1", "command-1", "", output))
 
-	meta := metautil.WithRuntimeSection(acpToolNameMeta("RunCommand"), metautil.RuntimeTask, map[string]any{
+	meta := testMeta.WithRuntimeSection(acpToolNameMeta("RunCommand"), testMeta.RuntimeTask, map[string]any{
 		"task_id": "task-1", "kind": "command",
-		metautil.RuntimeOutputDelta: output, "running": false, "state": "completed",
+		testMeta.RuntimeOutputDelta: output, "running": false, "state": "completed",
 	})
 	event := &session.Event{
 		ID: "command-final", Seq: 2, SessionID: "session-1", Type: session.EventTypeToolResult,
@@ -142,9 +141,9 @@ func TestHandleACPEventEnvelopeRendersTaskWriteInteractionAndKeepsUTF8RunCommand
 	const output = "请输入你的名字: 小明\r\n你好, 小明! (输入来自 stdin/TTY)\r\n"
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(242, 0))
-	commandMeta := metautil.WithRuntimeSection(acpToolNameMeta("RunCommand"), metautil.RuntimeTask, map[string]any{
+	commandMeta := testMeta.WithRuntimeSection(acpToolNameMeta("RunCommand"), testMeta.RuntimeTask, map[string]any{
 		"task_id":                      "task-4",
-		metautil.RuntimeTaskTerminalID: "terminal-4",
+		testMeta.RuntimeTaskTerminalID: "terminal-4",
 		"handle":                       "command-4",
 		"kind":                         "command",
 		"running":                      true,
@@ -164,8 +163,8 @@ func TestHandleACPEventEnvelopeRendersTaskWriteInteractionAndKeepsUTF8RunCommand
 	taskInput := map[string]any{
 		"action": "write", "handle": "command-4", "target_kind": "command", "input": "小明",
 	}
-	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", "action": "write",
+	taskMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Task"), testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Task", "action": "write",
 		"input": "小明", "target_kind": "command", "target_handle": "command-4",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -177,8 +176,8 @@ func TestHandleACPEventEnvelopeRendersTaskWriteInteractionAndKeepsUTF8RunCommand
 		},
 	})
 	completed := eventstream.ToolStatusCompleted
-	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
-		"task_id": "task-4", metautil.RuntimeOutputDelta: output,
+	taskMeta = testMeta.WithRuntimeSection(taskMeta, testMeta.RuntimeTask, map[string]any{
+		"task_id": "task-4", testMeta.RuntimeOutputDelta: output,
 		"handle": "command-4", "kind": "command", "running": false, "state": "completed",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -222,8 +221,8 @@ func TestHandleACPEventEnvelopeRendersTaskWriteFailureWithoutInternalHandle(t *t
 	taskInput := map[string]any{
 		"action": "write", "handle": "command-10", "target_kind": "command", "input": "test",
 	}
-	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", "action": "write",
+	taskMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Task"), testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Task", "action": "write",
 		"input": "test", "target_kind": "command", "target_handle": "command-10",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -237,8 +236,8 @@ func TestHandleACPEventEnvelopeRendersTaskWriteFailureWithoutInternalHandle(t *t
 	failed := eventstream.ToolStatusFailed
 	const reason = `agent-sdk/runtime: command task "command-10" does not accept stdin`
 	const displayedReason = "agent-sdk/runtime: command task does not accept stdin"
-	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
-		metautil.RuntimeOutputDelta: "existing shell output\n", "handle": "command-10", "kind": "command",
+	taskMeta = testMeta.WithRuntimeSection(taskMeta, testMeta.RuntimeTask, map[string]any{
+		testMeta.RuntimeOutputDelta: "existing shell output\n", "handle": "command-10", "kind": "command",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
@@ -274,15 +273,15 @@ func TestHandleACPEventEnvelopeRendersTerminalTaggedCommandTaskWriteAsShellInter
 	taskInput := map[string]any{
 		"action": "write", "handle": "command-82", "target_kind": "command", "input": input,
 	}
-	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", "action": "write",
+	taskMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Task"), testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Task", "action": "write",
 		"input": input, "target_kind": "command", "target_handle": "command-82",
 	})
-	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
-		"task_id": "task-82", metautil.RuntimeTaskTerminalID: "terminal-82",
+	taskMeta = testMeta.WithRuntimeSection(taskMeta, testMeta.RuntimeTask, map[string]any{
+		"task_id": "task-82", testMeta.RuntimeTaskTerminalID: "terminal-82",
 		"handle": "command-82", "kind": "command", "running": true, "state": "running",
 	})
-	taskMeta = metautil.WithTerminalInfo(taskMeta, "terminal-82")
+	taskMeta = testMeta.WithTerminalInfo(taskMeta, "terminal-82")
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCall{
@@ -350,15 +349,15 @@ func TestHandleACPEventEnvelopeKeepsStreamedRunCommandOutputOnEmptyFinalFrame(t 
 
 	completed := eventstream.ToolStatusCompleted
 	exitCode := 0
-	finalMeta := metautil.WithRuntimeSection(acpToolNameMeta("RunCommand"), metautil.RuntimeTask, map[string]any{
+	finalMeta := testMeta.WithRuntimeSection(acpToolNameMeta("RunCommand"), testMeta.RuntimeTask, map[string]any{
 		"task_id":                      "task-1",
-		metautil.RuntimeTaskTerminalID: "command-1",
+		testMeta.RuntimeTaskTerminalID: "command-1",
 		"output_cursor":                len([]byte(output)),
 		"running":                      false,
 		"state":                        "completed",
 	})
-	finalMeta = metautil.WithTerminalInfo(finalMeta, "command-1")
-	finalMeta = metautil.WithTerminalExit(finalMeta, "command-1", &exitCode, nil)
+	finalMeta = testMeta.WithTerminalInfo(finalMeta, "command-1")
+	finalMeta = testMeta.WithTerminalExit(finalMeta, "command-1", &exitCode, nil)
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
@@ -397,11 +396,11 @@ func TestTaskWaitOfFailedCommandStaysHiddenAndFoldsIntoOwner(t *testing.T) {
 		},
 	})
 	running := eventstream.ToolStatusInProgress
-	commandMeta := metautil.WithRuntimeSection(acpToolNameMeta("RunCommand"), metautil.RuntimeTask, map[string]any{
-		"task_id": "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
+	commandMeta := testMeta.WithRuntimeSection(acpToolNameMeta("RunCommand"), testMeta.RuntimeTask, map[string]any{
+		"task_id": "task-1", testMeta.RuntimeTaskTerminalID: "terminal-1",
 		"handle": "command-2", "running": true, "state": "running",
 	})
-	commandMeta = metautil.WithTerminalInfo(commandMeta, "terminal-1")
+	commandMeta = testMeta.WithTerminalInfo(commandMeta, "terminal-1")
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
@@ -412,16 +411,16 @@ func TestTaskWaitOfFailedCommandStaysHiddenAndFoldsIntoOwner(t *testing.T) {
 	})
 
 	taskInput := map[string]any{"action": "wait", "handle": "command-2"}
-	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", "action": "wait",
+	taskMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Task"), testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Task", "action": "wait",
 		"target_handle": "command-2", "target_kind": "command",
 	})
-	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
-		"task_id": "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
+	taskMeta = testMeta.WithRuntimeSection(taskMeta, testMeta.RuntimeTask, map[string]any{
+		"task_id": "task-1", testMeta.RuntimeTaskTerminalID: "terminal-1",
 		"handle": "command-2", "running": false, "state": "failed",
-		metautil.RuntimeOutputDelta: failedOutput,
+		testMeta.RuntimeOutputDelta: failedOutput,
 	})
-	taskMeta = metautil.WithTerminalInfo(taskMeta, "terminal-1")
+	taskMeta = testMeta.WithTerminalInfo(taskMeta, "terminal-1")
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCall{
@@ -479,11 +478,11 @@ func TestTaskWaitControlTransportFailureStaysVisibleWithoutFoldingIntoOwner(t *t
 		},
 	})
 	running := eventstream.ToolStatusInProgress
-	commandMeta := metautil.WithRuntimeSection(acpToolNameMeta("RunCommand"), metautil.RuntimeTask, map[string]any{
-		"task_id": "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
+	commandMeta := testMeta.WithRuntimeSection(acpToolNameMeta("RunCommand"), testMeta.RuntimeTask, map[string]any{
+		"task_id": "task-1", testMeta.RuntimeTaskTerminalID: "terminal-1",
 		"handle": "command-2", "running": true, "state": "running",
 	})
-	commandMeta = metautil.WithTerminalInfo(commandMeta, "terminal-1")
+	commandMeta = testMeta.WithTerminalInfo(commandMeta, "terminal-1")
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
@@ -494,13 +493,13 @@ func TestTaskWaitControlTransportFailureStaysVisibleWithoutFoldingIntoOwner(t *t
 	})
 
 	taskInput := map[string]any{"action": "wait", "handle": "command-2"}
-	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", "action": "wait",
+	taskMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Task"), testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Task", "action": "wait",
 		"target_handle": "command-2", "target_kind": "command",
 		"error": true,
 	})
-	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
-		"task_id": "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
+	taskMeta = testMeta.WithRuntimeSection(taskMeta, testMeta.RuntimeTask, map[string]any{
+		"task_id": "task-1", testMeta.RuntimeTaskTerminalID: "terminal-1",
 		"handle": "command-2", "running": true, "state": "running",
 	})
 	failed := eventstream.ToolStatusFailed
@@ -570,12 +569,12 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 	})
 	completed := eventstream.ToolStatusCompleted
 	exitCode := 0
-	commandFinalMeta := metautil.WithRuntimeSection(acpToolNameMeta("RunCommand"), metautil.RuntimeTask, map[string]any{
-		"task_id": "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
+	commandFinalMeta := testMeta.WithRuntimeSection(acpToolNameMeta("RunCommand"), testMeta.RuntimeTask, map[string]any{
+		"task_id": "task-1", testMeta.RuntimeTaskTerminalID: "terminal-1",
 		"running": false, "state": "completed",
 	})
-	commandFinalMeta = metautil.WithTerminalInfo(commandFinalMeta, "terminal-1")
-	commandFinalMeta = metautil.WithTerminalExit(commandFinalMeta, "terminal-1", &exitCode, nil)
+	commandFinalMeta = testMeta.WithTerminalInfo(commandFinalMeta, "terminal-1")
+	commandFinalMeta = testMeta.WithTerminalExit(commandFinalMeta, "terminal-1", &exitCode, nil)
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
@@ -587,15 +586,15 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 	model.commitUserDisplayLine("resume")
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(243, 0))
 	taskInput := map[string]any{"action": "wait", "task_id": "task-1", "target_kind": "command"}
-	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", "action": "wait",
+	taskMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Task"), testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Task", "action": "wait",
 		"target_id": "task-1", "target_kind": "command",
 	})
-	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
-		"task_id": "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
+	taskMeta = testMeta.WithRuntimeSection(taskMeta, testMeta.RuntimeTask, map[string]any{
+		"task_id": "task-1", testMeta.RuntimeTaskTerminalID: "terminal-1",
 		"running": false, "state": "completed",
 	})
-	taskMeta = metautil.WithTerminalInfo(taskMeta, "terminal-1")
+	taskMeta = testMeta.WithTerminalInfo(taskMeta, "terminal-1")
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCall{
@@ -666,12 +665,12 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	})
 	running := eventstream.ToolStatusInProgress
 	firstMeta := runningSnapshotTerminalMeta("RunCommand", "command-task", "terminal-1", first, "append")
-	firstMeta = metautil.WithRuntimeSection(firstMeta, metautil.RuntimeTask, map[string]any{
+	firstMeta = testMeta.WithRuntimeSection(firstMeta, testMeta.RuntimeTask, map[string]any{
 		"handle": "command-3",
 	})
-	firstMeta = metautil.WithRuntimeSection(firstMeta, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamMode:   "append",
-		metautil.RuntimeOutputCursor: int64(len([]byte(first))),
+	firstMeta = testMeta.WithRuntimeSection(firstMeta, testMeta.RuntimeStream, map[string]any{
+		testMeta.RuntimeStreamMode:   "append",
+		testMeta.RuntimeOutputCursor: int64(len([]byte(first))),
 	})
 	applyStream(eventstream.ToolCallUpdate{
 		SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-call",
@@ -682,15 +681,15 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	}
 
 	readInput := map[string]any{"action": "read", "handle": "command-3"}
-	readMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", "action": "read",
+	readMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Task"), testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Task", "action": "read",
 		"target_handle": "command-3", "target_kind": "command",
 	})
-	readMeta = metautil.WithRuntimeSection(readMeta, metautil.RuntimeTask, map[string]any{
-		"task_id": "command-task", metautil.RuntimeTaskTerminalID: "terminal-1",
-		metautil.RuntimeOutputStart:  int64(len([]byte(first))),
-		metautil.RuntimeOutputCursor: int64(len([]byte(first + second))),
-		metautil.RuntimeOutputDelta:  second,
+	readMeta = testMeta.WithRuntimeSection(readMeta, testMeta.RuntimeTask, map[string]any{
+		"task_id": "command-task", testMeta.RuntimeTaskTerminalID: "terminal-1",
+		testMeta.RuntimeOutputStart:  int64(len([]byte(first))),
+		testMeta.RuntimeOutputCursor: int64(len([]byte(first + second))),
+		testMeta.RuntimeOutputDelta:  second,
 		"running":                    true, "state": "running", "handle": "command-3",
 	})
 	apply(eventstream.ToolCall{
@@ -725,18 +724,18 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	}
 
 	duplicateMeta := runningSnapshotTerminalMeta("RunCommand", "command-task", "terminal-1", second, "append")
-	duplicateMeta = metautil.WithRuntimeSection(duplicateMeta, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamMode:   "append",
-		metautil.RuntimeOutputCursor: int64(len([]byte(first + second))),
+	duplicateMeta = testMeta.WithRuntimeSection(duplicateMeta, testMeta.RuntimeStream, map[string]any{
+		testMeta.RuntimeStreamMode:   "append",
+		testMeta.RuntimeOutputCursor: int64(len([]byte(first + second))),
 	})
 	applyStream(eventstream.ToolCallUpdate{
 		SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-call",
 		Status: &running, Meta: duplicateMeta,
 	}, 2)
 	thirdMeta := runningSnapshotTerminalMeta("RunCommand", "command-task", "terminal-1", third, "append")
-	thirdMeta = metautil.WithRuntimeSection(thirdMeta, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamMode:   "append",
-		metautil.RuntimeOutputCursor: int64(len([]byte(first + second + third))),
+	thirdMeta = testMeta.WithRuntimeSection(thirdMeta, testMeta.RuntimeStream, map[string]any{
+		testMeta.RuntimeStreamMode:   "append",
+		testMeta.RuntimeOutputCursor: int64(len([]byte(first + second + third))),
 	})
 	applyStream(eventstream.ToolCallUpdate{
 		SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-call",
@@ -749,8 +748,8 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	}
 
 	terminalReadInput := map[string]any{"action": "read", "handle": "command-3"}
-	terminalReadMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", "action": "read",
+	terminalReadMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Task"), testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Task", "action": "read",
 		"target_handle": "command-3", "target_kind": "command",
 	})
 	apply(eventstream.ToolCall{
@@ -1354,7 +1353,7 @@ func TestHandleACPEventEnvelopePreservesStandardTerminalPatchNewlines(t *testing
 			Update: eventstream.ToolCallUpdate{
 				SessionUpdate: eventstream.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
-				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", text),
+				Meta:          testMeta.WithTerminalOutput(acpToolNameMeta("RunCommand"), "call-1", text),
 			},
 		})
 	}
@@ -1663,8 +1662,8 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	spawnMeta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Spawn",
+	spawnMeta := testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Spawn",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
@@ -1686,9 +1685,9 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 		ScopeID:   "task-1",
 		Actor:     "reviewer",
 		Final:     true,
-		Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
-			metautil.RuntimeStreamParentCallID: "spawn-1",
-			metautil.RuntimeStreamParentTool:   "Spawn",
+		Meta: testMeta.WithRuntimeSection(nil, testMeta.RuntimeStream, map[string]any{
+			testMeta.RuntimeStreamParentCallID: "spawn-1",
+			testMeta.RuntimeStreamParentTool:   "Spawn",
 		}),
 		Update: eventstream.ContentChunk{
 			SessionUpdate: eventstream.UpdateAgentMessage,
@@ -1811,7 +1810,7 @@ func TestHandleACPEventEnvelopeStreamsDurableChildNarrativeBeforeCompletion(t *t
 	}
 
 	completed := eventstream.ToolStatusCompleted
-	finalMeta := metautil.WithRuntimeSection(acpToolNameMeta("Spawn"), metautil.RuntimeTask, map[string]any{
+	finalMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Spawn"), testMeta.RuntimeTask, map[string]any{
 		"task_id": "task-1",
 		"running": false,
 		"state":   "completed",
@@ -1908,7 +1907,7 @@ func TestHandleACPEventEnvelopeChildFinalChunksDoNotCloseOrTruncateSpawn(t *test
 	}
 
 	completed := eventstream.ToolStatusCompleted
-	finalMeta := metautil.WithRuntimeSection(acpToolNameMeta("Spawn"), metautil.RuntimeTask, map[string]any{
+	finalMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Spawn"), testMeta.RuntimeTask, map[string]any{
 		"task_id": "task-1",
 		"running": false,
 		"state":   "completed",
@@ -2075,8 +2074,8 @@ func TestHandleACPEventEnvelopeRoutesCrossTurnChildContinuationAfterSendMessage(
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(250, 0))
-	spawnMeta := metautil.WithRuntimeSection(acpToolNameMeta("Spawn"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Spawn",
+	spawnMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Spawn"), testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Spawn",
 		"target_id":              "task-1",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -2095,7 +2094,7 @@ func TestHandleACPEventEnvelopeRoutesCrossTurnChildContinuationAfterSendMessage(
 		},
 	})
 	completed := eventstream.ToolStatusCompleted
-	spawnFinalMeta := metautil.WithRuntimeSection(spawnMeta, metautil.RuntimeTask, map[string]any{
+	spawnFinalMeta := testMeta.WithRuntimeSection(spawnMeta, testMeta.RuntimeTask, map[string]any{
 		"task_id": "task-1",
 		"handle":  "task-1",
 		"running": false,
@@ -2506,12 +2505,12 @@ func TestHandleACPEventEnvelopeAppliesSpawnFinalRuntimeResultWithoutTerminalOutp
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	spawnMeta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Spawn",
+	spawnMeta := testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Spawn",
 	})
-	spawnMeta = metautil.WithRuntimeSection(spawnMeta, metautil.RuntimeTask, map[string]any{
+	spawnMeta = testMeta.WithRuntimeSection(spawnMeta, testMeta.RuntimeTask, map[string]any{
 		"task_id":                      "task-1",
-		metautil.RuntimeTaskTerminalID: "subagent-task-1",
+		testMeta.RuntimeTaskTerminalID: "subagent-task-1",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
@@ -2527,9 +2526,9 @@ func TestHandleACPEventEnvelopeAppliesSpawnFinalRuntimeResultWithoutTerminalOutp
 		},
 	})
 	completed := eventstream.ToolStatusCompleted
-	finalMeta := metautil.WithRuntimeSection(spawnMeta, metautil.RuntimeTask, map[string]any{
+	finalMeta := testMeta.WithRuntimeSection(spawnMeta, testMeta.RuntimeTask, map[string]any{
 		"task_id":                      "task-1",
-		metautil.RuntimeTaskTerminalID: "subagent-task-1",
+		testMeta.RuntimeTaskTerminalID: "subagent-task-1",
 		"running":                      false,
 		"state":                        "completed",
 		"result":                       "Final child result",
@@ -4340,8 +4339,8 @@ func TestMainTimelineRoutesCrossTurnTaskObserverStreamToOriginalCommandPanel(t *
 	model.commitUserDisplayLine("wait for the command")
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(271, 0))
 	taskInput := map[string]any{"action": "wait", "task_id": "task-1", "target_kind": "terminal"}
-	taskMeta := metautil.WithRuntimeSection(acpToolNameMeta("Task"), metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "Task", "action": "wait",
+	taskMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Task"), testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "Task", "action": "wait",
 		"target_id": "task-1", "target_kind": "terminal",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -4458,17 +4457,17 @@ func assertMainTurnDocumentOrder(t *testing.T, model *Model, oldText string, pro
 
 func commandTaskStreamEnvelopeForTest(sessionID string, callID string, taskHandle string, output string) eventstream.Envelope {
 	streamMeta := map[string]any{
-		metautil.RuntimeStreamMode:   "append",
-		metautil.RuntimeOutputCursor: int64(len([]byte(output))),
+		testMeta.RuntimeStreamMode:   "append",
+		testMeta.RuntimeOutputCursor: int64(len([]byte(output))),
 	}
-	meta := metautil.WithCompactRuntimeSection(nil, metautil.RuntimeStream, streamMeta)
-	toolMeta := map[string]any{metautil.RuntimeToolName: "RunCommand"}
+	meta := testMeta.WithCompactRuntimeSection(nil, testMeta.RuntimeStream, streamMeta)
+	toolMeta := map[string]any{testMeta.RuntimeToolName: "RunCommand"}
 	if taskHandle != "" {
 		toolMeta["target_handle"] = taskHandle
 	}
-	meta = metautil.WithRuntimeSection(meta, metautil.RuntimeTool, toolMeta)
-	meta = metautil.WithTerminalOutput(meta, callID, output)
-	meta = metautil.WithTerminalInfo(meta, callID)
+	meta = testMeta.WithRuntimeSection(meta, testMeta.RuntimeTool, toolMeta)
+	meta = testMeta.WithTerminalOutput(meta, callID, output)
+	meta = testMeta.WithTerminalInfo(meta, callID)
 	status := eventstream.ToolStatusInProgress
 	return eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,

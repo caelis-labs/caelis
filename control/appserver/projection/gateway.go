@@ -12,7 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/control/acppermission"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 // ProjectSessionEventEnvelope projects one canonical session event into
@@ -67,8 +66,8 @@ func withoutLiveFinalContent(events []eventstream.Envelope, published agentsdk.P
 }
 
 func withoutPublishedTerminalContent(meta map[string]any) map[string]any {
-	meta = metautil.WithoutTerminalOutput(meta)
-	return eventmeta.WithoutRuntimeSectionKeys(meta, metautil.RuntimeTask, metautil.RuntimeOutputDelta)
+	meta = eventmeta.WithoutTerminalOutput(meta)
+	return eventmeta.WithoutRuntimeSectionKeys(meta, eventmeta.RuntimeTask, eventmeta.RuntimeOutputDelta)
 }
 
 // SessionEventTransport carries live transport ids that are unavailable from
@@ -468,7 +467,7 @@ func lifecycleEventstreamEnvelope(base eventstream.Envelope, state string, reaso
 }
 
 func mergeACPEventMeta(base map[string]any, overlay map[string]any) map[string]any {
-	return metautil.Merge(base, overlay)
+	return eventmeta.Merge(base, overlay)
 }
 
 func permissionToolMeta(baseMeta map[string]any, sessionEvent *session.Event) map[string]any {
@@ -486,8 +485,8 @@ func acpMetaWithToolName(meta map[string]any, toolName string) map[string]any {
 	if toolName == "" {
 		return cloneAnyMap(meta)
 	}
-	return metautil.WithRuntimeSection(meta, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: toolName,
+	return eventmeta.WithRuntimeSection(meta, eventmeta.RuntimeTool, map[string]any{
+		eventmeta.RuntimeToolName: toolName,
 	})
 }
 

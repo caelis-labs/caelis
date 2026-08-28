@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 )
 
 func TestProjectSessionEventEnvelopeProjectsToolUpdate(t *testing.T) {
@@ -48,10 +48,10 @@ func TestProjectSessionEventEnvelopeProjectsToolUpdate(t *testing.T) {
 		t.Fatalf("tool update = %#v, want RUN_COMMAND in_progress call-1", update)
 	}
 	assertTerminalAnchor(t, update.Content, "call-1")
-	if info, ok := metautil.TerminalInfo(update.Meta); !ok || info.TerminalID != "call-1" {
+	if info, ok := eventmeta.TerminalInfo(update.Meta); !ok || info.TerminalID != "call-1" {
 		t.Fatalf("terminal_info = %#v, want call-1", update.Meta)
 	}
-	if output, ok := metautil.TerminalOutput(update.Meta); !ok || output.TerminalID != "call-1" || output.Data != "ok\n" {
+	if output, ok := eventmeta.TerminalOutput(update.Meta); !ok || output.TerminalID != "call-1" || output.Data != "ok\n" {
 		t.Fatalf("terminal_output = %#v, want ok output", update.Meta)
 	}
 }
@@ -234,11 +234,11 @@ func TestProjectSessionEventLiveSupplementSeparatesFinalNarrativeFromUsage(t *te
 }
 
 func TestProjectSessionEventLiveSupplementKeepsTerminalFinalStateWithoutBytes(t *testing.T) {
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTask, map[string]any{
-		"task_id":                    "task-1",
-		metautil.RuntimeOutputStart:  int64(0),
-		metautil.RuntimeOutputCursor: int64(3),
-		metautil.RuntimeOutputDelta:  "ok\n",
+	meta := eventmeta.WithRuntimeSection(nil, eventmeta.RuntimeTask, map[string]any{
+		"task_id":                     "task-1",
+		eventmeta.RuntimeOutputStart:  int64(0),
+		eventmeta.RuntimeOutputCursor: int64(3),
+		eventmeta.RuntimeOutputDelta:  "ok\n",
 	})
 	event := &session.Event{
 		ID:         "command-final",
@@ -265,10 +265,10 @@ func TestProjectSessionEventLiveSupplementKeepsTerminalFinalStateWithoutBytes(t 
 
 	replay := ProjectSessionEventEnvelope(base, event)
 	replayUpdate := replay[0].Update.(eventstream.ToolCallUpdate)
-	if output, ok := metautil.TerminalOutput(replayUpdate.Meta); !ok || output.Data != "ok\n" {
+	if output, ok := eventmeta.TerminalOutput(replayUpdate.Meta); !ok || output.Data != "ok\n" {
 		t.Fatalf("replay terminal output = %#v, want one complete materialization", replayUpdate.Meta)
 	}
-	if taskMeta := metautil.RuntimeSection(replayUpdate.Meta, metautil.RuntimeTask); taskMeta[metautil.RuntimeOutputDelta] != "ok\n" {
+	if taskMeta := eventmeta.RuntimeSection(replayUpdate.Meta, eventmeta.RuntimeTask); taskMeta[eventmeta.RuntimeOutputDelta] != "ok\n" {
 		t.Fatalf("replay task meta = %#v, want complete observation retained", taskMeta)
 	}
 	live := ProjectSessionEventLiveSupplementEnvelope(base, event, agent.PublishedTerminal)
@@ -276,19 +276,19 @@ func TestProjectSessionEventLiveSupplementKeepsTerminalFinalStateWithoutBytes(t 
 		t.Fatalf("live terminal final = %#v, want one state update", live)
 	}
 	liveUpdate := live[0].Update.(eventstream.ToolCallUpdate)
-	if _, ok := metautil.TerminalOutput(liveUpdate.Meta); ok {
+	if _, ok := eventmeta.TerminalOutput(liveUpdate.Meta); ok {
 		t.Fatalf("live terminal final meta = %#v, want no second terminal byte source", liveUpdate.Meta)
 	}
-	if taskMeta := metautil.RuntimeSection(liveUpdate.Meta, metautil.RuntimeTask); taskMeta[metautil.RuntimeOutputDelta] != nil {
+	if taskMeta := eventmeta.RuntimeSection(liveUpdate.Meta, eventmeta.RuntimeTask); taskMeta[eventmeta.RuntimeOutputDelta] != nil {
 		t.Fatalf("live terminal final task meta = %#v, want no compatibility terminal delta", taskMeta)
 	}
-	if taskMeta := metautil.RuntimeSection(live[0].Meta, metautil.RuntimeTask); taskMeta[metautil.RuntimeOutputDelta] != nil {
+	if taskMeta := eventmeta.RuntimeSection(live[0].Meta, eventmeta.RuntimeTask); taskMeta[eventmeta.RuntimeOutputDelta] != nil {
 		t.Fatalf("live terminal final envelope meta = %#v, want no merged compatibility terminal delta", taskMeta)
 	}
 	if stringPtrValue(liveUpdate.Status) != eventstream.ToolStatusCompleted {
 		t.Fatalf("live terminal final status = %#v, want completed", liveUpdate.Status)
 	}
-	if exit, ok := metautil.TerminalExit(liveUpdate.Meta); !ok || exit.ExitCode == nil || *exit.ExitCode != 0 {
+	if exit, ok := eventmeta.TerminalExit(liveUpdate.Meta); !ok || exit.ExitCode == nil || *exit.ExitCode != 0 {
 		t.Fatalf("live terminal final meta = %#v, want exit state retained", liveUpdate.Meta)
 	}
 }

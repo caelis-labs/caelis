@@ -20,10 +20,10 @@ Built-in or external Agent
   lifecycle, cancellation, and controller semantics.
 - `acp-go-sdk` owns standard ACP wire contracts and connection behavior.
 - `control/appserver/eventstream` owns the ACP-shaped update and permission
-  payloads carried by its Control-to-Surface Envelope. Remaining
-  `protocol/acp/metautil` extensions are transitional compatibility code and
-  must shrink into the Control, Surface, reusable SDK, or Host-private owner
-  that uses them. `control/acppermission` owns the standard ACP
+  payloads carried by its Control-to-Surface Envelope. Caelis `_meta`
+  compatibility is owner-local: Control projection/replay, Host ingress,
+  adapter negotiation, and Surface rendering each keep only the codec they
+  use. `control/acppermission` owns the standard ACP
   `request_permission` translation to and from normalized SDK approval
   semantics; it applies no approval policy.
 - Control owns authorization, lifecycle, ordering, replay coordination,
