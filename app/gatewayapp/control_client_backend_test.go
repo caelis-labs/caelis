@@ -292,7 +292,7 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 						metautil.RuntimeToolName: "RunCommand",
 					},
 					metautil.RuntimeTask: map[string]any{
-						metautil.RuntimeTaskID:         "task-1",
+						"task_id":                      "task-1",
 						metautil.RuntimeTaskTerminalID: "terminal-1",
 					},
 				},

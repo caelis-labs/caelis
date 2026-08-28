@@ -17,12 +17,10 @@ const (
 
 	Runtime = "runtime"
 
-	RuntimeTool         = "tool"
-	RuntimeToolName     = "name"
-	RuntimeTargetHandle = "target_handle"
+	RuntimeTool     = "tool"
+	RuntimeToolName = "name"
 
 	RuntimeTask           = "task"
-	RuntimeTaskID         = "task_id"
 	RuntimeTaskTerminalID = "terminal_id"
 	RuntimeOutputCursor   = "output_cursor"
 	RuntimeOutputStart    = "output_start_cursor"
@@ -30,8 +28,6 @@ const (
 
 	RuntimeStream             = "stream"
 	RuntimeStreamMode         = "mode"
-	RuntimeStreamTruncated    = "truncated"
-	RuntimeStreamBefore       = "truncated_before"
 	RuntimeStreamParentCallID = "parent_call_id"
 	RuntimeStreamParentTool   = "parent_tool"
 	RuntimeStreamParentTaskID = "parent_task_id"

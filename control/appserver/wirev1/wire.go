@@ -36,7 +36,10 @@ type ResumeBoundary struct {
 	BoundaryCursor string               `json:"boundary_cursor,omitempty"`
 }
 
-const maxSafeJSONInteger = uint64(1<<53 - 1)
+const (
+	maxSafeJSONInteger                  = uint64(1<<53 - 1)
+	runtimeStreamTruncatedBeforeMetaKey = "truncated_before"
+)
 
 // ParseUint64Decimal parses one canonical base-10 uint64 wire value.
 func ParseUint64Decimal(value string) (uint64, error) {
@@ -519,7 +522,7 @@ func transformKnownMetadata(
 		if stream, present, mapErr := childMap(runtime, metautil.RuntimeStream); mapErr != nil {
 			return nil, mapErr
 		} else if present {
-			if err := transform(stream, metautil.RuntimeStreamBefore); err != nil {
+			if err := transform(stream, runtimeStreamTruncatedBeforeMetaKey); err != nil {
 				return nil, err
 			}
 		}

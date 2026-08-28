@@ -273,9 +273,9 @@ func TestTerminalGapIsRenderedOnceWithoutChangingExactBytes(t *testing.T) {
 	})
 	runningMeta := runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", retained, "append")
 	runningMeta = metautil.WithRuntimeSection(runningMeta, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamMode:      "append",
-		metautil.RuntimeStreamTruncated: true,
-		metautil.RuntimeStreamBefore:    int64(65539),
+		metautil.RuntimeStreamMode: "append",
+		"truncated":                true,
+		"truncated_before":         int64(65539),
 	})
 	running := eventstream.ToolStatusInProgress
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{

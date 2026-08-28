@@ -14,6 +14,12 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
+const (
+	runtimeStreamTruncatedMetaKey   = "truncated"
+	runtimeStreamTruncatedBeforeKey = "truncated_before"
+	runtimeToolTargetHandleMetaKey  = "target_handle"
+)
+
 // taskFrameProjectionRequest carries only the Control Task descriptor facts
 // required to project one observation frame for a presentation client.
 type taskFrameProjectionRequest struct {
@@ -112,8 +118,8 @@ func streamTerminalExitID(req taskFrameProjectionRequest, frame stream.Frame) st
 func streamToolUpdateEnvelope(req taskFrameProjectionRequest, frame stream.Frame, status string, includeStatus bool, isErr bool, terminalText string, meta map[string]any, includeDisplayTerminal bool) eventstream.Envelope {
 	if frame.TruncatedBefore > 0 {
 		meta = metautil.WithCompactRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
-			metautil.RuntimeStreamTruncated: true,
-			metautil.RuntimeStreamBefore:    frame.TruncatedBefore,
+			runtimeStreamTruncatedMetaKey:   true,
+			runtimeStreamTruncatedBeforeKey: frame.TruncatedBefore,
 		})
 	}
 	occurredAt := frame.UpdatedAt
@@ -246,7 +252,7 @@ func streamFrameToolMeta(meta map[string]any, taskHandle string) map[string]any 
 		return meta
 	}
 	return metautil.WithCompactRuntimeSection(meta, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeTargetHandle: taskHandle,
+		runtimeToolTargetHandleMetaKey: taskHandle,
 	})
 }
 

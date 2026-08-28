@@ -235,7 +235,7 @@ func TestProjectSessionEventLiveSupplementSeparatesFinalNarrativeFromUsage(t *te
 
 func TestProjectSessionEventLiveSupplementKeepsTerminalFinalStateWithoutBytes(t *testing.T) {
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTask, map[string]any{
-		metautil.RuntimeTaskID:       "task-1",
+		"task_id":                    "task-1",
 		metautil.RuntimeOutputStart:  int64(0),
 		metautil.RuntimeOutputCursor: int64(3),
 		metautil.RuntimeOutputDelta:  "ok\n",

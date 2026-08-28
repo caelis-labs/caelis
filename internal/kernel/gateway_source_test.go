@@ -100,7 +100,7 @@ func TestForwardSourceEventsPublishesTaskOwnedRunCommandFinalWithoutTerminalByte
 
 	handle := newTestTurnHandle()
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTask, map[string]any{
-		metautil.RuntimeTaskID: "task-1", metautil.RuntimeOutputDelta: "ok\n",
+		"task_id": "task-1", metautil.RuntimeOutputDelta: "ok\n",
 		"kind": "command", "state": "completed", "running": false,
 	})
 	source := acpbridge.SourceStream{Events: func(yield func(acpbridge.SourceEvent, error) bool) {

@@ -566,9 +566,9 @@ func TestProjectACPEventToTranscriptEventsMarksUnavailableTerminalPrefix(t *test
 	kind := eventstream.ToolKindExecute
 	meta := runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", "retained tail\n", "append")
 	meta = metautil.WithRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamMode:      "append",
-		metautil.RuntimeStreamTruncated: true,
-		metautil.RuntimeStreamBefore:    int64(65539),
+		metautil.RuntimeStreamMode: "append",
+		"truncated":                true,
+		"truncated_before":         int64(65539),
 	})
 	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate,

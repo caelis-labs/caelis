@@ -672,7 +672,7 @@ func TestFeedBrokerFreshReplayLetsStoredTerminalOutputWinAfterRingEviction(t *te
 func TestFeedBrokerFreshReplaySelectsFinalCommandTaskMaterialization(t *testing.T) {
 	terminalMeta := func(name, terminalID string, start, cursor int64, text string) map[string]any {
 		meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTask, map[string]any{
-			metautil.RuntimeTaskID:         "task-1",
+			"task_id":                      "task-1",
 			metautil.RuntimeTaskTerminalID: "terminal-1",
 			metautil.RuntimeOutputStart:    start,
 			metautil.RuntimeOutputCursor:   cursor,
@@ -1839,7 +1839,7 @@ func terminalEnvelope(text string) eventstream.Envelope {
 func terminalEnvelopeAtCursor(text string, cursor int64) eventstream.Envelope {
 	meta := metautil.WithTerminalOutput(nil, "command-1", text)
 	meta = metautil.WithCompactRuntimeSection(meta, metautil.RuntimeTask, map[string]any{
-		metautil.RuntimeTaskID:         "task-1",
+		"task_id":                      "task-1",
 		metautil.RuntimeTaskTerminalID: "terminal-1",
 		"output_cursor":                cursor,
 	})

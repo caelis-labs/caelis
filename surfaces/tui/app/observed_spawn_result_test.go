@@ -408,10 +408,10 @@ func TestTerminalTaskReadRepairsSpawnBlockAndActivity(t *testing.T) {
 
 	completed := eventstream.ToolStatusCompleted
 	taskMeta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName:     "Task",
-		"action":                     "read",
-		"target_kind":                "subagent",
-		metautil.RuntimeTargetHandle: "alpha",
+		metautil.RuntimeToolName: "Task",
+		"action":                 "read",
+		"target_kind":            "subagent",
+		"target_handle":          "alpha",
 	})
 	envelope := eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
