@@ -285,8 +285,13 @@ func contentChunkForEvent(event *session.Event, kind string, text string) events
 		}
 		if message != nil {
 			if citations := message.TextContentCitations(); len(citations) > 0 {
-				chunk.Meta = metautil.WithSection(chunk.Meta, metautil.Message, map[string]any{
-					metautil.MessageCitations: citationMetaPayload(citations),
+				chunk.Meta = metautil.Merge(chunk.Meta, map[string]any{
+					metautil.Root: map[string]any{
+						metautil.Version: 1,
+						"message": map[string]any{
+							"citations": citationMetaPayload(citations),
+						},
+					},
 				})
 			}
 		}

@@ -60,9 +60,7 @@ func normalizeInboundToolDisplay(meta map[string]any, standardKind string) (map[
 	default:
 		return meta, standardKind
 	}
-	meta = metautil.WithSection(meta, metautil.Display, map[string]any{
-		metautil.DisplayExplorationVerb: "List",
-	})
+	meta = withDisplayExplorationVerb(meta, "List")
 	return meta, standardKind
 }
 
@@ -83,7 +81,7 @@ func grokStandardToolKind(provider map[string]any) (string, bool) {
 
 func normalizeInboundToolMeta(meta map[string]any) map[string]any {
 	meta = normalizeInboundTerminalOutput(meta)
-	return metautil.WithoutSectionKeys(meta, metautil.Display, metautil.DisplayExplorationVerb)
+	return withoutDisplayExplorationVerb(meta)
 }
 
 // normalizeInboundTerminalOutput consumes the maintained codex-acp alias at

@@ -6,7 +6,6 @@ import (
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 const xKeywordSearchToolName = "x_keyword_search"
@@ -17,10 +16,10 @@ const xKeywordSearchToolName = "x_keyword_search"
 func normalizeACPToolDisplayUpdate(update client.Update) client.Update {
 	switch typed := update.(type) {
 	case client.ToolCall:
-		typed.Meta = metautil.WithoutSectionKeys(typed.Meta, metautil.Display, metautil.DisplayToolInput)
+		typed.Meta = client.WithoutDisplayToolInput(typed.Meta)
 		return typed
 	case client.ToolCallUpdate:
-		typed.Meta = metautil.WithoutSectionKeys(typed.Meta, metautil.Display, metautil.DisplayToolInput)
+		typed.Meta = client.WithoutDisplayToolInput(typed.Meta)
 		if !strings.EqualFold(strings.TrimSpace(derefString(typed.Status)), eventstream.ToolStatusCompleted) {
 			return typed
 		}
@@ -28,9 +27,7 @@ func normalizeACPToolDisplayUpdate(update client.Update) client.Update {
 		if len(input) == 0 {
 			return typed
 		}
-		typed.Meta = metautil.WithSection(typed.Meta, metautil.Display, map[string]any{
-			metautil.DisplayToolInput: input,
-		})
+		typed.Meta = client.WithDisplayToolInput(typed.Meta, input)
 		return typed
 	default:
 		return update

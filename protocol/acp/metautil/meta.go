@@ -15,8 +15,6 @@ const (
 
 	Version                = "version"
 	Runtime                = "runtime"
-	Message                = "message"
-	MessageCitations       = "citations"
 	Display                = "display"
 	DisplayToolInput       = "tool_input"
 	DisplayExplorationVerb = "exploration_verb"
@@ -40,55 +38,6 @@ const (
 	RuntimeStreamParentTool   = "parent_tool"
 	RuntimeStreamParentTaskID = "parent_task_id"
 )
-
-// WithSection returns a copy of meta with one direct _meta.caelis section
-// merged in. It is used for presentation semantics that are not runtime
-// lifecycle state, such as structured message citations.
-func WithSection(meta map[string]any, section string, values map[string]any) map[string]any {
-	if section == "" || len(values) == 0 {
-		return CloneMap(meta)
-	}
-	out := CloneMap(meta)
-	if out == nil {
-		out = map[string]any{}
-	}
-	caelis := CloneMap(mapAt(out, Root))
-	if caelis == nil {
-		caelis = map[string]any{}
-	}
-	caelis[Version] = 1
-	sectionMap := CloneMap(mapAt(caelis, section))
-	if sectionMap == nil {
-		sectionMap = map[string]any{}
-	}
-	for key, value := range values {
-		sectionMap[key] = cloneAny(value)
-	}
-	caelis[section] = sectionMap
-	out[Root] = caelis
-	return out
-}
-
-// WithoutSectionKeys returns a copy of meta without selected keys from one
-// direct _meta.caelis section. Empty parent maps are retained so unrelated
-// provider and Caelis metadata keep their original shape.
-func WithoutSectionKeys(meta map[string]any, section string, keys ...string) map[string]any {
-	out := CloneMap(meta)
-	if len(out) == 0 || section == "" || len(keys) == 0 {
-		return out
-	}
-	caelis := CloneMap(mapAt(out, Root))
-	sectionMap := CloneMap(mapAt(caelis, section))
-	if len(sectionMap) == 0 {
-		return out
-	}
-	for _, key := range keys {
-		delete(sectionMap, key)
-	}
-	caelis[section] = sectionMap
-	out[Root] = caelis
-	return out
-}
 
 // String returns a trimmed string from _meta using a stable path.
 func String(values map[string]any, path ...string) string {

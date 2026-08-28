@@ -233,7 +233,7 @@ func TestNormalizeInboundUpdateGrokListIsIdempotentForExplicitUpdateKind(t *test
 
 	input := map[string]any{"target_directory": "docs"}
 	meta := grokListMeta(true)
-	meta = metautil.WithSection(meta, metautil.Display, map[string]any{"unrelated": "kept"})
+	meta = withDisplayMetaValues(meta, map[string]any{"unrelated": "kept"})
 	kind := eventstream.ToolKindRead
 	update := ToolCallUpdate{
 		SessionUpdate: eventstream.UpdateToolCallInfo,
@@ -287,9 +287,7 @@ func TestNormalizeInboundUpdateGrokListIsIdempotentForExplicitOtherUpdate(t *tes
 func TestNormalizeInboundUpdateSparseKindDoesNotOverridePriorStandardKind(t *testing.T) {
 	t.Parallel()
 
-	meta := metautil.WithSection(grokListMeta(true), metautil.Display, map[string]any{
-		metautil.DisplayExplorationVerb: "List",
-	})
+	meta := withDisplayExplorationVerb(grokListMeta(true), "List")
 	normalized := NormalizeInboundUpdate(ToolCallUpdate{
 		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    "specific-1",
@@ -309,9 +307,7 @@ func TestNormalizeInboundUpdateSparseKindDoesNotOverridePriorStandardKind(t *tes
 func TestNormalizeInboundUpdateRejectsForgedExplorationVerbWithoutStrictProviderMetadata(t *testing.T) {
 	t.Parallel()
 
-	meta := metautil.WithSection(nil, metautil.Display, map[string]any{
-		metautil.DisplayExplorationVerb: "List",
-	})
+	meta := withDisplayExplorationVerb(nil, "List")
 	normalized := NormalizeInboundUpdate(ToolCall{
 		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    "other-1",

@@ -152,7 +152,7 @@ func TestProjectACPEventToTranscriptEventsIgnoresRecoveredToolInputOnStart(t *te
 					Kind:          eventstream.ToolKindSearch,
 					Status:        eventstream.ToolStatusInProgress,
 					RawInput:      tt.rawInput,
-					Meta: metautil.WithSection(nil, metautil.Display, map[string]any{
+					Meta: testACPDisplayMeta(map[string]any{
 						metautil.DisplayToolInput: map[string]any{"query": "forged"},
 					}),
 				},
@@ -190,7 +190,7 @@ func TestProjectACPEventToTranscriptEventsIgnoresRecoveredToolInputOnLivePatch(t
 					Kind:          stringPtr(tt.kind),
 					Status:        tt.status,
 					RawInput:      tt.rawInput,
-					Meta: metautil.WithSection(nil, metautil.Display, map[string]any{
+					Meta: testACPDisplayMeta(map[string]any{
 						metautil.DisplayToolInput: map[string]any{"query": "forged"},
 					}),
 				},
@@ -234,7 +234,7 @@ func TestProjectACPEventToTranscriptEventsRecoversSerializedCompletedToolInput(t
 				"name":  "x_keyword_search",
 				"input": `{"query":"` + query + `","limit":"3","mode":"Latest"}`,
 			},
-			Meta: metautil.WithSection(nil, metautil.Display, map[string]any{
+			Meta: testACPDisplayMeta(map[string]any{
 				metautil.DisplayToolInput: map[string]any{"query": query},
 			}),
 		},
@@ -265,7 +265,7 @@ func TestProjectACPEventToTranscriptEventsPreservesNormalizedExplorationVerb(t *
 			Kind:          eventstream.ToolKindRead,
 			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"target_directory": "docs"},
-			Meta: metautil.WithSection(nil, metautil.Display, map[string]any{
+			Meta: testACPDisplayMeta(map[string]any{
 				metautil.DisplayExplorationVerb: "List",
 			}),
 		},
@@ -315,7 +315,7 @@ func TestProjectACPEventToTranscriptEventsKeepsRawInputAuthoritative(t *testing.
 			Title:         stringPtr("Search"),
 			Status:        stringPtr(eventstream.ToolStatusCompleted),
 			RawInput:      map[string]any{"query": "authoritative"},
-			Meta: metautil.WithSection(nil, metautil.Display, map[string]any{
+			Meta: testACPDisplayMeta(map[string]any{
 				metautil.DisplayToolInput: map[string]any{"query": "recovered"},
 			}),
 		},
@@ -637,4 +637,13 @@ func runningSnapshotTerminalMeta(toolName string, taskID string, terminalID stri
 		meta = metautil.WithTerminalOutput(meta, terminalID, output)
 	}
 	return meta
+}
+
+func testACPDisplayMeta(values map[string]any) map[string]any {
+	return map[string]any{
+		"caelis": map[string]any{
+			"version": 1,
+			"display": values,
+		},
+	}
 }

@@ -279,9 +279,9 @@ func TestNormalizeACPUpdateEventDoesNotTreatArbitraryRawOutputInputAsInvocation(
 			"name":  "read",
 			"input": `{"query":"returned-result-or-sensitive-text"}`,
 		},
-		Meta: metautil.WithSection(map[string]any{
+		Meta: withTestDisplayMeta(map[string]any{
 			"vendor": map[string]any{"trace": "keep"},
-		}, metautil.Display, map[string]any{
+		}, map[string]any{
 			metautil.DisplayToolInput: map[string]any{"query": "forged"},
 			"theme":                   "keep",
 		}),
@@ -340,9 +340,9 @@ func TestNormalizeACPUpdateEventStripsExternalDisplayInputFromToolStart(t *testi
 		ToolCallID:    "read-1",
 		Title:         "Read",
 		Status:        eventstream.ToolStatusInProgress,
-		Meta: metautil.WithSection(map[string]any{
+		Meta: withTestDisplayMeta(map[string]any{
 			"vendor": map[string]any{"trace": "keep"},
-		}, metautil.Display, map[string]any{
+		}, map[string]any{
 			metautil.DisplayToolInput: map[string]any{"query": "forged"},
 			"theme":                   "keep",
 		}),
@@ -3053,6 +3053,15 @@ func testDisplayMeta(meta map[string]any) map[string]any {
 	caelisMeta, _ := meta[metautil.Root].(map[string]any)
 	displayMeta, _ := caelisMeta[metautil.Display].(map[string]any)
 	return metautil.CloneMap(displayMeta)
+}
+
+func withTestDisplayMeta(meta map[string]any, values map[string]any) map[string]any {
+	return metautil.Merge(meta, map[string]any{
+		metautil.Root: map[string]any{
+			metautil.Version: 1,
+			metautil.Display: values,
+		},
+	})
 }
 
 func testStringPtr(value string) *string {
