@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -83,7 +84,7 @@ func (t *liveReasoningTrace) capture(env eventstream.Envelope) {
 	if !ok {
 		return
 	}
-	text := strings.TrimSpace(schema.ExtractTextValue(chunk.Content))
+	text := strings.TrimSpace(session.ExtractProtocolText(chunk.Content))
 	switch chunk.SessionUpdate {
 	case schema.UpdateAgentThought:
 		t.reasoningChunks = append(t.reasoningChunks, text)

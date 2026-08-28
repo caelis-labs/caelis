@@ -521,7 +521,7 @@ func permissionRequestFromProtocol(sessionID string, meta map[string]any, approv
 		req.ToolCall.Title == nil &&
 		req.ToolCall.Kind == nil &&
 		len(approval.Options) == 0 &&
-		len(schema.NormalizeRawMap(req.ToolCall.RawInput)) == 0 {
+		len(session.NormalizeProtocolRawMap(req.ToolCall.RawInput)) == 0 {
 		return nil
 	}
 	return &req

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -543,7 +544,7 @@ func ToolUpdateError(update schema.ToolCallUpdate) bool {
 }
 
 func RawMap(raw any) map[string]any {
-	return schema.NormalizeRawMap(raw)
+	return session.NormalizeProtocolRawMap(raw)
 }
 
 func GatewayProjection(meta map[string]any) bool {

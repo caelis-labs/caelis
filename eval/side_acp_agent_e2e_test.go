@@ -249,5 +249,5 @@ func sideACPNarrative(update schema.Update) (string, string) {
 	if !ok {
 		return "", ""
 	}
-	return strings.TrimSpace(chunk.SessionUpdate), schema.ExtractTextValue(chunk.Content)
+	return strings.TrimSpace(chunk.SessionUpdate), session.ExtractProtocolText(chunk.Content)
 }

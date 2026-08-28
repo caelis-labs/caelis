@@ -195,7 +195,7 @@ func TestForwardControllerEventsPublishesNarrativeDeltasWithRepairedNativeACP(t 
 			if !ok {
 				t.Fatalf("native ACP update = %#v, want ContentChunk", env.Update)
 			}
-			nativeTexts = append(nativeTexts, schema.ExtractTextValue(chunk.Content))
+			nativeTexts = append(nativeTexts, session.ExtractProtocolText(chunk.Content))
 			if env.Scope != eventstream.ScopeParticipant || env.ScopeID != "emma" {
 				t.Fatalf("native ACP scope = %q/%q, want preserved participant/emma", env.Scope, env.ScopeID)
 			}

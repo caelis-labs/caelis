@@ -291,7 +291,7 @@ func TestEnvelopeWithNarrativeTextPreservesEnvelopeShape(t *testing.T) {
 	if chunk.SessionUpdate != schema.UpdateAgentMessage {
 		t.Fatalf("repaired session_update = %q, want agent_message_chunk", chunk.SessionUpdate)
 	}
-	if got, want := schema.ExtractTextValue(chunk.Content), "lo"; got != want {
+	if got, want := session.ExtractProtocolText(chunk.Content), "lo"; got != want {
 		t.Fatalf("repaired narrative text = %q, want delta %q", got, want)
 	}
 }

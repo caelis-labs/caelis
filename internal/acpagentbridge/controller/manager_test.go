@@ -387,7 +387,7 @@ func TestNormalizeACPUpdateEventPreservesToolUpdateMeta(t *testing.T) {
 		t.Fatalf("event = %#v, want protocol update", event)
 	}
 	content := session.ProtocolToolCallContentOf(event.Protocol.Update)
-	if len(content) != 1 || content[0].TerminalID != "call-1" || schema.ExtractTextValue(content[0].Content) != "line\n" {
+	if len(content) != 1 || content[0].TerminalID != "call-1" || session.ExtractProtocolText(content[0].Content) != "line\n" {
 		t.Fatalf("Protocol.Update.Content = %#v, want terminal content", event.Protocol.Update.Content)
 	}
 }
@@ -2658,7 +2658,7 @@ func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 		t.Fatalf("canonical raw output stdout = %#v, want original %q", got, fenced)
 	}
 	canonicalContent := session.ProtocolToolCallContentOf(canonicalUpdate)
-	if got := schema.ExtractTextValue(canonicalContent[0].Content); got != want {
+	if got := session.ExtractProtocolText(canonicalContent[0].Content); got != want {
 		t.Fatalf("canonical terminal content = %q, want %q", got, want)
 	}
 	acpUpdate, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
@@ -2669,7 +2669,7 @@ func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 	if got := rawOutput["stdout"]; got != fenced {
 		t.Fatalf("ACP raw output stdout = %#v, want original %q", got, fenced)
 	}
-	if got := schema.ExtractTextValue(acpUpdate.Content[0].Content); got != want {
+	if got := session.ExtractProtocolText(acpUpdate.Content[0].Content); got != want {
 		t.Fatalf("ACP terminal content = %q, want %q", got, want)
 	}
 }
@@ -2723,14 +2723,14 @@ func TestControllerRunStripsConsoleFenceFromExecuteContentAtUpdateIngress(t *tes
 		t.Fatalf("canonical event = %#v, want protocol tool update", canonical)
 	}
 	canonicalContent := session.ProtocolToolCallContentOf(canonicalUpdate)
-	if got := schema.ExtractTextValue(canonicalContent[0].Content); got != want {
+	if got := session.ExtractProtocolText(canonicalContent[0].Content); got != want {
 		t.Fatalf("canonical execute content = %q, want %q", got, want)
 	}
 	acpUpdate, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("ACP update = %T, want ToolCallUpdate", events[0].ACP.Update)
 	}
-	if got := schema.ExtractTextValue(acpUpdate.Content[0].Content); got != want {
+	if got := session.ExtractProtocolText(acpUpdate.Content[0].Content); got != want {
 		t.Fatalf("ACP execute content = %q, want %q", got, want)
 	}
 }
@@ -2788,14 +2788,14 @@ func TestControllerRunStripsConsoleFenceFromClaudeBashContentAtUpdateIngress(t *
 		t.Fatalf("canonical event = %#v, want protocol tool update", canonical)
 	}
 	canonicalContent := session.ProtocolToolCallContentOf(canonicalUpdate)
-	if got := schema.ExtractTextValue(canonicalContent[0].Content); got != want {
+	if got := session.ExtractProtocolText(canonicalContent[0].Content); got != want {
 		t.Fatalf("canonical claude bash content = %q, want %q", got, want)
 	}
 	acpUpdate, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("ACP update = %T, want ToolCallUpdate", events[0].ACP.Update)
 	}
-	if got := schema.ExtractTextValue(acpUpdate.Content[0].Content); got != want {
+	if got := session.ExtractProtocolText(acpUpdate.Content[0].Content); got != want {
 		t.Fatalf("ACP claude bash content = %q, want %q", got, want)
 	}
 }

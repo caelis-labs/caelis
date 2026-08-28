@@ -1,8 +1,11 @@
 package acpbridge
 
-import "strings"
+import (
+	"strings"
 
-import acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
+)
 
 // FinalAssistantAccumulator retains the latest assistant message while
 // appending ACP narrative frames with exact delta semantics.
@@ -73,7 +76,7 @@ func (a *FinalAssistantAccumulator) Reset() {
 func (a *FinalAssistantAccumulator) observeContentChunk(updateType string, content any, messageID string) AssistantTextUpdate {
 	switch strings.TrimSpace(updateType) {
 	case acpschema.UpdateAgentMessage:
-		return a.ObserveFrame(messageID, acpschema.ExtractTextValue(content))
+		return a.ObserveFrame(messageID, session.ExtractProtocolText(content))
 	case acpschema.UpdateAgentThought:
 		a.Reset()
 		return AssistantTextUpdate{Barrier: true}

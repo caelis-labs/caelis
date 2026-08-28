@@ -3,6 +3,7 @@ package acputil
 import (
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -70,10 +71,10 @@ func TestStripTerminalConsoleFenceToolCallUpdate(t *testing.T) {
 	if got.RawOutput.(map[string]any)["stdout"] != fenced {
 		t.Fatalf("raw output = %#v, want original stdout", got.RawOutput)
 	}
-	if text := acpschema.ExtractTextValue(got.Content[0].Content); text != "line\n" {
+	if text := session.ExtractProtocolText(got.Content[0].Content); text != "line\n" {
 		t.Fatalf("terminal content = %q, want stripped text", text)
 	}
-	if text := acpschema.ExtractTextValue(got.Content[1].Content); text != fenced {
+	if text := session.ExtractProtocolText(got.Content[1].Content); text != fenced {
 		t.Fatalf("non-terminal content = %q, want original text", text)
 	}
 }
@@ -91,7 +92,7 @@ func TestStripTerminalConsoleFenceToolCallUpdateStripsExecuteContent(t *testing.
 		}},
 	})
 
-	if text := acpschema.ExtractTextValue(got.Content[0].Content); text != "clean\n" {
+	if text := session.ExtractProtocolText(got.Content[0].Content); text != "clean\n" {
 		t.Fatalf("execute content = %q, want stripped console output", text)
 	}
 }
@@ -114,7 +115,7 @@ func TestStripTerminalConsoleFenceToolCallUpdateStripsClaudeBashContent(t *testi
 		},
 	})
 
-	if text := acpschema.ExtractTextValue(got.Content[0].Content); text != want {
+	if text := session.ExtractProtocolText(got.Content[0].Content); text != want {
 		t.Fatalf("claude bash content = %q, want stripped console output", text)
 	}
 }

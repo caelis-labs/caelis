@@ -313,7 +313,7 @@ func TestTranslateApprovalRequestPreservesCanonicalToolPayload(t *testing.T) {
 	if got.ToolCall.RawOutput["preview"] != "new text" {
 		t.Fatalf("raw output = %#v, want preserved preview", got.ToolCall.RawOutput)
 	}
-	if len(got.ToolCall.Content) != 1 || schema.ExtractTextValue(got.ToolCall.Content[0].Content) != "permission detail" {
+	if len(got.ToolCall.Content) != 1 || session.ExtractProtocolText(got.ToolCall.Content[0].Content) != "permission detail" {
 		t.Fatalf("content = %#v, want preserved canonical content", got.ToolCall.Content)
 	}
 }
@@ -748,7 +748,7 @@ func TestRunnerStripsConsoleFenceFromChildTerminalOutput(t *testing.T) {
 		t.Fatalf("raw output stdout = %#v, want original %q", got, fenced)
 	}
 	content := session.ProtocolToolCallContentOf(update)
-	if got := schema.ExtractTextValue(content[0].Content); got != want {
+	if got := session.ExtractProtocolText(content[0].Content); got != want {
 		t.Fatalf("terminal content = %q, want %q", got, want)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -247,12 +248,12 @@ func terminalMaterializationComplete(envelope eventstream.Envelope) bool {
 	switch update := envelope.Update.(type) {
 	case schema.ToolCall:
 		status = update.Status
-		rawOutput = schema.NormalizeRawMap(update.RawOutput)
+		rawOutput = session.NormalizeProtocolRawMap(update.RawOutput)
 	case schema.ToolCallUpdate:
 		if update.Status != nil {
 			status = *update.Status
 		}
-		rawOutput = schema.NormalizeRawMap(update.RawOutput)
+		rawOutput = session.NormalizeProtocolRawMap(update.RawOutput)
 	}
 	_, output, ok := freshReplayTerminalMaterialization(envelope)
 	if !ok || !terminalMaterializationStartsAtZero(freshReplayTerminalMeta(envelope), output) {

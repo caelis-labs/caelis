@@ -81,8 +81,8 @@ func permissionToolCallFromWire(wire schema.ToolCallUpdate) session.ProtocolTool
 		Kind:      permissionStringValue(wire.Kind),
 		Title:     permissionStringValue(wire.Title),
 		Status:    permissionStringValue(wire.Status),
-		RawInput:  schema.NormalizeRawMap(wire.RawInput),
-		RawOutput: schema.NormalizeRawMap(wire.RawOutput),
+		RawInput:  session.NormalizeProtocolRawMap(wire.RawInput),
+		RawOutput: session.NormalizeProtocolRawMap(wire.RawOutput),
 		Content:   content,
 	}
 }

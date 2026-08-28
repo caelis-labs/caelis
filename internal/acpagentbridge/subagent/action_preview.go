@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
-	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const (
@@ -243,7 +243,7 @@ func compactToolOutput(text string) string {
 func toolContentActivity(content []client.ToolCallContent) string {
 	output := ""
 	for _, item := range content {
-		if text := strings.TrimSpace(acpschema.ExtractTextValue(item.Content)); text != "" {
+		if text := strings.TrimSpace(session.ExtractProtocolText(item.Content)); text != "" {
 			if output != "" {
 				text = "\n" + text
 			}

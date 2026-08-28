@@ -19,7 +19,7 @@ import (
 	sdkchat "github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -854,7 +854,7 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 	if got := metautil.String(toolMeta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RunCommand" {
 		t.Fatalf("client permission tool name = %q, want RUN_COMMAND", got)
 	}
-	if got := acp.NormalizeRawMap(cb.last.ToolCall.RawInput)["command"]; got != "git restore hello.py" {
+	if got := session.NormalizeProtocolRawMap(cb.last.ToolCall.RawInput)["command"]; got != "git restore hello.py" {
 		t.Fatalf("client permission raw command = %#v, want git restore hello.py", got)
 	}
 	if reviewer.calls != 0 {

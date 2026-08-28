@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -70,8 +71,8 @@ func terminalTaskObservationsFromEnvelope(env eventstream.Envelope) []terminalTa
 	if !ok || !taskObserverStatusFinal(update.Status) {
 		return nil
 	}
-	rawInput := schema.NormalizeRawMap(update.RawInput)
-	rawOutput := schema.NormalizeRawMap(update.RawOutput)
+	rawInput := session.NormalizeProtocolRawMap(update.RawInput)
+	rawOutput := session.NormalizeProtocolRawMap(update.RawOutput)
 	if len(rawInput) == 0 || len(rawOutput) == 0 {
 		return nil
 	}

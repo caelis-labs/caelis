@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -118,7 +119,7 @@ func terminalExtensionMetaFromACPContent(meta map[string]any, terminalID string,
 		} else if terminalID == "" {
 			terminalID = defaultTerminalID
 		}
-		text.WriteString(acp.ExtractTextValue(item.Content))
+		text.WriteString(session.ExtractProtocolText(item.Content))
 	}
 	if !hasTerminalContent && terminalID == "" {
 		return meta, content

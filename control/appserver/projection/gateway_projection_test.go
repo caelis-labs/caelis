@@ -481,7 +481,7 @@ func TestEnvelopeBaseKeepsCanonicalizedDurableChildDeltaNonFinal(t *testing.T) {
 		t.Fatalf("ProjectSessionEventEnvelope() = %#v, want one non-final child delta", events)
 	}
 	chunk, ok := events[0].Update.(schema.ContentChunk)
-	if !ok || chunk.SessionUpdate != schema.UpdateAgentMessage || schema.ExtractTextValue(chunk.Content) != "。" {
+	if !ok || chunk.SessionUpdate != schema.UpdateAgentMessage || session.ExtractProtocolText(chunk.Content) != "。" {
 		t.Fatalf("projected child delta = %#v", events[0].Update)
 	}
 }

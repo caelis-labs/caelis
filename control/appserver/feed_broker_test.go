@@ -178,7 +178,7 @@ func TestFeedBrokerMainTerminalReconcilesCommittedAssistantFirst(t *testing.T) {
 
 	got := receiveEnvelopes(t, subscription.Events(), 2)
 	chunk, ok := got[0].Update.(schema.ContentChunk)
-	if !ok || chunk.SessionUpdate != schema.UpdateAgentMessage || schema.ExtractTextValue(chunk.Content) != "committed final answer" {
+	if !ok || chunk.SessionUpdate != schema.UpdateAgentMessage || session.ExtractProtocolText(chunk.Content) != "committed final answer" {
 		t.Fatalf("first event = %#v, want committed assistant", got[0])
 	}
 	if !eventstream.IsTurnTerminalLifecycle(got[1]) {
@@ -485,7 +485,7 @@ func TestFeedBrokerFreshReplaySelectsCanonicalNarrativeInsteadOfRetainedDeltas(t
 	defer result.Subscription.Close()
 	got := receiveEnvelopes(t, result.Subscription.Backfill(), 1)
 	chunk, ok := got[0].Update.(schema.ContentChunk)
-	if !ok || chunk.MessageID != "message-1" || schema.ExtractTextValue(chunk.Content) != "CAELIS" || !isDurableFeedEnvelope(got[0]) {
+	if !ok || chunk.MessageID != "message-1" || session.ExtractProtocolText(chunk.Content) != "CAELIS" || !isDurableFeedEnvelope(got[0]) {
 		t.Fatalf("fresh replay = %#v, want one durable complete message", got)
 	}
 	if _, open := <-result.Subscription.Backfill(); open {
@@ -607,7 +607,7 @@ func TestFeedBrokerFreshReplaySelectsStoredCanonicalNarrativeOverRetainedDeltas(
 	defer result.Subscription.Close()
 	got := receiveEnvelopes(t, result.Subscription.Backfill(), 1)
 	chunk, ok := got[0].Update.(schema.ContentChunk)
-	if !ok || schema.ExtractTextValue(chunk.Content) != "CAELIS" || !isDurableFeedEnvelope(got[0]) {
+	if !ok || session.ExtractProtocolText(chunk.Content) != "CAELIS" || !isDurableFeedEnvelope(got[0]) {
 		t.Fatalf("fresh replay = %#v, want the stored complete narrative once", got)
 	}
 	if _, open := <-result.Subscription.Backfill(); open {

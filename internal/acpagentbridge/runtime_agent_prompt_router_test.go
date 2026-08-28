@@ -11,7 +11,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
@@ -671,7 +671,7 @@ func TestRuntimeAgentPromptRouterTurnFeedEmitsTerminalMetaForACPStdio(t *testing
 		t.Fatalf("notifications = %#v, want completed update", cb.notifications)
 	}
 	for _, item := range finalUpdate.Content {
-		if text := acp.ExtractTextValue(item.Content); text != "" {
+		if text := session.ExtractProtocolText(item.Content); text != "" {
 			t.Fatalf("completed update = %#v, final status should not repeat streamed terminal content", *finalUpdate)
 		}
 	}

@@ -7,7 +7,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
-	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func protocolUpdateFromContentChunk(chunk client.ContentChunk) (*session.ProtocolUpdate, error) {
@@ -32,8 +31,8 @@ func protocolUpdateFromToolCall(call client.ToolCall) *session.ProtocolUpdate {
 		Title:         call.Title,
 		Kind:          call.Kind,
 		Status:        call.Status,
-		RawInput:      acpschema.NormalizeRawMap(call.RawInput),
-		RawOutput:     acpschema.NormalizeRawMap(call.RawOutput),
+		RawInput:      session.NormalizeProtocolRawMap(call.RawInput),
+		RawOutput:     session.NormalizeProtocolRawMap(call.RawOutput),
 		Content:       protocolToolContentFromWire(call.Content),
 		Locations:     protocolLocationsFromWire(call.Locations),
 		Meta:          call.Meta,
@@ -47,8 +46,8 @@ func protocolUpdateFromToolCallUpdate(update client.ToolCallUpdate) *session.Pro
 		Title:         stringValue(update.Title),
 		Kind:          stringValue(update.Kind),
 		Status:        stringValue(update.Status),
-		RawInput:      acpschema.NormalizeRawMap(update.RawInput),
-		RawOutput:     acpschema.NormalizeRawMap(update.RawOutput),
+		RawInput:      session.NormalizeProtocolRawMap(update.RawInput),
+		RawOutput:     session.NormalizeProtocolRawMap(update.RawOutput),
 		Content:       protocolToolContentFromWire(update.Content),
 		Locations:     protocolLocationsFromWire(update.Locations),
 		Meta:          update.Meta,

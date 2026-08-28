@@ -65,7 +65,7 @@ func (p *spawnReplayProjector) normalize(
 	if !ok || !toolStatusFinal(update.Status) || !sessionEventOwnsSpawnCall(event, update.ToolCallID) {
 		return notification
 	}
-	rawOutput := acp.NormalizeRawMap(update.RawOutput)
+	rawOutput := session.NormalizeProtocolRawMap(update.RawOutput)
 	update = withSpawnReplayResult(update, rawOutput)
 	p.closed[spawnReplayKeyForRawOutput(update.ToolCallID, rawOutput)] = struct{}{}
 	notification.Update = update

@@ -147,7 +147,7 @@ func TestSideACPDistinctXSearchBypassesOrchestrationWatchdogE2E(t *testing.T) {
 			completedQueries = append(completedQueries, query)
 		case schema.ContentChunk:
 			if update.SessionUpdate != schema.UpdateAgentMessage ||
-				strings.TrimSpace(schema.ExtractTextValue(update.Content)) != "external xsearch sequence complete" {
+				strings.TrimSpace(session.ExtractProtocolText(update.Content)) != "external xsearch sequence complete" {
 				continue
 			}
 			finalMessages++

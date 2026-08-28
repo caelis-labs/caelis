@@ -28,7 +28,7 @@ func TestProjectSessionEventNotificationsWrapsUpdatesAndAppendsUsage(t *testing.
 		t.Fatalf("notifications = %#v, want projected update plus usage", notifications)
 	}
 	chunk, ok := notifications[0].Update.(schema.ContentChunk)
-	if !ok || notifications[0].SessionID != "event-session" || schema.ExtractTextValue(chunk.Content) != "from updates" {
+	if !ok || notifications[0].SessionID != "event-session" || session.ExtractProtocolText(chunk.Content) != "from updates" {
 		t.Fatalf("notification = %#v, want event session update", notifications[0])
 	}
 	usage, ok := notifications[1].Update.(schema.UsageUpdate)

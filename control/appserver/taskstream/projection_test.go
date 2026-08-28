@@ -894,7 +894,7 @@ func assertTerminalAnchor(t *testing.T, content []schema.ToolCallContent, termin
 	if len(content) != 1 || content[0].Type != "terminal" || content[0].TerminalID != terminalID {
 		t.Fatalf("content = %#v, want one terminal anchor %q", content, terminalID)
 	}
-	if text := schema.ExtractTextValue(content[0].Content); text != "" {
+	if text := session.ExtractProtocolText(content[0].Content); text != "" {
 		t.Fatalf("terminal anchor content text = %q, want empty", text)
 	}
 }
