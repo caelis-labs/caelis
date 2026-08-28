@@ -3,7 +3,6 @@ package client
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
@@ -56,8 +55,8 @@ func normalizeInboundToolDisplay(meta map[string]any, standardKind string) (map[
 
 	switch strings.ToLower(strings.TrimSpace(standardKind)) {
 	case "":
-		standardKind = eventstream.ToolKindRead
-	case eventstream.ToolKindRead, eventstream.ToolKindOther:
+		standardKind = toolKindRead
+	case toolKindRead, toolKindOther:
 	default:
 		return meta, standardKind
 	}
@@ -73,9 +72,9 @@ func grokStandardToolKind(provider map[string]any) (string, bool) {
 		return "", false
 	}
 	switch kind := mapString(provider, "kind"); kind {
-	case eventstream.ToolKindRead, eventstream.ToolKindSearch:
+	case toolKindRead, toolKindSearch:
 		return kind, readOnly
-	case eventstream.ToolKindEdit, eventstream.ToolKindExecute:
+	case toolKindEdit, toolKindExecute:
 		return kind, !readOnly
 	default:
 		return "", false

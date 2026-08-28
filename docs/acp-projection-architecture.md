@@ -279,6 +279,12 @@ absent.
 Permission requests are Control interactions, not Task frames. Control emits
 the approval Envelope on the Session feed after the request has durable
 identity. A Surface returns only that identity and the user's decision.
+External `request_permission` options are validated before any approval
+callback: identifiers are non-empty and unique, and kinds are one of the four
+canonical ACP allow/reject values. A registered `danger-full-access` policy
+automatically selects a canonical allow option for controller, participant, and
+subagent requests; malformed or ambiguous options fail closed, while tool
+names, titles, and display metadata never influence that decision.
 
 A Task control invocation and its target have independent lifecycles. A
 successful read, wait, command write, or cancel invocation does not prove that
@@ -301,6 +307,14 @@ result already exists in durable participant history, replay renders it through
 the same ordinary tool panel and never reconstructs a child workspace.
 Product-owned Main Spawn continues to use the typed Task stream and retained
 child workspace described above.
+
+External Agent ingress owns its tolerant update DTOs and unknown-update decoder
+inside `internal/acpagentbridge/client`. Standard session-state and permission
+shapes prefer `acp-go-sdk`; maintained provider extensions and unknown future
+updates remain raw until Host-private normalization has applied trust and
+compatibility policy. Only the controller/participant Host boundary projects
+those values into `control/appserver/eventstream` for Surface delivery. The
+external client never imports Control Envelope DTOs as its wire model.
 
 ## Display Extensions
 

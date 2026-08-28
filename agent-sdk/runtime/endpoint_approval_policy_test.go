@@ -118,6 +118,51 @@ func TestDangerFullAccessResolvesSubagentPermissionsBeforeApprovalRequester(t *t
 	}
 }
 
+func TestDangerFullAccessRejectsMalformedEndpointPermissionOptions(t *testing.T) {
+	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "malformed-options")
+	requesterCalls := 0
+	bridge := controllerApprovalRequester{
+		runtime: runtime,
+		requester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			requesterCalls++
+			return agent.ApprovalResponse{Approved: true}, nil
+		}),
+		sessionRef: activeSession.SessionRef,
+		session:    activeSession,
+	}
+	tests := map[string][]agent.ApprovalOption{
+		"unknown kind":   {{ID: "allow_once", Name: "Allow once", Kind: "vendor_custom"}},
+		"uppercase kind": {{ID: "allow_once", Name: "Allow once", Kind: "ALLOW_ONCE"}},
+		"spaced kind":    {{ID: "allow_once", Name: "Allow once", Kind: " allow_once "}},
+		"duplicate id": {
+			{ID: "same", Name: "Allow", Kind: "allow_once"},
+			{ID: "same", Name: "Reject", Kind: "reject_once"},
+		},
+		"blank id":  {{ID: " ", Name: "Allow", Kind: "allow_once"}},
+		"spaced id": {{ID: " allow_once ", Name: "Allow", Kind: "allow_once"}},
+	}
+	for name, options := range tests {
+		t.Run(name, func(t *testing.T) {
+			response, err := bridge.RequestControllerApproval(context.Background(), controller.ApprovalRequest{
+				Mode: presets.ModeDangerFullAccess,
+				ToolCall: controller.ApprovalToolCall{
+					ID: "call-malformed", Name: "external.custom.tool", Kind: "execute",
+				},
+				Options: options,
+			})
+			if err == nil {
+				t.Fatalf("RequestControllerApproval() response = %#v, error = nil", response)
+			}
+			if response.Approved {
+				t.Fatalf("RequestControllerApproval() response = %#v, want fail-closed", response)
+			}
+		})
+	}
+	if requesterCalls != 0 {
+		t.Fatalf("ApprovalRequester calls = %d, want zero for malformed full-access options", requesterCalls)
+	}
+}
+
 func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T) {
 	registry, err := presets.NewRegistry()
 	if err != nil {

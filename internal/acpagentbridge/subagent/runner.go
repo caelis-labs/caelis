@@ -871,7 +871,11 @@ func translateApprovalRequest(
 	agentID string,
 	req client.RequestPermissionRequest,
 ) (subagent.ApprovalRequest, error) {
-	approval, err := acppermission.DecodePermissionRequest(req)
+	wire, err := acpingress.PermissionRequest(req)
+	if err != nil {
+		return subagent.ApprovalRequest{}, err
+	}
+	approval, err := acppermission.DecodePermissionRequest(wire)
 	if err != nil {
 		return subagent.ApprovalRequest{}, err
 	}

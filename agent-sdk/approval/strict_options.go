@@ -23,6 +23,26 @@ func ValidateStrictOptions(options []Option) error {
 	return err
 }
 
+// ValidateACPOptions verifies the strict option invariants and limits kinds to
+// the four values defined by the ACP request_permission wire contract.
+func ValidateACPOptions(options []Option) error {
+	_, err := normalizeStrictOptions(options)
+	if err != nil {
+		return err
+	}
+	for _, option := range options {
+		if option.ID != strings.TrimSpace(option.ID) {
+			return fmt.Errorf("approval: ACP option id %q has surrounding whitespace", option.ID)
+		}
+		switch option.Kind {
+		case "allow_once", "allow_always", "reject_once", "reject_always":
+		default:
+			return fmt.Errorf("approval: option %q has non-ACP kind %q", option.ID, option.Kind)
+		}
+	}
+	return nil
+}
+
 // StrictOptionIDs returns validated option identifiers in encounter order.
 func StrictOptionIDs(options []Option) ([]string, error) {
 	normalized, err := normalizeStrictOptions(options)

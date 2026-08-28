@@ -627,6 +627,11 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if strings.HasPrefix(rel, "internal/acpagentbridge/") && strings.HasPrefix(target, "surfaces/") {
 		return "internal/acpagentbridge must receive presentation projection through assembly, not import surfaces"
 	}
+	if strings.HasPrefix(rel, "internal/acpagentbridge/client/") &&
+		!strings.HasSuffix(rel, "_test.go") &&
+		(target == "control/appserver/eventstream" || strings.HasPrefix(target, "control/appserver/eventstream/")) {
+		return "external ACP client ingress must own tolerant wire compatibility and project into Control eventstream at the Host boundary"
+	}
 	if temporaryArchitectureException(rel, target) {
 		return ""
 	}

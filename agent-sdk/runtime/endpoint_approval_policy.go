@@ -42,15 +42,31 @@ func endpointPolicyApprovalResponse(
 ) (agent.ApprovalResponse, error) {
 	options := make([]approval.Option, 0)
 	if payload != nil {
-		options = approval.NormalizeProtocolOptions(payload.Options)
+		options = make([]approval.Option, 0, len(payload.Options))
+		for _, option := range payload.Options {
+			options = append(options, approval.Option{ID: option.ID, Name: option.Name, Kind: option.Kind})
+		}
 	}
-	resolved := approval.ResolveReviewResult(&approval.Payload{Options: options}, approval.ReviewResult{
+	if err := approval.ValidateACPOptions(options); err != nil {
+		return agent.ApprovalResponse{}, fmt.Errorf("agent-sdk/runtime: invalid endpoint permission options: %w", err)
+	}
+	decision := approval.OptionDecisionDeny
+	if approved {
+		decision = approval.OptionDecisionAllow
+	}
+	optionID, ok, err := approval.StrictOptionIDForDecision(options, decision)
+	if err != nil {
+		return agent.ApprovalResponse{}, fmt.Errorf("agent-sdk/runtime: resolve endpoint permission option: %w", err)
+	}
+	if !ok {
+		return agent.ApprovalResponse{}, fmt.Errorf("agent-sdk/runtime: endpoint permission has no %s option", decision)
+	}
+	resolved := approval.ReviewResult{
+		Outcome:   string(approval.StatusSelected),
+		OptionID:  optionID,
 		Approved:  approved,
 		Rationale: strings.TrimSpace(reason),
-	})
-	response := approval.RuntimeResponseFromFinalReview(resolved)
-	if approved && strings.TrimSpace(response.OptionID) == "" {
-		return agent.ApprovalResponse{}, fmt.Errorf("agent-sdk/runtime: endpoint permission has no allow option")
 	}
+	response := approval.RuntimeResponseFromFinalReview(resolved)
 	return response, nil
 }

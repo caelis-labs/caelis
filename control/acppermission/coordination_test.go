@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/acppermission"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -81,5 +82,33 @@ func TestPermissionDecodeFallsBackFromMissingToolName(t *testing.T) {
 	}
 	if approval.ToolCall.Name != eventstream.ToolKindExecute {
 		t.Fatalf("tool name = %q, want kind fallback %q", approval.ToolCall.Name, eventstream.ToolKindExecute)
+	}
+}
+
+func TestPermissionDecodeRejectsNoncanonicalOrAmbiguousOptions(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string][]acpsdk.PermissionOption{
+		"unknown kind":   {{OptionId: "allow_once", Name: "Allow", Kind: "vendor_custom"}},
+		"uppercase kind": {{OptionId: "allow_once", Name: "Allow", Kind: "ALLOW_ONCE"}},
+		"spaced kind":    {{OptionId: "allow_once", Name: "Allow", Kind: " allow_once "}},
+		"duplicate id": {
+			{OptionId: "same", Name: "Allow", Kind: acpsdk.PermissionOptionKindAllowOnce},
+			{OptionId: "same", Name: "Reject", Kind: acpsdk.PermissionOptionKindRejectOnce},
+		},
+		"blank id":  {{OptionId: " ", Name: "Allow", Kind: acpsdk.PermissionOptionKindAllowOnce}},
+		"spaced id": {{OptionId: " allow_once ", Name: "Allow", Kind: acpsdk.PermissionOptionKindAllowOnce}},
+	}
+	for name, options := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := acppermission.DecodePermissionRequest(eventstream.RequestPermissionRequest{
+				SessionID: "session-1",
+				ToolCall:  eventstream.ToolCallUpdate{ToolCallID: "call-1"},
+				Options:   options,
+			})
+			if err == nil {
+				t.Fatal("DecodePermissionRequest() error = nil, want fail-closed validation")
+			}
+		})
 	}
 }

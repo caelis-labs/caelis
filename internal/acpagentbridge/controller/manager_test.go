@@ -394,23 +394,23 @@ func TestNormalizeACPUpdateEventPreservesToolUpdateMeta(t *testing.T) {
 func TestTranslateApprovalRequestPreservesToolRawInput(t *testing.T) {
 	t.Parallel()
 
+	kind := acpsdk.ToolKindExecute
+	status := acpsdk.ToolCallStatusPending
 	req, err := translateApprovalRequest(session.Session{
 		SessionRef: session.SessionRef{SessionID: "sess-1"},
 	}, "codex", "default", client.RequestPermissionRequest{
-		SessionID: "remote-1",
-		ToolCall: client.ToolCallUpdate{
-			ToolCallID: "call-1",
-			Kind:       testStringPtr("execute"),
+		SessionId: "remote-1",
+		ToolCall: acpsdk.ToolCallUpdate{
+			ToolCallId: "call-1",
+			Kind:       &kind,
 			Title:      testStringPtr("Run command"),
-			Status:     testStringPtr("pending"),
+			Status:     &status,
 			RawInput: map[string]any{
 				"command": "pwd",
 				"workdir": "/tmp/project",
 			},
 			RawOutput: map[string]any{"preview": "ok"},
-			Content: []client.ToolCallContent{{
-				Type: "content", Content: client.TextContent{Type: "text", Text: "approval detail"},
-			}},
+			Content:   []acpsdk.ToolCallContent{acpsdk.ToolContent(acpsdk.TextBlock("approval detail"))},
 		},
 		Options: []acpsdk.PermissionOption{{OptionId: "allow_once", Name: "Allow", Kind: acpsdk.PermissionOptionKindAllowOnce}},
 	})

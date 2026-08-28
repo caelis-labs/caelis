@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -20,6 +21,20 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
+
+func normalizedExternalACPUpdateForTest(t *testing.T, update acpclient.Update) eventstream.Update {
+	t.Helper()
+	normalized := acpclient.NormalizeInboundUpdate(update)
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		t.Fatalf("marshal normalized external ACP update: %v", err)
+	}
+	projected, err := eventstream.DecodeUpdateJSON(raw)
+	if err != nil {
+		t.Fatalf("project normalized external ACP update: %v", err)
+	}
+	return projected
+}
 
 func TestHandleACPEventEnvelopeAppliesToolTerminalSequence(t *testing.T) {
 	t.Parallel()
@@ -962,8 +977,8 @@ func TestNormalizedGrokListJoinsExploredWithoutExactToolName(t *testing.T) {
 		{callID: "search-1", title: `Search "projection"`, kind: eventstream.ToolKindSearch, input: map[string]any{"query": "projection"}},
 	}
 	for _, tool := range tools {
-		update := acpclient.NormalizeInboundUpdate(eventstream.ToolCall{
-			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: tool.callID,
+		update := normalizedExternalACPUpdateForTest(t, acpclient.ToolCall{
+			SessionUpdate: acpclient.UpdateToolCall, ToolCallID: tool.callID,
 			Title: tool.title, Kind: tool.kind, Status: eventstream.ToolStatusInProgress,
 			RawInput: tool.input, Meta: tool.meta,
 		}).(eventstream.ToolCall)
@@ -1014,34 +1029,29 @@ func TestNormalizedGrokLiveOtherMatchesLoadedListPresentation(t *testing.T) {
 	}
 	applyNormalized := func(t *testing.T, model *Model, update acpclient.Update) *Model {
 		t.Helper()
-		inbound := acpclient.NormalizeInboundUpdate(update)
-		normalized, ok := inbound.(eventstream.Update)
-		if !ok {
-			t.Fatalf("normalized update type = %T, want eventstream.Update", inbound)
-		}
 		return applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-			Update: normalized,
+			Update: normalizedExternalACPUpdateForTest(t, update),
 		})
 	}
 
 	live := NewModel(Config{NoColor: true, NoAnimation: true})
-	live = applyNormalized(t, live, eventstream.ToolCall{
-		SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "list-1", Title: "list_dir",
+	live = applyNormalized(t, live, acpclient.ToolCall{
+		SessionUpdate: acpclient.UpdateToolCall, ToolCallID: "list-1", Title: "list_dir",
 		Status: eventstream.ToolStatusInProgress, RawInput: map[string]any{"target_directory": "docs"}, Meta: listMeta(),
 	})
 	other := eventstream.ToolKindOther
-	live = applyNormalized(t, live, eventstream.ToolCallUpdate{
-		SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "list-1", Kind: &other,
+	live = applyNormalized(t, live, acpclient.ToolCallUpdate{
+		SessionUpdate: acpclient.UpdateToolCallState, ToolCallID: "list-1", Kind: &other,
 		Title: stringPtr("List `docs`"), RawInput: map[string]any{"variant": "ListDir", "target_directory": "docs"}, Meta: listMeta(),
 	})
-	live = applyNormalized(t, live, eventstream.ToolCallUpdate{
-		SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "list-1", Status: stringPtr(eventstream.ToolStatusCompleted),
+	live = applyNormalized(t, live, acpclient.ToolCallUpdate{
+		SessionUpdate: acpclient.UpdateToolCallState, ToolCallID: "list-1", Status: stringPtr(eventstream.ToolStatusCompleted),
 	})
 
 	loaded := NewModel(Config{NoColor: true, NoAnimation: true})
-	loaded = applyNormalized(t, loaded, eventstream.ToolCall{
-		SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "list-1", Title: "List `docs`",
+	loaded = applyNormalized(t, loaded, acpclient.ToolCall{
+		SessionUpdate: acpclient.UpdateToolCall, ToolCallID: "list-1", Title: "List `docs`",
 		Status: eventstream.ToolStatusCompleted, RawInput: map[string]any{"variant": "ListDir", "target_directory": "docs"}, Meta: listMeta(),
 	})
 

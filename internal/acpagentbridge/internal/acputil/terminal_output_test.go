@@ -3,8 +3,8 @@ package acputil
 import (
 	"testing"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
@@ -58,10 +58,10 @@ func TestStripTerminalConsoleFenceToolCallUpdate(t *testing.T) {
 		RawOutput: map[string]any{"stdout": fenced},
 		Content: []client.ToolCallContent{{
 			Type:    "terminal",
-			Content: eventstream.TextContent{Type: "text", Text: fenced},
+			Content: client.TextContent{Type: "text", Text: fenced},
 		}, {
 			Type:    "content",
-			Content: eventstream.TextContent{Type: "text", Text: fenced},
+			Content: client.TextContent{Type: "text", Text: fenced},
 		}},
 	})
 
@@ -83,12 +83,12 @@ func TestStripTerminalConsoleFenceToolCallUpdateStripsExecuteContent(t *testing.
 	t.Parallel()
 
 	fenced := "```console\nclean\n```\n"
-	kind := eventstream.ToolKindExecute
+	kind := string(acpsdk.ToolKindExecute)
 	got := StripTerminalConsoleFenceToolCallUpdate(client.ToolCallUpdate{
 		Kind: &kind,
 		Content: []client.ToolCallContent{{
 			Type:    "content",
-			Content: eventstream.TextContent{Type: "text", Text: fenced},
+			Content: client.TextContent{Type: "text", Text: fenced},
 		}},
 	})
 
@@ -106,7 +106,7 @@ func TestStripTerminalConsoleFenceToolCallUpdateStripsClaudeBashContent(t *testi
 		RawOutput: "Fri Jun 26 14:35:27 CST 2026",
 		Content: []client.ToolCallContent{{
 			Type:    "content",
-			Content: eventstream.TextContent{Type: "text", Text: fenced},
+			Content: client.TextContent{Type: "text", Text: fenced},
 		}},
 		Meta: map[string]any{
 			"claudeCode": map[string]any{
@@ -124,7 +124,7 @@ func TestStripTerminalConsoleFenceToolCallUpdateStripsDecodedTextMapContent(t *t
 	t.Parallel()
 
 	fenced := "```console\nhello\n```\n"
-	kind := eventstream.ToolKindExecute
+	kind := string(acpsdk.ToolKindExecute)
 	got := StripTerminalConsoleFenceToolCallUpdate(client.ToolCallUpdate{
 		Kind: &kind,
 		Content: []client.ToolCallContent{{

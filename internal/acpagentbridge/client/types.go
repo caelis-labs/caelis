@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
 )
 
@@ -28,20 +27,6 @@ const (
 	MethodSessionSteering      = "_session/steering"
 	MethodSessionUpdate        = acpsdk.ClientMethodSessionUpdate
 	MethodSessionReqPermission = acpsdk.ClientMethodSessionRequestPermission
-)
-
-const (
-	UpdateUserMessage   = eventstream.UpdateUserMessage
-	UpdateAgentMessage  = eventstream.UpdateAgentMessage
-	UpdateAgentThought  = eventstream.UpdateAgentThought
-	UpdateToolCall      = eventstream.UpdateToolCall
-	UpdateToolCallState = eventstream.UpdateToolCallInfo
-	UpdateAvailableCmds = eventstream.UpdateAvailableCmds
-	UpdatePlan          = eventstream.UpdatePlan
-	UpdateUsage         = eventstream.UpdateUsage
-	UpdateCurrentMode   = eventstream.UpdateCurrentMode
-	UpdateConfigOption  = eventstream.UpdateConfigOption
-	UpdateSessionInfo   = eventstream.UpdateSessionInfo
 )
 
 // Implementation is the tolerant external-Agent implementation descriptor.
@@ -210,18 +195,9 @@ type SessionSteeringOptions = steeringwire.SessionSteeringOptions
 type SessionSteeringRequest = steeringwire.SessionSteeringRequest
 type SessionSteeringResponse = steeringwire.SessionSteeringResponse
 type CancelRequest = acpsdk.CancelNotification
-type ToolCallLocation = eventstream.ToolCallLocation
-type ToolCallContent = eventstream.ToolCallContent
-type ToolCall = eventstream.ToolCall
-type ToolCallUpdate = eventstream.ToolCallUpdate
-type PlanEntry = eventstream.PlanEntry
-type PlanUpdate = eventstream.PlanUpdate
-type UsageUpdate = eventstream.UsageUpdate
 type CurrentModeUpdate = acpsdk.SessionCurrentModeUpdate
-type RequestPermissionRequest = eventstream.RequestPermissionRequest
+type RequestPermissionRequest = acpsdk.RequestPermissionRequest
 type RequestPermissionResponse = acpsdk.RequestPermissionResponse
-type TextContent = eventstream.TextContent
-type RawUpdate = eventstream.RawUpdate
 
 const (
 	SessionSteeringMetaKey = steeringwire.SessionSteeringMetaKey
@@ -233,26 +209,6 @@ const (
 
 	SessionSteeringIdlePromptRequired = steeringwire.SessionSteeringIdlePromptRequired
 )
-
-// SessionNotification retains the raw update union until provider
-// compatibility has been applied.
-type SessionNotification struct {
-	SessionID string          `json:"sessionId"`
-	Update    json.RawMessage `json:"update"`
-}
-
-// ContentChunk retains the raw content union for delayed decoding.
-type ContentChunk struct {
-	SessionUpdate string          `json:"sessionUpdate"`
-	Content       json.RawMessage `json:"content"`
-	MessageID     string          `json:"messageId,omitempty"`
-	Meta          map[string]any  `json:"_meta,omitempty"`
-}
-
-type TextChunk struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
 
 type AvailableCommandsUpdate = acpsdk.SessionAvailableCommandsUpdate
 
@@ -270,12 +226,4 @@ type SessionInfoUpdate struct {
 	TitlePresent     bool
 	UpdatedAt        *string
 	UpdatedAtPresent bool
-}
-
-type Update any
-
-type UpdateEnvelope struct {
-	SessionID string
-	Update    Update
-	Raw       json.RawMessage
 }

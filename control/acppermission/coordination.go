@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	sdkapproval "github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -14,6 +15,17 @@ import (
 // DecodePermissionRequest converts the ACP permission wire request into
 // normalized SDK approval semantics.
 func DecodePermissionRequest(wire eventstream.RequestPermissionRequest) (*session.ProtocolApproval, error) {
+	strictOptions := make([]sdkapproval.Option, 0, len(wire.Options))
+	for _, option := range wire.Options {
+		strictOptions = append(strictOptions, sdkapproval.Option{
+			ID:   string(option.OptionId),
+			Name: option.Name,
+			Kind: string(option.Kind),
+		})
+	}
+	if err := sdkapproval.ValidateACPOptions(strictOptions); err != nil {
+		return nil, fmt.Errorf("control/acppermission: invalid permission options: %w", err)
+	}
 	toolCall := permissionToolCallFromWire(wire.ToolCall)
 	meta := metautil.Merge(wire.ToolCall.Meta, wire.Meta)
 	toolCall.Name = canonicalPermissionToolName(meta, toolCall)

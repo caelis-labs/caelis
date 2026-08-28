@@ -27,6 +27,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
@@ -1086,7 +1087,11 @@ func translateApprovalRequest(
 	mode string,
 	req client.RequestPermissionRequest,
 ) (controller.ApprovalRequest, error) {
-	approval, err := acppermission.DecodePermissionRequest(req)
+	wire, err := acpingress.PermissionRequest(req)
+	if err != nil {
+		return controller.ApprovalRequest{}, err
+	}
+	approval, err := acppermission.DecodePermissionRequest(wire)
 	if err != nil {
 		return controller.ApprovalRequest{}, err
 	}

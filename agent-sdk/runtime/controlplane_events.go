@@ -108,9 +108,9 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 	options := make([]session.ProtocolApprovalOption, 0, len(req.Options))
 	for _, item := range req.Options {
 		options = append(options, session.ProtocolApprovalOption{
-			ID:   strings.TrimSpace(item.ID),
+			ID:   item.ID,
 			Name: strings.TrimSpace(item.Name),
-			Kind: strings.TrimSpace(item.Kind),
+			Kind: item.Kind,
 		})
 	}
 	toolName := firstNonEmpty(req.ToolCall.Name, req.ToolCall.Kind)

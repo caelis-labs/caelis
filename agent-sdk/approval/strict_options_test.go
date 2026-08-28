@@ -68,3 +68,26 @@ func TestStrictApprovalOptionsRejectAmbiguousOrInferredSemantics(t *testing.T) {
 		})
 	}
 }
+
+func TestACPApprovalOptionsRequireCanonicalWireKinds(t *testing.T) {
+	t.Parallel()
+
+	if err := ValidateACPOptions([]Option{
+		{ID: "opaque-a", Kind: "allow_once"},
+		{ID: "opaque-b", Kind: "reject_always"},
+	}); err != nil {
+		t.Fatalf("ValidateACPOptions() error = %v", err)
+	}
+	for _, option := range []Option{
+		{ID: "opaque", Kind: "allow"},
+		{ID: "opaque", Kind: "deny_once"},
+		{ID: "opaque", Kind: "vendor_custom"},
+		{ID: "opaque", Kind: "ALLOW_ONCE"},
+		{ID: "opaque", Kind: " allow_once "},
+		{ID: " opaque ", Kind: "allow_once"},
+	} {
+		if err := ValidateACPOptions([]Option{option}); err == nil {
+			t.Fatalf("ValidateACPOptions(%#v) error = nil, want non-ACP kind rejected", option)
+		}
+	}
+}

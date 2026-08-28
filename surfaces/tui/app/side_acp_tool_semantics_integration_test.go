@@ -601,8 +601,8 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 		completed := eventstream.ToolStatusCompleted
 		inProgress := eventstream.ToolStatusInProgress
 		failed := eventstream.ToolStatusFailed
-		grokExecute := acpclient.NormalizeInboundUpdate(eventstream.ToolCall{
-			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "execute-1",
+		grokExecute := normalizedExternalACPUpdateForTest(t, acpclient.ToolCall{
+			SessionUpdate: acpclient.UpdateToolCall, ToolCallID: "execute-1",
 			Title: "run_terminal_command", Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"command": "git status --short"},
 			Meta: map[string]any{"x.ai/tool": map[string]any{
@@ -790,8 +790,8 @@ func TestCapturedGrokBuildShellAndAnonymousFinalStreamRenderAcrossParticipantAnd
 	executeTitle := "Execute `printf 'SHELL_ACP_43\\n'`"
 	completed := eventstream.ToolStatusCompleted
 	updates := []eventstream.Update{
-		acpclient.NormalizeInboundUpdate(eventstream.ToolCall{
-			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "execute-1",
+		normalizedExternalACPUpdateForTest(t, acpclient.ToolCall{
+			SessionUpdate: acpclient.UpdateToolCall, ToolCallID: "execute-1",
 			Title: "run_terminal_command", Status: eventstream.ToolStatusInProgress,
 			RawInput: map[string]any{"command": "printf 'SHELL_ACP_43\\n'"},
 			Meta: map[string]any{"x.ai/tool": map[string]any{
@@ -799,18 +799,18 @@ func TestCapturedGrokBuildShellAndAnonymousFinalStreamRenderAcrossParticipantAnd
 				"namespace": "grok_build", "label": "Run Command", "read_only": false,
 			}},
 		}).(eventstream.ToolCall),
-		acpclient.NormalizeInboundUpdate(eventstream.ToolCallUpdate{
-			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "execute-1",
+		normalizedExternalACPUpdateForTest(t, acpclient.ToolCallUpdate{
+			SessionUpdate: acpclient.UpdateToolCallState, ToolCallID: "execute-1",
 			Title: &executeTitle, Kind: &execute,
 			RawInput: map[string]any{"variant": "Bash", "command": "printf 'SHELL_ACP_43\\n'"},
-			Content: []eventstream.ToolCallContent{{
-				Type: "content", Content: eventstream.TextContent{Type: "text", Text: "Execute the shell command"},
+			Content: []acpclient.ToolCallContent{{
+				Type: "content", Content: acpclient.TextContent{Type: "text", Text: "Execute the shell command"},
 			}},
 		}).(eventstream.ToolCallUpdate),
-		acpclient.NormalizeInboundUpdate(eventstream.ToolCallUpdate{
-			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "execute-1", Status: &completed,
-			Content: []eventstream.ToolCallContent{{
-				Type: "content", Content: eventstream.TextContent{Type: "text", Text: "SHELL_ACP_43\n"},
+		normalizedExternalACPUpdateForTest(t, acpclient.ToolCallUpdate{
+			SessionUpdate: acpclient.UpdateToolCallState, ToolCallID: "execute-1", Status: &completed,
+			Content: []acpclient.ToolCallContent{{
+				Type: "content", Content: acpclient.TextContent{Type: "text", Text: "SHELL_ACP_43\n"},
 			}},
 			RawOutput: map[string]any{
 				"type": "Bash", "command": "printf 'SHELL_ACP_43\\n'",

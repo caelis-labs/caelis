@@ -291,17 +291,17 @@ func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {
 func TestTranslateApprovalRequestPreservesCanonicalToolPayload(t *testing.T) {
 	t.Parallel()
 
-	content := []client.ToolCallContent{{Type: "content", Content: client.TextContent{Type: "text", Text: "permission detail"}}}
+	content := []acpsdk.ToolCallContent{acpsdk.ToolContent(acpsdk.TextBlock("permission detail"))}
+	status := acpsdk.ToolCallStatusPending
 	req := client.RequestPermissionRequest{
-		SessionID: "child-1",
-		ToolCall: client.ToolCallUpdate{
-			SessionUpdate: eventstream.UpdateToolCallInfo,
-			ToolCallID:    "call-1",
-			Title:         stringPtr("write file"),
-			Status:        stringPtr("pending"),
-			RawInput:      map[string]any{"path": "a.txt"},
-			RawOutput:     map[string]any{"preview": "new text"},
-			Content:       content,
+		SessionId: "child-1",
+		ToolCall: acpsdk.ToolCallUpdate{
+			ToolCallId: "call-1",
+			Title:      stringPtr("write file"),
+			Status:     &status,
+			RawInput:   map[string]any{"path": "a.txt"},
+			RawOutput:  map[string]any{"preview": "new text"},
+			Content:    content,
 		},
 		Options: []acpsdk.PermissionOption{{OptionId: "allow-once", Name: "Allow once", Kind: acpsdk.PermissionOptionKindAllowOnce}},
 	}
@@ -337,19 +337,15 @@ func TestRunnerPermissionCallbackNormalizesChildApprovalWithoutPublishingFrame(t
 	}, AgentConfig{Name: "helper"}, "helper-1")
 
 	response, err := handler(context.Background(), client.RequestPermissionRequest{
-		SessionID: "child-session",
-		ToolCall: client.ToolCallUpdate{
-			SessionUpdate: eventstream.UpdateToolCallInfo,
-			ToolCallID:    "child-call-1",
-			Kind:          stringPtr("edit"),
-			Title:         stringPtr("Write child file"),
-			Status:        stringPtr("pending"),
-			RawInput:      map[string]any{"path": "child.txt"},
-			RawOutput:     map[string]any{"preview": "new text"},
-			Content: []client.ToolCallContent{{
-				Type:    "content",
-				Content: client.TextContent{Type: "text", Text: "child permission detail"},
-			}},
+		SessionId: "child-session",
+		ToolCall: acpsdk.ToolCallUpdate{
+			ToolCallId: "child-call-1",
+			Kind:       acpsdk.Ptr(acpsdk.ToolKindEdit),
+			Title:      stringPtr("Write child file"),
+			Status:     acpsdk.Ptr(acpsdk.ToolCallStatusPending),
+			RawInput:   map[string]any{"path": "child.txt"},
+			RawOutput:  map[string]any{"preview": "new text"},
+			Content:    []acpsdk.ToolCallContent{acpsdk.ToolContent(acpsdk.TextBlock("child permission detail"))},
 		},
 		Options: []acpsdk.PermissionOption{{OptionId: "allow_once", Name: "Allow once", Kind: acpsdk.PermissionOptionKindAllowOnce}},
 	})

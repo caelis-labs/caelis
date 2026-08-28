@@ -17,7 +17,7 @@ type acpEnvelopeParticipantScope struct {
 }
 
 func acpEnvelopeFromUpdate(env client.UpdateEnvelope, canonical *session.Event, participant *acpEnvelopeParticipantScope) *eventstream.Envelope {
-	update := schemaUpdateFromClientUpdate(env)
+	update := eventstreamUpdateFromClient(env)
 	if update == nil {
 		return nil
 	}
@@ -75,7 +75,7 @@ func applyACPParticipantDisplayMeta(meta map[string]any, binding session.Partici
 	return out
 }
 
-func schemaUpdateFromClientUpdate(env client.UpdateEnvelope) eventstream.Update {
+func eventstreamUpdateFromClient(env client.UpdateEnvelope) eventstream.Update {
 	switch typed := client.NormalizeInboundUpdate(env.Update).(type) {
 	case nil:
 		return nil
@@ -87,11 +87,13 @@ func schemaUpdateFromClientUpdate(env client.UpdateEnvelope) eventstream.Update 
 			Meta:          metautil.CloneMap(typed.Meta),
 		}
 	case client.ToolCall:
-		return typed
+		return decodeEventstreamUpdate(typed, env.Raw)
 	case client.ToolCallUpdate:
-		return typed
+		return decodeEventstreamUpdate(typed, env.Raw)
 	case client.PlanUpdate:
-		return typed
+		return decodeEventstreamUpdate(typed, env.Raw)
+	case client.UsageUpdate:
+		return decodeEventstreamUpdate(typed, env.Raw)
 	case client.CurrentModeUpdate:
 		return eventstream.RawUpdate{SessionUpdate: strings.TrimSpace(typed.SessionUpdate), Raw: cloneRaw(env.Raw)}
 	case client.ConfigOptionUpdate:
@@ -106,10 +108,22 @@ func schemaUpdateFromClientUpdate(env client.UpdateEnvelope) eventstream.Update 
 			raw = cloneRaw(env.Raw)
 		}
 		return eventstream.RawUpdate{SessionUpdate: strings.TrimSpace(typed.SessionUpdate), Raw: raw}
-	case eventstream.Update:
-		return typed
 	default:
 		return eventstream.RawUpdate{SessionUpdate: sessionUpdateTypeFromRaw(env.Raw), Raw: cloneRaw(env.Raw)}
+	}
+}
+
+func decodeEventstreamUpdate(update any, fallbackRaw json.RawMessage) eventstream.Update {
+	raw, err := json.Marshal(update)
+	if err == nil {
+		decoded, decodeErr := eventstream.DecodeUpdateJSON(raw)
+		if decodeErr == nil {
+			return decoded
+		}
+	}
+	return eventstream.RawUpdate{
+		SessionUpdate: sessionUpdateTypeFromRaw(fallbackRaw),
+		Raw:           cloneRaw(fallbackRaw),
 	}
 }
 

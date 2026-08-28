@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
@@ -68,10 +68,10 @@ func stripTerminalConsoleFenceContentValue(value any) any {
 		return nil
 	case string:
 		return StripTerminalConsoleFenceText(typed)
-	case eventstream.TextContent:
+	case client.TextContent:
 		typed.Text = StripTerminalConsoleFenceText(typed.Text)
 		return typed
-	case *eventstream.TextContent:
+	case *client.TextContent:
 		if typed == nil {
 			return nil
 		}
@@ -92,7 +92,7 @@ func stripTerminalConsoleFenceContentValue(value any) any {
 }
 
 func shouldStripConsoleFenceFromContent(kind string, meta map[string]any) bool {
-	if strings.EqualFold(strings.TrimSpace(kind), eventstream.ToolKindExecute) {
+	if strings.EqualFold(strings.TrimSpace(kind), string(acpsdk.ToolKindExecute)) {
 		return true
 	}
 	claudeCode, _ := meta["claudeCode"].(map[string]any)

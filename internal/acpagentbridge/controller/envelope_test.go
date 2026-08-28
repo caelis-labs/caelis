@@ -1,8 +1,8 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
-	"reflect"
 	"testing"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
-func TestACPEnvelopeFromUpdatePassesThroughStandardToolLifecycle(t *testing.T) {
+func TestACPEnvelopeFromUpdateProjectsStandardToolLifecycle(t *testing.T) {
 	t.Parallel()
 
 	completed := eventstream.ToolStatusCompleted
@@ -51,8 +51,10 @@ func TestACPEnvelopeFromUpdatePassesThroughStandardToolLifecycle(t *testing.T) {
 		if env.Scope != eventstream.ScopeParticipant || env.ParticipantID != "grok-1" || env.TurnID != "participant-turn-1" {
 			t.Fatalf("participant envelope scope = %#v", env)
 		}
-		if !reflect.DeepEqual(env.Update, update) {
-			t.Fatalf("participant tool update %d = %#v, want %#v", i, env.Update, update)
+		gotJSON, gotErr := json.Marshal(env.Update)
+		wantJSON, wantErr := json.Marshal(update)
+		if gotErr != nil || wantErr != nil || !bytes.Equal(gotJSON, wantJSON) {
+			t.Fatalf("participant tool update %d wire = %s (%v), want %s (%v)", i, gotJSON, gotErr, wantJSON, wantErr)
 		}
 	}
 }

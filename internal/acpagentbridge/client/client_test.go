@@ -382,7 +382,7 @@ func TestDefaultPermissionPolicyRejectsOnce(t *testing.T) {
 	t.Parallel()
 
 	client := &Client{}
-	result, rpcErr := client.handleRequest(context.Background(), MethodSessionReqPermission, mustMarshalRaw(RequestPermissionRequest{}))
+	result, rpcErr := client.handleRequest(context.Background(), MethodSessionReqPermission, mustMarshalRaw(validPermissionRequest()))
 	if rpcErr != nil {
 		t.Fatal(rpcErr)
 	}
@@ -406,13 +406,52 @@ func TestPermissionRequestRejectsMalformedStandardOption(t *testing.T) {
 	}
 }
 
+func TestPermissionRequestRejectsMissingStandardFields(t *testing.T) {
+	t.Parallel()
+
+	client := &Client{}
+	_, rpcErr := client.handleRequest(context.Background(), MethodSessionReqPermission, json.RawMessage(`{}`))
+	if rpcErr == nil || rpcErr.Code != -32602 {
+		t.Fatalf("permission request error = %#v, want invalid params for missing standard fields", rpcErr)
+	}
+}
+
+func TestPermissionRequestRejectsAmbiguousOrNonstandardOptionsBeforeCallback(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"unknown kind":   `{"sessionId":"session-1","toolCall":{"toolCallId":"call-1"},"options":[{"optionId":"allow_once","name":"Allow once","kind":"vendor_custom"}]}`,
+		"uppercase kind": `{"sessionId":"session-1","toolCall":{"toolCallId":"call-1"},"options":[{"optionId":"allow_once","name":"Allow once","kind":"ALLOW_ONCE"}]}`,
+		"spaced kind":    `{"sessionId":"session-1","toolCall":{"toolCallId":"call-1"},"options":[{"optionId":"allow_once","name":"Allow once","kind":" allow_once "}]}`,
+		"duplicate id":   `{"sessionId":"session-1","toolCall":{"toolCallId":"call-1"},"options":[{"optionId":"same","name":"Allow","kind":"allow_once"},{"optionId":"same","name":"Reject","kind":"reject_once"}]}`,
+		"blank id":       `{"sessionId":"session-1","toolCall":{"toolCallId":"call-1"},"options":[{"optionId":" ","name":"Allow","kind":"allow_once"}]}`,
+		"spaced id":      `{"sessionId":"session-1","toolCall":{"toolCallId":"call-1"},"options":[{"optionId":" allow_once ","name":"Allow","kind":"allow_once"}]}`,
+	}
+	for name, raw := range tests {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			client := &Client{cfg: Config{OnPermissionRequest: func(context.Context, RequestPermissionRequest) (RequestPermissionResponse, error) {
+				calls++
+				return RequestPermissionResponse{}, nil
+			}}}
+			_, rpcErr := client.handleRequest(context.Background(), MethodSessionReqPermission, json.RawMessage(raw))
+			if rpcErr == nil || rpcErr.Code != -32602 {
+				t.Fatalf("permission request error = %#v, want invalid params", rpcErr)
+			}
+			if calls != 0 {
+				t.Fatalf("permission callback calls = %d, want zero", calls)
+			}
+		})
+	}
+}
+
 func TestPermissionHandlerErrorUsesInternalErrorCode(t *testing.T) {
 	t.Parallel()
 
 	client := &Client{cfg: Config{OnPermissionRequest: func(context.Context, RequestPermissionRequest) (RequestPermissionResponse, error) {
 		return RequestPermissionResponse{}, errors.New("permission backend unavailable")
 	}}}
-	_, rpcErr := client.handleRequest(context.Background(), MethodSessionReqPermission, mustMarshalRaw(RequestPermissionRequest{}))
+	_, rpcErr := client.handleRequest(context.Background(), MethodSessionReqPermission, mustMarshalRaw(validPermissionRequest()))
 	if rpcErr == nil {
 		t.Fatal("permission handler error = nil")
 	}
@@ -450,7 +489,7 @@ func TestClientRejectsWrongACPMessageDirection(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := peer.SendNotification(ctx, MethodSessionReqPermission, RequestPermissionRequest{}); err != nil {
+	if err := peer.SendNotification(ctx, MethodSessionReqPermission, validPermissionRequest()); err != nil {
 		t.Fatalf("request_permission notification error = %v", err)
 	}
 	update := SessionNotification{
@@ -482,7 +521,7 @@ func TestClientRejectsWrongACPMessageDirection(t *testing.T) {
 		t.Fatalf("update calls after request = %d, want only the notification", updateCalls)
 	}
 
-	response, err := acpsdk.SendRequest[RequestPermissionResponse](peer, ctx, MethodSessionReqPermission, RequestPermissionRequest{})
+	response, err := acpsdk.SendRequest[RequestPermissionResponse](peer, ctx, MethodSessionReqPermission, validPermissionRequest())
 	if err != nil {
 		t.Fatalf("request_permission request error = %v", err)
 	}
@@ -698,5 +737,26 @@ func TestConcurrentStderrTail(t *testing.T) {
 	wg.Wait()
 	if client.StderrTail(128) == "" {
 		t.Fatal("stderr tail is empty")
+	}
+}
+
+func validPermissionRequest() RequestPermissionRequest {
+	title := "Run command"
+	kind := acpsdk.ToolKindExecute
+	status := acpsdk.ToolCallStatusPending
+	return RequestPermissionRequest{
+		SessionId: "session-1",
+		ToolCall: acpsdk.ToolCallUpdate{
+			ToolCallId: "call-1",
+			Title:      &title,
+			Kind:       &kind,
+			Status:     &status,
+			RawInput:   map[string]any{"command": "pwd"},
+		},
+		Options: []acpsdk.PermissionOption{{
+			OptionId: "allow_once",
+			Name:     "Allow once",
+			Kind:     acpsdk.PermissionOptionKindAllowOnce,
+		}},
 	}
 }

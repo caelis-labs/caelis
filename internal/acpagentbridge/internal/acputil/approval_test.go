@@ -3,14 +3,15 @@ package acputil
 import (
 	"testing"
 
-	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 )
 
 func TestToolCallNamePreservesGenericExecuteKind(t *testing.T) {
 	t.Parallel()
 
-	got := ToolCallName(client.ToolCallUpdate{
-		Kind:     stringPtr("execute"),
+	kind := acpsdk.ToolKindExecute
+	got := ToolCallName(acpsdk.ToolCallUpdate{
+		Kind:     &kind,
 		Title:    stringPtr("Run command"),
 		RawInput: map[string]any{"command": "pwd"},
 	})
@@ -23,8 +24,9 @@ func TestToolCallNamePreservesGenericExecuteKind(t *testing.T) {
 func TestToolCallNamePreservesGenericKindOverCommandShapedInput(t *testing.T) {
 	t.Parallel()
 
-	got := ToolCallName(client.ToolCallUpdate{
-		Kind:     stringPtr("read"),
+	kind := acpsdk.ToolKindRead
+	got := ToolCallName(acpsdk.ToolCallUpdate{
+		Kind:     &kind,
 		Title:    stringPtr("Read command config"),
 		RawInput: map[string]any{"cmd": "show running-config"},
 	})
@@ -37,7 +39,7 @@ func TestToolCallNamePreservesGenericKindOverCommandShapedInput(t *testing.T) {
 func TestToolCallNameDoesNotReturnUnknownForMissingName(t *testing.T) {
 	t.Parallel()
 
-	got := ToolCallName(client.ToolCallUpdate{
+	got := ToolCallName(acpsdk.ToolCallUpdate{
 		RawInput: map[string]any{"reason": "needs approval"},
 	})
 

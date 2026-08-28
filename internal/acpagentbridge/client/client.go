@@ -16,7 +16,6 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	sdkstdio "github.com/caelis-labs/acp-go-sdk/transport/stdio"
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -504,6 +503,9 @@ func (c *Client) handleRequest(ctx context.Context, method string, params json.R
 		if err := decodeParams(params, &req); err != nil {
 			return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 		}
+		if err := validatePermissionRequest(req); err != nil {
+			return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
+		}
 		if c.cfg.OnPermissionRequest != nil {
 			resp, err := c.cfg.OnPermissionRequest(ctx, req)
 			if err != nil {
@@ -551,27 +553,6 @@ func decodeParams(raw json.RawMessage, out any) error {
 		return nil
 	}
 	return json.Unmarshal(raw, out)
-}
-
-func decodeUpdate(raw json.RawMessage) (Update, error) {
-	var probe struct {
-		SessionUpdate string `json:"sessionUpdate"`
-	}
-	if err := json.Unmarshal(raw, &probe); err != nil {
-		return nil, err
-	}
-	switch probe.SessionUpdate {
-	case UpdateUserMessage, UpdateAgentMessage, UpdateAgentThought:
-		var update ContentChunk
-		if err := json.Unmarshal(raw, &update); err != nil {
-			return nil, err
-		}
-		return update, nil
-	case UpdateAvailableCmds, UpdateConfigOption, UpdateCurrentMode, UpdateSessionInfo:
-		return decodeStandardSessionStateUpdate(raw, probe.SessionUpdate)
-	default:
-		return eventstream.DecodeUpdateJSON(raw)
-	}
 }
 
 func SupportsSessionSteering(response InitializeResponse) (bool, error) {

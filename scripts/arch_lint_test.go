@@ -246,6 +246,12 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "internal/acpagentbridge must receive presentation projection through assembly, not import surfaces",
 		},
 		{
+			name:       "external ACP client rejects Control eventstream DTOs",
+			rel:        "internal/acpagentbridge/client/update.go",
+			importPath: modulePath + "/control/appserver/eventstream",
+			want:       "external ACP client ingress must own tolerant wire compatibility and project into Control eventstream at the Host boundary",
+		},
+		{
 			name:       "control rejects app implementation packages",
 			rel:        "control/modelconfig/connect.go",
 			importPath: modulePath + "/app/gatewayapp",
