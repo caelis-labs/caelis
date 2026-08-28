@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
 )
 
 // SteerSession injects standard ACP prompt content into the currently active
@@ -14,27 +14,27 @@ import (
 // still current when the command is applied.
 func (a *RuntimeAgent) SteerSession(
 	ctx context.Context,
-	request acp.SessionSteeringRequest,
-) (acp.SessionSteeringResponse, error) {
+	request steeringwire.SessionSteeringRequest,
+) (steeringwire.SessionSteeringResponse, error) {
 	if a == nil || a.sessionClient == nil {
-		return acp.SessionSteeringResponse{}, ErrCapabilityUnsupported
+		return steeringwire.SessionSteeringResponse{}, ErrCapabilityUnsupported
 	}
 	if _, err := a.targetSession(ctx, request.SessionID); err != nil {
-		return acp.SessionSteeringResponse{}, err
+		return steeringwire.SessionSteeringResponse{}, err
 	}
 	input, contentParts, err := promptContent(request.Prompt)
 	if err != nil {
-		return acp.SessionSteeringResponse{}, err
+		return steeringwire.SessionSteeringResponse{}, err
 	}
-	options, err := acp.DecodeSessionSteeringOptions(request.Meta)
+	options, err := steeringwire.DecodeSessionSteeringOptions(request.Meta)
 	if err != nil {
-		return acp.SessionSteeringResponse{}, err
+		return steeringwire.SessionSteeringResponse{}, err
 	}
 	state, err := a.sessionClient.InspectSession(ctx, appserver.StateRequest{
 		SessionID: strings.TrimSpace(request.SessionID),
 	})
 	if err != nil {
-		return acp.SessionSteeringResponse{}, err
+		return steeringwire.SessionSteeringResponse{}, err
 	}
 	if !steerableMainRun(state.Run) {
 		return idleSteeringResponse(options), nil
@@ -54,9 +54,9 @@ func (a *RuntimeAgent) SteerSession(
 		ContentParts: contentParts,
 	})
 	if err := committedSteeringError(result, steerErr); err != nil {
-		return acp.SessionSteeringResponse{}, err
+		return steeringwire.SessionSteeringResponse{}, err
 	}
-	return acp.SessionSteeringResponse{Outcome: acp.SessionSteeringInjected}, nil
+	return steeringwire.SessionSteeringResponse{Outcome: steeringwire.SessionSteeringInjected}, nil
 }
 
 func steerableMainRun(run appserver.RunState) bool {
@@ -67,14 +67,14 @@ func steerableMainRun(run appserver.RunState) bool {
 		strings.TrimSpace(run.TurnID) != ""
 }
 
-func idleSteeringResponse(options acp.SessionSteeringOptions) acp.SessionSteeringResponse {
-	if options.IdleBehavior == acp.SessionSteeringIdlePromptRequired {
-		return acp.SessionSteeringResponse{
-			Outcome: acp.SessionSteeringPromptRequired,
+func idleSteeringResponse(options steeringwire.SessionSteeringOptions) steeringwire.SessionSteeringResponse {
+	if options.IdleBehavior == steeringwire.SessionSteeringIdlePromptRequired {
+		return steeringwire.SessionSteeringResponse{
+			Outcome: steeringwire.SessionSteeringPromptRequired,
 			Reason:  "noRunningTurn",
 		}
 	}
-	return acp.SessionSteeringResponse{Outcome: acp.SessionSteeringFailed}
+	return steeringwire.SessionSteeringResponse{Outcome: steeringwire.SessionSteeringFailed}
 }
 
 func committedSteeringError(result appserver.CommandResult, err error) error {

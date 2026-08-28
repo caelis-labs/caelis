@@ -246,7 +246,7 @@ func (c *serverConn) handleRequest(ctx context.Context, inbound *serverInboundRe
 		resp, err := c.agent.Prompt(ctx, req, c.promptCallbacks())
 		return responseOrError(resp, err)
 	case methodSessionSteering:
-		var req protocolacp.SessionSteeringRequest
+		var req SessionSteeringRequest
 		if err := decodeParams(params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
@@ -407,14 +407,14 @@ func decodeRequiredParams(raw json.RawMessage, target any) error {
 	return json.Unmarshal(raw, target)
 }
 
-func validateSessionSteeringRequest(req protocolacp.SessionSteeringRequest) error {
+func validateSessionSteeringRequest(req SessionSteeringRequest) error {
 	if strings.TrimSpace(req.SessionID) == "" {
 		return fmt.Errorf("sessionId is required")
 	}
 	if len(req.Prompt) == 0 {
 		return fmt.Errorf("prompt must contain at least one content block")
 	}
-	_, err := protocolacp.DecodeSessionSteeringOptions(req.Meta)
+	_, err := decodeSessionSteeringOptions(req.Meta)
 	return err
 }
 

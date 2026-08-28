@@ -20,12 +20,12 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/loader"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
-	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/google/uuid"
 )
 
@@ -264,11 +264,11 @@ func (a *RuntimeAgent) Initialize(ctx context.Context, _ acpsdk.InitializeReques
 	}
 	var meta map[string]json.RawMessage
 	if a.sessionClient != nil {
-		steering, err := json.Marshal(acp.SessionSteeringCapability{Supported: true})
+		steering, err := json.Marshal(steeringwire.SessionSteeringCapability{Supported: true})
 		if err != nil {
 			return acpsdk.InitializeResponse{}, err
 		}
-		meta = map[string]json.RawMessage{acp.SessionSteeringMetaKey: steering}
+		meta = map[string]json.RawMessage{steeringwire.SessionSteeringMetaKey: steering}
 	}
 	return acpsdk.InitializeResponse{
 		ProtocolVersion:   acpsdk.ProtocolVersionNumber,

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -202,12 +203,12 @@ type PromptRequest struct {
 type PromptResponse struct {
 	StopReason string `json:"stopReason"`
 }
-type SessionSteeringOutcome = schema.SessionSteeringOutcome
-type SessionSteeringIdleBehavior = schema.SessionSteeringIdleBehavior
-type SessionSteeringCapability = schema.SessionSteeringCapability
-type SessionSteeringOptions = schema.SessionSteeringOptions
-type SessionSteeringRequest = schema.SessionSteeringRequest
-type SessionSteeringResponse = schema.SessionSteeringResponse
+type SessionSteeringOutcome = steeringwire.SessionSteeringOutcome
+type SessionSteeringIdleBehavior = steeringwire.SessionSteeringIdleBehavior
+type SessionSteeringCapability = steeringwire.SessionSteeringCapability
+type SessionSteeringOptions = steeringwire.SessionSteeringOptions
+type SessionSteeringRequest = steeringwire.SessionSteeringRequest
+type SessionSteeringResponse = steeringwire.SessionSteeringResponse
 type CancelRequest = acpsdk.CancelNotification
 type ToolCallLocation = schema.ToolCallLocation
 type ToolCallContent = schema.ToolCallContent
@@ -224,14 +225,14 @@ type TextContent = schema.TextContent
 type RawUpdate = schema.RawUpdate
 
 const (
-	SessionSteeringMetaKey = schema.SessionSteeringMetaKey
+	SessionSteeringMetaKey = steeringwire.SessionSteeringMetaKey
 
-	SessionSteeringInjected       = schema.SessionSteeringInjected
-	SessionSteeringStartedNewTurn = schema.SessionSteeringStartedNewTurn
-	SessionSteeringPromptRequired = schema.SessionSteeringPromptRequired
-	SessionSteeringFailed         = schema.SessionSteeringFailed
+	SessionSteeringInjected       = steeringwire.SessionSteeringInjected
+	SessionSteeringStartedNewTurn = steeringwire.SessionSteeringStartedNewTurn
+	SessionSteeringPromptRequired = steeringwire.SessionSteeringPromptRequired
+	SessionSteeringFailed         = steeringwire.SessionSteeringFailed
 
-	SessionSteeringIdlePromptRequired = schema.SessionSteeringIdlePromptRequired
+	SessionSteeringIdlePromptRequired = steeringwire.SessionSteeringIdlePromptRequired
 )
 
 // SessionNotification retains the raw update union until provider

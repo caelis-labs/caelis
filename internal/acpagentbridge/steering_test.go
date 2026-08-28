@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -24,8 +25,8 @@ func TestRuntimeAgentAdvertisesSteeringOnlyWithAppServerBackend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var capability acp.SessionSteeringCapability
-	if err := json.Unmarshal(response.Meta[acp.SessionSteeringMetaKey], &capability); err != nil {
+	var capability steeringwire.SessionSteeringCapability
+	if err := json.Unmarshal(response.Meta[steeringwire.SessionSteeringMetaKey], &capability); err != nil {
 		t.Fatalf("decode steering capability: %v", err)
 	}
 	if !capability.Supported {
@@ -37,10 +38,10 @@ func TestRuntimeAgentAdvertisesSteeringOnlyWithAppServerBackend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := directResponse.Meta[acp.SessionSteeringMetaKey]; ok {
+	if _, ok := directResponse.Meta[steeringwire.SessionSteeringMetaKey]; ok {
 		t.Fatalf("direct Runtime initialize _meta = %#v, want no steering capability", directResponse.Meta)
 	}
-	if _, err := direct.SteerSession(context.Background(), acp.SessionSteeringRequest{}); !errors.Is(err, ErrCapabilityUnsupported) {
+	if _, err := direct.SteerSession(context.Background(), steeringwire.SessionSteeringRequest{}); !errors.Is(err, ErrCapabilityUnsupported) {
 		t.Fatalf("direct Runtime SteerSession error = %v, want capability unsupported", err)
 	}
 }
@@ -62,14 +63,14 @@ func TestRuntimeAgentSteersExactActiveMainTurnWithoutRevisionCAS(t *testing.T) {
 		jsonrpc.MustMarshalRaw(acp.TextContent{Type: "text", Text: "adjust the plan"}),
 		json.RawMessage(`{"type":"image","mimeType":"image/png","data":"aW1hZ2U=","name":"plan.png"}`),
 	}
-	response, err := agent.SteerSession(context.Background(), acp.SessionSteeringRequest{
+	response, err := agent.SteerSession(context.Background(), steeringwire.SessionSteeringRequest{
 		SessionID: state.SessionID,
 		Prompt:    prompt,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Outcome != acp.SessionSteeringInjected {
+	if response.Outcome != steeringwire.SessionSteeringInjected {
 		t.Fatalf("steering response = %#v, want injected", response)
 	}
 	if len(client.steerRequests) != 1 {
@@ -109,20 +110,20 @@ func TestRuntimeAgentSteeringWithoutActiveMainTurnHasNoControlEffect(t *testing.
 		name        string
 		run         appserver.RunState
 		meta        map[string]json.RawMessage
-		wantOutcome acp.SessionSteeringOutcome
+		wantOutcome steeringwire.SessionSteeringOutcome
 		wantReason  string
 	}{
 		{
 			name:        "idle default",
 			run:         appserver.RunState{},
-			wantOutcome: acp.SessionSteeringFailed,
+			wantOutcome: steeringwire.SessionSteeringFailed,
 		},
 		{
 			name: "idle prompt required",
 			meta: map[string]json.RawMessage{
-				acp.SessionSteeringMetaKey: json.RawMessage(`{"idleBehavior":"promptRequired"}`),
+				steeringwire.SessionSteeringMetaKey: json.RawMessage(`{"idleBehavior":"promptRequired"}`),
 			},
-			wantOutcome: acp.SessionSteeringPromptRequired,
+			wantOutcome: steeringwire.SessionSteeringPromptRequired,
 			wantReason:  "noRunningTurn",
 		},
 		{
@@ -132,9 +133,9 @@ func TestRuntimeAgentSteeringWithoutActiveMainTurnHasNoControlEffect(t *testing.
 				HandleID: "participant-handle", RunID: "participant-run", TurnID: "participant-turn",
 			},
 			meta: map[string]json.RawMessage{
-				acp.SessionSteeringMetaKey: json.RawMessage(`{"idleBehavior":"promptRequired"}`),
+				steeringwire.SessionSteeringMetaKey: json.RawMessage(`{"idleBehavior":"promptRequired"}`),
 			},
-			wantOutcome: acp.SessionSteeringPromptRequired,
+			wantOutcome: steeringwire.SessionSteeringPromptRequired,
 			wantReason:  "noRunningTurn",
 		},
 		{
@@ -143,7 +144,7 @@ func TestRuntimeAgentSteeringWithoutActiveMainTurnHasNoControlEffect(t *testing.
 				Active: true, Kind: appserver.RunKindKernel,
 				HandleID: "main-handle", RunID: "main-run",
 			},
-			wantOutcome: acp.SessionSteeringFailed,
+			wantOutcome: steeringwire.SessionSteeringFailed,
 		},
 	}
 	for _, tt := range tests {
@@ -153,7 +154,7 @@ func TestRuntimeAgentSteeringWithoutActiveMainTurnHasNoControlEffect(t *testing.
 			state.Run = tt.run
 			client := &steeringTestSessionClient{state: state}
 			agent := steeringTestAgent(client)
-			response, err := agent.SteerSession(context.Background(), acp.SessionSteeringRequest{
+			response, err := agent.SteerSession(context.Background(), steeringwire.SessionSteeringRequest{
 				SessionID: state.SessionID,
 				Prompt: []json.RawMessage{
 					jsonrpc.MustMarshalRaw(acp.TextContent{Type: "text", Text: "continue"}),
@@ -198,7 +199,7 @@ func TestRuntimeAgentReportsOnlyCommittedSteeringAsInjected(t *testing.T) {
 				},
 				steerErr: tt.err,
 			}
-			response, err := steeringTestAgent(client).SteerSession(context.Background(), acp.SessionSteeringRequest{
+			response, err := steeringTestAgent(client).SteerSession(context.Background(), steeringwire.SessionSteeringRequest{
 				SessionID: state.SessionID,
 				Prompt: []json.RawMessage{
 					jsonrpc.MustMarshalRaw(acp.TextContent{Type: "text", Text: "continue"}),
@@ -211,7 +212,7 @@ func TestRuntimeAgentReportsOnlyCommittedSteeringAsInjected(t *testing.T) {
 			if !errors.As(err, &receipt) || receipt.Receipt.Outcome != tt.outcome {
 				t.Fatalf("SteerSession error = %T %v, want %q receipt", err, err, tt.outcome)
 			}
-			if response.Outcome == acp.SessionSteeringInjected {
+			if response.Outcome == steeringwire.SessionSteeringInjected {
 				t.Fatalf("SteerSession response = %#v, %q command reported injected", response, tt.outcome)
 			}
 		})

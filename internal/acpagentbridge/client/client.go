@@ -17,6 +17,7 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	sdkstdio "github.com/caelis-labs/acp-go-sdk/transport/stdio"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -574,7 +575,7 @@ func decodeUpdate(raw json.RawMessage) (Update, error) {
 }
 
 func SupportsSessionSteering(response InitializeResponse) (bool, error) {
-	capability, err := schema.DecodeSessionSteeringCapability(response.Meta)
+	capability, err := steeringwire.DecodeSessionSteeringCapability(response.Meta)
 	return capability.Supported, err
 }
 

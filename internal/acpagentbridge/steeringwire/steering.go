@@ -1,4 +1,6 @@
-package schema
+// Package steeringwire owns Host-private ACP extension wire values shared by the
+// product Agent surface and external-Agent client adapters.
+package steeringwire
 
 import (
 	"bytes"
