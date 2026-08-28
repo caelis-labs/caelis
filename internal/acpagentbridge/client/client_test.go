@@ -392,6 +392,20 @@ func TestDefaultPermissionPolicyRejectsOnce(t *testing.T) {
 	}
 }
 
+func TestPermissionRequestRejectsMalformedStandardOption(t *testing.T) {
+	t.Parallel()
+
+	client := &Client{}
+	_, rpcErr := client.handleRequest(
+		context.Background(),
+		MethodSessionReqPermission,
+		json.RawMessage(`{"sessionId":"session-1","toolCall":{"toolCallId":"call-1"},"options":[{"optionId":"allow_once","name":"Allow once"}]}`),
+	)
+	if rpcErr == nil || rpcErr.Code != -32602 {
+		t.Fatalf("permission request error = %#v, want invalid params for missing standard kind", rpcErr)
+	}
+}
+
 func TestPermissionHandlerErrorUsesInternalErrorCode(t *testing.T) {
 	t.Parallel()
 

@@ -2317,7 +2317,7 @@
         ],
         "discriminator": {"propertyName": "sessionUpdate"}
       },
-      "PermissionOption": {"type": "object", "additionalProperties": false, "required": ["optionId", "name", "kind"], "properties": {"optionId": {"type": "string"}, "name": {"type": "string"}, "kind": {"type": "string"}}},
+      "PermissionOption": {"type": "object", "additionalProperties": false, "required": ["optionId", "name", "kind"], "properties": {"_meta": {"$ref": "#/components/schemas/ACPMetadata"}, "optionId": {"type": "string"}, "name": {"type": "string"}, "kind": {"type": "string"}}},
       "RequestPermission": {"type": "object", "additionalProperties": false, "required": ["sessionId", "toolCall", "options"], "properties": {"sessionId": {"type": "string"}, "toolCall": {"$ref": "#/components/schemas/ACPToolCallUpdate"}, "options": {"type": "array", "items": {"$ref": "#/components/schemas/PermissionOption"}}, "_meta": {"$ref": "#/components/schemas/ACPMetadata"}}},
       "ApprovalReview": {"type": "object", "additionalProperties": false, "properties": {"tool_call_id": {"type": "string"}, "tool_name": {"type": "string"}, "raw_input": {"$ref": "#/components/schemas/JSONObject"}, "status": {"type": "string"}, "text": {"type": "string"}, "risk": {"type": "string"}, "authorization": {"type": "string"}}},
       "ParticipantEvent": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string"}}},

@@ -198,10 +198,10 @@ func scopedPermissionEnvelope(scopeID string) eventstream.Envelope {
 				ToolCallID:    "child-permission",
 				Status:        &status,
 			},
-			Options: []acp.PermissionOption{{
-				OptionID: string(acpsdk.PermissionOptionKindAllowOnce),
+			Options: []acpsdk.PermissionOption{{
+				OptionId: acpsdk.PermissionOptionId(acpsdk.PermissionOptionKindAllowOnce),
 				Name:     "Allow once",
-				Kind:     string(acpsdk.PermissionOptionKindAllowOnce),
+				Kind:     acpsdk.PermissionOptionKindAllowOnce,
 			}},
 		},
 	}

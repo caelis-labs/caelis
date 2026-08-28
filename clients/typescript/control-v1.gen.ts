@@ -848,6 +848,7 @@ export type ParticipantKind = "acp" | "subagent";
 export type ParticipantRole = "sidecar" | "delegated" | "observer";
 
 export interface PermissionOption {
+  _meta?: ACPMetadata;
   kind: string;
   name: string;
   optionId: string;

@@ -62,7 +62,7 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 			options := make([]ApprovalOption, 0, len(env.Permission.Options))
 			for _, option := range env.Permission.Options {
 				options = append(options, ApprovalOption{
-					ID: strings.TrimSpace(option.OptionID), Name: strings.TrimSpace(option.Name), Kind: strings.TrimSpace(option.Kind),
+					ID: strings.TrimSpace(string(option.OptionId)), Name: strings.TrimSpace(option.Name), Kind: strings.TrimSpace(string(option.Kind)),
 				})
 			}
 			out = append(out, Event{

@@ -149,9 +149,9 @@ func approvalPayloadFromACPEvent(env eventstream.Envelope) *approvalPayload {
 	options := make([]approvalOption, 0, len(env.Permission.Options))
 	for _, option := range env.Permission.Options {
 		options = append(options, approvalOption{
-			ID:   strings.TrimSpace(option.OptionID),
+			ID:   strings.TrimSpace(string(option.OptionId)),
 			Name: strings.TrimSpace(option.Name),
-			Kind: strings.TrimSpace(option.Kind),
+			Kind: strings.TrimSpace(string(option.Kind)),
 		})
 	}
 	return &approvalPayload{

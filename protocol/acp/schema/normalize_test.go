@@ -129,8 +129,15 @@ func TestRequestPermissionRoundTripPreservesACPMetadata(t *testing.T) {
 			SessionUpdate: UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 		},
-		Options: []PermissionOption{{OptionID: "allow_once", Name: "Allow once", Kind: "allow_once"}},
-		Meta:    map[string]any{"vendor": map[string]any{"trace": "abc"}},
+		Options: []acpsdk.PermissionOption{{
+			OptionId: "allow_once",
+			Name:     "Allow once",
+			Kind:     acpsdk.PermissionOptionKindAllowOnce,
+			Meta: map[string]json.RawMessage{
+				"vendor": json.RawMessage(`{"scope":"once"}`),
+			},
+		}},
+		Meta: map[string]any{"vendor": map[string]any{"trace": "abc"}},
 	})
 	if err != nil {
 		t.Fatalf("json.Marshal(RequestPermissionRequest) error = %v", err)
@@ -142,6 +149,9 @@ func TestRequestPermissionRoundTripPreservesACPMetadata(t *testing.T) {
 	vendor, _ := decoded.Meta["vendor"].(map[string]any)
 	if vendor["trace"] != "abc" {
 		t.Fatalf("meta = %#v, want vendor trace", decoded.Meta)
+	}
+	if got := string(decoded.Options[0].Meta["vendor"]); got != `{"scope":"once"}` {
+		t.Fatalf("option metadata = %s, want preserved vendor metadata", got)
 	}
 }
 

@@ -138,7 +138,7 @@ func TestTurnHandlePublishesApprovalAsACPPermission(t *testing.T) {
 	if got := metautil.String(permission.ToolCall.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RunCommand" {
 		t.Fatalf("permission tool meta = %#v, want RUN_COMMAND tool name", permission.ToolCall.Meta)
 	}
-	if len(permission.Options) != 1 || permission.Options[0].OptionID != "allow_once" {
+	if len(permission.Options) != 1 || permission.Options[0].OptionId != "allow_once" {
 		t.Fatalf("permission options = %#v, want allow_once", permission.Options)
 	}
 }
@@ -1419,7 +1419,7 @@ func assertChildPermissionEnvelope(t *testing.T, env eventstream.Envelope, reque
 	if env.Position == nil || env.Position.Durable == nil || env.Position.Validate() != nil {
 		t.Fatalf("child position = %#v, want valid durable position", env.Position)
 	}
-	if env.Permission == nil || env.Permission.ToolCall.ToolCallID != "shared-child-call" || len(env.Permission.Options) != 1 || env.Permission.Options[0].OptionID != "allow_once" {
+	if env.Permission == nil || env.Permission.ToolCall.ToolCallID != "shared-child-call" || len(env.Permission.Options) != 1 || env.Permission.Options[0].OptionId != "allow_once" {
 		t.Fatalf("child ACP permission = %#v, want preserved tool call and options", env.Permission)
 	}
 	raw, ok := env.Permission.ToolCall.RawInput.(map[string]any)

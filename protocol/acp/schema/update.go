@@ -198,15 +198,9 @@ type UsageUpdate struct {
 
 func (u UsageUpdate) SessionUpdateType() string { return u.SessionUpdate }
 
-type PermissionOption struct {
-	OptionID string `json:"optionId"`
-	Name     string `json:"name"`
-	Kind     string `json:"kind"`
-}
-
 type RequestPermissionRequest struct {
-	SessionID string             `json:"sessionId"`
-	ToolCall  ToolCallUpdate     `json:"toolCall"`
-	Options   []PermissionOption `json:"options"`
-	Meta      map[string]any     `json:"_meta,omitempty"`
+	SessionID string                    `json:"sessionId"`
+	ToolCall  ToolCallUpdate            `json:"toolCall"`
+	Options   []acpsdk.PermissionOption `json:"options"`
+	Meta      map[string]any            `json:"_meta,omitempty"`
 }

@@ -175,7 +175,7 @@ func TestProjectSessionEventEnvelopeProjectsPermission(t *testing.T) {
 	if permission.ToolCall.ToolCallID != "call-1" || stringPtrValue(permission.ToolCall.Kind) != "RunCommand" {
 		t.Fatalf("permission tool call = %#v, want RUN_COMMAND call-1", permission.ToolCall)
 	}
-	if len(permission.Options) != 1 || permission.Options[0].OptionID != "allow_once" {
+	if len(permission.Options) != 1 || permission.Options[0].OptionId != "allow_once" {
 		t.Fatalf("permission options = %#v, want allow_once", permission.Options)
 	}
 }

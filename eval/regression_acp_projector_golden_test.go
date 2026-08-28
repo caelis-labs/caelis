@@ -299,7 +299,7 @@ func TestRegressionACPProjectorPermissionRequest(t *testing.T) {
 	if len(req.Options) != 2 {
 		t.Fatalf("options = %d, want 2", len(req.Options))
 	}
-	if req.Options[0].OptionID != "allow_once" {
-		t.Fatalf("options[0].option_id = %q, want allow_once", req.Options[0].OptionID)
+	if req.Options[0].OptionId != "allow_once" {
+		t.Fatalf("options[0].option_id = %q, want allow_once", req.Options[0].OptionId)
 	}
 }

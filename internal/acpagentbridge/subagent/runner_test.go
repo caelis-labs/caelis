@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
@@ -302,7 +303,7 @@ func TestTranslateApprovalRequestPreservesCanonicalToolPayload(t *testing.T) {
 			RawOutput:     map[string]any{"preview": "new text"},
 			Content:       content,
 		},
-		Options: []client.PermissionOption{{OptionID: "allow-once", Name: "Allow once", Kind: "allow_once"}},
+		Options: []acpsdk.PermissionOption{{OptionId: "allow-once", Name: "Allow once", Kind: acpsdk.PermissionOptionKindAllowOnce}},
 	}
 
 	got, err := translateApprovalRequest(tasksubagent.SpawnContext{TaskID: "task-1"}, AgentConfig{Name: "child"}, "child-1", req)
@@ -350,7 +351,7 @@ func TestRunnerPermissionCallbackNormalizesChildApprovalWithoutPublishingFrame(t
 				Content: client.TextContent{Type: "text", Text: "child permission detail"},
 			}},
 		},
-		Options: []client.PermissionOption{{OptionID: "allow_once", Name: "Allow once", Kind: "allow_once"}},
+		Options: []acpsdk.PermissionOption{{OptionId: "allow_once", Name: "Allow once", Kind: acpsdk.PermissionOptionKindAllowOnce}},
 	})
 	if err != nil {
 		t.Fatalf("permission callback error = %v", err)

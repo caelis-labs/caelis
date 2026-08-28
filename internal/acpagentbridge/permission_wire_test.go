@@ -37,7 +37,7 @@ func TestEmitControlPermissionEnvelopePreservesStandardWire(t *testing.T) {
 			},
 			Meta: map[string]any{"vendor": map[string]any{"trace": "tool-only"}},
 		},
-		Options: []acp.PermissionOption{{OptionID: "allow-once", Name: "Allow once", Kind: "allow_once"}},
+		Options: []acpsdk.PermissionOption{{OptionId: "allow-once", Name: "Allow once", Kind: acpsdk.PermissionOptionKindAllowOnce}},
 		Meta:    map[string]any{"request": "kept"},
 	}
 	callbacks := &permissionWireCallbacks{}

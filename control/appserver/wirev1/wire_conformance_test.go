@@ -167,7 +167,14 @@ func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 	permission.Permission = &schema.RequestPermissionRequest{
 		SessionID: "session-1",
 		ToolCall:  schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "tool-1", Title: &title},
-		Options:   []schema.PermissionOption{{OptionID: string(acpsdk.PermissionOptionKindAllowOnce), Name: "Allow once", Kind: string(acpsdk.PermissionOptionKindAllowOnce)}},
+		Options: []acpsdk.PermissionOption{{
+			OptionId: acpsdk.PermissionOptionId(acpsdk.PermissionOptionKindAllowOnce),
+			Name:     "Allow once",
+			Kind:     acpsdk.PermissionOptionKindAllowOnce,
+			Meta: map[string]json.RawMessage{
+				"vendor": json.RawMessage(`{"scope":"once"}`),
+			},
+		}},
 	}
 	participant := baseEnvelope(eventstream.KindParticipant)
 	participant.Participant = &eventstream.Participant{State: "attached"}

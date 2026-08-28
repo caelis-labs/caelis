@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -271,10 +272,10 @@ func TestRunSessionOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 				},
 			},
 		},
-		Options: []schema.PermissionOption{{
-			OptionID: "allow_once",
+		Options: []acpsdk.PermissionOption{{
+			OptionId: "allow_once",
 			Name:     "Allow once",
-			Kind:     "allow_once",
+			Kind:     acpsdk.PermissionOptionKindAllowOnce,
 		}},
 	}
 	handle := newFakeACPHandle([]eventstream.Envelope{

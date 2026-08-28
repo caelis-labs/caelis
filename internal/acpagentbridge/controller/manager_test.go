@@ -413,7 +413,7 @@ func TestTranslateApprovalRequestPreservesToolRawInput(t *testing.T) {
 				Type: "content", Content: client.TextContent{Type: "text", Text: "approval detail"},
 			}},
 		},
-		Options: []client.PermissionOption{{OptionID: "allow_once", Name: "Allow", Kind: "allow_once"}},
+		Options: []acpsdk.PermissionOption{{OptionId: "allow_once", Name: "Allow", Kind: acpsdk.PermissionOptionKindAllowOnce}},
 	})
 	if err != nil {
 		t.Fatal(err)

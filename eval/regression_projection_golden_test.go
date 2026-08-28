@@ -373,9 +373,9 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
       },
       "options": [
         {
-          "optionId": "allow_once",
+          "kind": "allow_once",
           "name": "Allow once",
-          "kind": "allow_once"
+          "optionId": "allow_once"
         }
       ]
     }

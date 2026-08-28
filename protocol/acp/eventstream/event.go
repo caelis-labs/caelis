@@ -299,7 +299,10 @@ func CloneEnvelope(in Envelope) Envelope {
 	}
 	if in.Permission != nil {
 		permission := *in.Permission
-		permission.Options = append([]schema.PermissionOption(nil), in.Permission.Options...)
+		permission.Options = append([]acpsdk.PermissionOption(nil), in.Permission.Options...)
+		for index := range permission.Options {
+			permission.Options[index].Meta = cloneRawMessageMap(permission.Options[index].Meta)
+		}
 		permission.ToolCall = cloneToolCallUpdate(in.Permission.ToolCall)
 		permission.Meta = cloneAnyMap(in.Permission.Meta)
 		out.Permission = &permission

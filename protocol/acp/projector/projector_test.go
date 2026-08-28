@@ -129,7 +129,7 @@ func TestProjectPermissionRequestUsesDurablePermissionAfterRoundTrip(t *testing.
 	if req.SessionID != "session-1" || req.ToolCall.ToolCallID != "call-rm" {
 		t.Fatalf("permission request = %#v, want session/call ids", req)
 	}
-	if len(req.Options) != 2 || req.Options[0].OptionID != "allow_once" {
+	if len(req.Options) != 2 || req.Options[0].OptionId != "allow_once" {
 		t.Fatalf("permission options = %#v", req.Options)
 	}
 	caelis, _ := req.Meta["caelis"].(map[string]any)

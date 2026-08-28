@@ -966,9 +966,10 @@ const (
 )
 
 type PermissionOption struct {
-	Kind     string `json:"kind"`
-	Name     string `json:"name"`
-	OptionId string `json:"optionId"`
+	Meta     *ACPMetadata `json:"_meta,omitempty"`
+	Kind     string       `json:"kind"`
+	Name     string       `json:"name"`
+	OptionId string       `json:"optionId"`
 }
 
 type PlanEntry struct {

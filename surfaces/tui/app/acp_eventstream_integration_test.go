@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	sdkmodel "github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -4496,10 +4497,10 @@ func TestApprovalPayloadFromACPEventUsesStandardPermission(t *testing.T) {
 					"sandbox_permissions": "workspace-write",
 				},
 			},
-			Options: []schema.PermissionOption{{
-				OptionID: "allow_once",
+			Options: []acpsdk.PermissionOption{{
+				OptionId: "allow_once",
 				Name:     "Allow once",
-				Kind:     "allow_once",
+				Kind:     acpsdk.PermissionOptionKindAllowOnce,
 			}},
 		},
 		Meta: acpToolNameMeta("RunCommand"),

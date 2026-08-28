@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -18,7 +19,11 @@ func DecodePermissionRequest(wire schema.RequestPermissionRequest) (*session.Pro
 	toolCall.Name = canonicalPermissionToolName(meta, toolCall)
 	approval := &session.ProtocolApproval{ToolCall: toolCall}
 	for _, option := range wire.Options {
-		approval.Options = append(approval.Options, session.ProtocolApprovalOption{ID: strings.TrimSpace(option.OptionID), Name: strings.TrimSpace(option.Name), Kind: strings.TrimSpace(option.Kind)})
+		approval.Options = append(approval.Options, session.ProtocolApprovalOption{
+			ID:   strings.TrimSpace(string(option.OptionId)),
+			Name: strings.TrimSpace(option.Name),
+			Kind: strings.TrimSpace(string(option.Kind)),
+		})
 	}
 	return approval, nil
 }
@@ -47,7 +52,11 @@ func EncodePermissionRequest(ref session.SessionRef, approval *session.ProtocolA
 		Meta: session.CloneState(meta),
 	}
 	for _, option := range normalized.Options {
-		wire.Options = append(wire.Options, schema.PermissionOption{OptionID: option.ID, Name: option.Name, Kind: option.Kind})
+		wire.Options = append(wire.Options, acpsdk.PermissionOption{
+			OptionId: acpsdk.PermissionOptionId(option.ID),
+			Name:     option.Name,
+			Kind:     acpsdk.PermissionOptionKind(option.Kind),
+		})
 	}
 	return wire, nil
 }

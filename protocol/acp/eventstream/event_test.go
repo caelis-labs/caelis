@@ -132,9 +132,9 @@ func TestEnvelopeV1RequestPermissionGolden(t *testing.T) {
 				Status:        &status,
 				RawInput:      map[string]any{"command": "make test"},
 			},
-			Options: []schema.PermissionOption{
-				{OptionID: string(acpsdk.PermissionOptionKindAllowOnce), Name: "Allow once", Kind: string(acpsdk.PermissionOptionKindAllowOnce)},
-				{OptionID: string(acpsdk.PermissionOptionKindRejectOnce), Name: "Reject", Kind: string(acpsdk.PermissionOptionKindRejectOnce)},
+			Options: []acpsdk.PermissionOption{
+				{OptionId: acpsdk.PermissionOptionId(acpsdk.PermissionOptionKindAllowOnce), Name: "Allow once", Kind: acpsdk.PermissionOptionKindAllowOnce},
+				{OptionId: acpsdk.PermissionOptionId(acpsdk.PermissionOptionKindRejectOnce), Name: "Reject", Kind: acpsdk.PermissionOptionKindRejectOnce},
 			},
 			Meta: map[string]any{
 				"caelis": map[string]any{
@@ -459,6 +459,28 @@ func TestCloneEnvelopePreservesContentChunkMetadata(t *testing.T) {
 	originalVendor, _ := original.Meta["vendor"].(map[string]any)
 	if originalVendor["trace"] != "abc" {
 		t.Fatalf("original meta mutated = %#v", original.Meta)
+	}
+}
+
+func TestCloneEnvelopeDeepCopiesPermissionOptionMetadata(t *testing.T) {
+	t.Parallel()
+
+	env := Envelope{
+		Permission: &schema.RequestPermissionRequest{
+			Options: []acpsdk.PermissionOption{{
+				OptionId: "allow_once",
+				Name:     "Allow once",
+				Kind:     acpsdk.PermissionOptionKindAllowOnce,
+				Meta: map[string]json.RawMessage{
+					"vendor": json.RawMessage(`{"scope":"once"}`),
+				},
+			}},
+		},
+	}
+	cloned := CloneEnvelope(env)
+	cloned.Permission.Options[0].Meta["vendor"][0] = '['
+	if got := string(env.Permission.Options[0].Meta["vendor"]); got != `{"scope":"once"}` {
+		t.Fatalf("source permission option metadata mutated: %s", got)
 	}
 }
 

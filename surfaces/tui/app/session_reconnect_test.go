@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -165,7 +166,7 @@ func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing
 			ApprovalRequestID: "approval-original",
 			Permission: &schema.RequestPermissionRequest{
 				SessionID: "session-1", ToolCall: schema.ToolCallUpdate{ToolCallID: "call-1"},
-				Options: []schema.PermissionOption{{OptionID: "allow_once", Name: "Allow once", Kind: "allow_once"}},
+				Options: []acpsdk.PermissionOption{{OptionId: "allow_once", Name: "Allow once", Kind: acpsdk.PermissionOptionKindAllowOnce}},
 			},
 		}},
 	}
