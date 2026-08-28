@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 const (

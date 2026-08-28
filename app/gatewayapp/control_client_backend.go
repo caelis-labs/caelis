@@ -16,7 +16,7 @@ import (
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 const controlFeedPublishTimeout = 5 * time.Second

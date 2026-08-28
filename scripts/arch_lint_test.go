@@ -126,9 +126,15 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "",
 		},
 		{
-			name:       "AppServer accepts shared ACP feed vocabulary",
+			name:       "production rejects retired ACP event stream",
 			rel:        "control/appserver/feed.go",
 			importPath: modulePath + "/protocol/acp/eventstream",
+			want:       "production code must not depend on retired protocol/acp/eventstream; use control/appserver/eventstream",
+		},
+		{
+			name:       "Surface accepts Control client event stream",
+			rel:        "surfaces/headless/headless.go",
+			importPath: modulePath + "/control/appserver/eventstream",
 			want:       "",
 		},
 		{
@@ -626,6 +632,12 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			rel:     "protocol/acp/projector/projector.go",
 			want:    "must not recreate protocol/acp/projector; canonical Session projection belongs to control/appserver/projection",
 			wantSub: "protocol/acp/projector",
+		},
+		{
+			name:    "deleted ACP event stream path fails",
+			rel:     "protocol/acp/eventstream/event.go",
+			want:    "must not recreate protocol/acp/eventstream; the Control client event contract belongs to control/appserver/eventstream",
+			wantSub: "protocol/acp/eventstream",
 		},
 		{
 			name:    "deleted ACP semantic path fails",

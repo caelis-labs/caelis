@@ -1,4 +1,4 @@
-// Package eventstream defines the Caelis v1 client event protocol.
+// Package eventstream defines the Control AppServer v1 client event stream.
 //
 // Envelope is the stable stream container consumed by TUI, GUI, app-server,
 // headless, and compatibility bridges. It carries standard ACP
@@ -6,7 +6,8 @@
 // for lifecycle, participant state, approval review, and notices. Usage is
 // represented only as standard ACP session/update usage_update.
 //
-// This package is a client protocol boundary, not the durable session model.
+// This package is the transport-neutral Control-to-Surface client contract,
+// not the durable session model, an ACP connection owner, or a policy layer.
 // Durable replay input is agent-sdk/session.Event: model-visible messages live
 // in Event.Message and durable tool execution state lives in Event.Tool. ACP
 // updates in an Envelope are projections of those canonical facts, or live

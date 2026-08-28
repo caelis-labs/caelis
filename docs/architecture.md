@@ -18,7 +18,8 @@ independently verified slices and must not be recreated.
 ## Layers
 
 - **Presentation surfaces**: TUI, ACP stdio/server, headless CLI, and future
-  GUI. Surfaces consume ACP-style `eventstream.Envelope` payloads plus
+  GUI. Surfaces consume ACP-style `control/appserver/eventstream.Envelope`
+  payloads plus
   documented `_meta` extensions. They render and collect input; they must not
   own model, tool, sandbox, policy, persistence, or runtime semantics.
 - **Control layer**: application orchestration. It assembles runnable agents,
@@ -77,8 +78,8 @@ Document responsibilities are intentionally separate:
   `surfaces/internal/transcript`: private shared presentation projection used
   by concrete Surfaces. These packages are not independent product surfaces or
   application-layer entry points.
-- `protocol/acp/*`: transitional ACP schema extensions, eventstream envelopes,
-  projection helpers, compatibility handling, and documented `_meta` contracts.
+- `protocol/acp/*`: transitional ACP schema extensions, compatibility handling,
+  and documented `_meta` contracts.
   The root facade has retired; consumers import only the owning subpackage. The
   tree owns no transport dispatch interfaces or new aggregate product boundary.
   Standard method identities, wire contracts, and connection behavior come
@@ -192,9 +193,10 @@ Document responsibilities are intentionally separate:
   capability sets, commands and outcomes, Session authorization,
   list/bootstrap/reconnect state, feed/replay coordination, legacy-child-mirror
   filtering, approval recovery, the aggregate client, the durable idempotency
-  operation ledger, and the Session lifecycle write gate. Its feed uses the
-  shared ACP projection and `eventstream.Envelope` vocabulary without moving
-  Control authorization, state, or broker ownership into `protocol/acp`. Its
+  operation ledger, and the Session lifecycle write gate. Its
+  `eventstream.Envelope` package owns the Control-to-Surface feed vocabulary;
+  the shared projection, authorization, state, and broker remain with their
+  focused Control owners. Its
   aggregate includes Task observation as an independently delivered typed
   capability; Task lifecycle, cursor, and stream ownership remain separate.
 - `internal/controlclient/turningress`: private main-Turn ingress glue between

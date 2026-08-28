@@ -16,7 +16,7 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {

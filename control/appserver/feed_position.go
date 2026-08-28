@@ -1,6 +1,6 @@
 package appserver
 
-import "github.com/caelis-labs/caelis/protocol/acp/eventstream"
+import "github.com/caelis-labs/caelis/control/appserver/eventstream"
 
 func durableAnchor(position eventstream.FeedPosition) eventstream.DurableFeedPosition {
 	if position.Durable != nil {

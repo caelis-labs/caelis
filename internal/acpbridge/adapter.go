@@ -5,7 +5,7 @@ import (
 
 	agentsdk "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 // SourceEventFromAgent adapts one SDK-owned source event into the control-layer

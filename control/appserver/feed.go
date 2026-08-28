@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 // ResumeMode describes how a Session subscription reconstructed its prefix.

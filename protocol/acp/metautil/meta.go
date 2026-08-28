@@ -227,41 +227,6 @@ func RuntimeSection(meta map[string]any, section string) map[string]any {
 	return CloneMap(mapAt(runtime, section))
 }
 
-func WithoutRuntimeSectionKeys(meta map[string]any, section string, keys ...string) map[string]any {
-	out := CloneMap(meta)
-	if len(out) == 0 || section == "" || len(keys) == 0 {
-		return out
-	}
-	caelis := CloneMap(mapAt(out, Root))
-	runtime := CloneMap(mapAt(caelis, Runtime))
-	sectionMap := CloneMap(mapAt(runtime, section))
-	if len(sectionMap) == 0 {
-		return out
-	}
-	for _, key := range keys {
-		delete(sectionMap, key)
-	}
-	if len(sectionMap) == 0 {
-		delete(runtime, section)
-	} else {
-		runtime[section] = sectionMap
-	}
-	if len(runtime) == 0 {
-		delete(caelis, Runtime)
-	} else {
-		caelis[Runtime] = runtime
-	}
-	if len(caelis) == 0 {
-		delete(out, Root)
-	} else {
-		out[Root] = caelis
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 func Merge(base map[string]any, extra map[string]any) map[string]any {
 	if len(extra) == 0 {
 		return CloneMap(base)

@@ -3,5 +3,5 @@
 //
 // Event values in this package are rendering state for TUI and GUI transcript
 // surfaces. They are not durable session records, app-server wire payloads, or
-// a replacement for protocol/acp/eventstream.Envelope.
+// a replacement for control/appserver/eventstream.Envelope.
 package transcript

@@ -10,7 +10,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/control/acppermission"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -68,7 +69,7 @@ func withoutLiveFinalContent(events []eventstream.Envelope, published agentsdk.P
 
 func withoutPublishedTerminalContent(meta map[string]any) map[string]any {
 	meta = metautil.WithoutTerminalOutput(meta)
-	return metautil.WithoutRuntimeSectionKeys(meta, metautil.RuntimeTask, metautil.RuntimeOutputDelta)
+	return eventmeta.WithoutRuntimeSectionKeys(meta, metautil.RuntimeTask, metautil.RuntimeOutputDelta)
 }
 
 // SessionEventTransport carries live transport ids that are unavailable from

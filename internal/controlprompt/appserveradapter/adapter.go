@@ -10,8 +10,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 // SessionClientAdapter is the presentation-facing AppServer client facade. It

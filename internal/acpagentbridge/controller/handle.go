@@ -8,9 +8,9 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/internal/eventqueue"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 type turnHandle struct {

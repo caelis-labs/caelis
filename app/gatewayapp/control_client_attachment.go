@@ -5,9 +5,9 @@ import (
 	"errors"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlclient/turningress"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 func (s *runtimeComposition) attachControlClientHandle(handle kernel.TurnHandle) {

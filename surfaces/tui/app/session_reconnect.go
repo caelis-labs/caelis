@@ -7,9 +7,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 const reconnectTransientGapWarning = "Some transient output may be missing; durable history and the live session feed were restored."

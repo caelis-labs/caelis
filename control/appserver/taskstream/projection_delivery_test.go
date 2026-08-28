@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 func TestProjectTaskFrameSeparatesDelegatedSemanticsFromCommandTerminalOutput(t *testing.T) {

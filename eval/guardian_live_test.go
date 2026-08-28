@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 func TestGuardianLiveE2E(t *testing.T) {

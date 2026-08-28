@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 // Broker owns delivery of one gateway Turn into the Control-owned Session

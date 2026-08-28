@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 // ingressDeliveryError identifies a producer contract violation before the

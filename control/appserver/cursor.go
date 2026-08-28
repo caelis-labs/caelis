@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 const (

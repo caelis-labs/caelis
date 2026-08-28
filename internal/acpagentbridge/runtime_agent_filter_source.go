@@ -3,7 +3,7 @@ package acpagentbridge
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 func acpEnvelopeSessionID(env eventstream.Envelope, fallbackSessionID string) string {

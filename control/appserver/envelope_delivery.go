@@ -3,7 +3,7 @@ package appserver
 import (
 	"fmt"
 
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 // ValidateEnvelopeDelivery checks that an Envelope's declared replay guarantee

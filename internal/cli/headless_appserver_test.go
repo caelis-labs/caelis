@@ -18,9 +18,9 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 	"github.com/caelis-labs/caelis/internal/testenv"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 func TestHeadlessExplicitEmbeddedRunBindsAppServer(t *testing.T) {

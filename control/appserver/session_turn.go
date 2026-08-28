@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 // SessionTurnStartRequest starts one main Turn after atomically attaching to

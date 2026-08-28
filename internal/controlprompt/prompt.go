@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 // Router routes one submission through the Control-owned prompt contract.

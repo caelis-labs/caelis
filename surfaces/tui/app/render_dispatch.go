@@ -9,7 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
