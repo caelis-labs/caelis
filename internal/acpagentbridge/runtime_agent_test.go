@@ -87,13 +87,8 @@ func TestRuntimeAgentNewSessionNormalizesManagedSubagentMetadata(t *testing.T) {
 	t.Parallel()
 
 	agent, sessions := newRuntimeAgentWithConfig(t, runtimeacp.Config{})
-	meta := metautil.WithCompactRuntimeSection(map[string]any{
-		"vendor": map[string]any{"untrusted": true},
-	}, metautil.RuntimeSession, map[string]any{
-		metautil.RuntimeSessionKind:     metautil.RuntimeSessionKindSubagent,
-		metautil.RuntimeSessionParentID: "parent-session",
-		metautil.RuntimeTaskID:          "task-1",
-	})
+	meta := managedSubagentSessionMeta("parent-session", "task-1", "")
+	meta["vendor"] = map[string]any{"untrusted": true}
 	resp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir(), Meta: testSDKRawMeta(t, meta)})
 	if err != nil {
 		t.Fatal(err)
@@ -133,12 +128,8 @@ func TestRuntimeAgentManagedLoadAndResumeIgnoreMetaAndRequireTrustedOwnership(t 
 	sessions := inmemory.NewStore(inmemory.Config{})
 	agent, _ := newRuntimeAgentWithSessionsAndConfig(t, sessions, runtimeacp.Config{})
 	created, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{
-		Cwd: t.TempDir(),
-		Meta: testSDKRawMeta(t, metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
-			metautil.RuntimeSessionKind:     metautil.RuntimeSessionKindSubagent,
-			metautil.RuntimeSessionParentID: "parent-session",
-			metautil.RuntimeTaskID:          "task-1",
-		})),
+		Cwd:  t.TempDir(),
+		Meta: testSDKRawMeta(t, managedSubagentSessionMeta("parent-session", "task-1", "")),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -148,11 +139,7 @@ func TestRuntimeAgentManagedLoadAndResumeIgnoreMetaAndRequireTrustedOwnership(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	claim := metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
-		metautil.RuntimeSessionKind:     metautil.RuntimeSessionKindSubagent,
-		metautil.RuntimeSessionParentID: "parent-session",
-		metautil.RuntimeTaskID:          "task-1",
-	})
+	claim := managedSubagentSessionMeta("parent-session", "task-1", "")
 	if _, err := agent.LoadSession(context.Background(), acpsdk.LoadSessionRequest{
 		SessionId: created.SessionId, Cwd: loaded.CWD,
 	}, &recordingPromptCallbacks{}); err != nil {
@@ -1043,6 +1030,23 @@ func (testConfigProvider) SetSessionConfigOption(context.Context, acpsdk.SetSess
 }
 
 type availableCommandProvider []acpsdk.AvailableCommand
+
+func managedSubagentSessionMeta(parentSessionID, taskID, historyToken string) map[string]any {
+	sessionMeta := map[string]any{
+		"kind":              "subagent",
+		"parent_session_id": parentSessionID,
+		"task_id":           taskID,
+	}
+	if historyToken != "" {
+		sessionMeta["history_token"] = historyToken
+	}
+	return map[string]any{
+		"caelis": map[string]any{
+			"version": 1,
+			"runtime": map[string]any{"session": sessionMeta},
+		},
+	}
+}
 
 func testSDKRawMeta(t *testing.T, meta map[string]any) map[string]json.RawMessage {
 	t.Helper()

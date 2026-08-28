@@ -13,7 +13,7 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 )
 
 var managedHistoryTestToken = strings.Repeat("ab", 32)
@@ -142,12 +142,7 @@ func TestRuntimeAgentProductResumeKeepsExecutionAndHistoryBridgesDisjoint(t *tes
 }
 
 func managedHistoryClaim(parentSessionID, taskID, token string) map[string]any {
-	return metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
-		metautil.RuntimeSessionKind:         metautil.RuntimeSessionKindSubagent,
-		metautil.RuntimeSessionParentID:     parentSessionID,
-		metautil.RuntimeTaskID:              taskID,
-		metautil.RuntimeSessionHistoryToken: token,
-	})
+	return acputil.NewSubagentSessionMeta(parentSessionID, taskID, token)
 }
 
 func managedHistoryRawMeta(t *testing.T, meta map[string]any) map[string]json.RawMessage {

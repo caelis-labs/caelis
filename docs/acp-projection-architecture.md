@@ -429,7 +429,8 @@ metadata, preserving parent Session and Task references for diagnostics. The
 Control Session directory excludes this product-managed Session from user
 resume candidates. Arbitrary ACP `_meta` values are not copied into durable
 Session metadata, and legacy unmarked child Sessions are not inferred from
-their title.
+their title. This managed-child and history-capability extension is owned by
+the Host-private ACP bridge, not the transitional root metadata package.
 
 Every Surface must:
 

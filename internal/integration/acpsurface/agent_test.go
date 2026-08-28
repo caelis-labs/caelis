@@ -314,11 +314,18 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	meta := metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
-		metautil.RuntimeSessionKind:     metautil.RuntimeSessionKindSubagent,
-		metautil.RuntimeSessionParentID: ordinary.SessionId,
-		metautil.RuntimeTaskID:          "task-1",
-	})
+	meta := map[string]any{
+		"caelis": map[string]any{
+			"version": 1,
+			"runtime": map[string]any{
+				"session": map[string]any{
+					"kind":              "subagent",
+					"parent_session_id": ordinary.SessionId,
+					"task_id":           "task-1",
+				},
+			},
+		},
+	}
 	child, err := agent.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: workspace, Meta: sdkRawMeta(t, meta)})
 	if err != nil {
 		t.Fatal(err)

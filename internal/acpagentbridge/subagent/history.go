@@ -19,7 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 // LoadHistory starts a short-lived ACP transport and calls session/load for an
@@ -124,12 +123,7 @@ func (r *Runner) LoadHistory(ctx context.Context, raw tasksubagent.HistoryReques
 }
 
 func subagentHistorySessionMeta(spawn tasksubagent.SpawnContext, historyToken string) map[string]any {
-	return metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
-		metautil.RuntimeSessionKind:         metautil.RuntimeSessionKindSubagent,
-		metautil.RuntimeSessionParentID:     spawn.SessionRef.SessionID,
-		metautil.RuntimeTaskID:              spawn.TaskID,
-		metautil.RuntimeSessionHistoryToken: historyToken,
-	})
+	return acputil.NewSubagentSessionMeta(spawn.SessionRef.SessionID, spawn.TaskID, historyToken)
 }
 
 type historyCollector struct {

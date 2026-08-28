@@ -134,7 +134,7 @@ func TestProjectTaskFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	if toolMeta[metautil.RuntimeTargetHandle] != "command" {
 		t.Fatalf("tool meta = %#v, want public Task handle", toolMeta)
 	}
-	if _, leaked := toolMeta[metautil.RuntimeTargetID]; leaked {
+	if _, leaked := toolMeta["target_id"]; leaked {
 		t.Fatalf("tool meta = %#v, opaque TaskID leaked as display identity", toolMeta)
 	}
 	assertStreamDelivery(t, env, true)
@@ -845,7 +845,7 @@ func assertNoLegacyRelationDeliveryMetadata(t *testing.T, env eventstream.Envelo
 
 func hasLegacyTransientMetadata(meta map[string]any) bool {
 	caelis, _ := meta[metautil.Root].(map[string]any)
-	transient, _ := caelis[metautil.Transient].(bool)
+	transient, _ := caelis["transient"].(bool)
 	return transient
 }
 

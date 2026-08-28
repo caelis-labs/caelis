@@ -20,12 +20,12 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/loader"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/version"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/google/uuid"
 )
 
@@ -1036,13 +1036,11 @@ func (a *RuntimeAgent) authorizeManagedSessionLoad(activeSession session.Session
 
 func matchesManagedSubagentHistoryCapability(configured string, meta map[string]any) bool {
 	configured = strings.TrimSpace(configured)
-	provided := metautil.String(
-		meta,
-		metautil.Root,
-		metautil.Runtime,
-		metautil.RuntimeSession,
-		metautil.RuntimeSessionHistoryToken,
-	)
+	claim, ok := acputil.ParseSubagentSessionMeta(meta)
+	if !ok {
+		return false
+	}
+	provided := claim.HistoryToken
 	// Tokens are 32 random bytes encoded as 64 hexadecimal characters. Require
 	// the exact shape before comparing so malformed metadata fails closed.
 	if len(configured) != 64 || len(provided) != len(configured) {

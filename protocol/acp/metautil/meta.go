@@ -14,7 +14,6 @@ const (
 	Root = "caelis"
 
 	Version                = "version"
-	Transient              = "transient"
 	Runtime                = "runtime"
 	Message                = "message"
 	MessageCitations       = "citations"
@@ -25,11 +24,9 @@ const (
 	RuntimeTool             = "tool"
 	RuntimeToolName         = "name"
 	RuntimeToolAction       = "action"
-	RuntimeToolInput        = "input"
 	RuntimeToolStatusDetail = "status_detail"
 	RuntimeTargetKind       = "target_kind"
 	RuntimeTargetHandle     = "target_handle"
-	RuntimeTargetID         = "target_id"
 
 	RuntimeTask           = "task"
 	RuntimeTaskID         = "task_id"
@@ -50,16 +47,6 @@ const (
 	RuntimeStreamParentCallID = "parent_call_id"
 	RuntimeStreamParentTool   = "parent_tool"
 	RuntimeStreamParentTaskID = "parent_task_id"
-
-	// RuntimeSession classifies a product-owned ACP Session creation request.
-	// The receiving Runtime must normalize recognized values before persistence.
-	RuntimeSession         = "session"
-	RuntimeSessionKind     = "kind"
-	RuntimeSessionParentID = "parent_session_id"
-	// RuntimeSessionHistoryToken is a transient Host-to-bridge capability. It
-	// must never be normalized into durable Session metadata.
-	RuntimeSessionHistoryToken = "history_token"
-	RuntimeSessionKindSubagent = "subagent"
 )
 
 // WithSection returns a copy of meta with one direct _meta.caelis section

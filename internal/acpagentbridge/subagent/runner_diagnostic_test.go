@@ -17,6 +17,7 @@ import (
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -500,9 +501,9 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 			}
 			meta := diagnosticRawMeta(req.Meta)
-			if req.SessionId != "child-reconnect" || req.Cwd != os.TempDir() ||
-				metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionParentID) != "parent-reconnect" ||
-				metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeTaskID) != "task-reconnect" {
+			claim, ok := acputil.ParseSubagentSessionMeta(meta)
+			if req.SessionId != "child-reconnect" || req.Cwd != os.TempDir() || !ok ||
+				claim.ParentSessionID != "parent-reconnect" || claim.TaskID != "task-reconnect" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/resume request"}
 			}
 			return client.ResumeSessionResponse{}, nil
@@ -515,14 +516,13 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 			}
 			meta := diagnosticRawMeta(req.Meta)
-			if req.SessionId != "child-history" || req.Cwd != os.TempDir() ||
-				metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionKind) != metautil.RuntimeSessionKindSubagent ||
-				metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionParentID) != "parent-history" ||
-				metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeTaskID) != "task-history" {
+			claim, ok := acputil.ParseSubagentSessionMeta(meta)
+			if req.SessionId != "child-history" || req.Cwd != os.TempDir() || !ok ||
+				claim.ParentSessionID != "parent-history" || claim.TaskID != "task-history" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/load request"}
 			}
 			if mode == "history-load-capability" {
-				requestToken := metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionHistoryToken)
+				requestToken := claim.HistoryToken
 				if processToken := strings.TrimSpace(os.Getenv(acpagentenv.EnvManagedSessionHistoryToken)); len(processToken) != 64 || requestToken != processToken {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: "managed history capability mismatch"}
 				}

@@ -17,6 +17,7 @@ import (
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
@@ -29,26 +30,18 @@ func TestSubagentSessionMetaMarksParentAndTask(t *testing.T) {
 		SessionRef: session.SessionRef{SessionID: "parent-session"},
 		TaskID:     "task-1",
 	})
-	path := []string{metautil.Root, metautil.Runtime, metautil.RuntimeSession}
-	if got := metautil.String(meta, append(path, metautil.RuntimeSessionKind)...); got != metautil.RuntimeSessionKindSubagent {
-		t.Fatalf("session kind = %q, want subagent", got)
-	}
-	if got := metautil.String(meta, append(path, metautil.RuntimeSessionParentID)...); got != "parent-session" {
-		t.Fatalf("parent Session ID = %q, want parent-session", got)
-	}
-	if got := metautil.String(meta, append(path, metautil.RuntimeTaskID)...); got != "task-1" {
-		t.Fatalf("Task ID = %q, want task-1", got)
-	}
-	if got := metautil.String(meta, append(path, metautil.RuntimeSessionHistoryToken)...); got != "" {
-		t.Fatalf("ordinary Session metadata history token = %q, want empty", got)
+	claim, ok := acputil.ParseSubagentSessionMeta(meta)
+	if !ok || claim.ParentSessionID != "parent-session" || claim.TaskID != "task-1" || claim.HistoryToken != "" {
+		t.Fatalf("ordinary Session metadata = %#v, %v; want parent/task claim without history token", claim, ok)
 	}
 
 	historyMeta := subagentHistorySessionMeta(tasksubagent.SpawnContext{
 		SessionRef: session.SessionRef{SessionID: "parent-session"},
 		TaskID:     "task-1",
 	}, strings.Repeat("ab", 32))
-	if got := metautil.String(historyMeta, append(path, metautil.RuntimeSessionHistoryToken)...); got != strings.Repeat("ab", 32) {
-		t.Fatalf("history Session metadata token = %q, want process capability", got)
+	historyClaim, ok := acputil.ParseSubagentSessionMeta(historyMeta)
+	if !ok || historyClaim.HistoryToken != strings.Repeat("ab", 32) {
+		t.Fatalf("history Session metadata = %#v, %v; want process capability", historyClaim, ok)
 	}
 }
 

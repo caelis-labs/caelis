@@ -28,7 +28,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/google/uuid"
 )
 
@@ -473,11 +472,7 @@ func detachedChildContext(ctx context.Context) context.Context {
 }
 
 func subagentSessionMeta(spawn subagent.SpawnContext) map[string]any {
-	return metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
-		metautil.RuntimeSessionKind:     metautil.RuntimeSessionKindSubagent,
-		metautil.RuntimeSessionParentID: spawn.SessionRef.SessionID,
-		metautil.RuntimeTaskID:          spawn.TaskID,
-	})
+	return acputil.NewSubagentSessionMeta(spawn.SessionRef.SessionID, spawn.TaskID, "")
 }
 
 func (r *Runner) Cancel(ctx context.Context, anchor delegation.Anchor) error {

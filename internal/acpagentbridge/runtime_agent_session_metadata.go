@@ -6,7 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 )
 
 const (
@@ -37,34 +37,16 @@ func acpRawMeta(meta map[string]json.RawMessage) map[string]any {
 // metadata, and this classification alone never authorizes an existing Session
 // target.
 func normalizedACPSessionMetadata(meta map[string]any) map[string]any {
-	kind := metautil.String(
-		meta,
-		metautil.Root,
-		metautil.Runtime,
-		metautil.RuntimeSession,
-		metautil.RuntimeSessionKind,
-	)
-	if kind != metautil.RuntimeSessionKindSubagent {
+	claim, ok := acputil.ParseSubagentSessionMeta(meta)
+	if !ok {
 		return nil
 	}
 	out := map[string]any{sessionvisibility.MetadataSystemManagedAgent: systemManagedSubagentSessionKind}
-	if parentSessionID := metautil.String(
-		meta,
-		metautil.Root,
-		metautil.Runtime,
-		metautil.RuntimeSession,
-		metautil.RuntimeSessionParentID,
-	); parentSessionID != "" {
-		out[sessionvisibility.MetadataSystemManagedParent] = parentSessionID
+	if claim.ParentSessionID != "" {
+		out[sessionvisibility.MetadataSystemManagedParent] = claim.ParentSessionID
 	}
-	if taskID := metautil.String(
-		meta,
-		metautil.Root,
-		metautil.Runtime,
-		metautil.RuntimeSession,
-		metautil.RuntimeTaskID,
-	); taskID != "" {
-		out[sessionvisibility.MetadataSystemManagedTask] = taskID
+	if claim.TaskID != "" {
+		out[sessionvisibility.MetadataSystemManagedTask] = claim.TaskID
 	}
 	return out
 }
@@ -81,13 +63,10 @@ func matchesManagedSubagentRelationClaim(active session.Session, meta map[string
 		) {
 		return false
 	}
-	path := []string{metautil.Root, metautil.Runtime, metautil.RuntimeSession}
-	kind := metautil.String(meta, append(path, metautil.RuntimeSessionKind)...)
-	parentSessionID := metautil.String(meta, append(path, metautil.RuntimeSessionParentID)...)
-	taskID := metautil.String(meta, append(path, metautil.RuntimeTaskID)...)
-	return kind == metautil.RuntimeSessionKindSubagent && parentSessionID != "" && taskID != "" &&
-		parentSessionID == strings.TrimSpace(sessionMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedParent)) &&
-		taskID == strings.TrimSpace(sessionMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedTask))
+	claim, ok := acputil.ParseSubagentSessionMeta(meta)
+	return ok && claim.ParentSessionID != "" && claim.TaskID != "" &&
+		claim.ParentSessionID == strings.TrimSpace(sessionMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedParent)) &&
+		claim.TaskID == strings.TrimSpace(sessionMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedTask))
 }
 
 func sessionMetadataString(metadata map[string]any, key string) string {
