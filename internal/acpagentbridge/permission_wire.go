@@ -8,14 +8,14 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/acppermission"
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 // sdkPermissionRequestFromApproval keeps live ACP callback wire ownership in
 // the Host bridge while reusing the durable compatibility projection.
 func sdkPermissionRequestFromApproval(ref session.SessionRef, approval *session.ProtocolApproval, meta map[string]any) (acpsdk.RequestPermissionRequest, error) {
-	request, err := semantic.EncodePermissionRequest(ref, approval, meta)
+	request, err := acppermission.EncodePermissionRequest(ref, approval, meta)
 	if err != nil {
 		return acpsdk.RequestPermissionRequest{}, err
 	}

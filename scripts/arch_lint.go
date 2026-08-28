@@ -596,6 +596,9 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if target == "protocol/acp/projector" || strings.HasPrefix(target, "protocol/acp/projector/") {
 		return "production code must not depend on retired protocol/acp/projector; use control/appserver/projection"
 	}
+	if target == "protocol/acp/semantic" || strings.HasPrefix(target, "protocol/acp/semantic/") {
+		return "production code must not depend on retired protocol/acp/semantic; use control/acppermission"
+	}
 	if strings.HasPrefix(rel, "app/controlserver/") &&
 		(target == "app/gatewayapp" || strings.HasPrefix(target, "app/gatewayapp/")) {
 		return "app/controlserver must depend on explicit Control contracts, not gatewayapp assembly"
@@ -638,7 +641,7 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	}
 	switch {
 	case strings.HasPrefix(rel, "control/"):
-		if allowedAppServerProtocolTarget(rel, target) {
+		if allowedControlProtocolTarget(rel, target) {
 			return ""
 		}
 		if startsWithAny(target, "app/", "surfaces/", "protocol/", "ports/", "internal/") {
@@ -745,8 +748,11 @@ func isProductionTestSupportPackage(rel string) bool {
 		strings.HasPrefix(rel, "internal/testenv/")
 }
 
-func allowedAppServerProtocolTarget(rel string, target string) bool {
-	if strings.HasPrefix(rel, "control/appserver/projection/") && target == "protocol/acp/semantic" {
+func allowedControlProtocolTarget(rel string, target string) bool {
+	if strings.HasPrefix(rel, "control/acppermission/") && pathIn(target,
+		"protocol/acp/metautil",
+		"protocol/acp/schema",
+	) {
 		return true
 	}
 	return strings.HasPrefix(rel, "control/appserver/") && pathIn(target,
@@ -875,6 +881,8 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "must not recreate protocol/acp/control; prompt contracts belong to internal/controlprompt, status data to control/status, and rendering to surfaces/internal/promptview", pkg, 1
 	case pkg == "protocol/acp/projector" || strings.HasPrefix(pkg, "protocol/acp/projector/"):
 		return "must not recreate protocol/acp/projector; canonical Session projection belongs to control/appserver/projection", pkg, 1
+	case pkg == "protocol/acp/semantic" || strings.HasPrefix(pkg, "protocol/acp/semantic/"):
+		return "must not recreate protocol/acp/semantic; ACP permission translation belongs to control/acppermission", pkg, 1
 	case pkg == "impl/model/catalog" || strings.HasPrefix(pkg, "impl/model/catalog/"):
 		return "must not recreate impl/model/catalog; concrete model catalogs belong to Control", pkg, 1
 	case pkg == "agent-sdk/model/catalog" || strings.HasPrefix(pkg, "agent-sdk/model/catalog/"):

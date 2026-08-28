@@ -9,10 +9,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"github.com/caelis-labs/caelis/control/acppermission"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 // ProjectSessionEventEnvelope projects one canonical session event into
@@ -495,11 +495,11 @@ func permissionRequestFromProtocol(sessionID string, meta map[string]any, approv
 	if approval == nil {
 		return nil
 	}
-	req, err := semantic.EncodePermissionRequest(session.SessionRef{SessionID: sessionID}, approval, meta)
+	req, err := acppermission.EncodePermissionRequest(session.SessionRef{SessionID: sessionID}, approval, meta)
 	if err != nil {
 		return nil
 	}
-	// Permission wire semantics come from semantic.EncodePermissionRequest.
+	// Permission wire semantics come from acppermission.EncodePermissionRequest.
 	// Projection may add display-only defaults without changing canonical
 	// identity, input, output, options, or approval meaning.
 	displayToolCall := permissionToolCallUpdateFromProtocol(approval.ToolCall)

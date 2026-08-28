@@ -1,4 +1,4 @@
-package semantic
+package acppermission
 
 import (
 	"encoding/json"
@@ -32,7 +32,7 @@ func DecodePermissionRequest(wire schema.RequestPermissionRequest) (*session.Pro
 // standard ACP request_permission wire shape.
 func EncodePermissionRequest(ref session.SessionRef, approval *session.ProtocolApproval, meta map[string]any) (schema.RequestPermissionRequest, error) {
 	if approval == nil {
-		return schema.RequestPermissionRequest{}, fmt.Errorf("protocol/acp/semantic: permission approval is required")
+		return schema.RequestPermissionRequest{}, fmt.Errorf("control/acppermission: permission approval is required")
 	}
 	normalized := session.CloneProtocolApproval(*approval)
 	title := permissionOptionalString(normalized.ToolCall.Title)

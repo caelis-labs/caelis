@@ -132,16 +132,16 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "",
 		},
 		{
-			name:       "AppServer projection accepts transitional ACP permission semantics",
-			rel:        "control/appserver/projection/gateway.go",
-			importPath: modulePath + "/protocol/acp/semantic",
+			name:       "Control ACP permission accepts transitional schema",
+			rel:        "control/acppermission/coordination.go",
+			importPath: modulePath + "/protocol/acp/schema",
 			want:       "",
 		},
 		{
-			name:       "AppServer feed rejects projection-only ACP permission semantics",
-			rel:        "control/appserver/feed.go",
+			name:       "production rejects retired ACP semantic adapter",
+			rel:        "control/appserver/projection/gateway.go",
 			importPath: modulePath + "/protocol/acp/semantic",
-			want:       "control must depend only on Control peers and reusable SDK packages",
+			want:       "production code must not depend on retired protocol/acp/semantic; use control/acppermission",
 		},
 		{
 			name:       "AppServer accepts Control-owned Task observation",
@@ -626,6 +626,12 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			rel:     "protocol/acp/projector/projector.go",
 			want:    "must not recreate protocol/acp/projector; canonical Session projection belongs to control/appserver/projection",
 			wantSub: "protocol/acp/projector",
+		},
+		{
+			name:    "deleted ACP semantic path fails",
+			rel:     "protocol/acp/semantic/coordination.go",
+			want:    "must not recreate protocol/acp/semantic; ACP permission translation belongs to control/acppermission",
+			wantSub: "protocol/acp/semantic",
 		},
 		{
 			name:    "deleted appserver surface fails",

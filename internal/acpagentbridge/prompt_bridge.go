@@ -11,11 +11,11 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/acppermission"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 func (a *RuntimeAgent) runPromptRouter(runCtx context.Context, bridgeCtx context.Context, activeSession session.Session, input string, contentParts []model.ContentPart, cb PromptCallbacks) (bool, error) {
@@ -470,7 +470,7 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbac
 		if env.Permission == nil {
 			return nil
 		}
-		approval, err := semantic.DecodePermissionRequest(*env.Permission)
+		approval, err := acppermission.DecodePermissionRequest(*env.Permission)
 		if err != nil {
 			return err
 		}

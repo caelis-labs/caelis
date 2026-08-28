@@ -12,10 +12,10 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/acppermission"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 // ResetSession clears the presentation facade's selected Session. A durable
@@ -313,7 +313,7 @@ func (r *clientSessionReconnect) prepareBootstrapEvents() error {
 		return errors.New("app/gatewayapp/controladapter: active approval bootstrap is incomplete")
 	}
 	permission := session.CloneProtocolApproval(*active.Permission)
-	wirePermission, err := semantic.EncodePermissionRequest(session.SessionRef{SessionID: r.state.SessionID}, &permission, nil)
+	wirePermission, err := acppermission.EncodePermissionRequest(session.SessionRef{SessionID: r.state.SessionID}, &permission, nil)
 	if err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-package semantic_test
+package acppermission_test
 
 import (
 	"encoding/json"
@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/acppermission"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
@@ -34,7 +34,7 @@ func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
 	}
 	wantMeta := map[string]any{"provider": map[string]any{"request_id": "request-1"}}
 
-	wire, err := semantic.EncodePermissionRequest(wantRef, &wantApproval, wantMeta)
+	wire, err := acppermission.EncodePermissionRequest(wantRef, &wantApproval, wantMeta)
 	if err != nil {
 		t.Fatalf("EncodePermissionRequest() error = %v", err)
 	}
@@ -55,7 +55,7 @@ func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
 	if err := json.Unmarshal(raw, &external); err != nil {
 		t.Fatal(err)
 	}
-	gotApproval, err := semantic.DecodePermissionRequest(external)
+	gotApproval, err := acppermission.DecodePermissionRequest(external)
 	if err != nil {
 		t.Fatalf("DecodePermissionRequest() error = %v", err)
 	}
@@ -68,7 +68,7 @@ func TestPermissionDecodeFallsBackFromMissingToolName(t *testing.T) {
 	t.Parallel()
 
 	kind := schema.ToolKindExecute
-	approval, err := semantic.DecodePermissionRequest(schema.RequestPermissionRequest{
+	approval, err := acppermission.DecodePermissionRequest(schema.RequestPermissionRequest{
 		SessionID: "session-1",
 		ToolCall: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,

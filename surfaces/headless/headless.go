@@ -8,11 +8,11 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/acppermission"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type ApprovalPolicy string
@@ -224,7 +224,7 @@ func approvalPayloadFromPermission(req *schema.RequestPermissionRequest) *approv
 	if req == nil {
 		return nil
 	}
-	decoded, err := semantic.DecodePermissionRequest(*req)
+	decoded, err := acppermission.DecodePermissionRequest(*req)
 	if err != nil || decoded == nil {
 		return nil
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/control/acppermission"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
@@ -28,7 +29,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 	"github.com/google/uuid"
 )
 
@@ -871,7 +871,7 @@ func translateApprovalRequest(
 	agentID string,
 	req client.RequestPermissionRequest,
 ) (subagent.ApprovalRequest, error) {
-	approval, err := semantic.DecodePermissionRequest(req)
+	approval, err := acppermission.DecodePermissionRequest(req)
 	if err != nil {
 		return subagent.ApprovalRequest{}, err
 	}

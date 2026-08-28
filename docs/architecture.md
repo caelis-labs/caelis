@@ -183,6 +183,10 @@ Document responsibilities are intentionally separate:
   detached Runtime may read its pinned Plugin view but cannot obtain a mutable
   Plugin host over its hook-free configuration reader; writes remain on the
   principal-bound Host command path.
+- `control/acppermission`: the focused Control adapter between standard ACP
+  `request_permission` payloads and normalized SDK approval semantics. It owns
+  no approval decision, display classification, persistence, or endpoint
+  policy.
 - `control/appserver`: the canonical surface-facing, transport-neutral Control
   boundary. It owns trusted principals, the aggregate client and service
   capability sets, commands and outcomes, Session authorization,

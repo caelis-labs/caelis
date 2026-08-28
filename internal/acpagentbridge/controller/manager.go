@@ -21,6 +21,7 @@ import (
 	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/acppermission"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
@@ -30,7 +31,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
-	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type Config struct {
@@ -1086,7 +1086,7 @@ func translateApprovalRequest(
 	mode string,
 	req client.RequestPermissionRequest,
 ) (controller.ApprovalRequest, error) {
-	approval, err := semantic.DecodePermissionRequest(req)
+	approval, err := acppermission.DecodePermissionRequest(req)
 	if err != nil {
 		return controller.ApprovalRequest{}, err
 	}
