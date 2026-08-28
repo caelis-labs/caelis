@@ -7,9 +7,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
 const reconnectTransientGapWarning = "Some transient output may be missing; durable history and the live session feed were restored."
@@ -50,11 +50,11 @@ func streamReconnectBackfill(
 	}
 	const batchSize = resumeReplayTranscriptBatchSize
 	batch := make([]TranscriptEvent, 0, batchSize)
-	ownerRepairs := acpprojector.TaskOwnerRepairs{}
+	ownerRepairs := taskstream.TaskOwnerRepairs{}
 	flush := func() {
 		if (len(batch) == 0 && ownerRepairs.Empty()) || send == nil {
 			batch = batch[:0]
-			ownerRepairs = acpprojector.TaskOwnerRepairs{}
+			ownerRepairs = taskstream.TaskOwnerRepairs{}
 			return
 		}
 		send(TranscriptEventsMsg{
@@ -63,7 +63,7 @@ func streamReconnectBackfill(
 			ReconnectReplay: true,
 		})
 		batch = batch[:0]
-		ownerRepairs = acpprojector.TaskOwnerRepairs{}
+		ownerRepairs = taskstream.TaskOwnerRepairs{}
 	}
 	for {
 		select {

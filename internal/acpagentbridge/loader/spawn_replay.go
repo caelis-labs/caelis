@@ -6,9 +6,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -76,7 +76,7 @@ func (p *spawnReplayProjector) observedParentCloses(env eventstream.Envelope, se
 	if p == nil {
 		return nil
 	}
-	results := projector.SpawnTaskResultsFromEnvelope(env)
+	results := taskstream.SpawnTaskResultsFromEnvelope(env)
 	if len(results) == 0 {
 		return nil
 	}

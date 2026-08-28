@@ -1,4 +1,4 @@
-package projector
+package taskstream
 
 import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"

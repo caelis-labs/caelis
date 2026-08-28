@@ -6,8 +6,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
@@ -54,7 +54,7 @@ func (m *Model) projectACPEnvelopePresentation(env eventstream.Envelope) Transcr
 func transcriptEventsMsgForEnvelope(events []TranscriptEvent, env eventstream.Envelope) TranscriptEventsMsg {
 	return TranscriptEventsMsg{
 		Events:       events,
-		OwnerRepairs: acpprojector.TaskOwnerRepairsFromEnvelope(env),
+		OwnerRepairs: taskstream.TaskOwnerRepairsFromEnvelope(env),
 	}
 }
 

@@ -6,8 +6,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -746,7 +746,7 @@ func TestObservedTerminalCommandClosesExactRunningActivityOwner(t *testing.T) {
 	})
 	m.refreshRunningActivity()
 
-	m.applyObservedCommandResults([]acpprojector.CommandTaskResult{{
+	m.applyObservedCommandResults([]taskstream.CommandTaskResult{{
 		ParentCallID: "different-command",
 		Handle:       "command-3",
 	}})
@@ -754,7 +754,7 @@ func TestObservedTerminalCommandClosesExactRunningActivityOwner(t *testing.T) {
 		t.Fatal("conflicting command observation closed the owner")
 	}
 
-	m.applyObservedCommandResults([]acpprojector.CommandTaskResult{{
+	m.applyObservedCommandResults([]taskstream.CommandTaskResult{{
 		ParentCallID: "command-call",
 		Handle:       "command-3",
 	}})

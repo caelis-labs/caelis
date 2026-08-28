@@ -7,8 +7,8 @@ import (
 	"time"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
@@ -196,7 +196,7 @@ const (
 // reconnect never build independent correlation paths from the same Envelope.
 type TranscriptEventsMsg struct {
 	Events       []TranscriptEvent
-	OwnerRepairs acpprojector.TaskOwnerRepairs
+	OwnerRepairs taskstream.TaskOwnerRepairs
 	// ReconnectReplay marks history delivered by the reconnect backfill path.
 	// It affects only first-paint layout reconstruction, never transcript data.
 	ReconnectReplay bool

@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -21,7 +21,7 @@ func TestObservedSpawnResultUsesHandleWhenCallIDIsReusedAcrossTurns(t *testing.T
 	beta.UpdateToolWithMeta("spawn-1", "Spawn", "beta", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
 	appendObservedSpawnOwner(model, beta, "spawn-1", "beta")
 
-	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
+	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 		ParentCallID: "spawn-1",
 		Status:       schema.ToolStatusCompleted,
 		RawOutput: map[string]any{
@@ -65,7 +65,7 @@ func TestObservedSpawnResultDoesNotInjectParentTaskResultIntoOpenOutputOverlay(t
 	}
 	initialStatus := view.block.Status
 
-	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
+	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 		ParentCallID: "spawn-1",
 		Status:       schema.ToolStatusCompleted,
 		RawOutput: map[string]any{
@@ -98,7 +98,7 @@ func TestObservedSpawnResultBatchClosesReusedCallIDByHandle(t *testing.T) {
 	beta.UpdateToolWithMeta("spawn-1", "Spawn", "beta", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
 	appendObservedSpawnOwner(model, beta, "spawn-1", "beta")
 
-	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{
+	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{
 		{
 			ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
 			RawOutput: map[string]any{
@@ -129,7 +129,7 @@ func TestObservedSpawnResultFailsClosedOnHandleMismatch(t *testing.T) {
 	block.UpdateToolWithMeta("spawn-1", "Spawn", "beta", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
 	appendObservedSpawnOwner(model, block, "spawn-1", "beta")
 
-	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
+	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 		ParentCallID: "spawn-1",
 		Status:       schema.ToolStatusCompleted,
 		RawOutput: map[string]any{
@@ -163,7 +163,7 @@ func TestObservedSpawnResultNeverOverridesCanonicalOrFirstFallbackFinal(t *testi
 			name:          "first fallback wins",
 			initialOutput: "first fallback",
 			complete: func(model *Model, _ *MainACPTurnBlock) {
-				model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
+				model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 					ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
 					RawOutput: map[string]any{
 						"handle": "alpha", "state": "completed", "final_message": "first fallback",
@@ -183,7 +183,7 @@ func TestObservedSpawnResultNeverOverridesCanonicalOrFirstFallbackFinal(t *testi
 			appendObservedSpawnOwner(model, block, "spawn-1", "alpha")
 			test.complete(model, block)
 
-			model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
+			model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 				ParentCallID: "spawn-1", Status: schema.ToolStatusFailed,
 				RawOutput: map[string]any{
 					"handle": "alpha", "state": "failed", "final_message": "stale replacement",
@@ -209,7 +209,7 @@ func TestObservedSpawnResultWithoutHandleRequiresUniqueOpenOwner(t *testing.T) {
 	second.UpdateToolWithMeta("spawn-1", "Spawn", "second", "", false, false, ToolUpdateMeta{})
 	appendObservedSpawnOwner(model, second, "spawn-1", "")
 
-	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
+	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 		ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
 		RawOutput: map[string]any{"state": "completed", "final_message": "ambiguous"},
 	}})
@@ -230,7 +230,7 @@ func TestObservedSpawnResultWithHandleFailsClosedAcrossEmptyAndMismatchedOwners(
 	beta.UpdateToolWithMeta("spawn-1", "Spawn", "beta", "", false, false, ToolUpdateMeta{TaskHandle: "beta"})
 	appendObservedSpawnOwner(model, beta, "spawn-1", "beta")
 
-	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
+	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 		ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
 		RawOutput: map[string]any{
 			"handle": "alpha", "state": "completed", "final_message": "stale alpha",
@@ -254,7 +254,7 @@ func TestObservedSpawnResultIgnoresClosedReusedCallOwnerDuringFallback(t *testin
 	open.UpdateToolWithMeta("spawn-1", "Spawn", "open", "", false, false, ToolUpdateMeta{})
 	appendObservedSpawnOwner(model, open, "spawn-1", "")
 
-	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
+	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 		ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
 		RawOutput: map[string]any{
 			"handle": "alpha", "state": "completed", "final_message": "alpha done",
@@ -274,7 +274,7 @@ func TestObservedSpawnResultWithoutHandleClosesUniqueOpenOwner(t *testing.T) {
 	block.UpdateToolWithMeta("spawn-1", "Spawn", "only owner", "", false, false, ToolUpdateMeta{})
 	appendObservedSpawnOwner(model, block, "spawn-1", "")
 
-	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
+	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 		ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
 		RawOutput: map[string]any{"state": "completed", "final_message": "unique final"},
 	}})
@@ -302,7 +302,7 @@ func TestObservedSpawnResultClosesBlockAndActivityThroughSameOwner(t *testing.T)
 		ToolTaskHandle: "alpha",
 	})
 
-	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
+	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 		ParentCallID: "spawn-1", Status: schema.ToolStatusCompleted,
 		RawOutput: map[string]any{
 			"handle": "alpha", "state": "completed", "final_message": "done",
@@ -342,7 +342,7 @@ func TestObservedSpawnResultDoesNotSplitActiveAssistantMessage(t *testing.T) {
 		"子代理 **self**（handle: `siena`）和 **breeze**（handle: `eira`",
 		newNarrativeSourceIdentity(messageID, "chunk-1", "projection-1"),
 	)
-	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
+	model.applyObservedSpawnResults([]taskstream.SpawnTaskResult{{
 		ParentCallID: "spawn-1",
 		Status:       schema.ToolStatusCompleted,
 		RawOutput: map[string]any{
@@ -436,7 +436,7 @@ func TestTerminalTaskReadRepairsSpawnBlockAndActivity(t *testing.T) {
 			Meta: taskMeta,
 		},
 	}
-	repairs := acpprojector.TaskOwnerRepairsFromEnvelope(envelope)
+	repairs := taskstream.TaskOwnerRepairsFromEnvelope(envelope)
 	if len(repairs.Spawns) != 1 || repairs.Spawns[0].ParentCallID != "spawn-1" {
 		t.Fatalf("Task owner repairs = %#v, want terminal Spawn read repair", repairs)
 	}

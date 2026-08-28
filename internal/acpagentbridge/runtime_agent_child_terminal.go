@@ -7,9 +7,9 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	acp "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -227,7 +227,7 @@ type acpObservedParentClose struct {
 }
 
 func acpObservedParentClosesFromEnvelope(env eventstream.Envelope) []acpObservedParentClose {
-	results := projector.SpawnTaskResultsFromEnvelope(env)
+	results := taskstream.SpawnTaskResultsFromEnvelope(env)
 	if len(results) == 0 {
 		return nil
 	}

@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -15,7 +15,7 @@ import (
 // normalized terminal Task observation used by ACP live projection and
 // session/load replay. The Task control invocation remains a separate event;
 // only a terminal observed child state can close the owner.
-func (m *Model) applyObservedSpawnResults(results []acpprojector.SpawnTaskResult) tea.Cmd {
+func (m *Model) applyObservedSpawnResults(results []taskstream.SpawnTaskResult) tea.Cmd {
 	if m == nil || m.doc == nil || len(results) == 0 {
 		return nil
 	}

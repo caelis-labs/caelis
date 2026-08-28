@@ -1,6 +1,7 @@
 // Package taskstream adapts Control-owned Task observation into the Envelope
-// contract consumed by presentation clients. It owns no Task lifecycle,
-// storage, authorization, cursor, or transport wire semantics.
+// contract consumed by presentation clients. It also derives presentation
+// owner repairs from terminal Task read and wait observations. It owns no Task
+// lifecycle, storage, authorization, cursor, or transport wire semantics.
 package taskstream
 
 import (
