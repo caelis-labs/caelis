@@ -26,3 +26,15 @@ Reports and raw logs persist under
 `${XDG_STATE_HOME:-$HOME/.local/state}/caelis/evals/acp`. The script builds an
 ephemeral minimal Runtime store for the real credential and removes that store
 on exit, so the persistent report directory contains no API key.
+
+`tmux_acceptance.sh` complements the headless ACP client run with a physical
+TUI session. It binds a scripted external ACP Agent to `zenith`, leaves the
+Host in its default `auto-review` mode, and verifies both `/zenith` Side ACP and
+`Spawn` of that external ACP subagent without sending permission-decision
+keystrokes. The controller and Guardian use the configured MiMo ModelProfile;
+the external Agent is deterministic. Its reports persist under
+`${XDG_STATE_HOME:-$HOME/.local/state}/caelis/evals/acp-tmux`.
+
+```bash
+./eval/acp/tmux_acceptance.sh
+```
