@@ -140,6 +140,8 @@ type subagentSemanticUnit struct {
 	order         int64
 	frame         stream.Frame
 	frameBytes    int
+	toolUpdate    *session.ProtocolUpdate
+	toolBytes     int
 	text          subagentSemanticText
 	narrative     bool
 	latestFinal   bool
@@ -154,7 +156,7 @@ func (u *subagentSemanticUnit) allocatedBytes() int {
 	if u.latestFinal {
 		return 0
 	}
-	return subagentSemanticUnitOverhead + len(u.key) + u.frameBytes + u.text.allocatedBytes()
+	return subagentSemanticUnitOverhead + len(u.key) + u.frameBytes + u.toolBytes + u.text.allocatedBytes()
 }
 
 func (u *subagentSemanticUnit) materialize() stream.Frame {
@@ -185,6 +187,7 @@ type subagentSemanticDescriptor struct {
 	text          string
 	narrative     bool
 	replace       bool
+	mergeTool     bool
 	skip          bool
 }
 
@@ -340,8 +343,23 @@ func (r *subagentSemanticRetention) observeDescriptor(frame stream.Frame, order 
 		unit.text.append([]byte(descriptor.text))
 	} else {
 		unit.text.reset()
+		if descriptor.mergeTool {
+			previous := unit.frame
+			if session.ProtocolUpdateOf(previous.Event) == nil && unit.toolUpdate != nil {
+				previous = stream.Frame{Event: &session.Event{
+					Protocol: &session.EventProtocol{Update: unit.toolUpdate},
+				}}
+			}
+			frame = subagentMergeSemanticToolFrame(previous, frame)
+		}
 		unit.frame = subagentBoundSemanticFrame(frame)
 		unit.frameBytes = subagentStreamFrameSize(unit.frame)
+		unit.toolUpdate = nil
+		unit.toolBytes = 0
+		if descriptor.mergeTool && session.ProtocolUpdateOf(unit.frame.Event) == nil {
+			unit.toolUpdate = subagentBoundSemanticToolUpdate(session.ProtocolUpdateOf(frame.Event))
+			unit.toolBytes = subagentProtocolUpdateSize(unit.toolUpdate)
+		}
 	}
 	r.bytes += unit.allocatedBytes() - before
 	r.evict()
@@ -595,13 +613,9 @@ func (r *subagentSemanticRetention) describe(frame stream.Frame, order int64) su
 		if callID == "" {
 			callID = eventID
 		}
-		kind := "call"
-		if session.EventTypeOf(event) == session.EventTypeToolResult {
-			kind = "update"
-		}
 		return subagentSemanticDescriptor{
-			key: "tool:" + turnID + ":" + kind + ":" + callID, turnID: turnID,
-			priority: subagentSemanticTool, replace: kind == "update",
+			key: "tool:" + turnID + ":" + callID, turnID: turnID,
+			priority: subagentSemanticTool, mergeTool: true,
 		}
 	case session.EventTypePlan:
 		return subagentSemanticDescriptor{
@@ -656,6 +670,115 @@ func subagentSemanticToolCallID(event *session.Event) string {
 		return strings.TrimSpace(update.ToolCallID)
 	}
 	return ""
+}
+
+// subagentMergeSemanticToolFrame materializes one current-state snapshot for a
+// sparse ACP tool lifecycle. Exact live delivery retains every original frame;
+// this merge is used only after that bounded delta window has been crossed.
+// Later fields replace earlier fields only when present, and a terminal status
+// cannot be reopened by a stale progress patch.
+func subagentMergeSemanticToolFrame(previous stream.Frame, current stream.Frame) stream.Frame {
+	current = stream.CloneFrame(current)
+	previousUpdate := session.ProtocolUpdateOf(previous.Event)
+	currentUpdate := session.ProtocolUpdateOf(current.Event)
+	if previousUpdate == nil || currentUpdate == nil || current.Event == nil {
+		return current
+	}
+	previousType := strings.TrimSpace(previousUpdate.SessionUpdate)
+	currentType := strings.TrimSpace(currentUpdate.SessionUpdate)
+	if (previousType != string(session.ProtocolUpdateTypeToolCall) && previousType != string(session.ProtocolUpdateTypeToolUpdate)) ||
+		(currentType != string(session.ProtocolUpdateTypeToolCall) && currentType != string(session.ProtocolUpdateTypeToolUpdate)) ||
+		strings.TrimSpace(previousUpdate.ToolCallID) == "" ||
+		strings.TrimSpace(previousUpdate.ToolCallID) != strings.TrimSpace(currentUpdate.ToolCallID) {
+		return current
+	}
+
+	merged := *previousUpdate
+	merged.SessionUpdate = currentUpdate.SessionUpdate
+	merged.ToolCallID = currentUpdate.ToolCallID
+	if currentUpdate.MessageID != "" {
+		merged.MessageID = currentUpdate.MessageID
+	}
+	if currentUpdate.Title != "" {
+		merged.Title = currentUpdate.Title
+	}
+	if currentUpdate.Kind != "" {
+		merged.Kind = currentUpdate.Kind
+	}
+	if currentUpdate.Status != "" &&
+		(!stream.IsTerminalState(merged.Status) || stream.IsTerminalState(currentUpdate.Status)) {
+		merged.Status = currentUpdate.Status
+	}
+	if currentUpdate.RawInput != nil {
+		merged.RawInput = currentUpdate.RawInput
+	}
+	if currentUpdate.RawOutput != nil {
+		merged.RawOutput = currentUpdate.RawOutput
+	}
+	if currentUpdate.Content != nil {
+		merged.Content = currentUpdate.Content
+	}
+	if currentUpdate.Locations != nil {
+		merged.Locations = currentUpdate.Locations
+	}
+	if currentUpdate.Entries != nil {
+		merged.Entries = currentUpdate.Entries
+	}
+	if currentUpdate.Meta != nil {
+		merged.Meta = currentUpdate.Meta
+	}
+	protocol := session.CloneEventProtocol(*current.Event.Protocol)
+	protocol.Update = &merged
+	current.Event.Protocol = &protocol
+	return current
+}
+
+// subagentBoundSemanticToolUpdate preserves the mergeable ACP lifecycle header
+// when the display frame itself is too large and becomes a bounded Notice. The
+// fallback participates in the shared semantic byte budget and admits open
+// payload fields only when each still fits inside the smaller header budget.
+func subagentBoundSemanticToolUpdate(update *session.ProtocolUpdate) *session.ProtocolUpdate {
+	if update == nil {
+		return nil
+	}
+	protocol := session.CloneEventProtocol(session.EventProtocol{Update: update})
+	cloned := protocol.Update
+	if subagentProtocolUpdateSize(cloned) <= subagentSemanticHeadByteCap {
+		return cloned
+	}
+	bounded := &session.ProtocolUpdate{
+		SessionUpdate: cloned.SessionUpdate,
+		ToolCallID:    cloned.ToolCallID,
+		Status:        cloned.Status,
+	}
+	tryField := func(apply func(*session.ProtocolUpdate)) {
+		candidate := *bounded
+		apply(&candidate)
+		if subagentProtocolUpdateSize(&candidate) <= subagentSemanticHeadByteCap {
+			bounded = &candidate
+		}
+	}
+	tryField(func(candidate *session.ProtocolUpdate) { candidate.Title = cloned.Title })
+	tryField(func(candidate *session.ProtocolUpdate) { candidate.Kind = cloned.Kind })
+	tryField(func(candidate *session.ProtocolUpdate) { candidate.MessageID = cloned.MessageID })
+	tryField(func(candidate *session.ProtocolUpdate) { candidate.RawInput = cloned.RawInput })
+	tryField(func(candidate *session.ProtocolUpdate) { candidate.Content = cloned.Content })
+	tryField(func(candidate *session.ProtocolUpdate) { candidate.RawOutput = cloned.RawOutput })
+	tryField(func(candidate *session.ProtocolUpdate) { candidate.Locations = cloned.Locations })
+	tryField(func(candidate *session.ProtocolUpdate) { candidate.Entries = cloned.Entries })
+	tryField(func(candidate *session.ProtocolUpdate) { candidate.Meta = cloned.Meta })
+	return bounded
+}
+
+func subagentProtocolUpdateSize(update *session.ProtocolUpdate) int {
+	if update == nil {
+		return 0
+	}
+	raw, err := json.Marshal(update)
+	if err != nil {
+		return subagentSemanticHeadByteCap + 1
+	}
+	return len(raw)
 }
 
 func subagentSemanticNarrativeTemplate(frame stream.Frame) stream.Frame {

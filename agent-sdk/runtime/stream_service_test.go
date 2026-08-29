@@ -2103,6 +2103,182 @@ func TestSubagentFrameRingEvictionReportsEventLowerBound(t *testing.T) {
 	}
 }
 
+func TestSubagentCurrentStateMergesSparseShellUpdates(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	turnID := subagentTurnID(task.ref.TaskID, task.turnSeq)
+	appendToolUpdate := func(id string, eventType session.EventType, update session.ProtocolUpdate) {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: id, Type: eventType, Visibility: session.VisibilityUIOnly,
+			Scope:    &session.EventScope{TurnID: turnID},
+			Protocol: &session.EventProtocol{Update: &update},
+		}})
+	}
+
+	task.mu.Lock()
+	appendToolUpdate("shell-start", session.EventTypeToolCall, session.ProtocolUpdate{
+		SessionUpdate: string(session.ProtocolUpdateTypeToolCall), ToolCallID: "execute-1",
+		Title: "shell", Kind: "execute", Status: "in_progress",
+		RawInput: map[string]any{
+			"command": "printf 'CURRENT_STATE_SHELL_47\\n'",
+		},
+	})
+	appendToolUpdate("shell-presentation", session.EventTypeToolCall, session.ProtocolUpdate{
+		SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate), ToolCallID: "execute-1",
+		Title: "Execute `printf 'CURRENT_STATE_SHELL_47\\n'`", Kind: "execute",
+		RawInput: map[string]any{
+			"variant": "Bash", "command": "printf 'CURRENT_STATE_SHELL_47\\n'",
+		},
+		Content: []session.ProtocolToolCallContent{{
+			Type: "content", Content: session.ProtocolTextContent("Print one probe line"),
+		}},
+		Meta: map[string]any{"provider": map[string]any{"trace": "shell-order"}},
+	})
+	appendToolUpdate("shell-complete", session.EventTypeToolResult, session.ProtocolUpdate{
+		SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate), ToolCallID: "execute-1",
+		Status: "completed",
+		Content: []session.ProtocolToolCallContent{{
+			Type: "content", Content: session.ProtocolTextContent("CURRENT_STATE_SHELL_47\n"),
+		}},
+		RawOutput: map[string]any{
+			"exit_code": 0, "output": "CURRENT_STATE_SHELL_47\n",
+		},
+	})
+	for index := 0; index < subagentStreamFrameCap+1; index++ {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: fmt.Sprintf("reasoning-%03d", index), MessageID: "reasoning-1",
+			Type: session.EventTypeAssistant, Visibility: session.VisibilityUIOnly,
+			Scope: &session.EventScope{TurnID: turnID}, Text: "r",
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentThought), MessageID: "reasoning-1",
+				Content: session.ProtocolTextContent("r"),
+			}},
+		}})
+	}
+	task.mu.Unlock()
+
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.EventsTruncatedBefore == 0 {
+		t.Fatalf("snapshot = %#v, want semantic current-state recovery after exact-frame eviction", snapshot)
+	}
+	var toolUpdates []*session.ProtocolUpdate
+	for _, frame := range snapshot.Frames {
+		update := session.ProtocolUpdateOf(frame.Event)
+		if update != nil && update.ToolCallID == "execute-1" {
+			toolUpdates = append(toolUpdates, update)
+		}
+	}
+	if len(toolUpdates) != 1 {
+		t.Fatalf("retained shell updates = %#v, want one materialized current state", toolUpdates)
+	}
+	update := toolUpdates[0]
+	if update.SessionUpdate != string(session.ProtocolUpdateTypeToolUpdate) ||
+		update.Title != "Execute `printf 'CURRENT_STATE_SHELL_47\\n'`" ||
+		update.Kind != "execute" || update.Status != "completed" ||
+		update.RawInput["command"] != "printf 'CURRENT_STATE_SHELL_47\\n'" ||
+		update.RawOutput["output"] != "CURRENT_STATE_SHELL_47\n" {
+		t.Fatalf("retained shell state = %#v, want title/input from the presentation patch and terminal result from completion", update)
+	}
+	content := session.ProtocolToolCallContentOf(update)
+	if len(content) != 1 || session.ExtractProtocolText(content[0].Content) != "CURRENT_STATE_SHELL_47\n" {
+		t.Fatalf("retained shell content = %#v, want final command output", content)
+	}
+	provider, _ := update.Meta["provider"].(map[string]any)
+	if provider["trace"] != "shell-order" {
+		t.Fatalf("retained shell metadata = %#v, want sparse provider metadata", update.Meta)
+	}
+}
+
+func TestSubagentCurrentStateKeepsShellHeaderAfterOversizedSparseUpdate(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	turnID := subagentTurnID(task.ref.TaskID, task.turnSeq)
+	appendToolUpdate := func(id string, eventType session.EventType, update session.ProtocolUpdate) {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: id, Type: eventType, Visibility: session.VisibilityUIOnly,
+			Scope:    &session.EventScope{TurnID: turnID},
+			Protocol: &session.EventProtocol{Update: &update},
+		}})
+	}
+
+	task.mu.Lock()
+	appendToolUpdate("shell-start", session.EventTypeToolCall, session.ProtocolUpdate{
+		SessionUpdate: string(session.ProtocolUpdateTypeToolCall), ToolCallID: "execute-1",
+		Title: "shell", Kind: "execute", Status: "in_progress",
+		RawInput: map[string]any{
+			"command": "printf 'OVERSIZED_SHELL_47\\n'",
+		},
+	})
+	appendToolUpdate("shell-output", session.EventTypeToolCall, session.ProtocolUpdate{
+		SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate), ToolCallID: "execute-1",
+		Title: "Execute `printf 'OVERSIZED_SHELL_47\\n'`", Kind: "execute",
+		Content: []session.ProtocolToolCallContent{{
+			Type: "content", Content: session.ProtocolTextContent(strings.Repeat("x", subagentStreamByteCap+1)),
+		}},
+		RawOutput: map[string]any{"exit_code": 0},
+		Meta:      map[string]any{"provider": map[string]any{"trace": "oversized-shell-order"}},
+	})
+	appendToolUpdate("shell-complete", session.EventTypeToolResult, session.ProtocolUpdate{
+		SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate), ToolCallID: "execute-1",
+		Status: "completed",
+	})
+	for index := 0; index < subagentStreamFrameCap+1; index++ {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: fmt.Sprintf("reasoning-%03d", index), MessageID: "reasoning-1",
+			Type: session.EventTypeAssistant, Visibility: session.VisibilityUIOnly,
+			Scope: &session.EventScope{TurnID: turnID}, Text: "r",
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentThought), MessageID: "reasoning-1",
+				Content: session.ProtocolTextContent("r"),
+			}},
+		}})
+	}
+	task.mu.Unlock()
+
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.EventsTruncatedBefore == 0 {
+		t.Fatalf("snapshot = %#v, want semantic current-state recovery after exact-frame eviction", snapshot)
+	}
+	var toolUpdates []*session.ProtocolUpdate
+	for _, frame := range snapshot.Frames {
+		update := session.ProtocolUpdateOf(frame.Event)
+		if update != nil && update.ToolCallID == "execute-1" {
+			toolUpdates = append(toolUpdates, update)
+		}
+	}
+	if len(toolUpdates) != 1 {
+		t.Fatalf("retained oversized shell updates = %#v, want one materialized current state", toolUpdates)
+	}
+	update := toolUpdates[0]
+	if update.Title != "Execute `printf 'OVERSIZED_SHELL_47\\n'`" ||
+		update.Kind != "execute" || update.Status != "completed" ||
+		update.RawInput["command"] != "printf 'OVERSIZED_SHELL_47\\n'" ||
+		update.RawOutput["exit_code"] != 0 {
+		t.Fatalf("retained oversized shell state = %#v, want bounded header/input/output plus sparse completion", update)
+	}
+	provider, _ := update.Meta["provider"].(map[string]any)
+	if provider["trace"] != "oversized-shell-order" {
+		t.Fatalf("retained oversized shell metadata = %#v, want independently bounded metadata", update.Meta)
+	}
+	if task.semanticRetention.bytes > subagentStreamByteCap {
+		t.Fatalf("semantic retention bytes = %d, cap %d", task.semanticRetention.bytes, subagentStreamByteCap)
+	}
+}
+
 func TestSubagentTwoTurnCurrentStateRetainsBothExactFinals(t *testing.T) {
 	t.Parallel()
 
@@ -2648,7 +2824,7 @@ func TestSubagentSemanticRetentionTreatsProgressLifecycleAsReplaceableNoise(t *t
 	if retention.units["narrative:"+turnID+":assistant:assistant"] == nil {
 		t.Fatal("progress lifecycle pressure evicted assistant current state")
 	}
-	if retention.units["tool:"+turnID+":call:call-1"] == nil {
+	if retention.units["tool:"+turnID+":call-1"] == nil {
 		t.Fatal("progress lifecycle pressure evicted tool current state")
 	}
 	progressUnits := 0
