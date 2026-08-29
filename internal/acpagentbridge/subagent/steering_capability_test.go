@@ -69,6 +69,9 @@ func TestSpawnRejectsMalformedSteeringBeforeSessionOrRegistration(t *testing.T) 
 	if err == nil {
 		t.Fatal("Spawn() error = nil, want malformed steering capability")
 	}
+	if !tasksubagent.SpawnProvenNotStarted(err) {
+		t.Fatalf("Spawn() error = %v, want positive no-child proof before session/new", err)
+	}
 	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
 		t.Fatalf("session/new ran before steering rejection: stat error = %v", statErr)
 	}

@@ -558,8 +558,8 @@ func TestSubagentRosterResumeLetsTerminalDirectorySupersedeHistoricalSpawn(t *te
 
 	view := model.subagentOutputViews[callIDs[0]]
 	plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 88, 20)), "\n")
-	if strings.Contains(strings.ToLower(plain), "waiting") || !strings.Contains(plain, "No retained assistant messages") {
-		t.Fatalf("terminal empty workspace rendered as active output:\n%s", plain)
+	if strings.TrimSpace(plain) != "" {
+		t.Fatalf("terminal empty workspace rendered a synthetic message:\n%s", plain)
 	}
 }
 

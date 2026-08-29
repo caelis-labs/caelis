@@ -144,7 +144,9 @@ type ControlRequest struct {
 // Entry is one durable task persistence record.
 type Entry struct {
 	TaskID string `json:"task_id,omitempty"`
-	// Handle is unique within the owning Session and is never reused there.
+	// Handle is unique within the owning Session and is not reused after a Task
+	// was created or its creation became indeterminate. A Spawn that proves no
+	// child was created releases the handle while retaining its durable intent.
 	// It is stored with the existing Task record rather than in a second index.
 	Handle         string             `json:"handle,omitempty"`
 	Revision       uint64             `json:"revision,omitempty"`

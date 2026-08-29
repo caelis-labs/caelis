@@ -101,6 +101,30 @@ func TestContextRouterUsesOnlySharedCanonicalDialogue(t *testing.T) {
 	}
 }
 
+func TestContextRouterAllowsEmptyCanonicalHistory(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	sessions, activeSession := newControlTestSession(t, "context-empty")
+	router, err := NewContextRouter(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, err := router.ParticipantContext(ctx, controller.ParticipantContextRequest{
+		SessionRef: activeSession.SessionRef,
+		Session:    activeSession,
+		Binding: session.ParticipantBinding{
+			ID: "spawn", Label: "spawn", ContextSyncSeq: 0,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ParticipantContext(empty history) error = %v", err)
+	}
+	if route.SyncSeq != 0 || !agent.ContextTransferEmpty(route.Context) || !agent.ContextTransferEmpty(route.FreshContext) {
+		t.Fatalf("empty history route = %#v, want empty transfer without error", route)
+	}
+}
+
 func TestSharedContextOffsetUsesDurableCompleteTurnsAndOpaqueCompactBoundary(t *testing.T) {
 	t.Parallel()
 

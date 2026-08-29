@@ -195,6 +195,24 @@ func TestDelegatedSpawnDefaultOmitsParentContext(t *testing.T) {
 	}
 }
 
+func TestDelegatedSpawnIncludeContextAllowsEmptyHistory(t *testing.T) {
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+
+	result := callDelegatedSpawnTool(t, runtime, activeSession, map[string]any{
+		"agent": "helper", "prompt": "review", "include_context": true,
+	})
+	payload := testToolResultPayload(t, result)
+	if _, ok := payload["system_hint"]; ok {
+		t.Fatalf("system_hint = %#v, want no warning for an empty supported transfer", payload["system_hint"])
+	}
+	if prompt := runner.spawnTargetRequest.Prompt; prompt != "review" {
+		t.Fatalf("spawn prompt = %q, want only the current request for empty history", prompt)
+	}
+}
+
 func TestDelegatedSpawnIncludeContextDegradesWithoutRouter(t *testing.T) {
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},

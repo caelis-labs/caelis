@@ -528,7 +528,7 @@ func (m *Model) subagentOutputRows(view *subagentOutputView, width, height int) 
 		case m.subagentOutputCurrentStatus(view) != subagentOutputRunning && m.subagentOutputHistoryPending(view):
 			label = "Loading subagent history…"
 		case m.subagentOutputCurrentStatus(view) != subagentOutputRunning:
-			label = "No retained assistant messages for this subagent."
+			label = ""
 		}
 		rows = []RenderedRow{StyledPlainRow(
 			"subagent-output",

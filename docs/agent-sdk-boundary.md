@@ -84,6 +84,13 @@ transfer used for child prompt rendering. A missing or failing router is not a
 spawn failure: Subagents may be assembled without a router, the child still
 starts, and the Spawn result may carry a `system_hint` that context transfer is
 unavailable. Runtime hides the argument when no router is assembled.
+An empty routed transfer is ordinary: the child receives only its Spawn prompt
+and no warning. A Runner may positively mark an error as not started only when
+it proves that no child was created and all activity/completion producers are
+quiescent; Runtime then releases the requested handle while retaining a
+handle-free failed intent for audit and idempotency. Every unmarked error is an
+unknown creation outcome, so Runtime retains the handle and refuses a blind
+retry.
 
 A Runner exposes one bounded, single-consumer observation stream. Slow
 observers may lose transient output but must not block execution, durable

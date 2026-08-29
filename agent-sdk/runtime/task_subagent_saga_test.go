@@ -12,6 +12,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -160,6 +161,7 @@ func (s *sagaTaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.
 type sagaRunner struct {
 	spawnCalls  int
 	cancelCalls int
+	spawnErr    error
 	cancelErr   error
 }
 
@@ -174,6 +176,9 @@ func (r *placementSagaRunner) SpawnTarget(_ context.Context, spawn subagent.Spaw
 
 func (r *sagaRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
 	r.spawnCalls++
+	if r.spawnErr != nil {
+		return delegation.Anchor{}, delegation.Result{}, r.spawnErr
+	}
 	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-saga", Agent: req.Agent, AgentID: "child-agent-saga"}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted, Result: "saga result"}, nil
 }
 func (*sagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
@@ -1291,6 +1296,92 @@ func TestSubagentSpawnReleasesRequestedHandleAfterFailedIntentPersist(t *testing
 	}
 	if runner.spawnCalls != 1 {
 		t.Fatalf("spawn calls = %d, want 1 after released reservation", runner.spawnCalls)
+	}
+}
+
+func TestSubagentSpawnReleasesHandleWhenRunnerProvesNoChildWasCreated(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "runner-failure-handle"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newFileTaskStoreForTest(t)
+	runner := &sagaRunner{spawnErr: subagent.MarkSpawnNotStarted(errors.New("runner setup failed"))}
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := taskapi.SubagentStartRequest{
+		SpawnID: "failed-runner", Agent: "helper", Prompt: "review", Handle: "reviewer", Role: session.ParticipantRoleSidecar,
+	}
+	if _, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err == nil {
+		t.Fatal("StartSubagent() error = nil, want runner setup failure")
+	}
+	taskID, err := subagentSpawnTaskID(active.SessionRef, req.SpawnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := store.Get(context.Background(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.State != taskapi.StateFailed || entry.Running || entry.SupportsCancel ||
+		entry.Handle != "" || taskSpecString(entry.Spec, "handle") != "" ||
+		taskStringValue(entry.Result["handle"]) != "" || spawnPhaseOf(entry) != spawnPhaseFailed {
+		t.Fatalf("failed Spawn entry = %#v, want handle-free terminal failure", entry)
+	}
+	if _, err := store.GetSessionTaskByHandle(context.Background(), active.SessionRef, "reviewer"); err == nil {
+		t.Fatal("failed Spawn handle remained in the durable handle index")
+	}
+
+	runner.spawnErr = nil
+	req.SpawnID = "retry-runner"
+	snapshot, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req)
+	if err != nil {
+		t.Fatalf("StartSubagent(retry) error = %v", err)
+	}
+	if snapshot.Handle != "reviewer" {
+		t.Fatalf("retry handle = %q, want released handle reviewer", snapshot.Handle)
+	}
+}
+
+func TestSubagentSpawnRetainsHandleWhenRunnerOutcomeIsUnknown(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "unknown-runner-handle"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newFileTaskStoreForTest(t)
+	runner := &sagaRunner{spawnErr: errors.New("runner outcome cannot be confirmed")}
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := taskapi.SubagentStartRequest{
+		SpawnID: "unknown-runner", Agent: "helper", Prompt: "review", Handle: "reviewer", Role: session.ParticipantRoleSidecar,
+	}
+	if _, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); !errorcode.Is(err, errorcode.UnknownOutcome) {
+		t.Fatalf("StartSubagent() error = %v, want unknown outcome", err)
+	}
+	taskID, err := subagentSpawnTaskID(active.SessionRef, req.SpawnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := store.Get(context.Background(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Handle != "reviewer" || entry.State != taskapi.StateUnknownOutcome || spawnPhaseOf(entry) != spawnPhaseUnknownOutcome {
+		t.Fatalf("unknown Spawn entry = %#v, want retained handle and unknown outcome", entry)
+	}
+
+	req.SpawnID = "different-spawn"
+	if _, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err == nil || !strings.Contains(err.Error(), "already in use") {
+		t.Fatalf("StartSubagent(reuse unknown handle) error = %v, want handle conflict", err)
 	}
 }
 

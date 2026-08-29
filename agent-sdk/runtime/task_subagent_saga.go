@@ -11,6 +11,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -30,6 +31,7 @@ const subagentSagaRecoveryTimeout = 5 * time.Second
 //	external_pending  — claimed for remote spawn; never blind-respawn on restart
 //	post_spawn        — remote spawn recorded; local attach/events still needed
 //	committed         — fully durable
+//	failed           — runner proved no child was created; handle released
 //	compensating / child_cancelled / compensated / unknown_outcome — failure path
 //
 // Legacy intermediate markers (participant_attached, canonical_committing,
@@ -41,6 +43,7 @@ const (
 	spawnPhaseExternalPending spawnPhase = "spawning"
 	spawnPhasePostSpawn       spawnPhase = "spawned"
 	spawnPhaseCommitted       spawnPhase = "committed"
+	spawnPhaseFailed          spawnPhase = "failed"
 	spawnPhaseCompensating    spawnPhase = "compensating"
 	spawnPhaseChildCancelled  spawnPhase = "child_cancelled"
 	spawnPhaseCompensated     spawnPhase = "compensated"
@@ -53,6 +56,7 @@ const (
 )
 
 const (
+	subagentSpawnFailedDiagnostic              = "subagent spawn failed before child creation"
 	subagentSpawnUnknownDiagnostic             = "subagent spawn outcome could not be confirmed"
 	subagentSpawnCompensationDiagnostic        = "subagent spawn could not be committed"
 	subagentSpawnCompensationUnknownDiagnostic = "subagent spawn rollback outcome could not be confirmed"
@@ -168,12 +172,19 @@ func (tm *taskRuntime) startSubagentTarget(
 		}
 		anchor, result, err := spawnSubagentTarget(ctx, runner, spawnContext, target, childPrompt)
 		if err != nil {
+			if subagent.SpawnProvenNotStarted(err) {
+				persistErr := tm.failSubagentSpawnBeforeCreation(ctx, outcome.Entry)
+				return taskapi.Snapshot{}, errors.Join(err, persistErr)
+			}
+			if !errorcode.Is(err, errorcode.UnknownOutcome) {
+				err = errorcode.Wrap(errorcode.UnknownOutcome, subagentSpawnUnknownDiagnostic, err)
+			}
 			outcome.Entry.State = taskapi.StateUnknownOutcome
 			outcome.Entry.Running = false
 			normalizeSubagentEntryResult(outcome.Entry, subagentSpawnUnknownDiagnostic)
 			setSpawnEntryPhase(outcome.Entry, spawnPhaseUnknownOutcome, subagentSpawnUnknownDiagnostic)
-			_ = tm.persistSpawnEntry(context.WithoutCancel(ctx), outcome.Entry)
-			return taskapi.Snapshot{}, err
+			persistErr := tm.persistSpawnEntry(context.WithoutCancel(ctx), outcome.Entry)
+			return taskapi.Snapshot{}, errors.Join(err, persistErr)
 		}
 		anchor = delegation.CloneAnchor(anchor)
 		result = delegation.CloneResult(result)
@@ -353,6 +364,9 @@ func (tm *taskRuntime) resumeExistingSpawn(ctx context.Context, existing *taskap
 	case spawnPhaseUnknownOutcome:
 		return spawnBeginOutcome{Entry: existing, Snapshot: snapshotFromTaskEntry(existing), Terminal: true},
 			fmt.Errorf("subagent spawn %q has unknown outcome; refusing blind respawn", spawnID)
+	case spawnPhaseFailed:
+		return spawnBeginOutcome{Entry: existing, Snapshot: snapshotFromTaskEntry(existing), Terminal: true},
+			fmt.Errorf("subagent spawn %q failed before child creation", spawnID)
 	case spawnPhaseCompensated:
 		return spawnBeginOutcome{Entry: existing, Snapshot: snapshotFromTaskEntry(existing), Terminal: true},
 			fmt.Errorf("subagent spawn %q was compensated", spawnID)
@@ -374,6 +388,33 @@ func (tm *taskRuntime) claimSpawnExternalEffect(ctx context.Context, entry *task
 		return spawnBeginOutcome{}, err
 	}
 	return spawnBeginOutcome{Entry: claimed, ShouldSpawn: true}, nil
+}
+
+func (tm *taskRuntime) failSubagentSpawnBeforeCreation(ctx context.Context, entry *taskapi.Entry) error {
+	if entry == nil {
+		return nil
+	}
+	failed := taskapi.CloneEntry(entry)
+	handle := firstNonEmpty(failed.Handle, taskSpecString(failed.Spec, "handle"), taskStringValue(failed.Metadata["handle"]))
+	failed.Handle = ""
+	failed.Running = false
+	failed.SupportsCancel = false
+	failed.State = taskapi.StateFailed
+	failed.UpdatedAt = tm.runtime.now()
+	delete(failed.Spec, "handle")
+	delete(failed.Metadata, "handle")
+	delete(failed.Result, "handle")
+	setSpawnEntryPhase(failed, spawnPhaseFailed, subagentSpawnFailedDiagnostic)
+	normalizeSubagentEntryResult(failed, subagentSpawnFailedDiagnostic)
+	if err := tm.persistSpawnEntry(context.WithoutCancel(ctx), failed); err != nil {
+		return err
+	}
+	tm.mu.Lock()
+	delete(tm.pending, strings.TrimSpace(failed.TaskID))
+	tm.mu.Unlock()
+	tm.discardSubagentCompletion(failed.TaskID)
+	tm.forgetTaskHandle(failed.Session.SessionID, handle)
+	return nil
 }
 
 func subagentSpawnRequestDigest(req taskapi.SubagentStartRequest, mode string, role session.ParticipantRole) (string, error) {
@@ -552,7 +593,7 @@ func spawnPhaseOfTask(task *subagentTask) spawnPhase {
 func normalizeSpawnPhase(raw string) spawnPhase {
 	switch phase := spawnPhase(strings.TrimSpace(raw)); phase {
 	case spawnPhaseIntent, spawnPhaseExternalPending, spawnPhasePostSpawn, spawnPhaseCommitted,
-		spawnPhaseCompensating, spawnPhaseChildCancelled, spawnPhaseCompensated, spawnPhaseUnknownOutcome:
+		spawnPhaseFailed, spawnPhaseCompensating, spawnPhaseChildCancelled, spawnPhaseCompensated, spawnPhaseUnknownOutcome:
 		return phase
 	case spawnPhaseLegacyParticipantAttached, spawnPhaseLegacyCanonicalCommitting, spawnPhaseLegacyCanonicalCommitted:
 		// Legacy pure-marker phases collapse to post_spawn for resume.

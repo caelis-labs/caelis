@@ -167,11 +167,11 @@ func (r *Runner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req del
 func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (delegation.Anchor, delegation.Result, error) {
 	req = delegation.CloneTargetRequest(req)
 	if err := delegation.ValidateTarget(req.Target); err != nil {
-		return delegation.Anchor{}, delegation.Result{}, err
+		return delegation.Anchor{}, delegation.Result{}, subagent.MarkSpawnNotStarted(err)
 	}
 	cfg, err := r.resolveSpawnConfig(ctx, spawn, req)
 	if err != nil {
-		return delegation.Anchor{}, delegation.Result{}, err
+		return delegation.Anchor{}, delegation.Result{}, subagent.MarkSpawnNotStarted(err)
 	}
 	agentID := r.stableAgentID(cfg.Name, spawn.TaskID)
 	role := spawn.Role
@@ -235,7 +235,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 	})
 	if err != nil {
 		childCancel()
-		return delegation.Anchor{}, delegation.Result{}, err
+		return delegation.Anchor{}, delegation.Result{}, subagent.MarkSpawnNotStarted(err)
 	}
 	run.mu.Lock()
 	run.client = acpClient
@@ -244,15 +244,15 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 	if err != nil {
 		setupErr := spawnedACPSetupError("initialize", cfg, err)
 		childCancel()
-		_ = acpClient.Close(ctx)
-		return delegation.Anchor{}, delegation.Result{}, setupErr
+		closeErr := acpcleanup.CloseClient(ctx, acpClient)
+		return delegation.Anchor{}, delegation.Result{}, markSpawnNotStartedAfterCleanup(setupErr, closeErr)
 	}
 	supportsSteering, err := client.SupportsSessionSteering(initialize)
 	if err != nil {
 		setupErr := spawnedACPSetupError("negotiate steering with", cfg, err)
 		childCancel()
 		closeErr := acpcleanup.CloseClient(ctx, acpClient)
-		return delegation.Anchor{}, delegation.Result{}, errors.Join(setupErr, closeErr)
+		return delegation.Anchor{}, delegation.Result{}, markSpawnNotStartedAfterCleanup(setupErr, closeErr)
 	}
 	authenticationMethods := authentication.Methods(initialize)
 	recovered, err := authentication.OpenNewSession(ctx, authentication.RecoveryConfig{
@@ -266,8 +266,11 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 	if err != nil {
 		setupErr := spawnedACPSetupError("open Session for", cfg, err)
 		childCancel()
-		_ = acpClient.Close(ctx)
-		return delegation.Anchor{}, delegation.Result{}, setupErr
+		closeErr := acpcleanup.CloseClient(ctx, acpClient)
+		if client.SubmissionProvenNotStarted(err) && closeErr == nil {
+			setupErr = subagent.MarkSpawnNotStarted(setupErr)
+		}
+		return delegation.Anchor{}, delegation.Result{}, errors.Join(setupErr, closeErr)
 	}
 	sessionResp := recovered.Value
 	sessionID := strings.TrimSpace(sessionResp.SessionID)
@@ -399,6 +402,13 @@ func spawnedACPSetupError(stage string, cfg AgentConfig, err error) error {
 		firstNonEmpty(strings.TrimSpace(cfg.Name), "unknown"),
 		err,
 	)
+}
+
+func markSpawnNotStartedAfterCleanup(setupErr error, cleanupErr error) error {
+	if cleanupErr != nil {
+		return errors.Join(setupErr, cleanupErr)
+	}
+	return subagent.MarkSpawnNotStarted(setupErr)
 }
 
 func (r *Runner) resolveSpawnConfig(ctx context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (AgentConfig, error) {

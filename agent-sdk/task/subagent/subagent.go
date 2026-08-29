@@ -2,11 +2,48 @@ package subagent
 
 import (
 	"context"
+	"errors"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 )
+
+type spawnNotStartedError struct {
+	err error
+}
+
+func (e *spawnNotStartedError) Error() string {
+	if e == nil || e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func (e *spawnNotStartedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+// MarkSpawnNotStarted records positive Runner proof that no child was created
+// and every producer that could publish activity or completion is quiescent.
+// It does not replace the underlying error's code or human-readable message.
+func MarkSpawnNotStarted(err error) error {
+	if err == nil || SpawnProvenNotStarted(err) {
+		return err
+	}
+	return &spawnNotStartedError{err: err}
+}
+
+// SpawnProvenNotStarted reports whether a Runner positively proved that a
+// failed Spawn created no child, has no handle-owning effect, and cannot publish
+// a later callback.
+func SpawnProvenNotStarted(err error) bool {
+	var marker *spawnNotStartedError
+	return errors.As(err, &marker)
+}
 
 // Registry exposes the spawnable ACP agents available to the runtime.
 // App-layer assembly is responsible for registering and wiring the actual ACP
@@ -42,7 +79,11 @@ type ApprovalRequester = agent.SubagentApprovalRequester
 type SpawnContext = agent.SubagentSpawnContext
 
 // Runner drives one spawned ACP child instance. The child itself is expected to
-// run in its own session and persist its own transcript independently.
+// run in its own session and persist its own transcript independently. Spawn
+// errors do not imply whether creation occurred. Implementations may use
+// MarkSpawnNotStarted only when they can positively prove that no child was
+// created and no producer can publish a later callback; every other error is
+// an indeterminate creation outcome.
 type Runner interface {
 	Spawn(context.Context, SpawnContext, delegation.Request) (delegation.Anchor, delegation.Result, error)
 	Wait(context.Context, delegation.Anchor, int) (delegation.Result, error)
