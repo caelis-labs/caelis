@@ -106,8 +106,10 @@ type HandoffControllerRequest struct {
 	ExpectedControllerEpoch string
 	Kind                    session.ControllerKind
 	Agent                   string
+	Placement               placement.Placement
 	Source                  string
 	Reason                  string
+	StateUpdate             session.AppendStateUpdate
 }
 
 // AttachParticipantRequest attaches one ACP-backed participant to the current

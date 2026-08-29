@@ -522,9 +522,7 @@ func (l *modelLookup) ResolveConfig(alias string) (ModelConfig, error) {
 	if key == "" {
 		return ModelConfig{}, fmt.Errorf("gatewayapp: model alias is required")
 	}
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	cfg, ok, err := l.resolveConfigLocked(key)
+	cfg, ok, err := l.ResolveConfigIfPresent(key)
 	if err != nil {
 		return ModelConfig{}, err
 	}
@@ -532,6 +530,21 @@ func (l *modelLookup) ResolveConfig(alias string) (ModelConfig, error) {
 		return ModelConfig{}, fmt.Errorf("gatewayapp: unknown model alias %q", alias)
 	}
 	return cfg, nil
+}
+
+// ResolveConfigIfPresent resolves one configured ID or unambiguous alias and
+// distinguishes an absent selection from an invalid ambiguous selection.
+func (l *modelLookup) ResolveConfigIfPresent(alias string) (ModelConfig, bool, error) {
+	if l == nil {
+		return ModelConfig{}, false, fmt.Errorf("gatewayapp: model lookup is nil")
+	}
+	key := strings.ToLower(strings.TrimSpace(alias))
+	if key == "" {
+		return ModelConfig{}, false, nil
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.resolveConfigLocked(key)
 }
 
 func (l *modelLookup) resolveConfigLocked(ref string) (ModelConfig, bool, error) {

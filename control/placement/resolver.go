@@ -214,6 +214,38 @@ func ResolveParticipant(snapshot Snapshot, rawProfileID, rawEffort string) (sdkp
 	return resolveACP(snapshot, profile, effort)
 }
 
+// ResolveProfile freezes one explicit product ModelProfile for main Session
+// execution. Unlike participant selection, both provider and ACP backends are
+// valid; Control still owns which profile the user selected.
+func ResolveProfile(snapshot Snapshot, rawProfileID, rawEffort string) (sdkplacement.Placement, error) {
+	if err := ValidateSnapshot(snapshot); err != nil {
+		return sdkplacement.Placement{}, err
+	}
+	profileID := modelprofile.NormalizeID(rawProfileID)
+	if profileID == "" {
+		return sdkplacement.Placement{}, fmt.Errorf("control/placement: model profile is required")
+	}
+	profile, ok := modelprofile.Lookup(snapshot.Profiles, profileID)
+	if !ok {
+		return sdkplacement.Placement{}, fmt.Errorf("control/placement: unknown model profile %q", profileID)
+	}
+	effort := modelcatalog.NormalizeReasoningEffort(rawEffort)
+	if effort == "" {
+		effort = profile.Effort.DefaultEffort
+	}
+	if !profile.SupportsEffort(effort) {
+		return sdkplacement.Placement{}, fmt.Errorf("control/placement: effort %q is not supported by profile %q", effort, profile.ID)
+	}
+	switch profile.Kind() {
+	case modelprofile.BackendProvider:
+		return resolveProvider(snapshot, profile, effort)
+	case modelprofile.BackendACP:
+		return resolveACP(snapshot, profile, effort)
+	default:
+		return sdkplacement.Placement{}, fmt.Errorf("control/placement: profile %q has no valid backend", profile.ID)
+	}
+}
+
 func defaultSystemProfile(profiles modelprofile.Configuration, handle agentbinding.Handle) (modelprofile.ModelProfile, error) {
 	profileID := modelprofile.NormalizeID(profiles.DefaultProfileID)
 	if profileID == "" {

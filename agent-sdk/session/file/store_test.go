@@ -1536,11 +1536,21 @@ func TestStoreBindControllerWithEventDoesNotSplitOnPrecommitFailure(t *testing.T
 	_, _, err = store.BindControllerWithEvent(ctx, session.BindControllerWithEventRequest{
 		SessionRef:       created.SessionRef,
 		ExpectedRevision: &zero,
+		TransactionID:    "handoff-atomic-state",
+		MutationDigest:   "handoff-atomic-state-v1",
 		Binding: session.ControllerBinding{
 			Kind: session.ControllerKindACP, ControllerID: "reviewer", EpochID: "epoch-1",
 		},
 		Event: &session.Event{
 			ID: "handoff-1", Type: session.EventTypeHandoff, Message: &message,
+		},
+		UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
+			next := session.CloneState(state)
+			if next == nil {
+				next = map[string]any{}
+			}
+			next["controller_profile"] = "acp:reviewer:main"
+			return next, nil
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "precommit failure") {
@@ -1553,6 +1563,13 @@ func TestStoreBindControllerWithEventDoesNotSplitOnPrecommitFailure(t *testing.T
 	}
 	if loaded.Session.Controller.ControllerID != "" || loaded.Session.Revision != 0 || len(loaded.Events) != 0 {
 		t.Fatalf("split handoff state after failure: session=%#v events=%#v", loaded.Session, loaded.Events)
+	}
+	state, err := store.SnapshotState(ctx, created.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state) != 0 {
+		t.Fatalf("split handoff product state after failure: %#v", state)
 	}
 }
 

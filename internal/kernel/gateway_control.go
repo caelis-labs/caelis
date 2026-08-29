@@ -30,8 +30,10 @@ func (g *Gateway) HandoffController(ctx context.Context, req HandoffControllerRe
 		ExpectedControllerEpoch: strings.TrimSpace(req.ExpectedControllerEpoch),
 		Kind:                    req.Kind,
 		Agent:                   strings.TrimSpace(req.Agent),
+		Placement:               req.Placement,
 		Source:                  strings.TrimSpace(req.Source),
 		Reason:                  strings.TrimSpace(req.Reason),
+		StateUpdate:             req.StateUpdate,
 	})
 	if err != nil {
 		return session.Session{}, err
@@ -140,6 +142,11 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 		g.mu.Unlock()
 		cancel()
 		return BeginTurnResult{}, hostClosingError()
+	}
+	if g.sessionTurnAdmissionBlockedLocked(session.SessionID) {
+		g.mu.Unlock()
+		cancel()
+		return BeginTurnResult{}, turnAdmissionBlockedError()
 	}
 	if _, ok := g.active[session.SessionID]; ok {
 		g.mu.Unlock()

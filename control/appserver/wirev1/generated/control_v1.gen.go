@@ -532,6 +532,7 @@ type ControllerBinding struct {
 	EpochId         *string        `json:"epoch_id,omitempty"`
 	Kind            ControllerKind `json:"kind,omitempty"`
 	Label           *string        `json:"label,omitempty"`
+	Placement       *Placement     `json:"placement,omitempty"`
 	RemoteSessionId *string        `json:"remote_session_id,omitempty"`
 	Source          *string        `json:"source,omitempty"`
 }
@@ -971,6 +972,25 @@ type PermissionOption struct {
 	Name     string       `json:"name"`
 	OptionId string       `json:"optionId"`
 }
+
+type Placement struct {
+	Agent                   *string        `json:"agent,omitempty"`
+	ConfigFingerprint       *string        `json:"config_fingerprint,omitempty"`
+	Fingerprint             *string        `json:"fingerprint,omitempty"`
+	Kind                    PlacementKind  `json:"kind,omitempty"`
+	Model                   *string        `json:"model,omitempty"`
+	ProfileId               *string        `json:"profile_id,omitempty"`
+	ReasoningEffort         *string        `json:"reasoning_effort,omitempty"`
+	ReasoningEffortConfigId *string        `json:"reasoning_effort_config_id,omitempty"`
+	SessionConfigValues     map[string]any `json:"session_config_values,omitempty"`
+}
+
+type PlacementKind string
+
+const (
+	PlacementKindAgent PlacementKind = "agent"
+	PlacementKindModel PlacementKind = "model"
+)
 
 type PlanEntry struct {
 	Content  string `json:"content"`

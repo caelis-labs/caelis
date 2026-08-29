@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
@@ -43,6 +44,62 @@ func TestRuntimeAgentAdvertisesSteeringOnlyWithAppServerBackend(t *testing.T) {
 	}
 	if _, err := direct.SteerSession(context.Background(), steeringwire.SessionSteeringRequest{}); !errors.Is(err, ErrCapabilityUnsupported) {
 		t.Fatalf("direct Runtime SteerSession error = %v, want capability unsupported", err)
+	}
+}
+
+func TestRuntimeAgentDoesNotEncodeControllerAuthorityInSessionMetadata(t *testing.T) {
+	t.Parallel()
+
+	client := &steeringTestSessionClient{
+		state: appserver.SessionState{
+			SessionID:    "session-inbound",
+			WorkspaceKey: "workspace-inbound",
+			Revision:     7,
+			Controller: session.ControllerBinding{
+				Kind: session.ControllerKindKernel, EpochID: "kernel-epoch", Source: "acp_ingress",
+			},
+		},
+		result: appserver.CommandResult{
+			Outcome:   appserver.OutcomeCommitted,
+			SessionID: "session-inbound",
+		},
+	}
+	agent := steeringTestAgent(client)
+	if _, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.createRequests) != 1 {
+		t.Fatalf("CreateSession calls = %d, want 1", len(client.createRequests))
+	}
+	if metadata := client.createRequests[0].Metadata; len(metadata) != 0 {
+		t.Fatalf("CreateSession metadata = %#v, want no controller authority hint", metadata)
+	}
+}
+
+func TestRuntimeAgentRejectsSessionWhenHostDoesNotAcceptIngressCredential(t *testing.T) {
+	t.Parallel()
+
+	client := &steeringTestSessionClient{
+		state: appserver.SessionState{
+			SessionID: "session-rejected", Revision: 3,
+			Controller: session.ControllerBinding{
+				Kind: session.ControllerKindACP, EpochID: "external-epoch", Source: "host_default",
+			},
+		},
+		result: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, SessionID: "session-rejected"},
+	}
+	agent := steeringTestAgent(client)
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	cancelRequest()
+	_, err := agent.NewSession(requestCtx, acpsdk.NewSessionRequest{Cwd: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "did not accept the ACP ingress credential") {
+		t.Fatalf("NewSession() error = %v, want rejected ingress credential", err)
+	}
+	if len(client.closeRequests) != 1 || client.closeRequests[0].SessionID != "session-rejected" {
+		t.Fatalf("CloseSession requests = %#v, want rejected Session cleanup", client.closeRequests)
+	}
+	if client.closeContextErrors[0] != nil {
+		t.Fatalf("CloseSession cleanup context error = %v, want cancellation-detached cleanup", client.closeContextErrors[0])
 	}
 }
 
@@ -221,11 +278,25 @@ func TestRuntimeAgentReportsOnlyCommittedSteeringAsInjected(t *testing.T) {
 
 type steeringTestSessionClient struct {
 	appserver.SessionClient
-	state           appserver.SessionState
-	currentRevision uint64
-	result          appserver.CommandResult
-	steerErr        error
-	steerRequests   []appserver.SteerRequest
+	state              appserver.SessionState
+	currentRevision    uint64
+	result             appserver.CommandResult
+	steerErr           error
+	createRequests     []appserver.CreateSessionRequest
+	closeRequests      []appserver.CloseSessionRequest
+	closeContextErrors []error
+	steerRequests      []appserver.SteerRequest
+}
+
+func (c *steeringTestSessionClient) CreateSession(_ context.Context, request appserver.CreateSessionRequest) (appserver.CommandResult, error) {
+	c.createRequests = append(c.createRequests, request)
+	return c.result, nil
+}
+
+func (c *steeringTestSessionClient) CloseSession(ctx context.Context, request appserver.CloseSessionRequest) (appserver.CommandResult, error) {
+	c.closeRequests = append(c.closeRequests, request)
+	c.closeContextErrors = append(c.closeContextErrors, ctx.Err())
+	return c.result, nil
 }
 
 func (c *steeringTestSessionClient) InspectSession(context.Context, appserver.StateRequest) (appserver.SessionState, error) {

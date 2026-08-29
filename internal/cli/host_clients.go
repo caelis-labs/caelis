@@ -38,17 +38,20 @@ const (
 )
 
 type productClientOptions struct {
-	Mode               productClientMode
-	ControlURL         string
-	Token              string
-	TokenFile          string
-	WorkspaceKey       string
-	WorkspaceCWD       string
-	UserID             string
-	AppName            string
-	StoreDir           string
-	ListenAddress      string
-	HTTPClient         *http.Client
+	Mode          productClientMode
+	ControlURL    string
+	Token         string
+	TokenFile     string
+	WorkspaceKey  string
+	WorkspaceCWD  string
+	UserID        string
+	AppName       string
+	StoreDir      string
+	ListenAddress string
+	HTTPClient    *http.Client
+	// ACPIngress selects the Host-issued ACP presentation credential. The role
+	// is bound by the Host authenticator and never derived from request data.
+	ACPIngress         bool
 	LaunchLocalService func(localHostStartRequest) (servicelifecycle.LaunchedProcess, error)
 	ServiceInstallDir  string
 	StartupTimeout     time.Duration
@@ -261,7 +264,11 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 		_ = ownership.Close()
 		return nil, err
 	}
-	clients, err := appServer.Bind(appserver.Principal{ID: stack.UserID()})
+	principal := appserver.Principal{ID: stack.UserID()}
+	if options.ACPIngress {
+		principal.Roles = []string{appserver.RoleACPIngress}
+	}
+	clients, err := appServer.Bind(principal)
 	if err != nil {
 		cleanupChildCredentialOnError()
 		closeEndpoint()
@@ -413,7 +420,11 @@ func resolveControlToken(options productClientOptions) (string, error) {
 	}
 	tokenFile := strings.TrimSpace(options.TokenFile)
 	if tokenFile == "" {
-		tokenFile = controlserver.DefaultTokenFile(options.StoreDir)
+		if options.ACPIngress {
+			tokenFile = controlserver.DefaultACPIngressTokenFile(options.StoreDir)
+		} else {
+			tokenFile = controlserver.DefaultTokenFile(options.StoreDir)
+		}
 	}
 	token, err := controlserver.LoadBearerToken(tokenFile)
 	if err != nil {

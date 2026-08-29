@@ -151,6 +151,29 @@ func TestParticipantResolvesExplicitACPProfileWithoutHandleBinding(t *testing.T)
 	}
 }
 
+func TestResolveProfileSupportsProviderAndACPMainExecution(t *testing.T) {
+	snapshot := testSnapshot()
+	provider, err := ResolveProfile(snapshot, "provider:main", "low")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.Kind != sdkplacement.KindModel || provider.ProfileID != "provider:main" || provider.ReasoningEffort != "low" {
+		t.Fatalf("ResolveProfile(provider) = %#v", provider)
+	}
+	acp, err := ResolveProfile(snapshot, "acp:claude:opus", "very-high")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acp.Kind != sdkplacement.KindAgent || acp.Agent != "claude" || acp.Model != "Opus-V4" || acp.ReasoningEffort != "xhigh" {
+		t.Fatalf("ResolveProfile(ACP) = %#v", acp)
+	}
+	for _, placed := range []sdkplacement.Placement{provider, acp} {
+		if err := sdkplacement.ValidateSealed(placed); err != nil {
+			t.Fatalf("ValidateSealed(%#v) = %v", placed, err)
+		}
+	}
+}
+
 func TestParticipantRejectsProviderProfileAndMissingSelection(t *testing.T) {
 	snapshot := testSnapshot()
 	for _, selection := range []struct {

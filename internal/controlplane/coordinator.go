@@ -123,9 +123,11 @@ func (c *Coordinator) ReattachController(ctx context.Context, req controller.Rec
 		SessionRef:     ref,
 		Session:        activeSession,
 		Agent:          agentName,
+		Placement:      binding.Placement,
 		Source:         "controller_rehydrate",
 		Reason:         "controller process rehydrate",
 		Context:        route.Context,
+		FreshContext:   route.FreshContext,
 		ContextSyncSeq: route.SyncSeq,
 	})
 	if err != nil {
@@ -230,9 +232,11 @@ func (c *Coordinator) handoffController(ctx context.Context, req agent.HandoffCo
 			SessionRef:     ref,
 			Session:        activeSession,
 			Agent:          strings.TrimSpace(req.Agent),
+			Placement:      req.Placement,
 			Source:         strings.TrimSpace(req.Source),
 			Reason:         strings.TrimSpace(req.Reason),
 			Context:        route.Context,
+			FreshContext:   route.FreshContext,
 			ContextSyncSeq: route.SyncSeq,
 		})
 		if err != nil {
@@ -257,8 +261,11 @@ func (c *Coordinator) handoffController(ctx context.Context, req agent.HandoffCo
 		SessionRef:       ref,
 		ExpectedRevision: &expected,
 		MutationGuard:    session.ControlMutationGuardWithRuntimeFence(ctx, session.ControlMutationPurposeHandoff),
+		TransactionID:    "controller-handoff-state-" + strings.TrimSpace(to.EpochID),
+		MutationDigest:   "controller-handoff-state-v1",
 		Binding:          to,
 		Event:            handoffEvent(from, to, strings.TrimSpace(req.Reason), c.clock()),
+		UpdateState:      req.StateUpdate,
 	})
 	if err == nil {
 		return updated, nil
@@ -309,9 +316,11 @@ func (c *Coordinator) reactivatePreviousController(ctx context.Context, ref sess
 		SessionRef:     ref,
 		Session:        activeSession,
 		Agent:          agentName,
+		Placement:      from.Placement,
 		Source:         "handoff_rollback",
 		Reason:         "durable handoff commit failed",
 		Context:        route.Context,
+		FreshContext:   route.FreshContext,
 		ContextSyncSeq: route.SyncSeq,
 	})
 	return err
@@ -367,7 +376,8 @@ func sameControllerBinding(left session.ControllerBinding, right session.Control
 		strings.TrimSpace(left.ControllerID) == strings.TrimSpace(right.ControllerID) &&
 		strings.TrimSpace(left.AgentName) == strings.TrimSpace(right.AgentName) &&
 		strings.TrimSpace(left.EpochID) == strings.TrimSpace(right.EpochID) &&
-		strings.TrimSpace(left.RemoteSessionID) == strings.TrimSpace(right.RemoteSessionID)
+		strings.TrimSpace(left.RemoteSessionID) == strings.TrimSpace(right.RemoteSessionID) &&
+		strings.TrimSpace(left.Placement.Fingerprint) == strings.TrimSpace(right.Placement.Fingerprint)
 }
 
 func handoffEvent(from session.ControllerBinding, to session.ControllerBinding, reason string, now time.Time) *session.Event {
@@ -380,6 +390,12 @@ func handoffEvent(from session.ControllerBinding, to session.ControllerBinding, 
 			"kind": to.Kind, "id": strings.TrimSpace(to.ControllerID), "agent": strings.TrimSpace(to.AgentName),
 			"remote_session_id": strings.TrimSpace(to.RemoteSessionID), "context_sync_seq": to.ContextSyncSeq,
 		},
+	}
+	if profileID := strings.TrimSpace(from.Placement.ProfileID); profileID != "" {
+		meta["from"].(map[string]any)["profile_id"] = profileID
+	}
+	if profileID := strings.TrimSpace(to.Placement.ProfileID); profileID != "" {
+		meta["to"].(map[string]any)["profile_id"] = profileID
 	}
 	if reason = strings.TrimSpace(reason); reason != "" {
 		meta["reason"] = reason

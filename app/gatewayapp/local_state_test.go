@@ -74,6 +74,7 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, alias); err != nil {
 		t.Fatalf("DeleteModel() error = %v", err)
 	}
+	fallbackAlias := stack.composition.lookup.DefaultAlias()
 	current = mustCurrentSession(t, stack, activeSession.SessionID)
 	revision = current.Revision
 	modeResult, err = stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SessionModeRequest{
@@ -88,8 +89,8 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() after reset error = %v", err)
 	}
-	if state.ModelAlias != "" {
-		t.Fatalf("model alias after delete = %q, want empty", state.ModelAlias)
+	if state.ModelAlias != fallbackAlias {
+		t.Fatalf("model alias after delete = %q, want fallback %q", state.ModelAlias, fallbackAlias)
 	}
 	if state.SessionMode != "auto-review" {
 		t.Fatalf("session mode after reset = %q, want auto-review", state.SessionMode)

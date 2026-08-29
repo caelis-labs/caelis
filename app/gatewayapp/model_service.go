@@ -31,6 +31,29 @@ func (s *runtimeComposition) setRuntimeDefaultModelFromLookup() {
 	s.setRuntimeModel(profileID, cfg)
 }
 
+func (s *runtimeComposition) setRuntimeDefaultProfile(profiles modelprofile.Configuration) {
+	if s == nil {
+		return
+	}
+	profiles = modelprofile.NormalizeConfiguration(profiles)
+	profile, ok := modelprofile.Lookup(profiles, profiles.DefaultProfileID)
+	if !ok {
+		s.setRuntimeModel("", ModelConfig{})
+		return
+	}
+	cfg := ModelConfig{}
+	if profile.Kind() == modelprofile.BackendProvider && s.lookup != nil {
+		cfg, _ = s.lookup.Config(profile.Backend.Provider.ModelConfigID)
+		cfg.ReasoningEffort = profiles.DefaultEffort
+	}
+	s.setRuntimeModel(profile.ID, cfg)
+	if s.process != nil && s.process.config != nil {
+		runtimeCfg := s.runtimeProcessSnapshot().runtime
+		runtimeCfg.ModelProfileEffort = profiles.DefaultEffort
+		s.process.config.setRuntime(runtimeCfg)
+	}
+}
+
 func (s *runtimeComposition) setRuntimeModel(profileID string, cfg ModelConfig) {
 	if s == nil || s.process == nil || s.process.config == nil {
 		return
@@ -63,7 +86,12 @@ func (s *runtimeComposition) ListModelChoices(ctx context.Context, ref session.S
 	if s.lookup == nil {
 		return nil, fmt.Errorf("gatewayapp: model lookup unavailable")
 	}
-	choices := make([]ModelChoice, 0, len(s.lookup.ListModelChoices())+1)
+	snapshot, err := s.placementSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	profiles := modelprofile.NormalizeConfiguration(snapshot.placement.Profiles)
+	choices := make([]ModelChoice, 0, len(profiles.Profiles)+1)
 	if strings.TrimSpace(ref.SessionID) != "" {
 		state, err := s.sessions.SnapshotState(ctx, ref)
 		if err != nil {
@@ -71,12 +99,64 @@ func (s *runtimeComposition) ListModelChoices(ctx context.Context, ref session.S
 		}
 		if modelRef := kernelimpl.CurrentModelAlias(state); modelRef != "" {
 			if cfg, ok := s.lookup.Config(modelRef); ok {
-				choices = append(choices, modelChoiceFromConfig(cfg))
+				choice := modelChoiceFromConfig(cfg)
+				choice.ProfileID = modelprofile.BuildProviderID(cfg.ID)
+				choices = append(choices, choice)
 			}
 		}
 	}
-	choices = append(choices, s.lookup.ListModelChoices()...)
+	ordered := profiles.Profiles
+	if profiles.DefaultProfileID != "" {
+		ordered = make([]modelprofile.ModelProfile, 0, len(profiles.Profiles))
+		if selected, ok := modelprofile.Lookup(profiles, profiles.DefaultProfileID); ok {
+			ordered = append(ordered, selected)
+		}
+		for _, profile := range profiles.Profiles {
+			if profile.ID != profiles.DefaultProfileID {
+				ordered = append(ordered, profile)
+			}
+		}
+	}
+	for _, profile := range ordered {
+		switch profile.Kind() {
+		case modelprofile.BackendProvider:
+			cfg, ok := s.lookup.Config(profile.Backend.Provider.ModelConfigID)
+			if !ok {
+				continue
+			}
+			choice := modelChoiceFromConfig(cfg)
+			choice.ProfileID = profile.ID
+			choice.ReasoningLevels = modelProfileEfforts(profile)
+			choices = append(choices, choice)
+		case modelprofile.BackendACP:
+			choices = append(choices, ModelChoice{
+				ID:              profile.ID,
+				Alias:           profile.DisplayName,
+				ProfileID:       profile.ID,
+				Backend:         string(modelprofile.BackendACP),
+				Provider:        profile.Backend.ACP.AgentID,
+				Model:           profile.Backend.ACP.RemoteModelID,
+				Detail:          fmt.Sprintf("ACP Agent %s · %s", profile.Backend.ACP.AgentID, profile.Backend.ACP.RemoteModelID),
+				ReasoningLevels: modelProfileEfforts(profile),
+			})
+		}
+	}
+	// Keep a bounded compatibility path for provider configs created before the
+	// unified ModelProfile catalog. Canonical profile choices win deduplication.
+	for _, choice := range s.lookup.ListModelChoices() {
+		choice.ProfileID = modelprofile.BuildProviderID(choice.ID)
+		choices = append(choices, choice)
+	}
 	return dedupeModelChoices(choices), nil
+}
+
+func modelProfileEfforts(profile modelprofile.ModelProfile) []string {
+	profile = modelprofile.Normalize(profile)
+	levels := make([]string, 0, len(profile.Effort.Choices))
+	for _, choice := range profile.Effort.Choices {
+		levels = append(levels, choice.Canonical)
+	}
+	return dedupeNonEmptyStrings(levels)
 }
 
 // HasReusableProviderAuth reports whether a configured provider endpoint still
@@ -106,12 +186,37 @@ func (s *runtimeComposition) DefaultModelAlias() string {
 	if s == nil || s.lookup == nil {
 		return ""
 	}
+	s.placementCacheMu.RLock()
+	cached := s.placementCache
+	s.placementCacheMu.RUnlock()
+	if cached != nil {
+		profiles := modelprofile.NormalizeConfiguration(cached.placement.Profiles)
+		profile, ok := modelprofile.Lookup(profiles, profiles.DefaultProfileID)
+		if !ok {
+			return ""
+		}
+		if profile.Kind() == modelprofile.BackendACP {
+			return profile.DisplayName
+		}
+		if profile.Backend.Provider != nil {
+			if configured, ok := s.lookup.Config(profile.Backend.Provider.ModelConfigID); ok {
+				return configured.Alias
+			}
+		}
+		return ""
+	}
 	return s.lookup.DefaultAlias()
 }
 
 func (s *runtimeComposition) DefaultModelEffort() string {
 	if s == nil || s.lookup == nil {
 		return ""
+	}
+	s.placementCacheMu.RLock()
+	cached := s.placementCache
+	s.placementCacheMu.RUnlock()
+	if cached != nil {
+		return modelprofile.NormalizeConfiguration(cached.placement.Profiles).DefaultEffort
 	}
 	return s.lookup.DefaultEffort()
 }
@@ -124,6 +229,7 @@ func (s *runtimeComposition) EffectiveModelAlias() string {
 		return ""
 	}
 	runtimeModel := s.runtimeProcessSnapshot().runtime.Model
+	runtimeProfileID := s.runtimeProcessSnapshot().runtime.ModelProfileID
 	if alias := strings.TrimSpace(runtimeModel.Alias); alias != "" {
 		return alias
 	}
@@ -132,7 +238,34 @@ func (s *runtimeComposition) EffectiveModelAlias() string {
 			return strings.TrimSpace(cfg.Alias)
 		}
 	}
+	if profile, ok := s.cachedModelProfile(runtimeProfileID); ok {
+		return profile.DisplayName
+	}
 	return s.DefaultModelAlias()
+}
+
+func (s *runtimeComposition) cachedDefaultProfileID() string {
+	if s == nil {
+		return ""
+	}
+	s.placementCacheMu.RLock()
+	defer s.placementCacheMu.RUnlock()
+	if s.placementCache == nil {
+		return ""
+	}
+	return s.placementCache.placement.Profiles.DefaultProfileID
+}
+
+func (s *runtimeComposition) cachedModelProfile(profileID string) (modelprofile.ModelProfile, bool) {
+	if s == nil {
+		return modelprofile.ModelProfile{}, false
+	}
+	s.placementCacheMu.RLock()
+	defer s.placementCacheMu.RUnlock()
+	if s.placementCache == nil {
+		return modelprofile.ModelProfile{}, false
+	}
+	return modelprofile.Lookup(s.placementCache.placement.Profiles, profileID)
 }
 
 // EffectiveModelEffort returns the reasoning effort selected for new work in

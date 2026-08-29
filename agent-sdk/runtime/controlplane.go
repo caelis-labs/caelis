@@ -187,16 +187,17 @@ func (r *Runtime) executeACPControllerTurn(
 		Mode:              r.policyMode(req.AgentSpec),
 		ApprovalRequester: controllerApprovalRequester{runtime: r, requester: req.ApprovalRequester, sessionRef: ref, session: activeSession, runID: runID, turnID: turnID},
 	}
-	contextTransfer, contextSeq, err := r.buildControllerTurnContext(ctx, activeSession, ref, turnID)
+	contextRoute, err := r.buildControllerTurnContext(ctx, activeSession, ref, turnID)
 	if err != nil {
 		terminalErr = err
 		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
 		handle.publishError(err)
 		return
 	}
-	if contextSeq > activeSession.Controller.ContextSyncSeq {
-		turnReq.Context = contextTransfer
-		turnReq.ContextSyncSeq = contextSeq
+	turnReq.FreshContext = contextRoute.FreshContext
+	turnReq.ContextSyncSeq = contextRoute.SyncSeq
+	if contextRoute.SyncSeq > activeSession.Controller.ContextSyncSeq {
+		turnReq.Context = contextRoute.Context
 	}
 	var turnResult controller.TurnResult
 	err = r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "acp", ""), func(runCtx context.Context) error {
@@ -214,8 +215,11 @@ func (r *Runtime) executeACPControllerTurn(
 				})
 				if turnErr == nil {
 					turnReq.Session = activeSession
-					turnReq.Context, turnReq.ContextSyncSeq, turnErr = r.buildControllerTurnContext(turnCtx, activeSession, ref, turnID)
+					contextRoute, turnErr = r.buildControllerTurnContext(turnCtx, activeSession, ref, turnID)
 					if turnErr == nil {
+						turnReq.Context = contextRoute.Context
+						turnReq.FreshContext = contextRoute.FreshContext
+						turnReq.ContextSyncSeq = contextRoute.SyncSeq
 						turnResult, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
 					}
 				}

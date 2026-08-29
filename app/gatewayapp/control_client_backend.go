@@ -267,10 +267,21 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		appserver.SessionPresentationConfigRequest:
 		return s.executeSessionConfigurationCommand(ctx, action, req)
 	case appserver.CreateSessionRequest:
+		var controller session.ControllerBinding
+		if principal.HasRole(appserver.RoleACPIngress) {
+			controller = initialKernelControllerBinding("acp_ingress")
+		} else {
+			var controllerErr error
+			controller, controllerErr = s.initialSessionController(ctx)
+			if controllerErr != nil {
+				return sessionCommandResult(session.Session{}), classifyControlBackendError(controllerErr)
+			}
+		}
 		created, err := s.sessions.StartSession(ctx, session.StartSessionRequest{
 			AppName: s.authorities.appName, UserID: strings.TrimSpace(principal.ID),
 			Workspace:          session.WorkspaceRef{Key: strings.TrimSpace(req.WorkspaceKey), CWD: strings.TrimSpace(req.CWD)},
 			PreferredSessionID: strings.TrimSpace(req.PreferredSessionID), Title: strings.TrimSpace(req.Title), Metadata: req.Metadata,
+			Controller: controller,
 		})
 		return sessionCommandResult(created), classifyControlBackendError(err)
 	case appserver.CloseSessionRequest:
@@ -555,7 +566,6 @@ func controlCommandSessionID(request any) string {
 func controlActionConfiguresSession(action appserver.Action) bool {
 	switch action {
 	case appserver.ActionSessionApprovalMode,
-		appserver.ActionSessionModel,
 		appserver.ActionSessionControllerMode,
 		appserver.ActionSessionPresentationMode,
 		appserver.ActionSessionPresentationConfig:
@@ -568,6 +578,7 @@ func controlActionConfiguresSession(action appserver.Action) bool {
 func controlActionActivatesSessionRuntime(action appserver.Action) bool {
 	switch action {
 	case appserver.ActionPrompt,
+		appserver.ActionSessionModel,
 		appserver.ActionSessionCompact,
 		appserver.ActionParticipantAttach,
 		appserver.ActionParticipantStart,

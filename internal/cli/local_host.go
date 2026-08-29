@@ -181,7 +181,15 @@ func attachManagedHostClient(ctx context.Context, options productClientOptions) 
 	if err := policy.Accept(inspection.Info); err != nil {
 		return nil, controlserver.DiscoveryRecord{}, &managedCompatibilityError{cause: err}
 	}
-	remote, err := newManagedHTTPClient(inspection.Record, inspection.Token, options, policy)
+	token := inspection.Token
+	if options.ACPIngress {
+		var err error
+		token, err = controlserver.LoadBearerToken(controlserver.DefaultACPIngressTokenFile(options.StoreDir))
+		if err != nil {
+			return nil, controlserver.DiscoveryRecord{}, fmt.Errorf("cli: load ACP ingress credential: %w", err)
+		}
+	}
+	remote, err := newManagedHTTPClient(inspection.Record, token, options, policy)
 	if err != nil {
 		return nil, controlserver.DiscoveryRecord{}, err
 	}

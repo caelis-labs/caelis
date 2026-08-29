@@ -1090,10 +1090,13 @@ func TestResetSessionDetachesActiveTurnWithoutCancellingHostWork(t *testing.T) {
 	}
 }
 
-func TestTUIResumeRejectsRetiredExternalMainControllerSession(t *testing.T) {
+func TestTUIResumeAcceptsExternalMainControllerSession(t *testing.T) {
 	subscription := newSessionClientAdapterTestSubscription()
 	client := &sessionClientAdapterTestClient{
 		subscription: subscription,
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
+			newSessionClientAdapterTestSubscription(),
+		},
 		state: appserver.SessionState{
 			SessionID: "retired-controller-session",
 			Controller: session.ControllerBinding{
@@ -1103,18 +1106,18 @@ func TestTUIResumeRejectsRetiredExternalMainControllerSession(t *testing.T) {
 	}
 	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "", "cli-tui")
 	resumed, err := adapter.ResumeSession(context.Background(), "retired-controller-session")
-	if err == nil || !strings.Contains(err.Error(), "no longer supported in the TUI") {
-		t.Fatalf("ResumeSession(retired ACP controller) = %#v, %v", resumed, err)
+	if err != nil {
+		t.Fatalf("ResumeSession(ACP controller) error = %v", err)
 	}
-	if adapter.clientSessionID() != "" {
-		t.Fatalf("retired ACP controller Session became active: %q", adapter.clientSessionID())
+	if resumed.SessionID != "retired-controller-session" || adapter.clientSessionID() != "retired-controller-session" {
+		t.Fatalf("ResumeSession(ACP controller) = %#v active=%q", resumed, adapter.clientSessionID())
 	}
-	if !subscription.closed {
-		t.Fatal("rejected reconnect subscription was not closed")
+	if err := resumed.Reconnect.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestTUIWorkRejectsRetiredExternalMainControllerSession(t *testing.T) {
+func TestTUIWorkAcceptsExternalMainControllerSession(t *testing.T) {
 	tests := []struct {
 		name              string
 		configuredID      string
@@ -1130,8 +1133,14 @@ func TestTUIWorkRejectsRetiredExternalMainControllerSession(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			continuation := newSessionClientAdapterTestSubscription()
 			client := &sessionClientAdapterTestClient{
 				createSessionID: test.createSessionID,
+				subscription:    continuation,
+				reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
+					newSessionClientAdapterTestSubscription(),
+					continuation,
+				},
 				state: appserver.SessionState{
 					SessionID: "retired-controller-session",
 					Controller: session.ControllerBinding{
@@ -1141,24 +1150,21 @@ func TestTUIWorkRejectsRetiredExternalMainControllerSession(t *testing.T) {
 			}
 			adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, test.configuredID, "cli-tui")
 			adapter.preferredID = test.preferredID
-			turn, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "start work"})
-			if err == nil || !strings.Contains(err.Error(), "no longer supported in the TUI") {
-				t.Fatalf("Submit(retired ACP controller) = %#v, %v", turn, err)
+			state, err := adapter.ensureSessionForMainPrompt(context.Background())
+			if err != nil {
+				t.Fatalf("ensureSessionForMainPrompt(ACP controller) error = %v", err)
 			}
-			if adapter.clientSessionID() != test.configuredID {
-				t.Fatalf("rejected ACP controller changed active Session: %q, want %q", adapter.clientSessionID(), test.configuredID)
+			if state.Controller.Kind != session.ControllerKindACP || adapter.clientSessionID() != "retired-controller-session" {
+				t.Fatalf("accepted ACP state=%#v active=%q", state, adapter.clientSessionID())
 			}
 			if got := client.create.OperationID != ""; got != test.wantCreateRequest {
 				t.Fatalf("CreateSession called = %v, want %v: %#v", got, test.wantCreateRequest, client.create)
-			}
-			if client.prompt.OperationID != "" {
-				t.Fatalf("rejected ACP controller started a prompt: %#v", client.prompt)
 			}
 		})
 	}
 }
 
-func TestTUISelectedRetiredExternalMainControllerRejectsParticipantContinuationAndMutation(t *testing.T) {
+func TestTUISelectedExternalMainControllerAllowsModelMutation(t *testing.T) {
 	client := &sessionClientAdapterTestClient{state: appserver.SessionState{
 		SessionID: "retired-controller-session",
 		Controller: session.ControllerBinding{
@@ -1174,24 +1180,11 @@ func TestTUISelectedRetiredExternalMainControllerRejectsParticipantContinuationA
 	configuration := &modelConfigurationClientProbe{}
 	adapter.configClient = configuration
 
-	turn, err := adapter.ContinueAgentRun(context.Background(), "@side", "continue", nil)
-	if err == nil || !strings.Contains(err.Error(), "no longer supported in the TUI") {
-		t.Fatalf("ContinueAgentRun(retired ACP controller) = %#v, %v", turn, err)
+	if _, err := adapter.UseModel(context.Background(), "ollama/late"); err != nil {
+		t.Fatalf("UseModel(ACP controller) error = %v", err)
 	}
-	if participants.prompt.OperationID != "" {
-		t.Fatalf("rejected ACP controller prompted a participant: %#v", participants.prompt)
-	}
-	if _, err := adapter.Compact(context.Background()); err == nil || !strings.Contains(err.Error(), "no longer supported in the TUI") {
-		t.Fatalf("Compact(retired ACP controller) error = %v", err)
-	}
-	if client.compact.OperationID != "" {
-		t.Fatalf("rejected ACP controller compacted the Session: %#v", client.compact)
-	}
-	if _, err := adapter.UseModel(context.Background(), "ollama/late"); err == nil || !strings.Contains(err.Error(), "no longer supported in the TUI") {
-		t.Fatalf("UseModel(retired ACP controller) error = %v", err)
-	}
-	if configuration.sessionCalls != 0 || configuration.hostCalls != 0 {
-		t.Fatalf("rejected ACP controller changed a model: %#v", configuration.sessionRequest)
+	if configuration.sessionCalls != 1 || configuration.hostCalls != 0 {
+		t.Fatalf("ACP controller model mutation calls = session %d host %d", configuration.sessionCalls, configuration.hostCalls)
 	}
 }
 

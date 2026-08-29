@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -130,15 +131,25 @@ func (s *controlCommandBackend) useHostModelAtRevision(ctx context.Context, alia
 		return result, err
 	}
 	result.Revision = doc.ConfigurationRevision
-	cfg, err := candidate.ResolveConfig(alias)
-	if err != nil {
-		return result, errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
-	}
 	reasoning := strings.TrimSpace(reasoningEffort)
-	if reasoning != "" && !modelConfigSupportsReasoningEffort(cfg, reasoning) {
-		return result, errorcode.New(errorcode.InvalidArgument, fmt.Sprintf("gatewayapp: model %q does not support reasoning level %q", alias, reasoning))
+	profile, profileSelected := modelprofile.Lookup(doc.ModelProfiles, alias)
+	if !profileSelected {
+		cfg, resolveErr := candidate.ResolveConfig(alias)
+		if resolveErr != nil {
+			return result, errorcode.Wrap(errorcode.InvalidArgument, resolveErr.Error(), resolveErr)
+		}
+		profile, profileSelected = modelprofile.Lookup(doc.ModelProfiles, modelprofile.BuildProviderID(cfg.ID))
+		if !profileSelected {
+			return result, errorcode.New(errorcode.InvalidArgument, fmt.Sprintf("gatewayapp: model %q has no selectable profile", alias))
+		}
 	}
-	doc.ModelProfiles, err = modelprofile.SelectDefault(doc.ModelProfiles, modelprofile.BuildProviderID(cfg.ID), reasoning)
+	if reasoning == "" {
+		reasoning = profile.Effort.DefaultEffort
+	}
+	if !profile.SupportsEffort(reasoning) {
+		return result, errorcode.New(errorcode.InvalidArgument, fmt.Sprintf("gatewayapp: model profile %q does not support reasoning level %q", profile.ID, reasoning))
+	}
+	doc.ModelProfiles, err = modelprofile.SelectDefault(doc.ModelProfiles, profile.ID, reasoning)
 	if err != nil {
 		return result, err
 	}
@@ -315,7 +326,11 @@ func (s *controlCommandBackend) observeCommittedModelConfiguration(ctx context.C
 	if pins := s.composition.authorities.sessionModelPins; pins != nil {
 		pins.syncConfiguredModels(candidate.Snapshot().Configs)
 	}
-	s.composition.setRuntimeDefaultModelFromLookup()
+	s.composition.invalidateOwnPlacementSnapshot()
+	if _, err := s.composition.placementSnapshot(reconcileCtx); err != nil {
+		return fmt.Errorf("gatewayapp: refresh committed model profile catalog: %w", err)
+	}
+	s.composition.setRuntimeDefaultProfile(doc.ModelProfiles)
 	if gw := s.composition.currentGateway(); gw != nil && gw.Resolver() != nil {
 		gw.Resolver().SetModelLookup(s.composition.lookup, s.composition.lookup.DefaultID())
 	}
@@ -331,8 +346,11 @@ func (s *controlCommandBackend) reconcileDeletedModelProfile(ctx context.Context
 	if s == nil || s.composition.authorities.store == nil {
 		return errors.New("gatewayapp: model configuration is unavailable after deletion")
 	}
-	reconcileCtx, cancel := context.WithTimeout(context.WithoutCancel(contextOrBackground(ctx)), 5*time.Second)
-	defer cancel()
+	// The provider removal is already committed. Complete revocation for every
+	// live and durable Session even when the initiating client disconnects; a
+	// bounded best-effort pass could otherwise leave a loaded Runtime presenting
+	// or resolving the deleted model indefinitely.
+	reconcileCtx := context.WithoutCancel(contextOrBackground(ctx))
 	runtimes := s.runtimeRegistry()
 	if runtimes != nil {
 		var unlock func()
@@ -366,16 +384,9 @@ func (s *controlCommandBackend) reconcileDeletedModelProfile(ctx context.Context
 					reconcileErr = errors.Join(reconcileErr, fmt.Errorf("Session %q Runtime: %w", runtime.sessionID, err))
 					continue
 				}
-				active, err := runtimes.sessionService.Session(reconcileCtx, session.SessionRef{SessionID: runtime.sessionID})
-				if err != nil {
-					reconcileErr = errors.Join(reconcileErr, fmt.Errorf("Session %q state: %w", runtime.sessionID, err))
-					continue
-				}
-				if _, err := s.modelRecovery.repairMissingSessionModelSelection(reconcileCtx, runtimes.sessionService, active); err != nil {
-					reconcileErr = errors.Join(reconcileErr, fmt.Errorf("Session %q model selection: %w", runtime.sessionID, err))
-				}
 			}
 		}
+		reconcileErr = errors.Join(reconcileErr, s.repairDeletedModelSessionSelections(reconcileCtx))
 		observed, err := s.composition.authorities.store.LoadContext(reconcileCtx)
 		if err != nil {
 			return errors.Join(reconcileErr, fmt.Errorf("gatewayapp: verify canonical model configuration after deletion: %w", err))
@@ -385,6 +396,47 @@ func (s *controlCommandBackend) reconcileDeletedModelProfile(ctx context.Context
 		}
 	}
 	return errors.New("gatewayapp: model removal reconciliation did not converge on a stable configuration revision")
+}
+
+func (s *controlCommandBackend) repairDeletedModelSessionSelections(ctx context.Context) error {
+	if s == nil || s.composition == nil || s.composition.sessions == nil || s.modelRecovery == nil {
+		return errors.New("gatewayapp: Session model reconciliation is unavailable")
+	}
+	var reconcileErr error
+	cursor := ""
+	for {
+		listed, err := s.composition.sessions.ListSessions(ctx, session.ListSessionsRequest{
+			AppName: s.composition.authorities.appName,
+			UserID:  s.composition.authorities.userID,
+			Cursor:  cursor,
+			Limit:   100,
+		})
+		if err != nil {
+			return errors.Join(reconcileErr, fmt.Errorf("gatewayapp: list Sessions for model reconciliation: %w", err))
+		}
+		for _, summary := range listed.Sessions {
+			active, err := s.composition.sessions.Session(ctx, summary.SessionRef)
+			if err != nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("Session %q state: %w", summary.SessionID, err))
+				continue
+			}
+			closed, err := appserver.IsSessionClosed(ctx, s.composition.sessions, active.SessionRef)
+			if err != nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("Session %q lifecycle: %w", summary.SessionID, err))
+				continue
+			}
+			if closed {
+				continue
+			}
+			if _, err := s.modelRecovery.repairMissingSessionModelSelection(ctx, s.composition.sessions, active); err != nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("Session %q model selection: %w", summary.SessionID, err))
+			}
+		}
+		cursor = strings.TrimSpace(listed.NextCursor)
+		if cursor == "" {
+			return reconcileErr
+		}
+	}
 }
 
 func (s *runtimeComposition) applyDeletedModelProfile(ctx context.Context, doc AppConfig, modelID string) error {

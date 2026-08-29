@@ -165,6 +165,40 @@ participant results use the same ordinary tool panel and never infer a child
 workspace from the Spawn name. This does not change the product-owned Main
 Spawn workspace and Task-stream contract.
 
+## Main Session Controller
+
+The product `ModelProfile` catalog is the single `/model` selection surface for
+provider and ACP backends. Selecting an ACP profile transfers the selected
+Session's main controller from the SDK Kernel to that external Agent. Caelis
+continues to own the TUI, durable Session and event feed, permissions, replay,
+and controller handoff; the external ACP endpoint owns model execution and
+returns standard ACP updates for projection.
+
+Control freezes the selected Agent, remote model, exact Session configuration
+values, effort option, and configuration fingerprint into the durable
+`ControllerBinding`. Runtime never re-resolves its audit-only ProfileID during
+reattachment. The binding also records the external Session ID, controller
+epoch, and context-sync sequence. After Runtime release or Host restart, the
+first work-bearing request resumes that external Session when supported and
+transfers only canonical context after the recorded sequence. If the peer no
+longer has the remote Session, the bridge creates a new one, resets the sync
+position, and transfers the complete canonical context required by that new
+endpoint. This fallback is attempted only after the current prompt is proven
+not submitted; after a successful Turn, Runtime persists the replacement
+remote Session identity and the new context checkpoint together.
+
+An ACP-backed Host default is frozen into each newly created Session as a
+dormant controller binding. This requires no local provider model and starts no
+external process until work activates the Session. The TUI may inspect, resume,
+and submit work to the Session through the same AppServer replay and input
+contracts as a Kernel-controlled Session.
+
+ACP main Turns do not require a local provider. Capabilities that are explicitly
+implemented with a local SDK model remain separate: in particular, local
+`/compact` still requires an eligible provider model and fails explicitly when
+none exists. Selecting an ACP main controller does not silently delegate those
+local-only capabilities to the peer.
+
 ## Disconnect Safety
 
 `/disconnect acp` is a Host-scoped AppServer command with an idempotency key and
@@ -181,19 +215,23 @@ placement, and affected durable Session model selection immediately; it never
 removes an ACP Agent connection.
 
 `/disconnect acp` changes the Host configuration available to future Session
-Runtime activations. It does not scan durable Sessions, rewrite their controller or
-participant history, or invalidate a Runtime that was already assembled. Such
-an activated Runtime may continue to use the external Agent endpoint captured
-in its immutable configuration snapshot until the Runtime is released, the
-user switches away and later reactivates the Session, or the Host restarts.
-After that boundary, a new activation reads the current configuration and the
-disconnected Agent is unavailable.
+Runtime activations and immediately reconciles current Sessions. Control first
+publishes the revoked placement catalog to the Host and every live Session
+Runtime, so later model selection, participant attachment, and Spawn cannot
+resolve the removed Agent. It then detaches durable and live participant
+bindings that name the Agent or one of its removed profiles. An affected main
+controller is handed to the remaining Host default; without a remaining
+profile it returns to the SDK Kernel and clears the Session model state, which
+surfaces as `no configured` rather than a phantom ACP model.
 
-No assembly lease or fresh Host admission check exists on participant Spawn,
-attachment, or controller handoff. Those operations resolve from the active
-Session Runtime snapshot. Configuration writers coordinate only for the short
-atomic configuration compare-and-save; revision conflicts are reported to the
-writer and do not block an already active Runtime.
+Loaded Sessions perform endpoint detach and controller handoff through their
+own Runtime. Dormant Sessions are revision-guarded and repaired atomically with
+their lifecycle event and matching product state, without launching a remote
+process merely to remove it. An already accepted in-flight operation may retain
+values resolved before revocation, but later work cannot resolve or display the
+deleted profile. Configuration compare-and-save conflicts are reported to the
+writer; a post-commit reconciliation or durability failure is a committed
+warning and never restores the disconnected configuration.
 
 ## Agent Default Model
 

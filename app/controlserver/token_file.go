@@ -13,12 +13,22 @@ import (
 	"github.com/caelis-labs/caelis/internal/productpaths"
 )
 
-const bearerTokenFilename = "auth.token"
+const (
+	bearerTokenFilename     = "auth.token"
+	acpIngressTokenFilename = "acp-ingress.token"
+)
 
 // DefaultTokenFile returns the persistent bearer credential path used by the
 // product Control server when CAELIS_CONTROL_TOKEN is not configured.
 func DefaultTokenFile(storeDir string) string {
 	return filepath.Join(productpaths.ServiceRuntimeDir(storeDir), bearerTokenFilename)
+}
+
+// DefaultACPIngressTokenFile returns the protected credential path used only
+// by the product ACP presentation process. The corresponding server principal
+// carries RoleACPIngress; ordinary presentation credentials do not.
+func DefaultACPIngressTokenFile(storeDir string) string {
+	return filepath.Join(productpaths.ServiceRuntimeDir(storeDir), acpIngressTokenFilename)
 }
 
 // LoadBearerToken loads one platform-secured token file without creating it.

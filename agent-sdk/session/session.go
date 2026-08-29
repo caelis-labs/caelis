@@ -287,15 +287,18 @@ type SessionRef struct {
 
 // ControllerBinding is the durable active-controller binding for one session.
 type ControllerBinding struct {
-	Kind            ControllerKind `json:"kind,omitempty"`
-	ControllerID    string         `json:"controller_id,omitempty"`
-	AgentName       string         `json:"agent_name,omitempty"`
-	Label           string         `json:"label,omitempty"`
-	EpochID         string         `json:"epoch_id,omitempty"`
-	RemoteSessionID string         `json:"remote_session_id,omitempty"`
-	ContextSyncSeq  uint64         `json:"context_sync_seq,omitempty"`
-	AttachedAt      time.Time      `json:"attached_at,omitempty"`
-	Source          string         `json:"source,omitempty"`
+	Kind         ControllerKind `json:"kind,omitempty"`
+	ControllerID string         `json:"controller_id,omitempty"`
+	AgentName    string         `json:"agent_name,omitempty"`
+	Label        string         `json:"label,omitempty"`
+	// Placement is the complete frozen ACP execution choice used for activation
+	// and reattachment. ProfileID is audit-only; Runtime never resolves it again.
+	Placement       placement.Placement `json:"placement,omitzero"`
+	EpochID         string              `json:"epoch_id,omitempty"`
+	RemoteSessionID string              `json:"remote_session_id,omitempty"`
+	ContextSyncSeq  uint64              `json:"context_sync_seq,omitempty"`
+	AttachedAt      time.Time           `json:"attached_at,omitempty"`
+	Source          string              `json:"source,omitempty"`
 }
 
 // ParticipantBinding is the durable participant attachment for one session.
@@ -403,6 +406,9 @@ type StartSessionRequest struct {
 	PreferredSessionID string         `json:"preferred_session_id,omitempty"`
 	Title              string         `json:"title,omitempty"`
 	Metadata           map[string]any `json:"metadata,omitempty"`
+	// Controller optionally installs the Control-selected initial owner. An ACP
+	// binding may be dormant until the first Turn reattaches its endpoint.
+	Controller ControllerBinding `json:"controller,omitzero"`
 }
 
 // LoadSessionRequest loads one session and recent events.
@@ -506,8 +512,13 @@ type BindControllerWithEventRequest struct {
 	SessionRef       SessionRef        `json:"session_ref"`
 	ExpectedRevision *uint64           `json:"expected_revision,omitempty"`
 	MutationGuard    MutationGuard     `json:"mutation_guard,omitempty"`
+	TransactionID    string            `json:"transaction_id,omitempty"`
+	MutationDigest   string            `json:"mutation_digest,omitempty"`
 	Binding          ControllerBinding `json:"binding"`
 	Event            *Event            `json:"event"`
+	// UpdateState derives the matching product state inside the same durable
+	// transaction as the controller binding and handoff event.
+	UpdateState AppendStateUpdate `json:"-"`
 }
 
 // PutParticipantRequest creates or updates one participant binding.

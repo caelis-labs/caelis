@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,8 +93,34 @@ func TestRunServeDefaultsToPersistentTokenFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if captured.Authenticator != nil || captured.Principal.ID != "local-user" || filepath.Clean(captured.TokenFile) != filepath.Clean(controlserver.DefaultTokenFile(storeDir)) {
+	if captured.Authenticator == nil || captured.Principal.ID != "local-user" || captured.TokenFile != "" {
 		t.Fatalf("control server config = %#v", captured)
+	}
+	normalToken, err := controlserver.LoadBearerToken(controlserver.DefaultTokenFile(storeDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	acpToken, err := controlserver.LoadBearerToken(controlserver.DefaultACPIngressTokenFile(storeDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticate := func(token string) appserver.Principal {
+		request, requestErr := http.NewRequest(http.MethodGet, "http://127.0.0.1", nil)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+		principal, authErr := captured.Authenticator.Authenticate(request)
+		if authErr != nil {
+			t.Fatal(authErr)
+		}
+		return principal
+	}
+	if principal := authenticate(normalToken); principal.HasRole(appserver.RoleACPIngress) {
+		t.Fatalf("ordinary principal = %#v, want no ACP ingress role", principal)
+	}
+	if principal := authenticate(acpToken); !principal.HasRole(appserver.RoleACPIngress) {
+		t.Fatalf("ACP principal = %#v, want ACP ingress role", principal)
 	}
 	if !published {
 		t.Fatal("managed discovery was not published")

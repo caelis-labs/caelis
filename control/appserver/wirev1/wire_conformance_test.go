@@ -14,6 +14,7 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -106,7 +107,15 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	state := appserver.SessionState{
 		ProtocolVersion: 1, EnvelopeVersion: appserver.EnvelopeVersion, APIVersion: appserver.HTTPAPIVersion,
 		SessionID: "session-1", Revision: 8, ResumeMode: appserver.ResumeModeExact,
-		Run: appserver.RunState{}, Controller: session.ControllerBinding{}, Approval: appserver.ApprovalState{},
+		Run: appserver.RunState{}, Controller: session.ControllerBinding{
+			Kind: session.ControllerKindACP,
+			Placement: placement.Placement{
+				Kind: placement.KindAgent, ProfileID: "acp:codex:main", Agent: "codex", Model: "main",
+				ReasoningEffort: "high", ReasoningEffortConfigID: "effort",
+				SessionConfigValues: map[string]string{"effort": "high"},
+				ConfigFingerprint:   "sha256:config", Fingerprint: "sha256:placement",
+			},
+		}, Approval: appserver.ApprovalState{},
 		Capabilities: appserver.ClientCapabilities{CaelisTerminalStream: true},
 	}
 	validateWireValue(t, "SessionState", state)

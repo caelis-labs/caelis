@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
@@ -18,7 +20,9 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 func TestDisconnectACPRemovesSiblingProfilesAndAllBindingsWhileRetainingInstallation(t *testing.T) {
@@ -275,7 +279,7 @@ func TestDisconnectACPPersistsProfilesAndBindingsWithoutAssemblyRefresh(t *testi
 	}
 }
 
-func TestDisconnectACPDoesNotRewriteActivatedSessionRuntime(t *testing.T) {
+func TestDisconnectACPRevokesActivatedSessionRuntimeImmediately(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	persistDisconnectTestAgent(t, stack, "codex")
 	ctx := context.Background()
@@ -299,15 +303,19 @@ func TestDisconnectACPDoesNotRewriteActivatedSessionRuntime(t *testing.T) {
 	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DisconnectACP() receipt/error = %#v/%v", receipt, err)
 	}
-	if _, ok := storedACPAgentInfo(activated.instance.ListACPAgents(), "codex"); !ok {
-		t.Fatalf("disconnect rewrote activated Session assembly: %#v", activated.instance.ListACPAgents())
+	if _, ok := storedACPAgentInfo(activated.instance.ListACPAgents(), "codex"); ok {
+		t.Fatalf("disconnect retained activated Session Agent: %#v", activated.instance.ListACPAgents())
 	}
-	retained, err := activated.instance.resolveParticipantPlacement(ctx, "acp:codex:default", "none")
-	if err != nil {
-		t.Fatalf("activated Session placement changed after disconnect: %v", err)
+	if _, err := activated.instance.resolveParticipantPlacement(ctx, "acp:codex:default", "none"); err == nil {
+		t.Fatalf("activated Session retained disconnected placement %#v", frozen)
 	}
-	if retained.Fingerprint != frozen.Fingerprint || retained.ConfigFingerprint != frozen.ConfigFingerprint {
-		t.Fatalf("activated placement changed: before=%#v after=%#v", frozen, retained)
+	_, err = activated.instance.acpControlPlane.Controllers.Activate(ctx, controller.HandoffRequest{
+		SessionRef: active.SessionRef,
+		Session:    active,
+		Agent:      "codex",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("disconnected Agent registry activation error = %v, want unavailable", err)
 	}
 	if _, err := stack.composition.resolveParticipantPlacement(ctx, "acp:codex:default", "none"); err == nil {
 		t.Fatal("Host placement resolution retained disconnected Agent")
@@ -327,10 +335,21 @@ func TestDisconnectACPDoesNotRewriteActivatedSessionRuntime(t *testing.T) {
 	}
 }
 
-func TestDisconnectACPDoesNotScanDurableSessionBindings(t *testing.T) {
+func TestDisconnectACPRepairsDurableSessionBindingsImmediately(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	persistDisconnectTestAgent(t, stack, "codex")
 	ctx := context.Background()
+	doc, err := stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.ModelProfiles, err = modelprofile.SelectDefault(doc.ModelProfiles, "acp:codex:default", "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
+		t.Fatal(err)
+	}
 	active, err := stack.composition.sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: stack.composition.authorities.appName, UserID: stack.composition.authorities.userID, Workspace: stack.composition.workspace,
 		PreferredSessionID: "activated-session",
@@ -360,12 +379,411 @@ func TestDisconnectACPDoesNotScanDurableSessionBindings(t *testing.T) {
 	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DisconnectACP() receipt/error = %#v/%v", receipt, err)
 	}
-	doc, err := stack.composition.authorities.store.LoadContext(ctx)
+	doc, err = stack.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := controlagents.LookupAgent(doc.ExternalAgents, "codex"); ok {
 		t.Fatalf("canonical config retained disconnected Agent: %#v", doc.ExternalAgents)
+	}
+	repaired, err := stack.composition.sessions.Session(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired.Controller.Kind != session.ControllerKindKernel || repaired.Controller.ControllerID != "sdk-kernel" {
+		t.Fatalf("repaired controller = %#v, want kernel fallback; receipt=%#v", repaired.Controller, receipt)
+	}
+	if len(repaired.Participants) != 0 {
+		t.Fatalf("repaired participants = %#v, want disconnected binding removed", repaired.Participants)
+	}
+	state, err := stack.composition.sessions.SnapshotState(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallback, ok := modelprofile.Lookup(doc.ModelProfiles, doc.ModelProfiles.DefaultProfileID)
+	if !ok || fallback.Backend.Provider == nil {
+		t.Fatalf("post-disconnect default profile = %#v", doc.ModelProfiles)
+	}
+	if model := strings.TrimSpace(kernel.CurrentModelAlias(state)); model != fallback.Backend.Provider.ModelConfigID {
+		t.Fatalf("repaired model = %q, want default %q", model, fallback.Backend.Provider.ModelConfigID)
+	}
+}
+
+func TestDisconnectACPRebindsLoadedControllerToACPConnectedAfterActivation(t *testing.T) {
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+	ctx := context.Background()
+	active, err := startGatewayAppTestSession(ctx, stack, "dynamic-acp-main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	activated, _, err := stack.sessionRuntimes.activateSession(ctx, active.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseRuntime, err := stack.sessionRuntimes.acquireRuntimeUse(activated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseRuntime()
+	if _, ok := storedACPAgentInfo(activated.instance.ListACPAgents(), "alpha"); ok {
+		t.Fatal("test Runtime unexpectedly started with alpha")
+	}
+
+	alphaAgents, alphaProfiles := disconnectTestCatalog(testACPControllerConnection(t, stack, "alpha"), "alpha", "remote-model")
+	betaAgents, betaProfiles := disconnectTestCatalog(testACPControllerConnection(t, stack, "beta"), "beta", "remote-model")
+	doc, err := stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.ExternalAgents = controlagents.NormalizeConfiguration(controlagents.Configuration{
+		Connections: append(alphaAgents.Connections, betaAgents.Connections...),
+		Agents:      append(alphaAgents.Agents, betaAgents.Agents...),
+		Discoveries: append(alphaAgents.Discoveries, betaAgents.Discoveries...),
+	})
+	doc.ModelProfiles, err = modelprofile.Upsert(doc.ModelProfiles, append(alphaProfiles.Profiles, betaProfiles.Profiles...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
+		t.Fatal(err)
+	}
+
+	active = mustCurrentSession(t, stack, active.SessionID)
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID:             "select-dynamically-connected-alpha",
+			SessionID:               active.SessionID,
+			ExpectedRevision:        &active.Revision,
+			ExpectedControllerEpoch: active.Controller.EpochID,
+		},
+		Model: "acp:alpha:remote-model",
+	})
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("UseSessionModel(dynamic alpha) = %#v, %v", selected, err)
+	}
+	active = mustCurrentSession(t, stack, active.SessionID)
+	if active.Controller.Kind != session.ControllerKindACP || active.Controller.AgentName != "alpha" {
+		t.Fatalf("selected controller = %#v, want dynamically installed alpha", active.Controller)
+	}
+	if _, ok := storedACPAgentInfo(activated.instance.ListACPAgents(), "alpha"); !ok {
+		t.Fatalf("activated Runtime roster = %#v, want alpha", activated.instance.ListACPAgents())
+	}
+
+	doc, err = stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.ModelProfiles, err = modelprofile.SelectDefault(doc.ModelProfiles, "acp:beta:remote-model", "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
+		t.Fatal(err)
+	}
+
+	receipt, err := disconnectACPCommand(ctx, stack, "alpha")
+	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("DisconnectACP(alpha) = %#v, %v", receipt, err)
+	}
+	rebound := mustCurrentSession(t, stack, active.SessionID)
+	if rebound.Controller.Kind != session.ControllerKindACP || rebound.Controller.AgentName != "beta" || rebound.Controller.Placement.ProfileID != "acp:beta:remote-model" {
+		t.Fatalf("rebound controller = %#v, want beta fallback", rebound.Controller)
+	}
+	if _, ok := storedACPAgentInfo(activated.instance.ListACPAgents(), "alpha"); ok {
+		t.Fatalf("activated Runtime retained alpha: %#v", activated.instance.ListACPAgents())
+	}
+	if _, ok := storedACPAgentInfo(activated.instance.ListACPAgents(), "beta"); !ok {
+		t.Fatalf("activated Runtime did not install beta fallback: %#v", activated.instance.ListACPAgents())
+	}
+	if _, found, err := activated.instance.ACPControllerStatus(ctx, rebound.SessionRef); err != nil || !found {
+		t.Fatalf("beta controller status found=%v err=%v", found, err)
+	}
+}
+
+func TestDisconnectACPRebindsLoadedControllerToProviderConnectedAfterActivation(t *testing.T) {
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+	ctx := context.Background()
+	active, err := startGatewayAppTestSession(ctx, stack, "dynamic-provider-fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	activated, _, err := stack.sessionRuntimes.activateSession(ctx, active.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseRuntime, err := stack.sessionRuntimes.acquireRuntimeUse(activated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseRuntime()
+
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	configurationRevision, err := stack.ControlStatus().ConfigurationRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "connect-provider-fallback", ExpectedRevision: &configurationRevision},
+		Config: appserver.ConnectConfig{
+			Provider: "ollama",
+			Model:    "provider-after-activation",
+		},
+	})
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("ConnectModel(provider fallback) = %#v, %v", connected, err)
+	}
+	fallbackConfig, err := stack.composition.lookup.ResolveConfig("ollama/provider-after-activation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := activated.instance.lookup.Config(fallbackConfig.ID); ok {
+		t.Fatal("activated Runtime unexpectedly contained provider connected after activation")
+	}
+	configurationRevision, err = stack.ControlStatus().ConfigurationRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaulted, err := stack.ConfigurationCommands().UseModel(ctx, principal, appserver.UseModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "default-provider-fallback", ExpectedRevision: &configurationRevision},
+		Model:     modelprofile.BuildProviderID(fallbackConfig.ID),
+	})
+	if err != nil || defaulted.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("UseModel(provider fallback) = %#v, %v", defaulted, err)
+	}
+
+	alphaAgents, alphaProfiles := disconnectTestCatalog(testACPControllerConnection(t, stack, "alpha"), "alpha", "remote-model")
+	doc, err := stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.ExternalAgents = alphaAgents
+	doc.ModelProfiles, err = modelprofile.Upsert(doc.ModelProfiles, alphaProfiles.Profiles...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
+		t.Fatal(err)
+	}
+
+	active = mustCurrentSession(t, stack, active.SessionID)
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID:             "select-alpha-before-provider-fallback",
+			SessionID:               active.SessionID,
+			ExpectedRevision:        &active.Revision,
+			ExpectedControllerEpoch: active.Controller.EpochID,
+		},
+		Model: "acp:alpha:remote-model",
+	})
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("UseSessionModel(alpha) = %#v, %v", selected, err)
+	}
+
+	receipt, err := disconnectACPCommand(ctx, stack, "alpha")
+	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("DisconnectACP(alpha) = %#v, %v", receipt, err)
+	}
+	rebound := mustCurrentSession(t, stack, active.SessionID)
+	if rebound.Controller.Kind != session.ControllerKindKernel {
+		t.Fatalf("rebound controller = %#v, want kernel provider fallback", rebound.Controller)
+	}
+	state, err := stack.composition.sessions.SnapshotState(ctx, rebound.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model := kernel.CurrentModelAlias(state); model != fallbackConfig.ID {
+		t.Fatalf("rebound model = %q, want %q", model, fallbackConfig.ID)
+	}
+	if configured, err := activated.instance.lookup.ResolveConfig(fallbackConfig.ID); err != nil || configured.ID != fallbackConfig.ID {
+		t.Fatalf("activated Runtime provider fallback = %#v, %v", configured, err)
+	}
+}
+
+func TestDisconnectACPInterruptsActiveControllerTurnBeforeFallback(t *testing.T) {
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+	ctx := context.Background()
+	active, err := startGatewayAppTestSession(ctx, stack, "active-acp-disconnect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	activated, _, err := stack.sessionRuntimes.activateSession(ctx, active.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseRuntime, err := stack.sessionRuntimes.acquireRuntimeUse(activated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseRuntime()
+
+	agents, profiles := disconnectTestCatalog(testACPControllerBlockingConnection(t, stack, "alpha"), "alpha", "remote-model")
+	doc, err := stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.ExternalAgents = agents
+	doc.ModelProfiles, err = modelprofile.Upsert(doc.ModelProfiles, profiles.Profiles...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
+		t.Fatal(err)
+	}
+
+	active = mustCurrentSession(t, stack, active.SessionID)
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID:             "select-alpha-for-active-disconnect",
+			SessionID:               active.SessionID,
+			ExpectedRevision:        &active.Revision,
+			ExpectedControllerEpoch: active.Controller.EpochID,
+		},
+		Model: "acp:alpha:remote-model",
+	})
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("UseSessionModel(alpha) = %#v, %v", selected, err)
+	}
+	prompted, err := stack.ControlClient().Prompt(ctx, principal, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{OperationID: "prompt-blocking-alpha", SessionID: active.SessionID},
+		Input:     "hold the ACP controller Turn",
+	})
+	if err != nil || prompted.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("Prompt(alpha) = %#v, %v", prompted, err)
+	}
+	if _, ok := activated.instance.currentGateway().ActiveTurn(active.SessionID); !ok {
+		t.Fatal("ACP controller Turn was not active before disconnect")
+	}
+
+	receipt, err := disconnectACPCommand(ctx, stack, "alpha")
+	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("DisconnectACP(alpha) = %#v, %v", receipt, err)
+	}
+	if _, ok := activated.instance.currentGateway().ActiveTurn(active.SessionID); ok {
+		t.Fatal("ACP controller Turn remained active after disconnect")
+	}
+	rebound := mustCurrentSession(t, stack, active.SessionID)
+	if rebound.Controller.Kind != session.ControllerKindKernel {
+		t.Fatalf("rebound controller = %#v, want kernel fallback", rebound.Controller)
+	}
+}
+
+func TestPinnedACPSelectionRollbackPreservesNewerPlacementPublication(t *testing.T) {
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+	ctx := context.Background()
+	active, err := startGatewayAppTestSession(ctx, stack, "acp-selection-rollback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	activated, _, err := stack.sessionRuntimes.activateSession(ctx, active.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, profiles := disconnectTestCatalog(testACPControllerConnection(t, stack, "alpha"), "alpha", "remote-model")
+	doc := before
+	doc.ExternalAgents = agents
+	doc.ModelProfiles, err = modelprofile.Upsert(doc.ModelProfiles, profiles.Profiles...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
+		t.Fatal(err)
+	}
+	canonical := newPlacementSnapshot(doc)
+	frozen, err := controlplacement.ResolveProfile(canonical.placement, "acp:alpha:remote-model", "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	finish, err := activated.instance.beginPinnedACPSelection(ctx, frozen)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newer := newPlacementSnapshot(before)
+	activated.instance.placementCacheMu.Lock()
+	activated.instance.placementCache = newer
+	activated.instance.placementCacheGeneration++
+	newerGeneration := activated.instance.placementCacheGeneration
+	activated.instance.placementCacheMu.Unlock()
+	finish(false)
+
+	activated.instance.placementCacheMu.RLock()
+	got := activated.instance.placementCache
+	gotGeneration := activated.instance.placementCacheGeneration
+	activated.instance.placementCacheMu.RUnlock()
+	if got != newer || gotGeneration != newerGeneration {
+		t.Fatalf("rollback placement/generation = %p/%d, want newer publication %p/%d", got, gotGeneration, newer, newerGeneration)
+	}
+}
+
+func TestDisconnectACPRepairsSessionToNoConfiguredWithoutFallback(t *testing.T) {
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+	ctx := context.Background()
+	agents, profiles := disconnectTestCatalog(controlagents.Connection{
+		ID: "codex", Launcher: controlagents.Launcher{Command: writeExternalAgentExecutable(t, t.TempDir(), "codex-acp")},
+	}, "codex", "default")
+	var err error
+	profiles, err = modelprofile.SelectDefault(profiles, "acp:codex:default", "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.ExternalAgents = agents
+	doc.ModelProfiles = profiles
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.composition.sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: stack.composition.authorities.appName, UserID: stack.composition.authorities.userID,
+		Workspace: stack.composition.workspace, PreferredSessionID: "no-fallback-session",
+		Controller: session.ControllerBinding{Kind: session.ControllerKindACP, ControllerID: "codex", AgentName: "codex"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err = stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
+		SessionRef: active.SessionRef, ExpectedRevision: &active.Revision,
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
+		Update: func(state map[string]any) (map[string]any, error) {
+			next := session.CloneState(state)
+			if next == nil {
+				next = map[string]any{}
+			}
+			next[kernel.StateCurrentModelAlias] = "stale-provider-model"
+			return next, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	receipt, err := disconnectACPCommand(ctx, stack, "codex")
+	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("DisconnectACP() receipt/error = %#v/%v", receipt, err)
+	}
+	repaired, err := stack.composition.sessions.Session(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired.Controller.Kind != session.ControllerKindKernel || len(repaired.Participants) != 0 {
+		t.Fatalf("repaired Session = %#v", repaired)
+	}
+	state, err := stack.composition.sessions.SnapshotState(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model := kernel.CurrentModelAlias(state); model != "" {
+		t.Fatalf("repaired model = %q, want no configured model", model)
+	}
+	if alias := stack.composition.DefaultModelAlias(); alias != "" {
+		t.Fatalf("Host default model = %q, want no configured model", alias)
 	}
 }
 
@@ -402,6 +820,34 @@ func persistDisconnectTestAgent(t *testing.T, stack *Stack, agentID string) {
 	}
 	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func testACPControllerConnection(t *testing.T, stack *Stack, agentID string) controlagents.Connection {
+	return testACPControllerConnectionMode(t, stack, agentID, "controller")
+}
+
+func testACPControllerBlockingConnection(t *testing.T, stack *Stack, agentID string) controlagents.Connection {
+	return testACPControllerConnectionMode(t, stack, agentID, "controller-blocking")
+}
+
+func testACPControllerConnectionMode(t *testing.T, stack *Stack, agentID, mode string) controlagents.Connection {
+	t.Helper()
+	return controlagents.Connection{
+		ID:   agentID,
+		Name: agentID,
+		Launcher: controlagents.Launcher{
+			Kind:    controlagents.LaunchKindExecutable,
+			Command: os.Args[0],
+			Args: []string{
+				"-test.run=^TestGatewayACPOnboardingHelperProcess$",
+				"--",
+				"caelis-onboarding-helper",
+				mode,
+				filepath.Join(t.TempDir(), agentID+"-started"),
+			},
+			WorkDir: stack.composition.workspace.CWD,
+		},
 	}
 }
 

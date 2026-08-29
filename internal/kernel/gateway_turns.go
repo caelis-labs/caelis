@@ -44,6 +44,11 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		cancel()
 		return BeginTurnResult{}, hostClosingError()
 	}
+	if g.sessionTurnAdmissionBlockedLocked(activeSession.SessionID) {
+		g.mu.Unlock()
+		cancel()
+		return BeginTurnResult{}, turnAdmissionBlockedError()
+	}
 	if _, ok := g.active[activeSession.SessionID]; ok {
 		g.mu.Unlock()
 		cancel()

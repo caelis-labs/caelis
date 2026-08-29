@@ -333,6 +333,7 @@ func runWithProductClientOpener(
 		StoreDir:         cfg.StoreDir,
 		ListenAddress:    managedListen,
 		SurfaceHostCause: doctorSubcommand || sandboxSubcommand != "",
+		ACPIngress:       acpSubcommand,
 	}
 	if sandboxSubcommand != "" {
 		outFmt, err := parseOutputFormat(*format)
@@ -494,6 +495,27 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 		tokenFile = controlserver.DefaultTokenFile(cfg.StoreDir)
 		childTokenFile = tokenFile
 	}
+	if authenticator == nil {
+		resolvedToken, tokenErr := controlserver.LoadOrCreateBearerToken(tokenFile)
+		if tokenErr != nil {
+			return tokenErr
+		}
+		authenticator, err = controlserver.BearerTokenAuthenticator(resolvedToken, serverConfig.Principal)
+		if err != nil {
+			return err
+		}
+	}
+	acpIngressToken, err := controlserver.LoadOrCreateBearerToken(controlserver.DefaultACPIngressTokenFile(cfg.StoreDir))
+	if err != nil {
+		return err
+	}
+	acpIngressPrincipal := serverConfig.Principal
+	acpIngressPrincipal.Roles = append(append([]string(nil), acpIngressPrincipal.Roles...), appserver.RoleACPIngress)
+	acpIngressAuthenticator, err := controlserver.BearerTokenAuthenticator(acpIngressToken, acpIngressPrincipal)
+	if err != nil {
+		return err
+	}
+	authenticator = anyControlAuthenticator(authenticator, acpIngressAuthenticator)
 	defaultTokenFile := controlserver.DefaultTokenFile(cfg.StoreDir)
 	discoveryPath := controlserver.DefaultDiscoveryFile(cfg.StoreDir)
 	publishedDiscovery := false
@@ -532,7 +554,7 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 		return err
 	}
 	serverConfig.Authenticator = authenticator
-	serverConfig.TokenFile = tokenFile
+	serverConfig.TokenFile = ""
 	return runControlServerCommand(ctx, controlserver.Dependencies{
 		Services: appServer.Services, AdapterHost: stack.AdapterHost(), Lifecycle: stack,
 	}, serverConfig)

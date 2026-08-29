@@ -20,6 +20,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/loader"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
@@ -303,6 +304,29 @@ func (a *RuntimeAgent) NewSession(ctx context.Context, req acpsdk.NewSessionRequ
 		activeSession, err := a.session(ctx, created.SessionID)
 		if err != nil {
 			return acpsdk.NewSessionResponse{}, err
+		}
+		if activeSession.Controller.Kind != session.ControllerKindKernel ||
+			!strings.EqualFold(strings.TrimSpace(activeSession.Controller.Source), "acp_ingress") {
+			authorityErr := errors.New("internal/acpagentbridge: Control Host did not accept the ACP ingress credential")
+			cleanupParent := context.Background()
+			if ctx != nil {
+				cleanupParent = context.WithoutCancel(ctx)
+			}
+			cleanupCtx, cancelCleanup := context.WithTimeout(cleanupParent, acpcleanup.DefaultTimeout)
+			closeResult, closeErr := a.sessionClient.CloseSession(cleanupCtx, appserver.CloseSessionRequest{WriteBase: appserver.WriteBase{
+				OperationID:             newACPSessionOperationID("reject-ingress"),
+				SessionID:               activeSession.SessionID,
+				ExpectedRevision:        &activeSession.Revision,
+				ExpectedControllerEpoch: strings.TrimSpace(activeSession.Controller.EpochID),
+			}})
+			cancelCleanup()
+			if closeErr == nil && closeResult.Outcome != appserver.OutcomeCommitted && closeResult.Outcome != appserver.OutcomeAccepted {
+				closeErr = fmt.Errorf("close rejected ACP ingress Session ended with outcome %q", closeResult.Outcome)
+			}
+			if closeErr != nil {
+				return acpsdk.NewSessionResponse{}, errors.Join(authorityErr, fmt.Errorf("close rejected ACP ingress Session: %w", closeErr))
+			}
+			return acpsdk.NewSessionResponse{}, authorityErr
 		}
 		return a.newSessionResponse(ctx, activeSession)
 	}

@@ -33,6 +33,7 @@ const (
 	CodeModeNotFound            = "mode_not_found"
 	CodeControlPlaneUnsupported = "control_plane_unsupported"
 	CodeHostClosing             = "host_closing"
+	CodeTurnAdmissionBlocked    = "turn_admission_blocked"
 	CodeGuardianUnavailable     = "guardian_unavailable"
 )
 
@@ -44,6 +45,16 @@ type Error struct {
 	Message     string    `json:"message,omitempty"`
 	Detail      string    `json:"detail,omitempty"`
 	Cause       error     `json:"-"`
+}
+
+func turnAdmissionBlockedError() *Error {
+	return &Error{
+		Kind:        KindConflict,
+		Code:        CodeTurnAdmissionBlocked,
+		Retryable:   true,
+		UserVisible: true,
+		Message:     "gateway: Session execution configuration is changing; retry the Turn",
+	}
 }
 
 func (e *Error) Error() string {

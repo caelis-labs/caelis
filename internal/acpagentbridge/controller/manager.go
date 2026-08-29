@@ -21,6 +21,8 @@ import (
 	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/control/acppermission"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
@@ -35,18 +37,20 @@ import (
 )
 
 type Config struct {
-	Registry         *subagent.Registry
-	ClientInfo       *acpsdk.Implementation
-	Clock            func() time.Time
-	EndpointResolver endpoint.Resolver
+	Registry          *subagent.Registry
+	ClientInfo        *acpsdk.Implementation
+	Clock             func() time.Time
+	EndpointResolver  endpoint.Resolver
+	PlacementResolver subagent.PlacementResolver
 }
 
 type Manager struct {
-	registry         *subagent.Registry
-	clientInfo       *acpsdk.Implementation
-	clock            func() time.Time
-	startClient      clientStarter
-	endpointResolver endpoint.Resolver
+	registry          *subagent.Registry
+	clientInfo        *acpsdk.Implementation
+	clock             func() time.Time
+	startClient       clientStarter
+	endpointResolver  endpoint.Resolver
+	placementResolver subagent.PlacementResolver
 
 	counter atomic.Uint64
 
@@ -83,6 +87,8 @@ type controllerRun struct {
 	binding               session.ControllerBinding
 	context               agent.ContextTransfer
 	contextPending        bool
+	contextFresh          bool
+	contextSyncSeq        uint64
 
 	operationMu         sync.Mutex
 	mu                  sync.Mutex
@@ -161,12 +167,13 @@ func NewManager(cfg Config) (*Manager, error) {
 		clock = time.Now
 	}
 	manager := &Manager{
-		registry:         cfg.Registry,
-		clientInfo:       cfg.ClientInfo,
-		clock:            clock,
-		endpointResolver: cfg.EndpointResolver,
-		controllers:      map[string]*controllerRun{},
-		participants:     map[participantRunKey]*participantRun{},
+		registry:          cfg.Registry,
+		clientInfo:        cfg.ClientInfo,
+		clock:             clock,
+		endpointResolver:  cfg.EndpointResolver,
+		placementResolver: cfg.PlacementResolver,
+		controllers:       map[string]*controllerRun{},
+		participants:      map[participantRunKey]*participantRun{},
 	}
 	manager.startClient = manager.startACPClient
 	return manager, nil
@@ -178,7 +185,49 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 	if parentSessionID == "" {
 		return session.ControllerBinding{}, fmt.Errorf("internal/acpagentbridge/controller: parent session id is required")
 	}
-	cfg, err := m.registry.Resolve(req.Agent)
+	placement := sdkplacement.Normalize(req.Placement)
+	var cfg subagent.AgentConfig
+	if placement.Kind != "" {
+		if err := sdkplacement.ValidateSealed(placement); err != nil {
+			return session.ControllerBinding{}, fmt.Errorf("internal/acpagentbridge/controller: controller placement is invalid: %w", err)
+		}
+		if placement.Kind != sdkplacement.KindAgent {
+			return session.ControllerBinding{}, fmt.Errorf("internal/acpagentbridge/controller: controller placement must select an Agent")
+		}
+		if m.placementResolver == nil {
+			return session.ControllerBinding{}, fmt.Errorf("internal/acpagentbridge/controller: configured placement resolution is unavailable")
+		}
+		var err error
+		cfg, err = m.placementResolver(ctx, tasksubagent.SpawnContext{
+			SessionRef: req.SessionRef,
+			Session:    req.Session,
+		}, delegation.TargetRequest{Target: delegation.Target{
+			Selector:  placement.Agent,
+			Placement: placement,
+		}})
+		if err != nil {
+			return session.ControllerBinding{}, err
+		}
+		if !strings.EqualFold(strings.TrimSpace(placement.Agent), strings.TrimSpace(cfg.Name)) {
+			return session.ControllerBinding{}, fmt.Errorf(
+				"internal/acpagentbridge/controller: controller Agent %q does not match frozen placement Agent %q",
+				strings.TrimSpace(cfg.Name),
+				placement.Agent,
+			)
+		}
+		cfg.SessionOptions = controlagents.SessionOptions{
+			ModelID:                 strings.TrimSpace(placement.Model),
+			ConfigValues:            maps.Clone(placement.SessionConfigValues),
+			ReasoningEffortConfigID: strings.TrimSpace(placement.ReasoningEffortConfigID),
+		}
+	} else {
+		var err error
+		cfg, err = m.registry.Resolve(req.Agent)
+		if err != nil {
+			return session.ControllerBinding{}, err
+		}
+	}
+	epochID, err := newControllerEpoch()
 	if err != nil {
 		return session.ControllerBinding{}, err
 	}
@@ -188,9 +237,10 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 		agent:           strings.TrimSpace(cfg.Name),
 		cfg:             cfg,
 		cwd:             strings.TrimSpace(req.Session.CWD),
-		binding:         controllerBinding(cfg.Name, req.Source, m.nextID("controller"), m.clock()),
+		binding:         controllerBinding(cfg.Name, req.Source, epochID, placement, m.clock()),
 		context:         agent.CloneContextTransfer(req.Context),
 		contextPending:  !agent.ContextTransferEmpty(req.Context),
+		contextSyncSeq:  req.ContextSyncSeq,
 		updatedAt:       m.clock(),
 	}
 	resumeRemoteSessionID := reusableControllerRemoteSessionID(req.Session, cfg.Name)
@@ -205,11 +255,14 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 	if err != nil {
 		return session.ControllerBinding{}, err
 	}
-	contextSyncSeq := req.ContextSyncSeq
-	if resumeRemoteSessionID != "" && !strings.EqualFold(strings.TrimSpace(remoteSessionID), resumeRemoteSessionID) {
-		contextSyncSeq = 0
-		run.context = agent.ContextTransfer{}
-		run.contextPending = false
+	contextSyncSeq := uint64(0)
+	if resumeRemoteSessionID != "" && strings.EqualFold(strings.TrimSpace(remoteSessionID), resumeRemoteSessionID) {
+		contextSyncSeq = req.Session.Controller.ContextSyncSeq
+	} else if resumeRemoteSessionID != "" {
+		run.context = agent.CloneContextTransfer(req.FreshContext)
+		run.contextPending = !agent.ContextTransferEmpty(req.FreshContext)
+		run.contextFresh = run.contextPending
+		run.contextSyncSeq = req.ContextSyncSeq
 	}
 	run.applyStartupStateLocked(client, remoteSessionID, state, contextSyncSeq)
 
@@ -266,6 +319,61 @@ func (m *Manager) Deactivate(ctx context.Context, ref session.SessionRef) error 
 	return nil
 }
 
+// ActiveControllerBinding returns the exact binding owned by the current live
+// controller run, including a replacement remote Session created on reconnect.
+func (m *Manager) ActiveControllerBinding(_ context.Context, ref session.SessionRef) (session.ControllerBinding, bool, error) {
+	if m == nil {
+		return session.ControllerBinding{}, false, nil
+	}
+	ref = session.NormalizeSessionRef(ref)
+	m.mu.RLock()
+	run := m.controllers[ref.SessionID]
+	m.mu.RUnlock()
+	if run == nil {
+		return session.ControllerBinding{}, false, nil
+	}
+	run.mu.Lock()
+	binding := session.CloneControllerBinding(run.binding)
+	run.mu.Unlock()
+	return binding, true, nil
+}
+
+// Quiesce closes every controller and participant connection owned by this
+// Manager without closing durable remote Sessions. A later Runtime may resume
+// them from their persisted bindings.
+func (m *Manager) Quiesce(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	m.mu.Lock()
+	controllers := make([]*controllerRun, 0, len(m.controllers))
+	for _, run := range m.controllers {
+		controllers = append(controllers, run)
+	}
+	participants := make([]*participantRun, 0, len(m.participants))
+	for _, run := range m.participants {
+		participants = append(participants, run)
+	}
+	m.controllers = map[string]*controllerRun{}
+	m.participants = map[participantRunKey]*participantRun{}
+	m.mu.Unlock()
+
+	var errs []error
+	for _, run := range controllers {
+		m.shutdownControllerRun(context.WithoutCancel(ctx), run, false)
+	}
+	for _, run := range participants {
+		run.closePromptAdmission()
+		if err := run.closeClient(context.WithoutCancel(ctx)); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
 	req = controller.NormalizeTurnRequest(req)
 	sessionID := strings.TrimSpace(req.SessionRef.SessionID)
@@ -289,7 +397,17 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 		cancel()
 		return controller.TurnResult{}, err
 	}
-	prompt = composeACPContextPrompt(prompt, agent.MergeContextTransfers(run.consumeContext(), req.Context))
+	activationContext, activationContextSyncSeq, activationContextFresh := run.consumeContext()
+	pendingContext, pendingContextSyncSeq, pendingContextFresh := selectControllerTurnContext(
+		activationContext,
+		activationContextSyncSeq,
+		activationContextFresh,
+		req.Context,
+		req.FreshContext,
+		req.ContextSyncSeq,
+	)
+	preparedPrompt := append([]json.RawMessage(nil), prompt...)
+	prompt = composeACPContextPrompt(preparedPrompt, pendingContext)
 	if len(prompt) == 0 {
 		run.finishTurn(handle)
 		handle.finish()
@@ -297,11 +415,23 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 	}
 	go func() {
 		defer handle.finish()
-		if err := m.promptControllerRun(turnCtx, run, prompt); err != nil {
+		attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, err := m.promptControllerRun(
+			turnCtx,
+			run,
+			preparedPrompt,
+			pendingContext,
+			pendingContextSyncSeq,
+			pendingContextFresh,
+			req.FreshContext,
+			req.ContextSyncSeq,
+		)
+		if err != nil {
+			run.restoreContext(attemptedContext, attemptedContextSyncSeq, attemptedContextFresh)
 			run.finishTurn(handle)
 			handle.publishError(err)
 			return
 		}
+		run.markContextSynced(attemptedContextSyncSeq)
 		buffered, stream := run.finishTurn(handle)
 		if !stream {
 			for _, event := range buffered {
@@ -312,24 +442,45 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 	return controller.TurnResult{Handle: handle, UpdatedAt: m.clock()}, nil
 }
 
-func (m *Manager) promptControllerRun(ctx context.Context, run *controllerRun, prompt []json.RawMessage) error {
-	if _, err := run.promptParts(ctx, prompt); err != nil {
+func (m *Manager) promptControllerRun(
+	ctx context.Context,
+	run *controllerRun,
+	prompt []json.RawMessage,
+	contextTransfer agent.ContextTransfer,
+	contextSyncSeq uint64,
+	contextFresh bool,
+	freshContext agent.ContextTransfer,
+	freshContextSyncSeq uint64,
+) (agent.ContextTransfer, uint64, bool, error) {
+	attemptedContext := agent.CloneContextTransfer(contextTransfer)
+	attemptedContextSyncSeq := contextSyncSeq
+	attemptedContextFresh := contextFresh
+	if _, err := run.promptParts(ctx, composeACPContextPrompt(prompt, attemptedContext)); err != nil {
 		if client.DispatchMayHaveCommitted(err) {
-			return errorcode.Wrap(errorcode.UnknownOutcome, "internal/acpagentbridge/controller: controller prompt outcome cannot be proven", err)
+			return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, errorcode.Wrap(errorcode.UnknownOutcome, "internal/acpagentbridge/controller: controller prompt outcome cannot be proven", err)
 		}
 		if !isACPClientConnectionError(err) {
-			return err
+			return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, err
 		}
 		if !client.SubmissionProvenNotStarted(err) {
-			return errorcode.Wrap(errorcode.UnknownOutcome, "internal/acpagentbridge/controller: controller prompt outcome cannot be proven", err)
+			return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, errorcode.Wrap(errorcode.UnknownOutcome, "internal/acpagentbridge/controller: controller prompt outcome cannot be proven", err)
 		}
-		if reconnectErr := m.reconnectControllerRun(ctx, run); reconnectErr != nil {
-			return fmt.Errorf("%w; reconnect failed: %w", err, reconnectErr)
+		fresh, reconnectErr := m.reconnectControllerRun(ctx, run)
+		if reconnectErr != nil {
+			return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, fmt.Errorf("%w; reconnect failed: %w", err, reconnectErr)
 		}
-		_, err = run.promptParts(ctx, prompt)
-		return err
+		if fresh {
+			attemptedContext = agent.CloneContextTransfer(freshContext)
+			attemptedContextSyncSeq = freshContextSyncSeq
+			attemptedContextFresh = true
+		}
+		_, err = run.promptParts(ctx, composeACPContextPrompt(prompt, attemptedContext))
+		if err != nil && (client.DispatchMayHaveCommitted(err) || !client.SubmissionProvenNotStarted(err)) {
+			err = errorcode.Wrap(errorcode.UnknownOutcome, "internal/acpagentbridge/controller: retried controller prompt outcome cannot be proven", err)
+		}
+		return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, err
 	}
-	return nil
+	return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, nil
 }
 
 func contentPartsContainImage(parts []model.ContentPart) bool {
@@ -420,16 +571,16 @@ func (m *Manager) SetControllerMode(ctx context.Context, req SetControllerModeRe
 	return run.setControllerMode(ctx, req, m.clock)
 }
 
-func (m *Manager) reconnectControllerRun(ctx context.Context, run *controllerRun) error {
+func (m *Manager) reconnectControllerRun(ctx context.Context, run *controllerRun) (bool, error) {
 	if m == nil || run == nil {
-		return fmt.Errorf("internal/acpagentbridge/controller: controller run is unavailable")
+		return false, fmt.Errorf("internal/acpagentbridge/controller: controller run is unavailable")
 	}
 	run.operationMu.Lock()
 	defer run.operationMu.Unlock()
 	run.reconnectMu.Lock()
 	defer run.reconnectMu.Unlock()
 	if !m.isActiveControllerRun(run) {
-		return fmt.Errorf("internal/acpagentbridge/controller: controller run is no longer active")
+		return false, fmt.Errorf("internal/acpagentbridge/controller: controller run is no longer active")
 	}
 	run.mu.Lock()
 	cfg := run.cfg
@@ -440,13 +591,13 @@ func (m *Manager) reconnectControllerRun(ctx context.Context, run *controllerRun
 	oldClient := run.client
 	run.mu.Unlock()
 	if strings.TrimSpace(cfg.Command) == "" {
-		return fmt.Errorf("internal/acpagentbridge/controller: controller agent config is unavailable")
+		return false, fmt.Errorf("internal/acpagentbridge/controller: controller agent config is unavailable")
 	}
 	if oldClient != nil {
 		_ = oldClient.Close(context.WithoutCancel(ctx))
 	}
 	if !m.isActiveControllerRun(run) {
-		return fmt.Errorf("internal/acpagentbridge/controller: controller run is no longer active")
+		return false, fmt.Errorf("internal/acpagentbridge/controller: controller run is no longer active")
 	}
 	acpClient, remoteSessionID, state, err := m.startClient(ctx, cwd, cfg, resumeRemoteSessionID,
 		func(env client.UpdateEnvelope) {
@@ -457,27 +608,30 @@ func (m *Manager) reconnectControllerRun(ctx context.Context, run *controllerRun
 		},
 	)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !m.isActiveControllerRun(run) {
 		_ = acpClient.Close(context.WithoutCancel(ctx))
-		return fmt.Errorf("internal/acpagentbridge/controller: controller run is no longer active")
+		return false, fmt.Errorf("internal/acpagentbridge/controller: controller run is no longer active")
 	}
 	remote := controllerReconnectConfigFromState(state.configOptions, state.models, state.mode, state.modeOptions)
-	if resumeRemoteSessionID != "" && !strings.EqualFold(strings.TrimSpace(remoteSessionID), resumeRemoteSessionID) {
+	fresh := resumeRemoteSessionID != "" && !strings.EqualFold(strings.TrimSpace(remoteSessionID), resumeRemoteSessionID)
+	if fresh {
 		contextSyncSeq = 0
 		run.mu.Lock()
 		run.context = agent.ContextTransfer{}
 		run.contextPending = false
+		run.contextFresh = false
+		run.contextSyncSeq = 0
 		run.mu.Unlock()
 	}
 	run.applyStartupStateLocked(acpClient, remoteSessionID, state, contextSyncSeq)
 	if desired.needsRemoteReapply(remote) {
 		if err := run.reapplyControllerRemoteConfig(ctx, desired, m.clock); err != nil {
-			return fmt.Errorf("reapply controller config: %w", err)
+			return fresh, fmt.Errorf("reapply controller config: %w", err)
 		}
 	}
-	return nil
+	return fresh, nil
 }
 
 func (m *Manager) isActiveControllerRun(run *controllerRun) bool {
@@ -1126,33 +1280,72 @@ func translateApprovalRequest(
 	}, nil
 }
 
-func controllerBinding(agent string, source string, epochID string, now time.Time) session.ControllerBinding {
+func controllerBinding(agent string, source string, epochID string, placement sdkplacement.Placement, now time.Time) session.ControllerBinding {
 	return session.ControllerBinding{
 		Kind:         session.ControllerKindACP,
 		ControllerID: strings.TrimSpace(agent),
 		AgentName:    strings.TrimSpace(agent),
 		Label:        strings.TrimSpace(agent),
+		Placement:    sdkplacement.Normalize(placement),
 		EpochID:      strings.TrimSpace(epochID),
 		AttachedAt:   now,
 		Source:       firstNonEmpty(source, "handoff"),
 	}
 }
 
-func (r *controllerRun) consumeContext() agent.ContextTransfer {
+func (r *controllerRun) consumeContext() (agent.ContextTransfer, uint64, bool) {
 	if r == nil {
-		return agent.ContextTransfer{}
+		return agent.ContextTransfer{}, 0, false
 	}
 	r.mu.Lock()
 	contextTransfer := agent.CloneContextTransfer(r.context)
+	contextSyncSeq := r.contextSyncSeq
 	pending := r.contextPending
+	fresh := r.contextFresh
 	if pending {
+		r.context = agent.ContextTransfer{}
 		r.contextPending = false
+		r.contextFresh = false
+		r.contextSyncSeq = 0
 	}
 	r.mu.Unlock()
 	if !pending {
-		return agent.ContextTransfer{}
+		return agent.ContextTransfer{}, 0, false
 	}
-	return contextTransfer
+	return contextTransfer, contextSyncSeq, fresh
+}
+
+func selectControllerTurnContext(
+	activation agent.ContextTransfer,
+	activationSyncSeq uint64,
+	activationFresh bool,
+	turn agent.ContextTransfer,
+	freshTurn agent.ContextTransfer,
+	turnSyncSeq uint64,
+) (agent.ContextTransfer, uint64, bool) {
+	activation = agent.CloneContextTransfer(activation)
+	turn = agent.CloneContextTransfer(turn)
+	freshTurn = agent.CloneContextTransfer(freshTurn)
+	if agent.ContextTransferEmpty(activation) {
+		return turn, turnSyncSeq, false
+	}
+	if activationFresh {
+		// A fresh remote has no durable baseline. While its full bootstrap is
+		// pending, replace it only with the Runtime's newer full route; an
+		// incremental route is relative to the old remote's checkpoint and
+		// cannot safely supersede the bootstrap.
+		if !agent.ContextTransferEmpty(freshTurn) && turnSyncSeq >= activationSyncSeq {
+			return freshTurn, turnSyncSeq, true
+		}
+		return activation, activationSyncSeq, true
+	}
+	if !agent.ContextTransferEmpty(turn) && turnSyncSeq >= activationSyncSeq {
+		// Runtime routes the Turn from the still-durable delivered checkpoint,
+		// so this offset already contains the unsent activation offset. Prefer
+		// it instead of duplicating the same history in the first prompt.
+		return turn, turnSyncSeq, false
+	}
+	return agent.MergeContextTransfers(activation, turn), max(activationSyncSeq, turnSyncSeq), false
 }
 
 func composeACPContextPrompt(prompt []json.RawMessage, contextTransfer agent.ContextTransfer) []json.RawMessage {
@@ -1530,6 +1723,14 @@ func newParticipantAttachmentGeneration() (string, error) {
 		return "", fmt.Errorf("internal/acpagentbridge/controller: generate participant attachment generation: %w", err)
 	}
 	return hex.EncodeToString(raw[:]), nil
+}
+
+func newControllerEpoch() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("internal/acpagentbridge/controller: generate controller epoch: %w", err)
+	}
+	return "controller-" + hex.EncodeToString(raw[:]), nil
 }
 
 func (r *participantRun) permissionHandler(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {

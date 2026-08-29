@@ -42,9 +42,6 @@ func injectACPControlPlane(
 	sessionPreparer acpsubagent.SessionPreparer,
 	endpointResolver endpoint.Resolver,
 ) (runtime.Config, *acpassembly.ControlPlane, error) {
-	if len(resolved.Agents) == 0 {
-		return cfg, nil, nil
-	}
 	controlPlane, err := acpassembly.NewControlPlane(acpassembly.ControlPlaneConfig{
 		Agents:            resolved.Agents,
 		PlacementResolver: placementResolver,

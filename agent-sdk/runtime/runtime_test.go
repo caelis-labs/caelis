@@ -1439,6 +1439,83 @@ func TestRuntimeACPControllerTurnSendsUnsyncedSharedDialogue(t *testing.T) {
 	}
 }
 
+func TestRuntimePersistsFreshRemoteBindingAndRoutesBootstrapContext(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	sessions, activeSession := newTestSessionService(t, "sess-acp-fresh-remote-binding")
+	for _, event := range []*session.Event{userTextEvent("previous request"), assistantEvent("previous answer")} {
+		if _, err := sessions.AppendEvent(ctx, session.AppendEventRequest{
+			SessionRef: activeSession.SessionRef,
+			Event:      event,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	durableBinding := session.ControllerBinding{
+		Kind:            session.ControllerKindACP,
+		ControllerID:    "acp-main",
+		AgentName:       "codex",
+		Label:           "ACP Main",
+		EpochID:         "epoch-fresh-remote",
+		RemoteSessionID: "remote-old",
+		ContextSyncSeq:  2,
+		Source:          "test",
+	}
+	activeSession, err := sessions.BindController(ctx, session.BindControllerRequest{
+		SessionRef: activeSession.SessionRef,
+		Binding:    durableBinding,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveBinding := session.CloneControllerBinding(durableBinding)
+	liveBinding.RemoteSessionID = "remote-fresh"
+	turnRequests := make(chan controller.TurnRequest, 1)
+	backend := bindingAwareACPController{
+		binding: liveBinding,
+		stubACPController: stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+			turnRequests <- req
+			handle := newTestControllerTurnHandle(nil)
+			handle.publishEvent(assistantEvent("fresh answer"))
+			handle.finish()
+			return controller.TurnResult{Handle: handle}, nil
+		}},
+	}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions:     sessions,
+		AgentFactory: chat.Factory{SystemPrompt: "Be terse."},
+		Controllers:  backend,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runtime.Run(ctx, agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "new request",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := drainRunnerEvents(t, result.Handle); err != nil {
+		t.Fatal(err)
+	}
+	turnReq := <-turnRequests
+	if !agent.ContextTransferEmpty(turnReq.Context) {
+		t.Fatalf("resume context = %#v, want no already-delivered dialogue", turnReq.Context)
+	}
+	if len(turnReq.FreshContext.Turns) != 1 || turnReq.FreshContext.Turns[0].AssistantSummary != "previous answer" {
+		t.Fatalf("fresh context = %#v, want complete previous dialogue", turnReq.FreshContext)
+	}
+	updated, err := sessions.Session(ctx, activeSession.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Controller.RemoteSessionID != "remote-fresh" || updated.Controller.EpochID != durableBinding.EpochID {
+		t.Fatalf("persisted controller = %#v, want live replacement remote binding", updated.Controller)
+	}
+}
+
 func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 	t.Parallel()
 

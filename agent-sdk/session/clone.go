@@ -141,6 +141,7 @@ func CloneControllerBinding(in ControllerBinding) ControllerBinding {
 		ControllerID:    strings.TrimSpace(in.ControllerID),
 		AgentName:       strings.TrimSpace(in.AgentName),
 		Label:           strings.TrimSpace(in.Label),
+		Placement:       placement.Normalize(in.Placement),
 		EpochID:         strings.TrimSpace(in.EpochID),
 		RemoteSessionID: strings.TrimSpace(in.RemoteSessionID),
 		ContextSyncSeq:  in.ContextSyncSeq,

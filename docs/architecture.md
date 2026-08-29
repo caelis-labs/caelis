@@ -126,7 +126,12 @@ Document responsibilities are intentionally separate:
   not parallel persisted defaults. `/connect` produces these profiles for both
   backend kinds. A model selection made without a selected Session changes this
   persisted Host default for future Sessions. Once a Session is selected, model
-  selection changes only that Session's revision-fenced override. Process
+  selection changes only that Session: a provider profile keeps the SDK Kernel
+  controller and writes its revision-fenced model state, while an ACP profile
+  hands controller ownership to the external Agent through Control. The durable
+  controller binding carries the complete sealed placement, remote Session
+  identity, epoch, and context-sync position required for later reattachment.
+  Process
   startup flags may choose a different effective model for new work without
   mutating the persisted Host default; Host status must report that effective
   selection until an explicit Host model mutation supersedes it.
@@ -135,8 +140,9 @@ Document responsibilities are intentionally separate:
   canonical effort.
 - `control/placement`: the Control-owned placement boundary. Fixed-handle work
   uses its handle resolver; participant attach uses its explicit profile-and-
-  effort selector. Both paths consume the same immutable snapshot and sealing
-  rules before durable work is prepared.
+  effort selector; main Session selection uses the backend-neutral profile
+  resolver. All paths consume the same immutable snapshot and sealing rules
+  before durable work is prepared.
 - `control/taskstream`: the Control-owned, Session-authorized Task directory,
   lightweight current-status observation, and transient content-record
   service for existing Tasks. A content stream is addressed only by
@@ -269,7 +275,7 @@ Document responsibilities are intentionally separate:
   lease, timer, persisted generation, or user-facing reload command. Prompt,
   skill, plugin, tool, sandbox, and ordinary Agent or placement changes
   therefore affect later activations rather than mutating a live Runtime. The
-  App model catalog has two deliberate live exceptions. `/connect` is
+  App model catalog has deliberate live exceptions. `/connect` is
   immediately visible to every model picker. `/disconnect provider` removes the
   profile and its Agent bindings from every live Runtime catalog and placement
   snapshot; an affected durable Session selection is revision-safely changed to
@@ -278,7 +284,14 @@ Document responsibilities are intentionally separate:
   deleted profile. `/model` writes either the selected Session or, when no
   Session is selected, the persisted Host default. When a dormant Session
   reconnects, the same missing-reference repair runs before the reconnect
-  snapshot is returned.
+  snapshot is returned. `/disconnect acp` removes the Agent and all of its
+  profiles and fixed bindings, revokes that Agent from every live Runtime
+  placement snapshot, detaches matching participants, and changes an affected
+  main controller to the remaining Host default. When no profile remains, the
+  Session returns to the SDK Kernel with no configured model. Dormant bindings
+  are repaired without starting an external process; loaded bindings use their
+  owning Session Runtime so live endpoint shutdown and durable handoff remain
+  coordinated.
   No workspace configuration generation or Session-to-generation binding is
   persisted; durable Sessions store only canonical workspace identity.
   Session activation and app configuration mutation are independent: assembly
@@ -288,7 +301,8 @@ Document responsibilities are intentionally separate:
   atomic-replacement snapshot without taking the writer lock. Only legacy
   migration enters a read-side lock.
   Writers ordinarily do not scan or rewrite already activated Session state;
-  committed provider-profile removal is the narrow exception described above.
+  explicit provider-profile deletion and external-Agent disconnect are the
+  narrow revocation exceptions described above.
   Runtime release first hides its Runtime from routing, waits already-routed
   synchronous mutations and Runtime producers, and shutdown drains in-flight assembly and
   release before closing all Session Gateways and the Host composition. Product
@@ -317,6 +331,14 @@ Document responsibilities are intentionally separate:
   caller-selected Host and never falls back to managed local mode. Session
   lifecycle and main-Turn ingress use principal-bound
   AppServer clients over embedded or HTTP/SSE transports. TUI and product ACP
+  Session creation are distinct authorities: the Host binds a dedicated
+  `acp-ingress` role to the product ACP process through an independent protected
+  credential (or the equivalent embedded capability). Control uses that trusted
+  principal to commit the local Kernel controller in the initial Session write;
+  request metadata cannot select or spoof that controller. An explicit remote
+  ACP attachment must use a Host-issued ingress token; the bridge verifies the
+  committed controller provenance and closes the new Session if the Host did
+  not accept that authority. TUI and product ACP
   slash routers also use
   focused status, configuration, Agent, participant, completion/skill, and
   plugin clients; slash parsing and display stay client-side. The production TUI
@@ -376,16 +398,17 @@ Document responsibilities are intentionally separate:
   or recreate `ports/*`; stable capabilities belong in coherent `control/*`
   packages. The shared router consumes only prompt-routing facets; the TUI owns
   its additional mode, completion, plugin, connector, and binding aggregate.
-  The TUI uses external
-  ACP connections only as Side ACP participants; it does not bind an external
-  ACP endpoint as the Session's main controller or project that endpoint's
-  slash/model catalog. A legacy ACP-controller Session cannot be resumed or
-  activated for work by the TUI. This presentation boundary is separate from
-  Caelis serving inbound ACP clients, whose model selection uses the standard
-  ACP `model` configuration option rather than the retired `models` response
-  field, `session/set_model`, or a `/model` command. The external-Agent client
-  retains the old model channel only as a compatibility fallback for peers that
-  do not advertise a model configuration option.
+  The TUI's `/model` picker projects the unified provider and ACP
+  `ModelProfile` catalog. Selecting an ACP profile binds that endpoint as the
+  Session's main controller; replay, live envelopes, input, approval, and
+  context transfer continue through the same AppServer contracts used for a
+  Kernel-controlled Session. The Surface never owns the controller process or
+  handoff decision. This presentation boundary is separate from Caelis serving
+  inbound ACP clients, whose model selection uses the standard ACP `model`
+  configuration option rather than the retired `models` response field,
+  `session/set_model`, or a `/model` command. The external-Agent client retains
+  the old model channel only as a compatibility fallback for peers that do not
+  advertise a model configuration option.
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
   product integration adapters that make external endpoints implement the same
   SDK controller/participant contracts used by built-in Agents. Product

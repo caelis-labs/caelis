@@ -14,7 +14,9 @@ func newTestAgentFromStack(stack *gatewayapp.Stack) (*surfaceacp.ProductAgent, e
 	if err != nil {
 		return nil, err
 	}
-	clients, err := appServer.Bind(appserver.Principal{ID: stack.UserID()})
+	clients, err := appServer.Bind(appserver.Principal{
+		ID: stack.UserID(), Roles: []string{appserver.RoleACPIngress},
+	})
 	if err != nil {
 		return nil, err
 	}

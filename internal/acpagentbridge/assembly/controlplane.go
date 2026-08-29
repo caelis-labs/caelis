@@ -2,6 +2,7 @@ package assembly
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
@@ -48,7 +49,11 @@ func NewControlPlane(cfg ControlPlaneConfig) (*ControlPlane, error) {
 	if err != nil {
 		return nil, err
 	}
-	manager, err := acpcontroller.NewManager(acpcontroller.Config{Registry: registry, EndpointResolver: cfg.EndpointResolver})
+	manager, err := acpcontroller.NewManager(acpcontroller.Config{
+		Registry:          registry,
+		EndpointResolver:  cfg.EndpointResolver,
+		PlacementResolver: cfg.PlacementResolver,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -63,10 +68,18 @@ func NewControlPlane(cfg ControlPlaneConfig) (*ControlPlane, error) {
 
 // Quiesce drains the Host-owned external child producer boundary.
 func (c *ControlPlane) Quiesce(ctx context.Context) error {
-	if c == nil || c.runner == nil {
+	if c == nil {
 		return nil
 	}
-	return c.runner.Quiesce(ctx)
+	var runnerErr error
+	if c.runner != nil {
+		runnerErr = c.runner.Quiesce(ctx)
+	}
+	var managerErr error
+	if c.manager != nil {
+		managerErr = c.manager.Quiesce(ctx)
+	}
+	return errors.Join(runnerErr, managerErr)
 }
 
 // LoadHistory delegates one read-only provider session/load to the shared

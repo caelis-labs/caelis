@@ -203,6 +203,7 @@ func (s *Store) StartSession(
 			CWD:          strings.TrimSpace(req.Workspace.CWD),
 			Title:        strings.TrimSpace(req.Title),
 			Metadata:     cloneMap(req.Metadata),
+			Controller:   session.CloneControllerBinding(req.Controller),
 			CreatedAt:    now,
 			UpdatedAt:    now,
 			Participants: nil,
@@ -739,10 +740,10 @@ func (s *Store) BindControllerWithEvent(
 				active.Controller = session.CloneControllerBinding(req.Binding)
 				return true, nil
 			},
-			nil,
+			req.UpdateState,
 			req.ExpectedRevision,
-			"",
-			"",
+			req.TransactionID,
+			req.MutationDigest,
 			prewarm,
 		)
 		if err != nil {

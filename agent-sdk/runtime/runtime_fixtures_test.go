@@ -45,6 +45,15 @@ type steeringACPController struct {
 	steerController  func(context.Context, controller.ControllerSteerRequest) error
 }
 
+type bindingAwareACPController struct {
+	stubACPController
+	binding session.ControllerBinding
+}
+
+func (c bindingAwareACPController) ActiveControllerBinding(context.Context, session.SessionRef) (session.ControllerBinding, bool, error) {
+	return session.CloneControllerBinding(c.binding), true, nil
+}
+
 func (s steeringACPController) SteerController(ctx context.Context, req controller.ControllerSteerRequest) error {
 	if s.steerController == nil {
 		return controller.ErrControllerSteeringUnsupported
@@ -470,7 +479,14 @@ func (r testContextRouter) ControllerContext(ctx context.Context, req controller
 	if err != nil {
 		return controller.ContextRoute{}, err
 	}
-	return controller.ContextRoute{Context: contextTransfer, SyncSeq: checkpoint}, nil
+	freshContext := contextTransfer
+	if req.SinceSeq != 0 {
+		freshContext, _, err = r.contextTransfer(ctx, req.SessionRef, 0, req.ExcludeTurnID)
+		if err != nil {
+			return controller.ContextRoute{}, err
+		}
+	}
+	return controller.ContextRoute{Context: contextTransfer, FreshContext: freshContext, SyncSeq: checkpoint}, nil
 }
 
 func (r testContextRouter) ParticipantContext(ctx context.Context, req controller.ParticipantContextRequest) (controller.ContextRoute, error) {

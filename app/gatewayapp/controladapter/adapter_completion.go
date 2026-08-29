@@ -201,14 +201,26 @@ func (d *assembler) completeModelReasoningLevels(ctx context.Context, aliasQuery
 		//nolint:nilerr // Completion is best-effort; an unresolved alias yields no candidates.
 		return nil, nil
 	}
-	if d.deps.Model.ConfigFn == nil {
-		return nil, nil
+	ref := session.SessionRef{}
+	if activeSession, ok := d.currentSession(); ok {
+		ref = activeSession.SessionRef
 	}
-	cfg, ok := d.deps.Model.ConfigFn(alias)
-	if !ok {
-		return nil, nil
+	choices, err := listModelChoices(ctx, d.deps.Model, ref)
+	if err != nil {
+		return nil, err
 	}
-	levels := d.configuredModelReasoningLevels(cfg)
+	var levels []string
+	for _, choice := range choices {
+		if strings.EqualFold(strings.TrimSpace(choice.ID), alias) || strings.EqualFold(strings.TrimSpace(choice.Alias), alias) {
+			levels = append([]string(nil), choice.ReasoningLevels...)
+			break
+		}
+	}
+	if len(levels) == 0 && d.deps.Model.ConfigFn != nil {
+		if cfg, ok := d.deps.Model.ConfigFn(alias); ok {
+			levels = d.configuredModelReasoningLevels(cfg)
+		}
+	}
 	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(levels)))
 	for _, level := range levels {
 		if query != "" && !hasSlashArgPrefix(query, level) {
@@ -296,6 +308,7 @@ func controllerCommandNames(commands []controller.ControllerCommand) []string {
 func acpControllerModelText(status controller.ControllerStatus, activeSession session.Session) string {
 	return firstNonEmpty(
 		strings.TrimSpace(status.Model),
+		strings.TrimSpace(activeSession.Controller.Placement.Model),
 		strings.TrimSpace(status.Agent),
 		strings.TrimSpace(activeSession.Controller.AgentName),
 		strings.TrimSpace(activeSession.Controller.Label),

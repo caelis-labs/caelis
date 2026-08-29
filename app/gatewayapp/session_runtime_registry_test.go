@@ -28,6 +28,7 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
@@ -272,7 +273,7 @@ func TestActiveSessionRuntimePromptsAfterConnectingAndSelectingNewModel(t *testi
 			ExpectedRevision:        &active.Revision,
 			ExpectedControllerEpoch: active.Controller.EpochID,
 		},
-		Model: modelConfig.ID,
+		Model: modelprofile.BuildProviderID(modelConfig.ID),
 	})
 	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel(mimo-v2.5) = %#v, %v", selected, err)
@@ -310,7 +311,7 @@ func waitForGatewayAppTestTurn(t *testing.T, stack *Stack, sessionID string) {
 	t.Fatalf("Session %q Turn did not stop", sessionID)
 }
 
-func TestSessionRuntimeSelectsNewCatalogModelPinsDeletionAndRepairsOnReactivation(t *testing.T) {
+func TestSessionRuntimeSelectsNewCatalogModelAndRefreshesDeletionImmediately(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
@@ -348,8 +349,8 @@ func TestSessionRuntimeSelectsNewCatalogModelPinsDeletionAndRepairsOnReactivatio
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, lateID); err != nil {
 		t.Fatal(err)
 	}
-	if state, err := runtime.instance.SessionRuntimeState(ctx, active.SessionRef); err != nil || state.ModelID != lateID {
-		t.Fatalf("active Runtime state after deletion = %#v, %v; want pinned %q", state, err, lateID)
+	if state, err := runtime.instance.SessionRuntimeState(ctx, active.SessionRef); err != nil || state.ModelID != initialID {
+		t.Fatalf("active Runtime state after deletion = %#v, %v; want fallback %q", state, err, initialID)
 	}
 	if _, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
 		WriteBase: appserver.WriteBase{
@@ -368,8 +369,8 @@ func TestSessionRuntimeSelectsNewCatalogModelPinsDeletionAndRepairsOnReactivatio
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := kernelimpl.CurrentModelAlias(beforeRecoveryState); got != lateID {
-		t.Fatalf("durable model before Runtime release = %q, want stale reference %q", got, lateID)
+	if got := kernelimpl.CurrentModelAlias(beforeRecoveryState); got != initialID {
+		t.Fatalf("durable model before Runtime release = %q, want immediate fallback %q", got, initialID)
 	}
 	if err := stack.sessionRuntimes.release(ctx, active.SessionID); err != nil {
 		t.Fatal(err)
@@ -391,8 +392,8 @@ func TestSessionRuntimeSelectsNewCatalogModelPinsDeletionAndRepairsOnReactivatio
 	if got := kernelimpl.CurrentReasoningEffort(recoveredState); got != "" {
 		t.Fatalf("recovered Session reasoning effort = %q, want cleared incompatible override", got)
 	}
-	if recovered.Revision != beforeRecovery.Revision+1 {
-		t.Fatalf("recovered Session revision = %d, want %d", recovered.Revision, beforeRecovery.Revision+1)
+	if recovered.Revision != beforeRecovery.Revision {
+		t.Fatalf("recovered Session revision = %d, want unchanged %d", recovered.Revision, beforeRecovery.Revision)
 	}
 }
 
@@ -983,7 +984,7 @@ func (s *blockingUpdateSessionService) UpdateState(ctx context.Context, request 
 	}
 }
 
-func TestDormantSessionModelRecoveryClearsSelectionWhenCatalogIsEmpty(t *testing.T) {
+func TestDormantSessionModelRecoveryClearsSelectionImmediatelyWhenCatalogIsEmpty(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
@@ -1011,8 +1012,8 @@ func TestDormantSessionModelRecoveryClearsSelectionWhenCatalogIsEmpty(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inspected.Revision != updated.Revision {
-		t.Fatalf("read-only InspectSession revision = %d, want unchanged %d", inspected.Revision, updated.Revision)
+	if inspected.Revision != updated.Revision+1 {
+		t.Fatalf("Session revision after delete = %d, want immediate repair %d", inspected.Revision, updated.Revision+1)
 	}
 	_, recovered, err := stack.sessionRuntimes.activateSession(ctx, active.SessionID)
 	if err != nil {
@@ -1028,8 +1029,8 @@ func TestDormantSessionModelRecoveryClearsSelectionWhenCatalogIsEmpty(t *testing
 	if got := kernelimpl.CurrentReasoningEffort(state); got != "" {
 		t.Fatalf("recovered reasoning effort = %q, want cleared", got)
 	}
-	if recovered.Revision != updated.Revision+1 {
-		t.Fatalf("recovered revision = %d, want %d", recovered.Revision, updated.Revision+1)
+	if recovered.Revision != inspected.Revision {
+		t.Fatalf("activation revision = %d, want already-repaired %d", recovered.Revision, inspected.Revision)
 	}
 }
 
@@ -1038,7 +1039,7 @@ func TestDormantSessionModelRecoveryReturnsLastRevisionConflict(t *testing.T) {
 	stack, active := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
 	modelID := stack.composition.lookup.DefaultID()
-	updated, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
+	_, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
 		SessionRef:    active.SessionRef,
 		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
 		Update: func(state map[string]any) (map[string]any, error) {
@@ -1054,6 +1055,26 @@ func TestDormantSessionModelRecoveryReturnsLastRevisionConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, modelID); err != nil {
+		t.Fatal(err)
+	}
+	current, err := stack.composition.sessions.Session(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
+		SessionRef:       current.SessionRef,
+		ExpectedRevision: &current.Revision,
+		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		Update: func(state map[string]any) (map[string]any, error) {
+			next := session.CloneState(state)
+			if next == nil {
+				next = map[string]any{}
+			}
+			next[kernelimpl.StateCurrentModelAlias] = modelID
+			return next, nil
+		},
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	original := stack.composition.sessions

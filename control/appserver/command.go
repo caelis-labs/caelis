@@ -19,6 +19,11 @@ type Principal struct {
 }
 
 const (
+	// RoleACPIngress identifies the product ACP presentation process. Control
+	// uses this adapter-bound authority to create an ACP-originated Session with
+	// the local Kernel controller atomically; request payloads cannot grant it.
+	RoleACPIngress = "acp-ingress"
+
 	// RoleSystemSessionRuntime allows a dedicated internal Turn-delivery client
 	// to observe a system-managed Session without being its owner. Owner exact-
 	// target Reconnect/Inspect remain available without this role so product ACP

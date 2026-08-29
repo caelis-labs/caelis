@@ -342,6 +342,44 @@ func TestExplicitRemoteHostRequiresCWDSessionListingCapability(t *testing.T) {
 	}
 }
 
+func TestRemoteACPIngressDefaultsToHostIssuedIngressCredential(t *testing.T) {
+	storeDir := t.TempDir()
+	if _, err := controlserver.LoadOrCreateBearerToken(controlserver.DefaultTokenFile(storeDir)); err != nil {
+		t.Fatal(err)
+	}
+	acpToken, err := controlserver.LoadOrCreateBearerToken(controlserver.DefaultACPIngressTokenFile(storeDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	build := version.BuildInfo()
+	server := testenv.NewHTTPServer(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/control/v1/initialize" {
+			http.NotFound(writer, request)
+			return
+		}
+		if request.Header.Get("Authorization") != "Bearer "+acpToken {
+			http.Error(writer, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(writer).Encode(appserver.ServerInfo{
+			ProtocolVersion: acpsdk.ProtocolVersionNumber, EnvelopeVersion: appserver.EnvelopeVersion,
+			APIVersion: appserver.HTTPAPIVersion, ServerID: appserver.ServerIdentity,
+			DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
+			Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},
+		})
+	}))
+	product, err := openProductClients(t.Context(), gatewayapp.Config{}, productClientOptions{
+		Mode: productClientModeRemote, ControlURL: server.URL, StoreDir: storeDir,
+		HTTPClient: server.Client(), ACPIngress: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := product.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestManagedHostOwnershipPreventsEmbeddedFallback(t *testing.T) {
 	storeDir := t.TempDir()
 	if _, err := controlserver.LoadOrCreateBearerToken(controlserver.DefaultTokenFile(storeDir)); err != nil {
@@ -383,6 +421,58 @@ func TestManagedHostOwnershipPreventsEmbeddedFallback(t *testing.T) {
 	}
 	if endpointCalls.Load() != 0 {
 		t.Fatalf("embedded fallback endpoint calls = %d, want 0", endpointCalls.Load())
+	}
+}
+
+func TestManagedACPIngressUsesHostIssuedRoleCredential(t *testing.T) {
+	storeDir := t.TempDir()
+	normalToken, err := controlserver.LoadOrCreateBearerToken(controlserver.DefaultTokenFile(storeDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	acpToken, err := controlserver.LoadOrCreateBearerToken(controlserver.DefaultACPIngressTokenFile(storeDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	instanceID := uuid.NewString()
+	build := version.BuildInfo()
+	info := appserver.ServerInfo{
+		ProtocolVersion: acpsdk.ProtocolVersionNumber, EnvelopeVersion: appserver.EnvelopeVersion,
+		APIVersion: appserver.HTTPAPIVersion, ServerID: appserver.ServerIdentity,
+		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
+		InstanceID: instanceID, Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},
+	}
+	var authHeaders []string
+	server := testenv.NewHTTPServer(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/readyz":
+			_ = json.NewEncoder(writer).Encode(appserver.HostStatus{
+				ServerID: info.ServerID, InstanceID: info.InstanceID, Ready: true,
+			})
+		case "/api/control/v1/initialize":
+			authHeaders = append(authHeaders, request.Header.Get("Authorization"))
+			_ = json.NewEncoder(writer).Encode(info)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	if err := controlserver.PublishDiscoveryRecord(controlserver.DefaultDiscoveryFile(storeDir), controlserver.DiscoveryRecord{
+		SchemaVersion: controlserver.DiscoverySchemaVersion,
+		ServerID:      info.ServerID, InstanceID: info.InstanceID,
+		AppName: "caelis", PrincipalID: "local-user", PID: 1, Endpoint: server.URL,
+		ProtocolVersion: info.ProtocolVersion, EnvelopeVersion: info.EnvelopeVersion, APIVersion: info.APIVersion,
+		DistributionVersion: info.DistributionVersion, BuildID: info.BuildID, BuildKind: info.BuildKind,
+		Capabilities: info.Capabilities, Transports: info.Transports, StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := attachManagedHostClient(t.Context(), productClientOptions{
+		StoreDir: storeDir, AppName: "caelis", UserID: "local-user", HTTPClient: server.Client(), ACPIngress: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(authHeaders) != 2 || authHeaders[0] != "Bearer "+normalToken || authHeaders[1] != "Bearer "+acpToken {
+		t.Fatalf("initialize authorization headers = %#v, want normal discovery then ACP ingress", authHeaders)
 	}
 }
 

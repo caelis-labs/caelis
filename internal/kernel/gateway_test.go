@@ -2020,6 +2020,42 @@ func TestSubmitActiveTurnRejectsReplacedExactTarget(t *testing.T) {
 	}
 }
 
+func TestCancelActiveTurnAndWaitDrainsAlreadyCancelledHandle(t *testing.T) {
+	t.Parallel()
+
+	ref := session.SessionRef{SessionID: "session-1"}
+	handle := newTurnHandle(turnHandleConfig{
+		handleID: "handle-1", runID: "run-1", turnID: "turn-1",
+		activeKind: ActiveTurnKindKernel, sessionRef: ref,
+	})
+	gateway := &Gateway{
+		active:        map[string]*turnHandle{ref.SessionID: handle},
+		activeChanged: make(chan struct{}),
+	}
+	expected, ok := gateway.ActiveTurn(ref.SessionID)
+	if !ok {
+		t.Fatal("ActiveTurn() = false, want active handle")
+	}
+	if !handle.Cancel().Cancelled() {
+		t.Fatal("initial Cancel() did not cancel handle")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- gateway.CancelActiveTurnAndWait(context.Background(), expected)
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("CancelActiveTurnAndWait() returned before release: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	gateway.releaseActive(ref.SessionID, handle)
+	if err := <-done; err != nil {
+		t.Fatalf("CancelActiveTurnAndWait() error = %v", err)
+	}
+}
+
 func TestBeginTurnDefaultsToStreamingRequestsAtGatewayBoundary(t *testing.T) {
 	t.Parallel()
 

@@ -35,6 +35,9 @@ type runtimeComposition struct {
 
 	spawnedSessionPinsMu      sync.Mutex
 	spawnedSessionPinReleases map[string]func()
+	// acpSelectionMu serializes staged ACP registry/placement changes across
+	// the durable controller handoff that decides commit or rollback.
+	acpSelectionMu sync.Mutex
 
 	lookup                   *modelLookup
 	mu                       sync.RWMutex

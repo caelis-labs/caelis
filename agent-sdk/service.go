@@ -209,13 +209,15 @@ type PromptParticipantRequest struct {
 // HandoffControllerRequest switches the active controller for one session. The
 // request is app-owned and not exposed on the LLM-facing tool surface.
 type HandoffControllerRequest struct {
-	SessionRef              session.SessionRef     `json:"session_ref"`
-	ExpectedRevision        *uint64                `json:"expected_revision,omitempty"`
-	ExpectedControllerEpoch string                 `json:"expected_controller_epoch,omitempty"`
-	Kind                    session.ControllerKind `json:"kind,omitempty"`
-	Agent                   string                 `json:"agent,omitempty"`
-	Source                  string                 `json:"source,omitempty"`
-	Reason                  string                 `json:"reason,omitempty"`
+	SessionRef              session.SessionRef        `json:"session_ref"`
+	ExpectedRevision        *uint64                   `json:"expected_revision,omitempty"`
+	ExpectedControllerEpoch string                    `json:"expected_controller_epoch,omitempty"`
+	Kind                    session.ControllerKind    `json:"kind,omitempty"`
+	Agent                   string                    `json:"agent,omitempty"`
+	Placement               placement.Placement       `json:"placement,omitzero"`
+	Source                  string                    `json:"source,omitempty"`
+	Reason                  string                    `json:"reason,omitempty"`
+	StateUpdate             session.AppendStateUpdate `json:"-"`
 }
 
 // ParticipantControlPlane exposes neutral participant execution capabilities.

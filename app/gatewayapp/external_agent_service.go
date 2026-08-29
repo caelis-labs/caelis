@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
@@ -82,6 +81,7 @@ func (s *controlCommandBackend) disconnectACPAtRevision(ctx context.Context, age
 	if err != nil {
 		return mutation, controlagents.DisconnectResult{}, fmt.Errorf("gatewayapp: %w", err)
 	}
+	removedProfileIDs := make([]string, 0)
 	for _, profile := range modelprofile.NormalizeConfiguration(doc.ModelProfiles).Profiles {
 		if profile.Kind() != modelprofile.BackendACP || profile.Backend.ACP.AgentID != result.Agent.ID {
 			continue
@@ -91,6 +91,14 @@ func (s *controlCommandBackend) disconnectACPAtRevision(ctx context.Context, age
 		// deletion keeps the stricter explicit rebind/reset protection.
 		doc.AgentBindings, _ = agentbinding.RemoveProfileBindings(doc.AgentBindings, profile.ID)
 		doc.ModelProfiles = modelprofile.Remove(doc.ModelProfiles, profile.ID)
+		removedProfileIDs = append(removedProfileIDs, profile.ID)
+	}
+	profiles := modelprofile.NormalizeConfiguration(doc.ModelProfiles)
+	if profiles.DefaultProfileID == "" && len(profiles.Profiles) > 0 {
+		doc.ModelProfiles, err = modelprofile.SelectDefault(profiles, profiles.Profiles[0].ID, "")
+		if err != nil {
+			return mutation, controlagents.DisconnectResult{}, fmt.Errorf("gatewayapp: select model fallback after ACP disconnect: %w", err)
+		}
 	}
 	doc.ExternalAgents = next
 	saved, persistErr := s.composition.authorities.store.CompareAndSave(ctx, expected, doc)
@@ -101,25 +109,21 @@ func (s *controlCommandBackend) disconnectACPAtRevision(ctx context.Context, age
 	mutation.EffectStarted = true
 	mutation.Revision = configurationErrorRevision(persistErr, saved.ConfigurationRevision)
 	if saved.ConfigurationRevision == 0 {
-		reconcileErr := s.reconcileCommittedExternalAgents(ctx)
+		reconcileErr := s.reconcileDisconnectedACPAgent(ctx, result.Agent.ID, removedProfileIDs)
 		return mutation, result, errors.Join(
 			persistErr,
 			errors.New("gatewayapp: committed external Agent configuration revision is unknown"),
 			wrapOptionalError("gatewayapp: reconcile unobserved external Agent configuration", reconcileErr),
 		)
 	}
-	mutation.Warning = wrapOptionalError("gatewayapp: external Agent configuration durability warning", persistErr)
+	mutation.Warning = errors.Join(
+		wrapOptionalError("gatewayapp: external Agent configuration durability warning", persistErr),
+		wrapOptionalError(
+			"gatewayapp: reconcile disconnected external Agent with current Sessions",
+			s.reconcileDisconnectedACPAgent(ctx, result.Agent.ID, removedProfileIDs),
+		),
+	)
 	return mutation, result, nil
-}
-
-func (s *controlCommandBackend) reconcileCommittedExternalAgents(ctx context.Context) error {
-	if s == nil || s.composition.authorities.store == nil {
-		return errors.New("gatewayapp: external Agent configuration is unavailable")
-	}
-	reconcileCtx, cancel := context.WithTimeout(context.WithoutCancel(contextOrBackground(ctx)), 5*time.Second)
-	defer cancel()
-	_, err := s.composition.authorities.store.LoadContext(reconcileCtx)
-	return err
 }
 
 func (s *controlCommandBackend) acpDiscoveryService() discovery.Service {

@@ -81,17 +81,20 @@ type HandoffRequest struct {
 	SessionRef     session.SessionRef    `json:"session_ref,omitempty"`
 	Session        session.Session       `json:"session,omitempty"`
 	Agent          string                `json:"agent,omitempty"`
+	Placement      placement.Placement   `json:"placement,omitzero"`
 	Source         string                `json:"source,omitempty"`
 	Reason         string                `json:"reason,omitempty"`
 	Context        agent.ContextTransfer `json:"context,omitempty"`
+	FreshContext   agent.ContextTransfer `json:"fresh_context,omitempty"`
 	ContextSyncSeq uint64                `json:"context_sync_seq,omitempty"`
 }
 
 // ContextRoute is one Control-selected context synchronization payload for an
 // endpoint turn or activation.
 type ContextRoute struct {
-	Context agent.ContextTransfer `json:"context,omitempty"`
-	SyncSeq uint64                `json:"sync_seq,omitempty"`
+	Context      agent.ContextTransfer `json:"context,omitempty"`
+	FreshContext agent.ContextTransfer `json:"fresh_context,omitempty"`
+	SyncSeq      uint64                `json:"sync_seq,omitempty"`
 }
 
 // ControllerContextRequest asks Control to select the canonical context that
@@ -143,6 +146,7 @@ type TurnRequest struct {
 	Input             string                `json:"input,omitempty"`
 	ContentParts      []model.ContentPart   `json:"content_parts,omitempty"`
 	Context           agent.ContextTransfer `json:"context,omitempty"`
+	FreshContext      agent.ContextTransfer `json:"fresh_context,omitempty"`
 	ContextSyncSeq    uint64                `json:"context_sync_seq,omitempty"`
 	Stream            bool                  `json:"stream,omitempty"`
 	Mode              string                `json:"mode,omitempty"`
@@ -238,6 +242,13 @@ type Backend interface {
 	Detach(context.Context, DetachRequest) error
 }
 
+// BindingProvider reports the exact live binding for an active controller.
+// Runtime uses this optional capability to persist a replacement remote
+// Session created during a proven-unsent reconnect.
+type BindingProvider interface {
+	ActiveControllerBinding(context.Context, session.SessionRef) (session.ControllerBinding, bool, error)
+}
+
 func NormalizeAttachRequest(in AttachRequest) AttachRequest {
 	out := in
 	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
@@ -266,9 +277,11 @@ func NormalizeHandoffRequest(in HandoffRequest) HandoffRequest {
 	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
 	out.Session = session.CloneSession(in.Session)
 	out.Agent = strings.TrimSpace(in.Agent)
+	out.Placement = placement.Normalize(in.Placement)
 	out.Source = strings.TrimSpace(in.Source)
 	out.Reason = strings.TrimSpace(in.Reason)
 	out.Context = agent.CloneContextTransfer(in.Context)
+	out.FreshContext = agent.CloneContextTransfer(in.FreshContext)
 	out.ContextSyncSeq = in.ContextSyncSeq
 	return out
 }
@@ -283,6 +296,7 @@ func NormalizeTurnRequest(in TurnRequest) TurnRequest {
 		out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)
 	}
 	out.Context = agent.CloneContextTransfer(in.Context)
+	out.FreshContext = agent.CloneContextTransfer(in.FreshContext)
 	out.ContextSyncSeq = in.ContextSyncSeq
 	out.Mode = strings.TrimSpace(in.Mode)
 	return out

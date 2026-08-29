@@ -3,11 +3,55 @@ package kernel
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
+
+// BlockSessionTurnAdmission temporarily prevents new main or participant
+// Turns for one Session while Control reconciles an execution-affecting
+// configuration mutation. Existing Turns remain visible so the caller can
+// interrupt them and wait for their durable execution fence to be released.
+func (g *Gateway) BlockSessionTurnAdmission(ref session.SessionRef) (func(), error) {
+	if g == nil {
+		return nil, &Error{Kind: KindInternal, Code: CodeInternal, UserVisible: true, Message: "gateway: gateway is not configured"}
+	}
+	ref = session.NormalizeSessionRef(ref)
+	sessionID := strings.TrimSpace(ref.SessionID)
+	if sessionID == "" {
+		return nil, &Error{Kind: KindValidation, Code: CodeInvalidRequest, UserVisible: true, Message: "gateway: session id is required for a Turn admission block"}
+	}
+	g.mu.Lock()
+	if g.quiescing {
+		g.mu.Unlock()
+		return nil, hostClosingError()
+	}
+	if g.turnAdmissionBlocks == nil {
+		g.turnAdmissionBlocks = map[string]uint64{}
+	}
+	g.turnAdmissionBlocks[sessionID]++
+	g.mu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			g.mu.Lock()
+			remaining := g.turnAdmissionBlocks[sessionID]
+			if remaining <= 1 {
+				delete(g.turnAdmissionBlocks, sessionID)
+			} else {
+				g.turnAdmissionBlocks[sessionID] = remaining - 1
+			}
+			g.mu.Unlock()
+		})
+	}, nil
+}
+
+func (g *Gateway) sessionTurnAdmissionBlockedLocked(sessionID string) bool {
+	return g != nil && g.turnAdmissionBlocks[strings.TrimSpace(sessionID)] > 0
+}
 
 func (g *Gateway) ActiveCounts() (int, int) {
 	if g == nil {
@@ -106,6 +150,46 @@ func (g *Gateway) WaitActiveTurnChange(ctx context.Context, expected ActiveTurnS
 		case <-changed:
 		}
 	}
+}
+
+// CancelActiveTurnAndWait cancels the exact active Turn when it is still
+// present, then waits until its producer releases the durable execution fence.
+// A Turn that was already cancelled is still waited out; callers that hold a
+// Session admission block can therefore reconcile execution-affecting state
+// without racing a draining producer or a replacement Turn.
+func (g *Gateway) CancelActiveTurnAndWait(ctx context.Context, expected ActiveTurnState) error {
+	if g == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	sessionID := strings.TrimSpace(expected.SessionRef.SessionID)
+	if sessionID == "" {
+		return &Error{
+			Kind: KindValidation, Code: CodeInvalidRequest, UserVisible: true,
+			Message: "gateway: session id is required to cancel an active Turn",
+		}
+	}
+	g.mu.Lock()
+	handle := g.active[sessionID]
+	if handle == nil {
+		g.mu.Unlock()
+		return nil
+	}
+	if handle.HandleID() != expected.HandleID || handle.RunID() != expected.RunID ||
+		handle.TurnID() != expected.TurnID || handle.ActiveKind() != expected.Kind ||
+		handle.ParticipantID() != expected.ParticipantID {
+		g.mu.Unlock()
+		return &Error{
+			Kind: KindConflict, Code: CodeActiveRunConflict, UserVisible: true,
+			Message: "gateway: active run does not match cancellation target",
+		}
+	}
+	g.mu.Unlock()
+
+	handle.Cancel()
+	return g.WaitActiveTurnChange(ctx, expected)
 }
 
 // ApprovalTarget returns the exact Turn identity that owns one pending

@@ -71,7 +71,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	if securityPosture.RequiredSandboxBackend != "" {
 		sandboxConfig.RequestedType = string(securityPosture.RequiredSandboxBackend)
 	}
-	runtimeModel, err := resolveRuntimeProviderProfile(
+	runtimeModel, err := resolveRuntimeProfile(
 		doc.ModelProfiles,
 		lookup,
 		runtimeConfig.ModelProfileID,

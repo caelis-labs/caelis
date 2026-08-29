@@ -603,7 +603,7 @@ func TestGatewayACPOnboardingHelperProcess(t *testing.T) {
 
 	authenticated := false
 	connection := jsonrpc.New(os.Stdin, os.Stdout)
-	err = connection.Serve(context.Background(), func(_ context.Context, message jsonrpc.Message) (any, *jsonrpc.RPCError) {
+	err = connection.Serve(context.Background(), func(requestCtx context.Context, message jsonrpc.Message) (any, *jsonrpc.RPCError) {
 		switch message.Method {
 		case acpclient.MethodInitialize:
 			if mode == "block" {
@@ -637,6 +637,12 @@ func TestGatewayACPOnboardingHelperProcess(t *testing.T) {
 					Options: []acpclient.SessionConfigSelectOption{{Value: "remote-model", Name: "Remote Model"}},
 				}},
 			}, nil
+		case acpclient.MethodSessionPrompt:
+			if mode == "controller-blocking" {
+				<-requestCtx.Done()
+				return nil, &jsonrpc.RPCError{Code: -32800, Message: requestCtx.Err().Error()}
+			}
+			return acpclient.PromptResponse{StopReason: "end_turn"}, nil
 		case acpclient.MethodSessionClose:
 			return acpclient.CloseSessionResponse{}, nil
 		default:

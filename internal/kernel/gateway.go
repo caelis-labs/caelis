@@ -61,6 +61,7 @@ type Gateway struct {
 	mu                   sync.Mutex
 	approvalAccountingMu sync.Mutex
 	active               map[string]*turnHandle
+	turnAdmissionBlocks  map[string]uint64
 	quiescing            bool
 	activeChanged        chan struct{}
 	approvals            map[string]*approvalCoordinator
@@ -132,6 +133,7 @@ func New(cfg Config) (*Gateway, error) {
 		clock:                cfg.Clock,
 		sessionStartHooks:    cfg.SessionStartHooks,
 		active:               map[string]*turnHandle{},
+		turnAdmissionBlocks:  map[string]uint64{},
 		activeChanged:        make(chan struct{}),
 		approvals:            map[string]*approvalCoordinator{},
 		bindings:             map[string]sessionBinding{},

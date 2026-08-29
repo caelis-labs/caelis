@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -151,9 +152,33 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 		})
 		return sessionCommandResult(updated), classifyControlBackendError(clearErr)
 	}
-	if active.Controller.Kind == session.ControllerKindACP {
+	selected, found, selectionErr := s.resolveSessionModelProfile(ctx, req.Model, req.ReasoningEffort)
+	if selectionErr != nil {
+		return sessionCommandResult(active), sessionConfigurationRejectedError(selectionErr)
+	}
+	if found {
+		switch selected.Profile.Kind() {
+		case modelprofile.BackendACP:
+			return s.configureSessionACPProfile(ctx, active, selected)
+		case modelprofile.BackendProvider:
+			return s.configureSessionProviderProfile(ctx, active, selected)
+		}
+	}
+	if active.Controller.Kind == session.ControllerKindACP && active.Controller.Placement.Kind == "" {
+		// Compatibility for pre-ModelProfile ACP bindings. New product-owned ACP
+		// controllers always switch through a frozen profile placement.
 		return s.configureACPControllerModel(ctx, active, req)
 	}
+	return sessionCommandResult(active), sessionConfigurationRejected(fmt.Sprintf("model profile %q is not configured", strings.TrimSpace(req.Model)))
+}
+
+func (s *runtimeComposition) configureSessionProviderProfile(
+	ctx context.Context,
+	active session.Session,
+	selected resolvedSessionModelProfile,
+) (appserver.CommandResult, error) {
+	var err error
+	configured := selected.Config
 	catalog := s.lookup
 	if s.activation != nil && s.activation.modelCatalog != nil {
 		catalog = s.activation.modelCatalog
@@ -161,14 +186,7 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 	if catalog == nil || s.lookup == nil {
 		return sessionCommandResult(active), sessionConfigurationRejected("model catalog is unavailable")
 	}
-	configured, err := catalog.ResolveConfig(req.Model)
-	if err != nil {
-		return sessionCommandResult(active), sessionConfigurationRejectedError(err)
-	}
-	reasoning := modelcatalog.NormalizeReasoningEffort(req.ReasoningEffort)
-	if strings.TrimSpace(req.ReasoningEffort) != "" && reasoning == "" {
-		return sessionCommandResult(active), sessionConfigurationRejected("reasoning effort is invalid")
-	}
+	reasoning := modelcatalog.NormalizeReasoningEffort(selected.Effort)
 	if reasoning != "" && !modelConfigSupportsReasoningEffort(configured, reasoning) {
 		return sessionCommandResult(active), sessionConfigurationRejected(fmt.Sprintf("model %q does not support reasoning effort %q", configured.ID, reasoning))
 	}
@@ -183,7 +201,7 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 			return sessionCommandResult(active), sessionConfigurationRejectedError(err)
 		}
 	}
-	updated, err := s.updateSessionStateAtRevision(ctx, active.SessionRef, active.Revision, func(state map[string]any) (map[string]any, error) {
+	updateState := func(_ []*session.Event, state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
@@ -195,10 +213,72 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 			next[kernel.StateCurrentReasoningEffort] = reasoning
 		}
 		return next, nil
-	})
+	}
+	var updated session.Session
+	if active.Controller.Kind == session.ControllerKindACP {
+		gateway := s.currentGateway()
+		if gateway == nil {
+			if finishPin != nil {
+				finishPin(false)
+			}
+			return sessionCommandResult(active), sessionConfigurationRejected("Session Runtime is unavailable")
+		}
+		updated, err = gateway.HandoffController(ctx, kernel.HandoffControllerRequest{
+			SessionRef:              active.SessionRef,
+			ExpectedRevision:        &active.Revision,
+			ExpectedControllerEpoch: active.Controller.EpochID,
+			Kind:                    session.ControllerKindKernel,
+			Source:                  "model_profile_selection",
+			Reason:                  "user selected provider model profile",
+			StateUpdate:             updateState,
+		})
+	} else {
+		updated, err = s.updateSessionStateAtRevision(ctx, active.SessionRef, active.Revision, func(state map[string]any) (map[string]any, error) {
+			return updateState(nil, state)
+		})
+	}
 	if finishPin != nil {
 		finishPin(err == nil || session.IsCommitted(err))
 	}
+	return sessionCommandResult(updated), classifyControlBackendError(err)
+}
+
+func (s *runtimeComposition) configureSessionACPProfile(
+	ctx context.Context,
+	active session.Session,
+	selected resolvedSessionModelProfile,
+) (appserver.CommandResult, error) {
+	gateway := s.currentGateway()
+	if gateway == nil {
+		return sessionCommandResult(active), sessionConfigurationRejected("Session Runtime is unavailable")
+	}
+	finishPin, err := s.beginPinnedACPSelection(ctx, selected.Placement)
+	if err != nil {
+		return sessionCommandResult(active), sessionConfigurationRejectedError(err)
+	}
+	updated, err := gateway.HandoffController(ctx, kernel.HandoffControllerRequest{
+		SessionRef:              active.SessionRef,
+		ExpectedRevision:        &active.Revision,
+		ExpectedControllerEpoch: active.Controller.EpochID,
+		Kind:                    session.ControllerKindACP,
+		Agent:                   selected.Placement.Agent,
+		Placement:               selected.Placement,
+		Source:                  "model_profile_selection",
+		Reason:                  "user selected ACP model profile",
+		StateUpdate: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
+			next := session.CloneState(state)
+			if next == nil {
+				next = map[string]any{}
+			}
+			delete(next, kernel.StateCurrentModelAlias)
+			delete(next, kernel.StateCurrentReasoningEffort)
+			delete(next, stateControllerConfigModel)
+			delete(next, stateControllerConfigReasoning)
+			delete(next, stateControllerConfigMode)
+			return next, nil
+		},
+	})
+	finishPin(err == nil || session.IsCommitted(err))
 	return sessionCommandResult(updated), classifyControlBackendError(err)
 }
 

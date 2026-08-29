@@ -427,7 +427,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if modelProfileEffort == "" && modelProfileID == defaultProfiles.DefaultProfileID {
 		modelProfileEffort = defaultProfiles.DefaultEffort
 	}
-	runtimeModel, err := resolveRuntimeProviderProfile(doc.ModelProfiles, lookup, modelProfileID, modelProfileEffort)
+	runtimeModel, err := resolveRuntimeProfile(doc.ModelProfiles, lookup, modelProfileID, modelProfileEffort)
 	if err != nil {
 		return nil, err
 	}

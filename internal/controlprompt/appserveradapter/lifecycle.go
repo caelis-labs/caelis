@@ -210,9 +210,9 @@ func (a *SessionClientAdapter) tracksSessionPresence() bool {
 }
 
 func (a *SessionClientAdapter) validateTUISessionController(state appserver.SessionState) error {
-	if a != nil && strings.EqualFold(strings.TrimSpace(a.surface), "cli-tui") && state.Controller.Kind == session.ControllerKindACP {
-		return errors.New("this older task uses a connection type that is no longer supported in the TUI; start a new task instead")
-	}
+	// ACP-backed main controllers use the same AppServer replay and live-feed
+	// contract as kernel sessions. Controller execution remains behind Control;
+	// the TUI only projects its envelopes and submits typed input.
 	return nil
 }
 

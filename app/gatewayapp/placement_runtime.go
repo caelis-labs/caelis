@@ -3,6 +3,8 @@ package gatewayapp
 import (
 	"context"
 	"fmt"
+	"maps"
+	"strings"
 	"sync"
 
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
@@ -12,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -115,6 +118,121 @@ func (s *runtimeComposition) beginPinnedModelSelection(ctx context.Context, conf
 	}, nil
 }
 
+// beginPinnedACPSelection stages one canonical external Agent and the current
+// placement snapshot in an already assembled Session Runtime. This is needed
+// when /connect added the selected Agent after that Runtime was activated.
+// Rollback restores the staged execution registry and restores the placement
+// view only if no newer canonical publisher replaced it while the durable
+// controller handoff was in flight.
+func (s *runtimeComposition) beginPinnedACPSelection(ctx context.Context, frozen sdkplacement.Placement) (func(bool), error) {
+	if s == nil || s.authorities.store == nil {
+		return nil, fmt.Errorf("gatewayapp: Session Runtime ACP selection is unavailable")
+	}
+	s.acpSelectionMu.Lock()
+	unlockOnError := true
+	defer func() {
+		if unlockOnError {
+			s.acpSelectionMu.Unlock()
+		}
+	}()
+	frozen = sdkplacement.Normalize(frozen)
+	if err := sdkplacement.ValidateSealed(frozen); err != nil {
+		return nil, fmt.Errorf("gatewayapp: validate selected ACP placement: %w", err)
+	}
+	doc, err := s.authorities.store.LoadContext(contextOrBackground(ctx))
+	if err != nil {
+		return nil, err
+	}
+	canonical := newPlacementSnapshot(doc)
+	if err := controlplacement.ValidateSnapshot(canonical.placement); err != nil {
+		return nil, err
+	}
+	if err := controlplacement.ValidateFrozen(canonical.placement, frozen); err != nil {
+		return nil, fmt.Errorf("gatewayapp: selected ACP placement changed: %w", err)
+	}
+	agent, connection, err := controlagents.ResolveAgent(canonical.placement.Agents, frozen.Agent)
+	if err != nil {
+		return nil, err
+	}
+	materialized, err := s.materializeExternalAgent(agent, connection)
+	if err != nil {
+		return nil, err
+	}
+	materialized.SessionOptions = controlagents.SessionOptions{
+		ModelID:                 strings.TrimSpace(frozen.Model),
+		ConfigValues:            maps.Clone(frozen.SessionConfigValues),
+		ReasoningEffortConfigID: strings.TrimSpace(frozen.ReasoningEffortConfigID),
+	}
+
+	s.placementCacheMu.Lock()
+	beforePlacement := s.placementCache
+	s.placementCache = canonical
+	s.placementCacheGeneration++
+	stagedPlacementGeneration := s.placementCacheGeneration
+	s.mu.Lock()
+	beforeAssembly := assembly.CloneResolvedAssembly(s.activeRuntime.Assembly)
+	nextAssembly := assembly.CloneResolvedAssembly(beforeAssembly)
+	nextAssembly.Agents = upsertRuntimeACPAgent(nextAssembly.Agents, materialized)
+	if s.acpControlPlane == nil {
+		s.mu.Unlock()
+		s.placementCache = beforePlacement
+		s.placementCacheGeneration++
+		s.placementCacheMu.Unlock()
+		return nil, fmt.Errorf("gatewayapp: ACP control plane is unavailable")
+	}
+	if err := s.acpControlPlane.UpdateAgents(nextAssembly.Agents); err != nil {
+		s.mu.Unlock()
+		s.placementCache = beforePlacement
+		s.placementCacheGeneration++
+		s.placementCacheMu.Unlock()
+		return nil, err
+	}
+	s.activeRuntime.Assembly = nextAssembly
+	s.mu.Unlock()
+	s.placementCacheMu.Unlock()
+
+	var once sync.Once
+	unlockOnError = false
+	return func(committed bool) {
+		once.Do(func() {
+			if !committed {
+				s.mu.Lock()
+				if s.acpControlPlane != nil {
+					_ = s.acpControlPlane.UpdateAgents(beforeAssembly.Agents)
+				}
+				s.activeRuntime.Assembly = beforeAssembly
+				s.mu.Unlock()
+				s.placementCacheMu.Lock()
+				if s.placementCacheGeneration == stagedPlacementGeneration && s.placementCache == canonical {
+					s.placementCache = beforePlacement
+					s.placementCacheGeneration++
+				}
+				s.placementCacheMu.Unlock()
+			}
+			s.acpSelectionMu.Unlock()
+		})
+	}, nil
+}
+
+func upsertRuntimeACPAgent(current []assembly.AgentConfig, configured assembly.AgentConfig) []assembly.AgentConfig {
+	next := make([]assembly.AgentConfig, 0, len(current)+1)
+	replaced := false
+	for _, existing := range current {
+		if strings.EqualFold(strings.TrimSpace(existing.Name), strings.TrimSpace(configured.Name)) {
+			if !replaced {
+				next = append(next, configured)
+				replaced = true
+			}
+			continue
+		}
+		next = append(next, existing)
+	}
+	if !replaced {
+		next = append(next, configured)
+	}
+	return next
+}
+
 func upsertPlacementModel(current []modelconfig.Config, configured modelconfig.Config) []modelconfig.Config {
 	configured = placementModelConfig(configured)
 	next := make([]modelconfig.Config, 0, len(current)+1)
@@ -198,6 +316,14 @@ func (s *runtimeComposition) resolveParticipantPlacement(ctx context.Context, pr
 		return sdkplacement.Placement{}, err
 	}
 	return controlplacement.ResolveParticipant(snapshot.placement, profileID, effort)
+}
+
+func (s *runtimeComposition) resolveModelProfilePlacement(ctx context.Context, profileID, effort string) (sdkplacement.Placement, error) {
+	snapshot, err := s.placementSnapshot(ctx)
+	if err != nil {
+		return sdkplacement.Placement{}, err
+	}
+	return controlplacement.ResolveProfile(snapshot.placement, profileID, effort)
 }
 
 func (s *runtimeComposition) resolveSystemAgentModel(

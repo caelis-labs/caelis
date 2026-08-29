@@ -87,6 +87,9 @@ func TestContextRouterUsesOnlySharedCanonicalDialogue(t *testing.T) {
 	if !reflect.DeepEqual(route.Context, wantContext) {
 		t.Fatalf("context = %#v, want %#v", route.Context, wantContext)
 	}
+	if !reflect.DeepEqual(route.FreshContext, wantContext) {
+		t.Fatalf("fresh context = %#v, want complete route %#v", route.FreshContext, wantContext)
+	}
 	encoded, err := json.Marshal(route.Context)
 	if err != nil {
 		t.Fatal(err)
@@ -128,6 +131,47 @@ func TestSharedContextOffsetUsesDurableCompleteTurnsAndOpaqueCompactBoundary(t *
 	}
 	if got := sharedContextOffsetFromEvents(events, 9, ""); !reflect.DeepEqual(got, sharedContextOffset{Checkpoint: 9}) {
 		t.Fatalf("incremental offset = %#v, want empty checkpoint", got)
+	}
+}
+
+func TestControllerContextIncludesFullBootstrapAlongsideResumeDelta(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	sessions, activeSession := newControlTestSession(t, "controller-context-bootstrap")
+	for _, event := range []*session.Event{
+		controlUserEvent("first question"),
+		controlAssistantEvent("first answer"),
+		controlUserEvent("second question"),
+		controlAssistantEvent("second answer"),
+	} {
+		if _, err := sessions.AppendEvent(ctx, session.AppendEventRequest{
+			SessionRef: activeSession.SessionRef,
+			Event:      event,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	router, err := NewContextRouter(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, err := router.ControllerContext(ctx, controller.ControllerContextRequest{
+		SessionRef: activeSession.SessionRef,
+		Session:    activeSession,
+		SinceSeq:   2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if route.SyncSeq != 4 {
+		t.Fatalf("SyncSeq = %d, want 4", route.SyncSeq)
+	}
+	if len(route.Context.Turns) != 1 || route.Context.Turns[0].AssistantSummary != "second answer" {
+		t.Fatalf("resume delta = %#v, want only second exchange", route.Context)
+	}
+	if len(route.FreshContext.Turns) != 2 || route.FreshContext.Turns[0].AssistantSummary != "first answer" || route.FreshContext.Turns[1].AssistantSummary != "second answer" {
+		t.Fatalf("fresh context = %#v, want both exchanges", route.FreshContext)
 	}
 }
 

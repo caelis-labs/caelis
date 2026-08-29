@@ -518,6 +518,7 @@ export interface ControllerBinding {
   epoch_id?: string;
   kind?: ControllerKind;
   label?: string;
+  placement?: Placement;
   remote_session_id?: string;
   source?: string;
 }
@@ -853,6 +854,20 @@ export interface PermissionOption {
   name: string;
   optionId: string;
 }
+
+export interface Placement {
+  agent?: string;
+  config_fingerprint?: string;
+  fingerprint?: string;
+  kind?: PlacementKind;
+  model?: string;
+  profile_id?: string;
+  reasoning_effort?: string;
+  reasoning_effort_config_id?: string;
+  session_config_values?: Record<string, JSONValue>;
+}
+
+export type PlacementKind = "agent" | "model";
 
 export interface PlanEntry {
   content: string;

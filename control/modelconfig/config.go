@@ -73,12 +73,15 @@ type ProviderEndpointConfig struct {
 type Choice struct {
 	ID                 string
 	Alias              string
+	ProfileID          string
+	Backend            string
 	Provider           string
 	Model              string
 	ProviderEndpointID string
 	EndpointID         string
 	BaseURL            string
 	Detail             string
+	ReasoningLevels    []string
 }
 
 // NormalizeConfig canonicalizes identifiers, endpoint defaults, credentials,
@@ -490,12 +493,14 @@ func ChoiceFromConfig(cfg Config) Choice {
 	return Choice{
 		ID:                 cfg.ID,
 		Alias:              cfg.Alias,
+		Backend:            "provider",
 		Provider:           cfg.Provider,
 		Model:              cfg.Model,
 		ProviderEndpointID: cfg.ProviderEndpointID,
 		EndpointID:         cfg.EndpointID,
 		BaseURL:            cfg.BaseURL,
 		Detail:             ChoiceDetail(cfg),
+		ReasoningLevels:    ReasoningLevelsForConfig(cfg),
 	}
 }
 

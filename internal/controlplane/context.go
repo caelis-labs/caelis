@@ -39,7 +39,15 @@ func (r *ContextRouter) ControllerContext(ctx context.Context, req controller.Co
 		return controller.ContextRoute{}, err
 	}
 	shared := sharedContextOffsetFromEvents(events, req.SinceSeq, req.ExcludeTurnID)
-	return controller.ContextRoute{Context: shared.Transfer, SyncSeq: shared.Checkpoint}, nil
+	fresh := shared
+	if req.SinceSeq != 0 {
+		fresh = sharedContextOffsetFromEvents(events, 0, req.ExcludeTurnID)
+	}
+	return controller.ContextRoute{
+		Context:      shared.Transfer,
+		FreshContext: fresh.Transfer,
+		SyncSeq:      shared.Checkpoint,
+	}, nil
 }
 
 // ParticipantContext returns the public context offset that one participant

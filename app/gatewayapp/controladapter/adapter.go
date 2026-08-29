@@ -175,6 +175,8 @@ func (d *assembler) activeACPControllerStatus(ctx context.Context) (controller.C
 		status = controller.ControllerStatus{
 			SessionRef:      activeSession.SessionRef,
 			Agent:           firstNonEmpty(strings.TrimSpace(activeSession.Controller.AgentName), strings.TrimSpace(activeSession.Controller.Label), strings.TrimSpace(activeSession.Controller.ControllerID)),
+			Model:           strings.TrimSpace(activeSession.Controller.Placement.Model),
+			ReasoningEffort: strings.TrimSpace(activeSession.Controller.Placement.ReasoningEffort),
 			RemoteSessionID: strings.TrimSpace(activeSession.Controller.RemoteSessionID),
 		}
 	}

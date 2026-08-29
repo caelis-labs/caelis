@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -24,13 +25,42 @@ func (r *controllerRun) beginTurn(req controller.TurnRequest, handle *turnHandle
 	r.turnSession = session.CloneSession(req.Session)
 	r.turnStream = req.Stream
 	r.turnMode = strings.TrimSpace(req.Mode)
-	if req.ContextSyncSeq > r.binding.ContextSyncSeq {
-		r.binding.ContextSyncSeq = req.ContextSyncSeq
-	}
 	r.approvalRequester = req.ApprovalRequester
 	r.handle = handle
 	r.events = nil
 	return nil
+}
+
+func (r *controllerRun) markContextSynced(checkpoint uint64) {
+	if r == nil || checkpoint == 0 {
+		return
+	}
+	r.mu.Lock()
+	if checkpoint > r.binding.ContextSyncSeq {
+		r.binding.ContextSyncSeq = checkpoint
+	}
+	r.mu.Unlock()
+}
+
+func (r *controllerRun) restoreContext(pending agent.ContextTransfer, checkpoint uint64, fresh bool) {
+	if r == nil || agent.ContextTransferEmpty(pending) {
+		return
+	}
+	r.mu.Lock()
+	if fresh {
+		// A full bootstrap supersedes any incremental pending route. Merging
+		// them would duplicate history and could let a later incremental Turn
+		// erase the fact that this remote still has no durable baseline.
+		r.context = agent.CloneContextTransfer(pending)
+	} else {
+		r.context = agent.MergeContextTransfers(pending, r.context)
+	}
+	r.contextPending = !agent.ContextTransferEmpty(r.context)
+	r.contextFresh = fresh
+	if checkpoint > r.contextSyncSeq {
+		r.contextSyncSeq = checkpoint
+	}
+	r.mu.Unlock()
 }
 
 func (r *controllerRun) finishTurn(owner *turnHandle) ([]*session.Event, bool) {

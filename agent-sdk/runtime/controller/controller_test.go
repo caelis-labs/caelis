@@ -117,9 +117,10 @@ func TestNormalizeAttachDetachHandoffRequests(t *testing.T) {
 		Source:         " source ",
 		Reason:         " reason ",
 		Context:        agent.ContextTransfer{Summary: " summary "},
+		FreshContext:   agent.ContextTransfer{Summary: " full summary "},
 		ContextSyncSeq: 9,
 	})
-	if handoff.SessionRef.SessionID != "sid" || handoff.Agent != "agent" || handoff.Reason != "reason" || handoff.Context.Summary != "summary" || handoff.ContextSyncSeq != 9 {
+	if handoff.SessionRef.SessionID != "sid" || handoff.Agent != "agent" || handoff.Reason != "reason" || handoff.Context.Summary != "summary" || handoff.FreshContext.Summary != "full summary" || handoff.ContextSyncSeq != 9 {
 		t.Fatalf("normalized handoff = %+v", handoff)
 	}
 }

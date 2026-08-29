@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +21,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
@@ -57,6 +60,12 @@ func mustParticipantPlacement(t *testing.T, agentName string) placement.Placemen
 		t.Fatal(err)
 	}
 	return frozen
+}
+
+func testPlacementResolver(registry *subagent.Registry) subagent.PlacementResolver {
+	return func(_ context.Context, _ tasksubagent.SpawnContext, req delegation.TargetRequest) (subagent.AgentConfig, error) {
+		return registry.Resolve(req.Target.Placement.Agent)
+	}
 }
 
 func closeActiveControllerClient(t *testing.T, manager *Manager, sessionID string) {
@@ -1579,6 +1588,141 @@ func TestManagerRunTurnReconnectReappliesSelectedModelAndEffort(t *testing.T) {
 	}
 }
 
+func TestManagerRunTurnUsesFullContextWhenReconnectCreatesFreshRemote(t *testing.T) {
+	firstClientSide, firstPeerSide := net.Pipe()
+	firstClient, err := client.NewStreamClient(firstClientSide, firstClientSide, client.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondClientSide, secondPeerSide := net.Pipe()
+	secondClient, err := client.NewStreamClient(secondClientSide, secondClientSide, client.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptSeen := make(chan client.PromptRequest, 1)
+	peer := jsonrpc.New(secondPeerSide, secondPeerSide)
+	peerCtx, cancelPeer := context.WithCancel(context.Background())
+	peerDone := make(chan error, 1)
+	go func() {
+		peerDone <- peer.Serve(peerCtx, func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
+			if msg.Method != client.MethodSessionPrompt {
+				return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+			}
+			var req client.PromptRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			promptSeen <- req
+			return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
+		}, nil)
+	}()
+	t.Cleanup(func() {
+		cancelPeer()
+		_ = firstClient.Close(context.Background())
+		_ = secondClient.Close(context.Background())
+		_ = peer.Close()
+		_ = firstClientSide.Close()
+		_ = firstPeerSide.Close()
+		_ = secondClientSide.Close()
+		_ = secondPeerSide.Close()
+		select {
+		case <-peerDone:
+		case <-time.After(time.Second):
+			t.Error("fresh remote ACP test peer did not stop")
+		}
+	})
+
+	registry, err := subagent.NewRegistry([]subagent.AgentConfig{{Name: "helper", Command: "helper-acp"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(Config{Registry: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	starts := 0
+	manager.startClient = func(
+		_ context.Context,
+		_ string,
+		_ subagent.AgentConfig,
+		resumeRemoteSessionID string,
+		_ func(client.UpdateEnvelope),
+		_ func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		starts++
+		switch starts {
+		case 1:
+			if resumeRemoteSessionID != "remote-old" {
+				t.Fatalf("activation resume ID = %q, want remote-old", resumeRemoteSessionID)
+			}
+			return firstClient, "remote-old", controllerClientState{}, nil
+		case 2:
+			if resumeRemoteSessionID != "remote-old" {
+				t.Fatalf("reconnect resume ID = %q, want remote-old", resumeRemoteSessionID)
+			}
+			return secondClient, "remote-fresh", controllerClientState{}, nil
+		default:
+			return nil, "", controllerClientState{}, fmt.Errorf("unexpected client start %d", starts)
+		}
+	}
+	parent := session.Session{
+		SessionRef: session.SessionRef{SessionID: "fresh-reconnect"},
+		Controller: session.ControllerBinding{
+			Kind: session.ControllerKindACP, AgentName: "helper", EpochID: "epoch-1",
+			RemoteSessionID: "remote-old", ContextSyncSeq: 2,
+		},
+	}
+	if _, err := manager.Activate(context.Background(), controller.HandoffRequest{
+		Session: parent, Agent: "helper",
+		Context:        agent.ContextTransfer{Summary: "DELTA-CONTEXT"},
+		FreshContext:   agent.ContextTransfer{Summary: "FULL-CONTEXT"},
+		ContextSyncSeq: 4,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstClient.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_ = firstPeerSide.Close()
+	turn, err := manager.RunTurn(context.Background(), controller.TurnRequest{
+		SessionRef:     parent.SessionRef,
+		Session:        parent,
+		TurnID:         "turn-fresh-reconnect",
+		Input:          "continue",
+		Context:        agent.ContextTransfer{Summary: "DELTA-CONTEXT"},
+		FreshContext:   agent.ContextTransfer{Summary: "FULL-CONTEXT"},
+		ContextSyncSeq: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, eventErr := range turn.Handle.Events() {
+		if eventErr != nil {
+			t.Fatal(eventErr)
+		}
+	}
+	var prompt client.PromptRequest
+	select {
+	case prompt = <-promptSeen:
+	case <-time.After(time.Second):
+		t.Fatal("fresh remote did not receive prompt")
+	}
+	encoded, err := json.Marshal(prompt.Prompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "FULL-CONTEXT") || strings.Contains(string(encoded), "DELTA-CONTEXT") {
+		t.Fatalf("fresh remote prompt = %s, want only full bootstrap context", encoded)
+	}
+	binding, found, err := manager.ActiveControllerBinding(context.Background(), parent.SessionRef)
+	if err != nil || !found {
+		t.Fatalf("ActiveControllerBinding() found/error = %v/%v", found, err)
+	}
+	if binding.RemoteSessionID != "remote-fresh" || binding.ContextSyncSeq != 4 {
+		t.Fatalf("live binding = %#v, want fresh remote at checkpoint 4", binding)
+	}
+}
+
 func TestManagerRunTurnReconnectReappliesModeWhenResumeReportsEmptyCurrentMode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -1689,7 +1833,7 @@ func TestManagerReconnectDoesNotRestartInactiveControllerRun(t *testing.T) {
 		cwd:             t.TempDir(),
 	}
 
-	err = manager.reconnectControllerRun(context.Background(), run)
+	_, err = manager.reconnectControllerRun(context.Background(), run)
 	if err == nil || !strings.Contains(err.Error(), "no longer active") {
 		t.Fatalf("reconnectControllerRun() error = %v, want inactive run error", err)
 	}
@@ -2132,6 +2276,7 @@ func TestManagerActivateResetsContextCheckpointForNewRemoteSession(t *testing.T)
 		},
 		Agent:          "helper",
 		Context:        agent.ContextTransfer{Summary: "incremental context for old remote"},
+		FreshContext:   agent.ContextTransfer{Summary: "complete context for fresh remote"},
 		ContextSyncSeq: 42,
 	})
 	if err != nil {
@@ -2142,6 +2287,44 @@ func TestManagerActivateResetsContextCheckpointForNewRemoteSession(t *testing.T)
 	}
 	if binding.ContextSyncSeq != 0 {
 		t.Fatalf("ContextSyncSeq = %d, want reset for fresh remote session", binding.ContextSyncSeq)
+	}
+	manager.mu.RLock()
+	run := manager.controllers["parent"]
+	manager.mu.RUnlock()
+	if run == nil {
+		t.Fatal("fresh controller run is missing")
+	}
+	contextTransfer, checkpoint, fresh := run.consumeContext()
+	if contextTransfer.Summary != "complete context for fresh remote" || checkpoint != 42 || !fresh {
+		t.Fatalf("fresh pending context/checkpoint/provenance = %#v/%d/%v, want complete context/42/true", contextTransfer, checkpoint, fresh)
+	}
+}
+
+func TestSelectControllerTurnContextDoesNotDuplicateActivationOffset(t *testing.T) {
+	t.Parallel()
+
+	activation := agent.ContextTransfer{Turns: []agent.ContextTurn{{
+		UserMessages: []string{"first"}, AssistantSummary: "first answer",
+	}}}
+	turn := agent.ContextTransfer{Turns: []agent.ContextTurn{
+		{UserMessages: []string{"first"}, AssistantSummary: "first answer"},
+		{UserMessages: []string{"second"}, AssistantSummary: "second answer"},
+	}}
+	got, checkpoint, fresh := selectControllerTurnContext(activation, 2, false, turn, agent.ContextTransfer{}, 4)
+	if !reflect.DeepEqual(got, turn) || checkpoint != 4 || fresh {
+		t.Fatalf("selected context/checkpoint/provenance = %#v/%d/%v, want Turn route without duplicate/4/false", got, checkpoint, fresh)
+	}
+}
+
+func TestSelectControllerTurnContextPreservesFreshBootstrapAcrossFailedTurn(t *testing.T) {
+	t.Parallel()
+
+	activation := agent.ContextTransfer{Summary: "stale full bootstrap"}
+	incremental := agent.ContextTransfer{Summary: "delta from old durable checkpoint"}
+	currentFull := agent.ContextTransfer{Summary: "current full bootstrap"}
+	got, checkpoint, fresh := selectControllerTurnContext(activation, 4, true, incremental, currentFull, 6)
+	if !reflect.DeepEqual(got, currentFull) || checkpoint != 6 || !fresh {
+		t.Fatalf("selected context/checkpoint/provenance = %#v/%d/%v, want current full bootstrap/6/true", got, checkpoint, fresh)
 	}
 }
 
@@ -2188,6 +2371,289 @@ func TestManagerACPResumeFallbackHelperProcess(t *testing.T) {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+func TestManagerActivateAppliesAndPersistsControllerPlacement(t *testing.T) {
+	registry, err := subagent.NewRegistry([]subagent.AgentConfig{{
+		Name:    "helper",
+		Command: "helper-acp",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(Config{
+		Registry:          registry,
+		Clock:             func() time.Time { return time.Unix(100, 0) },
+		PlacementResolver: testPlacementResolver(registry),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.startClient = func(
+		_ context.Context,
+		_ string,
+		cfg subagent.AgentConfig,
+		_ string,
+		_ func(client.UpdateEnvelope),
+		_ func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		if cfg.SessionOptions.ModelID != "gpt-main" ||
+			cfg.SessionOptions.ReasoningEffortConfigID != "reasoning" ||
+			cfg.SessionOptions.ConfigValues["mode"] != "agent" ||
+			cfg.SessionOptions.ConfigValues["reasoning"] != "high" {
+			t.Fatalf("controller SessionOptions = %#v", cfg.SessionOptions)
+		}
+		return nil, "remote-main", controllerClientState{}, nil
+	}
+	frozen, err := placement.Seal(placement.Placement{
+		Kind: placement.KindAgent, ProfileID: "acp:helper:gpt-main", Agent: "helper", Model: "gpt-main",
+		ReasoningEffort: "high", ReasoningEffortConfigID: "reasoning",
+		SessionConfigValues: map[string]string{"mode": "agent", "reasoning": "high"},
+		ConfigFingerprint:   "sha256:controller-config",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := manager.Activate(context.Background(), controller.HandoffRequest{
+		Session: session.Session{
+			SessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "main", WorkspaceKey: "ws"},
+			CWD:        "/workspace",
+		},
+		Agent: "helper", Placement: frozen, Source: "model_profile_selection",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.Kind != session.ControllerKindACP || binding.RemoteSessionID != "remote-main" || binding.Placement.Fingerprint != frozen.Fingerprint {
+		t.Fatalf("controller binding = %#v, want frozen main placement", binding)
+	}
+}
+
+func TestManagerActivateUsesProcessIndependentControllerEpoch(t *testing.T) {
+	registry, err := subagent.NewRegistry([]subagent.AgentConfig{{Name: "helper", Command: "helper-acp"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activate := func() session.ControllerBinding {
+		manager, err := NewManager(Config{Registry: registry})
+		if err != nil {
+			t.Fatal(err)
+		}
+		manager.startClient = func(
+			context.Context,
+			string,
+			subagent.AgentConfig,
+			string,
+			func(client.UpdateEnvelope),
+			func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+		) (*client.Client, string, controllerClientState, error) {
+			return nil, "remote-main", controllerClientState{}, nil
+		}
+		binding, err := manager.Activate(context.Background(), controller.HandoffRequest{
+			Session: session.Session{SessionRef: session.SessionRef{SessionID: "main"}},
+			Agent:   "helper",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return binding
+	}
+
+	first := activate()
+	second := activate()
+	if !strings.HasPrefix(first.EpochID, "controller-") || !strings.HasPrefix(second.EpochID, "controller-") || first.EpochID == second.EpochID {
+		t.Fatalf("controller epochs = %q / %q, want distinct process-independent identities", first.EpochID, second.EpochID)
+	}
+}
+
+func TestManagerActivateDoesNotCheckpointUnsentContext(t *testing.T) {
+	registry, err := subagent.NewRegistry([]subagent.AgentConfig{{Name: "helper", Command: "helper-acp"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newManager := func() *Manager {
+		manager, err := NewManager(Config{Registry: registry})
+		if err != nil {
+			t.Fatal(err)
+		}
+		manager.startClient = func(
+			_ context.Context,
+			_ string,
+			_ subagent.AgentConfig,
+			resumeRemoteSessionID string,
+			_ func(client.UpdateEnvelope),
+			_ func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+		) (*client.Client, string, controllerClientState, error) {
+			if resumeRemoteSessionID != "remote-main" {
+				t.Fatalf("resume remote Session = %q, want remote-main", resumeRemoteSessionID)
+			}
+			return nil, resumeRemoteSessionID, controllerClientState{}, nil
+		}
+		return manager
+	}
+	request := controller.HandoffRequest{
+		Session: session.Session{
+			SessionRef: session.SessionRef{SessionID: "main"},
+			Controller: session.ControllerBinding{
+				Kind: session.ControllerKindACP, AgentName: "helper", RemoteSessionID: "remote-main", ContextSyncSeq: 4,
+			},
+		},
+		Agent:          "helper",
+		Context:        agent.ContextTransfer{Summary: "context that still needs delivery"},
+		ContextSyncSeq: 9,
+	}
+
+	firstManager := newManager()
+	first, err := firstManager.Activate(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ContextSyncSeq != 4 {
+		t.Fatalf("first binding ContextSyncSeq = %d, want last delivered checkpoint 4", first.ContextSyncSeq)
+	}
+	firstManager.mu.RLock()
+	firstRun := firstManager.controllers["main"]
+	firstManager.mu.RUnlock()
+	if firstRun == nil || !firstRun.contextPending {
+		t.Fatal("first activation dropped context before the first successful prompt")
+	}
+	if err := firstManager.Quiesce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	request.Session.Controller = first
+	secondManager := newManager()
+	second, err := secondManager.Activate(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ContextSyncSeq != 4 {
+		t.Fatalf("restarted binding ContextSyncSeq = %d, want unsent context to remain replayable from 4", second.ContextSyncSeq)
+	}
+	secondManager.mu.RLock()
+	secondRun := secondManager.controllers["main"]
+	secondManager.mu.RUnlock()
+	if secondRun == nil || !secondRun.contextPending {
+		t.Fatal("restart treated unsent context as already delivered")
+	}
+}
+
+func TestManagerActivateRejectsStalePlacementBeforeStartingClient(t *testing.T) {
+	registry, err := subagent.NewRegistry([]subagent.AgentConfig{{Name: "helper", Command: "helper-acp"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	placementChanged := errors.New("placement configuration changed")
+	manager, err := NewManager(Config{
+		Registry: registry,
+		PlacementResolver: func(context.Context, tasksubagent.SpawnContext, delegation.TargetRequest) (subagent.AgentConfig, error) {
+			return subagent.AgentConfig{}, placementChanged
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := false
+	manager.startClient = func(
+		context.Context,
+		string,
+		subagent.AgentConfig,
+		string,
+		func(client.UpdateEnvelope),
+		func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		started = true
+		return nil, "remote-main", controllerClientState{}, nil
+	}
+	frozen := mustParticipantPlacement(t, "helper")
+	_, err = manager.Activate(context.Background(), controller.HandoffRequest{
+		Session:   session.Session{SessionRef: session.SessionRef{SessionID: "main"}},
+		Agent:     "helper",
+		Placement: frozen,
+	})
+	if !errors.Is(err, placementChanged) {
+		t.Fatalf("Activate(stale placement) error = %v, want %v", err, placementChanged)
+	}
+	if started {
+		t.Fatal("stale placement launched an ACP process")
+	}
+}
+
+func TestManagerLegacyHandoffDoesNotReusePreviousControllerPlacement(t *testing.T) {
+	registry, err := subagent.NewRegistry([]subagent.AgentConfig{
+		{Name: "alpha", Command: "alpha-acp"},
+		{Name: "beta", Command: "beta-acp"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(Config{Registry: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startedAgent := ""
+	manager.startClient = func(
+		_ context.Context,
+		_ string,
+		cfg subagent.AgentConfig,
+		_ string,
+		_ func(client.UpdateEnvelope),
+		_ func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		startedAgent = cfg.Name
+		return nil, "remote-beta", controllerClientState{}, nil
+	}
+	previous := mustParticipantPlacement(t, "alpha")
+	binding, err := manager.Activate(context.Background(), controller.HandoffRequest{
+		Session: session.Session{
+			SessionRef: session.SessionRef{SessionID: "main"},
+			Controller: session.ControllerBinding{
+				Kind: session.ControllerKindACP, AgentName: "alpha", Placement: previous,
+			},
+		},
+		Agent: "beta",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startedAgent != "beta" || binding.AgentName != "beta" || binding.Placement.Kind != "" {
+		t.Fatalf("legacy handoff started %q with binding %#v, want beta without alpha placement", startedAgent, binding)
+	}
+}
+
+func TestManagerQuiesceRetiresControllerRuns(t *testing.T) {
+	registry, err := subagent.NewRegistry([]subagent.AgentConfig{{Name: "helper", Command: "helper-acp"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(Config{Registry: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.startClient = func(
+		context.Context,
+		string,
+		subagent.AgentConfig,
+		string,
+		func(client.UpdateEnvelope),
+		func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		return nil, "remote-main", controllerClientState{}, nil
+	}
+	if _, err := manager.Activate(context.Background(), controller.HandoffRequest{
+		Session: session.Session{SessionRef: session.SessionRef{SessionID: "main"}}, Agent: "helper",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Quiesce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := manager.ControllerStatus(context.Background(), session.SessionRef{SessionID: "main"}); err != nil || found {
+		t.Fatalf("ControllerStatus() after Quiesce found=%v err=%v, want retired", found, err)
+	}
+	if _, err := manager.RunTurn(context.Background(), controller.TurnRequest{SessionRef: session.SessionRef{SessionID: "main"}, Input: "hello"}); !errors.Is(err, controller.ErrNotActive) {
+		t.Fatalf("RunTurn() after Quiesce error = %v, want ErrNotActive", err)
+	}
 }
 
 func TestManagerACPControllerReconnectHelperProcess(t *testing.T) {
