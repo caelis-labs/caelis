@@ -615,6 +615,7 @@ func (m *Model) viewportViewCacheKey(showScrollbar bool) string {
 		strconv.Itoa(m.viewport.Width()),
 		strconv.Itoa(m.viewport.Height()),
 		strconv.Itoa(m.viewport.YOffset()),
+		strconv.Itoa(m.viewport.XOffset()),
 		strconv.Itoa(len(m.viewportStyledLines)),
 		strconv.FormatBool(m.viewportContentStale),
 		strconv.FormatBool(showScrollbar),
@@ -631,23 +632,57 @@ func (m *Model) renderViewportView() string {
 		return m.lastViewportViewRendered
 	}
 	var vpView string
+	scrollbarRendered := false
 	if m.hasSelectionRange() {
 		vpView = strings.TrimRight(m.renderViewportLinesView(true), "\n")
 		m.diag.SelectionVisibleRenders++
 	} else if m.viewportContentStale {
 		vpView = strings.TrimRight(m.renderViewportLinesView(false), "\n")
+	} else if cachedView, ok := m.renderCachedViewportLinesView(showScrollbar); ok {
+		vpView = cachedView
+		scrollbarRendered = showScrollbar
 	} else {
 		vpView = strings.TrimRight(m.viewport.View(), "\n")
 	}
 	if m.hasSelectionRange() {
 		vpView = protectWideCellRepaintBlock(vpView, m.viewport.Width())
 	}
-	if showScrollbar {
+	if showScrollbar && !scrollbarRendered {
 		vpView = m.renderViewportScrollbar(vpView)
 	}
 	m.lastViewportViewKey = key
 	m.lastViewportViewRendered = vpView
 	return vpView
+}
+
+// renderCachedViewportLinesView renders the already wrapped viewport rows
+// without passing them through viewport.View and Lip Gloss a second time.
+// Caelis owns these rows at the current viewport width and disables horizontal
+// scrolling, so stable transcript movement only needs a visible-row slice.
+func (m *Model) renderCachedViewportLinesView(showScrollbar bool) (string, bool) {
+	if m == nil || len(m.viewportStyledLines) == 0 || m.viewport.Height() <= 0 || m.viewport.XOffset() != 0 {
+		return "", false
+	}
+	offset := m.viewportVisibleOffset()
+	if offset >= len(m.viewportStyledLines) {
+		offset = maxInt(0, len(m.viewportStyledLines)-1)
+	}
+	end := minInt(len(m.viewportStyledLines), offset+maxInt(1, m.viewport.Height()))
+	if end < offset {
+		end = offset
+	}
+	lines := make([]string, m.viewport.Height())
+	copy(lines, m.viewportStyledLines[offset:end])
+
+	geometry := newScrollbarGeometry(len(m.viewportStyledLines), m.viewport.Height(), offset)
+	if showScrollbar && geometry.scrollable() {
+		lines = addScrollbar(lines, m.viewport.Width(), m.viewport.Height(), offset, len(m.viewportStyledLines), m.theme, true)
+	} else {
+		for index := range lines {
+			lines[index] = padRightDisplay(lines[index], m.viewport.Width())
+		}
+	}
+	return strings.Join(lines, "\n"), true
 }
 
 func (m *Model) renderViewportSelectionView() string {
