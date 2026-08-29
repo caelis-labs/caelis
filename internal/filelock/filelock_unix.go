@@ -12,11 +12,12 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 )
 
 // Acquire obtains an exclusive lock without replacing or deleting the lock
-// file, so all waiters keep addressing the same inode.
+// file, so all waiters keep addressing the same inode. The context bounds
+// waiting after observed contention; a successful non-blocking attempt wins a
+// concurrent cancellation.
 func Acquire(ctx context.Context, path string) (io.Closer, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -24,6 +25,9 @@ func Acquire(ctx context.Context, path string) (io.Closer, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, errors.New("filelock: path is empty")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
@@ -36,33 +40,22 @@ func Acquire(ctx context.Context, path string) (io.Closer, error) {
 		_ = file.Close()
 		return nil, err
 	}
-	for {
-		err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			if err := ctx.Err(); err != nil {
-				closeErr := errors.Join(syscall.Flock(int(file.Fd()), syscall.LOCK_UN), file.Close())
-				return nil, errors.Join(err, closeErr)
-			}
-			return &unixLock{file: file}, nil
+	err = waitForLock(ctx, func() (bool, error) {
+		lockErr := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		switch {
+		case lockErr == nil:
+			return true, nil
+		case errors.Is(lockErr, syscall.EWOULDBLOCK), errors.Is(lockErr, syscall.EAGAIN):
+			return false, nil
+		default:
+			return false, lockErr
 		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
-			_ = file.Close()
-			return nil, err
-		}
-		timer := time.NewTimer(25 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			_ = file.Close()
-			return nil, ctx.Err()
-		case <-timer.C:
-		}
+	})
+	if err != nil {
+		_ = file.Close()
+		return nil, err
 	}
+	return &unixLock{file: file}, nil
 }
 
 type unixLock struct {
