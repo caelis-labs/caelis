@@ -334,10 +334,10 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 		}
 	}
 	if base.RefreshStatusUsage == nil {
-		base.RefreshStatusUsage = func() (int, int) {
+		base.RefreshStatusUsage = func() controlstatus.StatusUsage {
 			statusCacheMu.Lock()
 			defer statusCacheMu.Unlock()
-			return cachedStatusUsage.TotalTokens, cachedStatusUsage.ContextWindowTokens
+			return cachedStatusUsage
 		}
 	}
 	if base.RefreshStatusView == nil {
@@ -740,16 +740,22 @@ func profileCommandDetailsWithContext(ctx context.Context, service controlprompt
 func sendStatusUpdate(send func(tea.Msg), status controlstatus.StatusSnapshot) {
 	if send != nil {
 		send(SetStatusMsg{
-			Workspace:           status.Session.Workspace,
-			Model:               statusModelDisplay(status.ModelStatus.Display),
-			Context:             promptview.FormatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens),
-			TotalTokens:         status.Usage.TotalTokens,
-			ContextWindowTokens: status.Usage.ContextWindowTokens,
-			UsageReplace:        strings.EqualFold(strings.TrimSpace(status.ModelStatus.Provider), "acp"),
-			ModeLabel:           strings.TrimSpace(status.Session.ModeLabel),
-			Status:              statusViewModelFromSnapshot(status),
+			Workspace:            status.Session.Workspace,
+			Model:                statusModelDisplay(status.ModelStatus.Display),
+			Context:              promptview.FormatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens),
+			TotalTokens:          status.Usage.TotalTokens,
+			ContextWindowTokens:  status.Usage.ContextWindowTokens,
+			HasUsage:             statusContextUsageAvailable(status.Usage),
+			UsageReplace:         status.Usage.ContextUsageReplace,
+			UsageControllerEpoch: strings.TrimSpace(status.Usage.ContextUsageControllerEpoch),
+			ModeLabel:            strings.TrimSpace(status.Session.ModeLabel),
+			Status:               statusViewModelFromSnapshot(status),
 		})
 	}
+}
+
+func statusContextUsageAvailable(usage controlstatus.StatusUsage) bool {
+	return usage.ContextUsageAvailable
 }
 
 func statusModelDisplay(model string) string {

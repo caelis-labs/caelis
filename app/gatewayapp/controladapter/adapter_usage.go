@@ -69,23 +69,27 @@ func (d *assembler) sessionTokenUsageBreakdown(ctx context.Context, ref session.
 	if state, err := d.deps.Session.Store.SnapshotState(ctx, ref); err == nil {
 		breakdown.addBreakdown(sessionTokenUsageBreakdownFromState(state))
 	}
-	for _, childRef := range d.subagentSessionRefs(ctx, ref) {
-		childEvents, err := sessionUsageEvents(ctx, d.deps.Session.Store, childRef)
+	aggregatedLocalChildTasks := map[string]struct{}{}
+	for _, child := range d.subagentChildren(ctx, ref) {
+		childEvents, err := sessionUsageEvents(ctx, d.deps.Session.Store, child.SessionRef)
 		if err != nil {
 			continue
 		}
-		if active, err := d.deps.Session.Store.Session(ctx, childRef); err == nil {
+		if active, err := d.deps.Session.Store.Session(ctx, child.SessionRef); err == nil {
 			childEvents = d.filterCurrentMainContextUsage(ctx, active, childEvents)
 		}
 		childBreakdown := sessionTokenUsageBreakdownFromEvents(childEvents, tokenUsageCategorySubagent)
-		if state, err := d.deps.Session.Store.SnapshotState(ctx, childRef); err == nil {
+		if state, err := d.deps.Session.Store.SnapshotState(ctx, child.SessionRef); err == nil {
 			childBreakdown.addBreakdown(sessionTokenUsageBreakdownFromState(state))
 		}
 		breakdown.addBreakdown(childBreakdown)
+		if taskID := strings.TrimSpace(child.DelegationID); taskID != "" {
+			aggregatedLocalChildTasks[taskID] = struct{}{}
+		}
 	}
 	if d.deps.Status.TaskEntriesFn != nil {
 		if entries, err := d.deps.Status.TaskEntriesFn(ctx, ref); err == nil {
-			breakdown.addACPTaskUsage(entries)
+			breakdown.addACPTaskUsage(entries, aggregatedLocalChildTasks)
 		} else if ctx.Err() != nil {
 			return sessionTokenUsageBreakdown{}, ctx.Err()
 		}
@@ -102,22 +106,14 @@ func (d *assembler) filterCurrentMainContextUsage(ctx context.Context, active se
 			expectedModel = firstNonEmpty(status.Model, expectedModel)
 		}
 	}
-	latestMain := -1
-	for index := len(events) - 1; index >= 0; index-- {
-		if isMainContextUsageEvent(events[index]) {
-			latestMain = index
-			break
-		}
-	}
-	keepLatestMain := latestMain >= 0 && active.Controller.Kind == session.ControllerKindACP &&
-		contextUsageMatchesController(events[latestMain], active.Controller, expectedProvider, expectedModel)
+	latestMain := latestControllerContextUsageIndex(events, active.Controller, expectedProvider, expectedModel)
 	out := make([]*session.Event, 0, len(events))
 	for index, event := range events {
 		if !isMainContextUsageEvent(event) {
 			out = append(out, event)
 			continue
 		}
-		if index == latestMain && keepLatestMain {
+		if index == latestMain {
 			out = append(out, event)
 		}
 	}
@@ -128,7 +124,27 @@ func isMainContextUsageEvent(event *session.Event) bool {
 	return event != nil && event.ContextUsage != nil && (event.Scope == nil || strings.TrimSpace(event.Scope.Participant.ID) == "")
 }
 
-func contextUsageMatchesController(event *session.Event, binding session.ControllerBinding, expectedProvider string, expectedModel string) bool {
+func latestControllerContextUsageIndex(events []*session.Event, binding session.ControllerBinding, expectedProvider string, expectedModel string) int {
+	if binding.Kind != session.ControllerKindACP {
+		return -1
+	}
+	for index := len(events) - 1; index >= 0; index-- {
+		event := events[index]
+		if !isMainContextUsageEvent(event) || !contextUsageBelongsToController(event, binding) {
+			continue
+		}
+		if contextUsageMatchesInvocation(event, expectedProvider, expectedModel) {
+			return index
+		}
+		// A newer gauge from the same controller epoch is a model/configuration
+		// boundary. Do not resurrect an older gauge if the controller later
+		// returns to the same display model before emitting fresh usage.
+		return -1
+	}
+	return -1
+}
+
+func contextUsageBelongsToController(event *session.Event, binding session.ControllerBinding) bool {
 	if event == nil || event.ContextUsage == nil || event.Scope == nil || event.Scope.Controller.Kind != session.ControllerKindACP {
 		return false
 	}
@@ -138,6 +154,10 @@ func contextUsageMatchesController(event *session.Event, binding session.Control
 	if expectedID := strings.TrimSpace(binding.ControllerID); expectedID != "" && !strings.EqualFold(strings.TrimSpace(event.Scope.Controller.ID), expectedID) {
 		return false
 	}
+	return true
+}
+
+func contextUsageMatchesInvocation(event *session.Event, expectedProvider string, expectedModel string) bool {
 	invocation, _ := invocationFromSessionEvent(event)
 	if expectedProvider = strings.TrimSpace(expectedProvider); expectedProvider != "" && !strings.EqualFold(invocation.Provider, expectedProvider) {
 		return false
@@ -253,12 +273,19 @@ func contextUsageLaneKey(event *session.Event, fallbackCategory string) string {
 	return category + "\x00" + participantID
 }
 
-func (u *sessionTokenUsageBreakdown) addACPTaskUsage(entries []*taskapi.Entry) {
+// addACPTaskUsage adds replaceable ACP Task gauges for subagent Tasks that do
+// not already have a readable local child Session aggregated from a parent
+// subagent participant. Local child Session usage is authoritative; Task gauges
+// remain the fallback for remote ACP Sessions without a local durable mirror.
+func (u *sessionTokenUsageBreakdown) addACPTaskUsage(entries []*taskapi.Entry, aggregatedLocalChildTasks map[string]struct{}) {
 	if u == nil {
 		return
 	}
 	for _, entry := range entries {
 		if entry == nil || entry.Kind != taskapi.KindSubagent || entry.ContextUsage == nil {
+			continue
+		}
+		if _, ok := aggregatedLocalChildTasks[strings.TrimSpace(entry.TaskID)]; ok {
 			continue
 		}
 		usage := session.UsageSnapshotFromContextUsage(entry.ContextUsage.Snapshot)
@@ -285,23 +312,15 @@ func (d *assembler) latestACPControllerContextUsage(
 	if err != nil {
 		return session.UsageSnapshot{}, false, err
 	}
-	expectedProvider = strings.TrimSpace(expectedProvider)
-	expectedModel = strings.TrimSpace(expectedModel)
-	for index := len(events) - 1; index >= 0; index-- {
-		event := events[index]
-		if event == nil || event.ContextUsage == nil || event.Scope == nil || strings.TrimSpace(event.Scope.Participant.ID) != "" {
-			continue
-		}
-		if !contextUsageMatchesController(event, active.Controller, expectedProvider, expectedModel) {
-			return session.UsageSnapshot{}, false, nil
-		}
-		usage := session.UsageSnapshotFromContextUsage(*event.ContextUsage)
-		if usage == nil {
-			return session.UsageSnapshot{}, false, nil
-		}
-		return *usage, true, nil
+	index := latestControllerContextUsageIndex(events, active.Controller, expectedProvider, expectedModel)
+	if index < 0 {
+		return session.UsageSnapshot{}, false, nil
 	}
-	return session.UsageSnapshot{}, false, nil
+	usage := session.UsageSnapshotFromContextUsage(*events[index].ContextUsage)
+	if usage == nil {
+		return session.UsageSnapshot{}, false, nil
+	}
+	return *usage, true, nil
 }
 
 func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsageBreakdown {
@@ -532,7 +551,12 @@ func normalizeUsageCategory(category string) string {
 	}
 }
 
-func (d *assembler) subagentSessionRefs(ctx context.Context, ref session.SessionRef) []session.SessionRef {
+type subagentChildRef struct {
+	SessionRef   session.SessionRef
+	DelegationID string
+}
+
+func (d *assembler) subagentChildren(ctx context.Context, ref session.SessionRef) []subagentChildRef {
 	if d == nil || d.deps == nil || d.deps.Session.Store == nil {
 		return nil
 	}
@@ -541,7 +565,7 @@ func (d *assembler) subagentSessionRefs(ctx context.Context, ref session.Session
 		return nil
 	}
 	seen := map[string]struct{}{}
-	out := make([]session.SessionRef, 0, len(activeSession.Participants))
+	out := make([]subagentChildRef, 0, len(activeSession.Participants))
 	for _, participant := range activeSession.Participants {
 		if participant.Kind != session.ParticipantKindSubagent {
 			continue
@@ -559,7 +583,10 @@ func (d *assembler) subagentSessionRefs(ctx context.Context, ref session.Session
 			UserID:    ref.UserID,
 			SessionID: sessionID,
 		}
-		out = append(out, session.NormalizeSessionRef(childRef))
+		out = append(out, subagentChildRef{
+			SessionRef:   session.NormalizeSessionRef(childRef),
+			DelegationID: strings.TrimSpace(participant.DelegationID),
+		})
 	}
 	return out
 }

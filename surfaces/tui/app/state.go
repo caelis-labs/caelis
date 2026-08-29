@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -141,7 +142,7 @@ type Config struct {
 	ModeLabel              func() string
 	RefreshWorkspace       func() string
 	RefreshStatus          func() (string, string)
-	RefreshStatusUsage     func() (totalTokens int, contextWindowTokens int)
+	RefreshStatusUsage     func() controlstatus.StatusUsage
 	RefreshStatusView      func() StatusViewModel
 	FileComplete           func(context.Context, string, int) ([]CompletionCandidate, error)
 	SkillComplete          func(string, int) ([]CompletionCandidate, error)
@@ -433,21 +434,23 @@ type Model struct {
 	runningActivity           runningActivityState
 	runningHintTracker        runningHintTracker
 
-	statusModel            string
-	statusContext          string
-	statusUsageTotal       int
-	statusUsageWindow      int
-	statusModeLabel        string
-	statusView             StatusViewModel
-	stableWorkspaceDisplay string
-	statusRefreshInFlight  bool
-	sandboxProgress        *sandboxProgressState
-	sandboxProgressBar     progress.Model
-	hint                   string
-	hintEntries            []hintEntry
-	nextHintID             uint64
-	updateOffered          bool
-	updateHintID           uint64
+	statusModel                string
+	statusContext              string
+	statusUsageTotal           int
+	statusUsageWindow          int
+	statusUsageControllerEpoch string
+	statusUsageIdentityKnown   bool
+	statusModeLabel            string
+	statusView                 StatusViewModel
+	stableWorkspaceDisplay     string
+	statusRefreshInFlight      bool
+	sandboxProgress            *sandboxProgressState
+	sandboxProgressBar         progress.Model
+	hint                       string
+	hintEntries                []hintEntry
+	nextHintID                 uint64
+	updateOffered              bool
+	updateHintID               uint64
 
 	pendingInputAt            time.Time
 	inputLatencyWindow        []time.Duration

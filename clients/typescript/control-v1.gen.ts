@@ -1433,6 +1433,9 @@ export interface StatusSnapshot {
 
 export interface StatusUsage {
   completion_tokens?: number;
+  context_usage_available: boolean;
+  context_usage_controller_epoch: string;
+  context_usage_replace: boolean;
   context_window_tokens?: number;
   prompt_tokens?: number;
   session_usage_by_model?: Array<ModelUsageSnapshot>;

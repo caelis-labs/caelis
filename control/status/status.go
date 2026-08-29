@@ -82,14 +82,19 @@ type StatusSandbox struct {
 
 // StatusUsage describes current-context plus Session-wide token accounting.
 // Native provider call usage is cumulative; standard ACP context usage
-// contributes one replaceable latest gauge per execution lane.
+// contributes one replaceable latest gauge per execution lane. The explicit
+// context fields keep surfaces from inferring reduction semantics from display
+// provider names and distinguish an observed zero gauge from unavailable data.
 type StatusUsage struct {
-	PromptTokens        int                  `json:"prompt_tokens,omitempty"`
-	CompletionTokens    int                  `json:"completion_tokens,omitempty"`
-	TotalTokens         int                  `json:"total_tokens,omitempty"`
-	ContextWindowTokens int                  `json:"context_window_tokens,omitempty"`
-	SessionUsageTotal   UsageSnapshot        `json:"session_usage_total"`
-	SessionUsageByModel []ModelUsageSnapshot `json:"session_usage_by_model,omitempty"`
+	PromptTokens                int                  `json:"prompt_tokens,omitempty"`
+	CompletionTokens            int                  `json:"completion_tokens,omitempty"`
+	TotalTokens                 int                  `json:"total_tokens,omitempty"`
+	ContextWindowTokens         int                  `json:"context_window_tokens,omitempty"`
+	ContextUsageAvailable       bool                 `json:"context_usage_available"`
+	ContextUsageReplace         bool                 `json:"context_usage_replace"`
+	ContextUsageControllerEpoch string               `json:"context_usage_controller_epoch"`
+	SessionUsageTotal           UsageSnapshot        `json:"session_usage_total"`
+	SessionUsageByModel         []ModelUsageSnapshot `json:"session_usage_by_model,omitempty"`
 }
 
 // StatusRuntime describes the live execution state exposed to status surfaces.

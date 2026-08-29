@@ -54,8 +54,6 @@ func (s *controlCommandBackend) connectModelsAtRevision(ctx context.Context, con
 		}
 	}()
 
-	previousDefaultID := strings.TrimSpace(candidate.DefaultID())
-	_, hadDefault := candidate.Config(previousDefaultID)
 	modelIDs := make([]string, 0, len(prepared))
 	for _, cfg := range prepared {
 		modelID, upsertErr := candidate.upsert(cfg, false)
@@ -81,7 +79,9 @@ func (s *controlCommandBackend) connectModelsAtRevision(ctx context.Context, con
 	if err != nil {
 		return result, fmt.Errorf("gatewayapp: update model profile catalog: %w", err)
 	}
-	if !hadDefault {
+	// Provider lookup omits ACP defaults, so a still-valid unified default
+	// (ACP or provider) must be preserved instead of inferred from DefaultID.
+	if _, ok := modelprofile.Lookup(doc.ModelProfiles, doc.ModelProfiles.DefaultProfileID); !ok {
 		doc.ModelProfiles, err = modelprofile.SelectDefault(doc.ModelProfiles, profiles[0].ID, "")
 		if err != nil {
 			return result, fmt.Errorf("gatewayapp: select default model profile: %w", err)
@@ -192,18 +192,18 @@ func (s *controlCommandBackend) deleteHostModelAtRevision(ctx context.Context, a
 		return result, err
 	}
 	profileID := modelprofile.BuildProviderID(cfg.ID)
+	deletedDefault := modelprofile.NormalizeID(doc.ModelProfiles.DefaultProfileID) == profileID
 	doc.AgentBindings, _ = agentbinding.RemoveProfileBindings(doc.AgentBindings, profileID)
 	doc.ModelProfiles = modelprofile.Remove(doc.ModelProfiles, profileID)
 	if err := candidate.Delete(alias); err != nil {
 		return result, err
 	}
-	doc.ModelProfiles, err = modelprofile.SelectDefault(
-		doc.ModelProfiles,
-		modelprofile.BuildProviderID(candidate.DefaultID()),
-		doc.ModelProfiles.DefaultEffort,
-	)
-	if err != nil {
-		return result, err
+	remaining := modelprofile.NormalizeConfiguration(doc.ModelProfiles)
+	if deletedDefault && remaining.DefaultProfileID == "" && len(remaining.Profiles) > 0 {
+		doc.ModelProfiles, err = modelprofile.SelectDefault(remaining, remaining.Profiles[0].ID, "")
+		if err != nil {
+			return result, err
+		}
 	}
 	if candidate.DefaultID() != "" {
 		candidate.SetDefault(candidate.DefaultID(), doc.ModelProfiles.DefaultEffort)

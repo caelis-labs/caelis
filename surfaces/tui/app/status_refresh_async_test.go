@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/surfaces/internal/promptview"
 )
 
@@ -58,7 +59,9 @@ func TestModelInitSchedulesStatusRefreshCommand(t *testing.T) {
 			calls.Add(1)
 			return "refreshed-model", promptview.FormatContextUsage(0, 100000)
 		},
-		RefreshStatusUsage: func() (int, int) { return 0, 100000 },
+		RefreshStatusUsage: func() controlstatus.StatusUsage {
+			return controlstatus.StatusUsage{ContextWindowTokens: 100000, ContextUsageAvailable: true}
+		},
 	})
 	if calls.Load() != 0 {
 		t.Fatalf("status calls after NewModel = %d, want 0", calls.Load())
@@ -252,10 +255,10 @@ func TestSetStatusReplacesUsageWhenModelChanges(t *testing.T) {
 
 	model := NewModel(Config{})
 	model.handleSetStatusMsg(SetStatusMsg{
-		Model: "model-a", TotalTokens: 1_600, ContextWindowTokens: 100000,
+		Model: "model-a", TotalTokens: 1_600, ContextWindowTokens: 100000, HasUsage: true,
 	})
 	model.handleSetStatusMsg(SetStatusMsg{
-		Model: "model-b", ContextWindowTokens: 200000,
+		Model: "model-b", ContextWindowTokens: 200000, HasUsage: true,
 	})
 	if model.statusUsageTotal != 0 || model.statusUsageWindow != 200000 {
 		t.Fatalf("model-b usage = %d/%d, want 0/200000", model.statusUsageTotal, model.statusUsageWindow)
@@ -295,5 +298,100 @@ func TestACPStatusRefreshReplacesZeroUsageWithoutModelChange(t *testing.T) {
 	})
 	if model.statusUsageTotal != 0 || model.statusUsageWindow != 200000 || model.statusContext != "" || model.statusView.Tokens != "" {
 		t.Fatalf("ACP status refresh retained stale gauge: context=%q view=%q usage=%d/%d", model.statusContext, model.statusView.Tokens, model.statusUsageTotal, model.statusUsageWindow)
+	}
+}
+
+func TestACPStatusRefreshWithoutAvailableUsagePreservesLiveGauge(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{})
+	model.statusModel = "codex"
+	model.statusUsageControllerEpoch = "epoch-1"
+	model.statusUsageIdentityKnown = true
+	model.replaceStatusUsage(42000, 200000)
+	model.handleStatusRefreshResultMsg(StatusRefreshResultMsg{
+		Model:                "codex",
+		HasStatus:            true,
+		HasView:              true,
+		Status:               StatusViewModel{Model: "codex", Provider: "acp"},
+		UsageReplace:         true,
+		UsageControllerEpoch: "epoch-1",
+		HasUsageIdentity:     true,
+	})
+	want := promptview.FormatContextUsage(42000, 200000)
+	if model.statusUsageTotal != 42000 || model.statusUsageWindow != 200000 || model.statusContext != want || model.statusView.Tokens != want {
+		t.Fatalf("unavailable ACP status erased live gauge: context=%q view=%q usage=%d/%d", model.statusContext, model.statusView.Tokens, model.statusUsageTotal, model.statusUsageWindow)
+	}
+}
+
+func TestACPStatusRefreshClearsUsageWhenControllerEpochChangesWithoutModelChange(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{})
+	model.statusModel = "codex"
+	model.statusUsageControllerEpoch = "epoch-1"
+	model.statusUsageIdentityKnown = true
+	model.replaceStatusUsage(42000, 200000)
+	model.handleStatusRefreshResultMsg(StatusRefreshResultMsg{
+		Model:                "codex",
+		HasStatus:            true,
+		HasView:              true,
+		Status:               StatusViewModel{Model: "codex", Provider: "acp"},
+		UsageReplace:         true,
+		UsageControllerEpoch: "epoch-2",
+		HasUsageIdentity:     true,
+	})
+	if model.statusUsageTotal != 0 || model.statusUsageWindow != 0 || model.statusContext != "" || model.statusView.Tokens != "" {
+		t.Fatalf("controller handoff retained stale gauge: context=%q view=%q usage=%d/%d", model.statusContext, model.statusView.Tokens, model.statusUsageTotal, model.statusUsageWindow)
+	}
+	if model.statusUsageControllerEpoch != "epoch-2" || !model.statusUsageIdentityKnown {
+		t.Fatalf("usage identity = %q/%v, want epoch-2/known", model.statusUsageControllerEpoch, model.statusUsageIdentityKnown)
+	}
+}
+
+func TestStatusMessagesUseTypedUsageSemanticsInsteadOfProviderName(t *testing.T) {
+	t.Parallel()
+
+	var sent SetStatusMsg
+	sendStatusUpdate(func(msg tea.Msg) {
+		var ok bool
+		sent, ok = msg.(SetStatusMsg)
+		if !ok {
+			t.Fatalf("status message = %T, want SetStatusMsg", msg)
+		}
+	}, controlstatus.StatusSnapshot{
+		ModelStatus: controlstatus.StatusModel{Provider: "remote-agent"},
+		Usage: controlstatus.StatusUsage{
+			TotalTokens:                 42000,
+			ContextWindowTokens:         200000,
+			ContextUsageAvailable:       true,
+			ContextUsageReplace:         true,
+			ContextUsageControllerEpoch: "epoch-1",
+		},
+	})
+	if !sent.HasUsage || !sent.UsageReplace || sent.UsageControllerEpoch != "epoch-1" {
+		t.Fatalf("typed status usage = %#v, want available replace gauge from epoch-1", sent)
+	}
+
+	model := NewModel(Config{
+		RefreshStatusUsage: func() controlstatus.StatusUsage {
+			return controlstatus.StatusUsage{
+				TotalTokens:                 1600,
+				ContextWindowTokens:         100000,
+				ContextUsageAvailable:       true,
+				ContextUsageControllerEpoch: "epoch-merge",
+			}
+		},
+		RefreshStatusView: func() StatusViewModel {
+			return StatusViewModel{Provider: "acp"}
+		},
+	})
+	raw := model.statusRefreshCmd()()
+	msg, ok := raw.(StatusRefreshResultMsg)
+	if !ok {
+		t.Fatalf("refresh result = %T, want StatusRefreshResultMsg", raw)
+	}
+	if !msg.HasUsage || msg.UsageReplace || !msg.HasUsageIdentity || msg.UsageControllerEpoch != "epoch-merge" {
+		t.Fatalf("refresh usage = %#v, want typed merge from epoch-merge despite acp display provider", msg)
 	}
 }

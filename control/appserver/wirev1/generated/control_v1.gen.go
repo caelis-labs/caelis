@@ -1546,12 +1546,15 @@ type StatusSnapshot struct {
 }
 
 type StatusUsage struct {
-	CompletionTokens    *int                 `json:"completion_tokens,omitempty"`
-	ContextWindowTokens *int                 `json:"context_window_tokens,omitempty"`
-	PromptTokens        *int                 `json:"prompt_tokens,omitempty"`
-	SessionUsageByModel []ModelUsageSnapshot `json:"session_usage_by_model,omitempty"`
-	SessionUsageTotal   UsageSnapshot        `json:"session_usage_total"`
-	TotalTokens         *int                 `json:"total_tokens,omitempty"`
+	CompletionTokens            *int                 `json:"completion_tokens,omitempty"`
+	ContextUsageAvailable       bool                 `json:"context_usage_available"`
+	ContextUsageControllerEpoch string               `json:"context_usage_controller_epoch"`
+	ContextUsageReplace         bool                 `json:"context_usage_replace"`
+	ContextWindowTokens         *int                 `json:"context_window_tokens,omitempty"`
+	PromptTokens                *int                 `json:"prompt_tokens,omitempty"`
+	SessionUsageByModel         []ModelUsageSnapshot `json:"session_usage_by_model,omitempty"`
+	SessionUsageTotal           UsageSnapshot        `json:"session_usage_total"`
+	TotalTokens                 *int                 `json:"total_tokens,omitempty"`
 }
 
 type SteerRequest struct {

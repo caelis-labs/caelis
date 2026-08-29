@@ -60,8 +60,9 @@ func TestAdapterFullStatusQueriesProviderUsageAndFailsSoft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lightweight.Usage.TotalTokens != 0 || lightweight.Usage.ContextWindowTokens != 128_000 {
-		t.Fatalf("lightweight usage = %#v, want static context window only", lightweight.Usage)
+	if lightweight.Usage.TotalTokens != 0 || lightweight.Usage.ContextWindowTokens != 128_000 ||
+		!lightweight.Usage.ContextUsageAvailable || lightweight.Usage.ContextUsageReplace || lightweight.Usage.ContextUsageControllerEpoch != "" {
+		t.Fatalf("lightweight usage = %#v, want available provider capacity with merge semantics", lightweight.Usage)
 	}
 	if providerCalls != 0 || doctorCalls != 0 || usageCalls != 0 || len(lightweight.RateLimits.Limits) != 0 {
 		t.Fatalf(
@@ -138,8 +139,10 @@ func TestACPControllerUsageFeedsLightweightStatusAndSessionStatistics(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lightweight.Usage.TotalTokens != 42000 || lightweight.Usage.ContextWindowTokens != 200000 {
-		t.Fatalf("lightweight ACP usage = %#v, want used/size", lightweight.Usage)
+	if lightweight.Usage.TotalTokens != 42000 || lightweight.Usage.ContextWindowTokens != 200000 ||
+		!lightweight.Usage.ContextUsageAvailable || !lightweight.Usage.ContextUsageReplace ||
+		lightweight.Usage.ContextUsageControllerEpoch != "epoch-1" {
+		t.Fatalf("lightweight ACP usage = %#v, want available replace used/size gauge", lightweight.Usage)
 	}
 	full, err := driver.Status(ctx)
 	if err != nil {
@@ -149,15 +152,40 @@ func TestACPControllerUsageFeedsLightweightStatusAndSessionStatistics(t *testing
 		full.Usage.SessionUsageByModel[0].Provider != "codex" || full.Usage.SessionUsageByModel[0].Model != "gpt-test" {
 		t.Fatalf("full ACP usage = %#v, want one attributed controller gauge", full.Usage)
 	}
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{
+		Type: session.EventTypeCustom, Visibility: session.VisibilityMirror,
+		Scope:        &session.EventScope{Controller: session.ControllerRef{Kind: session.ControllerKindACP, ID: "other", EpochID: "epoch-other"}},
+		Invocation:   &session.EventInvocation{Provider: "other", Model: "other-model"},
+		ContextUsage: &session.ContextUsageSnapshot{Size: 100000, Used: 7000},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	withLaterNonmatchingGauge, err := driver.LightweightStatus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withLaterNonmatchingGauge.Usage.TotalTokens != 42000 || !withLaterNonmatchingGauge.Usage.ContextUsageAvailable {
+		t.Fatalf("later nonmatching gauge hid current controller usage: %#v", withLaterNonmatchingGauge.Usage)
+	}
+	withLaterNonmatchingGaugeFull, err := driver.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withLaterNonmatchingGaugeFull.Usage.SessionUsageTotal.TotalTokens != 42000 {
+		t.Fatalf("later nonmatching gauge hid current Session usage: %#v", withLaterNonmatchingGaugeFull.Usage)
+	}
+	currentControllerModel := "gpt-new"
 	deps.Agent.ControllerStatusFn = func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error) {
-		return controller.ControllerStatus{Agent: "codex", Model: "gpt-new"}, true, nil
+		return controller.ControllerStatus{Agent: "codex", Model: currentControllerModel}, true, nil
 	}
 	afterModelSwitch, err := driver.LightweightStatus(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if afterModelSwitch.Usage.TotalTokens != 0 || afterModelSwitch.Usage.ContextWindowTokens != 0 {
-		t.Fatalf("usage after ACP model switch = %#v, want stale prior-model gauge cleared", afterModelSwitch.Usage)
+	if afterModelSwitch.Usage.TotalTokens != 0 || afterModelSwitch.Usage.ContextWindowTokens != 0 ||
+		afterModelSwitch.Usage.ContextUsageAvailable || !afterModelSwitch.Usage.ContextUsageReplace ||
+		afterModelSwitch.Usage.ContextUsageControllerEpoch != "epoch-1" {
+		t.Fatalf("usage after ACP model switch = %#v, want unavailable replace gauge with stale prior-model usage omitted", afterModelSwitch.Usage)
 	}
 	afterModelSwitchFull, err := driver.Status(ctx)
 	if err != nil {
@@ -165,6 +193,36 @@ func TestACPControllerUsageFeedsLightweightStatusAndSessionStatistics(t *testing
 	}
 	if afterModelSwitchFull.Usage.SessionUsageTotal.TotalTokens != 0 || len(afterModelSwitchFull.Usage.SessionUsageByModel) != 0 {
 		t.Fatalf("session usage after ACP model switch = %#v, want stale prior-model gauge excluded", afterModelSwitchFull.Usage)
+	}
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{
+		Type: session.EventTypeCustom, Visibility: session.VisibilityMirror,
+		Scope:        &session.EventScope{Controller: session.ControllerRef{Kind: session.ControllerKindACP, ID: "codex", EpochID: "epoch-1"}},
+		Invocation:   &session.EventInvocation{Provider: "codex", Model: "gpt-new"},
+		ContextUsage: &session.ContextUsageSnapshot{Size: 200000, Used: 8000},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	modelBGauge, err := driver.LightweightStatus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modelBGauge.Usage.TotalTokens != 8000 || !modelBGauge.Usage.ContextUsageAvailable {
+		t.Fatalf("model B usage = %#v, want fresh B gauge", modelBGauge.Usage)
+	}
+	currentControllerModel = "gpt-test"
+	afterABA, err := driver.LightweightStatus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterABA.Usage.TotalTokens != 0 || afterABA.Usage.ContextUsageAvailable {
+		t.Fatalf("usage after A-B-A model switch = %#v, want old A gauge to remain unavailable", afterABA.Usage)
+	}
+	afterABAFull, err := driver.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterABAFull.Usage.SessionUsageTotal.TotalTokens != 0 || len(afterABAFull.Usage.SessionUsageByModel) != 0 {
+		t.Fatalf("Session usage after A-B-A model switch = %#v, want old A gauge excluded", afterABAFull.Usage)
 	}
 }
 
@@ -202,6 +260,88 @@ func TestSessionUsageIncludesACPSubagentTaskGauge(t *testing.T) {
 	}
 	if len(breakdown.ByModel) != 1 {
 		t.Fatalf("Task ACP by-model usage = %#v, want one model", breakdown.ByModel)
+	}
+}
+
+func TestSessionUsageSkipsACPTaskGaugeWhenLocalChildSessionIsAggregated(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := inmemory.NewStore(inmemory.Config{})
+	parent, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: child.SessionRef, Event: &session.Event{
+		Type: session.EventTypeAssistant, Visibility: session.VisibilityMirror,
+		Invocation: &session.EventInvocation{Provider: "grok", Model: "grok-4"},
+		Meta: map[string]any{"usage": map[string]any{
+			"prompt_tokens": 8000, "completion_tokens": 2000, "total_tokens": 10000,
+		}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.PutParticipant(ctx, session.PutParticipantRequest{
+		SessionRef: parent.SessionRef,
+		Binding: session.ParticipantBinding{
+			ID: "child-1", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated,
+			SessionID: child.SessionID, DelegationID: "task-local",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.PutParticipant(ctx, session.PutParticipantRequest{
+		SessionRef: parent.SessionRef,
+		Binding: session.ParticipantBinding{
+			ID: "remote-1", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated,
+			SessionID: "remote-acp-session", DelegationID: "task-remote",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deps := &runtimeDeps{
+		Session: SessionRuntimeDeps{Store: store},
+		Status: StatusRuntimeDeps{TaskEntriesFn: func(context.Context, session.SessionRef) ([]*taskapi.Entry, error) {
+			return []*taskapi.Entry{
+				{
+					TaskID: "task-local", Kind: taskapi.KindSubagent,
+					ContextUsage: &taskapi.ContextUsageRecord{
+						Snapshot:   session.ContextUsageSnapshot{Size: 200000, Used: 42000},
+						Invocation: session.EventInvocation{Provider: "grok", Model: "grok-4"},
+					},
+				},
+				{
+					TaskID: "task-remote", Kind: taskapi.KindSubagent,
+					ContextUsage: &taskapi.ContextUsageRecord{
+						Snapshot:   session.ContextUsageSnapshot{Size: 100000, Used: 7000},
+						Invocation: session.EventInvocation{Provider: "codex", Model: "gpt-test"},
+					},
+				},
+			}, nil
+		}},
+	}
+	driver, err := newAssemblerForSession(ctx, deps, parent, "tui", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	breakdown, err := driver.sessionTokenUsageBreakdown(ctx, parent.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if breakdown.Total.TotalTokens != 17000 || breakdown.Subagents.TotalTokens != 17000 || breakdown.Main.TotalTokens != 0 {
+		t.Fatalf("usage breakdown = %#v, want local child session plus remote Task gauge only", breakdown)
+	}
+	if len(breakdown.ByModel) != 2 {
+		t.Fatalf("by-model usage = %#v, want local child and remote Task models", breakdown.ByModel)
+	}
+	local := breakdown.ByModel["grok\x00grok-4"]
+	remote := breakdown.ByModel["codex\x00gpt-test"]
+	if local.Usage.TotalTokens != 10000 || remote.Usage.TotalTokens != 7000 {
+		t.Fatalf("by-model usage = %#v, want child 10000 and remote 7000", breakdown.ByModel)
 	}
 }
 

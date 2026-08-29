@@ -2097,10 +2097,13 @@
         "properties": {"provider": {"type": "string"}, "model": {"type": "string"}, "usage": {"$ref": "#/components/schemas/UsageSnapshot"}}
       },
       "StatusUsage": {
-        "type": "object", "additionalProperties": false, "required": ["session_usage_total"],
+        "type": "object", "additionalProperties": false,
+        "required": ["context_usage_available", "context_usage_controller_epoch", "context_usage_replace", "session_usage_total"],
         "properties": {
           "prompt_tokens": {"type": "integer"}, "completion_tokens": {"type": "integer"}, "total_tokens": {"type": "integer"},
-          "context_window_tokens": {"type": "integer"}, "session_usage_total": {"$ref": "#/components/schemas/UsageSnapshot"},
+          "context_window_tokens": {"type": "integer"}, "context_usage_available": {"type": "boolean"},
+          "context_usage_controller_epoch": {"type": "string"}, "context_usage_replace": {"type": "boolean"},
+          "session_usage_total": {"$ref": "#/components/schemas/UsageSnapshot"},
           "session_usage_by_model": {"type": "array", "items": {"$ref": "#/components/schemas/ModelUsageSnapshot"}}
         }
       },

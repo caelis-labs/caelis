@@ -43,9 +43,12 @@ func TestStatusSnapshotCarriesGroupedViews(t *testing.T) {
 			HostExecution:   true,
 		},
 		Usage: StatusUsage{
-			TotalTokens:         42,
-			ContextWindowTokens: 128,
-			SessionUsageByModel: []ModelUsageSnapshot{{Provider: "openai", Model: "gpt-4o", Usage: UsageSnapshot{TotalTokens: 42}}},
+			TotalTokens:                 42,
+			ContextWindowTokens:         128,
+			ContextUsageAvailable:       true,
+			ContextUsageReplace:         true,
+			ContextUsageControllerEpoch: "epoch-1",
+			SessionUsageByModel:         []ModelUsageSnapshot{{Provider: "openai", Model: "gpt-4o", Usage: UsageSnapshot{TotalTokens: 42}}},
 		},
 		Runtime: StatusRuntime{
 			ActiveJobs:     1,
@@ -64,7 +67,9 @@ func TestStatusSnapshotCarriesGroupedViews(t *testing.T) {
 	if status.SandboxStatus.Type != "windows" || !status.SandboxStatus.Setup.Required || !ok || workspace.Counts["write_roots"] != 2 || !workspace.UpdatedAt.Equal(updated) {
 		t.Fatalf("sandbox group = %#v", status.SandboxStatus)
 	}
-	if status.Usage.TotalTokens != 42 || status.Usage.ContextWindowTokens != 128 || len(status.Usage.SessionUsageByModel) != 1 {
+	if status.Usage.TotalTokens != 42 || status.Usage.ContextWindowTokens != 128 ||
+		!status.Usage.ContextUsageAvailable || !status.Usage.ContextUsageReplace || status.Usage.ContextUsageControllerEpoch != "epoch-1" ||
+		len(status.Usage.SessionUsageByModel) != 1 {
 		t.Fatalf("usage group = %#v", status.Usage)
 	}
 	if status.Runtime.ActiveJobs != 1 || status.Runtime.ActiveTurnKind != "main" || !status.Runtime.Running {

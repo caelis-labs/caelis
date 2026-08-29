@@ -38,31 +38,35 @@ type SlashNoticeMsg struct {
 }
 
 type SetStatusMsg struct {
-	Workspace           string
-	Model               string
-	Context             string
-	TotalTokens         int
-	ContextWindowTokens int
-	UsageReplace        bool
-	ModeLabel           string
-	Status              StatusViewModel
+	Workspace            string
+	Model                string
+	Context              string
+	TotalTokens          int
+	ContextWindowTokens  int
+	HasUsage             bool
+	UsageReplace         bool
+	UsageControllerEpoch string
+	ModeLabel            string
+	Status               StatusViewModel
 }
 
 type StatusRefreshResultMsg struct {
-	Workspace           string
-	HasWorkspace        bool
-	Model               string
-	Context             string
-	HasStatus           bool
-	HasContext          bool
-	TotalTokens         int
-	ContextWindowTokens int
-	HasUsage            bool
-	UsageReplace        bool
-	ModeLabel           string
-	HasModeLabel        bool
-	Status              StatusViewModel
-	HasView             bool
+	Workspace            string
+	HasWorkspace         bool
+	Model                string
+	Context              string
+	HasStatus            bool
+	HasContext           bool
+	TotalTokens          int
+	ContextWindowTokens  int
+	HasUsage             bool
+	UsageReplace         bool
+	UsageControllerEpoch string
+	HasUsageIdentity     bool
+	ModeLabel            string
+	HasModeLabel         bool
+	Status               StatusViewModel
+	HasView              bool
 }
 
 type SetCommandsMsg struct {

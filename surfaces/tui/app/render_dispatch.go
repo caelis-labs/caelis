@@ -381,19 +381,28 @@ func (m *Model) handleSetStatusMsg(msg SetStatusMsg) tea.Model {
 	if workspace := strings.TrimSpace(msg.Workspace); workspace != "" {
 		m.setWorkspaceDisplay(workspace)
 	}
+	usageIdentityChanged := m.observeStatusUsageIdentity(msg.UsageControllerEpoch)
 	nextModel := normalizeStatusModel(msg.Model)
 	modelChanged := nextModel != m.statusModel
 	modelSwitched := m.statusModel != "" && modelChanged
 	if modelChanged {
 		m.statusModel = nextModel
 	}
-	m.statusContext = strings.TrimSpace(msg.Context)
+	nextStatus := msg.Status
+	if !msg.HasUsage && !modelSwitched && !usageIdentityChanged && strings.TrimSpace(nextStatus.Tokens) == "" {
+		nextStatus.Tokens = firstNonEmpty(strings.TrimSpace(m.statusView.Tokens), strings.TrimSpace(m.statusContext))
+	}
 	m.statusModeLabel = strings.TrimSpace(msg.ModeLabel)
-	m.statusView = msg.Status
-	if modelSwitched || msg.UsageReplace {
-		m.replaceStatusUsage(msg.TotalTokens, msg.ContextWindowTokens)
-	} else {
-		m.mergeStatusUsage(msg.TotalTokens, msg.ContextWindowTokens)
+	m.statusView = nextStatus
+	if (modelSwitched || usageIdentityChanged) && !msg.HasUsage {
+		m.replaceStatusUsage(0, 0)
+	}
+	if msg.HasUsage {
+		if modelSwitched || usageIdentityChanged || msg.UsageReplace {
+			m.replaceStatusUsage(msg.TotalTokens, msg.ContextWindowTokens)
+		} else {
+			m.mergeStatusUsage(msg.TotalTokens, msg.ContextWindowTokens)
+		}
 	}
 	m.normalizeStatusViewWorkspace()
 	return m
@@ -401,6 +410,10 @@ func (m *Model) handleSetStatusMsg(msg SetStatusMsg) tea.Model {
 
 func (m *Model) handleStatusRefreshResultMsg(msg StatusRefreshResultMsg) tea.Model {
 	m.statusRefreshInFlight = false
+	usageIdentityChanged := false
+	if msg.HasUsageIdentity {
+		usageIdentityChanged = m.observeStatusUsageIdentity(msg.UsageControllerEpoch)
+	}
 	modelSwitched := false
 	if msg.HasWorkspace {
 		if workspace := strings.TrimSpace(msg.Workspace); workspace != "" {
@@ -414,16 +427,16 @@ func (m *Model) handleStatusRefreshResultMsg(msg StatusRefreshResultMsg) tea.Mod
 		if modelChanged {
 			m.statusModel = nextModel
 		}
-		if modelSwitched && !msg.HasUsage {
-			m.replaceStatusUsage(0, 0)
-		}
+	}
+	if (modelSwitched || usageIdentityChanged) && !msg.HasUsage {
+		m.replaceStatusUsage(0, 0)
 	}
 	if msg.HasContext {
 		m.statusContext = strings.TrimSpace(msg.Context)
 	}
 	if msg.HasView {
 		nextStatus := msg.Status
-		if strings.TrimSpace(nextStatus.Tokens) == "" {
+		if !modelSwitched && !usageIdentityChanged && strings.TrimSpace(nextStatus.Tokens) == "" {
 			nextStatus.Tokens = firstNonEmpty(strings.TrimSpace(m.statusView.Tokens), strings.TrimSpace(m.statusContext))
 		}
 		m.statusView = nextStatus
@@ -433,13 +446,24 @@ func (m *Model) handleStatusRefreshResultMsg(msg StatusRefreshResultMsg) tea.Mod
 		m.statusModeLabel = strings.TrimSpace(msg.ModeLabel)
 	}
 	if msg.HasUsage {
-		if modelSwitched || msg.UsageReplace {
+		if modelSwitched || usageIdentityChanged || msg.UsageReplace {
 			m.replaceStatusUsage(msg.TotalTokens, msg.ContextWindowTokens)
 		} else {
 			m.mergeStatusUsage(msg.TotalTokens, msg.ContextWindowTokens)
 		}
 	}
 	return m
+}
+
+func (m *Model) observeStatusUsageIdentity(controllerEpoch string) bool {
+	if m == nil {
+		return false
+	}
+	controllerEpoch = strings.TrimSpace(controllerEpoch)
+	changed := m.statusUsageIdentityKnown && m.statusUsageControllerEpoch != controllerEpoch
+	m.statusUsageControllerEpoch = controllerEpoch
+	m.statusUsageIdentityKnown = true
+	return changed
 }
 
 func (m *Model) handleSetCommandsMsg(msg SetCommandsMsg) tea.Model {
@@ -586,13 +610,17 @@ func (m *Model) statusRefreshCmd() tea.Cmd {
 			msg.HasContext = strings.TrimSpace(msg.Context) != ""
 		}
 		if cfg.RefreshStatusUsage != nil {
-			msg.TotalTokens, msg.ContextWindowTokens = cfg.RefreshStatusUsage()
-			msg.HasUsage = true
+			usage := cfg.RefreshStatusUsage()
+			msg.TotalTokens = usage.TotalTokens
+			msg.ContextWindowTokens = usage.ContextWindowTokens
+			msg.HasUsage = statusContextUsageAvailable(usage)
+			msg.UsageReplace = usage.ContextUsageReplace
+			msg.UsageControllerEpoch = strings.TrimSpace(usage.ContextUsageControllerEpoch)
+			msg.HasUsageIdentity = true
 		}
 		if cfg.RefreshStatusView != nil {
 			msg.Status = cfg.RefreshStatusView()
 			msg.HasView = true
-			msg.UsageReplace = strings.EqualFold(strings.TrimSpace(msg.Status.Provider), "acp")
 		}
 		if cfg.ModeLabel != nil {
 			msg.ModeLabel = strings.TrimSpace(cfg.ModeLabel())

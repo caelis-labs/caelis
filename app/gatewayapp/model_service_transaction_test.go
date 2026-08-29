@@ -605,6 +605,65 @@ func TestDeleteNonDefaultModelPreservesGlobalEffort(t *testing.T) {
 	}
 }
 
+func TestConnectPreservesACPHostDefault(t *testing.T) {
+	stack, _ := newLocalStateTestStack(t)
+	acpProfileID := selectACPHostDefault(t, stack, "codex")
+
+	connected, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "after-acp-default"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertACPHostDefaultPreserved(t, stack, acpProfileID)
+	if _, ok := modelprofile.Lookup(mustLoadModelProfiles(t, stack), connected.ID); !ok {
+		t.Fatalf("connected provider profile missing: %#v", connected)
+	}
+}
+
+func TestDeleteNonDefaultProviderPreservesACPHostDefault(t *testing.T) {
+	ctx := context.Background()
+	stack, _ := newLocalStateTestStack(t)
+	acpProfileID := selectACPHostDefault(t, stack, "codex")
+	unrelated, err := stack.connectTestModel(ModelConfig{
+		Provider: "ollama",
+		API:      providers.APIOllama,
+		Model:    "unrelated-acp-default",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, unrelated.Backend.Provider.ModelConfigID); err != nil {
+		t.Fatal(err)
+	}
+	assertACPHostDefaultPreserved(t, stack, acpProfileID)
+	if _, ok := modelprofile.Lookup(mustLoadModelProfiles(t, stack), unrelated.ID); ok {
+		t.Fatalf("deleted provider profile remains: %#v", unrelated)
+	}
+}
+
+func TestDeleteLastProviderPreservesACPHostDefault(t *testing.T) {
+	ctx := context.Background()
+	stack, _ := newLocalStateTestStack(t)
+	lastProviderID := stack.composition.lookup.DefaultID()
+	if lastProviderID == "" {
+		t.Fatal("test stack has no initial provider model")
+	}
+	acpProfileID := selectACPHostDefault(t, stack, "codex")
+	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, lastProviderID); err != nil {
+		t.Fatal(err)
+	}
+	assertACPHostDefaultPreserved(t, stack, acpProfileID)
+	doc, err := stack.composition.authorities.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Models.Configs) != 0 {
+		t.Fatalf("last provider remains: %#v", doc.Models.Configs)
+	}
+	if _, ok := modelprofile.Lookup(doc.ModelProfiles, modelprofile.BuildProviderID(lastProviderID)); ok {
+		t.Fatalf("last provider profile remains: %#v", doc.ModelProfiles)
+	}
+}
+
 func TestDeleteModelRollsForwardAfterCommittedConfigWriteFault(t *testing.T) {
 	for _, stage := range []string{"chmod", "fsync"} {
 		t.Run(stage, func(t *testing.T) {
@@ -780,5 +839,45 @@ func requireCommittedConfigWriteError(t *testing.T, err error, fault error) {
 	t.Helper()
 	if !errors.Is(err, fault) || !configstore.WriteCommitted(err) {
 		t.Fatalf("operation error = %v, want committed %v", err, fault)
+	}
+}
+
+func selectACPHostDefault(t *testing.T, stack *Stack, agentID string) string {
+	t.Helper()
+	persistDisconnectTestAgent(t, stack, agentID)
+	profileID := "acp:" + agentID + ":default"
+	if err := stack.useTestHostModel(context.Background(), session.SessionRef{}, profileID, "none"); err != nil {
+		t.Fatal(err)
+	}
+	return profileID
+}
+
+func mustLoadModelProfiles(t *testing.T, stack *Stack) modelprofile.Configuration {
+	t.Helper()
+	doc, err := stack.composition.authorities.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return doc.ModelProfiles
+}
+
+func assertACPHostDefaultPreserved(t *testing.T, stack *Stack, profileID string) {
+	t.Helper()
+	doc, err := stack.composition.authorities.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := stack.composition.runtimeProcessSnapshot().runtime
+	if doc.ModelProfiles.DefaultProfileID != profileID ||
+		doc.ModelProfiles.DefaultEffort != "none" ||
+		stack.composition.lookup.DefaultID() != "" ||
+		runtime.ModelProfileID != profileID {
+		t.Fatalf(
+			"ACP Host default was not preserved: profile=%q effort=%q lookup=%q runtime=%q",
+			doc.ModelProfiles.DefaultProfileID,
+			doc.ModelProfiles.DefaultEffort,
+			stack.composition.lookup.DefaultID(),
+			runtime.ModelProfileID,
+		)
 	}
 }

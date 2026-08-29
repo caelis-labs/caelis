@@ -15,6 +15,8 @@ func (m *Model) resetConversationView() {
 	m.statusView.Tokens = ""
 	m.statusUsageTotal = 0
 	m.statusUsageWindow = 0
+	m.statusUsageControllerEpoch = ""
+	m.statusUsageIdentityKnown = false
 	m.transientBlockID = ""
 	m.mainTimelineTailID = ""
 	m.mainAnchorBlockIDs = nil

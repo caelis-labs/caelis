@@ -121,11 +121,21 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	validateWireValue(t, "SessionState", state)
 	validateWireValue(t, "StatusSnapshot", controlstatus.StatusSnapshot{
 		Configuration: controlstatus.StatusConfiguration{Revision: math.MaxUint64},
+		Usage: controlstatus.StatusUsage{
+			TotalTokens: 42, ContextWindowTokens: 200000,
+			ContextUsageAvailable: true, ContextUsageReplace: true, ContextUsageControllerEpoch: "epoch-1",
+		},
 	})
 }
 
 func TestStatusConfigurationRevisionWireRoundTrip(t *testing.T) {
-	want := controlstatus.StatusSnapshot{Configuration: controlstatus.StatusConfiguration{Revision: math.MaxUint64}}
+	want := controlstatus.StatusSnapshot{
+		Configuration: controlstatus.StatusConfiguration{Revision: math.MaxUint64},
+		Usage: controlstatus.StatusUsage{
+			TotalTokens: 42, ContextWindowTokens: 200000,
+			ContextUsageAvailable: true, ContextUsageReplace: true, ContextUsageControllerEpoch: "epoch-1",
+		},
+	}
 	raw, err := Marshal(want)
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +150,23 @@ func TestStatusConfigurationRevisionWireRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("round trip = %#v, want %#v", got, want)
 	}
+}
+
+func TestStatusUsageWireAlwaysCarriesTypedReductionIdentity(t *testing.T) {
+	raw, err := Marshal(controlstatus.StatusSnapshot{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range [][]byte{
+		[]byte(`"context_usage_available":false`),
+		[]byte(`"context_usage_controller_epoch":""`),
+		[]byte(`"context_usage_replace":false`),
+	} {
+		if !bytes.Contains(raw, field) {
+			t.Fatalf("wire JSON = %s, want required field %s", raw, field)
+		}
+	}
+	validateWireValue(t, "StatusSnapshot", controlstatus.StatusSnapshot{})
 }
 
 func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {

@@ -107,6 +107,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 
 	status := controlstatus.StatusSnapshot{
 		Configuration: controlstatus.StatusConfiguration{Revision: configurationRevision},
+		Usage:         controlstatus.StatusUsage{ContextUsageReplace: activeACP},
 		Session: controlstatus.StatusSession{
 			ID:          sessionID,
 			Workspace:   workspaceStatusDisplay(ctx, workspaceCWD),
@@ -131,6 +132,9 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 			FullAccessMode:   sandboxStatus.FullAccessMode,
 		},
 	}
+	if activeACP {
+		status.Usage.ContextUsageControllerEpoch = strings.TrimSpace(activeSession.Controller.EpochID)
+	}
 	if d.deps != nil {
 		// The configured context window is static model metadata, not a usage
 		// diagnostic. Keep it available to lightweight status consumers so a
@@ -139,6 +143,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		if !activeACP && d.deps.Model.ConfigFn != nil {
 			if cfg, found := d.deps.Model.ConfigFn(rawModelText); found && cfg.ContextWindowTokens > 0 {
 				status.Usage.ContextWindowTokens = cfg.ContextWindowTokens
+				status.Usage.ContextUsageAvailable = true
 			}
 		}
 		if activeACP && ok {
@@ -151,6 +156,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 			if err == nil && found {
 				status.Usage.TotalTokens = usage.TotalTokens
 				status.Usage.ContextWindowTokens = usage.ContextWindowTokens
+				status.Usage.ContextUsageAvailable = true
 			} else if ctx.Err() != nil {
 				return controlstatus.StatusSnapshot{}, ctx.Err()
 			}
@@ -184,6 +190,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		if includeDiagnostics && ok && !activeACP && d.deps.Model.SessionUsageSnapshotFn != nil {
 			if usage, err := d.deps.Model.SessionUsageSnapshotFn(ctx, activeSession.SessionRef, rawModelText); err == nil {
 				status.Usage.TotalTokens = usage.TotalTokens
+				status.Usage.ContextUsageAvailable = true
 				if usage.ContextWindowTokens > 0 {
 					status.Usage.ContextWindowTokens = usage.ContextWindowTokens
 				}
