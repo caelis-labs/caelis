@@ -10,6 +10,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/google/uuid"
 )
 
 const xAIWebSearchMaxOutputTokens = 8192
@@ -40,6 +41,7 @@ func (l *xAIResponsesLLM) SearchWeb(ctx context.Context, req model.WebSearchRequ
 		return model.WebSearchResponse{}, fmt.Errorf("model: xai responses llm is nil")
 	}
 
+	temporarySessionID := uuid.NewString()
 	payload := xAIWebSearchRequest{
 		Model:           strings.TrimSpace(l.name),
 		Input:           req.Query,
@@ -59,11 +61,14 @@ func (l *xAIResponsesLLM) SearchWeb(ctx context.Context, req model.WebSearchRequ
 	if err != nil {
 		return model.WebSearchResponse{}, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json")
-	httpReq.Header.Set("x-grok-model-override", l.name)
-	applyDefaultAttributionHeaders(httpReq, APIXAIResponses)
 	applyConfiguredHeaders(httpReq, l.headers)
+	// Each hosted search is an isolated temporary Responses conversation. It
+	// must not join the parent model Session or its prompt-cache affinity.
+	applyXAIResponsesHeaders(httpReq, "application/json", l.name, xAIResponsesWireIdentity{
+		conversationID: temporarySessionID,
+		requestID:      uuid.NewString(),
+		sessionID:      temporarySessionID,
+	})
 
 	resp, err := l.client.Do(httpReq)
 	if err != nil {

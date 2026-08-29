@@ -541,8 +541,14 @@ func TestAuthenticatedClientRefreshesOnceAndPersistsRotatedToken(t *testing.T) {
 			if got := request.Header.Get("X-XAI-Token-Auth"); got != "xai-grok-cli" {
 				t.Errorf("X-XAI-Token-Auth = %q", got)
 			}
-			if got := request.Header.Get("x-grok-client-version"); got != grokBuildProtocolVersion {
-				t.Errorf("x-grok-client-version = %q", got)
+			if got := request.Header.Get("x-authenticateresponse"); got != "authenticate-response" {
+				t.Errorf("x-authenticateresponse = %q", got)
+			}
+			if got := request.Header.Get(grokClientModeHeader); got != grokInteractiveClient {
+				t.Errorf("%s = %q", grokClientModeHeader, got)
+			}
+			if got := request.Header.Get("x-grok-client-version"); got != "1.0.12" {
+				t.Errorf("x-grok-client-version = %q, want reviewed Grok Build version 1.0.12", got)
 			}
 			if got := request.Header.Get("x-grok-client-identifier"); got != "caelis" {
 				t.Errorf("x-grok-client-identifier = %q", got)
@@ -621,8 +627,10 @@ func TestAuthenticatedClientRefreshesUnauthorizedOnceAndEnforcesAllowlist(t *tes
 	var calls atomic.Int32
 	var firstBodyClosed atomic.Bool
 	var firstRequestPayload string
+	var firstRequestID string
 	var secondAuthorization string
 	var secondRequestPayload string
+	var secondRequestID string
 	base := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		raw, err := io.ReadAll(request.Body)
 		if err != nil {
@@ -632,11 +640,25 @@ func TestAuthenticatedClientRefreshesUnauthorizedOnceAndEnforcesAllowlist(t *tes
 			return nil, err
 		}
 		call := calls.Add(1)
-		if got := request.Header.Get("X-XAI-Token-Auth"); got != "xai-grok-cli" {
-			t.Errorf("X-XAI-Token-Auth = %q", got)
+		for header, want := range map[string]string{
+			"X-XAI-Token-Auth":       "xai-grok-cli",
+			"x-authenticateresponse": "authenticate-response",
+			"x-grok-client-version":  grokBuildProtocolVersion,
+			grokClientModeHeader:     grokInteractiveClient,
+			"x-grok-conv-id":         "session-affinity",
+			"x-grok-session-id":      "session-affinity",
+		} {
+			if got := request.Header.Get(header); got != want {
+				t.Errorf("%s = %q, want %q", header, got, want)
+			}
+		}
+		requestID := request.Header.Get("x-grok-req-id")
+		if requestID == "" || requestID == "provider-request" {
+			t.Errorf("x-grok-req-id = %q, want transport-owned attempt identity", requestID)
 		}
 		if call == 1 {
 			firstRequestPayload = string(raw)
+			firstRequestID = requestID
 			if got := request.Header.Get("Authorization"); got != "Bearer access-revoked" {
 				t.Errorf("first Authorization = %q", got)
 			}
@@ -649,11 +671,15 @@ func TestAuthenticatedClientRefreshesUnauthorizedOnceAndEnforcesAllowlist(t *tes
 		}
 		secondAuthorization = request.Header.Get("Authorization")
 		secondRequestPayload = string(raw)
+		secondRequestID = requestID
 		return textResponse(request, http.StatusOK, "ok"), nil
 	})}
 	client, refreshCalls := newRevokedTestAuthenticatedClient(t, now, base)
 	request, _ := http.NewRequest(http.MethodPost, "https://cli-chat-proxy.grok.com/v1/responses", strings.NewReader(requestPayload))
 	request.Header.Set("X-Test", "original")
+	request.Header.Set("x-grok-conv-id", "session-affinity")
+	request.Header.Set("x-grok-session-id", "session-affinity")
+	request.Header.Set("x-grok-req-id", "provider-request")
 	response, err := client.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -668,7 +694,11 @@ func TestAuthenticatedClientRefreshesUnauthorizedOnceAndEnforcesAllowlist(t *tes
 	if firstRequestPayload != requestPayload || secondRequestPayload != requestPayload {
 		t.Fatalf("backend request bodies = %q, %q; want %q on both attempts", firstRequestPayload, secondRequestPayload, requestPayload)
 	}
-	if request.Header.Get("Authorization") != "" || request.Header.Get("X-Test") != "original" {
+	if firstRequestID == secondRequestID {
+		t.Fatalf("x-grok-req-id reused across 401 replay: %q", firstRequestID)
+	}
+	if request.Header.Get("Authorization") != "" || request.Header.Get("X-Test") != "original" ||
+		request.Header.Get("x-grok-req-id") != "provider-request" || request.Header.Get("x-grok-session-id") != "session-affinity" {
 		t.Fatalf("original request mutated: %#v", request.Header)
 	}
 	blocked, _ := http.NewRequest(http.MethodGet, "https://example.com/v1/models", nil)

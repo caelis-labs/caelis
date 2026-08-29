@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/google/uuid"
 )
 
 type authenticatedTransport struct {
@@ -81,8 +82,16 @@ func authenticatedRequest(request *http.Request, credentials accessCredentials) 
 	clone.Header = request.Header.Clone()
 	clone.Header.Set("Authorization", "Bearer "+credentials.token)
 	clone.Header.Set("X-XAI-Token-Auth", "xai-grok-cli")
+	clone.Header.Set("x-authenticateresponse", "authenticate-response")
 	clone.Header.Set("x-grok-client-version", grokBuildProtocolVersion)
 	clone.Header.Set("x-grok-client-identifier", "caelis")
+	clone.Header.Set(grokClientModeHeader, grokInteractiveClient)
+	if isXAIResponsesRequest(clone) {
+		// The transport is the actual-attempt boundary, including its transparent
+		// one-shot 401 replay. Keep the logical Session headers but mint a fresh
+		// request identity for every request that reaches the proxy.
+		clone.Header.Set("x-grok-req-id", uuid.NewString())
+	}
 	return clone
 }
 
@@ -101,6 +110,10 @@ func replayAuthenticatedRequest(request *http.Request, credentials accessCredent
 
 func requestReplayable(request *http.Request) bool {
 	return request.Body == nil || request.Body == http.NoBody || request.GetBody != nil
+}
+
+func isXAIResponsesRequest(request *http.Request) bool {
+	return request != nil && request.URL != nil && request.URL.EscapedPath() == "/v1/responses"
 }
 
 func allowedXAIRequest(request *http.Request) bool {

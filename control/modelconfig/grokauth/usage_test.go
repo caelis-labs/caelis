@@ -39,6 +39,7 @@ func TestSubscriptionUsageReadsCurrentWeeklyCredits(t *testing.T) {
 			for header, want := range map[string]string{
 				"Authorization":            "Bearer " + accessToken,
 				"X-XAI-Token-Auth":         "xai-grok-cli",
+				"x-authenticateresponse":   "authenticate-response",
 				"x-userid":                 "user-123",
 				"x-grok-client-version":    grokBuildProtocolVersion,
 				"x-grok-client-identifier": "caelis",

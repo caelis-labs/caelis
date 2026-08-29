@@ -17,6 +17,7 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 
 	var mu sync.Mutex
 	var bodies []map[string]any
+	var requestIDs []string
 	var requestCount atomic.Int32
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {
@@ -28,11 +29,33 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 		if got := r.Header.Get("originator"); got != "" {
 			t.Errorf("originator = %q, want empty", got)
 		}
-		if got := r.Header.Get("session-id"); got != "" {
-			t.Errorf("session-id = %q, want empty", got)
+		for _, header := range []string{
+			"session-id", "session_id", "x-authenticateresponse", "x-client-request-id",
+			"x-grok-agent-id", "x-grok-client-identifier", "x-grok-client-mode", "x-grok-client-version",
+			"x-session-id", "x-userid", "X-XAI-Token-Auth",
+		} {
+			if got := r.Header.Get(header); got != "" {
+				t.Errorf("%s = %q, want empty", header, got)
+			}
 		}
-		if got := r.Header.Get("x-grok-model-override"); got != "grok-4.5" {
-			t.Errorf("x-grok-model-override = %q, want grok-4.5", got)
+		for header, want := range map[string]string{
+			"Accept":                "text/event-stream",
+			"Content-Type":          "application/json",
+			"x-grok-conv-id":        "caelis-session-1",
+			"x-grok-model-override": "grok-4.5",
+			"x-grok-session-id":     "caelis-session-1",
+			"X-Custom-Safe":         "preserved",
+		} {
+			if got := r.Header.Get(header); got != want {
+				t.Errorf("%s = %q, want %q", header, got, want)
+			}
+		}
+		if got := r.Header.Get("User-Agent"); !strings.HasPrefix(got, "caelis/") {
+			t.Errorf("User-Agent = %q, want Caelis attribution", got)
+		}
+		requestID := r.Header.Get("x-grok-req-id")
+		if requestID == "" || requestID == "spoofed-request" {
+			t.Errorf("x-grok-req-id = %q, want internal request identity", requestID)
 		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -41,6 +64,7 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 		}
 		mu.Lock()
 		bodies = append(bodies, body)
+		requestIDs = append(requestIDs, requestID)
 		mu.Unlock()
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -81,6 +105,28 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 		Alias: "xai/grok-4.5", Provider: "xai", API: APIXAIResponses, Model: "grok-4.5",
 		BaseURL: server.URL, HTTPClient: client, MaxOutputTok: 32768, ContextWindowTokens: 500000,
 		Auth: AuthConfig{Type: AuthOAuthToken},
+		Headers: map[string]string{
+			"Accept":                   "application/x-spoofed",
+			"Authorization":            "Bearer spoofed",
+			"Content-Type":             "application/x-spoofed",
+			"session-id":               "spoofed-codex-session",
+			"session_id":               "spoofed-generic-session",
+			"User-Agent":               "grok-shell/spoofed",
+			"x-authenticateresponse":   "spoofed-auth",
+			"x-client-request-id":      "spoofed-client-request",
+			"x-grok-agent-id":          "spoofed-agent",
+			"x-grok-client-identifier": "spoofed-client",
+			"x-grok-client-mode":       "spoofed-mode",
+			"x-grok-client-version":    "999",
+			"x-grok-conv-id":           "spoofed-conversation",
+			"x-grok-model-override":    "spoofed-model",
+			"x-grok-req-id":            "spoofed-request",
+			"x-grok-session-id":        "spoofed-session",
+			"x-session-id":             "spoofed-router-session",
+			"x-userid":                 "spoofed-user",
+			"X-XAI-Token-Auth":         "spoofed-token-mode",
+			"X-Custom-Safe":            "preserved",
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -133,8 +179,16 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(bodies) != 2 {
-		t.Fatalf("request bodies = %d, want 2", len(bodies))
+	if len(bodies) != 2 || len(requestIDs) != 2 {
+		t.Fatalf("captured requests = bodies %d ids %d, want 2", len(bodies), len(requestIDs))
+	}
+	if requestIDs[0] == requestIDs[1] {
+		t.Fatalf("x-grok-req-id reused across model requests: %q", requestIDs[0])
+	}
+	for index, body := range bodies {
+		if body["prompt_cache_key"] != "caelis-session-1" {
+			t.Fatalf("body[%d] prompt_cache_key = %#v, want stable Session affinity", index, body["prompt_cache_key"])
+		}
 	}
 	if bodies[0]["model"] != "grok-4.5" || bodies[1]["model"] != "grok-4.5" {
 		t.Fatalf("request models = %#v/%#v, want grok-4.5", bodies[0]["model"], bodies[1]["model"])
@@ -162,6 +216,23 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	}
 	if !replayed {
 		t.Fatalf("second input omitted xAI encrypted reasoning: %#v", input)
+	}
+}
+
+func TestXAIResponsesRequestAffinityIsStableDistinctAndBounded(t *testing.T) {
+	t.Parallel()
+
+	if got := xAIResponsesRequestAffinity(" session-a "); got != "session-a" {
+		t.Fatalf("short affinity = %q, want session-a", got)
+	}
+	if first, second := xAIResponsesRequestAffinity("session-a"), xAIResponsesRequestAffinity("session-b"); first == second {
+		t.Fatalf("distinct Sessions projected to the same affinity %q", first)
+	}
+	longSession := "system-reviewer-" + strings.Repeat("x", 256)
+	first := xAIResponsesRequestAffinity(longSession)
+	second := xAIResponsesRequestAffinity(longSession)
+	if first != second || len(first) != xAIResponsesRequestAffinityMaxLength {
+		t.Fatalf("long affinity = %q/%q (length %d), want stable %d-character projection", first, second, len(first), xAIResponsesRequestAffinityMaxLength)
 	}
 }
 

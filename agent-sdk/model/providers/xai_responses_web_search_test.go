@@ -17,7 +17,13 @@ import (
 func TestXAIResponsesSearchWebUsesHostedToolAndPreservesProviderResults(t *testing.T) {
 	t.Parallel()
 
+	type wireIdentity struct {
+		conversationID string
+		requestID      string
+		sessionID      string
+	}
 	var body map[string]any
+	var identities []wireIdentity
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {
 			t.Errorf("path = %q, want /responses", r.URL.Path)
@@ -34,6 +40,18 @@ func TestXAIResponsesSearchWebUsesHostedToolAndPreservesProviderResults(t *testi
 		if got := r.Header.Get("originator"); got != "" {
 			t.Errorf("originator = %q, want empty", got)
 		}
+		identity := wireIdentity{
+			conversationID: r.Header.Get("x-grok-conv-id"),
+			requestID:      r.Header.Get("x-grok-req-id"),
+			sessionID:      r.Header.Get("x-grok-session-id"),
+		}
+		if identity.conversationID == "" || identity.conversationID != identity.sessionID || identity.sessionID == "parent-session" {
+			t.Errorf("Grok search identity = %#v, want one isolated temporary Session", identity)
+		}
+		if identity.requestID == "" || identity.requestID == identity.conversationID {
+			t.Errorf("x-grok-req-id = %q, want independent request identity", identity.requestID)
+		}
+		identities = append(identities, identity)
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode request: %v", err)
 			return
@@ -92,16 +110,24 @@ func TestXAIResponsesSearchWebUsesHostedToolAndPreservesProviderResults(t *testi
 	if !ok {
 		t.Fatalf("Factory xAI model = %T, want model.WebSearcher", llm)
 	}
-	got, err := searcher.SearchWeb(context.Background(), model.WebSearchRequest{
-		Query:      "最新 xAI 文档",
-		MaxResults: 1,
-	})
+	ctx := model.WithProviderRequestMetadata(context.Background(), model.ProviderRequestMetadata{SessionAffinity: "parent-session"})
+	searchRequest := model.WebSearchRequest{Query: "最新 xAI 文档", MaxResults: 1}
+	got, err := searcher.SearchWeb(ctx, searchRequest)
 	if err != nil {
-		t.Fatalf("SearchWeb() error = %v", err)
+		t.Fatalf("first SearchWeb() error = %v", err)
+	}
+	if _, err := searcher.SearchWeb(ctx, searchRequest); err != nil {
+		t.Fatalf("second SearchWeb() error = %v", err)
+	}
+	if len(identities) != 2 || identities[0].sessionID == identities[1].sessionID || identities[0].requestID == identities[1].requestID {
+		t.Fatalf("Grok search identities = %#v, want fresh temporary Session and request IDs", identities)
 	}
 
 	if body["model"] != "grok-4.5" || body["input"] != "最新 xAI 文档" {
 		t.Fatalf("request model/input = %#v", body)
+	}
+	if _, ok := body["prompt_cache_key"]; ok {
+		t.Fatalf("temporary search request contains prompt_cache_key: %#v", body)
 	}
 	tools, _ := body["tools"].([]any)
 	if len(tools) != 1 {

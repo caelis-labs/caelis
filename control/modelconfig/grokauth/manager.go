@@ -44,7 +44,7 @@ const (
 	// grokBuildProtocolVersion is a compatibility anchor required by the
 	// subscription proxy. It is intentionally independent from the Caelis
 	// product version and must track the public Grok Build wire contract.
-	grokBuildProtocolVersion = "0.2.112"
+	grokBuildProtocolVersion = "1.0.12"
 )
 
 var (

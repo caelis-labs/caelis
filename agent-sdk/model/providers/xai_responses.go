@@ -3,6 +3,7 @@ package providers
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"iter"
@@ -12,9 +13,13 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/google/uuid"
 )
 
-const defaultXAIResponsesBaseURL = "https://cli-chat-proxy.grok.com/v1"
+const (
+	defaultXAIResponsesBaseURL           = "https://cli-chat-proxy.grok.com/v1"
+	xAIResponsesRequestAffinityMaxLength = 64
+)
 
 // xAI Responses has not been verified to accept strict function-tool
 // declarations. Keep this independent from the Codex OAuth strategy even
@@ -97,6 +102,8 @@ func (l *xAIResponsesLLM) Generate(ctx context.Context, req *model.Request) iter
 			yield(nil, err)
 			return
 		}
+		affinity := xAIResponsesSessionAffinity(ctx)
+		payload.PromptCache = affinity
 		raw, err := json.Marshal(payload)
 		if err != nil {
 			yield(nil, err)
@@ -107,11 +114,12 @@ func (l *xAIResponsesLLM) Generate(ctx context.Context, req *model.Request) iter
 			yield(nil, err)
 			return
 		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Accept", "text/event-stream")
-		httpReq.Header.Set("x-grok-model-override", l.name)
-		applyDefaultAttributionHeaders(httpReq, APIXAIResponses)
 		applyConfiguredHeaders(httpReq, l.headers)
+		applyXAIResponsesHeaders(httpReq, "text/event-stream", l.name, xAIResponsesWireIdentity{
+			conversationID: affinity,
+			requestID:      uuid.NewString(),
+			sessionID:      affinity,
+		})
 
 		resp, err := doStreamingRequest(l.client, httpReq, l.responseHeaderTimeout)
 		if err != nil {
@@ -231,6 +239,61 @@ func (l *xAIResponsesLLM) Generate(ctx context.Context, req *model.Request) iter
 		if !terminalSeen {
 			yield(nil, fmt.Errorf("xai responses: stream ended before a terminal response"))
 		}
+	}
+}
+
+type xAIResponsesWireIdentity struct {
+	conversationID string
+	requestID      string
+	sessionID      string
+}
+
+func xAIResponsesSessionAffinity(ctx context.Context) string {
+	if metadata, ok := model.ProviderRequestMetadataFromContext(ctx); ok {
+		return xAIResponsesRequestAffinity(metadata.SessionAffinity)
+	}
+	return uuid.NewString()
+}
+
+func xAIResponsesRequestAffinity(sessionAffinity string) string {
+	key := strings.TrimSpace(sessionAffinity)
+	if len(key) <= xAIResponsesRequestAffinityMaxLength {
+		return key
+	}
+	// Keep Grok's conversation, session, and prompt-cache routing on one stable
+	// value within the Responses API's 64-character cache-key limit.
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
+}
+
+func applyXAIResponsesHeaders(req *http.Request, accept string, modelName string, identity xAIResponsesWireIdentity) {
+	if req == nil {
+		return
+	}
+	for name := range req.Header {
+		if xAIResponsesReservedHeader(name) {
+			req.Header.Del(name)
+		}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", accept)
+	req.Header.Set("User-Agent", caelisUserAgent())
+	req.Header.Set("x-grok-model-override", strings.TrimSpace(modelName))
+	req.Header.Set("x-grok-conv-id", identity.conversationID)
+	req.Header.Set("x-grok-req-id", identity.requestID)
+	req.Header.Set("x-grok-session-id", identity.sessionID)
+}
+
+func xAIResponsesReservedHeader(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if strings.HasPrefix(name, "x-grok-") {
+		return true
+	}
+	switch name {
+	case "accept", "authorization", "content-type", "session-id", "session_id", "user-agent",
+		"x-authenticateresponse", "x-client-request-id", "x-session-id", "x-userid", "x-xai-token-auth":
+		return true
+	default:
+		return false
 	}
 }
 
