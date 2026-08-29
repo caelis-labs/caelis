@@ -643,6 +643,7 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		turnSeq:         taskTurnSeqFromSpec(entry.Spec),
 		result:          result,
 		metadata:        session.CloneState(entry.Metadata),
+		contextUsage:    taskapi.CloneContextUsageRecord(entry.ContextUsage),
 		completionReady: true,
 	}
 	if cursor, ok := taskInt64Value(entry.Metadata[subagentStreamEventCursorMeta]); ok && cursor >= 0 {
@@ -926,6 +927,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      now,
 		Lease:          taskapi.CloneLease(t.lease),
+		ContextUsage:   taskapi.CloneContextUsageRecord(t.contextUsage),
 		Spec: map[string]any{
 			"target":               delegation.NormalizeTarget(t.target),
 			"prompt":               t.prompt,

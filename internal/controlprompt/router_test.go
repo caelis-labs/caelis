@@ -47,7 +47,7 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/model use) error = %v", err)
 	}
-	if svc.usedModel != "fast" || svc.usedReasoning != "high" || model.StatusUpdate == nil {
+	if svc.usedModel != "fast" || svc.usedReasoning != "high" || model.StatusUpdate == nil || !model.RefreshCommands {
 		t.Fatalf("model route used model=%q reasoning=%q status=%#v", svc.usedModel, svc.usedReasoning, model.StatusUpdate)
 	}
 	deleted, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/model del fast"}})

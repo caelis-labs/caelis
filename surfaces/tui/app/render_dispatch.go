@@ -390,7 +390,7 @@ func (m *Model) handleSetStatusMsg(msg SetStatusMsg) tea.Model {
 	m.statusContext = strings.TrimSpace(msg.Context)
 	m.statusModeLabel = strings.TrimSpace(msg.ModeLabel)
 	m.statusView = msg.Status
-	if modelSwitched {
+	if modelSwitched || msg.UsageReplace {
 		m.replaceStatusUsage(msg.TotalTokens, msg.ContextWindowTokens)
 	} else {
 		m.mergeStatusUsage(msg.TotalTokens, msg.ContextWindowTokens)
@@ -433,7 +433,7 @@ func (m *Model) handleStatusRefreshResultMsg(msg StatusRefreshResultMsg) tea.Mod
 		m.statusModeLabel = strings.TrimSpace(msg.ModeLabel)
 	}
 	if msg.HasUsage {
-		if modelSwitched {
+		if modelSwitched || msg.UsageReplace {
 			m.replaceStatusUsage(msg.TotalTokens, msg.ContextWindowTokens)
 		} else {
 			m.mergeStatusUsage(msg.TotalTokens, msg.ContextWindowTokens)
@@ -592,6 +592,7 @@ func (m *Model) statusRefreshCmd() tea.Cmd {
 		if cfg.RefreshStatusView != nil {
 			msg.Status = cfg.RefreshStatusView()
 			msg.HasView = true
+			msg.UsageReplace = strings.EqualFold(strings.TrimSpace(msg.Status.Provider), "acp")
 		}
 		if cfg.ModeLabel != nil {
 			msg.ModeLabel = strings.TrimSpace(cfg.ModeLabel())

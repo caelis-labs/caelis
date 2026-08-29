@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
@@ -152,6 +153,7 @@ type StatusRuntimeDeps struct {
 	RuntimeStateFn          func(context.Context, session.SessionRef) (SessionRuntimeState, error)
 	ConfigurationRevisionFn func(context.Context) (uint64, error)
 	DoctorFn                func(context.Context, DoctorRequest) (DoctorStatusProjection, error)
+	TaskEntriesFn           func(context.Context, session.SessionRef) ([]*taskapi.Entry, error)
 }
 
 // AgentRuntimeDeps carries ACP controller and registered-agent capabilities.

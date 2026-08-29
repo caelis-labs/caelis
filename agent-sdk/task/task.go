@@ -167,9 +167,28 @@ type Entry struct {
 	// projection; this typed field is the durable trust boundary used when
 	// rebuilding that projection from older or externally supplied records.
 	FailureDiagnostic string              `json:"failure_diagnostic,omitempty"`
+	ContextUsage      *ContextUsageRecord `json:"context_usage,omitempty"`
 	Result            map[string]any      `json:"result,omitempty"`
 	Metadata          map[string]any      `json:"metadata,omitempty"`
 	Terminal          sandbox.TerminalRef `json:"terminal,omitempty"`
+}
+
+// ContextUsageRecord is the latest replaceable context gauge observed from a
+// Task's ACP execution endpoint together with its stable model attribution.
+type ContextUsageRecord struct {
+	Snapshot   session.ContextUsageSnapshot `json:"snapshot"`
+	Invocation session.EventInvocation      `json:"invocation,omitempty"`
+}
+
+// CloneContextUsageRecord returns one detached Task context usage record.
+func CloneContextUsageRecord(in *ContextUsageRecord) *ContextUsageRecord {
+	if in == nil {
+		return nil
+	}
+	return &ContextUsageRecord{
+		Snapshot:   session.CloneContextUsageSnapshot(in.Snapshot),
+		Invocation: session.CloneEventInvocation(in.Invocation),
+	}
 }
 
 // Store persists task records for one owning session. Durable subagent spawn
@@ -397,6 +416,7 @@ func CloneEntry(in *Entry) *Entry {
 	out.Title = strings.TrimSpace(in.Title)
 	out.State = State(strings.TrimSpace(string(in.State)))
 	out.FailureDiagnostic = strings.TrimSpace(in.FailureDiagnostic)
+	out.ContextUsage = CloneContextUsageRecord(in.ContextUsage)
 	out.Lease = CloneLease(in.Lease)
 	out.Spec = jsonvalue.CloneMap(in.Spec)
 	out.Result = jsonvalue.CloneMap(in.Result)

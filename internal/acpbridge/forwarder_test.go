@@ -116,6 +116,50 @@ func TestForwardControllerEventsPublishesPersistedCanonicalWhenACPPresent(t *tes
 	}
 }
 
+func TestForwardControllerEventsPersistsACPUsageMirror(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-acp-forward-usage")
+	forwarder := NewControllerForwarder(sessions)
+	publisher := newTestPublisher()
+	source := scriptedSourceHandle{events: []SourceEvent{{
+		Canonical: &session.Event{
+			Type:         session.EventTypeCustom,
+			Visibility:   session.VisibilityMirror,
+			ContextUsage: &session.ContextUsageSnapshot{Size: 200000, Used: 42000},
+			Invocation:   &session.EventInvocation{Provider: "codex", Model: "gpt-test"},
+		},
+		ACP: &eventstream.Envelope{
+			Kind:   eventstream.KindSessionUpdate,
+			Update: eventstream.UsageUpdate{SessionUpdate: eventstream.UpdateUsage, Size: 200000, Used: 42000},
+		},
+	}}}
+	if err := forwarder.ForwardControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
+		ActiveSession: activeSession,
+		SessionRef:    activeSession.SessionRef,
+		TurnID:        "turn-1",
+		Source:        source,
+		Publisher:     publisher,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	paged, ok := sessions.(session.PagedReader)
+	if !ok {
+		t.Fatal("session service does not support durable replay pages")
+	}
+	page, err := paged.EventsPage(context.Background(), session.EventPageRequest{
+		SessionRef: activeSession.SessionRef,
+		Visibility: session.EventPageClientReplay,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := page.Events
+	if len(stored) != 1 || !session.IsMirror(stored[0]) || stored[0].ContextUsage == nil || stored[0].ContextUsage.Used != 42000 {
+		t.Fatalf("stored usage events = %#v, want one durable mirror", stored)
+	}
+}
+
 func TestForwardControllerEventsRequiresDependencies(t *testing.T) {
 	t.Parallel()
 

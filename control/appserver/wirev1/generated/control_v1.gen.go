@@ -669,6 +669,7 @@ type Envelope struct {
 	SessionId          *string             `json:"session_id,omitempty"`
 	TurnId             *string             `json:"turn_id,omitempty"`
 	Update             *ACPUpdate          `json:"update,omitempty"`
+	UsageSemantics     UsageSemantics      `json:"usage_semantics,omitempty"`
 }
 
 type EnvelopeBase struct {
@@ -1397,26 +1398,27 @@ type SessionSummary struct {
 }
 
 type SessionUpdateEnvelope struct {
-	Meta          *ACPMetadata        `json:"_meta,omitempty"`
-	ActivityId    *string             `json:"activity_id,omitempty"`
-	Actor         *string             `json:"actor,omitempty"`
-	Cursor        string              `json:"cursor"`
-	Delivery      Delivery            `json:"delivery"`
-	EventId       *string             `json:"event_id,omitempty"`
-	Final         *bool               `json:"final,omitempty"`
-	HandleId      *string             `json:"handle_id,omitempty"`
-	Kind          string              `json:"kind"`
-	OccurredAt    *time.Time          `json:"occurred_at,omitempty"`
-	ParentTool    *ParentToolRelation `json:"parent_tool,omitempty"`
-	ParticipantId *string             `json:"participant_id,omitempty"`
-	Position      FeedPosition        `json:"position"`
-	ProjectionId  *string             `json:"projection_id,omitempty"`
-	RunId         *string             `json:"run_id,omitempty"`
-	Scope         *string             `json:"scope,omitempty"`
-	ScopeId       *string             `json:"scope_id,omitempty"`
-	SessionId     *string             `json:"session_id,omitempty"`
-	TurnId        *string             `json:"turn_id,omitempty"`
-	Update        ACPUpdate           `json:"update"`
+	Meta           *ACPMetadata        `json:"_meta,omitempty"`
+	ActivityId     *string             `json:"activity_id,omitempty"`
+	Actor          *string             `json:"actor,omitempty"`
+	Cursor         string              `json:"cursor"`
+	Delivery       Delivery            `json:"delivery"`
+	EventId        *string             `json:"event_id,omitempty"`
+	Final          *bool               `json:"final,omitempty"`
+	HandleId       *string             `json:"handle_id,omitempty"`
+	Kind           string              `json:"kind"`
+	OccurredAt     *time.Time          `json:"occurred_at,omitempty"`
+	ParentTool     *ParentToolRelation `json:"parent_tool,omitempty"`
+	ParticipantId  *string             `json:"participant_id,omitempty"`
+	Position       FeedPosition        `json:"position"`
+	ProjectionId   *string             `json:"projection_id,omitempty"`
+	RunId          *string             `json:"run_id,omitempty"`
+	Scope          *string             `json:"scope,omitempty"`
+	ScopeId        *string             `json:"scope_id,omitempty"`
+	SessionId      *string             `json:"session_id,omitempty"`
+	TurnId         *string             `json:"turn_id,omitempty"`
+	Update         ACPUpdate           `json:"update"`
+	UsageSemantics UsageSemantics      `json:"usage_semantics,omitempty"`
 }
 
 type SkillResolveResult struct {
@@ -1703,6 +1705,13 @@ type UsageCost struct {
 }
 
 type UsageMetadata map[string]JSONValue
+
+type UsageSemantics string
+
+const (
+	UsageSemanticsContextGauge  UsageSemantics = "context_gauge"
+	UsageSemanticsProviderUsage UsageSemantics = "provider_usage"
+)
 
 type UsageSnapshot struct {
 	CachedInputTokens *int `json:"cached_input_tokens,omitempty"`

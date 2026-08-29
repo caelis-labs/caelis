@@ -141,6 +141,20 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 				status.Usage.ContextWindowTokens = cfg.ContextWindowTokens
 			}
 		}
+		if activeACP && ok {
+			usage, found, err := d.latestACPControllerContextUsage(
+				ctx,
+				activeSession,
+				firstNonEmpty(acpStatus.Agent, activeSession.Controller.AgentName, activeSession.Controller.ControllerID),
+				firstNonEmpty(acpStatus.Model, activeSession.Controller.Placement.Model),
+			)
+			if err == nil && found {
+				status.Usage.TotalTokens = usage.TotalTokens
+				status.Usage.ContextWindowTokens = usage.ContextWindowTokens
+			} else if ctx.Err() != nil {
+				return controlstatus.StatusSnapshot{}, ctx.Err()
+			}
+		}
 		req := DoctorRequest{}
 		if ok {
 			req.SessionRef = activeSession.SessionRef
@@ -207,10 +221,6 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		status.ModelStatus.Provider = "acp"
 		status.ModelStatus.Name = rawModelText
 		status.ModelStatus.MissingAPIKey = false
-		status.Usage.PromptTokens = 0
-		status.Usage.CompletionTokens = 0
-		status.Usage.TotalTokens = 0
-		status.Usage.ContextWindowTokens = 0
 	}
 	if status.Usage.TotalTokens > 0 {
 		status.Usage.PromptTokens = status.Usage.TotalTokens

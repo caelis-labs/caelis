@@ -255,3 +255,16 @@ func TestAgentSlashCommandsHideRosterAndKeepProfileRunsSessionScoped(t *testing.
 		t.Fatalf("commands after /new = %#v, want prior Session run removed", after)
 	}
 }
+
+func TestACPControllerHidesCompactFromTUICommands(t *testing.T) {
+	t.Parallel()
+
+	service := &modelConnectControlStub{status: controlprompt.AgentStatusSnapshot{ControllerKind: "acp"}}
+	commands := appendAgentSlashCommandsWithContext(context.Background(), service, DefaultCommands())
+	if slices.Contains(commands, "compact") {
+		t.Fatalf("commands = %#v, should hide /compact for external ACP controller", commands)
+	}
+	if !slices.Contains(commands, "status") || !slices.Contains(commands, "model") {
+		t.Fatalf("commands = %#v, want status and model retained", commands)
+	}
+}

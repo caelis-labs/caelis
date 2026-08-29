@@ -85,6 +85,7 @@ type Runner struct {
 type childRun struct {
 	anchor                delegation.Anchor
 	agentName             string
+	invocation            session.EventInvocation
 	client                *client.Client
 	configuredAuth        controlagents.Authentication
 	authenticationMethods []controlagents.AuthenticationMethod
@@ -189,6 +190,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		updatedAt:      r.clock(),
 		done:           make(chan struct{}),
 		agentName:      strings.TrimSpace(cfg.Name),
+		invocation:     session.EventInvocation{Provider: strings.TrimSpace(cfg.Name), Model: strings.TrimSpace(req.Target.Placement.Model)},
 		configuredAuth: controlagents.NormalizeAuthentication(cfg.Authentication),
 		spawn:          spawn,
 	}
@@ -1003,6 +1005,8 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 			run.outputPreview = run.actionSummary.previewOrEmpty()
 		}
 		event = run.acpUpdateEvent(env, run.updatedAt)
+	case client.UsageUpdate:
+		event = run.acpUpdateEvent(env, run.updatedAt)
 	}
 	if event != nil {
 		frameState := run.state
@@ -1083,6 +1087,7 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 		At:         at,
 		Scope:      *scope,
 		Actor:      actor,
+		Invocation: session.CloneEventInvocation(run.invocation),
 		Visibility: acpingress.UIOnlyVisibility,
 		Meta: map[string]any{
 			"caelis": map[string]any{

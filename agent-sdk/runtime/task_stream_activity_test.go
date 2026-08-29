@@ -37,6 +37,30 @@ func TestTaskStreamActivityWatchClosesResolutionWindowAndReclaimsSignal(t *testi
 	}
 }
 
+func TestSubagentTaskPersistsLatestACPContextUsage(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "parent-1"}}
+	task.applyStreamFrames([]stream.Frame{
+		{Event: &session.Event{ContextUsage: &session.ContextUsageSnapshot{Size: 200000, Used: 12000}, Invocation: &session.EventInvocation{Provider: "codex", Model: "gpt-test"}}},
+		{Event: &session.Event{ContextUsage: &session.ContextUsageSnapshot{Size: 200000, Used: 42000}, Invocation: &session.EventInvocation{Provider: "codex", Model: "gpt-test"}}},
+	})
+	entry := task.entrySnapshot(time.Unix(1, 0))
+	if entry.ContextUsage == nil || entry.ContextUsage.Snapshot.Used != 42000 || entry.ContextUsage.Snapshot.Size != 200000 {
+		t.Fatalf("entry context usage = %#v, want latest gauge", entry.ContextUsage)
+	}
+	if entry.ContextUsage.Invocation.Provider != "codex" || entry.ContextUsage.Invocation.Model != "gpt-test" {
+		t.Fatalf("entry invocation = %#v, want codex/gpt-test", entry.ContextUsage.Invocation)
+	}
+	task.mu.Lock()
+	beginObservedSubagentActivityLocked(task)
+	entry = task.entrySnapshot(time.Unix(2, 0))
+	task.mu.Unlock()
+	if entry.ContextUsage != nil {
+		t.Fatalf("new activity retained prior context usage = %#v", entry.ContextUsage)
+	}
+}
+
 func TestStreamSubscribeAwaitErrorReclaimsActivityWatch(t *testing.T) {
 	t.Parallel()
 

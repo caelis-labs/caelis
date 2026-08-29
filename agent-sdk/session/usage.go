@@ -16,11 +16,57 @@ type UsageSnapshot struct {
 	ContextWindowTokens int `json:"context_window_tokens,omitempty"`
 }
 
+// ContextUsageSnapshot is one replaceable standard-ACP-style context gauge.
+// Used is the current context occupancy and Size is the current context
+// capacity; repeated snapshots must not be summed as provider call usage.
+type ContextUsageSnapshot struct {
+	Size uint64                     `json:"size"`
+	Used uint64                     `json:"used"`
+	Cost *ContextUsageCost          `json:"cost,omitempty"`
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+}
+
+// ContextUsageCost is the optional cumulative session cost reported with one
+// context usage snapshot. Meta remains opaque ACP extension data.
+type ContextUsageCost struct {
+	Amount   float64                    `json:"amount"`
+	Currency string                     `json:"currency"`
+	Meta     map[string]json.RawMessage `json:"_meta,omitempty"`
+}
+
+// CloneContextUsageSnapshot returns one detached context usage snapshot.
+func CloneContextUsageSnapshot(in ContextUsageSnapshot) ContextUsageSnapshot {
+	out := in
+	if len(in.Meta) > 0 {
+		out.Meta = make(map[string]json.RawMessage, len(in.Meta))
+		for key, value := range in.Meta {
+			out.Meta[key] = append(json.RawMessage(nil), value...)
+		}
+	}
+	if in.Cost != nil {
+		cost := *in.Cost
+		cost.Currency = strings.TrimSpace(in.Cost.Currency)
+		if len(in.Cost.Meta) > 0 {
+			cost.Meta = make(map[string]json.RawMessage, len(in.Cost.Meta))
+			for key, value := range in.Cost.Meta {
+				cost.Meta[key] = append(json.RawMessage(nil), value...)
+			}
+		}
+		out.Cost = &cost
+	}
+	return out
+}
+
 // UsageSnapshotFromSessionEvent projects provider token usage from a durable
 // session event into the canonical session usage contract.
 func UsageSnapshotFromSessionEvent(event *Event) *UsageSnapshot {
 	if event == nil {
 		return nil
+	}
+	if event.ContextUsage != nil {
+		if usage := UsageSnapshotFromContextUsage(*event.ContextUsage); usage != nil {
+			return usage
+		}
 	}
 	provider := usageProviderFromSessionEvent(event)
 	for _, meta := range []map[string]any{semanticUsageMetadata(event), event.Meta} {
@@ -49,6 +95,24 @@ func UsageSnapshotFromSessionEvent(event *Event) *UsageSnapshot {
 	}
 	return nil
 }
+
+// UsageSnapshotFromContextUsage converts one standard-ACP-style uint64 gauge
+// into the bounded usage values consumed by Control status surfaces.
+func UsageSnapshotFromContextUsage(value ContextUsageSnapshot) *UsageSnapshot {
+	usage := &UsageSnapshot{}
+	if value.Used <= uint64(maxUsageInt()) {
+		usage.TotalTokens = int(value.Used)
+	}
+	if value.Size <= uint64(maxUsageInt()) {
+		usage.ContextWindowTokens = int(value.Size)
+	}
+	if usage.TotalTokens == 0 && usage.ContextWindowTokens == 0 {
+		return nil
+	}
+	return usage
+}
+
+func maxUsageInt() int { return int(^uint(0) >> 1) }
 
 // UsageSnapshotFromMap projects one provider-style usage payload into the
 // canonical session usage contract.

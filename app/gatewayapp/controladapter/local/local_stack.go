@@ -36,6 +36,7 @@ func statusRuntimeDeps(status gatewayapp.StatusService) controladapter.StatusRun
 	return controladapter.StatusRuntimeDeps{
 		RuntimeStateFn:          status.SessionRuntimeState,
 		ConfigurationRevisionFn: status.ConfigurationRevision,
+		TaskEntriesFn:           status.SessionTasks,
 		DoctorFn: func(ctx context.Context, req controladapter.DoctorRequest) (controladapter.DoctorStatusProjection, error) {
 			return toDoctorStatusProjection(status.Doctor(ctx, req))
 		},

@@ -2324,6 +2324,7 @@
       "LifecycleEvent": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string"}, "reason": {"type": "string"}, "stopReason": {"type": "string"}}},
       "ActorIdentity": {"type": "object", "additionalProperties": false, "anyOf": [{"required": ["id"]}, {"required": ["name"]}], "properties": {"kind": {"type": "string"}, "id": {"type": "string", "minLength": 1}, "role": {"type": "string"}, "name": {"type": "string", "minLength": 1}}},
       "AgentCommunication": {"type": "object", "additionalProperties": false, "required": ["source", "text"], "properties": {"source": {"$ref": "#/components/schemas/ActorIdentity"}, "text": {"type": "string", "minLength": 1}}},
+      "UsageSemantics": {"type": "string", "enum": ["context_gauge", "provider_usage"]},
       "EnvelopeBase": {
         "type": "object",
         "required": ["kind", "cursor", "position", "delivery"],
@@ -2338,7 +2339,7 @@
           "_meta": {"$ref": "#/components/schemas/ACPMetadata"}
         }
       },
-      "SessionUpdateEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["update"], "properties": {"kind": {"const": "session/update"}, "update": {"$ref": "#/components/schemas/ACPUpdate"}}}], "unevaluatedProperties": false},
+      "SessionUpdateEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["update"], "properties": {"kind": {"const": "session/update"}, "usage_semantics": {"$ref": "#/components/schemas/UsageSemantics"}, "update": {"$ref": "#/components/schemas/ACPUpdate"}}}], "unevaluatedProperties": false},
       "RequestPermissionEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["approval_request_id", "permission"], "properties": {"kind": {"const": "session/request_permission"}, "approval_request_id": {"type": "string", "minLength": 1}, "permission": {"$ref": "#/components/schemas/RequestPermission"}}}], "unevaluatedProperties": false},
       "NoticeEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["notice"], "properties": {"kind": {"const": "caelis/notice"}, "notice": {"type": "string"}, "notice_kind": {"$ref": "#/components/schemas/NoticeKind"}}}], "unevaluatedProperties": false},
       "ParticipantEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["participant"], "properties": {"kind": {"const": "caelis/participant"}, "participant": {"$ref": "#/components/schemas/ParticipantEvent"}}}], "unevaluatedProperties": false},

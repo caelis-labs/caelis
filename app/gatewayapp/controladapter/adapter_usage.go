@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
@@ -57,18 +58,24 @@ func (d *assembler) sessionTokenUsageBreakdown(ctx context.Context, ref session.
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return sessionTokenUsageBreakdown{}, nil
 	}
-	events, err := d.deps.Session.Store.Events(ctx, session.EventsRequest{SessionRef: ref})
+	events, err := sessionUsageEvents(ctx, d.deps.Session.Store, ref)
 	if err != nil {
 		return sessionTokenUsageBreakdown{}, err
+	}
+	if active, err := d.deps.Session.Store.Session(ctx, ref); err == nil {
+		events = d.filterCurrentMainContextUsage(ctx, active, events)
 	}
 	breakdown := sessionTokenUsageBreakdownFromEvents(events, tokenUsageCategoryMain)
 	if state, err := d.deps.Session.Store.SnapshotState(ctx, ref); err == nil {
 		breakdown.addBreakdown(sessionTokenUsageBreakdownFromState(state))
 	}
 	for _, childRef := range d.subagentSessionRefs(ctx, ref) {
-		childEvents, err := d.deps.Session.Store.Events(ctx, session.EventsRequest{SessionRef: childRef})
+		childEvents, err := sessionUsageEvents(ctx, d.deps.Session.Store, childRef)
 		if err != nil {
 			continue
+		}
+		if active, err := d.deps.Session.Store.Session(ctx, childRef); err == nil {
+			childEvents = d.filterCurrentMainContextUsage(ctx, active, childEvents)
 		}
 		childBreakdown := sessionTokenUsageBreakdownFromEvents(childEvents, tokenUsageCategorySubagent)
 		if state, err := d.deps.Session.Store.SnapshotState(ctx, childRef); err == nil {
@@ -76,11 +83,111 @@ func (d *assembler) sessionTokenUsageBreakdown(ctx context.Context, ref session.
 		}
 		breakdown.addBreakdown(childBreakdown)
 	}
+	if d.deps.Status.TaskEntriesFn != nil {
+		if entries, err := d.deps.Status.TaskEntriesFn(ctx, ref); err == nil {
+			breakdown.addACPTaskUsage(entries)
+		} else if ctx.Err() != nil {
+			return sessionTokenUsageBreakdown{}, ctx.Err()
+		}
+	}
 	return breakdown, nil
+}
+
+func (d *assembler) filterCurrentMainContextUsage(ctx context.Context, active session.Session, events []*session.Event) []*session.Event {
+	expectedProvider := firstNonEmpty(active.Controller.AgentName, active.Controller.ControllerID, active.Controller.Label)
+	expectedModel := strings.TrimSpace(active.Controller.Placement.Model)
+	if active.Controller.Kind == session.ControllerKindACP && d != nil && d.deps != nil && d.deps.Agent.ControllerStatusFn != nil {
+		if status, found, err := d.deps.Agent.ControllerStatusFn(ctx, active.SessionRef); err == nil && found {
+			expectedProvider = firstNonEmpty(status.Agent, expectedProvider)
+			expectedModel = firstNonEmpty(status.Model, expectedModel)
+		}
+	}
+	latestMain := -1
+	for index := len(events) - 1; index >= 0; index-- {
+		if isMainContextUsageEvent(events[index]) {
+			latestMain = index
+			break
+		}
+	}
+	keepLatestMain := latestMain >= 0 && active.Controller.Kind == session.ControllerKindACP &&
+		contextUsageMatchesController(events[latestMain], active.Controller, expectedProvider, expectedModel)
+	out := make([]*session.Event, 0, len(events))
+	for index, event := range events {
+		if !isMainContextUsageEvent(event) {
+			out = append(out, event)
+			continue
+		}
+		if index == latestMain && keepLatestMain {
+			out = append(out, event)
+		}
+	}
+	return out
+}
+
+func isMainContextUsageEvent(event *session.Event) bool {
+	return event != nil && event.ContextUsage != nil && (event.Scope == nil || strings.TrimSpace(event.Scope.Participant.ID) == "")
+}
+
+func contextUsageMatchesController(event *session.Event, binding session.ControllerBinding, expectedProvider string, expectedModel string) bool {
+	if event == nil || event.ContextUsage == nil || event.Scope == nil || event.Scope.Controller.Kind != session.ControllerKindACP {
+		return false
+	}
+	if expectedEpoch := strings.TrimSpace(binding.EpochID); expectedEpoch != "" && strings.TrimSpace(event.Scope.Controller.EpochID) != expectedEpoch {
+		return false
+	}
+	if expectedID := strings.TrimSpace(binding.ControllerID); expectedID != "" && !strings.EqualFold(strings.TrimSpace(event.Scope.Controller.ID), expectedID) {
+		return false
+	}
+	invocation, _ := invocationFromSessionEvent(event)
+	if expectedProvider = strings.TrimSpace(expectedProvider); expectedProvider != "" && !strings.EqualFold(invocation.Provider, expectedProvider) {
+		return false
+	}
+	if expectedModel = strings.TrimSpace(expectedModel); expectedModel != "" && !strings.EqualFold(invocation.Model, expectedModel) {
+		return false
+	}
+	return true
+}
+
+func sessionUsageEvents(ctx context.Context, reader session.Reader, ref session.SessionRef) ([]*session.Event, error) {
+	paged, ok := reader.(session.PagedReader)
+	if !ok {
+		return reader.Events(ctx, session.EventsRequest{SessionRef: ref})
+	}
+	var throughSeq uint64
+	if checkpointReader, ok := reader.(session.EventCheckpointReader); ok {
+		checkpoint, err := checkpointReader.EventCheckpoint(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		throughSeq = checkpoint.ThroughSeq
+	}
+	var events []*session.Event
+	var afterSeq uint64
+	for {
+		page, err := paged.EventsPage(ctx, session.EventPageRequest{
+			SessionRef: ref,
+			AfterSeq:   afterSeq,
+			ThroughSeq: throughSeq,
+			Visibility: session.EventPageClientReplay,
+		})
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, page.Events...)
+		if !page.HasMore {
+			return events, nil
+		}
+		if page.NextSeq <= afterSeq {
+			return nil, fmt.Errorf("read session usage events: page cursor did not advance past %d", afterSeq)
+		}
+		afterSeq = page.NextSeq
+	}
 }
 
 func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCategory string) sessionTokenUsageBreakdown {
 	var breakdown sessionTokenUsageBreakdown
+	latestContextUsage := map[string]modelUsageSnapshot{}
+	latestContextCategory := map[string]string{}
 	lastToolCallUsageKey := ""
 	lastUsageWasToolCall := false
 	for _, event := range events {
@@ -90,6 +197,17 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 				lastToolCallUsageKey = ""
 				lastUsageWasToolCall = false
 			}
+			continue
+		}
+		if event.ContextUsage != nil {
+			invocation, _ := invocationFromSessionEvent(event)
+			lane := contextUsageLaneKey(event, fallbackCategory)
+			latestContextUsage[lane] = modelUsageSnapshot{
+				Provider: invocation.Provider,
+				Model:    invocation.Model,
+				Usage:    *one,
+			}
+			latestContextCategory[lane] = usageCategoryFromSessionEvent(event, fallbackCategory)
 			continue
 		}
 		isToolCall := session.EventTypeOf(event) == session.EventTypeToolCall
@@ -115,7 +233,75 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 			lastUsageWasToolCall = false
 		}
 	}
+	for lane, item := range latestContextUsage {
+		usage := session.NormalizeUsageForDisplay(item.Usage, item.Provider)
+		breakdown.add(latestContextCategory[lane], usage)
+		breakdown.addModel(item.Provider, item.Model, usage)
+	}
 	return breakdown
+}
+
+func contextUsageLaneKey(event *session.Event, fallbackCategory string) string {
+	category := usageCategoryFromSessionEvent(event, fallbackCategory)
+	if event == nil || event.Scope == nil {
+		return category + "\x00main"
+	}
+	participantID := strings.TrimSpace(event.Scope.Participant.ID)
+	if participantID == "" {
+		return category + "\x00main"
+	}
+	return category + "\x00" + participantID
+}
+
+func (u *sessionTokenUsageBreakdown) addACPTaskUsage(entries []*taskapi.Entry) {
+	if u == nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry == nil || entry.Kind != taskapi.KindSubagent || entry.ContextUsage == nil {
+			continue
+		}
+		usage := session.UsageSnapshotFromContextUsage(entry.ContextUsage.Snapshot)
+		if usage == nil {
+			continue
+		}
+		invocation := session.CloneEventInvocation(entry.ContextUsage.Invocation)
+		normalized := session.NormalizeUsageForDisplay(*usage, invocation.Provider)
+		u.add(tokenUsageCategorySubagent, normalized)
+		u.addModel(invocation.Provider, invocation.Model, normalized)
+	}
+}
+
+func (d *assembler) latestACPControllerContextUsage(
+	ctx context.Context,
+	active session.Session,
+	expectedProvider string,
+	expectedModel string,
+) (session.UsageSnapshot, bool, error) {
+	if d == nil || d.deps == nil || d.deps.Session.Store == nil {
+		return session.UsageSnapshot{}, false, nil
+	}
+	events, err := sessionUsageEvents(ctx, d.deps.Session.Store, active.SessionRef)
+	if err != nil {
+		return session.UsageSnapshot{}, false, err
+	}
+	expectedProvider = strings.TrimSpace(expectedProvider)
+	expectedModel = strings.TrimSpace(expectedModel)
+	for index := len(events) - 1; index >= 0; index-- {
+		event := events[index]
+		if event == nil || event.ContextUsage == nil || event.Scope == nil || strings.TrimSpace(event.Scope.Participant.ID) != "" {
+			continue
+		}
+		if !contextUsageMatchesController(event, active.Controller, expectedProvider, expectedModel) {
+			return session.UsageSnapshot{}, false, nil
+		}
+		usage := session.UsageSnapshotFromContextUsage(*event.ContextUsage)
+		if usage == nil {
+			return session.UsageSnapshot{}, false, nil
+		}
+		return *usage, true, nil
+	}
+	return session.UsageSnapshot{}, false, nil
 }
 
 func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsageBreakdown {
@@ -226,7 +412,7 @@ func usageCategoryFromSessionEvent(event *session.Event, fallback string) string
 	if category := usageCategoryFromMeta(event.Meta); category != "" {
 		return category
 	}
-	if event.Scope != nil && event.Scope.Participant.Kind == session.ParticipantKindSubagent {
+	if event.Scope != nil && (event.Scope.Participant.Kind == session.ParticipantKindSubagent || event.Scope.Participant.Role == session.ParticipantRoleDelegated) {
 		return tokenUsageCategorySubagent
 	}
 	return firstNonEmpty(fallback, tokenUsageCategoryMain)

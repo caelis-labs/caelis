@@ -46,6 +46,18 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 	if isHostPluginCommandRequest(request) {
 		return s.executePluginCommand(ctx, action, request)
 	}
+	if action == appserver.ActionSessionCompact {
+		active, err := s.composition.sessions.Session(ctx, session.SessionRef{SessionID: controlCommandSessionID(request)})
+		if err != nil {
+			return appserver.CommandResult{SessionID: controlCommandSessionID(request)}, classifyControlPreDispatchError(err)
+		}
+		if active.Controller.Kind == session.ControllerKindACP {
+			coded := errorcode.New(errorcode.Unsupported, "gatewayapp: /compact is unavailable while an external ACP Agent controls the Session")
+			return appserver.CommandResult{
+				Outcome: appserver.OutcomeRejected, SessionID: active.SessionID, Revision: active.Revision,
+			}, appserver.NewOutcomeError(appserver.OutcomeRejected, coded)
+		}
+	}
 	runtimes := s.runtimeRegistry()
 	if runtimes == nil {
 		return s.composition.executeControlCommand(ctx, principal, action, request)

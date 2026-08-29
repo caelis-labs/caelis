@@ -171,6 +171,27 @@ func DefaultSharedNamesForPlatform(goos string) []string {
 	return out
 }
 
+// WithoutNames removes named slash commands while preserving the caller's
+// display order. Names may be supplied with or without a leading slash.
+func WithoutNames(names []string, excluded ...string) []string {
+	blocked := make(map[string]struct{}, len(excluded))
+	for _, name := range excluded {
+		name = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(name, "/")))
+		if name != "" {
+			blocked[name] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		key := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(name, "/")))
+		if _, remove := blocked[key]; remove {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
 func DefaultACPNames() []string {
 	return DefaultACPNamesForPlatform(runtime.GOOS)
 }

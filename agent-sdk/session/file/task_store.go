@@ -355,8 +355,8 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 			failure_diagnostic, running, supports_input, supports_cancel,
 			created_at_ns, updated_at_ns, heartbeat_at_ns, lease_id, lease_owner_id, lease_revision, lease_acquired_at_ns, lease_expires_at_ns,
 			stdout_cursor, stderr_cursor, event_cursor,
-			handle, spec_json, result_json, metadata_json, terminal_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			handle, spec_json, context_usage_json, result_json, metadata_json, terminal_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id) DO UPDATE SET
 			revision = excluded.revision,
 			kind = excluded.kind,
@@ -383,6 +383,7 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 			event_cursor = excluded.event_cursor,
 			handle = excluded.handle,
 			spec_json = excluded.spec_json,
+			context_usage_json = excluded.context_usage_json,
 			result_json = excluded.result_json,
 			metadata_json = excluded.metadata_json,
 			terminal_json = excluded.terminal_json`,
@@ -412,6 +413,7 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 		row.eventCursor,
 		row.handle,
 		row.specJSON,
+		row.contextUsageJSON,
 		row.resultJSON,
 		row.metadataJSON,
 		row.terminalJSON,
@@ -520,7 +522,7 @@ func taskIndexSelectSQL() string {
 		failure_diagnostic, running, supports_input, supports_cancel,
 		created_at_ns, updated_at_ns, heartbeat_at_ns, lease_id, lease_owner_id, lease_revision, lease_acquired_at_ns, lease_expires_at_ns,
 		stdout_cursor, stderr_cursor, event_cursor, handle,
-		spec_json, result_json, metadata_json, terminal_json
+		spec_json, context_usage_json, result_json, metadata_json, terminal_json
 	FROM tasks`
 }
 
@@ -551,6 +553,7 @@ type taskIndexRow struct {
 	eventCursor       int64
 	handle            string
 	specJSON          string
+	contextUsageJSON  string
 	resultJSON        string
 	metadataJSON      string
 	terminalJSON      string
@@ -563,6 +566,10 @@ func taskIndexRowFromEntry(entry *taskapi.Entry) (taskIndexRow, error) {
 	specJSON, err := taskIndexJSON(entry.Spec)
 	if err != nil {
 		return taskIndexRow{}, fmt.Errorf("agent-sdk/session/file: encode task spec: %w", err)
+	}
+	contextUsageJSON, err := taskIndexJSON(entry.ContextUsage)
+	if err != nil {
+		return taskIndexRow{}, fmt.Errorf("agent-sdk/session/file: encode task context usage: %w", err)
 	}
 	resultJSON, err := taskIndexJSON(entry.Result)
 	if err != nil {
@@ -603,6 +610,7 @@ func taskIndexRowFromEntry(entry *taskapi.Entry) (taskIndexRow, error) {
 		eventCursor:       entry.EventCursor,
 		handle:            taskapi.NormalizeHandle(firstNonEmpty(entry.Handle, taskIndexString(entry.Result, "handle"), taskIndexString(entry.Metadata, "handle"), taskIndexString(entry.Spec, "handle"))),
 		specJSON:          specJSON,
+		contextUsageJSON:  contextUsageJSON,
 		resultJSON:        resultJSON,
 		metadataJSON:      metadataJSON,
 		terminalJSON:      terminalJSON,
@@ -637,6 +645,7 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		eventCursor       int64
 		handle            string
 		specRaw           string
+		contextUsageRaw   string
 		resultRaw         string
 		metadataRaw       string
 		terminalRaw       string
@@ -668,6 +677,7 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		&eventCursor,
 		&handle,
 		&specRaw,
+		&contextUsageRaw,
 		&resultRaw,
 		&metadataRaw,
 		&terminalRaw,
@@ -675,6 +685,10 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		return nil, err
 	}
 	spec, err := decodeTaskIndexMap(specRaw, "spec")
+	if err != nil {
+		return nil, err
+	}
+	contextUsage, err := decodeTaskIndexContextUsage(contextUsageRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -709,6 +723,7 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		Title:             strings.TrimSpace(title),
 		State:             taskapi.State(strings.TrimSpace(state)),
 		FailureDiagnostic: strings.TrimSpace(failureDiagnostic),
+		ContextUsage:      contextUsage,
 		Running:           sqliteBool(running),
 		SupportsInput:     sqliteBool(supportsInput),
 		SupportsCancel:    sqliteBool(supportsCancel),
@@ -726,6 +741,18 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		Metadata:     metadata,
 		Terminal:     terminal,
 	}), nil
+}
+
+func decodeTaskIndexContextUsage(raw string) (*taskapi.ContextUsageRecord, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed == "null" {
+		return nil, nil
+	}
+	var out taskapi.ContextUsageRecord
+	if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
+		return nil, fmt.Errorf("agent-sdk/session/file: decode task context usage: %w", err)
+	}
+	return taskapi.CloneContextUsageRecord(&out), nil
 }
 
 func taskIndexJSON(value any) (string, error) {

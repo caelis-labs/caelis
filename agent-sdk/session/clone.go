@@ -53,6 +53,10 @@ func CloneEvent(in *Event) *Event {
 		invocation := CloneEventInvocation(*in.Invocation)
 		out.Invocation = &invocation
 	}
+	if in.ContextUsage != nil {
+		usage := CloneContextUsageSnapshot(*in.ContextUsage)
+		out.ContextUsage = &usage
+	}
 	if in.Scope != nil {
 		scope := CloneEventScope(*in.Scope)
 		out.Scope = &scope

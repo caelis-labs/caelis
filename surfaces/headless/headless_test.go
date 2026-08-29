@@ -28,9 +28,10 @@ func TestRunSessionOnceDrainsAssistantOutput(t *testing.T) {
 			},
 		},
 		{
-			Cursor: "u1",
-			Kind:   eventstream.KindSessionUpdate,
-			Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{PromptTokens: 11, TotalTokens: 17}, nil),
+			Cursor:         "u1",
+			Kind:           eventstream.KindSessionUpdate,
+			UsageSemantics: eventstream.UsageSemanticsProviderUsage,
+			Update:         eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{PromptTokens: 11, TotalTokens: 17}, nil),
 		},
 	})
 	gw := fakeStarter{
@@ -179,10 +180,11 @@ func TestRunSessionOnceIgnoresScopedTraceOutput(t *testing.T) {
 			},
 		},
 		{
-			Cursor: "usage-main",
-			Kind:   eventstream.KindSessionUpdate,
-			Scope:  eventstream.ScopeMain,
-			Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{PromptTokens: 11, TotalTokens: 17}, nil),
+			Cursor:         "usage-main",
+			Kind:           eventstream.KindSessionUpdate,
+			Scope:          eventstream.ScopeMain,
+			UsageSemantics: eventstream.UsageSemanticsProviderUsage,
+			Update:         eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{PromptTokens: 11, TotalTokens: 17}, nil),
 		},
 		{
 			Cursor:  "child-1",
@@ -195,10 +197,11 @@ func TestRunSessionOnceIgnoresScopedTraceOutput(t *testing.T) {
 			},
 		},
 		{
-			Cursor: "usage-child",
-			Kind:   eventstream.KindSessionUpdate,
-			Scope:  eventstream.ScopeSubagent,
-			Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{PromptTokens: 99}, nil),
+			Cursor:         "usage-child",
+			Kind:           eventstream.KindSessionUpdate,
+			Scope:          eventstream.ScopeSubagent,
+			UsageSemantics: eventstream.UsageSemanticsProviderUsage,
+			Update:         eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{PromptTokens: 99}, nil),
 		},
 	})
 	gw := fakeStarter{
@@ -405,12 +408,13 @@ func TestRunSessionOnceProjectsTargetedResultAndStructuredObservation(t *testing
 			},
 		},
 		{
-			Kind:      eventstream.KindSessionUpdate,
-			SessionID: "session-1",
-			HandleID:  target.HandleID,
-			RunID:     target.RunID,
-			TurnID:    target.TurnID,
-			Cursor:    "cursor-usage",
+			Kind:           eventstream.KindSessionUpdate,
+			SessionID:      "session-1",
+			HandleID:       target.HandleID,
+			RunID:          target.RunID,
+			TurnID:         target.TurnID,
+			Cursor:         "cursor-usage",
+			UsageSemantics: eventstream.UsageSemanticsProviderUsage,
 			Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{
 				PromptTokens: 11,
 				TotalTokens:  17,

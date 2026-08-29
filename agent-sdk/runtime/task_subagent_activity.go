@@ -379,6 +379,7 @@ func beginObservedSubagentActivityLocked(task *subagentTask) {
 	}
 	task.stdout = ""
 	task.stderr = ""
+	task.contextUsage = nil
 	task.stdoutCursor = 0
 	task.stderrCursor = 0
 	task.streamTerminalFramed = false

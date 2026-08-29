@@ -226,7 +226,11 @@ func (m *Model) applyTranscriptUsage(event TranscriptEvent) tea.Model {
 	if m == nil || event.Scope != ACPProjectionMain || event.Usage == nil {
 		return m
 	}
-	m.mergeStatusUsage(event.Usage.TotalTokens, event.Usage.ContextWindowTokens)
+	if event.UsageReplace {
+		m.replaceStatusUsage(event.Usage.TotalTokens, event.Usage.ContextWindowTokens)
+	} else {
+		m.mergeStatusUsage(event.Usage.TotalTokens, event.Usage.ContextWindowTokens)
+	}
 	return m
 }
 

@@ -15,6 +15,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -672,6 +673,9 @@ func appendAgentSlashCommandsWithContext(ctx context.Context, service controlpro
 	commands = agentbinding.ProjectBoundDirectNames(commands, bindingStatus)
 	status, err := service.AgentStatus(ctx)
 	if err == nil {
+		if strings.EqualFold(strings.TrimSpace(status.ControllerKind), string(session.ControllerKindACP)) {
+			commands = controlprompt.WithoutNames(commands, "compact")
+		}
 		commands = controlagents.AppendRunNames(commands, tuiDirectAgentRuns(status), nil)
 	}
 	return commands
@@ -741,6 +745,7 @@ func sendStatusUpdate(send func(tea.Msg), status controlstatus.StatusSnapshot) {
 			Context:             promptview.FormatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens),
 			TotalTokens:         status.Usage.TotalTokens,
 			ContextWindowTokens: status.Usage.ContextWindowTokens,
+			UsageReplace:        strings.EqualFold(strings.TrimSpace(status.ModelStatus.Provider), "acp"),
 			ModeLabel:           strings.TrimSpace(status.Session.ModeLabel),
 			Status:              statusViewModelFromSnapshot(status),
 		})

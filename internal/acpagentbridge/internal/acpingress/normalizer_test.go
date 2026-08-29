@@ -273,16 +273,32 @@ func TestNormalizeRejectsProtocolOnlyCanonicalToolAndPlan(t *testing.T) {
 	}
 }
 
-func TestNormalizeUsageUpdateIsEventstreamOnly(t *testing.T) {
+func TestNormalizeUsageUpdateCreatesDurableMirror(t *testing.T) {
 	t.Parallel()
 
 	event := NormalizeUpdate(client.UsageUpdate{
 		SessionUpdate: client.UpdateUsage,
 		Size:          200000,
 		Used:          42000,
-	}, controllerTestOptions())
-	if event != nil {
-		t.Fatalf("usage_update event = %#v, want no canonical ingress event", event)
+		Meta:          map[string]any{"vendor": map[string]any{"trace": "usage"}},
+	}, Options{
+		At:         time.Unix(1, 0),
+		Scope:      controllerTestOptions().Scope,
+		Actor:      controllerTestOptions().Actor,
+		Invocation: session.EventInvocation{Provider: "codex", Model: "gpt-test"},
+		Visibility: ControllerVisibility,
+	})
+	if event == nil || !session.IsMirror(event) || event.ContextUsage == nil {
+		t.Fatalf("usage_update event = %#v, want durable usage mirror", event)
+	}
+	if event.ContextUsage.Size != 200000 || event.ContextUsage.Used != 42000 {
+		t.Fatalf("context usage = %#v, want size=200000 used=42000", event.ContextUsage)
+	}
+	if string(event.ContextUsage.Meta["vendor"]) != `{"trace":"usage"}` {
+		t.Fatalf("context usage metadata = %s", event.ContextUsage.Meta["vendor"])
+	}
+	if event.Invocation == nil || event.Invocation.Provider != "codex" || event.Invocation.Model != "gpt-test" {
+		t.Fatalf("invocation = %#v, want codex/gpt-test", event.Invocation)
 	}
 }
 

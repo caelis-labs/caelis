@@ -1382,7 +1382,9 @@ func (r *controllerRun) handleUpdate(clock func() time.Time, env client.UpdateEn
 	turnID := r.turnID
 	stream := r.turnStream
 	handle := r.handle
-	event := normalizeACPUpdateEvent(clock, r.binding, r.remoteSessionID, turnID, env.Update)
+	binding := session.CloneControllerBinding(r.binding)
+	binding.Placement.Model = firstNonEmpty(r.controllerStatusLocked(r.turnSession.SessionRef).Model, binding.Placement.Model)
+	event := normalizeACPUpdateEvent(clock, binding, r.remoteSessionID, turnID, env.Update)
 	acpEnv := acpEnvelopeFromUpdate(env, event, nil)
 	if event == nil && acpEnv == nil {
 		r.mu.Unlock()
@@ -1776,7 +1778,9 @@ func (r *participantRun) handleUpdate(clock func() time.Time, env client.UpdateE
 	event := normalizeACPUpdateEvent(clock, session.ControllerBinding{
 		Kind:         session.ControllerKindACP,
 		ControllerID: r.agent,
+		AgentName:    r.agent,
 		Label:        r.binding.Label,
+		Placement:    r.binding.Placement,
 		EpochID:      r.binding.ControllerRef,
 	}, r.remoteSessionID, turnID, env.Update)
 	if event != nil {

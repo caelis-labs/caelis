@@ -122,6 +122,15 @@ One live Turn has one content source:
   owns live content and state; the paired canonical event contributes only
   accounting such as `usage_update`.
 
+Standard ACP `usage_update` is a replaceable context gauge rather than a token
+delta: `used` is the current context occupancy, `size` is the current context
+capacity, and `cost` is the peer's optional cumulative Session cost. Caelis
+persists the latest main-controller gauge as a typed Session mirror so replay,
+`/status`, and the TUI prompt bar use the same value. An ACP-backed Spawn Task
+persists its latest gauge on the typed Task record. Session accounting includes
+one latest gauge per main or subagent execution lane; it never sums every
+streamed usage update. These mirrors remain outside parent model context.
+
 A fresh replay or `session/load` starts from an empty consumer and may
 materialize the canonical complete value once. Live and replay are therefore
 explicit projection profiles, never two simultaneous content sources. Resume

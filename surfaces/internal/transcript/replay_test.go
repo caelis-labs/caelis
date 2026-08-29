@@ -149,7 +149,8 @@ func TestProjectReplayEventsProjectsUsageUpdate(t *testing.T) {
 	t.Parallel()
 
 	events := ProjectReplayEvents([]eventstream.Envelope{{
-		Kind: eventstream.KindSessionUpdate,
+		Kind:           eventstream.KindSessionUpdate,
+		UsageSemantics: eventstream.UsageSemanticsProviderUsage,
 		Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{
 			PromptTokens: 12,
 			TotalTokens:  17,

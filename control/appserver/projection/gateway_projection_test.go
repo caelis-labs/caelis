@@ -1,6 +1,7 @@
 package projection
 
 import (
+	"encoding/json"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -201,9 +202,43 @@ func TestProjectSessionEventEnvelopeProjectsUsageAsACPUsageUpdate(t *testing.T) 
 	if _, ok := events[0].Update.(eventstream.UsageUpdate); !ok {
 		t.Fatalf("update = %#v, want UsageUpdate", events[0].Update)
 	}
+	if events[0].UsageSemantics != eventstream.UsageSemanticsProviderUsage {
+		t.Fatalf("usage semantics = %q, want provider usage", events[0].UsageSemantics)
+	}
 	usage := eventstream.UsageSnapshotFromEnvelope(events[0])
 	if usage == nil || usage.PromptTokens != 12 || usage.CachedInputTokens != 3 || usage.CompletionTokens != 5 || usage.ReasoningTokens != 2 || usage.TotalTokens != 17 {
 		t.Fatalf("usage snapshot = %#v", usage)
+	}
+}
+
+func TestProjectSessionEventEnvelopeReplaysStandardACPUsageFields(t *testing.T) {
+	t.Parallel()
+
+	event := &session.Event{
+		ID: "usage-1", Seq: 7, SessionID: "session-1", Type: session.EventTypeCustom, Visibility: session.VisibilityMirror,
+		ContextUsage: &session.ContextUsageSnapshot{
+			Size: 200000, Used: 42000,
+			Meta: map[string]json.RawMessage{"vendor": json.RawMessage(`{"trace":"usage"}`)},
+			Cost: &session.ContextUsageCost{
+				Amount: 0.47, Currency: "USD", Meta: map[string]json.RawMessage{"billing": json.RawMessage(`{"tier":"pro"}`)},
+			},
+		},
+	}
+	events := ProjectSessionEventEnvelope(EnvelopeBaseFromSessionEvent(
+		session.SessionRef{SessionID: "session-1"}, event, SessionEventTransport{},
+	), event)
+	if len(events) != 1 {
+		t.Fatalf("standard ACP usage replay = %#v, want one update", events)
+	}
+	if events[0].UsageSemantics != eventstream.UsageSemanticsContextGauge {
+		t.Fatalf("usage semantics = %q, want context gauge", events[0].UsageSemantics)
+	}
+	update, ok := events[0].Update.(eventstream.UsageUpdate)
+	if !ok || update.Size != 200000 || update.Used != 42000 || update.Cost == nil || update.Cost.Amount != 0.47 {
+		t.Fatalf("standard ACP usage replay = %#v", events[0].Update)
+	}
+	if vendor, _ := update.Meta["vendor"].(map[string]any); vendor["trace"] != "usage" || string(update.Cost.Meta["billing"]) != `{"tier":"pro"}` {
+		t.Fatalf("standard ACP usage replay metadata = meta %#v cost %#v", update.Meta, update.Cost)
 	}
 }
 

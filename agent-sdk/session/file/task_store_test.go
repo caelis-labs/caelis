@@ -21,7 +21,13 @@ func TestTaskStoreRevisionAndLeaseCAS(t *testing.T) {
 	root := t.TempDir()
 	store := NewTaskStore(NewStore(Config{RootDir: root}))
 	created, err := store.Put(context.Background(), task.PutRequest{
-		Entry:            &task.Entry{TaskID: "task-cas", Kind: task.KindCommand, Session: taskSessionRef("sess-cas"), State: task.StateRunning, Running: true},
+		Entry: &task.Entry{
+			TaskID: "task-cas", Kind: task.KindCommand, Session: taskSessionRef("sess-cas"), State: task.StateRunning, Running: true,
+			ContextUsage: &task.ContextUsageRecord{
+				Snapshot:   session.ContextUsageSnapshot{Size: 200000, Used: 42000},
+				Invocation: session.EventInvocation{Provider: "codex", Model: "gpt-test"},
+			},
+		},
 		ExpectedRevision: 0,
 	})
 	if err != nil {
@@ -88,6 +94,10 @@ func TestTaskStoreRevisionAndLeaseCAS(t *testing.T) {
 	}
 	if reopened.Revision != 5 || reopened.Lease.ID != "" {
 		t.Fatalf("reopened task = %#v, want persisted revision 5 without lease", reopened)
+	}
+	if reopened.ContextUsage == nil || reopened.ContextUsage.Snapshot.Used != 42000 || reopened.ContextUsage.Snapshot.Size != 200000 ||
+		reopened.ContextUsage.Invocation.Provider != "codex" || reopened.ContextUsage.Invocation.Model != "gpt-test" {
+		t.Fatalf("reopened context usage = %#v, want persisted ACP gauge", reopened.ContextUsage)
 	}
 }
 
@@ -208,7 +218,7 @@ func TestTaskStorePersistsTypedFailureDiagnostic(t *testing.T) {
 	}
 }
 
-func TestEnsureTaskIndexV4ColumnsAddsFailureDiagnostic(t *testing.T) {
+func TestEnsureTaskIndexColumnsAddsCurrentFields(t *testing.T) {
 	t.Parallel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "legacy-index.db"))
@@ -219,15 +229,15 @@ func TestEnsureTaskIndexV4ColumnsAddsFailureDiagnostic(t *testing.T) {
 	if _, err := db.Exec(`CREATE TABLE tasks (task_id TEXT PRIMARY KEY)`); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensureTaskIndexV4Columns(db); err != nil {
-		t.Fatalf("ensureTaskIndexV4Columns() error = %v", err)
+	if err := ensureTaskIndexColumns(db); err != nil {
+		t.Fatalf("ensureTaskIndexColumns() error = %v", err)
 	}
 	rows, err := db.Query(`PRAGMA table_info(tasks)`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
-	found := false
+	found := map[string]bool{}
 	for rows.Next() {
 		var cid int
 		var name, typ string
@@ -237,15 +247,17 @@ func TestEnsureTaskIndexV4ColumnsAddsFailureDiagnostic(t *testing.T) {
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &primaryKey); err != nil {
 			t.Fatal(err)
 		}
-		if name == "failure_diagnostic" {
-			found = typ == "TEXT" && notNull == 1
+		if name == "failure_diagnostic" || name == "context_usage_json" {
+			found[name] = typ == "TEXT" && notNull == 1
 		}
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if !found {
-		t.Fatal("failure_diagnostic column was not added as required TEXT")
+	for _, name := range []string{"failure_diagnostic", "context_usage_json"} {
+		if !found[name] {
+			t.Fatalf("%s column was not added as required TEXT", name)
+		}
 	}
 }
 

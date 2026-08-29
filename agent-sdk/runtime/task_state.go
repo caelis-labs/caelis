@@ -220,6 +220,7 @@ type subagentTask struct {
 	running         bool
 	result          map[string]any
 	metadata        map[string]any
+	contextUsage    *taskapi.ContextUsageRecord
 
 	stdout           string
 	stderr           string

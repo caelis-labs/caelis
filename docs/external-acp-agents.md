@@ -194,10 +194,16 @@ and submit work to the Session through the same AppServer replay and input
 contracts as a Kernel-controlled Session.
 
 ACP main Turns do not require a local provider. Capabilities that are explicitly
-implemented with a local SDK model remain separate: in particular, local
-`/compact` still requires an eligible provider model and fails explicitly when
-none exists. Selecting an ACP main controller does not silently delegate those
-local-only capabilities to the peer.
+implemented with a local SDK model remain separate: while an ACP Agent is the
+main controller, `/compact` is omitted from command discovery and help, and a
+stale direct invocation is rejected before any Runtime effect. Selecting an ACP
+main controller does not silently delegate local-only capabilities to the peer.
+
+The standard ACP `usage_update` reported by the main controller drives the
+current Token usage in `/status` and the TUI prompt bar. Caelis durably retains
+the latest context gauge for replay. ACP-backed subagent Tasks retain their own
+latest gauges, which are included once in Session usage totals and per-model
+statistics without overwriting the main prompt-bar value.
 
 ## Disconnect Safety
 

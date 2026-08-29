@@ -37,6 +37,7 @@ func normalizeACPUpdateEvent(
 		Clock:      clock,
 		Scope:      *scope,
 		Actor:      session.ActorRef{Kind: session.ActorKindController, Name: strings.TrimSpace(binding.Label)},
+		Invocation: session.EventInvocation{Provider: firstNonEmpty(binding.AgentName, binding.ControllerID, binding.Label), Model: strings.TrimSpace(binding.Placement.Model)},
 		Visibility: acpingress.ControllerVisibility,
 	})
 }

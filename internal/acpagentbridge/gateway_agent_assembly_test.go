@@ -3,6 +3,8 @@ package acpagentbridge
 import (
 	"strings"
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func TestGatewayCommandNamesFromSessionRuntimeHandles(t *testing.T) {
@@ -19,6 +21,15 @@ func TestGatewayCommandNamesFromSessionRuntimeHandles(t *testing.T) {
 	}
 	if countGatewayCommand(commands, "orbit") != 1 {
 		t.Fatalf("gatewayCommandNamesFromHandles() = %#v, want one orbit", commands)
+	}
+}
+
+func TestGatewayCommandNamesForACPControllerHidesCompactFromHelp(t *testing.T) {
+	t.Parallel()
+
+	commands := gatewayCommandNamesForSession(nil, session.Session{Controller: session.ControllerBinding{Kind: session.ControllerKindACP}})
+	if containsGatewayCommand(commands, "compact") {
+		t.Fatalf("commands = %#v, should hide /compact from ACP /help", commands)
 	}
 }
 

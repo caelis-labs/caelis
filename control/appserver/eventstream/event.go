@@ -84,9 +84,37 @@ func UsageUpdateFromSnapshot(usage session.UsageSnapshot, meta map[string]any) U
 	}
 }
 
+// UsageUpdateFromContextUsage restores one standard ACP context gauge without
+// discarding optional cost or extension metadata retained by durable replay.
+func UsageUpdateFromContextUsage(usage session.ContextUsageSnapshot, meta map[string]any) UsageUpdate {
+	update := UsageUpdate{
+		SessionUpdate: UpdateUsage,
+		Size:          usage.Size,
+		Used:          usage.Used,
+		Meta:          maps.Clone(meta),
+	}
+	for key, raw := range usage.Meta {
+		var value any
+		if json.Unmarshal(raw, &value) == nil {
+			if update.Meta == nil {
+				update.Meta = map[string]any{}
+			}
+			update.Meta[key] = value
+		}
+	}
+	if usage.Cost != nil {
+		update.Cost = &acpsdk.Cost{
+			Amount: usage.Cost.Amount, Currency: strings.TrimSpace(usage.Cost.Currency),
+			Meta: cloneRawMessageMap(usage.Cost.Meta),
+		}
+	}
+	return update
+}
+
 func usageSnapshotFromUpdate(update UsageUpdate) *session.UsageSnapshot {
 	usage := usageSnapshotFromMeta(update.Meta)
-	if usage == nil && update.Used == 0 {
+	projectedUsage := usage != nil
+	if usage == nil && update.Used == 0 && update.Size == 0 {
 		return nil
 	}
 	if usage == nil {
@@ -94,6 +122,9 @@ func usageSnapshotFromUpdate(update UsageUpdate) *session.UsageSnapshot {
 	}
 	if usage.TotalTokens == 0 && update.Used <= uint64(maxInt()) {
 		usage.TotalTokens = int(update.Used)
+	}
+	if !projectedUsage && usage.ContextWindowTokens == 0 && update.Size <= uint64(maxInt()) {
+		usage.ContextWindowTokens = int(update.Size)
 	}
 	if usageSnapshotEmpty(*usage) {
 		return nil
@@ -118,7 +149,41 @@ func UsageSnapshotFromEnvelope(env Envelope) *session.UsageSnapshot {
 	if !ok {
 		return nil
 	}
+	if UsageEnvelopeReplacesContext(env) {
+		return usageSnapshotFromStandardUpdate(update)
+	}
 	return usageSnapshotFromUpdate(update)
+}
+
+func usageSnapshotFromStandardUpdate(update UsageUpdate) *session.UsageSnapshot {
+	usage := &session.UsageSnapshot{}
+	if update.Used <= uint64(maxInt()) {
+		usage.TotalTokens = int(update.Used)
+	}
+	if update.Size <= uint64(maxInt()) {
+		usage.ContextWindowTokens = int(update.Size)
+	}
+	if usageSnapshotEmpty(*usage) {
+		return nil
+	}
+	return usage
+}
+
+// UsageSemantics identifies the Control-owned reduction rule for a usage
+// update. It lives beside the ACP payload because peer-owned _meta cannot grant
+// product semantics.
+type UsageSemantics string
+
+const (
+	UsageSemanticsContextGauge  UsageSemantics = "context_gauge"
+	UsageSemanticsProviderUsage UsageSemantics = "provider_usage"
+)
+
+// UsageEnvelopeReplacesContext reports whether a usage Envelope is the
+// standard ACP replaceable context gauge. Empty semantics retains the legacy
+// provider-usage merge behavior for Control v1 peers predating this field.
+func UsageEnvelopeReplacesContext(env Envelope) bool {
+	return env.UsageSemantics == UsageSemanticsContextGauge
 }
 
 type Envelope struct {
@@ -136,13 +201,14 @@ type Envelope struct {
 	ActivityID string    `json:"activity_id,omitempty"`
 	OccurredAt time.Time `json:"occurred_at,omitempty"`
 
-	Scope         Scope               `json:"scope,omitempty"`
-	ScopeID       string              `json:"scope_id,omitempty"`
-	Actor         string              `json:"actor,omitempty"`
-	ParticipantID string              `json:"participant_id,omitempty"`
-	Final         bool                `json:"final,omitempty"`
-	ParentTool    *ParentToolRelation `json:"parent_tool,omitempty"`
-	Delivery      *Delivery           `json:"delivery,omitempty"`
+	Scope          Scope               `json:"scope,omitempty"`
+	ScopeID        string              `json:"scope_id,omitempty"`
+	Actor          string              `json:"actor,omitempty"`
+	ParticipantID  string              `json:"participant_id,omitempty"`
+	Final          bool                `json:"final,omitempty"`
+	UsageSemantics UsageSemantics      `json:"usage_semantics,omitempty"`
+	ParentTool     *ParentToolRelation `json:"parent_tool,omitempty"`
+	Delivery       *Delivery           `json:"delivery,omitempty"`
 	// ApprovalRequestID is required to resolve a request_permission Envelope
 	// through the Caelis Control command. It deliberately sits beside the ACP
 	// payload so standard RequestPermissionRequest wire shape remains unchanged.

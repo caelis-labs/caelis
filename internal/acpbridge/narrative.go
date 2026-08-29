@@ -120,7 +120,13 @@ func eventUpdateType(event *session.Event) string {
 }
 
 func shouldPersistExternalACPEvent(event *session.Event) bool {
-	if event == nil || !session.IsCanonicalHistoryEvent(event) || session.IsUIOnly(event) {
+	if event == nil || session.IsUIOnly(event) {
+		return false
+	}
+	if event.ContextUsage != nil && session.IsMirror(event) {
+		return true
+	}
+	if !session.IsCanonicalHistoryEvent(event) {
 		return false
 	}
 	switch session.EventTypeOf(event) {

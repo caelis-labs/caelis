@@ -347,6 +347,9 @@ func TestUsageUpdateFromSnapshotStoresBreakdownInMeta(t *testing.T) {
 	if invocation["model"] != "m" {
 		t.Fatalf("meta.caelis.invocation = %#v, want preserved model", invocation)
 	}
+	if UsageEnvelopeReplacesContext(Envelope{UsageSemantics: UsageSemanticsProviderUsage, Update: update}) {
+		t.Fatal("Caelis provider usage should retain partial-field merge semantics")
+	}
 }
 
 func TestUsageUpdateFromSnapshotDefaultsUnknownSizeToUsed(t *testing.T) {
@@ -358,6 +361,70 @@ func TestUsageUpdateFromSnapshotDefaultsUnknownSizeToUsed(t *testing.T) {
 	}
 }
 
+func TestUsageUpdateFromContextUsageRestoresStandardFields(t *testing.T) {
+	t.Parallel()
+
+	update := UsageUpdateFromContextUsage(session.ContextUsageSnapshot{
+		Size: 200000,
+		Used: 42000,
+		Meta: map[string]json.RawMessage{"vendor": json.RawMessage(`{"trace":"usage"}`)},
+		Cost: &session.ContextUsageCost{
+			Amount: 0.47, Currency: " USD ", Meta: map[string]json.RawMessage{"billing": json.RawMessage(`{"tier":"pro"}`)},
+		},
+	}, map[string]any{"caelis": map[string]any{"version": 1}})
+	if update.Size != 200000 || update.Used != 42000 || update.Cost == nil || update.Cost.Amount != 0.47 || update.Cost.Currency != "USD" {
+		t.Fatalf("restored standard usage = %#v", update)
+	}
+	if vendor, _ := update.Meta["vendor"].(map[string]any); vendor["trace"] != "usage" {
+		t.Fatalf("restored usage metadata = %#v", update.Meta)
+	}
+	if string(update.Cost.Meta["billing"]) != `{"tier":"pro"}` {
+		t.Fatalf("restored cost metadata = %s", update.Cost.Meta["billing"])
+	}
+	if !UsageEnvelopeReplacesContext(Envelope{UsageSemantics: UsageSemanticsContextGauge, Update: update}) {
+		t.Fatal("standard ACP context usage should replace the prior gauge")
+	}
+}
+
+func TestUsageEnvelopeSemanticsCannotBeSpoofedByACPMetadata(t *testing.T) {
+	t.Parallel()
+
+	env := Envelope{
+		Kind:           KindSessionUpdate,
+		UsageSemantics: UsageSemanticsContextGauge,
+		Update: UsageUpdate{
+			SessionUpdate: UpdateUsage, Size: 200000, Used: 0,
+			Meta: map[string]any{"caelis": map[string]any{"usage": map[string]any{"total_tokens": 99999}}},
+		},
+	}
+	if !UsageEnvelopeReplacesContext(env) {
+		t.Fatal("peer metadata changed the typed standard context-gauge semantics")
+	}
+	usage := UsageSnapshotFromEnvelope(env)
+	if usage == nil || usage.TotalTokens != 0 || usage.ContextWindowTokens != 200000 {
+		t.Fatalf("UsageSnapshotFromEnvelope() = %#v, want typed standard size/used", usage)
+	}
+}
+
+func TestMissingUsageSemanticsRetainsLegacyProviderMerge(t *testing.T) {
+	t.Parallel()
+
+	env := Envelope{
+		Kind: KindSessionUpdate,
+		Update: UsageUpdateFromSnapshot(session.UsageSnapshot{
+			PromptTokens: 1200,
+			TotalTokens:  1600,
+		}, nil),
+	}
+	if UsageEnvelopeReplacesContext(env) {
+		t.Fatal("missing usage semantics should retain legacy provider merge behavior")
+	}
+	usage := UsageSnapshotFromEnvelope(env)
+	if usage == nil || usage.PromptTokens != 1200 || usage.TotalTokens != 1600 || usage.ContextWindowTokens != 0 {
+		t.Fatalf("UsageSnapshotFromEnvelope() = %#v, want legacy provider breakdown without a replacement window", usage)
+	}
+}
+
 func TestUsageSnapshotFromUpdateNeverWrapsFullUint64Counters(t *testing.T) {
 	t.Parallel()
 
@@ -366,6 +433,19 @@ func TestUsageSnapshotFromUpdateNeverWrapsFullUint64Counters(t *testing.T) {
 	}
 	if usage := usageSnapshotFromUpdate(update); usage != nil {
 		t.Fatalf("usageSnapshotFromUpdate() = %#v, want no lossy machine-int projection", usage)
+	}
+}
+
+func TestUsageSnapshotFromRawStandardUpdateUsesSizeAsContextWindow(t *testing.T) {
+	t.Parallel()
+
+	usage := usageSnapshotFromUpdate(UsageUpdate{
+		SessionUpdate: UpdateUsage,
+		Size:          200000,
+		Used:          42000,
+	})
+	if usage == nil || usage.TotalTokens != 42000 || usage.ContextWindowTokens != 200000 {
+		t.Fatalf("usageSnapshotFromUpdate() = %#v, want raw ACP used/size", usage)
 	}
 }
 

@@ -279,6 +279,38 @@ func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {
 	}
 }
 
+func TestRunnerHandleUpdatePublishesACPUsageGauge(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingStreams{}
+	run := &childRun{
+		anchor:     delegation.Anchor{TaskID: "task-1", SessionID: "child-1", AgentID: "codex-1"},
+		taskID:     "task-1",
+		agentName:  "codex",
+		invocation: session.EventInvocation{Provider: "codex", Model: "gpt-test"},
+		sink:       sink,
+		state:      delegation.StateRunning,
+		running:    true,
+	}
+	runner := &Runner{clock: time.Now}
+	runner.handleUpdate(run, client.UpdateEnvelope{SessionID: "child-1", Update: client.UsageUpdate{
+		SessionUpdate: client.UpdateUsage,
+		Size:          200000,
+		Used:          42000,
+	}})
+
+	if len(sink.frames) != 1 || sink.frames[0].Event == nil || sink.frames[0].Event.ContextUsage == nil {
+		t.Fatalf("usage frames = %#v, want one typed usage event", sink.frames)
+	}
+	event := sink.frames[0].Event
+	if !session.IsMirror(event) || event.ContextUsage.Size != 200000 || event.ContextUsage.Used != 42000 {
+		t.Fatalf("usage event = %#v, want durable-style mirror gauge", event)
+	}
+	if event.Invocation == nil || event.Invocation.Provider != "codex" || event.Invocation.Model != "gpt-test" {
+		t.Fatalf("usage invocation = %#v, want codex/gpt-test", event.Invocation)
+	}
+}
+
 func TestTranslateApprovalRequestPreservesCanonicalToolPayload(t *testing.T) {
 	t.Parallel()
 

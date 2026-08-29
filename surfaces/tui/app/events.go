@@ -43,6 +43,7 @@ type SetStatusMsg struct {
 	Context             string
 	TotalTokens         int
 	ContextWindowTokens int
+	UsageReplace        bool
 	ModeLabel           string
 	Status              StatusViewModel
 }
@@ -57,6 +58,7 @@ type StatusRefreshResultMsg struct {
 	TotalTokens         int
 	ContextWindowTokens int
 	HasUsage            bool
+	UsageReplace        bool
 	ModeLabel           string
 	HasModeLabel        bool
 	Status              StatusViewModel

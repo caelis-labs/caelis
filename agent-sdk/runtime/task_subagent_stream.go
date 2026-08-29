@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
@@ -370,6 +371,14 @@ func (t *subagentTask) applyStreamFramesLocked(frames []stream.Frame) {
 			frame.State = ""
 		}
 		frame.Running = t.running
+		if frame.Event != nil && frame.Event.ContextUsage != nil {
+			t.contextUsage = &taskapi.ContextUsageRecord{
+				Snapshot: session.CloneContextUsageSnapshot(*frame.Event.ContextUsage),
+			}
+			if frame.Event.Invocation != nil {
+				t.contextUsage.Invocation = session.CloneEventInvocation(*frame.Event.Invocation)
+			}
+		}
 		text := subagentFrameAssistantText(frame)
 		if text == "" {
 			text = frame.Text

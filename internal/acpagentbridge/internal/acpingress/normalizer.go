@@ -19,6 +19,7 @@ type Options struct {
 	At           time.Time
 	Scope        session.EventScope
 	Actor        session.ActorRef
+	Invocation   session.EventInvocation
 	Meta         map[string]any
 	TextOverride string
 	Visibility   VisibilityPolicy
@@ -49,13 +50,58 @@ func NormalizeUpdate(update client.Update, opts Options) *session.Event {
 	case client.PlanUpdate:
 		return normalizePlanUpdate(typed, opts)
 	case client.UsageUpdate:
-		// usage_update is a standard ACP client-stream payload, but Caelis does
-		// not yet have a durable canonical source for ACP size/used semantics.
-		// Controller live streams pass it through as eventstream.Envelope only.
-		return nil
+		return normalizeUsageUpdate(typed, opts)
 	default:
 		return nil
 	}
+}
+
+func normalizeUsageUpdate(update client.UsageUpdate, opts Options) *session.Event {
+	event := baseEvent(client.UpdateUsage, session.EventTypeCustom, "", session.CloneActorRef(opts.Actor), opts)
+	// Standard ACP usage is a replaceable client-facing context gauge. A mirror
+	// makes it replayable without adding it to model context.
+	event.Visibility = session.VisibilityMirror
+	event.ContextUsage = &session.ContextUsageSnapshot{
+		Size: update.Size, Used: update.Used, Meta: rawMessageMapFromAny(update.Meta),
+	}
+	if update.Cost != nil {
+		event.ContextUsage.Cost = &session.ContextUsageCost{
+			Amount: update.Cost.Amount, Currency: strings.TrimSpace(update.Cost.Currency), Meta: cloneRawMessageMap(update.Cost.Meta),
+		}
+	}
+	invocation := session.CloneEventInvocation(opts.Invocation)
+	if invocation.Provider != "" || invocation.Model != "" {
+		event.Invocation = &invocation
+	}
+	return event
+}
+
+func rawMessageMapFromAny(in map[string]any) map[string]json.RawMessage {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(in))
+	for key, value := range in {
+		encoded, err := json.Marshal(value)
+		if err == nil {
+			out[key] = encoded
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func cloneRawMessageMap(in map[string]json.RawMessage) map[string]json.RawMessage {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(in))
+	for key, value := range in {
+		out[key] = append(json.RawMessage(nil), value...)
+	}
+	return out
 }
 
 func ContentChunkText(chunk client.ContentChunk) string {

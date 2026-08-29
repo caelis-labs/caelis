@@ -342,7 +342,8 @@ func TestProjectACPEventToEventsProjectsUsageUpdate(t *testing.T) {
 	t.Parallel()
 
 	events := ProjectACPEventToEvents(eventstream.Envelope{
-		Kind: eventstream.KindSessionUpdate,
+		Kind:           eventstream.KindSessionUpdate,
+		UsageSemantics: eventstream.UsageSemanticsProviderUsage,
 		Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{
 			PromptTokens:      12,
 			CachedInputTokens: 3,
@@ -356,6 +357,40 @@ func TestProjectACPEventToEventsProjectsUsageUpdate(t *testing.T) {
 	}
 	if events[0].Kind != EventUsage || events[0].Usage == nil || events[0].Usage.PromptTokens != 12 || events[0].Usage.TotalTokens != 17 {
 		t.Fatalf("event = %#v, want usage projection", events[0])
+	}
+	if events[0].UsageReplace {
+		t.Fatal("Caelis provider usage should merge independently observed fields")
+	}
+}
+
+func TestProjectACPEventToEventsMarksStandardUsageAsReplaceableGauge(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToEvents(eventstream.Envelope{
+		Kind:           eventstream.KindSessionUpdate,
+		UsageSemantics: eventstream.UsageSemanticsContextGauge,
+		Update: eventstream.UsageUpdate{
+			SessionUpdate: eventstream.UpdateUsage, Size: 200000, Used: 0,
+			Meta: map[string]any{"caelis": map[string]any{"usage": map[string]any{"total_tokens": 99999}}},
+		},
+	}, nil)
+	if len(events) != 1 || events[0].Usage == nil || !events[0].UsageReplace || events[0].Usage.TotalTokens != 0 || events[0].Usage.ContextWindowTokens != 200000 {
+		t.Fatalf("standard usage event = %#v, want replaceable zero gauge", events)
+	}
+}
+
+func TestProjectACPEventToEventsKeepsLegacyUnannotatedProviderUsageMerge(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{
+			PromptTokens: 1200,
+			TotalTokens:  1600,
+		}, nil),
+	}, nil)
+	if len(events) != 1 || events[0].Usage == nil || events[0].UsageReplace || events[0].Usage.PromptTokens != 1200 || events[0].Usage.ContextWindowTokens != 0 {
+		t.Fatalf("legacy provider usage event = %#v, want merge-compatible breakdown", events)
 	}
 }
 

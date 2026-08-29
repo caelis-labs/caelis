@@ -134,7 +134,8 @@ func TestModelInitSchedulesStatusRefreshCommand(t *testing.T) {
 		t.Fatal("status refresh remained in flight after its result was applied")
 	}
 	updated, _ := final.Update(eventstream.Envelope{
-		Kind: eventstream.KindSessionUpdate,
+		Kind:           eventstream.KindSessionUpdate,
+		UsageSemantics: eventstream.UsageSemanticsProviderUsage,
 		Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{
 			TotalTokens: 1_600,
 		}, nil),
@@ -151,12 +152,14 @@ func TestMainACPUsageUpdatesStatusContextForLiveAndReplay(t *testing.T) {
 
 	model := NewModel(Config{})
 	usage := eventstream.Envelope{
-		Kind:      eventstream.KindSessionUpdate,
-		SessionID: "session-1",
-		Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{
-			TotalTokens:         1600,
-			ContextWindowTokens: 100000,
-		}, nil),
+		Kind:           eventstream.KindSessionUpdate,
+		SessionID:      "session-1",
+		UsageSemantics: eventstream.UsageSemanticsContextGauge,
+		Update: eventstream.UsageUpdate{
+			SessionUpdate: eventstream.UpdateUsage,
+			Used:          1600,
+			Size:          100000,
+		},
 	}
 	want := promptview.FormatContextUsage(1600, 100000)
 
@@ -168,9 +171,21 @@ func TestMainACPUsageUpdatesStatusContextForLiveAndReplay(t *testing.T) {
 	if model.statusView.Tokens != want {
 		t.Fatalf("live usage view tokens = %q, want %q", model.statusView.Tokens, want)
 	}
+	cleared := eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", UsageSemantics: eventstream.UsageSemanticsContextGauge,
+		Update: eventstream.UsageUpdate{SessionUpdate: eventstream.UpdateUsage, Size: 100000, Used: 0},
+	}
+	updated, _ = model.Update(cleared)
+	model = updated.(*Model)
+	if model.statusContext != "" || model.statusView.Tokens != "" || model.statusUsageTotal != 0 || model.statusUsageWindow != 100000 {
+		t.Fatalf("zero standard gauge did not replace footer: context=%q view=%q usage=%d/%d", model.statusContext, model.statusView.Tokens, model.statusUsageTotal, model.statusUsageWindow)
+	}
+	updated, _ = model.Update(usage)
+	model = updated.(*Model)
 	totalOnly := eventstream.Envelope{
-		Kind:      eventstream.KindSessionUpdate,
-		SessionID: "session-1",
+		Kind:           eventstream.KindSessionUpdate,
+		SessionID:      "session-1",
+		UsageSemantics: eventstream.UsageSemanticsProviderUsage,
 		Update: eventstream.UsageUpdateFromSnapshot(session.UsageSnapshot{
 			TotalTokens: 2_400,
 		}, nil),
@@ -265,5 +280,20 @@ func TestStatusRefreshReplacesUsageWhenModelChanges(t *testing.T) {
 	}
 	if model.statusContext != "" || model.statusView.Tokens != "" {
 		t.Fatalf("refreshed model-b context = %q / %q, want empty until observed usage", model.statusContext, model.statusView.Tokens)
+	}
+}
+
+func TestACPStatusRefreshReplacesZeroUsageWithoutModelChange(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{})
+	model.statusModel = "codex"
+	model.replaceStatusUsage(42000, 200000)
+	model.handleStatusRefreshResultMsg(StatusRefreshResultMsg{
+		Model: "codex", HasStatus: true,
+		TotalTokens: 0, ContextWindowTokens: 200000, HasUsage: true, UsageReplace: true,
+	})
+	if model.statusUsageTotal != 0 || model.statusUsageWindow != 200000 || model.statusContext != "" || model.statusView.Tokens != "" {
+		t.Fatalf("ACP status refresh retained stale gauge: context=%q view=%q usage=%d/%d", model.statusContext, model.statusView.Tokens, model.statusUsageTotal, model.statusUsageWindow)
 	}
 }

@@ -80,8 +80,9 @@ type StatusSandbox struct {
 	FullAccessMode   bool               `json:"full_access_mode,omitempty"`
 }
 
-// StatusUsage describes current-context plus cumulative total and per-model
-// Session token usage.
+// StatusUsage describes current-context plus Session-wide token accounting.
+// Native provider call usage is cumulative; standard ACP context usage
+// contributes one replaceable latest gauge per execution lane.
 type StatusUsage struct {
 	PromptTokens        int                  `json:"prompt_tokens,omitempty"`
 	CompletionTokens    int                  `json:"completion_tokens,omitempty"`

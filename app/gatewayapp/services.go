@@ -8,6 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
@@ -279,4 +280,13 @@ func (s StatusService) DoctorForWorkspace(ctx context.Context, workspace session
 
 func (s StatusService) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
 	return s.composition.SessionRuntimeState(ctx, ref)
+}
+
+// SessionTasks returns the durable Task records owned by one Session for
+// focused status accounting.
+func (s StatusService) SessionTasks(ctx context.Context, ref session.SessionRef) ([]*taskapi.Entry, error) {
+	if s.composition == nil || s.composition.authorities.taskStore == nil {
+		return nil, nil
+	}
+	return s.composition.authorities.taskStore.ListSession(ctx, session.NormalizeSessionRef(ref))
 }

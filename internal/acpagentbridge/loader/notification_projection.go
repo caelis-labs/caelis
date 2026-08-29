@@ -31,9 +31,13 @@ func projectSessionEventNotifications(fallbackSessionID string, event *session.E
 		})
 	}
 	if usage := session.UsageSnapshotFromSessionEvent(event); usage != nil && !containsUsageNotification(out) {
+		update := eventstream.UsageUpdateFromSnapshot(*usage, nil)
+		if event != nil && event.ContextUsage != nil {
+			update = eventstream.UsageUpdateFromContextUsage(*event.ContextUsage, nil)
+		}
 		out = append(out, eventstream.SessionNotification{
 			SessionID: firstNonEmptyString(fallbackSessionID, eventSessionID),
-			Update:    eventstream.UsageUpdateFromSnapshot(*usage, nil),
+			Update:    update,
 		})
 	}
 	return out, nil

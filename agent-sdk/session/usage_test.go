@@ -1,6 +1,9 @@
 package session
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestUsageSnapshotFromMapAcceptsGeminiUsageMetadata(t *testing.T) {
 	usage := UsageSnapshotFromMap(map[string]any{
@@ -51,6 +54,30 @@ func TestUsageSnapshotFromSessionEventUsesInvocationContextWindow(t *testing.T) 
 	}
 	if usage.TotalTokens != 17 || usage.ContextWindowTokens != 128000 {
 		t.Fatalf("usage = %+v, want total tokens and invocation context window", *usage)
+	}
+}
+
+func TestUsageSnapshotFromSessionEventUsesTypedContextGauge(t *testing.T) {
+	t.Parallel()
+
+	event := &Event{ContextUsage: &ContextUsageSnapshot{
+		Size: 200000,
+		Used: 42000,
+		Meta: map[string]json.RawMessage{"vendor": json.RawMessage(`{"trace":"usage"}`)},
+		Cost: &ContextUsageCost{Amount: 0.47, Currency: " USD "},
+	}}
+	usage := UsageSnapshotFromSessionEvent(event)
+	if usage == nil || usage.TotalTokens != 42000 || usage.ContextWindowTokens != 200000 {
+		t.Fatalf("UsageSnapshotFromSessionEvent() = %#v, want typed used/size gauge", usage)
+	}
+	cloned := CloneEvent(event)
+	cloned.ContextUsage.Cost.Amount = 1
+	cloned.ContextUsage.Meta["vendor"][0] = '['
+	if event.ContextUsage.Cost.Amount != 0.47 || cloned.ContextUsage.Cost.Currency != "USD" {
+		t.Fatalf("CloneEvent() context usage = original %#v cloned %#v", event.ContextUsage, cloned.ContextUsage)
+	}
+	if string(event.ContextUsage.Meta["vendor"]) != `{"trace":"usage"}` {
+		t.Fatalf("CloneEvent() mutated context usage metadata: %s", event.ContextUsage.Meta["vendor"])
 	}
 }
 

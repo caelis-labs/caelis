@@ -171,6 +171,16 @@ func (p gatewayPresentationSource) PromptCapabilities(context.Context) (appserve
 }
 
 func (p gatewayPresentationSource) AvailableCommands(ctx context.Context, sessionID string) ([]appserver.PresentationCommand, error) {
+	var activeSession session.Session
+	hasActiveSession := false
+	if p.sessions != nil && strings.TrimSpace(sessionID) != "" {
+		var err error
+		activeSession, err = p.session(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		hasActiveSession = true
+	}
 	var bindingStatus agentbinding.Status
 	boundProfiles := map[string]agentbinding.HandleStatus{}
 	if p.bindingStatusFn != nil {
@@ -183,7 +193,11 @@ func (p gatewayPresentationSource) AvailableCommands(ctx context.Context, sessio
 	}
 	commands := make([]appserver.PresentationCommand, 0, len(controlprompt.DefaultACPSpecs()))
 	seen := map[string]struct{}{}
-	for _, name := range agentbinding.ProjectBoundDirectNames(controlprompt.DefaultACPNames(), bindingStatus) {
+	coreNames := controlprompt.DefaultACPNames()
+	if hasActiveSession && activeSession.Controller.Kind == session.ControllerKindACP {
+		coreNames = controlprompt.WithoutNames(coreNames, "compact")
+	}
+	for _, name := range agentbinding.ProjectBoundDirectNames(coreNames, bindingStatus) {
 		spec, known := controlprompt.LookupACP(name)
 		cmd := appserver.PresentationCommand{
 			Name: name,
@@ -203,63 +217,57 @@ func (p gatewayPresentationSource) AvailableCommands(ctx context.Context, sessio
 		commands = append(commands, cmd)
 		seen[name] = struct{}{}
 	}
-	if p.sessions != nil {
-		if strings.TrimSpace(sessionID) != "" {
-			activeSession, err := p.session(ctx, sessionID)
-			if err != nil {
-				return nil, err
+	if hasActiveSession {
+		runs := make([]controlagents.Run, 0, len(activeSession.Participants))
+		for _, participant := range activeSession.Participants {
+			runs = append(runs, controlagents.DirectRunFromParticipant(
+				participant.Label,
+				string(participant.Kind),
+				string(participant.Role),
+				participant.Source,
+			))
+		}
+		for _, name := range controlagents.AppendRunNames(nil, runs, nil) {
+			if _, exists := seen[name]; exists {
+				continue
 			}
-			runs := make([]controlagents.Run, 0, len(activeSession.Participants))
-			for _, participant := range activeSession.Participants {
-				runs = append(runs, controlagents.DirectRunFromParticipant(
-					participant.Label,
-					string(participant.Kind),
-					string(participant.Role),
-					participant.Source,
-				))
+			agent, _, _ := controlagents.ParseRunName(name)
+			commands = append(commands, appserver.PresentationCommand{
+				Name:        name,
+				Description: "Continue the " + agent + " Agent run",
+				Input:       commandInput("prompt"),
+			})
+			seen[name] = struct{}{}
+		}
+		if remote, active, err := p.controllerStatus(ctx, activeSession.SessionRef); err != nil {
+			return nil, err
+		} else if active {
+			hiddenRosterNames := make(map[string]struct{})
+			for _, agent := range p.listAgents() {
+				if name := controlagents.NormalizeName(agent.Name); name != "" {
+					hiddenRosterNames[name] = struct{}{}
+				}
 			}
-			for _, name := range controlagents.AppendRunNames(nil, runs, nil) {
+			for _, command := range remote.Commands {
+				name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command.Name, "/")))
+				if fields := strings.Fields(name); len(fields) > 0 {
+					name = fields[0]
+				}
+				if name == "" || reservedSlashCommandName(name) {
+					continue
+				}
+				baseName := name
+				if agent, _, ok := controlagents.ParseRunName(name); ok {
+					baseName = agent
+				}
+				if _, hidden := hiddenRosterNames[baseName]; hidden {
+					continue
+				}
 				if _, exists := seen[name]; exists {
 					continue
 				}
-				agent, _, _ := controlagents.ParseRunName(name)
-				commands = append(commands, appserver.PresentationCommand{
-					Name:        name,
-					Description: "Continue the " + agent + " Agent run",
-					Input:       commandInput("prompt"),
-				})
+				commands = append(commands, appserver.PresentationCommand{Name: name, Description: strings.TrimSpace(command.Description), Input: commandInput("prompt")})
 				seen[name] = struct{}{}
-			}
-			if remote, active, err := p.controllerStatus(ctx, activeSession.SessionRef); err != nil {
-				return nil, err
-			} else if active {
-				hiddenRosterNames := make(map[string]struct{})
-				for _, agent := range p.listAgents() {
-					if name := controlagents.NormalizeName(agent.Name); name != "" {
-						hiddenRosterNames[name] = struct{}{}
-					}
-				}
-				for _, command := range remote.Commands {
-					name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command.Name, "/")))
-					if fields := strings.Fields(name); len(fields) > 0 {
-						name = fields[0]
-					}
-					if name == "" || reservedSlashCommandName(name) {
-						continue
-					}
-					baseName := name
-					if agent, _, ok := controlagents.ParseRunName(name); ok {
-						baseName = agent
-					}
-					if _, hidden := hiddenRosterNames[baseName]; hidden {
-						continue
-					}
-					if _, exists := seen[name]; exists {
-						continue
-					}
-					commands = append(commands, appserver.PresentationCommand{Name: name, Description: strings.TrimSpace(command.Description), Input: commandInput("prompt")})
-					seen[name] = struct{}{}
-				}
 			}
 		}
 	}

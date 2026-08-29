@@ -158,7 +158,8 @@ type Event struct {
 	Reason     string
 	StopReason string
 
-	Usage *session.UsageSnapshot
+	Usage        *session.UsageSnapshot
+	UsageReplace bool
 
 	RawSessionUpdate string
 	RawUpdate        json.RawMessage

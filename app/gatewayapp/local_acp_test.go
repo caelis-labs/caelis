@@ -143,6 +143,22 @@ func TestPresentationSourceAvailableCommandsExposeOnlyBoundProfilesAndHideRoster
 	if acpCommandForToolTest(commands, "model") != nil {
 		t.Fatalf("AvailableCommands() exposes /model even though ACP has a dedicated model-selection channel: %#v", commands)
 	}
+	activeSession, err = stack.composition.sessions.BindController(context.Background(), session.BindControllerRequest{
+		SessionRef: activeSession.SessionRef,
+		Binding: session.ControllerBinding{
+			Kind: session.ControllerKindACP, ControllerID: "helper", AgentName: "helper", EpochID: "epoch-1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands, err = stack.PresentationSource(nil, false, nil).AvailableCommands(context.Background(), activeSession.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acpCommandForToolTest(commands, "compact") != nil {
+		t.Fatalf("AvailableCommands() = %#v, should hide /compact for external ACP controller", commands)
+	}
 }
 
 func bindProfileToModelForToolTest(t *testing.T, stack *Stack, handle agentbinding.Handle) {

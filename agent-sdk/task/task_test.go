@@ -21,6 +21,10 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 		Title:             " ls -la ",
 		State:             " running ",
 		FailureDiagnostic: " bounded failure ",
+		ContextUsage: &ContextUsageRecord{
+			Snapshot:   session.ContextUsageSnapshot{Size: 200000, Used: 42000, Cost: &session.ContextUsageCost{Amount: 0.47, Currency: "USD"}},
+			Invocation: session.EventInvocation{Provider: " codex ", Model: " gpt-test "},
+		},
 		Spec: map[string]any{
 			"command": "ls -la",
 			"options": map[string]any{"env": []any{"A=1"}},
@@ -44,6 +48,7 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 	cloned.Spec["command"] = "pwd"
 	cloned.Result["exit_code"] = 1
 	cloned.Metadata["tool_name"] = "Task"
+	cloned.ContextUsage.Snapshot.Cost.Amount = 1
 	cloned.Spec["options"].(map[string]any)["env"].([]any)[0] = "A=2"
 	cloned.Result["details"].(map[string]any)["files"].([]any)[0] = "b"
 	cloned.Metadata["trace"].(map[string]any)["ids"].([]any)[0] = "two"
@@ -71,6 +76,9 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 	}
 	if got := entry.Metadata["tool_name"]; got != "RunCommand" {
 		t.Fatalf("original metadata mutated: %v", got)
+	}
+	if entry.ContextUsage.Snapshot.Cost.Amount != 0.47 || cloned.ContextUsage.Invocation.Provider != "codex" || cloned.ContextUsage.Invocation.Model != "gpt-test" {
+		t.Fatalf("context usage clone = original %#v cloned %#v", entry.ContextUsage, cloned.ContextUsage)
 	}
 	if got := entry.Spec["options"].(map[string]any)["env"].([]any)[0]; got != "A=1" {
 		t.Fatalf("original nested spec mutated: %v", got)

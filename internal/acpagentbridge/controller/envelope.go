@@ -27,6 +27,9 @@ func acpEnvelopeFromUpdate(env client.UpdateEnvelope, canonical *session.Event, 
 		Update:    update,
 		Meta:      eventstream.UpdateMeta(update),
 	}
+	if _, ok := update.(eventstream.UsageUpdate); ok {
+		out.UsageSemantics = eventstream.UsageSemanticsContextGauge
+	}
 	if canonical != nil {
 		out.OccurredAt = canonical.Time
 		out.Actor = strings.TrimSpace(canonical.Actor.Name)

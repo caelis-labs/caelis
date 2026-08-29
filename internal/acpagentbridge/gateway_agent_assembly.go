@@ -39,7 +39,7 @@ func newGatewayPromptRouterFactory(clients appserver.AppServerClients, systemSes
 			Service: driver,
 			CommandNames: func(ctx context.Context, service controlprompt.RouterService) []string {
 				handles, _ := clients.Participants.Handles(ctx, activeSession.SessionID)
-				out := gatewayCommandNamesFromHandles(handles)
+				out := gatewayCommandNamesForSession(handles, activeSession)
 				status, err := service.AgentStatus(ctx)
 				if err != nil {
 					return out
@@ -51,6 +51,14 @@ func newGatewayPromptRouterFactory(clients appserver.AppServerClients, systemSes
 			},
 		}), nil
 	}
+}
+
+func gatewayCommandNamesForSession(handles []string, activeSession session.Session) []string {
+	out := gatewayCommandNamesFromHandles(handles)
+	if activeSession.Controller.Kind == session.ControllerKindACP {
+		out = controlprompt.WithoutNames(out, "compact")
+	}
+	return out
 }
 
 func gatewayCommandNamesFromHandles(handles []string) []string {

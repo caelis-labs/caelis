@@ -160,6 +160,7 @@ func (r router) dispatchModel(ctx context.Context, args string) (Result, error) 
 		}
 		result := r.noticeResult(text)
 		result.StatusUpdate = &status
+		result.RefreshCommands = true
 		return result, nil
 	case "del", "delete", "rm":
 		alias := strings.TrimSpace(rest)

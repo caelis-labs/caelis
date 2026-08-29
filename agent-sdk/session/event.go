@@ -93,6 +93,7 @@ type Event struct {
 	ChildOrigin       *EventChildOrigin       `json:"child_origin,omitempty"`
 	ApprovalRequestID string                  `json:"approval_request_id,omitempty"`
 	Invocation        *EventInvocation        `json:"invocation,omitempty"`
+	ContextUsage      *ContextUsageSnapshot   `json:"context_usage,omitempty"`
 	Compaction        *EventCompactionContext `json:"compaction_context,omitempty"`
 	// MessageID identifies one logical message across transient chunks and its
 	// canonical durable event. It is semantic event state, not display metadata.

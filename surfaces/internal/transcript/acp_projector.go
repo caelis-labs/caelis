@@ -355,12 +355,13 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			return nil
 		}
 		return []Event{{
-			Kind:       EventUsage,
-			Scope:      scope,
-			ScopeID:    scopeID,
-			Actor:      strings.TrimSpace(env.Actor),
-			OccurredAt: env.OccurredAt,
-			Usage:      usage,
+			Kind:         EventUsage,
+			Scope:        scope,
+			ScopeID:      scopeID,
+			Actor:        strings.TrimSpace(env.Actor),
+			OccurredAt:   env.OccurredAt,
+			Usage:        usage,
+			UsageReplace: eventstream.UsageEnvelopeReplacesContext(env),
 		}}
 	case eventstream.RawUpdate:
 		raw := append(json.RawMessage(nil), update.Raw...)

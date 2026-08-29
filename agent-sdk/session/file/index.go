@@ -329,6 +329,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 	event_cursor INTEGER NOT NULL,
 	handle TEXT NOT NULL,
 	spec_json TEXT NOT NULL,
+	context_usage_json TEXT NOT NULL,
 	result_json TEXT NOT NULL,
 	metadata_json TEXT NOT NULL,
 	terminal_json TEXT NOT NULL
@@ -339,7 +340,7 @@ CREATE INDEX IF NOT EXISTS tasks_session_kind_handle_idx ON tasks(session_id, ki
 	if err != nil {
 		return fmt.Errorf("agent-sdk/session/file: initialize session index: %w", err)
 	}
-	if err := ensureTaskIndexV4Columns(db); err != nil {
+	if err := ensureTaskIndexColumns(db); err != nil {
 		return err
 	}
 	if version != indexVersion {
@@ -350,7 +351,7 @@ CREATE INDEX IF NOT EXISTS tasks_session_kind_handle_idx ON tasks(session_id, ki
 	return nil
 }
 
-func ensureTaskIndexV4Columns(db *sql.DB) error {
+func ensureTaskIndexColumns(db *sql.DB) error {
 	columns := map[string]string{
 		"revision":             "INTEGER NOT NULL DEFAULT 0",
 		"failure_diagnostic":   "TEXT NOT NULL DEFAULT ''",
@@ -359,6 +360,7 @@ func ensureTaskIndexV4Columns(db *sql.DB) error {
 		"lease_revision":       "INTEGER NOT NULL DEFAULT 0",
 		"lease_acquired_at_ns": "INTEGER NOT NULL DEFAULT 0",
 		"lease_expires_at_ns":  "INTEGER NOT NULL DEFAULT 0",
+		"context_usage_json":   "TEXT NOT NULL DEFAULT 'null'",
 	}
 	rows, err := db.Query(`PRAGMA table_info(tasks)`)
 	if err != nil {

@@ -237,7 +237,7 @@ func projectSessionEventEnvelope(base eventstream.Envelope, event *session.Event
 		out = append(out, projectSessionEventstreamOnlyEvents(base, event)...)
 	}
 	if usage := session.UsageSnapshotFromSessionEvent(event); usage != nil && !containsUsageUpdate(out) {
-		out = append(out, gatewayUsageEnvelope(base, usage))
+		out = append(out, gatewayUsageEnvelope(base, event, usage))
 	}
 	return stampDurableProjectionPositions(event, out)
 }
@@ -316,28 +316,35 @@ func projectSessionEventToACPEnvelopes(base eventstream.Envelope, sessionEvent *
 	return out
 }
 
-func gatewayUsageEnvelope(base eventstream.Envelope, usage *session.UsageSnapshot) eventstream.Envelope {
+func gatewayUsageEnvelope(base eventstream.Envelope, event *session.Event, usage *session.UsageSnapshot) eventstream.Envelope {
 	if usage == nil {
 		return eventstream.Envelope{}
 	}
+	update := eventstream.UsageUpdateFromSnapshot(*usage, base.Meta)
+	semantics := eventstream.UsageSemanticsProviderUsage
+	if event != nil && event.ContextUsage != nil {
+		update = eventstream.UsageUpdateFromContextUsage(*event.ContextUsage, base.Meta)
+		semantics = eventstream.UsageSemanticsContextGauge
+	}
 	return eventstream.Envelope{
-		Kind:          eventstream.KindSessionUpdate,
-		Cursor:        base.Cursor,
-		EventID:       base.EventID,
-		ProjectionID:  base.ProjectionID,
-		Position:      eventstream.CloneFeedPosition(base.Position),
-		SessionID:     base.SessionID,
-		HandleID:      base.HandleID,
-		RunID:         base.RunID,
-		TurnID:        base.TurnID,
-		OccurredAt:    base.OccurredAt,
-		Scope:         base.Scope,
-		ScopeID:       base.ScopeID,
-		Actor:         base.Actor,
-		ParticipantID: base.ParticipantID,
-		ParentTool:    cloneParentToolRelation(base.ParentTool),
-		Delivery:      cloneDelivery(base.Delivery),
-		Update:        eventstream.UsageUpdateFromSnapshot(*usage, base.Meta),
+		Kind:           eventstream.KindSessionUpdate,
+		Cursor:         base.Cursor,
+		EventID:        base.EventID,
+		ProjectionID:   base.ProjectionID,
+		Position:       eventstream.CloneFeedPosition(base.Position),
+		SessionID:      base.SessionID,
+		HandleID:       base.HandleID,
+		RunID:          base.RunID,
+		TurnID:         base.TurnID,
+		OccurredAt:     base.OccurredAt,
+		Scope:          base.Scope,
+		ScopeID:        base.ScopeID,
+		Actor:          base.Actor,
+		ParticipantID:  base.ParticipantID,
+		UsageSemantics: semantics,
+		ParentTool:     cloneParentToolRelation(base.ParentTool),
+		Delivery:       cloneDelivery(base.Delivery),
+		Update:         update,
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
@@ -35,6 +36,34 @@ func TestClassifyControlBackendErrorTreatsFenceConflictAsConflict(t *testing.T) 
 	var outcomeErr *appserver.OutcomeError
 	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("classifyControlBackendError() = %v, want conflicted outcome", err)
+	}
+}
+
+func TestControlCommandBackendRejectsCompactForACPController(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	stack, active := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	active, err := stack.composition.sessions.BindController(ctx, session.BindControllerRequest{
+		SessionRef: active.SessionRef,
+		Binding: session.ControllerBinding{
+			Kind: session.ControllerKindACP, ControllerID: "codex", AgentName: "codex", EpochID: "epoch-1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := active.Revision
+	result, err := (&controlCommandBackend{composition: &stack.composition}).ExecuteControlCommand(
+		ctx,
+		appserver.Principal{},
+		appserver.ActionSessionCompact,
+		appserver.CompactSessionRequest{WriteBase: appserver.WriteBase{
+			OperationID: "compact-acp", SessionID: active.SessionID, ExpectedRevision: &expected,
+		}},
+	)
+	if result.Outcome != appserver.OutcomeRejected || errorcode.CodeOf(err) != errorcode.Unsupported {
+		t.Fatalf("CompactSession() = %#v, %v; want rejected unsupported", result, err)
 	}
 }
 

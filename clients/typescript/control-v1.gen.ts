@@ -1304,6 +1304,7 @@ export interface SessionUpdateEnvelope {
   session_id?: string;
   turn_id?: string;
   update: ACPUpdate;
+  usage_semantics?: UsageSemantics;
 }
 
 export interface SkillResolveResult {
@@ -1575,6 +1576,8 @@ export interface UsageMetadata {
   total_tokens?: Uint64Decimal;
   [key: string]: JSONValue;
 }
+
+export type UsageSemantics = "context_gauge" | "provider_usage";
 
 export interface UsageSnapshot {
   cached_input_tokens?: number;
