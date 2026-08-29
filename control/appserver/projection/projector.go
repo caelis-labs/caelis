@@ -566,7 +566,7 @@ func projectEventToolContent(content []session.EventToolContent, displayTerminal
 }
 
 func projectToolContent(content []session.ProtocolToolCallContent, displayTerminalID string) []eventstream.ToolCallContent {
-	if len(content) == 0 {
+	if content == nil {
 		return nil
 	}
 	out := make([]eventstream.ToolCallContent, 0, len(content))

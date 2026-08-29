@@ -33,6 +33,50 @@ func TestContentChunkRoundTripPreservesACPMetadata(t *testing.T) {
 	}
 }
 
+func TestToolCallUpdateRoundTripPreservesContentPresence(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name        string
+		content     []ToolCallContent
+		wantPresent bool
+	}{
+		{name: "omitted"},
+		{name: "explicit empty", content: []ToolCallContent{}, wantPresent: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			raw, err := json.Marshal(ToolCallUpdate{
+				SessionUpdate: UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Content:       test.content,
+			})
+			if err != nil {
+				t.Fatalf("json.Marshal(ToolCallUpdate) error = %v", err)
+			}
+			var object map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &object); err != nil {
+				t.Fatalf("json.Unmarshal(ToolCallUpdate object) error = %v", err)
+			}
+			if _, present := object["content"]; present != test.wantPresent {
+				t.Fatalf("ToolCallUpdate JSON = %s, content presence = %t, want %t", raw, present, test.wantPresent)
+			}
+			decoded, err := DecodeUpdateJSON(raw)
+			if err != nil {
+				t.Fatalf("DecodeUpdateJSON() error = %v", err)
+			}
+			update, ok := decoded.(ToolCallUpdate)
+			if !ok {
+				t.Fatalf("DecodeUpdateJSON() = %T, want ToolCallUpdate", decoded)
+			}
+			if present := update.Content != nil; present != test.wantPresent {
+				t.Fatalf("decoded content = %#v, presence = %t, want %t", update.Content, present, test.wantPresent)
+			}
+		})
+	}
+}
+
 func TestRequestPermissionRoundTripPreservesACPMetadata(t *testing.T) {
 	t.Parallel()
 

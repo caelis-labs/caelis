@@ -70,7 +70,7 @@ func protocolUpdateFromPlanUpdate(update client.PlanUpdate) *session.ProtocolUpd
 }
 
 func protocolToolContentFromWire(in []client.ToolCallContent) []session.ProtocolToolCallContent {
-	if len(in) == 0 {
+	if in == nil {
 		return nil
 	}
 	out := make([]session.ProtocolToolCallContent, 0, len(in))

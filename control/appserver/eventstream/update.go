@@ -175,6 +175,36 @@ type ToolCallUpdate struct {
 
 func (u ToolCallUpdate) SessionUpdateType() string { return u.SessionUpdate }
 
+func (u ToolCallUpdate) MarshalJSON() ([]byte, error) {
+	var content *[]ToolCallContent
+	if u.Content != nil {
+		content = &u.Content
+	}
+	return json.Marshal(struct {
+		SessionUpdate string             `json:"sessionUpdate"`
+		ToolCallID    string             `json:"toolCallId"`
+		Title         *string            `json:"title,omitempty"`
+		Kind          *string            `json:"kind,omitempty"`
+		Status        *string            `json:"status,omitempty"`
+		RawInput      any                `json:"rawInput,omitempty"`
+		RawOutput     any                `json:"rawOutput,omitempty"`
+		Content       *[]ToolCallContent `json:"content,omitempty"`
+		Locations     []ToolCallLocation `json:"locations,omitempty"`
+		Meta          map[string]any     `json:"_meta,omitempty"`
+	}{
+		SessionUpdate: u.SessionUpdate,
+		ToolCallID:    u.ToolCallID,
+		Title:         u.Title,
+		Kind:          u.Kind,
+		Status:        u.Status,
+		RawInput:      u.RawInput,
+		RawOutput:     u.RawOutput,
+		Content:       content,
+		Locations:     u.Locations,
+		Meta:          u.Meta,
+	})
+}
+
 type PlanEntry struct {
 	Content  string `json:"content"`
 	Status   string `json:"status"`

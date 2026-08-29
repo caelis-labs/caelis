@@ -502,7 +502,7 @@ func cloneStringPtr(in *string) *string {
 }
 
 func cloneToolCallContent(in []ToolCallContent) []ToolCallContent {
-	if len(in) == 0 {
+	if in == nil {
 		return nil
 	}
 	out := make([]ToolCallContent, 0, len(in))

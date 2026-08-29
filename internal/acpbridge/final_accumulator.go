@@ -5,18 +5,21 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/google/uuid"
 )
 
 // FinalAssistantAccumulator retains the latest assistant message while
 // appending ACP narrative frames with exact delta semantics.
 type FinalAssistantAccumulator struct {
-	messageID string
-	text      string
+	messageID          string
+	messageIDGenerated bool
+	text               string
 }
 
 type AssistantTextUpdate struct {
 	Text      string
 	Delta     string
+	MessageID string
 	Assistant bool
 	Barrier   bool
 }
@@ -50,13 +53,24 @@ func (a *FinalAssistantAccumulator) ObserveFrame(messageID string, text string) 
 	}
 	messageID = strings.TrimSpace(messageID)
 	if messageID != "" {
-		if a.messageID != "" && a.messageID != messageID {
+		switch {
+		case a.messageID == "":
+			a.messageID = messageID
+			a.messageIDGenerated = false
+		case a.messageID == messageID:
+		case a.messageIDGenerated:
+			// The generated identity may already have been published. Keep it
+			// stable until a real message barrier rather than dropping its prefix.
+		default:
 			a.resetMessage()
+			a.messageID = messageID
 		}
-		a.messageID = messageID
+	} else if a.messageID == "" && text != "" {
+		a.messageID = nextGeneratedNarrativeMessageID()
+		a.messageIDGenerated = true
 	}
 	delta := a.appendAssistantFrame(text)
-	return AssistantTextUpdate{Text: a.text, Delta: delta, Assistant: true}
+	return AssistantTextUpdate{Text: a.text, Delta: delta, MessageID: a.messageID, Assistant: true}
 }
 
 func (a *FinalAssistantAccumulator) FinalText() string {
@@ -68,8 +82,7 @@ func (a *FinalAssistantAccumulator) FinalText() string {
 
 func (a *FinalAssistantAccumulator) Reset() {
 	if a != nil {
-		a.messageID = ""
-		a.text = ""
+		a.resetMessage()
 	}
 }
 
@@ -87,7 +100,12 @@ func (a *FinalAssistantAccumulator) observeContentChunk(updateType string, conte
 
 func (a *FinalAssistantAccumulator) resetMessage() {
 	a.messageID = ""
+	a.messageIDGenerated = false
 	a.text = ""
+}
+
+func nextGeneratedNarrativeMessageID() string {
+	return "caelis-acp-message-" + uuid.NewString()
 }
 
 func (a *FinalAssistantAccumulator) appendAssistantFrame(incoming string) string {

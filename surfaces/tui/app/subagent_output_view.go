@@ -17,6 +17,12 @@ type subagentOutputRenderTickMsg struct {
 // anchored child Task. Its block reuses the Side ACP renderer but is not part
 // of the main Document and never becomes Session or Task authority. Views and
 // their complete child transcript are retained until the Session changes.
+type subagentOutputNarrativeKey struct {
+	block     *ParticipantTurnBlock
+	kind      TranscriptNarrativeKind
+	messageID string
+}
+
 type subagentOutputView struct {
 	callID        string
 	taskHandle    string
@@ -47,6 +53,10 @@ type subagentOutputView struct {
 	idleHistoryActivityID string
 	renderCache           subagentOutputRenderCache
 	seenProjections       map[string]struct{}
+	// liveNarratives records typed messages that entered this detached view as
+	// live deltas. A later final snapshot with the same message identity replaces
+	// that stream; compatibility frames that arrive final-only remain deltas.
+	liveNarratives map[subagentOutputNarrativeKey]struct{}
 }
 
 type subagentOutputRenderCache struct {
@@ -166,6 +176,7 @@ func (v *subagentOutputView) resetForCurrentState() {
 	v.idleHistorySettled = false
 	v.idleHistoryActivityID = ""
 	v.seenProjections = nil
+	v.liveNarratives = nil
 	v.renderCache = subagentOutputRenderCache{}
 	v.touch(true)
 }
@@ -206,7 +217,7 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 	}
 	result := applyTranscriptEventToParticipantTurn(block, event, participantTurnTranscriptPolicy{
 		actor:                actor,
-		appendFinalNarrative: true,
+		appendFinalNarrative: v.shouldAppendFinalNarrative(block, event),
 		hideTaskControl:      true,
 		monotonicStatus:      true,
 		reopenPlan:           true,
@@ -218,6 +229,27 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 		finalizeSubagentOutputNarratives(block)
 	}
 	v.touch(false)
+}
+
+func (v *subagentOutputView) shouldAppendFinalNarrative(block *ParticipantTurnBlock, event TranscriptEvent) bool {
+	if v == nil || block == nil || event.Kind != TranscriptEventNarrative ||
+		(event.NarrativeKind != TranscriptNarrativeAssistant && event.NarrativeKind != TranscriptNarrativeReasoning) {
+		return true
+	}
+	messageID := strings.TrimSpace(event.MessageID)
+	if messageID == "" {
+		return true
+	}
+	key := subagentOutputNarrativeKey{block: block, kind: event.NarrativeKind, messageID: messageID}
+	if !event.Final {
+		if v.liveNarratives == nil {
+			v.liveNarratives = make(map[subagentOutputNarrativeKey]struct{})
+		}
+		v.liveNarratives[key] = struct{}{}
+		return true
+	}
+	_, streamed := v.liveNarratives[key]
+	return !streamed
 }
 
 func (v *subagentOutputView) blockForObservedChildTool(callID string) *ParticipantTurnBlock {

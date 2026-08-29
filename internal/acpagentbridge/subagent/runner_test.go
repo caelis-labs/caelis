@@ -837,12 +837,19 @@ func TestRunnerHandleUpdatePublishesRepeatedAgentMessageDeltas(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want both repeated ACP deltas", sink.frames)
 	}
 	var rendered string
+	var messageID string
 	for i, frame := range sink.frames {
 		if frame.Event == nil || frame.Event.Text != "ha" {
 			t.Fatalf("stream frame %d = %#v, want exact ha delta", i, frame)
 		}
-		if update := session.ProtocolUpdateOf(frame.Event); update == nil || update.MessageID != "" {
-			t.Fatalf("stream frame %d update = %#v, want real Grok message ID omission preserved", i, update)
+		update := session.ProtocolUpdateOf(frame.Event)
+		if update == nil || update.MessageID == "" {
+			t.Fatalf("stream frame %d update = %#v, want generated message identity", i, update)
+		}
+		if messageID == "" {
+			messageID = update.MessageID
+		} else if update.MessageID != messageID {
+			t.Fatalf("stream frame %d message id = %q, want stable %q", i, update.MessageID, messageID)
 		}
 		rendered += frame.Event.Text
 	}

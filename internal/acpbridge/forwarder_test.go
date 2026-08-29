@@ -222,6 +222,79 @@ func TestForwardControllerEventsPublishesNarrativeDeltasWithRepairedNativeACP(t 
 	}
 }
 
+func TestForwardControllerEventsAssignsStableIdentityToAnonymousNarrative(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-acp-forward-message-identity")
+	forwarder := NewControllerForwarder(sessions)
+	publisher := newTestPublisher()
+	source := scriptedSourceHandle{events: []SourceEvent{
+		{
+			Canonical: acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "hello "),
+			ACP:       acpNarrativeEnvelope("hello ", nil),
+		},
+		{
+			Canonical: &session.Event{
+				Type:       session.EventTypeNotice,
+				Visibility: session.VisibilityUIOnly,
+				Text:       "presentation boundary",
+			},
+		},
+		{
+			Canonical: acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "world"),
+			ACP:       acpNarrativeEnvelope("world", nil),
+		},
+	}}
+
+	if err := forwarder.ForwardControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
+		ActiveSession: activeSession,
+		SessionRef:    activeSession.SessionRef,
+		TurnID:        "turn-1",
+		Source:        source,
+		Publisher:     publisher,
+	}); err != nil {
+		t.Fatalf("ForwardControllerEvents() error = %v", err)
+	}
+	publisher.finish()
+
+	var liveIDs []string
+	var nativeIDs []string
+	var finalID string
+	for sourceEvent, err := range publisher.SourceEvents() {
+		if err != nil {
+			t.Fatalf("publisher source error = %v", err)
+		}
+		if event := sourceEvent.Canonical; event != nil && session.EventTypeOf(event) == session.EventTypeAssistant {
+			messageID := session.EventMessageID(event)
+			switch event.Visibility {
+			case session.VisibilityUIOnly:
+				liveIDs = append(liveIDs, messageID)
+			case session.VisibilityCanonical:
+				finalID = messageID
+				if !sourceEvent.CanonicalContentAlreadyPublished.Has(agent.PublishedAssistantMessage) {
+					t.Fatalf("final published content = %v, want assistant ownership", sourceEvent.CanonicalContentAlreadyPublished)
+				}
+			}
+		}
+		if env, ok := sourceEvent.Native.(*eventstream.Envelope); ok && env != nil {
+			chunk, ok := env.Update.(eventstream.ContentChunk)
+			if !ok {
+				t.Fatalf("native ACP update = %T, want ContentChunk", env.Update)
+			}
+			nativeIDs = append(nativeIDs, chunk.MessageID)
+		}
+	}
+	if len(liveIDs) != 2 || liveIDs[0] == "" || liveIDs[0] != liveIDs[1] {
+		t.Fatalf("live message ids = %#v, want one generated stable identity", liveIDs)
+	}
+	if !reflect.DeepEqual(nativeIDs, liveIDs) {
+		t.Fatalf("native message ids = %#v, want live ids %#v", nativeIDs, liveIDs)
+	}
+	if finalID != liveIDs[0] {
+		t.Fatalf("final message id = %q, want live identity %q", finalID, liveIDs[0])
+	}
+}
+
 func TestForwardControllerEventsSuppressesACPControllerUserEcho(t *testing.T) {
 	t.Parallel()
 

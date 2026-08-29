@@ -962,8 +962,10 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 				markSubagentInputEvent(event, run.inputActor)
 			case client.UpdateAgentMessage:
 				if acceptOutput {
-					textOverride := run.appendAgentMessageChunkLocked(update.MessageID, text)
-					run.actionSummary.observeAssistant(update.MessageID, run.agentText)
+					textOverride, messageID := run.appendAgentMessageChunkLocked(update.MessageID, text)
+					update.MessageID = messageID
+					env.Update = update
+					run.actionSummary.observeAssistant(messageID, run.agentText)
 					run.outputPreview = run.actionSummary.previewOrEmpty()
 					if textOverride != "" {
 						event = run.acpUpdateEvent(env, run.updatedAt, textOverride)
@@ -1116,12 +1118,13 @@ func (run *childRun) emit(frame stream.Frame) {
 }
 
 func (run *childRun) appendAgentMessageLocked(text string) string {
-	return run.appendAgentMessageChunkLocked("", text)
+	delta, _ := run.appendAgentMessageChunkLocked("", text)
+	return delta
 }
 
-func (run *childRun) appendAgentMessageChunkLocked(messageID string, text string) string {
+func (run *childRun) appendAgentMessageChunkLocked(messageID string, text string) (string, string) {
 	if run == nil {
-		return ""
+		return "", ""
 	}
 	update := run.finalAssistant.ObserveUpdate(eventstream.ContentChunk{
 		SessionUpdate: eventstream.UpdateAgentMessage,
@@ -1130,7 +1133,7 @@ func (run *childRun) appendAgentMessageChunkLocked(messageID string, text string
 	})
 	run.agentText = update.Text
 	run.result = update.Text
-	return update.Delta
+	return update.Delta, update.MessageID
 }
 
 func (run *childRun) clearFinalAssistantLocked() {

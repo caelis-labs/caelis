@@ -7,6 +7,32 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
+func TestProtocolToolUpdateProjectionPreservesExplicitEmptyContent(t *testing.T) {
+	t.Parallel()
+
+	updates, err := ProjectEvent(&session.Event{
+		Type: session.EventTypeToolResult,
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Content:       []session.ProtocolToolCallContent{},
+		}},
+	})
+	if err != nil || len(updates) != 1 {
+		t.Fatalf("ProjectEvent() = %#v, %v; want one update", updates, err)
+	}
+	wire, ok := updates[0].(eventstream.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("ProjectEvent() update = %T, want ToolCallUpdate", updates[0])
+	}
+	if wire.Content == nil || len(wire.Content) != 0 {
+		t.Fatalf("wire content = %#v, want present empty collection", wire.Content)
+	}
+	if wire.Title != nil || wire.Kind != nil || wire.Status != nil {
+		t.Fatalf("wire sparse scalar fields = %#v, want omitted title/kind/status", wire)
+	}
+}
+
 func TestProtocolToolUpdateProjectionClonesAndPreservesWireFields(t *testing.T) {
 	t.Parallel()
 

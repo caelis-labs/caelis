@@ -611,6 +611,38 @@ func TestNormalizeACPStdioTerminalExtensionDoesNotMountFinalOnlySpawn(t *testing
 	if got := acpmeta.ToolName(call.Meta); got != "Spawn" {
 		t.Fatalf("Spawn runtime tool name = %q, want preserved", got)
 	}
+
+	status := eventstream.ToolStatusInProgress
+	for _, test := range []struct {
+		name        string
+		content     []eventstream.ToolCallContent
+		wantPresent bool
+	}{
+		{name: "filtered terminal mount", content: []eventstream.ToolCallContent{{Type: "terminal", TerminalID: "spawn-1"}}},
+		{name: "explicit empty patch", content: []eventstream.ToolCallContent{}, wantPresent: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			updateMeta := acpmeta.WithToolName(nil, "Spawn")
+			updateMeta = acpmeta.WithTerminalInfo(updateMeta, "spawn-1")
+			normalized := normalizeACPStdioTerminalExtension(eventstream.SessionNotification{
+				SessionID: "session-1",
+				Update: eventstream.ToolCallUpdate{
+					SessionUpdate: eventstream.UpdateToolCallInfo,
+					ToolCallID:    "spawn-1",
+					Status:        &status,
+					Content:       test.content,
+					Meta:          updateMeta,
+				},
+			})
+			update, ok := normalized.Update.(eventstream.ToolCallUpdate)
+			if !ok {
+				t.Fatalf("update = %T, want ToolCallUpdate", normalized.Update)
+			}
+			if present := update.Content != nil; present != test.wantPresent {
+				t.Fatalf("Spawn update content = %#v, presence = %t, want %t", update.Content, present, test.wantPresent)
+			}
+		})
+	}
 }
 
 func TestNormalizeACPStdioTerminalExtensionKeepsAnchorAndMovesOutputToMeta(t *testing.T) {

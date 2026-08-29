@@ -404,9 +404,6 @@ func protocolToolCallContentFromAny(content any) []ProtocolToolCallContent {
 				out = append(out, content)
 			}
 		}
-		if len(out) == 0 {
-			return nil
-		}
 		return out
 	default:
 		raw, err := json.Marshal(typed)
@@ -543,7 +540,7 @@ func cloneProtocolPlanEntries(in []ProtocolPlanEntry) []ProtocolPlanEntry {
 }
 
 func cloneProtocolToolCallContents(in []ProtocolToolCallContent) []ProtocolToolCallContent {
-	if len(in) == 0 {
+	if in == nil {
 		return nil
 	}
 	out := make([]ProtocolToolCallContent, 0, len(in))
@@ -591,9 +588,6 @@ func cloneProtocolAny(in any) any {
 	case map[string]any:
 		return cloneProtocolAnyMap(typed)
 	case []ProtocolToolCallContent:
-		if len(typed) == 0 {
-			return nil
-		}
 		return cloneProtocolToolCallContents(typed)
 	case []any:
 		out := make([]any, 0, len(typed))

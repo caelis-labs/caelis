@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	acpclient "github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
 )
 
 func TestMainProjectedTaskWaitMatchesNativeSubagentSemantics(t *testing.T) {
@@ -778,6 +779,218 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 		overlay := subagentOutputOverlayPlain(model)
 		if strings.Count(overlay, "• Explored") != 1 || !strings.Contains(overlay, "Read MEMORY.md, missing.go failed") || !strings.Contains(overlay, "Search ToolCallStatus") || !strings.Contains(overlay, "Ran git status --short") || !strings.Contains(overlay, "Start subagent task_invocation_review") || strings.Contains(overlay, "missing file") || strings.Contains(overlay, "Other Start") || strings.Contains(overlay, "• Tool") {
 			t.Fatalf("overlay diverged from participant transcript semantics:\n%s", overlay)
+		}
+	})
+}
+
+func TestProjectedGrokSparseToolPatchesRetainRichHeaderAcrossParticipantAndOverlay(t *testing.T) {
+	t.Parallel()
+
+	project := func(t *testing.T, eventType session.EventType, update session.ProtocolUpdate) eventstream.Update {
+		t.Helper()
+		updates, err := acpprojector.ProjectEvent(&session.Event{
+			Type:       eventType,
+			Visibility: session.VisibilityUIOnly,
+			Protocol:   &session.EventProtocol{Update: &update},
+		})
+		if err != nil || len(updates) != 1 {
+			t.Fatalf("ProjectEvent(%s) = %#v, %v; want one update", update.SessionUpdate, updates, err)
+		}
+		return updates[0]
+	}
+	updates := []eventstream.Update{
+		project(t, session.EventTypeToolCall, session.ProtocolUpdate{
+			SessionUpdate: eventstream.UpdateToolCall,
+			ToolCallID:    "execute-1",
+			Title:         "run_terminal_command",
+			Status:        eventstream.ToolStatusInProgress,
+		}),
+		project(t, session.EventTypeToolResult, session.ProtocolUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
+			ToolCallID:    "execute-1",
+			Title:         "Execute `printf 'SPARSE_GROK_47\\n'`",
+			Kind:          eventstream.ToolKindExecute,
+			RawInput:      map[string]any{"variant": "Bash", "command": "printf 'SPARSE_GROK_47\\n'"},
+			Content: []session.ProtocolToolCallContent{{
+				Type: "content", Content: session.ProtocolTextContent("SPARSE_GROK_47\n"),
+			}},
+		}),
+		project(t, session.EventTypeToolResult, session.ProtocolUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
+			ToolCallID:    "execute-1",
+			RawOutput:     map[string]any{"exit_code": 0},
+		}),
+		project(t, session.EventTypeToolResult, session.ProtocolUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
+			ToolCallID:    "execute-1",
+			Content:       []session.ProtocolToolCallContent{},
+		}),
+		project(t, session.EventTypeToolResult, session.ProtocolUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
+			ToolCallID:    "execute-1",
+			Status:        eventstream.ToolStatusCompleted,
+		}),
+	}
+
+	apply := func(t *testing.T, model *Model, scope eventstream.Scope, parent *eventstream.ParentToolRelation) *Model {
+		t.Helper()
+		for index, update := range updates {
+			model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+				Kind: eventstream.KindSessionUpdate, EventID: fmt.Sprintf("sparse-grok-%d", index),
+				SessionID: "session-1", TurnID: "grok-turn-1", Scope: scope, ScopeID: "grok-task-1",
+				ParticipantID: "grok", Actor: "@grok", ParentTool: parent, Update: update,
+			})
+		}
+		return model
+	}
+	assertTool := func(t *testing.T, model *Model, block *ParticipantTurnBlock) {
+		t.Helper()
+		if block == nil {
+			t.Fatal("Grok transcript block missing")
+		}
+		var tools []SubagentEvent
+		for _, event := range block.Events {
+			if event.Kind == SEToolCall {
+				tools = append(tools, event)
+			}
+		}
+		if len(tools) != 1 {
+			t.Fatalf("tool events = %#v, want one sparse-merged tool", tools)
+		}
+		tool := tools[0]
+		if tool.ToolKind != eventstream.ToolKindExecute || tool.Title != "Execute `printf 'SPARSE_GROK_47\\n'`" ||
+			tool.Args != "printf 'SPARSE_GROK_47\\n'" || tool.Output != "" || !tool.Done {
+			t.Fatalf("sparse-merged tool = %#v, want rich header, explicit empty content, and completed state", tool)
+		}
+		plain := joinRenderedPlain(block.Render(BlockRenderContext{
+			Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
+		}))
+		if !strings.Contains(plain, "Ran printf") || strings.Contains(plain, "• Tool") || strings.Contains(plain, "run_terminal_command") {
+			t.Fatalf("sparse Grok header degraded during live updates:\n%s", plain)
+		}
+	}
+
+	t.Run("participant transcript", func(t *testing.T) {
+		model := apply(t, NewModel(Config{NoColor: true, NoAnimation: true}), eventstream.ScopeParticipant, nil)
+		assertTool(t, model, model.findParticipantTurnBlock("grok-turn-1"))
+	})
+	t.Run("subagent overlay", func(t *testing.T) {
+		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		model.width, model.height = 96, 28
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn grok: inspect shell",
+				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
+				RawInput: map[string]any{"agent": "grok", "prompt": "inspect shell"}, Meta: acpToolNameMeta("Spawn"),
+			},
+		})
+		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		model = apply(t, model, eventstream.ScopeSubagent, parent)
+		view := requireSubagentOutputViewForTest(t, model, "spawn-1")
+		assertTool(t, model, view.block)
+	})
+}
+
+func TestGeneratedACPMessageIdentityReplacesCumulativeFinalAcrossToolBoundary(t *testing.T) {
+	t.Parallel()
+
+	var accumulator acpbridge.FinalAssistantAccumulator
+	first := accumulator.ObserveFrame("", "first ")
+	second := accumulator.ObserveFrame("", "answer")
+	if first.MessageID == "" || second.MessageID != first.MessageID {
+		t.Fatalf("generated message ids = %q / %q, want one stable identity", first.MessageID, second.MessageID)
+	}
+	completed := eventstream.ToolStatusCompleted
+	updates := []struct {
+		update eventstream.Update
+		final  bool
+	}{
+		{update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage, MessageID: first.MessageID,
+			Content: eventstream.TextContent{Type: "text", Text: first.Delta},
+		}},
+		{update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage, MessageID: second.MessageID,
+			Content: eventstream.TextContent{Type: "text", Text: second.Delta},
+		}},
+		{update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "read-1", Title: "Read result.go",
+			Kind: eventstream.ToolKindRead, Status: eventstream.ToolStatusInProgress,
+			RawInput: map[string]any{"path": "result.go"},
+		}},
+		{update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "read-1", Status: &completed,
+		}},
+		{update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage, MessageID: second.MessageID,
+			Content: eventstream.TextContent{Type: "text", Text: accumulator.FinalText()},
+		}, final: true},
+	}
+
+	apply := func(t *testing.T, model *Model, scope eventstream.Scope, parent *eventstream.ParentToolRelation) *Model {
+		t.Helper()
+		for index, item := range updates {
+			model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+				Kind: eventstream.KindSessionUpdate, EventID: fmt.Sprintf("stable-final-%d", index),
+				ProjectionID: fmt.Sprintf("stable-final-%d:0", index), Final: item.final,
+				SessionID: "session-1", TurnID: "grok-turn-1", Scope: scope, ScopeID: "grok-task-1",
+				ParticipantID: "grok", Actor: "@grok", ParentTool: parent, Update: item.update,
+			})
+		}
+		return model
+	}
+	assertTranscript := func(t *testing.T, model *Model, block *ParticipantTurnBlock) {
+		t.Helper()
+		if block == nil {
+			t.Fatal("Grok transcript block missing")
+		}
+		var assistants []SubagentEvent
+		var tools []SubagentEvent
+		for _, event := range block.Events {
+			switch event.Kind {
+			case SEAssistant:
+				assistants = append(assistants, event)
+			case SEToolCall:
+				tools = append(tools, event)
+			}
+		}
+		if len(assistants) != 1 || assistants[0].Text != "first answer" || len(tools) != 1 || !tools[0].Done {
+			t.Fatalf("transcript events = %#v, want one replaced final and one settled tool", block.Events)
+		}
+		plain := joinRenderedPlain(block.Render(BlockRenderContext{
+			Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
+		}))
+		if strings.Count(plain, "first answer") != 1 {
+			t.Fatalf("cumulative final overlapped live chunks:\n%s", plain)
+		}
+	}
+
+	t.Run("participant transcript", func(t *testing.T) {
+		model := apply(t, NewModel(Config{NoColor: true, NoAnimation: true}), eventstream.ScopeParticipant, nil)
+		assertTranscript(t, model, model.findParticipantTurnBlock("grok-turn-1"))
+	})
+	t.Run("subagent overlay", func(t *testing.T) {
+		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		model.width, model.height = 96, 28
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+			Update: eventstream.ToolCall{
+				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn grok: inspect",
+				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
+				RawInput: map[string]any{"agent": "grok", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
+			},
+		})
+		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		model = apply(t, model, eventstream.ScopeSubagent, parent)
+		view := requireSubagentOutputViewForTest(t, model, "spawn-1")
+		assertTranscript(t, model, view.block)
+		mainBlock := requireMainACPTurnBlockForTest(t, model)
+		if !model.openSubagentOutputOverlay(mainBlock.BlockID(), "spawn-1") {
+			t.Fatal("subagent output overlay did not open")
+		}
+		if overlay := subagentOutputOverlayPlain(model); strings.Count(overlay, "first answer") != 1 {
+			t.Fatalf("subagent overlay repeated cumulative final:\n%s", overlay)
 		}
 	})
 }

@@ -20,18 +20,19 @@ func (a *narrativeAccumulator) normalize(event *session.Event) (*session.Event, 
 	}
 	updateType := eventUpdateType(event)
 	raw := narrativeEventText(event, updateType)
-	a.lastNarrativeEvent = session.CloneEvent(event)
 	if updateType == string(session.ProtocolUpdateTypeAgentMessage) {
 		a.reasoning.Reset()
-		a.lastAssistantEvent = session.CloneEvent(event)
 		update := a.final.ObserveFrame(narrativeMessageID(event), raw)
+		identified := withNarrativeMessageID(event, update.MessageID)
+		a.lastNarrativeEvent = session.CloneEvent(identified)
+		a.lastAssistantEvent = session.CloneEvent(identified)
 		if update.Text == "" && update.Delta == "" {
 			return nil, nil, true
 		}
 		if update.Delta == "" {
 			return nil, nil, true
 		}
-		live := session.CloneEvent(event)
+		live := session.CloneEvent(identified)
 		live.ID = ""
 		live.Visibility = session.VisibilityUIOnly
 		setNarrativeEventText(live, updateType, update.Delta)
@@ -39,13 +40,15 @@ func (a *narrativeAccumulator) normalize(event *session.Event) (*session.Event, 
 	}
 	a.final.Reset()
 	update := a.reasoning.ObserveFrame(narrativeMessageID(event), raw)
+	identified := withNarrativeMessageID(event, update.MessageID)
+	a.lastNarrativeEvent = session.CloneEvent(identified)
 	if update.Text == "" && update.Delta == "" {
 		return nil, nil, true
 	}
 	if update.Delta == "" {
 		return nil, nil, true
 	}
-	live := session.CloneEvent(event)
+	live := session.CloneEvent(identified)
 	live.ID = ""
 	live.Visibility = session.VisibilityUIOnly
 	setNarrativeEventText(live, updateType, update.Delta)
@@ -68,6 +71,24 @@ func narrativeMessageID(event *session.Event) string {
 		return ""
 	}
 	return strings.TrimSpace(event.Protocol.Update.MessageID)
+}
+
+func withNarrativeMessageID(event *session.Event, messageID string) *session.Event {
+	identified := session.CloneEvent(event)
+	messageID = strings.TrimSpace(messageID)
+	if identified == nil || messageID == "" {
+		return identified
+	}
+	if identified.Protocol == nil {
+		identified.Protocol = &session.EventProtocol{}
+	}
+	protocol := session.CloneEventProtocol(*identified.Protocol)
+	if protocol.Update == nil {
+		protocol.Update = &session.ProtocolUpdate{}
+	}
+	protocol.Update.MessageID = messageID
+	identified.Protocol = &protocol
+	return identified
 }
 
 func (a *narrativeAccumulator) finalAssistantEvent() *session.Event {

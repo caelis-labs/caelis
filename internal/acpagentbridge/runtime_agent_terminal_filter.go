@@ -92,12 +92,18 @@ func withoutACPStdioTerminalMount(meta map[string]any, content []eventstream.Too
 	if len(meta) == 0 {
 		meta = nil
 	}
-	out := make([]eventstream.ToolCallContent, 0, len(content))
+	var out []eventstream.ToolCallContent
+	if content != nil {
+		out = make([]eventstream.ToolCallContent, 0, len(content))
+	}
 	for _, item := range content {
 		if strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
 			continue
 		}
 		out = append(out, item)
+	}
+	if len(content) > 0 && len(out) == 0 {
+		out = nil
 	}
 	return meta, out
 }

@@ -134,6 +134,31 @@ func TestNormalizeSparseToolUpdateDoesNotInventDisplayContent(t *testing.T) {
 	}
 }
 
+func TestNormalizeToolUpdatePreservesExplicitEmptyContentCollection(t *testing.T) {
+	t.Parallel()
+
+	event := NormalizeUpdate(client.ToolCallUpdate{
+		SessionUpdate: client.UpdateToolCallState,
+		ToolCallID:    "call-1",
+		Content:       []client.ToolCallContent{},
+	}, Options{
+		At:         time.Unix(1, 0),
+		Scope:      session.EventScope{Source: "acp_subagent"},
+		Actor:      session.ActorRef{Kind: session.ActorKindParticipant, ID: "agent-1", Name: "grok"},
+		Visibility: UIOnlyVisibility,
+	})
+	if event == nil {
+		t.Fatal("NormalizeUpdate() = nil, want explicit empty content patch")
+	}
+	update := session.ProtocolUpdateOf(event)
+	if update == nil || update.Content == nil {
+		t.Fatalf("protocol update = %#v, want present empty content collection", update)
+	}
+	if content := session.ProtocolToolCallContentOf(update); content == nil || len(content) != 0 {
+		t.Fatalf("protocol content = %#v, want non-nil empty collection", content)
+	}
+}
+
 func TestNormalizeToolCallDefaultsMissingStatusToPending(t *testing.T) {
 	t.Parallel()
 

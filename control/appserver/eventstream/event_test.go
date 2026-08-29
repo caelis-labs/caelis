@@ -461,6 +461,26 @@ func TestCloneEnvelopePreservesContentChunkMetadata(t *testing.T) {
 	}
 }
 
+func TestCloneEnvelopePreservesExplicitEmptyToolUpdateContent(t *testing.T) {
+	t.Parallel()
+
+	cloned := CloneEnvelope(Envelope{
+		Kind: KindSessionUpdate,
+		Update: ToolCallUpdate{
+			SessionUpdate: UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Content:       []ToolCallContent{},
+		},
+	})
+	update, ok := cloned.Update.(ToolCallUpdate)
+	if !ok {
+		t.Fatalf("cloned update = %T, want ToolCallUpdate", cloned.Update)
+	}
+	if update.Content == nil || len(update.Content) != 0 {
+		t.Fatalf("cloned content = %#v, want present empty collection", update.Content)
+	}
+}
+
 func TestCloneEnvelopeDeepCopiesPermissionOptionMetadata(t *testing.T) {
 	t.Parallel()
 

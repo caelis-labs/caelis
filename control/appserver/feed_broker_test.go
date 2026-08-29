@@ -158,6 +158,36 @@ func TestFeedBrokerPrimePublishesCommittedMutationToLiveSubscriber(t *testing.T)
 	}
 }
 
+func TestFeedBrokerPreservesExplicitEmptyToolUpdateContent(t *testing.T) {
+	broker, _ := newTestFeedBroker(t, nil, FeedBrokerConfig{SubscriberQueue: 8})
+	subscription, err := broker.SubscribeFromNow(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+
+	if err := broker.Publish(eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeMain,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Content:       []eventstream.ToolCallContent{},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := receiveEnvelopes(t, subscription.Events(), 1)[0]
+	update, ok := got.Update.(eventstream.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("broker update = %T, want ToolCallUpdate", got.Update)
+	}
+	if update.Content == nil || len(update.Content) != 0 {
+		t.Fatalf("broker content = %#v, want present empty collection", update.Content)
+	}
+}
+
 func TestFeedBrokerMainTerminalReconcilesCommittedAssistantFirst(t *testing.T) {
 	reader := &mutablePageReader{}
 	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{SubscriberQueue: 8})

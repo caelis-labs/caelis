@@ -1,6 +1,9 @@
 package acpbridge
 
 import (
+	"os"
+	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -11,7 +14,7 @@ func TestFinalAssistantAccumulatorKeepsLastAssistantStep(t *testing.T) {
 
 	var acc FinalAssistantAccumulator
 	first := acc.ObserveUpdate(eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, Content: eventstream.TextContent{Type: "text", Text: "I will inspect."}})
-	if !first.Assistant || first.Delta != "I will inspect." || acc.FinalText() != "I will inspect." {
+	if !first.Assistant || first.Delta != "I will inspect." || first.MessageID == "" || acc.FinalText() != "I will inspect." {
 		t.Fatalf("first update = %#v final = %q", first, acc.FinalText())
 	}
 	barrier := acc.ObserveUpdate(eventstream.ToolCall{SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "call-1", Kind: eventstream.ToolKindExecute})
@@ -20,8 +23,8 @@ func TestFinalAssistantAccumulatorKeepsLastAssistantStep(t *testing.T) {
 	}
 	acc.ObserveUpdate(eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "call-1"})
 	final := acc.ObserveUpdate(eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, Content: map[string]any{"text": "Final answer."}})
-	if !final.Assistant || final.Delta != "Final answer." || acc.FinalText() != "Final answer." {
-		t.Fatalf("final update = %#v final = %q", final, acc.FinalText())
+	if !final.Assistant || final.Delta != "Final answer." || final.MessageID == "" || final.MessageID == first.MessageID || acc.FinalText() != "Final answer." {
+		t.Fatalf("final update = %#v final = %q, want a new post-barrier identity", final, acc.FinalText())
 	}
 }
 
@@ -66,8 +69,10 @@ func TestFinalAssistantAccumulatorAppendsEveryACPDelta(t *testing.T) {
 	first := acc.ObserveUpdate(eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, Content: eventstream.TextContent{Type: "text", Text: "hel"}})
 	second := acc.ObserveUpdate(eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, Content: eventstream.TextContent{Type: "text", Text: "hello"}})
 	third := acc.ObserveUpdate(eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, Content: eventstream.TextContent{Type: "text", Text: "lo"}})
-	if first.Delta != "hel" || second.Delta != "hello" || third.Delta != "lo" || acc.FinalText() != "helhellolo" {
-		t.Fatalf("deltas = %q/%q/%q final = %q", first.Delta, second.Delta, third.Delta, acc.FinalText())
+	if first.Delta != "hel" || second.Delta != "hello" || third.Delta != "lo" ||
+		first.MessageID == "" || second.MessageID != first.MessageID || third.MessageID != first.MessageID ||
+		acc.FinalText() != "helhellolo" {
+		t.Fatalf("updates = %#v/%#v/%#v final = %q", first, second, third, acc.FinalText())
 	}
 }
 
@@ -144,6 +149,50 @@ func TestFinalAssistantAccumulatorDoesNotInferCumulativeSnapshots(t *testing.T) 
 	}
 	if got := acc.FinalText(); got != "helhellohello world" {
 		t.Fatalf("FinalText() = %q, want exact appended frames", got)
+	}
+}
+
+func TestFinalAssistantAccumulatorKeepsGeneratedIdentityWhenProviderIDAppearsMidStream(t *testing.T) {
+	t.Parallel()
+
+	var acc FinalAssistantAccumulator
+	first := acc.ObserveFrame("", "hello ")
+	second := acc.ObserveFrame("provider-message-1", "world")
+	if first.MessageID == "" || second.MessageID != first.MessageID {
+		t.Fatalf("message ids = %q / %q, want generated identity retained until a barrier", first.MessageID, second.MessageID)
+	}
+	if got := acc.FinalText(); got != "hello world" {
+		t.Fatalf("FinalText() = %q, want anonymous prefix retained", got)
+	}
+
+	acc.Reset()
+	third := acc.ObserveFrame("provider-message-2", "next")
+	if third.MessageID != "provider-message-2" || acc.FinalText() != "next" {
+		t.Fatalf("post-reset update = %#v final = %q, want provider identity accepted after barrier", third, acc.FinalText())
+	}
+}
+
+func TestGeneratedNarrativeMessageIDsAreUniqueAcrossProcesses(t *testing.T) {
+	const helperEnvironment = "CAELIS_TEST_GENERATED_NARRATIVE_MESSAGE_ID"
+	if os.Getenv(helperEnvironment) == "1" {
+		_, _ = os.Stdout.WriteString(nextGeneratedNarrativeMessageID())
+		os.Exit(0)
+	}
+
+	generate := func() string {
+		t.Helper()
+		command := exec.Command(os.Args[0], "-test.run=^TestGeneratedNarrativeMessageIDsAreUniqueAcrossProcesses$")
+		command.Env = append(os.Environ(), helperEnvironment+"=1")
+		output, err := command.Output()
+		if err != nil {
+			t.Fatalf("generated-id helper error = %v", err)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	first := generate()
+	second := generate()
+	if first == "" || second == "" || first == second {
+		t.Fatalf("cross-process message ids = %q / %q, want distinct non-empty identities", first, second)
 	}
 }
 

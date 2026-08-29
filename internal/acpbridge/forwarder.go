@@ -68,7 +68,7 @@ func (f *ControllerForwarder) forwardSourceEvent(ctx context.Context, req agents
 		if _, liveEvent, ok := accumulator.normalize(normalized); ok {
 			if liveEvent != nil {
 				updateType := eventUpdateType(liveEvent)
-				if liveACP := envelopeWithNarrativeText(sourceEvent.ACP, updateType, narrativeEventText(liveEvent, updateType)); liveACP != nil {
+				if liveACP := envelopeWithNarrativeText(sourceEvent.ACP, updateType, narrativeEventText(liveEvent, updateType), narrativeMessageID(liveEvent)); liveACP != nil {
 					req.Publisher.PublishSourceEvent(agentsdk.SourceEvent{Canonical: liveEvent, Native: liveACP})
 				} else {
 					req.Publisher.PublishEvent(liveEvent)
