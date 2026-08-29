@@ -20,21 +20,22 @@ var (
 	customHandlePattern   = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	bindingSetPattern     = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	reservedCustomHandles = map[Handle]struct{}{
-		"compact":  {},
-		"connect":  {},
-		"doctor":   {},
-		"exit":     {},
-		"help":     {},
-		"lead":     {},
-		"model":    {},
-		"new":      {},
-		"plugin":   {},
-		"quit":     {},
-		"resume":   {},
-		"review":   {},
-		"sandbox":  {},
-		"status":   {},
-		"subagent": {},
+		"compact":    {},
+		"connect":    {},
+		"disconnect": {},
+		"doctor":     {},
+		"exit":       {},
+		"help":       {},
+		"lead":       {},
+		"model":      {},
+		"new":        {},
+		"plugin":     {},
+		"quit":       {},
+		"resume":     {},
+		"review":     {},
+		"sandbox":    {},
+		"status":     {},
+		"subagent":   {},
 	}
 )
 

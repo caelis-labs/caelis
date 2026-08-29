@@ -80,9 +80,9 @@ func (s *runtimeComposition) ListModelChoices(ctx context.Context, ref session.S
 }
 
 // HasReusableProviderAuth reports whether a configured provider endpoint still
-// references usable Host authentication. Detached Runtime generations pin the
-// API-key material they assembled, so deleting the last ModelProfile can retire
-// the Host credential without interrupting already activated work.
+// references usable Host authentication. A running invocation may retain the
+// API-key material it already resolved; deleting the last ModelProfile retires
+// the Host credential and prevents later work from resolving that profile.
 func (s *runtimeComposition) HasReusableProviderAuth(ctx context.Context, provider string, baseURL string) bool {
 	if s == nil || s.authorities.store == nil {
 		return false

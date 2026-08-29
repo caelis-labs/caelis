@@ -81,6 +81,9 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	for name, request := range requests {
 		t.Run("request/"+name, func(t *testing.T) { validateWireValue(t, name, request) })
 	}
+	t.Run("request/SessionModelClearRequest", func(t *testing.T) {
+		validateWireValue(t, "SessionModelRequest", appserver.SessionModelRequest{WriteBase: base, Clear: true})
+	})
 
 	for _, outcome := range []appserver.Outcome{
 		appserver.OutcomeAccepted, appserver.OutcomeCommitted, appserver.OutcomeConflicted,

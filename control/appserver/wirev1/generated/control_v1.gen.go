@@ -1311,6 +1311,7 @@ type SessionModeRequest struct {
 }
 
 type SessionModelRequest struct {
+	Clear                   *bool          `json:"clear,omitempty"`
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
 	Model                   string         `json:"model"`

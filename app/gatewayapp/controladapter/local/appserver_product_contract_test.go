@@ -80,6 +80,22 @@ func TestModelCatalogMutationsRefreshActiveSessionPickerWithoutReplacingRuntime(
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
 	}
+	fallbackConnected, err := clients.Configuration.ConnectModel(ctx, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "connect-fallback-model", ExpectedRevision: &connected.Revision},
+		Config: appserver.ConnectConfig{
+			Provider: "ollama", Model: "fallback", BaseURL: "http://127.0.0.1:11434",
+		},
+	})
+	if err != nil || fallbackConnected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("ConnectModel(fallback) = %#v, %v", fallbackConnected, err)
+	}
+	defaulted, err := clients.Configuration.UseModel(ctx, appserver.UseModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "select-host-fallback", ExpectedRevision: &fallbackConnected.Revision},
+		Model:     "ollama/fallback",
+	})
+	if err != nil || defaulted.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("UseModel(fallback) = %#v, %v", defaulted, err)
+	}
 	assertSlashArgCandidate(t, clients.Completion, sessionID, "model use", "ollama/late", true)
 	assertSlashArgCandidate(t, clients.Completion, sessionID, "model del", "ollama/late", true)
 	remote := bindAppServerHTTPTestClient(t, appServer, "local-user")
@@ -102,7 +118,7 @@ func TestModelCatalogMutationsRefreshActiveSessionPickerWithoutReplacingRuntime(
 		t.Fatalf("UseSessionModel() = %#v, %v", selected, err)
 	}
 	deleted, err := clients.Configuration.DeleteModel(ctx, appserver.DeleteModelRequest{
-		WriteBase: appserver.WriteBase{OperationID: "delete-late-model", ExpectedRevision: &connected.Revision},
+		WriteBase: appserver.WriteBase{OperationID: "delete-late-model", ExpectedRevision: &defaulted.Revision},
 		Model:     "ollama/late",
 	})
 	if err != nil || deleted.Outcome != appserver.OutcomeCommitted {
@@ -116,13 +132,43 @@ func TestModelCatalogMutationsRefreshActiveSessionPickerWithoutReplacingRuntime(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if afterDelete.ModelStatus.Display != "ollama/late" {
-		t.Fatalf("active Session model after catalog deletion = %q, want pinned ollama/late", afterDelete.ModelStatus.Display)
+	if afterDelete.ModelStatus.Display != "ollama/fallback" {
+		t.Fatalf("active Session model after catalog deletion = %q, want newly connected fallback ollama/fallback", afterDelete.ModelStatus.Display)
 	}
 	if afterDelete.SandboxStatus.RequestedBackend != "host" ||
 		afterDelete.SandboxStatus.ResolvedBackend != "host" ||
 		afterDelete.SandboxStatus.Route != "host" {
 		t.Fatalf("active Session sandbox status = %#v, want pinned host Runtime", afterDelete.SandboxStatus)
+	}
+
+	fallbackDeleted, err := clients.Configuration.DeleteModel(ctx, appserver.DeleteModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "delete-fallback-model", ExpectedRevision: &deleted.Revision},
+		Model:     "ollama/fallback",
+	})
+	if err != nil || fallbackDeleted.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("DeleteModel(fallback) = %#v, %v", fallbackDeleted, err)
+	}
+	afterFallbackDelete, err := clients.Status.SessionStatus(ctx, appserver.StatusRequest{SessionID: sessionID, Surface: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterFallbackDelete.ModelStatus.Display != "ollama/initial" {
+		t.Fatalf("active Session model after fallback deletion = %q, want ollama/initial", afterFallbackDelete.ModelStatus.Display)
+	}
+
+	cleared, err := clients.Configuration.DeleteModel(ctx, appserver.DeleteModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "delete-final-model", ExpectedRevision: &fallbackDeleted.Revision},
+		Model:     "ollama/initial",
+	})
+	if err != nil || cleared.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("DeleteModel(final) = %#v, %v", cleared, err)
+	}
+	afterClear, err := clients.Status.SessionStatus(ctx, appserver.StatusRequest{SessionID: sessionID, Surface: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterClear.ModelStatus.Display != "" || afterClear.ModelStatus.Alias != "" || afterClear.ModelStatus.Name != "" {
+		t.Fatalf("active Session model after final catalog deletion = %#v, want no configured model", afterClear.ModelStatus)
 	}
 }
 

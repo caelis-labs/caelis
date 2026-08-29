@@ -60,16 +60,12 @@ func TestAdapterListsControlOwnedDisconnectCandidates(t *testing.T) {
 	if len(candidates) != 1 || candidates[0].AgentID != "codex" {
 		t.Fatalf("DisconnectCandidates() = %#v", candidates)
 	}
-	sources, err := driver.CompleteSlashArg(context.Background(), "connect", "", 10)
-	if err != nil || !slashCandidatesHaveValue(sources, "disconnect") {
-		t.Fatalf("CompleteSlashArg(connect) = %#v, err=%v, want disconnect entry", sources, err)
+	sources, err := driver.CompleteSlashArg(context.Background(), "disconnect", "", 10)
+	if err != nil || !slashCandidatesHaveValue(sources, "acp") || !slashCandidatesHaveValue(sources, "provider") {
+		t.Fatalf("CompleteSlashArg(disconnect) = %#v, err=%v, want provider/ACP entries", sources, err)
 	}
-	agents, err := driver.CompleteSlashArg(context.Background(), "connect-disconnect-agent", "", 10)
+	agents, err := driver.CompleteSlashArg(context.Background(), "disconnect-acp", "", 10)
 	if err != nil || len(agents) != 1 || agents[0].Value != "codex" || agents[0].Display != "/codex" {
 		t.Fatalf("CompleteSlashArg(disconnect Agent) = %#v, err=%v", agents, err)
-	}
-	confirm, err := driver.CompleteSlashArg(context.Background(), "connect-disconnect-confirm:codex", "", 10)
-	if err != nil || len(confirm) != 1 || confirm[0].Value != "confirm" || !strings.Contains(confirm[0].Detail, "installed adapter") {
-		t.Fatalf("CompleteSlashArg(disconnect confirm) = %#v, err=%v", confirm, err)
 	}
 }

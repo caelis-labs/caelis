@@ -477,6 +477,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		childControlURL:       cfg.ChildControlURL,
 		childControlTokenFile: cfg.ChildControlTokenFile,
 	})
+	sessionModelPins := newSessionModelPinRegistry(apiKeyCredentials.Get, lookup.Snapshot().Configs...)
 	stack := &Stack{
 		composition: runtimeComposition{
 			authorities: runtimeHostAuthorities{
@@ -495,7 +496,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 				grokAuth:                grokAuth,
 				apiKeyCredentials:       apiKeyCredentials,
 				providerUsage:           providerUsage,
-				sessionModelPins:        newSessionModelPinRegistry(),
+				sessionModelPins:        sessionModelPins,
 			},
 			sessions:  sessions,
 			workspace: workspace,

@@ -23,7 +23,7 @@ func slashArgPickerHint(command string, candidates []SlashArgCandidate, index in
 
 func isModelAliasPickerCommand(command string) bool {
 	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "model use", "model del":
+	case "model", "model use", "model del":
 		return true
 	default:
 		return false

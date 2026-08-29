@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -2288,6 +2289,73 @@ func TestSessionClientAdapterHostModelReceiptsAndObservation(t *testing.T) {
 			t.Fatalf("Host delete status requests = %#v", statusClient.requests)
 		}
 	})
+
+	t.Run("delete refreshes a stale selected Session to the default", func(t *testing.T) {
+		statusClient := &sandboxStatusClientProbe{statuses: []controlstatus.StatusSnapshot{
+			{Configuration: controlstatus.StatusConfiguration{Revision: 45}},
+			{Session: controlstatus.StatusSession{ID: "session-1"}, ModelStatus: controlstatus.StatusModel{Alias: "ollama/old"}},
+			{Configuration: controlstatus.StatusConfiguration{Revision: 46}},
+			{Session: controlstatus.StatusSession{ID: "session-1"}, ModelStatus: controlstatus.StatusModel{Alias: "ollama/old"}},
+			{Session: controlstatus.StatusSession{ID: "session-1"}, ModelStatus: controlstatus.StatusModel{Alias: "ollama/default"}},
+		}}
+		configuration := &modelConfigurationClientProbe{
+			deleteResult: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 46},
+		}
+		completion := &recordingCompletionClient{slashResults: [][]appserver.SlashArgCandidate{
+			{{Value: "ollama@local/ollama/old", Display: "ollama/old"}},
+			{{Value: "ollama@local/ollama/default", Display: "ollama/default"}},
+		}}
+		adapter := &SessionClientAdapter{
+			sessionClient: &sessionClientAdapterTestClient{state: appserver.SessionState{
+				SessionID: "session-1", Revision: 7, Controller: session.ControllerBinding{EpochID: "epoch-1"},
+			}},
+			statusClient: statusClient, configClient: configuration, completionClient: completion,
+			surface: "tui", sessionID: "session-1",
+		}
+		if err := adapter.DeleteModel(context.Background(), "ollama@local/ollama/old"); err != nil {
+			t.Fatal(err)
+		}
+		request := configuration.sessionRequest
+		if configuration.sessionCalls != 1 || request.Clear || request.Model != "ollama@local/ollama/default" ||
+			request.ExpectedRevision == nil || *request.ExpectedRevision != 7 || request.ExpectedControllerEpoch != "epoch-1" {
+			t.Fatalf("fallback Session request/calls = %#v / %d", request, configuration.sessionCalls)
+		}
+		if completion.slash.Command != "model use" || completion.slash.SessionID != "session-1" {
+			t.Fatalf("fallback completion request = %#v", completion.slash)
+		}
+	})
+
+	t.Run("delete clears a stale selected Session when no model remains", func(t *testing.T) {
+		statusClient := &sandboxStatusClientProbe{statuses: []controlstatus.StatusSnapshot{
+			{Configuration: controlstatus.StatusConfiguration{Revision: 45}},
+			{Session: controlstatus.StatusSession{ID: "session-1"}, ModelStatus: controlstatus.StatusModel{Alias: "ollama/only"}},
+			{Configuration: controlstatus.StatusConfiguration{Revision: 46}},
+			{Session: controlstatus.StatusSession{ID: "session-1"}, ModelStatus: controlstatus.StatusModel{Alias: "ollama/only"}},
+			{Session: controlstatus.StatusSession{ID: "session-1"}},
+		}}
+		configuration := &modelConfigurationClientProbe{
+			deleteResult: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 46},
+		}
+		completion := &recordingCompletionClient{slashResults: [][]appserver.SlashArgCandidate{
+			{{Value: "ollama@local/ollama/only", Display: "ollama/only"}},
+			{},
+		}}
+		adapter := &SessionClientAdapter{
+			sessionClient: &sessionClientAdapterTestClient{state: appserver.SessionState{
+				SessionID: "session-1", Revision: 7, Controller: session.ControllerBinding{EpochID: "epoch-1"},
+			}},
+			statusClient: statusClient, configClient: configuration, completionClient: completion,
+			surface: "tui", sessionID: "session-1",
+		}
+		if err := adapter.DeleteModel(context.Background(), "ollama@local/ollama/only"); err != nil {
+			t.Fatal(err)
+		}
+		request := configuration.sessionRequest
+		if configuration.sessionCalls != 1 || !request.Clear || request.Model != "" || request.ReasoningEffort != "" ||
+			request.ExpectedRevision == nil || *request.ExpectedRevision != 7 || request.ExpectedControllerEpoch != "epoch-1" {
+			t.Fatalf("clear Session request/calls = %#v / %d", request, configuration.sessionCalls)
+		}
+	})
 }
 
 func collectSessionClientAdapterEvents(events <-chan eventstream.Envelope) []eventstream.Envelope {
@@ -2783,9 +2851,11 @@ type sessionClientAdapterTestPluginClient struct {
 
 type recordingCompletionClient struct {
 	appserver.CompletionClient
-	skill   appserver.CompletionRequest
-	slash   appserver.CompletionRequest
-	resolve appserver.CompletionRequest
+	skill           appserver.CompletionRequest
+	slash           appserver.CompletionRequest
+	resolve         appserver.CompletionRequest
+	slashCandidates []appserver.SlashArgCandidate
+	slashResults    [][]appserver.SlashArgCandidate
 }
 
 type fallbackSkillCompletionClient struct {
@@ -2816,6 +2886,14 @@ func (c *recordingCompletionClient) CompleteSkill(_ context.Context, request app
 
 func (c *recordingCompletionClient) CompleteSlashArg(_ context.Context, request appserver.CompletionRequest) ([]appserver.SlashArgCandidate, error) {
 	c.slash = request
+	if len(c.slashResults) > 0 {
+		result := slices.Clone(c.slashResults[0])
+		c.slashResults = c.slashResults[1:]
+		return result, nil
+	}
+	if c.slashCandidates != nil {
+		return slices.Clone(c.slashCandidates), nil
+	}
 	return []appserver.SlashArgCandidate{{Value: "mimo"}}, nil
 }
 

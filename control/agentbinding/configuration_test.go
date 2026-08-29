@@ -52,7 +52,7 @@ func TestCreateRoleAddsBoundCustomDelegationDefinition(t *testing.T) {
 func TestValidateCustomHandleRejectsReservedProductCommands(t *testing.T) {
 	for _, handle := range []Handle{
 		"help", "review", "model", "status", "doctor", "new", "resume",
-		"compact", "connect", "subagent", "plugin", "exit", "quit", "lead", "sandbox",
+		"compact", "connect", "disconnect", "subagent", "plugin", "exit", "quit", "lead", "sandbox",
 	} {
 		if err := ValidateCustomHandle(handle); err == nil {
 			t.Errorf("ValidateCustomHandle(%q) succeeded, want reserved-name rejection", handle)

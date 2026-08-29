@@ -1260,6 +1260,13 @@ func (m *Model) submitInteractiveLine(execLine string, displayLine string, attac
 		}
 		return m.submitLine("/connect")
 	}
+	if (execLine == "/disconnect" || strings.HasPrefix(execLine, "/disconnect ")) && m.isCommandAvailable("disconnect") {
+		if def := m.findWizard("disconnect"); def != nil {
+			query := strings.TrimSpace(strings.TrimPrefix(execLine, "/disconnect"))
+			return m, m.startWizardWithQuery(def, query)
+		}
+		return m.submitLine("/disconnect")
+	}
 	if execLine == "/subagent" && m.isCommandAvailable("subagent") {
 		m.resetComposerAfterOverlayOpen()
 		return m, m.openSubagentOverlay()

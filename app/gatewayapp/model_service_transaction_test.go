@@ -683,7 +683,7 @@ func TestDeleteModelRollsBackAfterPreCommitConfigWriteFault(t *testing.T) {
 	}
 }
 
-func TestDeleteModelRejectsSystemBoundProfile(t *testing.T) {
+func TestDeleteModelRemovesSystemBoundProfile(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
 	profile, err := stack.connectTestModel(ModelConfig{
@@ -698,12 +698,18 @@ func TestDeleteModelRejectsSystemBoundProfile(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	err = stack.deleteTestHostModel(ctx, session.SessionRef{}, profile.Backend.Provider.ModelConfigID)
-	if err == nil || !strings.Contains(err.Error(), "rebind or reset") {
+	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, profile.Backend.Provider.ModelConfigID); err != nil {
 		t.Fatalf("DeleteModel(system-bound) error = %v", err)
 	}
-	if !stack.composition.lookup.HasAlias(profile.Backend.Provider.ModelConfigID) {
-		t.Fatal("DeleteModel removed a system-bound model")
+	doc, err := stack.composition.authorities.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stack.composition.lookup.HasAlias(profile.Backend.Provider.ModelConfigID) {
+		t.Fatal("DeleteModel retained a system-bound model")
+	}
+	if binding, ok := agentbinding.Lookup(doc.AgentBindings, agentbinding.HandleReviewer); ok {
+		t.Fatalf("DeleteModel retained Reviewer binding %#v", binding)
 	}
 }
 

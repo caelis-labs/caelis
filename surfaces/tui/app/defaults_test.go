@@ -17,6 +17,7 @@ func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
 		"orbit",
 		"zenith",
 		"connect",
+		"disconnect",
 		"subagent",
 		"plugin",
 		"model",
@@ -40,13 +41,13 @@ func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
 	}
 }
 
-func TestDefaultWizardsKeepConnectFlowAndReserveSubagentForOverlay(t *testing.T) {
+func TestDefaultWizardsExposeConnectAndDisconnectFlows(t *testing.T) {
 	wizards := DefaultWizards()
-	if len(wizards) != 1 {
-		t.Fatalf("DefaultWizards() count = %d, want only connect", len(wizards))
+	if len(wizards) != 2 {
+		t.Fatalf("DefaultWizards() count = %d, want connect and disconnect", len(wizards))
 	}
-	if wizards[0].Command != "connect" {
-		t.Fatalf("DefaultWizards()[0].Command = %q, want connect", wizards[0].Command)
+	if wizards[0].Command != "connect" || wizards[1].Command != "disconnect" {
+		t.Fatalf("DefaultWizards() = %#v, want connect then disconnect", wizards)
 	}
 }
 
@@ -69,14 +70,26 @@ func TestDefaultConnectWizardSeparatesModelAndACPConnectionSteps(t *testing.T) {
 	if got := len(connect.Steps); got != 1 || connect.Steps[0].Key != "source" || connect.Branch == nil {
 		t.Fatalf("connect root wizard = %#v, want one explicit branching step", connect)
 	}
+	for _, source := range []string{"account", "api-key", "acp"} {
+		branch := connect.Branch("source", source, nil, map[string]string{})
+		if branch == nil || len(branch.Steps) == 0 {
+			t.Fatalf("/connect %s branch = %#v", source, branch)
+		}
+		if source != "acp" {
+			want := "connect-provider-" + source
+			if got := branch.Steps[0].CompletionCommand(nil); got != want {
+				t.Fatalf("/connect %s provider command = %q, want %q", source, got, want)
+			}
+		}
+	}
 	tests := []struct {
 		name string
 		def  WizardDef
 		want []string
 	}{
-		{name: "model", def: connectModelWizard(), want: []string{"provider", "endpoint", "baseurl", "apikey", "model", "image_input", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
+		{name: "account", def: connectModelWizard("account"), want: []string{"provider", "endpoint", "baseurl", "apikey", "model", "image_input", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
+		{name: "api-key", def: connectModelWizard("api-key"), want: []string{"provider", "endpoint", "baseurl", "apikey", "model", "image_input", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
 		{name: "acp", def: connectACPWizard(), want: []string{"acp_agent", "acp_launcher", "acp_command", "acp_model"}},
-		{name: "disconnect", def: disconnectACPWizard(), want: []string{"disconnect_agent", "disconnect_confirm"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,6 +101,27 @@ func TestDefaultConnectWizardSeparatesModelAndACPConnectionSteps(t *testing.T) {
 				t.Fatalf("steps = %#v, want %#v", keys, tt.want)
 			}
 		})
+	}
+}
+
+func TestDefaultDisconnectWizardSeparatesProviderAndACP(t *testing.T) {
+	disconnect := disconnectWizard()
+	if len(disconnect.Steps) != 1 || disconnect.Steps[0].Key != "kind" || disconnect.Branch == nil {
+		t.Fatalf("disconnect root wizard = %#v", disconnect)
+	}
+	provider := disconnect.Branch("kind", "provider", nil, map[string]string{})
+	if provider == nil || len(provider.Steps) != 1 || provider.Steps[0].Key != "provider_model" {
+		t.Fatalf("provider disconnect branch = %#v", provider)
+	}
+	if got := provider.BuildExecLine(map[string]string{"provider_model": "ollama/qwen3"}); got != "/disconnect provider ollama/qwen3" {
+		t.Fatalf("provider disconnect exec line = %q", got)
+	}
+	acp := disconnect.Branch("kind", "acp", nil, map[string]string{})
+	if acp == nil || len(acp.Steps) != 1 || acp.Steps[0].Key != "disconnect_agent" {
+		t.Fatalf("ACP disconnect branch = %#v", acp)
+	}
+	if got := acp.BuildExecLine(map[string]string{"disconnect_agent": "codex"}); got != "/disconnect acp codex" {
+		t.Fatalf("ACP disconnect exec line = %q", got)
 	}
 }
 

@@ -529,15 +529,9 @@ func (m *Model) applySlashArgCompletion() tea.Cmd {
 		m.clearSlashArg()
 		return nil
 	case "model":
-		m.setInputText("/model " + choice + " ")
+		m.setInputText("/model use " + choice + " ")
 		m.syncTextareaFromInput()
-		switch choice {
-		case "use", "del":
-			return m.activateSlashArgPickerFromInput("model " + choice)
-		default:
-			m.clearSlashArg()
-		}
-		return nil
+		return m.activateSlashArgPickerFromInput("model use " + choice)
 	case "model use":
 		m.setInputText("/model use " + choice + " ")
 		m.syncTextareaFromInput()

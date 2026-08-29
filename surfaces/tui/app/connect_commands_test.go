@@ -26,11 +26,21 @@ type modelConnectControlStub struct {
 	status        controlprompt.AgentStatusSnapshot
 	bindingStatus agentbinding.Status
 	connected     controlprompt.ConnectConfig
+	deleted       string
 }
 
 func (s *modelConnectControlStub) Connect(_ context.Context, config controlprompt.ConnectConfig) (controlstatus.StatusSnapshot, error) {
 	s.connected = config
 	return controlstatus.StatusSnapshot{ModelStatus: controlstatus.StatusModel{Display: "openai/gpt-5.6"}}, nil
+}
+
+func (s *modelConnectControlStub) DeleteModel(_ context.Context, model string) error {
+	s.deleted = model
+	return nil
+}
+
+func (*modelConnectControlStub) Status(context.Context) (controlstatus.StatusSnapshot, error) {
+	return controlstatus.StatusSnapshot{}, nil
 }
 
 func (s *modelConnectControlStub) AgentStatus(context.Context) (controlprompt.AgentStatusSnapshot, error) {
@@ -148,6 +158,20 @@ func TestSlashConnectDisconnectsOnlyAfterWizardConfirmation(t *testing.T) {
 	}
 	if service.disconnected != "opus" {
 		t.Fatalf("disconnect called for %q, want opus", service.disconnected)
+	}
+}
+
+func TestSlashDisconnectSeparatesProviderAndACP(t *testing.T) {
+	provider := &modelConnectControlStub{}
+	result := slashDisconnectWithContext(context.Background(), provider, provider, nil, "provider ollama/qwen3")
+	if result.Err != nil || !result.SuppressTurnDivider || provider.deleted != "ollama/qwen3" {
+		t.Fatalf("provider disconnect = %#v, deleted %q", result, provider.deleted)
+	}
+
+	acp := &acpConnectControlStub{}
+	result = slashDisconnectWithContext(context.Background(), acp, acp, nil, "acp codex")
+	if result.Err != nil || !result.SuppressTurnDivider || acp.disconnected != "codex" {
+		t.Fatalf("ACP disconnect = %#v, disconnected %q", result, acp.disconnected)
 	}
 }
 

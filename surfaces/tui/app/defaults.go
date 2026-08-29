@@ -203,6 +203,7 @@ func (m *Model) commandCompletionDetail(command string) string {
 func DefaultWizards() []WizardDef {
 	return []WizardDef{
 		connectWizard(),
+		disconnectWizard(),
 	}
 }
 
@@ -213,7 +214,7 @@ func connectWizard() WizardDef {
 		Steps: []WizardStepDef{{
 			Key:               "source",
 			HintLabel:         "/connect source",
-			FreeformHint:      "/connect source: connect a model provider or local ACP Agent, or disconnect an existing Agent",
+			FreeformHint:      "/connect source: sign in with an account or API key, or connect a local ACP Agent",
 			RequireCandidate:  true,
 			CompletionCommand: func(map[string]string) string { return "connect" },
 		}},
@@ -222,12 +223,16 @@ func connectWizard() WizardDef {
 			state["source"] = source
 			var next WizardDef
 			switch source {
+			case "account", "api-key":
+				next = connectModelWizard(source)
 			case "model":
+				// Compatibility for a typed or restored pre-split wizard state.
 				next = connectModelWizard()
 			case "acp":
 				next = connectACPWizard()
 			case "disconnect":
-				next = disconnectACPWizard()
+				// Compatibility for the retired nested disconnect wizard.
+				next = legacyDisconnectACPWizard()
 			default:
 				return nil
 			}
@@ -236,7 +241,15 @@ func connectWizard() WizardDef {
 	}
 }
 
-func connectModelWizard() WizardDef {
+func connectModelWizard(authSources ...string) WizardDef {
+	authSource := ""
+	if len(authSources) > 0 && strings.TrimSpace(authSources[0]) != "" {
+		authSource = strings.TrimSpace(authSources[0])
+	}
+	providerCommand := "connect-provider"
+	if authSource != "" {
+		providerCommand += "-" + authSource
+	}
 	return WizardDef{
 		Command: "connect", DisplayLine: "/connect",
 		Steps: []WizardStepDef{
@@ -244,7 +257,7 @@ func connectModelWizard() WizardDef {
 				Key: "provider", HintLabel: "/connect provider",
 				FreeformHint:      "/connect provider: choose a provider; compatible endpoints may ask for a custom base URL",
 				RequireCandidate:  true,
-				CompletionCommand: func(map[string]string) string { return "connect-provider" },
+				CompletionCommand: func(map[string]string) string { return providerCommand },
 			},
 			{
 				Key: "endpoint", HintLabel: "/connect endpoint",
@@ -351,7 +364,63 @@ func connectACPWizard() WizardDef {
 	}
 }
 
+func disconnectWizard() WizardDef {
+	return WizardDef{
+		Command:     "disconnect",
+		DisplayLine: "/disconnect",
+		Steps: []WizardStepDef{{
+			Key:               "kind",
+			HintLabel:         "/disconnect type",
+			FreeformHint:      "/disconnect type: choose a provider model or local ACP Agent",
+			RequireCandidate:  true,
+			CompletionCommand: func(map[string]string) string { return "disconnect" },
+		}},
+		Branch: func(_ string, value string, _ *SlashArgCandidate, state map[string]string) *WizardDef {
+			kind := strings.ToLower(strings.TrimSpace(value))
+			state["kind"] = kind
+			var next WizardDef
+			switch kind {
+			case "provider":
+				next = disconnectProviderWizard()
+			case "acp":
+				next = disconnectACPWizard()
+			default:
+				return nil
+			}
+			return &next
+		},
+	}
+}
+
+func disconnectProviderWizard() WizardDef {
+	return WizardDef{
+		Command: "disconnect", DisplayLine: "/disconnect",
+		Steps: []WizardStepDef{{
+			Key: "provider_model", HintLabel: "/disconnect provider",
+			FreeformHint: "/disconnect provider: choose a configured provider model", RequireCandidate: true,
+			CompletionCommand: func(map[string]string) string { return "disconnect-provider" },
+		}},
+		BuildExecLine: func(state map[string]string) string {
+			return "/disconnect provider " + strings.TrimSpace(state["provider_model"])
+		},
+	}
+}
+
 func disconnectACPWizard() WizardDef {
+	return WizardDef{
+		Command: "disconnect", DisplayLine: "/disconnect",
+		Steps: []WizardStepDef{{
+			Key: "disconnect_agent", HintLabel: "/disconnect ACP Agent",
+			FreeformHint: "/disconnect ACP Agent: choose a connected local ACP Agent", RequireCandidate: true,
+			CompletionCommand: func(map[string]string) string { return "disconnect-acp" },
+		}},
+		BuildExecLine: func(state map[string]string) string {
+			return "/disconnect acp " + strings.TrimSpace(state["disconnect_agent"])
+		},
+	}
+}
+
+func legacyDisconnectACPWizard() WizardDef {
 	return WizardDef{
 		Command: "connect", DisplayLine: "/connect",
 		Steps: []WizardStepDef{

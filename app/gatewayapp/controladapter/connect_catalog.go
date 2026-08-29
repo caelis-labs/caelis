@@ -27,9 +27,14 @@ type connectWizardPayload = connectwizard.ConnectWizardState
 func completeConnectArgs(ctx context.Context, driver *assembler, command string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	switch {
 	case command == "connect":
-		return completeConnectSources(ctx, driver, query, limit), nil
+		return completeConnectSources(query, limit), nil
+	case command == "connect-provider-account":
+		return completeConnectProviders(ctx, driver, "account", query, limit), nil
+	case command == "connect-provider-api-key":
+		return completeConnectProviders(ctx, driver, "api-key", query, limit), nil
 	case command == "connect-provider":
-		return completeConnectProviders(ctx, driver, query, limit), nil
+		// Compatibility for a typed or restored pre-split /connect model flow.
+		return completeConnectProviders(ctx, driver, "", query, limit), nil
 	case command == "connect-disconnect-agent":
 		return completeConnectDisconnectAgents(ctx, driver, query, limit)
 	case strings.HasPrefix(command, "connect-disconnect-confirm:"):
@@ -59,17 +64,11 @@ func completeConnectArgs(ctx context.Context, driver *assembler, command string,
 	}
 }
 
-func completeConnectSources(ctx context.Context, driver *assembler, query string, limit int) []controlprompt.SlashArgCandidate {
+func completeConnectSources(query string, limit int) []controlprompt.SlashArgCandidate {
 	candidates := []controlprompt.SlashArgCandidate{
-		{Value: "model", Display: "Model provider", Detail: "Connect an API or local model provider"},
-		{Value: "acp", Display: "Local ACP Agent", Detail: "Connect an installed native ACP Agent or another local ACP command"},
-	}
-	if driver != nil {
-		if connected, err := driver.DisconnectCandidates(ctx); err == nil && len(connected) > 0 {
-			candidates = append(candidates, controlprompt.SlashArgCandidate{
-				Value: "disconnect", Display: "Disconnect local ACP Agent", Detail: "Remove one connected Agent from the Caelis roster",
-			})
-		}
+		{Value: "account", Display: "Sign in with an account", Detail: "Use a provider account sign-in"},
+		{Value: "api-key", Display: "Use an API key", Detail: "Use an API key or local model provider"},
+		{Value: "acp", Display: "Use a local ACP Agent", Detail: "Connect an installed native ACP Agent or another local ACP command"},
 	}
 	return filterSlashArgCandidates(candidates, query, limit)
 }
@@ -203,10 +202,14 @@ func connectableACPAgentDetail(agent agentregistry.ConnectableAgent) string {
 	return strings.TrimSpace(agent.Description)
 }
 
-func completeConnectProviders(ctx context.Context, driver *assembler, query string, limit int) []controlprompt.SlashArgCandidate {
+func completeConnectProviders(ctx context.Context, driver *assembler, authSource string, query string, limit int) []controlprompt.SlashArgCandidate {
 	templates := modelconfig.ProviderTemplates()
 	out := make([]controlprompt.SlashArgCandidate, 0, len(templates))
 	for _, template := range templates {
+		accountProvider := strings.TrimSpace(string(template.AuthFlow)) != ""
+		if (authSource == "account" && !accountProvider) || (authSource == "api-key" && accountProvider) {
+			continue
+		}
 		if query != "" && !strings.Contains(strings.ToLower(template.Label+" "+template.Description), strings.ToLower(strings.TrimSpace(query))) {
 			continue
 		}

@@ -136,6 +136,21 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 	if err := s.rejectSessionConfigurationDuringTurn(active.SessionID); err != nil {
 		return sessionCommandResult(active), sessionConfigurationConflict(err)
 	}
+	if req.Clear {
+		if active.Controller.Kind == session.ControllerKindACP {
+			return sessionCommandResult(active), sessionConfigurationRejected("external ACP controller model cannot be cleared locally")
+		}
+		updated, clearErr := s.updateSessionStateAtRevision(ctx, active.SessionRef, active.Revision, func(state map[string]any) (map[string]any, error) {
+			next := session.CloneState(state)
+			if next == nil {
+				next = map[string]any{}
+			}
+			delete(next, kernel.StateCurrentModelAlias)
+			delete(next, kernel.StateCurrentReasoningEffort)
+			return next, nil
+		})
+		return sessionCommandResult(updated), classifyControlBackendError(clearErr)
+	}
 	if active.Controller.Kind == session.ControllerKindACP {
 		return s.configureACPControllerModel(ctx, active, req)
 	}
@@ -158,8 +173,9 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 		return sessionCommandResult(active), sessionConfigurationRejected(fmt.Sprintf("model %q does not support reasoning effort %q", configured.ID, reasoning))
 	}
 	// The App catalog decides whether a model may be selected. Once accepted,
-	// pin its hydrated configuration and matching placement profile into this
-	// Runtime so a later App deletion cannot interrupt the active Session.
+	// install its hydrated configuration and matching placement profile into
+	// this Runtime atomically with the durable Session selection. A later
+	// explicit provider removal may revoke it for subsequent work.
 	var finishPin func(bool)
 	if s.activation != nil && s.activation.modelCatalog != nil {
 		finishPin, err = s.beginPinnedModelSelection(ctx, configured)

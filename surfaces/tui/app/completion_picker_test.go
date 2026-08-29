@@ -39,11 +39,13 @@ func TestSlashArgPickerHintDisambiguatesDuplicateModelAliases(t *testing.T) {
 			Detail:  "endpoint:xiaomi@token-plan-cn · token-plan-cn · https://token-plan-cn.xiaomimimo.com/v1 · managed auth",
 		},
 	}
-	if got := slashArgPickerHint("model use", candidates, 0); got != "default" {
-		t.Fatalf("slashArgPickerHint(default) = %q, want default", got)
-	}
-	if got := slashArgPickerHint("model use", candidates, 1); got != "xiaomi@token-plan-cn" {
-		t.Fatalf("slashArgPickerHint(token-plan) = %q, want xiaomi@token-plan-cn", got)
+	for _, command := range []string{"model", "model use"} {
+		if got := slashArgPickerHint(command, candidates, 0); got != "default" {
+			t.Fatalf("slashArgPickerHint(%q, default) = %q, want default", command, got)
+		}
+		if got := slashArgPickerHint(command, candidates, 1); got != "xiaomi@token-plan-cn" {
+			t.Fatalf("slashArgPickerHint(%q, token-plan) = %q, want xiaomi@token-plan-cn", command, got)
+		}
 	}
 }
 

@@ -523,24 +523,31 @@ func TestFutureSessionActivationUsesLatestHostProcessConfig(t *testing.T) {
 	}
 }
 
-func TestSpawnedSessionUsesParentRuntimeModelSnapshotAfterHostDeletion(t *testing.T) {
+func TestSpawnedSessionCannotUseDeletedParentRuntimeProfile(t *testing.T) {
 	ctx := context.Background()
 	stack, parent := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 
-	profile, err := stack.connectTestModel(ModelConfig{
+	frozenConfig := ModelConfig{
 		Provider:            "ollama",
 		API:                 "ollama",
 		Model:               "spawn-frozen-model",
 		BaseURL:             "http://frozen.example",
 		ReasoningLevels:     []string{"high"},
 		ContextWindowTokens: 196608,
-	})
+	}
+	profile, err := stack.connectTestModel(frozenConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
+	initialID := stack.composition.lookup.DefaultID()
 	modelID := profile.Backend.Provider.ModelConfigID
+	if _, err := stack.testAgentBindings().BindAgentBinding(ctx, agentbinding.Binding{
+		Handle: agentbinding.HandleOrbit, ProfileID: profile.ID, Effort: "high",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	parent = mustCurrentSession(t, stack, parent.SessionID)
 	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
 		WriteBase: appserver.WriteBase{
@@ -555,52 +562,305 @@ func TestSpawnedSessionUsesParentRuntimeModelSnapshotAfterHostDeletion(t *testin
 		t.Fatalf("UseSessionModel() = %#v, %v", selected, err)
 	}
 	parentRuntime := activateSessionRuntime(t, stack, parent.SessionID)
+	agentConfig, err := parentRuntime.instance.materializeDelegatedModel("", profile.ID, "high", parentRuntime.instance.activeRuntime)
+	if err != nil {
+		t.Fatalf("materializeDelegatedModel() before deletion: %v", err)
+	}
+	child, err := startGatewayAppTestSession(ctx, stack, "spawn-frozen-child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parentRuntime.instance.prepareSpawnedACPSession(ctx, tasksubagent.SpawnContext{}, child.SessionID, agentConfig); err != nil {
+		t.Fatalf("prepareSpawnedACPSession() before deletion: %v", err)
+	}
+	childRuntime := activateSessionRuntime(t, stack, child.SessionID)
+	if _, ok := stack.composition.authorities.sessionModelPins.config(ctx, child.SessionID); !ok {
+		t.Fatal("child Session model pin was not retained before deletion")
+	}
+
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, modelID); err != nil {
 		t.Fatal(err)
 	}
 	if stack.composition.lookup.HasAlias(modelID) {
 		t.Fatalf("Host catalog still contains deleted model %q", modelID)
 	}
-
-	agentConfig, err := parentRuntime.instance.materializeDelegatedModel("", profile.ID, "high", parentRuntime.instance.activeRuntime)
-	if err != nil {
-		t.Fatalf("materializeDelegatedModel() from frozen Runtime: %v", err)
+	parentRuntime.instance.placementCacheMu.RLock()
+	_, bound := agentbinding.Lookup(parentRuntime.instance.placementCache.placement.Bindings, agentbinding.HandleOrbit)
+	parentRuntime.instance.placementCacheMu.RUnlock()
+	if bound {
+		t.Fatal("active Session placement retained the deleted Orbit model binding")
 	}
-	if agentConfig.PinnedModel == nil || agentConfig.PinnedModel.ID != modelID {
-		t.Fatalf("spawned Agent pin = %#v, want frozen model %q", agentConfig.PinnedModel, modelID)
+	if _, ok := stack.composition.authorities.sessionModelPins.config(ctx, child.SessionID); ok {
+		t.Fatal("provider deletion retained the existing child Session model pin")
 	}
-	child, err := startGatewayAppTestSession(ctx, stack, "spawn-frozen-child")
+	if childRuntime.instance.lookup.HasAlias(modelID) {
+		t.Fatalf("active child Session Runtime retained deleted model %q", modelID)
+	}
+	childState, err := stack.composition.sessions.SnapshotState(ctx, child.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
-	remaining, err := parentRuntime.instance.prepareSpawnedACPSession(ctx, tasksubagent.SpawnContext{}, child.SessionID, agentConfig)
+	if got := kernelimpl.CurrentModelAlias(childState); got != initialID {
+		t.Fatalf("child durable model after deletion = %q, want fallback %q", got, initialID)
+	}
+	if got := kernelimpl.CurrentReasoningEffort(childState); got != "" {
+		t.Fatalf("child durable reasoning after deletion = %q, want cleared", got)
+	}
+
+	lateChild, err := startGatewayAppTestSession(ctx, stack, "spawn-after-delete-child")
 	if err != nil {
-		t.Fatalf("prepareSpawnedACPSession() = %v", err)
+		t.Fatal(err)
 	}
-	if remaining.ModelID != "" || remaining.ReasoningEffortConfigID != "" || remaining.ConfigValues[acpConfigReasoningID] != "" {
-		t.Fatalf("remaining wire options = %#v, want provider identity kept process-local", remaining)
+	if _, err := parentRuntime.instance.prepareSpawnedACPSession(ctx, tasksubagent.SpawnContext{}, lateChild.SessionID, agentConfig); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("prepareSpawnedACPSession() with revoked pin error = %v, want not configured", err)
 	}
-	if remaining.ConfigValues[acpConfigModeID] != "manual" {
-		t.Fatalf("remaining mode = %q, want manual", remaining.ConfigValues[acpConfigModeID])
+	if err := stack.sessionRuntimes.release(ctx, child.SessionID); err != nil {
+		t.Fatal(err)
 	}
-	state, err := stack.composition.sessions.SnapshotState(ctx, child.SessionRef)
+	reactivatedChild := activateSessionRuntime(t, stack, child.SessionID)
+	if reactivatedChild.instance.lookup.HasAlias(modelID) {
+		t.Fatalf("reactivated child Session Runtime resurrected deleted model %q", modelID)
+	}
+
+	if _, err := parentRuntime.instance.materializeDelegatedModel("", profile.ID, "high", parentRuntime.instance.activeRuntime); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("materializeDelegatedModel(deleted profile) error = %v", err)
+	}
+	reconnected, err := stack.connectTestModel(frozenConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reconnected.Backend.Provider.ModelConfigID != modelID {
+		t.Fatalf("reconnected model ID = %q, want stable %q", reconnected.Backend.Provider.ModelConfigID, modelID)
+	}
+	reconnectedChild, err := startGatewayAppTestSession(ctx, stack, "spawn-after-reconnect-child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parentRuntime.instance.prepareSpawnedACPSession(ctx, tasksubagent.SpawnContext{}, reconnectedChild.SessionID, agentConfig); err != nil {
+		t.Fatalf("prepareSpawnedACPSession() after same-ID reconnect: %v", err)
+	}
+}
+
+func TestProviderDeletionSerializesWithRuntimeActivation(t *testing.T) {
+	ctx := context.Background()
+	stack, active := newLocalStateTestStack(t)
+	t.Cleanup(func() { _ = stack.Close() })
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	initialID := stack.composition.lookup.DefaultID()
+
+	profile, err := stack.connectTestModel(ModelConfig{
+		Provider: "ollama",
+		API:      "ollama",
+		Model:    "activation-race-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelID := profile.Backend.Provider.ModelConfigID
+	active = mustCurrentSession(t, stack, active.SessionID)
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID:             "select-activation-race-model",
+			SessionID:               active.SessionID,
+			ExpectedRevision:        &active.Revision,
+			ExpectedControllerEpoch: active.Controller.EpochID,
+		},
+		Model: modelID,
+	})
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("UseSessionModel() = %#v, %v", selected, err)
+	}
+
+	blocked := &postAssemblyBlockingRuntimeAssembler{
+		delegate: stack.sessionRuntimes.assembler,
+		entered:  make(chan struct{}),
+		proceed:  make(chan struct{}),
+	}
+	stack.sessionRuntimes.assembler = blocked
+	type activationResult struct {
+		runtime *sessionRuntime
+		err     error
+	}
+	activationDone := make(chan activationResult, 1)
+	go func() {
+		runtime, _, activateErr := stack.sessionRuntimes.activateSession(ctx, active.SessionID)
+		activationDone <- activationResult{runtime: runtime, err: activateErr}
+	}()
+	<-blocked.entered
+
+	deletionDone := make(chan error, 1)
+	go func() {
+		deletionDone <- stack.deleteTestHostModel(ctx, session.SessionRef{}, modelID)
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for stack.composition.lookup.HasAlias(modelID) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if stack.composition.lookup.HasAlias(modelID) {
+		t.Fatalf("provider deletion did not commit model %q before timeout", modelID)
+	}
+	select {
+	case err := <-deletionDone:
+		t.Fatalf("provider deletion bypassed in-progress activation: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(blocked.proceed)
+
+	activated := <-activationDone
+	if activated.err != nil {
+		t.Fatal(activated.err)
+	}
+	if err := <-deletionDone; err != nil {
+		t.Fatal(err)
+	}
+	if activated.runtime.instance.lookup.HasAlias(modelID) {
+		t.Fatalf("activation published deleted model %q after reconciliation", modelID)
+	}
+	state, err := stack.composition.sessions.SnapshotState(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := kernelimpl.CurrentModelAlias(state); got != initialID {
+		t.Fatalf("durable model after activation race = %q, want fallback %q", got, initialID)
+	}
+}
+
+func TestProviderDeletionConvergesConcurrentSameIDReconnect(t *testing.T) {
+	ctx := context.Background()
+	stack, active := newLocalStateTestStack(t)
+	t.Cleanup(func() { _ = stack.Close() })
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	oldConfig := ModelConfig{
+		Provider:            "ollama",
+		API:                 "ollama",
+		Model:               "same-id-reconnect-model",
+		BaseURL:             "http://same-id.example",
+		ReasoningLevels:     []string{"high"},
+		ContextWindowTokens: 65536,
+	}
+	profile, err := stack.connectTestModel(oldConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelID := profile.Backend.Provider.ModelConfigID
+	if _, err := stack.testAgentBindings().BindAgentBinding(ctx, agentbinding.Binding{
+		Handle: agentbinding.HandleOrbit, ProfileID: profile.ID, Effort: "high",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	active = mustCurrentSession(t, stack, active.SessionID)
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID:             "select-same-id-reconnect-model",
+			SessionID:               active.SessionID,
+			ExpectedRevision:        &active.Revision,
+			ExpectedControllerEpoch: active.Controller.EpochID,
+		},
+		Model: modelID, ReasoningEffort: "high",
+	})
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("UseSessionModel() = %#v, %v", selected, err)
+	}
+	runtime := activateSessionRuntime(t, stack, active.SessionID)
+	oldAgentConfig, err := runtime.instance.materializeDelegatedModel("", profile.ID, "high", runtime.instance.activeRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stack.sessionRuntimes.activationMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			stack.sessionRuntimes.activationMu.Unlock()
+		}
+	}()
+	deletionDone := make(chan error, 1)
+	go func() {
+		deletionDone <- stack.deleteTestHostModel(ctx, session.SessionRef{}, modelID)
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for stack.composition.lookup.HasAlias(modelID) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if stack.composition.lookup.HasAlias(modelID) {
+		t.Fatal("provider deletion did not commit before timeout")
+	}
+
+	newConfig := oldConfig
+	newConfig.ContextWindowTokens = 131072
+	newConfig.ReasoningLevels = []string{"low"}
+	reconnected, err := stack.connectTestModel(newConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reconnected.Backend.Provider.ModelConfigID != modelID {
+		t.Fatalf("reconnected model ID = %q, want %q", reconnected.Backend.Provider.ModelConfigID, modelID)
+	}
+	stack.sessionRuntimes.activationMu.Unlock()
+	locked = false
+	if err := <-deletionDone; err != nil {
+		t.Fatal(err)
+	}
+
+	configured, err := runtime.instance.lookup.ResolveConfig(modelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured.ContextWindowTokens != newConfig.ContextWindowTokens {
+		t.Fatalf("live Runtime model context window = %d, want reconnected %d", configured.ContextWindowTokens, newConfig.ContextWindowTokens)
+	}
+	runtime.instance.placementCacheMu.RLock()
+	_, bound := agentbinding.Lookup(runtime.instance.placementCache.placement.Bindings, agentbinding.HandleOrbit)
+	runtime.instance.placementCacheMu.RUnlock()
+	if bound {
+		t.Fatal("same-ID reconnect restored the provider binding removed by deletion")
+	}
+	state, err := stack.composition.sessions.SnapshotState(ctx, active.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := kernelimpl.CurrentModelAlias(state); got != modelID {
-		t.Fatalf("child durable model = %q, want %q", got, modelID)
+		t.Fatalf("durable model after same-ID reconnect = %q, want %q", got, modelID)
 	}
-	if got := kernelimpl.CurrentReasoningEffort(state); got != "high" {
-		t.Fatalf("child durable effort = %q, want high", got)
+	if got := kernelimpl.CurrentReasoningEffort(state); got != "" {
+		t.Fatalf("durable reasoning after same-ID reconnect = %q, want unsupported high cleared", got)
 	}
-
-	childRuntime := activateSessionRuntime(t, stack, child.SessionID)
-	pinned, err := childRuntime.instance.lookup.ResolveConfig(modelID)
+	if got := runtime.instance.activeRuntime.ModelProfileEffort; strings.EqualFold(got, "high") {
+		t.Fatalf("live Runtime reasoning after same-ID reconnect = %q, want stale high cleared", got)
+	}
+	child, err := startGatewayAppTestSession(ctx, stack, "same-id-stale-pin-child")
 	if err != nil {
-		t.Fatalf("child Runtime did not receive process-local model pin: %v", err)
+		t.Fatal(err)
 	}
-	if pinned.BaseURL != "http://frozen.example" || pinned.ContextWindowTokens != 196608 {
-		t.Fatalf("child Runtime model = %#v, want frozen provider snapshot", pinned)
+	if _, err := runtime.instance.prepareSpawnedACPSession(ctx, tasksubagent.SpawnContext{}, child.SessionID, oldAgentConfig); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("prepareSpawnedACPSession() with stale same-ID generation error = %v, want not configured", err)
+	}
+}
+
+type postAssemblyBlockingRuntimeAssembler struct {
+	delegate sessionRuntimeAssembler
+	entered  chan struct{}
+	proceed  chan struct{}
+	once     sync.Once
+}
+
+func (a *postAssemblyBlockingRuntimeAssembler) assembleSnapshot(
+	ctx context.Context,
+	active session.Session,
+	activity sessionRuntimeActivity,
+	sessions session.Service,
+) (*sessionRuntimeInstance, error) {
+	instance, err := a.delegate.assembleSnapshot(ctx, active, activity, sessions)
+	if err != nil {
+		return nil, err
+	}
+	a.once.Do(func() { close(a.entered) })
+	select {
+	case <-a.proceed:
+		return instance, nil
+	case <-ctx.Done():
+		_ = instance.closeWorkspaceResources()
+		return nil, ctx.Err()
 	}
 }
 

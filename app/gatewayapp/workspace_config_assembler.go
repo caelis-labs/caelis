@@ -133,7 +133,7 @@ func (a *workspaceConfigAssembler) loadRuntimeModelSnapshot(ctx context.Context,
 			return AppConfig{}, nil, err
 		}
 		credentialRefs := providerProfileAPIKeyCredentialRefs(doc)
-		if pinned, ok := deps.authorities.sessionModelPins.config(active.SessionID); ok {
+		if pinned, ok := deps.authorities.sessionModelPins.config(ctx, active.SessionID); ok {
 			if _, err := lookup.upsert(pinned, false); err != nil {
 				return AppConfig{}, nil, fmt.Errorf("gatewayapp: inject pinned model for Session %q: %w", active.SessionID, err)
 			}

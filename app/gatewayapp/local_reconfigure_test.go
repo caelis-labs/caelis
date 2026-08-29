@@ -658,8 +658,8 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 			}
 		})
 	}
-	if loaded.instance.lookup.HasAlias("ollama/blocked-model") || !loaded.instance.lookup.HasAlias(altAlias) {
-		t.Fatalf("active Session model snapshot changed: blocked=%v alt=%v", loaded.instance.lookup.HasAlias("ollama/blocked-model"), loaded.instance.lookup.HasAlias(altAlias))
+	if !loaded.instance.lookup.HasAlias("ollama/blocked-model") || loaded.instance.lookup.HasAlias(altAlias) {
+		t.Fatalf("active Session model catalog did not install fallback and apply deletion: blocked=%v alt=%v", loaded.instance.lookup.HasAlias("ollama/blocked-model"), loaded.instance.lookup.HasAlias(altAlias))
 	}
 	if got := loaded.instance.sandbox.RequestedType; got != "host" {
 		t.Fatalf("active Session sandbox = %q, want frozen host", got)

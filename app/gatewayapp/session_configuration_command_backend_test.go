@@ -88,6 +88,34 @@ func TestSessionModelCommandDoesNotChangeHostDefaultOrConfigurationRevision(t *t
 	}
 }
 
+func TestSessionModelCommandCanClearLocalSelection(t *testing.T) {
+	ctx := context.Background()
+	stack, active := newLocalStateTestStack(t)
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	active = mustCurrentSession(t, stack, active.SessionID)
+	revision := active.Revision
+
+	result, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID:             "session-model-clear",
+			SessionID:               active.SessionID,
+			ExpectedRevision:        &revision,
+			ExpectedControllerEpoch: active.Controller.EpochID,
+		},
+		Clear: true,
+	})
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != revision+1 {
+		t.Fatalf("UseSessionModel(clear) = %#v, %v", result, err)
+	}
+	state, err := stack.composition.sessions.SnapshotState(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := kernel.CurrentModelAlias(state); got != "" {
+		t.Fatalf("Session model after clear = %q, want empty", got)
+	}
+}
+
 func TestSessionPresentationAndApprovalCommandsKeepIndependentStateKeys(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{

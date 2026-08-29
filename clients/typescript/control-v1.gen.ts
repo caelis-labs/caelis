@@ -1203,6 +1203,7 @@ export interface SessionModeRequest {
 }
 
 export interface SessionModelRequest {
+  clear?: boolean;
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
   model: string;

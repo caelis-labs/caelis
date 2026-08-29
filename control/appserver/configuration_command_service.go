@@ -150,6 +150,12 @@ func validateSessionModelRequest(req SessionModelRequest) error {
 	if err := validateSessionConfigurationWrite(req.WriteBase); err != nil {
 		return err
 	}
+	if req.Clear {
+		if strings.TrimSpace(req.Model) != "" || strings.TrimSpace(req.ReasoningEffort) != "" {
+			return errors.New("controlclient: cleared Session model must not include a model or reasoning effort")
+		}
+		return nil
+	}
 	if strings.TrimSpace(req.Model) == "" {
 		return errors.New("controlclient: Session model is required")
 	}

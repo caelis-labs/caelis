@@ -127,6 +127,17 @@ func TestEveryWriteCommandAuthorizationIdempotencyCASAndUnknownOutcome(t *testin
 			}
 			return s.UseSessionModel(context.Background(), p, SessionModelRequest{WriteBase: WriteBase{OperationID: op, SessionID: "session-1", ExpectedRevision: &revision, ExpectedControllerEpoch: epoch}, Model: model})
 		}},
+		{"session model clear", ActionSessionModel, func(s *CommandService, p Principal, op string, changed bool) (CommandResult, error) {
+			request := SessionModelRequest{
+				WriteBase: WriteBase{OperationID: op, SessionID: "session-1", ExpectedRevision: &revision, ExpectedControllerEpoch: epoch},
+				Clear:     true,
+			}
+			if changed {
+				request.Clear = false
+				request.Model = "mimo"
+			}
+			return s.UseSessionModel(context.Background(), p, request)
+		}},
 		{"session controller mode", ActionSessionControllerMode, func(s *CommandService, p Principal, op string, changed bool) (CommandResult, error) {
 			mode := "code"
 			if changed {
@@ -628,6 +639,13 @@ func TestSessionConfigurationCommandsRejectInvalidScopeBeforeLedger(t *testing.T
 		{name: "missing revision", invoke: func(service *CommandService) (CommandResult, error) {
 			return service.UseSessionModel(context.Background(), Principal{ID: "owner"}, SessionModelRequest{
 				WriteBase: WriteBase{OperationID: "missing-revision", SessionID: "session-1"}, Model: "mimo",
+			})
+		}},
+		{name: "clear with model", invoke: func(service *CommandService) (CommandResult, error) {
+			return service.UseSessionModel(context.Background(), Principal{ID: "owner"}, SessionModelRequest{
+				WriteBase: WriteBase{OperationID: "clear-with-model", SessionID: "session-1", ExpectedRevision: &revision},
+				Model:     "mimo",
+				Clear:     true,
 			})
 		}},
 		{name: "missing controller epoch", invoke: func(service *CommandService) (CommandResult, error) {

@@ -246,9 +246,29 @@ func (a *SessionClientAdapter) DeleteModel(ctx context.Context, model string) er
 	if a == nil || a.configClient == nil || a.statusClient == nil {
 		return errors.New("app/gatewayapp/controladapter: configuration client is unavailable")
 	}
+	a.sessionChangeMu.Lock()
+	selectedSessionID := a.clientSessionID()
+	a.sessionChangeMu.Unlock()
 	before, err := a.addressedStatus(ctx, "", true)
 	if err != nil {
 		return fmt.Errorf("app/gatewayapp/controladapter: read Host configuration revision: %w", err)
+	}
+	selectedUsesDeletedModel := false
+	selectedModelReference := strings.TrimSpace(model)
+	if selectedSessionID != "" && a.sessionClient != nil {
+		selected, selectedErr := a.addressedStatus(ctx, selectedSessionID, false)
+		if selectedErr == nil {
+			selectedUsesDeletedModel = statusModelMatches(selected.ModelStatus, selectedModelReference)
+			if !selectedUsesDeletedModel && statusHasConfiguredModel(selected) && a.completionClient != nil {
+				if candidates, completionErr := a.CompleteSlashArg(ctx, "model use", "", 200); completionErr == nil {
+					selectedModelReference, selectedUsesDeletedModel = matchingStatusModelReference(
+						selected.ModelStatus,
+						selectedModelReference,
+						candidates,
+					)
+				}
+			}
+		}
 	}
 	revision := before.Configuration.Revision
 	result, commandErr := a.configClient.DeleteModel(ctx, appserver.DeleteModelRequest{
@@ -259,7 +279,108 @@ func (a *SessionClientAdapter) DeleteModel(ctx context.Context, model string) er
 		Model: strings.TrimSpace(model),
 	})
 	_, err = a.observeCommittedHostConfiguration(ctx, "model deletion", result, commandErr)
-	return err
+	if err != nil || !selectedUsesDeletedModel {
+		return err
+	}
+	selected, selectionErr := a.addressedStatus(ctx, selectedSessionID, false)
+	if selectionErr != nil {
+		return &appserver.CommandReceiptError{
+			Receipt: result,
+			Err: fmt.Errorf(
+				"app/gatewayapp/controladapter: model deletion committed as operation %q, but selected Session refresh could not be observed; do not retry the deletion blindly: %w",
+				result.OperationID,
+				selectionErr,
+			),
+		}
+	}
+	if !statusModelMatches(selected.ModelStatus, selectedModelReference) {
+		return nil
+	}
+	candidates, selectionErr := a.CompleteSlashArg(ctx, "model use", "", 1)
+	if selectionErr == nil && len(candidates) > 0 {
+		_, selectionErr = a.useModelForSelectedSession(ctx, selectedSessionID, candidates[0].Value, "")
+	} else if selectionErr == nil {
+		_, selectionErr = a.clearModelForSelectedSession(ctx, selectedSessionID)
+	}
+	if selectionErr == nil {
+		return nil
+	}
+	selectionErr = fmt.Errorf(
+		"app/gatewayapp/controladapter: model deletion committed as operation %q, but selected Session refresh failed; do not retry the deletion blindly: %w",
+		result.OperationID,
+		selectionErr,
+	)
+	return &appserver.CommandReceiptError{Receipt: result, Err: selectionErr}
+}
+
+func statusModelMatches(status controlstatus.StatusModel, model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	for _, value := range []string{status.Alias, status.Name, status.Display} {
+		value = strings.TrimSpace(value)
+		if strings.EqualFold(value, model) || strings.HasPrefix(strings.ToLower(value), strings.ToLower(model)+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+func matchingStatusModelReference(
+	status controlstatus.StatusModel,
+	model string,
+	candidates []controlprompt.SlashArgCandidate,
+) (string, bool) {
+	model = strings.TrimSpace(model)
+	if statusModelMatches(status, model) {
+		return model, true
+	}
+	for _, candidate := range candidates {
+		value := strings.TrimSpace(candidate.Value)
+		display := strings.TrimSpace(candidate.Display)
+		if !strings.EqualFold(model, value) && !strings.EqualFold(model, display) {
+			continue
+		}
+		reference := firstNonEmpty(display, value)
+		if statusModelMatches(status, reference) {
+			return reference, true
+		}
+	}
+	return model, false
+}
+
+func (a *SessionClientAdapter) clearModelForSelectedSession(
+	ctx context.Context,
+	selectedSessionID string,
+) (controlstatus.StatusSnapshot, error) {
+	a.sessionChangeMu.Lock()
+	defer a.sessionChangeMu.Unlock()
+	if current := a.clientSessionID(); current != strings.TrimSpace(selectedSessionID) {
+		return controlstatus.StatusSnapshot{}, fmt.Errorf(
+			"app/gatewayapp/controladapter: selected Session changed from %q to %q before model reset",
+			strings.TrimSpace(selectedSessionID),
+			current,
+		)
+	}
+	state, err := a.sessionClient.InspectSession(ctx, appserver.StateRequest{SessionID: selectedSessionID})
+	if err != nil {
+		return controlstatus.StatusSnapshot{}, err
+	}
+	if err := a.validateTUISessionController(state); err != nil {
+		return controlstatus.StatusSnapshot{}, err
+	}
+	revision := state.Revision
+	result, err := a.configClient.UseSessionModel(ctx, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID:             "session-model-clear-" + uuid.NewString(),
+			SessionID:               state.SessionID,
+			ExpectedRevision:        &revision,
+			ExpectedControllerEpoch: state.Controller.EpochID,
+		},
+		Clear: true,
+	})
+	return a.observeCommittedSessionConfiguration(ctx, "session model reset", result, err)
 }
 
 func (a *SessionClientAdapter) observeCommittedHostConfiguration(

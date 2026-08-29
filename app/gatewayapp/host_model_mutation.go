@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
@@ -179,10 +181,7 @@ func (s *controlCommandBackend) deleteHostModelAtRevision(ctx context.Context, a
 		return result, err
 	}
 	profileID := modelprofile.BuildProviderID(cfg.ID)
-	doc.AgentBindings, err = agentbinding.PrepareProfileRemoval(doc.AgentBindings, profileID)
-	if err != nil {
-		return result, err
-	}
+	doc.AgentBindings, _ = agentbinding.RemoveProfileBindings(doc.AgentBindings, profileID)
 	doc.ModelProfiles = modelprofile.Remove(doc.ModelProfiles, profileID)
 	if err := candidate.Delete(alias); err != nil {
 		return result, err
@@ -226,6 +225,7 @@ func (s *controlCommandBackend) deleteHostModelAtRevision(ctx context.Context, a
 				persistErr,
 				wrapOptionalError("gatewayapp: commit retired provider credentials", credentialTxn.commit()),
 				wrapOptionalError("gatewayapp: roll forward unobserved model configuration", s.observeCommittedModelConfiguration(ctx, saved)),
+				wrapOptionalError("gatewayapp: reconcile active Session model removal", s.reconcileDeletedModelProfile(ctx, cfg.ID)),
 			)
 		}
 		return result, persistErr
@@ -233,7 +233,12 @@ func (s *controlCommandBackend) deleteHostModelAtRevision(ctx context.Context, a
 	credentialCommitWarning := wrapOptionalError("gatewayapp: commit retired provider credentials", credentialTxn.commit())
 	result.EffectStarted = true
 	result.Revision = saved.ConfigurationRevision
-	result.Warning = errors.Join(persistWarning, credentialCommitWarning, s.observeCommittedModelConfiguration(ctx, saved))
+	result.Warning = errors.Join(
+		persistWarning,
+		credentialCommitWarning,
+		s.observeCommittedModelConfiguration(ctx, saved),
+		s.reconcileDeletedModelProfile(ctx, cfg.ID),
+	)
 	return result, nil
 }
 
@@ -280,8 +285,8 @@ func (s *controlCommandBackend) persistModelConfiguration(ctx context.Context, d
 }
 
 // observeCommittedModelConfiguration refreshes Host catalog/status state after
-// a CAS commit. It never rebuilds a Runtime; activated Sessions keep their
-// detached model and Agent assembly until release.
+// a CAS commit. Ordinary additions and default changes do not rebuild activated
+// Session Runtimes; explicit profile deletion is reconciled separately below.
 func (s *controlCommandBackend) observeCommittedModelConfiguration(ctx context.Context, committed AppConfig) error {
 	if s == nil || s.composition.lookup == nil || s.composition.authorities.store == nil {
 		return errors.New("gatewayapp: model lookup unavailable after configuration commit")
@@ -307,9 +312,181 @@ func (s *controlCommandBackend) observeCommittedModelConfiguration(ctx context.C
 		return fmt.Errorf("gatewayapp: rebuild committed model lookup: %w", err)
 	}
 	s.composition.lookup.Restore(candidate.Snapshot(), candidate.contextWindow)
+	if pins := s.composition.authorities.sessionModelPins; pins != nil {
+		pins.syncConfiguredModels(candidate.Snapshot().Configs)
+	}
 	s.composition.setRuntimeDefaultModelFromLookup()
 	if gw := s.composition.currentGateway(); gw != nil && gw.Resolver() != nil {
 		gw.Resolver().SetModelLookup(s.composition.lookup, s.composition.lookup.DefaultID())
+	}
+	return nil
+}
+
+// reconcileDeletedModelProfile removes one committed provider profile from
+// every live Session execution snapshot and repairs each affected durable
+// Session selection to the canonical fallback. In-flight work may finish with
+// values it already resolved, but later Turns and Spawn placement cannot keep
+// using a profile that no longer exists.
+func (s *controlCommandBackend) reconcileDeletedModelProfile(ctx context.Context, modelID string) error {
+	if s == nil || s.composition.authorities.store == nil {
+		return errors.New("gatewayapp: model configuration is unavailable after deletion")
+	}
+	reconcileCtx, cancel := context.WithTimeout(context.WithoutCancel(contextOrBackground(ctx)), 5*time.Second)
+	defer cancel()
+	runtimes := s.runtimeRegistry()
+	if runtimes != nil {
+		var unlock func()
+		var err error
+		reconcileCtx, unlock, err = runtimes.lockActivation(reconcileCtx)
+		if err != nil {
+			return fmt.Errorf("gatewayapp: serialize Session Runtime model removal: %w", err)
+		}
+		defer unlock()
+	}
+
+	for attempt := 0; attempt < sessionModelRecoveryMaxAttempts; attempt++ {
+		doc, err := s.composition.authorities.store.LoadContext(reconcileCtx)
+		if err != nil {
+			return fmt.Errorf("gatewayapp: read canonical model configuration after deletion: %w", err)
+		}
+		current, err := newModelLookupFromDocument(doc, 0)
+		if err != nil {
+			return fmt.Errorf("gatewayapp: rebuild canonical model catalog after deletion: %w", err)
+		}
+		if pins := s.composition.authorities.sessionModelPins; pins != nil {
+			pins.syncConfiguredModels(current.Snapshot().Configs)
+		}
+		var reconcileErr error
+		if runtimes != nil {
+			for _, runtime := range runtimes.snapshot() {
+				if runtime == nil || runtime.instance == nil {
+					continue
+				}
+				if err := runtime.instance.applyDeletedModelProfile(reconcileCtx, doc, modelID); err != nil {
+					reconcileErr = errors.Join(reconcileErr, fmt.Errorf("Session %q Runtime: %w", runtime.sessionID, err))
+					continue
+				}
+				active, err := runtimes.sessionService.Session(reconcileCtx, session.SessionRef{SessionID: runtime.sessionID})
+				if err != nil {
+					reconcileErr = errors.Join(reconcileErr, fmt.Errorf("Session %q state: %w", runtime.sessionID, err))
+					continue
+				}
+				if _, err := s.modelRecovery.repairMissingSessionModelSelection(reconcileCtx, runtimes.sessionService, active); err != nil {
+					reconcileErr = errors.Join(reconcileErr, fmt.Errorf("Session %q model selection: %w", runtime.sessionID, err))
+				}
+			}
+		}
+		observed, err := s.composition.authorities.store.LoadContext(reconcileCtx)
+		if err != nil {
+			return errors.Join(reconcileErr, fmt.Errorf("gatewayapp: verify canonical model configuration after deletion: %w", err))
+		}
+		if observed.ConfigurationRevision == doc.ConfigurationRevision {
+			return reconcileErr
+		}
+	}
+	return errors.New("gatewayapp: model removal reconciliation did not converge on a stable configuration revision")
+}
+
+func (s *runtimeComposition) applyDeletedModelProfile(ctx context.Context, doc AppConfig, modelID string) error {
+	if s == nil || s.lookup == nil {
+		return nil
+	}
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return nil
+	}
+
+	s.lookup.mu.RLock()
+	contextWindow := s.lookup.contextWindow
+	s.lookup.mu.RUnlock()
+	canonical, err := newModelLookupFromDocument(doc, contextWindow)
+	if err != nil {
+		return err
+	}
+	if s.authorities.apiKeyCredentials != nil {
+		canonical.resolveAPIKey = s.authorities.apiKeyCredentials.Get
+	}
+	canonicalConfig, profileConfigured := canonical.Config(modelID)
+	canonicalDefault := strings.TrimSpace(canonical.DefaultID())
+	install := make([]ModelConfig, 0, 2)
+	if canonicalDefault != "" && !s.lookup.HasAlias(canonicalDefault) {
+		fallback, ok := canonical.Config(canonicalDefault)
+		if !ok {
+			return fmt.Errorf("canonical default model %q is unavailable", canonicalDefault)
+		}
+		install = append(install, fallback)
+	}
+	if profileConfigured {
+		install = append(install, canonicalConfig)
+	}
+	installed := map[string]struct{}{}
+	for _, configured := range install {
+		key := strings.ToLower(strings.TrimSpace(configured.ID))
+		if _, ok := installed[key]; ok {
+			continue
+		}
+		installed[key] = struct{}{}
+		finishCredential, err := s.lookup.beginPinAPIKeyCredential(ctx, configured, canonical)
+		if err != nil {
+			return fmt.Errorf("pin canonical model %q credential: %w", configured.ID, err)
+		}
+		_, finishLookup, err := s.lookup.beginPinnedUpsert(configured)
+		if err != nil {
+			finishCredential(false)
+			return fmt.Errorf("install canonical model %q: %w", configured.ID, err)
+		}
+		finishLookup(true)
+		finishCredential(true)
+	}
+	s.lookup.mu.RLock()
+	contextWindow = s.lookup.contextWindow
+	s.lookup.mu.RUnlock()
+	snapshot := s.lookup.Snapshot()
+	remaining := snapshot.Configs[:0]
+	for _, configured := range snapshot.Configs {
+		if !profileConfigured && strings.EqualFold(strings.TrimSpace(configured.ID), modelID) {
+			continue
+		}
+		remaining = append(remaining, configured)
+	}
+	snapshot.Configs = remaining
+	snapshot.DefaultAlias = ""
+	snapshot.DefaultID = ""
+	snapshot.DefaultEffort = ""
+	for _, configured := range snapshot.Configs {
+		if strings.EqualFold(strings.TrimSpace(configured.ID), canonicalDefault) {
+			snapshot.DefaultID = configured.ID
+			snapshot.DefaultAlias = configured.Alias
+			snapshot.DefaultEffort = canonical.DefaultEffort()
+			break
+		}
+	}
+	s.lookup.Restore(snapshot, contextWindow)
+
+	nextPlacement := newPlacementSnapshot(doc)
+	s.placementCacheMu.Lock()
+	s.placementCache = nextPlacement
+	s.placementCacheGeneration++
+	s.placementCacheMu.Unlock()
+
+	s.mu.Lock()
+	if strings.EqualFold(strings.TrimSpace(s.activeRuntime.Model.ID), modelID) {
+		configured, _ := s.lookup.Config(modelID)
+		if !profileConfigured {
+			configured, _ = s.lookup.Config(s.lookup.DefaultID())
+		}
+		s.activeRuntime.Model = configured
+		s.activeRuntime.ModelProfileID = modelprofile.BuildProviderID(configured.ID)
+		if !profileConfigured {
+			s.activeRuntime.ModelProfileEffort = s.lookup.DefaultEffort()
+		} else if effort := modelcatalog.NormalizeReasoningEffort(s.activeRuntime.ModelProfileEffort); effort != "" && !modelConfigSupportsReasoningEffort(configured, effort) {
+			s.activeRuntime.ModelProfileEffort = ""
+		}
+	}
+	gateway := s.gateway
+	s.mu.Unlock()
+	if gateway != nil && gateway.Resolver() != nil {
+		gateway.Resolver().SetModelLookup(s.lookup, s.lookup.DefaultID())
 	}
 	return nil
 }

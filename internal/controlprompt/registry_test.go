@@ -17,6 +17,7 @@ func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
 		"orbit",
 		"zenith",
 		"connect",
+		"disconnect",
 		"subagent",
 		"plugin",
 		"model",
@@ -64,7 +65,7 @@ func TestDefaultSharedNamesExcludeTUIPrivateCommands(t *testing.T) {
 			t.Fatalf("DefaultSharedNamesForPlatform(linux) = %#v, want %q", got, want)
 		}
 	}
-	for _, hidden := range []string{"connect", "subagent", "plugin", "exit", "quit"} {
+	for _, hidden := range []string{"connect", "disconnect", "subagent", "plugin", "exit", "quit"} {
 		if sliceContainsString(got, hidden) {
 			t.Fatalf("DefaultSharedNamesForPlatform(linux) = %#v, should exclude TUI-private %q", got, hidden)
 		}
@@ -80,7 +81,7 @@ func TestDefaultACPNamesExposeACPPromptCommandsOnly(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DefaultACPNamesForPlatform(linux) = %#v, want %#v", got, want)
 	}
-	for _, hidden := range []string{"help", "agent", "subagent", "model", "new", "resume", "connect", "plugin", "exit", "quit"} {
+	for _, hidden := range []string{"help", "agent", "subagent", "model", "new", "resume", "connect", "disconnect", "plugin", "exit", "quit"} {
 		if sliceContainsString(got, hidden) {
 			t.Fatalf("DefaultACPNamesForPlatform(linux) = %#v, should exclude %q", got, hidden)
 		}
@@ -103,12 +104,12 @@ func TestHelpSnapshotUsesRegistrySpecs(t *testing.T) {
 }
 
 func TestRootArgCandidatesReturnsCopies(t *testing.T) {
-	first := RootArgCandidates("model")
+	first := RootArgCandidates("plugin")
 	if len(first) == 0 {
-		t.Fatal("RootArgCandidates(model) returned no candidates")
+		t.Fatal("RootArgCandidates(plugin) returned no candidates")
 	}
 	first[0].Value = "mutated"
-	second := RootArgCandidates("model")
+	second := RootArgCandidates("plugin")
 	if second[0].Value == "mutated" {
 		t.Fatalf("RootArgCandidates(model) leaked mutable backing slice: %#v", second)
 	}

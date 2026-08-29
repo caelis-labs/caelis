@@ -44,7 +44,8 @@ type runtimeComposition struct {
 	placementCacheGeneration uint64
 	// activeRuntime is the execution artifact installed with gateway/engine.
 	// Host process mutations publish only to process.config; detached values
-	// keep this activation-pinned snapshot for their complete lifetime.
+	// keep this activation-pinned snapshot for their complete lifetime except
+	// that explicit provider removal revokes the deleted model for later work.
 	activeRuntime      stackRuntimeConfig
 	sandbox            SandboxConfig
 	exec               sandbox.Runtime
@@ -69,10 +70,10 @@ type runtimeProcessState struct {
 	sandboxRevision  uint64
 }
 
-// sessionRuntimeActivation is the immutable selection snapshot for one
-// detached Session Runtime. The live model catalog is consulted only to
-// validate explicit later Session configuration writes; Turns keep using the
-// pinned lookup installed on runtimeComposition.
+// sessionRuntimeActivation is the selection snapshot for one detached Session
+// Runtime. Ordinary Host additions and default changes do not mutate it;
+// explicit provider removal revokes the deleted model from its live lookup and
+// placement before later Turns or Spawn resolve work.
 type sessionRuntimeActivation struct {
 	modelCatalog          *modelLookup
 	appConfig             *AppConfig

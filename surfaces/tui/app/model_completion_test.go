@@ -16,21 +16,18 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func TestModelDeleteSelectionOpensAliasPicker(t *testing.T) {
+func TestModelSelectionOpensReasoningPickerDirectly(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
 		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
-					{Value: "use", Display: "use"},
-					{Value: "del", Display: "del"},
-				}, nil
-			case "model use", "model del":
-				return []SlashArgCandidate{
 					{Value: "minimax/minimax-m1", Display: "minimax/minimax-m1"},
 					{Value: "alt-model", Display: "alt-model"},
 				}, nil
+			case "model use alt-model":
+				return []SlashArgCandidate{{Value: "none", Display: "none"}}, nil
 			default:
 				return nil, nil
 			}
@@ -41,17 +38,14 @@ func TestModelDeleteSelectionOpensAliasPicker(t *testing.T) {
 	model.slashArgIndex = 1
 	runCompletionCmd(t, model, model.applySlashArgCompletion())
 
-	if got := string(model.input); got != "/model del " {
-		t.Fatalf("input after /model del selection = %q, want %q", got, "/model del ")
+	if got := string(model.input); got != "/model use alt-model " {
+		t.Fatalf("input after model selection = %q, want %q", got, "/model use alt-model ")
 	}
-	if got := model.slashArgCommand; got != "model del" {
-		t.Fatalf("slashArgCommand = %q, want model del", got)
+	if got := model.slashArgCommand; got != "model use alt-model" {
+		t.Fatalf("slashArgCommand = %q, want model use alt-model", got)
 	}
-	if len(model.slashArgCandidates) != 2 {
-		t.Fatalf("slashArgCandidates count = %d, want 2", len(model.slashArgCandidates))
-	}
-	if got := model.slashArgCandidates[0].Value; got != "minimax/minimax-m1" {
-		t.Fatalf("first alias candidate = %q, want minimax/minimax-m1", got)
+	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "none" {
+		t.Fatalf("reasoning candidates = %#v, want none", model.slashArgCandidates)
 	}
 }
 
@@ -353,6 +347,28 @@ func TestTryOpenSlashArgPickerOpensModelUseList(t *testing.T) {
 	}
 }
 
+func TestTryOpenSlashArgPickerOpensModelListDirectly(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			if command != "model" {
+				return nil, nil
+			}
+			return []SlashArgCandidate{{Value: "ollama@local/ollama/qwen3", Display: "ollama/qwen3"}}, nil
+		},
+	})
+
+	opened, cmd := model.tryOpenSlashArgPicker("/model")
+	if !opened {
+		t.Fatal("tryOpenSlashArgPicker(/model) = false, want true")
+	}
+	runCompletionCmd(t, model, cmd)
+	if model.slashArgCommand != "model" || model.textarea.Value() != "/model " ||
+		len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Display != "ollama/qwen3" {
+		t.Fatalf("direct /model picker = command %q input %q candidates %#v", model.slashArgCommand, model.textarea.Value(), model.slashArgCandidates)
+	}
+}
+
 func TestPluginManageCompletionSubmitsPickerCommand(t *testing.T) {
 	var submitted string
 	model := NewModel(Config{
@@ -390,8 +406,6 @@ func TestModelUseSelectionOpensReasoningPicker(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
-				return []SlashArgCandidate{{Value: "use", Display: "use"}}, nil
-			case "model use":
 				return []SlashArgCandidate{{Value: "deepseek/deepseek-v4-pro", Display: "deepseek/deepseek-v4-pro"}}, nil
 			case "model use deepseek/deepseek-v4-pro":
 				return []SlashArgCandidate{{Value: "none", Display: "none"}, {Value: "high", Display: "high"}}, nil
@@ -402,10 +416,6 @@ func TestModelUseSelectionOpensReasoningPicker(t *testing.T) {
 	})
 
 	runCompletionCmd(t, model, model.openSlashArgPicker("model"))
-	runCompletionCmd(t, model, model.applySlashArgCompletion())
-	if got := string(model.input); got != "/model use " {
-		t.Fatalf("input after model action = %q, want /model use ", got)
-	}
 	runCompletionCmd(t, model, model.applySlashArgCompletion())
 	if got := string(model.input); got != "/model use deepseek/deepseek-v4-pro " {
 		t.Fatalf("input after model alias = %q, want alias plus trailing space", got)
@@ -1391,19 +1401,19 @@ func TestSlashCommandTabKeepsArrowSelectedCandidateAcrossRefresh(t *testing.T) {
 	}
 }
 
-func TestModelActionPrefixTypingOpensMatchingAliasPicker(t *testing.T) {
+func TestModelPrefixTypingOpensMatchingReasoningPicker(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
 		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
-					{Value: "use", Display: "use"},
-					{Value: "del", Display: "del"},
+					{Value: "user/model", Display: "user/model"},
+					{Value: "deepseek/model", Display: "deepseek/model"},
 				}, nil
-			case "model del":
+			case "model use deepseek/model":
 				return []SlashArgCandidate{
-					{Value: "minimax/minimax-m2.7-highspeed", Display: "minimax/minimax-m2.7-highspeed"},
+					{Value: "none", Display: "none"},
 				}, nil
 			default:
 				return nil, nil
@@ -1418,8 +1428,8 @@ func TestModelActionPrefixTypingOpensMatchingAliasPicker(t *testing.T) {
 	if got := model.slashArgCommand; got != "model" {
 		t.Fatalf("slashArgCommand = %q, want model", got)
 	}
-	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "del" {
-		t.Fatalf("slashArgCandidates = %#v, want only del candidate", model.slashArgCandidates)
+	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "deepseek/model" {
+		t.Fatalf("slashArgCandidates = %#v, want only deepseek/model", model.slashArgCandidates)
 	}
 
 	handled, cmd := model.handleSlashArgKey(keyPress("enter"))
@@ -1429,11 +1439,11 @@ func TestModelActionPrefixTypingOpensMatchingAliasPicker(t *testing.T) {
 	if cmd != nil {
 		cmd()
 	}
-	if got := string(model.input); got != "/model del " {
-		t.Fatalf("input after /model de enter = %q, want /model del ", got)
+	if got := string(model.input); got != "/model use deepseek/model " {
+		t.Fatalf("input after /model de enter = %q, want model selection", got)
 	}
-	if got := model.slashArgCommand; got != "model del" {
-		t.Fatalf("slashArgCommand after /model de enter = %q, want model del", got)
+	if got := model.slashArgCommand; got != "model use deepseek/model" {
+		t.Fatalf("slashArgCommand after /model de enter = %q, want reasoning picker", got)
 	}
 }
 
@@ -1444,8 +1454,8 @@ func TestModelActionPrefixTypingFiltersCandidatesWhenCursorLags(t *testing.T) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
-					{Value: "use", Display: "use"},
-					{Value: "del", Display: "del"},
+					{Value: "user/model", Display: "user/model"},
+					{Value: "deepseek/model", Display: "deepseek/model"},
 				}, nil
 			default:
 				return nil, nil
@@ -1458,8 +1468,8 @@ func TestModelActionPrefixTypingFiltersCandidatesWhenCursorLags(t *testing.T) {
 	model.cursor = len([]rune("/model "))
 	syncSlashInputOverlaysForTest(t, model)
 
-	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "del" {
-		t.Fatalf("slashArgCandidates with lagging cursor = %#v, want only del candidate", model.slashArgCandidates)
+	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "deepseek/model" {
+		t.Fatalf("slashArgCandidates with lagging cursor = %#v, want only deepseek/model", model.slashArgCandidates)
 	}
 }
 
@@ -1470,8 +1480,8 @@ func TestModelActionPrefixTypingResetsSelectionToFirstFilteredCandidate(t *testi
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
-					{Value: "use", Display: "use"},
-					{Value: "del", Display: "del"},
+					{Value: "user/model", Display: "user/model"},
+					{Value: "deepseek/model", Display: "deepseek/model"},
 				}, nil
 			default:
 				return nil, nil
@@ -1484,8 +1494,8 @@ func TestModelActionPrefixTypingResetsSelectionToFirstFilteredCandidate(t *testi
 	model.setInputText("/model us")
 	model.syncTextareaFromInput()
 	syncSlashInputOverlaysForTest(t, model)
-	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "use" {
-		t.Fatalf("slashArgCandidates after /model us = %#v, want only use", model.slashArgCandidates)
+	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "user/model" {
+		t.Fatalf("slashArgCandidates after /model us = %#v, want only user/model", model.slashArgCandidates)
 	}
 	if model.currentSlashArgIndex(model.slashArgCandidates) != 0 {
 		t.Fatalf("currentSlashArgIndex after /model us = %d, want 0", model.currentSlashArgIndex(model.slashArgCandidates))
@@ -1495,8 +1505,8 @@ func TestModelActionPrefixTypingResetsSelectionToFirstFilteredCandidate(t *testi
 	model.setInputText("/model de")
 	model.syncTextareaFromInput()
 	syncSlashInputOverlaysForTest(t, model)
-	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "del" {
-		t.Fatalf("slashArgCandidates after /model de = %#v, want only del", model.slashArgCandidates)
+	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "deepseek/model" {
+		t.Fatalf("slashArgCandidates after /model de = %#v, want only deepseek/model", model.slashArgCandidates)
 	}
 	if model.currentSlashArgIndex(model.slashArgCandidates) != 0 {
 		t.Fatalf("currentSlashArgIndex after /model de = %d, want 0", model.currentSlashArgIndex(model.slashArgCandidates))
@@ -1726,8 +1736,8 @@ func TestModelActionPrefixTypingFiltersCandidatesDuringLiveInput(t *testing.T) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
-					{Value: "use", Display: "use"},
-					{Value: "del", Display: "del"},
+					{Value: "user/model", Display: "user/model"},
+					{Value: "deepseek/model", Display: "deepseek/model"},
 				}, nil
 			default:
 				return nil, nil
@@ -1747,8 +1757,8 @@ func TestModelActionPrefixTypingFiltersCandidatesDuringLiveInput(t *testing.T) {
 	if got := model.slashArgCommand; got != "model" {
 		t.Fatalf("slashArgCommand = %q, want model", got)
 	}
-	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "del" {
-		t.Fatalf("slashArgCandidates after live input = %#v, want only del candidate", model.slashArgCandidates)
+	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "deepseek/model" {
+		t.Fatalf("slashArgCandidates after live input = %#v, want only deepseek/model", model.slashArgCandidates)
 	}
 }
 
@@ -1777,8 +1787,8 @@ func TestModelActionPrefixTypingUsesTextareaValueAsSourceOfTruth(t *testing.T) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
-					{Value: "use", Display: "use"},
-					{Value: "del", Display: "del"},
+					{Value: "user/model", Display: "user/model"},
+					{Value: "deepseek/model", Display: "deepseek/model"},
 				}, nil
 			default:
 				return nil, nil
@@ -1795,8 +1805,8 @@ func TestModelActionPrefixTypingUsesTextareaValueAsSourceOfTruth(t *testing.T) {
 	if got := model.slashArgCommand; got != "model" {
 		t.Fatalf("slashArgCommand = %q, want model", got)
 	}
-	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "del" {
-		t.Fatalf("slashArgCandidates from textarea source = %#v, want only del candidate", model.slashArgCandidates)
+	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "deepseek/model" {
+		t.Fatalf("slashArgCandidates from textarea source = %#v, want only deepseek/model", model.slashArgCandidates)
 	}
 }
 
@@ -1839,7 +1849,7 @@ func TestSlashCompletionRendersDescriptionsWithoutHeaderOrBorder(t *testing.T) {
 	if strings.ContainsAny(rendered, "┌┐└┘│─") || strings.ContainsAny(rendered, "╭╮╰╯│─") {
 		t.Fatalf("renderSlashCommandList() = %q, should not show borders", rendered)
 	}
-	for _, want := range []string{"/model", "Switch or delete a configured model alias", "/status", "Show current provider"} {
+	for _, want := range []string{"/model", "Choose the model for the current or next session", "/status", "Show current provider"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("renderSlashCommandList() = %q, want %q", rendered, want)
 		}
@@ -2344,8 +2354,8 @@ func TestModelActionPrefixTypingFiltersCandidatesDuringPaste(t *testing.T) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
-					{Value: "use", Display: "use"},
-					{Value: "del", Display: "del"},
+					{Value: "user/model", Display: "user/model"},
+					{Value: "deepseek/model", Display: "deepseek/model"},
 				}, nil
 			default:
 				return nil, nil
@@ -2362,8 +2372,8 @@ func TestModelActionPrefixTypingFiltersCandidatesDuringPaste(t *testing.T) {
 	if got := model.slashArgCommand; got != "model" {
 		t.Fatalf("slashArgCommand after paste = %q, want model", got)
 	}
-	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "del" {
-		t.Fatalf("slashArgCandidates after paste = %#v, want only del candidate", model.slashArgCandidates)
+	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "deepseek/model" {
+		t.Fatalf("slashArgCandidates after paste = %#v, want only deepseek/model", model.slashArgCandidates)
 	}
 }
 
@@ -2374,8 +2384,8 @@ func TestModelActionPrefixTypingFiltersCandidatesWhenTerminalBatchesInput(t *tes
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
-					{Value: "use", Display: "use"},
-					{Value: "del", Display: "del"},
+					{Value: "user/model", Display: "user/model"},
+					{Value: "deepseek/model", Display: "deepseek/model"},
 				}, nil
 			default:
 				return nil, nil
@@ -2392,8 +2402,8 @@ func TestModelActionPrefixTypingFiltersCandidatesWhenTerminalBatchesInput(t *tes
 	if got := model.slashArgCommand; got != "model" {
 		t.Fatalf("slashArgCommand after batched key = %q, want model", got)
 	}
-	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "del" {
-		t.Fatalf("slashArgCandidates after batched key = %#v, want only del candidate", model.slashArgCandidates)
+	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "deepseek/model" {
+		t.Fatalf("slashArgCandidates after batched key = %#v, want only deepseek/model", model.slashArgCandidates)
 	}
 }
 
@@ -2404,8 +2414,8 @@ func TestModelActionPrefixTypingFiltersCandidatesAfterSlashThenBatchedTail(t *te
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
-					{Value: "use", Display: "use"},
-					{Value: "del", Display: "del"},
+					{Value: "user/model", Display: "user/model"},
+					{Value: "deepseek/model", Display: "deepseek/model"},
 				}, nil
 			default:
 				return nil, nil
@@ -2424,8 +2434,8 @@ func TestModelActionPrefixTypingFiltersCandidatesAfterSlashThenBatchedTail(t *te
 	if got := model.slashArgCommand; got != "model" {
 		t.Fatalf("slashArgCommand after slash + batched tail = %q, want model", got)
 	}
-	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "del" {
-		t.Fatalf("slashArgCandidates after slash + batched tail = %#v, want only del candidate", model.slashArgCandidates)
+	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "deepseek/model" {
+		t.Fatalf("slashArgCandidates after slash + batched tail = %#v, want only deepseek/model", model.slashArgCandidates)
 	}
 }
 

@@ -94,10 +94,6 @@ func (r *sessionModelRecovery) repairMissingSessionModelSelection(
 		if currentModel == "" {
 			return active, nil
 		}
-		if pinned, ok := r.pins.config(active.SessionID); ok && strings.EqualFold(pinned.ID, currentModel) {
-			return active, nil
-		}
-
 		doc, err := r.store.LoadContext(ctx)
 		if err != nil {
 			return active, err
@@ -112,18 +108,25 @@ func (r *sessionModelRecovery) repairMissingSessionModelSelection(
 		if err != nil {
 			return active, err
 		}
-		if catalog.HasAlias(currentModel) {
+		if r.pins != nil {
+			r.pins.syncConfiguredModels(catalog.Snapshot().Configs)
+		}
+		currentConfig, currentConfigured := catalog.Config(currentModel)
+		currentEffort := modelcatalog.NormalizeReasoningEffort(kernel.CurrentReasoningEffort(state))
+		if currentConfigured && (currentEffort == "" || modelConfigSupportsReasoningEffort(currentConfig, currentEffort)) {
 			return active, nil
 		}
 
-		fallbackID := strings.TrimSpace(catalog.DefaultID())
-		if fallbackID == "" {
-			if choices := catalog.ListModelChoices(); len(choices) > 0 {
-				fallbackID = strings.TrimSpace(choices[0].ID)
+		fallback, hasFallback := currentConfig, currentConfigured
+		if !hasFallback {
+			fallbackID := strings.TrimSpace(catalog.DefaultID())
+			if fallbackID == "" {
+				if choices := catalog.ListModelChoices(); len(choices) > 0 {
+					fallbackID = strings.TrimSpace(choices[0].ID)
+				}
 			}
+			fallback, hasFallback = catalog.Config(fallbackID)
 		}
-		fallback, hasFallback := catalog.Config(fallbackID)
-		currentEffort := modelcatalog.NormalizeReasoningEffort(kernel.CurrentReasoningEffort(state))
 		expectedRevision := active.Revision
 		updated, err := sessions.UpdateState(ctx, session.UpdateStateRequest{
 			SessionRef:       active.SessionRef,

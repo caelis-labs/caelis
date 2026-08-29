@@ -120,10 +120,13 @@ the current Turn with `guardian_unavailable`, executes no requested action, and
 does not silently fall back to manual approval. Retry the Turn after Guardian is
 available, or use `/mode manual` before starting sensitive work.
 
-Provider setup and API-key replacement are available only through `/connect`.
-Runtime startup never creates or overwrites model profiles or credentials.
-`/model use` changes the global default by storing one existing ModelProfile ID
-and one supported reasoning effort; it does not rewrite the profile definition.
+`/connect` starts by separating account sign-in, API-key/provider setup (also
+used for local providers such as Ollama), and local ACP Agents. Runtime startup
+never creates or overwrites model profiles or credentials. `/model` opens the
+model picker directly; with a selected Session it changes that Session, and
+otherwise it changes the Host default by storing one existing ModelProfile ID
+and one supported reasoning effort. `/disconnect provider` removes a provider
+profile, while `/disconnect acp` removes a connected local ACP Agent.
 
 Use `/subagent` to configure the fixed Caelis delegation profiles: Breeze for
 fast bounded work, Orbit for general implementation and review, and Zenith for

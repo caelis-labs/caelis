@@ -167,17 +167,21 @@ Spawn workspace and Task-stream contract.
 
 ## Disconnect Safety
 
-Disconnect is a Host-scoped AppServer command with an idempotency key and an
-expected Host configuration revision. Its explicit confirmation authorizes
-removal of the external Agent, its ACP profiles, and every binding to those
-profiles, including a system-Agent binding, in one configuration
-compare-and-save. This lifecycle cleanup is intentionally stronger than ordinary
-model deletion, which still requires a system Agent to be rebound or reset
-first. A committed configuration write is never undone with an unconditional
-rollback; later assembly refresh failures are reported as committed warnings.
+`/disconnect acp` is a Host-scoped AppServer command with an idempotency key and
+an expected Host configuration revision. Selecting the Agent in that explicit
+command authorizes removal without a second confirmation prompt. Control removes
+the external Agent, its ACP profiles, and every binding to those profiles,
+including a system-Agent binding, in one configuration compare-and-save. A
+committed configuration write is never undone with an unconditional rollback;
+later assembly refresh failures are reported as committed warnings.
 
-Disconnect changes the Host configuration available to future Session Runtime
-activations. It does not scan durable Sessions, rewrite their controller or
+`/disconnect provider` is the separate provider-profile operation. It removes
+every binding to that provider profile and refreshes live Runtime model catalogs,
+placement, and affected durable Session model selection immediately; it never
+removes an ACP Agent connection.
+
+`/disconnect acp` changes the Host configuration available to future Session
+Runtime activations. It does not scan durable Sessions, rewrite their controller or
 participant history, or invalidate a Runtime that was already assembled. Such
 an activated Runtime may continue to use the external Agent endpoint captured
 in its immutable configuration snapshot until the Runtime is released, the

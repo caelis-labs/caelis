@@ -111,8 +111,9 @@ Document responsibilities are intentionally separate:
   pin, from a revision-stable AppConfig/credential observation into a
   Runtime-owned process-local snapshot; Control extends that snapshot only when
   a later model pin commits and copies child Session pins from it. Host
-  credential retirement therefore cannot interrupt work that already owns a
-  Runtime reference.
+  credential retirement therefore cannot interrupt an invocation that already
+  resolved its credential; explicit provider removal prevents later Runtime
+  resolutions from using that profile.
   Interactive Codex and Grok authentication is admitted by a
   fail-fast, process-local gate per OAuth flow. It never creates a durable
   command-lock file or waits behind another user interaction. Short credential
@@ -266,15 +267,18 @@ Document responsibilities are intentionally separate:
   Runtime; the next work-bearing activation naturally assembles current
   configuration. This is reference counting plus running state, not another
   lease, timer, persisted generation, or user-facing reload command. Prompt,
-  skill, plugin, tool, sandbox, Agent, and placement changes therefore affect
-  later activations rather than mutating a live Runtime. The App model catalog is a
-  deliberate exception: `/connect` and `/model del` are immediately visible to
-  every model picker, while `/model use` writes either the selected Session or,
-  when no Session is selected, the persisted Host default. A live Runtime pins
-  every model it has selected so deleting a catalog entry cannot interrupt it.
-  When a dormant Session reconnects, a missing durable model reference is
-  revision-safely repaired to the current default (or cleared when no model is
-  configured) before the reconnect snapshot is returned.
+  skill, plugin, tool, sandbox, and ordinary Agent or placement changes
+  therefore affect later activations rather than mutating a live Runtime. The
+  App model catalog has two deliberate live exceptions. `/connect` is
+  immediately visible to every model picker. `/disconnect provider` removes the
+  profile and its Agent bindings from every live Runtime catalog and placement
+  snapshot; an affected durable Session selection is revision-safely changed to
+  the current default, or cleared when no model remains. An already-resolved
+  in-flight invocation may finish, but a later Turn or Spawn cannot resolve the
+  deleted profile. `/model` writes either the selected Session or, when no
+  Session is selected, the persisted Host default. When a dormant Session
+  reconnects, the same missing-reference repair runs before the reconnect
+  snapshot is returned.
   No workspace configuration generation or Session-to-generation binding is
   persisted; durable Sessions store only canonical workspace identity.
   Session activation and app configuration mutation are independent: assembly
@@ -283,9 +287,10 @@ Document responsibilities are intentionally separate:
   atomic compare-and-save boundary; current-schema readers consume a complete
   atomic-replacement snapshot without taking the writer lock. Only legacy
   migration enters a read-side lock.
-  Writers do not scan or rewrite already activated Session state. Runtime
-  release first hides its Runtime from routing, waits already-routed synchronous
-  mutations and Runtime producers, and shutdown drains in-flight assembly and
+  Writers ordinarily do not scan or rewrite already activated Session state;
+  committed provider-profile removal is the narrow exception described above.
+  Runtime release first hides its Runtime from routing, waits already-routed
+  synchronous mutations and Runtime producers, and shutdown drains in-flight assembly and
   release before closing all Session Gateways and the Host composition. Product
   topology is one live Control Host per store. A bare
   TUI, Headless, or product ACP launch discovers the user-private local Host,

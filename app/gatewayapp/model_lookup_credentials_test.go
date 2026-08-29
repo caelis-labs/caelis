@@ -10,10 +10,85 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 )
+
+func TestBrokenUnusedProviderCredentialDoesNotBlockObservationOrStartup(t *testing.T) {
+	ctx := context.Background()
+	stack, _ := newLocalStateTestStack(t)
+	t.Cleanup(func() {
+		if stack != nil {
+			_ = stack.Close()
+		}
+	})
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	before, err := stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultID := stack.composition.lookup.DefaultID()
+	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID:      "broken-unused-credential-connect",
+			ExpectedRevision: &before.ConfigurationRevision,
+		},
+		Config: appserver.ConnectConfig{
+			Provider: "openai",
+			Model:    "broken-unused-credential-model",
+			BaseURL:  "https://broken-unused-credential.example/v1",
+			APIKey:   "broken-unused-secret",
+		},
+	})
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
+	}
+	configured, err := stack.composition.lookup.ResolveConfig("openai/broken-unused-credential-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.composition.authorities.apiKeyCredentials.Delete(ctx, configured.CredentialRef); err != nil {
+		t.Fatal(err)
+	}
+
+	// A missing credential for a non-selected profile must not turn an
+	// unrelated committed configuration change into a post-commit warning.
+	if err := stack.useTestHostModel(ctx, session.SessionRef{}, defaultID); err != nil {
+		t.Fatalf("UseModel(default) with broken unused credential: %v", err)
+	}
+
+	storeDir := stack.composition.authorities.storeDir
+	workspace := stack.composition.workspace
+	appName := stack.composition.authorities.appName
+	userID := stack.composition.authorities.userID
+	if err := stack.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stack = nil
+
+	restarted, err := NewLocalStack(Config{
+		AppName:      appName,
+		UserID:       userID,
+		StoreDir:     storeDir,
+		WorkspaceKey: workspace.Key,
+		WorkspaceCWD: workspace.CWD,
+		ApprovalMode: "auto-review",
+		Sandbox:      SandboxConfig{RequestedType: "host"},
+		SkillDirs:    []string{t.TempDir()},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() with broken unused credential: %v", err)
+	}
+	stack = restarted
+	if got := restarted.composition.lookup.DefaultID(); got != defaultID {
+		t.Fatalf("restarted default model = %q, want %q", got, defaultID)
+	}
+	if _, err := restarted.composition.lookup.ResolveModel(ctx, configured.ID, 0); err == nil {
+		t.Fatal("ResolveModel() with the broken target credential succeeded")
+	}
+}
 
 func TestRuntimeCredentialSnapshotPinsLateModelAndProcessLocalChildCopy(t *testing.T) {
 	ctx := context.Background()

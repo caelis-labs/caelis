@@ -17,6 +17,9 @@ type SessionModelRequest struct {
 	WriteBase
 	Model           string `json:"model"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Clear removes the Session override when no provider model remains.
+	// Model and ReasoningEffort must be empty when Clear is true.
+	Clear bool `json:"clear,omitempty"`
 }
 
 // SessionControllerModeRequest selects one mode on the currently bound

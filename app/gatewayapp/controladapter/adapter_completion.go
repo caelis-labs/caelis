@@ -140,8 +140,15 @@ func (d *assembler) CompleteSlashArg(ctx context.Context, command string, query 
 	command = strings.TrimSpace(command)
 	normalizedCommand := strings.ToLower(command)
 	switch normalizedCommand {
-	case "model use", "model del":
+	case "model", "model use", "model del", "disconnect-provider":
 		return d.completeModelAliases(ctx, query, limit)
+	case "disconnect":
+		return filterSlashCandidates([]controlprompt.SlashArgCandidate{
+			{Value: "provider", Display: "Provider", Detail: "Disconnect a configured provider model"},
+			{Value: "acp", Display: "ACP Agent", Detail: "Disconnect a local ACP Agent"},
+		}, query, limit), nil
+	case "disconnect-acp":
+		return completeConnectDisconnectAgents(ctx, d, query, limit)
 	case "plugin rm":
 		return d.completePluginIDs(ctx, query, limit)
 	case "plugin marketplace":

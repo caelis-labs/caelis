@@ -76,7 +76,7 @@ func defaultSpecs() []CommandSpec {
 	for _, spec := range append(defaultSharedSpecs(), defaultTUISpecs()...) {
 		byName[spec.Name] = spec
 	}
-	order := []string{"help", "review", "breeze", "orbit", "zenith", "connect", "subagent", "plugin", "model", "status", "doctor", "new", "resume", "compact", "exit", "quit"}
+	order := []string{"help", "review", "breeze", "orbit", "zenith", "connect", "disconnect", "subagent", "plugin", "model", "status", "doctor", "new", "resume", "compact", "exit", "quit"}
 	specs := make([]CommandSpec, 0, len(order))
 	for _, name := range order {
 		if spec, ok := byName[name]; ok {
@@ -93,7 +93,7 @@ func defaultSharedSpecs() []CommandSpec {
 		{Name: "breeze", Usage: "/breeze <prompt>", Description: "Run the bound Breeze profile"},
 		{Name: "orbit", Usage: "/orbit <prompt>", Description: "Run the bound Orbit profile"},
 		{Name: "zenith", Usage: "/zenith <prompt>", Description: "Run the bound Zenith profile"},
-		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", Details: []string{"actions: use <alias> [effort], del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
+		{Name: "model", Usage: "/model", Description: "Choose the model for the current or next session", DynamicCompleter: true},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info"},
 		{Name: "doctor", Usage: "/doctor", Description: "Diagnose and repair Windows sandbox readiness", Platforms: []string{"windows"}},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
@@ -106,6 +106,7 @@ func defaultSharedSpecs() []CommandSpec {
 func defaultTUISpecs() []CommandSpec {
 	specs := []CommandSpec{
 		{Name: "connect", Usage: "/connect", Description: "Connect a model provider or local ACP Agent", DynamicCompleter: true},
+		{Name: "disconnect", Usage: "/disconnect", Description: "Disconnect a provider model or local ACP Agent", DynamicCompleter: true},
 		{Name: "subagent", Usage: "/subagent <action>", Description: "List or bind delegation profiles and system Agents", DynamicCompleter: true, Details: []string{"actions: list; bind <breeze|orbit|zenith> <self|agent> [effort]; bind <guardian|reviewer> <default|model-agent> [effort]"}},
 		{Name: "plugin", Usage: "/plugin <action>", Description: "Manage Caelis plugins", Details: []string{"actions: install <plugin@marketplace|path>, marketplace add|list|update|rm, manage, rm <id>"}, ArgCandidates: pluginRootCandidates(), DynamicCompleter: true},
 		{Name: "exit", Usage: "/exit", Description: "Exit the TUI"},
@@ -328,13 +329,6 @@ func RootArgCandidatesForPlatform(command string, goos string) []SlashArgCandida
 	out := make([]SlashArgCandidate, len(spec.ArgCandidates))
 	copy(out, spec.ArgCandidates)
 	return out
-}
-
-func modelRootCandidates() []SlashArgCandidate {
-	return []SlashArgCandidate{
-		{Value: "use", Display: "use", Detail: "Switch current model alias"},
-		{Value: "del", Display: "del", Detail: "Delete stored model alias"},
-	}
 }
 
 func pluginRootCandidates() []SlashArgCandidate {
