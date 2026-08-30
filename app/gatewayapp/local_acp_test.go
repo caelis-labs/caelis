@@ -246,6 +246,9 @@ func newStackForToolTest(t *testing.T, resolved assembly.ResolvedAssembly) *Stac
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
+	// Close before t.TempDir cleanup. Deferred Runtime use-release can otherwise
+	// schedule an idle Session writer that races Linux RemoveAll.
+	t.Cleanup(func() { _ = stack.Close() })
 	return stack
 }
 

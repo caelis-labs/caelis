@@ -563,6 +563,11 @@ func TestSpawnedSessionCannotUseDeletedParentRuntimeProfile(t *testing.T) {
 		t.Fatalf("UseSessionModel() = %#v, %v", selected, err)
 	}
 	parentRuntime := activateSessionRuntime(t, stack, parent.SessionID)
+	releaseParent, err := stack.sessionRuntimes.acquireRuntimeUse(parentRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseParent()
 	agentConfig, err := parentRuntime.instance.materializeDelegatedModel("", profile.ID, "high", parentRuntime.instance.activeRuntime)
 	if err != nil {
 		t.Fatalf("materializeDelegatedModel() before deletion: %v", err)
@@ -575,6 +580,11 @@ func TestSpawnedSessionCannotUseDeletedParentRuntimeProfile(t *testing.T) {
 		t.Fatalf("prepareSpawnedACPSession() before deletion: %v", err)
 	}
 	childRuntime := activateSessionRuntime(t, stack, child.SessionID)
+	releaseChild, err := stack.sessionRuntimes.acquireRuntimeUse(childRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseChild()
 	if _, ok := stack.composition.authorities.sessionModelPins.config(ctx, child.SessionID); !ok {
 		t.Fatal("child Session model pin was not retained before deletion")
 	}
@@ -615,6 +625,7 @@ func TestSpawnedSessionCannotUseDeletedParentRuntimeProfile(t *testing.T) {
 	if _, err := parentRuntime.instance.prepareSpawnedACPSession(ctx, tasksubagent.SpawnContext{}, lateChild.SessionID, agentConfig); err == nil || !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("prepareSpawnedACPSession() with revoked pin error = %v, want not configured", err)
 	}
+	releaseChild()
 	if err := stack.sessionRuntimes.release(ctx, child.SessionID); err != nil {
 		t.Fatal(err)
 	}
@@ -770,6 +781,11 @@ func TestProviderDeletionConvergesConcurrentSameIDReconnect(t *testing.T) {
 		t.Fatalf("UseSessionModel() = %#v, %v", selected, err)
 	}
 	runtime := activateSessionRuntime(t, stack, active.SessionID)
+	releaseRuntime, err := stack.sessionRuntimes.acquireRuntimeUse(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseRuntime()
 	oldAgentConfig, err := runtime.instance.materializeDelegatedModel("", profile.ID, "high", runtime.instance.activeRuntime)
 	if err != nil {
 		t.Fatal(err)
