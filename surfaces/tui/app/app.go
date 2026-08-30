@@ -239,7 +239,7 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) appendWelcomeCard() {
-	m.doc.Append(NewWelcomeBlock(m.cfg.Version))
+	m.doc.Append(newWelcomeBlock(m.cfg.Version, m.cfg.WelcomeNotice))
 	m.hasCommittedLine = true
 	m.lastCommittedStyle = tuikit.LineStyleDefault
 }

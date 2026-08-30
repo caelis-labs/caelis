@@ -14,7 +14,7 @@ type welcomeAction struct {
 
 var welcomeActions = []welcomeAction{
 	{token: welcomeActionTokenResume, label: "Resume Session", command: "/resume"},
-	{token: welcomeActionTokenModel, label: "Switch Model", command: "/model use"},
+	{token: welcomeActionTokenModel, label: "Switch Model", command: "/model"},
 	{token: welcomeActionTokenConnect, label: "Connect", command: "/connect"},
 	{token: welcomeActionTokenQuit, label: "Quit", command: "/quit"},
 }

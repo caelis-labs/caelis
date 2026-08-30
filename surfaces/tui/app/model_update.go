@@ -1,34 +1,31 @@
 package tuiapp
 
 import (
-	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 )
 
-func formatUpdateHint(latestVersion string) string {
+func formatUpdateNotice(latestVersion string) string {
 	latest := strings.TrimSpace(latestVersion)
 	if latest == "" {
 		return ""
 	}
-	return fmt.Sprintf("Update %s available. Press Ctrl+U to update.", latest)
+	return latest + " · Ctrl+U"
 }
 
 func (m *Model) handleUpdateCheckResult(msg UpdateCheckResultMsg) (tea.Model, tea.Cmd) {
 	if m == nil || m.updateOffered || m.turnRunning() || !msg.Eligible {
 		return m, nil
 	}
-	text := formatUpdateHint(msg.LatestVersion)
-	if text == "" {
+	text := formatUpdateNotice(msg.LatestVersion)
+	if text == "" ||
+		!welcomePanelSupportsNotice(m.blockRenderContext(maxInt(1, m.viewport.Width()))) ||
+		!m.setWelcomeNotice(text) {
 		return m, nil
 	}
 	m.updateOffered = true
-	cmd := m.showHint(text, hintOptions{
-		priority: HintPriorityNormal,
-	})
-	m.updateHintID = m.nextHintID
-	return m, cmd
+	return m, nil
 }
 
 func (m *Model) handleUpdateKey() (tea.Model, tea.Cmd) {
@@ -46,8 +43,31 @@ func (m *Model) revokeUpdateOffer() {
 		return
 	}
 	m.updateOffered = false
-	if m.updateHintID != 0 {
-		m.removeHintByID(m.updateHintID)
-		m.updateHintID = 0
+	m.setWelcomeNotice(m.cfg.WelcomeNotice)
+}
+
+func (m *Model) setWelcomeNotice(notice string) bool {
+	if m == nil || m.doc == nil {
+		return false
 	}
+	notice = normalizeWelcomeNotice(notice)
+	found := false
+	changed := false
+	for _, block := range m.doc.FindByKind(BlockWelcome) {
+		welcome, ok := block.(*WelcomeBlock)
+		if !ok {
+			continue
+		}
+		found = true
+		if welcome.Notice == notice {
+			continue
+		}
+		welcome.Notice = notice
+		m.markViewportBlockDirty(welcome.BlockID())
+		changed = true
+	}
+	if changed {
+		m.syncViewportContent()
+	}
+	return found
 }

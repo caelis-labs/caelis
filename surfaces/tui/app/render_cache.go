@@ -783,6 +783,7 @@ func viewportBlockRenderKey(block Block, ctx BlockRenderContext) string {
 		writeSubagentEvents(builder, b.Events, ctx)
 	case *WelcomeBlock:
 		builder.addString(b.Version)
+		builder.addString(b.Notice)
 	}
 
 	return builder.String()

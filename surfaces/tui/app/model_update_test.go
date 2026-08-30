@@ -7,19 +7,87 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func TestUpdateCheckResultShowsHintWhenIdle(t *testing.T) {
-	model := NewModel(Config{})
+func TestUpdateCheckResultShowsWelcomeNoticeWhenIdle(t *testing.T) {
+	model := newWelcomeTestModel(t, 80, 24, Config{})
 
-	updated, _ := model.handleUpdateCheckResult(UpdateCheckResultMsg{
+	updated, cmd := model.handleUpdateCheckResult(UpdateCheckResultMsg{
 		LatestVersion: "v1.2.0",
 		Eligible:      true,
 	})
 	m := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("update notice command != nil, want synchronous Welcome refresh")
+	}
 	if !m.updateOffered {
 		t.Fatal("updateOffered = false, want true")
 	}
-	if !strings.Contains(m.hint, "v1.2.0") || !strings.Contains(m.hint, "Ctrl+U") {
-		t.Fatalf("hint = %q, want update availability text", m.hint)
+	if m.hint != "" {
+		t.Fatalf("composer hint = %q, want update notice confined to Welcome", m.hint)
+	}
+	plain := strings.Join(m.viewportPlainLines, "\n")
+	if !strings.Contains(plain, "v1.2.0") || !strings.Contains(plain, "Ctrl+U") {
+		t.Fatalf("welcome notice missing update availability text\n%s", plain)
+	}
+}
+
+func TestUpdateCheckResultRequiresVisibleWelcomeCard(t *testing.T) {
+	model := NewModel(Config{})
+
+	updated, cmd := model.handleUpdateCheckResult(UpdateCheckResultMsg{
+		LatestVersion: "v1.2.0",
+		Eligible:      true,
+	})
+	m := updated.(*Model)
+	if cmd != nil || m.updateOffered {
+		t.Fatalf("update without Welcome = (cmd:%v offered:%v)", cmd != nil, m.updateOffered)
+	}
+}
+
+func TestUpdateNoticeKeepsVersionAndShortcutInSmallLayout(t *testing.T) {
+	model := newWelcomeTestModel(t, 35, 16, Config{})
+
+	_, _ = model.handleUpdateCheckResult(UpdateCheckResultMsg{
+		LatestVersion: "v1.2.0",
+		Eligible:      true,
+	})
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(plain, "v1.2.0") || !strings.Contains(plain, "Ctrl+U") {
+		t.Fatalf("small Welcome lost update version or shortcut\n%s", plain)
+	}
+}
+
+func TestUpdateNoticeRemainsVisibleInNoticeOnlyHeightFallback(t *testing.T) {
+	model := newWelcomeTestModel(t, 80, 24, Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 14})
+	model = updated.(*Model)
+
+	_, _ = model.handleUpdateCheckResult(UpdateCheckResultMsg{
+		LatestVersion: "v1.2.0",
+		Eligible:      true,
+	})
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if !model.updateOffered || !strings.Contains(plain, "v1.2.0") || !strings.Contains(plain, "Ctrl+U") {
+		t.Fatalf("notice-only Welcome hid the update offer\n%s", plain)
+	}
+}
+
+func TestUpdateNoticeTemporarilyOverridesConfiguredAnnouncement(t *testing.T) {
+	const announcement = "Explore the new workspace flow."
+	model := newWelcomeTestModel(t, 80, 24, Config{WelcomeNotice: announcement})
+
+	_, _ = model.handleUpdateCheckResult(UpdateCheckResultMsg{
+		LatestVersion: "v1.2.0",
+		Eligible:      true,
+	})
+	if plain := strings.Join(model.viewportPlainLines, "\n"); !strings.Contains(plain, "Ctrl+U") || strings.Contains(plain, announcement) {
+		t.Fatalf("update availability did not replace configured announcement\n%s", plain)
+	}
+
+	model.revokeUpdateOffer()
+	if plain := strings.Join(model.viewportPlainLines, "\n"); !strings.Contains(plain, "Explore the new") ||
+		!strings.Contains(plain, "workspace flow.") ||
+		strings.Contains(plain, "Ctrl+U") {
+		t.Fatalf("restored Welcome notice is incorrect\n%s", plain)
 	}
 }
 
@@ -114,7 +182,7 @@ func TestCtrlUInActivePromptUpdatesWhenOffered(t *testing.T) {
 }
 
 func TestSubmitRevokesUpdateOffer(t *testing.T) {
-	model := NewModel(Config{})
+	model := newWelcomeTestModel(t, 80, 24, Config{})
 	_, _ = model.handleUpdateCheckResult(UpdateCheckResultMsg{
 		LatestVersion: "v1.2.0",
 		Eligible:      true,
@@ -129,6 +197,6 @@ func TestSubmitRevokesUpdateOffer(t *testing.T) {
 		t.Fatal("updateOffered = true, want false after submit")
 	}
 	if strings.Contains(m.hint, "Ctrl+U") {
-		t.Fatalf("hint = %q, want update hint removed after submit", m.hint)
+		t.Fatalf("post-submit composer hint = %q, want update notice revoked", m.hint)
 	}
 }

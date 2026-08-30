@@ -123,7 +123,8 @@ type Config struct {
 	Workspace              string
 	ModelAlias             string
 	ShowWelcomeCard        bool
-	FullAccessMode         bool // process-owned Host escape; persistent YOLO footer badge
+	WelcomeNotice          string // Optional product announcement; empty uses the default command hint.
+	FullAccessMode         bool   // process-owned Host escape; persistent YOLO footer badge
 	InitialLogs            []string
 	Commands               []string
 	CommandDetails         map[string]string
@@ -450,7 +451,6 @@ type Model struct {
 	hintEntries                []hintEntry
 	nextHintID                 uint64
 	updateOffered              bool
-	updateHintID               uint64
 
 	pendingInputAt            time.Time
 	inputLatencyWindow        []time.Duration
