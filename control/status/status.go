@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 // SessionRuntimeState is the stable Control read projection for effective
@@ -108,7 +109,8 @@ type StatusRuntime struct {
 // StatusConfiguration identifies the canonical persisted Host configuration
 // observed by this snapshot.
 type StatusConfiguration struct {
-	Revision uint64 `json:"revision"`
+	Revision       uint64               `json:"revision"`
+	WorkspaceTrust workspacetrust.Level `json:"workspace_trust"`
 }
 
 // StatusDiagnostics contains Host diagnostics that do not duplicate the

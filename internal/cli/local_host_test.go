@@ -316,7 +316,55 @@ func TestAutomaticWorkspaceAddressListsAndResumesPersistedLegacyAliases(t *testi
 	}
 }
 
-func TestExplicitRemoteHostRequiresCWDSessionListingCapability(t *testing.T) {
+func TestExplicitRemoteHostRequiresWorkspaceCapabilities(t *testing.T) {
+	tests := []struct {
+		name                   string
+		capabilities           []string
+		additionalCapabilities []string
+		missing                string
+	}{
+		{
+			name:         "cwd session listing",
+			capabilities: []string{appserver.CapabilityWorkspaceTrust},
+			missing:      appserver.CapabilityWorkspaceCWDList,
+		},
+		{
+			name:                   "interactive workspace trust",
+			capabilities:           []string{appserver.CapabilityWorkspaceCWDList},
+			additionalCapabilities: []string{appserver.CapabilityWorkspaceTrust},
+			missing:                appserver.CapabilityWorkspaceTrust,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := testenv.NewHTTPServer(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.URL.Path != "/api/control/v1/initialize" {
+					http.NotFound(writer, request)
+					return
+				}
+				_ = json.NewEncoder(writer).Encode(appserver.ServerInfo{
+					ProtocolVersion: acpsdk.ProtocolVersionNumber,
+					EnvelopeVersion: appserver.EnvelopeVersion,
+					APIVersion:      appserver.HTTPAPIVersion,
+					ServerID:        appserver.ServerIdentity,
+					Capabilities:    test.capabilities,
+				})
+			}))
+			workspace := t.TempDir()
+			_, err := openProductClients(t.Context(), gatewayapp.Config{
+				WorkspaceKey: workspace, WorkspaceCWD: workspace,
+			}, productClientOptions{
+				Mode: productClientModeRemote, ControlURL: server.URL, Token: "test-token", HTTPClient: server.Client(),
+				WorkspaceKey: workspace, WorkspaceCWD: workspace, AdditionalRemoteCapabilities: test.additionalCapabilities,
+			})
+			if err == nil || !strings.Contains(err.Error(), test.missing) {
+				t.Fatalf("remote attach error = %v, want missing %q capability", err, test.missing)
+			}
+		})
+	}
+}
+
+func TestExplicitRemoteHostAllowsMissingWorkspaceTrustOutsideInteractiveFlow(t *testing.T) {
 	server := testenv.NewHTTPServer(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/api/control/v1/initialize" {
 			http.NotFound(writer, request)
@@ -327,19 +375,20 @@ func TestExplicitRemoteHostRequiresCWDSessionListingCapability(t *testing.T) {
 			EnvelopeVersion: appserver.EnvelopeVersion,
 			APIVersion:      appserver.HTTPAPIVersion,
 			ServerID:        appserver.ServerIdentity,
-			Capabilities:    []string{appserver.CapabilityMultiWorkspace},
+			Capabilities:    []string{appserver.CapabilityWorkspaceCWDList},
 		})
 	}))
 	workspace := t.TempDir()
-	_, err := openProductClients(t.Context(), gatewayapp.Config{
+	product, err := openProductClients(t.Context(), gatewayapp.Config{
 		WorkspaceKey: workspace, WorkspaceCWD: workspace,
 	}, productClientOptions{
 		Mode: productClientModeRemote, ControlURL: server.URL, Token: "test-token", HTTPClient: server.Client(),
 		WorkspaceKey: workspace, WorkspaceCWD: workspace,
 	})
-	if err == nil || !strings.Contains(err.Error(), appserver.CapabilityWorkspaceCWDList) {
-		t.Fatalf("remote attach error = %v, want missing CWD-list capability", err)
+	if err != nil {
+		t.Fatalf("non-interactive remote attach: %v", err)
 	}
+	t.Cleanup(func() { _ = product.Close() })
 }
 
 func TestRemoteACPIngressDefaultsToHostIssuedIngressCredential(t *testing.T) {

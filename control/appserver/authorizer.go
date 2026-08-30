@@ -93,6 +93,7 @@ func isHostProductAction(action Action) bool {
 	switch action {
 	case ActionModelConnect, ActionModelUse, ActionModelDelete,
 		ActionSandboxBackend, ActionSandboxPrepare, ActionSandboxRepair, ActionSandboxReset, ActionSandboxRefresh,
+		ActionWorkspaceTrust,
 		ActionAgentBindingBind, ActionAgentBindingReset, ActionAgentRoleCreate, ActionAgentRoleDelete,
 		ActionAgentBindingSetSave, ActionAgentBindingSetApply, ActionAgentBindingSetDelete,
 		ActionACPAgentPrepare, ActionACPAgentPrepareAuth, ActionACPAgentConnect,

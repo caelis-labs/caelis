@@ -52,6 +52,10 @@ func (s *ConfigurationService) DeleteModel(ctx context.Context, principal appser
 	return s.commands.DeleteModel(ctx, principal, req)
 }
 
+func (s *ConfigurationService) SetWorkspaceTrust(ctx context.Context, principal appserver.Principal, req appserver.WorkspaceTrustRequest) (appserver.CommandResult, error) {
+	return s.commands.SetWorkspaceTrust(ctx, principal, req)
+}
+
 func (s *ConfigurationService) SetSandboxBackend(ctx context.Context, principal appserver.Principal, req appserver.SandboxRequest) (appserver.CommandResult, error) {
 	return s.commands.SetSandboxBackend(ctx, principal, req)
 }

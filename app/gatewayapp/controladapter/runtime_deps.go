@@ -14,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -152,6 +153,7 @@ type SessionRuntimeDeps struct {
 type StatusRuntimeDeps struct {
 	RuntimeStateFn          func(context.Context, session.SessionRef) (SessionRuntimeState, error)
 	ConfigurationRevisionFn func(context.Context) (uint64, error)
+	WorkspaceTrustFn        func(context.Context, string) (workspacetrust.Level, error)
 	DoctorFn                func(context.Context, DoctorRequest) (DoctorStatusProjection, error)
 	TaskEntriesFn           func(context.Context, session.SessionRef) ([]*taskapi.Entry, error)
 }

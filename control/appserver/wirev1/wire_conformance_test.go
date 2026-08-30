@@ -21,6 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 	jsonschema "github.com/google/jsonschema-go/jsonschema"
 )
 
@@ -52,6 +53,10 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		},
 		"SandboxRequest": appserver.SandboxRequest{
 			WriteBase: appserver.WriteBase{OperationID: "sandbox-operation-1", ExpectedRevision: &revision}, Backend: "host",
+		},
+		"WorkspaceTrustRequest": appserver.WorkspaceTrustRequest{
+			WriteBase:    appserver.WriteBase{OperationID: "workspace-trust-operation-1", ExpectedRevision: &revision},
+			WorkspaceKey: "workspace-1", CWD: "/tmp/workspace", TrustLevel: workspacetrust.Trusted,
 		},
 		"BindAgentBindingRequest": appserver.BindAgentBindingRequest{
 			WriteBase: appserver.WriteBase{OperationID: "agent-binding-operation-1", ExpectedRevision: &revision},
@@ -120,7 +125,7 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	}
 	validateWireValue(t, "SessionState", state)
 	validateWireValue(t, "StatusSnapshot", controlstatus.StatusSnapshot{
-		Configuration: controlstatus.StatusConfiguration{Revision: math.MaxUint64},
+		Configuration: controlstatus.StatusConfiguration{Revision: math.MaxUint64, WorkspaceTrust: workspacetrust.Unknown},
 		Usage: controlstatus.StatusUsage{
 			TotalTokens: 42, ContextWindowTokens: 200000,
 			ContextUsageAvailable: true, ContextUsageReplace: true, ContextUsageControllerEpoch: "epoch-1",
@@ -130,7 +135,7 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 
 func TestStatusConfigurationRevisionWireRoundTrip(t *testing.T) {
 	want := controlstatus.StatusSnapshot{
-		Configuration: controlstatus.StatusConfiguration{Revision: math.MaxUint64},
+		Configuration: controlstatus.StatusConfiguration{Revision: math.MaxUint64, WorkspaceTrust: workspacetrust.Unknown},
 		Usage: controlstatus.StatusUsage{
 			TotalTokens: 42, ContextWindowTokens: 200000,
 			ContextUsageAvailable: true, ContextUsageReplace: true, ContextUsageControllerEpoch: "epoch-1",

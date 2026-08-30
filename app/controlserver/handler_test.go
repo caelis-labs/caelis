@@ -87,7 +87,8 @@ func TestHostHealthReadinessAndInitializeExposeOneInstance(t *testing.T) {
 	}
 	if info.ServerID != appserver.ServerIdentity || info.InstanceID != instanceID ||
 		!slices.Contains(info.Capabilities, appserver.CapabilityMultiWorkspace) ||
-		!slices.Contains(info.Capabilities, appserver.CapabilityWorkspaceCWDList) {
+		!slices.Contains(info.Capabilities, appserver.CapabilityWorkspaceCWDList) ||
+		!slices.Contains(info.Capabilities, appserver.CapabilityWorkspaceTrust) {
 		t.Fatalf("initialize = %#v", info)
 	}
 }

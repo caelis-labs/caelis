@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 func (d *assembler) LightweightStatus(ctx context.Context) (controlstatus.StatusSnapshot, error) {
@@ -104,9 +105,17 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 	if workspaceCWD == "" && d.deps != nil {
 		workspaceCWD = strings.TrimSpace(d.deps.Session.Workspace.CWD)
 	}
+	workspaceTrust := workspacetrust.Unknown
+	if d.deps != nil && d.deps.Status.WorkspaceTrustFn != nil {
+		var err error
+		workspaceTrust, err = d.deps.Status.WorkspaceTrustFn(ctx, workspaceCWD)
+		if err != nil {
+			return controlstatus.StatusSnapshot{}, err
+		}
+	}
 
 	status := controlstatus.StatusSnapshot{
-		Configuration: controlstatus.StatusConfiguration{Revision: configurationRevision},
+		Configuration: controlstatus.StatusConfiguration{Revision: configurationRevision, WorkspaceTrust: workspaceTrust},
 		Usage:         controlstatus.StatusUsage{ContextUsageReplace: activeACP},
 		Session: controlstatus.StatusSession{
 			ID:          sessionID,

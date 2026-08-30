@@ -11,7 +11,9 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/control/mcpconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 func TestAppConfigStoreRejectsCredentialMaterial(t *testing.T) {
@@ -550,5 +552,52 @@ func TestAppConfigStoreCanPersistPlugins(t *testing.T) {
 	p := doc.Plugins[0]
 	if p.ID != "superpowers" || p.Name != "Superpowers" || p.Root != "/some/root/superpowers" || p.Kind != "caelis" || !p.Enabled || !p.Managed || p.CacheRoot != "/some/root" {
 		t.Errorf("unexpected plugin persisted contents: %+v", p)
+	}
+}
+
+func TestAppConfigStoreCanPersistMCPServers(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := newAppConfigStore(root)
+	err := store.Save(AppConfig{
+		MCPServers: mcpconfig.Servers{
+			"context7": {
+				Command: "npx",
+				Args:    []string{"-y", "@upstash/context7-mcp"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	doc, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	server, ok := doc.MCPServers["context7"]
+	if !ok || server.Command != "npx" || len(server.Args) != 2 || server.Args[1] != "@upstash/context7-mcp" {
+		t.Fatalf("MCPServers = %#v, want persisted context7 catalog", doc.MCPServers)
+	}
+}
+
+func TestAppConfigStorePersistsWorkspaceTrustDecision(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	store := newAppConfigStore(root)
+	if err := store.Save(AppConfig{WorkspaceTrust: workspacetrust.Configuration{
+		workspace: workspacetrust.Untrusted,
+	}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	doc, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := workspacetrust.Lookup(doc.WorkspaceTrust, workspace); got != workspacetrust.Untrusted {
+		t.Fatalf("workspace trust = %q, want %q", got, workspacetrust.Untrusted)
 	}
 }

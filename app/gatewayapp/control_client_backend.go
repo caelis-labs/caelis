@@ -221,6 +221,7 @@ func isHostConfigurationCommandRequest(request any) bool {
 	case appserver.ConnectModelRequest,
 		appserver.UseModelRequest,
 		appserver.DeleteModelRequest,
+		appserver.WorkspaceTrustRequest,
 		appserver.SandboxRequest:
 		return true
 	default:

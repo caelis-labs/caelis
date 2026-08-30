@@ -11,9 +11,11 @@ import (
 )
 
 func (s *controlCommandBackend) executeConfigurationCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
-	switch request.(type) {
+	switch typed := request.(type) {
 	case appserver.ConnectModelRequest, appserver.UseModelRequest, appserver.DeleteModelRequest:
 		return s.executeHostModelConfigurationCommand(ctx, action, request)
+	case appserver.WorkspaceTrustRequest:
+		return s.executeWorkspaceTrustCommand(ctx, action, typed)
 	}
 	req, ok := request.(appserver.SandboxRequest)
 	if !ok {

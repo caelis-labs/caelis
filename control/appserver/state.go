@@ -18,6 +18,7 @@ const (
 	CapabilityTaskStreams      = "task-streams-v1"
 	CapabilityMultiWorkspace   = "multi-workspace-sessions-v1"
 	CapabilityWorkspaceCWDList = "workspace-cwd-session-list-v1"
+	CapabilityWorkspaceTrust   = "workspace-trust-v1"
 	CapabilityHostReadiness    = "host-readiness-v1"
 )
 
@@ -54,6 +55,7 @@ func RequiredManagedHostCapabilities() []string {
 		CapabilityTaskStreams,
 		CapabilityMultiWorkspace,
 		CapabilityWorkspaceCWDList,
+		CapabilityWorkspaceTrust,
 		CapabilityHostReadiness,
 	}
 }

@@ -80,6 +80,7 @@ const (
 	ActionSandboxRepair             Action = "configuration.sandbox.repair"
 	ActionSandboxReset              Action = "configuration.sandbox.reset"
 	ActionSandboxRefresh            Action = "configuration.sandbox.refresh"
+	ActionWorkspaceTrust            Action = "configuration.workspace.trust"
 	ActionAgentBindingBind          Action = "configuration.agent-binding.bind"
 	ActionAgentBindingReset         Action = "configuration.agent-binding.reset"
 	ActionAgentRoleCreate           Action = "configuration.agent-role.create"

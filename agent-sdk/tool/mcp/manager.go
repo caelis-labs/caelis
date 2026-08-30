@@ -48,6 +48,7 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter) (*
 		warnings: make(map[string][]string),
 	}
 	usedToolNames := map[string]string{}
+	seenServers := make(map[string]struct{}, len(specs))
 
 	for _, spec := range specs {
 		if err := validateMCPIdentity("plugin id", spec.PluginID, maxMCPPluginIDRunes); err != nil {
@@ -58,13 +59,21 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter) (*
 			_ = mgr.Close()
 			return nil, fmt.Errorf("mcp manager: %w", err)
 		}
+		key := spec.PluginID + "/" + spec.Name
+		if _, exists := seenServers[key]; exists {
+			_ = mgr.Close()
+			return nil, fmt.Errorf("mcp manager: duplicate server %s/%s", spec.PluginID, spec.Name)
+		}
+		seenServers[key] = struct{}{}
+	}
+
+	for _, spec := range specs {
+		key := spec.PluginID + "/" + spec.Name
 		client, err := start(ctx, spec)
 		if err != nil {
 			_ = mgr.Close()
 			return nil, fmt.Errorf("mcp manager: failed to start server %s/%s: %w", spec.PluginID, spec.Name, err)
 		}
-
-		key := spec.PluginID + "/" + spec.Name
 		mgr.clients[key] = client
 
 		listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

@@ -120,6 +120,9 @@ func (c *Client) UseModel(ctx context.Context, req appserver.UseModelRequest) (a
 func (c *Client) DeleteModel(ctx context.Context, req appserver.DeleteModelRequest) (appserver.CommandResult, error) {
 	return c.doCommand(ctx, http.MethodPost, "/configuration/delete-model", req.WriteBase, req)
 }
+func (c *Client) SetWorkspaceTrust(ctx context.Context, req appserver.WorkspaceTrustRequest) (appserver.CommandResult, error) {
+	return c.doCommand(ctx, http.MethodPost, "/configuration/workspace-trust", req.WriteBase, req)
+}
 func (c *Client) SetSandboxBackend(ctx context.Context, req appserver.SandboxRequest) (appserver.CommandResult, error) {
 	return c.doCommand(ctx, http.MethodPost, "/configuration/sandbox-backend", req.WriteBase, req)
 }

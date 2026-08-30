@@ -7,10 +7,12 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/mcpconfig"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/plugin"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 // SchemaVersionV2 is the first AppConfig schema with one ModelProfile catalog
@@ -21,16 +23,18 @@ const SchemaVersionV2 = 2
 // delegation, and system-Agent fields exist only in the private legacy wire
 // document used by the one-way migration.
 type AppConfig struct {
-	SchemaVersion         int                         `json:"schema_version"`
-	ConfigurationRevision uint64                      `json:"configuration_revision,omitempty"`
-	Models                PersistedModelConfig        `json:"models,omitempty"`
-	ExternalAgents        controlagents.Configuration `json:"external_agents,omitempty"`
-	ModelProfiles         modelprofile.Configuration  `json:"model_profiles,omitempty"`
-	AgentBindings         agentbinding.Configuration  `json:"agent_bindings,omitempty"`
-	Sandbox               SandboxConfig               `json:"sandbox,omitempty"`
-	Runtime               RuntimeConfig               `json:"runtime,omitempty"`
-	Plugins               []PluginConfig              `json:"plugins,omitempty"`
-	PluginMarketplaces    []MarketplaceConfig         `json:"plugin_marketplaces,omitempty"`
+	SchemaVersion         int                          `json:"schema_version"`
+	ConfigurationRevision uint64                       `json:"configuration_revision,omitempty"`
+	Models                PersistedModelConfig         `json:"models,omitempty"`
+	ExternalAgents        controlagents.Configuration  `json:"external_agents,omitempty"`
+	ModelProfiles         modelprofile.Configuration   `json:"model_profiles,omitempty"`
+	AgentBindings         agentbinding.Configuration   `json:"agent_bindings,omitempty"`
+	Sandbox               SandboxConfig                `json:"sandbox,omitempty"`
+	Runtime               RuntimeConfig                `json:"runtime,omitempty"`
+	Plugins               []PluginConfig               `json:"plugins,omitempty"`
+	PluginMarketplaces    []MarketplaceConfig          `json:"plugin_marketplaces,omitempty"`
+	MCPServers            mcpconfig.Servers            `json:"mcp_servers,omitempty"`
+	WorkspaceTrust        workspacetrust.Configuration `json:"workspace_trust,omitempty"`
 }
 
 // Validate checks the current persisted truth without reconstructing legacy
@@ -61,6 +65,12 @@ func Validate(doc AppConfig) error {
 	}
 	if err := agentbinding.ValidateConfiguration(doc.AgentBindings, doc.ModelProfiles); err != nil {
 		return fmt.Errorf("gatewayapp: invalid Agent bindings: %w", err)
+	}
+	if err := mcpconfig.Validate(doc.MCPServers); err != nil {
+		return fmt.Errorf("gatewayapp: invalid MCP servers: %w", err)
+	}
+	if err := workspacetrust.Validate(doc.WorkspaceTrust); err != nil {
+		return fmt.Errorf("gatewayapp: invalid workspace trust: %w", err)
 	}
 
 	endpointIDs := make(map[string]struct{}, len(doc.Models.ProviderEndpoints))
@@ -125,6 +135,8 @@ func Normalize(doc AppConfig) AppConfig {
 	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 	doc.Plugins = plugin.DedupeConfigs(doc.Plugins)
 	doc.PluginMarketplaces = plugin.DedupeMarketplaceConfigs(doc.PluginMarketplaces)
+	doc.MCPServers = mcpconfig.Normalize(doc.MCPServers)
+	doc.WorkspaceTrust = workspacetrust.Normalize(doc.WorkspaceTrust)
 	return doc
 }
 
@@ -283,6 +295,12 @@ func validateCurrentRecordIdentities(doc AppConfig) error {
 		if name != "" && recordIdentityExists(marketplaceNames, name) {
 			return fmt.Errorf("gatewayapp: duplicate plugin marketplace %q", name)
 		}
+	}
+	if err := mcpconfig.ValidateIdentities(doc.MCPServers); err != nil {
+		return fmt.Errorf("gatewayapp: invalid MCP servers: %w", err)
+	}
+	if err := workspacetrust.ValidateIdentities(doc.WorkspaceTrust); err != nil {
+		return fmt.Errorf("gatewayapp: invalid workspace trust: %w", err)
 	}
 	return nil
 }

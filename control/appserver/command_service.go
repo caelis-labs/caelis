@@ -348,6 +348,8 @@ func validateCommandRequest(action Action, request any) error {
 		return validateUseModelRequest(typed)
 	case DeleteModelRequest:
 		return validateDeleteModelRequest(typed)
+	case WorkspaceTrustRequest:
+		return validateWorkspaceTrustRequest(typed)
 	case SandboxRequest:
 		return validateSandboxCommandRequest(action, typed)
 	case BindAgentBindingRequest:

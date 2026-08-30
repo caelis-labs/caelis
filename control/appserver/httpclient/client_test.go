@@ -21,6 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 func TestNewRejectsInsecureRemoteOrigin(t *testing.T) {
@@ -348,6 +349,7 @@ func TestHostFocusedRequestsUseUnscopedRoutes(t *testing.T) {
 		{method: http.MethodPost, path: wirev1.APIPrefix + "/completion/skills"},
 		{method: http.MethodPost, path: wirev1.APIPrefix + "/configuration/use-model"},
 		{method: http.MethodPost, path: wirev1.APIPrefix + "/configuration/sandbox-reset"},
+		{method: http.MethodPost, path: wirev1.APIPrefix + "/configuration/workspace-trust"},
 	}
 	index := 0
 	client, closeServer := newFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -375,6 +377,16 @@ func TestHostFocusedRequestsUseUnscopedRoutes(t *testing.T) {
 			if request.SessionID != "" || request.ExpectedRevision == nil || *request.ExpectedRevision != 4 {
 				t.Fatalf("sandbox wire request = %#v", request)
 			}
+		case 4:
+			assertFixtureRequest(t, r, http.MethodPost, "workspace-trust-1")
+			if got := r.Header.Get("If-Match"); got != `"4"` {
+				t.Fatalf("workspace trust If-Match = %q, want quoted revision", got)
+			}
+			var request appserver.WorkspaceTrustRequest
+			decodeFixtureRequest(t, r, &request)
+			if request.SessionID != "" || request.ExpectedRevision == nil || *request.ExpectedRevision != 4 || request.TrustLevel != workspacetrust.Trusted {
+				t.Fatalf("workspace trust wire request = %#v", request)
+			}
 		}
 		switch index {
 		case 0:
@@ -386,6 +398,10 @@ func TestHostFocusedRequestsUseUnscopedRoutes(t *testing.T) {
 		case 3:
 			writeFixtureJSON(t, w, http.StatusOK, appserver.CommandResult{
 				OperationID: "sandbox-reset-1", Outcome: appserver.OutcomeCommitted, Revision: 4,
+			})
+		case 4:
+			writeFixtureJSON(t, w, http.StatusOK, appserver.CommandResult{
+				OperationID: "workspace-trust-1", Outcome: appserver.OutcomeCommitted, Revision: 4,
 			})
 		default:
 			writeFixtureJSON(t, w, http.StatusOK, []appserver.CompletionCandidate{})
@@ -410,6 +426,12 @@ func TestHostFocusedRequestsUseUnscopedRoutes(t *testing.T) {
 	if _, err := client.ResetSandbox(context.Background(), appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "sandbox-reset-1", ExpectedRevision: &expectedRevision,
 	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SetWorkspaceTrust(context.Background(), appserver.WorkspaceTrustRequest{
+		WriteBase:    appserver.WriteBase{OperationID: "workspace-trust-1", ExpectedRevision: &expectedRevision},
+		WorkspaceKey: "workspace", CWD: "/tmp/workspace", TrustLevel: workspacetrust.Trusted,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if index != len(requests) {

@@ -49,6 +49,11 @@ type productClientOptions struct {
 	StoreDir      string
 	ListenAddress string
 	HTTPClient    *http.Client
+	// AdditionalRemoteCapabilities are required only by the presentation flow
+	// selected by the caller. The common remote path always requires workspace
+	// CWD Session listing, while interactive onboarding additionally requires
+	// workspace trust support.
+	AdditionalRemoteCapabilities []string
 	// ACPIngress selects the Host-issued ACP presentation credential. The role
 	// is bound by the Host authenticator and never derived from request data.
 	ACPIngress         bool
@@ -145,12 +150,14 @@ func openRemoteProductClients(ctx context.Context, options productClientOptions)
 	if err != nil {
 		return nil, err
 	}
+	requiredCapabilities := []string{appserver.CapabilityWorkspaceCWDList}
+	requiredCapabilities = append(requiredCapabilities, options.AdditionalRemoteCapabilities...)
 	remote, err := httpclient.New(httpclient.Config{
 		BaseURL:       baseURL,
 		BearerToken:   token,
 		HTTPClient:    options.HTTPClient,
 		EventBuffer:   256,
-		Compatibility: appserver.CurrentCompatibility(appserver.CapabilityWorkspaceCWDList),
+		Compatibility: appserver.CurrentCompatibility(requiredCapabilities...),
 	})
 	if err != nil {
 		return nil, err

@@ -89,6 +89,25 @@ func TestManagerRejectsOversizedServerIdentityBeforeStart(t *testing.T) {
 	}
 }
 
+func TestManagerRejectsDuplicateServerIdentityBeforeStart(t *testing.T) {
+	t.Parallel()
+
+	starts := 0
+	_, err := newManager(context.Background(), []ServerSpec{
+		{PluginID: "plugin", Name: "server"},
+		{PluginID: "plugin", Name: "server"},
+	}, func(context.Context, ServerSpec) (*Client, error) {
+		starts++
+		return nil, nil
+	})
+	if err == nil {
+		t.Fatal("newManager() succeeded")
+	}
+	if starts != 0 {
+		t.Fatalf("client starts = %d, want 0", starts)
+	}
+}
+
 func TestNormalizeListedToolDefinitionQuarantinesBadSchemas(t *testing.T) {
 	t.Parallel()
 

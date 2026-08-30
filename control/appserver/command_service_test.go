@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 func TestEveryWriteCommandAuthorizationIdempotencyCASAndUnknownOutcome(t *testing.T) {
@@ -185,6 +186,16 @@ func TestEveryWriteCommandAuthorizationIdempotencyCASAndUnknownOutcome(t *testin
 			}
 			return s.DeleteModel(context.Background(), p, DeleteModelRequest{
 				WriteBase: WriteBase{OperationID: op, ExpectedRevision: &revision}, Model: model,
+			})
+		}},
+		{"workspace trust", ActionWorkspaceTrust, func(s *CommandService, p Principal, op string, changed bool) (CommandResult, error) {
+			level := workspacetrust.Trusted
+			if changed {
+				level = workspacetrust.Untrusted
+			}
+			return s.SetWorkspaceTrust(context.Background(), p, WorkspaceTrustRequest{
+				WriteBase:    WriteBase{OperationID: op, ExpectedRevision: &revision},
+				WorkspaceKey: "workspace", CWD: "/tmp/workspace", TrustLevel: level,
 			})
 		}},
 		{"sandbox backend", ActionSandboxBackend, func(s *CommandService, p Principal, op string, changed bool) (CommandResult, error) {
@@ -392,7 +403,7 @@ func TestProductCommandAuthorizerSeparatesHostAndSessionAuthority(t *testing.T) 
 	sessions := &recordingAuthorizer{}
 	authorizer := ProductCommandAuthorizer{Sessions: sessions}
 	for _, action := range []Action{
-		ActionModelConnect, ActionModelUse, ActionModelDelete, ActionSandboxReset, ActionAgentBindingBind,
+		ActionModelConnect, ActionModelUse, ActionModelDelete, ActionSandboxReset, ActionWorkspaceTrust, ActionAgentBindingBind,
 		ActionACPAgentDisconnect, ActionACPAgentPrepare, ActionACPAgentPrepareAuth, ActionACPAgentConnect,
 		ActionPluginMarketplaceAdd, ActionPluginInstall, ActionPluginEnable, ActionPluginRemove,
 	} {
@@ -422,6 +433,28 @@ func TestProductCommandAuthorizerSeparatesHostAndSessionAuthority(t *testing.T) 
 	}
 	if sessions.calls != 1 || sessions.action != ActionSessionModel || sessions.sessionID != "session-1" {
 		t.Fatalf("Session delegation = %#v", sessions)
+	}
+}
+
+func TestValidateWorkspaceTrustRequestRequiresHostCASAndExplicitDecision(t *testing.T) {
+	revision := uint64(4)
+	valid := WorkspaceTrustRequest{
+		WriteBase:    WriteBase{OperationID: "workspace-trust", ExpectedRevision: &revision},
+		WorkspaceKey: "workspace", CWD: "/tmp/workspace", TrustLevel: workspacetrust.Trusted,
+	}
+	if err := validateWorkspaceTrustRequest(valid); err != nil {
+		t.Fatalf("validateWorkspaceTrustRequest(valid) error = %v", err)
+	}
+	cases := []WorkspaceTrustRequest{
+		{WriteBase: WriteBase{OperationID: "missing-revision"}, WorkspaceKey: "workspace", CWD: "/tmp/workspace", TrustLevel: workspacetrust.Trusted},
+		{WriteBase: valid.WriteBase, CWD: "/tmp/workspace", TrustLevel: workspacetrust.Trusted},
+		{WriteBase: valid.WriteBase, WorkspaceKey: "workspace", TrustLevel: workspacetrust.Trusted},
+		{WriteBase: valid.WriteBase, WorkspaceKey: "workspace", CWD: "/tmp/workspace", TrustLevel: workspacetrust.Unknown},
+	}
+	for _, request := range cases {
+		if err := validateWorkspaceTrustRequest(request); err == nil {
+			t.Fatalf("validateWorkspaceTrustRequest(%#v) accepted invalid request", request)
+		}
 	}
 }
 
@@ -1067,6 +1100,8 @@ func operationIDOf(request any) string {
 	case DeleteModelRequest:
 		return req.OperationID
 	case SandboxRequest:
+		return req.OperationID
+	case WorkspaceTrustRequest:
 		return req.OperationID
 	case BindAgentBindingRequest:
 		return req.OperationID

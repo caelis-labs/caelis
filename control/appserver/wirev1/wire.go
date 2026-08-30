@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 const APIPrefix = "/api/control/v1"
@@ -164,6 +165,8 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.SandboxRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.WorkspaceTrustRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.HandoffAgentRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.PrepareACPRequest:
@@ -239,6 +242,9 @@ func marshalDisconnectCandidatesSnapshot(snapshot appserver.DisconnectCandidates
 }
 
 func marshalStatusSnapshot(status controlstatus.StatusSnapshot) ([]byte, error) {
+	if !status.Configuration.WorkspaceTrust.Decided() {
+		status.Configuration.WorkspaceTrust = workspacetrust.Unknown
+	}
 	fields, err := marshalObject(status)
 	if err != nil {
 		return nil, err

@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 )
 
@@ -260,6 +261,18 @@ func (s StatusService) Doctor(ctx context.Context, req DoctorRequest) (DoctorRep
 // observed by this Runtime's focused status projection.
 func (s StatusService) ConfigurationRevision(ctx context.Context) (uint64, error) {
 	return s.composition.ConfigurationRevision(ctx)
+}
+
+// WorkspaceTrust returns the exact persisted trust decision for workspace.
+func (s StatusService) WorkspaceTrust(ctx context.Context, workspace string) (workspacetrust.Level, error) {
+	if s.composition == nil || s.composition.authorities.store == nil {
+		return workspacetrust.Unknown, fmt.Errorf("gatewayapp: app config store unavailable")
+	}
+	doc, err := s.composition.authorities.store.LoadContext(contextOrBackground(ctx))
+	if err != nil {
+		return workspacetrust.Unknown, err
+	}
+	return workspacetrust.Lookup(doc.WorkspaceTrust, workspace), nil
 }
 
 func (s StatusService) Sandbox() SandboxStatus {

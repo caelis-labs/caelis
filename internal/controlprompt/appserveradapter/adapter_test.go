@@ -2951,6 +2951,9 @@ func (sessionClientAdapterTestConfigurationClient) UseModel(_ context.Context, r
 func (sessionClientAdapterTestConfigurationClient) DeleteModel(_ context.Context, request appserver.DeleteModelRequest) (appserver.CommandResult, error) {
 	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
 }
+func (sessionClientAdapterTestConfigurationClient) SetWorkspaceTrust(_ context.Context, request appserver.WorkspaceTrustRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
+}
 func (sessionClientAdapterTestConfigurationClient) SetSandboxBackend(_ context.Context, request appserver.SandboxRequest) (appserver.CommandResult, error) {
 	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
 }

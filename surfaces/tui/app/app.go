@@ -155,6 +155,9 @@ func NewModel(cfg Config) *Model {
 	if cfg.FullAccessMode {
 		m.statusView.FullAccess = true
 	}
+	if cfg.InitialPrompt != nil && cfg.InitialPrompt.Response != nil {
+		m.activePrompt = newPromptState(*cfg.InitialPrompt)
+	}
 
 	m.normalizeStatusViewWorkspace()
 	m.setCommands(cfg.Commands)

@@ -11,6 +11,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
@@ -91,6 +92,13 @@ func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 	}})
 	if err != nil || command.Outcome != appserver.OutcomeCommitted || command.Revision != expectedConfigurationRevision {
 		t.Fatalf("ResetSandbox() = %#v, %v", command, err)
+	}
+	command, err = client.SetWorkspaceTrust(context.Background(), appserver.WorkspaceTrustRequest{
+		WriteBase:    appserver.WriteBase{OperationID: "workspace-trust-1", ExpectedRevision: &expectedConfigurationRevision},
+		WorkspaceKey: "workspace", CWD: "/workspace", TrustLevel: workspacetrust.Trusted,
+	})
+	if err != nil || command.Outcome != appserver.OutcomeCommitted || configuration.trust.TrustLevel != workspacetrust.Trusted {
+		t.Fatalf("SetWorkspaceTrust() = %#v, %v; request = %#v", command, err, configuration.trust)
 	}
 	agentStatus, err := client.AgentStatus(context.Background(), appserver.AgentRequest{SessionID: "session-1", Surface: "bar"})
 	if err != nil || agentStatus.ControllerLabel != "main" {
@@ -352,6 +360,7 @@ type focusedConfigurationService struct {
 	presentation     appserver.SessionPresentationConfigRequest
 	connect          appserver.ConnectModelRequest
 	reset            appserver.SandboxRequest
+	trust            appserver.WorkspaceTrustRequest
 	modelCalls       int
 	connectCalls     int
 	resetCalls       int
@@ -392,6 +401,13 @@ func (s *focusedConfigurationService) ConfigureSessionPresentation(_ context.Con
 func (s *focusedConfigurationService) ResetSandbox(_ context.Context, principal appserver.Principal, request appserver.SandboxRequest) (appserver.CommandResult, error) {
 	s.resetCalls++
 	s.principal, s.reset = principal, request
+	return appserver.CommandResult{
+		OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted, Revision: *request.ExpectedRevision,
+	}, nil
+}
+
+func (s *focusedConfigurationService) SetWorkspaceTrust(_ context.Context, principal appserver.Principal, request appserver.WorkspaceTrustRequest) (appserver.CommandResult, error) {
+	s.principal, s.trust = principal, request
 	return appserver.CommandResult{
 		OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted, Revision: *request.ExpectedRevision,
 	}, nil

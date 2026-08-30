@@ -11,6 +11,7 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 func unmarshalWireValue(raw []byte, target any) error {
@@ -63,7 +64,17 @@ func normalizeStatusSnapshotJSON(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	fields["configuration"] = normalized
+	var configurationFields map[string]json.RawMessage
+	if err := json.Unmarshal(normalized, &configurationFields); err != nil {
+		return nil, err
+	}
+	if _, ok := configurationFields["workspace_trust"]; !ok {
+		configurationFields["workspace_trust"], _ = json.Marshal(workspacetrust.Unknown)
+	}
+	fields["configuration"], err = json.Marshal(configurationFields)
+	if err != nil {
+		return nil, err
+	}
 	return json.Marshal(fields)
 }
 

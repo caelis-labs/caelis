@@ -120,6 +120,7 @@ type gatewayBuildPlan struct {
 	RuntimeConfig      stackRuntimeConfig
 	SkillDirs          []string
 	Plugins            plugin.Contributions
+	MCPServers         []mcp.ServerSpec
 	ReleasePluginCache func() error
 }
 
@@ -187,6 +188,10 @@ func (s *runtimeComposition) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runt
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
+	mcpServers, err := resolveConfiguredMCPServers(doc.MCPServers, doc.WorkspaceTrust, s.workspace.CWD)
+	if err != nil {
+		return gatewayBuildPlan{}, err
+	}
 	configuredAssembly, err := s.configuredAssemblyWithPluginAgents(runtimeCfg.BaseAssembly, contribs.Agents, runtimeCfg)
 	if err != nil {
 		return gatewayBuildPlan{}, err
@@ -200,6 +205,7 @@ func (s *runtimeComposition) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runt
 		RuntimeConfig:      runtimeCfg,
 		SkillDirs:          skillDirs,
 		Plugins:            contribs,
+		MCPServers:         mcpServers,
 		ReleasePluginCache: releasePluginCache,
 	}, nil
 }
@@ -297,7 +303,12 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, err
 	}
-	mcpMgr, err := mcp.NewManager(ctx, plan.Plugins.MCPServerSpecs)
+	mcpSpecs, err := mergeRuntimeMCPSpecs(plan.MCPServers, plan.Plugins.MCPServerSpecs)
+	if err != nil {
+		bundle.Close()
+		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
+	}
+	mcpMgr, err := mcp.NewManager(ctx, mcpSpecs)
 	if err != nil {
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)

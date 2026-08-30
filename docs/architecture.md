@@ -168,6 +168,16 @@ Document responsibilities are intentionally separate:
   [External ACP Agents](external-acp-agents.md).
   The configured Agent catalog entry is the canonical read projection consumed
   by Host adapters; adapters do not mirror its name and description fields.
+- `control/mcpconfig`: Control-owned native MCP server catalog and assembly-time
+  overlay resolution. Native servers persist in AppConfig (`mcp_servers`). User
+  overlays come from `~/.agents/mcp.json`. Project files `<workspace>/.agents/mcp.json`
+  and `<workspace>/.mcp.json` are sampled only when AppConfig `workspace_trust`
+  records that exact canonical workspace as `trusted`. An absent record is
+  `unknown`; the TUI asks once and persists either `trusted` or `untrusted`.
+  This is a Host configuration choice, not a turn-level approval. Overlay files
+  are never imported into AppConfig and never hot-reloaded into a live Runtime;
+  changes are sampled on later Runtime assembly. Catalog identities use reserved
+  namespaces (`caelis.mcp.user`, `caelis.mcp.project`) distinct from plugin IDs.
 - `control/plugin`: Control-owned plugin configuration, manifest discovery,
   identity, marketplace/install resolution, lifecycle mutation, and normalized
   hook, skill, MCP server, and external Agent contributions. Its `Info` view is

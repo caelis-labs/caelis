@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
 	"github.com/caelis-labs/caelis/internal/updater"
@@ -37,6 +38,22 @@ func runTUI(
 	stdout io.Writer,
 	stderr io.Writer,
 ) error {
+	proceed, err := ensureTUIWorkspaceTrust(
+		ctx,
+		clients.Status,
+		clients.Configuration,
+		workspaceKey,
+		workspaceDir,
+		func(ctx context.Context, request workspaceTrustPromptRequest) (workspacetrust.Level, bool, error) {
+			return runWorkspaceTrustPrompt(ctx, request, options, stdin, stdout)
+		},
+	)
+	if err != nil {
+		return err
+	}
+	if !proceed {
+		return nil
+	}
 	typedDriver, err := appserveradapter.NewAppServerAdapter(appserveradapter.AppServerAdapterConfig{
 		PreferredSessionID: strings.TrimSpace(sessionID),
 		WorkspaceKey:       strings.TrimSpace(workspaceKey),

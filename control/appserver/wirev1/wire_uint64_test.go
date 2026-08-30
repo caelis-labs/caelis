@@ -17,6 +17,7 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
@@ -66,6 +67,24 @@ func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
 			}
 			if decodedSandbox.ExpectedRevision == nil || *decodedSandbox.ExpectedRevision != value {
 				t.Fatalf("decoded sandbox expected_revision = %#v, want %d", decodedSandbox.ExpectedRevision, value)
+			}
+			workspaceTrustJSON := mustMarshalWire(t, appserver.WorkspaceTrustRequest{
+				WriteBase:    appserver.WriteBase{OperationID: "workspace-trust-operation-1", ExpectedRevision: &value},
+				WorkspaceKey: "workspace-1", CWD: "/tmp/workspace", TrustLevel: workspacetrust.Trusted,
+			})
+			var workspaceTrustDTO generated.WorkspaceTrustRequest
+			if err := json.Unmarshal(workspaceTrustJSON, &workspaceTrustDTO); err != nil {
+				t.Fatal(err)
+			}
+			if workspaceTrustDTO.ExpectedRevision == nil || string(*workspaceTrustDTO.ExpectedRevision) != decimal {
+				t.Fatalf("generated workspace trust expected_revision = %#v, want %q", workspaceTrustDTO.ExpectedRevision, decimal)
+			}
+			var decodedWorkspaceTrust appserver.WorkspaceTrustRequest
+			if err := DecodeRequest(workspaceTrustJSON, &decodedWorkspaceTrust); err != nil {
+				t.Fatal(err)
+			}
+			if decodedWorkspaceTrust.ExpectedRevision == nil || *decodedWorkspaceTrust.ExpectedRevision != value {
+				t.Fatalf("decoded workspace trust expected_revision = %#v, want %d", decodedWorkspaceTrust.ExpectedRevision, value)
 			}
 			modelRequests := []struct {
 				name    string

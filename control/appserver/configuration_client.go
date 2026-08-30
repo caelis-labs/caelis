@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 type SessionModeRequest struct {
@@ -65,6 +67,15 @@ type SandboxRequest struct {
 	Backend string `json:"backend,omitempty"`
 }
 
+// WorkspaceTrustRequest persists one explicit trust decision for a canonical
+// workspace. The decision affects later Runtime assemblies, never a live one.
+type WorkspaceTrustRequest struct {
+	WriteBase
+	WorkspaceKey string               `json:"workspace_key"`
+	CWD          string               `json:"cwd"`
+	TrustLevel   workspacetrust.Level `json:"trust_level"`
+}
+
 // ConfigurationService owns typed AppServer configuration operations. It is a
 // transport contract; model, sandbox, and Session policy semantics remain with
 // their existing Control owners.
@@ -77,6 +88,7 @@ type ConfigurationService interface {
 	ConnectModel(context.Context, Principal, ConnectModelRequest) (CommandResult, error)
 	UseModel(context.Context, Principal, UseModelRequest) (CommandResult, error)
 	DeleteModel(context.Context, Principal, DeleteModelRequest) (CommandResult, error)
+	SetWorkspaceTrust(context.Context, Principal, WorkspaceTrustRequest) (CommandResult, error)
 	SetSandboxBackend(context.Context, Principal, SandboxRequest) (CommandResult, error)
 	PrepareSandbox(context.Context, Principal, SandboxRequest) (CommandResult, error)
 	RepairSandbox(context.Context, Principal, SandboxRequest) (CommandResult, error)
@@ -97,6 +109,7 @@ type ConfigurationCommandService interface {
 	ConnectModel(context.Context, Principal, ConnectModelRequest) (CommandResult, error)
 	UseModel(context.Context, Principal, UseModelRequest) (CommandResult, error)
 	DeleteModel(context.Context, Principal, DeleteModelRequest) (CommandResult, error)
+	SetWorkspaceTrust(context.Context, Principal, WorkspaceTrustRequest) (CommandResult, error)
 	SetSandboxBackend(context.Context, Principal, SandboxRequest) (CommandResult, error)
 	PrepareSandbox(context.Context, Principal, SandboxRequest) (CommandResult, error)
 	RepairSandbox(context.Context, Principal, SandboxRequest) (CommandResult, error)
@@ -113,6 +126,7 @@ type ConfigurationClient interface {
 	ConnectModel(context.Context, ConnectModelRequest) (CommandResult, error)
 	UseModel(context.Context, UseModelRequest) (CommandResult, error)
 	DeleteModel(context.Context, DeleteModelRequest) (CommandResult, error)
+	SetWorkspaceTrust(context.Context, WorkspaceTrustRequest) (CommandResult, error)
 	SetSandboxBackend(context.Context, SandboxRequest) (CommandResult, error)
 	PrepareSandbox(context.Context, SandboxRequest) (CommandResult, error)
 	RepairSandbox(context.Context, SandboxRequest) (CommandResult, error)
@@ -166,6 +180,9 @@ func (c *boundConfigurationClient) UseModel(ctx context.Context, req UseModelReq
 }
 func (c *boundConfigurationClient) DeleteModel(ctx context.Context, req DeleteModelRequest) (CommandResult, error) {
 	return c.service.DeleteModel(ctx, c.boundPrincipal(), req)
+}
+func (c *boundConfigurationClient) SetWorkspaceTrust(ctx context.Context, req WorkspaceTrustRequest) (CommandResult, error) {
+	return c.service.SetWorkspaceTrust(ctx, c.boundPrincipal(), req)
 }
 func (c *boundConfigurationClient) SetSandboxBackend(ctx context.Context, req SandboxRequest) (CommandResult, error) {
 	return c.service.SetSandboxBackend(ctx, c.boundPrincipal(), req)

@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/mcpconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 func TestStoreRejectsDuplicateCurrentRecordsBeforeNormalization(t *testing.T) {
@@ -84,6 +86,37 @@ func TestStoreRejectsDuplicateCurrentRecordsBeforeNormalization(t *testing.T) {
 				return doc
 			},
 			wantErr: "contains an incomplete binding",
+		},
+		{
+			name: "MCP server",
+			mutate: func(doc AppConfig) AppConfig {
+				doc.MCPServers = mcpconfig.Servers{
+					"docs": {},
+				}
+				return doc
+			},
+			wantErr: "invalid MCP servers",
+		},
+		{
+			name: "MCP server identity",
+			mutate: func(doc AppConfig) AppConfig {
+				doc.MCPServers = mcpconfig.Servers{
+					"docs":   {Command: "npx"},
+					" docs ": {Command: "other"},
+				}
+				return doc
+			},
+			wantErr: "duplicate MCP server",
+		},
+		{
+			name: "workspace trust level",
+			mutate: func(doc AppConfig) AppConfig {
+				doc.WorkspaceTrust = workspacetrust.Configuration{
+					filepath.Join(string(filepath.Separator), "workspace"): workspacetrust.Unknown,
+				}
+				return doc
+			},
+			wantErr: "invalid workspace trust",
 		},
 	}
 

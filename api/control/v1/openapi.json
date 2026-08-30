@@ -1369,6 +1369,33 @@
         }
       }
     },
+    "/configuration/workspace-trust": {
+      "post": {
+        "operationId": "setWorkspaceTrust",
+        "parameters": [
+          {"$ref": "#/components/parameters/IdempotencyKey"},
+          {"$ref": "#/components/parameters/IfMatch"}
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/WorkspaceTrustRequest"}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/CommandCommitted"},
+          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "400": {"$ref": "#/components/responses/CommandBadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/CommandConflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    },
     "/configuration/use-model": {
       "post": {
         "operationId": "hostUseModel",
@@ -1763,6 +1790,14 @@
         ],
         "unevaluatedProperties": false
       },
+      "WorkspaceTrustLevel": {"type":"string","enum":["unknown","trusted","untrusted"]},
+      "WorkspaceTrustRequest": {
+        "allOf": [
+          {"$ref":"#/components/schemas/WriteBase"},
+          {"type":"object","required":["workspace_key","cwd","trust_level"],"properties":{"workspace_key":{"type":"string","minLength":1},"cwd":{"type":"string","minLength":1},"trust_level":{"$ref":"#/components/schemas/WorkspaceTrustLevel"}}}
+        ],
+        "unevaluatedProperties": false
+      },
       "AgentRequest": {"type":"object","properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"limit":{"type":"integer"}},"additionalProperties":false},
       "HandoffAgentRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["target"],"properties":{"target":{"type":"string"}}}],"unevaluatedProperties":false},
       "ACPLauncherChoice": {"type":"string","enum":["npx","global","managed","installed","command"]},
@@ -2112,8 +2147,8 @@
         "properties": {"active_jobs": {"type": "integer"}, "active_turn_kind": {"type": "string"}, "active_sessions": {"type": "array", "items": {"type": "string"}}, "running": {"type": "boolean"}}
       },
       "StatusConfiguration": {
-        "type": "object", "additionalProperties": false, "required": ["revision"],
-        "properties": {"revision": {"$ref": "#/components/schemas/Uint64Decimal"}}
+        "type": "object", "additionalProperties": false, "required": ["revision", "workspace_trust"],
+        "properties": {"revision": {"$ref": "#/components/schemas/Uint64Decimal"}, "workspace_trust": {"$ref":"#/components/schemas/WorkspaceTrustLevel"}}
       },
       "StatusDiagnostics": {
         "type": "object", "additionalProperties": false,

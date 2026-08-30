@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 func TestStatusProjectsCanonicalConfigurationRevision(t *testing.T) {
@@ -16,6 +19,26 @@ func TestStatusProjectsCanonicalConfigurationRevision(t *testing.T) {
 	}
 	if status.Configuration.Revision != 42 {
 		t.Fatalf("configuration revision = %d, want 42", status.Configuration.Revision)
+	}
+}
+
+func TestStatusProjectsWorkspaceTrustForAddressedWorkspace(t *testing.T) {
+	var gotWorkspace string
+	driver := NewStatusAssemblerForHost(StatusAssemblyDeps{
+		Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{Key: "project", CWD: "/tmp/project"}},
+		Status: StatusRuntimeDeps{
+			WorkspaceTrustFn: func(_ context.Context, workspace string) (workspacetrust.Level, error) {
+				gotWorkspace = workspace
+				return workspacetrust.Untrusted, nil
+			},
+		},
+	}, "test", "")
+	status, err := driver.LightweightStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotWorkspace != "/tmp/project" || status.Configuration.WorkspaceTrust != workspacetrust.Untrusted {
+		t.Fatalf("workspace/trust = %q/%q", gotWorkspace, status.Configuration.WorkspaceTrust)
 	}
 }
 

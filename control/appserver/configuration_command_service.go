@@ -39,6 +39,32 @@ func (s *CommandService) DeleteModel(ctx context.Context, principal Principal, r
 	return s.execute(ctx, principal, ActionModelDelete, req.WriteBase, "host/configuration/model-catalog", req)
 }
 
+func (s *CommandService) SetWorkspaceTrust(ctx context.Context, principal Principal, req WorkspaceTrustRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionWorkspaceTrust, req.WriteBase, "host/configuration/workspace-trust", req)
+}
+
+func validateWorkspaceTrustRequest(req WorkspaceTrustRequest) error {
+	if strings.TrimSpace(req.SessionID) != "" {
+		return errors.New("controlclient: workspace trust mutation must not address a Session")
+	}
+	if req.ExpectedRevision == nil {
+		return errors.New("controlclient: workspace trust mutation expected_revision is required")
+	}
+	if strings.TrimSpace(req.ExpectedControllerEpoch) != "" {
+		return errors.New("controlclient: workspace trust mutation must not address a controller epoch")
+	}
+	if strings.TrimSpace(req.WorkspaceKey) == "" {
+		return errors.New("controlclient: workspace_key is required")
+	}
+	if strings.TrimSpace(req.CWD) == "" {
+		return errors.New("controlclient: workspace CWD is required")
+	}
+	if !req.TrustLevel.Decided() {
+		return errors.New("controlclient: workspace trust_level must be trusted or untrusted")
+	}
+	return nil
+}
+
 func (s *CommandService) SetSandboxBackend(ctx context.Context, principal Principal, req SandboxRequest) (CommandResult, error) {
 	return s.execute(ctx, principal, ActionSandboxBackend, req.WriteBase, "host/configuration/sandbox-backend", req)
 }

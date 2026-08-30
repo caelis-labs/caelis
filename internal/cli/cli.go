@@ -337,6 +337,9 @@ func runWithProductClientOpener(
 		SurfaceHostCause: doctorSubcommand || sandboxSubcommand != "",
 		ACPIngress:       acpSubcommand,
 	}
+	if interactiveLaunch {
+		clientOptions.AdditionalRemoteCapabilities = []string{appserver.CapabilityWorkspaceTrust}
+	}
 	if sandboxSubcommand != "" {
 		outFmt, err := parseOutputFormat(*format)
 		if err != nil {

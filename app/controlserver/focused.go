@@ -28,7 +28,7 @@ func (s *Server) focusedRoutes() {
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/configuration/presentation-mode", s.configurationHandler("presentation-mode"))
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/configuration/presentation-config", s.configurationHandler("presentation-config"))
 	for path, action := range map[string]string{
-		"connect-model": "connect-model", "use-model": "use-model", "delete-model": "delete-model",
+		"connect-model": "connect-model", "use-model": "use-model", "delete-model": "delete-model", "workspace-trust": "workspace-trust",
 	} {
 		s.mux.HandleFunc("POST "+apiPrefix+"/configuration/"+path, s.configurationHandler(action))
 	}
@@ -244,6 +244,12 @@ func (s *Server) configurationHandler(action string) http.HandlerFunc {
 			var req appserver.DeleteModelRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Configuration.DeleteModel(r.Context(), principal, req)
+				writeCommandResult(w, result, err)
+			}
+		case "workspace-trust":
+			var req appserver.WorkspaceTrustRequest
+			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
+				result, err := s.config.Services.Configuration.SetWorkspaceTrust(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		default:

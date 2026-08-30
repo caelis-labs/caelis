@@ -126,6 +126,7 @@ type Config struct {
 	WelcomeNotice          string // Optional product announcement; empty uses the default command hint.
 	FullAccessMode         bool   // process-owned Host escape; persistent YOLO footer badge
 	InitialLogs            []string
+	InitialPrompt          *PromptRequestMsg
 	Commands               []string
 	CommandDetails         map[string]string
 	Wizards                []WizardDef
