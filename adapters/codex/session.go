@@ -45,6 +45,10 @@ type sessionState struct {
 	model    string
 	effort   string
 	models   []codexModel
+	// subscribed records that thread/start or thread/resume may have loaded the
+	// Thread into the shared Codex app-server process. Synthetic reserved routes
+	// used before any app-server request must not unsubscribe another owner.
+	subscribed bool
 
 	activeTurnID string
 	turnDone     chan turnResult
@@ -58,9 +62,28 @@ type turnResult struct {
 
 func (s *sessionState) applyOpenResponse(response threadOpenResponse) {
 	s.mu.Lock()
+	s.subscribed = true
 	s.model = strings.TrimSpace(response.Model)
 	s.effort = strings.TrimSpace(response.ReasoningEffort)
 	s.mu.Unlock()
+}
+
+func (s *sessionState) markSubscribed() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.subscribed = true
+	s.mu.Unlock()
+}
+
+func (s *sessionState) shouldUnsubscribe() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.subscribed
 }
 
 func (s *sessionState) clearTurn(done chan turnResult) {

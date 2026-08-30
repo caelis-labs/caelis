@@ -32,35 +32,42 @@ func stableID(threadID, itemID, role string) string {
 }
 
 type threadItem struct {
-	ID               string            `json:"id"`
-	Type             string            `json:"type"`
-	Text             string            `json:"text"`
-	Content          []json.RawMessage `json:"content"`
-	Summary          []string          `json:"summary"`
-	Command          string            `json:"command"`
-	CommandActions   []commandAction   `json:"commandActions"`
-	CWD              string            `json:"cwd"`
-	AggregatedOutput string            `json:"aggregatedOutput"`
-	ExitCode         *int              `json:"exitCode"`
-	Status           string            `json:"status"`
-	Changes          []struct {
-		Path string `json:"path"`
-		Kind string `json:"kind"`
-	} `json:"changes"`
-	Server            string         `json:"server"`
-	Tool              string         `json:"tool"`
-	Arguments         map[string]any `json:"arguments"`
-	Prompt            string         `json:"prompt"`
-	SenderThreadID    string         `json:"senderThreadId"`
-	ReceiverThreadIDs []string       `json:"receiverThreadIds"`
-	AgentsStates      any            `json:"agentsStates"`
-	Model             string         `json:"model"`
-	ReasoningEffort   string         `json:"reasoningEffort"`
-	Result            any            `json:"result"`
-	Error             any            `json:"error"`
-	Query             string         `json:"query"`
-	Path              string         `json:"path"`
-	Duration          int64          `json:"durationMs"`
+	ID                string             `json:"id"`
+	Type              string             `json:"type"`
+	Text              string             `json:"text"`
+	Content           []json.RawMessage  `json:"content"`
+	Summary           []string           `json:"summary"`
+	Command           string             `json:"command"`
+	CommandActions    []commandAction    `json:"commandActions"`
+	CWD               string             `json:"cwd"`
+	AggregatedOutput  string             `json:"aggregatedOutput"`
+	ExitCode          *int               `json:"exitCode"`
+	Status            string             `json:"status"`
+	Changes           []fileUpdateChange `json:"changes"`
+	Server            string             `json:"server"`
+	Tool              string             `json:"tool"`
+	Arguments         map[string]any     `json:"arguments"`
+	Prompt            string             `json:"prompt"`
+	SenderThreadID    string             `json:"senderThreadId"`
+	ReceiverThreadIDs []string           `json:"receiverThreadIds"`
+	AgentsStates      any                `json:"agentsStates"`
+	Model             string             `json:"model"`
+	ReasoningEffort   string             `json:"reasoningEffort"`
+	Result            any                `json:"result"`
+	Error             any                `json:"error"`
+	Query             string             `json:"query"`
+	Path              string             `json:"path"`
+	Duration          int64              `json:"durationMs"`
+}
+
+// fileUpdateChange accepts both the legacy string kind and the object kind
+// emitted by current Codex app-server versions. RawMessage preserves the
+// provider-owned discriminator without making the adapter authoritative for
+// its evolving shape.
+type fileUpdateChange struct {
+	Path string          `json:"path"`
+	Kind json.RawMessage `json:"kind"`
+	Diff string          `json:"diff,omitempty"`
 }
 
 type commandAction struct {

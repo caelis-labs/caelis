@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"sync"
 	"testing"
@@ -60,6 +61,45 @@ func newPromptRPCFakeWithAccount(input io.Reader, output io.Writer, accountType 
 		}
 	}()
 	return fake
+}
+
+func TestRouteFailureUnsubscribesLoadedThread(t *testing.T) {
+	appInput, appOutput := io.Pipe()
+	adapterInput, adapterOutput := io.Pipe()
+	defer appInput.Close()
+	defer appOutput.Close()
+	defer adapterInput.Close()
+	defer adapterOutput.Close()
+	fake := newPromptRPCFake(adapterInput, appOutput)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	backend, err := NewBackend(ctx, appInput, adapterOutput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Close()
+
+	a := &agent{backend: backend, sessions: make(map[string]*sessionState)}
+	route, err := a.reserveSession("thread-1", t.TempDir(), nil, routeLive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route.state.markSubscribed()
+	closed := make(chan struct{})
+	go func() {
+		route.close(errors.New("decode current item"))
+		close(closed)
+	}()
+	request := expectPromptRPCRequest(t, ctx, fake.requests, "thread/unsubscribe")
+	if got := stringValue(request.Params["threadId"]); got != "thread-1" {
+		t.Fatalf("thread/unsubscribe Thread = %q, want thread-1", got)
+	}
+	fake.respond(request, map[string]any{"status": "unsubscribed"})
+	select {
+	case <-closed:
+	case <-ctx.Done():
+		t.Fatal("route close did not finish after thread/unsubscribe")
+	}
 }
 
 func (f *promptRPCFake) respond(request promptRPCRequest, result any) {

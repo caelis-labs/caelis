@@ -14,18 +14,29 @@ func formatUpdateNotice(latestVersion string) string {
 	return latest + " · Ctrl+U"
 }
 
+func formatUpdateHint(latestVersion string) string {
+	latest := strings.TrimSpace(latestVersion)
+	if latest == "" {
+		return ""
+	}
+	return "Update " + latest + " available. Press Ctrl+U to update."
+}
+
 func (m *Model) handleUpdateCheckResult(msg UpdateCheckResultMsg) (tea.Model, tea.Cmd) {
 	if m == nil || m.updateOffered || m.turnRunning() || !msg.Eligible {
 		return m, nil
 	}
 	text := formatUpdateNotice(msg.LatestVersion)
-	if text == "" ||
-		!welcomePanelSupportsNotice(m.blockRenderContext(maxInt(1, m.viewport.Width()))) ||
-		!m.setWelcomeNotice(text) {
+	if text == "" {
 		return m, nil
 	}
 	m.updateOffered = true
-	return m, nil
+	if welcomePanelSupportsNotice(m.blockRenderContext(maxInt(1, m.viewport.Width()))) && m.setWelcomeNotice(text) {
+		return m, nil
+	}
+	cmd := m.showHint(formatUpdateHint(msg.LatestVersion), hintOptions{priority: HintPriorityNormal})
+	m.updateHintID = m.nextHintID
+	return m, cmd
 }
 
 func (m *Model) handleUpdateKey() (tea.Model, tea.Cmd) {
@@ -44,6 +55,8 @@ func (m *Model) revokeUpdateOffer() {
 	}
 	m.updateOffered = false
 	m.setWelcomeNotice(m.cfg.WelcomeNotice)
+	m.removeHintByID(m.updateHintID)
+	m.updateHintID = 0
 }
 
 func (m *Model) setWelcomeNotice(notice string) bool {

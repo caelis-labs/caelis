@@ -95,14 +95,18 @@ func TestLoadSessionReplaysStableHistoryBeforeReturning(t *testing.T) {
 		t.Fatal("load response omitted model configuration")
 	}
 	updates := recorder.snapshot()
-	if len(updates) != 2 || updates[0].Update.UserMessageChunk == nil || updates[1].Update.AgentMessageChunk == nil {
+	if len(updates) != 4 || updates[0].Update.UserMessageChunk == nil || updates[1].Update.ToolCall == nil ||
+		updates[2].Update.ToolCallUpdate == nil || updates[3].Update.AgentMessageChunk == nil {
 		t.Fatalf("replayed updates = %#v", updates)
 	}
 	if updates[0].Update.UserMessageChunk.Content.Text == nil || updates[0].Update.UserMessageChunk.Content.Text.Text != "remember this" {
 		t.Fatalf("replayed user update = %#v", updates[0])
 	}
-	if updates[1].Update.AgentMessageChunk.Content.Text == nil || updates[1].Update.AgentMessageChunk.Content.Text.Text != "remembered" {
-		t.Fatalf("replayed agent update = %#v", updates[1])
+	if len(updates[1].Update.ToolCall.Locations) != 1 || updates[1].Update.ToolCall.Locations[0].Path != "/workspace/main.go" {
+		t.Fatalf("replayed file change = %#v", updates[1])
+	}
+	if updates[3].Update.AgentMessageChunk.Content.Text == nil || updates[3].Update.AgentMessageChunk.Content.Text.Text != "remembered" {
+		t.Fatalf("replayed agent update = %#v", updates[3])
 	}
 	select {
 	case err := <-fakeErr:
@@ -155,6 +159,9 @@ func serveLoadFakeAppServer(input io.Reader, output io.Writer, cwd string, resul
 				historyReads++
 				items := []map[string]any{
 					{"id": "user-1", "type": "userMessage", "content": []map[string]any{{"type": "text", "text": "remember this"}}},
+					{"id": "change-1", "type": "fileChange", "status": "completed", "changes": []map[string]any{{
+						"path": "/workspace/main.go", "kind": map[string]any{"type": "update", "move_path": nil}, "diff": "@@ -1 +1 @@",
+					}}},
 					{"id": "agent-1", "type": "agentMessage", "text": "remembered"},
 				}
 				turns := []map[string]any{{"id": "turn-1", "status": "completed", "items": items}}
@@ -175,6 +182,8 @@ func serveLoadFakeAppServer(input io.Reader, output io.Writer, cwd string, resul
 				"id": "gpt-test", "model": "gpt-test", "displayName": "GPT Test", "defaultReasoningEffort": "high",
 				"supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "high"}},
 			}}, "nextCursor": nil}
+		case "thread/unsubscribe":
+			response = map[string]any{"status": "unsubscribed"}
 		default:
 			result <- &unexpectedFakeMethod{method: request.Method}
 			return

@@ -177,7 +177,7 @@ func TestRouteCompletionOnlyToolPublishesCompleteSnapshot(t *testing.T) {
 
 	updates, _, err = route.translateNotification(appserver.Notification{
 		Method: "item/completed",
-		Params: json.RawMessage(`{"item":{"id":"change-1","type":"fileChange","status":"completed","changes":[{"path":"/workspace/main.go","kind":"update"}]}}`),
+		Params: json.RawMessage(`{"item":{"id":"change-1","type":"fileChange","status":"completed","changes":[{"path":"/workspace/main.go","kind":{"type":"update","move_path":null},"diff":"@@ -1 +1 @@"}]}}`),
 	})
 	if err != nil || len(updates) != 1 || updates[0].ToolCall == nil {
 		t.Fatalf("completion-only file change = %#v, err=%v", updates, err)
@@ -185,6 +185,70 @@ func TestRouteCompletionOnlyToolPublishesCompleteSnapshot(t *testing.T) {
 	if updates[0].ToolCall.Title != "Apply file changes" || updates[0].ToolCall.Kind != acp.ToolKindEdit ||
 		len(updates[0].ToolCall.Locations) != 1 || updates[0].ToolCall.Locations[0].Path != "/workspace/main.go" {
 		t.Fatalf("completion-only file presentation = %#v", updates[0].ToolCall)
+	}
+}
+
+func TestRouteAcceptsObjectFileChangeKindFromCurrentCodex(t *testing.T) {
+	t.Parallel()
+
+	route := &sessionRoute{
+		state:    &sessionState{threadID: "thread-1"},
+		seenItem: make(map[string]bool), startedTool: make(map[string]bool), toolOutput: make(map[string]bool),
+	}
+	updates, _, err := route.translateNotification(appserver.Notification{
+		Method: "item/started",
+		Params: json.RawMessage(`{"item":{"id":"change-1","type":"fileChange","status":"inProgress","changes":[{"path":"/workspace/new.go","kind":{"type":"add"},"diff":"+package new"},{"path":"/workspace/deleted.go","kind":{"type":"delete"},"diff":"-package deleted"},{"path":"/workspace/main.go","kind":{"type":"update","move_path":"/workspace/renamed.go"},"diff":"@@ -1 +1 @@"}]}}`),
+	})
+	if err != nil || len(updates) != 1 || updates[0].ToolCall == nil {
+		t.Fatalf("object-kind file change start = %#v, err=%v", updates, err)
+	}
+	if updates[0].ToolCall.Kind != acp.ToolKindEdit || len(updates[0].ToolCall.Locations) != 3 ||
+		updates[0].ToolCall.Locations[0].Path != "/workspace/new.go" ||
+		updates[0].ToolCall.Locations[1].Path != "/workspace/deleted.go" ||
+		updates[0].ToolCall.Locations[2].Path != "/workspace/main.go" {
+		t.Fatalf("object-kind file presentation = %#v", updates[0].ToolCall)
+	}
+	rawInput, err := json.Marshal(updates[0].ToolCall.RawInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var changes []map[string]any
+	if err := json.Unmarshal(rawInput, &changes); err != nil || len(changes) != 3 {
+		t.Fatalf("decode raw file changes = %#v, err=%v", string(rawInput), err)
+	}
+	addKind, _ := changes[0]["kind"].(map[string]any)
+	deleteKind, _ := changes[1]["kind"].(map[string]any)
+	updateKind, _ := changes[2]["kind"].(map[string]any)
+	if addKind["type"] != "add" || deleteKind["type"] != "delete" ||
+		updateKind["type"] != "update" || updateKind["move_path"] != "/workspace/renamed.go" ||
+		changes[0]["diff"] != "+package new" || changes[1]["diff"] != "-package deleted" ||
+		changes[2]["diff"] != "@@ -1 +1 @@" {
+		t.Fatalf("raw file changes = %#v, want current Codex add/delete/update shapes", changes)
+	}
+	updates, terminal, err := route.translateNotification(appserver.Notification{
+		Method: "item/completed",
+		Params: json.RawMessage(`{"item":{"id":"change-1","type":"fileChange","status":"completed","changes":[{"path":"/workspace/new.go","kind":{"type":"add"},"diff":"+package new"},{"path":"/workspace/deleted.go","kind":{"type":"delete"},"diff":"-package deleted"},{"path":"/workspace/main.go","kind":{"type":"update","move_path":"/workspace/renamed.go"},"diff":"@@ -1 +1 @@"}]}}`),
+	})
+	if err != nil || terminal != nil || len(updates) != 1 || updates[0].ToolCallUpdate == nil {
+		t.Fatalf("object-kind file change completion = %#v, terminal=%#v, err=%v", updates, terminal, err)
+	}
+	updates, terminal, err = route.translateNotification(appserver.Notification{
+		Method: "turn/completed",
+		Params: json.RawMessage(`{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}`),
+	})
+	if err != nil || len(updates) != 0 || terminal == nil || terminal.reason != acp.StopReasonEndTurn {
+		t.Fatalf("turn completion = %#v, terminal=%#v, err=%v", updates, terminal, err)
+	}
+}
+
+func TestRouteAcceptsLegacyStringFileChangeKind(t *testing.T) {
+	t.Parallel()
+
+	updates, _, err := liveItemStarted("thread-1", json.RawMessage(
+		`{"id":"change-1","type":"fileChange","status":"inProgress","changes":[{"path":"/workspace/main.go","kind":"update"}]}`,
+	))
+	if err != nil || len(updates) != 1 || updates[0].ToolCall == nil {
+		t.Fatalf("legacy file change start = %#v, err=%v", updates, err)
 	}
 }
 

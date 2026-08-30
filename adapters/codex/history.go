@@ -47,8 +47,11 @@ func (a *agent) loadSession(ctx context.Context, request acp.LoadSessionRequest)
 	if err != nil {
 		return acp.LoadSessionResponse{}, err
 	}
+	// Treat a submitted resume as loaded until thread/unsubscribe proves
+	// otherwise; transport failure cannot prove app-server did not accept it.
+	route.state.markSubscribed()
 	fail := func(loadErr error, replayStarted bool) (acp.LoadSessionResponse, error) {
-		a.removeSession(threadID, route)
+		a.removeSession(ctx, threadID, route)
 		if replayStarted && a.connection != nil {
 			_ = a.connection.Close()
 		}

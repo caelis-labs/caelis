@@ -9,6 +9,7 @@ import (
 	"maps"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -874,6 +875,12 @@ func TestChatAgentExecutesSameStepWebSearchCallsConcurrently(t *testing.T) {
 	}
 	if got := searchModel.searchCalls.Load(); got != 2 {
 		t.Fatalf("SearchWeb calls = %d, want 2", got)
+	}
+	searchModel.affinityMu.Lock()
+	affinities := append([]string(nil), searchModel.affinities...)
+	searchModel.affinityMu.Unlock()
+	if !reflect.DeepEqual(affinities, []string{"sess-web-search", "sess-web-search"}) {
+		t.Fatalf("SearchWeb Session affinities = %#v, want stable parent Session", affinities)
 	}
 	if got := len(searchModel.lastRequest.Messages); got < 2 {
 		t.Fatalf("last request messages = %d, want at least 2 tool results", got)
@@ -3705,6 +3712,8 @@ type concurrentWebSearchModel struct {
 	searchCalls   atomic.Int32
 	overlapped    atomic.Bool
 	lastRequest   model.Request
+	affinityMu    sync.Mutex
+	affinities    []string
 }
 
 func (m *concurrentWebSearchModel) Name() string { return "concurrent-web-search" }
@@ -3747,6 +3756,10 @@ func (m *concurrentWebSearchModel) Generate(_ context.Context, req *model.Reques
 
 func (m *concurrentWebSearchModel) SearchWeb(ctx context.Context, req model.WebSearchRequest) (model.WebSearchResponse, error) {
 	m.searchCalls.Add(1)
+	metadata, _ := model.ProviderRequestMetadataFromContext(ctx)
+	m.affinityMu.Lock()
+	m.affinities = append(m.affinities, metadata.SessionAffinity)
+	m.affinityMu.Unlock()
 	if m.active.Add(1) > 1 {
 		m.overlapped.Store(true)
 	}

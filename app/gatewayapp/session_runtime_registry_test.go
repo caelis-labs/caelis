@@ -643,7 +643,8 @@ func TestSpawnedSessionCannotUseDeletedParentRuntimeProfile(t *testing.T) {
 }
 
 func TestProviderDeletionSerializesWithRuntimeActivation(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	stack, active := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
@@ -687,7 +688,13 @@ func TestProviderDeletionSerializesWithRuntimeActivation(t *testing.T) {
 		runtime, _, activateErr := stack.sessionRuntimes.activateSession(ctx, active.SessionID)
 		activationDone <- activationResult{runtime: runtime, err: activateErr}
 	}()
-	<-blocked.entered
+	select {
+	case <-blocked.entered:
+	case activated := <-activationDone:
+		t.Fatalf("activation completed before the post-assembly barrier: runtime=%p err=%v", activated.runtime, activated.err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("activation did not reach the post-assembly barrier before timeout")
+	}
 
 	deletionDone := make(chan error, 1)
 	go func() {

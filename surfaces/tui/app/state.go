@@ -451,6 +451,7 @@ type Model struct {
 	hintEntries                []hintEntry
 	nextHintID                 uint64
 	updateOffered              bool
+	updateHintID               uint64
 
 	pendingInputAt            time.Time
 	inputLatencyWindow        []time.Duration

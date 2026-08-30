@@ -1280,6 +1280,30 @@ func TestAppServerAdapterResumeFailurePreservesCurrentSession(t *testing.T) {
 	}
 }
 
+func TestAppServerAdapterIncompleteActiveResumeReleasesPresence(t *testing.T) {
+	replay := newSessionClientAdapterTestSubscription()
+	presence := newSessionClientAdapterTestSubscription()
+	client := &sessionClientAdapterTestClient{
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{replay, presence},
+		state: appserver.SessionState{
+			SessionID: "session-target",
+			Run:       appserver.RunState{Active: true, HandleID: "handle-only"},
+		},
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-current", "cli-tui")
+
+	if _, err := adapter.ResumeSession(context.Background(), "session-target"); err == nil ||
+		!strings.Contains(err.Error(), "complete Turn target") {
+		t.Fatalf("ResumeSession() error = %v, want incomplete Turn target", err)
+	}
+	if !replay.closed || !presence.closed {
+		t.Fatalf("failed ResumeSession retained subscriptions: replay=%v presence=%v", replay.closed, presence.closed)
+	}
+	if got := adapter.clientSessionID(); got != "session-current" {
+		t.Fatalf("active Session after failed resume = %q, want session-current", got)
+	}
+}
+
 func TestAppServerAdapterStatusWithoutSessionDoesNotInspectOrCreate(t *testing.T) {
 	sessions := &sessionClientAdapterTestClient{}
 	status := &recordingStatusClient{}

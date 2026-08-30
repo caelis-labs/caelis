@@ -30,16 +30,20 @@ func TestUpdateCheckResultShowsWelcomeNoticeWhenIdle(t *testing.T) {
 	}
 }
 
-func TestUpdateCheckResultRequiresVisibleWelcomeCard(t *testing.T) {
-	model := NewModel(Config{})
+func TestUpdateCheckResultFallsBackAfterWelcomeDismissal(t *testing.T) {
+	model := newWelcomeTestModel(t, 80, 24, Config{})
+	model.dismissWelcomeCard()
 
 	updated, cmd := model.handleUpdateCheckResult(UpdateCheckResultMsg{
 		LatestVersion: "v1.2.0",
 		Eligible:      true,
 	})
 	m := updated.(*Model)
-	if cmd != nil || m.updateOffered {
-		t.Fatalf("update without Welcome = (cmd:%v offered:%v)", cmd != nil, m.updateOffered)
+	if cmd != nil {
+		t.Fatal("persistent update hint command != nil, want no expiry timer")
+	}
+	if !m.updateOffered || !strings.Contains(m.hint, "v1.2.0") || !strings.Contains(m.hint, "Ctrl+U") {
+		t.Fatalf("update after Welcome dismissal = (offered:%v hint:%q)", m.updateOffered, m.hint)
 	}
 }
 
@@ -68,6 +72,24 @@ func TestUpdateNoticeRemainsVisibleInNoticeOnlyHeightFallback(t *testing.T) {
 	plain := strings.Join(model.viewportPlainLines, "\n")
 	if !model.updateOffered || !strings.Contains(plain, "v1.2.0") || !strings.Contains(plain, "Ctrl+U") {
 		t.Fatalf("notice-only Welcome hid the update offer\n%s", plain)
+	}
+}
+
+func TestUpdateCheckResultFallsBackWhenWelcomeCannotRenderNotice(t *testing.T) {
+	model := newWelcomeTestModel(t, 35, 16, Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 35, Height: 7})
+	model = updated.(*Model)
+
+	updated, cmd := model.handleUpdateCheckResult(UpdateCheckResultMsg{
+		LatestVersion: "v1.2.0",
+		Eligible:      true,
+	})
+	model = updated.(*Model)
+	if cmd != nil {
+		t.Fatal("persistent update hint command != nil, want no expiry timer")
+	}
+	if !model.updateOffered || !strings.Contains(model.hint, "v1.2.0") || !strings.Contains(model.hint, "Ctrl+U") {
+		t.Fatalf("small-layout update = (offered:%v hint:%q)", model.updateOffered, model.hint)
 	}
 }
 

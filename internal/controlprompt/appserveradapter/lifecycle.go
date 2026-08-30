@@ -64,16 +64,20 @@ func (a *SessionClientAdapter) ResumeSession(ctx context.Context, sessionID stri
 		_ = reconnect.Close()
 		return controlprompt.SessionSnapshot{}, err
 	}
+	var presence *sessionPresence
 	abort := true
 	defer func() {
-		if abort {
-			_ = reconnect.Close()
+		if !abort {
+			return
+		}
+		_ = reconnect.Close()
+		if presence != nil {
+			_ = presence.Close()
 		}
 	}()
 	if strings.TrimSpace(result.State.SessionID) != strings.TrimSpace(sessionID) {
 		return controlprompt.SessionSnapshot{}, errors.New("app/gatewayapp/controladapter: reconnect state belongs to another Session")
 	}
-	var presence *sessionPresence
 	if a.tracksSessionPresence() {
 		presence, err = a.openSessionPresence(result.State)
 		if err != nil {

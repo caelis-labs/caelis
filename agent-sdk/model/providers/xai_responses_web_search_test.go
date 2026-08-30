@@ -45,8 +45,8 @@ func TestXAIResponsesSearchWebUsesHostedToolAndPreservesProviderResults(t *testi
 			requestID:      r.Header.Get("x-grok-req-id"),
 			sessionID:      r.Header.Get("x-grok-session-id"),
 		}
-		if identity.conversationID == "" || identity.conversationID != identity.sessionID || identity.sessionID == "parent-session" {
-			t.Errorf("Grok search identity = %#v, want one isolated temporary Session", identity)
+		if identity.conversationID == "" || identity.conversationID == identity.sessionID || identity.sessionID != "parent-session" {
+			t.Errorf("Grok search identity = %#v, want temporary conversation and stable parent Session", identity)
 		}
 		if identity.requestID == "" || identity.requestID == identity.conversationID {
 			t.Errorf("x-grok-req-id = %q, want independent request identity", identity.requestID)
@@ -119,15 +119,16 @@ func TestXAIResponsesSearchWebUsesHostedToolAndPreservesProviderResults(t *testi
 	if _, err := searcher.SearchWeb(ctx, searchRequest); err != nil {
 		t.Fatalf("second SearchWeb() error = %v", err)
 	}
-	if len(identities) != 2 || identities[0].sessionID == identities[1].sessionID || identities[0].requestID == identities[1].requestID {
-		t.Fatalf("Grok search identities = %#v, want fresh temporary Session and request IDs", identities)
+	if len(identities) != 2 || identities[0].conversationID == identities[1].conversationID ||
+		identities[0].sessionID != identities[1].sessionID || identities[0].requestID == identities[1].requestID {
+		t.Fatalf("Grok search identities = %#v, want fresh conversation/request IDs and stable Session", identities)
 	}
 
 	if body["model"] != "grok-4.5" || body["input"] != "最新 xAI 文档" {
 		t.Fatalf("request model/input = %#v", body)
 	}
-	if _, ok := body["prompt_cache_key"]; ok {
-		t.Fatalf("temporary search request contains prompt_cache_key: %#v", body)
+	if got := body["prompt_cache_key"]; got != "parent-session" {
+		t.Fatalf("prompt_cache_key = %#v, want stable parent Session", got)
 	}
 	tools, _ := body["tools"].([]any)
 	if len(tools) != 1 {

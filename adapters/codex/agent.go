@@ -30,7 +30,10 @@ type agent struct {
 	terminalMode terminalOutputMode
 }
 
-const sessionSteeringMethod = "_session/steering"
+const (
+	sessionSteeringMethod         = "_session/steering"
+	codexThreadUnsubscribeTimeout = 2 * time.Second
+)
 
 func (a *agent) Initialize(ctx context.Context, request acp.InitializeRequest) (acp.InitializeResponse, error) {
 	if err := a.waitConnection(ctx); err != nil {
@@ -147,10 +150,11 @@ func (a *agent) NewSession(ctx context.Context, request acp.NewSessionRequest) (
 	}
 	state, err := a.installSession(response, request.Cwd, roots, routeLive)
 	if err != nil {
+		a.unsubscribeThread(ctx, strings.TrimSpace(response.Thread.ID))
 		return acp.NewSessionResponse{}, err
 	}
 	if err := a.loadModels(ctx, state); err != nil {
-		a.removeSession(state.threadID, state.route)
+		a.removeSession(ctx, state.threadID, state.route)
 		return acp.NewSessionResponse{}, err
 	}
 	return acp.NewSessionResponse{
@@ -180,6 +184,9 @@ func (a *agent) ResumeSession(ctx context.Context, request acp.ResumeSessionRequ
 	if err != nil {
 		return acp.ResumeSessionResponse{}, err
 	}
+	// A failed response can still mean app-server accepted thread/resume. Mark
+	// ownership before submission so every ambiguous failure unloads it.
+	route.state.markSubscribed()
 	var response threadOpenResponse
 	err = a.backend.rpc.Request(ctx, "thread/resume", map[string]any{
 		"threadId": threadID, "cwd": request.Cwd,
@@ -187,16 +194,16 @@ func (a *agent) ResumeSession(ctx context.Context, request acp.ResumeSessionRequ
 		"approvalPolicy": "on-request", "sandbox": "workspace-write",
 	}, &response)
 	if err != nil {
-		a.removeSession(threadID, route)
+		a.removeSession(ctx, threadID, route)
 		return acp.ResumeSessionResponse{}, err
 	}
 	route.state.applyOpenResponse(response)
 	if err := a.loadModels(ctx, route.state); err != nil {
-		a.removeSession(threadID, route)
+		a.removeSession(ctx, threadID, route)
 		return acp.ResumeSessionResponse{}, err
 	}
 	if err := route.drainBufferedToLive(); err != nil {
-		a.removeSession(threadID, route)
+		a.removeSession(ctx, threadID, route)
 		return acp.ResumeSessionResponse{}, err
 	}
 	return acp.ResumeSessionResponse{ConfigOptions: route.state.configOptions()}, nil
@@ -410,7 +417,9 @@ func (a *agent) CloseSession(ctx context.Context, request acp.CloseSessionReques
 	_ = a.interrupt(ctx, state)
 	a.backend.release(threadID, state.route)
 	state.route.close(errors.New("codex adapter: session closed"))
-	_ = a.backend.rpc.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": threadID}, nil)
+	if state.shouldUnsubscribe() {
+		a.unsubscribeThread(ctx, threadID)
+	}
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -508,23 +517,33 @@ func (a *agent) reserveSession(threadID, cwd string, roots []string, mode routeM
 	return route, nil
 }
 
-func (a *agent) removeSession(threadID string, route *sessionRoute) {
+func (a *agent) removeSession(ctx context.Context, threadID string, route *sessionRoute) {
+	var removed *sessionState
 	a.mu.Lock()
 	if state := a.sessions[threadID]; state != nil && state.route == route {
 		delete(a.sessions, threadID)
+		removed = state
 	}
 	a.mu.Unlock()
 	a.backend.release(threadID, route)
 	route.close(errors.New("codex adapter: Session open failed"))
+	if removed != nil && removed.shouldUnsubscribe() {
+		a.unsubscribeThread(ctx, threadID)
+	}
 }
 
 func (a *agent) releaseClosedSession(threadID string, route *sessionRoute) {
+	var removed *sessionState
 	a.mu.Lock()
 	if state := a.sessions[threadID]; state != nil && state.route == route {
 		delete(a.sessions, threadID)
+		removed = state
 	}
 	a.mu.Unlock()
 	a.backend.release(threadID, route)
+	if removed != nil && removed.shouldUnsubscribe() {
+		a.unsubscribeThread(context.Background(), threadID)
+	}
 }
 
 func (a *agent) lookupSession(threadID string) (*sessionState, error) {
@@ -542,10 +561,39 @@ func (a *agent) closeAll() {
 	sessions := a.sessions
 	a.sessions = make(map[string]*sessionState)
 	a.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), codexThreadUnsubscribeTimeout)
+	defer cancel()
 	for threadID, state := range sessions {
 		a.backend.release(threadID, state.route)
 		state.route.close(errors.New("codex adapter: ACP connection closed"))
+		if state.shouldUnsubscribe() {
+			a.unsubscribeThread(ctx, threadID)
+		}
 	}
+}
+
+// unsubscribeThread releases app-server's in-memory ownership without
+// archiving or deleting the durable Codex Thread. The built-in backend is
+// shared for the Host lifetime, so closing only the ACP route would otherwise
+// leave the Thread loaded until `caelis svc restart` terminates app-server.
+func (a *agent) unsubscribeThread(ctx context.Context, threadID string) {
+	if a == nil || a.backend == nil || a.backend.rpc == nil {
+		return
+	}
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	} else {
+		// Thread ownership cleanup must outlive a cancelled ACP handler. A
+		// separate bound below still prevents shutdown from hanging forever.
+		ctx = context.WithoutCancel(ctx)
+	}
+	unsubscribeCtx, cancel := context.WithTimeout(ctx, codexThreadUnsubscribeTimeout)
+	defer cancel()
+	_ = a.backend.rpc.Request(unsubscribeCtx, "thread/unsubscribe", map[string]any{"threadId": threadID}, nil)
 }
 
 func (a *agent) authorizeStoredThread(ctx context.Context, threadID, requestedCWD string) error {

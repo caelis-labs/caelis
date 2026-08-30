@@ -160,7 +160,10 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				}
 			}
 			messages = append(messages, assistantMessage)
-			toolMessages, toolEvents, ok, err := a.executeStepToolCalls(ctx, messageID, calls, func(event *session.Event) bool {
+			toolCtx := model.WithProviderRequestMetadata(ctx, model.ProviderRequestMetadata{
+				SessionAffinity: ctx.Session().SessionID,
+			})
+			toolMessages, toolEvents, ok, err := a.executeStepToolCalls(toolCtx, messageID, calls, func(event *session.Event) bool {
 				return yield(event, nil)
 			}, &visibility)
 			if !ok {

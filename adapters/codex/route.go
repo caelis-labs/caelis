@@ -38,6 +38,7 @@ type sessionRoute struct {
 	startedTool map[string]bool
 	toolOutput  map[string]bool
 	workerOnce  sync.Once
+	asyncClose  sync.Once
 	closeOnce   sync.Once
 }
 
@@ -57,7 +58,10 @@ func (r *sessionRoute) enqueue(notification appserver.Notification) {
 	case routeBuffering:
 		if len(r.buffer) >= maxBufferedNotifications {
 			r.mu.Unlock()
-			r.close(errors.New("codex adapter: notification buffer overflow"))
+			// onNotification runs on the app-server reader. Close outside that
+			// callback so releasing the loaded Thread may synchronously issue
+			// thread/unsubscribe without deadlocking the shared connection.
+			r.closeAsync(errors.New("codex adapter: notification buffer overflow"))
 			return
 		}
 		r.buffer = append(r.buffer, notification)
@@ -72,8 +76,12 @@ func (r *sessionRoute) enqueue(notification appserver.Notification) {
 	select {
 	case r.notify <- notification:
 	default:
-		r.close(errors.New("codex adapter: live notification queue overflow"))
+		r.closeAsync(errors.New("codex adapter: live notification queue overflow"))
 	}
+}
+
+func (r *sessionRoute) closeAsync(err error) {
+	r.asyncClose.Do(func() { go r.close(err) })
 }
 
 func (r *sessionRoute) run() {
@@ -99,18 +107,24 @@ func (r *sessionRoute) close(err error) {
 		r.closeErr = err
 		r.mu.Unlock()
 		close(r.closed)
-		r.state.mu.Lock()
-		if done := r.state.turnDone; done != nil {
-			select {
-			case done <- turnResult{err: err}:
-			default:
-			}
-		}
-		r.state.mu.Unlock()
 	})
-	if closedNow && r.agent != nil {
+	if !closedNow {
+		return
+	}
+	if r.agent != nil {
+		// Release app-server ownership before exposing the Turn failure. A
+		// caller that immediately opens the same Codex Thread in another
+		// Surface must not race the stale loaded subscription.
 		r.agent.releaseClosedSession(r.state.threadID, r)
 	}
+	r.state.mu.Lock()
+	if done := r.state.turnDone; done != nil {
+		select {
+		case done <- turnResult{err: err}:
+		default:
+		}
+	}
+	r.state.mu.Unlock()
 }
 
 func (r *sessionRoute) acceptStableBarrier(sequence uint64) []appserver.Notification {

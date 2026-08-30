@@ -19,6 +19,7 @@ type xAIWebSearchRequest struct {
 	Model           string             `json:"model"`
 	Input           string             `json:"input"`
 	Tools           []xAIWebSearchTool `json:"tools"`
+	PromptCache     string             `json:"prompt_cache_key,omitempty"`
 	Store           bool               `json:"store"`
 	Temperature     float64            `json:"temperature"`
 	TopP            float64            `json:"top_p"`
@@ -41,11 +42,13 @@ func (l *xAIResponsesLLM) SearchWeb(ctx context.Context, req model.WebSearchRequ
 		return model.WebSearchResponse{}, fmt.Errorf("model: xai responses llm is nil")
 	}
 
-	temporarySessionID := uuid.NewString()
+	affinity := xAIResponsesSessionAffinity(ctx)
+	temporaryConversationID := uuid.NewString()
 	payload := xAIWebSearchRequest{
 		Model:           strings.TrimSpace(l.name),
 		Input:           req.Query,
 		Tools:           []xAIWebSearchTool{{Type: "web_search"}},
+		PromptCache:     affinity,
 		Store:           false,
 		Temperature:     0.1,
 		TopP:            0.95,
@@ -62,12 +65,12 @@ func (l *xAIResponsesLLM) SearchWeb(ctx context.Context, req model.WebSearchRequ
 		return model.WebSearchResponse{}, err
 	}
 	applyConfiguredHeaders(httpReq, l.headers)
-	// Each hosted search is an isolated temporary Responses conversation. It
-	// must not join the parent model Session or its prompt-cache affinity.
+	// Each hosted search is an isolated temporary Responses conversation while
+	// routing and prompt-cache affinity remain stable for the parent Session.
 	applyXAIResponsesHeaders(httpReq, "application/json", l.name, xAIResponsesWireIdentity{
-		conversationID: temporarySessionID,
+		conversationID: temporaryConversationID,
 		requestID:      uuid.NewString(),
-		sessionID:      temporarySessionID,
+		sessionID:      affinity,
 	})
 
 	resp, err := l.client.Do(httpReq)
