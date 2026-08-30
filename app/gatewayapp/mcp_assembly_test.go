@@ -16,6 +16,7 @@ func TestResolveConfiguredMCPServersIgnoresUntrustedProjectOverlay(t *testing.T)
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	if err := os.MkdirAll(filepath.Join(home, ".agents"), 0o700); err != nil {
 		t.Fatalf("mkdir home agents: %v", err)
 	}

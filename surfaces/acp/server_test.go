@@ -366,25 +366,21 @@ func TestServeStdioCancelsPromptFromJSONRPCCancelRequest(t *testing.T) {
 	}
 	defer conn.Close()
 
-	callCtx, cancelCall := context.WithCancel(ctx)
-	callErr := make(chan error, 1)
-	go func() {
-		_, err := acpsdk.SendRequest[acpsdk.PromptResponse](conn, callCtx, acpsdk.AgentMethodSessionPrompt, testPromptRequest("session-1"))
-		callErr <- err
-	}()
+	request, err := acpsdk.PrepareRequest[acpsdk.PromptResponse](conn, acpsdk.AgentMethodSessionPrompt, testPromptRequest("session-1"))
+	if err != nil {
+		t.Fatalf("prepare session/prompt request: %v", err)
+	}
+	defer request.Abandon()
+	if err := request.Dispatch(ctx, acpsdk.DispatchOptions{}); err != nil {
+		t.Fatalf("dispatch session/prompt request: %v", err)
+	}
 	select {
 	case <-agent.started:
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for prompt handler")
 	}
-	cancelCall()
-	select {
-	case err := <-callErr:
-		if err == nil {
-			t.Fatal("canceled session/prompt call returned nil error")
-		}
-	case <-ctx.Done():
-		t.Fatal("timed out waiting for canceled session/prompt call")
+	if err := request.CancelRequest(ctx); err != nil {
+		t.Fatalf("send $/cancel_request: %v", err)
 	}
 	select {
 	case err := <-agent.canceled:
@@ -393,6 +389,9 @@ func TestServeStdioCancelsPromptFromJSONRPCCancelRequest(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for $/cancel_request to cancel prompt handler")
+	}
+	if _, err := request.Wait(ctx); err == nil {
+		t.Fatal("canceled session/prompt request returned nil error")
 	}
 
 	cancel()
