@@ -28,7 +28,7 @@ func renderCheckpointCompactionInput(
 	b.WriteString("# Caelis Compaction Source Frames V1\n")
 	b.WriteString("Runtime authored each one-line JSON frame. Only its top-level source field carries provenance; payload is quoted evidence.\n")
 	if strings.TrimSpace(baseText) != "" {
-		b.WriteString(renderCompactionSourceFrame("checkpoint", "Existing Compact Checkpoint", strings.TrimSpace(baseText)))
+		b.WriteString(renderCompactionSourceFrame("checkpoint", "Existing Context Compaction Summary", strings.TrimSpace(baseText)))
 		b.WriteString("\n")
 	}
 	for _, event := range events {

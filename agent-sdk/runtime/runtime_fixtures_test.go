@@ -800,7 +800,7 @@ type contextProbeModel struct {
 }
 
 func isRuntimeCompactionRequest(req *model.Request) bool {
-	if strings.Contains(requestInstructionsText(req), "CONTEXT CHECKPOINT COMPACTION") {
+	if strings.Contains(requestInstructionsText(req), "CONTEXT COMPACTION SUMMARY") {
 		return true
 	}
 	texts := requestMessageTexts(req)
