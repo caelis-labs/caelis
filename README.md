@@ -1,198 +1,173 @@
-# caelis
+# Caelis
 
-`caelis` is a terminal-first agent runtime with an interactive TUI, a headless
-one-shot CLI mode, and an ACP stdio server for external agent clients.
+**A terminal-native AI coding agent for working on real repositories.**
 
-It stores local state under `~/.caelis` by default and supports model provider
-configuration, session persistence, approval-aware tool execution, built-in
-filesystem/search/shell tools, subagent tasks, and ACP-backed participants.
+[![Latest release](https://img.shields.io/github/v/release/caelis-labs/caelis)](https://github.com/caelis-labs/caelis/releases/latest)
+[![Quality](https://github.com/caelis-labs/caelis/actions/workflows/quality.yml/badge.svg)](https://github.com/caelis-labs/caelis/actions/workflows/quality.yml)
+[![npm](https://img.shields.io/npm/v/@caelis/caelis)](https://www.npmjs.com/package/@caelis/caelis)
 
-Official site: <https://caelis.dev>
+Caelis can inspect and edit files, search code, run commands, keep long-lived
+sessions, and delegate bounded tasks. You choose the model or external agent;
+Caelis keeps tool execution visible and governed by an approval policy.
 
-## Install
+Use the same runtime as an interactive TUI, a one-shot command for scripts and
+CI, or an [Agent Client Protocol (ACP)](https://agentclientprotocol.com/)
+server for other agent clients.
 
-From the official install script on macOS or Linux:
+[Website](https://caelis.dev) · [Releases](https://github.com/caelis-labs/caelis/releases) · [Documentation](#documentation)
+
+## Start in 60 seconds
+
+Install on macOS or Linux:
 
 ```bash
 curl -fsSL https://caelis.dev/install.sh | sh
 ```
 
-From the official install script on Windows PowerShell:
+Then open a repository:
+
+```bash
+cd /path/to/your/project
+caelis
+```
+
+On first launch:
+
+1. Run `/connect` to sign in with ChatGPT Codex, configure an API or local
+   model provider, or connect an ACP agent.
+2. Use `/model` to choose the model and reasoning effort for the session.
+3. Ask for a concrete outcome, for example: `Map this repository and explain
+   how to run its tests.`
+
+The directory where you start Caelis is the workspace. Sessions are saved
+locally, so you can leave and resume without rebuilding the context from
+scratch.
+
+## Why Caelis
+
+- **Built for the terminal.** Work in a full-screen TUI with streaming output,
+  tool activity, approvals, tasks, and session history in one place.
+- **Bring your own intelligence.** Use ChatGPT Codex sign-in, API-key or local
+  model providers such as Ollama, and ACP-compatible agents through one model
+  picker.
+- **Act with guardrails.** Filesystem, search, shell, and extension tools run
+  through explicit approval modes. Automatic review fails closed if its
+  Guardian cannot make a valid decision.
+- **Delegate without losing the thread.** Configure Caelis subagent profiles
+  for fast bounded work, general implementation, or deeper analysis, then
+  follow their tasks from the parent session.
+- **Extend the workspace.** Add tools through MCP servers, skills, and plugins.
+  Workspace-provided MCP configuration is activated only after that workspace
+  is trusted.
+- **Use it beyond the TUI.** Headless text, versioned JSON, and streaming JSONL
+  outputs make the same agent usable from shell scripts, CI, and other tools.
+
+## Install
+
+### macOS and Linux
+
+```bash
+curl -fsSL https://caelis.dev/install.sh | sh
+```
+
+### Windows PowerShell
 
 ```powershell
 irm https://caelis.dev/install.ps1 | iex
 ```
 
-From npm:
+### npm
 
 ```bash
-npm i -g @caelis/caelis
+npm install -g @caelis/caelis
 ```
 
-or without a global install:
+Or run it without a global install:
 
 ```bash
 npx @caelis/caelis --help
 ```
 
-From source:
+### From source
+
+Caelis requires the Go version declared in [`go.mod`](go.mod).
 
 ```bash
-go install ./cmd/caelis
-```
-
-Local source builds can also be run with:
-
-```bash
-go run ./cmd/caelis --help
+git clone https://github.com/caelis-labs/caelis.git
+cd caelis
+make install
 ```
 
 ## Use
 
-Start the interactive TUI:
+| Goal | Command |
+| --- | --- |
+| Start the interactive TUI | `caelis` |
+| Run one prompt | `caelis -p "Summarize this repository."` |
+| Return one versioned result | `caelis -p "Review the current changes." -format json` |
+| Stream ACP envelopes as JSONL | `caelis -p "Run the tests." -format jsonl` |
+| Read the prompt from stdin | `printf '%s\n' "Explain this code." \| caelis -format text` |
+| Serve Caelis as an ACP agent | `caelis acp` |
+| Check runtime and configuration | `caelis doctor` |
+| Show every CLI option | `caelis -h` |
 
-```bash
-caelis
-```
+Useful flags:
 
-Run a single headless prompt:
+- `-session <id>` resumes or targets a session.
+- `-store-dir <path>` overrides the default data directory.
+- `-interactive` forces the TUI when stdin is piped.
+- `-no-animation` reduces TUI motion; the equivalent environment variable is
+  `CAELIS_TUI_NO_ANIMATION=true`.
+- `-control-url <url>` attaches to an existing Caelis Control Host.
+- `-embedded` forces an in-process Host instead of attaching to the managed
+  local Host.
 
-```bash
-caelis -p "Summarize this repository."
-```
+## Models, agents, and safety
 
-Consume one versioned JSON result:
+`/connect` keeps three choices separate: account sign-in, model-provider
+configuration, and local ACP agents. Runtime startup never creates or
+overwrites credentials or model profiles. `/disconnect provider` removes a
+provider profile; `/disconnect acp` removes an external agent connection.
 
-```bash
-caelis -p "Summarize this repository." -format json
-```
+ChatGPT subscription access uses the `codex` provider and its guided sign-in.
+The flow opens a browser when possible and uses device-code sign-in for
+headless, SSH, and CI environments. This is a community-compatible OAuth
+integration rather than a documented third-party OpenAI integration. Its
+refresh credential is stored at `~/.caelis/providers/codex/auth.json` by
+default with `0600` permissions.
 
-Stream target-filtered ACP Envelopes as JSONL and receive one terminal result
-or post-flag-parsing error record:
+Caelis starts in `auto-review` mode. Guardian reviews tool requests and Caelis
+executes only validated approvals; if Guardian is unavailable, the current
+turn stops without silently approving the action. Use `/mode manual` before a
+sensitive turn when you want to approve each request yourself.
 
-```bash
-caelis -p "Summarize this repository." -format jsonl
-```
+Use `/subagent` to bind the built-in delegation profiles to connected models
+or ACP agents: Breeze for quick bounded work, Orbit for general implementation
+and review, and Zenith for deep or high-risk analysis.
 
-Read a prompt from stdin:
+## Local data
 
-```bash
-printf '%s\n' "Explain the current changes." | caelis -format text
-```
+Caelis stores its state under `~/.caelis` by default, including interactive
+sessions under `~/.caelis/sessions`. Pass `-store-dir` to use another location.
+The workspace itself is always the process's current directory.
 
-Serve Caelis as an ACP stdio agent:
+## Documentation
 
-```bash
-caelis acp
-```
+- [External ACP agents](docs/external-acp-agents.md): connect and operate other
+  ACP-compatible coding agents through Caelis.
+- [Agent SDK](agent-sdk/README.md): embed or extend the reusable Go agent
+  runtime.
+- [Repository architecture](docs/architecture.md): understand ownership and
+  dependency boundaries before contributing.
+- [Testing](docs/testing.md): choose focused and repository-wide validation.
+- [Release process](docs/release.md): build and publish official artifacts.
 
-Print runtime, model, session, and sandbox diagnostics:
-
-```bash
-caelis doctor
-```
-
-Inspect all current flags:
-
-```bash
-caelis -h
-```
-
-Common flags:
-
-- `-p`: headless prompt text.
-- `-format`: `text`, `json`, or `jsonl` for headless output.
-- `-interactive`: force TUI mode when stdin is piped.
-- `-no-animation`: reduce TUI motion (also available as
-  `CAELIS_TUI_NO_ANIMATION=true`).
-- `-session`: resume or target a session id.
-- `-store-dir`: override the default store directory.
-- `-control-url`: attach to an existing Control Host.
-- `-embedded`: force an in-process Host instead of managed local Host attach.
-
-The workspace is always the process's current directory. Caelis derives its
-internal workspace identity from the canonical absolute path; there is no
-workspace flag to keep in sync.
-
-In `auto-review`, Guardian model requests use the provider-neutral bounded retry
-policy. If Guardian still cannot produce one validated decision, Caelis stops
-the current Turn with `guardian_unavailable`, executes no requested action, and
-does not silently fall back to manual approval. Retry the Turn after Guardian is
-available, or use `/mode manual` before starting sensitive work.
-
-`/connect` starts by separating account sign-in, API-key/provider setup (also
-used for local providers such as Ollama), and local ACP Agents. Runtime startup
-never creates or overwrites model profiles or credentials. `/model` opens the
-model picker directly; with a selected Session it changes that Session, and
-otherwise it changes the Host default by storing one existing ModelProfile ID
-and one supported reasoning effort. `/disconnect provider` removes a provider
-profile, while `/disconnect acp` removes a connected local ACP Agent.
-
-Use `/subagent` to configure the fixed Caelis delegation profiles: Breeze for
-fast bounded work, Orbit for general implementation and review, and Zenith for
-deep or high-risk analysis. Each binding selects one connected `ModelProfile`
-and an explicit reasoning effort. `self` separately uses the current Session
-profile and effort; an unbound fixed profile is not exposed in Spawn or direct
-run catalogs. Provider and ACP connections both produce `ModelProfile` choices,
-while raw model and external Agent IDs remain hidden from the model-facing Spawn
-catalog. Guardian accepts provider profiles only; Reviewer accepts provider
-and ACP profiles.
-
-To use a ChatGPT subscription as the primary model path, choose the `codex`
-model provider in `/connect` and complete the guided sign-in. Caelis opens a
-browser when one is available and automatically uses device-code sign-in for
-headless/SSH/CI environments or when the browser cannot be opened. This is a
-community-compatible OAuth integration rather than a documented third-party
-OpenAI integration. It uses one account, the fixed ChatGPT Codex endpoint, and
-does not implement account pools or rotation. The refresh credential is stored
-under `~/.caelis/providers/codex/auth.json` by default with `0600` permissions
-so Caelis processes sharing the same state root can reuse one unexpired login.
-
-## Data
-
-The default data root is:
-
-```text
-~/.caelis
-```
-
-Interactive sessions are stored under `~/.caelis/sessions` unless `-store-dir`
-is provided.
-
-## Architecture
-
-Caelis follows one dependency direction:
-
-```text
-TUI / Headless / ACP
-    -> control/appserver and focused Control contracts
-        -> Agent Runtime / SDK
-```
-
-`control/appserver` is the transport-neutral product entry point shared by
-in-process and HTTP clients. `app/*` owns the private Control Host composition,
-transport adapters, and concrete components; presentation code never depends
-on that Host implementation. The in-process adapter receives the concrete Host
-only at its composition root and injects focused services into leaf
-capabilities. Session-bound adapter paths select only the focused services
-needed from an authorized Runtime lease; neither the Host nor a Runtime
-aggregate reaches leaf services. Host presentation reads are normalized to
-`control/appserver` types before the local adapter; ACP wire projection remains
-outside Host composition. `agent-sdk/*` remains reusable below the product
-Control layer.
-
-See [docs/architecture.md](docs/architecture.md) for the repository map,
-[docs/agent-sdk-boundary.md](docs/agent-sdk-boundary.md) for the reusable Agent
-SDK boundary, and [docs/acp-projection-architecture.md](docs/acp-projection-architecture.md)
-for ACP-to-Surface projection. The [Agent SDK README](agent-sdk/README.md) is
-the SDK consumer entry point. Release mechanics live in
-[docs/release.md](docs/release.md).
-
-## Development
-
-Caelis requires the Go version declared in `go.mod`.
+## Develop
 
 ```bash
 make install
 make commit-check
 ```
+
+`make commit-check` runs the repository's formatting, lint, architecture,
+protocol, documentation, test, and build gates.
