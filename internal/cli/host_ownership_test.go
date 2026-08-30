@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -77,25 +78,12 @@ func TestEmbeddedProductClientsExposeSameHostToBuiltInACPChild(t *testing.T) {
 		}
 	}
 	joined := strings.Join(selfArgs, " ")
-	tokenFile := controlserver.DefaultTokenFile(storeDir)
+	tokenFile := controlserver.DefaultACPIngressTokenFile(storeDir)
 	if !strings.Contains(joined, "-control-url "+product.BaseURL) ||
 		!strings.Contains(joined, "-control-token-file "+tokenFile) {
-		t.Fatalf("embedded self args = %#v, want same-Host attachment", selfArgs)
+		t.Fatalf("embedded self args = %#v, want same-Host ACP ingress attachment", selfArgs)
 	}
-	token, err := controlserver.LoadBearerToken(tokenFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	remote, err := httpclient.New(httpclient.Config{
-		BaseURL: product.BaseURL, BearerToken: token, HTTPClient: product.embeddedControl.HTTPClient(),
-		Compatibility: appserver.CurrentCompatibility(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info, err := remote.Initialize(context.Background()); err != nil || info.ServerID == "" {
-		t.Fatalf("private embedded child Initialize() = %#v, %v", info, err)
-	}
+	assertChildCredentialCreatesACPIngressSession(t, product, tokenFile, "create-embedded-child")
 }
 
 func TestEmbeddedRawControlTokenUsesSeparateChildCredential(t *testing.T) {
@@ -157,6 +145,7 @@ func TestEmbeddedRawControlTokenUsesSeparateChildCredential(t *testing.T) {
 			t.Fatalf("%s Initialize() = %#v, %v", name, info, initializeErr)
 		}
 	}
+	assertChildCredentialCreatesACPIngressSession(t, product, childTokenFile, "create-embedded-raw-token-child")
 	if err := product.Close(); err != nil {
 		closed = true
 		t.Fatal(err)
@@ -164,6 +153,86 @@ func TestEmbeddedRawControlTokenUsesSeparateChildCredential(t *testing.T) {
 	closed = true
 	if _, err := os.Stat(childTokenFile); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("child token file after product close: %v, want removed", err)
+	}
+}
+
+func TestEmbeddedCustomControlTokenFileUsesDedicatedACPIngressCredential(t *testing.T) {
+	storeDir := t.TempDir()
+	ordinaryTokenFile := filepath.Join(t.TempDir(), "custom-control.token")
+	if _, err := controlserver.LoadOrCreateBearerToken(ordinaryTokenFile); err != nil {
+		t.Fatal(err)
+	}
+	product, err := openProductClients(context.Background(), gatewayapp.Config{
+		StoreDir: storeDir, WorkspaceKey: "embedded-custom-token", WorkspaceCWD: t.TempDir(),
+		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
+	}, productClientOptions{
+		Mode: productClientModeEmbedded, StoreDir: storeDir, TokenFile: ordinaryTokenFile,
+		EmbeddedControlEndpoint: roundTripEmbeddedControlFactory(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = product.Close() })
+	ingressTokenFile := controlserver.DefaultACPIngressTokenFile(storeDir)
+	if filepath.Clean(ordinaryTokenFile) == filepath.Clean(ingressTokenFile) {
+		t.Fatal("test ordinary and ACP ingress credential paths unexpectedly match")
+	}
+	assertChildCredentialCreatesACPIngressSession(t, product, ingressTokenFile, "create-embedded-custom-token-child")
+}
+
+func TestEmbeddedProductClientsRejectAliasedACPIngressCredential(t *testing.T) {
+	storeDir := t.TempDir()
+	ingressTokenFile := controlserver.DefaultACPIngressTokenFile(storeDir)
+	if _, err := controlserver.LoadOrCreateBearerToken(ingressTokenFile); err != nil {
+		t.Fatal(err)
+	}
+	_, err := openProductClients(context.Background(), gatewayapp.Config{
+		StoreDir: storeDir, WorkspaceKey: "embedded-aliased-token", WorkspaceCWD: t.TempDir(),
+		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
+	}, productClientOptions{
+		Mode: productClientModeEmbedded, StoreDir: storeDir, TokenFile: ingressTokenFile,
+		EmbeddedControlEndpoint: roundTripEmbeddedControlFactory(t),
+	})
+	if err == nil || !strings.Contains(err.Error(), "credentials must be distinct") {
+		t.Fatalf("openProductClients() error = %v, want aliased credential rejection", err)
+	}
+}
+
+func assertChildCredentialCreatesACPIngressSession(t *testing.T, product *productClients, tokenFile, operationID string) {
+	t.Helper()
+	token, err := controlserver.LoadBearerToken(tokenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote, err := httpclient.New(httpclient.Config{
+		BaseURL: product.BaseURL, BearerToken: token, HTTPClient: product.embeddedControl.HTTPClient(),
+		Compatibility: appserver.CurrentCompatibility(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, err := remote.Initialize(context.Background()); err != nil || info.ServerID == "" {
+		t.Fatalf("private embedded child Initialize() = %#v, %v", info, err)
+	}
+	workspace := product.stack.Workspace()
+	created, err := remote.CreateSession(context.Background(), appserver.CreateSessionRequest{
+		WriteBase:    appserver.WriteBase{OperationID: operationID},
+		WorkspaceKey: workspace.Key,
+		CWD:          workspace.CWD,
+	})
+	if err != nil || created.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("private embedded child CreateSession() = %#v, %v", created, err)
+	}
+	deps, err := product.stack.PresentationDependencies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := deps.Sessions.Session(context.Background(), session.SessionRef{SessionID: created.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.Controller.Kind != session.ControllerKindKernel || active.Controller.Source != "acp_ingress" {
+		t.Fatalf("private embedded child controller = %#v, want ACP ingress kernel owner", active.Controller)
 	}
 }
 

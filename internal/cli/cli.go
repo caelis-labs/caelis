@@ -61,12 +61,14 @@ type runResult struct {
 type sandboxCommandFunc func(context.Context, gatewayapp.Config, productClientOptions, outputFormat, io.Writer) error
 type controlServerFunc func(context.Context, controlserver.Dependencies, controlserver.Config) error
 type productClientOpener func(context.Context, gatewayapp.Config, productClientOptions) (*productClients, error)
+type builtInChildControlBinder func(*gatewayapp.Stack, string, string)
 
 var (
-	runSandboxSetupCommand  sandboxCommandFunc = runSandboxSetupFromConfig
-	runSandboxFixCommand    sandboxCommandFunc = runSandboxFixFromConfig
-	runSandboxResetCommand  sandboxCommandFunc = runSandboxResetFromConfig
-	runControlServerCommand controlServerFunc  = controlserver.ListenAndServe
+	runSandboxSetupCommand  sandboxCommandFunc        = runSandboxSetupFromConfig
+	runSandboxFixCommand    sandboxCommandFunc        = runSandboxFixFromConfig
+	runSandboxResetCommand  sandboxCommandFunc        = runSandboxResetFromConfig
+	runControlServerCommand controlServerFunc         = controlserver.ListenAndServe
+	bindBuiltInChildControl builtInChildControlBinder = (*gatewayapp.Stack).SetBuiltInChildControl
 )
 
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
@@ -446,12 +448,6 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 	}
 	defer func() { _ = ownership.Close() }()
 	cfg.HostOwnership = ownership
-	var cleanupChildCredential func() error
-	defer func() {
-		if cleanupChildCredential != nil {
-			_ = cleanupChildCredential()
-		}
-	}()
 	stack, err := gatewayapp.NewLocalStack(cfg)
 	if err != nil {
 		return sandboxStartupEscapeError(err)
@@ -469,53 +465,31 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
 		Capabilities: appserver.RequiredManagedHostCapabilities(),
 	}
-	token := strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN"))
+	rawToken := strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN"))
+	token := rawToken
 	tokenFile := strings.TrimSpace(serverConfig.TokenFile)
-	childTokenFile := tokenFile
-	var authenticator controlserver.Authenticator
 	if token != "" {
 		if tokenFile != "" {
 			return errors.New("configure either CAELIS_CONTROL_TOKEN or a Control token file, not both")
 		}
-		authenticator, err = controlserver.BearerTokenAuthenticator(token, serverConfig.Principal)
-		if err != nil {
-			return err
-		}
-		var childToken string
-		childTokenFile, childToken, cleanupChildCredential, err = newEphemeralChildControlCredential()
-		if err != nil {
-			return err
-		}
-		childAuthenticator, childAuthErr := controlserver.BearerTokenAuthenticator(childToken, serverConfig.Principal)
-		if childAuthErr != nil {
-			return childAuthErr
-		}
-		authenticator = anyControlAuthenticator(authenticator, childAuthenticator)
 	} else if tokenFile == "" {
 		tokenFile = controlserver.DefaultTokenFile(cfg.StoreDir)
-		childTokenFile = tokenFile
 	}
-	if authenticator == nil {
-		resolvedToken, tokenErr := controlserver.LoadOrCreateBearerToken(tokenFile)
-		if tokenErr != nil {
-			return tokenErr
-		}
-		authenticator, err = controlserver.BearerTokenAuthenticator(resolvedToken, serverConfig.Principal)
+	if token == "" {
+		token, err = controlserver.LoadOrCreateBearerToken(tokenFile)
 		if err != nil {
 			return err
 		}
 	}
-	acpIngressToken, err := controlserver.LoadOrCreateBearerToken(controlserver.DefaultACPIngressTokenFile(cfg.StoreDir))
+	acpIngressTokenFile := controlserver.DefaultACPIngressTokenFile(cfg.StoreDir)
+	acpIngressToken, err := controlserver.LoadOrCreateBearerToken(acpIngressTokenFile)
 	if err != nil {
 		return err
 	}
-	acpIngressPrincipal := serverConfig.Principal
-	acpIngressPrincipal.Roles = append(append([]string(nil), acpIngressPrincipal.Roles...), appserver.RoleACPIngress)
-	acpIngressAuthenticator, err := controlserver.BearerTokenAuthenticator(acpIngressToken, acpIngressPrincipal)
+	authenticator, err := controlAuthenticatorWithACPIngress(token, serverConfig.Principal, acpIngressToken)
 	if err != nil {
 		return err
 	}
-	authenticator = anyControlAuthenticator(authenticator, acpIngressAuthenticator)
 	defaultTokenFile := controlserver.DefaultTokenFile(cfg.StoreDir)
 	discoveryPath := controlserver.DefaultDiscoveryFile(cfg.StoreDir)
 	publishedDiscovery := false
@@ -526,8 +500,8 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 				return err
 			}
 		}
-		stack.SetBuiltInChildControl(listener.Endpoint, childTokenFile)
-		if token != "" || filepath.Clean(tokenFile) != filepath.Clean(defaultTokenFile) || !isLoopbackEndpoint(listener.Endpoint) {
+		bindBuiltInChildControl(stack, listener.Endpoint, acpIngressTokenFile)
+		if rawToken != "" || filepath.Clean(tokenFile) != filepath.Clean(defaultTokenFile) || !isLoopbackEndpoint(listener.Endpoint) {
 			return nil
 		}
 		info := listener.ServerInfo

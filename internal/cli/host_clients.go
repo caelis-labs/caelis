@@ -225,8 +225,13 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 			_ = ownership.Close()
 			return nil, err
 		}
-		childToken = token
-		childTokenFile = tokenFile
+		childTokenFile = controlserver.DefaultACPIngressTokenFile(cfg.StoreDir)
+		childToken, err = controlserver.LoadOrCreateBearerToken(childTokenFile)
+		if err != nil {
+			_ = endpoint.Close()
+			_ = ownership.Close()
+			return nil, err
+		}
 	} else if endpoint != nil {
 		childTokenFile, childToken, childCredentialCleanup, err = newEphemeralChildControlCredential()
 		if err != nil {
@@ -277,24 +282,14 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 		return nil, err
 	}
 	if endpoint != nil {
-		authenticator, authErr := controlserver.BearerTokenAuthenticator(token, appserver.Principal{ID: stack.UserID()})
+		ordinaryPrincipal := appserver.Principal{ID: stack.UserID()}
+		authenticator, authErr := controlAuthenticatorWithACPIngress(token, ordinaryPrincipal, childToken)
 		if authErr != nil {
 			cleanupChildCredentialOnError()
 			closeEndpoint()
 			_ = stack.Close()
 			_ = ownership.Close()
 			return nil, authErr
-		}
-		if childToken != token {
-			childAuthenticator, childAuthErr := controlserver.BearerTokenAuthenticator(childToken, appserver.Principal{ID: stack.UserID()})
-			if childAuthErr != nil {
-				cleanupChildCredentialOnError()
-				closeEndpoint()
-				_ = stack.Close()
-				_ = ownership.Close()
-				return nil, childAuthErr
-			}
-			authenticator = anyControlAuthenticator(authenticator, childAuthenticator)
 		}
 		build := version.BuildInfo()
 		handler, handlerErr := controlserver.Handler(controlserver.Dependencies{

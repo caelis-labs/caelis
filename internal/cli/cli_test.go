@@ -131,6 +131,132 @@ func TestRunServeDefaultsToPersistentTokenFile(t *testing.T) {
 	}
 }
 
+func TestRunServeBindsBuiltInChildrenToDistinctACPIngressCredential(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+	}{
+		{name: "default token file", mode: "default"},
+		{name: "custom token file", mode: "custom"},
+		{name: "raw token", mode: "raw"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("CAELIS_CONTROL_TOKEN", "")
+			t.Setenv("CAELIS_CONTROL_TOKEN_FILE", "")
+			storeDir := cliTestStoreDir(t)
+			arguments := []string{"serve", "--store-dir", storeDir, "--listen", "127.0.0.1:7777"}
+			ordinaryTokenFile := controlserver.DefaultTokenFile(storeDir)
+			ordinaryToken := ""
+			switch test.mode {
+			case "custom":
+				ordinaryTokenFile = filepath.Join(t.TempDir(), "custom-control.token")
+				if _, err := controlserver.LoadOrCreateBearerToken(ordinaryTokenFile); err != nil {
+					t.Fatal(err)
+				}
+				arguments = append(arguments, "--control-token-file", ordinaryTokenFile)
+			case "raw":
+				ordinaryTokenFile = ""
+				ordinaryToken = strings.Repeat("a", 64)
+				t.Setenv("CAELIS_CONTROL_TOKEN", ordinaryToken)
+			}
+
+			previousServer := runControlServerCommand
+			previousBinder := bindBuiltInChildControl
+			t.Cleanup(func() {
+				runControlServerCommand = previousServer
+				bindBuiltInChildControl = previousBinder
+			})
+			var captured controlserver.Config
+			var boundEndpoint string
+			var boundTokenFile string
+			bindBuiltInChildControl = func(stack *gatewayapp.Stack, endpoint, tokenFile string) {
+				boundEndpoint = endpoint
+				boundTokenFile = tokenFile
+				stack.SetBuiltInChildControl(endpoint, tokenFile)
+			}
+			runControlServerCommand = func(_ context.Context, _ controlserver.Dependencies, config controlserver.Config) error {
+				captured = config
+				info := config.ServerInfo
+				info.ProtocolVersion = acpsdk.ProtocolVersionNumber
+				info.EnvelopeVersion = appserver.EnvelopeVersion
+				info.APIVersion = appserver.HTTPAPIVersion
+				info.Transports = []string{"http"}
+				return config.OnListening(controlserver.ListenerInfo{
+					Endpoint: "http://127.0.0.1:7777", Address: "127.0.0.1:7777", ServerInfo: info,
+				})
+			}
+			if err := run(context.Background(), arguments, nil, io.Discard, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			wantIngressTokenFile := controlserver.DefaultACPIngressTokenFile(storeDir)
+			if boundEndpoint != "http://127.0.0.1:7777" || filepath.Clean(boundTokenFile) != filepath.Clean(wantIngressTokenFile) {
+				t.Fatalf("built-in child Control binding = %q/%q, want ingress endpoint/%q", boundEndpoint, boundTokenFile, wantIngressTokenFile)
+			}
+			ingressToken, err := controlserver.LoadBearerToken(wantIngressTokenFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ordinaryToken == "" {
+				ordinaryToken, err = controlserver.LoadBearerToken(ordinaryTokenFile)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if ordinaryToken == ingressToken {
+				t.Fatal("ordinary and ACP ingress credentials are identical")
+			}
+			request, err := http.NewRequest(http.MethodGet, "http://127.0.0.1", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer "+ingressToken)
+			principal, err := captured.Authenticator.Authenticate(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !principal.HasRole(appserver.RoleACPIngress) {
+				t.Fatalf("built-in child principal = %#v, want ACP ingress role", principal)
+			}
+		})
+	}
+}
+
+func TestRunServeRejectsAliasedACPIngressCredential(t *testing.T) {
+	for _, mode := range []string{"token-file", "raw-token"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("CAELIS_CONTROL_TOKEN", "")
+			t.Setenv("CAELIS_CONTROL_TOKEN_FILE", "")
+			storeDir := cliTestStoreDir(t)
+			ingressTokenFile := controlserver.DefaultACPIngressTokenFile(storeDir)
+			ingressToken, err := controlserver.LoadOrCreateBearerToken(ingressTokenFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			arguments := []string{"serve", "--store-dir", storeDir}
+			if mode == "token-file" {
+				arguments = append(arguments, "--control-token-file", ingressTokenFile)
+			} else {
+				t.Setenv("CAELIS_CONTROL_TOKEN", ingressToken)
+			}
+			previous := runControlServerCommand
+			t.Cleanup(func() { runControlServerCommand = previous })
+			called := false
+			runControlServerCommand = func(context.Context, controlserver.Dependencies, controlserver.Config) error {
+				called = true
+				return nil
+			}
+			err = run(context.Background(), arguments, nil, io.Discard, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), "credentials must be distinct") {
+				t.Fatalf("run() error = %v, want aliased credential rejection", err)
+			}
+			if called {
+				t.Fatal("Control server started with aliased ordinary and ACP ingress credentials")
+			}
+		})
+	}
+}
+
 func TestProductClientRejectsServeOnlyNetworkFlags(t *testing.T) {
 	t.Setenv("CAELIS_CONTROL_LISTEN", "")
 	t.Setenv("CAELIS_CONTROL_ALLOWED_HOSTS", "")
