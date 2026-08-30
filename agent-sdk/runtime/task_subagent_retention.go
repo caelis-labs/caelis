@@ -171,12 +171,17 @@ func (u *subagentSemanticUnit) materialize() stream.Frame {
 }
 
 type subagentSemanticRetention struct {
-	bytes         int
-	barrier       uint64
-	units         map[string]*subagentSemanticUnit
-	order         *list.List
-	buckets       [subagentSemanticPriorityCount]*list.List
-	assistantKeys map[string]map[string]struct{}
+	bytes             int
+	barrier           uint64
+	narrativeRunKey   string
+	narrativeRunTurn  string
+	narrativeIdentity string
+	narrativePriority subagentSemanticPriority
+	narrativeSeq      uint64
+	units             map[string]*subagentSemanticUnit
+	order             *list.List
+	buckets           [subagentSemanticPriorityCount]*list.List
+	assistantKeys     map[string]map[string]struct{}
 }
 
 type subagentSemanticDescriptor struct {
@@ -184,6 +189,7 @@ type subagentSemanticDescriptor struct {
 	turnID        string
 	assistantTurn string
 	priority      subagentSemanticPriority
+	identity      string
 	text          string
 	narrative     bool
 	replace       bool
@@ -201,8 +207,33 @@ func (r *subagentSemanticRetention) observe(frame stream.Frame, order int64) {
 	if descriptor.skip || descriptor.key == "" {
 		return
 	}
-	if !descriptor.narrative {
+	if descriptor.narrative {
+		// ACP MessageID identifies a message, but it does not authorize moving a
+		// later delta back across another message or semantic event. Retain one
+		// unit per contiguous wire-order run so current-state recovery preserves
+		// the same ordering as exact delivery. An anonymous chunk followed by a
+		// producer identity is promotion of the active message, not a barrier.
+		base := descriptor.key
+		continueRun := r.narrativeRunKey != "" &&
+			r.narrativeRunTurn == descriptor.turnID &&
+			r.narrativePriority == descriptor.priority &&
+			(descriptor.identity == "" || r.narrativeIdentity == "" ||
+				descriptor.identity == r.narrativeIdentity)
+		if !continueRun {
+			r.narrativeSeq++
+			r.narrativeRunKey = fmt.Sprintf("%s:run:%d", base, r.narrativeSeq)
+			r.narrativeRunTurn = descriptor.turnID
+			r.narrativeIdentity = descriptor.identity
+			r.narrativePriority = descriptor.priority
+		} else if descriptor.identity != "" {
+			r.narrativeIdentity = descriptor.identity
+		}
+		descriptor.key = r.narrativeRunKey
+	} else {
 		r.barrier++
+		r.narrativeRunKey = ""
+		r.narrativeRunTurn = ""
+		r.narrativeIdentity = ""
 	}
 	r.observeDescriptor(frame, order, descriptor)
 }
@@ -365,65 +396,21 @@ func (r *subagentSemanticRetention) observeDescriptor(frame stream.Frame, order 
 	r.evict()
 }
 
-func (r *subagentSemanticRetention) dropAssistantTurn(turnID string) {
-	if r == nil || turnID == "" {
+// dropLatestAssistantRun removes only the contiguous assistant run replaced by
+// the Task's authoritative Final Message. Earlier ACP messages in the same Turn
+// remain distinct user-visible output and must survive current-state recovery.
+func (r *subagentSemanticRetention) dropLatestAssistantRun(turnID string) {
+	if r == nil || strings.TrimSpace(turnID) == "" {
 		return
 	}
-	keys := r.assistantKeys[turnID]
-	for key := range keys {
-		if unit := r.units[key]; unit != nil {
+	r.ensure()
+	for element := r.order.Back(); element != nil; element = element.Prev() {
+		unit, _ := element.Value.(*subagentSemanticUnit)
+		if unit != nil && unit.assistantTurn == turnID {
 			r.remove(unit)
+			return
 		}
 	}
-	delete(r.assistantKeys, turnID)
-}
-
-func (r *subagentSemanticRetention) dropAssistantMessage(turnID string, messageID string) {
-	if r == nil {
-		return
-	}
-	turnID = strings.TrimSpace(turnID)
-	messageID = strings.TrimSpace(messageID)
-	if turnID == "" || messageID == "" {
-		return
-	}
-	if unit := r.units["narrative:"+turnID+":assistant:"+messageID]; unit != nil {
-		r.remove(unit)
-	}
-}
-
-// archiveAssistantMessage closes the active identity key at a producer
-// barrier. If the endpoint later reuses that MessageID, the new segment gets a
-// fresh active unit; replacing that segment then cannot discard the legitimate
-// pre-tool or pre-reasoning narrative retained here.
-func (r *subagentSemanticRetention) archiveAssistantMessage(turnID string, messageID string, order int64) {
-	if r == nil {
-		return
-	}
-	turnID = strings.TrimSpace(turnID)
-	messageID = strings.TrimSpace(messageID)
-	if turnID == "" || messageID == "" {
-		return
-	}
-	key := "narrative:" + turnID + ":assistant:" + messageID
-	unit := r.units[key]
-	if unit == nil {
-		return
-	}
-	archivedKey := fmt.Sprintf("%s:segment:%d", key, order)
-	if r.units[archivedKey] != nil {
-		return
-	}
-	before := unit.allocatedBytes()
-	delete(r.units, key)
-	unit.key = archivedKey
-	r.units[archivedKey] = unit
-	if keys := r.assistantKeys[turnID]; keys != nil {
-		delete(keys, key)
-		keys[archivedKey] = struct{}{}
-	}
-	r.bytes += unit.allocatedBytes() - before
-	r.evict()
 }
 
 func (r *subagentSemanticRetention) frames(
@@ -596,13 +583,14 @@ func (r *subagentSemanticRetention) describe(frame stream.Frame, order int64) su
 			assistantTurn = ""
 		}
 		identity := session.EventMessageID(event)
-		if identity == "" {
-			identity = fmt.Sprintf("anonymous:%d", r.barrier)
+		keyIdentity := identity
+		if keyIdentity == "" {
+			keyIdentity = fmt.Sprintf("anonymous:%d", r.barrier)
 		}
 		return subagentSemanticDescriptor{
-			key:    "narrative:" + turnID + ":" + kind + ":" + identity,
+			key:    "narrative:" + turnID + ":" + kind + ":" + keyIdentity,
 			turnID: turnID, assistantTurn: assistantTurn, priority: priority,
-			text: session.EventText(event), narrative: true,
+			identity: identity, text: session.EventText(event), narrative: true,
 		}
 	}
 
@@ -725,12 +713,32 @@ func subagentMergeSemanticToolFrame(previous stream.Frame, current stream.Frame)
 		merged.Entries = currentUpdate.Entries
 	}
 	if currentUpdate.Meta != nil {
-		merged.Meta = currentUpdate.Meta
+		merged.Meta = subagentMergeSemanticMeta(previousUpdate.Meta, currentUpdate.Meta)
 	}
 	protocol := session.CloneEventProtocol(*current.Event.Protocol)
 	protocol.Update = &merged
 	current.Event.Protocol = &protocol
 	return current
+}
+
+func subagentMergeSemanticMeta(previous map[string]any, current map[string]any) map[string]any {
+	if current == nil {
+		return session.CloneState(previous)
+	}
+	merged := session.CloneState(previous)
+	if merged == nil {
+		merged = map[string]any{}
+	}
+	for key, value := range current {
+		currentMap, currentIsMap := value.(map[string]any)
+		previousMap, previousIsMap := merged[key].(map[string]any)
+		if currentIsMap && previousIsMap {
+			merged[key] = subagentMergeSemanticMeta(previousMap, currentMap)
+			continue
+		}
+		merged[key] = session.CloneState(map[string]any{"value": value})["value"]
+	}
+	return merged
 }
 
 // subagentBoundSemanticToolUpdate preserves the mergeable ACP lifecycle header

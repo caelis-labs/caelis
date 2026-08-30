@@ -341,7 +341,7 @@ func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, f
 }
 
 // projectNotice consumes child notices without crossing the process boundary.
-func (p *acpChildTerminalProjector) projectNotice(env eventstream.Envelope, _ string) (eventstream.SessionNotification, bool) {
+func (p *acpChildTerminalProjector) projectNotice(env eventstream.Envelope, fallbackSessionID string) (eventstream.SessionNotification, bool) {
 	if p == nil || env.Kind != eventstream.KindNotice || env.Scope != eventstream.ScopeSubagent ||
 		env.ParentTool == nil {
 		return eventstream.SessionNotification{}, false
@@ -349,6 +349,16 @@ func (p *acpChildTerminalProjector) projectNotice(env eventstream.Envelope, _ st
 	parentCallID := strings.TrimSpace(env.ParentTool.ToolCallID)
 	if parentCallID == "" || env.ParentTool.ToolName != spawn.ToolName {
 		return eventstream.SessionNotification{}, false
+	}
+	if taskstream.IsTransientGapEnvelope(env) {
+		p.mu.Lock()
+		state, _ := p.childTurnStateLocked(
+			childTerminalSessionID(env.SessionID, fallbackSessionID), parentCallID, env.TurnID, true,
+		)
+		if !state.closed {
+			state.finalResponse.Reset()
+		}
+		p.mu.Unlock()
 	}
 	return eventstream.SessionNotification{}, true
 }

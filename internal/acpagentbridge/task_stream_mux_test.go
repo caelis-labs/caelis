@@ -96,7 +96,7 @@ func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
 	}
 }
 
-func TestACPTaskStreamMuxSilencesRecoverableSubagentGap(t *testing.T) {
+func TestACPTaskStreamMuxForwardsRecoverableSubagentGapAsProjectorBoundary(t *testing.T) {
 	t.Parallel()
 
 	sub := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 3)}
@@ -145,8 +145,11 @@ func TestACPTaskStreamMuxSilencesRecoverableSubagentGap(t *testing.T) {
 	}
 	select {
 	case envelope := <-mux.Events():
-		t.Fatalf("recoverable Task gap reached ACP child terminal: %#v", envelope)
-	case <-time.After(30 * time.Millisecond):
+		if !taskstream.IsTransientGapEnvelope(envelope) {
+			t.Fatalf("recoverable Task gap = %#v, want typed child projector boundary", envelope)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("recoverable Task gap was not forwarded to the child projector")
 	}
 
 	sub.events <- eventstream.Envelope{

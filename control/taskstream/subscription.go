@@ -10,8 +10,12 @@ import (
 )
 
 const (
-	subscriberEventCap = 128
-	subscriberByteCap  = 1024 * 1024
+	// A Surface subscription is allowed to absorb ordinary render stalls
+	// without forcing a reconnect into Runtime's bounded history. These limits
+	// remain fail-fast and per-subscriber so a detached consumer cannot apply
+	// backpressure to the authoritative Task producer indefinitely.
+	subscriberEventCap = 1024
+	subscriberByteCap  = 8 * 1024 * 1024
 )
 
 type queuedRecord struct {

@@ -33,7 +33,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 
 	group := events[idx : end+1]
 	start := group[0]
-	singleCompletedLifecycle := len(group) == 1 && start.Done && toolEventHasHeader(start)
+	singleCompletedLifecycle := len(group) == 1 && start.Done && toolEventHasPresentation(start)
 	if start.Done && len(group) > 1 {
 		start = SubagentEvent{}
 		for _, item := range group {
@@ -50,7 +50,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 	var final SubagentEvent
 	var preview string
 	settled := false
-	hasStart := (!start.Done || singleCompletedLifecycle) && toolEventHasHeader(start)
+	hasStart := (!start.Done || singleCompletedLifecycle) && toolEventHasPresentation(start)
 	hasFinal := false
 	for _, item := range group {
 		if !item.Done {
@@ -60,7 +60,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 			continue
 		}
 		settled = true
-		if !shouldRenderToolEvent(item) {
+		if !toolEventHasPresentation(item) || !shouldRenderToolEvent(item) {
 			continue
 		}
 		final = item
@@ -77,7 +77,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 		if hasFinal {
 			return renderACPStandaloneFinalToolRows(blockID, final, width, ctx, opts), end
 		}
-		if shouldRenderToolEvent(ev) {
+		if toolEventHasPresentation(ev) && shouldRenderToolEvent(ev) {
 			return renderACPStandardToolCollapsedRows(blockID, ev, callID, width, ctx, ev.Err, ev.Done, ""), end
 		}
 		return nil, end
@@ -271,11 +271,18 @@ func toolLifecycleHeaderEvent(start SubagentEvent, final SubagentEvent, hasFinal
 	return header
 }
 
-func toolEventHasHeader(ev SubagentEvent) bool {
-	return strings.TrimSpace(ev.Name) != "" ||
-		strings.TrimSpace(ev.ToolKind) != "" ||
-		strings.TrimSpace(ev.Title) != "" ||
-		strings.TrimSpace(ev.Args) != ""
+// toolEventHasPresentation distinguishes an ACP tool identity from a sparse
+// content/state patch. Arguments and output alone cannot name a tool, and a
+// generic kind=other without a provider title has no trustworthy label. Keep
+// such updates in reducer state so a later identity-bearing patch can
+// materialize them, but never manufacture the user-visible label "Tool".
+func toolEventHasPresentation(ev SubagentEvent) bool {
+	if strings.TrimSpace(ev.Name) != "" || strings.TrimSpace(ev.Title) != "" ||
+		strings.TrimSpace(ev.ExplorationVerb) != "" {
+		return true
+	}
+	kind := strings.ToLower(strings.TrimSpace(ev.ToolKind))
+	return kind != "" && kind != "other"
 }
 
 func shouldRenderACPToolPanel(text string, err bool) bool {

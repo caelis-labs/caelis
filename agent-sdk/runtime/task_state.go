@@ -19,12 +19,16 @@ import (
 )
 
 const (
-	defaultCommandYield             = 10 * time.Second
-	taskWaitMaxYield                = time.Minute
-	taskWriteOutputWait             = 2 * time.Second
-	taskWriteOutputQuietPeriod      = 100 * time.Millisecond
-	taskCancelWait                  = 10 * time.Millisecond
-	commandLiveOutputBufferCapBytes = 64 * 1024
+	defaultCommandYield        = 10 * time.Second
+	taskWaitMaxYield           = time.Minute
+	taskWriteOutputWait        = 2 * time.Second
+	taskWriteOutputQuietPeriod = 100 * time.Millisecond
+	taskCancelWait             = 10 * time.Millisecond
+	// Command observation must comfortably bridge process startup, TaskStream
+	// attachment, and ordinary TUI render stalls. The window stays bounded, but
+	// is aligned with the semantic subagent recovery budget instead of evicting
+	// a normal build log after only 64 KiB.
+	commandLiveOutputBufferCapBytes = 4 * 1024 * 1024
 	// Subagent observation deliberately keeps two bounded, process-local views:
 	// a short exact delta window for lossless resume and a larger ingest-merged
 	// semantic view for gap recovery. The semantic byte budget retains exact
@@ -236,19 +240,15 @@ type subagentTask struct {
 	streamBytes        int
 	semanticRetention  subagentSemanticRetention
 	// assistantStream* tracks the producer's current ACP agent-message segment.
-	// A new non-empty MessageID without an intervening reasoning/tool/plan
-	// barrier replaces that provisional segment instead of concatenating it.
+	// A MessageID change starts a new message; semantic retention preserves each
+	// contiguous run in wire order.
 	assistantStreamTurnID    string
 	assistantStreamMessageID string
-	assistantStreamHasText   bool
-	// assistantStreamPreviewPrefix is the bounded output before the current
-	// segment. It is the rebuild point when a new MessageID replaces that segment.
-	assistantStreamPreviewPrefix string
-	latestFinalText              string
-	latestFinalTurnSeq           int64
-	latestFinalOrder             int64
-	latestFinalAt                time.Time
-	latestFinalActivityID        string
+	latestFinalText          string
+	latestFinalTurnSeq       int64
+	latestFinalOrder         int64
+	latestFinalAt            time.Time
+	latestFinalActivityID    string
 	// finalResponseCursor is the highest completed child Turn whose exact Final
 	// Response has already been exposed by Spawn or an explicit Task read/wait.
 	// It is an observation frontier, not a second output store; exact text stays

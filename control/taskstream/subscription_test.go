@@ -49,6 +49,21 @@ func TestLiveSubscriptionStillFailsFastForSlowConsumer(t *testing.T) {
 	}
 }
 
+func TestLiveSubscriptionAbsorbsOrdinaryTUIRenderStall(t *testing.T) {
+	const ordinaryBurstRecords = 256
+
+	sub := newSubscription(context.Background())
+	defer sub.Close()
+	for index := 0; index < ordinaryBurstRecords; index++ {
+		if !sub.enqueue(Record{Cursor: "cursor", Frame: &stream.Frame{Text: "build output\n"}}) {
+			t.Fatalf("ordinary burst rejected record %d: %v", index, sub.Err())
+		}
+	}
+	if err := sub.Err(); err != nil {
+		t.Fatalf("ordinary render stall closed subscription: %v", err)
+	}
+}
+
 func TestInitialSubscriptionDeliversOneExactFinalLargerThanLiveByteCap(t *testing.T) {
 	sub := newSubscription(context.Background())
 	defer sub.Close()

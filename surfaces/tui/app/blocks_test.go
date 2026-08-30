@@ -327,10 +327,31 @@ func TestExplorationSummaryPreservesStructuredQueryWrappers(t *testing.T) {
 func TestAnonymousCompletedToolWithoutPresentationFieldsHasNoHeader(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	rows, _ := renderACPToolLifecycleRows("block-1", []SubagentEvent{{
-		Kind: SEToolCall, CallID: "tool-1", Done: true,
+		Kind: SEToolCall, CallID: "tool-1", Args: "echo hidden", Output: "hidden output", Done: true,
 	}}, 0, 80, model.blockRenderContext(80), acpTranscriptRenderOptions{ToolOutputPanels: true})
 	if len(rows) != 0 {
-		t.Fatalf("anonymous completed tool rows = %#v, want no synthetic Tool header", rows)
+		t.Fatalf("anonymous completed tool rows = %#v, want sparse content retained without a synthetic Tool header", rows)
+	}
+}
+
+func TestAnonymousToolPatchMaterializesAfterPresentationIdentityArrives(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	index := map[string]int{}
+	events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
+		CallID: "shell-1", Args: "printf ready", Output: "ready\n",
+	}, index)
+	rows, _ := renderACPToolLifecycleRows("block-1", events, 0, 80, model.blockRenderContext(80), acpTranscriptRenderOptions{ToolOutputPanels: true})
+	if len(rows) != 0 {
+		t.Fatalf("anonymous sparse update rows = %#v, want cached but invisible until ACP identity arrives", rows)
+	}
+
+	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
+		CallID: "shell-1", Meta: ToolUpdateMeta{ToolKind: "execute"},
+	}, index)
+	rows, _ = renderACPToolLifecycleRows("block-1", events, 0, 80, model.blockRenderContext(80), acpTranscriptRenderOptions{ToolOutputPanels: true})
+	plain := joinRenderedPlain(rows)
+	if !strings.Contains(plain, "Ran") || !strings.Contains(plain, "ready") || strings.Contains(plain, "Tool") {
+		t.Fatalf("materialized sparse update = %q, want standard execute identity with retained output", plain)
 	}
 }
 

@@ -6,8 +6,47 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
+
+func TestACPChildTerminalProjectorResetsFinalResponseAtReplayGap(t *testing.T) {
+	t.Parallel()
+
+	projector := newACPChildTerminalProjector()
+	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+	message := eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
+		ScopeID: "task-1", TurnID: "child-turn-1", ParentTool: parent,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "message-1",
+			Content: eventstream.TextContent{Type: "text", Text: "A"},
+		},
+	}
+	projector.project(message, "")
+	gap := eventstream.Envelope{
+		Kind: eventstream.KindNotice, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
+		ScopeID: "task-1", TurnID: "child-turn-1", ParentTool: parent,
+		Meta: map[string]any{"task_stream": map[string]any{"transient_gap": true}},
+	}
+	if !taskstream.IsTransientGapEnvelope(gap) {
+		t.Fatal("test gap was not recognized as a Task-stream replay boundary")
+	}
+	if notification, handled := projector.projectNotice(gap, ""); !handled || notification.Update != nil {
+		t.Fatalf("gap projection = %#v handled=%v, want consumed reset boundary", notification, handled)
+	}
+	projector.project(message, "")
+
+	final, handled := projector.projectLifecycle(eventstream.Envelope{
+		Kind: eventstream.KindLifecycle, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
+		ScopeID: "task-1", TurnID: "child-turn-1", ParentTool: parent, Final: true,
+		Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
+	}, "")
+	if !handled {
+		t.Fatal("child terminal was not handled")
+	}
+	assertACPChildFinalResult(t, final, eventstream.ToolStatusCompleted, "A")
+}
 
 func TestACPChildTerminalProjectorEmitsOnlyFinalResponseContent(t *testing.T) {
 	t.Parallel()

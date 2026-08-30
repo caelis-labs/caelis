@@ -1893,6 +1893,34 @@ func TestCommandLiveOutputBufferIsBoundedAndCursorStable(t *testing.T) {
 	task.mu.Unlock()
 }
 
+func TestCommandOrdinaryBuildOutputRemainsReplayableFromStart(t *testing.T) {
+	t.Parallel()
+
+	const ordinaryBuildLogBytes = 256 * 1024
+	want := strings.Repeat("build output\n", ordinaryBuildLogBytes/len("build output\n"))
+	task := &commandTask{
+		ref:         taskapi.Ref{TaskID: "task-1", TerminalID: "term-1"},
+		sessionRef:  session.SessionRef{SessionID: "session-1"},
+		session:     &liveOutputRaceSession{},
+		state:       taskapi.StateRunning,
+		running:     true,
+		createdAt:   time.Now(),
+		outputState: commandOutputState{callback: true},
+	}
+	task.appendOutput(want)
+
+	snapshot, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.TruncatedBefore != 0 || len(snapshot.Frames) != 1 || snapshot.Frames[0].TruncatedBefore != 0 {
+		t.Fatalf("ordinary build snapshot = %#v, want exact replay without an earlier-output gap", snapshot)
+	}
+	if snapshot.Frames[0].Text != want {
+		t.Fatalf("ordinary build replay bytes = %d, want %d", len(snapshot.Frames[0].Text), len(want))
+	}
+}
+
 func TestCommandStreamAssignsOneMonotonicEventCursorPerOutputFrame(t *testing.T) {
 	t.Parallel()
 
@@ -2126,6 +2154,9 @@ func TestSubagentCurrentStateMergesSparseShellUpdates(t *testing.T) {
 		RawInput: map[string]any{
 			"command": "printf 'CURRENT_STATE_SHELL_47\\n'",
 		},
+		Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{
+			"tool": map[string]any{"name": "Shell"},
+		}}},
 	})
 	appendToolUpdate("shell-presentation", session.EventTypeToolCall, session.ProtocolUpdate{
 		SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate), ToolCallID: "execute-1",
@@ -2140,7 +2171,9 @@ func TestSubagentCurrentStateMergesSparseShellUpdates(t *testing.T) {
 	})
 	appendToolUpdate("shell-complete", session.EventTypeToolResult, session.ProtocolUpdate{
 		SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate), ToolCallID: "execute-1",
-		Status: "completed",
+		Status: "completed", Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{
+			"stream": map[string]any{"cursor": float64(47)},
+		}}},
 		Content: []session.ProtocolToolCallContent{{
 			Type: "content", Content: session.ProtocolTextContent("CURRENT_STATE_SHELL_47\n"),
 		}},
@@ -2219,6 +2252,9 @@ func TestSubagentCurrentStateKeepsShellHeaderAfterOversizedSparseUpdate(t *testi
 		RawInput: map[string]any{
 			"command": "printf 'OVERSIZED_SHELL_47\\n'",
 		},
+		Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{
+			"tool": map[string]any{"name": "Shell"},
+		}}},
 	})
 	appendToolUpdate("shell-output", session.EventTypeToolCall, session.ProtocolUpdate{
 		SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate), ToolCallID: "execute-1",
@@ -2232,6 +2268,9 @@ func TestSubagentCurrentStateKeepsShellHeaderAfterOversizedSparseUpdate(t *testi
 	appendToolUpdate("shell-complete", session.EventTypeToolResult, session.ProtocolUpdate{
 		SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate), ToolCallID: "execute-1",
 		Status: "completed",
+		Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{
+			"stream": map[string]any{"cursor": float64(47)},
+		}}},
 	})
 	for index := 0; index < subagentStreamFrameCap+1; index++ {
 		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
@@ -2273,6 +2312,13 @@ func TestSubagentCurrentStateKeepsShellHeaderAfterOversizedSparseUpdate(t *testi
 	provider, _ := update.Meta["provider"].(map[string]any)
 	if provider["trace"] != "oversized-shell-order" {
 		t.Fatalf("retained oversized shell metadata = %#v, want independently bounded metadata", update.Meta)
+	}
+	caelis, _ := update.Meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	toolMeta, _ := runtimeMeta["tool"].(map[string]any)
+	streamMeta, _ := runtimeMeta["stream"].(map[string]any)
+	if toolMeta["name"] != "Shell" || streamMeta["cursor"] != float64(47) {
+		t.Fatalf("retained oversized shell nested metadata = %#v, want sparse patch merge", update.Meta)
 	}
 	if task.semanticRetention.bytes > subagentStreamByteCap {
 		t.Fatalf("semantic retention bytes = %d, cap %d", task.semanticRetention.bytes, subagentStreamByteCap)
@@ -2396,7 +2442,7 @@ func TestSubagentCurrentStateRetainsCompletedFinalsBelowByteBudget(t *testing.T)
 	}
 }
 
-func TestSubagentMessageIdentityReplacementRetractsProvisionalAssistantWhileRunning(t *testing.T) {
+func TestSubagentMessageIdentityChangeStartsNewAssistantWithoutGap(t *testing.T) {
 	t.Parallel()
 
 	task := &subagentTask{
@@ -2425,8 +2471,8 @@ func TestSubagentMessageIdentityReplacementRetractsProvisionalAssistantWhileRunn
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.EventsTruncatedBefore <= provisionalCursor.Events {
-		t.Fatalf("completion boundary = %d, want after provisional cursor %d", snapshot.EventsTruncatedBefore, provisionalCursor.Events)
+	if snapshot.EventsTruncatedBefore != 0 {
+		t.Fatalf("message boundary = %d, want exact ACP continuation without a manufactured gap", snapshot.EventsTruncatedBefore)
 	}
 	frames := stream.FramesForSnapshot(snapshot)
 	var assistant []string
@@ -2436,17 +2482,17 @@ func TestSubagentMessageIdentityReplacementRetractsProvisionalAssistantWhileRunn
 		}
 	}
 	if !reflect.DeepEqual(assistant, []string{"Here's the result:"}) {
-		t.Fatalf("reconciled assistant = %#v in %#v, want authoritative Final only", assistant, frames)
+		t.Fatalf("new assistant message = %#v in %#v, want only the delta after the requested cursor", assistant, frames)
 	}
 	if !snapshot.Running || stream.IsTerminalState(snapshot.State) {
 		t.Fatalf("reconciled running snapshot = %#v, want running Task", snapshot)
 	}
 	taskSnapshot := task.snapshot()
-	if preview := taskRawStringValue(taskSnapshot.Result["output_preview"]); preview != "Here's the result:" {
-		t.Fatalf("reconciled output preview = %q, want canonical assistant only", preview)
+	if preview := taskRawStringValue(taskSnapshot.Result["output_preview"]); preview != "Here's the Here's the result:" {
+		t.Fatalf("ordered output preview = %q, want both ACP messages", preview)
 	}
-	if preview := taskRawStringValue(subagentTaskToolPayload(taskSnapshot)["output_preview"]); preview != "Here's the result:" {
-		t.Fatalf("reconciled tool payload preview = %q, want canonical assistant only", preview)
+	if preview := taskRawStringValue(subagentTaskToolPayload(taskSnapshot)["output_preview"]); preview != "Here's the Here's the result:" {
+		t.Fatalf("ordered tool payload preview = %q, want both ACP messages", preview)
 	}
 	for _, frame := range frames {
 		if frame.Closed || stream.IsTerminalState(frame.State) {
@@ -2459,6 +2505,150 @@ func TestSubagentMessageIdentityReplacementRetractsProvisionalAssistantWhileRunn
 	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "Here's the result:"})
 	if task.streamEventBase != boundary {
 		t.Fatalf("completion boundary = %d, want live replacement boundary %d to remain authoritative", task.streamEventBase, boundary)
+	}
+	task.mu.Unlock()
+}
+
+func TestSubagentCurrentStatePreservesNoncontiguousACPMessageOrder(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	turnID := subagentTurnID(task.ref.TaskID, task.turnSeq)
+	appendAssistant := func(messageID string, text string) {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: messageID + text, MessageID: messageID, Type: session.EventTypeAssistant,
+			Visibility: session.VisibilityUIOnly, Text: text, Scope: &session.EventScope{TurnID: turnID},
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), MessageID: messageID,
+				Content: session.ProtocolTextContent(text),
+			}},
+		}})
+	}
+
+	task.mu.Lock()
+	appendAssistant("message-a", "A1")
+	appendAssistant("message-b", "B")
+	appendAssistant("message-a", "A2")
+	for index := 0; index < subagentStreamFrameCap+1; index++ {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: fmt.Sprintf("progress-%03d", index), Type: session.EventTypeLifecycle,
+			Scope: &session.EventScope{TurnID: turnID}, Lifecycle: &session.EventLifecycle{Status: "progress"},
+		}})
+	}
+	task.mu.Unlock()
+
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.EventsTruncatedBefore == 0 {
+		t.Fatal("snapshot remained exact, want semantic current-state recovery")
+	}
+	var assistant []string
+	for _, frame := range snapshot.Frames {
+		if session.ProtocolSessionUpdateType(frame.Event) == string(session.ProtocolUpdateTypeAgentMessage) {
+			assistant = append(assistant, session.EventText(frame.Event))
+		}
+	}
+	if !reflect.DeepEqual(assistant, []string{"A1", "B", "A2"}) {
+		t.Fatalf("current-state assistant order = %#v, want exact ACP wire order", assistant)
+	}
+}
+
+func TestSubagentIdentityPromotionKeepsOneAssistantRunAtCompletion(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	turnID := subagentTurnID(task.ref.TaskID, task.turnSeq)
+	appendAssistant := func(eventID string, messageID string, text string) {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: eventID, MessageID: messageID, Type: session.EventTypeAssistant,
+			Visibility: session.VisibilityUIOnly, Text: text, Scope: &session.EventScope{TurnID: turnID},
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), MessageID: messageID,
+				Content: session.ProtocolTextContent(text),
+			}},
+		}})
+	}
+
+	task.mu.Lock()
+	appendAssistant("anonymous-prefix", "", "prefix ")
+	appendAssistant("identified-suffix", "message-1", "suffix")
+	for index := 0; index < subagentStreamFrameCap+1; index++ {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: fmt.Sprintf("progress-%03d", index), Type: session.EventTypeLifecycle,
+			Scope: &session.EventScope{TurnID: turnID}, Lifecycle: &session.EventLifecycle{Status: "progress"},
+		}})
+	}
+	task.applyResult(delegation.Result{
+		TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "prefix suffix",
+	})
+	task.ensureTerminalStreamFrameLocked()
+	task.mu.Unlock()
+
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.EventsTruncatedBefore == 0 {
+		t.Fatal("snapshot remained exact, want semantic current-state recovery")
+	}
+	var assistant []string
+	for _, frame := range snapshot.Frames {
+		if frame.Event == nil {
+			continue
+		}
+		if session.ProtocolSessionUpdateType(frame.Event) == string(session.ProtocolUpdateTypeAgentMessage) ||
+			(frame.Event.Scope != nil && frame.Event.Scope.Source == "subagent_result") {
+			assistant = append(assistant, session.EventText(frame.Event))
+		}
+	}
+	if !reflect.DeepEqual(assistant, []string{"prefix suffix"}) {
+		t.Fatalf("identity-promotion current state = %#v, want one authoritative Final without duplicated prefix", assistant)
+	}
+}
+
+func TestSubagentIdentityPromotionAfterToolDoesNotManufactureCompletionGap(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	turnID := subagentTurnID(task.ref.TaskID, task.turnSeq)
+	appendAssistant := func(eventID string, messageID string, text string) {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: eventID, MessageID: messageID, Type: session.EventTypeAssistant,
+			Visibility: session.VisibilityUIOnly, Text: text, Scope: &session.EventScope{TurnID: turnID},
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), MessageID: messageID,
+				Content: session.ProtocolTextContent(text),
+			}},
+		}})
+	}
+
+	task.mu.Lock()
+	appendAssistant("before-tool", "message-a", "I will inspect.")
+	task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+		ID: "tool-1", Type: session.EventTypeToolCall, Scope: &session.EventScope{TurnID: turnID},
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeToolCall), ToolCallID: "tool-1",
+		}},
+	}})
+	appendAssistant("anonymous-prefix", "", "prefix ")
+	appendAssistant("identified-suffix", "message-b", "suffix")
+	boundary := task.streamEventBase
+	task.applyResult(delegation.Result{
+		TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "prefix suffix",
+	})
+	if task.streamEventBase != boundary {
+		t.Fatalf("completion boundary = %d, want no gap after identity promotion at boundary %d", task.streamEventBase, boundary)
 	}
 	task.mu.Unlock()
 }
@@ -2498,8 +2688,8 @@ func TestSubagentAssistantMessageIdentityAfterToolKeepsPriorNarrative(t *testing
 	eventBase := task.streamEventBase
 	task.mu.Unlock()
 
-	if eventBase <= provisionalCursor.Events {
-		t.Fatalf("assistant replacement boundary = %d, want after provisional cursor %d", eventBase, provisionalCursor.Events)
+	if eventBase != 0 {
+		t.Fatalf("assistant message boundary = %d, want no manufactured gap", eventBase)
 	}
 	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, provisionalCursor)
 	if err != nil {
@@ -2511,11 +2701,11 @@ func TestSubagentAssistantMessageIdentityAfterToolKeepsPriorNarrative(t *testing
 			assistant = append(assistant, session.EventText(frame.Event))
 		}
 	}
-	if !reflect.DeepEqual(assistant, []string{"I will inspect the repository.", "Here is the result."}) {
-		t.Fatalf("assistant transcript = %#v in %#v, want pre-tool narrative plus replacement", assistant, snapshot.Frames)
+	if !reflect.DeepEqual(assistant, []string{"Here is the result."}) {
+		t.Fatalf("assistant continuation = %#v in %#v, want exact new message after requested cursor", assistant, snapshot.Frames)
 	}
-	if stdout != "I will inspect the repository.Here is the result." {
-		t.Fatalf("assistant output preview source = %q, want pre-tool narrative plus replacement", stdout)
+	if stdout != "I will inspect the repository.Provisional summary after the tool.Here is the result." {
+		t.Fatalf("assistant output preview source = %q, want every ordered ACP message", stdout)
 	}
 }
 
@@ -2821,7 +3011,11 @@ func TestSubagentSemanticRetentionTreatsProgressLifecycleAsReplaceableNoise(t *t
 			Lifecycle: &session.EventLifecycle{Status: "progress", Reason: fmt.Sprintf("step-%04d", index)},
 		}}, int64(index+3))
 	}
-	if retention.units["narrative:"+turnID+":assistant:assistant"] == nil {
+	var retainedAssistant bool
+	for _, unit := range retention.units {
+		retainedAssistant = retainedAssistant || unit != nil && unit.assistantTurn == turnID
+	}
+	if !retainedAssistant {
 		t.Fatal("progress lifecycle pressure evicted assistant current state")
 	}
 	if retention.units["tool:"+turnID+":call-1"] == nil {

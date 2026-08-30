@@ -262,7 +262,14 @@ func (m *acpTaskStreamMux) forwardUntilClose(
 				return strings.TrimSpace(subscription.LastCursor()), subscription.Err()
 			}
 			if taskstream.IsTransientGapEnvelope(envelope) {
-				continue
+				// Child current-state replay is intentionally anchored before the
+				// lost exact window. Forward its gap boundary to the child terminal
+				// projector so any partially accumulated FinalResponse is reset
+				// before replayed deltas arrive. Command gaps have no child
+				// accumulator and remain internal to this compatibility mux.
+				if anchor.kind != task.KindSubagent {
+					continue
+				}
 			}
 			cursor := strings.TrimSpace(envelope.Cursor)
 			if cursor == "" {
