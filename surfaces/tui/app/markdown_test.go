@@ -473,6 +473,7 @@ func TestCaelisChromaStylesUseSemanticSyntaxPalettes(t *testing.T) {
 					want := colorToAnsiPtr(check.want)
 					if want == nil {
 						t.Fatalf("palette %s color is nil", check.name)
+						return
 					}
 					if got := registered.Get(check.token).Colour.String(); got != *want {
 						t.Fatalf("%s color = %q, want %q", check.name, got, *want)

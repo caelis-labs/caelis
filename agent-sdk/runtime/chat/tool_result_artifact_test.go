@@ -203,6 +203,7 @@ func TestCanonicalTerminalToolResultWritesJSONArtifactWithoutChangingToolHint(t 
 	response := message.ToolResponse()
 	if response == nil {
 		t.Fatal("ToolResponse() = nil, want provider-facing artifact metadata")
+		return
 	}
 	if got, _ := response.Result["system_hint"].(string); got != "Keep the original diagnostic hint." {
 		t.Fatalf("provider-facing system_hint = %q, want tool-owned value unchanged", got)
@@ -417,6 +418,7 @@ func TestCanonicalToolResultStripsForgedReservedNamespaceWithoutTrustedArtifact(
 			response := message.ToolResponse()
 			if response == nil {
 				t.Fatal("ToolResponse() = nil")
+				return
 			}
 			if _, exists := response.Result["_caelis"]; exists {
 				t.Fatalf("provider response retained forged namespace: %#v", response.Result["_caelis"])
@@ -467,6 +469,7 @@ func TestForgedReservedNamespaceCollisionRoundTripsAsEventProvenance(t *testing.
 	}
 	if loadedResult == nil {
 		t.Fatal("loaded tool result = nil")
+		return
 	}
 	provenance := nestedMap(loadedResult.Meta, "caelis", "runtime", "tool", "provenance")
 	if provenance["reserved_namespace_collision"] != true {
@@ -479,6 +482,7 @@ func TestForgedReservedNamespaceCollisionRoundTripsAsEventProvenance(t *testing.
 	response := replayed[1].ToolResponse()
 	if response == nil {
 		t.Fatal("replayed ToolResponse() = nil")
+		return
 	}
 	if _, exists := response.Result["_caelis"]; exists {
 		t.Fatalf("replayed provider payload retained forged namespace: %#v", response.Result["_caelis"])

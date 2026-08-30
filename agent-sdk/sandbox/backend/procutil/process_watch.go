@@ -84,15 +84,3 @@ func WaitWithIdleTimeout(ctx context.Context, cmd *exec.Cmd, idleTimeout time.Du
 		}
 	}
 }
-
-func KillProcess(cmd *exec.Cmd) error {
-	if cmd == nil || cmd.Process == nil {
-		return nil
-	}
-	// Kill the whole process group so child processes (for example spawned by
-	// "go run" / shells) do not keep stdout/stderr pipes open.
-	if err := KillProcessGroup(cmd.Process.Pid); err == nil {
-		return nil
-	}
-	return cmd.Process.Kill()
-}

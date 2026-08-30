@@ -19,6 +19,7 @@ func TestUsageSnapshotFromMapAcceptsGeminiUsageMetadata(t *testing.T) {
 
 	if usage == nil {
 		t.Fatal("UsageSnapshotFromMap() = nil, want usage")
+		return
 	}
 	if usage.PromptTokens != 11 {
 		t.Fatalf("PromptTokens = %d, want Gemini promptTokenCount", usage.PromptTokens)
@@ -51,6 +52,7 @@ func TestUsageSnapshotFromSessionEventUsesInvocationContextWindow(t *testing.T) 
 
 	if usage == nil {
 		t.Fatal("UsageSnapshotFromSessionEvent() = nil, want usage")
+		return
 	}
 	if usage.TotalTokens != 17 || usage.ContextWindowTokens != 128000 {
 		t.Fatalf("usage = %+v, want total tokens and invocation context window", *usage)
@@ -99,6 +101,7 @@ func TestUsageSnapshotFromSessionEventUsesSDKContextWindowMetadata(t *testing.T)
 
 	if usage == nil {
 		t.Fatal("UsageSnapshotFromSessionEvent() = nil, want usage")
+		return
 	}
 	if usage.TotalTokens != 17 || usage.ContextWindowTokens != 200000 {
 		t.Fatalf("usage = %+v, want total tokens and sdk context window", *usage)
@@ -115,6 +118,7 @@ func TestUsageSnapshotFromMapAcceptsAnthropicCacheReadUsage(t *testing.T) {
 
 	if usage == nil {
 		t.Fatal("UsageSnapshotFromMap() = nil, want usage")
+		return
 	}
 	if usage.PromptTokens != 14 {
 		t.Fatalf("PromptTokens = %d, want input plus cache creation", usage.PromptTokens)
@@ -140,6 +144,7 @@ func TestUsageSnapshotFromMapForProviderDoesNotTrustUndercountedCacheTotal(t *te
 
 	if usage == nil {
 		t.Fatal("UsageSnapshotFromMapForProvider() = nil, want usage")
+		return
 	}
 	if usage.TotalTokens != 115 {
 		t.Fatalf("TotalTokens = %d, want max(explicit total, prompt+cached+output)", usage.TotalTokens)
@@ -156,6 +161,7 @@ func TestDeepSeekOpenAICompatCacheHitDoesNotDoubleCount(t *testing.T) {
 
 	if usage == nil {
 		t.Fatal("UsageSnapshotFromMapForProvider() = nil, want usage")
+		return
 	}
 	normalized := NormalizeUsageForDisplay(*usage, "deepseek")
 	if normalized.PromptTokens != 42 {
@@ -180,6 +186,7 @@ func TestDeepSeekAnthropicUsageProviderFoldsCacheReadForDisplay(t *testing.T) {
 
 	if usage == nil {
 		t.Fatal("UsageSnapshotFromMapForProvider() = nil, want usage")
+		return
 	}
 	normalized := NormalizeUsageForDisplay(*usage, "deepseek-anthropic")
 	if normalized.PromptTokens != 73 {
@@ -201,6 +208,7 @@ func TestUsageSnapshotFromMapAcceptsAnthropicThinkingTokenDetails(t *testing.T) 
 
 	if usage == nil {
 		t.Fatal("UsageSnapshotFromMap() = nil, want usage")
+		return
 	}
 	if usage.ReasoningTokens != 3 {
 		t.Fatalf("ReasoningTokens = %d, want Anthropic thinking token details", usage.ReasoningTokens)

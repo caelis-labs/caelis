@@ -142,6 +142,7 @@ func TestRuntimeChildInputLeavesTaskUnchangedUntilOutputThenObservesGeneration(t
 	runtime.tasks.mu.RUnlock()
 	if observed == nil {
 		t.Fatal("observed Task disappeared")
+		return
 	}
 	snapshot := observed.snapshot()
 	generation, _ := taskInt64Value(snapshot.Metadata[subagentActivityGenerationMeta])
@@ -370,6 +371,7 @@ func TestRuntimeChildActivityBatchUsesOneRunningWriteAndKeepsGapNonTerminal(t *t
 	runtime.tasks.mu.RUnlock()
 	if task == nil {
 		t.Fatal("started Task is unavailable")
+		return
 	}
 	task.mu.Lock()
 	target := agent.ChildEndpointRef{
@@ -418,6 +420,7 @@ func TestRuntimeChildActivityBatchUsesOneRunningWriteAndKeepsGapNonTerminal(t *t
 	runtime.tasks.mu.RUnlock()
 	if observed == nil {
 		t.Fatal("observed Task disappeared")
+		return
 	}
 	snapshot := observed.snapshot()
 	observed.mu.Lock()
@@ -478,6 +481,7 @@ func TestRuntimeChildActivityLiveFrameAdvancesTaskStreamWhilePersistenceBlocks(t
 	runtime.tasks.mu.RUnlock()
 	if observedTask == nil {
 		t.Fatal("started child Task is unavailable")
+		return
 	}
 	observedTask.mu.Lock()
 	target := agent.ChildEndpointRef{
@@ -645,6 +649,7 @@ func TestInitialActivityReplayedAfterFastTerminalStaysOnGenerationOne(t *testing
 	runtime.tasks.mu.RUnlock()
 	if task == nil {
 		t.Fatal("initial Task is unavailable")
+		return
 	}
 	snapshot := task.snapshot()
 	generation, _ := taskInt64Value(snapshot.Metadata[subagentActivityGenerationMeta])

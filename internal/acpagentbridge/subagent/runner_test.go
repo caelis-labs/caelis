@@ -67,6 +67,7 @@ func TestChildACPUpdatePreservesUIOnlyRuntimeToolIdentity(t *testing.T) {
 	update := session.ProtocolUpdateOf(event)
 	if update == nil {
 		t.Fatal("acpUpdateEvent() = nil, want tool event")
+		return
 	}
 	got := acpmeta.ToolName(update.Meta)
 	if got != "SendMessage" {

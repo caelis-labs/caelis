@@ -1400,6 +1400,7 @@ func TestHandleACPEventEnvelopeAppliesParticipantSequence(t *testing.T) {
 	block := model.findParticipantTurnBlock("participant-turn-1")
 	if block == nil {
 		t.Fatal("participant block missing")
+		return
 	}
 	if block.Actor != "/codex(lina)" || block.Status != "completed" {
 		t.Fatalf("participant block = %#v, want /codex(lina) completed", block)
@@ -1458,6 +1459,7 @@ func TestHandleACPEventEnvelopeShowsParticipantFailureBeforeTerminal(t *testing.
 	block := model.findParticipantTurnBlock(turnID)
 	if block == nil {
 		t.Fatal("participant block missing")
+		return
 	}
 	if len(block.Events) != 1 ||
 		block.Events[0].Kind != SENotice ||
@@ -1599,6 +1601,7 @@ func TestParticipantLiveAndFinalWithoutMessageIDRenderExactlyOnce(t *testing.T) 
 	block := model.findParticipantTurnBlock(turnID)
 	if block == nil {
 		t.Fatal("participant turn block missing")
+		return
 	}
 	if len(block.Events) != 1 || block.Events[0].Kind != SEAssistant || block.Events[0].Text != answer {
 		t.Fatalf("participant events = %#v, want one final assistant answer", block.Events)
@@ -1647,6 +1650,7 @@ func TestHandleACPEventEnvelopeKeepsParticipantSkillContentAsStandardRead(t *tes
 	block := model.findParticipantTurnBlock("side-reviewer")
 	if block == nil {
 		t.Fatal("participant block missing")
+		return
 	}
 	if len(block.Events) != 1 || block.Events[0].Name != "" || block.Events[0].ToolKind != eventstream.ToolKindRead || block.Events[0].Title != `Read <skill_content name="review">` || block.Events[0].Args != "review" || !block.Events[0].Done {
 		t.Fatalf("participant events = %#v, want completed standard Read review", block.Events)
@@ -4515,6 +4519,7 @@ func TestApprovalPayloadFromACPEventUsesStandardPermission(t *testing.T) {
 	})
 	if req == nil {
 		t.Fatal("approvalPayloadFromACPEvent() = nil")
+		return
 	}
 	if req.RequestID != "approval-child-1" || req.ToolCallID != "call-1" || req.ToolName != "RunCommand" || req.Reason != "needs execution" {
 		t.Fatalf("approval payload = %#v, want ACP permission fields", req)

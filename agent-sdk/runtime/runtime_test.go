@@ -5028,28 +5028,32 @@ func TestRuntimeCommandTaskBatchWaitDoesNotTreatOutputAsWinner(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
-	commandTool := runtimeCommandTool{
-		base:       mustRuntimeRunCommandTool(t, hostRuntimeForTest(t, activeSession.CWD)),
-		session:    activeSession,
-		sessionRef: activeSession.SessionRef,
-		tasks:      runtime.tasks,
+	longSession := newConcurrentCommandWaitSession()
+	longSession.stdout = "long-progress\n"
+	shortSession := newConcurrentCommandWaitSession()
+	shortSession.stdout = "short-progress\n"
+	longResult, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, newCommandStartProbe(longSession, nil), taskapi.CommandStartRequest{
+		Command: "long", Workdir: activeSession.CWD, Yield: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	longResult := callRuntimeRunCommandTool(t, commandTool, map[string]any{
-		"command":       shellPrintThenSleepForTest("long-progress\n", 3*time.Second),
-		"workdir":       ".",
-		"yield_time_ms": shellRunningYieldMillisForTest(0),
+	shortResult, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, newCommandStartProbe(shortSession, nil), taskapi.CommandStartRequest{
+		Command: "short", Workdir: activeSession.CWD, Yield: 0,
 	})
-	shortResult := callRuntimeRunCommandTool(t, commandTool, map[string]any{
-		"command":       shellPrintThenSleepForTest("short-progress\n", 500*time.Millisecond),
-		"workdir":       ".",
-		"yield_time_ms": shellRunningYieldMillisForTest(0),
-	})
-	longHandle, _ := testToolResultRuntimeMeta(t, longResult, "task")["handle"].(string)
-	shortHandle, _ := testToolResultRuntimeMeta(t, shortResult, "task")["handle"].(string)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		<-longSession.waitStarted
+		<-shortSession.waitStarted
+		shortSession.complete()
+	}()
 
 	waitResult := callRuntimeTaskTool(t, runtimeTaskTool{
 		base: tasktool.New(), sessionRef: activeSession.SessionRef, tasks: runtime.tasks,
-	}, map[string]any{"action": "wait", "handle": longHandle + "," + shortHandle})
+	}, map[string]any{"action": "wait", "handle": longResult.Handle + "," + shortResult.Handle})
 	payload := testToolResultPayload(t, waitResult)
 	items, _ := payload["tasks"].([]any)
 	if len(items) != 2 {
@@ -5064,12 +5068,8 @@ func TestRuntimeCommandTaskBatchWaitDoesNotTreatOutputAsWinner(t *testing.T) {
 		t.Fatalf("short command snapshot = %#v, want terminal winner after its output", shortSnapshot)
 	}
 
-	longIdentity, err := runtime.tasks.resolveTaskHandle(context.Background(), activeSession.SessionRef, longHandle)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runtime.tasks.Cancel(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
-		TaskID: longIdentity.taskID, Principal: session.ActorKindController,
+		TaskID: longResult.Ref.TaskID, Principal: session.ActorKindController,
 	}); err != nil {
 		t.Fatal(err)
 	}

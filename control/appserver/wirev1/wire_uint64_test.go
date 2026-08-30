@@ -764,6 +764,7 @@ func assertGeneratedDecimal(t *testing.T, value *generated.Uint64Decimal, want u
 	t.Helper()
 	if value == nil {
 		t.Fatalf("%s is nil", name)
+		return
 	}
 	parsed, err := strconv.ParseUint(string(*value), 10, 64)
 	if err != nil || parsed != want {

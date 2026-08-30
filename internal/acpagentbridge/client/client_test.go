@@ -493,6 +493,7 @@ func TestPermissionHandlerErrorUsesInternalErrorCode(t *testing.T) {
 	_, rpcErr := client.handleRequest(context.Background(), MethodSessionReqPermission, mustMarshalRaw(validPermissionRequest()))
 	if rpcErr == nil {
 		t.Fatal("permission handler error = nil")
+		return
 	}
 	if rpcErr.Code != -32603 {
 		t.Fatalf("permission handler code = %d, want -32603", rpcErr.Code)

@@ -566,6 +566,7 @@ func assertRecoveredCommandEntry(
 	t.Helper()
 	if got == nil {
 		t.Fatal("recovered command entry = nil")
+		return
 	}
 	metadataRunning, _ := got.Metadata["running"].(bool)
 	gotResult := strings.TrimSpace(taskStringValue(got.Result["result"]))

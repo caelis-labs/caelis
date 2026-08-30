@@ -1126,6 +1126,7 @@ func TestHiddenTaskBoundaryIsSymmetricForParticipantAndSubagentLanes(t *testing.
 			}
 			if block == nil {
 				t.Fatal("participant lane block missing")
+				return
 			}
 			var boundaries int
 			var reasoning []string
@@ -1203,6 +1204,7 @@ func TestHiddenParticipantTaskReadRepairsCommandOwnerAcrossTurns(t *testing.T) {
 	block := model.findParticipantTurnBlock(turnID)
 	if block == nil {
 		t.Fatal("participant block missing")
+		return
 	}
 	physical := physicalTranscriptEventsForTest(block.Events)
 	if len(physical) != 1 || physical[0].CallID != "command-1" {

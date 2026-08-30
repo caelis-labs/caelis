@@ -75,6 +75,7 @@ func closeActiveControllerClient(t *testing.T, manager *Manager, sessionID strin
 	manager.mu.RUnlock()
 	if run == nil {
 		t.Fatalf("controller run for %q is unavailable", sessionID)
+		return
 	}
 	run.mu.Lock()
 	acpClient := run.client
@@ -3377,6 +3378,7 @@ func TestParticipantRunSharesCanonicalTerminalCompatibilityAcrossSourceViews(t *
 	canonicalUpdate := session.ProtocolUpdateOf(events[0].Canonical)
 	if canonicalUpdate == nil {
 		t.Fatal("canonical protocol update is nil")
+		return
 	}
 	nativeUpdate, ok := events[0].ACP.Update.(eventstream.ToolCallUpdate)
 	if !ok {

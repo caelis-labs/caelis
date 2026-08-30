@@ -14,12 +14,21 @@ func TestChannelGrantFileIsPrivateAndConsumedOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(path)
+	file, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("grant mode = %o, want 600", info.Mode().Perm())
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := validateChannelGrantFileSecurity(file, info); err != nil {
+		_ = file.Close()
+		t.Fatalf("grant file security: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
 	}
 	grant, err := ConsumeChannelGrantFile(path)
 	if err != nil {

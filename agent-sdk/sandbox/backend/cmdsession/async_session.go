@@ -603,11 +603,7 @@ func (s *AsyncSession) Terminate() error {
 	s.cancel()
 
 	if s.cmd != nil && s.cmd.Process != nil {
-		// Kill the process group
-		if err := procutil.KillProcessGroup(s.cmd.Process.Pid); err != nil {
-			// Fall back to direct kill
-			return s.cmd.Process.Kill()
-		}
+		return procutil.KillProcess(s.cmd)
 	}
 
 	return nil

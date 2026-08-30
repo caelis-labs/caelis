@@ -8,6 +8,11 @@ BUILD_ID ?= $(COMMIT)@$(DATE)
 LDFLAGS ?= -X github.com/caelis-labs/caelis/internal/version.Version=$(BUILD_VERSION) -X github.com/caelis-labs/caelis/internal/version.Commit=$(COMMIT) -X github.com/caelis-labs/caelis/internal/version.Date=$(DATE) -X github.com/caelis-labs/caelis/internal/version.BuildID=$(BUILD_ID) -X github.com/caelis-labs/caelis/internal/version.BuildKind=$(BUILD_KIND)
 GOFILES_CMD = if command -v rg >/dev/null 2>&1; then rg --files -0 -g '*.go'; else find . -type f -name '*.go' ! -path './.git/*' ! -path './.tmp/*' -print0; fi
 GO_TEST_TIMEOUT ?= 5m
+ifeq ($(OS),Windows_NT)
+BASH ?= $(shell git --exec-path)/../../../bin/bash.exe
+else
+BASH ?= bash
+endif
 EVAL_REGRESSION_SELECTOR ?= ^TestRegression
 TUI_GOLDEN_SELECTOR ?= ^TestRegressionACPEventstreamToolCallFrame120x32$$
 TUI_INTERACTION_SELECTOR ?= ^(TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBeforeTool|TestTypedResumeEnterLoadsEmptyQueryAndSubmitsSelectedSession|TestResumeTabRetriesAfterTransientCompletionFailure|TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce|TestHandleACPEventEnvelopeScopedChildTerminalKeepsOneSpawnPanelAndMainTurnAlive)$$
@@ -60,10 +65,10 @@ arch-lint: cache-dirs
 	go run ./scripts/arch_lint.go --include-tests
 
 sdk-boundary-check: cache-dirs
-	./scripts/sdk_boundary_check.sh
+	"$(BASH)" ./scripts/sdk_boundary_check.sh
 
 sdk-proxy-smoke: cache-dirs
-	./scripts/sdk_proxy_smoke.sh
+	"$(BASH)" ./scripts/sdk_proxy_smoke.sh
 
 sdk-race: cache-dirs
 	go test -race -timeout $(GO_TEST_TIMEOUT) ./agent-sdk/policy/... ./agent-sdk/session/... ./agent-sdk/runtime/...
@@ -84,35 +89,35 @@ commit-check: quality build
 regression: product-acceptance eval-smoke tui-golden tui-interaction control-feed-regression command-regression command-execution-regression
 
 product-acceptance: cache-dirs
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./agent-sdk/runtime '$(PRODUCT_RUNTIME_SELECTOR)' product-runtime
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./internal/acpagentbridge/controller '$(PRODUCT_CONTROLLER_SELECTOR)' product-controller
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./internal/acpagentbridge/subagent '$(PRODUCT_SUBAGENT_SELECTOR)' product-subagent
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./control/appserver '$(PRODUCT_CONTROL_CLIENT_SELECTOR)' product-control-client
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./control/appserver/wirev1 '$(PRODUCT_WIRE_SELECTOR)' product-wire
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp '$(PRODUCT_DIAGNOSTICS_SELECTOR)' product-diagnostics
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(PRODUCT_TUI_SELECTOR)' product-tui
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./agent-sdk/runtime '$(PRODUCT_RUNTIME_SELECTOR)' product-runtime
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./internal/acpagentbridge/controller '$(PRODUCT_CONTROLLER_SELECTOR)' product-controller
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./internal/acpagentbridge/subagent '$(PRODUCT_SUBAGENT_SELECTOR)' product-subagent
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./control/appserver '$(PRODUCT_CONTROL_CLIENT_SELECTOR)' product-control-client
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./control/appserver/wirev1 '$(PRODUCT_WIRE_SELECTOR)' product-wire
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./app/gatewayapp '$(PRODUCT_DIAGNOSTICS_SELECTOR)' product-diagnostics
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(PRODUCT_TUI_SELECTOR)' product-tui
 
 eval-smoke: cache-dirs
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./eval '$(EVAL_REGRESSION_SELECTOR)' eval-smoke
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./eval '$(EVAL_REGRESSION_SELECTOR)' eval-smoke
 
 guardian-eval: cache-dirs
 	CAELIS_GUARDIAN_E2E=1 go test -tags=e2e -timeout 30m -run '^TestGuardianLiveE2E$$' -v ./eval
 
 tui-golden: cache-dirs
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(TUI_GOLDEN_SELECTOR)' tui-golden
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(TUI_GOLDEN_SELECTOR)' tui-golden
 
 tui-interaction: cache-dirs
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(TUI_INTERACTION_SELECTOR)' tui-interaction
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(TUI_INTERACTION_SELECTOR)' tui-interaction
 
 control-feed-regression: cache-dirs
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./control/appserver '$(CONTROL_TURN_REGRESSION_SELECTOR)' control-turn-regression
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./internal/controlprompt/appserveradapter '$(SURFACE_CLIENT_REGRESSION_SELECTOR)' surface-client-regression
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./control/appserver '$(CONTROL_TURN_REGRESSION_SELECTOR)' control-turn-regression
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./internal/controlprompt/appserveradapter '$(SURFACE_CLIENT_REGRESSION_SELECTOR)' surface-client-regression
 
 command-regression: cache-dirs
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(COMMAND_REGRESSION_SELECTOR)' command-regression
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(COMMAND_REGRESSION_SELECTOR)' command-regression
 
 command-execution-regression: cache-dirs
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(COMMAND_EXECUTION_REGRESSION_SELECTOR)' command-execution-regression
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(COMMAND_EXECUTION_REGRESSION_SELECTOR)' command-execution-regression
 
 test: cache-dirs
 	go test -timeout $(GO_TEST_TIMEOUT) ./...

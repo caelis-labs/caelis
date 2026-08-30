@@ -150,7 +150,7 @@ func TestSDKConsumerGatesUseCurrentAndTaggedFixturesSeparately(t *testing.T) {
 func TestSDKProxySmokeRejectsDisabledProxyEvenWithWarmSharedCache(t *testing.T) {
 	t.Parallel()
 
-	command := exec.Command("bash", "./sdk_proxy_smoke.sh")
+	command := exec.Command(testBash(t), "./sdk_proxy_smoke.sh")
 	command.Env = append(os.Environ(),
 		"SDK_PROXY_VERSION=v0.25.0",
 		"SDK_PROXY_URL=off",
@@ -168,7 +168,7 @@ func TestSDKProxySmokeRejectsDisabledProxyEvenWithWarmSharedCache(t *testing.T) 
 func TestSDKProxySmokeRejectsPipeDirectFallback(t *testing.T) {
 	t.Parallel()
 
-	command := exec.Command("bash", "./sdk_proxy_smoke.sh")
+	command := exec.Command(testBash(t), "./sdk_proxy_smoke.sh")
 	command.Env = append(os.Environ(),
 		"SDK_PROXY_VERSION=v0.25.0",
 		"SDK_PROXY_URL=https://127.0.0.1:1|direct",
@@ -185,7 +185,7 @@ func TestSDKProxySmokeRejectsPipeDirectFallback(t *testing.T) {
 
 func TestSDKProxySmokeCannotUseAmbientPrivateModuleBypass(t *testing.T) {
 	t.Parallel()
-	command := exec.Command("bash", "./sdk_proxy_smoke.sh")
+	command := exec.Command(testBash(t), "./sdk_proxy_smoke.sh")
 	command.Env = append(os.Environ(),
 		"SDK_PROXY_VERSION=v0.25.0",
 		"SDK_PROXY_URL=https://127.0.0.1:1",

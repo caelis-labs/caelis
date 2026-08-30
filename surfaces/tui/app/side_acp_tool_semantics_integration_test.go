@@ -282,6 +282,7 @@ func TestParticipantSpawnRendersStandardFinalResultWithoutSubagentUI(t *testing.
 				block := model.findParticipantTurnBlock(turnID)
 				if block == nil {
 					t.Fatal("participant turn block missing")
+					return
 				}
 				physical := physicalTranscriptEventsForTest(block.Events)
 				if len(physical) != 1 || physical[0].CallID != callID || !physical[0].Done ||
@@ -370,6 +371,7 @@ func TestParticipantSpawnToolPanelExpandsFullFinalResponse(t *testing.T) {
 			block := model.findParticipantTurnBlock(turnID)
 			if block == nil {
 				t.Fatal("participant turn block missing")
+				return
 			}
 			physical := physicalTranscriptEventsForTest(block.Events)
 			if len(physical) != 1 || !isSpawnToolEvent(physical[0]) || physical[0].Output != finalResponse {
@@ -697,6 +699,7 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 		t.Helper()
 		if block == nil {
 			t.Fatal("participant transcript block missing")
+			return
 		}
 		tools := make([]SubagentEvent, 0, 4)
 		for _, event := range block.Events {
@@ -847,6 +850,7 @@ func TestProjectedGrokSparseToolPatchesRetainRichHeaderAcrossParticipantAndOverl
 		t.Helper()
 		if block == nil {
 			t.Fatal("Grok transcript block missing")
+			return
 		}
 		var tools []SubagentEvent
 		for _, event := range block.Events {
@@ -944,6 +948,7 @@ func TestGeneratedACPMessageIdentityReplacesCumulativeFinalAcrossToolBoundary(t 
 		t.Helper()
 		if block == nil {
 			t.Fatal("Grok transcript block missing")
+			return
 		}
 		var assistants []SubagentEvent
 		var tools []SubagentEvent
@@ -1054,6 +1059,7 @@ func TestCapturedGrokBuildShellAndAnonymousFinalStreamRenderAcrossParticipantAnd
 		t.Helper()
 		if block == nil {
 			t.Fatal("Grok transcript block missing")
+			return
 		}
 		var tools []SubagentEvent
 		var answers []SubagentEvent

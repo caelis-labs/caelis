@@ -21,6 +21,7 @@ func TestStackNewGuardianApproverUsesStackSessions(t *testing.T) {
 	approver := stack.composition.newGuardianApprover()
 	if approver == nil {
 		t.Fatal("newGuardianApprover() = nil")
+		return
 	}
 	if approver.sessions != sessions {
 		t.Fatal("newGuardianApprover() did not preserve the Stack session service")

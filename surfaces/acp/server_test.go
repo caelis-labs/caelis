@@ -332,8 +332,8 @@ func TestSDKOwnedServerOutputDuplicatesCallerFile(t *testing.T) {
 	}
 
 	closeOnFailure()
-	if _, err := ownedFile.Stat(); !errors.Is(err, os.ErrClosed) {
-		t.Fatalf("SDK-owned output remains open after cleanup: %v", err)
+	if got := ownedFile.Fd(); got != ^uintptr(0) {
+		t.Fatalf("SDK-owned output descriptor after cleanup = %#x, want invalid", got)
 	}
 	if _, err := output.Stat(); err != nil {
 		t.Fatalf("caller output was closed with SDK-owned duplicate: %v", err)

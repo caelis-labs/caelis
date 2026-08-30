@@ -9,7 +9,7 @@ import (
 )
 
 // DefaultProcessExitGrace is the opportunity an owned ACP process gets to
-// exit after its protocol streams close before cleanup escalates to forced
+// exit after its protocol input closes before cleanup escalates to forced
 // process-tree termination.
 const DefaultProcessExitGrace = 5 * time.Second
 
@@ -53,11 +53,11 @@ func (e *CloseError) Unwrap() error {
 	return e.Err
 }
 
-// Close closes protocol streams, joins connection-owned goroutines within the
-// caller's cleanup window, and gives the owned process the same window to exit.
-// Process cleanup escalates to joined process-tree termination when that window
-// expires. If ctx has no deadline, DefaultProcessExitGrace supplies the window.
-// The first call owns the terminal result returned by later calls.
+// Close shuts down an owned process within the caller's cleanup window, then
+// closes the protocol connection and joins its goroutines. Process cleanup
+// escalates to joined process-tree termination when that window expires. If ctx
+// has no deadline, DefaultProcessExitGrace supplies the window. The first call
+// owns the terminal result returned by later calls.
 func (c *Client) Close(ctx context.Context) error {
 	if c == nil {
 		return nil
@@ -74,23 +74,12 @@ func (c *Client) close(ctx context.Context) error {
 	defer c.releaseEndpoint()
 
 	var errs []error
-	if c.conn != nil {
-		if err := c.conn.Close(); err != nil {
-			errs = append(errs, &CloseError{Stage: CloseStageConnectionClose, Err: err})
-		}
-	}
-	if c.conn != nil {
-		// Join while the caller's cleanup window is still active. Discovery uses
-		// a cancellation-detached window; runtime teardown may deliberately pass
-		// a canceled context to avoid waiting behind an in-flight callback.
-		if err := c.conn.Wait(ctx); context.Cause(ctx) != nil && errors.Is(err, context.Cause(ctx)) {
-			errs = append(errs, &CloseError{Stage: CloseStageConnectionJoin, Err: context.Cause(ctx)})
-		}
-		// Any non-context Wait result proves the connection goroutines joined.
-		// The operation that observed its transport cause owns the reporting; it
-		// is not a cleanup failure.
-	}
 	if c.proc != nil {
+		// On Windows, closing an os.File that has a blocked pipe read waits for
+		// that read to finish. Closing the SDK connection first would therefore
+		// block on child stdout before the process owner could close child stdin.
+		// Shut the owned process down first: its input closes immediately and its
+		// terminal output closes the receive side before Connection.Close joins it.
 		shutdownErr := completeProcessShutdownError(ctx, c.proc.Shutdown(ctx), func() error {
 			// Process.Shutdown's forced path has already joined waitDone before
 			// returning the context cause, so this observes the terminal process
@@ -100,6 +89,29 @@ func (c *Client) close(ctx context.Context) error {
 		if shutdownErr != nil {
 			errs = append(errs, &CloseError{Stage: CloseStageProcessCleanup, Err: shutdownErr})
 		}
+	}
+	if c.conn != nil {
+		if err := c.conn.Close(); err != nil {
+			errs = append(errs, &CloseError{Stage: CloseStageConnectionClose, Err: err})
+		}
+		joinCtx := ctx
+		joinCancel := func() {}
+		if c.proc != nil && context.Cause(ctx) != nil {
+			// Process.Shutdown may consume the caller's grace while forcefully
+			// terminating and joining the process tree. Once that proof exists,
+			// give the now-closed transport a bounded detached window to publish
+			// its connection-goroutine join instead of selecting the stale cause.
+			joinCtx, joinCancel = context.WithTimeout(context.WithoutCancel(ctx), DefaultProcessExitGrace)
+		}
+		// Join through the bounded cleanup context. Discovery starts detached;
+		// forced owned-process cleanup may use the detached terminal window above.
+		if err := c.conn.Wait(joinCtx); context.Cause(joinCtx) != nil && errors.Is(err, context.Cause(joinCtx)) {
+			errs = append(errs, &CloseError{Stage: CloseStageConnectionJoin, Err: context.Cause(joinCtx)})
+		}
+		joinCancel()
+		// Any non-context Wait result proves the connection goroutines joined.
+		// The operation that observed its transport cause owns the reporting; it
+		// is not a cleanup failure.
 	}
 	return errors.Join(errs...)
 }

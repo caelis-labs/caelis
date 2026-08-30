@@ -387,6 +387,7 @@ func TestStoreSetPathConcurrentWithLoadSave(t *testing.T) {
 	store := New(root)
 	if store == nil {
 		t.Fatal("New() = nil")
+		return
 	}
 	// This test exercises Store locking and atomic path replacement, not the
 	// durability barriers covered by TestAtomicWriteFileCommitBoundary. Avoid

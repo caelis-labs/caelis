@@ -2065,6 +2065,7 @@ type concurrentCommandWaitSession struct {
 
 	mu               sync.Mutex
 	running          bool
+	exitCode         int
 	done             chan struct{}
 	waitStarted      chan time.Duration
 	waitErrorRelease chan struct{}
@@ -2075,6 +2076,7 @@ func newConcurrentCommandWaitSession() *concurrentCommandWaitSession {
 	return &concurrentCommandWaitSession{
 		yieldProbeSandboxSession: newYieldProbeSandboxSession(),
 		running:                  true,
+		exitCode:                 -1,
 		done:                     make(chan struct{}),
 		waitStarted:              make(chan time.Duration, 1),
 	}
@@ -2083,10 +2085,11 @@ func newConcurrentCommandWaitSession() *concurrentCommandWaitSession {
 func (s *concurrentCommandWaitSession) Status(context.Context) (sandbox.SessionStatus, error) {
 	s.mu.Lock()
 	running := s.running
+	configuredExitCode := s.exitCode
 	s.mu.Unlock()
 	exitCode := 0
 	if !running {
-		exitCode = -1
+		exitCode = configuredExitCode
 	}
 	return sandbox.SessionStatus{
 		SessionRef: s.Ref(), Terminal: s.Terminal(), Running: running,
@@ -2130,9 +2133,18 @@ func (s *concurrentCommandWaitSession) Wait(ctx context.Context, timeout time.Du
 func (s *concurrentCommandWaitSession) Terminate(context.Context) error {
 	s.mu.Lock()
 	s.running = false
+	s.exitCode = -1
 	s.mu.Unlock()
 	s.finishOnce.Do(func() { close(s.done) })
 	return nil
+}
+
+func (s *concurrentCommandWaitSession) complete() {
+	s.mu.Lock()
+	s.running = false
+	s.exitCode = 0
+	s.mu.Unlock()
+	s.finishOnce.Do(func() { close(s.done) })
 }
 
 func probeOutputFromCursor(text string, cursor int64) ([]byte, int64) {

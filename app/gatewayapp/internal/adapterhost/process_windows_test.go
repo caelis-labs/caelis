@@ -70,7 +70,11 @@ func TestProcessTreeTerminatesDescendants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer windows.CloseHandle(child)
+	defer func() {
+		if closeErr := windows.CloseHandle(child); closeErr != nil {
+			t.Errorf("close descendant process handle: %v", closeErr)
+		}
+	}()
 
 	if err := killProcess(command, process); err != nil {
 		t.Fatal(err)

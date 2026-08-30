@@ -445,6 +445,7 @@ func TestParticipantPromptUserEventUsesDisplayInputForProjection(t *testing.T) {
 	)
 	if event == nil {
 		t.Fatal("participantPromptUserEvent() = nil")
+		return
 	}
 	if event.Message == nil || event.Message.TextContent() != modelInput {
 		t.Fatalf("event.Message = %#v, want model-visible input", event.Message)

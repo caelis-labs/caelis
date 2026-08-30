@@ -45,7 +45,7 @@ func prepareProcess(command *exec.Cmd) (*processTree, error) {
 	return &processTree{job: job}, nil
 }
 
-func (p *processTree) Started(command *exec.Cmd) error {
+func (p *processTree) Started(command *exec.Cmd) (returnErr error) {
 	if p == nil || p.job == 0 || command == nil || command.Process == nil {
 		return errors.New("adapterhost: incomplete Windows process tree")
 	}
@@ -57,7 +57,9 @@ func (p *processTree) Started(command *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
-	defer windows.CloseHandle(process)
+	defer func() {
+		returnErr = errors.Join(returnErr, windows.CloseHandle(process))
+	}()
 	if err := windows.AssignProcessToJobObject(p.job, process); err != nil {
 		return err
 	}

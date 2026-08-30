@@ -946,6 +946,7 @@ func TestCloneEventProtocolDeepClonesDurableToolUpdate(t *testing.T) {
 	update := ProtocolUpdateOfProtocol(&protocol)
 	if update == nil {
 		t.Fatal("ProtocolUpdateOfProtocol() = nil")
+		return
 	}
 	if update.ToolCallID != "call-1" || update.Kind != "execute" || update.Title != "RUN_COMMAND echo hi" {
 		t.Fatalf("update = %#v, want durable tool call fields", update)
@@ -978,6 +979,7 @@ func TestEventProtocolRoundTripPreservesUpdateMessageID(t *testing.T) {
 	update := ProtocolUpdateOf(&Event{Protocol: &decoded})
 	if update == nil {
 		t.Fatal("ProtocolUpdateOf() = nil")
+		return
 	}
 	if update.MessageID != "msg-1" {
 		t.Fatalf("MessageID = %q, want msg-1", update.MessageID)
@@ -1005,6 +1007,7 @@ func TestCanonicalEventMessageIDSurvivesProjectionNormalizationAndRoundTrip(t *t
 	})
 	if event == nil {
 		t.Fatal("CanonicalizeEvent() = nil")
+		return
 	}
 	if event.MessageID != "msg-1" || EventMessageID(event) != "msg-1" {
 		t.Fatalf("canonical message identity = %q/%q, want msg-1", event.MessageID, EventMessageID(event))
@@ -1065,6 +1068,7 @@ func TestEventProtocolRoundTripPreservesParticipantPayload(t *testing.T) {
 	})
 	if participant == nil {
 		t.Fatal("ProtocolParticipantOf() = nil")
+		return
 	}
 	if participant.Action != "attached" {
 		t.Fatalf("participant.Action = %q, want attached", participant.Action)
@@ -1095,6 +1099,7 @@ func TestEventProtocolRoundTripPreservesHandoffPayload(t *testing.T) {
 	})
 	if handoff == nil {
 		t.Fatal("ProtocolHandoffOf() = nil")
+		return
 	}
 	if handoff.Phase != "activation" {
 		t.Fatalf("handoff.Phase = %q, want activation", handoff.Phase)
@@ -1197,6 +1202,7 @@ func TestCanonicalizeEventDoesNotBuildCoreMessageFromProtocolText(t *testing.T) 
 	})
 	if event == nil {
 		t.Fatal("CanonicalizeEvent() = nil")
+		return
 	}
 	if event.Message != nil {
 		t.Fatalf("event.Message = %#v, want no protocol-to-message migration", event.Message)

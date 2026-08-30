@@ -367,6 +367,7 @@ func requireNegotiatedProtocolVersion(t *testing.T, mgr *Manager, pluginID, serv
 	result := client.session.InitializeResult()
 	if result == nil {
 		t.Fatalf("MCP client %s/%s has no negotiation result", pluginID, serverName)
+		return
 	}
 	if got := result.ProtocolVersion; got != want {
 		t.Fatalf("MCP client %s/%s protocol version = %q, want %q", pluginID, serverName, got, want)

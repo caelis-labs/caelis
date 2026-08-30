@@ -1387,6 +1387,7 @@ func TestResponseInvocationUsesRequestedModelIdentity(t *testing.T) {
 	invocation := event.Invocation
 	if invocation == nil {
 		t.Fatal("modelResponseEvent().Invocation = nil")
+		return
 	}
 	if invocation.Provider != "xai" || invocation.Model != "grok-4.5" {
 		t.Fatalf("invocation identity = %q/%q, want xai/grok-4.5", invocation.Provider, invocation.Model)

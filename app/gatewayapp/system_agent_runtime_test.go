@@ -325,7 +325,7 @@ func (*systemManagedGuardianCompactionModel) Capabilities() model.Capabilities {
 func (m *systemManagedGuardianCompactionModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	instructions := systemManagedRequestInstructions(req)
 	m.mu.Lock()
-	if strings.Contains(instructions, "CONTEXT CHECKPOINT COMPACTION") {
+	if strings.Contains(instructions, "CONTEXT COMPACTION SUMMARY") {
 		m.compactionCalls++
 		m.compactionReq = model.CloneRequest(req)
 		m.mu.Unlock()

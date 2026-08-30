@@ -47,6 +47,7 @@ func TestACPEnvelopeFromUpdateProjectsStandardToolLifecycle(t *testing.T) {
 		}, nil, participant)
 		if env == nil {
 			t.Fatalf("tool lifecycle update %d produced no participant envelope", i)
+			return
 		}
 		if env.Scope != eventstream.ScopeParticipant || env.ParticipantID != "grok-1" || env.TurnID != "participant-turn-1" {
 			t.Fatalf("participant envelope scope = %#v", env)
@@ -111,6 +112,7 @@ func TestACPEnvelopeFromUpdatePassesThroughUsageUpdate(t *testing.T) {
 	}, nil, nil)
 	if env == nil {
 		t.Fatal("acpEnvelopeFromUpdate() = nil, want usage_update envelope")
+		return
 	}
 	update, ok := env.Update.(eventstream.UsageUpdate)
 	if !ok {

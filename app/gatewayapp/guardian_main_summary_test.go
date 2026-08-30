@@ -242,7 +242,7 @@ func (*guardianMainSummaryCompactionProbe) Capabilities() model.Capabilities {
 
 func (m *guardianMainSummaryCompactionProbe) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.mu.Lock()
-	if strings.Contains(guardianMainSummaryRequestInstructions(req), "CONTEXT CHECKPOINT COMPACTION") {
+	if strings.Contains(guardianMainSummaryRequestInstructions(req), "CONTEXT COMPACTION SUMMARY") {
 		m.compactionCalls++
 		m.compactionReq = model.CloneRequest(req)
 		m.mu.Unlock()

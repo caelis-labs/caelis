@@ -81,6 +81,7 @@ func TestParticipantPromptUsesSessionFenceWithoutOrchestrationWatchdog(t *testin
 	}
 	if participantRunner == nil {
 		t.Fatal("participant runner is nil")
+		return
 	}
 	participantRunner.mu.Lock()
 	cancelCalls := participantRunner.cancel

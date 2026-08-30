@@ -65,7 +65,7 @@ func WriteChannelGrantFile(dir string, grant ChannelGrantFile) (string, error) {
 			_ = os.Remove(path)
 		}
 	}()
-	if err := file.Chmod(0o600); err != nil {
+	if err := secureChannelGrantFile(file); err != nil {
 		return "", err
 	}
 	if err := json.NewEncoder(file).Encode(grant); err != nil {
@@ -91,8 +91,10 @@ func ConsumeChannelGrantFile(path string) (ChannelGrantFile, error) {
 	if err != nil {
 		return ChannelGrantFile{}, err
 	}
-	defer file.Close()
-	defer os.Remove(path)
+	defer func() {
+		_ = file.Close()
+		_ = os.Remove(path)
+	}()
 	info, err := file.Stat()
 	if err != nil {
 		return ChannelGrantFile{}, err
@@ -100,8 +102,8 @@ func ConsumeChannelGrantFile(path string) (ChannelGrantFile, error) {
 	if !info.Mode().IsRegular() {
 		return ChannelGrantFile{}, errors.New("adapterhostclient: channel grant path must be a regular file")
 	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return ChannelGrantFile{}, errors.New("adapterhostclient: channel grant file must not be group or world accessible")
+	if err := validateChannelGrantFileSecurity(file, info); err != nil {
+		return ChannelGrantFile{}, err
 	}
 	var grant ChannelGrantFile
 	decoder := json.NewDecoder(io.LimitReader(file, 64<<10))

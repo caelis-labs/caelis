@@ -668,6 +668,7 @@ func TestRuntimeAgentPromptRouterTurnFeedEmitsTerminalMetaForACPStdio(t *testing
 	}
 	if finalUpdate == nil {
 		t.Fatalf("notifications = %#v, want completed update", cb.notifications)
+		return
 	}
 	for _, item := range finalUpdate.Content {
 		if text := session.ExtractProtocolText(item.Content); text != "" {

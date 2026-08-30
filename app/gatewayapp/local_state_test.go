@@ -1004,6 +1004,7 @@ func assertSandboxNetworkEnabledDefault(t *testing.T, stack *Stack) {
 	t.Helper()
 	if stack == nil {
 		t.Fatal("stack is nil")
+		return
 	}
 	if stack.composition.sandbox.NetworkEnabled == nil || !*stack.composition.sandbox.NetworkEnabled {
 		t.Fatalf("stack sandbox NetworkEnabled = %#v, want runtime true default", stack.composition.sandbox.NetworkEnabled)
@@ -1404,7 +1405,7 @@ func newGatewayAppCompactionOllamaServer(t *testing.T) *gatewayAppCompactionOlla
 		}
 		joined := gatewayAppOllamaMessages(payload.Messages)
 		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(joined, "CONTEXT CHECKPOINT COMPACTION") {
+		if strings.Contains(joined, "CONTEXT COMPACTION SUMMARY") {
 			out.compactionCalls.Add(1)
 			fmt.Fprint(w, `{"model":"compact-test","message":{"role":"assistant","content":"CONTEXT CHECKPOINT\nObjective: app compact preserves context\nBlocker: bare compact events truncate prompt-visible history\nNext action: continue from structured checkpoint overlay\n\n## Current Progress\n- app runtime used model-backed compaction"},"done":true,"prompt_eval_count":64,"eval_count":12}`)
 			return

@@ -1059,10 +1059,12 @@ func subagentOutputMarkerPositionForTest(t *testing.T, model *Model, marker stri
 	t.Helper()
 	if model == nil || model.subagentOutputOverlay == nil {
 		t.Fatal("subagent output overlay is unavailable")
+		return -1, -1
 	}
 	view := model.subagentOutputViews[model.subagentOutputOverlay.callID]
 	if view == nil {
 		t.Fatal("subagent output view is unavailable")
+		return -1, -1
 	}
 	for rowIndex, row := range view.renderCache.rows {
 		if byteIndex := strings.Index(row.Plain, marker); byteIndex >= 0 {
@@ -1077,6 +1079,7 @@ func clickSubagentOutputToolPanelForTest(t *testing.T, model *Model, callID stri
 	t.Helper()
 	if model == nil || model.subagentOutputOverlay == nil {
 		t.Fatal("subagent output overlay is unavailable")
+		return
 	}
 	token := acpToolPanelClickToken(callID)
 	geometry := model.subagentOutputOverlay.geometry

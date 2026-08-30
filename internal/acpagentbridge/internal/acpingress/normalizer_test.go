@@ -24,6 +24,7 @@ func TestNormalizeControllerUserMessageIsCanonicalDurableMessage(t *testing.T) {
 	}, controllerTestOptions())
 	if event == nil {
 		t.Fatal("NormalizeUpdate() = nil, want user event")
+		return
 	}
 	if event.Visibility != session.VisibilityCanonical || event.Type != session.EventTypeUser {
 		t.Fatalf("event = %#v, want canonical user event", event)
@@ -118,6 +119,7 @@ func TestNormalizeSparseToolUpdateDoesNotInventDisplayContent(t *testing.T) {
 	})
 	if event == nil {
 		t.Fatal("NormalizeUpdate() = nil, want sparse tool update")
+		return
 	}
 	if event.Text != "" {
 		t.Fatalf("event.Text = %q, want no invented tool-update content", event.Text)
@@ -198,6 +200,7 @@ func TestNormalizeExternalToolCallPreservesPresentationNameButStripsBinding(t *t
 	update := session.ProtocolUpdateOf(event)
 	if update == nil {
 		t.Fatal("NormalizeUpdate() = nil, want UI-only tool event")
+		return
 	}
 	if got := acpmeta.ToolName(update.Meta); got != "RunCommand" {
 		t.Fatalf("external runtime tool name = %q, want UI-only presentation identity preserved", got)

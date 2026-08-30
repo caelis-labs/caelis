@@ -25,6 +25,7 @@ func TestNarrativeAccumulatorMessageChunksEmitDeltasOnly(t *testing.T) {
 	final := acc.finalAssistantEvent()
 	if final == nil {
 		t.Fatal("finalAssistantEvent() = nil, want canonical assistant")
+		return
 	}
 	if got, want := session.EventText(final), "aab"; got != want {
 		t.Fatalf("final assistant text = %q, want %q", got, want)
@@ -247,6 +248,7 @@ func TestEnvelopeWithNarrativeTextPreservesEnvelopeShape(t *testing.T) {
 	repaired := envelopeWithNarrativeText(original, string(session.ProtocolUpdateTypeAgentMessage), "lo")
 	if repaired == nil {
 		t.Fatal("envelopeWithNarrativeText() = nil")
+		return
 	}
 	if repaired.Kind != eventstream.KindSessionUpdate {
 		t.Fatalf("repaired kind = %q, want session update", repaired.Kind)
@@ -311,6 +313,7 @@ func TestEnvelopeWithNarrativeTextDerivesMetaFromUpdateWhenAbsent(t *testing.T) 
 	repaired := envelopeWithNarrativeText(original, string(session.ProtocolUpdateTypeAgentMessage), "lo")
 	if repaired == nil {
 		t.Fatal("envelopeWithNarrativeText() = nil")
+		return
 	}
 	if !reflect.DeepEqual(repaired.Meta, map[string]any{"from_update": true}) {
 		t.Fatalf("repaired meta = %#v, want derived from update", repaired.Meta)

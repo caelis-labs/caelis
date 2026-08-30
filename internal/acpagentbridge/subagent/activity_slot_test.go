@@ -322,6 +322,7 @@ func TestChildActivityJournalCoalescesStreamingAssistantChunksWhileObserverPersi
 	if terminal == nil || terminal.State != delegation.StateCompleted || terminal.Result != wantFinal {
 		if terminal == nil {
 			t.Fatal("terminal result is nil")
+			return
 		}
 		t.Fatalf("terminal state/result = %q equal:%v bytes:%d, want %q/%d bytes", terminal.State, terminal.Result == wantFinal, len(terminal.Result), delegation.StateCompleted, len(wantFinal))
 	}

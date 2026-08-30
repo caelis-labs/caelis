@@ -119,6 +119,7 @@ func TestGatewayAppRuntimeDepsWiresFocusedServices(t *testing.T) {
 	stack := gatewayAppRuntimeDepsForTest(&gatewayapp.Stack{})
 	if stack == nil {
 		t.Fatal("gatewayAppRuntimeDepsForTest() returned nil")
+		return
 	}
 
 	gatewayHooks := map[string]bool{

@@ -20,6 +20,7 @@ func TestSelfAgentFromEnvPrefersStructuredCommand(t *testing.T) {
 	}
 	if agent == nil {
 		t.Fatal("SelfAgentFromEnv() agent = nil")
+		return
 	}
 	if agent.Name != "worker" || agent.Description != "custom worker" {
 		t.Fatalf("agent identity = %q/%q", agent.Name, agent.Description)
@@ -42,6 +43,7 @@ func TestSelfAgentFromEnvUsesLegacyShellCommand(t *testing.T) {
 	}
 	if agent == nil {
 		t.Fatal("SelfAgentFromEnv() agent = nil")
+		return
 	}
 	wantCommand, wantArgs := shellCommandSpec("echo child")
 	if agent.Name != "self" || agent.Description != "default desc" {

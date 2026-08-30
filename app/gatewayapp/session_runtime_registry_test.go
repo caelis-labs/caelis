@@ -2764,6 +2764,7 @@ func assertSessionRuntimeIsolationContract(t *testing.T, host *Stack, instance *
 	t.Helper()
 	if instance == nil {
 		t.Fatal("Session Runtime instance is nil")
+		return
 	}
 	if instance.lookup == host.composition.lookup || instance.placementCache == host.composition.placementCache {
 		t.Fatal("Session Runtime shared mutable model or placement configuration")

@@ -32,6 +32,7 @@ func TestCanonicalApprovalPayloadPreservesPromptFields(t *testing.T) {
 	})
 	if payload == nil {
 		t.Fatal("canonicalApprovalPayload() = nil")
+		return
 	}
 	if payload.ToolCallID != "call-1" || payload.ToolName != "RunCommand" {
 		t.Fatalf("approval payload identity = %#v", payload)
