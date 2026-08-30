@@ -562,11 +562,7 @@ func TestSpawnedSessionCannotUseDeletedParentRuntimeProfile(t *testing.T) {
 	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel() = %#v, %v", selected, err)
 	}
-	parentRuntime := activateSessionRuntime(t, stack, parent.SessionID)
-	releaseParent, err := stack.sessionRuntimes.acquireRuntimeUse(parentRuntime)
-	if err != nil {
-		t.Fatal(err)
-	}
+	parentRuntime, releaseParent := activateHeldSessionRuntime(t, stack, parent.SessionID)
 	defer releaseParent()
 	agentConfig, err := parentRuntime.instance.materializeDelegatedModel("", profile.ID, "high", parentRuntime.instance.activeRuntime)
 	if err != nil {
@@ -579,11 +575,7 @@ func TestSpawnedSessionCannotUseDeletedParentRuntimeProfile(t *testing.T) {
 	if _, err := parentRuntime.instance.prepareSpawnedACPSession(ctx, tasksubagent.SpawnContext{}, child.SessionID, agentConfig); err != nil {
 		t.Fatalf("prepareSpawnedACPSession() before deletion: %v", err)
 	}
-	childRuntime := activateSessionRuntime(t, stack, child.SessionID)
-	releaseChild, err := stack.sessionRuntimes.acquireRuntimeUse(childRuntime)
-	if err != nil {
-		t.Fatal(err)
-	}
+	childRuntime, releaseChild := activateHeldSessionRuntime(t, stack, child.SessionID)
 	defer releaseChild()
 	if _, ok := stack.composition.authorities.sessionModelPins.config(ctx, child.SessionID); !ok {
 		t.Fatal("child Session model pin was not retained before deletion")
@@ -683,6 +675,12 @@ func TestProviderDeletionSerializesWithRuntimeActivation(t *testing.T) {
 	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel() = %#v, %v", selected, err)
 	}
+	// UseSessionModel may already have activated a Runtime. Drop it so the
+	// blocked activation must reassemble and hit the post-assembly barrier.
+	if err := stack.sessionRuntimes.release(ctx, active.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	waitForSessionRuntimeUnloaded(t, stack.sessionRuntimes, active.SessionID)
 
 	blocked := &postAssemblyBlockingRuntimeAssembler{
 		delegate: stack.sessionRuntimes.assembler,
@@ -780,11 +778,7 @@ func TestProviderDeletionConvergesConcurrentSameIDReconnect(t *testing.T) {
 	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel() = %#v, %v", selected, err)
 	}
-	runtime := activateSessionRuntime(t, stack, active.SessionID)
-	releaseRuntime, err := stack.sessionRuntimes.acquireRuntimeUse(runtime)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runtime, releaseRuntime := activateHeldSessionRuntime(t, stack, active.SessionID)
 	defer releaseRuntime()
 	oldAgentConfig, err := runtime.instance.materializeDelegatedModel("", profile.ID, "high", runtime.instance.activeRuntime)
 	if err != nil {
@@ -2751,6 +2745,19 @@ func activateSessionRuntime(t *testing.T, stack *Stack, sessionID string) *sessi
 		t.Fatalf("activate Session %q: %v", sessionID, err)
 	}
 	return runtime
+}
+
+func activateHeldSessionRuntime(t *testing.T, stack *Stack, sessionID string) (*sessionRuntime, func()) {
+	t.Helper()
+	runtime, _, release, _, err := stack.sessionRuntimes.acquireActivatedControlRuntime(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("activate held Session %q: %v", sessionID, err)
+	}
+	return runtime, func() {
+		if release != nil {
+			_ = release(context.Background())
+		}
+	}
 }
 
 func assertSessionRuntimeIsolationContract(t *testing.T, host *Stack, instance *sessionRuntimeInstance) {
