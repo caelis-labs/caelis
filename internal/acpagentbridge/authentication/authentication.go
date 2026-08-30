@@ -42,15 +42,15 @@ const (
 // RecoveryConfig supplies the endpoint and interaction policy shared by
 // authenticated ACP operations.
 type RecoveryConfig struct {
-	Mode           RecoveryMode
-	Client         *client.Client
-	Initialize     client.InitializeResponse
-	Methods        []controlagents.AuthenticationMethod
-	AgentID        string
-	Connection     controlagents.Connection
-	Authentication controlagents.Authentication
-	Restart        func(context.Context) (*client.Client, client.InitializeResponse, error)
-	CleanupTimeout time.Duration
+	Mode             RecoveryMode
+	Client           *client.Client
+	Initialize       client.InitializeResponse
+	Methods          []controlagents.AuthenticationMethod
+	AgentID          string
+	Connection       controlagents.Connection
+	Authentication   controlagents.Authentication
+	Restart          func(context.Context) (*client.Client, client.InitializeResponse, error)
+	ProcessExitGrace time.Duration
 }
 
 // RecoveryResult returns the active client because terminal auth replaces the
@@ -315,29 +315,29 @@ func recoverCall[T any](
 	call func(context.Context, *client.Client) (T, error),
 ) (RecoveryResult[T], error) {
 	recovered, err := recoverOperation(ctx, recoveryOperationConfig[*client.Client]{
-		Mode:           config.Mode,
-		Client:         config.Client,
-		Initialize:     config.Initialize,
-		Methods:        controlagents.CloneAuthenticationMethods(config.Methods),
-		AgentID:        config.AgentID,
-		Connection:     config.Connection,
-		Authentication: config.Authentication,
-		Restart:        config.Restart,
-		CleanupTimeout: config.CleanupTimeout,
+		Mode:             config.Mode,
+		Client:           config.Client,
+		Initialize:       config.Initialize,
+		Methods:          controlagents.CloneAuthenticationMethods(config.Methods),
+		AgentID:          config.AgentID,
+		Connection:       config.Connection,
+		Authentication:   config.Authentication,
+		Restart:          config.Restart,
+		ProcessExitGrace: config.ProcessExitGrace,
 	}, call)
 	return RecoveryResult[T](recovered), err
 }
 
 type recoveryOperationConfig[C recoveryClient] struct {
-	Mode           RecoveryMode
-	Client         C
-	Initialize     client.InitializeResponse
-	Methods        []controlagents.AuthenticationMethod
-	AgentID        string
-	Connection     controlagents.Connection
-	Authentication controlagents.Authentication
-	Restart        func(context.Context) (C, client.InitializeResponse, error)
-	CleanupTimeout time.Duration
+	Mode             RecoveryMode
+	Client           C
+	Initialize       client.InitializeResponse
+	Methods          []controlagents.AuthenticationMethod
+	AgentID          string
+	Connection       controlagents.Connection
+	Authentication   controlagents.Authentication
+	Restart          func(context.Context) (C, client.InitializeResponse, error)
+	ProcessExitGrace time.Duration
 }
 
 type recoveryOperationResult[C recoveryClient, T any] struct {
@@ -466,7 +466,7 @@ func recoverOperation[C recoveryClient, T any](
 		if err != nil {
 			return result, recoveryError(err)
 		}
-		cleanupErr := acpcleanup.CloseClientWithin(ctx, config.Client, config.CleanupTimeout)
+		cleanupErr := acpcleanup.CloseClientWithGrace(ctx, config.Client, config.ProcessExitGrace)
 		result.Client = zeroClient
 		if cleanupErr != nil {
 			result.CleanupUnknown = true
@@ -496,7 +496,7 @@ func recoverOperation[C recoveryClient, T any](
 		result.Initialize = initialize
 		value, err = call(ctx, restarted)
 		if err != nil {
-			cleanupErr := acpcleanup.CloseClientWithin(ctx, restarted, config.CleanupTimeout)
+			cleanupErr := acpcleanup.CloseClientWithGrace(ctx, restarted, config.ProcessExitGrace)
 			result.Client = zeroClient
 			if cleanupErr != nil {
 				result.CleanupUnknown = true

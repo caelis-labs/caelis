@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 )
@@ -261,6 +262,65 @@ func TestConnectWizardLoadsACPModelsInBackgroundWithRunningSpinner(t *testing.T)
 	if len(m.slashArgCandidates) != 1 || m.slashArgCandidates[0].Value != "opus" {
 		t.Fatalf("slashArgCandidates = %#v, want loaded Opus", m.slashArgCandidates)
 	}
+}
+
+func TestConnectWizardUnknownACPPreparationStopsRecoveryPicker(t *testing.T) {
+	for name, unknown := range map[string]error{
+		"command receipt": &appserver.CommandReceiptError{
+			Receipt: appserver.CommandResult{Outcome: appserver.OutcomeUnknown},
+			Err:     errors.New("effect outcome cannot be proven"),
+		},
+		"backend outcome": &appserver.OutcomeError{
+			Outcome: appserver.OutcomeUnknown,
+			Err:     errors.New("effect outcome cannot be proven"),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := NewModel(Config{})
+			seq, command := armACPModelLoad(m)
+			m.handleSlashArgLoadResult(slashArgLoadResultMsg{seq: seq, command: command, err: unknown})
+			if m.isWizardActive() || m.slashArgActive {
+				t.Fatal("unknown ACP preparation left a retryable wizard active")
+			}
+			hint := ansi.Strip(m.buildHintText())
+			if !strings.Contains(hint, "setup stopped") || !strings.Contains(hint, "cleanup could not be proven") {
+				t.Fatalf("buildHintText() = %q, want terminal unknown-cleanup guidance", hint)
+			}
+			if strings.Contains(hint, "retry discovery") {
+				t.Fatalf("buildHintText() = %q, must not suggest replaying an unknown effect", hint)
+			}
+		})
+	}
+}
+
+func TestConnectWizardRetryableACPDiscoveryFailureKeepsRecoveryPicker(t *testing.T) {
+	m := NewModel(Config{})
+	seq, command := armACPModelLoad(m)
+	m.handleSlashArgLoadResult(slashArgLoadResultMsg{
+		seq: seq, command: command, err: errors.New("ACP Agent is temporarily unavailable"),
+	})
+	if !m.isWizardActive() || !m.slashArgActive {
+		t.Fatal("retryable ACP discovery failure closed the recovery wizard")
+	}
+	hint := ansi.Strip(m.buildHintText())
+	if !strings.Contains(hint, "ACP Agent setup failed") {
+		t.Fatalf("buildHintText() = %q, want retryable setup failure", hint)
+	}
+}
+
+func armACPModelLoad(m *Model) (uint64, string) {
+	def := connectACPWizard()
+	state := map[string]string{"acp_agent": "grok", "acp_launcher": "installed"}
+	m.wizard = &wizardRuntime{
+		def: &def, stepIndex: len(def.Steps) - 1, state: state,
+		multiSelections: map[string][]string{},
+	}
+	m.slashArgActive = true
+	m.slashArgCommand = m.wizard.completionCommand()
+	m.slashArgLoadSeq = 1
+	m.slashArgLoadPending = true
+	m.slashArgLoadCommand = m.slashArgCommand
+	return m.slashArgLoadSeq, m.slashArgCommand
 }
 
 func TestConnectWizardRunsCodexAuthenticationInBackgroundAndShowsBrowserGuidance(t *testing.T) {

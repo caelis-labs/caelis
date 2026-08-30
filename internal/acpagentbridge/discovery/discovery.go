@@ -17,12 +17,15 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 )
 
+const defaultPreparationProcessExitGrace = 10 * time.Second
+
 // Service discovers the catalog declared by a temporary empty ACP session.
 type Service struct {
-	ClientInfo       *acpsdk.Implementation
-	Clock            func() time.Time
-	CleanupTimeout   time.Duration
-	EndpointResolver endpoint.Resolver
+	ClientInfo          *acpsdk.Implementation
+	Clock               func() time.Time
+	SessionCloseTimeout time.Duration
+	ProcessExitGrace    time.Duration
+	EndpointResolver    endpoint.Resolver
 }
 
 func (s Service) startInitializedClient(
@@ -58,7 +61,7 @@ func (s Service) startInitializedClient(
 	}
 	initialize, err := acpClient.Initialize(ctx)
 	if err != nil {
-		_ = acpcleanup.CloseClientWithin(ctx, acpClient, s.cleanupTimeout())
+		_ = acpcleanup.CloseClientWithGrace(ctx, acpClient, s.processExitGrace())
 		if connection.Launcher.Kind == controlagents.LaunchKindPackageExec {
 			return nil, client.InitializeResponse{}, fmt.Errorf(
 				"internal/acpagentbridge/discovery: initialize connection %q through package launcher %q; verify its package cache or choose another launcher: %w",
@@ -76,11 +79,18 @@ func (s Service) startInitializedClient(
 	return acpClient, initialize, nil
 }
 
-func (s Service) cleanupTimeout() time.Duration {
-	if s.CleanupTimeout > 0 {
-		return s.CleanupTimeout
+func (s Service) sessionCloseTimeout() time.Duration {
+	if s.SessionCloseTimeout > 0 {
+		return s.SessionCloseTimeout
 	}
-	return acpcleanup.DefaultTimeout
+	return acpcleanup.DefaultSessionCloseTimeout
+}
+
+func (s Service) processExitGrace() time.Duration {
+	if s.ProcessExitGrace > 0 {
+		return s.ProcessExitGrace
+	}
+	return defaultPreparationProcessExitGrace
 }
 
 func hasSessionCapability(resp client.InitializeResponse, name string) bool {

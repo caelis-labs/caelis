@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 )
@@ -317,7 +319,12 @@ func (m *Model) handleSlashArgLoadResult(msg slashArgLoadResultMsg) tea.Cmd {
 	// cannot restore stale, unfiltered candidates when the result arrives.
 	m.applySlashArgCandidates(command, query, msg.candidates, msg.err)
 	if msg.err != nil {
-		return m.showHint(fmt.Sprintf("%s: %v", slashArgLoadFailureLabel(msg.command), msg.err), hintOptions{
+		failureLabel := slashArgLoadFailureLabel(msg.command)
+		if shouldStopACPSetupAfterLoadError(msg.command, msg.err) {
+			failureLabel = "ACP Agent setup stopped; preparation cleanup could not be proven"
+			m.clearWizard()
+		}
+		return m.showHint(fmt.Sprintf("%s: %v", failureLabel, msg.err), hintOptions{
 			priority: HintPriorityHigh, clearOnMessage: true, clearAfter: systemHintDuration,
 		})
 	}
@@ -400,6 +407,18 @@ func slashArgLoadFailureLabel(command string) string {
 		return "Model provider sign-in failed"
 	}
 	return "ACP Agent setup failed"
+}
+
+func shouldStopACPSetupAfterLoadError(command string, err error) bool {
+	if !strings.HasPrefix(strings.TrimSpace(command), "connect-acp-model:") || err == nil {
+		return false
+	}
+	var receiptErr *appserver.CommandReceiptError
+	if errors.As(err, &receiptErr) && receiptErr.Receipt.Outcome == appserver.OutcomeUnknown {
+		return true
+	}
+	var outcomeErr *appserver.OutcomeError
+	return errors.As(err, &outcomeErr) && outcomeErr.Outcome == appserver.OutcomeUnknown
 }
 
 func slashArgLoadCancelLabel(command string) string {

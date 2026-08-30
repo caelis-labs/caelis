@@ -368,6 +368,27 @@ func assertActionablePackageLauncherError(t *testing.T, err error) {
 	}
 }
 
+func TestPrepareAcceptsProvenForcedProcessCleanup(t *testing.T) {
+	markerDir := t.TempDir()
+	started := time.Now()
+	result, err := (Service{ProcessExitGrace: 50 * time.Millisecond}).Prepare(
+		context.Background(),
+		PrepareRequest{Connection: helperConnection(markerDir, "slow-exit"), CWD: markerDir},
+	)
+	if err != nil {
+		t.Fatalf("Prepare() error = %v, want ready discovery after proven forced cleanup", err)
+	}
+	if result.State != PrepareReady || result.Snapshot.CurrentModelID != "sonnet" {
+		t.Fatalf("Prepare() = %#v, want ready snapshot", result)
+	}
+	if elapsed := time.Since(started); elapsed >= 2*time.Second {
+		t.Fatalf("Prepare() elapsed = %v, want prompt forced cleanup", elapsed)
+	}
+	if _, statErr := os.Stat(filepath.Join(markerDir, "process-exit")); !os.IsNotExist(statErr) {
+		t.Fatalf("slow helper exited gracefully before forced cleanup: %v", statErr)
+	}
+}
+
 func TestPrepareCancellationTerminatesProcess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("kill -0 liveness probe is Unix-specific")
@@ -401,7 +422,10 @@ func TestPrepareBoundsUnresponsiveSessionCloseAndTerminatesProcess(t *testing.T)
 	}
 	markerDir := t.TempDir()
 	started := time.Now()
-	_, err := (Service{CleanupTimeout: 50 * time.Millisecond}).Prepare(context.Background(), PrepareRequest{
+	_, err := (Service{
+		SessionCloseTimeout: 50 * time.Millisecond,
+		ProcessExitGrace:    50 * time.Millisecond,
+	}).Prepare(context.Background(), PrepareRequest{
 		Connection: helperConnection(markerDir, "close-block"), CWD: markerDir,
 	})
 	if err == nil || !strings.Contains(err.Error(), "close prepare session") || !strings.Contains(err.Error(), "deadline exceeded") {
@@ -420,7 +444,10 @@ func TestPrepareReportsUnknownCleanupAndPreservesSnapshot(t *testing.T) {
 	}
 	markerDir := t.TempDir()
 	started := time.Now()
-	result, err := (Service{CleanupTimeout: 50 * time.Millisecond}).Prepare(
+	result, err := (Service{
+		SessionCloseTimeout: 50 * time.Millisecond,
+		ProcessExitGrace:    50 * time.Millisecond,
+	}).Prepare(
 		context.Background(),
 		PrepareRequest{Connection: helperConnection(markerDir, "close-block"), CWD: markerDir},
 	)
@@ -630,6 +657,9 @@ func TestDiscoveryHelperProcess(t *testing.T) {
 			return nil, &jsonrpc.RPCError{Code: -32601, Message: fmt.Sprintf("unknown method %s", msg.Method)}
 		}
 	}, nil)
+	if mode == "slow-exit" {
+		time.Sleep(5 * time.Second)
+	}
 	writeMarker("process-exit", "yes")
 	os.Exit(0)
 }

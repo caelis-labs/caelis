@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	sdkstdio "github.com/caelis-labs/acp-go-sdk/transport/stdio"
@@ -22,8 +21,6 @@ import (
 )
 
 const maxFrameSize = 64 * 1024 * 1024
-
-const processShutdownGrace = 2 * time.Second
 
 type PermissionHandler func(context.Context, RequestPermissionRequest) (RequestPermissionResponse, error)
 
@@ -51,6 +48,8 @@ type Client struct {
 
 	stderrMu    sync.Mutex
 	stderrBuf   bytes.Buffer
+	closeOnce   sync.Once
+	closeErr    error
 	releaseOnce sync.Once
 	release     func()
 }
@@ -405,46 +404,6 @@ func (c *Client) Cancel(ctx context.Context, sessionID string) error {
 		return errors.New("acp client is unavailable")
 	}
 	return c.conn.SendNotification(ctx, MethodSessionCancel, CancelRequest{SessionId: acpsdk.SessionId(sessionID)})
-}
-
-func (c *Client) Close(ctx context.Context) error {
-	if c == nil {
-		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	var errs []error
-	if c.conn != nil {
-		if err := c.conn.Close(); err != nil {
-			errs = append(errs, err)
-		}
-		if err := c.conn.Wait(ctx); err != nil &&
-			!errors.Is(err, acpsdk.ErrConnectionClosed) && !errors.Is(err, acpsdk.ErrPeerClosed) {
-			errs = append(errs, err)
-		}
-	}
-	if c.proc != nil {
-		graceCtx, cancel := context.WithTimeout(ctx, processShutdownGrace)
-		// Shutdown joins forced process-tree cleanup before returning. Preserve
-		// its deadline cause so callers can distinguish a graceful exit from
-		// escalation without losing any joined cleanup error.
-		errs = append(errs, c.proc.Shutdown(graceCtx))
-		cancel()
-	}
-	c.releaseEndpoint()
-	return errors.Join(errs...)
-}
-
-func (c *Client) releaseEndpoint() {
-	if c == nil {
-		return
-	}
-	c.releaseOnce.Do(func() {
-		if c.release != nil {
-			c.release()
-		}
-	})
 }
 
 func firstNonEmpty(values ...string) string {

@@ -23,8 +23,8 @@ const (
 	// PrepareNeedsAuth means session/new returned auth_required. The caller must
 	// explicitly choose one of AuthenticationMethods and invoke Prepare again.
 	PrepareNeedsAuth PrepareState = "needs_auth"
-	// PrepareUnknownCleanup means preparation produced useful evidence, but the
-	// temporary Session or process could not be proven closed within the bound.
+	// PrepareUnknownCleanup means preparation produced useful evidence, but a
+	// temporary Session close or forced process cleanup could not be proven.
 	PrepareUnknownCleanup PrepareState = "unknown_cleanup"
 )
 
@@ -64,7 +64,7 @@ func (s Service) Prepare(ctx context.Context, request PrepareRequest) (result Pr
 		if acpClient == nil {
 			return
 		}
-		if cleanupErr := acpcleanup.CloseClientWithin(ctx, acpClient, s.cleanupTimeout()); cleanupErr != nil {
+		if cleanupErr := acpcleanup.CloseClientWithGrace(ctx, acpClient, s.processExitGrace()); cleanupErr != nil {
 			result.State = PrepareUnknownCleanup
 			err = errors.Join(err, fmt.Errorf(
 				"internal/acpagentbridge/discovery: close prepare client for %q: %w",
@@ -91,7 +91,7 @@ func (s Service) Prepare(ctx context.Context, request PrepareRequest) (result Pr
 		Restart: func(restartCtx context.Context) (*client.Client, client.InitializeResponse, error) {
 			return s.startInitializedClient(restartCtx, connection, workDir)
 		},
-		CleanupTimeout: s.cleanupTimeout(),
+		ProcessExitGrace: s.processExitGrace(),
 	}, cwd, nil)
 	acpClient = recovered.Client
 	result.Authentication = controlagents.NormalizeAuthentication(recovered.Authentication)
@@ -148,7 +148,7 @@ func (s Service) Prepare(ctx context.Context, request PrepareRequest) (result Pr
 	}
 	result.Snapshot.DiscoveredAt = clock().UTC()
 	if hasSessionCapability(initialize, "close") {
-		if closeErr := acpcleanup.CloseSessionWithin(ctx, acpClient, sessionID, s.cleanupTimeout()); closeErr != nil {
+		if closeErr := acpcleanup.CloseSessionWithin(ctx, acpClient, sessionID, s.sessionCloseTimeout()); closeErr != nil {
 			result.State = PrepareUnknownCleanup
 			return result, fmt.Errorf(
 				"internal/acpagentbridge/discovery: close prepare session %q: %w",

@@ -21,10 +21,15 @@ the expected Host configuration revision.
 Preparation records are secret-free, principal-owned, time bounded, and not a
 second operation ledger. They allow an intent-only operation receipt to be
 recovered observationally after restart without repeating launcher, process,
-authentication, or Session effects. Cleanup that cannot be proven produces an
-unknown outcome and is never retried blindly. `connect` uses configuration
-compare-and-save and canonical roll-forward; a committed write is not undone
-when assembly refresh or durability observation later reports a warning.
+authentication, or Session effects. An owned local process receives a bounded
+graceful-exit opportunity after its protocol streams close. Expiry of that
+grace alone is not an unknown outcome: Control forcefully terminates and joins
+the process tree, and accepts cleanup when that proof succeeds. An ambiguous
+`session/close`, failed forced termination, handle release, or connection join
+still produces an unknown outcome and is never retried blindly. `connect` uses
+configuration compare-and-save and canonical roll-forward; a committed write is
+not undone when assembly refresh or durability observation later reports a
+warning.
 Within the single Control Host, an exact-operation gate spans intent creation,
 effect execution or observational recovery, and receipt completion. Restart
 recovery uses the durable intent plus the preparation record; it does not rely

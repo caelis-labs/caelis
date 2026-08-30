@@ -765,7 +765,11 @@ func TestParticipantSteeringTransportLossIsUnknownAndIsolates(t *testing.T) {
 func TestParticipantDetachCancelsInflightSteering(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Detach deliberately gives an unresponsive owned process three seconds to
+	// exit before forced cleanup. Keep that production grace distinct from the
+	// test's scheduling budget so parallel process tests cannot exhaust the same
+	// deadline before the post-detach assertions run.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	requestMarker := filepath.Join(t.TempDir(), "steering-requested")
 	harness := newParticipantSteeringTestHarnessWithEnv(
@@ -821,9 +825,11 @@ func TestParticipantDetachCancelsInflightSteering(t *testing.T) {
 		t.Fatal("Detach() did not settle in-flight steering")
 	}
 	harness.handle.finish()
+	consumerDeadline := time.NewTimer(5 * time.Second)
+	defer consumerDeadline.Stop()
 	select {
 	case <-consumerDone:
-	case <-ctx.Done():
+	case <-consumerDeadline.C:
 		t.Fatal("detached participant consumer did not stop")
 	}
 }

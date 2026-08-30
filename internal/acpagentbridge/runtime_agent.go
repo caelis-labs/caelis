@@ -312,7 +312,7 @@ func (a *RuntimeAgent) NewSession(ctx context.Context, req acpsdk.NewSessionRequ
 			if ctx != nil {
 				cleanupParent = context.WithoutCancel(ctx)
 			}
-			cleanupCtx, cancelCleanup := context.WithTimeout(cleanupParent, acpcleanup.DefaultTimeout)
+			cleanupCtx, cancelCleanup := context.WithTimeout(cleanupParent, acpcleanup.DefaultSessionCloseTimeout)
 			closeResult, closeErr := a.sessionClient.CloseSession(cleanupCtx, appserver.CloseSessionRequest{WriteBase: appserver.WriteBase{
 				OperationID:             newACPSessionOperationID("reject-ingress"),
 				SessionID:               activeSession.SessionID,

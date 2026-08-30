@@ -34,7 +34,7 @@ func TestCleanupDetachesCancellationAndBoundsOperations(t *testing.T) {
 			return CloseSessionWithin(parent, client, "temporary", 20*time.Millisecond)
 		}},
 		{name: "client", run: func(client blockingCleanupClient) error {
-			return CloseClientWithin(parent, client, 20*time.Millisecond)
+			return CloseClientWithGrace(parent, client, 20*time.Millisecond)
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {

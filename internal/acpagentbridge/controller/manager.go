@@ -669,7 +669,7 @@ func (m *Manager) shutdownControllerRunLocked(ctx context.Context, run *controll
 	if closeRemote && remoteSessionID != "" && supportsClose {
 		_ = acpClient.CloseSession(ctx, remoteSessionID)
 	}
-	_ = acpClient.Close(ctx)
+	_ = acpcleanup.CloseClient(ctx, acpClient)
 }
 
 type controllerReconnectConfig struct {
