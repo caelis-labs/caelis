@@ -173,10 +173,12 @@ Document responsibilities are intentionally separate:
   overlays come from `~/.agents/mcp.json`. Project files `<workspace>/.agents/mcp.json`
   and `<workspace>/.mcp.json` are sampled only when AppConfig `workspace_trust`
   records that exact canonical workspace as `trusted`. An absent record is
-  `unknown`; the TUI asks once and persists either `trusted` or `untrusted`.
-  This is a Host configuration choice, not a turn-level approval. Overlay files
-  are never imported into AppConfig and never hot-reloaded into a live Runtime;
-  changes are sampled on later Runtime assembly. Catalog identities use reserved
+  `unknown`; when either supported project file is present, the TUI asks once
+  and persists either `trusted` or `untrusted`. Workspaces without project MCP
+  files do not prompt or synthesize a trust decision. This is a Host
+  configuration choice, not a turn-level approval. Overlay files are never
+  imported into AppConfig and never hot-reloaded into a live Runtime; changes
+  are sampled on later Runtime assembly. Catalog identities use reserved
   namespaces (`caelis.mcp.user`, `caelis.mcp.project`) distinct from plugin IDs.
 - `control/plugin`: Control-owned plugin configuration, manifest discovery,
   identity, marketplace/install resolution, lifecycle mutation, and normalized

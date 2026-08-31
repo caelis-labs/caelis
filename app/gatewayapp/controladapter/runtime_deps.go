@@ -151,11 +151,12 @@ type SessionRuntimeDeps struct {
 
 // StatusRuntimeDeps carries read-only runtime state lookups.
 type StatusRuntimeDeps struct {
-	RuntimeStateFn          func(context.Context, session.SessionRef) (SessionRuntimeState, error)
-	ConfigurationRevisionFn func(context.Context) (uint64, error)
-	WorkspaceTrustFn        func(context.Context, string) (workspacetrust.Level, error)
-	DoctorFn                func(context.Context, DoctorRequest) (DoctorStatusProjection, error)
-	TaskEntriesFn           func(context.Context, session.SessionRef) ([]*taskapi.Entry, error)
+	RuntimeStateFn                   func(context.Context, session.SessionRef) (SessionRuntimeState, error)
+	ConfigurationRevisionFn          func(context.Context) (uint64, error)
+	WorkspaceTrustFn                 func(context.Context, string) (workspacetrust.Level, error)
+	ProjectMCPConfigurationPresentFn func(context.Context, string) (bool, error)
+	DoctorFn                         func(context.Context, DoctorRequest) (DoctorStatusProjection, error)
+	TaskEntriesFn                    func(context.Context, session.SessionRef) ([]*taskapi.Entry, error)
 }
 
 // AgentRuntimeDeps carries ACP controller and registered-agent capabilities.

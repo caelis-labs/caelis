@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
@@ -41,11 +42,16 @@ func (m *Model) renderPromptModal() string {
 	start = min(start, len(visible))
 	end := minInt(len(visible), start+maxVisiblePromptChoices)
 	window := visible[start:end]
+	choiceLabelWidth := m.promptChoiceLabelWidth(window)
+	stackChoices := p.stackedChoices && m.promptChoicesNeedStacking(window, choiceLabelWidth)
 	lines := make([]string, 0, len(window))
 	for i := range window {
 		choice := window[i]
 		actualIndex := start + i
-		lines = append(lines, m.renderPromptChoiceLine(choice, actualIndex == p.choiceIndex))
+		lines = append(lines, m.renderPromptChoiceLines(choice, actualIndex == p.choiceIndex, stackChoices, choiceLabelWidth)...)
+		if stackChoices && i < len(window)-1 {
+			lines = append(lines, "")
+		}
 	}
 	if len(bodyLines) > 0 {
 		bodyLines = append(bodyLines, "")
@@ -58,6 +64,20 @@ func (m *Model) renderPromptDetailLines(details []PromptDetail) []string {
 	if len(details) == 0 {
 		return nil
 	}
+	labelColumnWidth := 0
+	for _, detail := range details {
+		label := strings.TrimSpace(detail.Label)
+		value := sanitizePromptModalText(detail.Value)
+		if label == "" || value == "" {
+			continue
+		}
+		labelColumnWidth = maxInt(labelColumnWidth, displayColumns(strings.ToUpper(label)+":"))
+	}
+	if labelColumnWidth == 0 {
+		return nil
+	}
+	valueColumnIndent := strings.Repeat(" ", labelColumnWidth+1)
+	valueColumnWidth := maxInt(1, m.promptModalInnerWidth()-labelColumnWidth-1)
 	lines := make([]string, 0, len(details)*2)
 	detailBudget := m.promptDetailLineBudget()
 	for _, detail := range details {
@@ -66,51 +86,69 @@ func (m *Model) renderPromptDetailLines(details []PromptDetail) []string {
 		if label == "" || value == "" {
 			continue
 		}
+		labelStyle := m.promptToneStyle(detail.Tone, m.theme.KeyLabelStyle())
 		valueStyle := m.theme.TextStyle()
 		if detail.Emphasis {
 			valueStyle = valueStyle.Bold(true)
 		}
-		valueLines := strings.Split(value, "\n")
-		truncatedCount := 0
-		if len(valueLines) > detailBudget {
-			truncatedCount = len(valueLines) - detailBudget
-			valueLines = append(append([]string(nil), valueLines[:detailBudget]...), "")
-		}
-		first := strings.TrimRight(valueLines[0], "\r")
-		if strings.TrimSpace(first) == "" {
-			continue
-		}
-		lines = append(lines, m.theme.KeyLabelStyle().Render(strings.ToUpper(label)+":")+" "+valueStyle.Render(first))
-		for _, line := range valueLines[1:] {
+		valueLines := make([]string, 0, strings.Count(value, "\n")+1)
+		for _, line := range strings.Split(value, "\n") {
 			line = strings.TrimRight(line, "\r")
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
-			lines = append(lines, "  "+valueStyle.Render(line))
+			valueLines = append(valueLines, wrapPromptModalLine(line, valueColumnWidth)...)
+		}
+		if len(valueLines) == 0 {
+			continue
+		}
+		truncatedCount := 0
+		if len(valueLines) > detailBudget {
+			truncatedCount = len(valueLines) - detailBudget
+			valueLines = append([]string(nil), valueLines[:detailBudget]...)
+		}
+		labelText := strings.ToUpper(label) + ":"
+		labelGap := strings.Repeat(" ", labelColumnWidth-displayColumns(labelText)+1)
+		lines = append(lines, labelStyle.Render(labelText)+labelGap+valueStyle.Render(valueLines[0]))
+		for _, line := range valueLines[1:] {
+			lines = append(lines, valueColumnIndent+valueStyle.Render(line))
 		}
 		if truncatedCount > 0 {
-			lines = append(lines, "  "+m.theme.HelpHintTextStyle().Render(fmt.Sprintf("… %d more lines", truncatedCount)))
+			lines = append(lines, valueColumnIndent+m.theme.HelpHintTextStyle().Render(fmt.Sprintf("… %d more lines", truncatedCount)))
 		}
 	}
 	return lines
 }
 
-func (m *Model) renderPromptChoiceLine(choice promptChoice, selected bool) string {
+func (m *Model) renderPromptChoiceLines(choice promptChoice, selected, stacked bool, labelColumnWidth int) []string {
 	gutter := "  "
 	if selected {
 		gutter = "▎ "
 	}
-	marker := ""
-	if m.activePrompt != nil && m.activePrompt.multiSelect {
-		if _, ok := m.activePrompt.selected[choice.value]; ok {
-			marker = "[x] "
-		} else {
-			marker = "[ ] "
-		}
-	}
+	marker := m.promptChoiceMarker(choice)
 	label := sanitizePromptModalText(choice.label)
 	detail := sanitizePromptModalText(choice.detail)
 	contentWidth := maxInt(1, m.promptModalInnerWidth()-displayColumns(gutter))
+	if stacked && detail != "" {
+		labelText := truncateTailDisplay(marker+label, contentWidth)
+		labelStyle := m.promptToneStyle(choice.tone, m.theme.TextStyle())
+		if selected {
+			labelStyle = m.theme.SelectionStyle().Bold(true)
+		} else if choice.tone == PromptToneDefault {
+			labelStyle = labelStyle.Bold(true)
+		}
+		labelLine := m.theme.HelpHintTextStyle().Render(gutter) + labelStyle.Render(labelText)
+		if selected {
+			labelLine = labelStyle.Render(gutter + labelText)
+		}
+		detailIndent := strings.Repeat(" ", displayColumns(gutter)+2)
+		detailWidth := maxInt(1, contentWidth-2)
+		lines := []string{labelLine}
+		for _, line := range wrapPromptModalLine(detail, detailWidth) {
+			lines = append(lines, detailIndent+m.theme.HelpHintTextStyle().Render(line))
+		}
+		return lines
+	}
 	mainText := marker + label
 	if detail != "" {
 		mainText += "  " + detail
@@ -120,30 +158,68 @@ func (m *Model) renderPromptChoiceLine(choice promptChoice, selected bool) strin
 	selectedDetailStyle := m.theme.SelectionStyle()
 	if detail == "" {
 		if selected {
-			return selectedLabelStyle.Render(gutter) + selectedLabelStyle.Render(mainText)
+			return []string{selectedLabelStyle.Render(gutter) + selectedLabelStyle.Render(mainText)}
 		}
-		return m.theme.HelpHintTextStyle().Render(gutter) + m.theme.TextStyle().Render(mainText)
+		return []string{m.theme.HelpHintTextStyle().Render(gutter) + m.promptToneStyle(choice.tone, m.theme.TextStyle()).Render(mainText)}
 	}
-	labelWidth := maxInt(8, minInt(displayColumns(marker+label), maxInt(8, contentWidth/2)))
-	if displayColumns(mainText) <= labelWidth {
-		labelWidth = displayColumns(mainText)
-	}
-	if labelWidth >= contentWidth {
-		labelWidth = maxInt(1, contentWidth-1)
-	}
-	labelText := truncateTailDisplay(marker+label, labelWidth)
-	detailBudget := maxInt(1, contentWidth-displayColumns(labelText)-2)
+	separator := "  "
+	labelWidth := minInt(maxInt(1, labelColumnWidth), maxInt(1, contentWidth-displayColumns(separator)-1))
+	labelText := padLineToDisplayWidth(truncateTailDisplay(marker+label, labelWidth), labelWidth)
+	detailBudget := maxInt(1, contentWidth-labelWidth-displayColumns(separator))
 	detailText := truncateTailDisplay(detail, detailBudget)
 	if selected {
-		return selectedLabelStyle.Render(gutter) +
-			selectedLabelStyle.Render(labelText) +
-			"  " +
-			selectedDetailStyle.Render(detailText)
+		return []string{selectedLabelStyle.Render(gutter+labelText+separator) +
+			selectedDetailStyle.Render(detailText)}
 	}
-	return m.theme.HelpHintTextStyle().Render(gutter) +
-		m.theme.TextStyle().Render(labelText) +
-		"  " +
-		m.theme.HelpHintTextStyle().Render(detailText)
+	return []string{m.theme.HelpHintTextStyle().Render(gutter) +
+		m.promptToneStyle(choice.tone, m.theme.TextStyle()).Render(labelText) +
+		separator +
+		m.theme.HelpHintTextStyle().Render(detailText)}
+}
+
+func (m *Model) promptChoiceMarker(choice promptChoice) string {
+	if m.activePrompt == nil || !m.activePrompt.multiSelect {
+		return ""
+	}
+	if _, ok := m.activePrompt.selected[choice.value]; ok {
+		return "[x] "
+	}
+	return "[ ] "
+}
+
+func (m *Model) promptChoiceLabelWidth(choices []promptChoice) int {
+	width := 0
+	for _, choice := range choices {
+		width = maxInt(width, displayColumns(m.promptChoiceMarker(choice)+sanitizePromptModalText(choice.label)))
+	}
+	return width
+}
+
+func (m *Model) promptChoicesNeedStacking(choices []promptChoice, labelColumnWidth int) bool {
+	contentWidth := maxInt(1, m.promptModalInnerWidth()-displayColumns("  "))
+	for _, choice := range choices {
+		detail := sanitizePromptModalText(choice.detail)
+		if detail == "" {
+			continue
+		}
+		if strings.Contains(detail, "\n") || labelColumnWidth+displayColumns("  ")+displayColumns(detail) > contentWidth {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) promptToneStyle(tone PromptTone, fallback lipgloss.Style) lipgloss.Style {
+	switch tone {
+	case PromptToneAccent:
+		return m.theme.Tokens().Accent.Bold(true)
+	case PromptToneWarning:
+		return m.theme.Tokens().Warning.Bold(true)
+	case PromptToneDanger:
+		return m.theme.Tokens().Danger.Bold(true)
+	default:
+		return fallback
+	}
 }
 
 func (m *Model) renderPromptModalBox(lines []string) string {
@@ -192,7 +268,9 @@ func (m *Model) promptModalInnerWidth() int {
 }
 
 func (m *Model) promptModalOuterWidth() int {
-	width := minInt(maxInt(44, m.fixedRowWidth()-4), 96)
+	available := m.fixedRowWidth()
+	width := minInt(maxInt(20, available-4), 120)
+	width = minInt(width, available)
 	if width <= 0 {
 		width = 72
 	}

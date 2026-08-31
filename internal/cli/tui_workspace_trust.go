@@ -21,6 +21,7 @@ type workspaceTrustConfigurationClient interface {
 type workspaceTrustPromptRequest struct {
 	Workspace string
 	SaveIssue string
+	Default   workspacetrust.Level
 }
 
 type workspaceTrustPromptFunc func(context.Context, workspaceTrustPromptRequest) (workspacetrust.Level, bool, error)
@@ -37,9 +38,10 @@ func ensureTUIWorkspaceTrust(
 		return false, errors.New("workspace trust services are unavailable")
 	}
 	request := appserver.StatusRequest{
-		WorkspaceKey: strings.TrimSpace(workspaceKey),
-		CWD:          strings.TrimSpace(workspaceDir),
-		Surface:      "cli-tui",
+		WorkspaceKey:                     strings.TrimSpace(workspaceKey),
+		CWD:                              strings.TrimSpace(workspaceDir),
+		Surface:                          "cli-tui",
+		IncludeWorkspaceTrustRequirement: true,
 	}
 	saveIssue := ""
 	attemptedDecision := workspacetrust.Unknown
@@ -55,9 +57,13 @@ func ensureTUIWorkspaceTrust(
 			}
 			saveIssue = "Workspace trust changed while this choice was being saved. Please review the options again."
 		}
+		if !attemptedDecision.Decided() && !snapshot.Configuration.WorkspaceTrustRequired {
+			return true, nil
+		}
 		decision, selected, err := prompt(ctx, workspaceTrustPromptRequest{
 			Workspace: request.CWD,
 			SaveIssue: saveIssue,
+			Default:   attemptedDecision,
 		})
 		if err != nil {
 			return false, err
@@ -149,36 +155,43 @@ func workspaceTrustPromptMessage(
 	request workspaceTrustPromptRequest,
 	responses chan tuiapp.PromptResponse,
 ) tuiapp.PromptRequestMsg {
+	defaultChoice := request.Default
+	if !defaultChoice.Decided() {
+		defaultChoice = workspacetrust.Trusted
+	}
 	details := []tuiapp.PromptDetail{
 		{Label: "Workspace", Value: request.Workspace, Emphasis: true},
 		{
-			Label: "Project MCP configuration",
-			Value: "If trusted, Caelis can start local programs and connect to external services defined by this workspace.",
+			Label: "MCP access",
+			Value: "This setup can start local programs or connect to external services.",
+			Tone:  tuiapp.PromptToneWarning,
 		},
 		{
-			Label: "When this takes effect",
-			Value: "The choice applies when a Runtime is created. Active Runtimes are not changed.",
+			Label: "Applies",
+			Value: "New Runtimes only; active Runtimes stay unchanged.",
 		},
 	}
 	if issue := strings.TrimSpace(request.SaveIssue); issue != "" {
-		details = append(details, tuiapp.PromptDetail{Label: "Unable to save", Value: issue})
+		details = append(details, tuiapp.PromptDetail{Label: "Unable to save", Value: issue, Tone: tuiapp.PromptToneDanger})
 	}
 	return tuiapp.PromptRequestMsg{
-		Title:   "Trust this workspace?",
+		Title:   "Trust this workspace's MCP setup?",
 		Details: details,
 		Choices: []tuiapp.PromptChoice{
 			{
-				Label:  "Trust and continue",
+				Label:  "Trust and enable MCP",
 				Value:  string(workspacetrust.Trusted),
-				Detail: "Allow project MCP configuration for this workspace.",
+				Detail: "Use workspace MCP in new Runtimes.",
+				Tone:   tuiapp.PromptToneAccent,
 			},
 			{
-				Label:  "Continue without trust",
+				Label:  "Continue without MCP",
 				Value:  string(workspacetrust.Untrusted),
-				Detail: "Ignore project MCP configuration for this workspace.",
+				Detail: "Keep workspace MCP disabled.",
 			},
 		},
-		DefaultChoice: string(workspacetrust.Untrusted),
-		Response:      responses,
+		DefaultChoice:  string(defaultChoice),
+		StackedChoices: true,
+		Response:       responses,
 	}
 }

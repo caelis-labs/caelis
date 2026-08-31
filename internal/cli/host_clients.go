@@ -52,7 +52,7 @@ type productClientOptions struct {
 	// AdditionalRemoteCapabilities are required only by the presentation flow
 	// selected by the caller. The common remote path always requires workspace
 	// CWD Session listing, while interactive onboarding additionally requires
-	// workspace trust support.
+	// workspace trust and project-MCP preflight support.
 	AdditionalRemoteCapabilities []string
 	// ACPIngress selects the Host-issued ACP presentation credential. The role
 	// is bound by the Host authenticator and never derived from request data.

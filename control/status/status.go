@@ -107,10 +107,12 @@ type StatusRuntime struct {
 }
 
 // StatusConfiguration identifies the canonical persisted Host configuration
-// observed by this snapshot.
+// observed by this snapshot. WorkspaceTrustRequired is a transient derived
+// value included only for an explicitly requested workspace trust preflight.
 type StatusConfiguration struct {
-	Revision       uint64               `json:"revision"`
-	WorkspaceTrust workspacetrust.Level `json:"workspace_trust"`
+	Revision               uint64               `json:"revision"`
+	WorkspaceTrust         workspacetrust.Level `json:"workspace_trust"`
+	WorkspaceTrustRequired bool                 `json:"workspace_trust_required,omitempty"`
 }
 
 // StatusDiagnostics contains Host diagnostics that do not duplicate the

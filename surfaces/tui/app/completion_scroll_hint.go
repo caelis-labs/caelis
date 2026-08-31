@@ -86,7 +86,31 @@ func (m *Model) renderPromptChoiceFooter() string {
 		keyStyle.Render("enter")+descStyle.Render(" confirm"),
 		keyStyle.Render("esc")+descStyle.Render(" cancel"),
 	)
-	return strings.Join(parts, sep)
+	footer := strings.Join(parts, sep)
+	available := maxInt(8, m.promptModalOuterWidth()-m.completionOverlayFooterIndent())
+	if displayColumns(footer) <= available {
+		return footer
+	}
+
+	compact := []string{upStyle.Render("↑") + slash + downStyle.Render("↓") + descStyle.Render(" select")}
+	if m.activePrompt.filterable {
+		compact = append([]string{descStyle.Render("type")}, compact...)
+	}
+	if m.activePrompt.multiSelect {
+		compact = append(compact, keyStyle.Render("space"))
+	}
+	compact = append(compact, keyStyle.Render("enter"), keyStyle.Render("esc"))
+	footer = strings.Join(compact, sep)
+	if displayColumns(footer) <= available {
+		return footer
+	}
+
+	minimal := []string{upStyle.Render("↑") + slash + downStyle.Render("↓")}
+	if m.activePrompt.multiSelect {
+		minimal = append(minimal, keyStyle.Render("space"))
+	}
+	minimal = append(minimal, keyStyle.Render("enter"), keyStyle.Render("esc"))
+	return truncateTailDisplay(strings.Join(minimal, descStyle.Render(" ")), available)
 }
 
 func (m *Model) attachPromptChoiceFooter(frame string) string {

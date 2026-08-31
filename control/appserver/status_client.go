@@ -20,6 +20,9 @@ type StatusRequest struct {
 	CWD                string `json:"cwd,omitempty"`
 	Surface            string `json:"surface,omitempty"`
 	IncludeDiagnostics bool   `json:"include_diagnostics,omitempty"`
+	// IncludeWorkspaceTrustRequirement requests the project-MCP presence
+	// projection used only by the interactive workspace trust preflight.
+	IncludeWorkspaceTrustRequirement bool `json:"include_workspace_trust_requirement,omitempty"`
 }
 
 // StatusService is the principal-aware AppServer status capability.

@@ -70,6 +70,9 @@ func (s *StatusService) SessionStatus(
 		deps.Status.DoctorFn = func(ctx context.Context, req controladapter.DoctorRequest) (controladapter.DoctorStatusProjection, error) {
 			return toDoctorStatusProjection(s.doctorForWorkspace(ctx, workspace, req))
 		}
+		if !request.IncludeWorkspaceTrustRequirement {
+			deps.Status.ProjectMCPConfigurationPresentFn = nil
+		}
 		driver := controladapter.NewStatusAssemblerForHost(
 			deps,
 			strings.TrimSpace(request.Surface),
@@ -91,9 +94,13 @@ func (s *StatusService) SessionStatus(
 	if deps == nil {
 		return controlstatus.StatusSnapshot{}, errors.New("app/gatewayapp/controladapter/local: status Runtime projection is unavailable")
 	}
+	resolvedDeps := *deps
+	if !request.IncludeWorkspaceTrustRequirement {
+		resolvedDeps.Status.ProjectMCPConfigurationPresentFn = nil
+	}
 	driver, err := controladapter.NewStatusAssemblerForSession(
 		ctx,
-		*deps,
+		resolvedDeps,
 		lease.Session(),
 		strings.TrimSpace(request.Surface),
 		"",

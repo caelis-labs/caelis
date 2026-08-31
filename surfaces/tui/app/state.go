@@ -254,6 +254,7 @@ type promptState struct {
 	multiSelect         bool
 	allowEmptySelection bool
 	allowFreeformInput  bool
+	stackedChoices      bool
 	selected            map[string]struct{}
 	response            chan PromptResponse
 }
@@ -262,6 +263,7 @@ type promptChoice struct {
 	label         string
 	value         string
 	detail        string
+	tone          PromptTone
 	alwaysVisible bool
 }
 

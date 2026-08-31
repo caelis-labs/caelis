@@ -28,6 +28,29 @@ func TestParseOverlayDocumentAcceptsWorkDirCamelCase(t *testing.T) {
 	}
 }
 
+func TestProjectOverlayPresentChecksSupportedWorkspaceFiles(t *testing.T) {
+	workspace := t.TempDir()
+	mustMkdir(t, filepath.Join(workspace, ".mcp.json"))
+	present, err := ProjectOverlayPresent(workspace)
+	if err != nil || present {
+		t.Fatalf("ProjectOverlayPresent(with directory) = (%v, %v), want false, nil", present, err)
+	}
+
+	mustMkdir(t, filepath.Join(workspace, ".agents"))
+	mustWrite(t, filepath.Join(workspace, ".agents", "mcp.json"), `{"mcpServers":{}}`)
+	present, err = ProjectOverlayPresent(workspace)
+	if err != nil || !present {
+		t.Fatalf("ProjectOverlayPresent(.agents/mcp.json) = (%v, %v), want true, nil", present, err)
+	}
+
+	otherWorkspace := t.TempDir()
+	mustWrite(t, filepath.Join(otherWorkspace, ".mcp.json"), `{"mcpServers":{}}`)
+	present, err = ProjectOverlayPresent(otherWorkspace)
+	if err != nil || !present {
+		t.Fatalf("ProjectOverlayPresent(.mcp.json) = (%v, %v), want true, nil", present, err)
+	}
+}
+
 func TestResolveMergeOrderAndNamespaces(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")

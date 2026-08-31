@@ -88,7 +88,8 @@ func TestHostHealthReadinessAndInitializeExposeOneInstance(t *testing.T) {
 	if info.ServerID != appserver.ServerIdentity || info.InstanceID != instanceID ||
 		!slices.Contains(info.Capabilities, appserver.CapabilityMultiWorkspace) ||
 		!slices.Contains(info.Capabilities, appserver.CapabilityWorkspaceCWDList) ||
-		!slices.Contains(info.Capabilities, appserver.CapabilityWorkspaceTrust) {
+		!slices.Contains(info.Capabilities, appserver.CapabilityWorkspaceTrust) ||
+		!slices.Contains(info.Capabilities, appserver.CapabilityWorkspaceTrustPreflight) {
 		t.Fatalf("initialize = %#v", info)
 	}
 }
@@ -159,7 +160,7 @@ func TestHTTPStatusAddressesSessionAndDiagnostics(t *testing.T) {
 	}
 	request := httptest.NewRequest(
 		http.MethodGet,
-		apiPrefix+"/sessions/session-1/status?workspace_key=workspace-a&cwd=%2Ftmp%2Fworkspace-a&surface=pet&diagnostics=true",
+		apiPrefix+"/sessions/session-1/status?workspace_key=workspace-a&cwd=%2Ftmp%2Fworkspace-a&surface=pet&diagnostics=true&workspace_trust_requirement=true",
 		nil,
 	)
 	authorizeTestRequest(request)
@@ -173,7 +174,8 @@ func TestHTTPStatusAddressesSessionAndDiagnostics(t *testing.T) {
 		statusService.request.WorkspaceKey != "workspace-a" ||
 		statusService.request.CWD != "/tmp/workspace-a" ||
 		statusService.request.Surface != "pet" ||
-		!statusService.request.IncludeDiagnostics {
+		!statusService.request.IncludeDiagnostics ||
+		!statusService.request.IncludeWorkspaceTrustRequirement {
 		t.Fatalf("principal/request = %#v %#v", statusService.principal, statusService.request)
 	}
 	var got controlstatus.StatusSnapshot

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -14,6 +15,37 @@ type overlayDocument struct {
 type overlayServerConfig struct {
 	ServerConfig
 	WorkDirCamel string `json:"workDir"`
+}
+
+// ProjectFiles returns the supported project MCP overlay paths for a
+// workspace. An empty project root has no project overlay paths.
+func ProjectFiles(projectRoot string) (agentsFile string, mcpFile string) {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return "", ""
+	}
+	return filepath.Join(projectRoot, ".agents", "mcp.json"), filepath.Join(projectRoot, ".mcp.json")
+}
+
+// ProjectOverlayPresent reports whether the workspace contains either
+// supported project MCP configuration file. It intentionally checks only file
+// presence: project-controlled content is not parsed until workspace trust
+// permits Runtime assembly to load the overlay.
+func ProjectOverlayPresent(projectRoot string) (bool, error) {
+	agentsFile, mcpFile := ProjectFiles(projectRoot)
+	if agentsFile == "" || mcpFile == "" {
+		return false, nil
+	}
+	for _, path := range []string{agentsFile, mcpFile} {
+		if info, err := os.Stat(path); err == nil {
+			if info.Mode().IsRegular() {
+				return true, nil
+			}
+		} else if !os.IsNotExist(err) {
+			return false, fmt.Errorf("mcpconfig: inspect %s: %w", path, err)
+		}
+	}
+	return false, nil
 }
 
 func (s overlayServerConfig) serverConfig() ServerConfig {

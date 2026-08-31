@@ -134,7 +134,8 @@
           {"name": "workspace_key", "in": "query", "schema": {"type": "string"}},
           {"name": "cwd", "in": "query", "schema": {"type": "string"}},
           {"name": "surface", "in": "query", "schema": {"type": "string"}},
-          {"name": "diagnostics", "in": "query", "schema": {"type": "boolean"}}
+          {"name": "diagnostics", "in": "query", "schema": {"type": "boolean"}},
+          {"name": "workspace_trust_requirement", "in": "query", "schema": {"type": "boolean"}}
         ],
         "responses": {
           "200": {"description": "Session-scoped product status", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StatusSnapshot"}}}},
@@ -1683,6 +1684,13 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "workspace_trust_requirement",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -2148,7 +2156,7 @@
       },
       "StatusConfiguration": {
         "type": "object", "additionalProperties": false, "required": ["revision", "workspace_trust"],
-        "properties": {"revision": {"$ref": "#/components/schemas/Uint64Decimal"}, "workspace_trust": {"$ref":"#/components/schemas/WorkspaceTrustLevel"}}
+        "properties": {"revision": {"$ref": "#/components/schemas/Uint64Decimal"}, "workspace_trust": {"$ref":"#/components/schemas/WorkspaceTrustLevel"}, "workspace_trust_required": {"type": "boolean", "description": "Present only for an explicitly requested interactive workspace trust preflight."}}
       },
       "StatusDiagnostics": {
         "type": "object", "additionalProperties": false,

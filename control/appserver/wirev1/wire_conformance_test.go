@@ -157,6 +157,38 @@ func TestStatusConfigurationRevisionWireRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStatusConfigurationAllowsMissingWorkspaceTrustRequirement(t *testing.T) {
+	var got controlstatus.StatusSnapshot
+	if err := Unmarshal([]byte(`{"configuration":{"revision":"0","workspace_trust":"unknown"}}`), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Configuration.WorkspaceTrustRequired {
+		t.Fatal("missing workspace_trust_required was treated as requested")
+	}
+}
+
+func TestStatusConfigurationOmitsUnrequestedWorkspaceTrustRequirement(t *testing.T) {
+	raw, err := Marshal(controlstatus.StatusSnapshot{Configuration: controlstatus.StatusConfiguration{
+		WorkspaceTrust: workspacetrust.Unknown,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"workspace_trust_required"`)) {
+		t.Fatalf("ordinary status response exposed preflight field: %s", raw)
+	}
+
+	raw, err = Marshal(controlstatus.StatusSnapshot{Configuration: controlstatus.StatusConfiguration{
+		WorkspaceTrust: workspacetrust.Unknown, WorkspaceTrustRequired: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"workspace_trust_required":true`)) {
+		t.Fatalf("preflight status response omitted requirement: %s", raw)
+	}
+}
+
 func TestStatusUsageWireAlwaysCarriesTypedReductionIdentity(t *testing.T) {
 	raw, err := Marshal(controlstatus.StatusSnapshot{})
 	if err != nil {

@@ -338,7 +338,10 @@ func runWithProductClientOpener(
 		ACPIngress:       acpSubcommand,
 	}
 	if interactiveLaunch {
-		clientOptions.AdditionalRemoteCapabilities = []string{appserver.CapabilityWorkspaceTrust}
+		clientOptions.AdditionalRemoteCapabilities = []string{
+			appserver.CapabilityWorkspaceTrust,
+			appserver.CapabilityWorkspaceTrustPreflight,
+		}
 	}
 	if sandboxSubcommand != "" {
 		outFmt, err := parseOutputFormat(*format)

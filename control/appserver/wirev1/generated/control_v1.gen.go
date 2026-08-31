@@ -1456,8 +1456,9 @@ type StartParticipantRequest struct {
 }
 
 type StatusConfiguration struct {
-	Revision       Uint64Decimal       `json:"revision"`
-	WorkspaceTrust WorkspaceTrustLevel `json:"workspace_trust"`
+	Revision               Uint64Decimal       `json:"revision"`
+	WorkspaceTrust         WorkspaceTrustLevel `json:"workspace_trust"`
+	WorkspaceTrustRequired *bool               `json:"workspace_trust_required,omitempty"`
 }
 
 type StatusDiagnostics struct {

@@ -334,6 +334,18 @@ func TestExplicitRemoteHostRequiresWorkspaceCapabilities(t *testing.T) {
 			additionalCapabilities: []string{appserver.CapabilityWorkspaceTrust},
 			missing:                appserver.CapabilityWorkspaceTrust,
 		},
+		{
+			name: "interactive workspace trust preflight",
+			capabilities: []string{
+				appserver.CapabilityWorkspaceCWDList,
+				appserver.CapabilityWorkspaceTrust,
+			},
+			additionalCapabilities: []string{
+				appserver.CapabilityWorkspaceTrust,
+				appserver.CapabilityWorkspaceTrustPreflight,
+			},
+			missing: appserver.CapabilityWorkspaceTrustPreflight,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -43,7 +43,9 @@ func (p *workspaceTrustConfigurationProbe) SetWorkspaceTrust(_ context.Context, 
 
 func TestEnsureTUIWorkspaceTrustPersistsFirstDecision(t *testing.T) {
 	status := &workspaceTrustStatusProbe{snapshots: []controlstatus.StatusSnapshot{{
-		Configuration: controlstatus.StatusConfiguration{Revision: 17, WorkspaceTrust: workspacetrust.Unknown},
+		Configuration: controlstatus.StatusConfiguration{
+			Revision: 17, WorkspaceTrust: workspacetrust.Unknown, WorkspaceTrustRequired: true,
+		},
 	}}}
 	configuration := &workspaceTrustConfigurationProbe{}
 	promptCalls := 0
@@ -60,8 +62,11 @@ func TestEnsureTUIWorkspaceTrustPersistsFirstDecision(t *testing.T) {
 	if err != nil || !proceed {
 		t.Fatalf("ensureTUIWorkspaceTrust() = (%v, %v)", proceed, err)
 	}
-	if promptCalls != 1 || len(configuration.requests) != 1 {
-		t.Fatalf("prompt calls = %d, writes = %d", promptCalls, len(configuration.requests))
+	if promptCalls != 1 || len(status.requests) != 1 || len(configuration.requests) != 1 {
+		t.Fatalf("prompt calls = %d, reads = %d, writes = %d", promptCalls, len(status.requests), len(configuration.requests))
+	}
+	if !status.requests[0].IncludeWorkspaceTrustRequirement {
+		t.Fatalf("workspace trust status request = %#v", status.requests[0])
 	}
 	request := configuration.requests[0]
 	if request.ExpectedRevision == nil || *request.ExpectedRevision != 17 || request.TrustLevel != workspacetrust.Trusted || request.WorkspaceKey != "project" || request.CWD != "/tmp/project" {
@@ -86,9 +91,28 @@ func TestEnsureTUIWorkspaceTrustUsesPersistedUntrustedDecision(t *testing.T) {
 	}
 }
 
+func TestEnsureTUIWorkspaceTrustSkipsPromptWithoutProjectMCP(t *testing.T) {
+	status := &workspaceTrustStatusProbe{snapshots: []controlstatus.StatusSnapshot{{
+		Configuration: controlstatus.StatusConfiguration{Revision: 19, WorkspaceTrust: workspacetrust.Unknown},
+	}}}
+	configuration := &workspaceTrustConfigurationProbe{}
+	proceed, err := ensureTUIWorkspaceTrust(
+		context.Background(), status, configuration, "project", "/tmp/project",
+		func(context.Context, workspaceTrustPromptRequest) (workspacetrust.Level, bool, error) {
+			t.Fatal("prompt was shown without project MCP configuration")
+			return workspacetrust.Unknown, false, nil
+		},
+	)
+	if err != nil || !proceed || len(configuration.requests) != 0 {
+		t.Fatalf("ensureTUIWorkspaceTrust() = (%v, %v), writes = %d", proceed, err, len(configuration.requests))
+	}
+}
+
 func TestEnsureTUIWorkspaceTrustRequiresConfirmationWhenConcurrentDecisionDiffers(t *testing.T) {
 	status := &workspaceTrustStatusProbe{snapshots: []controlstatus.StatusSnapshot{
-		{Configuration: controlstatus.StatusConfiguration{Revision: 20, WorkspaceTrust: workspacetrust.Unknown}},
+		{Configuration: controlstatus.StatusConfiguration{
+			Revision: 20, WorkspaceTrust: workspacetrust.Unknown, WorkspaceTrustRequired: true,
+		}},
 		{Configuration: controlstatus.StatusConfiguration{Revision: 21, WorkspaceTrust: workspacetrust.Trusted}},
 	}}
 	configuration := &workspaceTrustConfigurationProbe{results: []appserver.CommandResult{
@@ -103,6 +127,9 @@ func TestEnsureTUIWorkspaceTrustRequiresConfirmationWhenConcurrentDecisionDiffer
 			if promptCalls == 2 {
 				if !strings.Contains(request.SaveIssue, "Workspace trust changed") {
 					t.Fatalf("second prompt issue = %q", request.SaveIssue)
+				}
+				if request.Default != workspacetrust.Untrusted {
+					t.Fatalf("second prompt default = %q, want untrusted", request.Default)
 				}
 				return workspacetrust.Trusted, true, nil
 			}
@@ -122,8 +149,14 @@ func TestWorkspaceTrustPromptUsesProductCopy(t *testing.T) {
 		Workspace: "/tmp/project",
 		SaveIssue: "Caelis could not save this choice. Please try again.",
 	}, make(chan tuiapp.PromptResponse, 1))
-	if prompt.Title != "Trust this workspace?" || prompt.DefaultChoice != string(workspacetrust.Untrusted) {
+	if prompt.Title != "Trust this workspace's MCP setup?" || prompt.DefaultChoice != string(workspacetrust.Trusted) || !prompt.StackedChoices {
 		t.Fatalf("prompt heading/default = %q/%q", prompt.Title, prompt.DefaultChoice)
+	}
+	if prompt.Details[1].Tone != tuiapp.PromptToneWarning || prompt.Details[len(prompt.Details)-1].Tone != tuiapp.PromptToneDanger {
+		t.Fatalf("prompt detail tones = %#v", prompt.Details)
+	}
+	if prompt.Choices[0].Tone != tuiapp.PromptToneAccent {
+		t.Fatalf("prompt primary choice = %#v", prompt.Choices[0])
 	}
 	var copy strings.Builder
 	for _, detail := range prompt.Details {
@@ -138,9 +171,19 @@ func TestWorkspaceTrustPromptUsesProductCopy(t *testing.T) {
 		copy.WriteString(choice.Detail)
 		copy.WriteString(" ")
 	}
-	for _, want := range []string{"Project MCP configuration", "start local programs", "Runtime is created", "Trust and continue", "Continue without trust", "Unable to save"} {
+	for _, want := range []string{"MCP access", "start local programs", "New Runtimes only", "Trust and enable MCP", "Continue without MCP", "Unable to save"} {
 		if !strings.Contains(copy.String(), want) {
 			t.Fatalf("prompt copy = %q, want %q", copy.String(), want)
 		}
+	}
+}
+
+func TestWorkspaceTrustPromptPreservesRetryDefault(t *testing.T) {
+	prompt := workspaceTrustPromptMessage(workspaceTrustPromptRequest{
+		Workspace: "/tmp/project",
+		Default:   workspacetrust.Untrusted,
+	}, make(chan tuiapp.PromptResponse, 1))
+	if prompt.DefaultChoice != string(workspacetrust.Untrusted) {
+		t.Fatalf("retry prompt default = %q, want untrusted", prompt.DefaultChoice)
 	}
 }

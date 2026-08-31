@@ -113,10 +113,22 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 			return controlstatus.StatusSnapshot{}, err
 		}
 	}
+	workspaceTrustRequired := false
+	if workspaceTrust == workspacetrust.Unknown && d.deps != nil && d.deps.Status.ProjectMCPConfigurationPresentFn != nil {
+		var err error
+		workspaceTrustRequired, err = d.deps.Status.ProjectMCPConfigurationPresentFn(ctx, workspaceCWD)
+		if err != nil {
+			return controlstatus.StatusSnapshot{}, err
+		}
+	}
 
 	status := controlstatus.StatusSnapshot{
-		Configuration: controlstatus.StatusConfiguration{Revision: configurationRevision, WorkspaceTrust: workspaceTrust},
-		Usage:         controlstatus.StatusUsage{ContextUsageReplace: activeACP},
+		Configuration: controlstatus.StatusConfiguration{
+			Revision:               configurationRevision,
+			WorkspaceTrust:         workspaceTrust,
+			WorkspaceTrustRequired: workspaceTrustRequired,
+		},
+		Usage: controlstatus.StatusUsage{ContextUsageReplace: activeACP},
 		Session: controlstatus.StatusSession{
 			ID:          sessionID,
 			Workspace:   workspaceStatusDisplay(ctx, workspaceCWD),

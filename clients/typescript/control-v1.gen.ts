@@ -1344,6 +1344,7 @@ export interface StartParticipantRequest {
 export interface StatusConfiguration {
   revision: Uint64Decimal;
   workspace_trust: WorkspaceTrustLevel;
+  workspace_trust_required?: boolean;
 }
 
 export interface StatusDiagnostics {

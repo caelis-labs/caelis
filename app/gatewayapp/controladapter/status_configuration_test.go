@@ -42,6 +42,51 @@ func TestStatusProjectsWorkspaceTrustForAddressedWorkspace(t *testing.T) {
 	}
 }
 
+func TestStatusRequiresWorkspaceTrustOnlyForProjectMCP(t *testing.T) {
+	var gotWorkspace string
+	driver := NewStatusAssemblerForHost(StatusAssemblyDeps{
+		Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{Key: "project", CWD: "/tmp/project"}},
+		Status: StatusRuntimeDeps{
+			WorkspaceTrustFn: func(context.Context, string) (workspacetrust.Level, error) {
+				return workspacetrust.Unknown, nil
+			},
+			ProjectMCPConfigurationPresentFn: func(_ context.Context, workspace string) (bool, error) {
+				gotWorkspace = workspace
+				return true, nil
+			},
+		},
+	}, "test", "")
+	status, err := driver.LightweightStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotWorkspace != "/tmp/project" || !status.Configuration.WorkspaceTrustRequired {
+		t.Fatalf("workspace/required = %q/%v", gotWorkspace, status.Configuration.WorkspaceTrustRequired)
+	}
+}
+
+func TestStatusSkipsProjectMCPProbeAfterWorkspaceDecision(t *testing.T) {
+	driver := NewStatusAssemblerForHost(StatusAssemblyDeps{
+		Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{Key: "project", CWD: "/tmp/project"}},
+		Status: StatusRuntimeDeps{
+			WorkspaceTrustFn: func(context.Context, string) (workspacetrust.Level, error) {
+				return workspacetrust.Trusted, nil
+			},
+			ProjectMCPConfigurationPresentFn: func(context.Context, string) (bool, error) {
+				t.Fatal("project MCP presence was probed after trust was decided")
+				return false, nil
+			},
+		},
+	}, "test", "")
+	status, err := driver.LightweightStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Configuration.WorkspaceTrustRequired {
+		t.Fatal("workspace trust required after decision")
+	}
+}
+
 func TestStatusPropagatesConfigurationRevisionReadFailure(t *testing.T) {
 	fault := errors.New("config read failed")
 	driver := NewStatusAssemblerForHost(StatusAssemblyDeps{Status: StatusRuntimeDeps{

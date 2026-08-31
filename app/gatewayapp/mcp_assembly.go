@@ -1,7 +1,6 @@
 package gatewayapp
 
 import (
-	"path/filepath"
 	"strings"
 
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
@@ -17,12 +16,7 @@ func resolveConfiguredMCPServers(native mcpconfig.Servers, trust workspacetrust.
 		userAgentsFile = resolved
 	}
 	workspaceDir = strings.TrimSpace(workspaceDir)
-	projectAgentsFile := ""
-	projectMCPFile := ""
-	if workspaceDir != "" {
-		projectAgentsFile = filepath.Join(workspaceDir, ".agents", "mcp.json")
-		projectMCPFile = filepath.Join(workspaceDir, ".mcp.json")
-	}
+	projectAgentsFile, projectMCPFile := mcpconfig.ProjectFiles(workspaceDir)
 	return mcpconfig.Resolve(mcpconfig.Request{
 		Native:               native,
 		UserAgentsFile:       userAgentsFile,

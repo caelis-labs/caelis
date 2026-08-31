@@ -282,12 +282,22 @@ func (s *Server) sessionStatus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	workspaceTrustRequirement := false
+	if raw := strings.TrimSpace(r.URL.Query().Get("workspace_trust_requirement")); raw != "" {
+		var err error
+		workspaceTrustRequirement, err = strconv.ParseBool(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "workspace_trust_requirement must be a boolean")
+			return
+		}
+	}
 	result, err := s.config.Services.Status.SessionStatus(r.Context(), principal, appserver.StatusRequest{
-		SessionID:          r.PathValue("session_id"),
-		WorkspaceKey:       strings.TrimSpace(r.URL.Query().Get("workspace_key")),
-		CWD:                strings.TrimSpace(r.URL.Query().Get("cwd")),
-		Surface:            strings.TrimSpace(r.URL.Query().Get("surface")),
-		IncludeDiagnostics: diagnostics,
+		SessionID:                        r.PathValue("session_id"),
+		WorkspaceKey:                     strings.TrimSpace(r.URL.Query().Get("workspace_key")),
+		CWD:                              strings.TrimSpace(r.URL.Query().Get("cwd")),
+		Surface:                          strings.TrimSpace(r.URL.Query().Get("surface")),
+		IncludeDiagnostics:               diagnostics,
+		IncludeWorkspaceTrustRequirement: workspaceTrustRequirement,
 	})
 	writeJSONResult(w, result, err)
 }

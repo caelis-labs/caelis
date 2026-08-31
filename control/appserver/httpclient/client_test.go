@@ -301,7 +301,8 @@ func TestReadsSessionStatusThroughTypedFacade(t *testing.T) {
 			r.URL.Query().Get("workspace_key") != "workspace" ||
 			r.URL.Query().Get("cwd") != "/tmp/workspace" ||
 			r.URL.Query().Get("surface") != "pet" ||
-			r.URL.Query().Get("diagnostics") != "true" {
+			r.URL.Query().Get("diagnostics") != "true" ||
+			r.URL.Query().Get("workspace_trust_requirement") != "true" {
 			t.Fatalf("status request = %s %s", r.Method, r.URL.String())
 		}
 		writeFixtureJSON(t, w, http.StatusOK, controlstatus.StatusSnapshot{
@@ -312,7 +313,7 @@ func TestReadsSessionStatusThroughTypedFacade(t *testing.T) {
 	defer closeServer()
 	status, err := client.SessionStatus(context.Background(), appserver.StatusRequest{
 		SessionID: "session-1", WorkspaceKey: "workspace", CWD: "/tmp/workspace",
-		Surface: "pet", IncludeDiagnostics: true,
+		Surface: "pet", IncludeDiagnostics: true, IncludeWorkspaceTrustRequirement: true,
 	})
 	if err != nil {
 		t.Fatal(err)

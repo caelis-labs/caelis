@@ -346,6 +346,9 @@ func (c *Client) SessionStatus(ctx context.Context, request appserver.StatusRequ
 	if request.IncludeDiagnostics {
 		query.Set("diagnostics", "true")
 	}
+	if request.IncludeWorkspaceTrustRequirement {
+		query.Set("workspace_trust_requirement", "true")
+	}
 	response, err := c.do(ctx, http.MethodGet, path, query, nil, nil)
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err

@@ -11,6 +11,7 @@ import (
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/mcpconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
@@ -273,6 +274,15 @@ func (s StatusService) WorkspaceTrust(ctx context.Context, workspace string) (wo
 		return workspacetrust.Unknown, err
 	}
 	return workspacetrust.Lookup(doc.WorkspaceTrust, workspace), nil
+}
+
+// ProjectMCPConfigurationPresent reports whether the exact workspace contains
+// a supported project MCP overlay without reading its untrusted content.
+func (s StatusService) ProjectMCPConfigurationPresent(ctx context.Context, workspace string) (bool, error) {
+	if err := contextOrBackground(ctx).Err(); err != nil {
+		return false, err
+	}
+	return mcpconfig.ProjectOverlayPresent(workspace)
 }
 
 func (s StatusService) Sandbox() SandboxStatus {

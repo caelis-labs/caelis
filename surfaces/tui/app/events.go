@@ -127,7 +127,10 @@ type PromptRequestMsg struct {
 	MultiSelect         bool
 	AllowEmptySelection bool
 	AllowFreeformInput  bool
-	Response            chan PromptResponse
+	// StackedChoices allows choice details to move below their labels when the
+	// prompt is too narrow to keep the aligned row on one line.
+	StackedChoices bool
+	Response       chan PromptResponse
 }
 
 type PromptResponse struct {
@@ -139,6 +142,7 @@ type PromptChoice struct {
 	Label         string
 	Value         string
 	Detail        string
+	Tone          PromptTone
 	AlwaysVisible bool
 }
 
@@ -146,7 +150,18 @@ type PromptDetail struct {
 	Label    string
 	Value    string
 	Emphasis bool
+	Tone     PromptTone
 }
+
+// PromptTone identifies the semantic visual emphasis of prompt content.
+type PromptTone string
+
+const (
+	PromptToneDefault PromptTone = ""
+	PromptToneAccent  PromptTone = "accent"
+	PromptToneWarning PromptTone = "warning"
+	PromptToneDanger  PromptTone = "danger"
+)
 
 const (
 	PromptErrInterrupt = "prompt_interrupted"

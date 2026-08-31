@@ -149,6 +149,7 @@ func newPromptState(req PromptRequestMsg) *promptState {
 		multiSelect:         req.MultiSelect,
 		allowEmptySelection: req.AllowEmptySelection,
 		allowFreeformInput:  req.AllowFreeformInput,
+		stackedChoices:      req.StackedChoices,
 		selected:            map[string]struct{}{},
 	}
 	if state.title == "" {
@@ -175,6 +176,7 @@ func newPromptState(req PromptRequestMsg) *promptState {
 				label:         label,
 				value:         value,
 				detail:        strings.TrimSpace(choice.Detail),
+				tone:          choice.Tone,
 				alwaysVisible: choice.AlwaysVisible,
 			})
 		}

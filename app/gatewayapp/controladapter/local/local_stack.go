@@ -34,10 +34,11 @@ func sessionRuntimeDeps(
 
 func statusRuntimeDeps(status gatewayapp.StatusService) controladapter.StatusRuntimeDeps {
 	return controladapter.StatusRuntimeDeps{
-		RuntimeStateFn:          status.SessionRuntimeState,
-		ConfigurationRevisionFn: status.ConfigurationRevision,
-		WorkspaceTrustFn:        status.WorkspaceTrust,
-		TaskEntriesFn:           status.SessionTasks,
+		RuntimeStateFn:                   status.SessionRuntimeState,
+		ConfigurationRevisionFn:          status.ConfigurationRevision,
+		WorkspaceTrustFn:                 status.WorkspaceTrust,
+		ProjectMCPConfigurationPresentFn: status.ProjectMCPConfigurationPresent,
+		TaskEntriesFn:                    status.SessionTasks,
 		DoctorFn: func(ctx context.Context, req controladapter.DoctorRequest) (controladapter.DoctorStatusProjection, error) {
 			return toDoctorStatusProjection(status.Doctor(ctx, req))
 		},
