@@ -1,4 +1,4 @@
-// Package runtime owns the movable local runtime implementation.
+// Package runtime owns the reusable local Runtime implementation.
 //
 // Public cross-domain contracts such as agent specs, run requests, context
 // helpers, and approval bridge values belong in the agentsdk root package.

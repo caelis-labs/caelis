@@ -1,55 +1,71 @@
 # AGENTS.md
 
 ## Working Style
-- Preserve unrelated user changes; check the worktree before broad edits.
-- Avoid import aliases unless they disambiguate or match local convention.
-- Read nearby docs, package comments, and tests before editing unfamiliar code. For session, gateway, ACP, replay, runtime, control, or surface work, read `docs/architecture.md` first, then the linked normative document for that boundary.
 
-## Architecture and Placement
-- Target direction: presentation surfaces -> Control -> Agent Runtime / SDK. Assign ownership by semantics; physical package movement is not an architecture goal.
-- Surfaces render ACP-shaped `eventstream.Envelope` values and collect input. They must not own model, tool, sandbox, policy, persistence, replay, or runtime semantics.
-- Control owns product orchestration: Agent assembly, lifecycle, permissions, system Agents, endpoint selection, and handoff authorization. Agents may suggest a transition but must not commit one.
-- `agent-sdk/*` owns reusable Runtime contracts and implementations. It must not depend on `control/*`, `app/*`, `surfaces/*`, `protocol/acp/*`, product-host `ports/*`, or repository `internal/*` outside the SDK tree.
-- Standard ACP wire contracts and connections come from `acp-go-sdk`. The retired root `protocol/acp/*` tree must not be recreated; ACP-shaped product envelopes and permission translation belong to Control, rendering belongs to presentation, reusable semantics belong to the SDK, and provider compatibility belongs to Host-private adapters. Product wire types must not flow inward.
-- Put stable product capabilities in coherent `control/*` packages, reusable contracts in `agent-sdk/*`, and concrete composition glue in the Host-owned private implementation tree. Do not recreate the retired `ports/*` tree or turn a private facade or Surface API into a second product API.
-- Treat current package locations as migration evidence, not future precedent. Long-term, `app/*` owns Host composition, private concrete components, and thin transport or in-process adapters; it is not a second product-semantics layer.
-- Keep process-lifetime Host authorities, activated Session Runtime instances, and stateless Runtime assembly factories as distinct concepts. Adapters depend on focused Control contracts rather than a concrete Host, and lower layers never depend outward on composition.
-- `control/appserver` owns the aggregate product client contract, including the independently delivered Task observation capability. Session feed/replay, approval recovery, and the lifecycle write gate stay on their existing authoritative paths; Task semantics belong to `control/taskstream`. Main-Turn ingress remains private in `internal/controlclient/turningress`. Surfaces own neither stream discovery nor replay.
-- `app/gatewayapp/controladapter` is Host-private server assembly, not a second product API. Its root package must not depend on the concrete `gatewayapp.Stack`; only `local.NewAppServer` may receive that Stack as the composition root. Local leaf services consume focused Host services or services selected from an authorized Session Runtime lease and bind principal-sensitive capabilities. Other production packages use `control/appserver` or focused Control contracts.
-- The Host-private Control command backend, state readers, Runtime registry, and leaf adapters must not retain bound methods on `gatewayapp.Stack`. The command backend owns command-scoped state and late-binds the one Runtime registry; `Stack` remains only the process composition root.
-- Host presentation reads cross into the local AppServer adapter as protocol-neutral `control/appserver` models. ACP fallback providers may be normalized inside the Host-private presentation source, but `controladapter/local` must not consume root `protocol/acp` wire types.
-- The external-ACP `ControlPlane` owns its shared Agent registry and replacement operation. Do not expose the registry or a mutable updater through `internal/controlassembly` or another cross-package dependency bag.
-- `internal/kernel` owns product Session/Turn coordination, not reusable SDK or ACP helper facades. Consume `agent-sdk` approval/usage semantics and keep any legacy presentation metadata it must emit private and typed-field subordinate.
-- Session Runtime registries, instances, assemblers, and assembly dependency snapshots must not retain a concrete Host `*gatewayapp.Stack`, the Host root `runtimeComposition`, or bound methods that capture either. Capture explicit process authorities and sample mutable process configuration through an independent source instead.
-- The Host `runtimeProcessState` owns process-lifetime mutable selections and the latest canonical sandbox observation; its `runtimeProcessConfigSource` is the sole mutable owner of Runtime assembly inputs. The root `activeRuntime` is an installed execution artifact, and detached Runtime values use a separate immutable activation selection; neither is a parallel publication target. Plugin configuration remains canonical AppConfig state, and detached Runtimes expose only its read projection.
-- `gatewayapp.Stack` must own Runtime composition through a named private field. Do not anonymously embed `runtimeComposition` into `Stack` or export the composition's fields; cross the Host boundary only through deliberate focused service getters. Do not recreate a wide function bag such as the retired `ControlRuntimeView`, or add direct Stack mirrors for execution, configuration revision, participant-handle projection, mutable Plugin services, or methods already owned by Model, Agent, Status, Runtime, workspace, preparation, or message-delivery services.
-- Keep one semantic owner, one authoritative data path, and one durable source of truth. Typed Envelope fields own identity, relation, position, approval, and resume semantics; `_meta` is display/debug unless a maintained contract says otherwise.
-- Fence semantic Session writes for the complete producer lifetime. Never retry `ErrFenceConflict` through an unfenced path; durable State repair requires an explicit revision-checked guarded mutation.
-- Dynamic orchestration belongs to Control. Do not add a deterministic workflow graph/node engine or let an Agent authorize its own handoff.
+- Preserve unrelated user changes and inspect the worktree before broad edits.
+- Avoid import aliases unless they disambiguate or match local convention.
+- Read nearby documentation, package comments, and tests before editing. For
+  Session, Runtime, Control, ACP, replay, gateway, or Surface work, start with
+  `docs/architecture.md` and follow its boundary links.
+
+## Architecture
+
+- Dependency direction is `Surfaces -> Control -> Agent Runtime / SDK`.
+- Surfaces render typed `control/appserver/eventstream.Envelope` values and
+  collect input. They do not own model, tool, sandbox, policy, persistence,
+  replay, permission, or lifecycle semantics.
+- Control owns product configuration, Agent assembly, endpoint and Session
+  lifecycle, permissions, orchestration, controller selection, and handoff.
+- `agent-sdk/*` owns reusable Runtime contracts and must not depend on product
+  Control, Host, transport, presentation, or repository-internal packages.
+- Standard ACP wire behavior comes from `acp-go-sdk`. Product projection,
+  compatibility, and permission translation stay with their Control,
+  Host-private, or Surface owner; do not recreate `protocol/acp/*` or `ports/*`.
+- `control/appserver` is the aggregate product-client boundary. Task observation
+  remains independent from the Session feed, and main-Turn ingress remains
+  private to `internal/controlclient/turningress`.
+- `app/*` owns process composition and private adapters, not a second product
+  semantics layer. Lower layers depend on focused contracts, never a concrete
+  Host or a wide function bag.
+- Keep one semantic owner and one authoritative data path. Typed Envelope fields
+  own identity, relation, position, approval, and resume; `_meta` is display or
+  compatibility data only.
+- Fence semantic Session writes for the complete producer lifetime. Never retry
+  `ErrFenceConflict` through an unfenced path or turn an unknown effect outcome
+  into a blind retry.
+- Dynamic orchestration and handoff authorization belong to Control. Do not add
+  an SDK workflow graph or let an Agent transfer its own authority.
 
 ## Code Quality
-- Follow existing boundaries, helpers, and tests; scope edits to changed behavior.
-- Add abstractions only when they remove real complexity or match an established pattern.
-- Avoid growing central orchestration files. For coherent features in large/high-touch files, prefer a nearby module with docs and tests.
-- When replacing a path, remove superseded code, mirrors, wrappers, tests, and docs. A required compatibility path must have a documented owner, scope, and removal condition.
-- Document new exported types, interfaces, and non-obvious contracts.
-- Normalize external ACP input before storage; keep transient UI/subagent traces out of durable parent context unless carried by canonical payloads.
+
+- Follow existing owners, helpers, and tests; scope edits to changed behavior.
+- Add abstractions only when they remove real complexity or match an established
+  pattern. Avoid growing central orchestration files.
+- Remove superseded paths, mirrors, wrappers, tests, and docs. A compatibility
+  path must name its owner, scope, and removal condition.
+- Document exported APIs and non-obvious caller-visible contracts. Normalize
+  external ACP input before storage, and keep transient UI or child traces out
+  of durable parent context.
 
 ## Validation
-- Run `gofmt` on touched Go files, focused `go test` packages for changed behavior, and `git diff --check`.
-- Before committing, run `make commit-check`; it is the fast default gate for lint, tests, and build. The configured lint includes `gofmt` and `govet`.
-- Run `make arch-lint` after import, package ownership, gateway/eventstream, or session protocol changes.
-- Run `make client-protocol-check` after changing OpenAPI, generated clients, Envelope wire shapes, or `control/appserver` JSON contracts.
-- Lease, concurrency, persistence, broker, or lifecycle changes require focused `go test -race` coverage in the change that needs it; do not turn that into an unconditional release-time rerun.
-- Persistence or replay changes need round-trip tests comparing rebuilt model context with runtime-produced context.
-- Projection/UI reload tests do not replace model-context round-trip tests.
-- UI or text-output changes should include/update golden or regression coverage and review the rendered/output diff.
-- Tests should prefer whole-object/event comparisons and structured helpers over field-by-field assertions or ad hoc JSON/string digging.
-- Use `make regression` when projection, TUI behavior, command execution, or ACP integration changes broadly.
-- Run `make docs-links` after adding, removing, or renaming maintained documentation.
-- Run `npm --prefix npm test` after changing the npm launcher, update handoff, package manifests, or release scripts. Use `make release-dry-run` only when packaging or release assembly needs direct evidence, then verify it left the tracked worktree unchanged.
+
+- Run `gofmt` on touched Go files, focused owning tests, and `git diff --check`.
+- Before committing, run `make commit-check` for lint, full tests, and build.
+- Select additional gates by impact: `make arch-lint` for ownership/import
+  changes, `make client-protocol-check` for wire changes, focused race tests for
+  lifecycle/concurrency/persistence, and `make regression` for broad Surface or
+  ACP behavior.
+- Persistence and replay changes require model-context round trips; UI reload
+  tests are not substitutes. Visible output changes require rendered or golden
+  review.
+- Run `make docs-links` after maintained documentation links change. Run
+  `npm --prefix npm test` for npm launcher or release-script changes, and use
+  `make release-dry-run` only for packaging evidence.
 
 ## Release
-- Keep release mechanics in `docs/release.md`; update that doc when the process changes.
-- When asked to release, follow `docs/release.md` and verify the worktree contains only intended changes.
-- Keep normative contracts and current limitations in maintained docs; keep completed implementation plans and acceptance history in Git, tests, tags, and CI rather than a permanent Roadmap document.
+
+- `docs/release.md` is the release procedure. A local commit does not authorize
+  a push, tag, or publication.
+- Keep current contracts and compatibility removal conditions in maintained
+  docs; keep plans, completed migrations, and acceptance history in issues, Git,
+  tests, tags, and CI.

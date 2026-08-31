@@ -16,7 +16,7 @@ import (
 
 // serverMaxFrameSize accommodates the product's 32 MB decoded aggregate image
 // limit after base64 expansion and JSON envelope overhead while keeping the
-// formerly unbounded stdio reader finite.
+// stdio reader finite.
 const serverMaxFrameSize = 64 * 1024 * 1024
 
 // New-session clients may bind their UI/session routing only after session/new

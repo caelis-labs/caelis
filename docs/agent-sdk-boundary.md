@@ -1,375 +1,159 @@
 # Agent SDK Boundary
 
 `agent-sdk/*` is Caelis's reusable Agent-building boundary inside the root Go
-module. It has no separate module, version, release, or test lifecycle.
-Independence means explicit contracts, enforced dependency direction, and reuse
-by more than one host; it does not require repository extraction.
+module. It is versioned and released with Caelis; it has no separate module or
+test lifecycle.
 
 ## Ownership
 
-| Layer | Owns | Must not own |
-| --- | --- | --- |
-| Agent SDK | Agent/run values, model and tool contracts, canonical Session semantics, Runtime mechanics, policy and approval primitives, sandbox, task/delegation, normalized ACP-compatible controller and participant contracts | Caelis configuration, credentials, Agent selection, product wire transport, presentation, or Manage Loop decisions |
-| Caelis Control | Product configuration and placement, Agent assembly, endpoint lifecycle, permissions and review routing, system Agents, dynamic orchestration, active-controller selection, and handoff commit | Presentation rendering or autonomous model-driven ownership transfer |
-| ACP boundaries | `acp-go-sdk` standard wire contracts and connections; owner-local Control, Surface, or Host-private compatibility and Envelope adapters | A standalone product-semantics layer, Agent-selection policy, or a second copy of canonical model truth |
-| Surfaces | Rendering Envelopes and collecting input | Runtime, persistence, replay, tool, sandbox, permission, or handoff decisions |
+| Owner | Responsibilities |
+| --- | --- |
+| Agent SDK | Agent and Run values, model/tool contracts, canonical Session semantics, Runtime mechanics, sandbox, policy/approval primitives, tasks, delegation, and normalized controller/participant contracts |
+| Caelis Control | Product configuration, credentials, placement, Agent assembly, endpoint lifecycle, review routing, orchestration, controller selection, and handoff |
+| `acp-go-sdk` | Standard ACP wire contracts and connection behavior |
+| Control, Host-private adapters, Surfaces | Product wire codecs, compatibility normalization, Envelope projection, and presentation |
 
-Ownership follows semantics rather than directory churn. Stable product
-capabilities belong in coherent `control/*` packages, reusable contracts in
-`agent-sdk/*`, and concrete composition glue inside the Host-owned private
-implementation boundary.
-
-## Dependency Contract
-
-SDK packages must not depend on:
-
-- `control/*`;
-- `app/*`;
-- `surfaces/*`;
-- product `protocol/acp/*`;
-- product-host `ports/*`;
-- repository `internal/*` outside the SDK tree.
-
-Product wire and hosts depend inward on SDK contracts, never the reverse.
-`make arch-lint` and `make sdk-boundary-check` enforce production and test
-dependency closure.
+The SDK must not depend on `control/*`, `app/*`, `surfaces/*`, the retired
+`protocol/acp/*` or `ports/*` trees, or repository `internal/*` packages outside
+the SDK. `make arch-lint` and `make sdk-boundary-check` enforce this direction.
 
 Only paths in
-[`agent-sdk/supported-packages.txt`](../agent-sdk/supported-packages.txt) form
-the supported external import surface. Other non-`internal` SDK packages are
-bundled implementations or experimental helpers until explicitly promoted.
-The root Caelis module tag versions the entire SDK.
+[`agent-sdk/supported-packages.txt`](../agent-sdk/supported-packages.txt) are
+supported external imports. Other non-`internal` packages remain bundled or
+experimental.
 
-## ACP-Native Semantics
-
-Built-in and external Agents expose the same effective language for:
-
-- Session and participant identity;
-- capabilities and configuration;
-- prompt and content input;
-- message, thought, tool, plan, permission, and lifecycle updates;
-- cancellation, completion, controller, and handoff facts.
-
-Native ACP means semantic equivalence, not mandatory JSON-RPC for in-process
-Agents. SDK contracts own normalized semantics; `acp-go-sdk` supplies standard
-wire behavior, while product compatibility and projection live with the
-Control, Surface, or Host-private adapter that needs them. External input is normalized before it can enter
-durable state.
-
-Remote is a transport choice, not a separate Agent category. The SDK does not
-adopt Agent-as-tool, Handoff, Workflow node, or Remote Agent bridge as required
-top-level abstractions.
-
-## Runtime Contract
+## Runtime and capabilities
 
 Hosts inject model, tool, Session, sandbox, task, policy, and endpoint
-implementations. Runtime validates the actual assembled capabilities and fails
-closed when a required model, output, tool, or executor feature is unavailable.
-The assembled Tool set is the capability-admission boundary. The built-in
-workspace-write policy applies argument- and effect-specific restrictions; it
-is not a second Tool-name allowlist. Hosts that need to prohibit an otherwise
-assembled Tool omit it from the Agent or register an explicit stricter policy
-profile. Caelis product assembly adds `SendMessage` explicitly alongside
-`Spawn` for an ordinary Agent. A Session created by Spawn receives
-`SendMessage` but never receives `Spawn`, so delegation has one level and a
-child cannot create nested children. Runtime augments only a hosted child whose
-parent/sibling message transport is supplied through the execution context.
-Delegated Spawn defaults to the caller prompt only. Optional `handle` requests a
-unique Session-scoped Task identity; omitting it keeps Runtime's current random
-assignment. Optional `include_context`
-asks the host-injected `ContextRouter` for the same recipient-specific public
-`ContextTransfer` used by participant handoff. Durable spawn identity binds that
-request bit, not the resolved transfer contents; the first intent freezes the
-transfer used for child prompt rendering. A missing or failing router is not a
-spawn failure: Subagents may be assembled without a router, the child still
-starts, and the Spawn result may carry a `system_hint` that context transfer is
-unavailable. Runtime hides the argument when no router is assembled.
-An empty routed transfer is ordinary: the child receives only its Spawn prompt
-and no warning. A Runner may positively mark an error as not started only when
-it proves that no child was created and all activity/completion producers are
-quiescent; Runtime then releases the requested handle while retaining a
-handle-free failed intent for audit and idempotency. Every unmarked error is an
-unknown creation outcome, so Runtime retains the handle and refuses a blind
-retry.
+implementations. Runtime validates the assembled capabilities and fails closed
+when a required feature is absent.
 
-A Runner exposes one bounded, single-consumer observation stream. Slow
-observers may lose transient output but must not block execution, durable
-writes, or completion. Observation gaps are typed and do not change canonical
-state.
+The assembled Tool set is the execution-admission boundary. Product policy may
+further restrict an admitted invocation, but tool names do not form a second
+allowlist. A Spawn-created child receives `SendMessage` but not `Spawn`, keeping
+delegation one level deep.
 
-Subagent Task observation intentionally pays for two process-local bounded
-views: a 128-frame/1 MiB exact delta window and an ingest-merged semantic
-current-state view with a 1,024-unit cap for transient context and a 4 MiB
-shared byte budget. Completed Final Messages remain exact, chronological, and
-highest priority inside that byte budget; unit-count pressure alone cannot
-discard them. Context pressure removes replaceable progress first, then oldest
-historical Turn boundaries before current reasoning, tools, or ordinary
-assistant content; byte pressure removes Final Messages only after all of that,
-from oldest to newest. The latest completed Turn's exact Final is additionally
-retained by the Task result contract. This is therefore an approximately 5 MiB
-transient per-active-subagent trade-off, plus that latest Final, rather than a
-memory reduction from the former single ring.
-It prevents an absent or late Surface from determining retention quality while
-keeping exact resume cheap inside the short window. Both views remain one
-Runtime-owned observation path; neither is durable or parent model context.
-Raw `Closed` and terminal `State` frames remain current Task lifecycle
-authority. For semantic current-state rebuilds, Runtime retains an older Turn's
-completion only as a typed `ui_only` lifecycle event with its completion time;
-it carries no Task terminal transport fields and therefore cannot regress the
-current Task descriptor. This lets detached child transcripts render the same
-per-Turn duration footer after a gap without loading the child ACP Session.
-Control delivers a semantic current-state snapshot as one replayable catch-up
-batch: partial-record cursors remain anchored before the lost exact window, and
-only the final record acknowledges the rebuilt boundary. A disconnect therefore
-replays the typed gap and whole snapshot instead of losing an unconsumed suffix.
+Spawn uses a Session-scoped Task identity. An optional handle must be unique.
+Optional context transfer is derived by the host's recipient-specific
+`ContextRouter`; an empty transfer or an unavailable router is not child-start
+failure. A Runner may release a requested handle after an error only when it
+positively proves that no child or producer started. Unknown creation outcomes
+retain the handle and reject blind retry.
 
-Agent-loop safety belongs to each Agent implementation at its model boundary.
-Control may observe lifecycle and accept explicit cancellation, but it does not
-inspect model content or apply a parent watchdog to external ACP controllers,
-participants, or third-party children.
+Runtime observation is bounded and must not block execution, durable writes, or
+completion. Lost transient output becomes a typed gap. The exact-delta window and
+semantic current-state snapshot are two views over one Runtime-owned observation
+path; neither is durable parent model context.
 
-Cancellation requested is distinct from proven terminal cancellation.
-Similarly, a completed Task control call is not evidence that its target
-completed, and a failed target is not evidence that the control call failed.
-`Task read` samples current state immediately. For a command target, `Task wait`
-waits for terminal state until its bounded observation window expires;
-intermediate command output is not a wait completion condition.
-Unknown side-effect outcomes remain explicit and must not be retried
-blindly. Task cancel ends the current child Turn but does not detach or retire
-the stable child identity. Its model-facing acknowledgement describes the
-subagent as interrupted; the canonical Task state remains authoritative. It is
-not the normal way to interrupt an Agent:
-prefer read/wait while observations keep changing, and cancel only for an
-explicit stop or prolonged lack of progress.
+Cancellation requested is not terminal cancellation. A successful Task control
+call does not imply that its target succeeded, and a failed target does not make
+the observation call fail. Cancel ends the current child Turn, not the stable
+child identity; use it for explicit stop or prolonged lack of progress.
 
-`agent-sdk.AgentInputSender` is the small provider-neutral Agent input contract.
-Runtime owns trusted source identity and Session-scoped handle resolution. The
-model-facing `SendMessage` tool exposes only `to` and `message`; each call sends
-one explicit Agent-communication input and returns no delivery or target-
-lifecycle claim. Runtime binds the trusted source Actor, stores a Context event,
-and adds the sender header required by user-role-only provider transports. Task
-remains the common lifecycle and observation abstraction for commands and
-subagents, but Task input is reserved for live command stdin and does not double
-as Agent communication. Subagent `Task read` and `Task wait`
-do not hold the lifecycle mutation claim while awaiting remote state. A sampled
-result is applied only under a short mutation claim and only when its child
-activity is still current; observer cancellation never cancels or interrupts
-the child.
-Each explicit read/wait advances one parent observation frontier and returns all
-exact retained activity FinalResponses after that frontier in chronological order;
-already observed Finals are not returned again. Spawn itself advances the
-frontier when its initial result already contains the first FinalResponse.
-While a subagent is running, the model-facing Task result also carries the
-absolute `activity_cursor` and a bounded `output_preview`. The preview contains
-at most four recent normalized activity blocks within 1 KiB: readable tool
-actions with canonical display content, plans, and head/tail slices of active
-reasoning or assistant text. It never includes raw tool input/output, is not a
-child transcript or replay token, and enters parent context only as this
-bounded Task result.
+## Agent input and task observation
 
-Tool invocation, target execution, and Task observation are separate contracts.
-Observer callbacks produce in-progress tool events; a successful SendMessage
-result means only that the target input API accepted the call. Input admission
-does not claim or advance Task state. Later child output opens or updates one
-observed activity generation, and Task read/stream remains an output-derived
-view over that stable Session/Task identity.
+`agent-sdk.AgentInputSender` is the provider-neutral Agent input contract.
+Runtime resolves Session-scoped addresses and binds trusted source identity.
+`SendMessage {to, message}` submits one Agent-communication input and claims
+neither delivery, target lifecycle, nor Task mutation.
 
-The input method is selected by the current endpoint owner, not by the caller:
+Task remains the lifecycle and output-observation abstraction. Command stdin is a
+separate Task capability; Agent communication never falls back to Task input.
+Read and wait sample or observe the current child activity without holding a
+lifecycle mutation claim. They advance one parent observation frontier and
+return retained FinalResponses without repeating an already observed activity.
 
-| Input path | Endpoint operation |
-| --- | --- |
-| Hosted child to an active main parent | Submit Agent communication to the exact active parent Run |
-| Hosted child to an idle main parent | Start one parent Turn with Agent-communication input |
-| Parent or sibling to a running ACP child | Use negotiated `_session/steering` on the exact active activity |
-| Parent or sibling to an idle ACP child | Resume when required, then use `session/prompt` on the same child Session |
+Running Task results may expose a bounded output preview and absolute activity
+cursor. These are observation aids, not a child transcript or model authority.
+Completion notifications are bounded best-effort hints; final output remains
+owned by Task read/wait.
 
-There is no SDK delivery ledger, mailbox, MessageID, parent audit mirror, or
-Task-side input fallback. A completion notice is a separate bounded,
-best-effort conversation hint submitted once to the exact active parent Run
-after Task and sidecar final are durable. It is dropped when the parent is idle
-or the Run changes; failure never delays producer completion or reopens Task
-terminal state.
+## Control and handoff
 
-## Control and Handoff
-
-Control alone selects the active endpoint and commits controller-epoch changes.
+Control alone selects the active controller and commits controller-epoch changes.
 An Agent may report completion, missing capability, or a suggested next actor,
 but cannot authorize its own handoff.
 
-Dynamic orchestration belongs to an event-driven Control Manage Loop. Caelis
-does not provide a deterministic workflow graph, node/edge DSL, SDK-owned
-Sequential/Parallel/Loop engine, or LLM-facing handoff tool.
+Context transfer is recipient-specific and derived from canonical public Session
+facts. Tool traces, reasoning, live chunks, routing metadata, paths, and
+participant rosters do not become transferred model context merely because a
+Surface rendered them.
 
-Context transfer is recipient-specific and derived from canonical public
-Session facts. Tool traces, reasoning, live chunks, routing metadata, workspace
-paths, and participant rosters do not become transferred model context merely
-because a Surface rendered them.
+Caelis does not provide an SDK workflow graph, deterministic node executor, or
+LLM-facing handoff tool. Dynamic orchestration belongs to Control.
 
-## Concurrency and Lifecycle
+## Concurrency and effects
 
-Control fences one canonical Turn per Session across the complete asynchronous
-producer lifetime. The fence serializes durable authority, not Agent identity:
-local, ACP, and authorized participant Turns follow the same rule.
-Session observation, replay, and mid-Turn input delivery do not acquire this
-fence and may proceed concurrently from other clients.
+One canonical Turn holds the Session execution fence for its complete
+asynchronous producer lifetime. Observation, replay, and authorized mid-Turn
+input may proceed concurrently. Overlapping writes require an explicit purpose
+and matching revision or fence.
 
-Overlapping Control writes require an explicitly allowed purpose and the
-matching revision or fence. Handoff and controller binding are exclusive.
-Unknown mutation purposes, stale fences, and missing guards fail closed rather
-than retrying unfenced. Session execution fences derive liveness from the
-process-lifetime Host authority, not wall-clock expiry or a renewal loop. Only
-the narrow capability bound to the Store's live Host-ownership guard can
-replace a prior Host fence; the ordinary Store does not expose takeover and
-ordinary acquisition conflicts with every active producer.
-Acquisition returns an opaque bearer claim; `SessionFenceReader` deliberately
-redacts it so observed fence identity cannot authorize release or writes.
-Backends reporting a committed acquisition must return the exact claimed
-result because readback cannot and must not reconstruct producer authority.
-`RunnerCompletionRuntime` is the preflight promise required by Control's
-fencing decorator: every successful non-nil Runner must expose a completion
-waiter, and only nil completion proves final durable writes are quiescent.
-Release failures are read back through `SessionFenceService` and remain
-retryable instead of silently dropping the active fence bookkeeping.
-Host diagnostics may report fixed fence phase names, elapsed milliseconds, and
-fixed outcome classes, including startup-release retries, but must not include
-Session content or identity.
+Fence acquisition returns an opaque bearer claim. Readers may observe identity
+but cannot reconstruct write or release authority. A backend that committed
+acquisition must return that exact claim. Successful Runners expose a completion
+waiter; only proven producer quiescence permits exact release.
 
-Participant lifecycle is Control metadata with stable identity, delegation,
-generation, and revision checks. A parent fence never grants authority over a
-different staging Session.
+Host ownership supplies fence liveness; there is no TTL or renewal loop. Only a
+capability bound to the live Host-ownership guard can replace a prior Host fence.
+Release failures remain recoverable rather than dropping bookkeeping.
 
-External effects use stable identities and durable intent/effect/terminal
-transitions. Identical retries deduplicate; changed payloads conflict;
-committed-but-unreported and indeterminate effects remain recoverable or
-`unknown_outcome`, never silently repeated.
+External effects use durable intent and stable identities. Identical retries
+deduplicate, changed payloads conflict, and indeterminate effects remain
+`unknown_outcome`.
 
-The SendMessage migration retains one bounded compatibility reader for Task
-records written by the retired Continue saga. It never calls the old remote
-effect: prepared records become interrupted, pending or unproven running
-post-effect records become `unknown_outcome`, and proven terminal post-effect
-records finish their canonical sidecar commit. `v0.35.0` is the last released
-writer of `continue_phase`. The first release containing this migration must be
-recorded as the first no-write release in its release notes. Remove the reader
-only when the documented minimum supported upgrade source is that no-write
-release or newer; until then a direct upgrade from `v0.35.0` remains supported.
+The SendMessage migration retains a read-only compatibility path for Task records
+written by the retired Continue saga. It never repeats the old remote effect.
+Remove it only after the supported upgrade floor reaches the first release that
+no longer wrote `continue_phase`; v0.35.0 is the last known writer.
 
-## Durable Facts and Replay
+## Durable facts and replay
 
 `session.Event` and guarded Session state are durable truth:
 
-- canonical messages and tool calls/results carry model context;
-- typed plan and protocol payloads carry their defined semantics;
+- canonical messages, tools, plans, and typed protocol payloads carry their
+  defined model or coordination semantics;
 - journal facts carry execution and recovery state;
-- mirrors are client-facing durable projection, not parent model truth;
-- UI, overlay, notice, and raw observation output are transient.
+- mirrors are durable client projection, not a second model context;
+- UI, overlay, notice, and raw observation values are transient.
 
-Envelope projection and `_meta` do not replace canonical facts. A semantic
-mutation spanning multiple durable values requires an atomic capability;
-adapters must not advertise that capability if readers can observe a split
-commit.
+Persistence requires revision CAS, full-payload idempotency, fenced writes,
+monotonic replay, schema migration before typed decode, and fail-closed handling
+of unknown versions. Persistence or replay changes require whole-object round
+trips proving rebuilt model context equals Runtime-produced context.
 
-Persistence contracts require revision CAS, complete-payload idempotency,
-fenced writes, monotonic replay ordering, schema migration before typed decode,
-and safe restart classification. Unknown durable versions or unverifiable
-legacy retries fail closed.
+Runtime-authored tool-result Events explicitly declare whether their wrapper may
+produce Task lifecycle facts. Historical absence is accepted only for the bounded
+legacy case where parent call and stored Task identity agree; an explicit false
+or malformed binding never upgrades. Remove that reader after the supported
+upgrade floor postdates the first release that wrote the marker.
 
-Persistence and replay changes require whole-object round trips proving rebuilt
-`[]model.Message` context matches Runtime-produced context. UI reload tests are
-not a substitute.
+## Tools and instruction authority
 
-Runtime-authored tool-result Events declare whether their selected wrapper may
-produce Task lifecycle facts. `binding.task_result=true` is the live authority;
-new ordinary tool results explicitly carry `false`. Historical backfill accepts
-an absent binding only for the bounded legacy case whose exact parent call and
-stored Task identity agree, and never accepts an explicit false or malformed
-binding. Remove that absence-only reader when the minimum supported upgrade
-source postdates the first release that writes the explicit marker.
+`tool.Definition.Name` is the sole executable identity. Names are exact and
+case-sensitive; assembly rejects empty, padded, or duplicate names. Durable
+history and deferred admission preserve that identity.
 
-## Tool Schema Contracts
+Canonical ToolSpecs describe Runtime-accepted input. Provider downgrade never
+weakens local schema, approval, or policy validation. Malformed external schemas
+are quarantined instead of replaced by permissive empty schemas.
 
-`tool.Definition.Name` is the sole executable tool identity. Agent assembly
-rejects empty, whitespace-padded, or duplicate exact names, and execution lookup
-is case-sensitive. Built-in tools are an optional assembled preset, not a
-registry that claims aliases; an external `SEARCH`, `RunCommand`, or any other
-distinct exact name remains an ordinary external capability. Model calls,
-durable history, ToolSearch admission, and replay preserve the exact name they
-received.
+Authority follows the Caelis channel and typed identity that introduced content,
+not labels or tags embedded in text. Skills gain instruction authority only
+through the Runtime-selected Skill call. Tool results, files, external-agent
+output, and prior checkpoints remain evidence and cannot grant permissions.
 
-Canonical ToolSpecs describe the Runtime-accepted input set. Conditional
-requirements may use JSON Schema conditionals, while the Runtime repeats the
-same semantic check and fails closed before execution. A ToolSpec is marked
-provider-strict only when its complete schema fits the maintained strict
-subset; conditionals are explicitly sent non-strict rather than advertising a
-stronger contract than the provider can preserve. Provider downgrade never
-removes local unknown-field, type, conditional, approval, or execution-policy
-validation.
-
-Dynamic ToolSpecs are cloned and bounded at their semantic ingress. MCP,
-ToolSearch, and Spawn/Agent metadata keep separate owners and budgets. Deferred
-tool admission occurs before model-visible and durable ToolSearch results so
-live execution and replay rebuild the same bounded visible set.
-
-MCP input schemas are recursively validated against the maintained JSON Schema
-keyword and value-shape subset before they become ToolSpecs. Malformed types,
-containers, conditionals, or unknown keywords quarantine that tool; they are
-never replaced with a permissive empty schema. Externally supplied MCP tool and
-schema descriptions remain capability metadata, carry an explicit
-non-authorizing marker in the provider-visible description, and cannot grant
-instruction authority. Normalization preserves accepted property names,
-required fields, constraints, and business values.
-
-## Instruction Authority and Runtime Provenance
-
-Authority follows the Caelis channel and typed identity that introduced a
-value, not labels embedded in its text. Harness, sandbox, approval, and Runtime
-policy contracts remain authoritative for their own boundary. Session,
-workspace, global, and Skill instructions apply only through the Caelis path
-that selected and injected them; none can grant permissions, weaken approval or
-sandbox policy, or override the current user request.
-
-The built-in Skill tool makes a Skill body instruction content only for its
-matching Runtime-selected tool call identity. A file, another tool, or an
-external participant cannot gain Skill authority by emitting `<skill_content>`
-or similar text. Tool and external content otherwise remains evidence, even
-when it imitates a privileged tag.
-
-Compaction preserves source authority. Only actual User events can establish or
-change user objectives, constraints, approvals, rejections, and corrections.
-Typed Runtime events remain authoritative only for their recorded status;
-assistant text, tool results, external-agent output, file contents, and earlier
-checkpoints are evidence. Compaction input uses Runtime-authored, one-line JSON
-source frames; only the top-level source field carries provenance, while every
-payload is JSON-quoted so embedded headings, tags, or frame text cannot create
-a peer source. Normal and salvage generation use the same framing and authority
-contract. A compact checkpoint is stored and overlaid as a
-Runtime-authored `Compact`/`System` fact with an explicit non-authorizing
-marker. `runtime/chat` may project that fact as a user-role history message for
-provider compatibility; the projection does not change its provenance or grant
-user authority.
-
-When a large tool result is written to a local artifact, the pointer is Runtime
-metadata rather than a tool-authored instruction. The canonical ingress removes
-every tool-authored top-level `_caelis` namespace and records a collision in
-Runtime-owned Event metadata. Only a successful artifact write may reintroduce
-`_caelis.runtime.artifact`; truncation preserves it from an explicit trusted
-caller field and never infers trust from Content shape. JSON collisions are
-also marked in the Runtime artifact pointer, while the original bytes remain in
-the artifact. Text results use a neutral Runtime artifact line. Runtime metadata
-must not be merged into a tool-owned `system_hint`. Artifact metadata is
-navigation for truncated evidence, not an authorization or policy channel.
+Compaction preserves provenance: only User events establish or change user
+objectives and approvals. Runtime checkpoints and artifact pointers remain
+Runtime metadata, not user or tool-authored instruction channels.
 
 ## Stability
 
-The SDK remains a stable dependency only while:
-
-- supported imports compile from an external consumer;
-- built-in and external Agents share normalized semantics;
-- only Control can select or transfer ownership;
-- bounded observers cannot block producers;
-- durable context is exactly rebuildable;
-- side-effect and lifecycle uncertainty remains typed and recoverable;
-- product, wire, and presentation dependencies stay outside the SDK.
+The SDK remains reusable while supported imports compile externally, product and
+presentation dependencies stay outside it, bounded observers cannot block
+producers, durable context is exactly rebuildable, uncertainty remains typed,
+and only Control can transfer ownership.
 
 Consumer setup and package layout live in
-[`agent-sdk/README.md`](../agent-sdk/README.md). Projection-specific rules live
-in [ACP Projection Contract](acp-projection-architecture.md).
+[`agent-sdk/README.md`](../agent-sdk/README.md). Projection rules live in
+[ACP Projection Contract](acp-projection-architecture.md).

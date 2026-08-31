@@ -78,8 +78,8 @@ type ConfigSelectOption struct {
 	Runtime     RuntimeOverrides
 }
 
-// ConfigOption is one pure app-owned session config declaration. Phase 3 keeps
-// the shape intentionally narrow and only models select-style options.
+// ConfigOption is one pure app-owned Session config declaration. It models only
+// select-style options.
 type ConfigOption struct {
 	ID           string
 	Name         string

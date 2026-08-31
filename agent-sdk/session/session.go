@@ -572,8 +572,8 @@ type RemoveParticipantWithEventRequest struct {
 // ListSessionsRequest lists sessions in one workspace or user namespace.
 type ListSessionsRequest struct {
 	AppName string `json:"app_name,omitempty"`
-	// Compatibility only: listing authorization belongs to the caller's Control
-	// principal. WorkspaceKey is the reusable SDK namespace during migration.
+	// UserID is persisted compatibility only; listing authorization belongs to
+	// the caller's Control principal. WorkspaceKey is the reusable SDK namespace.
 	UserID       string `json:"user_id,omitempty"`
 	WorkspaceKey string `json:"workspace_key,omitempty"`
 	CWD          string `json:"cwd,omitempty"`
