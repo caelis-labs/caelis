@@ -24,7 +24,20 @@ model output are not release-regression oracles.
 
 ## Gates
 
-Run the selected deterministic product suite with:
+The fast default gate is:
+
+```bash
+make commit-check
+```
+
+It runs lint, the full untagged Go test suite, and build. The configured lint
+already includes `gofmt` and `govet`, and `make test` disables Go's duplicate
+implicit vet pass. Standard shared Go caches are used by default so compiled
+artifacts can be reused across local worktrees and by CI. A restricted
+environment can opt into isolated caches with `CACHE_ROOT=/path/to/cache`.
+
+Run the selected deterministic product suite when a change affects Runtime,
+Control, projection, or physical TUI product contracts:
 
 ```bash
 make product-acceptance
@@ -32,13 +45,15 @@ make product-acceptance
 
 Each package selector is executed through `scripts/go_test_nonempty.sh`, so a
 test rename or removal cannot silently turn a covered lane into a zero-test
-pass. `make regression` includes this target, and `quality.yml` runs it as an
-explicit required job. The ordinary `make test` suite continues to run the same
-untagged tests as part of full package coverage.
+pass. `make regression` includes this target. The ordinary `make test` suite
+already runs the same untagged tests as part of full package coverage; the
+selector is therefore a focused change-validation tool, not a second universal
+CI pass.
 
-Windows persistence behavior runs on the real `windows-latest` quality job.
-Cross-compilation is not accepted as evidence for file-lock, rename, or WAL
-recovery behavior.
+Race, architecture, SDK boundary, protocol generation, documentation, broader
+regression, and native Windows checks are selected for changes that affect
+those contracts. Cross-compilation is not accepted as evidence for Windows
+file-lock, rename, or WAL recovery behavior.
 
 ## Initial coverage
 

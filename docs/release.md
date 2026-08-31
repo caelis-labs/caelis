@@ -18,12 +18,11 @@ process exits.
 
 ## Gate model
 
-Quality belongs to `quality.yml`, including its deterministic
-`product-acceptance` and real-Windows persistence jobs. The tag workflow waits
-for the successful `main` quality run with the exact tag SHA, then builds with
-the Go version declared by `go.mod` and publishes artifacts. It does not rerun
-ordinary tests, race suites, the broader regression target, proxy smoke, or
-release-dry-run.
+Quality belongs to `quality.yml` and consists of the fast default lint, full
+untagged test, and build gates. The tag workflow waits for the successful
+`main` quality run with the exact tag SHA, then builds with the Go version
+declared by `go.mod` and publishes artifacts. It does not rerun ordinary tests,
+race suites, the broader regression target, proxy smoke, or release-dry-run.
 
 ## Preflight
 
@@ -46,9 +45,11 @@ release-dry-run.
    Keep the reader until the documented minimum supported upgrade source is the
    first no-write version or newer.
 
-`make sdk-race`, `make regression`, `make sdk-proxy-smoke`, and
-`make release-dry-run` remain available for a change that specifically needs
-them. They are diagnostic tools, not unconditional release stages.
+`make arch-lint`, `make sdk-boundary-check`, `make client-protocol-check`,
+`make docs-links`, `make sdk-race`, `make regression`, `make sdk-proxy-smoke`,
+and `make release-dry-run` remain available for a change that specifically
+needs them. They are change-scoped diagnostic tools, not unconditional commit,
+CI, or release stages.
 
 ## Publish
 

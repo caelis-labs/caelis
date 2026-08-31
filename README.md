@@ -169,5 +169,6 @@ make install
 make commit-check
 ```
 
-`make commit-check` runs the repository's formatting, lint, architecture,
-protocol, documentation, test, and build gates.
+`make commit-check` runs the fast default lint, full untagged test, and build
+gates. See [Testing](docs/testing.md) for change-scoped architecture, protocol,
+race, regression, documentation, and platform checks.

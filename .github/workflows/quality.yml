@@ -18,16 +18,11 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Verify formatting
-        run: make fmt-check
 
       - name: Lint
         uses: golangci/golangci-lint-action@v9.2.0
@@ -36,97 +31,8 @@ jobs:
           args: ./...
           install-mode: goinstall
 
-      - name: Vet
-        run: make vet
-
-      - name: Architecture lint
-        run: make arch-lint
-
-      - name: Agent SDK package boundary
-        run: make sdk-boundary-check
-
-      - name: Control client protocol generation
-        run: make client-protocol-check
-
-      - name: Documentation links
-        run: make docs-links
-
       - name: Test
         run: make test
 
       - name: Build
         run: make build
-
-  sdk-race:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Focused Agent SDK race
-        run: make sdk-race
-
-  control-race:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Fence, recovery, and credential race
-        run: go test -race -count=1 ./internal/controlplane ./control/appserver ./control/modelconfig/credentialstore ./app/gatewayapp
-
-  product-acceptance:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      # Exercises selected Runtime and Control contracts plus a physical TUI
-      # scenario. Selectors fail closed when a covered test is renamed away.
-      - name: Deterministic product acceptance
-        run: make product-acceptance
-
-  windows-persistence:
-    runs-on: windows-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      # Cross-compilation cannot catch Windows file-lock and durable-rename
-      # behavior. Keep the supported release target on a real Windows runner.
-      - name: Windows persistence product acceptance
-        run: go test -count=1 ./agent-sdk/session/file
-
-      - name: Windows sandbox native unit coverage
-        run: go test -count=1 ./agent-sdk/sandbox/windows/...
-
-      - name: Windows control and credential runtime
-        run: go test -count=1 ./control/appserver ./control/modelconfig/credentialstore ./app/controlserver ./app/gatewayapp

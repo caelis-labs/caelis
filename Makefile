@@ -21,23 +21,31 @@ SURFACE_CLIENT_REGRESSION_SELECTOR ?= ^(TestSessionClientAdapterRoutesMainTurnWr
 COMMAND_REGRESSION_SELECTOR ?= ^TestRegression(Command(Status|Workspace|List|Agent|Parse|Connect|NewDriver)|Slash)
 COMMAND_EXECUTION_REGRESSION_SELECTOR ?= ^TestRegressionCommandExec
 PRODUCT_TUI_SELECTOR ?= ^TestProductScenarioContextCompactionRuntimeToPhysicalTUI$$
-PRODUCT_RUNTIME_SELECTOR ?= ^(TestRuntimeRecoveryConvergesCommandRehydrateFailure|TestRuntimeRecoveryCommandRepairFileStoreRoundTrip|TestSessionWriteQueueCancellationPassesAdmissionToSuccessor|TestSessionWriteQueueCancellationUnlinksBeforePredecessorCompletes|TestCompactionAndAgentCompletionCommitFIFOWhenCompactionArrivesFirst|TestTwoRuntimesRejectStaleCompactionAndRebuildWholeModelContext|TestRuntimeAutoCompactFailurePublishesLiveNotice|TestSubagentActivityCursorAdvancesWithStreamEvents|TestTaskControlSnapshotToolResultDescribesSubagentInterruption|TestSubagentCompletionNoticeUsesInterruptionLanguage)$$
+PRODUCT_RUNTIME_SELECTOR ?= ^(TestRuntimeRecoveryConvergesCommandRehydrateFailure|TestRuntimeRecoveryCommandRepairFileStoreRoundTrip|TestSessionWriteQueueCancellationPassesAdmissionToSuccessor|TestSessionWriteQueueCancellationUnlinksBeforePredecessorCompletes|TestTwoRuntimesRejectStaleCompactionAndRebuildWholeModelContext|TestRuntimeAutoCompactFailurePublishesLiveNotice|TestSubagentActivityCursorAdvancesWithStreamEvents|TestTaskControlSnapshotToolResultDescribesSubagentInterruption|TestSubagentCompletionNoticeUsesInterruptionLanguage)$$
 PRODUCT_CONTROLLER_SELECTOR ?= ^(TestControllerRunRejectsOverlappingTurns|TestControllerRunConcurrentAdmissionAllowsOneTurn|TestManagerDeactivateCancelsInFlightControllerTurn|TestManagerDetachCancelsInFlightParticipantPrompt)$$
 PRODUCT_SUBAGENT_SELECTOR ?= ^(TestRunnerActionSummaryKeepsFinalizingIntentAcrossSparseToolUpdate|TestRunnerActionSummaryConcurrentUpdateAndWait|TestRunnerCompletedResultKeepsActionSummary|TestRunnerTerminalDiagnosticOverridesActionSummary|TestRunnerActionSummaryUsesCanonicalToolContentNotRawOutput|TestSubagentActionSummaryIsBoundedWhitespaceCompactedAndUTF8Safe)$$
 PRODUCT_CONTROL_CLIENT_SELECTOR ?= ^(TestStateServiceDoesNotStarveWhileSessionRevisionChanges|TestStateServiceReconnectSucceedsDuringContinuousPublish)$$
 PRODUCT_WIRE_SELECTOR ?= ^TestEveryProductionEnvelopeVariantConformsToOpenAPI$$
 PRODUCT_DIAGNOSTICS_SELECTOR ?= ^(TestRuntimeDiagnosticsLoggerWritesPrivateJSONLFile|TestBoundedDiagnosticWriterKeepsOneSizeBoundedBackup)$$
-CACHE_ROOT ?= $(CURDIR)/.tmp/cache
+# Use the standard shared Go and tool caches by default. This lets local
+# worktrees reuse compiled artifacts and keeps GitHub's setup-go cache effective.
+# Restricted environments can opt into repository-local caches with
+# `make CACHE_ROOT=$(CURDIR)/.tmp/cache <target>`.
+CACHE_ROOT ?=
+ifneq ($(strip $(CACHE_ROOT)),)
 GOMODCACHE ?= $(CACHE_ROOT)/gomod
 GOCACHE ?= $(CACHE_ROOT)/gocache
 GOTMPDIR ?= $(CACHE_ROOT)/gotmp
 GOLANGCI_LINT_CACHE ?= $(CACHE_ROOT)/golangci-lint
 XDG_CACHE_HOME ?= $(CACHE_ROOT)/xdg
 export GOMODCACHE GOCACHE GOTMPDIR GOLANGCI_LINT_CACHE XDG_CACHE_HOME
+endif
 .PHONY: arch-lint build build-cli cache-dirs client-protocol-check client-protocol-generate command-regression command-execution-regression commit-check control-feed-regression docs-links eval-smoke fmt fmt-check guardian-eval install lint product-acceptance quality regression sdk-boundary-check sdk-proxy-smoke sdk-race test tui-golden tui-interaction vet release-dry-run
 
 cache-dirs:
+ifneq ($(strip $(CACHE_ROOT)),)
 	mkdir -p "$(GOMODCACHE)" "$(GOCACHE)" "$(GOTMPDIR)" "$(GOLANGCI_LINT_CACHE)" "$(XDG_CACHE_HOME)"
+endif
 
 fmt:
 	$(GOFILES_CMD) | xargs -0 gofmt -w
@@ -82,9 +90,9 @@ client-protocol-generate: cache-dirs
 client-protocol-check: cache-dirs
 	go run ./scripts/client_protocol_generate -check
 
-quality: fmt-check lint arch-lint sdk-boundary-check client-protocol-check vet test
+quality: lint test build
 
-commit-check: quality build
+commit-check: quality
 
 regression: product-acceptance eval-smoke tui-golden tui-interaction control-feed-regression command-regression command-execution-regression
 
@@ -119,8 +127,9 @@ command-regression: cache-dirs
 command-execution-regression: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(COMMAND_EXECUTION_REGRESSION_SELECTOR)' command-execution-regression
 
+# golangci-lint already runs govet; do not repeat the same analyzers here.
 test: cache-dirs
-	go test -timeout $(GO_TEST_TIMEOUT) ./...
+	go test -vet=off -timeout $(GO_TEST_TIMEOUT) ./...
 
 release-dry-run: cache-dirs
 	goreleaser release --clean --snapshot

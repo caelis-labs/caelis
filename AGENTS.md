@@ -37,7 +37,7 @@
 
 ## Validation
 - Run `gofmt` on touched Go files, focused `go test` packages for changed behavior, and `git diff --check`.
-- Before committing, run `make commit-check`; it includes formatting, `golangci-lint`, `arch-lint`, the SDK package-boundary gate, vet, tests, and build.
+- Before committing, run `make commit-check`; it is the fast default gate for lint, tests, and build. The configured lint includes `gofmt` and `govet`.
 - Run `make arch-lint` after import, package ownership, gateway/eventstream, or session protocol changes.
 - Run `make client-protocol-check` after changing OpenAPI, generated clients, Envelope wire shapes, or `control/appserver` JSON contracts.
 - Lease, concurrency, persistence, broker, or lifecycle changes require focused `go test -race` coverage in the change that needs it; do not turn that into an unconditional release-time rerun.

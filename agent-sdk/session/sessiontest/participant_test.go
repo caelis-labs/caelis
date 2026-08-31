@@ -14,11 +14,15 @@ import (
 
 func TestReferenceParticipantStoresConform(t *testing.T) {
 	t.Run("memory", func(t *testing.T) {
+		t.Parallel()
+
 		sessiontest.ParticipantLifecycleConformance(t, func(*testing.T) sessiontest.ParticipantStore {
 			return &committedFaultParticipantStore{participantBackend: sessionmemory.NewStore(sessionmemory.Config{})}
 		})
 	})
 	t.Run("file", func(t *testing.T) {
+		t.Parallel()
+
 		sessiontest.ParticipantLifecycleConformance(t, func(t *testing.T) sessiontest.ParticipantStore {
 			return &committedFaultParticipantStore{participantBackend: sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})}
 		})

@@ -16,9 +16,9 @@ func TestReleaseWaitsForExactSHAMainQualityBeforeArtifacts(t *testing.T) {
 	for _, want := range []string{
 		"pull_request:",
 		"push:",
-		"make sdk-boundary-check",
-		"make sdk-race",
-		"make docs-links",
+		"name: Lint",
+		"run: make test",
+		"run: make build",
 	} {
 		if !strings.Contains(quality, want) {
 			t.Errorf("quality workflow missing %q", want)
@@ -67,12 +67,23 @@ func TestReleaseWaitsForExactSHAMainQualityBeforeArtifacts(t *testing.T) {
 			t.Errorf("release workflow still contains non-artifact work %q", forbidden)
 		}
 	}
-	if !strings.Contains(quality, "sdk-race:\n    if: github.event_name == 'pull_request'") {
-		t.Error("focused SDK race is not scoped to pull requests")
-	}
-	for _, forbidden := range []string{"workflow_call:", "make regression", "make sdk-proxy-smoke"} {
+	for _, forbidden := range []string{
+		"workflow_call:",
+		"make fmt-check",
+		"make vet",
+		"make arch-lint",
+		"make sdk-boundary-check",
+		"make client-protocol-check",
+		"make docs-links",
+		"make sdk-race",
+		"control-race:",
+		"product-acceptance:",
+		"windows-persistence:",
+		"make regression",
+		"make sdk-proxy-smoke",
+	} {
 		if strings.Contains(quality, forbidden) {
-			t.Errorf("quality workflow still contains release-only behavior %q", forbidden)
+			t.Errorf("quality workflow still contains non-core behavior %q", forbidden)
 		}
 	}
 }
@@ -109,11 +120,17 @@ func TestReleaseDryRunDoesNotRepeatOrdinaryQuality(t *testing.T) {
 	t.Parallel()
 
 	makefile := readWorkflow(t, "../Makefile")
+	goreleaser := readWorkflow(t, "../.goreleaser.yml")
 	if !strings.Contains(makefile, "release-dry-run: cache-dirs") {
 		t.Error("release dry run no longer initializes its local cache directories")
 	}
 	if strings.Contains(makefile, "release-dry-run: quality") {
 		t.Error("release dry run repeats the ordinary quality gate")
+	}
+	for _, forbidden := range []string{"go mod tidy", "go test"} {
+		if strings.Contains(goreleaser, forbidden) {
+			t.Errorf("GoReleaser repeats pre-approved source validation %q", forbidden)
+		}
 	}
 }
 
