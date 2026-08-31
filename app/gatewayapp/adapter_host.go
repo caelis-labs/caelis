@@ -42,6 +42,22 @@ func newHostedAdapterManager() (*adapterhostimpl.Manager, error) {
 	})
 }
 
+func builtInCodexAdapterAvailable(ctx context.Context) (bool, error) {
+	manager, err := newHostedAdapterManager()
+	if err != nil {
+		return false, err
+	}
+	descriptor, inspectErr := manager.Inspect(contextOrBackground(ctx), controladapterhost.CodexAdapterID)
+	closeErr := manager.Close()
+	if inspectErr != nil {
+		return false, inspectErr
+	}
+	if closeErr != nil {
+		return false, closeErr
+	}
+	return descriptor.Available, nil
+}
+
 // AdapterHost returns the focused Host-managed adapter capability used by the
 // private adapter transport. It does not expose the process supervisor.
 func (s *Stack) AdapterHost() controladapterhost.Service {

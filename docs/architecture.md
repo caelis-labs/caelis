@@ -125,9 +125,46 @@ fence. Only a Host admitted by the process-lifetime ownership guard may replace
 an abandoned prior-Host fence. Fence conflicts never retry through an unfenced
 path.
 
-External effects use stable identity, durable intent, idempotency where
-available, and explicit recovery. A committed-but-unreported or indeterminate
-effect remains recoverable or `unknown_outcome`; it is never silently repeated.
+External effects either use stable identity and explicit recovery or are made
+safe to retry as a fresh operation. Managed plugin materialization uses private
+staging, immutable content-addressed publication, revision-CAS configuration,
+and later cache reclamation. It has no operation-specific recovery receipt: a
+failed install or marketplace update is retried with a new operation and the
+current configuration revision.
+
+### Store layout
+
+The user Store separates durable semantics from runtime coordination and
+content assets:
+
+```text
+config.json                 canonical product configuration
+control/control.sqlite      Control operation and ACP preparation state
+control/cursor.key          private cursor-signing secret
+sessions/                   canonical Session documents and event JSONL plus derived SQLite indexes
+providers/                  private provider credential material
+plugins/                    installed and marketplace content caches
+runtime/service/            live Host discovery, authentication, and ownership files
+logs/, updates/, skills/    diagnostics, update state, and prompt assets
+```
+
+`control/control.sqlite` is one physical database with separate domain tables.
+`control/appserver` owns the operation ledger, while Host-private Gateway
+composition owns ACP preparation state. Indexed SQLite columns are checked
+against the complete stored record before cleanup.
+
+Session JSONL remains canonical ordered history; `sessions/.sessions.index.sqlite`
+is an SDK-owned secondary index and is not a Control store. Credential bytes,
+cursor keys, runtime locks and tokens, diagnostic logs, and immutable plugin
+content also remain outside the Control database because their lifecycle or
+security boundary is different.
+
+An upgrade starts a new Control operation epoch. Retired `control-operations`,
+`acp-preparations`, and plugin operation-receipt directories are not read,
+imported, or allowed to participate in Host startup. They are disposable legacy
+state, while current Session history and product configuration remain intact.
+The former root-level cursor key is different: it authenticates live replay
+cursors and is atomically moved to `control/cursor.key`.
 
 ## Configuration and trust
 

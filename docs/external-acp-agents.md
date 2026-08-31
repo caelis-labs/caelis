@@ -157,5 +157,11 @@ observed message shape or advertised capabilities, never a guessed peer version.
 
 Older persisted connections may still use `package_exec` or `managed`
 launchers. Runtime keeps them read-compatible, but new onboarding cannot create
-or repair them. Remove that reader only after every supported upgrade source can
-be migrated to a user-owned executable command.
+or repair them. A Codex connection that points into the retired Store-owned
+`acp-agents` cache is migrated to the built-in `hosted_adapter` only when the
+Host confirms that `codex` is available on `PATH`; its stable connection, Agent,
+profile, and binding identities are preserved while stale discovery is dropped.
+The cache is reclaimed only after neither external connections nor live ACP
+preparations still reference it.
+Remove the general legacy launcher reader only after every supported upgrade
+source can be migrated to a user-owned executable or a built-in hosted adapter.

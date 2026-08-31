@@ -129,7 +129,7 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 		t.Fatalf("empty source error = %v, want OutcomeError(rejected)", rejectErr)
 	}
 
-	t.Run("post-effect CAS is unknown and replay does not reclone", func(t *testing.T) {
+	t.Run("post-materialization CAS is conflicted and fresh operation retries", func(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			t.Skip("test git wrapper uses a POSIX shell")
 		}
@@ -176,22 +176,36 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 		}
 
 		call := <-callDone
-		if call.err == nil || call.result.Outcome != appserver.OutcomeUnknown {
-			t.Fatalf("AddMarketplace(post-effect CAS) = %#v, %v; want unknown", call.result, call.err)
+		if call.err == nil || call.result.Outcome != appserver.OutcomeConflicted {
+			t.Fatalf("AddMarketplace(post-materialization CAS) = %#v, %v; want conflicted", call.result, call.err)
 		}
-		if !errors.As(call.err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeUnknown {
-			t.Fatalf("post-effect error = %v, want OutcomeError(unknown)", call.err)
+		if !errors.As(call.err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeConflicted {
+			t.Fatalf("post-materialization error = %v, want OutcomeError(conflicted)", call.err)
 		}
 		if got := blockingGitCloneCount(t, count); got != 1 {
 			t.Fatalf("clone count after first command = %d, want 1", got)
 		}
 
 		replayed, replayErr := clients.Plugins.AddMarketplace(ctx, req)
-		if replayErr == nil || replayed.Outcome != appserver.OutcomeUnknown {
-			t.Fatalf("AddMarketplace(replay) = %#v, %v; want stored unknown", replayed, replayErr)
+		if replayErr == nil || replayed.Outcome != appserver.OutcomeConflicted {
+			t.Fatalf("AddMarketplace(replay) = %#v, %v; want stored conflict", replayed, replayErr)
 		}
 		if got := blockingGitCloneCount(t, count); got != 1 {
 			t.Fatalf("clone count after replay = %d, want 1", got)
+		}
+
+		current, err := host.ControlStatus().ConfigurationRevision(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.OperationID = "http-market-fresh-retry"
+		req.ExpectedRevision = &current
+		retried, retryErr := clients.Plugins.AddMarketplace(ctx, req)
+		if retryErr != nil || retried.Outcome != appserver.OutcomeCommitted {
+			t.Fatalf("AddMarketplace(fresh retry) = %#v, %v; want committed", retried, retryErr)
+		}
+		if got := blockingGitCloneCount(t, count); got != 2 {
+			t.Fatalf("clone count after fresh retry = %d, want 2", got)
 		}
 	})
 }

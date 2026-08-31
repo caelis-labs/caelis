@@ -127,28 +127,27 @@ func safeJoinPluginPath(root string, relativePath string) (string, error) {
 	return joined, nil
 }
 
-// AddMarketplace registers a Claude Code compatible marketplace and persists it.
-// External git fetch is reported through EffectReport.Started only after a
-// durable clone effect begins.
-func (s Service) AddMarketplace(ctx context.Context, source string) (MarketplaceInfo, EffectReport, error) {
-	ctx, report := withEffectReport(ctx)
+// AddMarketplace registers a Claude Code compatible marketplace and persists
+// it. Managed sources use immutable publication so a failed attempt is safe to
+// retry with a fresh operation.
+func (s Service) AddMarketplace(ctx context.Context, source string) (MarketplaceInfo, error) {
 	if _, err := s.requireHost(); err != nil {
-		return MarketplaceInfo{}, effectReportFrom(report), err
+		return MarketplaceInfo{}, err
 	}
 	source = strings.TrimSpace(source)
 	if source == "" {
-		return MarketplaceInfo{}, effectReportFrom(report), fmt.Errorf("plugin service: marketplace source is required")
+		return MarketplaceInfo{}, fmt.Errorf("plugin service: marketplace source is required")
 	}
 	root, repoURL, err := s.fetchMarketplaceRoot(ctx, source)
 	if err != nil {
-		return MarketplaceInfo{}, effectReportFrom(report), err
+		return MarketplaceInfo{}, err
 	}
 	manifest, err := readPluginMarketplaceManifest(root)
 	if err != nil {
-		return MarketplaceInfo{}, effectReportFrom(report), err
+		return MarketplaceInfo{}, err
 	}
 	if strings.TrimSpace(manifest.Name) == "" {
-		return MarketplaceInfo{}, effectReportFrom(report), fmt.Errorf("plugin service: marketplace manifest is missing name")
+		return MarketplaceInfo{}, fmt.Errorf("plugin service: marketplace manifest is missing name")
 	}
 
 	entry := MarketplaceConfig{
@@ -168,9 +167,9 @@ func (s Service) AddMarketplace(ctx context.Context, source string) (Marketplace
 			return nil
 		},
 	}); err != nil {
-		return MarketplaceInfo{}, effectReportFrom(report), err
+		return MarketplaceInfo{}, err
 	}
-	return marketplaceInfoFromManifest(entry, manifest), effectReportFrom(report), nil
+	return marketplaceInfoFromManifest(entry, manifest), nil
 }
 
 func (s Service) ListMarketplaces(ctx context.Context) ([]MarketplaceInfo, error) {
@@ -195,24 +194,23 @@ func (s Service) ListMarketplaces(ctx context.Context) ([]MarketplaceInfo, error
 	return out, nil
 }
 
-func (s Service) UpdateMarketplace(ctx context.Context, name string) (MarketplaceInfo, EffectReport, error) {
-	ctx, report := withEffectReport(ctx)
+func (s Service) UpdateMarketplace(ctx context.Context, name string) (MarketplaceInfo, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	doc, err := s.loadState(ctx)
 	if err != nil {
-		return MarketplaceInfo{}, effectReportFrom(report), err
+		return MarketplaceInfo{}, err
 	}
 	_, entry, ok := findMarketplaceConfig(doc, name)
 	if !ok {
-		return MarketplaceInfo{}, effectReportFrom(report), fmt.Errorf("plugin service: marketplace not found: %s", name)
+		return MarketplaceInfo{}, fmt.Errorf("plugin service: marketplace not found: %s", name)
 	}
 	root, repoURL, err := s.fetchMarketplaceRoot(ctx, entry.Source)
 	if err != nil {
-		return MarketplaceInfo{}, effectReportFrom(report), err
+		return MarketplaceInfo{}, err
 	}
 	manifest, err := readPluginMarketplaceManifest(root)
 	if err != nil {
-		return MarketplaceInfo{}, effectReportFrom(report), err
+		return MarketplaceInfo{}, err
 	}
 
 	if err := s.updateState(ctx, Mutation{
@@ -233,9 +231,9 @@ func (s Service) UpdateMarketplace(ctx context.Context, name string) (Marketplac
 			return nil
 		},
 	}); err != nil {
-		return MarketplaceInfo{}, effectReportFrom(report), err
+		return MarketplaceInfo{}, err
 	}
-	return marketplaceInfoFromManifest(entry, manifest), effectReportFrom(report), nil
+	return marketplaceInfoFromManifest(entry, manifest), nil
 }
 
 func (s Service) RemoveMarketplace(ctx context.Context, name string) error {

@@ -2,7 +2,6 @@ package gatewayapp
 
 import (
 	"context"
-	"path/filepath"
 
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -37,8 +36,8 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	if err != nil {
 		return hostControlAssembly{}, err
 	}
-	controlOperations, err := appserver.NewFileOperationStoreWithConfig(
-		filepath.Join(storeDir, "control-operations"),
+	controlOperations, err := appserver.NewSQLiteOperationStoreWithConfig(
+		controlStoreDatabasePath(storeDir),
 		appserver.OperationRetentionConfig{TerminalRetention: cfg.ControlOperationRetention},
 	)
 	if err != nil {
@@ -46,8 +45,22 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	}
 	acpPreparations, err := newACPPreparationStore(storeDir)
 	if err != nil {
+		_ = controlOperations.Close()
 		return hostControlAssembly{}, err
 	}
+	currentConfig, err := stack.composition.authorities.store.LoadContext(context.Background())
+	if err != nil {
+		_ = acpPreparations.Close()
+		_ = controlOperations.Close()
+		return hostControlAssembly{}, err
+	}
+	if err := reclaimRetiredACPAgentStore(context.Background(), storeDir, currentConfig, acpPreparations); err != nil {
+		_ = acpPreparations.Close()
+		_ = controlOperations.Close()
+		return hostControlAssembly{}, err
+	}
+	stack.operations = controlOperations
+	stack.commandBackend.acpPreparations = acpPreparations
 	if err := controlOperations.Initialize(context.Background()); err != nil {
 		return hostControlAssembly{}, err
 	}
@@ -56,8 +69,6 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 		return hostControlAssembly{}, err
 	}
 	stack.controlOperationRetention = effectiveOperationRetention
-	stack.operations = controlOperations
-	stack.commandBackend.acpPreparations = acpPreparations
 
 	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: stack.composition.sessions}
 	controlCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{

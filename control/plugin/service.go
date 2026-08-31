@@ -120,59 +120,69 @@ func (s Service) List(ctx context.Context) ([]Info, error) {
 // Install installs one plugin from a Claude Code compatible source. Local
 // directories are registered directly. plugin@marketplace resolves a Claude
 // marketplace.json and then registers the referenced plugin directory.
-// External git materialization is reported through EffectReport.Started only
-// after a durable clone effect begins.
-func (s Service) Install(ctx context.Context, source string) (info Info, effect EffectReport, err error) {
-	ctx, report := withEffectReport(ctx)
+// Managed sources are staged and published into immutable content-addressed
+// roots. A failed attempt can therefore be retried without recovering an
+// operation-specific external-effect receipt.
+func (s Service) Install(ctx context.Context, source string) (Info, error) {
 	releaseMaterialization := beginManagedPluginMaterialization()
-	defer func() {
-		releaseMaterialization()
-		if err == nil && effectReportFrom(report).Started {
-			err = s.ReclaimManagedCaches(ctx)
-		}
-	}()
+	defer releaseMaterialization()
 	if _, err := s.requireHost(); err != nil {
-		return Info{}, effectReportFrom(report), err
+		return Info{}, err
 	}
 	source = strings.TrimSpace(source)
 	if source == "" {
-		return Info{}, effectReportFrom(report), fmt.Errorf("plugin service: plugin install source is required")
+		return Info{}, fmt.Errorf("plugin service: plugin install source is required")
 	}
 	if info, ok, err := s.installLocalPluginSource(ctx, source); ok || err != nil {
-		return info, effectReportFrom(report), err
+		return info, err
 	}
 	pluginName, marketplaceRef, ok := strings.Cut(source, "@")
 	if !ok || strings.TrimSpace(pluginName) == "" || strings.TrimSpace(marketplaceRef) == "" {
-		return Info{}, effectReportFrom(report), fmt.Errorf("plugin service: expected plugin@marketplace or local plugin directory")
+		return Info{}, fmt.Errorf("plugin service: expected plugin@marketplace or local plugin directory")
 	}
 	marketplaceRoot, err := s.resolveMarketplaceRoot(ctx, marketplaceRef)
 	if err != nil {
-		return Info{}, effectReportFrom(report), err
+		return Info{}, err
 	}
 	manifest, err := readPluginMarketplaceManifest(marketplaceRoot)
 	if err != nil {
-		return Info{}, effectReportFrom(report), err
+		return Info{}, err
 	}
 	entry, ok := findMarketplacePlugin(manifest, pluginName)
 	if !ok {
-		return Info{}, effectReportFrom(report), fmt.Errorf("plugin service: plugin %q not found in marketplace %q", strings.TrimSpace(pluginName), strings.TrimSpace(marketplaceRef))
+		return Info{}, fmt.Errorf("plugin service: plugin %q not found in marketplace %q", strings.TrimSpace(pluginName), strings.TrimSpace(marketplaceRef))
 	}
 	pluginRoot, err := s.resolveMarketplacePluginRoot(ctx, marketplaceRoot, manifest, entry)
 	if err != nil {
-		return Info{}, effectReportFrom(report), err
+		return Info{}, err
 	}
 	storeDir, err := s.storeDirectory()
 	if err != nil {
-		return Info{}, effectReportFrom(report), err
+		return Info{}, err
 	}
 	cacheRoot := managedPluginInstallCacheRoot(storeDir, pluginRoot)
-	info, err = s.addPath(ctx, pluginRoot, pluginAddPathOptions{
+	info, err := s.addPath(ctx, pluginRoot, pluginAddPathOptions{
 		Managed:    cacheRoot != "",
 		CacheRoot:  cacheRoot,
 		ConfigID:   entry.Name,
 		UpsertMode: pluginInstallUpsertByRoot,
 	})
-	return info, effectReportFrom(report), err
+	if err != nil || cacheRoot == "" {
+		return info, err
+	}
+	// The configuration now references the immutable content, so materialization
+	// no longer needs to exclude cache GC. Release the shared gate before GC
+	// takes its exclusive lock.
+	releaseMaterialization()
+	if err := s.ReclaimManagedCaches(ctx); err != nil {
+		warning := fmt.Sprintf("reclaim managed install cache: %v", err)
+		if strings.TrimSpace(info.Warning) == "" {
+			info.Warning = warning
+		} else {
+			info.Warning += "; " + warning
+		}
+	}
+	return info, nil
 }
 
 func (s Service) installLocalPluginSource(ctx context.Context, source string) (Info, bool, error) {

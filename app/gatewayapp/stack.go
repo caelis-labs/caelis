@@ -121,7 +121,7 @@ type Stack struct {
 	agentCommands             appserver.AgentCommandService
 	pluginCommands            appserver.PluginCommandService
 	taskStreams               acptaskstream.Service
-	operations                *appserver.FileOperationStore
+	operations                appserver.DurableOperationStore
 	lifecycleCancel           context.CancelFunc
 	sessionRuntimes           *sessionRuntimeRegistry
 	modelRecovery             *sessionModelRecovery
@@ -340,6 +340,14 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	}
 	configStore := newAppConfigStore(storeDir)
 	doc, err := configStore.Load()
+	if err != nil {
+		return nil, err
+	}
+	hostedCodexAvailable, err := builtInCodexAdapterAvailable(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("gatewayapp: inspect built-in Codex adapter before Store migration: %w", err)
+	}
+	doc, err = migrateRetiredStoreLayout(context.Background(), configStore, storeDir, doc, hostedCodexAvailable)
 	if err != nil {
 		return nil, err
 	}
@@ -724,6 +732,12 @@ func (s *Stack) Close() error {
 		if err := controlOperations.Close(); err != nil {
 			errs = append(errs, err)
 		}
+	}
+	if s.commandBackend != nil && s.commandBackend.acpPreparations != nil {
+		if err := s.commandBackend.acpPreparations.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		s.commandBackend.acpPreparations = nil
 	}
 	if s.adapterHost != nil {
 		if err := s.adapterHost.Close(); err != nil {

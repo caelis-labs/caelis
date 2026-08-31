@@ -262,8 +262,6 @@ func cloneGitRepoImmutableFromSource(ctx context.Context, source string, ref str
 	if err := os.RemoveAll(staging); err != nil {
 		return "", err
 	}
-	// Durable external effect begins: a new managed cache tree is created.
-	markEffectStarted(ctx)
 	// "--" prevents source/path values from being interpreted as git options.
 	args := []string{"clone", "--depth", "1", "--", source, staging}
 	cmd := exec.CommandContext(ctx, "git", args...)

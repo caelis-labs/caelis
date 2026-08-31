@@ -10,13 +10,14 @@ import (
 type recordedMutation struct{}
 
 type memoryHost struct {
-	dir       string
-	state     State
-	statuses  map[string][]mcp.MCPServerInfo
-	loadErr   error
-	loadCalls int
-	updateErr error
-	mutations []recordedMutation
+	dir         string
+	state       State
+	statuses    map[string][]mcp.MCPServerInfo
+	loadErr     error
+	loadCalls   int
+	updateErr   error
+	afterUpdate func()
+	mutations   []recordedMutation
 }
 
 func (h *memoryHost) StoreDir() string {
@@ -44,6 +45,11 @@ func (h *memoryHost) UpdatePluginState(_ context.Context, mutation Mutation) err
 	}
 	h.state = next
 	h.mutations = append(h.mutations, recordedMutation{})
+	defer func() {
+		if h.afterUpdate != nil {
+			h.afterUpdate()
+		}
+	}()
 	if mutation.AfterCommit != nil {
 		return mutation.AfterCommit(h.state.Clone())
 	}

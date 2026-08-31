@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -126,6 +127,36 @@ func TestServiceAddPathUsesHostState(t *testing.T) {
 	}
 }
 
+func TestServiceInstallCommitsBeforeManagedCacheGCWarning(t *testing.T) {
+	storeDir := t.TempDir()
+	marketplaceRoot := filepath.Join(storeDir, "plugins", "installed", "demo-cache", "revision-a", "marketplace")
+	pluginRoot := filepath.Join(marketplaceRoot, "plugins", "demo")
+	writeServiceTestPlugin(t, pluginRoot)
+	manifestDir := filepath.Join(marketplaceRoot, ".claude-plugin")
+	if err := os.MkdirAll(manifestDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "marketplace.json"), []byte(`{
+		"name":"demo-market",
+		"plugins":[{"name":"demo","source":"./plugins/demo"}]
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	host := &memoryHost{dir: storeDir, afterUpdate: cancel}
+	info, err := NewService(host).Install(ctx, "demo@"+marketplaceRoot)
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if info.ID != "demo" || !strings.Contains(info.Warning, context.Canceled.Error()) {
+		t.Fatalf("Install() = %#v, want committed plugin with cache GC warning", info)
+	}
+	if len(host.state.Plugins) != 1 || host.state.Plugins[0].ID != "demo" {
+		t.Fatalf("committed state = %#v, want demo plugin", host.state)
+	}
+}
+
 func TestServiceRemoveIsConfigurationOnly(t *testing.T) {
 	t.Parallel()
 
@@ -172,7 +203,7 @@ func TestInstallPropagatesMarketplaceStateLoadFailure(t *testing.T) {
 
 	sentinel := errors.New("load failed")
 	host := &memoryHost{dir: t.TempDir(), loadErr: sentinel}
-	_, _, err := NewService(host).Install(context.Background(), "demo@market")
+	_, err := NewService(host).Install(context.Background(), "demo@market")
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("Install() error = %v, want load failure", err)
 	}

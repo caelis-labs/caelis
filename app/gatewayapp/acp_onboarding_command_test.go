@@ -52,10 +52,7 @@ func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *te
 		t.Fatalf("helper starts after first prepare = %d, want 1", starts)
 	}
 
-	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.composition.authorities.storeDir, "control-operations"))
-	if err := restartedOperations.Initialize(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	restartedOperations := reopenControlOperationStore(t, stack.composition.authorities.storeDir)
 	restartedPreparations, err := newACPPreparationStore(stack.composition.authorities.storeDir)
 	if err != nil {
 		t.Fatal(err)
@@ -90,6 +87,8 @@ func TestControlCommandBackendRecoveryCapabilityIsExplicit(t *testing.T) {
 		{action: appserver.ActionACPAgentPrepare, want: true},
 		{action: appserver.ActionACPAgentPrepareAuth, want: true},
 		{action: appserver.ActionACPAgentConnect, want: false},
+		{action: appserver.ActionPluginInstall, want: false},
+		{action: appserver.ActionPluginMarketplaceAdd, want: false},
 		{action: appserver.ActionPrompt, want: false},
 		{action: appserver.Action("unknown.action"), want: false},
 	} {
@@ -124,10 +123,7 @@ func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	retryOperations := appserver.NewFileOperationStore(filepath.Join(stack.composition.authorities.storeDir, "control-operations"))
-	if err := retryOperations.Initialize(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	retryOperations := reopenControlOperationStore(t, stack.composition.authorities.storeDir)
 	retry, err := appserver.NewCommandService(appserver.CommandServiceConfig{
 		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: retryOperations, Backend: backend,
 	})
@@ -172,10 +168,7 @@ func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T
 		t.Fatalf("recovery calls while creator completed = %d, want 0", got)
 	}
 
-	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.composition.authorities.storeDir, "control-operations"))
-	if err := restartedOperations.Initialize(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	restartedOperations := reopenControlOperationStore(t, stack.composition.authorities.storeDir)
 	restarted, err := appserver.NewCommandService(appserver.CommandServiceConfig{
 		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: restartedOperations, Backend: backend,
 	})

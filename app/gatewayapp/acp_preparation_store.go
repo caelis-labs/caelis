@@ -1,30 +1,25 @@
 package gatewayapp
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
 const (
-	acpPreparationDirectory       = "acp-preparations"
-	acpPreparationLockFilename    = ".preparations.lock"
 	acpPreparationSchemaVersion   = 1
 	acpPreparationTTL             = 30 * time.Minute
 	maxACPPreparationDocumentSize = 1 << 20
@@ -41,10 +36,11 @@ var (
 )
 
 // acpPreparationStore is the Host-private durable staging area for one ACP
-// onboarding intent. It is not a second roster or operation ledger.
+// onboarding intent. Rows share the physical Control database but remain a
+// distinct domain receipt, not a second operation ledger.
 type acpPreparationStore struct {
-	root string
-	now  func() time.Time
+	db  *sql.DB
+	now func() time.Time
 }
 
 type acpPreparationDiskRecord struct {
@@ -55,25 +51,61 @@ type acpPreparationDiskRecord struct {
 	Preparation  controlagents.ACPPreparation `json:"preparation"`
 }
 
-func newACPPreparationStore(storeDir string) (*acpPreparationStore, error) {
-	storeDir = strings.TrimSpace(storeDir)
-	if storeDir == "" {
-		return nil, errors.New("gatewayapp: ACP preparation store directory is required")
-	}
-	absolute, err := filepath.Abs(storeDir)
-	if err != nil {
-		return nil, fmt.Errorf("gatewayapp: resolve ACP preparation store directory: %w", err)
-	}
-	return &acpPreparationStore{
-		root: filepath.Join(filepath.Clean(absolute), acpPreparationDirectory),
-		now:  time.Now,
-	}, nil
+type acpPreparationRow struct {
+	ref           string
+	principalID   string
+	operationID   string
+	intentDigest  string
+	contentDigest string
+	expiresAtNS   int64
+	raw           []byte
+	preparation   controlagents.ACPPreparation
 }
 
-// CreatePlanned creates one server-owned opaque preparation identity. Caller
-// ownership and the observed Host revision must already be bound to record.
+type acpPreparationRowScanner interface {
+	Scan(...any) error
+}
+
+func newACPPreparationStore(storeDir string) (*acpPreparationStore, error) {
+	db, _, err := openControlStoreDatabase(storeDir)
+	if err != nil {
+		return nil, err
+	}
+	store := &acpPreparationStore{db: db, now: time.Now}
+	if err := store.initialize(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+func (s *acpPreparationStore) initialize(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS control_acp_preparations (
+	ref TEXT PRIMARY KEY,
+	principal_id TEXT NOT NULL,
+	operation_id TEXT NOT NULL,
+	intent_digest TEXT NOT NULL,
+	content_digest TEXT NOT NULL,
+	expires_at_ns INTEGER NOT NULL,
+	record_json BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS control_acp_preparations_intent_idx
+	ON control_acp_preparations(principal_id, operation_id, intent_digest, expires_at_ns);
+CREATE INDEX IF NOT EXISTS control_acp_preparations_expiry_idx
+	ON control_acp_preparations(expires_at_ns);
+`); err != nil {
+		return fmt.Errorf("gatewayapp: initialize ACP preparation schema: %w", err)
+	}
+	now := s.currentTime()
+	if err := s.pruneExpired(ctx, now); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *acpPreparationStore) CreatePlanned(ctx context.Context, record controlagents.ACPPreparation) (controlagents.ACPPreparation, error) {
-	if s == nil {
+	if s == nil || s.db == nil {
 		return controlagents.ACPPreparation{}, errors.New("gatewayapp: ACP preparation store is unavailable")
 	}
 	ctx = acpPreparationContextOrBackground(ctx)
@@ -88,123 +120,80 @@ func (s *acpPreparationStore) CreatePlanned(ctx context.Context, record controla
 		return controlagents.ACPPreparation{}, errors.New("gatewayapp: CreatePlanned requires planned ACP preparation state")
 	}
 	record.State = controlagents.PreparationStatePlanned
-
-	var created controlagents.ACPPreparation
-	err := s.withLock(ctx, func() error {
-		now := s.currentTime()
-		live, err := s.pruneExpiredLocked(ctx, now)
-		if err != nil {
-			return err
-		}
-		if live >= maxACPPreparationDocuments {
-			return fmt.Errorf("gatewayapp: ACP preparation capacity %d reached", maxACPPreparationDocuments)
-		}
-		for range 4 {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			ref, err := newACPPreparationRef()
-			if err != nil {
-				return err
-			}
-			candidate := record
-			candidate.Ref = ref
-			candidate.CreatedAt = now
-			candidate.ExpiresAt = now.Add(acpPreparationTTL)
-			candidate, err = controlagents.SealACPPreparation(candidate)
-			if err != nil {
-				return err
-			}
-			path := s.path(candidate.Ref)
-			if _, statErr := os.Lstat(path); statErr == nil {
-				continue
-			} else if !errors.Is(statErr, os.ErrNotExist) {
-				return fmt.Errorf("gatewayapp: inspect ACP preparation destination: %w", statErr)
-			}
-			writeErr := s.writeLocked(ctx, candidate)
-			if writeErr != nil && !configstore.WriteCommitted(writeErr) {
-				return writeErr
-			}
-			created = candidate
-			return writeErr
-		}
-		return errors.New("gatewayapp: allocate unique ACP preparation reference")
-	})
-	return created, err
-}
-
-func (s *acpPreparationStore) pruneExpiredLocked(ctx context.Context, now time.Time) (int, error) {
-	entries, err := os.ReadDir(s.root)
-	if err != nil {
-		return 0, fmt.Errorf("gatewayapp: enumerate ACP preparations for pruning: %w", err)
+	now := s.currentTime()
+	if err := s.pruneExpired(ctx, now); err != nil {
+		return controlagents.ACPPreparation{}, err
 	}
-	live := 0
-	documents := 0
-	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
-			return 0, err
-		}
-		if filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		documents++
-		if documents > maxACPPreparationDocuments {
-			return 0, fmt.Errorf("gatewayapp: ACP preparation document limit %d exceeded", maxACPPreparationDocuments)
-		}
-		if !validACPPreparationFilename(entry.Name()) {
-			return 0, fmt.Errorf("gatewayapp: invalid ACP preparation filename %q", entry.Name())
-		}
-		path := filepath.Join(s.root, entry.Name())
-		preparation, err := s.readPathLocked(ctx, path, "")
+	for range 4 {
+		ref, err := newACPPreparationRef()
 		if err != nil {
-			return 0, err
+			return controlagents.ACPPreparation{}, err
 		}
-		if preparation.ExpiresAt.After(now) {
-			live++
-			continue
+		candidate := record
+		candidate.Ref = ref
+		candidate.CreatedAt = now
+		candidate.ExpiresAt = now.Add(acpPreparationTTL)
+		candidate, err = controlagents.SealACPPreparation(candidate)
+		if err != nil {
+			return controlagents.ACPPreparation{}, err
 		}
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return 0, fmt.Errorf("gatewayapp: remove expired ACP preparation: %w", err)
+		raw, err := encodeACPPreparation(candidate)
+		if err != nil {
+			return controlagents.ACPPreparation{}, err
+		}
+		result, err := s.db.ExecContext(ctx, `
+INSERT OR IGNORE INTO control_acp_preparations
+	(ref, principal_id, operation_id, intent_digest, content_digest, expires_at_ns, record_json)
+SELECT ?, ?, ?, ?, ?, ?, ?
+WHERE (SELECT COUNT(*) FROM control_acp_preparations) < ?`, candidate.Ref, candidate.PrincipalID, candidate.OperationID,
+			candidate.IntentDigest, candidate.ContentDigest, candidate.ExpiresAt.UnixNano(), raw, maxACPPreparationDocuments)
+		if err != nil {
+			return controlagents.ACPPreparation{}, err
+		}
+		inserted, err := result.RowsAffected()
+		if err != nil {
+			return controlagents.ACPPreparation{}, err
+		}
+		if inserted == 1 {
+			return candidate, nil
 		}
 	}
-	return live, nil
+	var live int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM control_acp_preparations`).Scan(&live); err != nil {
+		return controlagents.ACPPreparation{}, err
+	}
+	if live >= maxACPPreparationDocuments {
+		return controlagents.ACPPreparation{}, fmt.Errorf("gatewayapp: ACP preparation capacity %d reached", maxACPPreparationDocuments)
+	}
+	return controlagents.ACPPreparation{}, errors.New("gatewayapp: allocate unique ACP preparation reference")
 }
 
-// Get returns one detached preparation after validating its opaque path,
-// persisted ownership, content digest, permissions, and expiration.
 func (s *acpPreparationStore) Get(ctx context.Context, ref string) (controlagents.ACPPreparation, error) {
-	if s == nil {
+	if s == nil || s.db == nil {
 		return controlagents.ACPPreparation{}, errors.New("gatewayapp: ACP preparation store is unavailable")
 	}
 	ctx = acpPreparationContextOrBackground(ctx)
+	ref = strings.TrimSpace(ref)
 	if err := validateACPPreparationStoreRef(ref); err != nil {
 		return controlagents.ACPPreparation{}, err
 	}
-	var preparation controlagents.ACPPreparation
-	err := s.withLock(ctx, func() error {
-		loaded, err := s.readLocked(ctx, strings.TrimSpace(ref))
-		if err != nil {
-			return err
-		}
-		if !loaded.ExpiresAt.After(s.currentTime()) {
-			return errACPPreparationExpired
-		}
-		preparation = loaded
-		return nil
-	})
-	return preparation, err
+	preparation, err := s.load(ctx, ref)
+	if err != nil {
+		return controlagents.ACPPreparation{}, err
+	}
+	if !preparation.ExpiresAt.After(s.currentTime()) {
+		return controlagents.ACPPreparation{}, errACPPreparationExpired
+	}
+	return preparation, nil
 }
 
-// FindByIntent returns the unique unexpired preparation owned by one exact
-// command intent. Corrupt records and ambiguous matches fail closed so command
-// recovery cannot silently choose a different durable effect receipt.
 func (s *acpPreparationStore) FindByIntent(
 	ctx context.Context,
 	principalID string,
 	operationID string,
 	intentDigest string,
 ) (controlagents.ACPPreparation, bool, error) {
-	if s == nil {
+	if s == nil || s.db == nil {
 		return controlagents.ACPPreparation{}, false, errors.New("gatewayapp: ACP preparation store is unavailable")
 	}
 	ctx = acpPreparationContextOrBackground(ctx)
@@ -214,57 +203,77 @@ func (s *acpPreparationStore) FindByIntent(
 	if principalID == "" || operationID == "" || !validACPPreparationDigest(intentDigest) {
 		return controlagents.ACPPreparation{}, false, errors.New("gatewayapp: principal, operation, and intent digest are required")
 	}
-
+	rows, err := s.db.QueryContext(ctx, `
+SELECT ref, principal_id, operation_id, intent_digest, content_digest, expires_at_ns, record_json
+FROM control_acp_preparations ORDER BY ref`)
+	if err != nil {
+		return controlagents.ACPPreparation{}, false, err
+	}
+	defer rows.Close()
 	var matched controlagents.ACPPreparation
-	err := s.withLock(ctx, func() error {
-		entries, err := os.ReadDir(s.root)
+	now := s.currentTime()
+	for rows.Next() {
+		row, err := scanACPPreparationRow(rows)
 		if err != nil {
-			return fmt.Errorf("gatewayapp: enumerate ACP preparations: %w", err)
+			return controlagents.ACPPreparation{}, false, err
 		}
-		documents := 0
-		for _, entry := range entries {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if filepath.Ext(entry.Name()) != ".json" {
-				continue
-			}
-			documents++
-			if documents > maxACPPreparationDocuments {
-				return fmt.Errorf("gatewayapp: ACP preparation document limit %d exceeded", maxACPPreparationDocuments)
-			}
-			if !validACPPreparationFilename(entry.Name()) {
-				return fmt.Errorf("gatewayapp: invalid ACP preparation filename %q", entry.Name())
-			}
-			preparation, err := s.readPathLocked(ctx, filepath.Join(s.root, entry.Name()), "")
-			if err != nil {
-				return err
-			}
-			if !preparation.ExpiresAt.After(s.currentTime()) {
-				continue
-			}
-			if preparation.PrincipalID != principalID || preparation.OperationID != operationID || preparation.IntentDigest != intentDigest {
-				continue
-			}
-			if matched.Ref != "" {
-				return errACPPreparationAmbiguous
-			}
-			matched = preparation
+		preparation := row.preparation
+		if preparation.PrincipalID != principalID || preparation.OperationID != operationID ||
+			preparation.IntentDigest != intentDigest || !preparation.ExpiresAt.After(now) {
+			continue
 		}
-		return nil
-	})
-	return matched, matched.Ref != "", err
+		if matched.Ref != "" {
+			return controlagents.ACPPreparation{}, false, errACPPreparationAmbiguous
+		}
+		matched = preparation
+	}
+	if err := rows.Err(); err != nil {
+		return controlagents.ACPPreparation{}, false, err
+	}
+	return matched, matched.Ref != "", nil
 }
 
-// Save performs an exact content-digest update. Trusted ownership, parent,
-// observed Host revision, launcher identity, creation time, and expiration are
-// immutable across the preparation lifetime.
+func (s *acpPreparationStore) referencesLauncherRoot(ctx context.Context, root string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, errors.New("gatewayapp: ACP preparation store is unavailable")
+	}
+	ctx = acpPreparationContextOrBackground(ctx)
+	rows, err := s.db.QueryContext(ctx, `
+SELECT ref, principal_id, operation_id, intent_digest, content_digest, expires_at_ns, record_json
+FROM control_acp_preparations ORDER BY ref`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	now := s.currentTime()
+	for rows.Next() {
+		row, err := scanACPPreparationRow(rows)
+		if err != nil {
+			return false, err
+		}
+		preparation := row.preparation
+		if !preparation.ExpiresAt.After(now) {
+			continue
+		}
+		if externalAgentConfigurationReferencesRoot(controlagents.Configuration{
+			Connections: []controlagents.Connection{preparation.Connection},
+		}, root) || textReferencesRoot(preparation.Request.CWD, root) ||
+			textReferencesRoot(preparation.Request.CommandLine, root) {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
 func (s *acpPreparationStore) Save(
 	ctx context.Context,
 	expectedContentDigest string,
 	record controlagents.ACPPreparation,
 ) (controlagents.ACPPreparation, error) {
-	if s == nil {
+	if s == nil || s.db == nil {
 		return controlagents.ACPPreparation{}, errors.New("gatewayapp: ACP preparation store is unavailable")
 	}
 	ctx = acpPreparationContextOrBackground(ctx)
@@ -276,74 +285,144 @@ func (s *acpPreparationStore) Save(
 	if err := validateACPPreparationStoreRef(record.Ref); err != nil {
 		return controlagents.ACPPreparation{}, err
 	}
-
-	var saved controlagents.ACPPreparation
-	err := s.withLock(ctx, func() error {
-		current, err := s.readLocked(ctx, record.Ref)
-		if err != nil {
-			return err
-		}
-		if !current.ExpiresAt.After(s.currentTime()) {
-			return errACPPreparationExpired
-		}
-		if current.ContentDigest != expectedContentDigest {
-			return errACPPreparationConflict
-		}
-		if !sameACPPreparationOwnership(current, record) {
-			return errACPPreparationOwner
-		}
-		if !validACPPreparationTransition(current.State, record.State) {
-			return fmt.Errorf("gatewayapp: invalid ACP preparation transition %q -> %q", current.State, record.State)
-		}
-		sealed, err := controlagents.SealACPPreparation(record)
-		if err != nil {
-			return err
-		}
-		if sealed.ContentDigest == current.ContentDigest {
-			saved = current
-			return nil
-		}
-		writeErr := s.writeLocked(ctx, sealed)
-		if writeErr != nil && !configstore.WriteCommitted(writeErr) {
-			return writeErr
-		}
-		saved = sealed
-		return writeErr
-	})
-	return saved, err
-}
-
-func (s *acpPreparationStore) readLocked(ctx context.Context, ref string) (controlagents.ACPPreparation, error) {
-	return s.readPathLocked(ctx, s.path(ref), ref)
-}
-
-func (s *acpPreparationStore) readPathLocked(
-	ctx context.Context,
-	path string,
-	expectedRef string,
-) (preparation controlagents.ACPPreparation, returnErr error) {
-	if err := ctx.Err(); err != nil {
+	current, err := s.Get(ctx, record.Ref)
+	if err != nil {
 		return controlagents.ACPPreparation{}, err
 	}
-	file, err := openSecureACPPreparationFile(path)
-	if errors.Is(err, os.ErrNotExist) {
+	if current.ContentDigest != expectedContentDigest {
+		return controlagents.ACPPreparation{}, errACPPreparationConflict
+	}
+	if !sameACPPreparationOwnership(current, record) {
+		return controlagents.ACPPreparation{}, errACPPreparationOwner
+	}
+	if !validACPPreparationTransition(current.State, record.State) {
+		return controlagents.ACPPreparation{}, fmt.Errorf("gatewayapp: invalid ACP preparation transition %q -> %q", current.State, record.State)
+	}
+	sealed, err := controlagents.SealACPPreparation(record)
+	if err != nil {
+		return controlagents.ACPPreparation{}, err
+	}
+	if sealed.ContentDigest == current.ContentDigest {
+		return current, nil
+	}
+	raw, err := encodeACPPreparation(sealed)
+	if err != nil {
+		return controlagents.ACPPreparation{}, err
+	}
+	result, err := s.db.ExecContext(ctx, `
+UPDATE control_acp_preparations
+SET content_digest = ?, record_json = ?
+WHERE ref = ? AND content_digest = ?`, sealed.ContentDigest, raw, sealed.Ref, expectedContentDigest)
+	if err != nil {
+		return controlagents.ACPPreparation{}, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return controlagents.ACPPreparation{}, err
+	}
+	if updated != 1 {
+		return controlagents.ACPPreparation{}, errACPPreparationConflict
+	}
+	return sealed, nil
+}
+
+func (s *acpPreparationStore) load(ctx context.Context, ref string) (controlagents.ACPPreparation, error) {
+	row, err := scanACPPreparationRow(s.db.QueryRowContext(ctx, `
+SELECT ref, principal_id, operation_id, intent_digest, content_digest, expires_at_ns, record_json
+FROM control_acp_preparations WHERE ref = ?`, ref))
+	if errors.Is(err, sql.ErrNoRows) {
 		return controlagents.ACPPreparation{}, errACPPreparationNotFound
 	}
 	if err != nil {
-		return controlagents.ACPPreparation{}, fmt.Errorf("gatewayapp: open ACP preparation: %w", err)
+		return controlagents.ACPPreparation{}, err
 	}
-	defer func() {
-		returnErr = errors.Join(returnErr, file.Close())
-	}()
-	payload, err := io.ReadAll(io.LimitReader(file, maxACPPreparationDocumentSize+1))
+	return row.preparation, nil
+}
+
+func scanACPPreparationRow(scanner acpPreparationRowScanner) (acpPreparationRow, error) {
+	var row acpPreparationRow
+	if err := scanner.Scan(
+		&row.ref, &row.principalID, &row.operationID, &row.intentDigest,
+		&row.contentDigest, &row.expiresAtNS, &row.raw,
+	); err != nil {
+		return acpPreparationRow{}, err
+	}
+	preparation, err := decodeACPPreparation(row.raw)
 	if err != nil {
-		return controlagents.ACPPreparation{}, fmt.Errorf("gatewayapp: read ACP preparation: %w", err)
+		return acpPreparationRow{}, err
 	}
-	if len(payload) > maxACPPreparationDocumentSize {
+	if preparation.Ref != row.ref || preparation.PrincipalID != row.principalID ||
+		preparation.OperationID != row.operationID || preparation.IntentDigest != row.intentDigest ||
+		preparation.ContentDigest != row.contentDigest || preparation.ExpiresAt.UnixNano() != row.expiresAtNS {
+		return acpPreparationRow{}, errors.New("gatewayapp: ACP preparation indexes do not match the stored record")
+	}
+	row.preparation = preparation
+	row.raw = append([]byte(nil), row.raw...)
+	return row, nil
+}
+
+func (s *acpPreparationStore) pruneExpired(ctx context.Context, now time.Time) error {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT ref, principal_id, operation_id, intent_digest, content_digest, expires_at_ns, record_json
+FROM control_acp_preparations ORDER BY ref`)
+	if err != nil {
+		return err
+	}
+	type expiredRow struct {
+		ref string
+		raw []byte
+	}
+	expired := make([]expiredRow, 0)
+	for rows.Next() {
+		row, err := scanACPPreparationRow(rows)
+		if err != nil {
+			rows.Close()
+			return fmt.Errorf("gatewayapp: validate ACP preparation before expiry cleanup: %w", err)
+		}
+		if !row.preparation.ExpiresAt.After(now) {
+			expired = append(expired, expiredRow{ref: row.ref, raw: row.raw})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, row := range expired {
+		if _, err := s.db.ExecContext(ctx, `
+DELETE FROM control_acp_preparations WHERE ref = ? AND record_json = ?`, row.ref, row.raw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func encodeACPPreparation(preparation controlagents.ACPPreparation) ([]byte, error) {
+	if err := controlagents.ValidateACPPreparation(preparation); err != nil {
+		return nil, err
+	}
+	disk := acpPreparationDiskRecord{
+		Version: acpPreparationSchemaVersion, PrincipalID: preparation.PrincipalID,
+		OperationID: preparation.OperationID, IntentDigest: preparation.IntentDigest, Preparation: preparation,
+	}
+	raw, err := json.Marshal(disk)
+	if err != nil {
+		return nil, fmt.Errorf("gatewayapp: encode ACP preparation: %w", err)
+	}
+	if len(raw) > maxACPPreparationDocumentSize {
+		return nil, errors.New("gatewayapp: ACP preparation exceeds size limit")
+	}
+	return raw, nil
+}
+
+func decodeACPPreparation(raw []byte) (controlagents.ACPPreparation, error) {
+	if len(raw) > maxACPPreparationDocumentSize {
 		return controlagents.ACPPreparation{}, errors.New("gatewayapp: ACP preparation exceeds size limit")
 	}
 	var disk acpPreparationDiskRecord
-	decoder := json.NewDecoder(strings.NewReader(string(payload)))
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&disk); err != nil {
 		return controlagents.ACPPreparation{}, fmt.Errorf("gatewayapp: decode ACP preparation: %w", err)
@@ -354,94 +433,15 @@ func (s *acpPreparationStore) readPathLocked(
 	if disk.Version != acpPreparationSchemaVersion {
 		return controlagents.ACPPreparation{}, fmt.Errorf("gatewayapp: unsupported ACP preparation version %d", disk.Version)
 	}
-	preparation = disk.Preparation
+	preparation := disk.Preparation
 	preparation.PrincipalID = strings.TrimSpace(disk.PrincipalID)
 	preparation.OperationID = strings.TrimSpace(disk.OperationID)
 	preparation.IntentDigest = strings.ToLower(strings.TrimSpace(disk.IntentDigest))
 	preparation = controlagents.NormalizeACPPreparation(preparation)
-	if (expectedRef != "" && preparation.Ref != expectedRef) || filepath.Clean(s.path(preparation.Ref)) != filepath.Clean(path) {
-		return controlagents.ACPPreparation{}, errors.New("gatewayapp: ACP preparation does not match its opaque path")
-	}
 	if err := controlagents.ValidateACPPreparation(preparation); err != nil {
 		return controlagents.ACPPreparation{}, fmt.Errorf("gatewayapp: validate ACP preparation: %w", err)
 	}
 	return preparation, nil
-}
-
-func (s *acpPreparationStore) writeLocked(ctx context.Context, preparation controlagents.ACPPreparation) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := controlagents.ValidateACPPreparation(preparation); err != nil {
-		return err
-	}
-	path := s.path(preparation.Ref)
-	if info, err := os.Lstat(path); err == nil {
-		if err := validateACPPreparationFileInfo(path, info, false); err != nil {
-			return err
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("gatewayapp: inspect ACP preparation file: %w", err)
-	}
-	disk := acpPreparationDiskRecord{
-		Version:      acpPreparationSchemaVersion,
-		PrincipalID:  preparation.PrincipalID,
-		OperationID:  preparation.OperationID,
-		IntentDigest: preparation.IntentDigest,
-		Preparation:  preparation,
-	}
-	payload, err := json.MarshalIndent(disk, "", "  ")
-	if err != nil {
-		return fmt.Errorf("gatewayapp: encode ACP preparation: %w", err)
-	}
-	payload = append(payload, '\n')
-	if len(payload) > maxACPPreparationDocumentSize {
-		return errors.New("gatewayapp: ACP preparation exceeds size limit")
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := configstore.AtomicWriteFile(path, payload, 0o600, configstore.AtomicWriteOps{}); err != nil {
-		return fmt.Errorf("gatewayapp: persist ACP preparation: %w", err)
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return fmt.Errorf("gatewayapp: inspect persisted ACP preparation: %w", err)
-	}
-	return validateACPPreparationFileInfo(path, info, false)
-}
-
-func (s *acpPreparationStore) withLock(ctx context.Context, fn func() error) (returnErr error) {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	processLock := acpPreparationProcessLockFor(s.root)
-	if err := processLock.lock(ctx); err != nil {
-		return err
-	}
-	defer processLock.unlock()
-	if err := ensureACPPreparationRoot(s.root); err != nil {
-		return err
-	}
-	lock, err := acquireACPPreparationFileLock(ctx, filepath.Join(s.root, acpPreparationLockFilename))
-	if err != nil {
-		return fmt.Errorf("gatewayapp: lock ACP preparation store: %w", err)
-	}
-	defer func() {
-		returnErr = errors.Join(returnErr, lock.Close())
-	}()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := ensureACPPreparationRoot(s.root); err != nil {
-		return err
-	}
-	return fn()
-}
-
-func (s *acpPreparationStore) path(ref string) string {
-	digest := sha256.Sum256([]byte(strings.TrimSpace(ref)))
-	return filepath.Join(s.root, hex.EncodeToString(digest[:])+".json")
 }
 
 func (s *acpPreparationStore) currentTime() time.Time {
@@ -450,6 +450,15 @@ func (s *acpPreparationStore) currentTime() time.Time {
 		now = s.now
 	}
 	return now().UTC().Round(0)
+}
+
+func (s *acpPreparationStore) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	err := s.db.Close()
+	s.db = nil
+	return err
 }
 
 func acpPreparationContextOrBackground(ctx context.Context) context.Context {
@@ -487,15 +496,10 @@ func validACPPreparationDigest(value string) bool {
 func sameACPPreparationOwnership(current, next controlagents.ACPPreparation) bool {
 	current = controlagents.NormalizeACPPreparation(current)
 	next = controlagents.NormalizeACPPreparation(next)
-	if current.Ref != next.Ref ||
-		current.PrincipalID != next.PrincipalID ||
-		current.OperationID != next.OperationID ||
-		current.IntentDigest != next.IntentDigest ||
-		current.ParentRef != next.ParentRef ||
-		!reflect.DeepEqual(current.Request, next.Request) ||
-		current.ObservedRevision != next.ObservedRevision ||
-		!current.CreatedAt.Equal(next.CreatedAt) ||
-		!current.ExpiresAt.Equal(next.ExpiresAt) {
+	if current.Ref != next.Ref || current.PrincipalID != next.PrincipalID || current.OperationID != next.OperationID ||
+		current.IntentDigest != next.IntentDigest || current.ParentRef != next.ParentRef ||
+		!reflect.DeepEqual(current.Request, next.Request) || current.ObservedRevision != next.ObservedRevision ||
+		!current.CreatedAt.Equal(next.CreatedAt) || !current.ExpiresAt.Equal(next.ExpiresAt) {
 		return false
 	}
 	if current.State == controlagents.PreparationStatePlanned && !storedACPPreparationConnectionPresent(current.Connection) {
@@ -509,15 +513,8 @@ func sameACPPreparationOwnership(current, next controlagents.ACPPreparation) boo
 }
 
 func storedACPPreparationConnectionPresent(connection controlagents.Connection) bool {
-	return strings.TrimSpace(connection.ID) != "" || strings.TrimSpace(connection.Launcher.Command) != ""
-}
-
-func validACPPreparationFilename(name string) bool {
-	if len(name) != sha256.Size*2+len(".json") || filepath.Ext(name) != ".json" {
-		return false
-	}
-	digest := strings.TrimSuffix(name, ".json")
-	return validACPPreparationDigest(digest)
+	return strings.TrimSpace(connection.ID) != "" || strings.TrimSpace(connection.Launcher.Command) != "" ||
+		strings.TrimSpace(connection.Launcher.AdapterID) != ""
 }
 
 func validACPPreparationTransition(current, next controlagents.PreparationState) bool {
@@ -543,135 +540,4 @@ func requireACPPreparationJSONEOF(decoder *json.Decoder) error {
 		return fmt.Errorf("gatewayapp: decode ACP preparation trailing data: %w", err)
 	}
 	return nil
-}
-
-func ensureACPPreparationRoot(root string) error {
-	storeDir := filepath.Dir(root)
-	if info, err := os.Lstat(storeDir); err == nil {
-		if err := validateACPPreparationFileInfo(storeDir, info, true); err != nil {
-			return err
-		}
-	} else if errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(storeDir, 0o700); err != nil {
-			return fmt.Errorf("gatewayapp: create ACP preparation store directory: %w", err)
-		}
-	} else {
-		return fmt.Errorf("gatewayapp: inspect ACP preparation store directory: %w", err)
-	}
-	if info, err := os.Lstat(root); err == nil {
-		return validateACPPreparationFileInfo(root, info, true)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("gatewayapp: inspect ACP preparation directory: %w", err)
-	}
-	if err := os.Mkdir(root, 0o700); err != nil {
-		return fmt.Errorf("gatewayapp: create ACP preparation directory: %w", err)
-	}
-	info, err := os.Lstat(root)
-	if err != nil {
-		return fmt.Errorf("gatewayapp: inspect created ACP preparation directory: %w", err)
-	}
-	return validateACPPreparationFileInfo(root, info, true)
-}
-
-func validateACPPreparationFileInfo(path string, info os.FileInfo, directory bool) error {
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("gatewayapp: ACP preparation path %q must not be a symlink", path)
-	}
-	if directory {
-		if !info.IsDir() {
-			return fmt.Errorf("gatewayapp: ACP preparation path %q is not a directory", path)
-		}
-	} else if !info.Mode().IsRegular() {
-		return fmt.Errorf("gatewayapp: ACP preparation path %q is not a regular file", path)
-	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("gatewayapp: ACP preparation path %q has unsafe permissions %04o", path, info.Mode().Perm())
-	}
-	return nil
-}
-
-func openSecureACPPreparationFile(path string) (*os.File, error) {
-	before, err := os.Lstat(path)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateACPPreparationFileInfo(path, before, false); err != nil {
-		return nil, err
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	opened, statErr := file.Stat()
-	after, lstatErr := os.Lstat(path)
-	if statErr != nil || lstatErr != nil || !os.SameFile(opened, after) {
-		_ = file.Close()
-		return nil, errors.Join(errors.New("gatewayapp: ACP preparation changed while opening"), statErr, lstatErr)
-	}
-	if err := validateACPPreparationFileInfo(path, after, false); err != nil {
-		_ = file.Close()
-		return nil, err
-	}
-	return file, nil
-}
-
-func openACPPreparationLockFile(path string) (*os.File, error) {
-	if info, err := os.Lstat(path); err == nil {
-		if err := validateACPPreparationFileInfo(path, info, false); err != nil {
-			return nil, err
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	opened, statErr := file.Stat()
-	after, lstatErr := os.Lstat(path)
-	if statErr != nil || lstatErr != nil || !os.SameFile(opened, after) {
-		_ = file.Close()
-		return nil, errors.Join(errors.New("gatewayapp: ACP preparation lock changed while opening"), statErr, lstatErr)
-	}
-	if err := validateACPPreparationFileInfo(path, after, false); err != nil {
-		_ = file.Close()
-		return nil, err
-	}
-	return file, nil
-}
-
-var acpPreparationProcessLocks sync.Map
-
-type acpPreparationProcessLock struct {
-	once  sync.Once
-	token chan struct{}
-}
-
-func acpPreparationProcessLockFor(root string) *acpPreparationProcessLock {
-	value, _ := acpPreparationProcessLocks.LoadOrStore(filepath.Clean(root), &acpPreparationProcessLock{})
-	return value.(*acpPreparationProcessLock)
-}
-
-func (l *acpPreparationProcessLock) lock(ctx context.Context) error {
-	l.once.Do(func() {
-		l.token = make(chan struct{}, 1)
-		l.token <- struct{}{}
-	})
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-l.token:
-		if err := ctx.Err(); err != nil {
-			l.token <- struct{}{}
-			return err
-		}
-		return nil
-	}
-}
-
-func (l *acpPreparationProcessLock) unlock() {
-	l.token <- struct{}{}
 }

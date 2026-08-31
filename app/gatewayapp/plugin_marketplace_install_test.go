@@ -84,7 +84,7 @@ func TestPluginServiceInstallFromClaudeMarketplaceDirectory(t *testing.T) {
 	})
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
-	info, _, err := stack.plugins().Install(context.Background(), "mcp-server-dev@"+marketplaceDir)
+	info, err := stack.plugins().Install(context.Background(), "mcp-server-dev@"+marketplaceDir)
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -119,7 +119,7 @@ func TestPluginServiceInstallFromMarketplaceUsesEntryNameWhenSourceDirDiffers(t 
 	})
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
-	info, _, err := stack.plugins().Install(context.Background(), "drawio@"+marketplaceDir)
+	info, err := stack.plugins().Install(context.Background(), "drawio@"+marketplaceDir)
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -177,7 +177,7 @@ func TestPluginServiceMarketplaceInstallRenamesExistingSameRoot(t *testing.T) {
 	}
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
-	info, _, err := stack.plugins().Install(context.Background(), "drawio@"+marketplaceDir)
+	info, err := stack.plugins().Install(context.Background(), "drawio@"+marketplaceDir)
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -229,7 +229,7 @@ func TestPluginServiceMarketplaceInstallUpdatesSameIDAtNewRoot(t *testing.T) {
 	}
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
-	info, _, err := stack.plugins().Install(context.Background(), "drawio@"+marketplaceDir)
+	info, err := stack.plugins().Install(context.Background(), "drawio@"+marketplaceDir)
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -276,7 +276,7 @@ func TestPluginServiceMarketplaceInstallRejectsIDCollisionOnRootRename(t *testin
 	}
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
-	_, _, err := stack.plugins().Install(context.Background(), "drawio@"+marketplaceDir)
+	_, err := stack.plugins().Install(context.Background(), "drawio@"+marketplaceDir)
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("Install() error = %v, want ID collision", err)
 	}

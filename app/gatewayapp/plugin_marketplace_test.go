@@ -37,7 +37,7 @@ func TestMarketplaceAddListInstallUpdateRoundTrip(t *testing.T) {
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
 
-	added, _, err := stack.plugins().AddMarketplace(ctx, marketplaceDir)
+	added, err := stack.plugins().AddMarketplace(ctx, marketplaceDir)
 	if err != nil {
 		t.Fatalf("AddMarketplace() error = %v", err)
 	}
@@ -50,7 +50,7 @@ func TestMarketplaceAddListInstallUpdateRoundTrip(t *testing.T) {
 		t.Fatalf("ListMarketplaces() = %#v, %v, want persisted marketplace", listed, err)
 	}
 
-	info, _, err := stack.plugins().Install(ctx, "demo-plugin@demo-market")
+	info, err := stack.plugins().Install(ctx, "demo-plugin@demo-market")
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -58,7 +58,7 @@ func TestMarketplaceAddListInstallUpdateRoundTrip(t *testing.T) {
 		t.Fatalf("Install() = %#v, want enabled demo-plugin", info)
 	}
 
-	updated, _, err := stack.plugins().UpdateMarketplace(ctx, "demo-market")
+	updated, err := stack.plugins().UpdateMarketplace(ctx, "demo-market")
 	if err != nil {
 		t.Fatalf("UpdateMarketplace() error = %v", err)
 	}
@@ -82,7 +82,7 @@ func TestAddMarketplaceAllowsMissingOwner(t *testing.T) {
 	}
 
 	stack := buildPluginStack(t, filepath.Join(tmp, "store"), filepath.Join(tmp, "ws"))
-	added, _, err := stack.plugins().AddMarketplace(context.Background(), marketplaceDir)
+	added, err := stack.plugins().AddMarketplace(context.Background(), marketplaceDir)
 	if err != nil {
 		t.Fatalf("AddMarketplace() error = %v", err)
 	}
@@ -119,7 +119,7 @@ func TestInstallFromRegisteredMarketplaceRefetchesMissingRoot(t *testing.T) {
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
-	if _, _, err := stack.plugins().AddMarketplace(ctx, marketplaceDir); err != nil {
+	if _, err := stack.plugins().AddMarketplace(ctx, marketplaceDir); err != nil {
 		t.Fatalf("AddMarketplace() error = %v", err)
 	}
 	doc, err := stack.composition.authorities.store.Load()
@@ -131,7 +131,7 @@ func TestInstallFromRegisteredMarketplaceRefetchesMissingRoot(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	info, _, err := stack.plugins().Install(ctx, "demo-plugin@demo-market")
+	info, err := stack.plugins().Install(ctx, "demo-plugin@demo-market")
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}

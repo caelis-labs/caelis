@@ -44,6 +44,17 @@ type OperationStore interface {
 	Complete(context.Context, OperationIntent, CommandResult) (OperationRecord, error)
 }
 
+// DurableOperationStore is the complete product Host lifecycle for a durable
+// operation ledger. Concrete persistence remains an implementation detail of
+// Control; callers depend on the idempotency and retention contract.
+type DurableOperationStore interface {
+	OperationStore
+	Initialize(context.Context) error
+	EffectiveTerminalRetention(context.Context) (time.Duration, error)
+	Sweep(context.Context) (OperationSweepResult, error)
+	Close() error
+}
+
 // OperationExecutionLease serializes effect execution, observational recovery,
 // and receipt completion for one operation identity. Release is idempotent.
 type OperationExecutionLease interface {

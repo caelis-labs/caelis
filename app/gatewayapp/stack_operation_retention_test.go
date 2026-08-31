@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func TestStackAssemblesConfiguredControlOperationRetention(t *testing.T) {
 	}
 }
 
-func TestStackAdoptsExistingControlOperationRetention(t *testing.T) {
+func TestStackStartsFreshWithoutImportingRetiredControlState(t *testing.T) {
 	storeDir := t.TempDir()
 	operationRoot := filepath.Join(storeDir, "control-operations")
 	seed, err := appserver.NewFileOperationStoreWithConfig(
@@ -57,8 +58,29 @@ func TestStackAdoptsExistingControlOperationRetention(t *testing.T) {
 	if err := seed.Initialize(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	legacyIntent := appserver.OperationIntent{
+		PrincipalID: "owner", OperationID: "retired-operation", Action: appserver.ActionPluginInstall,
+		Target: "demo", Digest: "retired-digest",
+	}
+	if _, created, err := seed.Begin(context.Background(), legacyIntent); err != nil || !created {
+		t.Fatalf("seed legacy operation = created %v, error %v", created, err)
+	}
 	if err := seed.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(operationRoot, ".retention-policy.json"), []byte("not-json"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		filepath.Join(storeDir, "acp-preparations"),
+		filepath.Join(storeDir, "plugins", "operation-receipts"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("retired and intentionally unreadable as a directory"), 0o000); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	stack, err := newGatewayAppTestStack(t, Config{StoreDir: storeDir})
@@ -66,8 +88,14 @@ func TestStackAdoptsExistingControlOperationRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stack.Close()
-	if stack.controlOperationRetention != 6*time.Hour {
-		t.Fatalf("Control operation retention = %v, want %v", stack.controlOperationRetention, 6*time.Hour)
+	if stack.controlOperationRetention != DefaultControlOperationRetention {
+		t.Fatalf("Control operation retention = %v, want default %v", stack.controlOperationRetention, DefaultControlOperationRetention)
+	}
+	if _, created, err := stack.operations.Begin(context.Background(), legacyIntent); err != nil || !created {
+		t.Fatalf("Begin(retired operation identity) = created %v, error %v; want fresh operation", created, err)
+	}
+	if _, err := os.Stat(operationRoot); err != nil {
+		t.Fatalf("retired operation directory was not ignored in place: %v", err)
 	}
 }
 

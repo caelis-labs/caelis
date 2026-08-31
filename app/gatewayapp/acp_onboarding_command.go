@@ -25,7 +25,7 @@ type acpPreparationEffectResult struct {
 }
 
 func (*controlCommandBackend) CanRecoverControlCommand(action appserver.Action) bool {
-	return recoverableACPCommandAction(action) || recoverablePluginCommandAction(action)
+	return recoverableACPCommandAction(action)
 }
 
 func recoverableACPCommandAction(action appserver.Action) bool {
@@ -37,27 +37,16 @@ func recoverableACPCommandAction(action appserver.Action) bool {
 	}
 }
 
-// RecoverControlCommand proves terminal ACP preparation or plugin external-effect
-// receipts from domain-owned durable records. It never repeats launcher,
-// process, auth, install, marketplace fetch, Session, or configuration effects.
-// Pure AppConfig mutations remain conservatively unknown when only an intent
-// exists because their domain state is not operation-attributable.
+// RecoverControlCommand proves terminal ACP preparation results from the
+// domain-owned durable staging record. Plugin mutations deliberately do not
+// recover operation-specific effects: managed materialization is retry-safe,
+// and callers retry with a fresh operation and current configuration revision.
 func (s *controlCommandBackend) RecoverControlCommand(
 	ctx context.Context,
 	principal appserver.Principal,
 	intent appserver.OperationIntent,
 	_ any,
 ) (appserver.CommandResult, bool, error) {
-	if recoverablePluginCommandAction(intent.Action) {
-		receipt, found, err := s.loadPluginOperationReceipt(ctx, principal.ID, intent.OperationID, intent.Digest)
-		if err != nil || !found {
-			return appserver.CommandResult{}, false, err
-		}
-		if receipt.Action != intent.Action || !receipt.Outcome.Valid() {
-			return appserver.CommandResult{}, false, nil
-		}
-		return pluginCommandResultFromReceipt(receipt), true, nil
-	}
 	if !recoverableACPCommandAction(intent.Action) {
 		return appserver.CommandResult{}, false, nil
 	}
