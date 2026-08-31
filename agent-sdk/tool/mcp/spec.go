@@ -4,15 +4,18 @@ import "strings"
 
 // ServerSpec describes one MCP server connection.
 type ServerSpec struct {
-	PluginID  string
-	Name      string
-	Transport string
-	Command   string
-	Args      []string
-	Env       map[string]string
-	WorkDir   string
-	URL       string
-	Headers   map[string]string
+	PluginID string
+	// ReplaySourceIDs lists prior source identities for remapping historical
+	// fully qualified names. They never create additional executable names.
+	ReplaySourceIDs []string
+	Name            string
+	Transport       string
+	Command         string
+	Args            []string
+	Env             map[string]string
+	WorkDir         string
+	URL             string
+	Headers         map[string]string
 }
 
 const (

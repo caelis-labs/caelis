@@ -207,6 +207,41 @@ func TestToolVisibilityDefersMCPToolsBehindToolSearch(t *testing.T) {
 	}
 }
 
+func TestToolVisibilityMapsReplayOnlyAliasToCompactMCPName(t *testing.T) {
+	t.Parallel()
+
+	const (
+		compactName = "context7__query_docs"
+		legacyName  = "mcp__caelis_mcp_user__context7__query_docs"
+	)
+	search := NamedTool{Def: Definition{
+		Name:     ToolSearchToolName,
+		Metadata: map[string]any{MetadataToolKind: MetadataToolKindToolSearch},
+	}}
+	mcp := NamedTool{Def: Definition{
+		Name: compactName,
+		Metadata: map[string]any{
+			MetadataToolKind:      MetadataToolKindMCP,
+			MetadataReplayAliases: []string{legacyName},
+		},
+	}}
+	tools := []Tool{search, mcp}
+
+	fromMetadata := NewToolVisibility(tools)
+	fromMetadata.ApplyDiscoveredToolNames([]string{legacyName})
+	if got, want := toolSpecNames(fromMetadata.ModelSpecs()), []string{ToolSearchToolName, compactName}; !equalStrings(got, want) {
+		t.Fatalf("metadata replay names = %v, want %v", got, want)
+	}
+
+	fromResult := NewToolVisibility(tools)
+	fromResult.ApplyToolSearchOutput(map[string]any{
+		"tools": []any{map[string]any{"name": legacyName}},
+	})
+	if got, want := toolSpecNames(fromResult.ModelSpecs()), []string{ToolSearchToolName, compactName}; !equalStrings(got, want) {
+		t.Fatalf("ToolSearch replay names = %v, want %v", got, want)
+	}
+}
+
 func TestToolVisibilityAdmitsBoundedToolSearchResults(t *testing.T) {
 	t.Parallel()
 

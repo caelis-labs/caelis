@@ -71,6 +71,58 @@ func TestAdmitToolSearchResultBoundsMessageAndDurableEvent(t *testing.T) {
 	}
 }
 
+func TestChatAgentReplaysLegacyMCPDiscoveryAsCompactToolName(t *testing.T) {
+	t.Parallel()
+
+	const (
+		compactName = "context7__query_docs"
+		legacyName  = "mcp__caelis_mcp_user__context7__query_docs"
+	)
+	search := tool.NamedTool{Def: tool.Definition{
+		Name:     tool.ToolSearchToolName,
+		Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindToolSearch},
+	}}
+	mcp := tool.NamedTool{Def: tool.Definition{
+		Name: compactName,
+		Metadata: map[string]any{
+			tool.MetadataToolKind:      tool.MetadataToolKindMCP,
+			tool.MetadataReplayAliases: []string{legacyName},
+		},
+	}}
+	modelProbe := &recordingModel{}
+	chatAgent, err := NewWithTools("chat", modelProbe, []tool.Tool{search, mcp}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-compact-mcp-replay"}},
+		Events: []*session.Event{
+			{
+				Type: session.EventTypeToolResult,
+				Tool: &session.EventTool{
+					Name: tool.ToolSearchToolName,
+					Output: map[string]any{
+						"tools": []any{map[string]any{"name": legacyName}},
+					},
+				},
+			},
+			{
+				Type:    session.EventTypeUser,
+				Message: ptrMessage(model.NewTextMessage(model.RoleUser, "continue")),
+			},
+		},
+	})
+	for _, runErr := range chatAgent.Run(ctx) {
+		if runErr != nil {
+			t.Fatal(runErr)
+		}
+	}
+	if got, want := functionToolNames(modelProbe.last.Tools), []string{tool.ToolSearchToolName, compactName}; !slices.Equal(got, want) {
+		t.Fatalf("replayed request tools = %v, want %v", got, want)
+	}
+}
+
 func TestChatAgentAdmitsToolSearchBeforeModelMessageAndDurableEvent(t *testing.T) {
 	t.Parallel()
 

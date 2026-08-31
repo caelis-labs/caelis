@@ -85,6 +85,7 @@ const (
 	MetadataExternalCapability   = "caelis.external.capability"
 	MetadataDescriptionAuthority = "caelis.description.authority"
 	MetadataDiscoveredToolNames  = "caelis.tool.discovered_names"
+	MetadataReplayAliases        = "caelis.tool.replay_aliases"
 	MetadataExecutionJournal     = "caelis.execution_journal"
 
 	MetadataToolKindMCP             = "mcp"

@@ -22,6 +22,32 @@ func (t *MCPTool) Definition() tool.Definition {
 	return tool.CloneDefinition(t.def)
 }
 
+func (t *MCPTool) addReplayAliases(in []string) {
+	if t == nil || len(in) == 0 {
+		return
+	}
+	if t.def.Metadata == nil {
+		t.def.Metadata = map[string]any{}
+	}
+	aliases, _ := t.def.Metadata[tool.MetadataReplayAliases].([]string)
+	for _, alias := range in {
+		if alias == "" {
+			continue
+		}
+		found := false
+		for _, existing := range aliases {
+			if existing == alias {
+				found = true
+				break
+			}
+		}
+		if !found {
+			aliases = append(aliases, alias)
+		}
+	}
+	t.def.Metadata[tool.MetadataReplayAliases] = aliases
+}
+
 func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	var args map[string]any
 	if len(call.Input) > 0 {

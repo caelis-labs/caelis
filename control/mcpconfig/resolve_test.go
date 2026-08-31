@@ -3,6 +3,7 @@ package mcpconfig
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -75,6 +76,9 @@ func TestResolveMergeOrderAndNamespaces(t *testing.T) {
 	}
 	if spec := byName["shared"]; spec.Command != "from-project-mcp" || spec.PluginID != NamespaceProject {
 		t.Fatalf("shared = %#v, want project overlay winner", spec)
+	}
+	if spec := byName["shared"]; !slices.Equal(spec.ReplaySourceIDs, []string{NamespaceUser, NamespaceProject}) {
+		t.Fatalf("shared replay source IDs = %#v, want both catalog namespaces", spec.ReplaySourceIDs)
 	}
 	if spec := byName["native"]; spec.Command != "native-only" || spec.PluginID != NamespaceUser {
 		t.Fatalf("native = %#v, want user catalog", spec)

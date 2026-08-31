@@ -27,6 +27,7 @@ type ToolVisibility struct {
 	visible              map[string]bool
 	available            map[string]bool
 	definitions          map[string]Definition
+	replayAliases        map[string]string
 	deferred             map[string]bool
 	deferredCount        int
 	deferredPromptTokens int
@@ -47,10 +48,11 @@ func NewToolVisibilityForModel(tools []Tool, llm model.LLM) ToolVisibility {
 
 func newToolVisibility(tools []Tool, llm model.LLM) ToolVisibility {
 	visibility := ToolVisibility{
-		tools:       append([]Tool(nil), tools...),
-		visible:     map[string]bool{},
-		definitions: map[string]Definition{},
-		deferred:    map[string]bool{},
+		tools:         append([]Tool(nil), tools...),
+		visible:       map[string]bool{},
+		definitions:   map[string]Definition{},
+		replayAliases: map[string]string{},
+		deferred:      map[string]bool{},
 	}
 	if llm != nil {
 		visibility.available = map[string]bool{}
@@ -66,6 +68,16 @@ func newToolVisibility(tools []Tool, llm model.LLM) ToolVisibility {
 			continue
 		}
 		visibility.definitions[name] = CloneDefinition(def)
+		for _, alias := range definitionReplayAliases(def) {
+			if alias == name {
+				continue
+			}
+			if existing, known := visibility.replayAliases[alias]; !known {
+				visibility.replayAliases[alias] = name
+			} else if existing != name {
+				visibility.replayAliases[alias] = ""
+			}
+		}
 		available := true
 		if llm != nil {
 			available = AvailableForModel(item, llm)
@@ -118,6 +130,7 @@ func (v *ToolVisibility) Reveal(name string) bool {
 	if v.visible == nil {
 		v.visible = map[string]bool{}
 	}
+	name = v.resolveReplayAlias(name)
 	def, known := v.definitions[name]
 	if name == "" || name != strings.TrimSpace(name) || !known {
 		return false
@@ -212,6 +225,7 @@ func (v *ToolVisibility) planToolSearchAdmission(result ToolSearchResult, maxAcc
 		if strings.TrimSpace(name) == "" && discovered.Function != nil {
 			name = discovered.Function.Name
 		}
+		name = v.resolveReplayAlias(name)
 		def, known := v.definitions[name]
 		if name == "" || name != strings.TrimSpace(name) || !known || !v.deferred[name] {
 			admitted.OmittedCount++
@@ -241,6 +255,36 @@ func (v *ToolVisibility) planToolSearchAdmission(result ToolSearchResult, maxAcc
 	}
 	admitted.Count = len(admitted.Tools)
 	return admitted, planned
+}
+
+func (v ToolVisibility) resolveReplayAlias(name string) string {
+	if _, known := v.definitions[name]; known {
+		return name
+	}
+	if canonical := v.replayAliases[name]; canonical != "" {
+		return canonical
+	}
+	return name
+}
+
+func definitionReplayAliases(def Definition) []string {
+	if len(def.Metadata) == 0 {
+		return nil
+	}
+	switch typed := def.Metadata[MetadataReplayAliases].(type) {
+	case []string:
+		return normalizeToolNameList(typed)
+	case []any:
+		aliases := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if alias, _ := item.(string); strings.TrimSpace(alias) != "" {
+				aliases = append(aliases, alias)
+			}
+		}
+		return normalizeToolNameList(aliases)
+	default:
+		return nil
+	}
 }
 
 // ModelSpecs returns the currently model-visible tools in registration order.

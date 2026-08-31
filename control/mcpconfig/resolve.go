@@ -108,15 +108,16 @@ func specFromEntry(name string, entry overlayEntry) (sdkmcp.ServerSpec, error) {
 		return sdkmcp.ServerSpec{}, fmt.Errorf("mcpconfig: MCP server %q: %w", name, err)
 	}
 	return sdkmcp.ServerSpec{
-		PluginID:  entry.source,
-		Name:      name,
-		Transport: transport,
-		Command:   entry.cfg.Command,
-		Args:      append([]string(nil), entry.cfg.Args...),
-		Env:       cloneStringMap(entry.cfg.Env),
-		WorkDir:   workDir,
-		URL:       entry.cfg.URL,
-		Headers:   cloneStringMap(entry.cfg.Headers),
+		PluginID:        entry.source,
+		ReplaySourceIDs: []string{NamespaceUser, NamespaceProject},
+		Name:            name,
+		Transport:       transport,
+		Command:         entry.cfg.Command,
+		Args:            append([]string(nil), entry.cfg.Args...),
+		Env:             cloneStringMap(entry.cfg.Env),
+		WorkDir:         workDir,
+		URL:             entry.cfg.URL,
+		Headers:         cloneStringMap(entry.cfg.Headers),
 	}, nil
 }
 

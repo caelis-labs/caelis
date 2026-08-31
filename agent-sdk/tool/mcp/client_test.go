@@ -2,10 +2,12 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	builtintoolsearch "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -43,6 +46,16 @@ func TestMCPServerHelperProcess(t *testing.T) {
 			},
 		}, nil, nil
 	})
+	if mode == "extra_tool" {
+		mcpsdk.AddTool[any, any](server, &mcpsdk.Tool{
+			Name:        "extra",
+			Description: "Returns an extra result",
+		}, func(_ context.Context, _ *mcpsdk.CallToolRequest, _ any) (*mcpsdk.CallToolResult, any, error) {
+			return &mcpsdk.CallToolResult{
+				Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "extra"}},
+			}, nil, nil
+		})
+	}
 	if mode == "bad_schema" {
 		server.AddTool(&mcpsdk.Tool{
 			Name:        "bad",
@@ -80,7 +93,7 @@ func TestMCPManagerQuarantinesOnlyMalformedToolAndReportsWarning(t *testing.T) {
 	defer mgr.Close()
 
 	tools := mgr.Tools()
-	if len(tools) != 1 || tools[0].Definition().Name != "mcp__myplugin__myserver__echo" {
+	if len(tools) != 1 || tools[0].Definition().Name != "myserver__echo" {
 		t.Fatalf("tools = %#v, want only valid echo", tools)
 	}
 	mutated := tools[0].Definition()
@@ -162,7 +175,7 @@ func TestMCPManagerAndTool(t *testing.T) {
 
 	oneTool := tools[0]
 	def := oneTool.Definition()
-	if def.Name != "mcp__myplugin__myserver__echo" {
+	if def.Name != "myserver__echo" {
 		t.Errorf("unexpected tool name: %s", def.Name)
 	}
 	if !strings.HasPrefix(def.Description, tool.ExternalCapabilityDescriptionPrefix) || !strings.Contains(def.Description, "Echoes input") {
@@ -469,7 +482,10 @@ func (b *mcpResponseBody) Close() error {
 }
 
 func TestMCPToolNamesAreProviderSafeAndStable(t *testing.T) {
-	longName := formatToolName("Plugin ID", "server/name", strings.Repeat("unsafe.tool:", 12))
+	if got := formatToolName("context7", "query_docs"); got != "context7__query_docs" {
+		t.Fatalf("formatToolName(context7, query_docs) = %q", got)
+	}
+	longName := formatToolName("server/name", strings.Repeat("unsafe.tool:", 12))
 	if len(longName) > 64 {
 		t.Fatalf("tool name length = %d, want <= 64 (%q)", len(longName), longName)
 	}
@@ -479,7 +495,79 @@ func TestMCPToolNamesAreProviderSafeAndStable(t *testing.T) {
 		}
 		t.Fatalf("tool name contains unsafe rune %q in %q", r, longName)
 	}
-	if longName != formatToolName("Plugin ID", "server/name", strings.Repeat("unsafe.tool:", 12)) {
+	if longName != formatToolName("server/name", strings.Repeat("unsafe.tool:", 12)) {
 		t.Fatalf("formatToolName is not stable")
+	}
+}
+
+func TestMCPManagerCompactNamesUseFirstAcceptedToolAndKeepLaterUniqueTools(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	baseSpec := ServerSpec{
+		Name:    "context7",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=^TestMCPServerHelperProcess$"},
+		Env:     map[string]string{"CAELIS_MCP_HELPER": "1"},
+		WorkDir: os.TempDir(),
+	}
+	catalogSpec := baseSpec
+	catalogSpec.PluginID = "caelis.mcp.project"
+	catalogSpec.ReplaySourceIDs = []string{"caelis.mcp.user", "caelis.mcp.project"}
+	pluginSpec := baseSpec
+	pluginSpec.PluginID = "context7-plugin"
+	pluginSpec.Env = map[string]string{
+		"CAELIS_MCP_HELPER":      "1",
+		"CAELIS_MCP_HELPER_MODE": "extra_tool",
+	}
+
+	mgr, err := NewManager(ctx, []ServerSpec{catalogSpec, pluginSpec})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	defer mgr.Close()
+
+	if len(mgr.clients) != 2 {
+		t.Fatalf("running clients = %d, want both same-named servers active", len(mgr.clients))
+	}
+	tools := mgr.Tools()
+	if len(tools) != 2 {
+		t.Fatalf("tools = %d, want first echo plus later unique tool", len(tools))
+	}
+	definitions := map[string]tool.Definition{}
+	for _, item := range tools {
+		definitions[item.Definition().Name] = item.Definition()
+	}
+	echo := definitions["context7__echo"]
+	if echo.Name == "" || echo.Metadata[tool.MetadataPluginID] != catalogSpec.PluginID {
+		t.Fatalf("compact echo definition = %#v, want catalog first-win", echo)
+	}
+	aliases, _ := echo.Metadata[tool.MetadataReplayAliases].([]string)
+	if got, want := aliases, []string{
+		"mcp__caelis_mcp_project__context7__echo",
+		"mcp__caelis_mcp_user__context7__echo",
+		"mcp__context7_plugin__context7__echo",
+	}; !slices.Equal(got, want) {
+		t.Fatalf("echo replay aliases = %#v, want %#v", got, want)
+	}
+	extra := definitions["context7__extra"]
+	if extra.Name == "" || extra.Metadata[tool.MetadataPluginID] != pluginSpec.PluginID {
+		t.Fatalf("compact extra definition = %#v, want later unique plugin tool", extra)
+	}
+
+	search := builtintoolsearch.New(tools)
+	result, err := search.Call(ctx, tool.Call{Name: tool.ToolSearchToolName, Input: json.RawMessage(`{"query":"echo"}`)})
+	if err != nil {
+		t.Fatalf("ToolSearch.Call() error = %v", err)
+	}
+	if len(result.Content) != 1 || result.Content[0].JSON == nil {
+		t.Fatalf("ToolSearch result = %#v, want JSON", result)
+	}
+	var discovered tool.ToolSearchResult
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &discovered); err != nil {
+		t.Fatalf("decode ToolSearch result: %v", err)
+	}
+	if len(discovered.Tools) != 1 || discovered.Tools[0].Name != "context7__echo" {
+		t.Fatalf("ToolSearch tools = %#v, want one compact first-win echo", discovered.Tools)
 	}
 }

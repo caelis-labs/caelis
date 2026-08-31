@@ -25,7 +25,7 @@ const (
 	pluginE2ESkillMarker  = "Use for Caelis plugin system E2E validation."
 	pluginE2EHookMarker   = "CAELIS_PLUGIN_E2E_HOOK_CONTEXT"
 	pluginE2EMCPMarker    = "CAELIS_PLUGIN_E2E_MCP_RESULT"
-	pluginE2EToolName     = "mcp__caelis_e2e_plugin__demo__read_e2e_fixture"
+	pluginE2EToolName     = "demo__read_e2e_fixture"
 	pluginE2EFinalMessage = "CAELIS_PLUGIN_E2E_OK"
 )
 

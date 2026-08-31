@@ -53,10 +53,15 @@ and `WebFetch`. `ViewImage` is exposed only when the selected model declares
 image-input support from maintained endpoint metadata or an explicit model
 override; generic compatible endpoints remain conservative. `Spawn` and
 `ToolSearch` are injected only when their capabilities are available.
-Tool lookup is exact and case-sensitive; external MCP tool names are preserved
-unchanged. Product projectors and Surfaces may attach private presentation
-semantics to the exact built-in names, but those labels do not create aliases
-or additional executable identities.
+Tool lookup is exact and case-sensitive. External MCP tools use a sanitized
+`<server>__<remote-tool>` model-visible name while retaining their complete
+source, server, and original tool identity as metadata. When multiple running
+servers project the same name, the first accepted definition is executable;
+later servers remain running and still contribute tools whose projected names
+are unique. Previous fully qualified MCP names are replay-only compatibility
+aliases and are not additional executable identities. Product projectors and
+Surfaces may attach private presentation semantics to the exact built-in names,
+but those labels do not create aliases or additional executable identities.
 
 ## Quickstart
 

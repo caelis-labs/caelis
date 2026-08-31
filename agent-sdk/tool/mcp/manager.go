@@ -27,7 +27,16 @@ type Manager struct {
 	warnings map[string][]string
 }
 
-func formatToolName(pluginID, serverName, toolName string) string {
+func formatToolName(serverName, toolName string) string {
+	raw := fmt.Sprintf("%s__%s", serverName, toolName)
+	name := sanitizeToolName(raw)
+	if len(name) <= 64 {
+		return name
+	}
+	return shortenToolName(name, raw)
+}
+
+func legacyToolName(pluginID, serverName, toolName string) string {
 	raw := fmt.Sprintf("mcp__%s__%s__%s", pluginID, serverName, toolName)
 	name := sanitizeToolName(raw)
 	if len(name) <= 64 {
@@ -47,13 +56,22 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter) (*
 		clients:  make(map[string]*Client),
 		warnings: make(map[string][]string),
 	}
-	usedToolNames := map[string]string{}
+	// Compact names intentionally omit source identity. Keep every server
+	// running, but expose only the first accepted definition for a projected
+	// name; later servers can still contribute names not already claimed.
+	toolsByProjectedName := map[string]*MCPTool{}
 	seenServers := make(map[string]struct{}, len(specs))
 
 	for _, spec := range specs {
 		if err := validateMCPIdentity("plugin id", spec.PluginID, maxMCPPluginIDRunes); err != nil {
 			_ = mgr.Close()
 			return nil, fmt.Errorf("mcp manager: %w", err)
+		}
+		for _, sourceID := range spec.ReplaySourceIDs {
+			if err := validateMCPIdentity("replay source id", sourceID, maxMCPPluginIDRunes); err != nil {
+				_ = mgr.Close()
+				return nil, fmt.Errorf("mcp manager: %w", err)
+			}
 		}
 		if err := validateMCPIdentity("server name", spec.Name, maxMCPServerNameRunes); err != nil {
 			_ = mgr.Close()
@@ -107,16 +125,21 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter) (*
 				mgr.addWarning(key, fmt.Sprintf("tool %s quarantined: MCP tool count limit reached", toolLabel))
 				continue
 			}
-			identity := spec.PluginID + "\x00" + spec.Name + "\x00" + info.Name
-			baseName := formatToolName(spec.PluginID, spec.Name, info.Name)
+			name := formatToolName(spec.Name, info.Name)
+			legacyNames := legacyToolNames(spec, info.Name)
+			if winner := toolsByProjectedName[name]; winner != nil {
+				winner.addReplayAliases(legacyNames)
+				continue
+			}
 			def, warning, err := normalizeListedToolDefinition(tool.Definition{
-				Name:        baseName,
+				Name:        name,
 				Description: info.Description,
 				Metadata: map[string]any{
-					tool.MetadataToolKind:  tool.MetadataToolKindMCP,
-					tool.MetadataPluginID:  spec.PluginID,
-					tool.MetadataMCPServer: spec.Name,
-					tool.MetadataMCPTool:   info.Name,
+					tool.MetadataToolKind:      tool.MetadataToolKindMCP,
+					tool.MetadataPluginID:      spec.PluginID,
+					tool.MetadataMCPServer:     spec.Name,
+					tool.MetadataMCPTool:       info.Name,
+					tool.MetadataReplayAliases: legacyNames,
 				},
 			}, info.InputSchema)
 			if warning != "" {
@@ -126,7 +149,6 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter) (*
 				mgr.addWarning(key, fmt.Sprintf("tool %s quarantined: %v", toolLabel, err))
 				continue
 			}
-			def.Name = uniqueToolName(baseName, identity, usedToolNames)
 			t := &MCPTool{
 				client:     client,
 				pluginID:   spec.PluginID,
@@ -134,6 +156,7 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter) (*
 				origName:   info.Name,
 				def:        def,
 			}
+			toolsByProjectedName[name] = t
 			mgr.tools = append(mgr.tools, t)
 			acceptedForServer++
 		}
@@ -143,6 +166,23 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter) (*
 	})
 
 	return mgr, nil
+}
+
+func legacyToolNames(spec ServerSpec, toolName string) []string {
+	sourceIDs := make([]string, 0, 1+len(spec.ReplaySourceIDs))
+	sourceIDs = append(sourceIDs, spec.PluginID)
+	sourceIDs = append(sourceIDs, spec.ReplaySourceIDs...)
+	seen := make(map[string]struct{}, len(sourceIDs))
+	names := make([]string, 0, len(sourceIDs))
+	for _, sourceID := range sourceIDs {
+		name := legacyToolName(sourceID, spec.Name, toolName)
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	return names
 }
 
 func mcpWarningToolName(name string) string {
@@ -194,27 +234,6 @@ func sanitizeToolName(raw string) string {
 		name = "mcp_" + name
 	}
 	return name
-}
-
-func uniqueToolName(name string, identity string, used map[string]string) string {
-	if used == nil {
-		return name
-	}
-	if existing, ok := used[name]; !ok || existing == identity {
-		used[name] = identity
-		return name
-	}
-	name = shortenToolName(name, identity)
-	for i := 0; ; i++ {
-		candidate := name
-		if i > 0 {
-			candidate = shortenToolName(fmt.Sprintf("%s_%d", name, i), identity)
-		}
-		if existing, ok := used[candidate]; !ok || existing == identity {
-			used[candidate] = identity
-			return candidate
-		}
-	}
 }
 
 func shortenToolName(name string, identity string) string {
