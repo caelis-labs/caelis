@@ -26,11 +26,12 @@ import (
 )
 
 const (
-	memoryM2ServiceVersion = "0.2.0-alpha.1"
-	memoryM2BuildRevision  = "a407e636a03a3a78c3929a456514699acd810565"
-	memoryM2ModuleVersion  = "v0.0.0-20260901045607-a407e636a03a"
-	memoryGoldenPrivate    = "commit does not authorize push"
-	memoryGoldenShared     = "the project uses Go"
+	memoryReleaseServiceVersion = "0.5.0-rc.1"
+	memoryReleaseBuildRevision  = "012fdfb320d60ffdec5fb4b223b49daf5a732f14"
+	memoryReleaseModuleVersion  = "v0.0.0-20260901080906-012fdfb320d6"
+	memoryReleaseArtifactSHA256 = "dc7f83307823e530f3a249db7d96b30bb1cbf0270f2ae31ab6ce47ce6006fc4d"
+	memoryGoldenPrivate         = "commit does not authorize push"
+	memoryGoldenShared          = "the project uses Go"
 )
 
 func TestMemoryGoldenPathE2E(t *testing.T) {
@@ -39,7 +40,7 @@ func TestMemoryGoldenPathE2E(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	root, err := os.MkdirTemp("/tmp", "caelis-memory-m2-")
+	root, err := os.MkdirTemp("/tmp", "caelis-memory-release-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,16 +182,35 @@ func buildMemoryGoldenArtifacts(t *testing.T, ctx context.Context, root string) 
 	if err := os.MkdirAll(binDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	memoryctl := filepath.Join(binDir, "memoryctl")
+	runMemoryGoldenCommand(t, ctx, repoRootForGatewayAppTest(t), "go", "build", "-trimpath", "-o", memoryctl, "github.com/caelis-labs/memory/cmd/memoryctl")
+	if manifestPath := strings.TrimSpace(os.Getenv("CAELIS_MEMORY_GOLDEN_SIDECAR_MANIFEST")); manifestPath != "" {
+		manifestPath, err := filepath.Abs(manifestPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest, err := sidecar.Load(manifestPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if manifest.ServiceVersion != memoryReleaseServiceVersion ||
+			manifest.BuildRevision != memoryReleaseBuildRevision ||
+			manifest.SHA256 != memoryReleaseArtifactSHA256 {
+			t.Fatalf("public Memory artifact identity = version %q revision %q digest %q", manifest.ServiceVersion, manifest.BuildRevision, manifest.SHA256)
+		}
+		if _, err := manifest.VerifySupportedNative(filepath.Dir(manifestPath)); err != nil {
+			t.Fatal(err)
+		}
+		return memoryGoldenArtifact{manifestPath: manifestPath, memoryctl: memoryctl, manifest: manifest}
+	}
 	memoryd := filepath.Join(binDir, "memoryd")
 	ldflags := fmt.Sprintf(
 		"-s -w -X github.com/caelis-labs/memory/internal/buildinfo.ServiceVersion=%s -X github.com/caelis-labs/memory/internal/buildinfo.BuildRevision=%s",
-		memoryM2ServiceVersion,
-		memoryM2BuildRevision,
+		memoryReleaseServiceVersion,
+		memoryReleaseBuildRevision,
 	)
 	runMemoryGoldenCommand(t, ctx, repoRootForGatewayAppTest(t), "go", "build", "-trimpath", "-ldflags", ldflags, "-o", memoryd, "github.com/caelis-labs/memory/cmd/memoryd")
-	memoryctl := filepath.Join(binDir, "memoryctl")
-	runMemoryGoldenCommand(t, ctx, repoRootForGatewayAppTest(t), "go", "build", "-trimpath", "-o", memoryctl, "github.com/caelis-labs/memory/cmd/memoryctl")
-	manifest, err := sidecar.CreateManifest(memoryd, memoryM2ServiceVersion, memoryM2BuildRevision, runtime.GOOS, runtime.GOARCH)
+	manifest, err := sidecar.CreateManifest(memoryd, memoryReleaseServiceVersion, memoryReleaseBuildRevision, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,14 +237,14 @@ func assertMemoryGoldenModulePin(t *testing.T, ctx context.Context) {
 		t.Fatal(err)
 	}
 	if !module.Main {
-		if module.Version != memoryM2ModuleVersion {
-			t.Fatalf("Memory module version = %q, want %q", module.Version, memoryM2ModuleVersion)
+		if module.Version != memoryReleaseModuleVersion {
+			t.Fatalf("Memory module version = %q, want %q", module.Version, memoryReleaseModuleVersion)
 		}
 		return
 	}
 	head := strings.TrimSpace(string(memoryGoldenCommandOutput(t, ctx, module.Dir, "git", "rev-parse", "HEAD")))
-	if head != memoryM2BuildRevision {
-		t.Fatalf("workspace Memory revision = %q, want %q", head, memoryM2BuildRevision)
+	if head != memoryReleaseBuildRevision {
+		t.Fatalf("workspace Memory revision = %q, want %q", head, memoryReleaseBuildRevision)
 	}
 	if dirty := strings.TrimSpace(string(memoryGoldenCommandOutput(t, ctx, module.Dir, "git", "status", "--porcelain"))); dirty != "" {
 		t.Fatalf("workspace Memory source is dirty:\n%s", dirty)
@@ -272,7 +292,7 @@ func newMemoryGoldenStack(
 ) *Stack {
 	t.Helper()
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName: "caelis-memory-m2", UserID: "memory-golden", StoreDir: storeDir,
+		AppName: "caelis-memory-release", UserID: "memory-golden", StoreDir: storeDir,
 		WorkspaceKey: "memory-golden", WorkspaceCWD: workspace, SkillDirs: []string{},
 		Sandbox: SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
