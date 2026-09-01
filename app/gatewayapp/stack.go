@@ -22,6 +22,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
@@ -77,6 +78,12 @@ type Config struct {
 	// Host and the token itself is not placed in argv or environment.
 	ChildControlURL       string
 	ChildControlTokenFile string
+	// MemoryBotID and MemoryAudience select one Control-owned Memory binding
+	// for later Session Runtime activations. DisableMemory is the independent
+	// process kill switch and never deletes or rewrites appliance data.
+	MemoryBotID    string
+	MemoryAudience memorybinding.OutputAudience
+	DisableMemory  bool
 }
 
 type ModelConfig = modelconfig.Config
@@ -351,6 +358,10 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
+	memorySelection := memorybinding.RuntimeSelection{BotID: cfg.MemoryBotID, Audience: cfg.MemoryAudience}
+	if _, _, err := memorybinding.Resolve(doc.Memory, memorySelection, cfg.DisableMemory); err != nil {
+		return nil, fmt.Errorf("gatewayapp: validate process Memory selection: %w", err)
+	}
 	apiKeyCredentials, err := credentialstore.New(storeDir)
 	if err != nil {
 		return nil, err
@@ -484,6 +495,8 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		sandboxOverride:       cfg.Sandbox,
 		childControlURL:       cfg.ChildControlURL,
 		childControlTokenFile: cfg.ChildControlTokenFile,
+		memorySelection:       memorySelection,
+		memoryDisabled:        cfg.DisableMemory,
 	})
 	sessionModelPins := newSessionModelPinRegistry(apiKeyCredentials.Get, lookup.Snapshot().Configs...)
 	stack := &Stack{

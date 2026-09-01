@@ -1,6 +1,10 @@
 package gatewayapp
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/caelis-labs/caelis/control/memorybinding"
+)
 
 func TestRuntimeProcessConfigSourceSnapshotsAndClonesMutableState(t *testing.T) {
 	t.Parallel()
@@ -18,6 +22,10 @@ func TestRuntimeProcessConfigSourceSnapshotsAndClonesMutableState(t *testing.T) 
 		},
 		childControlURL:       " http://127.0.0.1:1234 ",
 		childControlTokenFile: " token-a ",
+		memorySelection: memorybinding.RuntimeSelection{
+			BotID: " bot-a ", Audience: " PRIVATE ",
+		},
+		memoryDisabled: true,
 	})
 
 	first := source.snapshot()
@@ -37,6 +45,9 @@ func TestRuntimeProcessConfigSourceSnapshotsAndClonesMutableState(t *testing.T) 
 	}
 	if second.childControlURL != "http://127.0.0.1:1234" || second.childControlTokenFile != "token-a" {
 		t.Fatalf("child control snapshot = %#v", second)
+	}
+	if second.memorySelection.BotID != "bot-a" || second.memorySelection.Audience != memorybinding.OutputAudiencePrivate || !second.memoryDisabled {
+		t.Fatalf("Memory process snapshot = %#v", second)
 	}
 }
 

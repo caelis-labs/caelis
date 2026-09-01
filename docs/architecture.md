@@ -50,6 +50,7 @@ and acceptance history belong in Git and CI, not in this map.
 | `control/taskstream`, `control/appserver/taskstream` | Session-authorized Task directory, observation, and Task-to-Envelope projection |
 | `control/modelcatalog`, `modelconfig`, `modelprofile`, `placement`, `agentbinding` | Provider and model discovery, credentials/configuration, selectable profiles, placement, and fixed Agent bindings |
 | `control/agents` | External ACP Agent identity, preparation, connection, and configuration |
+| `control/memorybinding` | Stable Bot-to-Memory identity references, Runtime actor and audience selection, exact appliance compatibility pins, and immutable selected binding snapshots |
 | `control/mcpconfig`, `control/plugin`, `control/status` | MCP assembly inputs, plugin lifecycle, and product status read models |
 | `app/controlserver` | Authenticated HTTP/SSE Host listener, policy, readiness, and drain |
 | `app/gatewayapp` | Product Host composition, Session Runtime registry, concrete Control services, and shutdown |
@@ -103,6 +104,15 @@ Ordinary model, skill, MCP, plugin, sandbox, and placement changes therefore
 affect later activations. Explicit provider or ACP-Agent removal is the narrow
 revocation exception: Control removes the profile from live placement and repairs
 affected Session bindings so later work cannot resolve a deleted endpoint.
+
+Memory follows the same activation boundary. Control selects one stable Bot and
+one `private` or `shared` output audience from process-owned input, then detaches
+only that audience's endpoint, Runtime actor, principal, issuer reference, View,
+Grant, and binding version. The activated Runtime does not retain the complete
+Bot catalog, the alternate audience, or the cognitive Memory identity. Later
+binding changes affect later activations; an independent process kill switch
+omits Memory from an activation without rewriting configuration or appliance
+data. Public or mixed-audience Runtime composition is invalid.
 
 Shutdown closes admission, cancels and drains producers, waits for routed
 mutations and Runtime cleanup, then closes stores and process resources.
@@ -180,6 +190,15 @@ active Runtime.
 Plugin configuration is also canonical AppConfig state. Managed plugin content
 is immutable and pinned while an active Runtime uses it; configuration mutation
 and installation effects remain on the principal-bound Control command path.
+
+Memory AppConfig contains only endpoint compatibility pins and opaque Bot,
+identity, actor, principal, issuer-credential, View, and Grant references. Raw
+credentials, capabilities, receipts, records, indexes, lifecycle policy, and
+Steward state belong outside AppConfig. A managed-local socket path is derived by
+Host-private composition and cannot be persisted as product configuration.
+References do not grant access: Host-private composition resolves the issuer
+credential, while the independent Memory appliance remains the authority for
+Views, Grants, capabilities, receipts, retrieval, and lifecycle.
 
 ## Compatibility and current limits
 

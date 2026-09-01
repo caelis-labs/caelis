@@ -2,6 +2,8 @@ package gatewayapp
 
 import (
 	"errors"
+
+	"github.com/caelis-labs/caelis/control/memorybinding"
 )
 
 // sessionRuntimeAssemblyDeps are the process-scoped authorities shared with
@@ -22,6 +24,8 @@ type sessionRuntimeProcessSnapshot struct {
 	sandboxOverride       SandboxConfig
 	childControlURL       string
 	childControlTokenFile string
+	memorySelection       memorybinding.RuntimeSelection
+	memoryDisabled        bool
 }
 
 func newSessionRuntimeAssemblyDeps(host *Stack) (sessionRuntimeAssemblyDeps, error) {

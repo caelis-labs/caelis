@@ -8,6 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/mcpconfig"
+	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -34,6 +35,7 @@ type AppConfig struct {
 	Plugins               []PluginConfig               `json:"plugins,omitempty"`
 	PluginMarketplaces    []MarketplaceConfig          `json:"plugin_marketplaces,omitempty"`
 	MCPServers            mcpconfig.Servers            `json:"mcp_servers,omitempty"`
+	Memory                memorybinding.Configuration  `json:"memory,omitzero"`
 	WorkspaceTrust        workspacetrust.Configuration `json:"workspace_trust,omitempty"`
 }
 
@@ -68,6 +70,9 @@ func Validate(doc AppConfig) error {
 	}
 	if err := mcpconfig.Validate(doc.MCPServers); err != nil {
 		return fmt.Errorf("gatewayapp: invalid MCP servers: %w", err)
+	}
+	if err := memorybinding.Validate(doc.Memory); err != nil {
+		return fmt.Errorf("gatewayapp: invalid Memory binding: %w", err)
 	}
 	if err := workspacetrust.Validate(doc.WorkspaceTrust); err != nil {
 		return fmt.Errorf("gatewayapp: invalid workspace trust: %w", err)
@@ -136,6 +141,7 @@ func Normalize(doc AppConfig) AppConfig {
 	doc.Plugins = plugin.DedupeConfigs(doc.Plugins)
 	doc.PluginMarketplaces = plugin.DedupeMarketplaceConfigs(doc.PluginMarketplaces)
 	doc.MCPServers = mcpconfig.Normalize(doc.MCPServers)
+	doc.Memory = memorybinding.Normalize(doc.Memory)
 	doc.WorkspaceTrust = workspacetrust.Normalize(doc.WorkspaceTrust)
 	return doc
 }
@@ -298,6 +304,9 @@ func validateCurrentRecordIdentities(doc AppConfig) error {
 	}
 	if err := mcpconfig.ValidateIdentities(doc.MCPServers); err != nil {
 		return fmt.Errorf("gatewayapp: invalid MCP servers: %w", err)
+	}
+	if err := memorybinding.ValidateIdentities(doc.Memory); err != nil {
+		return fmt.Errorf("gatewayapp: invalid Memory binding: %w", err)
 	}
 	if err := workspacetrust.ValidateIdentities(doc.WorkspaceTrust); err != nil {
 		return fmt.Errorf("gatewayapp: invalid workspace trust: %w", err)

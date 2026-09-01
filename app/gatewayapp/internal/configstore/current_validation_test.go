@@ -1,14 +1,17 @@
 package configstore
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/mcpconfig"
+	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
@@ -109,6 +112,28 @@ func TestStoreRejectsDuplicateCurrentRecordsBeforeNormalization(t *testing.T) {
 			wantErr: "duplicate MCP server",
 		},
 		{
+			name: "Memory Bot",
+			mutate: func(doc AppConfig) AppConfig {
+				doc.Memory = currentMemoryBindingFixture()
+				duplicate := doc.Memory.Bots[0]
+				duplicate.RuntimeActorRef = "actor-b"
+				doc.Memory.Bots = append(doc.Memory.Bots, duplicate)
+				return doc
+			},
+			wantErr: "duplicate Bot ID",
+		},
+		{
+			name: "Memory Runtime actor",
+			mutate: func(doc AppConfig) AppConfig {
+				doc.Memory = currentMemoryBindingFixture()
+				duplicate := doc.Memory.Bots[0]
+				duplicate.BotID = "bot-b"
+				doc.Memory.Bots = append(doc.Memory.Bots, duplicate)
+				return doc
+			},
+			wantErr: "duplicate Runtime actor",
+		},
+		{
 			name: "workspace trust level",
 			mutate: func(doc AppConfig) AppConfig {
 				doc.WorkspaceTrust = workspacetrust.Configuration{
@@ -140,6 +165,45 @@ func TestStoreRejectsDuplicateCurrentRecordsBeforeNormalization(t *testing.T) {
 				t.Fatalf("Load() error = %v, want containing %q", err, test.wantErr)
 			}
 		})
+	}
+}
+
+func TestStoreRoundTripsDisabledMemoryBindingWithoutSecretMaterial(t *testing.T) {
+	store := New(t.TempDir())
+	doc := currentValidationFixture()
+	doc.Memory = currentMemoryBindingFixture()
+	doc.Memory.Enabled = false
+	if err := store.Save(doc); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := memorybinding.Normalize(doc.Memory)
+	if got := loaded.Memory; !reflect.DeepEqual(got, want) {
+		t.Fatalf("loaded Memory binding = %#v, want %#v", got, want)
+	}
+	raw, err := os.ReadFile(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("issuer-secret")) || !bytes.Contains(raw, []byte(`"issuer_credential_ref"`)) {
+		t.Fatalf("persisted Memory binding contains secret or omits credential reference: %s", raw)
+	}
+}
+
+func TestZeroMemoryBindingIsOmittedFromCurrentDocument(t *testing.T) {
+	store := New(t.TempDir())
+	if err := store.Save(currentValidationFixture()); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"memory"`)) {
+		t.Fatalf("zero Memory binding was persisted: %s", raw)
 	}
 }
 
@@ -197,5 +261,25 @@ func currentValidationFixture() AppConfig {
 				}},
 			}},
 		},
+	}
+}
+
+func currentMemoryBindingFixture() memorybinding.Configuration {
+	return memorybinding.Configuration{
+		Enabled: true,
+		Endpoint: memorybinding.EndpointConfig{
+			ID: "memory-default", Deployment: memorybinding.DeploymentModeManagedLocal,
+			Compatibility: memorybinding.APICompatibility{
+				Protocol: "memory.local.v1alpha1", APIVersion: "memory.v1alpha1",
+				CoreProfile: "memory.core.v1alpha1", ServiceVersion: "0.2.0-alpha.1",
+				BuildRevision: strings.Repeat("a", 40), ArtifactSHA256: strings.Repeat("b", 64),
+			},
+		},
+		Bots: []memorybinding.BotMemoryBinding{{
+			BotID: "bot-a", RuntimeActorRef: "actor-a", MemoryIdentityRef: "identity-a",
+			PrincipalRef: "principal:a", IssuerCredentialRef: "memory-issuer:bot-a",
+			Private:        memorybinding.AudienceBinding{ViewRef: "view-a", GrantRef: "grant-a"},
+			BindingVersion: 1,
+		}},
 	}
 }

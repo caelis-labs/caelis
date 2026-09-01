@@ -28,6 +28,7 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
@@ -1523,6 +1524,128 @@ func TestSessionRuntimeSandboxConfigIsDetachedFromHostMutation(t *testing.T) {
 	}
 	if !slices.Equal(refreshed.instance.sandbox.WritableRoots, []string{updatedWritableRoot}) {
 		t.Fatalf("reactivated Session sandbox writable roots = %#v, want current snapshot", refreshed.instance.sandbox.WritableRoots)
+	}
+}
+
+func TestSessionRuntimeMemoryBindingIsSelectedAndPinnedAtActivation(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
+	storeDir := t.TempDir()
+	store := newAppConfigStore(storeDir)
+	doc, err := store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.Memory = testRuntimeMemoryConfiguration(1, "view-private-v1", "grant-private-v1")
+	if _, err := store.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
+		t.Fatal(err)
+	}
+	stack, err := NewLocalStack(Config{
+		StoreDir:       storeDir,
+		WorkspaceKey:   "workspace",
+		WorkspaceCWD:   workspace,
+		SkillDirs:      []string{},
+		Sandbox:        SandboxConfig{RequestedType: "host"},
+		MemoryBotID:    "bot-a",
+		MemoryAudience: memorybinding.OutputAudiencePrivate,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	client := newWorkspaceRuntimeHTTPClient(t, stack, "local-user")
+	firstID := createWorkspaceRuntimeTestSession(t, client, "create-memory-first", "memory-first", "workspace", workspace)
+	first := activateSessionRuntime(t, stack, firstID)
+	firstBinding := first.instance.activation.memoryBinding
+	if firstBinding == nil || firstBinding.ViewRef != "view-private-v1" ||
+		firstBinding.GrantRef != "grant-private-v1" || firstBinding.BindingVersion != 1 ||
+		firstBinding.Audience != memorybinding.OutputAudiencePrivate {
+		t.Fatalf("first Runtime Memory binding = %#v", firstBinding)
+	}
+	if !reflect.DeepEqual(first.instance.activation.appConfig.Memory, memorybinding.Configuration{}) {
+		t.Fatalf("Runtime retained full Memory configuration: %#v", first.instance.activation.appConfig.Memory)
+	}
+
+	doc, err = stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.Memory = testRuntimeMemoryConfiguration(2, "view-private-v2", "grant-private-v2")
+	if _, err := stack.composition.authorities.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
+		t.Fatal(err)
+	}
+	if firstBinding.ViewRef != "view-private-v1" || firstBinding.BindingVersion != 1 {
+		t.Fatalf("live Runtime Memory binding drifted after AppConfig mutation: %#v", firstBinding)
+	}
+
+	secondID := createWorkspaceRuntimeTestSession(t, client, "create-memory-second", "memory-second", "workspace", workspace)
+	second := activateSessionRuntime(t, stack, secondID)
+	secondBinding := second.instance.activation.memoryBinding
+	if secondBinding == nil || secondBinding.ViewRef != "view-private-v2" ||
+		secondBinding.GrantRef != "grant-private-v2" || secondBinding.BindingVersion != 2 {
+		t.Fatalf("second Runtime Memory binding = %#v", secondBinding)
+	}
+}
+
+func TestMemoryProcessKillSwitchRemovesRuntimeBindingWithoutMutatingConfig(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
+	storeDir := t.TempDir()
+	store := newAppConfigStore(storeDir)
+	doc, err := store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := testRuntimeMemoryConfiguration(1, "view-private", "grant-private")
+	doc.Memory = want
+	if _, err := store.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
+		t.Fatal(err)
+	}
+	stack, err := NewLocalStack(Config{
+		StoreDir:      storeDir,
+		WorkspaceKey:  "workspace",
+		WorkspaceCWD:  workspace,
+		SkillDirs:     []string{},
+		Sandbox:       SandboxConfig{RequestedType: "host"},
+		DisableMemory: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	client := newWorkspaceRuntimeHTTPClient(t, stack, "local-user")
+	sessionID := createWorkspaceRuntimeTestSession(t, client, "create-memory-disabled", "memory-disabled", "workspace", workspace)
+	runtime := activateSessionRuntime(t, stack, sessionID)
+	if runtime.instance.activation.memoryBinding != nil {
+		t.Fatalf("kill-switched Runtime retained Memory binding: %#v", runtime.instance.activation.memoryBinding)
+	}
+	loaded, err := stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(loaded.Memory, memorybinding.Normalize(want)) {
+		t.Fatalf("kill switch mutated persisted Memory binding: %#v", loaded.Memory)
+	}
+}
+
+func testRuntimeMemoryConfiguration(version uint64, viewRef, grantRef string) memorybinding.Configuration {
+	return memorybinding.Configuration{
+		Enabled: true,
+		Endpoint: memorybinding.EndpointConfig{
+			ID: "memory-default", Deployment: memorybinding.DeploymentModeManagedLocal,
+			Compatibility: memorybinding.APICompatibility{
+				Protocol: "memory.local.v1alpha1", APIVersion: "memory.v1alpha1",
+				CoreProfile: "memory.core.v1alpha1", ServiceVersion: "0.2.0-alpha.1",
+				BuildRevision: strings.Repeat("a", 40), ArtifactSHA256: strings.Repeat("b", 64),
+			},
+		},
+		Bots: []memorybinding.BotMemoryBinding{{
+			BotID: "bot-a", RuntimeActorRef: "actor-a", MemoryIdentityRef: "identity-a",
+			PrincipalRef: "principal:a", IssuerCredentialRef: "memory-issuer:bot-a",
+			Private:        memorybinding.AudienceBinding{ViewRef: viewRef, GrantRef: grantRef},
+			Shared:         memorybinding.AudienceBinding{ViewRef: "view-shared", GrantRef: "grant-shared"},
+			BindingVersion: version,
+		}},
 	}
 }
 

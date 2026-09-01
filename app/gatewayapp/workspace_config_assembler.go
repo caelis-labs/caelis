@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/control/memorybinding"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
@@ -85,6 +86,10 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	if err := controlplacement.ValidateSnapshot(placement.placement); err != nil {
 		return nil, err
 	}
+	memoryBinding, err := resolveRuntimeMemoryBinding(doc.Memory, process)
+	if err != nil {
+		return nil, err
+	}
 
 	instance := &sessionRuntimeInstance{
 		runtimeComposition: runtimeComposition{
@@ -94,7 +99,8 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 			lookup:      lookup,
 			activation: &sessionRuntimeActivation{
 				modelCatalog:          deps.modelCatalog,
-				appConfig:             ptrToConfigSnapshot(doc),
+				appConfig:             ptrToRuntimeConfigSnapshot(doc),
+				memoryBinding:         memoryBinding,
 				childControlURL:       process.childControlURL,
 				childControlTokenFile: process.childControlTokenFile,
 			},
@@ -204,9 +210,31 @@ func cloneSessionModelLookup(source *modelLookup, doc AppConfig) (*modelLookup, 
 	return cloned, nil
 }
 
-func ptrToConfigSnapshot(doc AppConfig) *AppConfig {
+func ptrToRuntimeConfigSnapshot(doc AppConfig) *AppConfig {
 	snapshot := configstore.Normalize(doc)
+	// The selected Runtime binding is the only Memory authority retained by an
+	// activation. Keeping the full configuration here would leave alternate Bot
+	// or audience references reachable from Runtime composition.
+	snapshot.Memory = memorybinding.Configuration{}
 	return &snapshot
+}
+
+func resolveRuntimeMemoryBinding(
+	configuration memorybinding.Configuration,
+	process sessionRuntimeProcessSnapshot,
+) (*memorybinding.RuntimeMemoryBindingSnapshot, error) {
+	snapshot, enabled, err := memorybinding.Resolve(
+		configuration,
+		process.memorySelection,
+		process.memoryDisabled,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gatewayapp: resolve Runtime Memory binding: %w", err)
+	}
+	if !enabled {
+		return nil, nil
+	}
+	return &snapshot, nil
 }
 
 func cloneSessionModelConfig(config ModelConfig) ModelConfig {

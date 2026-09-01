@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/control/memorybinding"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
@@ -80,6 +81,7 @@ type runtimeProcessState struct {
 type sessionRuntimeActivation struct {
 	modelCatalog          *modelLookup
 	appConfig             *AppConfig
+	memoryBinding         *memorybinding.RuntimeMemoryBindingSnapshot
 	childControlURL       string
 	childControlTokenFile string
 }
