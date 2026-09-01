@@ -6,34 +6,28 @@ import (
 	"testing"
 )
 
-func TestResolveSelectsOneAudienceIntoDetachedRuntimeSnapshot(t *testing.T) {
+func TestResolveSelectsOneOpaqueBindingIntoDetachedRuntimeSnapshot(t *testing.T) {
 	configuration := testConfiguration()
-	private, enabled, err := Resolve(configuration, RuntimeSelection{
-		BotID: " bot-a ", Audience: " PRIVATE ",
-	}, false)
+	selected, enabled, err := Resolve(configuration, RuntimeSelection{BindingRef: " shared "}, false)
 	if err != nil || !enabled {
-		t.Fatalf("Resolve(private) = %#v, %v, %v", private, enabled, err)
+		t.Fatalf("Resolve(shared) = %#v, %v, %v", selected, enabled, err)
 	}
-	if private.RuntimeActorRef != "actor-a" || private.PrincipalRef != "principal:a" ||
-		private.ViewRef != "view-a-private" || private.GrantRef != "grant-a-private" ||
-		private.Audience != OutputAudiencePrivate || private.BindingVersion != 7 {
-		t.Fatalf("private snapshot = %#v", private)
+	if selected.BindingRef != "shared" || selected.RuntimeActorRef != "actor-a" ||
+		selected.PrincipalRef != "principal:a" || selected.ViewRef != "view-a-shared" ||
+		selected.GrantRef != "grant-a-shared" || selected.Audience != OutputAudienceShared ||
+		selected.BindingVersion != 7 {
+		t.Fatalf("shared snapshot = %#v", selected)
 	}
-	if strings.Contains(private.ViewRef, "shared") || strings.Contains(private.GrantRef, "shared") {
-		t.Fatalf("private snapshot retained alternate audience binding: %#v", private)
+	if strings.Contains(selected.ViewRef, "private") || strings.Contains(selected.GrantRef, "private") {
+		t.Fatalf("snapshot retained another binding: %#v", selected)
 	}
 
-	shared, enabled, err := Resolve(configuration, RuntimeSelection{
-		BotID: "bot-a", Audience: OutputAudienceShared,
-	}, false)
+	defaulted, enabled, err := Resolve(configuration, RuntimeSelection{}, false)
 	if err != nil || !enabled {
-		t.Fatalf("Resolve(shared) = %#v, %v, %v", shared, enabled, err)
+		t.Fatalf("Resolve(default) = %#v, %v, %v", defaulted, enabled, err)
 	}
-	if shared.ViewRef != "view-a-shared" || shared.GrantRef != "grant-a-shared" || shared.Audience != OutputAudienceShared {
-		t.Fatalf("shared snapshot = %#v", shared)
-	}
-	if shared == private {
-		t.Fatal("private and shared selections produced the same snapshot")
+	if defaulted.BindingRef != "private" || defaulted.Audience != OutputAudiencePrivate || defaulted.ViewRef != "view-a-private" {
+		t.Fatalf("default snapshot = %#v", defaulted)
 	}
 }
 
@@ -44,34 +38,38 @@ func TestFeatureDisableAndKillSwitchPreserveConfiguration(t *testing.T) {
 	if err := Validate(disabled); err != nil {
 		t.Fatalf("Validate(disabled retained config) = %v", err)
 	}
-	if snapshot, enabled, err := Resolve(disabled, RuntimeSelection{BotID: "bot-a", Audience: OutputAudiencePrivate}, false); err != nil || enabled || snapshot != (RuntimeMemoryBindingSnapshot{}) {
+	if snapshot, enabled, err := Resolve(disabled, RuntimeSelection{}, false); err != nil || enabled || snapshot != (RuntimeMemoryBindingSnapshot{}) {
 		t.Fatalf("Resolve(feature disabled) = %#v, %v, %v", snapshot, enabled, err)
 	}
-	if !reflect.DeepEqual(disabled.Endpoint, configuration.Endpoint) || !reflect.DeepEqual(disabled.Bots, configuration.Bots) {
+	if !reflect.DeepEqual(disabled.Endpoint, configuration.Endpoint) || !reflect.DeepEqual(disabled.Bindings, configuration.Bindings) {
 		t.Fatal("feature disable changed retained binding references")
 	}
-	if snapshot, enabled, err := Resolve(configuration, RuntimeSelection{BotID: "bot-a", Audience: OutputAudiencePrivate}, true); err != nil || enabled || snapshot != (RuntimeMemoryBindingSnapshot{}) {
+	if snapshot, enabled, err := Resolve(configuration, RuntimeSelection{}, true); err != nil || enabled || snapshot != (RuntimeMemoryBindingSnapshot{}) {
 		t.Fatalf("Resolve(kill switch) = %#v, %v, %v", snapshot, enabled, err)
 	}
 }
 
 func TestValidationRejectsDuplicateOrIncompleteAuthorityReferences(t *testing.T) {
 	for name, mutate := range map[string]func(*Configuration){
-		"duplicate Bot": func(configuration *Configuration) {
-			duplicate := configuration.Bots[0]
+		"duplicate binding": func(configuration *Configuration) {
+			duplicate := configuration.Bindings[0]
 			duplicate.RuntimeActorRef = "actor-b"
-			configuration.Bots = append(configuration.Bots, duplicate)
+			configuration.Bindings = append(configuration.Bindings, duplicate)
 		},
-		"duplicate actor": func(configuration *Configuration) {
-			duplicate := configuration.Bots[0]
-			duplicate.BotID = "bot-b"
-			configuration.Bots = append(configuration.Bots, duplicate)
+		"missing default": func(configuration *Configuration) {
+			configuration.DefaultBindingRef = ""
 		},
-		"half private binding": func(configuration *Configuration) {
-			configuration.Bots[0].Private.GrantRef = ""
+		"unknown default": func(configuration *Configuration) {
+			configuration.DefaultBindingRef = "missing"
+		},
+		"missing Grant": func(configuration *Configuration) {
+			configuration.Bindings[0].GrantRef = ""
 		},
 		"missing issuer credential reference": func(configuration *Configuration) {
-			configuration.Bots[0].IssuerCredentialRef = ""
+			configuration.Bindings[0].IssuerCredentialRef = ""
+		},
+		"invalid audience": func(configuration *Configuration) {
+			configuration.Bindings[0].Audience = "public"
 		},
 		"persisted managed endpoint": func(configuration *Configuration) {
 			configuration.Endpoint.Endpoint = "/tmp/memoryd.sock"
@@ -90,21 +88,10 @@ func TestValidationRejectsDuplicateOrIncompleteAuthorityReferences(t *testing.T)
 	}
 }
 
-func TestResolveFailsClosedForUnknownBotAudienceOrUnboundAudience(t *testing.T) {
+func TestResolveFailsClosedForUnknownBinding(t *testing.T) {
 	configuration := testConfiguration()
-	for name, selection := range map[string]RuntimeSelection{
-		"unknown Bot":      {BotID: "bot-b", Audience: OutputAudiencePrivate},
-		"unknown audience": {BotID: "bot-a", Audience: "public"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if _, enabled, err := Resolve(configuration, selection, false); err == nil || enabled {
-				t.Fatalf("Resolve(%s) = enabled:%v error:%v", name, enabled, err)
-			}
-		})
-	}
-	configuration.Bots[0].Shared = AudienceBinding{}
-	if _, enabled, err := Resolve(configuration, RuntimeSelection{BotID: "bot-a", Audience: OutputAudienceShared}, false); err == nil || enabled {
-		t.Fatalf("Resolve(unbound shared) = enabled:%v error:%v", enabled, err)
+	if _, enabled, err := Resolve(configuration, RuntimeSelection{BindingRef: "missing"}, false); err == nil || enabled {
+		t.Fatalf("Resolve(unknown) = enabled:%v error:%v", enabled, err)
 	}
 }
 
@@ -119,12 +106,18 @@ func testConfiguration() Configuration {
 				BuildRevision: strings.Repeat("a", 40), ArtifactSHA256: strings.Repeat("b", 64),
 			},
 		},
-		Bots: []BotMemoryBinding{{
-			BotID: "bot-a", RuntimeActorRef: "actor-a", MemoryIdentityRef: "identity-a",
-			PrincipalRef: "principal:a", IssuerCredentialRef: "memory-issuer:bot-a",
-			Private:        AudienceBinding{ViewRef: "view-a-private", GrantRef: "grant-a-private"},
-			Shared:         AudienceBinding{ViewRef: "view-a-shared", GrantRef: "grant-a-shared"},
-			BindingVersion: 7,
-		}},
+		DefaultBindingRef: "private",
+		Bindings: []AccessBinding{
+			{
+				BindingRef: "private", RuntimeActorRef: "actor-a", PrincipalRef: "principal:a",
+				IssuerCredentialRef: "memory-issuer:a", ViewRef: "view-a-private", GrantRef: "grant-a-private",
+				Audience: OutputAudiencePrivate, BindingVersion: 7,
+			},
+			{
+				BindingRef: "shared", RuntimeActorRef: "actor-a", PrincipalRef: "principal:a",
+				IssuerCredentialRef: "memory-issuer:a", ViewRef: "view-a-shared", GrantRef: "grant-a-shared",
+				Audience: OutputAudienceShared, BindingVersion: 7,
+			},
+		},
 	}
 }

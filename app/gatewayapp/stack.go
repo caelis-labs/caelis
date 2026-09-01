@@ -37,6 +37,20 @@ import (
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
 
+// MemoryBindingSelectionContext is the host-neutral input for selecting one
+// opaque Memory binding at Session creation and Runtime activation. It carries
+// no downstream product identity or Memory authority.
+type MemoryBindingSelectionContext struct {
+	SessionRef         session.SessionRef
+	Workspace          session.WorkspaceRef
+	FallbackBindingRef memorybinding.BindingRef
+}
+
+// MemoryBindingSelector lets an embedding map future product concepts to an
+// opaque binding without adding those concepts to Caelis. Returning an empty
+// reference preserves the process fallback and AppConfig default.
+type MemoryBindingSelector func(context.Context, MemoryBindingSelectionContext) (memorybinding.BindingRef, error)
+
 type Config struct {
 	AppName  string
 	UserID   string
@@ -80,15 +94,16 @@ type Config struct {
 	// Host and the token itself is not placed in argv or environment.
 	ChildControlURL       string
 	ChildControlTokenFile string
-	// MemoryBotID and MemoryAudience select one Control-owned Memory binding
-	// for later Session Runtime activations. DisableMemory is the independent
-	// process kill switch and never deletes or rewrites appliance data.
-	MemoryBotID    string
-	MemoryAudience memorybinding.OutputAudience
-	DisableMemory  bool
+	// MemoryBindingRef optionally selects one opaque Control-owned Memory
+	// binding for later Session Runtime activations. An empty value uses the
+	// explicit AppConfig default. DisableMemory is the independent process kill
+	// switch and never deletes or rewrites appliance data.
+	MemoryBindingRef      memorybinding.BindingRef
+	MemoryBindingSelector MemoryBindingSelector
+	DisableMemory         bool
 	// MemorySidecarManifest and MemoryDataDir are Host-private managed-local
-	// composition inputs. The socket is derived below DataDir and neither path
-	// becomes product Memory authority.
+	// composition inputs. The native local endpoint is derived from DataDir and
+	// neither value becomes product Memory authority.
 	MemorySidecarManifest string
 	MemoryDataDir         string
 	// memoryHost is a package-private deterministic test seam. Production must
@@ -357,8 +372,12 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, fmt.Errorf("gatewayapp: Host ownership does not authorize StoreDir")
 	}
 	configStore := newAppConfigStore(storeDir)
+	runtimeDiagnostics := newRuntimeDiagnosticsLogger(storeDir)
 	doc, err := configStore.Load()
 	if err != nil {
+		if isInvalidMemoryConfiguration(err) {
+			logMemoryActivationState(runtimeDiagnostics, memoryActivationUnconfigured)
+		}
 		return nil, err
 	}
 	hostedCodexAvailable, err := builtInCodexAdapterAvailable(context.Background())
@@ -369,10 +388,27 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	memorySelection := memorybinding.RuntimeSelection{BotID: cfg.MemoryBotID, Audience: cfg.MemoryAudience}
-	initialMemoryBinding, memoryEnabled, err := memorybinding.Resolve(doc.Memory, memorySelection, cfg.DisableMemory)
+	memorySelection := memorybinding.RuntimeSelection{BindingRef: cfg.MemoryBindingRef}
+	initialMemorySelection := memorySelection
+	if cfg.MemoryBindingSelector != nil {
+		if memorySelection.BindingRef != "" {
+			if _, _, fallbackErr := memorybinding.Resolve(doc.Memory, memorySelection, cfg.DisableMemory); fallbackErr != nil {
+				logMemoryActivationState(runtimeDiagnostics, memoryActivationUnconfigured)
+				return nil, fmt.Errorf("gatewayapp: validate fallback Memory selection: %w", fallbackErr)
+			}
+		}
+		initialMemorySelection = memorybinding.RuntimeSelection{}
+	}
+	initialMemoryBinding, memoryEnabled, err := memorybinding.Resolve(doc.Memory, initialMemorySelection, cfg.DisableMemory)
 	if err != nil {
+		logMemoryActivationState(runtimeDiagnostics, memoryActivationUnconfigured)
 		return nil, fmt.Errorf("gatewayapp: validate process Memory selection: %w", err)
+	}
+	switch {
+	case cfg.DisableMemory:
+		logMemoryActivationState(runtimeDiagnostics, memoryActivationDisabled)
+	case !memoryEnabled:
+		logMemoryActivationState(runtimeDiagnostics, memoryActivationUnconfigured)
 	}
 	apiKeyCredentials, err := credentialstore.New(storeDir)
 	if err != nil {
@@ -388,7 +424,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	runtimeDiagnostics := newRuntimeDiagnosticsLogger(storeDir)
 	sessionStoreConfig := sessionfile.Config{
 		RootDir:     filepath.Join(storeDir, "sessions"),
 		Diagnostics: runtimeDiagnostics,
@@ -508,6 +543,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		childControlURL:       cfg.ChildControlURL,
 		childControlTokenFile: cfg.ChildControlTokenFile,
 		memorySelection:       memorySelection,
+		memorySelector:        cfg.MemoryBindingSelector,
 		memoryDisabled:        cfg.DisableMemory,
 	})
 	sessionModelPins := newSessionModelPinRegistry(apiKeyCredentials.Get, lookup.Snapshot().Configs...)
@@ -555,13 +591,20 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			if memoryDataDir == "" {
 				memoryDataDir = filepath.Join(storeDir, "memory", "appliance")
 			}
+			memoryManifestPath := strings.TrimSpace(cfg.MemorySidecarManifest)
+			if memoryManifestPath == "" {
+				logMemoryActivationState(runtimeDiagnostics, memoryActivationUnconfigured)
+				_ = stack.Close()
+				return nil, fmt.Errorf("gatewayapp: managed Memory sidecar manifest is not configured")
+			}
 			stack.memorySidecar, err = memoryhost.Start(context.Background(), memoryhost.Config{
-				ManifestPath: strings.TrimSpace(cfg.MemorySidecarManifest),
+				ManifestPath: memoryManifestPath,
 				DataDir:      memoryDataDir,
 				Endpoint:     initialMemoryBinding.Endpoint,
 				Credentials:  memoryCredentials.Get,
 			})
 			if err != nil {
+				logMemoryActivationState(runtimeDiagnostics, memoryhost.FailureClass(err))
 				_ = stack.Close()
 				return nil, err
 			}

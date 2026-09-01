@@ -831,8 +831,7 @@ func TestEnvBoolParsesTUIAnimationSetting(t *testing.T) {
 }
 
 func TestMemoryHostEnvironmentReachesProductComposition(t *testing.T) {
-	t.Setenv("CAELIS_MEMORY_BOT_ID", " bot-a ")
-	t.Setenv("CAELIS_MEMORY_AUDIENCE", " PRIVATE ")
+	t.Setenv("CAELIS_MEMORY_BINDING_REF", " primary ")
 	t.Setenv("CAELIS_MEMORY_DISABLED", "true")
 	t.Setenv("CAELIS_MEMORY_SIDECAR_MANIFEST", " /opt/caelis/memoryd.manifest.json ")
 	t.Setenv("CAELIS_MEMORY_DATA_DIR", " /var/lib/caelis-memory ")
@@ -852,7 +851,7 @@ func TestMemoryHostEnvironmentReachesProductComposition(t *testing.T) {
 	if !errors.Is(err, stop) {
 		t.Fatalf("runWithProductClientOpener() error = %v", err)
 	}
-	if captured.MemoryBotID != "bot-a" || string(captured.MemoryAudience) != "private" || !captured.DisableMemory ||
+	if captured.MemoryBindingRef != "primary" || !captured.DisableMemory ||
 		captured.MemorySidecarManifest != "/opt/caelis/memoryd.manifest.json" ||
 		captured.MemoryDataDir != "/var/lib/caelis-memory" {
 		t.Fatalf("Memory environment config = %#v", captured)

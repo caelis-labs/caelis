@@ -2,7 +2,10 @@ package configstore
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -112,26 +115,24 @@ func TestStoreRejectsDuplicateCurrentRecordsBeforeNormalization(t *testing.T) {
 			wantErr: "duplicate MCP server",
 		},
 		{
-			name: "Memory Bot",
+			name: "Memory binding reference",
 			mutate: func(doc AppConfig) AppConfig {
 				doc.Memory = currentMemoryBindingFixture()
-				duplicate := doc.Memory.Bots[0]
+				duplicate := doc.Memory.Bindings[0]
 				duplicate.RuntimeActorRef = "actor-b"
-				doc.Memory.Bots = append(doc.Memory.Bots, duplicate)
+				doc.Memory.Bindings = append(doc.Memory.Bindings, duplicate)
 				return doc
 			},
-			wantErr: "duplicate Bot ID",
+			wantErr: "duplicate binding reference",
 		},
 		{
-			name: "Memory Runtime actor",
+			name: "Memory default binding",
 			mutate: func(doc AppConfig) AppConfig {
 				doc.Memory = currentMemoryBindingFixture()
-				duplicate := doc.Memory.Bots[0]
-				duplicate.BotID = "bot-b"
-				doc.Memory.Bots = append(doc.Memory.Bots, duplicate)
+				doc.Memory.DefaultBindingRef = "missing"
 				return doc
 			},
-			wantErr: "duplicate Runtime actor",
+			wantErr: "default binding reference",
 		},
 		{
 			name: "workspace trust level",
@@ -207,6 +208,66 @@ func TestZeroMemoryBindingIsOmittedFromCurrentDocument(t *testing.T) {
 	}
 }
 
+func TestStoreAtomicallyMigratesLegacyV2MemoryBindingToOpaqueReferences(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		identities  int
+		wantEnabled bool
+	}{
+		{name: "single identity keeps least-authority private default", identities: 1, wantEnabled: true},
+		{name: "ambiguous identities fail closed", identities: 2, wantEnabled: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			legacy := legacyV2MemoryConfiguration{
+				Enabled:  true,
+				Endpoint: currentMemoryBindingFixture().Endpoint,
+			}
+			for index := range test.identities {
+				legacy.Bots = append(legacy.Bots, legacyV2MemoryIdentity{
+					BotID: fmt.Sprintf("historical-%d", index+1), RuntimeActorRef: memorybinding.RuntimeActorRef(fmt.Sprintf("actor-%d", index+1)),
+					MemoryIdentityRef: fmt.Sprintf("identity-%d", index+1), PrincipalRef: fmt.Sprintf("principal:%d", index+1),
+					IssuerCredentialRef: fmt.Sprintf("memory-issuer:%d", index+1), BindingVersion: 1,
+					Private: legacyV2AudienceBinding{ViewRef: fmt.Sprintf("view-%d-private", index+1), GrantRef: fmt.Sprintf("grant-%d-private", index+1)},
+					Shared:  legacyV2AudienceBinding{ViewRef: fmt.Sprintf("view-%d-shared", index+1), GrantRef: fmt.Sprintf("grant-%d-shared", index+1)},
+				})
+			}
+			wire := struct {
+				SchemaVersion         int                         `json:"schema_version"`
+				ConfigurationRevision uint64                      `json:"configuration_revision"`
+				Memory                legacyV2MemoryConfiguration `json:"memory"`
+			}{SchemaVersion: SchemaVersionV2, ConfigurationRevision: 7, Memory: legacy}
+			raw, err := json.Marshal(wire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "config.json")
+			if err := os.WriteFile(path, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := New(root).Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if loaded.ConfigurationRevision != 8 || loaded.Memory.Enabled != test.wantEnabled ||
+				loaded.Memory.DefaultBindingRef != "legacy-001-private" || len(loaded.Memory.Bindings) != test.identities*2 {
+				t.Fatalf("migrated Memory configuration = %#v", loaded.Memory)
+			}
+			if _, err := New(root).CompareAndSave(context.Background(), 7, loaded); !errors.Is(err, ErrConfigurationRevisionConflict) {
+				t.Fatalf("stale pre-migration revision error = %v, want conflict", err)
+			}
+			persisted, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(persisted, []byte(`"bots"`)) || bytes.Contains(persisted, []byte(`"bot_id"`)) ||
+				!bytes.Contains(persisted, []byte(`"bindings"`)) || !bytes.Contains(persisted, []byte(`"default_binding_ref"`)) {
+				t.Fatalf("legacy Memory wire was not replaced: %s", persisted)
+			}
+		})
+	}
+}
+
 func currentValidationFixture() AppConfig {
 	model := modelconfig.NormalizeConfig(modelconfig.Config{
 		Provider:               "openai-codex",
@@ -275,11 +336,11 @@ func currentMemoryBindingFixture() memorybinding.Configuration {
 				BuildRevision: strings.Repeat("a", 40), ArtifactSHA256: strings.Repeat("b", 64),
 			},
 		},
-		Bots: []memorybinding.BotMemoryBinding{{
-			BotID: "bot-a", RuntimeActorRef: "actor-a", MemoryIdentityRef: "identity-a",
-			PrincipalRef: "principal:a", IssuerCredentialRef: "memory-issuer:bot-a",
-			Private:        memorybinding.AudienceBinding{ViewRef: "view-a", GrantRef: "grant-a"},
-			BindingVersion: 1,
+		DefaultBindingRef: "primary",
+		Bindings: []memorybinding.AccessBinding{{
+			BindingRef: "primary", RuntimeActorRef: "actor-a", PrincipalRef: "principal:a",
+			IssuerCredentialRef: "memory-issuer:a", ViewRef: "view-a", GrantRef: "grant-a",
+			Audience: memorybinding.OutputAudiencePrivate, BindingVersion: 1,
 		}},
 	}
 }

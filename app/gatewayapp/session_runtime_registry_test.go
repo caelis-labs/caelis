@@ -1545,14 +1545,13 @@ func TestSessionRuntimeMemoryBindingIsSelectedAndPinnedAtActivation(t *testing.T
 		t.Fatal(err)
 	}
 	stack, err := NewLocalStack(Config{
-		StoreDir:       storeDir,
-		WorkspaceKey:   "workspace",
-		WorkspaceCWD:   workspace,
-		SkillDirs:      []string{},
-		Sandbox:        SandboxConfig{RequestedType: "host"},
-		MemoryBotID:    "bot-a",
-		MemoryAudience: memorybinding.OutputAudiencePrivate,
-		memoryHost:     memoryHost,
+		StoreDir:         storeDir,
+		WorkspaceKey:     "workspace",
+		WorkspaceCWD:     workspace,
+		SkillDirs:        []string{},
+		Sandbox:          SandboxConfig{RequestedType: "host"},
+		MemoryBindingRef: "private",
+		memoryHost:       memoryHost,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1594,6 +1593,132 @@ func TestSessionRuntimeMemoryBindingIsSelectedAndPinnedAtActivation(t *testing.T
 	assertRuntimeMemoryTools(t, second.instance)
 	if got := memoryHost.bindingVersions(); !slices.Equal(got, []uint64{1, 1, 2, 2}) {
 		t.Fatalf("Memory Host binding versions = %#v, want activation and inspection for each pinned version", got)
+	}
+}
+
+func TestSessionRuntimeMemoryBindingSelectorCanChooseOpaqueBindingPerActivation(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
+	storeDir := t.TempDir()
+	memoryHost := &runtimeMemoryHostStub{}
+	store := newAppConfigStore(storeDir)
+	doc, err := store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.Memory = testRuntimeMemoryConfiguration(1, "view-private", "grant-private")
+	if _, err := store.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
+		t.Fatal(err)
+	}
+	var selections []MemoryBindingSelectionContext
+	stack, err := NewLocalStack(Config{
+		StoreDir:         storeDir,
+		WorkspaceKey:     "workspace",
+		WorkspaceCWD:     workspace,
+		SkillDirs:        []string{},
+		Sandbox:          SandboxConfig{RequestedType: "host"},
+		MemoryBindingRef: "private",
+		MemoryBindingSelector: func(_ context.Context, input MemoryBindingSelectionContext) (memorybinding.BindingRef, error) {
+			selections = append(selections, input)
+			return "shared", nil
+		},
+		memoryHost: memoryHost,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	client := newWorkspaceRuntimeHTTPClient(t, stack, "local-user")
+	sessionID := createWorkspaceRuntimeTestSession(t, client, "create-memory-selected", "memory-selected", "workspace", workspace)
+	activated := activateSessionRuntime(t, stack, sessionID)
+	binding := activated.instance.activation.memoryBinding
+	if binding == nil || binding.BindingRef != "shared" || binding.Audience != memorybinding.OutputAudienceShared {
+		t.Fatalf("selected Runtime Memory binding = %#v", binding)
+	}
+	if len(selections) != 2 {
+		t.Fatalf("Memory selector calls = %d, want Session admission and Runtime activation", len(selections))
+	}
+	for _, selection := range selections {
+		if selection.SessionRef.SessionID != sessionID || selection.Workspace.Key != "workspace" || selection.FallbackBindingRef != "private" {
+			t.Fatalf("Memory selector input = %#v", selection)
+		}
+	}
+}
+
+func TestMemoryBindingSelectorRejectsUnknownFallbackBeforeSessionAdmission(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
+	storeDir := t.TempDir()
+	store := newAppConfigStore(storeDir)
+	doc, err := store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.Memory = testRuntimeMemoryConfiguration(1, "view-private", "grant-private")
+	if _, err := store.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewLocalStack(Config{
+		StoreDir:         storeDir,
+		WorkspaceKey:     "workspace",
+		WorkspaceCWD:     workspace,
+		SkillDirs:        []string{},
+		Sandbox:          SandboxConfig{RequestedType: "host"},
+		MemoryBindingRef: "missing",
+		MemoryBindingSelector: func(context.Context, MemoryBindingSelectionContext) (memorybinding.BindingRef, error) {
+			return "", nil
+		},
+		memoryHost: &runtimeMemoryHostStub{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "validate fallback Memory selection") {
+		t.Fatalf("NewLocalStack() fallback validation error = %v", err)
+	}
+}
+
+func TestSessionRuntimeRejectsSelectorAuthorityChangeAfterAdmission(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
+	storeDir := t.TempDir()
+	store := newAppConfigStore(storeDir)
+	doc, err := store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.Memory = testRuntimeMemoryConfiguration(1, "view-private", "grant-private")
+	alternate := doc.Memory.Bindings[0]
+	alternate.BindingRef = "alternate-private"
+	alternate.PrincipalRef = "principal:b"
+	alternate.IssuerCredentialRef = "memory-issuer:b"
+	alternate.GrantRef = "grant-alternate"
+	doc.Memory.Bindings = append(doc.Memory.Bindings, alternate)
+	if _, err := store.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
+		t.Fatal(err)
+	}
+	selectorCalls := 0
+	stack, err := NewLocalStack(Config{
+		StoreDir:     storeDir,
+		WorkspaceKey: "workspace",
+		WorkspaceCWD: workspace,
+		SkillDirs:    []string{},
+		Sandbox:      SandboxConfig{RequestedType: "host"},
+		MemoryBindingSelector: func(context.Context, MemoryBindingSelectionContext) (memorybinding.BindingRef, error) {
+			selectorCalls++
+			if selectorCalls == 1 {
+				return "private", nil
+			}
+			return "alternate-private", nil
+		},
+		memoryHost: &runtimeMemoryHostStub{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	client := newWorkspaceRuntimeHTTPClient(t, stack, "local-user")
+	sessionID := createWorkspaceRuntimeTestSession(t, client, "create-memory-authority-pin", "memory-authority-pin", "workspace", workspace)
+	if _, _, err := stack.sessionRuntimes.activateSession(ctx, sessionID); err == nil ||
+		!strings.Contains(err.Error(), "binding, actor, principal, or audience cannot change") {
+		t.Fatalf("activate Session with changed selected authority error = %v", err)
 	}
 }
 
@@ -1641,7 +1766,7 @@ func TestMemoryProcessKillSwitchRemovesRuntimeBindingWithoutMutatingConfig(t *te
 	}
 }
 
-func TestSessionRuntimeRejectsMemoryAudienceChangeAfterRestart(t *testing.T) {
+func TestSessionRuntimeRejectsMemoryBindingAudienceChangeAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
 	storeDir := t.TempDir()
@@ -1654,17 +1779,16 @@ func TestSessionRuntimeRejectsMemoryAudienceChangeAfterRestart(t *testing.T) {
 	if _, err := store.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
 		t.Fatal(err)
 	}
-	newStack := func(audience memorybinding.OutputAudience) *Stack {
+	newStack := func(bindingRef memorybinding.BindingRef) *Stack {
 		t.Helper()
 		stack, err := NewLocalStack(Config{
-			StoreDir:       storeDir,
-			WorkspaceKey:   "workspace",
-			WorkspaceCWD:   workspace,
-			SkillDirs:      []string{},
-			Sandbox:        SandboxConfig{RequestedType: "host"},
-			MemoryBotID:    "bot-a",
-			MemoryAudience: audience,
-			memoryHost:     &runtimeMemoryHostStub{},
+			StoreDir:         storeDir,
+			WorkspaceKey:     "workspace",
+			WorkspaceCWD:     workspace,
+			SkillDirs:        []string{},
+			Sandbox:          SandboxConfig{RequestedType: "host"},
+			MemoryBindingRef: bindingRef,
+			memoryHost:       &runtimeMemoryHostStub{},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -1672,7 +1796,7 @@ func TestSessionRuntimeRejectsMemoryAudienceChangeAfterRestart(t *testing.T) {
 		return stack
 	}
 
-	privateStack := newStack(memorybinding.OutputAudiencePrivate)
+	privateStack := newStack("private")
 	client := newWorkspaceRuntimeHTTPClient(t, privateStack, "local-user")
 	sessionID := createWorkspaceRuntimeTestSession(t, client, "create-memory-audience", "memory-audience", "workspace", workspace)
 	activateSessionRuntime(t, privateStack, sessionID)
@@ -1680,7 +1804,7 @@ func TestSessionRuntimeRejectsMemoryAudienceChangeAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sharedStack := newStack(memorybinding.OutputAudienceShared)
+	sharedStack := newStack("shared")
 	defer func() { _ = sharedStack.Close() }()
 	sharedClient := newWorkspaceRuntimeHTTPClient(t, sharedStack, "local-user")
 	recreated, err := sharedClient.CreateSession(ctx, appserver.CreateSessionRequest{
@@ -1696,7 +1820,7 @@ func TestSessionRuntimeRejectsMemoryAudienceChangeAfterRestart(t *testing.T) {
 		t.Fatalf("recreate Session with changed Memory audience = %#v, %v; want conflicted", recreated, err)
 	}
 	if _, _, err := sharedStack.sessionRuntimes.activateSession(ctx, sessionID); err == nil ||
-		!strings.Contains(err.Error(), "actor or audience cannot change") {
+		!strings.Contains(err.Error(), "binding, actor, principal, or audience cannot change") {
 		t.Fatalf("reactivate Session with changed Memory audience error = %v", err)
 	}
 }
@@ -1778,13 +1902,19 @@ func testRuntimeMemoryConfiguration(version uint64, viewRef, grantRef string) me
 				BuildRevision: strings.Repeat("a", 40), ArtifactSHA256: strings.Repeat("b", 64),
 			},
 		},
-		Bots: []memorybinding.BotMemoryBinding{{
-			BotID: "bot-a", RuntimeActorRef: "actor-a", MemoryIdentityRef: "identity-a",
-			PrincipalRef: "principal:a", IssuerCredentialRef: "memory-issuer:bot-a",
-			Private:        memorybinding.AudienceBinding{ViewRef: viewRef, GrantRef: grantRef},
-			Shared:         memorybinding.AudienceBinding{ViewRef: "view-shared", GrantRef: "grant-shared"},
-			BindingVersion: version,
-		}},
+		DefaultBindingRef: "private",
+		Bindings: []memorybinding.AccessBinding{
+			{
+				BindingRef: "private", RuntimeActorRef: "actor-a", PrincipalRef: "principal:a",
+				IssuerCredentialRef: "memory-issuer:a", ViewRef: viewRef, GrantRef: grantRef,
+				Audience: memorybinding.OutputAudiencePrivate, BindingVersion: version,
+			},
+			{
+				BindingRef: "shared", RuntimeActorRef: "actor-a", PrincipalRef: "principal:a",
+				IssuerCredentialRef: "memory-issuer:a", ViewRef: "view-shared", GrantRef: "grant-shared",
+				Audience: memorybinding.OutputAudienceShared, BindingVersion: version,
+			},
+		},
 	}
 }
 

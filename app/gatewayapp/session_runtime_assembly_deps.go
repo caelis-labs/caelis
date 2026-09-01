@@ -25,6 +25,7 @@ type sessionRuntimeProcessSnapshot struct {
 	childControlURL       string
 	childControlTokenFile string
 	memorySelection       memorybinding.RuntimeSelection
+	memorySelector        MemoryBindingSelector
 	memoryDisabled        bool
 }
 

@@ -86,7 +86,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	if err := controlplacement.ValidateSnapshot(placement.placement); err != nil {
 		return nil, err
 	}
-	memoryBinding, err := resolveRuntimeMemoryBinding(doc.Memory, process)
+	memoryBinding, err := selectRuntimeMemoryBinding(ctx, doc.Memory, process, active.SessionRef, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -225,8 +225,8 @@ func cloneSessionModelLookup(source *modelLookup, doc AppConfig) (*modelLookup, 
 func ptrToRuntimeConfigSnapshot(doc AppConfig) *AppConfig {
 	snapshot := configstore.Normalize(doc)
 	// The selected Runtime binding is the only Memory authority retained by an
-	// activation. Keeping the full configuration here would leave alternate Bot
-	// or audience references reachable from Runtime composition.
+	// activation. Keeping the full configuration here would leave alternate
+	// host-selected binding references reachable from Runtime composition.
 	snapshot.Memory = memorybinding.Configuration{}
 	return &snapshot
 }
@@ -247,6 +247,30 @@ func resolveRuntimeMemoryBinding(
 		return nil, nil
 	}
 	return &snapshot, nil
+}
+
+func selectRuntimeMemoryBinding(
+	ctx context.Context,
+	configuration memorybinding.Configuration,
+	process sessionRuntimeProcessSnapshot,
+	ref session.SessionRef,
+	workspace session.WorkspaceRef,
+) (*memorybinding.RuntimeMemoryBindingSnapshot, error) {
+	if process.memorySelector == nil || process.memoryDisabled || !configuration.Enabled {
+		return resolveRuntimeMemoryBinding(configuration, process)
+	}
+	selected, err := process.memorySelector(ctx, MemoryBindingSelectionContext{
+		SessionRef:         ref,
+		Workspace:          workspace,
+		FallbackBindingRef: process.memorySelection.BindingRef,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gatewayapp: select Runtime Memory binding: %w", err)
+	}
+	if selected != "" {
+		process.memorySelection.BindingRef = selected
+	}
+	return resolveRuntimeMemoryBinding(configuration, process)
 }
 
 func cloneSessionModelConfig(config ModelConfig) ModelConfig {

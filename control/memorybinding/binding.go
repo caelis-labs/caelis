@@ -48,24 +48,23 @@ type EndpointConfig struct {
 	Compatibility APICompatibility `json:"compatibility"`
 }
 
-// AudienceBinding names the View and Grant selected for exactly one output
-// audience. These references do not themselves grant access.
-type AudienceBinding struct {
-	ViewRef  string `json:"view_ref"`
-	GrantRef string `json:"grant_ref"`
-}
+// BindingRef is an opaque host-selected reference. Future product concepts
+// such as an Agent, user, tenant, or workspace may resolve to this reference,
+// but none of those concepts enter the Memory integration contract.
+type BindingRef string
 
-// BotMemoryBinding maps one stable product Bot to cognitive continuity and
-// Memory authorization references. IssuerCredentialRef is an opaque secret
-// lookup reference; raw credentials never enter AppConfig.
-type BotMemoryBinding struct {
-	BotID               string          `json:"bot_id"`
+// AccessBinding is one complete, single-audience Memory delegation.
+// IssuerCredentialRef is an opaque secret lookup reference; raw credentials
+// never enter AppConfig. View and Grant references do not themselves grant
+// access.
+type AccessBinding struct {
+	BindingRef          BindingRef      `json:"binding_ref"`
 	RuntimeActorRef     RuntimeActorRef `json:"runtime_actor_ref"`
-	MemoryIdentityRef   string          `json:"memory_identity_ref"`
 	PrincipalRef        string          `json:"principal_ref"`
 	IssuerCredentialRef string          `json:"issuer_credential_ref"`
-	Private             AudienceBinding `json:"private,omitzero"`
-	Shared              AudienceBinding `json:"shared,omitzero"`
+	ViewRef             string          `json:"view_ref"`
+	GrantRef            string          `json:"grant_ref"`
+	Audience            OutputAudience  `json:"audience"`
 	BindingVersion      uint64          `json:"binding_version"`
 }
 
@@ -73,16 +72,17 @@ type BotMemoryBinding struct {
 // product feature flag; an independent process kill switch may still disable
 // activation without mutating this document or appliance data.
 type Configuration struct {
-	Enabled  bool               `json:"enabled,omitempty"`
-	Endpoint EndpointConfig     `json:"endpoint,omitempty"`
-	Bots     []BotMemoryBinding `json:"bots,omitempty"`
+	Enabled           bool            `json:"enabled,omitempty"`
+	Endpoint          EndpointConfig  `json:"endpoint,omitempty"`
+	DefaultBindingRef BindingRef      `json:"default_binding_ref,omitempty"`
+	Bindings          []AccessBinding `json:"bindings,omitempty"`
 }
 
-// RuntimeSelection is process-owned input selecting one Bot and one audience
-// for later Session Runtime activations. Neither value is model-controlled.
+// RuntimeSelection is process-owned input selecting one opaque binding for
+// later Session Runtime activations. An empty value selects the explicit
+// configuration default. It is never model-controlled.
 type RuntimeSelection struct {
-	BotID    string
-	Audience OutputAudience
+	BindingRef BindingRef
 }
 
 // RuntimeMemoryBindingSnapshot is the detached immutable binding consumed by
@@ -90,6 +90,7 @@ type RuntimeSelection struct {
 // retargeted to the other audience after activation.
 type RuntimeMemoryBindingSnapshot struct {
 	Endpoint            EndpointConfig
+	BindingRef          BindingRef
 	RuntimeActorRef     RuntimeActorRef
 	PrincipalRef        string
 	IssuerCredentialRef string
@@ -102,16 +103,19 @@ type RuntimeMemoryBindingSnapshot struct {
 // Normalize returns a detached deterministic configuration. Validation must
 // run on the raw document first when duplicate identity rejection matters.
 func Normalize(in Configuration) Configuration {
-	out := Configuration{Enabled: in.Enabled, Endpoint: normalizeEndpoint(in.Endpoint)}
-	if len(in.Bots) == 0 {
+	out := Configuration{
+		Enabled: in.Enabled, Endpoint: normalizeEndpoint(in.Endpoint),
+		DefaultBindingRef: BindingRef(strings.TrimSpace(string(in.DefaultBindingRef))),
+	}
+	if len(in.Bindings) == 0 {
 		return out
 	}
-	out.Bots = make([]BotMemoryBinding, 0, len(in.Bots))
-	for _, binding := range in.Bots {
-		out.Bots = append(out.Bots, normalizeBotBinding(binding))
+	out.Bindings = make([]AccessBinding, 0, len(in.Bindings))
+	for _, binding := range in.Bindings {
+		out.Bindings = append(out.Bindings, normalizeAccessBinding(binding))
 	}
-	sort.Slice(out.Bots, func(i, j int) bool {
-		return out.Bots[i].BotID < out.Bots[j].BotID
+	sort.Slice(out.Bindings, func(i, j int) bool {
+		return out.Bindings[i].BindingRef < out.Bindings[j].BindingRef
 	})
 	return out
 }
@@ -119,21 +123,14 @@ func Normalize(in Configuration) Configuration {
 // ValidateIdentities rejects collisions before deterministic sorting or any
 // future lossy normalization can hide them.
 func ValidateIdentities(in Configuration) error {
-	botIDs := make(map[string]struct{}, len(in.Bots))
-	actorRefs := make(map[RuntimeActorRef]struct{}, len(in.Bots))
-	for _, raw := range in.Bots {
-		binding := normalizeBotBinding(raw)
-		if binding.BotID != "" {
-			if _, duplicate := botIDs[binding.BotID]; duplicate {
-				return fmt.Errorf("control/memorybinding: duplicate Bot ID %q", binding.BotID)
+	bindingRefs := make(map[BindingRef]struct{}, len(in.Bindings))
+	for _, raw := range in.Bindings {
+		binding := normalizeAccessBinding(raw)
+		if binding.BindingRef != "" {
+			if _, duplicate := bindingRefs[binding.BindingRef]; duplicate {
+				return fmt.Errorf("control/memorybinding: duplicate binding reference %q", binding.BindingRef)
 			}
-			botIDs[binding.BotID] = struct{}{}
-		}
-		if binding.RuntimeActorRef != "" {
-			if _, duplicate := actorRefs[binding.RuntimeActorRef]; duplicate {
-				return fmt.Errorf("control/memorybinding: duplicate Runtime actor %q", binding.RuntimeActorRef)
-			}
-			actorRefs[binding.RuntimeActorRef] = struct{}{}
+			bindingRefs[binding.BindingRef] = struct{}{}
 		}
 	}
 	return nil
@@ -146,22 +143,30 @@ func Validate(in Configuration) error {
 		return err
 	}
 	configuration := Normalize(in)
-	if configuration.Endpoint.ID == "" && len(configuration.Bots) == 0 {
+	if configuration.Endpoint.ID == "" && len(configuration.Bindings) == 0 {
 		if configuration.Enabled {
-			return fmt.Errorf("control/memorybinding: enabled configuration requires an endpoint and Bot binding")
+			return fmt.Errorf("control/memorybinding: enabled configuration requires an endpoint and access binding")
 		}
 		return nil
 	}
 	if err := validateEndpoint(configuration.Endpoint); err != nil {
 		return err
 	}
-	if len(configuration.Bots) == 0 {
-		return fmt.Errorf("control/memorybinding: configured endpoint requires at least one Bot binding")
+	if len(configuration.Bindings) == 0 {
+		return fmt.Errorf("control/memorybinding: configured endpoint requires at least one access binding")
 	}
-	for _, binding := range configuration.Bots {
-		if err := validateBotBinding(binding); err != nil {
+	if configuration.DefaultBindingRef == "" {
+		return fmt.Errorf("control/memorybinding: configured bindings require an explicit default binding reference")
+	}
+	foundDefault := false
+	for _, binding := range configuration.Bindings {
+		if err := validateAccessBinding(binding); err != nil {
 			return err
 		}
+		foundDefault = foundDefault || binding.BindingRef == configuration.DefaultBindingRef
+	}
+	if !foundDefault {
+		return fmt.Errorf("control/memorybinding: default binding reference %q does not exist", configuration.DefaultBindingRef)
 	}
 	return nil
 }
@@ -175,36 +180,24 @@ func Resolve(configuration Configuration, selection RuntimeSelection, disabled b
 	if err := Validate(configuration); err != nil {
 		return RuntimeMemoryBindingSnapshot{}, false, err
 	}
-	selection.BotID = strings.TrimSpace(selection.BotID)
-	selection.Audience = normalizeAudience(selection.Audience)
-	if selection.BotID == "" || !validAudience(selection.Audience) {
-		return RuntimeMemoryBindingSnapshot{}, false, fmt.Errorf("control/memorybinding: Runtime Bot and output audience are required")
+	selection.BindingRef = BindingRef(strings.TrimSpace(string(selection.BindingRef)))
+	if selection.BindingRef == "" {
+		selection.BindingRef = configuration.DefaultBindingRef
 	}
 	configuration = Normalize(configuration)
-	for _, binding := range configuration.Bots {
-		if binding.BotID != selection.BotID {
+	for _, binding := range configuration.Bindings {
+		if binding.BindingRef != selection.BindingRef {
 			continue
 		}
-		audienceBinding := binding.Private
-		if selection.Audience == OutputAudienceShared {
-			audienceBinding = binding.Shared
-		}
-		if audienceBinding.ViewRef == "" || audienceBinding.GrantRef == "" {
-			return RuntimeMemoryBindingSnapshot{}, false, fmt.Errorf(
-				"control/memorybinding: Bot %q has no %s Memory binding",
-				selection.BotID,
-				selection.Audience,
-			)
-		}
 		return RuntimeMemoryBindingSnapshot{
-			Endpoint:        configuration.Endpoint,
+			Endpoint: configuration.Endpoint, BindingRef: binding.BindingRef,
 			RuntimeActorRef: binding.RuntimeActorRef,
 			PrincipalRef:    binding.PrincipalRef, IssuerCredentialRef: binding.IssuerCredentialRef,
-			ViewRef: audienceBinding.ViewRef, GrantRef: audienceBinding.GrantRef,
-			Audience: selection.Audience, BindingVersion: binding.BindingVersion,
+			ViewRef: binding.ViewRef, GrantRef: binding.GrantRef,
+			Audience: binding.Audience, BindingVersion: binding.BindingVersion,
 		}, true, nil
 	}
-	return RuntimeMemoryBindingSnapshot{}, false, fmt.Errorf("control/memorybinding: Bot %q has no Memory binding", selection.BotID)
+	return RuntimeMemoryBindingSnapshot{}, false, fmt.Errorf("control/memorybinding: binding reference %q does not exist", selection.BindingRef)
 }
 
 func normalizeEndpoint(in EndpointConfig) EndpointConfig {
@@ -220,20 +213,14 @@ func normalizeEndpoint(in EndpointConfig) EndpointConfig {
 	return in
 }
 
-func normalizeBotBinding(in BotMemoryBinding) BotMemoryBinding {
-	in.BotID = strings.TrimSpace(in.BotID)
+func normalizeAccessBinding(in AccessBinding) AccessBinding {
+	in.BindingRef = BindingRef(strings.TrimSpace(string(in.BindingRef)))
 	in.RuntimeActorRef = RuntimeActorRef(strings.TrimSpace(string(in.RuntimeActorRef)))
-	in.MemoryIdentityRef = strings.TrimSpace(in.MemoryIdentityRef)
 	in.PrincipalRef = strings.TrimSpace(in.PrincipalRef)
 	in.IssuerCredentialRef = strings.TrimSpace(in.IssuerCredentialRef)
-	in.Private = normalizeAudienceBinding(in.Private)
-	in.Shared = normalizeAudienceBinding(in.Shared)
-	return in
-}
-
-func normalizeAudienceBinding(in AudienceBinding) AudienceBinding {
 	in.ViewRef = strings.TrimSpace(in.ViewRef)
 	in.GrantRef = strings.TrimSpace(in.GrantRef)
+	in.Audience = normalizeAudience(in.Audience)
 	return in
 }
 
@@ -264,19 +251,11 @@ func validateEndpoint(endpoint EndpointConfig) error {
 	return nil
 }
 
-func validateBotBinding(binding BotMemoryBinding) error {
-	if binding.BotID == "" || binding.RuntimeActorRef == "" || binding.MemoryIdentityRef == "" ||
-		binding.PrincipalRef == "" || binding.IssuerCredentialRef == "" || binding.BindingVersion == 0 {
-		return fmt.Errorf("control/memorybinding: Bot identity, Runtime actor, Memory identity, principal, issuer credential, and binding version are required")
-	}
-	if (binding.Private.ViewRef == "") != (binding.Private.GrantRef == "") {
-		return fmt.Errorf("control/memorybinding: Bot %q private View and Grant must be configured together", binding.BotID)
-	}
-	if (binding.Shared.ViewRef == "") != (binding.Shared.GrantRef == "") {
-		return fmt.Errorf("control/memorybinding: Bot %q shared View and Grant must be configured together", binding.BotID)
-	}
-	if binding.Private.ViewRef == "" && binding.Shared.ViewRef == "" {
-		return fmt.Errorf("control/memorybinding: Bot %q requires a private or shared binding", binding.BotID)
+func validateAccessBinding(binding AccessBinding) error {
+	if binding.BindingRef == "" || binding.RuntimeActorRef == "" || binding.PrincipalRef == "" ||
+		binding.IssuerCredentialRef == "" || binding.ViewRef == "" || binding.GrantRef == "" ||
+		!validAudience(binding.Audience) || binding.BindingVersion == 0 {
+		return fmt.Errorf("control/memorybinding: binding reference, Runtime actor, principal, issuer credential, View, Grant, audience, and version are required")
 	}
 	return nil
 }

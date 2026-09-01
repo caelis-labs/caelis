@@ -226,7 +226,7 @@ func testToolRuntime(t *testing.T) (context.Context, *sessionmemory.Store, sessi
 
 func testBinding() memorybinding.RuntimeMemoryBindingSnapshot {
 	return memorybinding.RuntimeMemoryBindingSnapshot{
-		Endpoint:        memorybinding.EndpointConfig{ID: "endpoint-a"},
+		Endpoint: memorybinding.EndpointConfig{ID: "endpoint-a"}, BindingRef: "binding-a",
 		RuntimeActorRef: "actor-a", PrincipalRef: "principal:a",
 		IssuerCredentialRef: "memory-issuer:" + strings.Repeat("a", 32),
 		ViewRef:             "view-a", GrantRef: "grant-a",

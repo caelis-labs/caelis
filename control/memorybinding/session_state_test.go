@@ -71,6 +71,26 @@ func TestSessionAdmissionRejectsAudienceActorDowngradeAndUnversionedDrift(t *tes
 		"actor":              runtimeSnapshotForState(3, "endpoint-a", "view-a", OutputAudiencePrivate, "actor-b"),
 		"downgrade":          runtimeSnapshotForState(1, "endpoint-a", "view-a", OutputAudiencePrivate, "actor-a"),
 		"same version drift": runtimeSnapshotForState(2, "endpoint-a", "view-b", OutputAudiencePrivate, "actor-a"),
+		"binding": func() RuntimeMemoryBindingSnapshot {
+			changed := runtimeSnapshotForState(3, "endpoint-a", "view-a", OutputAudiencePrivate, "actor-a")
+			changed.BindingRef = "binding-b"
+			return changed
+		}(),
+		"principal": func() RuntimeMemoryBindingSnapshot {
+			changed := runtimeSnapshotForState(3, "endpoint-a", "view-a", OutputAudiencePrivate, "actor-a")
+			changed.PrincipalRef = "principal:b"
+			return changed
+		}(),
+		"same version grant": func() RuntimeMemoryBindingSnapshot {
+			changed := base
+			changed.GrantRef = "grant-b"
+			return changed
+		}(),
+		"same version issuer": func() RuntimeMemoryBindingSnapshot {
+			changed := base
+			changed.IssuerCredentialRef = "memory-issuer:b"
+			return changed
+		}(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := AdmitSession(ctx, store, active.SessionRef, changed); !errors.Is(err, ErrSessionAdmissionConflict) {
@@ -103,6 +123,32 @@ func TestSessionAdmissionRejectsMalformedPersistedState(t *testing.T) {
 	}
 }
 
+func TestSessionAdmissionRejectsLegacyPartialAuthorityState(t *testing.T) {
+	ctx := context.Background()
+	store := sessionmemory.NewStore(sessionmemory.Config{})
+	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user", PreferredSessionID: "session-memory"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.UpdateState(ctx, session.UpdateStateRequest{
+		SessionRef:    active.SessionRef,
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		Update: func(state map[string]any) (map[string]any, error) {
+			state[SessionStateKey] = map[string]any{
+				"version": 1, "endpoint_id": "endpoint-a", "runtime_actor_ref": "actor-a",
+				"audience": "private", "view_ref": "view-a", "binding_version": 1,
+			}
+			return state, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AdmitSession(ctx, store, active.SessionRef, runtimeSnapshotForState(1, "endpoint-a", "view-a", OutputAudiencePrivate, "actor-a")); err == nil {
+		t.Fatal("AdmitSession() widened a legacy partial authority pin")
+	}
+}
+
 func TestPrepareConsistencyPinsLegacySessionUnderRuntimeFence(t *testing.T) {
 	ctx := context.Background()
 	store := sessionmemory.NewStore(sessionmemory.Config{})
@@ -132,7 +178,8 @@ func TestPrepareConsistencyPinsLegacySessionUnderRuntimeFence(t *testing.T) {
 
 func runtimeSnapshotForState(version uint64, endpoint, view string, audience OutputAudience, actor RuntimeActorRef) RuntimeMemoryBindingSnapshot {
 	return RuntimeMemoryBindingSnapshot{
-		Endpoint: EndpointConfig{ID: endpoint}, RuntimeActorRef: actor,
-		ViewRef: view, Audience: audience, BindingVersion: version,
+		Endpoint: EndpointConfig{ID: endpoint}, BindingRef: "binding-a", RuntimeActorRef: actor,
+		PrincipalRef: "principal:a", IssuerCredentialRef: "memory-issuer:a",
+		ViewRef: view, GrantRef: "grant-a", Audience: audience, BindingVersion: version,
 	}
 }

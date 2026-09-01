@@ -21,30 +21,22 @@ import (
 	memorycredentialstore "github.com/caelis-labs/caelis/control/memorybinding/credentialstore"
 	"github.com/caelis-labs/caelis/control/memorytool"
 	"github.com/caelis-labs/caelis/surfaces/headless"
-	v1alpha1 "github.com/caelis-labs/memory/api/memory/v1alpha1"
 	"github.com/caelis-labs/memory/sdk/go/memory/sidecar"
 )
 
 const (
 	memoryReleaseServiceVersion = "0.5.0-rc.1"
-	memoryReleaseBuildRevision  = "012fdfb320d60ffdec5fb4b223b49daf5a732f14"
-	memoryReleaseModuleVersion  = "v0.0.0-20260901080906-012fdfb320d6"
-	memoryReleaseArtifactSHA256 = "dc7f83307823e530f3a249db7d96b30bb1cbf0270f2ae31ab6ce47ce6006fc4d"
+	memoryReleaseBuildRevision  = "6d34b9def418aaeb78c3504b2539ebe1cc7c77e3"
+	memoryReleaseModuleVersion  = "v0.5.0-rc.1.0.20260901114055-6d34b9def418"
+	memoryReleaseDarwinArm64SHA = "e761a776bb1695f2df14206c43b8dbec4446935c596ceff9a926fb039ee806bc"
 	memoryGoldenPrivate         = "commit does not authorize push"
 	memoryGoldenShared          = "the project uses Go"
 )
 
 func TestMemoryGoldenPathE2E(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("memory.local.v1alpha1 uses the Unix Socket host profile")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	root, err := os.MkdirTemp("/tmp", "caelis-memory-release-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	root := memoryGoldenTempDir(t)
 	artifact := buildMemoryGoldenArtifacts(t, ctx, root)
 	dataDir := filepath.Join(root, "appliance")
 	storeA := filepath.Join(root, "caelis-a")
@@ -61,7 +53,7 @@ func TestMemoryGoldenPathE2E(t *testing.T) {
 	}
 	provider := newMemoryGoldenProvider(t)
 
-	stackA := newMemoryGoldenStack(t, artifact, provider, dataDir, storeA, workspace, "bot-a", memorybinding.OutputAudiencePrivate, false)
+	stackA := newMemoryGoldenStack(t, artifact, provider, dataDir, storeA, workspace, "actor-a-private", false)
 	credentials := bootstrapMemoryGoldenTopology(t, ctx, artifact.memoryctl, dataDir, root)
 	putMemoryGoldenCredential(t, storeA, "principal:bot-a", credentials["principal:bot-a"])
 	putMemoryGoldenCredential(t, storeB, "principal:bot-b", credentials["principal:bot-b"])
@@ -81,7 +73,7 @@ func TestMemoryGoldenPathE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stackA = newMemoryGoldenStack(t, artifact, provider, dataDir, storeA, workspace, "bot-a", memorybinding.OutputAudiencePrivate, false)
+	stackA = newMemoryGoldenStack(t, artifact, provider, dataDir, storeA, workspace, "actor-a-private", false)
 	if restartedCursor := memoryGoldenConsistencyToken(t, stackA, privateA.SessionRef); restartedCursor != privateCursor {
 		t.Fatalf("restarted Caelis consistency cursor = %q, want %q", restartedCursor, privateCursor)
 	}
@@ -97,7 +89,7 @@ func TestMemoryGoldenPathE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stackB := newMemoryGoldenStack(t, artifact, provider, dataDir, storeB, workspace, "bot-b", memorybinding.OutputAudiencePrivate, false)
+	stackB := newMemoryGoldenStack(t, artifact, provider, dataDir, storeB, workspace, "actor-b-private", false)
 	provider.Begin(memoryGoldenScenario{
 		name:    "bot-b-private-isolation",
 		actions: []memoryGoldenAction{{name: memorytool.RecallToolName, arguments: `{"query":"commit push"}`}},
@@ -110,7 +102,7 @@ func TestMemoryGoldenPathE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stackA = newMemoryGoldenStack(t, artifact, provider, dataDir, storeA, workspace, "bot-a", memorybinding.OutputAudienceShared, false)
+	stackA = newMemoryGoldenStack(t, artifact, provider, dataDir, storeA, workspace, "actor-a-shared", false)
 	provider.Begin(memoryGoldenScenario{
 		name: "bot-a-shared", actions: []memoryGoldenAction{
 			{name: memorytool.RememberToolName, arguments: `{"text":"` + memoryGoldenShared + `"}`},
@@ -121,11 +113,8 @@ func TestMemoryGoldenPathE2E(t *testing.T) {
 	sharedAResults := memoryGoldenToolResults(t, stackA, sharedA.SessionRef)
 	assertMemoryGoldenResult(t, sharedAResults, memorytool.RecallToolName, memoryGoldenShared)
 	provider.AssertComplete(t)
-	if err := stackA.Close(); err != nil {
-		t.Fatal(err)
-	}
 
-	stackB = newMemoryGoldenStack(t, artifact, provider, dataDir, storeB, workspace, "bot-b", memorybinding.OutputAudienceShared, false)
+	stackB = newMemoryGoldenStack(t, artifact, provider, dataDir, storeB, workspace, "actor-b-shared", false)
 	provider.Begin(memoryGoldenScenario{
 		name:    "bot-b-shared",
 		actions: []memoryGoldenAction{{name: memorytool.RecallToolName, arguments: `{"query":"project language"}`}},
@@ -135,6 +124,17 @@ func TestMemoryGoldenPathE2E(t *testing.T) {
 	assertMemoryGoldenResult(t, sharedBResults, memorytool.RecallToolName, memoryGoldenShared)
 	provider.AssertComplete(t)
 	if err := stackB.memorySidecar.Close(); err != nil {
+		t.Fatal(err)
+	}
+	provider.Begin(memoryGoldenScenario{
+		name:    "owner-after-attached-close",
+		actions: []memoryGoldenAction{{name: memorytool.RecallToolName, arguments: `{"query":"project language"}`}},
+	})
+	ownerAfterAttachedClose := runMemoryGoldenSession(t, ctx, stackA, "session-owner-after-attached-close")
+	ownerResults := memoryGoldenToolResults(t, stackA, ownerAfterAttachedClose.SessionRef)
+	assertMemoryGoldenResult(t, ownerResults, memorytool.RecallToolName, memoryGoldenShared)
+	provider.AssertComplete(t)
+	if err := stackA.Close(); err != nil {
 		t.Fatal(err)
 	}
 	provider.Begin(memoryGoldenScenario{
@@ -152,7 +152,7 @@ func TestMemoryGoldenPathE2E(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dataDir, "memory.db")); err != nil {
 		t.Fatalf("durable appliance data after managed restarts: %v", err)
 	}
-	offline := newMemoryGoldenStack(t, artifact, provider, dataDir, storeA, workspace, "bot-a", memorybinding.OutputAudiencePrivate, true)
+	offline := newMemoryGoldenStack(t, artifact, provider, dataDir, storeA, workspace, "actor-a-private", true)
 	privateAfter := memoryGoldenToolResults(t, offline, privateA.SessionRef)
 	if !reflect.DeepEqual(privateAfter, privateBefore) {
 		t.Fatalf("offline Session Replay changed Memory ToolResults:\nbefore=%q\nafter=%q", privateBefore, privateAfter)
@@ -175,6 +175,19 @@ type memoryGoldenArtifact struct {
 	manifest     sidecar.Manifest
 }
 
+func memoryGoldenTempDir(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return t.TempDir()
+	}
+	root, err := os.MkdirTemp("/tmp", "caelis-memory-release-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	return root
+}
+
 func buildMemoryGoldenArtifacts(t *testing.T, ctx context.Context, root string) memoryGoldenArtifact {
 	t.Helper()
 	assertMemoryGoldenModulePin(t, ctx)
@@ -182,7 +195,7 @@ func buildMemoryGoldenArtifacts(t *testing.T, ctx context.Context, root string) 
 	if err := os.MkdirAll(binDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	memoryctl := filepath.Join(binDir, "memoryctl")
+	memoryctl := filepath.Join(binDir, memoryGoldenExecutable("memoryctl"))
 	runMemoryGoldenCommand(t, ctx, repoRootForGatewayAppTest(t), "go", "build", "-trimpath", "-o", memoryctl, "github.com/caelis-labs/memory/cmd/memoryctl")
 	if manifestPath := strings.TrimSpace(os.Getenv("CAELIS_MEMORY_GOLDEN_SIDECAR_MANIFEST")); manifestPath != "" {
 		manifestPath, err := filepath.Abs(manifestPath)
@@ -193,9 +206,13 @@ func buildMemoryGoldenArtifacts(t *testing.T, ctx context.Context, root string) 
 		if err != nil {
 			t.Fatal(err)
 		}
+		expectedDigest, ok := memoryReleaseArtifactDigest(manifest.GOOS, manifest.GOARCH)
+		if !ok {
+			t.Fatalf("no reviewed Memory artifact digest for %s/%s", manifest.GOOS, manifest.GOARCH)
+		}
 		if manifest.ServiceVersion != memoryReleaseServiceVersion ||
 			manifest.BuildRevision != memoryReleaseBuildRevision ||
-			manifest.SHA256 != memoryReleaseArtifactSHA256 {
+			manifest.SHA256 != expectedDigest {
 			t.Fatalf("public Memory artifact identity = version %q revision %q digest %q", manifest.ServiceVersion, manifest.BuildRevision, manifest.SHA256)
 		}
 		if _, err := manifest.VerifySupportedNative(filepath.Dir(manifestPath)); err != nil {
@@ -203,7 +220,7 @@ func buildMemoryGoldenArtifacts(t *testing.T, ctx context.Context, root string) 
 		}
 		return memoryGoldenArtifact{manifestPath: manifestPath, memoryctl: memoryctl, manifest: manifest}
 	}
-	memoryd := filepath.Join(binDir, "memoryd")
+	memoryd := filepath.Join(binDir, memoryGoldenExecutable("memoryd"))
 	ldflags := fmt.Sprintf(
 		"-s -w -X github.com/caelis-labs/memory/internal/buildinfo.ServiceVersion=%s -X github.com/caelis-labs/memory/internal/buildinfo.BuildRevision=%s",
 		memoryReleaseServiceVersion,
@@ -222,7 +239,22 @@ func buildMemoryGoldenArtifacts(t *testing.T, ctx context.Context, root string) 
 	if err := os.WriteFile(manifestPath, append(data, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	t.Log("using a source-built integration artifact; formal artifact digest acceptance requires CAELIS_MEMORY_GOLDEN_SIDECAR_MANIFEST")
 	return memoryGoldenArtifact{manifestPath: manifestPath, memoryctl: memoryctl, manifest: manifest}
+}
+
+func memoryReleaseArtifactDigest(goos, goarch string) (string, bool) {
+	if goos == "darwin" && goarch == "arm64" {
+		return memoryReleaseDarwinArm64SHA, true
+	}
+	return "", false
+}
+
+func memoryGoldenExecutable(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
 }
 
 func assertMemoryGoldenModulePin(t *testing.T, ctx context.Context) {
@@ -261,21 +293,32 @@ func memoryGoldenConfiguration(manifest sidecar.Manifest) memorybinding.Configur
 		},
 	}
 	return memorybinding.Configuration{
-		Enabled:  true,
-		Endpoint: endpoint,
-		Bots: []memorybinding.BotMemoryBinding{
+		Enabled:           true,
+		Endpoint:          endpoint,
+		DefaultBindingRef: "actor-a-private",
+		Bindings: []memorybinding.AccessBinding{
 			{
-				BotID: "bot-a", RuntimeActorRef: "actor-bot-a", MemoryIdentityRef: "identity-bot-a",
+				BindingRef: "actor-a-private", RuntimeActorRef: "actor-bot-a",
 				PrincipalRef: "principal:bot-a", IssuerCredentialRef: memorycredentialstore.BuildReference("principal:bot-a"),
-				Private:        memorybinding.AudienceBinding{ViewRef: "view-bot-a-private", GrantRef: "grant-bot-a-private"},
-				Shared:         memorybinding.AudienceBinding{ViewRef: "view-bot-a-shared", GrantRef: "grant-bot-a-shared"},
+				ViewRef: "view-bot-a-private", GrantRef: "grant-bot-a-private", Audience: memorybinding.OutputAudiencePrivate,
 				BindingVersion: 1,
 			},
 			{
-				BotID: "bot-b", RuntimeActorRef: "actor-bot-b", MemoryIdentityRef: "identity-bot-b",
+				BindingRef: "actor-a-shared", RuntimeActorRef: "actor-bot-a",
+				PrincipalRef: "principal:bot-a", IssuerCredentialRef: memorycredentialstore.BuildReference("principal:bot-a"),
+				ViewRef: "view-bot-a-shared", GrantRef: "grant-bot-a-shared", Audience: memorybinding.OutputAudienceShared,
+				BindingVersion: 1,
+			},
+			{
+				BindingRef: "actor-b-private", RuntimeActorRef: "actor-bot-b",
 				PrincipalRef: "principal:bot-b", IssuerCredentialRef: memorycredentialstore.BuildReference("principal:bot-b"),
-				Private:        memorybinding.AudienceBinding{ViewRef: "view-bot-b-private", GrantRef: "grant-bot-b-private"},
-				Shared:         memorybinding.AudienceBinding{ViewRef: "view-bot-b-shared", GrantRef: "grant-bot-b-shared"},
+				ViewRef: "view-bot-b-private", GrantRef: "grant-bot-b-private", Audience: memorybinding.OutputAudiencePrivate,
+				BindingVersion: 1,
+			},
+			{
+				BindingRef: "actor-b-shared", RuntimeActorRef: "actor-bot-b",
+				PrincipalRef: "principal:bot-b", IssuerCredentialRef: memorycredentialstore.BuildReference("principal:bot-b"),
+				ViewRef: "view-bot-b-shared", GrantRef: "grant-bot-b-shared", Audience: memorybinding.OutputAudienceShared,
 				BindingVersion: 1,
 			},
 		},
@@ -286,8 +329,8 @@ func newMemoryGoldenStack(
 	t *testing.T,
 	artifact memoryGoldenArtifact,
 	provider *memoryGoldenProvider,
-	dataDir, storeDir, workspace, botID string,
-	audience memorybinding.OutputAudience,
+	dataDir, storeDir, workspace string,
+	bindingRef memorybinding.BindingRef,
 	disabled bool,
 ) *Stack {
 	t.Helper()
@@ -301,7 +344,7 @@ func newMemoryGoldenStack(
 			Token: "memory-model-test-token", AuthType: providers.AuthBearerToken,
 			ContextWindowTokens: 128000, MaxOutputTok: 1024, Timeout: 5 * time.Second,
 		},
-		MemoryBotID: botID, MemoryAudience: audience, DisableMemory: disabled,
+		MemoryBindingRef: bindingRef, DisableMemory: disabled,
 		MemorySidecarManifest: artifact.manifestPath, MemoryDataDir: dataDir,
 	})
 	if err != nil {
@@ -342,7 +385,7 @@ func bootstrapMemoryGoldenTopology(t *testing.T, ctx context.Context, memoryctl,
 	issuerPath := filepath.Join(root, "issuers.json")
 	runMemoryGoldenCommand(
 		t, ctx, root, memoryctl,
-		"-socket", filepath.Join(dataDir, v1alpha1.LocalSocketFilename),
+		"-data-dir", dataDir,
 		"-management-credential", filepath.Join(dataDir, "management.token"),
 		"bootstrap", "-file", requestPath, "-issuer-output", issuerPath,
 	)

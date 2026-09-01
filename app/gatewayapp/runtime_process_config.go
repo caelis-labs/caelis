@@ -20,6 +20,7 @@ type runtimeProcessConfigSource struct {
 	childControlURL       string
 	childControlTokenFile string
 	memorySelection       memorybinding.RuntimeSelection
+	memorySelector        MemoryBindingSelector
 	memoryDisabled        bool
 }
 
@@ -30,11 +31,9 @@ func newRuntimeProcessConfigSource(snapshot sessionRuntimeProcessSnapshot) *runt
 		childControlURL:       strings.TrimSpace(snapshot.childControlURL),
 		childControlTokenFile: strings.TrimSpace(snapshot.childControlTokenFile),
 		memorySelection: memorybinding.RuntimeSelection{
-			BotID: strings.TrimSpace(snapshot.memorySelection.BotID),
-			Audience: memorybinding.OutputAudience(strings.ToLower(strings.TrimSpace(
-				string(snapshot.memorySelection.Audience),
-			))),
+			BindingRef: memorybinding.BindingRef(strings.TrimSpace(string(snapshot.memorySelection.BindingRef))),
 		},
+		memorySelector: snapshot.memorySelector,
 		memoryDisabled: snapshot.memoryDisabled,
 	}
 }
@@ -51,6 +50,7 @@ func (s *runtimeProcessConfigSource) snapshot() sessionRuntimeProcessSnapshot {
 		childControlURL:       s.childControlURL,
 		childControlTokenFile: s.childControlTokenFile,
 		memorySelection:       s.memorySelection,
+		memorySelector:        s.memorySelector,
 		memoryDisabled:        s.memoryDisabled,
 	}
 }

@@ -23,7 +23,13 @@ func (s *runtimeComposition) admitCreatedMemorySession(ctx context.Context, crea
 	if err != nil {
 		return created, &session.CommittedError{Err: fmt.Errorf("load Memory binding after Session creation: %w", err)}
 	}
-	binding, err := resolveRuntimeMemoryBinding(doc.Memory, s.runtimeProcessSnapshot())
+	binding, err := selectRuntimeMemoryBinding(
+		ctx,
+		doc.Memory,
+		s.runtimeProcessSnapshot(),
+		created.SessionRef,
+		session.WorkspaceRef{Key: created.WorkspaceKey, CWD: created.CWD},
+	)
 	if err != nil {
 		return created, &session.CommittedError{Err: err}
 	}

@@ -50,7 +50,7 @@ and acceptance history belong in Git and CI, not in this map.
 | `control/taskstream`, `control/appserver/taskstream` | Session-authorized Task directory, observation, and Task-to-Envelope projection |
 | `control/modelcatalog`, `modelconfig`, `modelprofile`, `placement`, `agentbinding` | Provider and model discovery, credentials/configuration, selectable profiles, placement, and fixed Agent bindings |
 | `control/agents` | External ACP Agent identity, preparation, connection, and configuration |
-| `control/memorybinding` | Stable Bot-to-Memory identity references, Runtime actor and audience selection, exact appliance compatibility pins, and immutable selected binding snapshots |
+| `control/memorybinding` | Opaque host-selected Memory binding references, Runtime actor and audience delegation, exact appliance compatibility pins, and immutable selected snapshots |
 | `control/mcpconfig`, `control/plugin`, `control/status` | MCP assembly inputs, plugin lifecycle, and product status read models |
 | `app/controlserver` | Authenticated HTTP/SSE Host listener, policy, readiness, and drain |
 | `app/gatewayapp` | Product Host composition, Session Runtime registry, concrete Control services, and shutdown |
@@ -105,16 +105,29 @@ affect later activations. Explicit provider or ACP-Agent removal is the narrow
 revocation exception: Control removes the profile from live placement and repairs
 affected Session bindings so later work cannot resolve a deleted endpoint.
 
-Memory follows the same activation boundary. Control selects one stable Bot and
-one `private` or `shared` output audience from process-owned input, then detaches
-only that audience's endpoint, Runtime actor, principal, issuer reference, View,
-Grant, and binding version. The activated Runtime does not retain the complete
-Bot catalog, the alternate audience, or the cognitive Memory identity. Later
-binding changes affect later activations; an independent process kill switch
+Memory follows the same activation boundary. Control selects one opaque
+`BindingRef` from process-owned input, then detaches only that binding's endpoint,
+Runtime actor, principal, issuer reference, View, Grant, single `private` or
+`shared` audience, and binding version. The activated Runtime does not retain the
+complete binding catalog or any downstream product identity. A future product
+layer may map a Bot, user, tenant, workspace, or another concept to a
+`BindingRef`; none is part of the Caelis Memory contract. Later binding changes
+affect later activations; an independent process kill switch
 omits Memory from an activation without rewriting configuration or appliance
-data. A new canonical Session pins its actor and audience at creation. A Session
-created before Memory was enabled is pinned before its first Memory call under
-the Runtime fence. Public or mixed-audience Runtime composition is invalid.
+data. A new canonical Session pins its complete non-secret delegation at
+creation. A Session created before Memory was enabled is pinned before its first
+Memory call under the Runtime fence. Public or mixed-audience Runtime
+composition is invalid.
+
+The current Session pin includes binding, endpoint, actor, principal, issuer
+reference, audience, View, Grant, and binding version. The earlier prerelease
+partial pin is rejected rather than silently widened; disable Memory to replay
+that Session without appliance calls, or start a new Session to establish the
+complete pin. Historical schema-v2 AppConfig `bots` records are atomically
+rewritten to opaque bindings. A single historical identity keeps a
+least-authority private default; multiple identities are preserved but Memory
+activation is disabled until a host explicitly selects a new opaque default and
+re-enables it.
 
 When Memory is enabled, Host-private composition verifies the native `memoryd`
 artifact against the exact platform, source revision, and SHA-256 manifest,
@@ -205,18 +218,20 @@ Plugin configuration is also canonical AppConfig state. Managed plugin content
 is immutable and pinned while an active Runtime uses it; configuration mutation
 and installation effects remain on the principal-bound Control command path.
 
-Memory AppConfig contains only endpoint compatibility pins and opaque Bot,
-identity, actor, principal, issuer-credential, View, and Grant references. Raw
+Memory AppConfig contains only endpoint compatibility pins, one explicit default
+`BindingRef`, and opaque actor, principal, issuer-credential, View, Grant, and
+audience values for each binding. Raw
 credentials, capabilities, receipts, records, indexes, lifecycle policy, and
-Steward state belong outside AppConfig. A managed-local socket path is derived by
-Host-private composition and cannot be persisted as product configuration.
+Steward state belong outside AppConfig. A managed-local Unix socket or Windows
+named-pipe endpoint is derived by Host-private composition and cannot be
+persisted as product configuration.
 References do not grant access: Host-private composition resolves the issuer
 credential, while the independent Memory appliance remains the authority for
 Views, Grants, capabilities, receipts, retrieval, and lifecycle.
 
-The local Alpha host selects this process composition through
-`CAELIS_MEMORY_BOT_ID`, `CAELIS_MEMORY_AUDIENCE`,
-`CAELIS_MEMORY_SIDECAR_MANIFEST`, and optional `CAELIS_MEMORY_DATA_DIR`.
+The local host optionally selects a non-default binding through
+`CAELIS_MEMORY_BINDING_REF`; it receives the verified sidecar through
+`CAELIS_MEMORY_SIDECAR_MANIFEST` and optional `CAELIS_MEMORY_DATA_DIR`.
 `CAELIS_MEMORY_DISABLED=true` is the process kill switch. These values select a
 Control-owned binding and Host-private paths; they do not configure appliance
 policy or carry credentials.

@@ -62,10 +62,76 @@ func (s *Store) LoadContext(ctx context.Context) (AppConfig, error) {
 	case 0, 1:
 		return s.loadLegacyContext(ctx, path)
 	case SchemaVersionV2:
+		legacyMemory, detectErr := hasLegacyV2Memory(data)
+		if detectErr != nil {
+			return AppConfig{}, detectErr
+		}
+		if legacyMemory {
+			return s.loadLegacyV2MemoryContext(ctx, path)
+		}
 		return decodeCurrentAppConfig(data)
 	default:
 		return AppConfig{}, fmt.Errorf("gatewayapp: unsupported AppConfig schema version %d", version)
 	}
+}
+
+func (s *Store) loadLegacyV2MemoryContext(ctx context.Context, path string) (document AppConfig, returnErr error) {
+	if err := s.gate.LockContext(ctx); err != nil {
+		return AppConfig{}, err
+	}
+	currentPath, err := s.snapshotPath(ctx)
+	if err != nil {
+		s.gate.Unlock()
+		return AppConfig{}, err
+	}
+	if currentPath != path {
+		s.gate.Unlock()
+		return s.LoadContext(ctx)
+	}
+	defer s.gate.Unlock()
+	s.migrationMu.Lock()
+	defer s.migrationMu.Unlock()
+
+	lock, err := acquireFileLock(ctx, path+".lock")
+	if err != nil {
+		return AppConfig{}, fmt.Errorf("gatewayapp: lock legacy Memory binding migration: %w", err)
+	}
+	committed := false
+	defer func() {
+		closeErr := lock.Close()
+		if committed {
+			closeErr = writeCommittedError(closeErr)
+		}
+		returnErr = errors.Join(returnErr, closeErr)
+	}()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return AppConfig{}, err
+	}
+	version, err := appConfigSchemaVersion(data)
+	if err != nil {
+		return AppConfig{}, err
+	}
+	if version != SchemaVersionV2 {
+		return AppConfig{}, fmt.Errorf("gatewayapp: AppConfig schema changed during legacy Memory binding migration")
+	}
+	document, migrated, err := decodeCurrentAppConfigWithMemoryMigration(data)
+	if err != nil || !migrated {
+		return document, err
+	}
+	if document.ConfigurationRevision == math.MaxUint64 {
+		return AppConfig{}, errors.New("gatewayapp: configuration revision exhausted")
+	}
+	document.ConfigurationRevision++
+	if err := s.saveUnlocked(path, document, true); err != nil {
+		if WriteCommitted(err) {
+			committed = true
+			return document, err
+		}
+		return AppConfig{}, err
+	}
+	committed = true
+	return document, nil
 }
 
 func (s *Store) snapshotPath(ctx context.Context) (string, error) {
@@ -167,20 +233,8 @@ func (s *Store) loadLegacyLocked(path string) (document AppConfig, committed boo
 }
 
 func decodeCurrentAppConfig(data []byte) (AppConfig, error) {
-	var doc AppConfig
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return AppConfig{}, fmt.Errorf("gatewayapp: decode app config: %w", err)
-	}
-	// Reject conflicting identities before normalization: normalization is
-	// intentionally lossy and must not hide duplicate current-schema records.
-	if err := validateCurrentRecordIdentities(doc); err != nil {
-		return AppConfig{}, err
-	}
-	doc = Normalize(doc)
-	if err := Validate(doc); err != nil {
-		return AppConfig{}, err
-	}
-	return doc, nil
+	doc, _, err := decodeCurrentAppConfigWithMemoryMigration(data)
+	return doc, err
 }
 
 type legacyCredentialPrevious struct {

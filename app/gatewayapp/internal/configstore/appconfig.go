@@ -1,6 +1,7 @@
 package configstore
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -19,6 +20,39 @@ import (
 // SchemaVersionV2 is the first AppConfig schema with one ModelProfile catalog
 // and one handle-binding table.
 const SchemaVersionV2 = 2
+
+type invalidMemoryConfigurationError struct {
+	err error
+}
+
+func (e *invalidMemoryConfigurationError) Error() string {
+	if e == nil || e.err == nil {
+		return "gatewayapp: invalid Memory binding"
+	}
+	return "gatewayapp: invalid Memory binding: " + e.err.Error()
+}
+
+func (e *invalidMemoryConfigurationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+// IsInvalidMemoryConfiguration reports whether AppConfig loading failed at the
+// Memory binding boundary. Callers use it only for a fixed, secret-free product
+// diagnostic and must not persist the wrapped detail.
+func IsInvalidMemoryConfiguration(err error) bool {
+	var invalid *invalidMemoryConfigurationError
+	return errors.As(err, &invalid)
+}
+
+func wrapInvalidMemoryConfiguration(err error) error {
+	if err == nil || IsInvalidMemoryConfiguration(err) {
+		return err
+	}
+	return &invalidMemoryConfigurationError{err: err}
+}
 
 // AppConfig is the current persisted application configuration. Retired roster,
 // delegation, and system-Agent fields exist only in the private legacy wire
@@ -72,7 +106,7 @@ func Validate(doc AppConfig) error {
 		return fmt.Errorf("gatewayapp: invalid MCP servers: %w", err)
 	}
 	if err := memorybinding.Validate(doc.Memory); err != nil {
-		return fmt.Errorf("gatewayapp: invalid Memory binding: %w", err)
+		return &invalidMemoryConfigurationError{err: err}
 	}
 	if err := workspacetrust.Validate(doc.WorkspaceTrust); err != nil {
 		return fmt.Errorf("gatewayapp: invalid workspace trust: %w", err)
@@ -306,7 +340,7 @@ func validateCurrentRecordIdentities(doc AppConfig) error {
 		return fmt.Errorf("gatewayapp: invalid MCP servers: %w", err)
 	}
 	if err := memorybinding.ValidateIdentities(doc.Memory); err != nil {
-		return fmt.Errorf("gatewayapp: invalid Memory binding: %w", err)
+		return &invalidMemoryConfigurationError{err: err}
 	}
 	if err := workspacetrust.ValidateIdentities(doc.WorkspaceTrust); err != nil {
 		return fmt.Errorf("gatewayapp: invalid workspace trust: %w", err)

@@ -73,14 +73,14 @@ func TestStartRejectsTamperedArtifactBeforeLaunch(t *testing.T) {
 		DataDir:      filepath.Join(directory, "data"),
 		Endpoint:     testHostEndpoint(manifest),
 		Credentials:  func(context.Context, string) (string, error) { return "unused", nil },
-		StartTimeout: 10 * time.Second,
+		StartTimeout: time.Second,
 	})
 	if err == nil || !strings.Contains(err.Error(), "digest mismatch") {
 		t.Fatalf("Start(tampered artifact) error = %v", err)
 	}
 }
 
-func TestStartReportsVerifiedProcessExitBeforeReadiness(t *testing.T) {
+func TestStartRejectsVerifiedProcessThatNeverBecomesReady(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("managed local Alpha sidecar uses the Unix Socket host profile")
 	}
@@ -100,10 +100,31 @@ func TestStartReportsVerifiedProcessExitBeforeReadiness(t *testing.T) {
 		DataDir:      filepath.Join(directory, "data"),
 		Endpoint:     testHostEndpoint(manifest),
 		Credentials:  func(context.Context, string) (string, error) { return "unused", nil },
-		StartTimeout: 10 * time.Second,
+		StartTimeout: time.Second,
 	})
-	if err == nil || !strings.Contains(err.Error(), "exited before readiness") {
-		t.Fatalf("Start(exited process) error = %v", err)
+	if err == nil || (!strings.Contains(err.Error(), "exited before readiness") && !strings.Contains(err.Error(), "sidecar readiness")) {
+		t.Fatalf("Start(non-ready process) error = %v", err)
+	}
+}
+
+func TestWaitForCompatibleOwnerUsesFullStartDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	started := time.Now()
+	readyAt := started.Add(350 * time.Millisecond)
+	probes := 0
+	err := waitForCompatibleOwner(ctx, func(context.Context) error {
+		probes++
+		if time.Now().Before(readyAt) {
+			return &v1alpha1.ServiceError{Code: v1alpha1.ErrorCodeUnavailable}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed < 300*time.Millisecond || probes < 2 {
+		t.Fatalf("owner readiness waited %s across %d probes", elapsed, probes)
 	}
 }
 
@@ -158,6 +179,18 @@ func TestCompatibilityMismatchRetainsTypedIdentity(t *testing.T) {
 	}
 }
 
+func TestFailureClassIsFixedAndSecretFree(t *testing.T) {
+	if got := FailureClass(fmt.Errorf("wrap: %w", &v1alpha1.ServiceError{Code: v1alpha1.ErrorCodeIncompatible})); got != failureIncompatible {
+		t.Fatalf("FailureClass(incompatible) = %q", got)
+	}
+	if got := FailureClass(fmt.Errorf("dial /private/owner/memoryd.sock: refused")); got != failureUnavailable {
+		t.Fatalf("FailureClass(unavailable) = %q", got)
+	}
+	if got := FailureClass(fmt.Errorf("verify sidecar manifest: digest mismatch")); got != failureIncompatible {
+		t.Fatalf("FailureClass(manifest) = %q", got)
+	}
+}
+
 func writeHostManifest(t *testing.T, path string, manifest sidecar.Manifest) {
 	t.Helper()
 	data, err := json.Marshal(manifest)
@@ -174,13 +207,13 @@ func TestCapabilitySourceCachesAndRenewsOneImmutableBindingPerOperation(t *testi
 	var credentials int
 	var requests []v1alpha1.CapabilityIssueRequest
 	host := &Host{
-		socketPath: "/owner/memoryd.sock",
+		localEndpoint: v1alpha1.LocalEndpoint{Network: v1alpha1.LocalNetworkUnix, Address: "/owner/memoryd.sock"},
 		credentials: func(context.Context, string) (string, error) {
 			credentials++
 			return "issuer-secret", nil
 		},
-		issue: func(_ context.Context, socket, credential string, request v1alpha1.CapabilityIssueRequest) (v1alpha1.RuntimeCapability, error) {
-			if socket != "/owner/memoryd.sock" || credential != "issuer-secret" {
+		issue: func(_ context.Context, endpoint v1alpha1.LocalEndpoint, credential string, request v1alpha1.CapabilityIssueRequest) (v1alpha1.RuntimeCapability, error) {
+			if endpoint.Network != v1alpha1.LocalNetworkUnix || endpoint.Address != "/owner/memoryd.sock" || credential != "issuer-secret" {
 				return v1alpha1.RuntimeCapability{}, fmt.Errorf("unexpected issuer authority")
 			}
 			requests = append(requests, request)

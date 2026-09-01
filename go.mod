@@ -13,7 +13,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.51.1
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1
 	github.com/caelis-labs/acp-go-sdk v1.1.0
-	github.com/caelis-labs/memory v0.0.0-20260901080906-012fdfb320d6
+	github.com/caelis-labs/memory v0.5.0-rc.1.0.20260901114055-6d34b9def418
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
 	github.com/charmbracelet/x/ansi v0.11.8
@@ -37,6 +37,7 @@ require (
 	cloud.google.com/go/auth v0.9.3 // indirect
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
 	github.com/JohannesKaufmann/dom v0.3.1 // indirect
+	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/andybalholm/cascadia v1.3.4 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect

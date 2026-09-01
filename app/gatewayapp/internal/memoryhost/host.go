@@ -23,13 +23,37 @@ const (
 	defaultStartTimeout  = 10 * time.Second
 	defaultCapabilityTTL = 30 * time.Minute
 	capabilityRenewalAge = time.Minute
+	failureIncompatible  = "incompatible"
+	failureUnavailable   = "unavailable"
 )
+
+// FailureClass returns a fixed, secret-free activation diagnostic. Detailed
+// errors remain available to the caller but must not be copied into product
+// diagnostic fields because they may contain host paths.
+func FailureClass(err error) string {
+	if err == nil {
+		return ""
+	}
+	if permanentCompatibilityError(err) {
+		return failureIncompatible
+	}
+	message := err.Error()
+	for _, marker := range []string{
+		"sidecar manifest", "native sidecar", "pinned Memory compatibility",
+		"managed Memory endpoint is invalid", "attached sidecar compatibility",
+	} {
+		if strings.Contains(message, marker) {
+			return failureIncompatible
+		}
+	}
+	return failureUnavailable
+}
 
 // CredentialLookup resolves an opaque Control reference to issuer credential
 // bytes. Implementations must not log or persist the returned value elsewhere.
 type CredentialLookup func(context.Context, string) (string, error)
 
-type capabilityIssuer func(context.Context, string, string, v1alpha1.CapabilityIssueRequest) (v1alpha1.RuntimeCapability, error)
+type capabilityIssuer func(context.Context, v1alpha1.LocalEndpoint, string, v1alpha1.CapabilityIssueRequest) (v1alpha1.RuntimeCapability, error)
 
 // BoundClient is the narrow public-SDK data plane consumed by Caelis tools.
 type BoundClient interface {
@@ -49,13 +73,14 @@ type Config struct {
 // Host owns one verified memoryd process and borrows no appliance storage
 // authority. The only runtime path is the public local API and Go SDK.
 type Host struct {
-	client      *localclient.Client
-	socketPath  string
-	endpoint    memorybinding.EndpointConfig
-	credentials CredentialLookup
-	issue       capabilityIssuer
-	command     *exec.Cmd
-	done        chan struct{}
+	client        *localclient.Client
+	localEndpoint v1alpha1.LocalEndpoint
+	endpoint      memorybinding.EndpointConfig
+	credentials   CredentialLookup
+	issue         capabilityIssuer
+	command       *exec.Cmd
+	done          chan struct{}
+	ownsProcess   bool
 
 	mu       sync.Mutex
 	waitErr  error
@@ -99,6 +124,28 @@ func Start(ctx context.Context, config Config) (*Host, error) {
 		return nil, fmt.Errorf("gatewayapp/memoryhost: inspect appliance data path: %w", statErr)
 	}
 
+	if config.StartTimeout <= 0 {
+		config.StartTimeout = defaultStartTimeout
+	}
+	localEndpoint := v1alpha1.DefaultLocalEndpoint(config.DataDir)
+	host := &Host{
+		client:        localclient.NewClientForEndpoint(localEndpoint),
+		localEndpoint: localEndpoint,
+		endpoint:      config.Endpoint,
+		credentials:   config.Credentials,
+		issue:         issueCapability,
+	}
+	probeCtx, cancelProbe := context.WithTimeout(ctx, min(config.StartTimeout, 250*time.Millisecond))
+	err = host.probeCompatible(probeCtx, manifest)
+	cancelProbe()
+	if err == nil {
+		return host, nil
+	}
+	if permanentCompatibilityError(err) {
+		host.client.CloseIdleConnections()
+		return nil, fmt.Errorf("gatewayapp/memoryhost: attached sidecar compatibility: %w", err)
+	}
+
 	command := exec.Command(executable, "-data-dir", config.DataDir)
 	// The sidecar has an explicit executable and data path and needs no ambient
 	// Host environment. In particular, provider and issuer credentials must not
@@ -109,19 +156,10 @@ func Start(ctx context.Context, config Config) (*Host, error) {
 	if err := command.Start(); err != nil {
 		return nil, fmt.Errorf("gatewayapp/memoryhost: start verified sidecar: %w", err)
 	}
-	host := &Host{
-		socketPath:  filepath.Join(config.DataDir, v1alpha1.LocalSocketFilename),
-		endpoint:    config.Endpoint,
-		credentials: config.Credentials,
-		issue:       issueCapability,
-		command:     command,
-		done:        make(chan struct{}),
-	}
-	host.client = localclient.NewClient(host.socketPath)
+	host.command = command
+	host.done = make(chan struct{})
+	host.ownsProcess = true
 	go host.wait()
-	if config.StartTimeout <= 0 {
-		config.StartTimeout = defaultStartTimeout
-	}
 	readyCtx, cancel := context.WithTimeout(ctx, config.StartTimeout)
 	defer cancel()
 	if err := host.waitReady(readyCtx, manifest); err != nil {
@@ -172,13 +210,13 @@ func (h *Host) ValidateBinding(binding memorybinding.RuntimeMemoryBindingSnapsho
 	return nil
 }
 
-// SocketPath returns the Host-derived local transport path for diagnostics and
-// tests. It is never persisted in AppConfig.
-func (h *Host) SocketPath() string {
+// LocalEndpoint returns the Host-derived transport endpoint for diagnostics
+// and tests. It is never persisted in AppConfig and contains no authority.
+func (h *Host) LocalEndpoint() v1alpha1.LocalEndpoint {
 	if h == nil {
-		return ""
+		return v1alpha1.LocalEndpoint{}
 	}
-	return h.socketPath
+	return h.localEndpoint
 }
 
 // Close stops the managed process after callers have drained every Runtime.
@@ -189,6 +227,9 @@ func (h *Host) Close() error {
 	h.close.Do(func() {
 		if h.client != nil {
 			h.client.CloseIdleConnections()
+		}
+		if !h.ownsProcess {
+			return
 		}
 		select {
 		case <-h.done:
@@ -217,6 +258,9 @@ func (h *Host) Close() error {
 }
 
 func (h *Host) wait() {
+	if h.command == nil {
+		return
+	}
 	err := h.command.Wait()
 	h.mu.Lock()
 	h.waitErr = err
@@ -239,18 +283,27 @@ func (h *Host) waitReady(ctx context.Context, manifest sidecar.Manifest) error {
 	for {
 		select {
 		case <-ctx.Done():
+			select {
+			case <-h.done:
+				return fmt.Errorf("gatewayapp/memoryhost: managed sidecar exited before readiness: %w", ctx.Err())
+			default:
+			}
 			return fmt.Errorf("gatewayapp/memoryhost: sidecar readiness: %w", ctx.Err())
 		case <-h.done:
-			return fmt.Errorf("gatewayapp/memoryhost: managed sidecar exited before readiness")
+			err := waitForCompatibleOwner(ctx, func(probeCtx context.Context) error {
+				return h.probeCompatible(probeCtx, manifest)
+			})
+			if err == nil {
+				h.ownsProcess = false
+				return nil
+			}
+			if permanentCompatibilityError(err) {
+				return fmt.Errorf("gatewayapp/memoryhost: sidecar compatibility after owner race: %w", err)
+			}
+			return fmt.Errorf("gatewayapp/memoryhost: managed sidecar exited before readiness: %w", err)
 		case <-ticker.C:
 			probeCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
-			err := h.client.Ready(probeCtx)
-			if err == nil {
-				_, err = h.client.CheckCompatibility(probeCtx, localclient.CompatibilityExpectation{
-					ServiceVersion: manifest.ServiceVersion,
-					BuildRevision:  manifest.BuildRevision,
-				})
-			}
+			err := h.probeCompatible(probeCtx, manifest)
 			cancel()
 			if err == nil {
 				return nil
@@ -260,6 +313,35 @@ func (h *Host) waitReady(ctx context.Context, manifest sidecar.Manifest) error {
 			}
 		}
 	}
+}
+
+func waitForCompatibleOwner(ctx context.Context, probe func(context.Context) error) error {
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		probeCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+		err := probe(probeCtx)
+		cancel()
+		if err == nil || permanentCompatibilityError(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (h *Host) probeCompatible(ctx context.Context, manifest sidecar.Manifest) error {
+	if err := h.client.Ready(ctx); err != nil {
+		return err
+	}
+	_, err := h.client.CheckCompatibility(ctx, localclient.CompatibilityExpectation{
+		ServiceVersion: manifest.ServiceVersion,
+		BuildRevision:  manifest.BuildRevision,
+	})
+	return err
 }
 
 func permanentCompatibilityError(err error) bool {
@@ -314,7 +396,7 @@ func (s *capabilitySource) Authorization(ctx context.Context, operation v1alpha1
 		if s.host.issue == nil {
 			return v1alpha1.CallAuthorization{}, fmt.Errorf("gatewayapp/memoryhost: capability issuer is unavailable")
 		}
-		capability, err = s.host.issue(ctx, s.host.socketPath, credential, v1alpha1.CapabilityIssueRequest{
+		capability, err = s.host.issue(ctx, s.host.localEndpoint, credential, v1alpha1.CapabilityIssueRequest{
 			PrincipalRef: s.binding.PrincipalRef,
 			GrantRef:     v1alpha1.GrantID(s.binding.GrantRef),
 			ActorRef:     string(s.binding.RuntimeActorRef),
@@ -336,11 +418,11 @@ func (s *capabilitySource) Authorization(ctx context.Context, operation v1alpha1
 
 func issueCapability(
 	ctx context.Context,
-	socketPath string,
+	endpoint v1alpha1.LocalEndpoint,
 	credential string,
 	request v1alpha1.CapabilityIssueRequest,
 ) (v1alpha1.RuntimeCapability, error) {
-	issuer := localclient.NewIssuerClient(socketPath, credential)
+	issuer := localclient.NewIssuerClientForEndpoint(endpoint, credential)
 	defer issuer.CloseIdleConnections()
 	return issuer.IssueCapability(ctx, request)
 }

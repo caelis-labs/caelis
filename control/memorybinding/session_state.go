@@ -11,30 +11,35 @@ import (
 )
 
 // SessionStateKey is the model-hidden Control state that pins one canonical
-// Session to a Memory actor and output audience while retaining its causal
-// Recall cursor. It contains no credential, capability, or private text.
+// Session to a complete non-secret Memory delegation while retaining its
+// causal Recall cursor. It contains no credential, capability, or private text.
 const SessionStateKey = "gateway.memory.binding.v1"
 
-// ErrSessionAdmissionConflict identifies an immutable canonical Session actor,
-// audience, or binding-version conflict. Callers may safely classify it as a
+// ErrSessionAdmissionConflict identifies an immutable canonical Session
+// delegation or binding-version conflict. Callers may safely classify it as a
 // rejected concurrent/configuration choice rather than an unknown side effect.
 var ErrSessionAdmissionConflict = errors.New("control/memorybinding: canonical Session Memory admission conflict")
 
 type sessionBindingState struct {
-	Version          int             `json:"version"`
-	EndpointID       string          `json:"endpoint_id"`
-	RuntimeActorRef  RuntimeActorRef `json:"runtime_actor_ref"`
-	Audience         OutputAudience  `json:"audience"`
-	ViewRef          string          `json:"view_ref"`
-	BindingVersion   uint64          `json:"binding_version"`
-	ConsistencyToken string          `json:"consistency_token,omitempty"`
+	Version             int             `json:"version"`
+	EndpointID          string          `json:"endpoint_id"`
+	BindingRef          BindingRef      `json:"binding_ref"`
+	RuntimeActorRef     RuntimeActorRef `json:"runtime_actor_ref"`
+	PrincipalRef        string          `json:"principal_ref"`
+	IssuerCredentialRef string          `json:"issuer_credential_ref"`
+	Audience            OutputAudience  `json:"audience"`
+	ViewRef             string          `json:"view_ref"`
+	GrantRef            string          `json:"grant_ref"`
+	BindingVersion      uint64          `json:"binding_version"`
+	ConsistencyToken    string          `json:"consistency_token,omitempty"`
 }
 
-const sessionBindingStateVersion = 1
+const sessionBindingStateVersion = 2
 
-// AdmitSession atomically fixes one canonical Session to one actor/audience.
-// A strictly newer binding may move endpoint/View and resets the causal token;
-// a downgrade or same-version drift fails closed.
+// AdmitSession atomically fixes one canonical Session to one complete
+// non-secret delegation. A strictly newer binding may rotate its versioned
+// endpoint/View/Grant/issuer references; a downgrade, identity change, or
+// same-version drift fails closed.
 func AdmitSession(
 	ctx context.Context,
 	store session.StateStore,
@@ -86,8 +91,8 @@ func AdmitSession(
 	return err
 }
 
-// ValidateSessionAdmission rejects a Runtime actor or audience that conflicts
-// with a previously admitted canonical Session without mutating Session state.
+// ValidateSessionAdmission rejects a Runtime delegation that conflicts with a
+// previously admitted canonical Session without mutating Session state.
 // A Session created before Memory was enabled is pinned before its first Memory
 // call by PrepareConsistency under the Runtime fence.
 func ValidateSessionAdmission(
@@ -234,33 +239,43 @@ func AdvanceConsistency(
 
 func sessionBindingStateFromSnapshot(binding RuntimeMemoryBindingSnapshot) sessionBindingState {
 	return sessionBindingState{
-		Version:         sessionBindingStateVersion,
-		EndpointID:      binding.Endpoint.ID,
-		RuntimeActorRef: binding.RuntimeActorRef,
-		Audience:        binding.Audience,
-		ViewRef:         binding.ViewRef,
-		BindingVersion:  binding.BindingVersion,
+		Version:             sessionBindingStateVersion,
+		EndpointID:          binding.Endpoint.ID,
+		BindingRef:          binding.BindingRef,
+		RuntimeActorRef:     binding.RuntimeActorRef,
+		PrincipalRef:        binding.PrincipalRef,
+		IssuerCredentialRef: binding.IssuerCredentialRef,
+		Audience:            binding.Audience,
+		ViewRef:             binding.ViewRef,
+		GrantRef:            binding.GrantRef,
+		BindingVersion:      binding.BindingVersion,
 	}
 }
 
 func sessionBindingMatches(current sessionBindingState, binding RuntimeMemoryBindingSnapshot) bool {
 	return current.Version == sessionBindingStateVersion &&
 		current.EndpointID == binding.Endpoint.ID &&
+		current.BindingRef == binding.BindingRef &&
 		current.RuntimeActorRef == binding.RuntimeActorRef &&
+		current.PrincipalRef == binding.PrincipalRef &&
+		current.IssuerCredentialRef == binding.IssuerCredentialRef &&
 		current.Audience == binding.Audience &&
 		current.ViewRef == binding.ViewRef &&
+		current.GrantRef == binding.GrantRef &&
 		current.BindingVersion == binding.BindingVersion
 }
 
 func reconcileSessionBinding(current, next sessionBindingState) (sessionBindingState, error) {
-	if current.RuntimeActorRef != next.RuntimeActorRef || current.Audience != next.Audience {
-		return sessionBindingState{}, fmt.Errorf("%w: actor or audience cannot change", ErrSessionAdmissionConflict)
+	if current.BindingRef != next.BindingRef || current.RuntimeActorRef != next.RuntimeActorRef ||
+		current.PrincipalRef != next.PrincipalRef || current.Audience != next.Audience {
+		return sessionBindingState{}, fmt.Errorf("%w: binding, actor, principal, or audience cannot change", ErrSessionAdmissionConflict)
 	}
 	if next.BindingVersion < current.BindingVersion {
 		return sessionBindingState{}, fmt.Errorf("%w: binding cannot downgrade", ErrSessionAdmissionConflict)
 	}
 	if next.BindingVersion == current.BindingVersion &&
-		(current.EndpointID != next.EndpointID || current.ViewRef != next.ViewRef) {
+		(current.EndpointID != next.EndpointID || current.ViewRef != next.ViewRef ||
+			current.GrantRef != next.GrantRef || current.IssuerCredentialRef != next.IssuerCredentialRef) {
 		return sessionBindingState{}, fmt.Errorf("%w: binding drifted without a version change", ErrSessionAdmissionConflict)
 	}
 	if current.EndpointID == next.EndpointID && current.ViewRef == next.ViewRef {
@@ -270,8 +285,9 @@ func reconcileSessionBinding(current, next sessionBindingState) (sessionBindingS
 }
 
 func validateRuntimeSnapshot(binding RuntimeMemoryBindingSnapshot) error {
-	if binding.Endpoint.ID == "" || binding.RuntimeActorRef == "" || binding.Audience == "" ||
-		binding.ViewRef == "" || binding.BindingVersion == 0 {
+	if binding.Endpoint.ID == "" || binding.BindingRef == "" || binding.RuntimeActorRef == "" ||
+		binding.PrincipalRef == "" || binding.IssuerCredentialRef == "" || binding.Audience == "" ||
+		binding.ViewRef == "" || binding.GrantRef == "" || binding.BindingVersion == 0 {
 		return fmt.Errorf("control/memorybinding: Runtime Memory binding snapshot is incomplete")
 	}
 	return nil
@@ -290,8 +306,9 @@ func decodeSessionBindingState(state map[string]any) (sessionBindingState, bool,
 	if err := json.Unmarshal(data, &current); err != nil {
 		return sessionBindingState{}, false, fmt.Errorf("control/memorybinding: decode canonical Session Memory state: %w", err)
 	}
-	if current.Version != sessionBindingStateVersion || current.EndpointID == "" || current.RuntimeActorRef == "" ||
-		!validAudience(current.Audience) || current.ViewRef == "" || current.BindingVersion == 0 {
+	if current.Version != sessionBindingStateVersion || current.EndpointID == "" || current.BindingRef == "" ||
+		current.RuntimeActorRef == "" || current.PrincipalRef == "" || current.IssuerCredentialRef == "" ||
+		!validAudience(current.Audience) || current.ViewRef == "" || current.GrantRef == "" || current.BindingVersion == 0 {
 		return sessionBindingState{}, false, fmt.Errorf("control/memorybinding: canonical Session Memory state is invalid")
 	}
 	return current, true, nil

@@ -52,6 +52,62 @@ func TestRuntimeDiagnosticsLoggerWritesPrivateJSONLFile(t *testing.T) {
 	}
 }
 
+func TestMemoryActivationDiagnosticUsesFixedStateOnly(t *testing.T) {
+	root := t.TempDir()
+	logger := newRuntimeDiagnosticsLogger(root)
+	logMemoryActivationState(logger, memoryActivationUnconfigured)
+
+	data, err := os.ReadFile(filepath.Join(root, "logs", runtimeDiagnosticsFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(data, &record); err != nil {
+		t.Fatal(err)
+	}
+	if record["component"] != "memory" || record["state"] != memoryActivationUnconfigured {
+		t.Fatalf("Memory activation diagnostic = %#v", record)
+	}
+	if _, exists := record["error"]; exists {
+		t.Fatalf("Memory activation diagnostic exposed a detailed error: %#v", record)
+	}
+}
+
+func TestInvalidPersistedMemoryConfigurationLogsUnconfigured(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "current", raw: `{"schema_version":2,"memory":{"enabled":true}}`},
+		{name: "current wire type", raw: `{"schema_version":2,"memory":{"bindings":"not-an-array"}}`},
+		{name: "mixed legacy wire", raw: `{"schema_version":2,"memory":{"enabled":true,"bots":[{}],"bindings":[{}]}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "config.json"), []byte(test.raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := NewLocalStack(Config{StoreDir: root, WorkspaceCWD: t.TempDir(), Sandbox: SandboxConfig{RequestedType: "host"}}); err == nil {
+				t.Fatal("NewLocalStack() accepted invalid Memory configuration")
+			}
+			data, err := os.ReadFile(filepath.Join(root, "logs", runtimeDiagnosticsFilename))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var record map[string]any
+			if err := json.Unmarshal(data, &record); err != nil {
+				t.Fatal(err)
+			}
+			if record["component"] != "memory" || record["state"] != memoryActivationUnconfigured {
+				t.Fatalf("invalid Memory diagnostic = %#v", record)
+			}
+			if _, exists := record["error"]; exists {
+				t.Fatalf("invalid Memory diagnostic exposed detailed error: %#v", record)
+			}
+		})
+	}
+}
+
 func TestBoundedDiagnosticWriterKeepsOneSizeBoundedBackup(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "logs", "runtime.jsonl")
 	writer := &boundedDiagnosticWriter{path: path, maxBytes: 12}
