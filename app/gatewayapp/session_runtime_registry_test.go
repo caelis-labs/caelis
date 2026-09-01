@@ -25,14 +25,17 @@ import (
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/app/controlserver"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/memoryhost"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/memorybinding"
+	"github.com/caelis-labs/caelis/control/memorytool"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
+	v1alpha1 "github.com/caelis-labs/memory/api/memory/v1alpha1"
 )
 
 func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
@@ -1531,6 +1534,7 @@ func TestSessionRuntimeMemoryBindingIsSelectedAndPinnedAtActivation(t *testing.T
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
 	storeDir := t.TempDir()
+	memoryHost := &runtimeMemoryHostStub{}
 	store := newAppConfigStore(storeDir)
 	doc, err := store.LoadContext(ctx)
 	if err != nil {
@@ -1548,6 +1552,7 @@ func TestSessionRuntimeMemoryBindingIsSelectedAndPinnedAtActivation(t *testing.T
 		Sandbox:        SandboxConfig{RequestedType: "host"},
 		MemoryBotID:    "bot-a",
 		MemoryAudience: memorybinding.OutputAudiencePrivate,
+		memoryHost:     memoryHost,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1565,6 +1570,7 @@ func TestSessionRuntimeMemoryBindingIsSelectedAndPinnedAtActivation(t *testing.T
 	if !reflect.DeepEqual(first.instance.activation.appConfig.Memory, memorybinding.Configuration{}) {
 		t.Fatalf("Runtime retained full Memory configuration: %#v", first.instance.activation.appConfig.Memory)
 	}
+	assertRuntimeMemoryTools(t, first.instance)
 
 	doc, err = stack.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
@@ -1584,6 +1590,10 @@ func TestSessionRuntimeMemoryBindingIsSelectedAndPinnedAtActivation(t *testing.T
 	if secondBinding == nil || secondBinding.ViewRef != "view-private-v2" ||
 		secondBinding.GrantRef != "grant-private-v2" || secondBinding.BindingVersion != 2 {
 		t.Fatalf("second Runtime Memory binding = %#v", secondBinding)
+	}
+	assertRuntimeMemoryTools(t, second.instance)
+	if got := memoryHost.bindingVersions(); !slices.Equal(got, []uint64{1, 1, 2, 2}) {
+		t.Fatalf("Memory Host binding versions = %#v, want activation and inspection for each pinned version", got)
 	}
 }
 
@@ -1619,6 +1629,9 @@ func TestMemoryProcessKillSwitchRemovesRuntimeBindingWithoutMutatingConfig(t *te
 	if runtime.instance.activation.memoryBinding != nil {
 		t.Fatalf("kill-switched Runtime retained Memory binding: %#v", runtime.instance.activation.memoryBinding)
 	}
+	if tools, err := runtime.instance.buildMemoryTools(); err != nil || len(tools) != 0 {
+		t.Fatalf("kill-switched Runtime Memory tools = %#v, %v", tools, err)
+	}
 	loaded, err := stack.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -1626,6 +1639,132 @@ func TestMemoryProcessKillSwitchRemovesRuntimeBindingWithoutMutatingConfig(t *te
 	if !reflect.DeepEqual(loaded.Memory, memorybinding.Normalize(want)) {
 		t.Fatalf("kill switch mutated persisted Memory binding: %#v", loaded.Memory)
 	}
+}
+
+func TestSessionRuntimeRejectsMemoryAudienceChangeAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
+	storeDir := t.TempDir()
+	store := newAppConfigStore(storeDir)
+	doc, err := store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.Memory = testRuntimeMemoryConfiguration(1, "view-private", "grant-private")
+	if _, err := store.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
+		t.Fatal(err)
+	}
+	newStack := func(audience memorybinding.OutputAudience) *Stack {
+		t.Helper()
+		stack, err := NewLocalStack(Config{
+			StoreDir:       storeDir,
+			WorkspaceKey:   "workspace",
+			WorkspaceCWD:   workspace,
+			SkillDirs:      []string{},
+			Sandbox:        SandboxConfig{RequestedType: "host"},
+			MemoryBotID:    "bot-a",
+			MemoryAudience: audience,
+			memoryHost:     &runtimeMemoryHostStub{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return stack
+	}
+
+	privateStack := newStack(memorybinding.OutputAudiencePrivate)
+	client := newWorkspaceRuntimeHTTPClient(t, privateStack, "local-user")
+	sessionID := createWorkspaceRuntimeTestSession(t, client, "create-memory-audience", "memory-audience", "workspace", workspace)
+	activateSessionRuntime(t, privateStack, sessionID)
+	if err := privateStack.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sharedStack := newStack(memorybinding.OutputAudienceShared)
+	defer func() { _ = sharedStack.Close() }()
+	sharedClient := newWorkspaceRuntimeHTTPClient(t, sharedStack, "local-user")
+	recreated, err := sharedClient.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: "recreate-memory-audience"},
+		PreferredSessionID: sessionID,
+		WorkspaceKey:       "workspace",
+		CWD:                workspace,
+		Title:              sessionID,
+	})
+	var outcomeErr *appserver.OutcomeError
+	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeConflicted ||
+		recreated.Outcome != appserver.OutcomeConflicted || errorcode.CodeOf(err) != errorcode.Conflict {
+		t.Fatalf("recreate Session with changed Memory audience = %#v, %v; want conflicted", recreated, err)
+	}
+	if _, _, err := sharedStack.sessionRuntimes.activateSession(ctx, sessionID); err == nil ||
+		!strings.Contains(err.Error(), "actor or audience cannot change") {
+		t.Fatalf("reactivate Session with changed Memory audience error = %v", err)
+	}
+}
+
+func assertRuntimeMemoryTools(t *testing.T, runtime *sessionRuntimeInstance) {
+	t.Helper()
+	tools, err := runtime.buildMemoryTools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 2 || tools[0].Definition().Name != memorytool.RememberToolName ||
+		tools[1].Definition().Name != memorytool.RecallToolName {
+		t.Fatalf("Runtime Memory tools = %#v, want exactly remember and recall", tools)
+	}
+}
+
+type runtimeMemoryHostStub struct {
+	mu       sync.Mutex
+	bindings []memorybinding.RuntimeMemoryBindingSnapshot
+}
+
+func (*runtimeMemoryHostStub) ValidateBinding(memorybinding.RuntimeMemoryBindingSnapshot) error {
+	return nil
+}
+
+func (h *runtimeMemoryHostStub) Bind(
+	binding memorybinding.RuntimeMemoryBindingSnapshot,
+	_ v1alpha1.SourceContext,
+	_ v1alpha1.RecallBudget,
+) (memoryhost.BoundClient, error) {
+	h.mu.Lock()
+	h.bindings = append(h.bindings, binding)
+	h.mu.Unlock()
+	return runtimeMemoryClientStub{}, nil
+}
+
+func (h *runtimeMemoryHostStub) bindingVersions() []uint64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	versions := make([]uint64, 0, len(h.bindings))
+	for _, binding := range h.bindings {
+		versions = append(versions, binding.BindingVersion)
+	}
+	return versions
+}
+
+type runtimeMemoryClientStub struct{}
+
+func (runtimeMemoryClientStub) Remember(
+	context.Context,
+	string,
+	string,
+	*time.Time,
+) (v1alpha1.RememberResponse, error) {
+	return v1alpha1.RememberResponse{
+		Accepted:         true,
+		ReceiptID:        "receipt-test",
+		ConsistencyToken: "token-test",
+		ProcessingState:  v1alpha1.ProcessingStateAccepted,
+	}, nil
+}
+
+func (runtimeMemoryClientStub) Recall(
+	context.Context,
+	string,
+	v1alpha1.ConsistencyToken,
+) (v1alpha1.RecallResponse, error) {
+	return v1alpha1.RecallResponse{Fragments: []v1alpha1.RecallFragment{}}, nil
 }
 
 func testRuntimeMemoryConfiguration(version uint64, viewRef, grantRef string) memorybinding.Configuration {

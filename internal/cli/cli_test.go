@@ -830,6 +830,35 @@ func TestEnvBoolParsesTUIAnimationSetting(t *testing.T) {
 	}
 }
 
+func TestMemoryHostEnvironmentReachesProductComposition(t *testing.T) {
+	t.Setenv("CAELIS_MEMORY_BOT_ID", " bot-a ")
+	t.Setenv("CAELIS_MEMORY_AUDIENCE", " PRIVATE ")
+	t.Setenv("CAELIS_MEMORY_DISABLED", "true")
+	t.Setenv("CAELIS_MEMORY_SIDECAR_MANIFEST", " /opt/caelis/memoryd.manifest.json ")
+	t.Setenv("CAELIS_MEMORY_DATA_DIR", " /var/lib/caelis-memory ")
+	stop := errors.New("captured Memory config")
+	var captured gatewayapp.Config
+	err := runWithProductClientOpener(
+		context.Background(),
+		[]string{"--embedded"},
+		nil,
+		io.Discard,
+		io.Discard,
+		func(_ context.Context, cfg gatewayapp.Config, _ productClientOptions) (*productClients, error) {
+			captured = cfg
+			return nil, stop
+		},
+	)
+	if !errors.Is(err, stop) {
+		t.Fatalf("runWithProductClientOpener() error = %v", err)
+	}
+	if captured.MemoryBotID != "bot-a" || string(captured.MemoryAudience) != "private" || !captured.DisableMemory ||
+		captured.MemorySidecarManifest != "/opt/caelis/memoryd.manifest.json" ||
+		captured.MemoryDataDir != "/var/lib/caelis-memory" {
+		t.Fatalf("Memory environment config = %#v", captured)
+	}
+}
+
 func TestRunVersionText(t *testing.T) {
 	oldVersion, oldCommit, oldDate := version.Version, version.Commit, version.Date
 	oldBuildID, oldBuildKind := version.BuildID, version.BuildKind

@@ -23,6 +23,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/productpaths"
@@ -264,6 +265,11 @@ func runWithProductClientOpener(
 		WorkspaceKey:               workspaceKey,
 		WorkspaceCWD:               workspaceCWD,
 		DangerouslySkipPermissions: *dangerouslySkipPermissions,
+		MemoryBotID:                strings.TrimSpace(os.Getenv("CAELIS_MEMORY_BOT_ID")),
+		MemoryAudience:             memorybinding.OutputAudience(strings.ToLower(strings.TrimSpace(os.Getenv("CAELIS_MEMORY_AUDIENCE")))),
+		DisableMemory:              envBool("CAELIS_MEMORY_DISABLED", false),
+		MemorySidecarManifest:      strings.TrimSpace(os.Getenv("CAELIS_MEMORY_SIDECAR_MANIFEST")),
+		MemoryDataDir:              strings.TrimSpace(os.Getenv("CAELIS_MEMORY_DATA_DIR")),
 	}
 	if serviceSubcommand != "" {
 		if *embeddedHost || strings.TrimSpace(*controlURL) != "" {

@@ -6,14 +6,22 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/memoryhost"
 	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
+	v1alpha1 "github.com/caelis-labs/memory/api/memory/v1alpha1"
 )
+
+type runtimeMemoryHost interface {
+	ValidateBinding(memorybinding.RuntimeMemoryBindingSnapshot) error
+	Bind(memorybinding.RuntimeMemoryBindingSnapshot, v1alpha1.SourceContext, v1alpha1.RecallBudget) (memoryhost.BoundClient, error)
+}
 
 // runtimeHostAuthorities is the immutable set of process services borrowed by
 // the Host root and detached Session Runtime instances. Copying this value
@@ -39,6 +47,7 @@ type runtimeHostAuthorities struct {
 	adapterHost             controladapterhost.Service
 	acpEndpointResolver     endpoint.Resolver
 	sessionModelPins        *sessionModelPinRegistry
+	memoryHost              runtimeMemoryHost
 	lifecycleCtx            context.Context
 	// hostedChildInput is the Host-owned parent/sibling route borrowed by
 	// spawned child Session Runtimes. The function carries routing capability,

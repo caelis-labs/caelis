@@ -19,10 +19,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	hostacpendpoint "github.com/caelis-labs/caelis/app/gatewayapp/internal/acpendpoint"
 	adapterhostimpl "github.com/caelis-labs/caelis/app/gatewayapp/internal/adapterhost"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/memoryhost"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/memorybinding"
+	memorycredentialstore "github.com/caelis-labs/caelis/control/memorybinding/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
@@ -84,6 +86,14 @@ type Config struct {
 	MemoryBotID    string
 	MemoryAudience memorybinding.OutputAudience
 	DisableMemory  bool
+	// MemorySidecarManifest and MemoryDataDir are Host-private managed-local
+	// composition inputs. The socket is derived below DataDir and neither path
+	// becomes product Memory authority.
+	MemorySidecarManifest string
+	MemoryDataDir         string
+	// memoryHost is a package-private deterministic test seam. Production must
+	// launch the digest-verified managed sidecar above.
+	memoryHost runtimeMemoryHost
 }
 
 type ModelConfig = modelconfig.Config
@@ -132,6 +142,7 @@ type Stack struct {
 	lifecycleCancel           context.CancelFunc
 	sessionRuntimes           *sessionRuntimeRegistry
 	modelRecovery             *sessionModelRecovery
+	memorySidecar             *memoryhost.Host
 }
 
 // Sessions returns the Host's process-level Session authority.
@@ -359,7 +370,8 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	memorySelection := memorybinding.RuntimeSelection{BotID: cfg.MemoryBotID, Audience: cfg.MemoryAudience}
-	if _, _, err := memorybinding.Resolve(doc.Memory, memorySelection, cfg.DisableMemory); err != nil {
+	initialMemoryBinding, memoryEnabled, err := memorybinding.Resolve(doc.Memory, memorySelection, cfg.DisableMemory)
+	if err != nil {
 		return nil, fmt.Errorf("gatewayapp: validate process Memory selection: %w", err)
 	}
 	apiKeyCredentials, err := credentialstore.New(storeDir)
@@ -530,8 +542,35 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			sandbox: sandboxCfg,
 		},
 	}
+	if memoryEnabled {
+		if cfg.memoryHost != nil {
+			stack.composition.authorities.memoryHost = cfg.memoryHost
+		} else {
+			memoryCredentials, credentialErr := memorycredentialstore.New(storeDir)
+			if credentialErr != nil {
+				_ = stack.Close()
+				return nil, credentialErr
+			}
+			memoryDataDir := strings.TrimSpace(cfg.MemoryDataDir)
+			if memoryDataDir == "" {
+				memoryDataDir = filepath.Join(storeDir, "memory", "appliance")
+			}
+			stack.memorySidecar, err = memoryhost.Start(context.Background(), memoryhost.Config{
+				ManifestPath: strings.TrimSpace(cfg.MemorySidecarManifest),
+				DataDir:      memoryDataDir,
+				Endpoint:     initialMemoryBinding.Endpoint,
+				Credentials:  memoryCredentials.Get,
+			})
+			if err != nil {
+				_ = stack.Close()
+				return nil, err
+			}
+			stack.composition.authorities.memoryHost = stack.memorySidecar
+		}
+	}
 	stack.adapterHost, err = newHostedAdapterManager()
 	if err != nil {
+		_ = stack.Close()
 		return nil, err
 	}
 	stack.composition.authorities.adapterHost = stack.adapterHost
@@ -740,6 +779,13 @@ func (s *Stack) Close() error {
 	}
 	if sessionCloseErr != nil {
 		errs = append(errs, sessionCloseErr)
+	}
+	if s.memorySidecar != nil {
+		if err := s.memorySidecar.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		s.memorySidecar = nil
+		s.composition.authorities.memoryHost = nil
 	}
 	if controlOperations != nil {
 		if err := controlOperations.Close(); err != nil {

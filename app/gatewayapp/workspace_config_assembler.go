@@ -90,6 +90,17 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	if err != nil {
 		return nil, err
 	}
+	if memoryBinding != nil {
+		if authorities.memoryHost == nil {
+			return nil, errors.New("gatewayapp: enabled Memory binding has no managed appliance")
+		}
+		if err := authorities.memoryHost.ValidateBinding(*memoryBinding); err != nil {
+			return nil, fmt.Errorf("gatewayapp: validate managed Memory endpoint: %w", err)
+		}
+		if err := memorybinding.ValidateSessionAdmission(ctx, sessions, active.SessionRef, *memoryBinding); err != nil {
+			return nil, fmt.Errorf("gatewayapp: validate canonical Session Memory binding: %w", err)
+		}
+	}
 
 	instance := &sessionRuntimeInstance{
 		runtimeComposition: runtimeComposition{
@@ -100,6 +111,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 			activation: &sessionRuntimeActivation{
 				modelCatalog:          deps.modelCatalog,
 				appConfig:             ptrToRuntimeConfigSnapshot(doc),
+				sessionRef:            active.SessionRef,
 				memoryBinding:         memoryBinding,
 				childControlURL:       process.childControlURL,
 				childControlTokenFile: process.childControlTokenFile,

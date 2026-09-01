@@ -296,6 +296,9 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 			PreferredSessionID: strings.TrimSpace(req.PreferredSessionID), Title: strings.TrimSpace(req.Title), Metadata: req.Metadata,
 			Controller: controller,
 		})
+		if err == nil {
+			created, err = s.admitCreatedMemorySession(ctx, created)
+		}
 		return sessionCommandResult(created), classifyControlBackendError(err)
 	case appserver.CloseSessionRequest:
 		active, err := s.checkControlCommandCASAllowClosed(ctx, req.WriteBase)

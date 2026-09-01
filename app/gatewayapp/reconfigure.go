@@ -342,6 +342,12 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, err
 	}
+	memoryTools, err := s.buildMemoryTools()
+	if err != nil {
+		bundle.Close()
+		return nil, err
+	}
+	tools = append(tools, memoryTools...)
 	mcpTools := mcpMgr.Tools()
 	if searchTool := toolsearch.New(mcpTools); searchTool != nil {
 		tools = append(tools, searchTool)

@@ -81,6 +81,7 @@ type runtimeProcessState struct {
 type sessionRuntimeActivation struct {
 	modelCatalog          *modelLookup
 	appConfig             *AppConfig
+	sessionRef            session.SessionRef
 	memoryBinding         *memorybinding.RuntimeMemoryBindingSnapshot
 	childControlURL       string
 	childControlTokenFile string

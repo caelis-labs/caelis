@@ -112,7 +112,19 @@ Grant, and binding version. The activated Runtime does not retain the complete
 Bot catalog, the alternate audience, or the cognitive Memory identity. Later
 binding changes affect later activations; an independent process kill switch
 omits Memory from an activation without rewriting configuration or appliance
-data. Public or mixed-audience Runtime composition is invalid.
+data. A new canonical Session pins its actor and audience at creation. A Session
+created before Memory was enabled is pinned before its first Memory call under
+the Runtime fence. Public or mixed-audience Runtime composition is invalid.
+
+When Memory is enabled, Host-private composition verifies the native `memoryd`
+artifact against the exact platform, source revision, and SHA-256 manifest,
+launches it without credential-bearing arguments or environment, waits for
+readiness, and performs the exact protocol/API/Core Profile handshake. Runtime
+capabilities are issued and renewed from an owner-only issuer credential store;
+the model sees exactly `remember(text)` and `recall(query)`. Their canonical
+ToolResults are ordinary Session history, so replay reads the stored bytes and
+does not contact the appliance. Consistency cursors and provenance references
+remain in model-hidden Session state and ToolResult metadata.
 
 Shutdown closes admission, cancels and drains producers, waits for routed
 mutations and Runtime cleanup, then closes stores and process resources.
@@ -153,6 +165,8 @@ control/control.sqlite      Control operation and ACP preparation state
 control/cursor.key          private cursor-signing secret
 sessions/                   canonical Session documents and event JSONL plus derived SQLite indexes
 providers/                  private provider credential material
+memory/credentials/         owner-only Memory issuer credentials behind opaque references
+memory/appliance/           default independent memoryd data directory for managed-local mode
 plugins/                    installed and marketplace content caches
 runtime/service/            live Host discovery, authentication, and ownership files
 logs/, updates/, skills/    diagnostics, update state, and prompt assets
@@ -199,6 +213,13 @@ Host-private composition and cannot be persisted as product configuration.
 References do not grant access: Host-private composition resolves the issuer
 credential, while the independent Memory appliance remains the authority for
 Views, Grants, capabilities, receipts, retrieval, and lifecycle.
+
+The local Alpha host selects this process composition through
+`CAELIS_MEMORY_BOT_ID`, `CAELIS_MEMORY_AUDIENCE`,
+`CAELIS_MEMORY_SIDECAR_MANIFEST`, and optional `CAELIS_MEMORY_DATA_DIR`.
+`CAELIS_MEMORY_DISABLED=true` is the process kill switch. These values select a
+Control-owned binding and Host-private paths; they do not configure appliance
+policy or carry credentials.
 
 ## Compatibility and current limits
 
