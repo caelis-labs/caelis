@@ -1847,6 +1847,13 @@ func (runtimeMemoryClientStub) Recall(
 	return v1alpha1.RecallResponse{Fragments: []v1alpha1.RecallFragment{}}, nil
 }
 
+func (runtimeMemoryClientStub) GetReceiptStatus(
+	context.Context,
+	v1alpha1.ReceiptID,
+) (v1alpha1.ReceiptStatus, error) {
+	return v1alpha1.ReceiptStatus{ReceiptID: "receipt-test", State: v1alpha1.ProcessingStateAccepted}, nil
+}
+
 func testRuntimeMemoryConfiguration(version uint64, viewRef, grantRef string) memorybinding.Configuration {
 	return memorybinding.Configuration{
 		DefaultBindingRef: "private",

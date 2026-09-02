@@ -22,18 +22,25 @@ import (
 
 const (
 	defaultMemoryStewardProfileID      stewardv1alpha1.ProfileID = "caelis-default"
-	defaultMemoryStewardProfileVersion uint64                    = 1
+	defaultMemoryStewardProfileVersion uint64                    = 3
 	memoryStewardPollInterval                                    = 500 * time.Millisecond
 	memoryStewardLeaseDuration                                   = 2 * time.Minute
 )
 
 var defaultMemoryStewardProfile = stewardv1alpha1.ProfileSpec{
-	ProfileID:         defaultMemoryStewardProfileID,
-	Version:           defaultMemoryStewardProfileVersion,
-	SystemPrompt:      "Preserve durable user facts and preferences. Merge or supersede only when the supplied record context supports it; otherwise add a new record or ignore non-durable content.",
-	MaxContextRecords: 32,
-	MaxInputBytes:     256 << 10,
-	MaxOutputBytes:    32 << 10,
+	ProfileID: defaultMemoryStewardProfileID,
+	Version:   defaultMemoryStewardProfileVersion,
+	SystemPrompt: `Preserve durable facts, preferences, decisions, and commitments as compact recall-oriented records.
+Use ADD unless one supplied record clearly describes the same subject and attribute. Use MERGE only for compatible additions, and SUPERSEDE only when the new receipt explicitly replaces an earlier value. Use IGNORE for transient chatter or content with no durable fact.
+Write self-contained record text. Preserve exact names and values. Improve future lexical Recall by adding at most two commonplace, unambiguous search aliases without changing the claim: expand a recognized technical abbreviation, add an established Chinese/English equivalent, or add one immediate technical category. Retain the original term in parentheses. General language and technical knowledge may supply an alias, but never a new fact, value, cause, recommendation, or explanation.
+Examples of the intended normalization:
+- "接口使用 JWT。" becomes "接口使用 JSON Web Token (JWT) 作为访问凭证。"
+- "服务每周一发布。" becomes "服务每星期一（周一）发布。"
+- "下游异常时启用熔断。" becomes "下游异常时启用熔断（circuit breaker）机制。"
+For ADD, cite the assigned receipt. For MERGE or SUPERSEDE, use the exact supplied target and revision and cite only the assigned receipt plus evidence references from that target. Return exactly one JSON object and no prose.`,
+	MaxContextRecords: 16,
+	MaxInputBytes:     128 << 10,
+	MaxOutputBytes:    4 << 10,
 }
 
 // memoryStewardBridge is a process-private adapter between Memory's
@@ -43,7 +50,7 @@ type memoryStewardBridge struct {
 	composition *runtimeComposition
 	admin       appliance.Management
 	worker      stewardworker.Worker
-	runner      *systemManagedAgentRuntime
+	runner      systemManagedAgentRunner
 	parent      session.Session
 	diagnostics *slog.Logger
 	cancel      context.CancelFunc
@@ -218,11 +225,12 @@ type memoryStewardGenerator struct {
 }
 
 type memoryStewardModelInput struct {
-	Protocol       string                          `json:"protocol"`
-	ProfileID      stewardv1alpha1.ProfileID       `json:"profile_id"`
-	ProfileVersion uint64                          `json:"profile_version"`
-	Receipt        stewardv1alpha1.ReceiptInput    `json:"receipt"`
-	Records        []stewardv1alpha1.RecordContext `json:"records"`
+	Protocol          string                             `json:"protocol"`
+	ProfileID         stewardv1alpha1.ProfileID          `json:"profile_id"`
+	ProfileVersion    uint64                             `json:"profile_version"`
+	Receipt           stewardv1alpha1.ReceiptInput       `json:"receipt"`
+	Records           []stewardv1alpha1.RecordContext    `json:"records"`
+	LexiconCandidates []stewardv1alpha1.LexiconCandidate `json:"lexicon_candidates,omitempty"`
 }
 
 func (g memoryStewardGenerator) Generate(
@@ -244,24 +252,26 @@ func (g memoryStewardGenerator) Generate(
 		return stewardv1alpha1.Proposal{}, memoryStewardGenerationError("model_unavailable", true, err)
 	}
 	input, err := json.Marshal(memoryStewardModelInput{
-		Protocol:       request.Protocol,
-		ProfileID:      request.Profile.ProfileID,
-		ProfileVersion: request.Profile.Version,
-		Receipt:        request.Receipt,
-		Records:        request.Records,
+		Protocol:          request.Protocol,
+		ProfileID:         request.Profile.ProfileID,
+		ProfileVersion:    request.Profile.Version,
+		Receipt:           request.Receipt,
+		Records:           request.Records,
+		LexiconCandidates: request.LexiconCandidates,
 	})
 	if err != nil {
 		return stewardv1alpha1.Proposal{}, memoryStewardGenerationError("input_invalid", false, err)
 	}
 	stewardModel := withSystemAgentReasoningEffort(resolved)
+	output := memoryStewardOutputSpecForModel(stewardModel, request.Profile.MaxOutputBytes)
 	result, err := g.runner.Run(ctx, systemManagedAgentRunRequest{
 		AgentID:            stewardSceneID,
 		Purpose:            systemManagedAgentPurposeMemorySteward,
 		Model:              stewardModel,
 		ParentSession:      g.parent,
 		Input:              string(input),
-		PolicyInstructions: "Memory appliance policy for this job:\n" + request.Profile.SystemPrompt,
-		Output:             memoryStewardOutputSpecForModel(stewardModel, request.Profile.MaxOutputBytes),
+		PolicyInstructions: memoryStewardPolicyInstructions(request.Profile.SystemPrompt, len(request.LexiconCandidates) > 0),
+		Output:             output,
 		Metadata: map[string]any{
 			"memory_steward_profile_id":      string(request.Profile.ProfileID),
 			"memory_steward_profile_version": request.Profile.Version,
@@ -300,15 +310,32 @@ func memoryStewardOutputSpec(maxOutputBytes int) *model.OutputSpec {
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"operation": map[string]any{
-					"type": "string",
-					"enum": []any{"ADD", "MERGE", "SUPERSEDE", "IGNORE"},
+					"type":        "string",
+					"description": "One appliance operation. Prefer ADD unless supplied context proves a same-subject update.",
+					"enum":        []any{"ADD", "MERGE", "SUPERSEDE", "IGNORE"},
 				},
-				"target_record_id":  map[string]any{"type": "string"},
-				"expected_revision": map[string]any{"type": "integer", "minimum": 0},
-				"kind":              map[string]any{"type": "string"},
-				"text":              map[string]any{"type": "string"},
+				"target_record_id": map[string]any{
+					"type": "string", "description": "Exact supplied record ID for MERGE or SUPERSEDE; otherwise empty.",
+				},
+				"expected_revision": map[string]any{
+					"type": "integer", "minimum": 0,
+					"description": "Exact supplied revision for MERGE or SUPERSEDE; otherwise zero.",
+				},
+				"kind": map[string]any{
+					"type": "string", "description": "Short stable category such as fact, preference, decision, or commitment.",
+				},
+				"text": map[string]any{
+					"type": "string", "description": "Self-contained evidence-supported text optimized for later recall.",
+				},
 				"evidence_refs": map[string]any{
-					"type": "array", "items": map[string]any{"type": "string"},
+					"type": "array", "description": "Only receipt IDs present in the assigned input or target record.",
+					"items": map[string]any{"type": "string"},
+				},
+				"lexicon_terms": map[string]any{
+					"type":        "array",
+					"description": "Optional exact term values selected only from supplied lexicon_candidates; never invent terms.",
+					"maxItems":    stewardv1alpha1.MaxLexiconTerms,
+					"items":       map[string]any{"type": "string"},
 				},
 			},
 			"required": []any{"operation"},
@@ -327,8 +354,24 @@ func memoryStewardOutputSpecForModel(llm model.LLM, maxOutputBytes int) *model.O
 	return output
 }
 
+func memoryStewardPolicyInstructions(profilePrompt string, hasLexiconCandidates bool) string {
+	instructions := "Memory appliance policy for this job:\n" + strings.TrimSpace(profilePrompt)
+	instructions += `
+
+The response object may use only these top-level keys: operation, target_record_id, expected_revision, kind, text, and evidence_refs. Return one of these exact JSON shapes with no Markdown fence, prose, or unused fields:
+ADD: {"operation":"ADD","kind":"fact","text":"...","evidence_refs":["assigned-receipt-id"]}
+MERGE: {"operation":"MERGE","target_record_id":"supplied-record-id","expected_revision":1,"kind":"supplied-kind","text":"...","evidence_refs":["assigned-receipt-id","retained-target-evidence-id"]}
+SUPERSEDE: {"operation":"SUPERSEDE","target_record_id":"supplied-record-id","expected_revision":1,"kind":"fact","text":"...","evidence_refs":["assigned-receipt-id","supported-target-evidence-id"]}
+IGNORE: {"operation":"IGNORE"}`
+	if !hasLexiconCandidates {
+		return instructions
+	}
+	return instructions + `
+The input contains lexicon_candidates. The response may additionally contain lexicon_terms with only exact candidate term values that are meaningful local compound names. Never invent or normalize a term; omit lexicon_terms when no candidate should be approved.`
+}
+
 func parseMemoryStewardProposal(text string) (stewardv1alpha1.Proposal, error) {
-	decoder := json.NewDecoder(strings.NewReader(strings.TrimSpace(text)))
+	decoder := json.NewDecoder(strings.NewReader(memoryStewardJSONText(text)))
 	decoder.DisallowUnknownFields()
 	var proposal stewardv1alpha1.Proposal
 	if err := decoder.Decode(&proposal); err != nil {
@@ -344,4 +387,18 @@ func parseMemoryStewardProposal(text string) (stewardv1alpha1.Proposal, error) {
 		return stewardv1alpha1.Proposal{}, err
 	}
 	return proposal, nil
+}
+
+func memoryStewardJSONText(text string) string {
+	trimmed := strings.TrimSpace(text)
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) < 3 {
+		return trimmed
+	}
+	opening := strings.ToLower(strings.TrimSpace(lines[0]))
+	closing := strings.TrimSpace(lines[len(lines)-1])
+	if (opening != "```" && opening != "```json") || closing != "```" {
+		return trimmed
+	}
+	return strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
 }

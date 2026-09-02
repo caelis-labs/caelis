@@ -29,6 +29,7 @@ type CredentialLookup func(context.Context, string) (string, error)
 type BoundClient interface {
 	Remember(context.Context, string, string, *time.Time) (v1alpha1.RememberResponse, error)
 	Recall(context.Context, string, v1alpha1.ConsistencyToken) (v1alpha1.RecallResponse, error)
+	GetReceiptStatus(context.Context, v1alpha1.ReceiptID) (v1alpha1.ReceiptStatus, error)
 }
 
 // Config is the complete process-owned input for the embedded Memory runtime.
@@ -99,7 +100,7 @@ func (h *Host) Bind(
 		host:        h,
 		binding:     binding,
 		now:         time.Now,
-		byOperation: make(map[v1alpha1.Operation]v1alpha1.RuntimeCapability, 2),
+		byOperation: make(map[v1alpha1.Operation]v1alpha1.RuntimeCapability, 3),
 	}
 	return memorysdk.NewClient(h.runtime.DataPlane(), capabilities, source, budget), nil
 }
@@ -141,7 +142,8 @@ type capabilitySource struct {
 }
 
 func (s *capabilitySource) Authorization(ctx context.Context, operation v1alpha1.Operation) (v1alpha1.CallAuthorization, error) {
-	if operation != v1alpha1.OperationRemember && operation != v1alpha1.OperationRecall {
+	if operation != v1alpha1.OperationRemember && operation != v1alpha1.OperationRecall &&
+		operation != v1alpha1.OperationReceiptStatus {
 		return v1alpha1.CallAuthorization{}, fmt.Errorf("gatewayapp/memoryhost: unsupported Runtime operation")
 	}
 	s.mu.Lock()
