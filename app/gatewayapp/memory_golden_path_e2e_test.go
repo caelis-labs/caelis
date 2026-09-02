@@ -28,7 +28,11 @@ func TestMemoryEmbeddedGoldenPath(t *testing.T) {
 	root := t.TempDir()
 	storeDir := filepath.Join(root, "caelis")
 	workspace := filepath.Join(root, "workspace")
+	isolatedWorkspace := filepath.Join(root, "isolated-workspace")
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(isolatedWorkspace, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	provider := newMemoryGoldenProvider(t)
@@ -65,6 +69,18 @@ func TestMemoryEmbeddedGoldenPath(t *testing.T) {
 	before := memoryGoldenToolResults(t, stack, active.SessionRef)
 	assertMemoryGoldenResult(t, before, memorytool.RememberToolName, `{"accepted":true}`)
 	assertMemoryGoldenResult(t, before, memorytool.RecallToolName, memoryGoldenFact)
+	provider.AssertComplete(t)
+	if err := stack.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	stack = newMemoryGoldenStackForWorkspace(t, provider, storeDir, "memory-golden-isolated", isolatedWorkspace)
+	provider.Begin(memoryGoldenScenario{
+		name:    "embedded-other-workspace",
+		actions: []memoryGoldenAction{{name: memorytool.RecallToolName, arguments: `{"query":"preferred review language"}`}},
+	})
+	isolated := runMemoryGoldenSession(t, ctx, stack, "session-isolated-workspace")
+	assertMemoryGoldenResultAbsent(t, memoryGoldenToolResults(t, stack, isolated.SessionRef), memorytool.RecallToolName, memoryGoldenFact)
 	provider.AssertComplete(t)
 	if err := stack.Close(); err != nil {
 		t.Fatal(err)
@@ -142,9 +158,20 @@ func TestMemoryStewardBindingControlsEmbeddedWorker(t *testing.T) {
 
 func newMemoryGoldenStack(t *testing.T, provider *memoryGoldenProvider, storeDir, workspace string) *Stack {
 	t.Helper()
+	return newMemoryGoldenStackForWorkspace(t, provider, storeDir, "memory-golden", workspace)
+}
+
+func newMemoryGoldenStackForWorkspace(
+	t *testing.T,
+	provider *memoryGoldenProvider,
+	storeDir string,
+	workspaceKey string,
+	workspace string,
+) *Stack {
+	t.Helper()
 	stack, err := newGatewayAppTestStack(t, Config{
 		AppName: "caelis-memory", UserID: "memory-golden", StoreDir: storeDir,
-		WorkspaceKey: "memory-golden", WorkspaceCWD: workspace, SkillDirs: []string{},
+		WorkspaceKey: workspaceKey, WorkspaceCWD: workspace, SkillDirs: []string{},
 		Sandbox: SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
 			Provider: "openai-compatible", API: providers.APIOpenAICompatible,
@@ -232,6 +259,23 @@ func assertMemoryGoldenResult(t *testing.T, results []memoryGoldenResult, name, 
 		}
 	}
 	t.Fatalf("Memory %s ToolResult missing %q: %#v", name, contains, results)
+}
+
+func assertMemoryGoldenResultAbsent(t *testing.T, results []memoryGoldenResult, name, absent string) {
+	t.Helper()
+	found := false
+	for _, result := range results {
+		if result.name != name {
+			continue
+		}
+		found = true
+		if strings.Contains(result.data, absent) {
+			t.Fatalf("Memory %s ToolResult crossed workspace LabelSet: %#v", name, results)
+		}
+	}
+	if !found {
+		t.Fatalf("Memory %s ToolResult is missing: %#v", name, results)
+	}
 }
 
 type memoryGoldenAction struct {

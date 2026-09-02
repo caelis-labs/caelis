@@ -26,6 +26,7 @@ type sessionRuntimeProcessSnapshot struct {
 	childControlTokenFile string
 	memorySelection       memorybinding.RuntimeSelection
 	memorySelector        MemoryBindingSelector
+	memoryLabelSelector   MemoryLabelSelector
 }
 
 func newSessionRuntimeAssemblyDeps(host *Stack) (sessionRuntimeAssemblyDeps, error) {

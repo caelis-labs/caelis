@@ -37,9 +37,13 @@ func TestEmbeddedHostBindsSDKClient(t *testing.T) {
 		}},
 		Grants: []managementv1alpha1.Grant{{
 			ID: "grant:test", PrincipalRef: "principal:test", ActorRef: "actor:test", ViewRef: "view:test",
-			AllowedOperations: []v1alpha1.Operation{v1alpha1.OperationRemember, v1alpha1.OperationRecall},
-			AllowedAudiences:  []v1alpha1.Audience{v1alpha1.AudiencePrivate},
-			ExpiresAt:         time.Now().Add(time.Hour), Version: 1,
+			AllowedOperations: []v1alpha1.Operation{
+				v1alpha1.OperationRemember,
+				v1alpha1.OperationRecall,
+				v1alpha1.OperationReceiptStatus,
+			},
+			AllowedAudiences: []v1alpha1.Audience{v1alpha1.AudiencePrivate},
+			ExpiresAt:        time.Now().Add(time.Hour), Version: 1,
 		}},
 		IssuerPrincipals: []string{"principal:test"},
 	})
@@ -51,6 +55,7 @@ func TestEmbeddedHostBindsSDKClient(t *testing.T) {
 		BindingRef: "binding:test", RuntimeActorRef: "actor:test", PrincipalRef: "principal:test",
 		IssuerCredentialRef: "issuer:test", ViewRef: "view:test", GrantRef: "grant:test",
 		Audience: memorybinding.OutputAudiencePrivate, BindingVersion: 1,
+		Labels: v1alpha1.LabelSet{"workspace:alpha"},
 	}
 	client, err := host.Bind(binding, v1alpha1.SourceContext{
 		ActorRef: "actor:test", SessionRef: "session:test", SourceType: "test",
@@ -68,6 +73,24 @@ func TestEmbeddedHostBindsSDKClient(t *testing.T) {
 	}
 	if len(recalled.Fragments) != 1 || recalled.Fragments[0].Text != "embedded memory host" {
 		t.Fatalf("Recall() = %#v", recalled)
+	}
+	otherBinding := binding
+	otherBinding.Labels = v1alpha1.LabelSet{"workspace:beta"}
+	other, err := host.Bind(otherBinding, v1alpha1.SourceContext{
+		ActorRef: "actor:test", SessionRef: "session:other", SourceType: "test",
+	}, v1alpha1.RecallBudget{MaxFragments: 8, MaxBytes: 16 << 10, DeadlineMS: 1_000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	isolated, err := other.Recall(ctx, "embedded host", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(isolated.Fragments) != 0 {
+		t.Fatalf("other Runtime labels recalled memory: %#v", isolated.Fragments)
+	}
+	if _, err := other.GetReceiptStatus(ctx, remembered.ReceiptID); !v1alpha1.IsCode(err, v1alpha1.ErrorCodeNotFound) {
+		t.Fatalf("other Runtime labels ReceiptStatus error = %v, want not_found", err)
 	}
 }
 

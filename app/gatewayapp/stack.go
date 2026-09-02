@@ -98,6 +98,10 @@ type Config struct {
 	// provisioned private binding and never configure endpoints or grants.
 	MemoryBindingRef      memorybinding.BindingRef
 	MemoryBindingSelector MemoryBindingSelector
+	// MemoryLabelSelector is an embedding-only extension seam for adding opaque
+	// product partitions to Caelis' mandatory, hashed workspace label. Labels
+	// are fixed at Session admission and never enter model-visible tool data.
+	MemoryLabelSelector MemoryLabelSelector
 	// memoryHost is a package-private deterministic test seam. Production opens
 	// the embedded Memory package synchronously with the Host.
 	memoryHost runtimeMemoryHost
@@ -537,6 +541,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		childControlTokenFile: cfg.ChildControlTokenFile,
 		memorySelection:       memorySelection,
 		memorySelector:        cfg.MemoryBindingSelector,
+		memoryLabelSelector:   cfg.MemoryLabelSelector,
 	})
 	sessionModelPins := newSessionModelPinRegistry(apiKeyCredentials.Get, lookup.Snapshot().Configs...)
 	stack := &Stack{

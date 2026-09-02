@@ -117,19 +117,27 @@ records, not setup fields.
 Memory then follows the same activation boundary. Control selects one opaque
 `BindingRef` internally, then detaches only that binding's Runtime actor,
 principal, issuer reference, View, Grant, single `private` or
-`shared` audience, and binding version. The activated Runtime does not retain the
-complete binding catalog or any downstream product identity. A future product
-layer may map a Bot, user, tenant, workspace, or another concept to a
-`BindingRef`; none is part of the Caelis Memory contract. Later binding changes
-affect later activations. A new canonical Session pins its complete non-secret delegation at
-creation. A Session created before Memory was enabled is pinned before its first
-Memory call under the Runtime fence. Public or mixed-audience Runtime
-composition is invalid.
+`shared` audience, and binding version. Caelis additionally derives one mandatory
+opaque Label from the canonical workspace key by SHA-256. The exact LabelSet is
+bound into each issued capability, so identical terms from different workspaces
+cannot cross Recall, receipt, or consistency-cursor boundaries. Raw workspace
+paths and labels never enter the model-visible tool schema or result.
 
-The current Session pin includes binding, actor, principal, issuer
-reference, audience, View, Grant, and binding version. The earlier prerelease
-partial pin is rejected rather than silently widened; start a new Session to
-establish the complete pin. Historical schema-v2 AppConfig `bots` records are
+The activated Runtime does not retain the complete binding catalog or any
+downstream product identity. A future product layer may map a Bot, user, tenant,
+or another concept to a `BindingRef` or append opaque labels through the
+embedding-only selector; Memory still sees neither those product concepts nor
+their semantics. The mandatory workspace label cannot be removed by that
+extension. Later binding changes affect later activations. A new canonical
+Session pins its complete non-secret delegation and LabelSet at creation. A
+Session created before Memory was enabled is pinned before its first Memory call
+under the Runtime fence. Public or mixed-audience Runtime composition is invalid.
+
+The current Session pin includes binding, actor, principal, issuer reference,
+audience, View, Grant, binding version, and the canonical LabelSet. A legacy
+pre-LabelSet Session pin is upgraded at its first post-upgrade admission and its
+old empty-partition consistency cursor is discarded; after that admission its
+labels cannot change. Historical schema-v2 AppConfig `bots` records are
 atomically rewritten to opaque bindings when exactly one identity exists.
 Multiple historical identities are rejected because silently selecting one
 would change authority; there is no Memory lifecycle switch or partially active

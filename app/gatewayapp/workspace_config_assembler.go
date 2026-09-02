@@ -255,21 +255,33 @@ func selectRuntimeMemoryBinding(
 	ref session.SessionRef,
 	workspace session.WorkspaceRef,
 ) (*memorybinding.RuntimeMemoryBindingSnapshot, error) {
+	var binding *memorybinding.RuntimeMemoryBindingSnapshot
+	var err error
 	if process.memorySelector == nil {
-		return resolveRuntimeMemoryBinding(configuration, process)
+		binding, err = resolveRuntimeMemoryBinding(configuration, process)
+	} else {
+		var selected memorybinding.BindingRef
+		selected, err = process.memorySelector(ctx, MemoryBindingSelectionContext{
+			SessionRef:         ref,
+			Workspace:          workspace,
+			FallbackBindingRef: process.memorySelection.BindingRef,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("gatewayapp: select Runtime Memory binding: %w", err)
+		}
+		if selected != "" {
+			process.memorySelection.BindingRef = selected
+		}
+		binding, err = resolveRuntimeMemoryBinding(configuration, process)
 	}
-	selected, err := process.memorySelector(ctx, MemoryBindingSelectionContext{
-		SessionRef:         ref,
-		Workspace:          workspace,
-		FallbackBindingRef: process.memorySelection.BindingRef,
-	})
+	if err != nil || binding == nil {
+		return binding, err
+	}
+	labeled, err := bindRuntimeMemoryLabels(ctx, *binding, process.memoryLabelSelector, ref, workspace)
 	if err != nil {
-		return nil, fmt.Errorf("gatewayapp: select Runtime Memory binding: %w", err)
+		return nil, err
 	}
-	if selected != "" {
-		process.memorySelection.BindingRef = selected
-	}
-	return resolveRuntimeMemoryBinding(configuration, process)
+	return &labeled, nil
 }
 
 func cloneSessionModelConfig(config ModelConfig) ModelConfig {

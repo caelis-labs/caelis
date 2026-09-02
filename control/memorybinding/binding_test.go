@@ -1,8 +1,11 @@
 package memorybinding
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+
+	memoryv1alpha1 "github.com/caelis-labs/memory/api/memory/v1alpha1"
 )
 
 func TestResolveSelectsOneOpaqueBindingIntoDetachedRuntimeSnapshot(t *testing.T) {
@@ -95,7 +98,29 @@ func TestZeroConfigurationWaitsForHostProvisioning(t *testing.T) {
 	if IsConfigured(configuration) {
 		t.Fatal("zero configuration is unexpectedly configured")
 	}
-	if snapshot, active, err := Resolve(configuration, RuntimeSelection{}); err != nil || active || snapshot != (RuntimeMemoryBindingSnapshot{}) {
+	if snapshot, active, err := Resolve(configuration, RuntimeSelection{}); err != nil || active || !reflect.DeepEqual(snapshot, RuntimeMemoryBindingSnapshot{}) {
 		t.Fatalf("Resolve(zero) = %#v, %v, %v", snapshot, active, err)
+	}
+}
+
+func TestBindRuntimeLabelsCanonicalizesAndDetaches(t *testing.T) {
+	binding, active, err := Resolve(testConfiguration(), RuntimeSelection{})
+	if err != nil || !active {
+		t.Fatalf("Resolve() = %#v, %v, %v", binding, active, err)
+	}
+	input := memoryv1alpha1.LabelSet{"workspace:z", "identity:a"}
+	labeled, err := BindRuntimeLabels(binding, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input[0] = "workspace:changed"
+	if !reflect.DeepEqual(labeled.Labels, memoryv1alpha1.LabelSet{"identity:a", "workspace:z"}) {
+		t.Fatalf("canonical labels = %#v", labeled.Labels)
+	}
+	if len(binding.Labels) != 0 {
+		t.Fatalf("source binding was mutated: %#v", binding.Labels)
+	}
+	if _, err := BindRuntimeLabels(binding, memoryv1alpha1.LabelSet{"duplicate", "duplicate"}); err == nil {
+		t.Fatal("BindRuntimeLabels accepted duplicate labels")
 	}
 }

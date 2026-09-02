@@ -5,6 +5,7 @@ package memoryhost
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -143,6 +144,10 @@ func validateBinding(binding memorybinding.RuntimeMemoryBindingSnapshot) error {
 		binding.BindingVersion == 0 {
 		return fmt.Errorf("gatewayapp/memoryhost: Runtime binding is incomplete")
 	}
+	canonicalLabels, err := v1alpha1.CanonicalLabelSet(binding.Labels)
+	if err != nil || !slices.Equal(canonicalLabels, binding.Labels) {
+		return fmt.Errorf("gatewayapp/memoryhost: Runtime binding labels are invalid or non-canonical")
+	}
 	return nil
 }
 
@@ -196,6 +201,7 @@ func (s *capabilitySource) Authorization(ctx context.Context, operation v1alpha1
 			ActorRef:     string(s.binding.RuntimeActorRef),
 			Audience:     v1alpha1.Audience(s.binding.Audience),
 			Operations:   []v1alpha1.Operation{operation},
+			Labels:       append(v1alpha1.LabelSet{}, s.binding.Labels...),
 			TTLSeconds:   int64(defaultCapabilityTTL / time.Second),
 		})
 		if err != nil {

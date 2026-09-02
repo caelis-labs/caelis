@@ -2,8 +2,11 @@ package memorybinding
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
+
+	memoryv1alpha1 "github.com/caelis-labs/memory/api/memory/v1alpha1"
 )
 
 // RuntimeActorRef is the stable Control-owned actor presented to Memory
@@ -74,6 +77,23 @@ type RuntimeMemoryBindingSnapshot struct {
 	GrantRef            string
 	Audience            OutputAudience
 	BindingVersion      uint64
+	Labels              memoryv1alpha1.LabelSet
+}
+
+// BindRuntimeLabels returns a detached Runtime authority with one canonical
+// model-hidden LabelSet. Product concepts are mapped to opaque labels by the
+// Host before Runtime assembly; Memory remains responsible for validation and
+// exact partition semantics.
+func BindRuntimeLabels(
+	binding RuntimeMemoryBindingSnapshot,
+	labels memoryv1alpha1.LabelSet,
+) (RuntimeMemoryBindingSnapshot, error) {
+	canonical, err := memoryv1alpha1.CanonicalLabelSet(labels)
+	if err != nil {
+		return RuntimeMemoryBindingSnapshot{}, fmt.Errorf("control/memorybinding: invalid Runtime labels: %w", err)
+	}
+	binding.Labels = canonical
+	return binding, nil
 }
 
 // Normalize returns a detached deterministic configuration. Validation must
@@ -158,9 +178,23 @@ func Resolve(configuration Configuration, selection RuntimeSelection) (RuntimeMe
 		if binding.BindingRef != selection.BindingRef {
 			continue
 		}
-		return RuntimeMemoryBindingSnapshot(binding), true, nil
+		return RuntimeMemoryBindingSnapshot{
+			BindingRef:          binding.BindingRef,
+			RuntimeActorRef:     binding.RuntimeActorRef,
+			PrincipalRef:        binding.PrincipalRef,
+			IssuerCredentialRef: binding.IssuerCredentialRef,
+			ViewRef:             binding.ViewRef,
+			GrantRef:            binding.GrantRef,
+			Audience:            binding.Audience,
+			BindingVersion:      binding.BindingVersion,
+		}, true, nil
 	}
 	return RuntimeMemoryBindingSnapshot{}, false, fmt.Errorf("control/memorybinding: binding reference %q does not exist", selection.BindingRef)
+}
+
+func validRuntimeLabels(labels memoryv1alpha1.LabelSet) bool {
+	canonical, err := memoryv1alpha1.CanonicalLabelSet(labels)
+	return err == nil && slices.Equal(canonical, labels)
 }
 
 func normalizeAccessBinding(in AccessBinding) AccessBinding {

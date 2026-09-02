@@ -73,7 +73,8 @@ func TestToolsExposeOnlyTextAndQueryAndPersistHiddenConsistency(t *testing.T) {
 	if got := string(remember.Content[0].JSON.Value); got != `{"accepted":true}` {
 		t.Fatalf("Remember result = %s", got)
 	}
-	if raw, _ := json.Marshal(remember); strings.Contains(string(raw), "capability") || strings.Contains(string(raw), "issuer-super-secret") {
+	if raw, _ := json.Marshal(remember); strings.Contains(string(raw), "capability") ||
+		strings.Contains(string(raw), "issuer-super-secret") || strings.Contains(string(raw), "workspace:hidden") {
 		t.Fatalf("Remember result leaked authority: %s", raw)
 	}
 
@@ -83,6 +84,9 @@ func TestToolsExposeOnlyTextAndQueryAndPersistHiddenConsistency(t *testing.T) {
 	}
 	if got := string(recall.Content[0].JSON.Value); got != `{"fragments":["commit does not authorize push"]}` {
 		t.Fatalf("Recall result = %s", got)
+	}
+	if raw, _ := json.Marshal(recall); strings.Contains(string(raw), "workspace:hidden") {
+		t.Fatalf("Recall result leaked Runtime labels: %s", raw)
 	}
 	if client.recallToken != "token-remember" {
 		t.Fatalf("Recall consistency token = %q", client.recallToken)
@@ -234,5 +238,6 @@ func testBinding() memorybinding.RuntimeMemoryBindingSnapshot {
 		IssuerCredentialRef: "memory-issuer:" + strings.Repeat("a", 32),
 		ViewRef:             "view-a", GrantRef: "grant-a",
 		Audience: memorybinding.OutputAudiencePrivate, BindingVersion: 1,
+		Labels: v1alpha1.LabelSet{"workspace:hidden"},
 	}
 }
