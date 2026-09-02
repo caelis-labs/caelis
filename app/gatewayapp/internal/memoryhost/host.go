@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caelis-labs/caelis/control/memorybinding"
@@ -42,7 +43,9 @@ type Config struct {
 type Host struct {
 	runtime     *appliance.Runtime
 	credentials CredentialLookup
+	runtimeMu   sync.RWMutex
 	close       sync.Once
+	closed      atomic.Bool
 	closeErr    error
 }
 
@@ -66,7 +69,12 @@ func Open(ctx context.Context, config Config) (*Host, error) {
 // Management returns the direct appliance owner plane used for automatic
 // topology and Steward-policy maintenance.
 func (h *Host) Management() appliance.Management {
-	if h == nil || h.runtime == nil {
+	if h == nil {
+		return nil
+	}
+	h.runtimeMu.RLock()
+	defer h.runtimeMu.RUnlock()
+	if h.closed.Load() {
 		return nil
 	}
 	return h.runtime.Management()
@@ -74,7 +82,12 @@ func (h *Host) Management() appliance.Management {
 
 // StewardWorker returns the provider-neutral direct work plane.
 func (h *Host) StewardWorker() stewardworker.Worker {
-	if h == nil || h.runtime == nil {
+	if h == nil {
+		return nil
+	}
+	h.runtimeMu.RLock()
+	defer h.runtimeMu.RUnlock()
+	if h.closed.Load() {
 		return nil
 	}
 	return h.runtime.StewardWorker()
@@ -87,10 +100,15 @@ func (h *Host) Bind(
 	source v1alpha1.SourceContext,
 	budget v1alpha1.RecallBudget,
 ) (BoundClient, error) {
-	if h == nil || h.runtime == nil || h.credentials == nil {
+	if h == nil {
 		return nil, fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
 	}
-	if err := h.ValidateBinding(binding); err != nil {
+	h.runtimeMu.RLock()
+	defer h.runtimeMu.RUnlock()
+	if h.closed.Load() || h.credentials == nil {
+		return nil, fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
+	}
+	if err := validateBinding(binding); err != nil {
 		return nil, err
 	}
 	if err := budget.Validate(); err != nil {
@@ -108,9 +126,18 @@ func (h *Host) Bind(
 // ValidateBinding checks the complete logical delegation. The embedded
 // runtime has no separately versioned endpoint or artifact to validate.
 func (h *Host) ValidateBinding(binding memorybinding.RuntimeMemoryBindingSnapshot) error {
-	if h == nil || h.runtime == nil {
+	if h == nil {
 		return fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
 	}
+	h.runtimeMu.RLock()
+	defer h.runtimeMu.RUnlock()
+	if h.closed.Load() {
+		return fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
+	}
+	return validateBinding(binding)
+}
+
+func validateBinding(binding memorybinding.RuntimeMemoryBindingSnapshot) error {
 	if binding.BindingRef == "" || binding.RuntimeActorRef == "" || binding.PrincipalRef == "" ||
 		binding.IssuerCredentialRef == "" || binding.ViewRef == "" || binding.GrantRef == "" ||
 		binding.BindingVersion == 0 {
@@ -125,9 +152,11 @@ func (h *Host) Close() error {
 		return nil
 	}
 	h.close.Do(func() {
+		h.closed.Store(true)
+		h.runtimeMu.Lock()
+		defer h.runtimeMu.Unlock()
 		if h.runtime != nil {
 			h.closeErr = h.runtime.Close()
-			h.runtime = nil
 		}
 	})
 	return h.closeErr
@@ -148,6 +177,9 @@ func (s *capabilitySource) Authorization(ctx context.Context, operation v1alpha1
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.host == nil || s.host.closed.Load() {
+		return v1alpha1.CallAuthorization{}, fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
+	}
 	now := time.Now()
 	if s.now != nil {
 		now = s.now()
@@ -158,7 +190,7 @@ func (s *capabilitySource) Authorization(ctx context.Context, operation v1alpha1
 		if err != nil {
 			return v1alpha1.CallAuthorization{}, fmt.Errorf("gatewayapp/memoryhost: resolve issuer credential: %w", err)
 		}
-		capability, err = s.host.runtime.IssueCapability(ctx, credential, v1alpha1.CapabilityIssueRequest{
+		capability, err = s.host.issueCapability(ctx, credential, v1alpha1.CapabilityIssueRequest{
 			PrincipalRef: s.binding.PrincipalRef,
 			GrantRef:     v1alpha1.GrantID(s.binding.GrantRef),
 			ActorRef:     string(s.binding.RuntimeActorRef),
@@ -176,4 +208,20 @@ func (s *capabilitySource) Authorization(ctx context.Context, operation v1alpha1
 		ActorRef:   string(s.binding.RuntimeActorRef),
 		Audience:   v1alpha1.Audience(s.binding.Audience),
 	}, nil
+}
+
+func (h *Host) issueCapability(
+	ctx context.Context,
+	credential string,
+	request v1alpha1.CapabilityIssueRequest,
+) (v1alpha1.RuntimeCapability, error) {
+	if h == nil {
+		return v1alpha1.RuntimeCapability{}, fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
+	}
+	h.runtimeMu.RLock()
+	defer h.runtimeMu.RUnlock()
+	if h.closed.Load() {
+		return v1alpha1.RuntimeCapability{}, fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
+	}
+	return h.runtime.IssueCapability(ctx, credential, request)
 }

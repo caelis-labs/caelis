@@ -2,6 +2,7 @@ package memoryhost
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -81,5 +82,41 @@ func TestEmbeddedHostRejectsIncompleteBinding(t *testing.T) {
 	defer host.Close()
 	if err := host.ValidateBinding(memorybinding.RuntimeMemoryBindingSnapshot{}); err == nil {
 		t.Fatal("ValidateBinding() accepted an incomplete logical binding")
+	}
+}
+
+func TestEmbeddedHostCloseIsSafeWithConcurrentAccess(t *testing.T) {
+	host, err := Open(t.Context(), Config{
+		DataDir:     t.TempDir(),
+		Credentials: func(context.Context, string) (string, error) { return "unused", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workers sync.WaitGroup
+	start := make(chan struct{})
+	for range 8 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			for range 100 {
+				_ = host.Management()
+				_ = host.StewardWorker()
+				_ = host.ValidateBinding(memorybinding.RuntimeMemoryBindingSnapshot{})
+				_, _ = host.Bind(memorybinding.RuntimeMemoryBindingSnapshot{}, v1alpha1.SourceContext{}, v1alpha1.RecallBudget{})
+			}
+		}()
+	}
+	close(start)
+	if err := host.Close(); err != nil {
+		t.Fatal(err)
+	}
+	workers.Wait()
+	if host.Management() != nil || host.StewardWorker() != nil {
+		t.Fatal("closed host still exposed Memory service planes")
+	}
+	if err := host.Close(); err != nil {
+		t.Fatalf("second Close() = %v", err)
 	}
 }
