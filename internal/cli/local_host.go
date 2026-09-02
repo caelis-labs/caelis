@@ -291,6 +291,10 @@ func managedProductFailure(storeDir string, phase string, err error, surfaceCaus
 func userFacingHostBlocker(err error) string {
 	text := strings.ToLower(err.Error())
 	switch {
+	case strings.Contains(text, "unsupported unreleased schema"):
+		return "Memory data uses an unsupported unreleased schema; remove the prerelease Memory database and restart Caelis"
+	case strings.Contains(text, "memory data directory is already owned"):
+		return "Memory data directory is already owned by another process"
 	case strings.Contains(text, "permission denied"), strings.Contains(text, "operation not permitted"),
 		strings.Contains(text, "read-only file system"):
 		return "permission denied"
@@ -303,6 +307,24 @@ func userFacingHostBlocker(err error) string {
 		return compactUserVisibleCause(err)
 	default:
 		return ""
+	}
+}
+
+func managedStartupDoctorCause(err error) string {
+	if err == nil {
+		return "local Control Host is unavailable"
+	}
+	if cause := userFacingHostBlocker(err); cause != "" {
+		return cause
+	}
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "context deadline exceeded"), strings.Contains(text, "did not become ready"):
+		return "local Control Host did not become ready before the startup deadline"
+	case strings.Contains(text, "process exited before readiness"), strings.Contains(text, "exit status"):
+		return "local Control Host exited before readiness"
+	default:
+		return "local Control Host could not start"
 	}
 }
 
@@ -331,6 +353,30 @@ func recordManagedProductDiagnostic(storeDir string, phase string, err error) {
 		return
 	}
 	_, _ = fmt.Fprintf(file, "%s phase=%s error=%q\n", time.Now().UTC().Format(time.RFC3339Nano), phase, err.Error())
+}
+
+func recordManagedProductTiming(storeDir string, event servicelifecycle.PhaseEvent) {
+	if event.Name == "start_total" && event.Err == nil && event.Duration < 100*time.Millisecond {
+		return
+	}
+	logDir := productpaths.ServiceLogDir(storeDir)
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		return
+	}
+	file, err := os.OpenFile(filepath.Join(logDir, localHostLogFilename), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	if err := file.Chmod(0o600); err != nil {
+		return
+	}
+	outcome := "ok"
+	if event.Err != nil {
+		outcome = "failed"
+	}
+	_, _ = fmt.Fprintf(file, "%s phase=lifecycle.%s duration_ms=%.3f outcome=%s\n",
+		time.Now().UTC().Format(time.RFC3339Nano), event.Name, float64(event.Duration)/float64(time.Millisecond), outcome)
 }
 
 func validateManagedServerInfo(record controlserver.DiscoveryRecord, info appserver.ServerInfo) error {
@@ -402,6 +448,11 @@ func launchDetachedLocalHost(request localHostStartRequest) (servicelifecycle.La
 		_ = logFile.Close()
 		return servicelifecycle.LaunchedProcess{}, fmt.Errorf("cli: secure local Control Host log: %w", err)
 	}
+	logInfo, err := logFile.Stat()
+	if err != nil {
+		_ = logFile.Close()
+		return servicelifecycle.LaunchedProcess{}, fmt.Errorf("cli: inspect local Control Host log: %w", err)
+	}
 	args := []string{
 		"serve",
 		"--store-dir", request.StoreDir,
@@ -419,51 +470,97 @@ func launchDetachedLocalHost(request localHostStartRequest) (servicelifecycle.La
 		return servicelifecycle.LaunchedProcess{}, fmt.Errorf("cli: start local Control Host: %w", err)
 	}
 	_ = logFile.Close()
-	handle := &detachedLocalHostProcess{command: command}
+	handle := newDetachedLocalHostProcess(command, logPath, logInfo.Size())
 	return servicelifecycle.LaunchedProcess{
 		PID:     command.Process.Pid,
 		Abort:   handle.abort,
 		Release: handle.release,
+		Exited:  handle.exited,
 	}, nil
 }
 
 type detachedLocalHostProcess struct {
-	mu      sync.Mutex
-	command *exec.Cmd
-	done    bool
+	mu       sync.Mutex
+	command  *exec.Cmd
+	exited   chan error
+	done     chan struct{}
+	released bool
+}
+
+func newDetachedLocalHostProcess(command *exec.Cmd, logPath string, logOffset int64) *detachedLocalHostProcess {
+	process := &detachedLocalHostProcess{
+		command: command,
+		exited:  make(chan error, 1),
+		done:    make(chan struct{}),
+	}
+	go func() {
+		waitErr := command.Wait()
+		if cause := managedStartupCauseFromLog(logPath, logOffset); cause != "" {
+			waitErr = errors.New(cause)
+		}
+		process.exited <- waitErr
+		close(process.exited)
+		close(process.done)
+	}()
+	return process
 }
 
 func (p *detachedLocalHostProcess) abort() error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.done {
+	if p.released {
+		p.mu.Unlock()
 		return nil
 	}
-	p.done = true
-	var errs []error
+	p.mu.Unlock()
+	select {
+	case <-p.done:
+		return nil
+	default:
+	}
+	var killErr error
 	if err := p.command.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		errs = append(errs, err)
+		killErr = err
 	}
-	if err := p.command.Wait(); err != nil {
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
+	<-p.done
+	return killErr
 }
 
 func (p *detachedLocalHostProcess) release() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.done {
-		return nil
-	}
-	if err := p.command.Process.Release(); err != nil {
-		return err
-	}
-	p.done = true
+	p.released = true
 	return nil
+}
+
+func managedStartupCauseFromLog(path string, offset int64) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info.Size() <= offset {
+		return ""
+	}
+	const maxStartupLogBytes = int64(64 << 10)
+	start := offset
+	if info.Size()-start > maxStartupLogBytes {
+		start = info.Size() - maxStartupLogBytes
+	}
+	if _, err := file.Seek(start, io.SeekStart); err != nil {
+		return ""
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, maxStartupLogBytes))
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(raw), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if cause := userFacingHostBlocker(errors.New(lines[i])); cause != "" {
+			return cause
+		}
+	}
+	return ""
 }
 
 func loadManagedDiscovery(storeDir string) (controlserver.DiscoveryRecord, string, error) {
@@ -494,6 +591,9 @@ func newLocalServiceManager(options productClientOptions) (servicelifecycle.Mana
 		StartupTimeout:  options.StartupTimeout,
 		ShutdownTimeout: localHostShutdownTimeout,
 		PollInterval:    options.PollInterval,
+		ObservePhase: func(event servicelifecycle.PhaseEvent) {
+			recordManagedProductTiming(options.StoreDir, event)
+		},
 	}
 	manager.Probe = func(ctx context.Context) servicelifecycle.ProbeResult {
 		return inspectManagedHost(ctx, options).Probe

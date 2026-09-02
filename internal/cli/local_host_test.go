@@ -575,7 +575,7 @@ func TestDetachedLocalHostAbortKillsAndReapsExactChild(t *testing.T) {
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
-	handle := &detachedLocalHostProcess{command: command}
+	handle := newDetachedLocalHostProcess(command, filepath.Join(t.TempDir(), "service.log"), 0)
 	if err := handle.abort(); err != nil {
 		t.Fatal(err)
 	}
@@ -592,6 +592,46 @@ func TestDetachedLocalHostAbortHelper(t *testing.T) {
 		return
 	}
 	time.Sleep(10 * time.Minute)
+}
+
+func TestDetachedLocalHostReportsEarlySafeStartupCause(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "service.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(os.Args[0], "-test.run=^TestDetachedLocalHostExitHelper$")
+	command.Env = append(os.Environ(), "CAELIS_EXIT_HELPER=1")
+	command.Stdout = logFile
+	command.Stderr = logFile
+	if err := command.Start(); err != nil {
+		_ = logFile.Close()
+		t.Fatal(err)
+	}
+	_ = logFile.Close()
+	handle := newDetachedLocalHostProcess(command, logPath, 0)
+	select {
+	case exitErr := <-handle.exited:
+		if exitErr == nil || !strings.Contains(exitErr.Error(), "unsupported unreleased schema") {
+			t.Fatalf("early exit error = %v", exitErr)
+		}
+		if strings.Contains(exitErr.Error(), "must-not-leak") {
+			t.Fatalf("early exit error exposed raw service log: %v", exitErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("early child exit was not reported")
+	}
+	if command.ProcessState == nil {
+		t.Fatal("exited child was not reaped")
+	}
+}
+
+func TestDetachedLocalHostExitHelper(t *testing.T) {
+	if os.Getenv("CAELIS_EXIT_HELPER") != "1" {
+		return
+	}
+	_, _ = fmt.Fprintln(os.Stderr, "gatewayapp/memoryhost: database uses an unsupported unreleased schema; token=must-not-leak")
+	os.Exit(23)
 }
 
 func TestManagedLocalHostRecoversStaleDiscoveryAndConvergesConcurrentClients(t *testing.T) {

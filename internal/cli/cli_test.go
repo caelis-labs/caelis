@@ -25,6 +25,7 @@ import (
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
+	"github.com/caelis-labs/caelis/internal/productpaths"
 	"github.com/caelis-labs/caelis/internal/testenv"
 	"github.com/caelis-labs/caelis/internal/updater"
 	"github.com/caelis-labs/caelis/internal/version"
@@ -741,7 +742,7 @@ func TestRunDerivesWorkspaceAndIdentityFromProcess(t *testing.T) {
 	var captured gatewayapp.Config
 	err := runWithProductClientOpener(
 		context.Background(),
-		[]string{"doctor"},
+		[]string{"--embedded"},
 		nil,
 		io.Discard,
 		io.Discard,
@@ -760,6 +761,38 @@ func TestRunDerivesWorkspaceAndIdentityFromProcess(t *testing.T) {
 	if captured.AppName != defaultAppName || captured.UserID != defaultPrincipalID ||
 		captured.WorkspaceCWD != canonicalWorkspace || captured.WorkspaceKey != canonicalWorkspace {
 		t.Fatalf("derived CLI config = %#v", captured)
+	}
+}
+
+func TestRunDoctorReportsManagedStartupFailureWithoutAHostClient(t *testing.T) {
+	storeDir := t.TempDir()
+	var out bytes.Buffer
+	err := runWithProductClientOpener(
+		context.Background(),
+		[]string{"doctor", "--store-dir", storeDir, "--format", "json"},
+		nil,
+		&out,
+		io.Discard,
+		func(context.Context, gatewayapp.Config, productClientOptions) (*productClients, error) {
+			return nil, errors.New("gatewayapp/memoryhost: database uses an unsupported unreleased schema; token=must-not-leak")
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result doctorResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.ServiceState != "unavailable" || !strings.Contains(result.ServiceError, "unsupported unreleased schema") {
+		t.Fatalf("doctor startup result = %#v", result)
+	}
+	if strings.Contains(out.String(), "must-not-leak") {
+		t.Fatalf("doctor output exposed raw startup error: %s", out.String())
+	}
+	wantLog := filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
+	if result.ServiceLogPath != wantLog {
+		t.Fatalf("service log path = %q, want %q", result.ServiceLogPath, wantLog)
 	}
 }
 

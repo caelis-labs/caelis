@@ -360,6 +360,13 @@ func runWithProductClientOpener(
 
 	product, err := openClients(ctx, cfg, clientOptions)
 	if err != nil {
+		if doctorSubcommand {
+			outFmt, formatErr := parseOutputFormat(*format)
+			if formatErr != nil {
+				return formatErr
+			}
+			return writeDoctorResult(stdout, outFmt, doctorResultFromStartupFailure(cfg.StoreDir, clientMode == productClientModeManaged, err))
+		}
 		return sandboxStartupEscapeError(err)
 	}
 	defer func() {

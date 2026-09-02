@@ -72,11 +72,21 @@ type ProbeResult struct {
 
 // LaunchedProcess retains ownership of the exact child process until startup
 // either succeeds or fails. Abort must kill and reap that child; Release hands
-// it off only after the expected service identity is ready.
+// it off only after the expected service identity is ready. Exited is optional;
+// when present, it reports an early child exit so readiness does not wait for
+// the full startup timeout.
 type LaunchedProcess struct {
 	PID     int
 	Abort   func() error
 	Release func() error
+	Exited  <-chan error
+}
+
+// PhaseEvent reports one lifecycle phase without exposing service output.
+type PhaseEvent struct {
+	Name     string
+	Duration time.Duration
+	Err      error
 }
 
 type ProbeFunc func(context.Context) ProbeResult
@@ -95,12 +105,15 @@ type Manager struct {
 	StartupTimeout  time.Duration
 	ShutdownTimeout time.Duration
 	PollInterval    time.Duration
+	ObservePhase    func(PhaseEvent)
 }
 
 // Start converges the Store on the candidate according to its build kind.
 // It is idempotent and is the single implicit ensure operation used by product
 // Surfaces and the explicit `caelis service start` command.
-func (m Manager) Start(ctx context.Context, candidate Candidate) (Status, error) {
+func (m Manager) Start(ctx context.Context, candidate Candidate) (status Status, err error) {
+	started := time.Now()
+	defer func() { m.observePhase("start_total", started, err) }()
 	return m.withLock(ctx, func() (Status, error) {
 		return m.startLocked(ctx, candidate)
 	})
@@ -108,7 +121,9 @@ func (m Manager) Start(ctx context.Context, candidate Candidate) (Status, error)
 
 // Restart restarts the selected service. A newer release already selected by
 // another Surface is never downgraded by an older caller.
-func (m Manager) Restart(ctx context.Context, candidate Candidate) (Status, error) {
+func (m Manager) Restart(ctx context.Context, candidate Candidate) (status Status, err error) {
+	started := time.Now()
+	defer func() { m.observePhase("restart_total", started, err) }()
 	return m.withLock(ctx, func() (Status, error) {
 		if err := validateCandidate(candidate); err != nil {
 			return Status{}, err
@@ -146,7 +161,9 @@ func (m Manager) Restart(ctx context.Context, candidate Candidate) (Status, erro
 }
 
 // Stop stops the current service without selecting another binary.
-func (m Manager) Stop(ctx context.Context) (Status, error) {
+func (m Manager) Stop(ctx context.Context) (status Status, err error) {
+	started := time.Now()
+	defer func() { m.observePhase("stop_total", started, err) }()
 	return m.withLock(ctx, func() (Status, error) {
 		probe := m.probe(ctx)
 		if probe.State == ProbeMissing {
@@ -214,7 +231,9 @@ func (m Manager) startLocked(ctx context.Context, candidate Candidate) (Status, 
 	}
 }
 
-func (m Manager) launchAndWait(ctx context.Context, candidate Candidate) (Status, error) {
+func (m Manager) launchAndWait(ctx context.Context, candidate Candidate) (status Status, err error) {
+	started := time.Now()
+	defer func() { m.observePhase("launch_ready", started, err) }()
 	previous, _ := m.loadSelected()
 	if m.Launch == nil {
 		return Status{}, errors.New("servicelifecycle: launch function is required")
@@ -263,8 +282,18 @@ func (m Manager) launchAndWait(ctx context.Context, candidate Candidate) (Status
 			m.cleanupStaged(candidate, previous)
 			return running, nil
 		}
-		if err := waitPoll(waitCtx, m.pollInterval()); err != nil {
-			return fail(fmt.Errorf("servicelifecycle: service did not become ready: %w", err))
+		timer := time.NewTimer(m.pollInterval())
+		select {
+		case <-waitCtx.Done():
+			timer.Stop()
+			return fail(fmt.Errorf("servicelifecycle: service did not become ready: %w", waitCtx.Err()))
+		case exitErr, ok := <-process.Exited:
+			timer.Stop()
+			if !ok || exitErr == nil {
+				return fail(errors.New("servicelifecycle: service process exited before readiness"))
+			}
+			return fail(fmt.Errorf("servicelifecycle: service process exited before readiness: %w", exitErr))
+		case <-timer.C:
 		}
 	}
 }
@@ -287,7 +316,9 @@ func previousCandidate(running Status, candidate Candidate, err error) Candidate
 	return candidate
 }
 
-func (m Manager) shutdownAndWait(ctx context.Context, running Status) error {
+func (m Manager) shutdownAndWait(ctx context.Context, running Status) (err error) {
+	started := time.Now()
+	defer func() { m.observePhase("shutdown", started, err) }()
 	if m.Shutdown == nil {
 		return errors.New("servicelifecycle: shutdown function is required")
 	}
@@ -427,7 +458,9 @@ const (
 	replaceRunning
 )
 
-func (m Manager) stage(candidate Candidate) (Candidate, error) {
+func (m Manager) stage(candidate Candidate) (staged Candidate, err error) {
+	started := time.Now()
+	defer func() { m.observePhase("stage", started, err) }()
 	source := filepath.Clean(candidate.Executable)
 	before, err := os.Lstat(source)
 	if err != nil {
@@ -502,6 +535,13 @@ func (m Manager) stage(candidate Candidate) (Candidate, error) {
 	}
 	candidate.Executable = destination
 	return candidate, nil
+}
+
+func (m Manager) observePhase(name string, started time.Time, err error) {
+	if m.ObservePhase == nil {
+		return
+	}
+	m.ObservePhase(PhaseEvent{Name: name, Duration: time.Since(started), Err: err})
 }
 
 func regularFileDigest(path string) (string, error) {

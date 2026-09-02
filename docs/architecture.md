@@ -78,6 +78,12 @@ Presentation exit does not stop the managed Host. Host lifecycle is explicit
 through `caelis service start|stop|restart|status`. Shared files are durable
 truth, never a substitute for live Host authority.
 
+Managed startup retains and reaps the exact launched process until its identity
+is ready. A child exit ends readiness polling immediately; phase durations and
+the complete cause stay in the owner-only service log. `caelis doctor` can emit
+a bounded startup diagnosis and that log path even when no Host client could be
+constructed.
+
 `control/appserver.AppServerClients` is the aggregate capability boundary used by
 product clients. Focused Control packages remain the semantic owners behind it.
 Task observation is independently delivered and never joins the Session feed, so

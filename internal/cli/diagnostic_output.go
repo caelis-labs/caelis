@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
 	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/internal/productpaths"
 )
 
 // doctorResult preserves the established CLI output contract while the data
@@ -24,6 +26,9 @@ type doctorResult struct {
 	ConfigDirSecure                 bool                              `json:"config_dir_secure,omitempty"`
 	ConfigFileSecure                bool                              `json:"config_file_secure,omitempty"`
 	ConfigPermissionsSecure         bool                              `json:"config_permissions_secure,omitempty"`
+	ServiceState                    string                            `json:"service_state,omitempty"`
+	ServiceError                    string                            `json:"service_error,omitempty"`
+	ServiceLogPath                  string                            `json:"service_log_path,omitempty"`
 	SessionID                       string                            `json:"session_id,omitempty"`
 	SessionMode                     string                            `json:"session_mode,omitempty"`
 	PolicyProfile                   string                            `json:"policy_profile,omitempty"`
@@ -70,6 +75,28 @@ type doctorResult struct {
 	ActiveTurnCount                 int                               `json:"active_turn_count,omitempty"`
 	ActiveTurnSessions              []string                          `json:"active_turn_sessions,omitempty"`
 	Warnings                        []string                          `json:"warnings,omitempty"`
+}
+
+func doctorResultFromStartupFailure(storeDir string, managed bool, err error) doctorResult {
+	result := doctorResult{
+		GoVersion:    runtime.Version(),
+		GOOS:         runtime.GOOS,
+		GOARCH:       runtime.GOARCH,
+		StoreDir:     filepath.Clean(storeDir),
+		ConfigPath:   filepath.Join(storeDir, "config.json"),
+		ServiceState: "unavailable",
+	}
+	if managed {
+		result.ServiceError = managedStartupDoctorCause(err)
+		result.ServiceLogPath = filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
+		return result
+	}
+	if cause := userFacingHostBlocker(err); cause != "" {
+		result.ServiceError = cause
+	} else {
+		result.ServiceError = "configured Control Host is unavailable"
+	}
+	return result
 }
 
 // sandboxStatusResult mirrors the established CamelCase sandbox command JSON
@@ -222,6 +249,13 @@ func doctorResultFromStatus(status controlstatus.StatusSnapshot) doctorResult {
 
 func formatDoctorResult(report doctorResult) string {
 	lines := make([]string, 0, 48)
+	if serviceError := strings.TrimSpace(report.ServiceError); serviceError != "" {
+		lines = append(lines, "blocked: "+serviceError)
+		if logPath := strings.TrimSpace(report.ServiceLogPath); logPath != "" {
+			lines = append(lines, "fix: inspect the private service log at "+logPath)
+		}
+		lines = append(lines, "")
+	}
 	if blocker := firstNonEmptyString(report.SandboxFallbackReason, report.SandboxSetupError, report.SandboxGlobalSetupReason, report.SandboxWorkspaceSetupReason); blocker != "" {
 		lines = append(lines, "blocked: "+blocker)
 		if hint := strings.TrimSpace(report.SandboxInstallHint); hint != "" {
@@ -234,6 +268,15 @@ func formatDoctorResult(report doctorResult) string {
 		fmt.Sprintf("platform: %s/%s", firstNonEmptyString(report.GOOS, "unknown"), firstNonEmptyString(report.GOARCH, "unknown")),
 		fmt.Sprintf("store_dir: %s", firstNonEmptyString(report.StoreDir, "-")),
 		fmt.Sprintf("config_path: %s", firstNonEmptyString(report.ConfigPath, "-")),
+	)
+	if report.ServiceState != "" || report.ServiceError != "" || report.ServiceLogPath != "" {
+		lines = append(lines,
+			fmt.Sprintf("service_state: %s", firstNonEmptyString(report.ServiceState, "-")),
+			fmt.Sprintf("service_error: %s", firstNonEmptyString(report.ServiceError, "-")),
+			fmt.Sprintf("service_log_path: %s", firstNonEmptyString(report.ServiceLogPath, "-")),
+		)
+	}
+	lines = append(lines,
 		fmt.Sprintf("config_permissions_secure: %t", report.ConfigPermissionsSecure),
 		fmt.Sprintf("config_dir_mode: %s", firstNonEmptyString(report.ConfigDirMode, "-")),
 		fmt.Sprintf("config_file_mode: %s", firstNonEmptyString(report.ConfigFileMode, "-")),

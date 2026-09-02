@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -23,31 +24,55 @@ func BenchmarkNewLocalStackFirstFrameBoundary(b *testing.B) {
 	} {
 		b.Run(fixture.name, func(b *testing.B) {
 			storeDir := b.TempDir()
+			workspaceDir := b.TempDir()
 			benchmarkStackSessions(b, filepath.Join(storeDir, "sessions"), fixture.sessionCount, fixture.eventsPerSess)
 			cfg := Config{
 				AppName: "caelis", UserID: "performance-user", StoreDir: storeDir,
-				WorkspaceKey: "performance-workspace", WorkspaceCWD: "/tmp/performance-workspace",
+				WorkspaceKey: "performance-workspace", WorkspaceCWD: workspaceDir,
 			}
 			b.ReportMetric(float64(fixture.sessionCount), "sessions")
 			b.ReportMetric(float64(fixture.sessionCount*fixture.eventsPerSess), "events")
 			b.ResetTimer()
+			var maximum time.Duration
 			for i := 0; i < b.N; i++ {
-				if _, err := NewLocalStack(cfg); err != nil {
+				started := time.Now()
+				stack, err := NewLocalStack(cfg)
+				elapsed := time.Since(started)
+				b.StopTimer()
+				if err != nil {
 					b.Fatal(err)
 				}
+				if err := stack.Close(); err != nil {
+					b.Fatal(err)
+				}
+				if elapsed > maximum {
+					maximum = elapsed
+				}
+				if elapsed > 2*time.Second {
+					b.Fatalf("NewLocalStack() took %s, exceeding the user-visible startup budget", elapsed)
+				}
+				b.StartTimer()
 			}
+			b.StopTimer()
+			b.ReportMetric(float64(maximum)/float64(time.Millisecond), "max_ms")
 		})
 	}
 }
 
 func BenchmarkNewSessionControlPath(b *testing.B) {
+	workspaceDir := b.TempDir()
 	stack, err := NewLocalStack(Config{
 		AppName: "caelis", UserID: "performance-user", StoreDir: b.TempDir(),
-		WorkspaceKey: "performance-workspace", WorkspaceCWD: "/tmp/performance-workspace",
+		WorkspaceKey: "performance-workspace", WorkspaceCWD: workspaceDir,
 	})
 	if err != nil {
 		b.Fatal(err)
 	}
+	b.Cleanup(func() {
+		if err := stack.Close(); err != nil {
+			b.Errorf("Close() error = %v", err)
+		}
+	})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := startGatewayAppTestSession(context.Background(), stack, fmt.Sprintf("new-session-%06d", i)); err != nil {

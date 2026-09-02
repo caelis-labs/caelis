@@ -25,6 +25,8 @@ adds cost without improving unrelated changes:
 | SDK dependencies or supported imports | `make sdk-boundary-check` |
 | Runtime, Control, projection, or physical TUI contracts | `make product-acceptance` |
 | Broad TUI, command, or ACP integration | `make regression` |
+| In-process Host or built-in Memory composition | `make startup-performance` |
+| Managed Host lifecycle or process ownership | `go test -race ./internal/servicelifecycle ./internal/cli` |
 | Maintained documentation links | `make docs-links` |
 | npm launcher or package handoff | `npm --prefix npm test` |
 | Release assembly | `make release-dry-run` |

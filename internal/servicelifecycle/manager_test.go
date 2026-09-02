@@ -210,6 +210,45 @@ func TestFailedStartupAbortsExactLaunchedProcess(t *testing.T) {
 	}
 }
 
+func TestFailedStartupReturnsImmediatelyWhenLaunchedProcessExits(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "caelis")
+	if err := os.WriteFile(executable, []byte("test executable"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	exited <- errors.New("Memory data uses an unsupported unreleased schema")
+	close(exited)
+	aborted := false
+	var phases []PhaseEvent
+	manager := Manager{
+		StoreDir: t.TempDir(), InstallDir: t.TempDir(), StartupTimeout: 5 * time.Second, PollInterval: time.Second,
+		Probe: func(context.Context) ProbeResult { return ProbeResult{State: ProbeMissing} },
+		Launch: func(Candidate) (LaunchedProcess, error) {
+			return LaunchedProcess{
+				PID:     4242,
+				Abort:   func() error { aborted = true; return nil },
+				Release: func() error { return nil },
+				Exited:  exited,
+			}, nil
+		},
+		ObservePhase: func(event PhaseEvent) { phases = append(phases, event) },
+	}
+	started := time.Now()
+	_, err := manager.Start(context.Background(), Candidate{Identity: devIdentity("build-a"), Executable: executable})
+	if err == nil || !strings.Contains(err.Error(), "unsupported unreleased schema") {
+		t.Fatalf("Start() error = %v, want launched process cause", err)
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("Start() waited %s after process exit", elapsed)
+	}
+	if !aborted {
+		t.Fatal("exited launched process was not passed through Abort cleanup")
+	}
+	if len(phases) < 3 || phases[len(phases)-1].Name != "start_total" || phases[len(phases)-1].Err == nil {
+		t.Fatalf("phase events = %#v, want failed start_total after stage and launch_ready", phases)
+	}
+}
+
 func TestUnreachableServiceNeverTriggersColdStart(t *testing.T) {
 	executable := filepath.Join(t.TempDir(), "caelis")
 	if err := os.WriteFile(executable, []byte("test executable"), 0o700); err != nil {
