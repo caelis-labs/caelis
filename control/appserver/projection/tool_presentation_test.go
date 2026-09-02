@@ -7,6 +7,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/memorytool"
 )
 
 func TestBuiltinToolPresentationRequiresExactDefinitionName(t *testing.T) {
@@ -29,6 +31,38 @@ func TestBuiltinToolPresentationRequiresExactDefinitionName(t *testing.T) {
 	}
 	if got := projectedToolTitle(spawn.ToolName, map[string]any{"agent": "self", "prompt": "inspect"}); got != "Spawn self: inspect" {
 		t.Fatalf("projectedToolTitle(Spawn) = %q", got)
+	}
+}
+
+func TestMemoryToolPresentationUsesProductSemantics(t *testing.T) {
+	t.Parallel()
+
+	if got := projectedToolKind(memorytool.RememberToolName); got != projectedToolKindEdit {
+		t.Fatalf("projectedToolKind(Remember) = %q, want edit", got)
+	}
+	if got := projectedToolTitle(memorytool.RememberToolName, map[string]any{"text": "private fact"}); got != "Updated memory" {
+		t.Fatalf("projectedToolTitle(Remember) = %q", got)
+	}
+	if got := projectedToolKind(memorytool.RecallToolName); got != projectedToolKindSearch {
+		t.Fatalf("projectedToolKind(Recall) = %q, want search", got)
+	}
+	if got := projectedToolTitle(memorytool.RecallToolName, map[string]any{"query": "项目技术栈"}); got != "Search 项目技术栈" {
+		t.Fatalf("projectedToolTitle(Recall) = %q", got)
+	}
+	if got := projectedToolKind("remember"); got != projectedToolKindOther {
+		t.Fatalf("lowercase historical alias kind = %q, want other", got)
+	}
+
+	content := projectedToolResultContent(
+		"remember-1",
+		memorytool.RememberToolName,
+		map[string]any{"text": "private fact"},
+		map[string]any{"accepted": true},
+		nil,
+		eventstream.ToolStatusCompleted,
+	)
+	if len(content) != 0 {
+		t.Fatalf("successful Remember presentation content = %#v, want silent completion", content)
 	}
 }
 

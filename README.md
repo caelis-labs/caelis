@@ -60,9 +60,9 @@ Building from source requires the Go version declared in [`go.mod`](go.mod).
 - **Workspace extensions:** MCP servers, skills, and plugins are assembled for
   the workspace; project MCP configuration requires workspace trust.
 - **Durable Memory:** the capability is enabled by default and exposes only
-	`remember` and `recall` from the Memory package embedded in the Host. It uses
-	zero model tokens unless you explicitly bind the Memory Steward in
-	`/subagent`; no separate Memory installation or endpoint is required.
+  `Remember` and `Recall` from the Memory package embedded in the Host. It uses
+  zero model tokens unless you explicitly bind the Memory Steward in
+  `/subagent`; no separate Memory installation or endpoint is required.
 - **Scriptable:** text, versioned JSON, and streaming JSONL use the same durable
   Session and Control paths as the TUI.
 

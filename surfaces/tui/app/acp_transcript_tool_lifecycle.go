@@ -359,6 +359,8 @@ func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 	case surfaceToolWrite, surfaceToolPatch:
 		ev.Name = semanticName
 		return mutationLifecycleHeader(ev, err)
+	case surfaceToolRemember:
+		return memoryLifecycleHeader(ev, err)
 	default:
 		if presentation.TitleAsLabel {
 			// Provider titles are complete presentation labels. Only a generic
@@ -380,6 +382,16 @@ func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 		}
 		return standardVerbLifecycleHeader(presentation.DisplayName, ev.Args, err)
 	}
+}
+
+func memoryLifecycleHeader(ev SubagentEvent, err bool) string {
+	if err {
+		return "• Update memory failed"
+	}
+	if ev.Done {
+		return "• Updated memory"
+	}
+	return "• Updating memory"
 }
 
 func taskControlLifecycleHeader(ev SubagentEvent) string {
@@ -728,6 +740,8 @@ func mutationLifecycleHeader(ev SubagentEvent, err bool) string {
 	switch name {
 	case surfaceToolWrite, surfaceToolPatch:
 		return standardVerbLifecycleHeader("Edit", args, err)
+	case surfaceToolRemember:
+		return memoryLifecycleHeader(ev, err)
 	default:
 		if args == "" {
 			args = strings.ToLower(name)

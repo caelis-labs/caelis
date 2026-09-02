@@ -1789,7 +1789,7 @@ func assertRuntimeMemoryTools(t *testing.T, runtime *sessionRuntimeInstance) {
 	}
 	if len(tools) != 2 || tools[0].Definition().Name != memorytool.RememberToolName ||
 		tools[1].Definition().Name != memorytool.RecallToolName {
-		t.Fatalf("Runtime Memory tools = %#v, want exactly remember and recall", tools)
+		t.Fatalf("Runtime Memory tools = %#v, want exactly Remember and Recall", tools)
 	}
 }
 

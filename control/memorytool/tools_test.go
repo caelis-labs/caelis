@@ -52,6 +52,9 @@ func TestToolsExposeOnlyTextAndQueryAndPersistHiddenConsistency(t *testing.T) {
 	if len(tools) != 2 || tools[0].Definition().Name != RememberToolName || tools[1].Definition().Name != RecallToolName {
 		t.Fatalf("tools = %#v", tool.Definitions(tools))
 	}
+	if RememberToolName != "Remember" || RecallToolName != "Recall" {
+		t.Fatalf("Memory tool names = %q, %q; want canonical built-in names", RememberToolName, RecallToolName)
+	}
 	for index, name := range []string{"text", "query"} {
 		definition := tools[index].Definition()
 		properties := definition.InputSchema["properties"].(map[string]any)

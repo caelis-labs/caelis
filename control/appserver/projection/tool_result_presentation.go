@@ -328,7 +328,8 @@ func projectedSuppressTaskControlContent(action string) bool {
 }
 
 func projectedSuccessfulEmptyTerminal(profile projectedToolProfile, known bool, status string, isErr bool) bool {
-	return known && profile.terminalKnown && profile.terminalPanel && !isErr && strings.EqualFold(strings.TrimSpace(status), eventstream.ToolStatusCompleted)
+	return known && !isErr && strings.EqualFold(strings.TrimSpace(status), eventstream.ToolStatusCompleted) &&
+		(profile.suppressSuccessfulEmpty || (profile.terminalKnown && profile.terminalPanel))
 }
 
 func projectedToolStatusFinal(status string, isErr bool) bool {

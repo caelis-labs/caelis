@@ -137,8 +137,8 @@ Host state.
 
 Host-private composition binds the Memory SDK directly to the embedded
 `DataPlane`. Runtime capabilities are issued and renewed from an owner-only
-issuer credential store; the model sees exactly `remember(text)` and
-`recall(query)`. Their canonical ToolResults are ordinary Session history, so
+issuer credential store; the model sees exactly `Remember(text)` and
+`Recall(query)`. Their canonical ToolResults are ordinary Session history, so
 replay reads the stored bytes and does not repeat a Memory call. Consistency
 cursors and provenance references remain in model-hidden Session state and
 ToolResult metadata.

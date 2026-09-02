@@ -1017,6 +1017,81 @@ func TestNormalizedGrokListJoinsExploredWithoutExactToolName(t *testing.T) {
 	}
 }
 
+func TestMemoryToolsUseCompactProductPresentation(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	tools := []eventstream.ToolCall{
+		{
+			SessionUpdate: eventstream.UpdateToolCall,
+			ToolCallID:    "remember-1",
+			Title:         "Updated memory",
+			Kind:          eventstream.ToolKindEdit,
+			Status:        eventstream.ToolStatusCompleted,
+			RawInput:      map[string]any{"text": "这是不应该出现在折叠标题里的事实"},
+			Meta:          acpToolNameMeta(surfaceToolRemember),
+		},
+		{
+			SessionUpdate: eventstream.UpdateToolCall,
+			ToolCallID:    "recall-1",
+			Title:         "Search 项目技术栈",
+			Kind:          eventstream.ToolKindSearch,
+			Status:        eventstream.ToolStatusCompleted,
+			RawInput:      map[string]any{"query": "项目技术栈"},
+			Meta:          acpToolNameMeta(surfaceToolRecall),
+		},
+		{
+			SessionUpdate: eventstream.UpdateToolCall,
+			ToolCallID:    "recall-2",
+			Title:         "Search 团队会议安排",
+			Kind:          eventstream.ToolKindSearch,
+			Status:        eventstream.ToolStatusCompleted,
+			RawInput:      map[string]any{"query": "团队会议安排"},
+			Meta:          acpToolNameMeta(surfaceToolRecall),
+		},
+	}
+	for _, call := range tools {
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "session-1",
+			Scope:     eventstream.ScopeMain,
+			Update:    call,
+		})
+	}
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != len(tools) {
+		t.Fatalf("Memory tool events = %#v, want %d", block.Events, len(tools))
+	}
+	block.Status = eventstream.ToolStatusCompleted
+	model.markViewportBlockDirty(block.BlockID())
+	model.syncViewportContent()
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(plain, "• Updated memory") {
+		t.Fatalf("Remember completion missing compact label:\n%s", plain)
+	}
+	if strings.Contains(plain, "这是不应该出现") || strings.Contains(plain, "Remember") {
+		t.Fatalf("Remember leaked tool identity or fact into collapsed transcript:\n%s", plain)
+	}
+	if countExactTrimmedLine(plain, "• Explored") != 1 ||
+		!strings.Contains(plain, "Search 项目技术栈, 团队会议安排") {
+		t.Fatalf("Recall did not join the Explored group as Search:\n%s", plain)
+	}
+	if strings.Contains(plain, "Recall") {
+		t.Fatalf("Recall leaked built-in identity into product presentation:\n%s", plain)
+	}
+
+	if got := standardToolLifecycleHeader(SubagentEvent{Name: surfaceToolRemember}, false); got != "• Updating memory" {
+		t.Fatalf("live Remember header = %q", got)
+	}
+	if got := standardToolLifecycleHeader(SubagentEvent{Name: surfaceToolRemember, Done: true}, false); got != "• Updated memory" {
+		t.Fatalf("completed Remember header = %q", got)
+	}
+	if got := standardToolLifecycleHeader(SubagentEvent{Name: surfaceToolRemember, Done: true}, true); got != "• Update memory failed" {
+		t.Fatalf("failed Remember header = %q", got)
+	}
+}
+
 func TestNormalizedGrokLiveOtherMatchesLoadedListPresentation(t *testing.T) {
 	t.Parallel()
 

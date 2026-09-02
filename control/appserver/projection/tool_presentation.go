@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/control/memorytool"
 )
 
 const (
@@ -34,6 +35,8 @@ const (
 	projectedTitleCommandAction
 	projectedTitleSpawn
 	projectedTitleMessage
+	projectedTitleMemoryUpdate
+	projectedTitleSearchQuery
 )
 
 type projectedToolResultStyle uint8
@@ -57,6 +60,9 @@ type projectedToolProfile struct {
 	result        projectedToolResultStyle
 	terminalKnown bool
 	terminalPanel bool
+	// suppressSuccessfulEmpty omits presentation-only completion text when the
+	// durable result is already represented by the lifecycle status.
+	suppressSuccessfulEmpty bool
 }
 
 // projectedBuiltinToolProfile is deliberately private to the ACP projection
@@ -88,6 +94,10 @@ func projectedBuiltinToolProfile(name string) (projectedToolProfile, bool) {
 		return projectedToolProfile{kind: projectedToolKindExecute, title: projectedTitleSpawn, result: projectedResultSpawn, terminalKnown: true, terminalPanel: true}, true
 	case sendmessage.ToolName:
 		return projectedToolProfile{kind: projectedToolKindExecute, title: projectedTitleMessage}, true
+	case memorytool.RememberToolName:
+		return projectedToolProfile{kind: projectedToolKindEdit, title: projectedTitleMemoryUpdate, suppressSuccessfulEmpty: true}, true
+	case memorytool.RecallToolName:
+		return projectedToolProfile{kind: projectedToolKindSearch, title: projectedTitleSearchQuery}, true
 	default:
 		return projectedToolProfile{}, false
 	}
@@ -140,6 +150,13 @@ func projectedToolTitle(name string, args map[string]any) string {
 		if summary := strings.TrimSpace(display.AgentMessageFullDisplayArgs(args)); summary != "" {
 			return "Send message " + summary
 		}
+	case projectedTitleMemoryUpdate:
+		return "Updated memory"
+	case projectedTitleSearchQuery:
+		if query := strings.TrimSpace(display.MapString(args, "query")); query != "" {
+			return "Search " + query
+		}
+		return "Search"
 	}
 	return name
 }

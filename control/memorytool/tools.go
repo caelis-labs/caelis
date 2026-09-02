@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	RememberToolName = "remember"
-	RecallToolName   = "recall"
+	RememberToolName = "Remember"
+	RecallToolName   = "Recall"
 
 	DefaultRecallFragments       = 8
 	DefaultRecallProjectionBytes = 8 << 10
@@ -46,7 +46,7 @@ type Config struct {
 	MaxProjectionBytes int
 }
 
-// New returns exactly remember and recall, in that order.
+// New returns exactly Remember and Recall, in that order.
 func New(config Config) ([]tool.Tool, error) {
 	if config.Client == nil || config.Sessions == nil || strings.TrimSpace(config.SessionRef.SessionID) == "" {
 		return nil, fmt.Errorf("control/memorytool: client, Session state, and Session reference are required")
@@ -135,7 +135,7 @@ func (t *rememberTool) remember(ctx context.Context, call tool.Call) (tool.Resul
 		return tool.Result{}, err
 	}
 	if strings.TrimSpace(call.ID) == "" {
-		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "remember requires a stable tool call identity")
+		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "Remember requires a stable tool call identity")
 	}
 	if _, err := memorybinding.PrepareConsistency(ctx, t.config.Sessions, t.config.SessionRef, t.config.Binding); err != nil {
 		return tool.Result{}, fmt.Errorf("prepare Memory consistency: %w", err)
