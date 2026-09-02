@@ -44,6 +44,7 @@ func TestPurposeForHandleMapsDirectAndSystemInvocations(t *testing.T) {
 		{handle: agentbinding.HandleZenith, want: PurposeDirect},
 		{handle: agentbinding.HandleGuardian, want: PurposeGuardian},
 		{handle: agentbinding.HandleReviewer, want: PurposeReviewer},
+		{handle: agentbinding.HandleSteward, want: PurposeSteward},
 	} {
 		got, err := PurposeForFixedHandle(test.handle)
 		if err != nil || got != test.want {
@@ -135,6 +136,33 @@ func TestUnboundSystemAgentUsesAnEligibleDefaultProfile(t *testing.T) {
 	}
 	if reviewer.Kind != sdkplacement.KindAgent || reviewer.Agent != "claude" || reviewer.Model != "Opus-V4" {
 		t.Fatalf("Resolve(Reviewer ACP default) = %#v", reviewer)
+	}
+}
+
+func TestStewardRequiresExplicitProviderBinding(t *testing.T) {
+	snapshot := testSnapshot()
+	if _, err := ResolveHandle(snapshot, HandleRequest{Handle: agentbinding.HandleSteward, Purpose: PurposeSteward}); err == nil || !strings.Contains(err.Error(), "not bound") {
+		t.Fatalf("Resolve(unbound Steward) error = %v, want explicit-binding rejection", err)
+	}
+
+	snapshot.Bindings.Bindings = append(snapshot.Bindings.Bindings, agentbinding.Binding{
+		Handle: agentbinding.HandleSteward, ProfileID: "provider:main", Effort: "low",
+	})
+	steward, err := ResolveHandle(snapshot, HandleRequest{Handle: agentbinding.HandleSteward, Purpose: PurposeSteward})
+	if err != nil {
+		t.Fatalf("Resolve(bound Steward) error = %v", err)
+	}
+	if steward.Kind != sdkplacement.KindModel || steward.ProfileID != "provider:main" || steward.ReasoningEffort != "low" {
+		t.Fatalf("Resolve(bound Steward) = %#v", steward)
+	}
+
+	snapshot.Bindings.Bindings[len(snapshot.Bindings.Bindings)-1] = agentbinding.Binding{
+		Handle: agentbinding.HandleSteward, ProfileID: "acp:claude:opus", Effort: "xhigh",
+	}
+	_, err = ResolveHandle(snapshot, HandleRequest{Handle: agentbinding.HandleSteward, Purpose: PurposeSteward})
+	var unsupported *agentbinding.UnsupportedBackendError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("Resolve(ACP Steward) error = %v, want UnsupportedBackendError", err)
 	}
 }
 

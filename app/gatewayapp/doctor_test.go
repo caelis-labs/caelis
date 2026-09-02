@@ -197,6 +197,9 @@ func TestDoctorReportFindsAPIKeyThroughCredentialReferenceAfterReload(t *testing
 	if err != nil || modeResult.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionMode() = %#v, %v", modeResult, err)
 	}
+	if err := stack.Close(); err != nil {
+		t.Fatalf("Close() before reload error = %v", err)
+	}
 
 	reloaded, err := newGatewayAppTestStack(t, Config{
 		AppName:      "caelis",

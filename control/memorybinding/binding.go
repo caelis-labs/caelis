@@ -1,7 +1,6 @@
 package memorybinding
 
 import (
-	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -19,34 +18,6 @@ const (
 	OutputAudiencePrivate OutputAudience = "private"
 	OutputAudienceShared  OutputAudience = "shared"
 )
-
-// DeploymentMode selects how Host-private composition reaches the appliance.
-type DeploymentMode string
-
-const (
-	DeploymentModeManagedLocal DeploymentMode = "managed_local"
-)
-
-// APICompatibility pins the Memory protocol and exact sidecar identity. The
-// SDK remains the authority that interprets protocol behavior.
-type APICompatibility struct {
-	Protocol       string `json:"protocol"`
-	APIVersion     string `json:"api_version"`
-	CoreProfile    string `json:"core_profile"`
-	ServiceVersion string `json:"service_version"`
-	BuildRevision  string `json:"build_revision"`
-	ArtifactSHA256 string `json:"artifact_sha256"`
-}
-
-// EndpointConfig identifies one appliance deployment. Endpoint is reserved
-// for a future external deployment; managed-local Socket paths are derived by
-// Host-private composition and are not persisted here.
-type EndpointConfig struct {
-	ID            string           `json:"id"`
-	Deployment    DeploymentMode   `json:"deployment"`
-	Endpoint      string           `json:"endpoint,omitempty"`
-	Compatibility APICompatibility `json:"compatibility"`
-}
 
 // BindingRef is an opaque host-selected reference. Future product concepts
 // such as an Agent, user, tenant, or workspace may resolve to this reference,
@@ -68,14 +39,20 @@ type AccessBinding struct {
 	BindingVersion      uint64          `json:"binding_version"`
 }
 
-// Configuration is the complete persisted Memory host binding. Enabled is a
-// product feature flag; an independent process kill switch may still disable
-// activation without mutating this document or appliance data.
+// Configuration is the complete persisted logical Memory binding. Memory is
+// a built-in Host capability; this document selects authority and has no
+// independent lifecycle switch.
 type Configuration struct {
-	Enabled           bool            `json:"enabled,omitempty"`
-	Endpoint          EndpointConfig  `json:"endpoint,omitempty"`
 	DefaultBindingRef BindingRef      `json:"default_binding_ref,omitempty"`
 	Bindings          []AccessBinding `json:"bindings,omitempty"`
+}
+
+// IsConfigured reports whether any persistent appliance topology has been
+// selected. Partial topology is configured and therefore fails validation;
+// only the complete zero value is eligible for automatic Host provisioning.
+func IsConfigured(configuration Configuration) bool {
+	configuration = Normalize(configuration)
+	return configuration.DefaultBindingRef != "" || len(configuration.Bindings) > 0
 }
 
 // RuntimeSelection is process-owned input selecting one opaque binding for
@@ -89,7 +66,6 @@ type RuntimeSelection struct {
 // one activated Runtime. It contains only the selected View/Grant and cannot be
 // retargeted to the other audience after activation.
 type RuntimeMemoryBindingSnapshot struct {
-	Endpoint            EndpointConfig
 	BindingRef          BindingRef
 	RuntimeActorRef     RuntimeActorRef
 	PrincipalRef        string
@@ -104,7 +80,6 @@ type RuntimeMemoryBindingSnapshot struct {
 // run on the raw document first when duplicate identity rejection matters.
 func Normalize(in Configuration) Configuration {
 	out := Configuration{
-		Enabled: in.Enabled, Endpoint: normalizeEndpoint(in.Endpoint),
 		DefaultBindingRef: BindingRef(strings.TrimSpace(string(in.DefaultBindingRef))),
 	}
 	if len(in.Bindings) == 0 {
@@ -143,17 +118,11 @@ func Validate(in Configuration) error {
 		return err
 	}
 	configuration := Normalize(in)
-	if configuration.Endpoint.ID == "" && len(configuration.Bindings) == 0 {
-		if configuration.Enabled {
-			return fmt.Errorf("control/memorybinding: enabled configuration requires an endpoint and access binding")
+	if len(configuration.Bindings) == 0 {
+		if configuration.DefaultBindingRef != "" {
+			return fmt.Errorf("control/memorybinding: default binding requires an access binding")
 		}
 		return nil
-	}
-	if err := validateEndpoint(configuration.Endpoint); err != nil {
-		return err
-	}
-	if len(configuration.Bindings) == 0 {
-		return fmt.Errorf("control/memorybinding: configured endpoint requires at least one access binding")
 	}
 	if configuration.DefaultBindingRef == "" {
 		return fmt.Errorf("control/memorybinding: configured bindings require an explicit default binding reference")
@@ -171,14 +140,14 @@ func Validate(in Configuration) error {
 	return nil
 }
 
-// Resolve returns a detached Runtime snapshot. disabled is the independent
-// process kill switch; false means Memory tools must be absent, not degraded.
-func Resolve(configuration Configuration, selection RuntimeSelection, disabled bool) (RuntimeMemoryBindingSnapshot, bool, error) {
-	if disabled || !configuration.Enabled {
-		return RuntimeMemoryBindingSnapshot{}, false, nil
-	}
+// Resolve returns a detached Runtime snapshot and reports whether the selected
+// logical binding exists.
+func Resolve(configuration Configuration, selection RuntimeSelection) (RuntimeMemoryBindingSnapshot, bool, error) {
 	if err := Validate(configuration); err != nil {
 		return RuntimeMemoryBindingSnapshot{}, false, err
+	}
+	if !IsConfigured(configuration) {
+		return RuntimeMemoryBindingSnapshot{}, false, nil
 	}
 	selection.BindingRef = BindingRef(strings.TrimSpace(string(selection.BindingRef)))
 	if selection.BindingRef == "" {
@@ -189,28 +158,9 @@ func Resolve(configuration Configuration, selection RuntimeSelection, disabled b
 		if binding.BindingRef != selection.BindingRef {
 			continue
 		}
-		return RuntimeMemoryBindingSnapshot{
-			Endpoint: configuration.Endpoint, BindingRef: binding.BindingRef,
-			RuntimeActorRef: binding.RuntimeActorRef,
-			PrincipalRef:    binding.PrincipalRef, IssuerCredentialRef: binding.IssuerCredentialRef,
-			ViewRef: binding.ViewRef, GrantRef: binding.GrantRef,
-			Audience: binding.Audience, BindingVersion: binding.BindingVersion,
-		}, true, nil
+		return RuntimeMemoryBindingSnapshot(binding), true, nil
 	}
 	return RuntimeMemoryBindingSnapshot{}, false, fmt.Errorf("control/memorybinding: binding reference %q does not exist", selection.BindingRef)
-}
-
-func normalizeEndpoint(in EndpointConfig) EndpointConfig {
-	in.ID = strings.TrimSpace(in.ID)
-	in.Deployment = DeploymentMode(strings.ToLower(strings.TrimSpace(string(in.Deployment))))
-	in.Endpoint = strings.TrimSpace(in.Endpoint)
-	in.Compatibility.Protocol = strings.TrimSpace(in.Compatibility.Protocol)
-	in.Compatibility.APIVersion = strings.TrimSpace(in.Compatibility.APIVersion)
-	in.Compatibility.CoreProfile = strings.TrimSpace(in.Compatibility.CoreProfile)
-	in.Compatibility.ServiceVersion = strings.TrimSpace(in.Compatibility.ServiceVersion)
-	in.Compatibility.BuildRevision = strings.ToLower(strings.TrimSpace(in.Compatibility.BuildRevision))
-	in.Compatibility.ArtifactSHA256 = strings.ToLower(strings.TrimSpace(in.Compatibility.ArtifactSHA256))
-	return in
 }
 
 func normalizeAccessBinding(in AccessBinding) AccessBinding {
@@ -228,29 +178,6 @@ func normalizeAudience(in OutputAudience) OutputAudience {
 	return OutputAudience(strings.ToLower(strings.TrimSpace(string(in))))
 }
 
-func validateEndpoint(endpoint EndpointConfig) error {
-	if endpoint.ID == "" {
-		return fmt.Errorf("control/memorybinding: endpoint ID is required")
-	}
-	if endpoint.Deployment != DeploymentModeManagedLocal {
-		return fmt.Errorf("control/memorybinding: unsupported deployment mode %q", endpoint.Deployment)
-	}
-	if endpoint.Endpoint != "" {
-		return fmt.Errorf("control/memorybinding: managed-local endpoint is Host-derived and must not be persisted")
-	}
-	compatibility := endpoint.Compatibility
-	if compatibility.Protocol == "" || compatibility.APIVersion == "" || compatibility.CoreProfile == "" || compatibility.ServiceVersion == "" {
-		return fmt.Errorf("control/memorybinding: complete API compatibility is required")
-	}
-	if !validDigest(compatibility.BuildRevision, 40, 64) {
-		return fmt.Errorf("control/memorybinding: build revision must be a full hexadecimal Git object ID")
-	}
-	if !validDigest(compatibility.ArtifactSHA256, 64) {
-		return fmt.Errorf("control/memorybinding: artifact SHA-256 is invalid")
-	}
-	return nil
-}
-
 func validateAccessBinding(binding AccessBinding) error {
 	if binding.BindingRef == "" || binding.RuntimeActorRef == "" || binding.PrincipalRef == "" ||
 		binding.IssuerCredentialRef == "" || binding.ViewRef == "" || binding.GrantRef == "" ||
@@ -262,19 +189,4 @@ func validateAccessBinding(binding AccessBinding) error {
 
 func validAudience(audience OutputAudience) bool {
 	return audience == OutputAudiencePrivate || audience == OutputAudienceShared
-}
-
-func validDigest(value string, lengths ...int) bool {
-	validLength := false
-	for _, length := range lengths {
-		if len(value) == length {
-			validLength = true
-			break
-		}
-	}
-	if !validLength || strings.ToLower(value) != value {
-		return false
-	}
-	_, err := hex.DecodeString(value)
-	return err == nil
 }

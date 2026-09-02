@@ -25,6 +25,7 @@ const (
 	PurposeDirect   Purpose = "direct"
 	PurposeGuardian Purpose = "guardian"
 	PurposeReviewer Purpose = "reviewer"
+	PurposeSteward  Purpose = "steward"
 )
 
 // SessionContext supplies the current Session choice used by the synthetic
@@ -110,6 +111,8 @@ func PurposeForHandle(catalog agentbinding.Catalog, raw agentbinding.Handle) (Pu
 		return PurposeGuardian, nil
 	case handle == agentbinding.HandleReviewer:
 		return PurposeReviewer, nil
+	case handle == agentbinding.HandleSteward:
+		return PurposeSteward, nil
 	case handle == agentbinding.HandleSelf:
 		return "", fmt.Errorf("control/placement: self is Session-derived and cannot run directly")
 	default:
@@ -158,7 +161,7 @@ func ResolveHandle(snapshot Snapshot, req HandleRequest) (sdkplacement.Placement
 	if !profile.SupportsEffort(effort) {
 		return sdkplacement.Placement{}, fmt.Errorf("control/placement: effort %q is not supported by profile %q", effort, profile.ID)
 	}
-	if purpose == PurposeGuardian || purpose == PurposeReviewer {
+	if purpose == PurposeGuardian || purpose == PurposeReviewer || purpose == PurposeSteward {
 		if !agentbinding.SupportsProfile(handle, profile) {
 			return sdkplacement.Placement{}, &agentbinding.UnsupportedBackendError{Handle: handle, ProfileID: profile.ID, Backend: profile.Kind()}
 		}
@@ -408,6 +411,10 @@ func validateHandlePurpose(configuration agentbinding.Configuration, handle agen
 	case PurposeReviewer:
 		if handle != agentbinding.HandleReviewer {
 			return fmt.Errorf("control/placement: purpose reviewer requires the reviewer handle")
+		}
+	case PurposeSteward:
+		if handle != agentbinding.HandleSteward {
+			return fmt.Errorf("control/placement: purpose steward requires the steward handle")
 		}
 	default:
 		return fmt.Errorf("control/placement: unsupported purpose %q", purpose)

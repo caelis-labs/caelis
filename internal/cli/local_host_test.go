@@ -560,10 +560,11 @@ func TestLocalHostEnvironmentDoesNotInheritClientOrNetworkAuthority(t *testing.T
 		"PATH=/usr/bin", "CAELIS_CONTROL_URL=http://127.0.0.1:1", "CAELIS_CONTROL_EMBEDDED=1",
 		"CAELIS_CONTROL_TOKEN=secret", "CAELIS_CONTROL_TOKEN_FILE=/tmp/token", "CAELIS_CONTROL_LISTEN=0.0.0.0:1",
 		"CAELIS_CONTROL_ALLOWED_HOSTS=example.test", "CAELIS_CONTROL_TLS_CERT=cert", "CAELIS_CONTROL_TLS_KEY=key",
-		"CAELIS_MEMORY_BINDING_REF=primary",
+		"CAELIS_MEMORY_BINDING_REF=primary", "CAELIS_MEMORY_SIDECAR_MANIFEST=/tmp/manifest",
+		"CAELIS_MEMORY_DATA_DIR=/tmp/data", "CAELIS_MEMORY_DISABLED=true",
 	}
 	got := localHostEnvironment(input)
-	if len(got) != 2 || got[0] != "PATH=/usr/bin" || got[1] != "CAELIS_MEMORY_BINDING_REF=primary" {
+	if len(got) != 1 || got[0] != "PATH=/usr/bin" {
 		t.Fatalf("local Host environment = %q", got)
 	}
 }

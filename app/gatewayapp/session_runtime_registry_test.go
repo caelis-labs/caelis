@@ -1722,50 +1722,6 @@ func TestSessionRuntimeRejectsSelectorAuthorityChangeAfterAdmission(t *testing.T
 	}
 }
 
-func TestMemoryProcessKillSwitchRemovesRuntimeBindingWithoutMutatingConfig(t *testing.T) {
-	ctx := context.Background()
-	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
-	storeDir := t.TempDir()
-	store := newAppConfigStore(storeDir)
-	doc, err := store.LoadContext(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := testRuntimeMemoryConfiguration(1, "view-private", "grant-private")
-	doc.Memory = want
-	if _, err := store.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
-		t.Fatal(err)
-	}
-	stack, err := NewLocalStack(Config{
-		StoreDir:      storeDir,
-		WorkspaceKey:  "workspace",
-		WorkspaceCWD:  workspace,
-		SkillDirs:     []string{},
-		Sandbox:       SandboxConfig{RequestedType: "host"},
-		DisableMemory: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = stack.Close() })
-	client := newWorkspaceRuntimeHTTPClient(t, stack, "local-user")
-	sessionID := createWorkspaceRuntimeTestSession(t, client, "create-memory-disabled", "memory-disabled", "workspace", workspace)
-	runtime := activateSessionRuntime(t, stack, sessionID)
-	if runtime.instance.activation.memoryBinding != nil {
-		t.Fatalf("kill-switched Runtime retained Memory binding: %#v", runtime.instance.activation.memoryBinding)
-	}
-	if tools, err := runtime.instance.buildMemoryTools(); err != nil || len(tools) != 0 {
-		t.Fatalf("kill-switched Runtime Memory tools = %#v, %v", tools, err)
-	}
-	loaded, err := stack.composition.authorities.store.LoadContext(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(loaded.Memory, memorybinding.Normalize(want)) {
-		t.Fatalf("kill switch mutated persisted Memory binding: %#v", loaded.Memory)
-	}
-}
-
 func TestSessionRuntimeRejectsMemoryBindingAudienceChangeAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
@@ -1893,15 +1849,6 @@ func (runtimeMemoryClientStub) Recall(
 
 func testRuntimeMemoryConfiguration(version uint64, viewRef, grantRef string) memorybinding.Configuration {
 	return memorybinding.Configuration{
-		Enabled: true,
-		Endpoint: memorybinding.EndpointConfig{
-			ID: "memory-default", Deployment: memorybinding.DeploymentModeManagedLocal,
-			Compatibility: memorybinding.APICompatibility{
-				Protocol: "memory.local.v1alpha1", APIVersion: "memory.v1alpha1",
-				CoreProfile: "memory.core.v1alpha1", ServiceVersion: "0.2.0-alpha.1",
-				BuildRevision: strings.Repeat("a", 40), ArtifactSHA256: strings.Repeat("b", 64),
-			},
-		},
 		DefaultBindingRef: "private",
 		Bindings: []memorybinding.AccessBinding{
 			{

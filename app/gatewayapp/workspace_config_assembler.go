@@ -92,10 +92,10 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	}
 	if memoryBinding != nil {
 		if authorities.memoryHost == nil {
-			return nil, errors.New("gatewayapp: enabled Memory binding has no managed appliance")
+			return nil, errors.New("gatewayapp: resolved Memory binding has no embedded runtime")
 		}
 		if err := authorities.memoryHost.ValidateBinding(*memoryBinding); err != nil {
-			return nil, fmt.Errorf("gatewayapp: validate managed Memory endpoint: %w", err)
+			return nil, fmt.Errorf("gatewayapp: validate embedded Memory binding: %w", err)
 		}
 		if err := memorybinding.ValidateSessionAdmission(ctx, sessions, active.SessionRef, *memoryBinding); err != nil {
 			return nil, fmt.Errorf("gatewayapp: validate canonical Session Memory binding: %w", err)
@@ -238,7 +238,6 @@ func resolveRuntimeMemoryBinding(
 	snapshot, enabled, err := memorybinding.Resolve(
 		configuration,
 		process.memorySelection,
-		process.memoryDisabled,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("gatewayapp: resolve Runtime Memory binding: %w", err)
@@ -256,7 +255,7 @@ func selectRuntimeMemoryBinding(
 	ref session.SessionRef,
 	workspace session.WorkspaceRef,
 ) (*memorybinding.RuntimeMemoryBindingSnapshot, error) {
-	if process.memorySelector == nil || process.memoryDisabled || !configuration.Enabled {
+	if process.memorySelector == nil {
 		return resolveRuntimeMemoryBinding(configuration, process)
 	}
 	selected, err := process.memorySelector(ctx, MemoryBindingSelectionContext{

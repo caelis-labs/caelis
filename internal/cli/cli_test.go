@@ -830,7 +830,7 @@ func TestEnvBoolParsesTUIAnimationSetting(t *testing.T) {
 	}
 }
 
-func TestMemoryHostEnvironmentReachesProductComposition(t *testing.T) {
+func TestMemoryEnvironmentDoesNotConfigureBuiltInMemory(t *testing.T) {
 	t.Setenv("CAELIS_MEMORY_BINDING_REF", " primary ")
 	t.Setenv("CAELIS_MEMORY_DISABLED", "true")
 	t.Setenv("CAELIS_MEMORY_SIDECAR_MANIFEST", " /opt/caelis/memoryd.manifest.json ")
@@ -851,9 +851,7 @@ func TestMemoryHostEnvironmentReachesProductComposition(t *testing.T) {
 	if !errors.Is(err, stop) {
 		t.Fatalf("runWithProductClientOpener() error = %v", err)
 	}
-	if captured.MemoryBindingRef != "primary" || !captured.DisableMemory ||
-		captured.MemorySidecarManifest != "/opt/caelis/memoryd.manifest.json" ||
-		captured.MemoryDataDir != "/var/lib/caelis-memory" {
+	if captured.MemoryBindingRef != "" {
 		t.Fatalf("Memory environment config = %#v", captured)
 	}
 }

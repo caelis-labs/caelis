@@ -125,14 +125,15 @@ type BindingSetStatus struct {
 }
 
 // SupportsProfile reports whether a profile may back one persisted handle.
-// Guardian requires an in-process provider model for its validated approval
-// contract. Reviewer may use either a provider model or an external ACP Agent.
+// Guardian and Steward require an in-process provider model for their
+// validated callback contracts. Reviewer may use either a provider model or
+// an external ACP Agent.
 func SupportsProfile(handle Handle, profile modelprofile.ModelProfile) bool {
 	handle = NormalizeHandle(handle)
 	if !isPersistedHandle(handle) && ValidateCustomHandle(handle) != nil {
 		return false
 	}
-	return handle != HandleGuardian || profile.Kind() == modelprofile.BackendProvider
+	return (handle != HandleGuardian && handle != HandleSteward) || profile.Kind() == modelprofile.BackendProvider
 }
 
 // Service is the single Control-owned handle configuration capability.

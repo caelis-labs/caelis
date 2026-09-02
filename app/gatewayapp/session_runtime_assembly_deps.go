@@ -26,7 +26,6 @@ type sessionRuntimeProcessSnapshot struct {
 	childControlTokenFile string
 	memorySelection       memorybinding.RuntimeSelection
 	memorySelector        MemoryBindingSelector
-	memoryDisabled        bool
 }
 
 func newSessionRuntimeAssemblyDeps(host *Stack) (sessionRuntimeAssemblyDeps, error) {

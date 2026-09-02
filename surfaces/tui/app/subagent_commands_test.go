@@ -122,6 +122,7 @@ func TestSlashSubagentListsAndBindsProfilesAndSystemAgents(t *testing.T) {
 				Rows: [][]string{
 					{"guardian", "Guardian", "openai-codex/gpt-5.6-sol [xhigh]"},
 					{"reviewer", "Reviewer", "Main Agent default"},
+					{"steward", "Memory Steward", "Static (zero-token)"},
 				},
 			},
 		},
@@ -130,7 +131,7 @@ func TestSlashSubagentListsAndBindsProfilesAndSystemAgents(t *testing.T) {
 		t.Fatalf("list table = %#v, want %#v", tables[0].Table, wantTable)
 	}
 	listOutput := slashOutputPlainForTest(renderSlashCommandResultLines(tables[0]))
-	for _, want := range []string{"Caelis Breeze", "Caelis Orbit", "Caelis Zenith", "openai-codex/gpt-5.6-sol", "[high]", "System Agents", "Guardian", "Reviewer"} {
+	for _, want := range []string{"Caelis Breeze", "Caelis Orbit", "Caelis Zenith", "openai-codex/gpt-5.6-sol", "[high]", "System Agents", "Guardian", "Reviewer", "Memory Steward", "Static (zero-token)"} {
 		if !strings.Contains(listOutput, want) {
 			t.Fatalf("list output = %q, want %q", listOutput, want)
 		}

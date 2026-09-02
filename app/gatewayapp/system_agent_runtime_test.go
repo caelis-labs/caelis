@@ -486,8 +486,8 @@ func (r *systemManagedLifecycleRecorder) saw(operation agent.LifecycleOperation)
 
 func TestSystemManagedAgentRegistryEntries(t *testing.T) {
 	specs := systemManagedAgentSpecs()
-	if len(specs) != 1 {
-		t.Fatalf("systemManagedAgentSpecs() len = %d, want 1: %#v", len(specs), specs)
+	if len(specs) != 2 {
+		t.Fatalf("systemManagedAgentSpecs() len = %d, want 2: %#v", len(specs), specs)
 	}
 	ids := make([]string, 0, len(specs))
 	for _, spec := range specs {
@@ -497,15 +497,19 @@ func TestSystemManagedAgentRegistryEntries(t *testing.T) {
 		t.Fatalf("systemManagedAgentSpecs() ids = %#v, want sorted", ids)
 	}
 
-	spec := specs[0]
-	if spec.ID != guardianSceneID {
-		t.Fatalf("systemManagedAgentSpecs()[0].ID = %q, want guardian", spec.ID)
+	guardian, ok := systemManagedAgentSpecFor(guardianSceneID)
+	if !ok {
+		t.Fatal("guardian system Agent is missing")
 	}
-	if spec.Purpose != systemManagedAgentPurposeApprovalReview {
-		t.Fatalf("guardian purpose = %q, want approval_review", spec.Purpose)
+	if guardian.Purpose != systemManagedAgentPurposeApprovalReview {
+		t.Fatalf("guardian purpose = %q, want approval_review", guardian.Purpose)
 	}
-	if spec.CapabilityProfile != systemManagedAgentCapabilityNone {
-		t.Fatalf("guardian capability = %q, want none", spec.CapabilityProfile)
+	if guardian.CapabilityProfile != systemManagedAgentCapabilityNone {
+		t.Fatalf("guardian capability = %q, want none", guardian.CapabilityProfile)
+	}
+	steward, ok := systemManagedAgentSpecFor(stewardSceneID)
+	if !ok || steward.Purpose != systemManagedAgentPurposeMemorySteward || steward.CapabilityProfile != systemManagedAgentCapabilityNone {
+		t.Fatalf("steward spec = %#v, want no-tool Memory Steward", steward)
 	}
 }
 

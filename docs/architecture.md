@@ -50,7 +50,7 @@ and acceptance history belong in Git and CI, not in this map.
 | `control/taskstream`, `control/appserver/taskstream` | Session-authorized Task directory, observation, and Task-to-Envelope projection |
 | `control/modelcatalog`, `modelconfig`, `modelprofile`, `placement`, `agentbinding` | Provider and model discovery, credentials/configuration, selectable profiles, placement, and fixed Agent bindings |
 | `control/agents` | External ACP Agent identity, preparation, connection, and configuration |
-| `control/memorybinding` | Opaque host-selected Memory binding references, Runtime actor and audience delegation, exact appliance compatibility pins, and immutable selected snapshots |
+| `control/memorybinding` | Opaque host-selected Memory binding references, Runtime actor and audience delegation, and immutable logical snapshots |
 | `control/mcpconfig`, `control/plugin`, `control/status` | MCP assembly inputs, plugin lifecycle, and product status read models |
 | `app/controlserver` | Authenticated HTTP/SSE Host listener, policy, readiness, and drain |
 | `app/gatewayapp` | Product Host composition, Session Runtime registry, concrete Control services, and shutdown |
@@ -105,39 +105,52 @@ affect later activations. Explicit provider or ACP-Agent removal is the narrow
 revocation exception: Control removes the profile from live placement and repairs
 affected Session bindings so later work cannot resolve a deleted endpoint.
 
-Memory follows the same activation boundary. Control selects one opaque
-`BindingRef` from process-owned input, then detaches only that binding's endpoint,
-Runtime actor, principal, issuer reference, View, Grant, single `private` or
+Memory is a default-enabled built-in Host capability. Process composition
+synchronously opens the imported `github.com/caelis-labs/memory/appliance` Go
+package and applies its schema migrations. Successful Host construction means
+Memory is available; there is no independent install, process, endpoint,
+readiness, compatibility handshake, or degraded Host state. First Host startup
+atomically provisions one private Identity, Space, View, Grant, issuer
+credential, and default binding. These are internal topology and authority
+records, not setup fields.
+
+Memory then follows the same activation boundary. Control selects one opaque
+`BindingRef` internally, then detaches only that binding's Runtime actor,
+principal, issuer reference, View, Grant, single `private` or
 `shared` audience, and binding version. The activated Runtime does not retain the
 complete binding catalog or any downstream product identity. A future product
 layer may map a Bot, user, tenant, workspace, or another concept to a
 `BindingRef`; none is part of the Caelis Memory contract. Later binding changes
-affect later activations; an independent process kill switch
-omits Memory from an activation without rewriting configuration or appliance
-data. A new canonical Session pins its complete non-secret delegation at
+affect later activations. A new canonical Session pins its complete non-secret delegation at
 creation. A Session created before Memory was enabled is pinned before its first
 Memory call under the Runtime fence. Public or mixed-audience Runtime
 composition is invalid.
 
-The current Session pin includes binding, endpoint, actor, principal, issuer
+The current Session pin includes binding, actor, principal, issuer
 reference, audience, View, Grant, and binding version. The earlier prerelease
-partial pin is rejected rather than silently widened; disable Memory to replay
-that Session without appliance calls, or start a new Session to establish the
-complete pin. Historical schema-v2 AppConfig `bots` records are atomically
-rewritten to opaque bindings. A single historical identity keeps a
-least-authority private default; multiple identities are preserved but Memory
-activation is disabled until a host explicitly selects a new opaque default and
-re-enables it.
+partial pin is rejected rather than silently widened; start a new Session to
+establish the complete pin. Historical schema-v2 AppConfig `bots` records are
+atomically rewritten to opaque bindings when exactly one identity exists.
+Multiple historical identities are rejected because silently selecting one
+would change authority; there is no Memory lifecycle switch or partially active
+Host state.
 
-When Memory is enabled, Host-private composition verifies the native `memoryd`
-artifact against the exact platform, source revision, and SHA-256 manifest,
-launches it without credential-bearing arguments or environment, waits for
-readiness, and performs the exact protocol/API/Core Profile handshake. Runtime
-capabilities are issued and renewed from an owner-only issuer credential store;
-the model sees exactly `remember(text)` and `recall(query)`. Their canonical
-ToolResults are ordinary Session history, so replay reads the stored bytes and
-does not contact the appliance. Consistency cursors and provenance references
-remain in model-hidden Session state and ToolResult metadata.
+Host-private composition binds the Memory SDK directly to the embedded
+`DataPlane`. Runtime capabilities are issued and renewed from an owner-only
+issuer credential store; the model sees exactly `remember(text)` and
+`recall(query)`. Their canonical ToolResults are ordinary Session history, so
+replay reads the stored bytes and does not repeat a Memory call. Consistency
+cursors and provenance references remain in model-hidden Session state and
+ToolResult metadata.
+
+The only ordinary user choice is the `Memory Steward` row in `/subagent`.
+Without an explicit provider-model binding, Memory keeps its baseline durable
+receipt journal and lexical recall path and Caelis never invokes a model for
+Memory. Binding that fixed system Agent enables the provider-neutral Steward
+Worker callback: Memory supplies bounded evidence and appliance-owned prompt
+policy, Caelis runs the selected existing provider model with no tools, and
+Memory validates and applies the returned proposal. Steward deliberately has
+no default-profile fallback, so an absent binding is a stable zero-token mode.
 
 Shutdown closes admission, cancels and drains producers, waits for routed
 mutations and Runtime cleanup, then closes stores and process resources.
@@ -179,7 +192,7 @@ control/cursor.key          private cursor-signing secret
 sessions/                   canonical Session documents and event JSONL plus derived SQLite indexes
 providers/                  private provider credential material
 memory/credentials/         owner-only Memory issuer credentials behind opaque references
-memory/appliance/           default independent memoryd data directory for managed-local mode
+memory/appliance/           embedded Memory package data and SQLite authority
 plugins/                    installed and marketplace content caches
 runtime/service/            live Host discovery, authentication, and ownership files
 logs/, updates/, skills/    diagnostics, update state, and prompt assets
@@ -218,23 +231,22 @@ Plugin configuration is also canonical AppConfig state. Managed plugin content
 is immutable and pinned while an active Runtime uses it; configuration mutation
 and installation effects remain on the principal-bound Control command path.
 
-Memory AppConfig contains only endpoint compatibility pins, one explicit default
-`BindingRef`, and opaque actor, principal, issuer-credential, View, Grant, and
+Memory AppConfig contains one default `BindingRef` and opaque actor, principal,
+issuer-credential, View, Grant, and
 audience values for each binding. Raw
 credentials, capabilities, receipts, records, indexes, lifecycle policy, and
-Steward state belong outside AppConfig. A managed-local Unix socket or Windows
-named-pipe endpoint is derived by Host-private composition and cannot be
-persisted as product configuration.
+Steward state belong outside AppConfig.
 References do not grant access: Host-private composition resolves the issuer
-credential, while the independent Memory appliance remains the authority for
+credential, while the Memory package remains the authority for
 Views, Grants, capabilities, receipts, retrieval, and lifecycle.
 
-The local host optionally selects a non-default binding through
-`CAELIS_MEMORY_BINDING_REF`; it receives the verified sidecar through
-`CAELIS_MEMORY_SIDECAR_MANIFEST` and optional `CAELIS_MEMORY_DATA_DIR`.
-`CAELIS_MEMORY_DISABLED=true` is the process kill switch. These values select a
-Control-owned binding and Host-private paths; they do not configure appliance
-policy or carry credentials.
+Normal product startup exposes none of the binding, data path, or credential
+fields. The CLI does not accept Memory lifecycle or topology from the user
+environment.
+Future product concepts may select another opaque binding through the existing
+Host callback without making Bot, tenant, workspace, or similar concepts part
+of the Memory API. A future standalone Memory distribution is an independent
+ecosystem adapter and cannot become a dependency of the embedded Caelis path.
 
 ## Compatibility and current limits
 

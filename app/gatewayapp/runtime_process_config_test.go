@@ -25,7 +25,6 @@ func TestRuntimeProcessConfigSourceSnapshotsAndClonesMutableState(t *testing.T) 
 		memorySelection: memorybinding.RuntimeSelection{
 			BindingRef: " primary ",
 		},
-		memoryDisabled: true,
 	})
 
 	first := source.snapshot()
@@ -46,7 +45,7 @@ func TestRuntimeProcessConfigSourceSnapshotsAndClonesMutableState(t *testing.T) 
 	if second.childControlURL != "http://127.0.0.1:1234" || second.childControlTokenFile != "token-a" {
 		t.Fatalf("child control snapshot = %#v", second)
 	}
-	if second.memorySelection.BindingRef != "primary" || !second.memoryDisabled {
+	if second.memorySelection.BindingRef != "primary" {
 		t.Fatalf("Memory process snapshot = %#v", second)
 	}
 }

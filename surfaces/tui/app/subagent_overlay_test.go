@@ -21,6 +21,8 @@ func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
 		"orbit",
 		"openai-codex/gpt-5.6-sol",
 		"System Agents",
+		"Memory Steward",
+		"Static (zero-token)",
 		"Save binding set…",
 		"Esc close",
 	} {
@@ -51,6 +53,16 @@ func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
 	_ = model.View()
 	if geometry := model.subagentOverlay.geometry; geometry.width > 60 || geometry.height > 18 {
 		t.Fatalf("small-screen overlay geometry = %#v, want within 60x18", geometry)
+	}
+}
+
+func TestSubagentOverlayStewardDefaultIsStatic(t *testing.T) {
+	model, _ := newSubagentOverlayTestModel(t)
+	selectSubagentTestRow(t, model, "handle:steward")
+	_ = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
+	frame := ansi.Strip(model.renderSubagentOverlay())
+	if !strings.Contains(frame, "Use static zero-token Memory") {
+		t.Fatalf("Steward binding picker omitted static default\n%s", frame)
 	}
 }
 

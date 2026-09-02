@@ -1,14 +1,13 @@
 package memorybinding
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestResolveSelectsOneOpaqueBindingIntoDetachedRuntimeSnapshot(t *testing.T) {
 	configuration := testConfiguration()
-	selected, enabled, err := Resolve(configuration, RuntimeSelection{BindingRef: " shared "}, false)
+	selected, enabled, err := Resolve(configuration, RuntimeSelection{BindingRef: " shared "})
 	if err != nil || !enabled {
 		t.Fatalf("Resolve(shared) = %#v, %v, %v", selected, enabled, err)
 	}
@@ -22,30 +21,12 @@ func TestResolveSelectsOneOpaqueBindingIntoDetachedRuntimeSnapshot(t *testing.T)
 		t.Fatalf("snapshot retained another binding: %#v", selected)
 	}
 
-	defaulted, enabled, err := Resolve(configuration, RuntimeSelection{}, false)
+	defaulted, enabled, err := Resolve(configuration, RuntimeSelection{})
 	if err != nil || !enabled {
 		t.Fatalf("Resolve(default) = %#v, %v, %v", defaulted, enabled, err)
 	}
 	if defaulted.BindingRef != "private" || defaulted.Audience != OutputAudiencePrivate || defaulted.ViewRef != "view-a-private" {
 		t.Fatalf("default snapshot = %#v", defaulted)
-	}
-}
-
-func TestFeatureDisableAndKillSwitchPreserveConfiguration(t *testing.T) {
-	configuration := testConfiguration()
-	disabled := configuration
-	disabled.Enabled = false
-	if err := Validate(disabled); err != nil {
-		t.Fatalf("Validate(disabled retained config) = %v", err)
-	}
-	if snapshot, enabled, err := Resolve(disabled, RuntimeSelection{}, false); err != nil || enabled || snapshot != (RuntimeMemoryBindingSnapshot{}) {
-		t.Fatalf("Resolve(feature disabled) = %#v, %v, %v", snapshot, enabled, err)
-	}
-	if !reflect.DeepEqual(disabled.Endpoint, configuration.Endpoint) || !reflect.DeepEqual(disabled.Bindings, configuration.Bindings) {
-		t.Fatal("feature disable changed retained binding references")
-	}
-	if snapshot, enabled, err := Resolve(configuration, RuntimeSelection{}, true); err != nil || enabled || snapshot != (RuntimeMemoryBindingSnapshot{}) {
-		t.Fatalf("Resolve(kill switch) = %#v, %v, %v", snapshot, enabled, err)
 	}
 }
 
@@ -71,12 +52,6 @@ func TestValidationRejectsDuplicateOrIncompleteAuthorityReferences(t *testing.T)
 		"invalid audience": func(configuration *Configuration) {
 			configuration.Bindings[0].Audience = "public"
 		},
-		"persisted managed endpoint": func(configuration *Configuration) {
-			configuration.Endpoint.Endpoint = "/tmp/memoryd.sock"
-		},
-		"short artifact digest": func(configuration *Configuration) {
-			configuration.Endpoint.Compatibility.ArtifactSHA256 = "abc"
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			configuration := testConfiguration()
@@ -90,22 +65,13 @@ func TestValidationRejectsDuplicateOrIncompleteAuthorityReferences(t *testing.T)
 
 func TestResolveFailsClosedForUnknownBinding(t *testing.T) {
 	configuration := testConfiguration()
-	if _, enabled, err := Resolve(configuration, RuntimeSelection{BindingRef: "missing"}, false); err == nil || enabled {
+	if _, enabled, err := Resolve(configuration, RuntimeSelection{BindingRef: "missing"}); err == nil || enabled {
 		t.Fatalf("Resolve(unknown) = enabled:%v error:%v", enabled, err)
 	}
 }
 
 func testConfiguration() Configuration {
 	return Configuration{
-		Enabled: true,
-		Endpoint: EndpointConfig{
-			ID: "memory-default", Deployment: DeploymentModeManagedLocal,
-			Compatibility: APICompatibility{
-				Protocol: "memory.local.v1alpha1", APIVersion: "memory.v1alpha1",
-				CoreProfile: "memory.core.v1alpha1", ServiceVersion: "0.2.0-alpha.1",
-				BuildRevision: strings.Repeat("a", 40), ArtifactSHA256: strings.Repeat("b", 64),
-			},
-		},
 		DefaultBindingRef: "private",
 		Bindings: []AccessBinding{
 			{
@@ -119,5 +85,17 @@ func testConfiguration() Configuration {
 				Audience: OutputAudienceShared, BindingVersion: 7,
 			},
 		},
+	}
+}
+
+func TestZeroConfigurationWaitsForHostProvisioning(t *testing.T) {
+	t.Parallel()
+
+	configuration := Configuration{}
+	if IsConfigured(configuration) {
+		t.Fatal("zero configuration is unexpectedly configured")
+	}
+	if snapshot, active, err := Resolve(configuration, RuntimeSelection{}); err != nil || active || snapshot != (RuntimeMemoryBindingSnapshot{}) {
+		t.Fatalf("Resolve(zero) = %#v, %v, %v", snapshot, active, err)
 	}
 }

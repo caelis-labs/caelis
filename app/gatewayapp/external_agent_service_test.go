@@ -151,7 +151,7 @@ func TestSplitACPCommandLineCanonicalizesRelativeExecutable(t *testing.T) {
 }
 
 func TestRosterNameValidationRejectsRuntimeAndRunAddresses(t *testing.T) {
-	for _, name := range []string{"self", "local", "main", "kernel", "sandbox", "guardian", "reviewer", "status", "worker(lina)", "bad name"} {
+	for _, name := range []string{"self", "local", "main", "kernel", "sandbox", "guardian", "reviewer", "steward", "status", "worker(lina)", "bad name"} {
 		if !forbiddenExternalAgentID(name) {
 			t.Fatalf("forbiddenExternalAgentID(%q) = false", name)
 		}

@@ -1,7 +1,8 @@
 # Release
 
 All Go packages share the root `vX.Y.Z` tag. A release publishes six CLI
-archives plus checksums to GitHub Releases, six platform npm packages, the main
+archives plus checksums to GitHub Releases. The workflow also publishes six
+platform npm packages, the main
 `@caelis/caelis` package, and mirrors the latest archives to the public R2 bucket
 used by the installers.
 
@@ -60,3 +61,9 @@ Before declaring the release complete:
 3. Verify `https://releases.caelis.dev/latest.txt`, download one archive and the
    checksum file from its versioned R2 prefix, and validate the checksum.
 4. Verify the root module version is available through the public Go proxy.
+
+The imported `github.com/caelis-labs/memory` module is compiled into every
+Caelis binary and follows this same platform matrix, installation, and rollback
+unit. Caelis does not download, stage, supervise, or version-match a separate
+Memory runtime artifact. A future standalone Memory distribution remains an
+independent ecosystem product and cannot become a prerequisite for this path.

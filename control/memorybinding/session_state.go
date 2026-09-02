@@ -22,7 +22,6 @@ var ErrSessionAdmissionConflict = errors.New("control/memorybinding: canonical S
 
 type sessionBindingState struct {
 	Version             int             `json:"version"`
-	EndpointID          string          `json:"endpoint_id"`
 	BindingRef          BindingRef      `json:"binding_ref"`
 	RuntimeActorRef     RuntimeActorRef `json:"runtime_actor_ref"`
 	PrincipalRef        string          `json:"principal_ref"`
@@ -34,11 +33,14 @@ type sessionBindingState struct {
 	ConsistencyToken    string          `json:"consistency_token,omitempty"`
 }
 
-const sessionBindingStateVersion = 2
+const (
+	legacyEndpointBindingStateVersion = 2
+	sessionBindingStateVersion        = 3
+)
 
 // AdmitSession atomically fixes one canonical Session to one complete
 // non-secret delegation. A strictly newer binding may rotate its versioned
-// endpoint/View/Grant/issuer references; a downgrade, identity change, or
+// View/Grant/issuer references; a downgrade, identity change, or
 // same-version drift fails closed.
 func AdmitSession(
 	ctx context.Context,
@@ -240,7 +242,6 @@ func AdvanceConsistency(
 func sessionBindingStateFromSnapshot(binding RuntimeMemoryBindingSnapshot) sessionBindingState {
 	return sessionBindingState{
 		Version:             sessionBindingStateVersion,
-		EndpointID:          binding.Endpoint.ID,
 		BindingRef:          binding.BindingRef,
 		RuntimeActorRef:     binding.RuntimeActorRef,
 		PrincipalRef:        binding.PrincipalRef,
@@ -254,7 +255,6 @@ func sessionBindingStateFromSnapshot(binding RuntimeMemoryBindingSnapshot) sessi
 
 func sessionBindingMatches(current sessionBindingState, binding RuntimeMemoryBindingSnapshot) bool {
 	return current.Version == sessionBindingStateVersion &&
-		current.EndpointID == binding.Endpoint.ID &&
 		current.BindingRef == binding.BindingRef &&
 		current.RuntimeActorRef == binding.RuntimeActorRef &&
 		current.PrincipalRef == binding.PrincipalRef &&
@@ -274,18 +274,18 @@ func reconcileSessionBinding(current, next sessionBindingState) (sessionBindingS
 		return sessionBindingState{}, fmt.Errorf("%w: binding cannot downgrade", ErrSessionAdmissionConflict)
 	}
 	if next.BindingVersion == current.BindingVersion &&
-		(current.EndpointID != next.EndpointID || current.ViewRef != next.ViewRef ||
-			current.GrantRef != next.GrantRef || current.IssuerCredentialRef != next.IssuerCredentialRef) {
+		(current.ViewRef != next.ViewRef || current.GrantRef != next.GrantRef ||
+			current.IssuerCredentialRef != next.IssuerCredentialRef) {
 		return sessionBindingState{}, fmt.Errorf("%w: binding drifted without a version change", ErrSessionAdmissionConflict)
 	}
-	if current.EndpointID == next.EndpointID && current.ViewRef == next.ViewRef {
+	if current.ViewRef == next.ViewRef {
 		next.ConsistencyToken = current.ConsistencyToken
 	}
 	return next, nil
 }
 
 func validateRuntimeSnapshot(binding RuntimeMemoryBindingSnapshot) error {
-	if binding.Endpoint.ID == "" || binding.BindingRef == "" || binding.RuntimeActorRef == "" ||
+	if binding.BindingRef == "" || binding.RuntimeActorRef == "" ||
 		binding.PrincipalRef == "" || binding.IssuerCredentialRef == "" || binding.Audience == "" ||
 		binding.ViewRef == "" || binding.GrantRef == "" || binding.BindingVersion == 0 {
 		return fmt.Errorf("control/memorybinding: Runtime Memory binding snapshot is incomplete")
@@ -306,7 +306,10 @@ func decodeSessionBindingState(state map[string]any) (sessionBindingState, bool,
 	if err := json.Unmarshal(data, &current); err != nil {
 		return sessionBindingState{}, false, fmt.Errorf("control/memorybinding: decode canonical Session Memory state: %w", err)
 	}
-	if current.Version != sessionBindingStateVersion || current.EndpointID == "" || current.BindingRef == "" ||
+	if current.Version == legacyEndpointBindingStateVersion {
+		current.Version = sessionBindingStateVersion
+	}
+	if current.Version != sessionBindingStateVersion || current.BindingRef == "" ||
 		current.RuntimeActorRef == "" || current.PrincipalRef == "" || current.IssuerCredentialRef == "" ||
 		!validAudience(current.Audience) || current.ViewRef == "" || current.GrantRef == "" || current.BindingVersion == 0 {
 		return sessionBindingState{}, false, fmt.Errorf("control/memorybinding: canonical Session Memory state is invalid")

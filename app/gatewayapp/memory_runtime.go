@@ -37,7 +37,7 @@ func (s *runtimeComposition) admitCreatedMemorySession(ctx context.Context, crea
 		return created, nil
 	}
 	if s.authorities.memoryHost == nil {
-		return created, &session.CommittedError{Err: fmt.Errorf("gatewayapp: enabled Memory binding has no managed appliance")}
+		return created, &session.CommittedError{Err: fmt.Errorf("gatewayapp: resolved Memory binding has no embedded runtime")}
 	}
 	if err := s.authorities.memoryHost.ValidateBinding(*binding); err != nil {
 		return created, &session.CommittedError{Err: fmt.Errorf("validate created Session Memory host binding: %w", err)}
@@ -61,7 +61,7 @@ func (s *runtimeComposition) buildMemoryTools() ([]tool.Tool, error) {
 		return nil, nil
 	}
 	if s.authorities.memoryHost == nil {
-		return nil, fmt.Errorf("gatewayapp: enabled Memory binding has no managed appliance")
+		return nil, fmt.Errorf("gatewayapp: resolved Memory binding has no embedded runtime")
 	}
 	binding := *s.activation.memoryBinding
 	ref := s.activation.sessionRef

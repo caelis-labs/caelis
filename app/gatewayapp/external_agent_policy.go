@@ -22,7 +22,7 @@ func forbiddenExternalAgentID(id string) bool {
 		return true
 	}
 	switch strings.ToLower(id) {
-	case "guardian", "reviewer", "self", "breeze", "orbit", "zenith", "lead", "local", "main", "kernel", "sandbox":
+	case "guardian", "reviewer", "steward", "self", "breeze", "orbit", "zenith", "lead", "local", "main", "kernel", "sandbox":
 		return true
 	default:
 		return false

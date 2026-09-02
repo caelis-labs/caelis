@@ -10,18 +10,9 @@ import (
 )
 
 const (
-	runtimeDiagnosticsFilename   = "runtime.jsonl"
-	runtimeDiagnosticsMaxBytes   = int64(2 << 20)
-	memoryActivationDisabled     = "disabled"
-	memoryActivationUnconfigured = "unconfigured"
+	runtimeDiagnosticsFilename = "runtime.jsonl"
+	runtimeDiagnosticsMaxBytes = int64(2 << 20)
 )
-
-func logMemoryActivationState(logger *slog.Logger, state string) {
-	if logger == nil {
-		return
-	}
-	logger.Warn("Memory tools are not active", "component", "memory", "state", state)
-}
 
 // newRuntimeDiagnosticsLogger returns a best-effort, bounded JSONL logger for
 // runtime and environment failures. Call sites must use fixed classifications;

@@ -125,6 +125,8 @@ func agentBindingStatusRow(status agentbinding.HandleStatus) []string {
 	switch {
 	case handle == agentbinding.HandleSelf:
 		target = "Current Session controller and effort"
+	case handle == agentbinding.HandleSteward:
+		target = "Static (zero-token)"
 	case agentbinding.IsSystem(handle):
 		target = "Main Agent default"
 	}

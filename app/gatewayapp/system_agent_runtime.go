@@ -25,6 +25,7 @@ type systemManagedAgentPurpose string
 
 const (
 	systemManagedAgentPurposeApprovalReview systemManagedAgentPurpose = "approval_review"
+	systemManagedAgentPurposeMemorySteward  systemManagedAgentPurpose = "memory_steward"
 )
 
 type systemManagedAgentCapabilityProfile string
@@ -57,18 +58,19 @@ type systemManagedAgentSpec struct {
 // one system-managed agent invocation. Domain callers supply context and output
 // contracts; this layer resolves the concrete runtime plan and capability cut.
 type systemManagedAgentRunRequest struct {
-	AgentID           string
-	Purpose           systemManagedAgentPurpose
-	Model             model.LLM
-	ParentSession     session.Session
-	Input             string
-	InputUserEvidence []string
-	Events            []*session.Event
-	Tools             []tool.Tool
-	Output            *model.OutputSpec
-	Compaction        sdkruntime.CompactionConfig
-	Metadata          map[string]any
-	CapabilityProfile systemManagedAgentCapabilityProfile
+	AgentID            string
+	Purpose            systemManagedAgentPurpose
+	Model              model.LLM
+	ParentSession      session.Session
+	Input              string
+	PolicyInstructions string
+	InputUserEvidence  []string
+	Events             []*session.Event
+	Tools              []tool.Tool
+	Output             *model.OutputSpec
+	Compaction         sdkruntime.CompactionConfig
+	Metadata           map[string]any
+	CapabilityProfile  systemManagedAgentCapabilityProfile
 }
 
 type systemManagedAgentRunResult struct {
@@ -98,19 +100,20 @@ type systemManagedAgentCompactResult struct {
 // agent spec defaults, purpose, capability profile, session projection, and
 // metadata used by the underlying Agent runtime.
 type systemManagedAgentRunPlan struct {
-	Spec              systemManagedAgentSpec
-	AgentID           string
-	Purpose           systemManagedAgentPurpose
-	CapabilityProfile systemManagedAgentCapabilityProfile
-	Model             model.LLM
-	Session           session.Session
-	Input             string
-	InputUserEvidence []string
-	Events            []*session.Event
-	Tools             []tool.Tool
-	Output            *model.OutputSpec
-	Compaction        sdkruntime.CompactionConfig
-	Metadata          map[string]any
+	Spec               systemManagedAgentSpec
+	AgentID            string
+	Purpose            systemManagedAgentPurpose
+	CapabilityProfile  systemManagedAgentCapabilityProfile
+	Model              model.LLM
+	Session            session.Session
+	Input              string
+	PolicyInstructions string
+	InputUserEvidence  []string
+	Events             []*session.Event
+	Tools              []tool.Tool
+	Output             *model.OutputSpec
+	Compaction         sdkruntime.CompactionConfig
+	Metadata           map[string]any
 }
 
 type systemManagedAgentRunner interface {
@@ -178,7 +181,11 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	if config.AgentFactory == nil || config.StagingSessions == nil {
 		config = newSystemManagedAgentRuntimeWithConfig(config).config
 	}
-	metadata := chat.Metadata(plan.Spec.Instructions)
+	instructions := strings.TrimSpace(plan.Spec.Instructions)
+	if policy := strings.TrimSpace(plan.PolicyInstructions); policy != "" {
+		instructions += "\n\n" + policy
+	}
+	metadata := chat.Metadata(instructions)
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
@@ -487,19 +494,20 @@ func systemManagedAgentRunPlanFor(req systemManagedAgentRunRequest) (systemManag
 	}
 	sessionMetadata["system_managed_purpose"] = strings.TrimSpace(string(purpose))
 	return systemManagedAgentRunPlan{
-		Spec:              spec,
-		AgentID:           strings.TrimSpace(spec.ID),
-		Purpose:           purpose,
-		CapabilityProfile: capabilityProfile,
-		Model:             req.Model,
-		Session:           systemManagedAgentSessionForParent(req.ParentSession, spec, sessionMetadata),
-		Input:             strings.TrimSpace(req.Input),
-		InputUserEvidence: append([]string(nil), req.InputUserEvidence...),
-		Events:            session.CloneEvents(req.Events),
-		Tools:             tools,
-		Output:            req.Output,
-		Compaction:        req.Compaction,
-		Metadata:          metadata,
+		Spec:               spec,
+		AgentID:            strings.TrimSpace(spec.ID),
+		Purpose:            purpose,
+		CapabilityProfile:  capabilityProfile,
+		Model:              req.Model,
+		Session:            systemManagedAgentSessionForParent(req.ParentSession, spec, sessionMetadata),
+		Input:              strings.TrimSpace(req.Input),
+		PolicyInstructions: strings.TrimSpace(req.PolicyInstructions),
+		InputUserEvidence:  append([]string(nil), req.InputUserEvidence...),
+		Events:             session.CloneEvents(req.Events),
+		Tools:              tools,
+		Output:             req.Output,
+		Compaction:         req.Compaction,
+		Metadata:           metadata,
 	}, nil
 }
 
@@ -516,6 +524,7 @@ func systemManagedAgentRegistrySnapshot() systemManagedAgentRegistry {
 	systemManagedAgentRegistryOnce.Do(func() {
 		systemManagedAgentRegistryValue = buildSystemManagedAgentRegistry([]systemManagedAgentSpec{
 			guardianSystemManagedAgentSpec(),
+			stewardSystemManagedAgentSpec(),
 		})
 	})
 	return systemManagedAgentRegistryValue

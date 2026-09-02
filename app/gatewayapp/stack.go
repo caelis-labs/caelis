@@ -24,7 +24,6 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/memorybinding"
-	memorycredentialstore "github.com/caelis-labs/caelis/control/memorybinding/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
@@ -94,20 +93,13 @@ type Config struct {
 	// Host and the token itself is not placed in argv or environment.
 	ChildControlURL       string
 	ChildControlTokenFile string
-	// MemoryBindingRef optionally selects one opaque Control-owned Memory
-	// binding for later Session Runtime activations. An empty value uses the
-	// explicit AppConfig default. DisableMemory is the independent process kill
-	// switch and never deletes or rewrites appliance data.
+	// MemoryBindingRef is an embedding-only extension seam for selecting another
+	// opaque Control-owned Memory binding. Product users receive the automatically
+	// provisioned private binding and never configure endpoints or grants.
 	MemoryBindingRef      memorybinding.BindingRef
 	MemoryBindingSelector MemoryBindingSelector
-	DisableMemory         bool
-	// MemorySidecarManifest and MemoryDataDir are Host-private managed-local
-	// composition inputs. The native local endpoint is derived from DataDir and
-	// neither value becomes product Memory authority.
-	MemorySidecarManifest string
-	MemoryDataDir         string
-	// memoryHost is a package-private deterministic test seam. Production must
-	// launch the digest-verified managed sidecar above.
+	// memoryHost is a package-private deterministic test seam. Production opens
+	// the embedded Memory package synchronously with the Host.
 	memoryHost runtimeMemoryHost
 }
 
@@ -157,7 +149,8 @@ type Stack struct {
 	lifecycleCancel           context.CancelFunc
 	sessionRuntimes           *sessionRuntimeRegistry
 	modelRecovery             *sessionModelRecovery
-	memorySidecar             *memoryhost.Host
+	memoryRuntime             *memoryhost.Host
+	memorySteward             *memoryStewardBridge
 }
 
 // Sessions returns the Host's process-level Session authority.
@@ -375,9 +368,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	runtimeDiagnostics := newRuntimeDiagnosticsLogger(storeDir)
 	doc, err := configStore.Load()
 	if err != nil {
-		if isInvalidMemoryConfiguration(err) {
-			logMemoryActivationState(runtimeDiagnostics, memoryActivationUnconfigured)
-		}
 		return nil, err
 	}
 	hostedCodexAvailable, err := builtInCodexAdapterAvailable(context.Background())
@@ -388,27 +378,30 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
+	preparedMemory, err := prepareEmbeddedMemory(context.Background(), cfg, configStore, storeDir, doc)
+	if err != nil {
+		return nil, err
+	}
+	doc = preparedMemory.document
+	startupMemoryRuntime := preparedMemory.host
+	defer func() {
+		if startupMemoryRuntime != nil {
+			_ = startupMemoryRuntime.Close()
+		}
+	}()
 	memorySelection := memorybinding.RuntimeSelection{BindingRef: cfg.MemoryBindingRef}
 	initialMemorySelection := memorySelection
 	if cfg.MemoryBindingSelector != nil {
 		if memorySelection.BindingRef != "" {
-			if _, _, fallbackErr := memorybinding.Resolve(doc.Memory, memorySelection, cfg.DisableMemory); fallbackErr != nil {
-				logMemoryActivationState(runtimeDiagnostics, memoryActivationUnconfigured)
+			if _, _, fallbackErr := memorybinding.Resolve(doc.Memory, memorySelection); fallbackErr != nil {
 				return nil, fmt.Errorf("gatewayapp: validate fallback Memory selection: %w", fallbackErr)
 			}
 		}
 		initialMemorySelection = memorybinding.RuntimeSelection{}
 	}
-	initialMemoryBinding, memoryEnabled, err := memorybinding.Resolve(doc.Memory, initialMemorySelection, cfg.DisableMemory)
+	_, memorySelected, err := memorybinding.Resolve(doc.Memory, initialMemorySelection)
 	if err != nil {
-		logMemoryActivationState(runtimeDiagnostics, memoryActivationUnconfigured)
 		return nil, fmt.Errorf("gatewayapp: validate process Memory selection: %w", err)
-	}
-	switch {
-	case cfg.DisableMemory:
-		logMemoryActivationState(runtimeDiagnostics, memoryActivationDisabled)
-	case !memoryEnabled:
-		logMemoryActivationState(runtimeDiagnostics, memoryActivationUnconfigured)
 	}
 	apiKeyCredentials, err := credentialstore.New(storeDir)
 	if err != nil {
@@ -544,7 +537,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		childControlTokenFile: cfg.ChildControlTokenFile,
 		memorySelection:       memorySelection,
 		memorySelector:        cfg.MemoryBindingSelector,
-		memoryDisabled:        cfg.DisableMemory,
 	})
 	sessionModelPins := newSessionModelPinRegistry(apiKeyCredentials.Get, lookup.Snapshot().Configs...)
 	stack := &Stack{
@@ -578,37 +570,13 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			sandbox: sandboxCfg,
 		},
 	}
-	if memoryEnabled {
+	if memorySelected {
 		if cfg.memoryHost != nil {
 			stack.composition.authorities.memoryHost = cfg.memoryHost
 		} else {
-			memoryCredentials, credentialErr := memorycredentialstore.New(storeDir)
-			if credentialErr != nil {
-				_ = stack.Close()
-				return nil, credentialErr
-			}
-			memoryDataDir := strings.TrimSpace(cfg.MemoryDataDir)
-			if memoryDataDir == "" {
-				memoryDataDir = filepath.Join(storeDir, "memory", "appliance")
-			}
-			memoryManifestPath := strings.TrimSpace(cfg.MemorySidecarManifest)
-			if memoryManifestPath == "" {
-				logMemoryActivationState(runtimeDiagnostics, memoryActivationUnconfigured)
-				_ = stack.Close()
-				return nil, fmt.Errorf("gatewayapp: managed Memory sidecar manifest is not configured")
-			}
-			stack.memorySidecar, err = memoryhost.Start(context.Background(), memoryhost.Config{
-				ManifestPath: memoryManifestPath,
-				DataDir:      memoryDataDir,
-				Endpoint:     initialMemoryBinding.Endpoint,
-				Credentials:  memoryCredentials.Get,
-			})
-			if err != nil {
-				logMemoryActivationState(runtimeDiagnostics, memoryhost.FailureClass(err))
-				_ = stack.Close()
-				return nil, err
-			}
-			stack.composition.authorities.memoryHost = stack.memorySidecar
+			stack.memoryRuntime = startupMemoryRuntime
+			startupMemoryRuntime = nil
+			stack.composition.authorities.memoryHost = stack.memoryRuntime
 		}
 	}
 	stack.adapterHost, err = newHostedAdapterManager()
@@ -648,6 +616,12 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err := activateHostRuntime(stack, controlAssembly); err != nil {
 		_ = stack.Close()
 		return nil, err
+	}
+	if preparedMemory.defaultTopology {
+		if err := startMemoryStewardBridge(stack); err != nil {
+			_ = stack.Close()
+			return nil, fmt.Errorf("gatewayapp: start Memory Steward bridge: %w", err)
+		}
 	}
 	return stack, nil
 }
@@ -746,8 +720,15 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 		s.lifecycleCancel()
 	}
 	s.composition.closing.Store(true)
+	var memoryStewardErr error
+	if s.memorySteward != nil {
+		memoryStewardErr = s.memorySteward.wait(ctx)
+	}
 	if s.sessionRuntimes != nil {
 		var errs []error
+		if memoryStewardErr != nil {
+			errs = append(errs, fmt.Errorf("memory Steward: %w", memoryStewardErr))
+		}
 		drain, err := s.sessionRuntimes.beginQuiesce(ctx)
 		if err != nil {
 			errs = append(errs, err)
@@ -775,6 +756,9 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 		return errors.Join(errs...)
 	}
 	var errs []error
+	if memoryStewardErr != nil {
+		errs = append(errs, fmt.Errorf("memory Steward: %w", memoryStewardErr))
+	}
 	if gateway := s.composition.currentGateway(); gateway != nil {
 		if err := gateway.Quiesce(ctx); err != nil {
 			errs = append(errs, err)
@@ -823,11 +807,15 @@ func (s *Stack) Close() error {
 	if sessionCloseErr != nil {
 		errs = append(errs, sessionCloseErr)
 	}
-	if s.memorySidecar != nil {
-		if err := s.memorySidecar.Close(); err != nil {
+	if s.memorySteward != nil {
+		s.memorySteward.closeClients()
+		s.memorySteward = nil
+	}
+	if s.memoryRuntime != nil {
+		if err := s.memoryRuntime.Close(); err != nil {
 			errs = append(errs, err)
 		}
-		s.memorySidecar = nil
+		s.memoryRuntime = nil
 		s.composition.authorities.memoryHost = nil
 	}
 	if controlOperations != nil {

@@ -11,9 +11,8 @@ import (
 // These types exist only to decode the pre-BindingRef schema-v2 wire shape.
 // Concrete product identity never enters the current AppConfig or Runtime API.
 type legacyV2MemoryConfiguration struct {
-	Enabled  bool                         `json:"enabled,omitempty"`
-	Endpoint memorybinding.EndpointConfig `json:"endpoint,omitempty"`
-	Bots     []legacyV2MemoryIdentity     `json:"bots,omitempty"`
+	Enabled bool                     `json:"enabled,omitempty"`
+	Bots    []legacyV2MemoryIdentity `json:"bots,omitempty"`
 }
 
 type legacyV2MemoryIdentity struct {
@@ -108,7 +107,7 @@ func migrateLegacyV2Memory(data []byte) (memorybinding.Configuration, bool, erro
 	if err := json.Unmarshal(top.Memory, &legacy); err != nil {
 		return memorybinding.Configuration{}, false, fmt.Errorf("gatewayapp: decode legacy Memory configuration: %w", err)
 	}
-	converted := memorybinding.Configuration{Enabled: legacy.Enabled, Endpoint: legacy.Endpoint}
+	converted := memorybinding.Configuration{}
 	seenIdentity := make(map[string]struct{}, len(legacy.Bots))
 	for index, raw := range legacy.Bots {
 		identity := normalizeLegacyV2MemoryIdentity(raw)
@@ -143,11 +142,11 @@ func migrateLegacyV2Memory(data []byte) (memorybinding.Configuration, bool, erro
 	}
 	converted.DefaultBindingRef = converted.Bindings[0].BindingRef
 	// The old wire selected a concrete identity outside AppConfig. With more
-	// than one historical identity there is no safe implicit equivalent, so the
-	// atomic wire migration preserves data but disables activation until a host
-	// explicitly chooses a new opaque default and re-enables the feature.
+	// than one historical identity there is no safe implicit equivalent. Memory
+	// has no lifecycle switch, so fail migration instead of silently choosing
+	// authority or starting a Host without its built-in Memory capability.
 	if len(legacy.Bots) > 1 {
-		converted.Enabled = false
+		return memorybinding.Configuration{}, false, fmt.Errorf("gatewayapp: invalid Memory binding: multiple legacy identities require an explicit binding migration")
 	}
 	return converted, true, nil
 }

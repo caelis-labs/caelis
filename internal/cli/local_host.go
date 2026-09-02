@@ -542,6 +542,7 @@ func localHostEnvironment(environment []string) []string {
 	blocked := []string{
 		"CAELIS_CONTROL_URL", "CAELIS_CONTROL_EMBEDDED", "CAELIS_CONTROL_TOKEN", "CAELIS_CONTROL_TOKEN_FILE",
 		"CAELIS_CONTROL_LISTEN", "CAELIS_CONTROL_ALLOWED_HOSTS", "CAELIS_CONTROL_TLS_CERT", "CAELIS_CONTROL_TLS_KEY",
+		"CAELIS_MEMORY_BINDING_REF", "CAELIS_MEMORY_SIDECAR_MANIFEST", "CAELIS_MEMORY_DATA_DIR", "CAELIS_MEMORY_DISABLED",
 	}
 	result := make([]string, 0, len(environment))
 	for _, entry := range environment {

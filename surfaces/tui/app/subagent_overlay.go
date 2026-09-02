@@ -437,6 +437,7 @@ func (m *Model) subagentMainRows() []subagentOverlayRow {
 		}
 		if item.Definition.Class == agentbinding.HandleClassSystem {
 			row.section = "System Agents"
+			row.label = firstNonEmpty(strings.TrimSpace(item.Definition.Name), string(item.Definition.Handle))
 		}
 		if !item.Definition.Configurable {
 			row.action = subagentActionNoop
@@ -459,6 +460,8 @@ func (m *Model) subagentBindingRows() []subagentOverlayRow {
 		resetDetail = "Use the provider-backed default"
 	case agentbinding.HandleReviewer:
 		resetDetail = "Use the Main Agent default"
+	case agentbinding.HandleSteward:
+		resetDetail = "Use static zero-token Memory"
 	}
 	var rows []subagentOverlayRow
 	if !state.creatingRole {
@@ -600,10 +603,14 @@ func subagentBindingDetail(item agentbinding.HandleStatus) string {
 		return subagentBindingDisplay(item.Binding, []modelprofile.ModelProfile{item.Profile})
 	}
 	if item.Definition.Class == agentbinding.HandleClassSystem {
-		if item.Definition.Handle == agentbinding.HandleGuardian {
+		switch item.Definition.Handle {
+		case agentbinding.HandleGuardian:
 			return "Provider-backed default"
+		case agentbinding.HandleSteward:
+			return "Static (zero-token)"
+		default:
+			return "Main Agent default"
 		}
-		return "Main Agent default"
 	}
 	return "Unbound"
 }

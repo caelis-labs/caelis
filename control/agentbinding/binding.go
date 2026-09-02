@@ -19,6 +19,7 @@ const (
 	HandleZenith   Handle = "zenith"
 	HandleGuardian Handle = "guardian"
 	HandleReviewer Handle = "reviewer"
+	HandleSteward  Handle = "steward"
 )
 
 // Binding maps one persisted handle to exactly one profile and canonical

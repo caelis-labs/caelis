@@ -19,6 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -515,6 +516,9 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	if status.Route != "host" {
 		t.Fatalf("sandbox route = %q, want host", status.Route)
 	}
+	if err := stack.Close(); err != nil {
+		t.Fatalf("Close() before reload error = %v", err)
+	}
 
 	reloaded, err := newGatewayAppTestStack(t, Config{
 		AppName:      "caelis",
@@ -862,6 +866,9 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	if err := stack.useTestHostModel(ctx, session.SessionRef{}, minimaxAlias); err != nil {
 		t.Fatalf("UseModel(minimax) error = %v", err)
 	}
+	if err := stack.Close(); err != nil {
+		t.Fatalf("Close() before reload error = %v", err)
+	}
 
 	reloaded, err := newGatewayAppTestStack(t, Config{
 		AppName:      "caelis",
@@ -940,8 +947,12 @@ func TestNewLocalStackAllowsEmptyInitialModelConfig(t *testing.T) {
 		t.Fatalf("DefaultModelAlias() = %q, want empty", got)
 	}
 	assertSandboxNetworkEnabledDefault(t, stack)
-	if _, err := os.Stat(filepath.Join(root, "config.json")); !os.IsNotExist(err) {
-		t.Fatalf("config.json stat error = %v, want no config write during stack construction", err)
+	document, err := LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	if len(document.Models.Configs) != 0 || !memorybinding.IsConfigured(document.Memory) {
+		t.Fatalf("initial config = %#v, want only built-in Memory provisioning", document)
 	}
 }
 

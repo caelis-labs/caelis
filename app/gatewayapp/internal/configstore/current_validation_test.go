@@ -169,11 +169,10 @@ func TestStoreRejectsDuplicateCurrentRecordsBeforeNormalization(t *testing.T) {
 	}
 }
 
-func TestStoreRoundTripsDisabledMemoryBindingWithoutSecretMaterial(t *testing.T) {
+func TestStoreRoundTripsMemoryBindingWithoutSecretMaterial(t *testing.T) {
 	store := New(t.TempDir())
 	doc := currentValidationFixture()
 	doc.Memory = currentMemoryBindingFixture()
-	doc.Memory.Enabled = false
 	if err := store.Save(doc); err != nil {
 		t.Fatal(err)
 	}
@@ -209,21 +208,11 @@ func TestZeroMemoryBindingIsOmittedFromCurrentDocument(t *testing.T) {
 }
 
 func TestStoreAtomicallyMigratesLegacyV2MemoryBindingToOpaqueReferences(t *testing.T) {
-	for _, test := range []struct {
-		name        string
-		identities  int
-		wantEnabled bool
-	}{
-		{name: "single identity keeps least-authority private default", identities: 1, wantEnabled: true},
-		{name: "ambiguous identities fail closed", identities: 2, wantEnabled: false},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+	for _, identities := range []int{1, 2} {
+		t.Run(fmt.Sprintf("identities-%d", identities), func(t *testing.T) {
 			root := t.TempDir()
-			legacy := legacyV2MemoryConfiguration{
-				Enabled:  true,
-				Endpoint: currentMemoryBindingFixture().Endpoint,
-			}
-			for index := range test.identities {
+			legacy := legacyV2MemoryConfiguration{Enabled: true}
+			for index := range identities {
 				legacy.Bots = append(legacy.Bots, legacyV2MemoryIdentity{
 					BotID: fmt.Sprintf("historical-%d", index+1), RuntimeActorRef: memorybinding.RuntimeActorRef(fmt.Sprintf("actor-%d", index+1)),
 					MemoryIdentityRef: fmt.Sprintf("identity-%d", index+1), PrincipalRef: fmt.Sprintf("principal:%d", index+1),
@@ -246,11 +235,16 @@ func TestStoreAtomicallyMigratesLegacyV2MemoryBindingToOpaqueReferences(t *testi
 				t.Fatal(err)
 			}
 			loaded, err := New(root).Load()
+			if identities > 1 {
+				if err == nil || !strings.Contains(err.Error(), "multiple legacy identities require an explicit binding migration") {
+					t.Fatalf("Load() error = %v, want explicit ambiguous-authority rejection", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			if loaded.ConfigurationRevision != 8 || loaded.Memory.Enabled != test.wantEnabled ||
-				loaded.Memory.DefaultBindingRef != "legacy-001-private" || len(loaded.Memory.Bindings) != test.identities*2 {
+			if loaded.ConfigurationRevision != 8 || loaded.Memory.DefaultBindingRef != "legacy-001-private" || len(loaded.Memory.Bindings) != identities*2 {
 				t.Fatalf("migrated Memory configuration = %#v", loaded.Memory)
 			}
 			if _, err := New(root).CompareAndSave(context.Background(), 7, loaded); !errors.Is(err, ErrConfigurationRevisionConflict) {
@@ -327,15 +321,6 @@ func currentValidationFixture() AppConfig {
 
 func currentMemoryBindingFixture() memorybinding.Configuration {
 	return memorybinding.Configuration{
-		Enabled: true,
-		Endpoint: memorybinding.EndpointConfig{
-			ID: "memory-default", Deployment: memorybinding.DeploymentModeManagedLocal,
-			Compatibility: memorybinding.APICompatibility{
-				Protocol: "memory.local.v1alpha1", APIVersion: "memory.v1alpha1",
-				CoreProfile: "memory.core.v1alpha1", ServiceVersion: "0.2.0-alpha.1",
-				BuildRevision: strings.Repeat("a", 40), ArtifactSHA256: strings.Repeat("b", 64),
-			},
-		},
 		DefaultBindingRef: "primary",
 		Bindings: []memorybinding.AccessBinding{{
 			BindingRef: "primary", RuntimeActorRef: "actor-a", PrincipalRef: "principal:a",

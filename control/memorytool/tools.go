@@ -295,7 +295,7 @@ func mapMemoryError(err error) error {
 func baseMetadata(binding memorybinding.RuntimeMemoryBindingSnapshot, token v1alpha1.ConsistencyToken) map[string]any {
 	memory := map[string]any{
 		"version":         metadataVersion,
-		"endpoint_id":     binding.Endpoint.ID,
+		"binding_ref":     string(binding.BindingRef),
 		"view_ref":        binding.ViewRef,
 		"audience":        string(binding.Audience),
 		"binding_version": binding.BindingVersion,
