@@ -116,7 +116,7 @@ func TestProjectTaskFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	if got := stringPtrValue(update.Status); got != eventstream.ToolStatusInProgress {
 		t.Fatalf("status = %q, want in_progress for terminal append", got)
 	}
-	assertTerminalAnchor(t, update.Content, "call-1")
+	assertSparseTerminalUpdate(t, update, "call-1")
 	if got := toolTerminalOutputText(t, update); got != "ok\n" {
 		t.Fatalf("terminal output = %q, want ok output", got)
 	}
@@ -192,7 +192,7 @@ func TestProjectTaskFramePreservesClosedCommandExitCode(t *testing.T) {
 	if !ok || exit.TerminalID != "call-1" || exit.ExitCode == nil || *exit.ExitCode != exitCode {
 		t.Fatalf("terminal exit = %#v, %v; want exit code %d", exit, ok, exitCode)
 	}
-	assertTerminalAnchor(t, update.Content, "call-1")
+	assertSparseTerminalUpdate(t, update, "call-1")
 	if got, ok := eventmeta.Int64(update.Meta, eventmeta.Root, eventmeta.Runtime, eventmeta.RuntimeStream, eventmeta.RuntimeOutputCursor); !ok || got != 3 {
 		t.Fatalf("final stream output cursor = %d, %v; want 3, true", got, ok)
 	}
@@ -254,7 +254,7 @@ func TestProjectTaskFrameFinalDoesNotRepeatStreamedOutput(t *testing.T) {
 	if got := stringPtrValue(update.Status); got != eventstream.ToolStatusCompleted {
 		t.Fatalf("status = %q, want completed", got)
 	}
-	assertTerminalAnchor(t, update.Content, "command-1")
+	assertSparseTerminalUpdate(t, update, "command-1")
 }
 
 func TestProjectTaskFrameProjectsDelegatedTaskSemanticsWithoutParentText(t *testing.T) {
@@ -888,14 +888,12 @@ func assertStreamTerminalInfo(t *testing.T, meta map[string]any, terminalID stri
 	}
 }
 
-func assertTerminalAnchor(t *testing.T, content []eventstream.ToolCallContent, terminalID string) {
+func assertSparseTerminalUpdate(t *testing.T, update eventstream.ToolCallUpdate, terminalID string) {
 	t.Helper()
-	if len(content) != 1 || content[0].Type != "terminal" || content[0].TerminalID != terminalID {
-		t.Fatalf("content = %#v, want one terminal anchor %q", content, terminalID)
+	if update.Content != nil {
+		t.Fatalf("content = %#v, want omitted sparse-patch content", update.Content)
 	}
-	if text := session.ExtractProtocolText(content[0].Content); text != "" {
-		t.Fatalf("terminal anchor content text = %q, want empty", text)
-	}
+	assertStreamTerminalInfo(t, update.Meta, terminalID)
 }
 
 func stringPtrValue(value *string) string {

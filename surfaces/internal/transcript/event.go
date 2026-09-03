@@ -125,8 +125,9 @@ type Event struct {
 	ToolOutputCursorKnown      bool
 	ToolOutputStartCursor      int64
 	ToolOutputStartCursorKnown bool
-	// ToolOutputGapBefore is a render-only notice that exact terminal bytes
-	// before this event are unavailable. It is never part of ToolOutput.
+	// ToolOutputGapBefore records that exact terminal bytes before this event
+	// are unavailable. Surfaces may use it for cursor recovery, but it is never
+	// part of ToolOutput or user-visible transcript text.
 	ToolOutputGapBefore bool
 	// ToolTaskHandle is the Session-scoped public identity shown to users. It
 	// must never carry the opaque TaskID used by Task stream endpoints.

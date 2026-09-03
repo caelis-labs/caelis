@@ -126,14 +126,15 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		Status:    status,
 		Error:     toolErr,
 	}
-	if !suppressRunningSnapshotOutput {
-		terminalOutput := transcript.TerminalToolOutputText(fallbackInput)
-		if terminalOutput != "" {
-			toolOutputHasTerminalData = toolTerminal
-			if strings.TrimSpace(toolOutput) == "" {
-				toolOutput = terminalOutput
-				toolOutputCollection = false
-			}
+	terminalOutput := transcript.TerminalRuntimeOutputText(input.Meta)
+	if terminalOutput == "" && !suppressRunningSnapshotOutput {
+		terminalOutput = transcript.TerminalToolOutputText(fallbackInput)
+	}
+	if terminalOutput != "" {
+		toolOutputHasTerminalData = toolTerminal
+		if strings.TrimSpace(toolOutput) == "" {
+			toolOutput = terminalOutput
+			toolOutputCollection = false
 		}
 	}
 	if !toolOutputCollection && strings.TrimSpace(toolOutput) == "" && !toolOutputHasTerminalData {
@@ -151,10 +152,9 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 			toolOutputSynthetic = strings.TrimSpace(toolOutput) != ""
 		}
 	}
-	// Task read/wait keeps latest_output compact for the model, but the
-	// presentation owner needs the exact observed bytes to reconcile with
-	// transient terminal frames without normalization, truncation, or
-	// delivery-order races.
+	// Task read/wait carries an exact observed delta for its target. RunCommand
+	// observations are normalized by Control to terminal_output and therefore
+	// use the ordinary terminal extension path above.
 	if semanticName == surfaceToolTask {
 		if delta, ok := transcriptToolObservationDelta(input.Meta); ok {
 			toolOutput = delta
@@ -238,7 +238,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		}
 	}
 	toolOutput = toolDisplayPanelOutput(semanticName, toolOutput)
-	if input.GatewayProjection && isExecuteToolKind(input.ToolKind) && len(input.Content) == 0 {
+	if input.GatewayProjection && isExecuteToolKind(input.ToolKind) && len(input.Content) == 0 && !toolOutputHasTerminalData {
 		toolOutput = ""
 		toolOutputSynthetic = false
 	}

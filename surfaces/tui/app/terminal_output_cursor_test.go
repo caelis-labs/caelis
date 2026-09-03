@@ -1,6 +1,9 @@
 package tuiapp
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMergeTerminalOutputByCursorIsOrderIndependent(t *testing.T) {
 	t.Parallel()
@@ -72,6 +75,131 @@ func TestContentlessFinalDoesNotAdvanceRepresentedOutputCursor(t *testing.T) {
 	}
 	if event.Output != "abcdef" || event.OutputCursor != 6 {
 		t.Fatalf("repaired event = %#v, want output abcdef at cursor 6", event)
+	}
+}
+
+func TestMergeTerminalOutputByCursorRepairsUnavailablePrefixFromExactCatchup(t *testing.T) {
+	t.Parallel()
+
+	const (
+		prefix = "prefix\n"
+		tail   = "tail\n"
+	)
+	end := int64(len([]byte(prefix + tail)))
+	event := SubagentEvent{
+		Output: tail, OutputTerminal: true, OutputGapBefore: true,
+		OutputCursor: end, OutputCursorKnown: true,
+	}
+	if !mergeTerminalOutputByCursor(&event, prefix+tail, ToolUpdateMeta{
+		OutputTerminal:    true,
+		OutputStartCursor: 0, OutputStartCursorKnown: true,
+		OutputCursor: end, OutputCursorKnown: true,
+	}) {
+		t.Fatal("exact catch-up did not repair the unavailable prefix")
+	}
+	if event.Output != prefix+tail || event.OutputGapBefore || event.OutputCursor != end {
+		t.Fatalf("repaired event = %#v, want complete exact output without a gap", event)
+	}
+}
+
+func TestMergeTerminalOutputByCursorRepairsUnmarkedIncompleteViewFromExactCatchup(t *testing.T) {
+	t.Parallel()
+
+	const (
+		prefix = "prefix\n"
+		tail   = "tail\n"
+	)
+	end := int64(len([]byte(prefix + tail)))
+	event := SubagentEvent{
+		Output: tail, OutputTerminal: true,
+		OutputCursor: end, OutputCursorKnown: true,
+	}
+	if !mergeTerminalOutputByCursor(&event, prefix+tail, ToolUpdateMeta{
+		OutputTerminal: true, OutputStartCursor: 0, OutputStartCursorKnown: true,
+		OutputCursor: end, OutputCursorKnown: true,
+	}) {
+		t.Fatal("exact full catch-up did not repair the incomplete view")
+	}
+	if event.Output != prefix+tail || event.OutputGapBefore || event.OutputCursor != end {
+		t.Fatalf("repaired event = %#v, want complete exact output without a gap", event)
+	}
+}
+
+func TestMergeTerminalOutputByCursorDoesNotRepairGapFromCompactRange(t *testing.T) {
+	t.Parallel()
+
+	event := SubagentEvent{
+		Output: "tail\n", OutputTerminal: true, OutputGapBefore: true,
+		OutputCursor: 12, OutputCursorKnown: true,
+	}
+	if mergeTerminalOutputByCursor(&event, "compact\n", ToolUpdateMeta{
+		OutputTerminal:    true,
+		OutputStartCursor: 0, OutputStartCursorKnown: true,
+		OutputCursor: 12, OutputCursorKnown: true,
+	}) {
+		t.Fatal("byte-incoherent catch-up unexpectedly replaced exact output")
+	}
+	if event.Output != "tail\n" || !event.OutputGapBefore {
+		t.Fatalf("event = %#v, want unavailable exact suffix unchanged", event)
+	}
+}
+
+func TestMergeTerminalOutputByCursorDoesNotEraseCursorlessLegacyAppend(t *testing.T) {
+	t.Parallel()
+
+	const legacy = "legacy tail\n"
+	full := strings.Repeat("x", 100)
+	event := SubagentEvent{
+		Output: "retained tail", OutputTerminal: true, OutputGapBefore: true,
+		OutputCursor: int64(len(full)), OutputCursorKnown: true,
+	}
+	if !mergeTerminalOutputByCursor(&event, legacy, ToolUpdateMeta{OutputTerminal: true}) {
+		t.Fatal("cursorless legacy delta was not appended")
+	}
+	wantCursor := int64(len(full) + len(legacy))
+	if event.OutputCursor != wantCursor || !event.OutputCursorKnown {
+		t.Fatalf("cursorless append cursor = (%d,%v), want (%d,true)", event.OutputCursor, event.OutputCursorKnown, wantCursor)
+	}
+	if mergeTerminalOutputByCursor(&event, full, ToolUpdateMeta{
+		OutputTerminal: true, OutputStartCursor: 0, OutputStartCursorKnown: true,
+		OutputCursor: int64(len(full)), OutputCursorKnown: true,
+	}) {
+		t.Fatal("repeated exact prefix unexpectedly replaced a mixed legacy view")
+	}
+	if event.Output != "retained tail"+legacy {
+		t.Fatalf("output = %q, want cursorless legacy bytes preserved", event.Output)
+	}
+}
+
+func TestApplyToolEventUpdateAdvancesCursorForCursorlessLegacyAppend(t *testing.T) {
+	t.Parallel()
+
+	const legacy = "legacy tail\n"
+	full := strings.Repeat("x", 100)
+	events := []SubagentEvent{{
+		Kind: SEToolCall, CallID: "command-1", Name: "RunCommand", ToolKind: "execute",
+		Terminal: true, Output: "retained tail", OutputTerminal: true, OutputGapBefore: true,
+		OutputCursor: int64(len(full)), OutputCursorKnown: true,
+	}}
+	index := map[string]int{"command-1": 0}
+	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
+		CallID: "command-1", Name: "RunCommand", Output: legacy,
+		Meta: ToolUpdateMeta{ToolKind: "execute", Terminal: true, OutputTerminal: true},
+	}, index)
+	wantCursor := int64(len(full) + len(legacy))
+	if events[0].Output != "retained tail"+legacy || events[0].OutputCursor != wantCursor || !events[0].OutputCursorKnown {
+		t.Fatalf("legacy reducer append = %#v, want preserved bytes at cursor %d", events[0], wantCursor)
+	}
+	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
+		CallID: "command-1", Name: "RunCommand", Output: full,
+		Meta: ToolUpdateMeta{
+			ToolKind: "execute", Terminal: true, OutputTerminal: true,
+			OutputStartCursor: 0, OutputStartCursorKnown: true,
+			OutputCursor: int64(len(full)), OutputCursorKnown: true,
+		},
+	}, index)
+	if events[0].Output != "retained tail"+legacy || events[0].OutputCursor != wantCursor {
+		t.Fatalf("late exact replay erased cursorless bytes: %#v", events[0])
 	}
 }
 

@@ -166,6 +166,122 @@ func TestEventProjectorDoesNotPromoteTraceTextIntoSparseToolUpdateContent(t *tes
 	}
 }
 
+func TestEventProjectorRunCommandResultWithoutContentStaysSparse(t *testing.T) {
+	t.Parallel()
+	const output = "first bytes\n"
+
+	updates, err := ProjectEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolResult,
+		Tool: &session.EventTool{
+			ID: "call-1", Name: "RunCommand", Kind: eventstream.ToolKindExecute,
+			Status: eventstream.ToolStatusInProgress,
+			Output: map[string]any{
+				"state": "running", "handle": "command",
+				"latest_output": "... compact preview different from exact bytes ...\n",
+			},
+		},
+		Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{
+			"binding": map[string]any{"task_result": true},
+			"task": map[string]any{
+				"task_id": "task-1", "terminal_id": "terminal-1",
+				eventmeta.RuntimeOutputStart: int64(0), eventmeta.RuntimeOutputCursor: int64(len([]byte(output))),
+				eventmeta.RuntimeOutputDelta: output,
+			},
+		}}},
+	})
+	if err != nil || len(updates) != 1 {
+		t.Fatalf("ProjectEvent() = %#v, %v; want one update", updates, err)
+	}
+	update, ok := updates[0].(eventstream.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
+	}
+	if update.Content != nil {
+		t.Fatalf("content = %#v, want omitted sparse-patch content", update.Content)
+	}
+	raw, err := json.Marshal(update)
+	if err != nil {
+		t.Fatalf("json.Marshal(update) error = %v", err)
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		t.Fatalf("json.Unmarshal(update) error = %v", err)
+	}
+	if _, present := object["content"]; present {
+		t.Fatalf("wire update = %s, want content omitted", raw)
+	}
+	assertTerminalInfo(t, update.Meta, "call-1")
+	assertTerminalOutput(t, update.Meta, "call-1", output)
+}
+
+func TestEventProjectorTaskBackedRunCommandWithoutNewDeltaStaysSparse(t *testing.T) {
+	t.Parallel()
+
+	updates, err := ProjectEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolResult,
+		Tool: &session.EventTool{
+			ID: "call-1", Name: "RunCommand", Kind: eventstream.ToolKindExecute,
+			Status: eventstream.ToolStatusInProgress,
+			Output: map[string]any{
+				"state": "running", "handle": "command", "latest_output": "compact previous output\n",
+			},
+		},
+		Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{
+			"binding": map[string]any{"task_result": true},
+			"task": map[string]any{
+				"task_id": "task-1", "terminal_id": "terminal-1",
+				eventmeta.RuntimeOutputStart: int64(0), eventmeta.RuntimeOutputCursor: int64(24),
+			},
+		}}},
+	})
+	if err != nil || len(updates) != 1 {
+		t.Fatalf("ProjectEvent() = %#v, %v; want one update", updates, err)
+	}
+	update, ok := updates[0].(eventstream.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
+	}
+	if update.Content != nil {
+		t.Fatalf("content = %#v, want compact latest_output omitted from sparse patch", update.Content)
+	}
+	if output, ok := eventmeta.TerminalOutput(update.Meta); ok {
+		t.Fatalf("terminal output = %#v, want no bytes without exact output_delta", output)
+	}
+	assertTerminalInfo(t, update.Meta, "call-1")
+}
+
+func TestEventProjectorDoesNotPromoteUntrustedRuntimeCommandObservation(t *testing.T) {
+	t.Parallel()
+
+	updates, err := ProjectEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolResult,
+		Tool: &session.EventTool{
+			ID: "call-1", Name: "RunCommand", Kind: eventstream.ToolKindExecute,
+			Status: eventstream.ToolStatusInProgress,
+			Output: map[string]any{"state": "running", "latest_output": "untrusted preview\n"},
+		},
+		Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{
+			"task": map[string]any{
+				"task_id": "spoofed-task", eventmeta.RuntimeOutputDelta: "spoofed exact bytes\n",
+			},
+		}}},
+	})
+	if err != nil || len(updates) != 1 {
+		t.Fatalf("ProjectEvent() = %#v, %v; want one update", updates, err)
+	}
+	update, ok := updates[0].(eventstream.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
+	}
+	output, ok := eventmeta.TerminalOutput(update.Meta)
+	if !ok || output.Data != "untrusted preview\n" {
+		t.Fatalf("terminal output = %#v, %v; want ordinary RawOutput presentation only", output, ok)
+	}
+}
+
 func TestProjectPermissionRequestUsesDurablePermissionAfterRoundTrip(t *testing.T) {
 	t.Parallel()
 

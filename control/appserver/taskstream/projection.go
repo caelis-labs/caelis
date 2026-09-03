@@ -141,9 +141,9 @@ func streamToolUpdateEnvelope(req taskFrameProjectionRequest, frame stream.Frame
 	if includeDisplayTerminal {
 		update = withCommandDisplayTerminal(update, req.CallID, req.ToolName)
 		if frame.Closed {
-			// withCommandDisplayTerminal preserves the Zed-compatible empty terminal
-			// anchor and installs the final terminal metadata. The stream close frame
-			// is the authoritative runtime exit-code carrier, so retain it here.
+			// The stream close frame is the authoritative runtime exit-code
+			// carrier. Keep the content collection omitted and publish lifecycle
+			// only through the terminal extension metadata.
 			update.Meta = eventmeta.WithTerminalExit(update.Meta, streamTerminalExitID(req, frame), frame.ExitCode, nil)
 		}
 	}
@@ -177,7 +177,10 @@ func withCommandDisplayTerminal(update eventstream.ToolCallUpdate, toolCallID st
 		return update
 	}
 	update.Meta = eventmeta.WithTerminalInfo(update.Meta, terminalID)
-	update.Content = []eventstream.ToolCallContent{{Type: "terminal", TerminalID: terminalID}}
+	// The RunCommand tool_call already mounted this terminal. TaskStream output
+	// and lifecycle are sparse tool_call_update patches, so repeating a present
+	// terminal-only content collection would authoritatively replace rendered
+	// output with an empty collection.
 	return update
 }
 

@@ -358,8 +358,12 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 				mergeTerminalOutputByCursor(ev, output, meta)
 			} else if meta.OutputTerminal {
 				// Legacy ACP terminal_output without a cursor is still an exact
-				// byte delta and must not use textual overlap guessing.
+				// next byte delta and must not use textual overlap guessing. Keep
+				// an existing absolute cursor coherent with the represented bytes.
 				ev.Output += output
+				if ev.OutputCursorKnown {
+					ev.OutputCursor += int64(len([]byte(output)))
+				}
 			} else {
 				ev.Output = mergeCommandStreamChunk(ev.Output, output)
 			}

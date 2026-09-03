@@ -68,11 +68,59 @@ func withDisplayTerminalUpdate(update eventstream.ToolCallUpdate, toolCallID str
 		return update
 	}
 	update.Meta = eventmeta.WithTerminalInfo(update.Meta, terminalID)
-	update.Meta, update.Content = terminalExtensionMetaFromContent(update.Meta, terminalID, update.Content)
+	// tool_call_update is a sparse ACP patch. A missing content field retains
+	// the collection installed by tool_call; do not manufacture a terminal-only
+	// collection because an explicitly present collection replaces prior output.
+	if len(update.Content) > 0 {
+		update.Meta, update.Content = terminalExtensionMetaFromContent(update.Meta, terminalID, update.Content)
+	}
 	if updateStatusFinal(update.Status) {
 		update.Meta = eventmeta.WithTerminalExit(update.Meta, terminalID, terminalExitCode(update.RawOutput), nil)
 	}
 	return update
+}
+
+// withRuntimeCommandObservation converts Runtime's exact task observation into
+// the canonical terminal display extension at the Control projection boundary.
+// Surfaces then consume the same terminal_output shape for both TaskStream
+// frames and the first task-backed RunCommand observation.
+func withRuntimeCommandObservation(update eventstream.ToolCallUpdate, meta map[string]any, name string) eventstream.ToolCallUpdate {
+	profile, known := projectedBuiltinToolProfile(strings.TrimSpace(name))
+	if !known || profile.result != projectedResultCommand || !trustedRuntimeTaskResult(meta) {
+		return update
+	}
+	if _, ok := eventmeta.TerminalOutput(update.Meta); ok {
+		return update
+	}
+	taskMeta := eventmeta.RuntimeSection(meta, eventmeta.RuntimeTask)
+	delta, ok := taskMeta[eventmeta.RuntimeOutputDelta].(string)
+	if !ok || delta == "" {
+		return update
+	}
+	terminalID := strings.TrimSpace(update.ToolCallID)
+	if info, ok := eventmeta.TerminalInfo(update.Meta); ok {
+		terminalID = strings.TrimSpace(info.TerminalID)
+	}
+	update.Meta = eventmeta.WithTerminalOutput(update.Meta, terminalID, delta)
+	return update
+}
+
+func taskBackedRunningCommandUpdate(name string, status string, meta map[string]any) bool {
+	profile, known := projectedBuiltinToolProfile(strings.TrimSpace(name))
+	if !known || profile.result != projectedResultCommand || projectedToolStatusFinal(status, false) ||
+		!trustedRuntimeTaskResult(meta) {
+		return false
+	}
+	taskMeta := eventmeta.RuntimeSection(meta, eventmeta.RuntimeTask)
+	taskID, _ := taskMeta["task_id"].(string)
+	terminalID, _ := taskMeta[eventmeta.RuntimeTaskTerminalID].(string)
+	return strings.TrimSpace(taskID) != "" || strings.TrimSpace(terminalID) != ""
+}
+
+func trustedRuntimeTaskResult(meta map[string]any) bool {
+	binding := eventmeta.RuntimeSection(meta, "binding")
+	trusted, _ := binding["task_result"].(bool)
+	return trusted
 }
 
 func terminalExtensionMetaFromContent(meta map[string]any, terminalID string, content []eventstream.ToolCallContent) (map[string]any, []eventstream.ToolCallContent) {

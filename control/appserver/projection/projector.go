@@ -66,7 +66,14 @@ func permissionToolCallUpdateFromProtocol(call session.ProtocolToolCall) eventst
 	}
 	displayTerminalID, _ := projectedDisplayTerminalID(call.ID, call.Name)
 	update.Content = projectToolContent(call.Content, displayTerminalID)
-	return withDisplayTerminalUpdate(update, call.ID, call.Name)
+	update = withDisplayTerminalUpdate(update, call.ID, call.Name)
+	// RequestPermission carries a complete tool snapshot rather than one
+	// incremental lifecycle patch. Preserve the declared terminal reference so
+	// clients can render the approval context without prior feed state.
+	if update.Content == nil && displayTerminalID != "" {
+		update.Meta, update.Content = terminalExtensionMetaFromContent(update.Meta, displayTerminalID, nil)
+	}
+	return update
 }
 
 func explicitUpdates(event *session.Event) []eventstream.Update {
@@ -442,7 +449,8 @@ func toolCallUpdateForEvent(event *session.Event) (eventstream.ToolCallUpdate, b
 	if title := projectedToolLifecycleTitle(name, nil, status, ""); projectedToolTitleTracksLifecycle(name) && title != "" {
 		out.Title = stringPtr(title)
 	}
-	return withDisplayTerminalUpdate(out, resp.ID, name), true, nil
+	out = withDisplayTerminalUpdate(out, resp.ID, name)
+	return withRuntimeCommandObservation(out, event.Meta, name), true, nil
 }
 
 func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string]any) eventstream.ToolCallUpdate {
@@ -458,7 +466,7 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string
 		Content:       projectEventToolContent(tool.Content, displayTerminalID),
 		Locations:     projectEventToolLocations(tool.Locations),
 	}
-	if len(out.Content) == 0 {
+	if len(out.Content) == 0 && !taskBackedRunningCommandUpdate(tool.Name, tool.Status, meta) {
 		out.Content = projectedToolResultContent(tool.ID, tool.Name, tool.Input, tool.Output, meta, tool.Status)
 	}
 	if title := projectedToolLifecycleTitle(tool.Name, tool.Input, tool.Status, tool.Title); title != "" {
@@ -470,7 +478,8 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string
 	if status := acpToolStatus(tool.Status); status != "" {
 		out.Status = stringPtr(status)
 	}
-	return withDisplayTerminalUpdate(out, tool.ID, tool.Name)
+	out = withDisplayTerminalUpdate(out, tool.ID, tool.Name)
+	return withRuntimeCommandObservation(out, meta, tool.Name)
 }
 
 func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.ProtocolUpdate) (eventstream.ToolCallUpdate, error) {
@@ -506,7 +515,8 @@ func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.Prot
 	if status := acpToolStatus(stringFromPtr(out.Status)); status != "" {
 		out.Status = stringPtr(status)
 	}
-	return withDisplayTerminalUpdate(out, id, name), nil
+	out = withDisplayTerminalUpdate(out, id, name)
+	return withRuntimeCommandObservation(out, eventmeta.Merge(event.Meta, update.Meta), name), nil
 }
 
 func projectEventToolLocations(locations []session.EventToolLocation) []eventstream.ToolCallLocation {

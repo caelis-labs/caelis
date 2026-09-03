@@ -546,9 +546,6 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 	if !expanded || !shouldRenderACPToolPanel(text, err) {
 		return rows
 	}
-	if ev.OutputGapBefore {
-		rows = append(rows, renderACPTerminalGapRow(blockID, width, ctx, token))
-	}
 	if final && fullOutput {
 		rows = append(rows, renderACPFullTerminalPanelRows(blockID, callID, text, width, ctx, err, token)...)
 		return rows
@@ -614,16 +611,6 @@ func renderACPTranscriptLinkedHeaderRowMarked(
 	row.acpHeaderMarkDim = dim
 	row.selectionIndent = 2
 	return row
-}
-
-const terminalOutputGapNotice = "… earlier output unavailable …"
-
-func renderACPTerminalGapRow(blockID string, width int, ctx BlockRenderContext, token string) RenderedRow {
-	rows := renderACPToolOutputRowsWithToken(blockID, "  └ ", terminalOutputGapNotice, width, ctx, ctx.Theme.TranscriptMetaStyle(), token)
-	if len(rows) == 0 {
-		return PlainRow(blockID, terminalOutputGapNotice)
-	}
-	return rows[0]
 }
 
 func terminalLifecycleHeader(ev SubagentEvent) string {

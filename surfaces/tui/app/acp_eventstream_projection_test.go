@@ -531,6 +531,79 @@ func TestProjectACPEventToTranscriptEventsSuppressesRunningSnapshotTerminalOutpu
 	}
 }
 
+func TestProjectACPEventToTranscriptEventsUsesExactRunningCommandObservation(t *testing.T) {
+	t.Parallel()
+
+	const prefix = "command prefix\n"
+	status := eventstream.ToolStatusInProgress
+	kind := eventstream.ToolKindExecute
+	meta := runningSnapshotTerminalMeta("RunCommand", "task-1", "terminal-1", prefix, "")
+	meta = testMeta.WithRuntimeSection(meta, testMeta.RuntimeTask, map[string]any{
+		"task_id": "task-1", "handle": "command", "running": true, "state": "running",
+		testMeta.RuntimeTaskTerminalID: "terminal-1",
+		testMeta.RuntimeOutputStart:    int64(0),
+		testMeta.RuntimeOutputCursor:   int64(len([]byte(prefix))),
+		testMeta.RuntimeOutputDelta:    prefix,
+	})
+	meta = testMeta.WithTerminalOutput(meta, "terminal-1", prefix)
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Meta: map[string]any{"caelis": map[string]any{
+			"bridge": map[string]any{"source": "gateway_projection"},
+		}},
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Title:         stringPtr("RunCommand long job"),
+			Kind:          &kind,
+			Status:        &status,
+			RawInput:      map[string]any{"command": "long job"},
+			RawOutput:     map[string]any{"latest_output": prefix, "state": "running"},
+			Meta:          meta,
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	event := events[0]
+	if event.ToolOutput != prefix || !event.ToolOutputTerminal ||
+		!event.ToolOutputStartCursorKnown || event.ToolOutputStartCursor != 0 ||
+		!event.ToolOutputCursorKnown || event.ToolOutputCursor != int64(len([]byte(prefix))) {
+		t.Fatalf("running command event = %#v, want exact prefix and absolute cursor", event)
+	}
+	if event.Final {
+		t.Fatal("Final = true, want running command observation to remain open")
+	}
+}
+
+func TestProjectACPEventToTranscriptEventsKeepsStandardTerminalOnlyContentAsEmptyCollection(t *testing.T) {
+	t.Parallel()
+
+	status := eventstream.ToolStatusInProgress
+	meta := testMeta.WithTerminalInfo(acpToolNameMeta("RunCommand"), "terminal-1")
+	meta = testMeta.WithRuntimeSection(meta, testMeta.RuntimeTask, map[string]any{
+		"task_id": "untrusted-external-task", testMeta.RuntimeTaskTerminalID: "terminal-1",
+	})
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Status:        &status,
+			Content: []eventstream.ToolCallContent{{
+				Type: "terminal", TerminalID: "terminal-1",
+			}},
+			Meta: meta,
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	if event := events[0]; event.ToolOutput != "" || !event.ToolOutputCollection {
+		t.Fatalf("standard terminal-only event = %#v, want authoritative empty output collection", event)
+	}
+}
+
 func TestProjectACPEventToTranscriptEventsDisplaysTerminalStreamFrameOutput(t *testing.T) {
 	t.Parallel()
 
@@ -558,7 +631,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysTerminalStreamFrameOutput(t *t
 	}
 }
 
-func TestProjectACPEventToTranscriptEventsMarksUnavailableTerminalPrefix(t *testing.T) {
+func TestProjectACPEventToTranscriptEventsRetainsUnavailableTerminalPrefixState(t *testing.T) {
 	t.Parallel()
 
 	status := eventstream.ToolStatusInProgress
@@ -584,7 +657,7 @@ func TestProjectACPEventToTranscriptEventsMarksUnavailableTerminalPrefix(t *test
 		t.Fatalf("events = %#v, want retained exact terminal bytes only", events)
 	}
 	if !events[0].ToolOutputGapBefore {
-		t.Fatal("ToolOutputGapBefore = false, want render-only truncation marker")
+		t.Fatal("ToolOutputGapBefore = false, want internal truncation state")
 	}
 }
 

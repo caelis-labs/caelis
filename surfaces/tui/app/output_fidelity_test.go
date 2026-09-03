@@ -256,7 +256,7 @@ func TestHiddenChildToolWithoutMessageIDCreatesMarkdownBoundary(t *testing.T) {
 	}
 }
 
-func TestTerminalGapIsRenderedOnceWithoutChangingExactBytes(t *testing.T) {
+func TestTerminalGapStateDoesNotRenderUnavailableNotice(t *testing.T) {
 	t.Parallel()
 
 	const retained = "retained 1\nretained 2\nretained 3\nretained 4\nretained 5\nretained 6\nretained tail\n"
@@ -300,18 +300,16 @@ func TestTerminalGapIsRenderedOnceWithoutChangingExactBytes(t *testing.T) {
 		t.Fatalf("events = %#v, want one terminal panel", block.Events)
 	}
 	terminal := block.Events[0]
-	if terminal.Output != retained || strings.Contains(terminal.Output, terminalOutputGapNotice) {
-		t.Fatalf("exact terminal bytes = %q, want retained bytes without synthetic gap", terminal.Output)
+	if terminal.Output != retained {
+		t.Fatalf("exact terminal bytes = %q, want retained bytes unchanged", terminal.Output)
 	}
 	if !terminal.OutputGapBefore || !terminal.Done || strings.Contains(terminal.Output, "(no output)") {
-		t.Fatalf("terminal event = %#v, want one remembered gap and streamed output after duplicate empty final", terminal)
+		t.Fatalf("terminal event = %#v, want internal gap state and streamed output after duplicate empty final", terminal)
 	}
 	model.syncViewportContent()
 	plain := strings.Join(model.viewportPlainLines, "\n")
-	if count := strings.Count(plain, terminalOutputGapNotice); count != 1 {
-		t.Fatalf("gap count = %d, want exactly one render-only notice:\n%s", count, plain)
-	}
-	if !strings.Contains(plain, "retained tail") || strings.Contains(plain, "(no output)") {
-		t.Fatalf("rendered terminal output lost retained bytes or regressed to placeholder:\n%s", plain)
+	if !strings.Contains(plain, "retained tail") ||
+		strings.Contains(plain, "unavailable") || strings.Contains(plain, "(no output)") {
+		t.Fatalf("rendered terminal output lost retained bytes or exposed internal gap state:\n%s", plain)
 	}
 }

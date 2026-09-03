@@ -1,6 +1,7 @@
 package projection
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -31,6 +32,42 @@ func TestProtocolToolUpdateProjectionPreservesExplicitEmptyContent(t *testing.T)
 	if wire.Title != nil || wire.Kind != nil || wire.Status != nil {
 		t.Fatalf("wire sparse scalar fields = %#v, want omitted title/kind/status", wire)
 	}
+}
+
+func TestProtocolRunCommandUpdatePreservesExplicitEmptyContent(t *testing.T) {
+	t.Parallel()
+
+	updates, err := ProjectEvent(&session.Event{
+		Type: session.EventTypeToolResult,
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Kind:          "RunCommand",
+			Content:       []session.ProtocolToolCallContent{},
+		}},
+	})
+	if err != nil || len(updates) != 1 {
+		t.Fatalf("ProjectEvent() = %#v, %v; want one update", updates, err)
+	}
+	wire, ok := updates[0].(eventstream.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("ProjectEvent() update = %T, want ToolCallUpdate", updates[0])
+	}
+	if wire.Content == nil || len(wire.Content) != 0 {
+		t.Fatalf("wire content = %#v, want present empty replacement collection", wire.Content)
+	}
+	raw, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatalf("json.Marshal(update) error = %v", err)
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		t.Fatalf("json.Unmarshal(update) error = %v", err)
+	}
+	if content, present := object["content"]; !present || string(content) != "[]" {
+		t.Fatalf("wire update = %s, want explicit empty content array", raw)
+	}
+	assertTerminalInfo(t, wire.Meta, "call-1")
 }
 
 func TestProtocolToolUpdateProjectionClonesAndPreservesWireFields(t *testing.T) {
