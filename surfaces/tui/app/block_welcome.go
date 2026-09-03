@@ -382,9 +382,9 @@ func welcomeBorderRow(width int, top bool, styles welcomePanelStyles) welcomePan
 		text := fitWelcomeText("─", width)
 		return welcomePanelRow{plain: text, styled: styles.border.Render(text)}
 	}
-	left, right := "┌", "┐"
+	left, right := "╭", "╮"
 	if !top {
-		left, right = "└", "┘"
+		left, right = "╰", "╯"
 	}
 	plain := left + strings.Repeat("─", maxInt(0, width-2)) + right
 	return welcomePanelRow{plain: plain, styled: styles.border.Render(plain)}

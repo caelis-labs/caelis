@@ -90,7 +90,7 @@ func TestWelcomeBlockResponsiveRender(t *testing.T) {
 					t.Fatalf("compact fallback retained command hint %q\n%s", action.command, plain)
 				}
 			}
-			for _, required := range []string{"┌", "┐", "└", "┘"} {
+			for _, required := range []string{"╭", "╮", "╰", "╯"} {
 				if !strings.Contains(plain, required) {
 					t.Fatalf("welcome missing restored frame %q\n%s", required, plain)
 				}
