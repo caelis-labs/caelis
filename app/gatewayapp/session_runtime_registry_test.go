@@ -1717,7 +1717,7 @@ func TestSessionRuntimeRejectsSelectorAuthorityChangeAfterAdmission(t *testing.T
 	client := newWorkspaceRuntimeHTTPClient(t, stack, "local-user")
 	sessionID := createWorkspaceRuntimeTestSession(t, client, "create-memory-authority-pin", "memory-authority-pin", "workspace", workspace)
 	if _, _, err := stack.sessionRuntimes.activateSession(ctx, sessionID); err == nil ||
-		!strings.Contains(err.Error(), "binding, actor, principal, or audience cannot change") {
+		!strings.Contains(err.Error(), "canonical Session Memory delegation cannot change") {
 		t.Fatalf("activate Session with changed selected authority error = %v", err)
 	}
 }
@@ -1762,21 +1762,8 @@ func TestSessionRuntimeRejectsMemoryBindingAudienceChangeAfterRestart(t *testing
 
 	sharedStack := newStack("shared")
 	defer func() { _ = sharedStack.Close() }()
-	sharedClient := newWorkspaceRuntimeHTTPClient(t, sharedStack, "local-user")
-	recreated, err := sharedClient.CreateSession(ctx, appserver.CreateSessionRequest{
-		WriteBase:          appserver.WriteBase{OperationID: "recreate-memory-audience"},
-		PreferredSessionID: sessionID,
-		WorkspaceKey:       "workspace",
-		CWD:                workspace,
-		Title:              sessionID,
-	})
-	var outcomeErr *appserver.OutcomeError
-	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeConflicted ||
-		recreated.Outcome != appserver.OutcomeConflicted || errorcode.CodeOf(err) != errorcode.Conflict {
-		t.Fatalf("recreate Session with changed Memory audience = %#v, %v; want conflicted", recreated, err)
-	}
 	if _, _, err := sharedStack.sessionRuntimes.activateSession(ctx, sessionID); err == nil ||
-		!strings.Contains(err.Error(), "binding, actor, principal, or audience cannot change") {
+		!strings.Contains(err.Error(), "canonical Session Memory delegation cannot change") {
 		t.Fatalf("reactivate Session with changed Memory audience error = %v", err)
 	}
 }
@@ -1799,6 +1786,10 @@ type runtimeMemoryHostStub struct {
 }
 
 func (*runtimeMemoryHostStub) ValidateBinding(memorybinding.RuntimeMemoryBindingSnapshot) error {
+	return nil
+}
+
+func (*runtimeMemoryHostStub) ValidateAuthority(context.Context, memorybinding.RuntimeMemoryBindingSnapshot) error {
 	return nil
 }
 
@@ -2868,6 +2859,49 @@ func TestControlClientRejectsAmbiguousWorkspaceBindingBeforeSessionCreation(t *t
 	if _, loadErr := stack.composition.sessions.Session(ctx, session.SessionRef{SessionID: "must-not-exist"}); !errors.Is(loadErr, session.ErrSessionNotFound) {
 		t.Fatalf("rejected Session lookup error = %v, want ErrSessionNotFound", loadErr)
 	}
+}
+
+func TestHostRebuildsWorkspaceIdentityBeforeReusingExplicitKey(t *testing.T) {
+	ctx := context.Background()
+	workspaceA := newWorkspaceRuntimeTestDir(t, "workspace-a", "Workspace A rule.")
+	workspaceB := newWorkspaceRuntimeTestDir(t, "workspace-b", "Workspace B rule.")
+	storeDir := t.TempDir()
+	first, err := NewLocalStack(Config{
+		StoreDir: storeDir, WorkspaceKey: "shared-key", WorkspaceCWD: workspaceA,
+		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := appserver.BindSessionClient(first.ControlClient(), appserver.Principal{ID: "local-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: "persist-workspace-identity"},
+		PreferredSessionID: "durable-workspace", WorkspaceKey: "shared-key", CWD: workspaceA,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewLocalStack(Config{
+		StoreDir: storeDir, WorkspaceKey: "shared-key", WorkspaceCWD: workspaceB,
+		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
+	}); err == nil || errorcode.CodeOf(err) != errorcode.FailedPrecondition {
+		t.Fatalf("restarted Host with reused workspace key error = %v, want failed_precondition", err)
+	}
+
+	reopened, err := NewLocalStack(Config{
+		StoreDir: storeDir, WorkspaceKey: "shared-key", WorkspaceCWD: workspaceA,
+		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatalf("restarted Host with original workspace identity: %v", err)
+	}
+	defer reopened.Close()
 }
 
 func newWorkspaceRuntimeTestDir(t *testing.T, name, instruction string) string {

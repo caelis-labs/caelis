@@ -901,9 +901,17 @@ func TestManagedProductFailureSurfacesPermissionBlocker(t *testing.T) {
 	if err == nil || err.Error() != "caelis could not start: permission denied" {
 		t.Fatalf("permission product error = %v", err)
 	}
-	diagnostic := managedProductFailure(storeDir, "start", errors.New("servicelifecycle: bind failed inside restricted sandbox"), true)
-	if diagnostic == nil || !strings.Contains(diagnostic.Error(), "restricted sandbox") {
-		t.Fatalf("doctor-facing product error = %v, want real cause", diagnostic)
+	secret := "seccomp failed path=/private/customer token=super-secret"
+	diagnostic := managedProductFailure(storeDir, "start", errors.New(secret), true)
+	if diagnostic == nil || diagnostic.Error() != "caelis could not start: sandbox isolation is unavailable" {
+		t.Fatalf("doctor-facing product error = %v, want bounded sandbox cause", diagnostic)
+	}
+	if strings.Contains(diagnostic.Error(), "customer") || strings.Contains(diagnostic.Error(), "super-secret") {
+		t.Fatalf("doctor-facing product error leaked private log content: %v", diagnostic)
+	}
+	logPath := filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
+	if got := managedStartupCauseFromLog(logPath, 0); got != "sandbox isolation is unavailable" {
+		t.Fatalf("managedStartupCauseFromLog() = %q", got)
 	}
 }
 

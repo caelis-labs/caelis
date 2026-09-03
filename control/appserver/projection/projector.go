@@ -49,9 +49,7 @@ func permissionToolCallUpdateFromProtocol(call session.ProtocolToolCall) eventst
 		SessionUpdate: eventstream.UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(call.ID),
 	}
-	if title := strings.TrimSpace(call.Title); title != "" {
-		update.Title = stringPtr(title)
-	} else if title := projectedToolTitle(call.Name, call.RawInput); title != "" {
+	if title := projectedToolLifecycleTitle(call.Name, call.RawInput, call.Status, call.Title); title != "" {
 		update.Title = stringPtr(title)
 	}
 	if kind := firstNonEmpty(strings.TrimSpace(call.Kind), projectedToolKind(call.Name)); kind != "" {
@@ -243,7 +241,7 @@ func inferredToolCallUpdates(event *session.Event) []eventstream.Update {
 		update := eventstream.ToolCall{
 			SessionUpdate: eventstream.UpdateToolCall,
 			ToolCallID:    strings.TrimSpace(call.ID),
-			Title:         projectedToolTitle(call.Name, args),
+			Title:         projectedToolTitle(call.Name, args, eventstream.ToolStatusPending),
 			Kind:          projectedToolKind(call.Name),
 			Status:        eventstream.ToolStatusPending,
 			RawInput:      cloneAnyMapPayload(args),
@@ -354,7 +352,7 @@ func toolCallForEvent(event *session.Event) (eventstream.ToolCall, bool, error) 
 	call := eventstream.ToolCall{
 		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    strings.TrimSpace(calls[0].ID),
-		Title:         projectedToolTitle(calls[0].Name, args),
+		Title:         projectedToolTitle(calls[0].Name, args, eventstream.ToolStatusPending),
 		Kind:          projectedToolKind(calls[0].Name),
 		Status:        eventstream.ToolStatusPending,
 		RawInput:      cloneAnyMapPayload(args),
@@ -372,7 +370,7 @@ func toolCallFromEventToolPayload(tool *session.EventTool) eventstream.ToolCall 
 	call := eventstream.ToolCall{
 		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    strings.TrimSpace(tool.ID),
-		Title:         firstNonEmpty(strings.TrimSpace(tool.Title), projectedToolTitle(tool.Name, rawInput), strings.TrimSpace(tool.Name)),
+		Title:         projectedToolLifecycleTitle(tool.Name, rawInput, tool.Status, tool.Title),
 		Kind:          firstNonEmpty(strings.TrimSpace(tool.Kind), projectedToolKind(tool.Name)),
 		Status:        firstNonEmpty(acpToolStatus(tool.Status), eventstream.ToolStatusPending),
 		RawInput:      cloneAnyMapPayload(rawInput),
@@ -398,7 +396,7 @@ func toolCallFromProtocolUpdate(event *session.Event, update *session.ProtocolUp
 		Locations:     protocolLocationsForProjection(update.Locations),
 		Meta:          cloneAnyMap(update.Meta),
 	}
-	call.Title = firstNonEmpty(strings.TrimSpace(call.Title), projectedToolTitle(name, rawInput), strings.TrimSpace(name))
+	call.Title = projectedToolLifecycleTitle(name, rawInput, call.Status, call.Title)
 	call.Kind = firstNonEmpty(strings.TrimSpace(call.Kind), projectedToolKind(name))
 	call.Status = firstNonEmpty(acpToolStatus(call.Status), eventstream.ToolStatusPending)
 	displayTerminalID, _ := projectedDisplayTerminalID(call.ToolCallID, name)
@@ -441,6 +439,9 @@ func toolCallUpdateForEvent(event *session.Event) (eventstream.ToolCallUpdate, b
 		RawOutput:     cloneAnyMapPayload(resp.Result),
 		Meta:          protocolUpdateMeta(event),
 	}
+	if title := projectedToolLifecycleTitle(name, nil, status, ""); projectedToolTitleTracksLifecycle(name) && title != "" {
+		out.Title = stringPtr(title)
+	}
 	return withDisplayTerminalUpdate(out, resp.ID, name), true, nil
 }
 
@@ -460,9 +461,7 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string
 	if len(out.Content) == 0 {
 		out.Content = projectedToolResultContent(tool.ID, tool.Name, tool.Input, tool.Output, meta, tool.Status)
 	}
-	if title := strings.TrimSpace(tool.Title); title != "" {
-		out.Title = stringPtr(title)
-	} else if title := projectedToolTitle(tool.Name, tool.Input); title != "" {
+	if title := projectedToolLifecycleTitle(tool.Name, tool.Input, tool.Status, tool.Title); title != "" {
 		out.Title = stringPtr(title)
 	}
 	if kind := firstNonEmpty(strings.TrimSpace(tool.Kind), projectedToolKind(tool.Name)); kind != "" {
@@ -494,9 +493,7 @@ func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.Prot
 	}
 	displayTerminalID, _ := projectedDisplayTerminalID(id, name)
 	out.Content = projectToolContent(session.ProtocolToolCallContentOf(update), displayTerminalID)
-	if title := strings.TrimSpace(stringFromPtr(out.Title)); title != "" {
-		out.Title = stringPtr(title)
-	} else if title := projectedToolTitle(name, update.RawInput); title != "" {
+	if title := projectedToolLifecycleTitle(name, update.RawInput, update.Status, stringFromPtr(out.Title)); title != "" {
 		out.Title = stringPtr(title)
 	}
 	kind := strings.TrimSpace(stringFromPtr(out.Kind))

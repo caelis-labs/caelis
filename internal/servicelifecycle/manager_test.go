@@ -310,6 +310,73 @@ func TestSuccessfulStartupReleasesProcessOnlyAfterExactReadiness(t *testing.T) {
 	}
 }
 
+func TestReadyProbeDoesNotReleaseAlreadyExitedProcess(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "caelis")
+	if err := os.WriteFile(executable, []byte("test executable"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	candidate := Candidate{Identity: devIdentity("build-a"), Executable: executable}
+	exited := make(chan error, 1)
+	exited <- errors.New("startup crash")
+	close(exited)
+	released := false
+	aborted := false
+	probes := 0
+	manager := Manager{
+		StoreDir: t.TempDir(), InstallDir: t.TempDir(),
+		Probe: func(context.Context) ProbeResult {
+			probes++
+			if probes == 1 {
+				return ProbeResult{State: ProbeMissing}
+			}
+			return ProbeResult{State: ProbeReady, Status: Status{Identity: candidate.Identity, InstanceID: "instance", PID: 1}}
+		},
+		Launch: func(Candidate) (LaunchedProcess, error) {
+			return LaunchedProcess{
+				PID: 1, Exited: exited,
+				Abort:   func() error { aborted = true; return nil },
+				Release: func() error { released = true; return nil },
+			}, nil
+		},
+	}
+	_, err := manager.Start(context.Background(), candidate)
+	if err == nil || !strings.Contains(err.Error(), "startup crash") {
+		t.Fatalf("Start() error = %v, want process exit cause", err)
+	}
+	if released || !aborted {
+		t.Fatalf("startup ownership released=%v aborted=%v", released, aborted)
+	}
+}
+
+func TestStartupDeadlinePrefersAlreadyAvailableProcessExit(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "caelis")
+	if err := os.WriteFile(executable, []byte("test executable"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	probes := 0
+	manager := Manager{
+		StoreDir: t.TempDir(), InstallDir: t.TempDir(), StartupTimeout: time.Millisecond,
+		Probe: func(ctx context.Context) ProbeResult {
+			probes++
+			if probes == 1 {
+				return ProbeResult{State: ProbeMissing}
+			}
+			<-ctx.Done()
+			exited <- errors.New("deadline crash")
+			close(exited)
+			return ProbeResult{State: ProbeMissing}
+		},
+		Launch: func(Candidate) (LaunchedProcess, error) {
+			return LaunchedProcess{PID: 1, Exited: exited, Abort: func() error { return nil }, Release: func() error { return nil }}, nil
+		},
+	}
+	_, err := manager.Start(context.Background(), Candidate{Identity: devIdentity("build-a"), Executable: executable})
+	if err == nil || !strings.Contains(err.Error(), "deadline crash") {
+		t.Fatalf("Start() error = %v, want process exit at deadline", err)
+	}
+}
+
 func TestManagerSerializesConcurrentStartAndLaunchesOnce(t *testing.T) {
 	executable := filepath.Join(t.TempDir(), "caelis")
 	if err := os.WriteFile(executable, []byte("test executable"), 0o700); err != nil {

@@ -85,6 +85,30 @@ func isDefaultEmbeddedMemoryConfiguration(configuration memorybinding.Configurat
 		binding.GrantRef == defaultMemoryGrantID
 }
 
+func validateConfiguredMemoryAuthorities(
+	ctx context.Context,
+	host runtimeMemoryHost,
+	configuration memorybinding.Configuration,
+) error {
+	if host == nil {
+		return fmt.Errorf("gatewayapp: configured Memory authority has no embedded runtime")
+	}
+	configuration = memorybinding.Normalize(configuration)
+	for _, configured := range configuration.Bindings {
+		binding, selected, err := memorybinding.Resolve(configuration, memorybinding.RuntimeSelection{BindingRef: configured.BindingRef})
+		if err != nil {
+			return fmt.Errorf("gatewayapp: resolve configured Memory authority: %w", err)
+		}
+		if !selected {
+			return fmt.Errorf("gatewayapp: configured Memory authority %q is unavailable", configured.BindingRef)
+		}
+		if err := host.ValidateAuthority(ctx, binding); err != nil {
+			return fmt.Errorf("gatewayapp: validate configured Memory authority %q: %w", configured.BindingRef, err)
+		}
+	}
+	return nil
+}
+
 func provisionDefaultMemoryTopology(
 	ctx context.Context,
 	store *appConfigStore,

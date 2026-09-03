@@ -304,7 +304,7 @@ func userFacingHostBlocker(err error) string {
 		return "listen address already in use"
 	case strings.Contains(text, "bwrap"), strings.Contains(text, "bubblewrap"),
 		strings.Contains(text, "landlock"), strings.Contains(text, "seccomp"):
-		return compactUserVisibleCause(err)
+		return "sandbox isolation is unavailable"
 	default:
 		return ""
 	}

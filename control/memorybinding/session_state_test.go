@@ -2,7 +2,6 @@ package memorybinding
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -41,19 +40,16 @@ func TestSessionAdmissionPinsActorAudienceAndCausalCursor(t *testing.T) {
 	if token, err := ConsistencyToken(ctx, store, active.SessionRef, binding); err != nil || token != "token-a" {
 		t.Fatalf("ConsistencyToken() = %q, %v", token, err)
 	}
-	newer := runtimeSnapshotForState(2, "view-a", OutputAudiencePrivate, "actor-a")
-	if err := AdmitSession(ctx, store, active.SessionRef, newer); err != nil {
-		t.Fatal(err)
+	for _, changed := range []RuntimeMemoryBindingSnapshot{
+		runtimeSnapshotForState(2, "view-a", OutputAudiencePrivate, "actor-a"),
+		runtimeSnapshotForState(3, "view-b", OutputAudiencePrivate, "actor-a"),
+	} {
+		if err := AdmitSession(ctx, store, active.SessionRef, changed); !errors.Is(err, ErrSessionAdmissionConflict) {
+			t.Fatalf("changed binding error = %v, want ErrSessionAdmissionConflict", err)
+		}
 	}
-	if token, err := ConsistencyToken(ctx, store, active.SessionRef, newer); err != nil || token != "token-a" {
-		t.Fatalf("newer same-View token = %q, %v", token, err)
-	}
-	moved := runtimeSnapshotForState(3, "view-b", OutputAudiencePrivate, "actor-a")
-	if err := AdmitSession(ctx, store, active.SessionRef, moved); err != nil {
-		t.Fatal(err)
-	}
-	if token, err := ConsistencyToken(ctx, store, active.SessionRef, moved); err != nil || token != "" {
-		t.Fatalf("moved binding token = %q, %v", token, err)
+	if token, err := ConsistencyToken(ctx, store, active.SessionRef, binding); err != nil || token != "token-a" {
+		t.Fatalf("unchanged binding token = %q, %v", token, err)
 	}
 }
 
@@ -102,7 +98,7 @@ func TestSessionAdmissionRejectsAudienceActorDowngradeAndUnversionedDrift(t *tes
 	}
 }
 
-func TestSessionAdmissionPinsRuntimeLabelsAndClearsLegacyCursor(t *testing.T) {
+func TestSessionAdmissionPinsRuntimeLabelsAndRejectsUnreleasedLegacyState(t *testing.T) {
 	ctx := context.Background()
 	store := sessionmemory.NewStore(sessionmemory.Config{})
 	active, err := store.StartSession(ctx, session.StartSessionRequest{
@@ -129,7 +125,7 @@ func TestSessionAdmissionPinsRuntimeLabelsAndClearsLegacyCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	legacyState := sessionBindingStateFromSnapshot(runtimeSnapshotForState(1, "view-a", OutputAudiencePrivate, "actor-a"))
-	legacyState.Version = legacyLogicalBindingStateVersion
+	legacyState.Version = 3
 	legacyState.Labels = nil
 	legacyState.ConsistencyToken = "legacy-empty-label-token"
 	_, err = store.UpdateState(ctx, session.UpdateStateRequest{
@@ -142,19 +138,8 @@ func TestSessionAdmissionPinsRuntimeLabelsAndClearsLegacyCursor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := AdmitSession(ctx, store, legacy.SessionRef, base); err != nil {
-		t.Fatalf("migrate pre-LabelSet Session admission: %v", err)
-	}
-	if token, err := ConsistencyToken(ctx, store, legacy.SessionRef, base); err != nil || token != "" {
-		t.Fatalf("migrated consistency token = %q, %v; want cleared", token, err)
-	}
-	state, err := store.SnapshotState(ctx, legacy.SessionRef)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := json.Marshal(state[SessionStateKey])
-	if !strings.Contains(string(raw), `"version":4`) || !strings.Contains(string(raw), "workspace:alpha") || strings.Contains(string(raw), "legacy-empty-label-token") {
-		t.Fatalf("migrated Session Memory state = %s", raw)
+	if err := AdmitSession(ctx, store, legacy.SessionRef, base); err == nil || !strings.Contains(err.Error(), "canonical Session Memory state is invalid") {
+		t.Fatalf("pre-LabelSet Session admission error = %v, want unsupported state rejection", err)
 	}
 }
 
@@ -178,6 +163,32 @@ func TestSessionAdmissionRejectsMalformedPersistedState(t *testing.T) {
 	}
 	if err := AdmitSession(ctx, store, active.SessionRef, runtimeSnapshotForState(1, "view-a", OutputAudiencePrivate, "actor-a")); err == nil {
 		t.Fatal("AdmitSession() repaired malformed authority state")
+	}
+}
+
+func TestPinnedRuntimeLabelsPreserveExistingV4Partition(t *testing.T) {
+	ctx := context.Background()
+	store := sessionmemory.NewStore(sessionmemory.Config{})
+	active, err := store.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "user", PreferredSessionID: "session-existing-labels",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned := runtimeSnapshotForState(1, "view-a", OutputAudiencePrivate, "actor-a")
+	pinned.Labels = memoryv1alpha1.LabelSet{"caelis.workspace.sha256:legacy-key-derived-label"}
+	if err := AdmitSession(ctx, store, active.SessionRef, pinned); err != nil {
+		t.Fatal(err)
+	}
+	selected := pinned
+	selected.Labels = nil
+	labels, found, err := PinnedRuntimeLabels(ctx, store, active.SessionRef, selected)
+	if err != nil || !found || len(labels) != 1 || labels[0] != pinned.Labels[0] {
+		t.Fatalf("PinnedRuntimeLabels() = %#v, %v, %v", labels, found, err)
+	}
+	selected.BindingVersion++
+	if _, _, err := PinnedRuntimeLabels(ctx, store, active.SessionRef, selected); !errors.Is(err, ErrSessionAdmissionConflict) {
+		t.Fatalf("changed authority error = %v, want ErrSessionAdmissionConflict", err)
 	}
 }
 

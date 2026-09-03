@@ -265,8 +265,14 @@ func (m Manager) launchAndWait(ctx context.Context, candidate Candidate) (status
 	waitCtx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 	for {
+		if exitErr, exited := launchedProcessExit(process.Exited); exited {
+			return fail(processExitBeforeReadinessError(exitErr))
+		}
 		probe := m.probe(waitCtx)
 		if probe.State == ProbeReady {
+			if exitErr, exited := launchedProcessExit(process.Exited); exited {
+				return fail(processExitBeforeReadinessError(exitErr))
+			}
 			running := probe.Status
 			if running.Identity != candidate.Identity {
 				return fail(fmt.Errorf("servicelifecycle: started service identity %#v does not match candidate %#v", running.Identity, candidate.Identity))
@@ -286,16 +292,41 @@ func (m Manager) launchAndWait(ctx context.Context, candidate Candidate) (status
 		select {
 		case <-waitCtx.Done():
 			timer.Stop()
+			if exitErr, exited := launchedProcessExit(process.Exited); exited {
+				return fail(processExitBeforeReadinessError(exitErr))
+			}
 			return fail(fmt.Errorf("servicelifecycle: service did not become ready: %w", waitCtx.Err()))
 		case exitErr, ok := <-process.Exited:
 			timer.Stop()
-			if !ok || exitErr == nil {
-				return fail(errors.New("servicelifecycle: service process exited before readiness"))
+			if !ok {
+				exitErr = nil
 			}
-			return fail(fmt.Errorf("servicelifecycle: service process exited before readiness: %w", exitErr))
+			return fail(processExitBeforeReadinessError(exitErr))
 		case <-timer.C:
 		}
 	}
+}
+
+func launchedProcessExit(exited <-chan error) (error, bool) {
+	if exited == nil {
+		return nil, false
+	}
+	select {
+	case err, ok := <-exited:
+		if !ok {
+			return nil, true
+		}
+		return err, true
+	default:
+		return nil, false
+	}
+}
+
+func processExitBeforeReadinessError(err error) error {
+	if err == nil {
+		return errors.New("servicelifecycle: service process exited before readiness")
+	}
+	return fmt.Errorf("servicelifecycle: service process exited before readiness: %w", err)
 }
 
 func (m Manager) launchWithRollback(ctx context.Context, candidate Candidate, previous Candidate) (Status, error) {

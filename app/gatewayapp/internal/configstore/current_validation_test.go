@@ -2,9 +2,7 @@ package configstore
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -207,25 +205,19 @@ func TestZeroMemoryBindingIsOmittedFromCurrentDocument(t *testing.T) {
 	}
 }
 
-func TestStoreAtomicallyMigratesLegacyV2MemoryBindingToOpaqueReferences(t *testing.T) {
-	for _, identities := range []int{1, 2} {
-		t.Run(fmt.Sprintf("identities-%d", identities), func(t *testing.T) {
+func TestStoreRejectsUnreleasedMemoryWireWithoutRewritingIt(t *testing.T) {
+	for _, memoryWire := range []map[string]any{
+		{"enabled": false, "bots": []any{}},
+		{"enabled": true, "bots": []any{map[string]any{"bot_id": "historical"}}},
+		{"bindings": []any{}, "bots": []any{}},
+	} {
+		t.Run(fmt.Sprint(memoryWire["enabled"]), func(t *testing.T) {
 			root := t.TempDir()
-			legacy := legacyV2MemoryConfiguration{Enabled: true}
-			for index := range identities {
-				legacy.Bots = append(legacy.Bots, legacyV2MemoryIdentity{
-					BotID: fmt.Sprintf("historical-%d", index+1), RuntimeActorRef: memorybinding.RuntimeActorRef(fmt.Sprintf("actor-%d", index+1)),
-					MemoryIdentityRef: fmt.Sprintf("identity-%d", index+1), PrincipalRef: fmt.Sprintf("principal:%d", index+1),
-					IssuerCredentialRef: fmt.Sprintf("memory-issuer:%d", index+1), BindingVersion: 1,
-					Private: legacyV2AudienceBinding{ViewRef: fmt.Sprintf("view-%d-private", index+1), GrantRef: fmt.Sprintf("grant-%d-private", index+1)},
-					Shared:  legacyV2AudienceBinding{ViewRef: fmt.Sprintf("view-%d-shared", index+1), GrantRef: fmt.Sprintf("grant-%d-shared", index+1)},
-				})
+			wire := map[string]any{
+				"schema_version":         SchemaVersionV2,
+				"configuration_revision": 7,
+				"memory":                 memoryWire,
 			}
-			wire := struct {
-				SchemaVersion         int                         `json:"schema_version"`
-				ConfigurationRevision uint64                      `json:"configuration_revision"`
-				Memory                legacyV2MemoryConfiguration `json:"memory"`
-			}{SchemaVersion: SchemaVersionV2, ConfigurationRevision: 7, Memory: legacy}
 			raw, err := json.Marshal(wire)
 			if err != nil {
 				t.Fatal(err)
@@ -234,29 +226,15 @@ func TestStoreAtomicallyMigratesLegacyV2MemoryBindingToOpaqueReferences(t *testi
 			if err := os.WriteFile(path, raw, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			loaded, err := New(root).Load()
-			if identities > 1 {
-				if err == nil || !strings.Contains(err.Error(), "multiple legacy identities require an explicit binding migration") {
-					t.Fatalf("Load() error = %v, want explicit ambiguous-authority rejection", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if loaded.ConfigurationRevision != 8 || loaded.Memory.DefaultBindingRef != "legacy-001-private" || len(loaded.Memory.Bindings) != identities*2 {
-				t.Fatalf("migrated Memory configuration = %#v", loaded.Memory)
-			}
-			if _, err := New(root).CompareAndSave(context.Background(), 7, loaded); !errors.Is(err, ErrConfigurationRevisionConflict) {
-				t.Fatalf("stale pre-migration revision error = %v, want conflict", err)
+			if _, err := New(root).Load(); err == nil || !strings.Contains(err.Error(), "invalid Memory binding") {
+				t.Fatalf("Load() error = %v, want unsupported Memory wire rejection", err)
 			}
 			persisted, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if bytes.Contains(persisted, []byte(`"bots"`)) || bytes.Contains(persisted, []byte(`"bot_id"`)) ||
-				!bytes.Contains(persisted, []byte(`"bindings"`)) || !bytes.Contains(persisted, []byte(`"default_binding_ref"`)) {
-				t.Fatalf("legacy Memory wire was not replaced: %s", persisted)
+			if !bytes.Equal(persisted, raw) {
+				t.Fatalf("unsupported Memory wire was rewritten:\n got: %s\nwant: %s", persisted, raw)
 			}
 		})
 	}

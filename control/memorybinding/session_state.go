@@ -36,16 +36,11 @@ type sessionBindingState struct {
 	ConsistencyToken    string                  `json:"consistency_token,omitempty"`
 }
 
-const (
-	legacyEndpointBindingStateVersion = 2
-	legacyLogicalBindingStateVersion  = 3
-	sessionBindingStateVersion        = 4
-)
+const sessionBindingStateVersion = 4
 
 // AdmitSession atomically fixes one canonical Session to one complete
-// non-secret delegation. A strictly newer binding may rotate its versioned
-// View/Grant/issuer references; a downgrade, identity change, or
-// same-version drift fails closed.
+// non-secret delegation. Configuration changes only affect new Sessions;
+// every authority field and LabelSet remain immutable for an admitted Session.
 func AdmitSession(
 	ctx context.Context,
 	store session.StateStore,
@@ -123,6 +118,38 @@ func ValidateSessionAdmission(
 	}
 	_, err = reconcileSessionBinding(current, sessionBindingStateFromSnapshot(binding))
 	return err
+}
+
+// PinnedRuntimeLabels returns the immutable LabelSet of an already admitted
+// Session after verifying that the current unlabeled Runtime selection names
+// the same complete authority. A Session without Memory state returns found
+// false so its labels can be derived and admitted normally.
+func PinnedRuntimeLabels(
+	ctx context.Context,
+	reader session.StateReader,
+	ref session.SessionRef,
+	binding RuntimeMemoryBindingSnapshot,
+) (labels memoryv1alpha1.LabelSet, found bool, err error) {
+	if reader == nil || strings.TrimSpace(ref.SessionID) == "" {
+		return nil, false, fmt.Errorf("control/memorybinding: Session state reader and reference are required")
+	}
+	if err := validateRuntimeAuthoritySnapshot(binding); err != nil {
+		return nil, false, err
+	}
+	state, err := reader.SnapshotState(ctx, ref)
+	if err != nil {
+		return nil, false, err
+	}
+	current, found, err := decodeSessionBindingState(state)
+	if err != nil || !found {
+		return nil, found, err
+	}
+	next := sessionBindingStateFromSnapshot(binding)
+	next.Labels = append(memoryv1alpha1.LabelSet{}, current.Labels...)
+	if _, err := reconcileSessionBinding(current, next); err != nil {
+		return nil, false, err
+	}
+	return append(memoryv1alpha1.LabelSet{}, current.Labels...), true, nil
 }
 
 // PrepareConsistency pins or migrates the complete non-secret binding before
@@ -286,41 +313,37 @@ func sessionBindingStateEqual(left, right sessionBindingState) bool {
 }
 
 func reconcileSessionBinding(current, next sessionBindingState) (sessionBindingState, error) {
-	if current.BindingRef != next.BindingRef || current.RuntimeActorRef != next.RuntimeActorRef ||
-		current.PrincipalRef != next.PrincipalRef || current.Audience != next.Audience {
-		return sessionBindingState{}, fmt.Errorf("%w: binding, actor, principal, or audience cannot change", ErrSessionAdmissionConflict)
+	if current.Version != next.Version ||
+		current.BindingRef != next.BindingRef ||
+		current.RuntimeActorRef != next.RuntimeActorRef ||
+		current.PrincipalRef != next.PrincipalRef ||
+		current.IssuerCredentialRef != next.IssuerCredentialRef ||
+		current.Audience != next.Audience ||
+		current.ViewRef != next.ViewRef ||
+		current.GrantRef != next.GrantRef ||
+		current.BindingVersion != next.BindingVersion ||
+		!slices.Equal(current.Labels, next.Labels) {
+		return sessionBindingState{}, fmt.Errorf("%w: canonical Session Memory delegation cannot change", ErrSessionAdmissionConflict)
 	}
-	if next.BindingVersion < current.BindingVersion {
-		return sessionBindingState{}, fmt.Errorf("%w: binding cannot downgrade", ErrSessionAdmissionConflict)
-	}
-	if next.BindingVersion == current.BindingVersion &&
-		(current.ViewRef != next.ViewRef || current.GrantRef != next.GrantRef ||
-			current.IssuerCredentialRef != next.IssuerCredentialRef) {
-		return sessionBindingState{}, fmt.Errorf("%w: binding drifted without a version change", ErrSessionAdmissionConflict)
-	}
-	if current.Version == legacyLogicalBindingStateVersion && next.Version == sessionBindingStateVersion {
-		// Version 3 predates capability-bound LabelSets. The first post-upgrade
-		// admission fixes the current Runtime labels and clears the old cursor,
-		// which belongs to the former empty partition.
-		return next, nil
-	}
-	if current.Version != next.Version || !slices.Equal(current.Labels, next.Labels) {
-		return sessionBindingState{}, fmt.Errorf("%w: Runtime labels cannot change", ErrSessionAdmissionConflict)
-	}
-	if current.ViewRef == next.ViewRef {
-		next.ConsistencyToken = current.ConsistencyToken
-	}
+	next.ConsistencyToken = current.ConsistencyToken
 	return next, nil
 }
 
 func validateRuntimeSnapshot(binding RuntimeMemoryBindingSnapshot) error {
+	if err := validateRuntimeAuthoritySnapshot(binding); err != nil {
+		return err
+	}
+	if !validRuntimeLabels(binding.Labels) {
+		return fmt.Errorf("control/memorybinding: Runtime Memory labels are invalid or non-canonical")
+	}
+	return nil
+}
+
+func validateRuntimeAuthoritySnapshot(binding RuntimeMemoryBindingSnapshot) error {
 	if binding.BindingRef == "" || binding.RuntimeActorRef == "" ||
 		binding.PrincipalRef == "" || binding.IssuerCredentialRef == "" || binding.Audience == "" ||
 		binding.ViewRef == "" || binding.GrantRef == "" || binding.BindingVersion == 0 {
 		return fmt.Errorf("control/memorybinding: Runtime Memory binding snapshot is incomplete")
-	}
-	if !validRuntimeLabels(binding.Labels) {
-		return fmt.Errorf("control/memorybinding: Runtime Memory labels are invalid or non-canonical")
 	}
 	return nil
 }
@@ -338,16 +361,13 @@ func decodeSessionBindingState(state map[string]any) (sessionBindingState, bool,
 	if err := json.Unmarshal(data, &current); err != nil {
 		return sessionBindingState{}, false, fmt.Errorf("control/memorybinding: decode canonical Session Memory state: %w", err)
 	}
-	if current.Version == legacyEndpointBindingStateVersion {
-		current.Version = legacyLogicalBindingStateVersion
-	}
-	if (current.Version != legacyLogicalBindingStateVersion && current.Version != sessionBindingStateVersion) ||
+	if current.Version != sessionBindingStateVersion ||
 		current.BindingRef == "" ||
 		current.RuntimeActorRef == "" || current.PrincipalRef == "" || current.IssuerCredentialRef == "" ||
 		!validAudience(current.Audience) || current.ViewRef == "" || current.GrantRef == "" || current.BindingVersion == 0 {
 		return sessionBindingState{}, false, fmt.Errorf("control/memorybinding: canonical Session Memory state is invalid")
 	}
-	if current.Version == sessionBindingStateVersion && !validRuntimeLabels(current.Labels) {
+	if !validRuntimeLabels(current.Labels) {
 		return sessionBindingState{}, false, fmt.Errorf("control/memorybinding: canonical Session Memory labels are invalid")
 	}
 	return current, true, nil

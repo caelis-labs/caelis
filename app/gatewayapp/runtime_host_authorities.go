@@ -20,6 +20,7 @@ import (
 
 type runtimeMemoryHost interface {
 	ValidateBinding(memorybinding.RuntimeMemoryBindingSnapshot) error
+	ValidateAuthority(context.Context, memorybinding.RuntimeMemoryBindingSnapshot) error
 	Bind(memorybinding.RuntimeMemoryBindingSnapshot, v1alpha1.SourceContext, v1alpha1.RecallBudget) (memoryhost.BoundClient, error)
 }
 

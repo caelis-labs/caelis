@@ -211,7 +211,10 @@ func retainedConcreteStack(typ reflect.Type, stackType reflect.Type, seen map[re
 
 func TestSessionRuntimeRegistryUsesInjectedDependenciesWithoutHost(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	workspace := session.WorkspaceRef{Key: "workspace-a", CWD: t.TempDir()}
+	workspace, err := canonicalWorkspaceRef(session.WorkspaceRef{Key: "workspace-a", CWD: t.TempDir()}, session.WorkspaceRef{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	sessions := inmemory.NewStore(inmemory.Config{})
 	active, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",

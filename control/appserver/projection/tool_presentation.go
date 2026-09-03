@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/memorytool"
 )
 
@@ -110,7 +111,7 @@ func projectedToolKind(name string) string {
 	return projectedToolKindOther
 }
 
-func projectedToolTitle(name string, args map[string]any) string {
+func projectedToolTitle(name string, args map[string]any, status string) string {
 	profile, known := projectedBuiltinToolProfile(name)
 	if !known {
 		return name
@@ -151,7 +152,14 @@ func projectedToolTitle(name string, args map[string]any) string {
 			return "Send message " + summary
 		}
 	case projectedTitleMemoryUpdate:
-		return "Updated memory"
+		switch acpToolStatus(status) {
+		case eventstream.ToolStatusCompleted:
+			return "Updated memory"
+		case eventstream.ToolStatusFailed:
+			return "Update memory failed"
+		default:
+			return "Updating memory"
+		}
 	case projectedTitleSearchQuery:
 		if query := strings.TrimSpace(display.MapString(args, "query")); query != "" {
 			return "Search " + query
@@ -159,6 +167,23 @@ func projectedToolTitle(name string, args map[string]any) string {
 		return "Search"
 	}
 	return name
+}
+
+// projectedToolLifecycleTitle preserves producer titles except for built-ins
+// whose title is itself lifecycle state. Those exact names opt into Control's
+// canonical presentation and cannot retain a stale producer title after a
+// status transition.
+func projectedToolLifecycleTitle(name string, args map[string]any, status string, explicit string) string {
+	derived := projectedToolTitle(name, args, status)
+	if projectedToolTitleTracksLifecycle(name) {
+		return firstNonEmpty(derived, strings.TrimSpace(explicit), strings.TrimSpace(name))
+	}
+	return firstNonEmpty(strings.TrimSpace(explicit), derived, strings.TrimSpace(name))
+}
+
+func projectedToolTitleTracksLifecycle(name string) bool {
+	profile, ok := projectedBuiltinToolProfile(name)
+	return ok && profile.title == projectedTitleMemoryUpdate
 }
 
 func projectedDisplayTerminalID(toolCallID string, name string) (string, bool) {

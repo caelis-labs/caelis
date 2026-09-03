@@ -57,6 +57,28 @@ func TestEmbeddedHostBindsSDKClient(t *testing.T) {
 		Audience: memorybinding.OutputAudiencePrivate, BindingVersion: 1,
 		Labels: v1alpha1.LabelSet{"workspace:alpha"},
 	}
+	if err := host.ValidateAuthority(ctx, binding); err != nil {
+		t.Fatalf("ValidateAuthority() = %v", err)
+	}
+	for name, mutate := range map[string]func(*memorybinding.RuntimeMemoryBindingSnapshot){
+		"credential": func(binding *memorybinding.RuntimeMemoryBindingSnapshot) {
+			binding.IssuerCredentialRef = "issuer:missing"
+		},
+		"principal": func(binding *memorybinding.RuntimeMemoryBindingSnapshot) { binding.PrincipalRef = "principal:other" },
+		"grant":     func(binding *memorybinding.RuntimeMemoryBindingSnapshot) { binding.GrantRef = "grant:missing" },
+		"actor":     func(binding *memorybinding.RuntimeMemoryBindingSnapshot) { binding.RuntimeActorRef = "actor:other" },
+		"audience": func(binding *memorybinding.RuntimeMemoryBindingSnapshot) {
+			binding.Audience = memorybinding.OutputAudienceShared
+		},
+	} {
+		t.Run("authority-"+name, func(t *testing.T) {
+			changed := binding
+			mutate(&changed)
+			if err := host.ValidateAuthority(ctx, changed); err == nil {
+				t.Fatal("ValidateAuthority() accepted invalid authority")
+			}
+		})
+	}
 	client, err := host.Bind(binding, v1alpha1.SourceContext{
 		ActorRef: "actor:test", SessionRef: "session:test", SourceType: "test",
 	}, v1alpha1.RecallBudget{MaxFragments: 8, MaxBytes: 16 << 10, DeadlineMS: 1_000})

@@ -1,6 +1,7 @@
 package gatewayapp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -16,8 +17,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/memorytool"
 	"github.com/caelis-labs/caelis/surfaces/headless"
+	stewardv1alpha1 "github.com/caelis-labs/memory/api/memory/steward/v1alpha1"
 )
 
 const memoryGoldenFact = "the preferred review language is Chinese"
@@ -70,6 +73,38 @@ func TestMemoryEmbeddedGoldenPath(t *testing.T) {
 	assertMemoryGoldenResult(t, before, memorytool.RememberToolName, `{"accepted":true}`)
 	assertMemoryGoldenResult(t, before, memorytool.RecallToolName, memoryGoldenFact)
 	provider.AssertComplete(t)
+	current := mustCurrentSession(t, stack, active.SessionID)
+	revision := current.Revision
+	sessions, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: active.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compacted, err := sessions.CompactSession(ctx, appserver.CompactSessionRequest{WriteBase: appserver.WriteBase{
+		OperationID:             "memory-golden-compact",
+		SessionID:               active.SessionID,
+		ExpectedRevision:        &revision,
+		ExpectedControllerEpoch: current.Controller.EpochID,
+	}})
+	if err != nil || compacted.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("CompactSession() = %#v, %v", compacted, err)
+	}
+	if provider.CompactionCalls() != 1 {
+		t.Fatalf("Memory compaction model calls = %d, want 1", provider.CompactionCalls())
+	}
+	compactionMessages := provider.LastCompactionMessages(t)
+	compactionInput, err := json.Marshal(compactionMessages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(compactionInput, []byte("accepted")) || !bytes.Contains(compactionInput, []byte(memoryGoldenFact)) {
+		t.Fatalf("compaction model context omitted Memory ToolResults: %s", compactionInput)
+	}
+	provider.Begin(memoryGoldenScenario{name: "context-before-restart"})
+	if _, err := runHeadlessOnceForGatewayAppTest(ctx, stack, active, active.SessionID, "capture context before restart", headless.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	provider.AssertComplete(t)
+	beforeRestartMessages := provider.LastMessages(t)
 	if err := stack.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +126,21 @@ func TestMemoryEmbeddedGoldenPath(t *testing.T) {
 	after := memoryGoldenToolResults(t, stack, active.SessionRef)
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("Session Replay changed Memory ToolResults:\nbefore=%q\nafter=%q", before, after)
+	}
+	provider.Begin(memoryGoldenScenario{name: "context-after-restart"})
+	if _, err := runHeadlessOnceForGatewayAppTest(ctx, stack, active, active.SessionID, "capture context after restart", headless.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	provider.AssertComplete(t)
+	afterRestartMessages := provider.LastMessages(t)
+	expectedRestartMessages := append(cloneMemoryGoldenMessages(beforeRestartMessages),
+		map[string]any{"role": "assistant", "content": "memory-golden-ok"},
+		map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "text", "text": "capture context after restart"},
+		}},
+	)
+	if !reflect.DeepEqual(afterRestartMessages, expectedRestartMessages) {
+		t.Fatalf("reconstructed model context changed:\nwant=%#v\ngot=%#v", expectedRestartMessages, afterRestartMessages)
 	}
 	provider.Begin(memoryGoldenScenario{
 		name:    "embedded-after-restart",
@@ -154,6 +204,42 @@ func TestMemoryStewardBindingControlsEmbeddedWorker(t *testing.T) {
 		configuration, configErr := stack.memoryRuntime.Management().GetStewardConfiguration(ctx)
 		return configErr == nil && stack.memorySteward != nil && !stack.memorySteward.active.Load() && len(configuration.Bindings) == 0
 	})
+}
+
+func TestConfiguredMemoryAuthorityIsValidatedDuringHostStartup(t *testing.T) {
+	root := t.TempDir()
+	storeDir := filepath.Join(root, "caelis")
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	provider := newMemoryGoldenProvider(t)
+	stack := newMemoryGoldenStack(t, provider, storeDir, workspace)
+	if err := stack.Close(); err != nil {
+		t.Fatal(err)
+	}
+	credentialDir := filepath.Join(storeDir, "memory", "credentials")
+	entries, err := os.ReadDir(credentialDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("Memory credential files = %d, want 1", len(entries))
+	}
+	if err := os.Remove(filepath.Join(credentialDir, entries[0].Name())); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := NewLocalStack(Config{
+		AppName: "caelis-memory", UserID: "memory-golden", StoreDir: storeDir,
+		WorkspaceKey: "memory-golden", WorkspaceCWD: workspace, SkillDirs: []string{},
+		Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if failed != nil {
+		_ = failed.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "resolve issuer credential") {
+		t.Fatalf("NewLocalStack() missing Memory credential error = %v", err)
+	}
 }
 
 func newMemoryGoldenStack(t *testing.T, provider *memoryGoldenProvider, storeDir, workspace string) *Stack {
@@ -290,12 +376,15 @@ type memoryGoldenScenario struct {
 
 type memoryGoldenProvider struct {
 	*gatewayTestHTTPServer
-	mu             sync.Mutex
-	scenario       memoryGoldenScenario
-	calls          int
-	errors         []string
-	stewardEnabled bool
-	stewardCalls   int
+	mu                 sync.Mutex
+	scenario           memoryGoldenScenario
+	calls              int
+	errors             []string
+	stewardEnabled     bool
+	stewardCalls       int
+	compactionCalls    int
+	payloads           []map[string]any
+	compactionPayloads []map[string]any
 }
 
 func newMemoryGoldenProvider(t *testing.T) *memoryGoldenProvider {
@@ -312,6 +401,7 @@ func (p *memoryGoldenProvider) Begin(scenario memoryGoldenScenario) {
 	p.scenario = scenario
 	p.calls = 0
 	p.errors = nil
+	p.payloads = nil
 }
 
 func (p *memoryGoldenProvider) EnableSteward() {
@@ -324,6 +414,12 @@ func (p *memoryGoldenProvider) StewardCalls() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.stewardCalls
+}
+
+func (p *memoryGoldenProvider) CompactionCalls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.compactionCalls
 }
 
 func (p *memoryGoldenProvider) handle(w http.ResponseWriter, request *http.Request) {
@@ -339,11 +435,29 @@ func (p *memoryGoldenProvider) handle(w http.ResponseWriter, request *http.Reque
 	if p.handleSteward(w, payload) {
 		return
 	}
+	if !memoryGoldenPayloadHasTools(payload) {
+		p.mu.Lock()
+		p.compactionCalls++
+		p.compactionPayloads = append(p.compactionPayloads, cloneMemoryGoldenPayload(payload))
+		p.mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		writePluginSystemE2ESSE(w, map[string]any{
+			"id": "memory-golden-compact", "object": "chat.completion.chunk", "model": "memory-golden",
+			"choices": []map[string]any{{
+				"index":         0,
+				"delta":         map[string]any{"role": "assistant", "content": "Memory mutation and recall completed with canonical ToolResults."},
+				"finish_reason": "stop",
+			}},
+		})
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		return
+	}
 	p.mu.Lock()
 	call := p.calls
 	p.calls++
 	scenario := p.scenario
 	p.checkTools(payload)
+	p.payloads = append(p.payloads, cloneMemoryGoldenPayload(payload))
 	p.mu.Unlock()
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -417,18 +531,22 @@ func memoryGoldenPayloadHasTools(payload map[string]any) bool {
 	return len(anySliceFromFinalToolValue(payload["tools"])) > 0
 }
 
-func memoryGoldenStewardInput(payload map[string]any) (memoryStewardModelInput, bool) {
+type memoryGoldenStewardInputPayload struct {
+	Receipt stewardv1alpha1.ReceiptInput `json:"receipt"`
+}
+
+func memoryGoldenStewardInput(payload map[string]any) (memoryGoldenStewardInputPayload, bool) {
 	messages, _ := payload["messages"].([]any)
 	for index := len(messages) - 1; index >= 0; index-- {
 		message, _ := messages[index].(map[string]any)
 		for _, text := range memoryGoldenMessageTexts(message["content"]) {
-			var input memoryStewardModelInput
+			var input memoryGoldenStewardInputPayload
 			if json.Unmarshal([]byte(text), &input) == nil && input.Receipt.ReceiptID != "" {
 				return input, true
 			}
 		}
 	}
-	return memoryStewardModelInput{}, false
+	return memoryGoldenStewardInputPayload{}, false
 }
 
 func memoryGoldenMessageTexts(content any) []string {
@@ -476,4 +594,40 @@ func (p *memoryGoldenProvider) AssertComplete(t *testing.T) {
 	if p.calls != len(p.scenario.actions)+1 || len(p.errors) != 0 {
 		t.Fatalf("Memory provider scenario %q calls=%d errors=%v", p.scenario.name, p.calls, p.errors)
 	}
+}
+
+func (p *memoryGoldenProvider) LastMessages(t *testing.T) []any {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.payloads) == 0 {
+		t.Fatal("Memory provider captured no model request")
+	}
+	messages, _ := p.payloads[len(p.payloads)-1]["messages"].([]any)
+	return cloneMemoryGoldenMessages(messages)
+}
+
+func (p *memoryGoldenProvider) LastCompactionMessages(t *testing.T) []any {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.compactionPayloads) == 0 {
+		t.Fatal("Memory provider captured no compaction request")
+	}
+	messages, _ := p.compactionPayloads[len(p.compactionPayloads)-1]["messages"].([]any)
+	return cloneMemoryGoldenMessages(messages)
+}
+
+func cloneMemoryGoldenPayload(payload map[string]any) map[string]any {
+	data, _ := json.Marshal(payload)
+	var cloned map[string]any
+	_ = json.Unmarshal(data, &cloned)
+	return cloned
+}
+
+func cloneMemoryGoldenMessages(messages []any) []any {
+	data, _ := json.Marshal(messages)
+	var cloned []any
+	_ = json.Unmarshal(data, &cloned)
+	return cloned
 }

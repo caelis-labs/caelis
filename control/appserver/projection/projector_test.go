@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
+	"github.com/caelis-labs/caelis/control/memorytool"
 )
 
 func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
@@ -42,6 +43,93 @@ func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
 	}
 	if update.Status == nil || *update.Status != eventstream.ToolStatusInProgress {
 		t.Fatalf("status = %v, want %q", update.Status, eventstream.ToolStatusInProgress)
+	}
+}
+
+func TestEventProjectorRememberTitleFollowsLifecycle(t *testing.T) {
+	t.Parallel()
+
+	callMessage := model.MessageFromAssistantParts("", "", []model.ToolCall{{
+		ID:   "remember-1",
+		Name: memorytool.RememberToolName,
+		Args: `{"text":"private fact"}`,
+	}})
+	callUpdates, err := ProjectEvent(&session.Event{
+		Type:    session.EventTypeToolCall,
+		Message: &callMessage,
+	})
+	if err != nil {
+		t.Fatalf("ProjectEvent(pending Remember) error = %v", err)
+	}
+	if len(callUpdates) != 1 {
+		t.Fatalf("ProjectEvent(pending Remember) produced %d updates, want 1", len(callUpdates))
+	}
+	call, ok := callUpdates[0].(eventstream.ToolCall)
+	if !ok || call.Title != "Updating memory" || call.Status != eventstream.ToolStatusPending {
+		t.Fatalf("pending Remember update = %#v, want pending Updating memory", callUpdates[0])
+	}
+
+	for _, test := range []struct {
+		name      string
+		status    string
+		meta      map[string]any
+		stale     string
+		wantTitle string
+	}{
+		{name: "completed model response", status: eventstream.ToolStatusCompleted, wantTitle: "Updated memory"},
+		{name: "failed model response", status: eventstream.ToolStatusFailed, meta: map[string]any{"is_error": true}, wantTitle: "Update memory failed"},
+		{name: "in progress canonical payload overrides stale title", status: eventstream.ToolStatusInProgress, stale: "Updated memory", wantTitle: "Updating memory"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := model.MessageFromToolResponse(&model.ToolResponse{
+				ID:     "remember-1",
+				Name:   memorytool.RememberToolName,
+				Result: map[string]any{"accepted": true},
+			})
+			event := &session.Event{Type: session.EventTypeToolResult, Message: &response, Meta: test.meta}
+			if test.stale != "" {
+				event.Tool = &session.EventTool{
+					ID: "remember-1", Name: memorytool.RememberToolName,
+					Status: test.status, Title: test.stale,
+				}
+			}
+			updates, err := ProjectEvent(event)
+			if err != nil {
+				t.Fatalf("ProjectEvent(Remember result) error = %v", err)
+			}
+			if len(updates) != 1 {
+				t.Fatalf("ProjectEvent(Remember result) produced %d updates, want 1", len(updates))
+			}
+			update, ok := updates[0].(eventstream.ToolCallUpdate)
+			if !ok || update.Title == nil || *update.Title != test.wantTitle {
+				t.Fatalf("Remember result update = %#v, want title %q", updates[0], test.wantTitle)
+			}
+			if update.Status == nil || *update.Status != test.status {
+				t.Fatalf("Remember result status = %v, want %q", update.Status, test.status)
+			}
+		})
+	}
+}
+
+func TestEventProjectorParameterizedToolCompletionDoesNotReplaceTitle(t *testing.T) {
+	t.Parallel()
+
+	response := model.MessageFromToolResponse(&model.ToolResponse{
+		ID: "read-1", Name: "Read", Result: map[string]any{"content": "ok"},
+	})
+	updates, err := ProjectEvent(&session.Event{Type: session.EventTypeToolResult, Message: &response})
+	if err != nil {
+		t.Fatalf("ProjectEvent(Read result) error = %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("ProjectEvent(Read result) produced %d updates, want 1", len(updates))
+	}
+	update, ok := updates[0].(eventstream.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("Read result update = %T, want ToolCallUpdate", updates[0])
+	}
+	if update.Title != nil {
+		t.Fatalf("Read result title = %q, want sparse update to preserve the parameterized call title", *update.Title)
 	}
 }
 

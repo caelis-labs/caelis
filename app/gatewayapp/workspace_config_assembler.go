@@ -86,7 +86,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	if err := controlplacement.ValidateSnapshot(placement.placement); err != nil {
 		return nil, err
 	}
-	memoryBinding, err := selectRuntimeMemoryBinding(ctx, doc.Memory, process, active.SessionRef, workspace)
+	memoryBinding, err := selectRuntimeMemoryBinding(ctx, sessions, doc.Memory, process, active.SessionRef, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -250,6 +250,7 @@ func resolveRuntimeMemoryBinding(
 
 func selectRuntimeMemoryBinding(
 	ctx context.Context,
+	sessions session.StateReader,
 	configuration memorybinding.Configuration,
 	process sessionRuntimeProcessSnapshot,
 	ref session.SessionRef,
@@ -277,7 +278,16 @@ func selectRuntimeMemoryBinding(
 	if err != nil || binding == nil {
 		return binding, err
 	}
-	labeled, err := bindRuntimeMemoryLabels(ctx, *binding, process.memoryLabelSelector, ref, workspace)
+	labels, found, err := memorybinding.PinnedRuntimeLabels(ctx, sessions, ref, *binding)
+	if err != nil {
+		return nil, fmt.Errorf("gatewayapp: resolve canonical Session Memory labels: %w", err)
+	}
+	var labeled memorybinding.RuntimeMemoryBindingSnapshot
+	if found {
+		labeled, err = memorybinding.BindRuntimeLabels(*binding, labels)
+	} else {
+		labeled, err = bindRuntimeMemoryLabels(ctx, *binding, process.memoryLabelSelector, ref, workspace)
+	}
 	if err != nil {
 		return nil, err
 	}

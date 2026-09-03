@@ -22,6 +22,7 @@ import (
 	managementv1alpha1 "github.com/caelis-labs/memory/api/memory/management/v1alpha1"
 	stewardv1alpha1 "github.com/caelis-labs/memory/api/memory/steward/v1alpha1"
 	memoryv1alpha1 "github.com/caelis-labs/memory/api/memory/v1alpha1"
+	"github.com/caelis-labs/memory/sdk/go/memory/stewardworker"
 )
 
 const (
@@ -151,7 +152,7 @@ func TestMemoryStewardSemanticEvaluationFixtureAndPolicy(t *testing.T) {
 	if len(cases) != 64 || len(groups) < 4 || len(digest) != 64 {
 		t.Fatalf("semantic fixture = cases:%d groups:%d digest:%q", len(cases), len(groups), digest)
 	}
-	if defaultMemoryStewardProfile.Version != 3 || defaultMemoryStewardProfile.MaxContextRecords != 16 ||
+	if defaultMemoryStewardProfile.Version != 1 || defaultMemoryStewardProfile.ProfileID != "memory-default" || defaultMemoryStewardProfile.MaxContextRecords != 16 ||
 		defaultMemoryStewardProfile.MaxInputBytes != 128<<10 || defaultMemoryStewardProfile.MaxOutputBytes != 4<<10 {
 		t.Fatalf("Memory Steward policy bounds = %+v", defaultMemoryStewardProfile)
 	}
@@ -163,7 +164,18 @@ func TestMemoryStewardSemanticEvaluationFixtureAndPolicy(t *testing.T) {
 }
 
 func TestMemoryStewardOutputReceivesExactContractAndNarrowFenceHandling(t *testing.T) {
-	instructions := memoryStewardPolicyInstructions("preserve facts", false)
+	base := stewardv1alpha1.WorkRequest{
+		Protocol: stewardv1alpha1.ProtocolVersion,
+		Profile:  stewardworker.BuiltInProfile(),
+		Receipt: stewardv1alpha1.ReceiptInput{
+			ReceiptID: "receipt-1", Text: "durable", ReceivedAt: time.Now().UTC(),
+		},
+	}
+	prepared, err := stewardworker.PrepareGeneration(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instructions := prepared.Instructions
 	for _, phrase := range []string{`"operation":"ADD"`, `"target_record_id"`, `"expected_revision"`, `may use only these top-level keys`, `with no Markdown fence`} {
 		if !strings.Contains(instructions, phrase) {
 			t.Fatalf("text output instructions are missing %q: %s", phrase, instructions)
@@ -172,31 +184,38 @@ func TestMemoryStewardOutputReceivesExactContractAndNarrowFenceHandling(t *testi
 	if strings.Contains(instructions, "lexicon_terms") {
 		t.Fatalf("request without lexicon candidates received lexicon instructions: %s", instructions)
 	}
-	withLexicon := memoryStewardPolicyInstructions("preserve facts", true)
-	if !strings.Contains(withLexicon, "lexicon_terms") || !strings.Contains(withLexicon, "exact candidate term values") {
-		t.Fatalf("lexicon candidate request is missing its bounded contract: %s", withLexicon)
+	base.LexiconCandidates = []stewardv1alpha1.LexiconCandidate{{Term: "量子织网", DocumentFrequency: 3}}
+	withLexicon, err := stewardworker.PrepareGeneration(base)
+	if err != nil {
+		t.Fatal(err)
 	}
-	structured := memoryStewardPolicyInstructions("preserve facts", false)
-	if !strings.Contains(structured, `"operation":"ADD"`) {
-		t.Fatalf("structured output is missing its exact JSON object contract: %s", structured)
+	if !strings.Contains(withLexicon.Instructions, "lexicon_terms") || !strings.Contains(withLexicon.Instructions, "exact candidate term values") {
+		t.Fatalf("lexicon candidate request is missing its bounded contract: %s", withLexicon.Instructions)
 	}
-	properties, _ := memoryStewardOutputSpec(4 << 10).JSONSchema["properties"].(map[string]any)
-	if properties["lexicon_terms"] == nil {
-		t.Fatalf("structured output schema is missing lexicon_terms: %+v", properties)
+	if !strings.Contains(prepared.Instructions, `"operation":"ADD"`) {
+		t.Fatalf("structured output is missing its exact JSON object contract: %s", prepared.Instructions)
 	}
-	encoded, err := json.Marshal(memoryStewardModelInput{
-		LexiconCandidates: []stewardv1alpha1.LexiconCandidate{{Term: "量子织网", DocumentFrequency: 3}},
-	})
-	if err != nil || !strings.Contains(string(encoded), `"lexicon_candidates":[{"term":"量子织网"`) {
-		t.Fatalf("Steward lexicon input = %s, %v", encoded, err)
+	properties, _ := prepared.JSONSchema["properties"].(map[string]any)
+	if properties["lexicon_terms"] != nil {
+		t.Fatalf("request without candidates exposes lexicon_terms: %+v", properties)
+	}
+	lexiconProperties, _ := withLexicon.JSONSchema["properties"].(map[string]any)
+	if lexiconProperties["lexicon_terms"] == nil {
+		t.Fatalf("candidate request omits lexicon_terms: %+v", lexiconProperties)
+	}
+	if !strings.Contains(withLexicon.Input, `"lexicon_candidates":[{"term":"量子织网"`) {
+		t.Fatalf("Steward lexicon input = %s", withLexicon.Input)
 	}
 	fenced := "```json\n" + `{"operation":"ADD","kind":"fact","text":"durable","evidence_refs":["receipt-1"]}` + "\n```"
-	proposal, err := parseMemoryStewardProposal(fenced)
+	proposal, err := stewardworker.ParseProposal(fenced, stewardworker.ParseModeText)
 	if err != nil || proposal.Operation != "ADD" || proposal.Text != "durable" {
 		t.Fatalf("parse fenced JSON = %+v, %v", proposal, err)
 	}
-	if _, err := parseMemoryStewardProposal("proposal follows\n" + fenced); err == nil {
-		t.Fatal("parser accepted prose outside the JSON fence")
+	if _, err := stewardworker.ParseProposal("proposal follows\n"+fenced, stewardworker.ParseModeText); err != nil {
+		t.Fatalf("text-mode parser rejected one unambiguous JSON object: %v", err)
+	}
+	if _, err := stewardworker.ParseProposal("proposal follows\n"+fenced, stewardworker.ParseModeStrict); err == nil {
+		t.Fatal("strict parser accepted prose outside the JSON object")
 	}
 }
 
@@ -232,6 +251,16 @@ func TestMemoryStewardRealProviderSemanticEvaluation(t *testing.T) {
 	if staticProfile != semanticProfile || staticEffort != semanticEffort {
 		t.Fatalf("evaluation model drifted: static %s/%s semantic %s/%s", staticProfile, staticEffort, semanticProfile, semanticEffort)
 	}
+	preparedPolicy, err := stewardworker.PrepareGeneration(stewardv1alpha1.WorkRequest{
+		Protocol: stewardv1alpha1.ProtocolVersion,
+		Profile:  defaultMemoryStewardProfile,
+		Receipt: stewardv1alpha1.ReceiptInput{
+			ReceiptID: "evaluation-policy", Text: "evaluation", ReceivedAt: time.Now().UTC(),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	groups := make(map[string]struct{})
 	for _, test := range cases {
 		groups[test.Group] = struct{}{}
@@ -246,7 +275,7 @@ func TestMemoryStewardRealProviderSemanticEvaluation(t *testing.T) {
 		Policy: realMemoryStewardPolicyReport{
 			ProfileID: string(defaultMemoryStewardProfile.ProfileID), ProfileVersion: defaultMemoryStewardProfile.Version,
 			ProfilePromptSHA256:   digestString(defaultMemoryStewardProfile.SystemPrompt),
-			EffectivePromptSHA256: digestString(memoryStewardPolicyInstructions(defaultMemoryStewardProfile.SystemPrompt, false)),
+			EffectivePromptSHA256: digestString(preparedPolicy.Instructions),
 			MaxContextRecords:     defaultMemoryStewardProfile.MaxContextRecords,
 			MaxInputBytes:         defaultMemoryStewardProfile.MaxInputBytes, MaxOutputBytes: defaultMemoryStewardProfile.MaxOutputBytes,
 		},
@@ -482,7 +511,7 @@ func (r *realMemoryStewardRecordingRunner) Run(
 	r.calls++
 	if err != nil {
 		r.failures++
-	} else if _, parseErr := parseMemoryStewardProposal(result.Text); parseErr != nil {
+	} else if _, parseErr := stewardworker.ParseProposal(result.Text, stewardworker.ParseModeText); parseErr != nil {
 		if r.parseErrors == nil {
 			r.parseErrors = make(map[string]int)
 		}
@@ -532,8 +561,16 @@ func (r *realMemoryStewardRecordingRunner) snapshot() realMemoryStewardUsageRepo
 }
 
 func realMemoryStewardJSONShape(text string) string {
+	proposal, err := stewardworker.ParseProposal(text, stewardworker.ParseModeText)
+	if err != nil {
+		return "invalid-json"
+	}
+	canonical, err := json.Marshal(proposal)
+	if err != nil {
+		return "invalid-json"
+	}
 	var value any
-	if err := json.Unmarshal([]byte(memoryStewardJSONText(text)), &value); err != nil {
+	if err := json.Unmarshal(canonical, &value); err != nil {
 		return "invalid-json"
 	}
 	return realMemoryStewardValueShape(value, 0, "")

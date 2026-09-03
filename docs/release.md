@@ -27,9 +27,14 @@ change-scoped gates.
    `release.yml`, and the `default` environment.
 4. Confirm `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_ENDPOINT` are
    available and the public release domain is active.
-5. Commit and push the intended SHA to `main`, then wait for or identify its
+5. Confirm the imported `github.com/caelis-labs/memory` version is released,
+   declares a forward-migration floor for the persisted appliance database,
+   and exposes side-effect-free authority validation that proves the configured
+   View matches its Grant. A prerelease development baseline is a release
+   blocker.
+6. Commit and push the intended SHA to `main`, then wait for or identify its
    quality run. Do not rerun unchanged local gates merely because a tag is next.
-6. Prepare concise user-visible release notes. When retiring a durable writer,
+7. Prepare concise user-visible release notes. When retiring a durable writer,
    record the last writer and first no-write version; retain its compatibility
    reader until the supported upgrade floor reaches that version.
 

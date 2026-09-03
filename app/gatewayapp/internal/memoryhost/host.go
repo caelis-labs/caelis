@@ -19,8 +19,9 @@ import (
 )
 
 const (
-	defaultCapabilityTTL = 30 * time.Minute
-	capabilityRenewalAge = time.Minute
+	defaultCapabilityTTL   = 30 * time.Minute
+	capabilityRenewalAge   = time.Minute
+	readinessCapabilityTTL = time.Second
 )
 
 // CredentialLookup resolves an opaque Control reference to issuer credential
@@ -136,6 +137,41 @@ func (h *Host) ValidateBinding(binding memorybinding.RuntimeMemoryBindingSnapsho
 		return fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
 	}
 	return validateBinding(binding)
+}
+
+// ValidateAuthority proves that the configured credential and Grant-backed
+// delegation can issue every Runtime operation. Memory v0.5.0-rc.3 exposes
+// this validation only through capability issuance, so the probe uses the
+// shortest public TTL and the empty, model-inaccessible partition. That API
+// does not accept the configured ViewRef separately; exact Grant-to-ViewRef
+// comparison remains a release prerequisite for the imported Memory module.
+func (h *Host) ValidateAuthority(ctx context.Context, binding memorybinding.RuntimeMemoryBindingSnapshot) error {
+	if h == nil {
+		return fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
+	}
+	if err := validateBinding(binding); err != nil {
+		return err
+	}
+	credential, err := h.credentials(ctx, binding.IssuerCredentialRef)
+	if err != nil {
+		return fmt.Errorf("gatewayapp/memoryhost: resolve issuer credential: %w", err)
+	}
+	_, err = h.issueCapability(ctx, credential, v1alpha1.CapabilityIssueRequest{
+		PrincipalRef: binding.PrincipalRef,
+		GrantRef:     v1alpha1.GrantID(binding.GrantRef),
+		ActorRef:     string(binding.RuntimeActorRef),
+		Audience:     v1alpha1.Audience(binding.Audience),
+		Operations: []v1alpha1.Operation{
+			v1alpha1.OperationRemember,
+			v1alpha1.OperationRecall,
+			v1alpha1.OperationReceiptStatus,
+		},
+		TTLSeconds: int64(readinessCapabilityTTL / time.Second),
+	})
+	if err != nil {
+		return fmt.Errorf("gatewayapp/memoryhost: validate configured Runtime authority: %w", err)
+	}
+	return nil
 }
 
 func validateBinding(binding memorybinding.RuntimeMemoryBindingSnapshot) error {

@@ -96,6 +96,14 @@ func newSessionRuntimeRegistry(config sessionRuntimeRegistryConfig) (*sessionRun
 	if err != nil {
 		return nil, err
 	}
+	ctx := config.LifecycleContext
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	workspaceCWD, err := loadDurableWorkspaceIdentities(ctx, config.Sessions, workspace)
+	if err != nil {
+		return nil, err
+	}
 	buildsIdle := make(chan struct{})
 	close(buildsIdle)
 	return &sessionRuntimeRegistry{
@@ -108,9 +116,46 @@ func newSessionRuntimeRegistry(config sessionRuntimeRegistryConfig) (*sessionRun
 		taskCommitted:    config.TaskCommitted,
 		sessions:         map[string]*sessionRuntime{},
 		observers:        map[string]uint64{},
-		workspaceCWD:     map[string]string{workspace.Key: workspace.CWD},
+		workspaceCWD:     workspaceCWD,
 		buildsIdle:       buildsIdle,
 	}, nil
+}
+
+func loadDurableWorkspaceIdentities(
+	ctx context.Context,
+	sessions session.Service,
+	defaultWorkspace session.WorkspaceRef,
+) (map[string]string, error) {
+	identities := map[string]string{defaultWorkspace.Key: defaultWorkspace.CWD}
+	cursor := ""
+	for {
+		listed, err := sessions.ListSessions(ctx, session.ListSessionsRequest{Cursor: cursor, Limit: 200})
+		if err != nil {
+			return nil, fmt.Errorf("gatewayapp: rebuild durable workspace identities: %w", err)
+		}
+		for _, summary := range listed.Sessions {
+			key := strings.TrimSpace(summary.WorkspaceKey)
+			cwd := filepath.Clean(strings.TrimSpace(summary.CWD))
+			if key == "" || cwd == "" || cwd == "." || !filepath.IsAbs(cwd) {
+				return nil, fmt.Errorf("gatewayapp: Session %q has an invalid durable workspace identity", summary.SessionID)
+			}
+			if existing := identities[key]; existing != "" && existing != cwd {
+				return nil, errorcode.New(
+					errorcode.FailedPrecondition,
+					fmt.Sprintf("gatewayapp: durable workspace key %q is bound to both %q and %q", key, existing, cwd),
+				)
+			}
+			identities[key] = cwd
+		}
+		next := strings.TrimSpace(listed.NextCursor)
+		if next == "" {
+			return identities, nil
+		}
+		if next == cursor {
+			return nil, errors.New("gatewayapp: durable Session listing did not advance")
+		}
+		cursor = next
+	}
 }
 
 // lockActivation admits one durable create or Runtime activation and

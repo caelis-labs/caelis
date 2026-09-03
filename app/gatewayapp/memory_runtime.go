@@ -25,6 +25,7 @@ func (s *runtimeComposition) admitCreatedMemorySession(ctx context.Context, crea
 	}
 	binding, err := selectRuntimeMemoryBinding(
 		ctx,
+		s.sessions,
 		doc.Memory,
 		s.runtimeProcessSnapshot(),
 		created.SessionRef,

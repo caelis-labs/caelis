@@ -360,6 +360,9 @@ func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 		ev.Name = semanticName
 		return mutationLifecycleHeader(ev, err)
 	case surfaceToolRemember:
+		if title := strings.TrimSpace(ev.Title); title != "" {
+			return "• " + title
+		}
 		return memoryLifecycleHeader(ev, err)
 	default:
 		if presentation.TitleAsLabel {

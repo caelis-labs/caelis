@@ -583,6 +583,10 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			startupMemoryRuntime = nil
 			stack.composition.authorities.memoryHost = stack.memoryRuntime
 		}
+		if err := validateConfiguredMemoryAuthorities(context.Background(), stack.composition.authorities.memoryHost, doc.Memory); err != nil {
+			_ = stack.Close()
+			return nil, err
+		}
 	}
 	stack.adapterHost, err = newHostedAdapterManager()
 	if err != nil {
@@ -783,12 +787,19 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 }
 
 func (s *Stack) Close() error {
+	return s.closeWithQuiesceTimeout(5 * time.Second)
+}
+
+func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 	if s == nil {
 		return nil
 	}
-	quiesceCtx, cancelQuiesce := context.WithTimeout(context.Background(), 5*time.Second)
+	quiesceCtx, cancelQuiesce := context.WithTimeout(context.Background(), timeout)
 	quiesceErr := s.Quiesce(quiesceCtx)
 	cancelQuiesce()
+	if s.memorySteward != nil && !s.memorySteward.drained() {
+		return fmt.Errorf("gatewayapp stack: close deferred until Memory Steward drains: %w", quiesceErr)
+	}
 	if s.composition.authorities.approvalRecovery != nil {
 		s.composition.authorities.approvalRecovery.Close()
 	}

@@ -35,11 +35,11 @@ func bindRuntimeMemoryLabels(
 	ref session.SessionRef,
 	workspace session.WorkspaceRef,
 ) (memorybinding.RuntimeMemoryBindingSnapshot, error) {
-	workspaceKey := strings.TrimSpace(workspace.Key)
-	if workspaceKey == "" {
-		return memorybinding.RuntimeMemoryBindingSnapshot{}, fmt.Errorf("gatewayapp: Memory workspace key is required")
+	workspaceCWD := strings.TrimSpace(workspace.CWD)
+	if workspaceCWD == "" {
+		return memorybinding.RuntimeMemoryBindingSnapshot{}, fmt.Errorf("gatewayapp: Memory workspace CWD is required")
 	}
-	digest := sha256.Sum256([]byte(workspaceKey))
+	digest := sha256.Sum256([]byte(workspaceCWD))
 	labels := memoryv1alpha1.LabelSet{
 		memoryv1alpha1.Label(workspaceMemoryLabelPrefix + hex.EncodeToString(digest[:])),
 	}

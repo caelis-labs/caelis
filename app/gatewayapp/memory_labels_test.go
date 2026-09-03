@@ -34,16 +34,16 @@ func TestRuntimeMemoryLabelsAlwaysPartitionByWorkspaceAndAllowOpaqueExtensions(t
 		t.Fatalf("Runtime labels = %#v, calls=%d", labeled.Labels, selectorCalls)
 	}
 	encoded := strings.Join([]string{string(labeled.Labels[0]), string(labeled.Labels[1])}, " ")
-	if strings.Contains(encoded, workspace.Key) || !strings.Contains(encoded, workspaceMemoryLabelPrefix) {
-		t.Fatalf("workspace label exposed its source key: %q", encoded)
+	if strings.Contains(encoded, workspace.CWD) || !strings.Contains(encoded, workspaceMemoryLabelPrefix) {
+		t.Fatalf("workspace label exposed its source CWD: %q", encoded)
 	}
 
-	other, err := bindRuntimeMemoryLabels(t.Context(), binding, nil, ref, session.WorkspaceRef{Key: "/private/workspace/beta"})
+	other, err := bindRuntimeMemoryLabels(t.Context(), binding, nil, ref, session.WorkspaceRef{Key: workspace.Key, CWD: "/private/workspace/beta"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if slices.Equal(labeled.Labels, other.Labels) {
-		t.Fatalf("different workspaces received equal labels: %#v", labeled.Labels)
+		t.Fatalf("different workspace directories received equal labels: %#v", labeled.Labels)
 	}
 }
 
@@ -53,7 +53,7 @@ func TestRuntimeMemoryLabelsRejectInvalidExtensionBeforeCapabilityIssue(t *testi
 		IssuerCredentialRef: "issuer:a", ViewRef: "view:a", GrantRef: "grant:a",
 		Audience: memorybinding.OutputAudiencePrivate, BindingVersion: 1,
 	}
-	workspace := session.WorkspaceRef{Key: "workspace"}
+	workspace := session.WorkspaceRef{Key: "workspace", CWD: "/private/workspace"}
 	_, err := bindRuntimeMemoryLabels(t.Context(), binding, func(context.Context, MemoryLabelSelectionContext) ([]string, error) {
 		return []string{" duplicate ", "duplicate"}, nil
 	}, session.SessionRef{SessionID: "session"}, workspace)
