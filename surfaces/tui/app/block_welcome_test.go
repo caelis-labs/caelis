@@ -36,16 +36,15 @@ func TestWelcomeBlockResponsiveRender(t *testing.T) {
 	t.Parallel()
 	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
 	cases := []struct {
-		name         string
-		width        int
-		height       int
-		wantLogoRow  string
-		wantCommands bool
+		name        string
+		width       int
+		height      int
+		wantLogoRow string
 	}{
-		{name: "fullscreen workspace", width: 190, height: 50, wantLogoRow: welcomeRelayLogoASCII[0], wantCommands: true},
-		{name: "100x30 terminal workspace", width: 97, height: 25, wantLogoRow: welcomeRelayLogoASCII[0], wantCommands: true},
-		{name: "80x24 terminal workspace", width: 77, height: 19, wantLogoRow: welcomeRelayLogoASCII[0], wantCommands: true},
-		{name: "55x20 terminal workspace", width: 52, height: 15, wantLogoRow: welcomeRelayLogoASCII[0], wantCommands: true},
+		{name: "fullscreen workspace", width: 190, height: 50, wantLogoRow: welcomeRelayLogoASCII[0]},
+		{name: "100x30 terminal workspace", width: 97, height: 25, wantLogoRow: welcomeRelayLogoASCII[0]},
+		{name: "80x24 terminal workspace", width: 77, height: 19, wantLogoRow: welcomeRelayLogoASCII[0]},
+		{name: "55x20 terminal workspace", width: 52, height: 15, wantLogoRow: welcomeRelayLogoASCII[0]},
 		{name: "35x16 terminal workspace", width: 33, height: 11, wantLogoRow: welcomeRelayCompactASCII[0]},
 	}
 	for _, tc := range cases {
@@ -83,11 +82,8 @@ func TestWelcomeBlockResponsiveRender(t *testing.T) {
 				t.Fatalf("welcome still contains removed click hint\n%s", plain)
 			}
 			for _, action := range welcomeActions {
-				if tc.wantCommands && !strings.Contains(plain, action.command) {
-					t.Fatalf("welcome missing command hint %q\n%s", action.command, plain)
-				}
-				if !tc.wantCommands && strings.Contains(plain, action.command) {
-					t.Fatalf("compact fallback retained command hint %q\n%s", action.command, plain)
+				if strings.Contains(plain, action.command) {
+					t.Fatalf("welcome retained command hint %q\n%s", action.command, plain)
 				}
 			}
 			for _, required := range []string{"╭", "╮", "╰", "╯"} {
@@ -148,7 +144,7 @@ func TestWelcomeDetailsKeepFormalVersionOrderAndReplaceableNotice(t *testing.T) 
 	}
 }
 
-func TestWelcomePanelRestoresFormalVersionSizing(t *testing.T) {
+func TestWelcomePanelKeepsWideLayoutsCompact(t *testing.T) {
 	t.Parallel()
 	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
 	medium := buildWelcomePanel(BlockRenderContext{Width: 77, Height: 19, Theme: theme}, "v1.0.0", "")
@@ -159,12 +155,17 @@ func TestWelcomePanelRestoresFormalVersionSizing(t *testing.T) {
 	if got, want := displayColumns(fullscreen[0].plain), welcomePanelMaxWidth; got != want {
 		t.Fatalf("fullscreen panel width = %d, want %d", got, want)
 	}
-	if len(fullscreen) <= len(medium) {
-		t.Fatalf("fullscreen panel rows = %d, want more frame breathing room than medium %d", len(fullscreen), len(medium))
+	const verticalPadding = 2
+	wantRows := 2 + len(welcomeRelayLogoASCII) + verticalPadding*2
+	if got := len(medium); got != wantRows {
+		t.Fatalf("medium panel rows = %d, want compact height %d", got, wantRows)
+	}
+	if got := len(fullscreen); got != wantRows {
+		t.Fatalf("fullscreen panel rows = %d, want compact height %d", got, wantRows)
 	}
 }
 
-func TestWelcomeStandardLogoRestoresFormalVersionAspect(t *testing.T) {
+func TestWelcomeStandardLogoKeepsAspect(t *testing.T) {
 	t.Parallel()
 	if got, want := len(welcomeRelayLogoASCII), 8; got != want {
 		t.Fatalf("logo rows = %d, want %d", got, want)
@@ -182,26 +183,42 @@ func TestWelcomeStandardLogoRestoresFormalVersionAspect(t *testing.T) {
 	}
 }
 
-func TestWelcomeStandardLayoutKeepsWideContentLeftBiased(t *testing.T) {
+func TestWelcomeStandardLayoutShiftsLogoAndBalancesItsSpacing(t *testing.T) {
 	t.Parallel()
 	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
 	rows := buildWelcomePanel(BlockRenderContext{Width: 190, Height: 50, Theme: theme}, "v1.0.0", "")
 	logoStart := -1
+	detailsStart := -1
 	for _, row := range rows {
-		if logoStart < 0 && strings.Contains(row.plain, welcomeRelayLogoASCII[0]) {
-			logoByte := strings.Index(row.plain, welcomeRelayLogoASCII[0])
-			logoStart = displayColumns(row.plain[:logoByte])
+		line := strings.TrimSuffix(strings.TrimPrefix(row.plain, "│"), "│")
+		if logoStart < 0 {
+			if logoByte := strings.Index(line, welcomeRelayLogoASCII[1]); logoByte >= 0 {
+				logoStart = displayColumns(line[:logoByte])
+			}
+		}
+		if detailsStart < 0 {
+			actionText := welcomeActionMarker + welcomeActions[0].label
+			if detailsByte := strings.Index(line, actionText); detailsByte >= 0 {
+				detailsStart = displayColumns(line[:detailsByte])
+			}
 		}
 	}
-	if logoStart < 0 {
-		t.Fatalf("formal layout missing logo: %#v", rowPlainTextsForWelcomePanel(rows))
+	if logoStart < 0 || detailsStart < 0 {
+		t.Fatalf("wide layout positions = logo %d, details %d\n%s",
+			logoStart, detailsStart, strings.Join(rowPlainTextsForWelcomePanel(rows), "\n"))
 	}
-	if got, want := logoStart, 1+welcomeMaxContentInset; got != want {
-		t.Fatalf("logo starts at column %d, want %d including frame", got, want)
+	middleSpace := detailsStart - logoStart - 18
+	if logoStart != middleSpace {
+		t.Fatalf("logo spacing = left %d, middle %d; want balanced\n%s",
+			logoStart, middleSpace, strings.Join(rowPlainTextsForWelcomePanel(rows), "\n"))
+	}
+	centeredLogoStart := (welcomePanelMaxWidth - 2 - 18 - 4 - welcomeDetailsMinWidth) / 2
+	if got := centeredLogoStart - logoStart; got != welcomeLogoLeftShift {
+		t.Fatalf("logo left shift = %d, want %d", got, welcomeLogoLeftShift)
 	}
 }
 
-func TestWelcomePanelWidthUsesFormalVersionBounds(t *testing.T) {
+func TestWelcomePanelWidthUsesCompactBounds(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		width int
@@ -211,8 +228,8 @@ func TestWelcomePanelWidthUsesFormalVersionBounds(t *testing.T) {
 		{width: 52, want: 52},
 		{width: 77, want: 72},
 		{width: 97, want: 72},
-		{width: 190, want: 112},
-		{width: 300, want: 112},
+		{width: 190, want: 80},
+		{width: 300, want: 80},
 	} {
 		if got := welcomeStandardPanelWidth(tc.width); got != tc.want {
 			t.Fatalf("viewport width %d panel width = %d, want %d", tc.width, got, tc.want)
@@ -220,37 +237,24 @@ func TestWelcomePanelWidthUsesFormalVersionBounds(t *testing.T) {
 	}
 }
 
-func TestWelcomeActionRowsUseOneLeftAlignedCommandColumn(t *testing.T) {
+func TestWelcomeActionRowsOmitCommandHints(t *testing.T) {
 	t.Parallel()
 	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
 	styles := newWelcomePanelStyles(theme.Tokens())
 	const width = 52
 	rows := buildWelcomeActionRows(width, styles)
-	wantCommandCol := welcomeActionLabelsWidth() + welcomeActionCommandGap
 	for i, row := range rows {
 		action := welcomeActions[i]
-		commandByte := strings.Index(row.plain, action.command)
-		if commandByte < 0 {
-			t.Fatalf("action %q row is missing %q: %q", action.label, action.command, row.plain)
-		}
-		got := displayColumns(row.plain[:commandByte])
-		if got != wantCommandCol {
-			t.Fatalf("action %q command column = %d, want %d: %q", action.label, got, wantCommandCol, row.plain)
+		if strings.Contains(row.plain, action.command) {
+			t.Fatalf("action %q row retained command hint %q: %q", action.label, action.command, row.plain)
 		}
 		if got := displayColumns(row.plain); got != width {
 			t.Fatalf("action %q row width = %d, want %d", action.label, got, width)
 		}
 	}
-
-	compact := buildWelcomeActionRows(welcomeActionLabelsWidth()+welcomeCommandColumnWidth(), styles)
-	for i, row := range compact {
-		if strings.Contains(row.plain, welcomeActions[i].command) {
-			t.Fatalf("compact rows retained a partial command column: %q", row.plain)
-		}
-	}
 }
 
-func TestWelcomeFormalLayoutKeepsDenseActionStack(t *testing.T) {
+func TestWelcomeLayoutKeepsDenseActionStack(t *testing.T) {
 	t.Parallel()
 	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
 	rows := buildWelcomePanel(BlockRenderContext{Width: 190, Height: 50, Theme: theme}, "v1.0.0", "")

@@ -10,15 +10,15 @@ import (
 
 const (
 	welcomePanelBaseWidth    = 72
-	welcomePanelMaxWidth     = 112
+	welcomePanelMaxWidth     = 80
 	welcomeStandardMinWidth  = 50
 	welcomeStandardMinHeight = 11
 	welcomeCompactMinWidth   = 33
 	welcomeCompactMinHeight  = 11
 	welcomeDefaultNotice     = "type / for commands"
 	welcomeActionMarker      = "› "
-	welcomeActionCommandGap  = 6
-	welcomeMaxContentInset   = 16
+	welcomeDetailsMinWidth   = 28
+	welcomeLogoLeftShift     = 3
 )
 
 const (
@@ -188,22 +188,23 @@ func buildStandardWelcomePanel(
 ) []welcomePanelRow {
 	panelWidth := welcomeStandardPanelWidth(width)
 	innerWidth := maxInt(0, panelWidth-2)
-	gap := 2
-	switch {
-	case panelWidth >= 96:
-		gap = 8
-	case panelWidth >= welcomePanelBaseWidth:
-		gap = 4
+	baseGap := 2
+	if panelWidth >= welcomePanelBaseWidth {
+		baseGap = 4
 	}
 	const (
 		logoWidth                = 18
 		minimumHorizontalPadding = 2
 	)
-	maxRightWidth := maxInt(0, innerWidth-logoWidth-gap-minimumHorizontalPadding*2)
+	maxRightWidth := maxInt(0, innerWidth-logoWidth-baseGap-minimumHorizontalPadding*2)
 	rightWidth := minInt(welcomePreferredDetailsWidth(notice), maxRightWidth)
-	remainingWidth := maxInt(0, innerWidth-logoWidth-gap-rightWidth)
-	leftPadding := minInt(remainingWidth/2, welcomeMaxContentInset)
-	rightPadding := remainingWidth - leftPadding
+	remainingWidth := maxInt(0, innerWidth-logoWidth-baseGap-rightWidth)
+	centeredLeftPadding := remainingWidth / 2
+	leftPadding := maxInt(minimumHorizontalPadding, centeredLeftPadding-welcomeLogoLeftShift)
+	// Match the logo inset and details gap so the two-column layout has one
+	// consistent unit of horizontal whitespace.
+	gap := leftPadding
+	rightPadding := maxInt(0, innerWidth-leftPadding-logoWidth-gap-rightWidth)
 	rightRows := buildWelcomeDetails(rightWidth, version, notice, styles)
 	contentRows := welcomeColumnLayoutRows(
 		welcomeRelayLogoASCII,
@@ -261,7 +262,6 @@ func buildFallbackWelcomePanel(width int, height int, notice string, styles welc
 
 func buildWelcomeDetails(width int, version string, notice string, styles welcomePanelStyles) []welcomePanelRow {
 	width = maxInt(0, width)
-	showCommands := width >= welcomeActionLabelsWidth()+1+welcomeCommandColumnWidth()
 	rows := []welcomePanelRow{
 		welcomeBrandVersionCell("CAELIS", version, width, styles),
 		welcomeTextCell("", width, styles.surface),
@@ -269,7 +269,7 @@ func buildWelcomeDetails(width int, version string, notice string, styles welcom
 	rows = append(rows, welcomeNoticeCells(notice, width, 2, styles)...)
 	rows = append(rows, welcomeTextCell("", width, styles.surface))
 	for _, action := range welcomeActions {
-		rows = append(rows, welcomeActionCell(action, width, showCommands, styles))
+		rows = append(rows, welcomeActionCell(action, width, styles))
 	}
 	return rows
 }
@@ -341,8 +341,6 @@ func welcomeStandardPanelWidth(width int) int {
 func welcomePanelVerticalPadding(height int, contentRows int) int {
 	padding := 0
 	switch {
-	case height >= 36:
-		padding = 4
 	case height >= 19:
 		padding = 2
 	case height >= 12:
@@ -392,34 +390,15 @@ func welcomeBorderRow(width int, top bool, styles welcomePanelStyles) welcomePan
 
 func buildWelcomeActionRows(width int, styles welcomePanelStyles) []welcomePanelRow {
 	width = maxInt(1, width)
-	commandWidth := welcomeCommandColumnWidth()
-	showCommands := width >= welcomeActionLabelsWidth()+1+commandWidth
 	rows := make([]welcomePanelRow, 0, len(welcomeActions))
 	for _, action := range welcomeActions {
-		rows = append(rows, welcomeActionCell(action, width, showCommands, styles))
+		rows = append(rows, welcomeActionCell(action, width, styles))
 	}
 	return rows
 }
 
-func welcomeActionLabelsWidth() int {
-	width := 0
-	for _, action := range welcomeActions {
-		width = maxInt(width, displayColumns(welcomeActionMarker)+displayColumns(action.label))
-	}
-	return width
-}
-
-func welcomeCommandColumnWidth() int {
-	width := 0
-	for _, action := range welcomeActions {
-		width = maxInt(width, displayColumns(action.command))
-	}
-	return width
-}
-
 func welcomePreferredDetailsWidth(notice string) int {
-	actionWidth := welcomeActionLabelsWidth() + welcomeActionCommandGap + welcomeCommandColumnWidth()
-	return maxInt(actionWidth, displayColumns(strings.TrimSpace(notice)))
+	return maxInt(welcomeDetailsMinWidth, displayColumns(strings.TrimSpace(notice)))
 }
 
 func welcomeBrandVersionCell(brand string, version string, width int, styles welcomePanelStyles) welcomePanelRow {
@@ -445,19 +424,9 @@ func welcomeTextCell(text string, width int, style lipgloss.Style) welcomePanelR
 	return welcomePanelRow{plain: plain, styled: styled}
 }
 
-func welcomeActionCell(action welcomeAction, width int, showCommand bool, styles welcomePanelStyles) welcomePanelRow {
+func welcomeActionCell(action welcomeAction, width int, styles welcomePanelStyles) welcomePanelRow {
 	width = maxInt(1, width)
-	commandWidth := 0
-	if showCommand {
-		commandWidth = welcomeCommandColumnWidth()
-	}
 	labelWidth := width
-	if showCommand {
-		labelWidth = minInt(
-			maxInt(0, width-commandWidth),
-			welcomeActionLabelsWidth()+welcomeActionCommandGap,
-		)
-	}
 	label := welcomeActionMarker + action.label
 	if labelWidth < displayColumns(welcomeActionMarker) {
 		label = action.label
@@ -472,12 +441,6 @@ func welcomeActionCell(action welcomeAction, width int, showCommand bool, styles
 	}
 	plain := label + labelSpace
 	styled := labelStyled + styles.surface.Render(labelSpace)
-	if showCommand {
-		command := fitWelcomeText(action.command, commandWidth)
-		commandSpace := strings.Repeat(" ", maxInt(0, commandWidth-displayColumns(command)))
-		plain += command + commandSpace
-		styled += styles.meta.Render(command) + styles.surface.Render(commandSpace)
-	}
 	trailingSpace := strings.Repeat(" ", maxInt(0, width-displayColumns(plain)))
 	plain += trailingSpace
 	styled += styles.surface.Render(trailingSpace)
