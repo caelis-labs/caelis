@@ -112,6 +112,8 @@ func projectedToolResultText(profile projectedToolProfile, known bool, input, ou
 		return display.WebSearchSummary(input, output)
 	case projectedResultWebFetch:
 		return display.WebFetchSummary(input, output)
+	case projectedResultMemoryRecall:
+		return firstNonEmpty(projectedToolString(output["message"]), projectedGenericResultText(output, isErr))
 	case projectedResultMutation:
 		if isErr || strings.EqualFold(status, eventstream.ToolStatusFailed) {
 			return firstNonEmpty(projectedToolString(output["error"]), projectedToolString(output["summary"]))

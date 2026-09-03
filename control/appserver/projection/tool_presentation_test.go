@@ -70,6 +70,22 @@ func TestMemoryToolPresentationUsesProductSemantics(t *testing.T) {
 	if len(content) != 0 {
 		t.Fatalf("successful Remember presentation content = %#v, want silent completion", content)
 	}
+
+	content = projectedToolResultContent(
+		"recall-1",
+		memorytool.RecallToolName,
+		map[string]any{"query": "missing exact terms"},
+		map[string]any{"fragments": []any{}, "message": "No matching memories found."},
+		nil,
+		eventstream.ToolStatusCompleted,
+	)
+	if len(content) != 1 {
+		t.Fatalf("empty Recall presentation content = %#v", content)
+	}
+	text, ok := content[0].Content.(eventstream.TextContent)
+	if !ok || text.Text != "No matching memories found." {
+		t.Fatalf("empty Recall presentation content = %#v", content)
+	}
 }
 
 func TestProtocolToolNameForUpdatePreservesExactName(t *testing.T) {

@@ -49,6 +49,7 @@ const (
 	projectedResultSearch
 	projectedResultWebSearch
 	projectedResultWebFetch
+	projectedResultMemoryRecall
 	projectedResultMutation
 	projectedResultCommand
 	projectedResultSpawn
@@ -98,7 +99,7 @@ func projectedBuiltinToolProfile(name string) (projectedToolProfile, bool) {
 	case memorytool.RememberToolName:
 		return projectedToolProfile{kind: projectedToolKindEdit, title: projectedTitleMemoryUpdate, suppressSuccessfulEmpty: true}, true
 	case memorytool.RecallToolName:
-		return projectedToolProfile{kind: projectedToolKindSearch, title: projectedTitleSearchQuery}, true
+		return projectedToolProfile{kind: projectedToolKindSearch, title: projectedTitleSearchQuery, result: projectedResultMemoryRecall}, true
 	default:
 		return projectedToolProfile{}, false
 	}

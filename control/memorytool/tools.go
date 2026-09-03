@@ -28,6 +28,8 @@ const (
 	DefaultRecallProjectionBytes = 8 << 10
 	DefaultRecallDeadlineMS      = 3_000
 	metadataVersion              = 1
+	emptyRecallMessage           = "No matching memories found."
+	incompleteRecallMessage      = "Memory recall was incomplete; no fragments were returned."
 )
 
 // Client is the pure bound Memory SDK behavior needed by the tool adapter.
@@ -80,8 +82,11 @@ type recallTool struct{ baseTool }
 func (*rememberTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        RememberToolName,
-		Description: "Store one durable fact for later recall. Memory organization and lifecycle are handled by the independent Memory system.",
-		InputSchema: singleStringSchema("text", "Fact text to remember."),
+		Description: "Persist established facts, decisions, preferences, commitments, or corrections that are likely to be useful in later interactions. Exclude transient status, intermediate work, speculation, logs, and secrets.",
+		InputSchema: singleStringSchema(
+			"text",
+			"One concise, self-contained statement containing one durable item. Identify the subject, relation or decision, exact value, and relevant scope or time. Include exact names and known literal aliases. For a correction, state both the superseded and current values.",
+		),
 		EffectClass: tool.EffectIdempotent,
 	}
 }
@@ -89,8 +94,11 @@ func (*rememberTool) Definition() tool.Definition {
 func (*recallTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        RecallToolName,
-		Description: "Recall relevant memory fragments for a query. An empty fragment list is a successful empty result.",
-		InputSchema: singleStringSchema("query", "Keywords or question to recall."),
+		Description: "Retrieve durable memory when prior facts, decisions, preferences, commitments, or corrections may affect the current task or answer.",
+		InputSchema: singleStringSchema(
+			"query",
+			"A short literal keyword string. Put the most distinctive entity or name first, followed by discriminating attributes, exact values, and known abbreviations or Chinese/English aliases. Matching is lexical and OR-based; Boolean operators and regular expressions are not supported. Avoid full natural-language questions and semantic paraphrases.",
+		),
 		EffectClass: tool.EffectReadOnly,
 	}
 }
@@ -185,7 +193,7 @@ func (t *recallTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	); err != nil {
 		return tool.Result{}, fmt.Errorf("persist Memory consistency: %w", err)
 	}
-	projected, err := memorysdk.ProjectRecall(response, t.config.MaxProjectionBytes)
+	projected, err := projectRecall(response, t.config.MaxProjectionBytes)
 	if err != nil {
 		if errors.Is(err, memorysdk.ErrProjectionBudgetExceeded) {
 			return tool.Result{}, tool.NewError(tool.ErrorCodeOutputTruncated, "Memory recall exceeded the model-visible output bound")
@@ -193,6 +201,31 @@ func (t *recallTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 		return tool.Result{}, err
 	}
 	return successResult(call, projected, recallMetadata(t.config.Binding, response)), nil
+}
+
+func projectRecall(response v1alpha1.RecallResponse, maxBytes int) ([]byte, error) {
+	projected, err := memorysdk.ProjectRecall(response, maxBytes)
+	if err != nil || len(response.Fragments) != 0 {
+		return projected, err
+	}
+	message := emptyRecallMessage
+	if response.Degraded || response.Truncated {
+		message = incompleteRecallMessage
+	}
+	projected, err = json.Marshal(struct {
+		Fragments []string `json:"fragments"`
+		Message   string   `json:"message"`
+	}{
+		Fragments: []string{},
+		Message:   message,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(projected) > maxBytes {
+		return nil, memorysdk.ErrProjectionBudgetExceeded
+	}
+	return projected, nil
 }
 
 func singleStringSchema(name, description string) map[string]any {

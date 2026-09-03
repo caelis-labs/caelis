@@ -55,11 +55,26 @@ func TestToolsExposeOnlyTextAndQueryAndPersistHiddenConsistency(t *testing.T) {
 	if RememberToolName != "Remember" || RecallToolName != "Recall" {
 		t.Fatalf("Memory tool names = %q, %q; want canonical built-in names", RememberToolName, RecallToolName)
 	}
+	wantEffects := []tool.EffectClass{tool.EffectIdempotent, tool.EffectReadOnly}
 	for index, name := range []string{"text", "query"} {
 		definition := tools[index].Definition()
-		properties := definition.InputSchema["properties"].(map[string]any)
-		if len(properties) != 1 || properties[name] == nil {
-			t.Fatalf("%s schema = %#v", definition.Name, properties)
+		properties, ok := definition.InputSchema["properties"].(map[string]any)
+		if !ok || len(properties) != 1 {
+			t.Fatalf("%s properties = %#v", definition.Name, definition.InputSchema["properties"])
+		}
+		property, ok := properties[name].(map[string]any)
+		if !ok || property["type"] != "string" {
+			t.Fatalf("%s %s property = %#v", definition.Name, name, properties[name])
+		}
+		required, ok := definition.InputSchema["required"].([]string)
+		if !ok || len(required) != 1 || required[0] != name {
+			t.Fatalf("%s required = %#v", definition.Name, definition.InputSchema["required"])
+		}
+		if additional, ok := definition.InputSchema["additionalProperties"].(bool); !ok || additional {
+			t.Fatalf("%s additionalProperties = %#v", definition.Name, definition.InputSchema["additionalProperties"])
+		}
+		if definition.EffectClass != wantEffects[index] {
+			t.Fatalf("%s effect class = %q, want %q", definition.Name, definition.EffectClass, wantEffects[index])
 		}
 		if definition.Capabilities.ParallelSafe {
 			t.Fatalf("%s unexpectedly permits calls to bypass the Session causal order", definition.Name)
@@ -121,6 +136,74 @@ func TestRememberRecoveryReusesStableEffectIdentity(t *testing.T) {
 	}
 	if len(client.rememberKeys) != 2 || client.rememberKeys[1] != firstKey {
 		t.Fatalf("Remember keys = %#v", client.rememberKeys)
+	}
+}
+
+func TestEmptyRecallReturnsExplicitMessageWithinProjectionBudget(t *testing.T) {
+	ctx, store, ref, binding, cleanup := testToolRuntime(t)
+	defer cleanup()
+	client := &fakeClient{}
+	want := `{"fragments":[],"message":"No matching memories found."}`
+	configured, err := New(Config{
+		Client: client, Sessions: store, SessionRef: ref, Binding: binding,
+		MaxProjectionBytes: len(want),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := configured[1].Call(ctx, tool.Call{
+		ID: "recall-empty", Name: RecallToolName, Input: json.RawMessage(`{"query":"missing exact terms"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(result.Content[0].JSON.Value); got != want {
+		t.Fatalf("empty Recall result = %s, want %s", got, want)
+	}
+
+	incompleteWant := `{"fragments":[],"message":"Memory recall was incomplete; no fragments were returned."}`
+	for _, test := range []struct {
+		name     string
+		response v1alpha1.RecallResponse
+	}{
+		{name: "degraded", response: v1alpha1.RecallResponse{Degraded: true}},
+		{name: "truncated", response: v1alpha1.RecallResponse{Truncated: true}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client.recall = test.response
+			incomplete, err := New(Config{
+				Client: client, Sessions: store, SessionRef: ref, Binding: binding,
+				MaxProjectionBytes: len(incompleteWant),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := incomplete[1].Call(ctx, tool.Call{
+				ID: "recall-empty-" + test.name, Name: RecallToolName, Input: json.RawMessage(`{"query":"missing exact terms"}`),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := string(result.Content[0].JSON.Value); got != incompleteWant {
+				t.Fatalf("incomplete Recall result = %s, want %s", got, incompleteWant)
+			}
+		})
+	}
+
+	client.recall = v1alpha1.RecallResponse{}
+	bounded, err := New(Config{
+		Client: client, Sessions: store, SessionRef: ref, Binding: binding,
+		MaxProjectionBytes: len(want) - 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = bounded[1].Call(ctx, tool.Call{
+		ID: "recall-empty-bounded", Name: RecallToolName, Input: json.RawMessage(`{"query":"missing exact terms"}`),
+	})
+	var toolErr *tool.ToolError
+	if !errors.As(err, &toolErr) || toolErr.Code != tool.ErrorCodeOutputTruncated {
+		t.Fatalf("bounded empty Recall error = %#v", err)
 	}
 }
 

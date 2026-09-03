@@ -162,10 +162,13 @@ The only ordinary user choice is the `Memory Steward` row in `/subagent`.
 Without an explicit provider-model binding, Memory keeps its baseline durable
 receipt journal and lexical recall path and Caelis never invokes a model for
 Memory. Binding that fixed system Agent enables the provider-neutral Steward
-Worker callback: Memory supplies bounded evidence and appliance-owned prompt
-policy, Caelis runs the selected existing provider model with no tools, and
-Memory validates and applies the returned proposal. Steward deliberately has
-no default-profile fallback, so an absent binding is a stable zero-token mode.
+Worker callback for jobs queued by Remember: Memory supplies bounded evidence
+and appliance-owned prompt policy, Caelis runs the selected existing provider
+model with no tools, and Memory validates and applies the returned proposal.
+The current Recall path does not invoke Steward or another model; it applies the
+caller's lexical query to baseline receipts and already-organized semantic
+records. Steward deliberately has no default-profile fallback, so an absent
+binding is a stable zero-token mode.
 
 Shutdown closes admission, cancels and drains producers, waits for routed
 mutations and Runtime cleanup, then closes stores and process resources.

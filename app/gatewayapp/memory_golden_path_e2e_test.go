@@ -115,8 +115,19 @@ func TestMemoryEmbeddedGoldenPath(t *testing.T) {
 		actions: []memoryGoldenAction{{name: memorytool.RecallToolName, arguments: `{"query":"preferred review language"}`}},
 	})
 	isolated := runMemoryGoldenSession(t, ctx, stack, "session-isolated-workspace")
-	assertMemoryGoldenResultAbsent(t, memoryGoldenToolResults(t, stack, isolated.SessionRef), memorytool.RecallToolName, memoryGoldenFact)
+	isolatedBefore := memoryGoldenToolResults(t, stack, isolated.SessionRef)
+	assertMemoryGoldenResultAbsent(t, isolatedBefore, memorytool.RecallToolName, memoryGoldenFact)
+	assertMemoryGoldenResult(t, isolatedBefore, memorytool.RecallToolName, `"message":"No matching memories found."`)
 	provider.AssertComplete(t)
+	if err := stack.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	stack = newMemoryGoldenStackForWorkspace(t, provider, storeDir, "memory-golden-isolated", isolatedWorkspace)
+	isolatedAfter := memoryGoldenToolResults(t, stack, isolated.SessionRef)
+	if !reflect.DeepEqual(isolatedBefore, isolatedAfter) {
+		t.Fatalf("empty Recall ToolResult changed across restart:\nbefore=%q\nafter=%q", isolatedBefore, isolatedAfter)
+	}
 	if err := stack.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -195,6 +206,18 @@ func TestMemoryStewardBindingControlsEmbeddedWorker(t *testing.T) {
 	})
 	if provider.StewardCalls() == 0 {
 		t.Fatal("explicit Steward binding completed no model callback")
+	}
+
+	stewardCallsBeforeRecall := provider.StewardCalls()
+	provider.Begin(memoryGoldenScenario{
+		name:    "semantic-steward-recall",
+		actions: []memoryGoldenAction{{name: memorytool.RecallToolName, arguments: `{"query":"release review language"}`}},
+	})
+	recalled := runMemoryGoldenSession(t, ctx, stack, "session-semantic-steward-recall")
+	assertMemoryGoldenResult(t, memoryGoldenToolResults(t, stack, recalled.SessionRef), memorytool.RecallToolName, "release review language is Chinese")
+	provider.AssertComplete(t)
+	if got := provider.StewardCalls(); got != stewardCallsBeforeRecall {
+		t.Fatalf("Recall triggered %d additional Steward model calls", got-stewardCallsBeforeRecall)
 	}
 
 	if _, err := stack.testAgentBindings().ResetAgentBinding(ctx, agentbinding.HandleSteward); err != nil {
@@ -577,8 +600,12 @@ func (p *memoryGoldenProvider) checkTools(payload map[string]any) {
 			if name == memorytool.RecallToolName {
 				want = "query"
 			}
-			if len(properties) != 1 || properties[want] == nil {
-				p.errors = append(p.errors, fmt.Sprintf("%s properties=%v", name, properties))
+			property, _ := properties[want].(map[string]any)
+			required, _ := parameters["required"].([]any)
+			additional, additionalOK := parameters["additionalProperties"].(bool)
+			if parameters["type"] != "object" || len(properties) != 1 || property["type"] != "string" ||
+				len(required) != 1 || required[0] != want || !additionalOK || additional {
+				p.errors = append(p.errors, fmt.Sprintf("%s parameters=%v", name, parameters))
 			}
 		}
 	}
