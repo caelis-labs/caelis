@@ -19,9 +19,8 @@ import (
 )
 
 const (
-	defaultCapabilityTTL   = 30 * time.Minute
-	capabilityRenewalAge   = time.Minute
-	readinessCapabilityTTL = time.Second
+	defaultCapabilityTTL = 30 * time.Minute
+	capabilityRenewalAge = time.Minute
 )
 
 // CredentialLookup resolves an opaque Control reference to issuer credential
@@ -139,12 +138,9 @@ func (h *Host) ValidateBinding(binding memorybinding.RuntimeMemoryBindingSnapsho
 	return validateBinding(binding)
 }
 
-// ValidateAuthority proves that the configured credential and Grant-backed
-// delegation can issue every Runtime operation. Memory v0.5.0-rc.3 exposes
-// this validation only through capability issuance, so the probe uses the
-// shortest public TTL and the empty, model-inaccessible partition. That API
-// does not accept the configured ViewRef separately; exact Grant-to-ViewRef
-// comparison remains a release prerequisite for the imported Memory module.
+// ValidateAuthority proves that the configured credential and complete
+// Grant-backed delegation authorize every Runtime operation without issuing a
+// bearer or persisting capability state.
 func (h *Host) ValidateAuthority(ctx context.Context, binding memorybinding.RuntimeMemoryBindingSnapshot) error {
 	if h == nil {
 		return fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
@@ -156,9 +152,10 @@ func (h *Host) ValidateAuthority(ctx context.Context, binding memorybinding.Runt
 	if err != nil {
 		return fmt.Errorf("gatewayapp/memoryhost: resolve issuer credential: %w", err)
 	}
-	_, err = h.issueCapability(ctx, credential, v1alpha1.CapabilityIssueRequest{
+	err = h.validateCapabilityAuthority(ctx, credential, v1alpha1.CapabilityAuthorityRequest{
 		PrincipalRef: binding.PrincipalRef,
 		GrantRef:     v1alpha1.GrantID(binding.GrantRef),
+		ViewRef:      v1alpha1.ViewID(binding.ViewRef),
 		ActorRef:     string(binding.RuntimeActorRef),
 		Audience:     v1alpha1.Audience(binding.Audience),
 		Operations: []v1alpha1.Operation{
@@ -166,12 +163,27 @@ func (h *Host) ValidateAuthority(ctx context.Context, binding memorybinding.Runt
 			v1alpha1.OperationRecall,
 			v1alpha1.OperationReceiptStatus,
 		},
-		TTLSeconds: int64(readinessCapabilityTTL / time.Second),
 	})
 	if err != nil {
 		return fmt.Errorf("gatewayapp/memoryhost: validate configured Runtime authority: %w", err)
 	}
 	return nil
+}
+
+func (h *Host) validateCapabilityAuthority(
+	ctx context.Context,
+	credential string,
+	request v1alpha1.CapabilityAuthorityRequest,
+) error {
+	if h == nil {
+		return fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
+	}
+	h.runtimeMu.RLock()
+	defer h.runtimeMu.RUnlock()
+	if h.closed.Load() {
+		return fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
+	}
+	return h.runtime.ValidateCapabilityAuthority(ctx, credential, request)
 }
 
 func validateBinding(binding memorybinding.RuntimeMemoryBindingSnapshot) error {

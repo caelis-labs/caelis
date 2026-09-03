@@ -119,12 +119,9 @@ readiness, compatibility handshake, or degraded Host state. First Host startup
 atomically provisions one private Identity, Space, View, Grant, issuer
 credential, and default binding. These are internal topology and authority
 records, not setup fields. On every later startup, Host construction validates
-each configured credential and its Grant-backed Runtime authority through
-Memory's capability issuer. The imported prerelease API makes that check a
-one-second, empty-partition capability rather than a side-effect-free query, and
-it does not expose the Grant's View for comparison with the configured
-`ViewRef`. A released Memory validation API that closes both gaps remains a
-Caelis release prerequisite.
+each configured credential and its complete Grant-backed Runtime authority,
+including the exact expected View, through Memory's side-effect-free validation
+API. Validation issues no bearer and persists no capability state.
 
 Memory then follows the same activation boundary. Control selects one opaque
 `BindingRef` internally, then detaches only that binding's Runtime actor,

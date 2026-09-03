@@ -60,12 +60,20 @@ func TestEmbeddedHostBindsSDKClient(t *testing.T) {
 	if err := host.ValidateAuthority(ctx, binding); err != nil {
 		t.Fatalf("ValidateAuthority() = %v", err)
 	}
+	inspection, err := host.Management().Inspect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.Capabilities.Stored != 0 {
+		t.Fatalf("ValidateAuthority() stored capabilities: %+v", inspection.Capabilities)
+	}
 	for name, mutate := range map[string]func(*memorybinding.RuntimeMemoryBindingSnapshot){
 		"credential": func(binding *memorybinding.RuntimeMemoryBindingSnapshot) {
 			binding.IssuerCredentialRef = "issuer:missing"
 		},
 		"principal": func(binding *memorybinding.RuntimeMemoryBindingSnapshot) { binding.PrincipalRef = "principal:other" },
 		"grant":     func(binding *memorybinding.RuntimeMemoryBindingSnapshot) { binding.GrantRef = "grant:missing" },
+		"view":      func(binding *memorybinding.RuntimeMemoryBindingSnapshot) { binding.ViewRef = "view:other" },
 		"actor":     func(binding *memorybinding.RuntimeMemoryBindingSnapshot) { binding.RuntimeActorRef = "actor:other" },
 		"audience": func(binding *memorybinding.RuntimeMemoryBindingSnapshot) {
 			binding.Audience = memorybinding.OutputAudienceShared
