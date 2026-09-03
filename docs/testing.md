@@ -10,8 +10,10 @@ make commit-check
 
 It runs configured lint, the full untagged Go test suite, and build. Lint already
 includes `gofmt` and `govet`, so `make test` disables Go's duplicate implicit vet
-pass. Standard Go caches are shared by default; restricted environments can set
-`CACHE_ROOT=/path/to/cache`.
+pass. Local and sandboxed Make targets use the stable repository-local
+`.tmp/cache` tree by default. CI retains its standard cache paths for runner
+cache integration. Set `CACHE_ROOT=/path/to/cache` to select another persistent
+location, or set it to an empty value locally to use the standard caches.
 
 ## Change-scoped checks
 

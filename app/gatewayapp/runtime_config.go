@@ -46,39 +46,6 @@ func (s *runtimeComposition) delegationAgentsForSpawn() []delegation.Agent {
 	return delegationAgentsForBindings(snapshot.placement.Bindings, true)
 }
 
-const sharedWorkspaceGuidance = "You share this workspace and current working directory with the parent agent and any sibling agents. Their edits are immediately visible. Change only files in this task's scope; do not assume you have an isolated copy."
-
-func systemPromptWithSharedWorkspaceGuidance(systemPrompt string) string {
-	systemPrompt = strings.TrimRight(strings.TrimSpace(systemPrompt), "\n")
-	if strings.Contains(systemPrompt, sharedWorkspaceGuidance) {
-		return systemPrompt
-	}
-	if systemPrompt == "" {
-		return sharedWorkspaceGuidance
-	}
-	return systemPrompt + "\n" + sharedWorkspaceGuidance
-}
-
-func systemPromptWithDelegationGuidance(systemPrompt string) string {
-	systemPrompt = strings.TrimRight(strings.TrimSpace(systemPrompt), "\n")
-	guidance := strings.Join([]string{
-		"- Delegate only when the subtask has clear independent scope, useful parallelism, or a focused review/investigation role.",
-		"- Make delegated prompts self-contained: goal, scope, constraints, edit permission, and expected output.",
-		"- Keep architecture, integration, validation, and user-facing judgment in the main session. Verify only delegated findings that affect the next action; do not repeat the investigation.",
-	}, "\n")
-	if strings.Contains(systemPrompt, guidance) ||
-		strings.Contains(systemPrompt, "Delegate only when the subtask has clear independent scope") ||
-		strings.Contains(systemPrompt, "Delegate only bounded side work") ||
-		strings.Contains(systemPrompt, "SPAWN for bounded child-agent work") ||
-		strings.Contains(systemPrompt, "SPAWN for bounded child ACP work") {
-		return systemPrompt
-	}
-	if systemPrompt == "" {
-		return guidance
-	}
-	return systemPrompt + "\n" + guidance
-}
-
 func defaultStoreDir() string {
 	return productpaths.DefaultStoreDir(mustGetwd())
 }

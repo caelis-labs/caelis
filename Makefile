@@ -27,11 +27,11 @@ PRODUCT_SUBAGENT_SELECTOR ?= ^(TestRunnerActionSummaryKeepsFinalizingIntentAcros
 PRODUCT_CONTROL_CLIENT_SELECTOR ?= ^(TestStateServiceDoesNotStarveWhileSessionRevisionChanges|TestStateServiceReconnectSucceedsDuringContinuousPublish)$$
 PRODUCT_WIRE_SELECTOR ?= ^TestEveryProductionEnvelopeVariantConformsToOpenAPI$$
 PRODUCT_DIAGNOSTICS_SELECTOR ?= ^(TestRuntimeDiagnosticsLoggerWritesPrivateJSONLFile|TestBoundedDiagnosticWriterKeepsOneSizeBoundedBackup)$$
-# Use the standard shared Go and tool caches by default. This lets local
-# worktrees reuse compiled artifacts and keeps GitHub's setup-go cache effective.
-# Restricted environments can opt into repository-local caches with
-# `make CACHE_ROOT=$(CURDIR)/.tmp/cache <target>`.
-CACHE_ROOT ?=
+# Local and sandboxed runs reuse a stable repository cache. CI keeps its
+# standard cache paths so runner-level cache integrations remain effective.
+ifeq ($(strip $(CI)),)
+CACHE_ROOT ?= $(CURDIR)/.tmp/cache
+endif
 ifneq ($(strip $(CACHE_ROOT)),)
 GOMODCACHE ?= $(CACHE_ROOT)/gomod
 GOCACHE ?= $(CACHE_ROOT)/gocache

@@ -98,11 +98,14 @@ func TestSpawnedSubagentSessionCannotReceiveNestedSpawn(t *testing.T) {
 		t.Fatalf("spawned child tools = %#v, want SendMessage", resolved.RunRequest.AgentSpec.Tools)
 	}
 	childPrompt := stringFromMap(resolved.RunRequest.AgentSpec.Metadata, "system_prompt")
-	if strings.Contains(childPrompt, "Delegate only when the subtask has clear independent scope") {
+	if strings.Contains(childPrompt, "## Delegation") {
 		t.Fatalf("spawned child prompt retained nested delegation guidance:\n%s", childPrompt)
 	}
-	if !strings.Contains(childPrompt, sharedWorkspaceGuidance) {
+	if !strings.Contains(childPrompt, "## Shared Workspace") {
 		t.Fatalf("spawned child prompt missing shared workspace guidance:\n%s", childPrompt)
+	}
+	if strings.Index(childPrompt, "## Shared Workspace") > strings.Index(childPrompt, "</system_instructions>") {
+		t.Fatalf("spawned child shared workspace guidance rendered outside system instructions:\n%s", childPrompt)
 	}
 }
 
