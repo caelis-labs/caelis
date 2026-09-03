@@ -286,6 +286,16 @@ func TestStandardACPKindPrecedesTerminalMetadataInHint(t *testing.T) {
 	if m.runningActivity.Phase != runningPhaseSearch {
 		t.Fatalf("search activity = %#v, want standard search phase", m.runningActivity)
 	}
+	if got := m.runningActivity.label(); got != "Searching" {
+		t.Fatalf("search activity label = %q, want generic search without a web claim", got)
+	}
+	search := m.runningActivity
+	search.StartedAt = time.Unix(101, 0)
+	m.runningHintTracker.active[search.Key] = search
+	m.refreshRunningActivity()
+	if got := ansi.Strip(m.buildRunningHintTextAt(time.Unix(110, 0))); got != "• Searching · 9.0s" {
+		t.Fatalf("running hint = %q, want generic search action without a web claim", got)
+	}
 }
 
 func TestStandardACPWaitUsesTaskWaitHintSemantics(t *testing.T) {
@@ -457,7 +467,7 @@ func TestLongRunningWebToolsUseDistinctWebActivity(t *testing.T) {
 		phase    runningActivityPhase
 		label    string
 	}{
-		{toolName: "WebSearch", phase: runningPhaseSearch, label: "Searching web"},
+		{toolName: "WebSearch", phase: runningPhaseWebSearch, label: "Searching web"},
 		{toolName: "WebFetch", phase: runningPhaseFetch, label: "Fetching web"},
 	} {
 		t.Run(test.toolName, func(t *testing.T) {

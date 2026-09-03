@@ -167,7 +167,7 @@ func (m *Model) applyToolRunningActivity(event TranscriptEvent) {
 	semanticName := event.ToolName
 	switch semanticName {
 	case surfaceToolWebSearch:
-		m.setRunningToolActivity(runningPhaseSearch, "", key, event.ToolCallID)
+		m.setRunningToolActivity(runningPhaseWebSearch, "", key, event.ToolCallID)
 	case surfaceToolWebFetch:
 		m.setRunningToolActivity(runningPhaseFetch, "", key, event.ToolCallID)
 	case surfaceToolRunCommand:

@@ -15,6 +15,8 @@ func (phase runningActivityPhase) label() string {
 	case runningPhaseResponding:
 		return "Responding"
 	case runningPhaseSearch:
+		return "Searching"
+	case runningPhaseWebSearch:
 		return "Searching web"
 	case runningPhaseFetch:
 		return "Fetching web"

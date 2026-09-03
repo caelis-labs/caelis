@@ -13,6 +13,7 @@ const (
 	runningPhaseThinking   runningActivityPhase = "thinking"
 	runningPhaseResponding runningActivityPhase = "responding"
 	runningPhaseSearch     runningActivityPhase = "search"
+	runningPhaseWebSearch  runningActivityPhase = "web_search"
 	runningPhaseFetch      runningActivityPhase = "fetch"
 	runningPhaseToolWait   runningActivityPhase = "wait"
 	runningPhaseCancel     runningActivityPhase = "cancel"
