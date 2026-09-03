@@ -179,7 +179,7 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireStringMinLength(t, defs[filesystem.ReadToolName], "path", 1)
 	requireIntegerBounds(t, defs[filesystem.ReadToolName], "offset", 0, nil)
 	requireIntegerBounds(t, defs[filesystem.ReadToolName], "limit", 1, ptrAny(400))
-	requireDescriptionContains(t, defs[filesystem.ReadToolName], "numbered lines", "small offsets", "has_more", "revision", "if_revision")
+	requireDescriptionContains(t, defs[filesystem.ReadToolName], "numbered lines", "small offsets", "has_more", "revision", "if_revision", "Write")
 	requireAnnotations(t, defs[filesystem.ReadToolName], true, false, true, false)
 
 	requireStringMinLength(t, defs[filesystem.ViewImageToolName], "path", 1)
@@ -213,8 +213,9 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireAnnotations(t, defs[filesystem.WriteToolName], false, true, true, false)
 
 	requireStringMinLength(t, defs[filesystem.PatchToolName], "path", 1)
+	requireNoProperty(t, defs[filesystem.PatchToolName], "if_revision")
 	requirePatchEditSchema(t, defs[filesystem.PatchToolName])
-	requireDescriptionContains(t, defs[filesystem.PatchToolName], "surgical edits", "if_revision")
+	requireDescriptionContains(t, defs[filesystem.PatchToolName], "surgical exact text replacements", "current file", "replacement batch")
 	requireAnnotations(t, defs[filesystem.PatchToolName], false, true, true, false)
 
 	requireStringMinLength(t, defs[shell.RunCommandToolName], "command", 1)
@@ -419,9 +420,8 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 	if got := readResult["content"]; !strings.Contains(got.(string), "1: hello") {
 		t.Fatalf("read content = %v, want numbered file lines", got)
 	}
-	revision, _ := readResult["revision"].(string)
-	if revision == "" {
-		t.Fatal("read revision is empty")
+	if revision, _ := readResult["revision"].(string); revision == "" {
+		t.Fatalf("read revision = %#v, want non-empty", readResult["revision"])
 	}
 
 	patchTool := mustLookupTool(t, tools, filesystem.PatchToolName)
@@ -431,10 +431,10 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 			{
 				"old":                   "world",
 				"new":                   "caelis",
-				"expected_replacements": 1,
+				"expected_replacements": "retired",
 			},
 		},
-		"if_revision": revision,
+		"if_revision": 42,
 	})
 	if got := patchResult["replacements"]; got != float64(1) {
 		t.Fatalf("patch replacements = %v, want 1", got)
@@ -725,25 +725,17 @@ func requirePatchEditSchema(t *testing.T, def tool.Definition) {
 	props, _ := items["properties"].(map[string]any)
 	oldProp, _ := props["old"].(map[string]any)
 	newProp, _ := props["new"].(map[string]any)
-	expectedProp, _ := props["expected_replacements"].(map[string]any)
 	if got := oldProp["minLength"]; got != 1 {
 		t.Fatalf("PATCH edits.old minLength = %#v, want 1", got)
 	}
 	if _, ok := newProp["minLength"]; ok {
 		t.Fatalf("PATCH edits.new minLength present: %#v", newProp["minLength"])
 	}
-	if got := expectedProp["minimum"]; got != 1 {
-		t.Fatalf("PATCH edits.expected_replacements minimum = %#v, want 1", got)
+	if _, ok := props["expected_replacements"]; ok {
+		t.Fatalf("PATCH edits expose retired expected_replacements: %#v", props["expected_replacements"])
 	}
-	allOf, _ := items["allOf"].([]any)
-	if len(allOf) != 1 {
-		t.Fatalf("PATCH edits item allOf = %#v, want replace_all conditional", allOf)
-	}
-	condition, _ := allOf[0].(map[string]any)
-	thenSchema, _ := condition["then"].(map[string]any)
-	required, _ := thenSchema["required"].([]string)
-	if !slices.Contains(required, "expected_replacements") {
-		t.Fatalf("PATCH conditional required = %#v, want expected_replacements", thenSchema["required"])
+	if _, ok := items["allOf"]; ok {
+		t.Fatalf("PATCH edits retain retired replacement-count condition: %#v", items["allOf"])
 	}
 }
 

@@ -13,12 +13,14 @@ import (
 type ErrorCode = errorcode.Code
 
 const (
-	ErrorCodeNotFound             ErrorCode = "not_found"
-	ErrorCodePermissionDenied     ErrorCode = "permission_denied"
-	ErrorCodeSandboxDenied        ErrorCode = "sandbox_denied"
-	ErrorCodeSandboxUnavailable   ErrorCode = "sandbox_unavailable"
-	ErrorCodeOldTextNotFound      ErrorCode = "old_text_not_found"
-	ErrorCodeTooManyMatches       ErrorCode = "too_many_matches"
+	ErrorCodeNotFound           ErrorCode = "not_found"
+	ErrorCodePermissionDenied   ErrorCode = "permission_denied"
+	ErrorCodeSandboxDenied      ErrorCode = "sandbox_denied"
+	ErrorCodeSandboxUnavailable ErrorCode = "sandbox_unavailable"
+	ErrorCodeOldTextNotFound    ErrorCode = "old_text_not_found"
+	ErrorCodeTooManyMatches     ErrorCode = "too_many_matches"
+	// ErrorCodeUnexpectedMatchCount is retained for source compatibility.
+	// Patch no longer emits it because replacement counts are no longer inputs.
 	ErrorCodeUnexpectedMatchCount ErrorCode = "unexpected_match_count"
 	ErrorCodeStaleRevision        ErrorCode = "stale_revision"
 	ErrorCodeTimeout              ErrorCode = "timeout"

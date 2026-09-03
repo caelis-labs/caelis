@@ -49,7 +49,7 @@ func NewRead(cfg ReadConfig, runtime sandbox.Runtime) (*ReadTool, error) {
 func (t *ReadTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ReadToolName,
-		Description: "Read a slice of one text file and return numbered lines plus cursor metadata. Use this after Glob or Grep identifies a relevant file, or when exact text is needed before editing. Prefer small offsets and limits; if has_more is true, continue from next_offset. Use revision as if_revision for Write or Patch stale-edit guards.",
+		Description: "Read a slice of one text file and return numbered lines plus cursor metadata. Use this after Glob or Grep identifies a relevant file, or when exact text is needed before editing. Prefer small offsets and limits; if has_more is true, continue from next_offset. Use revision as if_revision for Write stale-edit guards.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -173,7 +173,6 @@ func (t *ReadTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 		nextOffset = lineNo
 	}
 	exhausted := len(lines) == 0 && offset >= lineNo
-
 	revision := contentHashRevision(hasher)
 	if hasMore {
 		revision = statRevision(info)

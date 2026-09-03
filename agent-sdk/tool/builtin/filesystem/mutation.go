@@ -12,6 +12,15 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
 )
 
+// Retired Patch arguments remain accepted only so recoverable invocations
+// issued under the former schema can still execute. They are intentionally
+// absent from the definition and ignored. Remove these allowances once that
+// recovery window falls below the supported upgrade floor.
+const (
+	retiredPatchIfRevisionArg      = "if_revision"
+	retiredExpectedReplacementsArg = "expected_replacements"
+)
+
 type fileMutationPlan struct {
 	tool      string
 	path      string
@@ -21,16 +30,13 @@ type fileMutationPlan struct {
 	hunk      string
 	mode      os.FileMode
 	replaced  int
-	oldCount  int
 	editCount int
 }
 
 type patchEdit struct {
-	old              string
-	new              string
-	replaceAll       bool
-	expected         int
-	expectedProvided bool
+	old        string
+	new        string
+	replaceAll bool
 }
 
 type patchReplacement struct {
@@ -57,7 +63,6 @@ func planWriteMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	if err != nil {
 		return fileMutationPlan{}, err
 	}
-
 	target, err := normalizePathWithFS(fsys, pathArg)
 	if err != nil {
 		return fileMutationPlan{}, err
@@ -89,7 +94,6 @@ func planWriteMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	if !revisionsMatchFile(ifRevision, before, info) {
 		return fileMutationPlan{}, staleRevisionError()
 	}
-
 	return fileMutationPlan{
 		tool:    WriteToolName,
 		path:    target,
@@ -109,11 +113,6 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	if err != nil {
 		return fileMutationPlan{}, err
 	}
-	ifRevision, err := argparse.String(args, "if_revision", false)
-	if err != nil {
-		return fileMutationPlan{}, err
-	}
-
 	target, err := normalizePathWithFS(fsys, pathArg)
 	if err != nil {
 		return fileMutationPlan{}, err
@@ -142,10 +141,6 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 		return fileMutationPlan{}, err
 	}
 	content := string(contentRaw)
-	if !revisionsMatchFile(ifRevision, content, fileInfo) {
-		return fileMutationPlan{}, staleRevisionError()
-	}
-
 	replacements, err := collectPatchReplacements(content, edits)
 	if err != nil {
 		return fileMutationPlan{}, err
@@ -165,7 +160,6 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 		hunk:      hunk,
 		mode:      mode,
 		replaced:  len(replacements),
-		oldCount:  len(replacements),
 		editCount: len(edits),
 	}, nil
 }
@@ -188,7 +182,7 @@ func parsePatchEdits(args map[string]any) ([]patchEdit, error) {
 		if !ok {
 			return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg \"edits[%d]\" must be an object", idx))
 		}
-		if err := tool.RejectUnknownArgs(item, "old", "new", "replace_all", "expected_replacements"); err != nil {
+		if err := tool.RejectUnknownArgs(item, "old", "new", "replace_all", retiredExpectedReplacementsArg); err != nil {
 			return nil, fmt.Errorf("patch edits[%d]: %w", idx, err)
 		}
 		oldValue, err := requiredPatchEditString(item, idx, "old")
@@ -206,27 +200,10 @@ func parsePatchEdits(args map[string]any) ([]patchEdit, error) {
 		if err != nil {
 			return nil, err
 		}
-		expectedProvided := false
-		expected := 1
-		if rawExpected, ok := item["expected_replacements"]; ok && rawExpected != nil {
-			expectedProvided = true
-			expected, err = argparse.Int(item, "expected_replacements", 1)
-			if err != nil {
-				return nil, err
-			}
-			if expected < 1 {
-				return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg \"edits[%d].expected_replacements\" must be >= 1", idx))
-			}
-		}
-		if replaceAll && !expectedProvided {
-			return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg \"edits[%d].expected_replacements\" is required when replace_all is true", idx))
-		}
 		edits = append(edits, patchEdit{
-			old:              oldValue,
-			new:              newValue,
-			replaceAll:       replaceAll,
-			expected:         expected,
-			expectedProvided: expectedProvided,
+			old:        oldValue,
+			new:        newValue,
+			replaceAll: replaceAll,
 		})
 	}
 	return edits, nil
@@ -255,12 +232,9 @@ func collectPatchReplacements(content string, edits []patchEdit) ([]patchReplace
 			err.Retryable = true
 			return nil, err
 		}
-		if edit.expectedProvided && count != edit.expected {
-			return nil, replacementCountError(idx, edit.expected, count)
-		}
 		if !edit.replaceAll && count != 1 {
 			err := tool.NewError(tool.ErrorCodeTooManyMatches, fmt.Sprintf("Patch edit %d requires exact single match, found %d", idx, count))
-			err.Hint = "Use a more specific old text or set replace_all with expected_replacements."
+			err.Hint = "Use a more specific old text or set replace_all."
 			err.Retryable = true
 			return nil, err
 		}
@@ -447,13 +421,6 @@ func applyPatchReplacements(content string, replacements []patchReplacement) str
 		out = out[:replacement.start] + replacement.new + out[replacement.end:]
 	}
 	return out
-}
-
-func replacementCountError(editIndex int, expected int, actual int) error {
-	err := tool.NewError(tool.ErrorCodeUnexpectedMatchCount, fmt.Sprintf("Patch edit %d expected %d replacement(s), found %d", editIndex, expected, actual))
-	err.Hint = "Read the file again and retry Patch with the current expected_replacements value."
-	err.Retryable = true
-	return err
 }
 
 func patchLineCount(text string) int {

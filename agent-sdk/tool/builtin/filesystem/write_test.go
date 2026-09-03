@@ -34,14 +34,12 @@ func TestWriteToolCreatesWorkspaceParentDirectories(t *testing.T) {
 	}
 }
 
-func TestWriteToolReturnsRevisionUsableByPatch(t *testing.T) {
+func TestWriteToolReturnsRevision(t *testing.T) {
 	dir := t.TempDir()
 	writeTool, err := NewWrite(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
 	if err != nil {
 		t.Fatalf("NewWrite() error = %v", err)
 	}
-	patchTool := newTestPatchTool(t, dir)
-
 	payload := runWritePayload(t, writeTool, map[string]any{
 		"path":    "notes.txt",
 		"content": "hello\n",
@@ -50,16 +48,30 @@ func TestWriteToolReturnsRevisionUsableByPatch(t *testing.T) {
 	if !strings.HasPrefix(revision, "sha256:") {
 		t.Fatalf("WRITE revision = %q, want sha256 revision", revision)
 	}
+}
 
-	runPatch(t, patchTool, map[string]any{
+func TestWriteToolRejectsStaleRevision(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("current\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeTool, err := NewWrite(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
+	if err != nil {
+		t.Fatalf("NewWrite() error = %v", err)
+	}
+
+	err = callWrite(writeTool, map[string]any{
 		"path":        "notes.txt",
-		"if_revision": revision,
-		"edits": []map[string]any{
-			{"old": "hello", "new": "hi"},
-		},
+		"content":     "stale replacement\n",
+		"if_revision": "sha256:stale",
 	})
-	if got, want := readTestFile(t, filepath.Join(dir, "notes.txt")), "hi\n"; got != want {
-		t.Fatalf("patched content = %q, want %q", got, want)
+	var toolErr *tool.ToolError
+	if !errors.As(err, &toolErr) || toolErr.Code != tool.ErrorCodeStaleRevision {
+		t.Fatalf("WRITE error = %T %v, want stale revision", err, err)
+	}
+	if got, want := readTestFile(t, path), "current\n"; got != want {
+		t.Fatalf("content changed after rejected WRITE: %q", got)
 	}
 }
 

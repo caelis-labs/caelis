@@ -113,10 +113,9 @@ func TestPatchToolAddsStructuredDiffHunksOnlyToMeta(t *testing.T) {
 		"path": "repo.go",
 		"edits": []map[string]any{
 			{
-				"old":                   "entity.GMLicense",
-				"new":                   "entity.GmLicense",
-				"replace_all":           true,
-				"expected_replacements": 2,
+				"old":         "entity.GMLicense",
+				"new":         "entity.GmLicense",
+				"replace_all": true,
 			},
 		},
 	})

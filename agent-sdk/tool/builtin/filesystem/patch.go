@@ -25,43 +25,25 @@ func NewPatch(runtime sandbox.Runtime) (*PatchTool, error) {
 func (t *PatchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        PatchToolName,
-		Description: "Apply one or more exact text replacements to a single file atomically. Use this for surgical edits after Read provides the exact old text. Include if_revision when available to guard against stale edits.",
+		Description: "Apply one or more surgical exact text replacements to a single file. All edits are validated against the current file before the replacement batch is written.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"path": map[string]any{"type": "string", "minLength": 1, "description": "Target file."},
 				"edits": map[string]any{
 					"type":        "array",
-					"description": "Exact replacements to apply atomically.",
+					"description": "Exact replacements validated together and written as one batch.",
 					"minItems":    1,
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
 							"old":         map[string]any{"type": "string", "minLength": 1, "description": "Exact text to replace."},
 							"new":         map[string]any{"type": "string", "description": "Replacement text."},
-							"replace_all": map[string]any{"type": "boolean", "description": "Replace all matches."},
-							"expected_replacements": map[string]any{
-								"type":        "integer",
-								"minimum":     1,
-								"description": "Required replacement count. Required when replace_all is true.",
-							},
+							"replace_all": map[string]any{"type": "boolean", "description": "Replace every exact match; otherwise old must match exactly once."},
 						},
 						"required":             []string{"old", "new"},
 						"additionalProperties": false,
-						"allOf": []any{map[string]any{
-							"if": map[string]any{
-								"properties": map[string]any{
-									"replace_all": map[string]any{"const": true},
-								},
-								"required": []string{"replace_all"},
-							},
-							"then": map[string]any{"required": []string{"expected_replacements"}},
-						}},
 					},
-				},
-				"if_revision": map[string]any{
-					"type":        "string",
-					"description": "Revision guard from Read.",
 				},
 			},
 			"required":             []string{"path", "edits"},
@@ -80,7 +62,7 @@ func (t *PatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 	if err != nil {
 		return tool.Result{}, err
 	}
-	if err := tool.RejectUnknownArgs(args, "path", "edits", "if_revision"); err != nil {
+	if err := tool.RejectUnknownArgs(args, "path", "edits", retiredPatchIfRevisionArg); err != nil {
 		return tool.Result{}, err
 	}
 	fsys := fileSystemFromRuntime(t.runtime, call.Metadata)

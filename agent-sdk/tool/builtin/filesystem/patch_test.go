@@ -120,10 +120,9 @@ func TestPatchToolReplaceAllWithExpectedCount(t *testing.T) {
 		"path": "symbols.txt",
 		"edits": []map[string]any{
 			{
-				"old":                   "x",
-				"new":                   "y",
-				"replace_all":           true,
-				"expected_replacements": 3,
+				"old":         "x",
+				"new":         "y",
+				"replace_all": true,
 			},
 		},
 	})
@@ -194,10 +193,9 @@ func TestPatchToolLineEndingFallbackPreservesReplaceAllCount(t *testing.T) {
 		"path": "repeated.txt",
 		"edits": []map[string]any{
 			{
-				"old":                   "alpha\nbeta\n",
-				"new":                   "one\ntwo\n",
-				"replace_all":           true,
-				"expected_replacements": 2,
+				"old":         "alpha\nbeta\n",
+				"new":         "one\ntwo\n",
+				"replace_all": true,
 			},
 		},
 	})
@@ -223,10 +221,9 @@ func TestPatchToolUsesExactMatchBeforeLineEndingFallback(t *testing.T) {
 		"path": "mixed.txt",
 		"edits": []map[string]any{
 			{
-				"old":                   "alpha\nbeta\n",
-				"new":                   "one\ntwo\n",
-				"replace_all":           true,
-				"expected_replacements": 1,
+				"old":         "alpha\nbeta\n",
+				"new":         "one\ntwo\n",
+				"replace_all": true,
 			},
 		},
 	})
@@ -304,7 +301,7 @@ func TestPatchToolMatchErrorsDoNotIncludeTargetPath(t *testing.T) {
 	}
 }
 
-func TestPatchToolRejectsExpectedCountMismatch(t *testing.T) {
+func TestPatchToolIgnoresLegacyExpectedReplacementCount(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "symbols.txt")
 	if err := os.WriteFile(path, []byte("x + x\n"), 0o644); err != nil {
@@ -312,24 +309,43 @@ func TestPatchToolRejectsExpectedCountMismatch(t *testing.T) {
 	}
 	patchTool := newTestPatchTool(t, dir)
 
-	err := callPatch(patchTool, map[string]any{
+	runPatch(t, patchTool, map[string]any{
 		"path": "symbols.txt",
 		"edits": []map[string]any{
 			{
 				"old":                   "x",
 				"new":                   "y",
 				"replace_all":           true,
-				"expected_replacements": 3,
+				"expected_replacements": "retired",
 			},
 		},
 	})
-	requireToolErrorCode(t, err, tool.ErrorCodeUnexpectedMatchCount)
-	if got, want := readTestFile(t, path), "x + x\n"; got != want {
-		t.Fatalf("content changed after failed PATCH: %q", got)
+	if got, want := readTestFile(t, path), "y + y\n"; got != want {
+		t.Fatalf("patched content = %q, want %q", got, want)
 	}
 }
 
-func TestPatchToolRequiresExpectedCountForReplaceAll(t *testing.T) {
+func TestPatchToolIgnoresLegacyRevision(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	patchTool := newTestPatchTool(t, dir)
+
+	runPatch(t, patchTool, map[string]any{
+		"path":        "notes.txt",
+		"if_revision": map[string]any{"retired": true},
+		"edits": []map[string]any{
+			{"old": "old", "new": "new"},
+		},
+	})
+	if got, want := readTestFile(t, path), "new\n"; got != want {
+		t.Fatalf("patched content = %q, want %q", got, want)
+	}
+}
+
+func TestPatchToolReplaceAllDoesNotRequireExpectedCount(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "replace-all.txt")
 	if err := os.WriteFile(path, []byte("x + x\n"), 0o644); err != nil {
@@ -337,7 +353,7 @@ func TestPatchToolRequiresExpectedCountForReplaceAll(t *testing.T) {
 	}
 	patchTool := newTestPatchTool(t, dir)
 
-	err := callPatch(patchTool, map[string]any{
+	runPatch(t, patchTool, map[string]any{
 		"path": "replace-all.txt",
 		"edits": []map[string]any{
 			{
@@ -347,34 +363,8 @@ func TestPatchToolRequiresExpectedCountForReplaceAll(t *testing.T) {
 			},
 		},
 	})
-	requireToolErrorCode(t, err, tool.ErrorCodeInvalidInput)
-	if got, want := readTestFile(t, path), "x + x\n"; got != want {
-		t.Fatalf("content changed after failed PATCH: %q", got)
-	}
-}
-
-func TestPatchToolTreatsNullExpectedCountAsMissingForReplaceAll(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "replace-all-null.txt")
-	if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	patchTool := newTestPatchTool(t, dir)
-
-	err := callPatch(patchTool, map[string]any{
-		"path": "replace-all-null.txt",
-		"edits": []map[string]any{
-			{
-				"old":                   "x",
-				"new":                   "y",
-				"replace_all":           true,
-				"expected_replacements": nil,
-			},
-		},
-	})
-	requireToolErrorCode(t, err, tool.ErrorCodeInvalidInput)
-	if got, want := readTestFile(t, path), "x\n"; got != want {
-		t.Fatalf("content changed after failed PATCH: %q", got)
+	if got, want := readTestFile(t, path), "y + y\n"; got != want {
+		t.Fatalf("patched content = %q, want %q", got, want)
 	}
 }
 

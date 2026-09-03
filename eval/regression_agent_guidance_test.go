@@ -74,8 +74,8 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 			wants:    []string{"repository inspection", "async Task", "file tools"},
 		},
 		{name: "small edits prefer patch", toolName: filesystem.WriteToolName, wants: []string{"Prefer Patch"}},
-		{name: "patch uses exact surgical edits", toolName: filesystem.PatchToolName, wants: []string{"surgical edits", "if_revision"}},
-		{name: "read exposes revision replay guard", toolName: filesystem.ReadToolName, wants: []string{"has_more", "revision", "if_revision"}},
+		{name: "patch uses current exact text", toolName: filesystem.PatchToolName, wants: []string{"surgical exact text replacements", "current file"}},
+		{name: "read exposes Write revision guard", toolName: filesystem.ReadToolName, wants: []string{"has_more", "next_offset", "revision", "if_revision", "Write"}},
 		{name: "task reaches model boundary", toolName: task.ToolName},
 		{name: "spawn remains bounded", toolName: spawn.ToolName, wants: []string{"bounded delegated child session", "self-contained"}},
 		{name: "send message reaches model boundary", toolName: sendmessage.ToolName},
@@ -91,9 +91,7 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 					t.Fatalf("%s description missing %q: %q", check.toolName, want, spec.Function.Description)
 				}
 			}
-			conditionalSchema := check.toolName == shell.RunCommandToolName ||
-				check.toolName == filesystem.PatchToolName ||
-				check.toolName == task.ToolName
+			conditionalSchema := check.toolName == shell.RunCommandToolName || check.toolName == task.ToolName
 			if got, want := spec.Function.Strict, !conditionalSchema; got != want {
 				t.Fatalf("%s Function.Strict = %v, want %v for its canonical schema", check.toolName, got, want)
 			}
