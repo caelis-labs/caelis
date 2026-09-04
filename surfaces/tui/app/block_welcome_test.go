@@ -121,7 +121,7 @@ func TestWelcomeDetailsKeepFormalVersionOrderAndReplaceableNotice(t *testing.T) 
 	t.Parallel()
 	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
 	styles := newWelcomePanelStyles(theme.Tokens())
-	rows := buildWelcomeDetails(34, "v1.2.3", "New workspace flow available.", styles)
+	rows := buildWelcomeDetails(34, "v1.2.3", newWelcomeAnnouncement("New workspace flow available."), styles)
 	if got := strings.TrimSpace(rows[0].plain); got != "CAELIS  v1.2.3" {
 		t.Fatalf("identity row = %q", got)
 	}
@@ -144,11 +144,110 @@ func TestWelcomeDetailsKeepFormalVersionOrderAndReplaceableNotice(t *testing.T) 
 	}
 }
 
+func TestWelcomeUpdateAnnouncementUsesWarningEmphasisAndFitsCompactColumn(t *testing.T) {
+	theme := tuikit.ResolveThemeFromOptions(false, colorprofile.TrueColor)
+	styles := newWelcomePanelStyles(theme.Tokens())
+	announcement := formatUpdateAnnouncement("1.2.0")
+	if got, want := announcement.plainText(), "v1.2.0 available, press ctrl+u to update"; got != want {
+		t.Fatalf("update announcement = %q, want %q", got, want)
+	}
+
+	rows := welcomeNoticeCells(announcement, 18, 3, styles)
+	wantRows := []string{
+		"v1.2.0 available,",
+		"press ctrl+u to",
+		"update",
+	}
+	if got := rowPlainTextsForWelcomePanel(rows); len(got) != len(wantRows) {
+		t.Fatalf("compact update rows = %#v, want %#v", got, wantRows)
+	} else {
+		for i, want := range wantRows {
+			if got := strings.TrimRight(got[i], " "); got != want {
+				t.Fatalf("compact update row %d = %q, want %q", i, got, want)
+			}
+		}
+	}
+	for i, row := range rows {
+		if got := displayColumns(row.plain); got != 18 {
+			t.Fatalf("plain update row %d width = %d, want 18: %q", i, got, row.plain)
+		}
+		if got := displayColumns(ansi.Strip(row.styled)); got != 18 {
+			t.Fatalf("styled update row %d width = %d, want 18: %q", i, got, ansi.Strip(row.styled))
+		}
+	}
+
+	warningParts := make([]string, 0, len(rows))
+	mutedParts := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if text := ansiTextForForeground(t, row.styled, theme.Warning); text != "" {
+			warningParts = append(warningParts, text)
+		}
+		if text := ansiTextForForeground(t, row.styled, theme.MutedText); text != "" {
+			mutedParts = append(mutedParts, text)
+		}
+	}
+	if got := strings.Join(warningParts, " "); got != "v1.2.0 available" {
+		t.Fatalf("warning emphasis = %q, want version availability only", got)
+	}
+	if got := strings.Join(mutedParts, " "); got != ", press ctrl+u to update" {
+		t.Fatalf("muted update detail = %q, want action copy", got)
+	}
+}
+
+func TestWelcomeAnnouncementAllowsCustomEmphasizedPrefix(t *testing.T) {
+	theme := tuikit.ResolveThemeFromOptions(false, colorprofile.TrueColor)
+	styles := newWelcomePanelStyles(theme.Tokens())
+	announcement := newWelcomeAnnouncementWithEmphasis("New: workspace flow", "New:")
+	if got := announcement.plainText(); got != "New: workspace flow" {
+		t.Fatalf("announcement text = %q, want caller-owned punctuation", got)
+	}
+	rows := welcomeNoticeCells(announcement, 34, 3, styles)
+	styled := rows[0].styled
+	if got := ansiTextForForeground(t, styled, theme.Warning); got != "New:" {
+		t.Fatalf("warning emphasis = %q, want custom leading segment", got)
+	}
+	if got := ansiTextForForeground(t, styled, theme.MutedText); got != "workspace flow" {
+		t.Fatalf("muted announcement detail = %q, want custom suffix", got)
+	}
+}
+
+func TestWelcomeGenericAnnouncementsRemainMuted(t *testing.T) {
+	theme := tuikit.ResolveThemeFromOptions(false, colorprofile.TrueColor)
+	styles := newWelcomePanelStyles(theme.Tokens())
+	for _, tc := range []struct {
+		name         string
+		announcement welcomeAnnouncement
+	}{
+		{name: "default", announcement: newWelcomeAnnouncement("")},
+		{name: "configured", announcement: newWelcomeAnnouncement("New workspace flow available.")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := welcomeNoticeCells(tc.announcement, 34, 3, styles)
+			var warningParts []string
+			var mutedParts []string
+			for _, row := range rows {
+				if text := ansiTextForForeground(t, row.styled, theme.Warning); text != "" {
+					warningParts = append(warningParts, text)
+				}
+				if text := ansiTextForForeground(t, row.styled, theme.MutedText); text != "" {
+					mutedParts = append(mutedParts, text)
+				}
+			}
+			if got := strings.Join(warningParts, " "); got != "" {
+				t.Fatalf("warning emphasis = %q, want none", got)
+			}
+			if got, want := strings.Join(mutedParts, " "), tc.announcement.plainText(); got != want {
+				t.Fatalf("muted announcement = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestWelcomePanelKeepsWideLayoutsCompact(t *testing.T) {
 	t.Parallel()
 	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
-	medium := buildWelcomePanel(BlockRenderContext{Width: 77, Height: 19, Theme: theme}, "v1.0.0", "")
-	fullscreen := buildWelcomePanel(BlockRenderContext{Width: 190, Height: 50, Theme: theme}, "v1.0.0", "")
+	medium := buildWelcomePanel(BlockRenderContext{Width: 77, Height: 19, Theme: theme}, "v1.0.0", newWelcomeAnnouncement(""))
+	fullscreen := buildWelcomePanel(BlockRenderContext{Width: 190, Height: 50, Theme: theme}, "v1.0.0", newWelcomeAnnouncement(""))
 	if got, want := displayColumns(medium[0].plain), welcomePanelBaseWidth; got != want {
 		t.Fatalf("medium panel width = %d, want %d", got, want)
 	}
@@ -186,7 +285,7 @@ func TestWelcomeStandardLogoKeepsAspect(t *testing.T) {
 func TestWelcomeStandardLayoutShiftsLogoAndBalancesItsSpacing(t *testing.T) {
 	t.Parallel()
 	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
-	rows := buildWelcomePanel(BlockRenderContext{Width: 190, Height: 50, Theme: theme}, "v1.0.0", "")
+	rows := buildWelcomePanel(BlockRenderContext{Width: 190, Height: 50, Theme: theme}, "v1.0.0", newWelcomeAnnouncement(""))
 	logoStart := -1
 	detailsStart := -1
 	for _, row := range rows {
@@ -257,7 +356,7 @@ func TestWelcomeActionRowsOmitCommandHints(t *testing.T) {
 func TestWelcomeLayoutKeepsDenseActionStack(t *testing.T) {
 	t.Parallel()
 	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
-	rows := buildWelcomePanel(BlockRenderContext{Width: 190, Height: 50, Theme: theme}, "v1.0.0", "")
+	rows := buildWelcomePanel(BlockRenderContext{Width: 190, Height: 50, Theme: theme}, "v1.0.0", newWelcomeAnnouncement(""))
 	actionRows := make([]int, 0, len(welcomeActions))
 	for i, row := range rows {
 		if row.token != "" {

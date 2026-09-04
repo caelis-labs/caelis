@@ -47,10 +47,34 @@ var welcomeRelayCompactASCII = []string{
 }
 
 type WelcomeBlock struct {
-	id      string
-	Version string
-	Notice  string
+	id           string
+	Version      string
+	announcement welcomeAnnouncement
 }
+
+type welcomeAnnouncement struct {
+	text     string
+	emphasis string
+}
+
+func newWelcomeAnnouncement(text string) welcomeAnnouncement {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		text = welcomeDefaultNotice
+	}
+	return welcomeAnnouncement{text: text}
+}
+
+func newWelcomeAnnouncementWithEmphasis(text string, emphasis string) welcomeAnnouncement {
+	announcement := newWelcomeAnnouncement(text)
+	emphasis = strings.TrimSpace(emphasis)
+	if emphasis != "" && strings.HasPrefix(announcement.text, emphasis) {
+		announcement.emphasis = emphasis
+	}
+	return announcement
+}
+
+func (a welcomeAnnouncement) plainText() string { return a.text }
 
 func NewWelcomeBlock(version string) *WelcomeBlock {
 	return newWelcomeBlock(version, "")
@@ -58,18 +82,10 @@ func NewWelcomeBlock(version string) *WelcomeBlock {
 
 func newWelcomeBlock(version string, notice string) *WelcomeBlock {
 	return &WelcomeBlock{
-		id:      nextBlockID(),
-		Version: version,
-		Notice:  normalizeWelcomeNotice(notice),
+		id:           nextBlockID(),
+		Version:      version,
+		announcement: newWelcomeAnnouncement(notice),
 	}
-}
-
-func normalizeWelcomeNotice(notice string) string {
-	notice = strings.TrimSpace(notice)
-	if notice == "" {
-		return welcomeDefaultNotice
-	}
-	return notice
 }
 
 func welcomeVersionLabel(version string) string {
@@ -87,7 +103,7 @@ func (b *WelcomeBlock) BlockID() string { return b.id }
 func (b *WelcomeBlock) Kind() BlockKind { return BlockWelcome }
 
 func (b *WelcomeBlock) Render(ctx BlockRenderContext) []RenderedRow {
-	panelRows := buildWelcomePanel(ctx, welcomeVersionLabel(b.Version), b.Notice)
+	panelRows := buildWelcomePanel(ctx, welcomeVersionLabel(b.Version), b.announcement)
 	if len(panelRows) == 0 {
 		return nil
 	}
@@ -133,26 +149,28 @@ type welcomePanelRow struct {
 }
 
 type welcomePanelStyles struct {
-	surface      lipgloss.Style
-	border       lipgloss.Style
-	logo         lipgloss.Style
-	brand        lipgloss.Style
-	action       lipgloss.Style
-	actionMarker lipgloss.Style
-	meta         lipgloss.Style
-	notice       lipgloss.Style
+	surface        lipgloss.Style
+	border         lipgloss.Style
+	logo           lipgloss.Style
+	brand          lipgloss.Style
+	action         lipgloss.Style
+	actionMarker   lipgloss.Style
+	meta           lipgloss.Style
+	notice         lipgloss.Style
+	noticeEmphasis lipgloss.Style
 }
 
 func newWelcomePanelStyles(tokens tuikit.Tokens) welcomePanelStyles {
 	styles := welcomePanelStyles{
-		surface:      tokens.Surface0,
-		border:       tokens.BorderSubtle,
-		logo:         tokens.Focus,
-		brand:        tokens.TextPrimary.Bold(true),
-		action:       tokens.TextPrimary.Bold(true),
-		actionMarker: tokens.Accent.Bold(true),
-		meta:         tokens.ChromeMeta,
-		notice:       tokens.TextMuted,
+		surface:        tokens.Surface0,
+		border:         tokens.BorderSubtle,
+		logo:           tokens.Focus,
+		brand:          tokens.TextPrimary.Bold(true),
+		action:         tokens.TextPrimary.Bold(true),
+		actionMarker:   tokens.Accent.Bold(true),
+		meta:           tokens.ChromeMeta,
+		notice:         tokens.TextMuted,
+		noticeEmphasis: tokens.Warning,
 	}
 	if background := tokens.Surface0.GetBackground(); background != nil {
 		styles.border = styles.border.Background(background)
@@ -162,20 +180,23 @@ func newWelcomePanelStyles(tokens tuikit.Tokens) welcomePanelStyles {
 		styles.actionMarker = styles.actionMarker.Background(background)
 		styles.meta = styles.meta.Background(background)
 		styles.notice = styles.notice.Background(background)
+		styles.noticeEmphasis = styles.noticeEmphasis.Background(background)
 	}
 	return styles
 }
 
-func buildWelcomePanel(ctx BlockRenderContext, version string, notice string) []welcomePanelRow {
+func buildWelcomePanel(ctx BlockRenderContext, version string, announcement welcomeAnnouncement) []welcomePanelRow {
 	styles := newWelcomePanelStyles(ctx.Theme.Tokens())
-	notice = normalizeWelcomeNotice(notice)
+	if strings.TrimSpace(announcement.plainText()) == "" {
+		announcement = newWelcomeAnnouncement("")
+	}
 	switch {
 	case ctx.Width >= welcomeStandardMinWidth && ctx.Height >= welcomeStandardMinHeight:
-		return buildStandardWelcomePanel(ctx.Width, ctx.Height, version, notice, styles)
+		return buildStandardWelcomePanel(ctx.Width, ctx.Height, version, announcement, styles)
 	case ctx.Width >= welcomeCompactMinWidth && ctx.Height >= welcomeCompactMinHeight:
-		return buildCompactWelcomePanel(ctx.Width, ctx.Height, version, notice, styles)
+		return buildCompactWelcomePanel(ctx.Width, ctx.Height, version, announcement, styles)
 	default:
-		return buildFallbackWelcomePanel(ctx.Width, ctx.Height, notice, styles)
+		return buildFallbackWelcomePanel(ctx.Width, ctx.Height, announcement, styles)
 	}
 }
 
@@ -183,7 +204,7 @@ func buildStandardWelcomePanel(
 	width int,
 	height int,
 	version string,
-	notice string,
+	announcement welcomeAnnouncement,
 	styles welcomePanelStyles,
 ) []welcomePanelRow {
 	panelWidth := welcomeStandardPanelWidth(width)
@@ -197,7 +218,7 @@ func buildStandardWelcomePanel(
 		minimumHorizontalPadding = 2
 	)
 	maxRightWidth := maxInt(0, innerWidth-logoWidth-baseGap-minimumHorizontalPadding*2)
-	rightWidth := minInt(welcomePreferredDetailsWidth(notice), maxRightWidth)
+	rightWidth := minInt(welcomePreferredDetailsWidth(announcement), maxRightWidth)
 	remainingWidth := maxInt(0, innerWidth-logoWidth-baseGap-rightWidth)
 	centeredLeftPadding := remainingWidth / 2
 	leftPadding := maxInt(minimumHorizontalPadding, centeredLeftPadding-welcomeLogoLeftShift)
@@ -205,7 +226,7 @@ func buildStandardWelcomePanel(
 	// consistent unit of horizontal whitespace.
 	gap := leftPadding
 	rightPadding := maxInt(0, innerWidth-leftPadding-logoWidth-gap-rightWidth)
-	rightRows := buildWelcomeDetails(rightWidth, version, notice, styles)
+	rightRows := buildWelcomeDetails(rightWidth, version, announcement, styles)
 	contentRows := welcomeColumnLayoutRows(
 		welcomeRelayLogoASCII,
 		logoWidth,
@@ -223,7 +244,7 @@ func buildCompactWelcomePanel(
 	width int,
 	height int,
 	version string,
-	notice string,
+	announcement welcomeAnnouncement,
 	styles welcomePanelStyles,
 ) []welcomePanelRow {
 	panelWidth := minInt(40, maxInt(1, width))
@@ -235,7 +256,7 @@ func buildCompactWelcomePanel(
 		gap          = 2
 	)
 	rightWidth := maxInt(0, innerWidth-leftPadding-rightPadding-logoWidth-gap)
-	rightRows := buildWelcomeDetails(rightWidth, version, notice, styles)
+	rightRows := buildWelcomeDetails(rightWidth, version, announcement, styles)
 	contentRows := welcomeColumnLayoutRows(
 		welcomeRelayCompactASCII,
 		logoWidth,
@@ -249,49 +270,67 @@ func buildCompactWelcomePanel(
 	return frameWelcomePanel(panelWidth, height, contentRows, styles)
 }
 
-func buildFallbackWelcomePanel(width int, height int, notice string, styles welcomePanelStyles) []welcomePanelRow {
+func buildFallbackWelcomePanel(width int, height int, announcement welcomeAnnouncement, styles welcomePanelStyles) []welcomePanelRow {
 	width = maxInt(1, width)
 	if height < len(welcomeActions)+2 {
 		return buildWelcomeActionRows(width, styles)
 	}
-	rows := welcomeNoticeCells(notice, width, 1, styles)
+	rows := welcomeNoticeCells(announcement, width, 1, styles)
 	divider := strings.Repeat("─", width)
 	rows = append(rows, welcomePanelRow{plain: divider, styled: styles.border.Render(divider)})
 	return append(rows, buildWelcomeActionRows(width, styles)...)
 }
 
-func buildWelcomeDetails(width int, version string, notice string, styles welcomePanelStyles) []welcomePanelRow {
+func buildWelcomeDetails(width int, version string, announcement welcomeAnnouncement, styles welcomePanelStyles) []welcomePanelRow {
 	width = maxInt(0, width)
 	rows := []welcomePanelRow{
 		welcomeBrandVersionCell("CAELIS", version, width, styles),
 		welcomeTextCell("", width, styles.surface),
 	}
-	rows = append(rows, welcomeNoticeCells(notice, width, 2, styles)...)
-	rows = append(rows, welcomeTextCell("", width, styles.surface))
+	noticeRows := welcomeNoticeCells(announcement, width, 3, styles)
+	rows = append(rows, noticeRows...)
+	if len(noticeRows) < 3 {
+		rows = append(rows, welcomeTextCell("", width, styles.surface))
+	}
 	for _, action := range welcomeActions {
 		rows = append(rows, welcomeActionCell(action, width, styles))
 	}
 	return rows
 }
 
-func welcomePanelSupportsNotice(ctx BlockRenderContext) bool {
+func welcomePanelSupportsAnnouncement(ctx BlockRenderContext, announcement welcomeAnnouncement) bool {
 	if ctx.Width >= welcomeCompactMinWidth && ctx.Height >= welcomeCompactMinHeight {
 		return true
 	}
-	return ctx.Height >= len(welcomeActions)+2
+	if ctx.Height < len(welcomeActions)+2 {
+		return false
+	}
+	return len(graphemeWordWrap(strings.TrimSpace(announcement.plainText()), maxInt(1, ctx.Width))) <= 1
 }
 
-func welcomeNoticeCells(notice string, width int, maxRows int, styles welcomePanelStyles) []welcomePanelRow {
+func welcomeNoticeCells(announcement welcomeAnnouncement, width int, maxRows int, styles welcomePanelStyles) []welcomePanelRow {
 	if width <= 0 {
 		return nil
 	}
-	lines := graphemeWordWrap(strings.TrimSpace(notice), width)
+	lines := graphemeWordWrap(strings.TrimSpace(announcement.plainText()), width)
 	if len(lines) > maxRows {
 		lines = lines[:maxRows]
 	}
+	emphasisRemaining := announcement.emphasis
 	rows := make([]welcomePanelRow, 0, len(lines))
 	for _, line := range lines {
-		rows = append(rows, welcomeTextCell(line, width, styles.notice))
+		emphasisRemaining = strings.TrimLeft(emphasisRemaining, " \t")
+		emphasized := ""
+		switch {
+		case emphasisRemaining == "":
+		case strings.HasPrefix(emphasisRemaining, line):
+			emphasized = line
+			emphasisRemaining = strings.TrimPrefix(emphasisRemaining, line)
+		case strings.HasPrefix(line, emphasisRemaining):
+			emphasized = emphasisRemaining
+			emphasisRemaining = ""
+		}
+		rows = append(rows, welcomeNoticeCell(line, emphasized, width, styles))
 	}
 	return rows
 }
@@ -397,8 +436,8 @@ func buildWelcomeActionRows(width int, styles welcomePanelStyles) []welcomePanel
 	return rows
 }
 
-func welcomePreferredDetailsWidth(notice string) int {
-	return maxInt(welcomeDetailsMinWidth, displayColumns(strings.TrimSpace(notice)))
+func welcomePreferredDetailsWidth(announcement welcomeAnnouncement) int {
+	return maxInt(welcomeDetailsMinWidth, displayColumns(strings.TrimSpace(announcement.plainText())))
 }
 
 func welcomeBrandVersionCell(brand string, version string, width int, styles welcomePanelStyles) welcomePanelRow {
@@ -422,6 +461,22 @@ func welcomeBrandVersionCell(brand string, version string, width int, styles wel
 func welcomeTextCell(text string, width int, style lipgloss.Style) welcomePanelRow {
 	plain, styled := welcomeCell(text, width, style.Render)
 	return welcomePanelRow{plain: plain, styled: styled}
+}
+
+func welcomeNoticeCell(text string, emphasized string, width int, styles welcomePanelStyles) welcomePanelRow {
+	text = fitWelcomeText(text, maxInt(0, width))
+	if !strings.HasPrefix(text, emphasized) {
+		emphasized = ""
+	}
+	styled := styles.notice.Render(text)
+	if emphasized != "" {
+		styled = styles.noticeEmphasis.Render(emphasized) + styles.notice.Render(strings.TrimPrefix(text, emphasized))
+	}
+	rightSpace := strings.Repeat(" ", maxInt(0, width-displayColumns(text)))
+	return welcomePanelRow{
+		plain:  text + rightSpace,
+		styled: styled + styles.surface.Render(rightSpace),
+	}
 }
 
 func welcomeActionCell(action welcomeAction, width int, styles welcomePanelStyles) welcomePanelRow {
