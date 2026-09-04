@@ -281,7 +281,7 @@ type AgentCommunicationEnvelope struct {
 	ActivityId         *string             `json:"activity_id,omitempty"`
 	Actor              *string             `json:"actor,omitempty"`
 	AgentCommunication AgentCommunication  `json:"agent_communication"`
-	Cursor             string              `json:"cursor"`
+	Cursor             *string             `json:"cursor,omitempty"`
 	Delivery           Delivery            `json:"delivery"`
 	EventId            *string             `json:"event_id,omitempty"`
 	Final              *bool               `json:"final,omitempty"`
@@ -290,7 +290,7 @@ type AgentCommunicationEnvelope struct {
 	OccurredAt         *time.Time          `json:"occurred_at,omitempty"`
 	ParentTool         *ParentToolRelation `json:"parent_tool,omitempty"`
 	ParticipantId      *string             `json:"participant_id,omitempty"`
-	Position           FeedPosition        `json:"position"`
+	Position           *FeedPosition       `json:"position,omitempty"`
 	ProjectionId       *string             `json:"projection_id,omitempty"`
 	RunId              *string             `json:"run_id,omitempty"`
 	Scope              *string             `json:"scope,omitempty"`
@@ -347,7 +347,7 @@ type ApprovalReviewEnvelope struct {
 	ActivityId     *string             `json:"activity_id,omitempty"`
 	Actor          *string             `json:"actor,omitempty"`
 	ApprovalReview ApprovalReview      `json:"approval_review"`
-	Cursor         string              `json:"cursor"`
+	Cursor         *string             `json:"cursor,omitempty"`
 	Delivery       Delivery            `json:"delivery"`
 	EventId        *string             `json:"event_id,omitempty"`
 	Final          *bool               `json:"final,omitempty"`
@@ -356,7 +356,7 @@ type ApprovalReviewEnvelope struct {
 	OccurredAt     *time.Time          `json:"occurred_at,omitempty"`
 	ParentTool     *ParentToolRelation `json:"parent_tool,omitempty"`
 	ParticipantId  *string             `json:"participant_id,omitempty"`
-	Position       FeedPosition        `json:"position"`
+	Position       *FeedPosition       `json:"position,omitempty"`
 	ProjectionId   *string             `json:"projection_id,omitempty"`
 	RunId          *string             `json:"run_id,omitempty"`
 	Scope          *string             `json:"scope,omitempty"`
@@ -646,7 +646,7 @@ type Envelope struct {
 	AgentCommunication *AgentCommunication `json:"agent_communication,omitempty"`
 	ApprovalRequestId  *string             `json:"approval_request_id,omitempty"`
 	ApprovalReview     *ApprovalReview     `json:"approval_review,omitempty"`
-	Cursor             string              `json:"cursor"`
+	Cursor             *string             `json:"cursor,omitempty"`
 	Delivery           Delivery            `json:"delivery"`
 	Error              *string             `json:"error,omitempty"`
 	EventId            *string             `json:"event_id,omitempty"`
@@ -661,7 +661,7 @@ type Envelope struct {
 	Participant        *ParticipantEvent   `json:"participant,omitempty"`
 	ParticipantId      *string             `json:"participant_id,omitempty"`
 	Permission         *RequestPermission  `json:"permission,omitempty"`
-	Position           FeedPosition        `json:"position"`
+	Position           *FeedPosition       `json:"position,omitempty"`
 	ProjectionId       *string             `json:"projection_id,omitempty"`
 	RunId              *string             `json:"run_id,omitempty"`
 	Scope              *string             `json:"scope,omitempty"`
@@ -676,7 +676,7 @@ type EnvelopeBase struct {
 	Meta          *ACPMetadata        `json:"_meta,omitempty"`
 	ActivityId    *string             `json:"activity_id,omitempty"`
 	Actor         *string             `json:"actor,omitempty"`
-	Cursor        string              `json:"cursor"`
+	Cursor        *string             `json:"cursor,omitempty"`
 	Delivery      Delivery            `json:"delivery"`
 	EventId       *string             `json:"event_id,omitempty"`
 	Final         *bool               `json:"final,omitempty"`
@@ -685,7 +685,7 @@ type EnvelopeBase struct {
 	OccurredAt    *time.Time          `json:"occurred_at,omitempty"`
 	ParentTool    *ParentToolRelation `json:"parent_tool,omitempty"`
 	ParticipantId *string             `json:"participant_id,omitempty"`
-	Position      FeedPosition        `json:"position"`
+	Position      *FeedPosition       `json:"position,omitempty"`
 	ProjectionId  *string             `json:"projection_id,omitempty"`
 	RunId         *string             `json:"run_id,omitempty"`
 	Scope         *string             `json:"scope,omitempty"`
@@ -734,7 +734,7 @@ type ErrorEnvelope struct {
 	Meta          *ACPMetadata        `json:"_meta,omitempty"`
 	ActivityId    *string             `json:"activity_id,omitempty"`
 	Actor         *string             `json:"actor,omitempty"`
-	Cursor        string              `json:"cursor"`
+	Cursor        *string             `json:"cursor,omitempty"`
 	Delivery      Delivery            `json:"delivery"`
 	Error         string              `json:"error"`
 	EventId       *string             `json:"event_id,omitempty"`
@@ -744,7 +744,7 @@ type ErrorEnvelope struct {
 	OccurredAt    *time.Time          `json:"occurred_at,omitempty"`
 	ParentTool    *ParentToolRelation `json:"parent_tool,omitempty"`
 	ParticipantId *string             `json:"participant_id,omitempty"`
-	Position      FeedPosition        `json:"position"`
+	Position      *FeedPosition       `json:"position,omitempty"`
 	ProjectionId  *string             `json:"projection_id,omitempty"`
 	RunId         *string             `json:"run_id,omitempty"`
 	Scope         *string             `json:"scope,omitempty"`
@@ -811,7 +811,7 @@ type LifecycleEnvelope struct {
 	Meta          *ACPMetadata        `json:"_meta,omitempty"`
 	ActivityId    *string             `json:"activity_id,omitempty"`
 	Actor         *string             `json:"actor,omitempty"`
-	Cursor        string              `json:"cursor"`
+	Cursor        *string             `json:"cursor,omitempty"`
 	Delivery      Delivery            `json:"delivery"`
 	EventId       *string             `json:"event_id,omitempty"`
 	Final         *bool               `json:"final,omitempty"`
@@ -821,7 +821,7 @@ type LifecycleEnvelope struct {
 	OccurredAt    *time.Time          `json:"occurred_at,omitempty"`
 	ParentTool    *ParentToolRelation `json:"parent_tool,omitempty"`
 	ParticipantId *string             `json:"participant_id,omitempty"`
-	Position      FeedPosition        `json:"position"`
+	Position      *FeedPosition       `json:"position,omitempty"`
 	ProjectionId  *string             `json:"projection_id,omitempty"`
 	RunId         *string             `json:"run_id,omitempty"`
 	Scope         *string             `json:"scope,omitempty"`
@@ -867,7 +867,7 @@ type NoticeEnvelope struct {
 	Meta          *ACPMetadata        `json:"_meta,omitempty"`
 	ActivityId    *string             `json:"activity_id,omitempty"`
 	Actor         *string             `json:"actor,omitempty"`
-	Cursor        string              `json:"cursor"`
+	Cursor        *string             `json:"cursor,omitempty"`
 	Delivery      Delivery            `json:"delivery"`
 	EventId       *string             `json:"event_id,omitempty"`
 	Final         *bool               `json:"final,omitempty"`
@@ -878,7 +878,7 @@ type NoticeEnvelope struct {
 	OccurredAt    *time.Time          `json:"occurred_at,omitempty"`
 	ParentTool    *ParentToolRelation `json:"parent_tool,omitempty"`
 	ParticipantId *string             `json:"participant_id,omitempty"`
-	Position      FeedPosition        `json:"position"`
+	Position      *FeedPosition       `json:"position,omitempty"`
 	ProjectionId  *string             `json:"projection_id,omitempty"`
 	RunId         *string             `json:"run_id,omitempty"`
 	Scope         *string             `json:"scope,omitempty"`
@@ -929,7 +929,7 @@ type ParticipantEnvelope struct {
 	Meta          *ACPMetadata        `json:"_meta,omitempty"`
 	ActivityId    *string             `json:"activity_id,omitempty"`
 	Actor         *string             `json:"actor,omitempty"`
-	Cursor        string              `json:"cursor"`
+	Cursor        *string             `json:"cursor,omitempty"`
 	Delivery      Delivery            `json:"delivery"`
 	EventId       *string             `json:"event_id,omitempty"`
 	Final         *bool               `json:"final,omitempty"`
@@ -939,7 +939,7 @@ type ParticipantEnvelope struct {
 	ParentTool    *ParentToolRelation `json:"parent_tool,omitempty"`
 	Participant   ParticipantEvent    `json:"participant"`
 	ParticipantId *string             `json:"participant_id,omitempty"`
-	Position      FeedPosition        `json:"position"`
+	Position      *FeedPosition       `json:"position,omitempty"`
 	ProjectionId  *string             `json:"projection_id,omitempty"`
 	RunId         *string             `json:"run_id,omitempty"`
 	Scope         *string             `json:"scope,omitempty"`
@@ -1181,7 +1181,7 @@ type RequestPermissionEnvelope struct {
 	ActivityId        *string             `json:"activity_id,omitempty"`
 	Actor             *string             `json:"actor,omitempty"`
 	ApprovalRequestId string              `json:"approval_request_id"`
-	Cursor            string              `json:"cursor"`
+	Cursor            *string             `json:"cursor,omitempty"`
 	Delivery          Delivery            `json:"delivery"`
 	EventId           *string             `json:"event_id,omitempty"`
 	Final             *bool               `json:"final,omitempty"`
@@ -1191,7 +1191,7 @@ type RequestPermissionEnvelope struct {
 	ParentTool        *ParentToolRelation `json:"parent_tool,omitempty"`
 	ParticipantId     *string             `json:"participant_id,omitempty"`
 	Permission        RequestPermission   `json:"permission"`
-	Position          FeedPosition        `json:"position"`
+	Position          *FeedPosition       `json:"position,omitempty"`
 	ProjectionId      *string             `json:"projection_id,omitempty"`
 	RunId             *string             `json:"run_id,omitempty"`
 	Scope             *string             `json:"scope,omitempty"`
@@ -1240,13 +1240,6 @@ type ResumeCandidate struct {
 }
 
 type ResumeCandidateList []ResumeCandidate
-
-type ResumeMode string
-
-const (
-	ResumeModeExact           ResumeMode = "exact"
-	ResumeModeDurableFallback ResumeMode = "durable_fallback"
-)
 
 type RunState struct {
 	Active          *bool      `json:"active,omitempty"`
@@ -1318,6 +1311,15 @@ type SessionControllerModeRequest struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
+type SessionFeedDelivery struct {
+	Events     []Envelope         `json:"events,omitempty"`
+	Kind       StreamDeliveryKind `json:"kind"`
+	NextCursor *string            `json:"next_cursor,omitempty"`
+	Page       *int               `json:"page,omitempty"`
+	SnapshotId *string            `json:"snapshot_id,omitempty"`
+	Source     StreamSourceClass  `json:"source"`
+}
+
 type SessionList struct {
 	NextCursor *string          `json:"next_cursor,omitempty"`
 	Sessions   []SessionSummary `json:"sessions,omitempty"`
@@ -1378,12 +1380,10 @@ type SessionState struct {
 	Metadata         JSONObject           `json:"metadata,omitempty"`
 	Participants     []ParticipantBinding `json:"participants,omitempty"`
 	ProtocolVersion  int                  `json:"protocol_version"`
-	ResumeMode       ResumeMode           `json:"resume_mode"`
 	Revision         Uint64Decimal        `json:"revision"`
 	Run              RunState             `json:"run"`
 	SessionId        string               `json:"session_id"`
 	Title            *string              `json:"title,omitempty"`
-	TransientGap     *bool                `json:"transient_gap,omitempty"`
 	WorkspaceKey     *string              `json:"workspace_key,omitempty"`
 }
 
@@ -1402,7 +1402,7 @@ type SessionUpdateEnvelope struct {
 	Meta           *ACPMetadata        `json:"_meta,omitempty"`
 	ActivityId     *string             `json:"activity_id,omitempty"`
 	Actor          *string             `json:"actor,omitempty"`
-	Cursor         string              `json:"cursor"`
+	Cursor         *string             `json:"cursor,omitempty"`
 	Delivery       Delivery            `json:"delivery"`
 	EventId        *string             `json:"event_id,omitempty"`
 	Final          *bool               `json:"final,omitempty"`
@@ -1411,7 +1411,7 @@ type SessionUpdateEnvelope struct {
 	OccurredAt     *time.Time          `json:"occurred_at,omitempty"`
 	ParentTool     *ParentToolRelation `json:"parent_tool,omitempty"`
 	ParticipantId  *string             `json:"participant_id,omitempty"`
-	Position       FeedPosition        `json:"position"`
+	Position       *FeedPosition       `json:"position,omitempty"`
 	ProjectionId   *string             `json:"projection_id,omitempty"`
 	RunId          *string             `json:"run_id,omitempty"`
 	Scope          *string             `json:"scope,omitempty"`
@@ -1572,6 +1572,26 @@ type SteerRequest struct {
 	Target                  TurnTarget          `json:"target"`
 }
 
+type StreamDeliveryKind string
+
+const (
+	StreamDeliveryKindReplaceBegin StreamDeliveryKind = "replace_begin"
+	StreamDeliveryKindReplacePage  StreamDeliveryKind = "replace_page"
+	StreamDeliveryKindReplaceEnd   StreamDeliveryKind = "replace_end"
+	StreamDeliveryKindAppendPage   StreamDeliveryKind = "append_page"
+	StreamDeliveryKindStatus       StreamDeliveryKind = "status"
+	StreamDeliveryKindSync         StreamDeliveryKind = "sync"
+)
+
+type StreamSourceClass string
+
+const (
+	StreamSourceClassExact       StreamSourceClass = "exact"
+	StreamSourceClassReplacement StreamSourceClass = "replacement"
+	StreamSourceClassResult      StreamSourceClass = "result"
+	StreamSourceClassStatus      StreamSourceClass = "status"
+)
+
 type StringList []string
 
 type TaskDescriptor struct {
@@ -1598,11 +1618,8 @@ type TaskDirectorySnapshot struct {
 }
 
 type TaskEventBatch struct {
-	ActivityId     *string        `json:"activity_id,omitempty"`
-	BoundaryCursor *string        `json:"boundary_cursor,omitempty"`
-	Events         []Envelope     `json:"events,omitempty"`
-	ResumeMode     TaskResumeMode `json:"resume_mode"`
-	TransientGap   *bool          `json:"transient_gap,omitempty"`
+	ActivityId *string              `json:"activity_id,omitempty"`
+	Deliveries []TaskStreamDelivery `json:"deliveries,omitempty"`
 }
 
 type TaskKind string
@@ -1621,13 +1638,6 @@ type TaskParentTool struct {
 	ToolName   *string `json:"tool_name,omitempty"`
 }
 
-type TaskResumeMode string
-
-const (
-	TaskResumeModeExact        TaskResumeMode = "exact"
-	TaskResumeModeCurrentState TaskResumeMode = "current_state"
-)
-
 type TaskState string
 
 const (
@@ -1642,6 +1652,16 @@ const (
 	TaskStateWaitingApproval TaskState = "waiting_approval"
 	TaskStateUnknownOutcome  TaskState = "unknown_outcome"
 )
+
+type TaskStreamDelivery struct {
+	ActivityId *string            `json:"activity_id,omitempty"`
+	Events     []Envelope         `json:"events,omitempty"`
+	Kind       StreamDeliveryKind `json:"kind"`
+	NextCursor *string            `json:"next_cursor,omitempty"`
+	Page       *int               `json:"page,omitempty"`
+	SnapshotId *string            `json:"snapshot_id,omitempty"`
+	Source     StreamSourceClass  `json:"source"`
+}
 
 type TerminalExitStatus struct {
 	ExitCode *int    `json:"exit_code,omitempty"`

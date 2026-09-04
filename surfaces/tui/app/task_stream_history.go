@@ -177,21 +177,19 @@ func (m *Model) startTaskStreamHistory(
 	m.taskStreamHistoryCancels[taskID] = cancel
 	started := cfg.ProgramSender.startForwarder(func() {
 		defer cancel()
-		batch, err := cfg.TaskStreams.Events(ctx, taskstream.ReadRequest{
-			SessionID: sessionID, TaskID: taskID,
-			ExpectedActivityID: expectedActivityID,
+		events, responseActivityID, err := readTaskStreamHistory(ctx, cfg.TaskStreams, taskstream.ReadRequest{
+			SessionID: sessionID, TaskID: taskID, ExpectedActivityID: expectedActivityID,
 		})
-		responseActivityID := strings.TrimSpace(batch.ActivityID)
 		if err == nil && responseActivityID != expectedActivityID {
 			err = errorcode.New(errorcode.Conflict, "task stream history activity changed")
 		}
 		if err == nil {
-			for start := 0; start < len(batch.Events); start += taskStreamMailboxBatchSize {
-				end := min(start+taskStreamMailboxBatchSize, len(batch.Events))
+			for start := 0; start < len(events); start += taskStreamMailboxBatchSize {
+				end := min(start+taskStreamMailboxBatchSize, len(events))
 				cfg.ProgramSender.SendMsg(taskStreamHistoryBatchMsg{
 					sessionID: sessionID, taskID: taskID, token: token,
 					activityID: responseActivityID,
-					events:     append([]eventstream.Envelope(nil), batch.Events[start:end]...),
+					events:     append([]eventstream.Envelope(nil), events[start:end]...),
 				})
 			}
 		}
@@ -229,14 +227,55 @@ func (m *Model) handleTaskStreamHistoryBatch(msg taskStreamHistoryBatchMsg) (tea
 	}
 	stage.responseActivityID = msg.activityID
 	for _, envelope := range msg.events {
-		if taskstream.IsTransientGapEnvelope(envelope) {
-			stage.view.resetForCurrentState()
-			continue
-		}
 		m.observeSubagentOutputHistoryEnvelope(stage, envelope)
 	}
 	stage.view.historyResolved = true
 	return m, nil
+}
+
+func readTaskStreamHistory(ctx context.Context, client taskstream.Client, request taskstream.ReadRequest) ([]eventstream.Envelope, string, error) {
+	assembler := &taskstream.DeliveryAssembler{}
+	events := make([]eventstream.Envelope, 0)
+	activityID := ""
+	cursor := strings.TrimSpace(request.Cursor)
+	for {
+		request.Cursor = cursor
+		result, err := client.Events(ctx, request)
+		if err != nil {
+			return nil, activityID, err
+		}
+		if id := strings.TrimSpace(result.ActivityID); id != "" {
+			activityID = id
+		}
+		nextCursor := cursor
+		hadExactEvents := false
+		committedReplacement := false
+		for _, delivery := range result.Deliveries {
+			visible, replacement, acceptErr := assembler.Accept(delivery)
+			if acceptErr != nil {
+				return nil, activityID, acceptErr
+			}
+			if delivery.Source == taskstream.SourceExact && len(visible) > 0 {
+				hadExactEvents = true
+			}
+			if replacement {
+				events = visible
+				committedReplacement = true
+			} else {
+				events = append(events, visible...)
+			}
+			if candidate := strings.TrimSpace(delivery.NextCursor); candidate != "" {
+				nextCursor = candidate
+			}
+		}
+		if assembler.Pending() {
+			return nil, activityID, errorcode.New(errorcode.Unavailable, "Task replacement ended before commit")
+		}
+		if committedReplacement || !hadExactEvents || nextCursor == cursor {
+			return events, activityID, nil
+		}
+		cursor = nextCursor
+	}
 }
 
 func (m *Model) handleTaskStreamHistoryClosed(msg taskStreamHistoryClosedMsg) (tea.Model, tea.Cmd) {

@@ -15,6 +15,8 @@ import (
 const (
 	controlStoreDirectory    = "control"
 	controlStoreDatabaseFile = "control.sqlite"
+	controlSpoolDirectory    = "spool"
+	controlSpoolVersion      = "v1"
 	legacyACPAgentDirectory  = "acp-agents"
 )
 
@@ -31,6 +33,10 @@ func controlStoreRoot(storeDir string) string {
 
 func controlStoreDatabasePath(storeDir string) string {
 	return filepath.Join(controlStoreRoot(storeDir), controlStoreDatabaseFile)
+}
+
+func controlStreamSpoolRoot(storeDir string) string {
+	return filepath.Join(controlStoreRoot(storeDir), controlSpoolDirectory, controlSpoolVersion)
 }
 
 // migrateRetiredStoreLayout removes the retired managed-ACP installation

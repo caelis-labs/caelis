@@ -17,6 +17,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1"
+	streamspoolfile "github.com/caelis-labs/caelis/control/streamspool/file"
 )
 
 func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
@@ -24,7 +26,12 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{CursorCodec: codec})
+	spool, err := streamspoolfile.New(t.Context(), streamspoolfile.Config{RootDir: t.TempDir(), GCInterval: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = spool.Close() })
+	registry, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{CursorCodec: codec, Spool: spool})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +52,7 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := receiveParityEnvelope(t, inProcess.Subscription.Backfill())
+	want := receiveParityEnvelope(t, inProcess.Subscription.Deliveries())
 	_ = inProcess.Subscription.Close()
 
 	server, err := New(HandlerConfig{
@@ -70,24 +77,16 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	}
 	defer response.Body.Close()
 	reader := bufio.NewReader(response.Body)
-	for range 3 {
-		if _, err := reader.ReadString('\n'); err != nil {
-			t.Fatal(err)
-		}
-	}
-	idLine, err := reader.ReadString('\n')
-	if err != nil {
+	data := readParitySSEData(t, reader, wirev1.FeedDeliveryEventName)
+	var delivery wirev1.FeedDelivery
+	if err := json.Unmarshal(data, &delivery); err != nil {
 		t.Fatal(err)
 	}
-	dataLine, err := reader.ReadString('\n')
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.TrimSpace(strings.TrimPrefix(idLine, "id: ")) != want.Cursor {
-		t.Fatalf("SSE id = %q, want %q", idLine, want.Cursor)
+	if delivery.NextCursor != want.Cursor || len(delivery.Events) != 1 {
+		t.Fatalf("SSE delivery = %#v, want cursor %q and one Envelope", delivery, want.Cursor)
 	}
 	var got any
-	if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(dataLine, "data: "))), &got); err != nil {
+	if err := json.Unmarshal(delivery.Events[0], &got); err != nil {
 		t.Fatal(err)
 	}
 	wantJSON, err := json.Marshal(want)
@@ -138,22 +137,49 @@ func (s parityService) Reconnect(ctx context.Context, _ appserver.Principal, req
 			EnvelopeVersion: appserver.EnvelopeVersion,
 			APIVersion:      appserver.HTTPAPIVersion,
 			SessionID:       req.SessionID,
-			ResumeMode:      subscription.Mode,
-			TransientGap:    subscription.TransientGap,
 			BoundaryCursor:  subscription.BoundaryCursor,
 		},
 		Subscription: subscription.Subscription,
 	}, nil
 }
 
-func receiveParityEnvelope(t *testing.T, events <-chan eventstream.Envelope) eventstream.Envelope {
+func receiveParityEnvelope(t *testing.T, deliveries <-chan appserver.FeedDelivery) eventstream.Envelope {
 	t.Helper()
-	select {
-	case envelope := <-events:
-		return envelope
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for broker Envelope")
-		return eventstream.Envelope{}
+	assembler := appserver.FeedDeliveryAssembler{}
+	for {
+		select {
+		case delivery, open := <-deliveries:
+			if !open {
+				t.Fatal("feed closed before an Envelope was delivered")
+			}
+			events, _, err := assembler.Accept(delivery)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(events) > 0 {
+				return events[0]
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for broker Envelope")
+		}
+	}
+}
+
+func readParitySSEData(t *testing.T, reader *bufio.Reader, wantEvent string) []byte {
+	t.Helper()
+	eventName := ""
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event: "))
+		case strings.HasPrefix(line, "data: ") && eventName == wantEvent:
+			return []byte(strings.TrimSpace(strings.TrimPrefix(line, "data: ")))
+		}
 	}
 }
 

@@ -115,7 +115,6 @@ func (s *Server) taskEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	setTaskResumeHeaders(w, result.ResumeMode, result.TransientGap, result.BoundaryCursor)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(append(data, '\n'))
@@ -151,7 +150,6 @@ func (s *Server) subscribeTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "streaming is unavailable")
 		return
 	}
-	setTaskResumeHeaders(w, result.ResumeMode, result.TransientGap, result.BoundaryCursor)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -168,7 +166,7 @@ func (s *Server) subscribeTask(w http.ResponseWriter, r *http.Request) {
 		case <-ticker.C:
 			_, _ = fmt.Fprint(w, ": heartbeat\n\n")
 			flusher.Flush()
-		case envelope, open := <-result.Subscription.Events():
+		case delivery, open := <-result.Subscription.Deliveries():
 			if !open {
 				if streamErr := result.Subscription.Err(); streamErr != nil {
 					encoded, marshalErr := json.Marshal(wirev1.EncodeTaskStreamError(streamErr))
@@ -182,11 +180,14 @@ func (s *Server) subscribeTask(w http.ResponseWriter, r *http.Request) {
 				}
 				return
 			}
-			data, marshalErr := wirev1.MarshalEnvelope(envelope)
+			data, marshalErr := marshalTaskDelivery(delivery)
 			if marshalErr != nil {
 				return
 			}
-			_, _ = fmt.Fprintf(w, "id: %s\ndata: %s\n\n", envelope.Cursor, data)
+			if delivery.NextCursor != "" {
+				_, _ = fmt.Fprintf(w, "id: %s\n", delivery.NextCursor)
+			}
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", wirev1.TaskStreamDeliveryEventName, data)
 			flusher.Flush()
 		}
 	}
@@ -211,14 +212,6 @@ func parseFollowQuery(r *http.Request) bool {
 	}
 }
 
-type taskBatchWire struct {
-	Events         []json.RawMessage     `json:"events,omitempty"`
-	ActivityID     string                `json:"activity_id,omitempty"`
-	ResumeMode     taskstream.ResumeMode `json:"resume_mode"`
-	TransientGap   bool                  `json:"transient_gap,omitempty"`
-	BoundaryCursor string                `json:"boundary_cursor,omitempty"`
-}
-
 type taskDirectorySnapshotWire struct {
 	Revision string                      `json:"revision"`
 	Tasks    []taskstream.TaskDescriptor `json:"tasks,omitempty"`
@@ -231,33 +224,42 @@ func marshalTaskDirectorySnapshot(snapshot taskstream.DirectorySnapshot) ([]byte
 	})
 }
 
-func marshalTaskBatch(batch taskstream.Batch) ([]byte, error) {
-	wire := taskBatchWire{
-		Events:         make([]json.RawMessage, 0, len(batch.Events)),
-		ActivityID:     batch.ActivityID,
-		ResumeMode:     batch.ResumeMode,
-		TransientGap:   batch.TransientGap,
-		BoundaryCursor: batch.BoundaryCursor,
+func marshalTaskBatch(batch taskstream.ReadResult) ([]byte, error) {
+	wire := wirev1.TaskStreamReadResult{
+		Deliveries: make([]wirev1.TaskStreamDelivery, 0, len(batch.Deliveries)),
+		ActivityID: batch.ActivityID,
 	}
-	for _, envelope := range batch.Events {
-		raw, err := wirev1.MarshalEnvelope(envelope)
+	for _, delivery := range batch.Deliveries {
+		encoded, err := taskDeliveryWire(delivery)
 		if err != nil {
 			return nil, err
 		}
-		wire.Events = append(wire.Events, raw)
+		wire.Deliveries = append(wire.Deliveries, encoded)
 	}
 	return json.Marshal(wire)
 }
 
-func setTaskResumeHeaders(
-	w http.ResponseWriter,
-	mode taskstream.ResumeMode,
-	transientGap bool,
-	boundaryCursor string,
-) {
-	w.Header().Set(resumeModeHeader, string(mode))
-	w.Header().Set(transientGapHeader, strconv.FormatBool(transientGap))
-	if boundaryCursor != "" {
-		w.Header().Set(boundaryCursorHeader, boundaryCursor)
+func marshalTaskDelivery(delivery taskstream.Delivery) ([]byte, error) {
+	wire, err := taskDeliveryWire(delivery)
+	if err != nil {
+		return nil, err
 	}
+	return json.Marshal(wire)
+}
+
+func taskDeliveryWire(delivery taskstream.Delivery) (wirev1.TaskStreamDelivery, error) {
+	wire := wirev1.TaskStreamDelivery{
+		Kind: string(delivery.Kind), Source: string(delivery.Source),
+		SnapshotID: delivery.SnapshotID, Page: delivery.Page,
+		NextCursor: delivery.NextCursor, ActivityID: delivery.ActivityID,
+		Events: make([]json.RawMessage, 0, len(delivery.Events)),
+	}
+	for _, envelope := range delivery.Events {
+		raw, err := wirev1.MarshalEnvelope(envelope)
+		if err != nil {
+			return wirev1.TaskStreamDelivery{}, err
+		}
+		wire.Events = append(wire.Events, raw)
+	}
+	return wire, nil
 }

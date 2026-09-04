@@ -1,7 +1,7 @@
 package agentsdk
 
 import (
-	"iter"
+	"context"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -32,26 +32,41 @@ func (p PublishedContent) Has(content PublishedContent) bool {
 type SourceEvent struct {
 	Canonical *session.Event
 	Native    any
+	// Err reports a producer failure at its exact position in the source
+	// sequence. It is delivered through the same synchronous observer so SDK
+	// implementations do not need a second error queue.
+	Err error
 	// CanonicalContentAlreadyPublished identifies the exact canonical content
 	// streams with separate live incremental owners. Live consumers omit only
 	// those streams; durable replay still uses Canonical in full.
 	CanonicalContentAlreadyPublished PublishedContent
 }
 
-// SourceHandle is an optional alternate view for handles that expose canonical
-// session events plus opaque native passthrough. It and Runner.Events must not
-// be consumed concurrently; one handle has one event consumer. Consumers may
-// continue after EventStreamGapError to receive the newest retained suffix.
-type SourceHandle interface {
-	SourceEvents() iter.Seq2[SourceEvent, error]
+// SourceEventObserver receives raw producer events synchronously. The caller
+// installs it on the request before execution starts. Implementations must not
+// retain an unbounded payload queue; product replay and cursor semantics belong
+// to Control rather than the SDK.
+type SourceEventObserver interface {
+	ObserveSourceEvent(context.Context, SourceEvent) error
 }
 
-// CloneSourceEvent copies one source event before queueing or fan-out. Native
+// SourceEventObserverFunc adapts a function to SourceEventObserver.
+type SourceEventObserverFunc func(context.Context, SourceEvent) error
+
+func (f SourceEventObserverFunc) ObserveSourceEvent(ctx context.Context, event SourceEvent) error {
+	if f == nil {
+		return nil
+	}
+	return f(ctx, event)
+}
+
+// CloneSourceEvent copies one source event before synchronous handoff. Native
 // passthrough is copied by reference because the runtime does not interpret it.
 func CloneSourceEvent(in SourceEvent) SourceEvent {
 	return SourceEvent{
 		Canonical:                        session.CloneEvent(in.Canonical),
 		Native:                           in.Native,
+		Err:                              in.Err,
 		CanonicalContentAlreadyPublished: in.CanonicalContentAlreadyPublished,
 	}
 }

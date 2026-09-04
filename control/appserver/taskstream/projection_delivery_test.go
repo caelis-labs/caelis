@@ -3,8 +3,8 @@ package taskstream
 import (
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 )
 
 func TestProjectTaskFrameSeparatesDelegatedSemanticsFromCommandTerminalOutput(t *testing.T) {
@@ -18,24 +18,25 @@ func TestProjectTaskFrameSeparatesDelegatedSemanticsFromCommandTerminalOutput(t 
 		SessionID:         "root-session",
 		CallID:            "command-call-1",
 		ToolName:          "RunCommand",
-		Ref:               stream.Ref{SessionID: "root-session", TaskID: "command-task-1", TerminalID: "command-terminal-1"},
+		TaskID:            "command-task-1",
+		TurnID:            "command-terminal-1",
 		DisplayTerminalID: "command-call-1",
 		Scope:             eventstream.ScopeMain,
 	}
 	tests := []struct {
 		name  string
 		req   taskFrameProjectionRequest
-		frame stream.Frame
+		frame controltaskstream.Frame
 		want  []streamFrameEnvelopeExpectation
 	}{
 		{
 			name: "task child event with materialized text",
 			req:  taskRequest,
-			frame: stream.Frame{
-				Ref:     taskRequest.Ref,
-				Text:    "child message\n",
-				Running: true,
-				Event:   childMessageEventForStreamTest("child message"),
+			frame: controltaskstream.Frame{
+				TerminalID: taskRequest.TurnID,
+				Text:       "child message\n",
+				Running:    true,
+				Event:      childMessageEventForStreamTest("child message"),
 			},
 			want: []streamFrameEnvelopeExpectation{
 				{parentCallID: "task-call-1", parentTool: "Task", transient: true},
@@ -44,30 +45,30 @@ func TestProjectTaskFrameSeparatesDelegatedSemanticsFromCommandTerminalOutput(t 
 		{
 			name: "spawn text only",
 			req:  spawnProjectionRequestForTest(),
-			frame: stream.Frame{
-				Ref:     spawnProjectionRequestForTest().Ref,
-				Text:    "child text only\n",
-				Running: true,
+			frame: controltaskstream.Frame{
+				TerminalID: spawnProjectionRequestForTest().TurnID,
+				Text:       "child text only\n",
+				Running:    true,
 			},
 		},
 		{
 			name: "spawn final result has no terminal replay",
 			req:  spawnProjectionRequestForTest(),
-			frame: stream.Frame{
-				Ref:    spawnProjectionRequestForTest().Ref,
-				Text:   "final child result\n",
-				Closed: true,
-				State:  "completed",
+			frame: controltaskstream.Frame{
+				TerminalID: spawnProjectionRequestForTest().TurnID,
+				Text:       "final child result\n",
+				Closed:     true,
+				State:      "completed",
 			},
 			want: []streamFrameEnvelopeExpectation{{parentCallID: "spawn-call-1", parentTool: "Spawn", transient: true}},
 		},
 		{
 			name: "run command running",
 			req:  commandRequest,
-			frame: stream.Frame{
-				Ref:     commandRequest.Ref,
-				Text:    "running output\n",
-				Running: true,
+			frame: controltaskstream.Frame{
+				TerminalID: commandRequest.TurnID,
+				Text:       "running output\n",
+				Running:    true,
 			},
 			want: []streamFrameEnvelopeExpectation{
 				{transient: true, terminalOutput: "running output\n", hasTerminalOutput: true},
@@ -76,12 +77,11 @@ func TestProjectTaskFrameSeparatesDelegatedSemanticsFromCommandTerminalOutput(t 
 		{
 			name: "run command final",
 			req:  commandRequest,
-			frame: stream.Frame{
-				Ref:    commandRequest.Ref,
-				Text:   "final output\n",
-				Cursor: stream.Cursor{Output: 0},
-				Closed: true,
-				State:  "completed",
+			frame: controltaskstream.Frame{
+				TerminalID: commandRequest.TurnID,
+				Text:       "final output\n",
+				Closed:     true,
+				State:      "completed",
 			},
 			want: []streamFrameEnvelopeExpectation{
 				{transient: true, terminalOutput: "final output\n", hasTerminalOutput: true},

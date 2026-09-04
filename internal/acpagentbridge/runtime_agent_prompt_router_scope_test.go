@@ -269,7 +269,7 @@ func (directScopedNarrativeRuntime) Run(_ context.Context, req agent.RunRequest)
 	sessionID := req.SessionRef.SessionID
 	return agent.RunResult{
 		Session: session.Session{SessionRef: req.SessionRef},
-		Handle: terminalBridgeRun{events: []*session.Event{
+		Handle: terminalBridgeRun{observer: req.SourceObserver, events: []*session.Event{
 			directNarrativeEvent(sessionID, "", mainScope, "main-message", "main live", session.VisibilityUIOnly),
 			directNarrativeEvent(sessionID, "", childAScope, "child-message", "shared child", session.VisibilityUIOnly),
 			directNarrativeEvent(sessionID, "", childBScope, "child-message", "shared child", session.VisibilityUIOnly),

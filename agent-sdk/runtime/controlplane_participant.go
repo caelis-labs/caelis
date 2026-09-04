@@ -147,6 +147,7 @@ func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachPartici
 		if err == nil || session.IsCommitted(err) {
 			confirmed, outcome, confirmErr := r.confirmParticipantLifecycle(ctx, activeSession, binding, "detached", lifecycleEvent, updatedSession, persistedEvent)
 			if confirmErr == nil {
+				r.tasks.closeSubagentOutputProducer(context.WithoutCancel(ctx), ref, binding.DelegationID)
 				return confirmed, nil
 			}
 			if outcome == participantLifecycleNotApplied {
@@ -166,6 +167,7 @@ func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachPartici
 		if loadErr == nil && (!stillOwned ||
 			strings.TrimSpace(latestBinding.DelegationID) != strings.TrimSpace(binding.DelegationID) ||
 			strings.TrimSpace(latestBinding.AttachmentGeneration) != strings.TrimSpace(binding.AttachmentGeneration)) {
+			r.tasks.closeSubagentOutputProducer(context.WithoutCancel(ctx), ref, binding.DelegationID)
 			return session.Session{}, err
 		}
 		if loadErr != nil {
@@ -375,7 +377,7 @@ func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptPartici
 	}
 	runID := r.nextID("participant-run", nil)
 	runCtx, cancel := context.WithCancel(ctx)
-	handle := newRunner(runID, cancel)
+	handle := newRunner(runCtx, runID, cancel, req.SourceObserver)
 	admission := newSteeringAdmission()
 	if err := handle.setSubmissionHandler(runCtx, r.participantSteeringHandler(
 		runCtx,
@@ -432,6 +434,30 @@ func (r *Runtime) executeACPParticipantTurn(
 		}
 		handle.publishEvent(persisted)
 	}
+	var toolFactOrdinal uint64
+	forwarding, err := r.beginControllerEvents(ctx, agent.ControllerEventForwardRequest{
+		ActiveSession: activeSession,
+		SessionRef:    ref,
+		MutationGuard: session.RuntimeMutationGuard(ctx),
+		TurnID:        turnID,
+		Publisher:     handle,
+		Normalize: func(active session.Session, turn string, event *session.Event) *session.Event {
+			normalized := normalizeEvent(active, turn, event)
+			if normalized != nil && normalized.Scope != nil {
+				normalized.Scope.Executor = session.ParticipantExecutor(binding)
+			}
+			if scopeRuntimeToolFactIdentity(normalized, runID, turnID, toolFactOrdinal+1) {
+				toolFactOrdinal++
+			}
+			return normalized
+		},
+		IsUserEcho: isACPParticipantUserEcho,
+	})
+	if err != nil {
+		admission.resolve(err)
+		handle.publishError(err)
+		return
+	}
 	turnResult, err := r.controllers.PromptParticipant(ctx, controller.ParticipantPromptRequest{
 		SessionRef:    ref,
 		Session:       activeSession,
@@ -455,6 +481,7 @@ func (r *Runtime) executeACPParticipantTurn(
 			participantKind:      strings.TrimSpace(string(binding.Kind)),
 			participantSessionID: strings.TrimSpace(binding.SessionID),
 		},
+		Observer: forwarding,
 	})
 	if err != nil {
 		admission.resolve(err)
@@ -467,32 +494,17 @@ func (r *Runtime) executeACPParticipantTurn(
 		handle.publishError(err)
 		return
 	}
-	var toolFactOrdinal uint64
 	handle.setCancelHook(func() error {
 		return turnResult.Handle.Cancel().Err
 	})
 	defer turnResult.Handle.Close()
 	admission.resolve(nil)
 	admitted = true
-	if err := r.forwardControllerEvents(ctx, agent.ControllerEventForwardRequest{
-		ActiveSession: activeSession,
-		SessionRef:    ref,
-		MutationGuard: session.RuntimeMutationGuard(ctx),
-		TurnID:        turnID,
-		Source:        turnResult.Handle,
-		Publisher:     handle,
-		Normalize: func(active session.Session, turn string, event *session.Event) *session.Event {
-			normalized := normalizeEvent(active, turn, event)
-			if normalized != nil && normalized.Scope != nil {
-				normalized.Scope.Executor = session.ParticipantExecutor(binding)
-			}
-			if scopeRuntimeToolFactIdentity(normalized, runID, turnID, toolFactOrdinal+1) {
-				toolFactOrdinal++
-			}
-			return normalized
-		},
-		IsUserEcho: isACPParticipantUserEcho,
-	}); err != nil {
+	err = turnResult.Handle.WaitCompletion(ctx)
+	if err == nil {
+		err = forwarding.Complete(ctx)
+	}
+	if err != nil {
 		handle.publishError(err)
 		return
 	}

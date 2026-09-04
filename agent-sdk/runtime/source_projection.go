@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"iter"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk"
@@ -62,45 +61,6 @@ func (o *liveContentOwnership) observe(event *session.Event) agentsdk.PublishedC
 		return alreadyPublished
 	}
 	return alreadyPublished
-}
-
-// SourceEvents adapts either Runner event view to the explicit source contract.
-// Events-only implementations use the same content-ownership algorithm as the
-// built-in Runtime runner; callers still consume exactly one underlying view.
-func SourceEvents(handle agentsdk.Runner) iter.Seq2[agentsdk.SourceEvent, error] {
-	if source, ok := handle.(agentsdk.SourceHandle); ok && source != nil {
-		return source.SourceEvents()
-	}
-	if handle == nil {
-		return SourceEventsFromEvents(nil)
-	}
-	return SourceEventsFromEvents(handle.Events())
-}
-
-// SourceEventsFromEvents applies explicit content ownership while adapting one
-// Events-only stream. Product bridges use this for legacy handle shapes that do
-// not expose the full Runner contract.
-func SourceEventsFromEvents(events iter.Seq2[*session.Event, error]) iter.Seq2[agentsdk.SourceEvent, error] {
-	return func(yield func(agentsdk.SourceEvent, error) bool) {
-		if events == nil {
-			return
-		}
-		ownership := liveContentOwnership{}
-		for event, err := range events {
-			if err != nil {
-				if !yield(agentsdk.SourceEvent{}, err) {
-					return
-				}
-				continue
-			}
-			if !yield(agentsdk.SourceEvent{
-				Canonical:                        session.CloneEvent(event),
-				CanonicalContentAlreadyPublished: ownership.observe(event),
-			}, nil) {
-				return
-			}
-		}
-	}
 }
 
 func liveEventContentKey(event *session.Event, messageID string) liveContentKey {

@@ -15,6 +15,7 @@ github.com/caelis-labs/caelis/agent-sdk/session/sessiontest
 github.com/caelis-labs/caelis/agent-sdk/skill
 github.com/caelis-labs/caelis/agent-sdk/task
 github.com/caelis-labs/caelis/agent-sdk/task/delegation
-github.com/caelis-labs/caelis/agent-sdk/task/stream
+github.com/caelis-labs/caelis/agent-sdk/task/output
 github.com/caelis-labs/caelis/agent-sdk/task/subagent
+github.com/caelis-labs/caelis/agent-sdk/task/terminal
 github.com/caelis-labs/caelis/agent-sdk/tool

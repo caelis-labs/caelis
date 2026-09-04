@@ -15,7 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/control/acppermission"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -28,7 +28,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
-	"github.com/google/uuid"
 )
 
 type PermissionHandler func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error)
@@ -93,7 +92,7 @@ type childRun struct {
 	supportsSteering      bool
 	promptCapabilities    acpsdk.PromptCapabilities
 	taskID                string
-	sink                  stream.Sink
+	output                output.Observer
 	completion            delegation.CompletionSink
 	ctx                   context.Context
 	cancel                context.CancelFunc
@@ -166,6 +165,11 @@ func (r *Runner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req del
 
 func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (delegation.Anchor, delegation.Result, error) {
 	req = delegation.CloneTargetRequest(req)
+	if strings.TrimSpace(spawn.ActivityID) == "" || spawn.Output == nil {
+		return delegation.Anchor{}, delegation.Result{}, subagent.MarkSpawnNotStarted(
+			errors.New("subagent output activity binding is required"),
+		)
+	}
 	if err := delegation.ValidateTarget(req.Target); err != nil {
 		return delegation.Anchor{}, delegation.Result{}, subagent.MarkSpawnNotStarted(err)
 	}
@@ -185,7 +189,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		state:          delegation.StateRunning,
 		running:        true,
 		taskID:         strings.TrimSpace(spawn.TaskID),
-		sink:           spawn.Streams,
+		output:         spawn.Output,
 		completion:     spawn.Completion,
 		updatedAt:      r.clock(),
 		done:           make(chan struct{}),
@@ -206,11 +210,6 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 	}
 	slot := newPendingChildSlot(target, run)
 	slot.beginSetup(run)
-	if spawn.ActivityObserver != nil {
-		slot.bindObserver(spawn.ActivityAfterCursor, spawn.ActivityObserver)
-	} else {
-		slot.bindObserver(0, compatibilityActivityObserver{run: run})
-	}
 	launchEnv := maps.Clone(cfg.Env)
 	if strings.EqualFold(strings.TrimSpace(cfg.Name), "self") {
 		if launchEnv == nil {
@@ -344,7 +343,8 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		_ = acpClient.Close(ctx)
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
-	slot.beginInitialActivity(uuid.NewString(), run)
+	activityID := strings.TrimSpace(spawn.ActivityID)
+	slot.beginInitialActivity(activityID, run)
 	dispatchCtx, cancelDispatch := context.WithCancel(ctx)
 	dispatchDone := slot.beginPromptDispatch(cancelDispatch)
 	r.dispatchInitialPrompt(dispatchCtx, childCtx, slot, run, dispatchDone, strings.TrimSpace(req.Prompt))
@@ -957,7 +957,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 	setupOutput := slot != nil && slot.acceptsSetupOutput(run)
 	env.Update = acputil.StripTerminalConsoleFenceUpdate(env.Update)
 	var event *session.Event
-	var frame *stream.Frame
+	var outputEvent *output.Event
 	run.mu.Lock()
 	acceptOutput := run.running || setupOutput
 	if !acceptOutput {
@@ -1025,21 +1025,17 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 			frameState = delegation.StateRunning
 			frameRunning = true
 		}
-		next := stream.Frame{
-			Ref: stream.Ref{
-				TaskID:    firstNonEmpty(run.taskID, run.anchor.TaskID),
-				SessionID: firstNonEmpty(strings.TrimSpace(env.SessionID), run.anchor.SessionID),
-			},
-			State:     string(frameState),
-			Running:   frameRunning,
-			Event:     event,
-			UpdatedAt: run.updatedAt,
+		next := output.Event{
+			State: string(frameState), Running: frameRunning,
+			Event: event, OccurredAt: run.updatedAt,
 		}
-		frame = &next
+		outputEvent = &next
 	}
 	run.mu.Unlock()
-	if frame != nil {
-		run.emit(*frame)
+	if outputEvent != nil {
+		if slot != nil {
+			slot.publishRunOutputLocked(run, *outputEvent)
+		}
 	}
 }
 
@@ -1117,19 +1113,6 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 		opts.TextOverride = textOverride[0]
 	}
 	return acpingress.NormalizeUpdate(env.Update, opts)
-}
-
-func (run *childRun) emit(frame stream.Frame) {
-	if run == nil {
-		return
-	}
-	if slot := run.childSlot(); slot != nil {
-		slot.publishRunFrame(run, frame)
-		return
-	}
-	if run.sink != nil {
-		run.sink.PublishStream(frame)
-	}
 }
 
 func (run *childRun) appendAgentMessageLocked(text string) string {

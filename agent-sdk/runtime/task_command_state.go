@@ -2,14 +2,12 @@ package runtime
 
 import (
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 )
 
@@ -117,14 +115,6 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 		result:   session.CloneState(entry.Result),
 		metadata: session.CloneState(entry.Metadata),
 	}
-	if eventCursor, ok := taskInt64Value(entry.Metadata[commandStreamEventCursorMeta]); ok && eventCursor >= 0 {
-		if eventCursor == math.MaxInt64 && (entry.Running || !stream.IsTerminalState(string(entry.State))) {
-			return nil, fmt.Errorf("command stream event cursor is exhausted")
-		}
-		// A terminal task cannot advance an exhausted event frontier, but it can
-		// still be observed through the terminal snapshot at that frontier.
-		task.streamEventBase = eventCursor
-	}
 	if task.parentCall == "" {
 		task.parentCall = taskStringValue(entry.Metadata["parent_call"])
 	}
@@ -137,7 +127,7 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 	if restoredCheckpoint.resumable() && task.output == "" {
 		task.outputState.frontier.base = restoredCheckpoint.output
 	}
-	if !entry.Running && stream.IsTerminalState(string(entry.State)) {
+	if !entry.Running && taskapi.IsTerminalState(entry.State) {
 		replayCursor, ok := taskInt64Value(entry.Metadata[commandStreamOutputCursorMeta])
 		if ok && replayCursor >= 0 {
 			// Canonical Result text is the terminal model/final-text view, not a
@@ -322,7 +312,6 @@ func (t *commandTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		replayCursor = max(replayCursor, observedCursor)
 	}
 	metadataSource[commandStreamOutputCursorMeta] = replayCursor
-	metadataSource[commandStreamEventCursorMeta] = t.commandStreamEventCursorLocked()
 	if t.outputState.resume.available && (t.outputState.resume.coherent || t.outputState.resume.gap) {
 		metadataSource["output_cursor"] = t.outputState.resume.output
 		metadataSource["model_output_cursor"] = t.outputState.resume.model

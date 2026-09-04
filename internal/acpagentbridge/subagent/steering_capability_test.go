@@ -28,8 +28,10 @@ func TestSpawnedChildRetainsNegotiatedSteeringCapability(t *testing.T) {
 			runner := steeringChildTestRunner(t, fmt.Sprintf(`{"supported":%v}`, supported), "")
 			completion := make(chan delegation.Result, 1)
 			anchor, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
-				TaskID: "task-new-" + fmt.Sprint(supported),
-				CWD:    t.TempDir(),
+				ActivityID: "activity-new-" + fmt.Sprint(supported),
+				TaskID:     "task-new-" + fmt.Sprint(supported),
+				CWD:        t.TempDir(),
+				Output:     &recordingStreams{},
 				Completion: completionSinkFunc(func(result delegation.Result) {
 					completion <- result
 				}),

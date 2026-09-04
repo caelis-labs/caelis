@@ -40,10 +40,15 @@ failure. A Runner may release a requested handle after an error only when it
 positively proves that no child or producer started. Unknown creation outcomes
 retain the handle and reject blind retry.
 
-Runtime observation is bounded and must not block execution, durable writes, or
-completion. Lost transient output becomes a typed gap. The exact-delta window and
-semantic current-state snapshot are two views over one Runtime-owned observation
-path; neither is durable parent model context.
+Runtime exposes producer-side source and Task-output observers installed before
+external effects begin. Observer calls are synchronous handoff points, not an
+SDK replay service: the SDK owns no subscriber queue, cursor, file, quota,
+garbage collection, or Surface recovery policy. Control records normalized
+output in its disposable file spool; observer failure never changes execution
+or durable completion. The binding reports only raw producer family and whether
+observation began before the Task's first possible output. A
+`ProducerClosed` event means that stable producer can emit no future output;
+Control alone interprets that fact as cache-writer reclamation.
 
 Cancellation requested is not terminal cancellation. A successful Task control
 call does not imply that its target succeeded, and a failed target does not make
@@ -57,16 +62,17 @@ Runtime resolves Session-scoped addresses and binds trusted source identity.
 `SendMessage {to, message}` submits one Agent-communication input and claims
 neither delivery, target lifecycle, nor Task mutation.
 
-Task remains the lifecycle and output-observation abstraction. Command stdin is a
+Task remains the lifecycle and final-result abstraction. Command stdin is a
 separate Task capability; Agent communication never falls back to Task input.
-Read and wait sample or observe the current child activity without holding a
-lifecycle mutation claim. They advance one parent observation frontier and
-return retained FinalResponses without repeating an already observed activity.
+The SDK may expose a bounded current/final command result and ACP child final
+result, but it does not retain Surface replay history or understand how a
+consumer resumes it.
 
-Running Task results may expose a bounded output preview and absolute activity
-cursor. These are observation aids, not a child transcript or model authority.
-Completion notifications are bounded best-effort hints; final output remains
-owned by Task read/wait.
+Running command Task results may expose a bounded point-in-time output preview
+for explicit model-facing Task control. This is not a Surface stream, child
+transcript, replay cursor, or delivery authority. Child completion remains a
+canonical Task result; transient child history belongs only to the Control
+spool and ACP session/load fallback.
 
 ## Control and handoff
 
@@ -150,9 +156,9 @@ Runtime metadata, not user or tool-authored instruction channels.
 ## Stability
 
 The SDK remains reusable while supported imports compile externally, product and
-presentation dependencies stay outside it, bounded observers cannot block
-producers, durable context is exactly rebuildable, uncertainty remains typed,
-and only Control can transfer ownership.
+presentation dependencies stay outside it, synchronous observers retain no
+unbounded delivery queue, durable context is exactly rebuildable, uncertainty
+remains typed, and only Control can transfer ownership.
 
 Consumer setup and package layout live in
 [`agent-sdk/README.md`](../agent-sdk/README.md). Projection rules live in

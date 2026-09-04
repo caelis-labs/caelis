@@ -22,8 +22,8 @@
   compatibility, and permission translation stay with their Control,
   Host-private, or Surface owner; do not recreate `protocol/acp/*` or `ports/*`.
 - `control/appserver` is the aggregate product-client boundary. Task observation
-  remains independent from the Session feed, and main-Turn ingress remains
-  private to `internal/controlclient/turningress`.
+  remains independent from the Session feed. Control-owned stream recorders
+  append Surface-bound events to the shared spool before appserver projection.
 - `app/*` owns process composition and private adapters, not a second product
   semantics layer. Lower layers depend on focused contracts, never a concrete
   Host or a wide function bag.

@@ -381,6 +381,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		ControllerContextRouter:  contextRouter,
 		ControllerEventForwarder: acpbridge.NewControllerForwarder(s.sessions),
 		TaskStore:                s.authorities.taskStore,
+		TaskOutput:               s.authorities.taskOutput,
 		TaskActivityChanged:      s.runtimeTaskChanged,
 		TaskCommitted:            s.taskCommitted,
 	}

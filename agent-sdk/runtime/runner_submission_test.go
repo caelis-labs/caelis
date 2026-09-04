@@ -15,7 +15,7 @@ import (
 func TestRunnerPublicSubmitRejectsRuntimeModelContext(t *testing.T) {
 	t.Parallel()
 
-	runner := newRunner("run-1", func() {})
+	runner := newRunner(t.Context(), "run-1", func() {}, nil)
 	submission := agent.Submission{
 		Kind: runtimeinput.ModelContext, Text: "hidden context",
 		Actor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "participant-1"},

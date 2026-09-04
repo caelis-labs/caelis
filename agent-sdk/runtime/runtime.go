@@ -19,7 +19,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
+	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 )
 
 // Config defines one baseline local runtime instance.
@@ -42,6 +43,9 @@ type Config struct {
 	ControllerRecovery       controller.RecoveryCoordinator
 	ControllerEventForwarder agent.ControllerEventForwarder
 	TaskStore                task.Store
+	// TaskOutput installs producer-only Task observers before external effects.
+	// The SDK never reads from or assigns retention semantics to this hook.
+	TaskOutput output.Binder
 	// TaskActivityChanged reports a committed Task terminal transition. Product
 	// hosts may use it to re-evaluate an in-memory Runtime reference; it does not
 	// authorize work or replace the durable Task store.
@@ -87,7 +91,8 @@ type Runtime struct {
 	activeRunners           map[string]activeRun
 	approvalWaiters         map[string]chan agent.ApprovalResponse
 	tasks                   *taskRuntime
-	terminals               *streamService
+	taskOutput              output.Binder
+	terminals               *terminalService
 	lifecycle               agent.LifecycleOptions
 	guardrails              []agent.GuardrailSpec
 	guardrailSlots          chan struct{}
@@ -122,6 +127,7 @@ func New(cfg Config) (*Runtime, error) {
 		controllerRecovery:       cfg.ControllerRecovery,
 		controllerEventForwarder: cfg.ControllerEventForwarder,
 		subagents:                cfg.Subagents,
+		taskOutput:               cfg.TaskOutput,
 		runStates:                map[string]agent.RunState{},
 		activeRunners:            map[string]activeRun{},
 		approvalWaiters:          map[string]chan agent.ApprovalResponse{},
@@ -161,7 +167,7 @@ func New(cfg Config) (*Runtime, error) {
 	}
 	r.tasks = newTaskRuntime(r, cfg.TaskStore, cfg.TaskActivityChanged)
 	r.tasks.taskCommitted = cfg.TaskCommitted
-	r.terminals = newStreamService(r.tasks)
+	r.terminals = newTerminalService(r.tasks)
 	return r, nil
 }
 
@@ -189,9 +195,9 @@ func requiresControllerForwarder(cfg Config) bool {
 	return cfg.Controllers != nil
 }
 
-// Terminals returns the unified terminal read/subscribe surface for this
-// runtime. Task control remains on the Task tool plane.
-func (r *Runtime) Streams() stream.Service {
+// Terminals returns the command fallback/control surface for this Runtime.
+// Transient Task output subscription is owned by product Control.
+func (r *Runtime) Terminals() terminal.Controller {
 	if r == nil {
 		return nil
 	}
@@ -257,7 +263,7 @@ func (r *Runtime) Run(
 		ActiveRunID: runID,
 		UpdatedAt:   r.now(),
 	})
-	handle := newRunner(runID, cancel)
+	handle := newRunner(runCtx, runID, cancel, req.SourceObserver)
 	handle.setCancelHook(func() error {
 		return r.transitionRunTurnJournal(context.WithoutCancel(runCtx), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 	})

@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -91,17 +91,14 @@ type ContextUsage struct {
 	MaxTokens     int `json:"max_tokens,omitempty"`
 }
 
-// Runner is one active runtime run handle. Events and optional SourceEvents are
-// alternate views of one bounded single-consumer stream; consuming both returns
-// runtime.ErrEventStreamConsumed. Producers never wait for the observer: a slow
-// consumer receives EventStreamGapError before the newest retained suffix.
-// Close cancels an unfinished run and discards undrained events, while natural
-// completion preserves the retained suffix for the selected consumer.
+// Runner is one active runtime run handle. Live source observation is installed
+// on the Run request before execution starts; Runner deliberately exposes no
+// pull stream or replay cache.
 type Runner interface {
 	RunID() string
-	Events() iter.Seq2[*session.Event, error]
 	Submit(Submission) error
 	Cancel() CancelResult
+	WaitCompletion(context.Context) error
 	Close() error
 }
 
@@ -114,13 +111,12 @@ type ContextSubmissionRunner interface {
 }
 
 // RunnerCompletionWaiter reports when the execution producer, including its
-// final durable writes, is quiescent. A nil result proves quiescence; an error
-// leaves completion unproven. Runtime decorators that own an external fence
-// require this contract before releasing authority after natural completion,
-// an early consumer stop, or Close.
-type RunnerCompletionWaiter interface {
-	WaitCompletion(context.Context) error
-}
+// final durable writes, is quiescent. Returning proves that the producer is no
+// longer live; a non-nil error describes its terminal outcome. If the supplied
+// wait context ends first, completion remains unproven. Runtime decorators that
+// own an external fence require this contract before releasing authority after
+// natural completion, cancellation, or Close.
+type RunnerCompletionWaiter interface{ WaitCompletion(context.Context) error }
 
 // SubagentRunner starts delegated child runs from the current invocation.
 // Concrete child-agent configuration is app-owned; runtime only sees the
@@ -146,12 +142,18 @@ type ChildEndpointRef struct {
 // ChildInputRequest submits Agent communication to one exact child.
 // Source is assigned by the trusted Runtime topology boundary, never by a
 // model-facing tool or external wire label.
+// ActivityID, Output, and Completion bind a possible new activity. Active
+// steering must retain the running producer's binding even when this request
+// carries another candidate; the first output may not yet be observed by Task.
 type ChildInputRequest struct {
-	Target       ChildEndpointRef    `json:"target"`
-	Source       session.ActorRef    `json:"source"`
-	Input        string              `json:"input,omitempty"`
-	DisplayInput string              `json:"display_input,omitempty"`
-	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
+	Target       ChildEndpointRef          `json:"target"`
+	Source       session.ActorRef          `json:"source"`
+	ActivityID   string                    `json:"activity_id,omitempty"`
+	Input        string                    `json:"input,omitempty"`
+	DisplayInput string                    `json:"display_input,omitempty"`
+	ContentParts []model.ContentPart       `json:"content_parts,omitempty"`
+	Output       output.Observer           `json:"-"`
+	Completion   delegation.CompletionSink `json:"-"`
 }
 
 // ChildInputCommand addresses one child inside a parent Session topology.
@@ -179,58 +181,11 @@ type ChildInputRunner interface {
 	SubmitChildInput(context.Context, ChildInputRequest) (ChildInputResult, error)
 }
 
-// ChildActivityEvent is one ordered output or terminal observation from a
-// delegated child activity. Cursor is monotonic for the endpoint slot.
-type ChildActivityEvent struct {
-	Target     ChildEndpointRef `json:"target"`
-	ActivityID string           `json:"activity_id"`
-	Cursor     uint64           `json:"cursor"`
-	// Initial identifies the activity created by the endpoint's Spawn prompt.
-	// It is activity-owned so journal replay keeps generation semantics across
-	// observer replacement.
-	Initial bool               `json:"initial,omitempty"`
-	Frame   *stream.Frame      `json:"frame,omitempty"`
-	Result  *delegation.Result `json:"result,omitempty"`
-	// Gap marks bounded presentation activity that was not retained by the
-	// endpoint observer journal. It never changes child execution lifecycle.
-	Gap bool `json:"gap,omitempty"`
-	// Dropped is the number of normalized observation frames represented by Gap.
-	Dropped uint64 `json:"dropped,omitempty"`
-}
-
-// ChildActivityObserver consumes target-owned output independently from input
-// admission. Returning nil acknowledges the event cursor to the endpoint slot.
-type ChildActivityObserver interface {
-	ObserveChildActivity(context.Context, ChildActivityEvent) error
-}
-
-// ChildActivityBatchObserver optionally acknowledges one ordered journal batch
-// through a single durable observation boundary. Implementations must apply the
-// batch atomically with respect to their durable cursor: returning nil
-// acknowledges every event through the final cursor.
-type ChildActivityBatchObserver interface {
-	ObserveChildActivityBatch(context.Context, []ChildActivityEvent) error
-}
-
-// ChildActivityLiveObserver optionally accepts one already-journaled frame for
-// process-local presentation before its durable observer callback completes.
-// Returning nil records only that the preview was applied; it never
-// acknowledges or removes the endpoint journal item. Implementations must
-// return promptly, perform no durable I/O, and tolerate the same cursor later
-// arriving through ChildActivityObserver.
-type ChildActivityLiveObserver interface {
-	ObserveChildActivityLive(context.Context, ChildActivityEvent) error
-}
-
-// ChildActivityObserverBinder atomically installs or replaces the sole output
-// observer for one endpoint and replays events after afterCursor.
-type ChildActivityObserverBinder interface {
-	BindChildActivityObserver(context.Context, ChildEndpointRef, uint64, ChildActivityObserver) error
-}
-
 // ChildEndpointBinder rehydrates process-local endpoint ownership from one
 // Runtime-validated durable binding. It performs no remote operation; a later
 // ChildInputRunner call may resume the exact remote Session.
+// Existing live producers retain their binding. Idle recovery installs the new
+// binding before reconnect setup can emit output.
 type ChildEndpointBinder interface {
 	BindChildEndpoint(context.Context, ChildEndpointRef, SubagentSpawnContext) error
 }
@@ -278,18 +233,14 @@ type SubagentSpawnContext struct {
 	Session           session.Session           `json:"session,omitempty"`
 	CWD               string                    `json:"cwd,omitempty"`
 	TaskID            string                    `json:"task_id,omitempty"`
+	ActivityID        string                    `json:"activity_id,omitempty"`
 	Handle            string                    `json:"handle,omitempty"`
 	Role              session.ParticipantRole   `json:"role,omitempty"`
 	ParentCallID      string                    `json:"parent_call_id,omitempty"`
 	Mode              string                    `json:"mode,omitempty"`
 	ApprovalMode      string                    `json:"approval_mode,omitempty"`
 	ApprovalRequester SubagentApprovalRequester `json:"-"`
-	Streams           stream.Sink               `json:"-"`
-	// ActivityObserver is the single output owner used by runners that support
-	// provider-neutral child input. Legacy runners may continue to publish via
-	// Streams and Completion.
-	ActivityObserver    ChildActivityObserver `json:"-"`
-	ActivityAfterCursor uint64                `json:"-"`
+	Output            output.Observer           `json:"-"`
 	// Completion is the Runtime-owned terminal lifecycle path for this child
 	// turn. Stream consumers and Task control calls remain observers.
 	Completion delegation.CompletionSink `json:"-"`

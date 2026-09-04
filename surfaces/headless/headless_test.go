@@ -574,11 +574,10 @@ func newFakeACPHandle(events []eventstream.Envelope) *fakeTurnHandle {
 	return &fakeTurnHandle{acpEvents: ch}
 }
 
-func (h *fakeTurnHandle) HandleID() string                       { return "h1" }
-func (h *fakeTurnHandle) RunID() string                          { return "run-1" }
-func (h *fakeTurnHandle) TurnID() string                         { return "turn-1" }
-func (h *fakeTurnHandle) ACPEvents() <-chan eventstream.Envelope { return h.acpEvents }
-func (*fakeTurnHandle) SessionID() string                        { return "session-1" }
+func (h *fakeTurnHandle) HandleID() string { return "h1" }
+func (h *fakeTurnHandle) RunID() string    { return "run-1" }
+func (h *fakeTurnHandle) TurnID() string   { return "turn-1" }
+func (*fakeTurnHandle) SessionID() string  { return "session-1" }
 func (h *fakeTurnHandle) Target() appserver.TurnTarget {
 	return appserver.TurnTarget{HandleID: h.HandleID(), RunID: h.RunID(), TurnID: h.TurnID()}
 }
@@ -589,7 +588,6 @@ func (h *fakeTurnHandle) ResolveApproval(_ context.Context, decision appserver.A
 }
 func (*fakeTurnHandle) Steer(context.Context, string, string, []model.ContentPart) error { return nil }
 func (*fakeTurnHandle) Cancel(context.Context, string) error                             { return nil }
-func (*fakeTurnHandle) LastCursor() string                                               { return "" }
 func (*fakeTurnHandle) Err() error                                                       { return nil }
 func (*fakeTurnHandle) Close() error                                                     { return nil }
 
@@ -645,8 +643,7 @@ func (t *fakeSessionTurn) Cancel(context.Context, string) error {
 	t.cancelled = true
 	return t.cancelErr
 }
-func (t *fakeSessionTurn) LastCursor() string { return t.last }
-func (*fakeSessionTurn) Err() error           { return nil }
+func (*fakeSessionTurn) Err() error { return nil }
 func (t *fakeSessionTurn) Close() error {
 	t.closed = true
 	return nil

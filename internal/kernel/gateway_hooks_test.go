@@ -94,7 +94,8 @@ func TestSessionStartHookRunsOnceAndPersists(t *testing.T) {
 		t.Fatalf("BeginTurn failed: %v", err)
 	}
 
-	for range res.Handle.ACPEvents() {
+	if err := res.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 
 	// Verify that the plugin context event is appended to session history.
@@ -177,7 +178,8 @@ func TestSessionStartHookRunsOnceAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Second BeginTurn failed: %v", err)
 	}
-	for range res2.Handle.ACPEvents() {
+	if err := res2.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 
 	// Verify that NO new plugin context event was appended (total should remain 1)
@@ -255,7 +257,8 @@ func TestSessionStartHookFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn should continue when a SessionStart hook fails, got error: %v", err)
 	}
-	for range res.Handle.ACPEvents() {
+	if err := res.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 
 	// Verify that a diagnostic EventTypeLifecycle event is appended to session history
@@ -323,7 +326,8 @@ func TestSessionStartHookFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Second BeginTurn failed: %v", err)
 	}
-	for range res2.Handle.ACPEvents() {
+	if err := res2.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 	events, err = sessions.Events(ctx, session.EventsRequest{SessionRef: sess.SessionRef})
 	if err != nil {
@@ -401,7 +405,8 @@ func TestSessionStartHookResumeWithFileStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("First BeginTurn failed: %v", err)
 	}
-	for range res1.Handle.ACPEvents() {
+	if err := res1.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 
 	// Recreate the session service (simulating load/resume) and gateway
@@ -427,7 +432,8 @@ func TestSessionStartHookResumeWithFileStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Second BeginTurn failed: %v", err)
 	}
-	for range res2.Handle.ACPEvents() {
+	if err := res2.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 
 	// Verify that the plugin context event is only present once in the persisted file store.
@@ -525,7 +531,8 @@ func TestHookDigestDifferentiatesArgsAndEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn failed: %v", err)
 	}
-	for range res.Handle.ACPEvents() {
+	if err := res.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 
 	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: sess.SessionRef})
@@ -606,7 +613,8 @@ func TestHookEnvAndCompatEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn failed: %v", err)
 	}
-	for range res.Handle.ACPEvents() {
+	if err := res.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 
 	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: sess.SessionRef})
@@ -682,7 +690,8 @@ func TestHookTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn should continue when a SessionStart hook times out, got error: %v", err)
 	}
-	for range res.Handle.ACPEvents() {
+	if err := res.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: sess.SessionRef})
 	if err != nil {
@@ -763,7 +772,8 @@ func TestSessionStartHookTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn failed: %v", err)
 	}
-	for range res.Handle.ACPEvents() {
+	if err := res.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 
 	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: sess.SessionRef})
@@ -855,7 +865,8 @@ func TestSessionStartHookRunsOnceAndPersistsEmptyStdout(t *testing.T) {
 	}
 
 	// Wait for the background turn to finish
-	for range res.Handle.ACPEvents() {
+	if err := res.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 
 	// Verify that the plugin marker event is appended to session history.
@@ -929,7 +940,8 @@ func TestSessionStartHookRunsOnceAndPersistsEmptyStdout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Second BeginTurn failed: %v", err)
 	}
-	for range res2.Handle.ACPEvents() {
+	if err := res2.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 
 	// Verify that NO new plugin marker event was appended (total should remain 1)

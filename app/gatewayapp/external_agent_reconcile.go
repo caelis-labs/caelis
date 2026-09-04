@@ -11,6 +11,7 @@ import (
 
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
@@ -210,15 +211,23 @@ func (s *controlCommandBackend) reconcileDisconnectedACPAgentSession(
 		}
 	}
 
+	var committedWarnings error
 	for attempt := 0; attempt < sessionModelRecoveryMaxAttempts; attempt++ {
 		active, err = s.composition.sessions.Session(ctx, active.SessionRef)
 		if err != nil {
-			return err
+			return errors.Join(committedWarnings, err)
 		}
 		changed := false
 		for _, binding := range active.Participants {
 			if !participantUsesDisconnectedACP(binding, agentID, removed) {
 				continue
+			}
+			// Capture the released product address before the mutation. A store
+			// reporting failure may still return the exact committed Session, but
+			// cleanup must not depend on inspecting that returned projection.
+			releasedTask := taskapi.Ref{
+				SessionID: active.SessionID,
+				TaskID:    strings.TrimSpace(binding.DelegationID),
 			}
 			if runtime != nil && runtime.instance != nil && runtime.instance.currentGateway() != nil {
 				active, err = runtime.instance.currentGateway().DetachParticipant(ctx, kernel.DetachParticipantRequest{
@@ -229,11 +238,20 @@ func (s *controlCommandBackend) reconcileDisconnectedACPAgentSession(
 			} else {
 				active, err = s.removeDormantDisconnectedParticipant(ctx, active, binding, configurationRevision)
 			}
-			if err != nil {
+			if err != nil && !session.IsCommitted(err) {
 				if errors.Is(err, session.ErrRevisionConflict) {
 					break
 				}
-				return err
+				return errors.Join(committedWarnings, err)
+			}
+			if session.IsCommitted(err) {
+				committedWarnings = errors.Join(committedWarnings, err)
+				err = nil
+			}
+			if releasedTask.TaskID != "" {
+				releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(contextOrBackground(ctx)), controlFeedPublishTimeout)
+				s.composition.releaseControlTaskOutput(releaseCtx, releasedTask)
+				cancel()
 			}
 			changed = true
 		}
@@ -247,19 +265,22 @@ func (s *controlCommandBackend) reconcileDisconnectedACPAgentSession(
 				active, err = s.rebindDormantDisconnectedController(ctx, active, fallback, configurationRevision)
 			}
 			if err != nil {
-				if errors.Is(err, session.ErrRevisionConflict) {
+				if session.IsCommitted(err) {
+					committedWarnings = errors.Join(committedWarnings, err)
+				} else if errors.Is(err, session.ErrRevisionConflict) {
 					continue
+				} else {
+					return errors.Join(committedWarnings, err)
 				}
-				return err
 			}
 			changed = true
 		}
 		if !changed || (!controllerUsesDisconnectedACP(active.Controller, agentID, removed) &&
 			!sessionHasDisconnectedACPParticipant(active, agentID, removed)) {
-			return nil
+			return committedWarnings
 		}
 	}
-	return fmt.Errorf("external Agent binding reconciliation did not converge: %w", session.ErrRevisionConflict)
+	return errors.Join(committedWarnings, fmt.Errorf("external Agent binding reconciliation did not converge: %w", session.ErrRevisionConflict))
 }
 
 func interruptDisconnectedACPActiveTurn(

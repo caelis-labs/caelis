@@ -2,87 +2,65 @@ package gatewayapp
 
 import (
 	"context"
-	"iter"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 )
 
-// hostTaskStreamService routes one Task observation to the Runtime that owns
-// its Session. Task output remains an independent side stream; this router
-// does not copy it into the Control Session feed.
+// hostTaskStreamService routes only command-terminal fallback/control to the
+// Runtime owning a Session. Transient Task output is read from Control's spool.
 type hostTaskStreamService struct {
-	host     *runtimeComposition
-	registry *sessionRuntimeRegistry
+	host      *runtimeComposition
+	registry  *sessionRuntimeRegistry
+	lifecycle taskOutputLifecycle
 }
 
-func (s hostTaskStreamService) Read(
-	ctx context.Context,
-	request stream.ReadRequest,
-) (stream.Snapshot, error) {
-	service, err := s.service(request.Ref.SessionID)
+func (s hostTaskStreamService) Read(ctx context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
+	controller, err := s.controller(ref.SessionID)
 	if err != nil {
-		return stream.Snapshot{}, err
+		return terminal.Snapshot{}, err
 	}
-	return service.Read(ctx, request)
+	return controller.Read(ctx, ref)
 }
 
-func (s hostTaskStreamService) Subscribe(
-	ctx context.Context,
-	request stream.SubscribeRequest,
-) iter.Seq2[*stream.Frame, error] {
-	return func(yield func(*stream.Frame, error) bool) {
-		service, err := s.service(request.Ref.SessionID)
-		if err != nil {
-			yield(nil, err)
-			return
-		}
-		for frame, streamErr := range service.Subscribe(ctx, request) {
-			if !yield(frame, streamErr) {
-				return
-			}
-		}
-	}
-}
-
-func (s hostTaskStreamService) Wait(ctx context.Context, ref stream.Ref) (stream.Snapshot, error) {
-	service, err := s.service(ref.SessionID)
+func (s hostTaskStreamService) Wait(ctx context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
+	controller, err := s.controller(ref.SessionID)
 	if err != nil {
-		return stream.Snapshot{}, err
-	}
-	controller, ok := service.(stream.Controller)
-	if !ok {
-		return stream.Snapshot{}, taskStreamControlUnavailable()
+		return terminal.Snapshot{}, err
 	}
 	return controller.Wait(ctx, ref)
 }
 
-func (s hostTaskStreamService) Kill(ctx context.Context, ref stream.Ref) error {
-	service, err := s.service(ref.SessionID)
+func (s hostTaskStreamService) Kill(ctx context.Context, ref terminal.Ref) error {
+	controller, err := s.controller(ref.SessionID)
 	if err != nil {
 		return err
-	}
-	controller, ok := service.(stream.Controller)
-	if !ok {
-		return taskStreamControlUnavailable()
 	}
 	return controller.Kill(ctx, ref)
 }
 
-func (s hostTaskStreamService) Release(ctx context.Context, ref stream.Ref) error {
-	service, err := s.service(ref.SessionID)
+func (s hostTaskStreamService) Release(ctx context.Context, ref terminal.Ref) error {
+	controller, err := s.controller(ref.SessionID)
 	if err != nil {
 		return err
 	}
-	controller, ok := service.(stream.Controller)
-	if !ok {
-		return taskStreamControlUnavailable()
+	if err := controller.Release(ctx, ref); err != nil {
+		return err
 	}
-	return controller.Release(ctx, ref)
+	if s.lifecycle != nil {
+		_ = s.lifecycle.ReleaseTask(context.WithoutCancel(ctx), taskRefFromTerminal(ref))
+	}
+	return nil
 }
 
-func (s hostTaskStreamService) service(sessionID string) (stream.Service, error) {
+func taskRefFromTerminal(ref terminal.Ref) task.Ref {
+	ref = terminal.NormalizeRef(ref)
+	return task.Ref{SessionID: ref.SessionID, TaskID: ref.TaskID, TerminalID: ref.TerminalID}
+}
+
+func (s hostTaskStreamService) controller(sessionID string) (terminal.Controller, error) {
 	composition := s.host
 	if composition == nil {
 		return nil, taskStreamRuntimeUnavailable()
@@ -95,20 +73,15 @@ func (s hostTaskStreamService) service(sessionID string) (stream.Service, error)
 		}
 		composition = &runtime.instance.runtimeComposition
 	}
-	provider := composition.KernelStreams()
-	if provider == nil || provider.Streams() == nil {
+	provider := composition.KernelTerminals()
+	if provider == nil || provider.Terminals() == nil {
 		return nil, taskStreamRuntimeUnavailable()
 	}
-	return provider.Streams(), nil
+	return provider.Terminals(), nil
 }
 
 func taskStreamRuntimeUnavailable() error {
-	return errorcode.New(errorcode.Unavailable, "gatewayapp: Task Runtime stream is unavailable")
+	return errorcode.New(errorcode.Unavailable, "gatewayapp: Task Runtime terminal control is unavailable")
 }
 
-func taskStreamControlUnavailable() error {
-	return errorcode.New(errorcode.Unavailable, "gatewayapp: terminal stream control is unavailable")
-}
-
-var _ stream.Service = hostTaskStreamService{}
-var _ stream.Controller = hostTaskStreamService{}
+var _ terminal.Controller = hostTaskStreamService{}

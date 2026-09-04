@@ -11,7 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	sdkstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
@@ -93,81 +92,6 @@ func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
 	mux.Close()
 	if !sub.closed() {
 		t.Fatal("mux close did not close delivery subscription")
-	}
-}
-
-func TestACPTaskStreamMuxForwardsRecoverableSubagentGapAsProjectorBoundary(t *testing.T) {
-	t.Parallel()
-
-	sub := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 3)}
-	service := &acpMuxTestService{
-		requests: make(chan taskstream.SubscribeRequest, 1),
-		sub:      sub,
-		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
-			SessionID: "session-1",
-			TaskID:    "task-1",
-			Handle:    "maia",
-			Kind:      task.KindSubagent,
-			State:     task.StateRunning,
-			Running:   true,
-			ParentTool: taskstream.ParentTool{
-				ToolCallID: "spawn-1",
-				ToolName:   "Spawn",
-			},
-		}}},
-	}
-	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
-	defer mux.Close()
-	mux.Observe(eventstream.Envelope{
-		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Update: eventstream.ToolCallUpdate{
-			SessionUpdate: eventstream.UpdateToolCallInfo,
-			ToolCallID:    "spawn-1",
-			RawOutput: map[string]any{
-				"handle": "maia", "state": "running", "target_kind": "subagent",
-				"parent_call": "spawn-1", "parent_tool": "Spawn",
-			},
-			Meta: acpmeta.WithToolName(nil, "Spawn"),
-		},
-	})
-	select {
-	case <-service.requests:
-	case <-time.After(time.Second):
-		t.Fatal("Spawn Task stream was not subscribed")
-	}
-
-	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
-	sub.events <- eventstream.Envelope{
-		Kind: eventstream.KindNotice, SessionID: "session-1",
-		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", ParentTool: parent,
-		Notice: "transient Task output before this boundary is no longer available",
-		Meta:   map[string]any{"task_stream": map[string]any{"transient_gap": true}},
-	}
-	select {
-	case envelope := <-mux.Events():
-		if !taskstream.IsTransientGapEnvelope(envelope) {
-			t.Fatalf("recoverable Task gap = %#v, want typed child projector boundary", envelope)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("recoverable Task gap was not forwarded to the child projector")
-	}
-
-	sub.events <- eventstream.Envelope{
-		Kind: eventstream.KindSessionUpdate, SessionID: "session-1",
-		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", ParentTool: parent,
-		Update: eventstream.ContentChunk{
-			SessionUpdate: eventstream.UpdateAgentMessage,
-			MessageID:     "child-message",
-			Content:       eventstream.TextContent{Type: "text", Text: "current child output"},
-		},
-	}
-	select {
-	case envelope := <-mux.Events():
-		if envelope.Kind != eventstream.KindSessionUpdate {
-			t.Fatalf("post-gap child envelope = %#v", envelope)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("post-gap child output was not forwarded")
 	}
 }
 
@@ -304,10 +228,10 @@ func TestACPTaskStreamMuxDetachedDeliveryOutlivesParentPrompt(t *testing.T) {
 	}
 }
 
-func TestEmitTaskAwareControlEnvelopeSuppressesChildStreamAndClosesParentOnceFromFallback(t *testing.T) {
+func TestEmitTaskAwareControlEnvelopeSuppressesChildStreamAndClosesParentOnceFromLifecycle(t *testing.T) {
 	t.Parallel()
 
-	taskEvents := make(chan eventstream.Envelope, 1)
+	taskEvents := make(chan eventstream.Envelope, 2)
 	taskEvents <- eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
@@ -323,16 +247,15 @@ func TestEmitTaskAwareControlEnvelopeSuppressesChildStreamAndClosesParentOnceFro
 			Content:       eventstream.TextContent{Type: "text", Text: "retained child output"},
 		},
 	}
-	var taskEventStream <-chan eventstream.Envelope = taskEvents
-	boundary := make(chan struct{}, 1)
-	mux := &acpTaskStreamMux{
-		observations: map[string]*acpTaskStreamObservation{
-			"spawn-1": {
-				generation: &acpTaskStreamObservationGeneration{boundary: boundary},
-			},
-		},
+	taskEvents <- eventstream.Envelope{
+		Kind: eventstream.KindLifecycle, SessionID: "session-1", TurnID: "child-turn-1",
+		Scope: eventstream.ScopeSubagent, ScopeID: "task-yara",
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
+		Final:      true,
 	}
-	mux.signalBoundary("spawn-1")
+	var taskEventStream <-chan eventstream.Envelope = taskEvents
+	mux := &acpTaskStreamMux{observations: map[string]*acpTaskStreamObservation{}}
 
 	completed := eventstream.ToolStatusCompleted
 	waitEnvelope := eventstream.Envelope{
@@ -393,10 +316,10 @@ func TestEmitTaskAwareControlEnvelopeSuppressesChildStreamAndClosesParentOnceFro
 			continue
 		}
 		parentCloses++
-		assertACPChildFinalResult(t, notification, eventstream.ToolStatusCompleted, "fallback final")
+		assertACPChildFinalResult(t, notification, eventstream.ToolStatusCompleted, "retained child output")
 	}
 	if parentCloses != 1 {
-		t.Fatalf("Spawn parent closes = %d, want exactly one standard result after repeated Task wait", parentCloses)
+		t.Fatalf("Spawn parent closes = %d, want exactly one standard result from child lifecycle", parentCloses)
 	}
 }
 
@@ -437,9 +360,9 @@ func TestACPTaskStreamMuxProjectsControlTaskRecordThroughACPAdapter(t *testing.T
 			State: task.StateRunning, Running: true,
 			ParentTool: controltaskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
 		},
-		Frame: &sdkstream.Frame{
-			Ref:  sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "terminal-1"},
-			Text: "from control\n", Running: true, Cursor: sdkstream.Cursor{Events: 1, Output: 13},
+		Frame: &controltaskstream.Frame{
+			TerminalID: "terminal-1",
+			Text:       "from control\n", Running: true,
 		},
 	}
 
@@ -628,7 +551,7 @@ func TestACPTaskStreamMuxLaterAnchorAttachesAfterRecoveryWindow(t *testing.T) {
 		t.Fatalf("Subscribe calls = %d, want later anchor to attach after the expired recovery window", calls)
 	}
 	select {
-	case <-mux.parentBoundary("command-1"):
+	case <-mux.observationBoundary("command-1"):
 		t.Fatal("later successful attach inherited the prior miss boundary")
 	default:
 	}
@@ -643,9 +566,9 @@ func TestACPTaskStreamMuxLaterAnchorAttachesAfterRecoveryWindow(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("later anchor attached no live Task output")
 	}
-	sub.finish(nil, "cursor-late")
+	sub.finish(nil)
 	select {
-	case <-mux.parentBoundary("command-1"):
+	case <-mux.observationBoundary("command-1"):
 	case <-time.After(time.Second):
 		t.Fatal("completed later attachment did not signal its own boundary")
 	}
@@ -684,22 +607,22 @@ func TestACPTaskStreamMuxRetryGenerationCannotSignalLaterAttachmentBoundary(t *t
 
 	anchor := acpMuxCommandAnchor("command")
 	mux.Observe(anchor)
+	select {
+	case <-mux.Events():
+	case <-time.After(time.Second):
+		t.Fatal("retryable miss emitted no availability notice")
+	}
 	var oldBoundary chan struct{}
 	select {
 	case oldBoundary = <-oldSignalReady:
 	case <-time.After(time.Second):
 		t.Fatal("retryable miss did not reach deferred generation cleanup")
 	}
-	select {
-	case <-mux.Events():
-	case <-time.After(time.Second):
-		t.Fatal("retryable miss emitted no availability notice")
-	}
 
 	sub := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 1)}
 	service.setSubscriptionResult(nil, sub)
 	mux.Observe(anchor)
-	newBoundary := mux.parentBoundary("command-1")
+	newBoundary := mux.observationBoundary("command-1")
 	if newBoundary == nil || oldBoundary == newBoundary {
 		t.Fatal("later attachment did not receive a distinct observation boundary")
 	}
@@ -740,7 +663,7 @@ func TestACPTaskStreamMuxRetryGenerationCannotSignalLaterAttachmentBoundary(t *t
 	case <-time.After(time.Second):
 		t.Fatal("later generation did not forward Task output")
 	}
-	sub.finish(nil, "cursor-later")
+	sub.finish(nil)
 	select {
 	case <-newBoundary:
 	case <-time.After(time.Second):

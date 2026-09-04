@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"iter"
 	"strings"
 	"time"
 
@@ -140,34 +139,36 @@ type RecoveryCoordinator interface {
 
 // TurnRequest runs one turn through the active ACP controller.
 type TurnRequest struct {
-	SessionRef        session.SessionRef    `json:"session_ref,omitempty"`
-	Session           session.Session       `json:"session,omitempty"`
-	TurnID            string                `json:"turn_id,omitempty"`
-	Input             string                `json:"input,omitempty"`
-	ContentParts      []model.ContentPart   `json:"content_parts,omitempty"`
-	Context           agent.ContextTransfer `json:"context,omitempty"`
-	FreshContext      agent.ContextTransfer `json:"fresh_context,omitempty"`
-	ContextSyncSeq    uint64                `json:"context_sync_seq,omitempty"`
-	Stream            bool                  `json:"stream,omitempty"`
-	Mode              string                `json:"mode,omitempty"`
-	ApprovalRequester ApprovalRequester     `json:"-"`
+	SessionRef        session.SessionRef        `json:"session_ref,omitempty"`
+	Session           session.Session           `json:"session,omitempty"`
+	TurnID            string                    `json:"turn_id,omitempty"`
+	Input             string                    `json:"input,omitempty"`
+	ContentParts      []model.ContentPart       `json:"content_parts,omitempty"`
+	Context           agent.ContextTransfer     `json:"context,omitempty"`
+	FreshContext      agent.ContextTransfer     `json:"fresh_context,omitempty"`
+	ContextSyncSeq    uint64                    `json:"context_sync_seq,omitempty"`
+	Stream            bool                      `json:"stream,omitempty"`
+	Mode              string                    `json:"mode,omitempty"`
+	ApprovalRequester ApprovalRequester         `json:"-"`
+	Observer          agent.SourceEventObserver `json:"-"`
 }
 
 // ParticipantPromptRequest sends one bounded prompt to an attached ACP
 // participant without changing the main controller.
 type ParticipantPromptRequest struct {
-	SessionRef        session.SessionRef    `json:"session_ref,omitempty"`
-	Session           session.Session       `json:"session,omitempty"`
-	TurnID            string                `json:"turn_id,omitempty"`
-	ParticipantID     string                `json:"participant_id,omitempty"`
-	Input             string                `json:"input,omitempty"`
-	DisplayInput      string                `json:"display_input,omitempty"`
-	DisplayTitle      string                `json:"display_title,omitempty"`
-	ContentParts      []model.ContentPart   `json:"content_parts,omitempty"`
-	Context           agent.ContextTransfer `json:"context,omitempty"`
-	Stream            bool                  `json:"stream,omitempty"`
-	Mode              string                `json:"mode,omitempty"`
-	ApprovalRequester ApprovalRequester     `json:"-"`
+	SessionRef        session.SessionRef        `json:"session_ref,omitempty"`
+	Session           session.Session           `json:"session,omitempty"`
+	TurnID            string                    `json:"turn_id,omitempty"`
+	ParticipantID     string                    `json:"participant_id,omitempty"`
+	Input             string                    `json:"input,omitempty"`
+	DisplayInput      string                    `json:"display_input,omitempty"`
+	DisplayTitle      string                    `json:"display_title,omitempty"`
+	ContentParts      []model.ContentPart       `json:"content_parts,omitempty"`
+	Context           agent.ContextTransfer     `json:"context,omitempty"`
+	Stream            bool                      `json:"stream,omitempty"`
+	Mode              string                    `json:"mode,omitempty"`
+	ApprovalRequester ApprovalRequester         `json:"-"`
+	Observer          agent.SourceEventObserver `json:"-"`
 }
 
 // ParticipantSteerRequest guides one exact active participant Turn. Commit is
@@ -220,8 +221,8 @@ const (
 type CancelResult = agent.CancelResult
 
 type TurnHandle interface {
-	Events() iter.Seq2[*session.Event, error]
 	Cancel() CancelResult
+	WaitCompletion(context.Context) error
 	Close() error
 }
 

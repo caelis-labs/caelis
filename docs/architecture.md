@@ -48,6 +48,7 @@ and acceptance history belong in Git and CI, not in this map.
 | `control/appserver` | Principal-bound aggregate product-client contract, Session feed/replay, lifecycle write gate, commands, approval recovery, and operation ledger |
 | `control/appserver/eventstream`, `projection`, `wirev1` | Typed Envelope vocabulary, canonical projection, and versioned HTTP/SSE schema |
 | `control/taskstream`, `control/appserver/taskstream` | Session-authorized Task directory, observation, and Task-to-Envelope projection |
+| `control/streamspool`, `control/streamspool/file` | Product-neutral Control cache records and the bounded local append-only spool implementation |
 | `control/modelcatalog`, `modelconfig`, `modelprofile`, `placement`, `agentbinding` | Provider and model discovery, credentials/configuration, selectable profiles, placement, and fixed Agent bindings |
 | `control/agents` | External ACP Agent identity, preparation, connection, and configuration |
 | `control/memorybinding` | Opaque host-selected Memory binding references, Runtime actor and audience delegation, and immutable logical snapshots |
@@ -56,7 +57,6 @@ and acceptance history belong in Git and CI, not in this map.
 | `app/gatewayapp` | Product Host composition, Session Runtime registry, concrete Control services, and shutdown |
 | `app/gatewayapp/controladapter` | Host-private server assembly; `local.NewAppServer` is the sole production root that receives a concrete `gatewayapp.Stack` |
 | `internal/kernel` | Product Session/Turn coordination and main Runtime integration |
-| `internal/controlclient/turningress` | Private main-Turn ingress to the Control Session feed |
 | `internal/controlprompt`, `internal/controlprompt/appserveradapter` | Private prompt parsing and adaptation over focused AppServer clients |
 | `internal/controlassembly`, `internal/controlplane`, `internal/acpagentbridge` | Private Agent assembly, endpoint/handoff coordination, and external ACP integration |
 | `agent-sdk/*` | Reusable SDK package tree in the root Go module |
@@ -183,10 +183,68 @@ messages, tools, plans, protocol facts, and journals determine model context and
 recovery. UI, overlay, notice, and raw observation output are transient unless a
 typed contract explicitly says otherwise.
 
-The Control-owned Session feed provides ordered live and replay delivery through
-opaque Envelope cursors. Typed Envelope fields own identity, relation, scope,
-position, approval, and resume. `_meta` is display, diagnostics, or bounded
-compatibility data and cannot grant authority or repair identity.
+Control records normalized Session and Task output in one file-backed,
+append-only spool model. Each partition has one writer and independent
+cursor-based readers; a missing or slow Surface parks only its reader. The
+spool is quota- and TTL-bounded, may be discarded after restart, and never
+participates in execution recovery or model-context reconstruction. Session
+events, Task results, and ACP child Sessions remain authoritative.
+
+Writer registrations count simultaneous live producers, not process-lifetime
+history. Command terminal state closes its writer. A child writer stays open
+across completed activities while its participant remains addressable, then
+closes on proven producer loss, Task release, permanent participant detach,
+Session close, or Host close. Session close first tries to catch the feed up
+from canonical truth and seals it; attached readers drain accepted records to
+EOF. If the canonical checkpoint contains a tail missed by final catch-up,
+Control delivers an atomic canonical replacement: a complete message may overlap
+transient fragments already delivered from the spool. A later read of a closed Session
+uses finite canonical replay and allocates no new spool writer or registry
+entry. Logical admission closure and successful physical sealing are distinct:
+canceled callers cannot skip local cleanup, and a failed physical seal retains
+its Control registry entry for retry.
+
+A participant mutation that returns the exact committed Session with
+`session.CommittedError` has already removed its product address. Control uses
+the pre-mutation Session/Task identity to release the matching writer, continues
+reconciliation from the committed projection, and still reports the
+post-commit warning. A reporting fault cannot turn a permanent detach into a
+process-lifetime spool lease.
+
+Both Session and Task clients receive explicit append or transactional
+replacement deliveries. Replacement pages remain non-visible until their
+matching end marker. A valid cursor prefers exact spool bytes, but missing,
+expired, or corrupt cache state selects one complete authoritative replacement:
+canonical Session replay, command final result, or ACP child session replay
+with Task final result as its fallback. Replace-capable Surfaces swap only after
+the matching end marker; an irreversible ACP callback rejects a replacement
+after it has already emitted an exact prefix.
+
+`Envelope.Cursor` and `Envelope.Position` are optional in the shared wire
+schema because the enclosing typed delivery owns resumability. Control validates
+the source-specific shape: every exact append carries a valid cursor and
+position and ends at `NextCursor`; a `result` carries neither; replacement
+pages never carry a cursor. Session canonical replacements may retain their
+durable position as provenance, while Task replacements remove record-local
+position because they have no Session-feed resume meaning.
+
+Consumers commit a delivery's `NextCursor` only after successfully applying its
+events. Subscriptions expose no separately advancing resume cursor.
+
+If a Session spool fails after an append/sync has crossed the consumer boundary,
+Control replaces that prefix with canonical Session truth before following new
+durable projections. One latest
+cursorless Turn terminal result per Session and one coalesced slot per
+subscription provide bounded completion fallback when the lossy file trace is
+unavailable. This delivery is explicitly classified as `result`, not `exact`;
+it contains no chunk history or cursor and is not replay authority. When
+canonical recovery is available, replacement commits before this terminal is
+delivered, so consumers cannot finish with an unrepaired prefix.
+
+Typed Envelope fields own identity, relation, scope, position, and approval.
+Opaque cursors bind a reader to a physical spool incarnation without exposing
+paths. `_meta` is display or diagnostics data and cannot grant authority or
+repair identity.
 
 A canonical Turn holds the Session execution fence for its complete asynchronous
 producer lifetime. Observation and authorized mid-Turn input do not take that
@@ -210,6 +268,7 @@ content assets:
 config.json                 canonical product configuration
 control/control.sqlite      Control operation and ACP preparation state
 control/cursor.key          private cursor-signing secret
+control/spool/v1/           disposable append-only Session and Task delivery traces
 sessions/                   canonical Session documents and event JSONL plus derived SQLite indexes
 providers/                  private provider credential material
 memory/credentials/         owner-only Memory issuer credentials behind opaque references

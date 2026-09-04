@@ -34,9 +34,11 @@ func TestRuntimeAllowsRepeatedCompactionRecoveriesInOneRun(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
+	capture := &testSourceCapture{}
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "Use ECHO repeatedly and then finish.",
+		SessionRef:     activeSession.SessionRef,
+		Input:          "Use ECHO repeatedly and then finish.",
+		SourceObserver: capture,
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: testModel,
@@ -46,13 +48,13 @@ func TestRuntimeAllowsRepeatedCompactionRecoveriesInOneRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("runner error = %v", err)
+	}
 
 	var finalText string
 	compactNotices := 0
-	for event, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			t.Fatalf("runner error = %v", seqErr)
-		}
+	for _, event := range capture.Events() {
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}

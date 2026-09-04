@@ -111,7 +111,7 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	}}})
 	state := appserver.SessionState{
 		ProtocolVersion: 1, EnvelopeVersion: appserver.EnvelopeVersion, APIVersion: appserver.HTTPAPIVersion,
-		SessionID: "session-1", Revision: 8, ResumeMode: appserver.ResumeModeExact,
+		SessionID: "session-1", Revision: 8,
 		Run: appserver.RunState{}, Controller: session.ControllerBinding{
 			Kind: session.ControllerKindACP,
 			Placement: placement.Placement{
@@ -283,6 +283,27 @@ func TestRawACPUpdateSchemaRejectsKnownStandardDiscriminator(t *testing.T) {
 	validator := openAPIValidator(t, "ACPRawUpdate")
 	if err := validator.Validate(map[string]any{"sessionUpdate": eventstream.UpdateToolCall, "vendor": true}); err == nil {
 		t.Fatal("ACPRawUpdate accepted a known standard discriminator")
+	}
+}
+
+func TestEnvelopeSchemaAcceptsCursorlessTerminalResult(t *testing.T) {
+	t.Parallel()
+
+	terminal := eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(100, 0).UTC())
+	terminal.SessionID = "session-1"
+	terminal.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+	validateWireValue(t, "Envelope", terminal)
+
+	raw, err := MarshalEnvelope(terminal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generatedEnvelope generated.Envelope
+	if err := json.Unmarshal(raw, &generatedEnvelope); err != nil {
+		t.Fatalf("generated Envelope rejected terminal result: %v", err)
+	}
+	if generatedEnvelope.Cursor != nil || generatedEnvelope.Position != nil {
+		t.Fatalf("terminal result became resumable: %#v", generatedEnvelope)
 	}
 }
 

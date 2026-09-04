@@ -23,7 +23,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
@@ -32,12 +32,6 @@ import (
 
 func ptrModelMessage(message model.Message) *model.Message {
 	return &message
-}
-
-func beginObservedActivityForTest(task *subagentTask) {
-	task.mu.Lock()
-	beginObservedSubagentActivityLocked(task)
-	task.mu.Unlock()
 }
 
 func mustSealPlacement(t *testing.T, value placement.Placement) placement.Placement {
@@ -401,7 +395,7 @@ func TestSlashSideSubagentDoesNotPersistPreviewAsFinalDialogue(t *testing.T) {
 	}
 }
 
-func TestSlashSideSubagentPersistsStreamBackedFinalDialogue(t *testing.T) {
+func TestSlashSideSubagentDoesNotPromoteStreamTraceToCanonicalDialogue(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult:      delegation.Result{State: delegation.StateCompleted},
@@ -432,8 +426,8 @@ func TestSlashSideSubagentPersistsStreamBackedFinalDialogue(t *testing.T) {
 			sideAssistant = event
 		}
 	}
-	if sideAssistant == nil || strings.TrimSpace(sideAssistant.Text) != "streamed final answer" {
-		t.Fatalf("side assistant event = %#v, want stream-backed final", sideAssistant)
+	if sideAssistant != nil {
+		t.Fatalf("side assistant event = %#v, want lossy stream trace excluded from canonical dialogue", sideAssistant)
 	}
 }
 
@@ -608,7 +602,7 @@ func TestSubagentProducerCompletionDoesNotRequireTaskObservation(t *testing.T) {
 		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "starting"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-	parentRun := newRunner("parent-run", func() {})
+	parentRun := newRunner(t.Context(), "parent-run", func() {}, nil)
 	runtime.registerActiveRun(activeSession.SessionRef, activeSession, "parent-turn", parentRun)
 	defer runtime.unregisterActiveRun(parentRun.RunID())
 	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
@@ -856,49 +850,6 @@ func TestSubagentWaitDoesNotExposeConcurrentLifecycleClaim(t *testing.T) {
 	}
 	if settled.Running || settled.State != task.StateCompleted {
 		t.Fatalf("settled Wait() = %#v, want completed", settled)
-	}
-}
-
-func TestSubagentObservationCannotApplyPreviousTurnResultToNewTurn(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
-		waitResult:  delegation.Result{State: delegation.StateCompleted, Result: "stale turn one final"},
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent: "helper", Prompt: "inspect",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtime.tasks.mu.RLock()
-	child := runtime.tasks.subagents[started.Ref.TaskID]
-	runtime.tasks.mu.RUnlock()
-	runner.waitHook = func() {
-		child.mu.Lock()
-		child.applyResult(delegation.Result{State: delegation.StateCompleted, Result: "turn one final"})
-		child.mu.Unlock()
-		beginObservedSubagentActivityLocked(child)
-		child.mu.Lock()
-		child.applyResult(delegation.Result{State: delegation.StateRunning, Running: true})
-		child.mu.Unlock()
-	}
-
-	snapshot, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	turnSeq, _ := taskInt64Value(snapshot.Metadata["turn_seq"])
-	if !snapshot.Running || snapshot.State != task.StateRunning || turnSeq != 2 {
-		t.Fatalf("Wait() applied stale previous-Turn result: %#v", snapshot)
-	}
-	if got := taskRawStringValue(snapshot.Result["final_message"]); got != "" {
-		t.Fatalf("new Turn final_message = %q, want stale final rejected", got)
 	}
 }
 
@@ -1531,112 +1482,6 @@ func TestTaskCancelPendingDiagnosticDoesNotClaimCompletion(t *testing.T) {
 	}
 }
 
-func TestTaskCancelPhaseDoesNotSuppressCancellationOfLaterTurn(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
-		waitResult:  delegation.Result{State: delegation.StateCancelled},
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent: "helper", Prompt: "first",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cancelReq := task.ControlRequest{
-		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Source: "agent_tool",
-	}
-	if _, err := runtime.tasks.Cancel(ctx, activeSession.SessionRef, cancelReq); err != nil {
-		t.Fatal(err)
-	}
-	if runner.cancelCalls != 1 {
-		t.Fatalf("first Turn runner Cancel calls = %d, want 1", runner.cancelCalls)
-	}
-
-	runtime.tasks.mu.RLock()
-	current := runtime.tasks.subagents[started.Ref.TaskID]
-	runtime.tasks.mu.RUnlock()
-	current.mu.Lock()
-	current.metadata[subagentCancelPhaseKey] = string(subagentCancelPhaseApplied)
-	current.metadata[subagentCancelTurnSeqKey] = current.turnSeq + 1
-	preservedTurn := current.turnSeq + 1
-	beginObservedSubagentActivityLocked(current)
-	preservedPhase := taskStringValue(current.metadata[subagentCancelPhaseKey])
-	preservedScope, preservedScoped := subagentCancelTurnSeq(current.metadata)
-	beginObservedSubagentActivityLocked(current)
-	phase := taskStringValue(current.metadata[subagentCancelPhaseKey])
-	_, scoped := subagentCancelTurnSeq(current.metadata)
-	current.mu.Unlock()
-	if preservedPhase != string(subagentCancelPhaseApplied) || !preservedScoped || preservedScope != preservedTurn {
-		t.Fatalf("scoped Turn %d journal = %q/%d/%v, want preserved", preservedTurn, preservedPhase, preservedScope, preservedScoped)
-	}
-	if phase != "" || scoped {
-		t.Fatalf("strictly later Turn retained cancel journal %q scoped=%v", phase, scoped)
-	}
-	current.mu.Lock()
-	conflicting := current.entrySnapshot(runtime.now())
-	current.mu.Unlock()
-	conflicting.Metadata[subagentCancelPhaseKey] = string(subagentCancelPhaseCompleted)
-	conflicting.Metadata[subagentCancelTurnSeqKey] = preservedTurn
-	conflicting.Spec[subagentCancelPhaseKey] = string(subagentCancelPhaseCompleted)
-	conflicting.Spec[subagentCancelTurnSeqKey] = preservedTurn
-	rebased := runtime.tasks.rebaseObservedSubagentTask(current, conflicting)
-	if phase := taskStringValue(rebased.Metadata[subagentCancelPhaseKey]); phase != "" {
-		t.Fatalf("new Turn rebase restored cancel metadata phase %q", phase)
-	}
-	if _, scoped := subagentCancelTurnSeq(rebased.Metadata); scoped {
-		t.Fatalf("new Turn rebase restored cancel metadata scope %#v", rebased.Metadata[subagentCancelTurnSeqKey])
-	}
-	if phase := taskStringValue(rebased.Spec[subagentCancelPhaseKey]); phase != "" {
-		t.Fatalf("new Turn rebase restored cancel spec phase %q", phase)
-	}
-	if _, scoped := subagentCancelTurnSeq(rebased.Spec); scoped {
-		t.Fatalf("new Turn rebase restored cancel spec scope %#v", rebased.Spec[subagentCancelTurnSeqKey])
-	}
-
-	if _, err := runtime.tasks.Cancel(ctx, activeSession.SessionRef, cancelReq); err != nil {
-		t.Fatal(err)
-	}
-	if runner.cancelCalls != 2 {
-		t.Fatalf("second Turn runner Cancel calls = %d, want a fresh remote effect", runner.cancelCalls)
-	}
-}
-
-func TestTerminalServiceReadsRunningSubagentStreamByTaskID(t *testing.T) {
-	ctx := context.Background()
-	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, OutputPreview: "starting", Running: true},
-		waitResult:  delegation.Result{State: delegation.StateRunning, OutputPreview: "starting", Running: true},
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent:  "helper",
-		Prompt: "first",
-	})
-	if err != nil {
-		t.Fatalf("StartSubagent() error = %v", err)
-	}
-	if started.Ref.TerminalID == "" {
-		t.Fatalf("subagent terminal id is empty")
-	}
-	snap, err := runtime.Streams().Read(ctx, stream.ReadRequest{
-		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
-	})
-	if err != nil {
-		t.Fatalf("Read(subagent terminal) error = %v", err)
-	}
-	if !snap.Running {
-		t.Fatalf("subagent terminal running = false, want true")
-	}
-	if len(snap.Frames) != 1 || !strings.Contains(snap.Frames[0].Text, "starting") {
-		t.Fatalf("subagent terminal frames = %#v, want starting preview", snap.Frames)
-	}
-}
-
 func TestSubagentTaskToolMetaCarriesPhysicalTurnCursorAndSpawnParent(t *testing.T) {
 	meta := taskToolMeta(task.Snapshot{
 		Kind:        task.KindSubagent,
@@ -1695,517 +1540,6 @@ func TestSubagentTaskToolPayloadCarriesCanonicalFinalAndSpawnParent(t *testing.T
 	}
 	if taskStringValue(payload["parent_call"]) != "spawn-call-1" || taskStringValue(payload["parent_tool"]) != "Spawn" {
 		t.Fatalf("parent relation payload = %#v, want canonical Spawn relation", payload)
-	}
-}
-
-func TestSubagentStreamsAppendsIncrementalTerminalFrames(t *testing.T) {
-	ctx := context.Background()
-	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
-		waitResult:  delegation.Result{State: delegation.StateRunning, Running: true},
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent:  "helper",
-		Prompt: "first",
-	})
-	if err != nil {
-		t.Fatalf("StartSubagent() error = %v", err)
-	}
-	runtime.tasks.PublishStream(stream.Frame{
-		Ref:     stream.Ref{TaskID: started.Ref.TaskID},
-		Text:    "line one\n",
-		State:   string(delegation.StateRunning),
-		Running: true,
-	})
-	first, err := runtime.Streams().Read(ctx, stream.ReadRequest{
-		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
-	})
-	if err != nil {
-		t.Fatalf("Read(first subagent frame) error = %v", err)
-	}
-	if len(first.Frames) != 1 || first.Frames[0].Text != "line one\n" {
-		t.Fatalf("first frames = %#v, want line one", first.Frames)
-	}
-
-	runtime.tasks.PublishStream(stream.Frame{
-		Ref:     stream.Ref{TaskID: started.Ref.TaskID},
-		Text:    "line two\n",
-		State:   string(delegation.StateRunning),
-		Running: true,
-	})
-	second, err := runtime.Streams().Read(ctx, stream.ReadRequest{
-		Ref:    stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
-		Cursor: first.Cursor,
-	})
-	if err != nil {
-		t.Fatalf("Read(second subagent frame) error = %v", err)
-	}
-	if len(second.Frames) != 1 || second.Frames[0].Text != "line two\n" {
-		t.Fatalf("second frames = %#v, want line two", second.Frames)
-	}
-}
-
-func TestSubagentStreamsExposeStructuredEventFramesWithoutPreviewFallback(t *testing.T) {
-	ctx := context.Background()
-	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
-		waitResult:  delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "Searching the Web"},
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent:  "helper",
-		Prompt: "weather",
-	})
-	if err != nil {
-		t.Fatalf("StartSubagent() error = %v", err)
-	}
-	runtime.tasks.PublishStream(stream.Frame{
-		Ref:     stream.Ref{TaskID: started.Ref.TaskID},
-		Running: true,
-		State:   string(delegation.StateRunning),
-		Event: &session.Event{
-			Type: session.EventTypeToolCall,
-			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
-				ToolCallID:    "ws-1",
-				Kind:          "fetch",
-				Title:         "Searching the Web",
-				Status:        "running",
-			}},
-		},
-	})
-
-	snap, err := runtime.Streams().Read(ctx, stream.ReadRequest{
-		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
-	})
-	if err != nil {
-		t.Fatalf("Read(subagent structured stream) error = %v", err)
-	}
-	if len(snap.Frames) != 1 {
-		t.Fatalf("subagent structured frames = %#v, want one event frame", snap.Frames)
-	}
-	frame := snap.Frames[0]
-	if frame.Text != "" {
-		t.Fatalf("structured event frame text = %q, want no preview fallback text", frame.Text)
-	}
-	update := session.ProtocolUpdateOf(frame.Event)
-	if frame.Event == nil || update == nil {
-		t.Fatalf("structured event frame = %#v, want tool call event", frame)
-	}
-	if update.Kind != "fetch" {
-		t.Fatalf("tool kind = %q, want fetch", update.Kind)
-	}
-}
-
-func TestSubagentStreamsExposeSemanticAssistantEventText(t *testing.T) {
-	ctx := context.Background()
-	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
-		waitResult:  delegation.Result{State: delegation.StateRunning, Running: true},
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent:  "helper",
-		Prompt: "list files",
-	})
-	if err != nil {
-		t.Fatalf("StartSubagent() error = %v", err)
-	}
-	runtime.tasks.PublishStream(stream.Frame{
-		Ref:     stream.Ref{TaskID: started.Ref.TaskID},
-		Running: true,
-		State:   string(delegation.StateRunning),
-		Event: &session.Event{
-			Type:    session.EventTypeAssistant,
-			Message: ptrModelMessage(model.NewTextMessage(model.RoleAssistant, "child output\n")),
-		},
-	})
-
-	snap, err := runtime.Streams().Read(ctx, stream.ReadRequest{
-		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
-	})
-	if err != nil {
-		t.Fatalf("Read(subagent semantic stream) error = %v", err)
-	}
-	if got := streamFrameText(snap.Frames); got != "child output\n" {
-		t.Fatalf("semantic subagent frame text = %q, want child output", got)
-	}
-	if len(snap.Frames) != 1 || snap.Frames[0].Event == nil {
-		t.Fatalf("semantic subagent frames = %#v, want one frame preserving event", snap.Frames)
-	}
-}
-
-func TestSubagentStreamsDoNotExposeSemanticReasoningAsParentOutput(t *testing.T) {
-	ctx := context.Background()
-	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
-		waitResult:  delegation.Result{State: delegation.StateRunning, Running: true},
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent:  "helper",
-		Prompt: "think",
-	})
-	if err != nil {
-		t.Fatalf("StartSubagent() error = %v", err)
-	}
-	runtime.tasks.PublishStream(stream.Frame{
-		Ref:     stream.Ref{TaskID: started.Ref.TaskID},
-		Running: true,
-		State:   string(delegation.StateRunning),
-		Event: &session.Event{
-			Type:    session.EventTypeAssistant,
-			Message: ptrModelMessage(model.NewReasoningMessage(model.RoleAssistant, "private thought", model.ReasoningVisibilityVisible)),
-		},
-	})
-
-	snap, err := runtime.Streams().Read(ctx, stream.ReadRequest{
-		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
-	})
-	if err != nil {
-		t.Fatalf("Read(subagent semantic reasoning stream) error = %v", err)
-	}
-	if len(snap.Frames) != 1 || snap.Frames[0].Event == nil {
-		t.Fatalf("semantic reasoning frames = %#v, want one structured event frame", snap.Frames)
-	}
-	if got := streamFrameText(snap.Frames); got != "" {
-		t.Fatalf("semantic reasoning parent output = %q, want empty", got)
-	}
-}
-
-func TestSubagentStructuredToolFramesStillSurfaceFinalResult(t *testing.T) {
-	ctx := context.Background()
-	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
-		waitResult:  delegation.Result{State: delegation.StateCompleted, Result: "final answer"},
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent:  "helper",
-		Prompt: "weather",
-	})
-	if err != nil {
-		t.Fatalf("StartSubagent() error = %v", err)
-	}
-	runtime.tasks.PublishStream(stream.Frame{
-		Ref:     stream.Ref{TaskID: started.Ref.TaskID},
-		Running: true,
-		State:   string(delegation.StateRunning),
-		Event: &session.Event{
-			Type: session.EventTypeToolCall,
-			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
-				ToolCallID:    "ws-1",
-				Kind:          "fetch",
-				Title:         "Searching the Web",
-				Status:        "running",
-			}},
-		},
-	})
-	publishSubagentCompletionAndWait(t, runtime, runner.spawnContext.Completion, delegation.Result{
-		TaskID: started.Ref.TaskID,
-		State:  delegation.StateCompleted,
-		Result: "final answer",
-	})
-
-	first, err := runtime.Streams().Read(ctx, stream.ReadRequest{
-		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
-	})
-	if err != nil {
-		t.Fatalf("Read(first structured frame) error = %v", err)
-	}
-	if len(first.Frames) != 3 || first.Frames[0].Event == nil || first.Frames[1].Event == nil || !first.Frames[2].Closed {
-		t.Fatalf("first frames = %#v, want tool frame, final answer, and terminal frame", first.Frames)
-	}
-	if first.Frames[0].Text != "" {
-		t.Fatalf("first frame text = %q, want no final result mixed into tool frame", first.Frames[0].Text)
-	}
-	finalEvent := first.Frames[1].Event
-	if session.EventTypeOf(finalEvent) != session.EventTypeAssistant || session.EventText(finalEvent) != "final answer" ||
-		finalEvent.Scope == nil || finalEvent.Scope.TurnID == "" || finalEvent.Scope.Participant.DelegationID != started.Ref.TaskID {
-		t.Fatalf("fallback final event = %#v, want semantic assistant scoped to the child Turn", finalEvent)
-	}
-	if finalEvent.Visibility != session.VisibilityUIOnly || session.ProtocolSessionUpdateType(finalEvent) != string(session.ProtocolUpdateTypeAgentMessage) {
-		t.Fatalf("fallback final event visibility/update = %q/%q, want transient agent message", finalEvent.Visibility, session.ProtocolSessionUpdateType(finalEvent))
-	}
-}
-
-func TestSubagentStreamSubscribeClosedFrameCarriesFinalResult(t *testing.T) {
-	ctx := context.Background()
-	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
-		waitResult:  delegation.Result{State: delegation.StateCompleted, Result: "### Done\n- `child.txt` written"},
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent:  "helper",
-		Prompt: "write child",
-	})
-	if err != nil {
-		t.Fatalf("StartSubagent() error = %v", err)
-	}
-	publishSubagentCompletionAndWait(t, runtime, runner.spawnContext.Completion, delegation.Result{
-		TaskID: started.Ref.TaskID,
-		State:  delegation.StateCompleted,
-		Result: "### Done\n- `child.txt` written",
-	})
-	var closed *stream.Frame
-	for frame, seqErr := range runtime.Streams().Subscribe(ctx, stream.SubscribeRequest{
-		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
-	}) {
-		if seqErr != nil {
-			t.Fatalf("Subscribe() error = %v", seqErr)
-		}
-		if frame != nil && frame.Closed {
-			copy := stream.CloneFrame(*frame)
-			closed = &copy
-			break
-		}
-	}
-	if closed == nil {
-		t.Fatal("Subscribe() did not emit closed frame")
-	}
-	if closed.State != string(task.StateCompleted) {
-		t.Fatalf("closed state = %q, want completed", closed.State)
-	}
-	if got := closed.Text; got != "### Done\n- `child.txt` written" {
-		t.Fatalf("closed text = %#v, want final subagent result", got)
-	}
-}
-
-func TestStartSubagentKeepsEarlyStreamPublishedBeforeTaskRegistration(t *testing.T) {
-	ctx := context.Background()
-	runner := &recordingSubagentRunner{
-		spawnResult:     delegation.Result{State: delegation.StateRunning, Running: true},
-		waitResult:      delegation.Result{State: delegation.StateRunning, Running: true},
-		publishOnSpawn:  true,
-		spawnStreamText: "early child output\n",
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent:  "helper",
-		Prompt: "first",
-	})
-	if err != nil {
-		t.Fatalf("StartSubagent() error = %v", err)
-	}
-	snap, err := runtime.Streams().Read(ctx, stream.ReadRequest{
-		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
-	})
-	if err != nil {
-		t.Fatalf("Read(subagent terminal) error = %v", err)
-	}
-	if len(snap.Frames) != 1 || snap.Frames[0].Text != "early child output\n" {
-		t.Fatalf("subagent frames = %#v, want early child output", snap.Frames)
-	}
-}
-
-func TestStartSubagentDoesNotDuplicateFastTerminalAssistantStream(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	const final = "The current working directory is /workspace."
-	runner := &recordingSubagentRunner{
-		spawnResult:    delegation.Result{State: delegation.StateCompleted, Result: final},
-		publishOnSpawn: true,
-		spawnStreamEvent: &session.Event{
-			Type:       session.EventTypeAssistant,
-			Visibility: session.VisibilityUIOnly,
-			MessageID:  "child-final-1",
-			Text:       final,
-			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
-				MessageID:     "child-final-1",
-				Content:       session.ProtocolTextContent(final),
-			}},
-		},
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent: "helper", Prompt: "report cwd",
-	})
-	if err != nil {
-		t.Fatalf("StartSubagent() error = %v", err)
-	}
-	snap, err := runtime.Streams().Read(ctx, stream.ReadRequest{
-		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
-	})
-	if err != nil {
-		t.Fatalf("Read() error = %v", err)
-	}
-	assistantFrames := 0
-	for _, frame := range snap.Frames {
-		if frame.Event == nil || session.EventTypeOf(frame.Event) != session.EventTypeAssistant ||
-			strings.TrimSpace(session.EventText(frame.Event)) == "" {
-			continue
-		}
-		assistantFrames++
-		if got := session.EventText(frame.Event); got != final {
-			t.Fatalf("assistant frame text = %q, want %q", got, final)
-		}
-		if frame.Event.Scope != nil && frame.Event.Scope.Source == "subagent_result" {
-			t.Fatalf("assistant frame = %#v, synthetic result duplicated real ACP Final", frame.Event)
-		}
-	}
-	if assistantFrames != 1 {
-		t.Fatalf("assistant frames = %d in %#v, want one real ACP Final", assistantFrames, snap.Frames)
-	}
-}
-
-func TestStartSubagentReplacesOversizedInitialResultWithRealACPFinal(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	const realFinal = "real ACP final"
-	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{
-			State:  delegation.StateCompleted,
-			Result: strings.Repeat("x", subagentExactStreamByteCap+1),
-		},
-		publishOnSpawn: true,
-		spawnStreamEvent: &session.Event{
-			Type: session.EventTypeAssistant, Visibility: session.VisibilityUIOnly,
-			MessageID: "child-real-final", Text: realFinal,
-			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
-				MessageID:     "child-real-final", Content: session.ProtocolTextContent(realFinal),
-			}},
-		},
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent: "helper", Prompt: "return a large final",
-	})
-	if err != nil {
-		t.Fatalf("StartSubagent() error = %v", err)
-	}
-	ref := stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID}
-	fromStart, err := runtime.Streams().Read(ctx, stream.ReadRequest{Ref: ref})
-	if err != nil {
-		t.Fatalf("Read(cursor 0) error = %v", err)
-	}
-	if fromStart.EventsTruncatedBefore != 0 {
-		t.Fatalf("cursor 0 truncated before = %d, want reset real-ACP boundary", fromStart.EventsTruncatedBefore)
-	}
-	assistantFrames := 0
-	for _, frame := range fromStart.Frames {
-		if frame.Event == nil || session.EventTypeOf(frame.Event) != session.EventTypeAssistant {
-			continue
-		}
-		assistantFrames++
-		if got := session.EventText(frame.Event); got != realFinal {
-			t.Fatalf("assistant text = %q, want %q", got, realFinal)
-		}
-		if frame.Event.Scope != nil && frame.Event.Scope.Source == "subagent_result" {
-			t.Fatalf("assistant event = %#v, want real ACP provenance", frame.Event)
-		}
-		if frame.Cursor.Events != 1 {
-			t.Fatalf("real ACP event cursor = %d, want 1", frame.Cursor.Events)
-		}
-	}
-	if assistantFrames != 1 {
-		t.Fatalf("assistant frames = %d in %#v, want one real ACP Final", assistantFrames, fromStart.Frames)
-	}
-
-	fromRealFinal, err := runtime.Streams().Read(ctx, stream.ReadRequest{
-		Ref: ref, Cursor: stream.Cursor{Events: 1},
-	})
-	if err != nil {
-		t.Fatalf("Read(cursor 1) error = %v", err)
-	}
-	if fromRealFinal.EventsTruncatedBefore != 0 || fromRealFinal.Cursor.Events != fromStart.Cursor.Events {
-		t.Fatalf("cursor 1 snapshot = cursor:%#v truncated:%d, want stable absolute boundary %#v", fromRealFinal.Cursor, fromRealFinal.EventsTruncatedBefore, fromStart.Cursor)
-	}
-	for _, frame := range fromRealFinal.Frames {
-		if frame.Event != nil && session.EventTypeOf(frame.Event) == session.EventTypeAssistant {
-			t.Fatalf("cursor 1 replayed assistant event = %#v", frame.Event)
-		}
-	}
-}
-
-func TestSubagentStreamReadDoesNotInterruptStaleRunningChild(t *testing.T) {
-	ctx := context.Background()
-	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "starting"},
-		waitErr:     errors.New("test subagent runner: child session \"child-1\" not found"),
-	}
-	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-
-	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent:  "helper",
-		Prompt: "first",
-	})
-	if err != nil {
-		t.Fatalf("StartSubagent() error = %v", err)
-	}
-	if !started.Running {
-		t.Fatalf("started.Running = false, want true")
-	}
-
-	snap, err := runtime.Streams().Read(ctx, stream.ReadRequest{
-		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
-	})
-	if err != nil {
-		t.Fatalf("Read(stale subagent) error = %v", err)
-	}
-	if !snap.Running {
-		t.Fatalf("stream snapshot Running = false, want observation-only running state")
-	}
-	if snap.State != string(task.StateRunning) {
-		t.Fatalf("stream snapshot State = %q, want running", snap.State)
-	}
-	if runner.waitCalls != 0 {
-		t.Fatalf("stream read called runner Wait %d times, want zero", runner.waitCalls)
-	}
-
-	waited, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{TaskID: started.Ref.TaskID, Principal: session.ActorKindController})
-	if err != nil {
-		t.Fatalf("Wait(interrupted subagent) error = %v", err)
-	}
-	if waited.Running || waited.State != task.StateInterrupted {
-		t.Fatalf("Wait() = running %v state %q, want interrupted", waited.Running, waited.State)
-	}
-	if got := taskStringValue(waited.Result["error"]); got != "subagent session interrupted during recovery" {
-		t.Fatalf("Wait() error diagnostic = %q, want bounded recovery diagnostic", got)
-	} else if strings.Contains(got, "child-1") {
-		t.Fatalf("Wait() error diagnostic leaked child identity: %q", got)
-	}
-}
-
-func publishSubagentCompletionAndWait(
-	t *testing.T,
-	runtime *Runtime,
-	completion delegation.CompletionSink,
-	result delegation.Result,
-) {
-	t.Helper()
-	if completion == nil {
-		t.Fatal("subagent completion sink is nil")
-	}
-	completion.PublishSubagentCompletion(result)
-	deadline := time.Now().Add(time.Second)
-	for {
-		entry, err := runtime.tasks.store.Get(context.Background(), result.TaskID)
-		if err != nil {
-			t.Fatalf("Get(completed subagent) error = %v", err)
-		}
-		if entry != nil && !entry.Running && entry.State == taskStateFromDelegation(result.State) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("stored subagent = %#v, want producer state %q", entry, result.State)
-		}
-		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -2792,19 +2126,16 @@ type recordingSubagentRunner struct {
 func (r *recordingSubagentRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
 	r.spawnRequest = delegation.CloneRequest(req)
 	r.spawnContext = spawn
-	if r.publishOnSpawn && spawn.Streams != nil {
+	if r.publishOnSpawn && spawn.Output != nil {
 		state := strings.TrimSpace(r.spawnStreamState)
 		running := r.spawnStreamRunning
 		if state == "" {
 			state = string(delegation.StateRunning)
 			running = true
 		}
-		spawn.Streams.PublishStream(stream.Frame{
-			Ref:     stream.Ref{TaskID: strings.TrimSpace(spawn.TaskID)},
-			Text:    r.spawnStreamText,
-			Event:   session.CloneEvent(r.spawnStreamEvent),
-			State:   state,
-			Running: running,
+		_ = spawn.Output.ObserveTaskOutput(context.Background(), output.Event{
+			Text: r.spawnStreamText, Event: session.CloneEvent(r.spawnStreamEvent),
+			State: state, Running: running, Closed: !running,
 		})
 	}
 	agentName := req.Agent

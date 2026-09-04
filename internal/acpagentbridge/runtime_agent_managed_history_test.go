@@ -11,7 +11,6 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 )
@@ -181,24 +180,11 @@ func (c *managedHistorySessionClient) Reconnect(context.Context, appserver.Recon
 
 type emptyManagedHistorySubscription struct{}
 
-func (emptyManagedHistorySubscription) Backfill() <-chan eventstream.Envelope {
-	ch := make(chan eventstream.Envelope)
+func (emptyManagedHistorySubscription) Deliveries() <-chan appserver.FeedDelivery {
+	ch := make(chan appserver.FeedDelivery)
 	close(ch)
 	return ch
 }
 
-func (emptyManagedHistorySubscription) Events() <-chan eventstream.Envelope {
-	ch := make(chan eventstream.Envelope)
-	close(ch)
-	return ch
-}
-
-func (emptyManagedHistorySubscription) BackfillDone() <-chan struct{} {
-	ch := make(chan struct{})
-	close(ch)
-	return ch
-}
-
-func (emptyManagedHistorySubscription) Close() error       { return nil }
-func (emptyManagedHistorySubscription) Err() error         { return nil }
-func (emptyManagedHistorySubscription) LastCursor() string { return "" }
+func (emptyManagedHistorySubscription) Close() error { return nil }
+func (emptyManagedHistorySubscription) Err() error   { return nil }

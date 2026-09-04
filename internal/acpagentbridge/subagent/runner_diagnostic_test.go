@@ -44,9 +44,10 @@ func TestRunnerPromptFailureBeforeFirstUpdateDoesNotPersistRawDiagnostics(t *tes
 	streams := &recordingStreams{}
 	completions := make(chan delegation.Result, 1)
 	_, _, err = runner.Spawn(ctx, tasksubagent.SpawnContext{
+		ActivityID: "activity-prompt-failure",
 		TaskID:     "task-prompt-failure",
 		CWD:        t.TempDir(),
-		Streams:    streams,
+		Output:     streams,
 		Completion: completionSinkFunc(func(result delegation.Result) { completions <- result }),
 	}, delegation.Request{Agent: "helper", Prompt: "review"})
 	if err != nil {
@@ -85,8 +86,8 @@ func TestRunnerPromptFailureBeforeFirstUpdateDoesNotPersistRawDiagnostics(t *tes
 			}
 		}
 	}
-	if len(streams.frames) != 0 {
-		t.Fatalf("stream frames = %#v, want failure before first child update", streams.frames)
+	if len(streams.frames) != 1 || !streams.frames[0].Closed || streams.frames[0].State != string(delegation.StateFailed) {
+		t.Fatalf("stream frames = %#v, want only terminal failed marker", streams.frames)
 	}
 }
 
@@ -109,8 +110,10 @@ func TestRunnerInitializeFailureReportsStageWithoutChildStderr(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, err = runner.Spawn(ctx, tasksubagent.SpawnContext{
-		TaskID: "task-initialize-exit",
-		CWD:    t.TempDir(),
+		ActivityID: "activity-initialize-exit",
+		TaskID:     "task-initialize-exit",
+		CWD:        t.TempDir(),
+		Output:     &recordingStreams{},
 	}, delegation.Request{Agent: "self", Prompt: "review"})
 	if err == nil || !strings.Contains(err.Error(), `initialize spawned ACP child "self"`) {
 		t.Fatalf("Spawn() error = %v, want explicit child initialize stage", err)
@@ -158,9 +161,11 @@ func TestRunnerAppliesBuiltInSessionOptionsAfterSessionNewBeforePrompt(t *testin
 	}
 	completion := make(chan delegation.Result, 1)
 	_, initial, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
+		ActivityID: "activity-session-options",
 		SessionRef: session.SessionRef{SessionID: "parent-session-options"},
 		TaskID:     "task-session-options",
 		CWD:        t.TempDir(),
+		Output:     &recordingStreams{},
 		Completion: completionSinkFunc(func(result delegation.Result) { completion <- result }),
 	}, delegation.Request{Agent: "self", Prompt: "review"})
 	if err != nil {
@@ -209,8 +214,10 @@ func TestRunnerPromptRecoversConfiguredAuthentication(t *testing.T) {
 	}
 	completions := make(chan delegation.Result, 1)
 	_, _, err = runner.Spawn(ctx, tasksubagent.SpawnContext{
+		ActivityID: "activity-prompt-authentication",
 		TaskID:     "task-prompt-authentication",
 		CWD:        t.TempDir(),
+		Output:     &recordingStreams{},
 		Completion: completionSinkFunc(func(result delegation.Result) { completions <- result }),
 	}, delegation.Request{Agent: "protected-helper", Prompt: "review"})
 	if err != nil {

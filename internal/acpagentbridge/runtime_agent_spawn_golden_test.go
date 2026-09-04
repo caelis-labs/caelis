@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"iter"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -22,7 +22,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
+func TestRuntimeAgentDirectRunnerSpawnStreamGolden(t *testing.T) {
 	runnerEvents := make(chan *session.Event)
 	subscription := &spawnGoldenSubscription{events: make(chan eventstream.Envelope), closed: make(chan struct{})}
 	streams := &spawnGoldenTaskStreams{
@@ -85,11 +85,16 @@ func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
 		Update: eventstream.ContentChunk{
 			SessionUpdate: eventstream.UpdateAgentMessage,
 			MessageID:     "child-message-1",
-			Content:       eventstream.TextContent{Type: "text", Text: "child output before wait"},
+			Content:       eventstream.TextContent{Type: "text", Text: "exact stream final"},
 		},
 	}
-	// Direct Runtime delivery still consumes Task output while the parent Runner
-	// is waiting, but the nested child stream produces no ACP notification.
+	subscription.events <- eventstream.Envelope{
+		Kind: eventstream.KindLifecycle, SessionID: "session-1", TurnID: "child-turn-1",
+		Scope: eventstream.ScopeSubagent, ScopeID: "task-yara", ParentTool: parent, Final: true,
+		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
+	}
+	waitGoldenNotification(t, callbacks) // typed Task-stream lifecycle closes Spawn
 	if err := subscription.Close(); err != nil {
 		t.Fatalf("close Task subscription: %v", err)
 	}
@@ -123,7 +128,6 @@ func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
 		},
 	)
 	waitGoldenNotification(t, callbacks) // canonical Task wait result
-	waitGoldenNotification(t, callbacks) // observed parent Spawn fallback close
 	close(runnerEvents)
 
 	select {
@@ -144,11 +148,11 @@ func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
 		}
 		spawnCompleted++
 		if update.Meta != nil || len(update.Content) != 1 || update.Content[0].Type != "content" {
-			t.Fatalf("Spawn fallback update = %#v, want one standard result without terminal metadata", update)
+			t.Fatalf("Spawn stream update = %#v, want one standard result without terminal metadata", update)
 		}
 		text, ok := update.Content[0].Content.(eventstream.TextContent)
-		if !ok || text.Text != "exact fallback final" {
-			t.Fatalf("Spawn fallback content = %#v, want exact final message", update.Content)
+		if !ok || text.Text != "exact stream final" {
+			t.Fatalf("Spawn stream content = %#v, want exact final message", update.Content)
 		}
 	}
 	if spawnCompleted != 1 {
@@ -160,12 +164,12 @@ func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
 		t.Fatalf("marshal direct Runtime ACP notifications: %v", err)
 	}
 	got = append(got, '\n')
-	want, err := os.ReadFile("testdata/golden/acp_stdio_direct_runner_spawn_fallback.golden.json")
+	want, err := os.ReadFile("testdata/golden/acp_stdio_direct_runner_spawn_stream.golden.json")
 	if err != nil {
 		t.Fatalf("read direct Runtime Spawn golden: %v\n--- got ---\n%s", err, got)
 	}
 	if string(got) != string(want) {
-		t.Fatalf("direct Runtime Spawn fallback changed\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		t.Fatalf("direct Runtime Spawn stream changed\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 
@@ -468,7 +472,7 @@ type spawnGoldenDirectRuntime struct {
 func (r spawnGoldenDirectRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
 	return agent.RunResult{
 		Session: session.Session{SessionRef: req.SessionRef},
-		Handle:  spawnGoldenDirectRunner(r),
+		Handle:  spawnGoldenDirectRunner{events: r.events, observer: req.SourceObserver},
 	}, nil
 }
 
@@ -477,16 +481,25 @@ func (spawnGoldenDirectRuntime) RunState(context.Context, session.SessionRef) (a
 }
 
 type spawnGoldenDirectRunner struct {
-	events <-chan *session.Event
+	events   <-chan *session.Event
+	observer agent.SourceEventObserver
 }
 
 func (spawnGoldenDirectRunner) RunID() string { return "direct-runner-1" }
 
-func (r spawnGoldenDirectRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		for event := range r.events {
-			if !yield(event, nil) {
-				return
+func (r spawnGoldenDirectRunner) WaitCompletion(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, open := <-r.events:
+			if !open {
+				return nil
+			}
+			if r.observer != nil {
+				if err := r.observer.ObserveSourceEvent(ctx, agent.SourceEvent{Canonical: event}); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -510,24 +523,52 @@ func (s *spawnGoldenTaskStreams) List(context.Context, taskstream.Principal, tas
 	return taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{s.descriptor}}, nil
 }
 
-func (*spawnGoldenTaskStreams) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.Batch, error) {
-	return taskstream.Batch{}, nil
+func (*spawnGoldenTaskStreams) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.ReadResult, error) {
+	return taskstream.ReadResult{}, nil
 }
 
 func (s *spawnGoldenTaskStreams) Subscribe(_ context.Context, _ taskstream.Principal, request taskstream.SubscribeRequest) (taskstream.SubscribeResult, error) {
 	s.subscribed <- request
-	return taskstream.SubscribeResult{Subscription: s.subscription, ResumeMode: taskstream.ResumeModeExact}, nil
+	return taskstream.SubscribeResult{Subscription: s.subscription}, nil
 }
 
 type spawnGoldenSubscription struct {
-	events chan eventstream.Envelope
-	closed chan struct{}
-	once   sync.Once
+	events     chan eventstream.Envelope
+	deliveries chan taskstream.Delivery
+	closed     chan struct{}
+	startOnce  sync.Once
+	once       sync.Once
 }
 
-func (s *spawnGoldenSubscription) Events() <-chan eventstream.Envelope { return s.events }
-func (*spawnGoldenSubscription) Err() error                            { return nil }
-func (*spawnGoldenSubscription) LastCursor() string                    { return "" }
+func (s *spawnGoldenSubscription) Deliveries() <-chan taskstream.Delivery {
+	s.startOnce.Do(func() {
+		s.deliveries = make(chan taskstream.Delivery)
+		go func() {
+			defer close(s.deliveries)
+			sequence := uint64(0)
+			for envelope := range s.events {
+				sequence++
+				if envelope.Cursor == "" {
+					envelope.Cursor = fmt.Sprintf("spawn-golden-cursor-%d", sequence)
+				}
+				if envelope.Position == nil {
+					envelope.Position = &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
+						Generation: "spawn-golden", Sequence: sequence,
+					}}
+				}
+				if envelope.Delivery == nil {
+					envelope.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+				}
+				s.deliveries <- taskstream.Delivery{
+					Kind: taskstream.DeliveryAppendPage, Source: taskstream.SourceExact,
+					Events: []eventstream.Envelope{envelope}, NextCursor: envelope.Cursor,
+				}
+			}
+		}()
+	})
+	return s.deliveries
+}
+func (*spawnGoldenSubscription) Err() error { return nil }
 func (s *spawnGoldenSubscription) Close() error {
 	s.once.Do(func() {
 		close(s.events)

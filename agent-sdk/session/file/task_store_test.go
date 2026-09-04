@@ -101,6 +101,50 @@ func TestTaskStoreRevisionAndLeaseCAS(t *testing.T) {
 	}
 }
 
+func TestTaskStoreDetachedSubagentActivityRequiresNextGeneration(t *testing.T) {
+	for _, invalid := range []string{"", "same_generation", "skipped_generation", "missing_identity", "terminal", "foreign_session", "running_predecessor"} {
+		t.Run(invalid, func(t *testing.T) {
+			store := NewTaskStore(NewStore(Config{RootDir: t.TempDir()}))
+			seed := &task.Entry{
+				TaskID: "child", Kind: task.KindSubagent, Session: taskSessionRef("external-session"),
+				State: task.StateCompleted, Spec: map[string]any{"turn_seq": int64(1)},
+				Metadata: map[string]any{"child_activity_id": "first", "child_activity_generation": int64(1)},
+			}
+			if invalid == "running_predecessor" {
+				seed.State, seed.Running = task.StateRunning, true
+			}
+			current, err := store.Put(t.Context(), task.PutRequest{Entry: seed})
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry := task.CloneEntry(current)
+			entry.State, entry.Running = task.StateRunning, true
+			entry.Spec["turn_seq"] = int64(2)
+			entry.Metadata["child_activity_id"], entry.Metadata["child_activity_generation"] = "second", int64(2)
+			switch invalid {
+			case "same_generation":
+				entry.Spec["turn_seq"] = int64(1)
+			case "skipped_generation":
+				entry.Spec["turn_seq"] = int64(3)
+			case "missing_identity":
+				delete(entry.Metadata, "child_activity_id")
+			case "terminal":
+				entry.State, entry.Running = task.StateCompleted, false
+			case "foreign_session":
+				entry.Session.SessionID = "other-session"
+			}
+			ctx := session.ContextWithControlMutation(t.Context(), session.ControlMutationPurposeSubagentActivity)
+			_, err = store.Put(ctx, task.PutRequest{Entry: entry, ExpectedRevision: current.Revision})
+			if invalid == "" && err != nil {
+				t.Fatalf("next activity rejected: %v", err)
+			}
+			if invalid != "" && err == nil {
+				t.Fatalf("invalid activity %q accepted", invalid)
+			}
+		})
+	}
+}
+
 func TestTaskStoreAllowsOnlySubagentCompletionWithoutLocalSessionDocument(t *testing.T) {
 	t.Parallel()
 

@@ -23,14 +23,18 @@ type Turn interface {
 }
 
 // SessionReconnect is the presentation-facing view of one Control-owned
-// reconnect transaction. Backfill is transcript-only; Events is the already
-// spliced live continuation. Closing it never cancels the Runtime Turn.
+// reconnect transaction. Deliveries explicitly distinguish atomic canonical
+// replacement from exact append. Closing it never cancels the Runtime Turn.
 type SessionReconnect interface {
-	Turn
 	State() appserver.SessionState
-	Backfill() <-chan eventstream.Envelope
-	BackfillDone() <-chan struct{}
+	HandleID() string
+	RunID() string
+	TurnID() string
+	Deliveries() <-chan appserver.FeedDelivery
 	BootstrapEvents() []eventstream.Envelope
+	SubmitApproval(context.Context, ApprovalDecision) error
+	Cancel()
+	Close() error
 	Err() error
 }
 

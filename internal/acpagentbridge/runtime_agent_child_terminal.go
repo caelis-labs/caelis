@@ -8,7 +8,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 )
 
@@ -163,7 +162,7 @@ func (p *acpChildTerminalProjector) childTurnClosedLocked(key acpChildTerminalKe
 // Physical subagent Turns use the stable "task-id:sequence" cursor. One Task
 // runs those Turns serially, so a contiguous high-water mark compacts closed
 // identities. Out-of-order closes remain exact tombstones until every earlier
-// Turn closes; an empty lifecycle therefore leaves its fallback gate open.
+// Turn closes.
 func acpChildTerminalTurnSeries(key acpChildTerminalKey) (acpChildTerminalSeries, int64, bool) {
 	turnID := strings.TrimSpace(key.TurnID)
 	separator := strings.LastIndex(turnID, ":")
@@ -178,17 +177,6 @@ func acpChildTerminalTurnSeries(key acpChildTerminalKey) (acpChildTerminalSeries
 		acpChildParentKey: key.acpChildParentKey,
 		Prefix:            turnID[:separator],
 	}, sequence, true
-}
-
-func (p *acpChildTerminalProjector) childTurnOpenLocked(sessionID, toolCallID, turnID string) bool {
-	parent := acpChildParentKey{
-		SessionID:  strings.TrimSpace(sessionID),
-		ToolCallID: strings.TrimSpace(toolCallID),
-	}
-	if turnID = strings.TrimSpace(turnID); turnID == "" {
-		turnID = p.current[parent]
-	}
-	return !p.childTurnClosedLocked(acpChildTerminalKey{acpChildParentKey: parent, TurnID: turnID})
 }
 
 // project consumes one typed child update. Agent-message chunks are the only
@@ -216,88 +204,6 @@ func (p *acpChildTerminalProjector) project(env eventstream.Envelope, fallbackSe
 	}
 	state.finalResponse.ObserveUpdate(env.Update)
 	return eventstream.SessionNotification{}, true
-}
-
-type acpObservedParentClose struct {
-	parentCallID string
-	turnID       string
-	status       string
-	rawOutput    map[string]any
-}
-
-func acpObservedParentClosesFromEnvelope(env eventstream.Envelope) []acpObservedParentClose {
-	results := taskstream.SpawnTaskResultsFromEnvelope(env)
-	if len(results) == 0 {
-		return nil
-	}
-	out := make([]acpObservedParentClose, 0, len(results))
-	for _, result := range results {
-		out = append(out, acpObservedParentClose{
-			parentCallID: result.ParentCallID,
-			turnID:       display.MapString(result.RawOutput, "turn_id"),
-			status:       result.Status,
-			rawOutput:    result.RawOutput,
-		})
-	}
-	return out
-}
-
-// projectObservedParentCloses is the fallback when typed child Task lifecycle
-// delivery was unavailable. The canonical Task read/wait result supplies the
-// authoritative FinalResponse. A per-parent Turn gate prevents a later stream
-// terminal or repeated observer result from emitting it again.
-func (p *acpChildTerminalProjector) projectObservedParentCloses(env eventstream.Envelope, fallbackSessionID string) []eventstream.SessionNotification {
-	if p == nil {
-		return nil
-	}
-	observedParents := acpObservedParentClosesFromEnvelope(env)
-	if len(observedParents) == 0 {
-		return nil
-	}
-	notifications := make([]eventstream.SessionNotification, 0, len(observedParents))
-	for _, observed := range observedParents {
-		if notification, ok := p.projectObservedParentClose(env, fallbackSessionID, observed); ok {
-			notifications = append(notifications, notification)
-		}
-	}
-	return notifications
-}
-
-func (p *acpChildTerminalProjector) projectObservedParentClose(
-	env eventstream.Envelope,
-	fallbackSessionID string,
-	observed acpObservedParentClose,
-) (eventstream.SessionNotification, bool) {
-	sessionID := childTerminalSessionID(env.SessionID, fallbackSessionID)
-	parentCallID := strings.TrimSpace(observed.parentCallID)
-	if parentCallID == "" {
-		return eventstream.SessionNotification{}, false
-	}
-	status := observed.status
-	if !acpToolStatusFinalString(status) {
-		status = observedSpawnStatus(nil, observed.rawOutput)
-	}
-	text := childTerminalResultText(status, observed.rawOutput)
-
-	p.mu.Lock()
-	state, key := p.childTurnStateLocked(sessionID, parentCallID, observed.turnID, false)
-	if state.closed {
-		p.mu.Unlock()
-		return eventstream.SessionNotification{}, false
-	}
-	p.closeChildTurnLocked(key, state)
-	p.mu.Unlock()
-
-	return childTerminalResultNotification(key.SessionID, key.ToolCallID, status, text, observed.rawOutput), true
-}
-
-func (p *acpChildTerminalProjector) parentOpen(sessionID string, parentCallID string, turnID string) bool {
-	if p == nil {
-		return true
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.childTurnOpenLocked(sessionID, parentCallID, turnID)
 }
 
 // projectLifecycle emits the one standard parent Spawn result for a child Turn.
@@ -328,12 +234,6 @@ func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, f
 	} else if strings.TrimSpace(text) == "" {
 		text = strings.TrimSpace(env.Lifecycle.Reason)
 	}
-	if strings.TrimSpace(text) == "" {
-		state.finalResponse = acpbridge.FinalAssistantAccumulator{}
-		delete(p.turns, key)
-		p.mu.Unlock()
-		return eventstream.SessionNotification{}, true
-	}
 	p.closeChildTurnLocked(key, state)
 	p.mu.Unlock()
 
@@ -349,16 +249,6 @@ func (p *acpChildTerminalProjector) projectNotice(env eventstream.Envelope, fall
 	parentCallID := strings.TrimSpace(env.ParentTool.ToolCallID)
 	if parentCallID == "" || env.ParentTool.ToolName != spawn.ToolName {
 		return eventstream.SessionNotification{}, false
-	}
-	if taskstream.IsTransientGapEnvelope(env) {
-		p.mu.Lock()
-		state, _ := p.childTurnStateLocked(
-			childTerminalSessionID(env.SessionID, fallbackSessionID), parentCallID, env.TurnID, true,
-		)
-		if !state.closed {
-			state.finalResponse.Reset()
-		}
-		p.mu.Unlock()
 	}
 	return eventstream.SessionNotification{}, true
 }

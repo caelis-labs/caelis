@@ -73,12 +73,6 @@ func (s *StateService) reconnect(
 		subscribed, err = feed.Subscribe(ctx, subscribeRequest)
 	}
 	if err != nil {
-		// A just-accepted durable Envelope may briefly lead the atomic store
-		// checkpoint. Expose that expected bootstrap race as a stable retryable
-		// conflict instead of leaking it as an opaque HTTP 500.
-		if errors.Is(err, errDurableCheckpointBehindAcceptedFeed) {
-			return ReconnectResult{}, ErrStateRevisionConflict
-		}
 		return ReconnectResult{}, err
 	}
 	if subscribed.Subscription == nil {
@@ -157,8 +151,6 @@ func sessionStateAtFeedCut(
 		Metadata:         cloneAnyMap(activeSession.Metadata),
 		BoundaryCursor:   subscribed.BoundaryCursor,
 		BoundaryPosition: position,
-		ResumeMode:       subscribed.Mode,
-		TransientGap:     subscribed.TransientGap,
 		Run:              runtimeState.Run,
 		Controller:       activeSession.Controller,
 		Participants:     append([]session.ParticipantBinding(nil), activeSession.Participants...),

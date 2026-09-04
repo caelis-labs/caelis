@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 )
@@ -112,5 +113,8 @@ func (tm *taskRuntime) persistCommandCancelPhase(ctx context.Context, task *comm
 		return task.snapshotWithoutSession(tm.runtime.now()), err
 	}
 	applyCommandEntry(task, entry)
+	task.mu.Lock()
+	task.emitOutputTerminalLocked(taskapi.StateUnknownOutcome, sandbox.SessionStatus{UpdatedAt: tm.runtime.now()}, false)
+	task.mu.Unlock()
 	return task.snapshotWithoutSession(tm.runtime.now()), nil
 }

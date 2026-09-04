@@ -72,7 +72,7 @@ func TestRemoteTaskEventsCarriesActivityFenceAndEnvelopeIdentity(t *testing.T) {
 			return
 		}
 		writer.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(writer, `{"events":[{"kind":"caelis/notice","cursor":"cursor-1","position":{"transient":{"anchor":{"seq":"0","projection_index":0},"generation":"generation-1","sequence":"1"}},"delivery":{"mode":"transient"},"activity_id":"activity-2","notice":"live"}],"activity_id":"activity-2","resume_mode":"exact"}`)
+		_, _ = io.WriteString(writer, `{"deliveries":[{"kind":"append_page","source":"exact","events":[{"kind":"caelis/notice","cursor":"cursor-1","position":{"transient":{"anchor":{"seq":"0","projection_index":0},"generation":"generation-1","sequence":"1"}},"delivery":{"mode":"transient"},"activity_id":"activity-2","notice":"live"}],"next_cursor":"cursor-1","activity_id":"activity-2"}],"activity_id":"activity-2"}`)
 	})
 	defer closeServer()
 	tasks, err := NewTaskClient(client)
@@ -85,8 +85,8 @@ func TestRemoteTaskEventsCarriesActivityFenceAndEnvelopeIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if batch.ActivityID != "activity-2" || len(batch.Events) != 1 ||
-		batch.Events[0].ActivityID != "activity-2" {
+	if batch.ActivityID != "activity-2" || len(batch.Deliveries) != 1 || len(batch.Deliveries[0].Events) != 1 ||
+		batch.Deliveries[0].Events[0].ActivityID != "activity-2" {
 		t.Fatalf("remote activity-fenced batch = %#v", batch)
 	}
 }

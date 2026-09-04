@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
@@ -60,7 +61,13 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 	}
 	runtimes := s.runtimeRegistry()
 	if runtimes == nil {
-		return s.composition.executeControlCommand(ctx, principal, action, request)
+		result, commandErr := s.composition.executeControlCommand(ctx, principal, action, request)
+		if action == appserver.ActionSessionClose && commandErr == nil && result.Outcome == appserver.OutcomeCommitted {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
+			s.composition.releaseControlSessionStreams(releaseCtx, session.SessionRef{SessionID: result.SessionID})
+			cancel()
+		}
+		return result, commandErr
 	}
 
 	if create, ok := request.(appserver.CreateSessionRequest); ok {
@@ -190,11 +197,14 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 			releaseRuntimeUse()
 			releaseRuntimeUse = nil
 		}
-		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
-		defer cancel()
-		if err := runtimes.releaseSession(releaseCtx, sessionID); err != nil {
+		runtimeReleaseCtx, cancelRuntimeRelease := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
+		if err := runtimes.releaseSession(runtimeReleaseCtx, sessionID); err != nil {
 			result.Detail = "session closed; execution Runtime cleanup remains pending"
 		}
+		cancelRuntimeRelease()
+		streamReleaseCtx, cancelStreamRelease := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
+		s.composition.releaseControlSessionStreams(streamReleaseCtx, session.SessionRef{SessionID: sessionID})
+		cancelStreamRelease()
 	}
 	return result, commandErr
 }
@@ -332,6 +342,7 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
+		observer, releaseTurn := s.controlTurnObserver(active.SessionRef)
 		result, err := gw.BeginTurn(ctx, kernelimpl.BeginTurnRequest{
 			SessionRef:     active.SessionRef,
 			RuntimeContext: s.controlRuntimeContext(ctx, active),
@@ -340,10 +351,9 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 			ContentParts:   req.ContentParts,
 			Surface:        "control-client",
 			Metadata:       map[string]any{"operation_id": req.OperationID},
+			Observer:       observer,
 		})
-		if err == nil && result.Handle != nil {
-			s.attachControlClientHandle(result.Handle)
-		}
+		retainControlTurn(result.Handle, releaseTurn)
 		out := sessionCommandResult(result.Session)
 		if result.Handle != nil {
 			out.Target = appserver.TurnTarget{HandleID: result.Handle.HandleID(), RunID: result.Handle.RunID(), TurnID: result.Handle.TurnID()}
@@ -440,13 +450,13 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 			Source:         req.Source,
 			DetachSource:   req.DetachSource,
 		}
+		observer, releaseTurn := s.controlTurnObserver(active.SessionRef)
+		startReq.Observer = observer
 		if req.Transient {
 			startReq.Lifecycle = kernelimpl.ParticipantLifecycleTransient
 		}
 		started, err := gw.StartParticipant(ctx, startReq)
-		if err == nil && started.Handle != nil {
-			s.attachControlClientHandle(started.Handle)
-		}
+		retainControlTurn(started.Handle, releaseTurn)
 		out := sessionCommandResult(started.Session)
 		out.ParticipantID = controlParticipantID(started.Session.Participants, req.Label, req.Source)
 		if started.Handle != nil {
@@ -458,6 +468,7 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
+		observer, releaseTurn := s.controlTurnObserver(active.SessionRef)
 		result, err := gw.PromptParticipant(ctx, kernelimpl.PromptParticipantRequest{
 			SessionRef:     active.SessionRef,
 			RuntimeContext: s.controlRuntimeContext(ctx, active),
@@ -468,10 +479,9 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 			DisplayTitle:   req.DisplayTitle,
 			ContentParts:   req.ContentParts,
 			Source:         firstNonEmpty(strings.TrimSpace(req.Source), "control-client"),
+			Observer:       observer,
 		})
-		if err == nil && result.Handle != nil {
-			s.attachControlClientHandle(result.Handle)
-		}
+		retainControlTurn(result.Handle, releaseTurn)
 		out := sessionCommandResult(result.Session)
 		out.ParticipantID = strings.TrimSpace(req.ParticipantID)
 		if result.Handle != nil {
@@ -498,7 +508,13 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
+		taskID := controlParticipantTaskID(active.Participants, req.ParticipantID)
 		updated, err := gw.DetachParticipant(ctx, kernelimpl.DetachParticipantRequest{SessionRef: active.SessionRef, ParticipantID: req.ParticipantID, Source: req.Source})
+		if taskID != "" && (err == nil || session.IsCommitted(err)) {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
+			s.releaseControlTaskOutput(releaseCtx, taskapi.Ref{SessionID: active.SessionID, TaskID: taskID})
+			cancel()
+		}
 		return sessionCommandResult(updated), classifyControlBackendError(err)
 	case appserver.HandoffRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
@@ -533,6 +549,16 @@ func controlParticipantID(participants []session.ParticipantBinding, label, sour
 		}
 		if id := strings.TrimSpace(participant.ID); id != "" {
 			return id
+		}
+	}
+	return ""
+}
+
+func controlParticipantTaskID(participants []session.ParticipantBinding, participantID string) string {
+	participantID = strings.TrimSpace(participantID)
+	for _, participant := range participants {
+		if strings.TrimSpace(participant.ID) == participantID && participant.Kind == session.ParticipantKindSubagent {
+			return strings.TrimSpace(participant.DelegationID)
 		}
 	}
 	return ""

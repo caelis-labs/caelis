@@ -17,7 +17,7 @@ import (
 
 const structuredFinalMessageForFidelityTest = "# 完成\n\n已创建文件。\n\n---\n\n### 结果\n\n- 第一项\n- 第二项\n\n| 文件 | 状态 |\n| --- | --- |\n| `hello.go` | 好 |\n\n```go\nfmt.Println(\"你好\")\n```\n\n创建文件\n\n> **结果**"
 
-func TestDurableTaskWaitFinalCompletesOriginalSpawnRowWithoutInjectingChildWorkspace(t *testing.T) {
+func TestCanonicalSpawnFinalCompletesOriginalRowWithoutInjectingTaskWaitOutput(t *testing.T) {
 	t.Parallel()
 
 	model := applyCanonicalOutputFidelitySequence(t, acpprojector.SessionEventTransport{})
@@ -181,6 +181,28 @@ func canonicalOutputFidelityEvents() []*session.Event {
 				},
 			},
 		},
+		{
+			ID:         "spawn-final-1",
+			SessionID:  "session-1",
+			Seq:        3,
+			Type:       session.EventTypeToolResult,
+			Visibility: session.VisibilityCanonical,
+			Time:       time.Unix(302, 0),
+			Scope:      &session.EventScope{TurnID: "turn-1"},
+			Meta:       acpToolNameMeta("Spawn"),
+			Tool: &session.EventTool{
+				ID:     "spawn-call-1",
+				Name:   "Spawn",
+				Kind:   "execute",
+				Title:  "Spawn reviewer: inspect",
+				Status: "completed",
+				Input:  map[string]any{"agent": "reviewer", "prompt": "inspect"},
+				Output: map[string]any{
+					"task_id": "reviewer", "state": "completed", "target_kind": "subagent",
+					"final_message": structuredFinalMessageForFidelityTest,
+				},
+			},
+		},
 	}
 }
 
@@ -256,7 +278,7 @@ func TestHiddenChildToolWithoutMessageIDCreatesMarkdownBoundary(t *testing.T) {
 	}
 }
 
-func TestTerminalGapStateDoesNotRenderUnavailableNotice(t *testing.T) {
+func TestLegacyTerminalTruncationMetadataDoesNotAlterRenderedBytes(t *testing.T) {
 	t.Parallel()
 
 	const retained = "retained 1\nretained 2\nretained 3\nretained 4\nretained 5\nretained 6\nretained tail\n"
@@ -303,8 +325,8 @@ func TestTerminalGapStateDoesNotRenderUnavailableNotice(t *testing.T) {
 	if terminal.Output != retained {
 		t.Fatalf("exact terminal bytes = %q, want retained bytes unchanged", terminal.Output)
 	}
-	if !terminal.OutputGapBefore || !terminal.Done || strings.Contains(terminal.Output, "(no output)") {
-		t.Fatalf("terminal event = %#v, want internal gap state and streamed output after duplicate empty final", terminal)
+	if !terminal.Done || strings.Contains(terminal.Output, "(no output)") {
+		t.Fatalf("terminal event = %#v, want streamed output after duplicate empty final", terminal)
 	}
 	model.syncViewportContent()
 	plain := strings.Join(model.viewportPlainLines, "\n")

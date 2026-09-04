@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
@@ -40,8 +41,53 @@ func forwardSessionReconnectEventStream(ctx context.Context, reconnect controlpr
 	if reconnect == nil {
 		return executeLineResult{completion: TaskResultMsg{}}
 	}
-	return forwardControlEventStream(ctx, reconnect, reconnect.Err, sender)
+	events := make(chan eventstream.Envelope)
+	streamCtx, cancel := context.WithCancel(contextOrBackground(ctx))
+	defer cancel()
+	go func() {
+		defer close(events)
+		assembler := &appserver.FeedDeliveryAssembler{}
+		for {
+			select {
+			case <-streamCtx.Done():
+				return
+			case delivery, open := <-reconnect.Deliveries():
+				if !open {
+					return
+				}
+				visible, replacement, err := assembler.Accept(delivery)
+				if err != nil {
+					return
+				}
+				// The initial reconnect transaction was already rendered before
+				// this live follower started. A later replacement cannot be
+				// appended to that irreversible transcript.
+				if replacement {
+					select {
+					case <-streamCtx.Done():
+					case events <- eventstream.Error(fmt.Errorf("session replacement crossed visible reconnect output")):
+					}
+					return
+				}
+				for _, envelope := range visible {
+					select {
+					case <-streamCtx.Done():
+						return
+					case events <- envelope:
+					}
+				}
+			}
+		}
+	}()
+	return forwardControlEventStream(ctx, reconnectEventTurn{SessionReconnect: reconnect, events: events}, reconnect.Err, sender)
 }
+
+type reconnectEventTurn struct {
+	controlprompt.SessionReconnect
+	events <-chan eventstream.Envelope
+}
+
+func (t reconnectEventTurn) Events() <-chan eventstream.Envelope { return t.events }
 
 func forwardControlEventStream(
 	ctx context.Context,
@@ -111,8 +157,7 @@ func forwardControlEventStream(
 			turn.HandleID(), turn.RunID(), turn.TurnID(),
 			eventstream.LifecycleStateInterrupted, failureReason, "", time.Now(),
 		)
-		// SessionReconnect is an in-process subscription view. Retain its typed
-		// FeedGapError so the retry Cursor is not lost when the live channel closes.
+		// Preserve the typed observation error for presentation diagnostics.
 		terminal.Err = closureErr
 		terminal.Error = failureReason
 	case cancelled:

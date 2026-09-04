@@ -11,18 +11,13 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
-const (
-	childActivityJournalMaxEvents = 256
-	childActivityJournalMaxBytes  = 1 << 20
-)
-
-// childSlot is the stable process-local owner for one durable child endpoint.
-// Its operation mutex survives ACP transport replacement. The state mutex is
-// deliberately short-lived: notification callbacks never wait on an RPC or a
-// Task observer while holding it.
+// childSlot is the stable process-local execution owner for one child
+// endpoint. It serializes endpoint effects, but deliberately retains no output
+// journal: normalized output is synchronously handed to the Control-bound
+// observer and durable completion is handed to the Task completion sink.
 type childSlot struct {
 	opMu sync.Mutex
 
@@ -32,27 +27,18 @@ type childSlot struct {
 	run                *childRun
 	activityID         string
 	activityInitial    bool
-	cursor             uint64
-	liveCursor         uint64
-	observer           agent.ChildActivityObserver
-	journal            []*childActivityJournalItem
-	journalBytes       int
-	delivering         bool
-	deliveringCount    int
 	terminalActivity   string
 	steeringActive     bool
-	steeringFrames     []stream.Frame
 	outputQuarantined  bool
 	setupActive        bool
-	setupFrames        []stream.Frame
 	terminalPending    chan struct{}
 	activeInputCancel  context.CancelFunc
 	promptDispatchDone chan struct{}
 	promptCancel       context.CancelFunc
 
-	deliveryMu     sync.Mutex
-	liveDeliveryMu sync.Mutex
-	ingressMu      sync.Mutex
+	// ingressMu is the one ordering point shared by ACP updates and terminal
+	// completion. No file or network bytes are retained behind it.
+	ingressMu sync.Mutex
 }
 
 func (s *childSlot) pendingPromptDispatch() <-chan struct{} {
@@ -98,18 +84,10 @@ func (s *childSlot) beginPromptDispatch(cancel context.CancelFunc) chan struct{}
 	return done
 }
 
-// reservePromptDispatch closes child-input admission around one prompt frame.
-// The initial/idle caller establishes the first reservation under opMu; an
-// auth-required response may establish a later reservation from the response
-// owner before it waits to reacquire opMu for the authenticated retry.
 func (s *childSlot) reservePromptDispatch(cancel context.CancelFunc) (chan struct{}, bool) {
 	return s.transitionPromptDispatch(nil, cancel)
 }
 
-// transitionPromptDispatch atomically converts the dispatch reservation that
-// guarded a just-written prompt into the reservation for its authenticated
-// retry. When the original reservation already completed, nil is still a
-// valid predecessor; any different live reservation is a conflicting owner.
 func (s *childSlot) transitionPromptDispatch(expected chan struct{}, cancel context.CancelFunc) (chan struct{}, bool) {
 	if s == nil {
 		return nil, false
@@ -142,45 +120,17 @@ func (s *childSlot) finishPromptDispatch(done chan struct{}) {
 	s.mu.Unlock()
 }
 
-type childActivityJournalItem struct {
-	event agent.ChildActivityEvent
-	// preserveLiveBoundary keeps a frame that was eligible for process-local
-	// live observation cursor-exact in the durable journal. Even if that live
-	// callback fails or an observer is rebound to an older durable cursor, a
-	// later unseen delta must not merge an already-applied prefix into its replay.
-	preserveLiveBoundary bool
-	// terminal is the immutable result generation captured at the producer's
-	// terminal fence. Copying Result copies only string headers, so the exact
-	// Final remains available without charging or duplicating its potentially
-	// large backing bytes in the bounded presentation journal.
-	terminal   *delegation.Result
-	size       int
-	frameCount uint64
-	done       chan struct{}
-	once       sync.Once
-}
-
 type childActivityCheckpoint struct {
 	activityID        string
 	activityInitial   bool
 	terminalActivity  string
 	outputQuarantined bool
 	setupActive       bool
-	setupFrames       []stream.Frame
-}
-
-func (item *childActivityJournalItem) acknowledge() {
-	if item == nil {
-		return
-	}
-	item.once.Do(func() { close(item.done) })
 }
 
 func newChildSlot(target agent.ChildEndpointRef, run *childRun) *childSlot {
 	target = agent.NormalizeChildEndpointRef(target)
-	slot := &childSlot{
-		target: target, targetReady: true, run: run,
-	}
+	slot := &childSlot{target: target, targetReady: true, run: run}
 	if run != nil {
 		run.installChildSlot(slot)
 	}
@@ -199,10 +149,14 @@ func (s *childSlot) beginSetup(run *childRun) {
 	}
 	s.ingressMu.Lock()
 	defer s.ingressMu.Unlock()
+	run.mu.RLock()
+	activityID := strings.TrimSpace(run.spawn.ActivityID)
+	run.mu.RUnlock()
 	s.mu.Lock()
 	s.run = run
+	s.activityID = activityID
+	s.activityInitial = true
 	s.setupActive = true
-	s.setupFrames = nil
 	s.outputQuarantined = false
 	s.mu.Unlock()
 }
@@ -218,22 +172,17 @@ func (s *childSlot) finalizeTarget(target agent.ChildEndpointRef) error {
 	s.ingressMu.Lock()
 	defer s.ingressMu.Unlock()
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	current := agent.NormalizeChildEndpointRef(s.target)
 	if (current.ParticipantID != "" && current.ParticipantID != target.ParticipantID) ||
 		(current.EndpointKey != "" && current.EndpointKey != target.EndpointKey) ||
 		(current.Role != "" && current.Role != target.Role) ||
 		(current.Placement.Kind != "" && !reflect.DeepEqual(current.Placement, target.Placement)) ||
 		(current.SessionID != "" && current.SessionID != target.SessionID) {
-		s.mu.Unlock()
 		return childSlotTargetError(target)
 	}
 	s.target = target
 	s.targetReady = true
-	for _, item := range s.journal {
-		item.event.Target = agent.NormalizeChildEndpointRef(target)
-	}
-	s.mu.Unlock()
-	s.triggerDelivery()
 	return nil
 }
 
@@ -252,7 +201,7 @@ func (s *childSlot) acceptsSetupOutput(run *childRun) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.run == run && s.setupActive
+	return s.run == run && s.setupActive && !s.outputQuarantined
 }
 
 func (s *childSlot) matchesTarget(target agent.ChildEndpointRef) bool {
@@ -263,10 +212,8 @@ func (s *childSlot) matchesTarget(target agent.ChildEndpointRef) bool {
 	s.mu.Lock()
 	have := agent.NormalizeChildEndpointRef(s.target)
 	s.mu.Unlock()
-	return have.ParticipantID == want.ParticipantID &&
-		have.SessionID == want.SessionID &&
-		have.EndpointKey == want.EndpointKey &&
-		have.Role == want.Role &&
+	return have.ParticipantID == want.ParticipantID && have.SessionID == want.SessionID &&
+		have.EndpointKey == want.EndpointKey && have.Role == want.Role &&
 		reflect.DeepEqual(have.Placement, want.Placement)
 }
 
@@ -290,21 +237,10 @@ func (s *childSlot) beginActivityKind(activityID string, run *childRun, initial 
 	s.activityInitial = initial
 	s.terminalActivity = ""
 	s.steeringActive = false
-	s.steeringFrames = nil
 	s.outputQuarantined = false
-	frames := append([]stream.Frame(nil), s.setupFrames...)
 	s.setupActive = false
-	s.setupFrames = nil
 	s.activeInputCancel = nil
-	activityID = s.activityID
 	s.mu.Unlock()
-	if activityID == "" {
-		return
-	}
-	for _, frame := range frames {
-		cloned := stream.CloneFrame(frame)
-		s.appendEvent(agent.ChildActivityEvent{ActivityID: activityID, Initial: initial, Frame: &cloned})
-	}
 }
 
 func (s *childSlot) activityCheckpoint() childActivityCheckpoint {
@@ -315,9 +251,8 @@ func (s *childSlot) activityCheckpoint() childActivityCheckpoint {
 	defer s.mu.Unlock()
 	return childActivityCheckpoint{
 		activityID: s.activityID, activityInitial: s.activityInitial,
-		terminalActivity:  s.terminalActivity,
-		outputQuarantined: s.outputQuarantined, setupActive: s.setupActive,
-		setupFrames: append([]stream.Frame(nil), s.setupFrames...),
+		terminalActivity: s.terminalActivity, outputQuarantined: s.outputQuarantined,
+		setupActive: s.setupActive,
 	}
 }
 
@@ -333,76 +268,38 @@ func (s *childSlot) restoreActivity(checkpoint childActivityCheckpoint, run *chi
 	s.activityInitial = checkpoint.activityInitial
 	s.terminalActivity = checkpoint.terminalActivity
 	s.steeringActive = false
-	s.steeringFrames = nil
 	s.outputQuarantined = checkpoint.outputQuarantined
 	s.setupActive = checkpoint.setupActive
-	s.setupFrames = append([]stream.Frame(nil), checkpoint.setupFrames...)
 	s.activeInputCancel = nil
 	s.mu.Unlock()
 }
 
-func (s *childSlot) bindObserver(afterCursor uint64, observer agent.ChildActivityObserver) {
-	if s == nil {
-		return
-	}
-	// Wait for an already selected observer callback to finish before swapping.
-	// Output ingestion remains free to append to the journal while this waits.
-	s.deliveryMu.Lock()
-	s.liveDeliveryMu.Lock()
-	s.mu.Lock()
-	s.observer = observer
-	s.cursor = max(s.cursor, afterCursor)
-	s.liveCursor = afterCursor
-	for len(s.journal) > 0 && s.journal[0].event.Cursor <= afterCursor {
-		item := s.journal[0]
-		s.journal = s.journal[1:]
-		s.journalBytes -= item.size
-		item.acknowledge()
-	}
-	s.mu.Unlock()
-	s.liveDeliveryMu.Unlock()
-	s.deliveryMu.Unlock()
-	s.triggerDelivery()
-}
-
-func (s *childSlot) publishFrame(frame stream.Frame) {
-	s.publishRunFrame(nil, frame)
-}
-
-func (s *childSlot) publishRunFrame(run *childRun, frame stream.Frame) {
+// publishRunOutputLocked publishes one normalized event while ingressMu is held.
+// ACP update normalization and observer delivery share this lock so terminal
+// completion cannot overtake the last update.
+func (s *childSlot) publishRunOutputLocked(run *childRun, event output.Event) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
-	if run != nil && s.run != run {
-		s.mu.Unlock()
-		return
-	}
-	if s.outputQuarantined {
-		s.mu.Unlock()
-		return
-	}
-	if s.setupActive {
-		s.setupFrames = append(s.setupFrames, stream.CloneFrame(frame))
-		s.mu.Unlock()
-		return
-	}
-	if s.activityID != "" && s.terminalActivity == s.activityID {
-		s.mu.Unlock()
-		return
-	}
-	if s.steeringActive {
-		s.steeringFrames = append(s.steeringFrames, stream.CloneFrame(frame))
-		s.mu.Unlock()
-		return
-	}
+	current := s.run
 	activityID := s.activityID
-	initial := s.activityInitial
+	rejected := (run != nil && current != run) || s.outputQuarantined || activityID == "" ||
+		(s.terminalActivity != "" && s.terminalActivity == activityID)
 	s.mu.Unlock()
-	if activityID == "" {
+	if rejected || current == nil {
 		return
 	}
-	s.appendEvent(agent.ChildActivityEvent{ActivityID: activityID, Initial: initial, Frame: &frame})
+	current.mu.RLock()
+	observer := current.output
+	current.mu.RUnlock()
+	if observer == nil {
+		return
+	}
+	if event.OccurredAt.IsZero() {
+		event.OccurredAt = time.Now()
+	}
+	_ = observer.ObserveTaskOutput(context.Background(), event)
 }
 
 func (s *childSlot) settleSteeringFrames(release bool) {
@@ -412,21 +309,10 @@ func (s *childSlot) settleSteeringFrames(release bool) {
 	s.ingressMu.Lock()
 	defer s.ingressMu.Unlock()
 	s.mu.Lock()
-	frames := append([]stream.Frame(nil), s.steeringFrames...)
-	s.steeringFrames = nil
 	s.steeringActive = false
 	s.outputQuarantined = !release
 	s.activeInputCancel = nil
-	activityID := s.activityID
-	initial := s.activityInitial
 	s.mu.Unlock()
-	if !release || activityID == "" {
-		return
-	}
-	for _, frame := range frames {
-		cloned := stream.CloneFrame(frame)
-		s.appendEvent(agent.ChildActivityEvent{ActivityID: activityID, Initial: initial, Frame: &cloned})
-	}
 }
 
 func (s *childSlot) quarantineOutput(run *childRun) {
@@ -439,9 +325,7 @@ func (s *childSlot) quarantineOutput(run *childRun) {
 	if run == nil || s.run == run {
 		s.outputQuarantined = true
 		s.steeringActive = false
-		s.steeringFrames = nil
 		s.setupActive = false
-		s.setupFrames = nil
 		s.activeInputCancel = nil
 	}
 	s.mu.Unlock()
@@ -455,11 +339,10 @@ func (s *childSlot) beginSteering(cancel context.CancelFunc) bool {
 	defer s.ingressMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.steeringActive || s.activityID == "" {
+	if s.steeringActive || s.activityID == "" || s.outputQuarantined {
 		return false
 	}
 	s.steeringActive = true
-	s.steeringFrames = nil
 	s.activeInputCancel = cancel
 	return true
 }
@@ -493,239 +376,41 @@ func (s *childSlot) publishRunResult(run *childRun) <-chan struct{} {
 		close(done)
 		return done
 	}
-	// Serialize the terminal snapshot with ACP notification ingress. An update
-	// already in flight is published before this terminal item; later updates see
-	// the terminal fence and cannot mutate or append to the settled activity.
 	s.ingressMu.Lock()
-	defer s.ingressMu.Unlock()
 	s.mu.Lock()
 	activityID := s.activityID
-	initial := s.activityInitial
 	if s.run != run || activityID == "" || s.terminalActivity == activityID {
 		s.mu.Unlock()
+		s.ingressMu.Unlock()
 		close(done)
 		return done
 	}
 	s.terminalActivity = activityID
 	s.outputQuarantined = true
+	s.setupActive = false
 	s.mu.Unlock()
 	run.mu.RLock()
 	result := childResultLocked(run)
+	observer := run.output
+	completion := run.completion
 	run.mu.RUnlock()
-	item := s.appendJournalEvent(agent.ChildActivityEvent{ActivityID: activityID, Initial: initial}, &result)
-	if item == nil {
-		close(done)
-		return done
-	}
-	return item.done
-}
-
-func (s *childSlot) appendEvent(raw agent.ChildActivityEvent) *childActivityJournalItem {
-	return s.appendJournalEvent(raw, nil)
-}
-
-func (s *childSlot) appendJournalEvent(raw agent.ChildActivityEvent, terminal *delegation.Result) *childActivityJournalItem {
-	if s == nil {
-		return nil
-	}
-	event := agent.CloneChildActivityEvent(raw)
-	s.mu.Lock()
-	s.cursor++
-	event.Cursor = s.cursor
-	event.Target = agent.NormalizeChildEndpointRef(s.target)
-	preserveLiveBoundary := s.liveFrameReadyLocked(event)
-	if !preserveLiveBoundary {
-		if merged := s.mergePendingActivityEventLocked(event); merged != nil {
-			s.compactActivityJournalLocked()
-			s.mu.Unlock()
-			// A merged item is an entirely not-live suffix. Keep it on the
-			// durable path even if an observer frontier advances concurrently;
-			// otherwise the item could later replay an older merged prefix.
-			s.triggerDelivery()
-			return merged
+	if observer != nil {
+		at := result.UpdatedAt
+		if at.IsZero() {
+			at = time.Now()
 		}
+		_ = observer.ObserveTaskOutput(context.Background(), output.Event{
+			OccurredAt: at, State: string(result.State), Closed: true,
+		})
 	}
-	size := childActivityEventSize(event)
-	frameCount := uint64(0)
-	if event.Frame != nil {
-		frameCount = 1
-	}
-	item := &childActivityJournalItem{
-		event: event, terminal: terminal, size: size, frameCount: frameCount,
-		preserveLiveBoundary: preserveLiveBoundary, done: make(chan struct{}),
-	}
-	s.journal = append(s.journal, item)
-	s.journalBytes += size
-	s.compactActivityJournalLocked()
-	s.mu.Unlock()
-	s.deliverLiveFrame(event)
-	s.triggerDelivery()
-	return item
-}
-
-func (s *childSlot) liveFrameReadyLocked(event agent.ChildActivityEvent) bool {
-	if s == nil || event.Frame == nil || event.Result != nil || event.Gap || event.Cursor == 0 || !s.targetReady {
-		return false
-	}
-	_, ok := s.observer.(agent.ChildActivityLiveObserver)
-	return ok && event.Cursor == s.liveCursor+1
-}
-
-// deliverLiveFrame exposes an exact frame only after the endpoint journal owns
-// it. A failed or skipped preview leaves a cursor gap, which fences later live
-// delivery until the durable observer catches up; this prevents a merged
-// journal replay from partially overlapping an accepted live suffix.
-func (s *childSlot) deliverLiveFrame(event agent.ChildActivityEvent) {
-	if s == nil || event.Frame == nil || event.Result != nil || event.Gap || event.Cursor == 0 {
-		return
-	}
-	s.liveDeliveryMu.Lock()
-	defer s.liveDeliveryMu.Unlock()
-
-	s.mu.Lock()
-	observer := s.observer
-	live, ok := observer.(agent.ChildActivityLiveObserver)
-	ready := s.liveFrameReadyLocked(event) && ok
-	s.mu.Unlock()
-	if !ready {
-		return
-	}
-	if err := live.ObserveChildActivityLive(context.Background(), agent.CloneChildActivityEvent(event)); err != nil {
-		return
-	}
-	s.mu.Lock()
-	s.liveCursor = max(s.liveCursor, event.Cursor)
-	s.mu.Unlock()
-}
-
-func (s *childSlot) triggerDelivery() {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	if s.delivering || !s.targetReady || s.observer == nil || len(s.journal) == 0 {
-		s.mu.Unlock()
-		return
-	}
-	s.delivering = true
-	s.mu.Unlock()
-	go s.deliverJournal()
-}
-
-func (s *childSlot) deliverJournal() {
-	defer func() {
-		s.mu.Lock()
-		s.delivering = false
-		retry := s.observer != nil && len(s.journal) > 0
-		s.mu.Unlock()
-		if retry {
-			time.AfterFunc(50*time.Millisecond, s.triggerDelivery)
-		}
-	}()
-	for {
-		s.deliveryMu.Lock()
-		s.mu.Lock()
-		if !s.targetReady || s.observer == nil || len(s.journal) == 0 {
-			s.mu.Unlock()
-			s.deliveryMu.Unlock()
-			return
-		}
-		observer := s.observer
-		count := 1
-		if _, ok := observer.(agent.ChildActivityBatchObserver); ok {
-			count = min(len(s.journal), childActivityJournalMaxEvents)
-			for index := range count {
-				if s.journal[index].terminal != nil {
-					count = index + 1
-					break
-				}
-			}
-		}
-		items := append([]*childActivityJournalItem(nil), s.journal[:count]...)
-		s.deliveringCount = len(items)
-		s.mu.Unlock()
-		events := make([]agent.ChildActivityEvent, 0, len(items))
-		for _, item := range items {
-			event := agent.CloneChildActivityEvent(item.event)
-			if item.terminal != nil {
-				result := delegation.CloneResult(*item.terminal)
-				event.Result = &result
-			}
-			events = append(events, event)
-		}
-		var err error
-		if batch, ok := observer.(agent.ChildActivityBatchObserver); ok {
-			err = batch.ObserveChildActivityBatch(context.Background(), events)
-		} else {
-			err = observer.ObserveChildActivity(context.Background(), events[0])
-		}
-		s.deliveryMu.Unlock()
-		ackCursor := uint64(0)
-		s.mu.Lock()
-		s.deliveringCount = 0
-		if err == nil && len(s.journal) >= len(items) {
-			matched := true
-			for index, item := range items {
-				matched = matched && s.journal[index] == item
-			}
-			if matched {
-				s.journal = s.journal[len(items):]
-				for _, item := range items {
-					s.journalBytes -= item.size
-					item.acknowledge()
-				}
-				if len(items) > 0 {
-					ackCursor = items[len(items)-1].event.Cursor
-				}
-			}
-		}
-		if err != nil {
-			// A selected callback is no longer in flight. Re-apply the hard
-			// presentation budget before retrying it with this or a replacement
-			// observer.
-			s.compactActivityJournalLocked()
-		}
-		s.mu.Unlock()
-		if ackCursor > 0 {
-			s.liveDeliveryMu.Lock()
-			s.mu.Lock()
-			s.liveCursor = max(s.liveCursor, ackCursor)
-			s.mu.Unlock()
-			s.liveDeliveryMu.Unlock()
-		}
-		if err != nil {
-			return
-		}
-	}
-}
-
-type compatibilityActivityObserver struct {
-	run *childRun
-}
-
-func (o compatibilityActivityObserver) ObserveChildActivity(_ context.Context, event agent.ChildActivityEvent) error {
-	if o.run == nil {
-		return nil
-	}
-	if event.Frame != nil {
-		o.run.mu.RLock()
-		sink := o.run.sink
-		o.run.mu.RUnlock()
-		if sink != nil {
-			frame := stream.CloneFrame(*event.Frame)
-			frame.ActivityID = strings.TrimSpace(event.ActivityID)
-			sink.PublishStream(frame)
-		}
-	}
-	if event.Result != nil {
-		o.run.mu.RLock()
-		completion := o.run.completion
-		o.run.mu.RUnlock()
+	s.ingressMu.Unlock()
+	go func() {
 		if completion != nil {
-			completion.PublishSubagentCompletion(delegation.CloneResult(*event.Result))
+			completion.PublishSubagentCompletion(delegation.CloneResult(result))
 		}
-	}
-	return nil
+		close(done)
+	}()
+	return done
 }
 
 func validateChildEndpointRef(target agent.ChildEndpointRef) error {

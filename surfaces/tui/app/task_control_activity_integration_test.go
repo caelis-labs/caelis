@@ -122,8 +122,8 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 			Meta: acpToolNameMeta("Task"),
 		},
 	})
-	if model.runningActivity.Phase != runningPhaseModelWait {
-		t.Fatalf("runningActivity = %#v, want terminal Task observation to close both observer and Spawn owner", model.runningActivity)
+	if model.runningActivity.Phase != runningPhaseToolWait || model.runningActivity.Target != runningTargetSubagent {
+		t.Fatalf("runningActivity = %#v, terminal Task observation must not close the Spawn owner", model.runningActivity)
 	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
@@ -284,6 +284,18 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 				"final_message": "child done",
 			},
 			Meta: acpToolNameMeta("Task"),
+		},
+	})
+	apply(eventstream.Envelope{
+		EventID: "spawn-final",
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo,
+			ToolCallID:    "spawn-1",
+			Status:        &completed,
+			RawOutput: map[string]any{
+				"handle": "orbit", "state": "completed", "final_message": "child done",
+			},
+			Meta: acpToolNameMeta("Spawn"),
 		},
 	})
 	apply(eventstream.Envelope{

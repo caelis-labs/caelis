@@ -19,44 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
-	"github.com/google/uuid"
 )
-
-// BindChildActivityObserver installs the sole output observer for one exact
-// durable child endpoint. Rebinding has an independent journal-delivery fence
-// so a failed observer can be replaced while a terminal producer is waiting
-// for durable acknowledgement.
-func (r *Runner) BindChildActivityObserver(
-	ctx context.Context,
-	target agent.ChildEndpointRef,
-	afterCursor uint64,
-	observer agent.ChildActivityObserver,
-) error {
-	if r == nil || observer == nil {
-		return errorcode.New(errorcode.InvalidArgument, "Child activity observer is required")
-	}
-	if err := validateChildEndpointRef(target); err != nil {
-		return err
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	slot, err := r.lookupChildSlot(target)
-	if err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if !slot.matchesTarget(target) {
-		return childSlotTargetError(target)
-	}
-	slot.bindObserver(afterCursor, observer)
-	return nil
-}
 
 // BindChildEndpoint installs process-local recovery state for one exact
 // Runtime-validated durable binding without opening or resuming the remote
@@ -96,7 +59,7 @@ func (r *Runner) BindChildEndpoint(
 				TaskID: target.EndpointKey, SessionID: target.SessionID, AgentID: target.ParticipantID,
 			},
 			agentName: firstNonEmpty(target.Placement.Agent, target.Placement.Model),
-			spawn:     spawn, taskID: target.EndpointKey, sink: spawn.Streams, completion: spawn.Completion,
+			spawn:     spawn, taskID: target.EndpointKey, output: spawn.Output, completion: spawn.Completion,
 			state: delegation.StateInterrupted, updatedAt: r.clock(), done: done,
 		}
 		slot = newChildSlot(target, run)
@@ -112,14 +75,16 @@ func (r *Runner) BindChildEndpoint(
 	if run == nil {
 		return errorcode.New(errorcode.Conflict, "Target Agent recovery state is unavailable")
 	}
+	// A second input can arrive before a live run's first output makes its
+	// activity visible in the Runtime Task index. Keep that producer binding;
+	// an idle endpoint needs the new binding for reconnect setup output too.
 	run.mu.Lock()
-	run.spawn = spawn
-	run.sink = spawn.Streams
-	run.completion = spawn.Completion
-	run.mu.Unlock()
-	if spawn.ActivityObserver != nil {
-		slot.bindObserver(spawn.ActivityAfterCursor, spawn.ActivityObserver)
+	if !run.running && !run.finishing {
+		run.spawn = spawn
+		run.output = spawn.Output
+		run.completion = spawn.Completion
 	}
+	run.mu.Unlock()
 	return nil
 }
 
@@ -496,7 +461,13 @@ func (r *Runner) submitIdleChildInput(
 	}
 	responseCtx, cancelResponse := context.WithCancel(producerCtx)
 	activityCheckpoint := slot.activityCheckpoint()
-	activityID := uuid.NewString()
+	activityID := strings.TrimSpace(req.ActivityID)
+	if activityID == "" {
+		slot.opMu.Unlock()
+		cancelResponse()
+		prepared.Abandon()
+		return agent.ChildInputResult{}, errorcode.New(errorcode.InvalidArgument, "Task activity binding is required")
+	}
 	run.mu.Lock()
 	runCheckpoint := checkpointIdleRun(run)
 	run.state = delegation.StateRunning
@@ -507,6 +478,10 @@ func (r *Runner) submitIdleChildInput(
 	run.result = ""
 	run.agentText = ""
 	run.finalAssistant.Reset()
+	run.output = req.Output
+	if req.Completion != nil {
+		run.completion = req.Completion
+	}
 	run.inputActor = session.CloneActorRef(req.Source)
 	run.updatedAt = r.clock()
 	run.finishing = false
@@ -674,7 +649,6 @@ func childConnectionError(err error) bool {
 }
 
 var (
-	_ agent.ChildInputRunner            = (*Runner)(nil)
-	_ agent.ChildActivityObserverBinder = (*Runner)(nil)
-	_ agent.ChildEndpointBinder         = (*Runner)(nil)
+	_ agent.ChildInputRunner    = (*Runner)(nil)
+	_ agent.ChildEndpointBinder = (*Runner)(nil)
 )

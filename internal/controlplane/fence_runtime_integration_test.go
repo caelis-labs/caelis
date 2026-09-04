@@ -192,7 +192,8 @@ func TestFencedRuntimeCancelPersistsFencedRequestBeforeNonCooperativeRunEnds(t *
 	}
 
 	close(release)
-	for range run.Handle.Events() {
+	if err := run.Handle.WaitCompletion(t.Context()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("WaitCompletion() error = %v, want cancellation", err)
 	}
 }
 
@@ -284,11 +285,7 @@ func (m *fencingCaptureModel) Generate(_ context.Context, req *model.Request) it
 }
 
 func drainControlplaneRunner(runner agent.Runner) error {
-	var out error
-	for _, err := range runner.Events() {
-		out = errors.Join(out, err)
-	}
-	return out
+	return runner.WaitCompletion(context.Background())
 }
 
 func messagesContain(messages []model.Message, needle string) bool {

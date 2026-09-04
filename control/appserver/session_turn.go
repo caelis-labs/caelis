@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
@@ -42,12 +43,11 @@ type TargetTurn interface {
 	SessionID() string
 	Target() TurnTarget
 	// Events is an intentionally unbuffered view for one consumer. Backpressure
-	// is isolated to this Turn's independently bounded FeedSubscription; it
-	// cannot block Runtime publication or sibling observers.
+	// parks only that consumer's spool reader; it cannot block Runtime
+	// publication or sibling observers.
 	Events() <-chan eventstream.Envelope
 	ResolveApproval(context.Context, ApprovalResolution) error
 	Cancel(context.Context, string) error
-	LastCursor() string
 	Err() error
 	Close() error
 }
@@ -303,7 +303,6 @@ type sessionTurn struct {
 
 	mu           sync.RWMutex
 	subscription FeedSubscription
-	lastCursor   string
 	err          error
 
 	events    chan eventstream.Envelope
@@ -407,21 +406,6 @@ func (t *sessionTurn) Cancel(ctx context.Context, reason string) error {
 	return t.cancelFn(ctx, strings.TrimSpace(reason))
 }
 
-func (t *sessionTurn) LastCursor() string {
-	if t == nil {
-		return ""
-	}
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	if t.lastCursor != "" {
-		return t.lastCursor
-	}
-	if t.subscription != nil {
-		return t.subscription.LastCursor()
-	}
-	return ""
-}
-
 func (t *sessionTurn) Err() error {
 	if t == nil {
 		return nil
@@ -462,99 +446,67 @@ func (t *sessionTurn) relay() {
 		}
 	}()
 
-	for {
-		t.mu.RLock()
-		subscription := t.subscription
-		t.mu.RUnlock()
-		if subscription == nil {
-			t.setErr(errors.New("controlclient: Session turn lost its feed subscription"))
-			return
-		}
-
-		// FeedSubscription exposes a strict Backfill -> Events sequence. Even
-		// though the inspected boundary normally makes this prefix empty, an
-		// Envelope accepted between Inspect and Reconnect belongs here. Draining
-		// it is required before the producer can install and expose the live
-		// continuation.
-		terminal, delivered := t.forwardTargetEvents(subscription.Backfill())
-		if terminal || !delivered {
-			return
-		}
-		terminal, delivered = t.forwardTargetEvents(subscription.Events())
-		if terminal || !delivered {
-			return
-		}
-		subscriptionErr := subscription.Err()
-		if subscriptionErr == nil {
-			t.setErr(errors.New("controlclient: Session feed closed before the target terminal"))
-			return
-		}
-		var gap *FeedGapError
-		if !errors.As(subscriptionErr, &gap) {
-			t.setErr(subscriptionErr)
-			return
-		}
-		cursor := strings.TrimSpace(gap.RetryCursor)
-		if cursor == "" {
-			cursor = strings.TrimSpace(subscription.LastCursor())
-		}
-		_ = subscription.Close()
-
-		reconnected, err := t.client.Reconnect(t.feedCtx, ReconnectRequest{
-			SessionID: t.sessionID,
-			Cursor:    cursor,
-		})
-		if err != nil {
-			t.setErr(err)
-			return
-		}
-		if reconnected.Subscription == nil {
-			t.setErr(errors.New("controlclient: Session reconnect returned no subscription"))
-			return
-		}
-		t.mu.Lock()
-		t.subscription = reconnected.Subscription
-		t.mu.Unlock()
-	}
-}
-
-// forwardTargetEvents returns terminal=true after delivering the target
-// terminal. delivered=false means observation was explicitly detached.
-func (t *sessionTurn) forwardTargetEvents(
-	events <-chan eventstream.Envelope,
-) (terminal bool, delivered bool) {
-	for {
-		select {
-		case <-t.feedCtx.Done():
-			return false, false
-		case envelope, ok := <-events:
-			if !ok {
-				return false, true
-			}
-			t.recordCursor(envelope.Cursor)
-			if !sessionTurnEnvelopeMatches(t.sessionID, t.target, envelope) {
-				continue
-			}
-			select {
-			case <-t.feedCtx.Done():
-				return false, false
-			case t.events <- envelope:
-			}
-			if eventstream.IsTurnTerminalLifecycle(envelope) {
-				return true, true
-			}
-		}
-	}
-}
-
-func (t *sessionTurn) recordCursor(cursor string) {
-	cursor = strings.TrimSpace(cursor)
-	if cursor == "" {
+	t.mu.RLock()
+	subscription := t.subscription
+	t.mu.RUnlock()
+	if subscription == nil {
+		t.setErr(errors.New("controlclient: Session turn lost its feed subscription"))
 		return
 	}
-	t.mu.Lock()
-	t.lastCursor = cursor
-	t.mu.Unlock()
+	assembler := &FeedDeliveryAssembler{}
+	forwardedTarget := false
+	for {
+		select {
+		case delivery, open := <-subscription.Deliveries():
+			if !open {
+				if assembler.Pending() {
+					t.setErr(errors.New("controlclient: Session replacement ended before commit"))
+					return
+				}
+				if err := subscription.Err(); err != nil {
+					t.setErr(err)
+					return
+				}
+				t.setErr(errors.New("controlclient: Session feed closed before the target terminal"))
+				return
+			}
+			events, replacement, err := assembler.Accept(delivery)
+			if err != nil {
+				t.setErr(err)
+				return
+			}
+			if replacement && forwardedTarget {
+				t.setErr(errorcode.New(errorcode.Conflict, "controlclient: Session replacement crossed an active Turn output boundary"))
+				return
+			}
+			for _, envelope := range events {
+				if !sessionTurnEnvelopeMatches(t.sessionID, t.target, envelope) {
+					continue
+				}
+				terminal, delivered := t.forwardTargetEnvelope(envelope)
+				forwardedTarget = true
+				if terminal || !delivered {
+					return
+				}
+			}
+		case <-t.feedCtx.Done():
+			return
+		}
+	}
+}
+
+// forwardTargetEnvelope returns terminal=true after delivering the target
+// terminal. delivered=false means observation was explicitly detached.
+func (t *sessionTurn) forwardTargetEnvelope(envelope eventstream.Envelope) (terminal bool, delivered bool) {
+	if !sessionTurnEnvelopeMatches(t.sessionID, t.target, envelope) {
+		return false, true
+	}
+	select {
+	case <-t.feedCtx.Done():
+		return false, false
+	case t.events <- eventstream.CloneEnvelope(envelope):
+	}
+	return eventstream.IsTurnTerminalLifecycle(envelope), true
 }
 
 func (t *sessionTurn) setErr(err error) {

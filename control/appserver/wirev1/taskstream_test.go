@@ -5,15 +5,14 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 )
 
 func TestStreamErrorWirePreservesRetryClassWithoutLeakingDetail(t *testing.T) {
 	t.Parallel()
 
-	slow := DecodeTaskStreamError(EncodeTaskStreamError(controltaskstream.ErrSlowConsumer))
-	if !errors.Is(slow, controltaskstream.ErrSlowConsumer) {
-		t.Fatalf("slow consumer round trip = %v", slow)
+	unavailable := DecodeTaskStreamError(EncodeTaskStreamError(errorcode.New(errorcode.Unavailable, "local detail")))
+	if errorcode.CodeOf(unavailable) != errorcode.Unavailable {
+		t.Fatalf("unavailable round trip = %v", unavailable)
 	}
 
 	wire := EncodeTaskStreamError(errorcode.Wrap(

@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	taskstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
 type listFailingTaskStore struct {
@@ -184,7 +183,7 @@ func TestRuntimeRecoveryListFailureBlocksRunAndCompact(t *testing.T) {
 	}
 }
 
-func TestRuntimeRecoveryConvergesCommandRehydrateFailure(t *testing.T) {
+func TestRuntimeRecoveryConvergesInterruptedCommand(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -219,10 +218,9 @@ func TestRuntimeRecoveryConvergesCommandRehydrateFailure(t *testing.T) {
 				Kind:   taskapi.KindCommand, Session: ref, State: taskapi.StateRunning, Running: true,
 				Result: map[string]any{"state": string(taskapi.StateRunning)},
 				Metadata: map[string]any{
-					"state":                      string(taskapi.StateRunning),
-					"running":                    true,
-					"command_phase":              tt.phase,
-					commandStreamEventCursorMeta: int64(math.MaxInt64),
+					"state":         string(taskapi.StateRunning),
+					"running":       true,
+					"command_phase": tt.phase,
 				},
 			}})
 			if err != nil {
@@ -238,10 +236,11 @@ func TestRuntimeRecoveryConvergesCommandRehydrateFailure(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertRecoveredCommandEntry(
-				t, got, tt.wantState, tt.wantPhase,
-				"command stream event cursor is exhausted", tt.wantResult,
-			)
+			wantError := "task interrupted during resume"
+			if tt.wantState == taskapi.StateUnknownOutcome {
+				wantError = "command effect outcome is unavailable after process restart"
+			}
+			assertRecoveredCommandEntry(t, got, tt.wantState, tt.wantPhase, wantError, tt.wantResult)
 
 			beforeRevision := got.Revision
 			if err := runtime.recoverRuntimeState(ctx, ref); err != nil {
@@ -359,15 +358,6 @@ func TestRuntimeRecoveryConvergesInstalledUnattachedCommand(t *testing.T) {
 	if cachedState != taskapi.StateUnknownOutcome || cachedRunning || cachedPhase != commandPhaseUnknown {
 		t.Fatalf("cached command after recovery = state %q running %v phase %q, want terminal unknown outcome", cachedState, cachedRunning, cachedPhase)
 	}
-	streamed, err := newStreamService(runtime.tasks).Read(ctx, taskstream.ReadRequest{
-		Ref: taskstream.Ref{SessionID: ref.SessionID, TaskID: entry.TaskID},
-	})
-	if err != nil {
-		t.Fatalf("stream Read() after cached recovery error = %v", err)
-	}
-	if streamed.State != string(taskapi.StateUnknownOutcome) || streamed.Running || !streamed.TerminalFramed {
-		t.Fatalf("stream snapshot after cached recovery = %#v, want terminal unknown outcome", streamed)
-	}
 }
 
 func TestRuntimeRecoveryDoesNotRewriteActiveCommand(t *testing.T) {
@@ -381,10 +371,9 @@ func TestRuntimeRecoveryDoesNotRewriteActiveCommand(t *testing.T) {
 		State: taskapi.StateRunning, Running: true,
 		Result: map[string]any{"state": string(taskapi.StateRunning)},
 		Metadata: map[string]any{
-			"state":                      string(taskapi.StateRunning),
-			"running":                    true,
-			"command_phase":              commandPhaseEffectClaimed,
-			commandStreamEventCursorMeta: int64(math.MaxInt64),
+			"state":         string(taskapi.StateRunning),
+			"running":       true,
+			"command_phase": commandPhaseEffectClaimed,
 		},
 	}})
 	if err != nil {
@@ -421,10 +410,9 @@ func TestRuntimeRecoveryDoesNotRewriteClaimedCommandOperation(t *testing.T) {
 		State: taskapi.StateRunning, Running: true,
 		Result: map[string]any{"state": string(taskapi.StateRunning)},
 		Metadata: map[string]any{
-			"state":                      string(taskapi.StateRunning),
-			"running":                    true,
-			"command_phase":              commandPhaseEffectClaimed,
-			commandStreamEventCursorMeta: int64(math.MaxInt64),
+			"state":         string(taskapi.StateRunning),
+			"running":       true,
+			"command_phase": commandPhaseEffectClaimed,
 		},
 	}})
 	if err != nil {
@@ -466,10 +454,9 @@ func TestRuntimeRecoveryCommandRepairFileStoreRoundTrip(t *testing.T) {
 		State: taskapi.StateRunning, Running: true,
 		Result: map[string]any{"state": string(taskapi.StateRunning)},
 		Metadata: map[string]any{
-			"state":                      string(taskapi.StateRunning),
-			"running":                    true,
-			"command_phase":              commandPhaseEffectClaimed,
-			commandStreamEventCursorMeta: int64(math.MaxInt64),
+			"state":         string(taskapi.StateRunning),
+			"running":       true,
+			"command_phase": commandPhaseEffectClaimed,
 		},
 	}})
 	if err != nil {
@@ -488,37 +475,8 @@ func TestRuntimeRecoveryCommandRepairFileStoreRoundTrip(t *testing.T) {
 	}
 	assertRecoveredCommandEntry(
 		t, got, taskapi.StateUnknownOutcome, commandPhaseUnknown,
-		"command stream event cursor is exhausted", false,
+		"command effect outcome is unavailable after process restart", false,
 	)
-
-	reopenedRuntime := &Runtime{}
-	reopenedRuntime.tasks = newTaskRuntime(reopenedRuntime, reopened)
-	streamed, err := newStreamService(reopenedRuntime.tasks).Read(ctx, taskstream.ReadRequest{
-		Ref: taskstream.Ref{SessionID: ref.SessionID, TaskID: entry.TaskID},
-	})
-	if err != nil {
-		t.Fatalf("stream Read() after repair round trip error = %v", err)
-	}
-	if streamed.State != string(taskapi.StateUnknownOutcome) || streamed.Running ||
-		streamed.Cursor.Events != math.MaxInt64 || !streamed.TerminalFramed {
-		t.Fatalf("stream snapshot after repair round trip = %#v, want terminal unknown outcome at exhausted frontier", streamed)
-	}
-	frames := taskstream.FramesForSnapshot(streamed)
-	if len(frames) != 1 || !frames[0].Closed || frames[0].State != string(taskapi.StateUnknownOutcome) ||
-		frames[0].Cursor.Events != math.MaxInt64 {
-		t.Fatalf("stream frames after repair round trip = %#v, want one closed unknown-outcome frame", frames)
-	}
-	acknowledged, err := newStreamService(reopenedRuntime.tasks).Read(ctx, taskstream.ReadRequest{
-		Ref:    taskstream.Ref{SessionID: ref.SessionID, TaskID: entry.TaskID},
-		Cursor: streamed.Cursor,
-	})
-	if err != nil {
-		t.Fatalf("stream Read() at repaired terminal frontier error = %v", err)
-	}
-	if acknowledged.State != string(taskapi.StateUnknownOutcome) || !acknowledged.TerminalFramed ||
-		len(taskstream.FramesForSnapshot(acknowledged)) != 0 {
-		t.Fatalf("acknowledged repaired stream snapshot = %#v, want idempotent terminal snapshot without repeated frames", acknowledged)
-	}
 }
 
 func TestRuntimeRecoveryReturnsCommandRepairPersistenceFailure(t *testing.T) {
@@ -530,10 +488,7 @@ func TestRuntimeRecoveryReturnsCommandRepairPersistenceFailure(t *testing.T) {
 	entry, err := store.Put(ctx, taskapi.PutRequest{Entry: &taskapi.Entry{
 		TaskID: "task-persist-failure", Kind: taskapi.KindCommand, Session: ref,
 		State: taskapi.StateRunning, Running: true,
-		Metadata: map[string]any{
-			"command_phase":              commandPhaseRunning,
-			commandStreamEventCursorMeta: int64(math.MaxInt64),
-		},
+		Metadata: map[string]any{"command_phase": commandPhaseRunning},
 	}})
 	if err != nil {
 		t.Fatal(err)

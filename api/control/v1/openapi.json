@@ -158,12 +158,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Atomic SessionState bootstrap and SSE continuation. The first named event is SessionState; a backfill-done marker separates replay from live Envelopes.",
-            "headers": {
-              "Caelis-Resume-Mode": {"schema": {"$ref": "#/components/schemas/ResumeMode"}},
-              "Caelis-Transient-Gap": {"schema": {"type": "boolean"}},
-              "Caelis-Boundary-Cursor": {"schema": {"type": "string"}}
-            },
+            "description": "Atomic SessionState bootstrap followed by typed append or transactional replacement deliveries.",
             "content": {"text/event-stream": {"schema": {"type": "string"}}}
           },
           "400": {"$ref": "#/components/responses/BadRequest"},
@@ -293,12 +288,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Finite Task output suffix and resumable boundary",
-            "headers": {
-              "Caelis-Resume-Mode": {"schema": {"$ref": "#/components/schemas/TaskResumeMode"}},
-              "Caelis-Transient-Gap": {"schema": {"type": "boolean"}},
-              "Caelis-Boundary-Cursor": {"schema": {"type": "string"}}
-            },
+            "description": "Finite typed Task append or transactional replacement deliveries",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TaskEventBatch"}}}
           },
           "400": {"$ref": "#/components/responses/BadRequest"},
@@ -321,12 +311,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Independent Task SSE stream. A named done or typed error event distinguishes intentional completion from transport EOF.",
-            "headers": {
-              "Caelis-Resume-Mode": {"schema": {"$ref": "#/components/schemas/TaskResumeMode"}},
-              "Caelis-Transient-Gap": {"schema": {"type": "boolean"}},
-              "Caelis-Boundary-Cursor": {"schema": {"type": "string"}}
-            },
+            "description": "Independent typed Task delivery stream. A named done or error event distinguishes intentional completion from transport EOF.",
             "content": {"text/event-stream": {"schema": {"type": "string"}}}
           },
           "400": {"$ref": "#/components/responses/BadRequest"},
@@ -2032,8 +2017,8 @@
       "Outcome": {"type": "string", "enum": ["accepted", "committed", "conflicted", "rejected", "unknown"]},
       "ErrorCode": {"type": "string", "enum": ["unknown", "invalid_argument", "not_found", "already_exists", "conflict", "permission_denied", "unauthenticated", "failed_precondition", "resource_exhausted", "rate_limited", "overloaded", "timeout", "cancelled", "interrupted", "unavailable", "unsupported", "unknown_outcome", "internal"]},
       "ErrorKind": {"type": "string", "enum": ["session_closed", "unauthorized", "operation_conflict", "state_revision_conflict"]},
-      "ResumeMode": {"type": "string", "enum": ["exact", "durable_fallback"]},
-      "TaskResumeMode": {"type": "string", "enum": ["exact", "current_state"]},
+      "StreamSourceClass": {"type": "string", "enum": ["exact", "replacement", "result", "status"]},
+      "StreamDeliveryKind": {"type": "string", "enum": ["replace_begin", "replace_page", "replace_end", "append_page", "status", "sync"]},
       "TaskKind": {"type": "string", "enum": ["command", "subagent"]},
       "TaskState": {"type": "string", "enum": ["prepared", "running", "waiting_input", "completed", "failed", "cancelled", "interrupted", "terminated", "waiting_approval", "unknown_outcome"]},
       "ControllerKind": {"type": "string", "enum": ["kernel", "acp"]},
@@ -2373,7 +2358,7 @@
       "UsageSemantics": {"type": "string", "enum": ["context_gauge", "provider_usage"]},
       "EnvelopeBase": {
         "type": "object",
-        "required": ["kind", "cursor", "position", "delivery"],
+        "required": ["kind", "delivery"],
         "properties": {
           "kind": {"$ref": "#/components/schemas/EnvelopeKind"}, "cursor": {"type": "string", "minLength": 1},
           "event_id": {"type": "string"}, "projection_id": {"type": "string"}, "position": {"$ref": "#/components/schemas/FeedPosition"},
@@ -2438,13 +2423,26 @@
       "TaskEventBatch": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["resume_mode"],
         "properties": {
+          "deliveries": {"type": "array", "items": {"$ref": "#/components/schemas/TaskStreamDelivery"}},
+          "activity_id": {"type": "string"}
+        }
+      },
+      "TaskStreamDelivery": {
+        "type": "object", "additionalProperties": false, "required": ["kind", "source"],
+        "properties": {
+          "kind": {"$ref": "#/components/schemas/StreamDeliveryKind"}, "source": {"$ref": "#/components/schemas/StreamSourceClass"},
+          "snapshot_id": {"type": "string"}, "page": {"type": "integer", "minimum": 0},
           "events": {"type": "array", "items": {"$ref": "#/components/schemas/Envelope"}},
-          "activity_id": {"type": "string"},
-          "resume_mode": {"$ref": "#/components/schemas/TaskResumeMode"},
-          "transient_gap": {"type": "boolean"},
-          "boundary_cursor": {"type": "string"}
+          "next_cursor": {"type": "string"}, "activity_id": {"type": "string"}
+        }
+      },
+      "SessionFeedDelivery": {
+        "type": "object", "additionalProperties": false, "required": ["kind", "source"],
+        "properties": {
+          "kind": {"$ref": "#/components/schemas/StreamDeliveryKind"}, "source": {"$ref": "#/components/schemas/StreamSourceClass"},
+          "snapshot_id": {"type": "string"}, "page": {"type": "integer", "minimum": 0},
+          "events": {"type": "array", "items": {"$ref": "#/components/schemas/Envelope"}}, "next_cursor": {"type": "string"}
         }
       },
       "SessionRef": {"type": "object", "additionalProperties": false, "properties": {"app_name": {"type": "string"}, "user_id": {"type": "string"}, "session_id": {"type": "string"}, "workspace_key": {"type": "string"}}},
@@ -2458,13 +2456,12 @@
       "ClientCapabilities": {"type": "object", "additionalProperties": false, "required": ["client_managed_terminal", "caelis_terminal_stream", "goal_bootstrap_supported", "manage_loop_bootstrap_supported"], "properties": {"client_managed_terminal": {"type": "boolean", "const": false}, "caelis_terminal_stream": {"type": "boolean", "const": true}, "goal_bootstrap_supported": {"type": "boolean", "const": false}, "manage_loop_bootstrap_supported": {"type": "boolean", "const": false}}},
       "SessionState": {
         "type": "object", "additionalProperties": false,
-        "required": ["protocol_version", "envelope_version", "api_version", "session_id", "revision", "resume_mode", "run", "controller", "approval", "capabilities"],
+        "required": ["protocol_version", "envelope_version", "api_version", "session_id", "revision", "run", "controller", "approval", "capabilities"],
         "properties": {
           "protocol_version": {"type": "integer"}, "envelope_version": {"type": "string"}, "api_version": {"type": "string"},
           "session_id": {"type": "string"}, "revision": {"$ref": "#/components/schemas/Uint64Decimal"}, "workspace_key": {"type": "string"},
           "cwd": {"type": "string"}, "title": {"type": "string"}, "metadata": {"$ref": "#/components/schemas/JSONObject"},
           "boundary_cursor": {"type": "string"}, "boundary_position": {"$ref": "#/components/schemas/FeedPosition"},
-          "resume_mode": {"$ref": "#/components/schemas/ResumeMode"}, "transient_gap": {"type": "boolean"},
           "run": {"$ref": "#/components/schemas/RunState"}, "controller": {"$ref": "#/components/schemas/ControllerBinding"},
           "participants": {"type": "array", "items": {"$ref": "#/components/schemas/ParticipantBinding"}},
           "approval": {"$ref": "#/components/schemas/ApprovalState"}, "capabilities": {"$ref": "#/components/schemas/ClientCapabilities"}

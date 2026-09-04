@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 type ClientConfig struct {
@@ -153,19 +152,34 @@ func (c *Client) Events(ctx context.Context, principal Principal, req SubscribeR
 		return EventBatch{}, err
 	}
 	defer result.Subscription.Close()
-	out := EventBatch{ResumeMode: result.Mode, TransientGap: result.TransientGap, BoundaryCursor: result.BoundaryCursor}
+	out := EventBatch{BoundaryCursor: result.BoundaryCursor}
+	assembler := &FeedDeliveryAssembler{}
 	for {
 		select {
 		case <-ctx.Done():
 			return EventBatch{}, ctx.Err()
-		case envelope, open := <-result.Subscription.Backfill():
+		case delivery, open := <-result.Subscription.Deliveries():
 			if !open {
 				if err := result.Subscription.Err(); err != nil {
 					return EventBatch{}, err
 				}
 				return out, nil
 			}
-			out.Events = append(out.Events, eventstream.CloneEnvelope(envelope))
+			events, replacement, acceptErr := assembler.Accept(delivery)
+			if acceptErr != nil {
+				return EventBatch{}, acceptErr
+			}
+			if replacement {
+				out.Events = cloneEnvelopes(events)
+			} else {
+				out.Events = append(out.Events, cloneEnvelopes(events)...)
+			}
+			if delivery.Kind == FeedDeliverySync {
+				if assembler.Pending() {
+					return EventBatch{}, errors.New("controlclient: Session replacement ended before sync")
+				}
+				return out, nil
+			}
 		}
 	}
 }

@@ -34,6 +34,9 @@ const (
 	// ControlMutationPurposeSubagentCompletion owns the asynchronous terminal
 	// Task and side-participant commit after the spawning Turn may have ended.
 	ControlMutationPurposeSubagentCompletion ControlMutationPurpose = "subagent_completion"
+	// ControlMutationPurposeSubagentActivity records producer-proven Task activity
+	// independently of the parent Turn that admitted the child input.
+	ControlMutationPurposeSubagentActivity ControlMutationPurpose = "subagent_activity"
 )
 
 // MutationGuard carries the authority and durable fence for one mutation.
@@ -199,6 +202,7 @@ func ControlMutationMayOverlapRuntimeFence(purpose ControlMutationPurpose) bool 
 		ControlMutationPurposeParticipant,
 		ControlMutationPurposeSystemCommit,
 		ControlMutationPurposeSubagentCompletion,
+		ControlMutationPurposeSubagentActivity,
 		ControlMutationPurposeTest:
 		return true
 	default:
@@ -216,7 +220,8 @@ func knownControlMutationPurpose(purpose ControlMutationPurpose) bool {
 		ControlMutationPurposeConfiguration,
 		ControlMutationPurposeTest,
 		ControlMutationPurposeSystemCommit,
-		ControlMutationPurposeSubagentCompletion:
+		ControlMutationPurposeSubagentCompletion,
+		ControlMutationPurposeSubagentActivity:
 		return true
 	default:
 		return false

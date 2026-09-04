@@ -19,12 +19,9 @@ import (
 )
 
 const (
-	subagentStreamEventCursorMeta   = "stream_event_cursor"
-	subagentStreamOutputCursorMeta  = "stream_output_cursor"
 	subagentFinalResponseCursorMeta = "final_response_cursor"
 	subagentActivityIDMeta          = "child_activity_id"
 	subagentActivityGenerationMeta  = "child_activity_generation"
-	subagentActivityCursorMeta      = "child_activity_cursor"
 )
 
 func subagentSpawnTaskID(ref session.SessionRef, spawnID string) (string, error) {
@@ -646,12 +643,6 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		contextUsage:    taskapi.CloneContextUsageRecord(entry.ContextUsage),
 		completionReady: true,
 	}
-	if cursor, ok := taskInt64Value(entry.Metadata[subagentStreamEventCursorMeta]); ok && cursor >= 0 {
-		task.streamEventBase = cursor
-	}
-	if cursor, ok := taskInt64Value(entry.Metadata[subagentStreamOutputCursorMeta]); ok && cursor >= 0 {
-		task.streamOutputCursor = cursor
-	}
 	if cursor, ok := taskInt64Value(entry.Metadata[subagentFinalResponseCursorMeta]); ok && cursor >= 0 {
 		task.finalResponseCursor = cursor
 	}
@@ -659,23 +650,15 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	if generation, ok := taskInt64Value(entry.Metadata[subagentActivityGenerationMeta]); ok && generation > 0 {
 		task.activityGeneration = generation
 	}
-	if cursor, ok := taskInt64Value(entry.Metadata[subagentActivityCursorMeta]); ok && cursor >= 0 {
-		task.activityCursor = uint64(cursor)
-		task.activityDurableCursor = uint64(cursor)
-	}
 	if task.state == taskapi.StateCompleted {
 		if final := firstNonBlankTaskOutput(taskRawStringValue(task.result["final_message"]), taskRawStringValue(task.result["result"])); taskOutputHasNonBlankLine(final) {
 			task.latestFinalText = final
 			task.latestFinalTurnSeq = max(task.turnSeq, 1)
-			task.latestFinalOrder = task.streamEventBase
 			task.latestFinalAt = entry.UpdatedAt
 			task.latestFinalActivityID = task.activityID
 			if task.latestFinalAt.IsZero() {
 				task.latestFinalAt = entry.CreatedAt
 			}
-			task.semanticRetention.protectLatestFinal(
-				subagentTurnID(task.ref.TaskID, task.latestFinalTurnSeq), task.latestFinalOrder,
-			)
 		}
 	}
 	if task.metadata == nil {
@@ -753,7 +736,6 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 	t.result["agent"] = t.agent
 	t.result["state"] = string(t.state)
 	normalizeSubagentResultForState(&t.result, t.state, result.Error)
-	t.notifyStreamChangeLocked()
 }
 
 func (t *subagentTask) isRunning() bool {
@@ -793,7 +775,6 @@ func (t *subagentTask) applyInterruptedLocked(reason string) {
 	t.metadata["prompt"] = t.prompt
 	t.metadata["session_id"] = t.anchor.SessionID
 	t.metadata["terminal_id"] = t.ref.TerminalID
-	t.notifyStreamChangeLocked()
 }
 
 // normalizeSubagentResultForState is the sole writer for mutually exclusive
@@ -896,7 +877,7 @@ func (t *subagentTask) snapshotLocked() taskapi.Snapshot {
 		Lease:          taskapi.CloneLease(t.lease),
 		StdoutCursor:   t.stdoutCursor,
 		StderrCursor:   t.stderrCursor,
-		EventCursor:    t.streamEventBase + int64(len(t.streamFrames)),
+		EventCursor:    max(t.turnSeq, 0),
 		Result:         result,
 		Metadata:       metadata,
 	})
@@ -910,8 +891,6 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
-	metadata[subagentStreamEventCursorMeta] = t.streamEventBase + int64(len(t.streamFrames))
-	metadata[subagentStreamOutputCursorMeta] = t.streamOutputCursor
 	metadata[subagentFinalResponseCursorMeta] = t.finalResponseCursor
 	entry := &taskapi.Entry{
 		TaskID:         t.ref.TaskID,

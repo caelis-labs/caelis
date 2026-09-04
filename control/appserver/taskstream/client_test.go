@@ -60,8 +60,8 @@ func (s *clientTestService) List(_ context.Context, principal Principal, _ ListR
 	return ListResult{}, nil
 }
 
-func (*clientTestService) Events(context.Context, Principal, ReadRequest) (Batch, error) {
-	return Batch{}, nil
+func (*clientTestService) Events(context.Context, Principal, ReadRequest) (ReadResult, error) {
+	return ReadResult{}, nil
 }
 
 func (*clientTestService) Subscribe(context.Context, Principal, SubscribeRequest) (SubscribeResult, error) {

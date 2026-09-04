@@ -27,6 +27,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
+	spoolfile "github.com/caelis-labs/caelis/control/streamspool/file"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
@@ -52,8 +53,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	storeRoot := sessionRootDir()
 	sessionStore := sessionfile.NewStore(sessionfile.Config{
-		RootDir:            sessionRootDir(),
+		RootDir:            storeRoot,
 		SessionIDGenerator: newSessionID,
 	})
 	sessions := sessionStore
@@ -72,11 +74,20 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	spoolStore, err := spoolfile.New(context.Background(), spoolfile.Config{
+		RootDir: filepath.Join(storeRoot, "control", "spool", "v1"),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer spoolStore.Close()
+	taskOutput := controltaskstream.NewRecorder(spoolStore, nil)
 	localCfg := runtime.Config{
 		Sessions:                 sessions,
 		TaskStore:                taskStore,
 		ControllerEventForwarder: acpbridge.NewControllerForwarder(sessions),
 		ControllerContextRouter:  contextRouter,
+		TaskOutput:               taskOutput,
 		AgentFactory: chat.Factory{
 			SystemPrompt: strings.TrimSpace(os.Getenv("SDK_ACP_SYSTEM_PROMPT")),
 		},
@@ -104,7 +115,7 @@ func main() {
 	}
 	controlTaskStreams, err := controltaskstream.New(controltaskstream.Config{
 		Tasks:      taskStore,
-		Streams:    rt.Streams,
+		Spool:      spoolStore,
 		Authorizer: acpe2eTaskStreamAuthorizer{sessions: sessions},
 		Secret:     []byte("caelis-acpe2e-taskstream-secret-v1"),
 	})

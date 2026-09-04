@@ -373,7 +373,7 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 		t.Fatalf("Prompt(system-managed child) error = %v", err)
 	}
 	if result.StopReason != acpsdk.StopReasonEndTurn || callbacks.firstAgentMessage() != "managed child ok" {
-		t.Fatalf("Prompt(system-managed child) = %#v, message %q", result, callbacks.firstAgentMessage())
+		t.Fatalf("Prompt(system-managed child) = %#v, message %q, notifications %#v", result, callbacks.firstAgentMessage(), callbacks.notifications)
 	}
 	listed, err := agent.ListSessions(ctx, acpsdk.ListSessionsRequest{Cwd: testStringPointer(workspace)})
 	if err != nil {
@@ -453,7 +453,7 @@ func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.StopReason != acpsdk.StopReasonEndTurn || callbacks.firstAgentMessage() != "typed ACP ok" {
-		t.Fatalf("Prompt() = %#v, message %q", result, callbacks.firstAgentMessage())
+		t.Fatalf("Prompt() = %#v, message %q, notifications %#v", result, callbacks.firstAgentMessage(), callbacks.notifications)
 	}
 	replayed := &recordingCallbacks{}
 	if _, err := agent.LoadSession(ctx, acpsdk.LoadSessionRequest{SessionId: created.SessionId, Cwd: workspace}, replayed); err != nil {

@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -224,12 +223,4 @@ func runEvalHeadlessOnce(
 		SessionID: active.SessionID,
 		Input:     input,
 	}, opts)
-}
-
-type recordingStreams struct {
-	frames []stream.Frame
-}
-
-func (s *recordingStreams) PublishStream(frame stream.Frame) {
-	s.frames = append(s.frames, stream.CloneFrame(frame))
 }

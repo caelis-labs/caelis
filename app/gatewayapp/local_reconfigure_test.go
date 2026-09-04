@@ -3,7 +3,6 @@ package gatewayapp
 import (
 	"context"
 	"errors"
-	"iter"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -666,7 +665,8 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 	}
 
 	close(blocking.release)
-	for range handle.Handle.ACPEvents() {
+	if err := handle.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -708,7 +708,8 @@ func TestBuildInitialGatewayRuntimeRejectsInitializedRuntimeBeforePlanLoad(t *te
 	defer handle.Handle.Close()
 	defer func() {
 		close(blocking.release)
-		for range handle.Handle.ACPEvents() {
+		if err := handle.Handle.WaitCompletion(t.Context()); err != nil {
+			t.Error(err)
 		}
 	}()
 
@@ -834,7 +835,8 @@ func TestInstallGatewayRuntimeBundleRejectsRuntimeReplacementAndClosesBundle(t *
 	defer handle.Handle.Close()
 	defer func() {
 		close(blocking.release)
-		for range handle.Handle.ACPEvents() {
+		if err := handle.Handle.WaitCompletion(t.Context()); err != nil {
+			t.Error(err)
 		}
 	}()
 
@@ -1044,14 +1046,16 @@ type blockingRunner struct {
 
 func (blockingRunner) RunID() string { return "run-blocking" }
 
-func (r blockingRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		<-r.release
-	}
-}
-
 func (blockingRunner) Submit(agent.Submission) error { return nil }
 func (blockingRunner) Cancel() agent.CancelResult {
 	return agent.CancelResult{Status: agent.CancelStatusCancelled}
 }
 func (blockingRunner) Close() error { return nil }
+func (r blockingRunner) WaitCompletion(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.release:
+		return nil
+	}
+}

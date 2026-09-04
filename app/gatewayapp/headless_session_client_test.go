@@ -2,7 +2,6 @@ package gatewayapp
 
 import (
 	"context"
-	"iter"
 	"slices"
 	"testing"
 	"time"
@@ -243,26 +242,29 @@ type headlessSessionTestRuntime struct {
 }
 
 func (runtime headlessSessionTestRuntime) Run(
-	_ context.Context,
+	ctx context.Context,
 	request agent.RunRequest,
 ) (agent.RunResult, error) {
 	if runtime.requests != nil {
 		runtime.requests <- request
 	}
 	message := model.NewTextMessage(model.RoleAssistant, runtime.response)
+	event := &session.Event{
+		ID:         "assistant-fixed",
+		SessionID:  request.SessionRef.SessionID,
+		Type:       session.EventTypeAssistant,
+		Visibility: session.VisibilityCanonical,
+		Message:    &message,
+		Text:       runtime.response,
+	}
+	if request.SourceObserver != nil {
+		if err := request.SourceObserver.ObserveSourceEvent(ctx, agent.SourceEvent{Canonical: event}); err != nil {
+			return agent.RunResult{}, err
+		}
+	}
 	return agent.RunResult{
 		Session: session.Session{SessionRef: request.SessionRef},
-		Handle: &headlessSessionTestRunner{
-			ref: request.SessionRef,
-			events: []*session.Event{{
-				ID:         "assistant-fixed",
-				SessionID:  request.SessionRef.SessionID,
-				Type:       session.EventTypeAssistant,
-				Visibility: session.VisibilityCanonical,
-				Message:    &message,
-				Text:       runtime.response,
-			}},
-		},
+		Handle:  &headlessSessionTestRunner{},
 	}, nil
 }
 
@@ -289,23 +291,9 @@ func (headlessSessionTestResolver) ResolveTurn(
 	}, nil
 }
 
-type headlessSessionTestRunner struct {
-	ref    session.SessionRef
-	events []*session.Event
-}
+type headlessSessionTestRunner struct{}
 
 func (*headlessSessionTestRunner) RunID() string { return "headless-test-runner" }
-
-func (runner *headlessSessionTestRunner) Events() iter.Seq2[*session.Event, error] {
-	events := append([]*session.Event(nil), runner.events...)
-	return func(yield func(*session.Event, error) bool) {
-		for _, event := range events {
-			if !yield(event, nil) {
-				return
-			}
-		}
-	}
-}
 
 func (*headlessSessionTestRunner) Submit(agent.Submission) error { return nil }
 
@@ -314,3 +302,5 @@ func (*headlessSessionTestRunner) Cancel() agent.CancelResult {
 }
 
 func (*headlessSessionTestRunner) Close() error { return nil }
+
+func (*headlessSessionTestRunner) WaitCompletion(context.Context) error { return nil }

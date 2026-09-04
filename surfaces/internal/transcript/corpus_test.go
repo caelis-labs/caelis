@@ -25,16 +25,9 @@ type transcriptCorpus struct {
 }
 
 type transcriptCorpusCase struct {
-	Name      string                    `json:"name"`
-	Boundary  *transcriptCorpusBoundary `json:"boundary"`
-	Envelopes []json.RawMessage         `json:"envelopes"`
-	Expected  json.RawMessage           `json:"expected"`
-}
-
-type transcriptCorpusBoundary struct {
-	ResumeMode     string `json:"resume_mode"`
-	TransientGap   bool   `json:"transient_gap"`
-	BoundaryCursor string `json:"boundary_cursor"`
+	Name      string            `json:"name"`
+	Envelopes []json.RawMessage `json:"envelopes"`
+	Expected  json.RawMessage   `json:"expected"`
 }
 
 type decodedCorpusEnvelope struct {
@@ -118,15 +111,6 @@ func TestSharedTranscriptCorpusMatchesGoldenSemanticState(t *testing.T) {
 				decoded := decodeTranscriptCorpusEnvelope(t, rawEnvelope)
 				state.reduce(decoded)
 			}
-			if fixture.Boundary != nil {
-				state.boundary = map[string]any{
-					"resumeMode": fixture.Boundary.ResumeMode, "transientGap": fixture.Boundary.TransientGap,
-				}
-				if fixture.Boundary.BoundaryCursor != "" {
-					state.boundary["boundaryCursor"] = fixture.Boundary.BoundaryCursor
-				}
-			}
-
 			got := normalizeCorpusJSON(t, state.publicValue())
 			var want any
 			if err := json.Unmarshal(fixture.Expected, &want); err != nil {
@@ -248,7 +232,6 @@ func parseCorpusUint64(t *testing.T, value string) uint64 {
 type corpusTranscriptState struct {
 	items      []map[string]any
 	seen       map[string]struct{}
-	boundary   map[string]any
 	usage      map[string]any
 	activeTool string
 }
@@ -466,9 +449,6 @@ func (s *corpusTranscriptState) publicValue() map[string]any {
 	out := map[string]any{"items": s.items}
 	if s.usage != nil {
 		out["usage"] = s.usage
-	}
-	if s.boundary != nil {
-		out["boundary"] = s.boundary
 	}
 	return out
 }

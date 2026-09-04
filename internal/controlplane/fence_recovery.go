@@ -75,7 +75,8 @@ func (e *activeFencedExecution) waitForQuiescence(ctx context.Context) error {
 			return e.guard.finish()
 		}
 		if runner != nil {
-			if err := runner.waitForProducer(ctx); err != nil {
+			completed, err := runner.waitForProducer(ctx)
+			if !completed {
 				return err
 			}
 			// The fence-loss error is expected on this path. Preserve only
@@ -210,12 +211,6 @@ func (g *sessionFenceGuard) recoveryLoss(ctx context.Context) (error, error) {
 }
 
 func baseFencedRunner(runner agent.Runner) *fencedRunner {
-	switch runner := runner.(type) {
-	case *fencedRunner:
-		return runner
-	case *fencedSourceRunner:
-		return runner.fencedRunner
-	default:
-		return nil
-	}
+	r, _ := runner.(*fencedRunner)
+	return r
 }

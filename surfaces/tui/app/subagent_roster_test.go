@@ -361,22 +361,27 @@ func TestSubagentRosterColdResumeLoadsOnlySelectedWorkspace(t *testing.T) {
 	}
 	selectedCallID := model.subagentOutputOverlay.callID
 	selectedTaskID := model.subagentRosterTasks[selectedCallID].TaskID
-	service.eventBatch = protocoltaskstream.Batch{
+	service.eventBatch = protocoltaskstream.ReadResult{
 		ActivityID: model.subagentRosterTasks[selectedCallID].ActivityID,
-		Events: []eventstream.Envelope{{
-			Kind: eventstream.KindSessionUpdate, SessionID: "session-old", TurnID: selectedTaskID + ":1",
-			Scope: eventstream.ScopeSubagent, ScopeID: selectedTaskID,
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: selectedCallID, ToolName: "Spawn"},
-			Update: eventstream.ContentChunk{
-				SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "history-answer",
-				Content: eventstream.TextContent{Type: "text", Text: "restored complete child history"},
-			},
-		}, {
-			Kind: eventstream.KindLifecycle, SessionID: "session-old", TurnID: selectedTaskID + ":1",
-			Scope: eventstream.ScopeSubagent, ScopeID: selectedTaskID, Final: true,
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: selectedCallID, ToolName: "Spawn"},
-			Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
-		}}}
+		Deliveries: []protocoltaskstream.Delivery{{
+			Kind: protocoltaskstream.DeliveryAppendPage, Source: protocoltaskstream.SourceExact,
+			NextCursor: "history-cursor-2",
+			Events: []eventstream.Envelope{tuiExactEnvelope(eventstream.Envelope{
+				Kind: eventstream.KindSessionUpdate, SessionID: "session-old", TurnID: selectedTaskID + ":1",
+				Scope: eventstream.ScopeSubagent, ScopeID: selectedTaskID,
+				ParentTool: &eventstream.ParentToolRelation{ToolCallID: selectedCallID, ToolName: "Spawn"},
+				Update: eventstream.ContentChunk{
+					SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "history-answer",
+					Content: eventstream.TextContent{Type: "text", Text: "restored complete child history"},
+				},
+			}, "history-cursor-1", 1), tuiExactEnvelope(eventstream.Envelope{
+				Kind: eventstream.KindLifecycle, SessionID: "session-old", TurnID: selectedTaskID + ":1",
+				Scope: eventstream.ScopeSubagent, ScopeID: selectedTaskID, Final: true,
+				ParentTool: &eventstream.ParentToolRelation{ToolCallID: selectedCallID, ToolName: "Spawn"},
+				Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
+			}, "history-cursor-2", 2)},
+		}},
+	}
 	resolved := receiveTUITaskStreamMessage[taskStreamResolvedMsg](t, messages)
 	if next, _ := model.Update(resolved); next != nil {
 		model = next.(*Model)
@@ -395,7 +400,15 @@ func TestSubagentRosterColdResumeLoadsOnlySelectedWorkspace(t *testing.T) {
 	}
 	select {
 	case request := <-requests:
-		t.Fatalf("selecting one workspace also subscribed Task %q", request.TaskID)
+		if request.TaskID != selectedTaskID || request.Cursor != "history-cursor-2" {
+			t.Fatalf("history continuation = %#v, want selected Task after history-cursor-2", request)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("selected history did not verify its exact high-water mark")
+	}
+	select {
+	case request := <-requests:
+		t.Fatalf("selecting one workspace also loaded Task %q after exact EOF", request.TaskID)
 	default:
 	}
 	historyBatch := receiveTUITaskStreamMessage[taskStreamHistoryBatchMsg](t, messages)
@@ -862,7 +875,7 @@ type subagentRosterTestTaskStreamService struct {
 	listErrors        []error
 	listCalls         int
 	eventRequests     chan protocoltaskstream.ReadRequest
-	eventBatch        protocoltaskstream.Batch
+	eventBatch        protocoltaskstream.ReadResult
 	eventErr          error
 	subscribeRequests chan protocoltaskstream.SubscribeRequest
 	subscription      protocoltaskstream.Subscription
@@ -877,13 +890,16 @@ func (s *subagentRosterTestTaskStreamService) List(context.Context, protocoltask
 	return s.list, nil
 }
 
-func (s *subagentRosterTestTaskStreamService) Events(_ context.Context, _ protocoltaskstream.Principal, request protocoltaskstream.ReadRequest) (protocoltaskstream.Batch, error) {
+func (s *subagentRosterTestTaskStreamService) Events(_ context.Context, _ protocoltaskstream.Principal, request protocoltaskstream.ReadRequest) (protocoltaskstream.ReadResult, error) {
 	if s.eventRequests != nil {
 		s.eventRequests <- request
 	}
 	batch := s.eventBatch
 	if batch.ActivityID == "" {
 		batch.ActivityID = request.ExpectedActivityID
+	}
+	if request.Cursor != "" {
+		batch.Deliveries = nil
 	}
 	return batch, s.eventErr
 }

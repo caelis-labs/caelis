@@ -257,7 +257,6 @@ func toolLifecycleHeaderEvent(start SubagentEvent, final SubagentEvent, hasFinal
 		if targetKind := strings.TrimSpace(final.TaskTargetKind); targetKind != "" {
 			header.TaskTargetKind = targetKind
 		}
-		header.OutputGapBefore = header.OutputGapBefore || final.OutputGapBefore
 		if args := strings.TrimSpace(final.Args); args != "" {
 			if isTerminalPanelToolEvent(header) {
 				header.Args = normalizeACPToolInline(args)

@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
 // waitCommandTask observes the sandbox lifecycle without retaining the Task
@@ -242,20 +241,16 @@ func (tm *taskRuntime) durableCommandSnapshot(
 func (tm *taskRuntime) observeCommandWriteOutput(
 	ctx context.Context,
 	task *commandTask,
-	baseline stream.Cursor,
+	baseline int64,
 	wait time.Duration,
 ) error {
 	if tm == nil || task == nil || wait <= 0 {
 		return nil
 	}
-	service := newStreamService(tm)
 	waitCtx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 
-	snapshot, err := service.await(waitCtx, stream.ReadRequest{
-		Ref:    commandTaskStreamRef(task),
-		Cursor: baseline,
-	})
+	cursor, running, err := tm.awaitCommandOutputAdvance(waitCtx, task, baseline)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -265,17 +260,12 @@ func (tm *taskRuntime) observeCommandWriteOutput(
 		}
 		return err
 	}
-	if !snapshot.Running || taskWriteOutputQuietPeriod <= 0 {
+	if !running || taskWriteOutputQuietPeriod <= 0 {
 		return nil
 	}
-
-	cursor := stream.CloneCursor(snapshot.Cursor)
 	for {
 		quietCtx, quietCancel := context.WithTimeout(waitCtx, taskWriteOutputQuietPeriod)
-		next, awaitErr := service.await(quietCtx, stream.ReadRequest{
-			Ref:    commandTaskStreamRef(task),
-			Cursor: cursor,
-		})
+		next, nextRunning, awaitErr := tm.awaitCommandOutputAdvance(quietCtx, task, cursor)
 		quietCancel()
 		if awaitErr != nil {
 			if ctx.Err() != nil {
@@ -286,11 +276,59 @@ func (tm *taskRuntime) observeCommandWriteOutput(
 			}
 			return awaitErr
 		}
-		if !next.Running {
+		if !nextRunning {
 			return nil
 		}
-		cursor = stream.CloneCursor(next.Cursor)
+		cursor = next
 	}
+}
+
+func (tm *taskRuntime) awaitCommandOutputAdvance(ctx context.Context, task *commandTask, cursor int64) (int64, bool, error) {
+	if task == nil || task.session == nil {
+		return cursor, false, fmt.Errorf("command Task has no observable sandbox Session")
+	}
+	task.mu.Lock()
+	if task.outputCursorLocked() > cursor || !task.running {
+		next, running := task.outputCursorLocked(), task.running
+		task.mu.Unlock()
+		return next, running, nil
+	}
+	wake, _ := task.commandOutputChangeWaiterLocked(cursor)
+	backend := task.outputState.backend.outputCursor()
+	callback := task.outputState.callback
+	commandSession := task.session
+	task.mu.Unlock()
+
+	type backendResult struct {
+		observation sandbox.OutputObservation
+		err         error
+	}
+	backendCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan backendResult, 1)
+	go func() {
+		observation, err := commandSession.AwaitOutput(backendCtx, backend)
+		results <- backendResult{observation: observation, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return cursor, true, ctx.Err()
+	case <-wake:
+	case result := <-results:
+		if result.err != nil {
+			return cursor, true, result.err
+		}
+		if !callback {
+			if err := tm.syncCommandOutput(ctx, task, result.observation.Status); err != nil {
+				return cursor, result.observation.Status.Running, err
+			}
+		}
+	}
+	task.mu.Lock()
+	next, running := task.outputCursorLocked(), task.running
+	task.mu.Unlock()
+	return next, running, nil
 }
 
 func (tm *taskRuntime) snapshotObservedCommand(ctx context.Context, task *commandTask) (taskapi.Snapshot, error) {
@@ -301,15 +339,21 @@ func (tm *taskRuntime) snapshotObservedCommand(ctx context.Context, task *comman
 	return tm.reconcileCommandStatus(ctx, task, status)
 }
 
-func (tm *taskRuntime) syncCommandStream(ctx context.Context, task *commandTask) (stream.Cursor, bool, error) {
-	cursor, _ := commandTaskStreamCursor(task)
-	if _, err := newStreamService(tm).Read(ctx, stream.ReadRequest{
-		Ref:    commandTaskStreamRef(task),
-		Cursor: cursor,
-	}); err != nil {
-		return stream.Cursor{}, false, err
+func (tm *taskRuntime) syncCommandStream(ctx context.Context, task *commandTask) (int64, bool, error) {
+	if task == nil || task.session == nil {
+		return 0, false, fmt.Errorf("command Task has no observable sandbox Session")
 	}
-	cursor, unread := commandTaskStreamCursor(task)
+	status, err := task.session.Status(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	if err := tm.syncCommandOutput(ctx, task, status); err != nil {
+		return 0, false, err
+	}
+	task.mu.Lock()
+	cursor := task.outputCursorLocked()
+	unread := task.outputState.frontier.model < cursor
+	task.mu.Unlock()
 	return cursor, unread, nil
 }
 

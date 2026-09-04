@@ -157,6 +157,7 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 	runID := g.allocateID("participant-run")
 	turnID := newParticipantTurnID()
 	handle := newTurnHandle(turnHandleConfig{
+		ctx:                     runCtx,
 		handleID:                handleID,
 		runID:                   runID,
 		turnID:                  turnID,
@@ -173,6 +174,7 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 			return cancelFn()
 		},
 		approvals:       approvals,
+		observer:        req.Observer,
 		persistApproval: g.approvalPersister(session.SessionRef, turnID),
 		settleApproval:  g.approvalSettler(session.SessionRef, turnID),
 	})

@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 )
 
@@ -29,17 +29,6 @@ const (
 	// is aligned with the semantic subagent recovery budget instead of evicting
 	// a normal build log after only 64 KiB.
 	commandLiveOutputBufferCapBytes = 4 * 1024 * 1024
-	// Subagent observation deliberately keeps two bounded, process-local views:
-	// a short exact delta window for lossless resume and a larger ingest-merged
-	// semantic view for gap recovery. The semantic byte budget retains exact
-	// completed Final Messages after lower-priority context, while the latest
-	// Final is additionally protected by the Task result contract. The combined
-	// bounded allocation is about 5 MiB per active subagent, plus that latest
-	// Final. Neither view is durable or parent model context.
-	subagentStreamFrameCap       = 128
-	subagentExactStreamByteCap   = 1024 * 1024
-	subagentStreamByteCap        = 4 * 1024 * 1024
-	subagentOutputPreviewByteCap = 1600
 )
 
 type taskRuntime struct {
@@ -51,7 +40,6 @@ type taskRuntime struct {
 	mu         sync.RWMutex
 	tasks      map[string]*commandTask
 	subagents  map[string]*subagentTask
-	pending    map[string][]stream.Frame
 	order      map[string][]string
 	backends   map[sandbox.Backend]sandbox.Runtime
 	handles    map[string]map[string]struct{}
@@ -59,12 +47,7 @@ type taskRuntime struct {
 	// operationChanged broadcasts release of a session-scoped Task mutation
 	// claim. Command waits observe process lifecycle without a claim, then use
 	// this signal to serialize their short reconciliation phase.
-	operationChanged map[string]chan struct{}
-	// streamActivity is a TaskID-stable condition variable for subagent stream
-	// activity. Concrete subagentTask values may be removed and rehydrated after
-	// completion, so a cross-activity observer must never wait on one instance.
-	streamActivity map[string]*taskStreamActivitySignal
-
+	operationChanged   map[string]chan struct{}
 	completions        map[string]*subagentCompletion
 	completionApplying map[string]struct{}
 }
@@ -100,9 +83,10 @@ func (cursor *commandBackendCursor) advance(next commandBackendCursor) {
 	cursor.stderr = max(cursor.stderr, next.stderr)
 }
 
-// commandObservationFrontier is the model/presentation view of command output.
-// base is the first retained byte and model is the complete boundary already
-// exposed through a canonical Task observation.
+// commandObservationFrontier is the model-facing Task observation view of
+// bounded sandbox output. It is not a Surface delivery cursor. base is the
+// first retained byte and model is the complete boundary already exposed by a
+// canonical Task control result.
 type commandObservationFrontier struct {
 	base  int64
 	model int64
@@ -191,10 +175,9 @@ type commandTask struct {
 	result       map[string]any
 	metadata     map[string]any
 
-	streamFrames         []stream.Frame
-	streamEventBase      int64
-	streamTerminalFramed bool
-	streamChanged        chan struct{}
+	outputObserver output.Observer
+	outputTerminal bool
+	outputChanged  chan struct{}
 }
 
 type subagentTask struct {
@@ -213,11 +196,8 @@ type subagentTask struct {
 	revision     uint64
 	lease        taskapi.Lease
 
-	// streamMu preserves publication order across the pending-to-live handoff.
-	// It must be acquired before publishing the task in taskRuntime.subagents.
-	streamMu sync.Mutex
-	// activityApplyMu serializes process-local live frame application with the
-	// matching durable journal callback without covering Task-store I/O.
+	// activityApplyMu serializes producer completion with concurrent Task
+	// lifecycle updates without covering Task-store I/O.
 	activityApplyMu sync.Mutex
 	mu              sync.Mutex
 	state           taskapi.State
@@ -226,41 +206,23 @@ type subagentTask struct {
 	metadata        map[string]any
 	contextUsage    *taskapi.ContextUsageRecord
 
-	stdout           string
-	stderr           string
-	stdoutCursor     int64
-	stderrCursor     int64
-	turnSeq          int64
-	streamFrames     []stream.Frame
-	streamFrameSizes []int
-	// Stream cursors are absolute for the Task lifetime and do not reset when a
-	// new observed child activity starts.
-	streamEventBase    int64
-	streamOutputCursor int64
-	streamBytes        int
-	semanticRetention  subagentSemanticRetention
-	// assistantStream* tracks the producer's current ACP agent-message segment.
-	// A MessageID change starts a new message; semantic retention preserves each
-	// contiguous run in wire order.
-	assistantStreamTurnID    string
-	assistantStreamMessageID string
-	latestFinalText          string
-	latestFinalTurnSeq       int64
-	latestFinalOrder         int64
-	latestFinalAt            time.Time
-	latestFinalActivityID    string
+	stdout                string
+	stderr                string
+	stdoutCursor          int64
+	stderrCursor          int64
+	turnSeq               int64
+	latestFinalText       string
+	latestFinalTurnSeq    int64
+	latestFinalAt         time.Time
+	latestFinalActivityID string
 	// finalResponseCursor is the highest completed child Turn whose exact Final
 	// Response has already been exposed by Spawn or an explicit Task read/wait.
 	// It is an observation frontier, not a second output store; exact text stays
-	// owned by latestFinalText and semanticRetention.
-	finalResponseCursor   int64
-	streamTerminalFramed  bool
-	streamChanged         chan struct{}
-	completionReady       bool
-	activityID            string
-	activityGeneration    int64
-	activityCursor        uint64
-	activityDurableCursor uint64
+	// owned by latestFinalText and the durable Task result.
+	finalResponseCursor int64
+	completionReady     bool
+	activityID          string
+	activityGeneration  int64
 }
 
 func newTaskRuntime(
@@ -278,13 +240,11 @@ func newTaskRuntime(
 		activityChanged:    activityChanged,
 		tasks:              map[string]*commandTask{},
 		subagents:          map[string]*subagentTask{},
-		pending:            map[string][]stream.Frame{},
 		order:              map[string][]string{},
 		backends:           map[sandbox.Backend]sandbox.Runtime{},
 		handles:            map[string]map[string]struct{}{},
 		operations:         map[string]struct{}{},
 		operationChanged:   map[string]chan struct{}{},
-		streamActivity:     map[string]*taskStreamActivitySignal{},
 		completions:        map[string]*subagentCompletion{},
 		completionApplying: map[string]struct{}{},
 	}

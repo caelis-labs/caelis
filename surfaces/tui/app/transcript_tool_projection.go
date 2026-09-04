@@ -30,14 +30,6 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
 	toolOutput := toolDisplayPanelOutput(semanticName, acpprojector.FormatToolContent(content))
 	toolOutputCollection := input.ContentPresent
-	outputCursor, outputCursorKnown, outputStartCursor, outputStartCursorKnown := transcriptToolOutputRange(input.Meta)
-	if toolOutputCollection {
-		// Standard ACP content is a replaceable lifecycle snapshot, not an
-		// incremental terminal byte range, even when it includes a terminal
-		// reference that selects the shell presentation.
-		outputCursor, outputCursorKnown = 0, false
-		outputStartCursor, outputStartCursorKnown = 0, false
-	}
 	// Start input is standard ACP RawInput only. DisplayToolInput is a
 	// result-time recovery channel and is not authenticated on every external
 	// ACP ingress path.
@@ -50,33 +42,29 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		toolArgs = taskDisplayArgsWithHandle(toolArgs, toolTaskHandle)
 	}
 	return TranscriptEvent{
-		Kind:                       TranscriptEventTool,
-		Scope:                      input.Scope,
-		ScopeID:                    input.ScopeID,
-		Actor:                      input.Actor,
-		OccurredAt:                 input.OccurredAt,
-		Meta:                       transcript.CloneAnyMap(input.Meta),
-		ToolCallID:                 strings.TrimSpace(input.CallID),
-		ToolName:                   toolName,
-		ToolKind:                   strings.TrimSpace(input.ToolKind),
-		ToolTitle:                  strings.TrimSpace(input.ToolTitle),
-		ToolExplorationVerb:        explorationVerb,
-		ToolArgs:                   toolArgs,
-		ToolFullArgs:               toolFullArgs,
-		ToolOutput:                 toolOutput,
-		ToolStatus:                 status,
-		ToolStatusExplicit:         input.StatusExplicit,
-		ToolTerminal:               toolTerminal,
-		ToolOutputCollection:       toolOutputCollection,
-		ToolOutputCursor:           outputCursor,
-		ToolOutputCursorKnown:      outputCursorKnown,
-		ToolOutputStartCursor:      outputStartCursor,
-		ToolOutputStartCursorKnown: outputStartCursorKnown,
-		ToolTaskHandle:             toolTaskHandle,
-		ToolTaskAction:             display.ToolTaskAction(rawInput, nil, input.Meta),
-		ToolTaskInput:              display.ToolTaskInput(rawInput, nil, input.Meta),
-		ToolTaskTargetKind:         display.ToolTaskTargetKind(rawInput, nil, input.Meta),
-		ToolMessageTarget:          toolMessageTarget,
+		Kind:                 TranscriptEventTool,
+		Scope:                input.Scope,
+		ScopeID:              input.ScopeID,
+		Actor:                input.Actor,
+		OccurredAt:           input.OccurredAt,
+		Meta:                 transcript.CloneAnyMap(input.Meta),
+		ToolCallID:           strings.TrimSpace(input.CallID),
+		ToolName:             toolName,
+		ToolKind:             strings.TrimSpace(input.ToolKind),
+		ToolTitle:            strings.TrimSpace(input.ToolTitle),
+		ToolExplorationVerb:  explorationVerb,
+		ToolArgs:             toolArgs,
+		ToolFullArgs:         toolFullArgs,
+		ToolOutput:           toolOutput,
+		ToolStatus:           status,
+		ToolStatusExplicit:   input.StatusExplicit,
+		ToolTerminal:         toolTerminal,
+		ToolOutputCollection: toolOutputCollection,
+		ToolTaskHandle:       toolTaskHandle,
+		ToolTaskAction:       display.ToolTaskAction(rawInput, nil, input.Meta),
+		ToolTaskInput:        display.ToolTaskInput(rawInput, nil, input.Meta),
+		ToolTaskTargetKind:   display.ToolTaskTargetKind(rawInput, nil, input.Meta),
+		ToolMessageTarget:    toolMessageTarget,
 	}
 }
 
@@ -152,26 +140,11 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 			toolOutputSynthetic = strings.TrimSpace(toolOutput) != ""
 		}
 	}
-	// Task read/wait carries an exact observed delta for its target. RunCommand
-	// observations are normalized by Control to terminal_output and therefore
-	// use the ordinary terminal extension path above.
+	// Task read/wait is a canonical model observation, not a second Surface
+	// output channel. The owning command panel receives exact bytes only from
+	// TaskStream, with the terminal FinalResult used by Control on cache miss.
 	if semanticName == surfaceToolTask {
-		if delta, ok := transcriptToolObservationDelta(input.Meta); ok {
-			toolOutput = delta
-			toolOutputCollection = false
-			toolOutputHasTerminalData = true
-			toolOutputSynthetic = false
-		} else {
-			// A terminal anchor identifies the observed process, but does not
-			// make a compact Task payload an exact byte delta.
-			toolOutputHasTerminalData = false
-		}
-	}
-	toolOutputGapBefore := toolOutputHasTerminalData && transcript.MetaInt(input.Meta, "caelis", "runtime", "stream", "truncated_before") > 0
-	outputCursor, outputCursorKnown, outputStartCursor, outputStartCursorKnown := transcriptToolOutputRange(input.Meta)
-	if toolOutputCollection {
-		outputCursor, outputCursorKnown = 0, false
-		outputStartCursor, outputStartCursorKnown = 0, false
+		toolOutputHasTerminalData = false
 	}
 	if transcript.SuppressToolResultOutputWithHint(semanticName, input.ToolKind, explorationVerb, toolOutput, toolOutputSynthetic, toolErr) {
 		toolOutput = ""
@@ -212,7 +185,6 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		toolOutput = ""
 		toolOutputHasTerminalData = false
 		toolOutputSynthetic = false
-		toolOutputGapBefore = false
 	} else if semanticName == surfaceToolTask && strings.EqualFold(toolTaskAction, "write") {
 		toolOutput = taskWriteFailureDisplayOutput(rawOutput, input.Meta, toolOutput, toolTaskHandle, status, toolErr)
 	}
@@ -243,40 +215,35 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		toolOutputSynthetic = false
 	}
 	return TranscriptEvent{
-		Kind:                       TranscriptEventTool,
-		Scope:                      input.Scope,
-		ScopeID:                    input.ScopeID,
-		Actor:                      input.Actor,
-		OccurredAt:                 input.OccurredAt,
-		Meta:                       transcript.CloneAnyMap(input.Meta),
-		ToolCallID:                 strings.TrimSpace(input.CallID),
-		ToolName:                   toolName,
-		ToolKind:                   strings.TrimSpace(input.ToolKind),
-		ToolTitle:                  strings.TrimSpace(input.ToolTitle),
-		ToolExplorationVerb:        explorationVerb,
-		ToolArgs:                   toolArgs,
-		ToolFullArgs:               toolFullArgs,
-		ToolOutput:                 toolOutput,
-		ToolStream:                 transcript.ToolStream(status, toolErr),
-		ToolStatus:                 status,
-		ToolStatusExplicit:         input.StatusExplicit,
-		ToolError:                  toolErr,
-		ToolTerminal:               toolTerminal,
-		ToolOutputSynthetic:        toolOutputSynthetic,
-		ToolOutputCollection:       toolOutputCollection,
-		ToolOutputTerminal:         toolOutputHasTerminalData,
-		ToolOutputCursor:           outputCursor,
-		ToolOutputCursorKnown:      outputCursorKnown,
-		ToolOutputStartCursor:      outputStartCursor,
-		ToolOutputStartCursorKnown: outputStartCursorKnown,
-		ToolOutputGapBefore:        toolOutputGapBefore,
-		ToolTaskHandle:             toolTaskHandle,
-		ToolTaskAction:             toolTaskAction,
-		ToolTaskInput:              toolTaskInput,
-		ToolTaskTargetKind:         toolTaskTargetKind,
-		ToolTaskState:              toolTaskState,
-		ToolMessageTarget:          toolMessageTarget,
-		Final:                      transcript.ToolStatusFinal(status, toolErr),
+		Kind:                 TranscriptEventTool,
+		Scope:                input.Scope,
+		ScopeID:              input.ScopeID,
+		Actor:                input.Actor,
+		OccurredAt:           input.OccurredAt,
+		Meta:                 transcript.CloneAnyMap(input.Meta),
+		ToolCallID:           strings.TrimSpace(input.CallID),
+		ToolName:             toolName,
+		ToolKind:             strings.TrimSpace(input.ToolKind),
+		ToolTitle:            strings.TrimSpace(input.ToolTitle),
+		ToolExplorationVerb:  explorationVerb,
+		ToolArgs:             toolArgs,
+		ToolFullArgs:         toolFullArgs,
+		ToolOutput:           toolOutput,
+		ToolStream:           transcript.ToolStream(status, toolErr),
+		ToolStatus:           status,
+		ToolStatusExplicit:   input.StatusExplicit,
+		ToolError:            toolErr,
+		ToolTerminal:         toolTerminal,
+		ToolOutputSynthetic:  toolOutputSynthetic,
+		ToolOutputCollection: toolOutputCollection,
+		ToolOutputTerminal:   toolOutputHasTerminalData,
+		ToolTaskHandle:       toolTaskHandle,
+		ToolTaskAction:       toolTaskAction,
+		ToolTaskInput:        toolTaskInput,
+		ToolTaskTargetKind:   toolTaskTargetKind,
+		ToolTaskState:        toolTaskState,
+		ToolMessageTarget:    toolMessageTarget,
+		Final:                transcript.ToolStatusFinal(status, toolErr),
 	}, true
 }
 
@@ -312,23 +279,6 @@ func taskWriteFailureDisplayOutput(rawOutput map[string]any, meta map[string]any
 		lines[i] = strings.Join(strings.Fields(lines[i]), " ")
 	}
 	return strings.Join(lines, "\n")
-}
-
-func transcriptToolOutputRange(meta map[string]any) (end int64, endKnown bool, start int64, startKnown bool) {
-	streamMode := transcript.MetaString(meta, "caelis", "runtime", "stream", "mode")
-	if streamMode != "" {
-		end, endKnown = transcript.MetaInt64(meta, "caelis", "runtime", "stream", "output_cursor")
-	} else {
-		end, endKnown = transcript.MetaInt64(meta, "caelis", "runtime", "task", "output_cursor")
-	}
-	start, startKnown = transcript.MetaInt64(meta, "caelis", "runtime", "task", "output_start_cursor")
-	if end < 0 {
-		end, endKnown = 0, false
-	}
-	if start < 0 || (endKnown && start > end) {
-		start, startKnown = 0, false
-	}
-	return end, endKnown, start, startKnown
 }
 
 func transcriptToolObservationDelta(meta map[string]any) (string, bool) {

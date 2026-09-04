@@ -1,6 +1,8 @@
 package kernel
 
 import (
+	"context"
+
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -8,56 +10,54 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 )
 
-func (g *Gateway) forwardHandleSourceEvents(activeSession session.Session, handle *turnHandle, source acpbridge.EventHandle) {
-	g.forwardSourceEvents(activeSession, handle, acpbridge.SourceStreamFrom(source))
+// observeSourceEvent is the synchronous Control boundary between an SDK
+// producer and the Session spool. It projects one raw source value and retains
+// no replayable payload state.
+func (g *Gateway) observeSourceEvent(_ context.Context, activeSession session.Session, handle *turnHandle, event agent.SourceEvent) error {
+	if handle == nil {
+		return nil
+	}
+	if event.Err == nil {
+		return g.observeSourceValue(activeSession, handle, event)
+	}
+	handle.publishError(event.Err)
+	return nil
 }
 
-func (g *Gateway) forwardSourceEvents(activeSession session.Session, handle *turnHandle, source acpbridge.SourceStream) {
-	for sourceEvent, seqErr := range source.Events {
-		if seqErr != nil {
-			if gap, ok := agent.AsEventStreamGap(seqErr); ok {
-				handle.publishACP(acpbridge.RuntimeObservationGapEnvelope(gap.Dropped), "runtime_observation")
-				continue
-			}
-			handle.publishError(seqErr)
-			return
-		}
-		if sourceEvent.ACP != nil {
-			// Native live content/state is the primary projection for a paired
-			// source event. Publish it before the canonical accounting sibling.
-			handle.publishACP(*sourceEvent.ACP, "acp_passthrough")
-		}
-		if sourceEvent.Canonical != nil {
-			project := acpprojector.ProjectSessionEventEnvelope
-			switch {
-			case sourceEvent.ACP != nil && eventstream.UpdateType(sourceEvent.ACP.Update) == eventstream.UpdateUsage:
-				project = nil
-			case sourceEvent.ACP != nil:
-				// The paired native envelope owns live content and state. Usage is
-				// still canonical accounting and must not disappear with the
-				// duplicate content projection.
-				project = projectSessionEventUsageEnvelope
-			case sourceEvent.CanonicalContentAlreadyPublished != 0:
-				published := sourceEvent.CanonicalContentAlreadyPublished
-				project = func(base eventstream.Envelope, event *session.Event) []eventstream.Envelope {
-					return acpprojector.ProjectSessionEventLiveSupplementEnvelope(base, event, published)
-				}
-			}
-			var projected []eventstream.Envelope
-			if project != nil {
-				projected = projectSessionACPEventWith(
-					handle.sessionRef,
-					sourceEvent.Canonical,
-					handle.handleID,
-					handle.runID,
-					handle.turnID,
-					project,
-				)
-			}
-			handle.publishEnvelopes(projected, "")
-			g.noteSessionCursor(activeSession.SessionID, sourceEvent.Canonical.ID)
+func (g *Gateway) observeSourceValue(activeSession session.Session, handle *turnHandle, event agent.SourceEvent) error {
+	sourceEvent := acpbridge.SourceEventFromAgent(event)
+	if sourceEvent.ACP != nil {
+		// Native live content/state owns a paired source event and is published
+		// before its canonical accounting sibling.
+		handle.publishACP(*sourceEvent.ACP, "acp_passthrough")
+	}
+	if sourceEvent.Canonical == nil {
+		return nil
+	}
+	project := acpprojector.ProjectSessionEventEnvelope
+	switch {
+	case sourceEvent.ACP != nil && eventstream.UpdateType(sourceEvent.ACP.Update) == eventstream.UpdateUsage:
+		project = nil
+	case sourceEvent.ACP != nil:
+		project = projectSessionEventUsageEnvelope
+	case sourceEvent.CanonicalContentAlreadyPublished != 0:
+		published := sourceEvent.CanonicalContentAlreadyPublished
+		project = func(base eventstream.Envelope, event *session.Event) []eventstream.Envelope {
+			return acpprojector.ProjectSessionEventLiveSupplementEnvelope(base, event, published)
 		}
 	}
+	if project != nil {
+		handle.publishEnvelopes(projectSessionACPEventWith(
+			handle.sessionRef,
+			sourceEvent.Canonical,
+			handle.handleID,
+			handle.runID,
+			handle.turnID,
+			project,
+		), "")
+	}
+	g.noteSessionCursor(activeSession.SessionID, sourceEvent.Canonical.ID)
+	return nil
 }
 
 // projectSessionEventUsageEnvelope keeps canonical accounting when the paired

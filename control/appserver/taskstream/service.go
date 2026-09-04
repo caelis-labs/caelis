@@ -1,6 +1,5 @@
 // Package taskstream adapts Control-owned Task observation into the Envelope
-// contract consumed by presentation clients. It also derives presentation
-// owner repairs from terminal Task read and wait observations. It owns no Task
+// contract consumed by presentation clients. It owns no Task
 // lifecycle, storage, authorization, cursor, or transport wire semantics.
 package taskstream
 
@@ -11,7 +10,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	sdkstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -22,7 +20,8 @@ import (
 // control/taskstream. This adapter aliases those values instead of maintaining
 // a second ACP-shaped mirror.
 type Principal = controltaskstream.Principal
-type ResumeMode = controltaskstream.ResumeMode
+type SourceClass = controltaskstream.SourceClass
+type DeliveryKind = controltaskstream.DeliveryKind
 type ParentTool = controltaskstream.ParentTool
 type TaskDescriptor = controltaskstream.TaskDescriptor
 type ListRequest = controltaskstream.ListRequest
@@ -31,50 +30,45 @@ type ReadRequest = controltaskstream.ReadRequest
 type SubscribeRequest = controltaskstream.SubscribeRequest
 
 const (
-	ResumeModeExact        = controltaskstream.ResumeModeExact
-	ResumeModeCurrentState = controltaskstream.ResumeModeCurrentState
+	SourceExact       = controltaskstream.SourceExact
+	SourceReplacement = controltaskstream.SourceReplacement
+	SourceStatus      = controltaskstream.SourceStatus
+
+	DeliveryReplaceBegin = controltaskstream.DeliveryReplaceBegin
+	DeliveryReplacePage  = controltaskstream.DeliveryReplacePage
+	DeliveryReplaceEnd   = controltaskstream.DeliveryReplaceEnd
+	DeliveryAppendPage   = controltaskstream.DeliveryAppendPage
+	DeliveryStatus       = controltaskstream.DeliveryStatus
 )
 
-var ErrSlowConsumer = controltaskstream.ErrSlowConsumer
-
-// IsTransientGapEnvelope reports the recoverable Task-stream boundary emitted
-// when an earlier process generation or retained output prefix is unavailable.
-// Programmatic clients retain the typed fact and cursor; first-party human
-// surfaces may silently continue from the advertised current state.
-func IsTransientGapEnvelope(envelope eventstream.Envelope) bool {
-	if envelope.Kind != eventstream.KindNotice {
-		return false
-	}
-	taskStream, _ := envelope.Meta["task_stream"].(map[string]any)
-	transientGap, _ := taskStream["transient_gap"].(bool)
-	return transientGap
+type Delivery struct {
+	Kind       DeliveryKind           `json:"kind"`
+	Source     SourceClass            `json:"source"`
+	SnapshotID string                 `json:"snapshot_id,omitempty"`
+	Page       uint32                 `json:"page,omitempty"`
+	Events     []eventstream.Envelope `json:"events,omitempty"`
+	NextCursor string                 `json:"next_cursor,omitempty"`
+	ActivityID string                 `json:"activity_id,omitempty"`
 }
 
-type Batch struct {
-	Events         []eventstream.Envelope `json:"events,omitempty"`
-	ActivityID     string                 `json:"activity_id,omitempty"`
-	ResumeMode     ResumeMode             `json:"resume_mode"`
-	TransientGap   bool                   `json:"transient_gap,omitempty"`
-	BoundaryCursor string                 `json:"boundary_cursor,omitempty"`
+type ReadResult struct {
+	Deliveries []Delivery `json:"deliveries,omitempty"`
+	ActivityID string     `json:"activity_id,omitempty"`
 }
 
 type Subscription interface {
-	Events() <-chan eventstream.Envelope
+	Deliveries() <-chan Delivery
 	Close() error
 	Err() error
-	LastCursor() string
 }
 
 type SubscribeResult struct {
-	Subscription   Subscription `json:"-"`
-	ResumeMode     ResumeMode   `json:"resume_mode"`
-	TransientGap   bool         `json:"transient_gap,omitempty"`
-	BoundaryCursor string       `json:"boundary_cursor,omitempty"`
+	Subscription Subscription `json:"-"`
 }
 
 type Service interface {
 	List(context.Context, Principal, ListRequest) (ListResult, error)
-	Events(context.Context, Principal, ReadRequest) (Batch, error)
+	Events(context.Context, Principal, ReadRequest) (ReadResult, error)
 	Subscribe(context.Context, Principal, SubscribeRequest) (SubscribeResult, error)
 }
 
@@ -97,20 +91,16 @@ func (s *service) List(ctx context.Context, principal Principal, req ListRequest
 	return s.control.List(ctx, principal, req)
 }
 
-func (s *service) Events(ctx context.Context, principal Principal, req ReadRequest) (Batch, error) {
+func (s *service) Events(ctx context.Context, principal Principal, req ReadRequest) (ReadResult, error) {
 	result, err := s.control.Events(ctx, principal, req)
 	if err != nil {
-		return Batch{}, err
+		return ReadResult{}, err
 	}
-	events := make([]eventstream.Envelope, 0, len(result.Records))
-	for _, record := range result.Records {
-		events = append(events, projectRecord(record)...)
+	deliveries := make([]Delivery, 0, len(result.Deliveries))
+	for _, delivery := range result.Deliveries {
+		deliveries = append(deliveries, projectDelivery(delivery))
 	}
-	return Batch{
-		Events: events, ActivityID: result.ActivityID,
-		ResumeMode: result.ResumeMode, TransientGap: result.TransientGap,
-		BoundaryCursor: result.BoundaryCursor,
-	}, nil
+	return ReadResult{Deliveries: deliveries, ActivityID: result.ActivityID}, nil
 }
 
 func (s *service) Subscribe(ctx context.Context, principal Principal, req SubscribeRequest) (SubscribeResult, error) {
@@ -122,26 +112,21 @@ func (s *service) Subscribe(ctx context.Context, principal Principal, req Subscr
 		return SubscribeResult{}, errorcode.New(errorcode.Unavailable, "taskstream: control subscription is unavailable")
 	}
 	sub := newSubscription(ctx, result.Subscription)
-	return SubscribeResult{
-		Subscription: sub, ResumeMode: result.ResumeMode, TransientGap: result.TransientGap,
-		BoundaryCursor: result.BoundaryCursor,
-	}, nil
+	return SubscribeResult{Subscription: sub}, nil
 }
 
 type subscription struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	inner  controltaskstream.Subscription
-	out    chan eventstream.Envelope
+	out    chan Delivery
 
-	mu         sync.Mutex
-	lastCursor string
-	closeOnce  sync.Once
+	closeOnce sync.Once
 }
 
 func newSubscription(parent context.Context, inner controltaskstream.Subscription) *subscription {
 	ctx, cancel := context.WithCancel(parent)
-	sub := &subscription{ctx: ctx, cancel: cancel, inner: inner, out: make(chan eventstream.Envelope)}
+	sub := &subscription{ctx: ctx, cancel: cancel, inner: inner, out: make(chan Delivery)}
 	go sub.forward()
 	return sub
 }
@@ -153,25 +138,21 @@ func (s *subscription) forward() {
 		select {
 		case <-s.ctx.Done():
 			return
-		case record, open := <-s.inner.Records():
+		case delivery, open := <-s.inner.Deliveries():
 			if !open {
 				return
 			}
-			for _, envelope := range projectRecord(record) {
-				select {
-				case <-s.ctx.Done():
-					return
-				case s.out <- envelope:
-					s.mu.Lock()
-					s.lastCursor = envelope.Cursor
-					s.mu.Unlock()
-				}
+			projected := projectDelivery(delivery)
+			select {
+			case <-s.ctx.Done():
+				return
+			case s.out <- projected:
 			}
 		}
 	}
 }
 
-func (s *subscription) Events() <-chan eventstream.Envelope { return s.out }
+func (s *subscription) Deliveries() <-chan Delivery { return s.out }
 
 func (s *subscription) Close() error {
 	var err error
@@ -184,29 +165,28 @@ func (s *subscription) Close() error {
 
 func (s *subscription) Err() error { return s.inner.Err() }
 
-func (s *subscription) LastCursor() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.lastCursor != "" {
-		return s.lastCursor
+func projectDelivery(delivery controltaskstream.Delivery) Delivery {
+	out := Delivery{
+		Kind: delivery.Kind, Source: delivery.Source, SnapshotID: delivery.SnapshotID,
+		Page: delivery.Page, NextCursor: delivery.NextCursor, ActivityID: delivery.ActivityID,
 	}
-	return s.inner.LastCursor()
+	for _, record := range delivery.Records {
+		out.Events = append(out.Events, projectRecord(record)...)
+	}
+	if delivery.Source == controltaskstream.SourceReplacement {
+		for index := range out.Events {
+			out.Events[index].Cursor = ""
+			out.Events[index].Position = nil
+		}
+	}
+	return out
 }
 
 func projectRecord(record controltaskstream.Record) []eventstream.Envelope {
-	if record.Gap != nil {
-		return []eventstream.Envelope{stampEnvelope(record, gapEnvelope(record))}
-	}
 	if record.Frame == nil {
 		return nil
 	}
-	frame := sdkstream.CloneFrame(*record.Frame)
-	if frame.Ref.SessionID == "" {
-		frame.Ref.SessionID = record.Task.SessionID
-	}
-	if frame.Ref.TaskID == "" {
-		frame.Ref.TaskID = record.Task.TaskID
-	}
+	frame := *record.Frame
 	request := taskFrameProjectionRequestFor(record.Task, frame)
 	projected := projectTaskStreamFrame(request, frame)
 	for index := range projected {
@@ -215,7 +195,7 @@ func projectRecord(record controltaskstream.Record) []eventstream.Envelope {
 	return projected
 }
 
-func taskFrameProjectionRequestFor(descriptor controltaskstream.TaskDescriptor, frame sdkstream.Frame) taskFrameProjectionRequest {
+func taskFrameProjectionRequestFor(descriptor controltaskstream.TaskDescriptor, frame controltaskstream.Frame) taskFrameProjectionRequest {
 	toolName := strings.TrimSpace(descriptor.ParentTool.ToolName)
 	if toolName == "" {
 		switch descriptor.Kind {
@@ -225,7 +205,7 @@ func taskFrameProjectionRequestFor(descriptor controltaskstream.TaskDescriptor, 
 			toolName = shell.RunCommandToolName
 		}
 	}
-	terminalID := firstString(frame.Ref.TerminalID, descriptor.CurrentTurnID)
+	terminalID := firstString(frame.TerminalID, descriptor.CurrentTurnID)
 	scope := eventstream.ScopeMain
 	if descriptor.Kind == task.KindSubagent {
 		scope = eventstream.ScopeSubagent
@@ -240,7 +220,7 @@ func taskFrameProjectionRequestFor(descriptor controltaskstream.TaskDescriptor, 
 	return taskFrameProjectionRequest{
 		TurnID: terminalID, SessionID: descriptor.SessionID,
 		CallID: descriptor.ParentTool.ToolCallID, ToolName: toolName, TaskHandle: descriptor.Handle,
-		Ref:               sdkstream.Ref{SessionID: descriptor.SessionID, TaskID: descriptor.TaskID, TerminalID: terminalID},
+		TaskID:            descriptor.TaskID,
 		DisplayTerminalID: displayTerminalID, Scope: scope, ParticipantID: descriptor.ParticipantID,
 	}
 }
@@ -267,25 +247,6 @@ func stampEnvelope(record controltaskstream.Record, envelope eventstream.Envelop
 		Generation: record.Generation, Sequence: record.Sequence,
 	}}
 	return envelope
-}
-
-func gapEnvelope(record controltaskstream.Record) eventstream.Envelope {
-	scope := eventstream.ScopeMain
-	scopeID := record.Task.SessionID
-	if record.Task.Kind == task.KindSubagent {
-		scope = eventstream.ScopeSubagent
-		scopeID = record.Task.TaskID
-	}
-	return eventstream.Envelope{
-		Kind: eventstream.KindNotice, SessionID: record.Task.SessionID,
-		TurnID: record.Task.CurrentTurnID, Scope: scope, ScopeID: scopeID,
-		Notice: "transient Task output before this boundary is no longer available",
-		Meta: map[string]any{
-			"task_stream": map[string]any{
-				"task_id": record.Task.TaskID, "state": record.Task.State, "transient_gap": true,
-			},
-		},
-	}
 }
 
 func firstString(values ...string) string {

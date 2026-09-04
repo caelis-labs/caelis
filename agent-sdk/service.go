@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -94,6 +94,7 @@ type RunRequest struct {
 	InputCompaction   *session.EventCompactionContext `json:"-"`
 	Request           ModelRequestOptions             `json:"request,omitempty"`
 	ApprovalRequester ApprovalRequester               `json:"-"`
+	SourceObserver    SourceEventObserver             `json:"-"`
 	Agent             Agent                           `json:"-"`
 	AgentSpec         AgentSpec                       `json:"-"`
 }
@@ -204,6 +205,7 @@ type PromptParticipantRequest struct {
 	Source            string              `json:"source,omitempty"`
 	Stream            bool                `json:"stream,omitempty"`
 	ApprovalRequester ApprovalRequester   `json:"-"`
+	SourceObserver    SourceEventObserver `json:"-"`
 }
 
 // HandoffControllerRequest switches the active controller for one session. The
@@ -235,8 +237,9 @@ type SessionControlPlane interface {
 	HandoffController(context.Context, HandoffControllerRequest) (session.Session, error)
 }
 
-// StreamProvider is one optional runtime capability for unified task output
-// reads and subscriptions.
-type StreamProvider interface {
-	Streams() stream.Service
+// TerminalProvider is one optional runtime capability for command fallback
+// reads and process control. Transient Task stream consumption belongs to
+// product Control.
+type TerminalProvider interface {
+	Terminals() terminal.Controller
 }

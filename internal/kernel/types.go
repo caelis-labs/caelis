@@ -27,6 +27,7 @@ type BeginTurnRequest struct {
 	Metadata       map[string]any
 	Request        agent.ModelRequestOptions
 	InputActor     session.ActorRef
+	Observer       TurnEventObserver
 }
 
 type TurnIntent = BeginTurnRequest
@@ -150,6 +151,7 @@ type PromptParticipantRequest struct {
 	DisplayTitle   string
 	ContentParts   []model.ContentPart
 	Source         string
+	Observer       TurnEventObserver
 }
 
 // ParticipantLifecycle controls whether one started participant remains
@@ -178,6 +180,7 @@ type StartParticipantRequest struct {
 	DisplayTitle   string
 	ContentParts   []model.ContentPart
 	Source         string
+	Observer       TurnEventObserver
 	Lifecycle      ParticipantLifecycle
 	DetachSource   string
 }
@@ -465,8 +468,23 @@ type TurnHandle interface {
 	TurnID() string
 	SessionRef() session.SessionRef
 	CreatedAt() time.Time
-	ACPEvents() <-chan eventstream.Envelope
 	Submit(context.Context, SubmitRequest) error
 	Cancel() agent.CancelResult
+	WaitCompletion(context.Context) error
 	Close() error
+}
+
+// TurnEventObserver accepts one fully projected Control envelope
+// synchronously. Replay, cursors, and buffering belong to the Control feed.
+type TurnEventObserver interface {
+	ObserveTurnEvent(context.Context, eventstream.Envelope) error
+}
+
+type TurnEventObserverFunc func(context.Context, eventstream.Envelope) error
+
+func (f TurnEventObserverFunc) ObserveTurnEvent(ctx context.Context, envelope eventstream.Envelope) error {
+	if f == nil {
+		return nil
+	}
+	return f(ctx, envelope)
 }

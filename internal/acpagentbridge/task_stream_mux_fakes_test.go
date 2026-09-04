@@ -2,6 +2,7 @@ package acpagentbridge
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -161,13 +162,13 @@ func (s *acpMuxRetryService) List(context.Context, taskstream.Principal, taskstr
 	return taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{s.descriptor}}, nil
 }
 
-func (*acpMuxRetryService) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.Batch, error) {
-	return taskstream.Batch{}, nil
+func (*acpMuxRetryService) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.ReadResult, error) {
+	return taskstream.ReadResult{}, nil
 }
 
 func (s *acpMuxRetryService) Subscribe(_ context.Context, _ taskstream.Principal, request taskstream.SubscribeRequest) (taskstream.SubscribeResult, error) {
 	s.requests <- request
-	return taskstream.SubscribeResult{Subscription: s.sub, ResumeMode: taskstream.ResumeModeExact}, nil
+	return taskstream.SubscribeResult{Subscription: s.sub}, nil
 }
 
 func newACPMuxReconnectService(steps []acpMuxSubscribeStep) *acpMuxReconnectService {
@@ -192,8 +193,8 @@ func (s *acpMuxReconnectService) List(context.Context, taskstream.Principal, tas
 	}}}, nil
 }
 
-func (*acpMuxReconnectService) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.Batch, error) {
-	return taskstream.Batch{}, nil
+func (*acpMuxReconnectService) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.ReadResult, error) {
+	return taskstream.ReadResult{}, nil
 }
 
 func (s *acpMuxReconnectService) Subscribe(ctx context.Context, _ taskstream.Principal, request taskstream.SubscribeRequest) (taskstream.SubscribeResult, error) {
@@ -225,13 +226,13 @@ func (s *acpMuxReconnectService) Subscribe(ctx context.Context, _ taskstream.Pri
 	if step.closeOnCancel {
 		go func() {
 			<-ctx.Done()
-			step.sub.finish(ctx.Err(), "")
+			step.sub.finish(ctx.Err())
 			if step.cancelled != nil {
 				step.cancelled <- struct{}{}
 			}
 		}()
 	}
-	return taskstream.SubscribeResult{Subscription: step.sub, ResumeMode: taskstream.ResumeModeExact}, nil
+	return taskstream.SubscribeResult{Subscription: step.sub}, nil
 }
 
 func (s *acpMuxReconnectService) listCallCount() int {
@@ -250,8 +251,8 @@ func (s *acpMuxTestService) List(context.Context, taskstream.Principal, taskstre
 	return s.list, s.listErr
 }
 
-func (s *acpMuxTestService) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.Batch, error) {
-	return taskstream.Batch{}, nil
+func (s *acpMuxTestService) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.ReadResult, error) {
+	return taskstream.ReadResult{}, nil
 }
 
 func (s *acpMuxTestService) Subscribe(_ context.Context, _ taskstream.Principal, request taskstream.SubscribeRequest) (taskstream.SubscribeResult, error) {
@@ -274,7 +275,7 @@ func (s *acpMuxTestService) Subscribe(_ context.Context, _ taskstream.Principal,
 	if err != nil {
 		return taskstream.SubscribeResult{}, err
 	}
-	return taskstream.SubscribeResult{Subscription: sub, ResumeMode: taskstream.ResumeModeExact}, nil
+	return taskstream.SubscribeResult{Subscription: sub}, nil
 }
 
 func (s *acpMuxTestService) setSubscriptionResult(err error, sub *acpMuxTestSubscription) {
@@ -292,11 +293,12 @@ func (s *acpMuxTestService) subscribeCallCount() int {
 
 type acpMuxTestSubscription struct {
 	events     chan eventstream.Envelope
+	deliveries chan taskstream.Delivery
+	startOnce  sync.Once
 	once       sync.Once
 	mu         sync.Mutex
 	done       bool
 	err        error
-	lastCursor string
 }
 
 type acpMuxControlService struct {
@@ -309,63 +311,118 @@ func (s *acpMuxControlService) List(context.Context, controltaskstream.Principal
 	return s.list, nil
 }
 
-func (*acpMuxControlService) Events(context.Context, controltaskstream.Principal, controltaskstream.ReadRequest) (controltaskstream.Batch, error) {
-	return controltaskstream.Batch{}, nil
+func (*acpMuxControlService) Events(context.Context, controltaskstream.Principal, controltaskstream.ReadRequest) (controltaskstream.ReadResult, error) {
+	return controltaskstream.ReadResult{}, nil
 }
 
 func (s *acpMuxControlService) Subscribe(_ context.Context, _ controltaskstream.Principal, request controltaskstream.SubscribeRequest) (controltaskstream.SubscribeResult, error) {
 	s.requests <- request
-	return controltaskstream.SubscribeResult{Subscription: s.sub, ResumeMode: controltaskstream.ResumeModeExact}, nil
+	return controltaskstream.SubscribeResult{Subscription: s.sub}, nil
 }
 
 type acpMuxControlSubscription struct {
-	records chan controltaskstream.Record
-	once    sync.Once
+	records    chan controltaskstream.Record
+	deliveries chan controltaskstream.Delivery
+	startOnce  sync.Once
+	once       sync.Once
 }
 
-func (s *acpMuxControlSubscription) Records() <-chan controltaskstream.Record { return s.records }
-func (*acpMuxControlSubscription) Err() error                                 { return nil }
-func (*acpMuxControlSubscription) LastCursor() string                         { return "" }
+func (s *acpMuxControlSubscription) Deliveries() <-chan controltaskstream.Delivery {
+	s.startOnce.Do(func() {
+		s.deliveries = make(chan controltaskstream.Delivery)
+		go func() {
+			defer close(s.deliveries)
+			for record := range s.records {
+				s.deliveries <- controltaskstream.Delivery{
+					Kind: controltaskstream.DeliveryAppendPage, Source: controltaskstream.SourceExact,
+					Records: []controltaskstream.Record{record}, NextCursor: record.Cursor,
+				}
+			}
+		}()
+	})
+	return s.deliveries
+}
+func (*acpMuxControlSubscription) Err() error { return nil }
 func (s *acpMuxControlSubscription) Close() error {
 	s.once.Do(func() { close(s.records) })
 	return nil
 }
 
-func (s *acpMuxTestSubscription) Events() <-chan eventstream.Envelope { return s.events }
+func (s *acpMuxTestSubscription) Deliveries() <-chan taskstream.Delivery {
+	s.mu.Lock()
+	if s.deliveries != nil {
+		deliveries := s.deliveries
+		s.mu.Unlock()
+		return deliveries
+	}
+	s.mu.Unlock()
+	s.startOnce.Do(func() {
+		deliveries := make(chan taskstream.Delivery)
+		s.mu.Lock()
+		s.deliveries = deliveries
+		events := s.events
+		s.mu.Unlock()
+		go func() {
+			defer close(deliveries)
+			sequence := uint64(0)
+			for envelope := range events {
+				sequence++
+				envelope = acpMuxExactEnvelope(envelope, sequence)
+				cursor := envelope.Cursor
+				deliveries <- taskstream.Delivery{
+					Kind: taskstream.DeliveryAppendPage, Source: taskstream.SourceExact,
+					Events: []eventstream.Envelope{envelope}, NextCursor: cursor,
+				}
+			}
+		}()
+	})
+	s.mu.Lock()
+	deliveries := s.deliveries
+	s.mu.Unlock()
+	return deliveries
+}
+
+func acpMuxExactEnvelope(envelope eventstream.Envelope, sequence uint64) eventstream.Envelope {
+	if envelope.Cursor == "" {
+		envelope.Cursor = fmt.Sprintf("acp-mux-cursor-%d", sequence)
+	}
+	if envelope.Position == nil {
+		envelope.Position = &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
+			Generation: "acp-mux-test", Sequence: sequence,
+		}}
+	}
+	if envelope.Delivery == nil {
+		envelope.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+	}
+	return envelope
+}
 func (s *acpMuxTestSubscription) Err() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.err
 }
 
-func (s *acpMuxTestSubscription) LastCursor() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.lastCursor
-}
-
 func (s *acpMuxTestSubscription) Close() error {
-	s.finish(nil, "")
+	s.finish(nil)
 	return nil
 }
 
-func (s *acpMuxTestSubscription) finish(err error, cursor string) {
+func (s *acpMuxTestSubscription) finish(err error) {
 	s.once.Do(func() {
 		s.mu.Lock()
 		s.done = true
 		s.err = err
-		if cursor != "" {
-			s.lastCursor = cursor
-		}
+		events := s.events
+		deliveries := s.deliveries
+		rawDeliveries := events == nil && deliveries != nil
 		s.mu.Unlock()
-		close(s.events)
+		if events != nil {
+			close(events)
+		}
+		if rawDeliveries {
+			close(deliveries)
+		}
 	})
-}
-
-func (s *acpMuxTestSubscription) setLastCursor(cursor string) {
-	s.mu.Lock()
-	s.lastCursor = cursor
-	s.mu.Unlock()
 }
 
 func (s *acpMuxTestSubscription) closed() bool {

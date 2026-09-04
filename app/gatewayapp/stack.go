@@ -15,7 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	hostacpendpoint "github.com/caelis-labs/caelis/app/gatewayapp/internal/acpendpoint"
 	adapterhostimpl "github.com/caelis-labs/caelis/app/gatewayapp/internal/adapterhost"
@@ -31,6 +31,8 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/control/streamspool"
+	streamspoolfile "github.com/caelis-labs/caelis/control/streamspool/file"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/hostownership"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
@@ -208,9 +210,9 @@ func (s *runtimeComposition) KernelControlPlaneState() KernelControlPlaneReader 
 	return nil
 }
 
-// KernelStreams returns the current gateway stream provider without exposing
-// gateway control or session operations.
-func (s *runtimeComposition) KernelStreams() kernelimpl.StreamProvider {
+// KernelTerminals returns the current gateway terminal provider without
+// exposing gateway control or Session operations.
+func (s *runtimeComposition) KernelTerminals() kernelimpl.TerminalProvider {
 	if gw := s.currentGateway(); gw != nil {
 		return gw
 	}
@@ -279,7 +281,7 @@ func (s *Stack) TaskStreams() acptaskstream.Service {
 // ControlTerminalStreams returns the Session-routed Runtime terminal stream
 // used by AppServer terminal services. Presentation surfaces must consume the
 // typed TerminalClient instead of this Runtime-facing controller.
-func (s *Stack) ControlTerminalStreams() stream.Controller {
+func (s *Stack) ControlTerminalStreams() terminal.Controller {
 	if s == nil {
 		return nil
 	}
@@ -455,10 +457,22 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
+	var controlSpool streamspool.Store
+	fileSpool, spoolErr := streamspoolfile.New(context.Background(), streamspoolfile.Config{
+		RootDir: controlStreamSpoolRoot(storeDir),
+	})
+	if spoolErr != nil {
+		runtimeDiagnostics.Warn("Control stream spool unavailable; using authoritative result replay", "error", spoolErr)
+	} else {
+		controlSpool = fileSpool
+	}
 	controlFeeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{
-		Reader: sessions, CursorCodec: cursorCodec,
+		Reader: sessions, Spool: controlSpool, CursorCodec: cursorCodec,
 	})
 	if err != nil {
+		if controlSpool != nil {
+			_ = controlSpool.Close()
+		}
 		return nil, err
 	}
 	codexAuth, err := codexauth.NewManager(codexauth.Options{
@@ -558,7 +572,9 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 				configMigration:         configStore.MigrationReport(),
 				fenceOwnerID:            fenceOwnerID,
 				taskStore:               taskStore,
+				streamSpool:             controlSpool,
 				controlFeeds:            controlFeeds,
+				controlFeedLifecycle:    controlFeeds,
 				approvalRecovery:        approvalRecovery,
 				codexAuth:               codexAuth,
 				grokAuth:                grokAuth,
@@ -846,6 +862,26 @@ func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 			errs = append(errs, err)
 		}
 		s.commandBackend.acpPreparations = nil
+	}
+	if s.composition.authorities.taskOutputLifecycle != nil {
+		if err := s.composition.authorities.taskOutputLifecycle.Close(context.Background()); err != nil {
+			errs = append(errs, err)
+		}
+		s.composition.authorities.taskOutputLifecycle = nil
+		s.composition.authorities.taskOutput = nil
+	}
+	if s.composition.authorities.controlFeedLifecycle != nil {
+		if err := s.composition.authorities.controlFeedLifecycle.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		s.composition.authorities.controlFeedLifecycle = nil
+		s.composition.authorities.controlFeeds = nil
+	}
+	if s.composition.authorities.streamSpool != nil {
+		if err := s.composition.authorities.streamSpool.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		s.composition.authorities.streamSpool = nil
 	}
 	if s.adapterHost != nil {
 		if err := s.adapterHost.Close(); err != nil {

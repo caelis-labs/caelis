@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"log/slog"
 	"strings"
 	"sync"
@@ -15,7 +14,7 @@ import (
 )
 
 var (
-	_ agent.StreamProvider          = (*FencedRuntime)(nil)
+	_ agent.TerminalProvider        = (*FencedRuntime)(nil)
 	_ agent.LiveRunAttacher         = (*FencedRuntime)(nil)
 	_ agent.ApprovalResolver        = (*FencedRuntime)(nil)
 	_ agent.ParticipantControlPlane = (*FencedRuntime)(nil)
@@ -438,66 +437,10 @@ func newFencedRunner(inner agent.Runner, guard *sessionFenceGuard, cancel contex
 		cancel()
 		inner.Cancel()
 	})
-	if source, ok := inner.(agent.SourceHandle); ok {
-		return &fencedSourceRunner{fencedRunner: runner, source: source}
-	}
 	return runner
 }
 
 func (r *fencedRunner) RunID() string { return r.inner.RunID() }
-
-func (r *fencedRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		completed := true
-		for event, err := range r.inner.Events() {
-			if errors.Is(err, session.ErrFenceConflict) {
-				r.guard.recordLoss(errSessionFenceOwnershipLost)
-				break
-			}
-			if !yield(event, err) {
-				completed = false
-				break
-			}
-		}
-		if !completed {
-			_ = r.inner.Close()
-			_ = r.finishAfterProducer()
-			return
-		}
-		if err := r.finishAfterProducer(); err != nil {
-			yield(nil, err)
-		}
-	}
-}
-
-type fencedSourceRunner struct {
-	*fencedRunner
-	source agent.SourceHandle
-}
-
-func (r *fencedSourceRunner) SourceEvents() iter.Seq2[agent.SourceEvent, error] {
-	return func(yield func(agent.SourceEvent, error) bool) {
-		completed := true
-		for event, err := range r.source.SourceEvents() {
-			if errors.Is(err, session.ErrFenceConflict) {
-				r.guard.recordLoss(errSessionFenceOwnershipLost)
-				break
-			}
-			if !yield(event, err) {
-				completed = false
-				break
-			}
-		}
-		if !completed {
-			_ = r.inner.Close()
-			_ = r.finishAfterProducer()
-			return
-		}
-		if err := r.finishAfterProducer(); err != nil {
-			yield(agent.SourceEvent{}, err)
-		}
-	}
-}
 
 func (r *fencedRunner) Submit(submission agent.Submission) error { return r.inner.Submit(submission) }
 
@@ -510,6 +453,20 @@ func (r *fencedRunner) SubmitContext(ctx context.Context, submission agent.Submi
 
 func (r *fencedRunner) Cancel() agent.CancelResult { return r.inner.Cancel() }
 
+func (r *fencedRunner) WaitCompletion(ctx context.Context) error {
+	waitErr := r.inner.WaitCompletion(ctx)
+	if errors.Is(waitErr, session.ErrFenceConflict) {
+		r.guard.recordLoss(errSessionFenceOwnershipLost)
+	}
+	// A return while the wait context is still live is the producer's terminal
+	// outcome, so quiescence is proven even when that outcome is an error.
+	if ctx == nil || ctx.Err() == nil {
+		return errors.Join(waitErr, r.finish(), r.guard.err())
+	}
+	finishErr := r.finishAfterProducer()
+	return errors.Join(waitErr, finishErr, r.guard.err())
+}
+
 func (r *fencedRunner) Close() error {
 	innerErr := r.inner.Close()
 	finishErr := r.finishAfterProducer()
@@ -517,18 +474,21 @@ func (r *fencedRunner) Close() error {
 }
 
 func (r *fencedRunner) finishAfterProducer() error {
-	waitErr := r.waitForProducer(context.Background())
-	if waitErr != nil {
-		// A waiter error does not prove producer quiescence. Retain the fence so
-		// an unobserved stale producer cannot commit after a new Turn starts.
+	completed, waitErr := r.waitForProducer(context.Background())
+	if !completed {
+		// This path is defensive: the background wait has no cancellation or
+		// deadline. Retain the fence unless producer quiescence was observed.
 		return errors.Join(waitErr, r.guard.err())
 	}
-	return r.finish()
+	// Runner completion errors describe the completed producer's outcome; they
+	// do not mean that the producer is still live. Once its completion waiter
+	// returns, release the fence while preserving that terminal error.
+	return errors.Join(waitErr, r.finish())
 }
 
-func (r *fencedRunner) waitForProducer(ctx context.Context) error {
+func (r *fencedRunner) waitForProducer(ctx context.Context) (bool, error) {
 	if r == nil {
-		return nil
+		return true, nil
 	}
 	r.quiesceOnce.Do(func() {
 		started := r.diagnostics.started()
@@ -546,9 +506,9 @@ func (r *fencedRunner) waitForProducer(ctx context.Context) error {
 	})
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return false, ctx.Err()
 	case <-r.quiesceDone:
-		return r.quiesceErr
+		return true, r.quiesceErr
 	}
 }
 

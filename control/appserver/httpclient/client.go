@@ -407,7 +407,7 @@ func (c *Client) Reconnect(ctx context.Context, request appserver.ReconnectReque
 		response.Body.Close()
 		return appserver.ReconnectResult{}, err
 	}
-	subscription := newRemoteSubscription(response, scanner, c.eventBuffer, strings.TrimSpace(request.Cursor))
+	subscription := newRemoteSubscription(response, scanner)
 	return appserver.ReconnectResult{State: state, Subscription: subscription}, nil
 }
 
@@ -729,33 +729,26 @@ type remoteSubscription struct {
 	response *http.Response
 	scanner  *bufio.Scanner
 
-	backfill     chan eventstream.Envelope
-	events       chan eventstream.Envelope
-	backfillDone chan struct{}
+	deliveries chan appserver.FeedDelivery
+	stop       chan struct{}
+	done       chan struct{}
 
 	closeOnce sync.Once
 	mu        sync.RWMutex
 	err       error
-	last      string
 	closed    bool
 }
 
-func newRemoteSubscription(response *http.Response, scanner *bufio.Scanner, capacity int, initialCursor string) *remoteSubscription {
+func newRemoteSubscription(response *http.Response, scanner *bufio.Scanner) *remoteSubscription {
 	subscription := &remoteSubscription{
-		response:     response,
-		scanner:      scanner,
-		backfill:     make(chan eventstream.Envelope, capacity),
-		events:       make(chan eventstream.Envelope, capacity),
-		backfillDone: make(chan struct{}),
-		last:         initialCursor,
+		response: response, scanner: scanner,
+		deliveries: make(chan appserver.FeedDelivery), stop: make(chan struct{}), done: make(chan struct{}),
 	}
 	go subscription.read()
 	return subscription
 }
 
-func (s *remoteSubscription) Backfill() <-chan eventstream.Envelope { return s.backfill }
-func (s *remoteSubscription) Events() <-chan eventstream.Envelope   { return s.events }
-func (s *remoteSubscription) BackfillDone() <-chan struct{}         { return s.backfillDone }
+func (s *remoteSubscription) Deliveries() <-chan appserver.FeedDelivery { return s.deliveries }
 
 func (s *remoteSubscription) Close() error {
 	if s == nil {
@@ -765,8 +758,10 @@ func (s *remoteSubscription) Close() error {
 		s.mu.Lock()
 		s.closed = true
 		s.mu.Unlock()
+		close(s.stop)
 		_ = s.response.Body.Close()
 	})
+	<-s.done
 	return nil
 }
 
@@ -779,25 +774,10 @@ func (s *remoteSubscription) Err() error {
 	return s.err
 }
 
-func (s *remoteSubscription) LastCursor() string {
-	if s == nil {
-		return ""
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.last
-}
-
 func (s *remoteSubscription) read() {
-	backfillOpen := true
-	defer func() {
-		if backfillOpen {
-			close(s.backfill)
-			close(s.backfillDone)
-		}
-		close(s.events)
-		_ = s.response.Body.Close()
-	}()
+	defer close(s.done)
+	defer close(s.deliveries)
+	defer s.response.Body.Close()
 	for {
 		frame, err := readRemoteSSEFrame(s.scanner)
 		if err != nil {
@@ -805,60 +785,41 @@ func (s *remoteSubscription) read() {
 				return
 			}
 			if errors.Is(err, io.EOF) {
-				if backfillOpen {
-					s.setError(errors.New("control http client: reconnect stream ended before the backfill marker"))
-				} else {
-					s.setError(&appserver.FeedGapError{
-						Cause:        io.ErrUnexpectedEOF,
-						RetryCursor:  s.LastCursor(),
-						Mode:         appserver.ResumeModeDurableFallback,
-						TransientGap: true,
-					})
-				}
+				s.setError(errorcode.New(errorcode.Unavailable, "control http client: Session feed ended without a done event"))
 			} else {
 				s.setError(err)
 			}
 			return
 		}
 		switch frame.event {
-		case wirev1.BackfillDoneEventName:
-			if !backfillOpen {
-				s.setError(errors.New("control http client: duplicate reconnect backfill marker"))
+		case wirev1.FeedDeliveryEventName:
+			var wire wirev1.FeedDelivery
+			if err := wirev1.Unmarshal(frame.data, &wire); err != nil {
+				s.setError(fmt.Errorf("control http client: decode Session delivery: %w", err))
 				return
 			}
-			backfillOpen = false
-			close(s.backfill)
-			close(s.backfillDone)
-		case wirev1.ResumeEventName:
-			var boundary wirev1.ResumeBoundary
-			if err := json.Unmarshal(frame.data, &boundary); err != nil {
-				s.setError(fmt.Errorf("control http client: decode reconnect gap: %w", err))
-				return
-			}
-			s.setError(&appserver.FeedGapError{
-				Cause:        errors.New("control http client: remote Session feed requires reconnect"),
-				RetryCursor:  boundary.BoundaryCursor,
-				Mode:         boundary.ResumeMode,
-				TransientGap: boundary.TransientGap,
-			})
-			return
-		case "":
-			envelope, err := wirev1.UnmarshalEnvelope(frame.data)
+			delivery, err := decodeFeedDelivery(wire)
 			if err != nil {
-				s.setError(fmt.Errorf("control http client: decode remote Envelope: %w", err))
+				s.setError(err)
 				return
 			}
-			if frame.id != "" && envelope.Cursor != frame.id {
-				s.setError(errors.New("control http client: SSE id does not match Envelope cursor"))
+			if frame.id != "" && delivery.NextCursor != frame.id {
+				s.setError(errors.New("control http client: SSE id does not match Session delivery cursor"))
 				return
 			}
-			target := s.events
-			if backfillOpen {
-				target = s.backfill
-			}
-			if !s.publish(target, envelope) {
+			if !s.publish(delivery) {
 				return
 			}
+		case wirev1.FeedDoneEventName:
+			return
+		case wirev1.FeedErrorEventName:
+			var wireErr wirev1.TaskStreamError
+			if err := json.Unmarshal(frame.data, &wireErr); err != nil {
+				s.setError(fmt.Errorf("control http client: decode Session feed error: %w", err))
+				return
+			}
+			s.setError(wirev1.DecodeTaskStreamError(wireErr))
+			return
 		default:
 			s.setError(fmt.Errorf("control http client: unsupported reconnect SSE event %q", frame.event))
 			return
@@ -866,27 +827,29 @@ func (s *remoteSubscription) read() {
 	}
 }
 
-func (s *remoteSubscription) publish(target chan<- eventstream.Envelope, envelope eventstream.Envelope) bool {
-	// Hold the cursor lock across the non-blocking send so a receiver that sees
-	// the event cannot observe a stale LastCursor. Failed delivery does not
-	// advance last, so reconnect cannot skip an undelivered event.
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *remoteSubscription) publish(delivery appserver.FeedDelivery) bool {
 	select {
-	case target <- envelope:
-		s.last = envelope.Cursor
+	case s.deliveries <- delivery:
 		return true
-	default:
-		if s.err == nil {
-			s.err = &appserver.FeedGapError{
-				Cause:        appserver.ErrSlowConsumer,
-				RetryCursor:  s.last,
-				Mode:         appserver.ResumeModeDurableFallback,
-				TransientGap: true,
-			}
-		}
+	case <-s.stop:
 		return false
 	}
+}
+
+func decodeFeedDelivery(wire wirev1.FeedDelivery) (appserver.FeedDelivery, error) {
+	delivery := appserver.FeedDelivery{
+		Kind: appserver.FeedDeliveryKind(wire.Kind), Source: appserver.FeedSourceClass(wire.Source),
+		SnapshotID: wire.SnapshotID, Page: wire.Page, NextCursor: wire.NextCursor,
+		Events: make([]eventstream.Envelope, 0, len(wire.Events)),
+	}
+	for _, raw := range wire.Events {
+		envelope, err := wirev1.UnmarshalEnvelope(raw)
+		if err != nil {
+			return appserver.FeedDelivery{}, fmt.Errorf("control http client: decode Session Envelope: %w", err)
+		}
+		delivery.Events = append(delivery.Events, envelope)
+	}
+	return delivery, nil
 }
 
 func (s *remoteSubscription) setError(err error) {

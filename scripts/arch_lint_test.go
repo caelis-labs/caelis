@@ -75,7 +75,7 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			name:       "internal kernel rejects implementation packages",
 			rel:        "internal/kernel/gateway.go",
 			importPath: modulePath + "/impl/stream/memory",
-			want:       "must not import impl/stream; use agent-sdk/task/stream",
+			want:       "must not import impl/stream; use agent-sdk/task/output",
 		},
 		{
 			name:       "deleted implementation path retains migration gate",

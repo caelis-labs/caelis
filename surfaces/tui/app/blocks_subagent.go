@@ -82,12 +82,8 @@ type SubagentEvent struct {
 	// OutputCollection marks the current output as one standard ACP content
 	// collection snapshot rather than an append-only terminal/narrative stream.
 	OutputCollection bool
-	OutputTerminal   bool
-	OutputGapBefore  bool
-	// OutputCursor is the cumulative byte position represented by terminal
-	// output or a durable compact observation in this panel.
-	OutputCursor      int64
-	OutputCursorKnown bool
+	// OutputTerminal marks append-only bytes delivered in FIFO order by Control.
+	OutputTerminal bool
 	// TaskHandle is presentation identity only. Runtime TaskID never enters a
 	// transcript panel.
 	TaskHandle     string
@@ -241,74 +237,6 @@ func joinSubagentNarrativeMessages(existing string, incoming string) string {
 	}
 }
 
-func mergeCommandStreamChunk(existing string, incoming string) string {
-	if incoming == "" {
-		return existing
-	}
-	if existing == "" {
-		return incoming
-	}
-	if overlap := commandLineOverlap(existing, incoming); overlap > 0 {
-		return existing + incoming[overlap:]
-	}
-	if overlap := commandCumulativePrefixOverlap(existing, incoming); overlap > 0 {
-		return existing + incoming[overlap:]
-	}
-	return existing + incoming
-}
-
-func mergeTerminalStreamChunk(existing string, incoming string) string {
-	if incoming == "" {
-		return existing
-	}
-	if existing == "" {
-		return incoming
-	}
-	if incoming == existing {
-		return existing
-	}
-	if strings.HasPrefix(incoming, existing) {
-		return incoming
-	}
-	if strings.HasPrefix(existing, incoming) {
-		return existing
-	}
-	if overlap := commandLineOverlap(existing, incoming); overlap > 0 {
-		return existing + incoming[overlap:]
-	}
-	if overlap := commandCumulativePrefixOverlap(existing, incoming); overlap > 0 {
-		return existing + incoming[overlap:]
-	}
-	return existing + incoming
-}
-
-func commandCumulativePrefixOverlap(existing string, incoming string) int {
-	common := commonPrefixBytes(existing, incoming)
-	if common == 0 || common >= len(incoming) {
-		return 0
-	}
-	prefix := incoming[:common]
-	if !strings.Contains(prefix, "\n") {
-		return 0
-	}
-	if !strings.HasSuffix(prefix, "\n") {
-		if idx := strings.LastIndex(prefix, "\n"); idx >= 0 {
-			return idx + 1
-		}
-		return 0
-	}
-	return common
-}
-
-func commonPrefixBytes(left string, right string) int {
-	max := min(len(left), len(right))
-	idx := 0
-	for idx < max && left[idx] == right[idx] {
-		idx++
-	}
-	return idx
-}
-
 func appendDeltaStreamChunk(existing string, incoming string) string {
 	if incoming == "" {
 		return existing
@@ -317,28 +245,6 @@ func appendDeltaStreamChunk(existing string, incoming string) string {
 		return incoming
 	}
 	return existing + incoming
-}
-
-func commandLineOverlap(existing string, incoming string) int {
-	maxOverlap := minInt(len(existing), len(incoming))
-	const maxSearch = 64 * 1024
-	if maxOverlap > maxSearch {
-		maxOverlap = maxSearch
-	}
-	start := len(existing) - maxOverlap
-	for i := start; i < len(existing); i++ {
-		if i > 0 && existing[i-1] != '\n' && existing[i-1] != '\r' {
-			continue
-		}
-		suffix := existing[i:]
-		if suffix == "" || (!strings.HasSuffix(suffix, "\n") && !strings.HasSuffix(suffix, "\r")) {
-			continue
-		}
-		if strings.HasPrefix(incoming, suffix) {
-			return len(suffix)
-		}
-	}
-	return 0
 }
 
 func narrativeEventActive(events []SubagentEvent, idx int, terminal bool) bool {

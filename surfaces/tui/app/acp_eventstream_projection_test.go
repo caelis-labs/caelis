@@ -531,7 +531,7 @@ func TestProjectACPEventToTranscriptEventsSuppressesRunningSnapshotTerminalOutpu
 	}
 }
 
-func TestProjectACPEventToTranscriptEventsUsesExactRunningCommandObservation(t *testing.T) {
+func TestProjectACPEventToTranscriptEventsUsesTerminalDeltaWithoutSurfaceCursor(t *testing.T) {
 	t.Parallel()
 
 	const prefix = "command prefix\n"
@@ -566,10 +566,8 @@ func TestProjectACPEventToTranscriptEventsUsesExactRunningCommandObservation(t *
 		t.Fatalf("events = %#v, want one transcript event", events)
 	}
 	event := events[0]
-	if event.ToolOutput != prefix || !event.ToolOutputTerminal ||
-		!event.ToolOutputStartCursorKnown || event.ToolOutputStartCursor != 0 ||
-		!event.ToolOutputCursorKnown || event.ToolOutputCursor != int64(len([]byte(prefix))) {
-		t.Fatalf("running command event = %#v, want exact prefix and absolute cursor", event)
+	if event.ToolOutput != prefix || !event.ToolOutputTerminal {
+		t.Fatalf("running command event = %#v, want exact FIFO delta without Surface cursor state", event)
 	}
 	if event.Final {
 		t.Fatal("Final = true, want running command observation to remain open")
@@ -631,7 +629,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysTerminalStreamFrameOutput(t *t
 	}
 }
 
-func TestProjectACPEventToTranscriptEventsRetainsUnavailableTerminalPrefixState(t *testing.T) {
+func TestProjectACPEventToTranscriptEventsIgnoresLegacyTruncationState(t *testing.T) {
 	t.Parallel()
 
 	status := eventstream.ToolStatusInProgress
@@ -655,9 +653,6 @@ func TestProjectACPEventToTranscriptEventsRetainsUnavailableTerminalPrefixState(
 	})
 	if len(events) != 1 || events[0].ToolOutput != "retained tail\n" {
 		t.Fatalf("events = %#v, want retained exact terminal bytes only", events)
-	}
-	if !events[0].ToolOutputGapBefore {
-		t.Fatal("ToolOutputGapBefore = false, want internal truncation state")
 	}
 }
 

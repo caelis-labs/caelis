@@ -5,20 +5,16 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
+	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 )
 
-const (
-	runtimeStreamTruncatedMetaKey   = "truncated"
-	runtimeStreamTruncatedBeforeKey = "truncated_before"
-	runtimeToolTargetHandleMetaKey  = "target_handle"
-)
+const runtimeToolTargetHandleMetaKey = "target_handle"
 
 // taskFrameProjectionRequest carries only the Control Task descriptor facts
 // required to project one observation frame for a presentation client.
@@ -28,9 +24,9 @@ type taskFrameProjectionRequest struct {
 	CallID    string
 	ToolName  string
 	// TaskHandle is the Session-scoped public Task identity used only for
-	// display metadata. Ref.TaskID remains the typed stream address.
+	// display metadata. TaskID remains the typed stream address.
 	TaskHandle        string
-	Ref               stream.Ref
+	TaskID            string
 	DisplayTerminalID string
 	Scope             eventstream.Scope
 	ParticipantID     string
@@ -39,7 +35,7 @@ type taskFrameProjectionRequest struct {
 // projectTaskStreamFrame projects one frame for the Task-owned stream. It never
 // manufactures a parent Spawn or Task update. Parent status and results remain
 // on the Session feed.
-func projectTaskStreamFrame(req taskFrameProjectionRequest, frame stream.Frame) []eventstream.Envelope {
+func projectTaskStreamFrame(req taskFrameProjectionRequest, frame controltaskstream.Frame) []eventstream.Envelope {
 	if !delegatedParentStream(req) {
 		return commandTaskStreamFrameEvents(req, frame)
 	}
@@ -66,10 +62,10 @@ func projectTaskStreamFrame(req taskFrameProjectionRequest, frame stream.Frame) 
 	return []eventstream.Envelope{{
 		Kind:       eventstream.KindLifecycle,
 		SessionID:  strings.TrimSpace(req.SessionID),
-		TurnID:     firstString(strings.TrimSpace(frame.Ref.TerminalID), strings.TrimSpace(req.TurnID)),
+		TurnID:     firstString(strings.TrimSpace(frame.TerminalID), strings.TrimSpace(req.TurnID)),
 		OccurredAt: occurredAt,
 		Scope:      eventstream.ScopeSubagent,
-		ScopeID:    firstString(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID)),
+		ScopeID:    strings.TrimSpace(req.TaskID),
 		ParentTool: streamParentToolRelation(req),
 		Delivery:   streamFrameDelivery(),
 		Lifecycle:  &eventstream.Lifecycle{State: state},
@@ -77,7 +73,7 @@ func projectTaskStreamFrame(req taskFrameProjectionRequest, frame stream.Frame) 
 	}}
 }
 
-func commandTaskStreamFrameEvents(req taskFrameProjectionRequest, frame stream.Frame) []eventstream.Envelope {
+func commandTaskStreamFrameEvents(req taskFrameProjectionRequest, frame controltaskstream.Frame) []eventstream.Envelope {
 	if frame.Closed {
 		return []eventstream.Envelope{streamFinalFrameEvent(req, frame)}
 	}
@@ -91,37 +87,28 @@ func delegatedParentStream(req taskFrameProjectionRequest) bool {
 	return req.ToolName == spawn.ToolName || req.ToolName == tasktool.ToolName
 }
 
-func streamFrameEvent(req taskFrameProjectionRequest, frame stream.Frame) eventstream.Envelope {
-	return streamToolUpdateEnvelope(req, frame, toolStatusRunning, true, false, frame.Text, streamFrameMeta("append", frame.Cursor.Output), true)
+func streamFrameEvent(req taskFrameProjectionRequest, frame controltaskstream.Frame) eventstream.Envelope {
+	return streamToolUpdateEnvelope(req, frame, toolStatusRunning, true, false, frame.Text, streamFrameMeta("append"), true)
 }
 
-func streamFinalFrameEvent(req taskFrameProjectionRequest, frame stream.Frame) eventstream.Envelope {
+func streamFinalFrameEvent(req taskFrameProjectionRequest, frame controltaskstream.Frame) eventstream.Envelope {
 	status, isErr := subagentFinalToolStatus(frame)
-	finalText := ""
-	if frame.Cursor.Output == 0 {
-		finalText = streamFinalTerminalText(frame.Text)
-	}
-	return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, streamFrameMeta("final", frame.Cursor.Output), true)
+	finalText := streamFinalTerminalText(frame.Text)
+	return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, streamFrameMeta("final"), true)
 }
 
-func streamDisplayTerminalID(req taskFrameProjectionRequest, frame stream.Frame) string {
-	return firstString(req.DisplayTerminalID, frame.Ref.TerminalID, req.Ref.TerminalID, req.CallID)
+func streamDisplayTerminalID(req taskFrameProjectionRequest, frame controltaskstream.Frame) string {
+	return firstString(req.DisplayTerminalID, frame.TerminalID, req.TurnID, req.CallID)
 }
 
-func streamTerminalExitID(req taskFrameProjectionRequest, frame stream.Frame) string {
+func streamTerminalExitID(req taskFrameProjectionRequest, frame controltaskstream.Frame) string {
 	if terminalID, ok := commandDisplayTerminalID(req.CallID, req.ToolName); ok {
 		return terminalID
 	}
 	return streamDisplayTerminalID(req, frame)
 }
 
-func streamToolUpdateEnvelope(req taskFrameProjectionRequest, frame stream.Frame, status string, includeStatus bool, isErr bool, terminalText string, meta map[string]any, includeDisplayTerminal bool) eventstream.Envelope {
-	if frame.TruncatedBefore > 0 {
-		meta = eventmeta.WithCompactRuntimeSection(meta, eventmeta.RuntimeStream, map[string]any{
-			runtimeStreamTruncatedMetaKey:   true,
-			runtimeStreamTruncatedBeforeKey: frame.TruncatedBefore,
-		})
-	}
+func streamToolUpdateEnvelope(req taskFrameProjectionRequest, frame controltaskstream.Frame, status string, includeStatus bool, isErr bool, terminalText string, meta map[string]any, includeDisplayTerminal bool) eventstream.Envelope {
 	occurredAt := frame.UpdatedAt
 	if occurredAt.IsZero() {
 		occurredAt = time.Now()
@@ -220,7 +207,7 @@ func streamFrameMetaForEnvelope(isErr bool) map[string]any {
 	return eventmeta.WithCompactRuntimeSection(nil, eventmeta.RuntimeTool, map[string]any{"error": true})
 }
 
-func subagentFinalToolStatus(frame stream.Frame) (string, bool) {
+func subagentFinalToolStatus(frame controltaskstream.Frame) (string, bool) {
 	state := strings.ToLower(strings.TrimSpace(frame.State))
 	switch state {
 	case "completed":
@@ -242,7 +229,7 @@ func streamFinalTerminalText(text string) string {
 	// terminal_output carries exact runtime bytes. The task stream's FinalText
 	// may contain this display-only placeholder when no byte was produced; keep
 	// that synthetic state out of the protocol and let each Surface render an
-	// empty-panel fallback after it has reconciled all earlier stream frames.
+	// empty-panel fallback after it has applied all earlier FIFO frames.
 	if strings.TrimSpace(text) == "(no output)" {
 		return ""
 	}
@@ -259,20 +246,20 @@ func streamFrameToolMeta(meta map[string]any, taskHandle string) map[string]any 
 	})
 }
 
-func shouldProjectFrameTextToParentTool(frame stream.Frame) bool {
+func shouldProjectFrameTextToParentTool(frame controltaskstream.Frame) bool {
 	if frame.Event != nil && session.ProtocolSessionUpdateTypeOfProtocol(frame.Event.Protocol) == string(session.ProtocolUpdateTypeAgentThought) {
 		return false
 	}
 	return true
 }
 
-func streamFrameEmbeddedEvents(req taskFrameProjectionRequest, frame stream.Frame) []eventstream.Envelope {
+func streamFrameEmbeddedEvents(req taskFrameProjectionRequest, frame controltaskstream.Frame) []eventstream.Envelope {
 	event := session.CloneEvent(frame.Event)
 	if event == nil {
 		return nil
 	}
 	if event.Scope != nil && event.Scope.Participant.Kind == session.ParticipantKindSubagent {
-		taskID := firstString(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID))
+		taskID := strings.TrimSpace(req.TaskID)
 		if taskID != "" && event.Scope.Participant.DelegationID == "" {
 			event.Scope.Participant.DelegationID = taskID
 		}
@@ -296,7 +283,7 @@ func streamFrameEmbeddedEvents(req taskFrameProjectionRequest, frame stream.Fram
 	})
 	out := acpprojector.ProjectSessionEventEnvelope(base, event)
 	out = taskStreamPrimaryEnvelope(out)
-	if taskID := firstString(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID)); taskID != "" {
+	if taskID := strings.TrimSpace(req.TaskID); taskID != "" {
 		for i := range out {
 			if out[i].Scope == eventstream.ScopeSubagent {
 				out[i].ScopeID = taskID
@@ -374,10 +361,9 @@ func streamFrameEventMeta(meta map[string]any) map[string]any {
 	})
 }
 
-func streamFrameMeta(mode string, outputCursor int64) map[string]any {
+func streamFrameMeta(mode string) map[string]any {
 	return eventmeta.WithCompactRuntimeSection(nil, eventmeta.RuntimeStream, map[string]any{
-		eventmeta.RuntimeStreamMode:   strings.TrimSpace(mode),
-		eventmeta.RuntimeOutputCursor: max(outputCursor, 0),
+		eventmeta.RuntimeStreamMode: strings.TrimSpace(mode),
 	})
 }
 

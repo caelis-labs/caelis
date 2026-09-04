@@ -379,7 +379,7 @@ func TestHandleACPEventEnvelopeKeepsStreamedRunCommandOutputOnEmptyFinalFrame(t 
 	}
 }
 
-func TestTaskWaitOfFailedCommandStaysHiddenAndFoldsIntoOwner(t *testing.T) {
+func TestTaskWaitOfFailedCommandStaysHiddenWithoutOwningOutput(t *testing.T) {
 	t.Parallel()
 
 	const failedOutput = "--- FAIL: TestCoreToolsFitModelContextBudgets (0.00s)\nFAIL\n"
@@ -448,16 +448,16 @@ func TestTaskWaitOfFailedCommandStaysHiddenAndFoldsIntoOwner(t *testing.T) {
 	if len(physical) != 1 || physical[0].CallID != "command-call" {
 		t.Fatalf("events = %#v, want only the RunCommand panel", block.Events)
 	}
-	if command := physical[0]; !strings.Contains(command.Output, "TestCoreToolsFitModelContextBudgets") {
-		t.Fatalf("command panel = %#v, want failed test output folded into the owner", command)
+	if command := physical[0]; command.Output != "" {
+		t.Fatalf("command panel = %#v, want Task wait output excluded from Surface ownership", command)
 	}
 	model.syncViewportContent()
 	plain := strings.Join(model.viewportPlainLines, "\n")
 	if strings.Contains(plain, "Wait command-2") || strings.Contains(plain, "Ran Wait") {
 		t.Fatalf("failed-target Wait rendered as its own panel:\n%s", plain)
 	}
-	if !strings.Contains(plain, "TestCoreToolsFitModelContextBudgets") {
-		t.Fatalf("command owner lost the observed failure output:\n%s", plain)
+	if strings.Contains(plain, "TestCoreToolsFitModelContextBudgets") {
+		t.Fatalf("Task wait output leaked into the command panel:\n%s", plain)
 	}
 }
 
@@ -551,7 +551,7 @@ func TestTaskWaitControlTransportFailureStaysVisibleWithoutFoldingIntoOwner(t *t
 	}
 }
 
-func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *testing.T) {
+func TestResumeDoesNotUseTaskWaitAsCommandOutputFallback(t *testing.T) {
 	t.Parallel()
 
 	const recovered = "步骤 1: 正在处理...\n=== 全部完成 ===\n"
@@ -621,15 +621,15 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 	if len(blocks) != 1 || len(blocks[0].Events) != 1 {
 		t.Fatalf("resume blocks = %#v, want only the original command panel", blocks)
 	}
-	if command := blocks[0].Events[0]; command.Output != recovered || !command.OutputSynthetic || strings.Contains(command.Output, "(no output)") {
-		t.Fatalf("recovered command = %#v, want replaceable durable Task snapshot in empty owner panel", command)
+	if command := blocks[0].Events[0]; command.Output != "" || command.OutputSynthetic || strings.Contains(command.Output, "(no output)") {
+		t.Fatalf("command = %#v, want Task wait excluded from Surface output ownership", command)
 	}
 	if model.runningActivity.Phase != runningPhaseModelWait {
 		t.Fatalf("runningActivity = %#v, want model waiting after Task wait completes", model.runningActivity)
 	}
 }
 
-func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.T) {
+func TestTaskReadUsesActivityHintButOnlyTaskStreamFeedsCommandOwner(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -719,24 +719,16 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	if len(physical) != 1 || physical[0].CallID != "command-call" {
 		t.Fatalf("events = %#v, want only the RunCommand panel", block.Events)
 	}
-	if got := physical[0].Output; got != first+second {
-		t.Fatalf("command output after Task read = %q, want %q", got, first+second)
+	if got := physical[0].Output; got != first {
+		t.Fatalf("command output after Task read = %q, want Task observation excluded from %q", got, first)
 	}
 
-	duplicateMeta := runningSnapshotTerminalMeta("RunCommand", "command-task", "terminal-1", second, "append")
-	duplicateMeta = testMeta.WithRuntimeSection(duplicateMeta, testMeta.RuntimeStream, map[string]any{
-		testMeta.RuntimeStreamMode:   "append",
-		testMeta.RuntimeOutputCursor: int64(len([]byte(first + second))),
-	})
+	secondMeta := runningSnapshotTerminalMeta("RunCommand", "command-task", "terminal-1", second, "append")
 	applyStream(eventstream.ToolCallUpdate{
 		SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-call",
-		Status: &running, Meta: duplicateMeta,
+		Status: &running, Meta: secondMeta,
 	}, 2)
 	thirdMeta := runningSnapshotTerminalMeta("RunCommand", "command-task", "terminal-1", third, "append")
-	thirdMeta = testMeta.WithRuntimeSection(thirdMeta, testMeta.RuntimeStream, map[string]any{
-		testMeta.RuntimeStreamMode:   "append",
-		testMeta.RuntimeOutputCursor: int64(len([]byte(first + second + third))),
-	})
 	applyStream(eventstream.ToolCallUpdate{
 		SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-call",
 		Status: &running, Meta: thirdMeta,
@@ -744,7 +736,7 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	block = requireMainACPTurnBlockForTest(t, model)
 	physical = physicalTranscriptEventsForTest(block.Events)
 	if got := physical[0].Output; got != first+second+third {
-		t.Fatalf("command output after overlapping stream = %q, want %q", got, first+second+third)
+		t.Fatalf("command output after FIFO stream = %q, want %q", got, first+second+third)
 	}
 
 	terminalReadInput := map[string]any{"action": "read", "handle": "command-3"}
@@ -781,11 +773,25 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 			Meta: terminalReadMeta,
 		},
 	})
-	if _, active := model.runningHintTracker.active["tool:turn-1:command-call"]; active {
-		t.Fatalf("active activities = %#v, want terminal Task read to close RunCommand owner", model.runningHintTracker.active)
+	if _, active := model.runningHintTracker.active["tool:turn-1:command-call"]; !active {
+		t.Fatalf("active activities = %#v, Task read must not close RunCommand owner", model.runningHintTracker.active)
 	}
+	finalMeta := testMeta.WithRuntimeSection(acpToolNameMeta("RunCommand"), testMeta.RuntimeTask, map[string]any{
+		"task_id": "command-task", testMeta.RuntimeTaskTerminalID: "terminal-1",
+		"running": false, "state": "completed",
+	})
+	finalMeta = testMeta.WithRuntimeSection(finalMeta, testMeta.RuntimeStream, map[string]any{
+		testMeta.RuntimeStreamMode: "final",
+	})
+	exitCode := 0
+	finalMeta = testMeta.WithTerminalInfo(finalMeta, "terminal-1")
+	finalMeta = testMeta.WithTerminalExit(finalMeta, "terminal-1", &exitCode, nil)
+	applyStream(eventstream.ToolCallUpdate{
+		SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-call",
+		Status: &completed, Meta: finalMeta,
+	}, 4)
 	if model.runningActivity.Phase != runningPhaseModelWait {
-		t.Fatalf("runningActivity = %#v, want model waiting after Task read and RunCommand both close", model.runningActivity)
+		t.Fatalf("runningActivity = %#v, want model waiting after the Task stream closes RunCommand", model.runningActivity)
 	}
 }
 

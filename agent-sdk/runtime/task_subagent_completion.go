@@ -16,9 +16,10 @@ import (
 )
 
 type subagentCompletion struct {
-	ctx     context.Context
-	result  delegation.Result
-	turnSeq int64
+	ctx      context.Context
+	result   delegation.Result
+	turnSeq  int64
+	activity *childTaskActivity
 	// observedTerminal forces the Task write that advances an activity cursor
 	// even when Spawn already returned the same terminal generation.
 	observedTerminal bool
@@ -49,6 +50,7 @@ type subagentCompletionSink struct {
 	taskID           string
 	turnSeq          int64
 	observedTerminal bool
+	activity         *childTaskActivity
 }
 
 func newSubagentCompletionSink(ctx context.Context, runtime *taskRuntime, taskID string, turnSeq int64) subagentCompletionSink {
@@ -102,6 +104,7 @@ func (sink subagentCompletionSink) enqueue(result delegation.Result) <-chan stru
 		result:           result,
 		turnSeq:          sink.turnSeq,
 		observedTerminal: sink.observedTerminal,
+		activity:         sink.activity,
 		done:             make(chan struct{}),
 	})
 }
@@ -211,13 +214,14 @@ func (tm *taskRuntime) startSubagentCompletionLocked(taskID string) (*subagentCo
 	task.mu.Lock()
 	ready := task.completionReady
 	turnSeq := task.turnSeq
+	wrongActivity := completion.activity != nil && turnSeq == completion.turnSeq && task.activityID != completion.activity.activityID
 	task.mu.Unlock()
-	if turnSeq > completion.turnSeq {
+	if turnSeq > completion.turnSeq || wrongActivity {
 		delete(tm.completions, taskID)
 		completion.acknowledgeDurable()
 		return nil, ""
 	}
-	if !ready || turnSeq < completion.turnSeq {
+	if !ready || turnSeq < completion.turnSeq && completion.activity == nil {
 		return nil, ""
 	}
 	tm.operations[operationKey] = struct{}{}
@@ -275,6 +279,10 @@ func (tm *taskRuntime) persistSubagentCompletion(completion *subagentCompletion)
 	}
 	task := completion.task
 	task.mu.Lock()
+	if completion.activity != nil && !completion.activity.openLocked(task) {
+		task.mu.Unlock()
+		return nil
+	}
 	if task.turnSeq != completion.turnSeq {
 		task.mu.Unlock()
 		return nil
@@ -383,6 +391,7 @@ func (tm *taskRuntime) refreshSubagentCompletionTask(completion *subagentComplet
 	durable.mu.Lock()
 	turnSeq := durable.turnSeq
 	running := durable.running
+	wrongActivity := completion.activity != nil && turnSeq == completion.turnSeq && durable.activityID != completion.activity.activityID
 	durable.mu.Unlock()
 
 	tm.mu.Lock()
@@ -390,7 +399,8 @@ func (tm *taskRuntime) refreshSubagentCompletionTask(completion *subagentComplet
 		tm.mu.Unlock()
 		return
 	}
-	if turnSeq > completion.turnSeq {
+	if turnSeq > completion.turnSeq || wrongActivity {
+		tm.subagents[taskID] = durable
 		delete(tm.completions, taskID)
 		tm.mu.Unlock()
 		completion.acknowledgeDurable()

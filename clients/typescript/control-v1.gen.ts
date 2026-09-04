@@ -257,7 +257,7 @@ export interface AgentCommunicationEnvelope {
   activity_id?: string;
   actor?: string;
   agent_communication: AgentCommunication;
-  cursor: string;
+  cursor?: string;
   delivery: Delivery;
   event_id?: string;
   final?: boolean;
@@ -266,7 +266,7 @@ export interface AgentCommunicationEnvelope {
   occurred_at?: string;
   parent_tool?: ParentToolRelation;
   participant_id?: string;
-  position: FeedPosition;
+  position?: FeedPosition;
   projection_id?: string;
   run_id?: string;
   scope?: "main" | "participant" | "subagent";
@@ -323,7 +323,7 @@ export interface ApprovalReviewEnvelope {
   activity_id?: string;
   actor?: string;
   approval_review: ApprovalReview;
-  cursor: string;
+  cursor?: string;
   delivery: Delivery;
   event_id?: string;
   final?: boolean;
@@ -332,7 +332,7 @@ export interface ApprovalReviewEnvelope {
   occurred_at?: string;
   parent_tool?: ParentToolRelation;
   participant_id?: string;
-  position: FeedPosition;
+  position?: FeedPosition;
   projection_id?: string;
   run_id?: string;
   scope?: "main" | "participant" | "subagent";
@@ -620,7 +620,7 @@ export interface EnvelopeBase {
   _meta?: ACPMetadata;
   activity_id?: string;
   actor?: string;
-  cursor: string;
+  cursor?: string;
   delivery: Delivery;
   event_id?: string;
   final?: boolean;
@@ -629,7 +629,7 @@ export interface EnvelopeBase {
   occurred_at?: string;
   parent_tool?: ParentToolRelation;
   participant_id?: string;
-  position: FeedPosition;
+  position?: FeedPosition;
   projection_id?: string;
   run_id?: string;
   scope?: "main" | "participant" | "subagent";
@@ -646,7 +646,7 @@ export interface ErrorEnvelope {
   _meta?: ACPMetadata;
   activity_id?: string;
   actor?: string;
-  cursor: string;
+  cursor?: string;
   delivery: Delivery;
   error: string;
   event_id?: string;
@@ -656,7 +656,7 @@ export interface ErrorEnvelope {
   occurred_at?: string;
   parent_tool?: ParentToolRelation;
   participant_id?: string;
-  position: FeedPosition;
+  position?: FeedPosition;
   projection_id?: string;
   run_id?: string;
   scope?: "main" | "participant" | "subagent";
@@ -716,7 +716,7 @@ export interface LifecycleEnvelope {
   _meta?: ACPMetadata;
   activity_id?: string;
   actor?: string;
-  cursor: string;
+  cursor?: string;
   delivery: Delivery;
   event_id?: string;
   final?: boolean;
@@ -726,7 +726,7 @@ export interface LifecycleEnvelope {
   occurred_at?: string;
   parent_tool?: ParentToolRelation;
   participant_id?: string;
-  position: FeedPosition;
+  position?: FeedPosition;
   projection_id?: string;
   run_id?: string;
   scope?: "main" | "participant" | "subagent";
@@ -772,7 +772,7 @@ export interface NoticeEnvelope {
   _meta?: ACPMetadata;
   activity_id?: string;
   actor?: string;
-  cursor: string;
+  cursor?: string;
   delivery: Delivery;
   event_id?: string;
   final?: boolean;
@@ -783,7 +783,7 @@ export interface NoticeEnvelope {
   occurred_at?: string;
   parent_tool?: ParentToolRelation;
   participant_id?: string;
-  position: FeedPosition;
+  position?: FeedPosition;
   projection_id?: string;
   run_id?: string;
   scope?: "main" | "participant" | "subagent";
@@ -821,7 +821,7 @@ export interface ParticipantEnvelope {
   _meta?: ACPMetadata;
   activity_id?: string;
   actor?: string;
-  cursor: string;
+  cursor?: string;
   delivery: Delivery;
   event_id?: string;
   final?: boolean;
@@ -831,7 +831,7 @@ export interface ParticipantEnvelope {
   parent_tool?: ParentToolRelation;
   participant: ParticipantEvent;
   participant_id?: string;
-  position: FeedPosition;
+  position?: FeedPosition;
   projection_id?: string;
   run_id?: string;
   scope?: "main" | "participant" | "subagent";
@@ -1051,7 +1051,7 @@ export interface RequestPermissionEnvelope {
   activity_id?: string;
   actor?: string;
   approval_request_id: string;
-  cursor: string;
+  cursor?: string;
   delivery: Delivery;
   event_id?: string;
   final?: boolean;
@@ -1061,7 +1061,7 @@ export interface RequestPermissionEnvelope {
   parent_tool?: ParentToolRelation;
   participant_id?: string;
   permission: RequestPermission;
-  position: FeedPosition;
+  position?: FeedPosition;
   projection_id?: string;
   run_id?: string;
   scope?: "main" | "participant" | "subagent";
@@ -1110,8 +1110,6 @@ export interface ResumeCandidate {
 }
 
 export type ResumeCandidateList = Array<ResumeCandidate>;
-
-export type ResumeMode = "exact" | "durable_fallback";
 
 export interface RunState {
   active?: boolean;
@@ -1204,6 +1202,15 @@ export interface SessionControllerModeRequest {
   session_id?: string;
 }
 
+export interface SessionFeedDelivery {
+  events?: Array<Envelope>;
+  kind: StreamDeliveryKind;
+  next_cursor?: string;
+  page?: number;
+  snapshot_id?: string;
+  source: StreamSourceClass;
+}
+
 export interface SessionList {
   next_cursor?: string;
   sessions?: Array<SessionSummary>;
@@ -1264,12 +1271,10 @@ export interface SessionState {
   metadata?: JSONObject;
   participants?: Array<ParticipantBinding>;
   protocol_version: number;
-  resume_mode: ResumeMode;
   revision: Uint64Decimal;
   run: RunState;
   session_id: string;
   title?: string;
-  transient_gap?: boolean;
   workspace_key?: string;
 }
 
@@ -1288,7 +1293,7 @@ export interface SessionUpdateEnvelope {
   _meta?: ACPMetadata;
   activity_id?: string;
   actor?: string;
-  cursor: string;
+  cursor?: string;
   delivery: Delivery;
   event_id?: string;
   final?: boolean;
@@ -1297,7 +1302,7 @@ export interface SessionUpdateEnvelope {
   occurred_at?: string;
   parent_tool?: ParentToolRelation;
   participant_id?: string;
-  position: FeedPosition;
+  position?: FeedPosition;
   projection_id?: string;
   run_id?: string;
   scope?: "main" | "participant" | "subagent";
@@ -1458,6 +1463,10 @@ export interface SteerRequest {
   target: TurnTarget;
 }
 
+export type StreamDeliveryKind = "replace_begin" | "replace_page" | "replace_end" | "append_page" | "status" | "sync";
+
+export type StreamSourceClass = "exact" | "replacement" | "result" | "status";
+
 export type StringList = Array<string>;
 
 export interface TaskDescriptor {
@@ -1485,10 +1494,7 @@ export interface TaskDirectorySnapshot {
 
 export interface TaskEventBatch {
   activity_id?: string;
-  boundary_cursor?: string;
-  events?: Array<Envelope>;
-  resume_mode: TaskResumeMode;
-  transient_gap?: boolean;
+  deliveries?: Array<TaskStreamDelivery>;
 }
 
 export type TaskKind = "command" | "subagent";
@@ -1502,9 +1508,17 @@ export interface TaskParentTool {
   tool_name?: string;
 }
 
-export type TaskResumeMode = "exact" | "current_state";
-
 export type TaskState = "prepared" | "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "interrupted" | "terminated" | "waiting_approval" | "unknown_outcome";
+
+export interface TaskStreamDelivery {
+  activity_id?: string;
+  events?: Array<Envelope>;
+  kind: StreamDeliveryKind;
+  next_cursor?: string;
+  page?: number;
+  snapshot_id?: string;
+  source: StreamSourceClass;
+}
 
 export interface TerminalExitStatus {
   exit_code?: number;

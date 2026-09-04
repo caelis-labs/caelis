@@ -2,49 +2,56 @@ package taskstream
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"math"
+	"io"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/control/streamspool"
+)
+
+const (
+	maxDeliveryRecords    = 256
+	maxDeliveryBytes      = 1 << 20
+	maxReplacementRecords = 8192
+	maxReplacementBytes   = 32 << 20
+	fallbackPollInterval  = 50 * time.Millisecond
 )
 
 type Authorizer interface {
 	AuthorizeTaskStream(context.Context, Principal, string) error
 }
 
-// SessionLoader supplies the durable parent Session context needed to resolve
-// the exact child Agent endpoint frozen by Spawn. Child history itself is
-// always loaded through that Agent's read-only ACP session/load capability.
+// SessionLoader supplies the durable parent Session required to reload one
+// exact child endpoint through ACP session/load.
 type SessionLoader interface {
 	LoadSession(context.Context, session.LoadSessionRequest) (session.LoadedSession, error)
 }
 
 type Config struct {
-	Tasks     task.Store
-	Streams   func() stream.Service
-	Sessions  SessionLoader
-	Directory *DirectoryIndex
-	// SubagentHistory loads an existing child Agent Session through ACP
-	// session/load without activating execution.
+	Tasks           task.Store
+	Spool           streamspool.Store
+	Sessions        SessionLoader
+	Directory       *DirectoryIndex
 	SubagentHistory subagent.HistoryRunner
 	Authorizer      Authorizer
 	Secret          []byte
-	Generation      string
 }
 
 type service struct {
 	tasks           task.Store
-	streams         func() stream.Service
+	spool           streamspool.Store
 	sessions        SessionLoader
 	subagentHistory subagent.HistoryRunner
 	directory       *DirectoryIndex
@@ -53,24 +60,16 @@ type service struct {
 }
 
 func New(config Config) (Service, error) {
-	if config.Tasks == nil || config.Streams == nil || config.Authorizer == nil {
-		return nil, fmt.Errorf("taskstream: tasks, streams, and authorizer are required")
+	if config.Tasks == nil || config.Authorizer == nil {
+		return nil, fmt.Errorf("taskstream: tasks and authorizer are required")
 	}
 	if len(config.Secret) < 32 {
 		return nil, fmt.Errorf("taskstream: cursor secret must be at least 32 bytes")
 	}
-	generation := strings.TrimSpace(config.Generation)
-	if generation == "" {
-		var raw [16]byte
-		if _, err := rand.Read(raw[:]); err != nil {
-			return nil, fmt.Errorf("taskstream: generate process generation: %w", err)
-		}
-		generation = base64.RawURLEncoding.EncodeToString(raw[:])
-	}
 	return &service{
-		tasks: config.Tasks, streams: config.Streams, sessions: config.Sessions,
-		subagentHistory: config.SubagentHistory, directory: config.Directory, authorizer: config.Authorizer,
-		cursors: cursorCodec{secret: append([]byte(nil), config.Secret...), generation: generation},
+		tasks: config.Tasks, spool: config.Spool, sessions: config.Sessions,
+		subagentHistory: config.SubagentHistory, directory: config.Directory,
+		authorizer: config.Authorizer, cursors: cursorCodec{secret: append([]byte(nil), config.Secret...)},
 	}, nil
 }
 
@@ -85,189 +84,163 @@ func (s *service) List(ctx context.Context, principal Principal, req ListRequest
 	}
 	result := ListResult{Tasks: make([]TaskDescriptor, 0, len(entries))}
 	for _, entry := range entries {
-		if entry == nil || strings.TrimSpace(entry.Session.SessionID) != sessionID {
-			continue
+		if entry != nil && strings.TrimSpace(entry.Session.SessionID) == sessionID {
+			result.Tasks = append(result.Tasks, descriptorFromEntry(entry))
 		}
-		result.Tasks = append(result.Tasks, descriptorFromEntry(entry))
 	}
 	return result, nil
 }
 
-func (s *service) Events(ctx context.Context, principal Principal, req ReadRequest) (Batch, error) {
-	entry, point, sameGeneration, err := s.prepare(ctx, principal, req)
+type exactSource struct {
+	key    streamspool.Key
+	offset streamspool.Offset
+	seq    uint64
+	bounds streamspool.Bounds
+}
+
+func (s *service) Events(ctx context.Context, principal Principal, req ReadRequest) (ReadResult, error) {
+	entry, point, cursorPresent, err := s.prepare(ctx, principal, req)
 	if err != nil {
-		return Batch{}, err
+		return ReadResult{}, err
 	}
-	activityID := descriptorFromEntry(entry).ActivityID
-	if expected := strings.TrimSpace(req.ExpectedActivityID); expected != "" && expected != activityID {
-		return Batch{}, errorcode.New(errorcode.Conflict, "taskstream: Task activity changed before history read")
-	}
-	snapshot, events, mode, gap, point, historical, err := s.initialRead(ctx, entry, point, sameGeneration, true)
+	source, exact, err := s.selectExact(ctx, entry, point, cursorPresent)
 	if err != nil {
-		return Batch{}, err
+		return ReadResult{}, err
 	}
-	if historical || strings.TrimSpace(req.ExpectedActivityID) != "" {
-		if err := s.verifyFiniteSubagentRead(ctx, entry); err != nil {
-			return Batch{}, err
+	if !exact {
+		deliveries, fallbackErr := s.fallbackDeliveries(ctx, entry)
+		return ReadResult{Deliveries: deliveries, ActivityID: descriptorFromEntry(entry).ActivityID}, fallbackErr
+	}
+	records, next, err := s.readAvailable(ctx, entry, source)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ReadResult{}, ctxErr
 		}
+		deliveries, fallbackErr := s.fallbackDeliveries(ctx, entry)
+		return ReadResult{Deliveries: deliveries, ActivityID: descriptorFromEntry(entry).ActivityID}, fallbackErr
 	}
-	point.Cursor = stream.CloneCursor(snapshot.Cursor)
-	boundary, err := s.cursors.encode(entry.Session.SessionID, entry.TaskID, point)
+	boundary, err := s.cursors.encode(entry.Session.SessionID, entry.TaskID, next)
 	if err != nil {
-		return Batch{}, err
+		return ReadResult{}, err
 	}
-	return Batch{
-		Records: events, ActivityID: activityID, ResumeMode: mode,
-		TransientGap: gap, BoundaryCursor: boundary,
-	}, nil
-}
-
-// verifyFiniteSubagentRead prevents a slow provider session/load from
-// publishing history for an activity that ceased to be the Task's terminal
-// activity while the read was in flight. Live observation remains independent
-// and is never fenced by this finite-read check.
-func (s *service) verifyFiniteSubagentRead(ctx context.Context, before *task.Entry) error {
-	if before == nil || before.Kind != task.KindSubagent || before.Running ||
-		!stream.IsTerminalState(string(before.State)) {
-		return errorcode.New(errorcode.FailedPrecondition, "taskstream: finite subagent history requires a terminal activity")
-	}
-	after, err := s.tasks.Get(ctx, before.TaskID)
-	if err != nil {
-		return errorcode.Wrap(errorcode.Unavailable, "taskstream: verify finite subagent history activity", err)
-	}
-	if !sameFiniteSubagentActivity(before, after) {
-		return errorcode.New(errorcode.Conflict, "taskstream: Task activity changed during history read")
-	}
-	return nil
-}
-
-func sameFiniteSubagentActivity(before, after *task.Entry) bool {
-	if before == nil || after == nil || before.TaskID != after.TaskID ||
-		before.Session.SessionID != after.Session.SessionID || after.Kind != task.KindSubagent ||
-		after.Running || !stream.IsTerminalState(string(after.State)) {
-		return false
-	}
-	beforeDescriptor := descriptorFromEntry(before)
-	afterDescriptor := descriptorFromEntry(after)
-	// Terminal bookkeeping such as final_event_persisted may commit a newer
-	// Task revision after the lifecycle became visible. That is still the same
-	// child activity and must not invalidate an in-flight ACP history read.
-	// Fence only the semantic activity and its immutable endpoint identity.
-	return before.State == after.State &&
-		beforeDescriptor.ActivityID == afterDescriptor.ActivityID &&
-		beforeDescriptor.CurrentTurnID == afterDescriptor.CurrentTurnID &&
-		beforeDescriptor.Handle == afterDescriptor.Handle &&
-		beforeDescriptor.AgentHandle == afterDescriptor.AgentHandle &&
-		beforeDescriptor.ParticipantID == afterDescriptor.ParticipantID &&
-		taskHistoryChildSessionID(before) == taskHistoryChildSessionID(after) &&
-		reflect.DeepEqual(taskHistoryTarget(before), taskHistoryTarget(after))
+	return ReadResult{Deliveries: []Delivery{{
+		Kind: DeliveryAppendPage, Source: SourceExact, Records: records,
+		NextCursor: boundary, ActivityID: descriptorFromEntry(entry).ActivityID,
+	}}, ActivityID: descriptorFromEntry(entry).ActivityID}, nil
 }
 
 func (s *service) Subscribe(ctx context.Context, principal Principal, req SubscribeRequest) (SubscribeResult, error) {
-	entry, point, sameGeneration, err := s.prepare(ctx, principal, ReadRequest{
+	entry, point, cursorPresent, err := s.prepare(ctx, principal, ReadRequest{
 		SessionID: req.SessionID, TaskID: req.TaskID, Cursor: req.Cursor,
 	})
 	if err != nil {
 		return SubscribeResult{}, err
 	}
-	// Follow observes the Runtime-owned current state and future activities.
-	// Complete idle history is a separate finite Events read so a slow
-	// session/load cannot replace or terminate the live observer.
-	snapshot, initial, mode, gap, point, historical, err := s.initialRead(
-		ctx, entry, point, sameGeneration, !req.Follow,
-	)
-	if err != nil {
-		return SubscribeResult{}, err
-	}
-	point.Cursor = stream.CloneCursor(snapshot.Cursor)
-	boundary, err := s.cursors.encode(entry.Session.SessionID, entry.TaskID, point)
+	source, exact, err := s.selectExact(ctx, entry, point, cursorPresent)
 	if err != nil {
 		return SubscribeResult{}, err
 	}
 	sub := newSubscription(ctx)
-	streams := s.streams()
-	if streams == nil && !historical {
-		_ = sub.Close()
-		return SubscribeResult{}, errorcode.New(errorcode.Unavailable, "taskstream: runtime streams are unavailable")
+	if !exact {
+		go s.forwardFallback(sub, entry, nil)
+		return SubscribeResult{Subscription: sub}, nil
 	}
-	go s.forward(sub, streams, entry, point, initial, req.Follow, historical)
-	return SubscribeResult{
-		Subscription: sub, ResumeMode: mode, TransientGap: gap, BoundaryCursor: boundary,
-	}, nil
+	go s.forwardExact(sub, entry, source, req.Follow)
+	return SubscribeResult{Subscription: sub}, nil
 }
 
-func (s *service) forward(
-	sub *subscription,
-	streams stream.Service,
-	entry *task.Entry,
-	point cursorPoint,
-	initial []Record,
-	follow bool,
-	historical bool,
-) {
+func (s *service) forwardExact(sub *subscription, entry *task.Entry, source exactSource, follow bool) {
+	reader, err := s.spool.Reader(sub.ctx, source.key, source.offset)
+	if err != nil {
+		s.forwardFallback(sub, entry, err)
+		return
+	}
+	defer reader.Close()
 	defer sub.finish(nil)
-	if !sub.enqueueCatchup(initial) {
-		return
-	}
-	if historical {
-		return
-	}
-	ref := stream.Ref{SessionID: entry.Session.SessionID, TaskID: entry.TaskID}
+	point := cursorPoint{Key: source.key, Offset: source.offset, Sequence: source.seq}
 	for {
-		recoverCurrentState := false
-		for frame, err := range streams.Subscribe(sub.ctx, stream.SubscribeRequest{
-			Ref: ref, Cursor: point.Cursor, Follow: follow,
-		}) {
-			if err != nil {
-				sub.finish(err)
+		raw, readErr := reader.Next(sub.ctx)
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) || errors.Is(readErr, context.Canceled) {
+				sub.finish(nil)
 				return
 			}
-			if frame == nil {
-				continue
-			}
-			if frame.EventsTruncatedBefore > point.Cursor.Events || frame.TruncatedBefore > point.Cursor.Output {
-				// A live gap may represent a multi-frame semantic current-state
-				// snapshot. Stop this incremental iterator and rebuild the whole
-				// batch through the snapshot path so descriptor and delivery
-				// boundaries remain coherent.
-				recoverCurrentState = true
-				break
-			}
-			descriptor := descriptorForFrame(entry, *frame)
-			records, next, projectErr := s.recordFrame(entry, descriptor, *frame, point)
-			if projectErr != nil {
-				sub.finish(projectErr)
-				return
-			}
-			point = next
-			for _, record := range records {
-				if !sub.enqueue(record) {
-					return
-				}
-			}
-		}
-		if !recoverCurrentState {
+			_ = reader.Close()
+			s.forwardFallback(sub, entry, readErr)
 			return
 		}
-
-		snapshot, catchup, _, _, next, historical, readErr := s.initialRead(
-			sub.ctx, entry, point, true, false,
-		)
-		if readErr != nil {
-			sub.finish(readErr)
+		record, next, decodeErr := s.projectSpoolRecord(entry, raw, point)
+		if decodeErr != nil {
+			_ = reader.Close()
+			s.forwardFallback(sub, entry, decodeErr)
 			return
 		}
 		point = next
-		if !sub.enqueueCatchup(catchup) {
+		if !sub.deliver(Delivery{
+			Kind: DeliveryAppendPage, Source: SourceExact,
+			Records: []Record{record}, NextCursor: record.Cursor,
+			ActivityID: record.Task.ActivityID,
+		}) {
 			return
 		}
-		if historical {
-			return
-		}
-		if !snapshot.Running && (!follow || entry.Kind != task.KindSubagent) {
+		if record.Frame != nil && record.Frame.Closed && (!follow || entry.Kind != task.KindSubagent) {
+			sub.finish(nil)
 			return
 		}
 	}
+}
+
+func (s *service) forwardFallback(sub *subscription, entry *task.Entry, exactErr error) {
+	if sub == nil {
+		return
+	}
+	if ctxErr := sub.ctx.Err(); ctxErr != nil {
+		sub.finish(ctxErr)
+		return
+	}
+	current := task.CloneEntry(entry)
+	if current != nil && current.Running {
+		descriptor := descriptorFromEntry(current)
+		if !sub.deliver(Delivery{
+			Kind: DeliveryStatus, Source: SourceStatus,
+			Records: []Record{{Sequence: 1, Task: descriptor}}, ActivityID: descriptor.ActivityID,
+		}) {
+			sub.finish(sub.ctx.Err())
+			return
+		}
+		ticker := time.NewTicker(fallbackPollInterval)
+		defer ticker.Stop()
+		for current.Running {
+			select {
+			case <-sub.ctx.Done():
+				sub.finish(sub.ctx.Err())
+				return
+			case <-ticker.C:
+			}
+			loaded, loadErr := s.tasks.Get(sub.ctx, current.TaskID)
+			if loadErr != nil {
+				sub.finish(errors.Join(s.exactReadError(exactErr), loadErr))
+				return
+			}
+			if loaded == nil || loaded.Session.SessionID != current.Session.SessionID {
+				sub.finish(errorcode.New(errorcode.PermissionDenied, "taskstream: Task moved outside the authorized session"))
+				return
+			}
+			current = task.CloneEntry(loaded)
+		}
+	}
+	deliveries, err := s.fallbackDeliveries(sub.ctx, current)
+	if err != nil {
+		sub.finish(errors.Join(s.exactReadError(exactErr), err))
+		return
+	}
+	for _, delivery := range deliveries {
+		if !sub.deliver(delivery) {
+			sub.finish(sub.ctx.Err())
+			return
+		}
+	}
+	sub.finish(nil)
 }
 
 func (s *service) prepare(ctx context.Context, principal Principal, req ReadRequest) (*task.Entry, cursorPoint, bool, error) {
@@ -286,198 +259,320 @@ func (s *service) prepare(ctx context.Context, principal Principal, req ReadRequ
 	if entry == nil || strings.TrimSpace(entry.Session.SessionID) != sessionID {
 		return nil, cursorPoint{}, false, errorcode.New(errorcode.PermissionDenied, "taskstream: task is not visible in this session")
 	}
-	point, sameGeneration, err := s.cursors.decode(sessionID, taskID, req.Cursor)
+	if expected := strings.TrimSpace(req.ExpectedActivityID); expected != "" && expected != descriptorFromEntry(entry).ActivityID {
+		return nil, cursorPoint{}, false, errorcode.New(errorcode.Conflict, "taskstream: Task activity changed before history read")
+	}
+	point, present, err := s.cursors.decode(sessionID, taskID, req.Cursor)
 	if err != nil {
-		return nil, cursorPoint{}, false, errorcode.Wrap(errorcode.InvalidArgument, "taskstream: invalid cursor", err)
+		return nil, cursorPoint{}, present, errorcode.Wrap(errorcode.InvalidArgument, "taskstream: invalid cursor", err)
 	}
-	return task.CloneEntry(entry), point, sameGeneration, nil
+	return task.CloneEntry(entry), point, present, nil
 }
 
-func (s *service) initialRead(
-	ctx context.Context,
-	entry *task.Entry,
-	point cursorPoint,
-	sameGeneration bool,
-	preferHistory bool,
-) (stream.Snapshot, []Record, ResumeMode, bool, cursorPoint, bool, error) {
-	readCursor := stream.CloneCursor(point.Cursor)
-	mode := ResumeModeExact
-	gap := false
-	replaySubagentCurrentState := !sameGeneration && entry.Kind == task.KindSubagent
-	if !sameGeneration {
-		if replaySubagentCurrentState {
-			readCursor = stream.Cursor{}
-		} else {
-			readCursor = stream.Cursor{Output: math.MaxInt64, Events: math.MaxInt64}
-		}
-		mode = ResumeModeCurrentState
-		gap = true
+func (s *service) selectExact(ctx context.Context, entry *task.Entry, point cursorPoint, cursorPresent bool) (exactSource, bool, error) {
+	if s.spool == nil {
+		return exactSource{}, false, nil
 	}
-	snapshot, historical, err := s.readTaskSnapshot(ctx, entry, readCursor, preferHistory)
-	if err != nil {
-		return stream.Snapshot{}, nil, "", false, point, false, err
-	}
-	subagentCurrentState := replaySubagentCurrentState
-	if snapshot.EventsTruncatedBefore > readCursor.Events || snapshot.TruncatedBefore > readCursor.Output {
-		mode = ResumeModeCurrentState
-		gap = true
-		subagentCurrentState = entry.Kind == task.KindSubagent && snapshot.EventsTruncatedBefore > readCursor.Events
-	}
-	descriptor := descriptorForSnapshot(entry, snapshot)
-	events := make([]Record, 0, len(snapshot.Frames)+1)
-	if gap {
-		if !sameGeneration {
-			if replaySubagentCurrentState {
-				point.Cursor = stream.CloneCursor(readCursor)
-				point.Cursor.Events = max(point.Cursor.Events, snapshot.EventsTruncatedBefore)
-				point.Cursor.Output = max(point.Cursor.Output, snapshot.TruncatedBefore)
-			} else {
-				point.Cursor = stream.CloneCursor(snapshot.Cursor)
+	if cursorPresent {
+		bounds, err := s.spool.Bounds(ctx, point.Key)
+		if err != nil || point.Offset < bounds.Low || point.Offset > bounds.High {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return exactSource{}, false, ctxErr
 			}
-		} else {
-			point.Cursor.Events = max(point.Cursor.Events, snapshot.EventsTruncatedBefore)
-			point.Cursor.Output = max(point.Cursor.Output, snapshot.TruncatedBefore)
+			// The signed cursor proved its product identity, but the spool is
+			// cache-only. Missing, expired, poisoned, or cross-epoch bytes select
+			// one atomic authoritative replacement instead of making the cursor a
+			// second availability authority.
+			return exactSource{}, false, nil
 		}
-		var record Record
-		record, point, err = s.gapRecord(entry, descriptor, point)
-		if err != nil {
-			return stream.Snapshot{}, nil, "", false, point, false, err
+		if bounds.State == streamspool.StatePoisoned || bounds.State == streamspool.StateStoreClosed || bounds.State == streamspool.StateEmptyTerminal {
+			return exactSource{}, false, nil
 		}
-		events = append(events, record)
+		return exactSource{key: point.Key, offset: point.Offset, seq: point.Sequence, bounds: bounds}, true, nil
 	}
-	if !sameGeneration && !replaySubagentCurrentState {
-		point.Cursor = stream.CloneCursor(snapshot.Cursor)
-		if stream.IsTerminalState(snapshot.State) {
-			frame := stream.Frame{
-				Ref:   stream.Ref{SessionID: entry.Session.SessionID, TaskID: entry.TaskID, TerminalID: descriptor.CurrentTurnID},
-				State: snapshot.State, Cursor: snapshot.Cursor, Closed: true, UpdatedAt: snapshot.UpdatedAt,
-			}
-			var projected []Record
-			projected, point, err = s.recordFrame(entry, descriptor, frame, point)
-			if err != nil {
-				return stream.Snapshot{}, nil, "", false, point, false, err
-			}
-			events = append(events, projected...)
-		}
-		return snapshot, events, mode, gap, point, historical, nil
+	logical := streamspool.LogicalKey{
+		Namespace: streamspool.NamespaceTask,
+		Digest:    streamspool.DigestStrings(entry.Session.SessionID, entry.TaskID),
 	}
-	for _, frame := range stream.FramesForSnapshot(snapshot) {
-		if frame.EventsTruncatedBefore > point.Cursor.Events || frame.TruncatedBefore > point.Cursor.Output {
-			point.Cursor.Events = max(point.Cursor.Events, frame.EventsTruncatedBefore)
-			point.Cursor.Output = max(point.Cursor.Output, frame.TruncatedBefore)
-			gapRecord, next, gapErr := s.gapRecord(entry, descriptor, point)
-			if gapErr != nil {
-				return stream.Snapshot{}, nil, "", false, point, false, gapErr
-			}
-			point = next
-			events = append(events, gapRecord)
-			mode = ResumeModeCurrentState
-			gap = true
+	key, bounds, err := s.spool.Resolve(ctx, logical)
+	if err == nil {
+		if !bounds.OriginComplete || bounds.Low != 0 || bounds.State == streamspool.StatePoisoned ||
+			bounds.State == streamspool.StateStoreClosed || bounds.State == streamspool.StateEmptyTerminal {
+			return exactSource{}, false, nil
 		}
-		frameDescriptor := descriptor
-		if activityID := strings.TrimSpace(frame.ActivityID); activityID != "" {
-			frameDescriptor.ActivityID = activityID
-		}
-		projected, next, projectErr := s.recordFrame(entry, frameDescriptor, frame, point)
-		if projectErr != nil {
-			return stream.Snapshot{}, nil, "", false, point, false, projectErr
-		}
-		point = next
-		events = append(events, projected...)
+		return exactSource{key: key, bounds: bounds}, true, nil
 	}
-	if subagentCurrentState {
-		if err := s.makeCurrentStateBatchReplayable(entry, events, readCursor); err != nil {
-			return stream.Snapshot{}, nil, "", false, point, false, err
-		}
-	}
-	return snapshot, events, mode, gap, point, historical, nil
+	return exactSource{}, false, nil
 }
 
-// makeCurrentStateBatchReplayable keeps every partial-batch cursor anchored
-// before the lost exact window. Only the final record acknowledges the semantic
-// snapshot boundary. A disconnect anywhere earlier therefore replays the gap,
-// allowing the Surface to reset and rebuild instead of silently losing the
-// unconsumed suffix.
-func (s *service) makeCurrentStateBatchReplayable(entry *task.Entry, records []Record, anchor stream.Cursor) error {
-	for index := 0; index+1 < len(records); index++ {
-		point := cursorPoint{Cursor: stream.CloneCursor(anchor), Sequence: records[index].Sequence}
-		cursor, err := s.cursors.encode(entry.Session.SessionID, entry.TaskID, point)
-		if err != nil {
-			return err
-		}
-		records[index].Cursor = cursor
-	}
-	return nil
-}
-
-func (s *service) recordFrame(entry *task.Entry, descriptor TaskDescriptor, frame stream.Frame, point cursorPoint) ([]Record, cursorPoint, error) {
-	point.Cursor = stream.CloneCursor(frame.Cursor)
-	if point.Cursor.Output == 0 && point.Cursor.Events == 0 {
+func (s *service) readAvailable(ctx context.Context, entry *task.Entry, source exactSource) ([]Record, cursorPoint, error) {
+	point := cursorPoint{Key: source.key, Offset: source.offset, Sequence: source.seq}
+	if source.offset == source.bounds.High {
 		return nil, point, nil
 	}
-	point.Sequence++
-	cursor, err := s.cursors.encode(entry.Session.SessionID, entry.TaskID, point)
+	reader, err := s.spool.Reader(ctx, source.key, source.offset)
 	if err != nil {
-		return nil, point, err
+		return nil, point, s.exactReadError(err)
 	}
-	cloned := stream.CloneFrame(frame)
-	return []Record{{
-		Cursor: cursor, Generation: s.cursors.generation, Sequence: point.Sequence,
-		Task: descriptor, Frame: &cloned,
-	}}, point, nil
+	defer reader.Close()
+	records := make([]Record, 0, min(maxDeliveryRecords, int(source.bounds.High-source.offset)))
+	encodedBytes := 0
+	for point.Offset < source.bounds.High && len(records) < maxDeliveryRecords {
+		raw, readErr := reader.Next(ctx)
+		if readErr != nil {
+			return nil, point, s.exactReadError(readErr)
+		}
+		record, next, decodeErr := s.projectSpoolRecord(entry, raw, point)
+		if decodeErr != nil {
+			return nil, point, decodeErr
+		}
+		rawRecord, marshalErr := json.Marshal(record)
+		if marshalErr != nil {
+			return nil, point, marshalErr
+		}
+		if len(records) > 0 && encodedBytes+len(rawRecord) > maxDeliveryBytes {
+			break
+		}
+		if len(rawRecord) > maxDeliveryBytes {
+			return nil, point, errorcode.New(errorcode.ResourceExhausted, "taskstream: Task record exceeds delivery limit")
+		}
+		records = append(records, record)
+		encodedBytes += len(rawRecord)
+		point = next
+	}
+	return records, point, nil
 }
 
-func (s *service) gapRecord(entry *task.Entry, descriptor TaskDescriptor, point cursorPoint) (Record, cursorPoint, error) {
+func (s *service) projectSpoolRecord(entry *task.Entry, raw streamspool.Record, point cursorPoint) (Record, cursorPoint, error) {
+	if raw.Type != taskOutputRecordType || raw.Offset != point.Offset {
+		return Record{}, point, errorcode.New(errorcode.Unavailable, "taskstream: cached Task record is invalid")
+	}
+	var recorded recordedTaskOutput
+	if err := json.Unmarshal(raw.Payload, &recorded); err != nil {
+		return Record{}, point, errorcode.Wrap(errorcode.Unavailable, "taskstream: decode cached Task record", err)
+	}
+	point.Offset++
 	point.Sequence++
 	cursor, err := s.cursors.encode(entry.Session.SessionID, entry.TaskID, point)
 	if err != nil {
 		return Record{}, point, err
 	}
+	descriptor := descriptorFromEntry(entry)
+	if recorded.ActivityID != "" {
+		descriptor.ActivityID = strings.TrimSpace(recorded.ActivityID)
+	}
+	if recorded.TerminalID != "" {
+		descriptor.CurrentTurnID = strings.TrimSpace(recorded.TerminalID)
+	}
+	event := recorded.Event
+	if event.State != "" {
+		descriptor.State = task.State(event.State)
+	}
+	descriptor.Running = event.Running && !task.IsTerminalState(task.State(event.State))
+	if !event.OccurredAt.IsZero() {
+		descriptor.UpdatedAt = event.OccurredAt
+	}
+	frame := Frame{
+		TerminalID: recorded.TerminalID,
+		Text:       event.Text, State: event.State, ActivityID: recorded.ActivityID,
+		Running: event.Running, Closed: event.Closed, ExitCode: event.ExitCode,
+		Event: session.CloneEvent(event.Event), UpdatedAt: event.OccurredAt,
+	}
 	return Record{
-		Cursor: cursor, Generation: s.cursors.generation, Sequence: point.Sequence, Task: descriptor,
-		Gap: &Gap{SessionID: descriptor.SessionID, TaskID: descriptor.TaskID, Kind: descriptor.Kind, State: descriptor.State},
+		Cursor: cursor, Generation: hex.EncodeToString(point.Key.Epoch[:]), Sequence: point.Sequence,
+		Task: descriptor, Frame: &frame,
 	}, point, nil
 }
 
-func descriptorForSnapshot(entry *task.Entry, snapshot stream.Snapshot) TaskDescriptor {
+func (s *service) fallbackDeliveries(ctx context.Context, entry *task.Entry) ([]Delivery, error) {
 	descriptor := descriptorFromEntry(entry)
-	if activityID := strings.TrimSpace(snapshot.ActivityID); activityID != "" {
-		descriptor.ActivityID = activityID
+	if entry.Running {
+		return []Delivery{{Kind: DeliveryStatus, Source: SourceStatus, Records: []Record{{Sequence: 1, Task: descriptor}}, ActivityID: descriptor.ActivityID}}, nil
 	}
-	state := strings.TrimSpace(snapshot.State)
-	if state != "" {
-		descriptor.State = task.State(state)
+	var snapshot fallbackSnapshot
+	loadedACPHistory := false
+	if entry.Kind == task.KindSubagent {
+		loaded, err := s.loadDurableSubagentHistory(ctx, entry)
+		if err == nil {
+			if err := s.verifyFiniteSubagentRead(ctx, entry); err != nil {
+				return nil, err
+			}
+			snapshot = loaded
+			loadedACPHistory = true
+		} else {
+			snapshot = terminalSubagentFallbackSnapshot(entry)
+		}
+	} else {
+		snapshot = terminalCommandFallbackSnapshot(entry)
 	}
-	descriptor.Running = snapshot.Running && !stream.IsTerminalState(state)
-	descriptor.SupportsInput = entry != nil && entry.Kind == task.KindCommand && snapshot.SupportsInput
-	if turnID := strings.TrimSpace(snapshot.Ref.TerminalID); turnID != "" {
-		descriptor.CurrentTurnID = turnID
+	records := recordsForSnapshot(entry, snapshot)
+	if len(records) == 0 {
+		return []Delivery{{Kind: DeliveryStatus, Source: SourceStatus, Records: []Record{{Sequence: 1, Task: descriptor}}, ActivityID: descriptor.ActivityID}}, nil
 	}
-	if !snapshot.UpdatedAt.IsZero() {
-		descriptor.UpdatedAt = snapshot.UpdatedAt
+	deliveries, err := replacementDeliveries(entry, records)
+	if err == nil {
+		return deliveries, nil
 	}
-	return descriptor
+	if loadedACPHistory && errorcode.Is(err, errorcode.ResourceExhausted) {
+		fallback := terminalSubagentFallbackSnapshot(entry)
+		records = recordsForSnapshot(entry, fallback)
+		deliveries, err = replacementDeliveries(entry, records)
+		if err == nil {
+			return deliveries, nil
+		}
+	}
+	if errorcode.Is(err, errorcode.ResourceExhausted) {
+		return []Delivery{{Kind: DeliveryStatus, Source: SourceStatus, Records: []Record{{Sequence: 1, Task: descriptor}}, ActivityID: descriptor.ActivityID}}, nil
+	}
+	return nil, err
 }
 
-func descriptorForFrame(entry *task.Entry, frame stream.Frame) TaskDescriptor {
+func recordsForSnapshot(entry *task.Entry, snapshot fallbackSnapshot) []Record {
+	records := make([]Record, 0, len(snapshot.Frames)+1)
+	for _, frame := range framesForFallback(snapshot) {
+		cloned := cloneFrame(frame)
+		records = append(records, Record{
+			Sequence: uint64(len(records) + 1), Task: descriptorForFrame(entry, cloned), Frame: &cloned,
+		})
+	}
+	return records
+}
+
+func replacementDeliveries(entry *task.Entry, records []Record) ([]Delivery, error) {
+	if len(records) > maxReplacementRecords {
+		return nil, errorcode.New(errorcode.ResourceExhausted, "taskstream: replacement exceeds record limit")
+	}
+	totalBytes := 0
+	encoded := make([][]byte, len(records))
+	for i, record := range records {
+		raw, err := json.Marshal(record)
+		if err != nil {
+			return nil, err
+		}
+		if len(raw) > maxDeliveryBytes || totalBytes+len(raw) > maxReplacementBytes {
+			return nil, errorcode.New(errorcode.ResourceExhausted, "taskstream: replacement exceeds byte limit")
+		}
+		encoded[i] = raw
+		totalBytes += len(raw)
+	}
+	digest := sha256.New()
+	_, _ = digest.Write([]byte(strings.TrimSpace(entry.TaskID)))
+	for _, raw := range encoded {
+		_, _ = digest.Write(raw)
+	}
+	snapshotID := hex.EncodeToString(digest.Sum(nil))
+	descriptor := descriptorFromEntry(entry)
+	deliveries := []Delivery{{Kind: DeliveryReplaceBegin, Source: SourceReplacement, SnapshotID: snapshotID, ActivityID: descriptor.ActivityID}}
+	page := uint32(0)
+	for start := 0; start < len(records); {
+		end := start
+		pageBytes := 0
+		for end < len(records) && end-start < maxDeliveryRecords {
+			if end > start && pageBytes+len(encoded[end]) > maxDeliveryBytes {
+				break
+			}
+			pageBytes += len(encoded[end])
+			end++
+		}
+		deliveries = append(deliveries, Delivery{
+			Kind: DeliveryReplacePage, Source: SourceReplacement, SnapshotID: snapshotID,
+			Page: page, Records: append([]Record(nil), records[start:end]...), ActivityID: descriptor.ActivityID,
+		})
+		page++
+		start = end
+	}
+	deliveries = append(deliveries, Delivery{Kind: DeliveryReplaceEnd, Source: SourceReplacement, SnapshotID: snapshotID, Page: page, ActivityID: descriptor.ActivityID})
+	return deliveries, nil
+}
+
+func (s *service) verifyFiniteSubagentRead(ctx context.Context, before *task.Entry) error {
+	if before == nil || before.Kind != task.KindSubagent || before.Running || !task.IsTerminalState(before.State) {
+		return errorcode.New(errorcode.FailedPrecondition, "taskstream: finite subagent history requires a terminal activity")
+	}
+	after, err := s.tasks.Get(ctx, before.TaskID)
+	if err != nil {
+		return errorcode.Wrap(errorcode.Unavailable, "taskstream: verify finite subagent history activity", err)
+	}
+	if !sameFiniteSubagentActivity(before, after) {
+		return errorcode.New(errorcode.Conflict, "taskstream: Task activity changed during history read")
+	}
+	return nil
+}
+
+func sameFiniteSubagentActivity(before, after *task.Entry) bool {
+	if before == nil || after == nil || before.TaskID != after.TaskID ||
+		before.Session.SessionID != after.Session.SessionID || after.Kind != task.KindSubagent ||
+		after.Running || !task.IsTerminalState(after.State) {
+		return false
+	}
+	beforeDescriptor := descriptorFromEntry(before)
+	afterDescriptor := descriptorFromEntry(after)
+	return before.State == after.State &&
+		beforeDescriptor.ActivityID == afterDescriptor.ActivityID &&
+		beforeDescriptor.CurrentTurnID == afterDescriptor.CurrentTurnID &&
+		beforeDescriptor.Handle == afterDescriptor.Handle &&
+		beforeDescriptor.AgentHandle == afterDescriptor.AgentHandle &&
+		beforeDescriptor.ParticipantID == afterDescriptor.ParticipantID &&
+		taskHistoryChildSessionID(before) == taskHistoryChildSessionID(after) &&
+		reflect.DeepEqual(taskHistoryTarget(before), taskHistoryTarget(after))
+}
+
+func terminalCommandFallbackSnapshot(entry *task.Entry) fallbackSnapshot {
+	if entry == nil {
+		return fallbackSnapshot{}
+	}
+	descriptor := descriptorFromEntry(entry)
+	text := strings.TrimSpace(mapString(entry.Result, "result"))
+	if text == "" {
+		text = strings.TrimSpace(mapString(entry.Result, "error"))
+	}
+	var exitCode *int
+	if code, ok := integerValue(entry.Result["exit_code"]); ok {
+		exitCode = &code
+	}
+	frame := Frame{
+		TerminalID: descriptor.CurrentTurnID,
+		Text:       text, State: string(entry.State), Closed: true, ExitCode: exitCode, UpdatedAt: entry.UpdatedAt,
+	}
+	return fallbackSnapshot{
+		State: frame.State, Running: false, TerminalFramed: true,
+		ExitCode: exitCode, UpdatedAt: entry.UpdatedAt, Frames: []Frame{frame}, FinalText: text,
+	}
+}
+
+func integerValue(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), int64(int(typed)) == typed
+	case float64:
+		return int(typed), float64(int(typed)) == typed
+	case json.Number:
+		parsed, err := typed.Int64()
+		return int(parsed), err == nil && int64(int(parsed)) == parsed
+	default:
+		return 0, false
+	}
+}
+
+func (s *service) exactReadError(err error) error {
+	if err == nil {
+		err = streamspool.ErrUnavailable
+	}
+	return errorcode.Wrap(errorcode.Unavailable, "taskstream: exact cached history is unavailable", err)
+}
+
+func descriptorForFrame(entry *task.Entry, frame Frame) TaskDescriptor {
 	descriptor := descriptorFromEntry(entry)
 	if activityID := strings.TrimSpace(frame.ActivityID); activityID != "" {
 		descriptor.ActivityID = activityID
 	}
-	state := strings.TrimSpace(frame.State)
-	switch {
-	case state != "":
+	if state := strings.TrimSpace(frame.State); state != "" {
 		descriptor.State = task.State(state)
-		descriptor.Running = frame.Running && !stream.IsTerminalState(state)
-		descriptor.SupportsInput = false
-	case frame.Running:
-		descriptor.State = task.StateRunning
-		descriptor.Running = true
-		descriptor.SupportsInput = false
-	case frame.Closed:
-		descriptor.Running = false
 	}
-	if turnID := strings.TrimSpace(frame.Ref.TerminalID); turnID != "" {
+	descriptor.Running = frame.Running && !task.IsTerminalState(task.State(frame.State))
+	if turnID := strings.TrimSpace(frame.TerminalID); turnID != "" {
 		descriptor.CurrentTurnID = turnID
 	}
 	if !frame.UpdatedAt.IsZero() {
@@ -515,7 +610,7 @@ func descriptorFromEntry(entry *task.Entry) TaskDescriptor {
 		SupportsInput: entry.Kind == task.KindCommand && entry.SupportsInput, SupportsCancel: entry.SupportsCancel,
 		ParentTool:    ParentTool{ToolCallID: parentCall, ToolName: parentTool},
 		ParticipantID: firstString(mapString(entry.Metadata, "agent_id"), mapString(entry.Spec, "agent_id")),
-		ActivityID:    mapString(entry.Metadata, "child_activity_id"),
+		ActivityID:    firstString(mapString(entry.Metadata, "child_activity_id"), mapString(entry.Spec, "child_activity_id")),
 		CurrentTurnID: firstString(mapString(entry.Metadata, "turn_id"), mapString(entry.Spec, "turn_id"), entry.Terminal.TerminalID),
 		UpdatedAt:     entry.UpdatedAt,
 	}

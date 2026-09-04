@@ -1,63 +1,14 @@
 package kernel
 
 import (
+	"context"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/internal/acpbridge"
 )
-
-func TestForwardSourceEventsKeepsObservationGapTransientAndContinues(t *testing.T) {
-	t.Parallel()
-
-	handle := newTestTurnHandle()
-	firstMessage := model.NewTextMessage(model.RoleAssistant, "before gap")
-	lastMessage := model.NewTextMessage(model.RoleAssistant, "after gap")
-	source := acpbridge.SourceStream{Events: func(yield func(acpbridge.SourceEvent, error) bool) {
-		if !yield(acpbridge.SourceEvent{Canonical: &session.Event{
-			ID: "event-1", Type: session.EventTypeAssistant, Visibility: session.VisibilityUIOnly, Message: &firstMessage,
-		}}, nil) {
-			return
-		}
-		if !yield(acpbridge.SourceEvent{}, &agent.EventStreamGapError{Dropped: 7}) {
-			return
-		}
-		yield(acpbridge.SourceEvent{Canonical: &session.Event{
-			ID: "event-9", Type: session.EventTypeAssistant, Visibility: session.VisibilityUIOnly, Message: &lastMessage,
-		}}, nil)
-	}}
-	(&Gateway{}).forwardSourceEvents(session.Session{SessionRef: handle.sessionRef}, handle, source)
-
-	got, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatalf("eventsAfter() error = %v", err)
-	}
-	if len(got) != 3 {
-		t.Fatalf("eventsAfter() = %#v, want canonical, transient gap notice, canonical", got)
-	}
-	if got[0].EventID != "event-1" || got[2].EventID != "event-9" {
-		t.Fatalf("forwarded event ids = %q, %q, want event-1 and event-9", got[0].EventID, got[2].EventID)
-	}
-	if got[1].Kind != eventstream.KindNotice || got[1].Delivery == nil || got[1].Delivery.Mode != eventstream.DeliveryTransient {
-		t.Fatalf("gap envelope = %#v, want transient notice", got[1])
-	}
-	if got[1].Notice != acpbridge.RuntimeObservationGapNotice {
-		t.Fatalf("gap Notice = %q, want stable presentation text", got[1].Notice)
-	}
-	observation := testRuntimeMetaSection(got[1].Meta, "observation")
-	if observation["code"] != "observation_gap" {
-		t.Fatalf("gap observation code = %#v, want observation_gap", observation["code"])
-	}
-	if observation["dropped"] != uint64(7) {
-		t.Fatalf("gap dropped = %#v, want 7", observation["dropped"])
-	}
-	if handle.failed {
-		t.Fatal("observation gap marked the Runtime turn failed")
-	}
-}
 
 func TestForwardSourceEventsPublishesFinalUsageWithoutRepeatedAssistantContent(t *testing.T) {
 	t.Parallel()
@@ -65,13 +16,11 @@ func TestForwardSourceEventsPublishesFinalUsageWithoutRepeatedAssistantContent(t
 	handle := newTestTurnHandle()
 	delta := model.NewTextMessage(model.RoleAssistant, "done")
 	final := model.NewTextMessage(model.RoleAssistant, "done")
-	source := acpbridge.SourceStream{Events: func(yield func(acpbridge.SourceEvent, error) bool) {
-		if !yield(acpbridge.SourceEvent{Canonical: session.MarkUIOnly(&session.Event{
+	events := []agent.SourceEvent{
+		{Canonical: session.MarkUIOnly(&session.Event{
 			Type: session.EventTypeAssistant, Message: &delta,
-		})}, nil) {
-			return
-		}
-		yield(acpbridge.SourceEvent{
+		})},
+		{
 			Canonical: &session.Event{
 				ID: "assistant-final", Seq: 2, Type: session.EventTypeAssistant,
 				Visibility: session.VisibilityCanonical, Message: &final,
@@ -80,14 +29,12 @@ func TestForwardSourceEventsPublishesFinalUsageWithoutRepeatedAssistantContent(t
 				}},
 			},
 			CanonicalContentAlreadyPublished: agent.PublishedAssistantMessage,
-		}, nil)
-	}}
-	(&Gateway{}).forwardSourceEvents(session.Session{SessionRef: handle.sessionRef}, handle, source)
-
-	got, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatal(err)
+		},
 	}
+	for _, event := range events {
+		_ = (&Gateway{}).observeSourceEvent(context.Background(), session.Session{SessionRef: handle.sessionRef}, handle, event)
+	}
+	got := testObservedTurnEvents(handle)
 	if len(got) != 2 || eventstream.UpdateType(got[0].Update) != "agent_message_chunk" ||
 		eventstream.UpdateType(got[1].Update) != "usage_update" {
 		t.Fatalf("live source projection = %#v, want delta once followed by final usage", got)
@@ -102,26 +49,20 @@ func TestForwardSourceEventsPublishesTaskOwnedRunCommandFinalWithoutTerminalByte
 		"task_id": "task-1", "output_delta": "ok\n",
 		"kind": "command", "state": "completed", "running": false,
 	})
-	source := acpbridge.SourceStream{Events: func(yield func(acpbridge.SourceEvent, error) bool) {
-		yield(acpbridge.SourceEvent{
-			Canonical: &session.Event{
-				ID: "command-final", Seq: 2, Type: session.EventTypeToolResult,
-				Visibility: session.VisibilityCanonical, Meta: meta,
-				Tool: &session.EventTool{
-					ID: "call-1", Name: "RunCommand", Status: "completed",
-					Output:  map[string]any{"stdout": "ok\n", "exit_code": 0},
-					Content: []session.EventToolContent{{Type: "terminal", TerminalID: "terminal-1", Text: "ok\n"}},
-				},
+	event := agent.SourceEvent{
+		Canonical: &session.Event{
+			ID: "command-final", Seq: 2, Type: session.EventTypeToolResult,
+			Visibility: session.VisibilityCanonical, Meta: meta,
+			Tool: &session.EventTool{
+				ID: "call-1", Name: "RunCommand", Status: "completed",
+				Output:  map[string]any{"stdout": "ok\n", "exit_code": 0},
+				Content: []session.EventToolContent{{Type: "terminal", TerminalID: "terminal-1", Text: "ok\n"}},
 			},
-			CanonicalContentAlreadyPublished: agent.PublishedTerminal,
-		}, nil)
-	}}
-	(&Gateway{}).forwardSourceEvents(session.Session{SessionRef: handle.sessionRef}, handle, source)
-
-	got, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatal(err)
+		},
+		CanonicalContentAlreadyPublished: agent.PublishedTerminal,
 	}
+	_ = (&Gateway{}).observeSourceEvent(context.Background(), session.Session{SessionRef: handle.sessionRef}, handle, event)
+	got := testObservedTurnEvents(handle)
 	if len(got) != 1 {
 		t.Fatalf("live source projection = %#v, want one final state update", got)
 	}
@@ -147,29 +88,25 @@ func TestForwardSourceEventsKeepsAnswerWhenOnlyThoughtWasPublished(t *testing.T)
 		model.NewReasoningPart("thinking", model.ReasoningVisibilityVisible),
 		model.NewTextPart("answer"),
 	)
-	source := acpbridge.SourceStream{Events: func(yield func(acpbridge.SourceEvent, error) bool) {
-		if !yield(acpbridge.SourceEvent{Canonical: session.MarkUIOnly(&session.Event{
+	events := []agent.SourceEvent{
+		{Canonical: session.MarkUIOnly(&session.Event{
 			Type: session.EventTypeAssistant, MessageID: "message-1", Message: &thought,
 			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeAgentThought), MessageID: "message-1",
 			}},
-		})}, nil) {
-			return
-		}
-		yield(acpbridge.SourceEvent{
+		})},
+		{
 			Canonical: &session.Event{
 				ID: "assistant-final", Seq: 2, Type: session.EventTypeAssistant,
 				Visibility: session.VisibilityCanonical, MessageID: "message-1", Message: &final,
 			},
 			CanonicalContentAlreadyPublished: agent.PublishedAssistantThought,
-		}, nil)
-	}}
-	(&Gateway{}).forwardSourceEvents(session.Session{SessionRef: handle.sessionRef}, handle, source)
-
-	got, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatal(err)
+		},
 	}
+	for _, event := range events {
+		_ = (&Gateway{}).observeSourceEvent(context.Background(), session.Session{SessionRef: handle.sessionRef}, handle, event)
+	}
+	got := testObservedTurnEvents(handle)
 	if len(got) != 2 || eventstream.UpdateType(got[0].Update) != eventstream.UpdateAgentThought ||
 		eventstream.UpdateType(got[1].Update) != eventstream.UpdateAgentMessage {
 		t.Fatalf("live source projection = %#v, want thought delta followed by the unpublished final answer", got)
@@ -189,24 +126,18 @@ func TestForwardSourceEventsPublishesPairedNativeContentBeforeCanonicalUsage(t *
 			Content:       eventstream.TextContent{Type: "text", Text: "delta"},
 		},
 	}
-	source := acpbridge.SourceStream{Events: func(yield func(acpbridge.SourceEvent, error) bool) {
-		yield(acpbridge.SourceEvent{
-			Canonical: &session.Event{
-				ID: "assistant-final", Seq: 2, Type: session.EventTypeAssistant,
-				Visibility: session.VisibilityCanonical, Message: &message,
-				Meta: map[string]any{"usage": map[string]any{
-					"prompt_tokens": 8, "completion_tokens": 1, "total_tokens": 9,
-				}},
-			},
-			ACP: &native,
-		}, nil)
-	}}
-	(&Gateway{}).forwardSourceEvents(session.Session{SessionRef: handle.sessionRef}, handle, source)
-
-	got, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatal(err)
+	event := agent.SourceEvent{
+		Canonical: &session.Event{
+			ID: "assistant-final", Seq: 2, Type: session.EventTypeAssistant,
+			Visibility: session.VisibilityCanonical, Message: &message,
+			Meta: map[string]any{"usage": map[string]any{
+				"prompt_tokens": 8, "completion_tokens": 1, "total_tokens": 9,
+			}},
+		},
+		Native: &native,
 	}
+	_ = (&Gateway{}).observeSourceEvent(context.Background(), session.Session{SessionRef: handle.sessionRef}, handle, event)
+	got := testObservedTurnEvents(handle)
 	if len(got) != 2 || eventstream.UpdateType(got[0].Update) != eventstream.UpdateAgentMessage ||
 		eventstream.UpdateType(got[1].Update) != eventstream.UpdateUsage {
 		t.Fatalf("paired source projection = %#v, want native content followed by canonical usage", got)
@@ -231,27 +162,21 @@ func TestForwardSourceEventsKeepsPairedNativeTerminalAsSingleLiveAuthority(t *te
 			Meta:          meta,
 		},
 	}
-	source := acpbridge.SourceStream{Events: func(yield func(acpbridge.SourceEvent, error) bool) {
-		yield(acpbridge.SourceEvent{
-			Canonical: session.MarkUIOnly(&session.Event{
-				ID:   "terminal-delta",
-				Type: session.EventTypeToolCall,
-				Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-					SessionUpdate: eventstream.UpdateToolCallInfo,
-					ToolCallID:    "command-1",
-					Status:        status,
-					Meta:          meta,
-				}},
-			}),
-			ACP: &native,
-		}, nil)
-	}}
-	(&Gateway{}).forwardSourceEvents(session.Session{SessionRef: handle.sessionRef}, handle, source)
-
-	got, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatal(err)
+	event := agent.SourceEvent{
+		Canonical: session.MarkUIOnly(&session.Event{
+			ID:   "terminal-delta",
+			Type: session.EventTypeToolCall,
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
+				ToolCallID:    "command-1",
+				Status:        status,
+				Meta:          meta,
+			}},
+		}),
+		Native: &native,
 	}
+	_ = (&Gateway{}).observeSourceEvent(context.Background(), session.Session{SessionRef: handle.sessionRef}, handle, event)
+	got := testObservedTurnEvents(handle)
 	if len(got) != 1 {
 		t.Fatalf("paired terminal projection = %#v, want one native terminal delta", got)
 	}
@@ -301,24 +226,18 @@ func TestForwardSourceEventsDoesNotDuplicateNativeUsage(t *testing.T) {
 		Kind:   eventstream.KindSessionUpdate,
 		Update: eventstream.UsageUpdate{SessionUpdate: eventstream.UpdateUsage, Used: 9, Size: 9},
 	}
-	source := acpbridge.SourceStream{Events: func(yield func(acpbridge.SourceEvent, error) bool) {
-		yield(acpbridge.SourceEvent{
-			Canonical: &session.Event{
-				ID: "assistant-final", Seq: 2, Type: session.EventTypeAssistant,
-				Visibility: session.VisibilityCanonical,
-				Meta: map[string]any{"usage": map[string]any{
-					"prompt_tokens": 8, "completion_tokens": 1, "total_tokens": 9,
-				}},
-			},
-			ACP: &native,
-		}, nil)
-	}}
-	(&Gateway{}).forwardSourceEvents(session.Session{SessionRef: handle.sessionRef}, handle, source)
-
-	got, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatal(err)
+	event := agent.SourceEvent{
+		Canonical: &session.Event{
+			ID: "assistant-final", Seq: 2, Type: session.EventTypeAssistant,
+			Visibility: session.VisibilityCanonical,
+			Meta: map[string]any{"usage": map[string]any{
+				"prompt_tokens": 8, "completion_tokens": 1, "total_tokens": 9,
+			}},
+		},
+		Native: &native,
 	}
+	_ = (&Gateway{}).observeSourceEvent(context.Background(), session.Session{SessionRef: handle.sessionRef}, handle, event)
+	got := testObservedTurnEvents(handle)
 	if len(got) != 1 || eventstream.UpdateType(got[0].Update) != eventstream.UpdateUsage {
 		t.Fatalf("paired native usage = %#v, want exactly one usage update", got)
 	}

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
 func TestDirectoryIndexFansStatusToIndependentObserversAndReleasesSession(t *testing.T) {
@@ -20,11 +19,9 @@ func TestDirectoryIndexFansStatusToIndependentObserversAndReleasesSession(t *tes
 	index := NewDirectoryIndex()
 	created, err := New(Config{
 		Tasks:      store,
-		Streams:    func() stream.Service { return nil },
 		Directory:  index,
 		Authorizer: taskStreamTestAuthorizer{},
 		Secret:     taskStreamTestSecret,
-		Generation: "directory-generation",
 	})
 	if err != nil {
 		t.Fatal(err)

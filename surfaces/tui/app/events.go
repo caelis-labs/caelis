@@ -7,7 +7,6 @@ import (
 	"time"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
@@ -212,12 +211,9 @@ const (
 	ACPProjectionSubagent    = transcript.ScopeSubagent
 )
 
-// TranscriptEventsMsg is one normalized Surface projection batch. Task owner
-// repairs are decoded alongside transcript events so live delivery and
-// reconnect never build independent correlation paths from the same Envelope.
+// TranscriptEventsMsg is one normalized Surface projection batch.
 type TranscriptEventsMsg struct {
-	Events       []TranscriptEvent
-	OwnerRepairs taskstream.TaskOwnerRepairs
+	Events []TranscriptEvent
 	// ReconnectReplay marks history delivered by the reconnect backfill path.
 	// It affects only first-paint layout reconstruction, never transcript data.
 	ReconnectReplay bool

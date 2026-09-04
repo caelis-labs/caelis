@@ -226,6 +226,9 @@ func (r *Runtime) runAttempt(
 			}
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return batch, emitted, inputPersisted, err
+	}
 	if err := r.updateCompactionUsageFromBatch(ctx, ref, batch); err != nil {
 		return batch, emitted, inputPersisted, err
 	}

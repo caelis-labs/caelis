@@ -109,6 +109,7 @@ func (tm *taskRuntime) finalizeTerminalCommand(
 			task.result["system_hint"] = hint
 		}
 	}
+	task.emitOutputTerminalLocked(state, status, commandExitCodeAvailable(state, result.ExitCode, resultErr))
 	snapshot := commandObservationSnapshot(task.snapshotLocked(status), exactStartCursor, exactOutputDelta)
 	entry := task.entrySnapshot(tm.runtime.now())
 	task.mu.Unlock()

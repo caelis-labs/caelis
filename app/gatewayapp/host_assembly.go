@@ -3,7 +3,6 @@ package gatewayapp
 import (
 	"context"
 
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
@@ -20,6 +19,12 @@ type hostControlAssembly struct {
 }
 
 func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, cursorSecret []byte) (hostControlAssembly, error) {
+	taskOutput := controltaskstream.NewRecorder(
+		stack.composition.authorities.streamSpool,
+		stack.composition.authorities.diagnostics,
+	)
+	stack.composition.authorities.taskOutput = taskOutput
+	stack.composition.authorities.taskOutputLifecycle = taskOutput
 	runtimeStateReader, err := newControlRuntimeStateReader(&stack.composition)
 	if err != nil {
 		return hostControlAssembly{}, err
@@ -93,12 +98,14 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	stack.agentCommands = controlCommands
 	stack.pluginCommands = controlCommands
 
-	taskStreamRouter := &hostTaskStreamService{host: &stack.composition}
+	taskStreamRouter := &hostTaskStreamService{
+		host: &stack.composition, lifecycle: stack.composition.authorities.taskOutputLifecycle,
+	}
 	taskDirectory := controltaskstream.NewDirectoryIndex()
 	stack.composition.taskCommitted = taskDirectory.Notify
 	controlTaskStreams, err := controltaskstream.New(controltaskstream.Config{
 		Tasks:           stack.composition.authorities.taskStore,
-		Streams:         func() stream.Service { return taskStreamRouter },
+		Spool:           stack.composition.authorities.streamSpool,
 		Sessions:        stack.composition.sessions,
 		Directory:       taskDirectory,
 		SubagentHistory: subagentHistoryService{composition: &stack.composition},

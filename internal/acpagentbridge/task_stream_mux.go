@@ -55,7 +55,7 @@ func newACPTaskStreamClientMux(parent context.Context, client taskstream.Client,
 	ctx, cancel := context.WithCancel(parent)
 	return &acpTaskStreamMux{
 		ctx: ctx, cancel: cancel, client: client,
-		sessionID: strings.TrimSpace(sessionID), events: make(chan eventstream.Envelope, 128),
+		sessionID: strings.TrimSpace(sessionID), events: make(chan eventstream.Envelope),
 		observations: map[string]*acpTaskStreamObservation{},
 	}
 }
@@ -195,14 +195,16 @@ func (m *acpTaskStreamMux) resolveAndForward(
 
 	taskID := attachment.taskID
 	subscription := attachment.result.Subscription
-	resumeCursor := ""
+	resumeCursor := strings.TrimSpace(generation.cursor)
+	allowReplacement := strings.TrimSpace(generation.cursor) == ""
 	for {
-		lastCursor, streamErr := m.forwardUntilClose(anchor, subscription, generation)
+		lastCursor, streamErr := m.forwardUntilClose(anchor, subscription, generation, allowReplacement, resumeCursor)
 		_ = subscription.Close()
 		m.recordObservationCursor(anchor.callID, generation, lastCursor)
 		if lastCursor != "" {
 			resumeCursor = lastCursor
 		}
+		allowReplacement = false
 		if streamErr == nil || generation.ctx.Err() != nil {
 			m.closeObservation(anchor.callID, generation, lastCursor)
 			return
@@ -251,54 +253,83 @@ func (m *acpTaskStreamMux) forwardUntilClose(
 	anchor acpTaskStreamAnchor,
 	subscription taskstream.Subscription,
 	generation *acpTaskStreamObservationGeneration,
+	allowReplacement bool,
+	committedCursor string,
 ) (string, error) {
 	deliveryCtx := generation.ctx
+	assembler := &taskstream.DeliveryAssembler{}
+	replacementAllowed := allowReplacement
 	for {
 		select {
 		case <-deliveryCtx.Done():
-			return strings.TrimSpace(subscription.LastCursor()), deliveryCtx.Err()
-		case envelope, ok := <-subscription.Events():
+			return committedCursor, deliveryCtx.Err()
+		case delivery, ok := <-subscription.Deliveries():
 			if !ok {
-				return strings.TrimSpace(subscription.LastCursor()), subscription.Err()
-			}
-			if taskstream.IsTransientGapEnvelope(envelope) {
-				// Child current-state replay is intentionally anchored before the
-				// lost exact window. Forward its gap boundary to the child terminal
-				// projector so any partially accumulated FinalResponse is reset
-				// before replayed deltas arrive. Command gaps have no child
-				// accumulator and remain internal to this compatibility mux.
-				if anchor.kind != task.KindSubagent {
-					continue
+				if assembler.Pending() {
+					return committedCursor, errorcode.New(errorcode.Unavailable, "Task replacement ended before commit")
 				}
+				return committedCursor, subscription.Err()
 			}
-			cursor := strings.TrimSpace(envelope.Cursor)
-			if cursor == "" {
-				cursor = strings.TrimSpace(subscription.LastCursor())
+			if delivery.Source == taskstream.SourceReplacement && !replacementAllowed {
+				return committedCursor, errorcode.New(
+					errorcode.Conflict,
+					"Task stream replacement cannot follow output already delivered over ACP",
+				)
 			}
-			m.recordObservationCursor(anchor.callID, generation, cursor)
-			if !acpTaskStreamEnvelopeAllowed(anchor, envelope) {
-				continue
+			events, _, deliveryErr := assembler.Accept(delivery)
+			if deliveryErr != nil {
+				return committedCursor, deliveryErr
 			}
-			select {
-			case <-deliveryCtx.Done():
-				return strings.TrimSpace(subscription.LastCursor()), deliveryCtx.Err()
-			case m.events <- envelope:
+			if delivery.Source == taskstream.SourceExact && len(events) > 0 {
+				replacementAllowed = false
 			}
-			if anchor.kind == task.KindSubagent && envelope.Kind == eventstream.KindLifecycle && envelope.Lifecycle != nil {
-				terminal := eventstream.IsTerminalLifecycleState(envelope.Lifecycle.State)
-				sealed := m.observeSubagentActivityLifecycle(anchor.callID, generation, terminal)
-				if terminal {
-					// Parent Task read/wait projection may be waiting for this child
-					// lifecycle before closing its mounted terminal. Signaling the
-					// boundary does not end a live following subscription.
-					m.signalGenerationBoundary(anchor.callID, generation.boundary)
+			sealedTerminal := false
+			for _, envelope := range events {
+				terminal, sealed, forwardErr := m.forwardTaskEnvelope(deliveryCtx, anchor, generation, envelope)
+				if forwardErr != nil {
+					return committedCursor, forwardErr
 				}
 				if terminal && sealed {
-					return strings.TrimSpace(subscription.LastCursor()), nil
+					sealedTerminal = true
 				}
+			}
+			// A page becomes resumable only after every projected event crosses
+			// the ACP boundary. Subscription read-ahead must not advance it.
+			if cursor := strings.TrimSpace(delivery.NextCursor); cursor != "" {
+				committedCursor = cursor
+				m.recordObservationCursor(anchor.callID, generation, cursor)
+				replacementAllowed = false
+			}
+			if sealedTerminal {
+				return committedCursor, nil
 			}
 		}
 	}
+}
+
+func (m *acpTaskStreamMux) forwardTaskEnvelope(
+	ctx context.Context,
+	anchor acpTaskStreamAnchor,
+	generation *acpTaskStreamObservationGeneration,
+	envelope eventstream.Envelope,
+) (bool, bool, error) {
+	if !acpTaskStreamEnvelopeAllowed(anchor, envelope) {
+		return false, false, nil
+	}
+	select {
+	case <-ctx.Done():
+		return false, false, ctx.Err()
+	case m.events <- envelope:
+	}
+	if anchor.kind != task.KindSubagent || envelope.Kind != eventstream.KindLifecycle || envelope.Lifecycle == nil {
+		return false, false, nil
+	}
+	terminal := eventstream.IsTerminalLifecycleState(envelope.Lifecycle.State)
+	sealed := m.observeSubagentActivityLifecycle(anchor.callID, generation, terminal)
+	if terminal {
+		m.signalGenerationBoundary(anchor.callID, generation.boundary)
+	}
+	return terminal, sealed, nil
 }
 
 func (m *acpTaskStreamMux) resolveSubscriptionWithGrace(
@@ -458,17 +489,6 @@ func (m *acpTaskStreamMux) reportNoticeOnce(
 	}
 }
 
-func (m *acpTaskStreamMux) signalBoundary(callID string) {
-	if m == nil {
-		return
-	}
-	boundary := m.observationBoundary(callID)
-	if boundary == nil {
-		return
-	}
-	m.signalGenerationBoundary(callID, boundary)
-}
-
 func (m *acpTaskStreamMux) signalGenerationBoundary(callID string, boundary chan struct{}) {
 	if m == nil || boundary == nil {
 		return
@@ -480,13 +500,6 @@ func (m *acpTaskStreamMux) signalGenerationBoundary(callID string, boundary chan
 	case boundary <- struct{}{}:
 	default:
 	}
-}
-
-func (m *acpTaskStreamMux) parentBoundary(callID string) <-chan struct{} {
-	if m == nil {
-		return nil
-	}
-	return m.observationBoundary(callID)
 }
 
 func (m *acpTaskStreamMux) Close() {

@@ -802,7 +802,11 @@ func approvalRawInputFromJSON(raw string) map[string]any {
 	return decoded
 }
 
-func sendApprovalPrompt(ctx context.Context, turn controlprompt.Turn, req *approvalPayload, send func(tea.Msg)) {
+type approvalSubmitter interface {
+	SubmitApproval(context.Context, controlprompt.ApprovalDecision) error
+}
+
+func sendApprovalPrompt(ctx context.Context, turn approvalSubmitter, req *approvalPayload, send func(tea.Msg)) {
 	if turn == nil || req == nil || send == nil {
 		return
 	}
@@ -835,7 +839,7 @@ func automaticApprovalReviewDisplayText(req *approvalPayload) string {
 	}
 }
 
-func awaitApprovalPrompt(ctx context.Context, turn controlprompt.Turn, req *approvalPayload, responses <-chan PromptResponse, send func(tea.Msg)) {
+func awaitApprovalPrompt(ctx context.Context, turn approvalSubmitter, req *approvalPayload, responses <-chan PromptResponse, send func(tea.Msg)) {
 	ctx = contextOrBackground(ctx)
 	var response PromptResponse
 	select {

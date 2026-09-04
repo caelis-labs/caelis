@@ -103,12 +103,16 @@ func TestRuntimeMainControllerSteeringWaitsForAdmissionAndCommitsCanonicalInput(
 	}
 
 	controllerHandle.finish()
+	if err := result.Handle.WaitCompletion(ctx); err != nil {
+		t.Fatal(err)
+	}
+	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var userInputs []*session.Event
 	var communications []*session.Event
-	for event, eventErr := range result.Handle.Events() {
-		if eventErr != nil {
-			t.Fatal(eventErr)
-		}
+	for _, event := range events {
 		if event != nil && session.EventTypeOf(event) == session.EventTypeUser {
 			userInputs = append(userInputs, event)
 		}
@@ -193,11 +197,15 @@ func TestRuntimeACPControllerInitialAgentCommunicationCarriesIdentity(t *testing
 		t.Fatal("controller Turn did not start")
 	}
 	controllerHandle.finish()
+	if err := result.Handle.WaitCompletion(ctx); err != nil {
+		t.Fatal(err)
+	}
+	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var communication *session.Event
-	for event, eventErr := range result.Handle.Events() {
-		if eventErr != nil {
-			t.Fatal(eventErr)
-		}
+	for _, event := range events {
 		if session.ProtocolAgentCommunicationOf(event) != nil {
 			communication = event
 		}
@@ -288,6 +296,7 @@ func TestRuntimeMainControllerSteeringUsesReattachedBinding(t *testing.T) {
 		t.Fatal("steering did not reach reattached controller")
 	}
 	controllerHandle.finish()
-	for range result.Handle.Events() {
+	if err := result.Handle.WaitCompletion(ctx); err != nil {
+		t.Fatal(err)
 	}
 }

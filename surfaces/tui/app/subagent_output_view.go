@@ -157,10 +157,10 @@ func (m *Model) ensureSubagentOutputView(callID string) *subagentOutputView {
 	return view
 }
 
-// resetForCurrentState drops only the transient child projection after a Task
-// stream gap. Stable Spawn/Task ownership stays mounted while the following
-// semantic snapshot rebuilds the visible child timeline.
-func (v *subagentOutputView) resetForCurrentState() {
+// resetForReplacement drops only the transient child projection before an
+// atomic fallback replacement. Stable Spawn/Task ownership stays mounted while
+// the replacement rebuilds the visible child timeline.
+func (v *subagentOutputView) resetForReplacement() {
 	if v == nil {
 		return
 	}

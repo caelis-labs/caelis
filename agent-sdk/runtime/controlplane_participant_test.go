@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
 func TestParticipantLifecycleEventUsesNormalizedACPParticipantSemantics(t *testing.T) {
@@ -80,7 +81,7 @@ func TestRuntimeParticipantLifecycleMayOverlapActiveTurnFence(t *testing.T) {
 	binding := session.ParticipantBinding{
 		ID: "claude-1", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar,
 		AgentName: "claude", Label: "@claude", SessionID: "remote-claude",
-		AttachmentGeneration: "generation-1",
+		DelegationID: "delegation-claude-1", AttachmentGeneration: "generation-1",
 	}
 	frozen, err := placement.Seal(placement.Placement{
 		Kind: placement.KindAgent, ProfileID: "acp:claude:model", Agent: "claude", Model: "opus",
@@ -106,8 +107,9 @@ func TestRuntimeParticipantLifecycleMayOverlapActiveTurnFence(t *testing.T) {
 			return nil
 		},
 	}
+	producerLifecycle := &recordingProducerLifecycle{}
 	runtime, err := New(testConfigWithACPForwarder(Config{
-		Sessions: sessions, AgentFactory: chat.Factory{}, Controllers: backend,
+		Sessions: sessions, AgentFactory: chat.Factory{}, Controllers: backend, TaskOutput: producerLifecycle,
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -130,6 +132,9 @@ func TestRuntimeParticipantLifecycleMayOverlapActiveTurnFence(t *testing.T) {
 	if _, ok := participantBinding(detached, binding.ID); ok {
 		t.Fatalf("detached Session still contains participant: %#v", detached.Participants)
 	}
+	if producerLifecycle.binding.TaskID != binding.DelegationID || len(producerLifecycle.events) != 1 || !producerLifecycle.events[0].ProducerClosed {
+		t.Fatalf("detached producer lifecycle = %#v / %#v", producerLifecycle.binding, producerLifecycle.events)
+	}
 	durableFence, err := sessions.(session.SessionFenceReader).SessionFence(context.Background(), active.SessionRef)
 	if err != nil {
 		t.Fatalf("SessionFence() error = %v", err)
@@ -137,6 +142,21 @@ func TestRuntimeParticipantLifecycleMayOverlapActiveTurnFence(t *testing.T) {
 	if durableFence.FenceID != fence.FenceID || durableFence.FencingToken != fence.FencingToken {
 		t.Fatalf("participant lifecycle changed active Turn fence: got %#v want %#v", durableFence, fence)
 	}
+}
+
+type recordingProducerLifecycle struct {
+	binding output.Binding
+	events  []output.Event
+}
+
+func (r *recordingProducerLifecycle) BindTaskOutput(_ context.Context, binding output.Binding) output.Observer {
+	r.binding = binding
+	return r
+}
+
+func (r *recordingProducerLifecycle) ObserveTaskOutput(_ context.Context, event output.Event) error {
+	r.events = append(r.events, event)
+	return nil
 }
 
 func TestRuntimeDetachParticipantRollbackPreservesActiveSessionOnRemoveFailure(t *testing.T) {
@@ -532,7 +552,8 @@ func TestRuntimeParticipantPromptSingleFlightRejectsBeforeUserEventPersistence(t
 	}
 
 	firstHandle.finish()
-	for range first.Handle.Events() {
+	if err := first.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 	third, err := runtime.PromptParticipant(context.Background(), agent.PromptParticipantRequest{
 		SessionRef: active.SessionRef, ParticipantID: binding.ID, Input: "third",
@@ -545,7 +566,8 @@ func TestRuntimeParticipantPromptSingleFlightRejectsBeforeUserEventPersistence(t
 	case <-time.After(time.Second):
 		t.Fatal("completed participant prompt did not release the Runtime claim")
 	}
-	for range third.Handle.Events() {
+	if err := third.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -654,12 +676,12 @@ func TestRuntimeParticipantSteeringWaitsForAdmissionAndCommitsFIFOInputs(t *test
 	}
 
 	controllerHandle.finish()
-	var published []*session.Event
-	for event, eventErr := range result.Handle.Events() {
-		if eventErr != nil {
-			t.Fatalf("participant runner event error = %v", eventErr)
-		}
-		published = append(published, event)
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("participant runner completion error = %v", err)
+	}
+	published, err := sessions.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
 	}
 	var publishedInputs []string
 	for _, event := range published {

@@ -268,7 +268,6 @@ func (tm *taskRuntime) persistSubagentCancelPhase(
 	}
 	task.metadata[subagentCancelPhaseKey] = string(phase)
 	task.metadata[subagentCancelTurnSeqKey] = cancelTurnSeq
-	task.notifyStreamChangeLocked()
 	task.mu.Unlock()
 	return true, nil
 }

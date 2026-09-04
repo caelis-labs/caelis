@@ -77,7 +77,7 @@ func TestSessionClientAdapterRoutesMainTurnWritesAndObservationThroughTypedClien
 	terminal.Cursor = "cursor-2"
 	subscription.events <- message
 	subscription.events <- terminal
-	close(subscription.events)
+	subscription.finish()
 
 	got := collectSessionClientAdapterEvents(turn.Events())
 	if len(got) != 2 || got[0].Notice != "typed" || !eventstream.IsTurnTerminalLifecycle(got[1]) {
@@ -747,7 +747,7 @@ func TestSessionClientAdapterRoutesReviewThroughTypedParticipantClient(t *testin
 	terminal := eventstream.TurnCompleted(target.HandleID, target.RunID, target.TurnID, time.Now())
 	terminal.SessionID = "session-1"
 	subscription.events <- terminal
-	close(subscription.events)
+	subscription.finish()
 	if got := collectSessionClientAdapterEvents(turn.Events()); len(got) != 1 || !eventstream.IsTurnTerminalLifecycle(got[0]) {
 		t.Fatalf("review Turn events = %#v", got)
 	}
@@ -2485,7 +2485,6 @@ func (*admissionTargetTurn) ResolveApproval(context.Context, appserver.ApprovalR
 	return nil
 }
 func (*admissionTargetTurn) Cancel(context.Context, string) error { return nil }
-func (*admissionTargetTurn) LastCursor() string                   { return "" }
 func (*admissionTargetTurn) Err() error                           { return nil }
 func (*admissionTargetTurn) Close() error                         { return nil }
 
@@ -2514,8 +2513,7 @@ func (t *detachOnlyTargetTurn) Cancel(context.Context, string) error {
 	t.cancelCalls++
 	return nil
 }
-func (*detachOnlyTargetTurn) LastCursor() string { return "" }
-func (*detachOnlyTargetTurn) Err() error         { return nil }
+func (*detachOnlyTargetTurn) Err() error { return nil }
 func (t *detachOnlyTargetTurn) Close() error {
 	t.closeCalls++
 	return nil
@@ -3188,43 +3186,59 @@ func (c *sessionClientAdapterTestParticipantClient) CancelParticipant(_ context.
 }
 
 type sessionClientAdapterTestSubscription struct {
-	backfill     chan eventstream.Envelope
-	backfillDone chan struct{}
-	events       chan eventstream.Envelope
-	closeOnce    sync.Once
-	closed       bool
+	events     chan eventstream.Envelope
+	deliveries chan appserver.FeedDelivery
+	startOnce  sync.Once
+	closeOnce  sync.Once
+	closed     bool
 }
 
 func newSessionClientAdapterTestSubscription() *sessionClientAdapterTestSubscription {
-	backfill := make(chan eventstream.Envelope)
-	close(backfill)
-	backfillDone := make(chan struct{})
-	close(backfillDone)
-	return &sessionClientAdapterTestSubscription{
-		backfill: backfill, backfillDone: backfillDone,
-		events: make(chan eventstream.Envelope, 4),
-	}
+	return &sessionClientAdapterTestSubscription{events: make(chan eventstream.Envelope, 4)}
 }
 
-func (s *sessionClientAdapterTestSubscription) Backfill() <-chan eventstream.Envelope {
-	return s.backfill
-}
-
-func (s *sessionClientAdapterTestSubscription) Events() <-chan eventstream.Envelope {
-	return s.events
-}
-
-func (s *sessionClientAdapterTestSubscription) BackfillDone() <-chan struct{} {
-	return s.backfillDone
+func (s *sessionClientAdapterTestSubscription) Deliveries() <-chan appserver.FeedDelivery {
+	s.startOnce.Do(func() {
+		s.deliveries = make(chan appserver.FeedDelivery)
+		go func() {
+			defer close(s.deliveries)
+			sequence := uint64(0)
+			for envelope := range s.events {
+				sequence++
+				if envelope.Cursor == "" {
+					envelope.Cursor = fmt.Sprintf("adapter-test-cursor-%d", sequence)
+				}
+				if envelope.Position == nil {
+					envelope.Position = &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
+						Generation: "adapter-test", Sequence: sequence,
+					}}
+				}
+				if envelope.Delivery == nil {
+					envelope.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+				}
+				s.deliveries <- appserver.FeedDelivery{
+					Kind: appserver.FeedDeliveryAppendPage, Source: appserver.FeedSourceExact,
+					Events: []eventstream.Envelope{envelope}, NextCursor: envelope.Cursor,
+				}
+			}
+		}()
+	})
+	return s.deliveries
 }
 
 func (s *sessionClientAdapterTestSubscription) Close() error {
-	s.closeOnce.Do(func() { s.closed = true })
+	s.finish()
 	return nil
 }
 
-func (*sessionClientAdapterTestSubscription) Err() error         { return nil }
-func (*sessionClientAdapterTestSubscription) LastCursor() string { return "" }
+func (s *sessionClientAdapterTestSubscription) finish() {
+	s.closeOnce.Do(func() {
+		s.closed = true
+		close(s.events)
+	})
+}
+
+func (*sessionClientAdapterTestSubscription) Err() error { return nil }
 
 var _ appserver.SessionClient = (*sessionClientAdapterTestClient)(nil)
 var _ appserver.ParticipantClient = (*sessionClientAdapterTestParticipantClient)(nil)

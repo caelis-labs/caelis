@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 )
 
@@ -173,20 +172,8 @@ type visibilityTestSubscription struct {
 	closeCalls atomic.Int32
 }
 
-func (*visibilityTestSubscription) Backfill() <-chan eventstream.Envelope {
-	ch := make(chan eventstream.Envelope)
-	close(ch)
-	return ch
-}
-
-func (*visibilityTestSubscription) Events() <-chan eventstream.Envelope {
-	ch := make(chan eventstream.Envelope)
-	close(ch)
-	return ch
-}
-
-func (*visibilityTestSubscription) BackfillDone() <-chan struct{} {
-	ch := make(chan struct{})
+func (*visibilityTestSubscription) Deliveries() <-chan FeedDelivery {
+	ch := make(chan FeedDelivery)
 	close(ch)
 	return ch
 }
@@ -196,5 +183,4 @@ func (s *visibilityTestSubscription) Close() error {
 	return nil
 }
 
-func (*visibilityTestSubscription) Err() error         { return nil }
-func (*visibilityTestSubscription) LastCursor() string { return "" }
+func (*visibilityTestSubscription) Err() error { return nil }

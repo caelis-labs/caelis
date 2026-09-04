@@ -1691,17 +1691,6 @@ func TestReconnectStateRestoresActiveTurnSubmissionMode(t *testing.T) {
 	}
 }
 
-func TestReconnectTransientGapUsesEphemeralHint(t *testing.T) {
-	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	model.applySessionReconnectState(appserver.SessionState{TransientGap: true})
-	if model.hint != reconnectTransientGapWarning {
-		t.Fatalf("reconnect gap hint = %q, want %q", model.hint, reconnectTransientGapWarning)
-	}
-	if len(model.doc.Blocks()) != 0 {
-		t.Fatalf("reconnect gap persisted %d transcript blocks", len(model.doc.Blocks()))
-	}
-}
-
 func TestResolveSubmissionModes(t *testing.T) {
 	t.Parallel()
 

@@ -132,17 +132,17 @@ func routeHostedChildInputToParent(
 			}
 			continue
 		}
+		observer, releaseTurn := composition.controlTurnObserver(active.SessionRef)
 		result, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
 			SessionRef:     active.SessionRef,
 			RuntimeContext: composition.controlRuntimeContext(context.Background(), active),
 			InputKind:      kernel.SubmissionKindAgentCommunication,
 			Input:          input.Input, DisplayInput: input.DisplayInput, ContentParts: input.ContentParts,
 			InputActor: source, Surface: "agent-input",
+			Observer: observer,
 		})
+		retainControlTurn(result.Handle, releaseTurn)
 		if err == nil {
-			if result.Handle != nil {
-				composition.attachControlClientHandle(result.Handle)
-			}
 			return nil
 		}
 		if !isHostedChildInputSelectionRace(err) {

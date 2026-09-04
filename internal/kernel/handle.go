@@ -16,6 +16,7 @@ import (
 )
 
 type turnHandleConfig struct {
+	ctx                     context.Context
 	handleID                string
 	runID                   string
 	turnID                  string
@@ -30,6 +31,7 @@ type turnHandleConfig struct {
 	persistApproval         func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error)
 	settleApproval          func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error)
 	approvals               *approvalCoordinator
+	observer                TurnEventObserver
 }
 
 type turnHandle struct {
@@ -41,20 +43,18 @@ type turnHandle struct {
 	sessionRef    session.SessionRef
 	createdAt     time.Time
 	cancelFn      func() bool
+	ctx           context.Context
+	observer      TurnEventObserver
+	observerMu    sync.Mutex
 
 	mu                      sync.Mutex
-	events                  []eventstream.Envelope
-	eventsCh                chan eventstream.Envelope
-	eventsCond              *sync.Cond
-	liveQueue               []eventstream.Envelope
-	liveQueueHead           int
-	eventsStarted           bool
-	eventsClosed            bool
 	closed                  bool
 	finishing               bool
 	finished                bool
 	failed                  bool
 	cancelled               bool
+	failureReason           string
+	producerTerminal        *eventstream.Envelope
 	runner                  agent.Runner
 	pendingSubmissions      []SubmitRequest
 	allowPendingSubmissions bool
@@ -66,12 +66,17 @@ type turnHandle struct {
 	settleApproval          func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error)
 	approvals               *approvalCoordinator
 	finishHooks             []func()
+	done                    chan struct{}
+	doneOnce                sync.Once
 
 	approvalReviewSeq uint64
 	acpCursorSeq      uint64
 }
 
 func newTurnHandle(cfg turnHandleConfig) *turnHandle {
+	if cfg.ctx == nil {
+		cfg.ctx = context.Background()
+	}
 	h := &turnHandle{
 		handleID:                cfg.handleID,
 		runID:                   cfg.runID,
@@ -81,19 +86,20 @@ func newTurnHandle(cfg turnHandleConfig) *turnHandle {
 		sessionRef:              cfg.sessionRef,
 		createdAt:               cfg.createdAt,
 		cancelFn:                cfg.cancel,
+		ctx:                     cfg.ctx,
+		observer:                cfg.observer,
 		allowPendingSubmissions: cfg.allowPendingSubmissions,
 		waitForRunnerSubmission: cfg.waitForRunnerSubmission,
 		prepareSubmission:       cfg.prepareSubmission,
 		persistApproval:         cfg.persistApproval,
 		settleApproval:          cfg.settleApproval,
 		approvals:               cfg.approvals,
-		eventsCh:                make(chan eventstream.Envelope, 32),
 		runnerReady:             make(chan struct{}),
+		done:                    make(chan struct{}),
 	}
 	if h.approvals == nil {
 		h.approvals = newApprovalCoordinator(cfg.sessionRef)
 	}
-	h.eventsCond = sync.NewCond(&h.mu)
 	return h
 }
 
@@ -104,29 +110,19 @@ func (h *turnHandle) ActiveKind() ActiveTurnKind     { return h.activeKind }
 func (h *turnHandle) ParticipantID() string          { return h.participantID }
 func (h *turnHandle) SessionRef() session.SessionRef { return h.sessionRef }
 func (h *turnHandle) CreatedAt() time.Time           { return h.createdAt }
-func (h *turnHandle) ACPEvents() <-chan eventstream.Envelope {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if !h.eventsStarted && !h.eventsClosed {
-		h.eventsStarted = true
-		go h.dispatchEvents()
+func (h *turnHandle) WaitCompletion(ctx context.Context) error {
+	if h == nil {
+		return nil
 	}
-	return h.eventsCh
-}
-
-func (h *turnHandle) eventsAfter(cursor string) ([]eventstream.Envelope, string, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	start, err := startEventstreamIndexAfterCursor(h.events, cursor)
-	if err != nil {
-		return nil, "", err
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if start == 0 {
-		out := eventstream.CloneEnvelopes(h.events)
-		return out, lastEventstreamCursor(out), nil
+	select {
+	case <-h.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	out := eventstream.CloneEnvelopes(h.events[start:])
-	return out, lastEventstreamCursor(out), nil
 }
 
 func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
@@ -224,9 +220,6 @@ func (h *turnHandle) Close() error {
 		return nil
 	}
 	h.closed = true
-	if h.finished {
-		h.closeEventsLocked()
-	}
 	h.mu.Unlock()
 	h.approvals.abandonOwner(h, "closed")
 	return nil
@@ -473,6 +466,7 @@ func (h *turnHandle) publishError(err error) {
 	}
 	h.mu.Lock()
 	h.failed = true
+	h.failureReason = strings.TrimSpace(display.UserVisibleError(err))
 	h.mu.Unlock()
 	env := eventstream.Error(err)
 	env.Error = display.UserVisibleError(err)
@@ -497,30 +491,39 @@ func (h *turnHandle) publishEnvelopes(events []eventstream.Envelope, bridgeSourc
 	if len(events) == 0 {
 		return
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.publishEnvelopesLocked(events, bridgeSource)
-}
-
-// publishEnvelopesLocked records and schedules ACP envelopes while h.mu is
-// held. Approval activation uses it so waiter registration, queue activation,
-// and prompt publication stay under the same Control owner.
-func (h *turnHandle) publishEnvelopesLocked(events []eventstream.Envelope, bridgeSource string) {
-	if len(events) == 0 {
-		return
-	}
+	h.observerMu.Lock()
+	defer h.observerMu.Unlock()
 	for _, env := range events {
+		h.mu.Lock()
 		if env.Cursor == "" || (env.ProjectionID != "" && env.Cursor == env.ProjectionID) {
 			env.Cursor = h.allocateEventCursorLocked()
 		}
 		env = h.enrichEnvelopeLocked(env, bridgeSource)
-		h.events = append(h.events, eventstream.CloneEnvelope(env))
-		if h.closed || h.eventsClosed {
+		if isMainFeedTerminal(env) {
+			if h.producerTerminal == nil {
+				clone := eventstream.CloneEnvelope(env)
+				h.producerTerminal = &clone
+			}
+			h.mu.Unlock()
 			continue
 		}
-		h.liveQueue = append(h.liveQueue, env)
+		observer := h.observer
+		ctx := h.ctx
+		h.mu.Unlock()
+		if isSubagentTaskObservation(env) || observer == nil {
+			continue
+		}
+		if err := observer.ObserveTurnEvent(ctx, eventstream.CloneEnvelope(env)); err != nil {
+			h.mu.Lock()
+			h.failed = true
+			h.failureReason = strings.TrimSpace(err.Error())
+			cancelFn := h.cancelFn
+			h.mu.Unlock()
+			if cancelFn != nil {
+				cancelFn()
+			}
+		}
 	}
-	h.eventsCond.Broadcast()
 }
 
 func (h *turnHandle) publishACP(env eventstream.Envelope, bridgeSource string) {
@@ -534,26 +537,6 @@ func (h *turnHandle) allocateEventCursorLocked() string {
 		prefix = "acp"
 	}
 	return fmt.Sprintf("%s-acp-%06d", prefix, h.acpCursorSeq)
-}
-
-func lastEventstreamCursor(events []eventstream.Envelope) string {
-	if len(events) == 0 {
-		return ""
-	}
-	return events[len(events)-1].Cursor
-}
-
-func startEventstreamIndexAfterCursor(events []eventstream.Envelope, cursor string) (int, error) {
-	cursor = strings.TrimSpace(cursor)
-	if cursor == "" {
-		return 0, nil
-	}
-	for i, env := range events {
-		if env.Cursor == cursor {
-			return i + 1, nil
-		}
-	}
-	return 0, cursorNotFoundError(cursor)
 }
 
 func (h *turnHandle) finish() {
@@ -570,58 +553,56 @@ func (h *turnHandle) finish() {
 	for _, hook := range hooks {
 		hook()
 	}
+	h.publishFinalTerminal()
 	h.mu.Lock()
 	h.finishing = false
 	h.finished = true
-	h.closeEventsLocked()
 	h.mu.Unlock()
+	h.doneOnce.Do(func() { close(h.done) })
 	h.approvals.abandonOwner(h, "terminal")
 }
 
-func (h *turnHandle) closeEventsLocked() {
-	if !h.eventsClosed && h.eventsStarted {
-		h.eventsCond.Broadcast()
+func (h *turnHandle) publishFinalTerminal() {
+	h.observerMu.Lock()
+	defer h.observerMu.Unlock()
+	h.mu.Lock()
+	terminal := eventstream.Envelope{}
+	switch {
+	case h.cancelled:
+		terminal = eventstream.TurnCancelled(h.handleID, h.runID, h.turnID, h.failureReason, time.Now())
+	case h.failed:
+		terminal = eventstream.TurnFailed(h.handleID, h.runID, h.turnID, h.failureReason, time.Now())
+	case h.producerTerminal != nil:
+		terminal = eventstream.CloneEnvelope(*h.producerTerminal)
+	default:
+		terminal = eventstream.TurnCompleted(h.handleID, h.runID, h.turnID, time.Now())
+	}
+	if terminal.Cursor == "" || (terminal.ProjectionID != "" && terminal.Cursor == terminal.ProjectionID) {
+		terminal.Cursor = h.allocateEventCursorLocked()
+	}
+	terminal = h.enrichEnvelopeLocked(terminal, "")
+	observer := h.observer
+	ctx := h.ctx
+	h.mu.Unlock()
+	if observer != nil {
+		_ = observer.ObserveTurnEvent(ctx, terminal)
 	}
 }
 
-func (h *turnHandle) dispatchEvents() {
-	for {
-		h.mu.Lock()
-		for h.liveQueueHead == len(h.liveQueue) && !h.finished {
-			h.eventsCond.Wait()
-		}
-		if h.liveQueueHead == len(h.liveQueue) && h.finished {
-			if !h.eventsClosed {
-				h.eventsClosed = true
-				close(h.eventsCh)
-			}
-			h.mu.Unlock()
-			return
-		}
-		env := h.liveQueue[h.liveQueueHead]
-		h.liveQueue[h.liveQueueHead] = eventstream.Envelope{}
-		h.liveQueueHead++
-		h.compactLiveQueueLocked()
-		h.mu.Unlock()
-		h.eventsCh <- env
-	}
+func isMainFeedTerminal(env eventstream.Envelope) bool {
+	return (env.Scope == "" || env.Scope == eventstream.ScopeMain) && eventstream.IsTurnTerminalLifecycle(env)
 }
 
-const liveQueueCompactThreshold = 1024
-
-func (h *turnHandle) compactLiveQueueLocked() {
-	if h.liveQueueHead == len(h.liveQueue) {
-		h.liveQueue = h.liveQueue[:0]
-		h.liveQueueHead = 0
-		return
+func isSubagentTaskObservation(env eventstream.Envelope) bool {
+	if env.Scope != eventstream.ScopeSubagent || strings.TrimSpace(string(env.ApprovalRequestID)) != "" {
+		return false
 	}
-	if h.liveQueueHead < liveQueueCompactThreshold || h.liveQueueHead < len(h.liveQueue)-h.liveQueueHead {
-		return
+	switch env.Kind {
+	case eventstream.KindRequestPermission, eventstream.KindApprovalReview, eventstream.KindParticipant:
+		return false
+	default:
+		return true
 	}
-	remaining := copy(h.liveQueue, h.liveQueue[h.liveQueueHead:])
-	clear(h.liveQueue[remaining:])
-	h.liveQueue = h.liveQueue[:remaining]
-	h.liveQueueHead = 0
 }
 
 func (h *turnHandle) enrichEnvelopeLocked(env eventstream.Envelope, bridgeSource string) eventstream.Envelope {

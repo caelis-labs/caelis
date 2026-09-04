@@ -1004,7 +1004,8 @@ func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
 	if turn.Handle == nil {
 		t.Fatal("RunTurn(empty) handle = nil")
 	}
-	for range turn.Handle.Events() {
+	if err := turn.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	if err := manager.Deactivate(context.Background(), parentSession.SessionRef); err != nil {
 		t.Fatalf("Deactivate() error = %v", err)
@@ -1296,12 +1297,7 @@ func TestManagerRunTurnReportsUnknownAfterPossiblePromptSubmissionAndRecoversNex
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	var turnErr error
-	for _, eventErr := range turn.Handle.Events() {
-		if eventErr != nil {
-			turnErr = eventErr
-		}
-	}
+	turnErr := turn.Handle.WaitCompletion(context.Background())
 	if turnErr == nil {
 		t.Fatal("turn error = nil, want ambiguous submitted prompt failure")
 	}
@@ -1321,10 +1317,8 @@ func TestManagerRunTurnReportsUnknownAfterPossiblePromptSubmissionAndRecoversNex
 	if err != nil {
 		t.Fatalf("RunTurn(recovery) error = %v", err)
 	}
-	for _, eventErr := range recovery.Handle.Events() {
-		if eventErr != nil {
-			t.Fatalf("recovery turn event error = %v", eventErr)
-		}
+	if eventErr := recovery.Handle.WaitCompletion(context.Background()); eventErr != nil {
+		t.Fatalf("recovery turn event error = %v", eventErr)
 	}
 	if starts != 2 {
 		t.Fatalf("client starts after recovery = %d, want one reconnect for the new Turn", starts)
@@ -1420,12 +1414,7 @@ func TestManagerRunTurnCancelAfterPromptSubmissionReportsUnknownAndKeepsAdmissio
 	if got := first.Handle.Cancel().Status; got != controller.CancelStatusCancelled {
 		t.Fatalf("Cancel() status = %q, want %q", got, controller.CancelStatusCancelled)
 	}
-	var firstErr error
-	for _, eventErr := range first.Handle.Events() {
-		if eventErr != nil {
-			firstErr = eventErr
-		}
-	}
+	firstErr := first.Handle.WaitCompletion(context.Background())
 	if !errorcode.Is(firstErr, errorcode.UnknownOutcome) {
 		t.Fatalf("first Turn error = %v, want unknown_outcome", firstErr)
 	}
@@ -1442,10 +1431,8 @@ func TestManagerRunTurnCancelAfterPromptSubmissionReportsUnknownAndKeepsAdmissio
 	if err != nil {
 		t.Fatalf("RunTurn(second) error = %v", err)
 	}
-	for _, eventErr := range second.Handle.Events() {
-		if eventErr != nil {
-			t.Fatalf("second Turn event error = %v", eventErr)
-		}
+	if eventErr := second.Handle.WaitCompletion(context.Background()); eventErr != nil {
+		t.Fatalf("second Turn event error = %v", eventErr)
 	}
 	if got := promptCalls.Load(); got != 2 {
 		t.Fatalf("prompt calls = %d, want two independently admitted Turns", got)
@@ -1498,10 +1485,8 @@ func TestManagerActivateKeepsControllerProcessAfterHandoffContextCancel(t *testi
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	for _, eventErr := range turn.Handle.Events() {
-		if eventErr != nil {
-			t.Fatalf("turn event error = %v", eventErr)
-		}
+	if eventErr := turn.Handle.WaitCompletion(context.Background()); eventErr != nil {
+		t.Fatalf("turn event error = %v", eventErr)
 	}
 	if err := manager.Deactivate(context.Background(), parentSession.SessionRef); err != nil {
 		t.Fatalf("Deactivate() error = %v", err)
@@ -1579,10 +1564,8 @@ func TestManagerRunTurnReconnectReappliesSelectedModelAndEffort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	for _, eventErr := range turn.Handle.Events() {
-		if eventErr != nil {
-			t.Fatalf("turn event error = %v", eventErr)
-		}
+	if eventErr := turn.Handle.WaitCompletion(context.Background()); eventErr != nil {
+		t.Fatalf("turn event error = %v", eventErr)
 	}
 	if starts != 2 {
 		t.Fatalf("client starts = %d, want activate plus reconnect", starts)
@@ -1697,10 +1680,8 @@ func TestManagerRunTurnUsesFullContextWhenReconnectCreatesFreshRemote(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, eventErr := range turn.Handle.Events() {
-		if eventErr != nil {
-			t.Fatal(eventErr)
-		}
+	if eventErr := turn.Handle.WaitCompletion(context.Background()); eventErr != nil {
+		t.Fatal(eventErr)
 	}
 	var prompt client.PromptRequest
 	select {
@@ -1794,10 +1775,8 @@ func TestManagerRunTurnReconnectReappliesModeWhenResumeReportsEmptyCurrentMode(t
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	for _, eventErr := range turn.Handle.Events() {
-		if eventErr != nil {
-			t.Fatalf("turn event error = %v", eventErr)
-		}
+	if eventErr := turn.Handle.WaitCompletion(context.Background()); eventErr != nil {
+		t.Fatalf("turn event error = %v", eventErr)
 	}
 	if starts != 2 {
 		t.Fatalf("client starts = %d, want activate plus reconnect", starts)
@@ -1994,22 +1973,22 @@ func TestApplyACPParticipantEventScopeIncludesPlacementAuditIdentity(t *testing.
 func TestParticipantRunRejectsOverlappingPrompts(t *testing.T) {
 	t.Parallel()
 	run := &participantRun{id: "participant-busy"}
-	first := newTurnHandle(nil)
+	first := newTestTurnHandle(nil)
 	if err := run.beginPrompt(controller.ParticipantPromptRequest{TurnID: "turn-1", ParticipantID: run.id}, first); err != nil {
 		t.Fatal(err)
 	}
-	second := newTurnHandle(nil)
+	second := newTestTurnHandle(nil)
 	if err := run.beginPrompt(controller.ParticipantPromptRequest{TurnID: "turn-2", ParticipantID: run.id}, second); err == nil {
 		t.Fatal("overlapping participant prompt was allowed to overwrite active turn state")
 	}
-	if _, _ = run.finishPrompt(second); run.handle != first {
+	if _ = run.finishPrompt(second); run.handle != first {
 		t.Fatal("stale participant prompt owner cleared the active prompt")
 	}
 	run.finishPrompt(first)
 	first.finish()
 	second.finish()
 
-	third := newTurnHandle(nil)
+	third := newTestTurnHandle(nil)
 	if err := run.beginPrompt(controller.ParticipantPromptRequest{TurnID: "turn-3", ParticipantID: run.id}, third); err != nil {
 		t.Fatalf("prompt after completion remained busy: %v", err)
 	}
@@ -2017,7 +1996,7 @@ func TestParticipantRunRejectsOverlappingPrompts(t *testing.T) {
 	if got := third.Cancel().Status; got != controller.CancelStatusAlreadyCancelled {
 		t.Fatalf("Cancel() after closePromptAdmission status = %q, want %q", got, controller.CancelStatusAlreadyCancelled)
 	}
-	fourth := newTurnHandle(nil)
+	fourth := newTestTurnHandle(nil)
 	if err := run.beginPrompt(controller.ParticipantPromptRequest{TurnID: "turn-4", ParticipantID: run.id}, fourth); !errors.Is(err, controller.ErrNotActive) {
 		t.Fatalf("beginPrompt() after close error = %v, want ErrNotActive", err)
 	}
@@ -2990,7 +2969,7 @@ func TestManagerACPControllerModeReapplyHelperProcess(t *testing.T) {
 func TestTurnHandlePublishDoesNotBlockAfterBufferFillsOrFinishes(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 128; i++ {
@@ -3012,7 +2991,7 @@ func TestTurnHandlePublishDoesNotBlockAfterBufferFillsOrFinishes(t *testing.T) {
 func TestControllerRunPublishesACPSourceEvent(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	run := &controllerRun{
 		remoteSessionID: "remote-1",
 		binding: session.ControllerBinding{
@@ -3075,7 +3054,7 @@ func TestControllerRunPublishesACPSourceEvent(t *testing.T) {
 func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	run := &controllerRun{
 		remoteSessionID: "remote-1",
 		binding: session.ControllerBinding{
@@ -3144,7 +3123,7 @@ func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 func TestControllerRunStripsConsoleFenceFromExecuteContentAtUpdateIngress(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	run := &controllerRun{
 		remoteSessionID: "remote-1",
 		binding: session.ControllerBinding{
@@ -3205,7 +3184,7 @@ func TestControllerRunStripsConsoleFenceFromExecuteContentAtUpdateIngress(t *tes
 func TestControllerRunStripsConsoleFenceFromClaudeBashContentAtUpdateIngress(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	run := &controllerRun{
 		remoteSessionID: "remote-1",
 		binding: session.ControllerBinding{
@@ -3271,7 +3250,7 @@ func TestParticipantRunNormalizesDelayedXSearchDisplayInput(t *testing.T) {
 	t.Parallel()
 
 	const serializedInput = `{"query":"CAELIS_ACP_QUERY_PROBE_7F31","limit":"3","mode":"Latest"}`
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	run := &participantRun{
 		remoteSessionID: "remote-participant",
 		agent:           "grok",
@@ -3332,7 +3311,7 @@ func TestParticipantRunNormalizesDelayedXSearchDisplayInput(t *testing.T) {
 func TestParticipantRunSharesCanonicalTerminalCompatibilityAcrossSourceViews(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	run := &participantRun{
 		remoteSessionID: "remote-participant",
 		agent:           "codex",
@@ -3401,7 +3380,7 @@ func TestParticipantRunSharesCanonicalTerminalCompatibilityAcrossSourceViews(t *
 func TestParticipantPassthroughOnlyACPUpdatePreservesScope(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	run := &participantRun{
 		remoteSessionID: "remote-participant",
 		agent:           "otto",
@@ -3464,7 +3443,7 @@ func TestParticipantPassthroughOnlyACPUpdatePreservesScope(t *testing.T) {
 func TestTurnHandleSourceEventsDoNotDropBurst(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	for i := 0; i < 128; i++ {
 		handle.publishEvent(&session.Event{ID: fmt.Sprintf("event-%d", i), Type: session.EventTypeAssistant})
 	}

@@ -7,12 +7,12 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 )
 
-func (r *Runtime) forwardControllerEvents(ctx context.Context, req agent.ControllerEventForwardRequest) error {
+func (r *Runtime) beginControllerEvents(ctx context.Context, req agent.ControllerEventForwardRequest) (agent.ControllerEventSession, error) {
 	if r == nil || r.controllerEventForwarder == nil {
-		return fmt.Errorf("agent-sdk/runtime: controller event forwarder is not configured")
+		return nil, fmt.Errorf("agent-sdk/runtime: controller event forwarder is not configured")
 	}
 	if req.Normalize == nil {
 		req.Normalize = normalizeEvent
 	}
-	return r.controllerEventForwarder.ForwardControllerEvents(ctx, req)
+	return r.controllerEventForwarder.BeginControllerEvents(ctx, req)
 }

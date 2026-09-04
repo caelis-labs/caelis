@@ -8,12 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 )
 
@@ -28,7 +28,6 @@ const (
 	commandPhaseCancelApplied = "command_cancel_effect_applied"
 
 	commandStreamOutputCursorMeta = "stream_output_cursor"
-	commandStreamEventCursorMeta  = "stream_event_cursor"
 )
 
 func commandTaskID(ref session.SessionRef, parentCall string) (string, error) {
@@ -65,23 +64,7 @@ func (tm *taskRuntime) StartCommand(
 	runtime sandbox.Runtime,
 	req taskapi.CommandStartRequest,
 ) (taskapi.Snapshot, error) {
-	var (
-		outputTask    *commandTask
-		pendingOutput []sandbox.OutputChunk
-		pendingMu     sync.Mutex
-	)
-	bindOutputTask := func(task *commandTask) {
-		pendingMu.Lock()
-		outputTask = task
-		buffered := append([]sandbox.OutputChunk(nil), pendingOutput...)
-		pendingOutput = nil
-		pendingMu.Unlock()
-		if task != nil {
-			for _, chunk := range buffered {
-				task.appendSandboxOutput(chunk)
-			}
-		}
-	}
+	var outputTask *commandTask
 	sandboxReq := sandbox.CommandRequest{
 		Command: strings.TrimSpace(req.Command),
 		Dir:     strings.TrimSpace(req.Workdir),
@@ -91,15 +74,9 @@ func (tm *taskRuntime) StartCommand(
 			if chunk.Text == "" {
 				return
 			}
-			pendingMu.Lock()
-			current := outputTask
-			if current == nil {
-				pendingOutput = append(pendingOutput, chunk)
-				pendingMu.Unlock()
-				return
+			if outputTask != nil {
+				outputTask.appendSandboxOutput(chunk)
 			}
-			pendingMu.Unlock()
-			current.appendSandboxOutput(chunk)
 		},
 	}
 	if constraints, ok := req.Constraints.(sandbox.Constraints); ok {
@@ -129,7 +106,8 @@ func (tm *taskRuntime) StartCommand(
 	if existing, ok, existingErr := tm.existingCommandForStart(ctx, ref, taskID, requestDigest); existingErr != nil {
 		return taskapi.Snapshot{}, existingErr
 	} else if ok {
-		bindOutputTask(existing)
+		outputTask = existing
+		tm.bindCommandOutput(ctx, existing, false)
 		return tm.resumeCommandStart(ctx, existing, runtime, sandboxReq, req)
 	}
 	handle, err := tm.reserveTaskHandle(ctx, activeSession, ref, taskapi.KindCommand, "command")
@@ -176,14 +154,40 @@ func (tm *taskRuntime) StartCommand(
 		},
 		result: map[string]any{"state": string(taskapi.StatePrepared)},
 	}
-	bindOutputTask(createdTask)
 	intent := createdTask.entrySnapshot(now)
 	if err := tm.persistTaskEntry(ctx, intent); err != nil {
 		return createdTask.snapshotWithoutSession(tm.runtime.now()), err
 	}
 	applyCommandEntry(createdTask, intent)
 	tm.installCommandTask(createdTask)
+	outputTask = createdTask
+	tm.bindCommandOutput(ctx, createdTask, true)
 	return tm.resumeCommandStart(ctx, createdTask, runtime, sandboxReq, req)
+}
+
+func (tm *taskRuntime) bindCommandOutput(ctx context.Context, task *commandTask, originComplete bool) {
+	if tm == nil || task == nil {
+		return
+	}
+	task.mu.Lock()
+	defer task.mu.Unlock()
+	if task.outputObserver != nil {
+		return
+	}
+	if !task.running && taskapi.IsTerminalState(task.state) {
+		task.outputObserver = output.Nop()
+		task.outputTerminal = true
+		return
+	}
+	if tm.runtime == nil || tm.runtime.taskOutput == nil {
+		task.outputObserver = output.Nop()
+		return
+	}
+	task.outputObserver = tm.runtime.taskOutput.BindTaskOutput(ctx, output.Binding{
+		SessionID: strings.TrimSpace(task.sessionRef.SessionID),
+		TaskID:    strings.TrimSpace(task.ref.TaskID), TerminalID: strings.TrimSpace(task.ref.TerminalID),
+		Kind: output.TaskKindCommand, StartsAtTaskOrigin: originComplete,
+	})
 }
 
 // resumeCommandStart advances only phases whose external effect has not yet
@@ -303,7 +307,7 @@ func applyCommandEntry(task *commandTask, entry *taskapi.Entry) {
 		task.ref.TerminalID = terminalID
 	}
 	if stateChanged {
-		task.notifyCommandStreamChangeLocked()
+		task.notifyCommandOutputChangeLocked()
 	}
 	task.mu.Unlock()
 }
@@ -395,7 +399,8 @@ func (tm *taskRuntime) handleCommandStartFailure(ctx context.Context, task *comm
 		task.metadata["running"] = false
 		task.metadata["command_phase"] = commandPhaseStartFailed
 		task.result = map[string]any{"state": string(taskapi.StateFailed), "error": strings.TrimSpace(startErr.Error())}
-		task.notifyCommandStreamChangeLocked()
+		task.emitOutputTerminalLocked(taskapi.StateFailed, sandbox.SessionStatus{UpdatedAt: tm.runtime.now()}, false)
+		task.notifyCommandOutputChangeLocked()
 		failed := task.entrySnapshot(tm.runtime.now())
 		task.mu.Unlock()
 		persistErr := tm.persistTaskEntry(context.WithoutCancel(ctx), failed)
@@ -429,6 +434,7 @@ func (tm *taskRuntime) finalizeCommandStartCleanup(ctx context.Context, task *co
 		reason = strings.TrimSpace(cause.Error())
 	}
 	now := tm.runtime.now()
+	status := sandbox.SessionStatus{SessionRef: task.session.Ref(), Terminal: task.session.Terminal(), Running: false, UpdatedAt: now}
 	task.mu.Lock()
 	task.state = taskapi.StateFailed
 	task.running = false
@@ -440,14 +446,14 @@ func (tm *taskRuntime) finalizeCommandStartCleanup(ctx context.Context, task *co
 	}
 	task.retainParentRelationLocked()
 	task.result = map[string]any{"state": string(taskapi.StateFailed), "error": reason}
-	task.notifyCommandStreamChangeLocked()
+	task.emitOutputTerminalLocked(taskapi.StateFailed, status, false)
+	task.notifyCommandOutputChangeLocked()
 	entry := task.entrySnapshot(now)
 	task.mu.Unlock()
 	persistErr := tm.persistTaskEntry(context.WithoutCancel(ctx), entry)
 	task.mu.Lock()
 	task.revision = entry.Revision
 	task.lease = taskapi.CloneLease(entry.Lease)
-	status := sandbox.SessionStatus{SessionRef: task.session.Ref(), Terminal: task.session.Terminal(), Running: false, UpdatedAt: now}
 	snapshot := task.snapshotLocked(status)
 	task.mu.Unlock()
 	if persistErr == nil {
@@ -529,7 +535,8 @@ func (tm *taskRuntime) retainCommandAfterFailedInitialPersistence(
 		"state": string(taskapi.StateUnknownOutcome),
 		"error": reason,
 	}
-	task.notifyCommandStreamChangeLocked()
+	task.emitOutputTerminalLocked(taskapi.StateUnknownOutcome, status, false)
+	task.notifyCommandOutputChangeLocked()
 	entry := task.entrySnapshot(now)
 	task.mu.Unlock()
 	recoveryPersistErr := tm.persistTaskEntry(context.WithoutCancel(ctx), entry)
@@ -610,6 +617,7 @@ func (tm *taskRuntime) markCommandUnknown(ctx context.Context, task *commandTask
 	applyCommandEntry(task, entry)
 	task.mu.Lock()
 	status := sandbox.SessionStatus{SessionRef: task.session.Ref(), Terminal: task.session.Terminal(), Running: false, SupportsInput: false, UpdatedAt: tm.runtime.now()}
+	task.emitOutputTerminalLocked(taskapi.StateUnknownOutcome, status, false)
 	snapshot := task.snapshotLocked(status)
 	task.mu.Unlock()
 	return snapshot, nil

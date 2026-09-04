@@ -66,14 +66,14 @@ func TestPluginReadServiceExposesOnlyReadMethods(t *testing.T) {
 	}
 }
 
-func TestProductionRuntimeCompositionPreservesStreamsThroughDecorators(t *testing.T) {
+func TestProductionRuntimeCompositionPreservesTerminalControlThroughDecorators(t *testing.T) {
 	stack, err := newGatewayAppTestStack(t, Config{StoreDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 	defer stack.Close()
-	provider := stack.runtimeProjection().KernelStreams()
-	if provider == nil || provider.Streams() == nil {
-		t.Fatalf("KernelStreams().Streams() = %#v, want production task streams", provider)
+	provider := stack.runtimeProjection().KernelTerminals()
+	if provider == nil || provider.Terminals() == nil {
+		t.Fatalf("KernelTerminals().Terminals() = %#v, want production terminal control", provider)
 	}
 }

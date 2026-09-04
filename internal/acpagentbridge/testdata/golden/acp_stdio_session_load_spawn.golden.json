@@ -201,12 +201,12 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "spawn-alpha",
+      "title": "Spawn",
+      "kind": "execute",
       "status": "completed",
       "rawOutput": {
         "final_message": "# Alpha final\n\n- exact markdown\n",
         "handle": "alpha",
-        "parent_call": "spawn-alpha",
-        "parent_tool": "Spawn",
         "state": "completed",
         "target_kind": "subagent"
       },
@@ -218,7 +218,17 @@
             "text": "# Alpha final\n\n- exact markdown\n"
           }
         }
-      ]
+      ],
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        }
+      }
     }
   },
   {
@@ -315,12 +325,12 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "spawn-beta",
+      "title": "Spawn",
+      "kind": "execute",
       "status": "completed",
       "rawOutput": {
         "final_message": "Beta final.",
         "handle": "beta",
-        "parent_call": "spawn-beta",
-        "parent_tool": "Spawn",
         "state": "completed",
         "target_kind": "subagent"
       },
@@ -332,7 +342,17 @@
             "text": "Beta final."
           }
         }
-      ]
+      ],
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        }
+      }
     }
   },
   {

@@ -6,13 +6,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
-
-const reconnectTransientGapWarning = "Some transient output may be missing; durable history and the live session feed were restored."
 
 func (m *Model) applySessionReconnectState(state appserver.SessionState) tea.Cmd {
 	if m == nil {
@@ -27,17 +25,11 @@ func (m *Model) applySessionReconnectState(state appserver.SessionState) tea.Cmd
 	m.resetSlashSkillCatalog()
 	m.runningHintTracker.resetSession()
 	m.resetConversationView()
-	var warning tea.Cmd
-	if state.TransientGap {
-		warning = m.showHint(reconnectTransientGapWarning, hintOptions{
-			priority: HintPriorityHigh, clearOnMessage: true, clearAfter: systemHintDuration,
-		})
-	}
 	if state.Run.Active || state.Approval.Active != nil {
 		m.beginLiveTurn(SubmissionModeDefault, false, state.Run.StartedAt)
-		return tea.Batch(warning, m.resumeRunningAnimationIfNeeded())
+		return m.resumeRunningAnimationIfNeeded()
 	}
-	return warning
+	return nil
 }
 
 func streamReconnectBackfill(
@@ -50,41 +42,52 @@ func streamReconnectBackfill(
 	}
 	const batchSize = resumeReplayTranscriptBatchSize
 	batch := make([]TranscriptEvent, 0, batchSize)
-	ownerRepairs := taskstream.TaskOwnerRepairs{}
+	published := false
+	assembler := &appserver.FeedDeliveryAssembler{}
 	flush := func() {
-		if (len(batch) == 0 && ownerRepairs.Empty()) || send == nil {
+		if len(batch) == 0 || send == nil {
 			batch = batch[:0]
-			ownerRepairs = taskstream.TaskOwnerRepairs{}
 			return
 		}
 		send(TranscriptEventsMsg{
 			Events:          append([]TranscriptEvent(nil), batch...),
-			OwnerRepairs:    ownerRepairs.Clone(),
 			ReconnectReplay: true,
 		})
+		published = true
 		batch = batch[:0]
-		ownerRepairs = taskstream.TaskOwnerRepairs{}
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case envelope, open := <-reconnect.Backfill():
+		case delivery, open := <-reconnect.Deliveries():
 			if !open {
 				flush()
 				return reconnect.Err()
 			}
-			presentation := transcriptEventsMsgForEnvelope(
-				projectResumeReplayEvents([]eventstream.Envelope{envelope}),
-				envelope,
-			)
-			batch = append(batch, presentation.Events...)
-			ownerRepairs.Append(presentation.OwnerRepairs)
-			// Preserve live ordering when a producer reuses a parent tool call
-			// ID in a later turn: apply each terminal observation before
-			// replaying any subsequent owner with that ID.
-			if !ownerRepairs.Empty() || len(batch) >= batchSize {
+			events, replacement, err := assembler.Accept(delivery)
+			if err != nil {
+				return err
+			}
+			if replacement {
+				if published {
+					return errorcode.New(errorcode.Conflict, "Session replacement crossed visible reconnect output")
+				}
+				batch = batch[:0]
+			}
+			for _, envelope := range events {
+				presentation := transcriptEventsMsg(projectResumeReplayEvents([]eventstream.Envelope{envelope}))
+				batch = append(batch, presentation.Events...)
+				if len(batch) >= batchSize {
+					flush()
+				}
+			}
+			if delivery.Kind == appserver.FeedDeliverySync {
+				if assembler.Pending() {
+					return errorcode.New(errorcode.Unavailable, "Session replacement ended before sync")
+				}
 				flush()
+				return nil
 			}
 		}
 	}

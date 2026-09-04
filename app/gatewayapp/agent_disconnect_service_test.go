@@ -15,12 +15,16 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
+	"github.com/caelis-labs/caelis/control/streamspool"
+	streamspoolfile "github.com/caelis-labs/caelis/control/streamspool/file"
+	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
@@ -409,6 +413,124 @@ func TestDisconnectACPRepairsDurableSessionBindingsImmediately(t *testing.T) {
 	}
 }
 
+func TestDisconnectACPDormantParticipantCommittedRemovalReleasesTaskOutput(t *testing.T) {
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+	persistDisconnectTestAgent(t, stack, "codex")
+	ctx := context.Background()
+	active, err := stack.composition.sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: stack.composition.authorities.appName, UserID: stack.composition.authorities.userID,
+		Workspace: stack.composition.workspace, PreferredSessionID: "dormant-committed-removal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err = stack.composition.sessions.PutParticipant(ctx, session.PutParticipantRequest{
+		SessionRef: active.SessionRef, ExpectedRevision: &active.Revision,
+		Binding: session.ParticipantBinding{
+			ID: "participant-codex", Kind: session.ParticipantKindACP, AgentName: "codex",
+			DelegationID: "task-before-disconnect",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	spool, err := streamspoolfile.New(ctx, streamspoolfile.Config{
+		RootDir: t.TempDir(), GCInterval: -1, MaxRegistrations: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := controltaskstream.NewRecorder(spool, nil)
+	originalLifecycle := stack.composition.authorities.taskOutputLifecycle
+	stack.composition.authorities.taskOutputLifecycle = recorder
+	originalSessions := stack.composition.sessions
+	lifecycle, ok := originalSessions.(session.ParticipantLifecycleService)
+	if !ok {
+		t.Fatal("production Session store does not implement participant lifecycle")
+	}
+	fault := errors.New("participant removal committed but directory sync failed")
+	faultingSessions := &committedRemoveParticipantSessionService{
+		Service: originalSessions, lifecycle: lifecycle, fault: fault,
+	}
+	stack.composition.sessions = faultingSessions
+	t.Cleanup(func() {
+		stack.composition.sessions = originalSessions
+		stack.composition.authorities.taskOutputLifecycle = originalLifecycle
+		_ = recorder.Close(context.Background())
+		_ = spool.Close()
+	})
+
+	observer := recorder.BindTaskOutput(ctx, output.Binding{
+		SessionID: active.SessionID, TaskID: "task-before-disconnect",
+		Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true,
+	})
+	if err := observer.ObserveTaskOutput(ctx, output.Event{Text: "partial", Running: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	receipt, err := disconnectACPCommand(ctx, stack, "codex")
+	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("DisconnectACP() receipt/error = %#v/%v", receipt, err)
+	}
+	if !faultingSessions.injected.Load() || !strings.Contains(receipt.Detail, fault.Error()) {
+		t.Fatalf("committed removal warning was not reported: receipt=%#v injected=%v", receipt, faultingSessions.injected.Load())
+	}
+	repaired, err := originalSessions.Session(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repaired.Participants) != 0 {
+		t.Fatalf("committed removal retained participant: %#v", repaired.Participants)
+	}
+
+	recorder.BindTaskOutput(ctx, output.Binding{
+		SessionID: active.SessionID, TaskID: "task-after-disconnect",
+		Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true,
+	})
+	logical := streamspool.LogicalKey{
+		Namespace: streamspool.NamespaceTask,
+		Digest:    streamspool.DigestStrings(active.SessionID, "task-after-disconnect"),
+	}
+	if _, _, err := spool.Resolve(ctx, logical); err != nil {
+		t.Fatalf("committed participant removal retained the only registration slot: %v", err)
+	}
+}
+
+type committedRemoveParticipantSessionService struct {
+	session.Service
+	lifecycle session.ParticipantLifecycleService
+	fault     error
+	once      sync.Once
+	injected  atomic.Bool
+}
+
+func (s *committedRemoveParticipantSessionService) PutParticipantWithEvent(
+	ctx context.Context,
+	req session.PutParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	return s.lifecycle.PutParticipantWithEvent(ctx, req)
+}
+
+func (s *committedRemoveParticipantSessionService) RemoveParticipantWithEvent(
+	ctx context.Context,
+	req session.RemoveParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	updated, event, err := s.lifecycle.RemoveParticipantWithEvent(ctx, req)
+	if err != nil {
+		return updated, event, err
+	}
+	inject := false
+	s.once.Do(func() {
+		inject = true
+		s.injected.Store(true)
+	})
+	if inject {
+		return updated, event, &session.CommittedError{Err: s.fault}
+	}
+	return updated, event, nil
+}
+
 func TestDisconnectACPRebindsLoadedControllerToACPConnectedAfterActivation(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	ctx := context.Background()
@@ -664,7 +786,7 @@ func TestDisconnectACPInterruptsActiveControllerTurnBeforeFallback(t *testing.T)
 	}
 	rebound := mustCurrentSession(t, stack, active.SessionID)
 	if rebound.Controller.Kind != session.ControllerKindKernel {
-		t.Fatalf("rebound controller = %#v, want kernel fallback", rebound.Controller)
+		t.Fatalf("rebound controller = %#v, want kernel fallback (disconnect detail: %q)", rebound.Controller, receipt.Detail)
 	}
 }
 

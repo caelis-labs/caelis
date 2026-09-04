@@ -67,8 +67,8 @@ func (s *TaskStore) put(ctx context.Context, entry *taskapi.Entry, expected *uin
 			if !errors.Is(err, session.ErrSessionNotFound) || !taskMutationMayUseDetachedControlStore(guard) {
 				return err
 			}
-			if taskMutationIsDetachedSubagentCompletion(guard) {
-				if err := s.validateDetachedSubagentCompletion(entry, expected); err != nil {
+			if taskMutationIsDetachedSubagentLifecycle(guard) {
+				if err := s.validateDetachedSubagentLifecycle(entry, expected, guard.Purpose); err != nil {
 					return err
 				}
 			}
@@ -80,44 +80,67 @@ func (s *TaskStore) put(ctx context.Context, entry *taskapi.Entry, expected *uin
 }
 
 // A TaskStore may be configured independently from the Session store. Ordinary
-// unguarded writes retain that topology; the only detached Control mutation is
-// a validated asynchronous subagent completion.
+// unguarded writes retain that topology; detached Control mutations are limited
+// to validated asynchronous subagent lifecycle updates.
 func taskMutationMayUseDetachedControlStore(guard session.MutationGuard) bool {
 	if guard.Authority == "" {
 		return true
 	}
-	return taskMutationIsDetachedSubagentCompletion(guard)
+	return taskMutationIsDetachedSubagentLifecycle(guard)
 }
 
-func taskMutationIsDetachedSubagentCompletion(guard session.MutationGuard) bool {
+func taskMutationIsDetachedSubagentLifecycle(guard session.MutationGuard) bool {
 	return guard.Authority == session.MutationAuthorityControl &&
-		guard.Purpose == session.ControlMutationPurposeSubagentCompletion &&
+		(guard.Purpose == session.ControlMutationPurposeSubagentCompletion || guard.Purpose == session.ControlMutationPurposeSubagentActivity) &&
 		session.ValidateControlMutationGuard(guard) == nil
 }
 
-func (s *TaskStore) validateDetachedSubagentCompletion(entry *taskapi.Entry, expected *uint64) error {
+func (s *TaskStore) validateDetachedSubagentLifecycle(entry *taskapi.Entry, expected *uint64, purpose session.ControlMutationPurpose) error {
 	if entry == nil || expected == nil || *expected == 0 {
-		return fmt.Errorf("agent-sdk/session/file: detached subagent completion requires an existing Task CAS revision")
+		return fmt.Errorf("agent-sdk/session/file: detached subagent lifecycle requires an existing Task CAS revision")
 	}
 	current, err := s.store.getTaskIndex(strings.TrimSpace(entry.TaskID))
 	if err != nil {
-		return fmt.Errorf("agent-sdk/session/file: detached subagent completion requires an existing Task: %w", err)
+		return fmt.Errorf("agent-sdk/session/file: detached subagent lifecycle requires an existing Task: %w", err)
 	}
 	if current.Kind != taskapi.KindSubagent || entry.Kind != taskapi.KindSubagent {
-		return fmt.Errorf("agent-sdk/session/file: detached subagent completion requires a subagent Task")
+		return fmt.Errorf("agent-sdk/session/file: detached subagent lifecycle requires a subagent Task")
 	}
 	if session.NormalizeSessionRef(current.Session) != session.NormalizeSessionRef(entry.Session) {
-		return fmt.Errorf("agent-sdk/session/file: detached subagent completion cannot change the owning Session")
-	}
-	if entry.Running || !detachedSubagentCompletionState(entry.State) {
-		return fmt.Errorf("agent-sdk/session/file: detached subagent completion requires a terminal Task state")
+		return fmt.Errorf("agent-sdk/session/file: detached subagent lifecycle cannot change the owning Session")
 	}
 	if current.Revision != *expected {
 		return &taskapi.RevisionConflictError{
 			TaskID: entry.TaskID, Expected: *expected, Actual: current.Revision,
 		}
 	}
+	if purpose == session.ControlMutationPurposeSubagentActivity {
+		activity, _ := entry.Metadata["child_activity_id"].(string)
+		generation := taskLifecycleGeneration(entry.Spec["turn_seq"])
+		previous := taskLifecycleGeneration(current.Spec["turn_seq"])
+		if !entry.Running || entry.State != taskapi.StateRunning || strings.TrimSpace(activity) == "" ||
+			previous <= 0 || generation != previous+1 || taskLifecycleGeneration(entry.Metadata["child_activity_generation"]) != generation {
+			return fmt.Errorf("agent-sdk/session/file: detached subagent activity requires a running Task with activity identity")
+		}
+		if current.Running && taskLifecycleGeneration(current.Metadata["cancel_turn_seq"]) != generation {
+			return fmt.Errorf("agent-sdk/session/file: detached subagent activity cannot supersede a running Task")
+		}
+	} else if entry.Running || !detachedSubagentCompletionState(entry.State) {
+		return fmt.Errorf("agent-sdk/session/file: detached subagent completion requires a terminal Task state")
+	}
 	return nil
+}
+
+func taskLifecycleGeneration(value any) int64 {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return 0
+	}
+	var generation int64
+	if json.Unmarshal(raw, &generation) != nil {
+		return 0
+	}
+	return generation
 }
 
 func detachedSubagentCompletionState(state taskapi.State) bool {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -13,132 +12,39 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-// ErrEventStreamConsumed reports an attempt to consume both alternate views of
-// one single-consumer Runner event stream.
-var ErrEventStreamConsumed = errors.New("agent-sdk/runtime: runner event stream already has a consumer")
-
 type runner struct {
-	runID       string
-	cancelFn    context.CancelFunc
-	events      *eventQueue[runnerEvent]
-	closeOnce   sync.Once
-	finishOnce  sync.Once
-	done        chan struct{}
-	mu          sync.Mutex
-	cancelled   bool
-	closed      bool
-	finished    bool
-	consumer    string
-	submissions []agent.Submission
-	cancelHook  func() error
-	dispatcher  *runnerSubmissionDispatcher
+	runID         string
+	ctx           context.Context
+	cancelFn      context.CancelFunc
+	observer      agent.SourceEventObserver
+	observerMu    sync.Mutex
+	ownership     liveContentOwnership
+	finishOnce    sync.Once
+	done          chan struct{}
+	mu            sync.Mutex
+	cancelled     bool
+	closed        bool
+	finished      bool
+	completionErr error
+	submissions   []agent.Submission
+	cancelHook    func() error
+	dispatcher    *runnerSubmissionDispatcher
 }
 
-type runnerEvent struct {
-	event agent.SourceEvent
-	err   error
-}
-
-func newRunner(runID string, cancel context.CancelFunc) *runner {
+func newRunner(ctx context.Context, runID string, cancel context.CancelFunc, observer agent.SourceEventObserver) *runner {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return &runner{
 		runID:    runID,
+		ctx:      ctx,
 		cancelFn: cancel,
-		events:   newEventQueue[runnerEvent](),
+		observer: observer,
 		done:     make(chan struct{}),
 	}
 }
 
 func (r *runner) RunID() string { return r.runID }
-
-func (r *runner) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		if r == nil {
-			return
-		}
-		if err := r.claimEventStream("events"); err != nil {
-			yield(nil, err)
-			return
-		}
-		for {
-			item, gap, ok := r.nextDelivery()
-			if !ok {
-				return
-			}
-			if gap != nil {
-				if !yield(nil, gap) {
-					return
-				}
-				continue
-			}
-			if item.err != nil {
-				if !yield(nil, item.err) {
-					return
-				}
-				continue
-			}
-			if item.event.Canonical == nil {
-				continue
-			}
-			if !yield(session.CloneEvent(item.event.Canonical), nil) {
-				return
-			}
-		}
-	}
-}
-
-func (r *runner) SourceEvents() iter.Seq2[agent.SourceEvent, error] {
-	return func(yield func(agent.SourceEvent, error) bool) {
-		if r == nil {
-			return
-		}
-		if err := r.claimEventStream("source_events"); err != nil {
-			yield(agent.SourceEvent{}, err)
-			return
-		}
-		ownership := liveContentOwnership{}
-		for {
-			item, gap, ok := r.nextDelivery()
-			if !ok {
-				return
-			}
-			if gap != nil {
-				if !yield(agent.SourceEvent{}, gap) {
-					return
-				}
-				continue
-			}
-			event := agent.CloneSourceEvent(item.event)
-			event.CanonicalContentAlreadyPublished |= ownership.observe(event.Canonical)
-			if !yield(event, item.err) {
-				return
-			}
-		}
-	}
-}
-
-func (r *runner) nextDelivery() (runnerEvent, *agent.EventStreamGapError, bool) {
-	if r == nil {
-		return runnerEvent{}, nil, false
-	}
-	delivery, ok := r.events.Pop()
-	if !ok {
-		return runnerEvent{}, nil, false
-	}
-	if delivery.Dropped > 0 {
-		return runnerEvent{}, &agent.EventStreamGapError{Dropped: delivery.Dropped}, true
-	}
-	return delivery.Item, nil, true
-}
-
-func (r *runner) claimEventStream(requested string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.consumer == "" {
-		r.consumer = requested
-		return nil
-	}
-	return fmt.Errorf("%w: selected %s, requested %s", ErrEventStreamConsumed, r.consumer, requested)
-}
 
 func (r *runner) Submit(sub agent.Submission) error {
 	return r.SubmitContext(context.Background(), sub)
@@ -276,12 +182,6 @@ func (r *runner) Close() error {
 		cancelErr = r.Cancel().Err
 	}
 	r.markClosed()
-	r.closeOnce.Do(func() {
-		r.events.Abort()
-	})
-	// Abort also clears a normally finished queue when Close is called after the
-	// producer won closeOnce but the caller no longer intends to drain events.
-	r.events.Abort()
 	return cancelErr
 }
 
@@ -294,7 +194,10 @@ func (r *runner) WaitCompletion(ctx context.Context) error {
 	}
 	select {
 	case <-r.done:
-		return nil
+		r.mu.Lock()
+		err := r.completionErr
+		r.mu.Unlock()
+		return err
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -318,24 +221,33 @@ func (r *runner) publishEvent(event *session.Event) {
 }
 
 func (r *runner) publishSourceEvent(event agent.SourceEvent) {
-	if r == nil || (event.Canonical == nil && event.Native == nil) {
+	if r == nil || (event.Canonical == nil && event.Native == nil && event.Err == nil) {
 		return
 	}
-	r.publish(runnerEvent{event: agent.CloneSourceEvent(event)})
+	r.publish(event)
 }
 
 func (r *runner) publishError(err error) {
 	if r == nil || err == nil {
 		return
 	}
-	r.publish(runnerEvent{err: err})
+	r.mu.Lock()
+	if r.completionErr == nil {
+		r.completionErr = err
+	}
+	r.mu.Unlock()
+	r.publish(agent.SourceEvent{Err: err})
 }
 
-func (r *runner) publish(item runnerEvent) {
-	if r == nil {
+func (r *runner) publish(event agent.SourceEvent) {
+	if r == nil || r.observer == nil {
 		return
 	}
-	r.events.Push(item)
+	r.observerMu.Lock()
+	event = agent.CloneSourceEvent(event)
+	event.CanonicalContentAlreadyPublished |= r.ownership.observe(event.Canonical)
+	_ = r.observer.ObserveSourceEvent(r.ctx, event)
+	r.observerMu.Unlock()
 }
 
 func (r *runner) finish() {
@@ -350,9 +262,6 @@ func (r *runner) finish() {
 	if dispatcher != nil {
 		dispatcher.close(errRunnerSubmissionClosed)
 	}
-	r.closeOnce.Do(func() {
-		r.events.Close()
-	})
 	r.finishOnce.Do(func() {
 		close(r.done)
 	})

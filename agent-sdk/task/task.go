@@ -21,6 +21,17 @@ const (
 	KindSubagent Kind = "subagent"
 )
 
+// IsTerminalState reports whether state proves that the current Task activity
+// has ended.
+func IsTerminalState(state State) bool {
+	switch State(strings.ToLower(strings.TrimSpace(string(state)))) {
+	case StateCompleted, StateFailed, StateCancelled, StateInterrupted, StateTerminated, StateUnknownOutcome:
+		return true
+	default:
+		return false
+	}
+}
+
 // State identifies one task lifecycle state.
 type State string
 

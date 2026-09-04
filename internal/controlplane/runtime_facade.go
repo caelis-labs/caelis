@@ -8,7 +8,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 )
 
 // runtimeFacade is the shared decorator shell for Control-owned Runtime
@@ -45,12 +45,12 @@ func (f *runtimeFacade) RunState(ctx context.Context, ref session.SessionRef) (a
 	return f.inner.RunState(ctx, ref)
 }
 
-func (f *runtimeFacade) Streams() stream.Service {
-	provider, _ := f.inner.(agent.StreamProvider)
+func (f *runtimeFacade) Terminals() terminal.Controller {
+	provider, _ := f.inner.(agent.TerminalProvider)
 	if provider == nil {
 		return nil
 	}
-	return provider.Streams()
+	return provider.Terminals()
 }
 
 func (f *runtimeFacade) AttachLiveRun(ctx context.Context, req agent.AttachLiveRunRequest) (agent.RunResult, error) {

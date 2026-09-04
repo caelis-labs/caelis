@@ -117,18 +117,9 @@ type Event struct {
 	// ToolOutputCollection marks a present standard ACP content collection.
 	// Reducers replace the prior collection even when ToolOutput is empty.
 	ToolOutputCollection bool
-	ToolOutputTerminal   bool
-	// ToolOutputCursor is the cumulative terminal-output byte position after
-	// ToolOutput. ToolOutputStartCursor is present for durable observation
-	// snapshots whose display text may be compacted rather than byte-exact.
-	ToolOutputCursor           int64
-	ToolOutputCursorKnown      bool
-	ToolOutputStartCursor      int64
-	ToolOutputStartCursorKnown bool
-	// ToolOutputGapBefore records that exact terminal bytes before this event
-	// are unavailable. Surfaces may use it for cursor recovery, but it is never
-	// part of ToolOutput or user-visible transcript text.
-	ToolOutputGapBefore bool
+	// ToolOutputTerminal marks an exact terminal byte delta. Control orders and
+	// resumes these records; the Surface only appends the bytes it receives.
+	ToolOutputTerminal bool
 	// ToolTaskHandle is the Session-scoped public identity shown to users. It
 	// must never carry the opaque TaskID used by Task stream endpoints.
 	ToolTaskHandle     string

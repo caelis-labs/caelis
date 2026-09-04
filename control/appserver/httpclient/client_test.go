@@ -3,12 +3,12 @@ package httpclient
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -553,7 +553,6 @@ func TestReconnectReturnsTypedAtomicSubscription(t *testing.T) {
 		APIVersion:      appserver.HTTPAPIVersion,
 		SessionID:       "session-1",
 		Revision:        math.MaxUint64,
-		ResumeMode:      appserver.ResumeModeExact,
 		BoundaryCursor:  "cursor-boundary",
 		Controller: session.ControllerBinding{
 			ContextSyncSeq: math.MaxUint64,
@@ -575,11 +574,22 @@ func TestReconnectReturnsTypedAtomicSubscription(t *testing.T) {
 		t.Fatalf("Reconnect state = %#v", result.State)
 	}
 
-	replayed := receiveRemoteEnvelope(t, result.Subscription.Backfill())
-	if replayed.Cursor != "cursor-backfill" ||
-		replayed.Position == nil ||
-		replayed.Position.Durable == nil ||
-		replayed.Position.Durable.Seq != math.MaxUint64 {
+	assembler := &appserver.FeedDeliveryAssembler{}
+	var received []eventstream.Envelope
+	var committedCursor string
+	for len(received) < 2 {
+		delivery := receiveRemoteDelivery(t, result.Subscription.Deliveries())
+		events, _, err := assembler.Accept(delivery)
+		if err != nil {
+			t.Fatal(err)
+		}
+		received = append(received, events...)
+		if delivery.NextCursor != "" {
+			committedCursor = delivery.NextCursor
+		}
+	}
+	replayed := received[0]
+	if replayed.Cursor != "" || replayed.Position == nil || replayed.Position.Durable == nil || replayed.Position.Durable.Seq != math.MaxUint64 {
 		t.Fatalf("backfill Envelope = %#v", replayed)
 	}
 	compact, ok := replayed.Meta["compact"].(map[string]any)
@@ -589,12 +599,7 @@ func TestReconnectReturnsTypedAtomicSubscription(t *testing.T) {
 	if _, ok := replayed.Update.(eventstream.ContentChunk); !ok {
 		t.Fatalf("backfill update = %T", replayed.Update)
 	}
-	select {
-	case <-result.Subscription.BackfillDone():
-	case <-time.After(2 * time.Second):
-		t.Fatal("backfill marker was not delivered")
-	}
-	continued := receiveRemoteEnvelope(t, result.Subscription.Events())
+	continued := received[1]
 	usage, ok := continued.Update.(eventstream.UsageUpdate)
 	if !ok || usage.Size != math.MaxUint64 || usage.Used != math.MaxUint64 ||
 		continued.Position == nil ||
@@ -602,93 +607,46 @@ func TestReconnectReturnsTypedAtomicSubscription(t *testing.T) {
 		continued.Position.Transient.Sequence != math.MaxUint64 {
 		t.Fatalf("live Envelope = %#v", continued)
 	}
-	if result.Subscription.LastCursor() != "cursor-live" {
-		t.Fatalf("LastCursor = %q", result.Subscription.LastCursor())
+	if committedCursor != "cursor-live" {
+		t.Fatalf("committed cursor = %q", committedCursor)
 	}
 	if err := result.Subscription.Err(); err != nil {
 		t.Fatalf("subscription error = %v", err)
 	}
 }
 
-func TestRemoteSubscriptionLastCursorLinearWithDelivery(t *testing.T) {
-	// Under concurrency, receiving an event must not observe a stale LastCursor.
-	for range 200 {
+func TestRemoteSubscriptionCarriesCursorInDelivery(t *testing.T) {
+	// The resume token is part of the page, so receiving it needs no sender-side acknowledgement.
+	for range 20 {
 		reader, writer := io.Pipe()
 		response := &http.Response{Body: reader}
 		scanner := bufio.NewScanner(reader)
 		scanner.Buffer(make([]byte, 64<<10), defaultRemoteMaxEvent)
-		subscription := newRemoteSubscription(response, scanner, 8, "cursor-client")
+		subscription := newRemoteSubscription(response, scanner)
 
-		_, _ = io.WriteString(writer, "id: cursor-backfill\ndata: {\"kind\":\"notice\",\"cursor\":\"cursor-backfill\",\"session_id\":\"s1\",\"notice\":\"b\"}\n\n")
-		select {
-		case envelope := <-subscription.Backfill():
-			if envelope.Cursor != "cursor-backfill" {
-				t.Fatalf("backfill envelope = %#v", envelope)
-			}
-			if got := subscription.LastCursor(); got != "cursor-backfill" {
-				t.Fatalf("LastCursor() = %q immediately after backfill, want cursor-backfill", got)
-			}
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for backfill")
+		envelope := eventstream.Envelope{Kind: eventstream.KindNotice, SessionID: "s1", Notice: "live"}
+		rawEnvelope, err := wirev1.MarshalEnvelope(envelope)
+		if err != nil {
+			t.Fatal(err)
 		}
-
-		_, _ = io.WriteString(writer, "event: "+wirev1.BackfillDoneEventName+"\ndata: {}\n\n")
-		select {
-		case <-subscription.BackfillDone():
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for backfill marker")
+		rawDelivery, err := wirev1.Marshal(wirev1.FeedDelivery{
+			Kind: string(appserver.FeedDeliveryAppendPage), Source: string(appserver.FeedSourceExact),
+			Events: []json.RawMessage{rawEnvelope}, NextCursor: "cursor-live",
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-
-		_, _ = io.WriteString(writer, "id: cursor-live\ndata: {\"kind\":\"notice\",\"cursor\":\"cursor-live\",\"session_id\":\"s1\",\"notice\":\"l\"}\n\n")
-		select {
-		case envelope := <-subscription.Events():
-			if envelope.Cursor != "cursor-live" {
-				t.Fatalf("live envelope = %#v", envelope)
-			}
-			if got := subscription.LastCursor(); got != "cursor-live" {
-				t.Fatalf("LastCursor() = %q immediately after live receive, want cursor-live", got)
-			}
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for live event")
+		_, _ = fmt.Fprintf(writer, "event: %s\nid: cursor-live\ndata: %s\n\n", wirev1.FeedDeliveryEventName, rawDelivery)
+		delivery := receiveRemoteDelivery(t, subscription.Deliveries())
+		if len(delivery.Events) != 1 || delivery.Events[0].Notice != "live" {
+			t.Fatalf("live delivery = %#v", delivery)
 		}
+		if got := delivery.NextCursor; got != "cursor-live" {
+			t.Fatalf("NextCursor = %q in delivery, want cursor-live", got)
+		}
+		_, _ = fmt.Fprintf(writer, "event: %s\ndata: {}\n\n", wirev1.FeedDoneEventName)
 		_ = writer.Close()
 		_ = subscription.Close()
-	}
-}
-
-func TestReconnectDisconnectsSlowConsumerWithCursor(t *testing.T) {
-	backfill := make([]eventstream.Envelope, 4)
-	for index := range backfill {
-		backfill[index] = eventstream.Envelope{
-			Kind: eventstream.KindNotice, Cursor: "cursor-" + strconv.Itoa(index+1),
-			SessionID: "session-1", Notice: "event",
-		}
-	}
-	state := appserver.SessionState{
-		ProtocolVersion: acpsdk.ProtocolVersionNumber,
-		EnvelopeVersion: appserver.EnvelopeVersion,
-		APIVersion:      appserver.HTTPAPIVersion,
-		SessionID:       "session-1",
-		ResumeMode:      appserver.ResumeModeExact,
-	}
-	client, closeServer := newFixtureClientWithConfig(t, Config{EventBuffer: 1}, reconnectFixture(t, state, backfill, nil, false))
-	defer closeServer()
-
-	result, err := client.Reconnect(context.Background(), appserver.ReconnectRequest{SessionID: "session-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer result.Subscription.Close()
-	select {
-	case <-result.Subscription.BackfillDone():
-	case <-time.After(2 * time.Second):
-		t.Fatal("slow-consumer subscription did not terminate")
-	}
-	var gap *appserver.FeedGapError
-	if !errors.As(result.Subscription.Err(), &gap) ||
-		!errors.Is(gap, appserver.ErrSlowConsumer) ||
-		gap.RetryCursor != "cursor-1" {
-		t.Fatalf("subscription error = %#v", result.Subscription.Err())
 	}
 }
 
@@ -771,12 +729,28 @@ func reconnectFixture(
 		writer.Header().Set("Content-Type", "text/event-stream")
 		writer.WriteHeader(http.StatusOK)
 		writeFixtureSSE(t, writer, wirev1.BootstrapEventName, "", state)
-		for _, envelope := range backfill {
-			writeFixtureSSE(t, writer, "", envelope.Cursor, envelope)
+		if len(backfill) > 0 {
+			backfill = cloneFixtureEnvelopesWithoutResume(backfill)
+			writeFixtureSSE(t, writer, wirev1.FeedDeliveryEventName, "", fixtureFeedDelivery(t,
+				appserver.FeedDeliveryReplaceBegin, appserver.FeedSourceReplacement, "snapshot-1", 0, nil, "",
+			))
+			writeFixtureSSE(t, writer, wirev1.FeedDeliveryEventName, "", fixtureFeedDelivery(t,
+				appserver.FeedDeliveryReplacePage, appserver.FeedSourceReplacement, "snapshot-1", 0, backfill, "",
+			))
+			writeFixtureSSE(t, writer, wirev1.FeedDeliveryEventName, "", fixtureFeedDelivery(t,
+				appserver.FeedDeliveryReplaceEnd, appserver.FeedSourceReplacement, "snapshot-1", 1, nil, "",
+			))
 		}
-		writeFixtureSSE(t, writer, wirev1.BackfillDoneEventName, "", map[string]any{})
+		writeFixtureSSE(t, writer, wirev1.FeedDeliveryEventName, state.BoundaryCursor, fixtureFeedDelivery(t,
+			appserver.FeedDeliverySync, appserver.FeedSourceExact, "", 0, nil, state.BoundaryCursor,
+		))
 		for _, envelope := range live {
-			writeFixtureSSE(t, writer, "", envelope.Cursor, envelope)
+			writeFixtureSSE(t, writer, wirev1.FeedDeliveryEventName, envelope.Cursor, fixtureFeedDelivery(t,
+				appserver.FeedDeliveryAppendPage, appserver.FeedSourceExact, "", 0, []eventstream.Envelope{envelope}, envelope.Cursor,
+			))
+		}
+		if !holdOpen {
+			writeFixtureSSE(t, writer, wirev1.FeedDoneEventName, "", map[string]any{})
 		}
 		if flusher, ok := writer.(http.Flusher); ok {
 			flusher.Flush()
@@ -785,6 +759,39 @@ func reconnectFixture(
 			<-request.Context().Done()
 		}
 	}
+}
+
+func cloneFixtureEnvelopesWithoutResume(envelopes []eventstream.Envelope) []eventstream.Envelope {
+	out := make([]eventstream.Envelope, 0, len(envelopes))
+	for _, envelope := range envelopes {
+		clone := eventstream.CloneEnvelope(envelope)
+		clone.Cursor = ""
+		out = append(out, clone)
+	}
+	return out
+}
+
+func fixtureFeedDelivery(
+	t *testing.T,
+	kind appserver.FeedDeliveryKind,
+	source appserver.FeedSourceClass,
+	snapshotID string,
+	page uint32,
+	events []eventstream.Envelope,
+	nextCursor string,
+) wirev1.FeedDelivery {
+	t.Helper()
+	delivery := wirev1.FeedDelivery{
+		Kind: string(kind), Source: string(source), SnapshotID: snapshotID, Page: page, NextCursor: nextCursor,
+	}
+	for _, envelope := range events {
+		raw, err := wirev1.MarshalEnvelope(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		delivery.Events = append(delivery.Events, raw)
+	}
+	return delivery
 }
 
 func writeFixtureSSE(t *testing.T, writer http.ResponseWriter, event, id string, value any) {
@@ -808,17 +815,17 @@ func writeFixtureSSE(t *testing.T, writer http.ResponseWriter, event, id string,
 	_, _ = fmt.Fprintf(writer, "data: %s\n\n", raw)
 }
 
-func receiveRemoteEnvelope(t *testing.T, events <-chan eventstream.Envelope) eventstream.Envelope {
+func receiveRemoteDelivery(t *testing.T, deliveries <-chan appserver.FeedDelivery) appserver.FeedDelivery {
 	t.Helper()
 	select {
-	case envelope, ok := <-events:
+	case delivery, ok := <-deliveries:
 		if !ok {
-			t.Fatal("remote Envelope channel closed")
+			t.Fatal("remote delivery channel closed")
 		}
-		return envelope
+		return delivery
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for remote Envelope")
-		return eventstream.Envelope{}
+		t.Fatal("timed out waiting for remote delivery")
+		return appserver.FeedDelivery{}
 	}
 }
 

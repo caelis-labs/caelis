@@ -4,7 +4,9 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/memoryhost"
 	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
@@ -14,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
+	"github.com/caelis-labs/caelis/control/streamspool"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	v1alpha1 "github.com/caelis-labs/memory/api/memory/v1alpha1"
 )
@@ -22,6 +25,15 @@ type runtimeMemoryHost interface {
 	ValidateBinding(memorybinding.RuntimeMemoryBindingSnapshot) error
 	ValidateAuthority(context.Context, memorybinding.RuntimeMemoryBindingSnapshot) error
 	Bind(memorybinding.RuntimeMemoryBindingSnapshot, v1alpha1.SourceContext, v1alpha1.RecallBudget) (memoryhost.BoundClient, error)
+}
+
+// taskOutputLifecycle is the Control-owned close side of the producer-only SDK
+// binding. Keeping it separate prevents Agent Runtime from acquiring replay,
+// retention, or product-address lifecycle authority.
+type taskOutputLifecycle interface {
+	ReleaseTask(context.Context, task.Ref) error
+	ReleaseSession(context.Context, session.SessionRef) error
+	Close(context.Context) error
 }
 
 // runtimeHostAuthorities is the immutable set of process services borrowed by
@@ -39,7 +51,11 @@ type runtimeHostAuthorities struct {
 	configMigration         configstore.MigrationReport
 	fenceOwnerID            string
 	taskStore               task.Store
+	taskOutput              output.Binder
+	taskOutputLifecycle     taskOutputLifecycle
+	streamSpool             streamspool.Store
 	controlFeeds            appserver.FeedRegistry
+	controlFeedLifecycle    appserver.FeedRegistryLifecycle
 	approvalRecovery        *appserver.ApprovalRecoveryGate
 	codexAuth               *codexauth.Manager
 	grokAuth                *grokauth.Manager

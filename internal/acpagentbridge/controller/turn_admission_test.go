@@ -23,11 +23,11 @@ func TestControllerRunRejectsOverlappingTurns(t *testing.T) {
 	t.Parallel()
 
 	run := &controllerRun{parentSessionID: "session-a"}
-	first := newTurnHandle(nil)
+	first := newTestTurnHandle(nil)
 	if err := run.beginTurn(controller.TurnRequest{TurnID: "turn-1"}, first); err != nil {
 		t.Fatal(err)
 	}
-	second := newTurnHandle(nil)
+	second := newTestTurnHandle(nil)
 	if err := run.beginTurn(controller.TurnRequest{TurnID: "turn-2"}, second); err == nil || !strings.Contains(err.Error(), "turn in progress") {
 		t.Fatalf("overlapping beginTurn() error = %v, want turn-in-progress rejection", err)
 	}
@@ -39,14 +39,14 @@ func TestControllerRunRejectsOverlappingTurns(t *testing.T) {
 		t.Fatalf("active turn after rejected overlap = %q/%p, want turn-1/%p", turnID, active, first)
 	}
 
-	if _, _ = run.finishTurn(second); run.handle != first {
+	if _ = run.finishTurn(second); run.handle != first {
 		t.Fatal("stale turn owner cleared the active turn")
 	}
 	run.finishTurn(first)
 	first.finish()
 	second.finish()
 
-	third := newTurnHandle(nil)
+	third := newTestTurnHandle(nil)
 	if err := run.beginTurn(controller.TurnRequest{TurnID: "turn-3"}, third); err != nil {
 		t.Fatalf("beginTurn() after completion error = %v", err)
 	}
@@ -73,7 +73,7 @@ func TestControllerRunConcurrentAdmissionAllowsOneTurn(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			turnID := fmt.Sprintf("turn-%d", i)
-			handle := newTurnHandle(nil)
+			handle := newTestTurnHandle(nil)
 			<-start
 			err := run.beginTurn(controller.TurnRequest{TurnID: turnID}, handle)
 			results <- admissionResult{turnID: turnID, handle: handle, err: err}
@@ -114,7 +114,7 @@ func TestManagerRunTurnBusyPreservesPendingContext(t *testing.T) {
 		context:         agent.ContextTransfer{Summary: "handoff context"},
 		contextPending:  true,
 	}
-	first := newTurnHandle(nil)
+	first := newTestTurnHandle(nil)
 	if err := run.beginTurn(controller.TurnRequest{TurnID: "turn-1"}, first); err != nil {
 		t.Fatal(err)
 	}
@@ -184,33 +184,27 @@ func TestManagerDeactivateCancelsInFlightControllerTurn(t *testing.T) {
 		t.Fatal("active controller run is missing")
 	}
 
+	started := make(chan struct{}, 1)
 	turn, err := manager.RunTurn(ctx, controller.TurnRequest{
 		SessionRef: parentSession.SessionRef,
 		Session:    parentSession,
 		TurnID:     "turn-blocking",
 		Input:      "wait for shutdown",
 		Stream:     true,
+		Observer: agent.SourceEventObserverFunc(func(context.Context, agent.SourceEvent) error {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			return nil
+		}),
 	})
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	started := make(chan struct{}, 1)
 	done := make(chan error, 1)
 	go func() {
-		var terminalErr error
-		for event, eventErr := range turn.Handle.Events() {
-			if eventErr != nil {
-				terminalErr = eventErr
-				continue
-			}
-			if event != nil {
-				select {
-				case started <- struct{}{}:
-				default:
-				}
-			}
-		}
-		done <- terminalErr
+		done <- turn.Handle.WaitCompletion(context.Background())
 	}()
 	select {
 	case <-started:
@@ -224,7 +218,7 @@ func TestManagerDeactivateCancelsInFlightControllerTurn(t *testing.T) {
 	if got := turn.Handle.Cancel().Status; got != controller.CancelStatusAlreadyCancelled {
 		t.Fatalf("Cancel() after Deactivate status = %q, want %q", got, controller.CancelStatusAlreadyCancelled)
 	}
-	rejected := newTurnHandle(nil)
+	rejected := newTestTurnHandle(nil)
 	if err := run.beginTurn(controller.TurnRequest{TurnID: "turn-after-shutdown"}, rejected); !errors.Is(err, controller.ErrNotActive) {
 		t.Fatalf("beginTurn() after Deactivate error = %v, want ErrNotActive", err)
 	}
@@ -253,7 +247,7 @@ func TestManagerDetachCancelsInFlightParticipantPrompt(t *testing.T) {
 		},
 	}
 	promptCtx, cancel := context.WithCancel(context.Background())
-	handle := newTurnHandle(cancel)
+	handle := newTestTurnHandle(cancel)
 	if err := run.beginPrompt(controller.ParticipantPromptRequest{
 		TurnID: "turn-1", ParticipantID: run.id,
 	}, handle); err != nil {
@@ -280,7 +274,7 @@ func TestManagerDetachCancelsInFlightParticipantPrompt(t *testing.T) {
 	if attached != nil {
 		t.Fatal("Detach left participant in the manager registry")
 	}
-	rejected := newTurnHandle(nil)
+	rejected := newTestTurnHandle(nil)
 	if err := run.beginPrompt(controller.ParticipantPromptRequest{
 		TurnID: "turn-after-detach", ParticipantID: run.id,
 	}, rejected); !errors.Is(err, controller.ErrNotActive) {

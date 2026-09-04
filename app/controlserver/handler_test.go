@@ -202,8 +202,7 @@ func TestReconnectSSEBootstrapsStateBeforeBackfillAndLiveEvents(t *testing.T) {
 			Content:       eventstream.TextContent{Type: "text", Text: "live"},
 		},
 	}
-	subscription := newTestSubscription(live)
-	subscription.backfill = envelopeChannel(backfill)
+	subscription := newTestReplacementSubscription([]eventstream.Envelope{backfill}, live)
 	service := &fakeService{
 		subscription: subscription,
 		reconnectState: appserver.SessionState{
@@ -211,7 +210,7 @@ func TestReconnectSSEBootstrapsStateBeforeBackfillAndLiveEvents(t *testing.T) {
 			EnvelopeVersion: appserver.EnvelopeVersion,
 			APIVersion:      appserver.HTTPAPIVersion,
 			SessionID:       "session-1", Revision: math.MaxUint64,
-			ResumeMode: appserver.ResumeModeExact, BoundaryCursor: "cursor-boundary",
+			BoundaryCursor: "cursor-boundary",
 		},
 	}
 	server := newTestServer(t, service, time.Hour)
@@ -231,24 +230,22 @@ func TestReconnectSSEBootstrapsStateBeforeBackfillAndLiveEvents(t *testing.T) {
 	}
 	text := string(body)
 	bootstrapAt := strings.Index(text, "event: "+bootstrapEventName)
-	backfillAt := strings.Index(text, "id: cursor-backfill")
-	doneAt := strings.Index(text, "event: "+backfillDoneEventName)
+	backfillAt := strings.Index(text, `"cursor":"cursor-backfill"`)
+	doneAt := strings.Index(text, `"kind":"replace_end"`)
 	liveAt := strings.Index(text, "id: cursor-live")
 	if bootstrapAt < 0 || backfillAt <= bootstrapAt || doneAt <= backfillAt || liveAt <= doneAt {
-		t.Fatalf("Reconnect SSE ordering is not bootstrap -> backfill -> marker -> live:\n%s", text)
+		t.Fatalf("Reconnect SSE ordering is not bootstrap -> atomic replacement -> live append:\n%s", text)
 	}
 	if !strings.Contains(text, `"revision":"18446744073709551615"`) ||
-		response.Header.Get(boundaryCursorHeader) != "cursor-boundary" {
-		t.Fatalf("Reconnect bootstrap lost state or boundary: headers=%#v body=%s", response.Header, text)
+		!strings.Contains(text, `"kind":"replace_begin"`) ||
+		!strings.Contains(text, `"kind":"append_page"`) {
+		t.Fatalf("Reconnect bootstrap or typed deliveries were lost: headers=%#v body=%s", response.Header, text)
 	}
 }
 
-func TestReconnectReportsTypedGapWithRetryCursor(t *testing.T) {
+func TestReconnectReportsTypedTerminalFeedError(t *testing.T) {
 	subscription := newTestSubscription()
-	subscription.err = &appserver.FeedGapError{
-		Cause: errors.New("splice overtaken"), RetryCursor: "retry-cursor",
-		Mode: appserver.ResumeModeDurableFallback, TransientGap: true,
-	}
+	subscription.err = errorcode.New(errorcode.Unavailable, "secret local spool path")
 	server := newTestServer(t, &fakeService{
 		subscription: subscription,
 		reconnectState: appserver.SessionState{
@@ -256,7 +253,6 @@ func TestReconnectReportsTypedGapWithRetryCursor(t *testing.T) {
 			EnvelopeVersion: appserver.EnvelopeVersion,
 			APIVersion:      appserver.HTTPAPIVersion,
 			SessionID:       "session-1",
-			ResumeMode:      appserver.ResumeModeExact,
 		},
 	}, time.Hour)
 	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/reconnect", nil)
@@ -269,11 +265,10 @@ func TestReconnectReportsTypedGapWithRetryCursor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(body), "event: "+resumeEventName) != 1 ||
-		!strings.Contains(string(body), `"resume_mode":"durable_fallback"`) ||
-		!strings.Contains(string(body), `"transient_gap":true`) ||
-		!strings.Contains(string(body), `"boundary_cursor":"retry-cursor"`) {
-		t.Fatalf("SSE typed gap body = %q", body)
+	if strings.Count(string(body), "event: "+wirev1.FeedErrorEventName) != 1 ||
+		!strings.Contains(string(body), `"code":"unavailable"`) ||
+		strings.Contains(string(body), "secret local spool path") {
+		t.Fatalf("SSE typed terminal error body = %q", body)
 	}
 }
 
@@ -653,7 +648,7 @@ func (s *fakeService) InspectSession(context.Context, appserver.Principal, appse
 	return appserver.SessionState{}, s.inspectErr
 }
 func (s *fakeService) Subscribe(context.Context, appserver.Principal, appserver.SubscribeRequest) (appserver.SubscribeResult, error) {
-	return appserver.SubscribeResult{Subscription: s.subscription, Mode: appserver.ResumeModeExact, BoundaryCursor: "signed-cursor-1"}, nil
+	return appserver.SubscribeResult{Subscription: s.subscription, BoundaryCursor: "signed-cursor-1"}, nil
 }
 func (s *fakeService) Reconnect(_ context.Context, _ appserver.Principal, req appserver.ReconnectRequest) (appserver.ReconnectResult, error) {
 	s.reconnectReq = req
@@ -696,7 +691,7 @@ func (s *recordingStatusService) SessionStatus(_ context.Context, principal apps
 type fakeTaskService struct {
 	principal taskstream.Principal
 	list      taskstream.ListResult
-	batch     taskstream.Batch
+	batch     taskstream.ReadResult
 	subscribe taskstream.SubscribeResult
 	read      taskstream.ReadRequest
 	request   taskstream.SubscribeRequest
@@ -708,7 +703,7 @@ func (s *fakeTaskService) List(_ context.Context, principal taskstream.Principal
 	return s.list, s.err
 }
 
-func (s *fakeTaskService) Events(_ context.Context, principal taskstream.Principal, request taskstream.ReadRequest) (taskstream.Batch, error) {
+func (s *fakeTaskService) Events(_ context.Context, principal taskstream.Principal, request taskstream.ReadRequest) (taskstream.ReadResult, error) {
 	s.principal = principal
 	s.read = request
 	return s.batch, s.err
@@ -742,37 +737,76 @@ func authorizeTestRequest(request *http.Request) {
 }
 
 type testSubscription struct {
-	backfill chan eventstream.Envelope
-	events   chan eventstream.Envelope
-	err      error
+	deliveries chan appserver.FeedDelivery
+	err        error
 }
 
 func newTestSubscription(events ...eventstream.Envelope) *testSubscription {
-	return &testSubscription{events: envelopeChannel(events...)}
+	deliveries := make([]appserver.FeedDelivery, 0, len(events)+1)
+	for _, event := range events {
+		deliveries = append(deliveries, appserver.FeedDelivery{
+			Kind: appserver.FeedDeliveryAppendPage, Source: appserver.FeedSourceExact,
+			Events: []eventstream.Envelope{event}, NextCursor: event.Cursor,
+		})
+	}
+	deliveries = append(deliveries, appserver.FeedDelivery{Kind: appserver.FeedDeliverySync, Source: appserver.FeedSourceExact})
+	return &testSubscription{deliveries: feedDeliveryChannel(deliveries...)}
 }
 
-func envelopeChannel(events ...eventstream.Envelope) chan eventstream.Envelope {
-	channel := make(chan eventstream.Envelope, len(events))
-	for _, event := range events {
-		channel <- event
+func newTestReplacementSubscription(replacement []eventstream.Envelope, live ...eventstream.Envelope) *testSubscription {
+	deliveries := []appserver.FeedDelivery{
+		{Kind: appserver.FeedDeliveryReplaceBegin, Source: appserver.FeedSourceReplacement, SnapshotID: "snapshot-1"},
+		{Kind: appserver.FeedDeliveryReplacePage, Source: appserver.FeedSourceReplacement, SnapshotID: "snapshot-1", Events: replacement},
+		{Kind: appserver.FeedDeliveryReplaceEnd, Source: appserver.FeedSourceReplacement, SnapshotID: "snapshot-1", Page: 1},
+		{Kind: appserver.FeedDeliverySync, Source: appserver.FeedSourceExact},
+	}
+	for _, event := range live {
+		deliveries = append(deliveries, appserver.FeedDelivery{
+			Kind: appserver.FeedDeliveryAppendPage, Source: appserver.FeedSourceExact,
+			Events: []eventstream.Envelope{event}, NextCursor: event.Cursor,
+		})
+	}
+	return &testSubscription{deliveries: feedDeliveryChannel(deliveries...)}
+}
+
+func TestMarshalFeedDeliveryKeepsTerminalResultCursorless(t *testing.T) {
+	t.Parallel()
+
+	terminal := eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(100, 0).UTC())
+	terminal.SessionID = "session-1"
+	terminal.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+	raw, err := marshalFeedDelivery(appserver.FeedDelivery{
+		Kind: appserver.FeedDeliveryAppendPage, Source: appserver.FeedSourceResult,
+		Events: []eventstream.Envelope{terminal},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var encoded struct {
+		Events []map[string]json.RawMessage `json:"events"`
+	}
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded.Events) != 1 {
+		t.Fatalf("wire result = %s", raw)
+	}
+	if _, ok := encoded.Events[0]["cursor"]; ok {
+		t.Fatalf("terminal result exposed cursor: %s", raw)
+	}
+	if _, ok := encoded.Events[0]["position"]; ok {
+		t.Fatalf("terminal result exposed position: %s", raw)
+	}
+}
+
+func feedDeliveryChannel(deliveries ...appserver.FeedDelivery) chan appserver.FeedDelivery {
+	channel := make(chan appserver.FeedDelivery, len(deliveries))
+	for _, delivery := range deliveries {
+		channel <- delivery
 	}
 	close(channel)
 	return channel
 }
-func (s *testSubscription) Events() <-chan eventstream.Envelope { return s.events }
-func (s *testSubscription) Backfill() <-chan eventstream.Envelope {
-	if s.backfill != nil {
-		return s.backfill
-	}
-	done := make(chan eventstream.Envelope)
-	close(done)
-	return done
-}
-func (*testSubscription) BackfillDone() <-chan struct{} {
-	done := make(chan struct{})
-	close(done)
-	return done
-}
-func (*testSubscription) Close() error       { return nil }
-func (s *testSubscription) Err() error       { return s.err }
-func (*testSubscription) LastCursor() string { return "signed-cursor-1" }
+func (s *testSubscription) Deliveries() <-chan appserver.FeedDelivery { return s.deliveries }
+func (*testSubscription) Close() error                                { return nil }
+func (s *testSubscription) Err() error                                { return s.err }

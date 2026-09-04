@@ -145,7 +145,24 @@ func TestParticipantSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonicalInp
 	cfg.Env["CAELIS_ACP_STEERING_NOTIFY_TEXT"] = "after steer"
 	cfg.Env["CAELIS_ACP_STEERING_REQUEST_MARKER"] = requestMarker
 
-	handle := newTurnHandle(nil)
+	priorStarted := make(chan struct{})
+	releasePrior := make(chan struct{})
+	ordered := make(chan string, 3)
+	handle := newTurnHandle(context.Background(), nil, agent.SourceEventObserverFunc(func(_ context.Context, source agent.SourceEvent) error {
+		if source.Err != nil {
+			return source.Err
+		}
+		if source.Canonical == nil || source.Canonical.Message == nil {
+			return nil
+		}
+		text := source.Canonical.Message.TextContent()
+		if text == "before steer" {
+			close(priorStarted)
+			<-releasePrior
+		}
+		ordered <- text
+		return nil
+	}))
 	run := &participantRun{
 		id:              "participant-1",
 		parentSessionID: "parent-session",
@@ -184,29 +201,8 @@ func TestParticipantSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonicalInp
 	manager := &Manager{participants: map[participantRunKey]*participantRun{key: run}}
 
 	priorMessage := model.NewTextMessage(model.RoleAssistant, "before steer")
-	handle.publishEvent(&session.Event{Type: session.EventTypeAssistant, Message: &priorMessage})
-	priorStarted := make(chan struct{})
-	releasePrior := make(chan struct{})
-	ordered := make(chan string, 3)
-	consumerErrors := make(chan error, 1)
-	consumerDone := make(chan struct{})
 	go func() {
-		defer close(consumerDone)
-		for source, sourceErr := range handle.SourceEvents() {
-			if sourceErr != nil {
-				consumerErrors <- sourceErr
-				return
-			}
-			if source.Canonical == nil || source.Canonical.Message == nil {
-				continue
-			}
-			text := source.Canonical.Message.TextContent()
-			if text == "before steer" {
-				close(priorStarted)
-				<-releasePrior
-			}
-			ordered <- text
-		}
+		handle.publishEvent(&session.Event{Type: session.EventTypeAssistant, Message: &priorMessage})
 	}()
 	select {
 	case <-priorStarted:
@@ -243,8 +239,6 @@ func TestParticipantSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonicalInp
 		select {
 		case item := <-ordered:
 			got = append(got, item)
-		case err := <-consumerErrors:
-			t.Fatalf("SourceEvents() error = %v", err)
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for ordered steering events: %#v", got)
 		}
@@ -256,11 +250,6 @@ func TestParticipantSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonicalInp
 		t.Fatalf("steering RPC marker missing after completion: %v", statErr)
 	}
 	handle.finish()
-	select {
-	case <-consumerDone:
-	case <-ctx.Done():
-		t.Fatal("SourceEvents() consumer did not stop")
-	}
 }
 
 func TestMainControllerSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonicalInput(t *testing.T) {
@@ -271,7 +260,24 @@ func TestMainControllerSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonical
 	cfg := steeringControllerTestConfig(`{"supported":true}`, "")
 	cfg.Env["CAELIS_ACP_STEERING_OUTCOME"] = string(client.SessionSteeringInjected)
 	cfg.Env["CAELIS_ACP_STEERING_NOTIFY_TEXT"] = "after main steer"
-	handle := newTurnHandle(nil)
+	priorStarted := make(chan struct{})
+	releasePrior := make(chan struct{})
+	ordered := make(chan string, 3)
+	handle := newTurnHandle(context.Background(), nil, agent.SourceEventObserverFunc(func(_ context.Context, source agent.SourceEvent) error {
+		if source.Err != nil {
+			return source.Err
+		}
+		if source.Canonical == nil || source.Canonical.Message == nil {
+			return nil
+		}
+		text := source.Canonical.Message.TextContent()
+		if text == "before main steer" {
+			close(priorStarted)
+			<-releasePrior
+		}
+		ordered <- text
+		return nil
+	}))
 	run := &controllerRun{
 		parentSessionID: "parent-session", agent: "steering-helper", cfg: cfg,
 		binding: session.ControllerBinding{
@@ -302,29 +308,8 @@ func TestMainControllerSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonical
 	manager := &Manager{controllers: map[string]*controllerRun{run.parentSessionID: run}}
 
 	priorMessage := model.NewTextMessage(model.RoleAssistant, "before main steer")
-	handle.publishEvent(&session.Event{Type: session.EventTypeAssistant, Message: &priorMessage})
-	priorStarted := make(chan struct{})
-	releasePrior := make(chan struct{})
-	ordered := make(chan string, 3)
-	consumerErrors := make(chan error, 1)
-	consumerDone := make(chan struct{})
 	go func() {
-		defer close(consumerDone)
-		for source, sourceErr := range handle.SourceEvents() {
-			if sourceErr != nil {
-				consumerErrors <- sourceErr
-				return
-			}
-			if source.Canonical == nil || source.Canonical.Message == nil {
-				continue
-			}
-			text := source.Canonical.Message.TextContent()
-			if text == "before main steer" {
-				close(priorStarted)
-				<-releasePrior
-			}
-			ordered <- text
-		}
+		handle.publishEvent(&session.Event{Type: session.EventTypeAssistant, Message: &priorMessage})
 	}()
 	select {
 	case <-priorStarted:
@@ -357,8 +342,6 @@ func TestMainControllerSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonical
 		select {
 		case item := <-ordered:
 			got = append(got, item)
-		case err := <-consumerErrors:
-			t.Fatalf("SourceEvents() error = %v", err)
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for ordered main steering events: %#v", got)
 		}
@@ -367,11 +350,6 @@ func TestMainControllerSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonical
 		t.Fatalf("main steering event order = %#v, want prior/canonical input/buffered output", got)
 	}
 	handle.finish()
-	select {
-	case <-consumerDone:
-	case <-ctx.Done():
-		t.Fatal("main SourceEvents() consumer did not stop")
-	}
 }
 
 func TestMainControllerSteeringAmbiguousOutcomeIsolatesExactRun(t *testing.T) {
@@ -381,7 +359,7 @@ func TestMainControllerSteeringAmbiguousOutcomeIsolatesExactRun(t *testing.T) {
 	defer cancel()
 	cfg := steeringControllerTestConfig(`{"supported":true}`, "")
 	cfg.Env["CAELIS_ACP_STEERING_OUTCOME"] = string(client.SessionSteeringStartedNewTurn)
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	run := &controllerRun{
 		parentSessionID: "parent-session", agent: "steering-helper", cfg: cfg,
 		binding: session.ControllerBinding{
@@ -452,7 +430,7 @@ func TestMainControllerSteeringReportsClosedRunBeforeRuntimeRunnerCloses(t *test
 	t.Parallel()
 
 	newFixture := func() (*Manager, *controllerRun, *turnHandle, controller.ControllerSteerRequest) {
-		handle := newTurnHandle(nil)
+		handle := newTestTurnHandle(nil)
 		run := &controllerRun{
 			parentSessionID: "parent-session", supportsSteering: true,
 			binding: session.ControllerBinding{
@@ -478,9 +456,9 @@ func TestMainControllerSteeringReportsClosedRunBeforeRuntimeRunnerCloses(t *test
 		}
 	})
 
-	t.Run("event stream barrier closed before runner close", func(t *testing.T) {
+	t.Run("observer handle finished before runner close", func(t *testing.T) {
 		manager, _, handle, request := newFixture()
-		handle.closeBarrierAdmission(controller.ErrNotActive)
+		handle.finish()
 		if err := manager.SteerController(context.Background(), request); !errors.Is(err, agent.ErrRunInputClosed) {
 			t.Fatalf("SteerController() error = %v, want ErrRunInputClosed", err)
 		}
@@ -494,7 +472,7 @@ func TestParticipantSteeringAmbiguousOutcomeIsolatesParticipant(t *testing.T) {
 	defer cancel()
 	cfg := steeringControllerTestConfig(`{"supported":true}`, "")
 	cfg.Env["CAELIS_ACP_STEERING_OUTCOME"] = string(client.SessionSteeringStartedNewTurn)
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	run := &participantRun{
 		id: "participant-1", parentSessionID: "parent-session", agent: "steering-helper",
 		binding:          session.ParticipantBinding{ID: "participant-1", Kind: session.ParticipantKindACP},
@@ -567,7 +545,7 @@ func TestParticipantSteeringAmbiguousOutcomeIsolatesParticipant(t *testing.T) {
 func TestParticipantSteeringCallerCancelBeforeRPCIsProvenNoEffect(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	run := &participantRun{
 		id: "participant-1", parentSessionID: "parent-session",
 		binding:          session.ParticipantBinding{ID: "participant-1", Kind: session.ParticipantKindACP},
@@ -839,7 +817,7 @@ func TestParticipantDetachAbortsBlockedSteeringWrite(t *testing.T) {
 	defer cancel()
 	marker := filepath.Join(t.TempDir(), "partial-write-started")
 	acpClient := newBlockedSteeringWriteClient(t, marker)
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	run := &participantRun{
 		id: "participant-blocked-write", parentSessionID: "parent-session", agent: "blocked-writer",
 		client: acpClient, remoteSessionID: "remote-session", supportsSteering: true,
@@ -905,7 +883,7 @@ func TestControllerCloseAdmissionAbortsBlockedSteeringWrite(t *testing.T) {
 	defer cancel()
 	marker := filepath.Join(t.TempDir(), "partial-write-started")
 	acpClient := newBlockedSteeringWriteClient(t, marker)
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	run := &controllerRun{
 		parentSessionID: "parent-session", agent: "blocked-writer", client: acpClient,
 		remoteSessionID: "remote-session", supportsSteering: true,
@@ -1061,7 +1039,7 @@ func newParticipantSteeringTestHarnessWithEnv(
 	for key, value := range extraEnv {
 		cfg.Env[key] = value
 	}
-	handle := newTurnHandle(nil)
+	handle := newTestTurnHandle(nil)
 	run := &participantRun{
 		id: "participant-1", parentSessionID: "parent-session", agent: "steering-helper",
 		binding: session.ParticipantBinding{

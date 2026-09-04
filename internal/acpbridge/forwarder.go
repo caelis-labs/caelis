@@ -19,33 +19,47 @@ func NewControllerForwarder(sessions session.Service) *ControllerForwarder {
 	return &ControllerForwarder{sessions: sessions}
 }
 
-// ForwardControllerEvents implements agentsdk.ControllerEventForwarder.
-func (f *ControllerForwarder) ForwardControllerEvents(ctx context.Context, req agentsdk.ControllerEventForwardRequest) error {
+// BeginControllerEvents implements agentsdk.ControllerEventForwarder.
+func (f *ControllerForwarder) BeginControllerEvents(_ context.Context, req agentsdk.ControllerEventForwardRequest) (agentsdk.ControllerEventSession, error) {
 	if f == nil || f.sessions == nil {
-		return errors.New("acpbridge: session service is required")
+		return nil, errors.New("acpbridge: session service is required")
 	}
 	if req.Publisher == nil {
-		return errors.New("acpbridge: source event publisher is required")
+		return nil, errors.New("acpbridge: source event publisher is required")
 	}
-	accumulator := narrativeAccumulator{}
-	for sourceEvent, seqErr := range SourceEventsFrom(req.Source) {
-		if seqErr != nil {
-			return seqErr
-		}
-		if err := f.forwardSourceEvent(ctx, req, &accumulator, sourceEvent); err != nil {
-			return err
-		}
+	return &controllerEventSession{forwarder: f, request: req}, nil
+}
+
+type controllerEventSession struct {
+	forwarder   *ControllerForwarder
+	request     agentsdk.ControllerEventForwardRequest
+	accumulator narrativeAccumulator
+}
+
+func (s *controllerEventSession) ObserveSourceEvent(ctx context.Context, event agentsdk.SourceEvent) error {
+	if s == nil || s.forwarder == nil {
+		return errors.New("acpbridge: controller event session is unavailable")
 	}
-	if finalEvent := accumulator.finalAssistantEvent(); finalEvent != nil {
-		persisted, err := f.sessions.AppendEvent(ctx, session.AppendEventRequest{
-			SessionRef:    req.SessionRef,
-			MutationGuard: req.MutationGuard,
+	if event.Err != nil {
+		return event.Err
+	}
+	return s.forwarder.forwardSourceEvent(ctx, s.request, &s.accumulator, SourceEventFromAgent(event))
+}
+
+func (s *controllerEventSession) Complete(ctx context.Context) error {
+	if s == nil || s.forwarder == nil {
+		return errors.New("acpbridge: controller event session is unavailable")
+	}
+	if finalEvent := s.accumulator.finalAssistantEvent(); finalEvent != nil {
+		persisted, err := s.forwarder.sessions.AppendEvent(ctx, session.AppendEventRequest{
+			SessionRef:    s.request.SessionRef,
+			MutationGuard: s.request.MutationGuard,
 			Event:         finalEvent,
 		})
 		if err != nil {
 			return err
 		}
-		req.Publisher.PublishSourceEvent(agentsdk.SourceEvent{
+		s.request.Publisher.PublishSourceEvent(agentsdk.SourceEvent{
 			Canonical:                        persisted,
 			CanonicalContentAlreadyPublished: agentsdk.PublishedAssistantMessage,
 		})

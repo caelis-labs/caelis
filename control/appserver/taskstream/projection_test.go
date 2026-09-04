@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
+	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 )
 
 func TestProjectTaskFrameDoesNotProjectChildPermissionOutsideControl(t *testing.T) {
@@ -19,14 +19,14 @@ func TestProjectTaskFrameDoesNotProjectChildPermissionOutsideControl(t *testing.
 		SessionID: "root-session",
 		CallID:    "spawn-call-1",
 		ToolName:  "Spawn",
-		Ref:       stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "child-terminal-1"},
+		TaskID:    "task-1",
 		Scope:     eventstream.ScopeMain,
 	}
-	frame := stream.Frame{
-		Ref:       req.Ref,
-		Running:   true,
-		State:     "waiting_approval",
-		UpdatedAt: time.Unix(200, 0),
+	frame := controltaskstream.Frame{
+		TerminalID: "child-terminal-1",
+		Running:    true,
+		State:      "waiting_approval",
+		UpdatedAt:  time.Unix(200, 0),
 		Event: &session.Event{
 			ID:         "approval-child-1",
 			Type:       session.EventTypeLifecycle,
@@ -74,27 +74,21 @@ func TestProjectTaskFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	t.Parallel()
 
 	req := taskFrameProjectionRequest{
-		TurnID:     "turn-1",
-		SessionID:  "session-1",
-		CallID:     "call-1",
-		ToolName:   "RunCommand",
-		TaskHandle: "command",
-		Ref: stream.Ref{
-			SessionID:  "session-1",
-			TaskID:     "task-1",
-			TerminalID: "internal-terminal-1",
-		},
+		TurnID:            "turn-1",
+		SessionID:         "session-1",
+		CallID:            "call-1",
+		ToolName:          "RunCommand",
+		TaskHandle:        "command",
+		TaskID:            "task-1",
 		DisplayTerminalID: "call-1",
 		Scope:             eventstream.ScopeMain,
 	}
 
-	events := projectTaskStreamFrame(req, stream.Frame{
-		Ref:             req.Ref,
-		Text:            "ok\n",
-		Cursor:          stream.Cursor{Output: 15},
-		TruncatedBefore: 12,
-		Running:         true,
-		UpdatedAt:       time.Unix(100, 0),
+	events := projectTaskStreamFrame(req, controltaskstream.Frame{
+		TerminalID: "internal-terminal-1",
+		Text:       "ok\n",
+		Running:    true,
+		UpdatedAt:  time.Unix(100, 0),
 	})
 	if len(events) != 1 {
 		t.Fatalf("projectTaskStreamFrame() returned %d events: %#v", len(events), events)
@@ -124,11 +118,8 @@ func TestProjectTaskFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 		t.Fatalf("update.Meta = %#v, want typed delivery without legacy transient shadow", update.Meta)
 	}
 	streamMeta := eventmeta.RuntimeSection(update.Meta, eventmeta.RuntimeStream)
-	if streamMeta["truncated"] != true || streamMeta["truncated_before"] != int64(12) {
-		t.Fatalf("stream meta = %#v, want typed truncation boundary", streamMeta)
-	}
-	if got, ok := eventmeta.Int64(update.Meta, eventmeta.Root, eventmeta.Runtime, eventmeta.RuntimeStream, eventmeta.RuntimeOutputCursor); !ok || got != 15 {
-		t.Fatalf("stream output cursor = %d, %v; want 15, true", got, ok)
+	if len(streamMeta) != 1 || streamMeta[eventmeta.RuntimeStreamMode] != "append" {
+		t.Fatalf("stream meta = %#v, want append mode without Surface reconciliation state", streamMeta)
 	}
 	toolMeta := eventmeta.RuntimeSection(update.Meta, eventmeta.RuntimeTool)
 	if toolMeta["target_handle"] != "command" {
@@ -148,11 +139,10 @@ func TestProjectTaskFrameKeepsOneEnvelopeWhenNarrativeCarriesUsage(t *testing.T)
 	event.Meta = map[string]any{"usage": map[string]any{
 		"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5,
 	}}
-	events := projectTaskStreamFrame(req, stream.Frame{
-		Ref:     req.Ref,
-		Cursor:  stream.Cursor{Events: 1},
-		Running: true,
-		Event:   event,
+	events := projectTaskStreamFrame(req, controltaskstream.Frame{
+		TerminalID: req.TurnID,
+		Running:    true,
+		Event:      event,
 	})
 	if len(events) != 1 {
 		t.Fatalf("projectTaskStreamFrame() returned %d envelopes, want one cursor-resumable unit: %#v", len(events), events)
@@ -170,16 +160,16 @@ func TestProjectTaskFramePreservesClosedCommandExitCode(t *testing.T) {
 		SessionID:         "session-1",
 		CallID:            "call-1",
 		ToolName:          "RunCommand",
-		Ref:               stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "term-1"},
+		TaskID:            "task-1",
+		TurnID:            "term-1",
 		DisplayTerminalID: "call-1",
 		Scope:             eventstream.ScopeMain,
 	}
-	events := projectTaskStreamFrame(req, stream.Frame{
-		Ref:      req.Ref,
-		Cursor:   stream.Cursor{Output: 3},
-		Closed:   true,
-		State:    "failed",
-		ExitCode: &exitCode,
+	events := projectTaskStreamFrame(req, controltaskstream.Frame{
+		TerminalID: req.TurnID,
+		Closed:     true,
+		State:      "failed",
+		ExitCode:   &exitCode,
 	})
 	if len(events) != 1 {
 		t.Fatalf("projectTaskStreamFrame() returned %d events: %#v", len(events), events)
@@ -193,8 +183,9 @@ func TestProjectTaskFramePreservesClosedCommandExitCode(t *testing.T) {
 		t.Fatalf("terminal exit = %#v, %v; want exit code %d", exit, ok, exitCode)
 	}
 	assertSparseTerminalUpdate(t, update, "call-1")
-	if got, ok := eventmeta.Int64(update.Meta, eventmeta.Root, eventmeta.Runtime, eventmeta.RuntimeStream, eventmeta.RuntimeOutputCursor); !ok || got != 3 {
-		t.Fatalf("final stream output cursor = %d, %v; want 3, true", got, ok)
+	streamMeta := eventmeta.RuntimeSection(update.Meta, eventmeta.RuntimeStream)
+	if len(streamMeta) != 1 || streamMeta[eventmeta.RuntimeStreamMode] != "final" {
+		t.Fatalf("final stream meta = %#v, want final mode without Surface reconciliation state", streamMeta)
 	}
 }
 
@@ -205,14 +196,15 @@ func TestProjectTaskFramePreservesSplitNewlineFrame(t *testing.T) {
 		SessionID: "session-1",
 		CallID:    "call-1",
 		ToolName:  "RunCommand",
-		Ref:       stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "terminal-1"},
+		TaskID:    "task-1",
+		TurnID:    "terminal-1",
 		Scope:     eventstream.ScopeMain,
 	}
 	var projected strings.Builder
-	for _, frame := range []stream.Frame{
-		{Ref: req.Ref, Text: "Step 1/2", Cursor: stream.Cursor{Output: 8}, Running: true},
-		{Ref: req.Ref, Text: "\n", Cursor: stream.Cursor{Output: 9}, Running: true},
-		{Ref: req.Ref, Text: "Step 2/2\n", Cursor: stream.Cursor{Output: 18}, Running: true},
+	for _, frame := range []controltaskstream.Frame{
+		{TerminalID: req.TurnID, Text: "Step 1/2", Running: true},
+		{TerminalID: req.TurnID, Text: "\n", Running: true},
+		{TerminalID: req.TurnID, Text: "Step 2/2\n", Running: true},
 	} {
 		events := projectTaskStreamFrame(req, frame)
 		if len(events) != 1 {
@@ -236,16 +228,16 @@ func TestProjectTaskFrameFinalDoesNotRepeatStreamedOutput(t *testing.T) {
 		SessionID: "root-session",
 		CallID:    "command-1",
 		ToolName:  "RunCommand",
-		Ref:       stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
+		TaskID:    "task-1",
+		TurnID:    "terminal-1",
 		Scope:     eventstream.ScopeMain,
 	}
-	events := projectTaskStreamFrame(req, stream.Frame{
-		Ref:     req.Ref,
-		Text:    "ok\n",
-		Cursor:  stream.Cursor{Output: 3},
-		Closed:  true,
-		Running: false,
-		State:   "completed",
+	events := projectTaskStreamFrame(req, controltaskstream.Frame{
+		TerminalID: req.TurnID,
+		Text:       "ok\n",
+		Closed:     true,
+		Running:    false,
+		State:      "completed",
 	})
 	if len(events) != 1 {
 		t.Fatalf("projectTaskStreamFrame(RUN_COMMAND closed) returned %d events: %#v", len(events), events)
@@ -264,16 +256,16 @@ func TestProjectTaskFrameProjectsDelegatedTaskSemanticsWithoutParentText(t *test
 		SessionID:         "root-session",
 		CallID:            "task-call-1",
 		ToolName:          "Task",
-		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
+		TaskID:            "jack",
+		TurnID:            "subagent-jack",
 		DisplayTerminalID: "task-call-1",
 		Scope:             eventstream.ScopeMain,
 	}
-	events := projectTaskStreamFrame(req, stream.Frame{
-		Ref:       req.Ref,
-		Text:      "child output\n",
-		Cursor:    stream.Cursor{Output: 13, Events: 1},
-		Running:   true,
-		UpdatedAt: time.Unix(150, 0),
+	events := projectTaskStreamFrame(req, controltaskstream.Frame{
+		TerminalID: req.TurnID,
+		Text:       "child output\n",
+		Running:    true,
+		UpdatedAt:  time.Unix(150, 0),
 		Event: &session.Event{
 			ID:         "child-event-1",
 			Type:       session.EventTypeAssistant,
@@ -314,14 +306,15 @@ func TestProjectTaskFrameKeepsNoOutputPlaceholderOutOfTerminalBytes(t *testing.T
 		SessionID: "root-session",
 		CallID:    "command-1",
 		ToolName:  "RunCommand",
-		Ref:       stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
+		TaskID:    "task-1",
+		TurnID:    "terminal-1",
 		Scope:     eventstream.ScopeMain,
 	}
-	events := projectTaskStreamFrame(req, stream.Frame{
-		Ref:     req.Ref,
-		Closed:  true,
-		Running: false,
-		State:   "failed",
+	events := projectTaskStreamFrame(req, controltaskstream.Frame{
+		TerminalID: req.TurnID,
+		Closed:     true,
+		Running:    false,
+		State:      "failed",
 	})
 	if len(events) != 1 {
 		t.Fatalf("projectTaskStreamFrame(RUN_COMMAND closed) returned %d events: %#v", len(events), events)
@@ -343,16 +336,15 @@ func TestProjectTaskFrameProjectsSubagentSemanticEventWithoutParentTerminal(t *t
 		SessionID:         "root-session",
 		CallID:            "spawn-call-1",
 		ToolName:          "Spawn",
-		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
+		TaskID:            "jack",
 		DisplayTerminalID: "spawn-call-1",
 		Scope:             eventstream.ScopeMain,
 	}
-	frame := stream.Frame{
-		Ref:       stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack-turn-1"},
-		Text:      "The user wants a file",
-		Cursor:    stream.Cursor{Output: 21, Events: 1},
-		Running:   true,
-		UpdatedAt: time.Unix(200, 0),
+	frame := controltaskstream.Frame{
+		TerminalID: "subagent-jack-turn-1",
+		Text:       "The user wants a file",
+		Running:    true,
+		UpdatedAt:  time.Unix(200, 0),
 		Event: &session.Event{
 			ID:         "child-event-1",
 			Type:       session.EventTypeAssistant,
@@ -525,10 +517,10 @@ func TestProjectTaskFrameProjectsEventOnlySpawnChildSemantics(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			events := projectTaskStreamFrame(req, stream.Frame{
-				Ref:     req.Ref,
-				Running: true,
-				Event:   tc.event,
+			events := projectTaskStreamFrame(req, controltaskstream.Frame{
+				TerminalID: req.TurnID,
+				Running:    true,
+				Event:      tc.event,
 			})
 			if len(events) != 1 {
 				t.Fatalf("projectTaskStreamFrame() returned %d events, want one child semantic event: %#v", len(events), events)
@@ -547,16 +539,16 @@ func TestProjectTaskFrameDropsDelegatedTextOnlyRunningFrame(t *testing.T) {
 	t.Parallel()
 
 	req := spawnProjectionRequestForTest()
-	events := projectTaskStreamFrame(req, stream.Frame{
-		Ref:     req.Ref,
-		Text:    "child stream text\n",
-		Running: true,
+	events := projectTaskStreamFrame(req, controltaskstream.Frame{
+		TerminalID: req.TurnID,
+		Text:       "child stream text\n",
+		Running:    true,
 	})
 	if len(events) != 0 {
 		t.Fatalf("projectTaskStreamFrame(text-only) = %#v, want no compatibility output", events)
 	}
 
-	events = projectTaskStreamFrame(req, stream.Frame{Ref: req.Ref, Running: true})
+	events = projectTaskStreamFrame(req, controltaskstream.Frame{TerminalID: req.TurnID, Running: true})
 	if len(events) != 0 {
 		t.Fatalf("projectTaskStreamFrame(empty) = %#v, want no output", events)
 	}
@@ -566,11 +558,10 @@ func TestProjectTaskFrameMarksClosedSpawnEventFinalWithoutParentCopy(t *testing.
 	t.Parallel()
 
 	req := spawnProjectionRequestForTest()
-	events := projectTaskStreamFrame(req, stream.Frame{
-		Ref:    req.Ref,
-		Cursor: stream.Cursor{Output: 19},
-		Closed: true,
-		State:  "completed",
+	events := projectTaskStreamFrame(req, controltaskstream.Frame{
+		TerminalID: req.TurnID,
+		Closed:     true,
+		State:      "completed",
 		Event: &session.Event{
 			ID:         "child-message-final",
 			Type:       session.EventTypeAssistant,
@@ -607,12 +598,11 @@ func TestProjectTaskFrameSubagentFinalStatesAreLifecycleOnly(t *testing.T) {
 		tc := tc
 		t.Run(tc, func(t *testing.T) {
 			req := spawnProjectionRequestForTest()
-			events := projectTaskStreamFrame(req, stream.Frame{
-				Ref:    req.Ref,
-				Text:   "### accumulated child output\n",
-				Cursor: stream.Cursor{Output: 27},
-				Closed: true,
-				State:  tc,
+			events := projectTaskStreamFrame(req, controltaskstream.Frame{
+				TerminalID: req.TurnID,
+				Text:       "### accumulated child output\n",
+				Closed:     true,
+				State:      tc,
 			})
 			if len(events) != 1 {
 				t.Fatalf("projectTaskStreamFrame(%s) returned %d events, want one Task lifecycle: %#v", tc, len(events), events)
@@ -637,16 +627,17 @@ func TestProjectTaskFrameDoesNotPromoteDelegatedResultIntoParentTool(t *testing.
 		SessionID:         "root-session",
 		CallID:            "spawn-call-1",
 		ToolName:          "Spawn",
-		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
+		TaskID:            "jack",
+		TurnID:            "subagent-jack",
 		DisplayTerminalID: "spawn-call-1",
 		Scope:             eventstream.ScopeMain,
 	}
-	events := projectTaskStreamFrame(req, stream.Frame{
-		Ref:     stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack-turn-1"},
-		Text:    "Final child result\n",
-		Closed:  true,
-		Running: false,
-		State:   "completed",
+	events := projectTaskStreamFrame(req, controltaskstream.Frame{
+		TerminalID: "subagent-jack-turn-1",
+		Text:       "Final child result\n",
+		Closed:     true,
+		Running:    false,
+		State:      "completed",
 	})
 	if len(events) != 1 {
 		t.Fatalf("projectTaskStreamFrame() returned %d events, want Task lifecycle: %#v", len(events), events)
@@ -663,12 +654,12 @@ func TestProjectTaskFrameSuppressesEmbeddedParentToolEcho(t *testing.T) {
 		SessionID: "root-session",
 		CallID:    "spawn-call-1",
 		ToolName:  "Spawn",
-		Ref:       stream.Ref{SessionID: "root-session", TaskID: "jack"},
+		TaskID:    "jack",
 		Scope:     eventstream.ScopeMain,
 	}
-	events := projectTaskStreamFrame(req, stream.Frame{
-		Ref:     req.Ref,
-		Running: true,
+	events := projectTaskStreamFrame(req, controltaskstream.Frame{
+		TerminalID: req.TurnID,
+		Running:    true,
 		Event: &session.Event{
 			Type:       session.EventTypeToolCall,
 			Visibility: session.VisibilityCanonical,
@@ -799,7 +790,7 @@ func spawnProjectionRequestForTest() taskFrameProjectionRequest {
 		SessionID:         "root-session",
 		CallID:            "spawn-call-1",
 		ToolName:          "Spawn",
-		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
+		TaskID:            "jack",
 		DisplayTerminalID: "spawn-call-1",
 		Scope:             eventstream.ScopeMain,
 	}

@@ -14,8 +14,9 @@ const (
 	HTTPAPIVersion  = "v1"
 	ServerIdentity  = "caelis-control-host"
 
-	CapabilityAppServerClients        = "appserver-clients-v1"
-	CapabilityTaskStreams             = "task-streams-v1"
+	CapabilityAppServerClients        = "appserver-clients-v2"
+	CapabilityTaskStreams             = "task-streams-v2"
+	CapabilitySessionFeed             = "session-feed-v2"
 	CapabilityMultiWorkspace          = "multi-workspace-sessions-v1"
 	CapabilityWorkspaceCWDList        = "workspace-cwd-session-list-v1"
 	CapabilityWorkspaceTrust          = "workspace-trust-v1"
@@ -54,6 +55,7 @@ func RequiredManagedHostCapabilities() []string {
 	return []string{
 		CapabilityAppServerClients,
 		CapabilityTaskStreams,
+		CapabilitySessionFeed,
 		CapabilityMultiWorkspace,
 		CapabilityWorkspaceCWDList,
 		CapabilityWorkspaceTrust,
@@ -133,8 +135,6 @@ type SessionState struct {
 	Metadata         map[string]any               `json:"metadata,omitempty"`
 	BoundaryCursor   string                       `json:"boundary_cursor,omitempty"`
 	BoundaryPosition *eventstream.FeedPosition    `json:"boundary_position,omitempty"`
-	ResumeMode       ResumeMode                   `json:"resume_mode"`
-	TransientGap     bool                         `json:"transient_gap,omitempty"`
 	Run              RunState                     `json:"run"`
 	Controller       session.ControllerBinding    `json:"controller"`
 	Participants     []session.ParticipantBinding `json:"participants,omitempty"`

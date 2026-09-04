@@ -53,11 +53,47 @@ fail closed.
 - `canonical`: durable Session semantics, model-visible only when the payload
   defines model context.
 - `mirror`: durable client projection that is not parent model truth.
-- `transient`: process-local observation with no restart guarantee.
+- `transient`: disposable observation with no restart guarantee.
 
 Slow or disconnected observers cannot block execution or durable publication.
-Lost bounded output becomes a typed gap or resume boundary. Recovery uses the
-Control feed and authoritative state, never a second Runtime stream.
+Control appends normalized delivery records to a bounded file spool without
+waiting for a Surface. A valid cursor prefers its exact spool range; if that
+cache is missing, expired, or corrupt, Control begins one complete canonical or
+final-result replacement. Replace-capable consumers swap it atomically, while
+an ACP or other irreversible consumer rejects replacement after it has exposed
+an exact prefix. No gap event or second Runtime stream repairs it.
+
+If the Session spool cannot deliver a live main-Turn terminal, Control may emit
+one cursorless `result` append containing only that terminal lifecycle. It is a
+bounded completion fallback, not exact history and not a resumable source. If
+canonical recovery is available, its replacement commits before this terminal.
+
+The shared Envelope schema therefore makes `cursor` and `position` optional;
+the enclosing typed delivery supplies the required context. Control accepts an
+exact append only when every Envelope has a valid cursor and position and the
+last cursor equals `next_cursor`. A `result` has neither field. Replacement
+pages never carry a cursor: Session canonical replacement may retain durable
+position as provenance, while Task replacement removes record-local position
+because it is not a Session-feed resume source.
+Consumers save `next_cursor` after successfully applying the complete delivery;
+subscription read-ahead cannot advance their resume position.
+
+Spool registrations are concurrent producer leases. Command completion,
+proven Task-producer loss, Task release, participant detach, Session close, and
+Host close seal the matching writer; closing a Session lets existing readers
+drain. A canonical checkpoint beyond the last delivered durable position means
+final catch-up missed a tail; Control replaces the complete view before ending,
+since that tail may overlap transient fragments in the exact prefix. A complete
+sealed trace ends without replacement. Later attachments are finite canonical reads without
+a new spool. Producer admission closes immediately, while physical writer
+sealing remains retryable and the registry retains ownership until that seal
+succeeds.
+
+Participant detach also follows the Session store's exact-result
+`CommittedError` contract. Control captures the Session/Task product address
+before mutation, releases its spool writer when the removal committed despite
+a reporting error, continues from the returned committed Session, and retains
+the warning for the caller.
 
 Live durable delivery and replay use the same projector. Reload must not create
 Session Events, promote transient output, or change rebuilt model context.
@@ -107,9 +143,12 @@ once and never sums every streamed update.
 
 Main-Turn delivery and Task observation are independent:
 
-- main ingress carries only the main Runtime producer;
+- the main Runtime producer is synchronously observed by Control before it is
+  exposed to a Surface;
 - `control/taskstream` owns the authorized directory and observation;
-- `control/appserver/taskstream` projects Task records into transient Envelopes.
+- `control/appserver/taskstream` projects Task records into transient Envelopes;
+- Session and Task observation use the same append/replacement delivery
+  protocol over independent file-spool partitions.
 
 People and models address Tasks by a Session-unique public handle. Opaque Task IDs
 remain correlation values resolved through Control. Child output is observation;
@@ -123,17 +162,17 @@ ID, lifecycle claim, or Task mutation. Later child output alone advances Task
 activity.
 
 Task status is a replaceable directory snapshot and contains no transcript.
-Visible content demand has its own bounded observer and cursor. When exact deltas
-are unavailable, Control may supply a typed semantic current-state snapshot with
-an explicit gap. A finite idle history read uses the Agent's advertised
-`session/load`; Control does not read a child Session file as a presentation
-shortcut. Unsupported endpoints may expose retained current state or a bounded
-terminal fallback, neither of which claims complete history.
+Visible content demand has an independent spool cursor. When an exact retained
+range is unavailable, Control chooses one complete fallback: command
+`FinalResult`, ACP `session/load`, or a descriptor-only running state. A finite
+idle history read uses the Agent's advertised `session/load`; Control does not
+read a child Session file as a presentation shortcut. A Surface never joins a
+partial spool prefix to a fallback or reconstructs content from overlap.
 
-A completion hint may notify the exact active parent Run once, but final output
-remains under Task read/wait. Cancel stops the current child Turn without
-retiring the child identity. Spawn-created children do not receive Spawn, so
-delegation cannot nest.
+The canonical parent Spawn result closes the parent tool once; child Task
+observation never manufactures that result from Task read/wait. Cancel stops
+the current child Turn without retiring the child identity. Spawn-created
+children do not receive Spawn, so delegation cannot nest.
 
 Permission requests are Session-feed interactions, not Task frames. Control
 publishes a typed approval identity; a Surface returns only that identity and the
@@ -156,7 +195,7 @@ stay generic. Provider compatibility must not overwrite a specific standard
 kind or executable name.
 
 Display extensions may carry citations, participant addresses, bounded tool
-input, terminal display state, and gap diagnostics. Raw tool results, terminal
+input, and terminal display state. Raw tool results, terminal
 bytes, paths, and provider metadata remain presentation evidence.
 
 Every normalized `terminal_output` value is an ordered delta. A compatibility
@@ -172,10 +211,10 @@ Product-managed child Sessions are classified only by the exact Host-private ACP
 bridge contract and remain hidden from ordinary lifecycle clients. Arbitrary
 external metadata is not copied into durable Session ownership.
 
-Every Surface must consume the Control Session feed and Task service, preserve
-typed identity/relation fields, keep transcript state non-durable, treat
-terminal/approval state monotonically, and avoid Runtime, policy, Session-store,
-or Host implementation dependencies.
+Every Surface must consume typed Control deliveries, commit replacement pages
+only after their end marker, preserve identity/relation fields, keep transcript
+state non-durable, treat terminal/approval state monotonically, and avoid
+Runtime, policy, Session-store, spool-file, or Host implementation dependencies.
 
 Projection changes require whole-Envelope live/replay parity. Changes affecting
 persistence or model visibility also require a round trip proving rebuilt model

@@ -11,9 +11,10 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
@@ -235,14 +236,14 @@ func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {
 			AgentID:   "self-1",
 		},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
 	raw, _ := json.Marshal(client.TextChunk{Type: "text", Text: "child output"})
 
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.ContentChunk{
 			SessionUpdate: client.UpdateAgentMessage,
@@ -256,7 +257,7 @@ func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want one frame", sink.frames)
 	}
 	got := sink.frames[0]
-	if got.Ref.TaskID != "task-1" || got.Ref.SessionID != "child-1" || got.Text != "" || !got.Running {
+	if got.Text != "" || !got.Running {
 		t.Fatalf("stream frame = %#v", got)
 	}
 	if got.Event == nil || got.Event.Type != session.EventTypeAssistant || got.Event.Text != "child output" {
@@ -289,12 +290,12 @@ func TestRunnerHandleUpdatePublishesACPUsageGauge(t *testing.T) {
 		taskID:     "task-1",
 		agentName:  "codex",
 		invocation: session.EventInvocation{Provider: "codex", Model: "gpt-test"},
-		sink:       sink,
+		output:     sink,
 		state:      delegation.StateRunning,
 		running:    true,
 	}
 	runner := &Runner{clock: time.Now}
-	runner.handleUpdate(run, client.UpdateEnvelope{SessionID: "child-1", Update: client.UsageUpdate{
+	handleTestUpdate(runner, run, client.UpdateEnvelope{SessionID: "child-1", Update: client.UsageUpdate{
 		SessionUpdate: client.UpdateUsage,
 		Size:          200000,
 		Used:          42000,
@@ -357,7 +358,7 @@ func TestRunnerPermissionCallbackNormalizesChildApprovalWithoutPublishingFrame(t
 		TaskID:            "task-1",
 		ParentCallID:      "spawn-call-1",
 		ApprovalRequester: requester,
-		Streams:           sink,
+		Output:            sink,
 	}, AgentConfig{Name: "helper"}, "helper-1")
 
 	response, err := handler(context.Background(), client.RequestPermissionRequest{
@@ -511,13 +512,13 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "agent-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
 
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.ToolCall{
 			SessionUpdate: client.UpdateToolCall,
@@ -528,7 +529,7 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 			RawInput:      map[string]any{"command": "go test ./surfaces/tui/app/..."},
 		},
 	})
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.ToolCallUpdate{
 			SessionUpdate: client.UpdateToolCallState,
@@ -540,7 +541,7 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 			RawOutput:     map[string]any{"stdout": "ok\n", "exit_code": 0},
 		},
 	})
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.PlanUpdate{
 			SessionUpdate: client.UpdatePlan,
@@ -598,13 +599,13 @@ func TestRunnerRestoresGrokExecutePresentationForSpawnStream(t *testing.T) {
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "grok", AgentID: "agent-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
 
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.ToolCall{
 			SessionUpdate: client.UpdateToolCall,
@@ -638,13 +639,13 @@ func TestRunnerDoesNotInventBuiltinIdentityForGenericFetch(t *testing.T) {
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "codex", AgentID: "agent-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
 
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.ToolCallUpdate{
 			SessionUpdate: client.UpdateToolCallState,
@@ -686,13 +687,13 @@ func TestRunnerPreservesChildTerminalContentWithoutParentTraceText(t *testing.T)
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
 
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.ToolCallUpdate{
 			SessionUpdate: client.UpdateToolCallState,
@@ -727,7 +728,7 @@ func TestRunnerStripsConsoleFenceFromChildTerminalOutput(t *testing.T) {
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "codex", AgentID: "agent-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
@@ -735,7 +736,7 @@ func TestRunnerStripsConsoleFenceFromChildTerminalOutput(t *testing.T) {
 	fenced := "```console\ndiff --git a/file b/file\n```\n"
 	want := "diff --git a/file b/file\n"
 
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.ToolCallUpdate{
 			SessionUpdate: client.UpdateToolCallState,
@@ -780,16 +781,16 @@ func TestRunnerHandleUpdateUsesAgentMessageDeltas(t *testing.T) {
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
 
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateUserMessage, "continue from parent"))
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "我来按步骤"))
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "执行"))
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "这个任务。"))
+	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateUserMessage, "continue from parent"))
+	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateAgentMessage, "我来按步骤"))
+	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateAgentMessage, "执行"))
+	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateAgentMessage, "这个任务。"))
 
 	if got := len(sink.frames); got != 4 {
 		t.Fatalf("stream frames = %#v, want input plus three agent delta updates", sink.frames)
@@ -830,13 +831,13 @@ func TestRunnerHandleUpdateKeepsTrustedAgentCommunicationSource(t *testing.T) {
 	sink := &recordingStreams{}
 	run := &childRun{
 		anchor: delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
-		taskID: "task-1", sink: sink, state: delegation.StateRunning, running: true,
+		taskID: "task-1", output: sink, state: delegation.StateRunning, running: true,
 		inputActor: source,
 	}
 	runner := &Runner{clock: time.Now}
 	input := session.AgentCommunicationPromptHeader(source) + "\nreview this change"
 
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateUserMessage, input))
+	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateUserMessage, input))
 
 	if len(sink.frames) != 1 || sink.frames[0].Event == nil {
 		t.Fatalf("stream frames = %#v, want one Agent communication", sink.frames)
@@ -857,14 +858,14 @@ func TestRunnerHandleUpdatePublishesRepeatedAgentMessageDeltas(t *testing.T) {
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
 
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "ha"))
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "ha"))
+	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateAgentMessage, "ha"))
+	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateAgentMessage, "ha"))
 
 	if got := len(sink.frames); got != 2 {
 		t.Fatalf("stream frames = %#v, want both repeated ACP deltas", sink.frames)
@@ -904,14 +905,14 @@ func TestRunnerHandleUpdateSeparatesAgentMessageIDs(t *testing.T) {
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
 
-	runner.handleUpdate(run, contentUpdateWithMessageID(t, client.UpdateAgentMessage, "m1", "first message"))
-	runner.handleUpdate(run, contentUpdateWithMessageID(t, client.UpdateAgentMessage, "m2", "second message"))
+	handleTestUpdate(runner, run, contentUpdateWithMessageID(t, client.UpdateAgentMessage, "m1", "first message"))
+	handleTestUpdate(runner, run, contentUpdateWithMessageID(t, client.UpdateAgentMessage, "m2", "second message"))
 
 	if got := len(sink.frames); got != 2 {
 		t.Fatalf("stream frames = %#v, want two agent updates", sink.frames)
@@ -937,14 +938,14 @@ func TestRunnerResultKeepsOnlyLatestAssistantSegmentAfterTools(t *testing.T) {
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
 
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "我先读取文件。"))
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateAgentMessage, "我先读取文件。"))
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.ToolCall{
 			SessionUpdate: client.UpdateToolCall,
@@ -955,7 +956,7 @@ func TestRunnerResultKeepsOnlyLatestAssistantSegmentAfterTools(t *testing.T) {
 			RawInput:      map[string]any{"path": "hello_spawn.txt"},
 		},
 	})
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.ToolCallUpdate{
 			SessionUpdate: client.UpdateToolCallState,
@@ -965,7 +966,7 @@ func TestRunnerResultKeepsOnlyLatestAssistantSegmentAfterTools(t *testing.T) {
 			Status:        stringPtr("completed"),
 		},
 	})
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "总结一下执行结果：\n步骤 操作 结果"))
+	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateAgentMessage, "总结一下执行结果：\n步骤 操作 结果"))
 
 	run.mu.RLock()
 	result := run.result
@@ -987,14 +988,14 @@ func TestRunnerPublishesSemanticFramesWithoutFormattedTrace(t *testing.T) {
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
 
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "先看一下文件"))
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateAgentMessage, "先看一下文件"))
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.ToolCall{
 			SessionUpdate: client.UpdateToolCall,
@@ -1005,7 +1006,7 @@ func TestRunnerPublishesSemanticFramesWithoutFormattedTrace(t *testing.T) {
 			RawInput:      map[string]any{"path": "/Users/xueyongzhi/WorkDir/xueyongzhi/demo"},
 		},
 	})
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.ToolCallUpdate{
 			SessionUpdate: client.UpdateToolCallState,
@@ -1016,7 +1017,7 @@ func TestRunnerPublishesSemanticFramesWithoutFormattedTrace(t *testing.T) {
 			RawInput:      map[string]any{"path": "/Users/xueyongzhi/WorkDir/xueyongzhi/demo"},
 		},
 	})
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.ToolCall{
 			SessionUpdate: client.UpdateToolCall,
@@ -1115,13 +1116,13 @@ func TestRunnerHandleUpdatePublishesStructuredThoughtEvent(t *testing.T) {
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "agent-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
 
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentThought, "thinking about the command"))
+	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateAgentThought, "thinking about the command"))
 
 	if len(sink.frames) != 1 {
 		t.Fatalf("stream frames = %#v, want one thought frame", sink.frames)
@@ -1143,13 +1144,13 @@ func TestRunnerHandleUpdatePreservesWhitespaceThoughtChunk(t *testing.T) {
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "agent-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
 
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentThought, " "))
+	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateAgentThought, " "))
 
 	if len(sink.frames) != 1 {
 		t.Fatalf("stream frames = %#v, want one whitespace thought frame", sink.frames)
@@ -1173,7 +1174,7 @@ func TestRunnerHandleUpdateDoesNotHoldRunLockWhilePublishing(t *testing.T) {
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
@@ -1181,13 +1182,13 @@ func TestRunnerHandleUpdateDoesNotHoldRunLockWhilePublishing(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "blocked output"))
+		handleTestUpdate(runner, run, contentUpdate(t, client.UpdateAgentMessage, "blocked output"))
 		close(done)
 	}()
 	select {
 	case <-sink.entered:
 	case <-time.After(time.Second):
-		t.Fatal("PublishStream was not called")
+		t.Fatal("ObserveTaskOutput was not called")
 	}
 
 	locked := make(chan struct{})
@@ -1200,14 +1201,14 @@ func TestRunnerHandleUpdateDoesNotHoldRunLockWhilePublishing(t *testing.T) {
 	select {
 	case <-locked:
 	case <-time.After(time.Second):
-		t.Fatal("run lock stayed held while PublishStream was blocked")
+		t.Fatal("run lock stayed held while ObserveTaskOutput was blocked")
 	}
 
 	close(sink.release)
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("handleUpdate did not return after releasing PublishStream")
+		t.Fatal("handleUpdate did not return after releasing ObserveTaskOutput")
 	}
 }
 
@@ -1265,7 +1266,7 @@ func TestRunnerHandleUpdateAcceptsStringContentChunks(t *testing.T) {
 	run := &childRun{
 		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "copilot-1"},
 		taskID:  "task-1",
-		sink:    sink,
+		output:  sink,
 		state:   delegation.StateRunning,
 		running: true,
 	}
@@ -1275,7 +1276,7 @@ func TestRunnerHandleUpdateAcceptsStringContentChunks(t *testing.T) {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
-	runner.handleUpdate(run, client.UpdateEnvelope{
+	handleTestUpdate(runner, run, client.UpdateEnvelope{
 		SessionID: "child-1",
 		Update: client.ContentChunk{
 			SessionUpdate: client.UpdateAgentMessage,
@@ -1326,7 +1327,15 @@ func stringPtr(value string) *string {
 }
 
 type recordingStreams struct {
-	frames []stream.Frame
+	frames []output.Event
+}
+
+func handleTestUpdate(runner *Runner, run *childRun, env client.UpdateEnvelope) {
+	if run.childSlot() == nil {
+		slot := newChildSlot(agent.ChildEndpointRef{EndpointKey: "test-endpoint"}, run)
+		slot.beginActivity("test-activity", run)
+	}
+	runner.handleUpdate(run, env)
 }
 
 type subagentApprovalRequesterFunc func(context.Context, tasksubagent.ApprovalRequest) (tasksubagent.ApprovalResponse, error)
@@ -1335,8 +1344,12 @@ func (f subagentApprovalRequesterFunc) RequestSubagentApproval(ctx context.Conte
 	return f(ctx, req)
 }
 
-func (s *recordingStreams) PublishStream(frame stream.Frame) {
-	s.frames = append(s.frames, stream.CloneFrame(frame))
+func (s *recordingStreams) ObserveTaskOutput(_ context.Context, event output.Event) error {
+	s.frames = append(s.frames, output.Event{
+		Text: event.Text, State: event.State, Running: event.Running, Closed: event.Closed,
+		ExitCode: event.ExitCode, Event: session.CloneEvent(event.Event), OccurredAt: event.OccurredAt,
+	})
+	return nil
 }
 
 type blockingStreams struct {
@@ -1344,9 +1357,10 @@ type blockingStreams struct {
 	release chan struct{}
 }
 
-func (s *blockingStreams) PublishStream(stream.Frame) {
+func (s *blockingStreams) ObserveTaskOutput(context.Context, output.Event) error {
 	close(s.entered)
 	<-s.release
+	return nil
 }
 
 func repoRootForRunnerTest(t *testing.T) string {

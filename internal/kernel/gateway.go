@@ -11,7 +11,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 	"github.com/caelis-labs/caelis/control/plugin"
 )
 
@@ -162,15 +162,15 @@ func (g *Gateway) sessionApprovals(ref session.SessionRef) *approvalCoordinator 
 	return coordinator
 }
 
-func (g *Gateway) Streams() stream.Service {
+func (g *Gateway) Terminals() terminal.Controller {
 	if g == nil || g.runtime == nil {
 		return nil
 	}
-	provider, ok := g.runtime.(agent.StreamProvider)
+	provider, ok := g.runtime.(agent.TerminalProvider)
 	if !ok {
 		return nil
 	}
-	return provider.Streams()
+	return provider.Terminals()
 }
 
 // Resolver returns the underlying *AssemblyResolver if the gateway's

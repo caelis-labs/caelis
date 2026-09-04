@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -20,9 +19,10 @@ type subagentFinalResponse struct {
 }
 
 // consumeSubagentFinalResponses advances the single parent-model observation
-// frontier and decorates one Task read/wait snapshot with every exact retained
-// Final Response that has not previously crossed that frontier. Final text
-// remains owned by the Task's existing latest/semantic retention path.
+// frontier and decorates one Task read/wait snapshot with the latest exact
+// Final Response that has not previously crossed that frontier. Historical
+// replay belongs to Control's spool or the child ACP Session; Task remains the
+// last-resort latest-Final fallback.
 func (tm *taskRuntime) consumeSubagentFinalResponses(snapshot taskapi.Snapshot) taskapi.Snapshot {
 	if tm == nil || snapshot.Kind != taskapi.KindSubagent {
 		return snapshot
@@ -43,9 +43,7 @@ func (tm *taskRuntime) consumeSubagentFinalResponses(snapshot taskapi.Snapshot) 
 			turnSeq := max(task.turnSeq, 1)
 			task.latestFinalText = finalMessage
 			task.latestFinalTurnSeq = turnSeq
-			task.latestFinalOrder = task.streamEventBase + int64(len(task.streamFrames))
 			task.latestFinalActivityID = strings.TrimSpace(task.activityID)
-			task.semanticRetention.protectLatestFinal(subagentTurnID(task.ref.TaskID, turnSeq), task.latestFinalOrder)
 		}
 	}
 	responses := task.unreadFinalResponsesLocked()
@@ -125,26 +123,7 @@ func (t *subagentTask) unreadFinalResponsesLocked() []subagentFinalResponse {
 	if t == nil || !t.hasUnreadFinalResponsesLocked() {
 		return nil
 	}
-	responses := make([]subagentFinalResponse, 0, 2)
-	if t.semanticRetention.order != nil {
-		for element := t.semanticRetention.order.Front(); element != nil; element = element.Next() {
-			unit, _ := element.Value.(*subagentSemanticUnit)
-			if unit == nil || unit.latestFinal || unit.priority != subagentSemanticFinal {
-				continue
-			}
-			turnSeq, ok := subagentTurnSeq(t.ref.TaskID, unit.turnID)
-			if !ok || turnSeq <= t.finalResponseCursor {
-				continue
-			}
-			text := subagentFrameAssistantText(unit.materialize())
-			if !taskOutputHasNonBlankLine(text) {
-				continue
-			}
-			responses = append(responses, subagentFinalResponse{
-				TurnID: unit.turnID, TurnSeq: turnSeq, FinalMessage: text,
-			})
-		}
-	}
+	responses := make([]subagentFinalResponse, 0, 1)
 	if t.latestFinalTurnSeq > t.finalResponseCursor && taskOutputHasNonBlankLine(t.latestFinalText) {
 		responses = append(responses, subagentFinalResponse{
 			TurnID:       subagentTurnID(t.ref.TaskID, t.latestFinalTurnSeq),
@@ -153,14 +132,4 @@ func (t *subagentTask) unreadFinalResponsesLocked() []subagentFinalResponse {
 		})
 	}
 	return responses
-}
-
-func subagentTurnSeq(taskID string, turnID string) (int64, bool) {
-	prefix := strings.TrimSpace(taskID) + ":"
-	turnID = strings.TrimSpace(turnID)
-	if prefix == ":" || !strings.HasPrefix(turnID, prefix) {
-		return 0, false
-	}
-	seq, err := strconv.ParseInt(strings.TrimPrefix(turnID, prefix), 10, 64)
-	return seq, err == nil && seq > 0
 }

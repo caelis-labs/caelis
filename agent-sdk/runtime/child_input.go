@@ -10,6 +10,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
 // SubmitChildInput resolves one topology address to an exact delegated child
@@ -128,16 +130,18 @@ func (r *Runtime) submitChildInputLocked(
 	if err := validateTaskActivityTarget(task, target); err != nil {
 		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.Conflict, "Target Agent binding changed", err)
 	}
-	observer := newSubagentActivityObserver(r.tasks, target.EndpointKey)
+	activityID, outputObserver, completion, err := r.prepareChildTaskOutput(ctx, task)
+	if err != nil {
+		return agent.ChildInputResult{}, err
+	}
 	if endpointBinder, ok := task.runner.(agent.ChildEndpointBinder); ok && endpointBinder != nil {
 		task.mu.Lock()
 		spawn := agent.SubagentSpawnContext{
 			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(active),
-			CWD: strings.TrimSpace(active.CWD), TaskID: strings.TrimSpace(task.ref.TaskID),
+			CWD: strings.TrimSpace(active.CWD), TaskID: strings.TrimSpace(task.ref.TaskID), ActivityID: activityID,
 			Handle: strings.TrimSpace(task.handle), Role: subagentParticipantRole(task),
 			ParentCallID: taskStringValue(task.metadata["parent_call"]), Mode: strings.TrimSpace(task.mode),
-			ApprovalMode: strings.TrimSpace(task.approvalMode), Streams: r.tasks,
-			ActivityObserver: observer, ActivityAfterCursor: task.activityDurableCursor,
+			ApprovalMode: strings.TrimSpace(task.approvalMode), Output: outputObserver, Completion: completion,
 		}
 		task.mu.Unlock()
 		spawn.ApprovalRequester = newSubagentApprovalRequester(r, spawn.Mode, nil, active, ref)
@@ -149,17 +153,39 @@ func (r *Runtime) submitChildInputLocked(
 	if !ok || runner == nil {
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent cannot receive follow-up messages")
 	}
-	binder, ok := task.runner.(agent.ChildActivityObserverBinder)
-	if !ok || binder == nil {
-		return agent.ChildInputResult{}, errorcode.New(errorcode.FailedPrecondition, "Target Agent activity observation is unavailable")
-	}
-	if err := binder.BindChildActivityObserver(ctx, target, subagentActivityCursor(task), observer); err != nil {
-		return agent.ChildInputResult{}, err
-	}
 	return runner.SubmitChildInput(ctx, agent.ChildInputRequest{
-		Target: target, Source: source, Input: command.Input,
+		Target: target, Source: source, ActivityID: activityID, Output: outputObserver, Completion: completion, Input: command.Input,
 		DisplayInput: command.DisplayInput, ContentParts: command.ContentParts,
 	})
+}
+
+func (r *Runtime) prepareChildTaskOutput(ctx context.Context, task *subagentTask) (string, output.Observer, delegation.CompletionSink, error) {
+	if r == nil || r.tasks == nil || task == nil {
+		return "", output.Nop(), nil, errorcode.New(errorcode.FailedPrecondition, "Target Agent Task is unavailable")
+	}
+	task.mu.Lock()
+	activityID := strings.TrimSpace(task.activityID)
+	running := task.running
+	turnSeq := max(task.turnSeq, 1)
+	if !running {
+		turnSeq++
+		activityID = r.nextID("activity", nil)
+	}
+	ref, taskRef := task.sessionRef, task.ref
+	task.mu.Unlock()
+	observer := r.tasks.bindSubagentOutput(ctx, ref, taskRef.TaskID, taskRef.TerminalID, activityID, false)
+	completion := newSubagentCompletionSink(ctx, r.tasks, taskRef.TaskID, turnSeq)
+	if !running {
+		activity := &childTaskActivity{
+			runtime: r.tasks, ctx: session.ContextWithControlMutation(context.WithoutCancel(ctx), session.ControlMutationPurposeSubagentActivity),
+			ref: ref, taskID: taskRef.TaskID,
+			activityID: activityID, turnSeq: turnSeq, observer: observer,
+		}
+		observer = activity
+		completion.activity = activity
+		completion.observedTerminal = true
+	}
+	return activityID, observer, completion, nil
 }
 
 func resolveExactParticipantInputSource(

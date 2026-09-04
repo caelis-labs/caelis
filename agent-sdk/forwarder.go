@@ -16,8 +16,8 @@ type SourceEventPublisher interface {
 	PublishSourceEvent(event SourceEvent)
 }
 
-// ControllerEventForwardRequest carries one external controller turn stream
-// forwarding job.
+// ControllerEventForwardRequest configures one external controller turn
+// forwarding session before the remote producer starts.
 type ControllerEventForwardRequest struct {
 	ActiveSession session.Session
 	SessionRef    session.SessionRef
@@ -25,14 +25,21 @@ type ControllerEventForwardRequest struct {
 	// by this forwarding job. Forwarders must preserve it on every store write.
 	MutationGuard session.MutationGuard
 	TurnID        string
-	Source        EventSource
 	Publisher     SourceEventPublisher
 	Normalize     EventNormalizer
 	IsUserEcho    func(*session.Event) bool
 }
 
-// ControllerEventForwarder forwards one external controller source stream into
-// canonical persistence and live publication paths.
+// ControllerEventSession synchronously normalizes and persists remote source
+// events. Complete flushes any final canonical event after the producer is
+// quiescent.
+type ControllerEventSession interface {
+	SourceEventObserver
+	Complete(context.Context) error
+}
+
+// ControllerEventForwarder creates one per-turn forwarding session before the
+// controller starts. It does not own a pull stream or payload queue.
 type ControllerEventForwarder interface {
-	ForwardControllerEvents(ctx context.Context, req ControllerEventForwardRequest) error
+	BeginControllerEvents(context.Context, ControllerEventForwardRequest) (ControllerEventSession, error)
 }

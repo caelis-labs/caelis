@@ -106,9 +106,21 @@ func RunContextCompaction(ctx context.Context, outcome ContextCompactionOutcome)
 	if err != nil {
 		return ContextCompactionRun{}, fmt.Errorf("build scenario Runtime: %w", err)
 	}
+	var liveEvents []*session.Event
+	var liveErr error
 	result, err := runtime.Run(ctx, agent.RunRequest{
 		SessionRef: active.SessionRef,
 		Input:      "continue",
+		SourceObserver: agent.SourceEventObserverFunc(func(_ context.Context, source agent.SourceEvent) error {
+			if source.Err == nil {
+				if source.Canonical != nil {
+					liveEvents = append(liveEvents, session.CloneEvent(source.Canonical))
+				}
+			} else {
+				liveErr = source.Err
+			}
+			return nil
+		}),
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: scripted,
@@ -117,7 +129,10 @@ func RunContextCompaction(ctx context.Context, outcome ContextCompactionOutcome)
 	if err != nil {
 		return ContextCompactionRun{}, fmt.Errorf("start scenario Runtime: %w", err)
 	}
-	liveEvents, runErr := collectRunnerEvents(result.Handle)
+	runErr := result.Handle.WaitCompletion(ctx)
+	if runErr == nil {
+		runErr = liveErr
+	}
 	switch outcome {
 	case ContextCompactionSuccess:
 		if runErr != nil {
@@ -169,23 +184,4 @@ func contextCompactionHistory() []*session.Event {
 		}))
 	}
 	return events
-}
-
-func collectRunnerEvents(handle agent.Runner) ([]*session.Event, error) {
-	if handle == nil {
-		return nil, nil
-	}
-	var events []*session.Event
-	for event, err := range handle.Events() {
-		if err != nil {
-			if _, ok := agent.AsEventStreamGap(err); ok {
-				continue
-			}
-			return events, err
-		}
-		if event != nil {
-			events = append(events, session.CloneEvent(event))
-		}
-	}
-	return events, nil
 }

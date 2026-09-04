@@ -16,8 +16,8 @@ func (s *appServerTestTasks) List(_ context.Context, principal taskstream.Princi
 	return taskstream.ListResult{}, nil
 }
 
-func (*appServerTestTasks) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.Batch, error) {
-	return taskstream.Batch{}, nil
+func (*appServerTestTasks) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.ReadResult, error) {
+	return taskstream.ReadResult{}, nil
 }
 
 func (*appServerTestTasks) Subscribe(context.Context, taskstream.Principal, taskstream.SubscribeRequest) (taskstream.SubscribeResult, error) {

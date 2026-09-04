@@ -109,68 +109,6 @@ func TestSystemManagedAgentDoesNotInheritParentRuntimeFence(t *testing.T) {
 	}
 }
 
-func TestSystemManagedAgentUsesDurableFinalAfterObservationGap(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	staging := inmemory.NewStore(inmemory.Config{})
-	active, err := staging.StartSession(ctx, session.StartSessionRequest{
-		AppName: "caelis-system", UserID: "system", PreferredSessionID: "gap-result",
-	})
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-	prompt := model.NewTextMessage(model.RoleUser, "review this")
-	storedPrompt, err := staging.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: active.SessionRef,
-		Event:      &session.Event{Type: session.EventTypeUser, Message: &prompt},
-	})
-	if err != nil {
-		t.Fatalf("AppendEvent(prompt) error = %v", err)
-	}
-
-	// Runtime's queue tests cover the concrete bounded overwrite. This test
-	// gives the production consumer the matching typed gap while the complete
-	// execution result remains available in its authoritative staging Session.
-	const outputCount = 400
-	outputs := make([]*session.Event, 0, outputCount)
-	for index := range outputCount {
-		text := fmt.Sprintf("candidate-%03d", index)
-		message := model.NewTextMessage(model.RoleAssistant, text)
-		outputs = append(outputs, &session.Event{
-			ID:      text,
-			Type:    session.EventTypeAssistant,
-			Message: &message,
-			Text:    text,
-		})
-	}
-	storedOutputs, err := staging.AppendEvents(ctx, session.AppendEventsRequest{
-		SessionRef: active.SessionRef,
-		Events:     outputs,
-	})
-	if err != nil {
-		t.Fatalf("AppendEvents(outputs) error = %v", err)
-	}
-
-	result, err := collectSystemManagedAgentResult(
-		ctx,
-		staging,
-		active.SessionRef,
-		storedPrompt.Seq,
-		systemManagedObservationGapRun{dropped: 144},
-	)
-	if err != nil {
-		t.Fatalf("collectSystemManagedAgentResult() error = %v", err)
-	}
-	last := storedOutputs[len(storedOutputs)-1]
-	if result.AssistantEvent == nil || result.AssistantEvent.ID != last.ID {
-		t.Fatalf("AssistantEvent = %#v, want durable final %q", result.AssistantEvent, last.ID)
-	}
-	if result.Text != session.EventText(last) {
-		t.Fatalf("Text = %q, want %q", result.Text, session.EventText(last))
-	}
-}
-
 func TestSystemManagedGuardianAutoCompactsHistoryWithoutSummarizingCurrentApproval(t *testing.T) {
 	t.Parallel()
 
@@ -303,10 +241,6 @@ func TestSystemManagedGuardianOverflowRecoveryKeepsCurrentApprovalExact(t *testi
 	}
 }
 
-type systemManagedObservationGapRun struct {
-	dropped int
-}
-
 type systemManagedGuardianCompactionModel struct {
 	mu              sync.Mutex
 	compactionCalls int
@@ -422,20 +356,6 @@ func requestContainsText(req *model.Request, text string) bool {
 		return strings.Contains(message.TextContent(), text)
 	})
 }
-
-func (systemManagedObservationGapRun) RunID() string { return "system-managed-gap" }
-
-func (r systemManagedObservationGapRun) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		yield(nil, &agent.EventStreamGapError{Dropped: uint64(r.dropped)})
-	}
-}
-
-func (systemManagedObservationGapRun) Submit(agent.Submission) error { return nil }
-func (systemManagedObservationGapRun) Cancel() agent.CancelResult {
-	return agent.CancelResult{Status: agent.CancelStatusCancelled}
-}
-func (systemManagedObservationGapRun) Close() error { return nil }
 
 type systemManagedLifecycleRecorder struct {
 	mu     sync.Mutex

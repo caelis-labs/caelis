@@ -25,15 +25,8 @@ const apiPrefix = wirev1.APIPrefix
 const maxJSONRequestBytes = 64 << 20
 
 const (
-	resumeModeHeader      = wirev1.ResumeModeHeader
-	transientGapHeader    = wirev1.TransientGapHeader
-	boundaryCursorHeader  = wirev1.BoundaryCursorHeader
-	resumeEventName       = wirev1.ResumeEventName
-	bootstrapEventName    = wirev1.BootstrapEventName
-	backfillDoneEventName = wirev1.BackfillDoneEventName
+	bootstrapEventName = wirev1.BootstrapEventName
 )
-
-type resumeBoundary = wirev1.ResumeBoundary
 
 type Authenticator interface {
 	Authenticate(*http.Request) (appserver.Principal, error)
@@ -347,18 +340,11 @@ func (s *Server) streamControlSubscription(
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
-	w.Header().Set(resumeModeHeader, string(state.ResumeMode))
-	w.Header().Set(transientGapHeader, strconv.FormatBool(state.TransientGap))
-	if state.BoundaryCursor != "" {
-		w.Header().Set(boundaryCursorHeader, state.BoundaryCursor)
-	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", bootstrapEventName, initial)
 	flusher.Flush()
 	heartbeat := time.NewTicker(s.config.Heartbeat)
 	defer heartbeat.Stop()
-	events := subscription.Backfill()
-	backfill := true
 	for {
 		select {
 		case <-r.Context().Done():
@@ -366,35 +352,46 @@ func (s *Server) streamControlSubscription(
 		case <-heartbeat.C:
 			_, _ = fmt.Fprint(w, ": heartbeat\n\n")
 			flusher.Flush()
-		case envelope, open := <-events:
+		case delivery, open := <-subscription.Deliveries():
 			if !open {
-				if backfill {
-					backfill = false
-					_, _ = fmt.Fprintf(w, "event: %s\ndata: {}\n\n", backfillDoneEventName)
-					flusher.Flush()
-					events = subscription.Events()
-					continue
-				}
-				var gap *appserver.FeedGapError
-				if errors.As(subscription.Err(), &gap) {
-					retry, marshalErr := json.Marshal(resumeBoundary{
-						ResumeMode: gap.Mode, TransientGap: gap.TransientGap, BoundaryCursor: gap.RetryCursor,
-					})
-					if marshalErr == nil {
-						_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", resumeEventName, retry)
-						flusher.Flush()
+				if streamErr := subscription.Err(); streamErr != nil {
+					wireErr := wirev1.EncodeTaskStreamError(streamErr)
+					if raw, marshalErr := json.Marshal(wireErr); marshalErr == nil {
+						_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", wirev1.FeedErrorEventName, raw)
 					}
+				} else {
+					_, _ = fmt.Fprintf(w, "event: %s\ndata: {}\n\n", wirev1.FeedDoneEventName)
 				}
+				flusher.Flush()
 				return
 			}
-			data, err := wirev1.MarshalEnvelope(envelope)
+			data, err := marshalFeedDelivery(delivery)
 			if err != nil {
 				return
 			}
-			_, _ = fmt.Fprintf(w, "id: %s\ndata: %s\n\n", envelope.Cursor, data)
+			if delivery.NextCursor != "" {
+				_, _ = fmt.Fprintf(w, "id: %s\n", delivery.NextCursor)
+			}
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", wirev1.FeedDeliveryEventName, data)
 			flusher.Flush()
 		}
 	}
+}
+
+func marshalFeedDelivery(delivery appserver.FeedDelivery) ([]byte, error) {
+	wire := wirev1.FeedDelivery{
+		Kind: string(delivery.Kind), Source: string(delivery.Source), SnapshotID: delivery.SnapshotID,
+		Page: delivery.Page, NextCursor: delivery.NextCursor,
+		Events: make([]json.RawMessage, 0, len(delivery.Events)),
+	}
+	for _, envelope := range delivery.Events {
+		raw, err := wirev1.MarshalEnvelope(envelope)
+		if err != nil {
+			return nil, err
+		}
+		wire.Events = append(wire.Events, raw)
+	}
+	return json.Marshal(wire)
 }
 
 func (s *Server) prompt(w http.ResponseWriter, r *http.Request) {

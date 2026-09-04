@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/acppermission"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/jsonvalue"
@@ -106,19 +106,38 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 			}
 		}
 	}
+	var reconnectDeliveries <-chan appserver.FeedDelivery
+	reconnectAssembler := &appserver.FeedDeliveryAssembler{}
+	reconnectIrreversible := false
 	if result.Reconnect != nil {
 		defer result.Reconnect.Close()
-		for backfill := result.Reconnect.Backfill(); backfill != nil; {
+		reconnectDeliveries = result.Reconnect.Deliveries()
+		initialDone := false
+		for reconnectDeliveries != nil && !initialDone {
 			select {
 			case <-ctx.Done():
 				return context.Canceled
-			case env, ok := <-backfill:
+			case delivery, ok := <-reconnectDeliveries:
 				if !ok {
-					backfill = nil
+					reconnectDeliveries = nil
 					continue
 				}
-				if err := a.emitControlBackfillEnvelope(ctx, cb, sessionID, env, outboundFilter); err != nil {
+				events, replacement, err := reconnectAssembler.Accept(delivery)
+				if err != nil {
 					return err
+				}
+				if replacement && reconnectIrreversible {
+					return fmt.Errorf("internal/acpagentbridge: Session replacement crossed emitted ACP output")
+				}
+				for _, env := range events {
+					if err := a.emitControlBackfillEnvelope(ctx, cb, sessionID, env, outboundFilter); err != nil {
+						return err
+					}
+					reconnectIrreversible = true
+				}
+				if delivery.Kind == appserver.FeedDeliverySync {
+					initialDone = true
+					reconnectIrreversible = true
 				}
 			}
 		}
@@ -139,7 +158,7 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 		if !state.Run.Active && state.Approval.Active == nil {
 			return nil
 		}
-		for events := result.Reconnect.Events(); events != nil; {
+		for reconnectDeliveries != nil {
 			select {
 			case <-ctx.Done():
 				return context.Canceled
@@ -151,13 +170,23 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 				if err := a.emitControlEnvelope(ctx, cb, sessionID, nil, taskEnvelope, outboundFilter); err != nil {
 					return err
 				}
-			case env, ok := <-events:
+			case delivery, ok := <-reconnectDeliveries:
 				if !ok {
-					events = nil
+					reconnectDeliveries = nil
 					continue
 				}
-				if err := a.emitTaskAwareControlEnvelope(ctx, cb, sessionID, result.Reconnect, taskMux, &taskEvents, env, outboundFilter); err != nil {
+				events, replacement, err := reconnectAssembler.Accept(delivery)
+				if err != nil {
 					return err
+				}
+				if replacement && reconnectIrreversible {
+					return fmt.Errorf("internal/acpagentbridge: Session replacement crossed emitted ACP output")
+				}
+				for _, env := range events {
+					if err := a.emitTaskAwareControlEnvelope(ctx, cb, sessionID, result.Reconnect, taskMux, &taskEvents, env, outboundFilter); err != nil {
+						return err
+					}
+					reconnectIrreversible = true
 				}
 			}
 		}
@@ -199,87 +228,24 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 	return nil
 }
 
-const acpTaskStreamParentDrainTimeout = 2 * time.Second
-
 // emitTaskAwareControlEnvelope is the single parent-envelope delivery order for
-// both Control turns and the direct Runtime runner. It preserves retained Task
-// output before a fallback parent close, emits the canonical envelope through
-// the standard compatibility projection, then discovers and drains any Task
-// stream mounted by that envelope.
+// both Control turns and the direct Runtime runner. It emits the canonical
+// envelope, then discovers and drains any Task stream mounted by that envelope.
 func (a *RuntimeAgent) emitTaskAwareControlEnvelope(
 	ctx context.Context,
 	cb PromptCallbacks,
 	sessionID string,
-	turn controlprompt.Turn,
+	turn controlApprovalSubmitter,
 	taskMux *acpTaskStreamMux,
 	taskEvents *<-chan eventstream.Envelope,
 	env eventstream.Envelope,
 	outboundFilter *acpNarrativeFilter,
 ) error {
-	if err := a.drainACPTaskStreamBeforeParentClose(ctx, cb, sessionID, taskMux, taskEvents, env, outboundFilter); err != nil {
-		return err
-	}
 	if err := a.emitControlEnvelope(ctx, cb, sessionID, turn, env, outboundFilter); err != nil {
 		return err
 	}
 	taskMux.Observe(env)
 	return a.drainReadyACPTaskStream(ctx, cb, sessionID, taskEvents, outboundFilter)
-}
-
-// drainACPTaskStreamBeforeParentClose preserves fallback ordering across the
-// independent Session and Task subscriber queues. The typed child lifecycle is
-// normally the primary terminal signal. If a canonical Task read/wait result
-// becomes readable first, drain through that lifecycle so its standard parent
-// result wins the per-Turn terminal gate. The bounded fallback keeps broken
-// observation from delaying the canonical Task result indefinitely.
-func (a *RuntimeAgent) drainACPTaskStreamBeforeParentClose(
-	ctx context.Context,
-	cb PromptCallbacks,
-	sessionID string,
-	taskMux *acpTaskStreamMux,
-	taskEvents *<-chan eventstream.Envelope,
-	env eventstream.Envelope,
-	outboundFilter *acpNarrativeFilter,
-) error {
-	observedParents := acpObservedParentClosesFromEnvelope(env)
-	if len(observedParents) == 0 || taskMux == nil || taskEvents == nil || *taskEvents == nil {
-		return nil
-	}
-	timer := time.NewTimer(acpTaskStreamParentDrainTimeout)
-	defer timer.Stop()
-	for _, observed := range observedParents {
-		if outboundFilter != nil && outboundFilter.childTerminal != nil &&
-			!outboundFilter.childTerminal.parentOpen(sessionID, observed.parentCallID, observed.turnID) {
-			continue
-		}
-		boundary := taskMux.parentBoundary(observed.parentCallID)
-		if boundary == nil {
-			continue
-		}
-	waitForBoundary:
-		for {
-			select {
-			case <-ctx.Done():
-				return context.Canceled
-			case <-timer.C:
-				return nil
-			case taskEnvelope, open := <-*taskEvents:
-				if !open {
-					*taskEvents = nil
-					return nil
-				}
-				if err := a.emitControlEnvelope(ctx, cb, sessionID, nil, taskEnvelope, outboundFilter); err != nil {
-					return err
-				}
-			case <-boundary:
-				if err := a.drainReadyACPTaskStream(ctx, cb, sessionID, taskEvents, outboundFilter); err != nil {
-					return err
-				}
-				break waitForBoundary
-			}
-		}
-	}
-	return nil
 }
 
 func (a *RuntimeAgent) drainReadyACPTaskStream(
@@ -459,7 +425,11 @@ func standardSessionUpdate(updateType string, update any) (eventstream.RawUpdate
 	return eventstream.RawUpdate{SessionUpdate: strings.TrimSpace(updateType), Raw: raw}, nil
 }
 
-func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbacks, fallbackSessionID string, turn controlprompt.Turn, env eventstream.Envelope, outboundFilter *acpNarrativeFilter) error {
+type controlApprovalSubmitter interface {
+	SubmitApproval(context.Context, controlprompt.ApprovalDecision) error
+}
+
+func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbacks, fallbackSessionID string, turn controlApprovalSubmitter, env eventstream.Envelope, outboundFilter *acpNarrativeFilter) error {
 	if cb == nil {
 		return nil
 	}
@@ -507,14 +477,6 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbac
 		notification := eventstream.SessionNotification{SessionID: sessionID, Update: env.Update}
 		if err := emitFilteredSessionUpdate(ctx, cb, notification, outboundFilter); err != nil {
 			return err
-		}
-		if outboundFilter == nil || outboundFilter.childTerminal == nil {
-			return nil
-		}
-		for _, parentClose := range outboundFilter.childTerminal.projectObservedParentCloses(env, sessionID) {
-			if err := emitFilteredSessionUpdate(ctx, cb, parentClose, outboundFilter); err != nil {
-				return err
-			}
 		}
 		return nil
 	case eventstream.KindNotice:

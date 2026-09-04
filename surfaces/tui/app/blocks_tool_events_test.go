@@ -132,10 +132,10 @@ func TestRunCommandTerminalDeltaReplacesExplicitContentCollection(t *testing.T) 
 	}, index)
 	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
 		CallID: "command-collection-1", Name: "RunCommand", Output: "actual\n",
-		Meta: ToolUpdateMeta{ToolKind: "execute", Terminal: true, OutputTerminal: true, OutputGapBefore: true},
+		Meta: ToolUpdateMeta{ToolKind: "execute", Terminal: true, OutputTerminal: true},
 	}, index)
 
-	if len(events) != 1 || events[0].Output != "actual\n" || !events[0].OutputTerminal || events[0].OutputCollection || !events[0].OutputGapBefore {
+	if len(events) != 1 || events[0].Output != "actual\n" || !events[0].OutputTerminal || events[0].OutputCollection {
 		t.Fatalf("RunCommand transition = %#v, want terminal bytes to replace explicit collection", events)
 	}
 }

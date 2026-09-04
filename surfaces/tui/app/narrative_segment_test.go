@@ -1168,7 +1168,7 @@ func TestHiddenParticipantTaskDoesNotCreateEmptyTurnBlock(t *testing.T) {
 	}
 }
 
-func TestHiddenParticipantTaskReadRepairsCommandOwnerAcrossTurns(t *testing.T) {
+func TestHiddenParticipantTaskReadDoesNotBecomeCommandOutput(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -1176,7 +1176,7 @@ func TestHiddenParticipantTaskReadRepairsCommandOwnerAcrossTurns(t *testing.T) {
 		turnID      = "participant-turn-1"
 		participant = "participant-1"
 		first       = "first\r\n"
-		second      = "second\r\n"
+		observation = "second\r\n"
 	)
 	base := TranscriptEvent{
 		Scope: ACPProjectionParticipant, ScopeID: turnID, TurnID: turnID, ParticipantID: participant, Actor: "worker",
@@ -1187,16 +1187,13 @@ func TestHiddenParticipantTaskReadRepairsCommandOwnerAcrossTurns(t *testing.T) {
 			ParticipantID: base.ParticipantID, Actor: base.Actor,
 			ToolCallID: "command-1", ToolName: "RunCommand", ToolKind: "execute", ToolStatus: "in_progress",
 			ToolTaskHandle: "command-3", ToolTerminal: true, ToolOutput: first, ToolOutputTerminal: true,
-			ToolOutputCursor: int64(len([]byte(first))), ToolOutputCursorKnown: true,
 		},
 		{
 			Kind: TranscriptEventTool, Scope: base.Scope, ScopeID: "participant-turn-2", TurnID: "participant-turn-2",
 			ParticipantID: base.ParticipantID, Actor: base.Actor,
 			ToolCallID: "read-1", ToolName: "Task", ToolKind: "other", ToolStatus: "completed", Final: true,
 			ToolTaskAction: "read", ToolTaskHandle: "command-3", ToolTaskTargetKind: "command",
-			ToolOutput: second, ToolOutputTerminal: true,
-			ToolOutputStartCursor: int64(len([]byte(first))), ToolOutputStartCursorKnown: true,
-			ToolOutputCursor: int64(len([]byte(first + second))), ToolOutputCursorKnown: true,
+			ToolOutput: observation, ToolOutputTerminal: true,
 		},
 	}
 	next, _ := model.applyTranscriptEvents(events)
@@ -1210,33 +1207,30 @@ func TestHiddenParticipantTaskReadRepairsCommandOwnerAcrossTurns(t *testing.T) {
 	if len(physical) != 1 || physical[0].CallID != "command-1" {
 		t.Fatalf("participant events = %#v, want only command owner", block.Events)
 	}
-	if physical[0].Output != first+second {
-		t.Fatalf("participant command output = %q, want %q", physical[0].Output, first+second)
+	if physical[0].Output != first {
+		t.Fatalf("participant command output = %q, want only TaskStream bytes %q", physical[0].Output, first)
 	}
 }
 
-func TestHiddenMainTaskReadUsesNormalizedOwnerIndex(t *testing.T) {
+func TestHiddenMainTaskReadDoesNotBecomeCommandOutput(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	const (
-		first  = "first\n"
-		second = "second\n"
+		first       = "first\n"
+		observation = "second\n"
 	)
 	events := []TranscriptEvent{
 		{
 			Kind: TranscriptEventTool, Scope: ACPProjectionMain, TurnID: "turn-1",
 			ToolCallID: "command-1", ToolName: "RunCommand", ToolKind: "execute", ToolStatus: "in_progress",
 			ToolTaskHandle: "@COMMAND-3", ToolTerminal: true, ToolOutput: first, ToolOutputTerminal: true,
-			ToolOutputCursor: int64(len([]byte(first))), ToolOutputCursorKnown: true,
 		},
 		{
 			Kind: TranscriptEventTool, Scope: ACPProjectionMain, TurnID: "turn-2",
 			ToolCallID: "read-1", ToolName: "Task", ToolKind: "other", ToolStatus: "completed", Final: true,
 			ToolTaskAction: "read", ToolTaskHandle: "command-3", ToolTaskTargetKind: "command",
-			ToolOutput: second, ToolOutputTerminal: true,
-			ToolOutputStartCursor: int64(len([]byte(first))), ToolOutputStartCursorKnown: true,
-			ToolOutputCursor: int64(len([]byte(first + second))), ToolOutputCursorKnown: true,
+			ToolOutput: observation, ToolOutputTerminal: true,
 		},
 	}
 	next, _ := model.applyTranscriptEvents(events)
@@ -1246,8 +1240,8 @@ func TestHiddenMainTaskReadUsesNormalizedOwnerIndex(t *testing.T) {
 	if len(physical) != 1 || physical[0].CallID != "command-1" {
 		t.Fatalf("main events = %#v, want only the indexed command owner", block.Events)
 	}
-	if physical[0].Output != first+second {
-		t.Fatalf("command output = %q, want normalized owner output %q", physical[0].Output, first+second)
+	if physical[0].Output != first {
+		t.Fatalf("command output = %q, want only TaskStream bytes %q", physical[0].Output, first)
 	}
 }
 

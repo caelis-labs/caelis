@@ -1,8 +1,8 @@
 package controller
 
 import (
-	"bytes"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
@@ -54,7 +54,14 @@ func TestACPEnvelopeFromUpdateProjectsStandardToolLifecycle(t *testing.T) {
 		}
 		gotJSON, gotErr := json.Marshal(env.Update)
 		wantJSON, wantErr := json.Marshal(update)
-		if gotErr != nil || wantErr != nil || !bytes.Equal(gotJSON, wantJSON) {
+		var gotValue, wantValue any
+		if gotErr == nil {
+			gotErr = json.Unmarshal(gotJSON, &gotValue)
+		}
+		if wantErr == nil {
+			wantErr = json.Unmarshal(wantJSON, &wantValue)
+		}
+		if gotErr != nil || wantErr != nil || !reflect.DeepEqual(gotValue, wantValue) {
 			t.Fatalf("participant tool update %d wire = %s (%v), want %s (%v)", i, gotJSON, gotErr, wantJSON, wantErr)
 		}
 	}

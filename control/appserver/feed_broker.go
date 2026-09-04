@@ -2,100 +2,68 @@ package appserver
 
 import (
 	"context"
-	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
+	"github.com/caelis-labs/caelis/control/streamspool"
 )
 
 const (
-	defaultRingEvents             = 1024
-	defaultRingBytes              = 4 << 20
-	defaultRingTTL                = 15 * time.Minute
-	defaultSubscriberSize         = 128
-	defaultSubscriberStallTimeout = 5 * time.Second
+	sessionEnvelopeRecordType uint16 = 1
+	canonicalFollowInterval          = 25 * time.Millisecond
+	feedLifecycleSealTimeout         = 5 * time.Second
 )
 
-// FeedBrokerConfig configures one Session-scoped multi-subscriber broker.
+// FeedBrokerConfig configures one Session-scoped Control spool owner. The old
+// ring and subscriber queue fields are intentionally gone: file quota belongs
+// to streamspool and every consumer owns only its reader cursor.
 type FeedBrokerConfig struct {
-	SessionRef      session.SessionRef
-	Reader          session.PagedReader
-	CursorCodec     *CursorCodec
-	RingEvents      int
-	RingBytes       int
-	RingTTL         time.Duration
-	SubscriberQueue int
-	// SubscriberStallTimeout bounds how long an AttachTo ingress may wait for
-	// its prepared Surface subscription. Ordinary Session fanout never waits.
-	SubscriberStallTimeout time.Duration
-	Generation             string
-	Now                    func() time.Time
+	SessionRef  session.SessionRef
+	Reader      session.PagedReader
+	Spool       streamspool.Store
+	CursorCodec *CursorCodec
+	Now         func() time.Time
 }
 
-type feedRingItem struct {
-	envelope eventstream.Envelope
-	bytes    int
-	at       time.Time
-	acceptID uint64
-}
-
-// FeedBroker owns delivery state for one Session. It does not own Runtime or
-// task cancellation.
+// FeedBroker validates and serializes Session Envelopes into one append-only
+// spool partition. Session storage remains canonical; the spool is a lossy
+// delivery trace and never participates in model-context reconstruction.
 type FeedBroker struct {
-	ref          session.SessionRef
-	reader       session.PagedReader
-	codec        *CursorCodec
-	ringEvents   int
-	ringBytes    int
-	ringTTL      time.Duration
-	queueSize    int
-	stallTimeout time.Duration
-	generation   string
-	now          func() time.Time
-	primeGate    chan struct{}
-	ctx          context.Context
-	cancel       context.CancelFunc
-	done         chan struct{}
+	ref    session.SessionRef
+	reader session.PagedReader
+	spool  streamspool.Store
+	codec  *CursorCodec
+	now    func() time.Time
 
-	mu            sync.Mutex
-	ring          []feedRingItem
-	ringByteCount int
-	seen          map[string]struct{}
-	subscribers   map[*feedSubscription]struct{}
+	primeMu       sync.Mutex
+	acceptMu      sync.Mutex
+	sealMu        sync.Mutex
+	writer        streamspool.Writer
+	key           streamspool.Key
 	latestDurable eventstream.DurableFeedPosition
 	scannedSeq    uint64
-	transientSeq  uint64
-	acceptID      uint64
-	evictedAccept uint64
-	// transientHistoryUnknown records that this broker reconstructed durable
-	// history from storage or evicted an accepted transient frame. In either case
-	// an empty-cursor replay cannot promise that every historical transient frame
-	// is still available, even when its retained suffix is exact.
-	transientHistoryUnknown bool
-	closed                  bool
-	// testBeforeAttachPublish is a deterministic race seam used only by package
-	// tests to stop an attachment after receive and before target fencing.
-	testBeforeAttachPublish func()
+	spoolErr      error
+	lastTerminal  *eventstream.Envelope
+	sealed        bool
+	writerSealed  bool
+	sealedCh      chan struct{}
+	closed        bool
+
+	subsMu sync.Mutex
+	subs   map[*feedSubscription]struct{}
 }
 
-// Attached ingress owns no caller context, so recoverable durable-read
-// failures use a small bounded retry window. A permanent projection or store
-// failure must be observable by the Turn adapter instead of pinning its
-// terminal frame forever.
-const (
-	attachPublishRetryInterval = 10 * time.Millisecond
-	attachPublishMaxAttempts   = 3
-)
-
-// NewFeedBroker constructs a broker. CursorCodec and Session ID are required.
 func NewFeedBroker(cfg FeedBrokerConfig) (*FeedBroker, error) {
 	cfg.SessionRef = session.NormalizeSessionRef(cfg.SessionRef)
 	if strings.TrimSpace(cfg.SessionRef.SessionID) == "" {
@@ -104,46 +72,46 @@ func NewFeedBroker(cfg FeedBrokerConfig) (*FeedBroker, error) {
 	if cfg.CursorCodec == nil {
 		return nil, errors.New("controlclient: feed broker cursor codec is required")
 	}
-	if cfg.RingEvents <= 0 {
-		cfg.RingEvents = defaultRingEvents
-	}
-	if cfg.RingBytes <= 0 {
-		cfg.RingBytes = defaultRingBytes
-	}
-	if cfg.RingTTL <= 0 {
-		cfg.RingTTL = defaultRingTTL
-	}
-	if cfg.SubscriberQueue <= 0 {
-		cfg.SubscriberQueue = defaultSubscriberSize
-	}
-	if cfg.SubscriberStallTimeout <= 0 {
-		cfg.SubscriberStallTimeout = defaultSubscriberStallTimeout
-	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	if strings.TrimSpace(cfg.Generation) == "" {
-		cfg.Generation = randomFeedGeneration()
+	b := &FeedBroker{
+		ref: cfg.SessionRef, reader: cfg.Reader, spool: cfg.Spool, codec: cfg.CursorCodec, now: cfg.Now,
+		subs: map[*feedSubscription]struct{}{}, sealedCh: make(chan struct{}),
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	primeGate := make(chan struct{}, 1)
-	primeGate <- struct{}{}
-	return &FeedBroker{
-		ref: cfg.SessionRef, reader: cfg.Reader, codec: cfg.CursorCodec,
-		ringEvents: cfg.RingEvents, ringBytes: cfg.RingBytes, ringTTL: cfg.RingTTL,
-		queueSize: cfg.SubscriberQueue, stallTimeout: cfg.SubscriberStallTimeout,
-		generation: cfg.Generation, now: cfg.Now,
-		primeGate: primeGate, ctx: ctx, cancel: cancel, done: make(chan struct{}),
-		seen:        map[string]struct{}{},
-		subscribers: map[*feedSubscription]struct{}{},
-	}, nil
+	originComplete := true
+	if checkpointReader, ok := cfg.Reader.(session.EventCheckpointReader); ok {
+		checkpoint, err := checkpointReader.EventCheckpoint(context.Background(), cfg.SessionRef)
+		if err != nil {
+			return nil, fmt.Errorf("controlclient: initialize Session feed checkpoint: %w", err)
+		}
+		b.scannedSeq = checkpoint.ThroughSeq
+		if position := checkpointBoundaryPosition(cfg.SessionRef, checkpoint.LastClientReplayEvent); position != nil && position.Durable != nil {
+			b.latestDurable = *position.Durable
+		}
+		originComplete = checkpoint.ThroughSeq == 0
+	} else if cfg.Reader != nil {
+		// A reader without an atomic checkpoint cannot prove an exact origin.
+		originComplete = false
+	}
+	if cfg.Spool != nil {
+		logical := streamspool.LogicalKey{
+			Namespace: streamspool.NamespaceSession,
+			Digest:    streamspool.DigestStrings(cfg.SessionRef.SessionID),
+		}
+		writer, err := cfg.Spool.Register(context.Background(), logical, streamspool.WriterOptions{OriginComplete: originComplete})
+		if err != nil {
+			b.spoolErr = err
+		} else {
+			b.writer = writer
+			b.key = writer.Key()
+		}
+	}
+	return b, nil
 }
 
-// Prime incrementally publishes every newly committed durable projection from
-// Session truth. The prime gate is the single durable sequencer: callers cannot
-// advance the durable high-water mark or fan out a later durable projection
-// while a storage gap or reconnect checkpoint is being reconciled. Transient
-// frames may interleave and retain their broker acceptance order.
+// Prime appends newly committed canonical Session projections. It pages
+// directly from the authoritative store and never materializes full history.
 func (b *FeedBroker) Prime(ctx context.Context) error {
 	if b == nil {
 		return errors.New("controlclient: nil feed broker")
@@ -151,91 +119,35 @@ func (b *FeedBroker) Prime(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := b.lockPrime(ctx); err != nil {
-		return err
-	}
-	defer b.unlockPrime()
-	return b.primeLocked(ctx, 0)
-}
-
-func (b *FeedBroker) lockPrime(ctx context.Context) error {
-	if b == nil {
-		return errors.New("controlclient: nil feed broker")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-b.done:
-		return errors.New("controlclient: feed broker is closed")
-	case <-b.primeGate:
-	}
-	select {
-	case <-ctx.Done():
-		b.unlockPrime()
-		return ctx.Err()
-	case <-b.done:
-		b.unlockPrime()
-		return errors.New("controlclient: feed broker is closed")
-	default:
+	b.primeMu.Lock()
+	defer b.primeMu.Unlock()
+	if b.reader == nil {
 		return nil
 	}
-}
-
-func (b *FeedBroker) unlockPrime() {
-	if b != nil {
-		b.primeGate <- struct{}{}
-	}
-}
-
-func (b *FeedBroker) primeLocked(ctx context.Context, throughSeq uint64) error {
-	_, err := b.primeStorageLocked(ctx, throughSeq, nil, nil)
-	return err
-}
-
-// primeStorageLocked publishes committed storage projections in order. When
-// before is non-nil, that exact durable position and every later position are
-// excluded: the ingress Envelope remains authoritative for its transport IDs
-// and payload extensions.
-func (b *FeedBroker) primeStorageLocked(
-	ctx context.Context,
-	throughSeq uint64,
-	before *eventstream.DurableFeedPosition,
-	skipTarget *feedSubscription,
-) (uint64, error) {
-	b.mu.Lock()
-	if b.closed {
-		b.mu.Unlock()
-		return 0, errors.New("controlclient: feed broker is closed")
-	}
-	afterSeq := b.scannedSeq
-	b.mu.Unlock()
-	if b.reader == nil {
-		return afterSeq, nil
-	}
-	observedSeq := afterSeq
-
 	for {
-		previousSeq := afterSeq
-		request := session.EventPageRequest{
-			SessionRef: b.ref, AfterSeq: afterSeq, Visibility: session.EventPageClientReplay,
+		b.acceptMu.Lock()
+		after := b.scannedSeq
+		closed := b.closed
+		sealed := b.sealed
+		b.acceptMu.Unlock()
+		if closed {
+			return errors.New("controlclient: feed broker is closed")
 		}
-		if throughSeq > 0 {
-			request.ThroughSeq = throughSeq
+		if sealed {
+			return nil
 		}
-		page, err := b.reader.EventsPage(ctx, request)
+		page, err := b.reader.EventsPage(ctx, session.EventPageRequest{
+			SessionRef: b.ref, AfterSeq: after, Visibility: session.EventPageClientReplay,
+		})
 		if err != nil {
-			return observedSeq, err
+			return err
 		}
+		observed := after
 		for _, event := range page.Events {
-			if throughSeq > 0 && event.Seq > throughSeq {
-				break
+			if event == nil {
+				continue
 			}
-			if event.Seq > observedSeq {
-				observedSeq = event.Seq
-			}
+			observed = max(observed, event.Seq)
 			if suppressHistoricalChildStreamMirror(event) {
 				continue
 			}
@@ -244,889 +156,964 @@ func (b *FeedBroker) primeStorageLocked(
 				if envelope.Position == nil || envelope.Position.Durable == nil {
 					continue
 				}
-				if before != nil && compareDurablePosition(*envelope.Position.Durable, *before) >= 0 {
-					continue
-				}
-				accepted, _, err := b.publishSerialized(envelope, skipTarget)
-				if err != nil {
-					return observedSeq, err
-				}
-				if accepted {
-					b.mu.Lock()
-					b.transientHistoryUnknown = true
-					b.mu.Unlock()
+				if err := b.publishAccepted(ctx, envelope); err != nil {
+					return err
 				}
 			}
 		}
-		if page.NextSeq > afterSeq {
-			afterSeq = page.NextSeq
+		b.acceptMu.Lock()
+		b.scannedSeq = max(b.scannedSeq, observed)
+		b.acceptMu.Unlock()
+		if page.NextSeq <= after || len(page.Events) == 0 {
+			return nil
 		}
-		if page.NextSeq > observedSeq {
-			observedSeq = page.NextSeq
-		}
-		if throughSeq > 0 && afterSeq >= throughSeq {
-			afterSeq = throughSeq
-			break
-		}
-		if !page.HasMore || page.NextSeq <= previousSeq {
-			break
-		}
+		b.acceptMu.Lock()
+		b.scannedSeq = max(b.scannedSeq, page.NextSeq)
+		b.acceptMu.Unlock()
 	}
-
-	b.mu.Lock()
-	completeThrough := afterSeq
-	if before != nil && before.Seq > 0 && completeThrough >= before.Seq {
-		completeThrough = before.Seq - 1
-	}
-	if completeThrough > b.scannedSeq {
-		b.scannedSeq = completeThrough
-	}
-	b.mu.Unlock()
-	return observedSeq, nil
 }
 
-// Publish assigns a signed Cursor and stores a bounded clone. Every subscriber
-// has an independent bounded queue; publication never waits on subscriber I/O.
-// A slow subscriber is disconnected and can resume from its last Cursor.
+// Publish accepts one normalized producer Envelope. Durable events are first
+// reconciled from Session truth so a transient terminal cannot overtake the
+// canonical final response. Spool failure degrades observation only.
 func (b *FeedBroker) Publish(envelope eventstream.Envelope) error {
 	if b == nil {
 		return errors.New("controlclient: nil feed broker")
 	}
-	_, _, err := b.publish(b.ctx, envelope, nil)
-	return err
-}
-
-func (b *FeedBroker) publish(
-	ctx context.Context,
-	envelope eventstream.Envelope,
-	target *feedSubscription,
-) (accepted bool, targetActive bool, err error) {
-	if b == nil {
-		return false, false, errors.New("controlclient: nil feed broker")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	holdingTarget := false
-	if target != nil {
-		active, err := b.beginTargetHold(target)
-		if err != nil {
-			return false, false, err
-		}
-		if !active {
-			return false, false, nil
-		}
-		holdingTarget = true
-	}
-	defer func() {
-		if holdingTarget {
-			b.abortTargetHold(target)
-		}
-	}()
-	envelope = eventstream.CloneEnvelope(envelope)
-	// Reject malformed durable declarations before they can enter the storage
-	// sequencer. Validation inside publishSerialized remains the final defense,
-	// but it is too late to protect scannedSeq from an invalid gap-fill target.
 	if err := ValidateEnvelopeDelivery(envelope); err != nil {
-		return false, false, fmt.Errorf("controlclient: feed envelope delivery: %w", err)
+		return fmt.Errorf("controlclient: feed envelope delivery: %w", err)
 	}
-	if isDurableFeedEnvelope(envelope) && b.reader != nil {
-		if err := b.lockPrime(ctx); err != nil {
-			return false, false, err
-		}
-		position := *envelope.Position.Durable
-		committedSeq, err := b.primeStorageLocked(ctx, position.Seq, &position, target)
-		if err != nil {
-			b.unlockPrime()
-			return false, false, err
-		}
-		b.mu.Lock()
-		if b.closed {
-			b.mu.Unlock()
-			b.unlockPrime()
-			return false, false, errors.New("controlclient: feed broker is closed")
-		}
-		if position.Seq > committedSeq {
-			b.mu.Unlock()
-			b.unlockPrime()
-			return false, false, fmt.Errorf("controlclient: durable feed position %d:%d is ahead of committed sequence %d", position.Seq, position.ProjectionIndex, committedSeq)
-		}
-		b.mu.Unlock()
-		_, _, err = b.publishSerialized(envelope, target)
-		b.unlockPrime()
-		if err != nil {
-			return false, false, err
-		}
-		active := b.flushTargetHold(ctx, target)
-		holdingTarget = false
-		return true, active, nil
+	// A normalized durable producer Envelope carries the active Handle/Run/Turn
+	// target that canonical Session replay intentionally does not retain. Keep
+	// that exact delivery identity in the lossy spool. Prime remains the
+	// ordering barrier before a terminal lifecycle so any canonical facts not
+	// observed through this producer are appended first.
+	if isMainTerminalEnvelope(envelope) {
+		// Prime is an ordering optimization for canonical facts, not authority
+		// over the producer terminal. A read-side failure must not suppress the
+		// basic terminal fallback.
+		_ = b.Prime(brokerContext(b))
 	}
-	if isMainTerminalEnvelope(envelope) && b.reader != nil {
-		// A Runtime terminal is the final delivery barrier for one Turn, while
-		// canonical assistant output is durable Session truth. Reconcile storage
-		// under the same sequencer before accepting the transient terminal so a
-		// fast provider cannot close a Surface before its committed final answer.
-		if err := b.lockPrime(ctx); err != nil {
-			return false, false, err
-		}
-		if err := b.primeLocked(ctx, 0); err != nil {
-			b.unlockPrime()
-			return false, false, err
-		}
-		_, _, err = b.publishSerialized(envelope, target)
-		b.unlockPrime()
-		if err != nil {
-			return false, false, err
-		}
-		active := b.flushTargetHold(ctx, target)
-		holdingTarget = false
-		return true, active, nil
-	}
-	_, _, err = b.publishSerialized(envelope, target)
-	if err != nil {
-		return false, false, err
-	}
-	active := b.flushTargetHold(ctx, target)
-	holdingTarget = false
-	return true, active, nil
+	return b.publishAccepted(brokerContext(b), envelope)
 }
 
-func isMainTerminalEnvelope(envelope eventstream.Envelope) bool {
-	return eventstream.IsTurnTerminalLifecycle(envelope)
-}
+func brokerContext(_ *FeedBroker) context.Context { return context.Background() }
 
-func (b *FeedBroker) publishSerialized(
-	envelope eventstream.Envelope,
-	skipTarget *feedSubscription,
-) (bool, eventstream.Envelope, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.publishLocked(envelope, skipTarget)
-}
-
-func (b *FeedBroker) publishLocked(
-	envelope eventstream.Envelope,
-	skipTarget *feedSubscription,
-) (bool, eventstream.Envelope, error) {
-	if b.closed {
-		return false, eventstream.Envelope{}, errors.New("controlclient: feed broker is closed")
+func (b *FeedBroker) publishAccepted(ctx context.Context, envelope eventstream.Envelope) error {
+	b.acceptMu.Lock()
+	defer b.acceptMu.Unlock()
+	if b.closed || b.sealed {
+		return errors.New("controlclient: feed broker is closed")
 	}
 	envelope = eventstream.CloneEnvelope(envelope)
-	if err := b.prepareEnvelopeLocked(&envelope); err != nil {
-		return false, eventstream.Envelope{}, err
-	}
-	if isDurableFeedEnvelope(envelope) && compareDurablePosition(*envelope.Position.Durable, b.latestDurable) <= 0 {
-		return false, eventstream.Envelope{}, nil
-	}
-	dedupeKey := feedDedupeKey(envelope)
-	if !isDurableFeedEnvelope(envelope) {
-		if _, ok := b.seen[dedupeKey]; ok {
-			return false, eventstream.Envelope{}, nil
-		}
-	}
-	encoded, err := json.Marshal(envelope)
-	if err != nil {
-		return false, eventstream.Envelope{}, fmt.Errorf("controlclient: encode feed envelope: %w", err)
-	}
-	b.acceptID++
-	item := feedRingItem{
-		envelope: eventstream.CloneEnvelope(envelope), bytes: len(encoded), at: b.now(), acceptID: b.acceptID,
-	}
-	b.ring = append(b.ring, item)
-	b.ringByteCount += item.bytes
-	if isDurableFeedEnvelope(envelope) {
-		b.latestDurable = *envelope.Position.Durable
-	} else {
-		b.seen[dedupeKey] = struct{}{}
-	}
-	b.evictLocked()
-
-	for subscriber := range b.subscribers {
-		if isDurableFeedEnvelope(envelope) && envelope.Position.Durable.Seq <= subscriber.ignoreDurableThrough {
-			continue
-		}
-		if subscriber == skipTarget {
-			b.appendTargetPendingLocked(subscriber, envelope, len(encoded))
-			continue
-		}
-		if subscriber.targetHold {
-			b.appendTargetPendingLocked(subscriber, envelope, len(encoded))
-			continue
-		}
-		if !subscriber.tryReserve() {
-			b.stopSubscriberLocked(subscriber, ErrSlowConsumer)
-			continue
-		}
-		select {
-		case subscriber.input <- eventstream.CloneEnvelope(envelope):
-		default:
-			subscriber.release()
-			b.stopSubscriberLocked(subscriber, ErrSlowConsumer)
-		}
-	}
-	return true, eventstream.CloneEnvelope(envelope), nil
-}
-
-func (b *FeedBroker) appendTargetPendingLocked(subscriber *feedSubscription, envelope eventstream.Envelope, encodedBytes int) {
-	if subscriber == nil || !subscriber.targetHold {
-		return
-	}
-	if len(subscriber.targetPending) >= b.ringEvents || subscriber.targetPendingBytes+encodedBytes > b.ringBytes {
-		b.stopSubscriberLocked(subscriber, ErrSlowConsumer)
-		return
-	}
-	subscriber.targetPending = append(subscriber.targetPending, eventstream.CloneEnvelope(envelope))
-	subscriber.targetPendingBytes += encodedBytes
-}
-
-func (b *FeedBroker) beginTargetHold(target *feedSubscription) (bool, error) {
-	if target == nil {
-		return true, nil
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if _, active := b.subscribers[target]; !active {
-		return false, nil
-	}
-	if target.targetHold {
-		return false, errors.New("controlclient: subscription already has an active attachment")
-	}
-	target.targetHold = true
-	target.targetPending = nil
-	target.targetPendingBytes = 0
-	return true, nil
-}
-
-func (b *FeedBroker) abortTargetHold(target *feedSubscription) {
-	if b == nil || target == nil {
-		return
-	}
-	b.mu.Lock()
-	if !target.targetHold {
-		b.mu.Unlock()
-		return
-	}
-	if len(target.targetPending) == 0 {
-		// Nothing entered the global Session sequence during this attempt. Clear
-		// the fence so a recoverable durable-read failure can retry the same
-		// ingress without making the prepared subscription look inactive.
-		target.targetHold = false
-		target.targetPendingBytes = 0
-	} else {
-		// A prefix has already entered the global sequence but could not be
-		// delivered to this target. Disconnect it explicitly: silently clearing
-		// the prefix would permit a later retry to overtake or lose those events.
-		b.stopSubscriberLocked(target, errors.New("controlclient: target attachment failed after partial publication"))
-	}
-	b.mu.Unlock()
-}
-
-func (b *FeedBroker) flushTargetHold(ctx context.Context, target *feedSubscription) bool {
-	if target == nil {
-		return true
-	}
-	for {
-		b.mu.Lock()
-		if _, active := b.subscribers[target]; !active {
-			b.mu.Unlock()
-			return false
-		}
-		if len(target.targetPending) == 0 {
-			target.targetHold = false
-			b.mu.Unlock()
-			return true
-		}
-		batch := eventstream.CloneEnvelopes(target.targetPending)
-		target.targetPending = nil
-		target.targetPendingBytes = 0
-		b.mu.Unlock()
-		if !b.deliverTargetBatch(ctx, target, batch) {
-			return false
-		}
-	}
-}
-
-func (b *FeedBroker) deliverTargetBatch(
-	ctx context.Context,
-	target *feedSubscription,
-	batch []eventstream.Envelope,
-) bool {
-	if target == nil {
-		return true
-	}
-	for _, envelope := range batch {
-		reserved, stalled := target.reserve(ctx, b.done, b.stallTimeout)
-		if !reserved {
-			if stalled {
-				b.mu.Lock()
-				b.stopSubscriberLocked(target, ErrSlowConsumer)
-				b.mu.Unlock()
-			}
-			return false
-		}
-		b.mu.Lock()
-		_, active := b.subscribers[target]
-		if active {
-			select {
-			case target.input <- eventstream.CloneEnvelope(envelope):
-			default:
-				target.release()
-				b.stopSubscriberLocked(target, ErrSlowConsumer)
-				active = false
-			}
-		} else {
-			target.release()
-		}
-		b.mu.Unlock()
-		if !active {
-			return false
-		}
-	}
-	b.mu.Lock()
-	_, active := b.subscribers[target]
-	b.mu.Unlock()
-	return active
-}
-
-func isDurableFeedEnvelope(envelope eventstream.Envelope) bool {
-	if envelope.Delivery == nil {
-		return false
-	}
-	if envelope.Delivery.Mode != eventstream.DeliveryCanonical && envelope.Delivery.Mode != eventstream.DeliveryMirror {
-		return false
-	}
-	return envelope.Position != nil && envelope.Position.Durable != nil
-}
-
-func (b *FeedBroker) prepareEnvelopeLocked(envelope *eventstream.Envelope) error {
-	if envelope == nil {
-		return errors.New("controlclient: nil feed envelope")
-	}
 	if strings.TrimSpace(envelope.SessionID) == "" {
 		envelope.SessionID = b.ref.SessionID
 	}
 	if strings.TrimSpace(envelope.SessionID) != b.ref.SessionID {
 		return fmt.Errorf("controlclient: feed envelope session %q does not match %q", envelope.SessionID, b.ref.SessionID)
 	}
-	mode := eventstream.DeliveryMode("")
-	if envelope.Delivery != nil {
-		mode = envelope.Delivery.Mode
-	}
-	if err := ValidateEnvelopeDelivery(*envelope); err != nil {
+	if err := ValidateEnvelopeDelivery(envelope); err != nil {
 		return fmt.Errorf("controlclient: feed envelope delivery: %w", err)
 	}
-	switch mode {
-	case eventstream.DeliveryCanonical, eventstream.DeliveryMirror:
-	case eventstream.DeliveryTransient, "":
-		b.transientSeq++
+	b.noteTerminalLocked(envelope)
+	if isDurableFeedEnvelope(envelope) && compareDurablePosition(*envelope.Position.Durable, b.latestDurable) <= 0 {
+		return nil
+	}
+	if b.writer == nil || b.spoolErr != nil {
+		b.acceptWithoutSpoolLocked(envelope)
+		return nil
+	}
+	bounds, err := b.writer.Bounds(ctx)
+	if err != nil {
+		b.disableSpoolLocked(err)
+		b.acceptWithoutSpoolLocked(envelope)
+		return nil
+	}
+	recordOffset := bounds.High
+	if envelope.Delivery == nil || envelope.Delivery.Mode == "" || envelope.Delivery.Mode == eventstream.DeliveryTransient {
 		envelope.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
 		envelope.Position = &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
-			Anchor: b.latestDurable, Generation: b.generation, Sequence: b.transientSeq,
+			Anchor: b.latestDurable, Generation: sessionSpoolGeneration(b.key), Sequence: uint64(recordOffset) + 1,
 		}}
 	}
-	cursor, err := b.codec.Encode(b.ref.SessionID, *envelope.Position)
+	cursor, err := b.codec.EncodeSpool(b.ref.SessionID, sessionSpoolCursor{Key: b.key, Offset: recordOffset + 1}, *envelope.Position)
 	if err != nil {
-		return err
+		b.disableSpoolLocked(err)
+		b.acceptWithoutSpoolLocked(envelope)
+		return nil
 	}
 	envelope.Cursor = cursor
+	payload, err := json.Marshal(envelope)
+	if err != nil {
+		b.disableSpoolLocked(fmt.Errorf("controlclient: encode feed envelope: %w", err))
+		b.acceptWithoutSpoolLocked(envelope)
+		return nil
+	}
+	if _, err := b.writer.Append(ctx, sessionEnvelopeRecordType, b.now(), payload); err != nil {
+		b.disableSpoolLocked(err)
+		b.acceptWithoutSpoolLocked(envelope)
+		return nil
+	}
+	b.acceptDurableLocked(envelope)
 	return nil
 }
 
-// SubscribeFromNow creates an internal Surface subscription without replaying
-// history. It is registered before BeginTurn and its ingress is attached only
-// after the Surface claims Events. Like every Session subscription, it has an
-// independent bounded queue and is disconnected if its consumer falls behind;
-// it can never stall another ingress or the durable sequencer.
-func (b *FeedBroker) SubscribeFromNow(ctx context.Context) (FeedSubscription, error) {
+func (b *FeedBroker) acceptWithoutSpoolLocked(envelope eventstream.Envelope) {
+	b.acceptDurableLocked(envelope)
+	if isMainTerminalEnvelope(envelope) {
+		b.offerTerminalFallbackLocked()
+	}
+}
+
+// noteTerminalLocked retains one small semantic result, never payload history.
+// It is used only when the file trace cannot deliver the terminal record.
+func (b *FeedBroker) noteTerminalLocked(envelope eventstream.Envelope) {
+	if isMainTerminalEnvelope(envelope) {
+		clone := eventstream.CloneEnvelope(envelope)
+		clone.Cursor = ""
+		clone.Position = nil
+		clone.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+		b.lastTerminal = &clone
+		return
+	}
+	if b.lastTerminal == nil || envelope.Scope == eventstream.ScopeSubagent || envelope.Scope == eventstream.ScopeParticipant {
+		return
+	}
+	if sameTurnIdentity(*b.lastTerminal, envelope) {
+		return
+	}
+	if strings.TrimSpace(envelope.HandleID) != "" || strings.TrimSpace(envelope.RunID) != "" || strings.TrimSpace(envelope.TurnID) != "" {
+		b.lastTerminal = nil
+	}
+}
+
+func sameTurnIdentity(left, right eventstream.Envelope) bool {
+	return strings.TrimSpace(left.HandleID) == strings.TrimSpace(right.HandleID) &&
+		strings.TrimSpace(left.RunID) == strings.TrimSpace(right.RunID) &&
+		strings.TrimSpace(left.TurnID) == strings.TrimSpace(right.TurnID)
+}
+
+// offerTerminalFallbackLocked is non-blocking and bounded to one coalesced
+// terminal per subscriber. acceptMu must be held by the caller.
+func (b *FeedBroker) offerTerminalFallbackLocked() {
+	if b.lastTerminal == nil {
+		return
+	}
+	b.subsMu.Lock()
+	defer b.subsMu.Unlock()
+	for sub := range b.subs {
+		sub.offerTerminal(*b.lastTerminal)
+	}
+}
+
+func (b *FeedBroker) acceptDurableLocked(envelope eventstream.Envelope) {
+	if !isDurableFeedEnvelope(envelope) {
+		return
+	}
+	b.latestDurable = *envelope.Position.Durable
+	b.scannedSeq = max(b.scannedSeq, envelope.Position.Durable.Seq)
+}
+
+func (b *FeedBroker) disableSpoolLocked(err error) {
+	if err != nil && b.spoolErr == nil {
+		b.spoolErr = err
+	}
+}
+
+func isDurableFeedEnvelope(envelope eventstream.Envelope) bool {
+	return envelope.Delivery != nil &&
+		(envelope.Delivery.Mode == eventstream.DeliveryCanonical || envelope.Delivery.Mode == eventstream.DeliveryMirror) &&
+		envelope.Position != nil && envelope.Position.Durable != nil
+}
+
+func isMainTerminalEnvelope(envelope eventstream.Envelope) bool {
+	return eventstream.IsTurnTerminalLifecycle(envelope)
+}
+
+func sessionSpoolGeneration(key streamspool.Key) string {
+	return hex.EncodeToString(key.Epoch[:]) + "." + hex.EncodeToString(key.Incarnation[:])
+}
+
+func (b *FeedBroker) Subscribe(ctx context.Context, req SubscribeRequest) (SubscribeResult, error) {
+	result, _, err := b.subscribeCheckpoint(ctx, req)
+	return result, err
+}
+
+func (b *FeedBroker) subscribeCheckpoint(ctx context.Context, req SubscribeRequest) (SubscribeResult, session.EventCheckpoint, error) {
 	if b == nil {
-		return nil, errors.New("controlclient: nil feed broker")
+		return SubscribeResult{}, session.EventCheckpoint{}, errors.New("controlclient: nil feed broker")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// Establish the durable baseline and register the subscriber under the
-	// same sequencer used by Publish. Existing Session history is therefore
-	// never injected by the first event of a new Turn, while a concurrent
-	// durable publish cannot slip between the baseline and registration.
-	if err := b.lockPrime(ctx); err != nil {
-		return nil, err
+	b.acceptMu.Lock()
+	closed := b.closed
+	b.acceptMu.Unlock()
+	if closed {
+		return SubscribeResult{}, session.EventCheckpoint{}, errors.New("controlclient: feed broker is closed")
 	}
-	defer b.unlockPrime()
-	if err := b.primeLocked(ctx, 0); err != nil {
-		return nil, err
+	if strings.TrimSpace(req.SessionID) != b.ref.SessionID {
+		return SubscribeResult{}, session.EventCheckpoint{}, ErrCursorSessionMismatch
 	}
-	subscriber := newFeedSubscription(b, b.queueSize)
-	b.mu.Lock()
-	if b.closed {
-		b.mu.Unlock()
-		return nil, errors.New("controlclient: feed broker is closed")
-	}
-	b.subscribers[subscriber] = struct{}{}
-	b.mu.Unlock()
-	subscriber.start()
-	go subscriber.closeWhenContextDone(ctx)
-	return subscriber, nil
-}
-
-// Attach immediately consumes one Turn ingress and publishes it into this
-// Session. Terminal Envelopes do not close the Session broker.
-func (b *FeedBroker) Attach(events <-chan eventstream.Envelope) <-chan error {
-	return b.attach(nil, events)
-}
-
-// AttachTo consumes one Turn ingress through its prepared internal
-// subscription. Capacity is reserved before each event enters the Session
-// sequencer, so only this ingress waits for its Surface while sibling
-// publication remains non-blocking.
-func (b *FeedBroker) AttachTo(
-	subscription FeedSubscription,
-	events <-chan eventstream.Envelope,
-) <-chan error {
-	target, ok := subscription.(*feedSubscription)
-	if !ok || target == nil || target.broker != b {
-		return completedAttachResult(errors.New("controlclient: attached subscription does not belong to feed broker"))
-	}
-	b.mu.Lock()
-	_, active := b.subscribers[target]
-	b.mu.Unlock()
-	if !active {
-		err := target.Err()
-		if err == nil {
-			err = errors.New("controlclient: attached subscription is closed")
-		}
-		return completedAttachResult(err)
-	}
-	return b.attach(target, events)
-}
-
-func completedAttachResult(err error) <-chan error {
-	result := make(chan error, 1)
+	checkpoint, err := b.eventCheckpoint(ctx)
 	if err != nil {
-		result <- err
+		return SubscribeResult{}, session.EventCheckpoint{}, err
 	}
-	close(result)
-	return result
+	if strings.TrimSpace(req.Cursor) != "" {
+		point, resumePosition, err := b.codec.decodeResume(b.ref.SessionID, req.Cursor)
+		if err != nil {
+			return SubscribeResult{}, session.EventCheckpoint{}, err
+		}
+		if point != nil {
+			bounds, anchor, exactErr := b.exactBounds(ctx, *point)
+			if exactErr == nil {
+				boundary := sessionSpoolCursor{Key: point.Key, Offset: bounds.High}
+				boundaryPosition := sessionBoundaryPosition(anchor, point.Key, bounds.High)
+				cursor, encodeErr := b.codec.EncodeSpool(b.ref.SessionID, boundary, boundaryPosition)
+				if encodeErr != nil {
+					return SubscribeResult{}, session.EventCheckpoint{}, encodeErr
+				}
+				sub := b.startSubscription(ctx, point.Offset, bounds.High, nil, 0, durableAnchor(resumePosition), req.Cursor, cursor)
+				return SubscribeResult{
+					Subscription: sub, BoundaryCursor: cursor, BoundaryPosition: &boundaryPosition,
+				}, checkpoint, nil
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return SubscribeResult{}, session.EventCheckpoint{}, ctxErr
+			}
+			// A valid cursor authenticates product identity, not cache
+			// availability. Stale epochs, GC, poison, and missing files all select
+			// one authoritative replacement below.
+		}
+	}
+
+	// Publish holds acceptMu across Bounds, Append, and durable acceptance. Read
+	// the canonical cut and physical high-water under that same mutex so a
+	// record cannot land between the replacement boundary and exact follow.
+	b.acceptMu.Lock()
+	d0 := b.latestDurable
+	writer, key, spoolErr := b.writer, b.key, b.spoolErr
+	var bounds streamspool.Bounds
+	var boundsErr error
+	if writer != nil && spoolErr == nil {
+		bounds, boundsErr = writer.Bounds(ctx)
+		if boundsErr != nil || bounds.State == streamspool.StatePoisoned || bounds.State == streamspool.StateStoreClosed {
+			if boundsErr == nil {
+				boundsErr = streamspool.ErrUnavailable
+			}
+			b.disableSpoolLocked(boundsErr)
+			spoolErr = b.spoolErr
+		}
+	}
+	b.acceptMu.Unlock()
+	if writer != nil && spoolErr == nil && boundsErr == nil {
+		if bounds.OriginComplete && bounds.Low == 0 && bounds.State != streamspool.StatePoisoned && bounds.State != streamspool.StateStoreClosed {
+			position := sessionBoundaryPosition(d0, key, bounds.High)
+			cursor, err := b.codec.EncodeSpool(b.ref.SessionID, sessionSpoolCursor{Key: key, Offset: bounds.High}, position)
+			if err != nil {
+				return SubscribeResult{}, session.EventCheckpoint{}, err
+			}
+			sub := b.startSubscription(ctx, 0, bounds.High, nil, 0, eventstream.DurableFeedPosition{}, "", cursor)
+			return SubscribeResult{Subscription: sub, BoundaryCursor: cursor, BoundaryPosition: &position}, checkpoint, nil
+		}
+	}
+	h0 := streamspool.Offset(0)
+	if writer != nil && spoolErr == nil && boundsErr == nil {
+		h0 = bounds.High
+	}
+	position := eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{
+		Seq: d0.Seq, ProjectionIndex: d0.ProjectionIndex,
+	}}
+	boundaryCursor := ""
+	if writer != nil && spoolErr == nil && boundsErr == nil {
+		position = sessionBoundaryPosition(d0, key, h0)
+		boundaryCursor, _ = b.codec.EncodeSpool(b.ref.SessionID, sessionSpoolCursor{Key: key, Offset: h0}, position)
+	} else {
+		boundaryCursor, _ = b.codec.Encode(b.ref.SessionID, position)
+	}
+	// The replacement covers exactly through D0, not through the Session
+	// checkpoint. A canonical commit may be visible to EventCheckpoint before
+	// its producer reaches Publish; following from checkpoint.ThroughSeq would
+	// skip that committed event forever.
+	sub := b.startSubscription(ctx, h0, h0, &d0, d0.Seq, d0, "", boundaryCursor)
+	return SubscribeResult{
+		Subscription: sub, BoundaryCursor: boundaryCursor, BoundaryPosition: &position,
+	}, checkpoint, nil
 }
 
-func (b *FeedBroker) attach(
-	target *feedSubscription,
-	events <-chan eventstream.Envelope,
-) <-chan error {
-	if b == nil {
-		return completedAttachResult(errors.New("controlclient: nil feed broker"))
+func (b *FeedBroker) exactBounds(ctx context.Context, point sessionSpoolCursor) (streamspool.Bounds, eventstream.DurableFeedPosition, error) {
+	b.acceptMu.Lock()
+	defer b.acceptMu.Unlock()
+	anchor := b.latestDurable
+	if b.spool == nil || point.Key != b.key || b.spoolErr != nil {
+		return streamspool.Bounds{}, anchor, streamspool.ErrExpired
 	}
-	if events == nil {
-		return completedAttachResult(nil)
+	bounds, err := b.spool.Bounds(ctx, point.Key)
+	if err != nil {
+		return streamspool.Bounds{}, anchor, err
 	}
-	result := make(chan error, 1)
-	go func() {
-		defer close(result)
-		targetCtx, cancelTarget := context.WithCancel(b.ctx)
-		defer cancelTarget()
-		currentTarget := target
-		publishCtx := b.ctx
-		if currentTarget != nil {
-			publishCtx = targetCtx
-			attachedTarget := currentTarget
-			go func() {
-				select {
-				case <-attachedTarget.stop:
-					cancelTarget()
-				case <-targetCtx.Done():
-				}
-			}()
-		}
-		detachedByClose := false
-		for {
-			var envelope eventstream.Envelope
-			select {
-			case <-publishCtx.Done():
-				if currentTarget != nil && b.ctx.Err() == nil {
-					detachedByClose = currentTarget.Err() == nil
-					currentTarget = nil
-					publishCtx = b.ctx
-					continue
-				}
-				return
-			case next, ok := <-events:
-				if !ok {
-					return
-				}
-				envelope = next
-			}
-			if b.testBeforeAttachPublish != nil {
-				b.testBeforeAttachPublish()
-			}
-
-			for {
-				attemptCtx := publishCtx
-				attemptTarget := currentTarget
-				var lastErr error
-				accepted := false
-				targetActive := true
-				detachAndRetry := false
-				for attempt := 1; attempt <= attachPublishMaxAttempts; attempt++ {
-					var err error
-					accepted, targetActive, err = b.publish(attemptCtx, envelope, attemptTarget)
-					if err == nil {
-						// An inactive target with a prior error means the failed attempt
-						// published a prefix and disconnected it. Preserve the original
-						// error instead of treating the retry as a successful no-op.
-						if !targetActive && lastErr != nil {
-							break
-						}
-						lastErr = nil
-						break
-					}
-					lastErr = err
-					if attemptTarget != nil && attemptCtx.Err() != nil && b.ctx.Err() == nil {
-						if targetErr := attemptTarget.Err(); targetErr == nil || errors.Is(targetErr, ErrSlowConsumer) {
-							detachedByClose = targetErr == nil
-							detachAndRetry = true
-							break
-						}
-					}
-					if attemptTarget != nil && attemptTarget.Err() != nil {
-						break
-					}
-					if attempt == attachPublishMaxAttempts {
-						break
-					}
-					timer := time.NewTimer(attachPublishRetryInterval)
-					select {
-					case <-attemptCtx.Done():
-						if !timer.Stop() {
-							<-timer.C
-						}
-						if attemptTarget != nil && b.ctx.Err() == nil {
-							if targetErr := attemptTarget.Err(); targetErr == nil || errors.Is(targetErr, ErrSlowConsumer) {
-								detachedByClose = targetErr == nil
-								detachAndRetry = true
-								break
-							}
-						}
-						return
-					case <-timer.C:
-					}
-				}
-				if detachAndRetry {
-					currentTarget = nil
-					publishCtx = b.ctx
-					continue
-				}
-				if !targetActive && lastErr == nil {
-					if attemptTarget != nil {
-						detachedByClose = attemptTarget.Err() == nil
-						currentTarget = nil
-						publishCtx = b.ctx
-					}
-					if !accepted {
-						// The target closed after this worker received the Envelope but
-						// before beginTargetHold. Nothing entered the Session sequence;
-						// retry the same Envelope untargeted instead of dropping it.
-						continue
-					}
-					// The Envelope is already globally represented. Detach only the
-					// stopped target and continue with the next ingress Envelope.
-					break
-				}
-				if lastErr != nil {
-					if detachedByClose && currentTarget == nil {
-						// The target owner explicitly tore down delivery. A durable
-						// Envelope that cannot be recovered from storage must not turn
-						// that delivery teardown into a new Session failure; later ingress
-						// (especially the terminal) still publishes untargeted.
-						break
-					}
-					result <- fmt.Errorf("controlclient: attach feed ingress: %w", lastErr)
-					return
-				}
-				break
-			}
-		}
-	}()
-	return result
+	if point.Offset < bounds.Low || point.Offset > bounds.High || bounds.State == streamspool.StatePoisoned || bounds.State == streamspool.StateStoreClosed {
+		return streamspool.Bounds{}, anchor, streamspool.ErrExpired
+	}
+	return bounds, anchor, nil
 }
 
-// Boundary returns the latest published position and signed Cursor.
+func (b *FeedBroker) eventCheckpoint(ctx context.Context) (session.EventCheckpoint, error) {
+	if reader, ok := b.reader.(session.EventCheckpointReader); ok {
+		checkpoint, err := reader.EventCheckpoint(ctx, b.ref)
+		if err != nil {
+			return session.EventCheckpoint{}, err
+		}
+		checkpoint.Session = session.CloneSession(checkpoint.Session)
+		checkpoint.LastClientReplayEvent = session.CloneEvent(checkpoint.LastClientReplayEvent)
+		return checkpoint, nil
+	}
+	b.acceptMu.Lock()
+	through := b.scannedSeq
+	b.acceptMu.Unlock()
+	return session.EventCheckpoint{ThroughSeq: through}, nil
+}
+
+func sessionBoundaryPosition(anchor eventstream.DurableFeedPosition, key streamspool.Key, offset streamspool.Offset) eventstream.FeedPosition {
+	return eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
+		Anchor: anchor, Generation: sessionSpoolGeneration(key), Sequence: uint64(offset) + 1,
+	}}
+}
+
+func (b *FeedBroker) startSubscription(ctx context.Context, start, initialHigh streamspool.Offset, replayThrough *eventstream.DurableFeedPosition, canonicalAfter uint64, lastDurable eventstream.DurableFeedPosition, initialCursor, syncCursor string) *feedSubscription {
+	sub := newFeedSubscription(ctx, b, start, initialHigh, replayThrough, canonicalAfter, lastDurable, initialCursor, syncCursor)
+	b.acceptMu.Lock()
+	closed := b.closed
+	b.subsMu.Lock()
+	if closed {
+		sub.cancel()
+	} else {
+		b.subs[sub] = struct{}{}
+	}
+	b.subsMu.Unlock()
+	if !closed && (b.writer == nil || b.spoolErr != nil) && b.lastTerminal != nil {
+		sub.offerTerminal(*b.lastTerminal)
+	}
+	b.acceptMu.Unlock()
+	go sub.run()
+	return sub
+}
+
 func (b *FeedBroker) Boundary() (*eventstream.FeedPosition, string) {
 	if b == nil {
 		return nil, ""
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.evictLocked()
-	if len(b.ring) > 0 {
-		last := b.ring[len(b.ring)-1].envelope
-		return eventstream.CloneFeedPosition(last.Position), last.Cursor
-	}
-	if b.latestDurable.Seq == 0 {
+	b.acceptMu.Lock()
+	writer, key, spoolErr := b.writer, b.key, b.spoolErr
+	if writer == nil || spoolErr != nil {
+		b.acceptMu.Unlock()
 		return nil, ""
 	}
-	position := &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{
-		Seq: b.latestDurable.Seq, ProjectionIndex: b.latestDurable.ProjectionIndex,
-	}}
-	cursor, _ := b.codec.Encode(b.ref.SessionID, *position)
-	return position, cursor
+	bounds, err := writer.Bounds(context.Background())
+	anchor := b.latestDurable
+	b.acceptMu.Unlock()
+	if err != nil {
+		return nil, ""
+	}
+	position := sessionBoundaryPosition(anchor, key, bounds.High)
+	cursor, err := b.codec.EncodeSpool(b.ref.SessionID, sessionSpoolCursor{Key: key, Offset: bounds.High}, position)
+	if err != nil {
+		return nil, ""
+	}
+	return &position, cursor
 }
 
-// Close disconnects subscribers without cancelling any Runtime work.
-func (b *FeedBroker) Close() error {
+// Seal permanently closes producer admission and the physical writer while
+// allowing existing subscribers to drain every accepted record to EOF.
+func (b *FeedBroker) Seal(ctx context.Context) error {
 	if b == nil {
 		return nil
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.closed {
-		return nil
-	}
-	b.closed = true
-	b.cancel()
-	close(b.done)
-	for subscriber := range b.subscribers {
-		b.stopSubscriberLocked(subscriber, nil)
-	}
-	return nil
-}
-
-func (b *FeedBroker) evictLocked() {
-	cutoff := b.now().Add(-b.ringTTL)
-	for len(b.ring) > 0 && (len(b.ring) > b.ringEvents || b.ringByteCount > b.ringBytes || b.ring[0].at.Before(cutoff)) {
-		item := b.ring[0]
-		b.ring = b.ring[1:]
-		b.ringByteCount -= item.bytes
-		if item.acceptID > b.evictedAccept {
-			b.evictedAccept = item.acceptID
-		}
-		if !isDurableFeedEnvelope(item.envelope) {
-			b.transientHistoryUnknown = true
-			delete(b.seen, feedDedupeKey(item.envelope))
-		}
-	}
-}
-
-func (b *FeedBroker) stopSubscriberLocked(subscriber *feedSubscription, err error) {
-	if subscriber == nil {
-		return
-	}
-	if _, ok := b.subscribers[subscriber]; !ok {
-		return
-	}
-	delete(b.subscribers, subscriber)
-	if errors.Is(err, ErrSlowConsumer) {
-		err = &FeedGapError{
-			Cause: err, RetryCursor: subscriber.retryFrom(),
-			Mode: ResumeModeDurableFallback, TransientGap: true,
-		}
-	}
-	subscriber.targetHold = false
-	subscriber.targetPending = nil
-	subscriber.targetPendingBytes = 0
-	subscriber.setErrLocked(err)
-	subscriber.stopOnce.Do(func() { close(subscriber.stop) })
-}
-
-type feedSubscription struct {
-	broker       *FeedBroker
-	input        chan eventstream.Envelope
-	slots        chan struct{}
-	backfillOut  chan eventstream.Envelope
-	out          chan eventstream.Envelope
-	stop         chan struct{}
-	done         chan struct{}
-	backfillDone chan struct{}
-	backfill     func(*feedSubscription) error
-
-	startOnce          sync.Once
-	stopOnce           sync.Once
-	backfillOnce       sync.Once
-	targetHold         bool
-	targetPending      []eventstream.Envelope
-	targetPendingBytes int
-
-	stateMu              sync.RWMutex
-	err                  error
-	lastCursor           string
-	retryCursor          string
-	ignoreDurableThrough uint64
-}
-
-func newFeedSubscription(broker *FeedBroker, queueSize int) *feedSubscription {
-	return &feedSubscription{
-		broker: broker, input: make(chan eventstream.Envelope, queueSize),
-		slots:       make(chan struct{}, queueSize),
-		backfillOut: make(chan eventstream.Envelope),
-		out:         make(chan eventstream.Envelope), stop: make(chan struct{}), done: make(chan struct{}),
-		backfillDone: make(chan struct{}),
-	}
-}
-
-func (s *feedSubscription) start() {
-	s.startOnce.Do(func() { go s.run() })
-}
-
-func (s *feedSubscription) closeWhenContextDone(ctx context.Context) {
-	if s == nil || ctx == nil {
-		return
-	}
-	select {
-	case <-ctx.Done():
-		_ = s.Close()
-	case <-s.done:
-	case <-s.broker.done:
-	}
-}
-
-func (s *feedSubscription) tryReserve() bool {
-	if s == nil {
-		return false
-	}
-	select {
-	case s.slots <- struct{}{}:
-		return true
-	default:
-		return false
-	}
-}
-
-func (s *feedSubscription) reserve(
-	ctx context.Context,
-	brokerDone <-chan struct{},
-	timeout time.Duration,
-) (reserved bool, stalled bool) {
-	if s == nil {
-		return false, false
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	select {
-	case s.slots <- struct{}{}:
-		return true, false
-	default:
+	b.sealMu.Lock()
+	defer b.sealMu.Unlock()
+	b.acceptMu.Lock()
+	if !b.sealed {
+		b.sealed = true
+		close(b.sealedCh)
 	}
-	if timeout <= 0 {
-		timeout = defaultSubscriberStallTimeout
+	writer := b.writer
+	writerSealed := b.writerSealed
+	if writer == nil {
+		b.writerSealed = true
 	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case s.slots <- struct{}{}:
-		return true, false
-	case <-s.stop:
-		return false, false
-	case <-brokerDone:
-		return false, false
-	case <-ctx.Done():
-		return false, false
-	case <-timer.C:
-		return false, true
+	b.acceptMu.Unlock()
+	if writer == nil || writerSealed {
+		return nil
 	}
+	// Product-address cleanup must not leak a registration merely because the
+	// initiating request was canceled. Preserve context values, but give the
+	// physical close one independent, bounded attempt; a non-context failure
+	// remains retryable because writerSealed is not advanced.
+	sealCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), feedLifecycleSealTimeout)
+	err := writer.Seal(sealCtx)
+	if err == nil {
+		err = writer.Close()
+	}
+	cancel()
+	if err != nil {
+		return err
+	}
+	b.acceptMu.Lock()
+	b.writerSealed = true
+	b.acceptMu.Unlock()
+	return nil
 }
 
-func (s *feedSubscription) release() {
-	if s == nil {
-		return
+func (b *FeedBroker) Close() error {
+	if b == nil {
+		return nil
 	}
-	select {
-	case <-s.slots:
-	default:
+	sealErr := b.Seal(context.Background())
+	b.acceptMu.Lock()
+	if b.closed {
+		b.acceptMu.Unlock()
+		return sealErr
 	}
+	b.closed = true
+	b.acceptMu.Unlock()
+	b.subsMu.Lock()
+	subs := make([]*feedSubscription, 0, len(b.subs))
+	for sub := range b.subs {
+		subs = append(subs, sub)
+	}
+	b.subsMu.Unlock()
+	for _, sub := range subs {
+		_ = sub.Close()
+	}
+	return sealErr
+}
+
+func checkpointBoundaryPosition(ref session.SessionRef, event *session.Event) *eventstream.FeedPosition {
+	if event == nil {
+		return nil
+	}
+	base := acpprojector.EnvelopeBaseFromSessionEvent(ref, event, acpprojector.SessionEventTransport{})
+	projected := acpprojector.ProjectSessionEventEnvelope(base, event)
+	for index := len(projected) - 1; index >= 0; index-- {
+		if projected[index].Position != nil && projected[index].Position.Durable != nil {
+			return eventstream.CloneFeedPosition(projected[index].Position)
+		}
+	}
+	return nil
+}
+
+type feedSubscription struct {
+	ctx            context.Context
+	cancel         context.CancelFunc
+	broker         *FeedBroker
+	start          streamspool.Offset
+	initialHigh    streamspool.Offset
+	replayThrough  *eventstream.DurableFeedPosition
+	canonicalAfter uint64
+	lastDurable    eventstream.DurableFeedPosition
+	replacementID  string
+	synced         bool
+	syncCursor     string
+
+	deliveries         chan FeedDelivery
+	terminals          chan eventstream.Envelope
+	done               chan struct{}
+	closeOnce          sync.Once
+	mu                 sync.Mutex
+	err                error
+	lastCursor         string
+	lastTerminalHandle string
+	lastTerminalRun    string
+	lastTerminalTurn   string
+}
+
+func newFeedSubscription(parent context.Context, broker *FeedBroker, start, initialHigh streamspool.Offset, replayThrough *eventstream.DurableFeedPosition, canonicalAfter uint64, lastDurable eventstream.DurableFeedPosition, initialCursor, syncCursor string) *feedSubscription {
+	ctx, cancel := context.WithCancel(parent)
+	var replay *eventstream.DurableFeedPosition
+	if replayThrough != nil {
+		copy := *replayThrough
+		replay = &copy
+	}
+	sub := &feedSubscription{
+		ctx: ctx, cancel: cancel, broker: broker, start: start, initialHigh: initialHigh, replayThrough: replay,
+		deliveries: make(chan FeedDelivery), terminals: make(chan eventstream.Envelope, 1), done: make(chan struct{}), lastCursor: strings.TrimSpace(initialCursor),
+		canonicalAfter: canonicalAfter, lastDurable: lastDurable, syncCursor: strings.TrimSpace(syncCursor),
+	}
+	sub.refreshReplacementID()
+	return sub
 }
 
 func (s *feedSubscription) run() {
 	defer close(s.done)
-	defer close(s.out)
-	defer s.finishBackfill()
-	if s.backfill != nil {
-		if err := s.backfill(s); err != nil {
-			if !errors.Is(err, errFeedSubscriptionStopped) {
+	defer close(s.deliveries)
+	defer s.unregister()
+	if s.replayThrough != nil {
+		if err := s.deliverCanonicalReplacement(); err != nil {
+			s.setErr(err)
+			return
+		}
+		if !s.spoolAvailable() {
+			if err := s.followCanonical(s.lastDurable); err != nil {
 				s.setErr(err)
 			}
 			return
 		}
-		s.backfill = nil
 	}
-	s.finishBackfill()
-	for {
-		select {
-		case <-s.stop:
+	if err := s.followSpool(s.start); err != nil {
+		if s.ctx.Err() != nil {
 			return
-		case envelope := <-s.input:
-			// A slot accounts for queued input, not the Envelope currently being
-			// handed to the consumer. Release it as soon as the runner dequeues the
-			// item; otherwise a queue of one can falsely classify an actively
-			// receiving subscriber as slow in the scheduling window after send.
-			s.release()
-			if !s.deliver(envelope) {
-				return
+		}
+		if errors.Is(err, io.EOF) {
+			// A complete sealed trace needs no replacement. If final Prime was
+			// interrupted, however, a canonical tail may complete transient text
+			// already delivered in this trace (or before its resume cursor).
+			if s.broker.reader != nil {
+				if _, hasCheckpoint := s.broker.reader.(session.EventCheckpointReader); !hasCheckpoint {
+					if err := s.replaceAndFollowCanonical(); err != nil {
+						s.setErr(err)
+					}
+					return
+				}
+				checkpoint, err := s.broker.eventCheckpoint(s.ctx)
+				if err != nil {
+					s.setErr(err)
+					return
+				}
+				position := checkpointBoundaryPosition(s.broker.ref, checkpoint.LastClientReplayEvent)
+				if position != nil && position.Durable != nil && compareDurablePosition(*position.Durable, s.lastDurable) > 0 {
+					if err := s.replaceAndFollowCanonical(); err != nil {
+						s.setErr(err)
+					}
+				}
 			}
+			return
+		}
+		s.disableSpool(err)
+		// Canonical events contain complete messages, while the exact prefix
+		// may contain transient fragments beyond lastDurable. Replace that
+		// prefix atomically; appending the canonical message would duplicate it.
+		if err := s.replaceAndFollowCanonical(); err != nil {
+			s.setErr(err)
 		}
 	}
 }
 
-func (s *feedSubscription) deliver(envelope eventstream.Envelope) bool {
-	select {
-	case <-s.stop:
+func (s *feedSubscription) deliverCanonicalReplacement() error {
+	if !s.deliver(FeedDelivery{Kind: FeedDeliveryReplaceBegin, Source: FeedSourceReplacement, SnapshotID: s.replacementID}) {
+		return s.ctx.Err()
+	}
+	page, err := s.replayCanonical()
+	if err != nil {
+		return err
+	}
+	if !s.deliver(FeedDelivery{Kind: FeedDeliveryReplaceEnd, Source: FeedSourceReplacement, SnapshotID: s.replacementID, Page: page}) {
+		return s.ctx.Err()
+	}
+	if !s.deliver(FeedDelivery{Kind: FeedDeliverySync, Source: FeedSourceExact, NextCursor: s.syncCursor}) {
+		return s.ctx.Err()
+	}
+	s.synced = true
+	return nil
+}
+
+func (s *feedSubscription) refreshReplacementID() {
+	if s == nil || s.broker == nil || s.replayThrough == nil {
+		return
+	}
+	raw := fmt.Sprintf("%s:%d:%d:%d:%d:%s", s.broker.ref.SessionID, s.start, s.replayThrough.Seq,
+		s.replayThrough.ProjectionIndex, s.canonicalAfter, s.lastCursor)
+	digest := sha256.Sum256([]byte(raw))
+	s.replacementID = hex.EncodeToString(digest[:])
+}
+
+func (s *feedSubscription) spoolAvailable() bool {
+	if s == nil || s.broker == nil {
 		return false
-	case s.out <- envelope:
-		s.stateMu.Lock()
-		s.lastCursor = envelope.Cursor
-		s.stateMu.Unlock()
+	}
+	s.broker.acceptMu.Lock()
+	available := s.broker.spool != nil && s.broker.writer != nil && s.broker.spoolErr == nil
+	s.broker.acceptMu.Unlock()
+	return available
+}
+
+func (s *feedSubscription) disableSpool(err error) {
+	if s == nil || s.broker == nil || err == nil {
+		return
+	}
+	s.broker.acceptMu.Lock()
+	s.broker.disableSpoolLocked(err)
+	s.broker.offerTerminalFallbackLocked()
+	s.broker.acceptMu.Unlock()
+}
+
+func (s *feedSubscription) replaceAndFollowCanonical() error {
+	if s == nil || s.broker == nil || s.broker.reader == nil {
+		return streamspool.ErrUnavailable
+	}
+	if err := s.broker.Prime(s.ctx); err != nil {
+		return err
+	}
+	checkpoint, err := s.broker.eventCheckpoint(s.ctx)
+	if err != nil {
+		return err
+	}
+	through := eventstream.DurableFeedPosition{}
+	if position := checkpointBoundaryPosition(s.broker.ref, checkpoint.LastClientReplayEvent); position != nil && position.Durable != nil {
+		through = *position.Durable
+	} else {
+		s.broker.acceptMu.Lock()
+		through = s.broker.latestDurable
+		s.broker.acceptMu.Unlock()
+	}
+	s.replayThrough = &through
+	// Replacement covers only the last client-replay projection. Journal-only
+	// or concurrently committed records after it must still be scanned.
+	s.canonicalAfter = through.Seq
+	s.lastDurable = through
+	s.syncCursor, _ = s.broker.codec.Encode(s.broker.ref.SessionID, eventstream.FeedPosition{Durable: &through})
+	s.refreshReplacementID()
+	if err := s.deliverCanonicalReplacement(); err != nil {
+		return err
+	}
+	return s.followCanonical(s.lastDurable)
+}
+
+func (s *feedSubscription) replayCanonical() (uint32, error) {
+	if s.broker == nil || s.broker.reader == nil || s.replayThrough == nil || s.replayThrough.Seq == 0 {
+		return 0, nil
+	}
+	after := uint64(0)
+	pageNumber := uint32(0)
+	totalBytes := 0
+	for after < s.replayThrough.Seq {
+		page, err := s.broker.reader.EventsPage(s.ctx, session.EventPageRequest{
+			SessionRef: s.broker.ref, AfterSeq: after, ThroughSeq: s.replayThrough.Seq,
+			Visibility: session.EventPageClientReplay,
+		})
+		if err != nil {
+			return pageNumber, err
+		}
+		for _, event := range page.Events {
+			if event == nil || suppressHistoricalChildStreamMirror(event) {
+				continue
+			}
+			base := acpprojector.EnvelopeBaseFromSessionEvent(s.broker.ref, event, acpprojector.SessionEventTransport{})
+			for _, envelope := range acpprojector.ProjectSessionEventEnvelope(base, event) {
+				if envelope.Position == nil || envelope.Position.Durable == nil || compareDurablePosition(*envelope.Position.Durable, *s.replayThrough) > 0 {
+					continue
+				}
+				// Replacement pages are atomic snapshots, not resumable records.
+				// Keep the durable position as canonical provenance, but only the
+				// matching Sync carries the boundary cursor after commit.
+				envelope.Cursor = ""
+				raw, err := json.Marshal(envelope)
+				if err != nil {
+					return pageNumber, err
+				}
+				if int(pageNumber) >= maxFeedReplacementEvents || totalBytes+len(raw) > maxFeedReplacementBytes {
+					return pageNumber, errorcode.New(errorcode.ResourceExhausted, "controlclient: Session replacement exceeds limit")
+				}
+				totalBytes += len(raw)
+				if !s.deliver(FeedDelivery{
+					Kind: FeedDeliveryReplacePage, Source: FeedSourceReplacement,
+					SnapshotID: s.replacementID, Page: pageNumber,
+					Events: []eventstream.Envelope{eventstream.CloneEnvelope(envelope)},
+				}) {
+					return pageNumber, s.ctx.Err()
+				}
+				pageNumber++
+			}
+		}
+		if page.NextSeq <= after || len(page.Events) == 0 {
+			break
+		}
+		after = page.NextSeq
+	}
+	return pageNumber, nil
+}
+
+// followCanonical is the availability fallback for a disabled or lost spool.
+// It polls only the authoritative paged Session store, retains no payload
+// queue, and advances by durable sequence. Transient trace events are allowed
+// to disappear in this mode by design.
+func (s *feedSubscription) followCanonical(after eventstream.DurableFeedPosition) error {
+	if s == nil || s.broker == nil || s.broker.reader == nil {
+		return streamspool.ErrUnavailable
+	}
+	ticker := time.NewTicker(canonicalFollowInterval)
+	defer ticker.Stop()
+	pageAfter := after.Seq
+	if after.Seq > 0 {
+		pageAfter--
+	}
+	for {
+		page, err := s.broker.reader.EventsPage(s.ctx, session.EventPageRequest{
+			SessionRef: s.broker.ref, AfterSeq: pageAfter, Visibility: session.EventPageClientReplay,
+		})
+		if err != nil {
+			return err
+		}
+		for _, event := range page.Events {
+			if event == nil || suppressHistoricalChildStreamMirror(event) {
+				continue
+			}
+			base := acpprojector.EnvelopeBaseFromSessionEvent(s.broker.ref, event, acpprojector.SessionEventTransport{})
+			for _, envelope := range acpprojector.ProjectSessionEventEnvelope(base, event) {
+				if envelope.Position == nil || envelope.Position.Durable == nil {
+					continue
+				}
+				if compareDurablePosition(*envelope.Position.Durable, after) <= 0 {
+					continue
+				}
+				cursor, encodeErr := s.broker.codec.Encode(s.broker.ref.SessionID, *envelope.Position)
+				if encodeErr != nil {
+					return encodeErr
+				}
+				envelope.Cursor = cursor
+				if !s.deliver(FeedDelivery{
+					Kind: FeedDeliveryAppendPage, Source: FeedSourceExact,
+					Events: []eventstream.Envelope{eventstream.CloneEnvelope(envelope)}, NextCursor: cursor,
+				}) {
+					return s.ctx.Err()
+				}
+				after = *envelope.Position.Durable
+				s.lastDurable = after
+			}
+		}
+		if page.NextSeq > pageAfter {
+			pageAfter = page.NextSeq
+			s.canonicalAfter = pageAfter
+			continue
+		}
+		sealed, complete := s.broker.canonicalSealState(after)
+		if complete {
+			select {
+			case terminal := <-s.terminals:
+				if !s.deliverFallbackTerminal(terminal) {
+					return s.ctx.Err()
+				}
+			default:
+			}
+			return nil
+		}
+		if sealed {
+			select {
+			case <-s.ctx.Done():
+				return s.ctx.Err()
+			case terminal := <-s.terminals:
+				if !s.deliverFallbackTerminal(terminal) {
+					return s.ctx.Err()
+				}
+			case <-ticker.C:
+			}
+			continue
+		}
+		select {
+		case <-s.ctx.Done():
+			return s.ctx.Err()
+		case terminal := <-s.terminals:
+			if !s.deliverFallbackTerminal(terminal) {
+				return s.ctx.Err()
+			}
+		case <-s.broker.sealedCh:
+		case <-ticker.C:
+		}
+	}
+}
+
+func (b *FeedBroker) canonicalSealState(after eventstream.DurableFeedPosition) (sealed, complete bool) {
+	if b == nil {
+		return true, true
+	}
+	b.acceptMu.Lock()
+	sealed = b.sealed || b.closed
+	through := b.latestDurable
+	b.acceptMu.Unlock()
+	return sealed, sealed && compareDurablePosition(after, through) >= 0
+}
+
+func (s *feedSubscription) followSpool(offset streamspool.Offset) error {
+	if s.broker == nil {
+		return streamspool.ErrUnavailable
+	}
+	s.broker.acceptMu.Lock()
+	spool, writer, key, spoolErr := s.broker.spool, s.broker.writer, s.broker.key, s.broker.spoolErr
+	s.broker.acceptMu.Unlock()
+	if spool == nil || writer == nil || spoolErr != nil {
+		return streamspool.ErrUnavailable
+	}
+	reader, err := spool.Reader(s.ctx, key, offset)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	type nextResult struct {
+		record streamspool.Record
+		err    error
+	}
+	pumpCtx, stopPump := context.WithCancel(s.ctx)
+	defer stopPump()
+	next := make(chan nextResult, 1)
+	go func() {
+		for {
+			record, err := reader.Next(pumpCtx)
+			select {
+			case <-pumpCtx.Done():
+				return
+			case next <- nextResult{record: record, err: err}:
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	current := offset
+	for {
+		if !s.synced && current >= s.initialHigh {
+			if !s.deliver(FeedDelivery{Kind: FeedDeliverySync, Source: FeedSourceExact, NextCursor: s.syncCursor}) {
+				return s.ctx.Err()
+			}
+			s.synced = true
+		}
+		var record streamspool.Record
+		var err error
+		select {
+		case <-s.ctx.Done():
+			return s.ctx.Err()
+		case terminal := <-s.terminals:
+			if s.broker.reader == nil {
+				if !s.deliverFallbackTerminal(terminal) {
+					return s.ctx.Err()
+				}
+			} else {
+				// A terminal must not let consumers exit before the canonical
+				// replacement repairs output lost with the optional trace.
+				s.offerTerminal(terminal)
+			}
+			return streamspool.ErrUnavailable
+		case result := <-next:
+			record, err = result.record, result.err
+		}
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
+		}
+		if record.Type != sessionEnvelopeRecordType || record.Offset != current {
+			return errors.New("controlclient: invalid Session spool record")
+		}
+		var envelope eventstream.Envelope
+		if err := json.Unmarshal(record.Payload, &envelope); err != nil {
+			return fmt.Errorf("controlclient: decode Session spool record: %w", err)
+		}
+		current++
+		if !s.deliver(FeedDelivery{
+			Kind: FeedDeliveryAppendPage, Source: FeedSourceExact,
+			Events: []eventstream.Envelope{eventstream.CloneEnvelope(envelope)}, NextCursor: envelope.Cursor,
+		}) {
+			return s.ctx.Err()
+		}
+		if isMainTerminalEnvelope(envelope) {
+			s.rememberDeliveredTerminal(envelope)
+		}
+		if envelope.Position != nil && envelope.Position.Durable != nil && compareDurablePosition(*envelope.Position.Durable, s.lastDurable) > 0 {
+			s.lastDurable = *envelope.Position.Durable
+		}
+	}
+}
+
+func (s *feedSubscription) deliverFallbackTerminal(envelope eventstream.Envelope) bool {
+	if s == nil || !isMainTerminalEnvelope(envelope) || s.terminalDelivered(envelope) {
+		return true
+	}
+	envelope = eventstream.CloneEnvelope(envelope)
+	envelope.Cursor = ""
+	envelope.Position = nil
+	envelope.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+	if !s.deliver(FeedDelivery{
+		Kind: FeedDeliveryAppendPage, Source: FeedSourceResult,
+		Events: []eventstream.Envelope{envelope},
+	}) {
+		return false
+	}
+	s.rememberDeliveredTerminal(envelope)
+	return true
+}
+
+func (s *feedSubscription) offerTerminal(envelope eventstream.Envelope) {
+	if s == nil || !isMainTerminalEnvelope(envelope) || s.terminalDelivered(envelope) {
+		return
+	}
+	envelope = eventstream.CloneEnvelope(envelope)
+	select {
+	case s.terminals <- envelope:
+		return
+	default:
+	}
+	select {
+	case <-s.terminals:
+	default:
+	}
+	select {
+	case s.terminals <- envelope:
+	default:
+	}
+}
+
+func (s *feedSubscription) terminalDelivered(envelope eventstream.Envelope) bool {
+	handleID := strings.TrimSpace(envelope.HandleID)
+	runID := strings.TrimSpace(envelope.RunID)
+	turnID := strings.TrimSpace(envelope.TurnID)
+	if handleID == "" && runID == "" && turnID == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastTerminalHandle == handleID &&
+		s.lastTerminalRun == runID &&
+		s.lastTerminalTurn == turnID
+}
+
+func (s *feedSubscription) rememberDeliveredTerminal(envelope eventstream.Envelope) {
+	s.mu.Lock()
+	s.lastTerminalHandle = strings.TrimSpace(envelope.HandleID)
+	s.lastTerminalRun = strings.TrimSpace(envelope.RunID)
+	s.lastTerminalTurn = strings.TrimSpace(envelope.TurnID)
+	s.mu.Unlock()
+}
+
+func (s *feedSubscription) deliver(delivery FeedDelivery) bool {
+	select {
+	case <-s.ctx.Done():
+		return false
+	case s.deliveries <- delivery:
+		if delivery.NextCursor != "" {
+			s.lastCursor = delivery.NextCursor
+		}
 		return true
 	}
 }
 
-func (s *feedSubscription) deliverBackfill(envelope eventstream.Envelope) bool {
-	select {
-	case <-s.stop:
-		return false
-	case s.backfillOut <- envelope:
-		s.stateMu.Lock()
-		s.lastCursor = envelope.Cursor
-		s.stateMu.Unlock()
-		return true
+func (s *feedSubscription) unregister() {
+	if s.broker == nil {
+		return
 	}
+	s.broker.subsMu.Lock()
+	delete(s.broker.subs, s)
+	s.broker.subsMu.Unlock()
 }
 
-func (s *feedSubscription) Backfill() <-chan eventstream.Envelope {
-	if s == nil {
-		closed := make(chan eventstream.Envelope)
-		close(closed)
-		return closed
-	}
-	return s.backfillOut
-}
-
-func (s *feedSubscription) Events() <-chan eventstream.Envelope { return s.out }
-
-func (s *feedSubscription) BackfillDone() <-chan struct{} {
-	if s == nil {
-		closed := make(chan struct{})
-		close(closed)
-		return closed
-	}
-	return s.backfillDone
-}
-
-func (s *feedSubscription) finishBackfill() {
-	s.backfillOnce.Do(func() {
-		close(s.backfillOut)
-		close(s.backfillDone)
-	})
-}
+func (s *feedSubscription) Deliveries() <-chan FeedDelivery { return s.deliveries }
 
 func (s *feedSubscription) Close() error {
-	if s == nil || s.broker == nil {
+	if s == nil {
 		return nil
 	}
-	s.broker.mu.Lock()
-	if _, active := s.broker.subscribers[s]; active {
-		s.broker.stopSubscriberLocked(s, nil)
-	} else {
-		s.stopOnce.Do(func() { close(s.stop) })
-	}
-	s.broker.mu.Unlock()
+	s.closeOnce.Do(s.cancel)
 	return nil
 }
 
@@ -1134,85 +1121,20 @@ func (s *feedSubscription) Err() error {
 	if s == nil {
 		return nil
 	}
-	s.stateMu.RLock()
-	defer s.stateMu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.err
 }
 
-func (s *feedSubscription) LastCursor() string {
-	if s == nil {
-		return ""
-	}
-	s.stateMu.RLock()
-	defer s.stateMu.RUnlock()
-	return s.lastCursor
-}
-
-func (s *feedSubscription) setErrLocked(err error) {
-	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-	if s.err == nil {
-		s.err = err
-	}
-}
-
 func (s *feedSubscription) setErr(err error) {
-	if s == nil || err == nil {
+	if err == nil || errors.Is(err, context.Canceled) {
 		return
 	}
-	s.stateMu.Lock()
+	s.mu.Lock()
 	if s.err == nil {
 		s.err = err
 	}
-	s.stateMu.Unlock()
-}
-
-func (s *feedSubscription) retryFrom() string {
-	if s == nil {
-		return ""
-	}
-	s.stateMu.RLock()
-	defer s.stateMu.RUnlock()
-	if strings.TrimSpace(s.lastCursor) != "" {
-		return s.lastCursor
-	}
-	return s.retryCursor
-}
-
-func feedDedupeKey(envelope eventstream.Envelope) string {
-	if id := strings.TrimSpace(envelope.ProjectionID); id != "" {
-		return "projection:" + id
-	}
-	return "cursor:" + strings.TrimSpace(envelope.Cursor)
-}
-
-func cloneFeedRing(in []feedRingItem) []feedRingItem {
-	out := make([]feedRingItem, len(in))
-	for index, item := range in {
-		out[index] = item
-		out[index].envelope = eventstream.CloneEnvelope(item.envelope)
-	}
-	return out
-}
-
-func findRingCursor(ring []feedRingItem, cursor string) int {
-	if strings.TrimSpace(cursor) == "" {
-		return -1
-	}
-	for index, item := range ring {
-		if item.envelope.Cursor == cursor {
-			return index
-		}
-	}
-	return -1
-}
-
-func randomFeedGeneration() string {
-	var raw [12]byte
-	if _, err := rand.Read(raw[:]); err == nil {
-		return hex.EncodeToString(raw[:])
-	}
-	return fmt.Sprintf("generation-%d", time.Now().UnixNano())
+	s.mu.Unlock()
 }
 
 // feedRegistry owns at most one broker for each Session ID.
@@ -1220,29 +1142,23 @@ type feedRegistry struct {
 	config FeedRegistryConfig
 	mu     sync.Mutex
 	feeds  map[string]*FeedBroker
+	closed bool
 }
 
-// FeedRegistryConfig supplies shared broker dependencies and limits.
 type FeedRegistryConfig struct {
-	Reader                 session.PagedReader
-	CursorCodec            *CursorCodec
-	RingEvents             int
-	RingBytes              int
-	RingTTL                time.Duration
-	SubscriberQueue        int
-	SubscriberStallTimeout time.Duration
-	Now                    func() time.Time
+	Reader      session.PagedReader
+	Spool       streamspool.Store
+	CursorCodec *CursorCodec
+	Now         func() time.Time
 }
 
-// NewFeedRegistry constructs a process-local Session broker registry.
-func NewFeedRegistry(config FeedRegistryConfig) (FeedRegistry, error) {
+func NewFeedRegistry(config FeedRegistryConfig) (FeedRegistryLifecycle, error) {
 	if config.CursorCodec == nil {
 		return nil, errors.New("controlclient: feed registry cursor codec is required")
 	}
 	return &feedRegistry{config: config, feeds: map[string]*FeedBroker{}}, nil
 }
 
-// Session returns the stable broker for one Session.
 func (r *feedRegistry) Session(ref session.SessionRef) (SessionFeed, error) {
 	if r == nil {
 		return nil, errors.New("controlclient: nil feed registry")
@@ -1253,14 +1169,36 @@ func (r *feedRegistry) Session(ref session.SessionRef) (SessionFeed, error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.closed {
+		return nil, errors.New("controlclient: feed registry is closed")
+	}
 	if broker := r.feeds[ref.SessionID]; broker != nil {
 		return broker, nil
 	}
+	if stateReader, ok := r.config.Reader.(session.StateReader); ok {
+		closed, err := IsSessionClosed(context.Background(), stateReader, ref)
+		if err != nil {
+			return nil, err
+		}
+		if closed {
+			// Closed Sessions remain canonically readable, but they never allocate
+			// another process-lifetime writer or registry entry.
+			broker, err := NewFeedBroker(FeedBrokerConfig{
+				SessionRef: ref, Reader: r.config.Reader, CursorCodec: r.config.CursorCodec, Now: r.config.Now,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if err := broker.Seal(context.Background()); err != nil {
+				_ = broker.Close()
+				return nil, err
+			}
+			return broker, nil
+		}
+	}
 	broker, err := NewFeedBroker(FeedBrokerConfig{
-		SessionRef: ref, Reader: r.config.Reader, CursorCodec: r.config.CursorCodec,
-		RingEvents: r.config.RingEvents, RingBytes: r.config.RingBytes,
-		RingTTL: r.config.RingTTL, SubscriberQueue: r.config.SubscriberQueue,
-		SubscriberStallTimeout: r.config.SubscriberStallTimeout, Now: r.config.Now,
+		SessionRef: ref, Reader: r.config.Reader, Spool: r.config.Spool,
+		CursorCodec: r.config.CursorCodec, Now: r.config.Now,
 	})
 	if err != nil {
 		return nil, err
@@ -1269,4 +1207,71 @@ func (r *feedRegistry) Session(ref session.SessionRef) (SessionFeed, error) {
 	return broker, nil
 }
 
+// CloseSession removes one permanently closed Session from the live registry.
+// Prime captures the final durable lifecycle fact before Seal lets current
+// readers drain to EOF; a later read of the closed Session is finite and uses
+// canonical replay without allocating a spool writer.
+func (r *feedRegistry) CloseSession(ctx context.Context, ref session.SessionRef) error {
+	if r == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ref = session.NormalizeSessionRef(ref)
+	if strings.TrimSpace(ref.SessionID) == "" {
+		return errors.New("controlclient: session id is required")
+	}
+	r.mu.Lock()
+	broker := r.feeds[ref.SessionID]
+	r.mu.Unlock()
+	if broker == nil {
+		return nil
+	}
+	primeErr := broker.Prime(ctx)
+	sealErr := broker.Seal(ctx)
+	if sealErr == nil {
+		r.mu.Lock()
+		if r.feeds[ref.SessionID] == broker {
+			delete(r.feeds, ref.SessionID)
+		}
+		r.mu.Unlock()
+	}
+	return errors.Join(primeErr, sealErr)
+}
+
+// Close stops every live broker before the shared spool Store closes.
+func (r *feedRegistry) Close() error {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	r.closed = true
+	type candidate struct {
+		sessionID string
+		broker    *FeedBroker
+	}
+	brokers := make([]candidate, 0, len(r.feeds))
+	for sessionID, broker := range r.feeds {
+		brokers = append(brokers, candidate{sessionID: sessionID, broker: broker})
+	}
+	r.mu.Unlock()
+	var joined error
+	for _, item := range brokers {
+		err := item.broker.Close()
+		joined = errors.Join(joined, err)
+		if err == nil {
+			r.mu.Lock()
+			if r.feeds[item.sessionID] == item.broker {
+				delete(r.feeds, item.sessionID)
+			}
+			r.mu.Unlock()
+		}
+	}
+	return joined
+}
+
+var _ SessionFeed = (*FeedBroker)(nil)
 var _ FeedRegistry = (*feedRegistry)(nil)
+var _ FeedRegistryLifecycle = (*feedRegistry)(nil)
+var _ FeedSubscription = (*feedSubscription)(nil)

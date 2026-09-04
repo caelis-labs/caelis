@@ -105,7 +105,7 @@ func TestMainProjectedTaskWaitMatchesNativeSubagentSemantics(t *testing.T) {
 	}
 }
 
-func TestMainProjectedFailedWaitRepairsSpawnWithReason(t *testing.T) {
+func TestMainProjectedSpawnFailureOwnsItsReason(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -184,9 +184,32 @@ func TestMainProjectedFailedWaitRepairsSpawnWithReason(t *testing.T) {
 			},
 		},
 	})
-
 	block := requireMainACPTurnBlockForTest(t, model)
 	physical := physicalTranscriptEventsForTest(block.Events)
+	if len(physical) != 1 || physical[0].Done {
+		t.Fatalf("Task wait changed Spawn owner = %#v, want still-open canonical Spawn", physical)
+	}
+	project(&session.Event{
+		ID:        "event-spawn-failed",
+		Seq:       5,
+		SessionID: "session-1",
+		Type:      session.EventTypeToolResult,
+		Tool: &session.EventTool{
+			ID:     "spawn-1",
+			Name:   "Spawn",
+			Kind:   "execute",
+			Title:  "Spawn breeze: inspect",
+			Status: "failed",
+			Input:  map[string]any{"agent": "breeze", "prompt": "inspect"},
+			Output: map[string]any{
+				"handle": "breeze", "target_kind": "subagent", "state": "failed",
+				"error": "ACP child prompt failed",
+			},
+		},
+	})
+
+	block = requireMainACPTurnBlockForTest(t, model)
+	physical = physicalTranscriptEventsForTest(block.Events)
 	if len(physical) != 1 || physical[0].CallID != "spawn-1" ||
 		!physical[0].Done || !physical[0].Err ||
 		!strings.Contains(physical[0].Output, "ACP child prompt failed") {

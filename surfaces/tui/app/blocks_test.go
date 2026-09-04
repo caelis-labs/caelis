@@ -124,44 +124,19 @@ func TestMergeSubagentNarrativeChunkAccumulatesBlankMessageID(t *testing.T) {
 	}
 }
 
-func TestMergeCommandStreamChunkDropsRepeatedLineOverlap(t *testing.T) {
+func TestRunCommandFIFOAppendsRepeatedLineDelta(t *testing.T) {
 	existing := "步骤 1/5 - 21:53:13\n步骤 2/5 - 21:53:14\n步骤 3/5 - 21:53:15\n步骤 4/5 - 21:53:16\n"
 	incoming := "步骤 4/5 - 21:53:16\n步骤 5/5 - 21:53:17\n"
-	want := existing + "步骤 5/5 - 21:53:17\n"
-	if got := mergeCommandStreamChunk(existing, incoming); got != want {
-		t.Fatalf("merged command chunk = %q, want %q", got, want)
-	}
-}
-
-func TestMergeCommandStreamChunkKeepsPrefixLikeDelta(t *testing.T) {
-	got := mergeCommandStreamChunk("abc", "abcdef")
-	if got != "abcabcdef" {
-		t.Fatalf("merged command chunk = %q, want exact appended delta", got)
-	}
-}
-
-func TestMergeCommandStreamChunkDropsCumulativePrefixLines(t *testing.T) {
-	existing := "🚀 异步 BASH 启动\n  第 1 秒...\n  第 2 秒...\n  第 3 秒...\n"
-	incoming := "🚀 异步 BASH 启动\n  第 1 秒...\n  第 2 秒...\n  第 4 秒...\n  第 5 秒...\n✅ 异步 BASH 完成\n"
-	want := existing + "  第 4 秒...\n  第 5 秒...\n✅ 异步 BASH 完成\n"
-	if got := mergeCommandStreamChunk(existing, incoming); got != want {
-		t.Fatalf("merged cumulative command chunk = %q, want %q", got, want)
-	}
-}
-
-func TestRUNCommandOverlappingRunningTailDoesNotDuplicateOutput(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	first := "步骤 1/5 - 21:53:13\n步骤 2/5 - 21:53:14\n步骤 3/5 - 21:53:15\n步骤 4/5 - 21:53:16\n"
-	tail := "步骤 4/5 - 21:53:16\n步骤 5/5 - 21:53:17\n"
-	block.UpdateToolWithMeta("command-1", "RunCommand", "for i in 1 2 3 4 5", first, false, false, ToolUpdateMeta{TaskHandle: "task-1"})
-	block.UpdateToolWithMeta("command-1", "RunCommand", "for i in 1 2 3 4 5", tail, false, false, ToolUpdateMeta{TaskHandle: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "for i in 1 2 3 4 5", existing, false, false, ToolUpdateMeta{TaskHandle: "task-1", OutputTerminal: true})
+	block.UpdateToolWithMeta("command-1", "RunCommand", "for i in 1 2 3 4 5", incoming, false, false, ToolUpdateMeta{TaskHandle: "task-1", OutputTerminal: true})
 
 	if len(block.Events) != 1 {
 		t.Fatalf("events = %#v, want one RunCommand event", block.Events)
 	}
-	want := first + "步骤 5/5 - 21:53:17\n"
+	want := existing + incoming
 	if got := block.Events[0].Output; got != want {
-		t.Fatalf("RunCommand output = %q, want %q", got, want)
+		t.Fatalf("FIFO command output = %q, want every delivered byte %q", got, want)
 	}
 }
 

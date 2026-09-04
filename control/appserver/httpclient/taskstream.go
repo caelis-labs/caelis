@@ -56,14 +56,14 @@ func (c *TaskClient) List(ctx context.Context, request taskstream.ListRequest) (
 	return result, nil
 }
 
-func (c *TaskClient) Events(ctx context.Context, request taskstream.ReadRequest) (taskstream.Batch, error) {
+func (c *TaskClient) Events(ctx context.Context, request taskstream.ReadRequest) (taskstream.ReadResult, error) {
 	sessionID, err := remotePathID("session", request.SessionID)
 	if err != nil {
-		return taskstream.Batch{}, err
+		return taskstream.ReadResult{}, err
 	}
 	taskID, err := remotePathID("task", request.TaskID)
 	if err != nil {
-		return taskstream.Batch{}, err
+		return taskstream.ReadResult{}, err
 	}
 	query := make(url.Values)
 	if cursor := strings.TrimSpace(request.Cursor); cursor != "" {
@@ -74,14 +74,14 @@ func (c *TaskClient) Events(ctx context.Context, request taskstream.ReadRequest)
 	}
 	response, err := c.remote.do(ctx, http.MethodGet, "/sessions/"+sessionID+"/tasks/"+taskID+"/events", query, nil, nil)
 	if err != nil {
-		return taskstream.Batch{}, err
+		return taskstream.ReadResult{}, err
 	}
 	defer response.Body.Close()
 	raw, err := readRemoteResponse(response)
 	if err != nil {
-		return taskstream.Batch{}, err
+		return taskstream.ReadResult{}, err
 	}
-	return decodeTaskBatch(raw, response.Header)
+	return decodeTaskBatch(raw)
 }
 
 func (c *TaskClient) Subscribe(ctx context.Context, request taskstream.SubscribeRequest) (taskstream.SubscribeResult, error) {
@@ -109,103 +109,73 @@ func (c *TaskClient) Subscribe(ctx context.Context, request taskstream.Subscribe
 		response.Body.Close()
 		return taskstream.SubscribeResult{}, errors.New("control http client: Task subscribe response is not an SSE stream")
 	}
-	batch, err := decodeTaskBatchHeaders(response.Header)
-	if err != nil {
-		response.Body.Close()
-		return taskstream.SubscribeResult{}, err
-	}
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 64<<10), c.remote.maxEventBytes)
-	subscription := newRemoteTaskSubscription(response, scanner, c.remote.eventBuffer)
-	return taskstream.SubscribeResult{
-		Subscription:   subscription,
-		ResumeMode:     batch.ResumeMode,
-		TransientGap:   batch.TransientGap,
-		BoundaryCursor: batch.BoundaryCursor,
-	}, nil
+	subscription := newRemoteTaskSubscription(response, scanner)
+	return taskstream.SubscribeResult{Subscription: subscription}, nil
 }
 
-type taskBatchWire struct {
-	Events         []json.RawMessage     `json:"events,omitempty"`
-	ActivityID     string                `json:"activity_id,omitempty"`
-	ResumeMode     taskstream.ResumeMode `json:"resume_mode"`
-	TransientGap   bool                  `json:"transient_gap,omitempty"`
-	BoundaryCursor string                `json:"boundary_cursor,omitempty"`
-}
-
-func decodeTaskBatch(raw []byte, headers http.Header) (taskstream.Batch, error) {
-	var wire taskBatchWire
+func decodeTaskBatch(raw []byte) (taskstream.ReadResult, error) {
+	var wire wirev1.TaskStreamReadResult
 	if err := wirev1.Unmarshal(raw, &wire); err != nil {
-		return taskstream.Batch{}, fmt.Errorf("control http client: decode Task batch: %w", err)
+		return taskstream.ReadResult{}, fmt.Errorf("control http client: decode Task read result: %w", err)
 	}
-	batch := taskstream.Batch{
-		Events:         make([]eventstream.Envelope, 0, len(wire.Events)),
-		ActivityID:     wire.ActivityID,
-		ResumeMode:     wire.ResumeMode,
-		TransientGap:   wire.TransientGap,
-		BoundaryCursor: wire.BoundaryCursor,
+	result := taskstream.ReadResult{
+		Deliveries: make([]taskstream.Delivery, 0, len(wire.Deliveries)),
+		ActivityID: wire.ActivityID,
 	}
-	if headers != nil {
-		if mode := headers.Get(wirev1.ResumeModeHeader); mode != "" {
-			batch.ResumeMode = taskstream.ResumeMode(mode)
+	for _, delivery := range wire.Deliveries {
+		decoded, err := decodeTaskDelivery(delivery)
+		if err != nil {
+			return taskstream.ReadResult{}, err
 		}
-		if cursor := headers.Get(wirev1.BoundaryCursorHeader); cursor != "" {
-			batch.BoundaryCursor = cursor
-		}
-		if headers.Get(wirev1.TransientGapHeader) == "true" {
-			batch.TransientGap = true
-		}
+		result.Deliveries = append(result.Deliveries, decoded)
+	}
+	return result, nil
+}
+
+func decodeTaskDelivery(wire wirev1.TaskStreamDelivery) (taskstream.Delivery, error) {
+	delivery := taskstream.Delivery{
+		Kind: taskstream.DeliveryKind(wire.Kind), Source: taskstream.SourceClass(wire.Source),
+		SnapshotID: wire.SnapshotID, Page: wire.Page,
+		NextCursor: wire.NextCursor, ActivityID: wire.ActivityID,
+		Events: make([]eventstream.Envelope, 0, len(wire.Events)),
 	}
 	for _, item := range wire.Events {
 		envelope, err := wirev1.UnmarshalEnvelope(item)
 		if err != nil {
-			return taskstream.Batch{}, fmt.Errorf("control http client: decode Task Envelope: %w", err)
+			return taskstream.Delivery{}, fmt.Errorf("control http client: decode Task Envelope: %w", err)
 		}
-		batch.Events = append(batch.Events, envelope)
+		delivery.Events = append(delivery.Events, envelope)
 	}
-	return batch, nil
-}
-
-func decodeTaskBatchHeaders(headers http.Header) (taskstream.Batch, error) {
-	if headers == nil {
-		return taskstream.Batch{}, errors.New("control http client: Task subscribe headers are required")
-	}
-	return taskstream.Batch{
-		ResumeMode:     taskstream.ResumeMode(headers.Get(wirev1.ResumeModeHeader)),
-		TransientGap:   headers.Get(wirev1.TransientGapHeader) == "true",
-		BoundaryCursor: headers.Get(wirev1.BoundaryCursorHeader),
-	}, nil
+	return delivery, nil
 }
 
 type remoteTaskSubscription struct {
-	response *http.Response
-	scanner  *bufio.Scanner
-	events   chan eventstream.Envelope
-	stop     chan struct{}
-	done     chan struct{}
+	response   *http.Response
+	scanner    *bufio.Scanner
+	deliveries chan taskstream.Delivery
+	stop       chan struct{}
+	done       chan struct{}
 
 	closeOnce sync.Once
 	mu        sync.Mutex
 	err       error
-	last      string
 }
 
-func newRemoteTaskSubscription(response *http.Response, scanner *bufio.Scanner, capacity int) *remoteTaskSubscription {
-	if capacity <= 0 {
-		capacity = defaultRemoteEventBuffer
-	}
+func newRemoteTaskSubscription(response *http.Response, scanner *bufio.Scanner) *remoteTaskSubscription {
 	subscription := &remoteTaskSubscription{
-		response: response,
-		scanner:  scanner,
-		events:   make(chan eventstream.Envelope, capacity),
-		stop:     make(chan struct{}),
-		done:     make(chan struct{}),
+		response:   response,
+		scanner:    scanner,
+		deliveries: make(chan taskstream.Delivery),
+		stop:       make(chan struct{}),
+		done:       make(chan struct{}),
 	}
 	go subscription.readLoop()
 	return subscription
 }
 
-func (s *remoteTaskSubscription) Events() <-chan eventstream.Envelope { return s.events }
+func (s *remoteTaskSubscription) Deliveries() <-chan taskstream.Delivery { return s.deliveries }
 
 func (s *remoteTaskSubscription) Close() error {
 	if s == nil {
@@ -227,15 +197,9 @@ func (s *remoteTaskSubscription) Err() error {
 	return s.err
 }
 
-func (s *remoteTaskSubscription) LastCursor() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.last
-}
-
 func (s *remoteTaskSubscription) readLoop() {
 	defer close(s.done)
-	defer close(s.events)
+	defer close(s.deliveries)
 	for {
 		frame, err := readRemoteSSEFrame(s.scanner)
 		if err != nil {
@@ -246,17 +210,22 @@ func (s *remoteTaskSubscription) readLoop() {
 			return
 		}
 		switch frame.event {
-		case "", "message":
-			envelope, decodeErr := wirev1.UnmarshalEnvelope(frame.data)
+		case wirev1.TaskStreamDeliveryEventName:
+			var wire wirev1.TaskStreamDelivery
+			decodeErr := wirev1.Unmarshal(frame.data, &wire)
 			if decodeErr != nil {
-				// Malformed payloads are not transport gaps; fail closed without retry.
-				s.setErr(errorcode.Wrap(errorcode.InvalidArgument, "control http client: decode Task SSE Envelope", decodeErr))
+				s.setErr(errorcode.Wrap(errorcode.InvalidArgument, "control http client: decode Task SSE delivery", decodeErr))
+				return
+			}
+			delivery, decodeErr := decodeTaskDelivery(wire)
+			if decodeErr != nil {
+				s.setErr(errorcode.Wrap(errorcode.InvalidArgument, "control http client: decode Task SSE delivery", decodeErr))
 				return
 			}
 			if frame.id != "" {
-				envelope.Cursor = frame.id
+				delivery.NextCursor = frame.id
 			}
-			if !s.publish(envelope) {
+			if !s.publish(delivery) {
 				return
 			}
 		case wirev1.TaskStreamDoneEventName:
@@ -275,29 +244,11 @@ func (s *remoteTaskSubscription) readLoop() {
 	}
 }
 
-func (s *remoteTaskSubscription) publish(envelope eventstream.Envelope) bool {
+func (s *remoteTaskSubscription) publish(delivery taskstream.Delivery) bool {
 	select {
-	case <-s.stop:
-		return false
-	default:
-	}
-	// Hold the cursor lock across the non-blocking send so a receiver that sees
-	// the event cannot observe a stale LastCursor. Failed delivery does not
-	// advance last, so reconnect cannot skip undelivered events.
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	select {
-	case s.events <- envelope:
-		if cursor := strings.TrimSpace(envelope.Cursor); cursor != "" {
-			s.last = cursor
-		}
+	case s.deliveries <- delivery:
 		return true
 	case <-s.stop:
-		return false
-	default:
-		if s.err == nil {
-			s.err = taskstream.ErrSlowConsumer
-		}
 		return false
 	}
 }

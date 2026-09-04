@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -28,7 +27,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
@@ -124,9 +122,11 @@ func TestRuntimePersistsAgentOwnedGenerationWatchdogInterruption(t *testing.T) {
 			}, nil
 		},
 	}
+	capture := &testSourceCapture{}
 	run, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: active.SessionRef,
-		Input:      "repeat forever",
+		SessionRef:     active.SessionRef,
+		Input:          "repeat forever",
+		SourceObserver: capture,
 		AgentSpec: agent.AgentSpec{
 			Name: "chat", Model: testModel, Tools: []tool.Tool{echo},
 		},
@@ -135,15 +135,9 @@ func TestRuntimePersistsAgentOwnedGenerationWatchdogInterruption(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var (
-		runErr     error
-		checkpoint *session.Event
-	)
-	for event, eventErr := range run.Handle.Events() {
-		if eventErr != nil {
-			runErr = eventErr
-			continue
-		}
+	runErr := run.Handle.WaitCompletion(t.Context())
+	var checkpoint *session.Event
+	for _, event := range capture.Events() {
 		if event != nil && event.Lifecycle != nil && event.Lifecycle.Status == "agent_loop_watchdog_checkpoint" {
 			checkpoint = event
 		}
@@ -232,12 +226,7 @@ func TestRuntimePersistsCallerCancellationAsCancelled(t *testing.T) {
 	if result := run.Handle.Cancel(); !result.Cancelled() || result.Err != nil {
 		t.Fatalf("Cancel() = %#v, want accepted cancellation", result)
 	}
-	var runErr error
-	for _, eventErr := range run.Handle.Events() {
-		if eventErr != nil {
-			runErr = eventErr
-		}
-	}
+	runErr := run.Handle.WaitCompletion(t.Context())
 	if !errors.Is(runErr, context.Canceled) || !errorcode.Is(runErr, errorcode.Cancelled) {
 		t.Fatalf("runner error = %#v, want caller cancellation", runErr)
 	}
@@ -422,17 +411,8 @@ func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 		t.Fatalf("RunID() = %q, want %q", got, "run-1")
 	}
 
-	var count int
-	for event, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			t.Fatalf("runner error = %v", seqErr)
-		}
-		if event != nil {
-			count++
-		}
-	}
-	if got, want := count, 2; got != want {
-		t.Fatalf("runner event count = %d, want %d", got, want)
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("runner completion error = %v", err)
 	}
 
 	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{
@@ -457,13 +437,13 @@ func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 	}
 }
 
-func TestRuntimeCompletionAndPersistenceDoNotWaitForEventConsumer(t *testing.T) {
+func TestRuntimeCompletionAndPersistenceDoNotRequireEventConsumer(t *testing.T) {
 	sessions, activeSession := newTestSessionService(t, "sess-observer-gap")
 	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, RunIDGenerator: func() string { return "run-observer-gap" }})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	const assistantEvents = runnerEventQueueCapacity + 32
+	const assistantEvents = 512
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "produce a burst",
@@ -501,28 +481,6 @@ func TestRuntimeCompletionAndPersistenceDoNotWaitForEventConsumer(t *testing.T) 
 		t.Fatalf("RunState().Status = %q, want completed", state.Status)
 	}
 
-	var (
-		gap      *agent.EventStreamGapError
-		retained []*session.Event
-	)
-	for event, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			if !errors.As(seqErr, &gap) {
-				t.Fatalf("Events() error = %v", seqErr)
-			}
-			continue
-		}
-		retained = append(retained, event)
-	}
-	if gap == nil || gap.Dropped != assistantEvents+1-runnerEventQueueCapacity {
-		t.Fatalf("Events() gap = %#v, want %d dropped", gap, assistantEvents+1-runnerEventQueueCapacity)
-	}
-	if len(retained) != runnerEventQueueCapacity {
-		t.Fatalf("Events() retained %d events, want %d", len(retained), runnerEventQueueCapacity)
-	}
-	if got := session.EventText(retained[len(retained)-1]); got != lastEventText {
-		t.Fatalf("last retained event = %q, want %q", got, lastEventText)
-	}
 }
 
 func TestRuntimeRejectsConcurrentRunForSameSession(t *testing.T) {
@@ -560,7 +518,8 @@ func TestRuntimeRejectsConcurrentRunForSameSession(t *testing.T) {
 		t.Fatalf("conflict.ActiveRunID = %q, want %q", conflict.ActiveRunID, first.Handle.RunID())
 	}
 	first.Handle.Cancel()
-	for range first.Handle.Events() {
+	if err := first.Handle.WaitCompletion(t.Context()); err == nil {
+		t.Fatal("cancelled run completed without cancellation error")
 	}
 }
 
@@ -623,10 +582,8 @@ func TestRuntimeRunPersistsDisplayInputSeparateFromModelInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	for _, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			t.Fatalf("runner error = %v", seqErr)
-		}
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("runner error = %v", err)
 	}
 	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{
 		SessionRef: activeSession.SessionRef,
@@ -767,19 +724,7 @@ func drainRunnerEvents(t *testing.T, handle agent.Runner) ([]*session.Event, err
 	if handle == nil {
 		return nil, nil
 	}
-	var events []*session.Event
-	for event, seqErr := range handle.Events() {
-		if seqErr != nil {
-			if _, ok := agent.AsEventStreamGap(seqErr); ok {
-				continue
-			}
-			return events, seqErr
-		}
-		if event != nil {
-			events = append(events, event)
-		}
-	}
-	return events, nil
+	return nil, handle.WaitCompletion(context.Background())
 }
 
 type invalidAppendSessionService struct {
@@ -845,11 +790,13 @@ func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 		result agent.RunResult
 		err    error
 	}
+	capture := &testSourceCapture{}
 	runDone := make(chan runResult, 1)
 	go func() {
 		result, err := runtime.Run(context.Background(), agent.RunRequest{
-			SessionRef: activeSession.SessionRef,
-			Input:      "hello",
+			SessionRef:     activeSession.SessionRef,
+			Input:          "hello",
+			SourceObserver: capture,
 			Request: agent.ModelRequestOptions{
 				Stream: boolPtr(true),
 			},
@@ -886,45 +833,35 @@ func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 		t.Fatalf("state.Status = %q, want %q while final response is gated", state.Status, agent.RunLifecycleStatusRunning)
 	}
 
-	eventCh := make(chan *session.Event, 8)
-	errCh := make(chan error, 1)
-	go func() {
-		for event, seqErr := range result.Handle.Events() {
-			if seqErr != nil {
-				errCh <- seqErr
-				return
-			}
-			eventCh <- event
-		}
-		close(eventCh)
-	}()
-
 	var sawUser bool
 	var sawChunk bool
-	deadline := time.After(2 * time.Second)
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(time.Millisecond)
+	defer poll.Stop()
 	for !sawUser || !sawChunk {
 		select {
-		case seqErr := <-errCh:
-			t.Fatalf("runner error = %v", seqErr)
-		case event := <-eventCh:
-			if event == nil {
-				t.Fatal("runner yielded nil event before final completion")
+		case <-poll.C:
+			for _, event := range capture.Events() {
+				switch {
+				case session.EventTypeOf(event) == session.EventTypeUser:
+					sawUser = true
+				case session.ProtocolSessionUpdateType(event) == string(session.ProtocolUpdateTypeAgentMessage) && session.EventText(event) == "hel":
+					sawChunk = true
+				}
 			}
-			switch {
-			case session.EventTypeOf(event) == session.EventTypeUser:
-				sawUser = true
-			case session.ProtocolSessionUpdateType(event) == string(session.ProtocolUpdateTypeAgentMessage) && session.EventText(event) == "hel":
-				sawChunk = true
-			}
-		case <-deadline:
+		case <-deadline.C:
 			t.Fatalf("timed out waiting for live user + chunk events (sawUser=%v sawChunk=%v)", sawUser, sawChunk)
 		}
 	}
 
 	close(testModel.releaseFinal)
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("runner error = %v", err)
+	}
 
 	var final *session.Event
-	for event := range eventCh {
+	for _, event := range capture.Events() {
 		if event != nil && session.EventTypeOf(event) == session.EventTypeAssistant && strings.TrimSpace(session.EventText(event)) == "hello" {
 			final = event
 		}
@@ -985,9 +922,11 @@ func TestRuntimeSubmitQueuesGuidanceForNextModelStep(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
+	capture := &testSourceCapture{}
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "first prompt",
+		SessionRef:     activeSession.SessionRef,
+		Input:          "first prompt",
+		SourceObserver: capture,
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: testModel,
@@ -1012,10 +951,11 @@ func TestRuntimeSubmitQueuesGuidanceForNextModelStep(t *testing.T) {
 	}
 	close(testModel.releaseFirst)
 
-	events, err := drainRunnerEvents(t, result.Handle)
+	_, err = drainRunnerEvents(t, result.Handle)
 	if err != nil {
 		t.Fatalf("runner error = %v", err)
 	}
+	events := capture.Events()
 	gotTexts := make([]string, 0, len(events))
 	for _, event := range events {
 		if event != nil && (event.Type == session.EventTypeUser || event.Type == session.EventTypeAssistant) {
@@ -1222,11 +1162,13 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 		result agent.RunResult
 		err    error
 	}
+	capture := &testSourceCapture{}
 	runDone := make(chan runResult, 1)
 	go func() {
 		result, err := runtime.Run(context.Background(), agent.RunRequest{
-			SessionRef: activeSession.SessionRef,
-			Input:      "hello",
+			SessionRef:     activeSession.SessionRef,
+			Input:          "hello",
+			SourceObserver: capture,
 			Request: agent.ModelRequestOptions{
 				Stream: boolPtr(true),
 			},
@@ -1253,45 +1195,35 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 		t.Fatal("controller did not observe stream request")
 	}
 
-	eventCh := make(chan *session.Event, 8)
-	errCh := make(chan error, 1)
-	go func() {
-		for event, seqErr := range result.Handle.Events() {
-			if seqErr != nil {
-				errCh <- seqErr
-				return
-			}
-			eventCh <- event
-		}
-		close(eventCh)
-	}()
-
 	var sawUser bool
 	var sawChunk bool
-	deadline := time.After(2 * time.Second)
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(time.Millisecond)
+	defer poll.Stop()
 	for !sawUser || !sawChunk {
 		select {
-		case seqErr := <-errCh:
-			t.Fatalf("runner error = %v", seqErr)
-		case event := <-eventCh:
-			if event == nil {
-				t.Fatal("runner yielded nil event before final completion")
+		case <-poll.C:
+			for _, event := range capture.Events() {
+				switch {
+				case session.EventTypeOf(event) == session.EventTypeUser:
+					sawUser = true
+				case session.ProtocolSessionUpdateType(event) == string(session.ProtocolUpdateTypeAgentMessage) && event.Visibility == session.VisibilityUIOnly:
+					sawChunk = true
+				}
 			}
-			switch {
-			case session.EventTypeOf(event) == session.EventTypeUser:
-				sawUser = true
-			case session.ProtocolSessionUpdateType(event) == string(session.ProtocolUpdateTypeAgentMessage) && event.Visibility == session.VisibilityUIOnly:
-				sawChunk = true
-			}
-		case <-deadline:
+		case <-deadline.C:
 			t.Fatalf("timed out waiting for live ACP user + chunk events (sawUser=%v sawChunk=%v)", sawUser, sawChunk)
 		}
 	}
 
 	close(releaseFinal)
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("runner error = %v", err)
+	}
 
 	var final *session.Event
-	for event := range eventCh {
+	for _, event := range capture.Events() {
 		if event != nil && session.EventTypeOf(event) == session.EventTypeAssistant && strings.TrimSpace(session.EventText(event)) == "hello" {
 			final = event
 		}
@@ -1638,7 +1570,8 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 		t.Fatal("participant prompt request was not sent")
 	}
 	if updated.Handle != nil {
-		for range updated.Handle.Events() {
+		if err := updated.Handle.WaitCompletion(t.Context()); err != nil {
+			t.Fatal(err)
 		}
 	}
 	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: updated.Session.SessionRef})
@@ -1767,7 +1700,8 @@ func TestRuntimePromptParticipantRehydratesPersistedBinding(t *testing.T) {
 		t.Fatal("participant prompt request was not sent")
 	}
 	if result.Handle != nil {
-		for range result.Handle.Events() {
+		if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+			t.Fatal(err)
 		}
 	}
 	updated, err := sessions.Session(context.Background(), activeSession.SessionRef)
@@ -1864,7 +1798,8 @@ func TestRuntimePromptParticipantCancelCancelsControllerTurn(t *testing.T) {
 		t.Fatal("participant handle cancel did not cancel controller turn")
 	}
 	controllerHandle.finish()
-	for range result.Handle.Events() {
+	if err := result.Handle.WaitCompletion(t.Context()); err == nil {
+		t.Fatal("cancelled participant completed without cancellation error")
 	}
 }
 
@@ -1944,9 +1879,11 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 	}
 	runCtx := session.ContextWithRuntimeFence(context.Background(), fence)
 
+	capture := &testSourceCapture{}
 	result, err := runtime.Run(runCtx, agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "hello",
+		SessionRef:     activeSession.SessionRef,
+		Input:          "hello",
+		SourceObserver: capture,
 		Request: agent.ModelRequestOptions{
 			Stream: boolPtr(true),
 		},
@@ -1954,10 +1891,11 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	events, err := drainRunnerEvents(t, result.Handle)
+	_, err = drainRunnerEvents(t, result.Handle)
 	if err != nil {
 		t.Fatalf("runner error = %v", err)
 	}
+	events := capture.Events()
 	var liveTexts []string
 	for _, event := range events {
 		if event == nil || event.Protocol == nil || event.Scope == nil {
@@ -2055,7 +1993,8 @@ func TestRuntimeACPControllerHonorsRequestedStreamMode(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Run() error = %v", err)
 			}
-			for range result.Handle.Events() {
+			if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+				t.Fatal(err)
 			}
 			select {
 			case got := <-streamSeen:
@@ -2180,16 +2119,6 @@ func TestRuntimeACPControllerUnknownOutcomePersistsJournalAndAllowsNextTurn(t *t
 	if _, err := drainRunnerEvents(t, first.Handle); !errorcode.Is(err, errorcode.UnknownOutcome) {
 		t.Fatalf("first Turn error = %v, want unknown_outcome", err)
 	}
-	waiter, ok := first.Handle.(agent.RunnerCompletionWaiter)
-	if !ok {
-		t.Fatal("first Turn handle does not expose completion waiting")
-	}
-	completionCtx, cancelCompletion := context.WithTimeout(context.Background(), time.Second)
-	defer cancelCompletion()
-	if err := waiter.WaitCompletion(completionCtx); err != nil {
-		t.Fatalf("WaitCompletion() error = %v", err)
-	}
-
 	paged, ok := sessions.(session.PagedReader)
 	if !ok {
 		t.Fatal("Session service does not expose durable event pages")
@@ -2296,9 +2225,11 @@ func TestRuntimeRunReplaysPersistedHistoryFromFileStore(t *testing.T) {
 		wantTexts: []string{"hello", "world", "again"},
 		replyText: "history ok",
 	}
+	capture := &testSourceCapture{}
 	result, err := runtime2.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "again",
+		SessionRef:     activeSession.SessionRef,
+		Input:          "again",
+		SourceObserver: capture,
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: replayModel,
@@ -2308,11 +2239,11 @@ func TestRuntimeRunReplaysPersistedHistoryFromFileStore(t *testing.T) {
 		t.Fatalf("runtime2.Run() error = %v", err)
 	}
 
-	events, seqErr := drainRunnerEvents(t, result.Handle)
+	_, seqErr := drainRunnerEvents(t, result.Handle)
 	if seqErr != nil {
 		t.Fatalf("runner error = %v", seqErr)
 	}
-	finalText := lastAssistantText(events)
+	finalText := lastAssistantText(capture.Events())
 	if finalText != "history ok" {
 		t.Fatalf("final assistant text = %q, want %q", finalText, "history ok")
 	}
@@ -2453,22 +2384,25 @@ func TestRuntimeRunDoesNotRetryAgentLoopBeforeAnyEventIsEmitted(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
+	capture := &testSourceCapture{}
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "hello",
-		AgentSpec:  agent.AgentSpec{Name: "chat"},
+		SessionRef:     activeSession.SessionRef,
+		Input:          "hello",
+		AgentSpec:      agent.AgentSpec{Name: "chat"},
+		SourceObserver: capture,
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	events, seqErr := drainRunnerEvents(t, result.Handle)
+	_, seqErr := drainRunnerEvents(t, result.Handle)
 	if seqErr == nil {
 		t.Fatal("runner error = nil, want model failure")
 	}
 	if !strings.Contains(seqErr.Error(), "overloaded_error") {
 		t.Fatalf("runner error = %v, want original model failure", seqErr)
 	}
+	events := capture.Events()
 	for _, event := range events {
 		if session.IsNotice(event) {
 			t.Fatalf("unexpected retry notice event: %q", session.EventText(event))
@@ -2617,17 +2551,8 @@ func TestRuntimeRunPersistsToolLoopEvents(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	var count int
-	for event, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			t.Fatalf("runner error = %v", seqErr)
-		}
-		if event != nil {
-			count++
-		}
-	}
-	if got, want := count, 4; got != want {
-		t.Fatalf("runner event count = %d, want %d", got, want)
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("runner error = %v", err)
 	}
 
 	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{
@@ -2725,9 +2650,11 @@ func TestRuntimeRunDoesNotFailWhenCanonicalTaskIndexSyncFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	capture := &testSourceCapture{}
 	run, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "emit canonical tool result",
+		SessionRef:     activeSession.SessionRef,
+		Input:          "emit canonical tool result",
+		SourceObserver: capture,
 		Agent: seqAgent{events: []*session.Event{{
 			Type: session.EventTypeToolResult,
 			Tool: &session.EventTool{
@@ -2745,10 +2672,11 @@ func TestRuntimeRunDoesNotFailWhenCanonicalTaskIndexSyncFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	events, seqErr := drainRunnerEvents(t, run.Handle)
+	_, seqErr := drainRunnerEvents(t, run.Handle)
 	if seqErr != nil {
 		t.Fatalf("runner error = %v", seqErr)
 	}
+	events := capture.Events()
 	var sawToolResult bool
 	for _, event := range events {
 		if event != nil && event.Type == session.EventTypeToolResult {
@@ -2798,17 +2726,8 @@ func TestRuntimeRunPersistsPlanLoopAndState(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	var sawPlan bool
-	for event, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			t.Fatalf("runner error = %v", seqErr)
-		}
-		if event != nil && event.Type == session.EventTypePlan {
-			sawPlan = true
-		}
-	}
-	if !sawPlan {
-		t.Fatal("expected plan event in runner output")
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("runner error = %v", err)
 	}
 
 	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{
@@ -3687,9 +3606,11 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("shell.NewRunCommand() error = %v", err)
 	}
+	capture := &testSourceCapture{}
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "run async command",
+		SessionRef:     activeSession.SessionRef,
+		Input:          "run async command",
+		SourceObserver: capture,
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: &commandTaskLoopRuntimeModel{t: t},
@@ -3702,10 +3623,10 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 
 	var finalText string
 	var progressToolUpdate bool
-	for event, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			t.Fatalf("runner error = %v", seqErr)
-		}
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("runner error = %v", err)
+	}
+	for _, event := range capture.Events() {
 		if event == nil {
 			continue
 		}
@@ -3769,29 +3690,6 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 	resultPayload, _ := task.result["result"].(string)
 	if !strings.Contains(resultPayload, "async command done") {
 		t.Fatalf("rehydrated task result = %q, want async command done", resultPayload)
-	}
-	terminals := runtime.Streams()
-	if terminals == nil {
-		t.Fatal("Streams() = nil")
-	}
-	snap, err := terminals.Read(context.Background(), stream.ReadRequest{
-		Ref: stream.Ref{
-			SessionID: activeSession.SessionID,
-			TaskID:    identity.taskID,
-		},
-	})
-	if err != nil {
-		t.Fatalf("terminal Read() error = %v", err)
-	}
-	if snap.Running {
-		t.Fatalf("terminal snapshot still running: %+v", snap)
-	}
-	terminalText := snap.FinalText
-	if terminalText == "" {
-		terminalText = terminalFramesText(snap.Frames)
-	}
-	if !strings.Contains(terminalText, "async command done") {
-		t.Fatalf("terminal snapshot text = %q, want async command done", terminalText)
 	}
 }
 
@@ -4259,21 +4157,6 @@ func TestCompletedCommandObservationKeepsAbsoluteCursorWhenResultIsCapped(t *tes
 	if replayCursor, ok := taskInt64Value(entry.Metadata[commandStreamOutputCursorMeta]); !ok || replayCursor != wantCursor {
 		t.Fatalf("durable stream replay cursor = %d/%v, want %d", replayCursor, ok, wantCursor)
 	}
-	reloaded, err := newStreamService(tasks).Read(context.Background(), stream.ReadRequest{
-		Ref: stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
-	})
-	if err != nil {
-		t.Fatalf("stream Read() after durable reload error = %v", err)
-	}
-	if reloaded.Cursor.Output != wantCursor || reloaded.TruncatedBefore != wantCursor {
-		t.Fatalf(
-			"durable terminal stream cursor/truncation = %d/%d, want %d/%d",
-			reloaded.Cursor.Output,
-			reloaded.TruncatedBefore,
-			wantCursor,
-			wantCursor,
-		)
-	}
 }
 
 func TestTaskToolPayloadReturnsCompletedCommandTerminalStreams(t *testing.T) {
@@ -4301,295 +4184,6 @@ func TestCompactLatestOutputKeepsTailOnly(t *testing.T) {
 	want := "...2 lines hidden...\nline 3\nline 4\nline 5\nline 6\nline 7\n"
 	if got != want {
 		t.Fatalf("compactLatestOutput() = %q, want %q", got, want)
-	}
-}
-
-func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
-	t.Parallel()
-
-	sessions, activeSession := newTestSessionService(t, "sess-terminal-subscribe")
-	runtime, err := New(Config{
-		Sessions: sessions,
-		AgentFactory: chat.Factory{
-			SystemPrompt: "Use tools when necessary.",
-		},
-		DefaultPolicyMode: presets.ModeAutoReview,
-	})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	sandbox := hostRuntimeForTest(t, activeSession.CWD)
-	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, sandbox, taskapi.CommandStartRequest{
-		Command: shellPrintThenSleepForTest("stream terminal", 50*time.Millisecond),
-		Workdir: activeSession.CWD,
-		Yield:   1 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatalf("StartCommand() error = %v", err)
-	}
-	terminals := runtime.Streams()
-	if terminals == nil {
-		t.Fatal("Streams() = nil")
-	}
-	subscribeTimeout := 2 * time.Second
-	if goruntime.GOOS == "windows" {
-		subscribeTimeout = 8 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), subscribeTimeout)
-	defer cancel()
-
-	var (
-		text        strings.Builder
-		closedFrame *stream.Frame
-	)
-	for frame, seqErr := range terminals.Subscribe(ctx, stream.SubscribeRequest{
-		Ref: stream.Ref{
-			SessionID: activeSession.SessionID,
-			TaskID:    snapshot.Ref.TaskID,
-		},
-	}) {
-		if seqErr != nil {
-			t.Fatalf("terminal Subscribe() error = %v", seqErr)
-		}
-		if frame == nil {
-			continue
-		}
-		text.WriteString(frame.Text)
-		if frame.Closed {
-			cloned := stream.CloneFrame(*frame)
-			closedFrame = &cloned
-		}
-	}
-	if closedFrame == nil {
-		t.Fatal("expected terminal subscription to emit closed frame")
-	}
-	if got := text.String(); !strings.Contains(got, "stream terminal") {
-		t.Fatalf("terminal text = %q, want %q", got, "stream terminal")
-	}
-	if got := strings.Count(text.String(), "stream terminal"); got != 1 {
-		t.Fatalf("terminal text = %q, want streamed output once", text.String())
-	}
-	if got := closedFrame.Text; got != "" {
-		t.Fatalf("closed frame text = %q, want contentless final after streamed output", got)
-	}
-}
-
-func TestRuntimeTerminalSubscribePreservesEchoNewlines(t *testing.T) {
-	t.Parallel()
-
-	sessions, activeSession := newTestSessionService(t, "sess-terminal-newlines")
-	runtime, err := New(Config{
-		Sessions: sessions,
-		AgentFactory: chat.Factory{
-			SystemPrompt: "Use tools when necessary.",
-		},
-		DefaultPolicyMode: presets.ModeAutoReview,
-	})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	sandbox := hostRuntimeForTest(t, activeSession.CWD)
-	command := `for i in 1 2 3; do echo "Step ${i}/3"; sleep 0.02; done`
-	want := "Step 1/3\nStep 2/3\nStep 3/3\n"
-	if goruntime.GOOS == "windows" {
-		command = `1..3 | ForEach-Object { Write-Output "Step $_/3"; Start-Sleep -Milliseconds 20 }`
-		want = "Step 1/3\r\nStep 2/3\r\nStep 3/3\r\n"
-	}
-	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, sandbox, taskapi.CommandStartRequest{
-		Command: command,
-		Workdir: activeSession.CWD,
-		Yield:   1 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatalf("StartCommand() error = %v", err)
-	}
-	terminals := runtime.Streams()
-	if terminals == nil {
-		t.Fatal("Streams() = nil")
-	}
-	subscribeTimeout := 2 * time.Second
-	if goruntime.GOOS == "windows" {
-		subscribeTimeout = 8 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), subscribeTimeout)
-	defer cancel()
-
-	var text strings.Builder
-	for frame, seqErr := range terminals.Subscribe(ctx, stream.SubscribeRequest{
-		Ref: stream.Ref{
-			SessionID: activeSession.SessionID,
-			TaskID:    snapshot.Ref.TaskID,
-		},
-	}) {
-		if seqErr != nil {
-			t.Fatalf("terminal Subscribe() error = %v", seqErr)
-		}
-		if frame == nil {
-			continue
-		}
-		text.WriteString(frame.Text)
-	}
-	if got := text.String(); got != want {
-		t.Fatalf("terminal stream text = %q, want %q", got, want)
-	}
-}
-
-func TestRuntimeTerminalSubscribePreservesCompletionTailDuringTaskWait(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-	workdir := t.TempDir()
-	sessionStore := sessionfile.NewStore(sessionfile.Config{
-		RootDir:            root,
-		SessionIDGenerator: func() string { return "sess-terminal-task-wait-tail" },
-	})
-	sessions := sessionStore
-	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis",
-		UserID:  "user-1",
-		Workspace: session.WorkspaceRef{
-			Key: "ws-1",
-			CWD: workdir,
-		},
-	})
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-	runtime, err := New(Config{
-		Sessions:  sessions,
-		TaskStore: sessionfile.NewTaskStore(sessionStore),
-		AgentFactory: chat.Factory{
-			SystemPrompt: "Use tools when necessary.",
-		},
-	})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	backend := hostRuntimeForTest(t, workdir)
-	t.Cleanup(func() { _ = backend.Close() })
-	runtime.tasks.registerSandboxRuntime(backend)
-
-	const prefix = "步骤 5/5: 处理中...\n"
-	const tail = "✅ 任务完成！\n"
-	delay := 250 * time.Millisecond
-	command := "printf " + shellQuoteForTest(prefix) + "; sleep 0.250; printf " + shellQuoteForTest(tail)
-	yield := 5 * time.Millisecond
-	waitBudget := 3 * time.Second
-	if goruntime.GOOS == "windows" {
-		command = fmt.Sprintf("[Console]::Out.Write(%s); Start-Sleep -Milliseconds %d; [Console]::Out.Write(%s)",
-			powershellQuoteForTest(prefix), delay.Milliseconds(), powershellQuoteForTest(tail))
-		yield = 100 * time.Millisecond
-		waitBudget = 8 * time.Second
-	}
-	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, backend, taskapi.CommandStartRequest{
-		Command:    command,
-		Workdir:    workdir,
-		Yield:      yield,
-		ParentCall: "call-terminal-task-wait-tail",
-	})
-	if err != nil {
-		t.Fatalf("StartCommand() error = %v", err)
-	}
-	if !snapshot.Running {
-		t.Fatalf("StartCommand() snapshot = %#v, want running task", snapshot)
-	}
-	type subscriptionResult struct {
-		frames []stream.Frame
-		err    error
-	}
-	streamCtx, cancel := context.WithTimeout(context.Background(), waitBudget)
-	defer cancel()
-	subscriptionDone := make(chan subscriptionResult, 1)
-	prefixObserved := make(chan struct{}, 1)
-	go func() {
-		var result subscriptionResult
-		var observed strings.Builder
-		for frame, streamErr := range runtime.Streams().Subscribe(streamCtx, stream.SubscribeRequest{
-			Ref: stream.Ref{
-				SessionID: activeSession.SessionID,
-				TaskID:    snapshot.Ref.TaskID,
-			},
-		}) {
-			if streamErr != nil {
-				result.err = streamErr
-				break
-			}
-			if frame != nil {
-				result.frames = append(result.frames, stream.CloneFrame(*frame))
-				observed.WriteString(frame.Text)
-				if strings.Contains(observed.String(), prefix) {
-					select {
-					case prefixObserved <- struct{}{}:
-					default:
-					}
-				}
-			}
-		}
-		subscriptionDone <- result
-	}()
-
-	select {
-	case <-prefixObserved:
-	case early := <-subscriptionDone:
-		t.Fatalf("terminal subscription closed before prefix: %#v", early)
-	case <-streamCtx.Done():
-		t.Fatalf("terminal subscription did not observe prefix: %v", streamCtx.Err())
-	}
-
-	var waited taskapi.Snapshot
-	for {
-		waited, err = runtime.tasks.Wait(streamCtx, activeSession.SessionRef, taskapi.ControlRequest{
-			TaskID:    snapshot.Ref.TaskID,
-			Yield:     waitBudget,
-			Principal: session.ActorKindController,
-		})
-		if err != nil {
-			t.Fatalf("TASK wait error = %v", err)
-		}
-		if !waited.Running {
-			break
-		}
-	}
-	if waited.State != taskapi.StateCompleted {
-		t.Fatalf("TASK wait snapshot = %#v, want completed", waited)
-	}
-	if waited.Metadata["parent_call"] != "call-terminal-task-wait-tail" || waited.Metadata["parent_tool"] != shell.RunCommandToolName {
-		t.Fatalf(
-			"TASK wait parent relation = %v/%v, want typed %s/%s relation",
-			waited.Metadata["parent_tool"],
-			waited.Metadata["parent_call"],
-			shell.RunCommandToolName,
-			"call-terminal-task-wait-tail",
-		)
-	}
-
-	var subscribed subscriptionResult
-	select {
-	case subscribed = <-subscriptionDone:
-	case <-streamCtx.Done():
-		t.Fatalf("terminal subscription did not close: %v", streamCtx.Err())
-	}
-	if subscribed.err != nil {
-		t.Fatalf("terminal subscription error = %v", subscribed.err)
-	}
-	var streamed strings.Builder
-	closeIndex := -1
-	tailIndex := -1
-	for i, frame := range subscribed.frames {
-		streamed.WriteString(frame.Text)
-		if strings.Contains(frame.Text, tail) && tailIndex < 0 {
-			tailIndex = i
-		}
-		if frame.Closed && closeIndex < 0 {
-			closeIndex = i
-		}
-	}
-	want := taskRawStringValue(waited.Result["result"])
-	if got := streamed.String(); got != want || want != prefix+tail {
-		t.Fatalf("streamed output = %q, TASK result = %q, want %q", got, want, prefix+tail)
-	}
-	if tailIndex < 0 || closeIndex < 0 || tailIndex >= closeIndex {
-		t.Fatalf("frames = %#v, want completion tail before terminal close", subscribed.frames)
 	}
 }
 
@@ -5833,31 +5427,6 @@ func TestTaskSnapshotToolResultKeepsSubagentTerminalRefInMetaOnly(t *testing.T) 
 	}
 }
 
-func TestSubagentActivityCursorAdvancesWithStreamEvents(t *testing.T) {
-	t.Parallel()
-
-	child := &subagentTask{
-		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "child-session"},
-		sessionRef: session.SessionRef{SessionID: "parent-session"},
-		handle:     "nova",
-		state:      taskapi.StateRunning,
-		running:    true,
-		result:     map[string]any{"output_preview": "Inspecting files"},
-	}
-	before := subagentTaskToolPayload(child.snapshot())
-	child.mu.Lock()
-	child.appendStreamFrameLocked(stream.Frame{Text: "Read gateway.go"})
-	child.mu.Unlock()
-	after := subagentTaskToolPayload(child.snapshot())
-
-	if before["activity_cursor"] != int64(0) || after["activity_cursor"] != int64(1) {
-		t.Fatalf("activity cursors = %#v -> %#v, want 0 -> 1", before["activity_cursor"], after["activity_cursor"])
-	}
-	if before["output_preview"] != after["output_preview"] {
-		t.Fatalf("stream cursor advance changed independent preview: %#v -> %#v", before, after)
-	}
-}
-
 func TestRuntimeTaskToolResolvesSubagentHandle(t *testing.T) {
 	t.Parallel()
 
@@ -5967,7 +5536,7 @@ func TestRuntimeTaskReadObservesSubagentImmediately(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskWaitReturnsEveryUnreadTurnFinalOnce(t *testing.T) {
+func TestRuntimeTaskWaitReturnsLatestUnreadTurnFinalOnce(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -5984,11 +5553,11 @@ func TestRuntimeTaskWaitReturnsEveryUnreadTurnFinalOnce(t *testing.T) {
 	child.mu.Lock()
 	child.applyResult(delegation.Result{State: delegation.StateCompleted, Result: "first exact Final"})
 	child.mu.Unlock()
-	beginObservedActivityForTest(child)
+	beginTaskTurnForFinalResponseTest(child)
 	child.mu.Lock()
 	child.applyResult(delegation.Result{State: delegation.StateCompleted, Result: "second exact Final"})
 	child.mu.Unlock()
-	beginObservedActivityForTest(child)
+	beginTaskTurnForFinalResponseTest(child)
 	child.mu.Lock()
 	child.applyResult(delegation.Result{
 		State: delegation.StateRunning, Running: true, OutputPreview: "third Turn in progress",
@@ -6004,14 +5573,12 @@ func TestRuntimeTaskWaitReturnsEveryUnreadTurnFinalOnce(t *testing.T) {
 	first := callRuntimeTaskTool(t, taskTool, map[string]any{"action": "wait", "handle": "ella"})
 	payload := testToolResultPayload(t, first)
 	responses, _ := payload["final_responses"].([]any)
-	if len(responses) != 2 {
-		t.Fatalf("first Task wait payload = %#v, want two unread FinalResponses", payload)
+	if len(responses) != 1 {
+		t.Fatalf("first Task wait payload = %#v, want latest unread FinalResponse fallback", payload)
 	}
-	firstFinal, _ := responses[0].(map[string]any)
-	secondFinal, _ := responses[1].(map[string]any)
-	if firstFinal["turn_id"] != "task-multi-final:1" || firstFinal["final_message"] != "first exact Final" ||
-		secondFinal["turn_id"] != "task-multi-final:2" || secondFinal["final_message"] != "second exact Final" {
-		t.Fatalf("ordered FinalResponses = %#v, want exact Turns 1 and 2", responses)
+	latestFinal, _ := responses[0].(map[string]any)
+	if latestFinal["turn_id"] != "task-multi-final:2" || latestFinal["final_message"] != "second exact Final" {
+		t.Fatalf("FinalResponses = %#v, want exact latest Turn 2", responses)
 	}
 	if payload["state"] != "running" || payload["output_preview"] != "third Turn in progress" ||
 		payload["final_message"] != "second exact Final" {
@@ -6029,6 +5596,17 @@ func TestRuntimeTaskWaitReturnsEveryUnreadTurnFinalOnce(t *testing.T) {
 	if payload["state"] != "running" || payload["output_preview"] != "third Turn in progress" {
 		t.Fatalf("second Task read payload = %#v, want only current running observation", payload)
 	}
+}
+
+func beginTaskTurnForFinalResponseTest(task *subagentTask) {
+	task.mu.Lock()
+	task.turnSeq++
+	task.applyResult(delegation.Result{
+		TaskID:  task.ref.TaskID,
+		State:   delegation.StateRunning,
+		Running: true,
+	})
+	task.mu.Unlock()
 }
 
 func TestRuntimeTaskReadRejectsBatchHandles(t *testing.T) {

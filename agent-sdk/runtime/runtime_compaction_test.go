@@ -69,9 +69,11 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
+	capture := &testSourceCapture{}
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "continue",
+		SessionRef:     activeSession.SessionRef,
+		Input:          "continue",
+		SourceObserver: capture,
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: testModel,
@@ -80,10 +82,11 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	runEvents, err := drainRunnerEvents(t, result.Handle)
+	_, err = drainRunnerEvents(t, result.Handle)
 	if err != nil {
 		t.Fatalf("runner error = %v", err)
 	}
+	runEvents := capture.Events()
 	userIndex := slices.IndexFunc(runEvents, func(event *session.Event) bool {
 		return event != nil && event.Type == session.EventTypeUser && strings.Contains(session.EventText(event), "continue")
 	})
@@ -1361,9 +1364,11 @@ Next action: verify reload from file-backed events only
 		},
 		replyText: "replay ok",
 	}
+	capture := &testSourceCapture{}
 	result, err := runtime2.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "continue after reload",
+		SessionRef:     activeSession.SessionRef,
+		Input:          "continue after reload",
+		SourceObserver: capture,
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: replayModel,
@@ -1372,7 +1377,8 @@ Next action: verify reload from file-backed events only
 	if err != nil {
 		t.Fatalf("runtime2.Run() error = %v", err)
 	}
-	events, seqErr := drainRunnerEvents(t, result.Handle)
+	seqErr := result.Handle.WaitCompletion(t.Context())
+	events := capture.Events()
 	if seqErr != nil {
 		t.Fatalf("runner error = %v", seqErr)
 	}
@@ -2198,9 +2204,11 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
+	capture := &testSourceCapture{}
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "Use ECHO and then finish.",
+		SessionRef:     activeSession.SessionRef,
+		Input:          "Use ECHO and then finish.",
+		SourceObserver: capture,
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: testModel,
@@ -2210,13 +2218,13 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("runner error = %v", err)
+	}
 
 	var finalText string
 	sawCompactNotice := false
-	for event, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			t.Fatalf("runner error = %v", seqErr)
-		}
+	for _, event := range capture.Events() {
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
@@ -2328,9 +2336,11 @@ func TestRuntimeAutoCompactsBeforePostToolModelRequest(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
+	capture := &testSourceCapture{}
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "Use ECHO and then finish.",
+		SessionRef:     activeSession.SessionRef,
+		Input:          "Use ECHO and then finish.",
+		SourceObserver: capture,
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: testModel,
@@ -2340,13 +2350,13 @@ func TestRuntimeAutoCompactsBeforePostToolModelRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("runner error = %v", err)
+	}
 
 	var finalText string
 	sawCompactNotice := false
-	for event, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			t.Fatalf("runner error = %v", seqErr)
-		}
+	for _, event := range capture.Events() {
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
@@ -2449,9 +2459,11 @@ func TestRuntimeDoesNotCompactProductionSizedInlineImagesBelowProviderWatermark(
 		t.Fatalf("New() error = %v", err)
 	}
 
+	capture := &testSourceCapture{}
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "Use ECHO and then finish.",
+		SessionRef:     activeSession.SessionRef,
+		Input:          "Use ECHO and then finish.",
+		SourceObserver: capture,
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: testModel,
@@ -2461,14 +2473,14 @@ func TestRuntimeDoesNotCompactProductionSizedInlineImagesBelowProviderWatermark(
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("runner error = %v", err)
+	}
 
 	var finalText string
 	sawCompactNotice := false
 	sawCompactActivity := false
-	for event, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			t.Fatalf("runner error = %v", seqErr)
-		}
+	for _, event := range capture.Events() {
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
@@ -2550,9 +2562,11 @@ func TestRuntimeAutoCompactFailurePublishesLiveNotice(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
+	capture := &testSourceCapture{}
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "Use ECHO and then finish.",
+		SessionRef:     activeSession.SessionRef,
+		Input:          "Use ECHO and then finish.",
+		SourceObserver: capture,
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: testModel,
@@ -2563,7 +2577,8 @@ func TestRuntimeAutoCompactFailurePublishesLiveNotice(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	events, seqErr := drainRunnerEvents(t, result.Handle)
+	seqErr := result.Handle.WaitCompletion(t.Context())
+	events := capture.Events()
 	if seqErr == nil {
 		t.Fatal("runner error = nil, want compact failure")
 	}
@@ -2656,9 +2671,11 @@ func TestRuntimeCompactsAfterRetryExhaustedAtHighWater(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
+	capture := &testSourceCapture{}
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "Use ECHO and then finish.",
+		SessionRef:     activeSession.SessionRef,
+		Input:          "Use ECHO and then finish.",
+		SourceObserver: capture,
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: testModel,
@@ -2668,13 +2685,13 @@ func TestRuntimeCompactsAfterRetryExhaustedAtHighWater(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("runner error = %v", err)
+	}
 
 	var finalText string
 	sawCompactNotice := false
-	for event, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			t.Fatalf("runner error = %v", seqErr)
-		}
+	for _, event := range capture.Events() {
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}

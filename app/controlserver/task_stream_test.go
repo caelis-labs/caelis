@@ -2,6 +2,7 @@ package controlserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
@@ -33,11 +35,12 @@ func TestTaskHTTPRoutesBindPrincipalAndPreserveEnvelopeWire(t *testing.T) {
 			SessionID: "session-1", TaskID: "task-1", Handle: "command-1",
 			Kind: task.KindCommand, State: task.StateRunning, Running: true,
 		}}},
-		batch: taskstream.Batch{
-			Events:         []eventstream.Envelope{envelope},
-			ActivityID:     "activity-2",
-			ResumeMode:     taskstream.ResumeModeExact,
-			BoundaryCursor: "task-boundary-1",
+		batch: taskstream.ReadResult{
+			Deliveries: []taskstream.Delivery{{
+				Kind: taskstream.DeliveryAppendPage, Source: taskstream.SourceExact,
+				Events: []eventstream.Envelope{envelope}, NextCursor: "task-cursor-1", ActivityID: "activity-2",
+			}},
+			ActivityID: "activity-2",
 		},
 	}
 	server := newTaskTestServer(t, tasks)
@@ -61,12 +64,50 @@ func TestTaskHTTPRoutesBindPrincipalAndPreserveEnvelopeWire(t *testing.T) {
 	eventsRecorder := httptest.NewRecorder()
 	server.ServeHTTP(eventsRecorder, eventsRequest)
 	if eventsRecorder.Code != http.StatusOK ||
-		eventsRecorder.Header().Get(resumeModeHeader) != string(taskstream.ResumeModeExact) ||
-		eventsRecorder.Header().Get(boundaryCursorHeader) != "task-boundary-1" ||
 		tasks.read.ExpectedActivityID != "activity-2" ||
+		!strings.Contains(eventsRecorder.Body.String(), `"kind":"append_page"`) ||
+		!strings.Contains(eventsRecorder.Body.String(), `"source":"exact"`) ||
 		!strings.Contains(eventsRecorder.Body.String(), `"activity_id":"activity-2"`) ||
 		!strings.Contains(eventsRecorder.Body.String(), `"sequence":"18446744073709551615"`) {
 		t.Fatalf("Task events headers=%#v body=%s", eventsRecorder.Header(), eventsRecorder.Body.String())
+	}
+}
+
+func TestMarshalTaskReplacementKeepsEventsNonResumable(t *testing.T) {
+	t.Parallel()
+
+	envelope := eventstream.Envelope{
+		Kind: eventstream.KindNotice, Notice: "fallback", Cursor: "must-not-escape",
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		Position: &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
+			Generation: "fallback-generation", Sequence: 1,
+		}},
+	}
+	// Projection owns stripping record-local resume identity before this wire
+	// boundary. This fixture represents its public replacement output.
+	envelope.Cursor = ""
+	envelope.Position = nil
+	raw, err := marshalTaskDelivery(taskstream.Delivery{
+		Kind: taskstream.DeliveryReplacePage, Source: taskstream.SourceReplacement,
+		SnapshotID: "snapshot-1", Events: []eventstream.Envelope{envelope},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var encoded struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded.Events) != 1 {
+		t.Fatalf("wire replacement = %s", raw)
+	}
+	if _, ok := encoded.Events[0]["cursor"]; ok {
+		t.Fatalf("Task replacement exposed cursor: %s", raw)
+	}
+	if _, ok := encoded.Events[0]["position"]; ok {
+		t.Fatalf("Task replacement exposed position: %s", raw)
 	}
 }
 
@@ -75,7 +116,7 @@ func TestTaskHTTPSubscribeParsesFollowQuery(t *testing.T) {
 		Kind: eventstream.KindNotice, Cursor: "task-cursor-1", SessionID: "session-1", Notice: "live",
 	})
 	tasks := &fakeTaskService{subscribe: taskstream.SubscribeResult{
-		Subscription: subscription, ResumeMode: taskstream.ResumeModeCurrentState,
+		Subscription: subscription,
 	}}
 	server := newTaskTestServer(t, tasks)
 	request := httptest.NewRequest(
@@ -132,7 +173,7 @@ func TestTaskHTTPSSEMarksCleanAndFailedSubscriptionEnds(t *testing.T) {
 		wantEvent string
 	}{
 		{name: "clean", wantEvent: wirev1.TaskStreamDoneEventName},
-		{name: "slow consumer", streamErr: taskstream.ErrSlowConsumer, wantEvent: wirev1.TaskStreamErrorEventName},
+		{name: "unavailable", streamErr: errorcode.New(errorcode.Unavailable, "secret spool path"), wantEvent: wirev1.TaskStreamErrorEventName},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			subscription := newTaskTestSubscription(test.streamErr, eventstream.Envelope{
@@ -141,8 +182,6 @@ func TestTaskHTTPSSEMarksCleanAndFailedSubscriptionEnds(t *testing.T) {
 			})
 			tasks := &fakeTaskService{subscribe: taskstream.SubscribeResult{
 				Subscription: subscription,
-				ResumeMode:   taskstream.ResumeModeCurrentState,
-				TransientGap: true,
 			}}
 			server := newTaskTestServer(t, tasks)
 			request := httptest.NewRequest(
@@ -160,13 +199,13 @@ func TestTaskHTTPSSEMarksCleanAndFailedSubscriptionEnds(t *testing.T) {
 				t.Fatal(err)
 			}
 			if response.StatusCode != http.StatusOK ||
-				response.Header.Get(resumeModeHeader) != string(taskstream.ResumeModeCurrentState) ||
 				!strings.Contains(string(body), "id: task-cursor-1") ||
+				!strings.Contains(string(body), `"kind":"append_page"`) ||
 				!strings.Contains(string(body), "event: "+test.wantEvent) {
 				t.Fatalf("Task SSE status=%d headers=%#v body=%s", response.StatusCode, response.Header, body)
 			}
 			if test.streamErr != nil &&
-				(!strings.Contains(string(body), `"code":"slow_consumer"`) ||
+				(!strings.Contains(string(body), `"code":"unavailable"`) ||
 					strings.Contains(string(body), test.streamErr.Error())) {
 				t.Fatalf("Task SSE error was not safely typed: %s", body)
 			}
@@ -191,26 +230,28 @@ func newTaskTestServer(t *testing.T, tasks taskstream.Service) *Server {
 }
 
 type taskTestSubscription struct {
-	events chan eventstream.Envelope
-	err    error
-	last   string
+	deliveries chan taskstream.Delivery
+	err        error
+	last       string
 }
 
 func newTaskTestSubscription(err error, events ...eventstream.Envelope) *taskTestSubscription {
-	channel := make(chan eventstream.Envelope, len(events))
+	channel := make(chan taskstream.Delivery, len(events))
 	last := ""
 	for _, envelope := range events {
-		channel <- envelope
+		channel <- taskstream.Delivery{
+			Kind: taskstream.DeliveryAppendPage, Source: taskstream.SourceExact,
+			Events: []eventstream.Envelope{envelope}, NextCursor: envelope.Cursor,
+		}
 		last = envelope.Cursor
 	}
 	close(channel)
-	return &taskTestSubscription{events: channel, err: err, last: last}
+	return &taskTestSubscription{deliveries: channel, err: err, last: last}
 }
 
-func (s *taskTestSubscription) Events() <-chan eventstream.Envelope { return s.events }
-func (*taskTestSubscription) Close() error                          { return nil }
-func (s *taskTestSubscription) Err() error                          { return s.err }
-func (s *taskTestSubscription) LastCursor() string                  { return s.last }
+func (s *taskTestSubscription) Deliveries() <-chan taskstream.Delivery { return s.deliveries }
+func (*taskTestSubscription) Close() error                             { return nil }
+func (s *taskTestSubscription) Err() error                             { return s.err }
 
 var _ taskstream.Subscription = (*taskTestSubscription)(nil)
 

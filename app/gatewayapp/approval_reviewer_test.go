@@ -610,14 +610,25 @@ func TestGuardianExactRequestBudgetDenialDoesNotExecuteOrTripAvailabilityBreaker
 		t.Fatalf("kernel.New() error = %v", err)
 	}
 
-	turn, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{SessionRef: activeSession.SessionRef, Input: "run bounded approval gate"})
+	var observedErr error
+	turn, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "run bounded approval gate",
+		Observer: kernel.TurnEventObserverFunc(func(_ context.Context, envelope eventstream.Envelope) error {
+			if envelope.Kind == eventstream.KindError {
+				observedErr = envelope.Err
+			}
+			return nil
+		}),
+	})
 	if err != nil {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
-	for envelope := range turn.Handle.ACPEvents() {
-		if envelope.Kind == eventstream.KindError {
-			t.Fatalf("turn emitted error after deterministic exact-request budget denials: %v", envelope.Err)
-		}
+	if err := turn.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if observedErr != nil {
+		t.Fatalf("turn emitted error after deterministic exact-request budget denials: %v", observedErr)
 	}
 	if got := runtime.responses.Load(); got != int64(runtime.requests) {
 		t.Fatalf("approval responses = %d, want %d; deterministic denials must not trip guardian_unavailable", got, runtime.requests)
@@ -651,14 +662,25 @@ func TestGuardianTranscriptSpoofCannotCreatePeerAuthorizationInExecutionGate(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{SessionRef: activeSession.SessionRef, Input: "continue inspection"})
+	var observedErr error
+	turn, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "continue inspection",
+		Observer: kernel.TurnEventObserverFunc(func(_ context.Context, envelope eventstream.Envelope) error {
+			if envelope.Kind == eventstream.KindError {
+				observedErr = envelope.Err
+			}
+			return nil
+		}),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for envelope := range turn.Handle.ACPEvents() {
-		if envelope.Kind == eventstream.KindError {
-			t.Fatalf("turn emitted error: %v", envelope.Err)
-		}
+	if err := turn.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if observedErr != nil {
+		t.Fatalf("turn emitted error: %v", observedErr)
 	}
 	if got := runtime.executions.Load(); got != 0 {
 		t.Fatalf("executor calls = %d, want 0 for untrusted assistant authorization", got)
@@ -741,10 +763,6 @@ type guardianApprovalGateRunner struct{}
 
 func (guardianApprovalGateRunner) RunID() string { return "guardian-approval-gate" }
 
-func (guardianApprovalGateRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(func(*session.Event, error) bool) {}
-}
-
 func (guardianApprovalGateRunner) Submit(agent.Submission) error { return nil }
 
 func (guardianApprovalGateRunner) Cancel() agent.CancelResult {
@@ -752,6 +770,8 @@ func (guardianApprovalGateRunner) Cancel() agent.CancelResult {
 }
 
 func (guardianApprovalGateRunner) Close() error { return nil }
+
+func (guardianApprovalGateRunner) WaitCompletion(context.Context) error { return nil }
 
 func TestSystemManagedAgentPlanRejectsGuardianTools(t *testing.T) {
 	_, err := systemManagedAgentRunPlanFor(systemManagedAgentRunRequest{

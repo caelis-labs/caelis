@@ -18,34 +18,10 @@ import (
 	"github.com/caelis-labs/caelis/internal/jsonvalue"
 )
 
-func TestTurnHandleReplaysEventstreamAfterCursor(t *testing.T) {
+func TestTurnHandleObserverProjectsCanonicalAndPassesThroughTransient(t *testing.T) {
 	t.Parallel()
 
 	handle := newTestTurnHandle()
-	handle.publishACP(eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "one"}, "")
-	handle.publishACP(eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "two"}, "")
-
-	all, next, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatalf("eventsAfter() error = %v", err)
-	}
-	if len(all) != 2 || next != all[1].Cursor {
-		t.Fatalf("eventsAfter() = %#v, %q, want both events and latest cursor", all, next)
-	}
-	replayed, next, err := handle.eventsAfter(all[0].Cursor)
-	if err != nil {
-		t.Fatalf("eventsAfter(cursor) error = %v", err)
-	}
-	if len(replayed) != 1 || replayed[0].Notice != "two" || next != replayed[0].Cursor {
-		t.Fatalf("eventsAfter(cursor) = %#v, %q, want second event", replayed, next)
-	}
-}
-
-func TestTurnHandleACPEventsProjectsCanonicalAndPassesThroughTransient(t *testing.T) {
-	t.Parallel()
-
-	handle := newTestTurnHandle()
-	acpEvents := handle.ACPEvents()
 	msg := model.NewTextMessage(model.RoleAssistant, "done")
 	handle.publishSessionEvent(&session.Event{ID: "e1", Seq: 1, Type: session.EventTypeAssistant, Message: &msg})
 	handle.publishACP(eventstream.Envelope{
@@ -54,11 +30,10 @@ func TestTurnHandleACPEventsProjectsCanonicalAndPassesThroughTransient(t *testin
 			SessionUpdate: "vendor/custom",
 		},
 	}, "acp_passthrough")
-	handle.finish()
 
-	got := drainACPEvents(acpEvents)
+	got := testObservedTurnEvents(handle)
 	if len(got) != 2 {
-		t.Fatalf("ACPEvents() produced %d events, want 2: %#v", len(got), got)
+		t.Fatalf("observer produced %d events, want 2: %#v", len(got), got)
 	}
 	if update, ok := got[0].Update.(eventstream.ContentChunk); !ok || update.SessionUpdate != eventstream.UpdateAgentMessage {
 		t.Fatalf("first ACP update = %#v, want projected assistant chunk", got[0].Update)
@@ -90,12 +65,9 @@ func TestTurnHandleCanSuppressCanonicalProjectionForNativePassthrough(t *testing
 		},
 	}, "acp_passthrough")
 
-	replayed, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatalf("eventsAfter() error = %v", err)
-	}
+	replayed := testObservedTurnEvents(handle)
 	if len(replayed) != 1 {
-		t.Fatalf("eventsAfter() = %#v, want only native passthrough", replayed)
+		t.Fatalf("observed events = %#v, want only native passthrough", replayed)
 	}
 	if update, ok := replayed[0].Update.(eventstream.RawUpdate); !ok || update.SessionUpdate != "vendor/custom" {
 		t.Fatalf("ACP update = %#v, want native raw passthrough", replayed[0].Update)
@@ -120,10 +92,7 @@ func TestTurnHandlePublishesApprovalAsACPPermission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("publishApproval() error = %v", err)
 	}
-	replayed, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatalf("eventsAfter() error = %v", err)
-	}
+	replayed := testObservedTurnEvents(handle)
 	if len(replayed) != 1 || replayed[0].Kind != eventstream.KindRequestPermission || replayed[0].Permission == nil {
 		t.Fatalf("approval events = %#v, want request_permission", replayed)
 	}
@@ -145,9 +114,11 @@ func TestTurnHandlePublishesApprovalAsACPPermission(t *testing.T) {
 func TestTurnHandlePublishApprovalRequiresDurablePersister(t *testing.T) {
 	t.Parallel()
 
+	recorder := newTestTurnEventRecorder()
 	handle := newTurnHandle(turnHandleConfig{
 		handleID: "h1", runID: "run-1", turnID: "turn-1",
 		sessionRef: session.SessionRef{SessionID: "s1"},
+		observer:   recorder,
 	})
 	_, err := handle.publishApproval(&agent.ApprovalRequest{
 		Tool: tool.Definition{Name: "RunCommand"},
@@ -156,10 +127,7 @@ func TestTurnHandlePublishApprovalRequiresDurablePersister(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "durable approval persistence is unavailable") {
 		t.Fatalf("publishApproval() error = %v, want durable persistence failure", err)
 	}
-	events, _, replayErr := handle.eventsAfter("")
-	if replayErr != nil {
-		t.Fatal(replayErr)
-	}
+	events := recorder.snapshot()
 	if len(events) != 0 {
 		t.Fatalf("approval events = %#v, want no transient permission fallback", events)
 	}
@@ -202,10 +170,7 @@ func TestTurnHandlePublishErrorUsesEventstreamError(t *testing.T) {
 
 	handle := newTestTurnHandle()
 	handle.publishError(errors.New("provider failed"))
-	replayed, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatalf("eventsAfter() error = %v", err)
-	}
+	replayed := testObservedTurnEvents(handle)
 	if len(replayed) != 1 || replayed[0].Kind != eventstream.KindError || replayed[0].Error != "provider failed" {
 		t.Fatalf("error event = %#v, want eventstream error", replayed)
 	}
@@ -217,6 +182,7 @@ func TestTurnHandlePublishErrorUsesEventstreamError(t *testing.T) {
 func TestParticipantTurnHandlePublishErrorPreservesScopeAndSanitizesDisplay(t *testing.T) {
 	t.Parallel()
 
+	recorder := newTestTurnEventRecorder()
 	handle := newTurnHandle(turnHandleConfig{
 		handleID:      "participant-handle-1",
 		runID:         "participant-run-1",
@@ -226,6 +192,7 @@ func TestParticipantTurnHandlePublishErrorPreservesScopeAndSanitizesDisplay(t *t
 		sessionRef: session.SessionRef{
 			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
 		},
+		observer: recorder,
 	})
 	rawCause := errors.New("model: http status 529 body=provider-secret")
 	handle.publishError(&model.RetryExhaustedError{
@@ -234,10 +201,7 @@ func TestParticipantTurnHandlePublishErrorPreservesScopeAndSanitizesDisplay(t *t
 		Cause:        rawCause,
 	})
 
-	replayed, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatalf("eventsAfter() error = %v", err)
-	}
+	replayed := recorder.snapshot()
 	if len(replayed) != 1 {
 		t.Fatalf("error events = %#v, want one", replayed)
 	}
@@ -424,7 +388,7 @@ func TestTurnHandleCancelCancelsContextAndRunner(t *testing.T) {
 func TestTurnHandlePublishDoesNotBlockWithoutSubscriber(t *testing.T) {
 	t.Parallel()
 
-	handle := newTestTurnHandle()
+	handle := newTurnHandle(turnHandleConfig{handleID: "h1"})
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 96; i++ {
@@ -437,128 +401,6 @@ func TestTurnHandlePublishDoesNotBlockWithoutSubscriber(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("publish blocked without a live subscriber")
-	}
-
-	replayed, next, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatalf("eventsAfter() error = %v", err)
-	}
-	if len(replayed) != 96 || next != replayed[len(replayed)-1].Cursor {
-		t.Fatalf("replayed len/next = %d/%q, want 96/latest", len(replayed), next)
-	}
-}
-
-func TestTurnHandleLiveStreamDoesNotDropApprovalWhenConsumerIsSlow(t *testing.T) {
-	t.Parallel()
-
-	handle := newTestTurnHandle()
-	for i := 0; i < 96; i++ {
-		handle.publishACP(eventstream.Envelope{Kind: eventstream.KindNotice, Notice: fmt.Sprintf("event-%d", i)}, "")
-	}
-	if _, err := handle.publishApproval(&agent.ApprovalRequest{
-		Tool: tool.Definition{Name: "RunCommand"},
-		Call: tool.Call{ID: "call-1"},
-	}); err != nil {
-		t.Fatalf("publishApproval() error = %v", err)
-	}
-	handle.finish()
-
-	deadline := time.After(time.Second)
-	events := handle.ACPEvents()
-	for {
-		select {
-		case env, ok := <-events:
-			if !ok {
-				t.Fatal("live events closed before approval request was delivered")
-			}
-			if env.Kind == eventstream.KindRequestPermission {
-				return
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for approval request from slow-consumer live stream")
-		}
-	}
-}
-
-func TestTurnHandleLiveDispatchReleasesHeadWithoutShiftingBufferedTail(t *testing.T) {
-	t.Parallel()
-
-	const backlog = 1024
-	handle := newTestTurnHandle()
-	handle.eventsCh = make(chan eventstream.Envelope)
-	handle.mu.Lock()
-	for i := range backlog {
-		handle.liveQueue = append(handle.liveQueue, eventstream.Envelope{
-			Kind:   eventstream.KindNotice,
-			Notice: fmt.Sprintf("event-%d", i),
-		})
-	}
-	backing := handle.liveQueue[:len(handle.liveQueue):len(handle.liveQueue)]
-	handle.mu.Unlock()
-
-	events := handle.ACPEvents()
-	deadline := time.Now().Add(time.Second)
-	var releasedHead string
-	for {
-		handle.mu.Lock()
-		if backing[0].Notice != "event-0" {
-			releasedHead = backing[0].Notice
-			handle.liveQueue = nil
-			handle.liveQueueHead = 0
-			handle.finished = true
-			handle.eventsCond.Broadcast()
-			handle.mu.Unlock()
-			break
-		}
-		handle.mu.Unlock()
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for live dispatcher to dequeue the first event")
-		}
-		time.Sleep(time.Millisecond)
-	}
-
-	first, ok := <-events
-	if !ok || first.Notice != "event-0" {
-		t.Fatalf("first live event = %#v, %v; want event-0, true", first, ok)
-	}
-	for range events {
-	}
-	if releasedHead == "event-1" {
-		t.Fatal("live dispatcher shifted the buffered tail over the head; repeated backlog drains are quadratic")
-	}
-	if releasedHead != "" {
-		t.Fatalf("live dispatcher retained consumed head %q; want the released slot cleared", releasedHead)
-	}
-}
-
-func TestTurnHandleLiveDispatchPreservesLargeBacklogOrder(t *testing.T) {
-	t.Parallel()
-
-	const backlog = 4096
-	handle := newTestTurnHandle()
-	for i := range backlog {
-		handle.publishACP(eventstream.Envelope{
-			Kind:   eventstream.KindNotice,
-			Notice: fmt.Sprintf("event-%d", i),
-		}, "")
-	}
-	handle.finish()
-
-	count := 0
-	for env := range handle.ACPEvents() {
-		want := fmt.Sprintf("event-%d", count)
-		if env.Notice != want {
-			t.Fatalf("live event %d Notice = %q, want %q", count, env.Notice, want)
-		}
-		count++
-	}
-	if count != backlog {
-		t.Fatalf("ACPEvents() produced %d events, want %d", count, backlog)
-	}
-	handle.mu.Lock()
-	defer handle.mu.Unlock()
-	if handle.liveQueueHead != 0 || len(handle.liveQueue) != 0 {
-		t.Fatalf("drained live queue head/len = %d/%d, want 0/0", handle.liveQueueHead, len(handle.liveQueue))
 	}
 }
 
@@ -751,10 +593,7 @@ func TestTurnHandleQueuesChildApprovalsInFIFOOrder(t *testing.T) {
 		t.Fatalf("child approval ids = %q and %q, want distinct ids", childA.id, childB.id)
 	}
 
-	events, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatalf("eventsAfter() error = %v", err)
-	}
+	events := testObservedTurnEvents(handle)
 	if len(events) != 1 {
 		t.Fatalf("permission events = %#v, want only active child A", events)
 	}
@@ -793,10 +632,7 @@ func TestTurnHandleQueuesChildApprovalsInFIFOOrder(t *testing.T) {
 		t.Fatal("child A waiter did not receive its approval")
 	}
 
-	events, _, err = handle.eventsAfter("")
-	if err != nil {
-		t.Fatalf("eventsAfter() after child A = %v", err)
-	}
+	events = testObservedTurnEvents(handle)
 	if len(events) != 2 {
 		t.Fatalf("permission events after child A = %#v, want child B published next", events)
 	}
@@ -840,10 +676,7 @@ func TestTurnHandleQueuesMainAndChildApprovalsOnOnePlane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("publish child approval: %v", err)
 	}
-	events, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatalf("eventsAfter() error = %v", err)
-	}
+	events := testObservedTurnEvents(handle)
 	if len(events) != 1 || events[0].ApprovalRequestID != main.id || events[0].Scope != eventstream.ScopeMain {
 		t.Fatalf("initial approval events = %#v, want only active main request %q", events, main.id)
 	}
@@ -868,10 +701,7 @@ func TestTurnHandleQueuesMainAndChildApprovalsOnOnePlane(t *testing.T) {
 		t.Fatal("main waiter did not receive its decision")
 	}
 
-	events, _, err = handle.eventsAfter("")
-	if err != nil {
-		t.Fatalf("eventsAfter() after main = %v", err)
-	}
+	events = testObservedTurnEvents(handle)
 	if len(events) != 2 {
 		t.Fatalf("approval events after main = %#v, want child published next", events)
 	}
@@ -1009,10 +839,7 @@ func TestTurnHandleAdvancesQueueWhenActiveApprovalIsAbandoned(t *testing.T) {
 		t.Fatal("abandoned active approval was not released")
 	}
 
-	events, _, err := handle.eventsAfter("")
-	if err != nil {
-		t.Fatalf("eventsAfter() error = %v", err)
-	}
+	events := testObservedTurnEvents(handle)
 	if len(events) != 2 {
 		t.Fatalf("approval events = %#v, want second request published after failure", events)
 	}
@@ -1278,31 +1105,17 @@ func TestTurnHandleConcurrentApprovalSubmissionsOnlyResolveActiveHead(t *testing
 	}
 }
 
-func TestTurnHandleEventsAfterReturnsCursorNotFound(t *testing.T) {
-	t.Parallel()
-
-	handle := newTestTurnHandle()
-	handle.publishACP(eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "one"}, "")
-
-	_, _, err := handle.eventsAfter("missing")
-	if err == nil {
-		t.Fatal("eventsAfter() error = nil, want cursor_not_found")
-	}
-	var gwErr *Error
-	if !As(err, &gwErr) || gwErr.Code != CodeCursorNotFound {
-		t.Fatalf("eventsAfter() error = %v, want cursor_not_found", err)
-	}
-}
-
 func newTestTurnHandle() *turnHandle {
 	ref := session.SessionRef{
 		AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
 	}
-	return newTurnHandle(turnHandleConfig{
+	recorder := newTestTurnEventRecorder()
+	handle := newTurnHandle(turnHandleConfig{
 		handleID:   "h1",
 		runID:      "run-1",
 		turnID:     "turn-1",
 		sessionRef: ref,
+		observer:   recorder,
 		persistApproval: func(req *agent.ApprovalRequest, requestID eventstream.ApprovalRequestID) (*session.Event, error) {
 			permission := approval.ProtocolApprovalFromPayload(canonicalApprovalPayload(req))
 			event := &session.Event{
@@ -1325,6 +1138,8 @@ func newTestTurnHandle() *turnHandle {
 		},
 		createdAt: time.Unix(100, 0),
 	})
+	registerTestTurnRecorder(handle, recorder)
+	return handle
 }
 
 type contextualSubmissionRunner struct {
@@ -1337,36 +1152,6 @@ func (r *contextualSubmissionRunner) SubmitContext(ctx context.Context, submissi
 		return errors.New("contextual submission runner is unavailable")
 	}
 	return r.submitContext(ctx, submission)
-}
-
-func BenchmarkTurnHandleLiveQueueDrain(b *testing.B) {
-	for _, size := range []int{1024, 4096, 16384} {
-		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
-			sample := make([]eventstream.Envelope, size)
-			for i := range sample {
-				sample[i] = eventstream.Envelope{
-					Kind:   eventstream.KindNotice,
-					Notice: "event",
-				}
-			}
-			b.ReportAllocs()
-			for b.Loop() {
-				handle := newTestTurnHandle()
-				handle.mu.Lock()
-				handle.liveQueue = append(handle.liveQueue, sample...)
-				handle.finished = true
-				handle.mu.Unlock()
-
-				count := 0
-				for range handle.ACPEvents() {
-					count++
-				}
-				if count != size {
-					b.Fatalf("ACPEvents() produced %d events, want %d", count, size)
-				}
-			}
-		})
-	}
 }
 
 func testChildApprovalRequest(taskID string, path string) *agent.ApprovalRequest {
@@ -1444,12 +1229,4 @@ func assertApprovalNotActive(t *testing.T, err error) {
 	if err == nil || !As(err, &gwErr) || gwErr.Kind != KindConflict || gwErr.Code != CodeApprovalNotActive {
 		t.Fatalf("approval error = %v, want conflict approval_not_active", err)
 	}
-}
-
-func drainACPEvents(events <-chan eventstream.Envelope) []eventstream.Envelope {
-	var out []eventstream.Envelope
-	for env := range events {
-		out = append(out, env)
-	}
-	return out
 }

@@ -2,7 +2,6 @@ package acpagentbridge
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -11,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
 
 const (
@@ -98,7 +96,6 @@ func buildACPTaskStreamNotice(sessionID string, facts acpTaskStreamNoticeFacts) 
 			facts.anchor.handle,
 			activeTaskStreamFailureReason(code, facts.hasCursor, facts.resumeExhausted),
 		)
-		meta["transient_gap"] = true
 		meta["active_stream_interrupted"] = true
 		meta["resume_cursor_available"] = facts.hasCursor
 		meta["resume_exhausted"] = facts.resumeExhausted
@@ -155,9 +152,9 @@ func activeTaskStreamFailureReason(code errorcode.Code, hasCursor bool, resumeEx
 }
 
 func acpTaskStreamResolveRetryable(err error) bool {
-	// Slow-consumer and bare transport failures are observation gaps. Resume from
-	// the last accepted cursor instead of ending the active Task stream forever.
+	// Only discovery delay and transport/storage unavailability are retryable.
+	// A cursor-bearing retry remains exact-only; Control never splices a
+	// replacement after an already visible exact prefix.
 	return errorcode.Is(err, errorcode.NotFound) ||
-		errorcode.Is(err, errorcode.Unavailable) ||
-		errors.Is(err, taskstream.ErrSlowConsumer)
+		errorcode.Is(err, errorcode.Unavailable)
 }

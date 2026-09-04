@@ -21,20 +21,19 @@ import (
 const APIPrefix = "/api/control/v1"
 
 const (
-	ResumeEventName       = "caelis.control.resume"
 	BootstrapEventName    = "caelis.control.bootstrap"
-	BackfillDoneEventName = "caelis.control.backfill_done"
-	ResumeModeHeader      = "Caelis-Resume-Mode"
-	TransientGapHeader    = "Caelis-Transient-Gap"
-	BoundaryCursorHeader  = "Caelis-Boundary-Cursor"
+	FeedDeliveryEventName = "caelis.control.delivery"
+	FeedDoneEventName     = "caelis.control.done"
+	FeedErrorEventName    = "caelis.control.error"
 )
 
-// ResumeBoundary is the wire notification that tells a disconnected client
-// where to atomically attach again.
-type ResumeBoundary struct {
-	ResumeMode     appserver.ResumeMode `json:"resume_mode"`
-	TransientGap   bool                 `json:"transient_gap,omitempty"`
-	BoundaryCursor string               `json:"boundary_cursor,omitempty"`
+type FeedDelivery struct {
+	Kind       string            `json:"kind"`
+	Source     string            `json:"source"`
+	SnapshotID string            `json:"snapshot_id,omitempty"`
+	Page       uint32            `json:"page,omitempty"`
+	Events     []json.RawMessage `json:"events,omitempty"`
+	NextCursor string            `json:"next_cursor,omitempty"`
 }
 
 const (

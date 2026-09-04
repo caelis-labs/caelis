@@ -7,50 +7,16 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
-// spawnReplayProjector reconstructs final-only stdio Spawn results from durable
-// Session history. Child Task streams are transient, so a canonical terminal
-// Task read/wait result is the historical source for a child FinalResponse when
-// no durable parent Spawn result exists.
-type spawnReplayKey struct {
-	ToolCallID string
-	TurnID     string
-}
+// spawnReplayProjector normalizes canonical parent Spawn results from durable
+// Session history into standard ACP tool-result content. It never derives a
+// parent result from a Task read or wait observation.
+type spawnReplayProjector struct{}
 
-type spawnReplayTerminalFingerprint struct {
-	Status string
-	Text   string
-}
-
-type spawnReplayProjector struct {
-	closed              map[spawnReplayKey]struct{}
-	authoritative       map[spawnReplayKey]struct{}
-	legacyAuthoritative map[string]map[spawnReplayTerminalFingerprint]int
-}
-
-func newSpawnReplayProjector(events []*session.Event) *spawnReplayProjector {
-	p := &spawnReplayProjector{
-		closed:              map[spawnReplayKey]struct{}{},
-		authoritative:       map[spawnReplayKey]struct{}{},
-		legacyAuthoritative: map[string]map[spawnReplayTerminalFingerprint]int{},
-	}
-	for _, event := range events {
-		if key := finalSpawnEventKey(event); key.ToolCallID != "" {
-			p.authoritative[key] = struct{}{}
-			if key.TurnID == "" {
-				fingerprints := p.legacyAuthoritative[key.ToolCallID]
-				if fingerprints == nil {
-					fingerprints = map[spawnReplayTerminalFingerprint]int{}
-					p.legacyAuthoritative[key.ToolCallID] = fingerprints
-				}
-				fingerprints[finalSpawnEventFingerprint(event)]++
-			}
-		}
-	}
-	return p
+func newSpawnReplayProjector(_ []*session.Event) *spawnReplayProjector {
+	return &spawnReplayProjector{}
 }
 
 func (p *spawnReplayProjector) normalize(
@@ -64,51 +30,9 @@ func (p *spawnReplayProjector) normalize(
 	if !ok || !toolStatusFinal(update.Status) || !sessionEventOwnsSpawnCall(event, update.ToolCallID) {
 		return notification
 	}
-	rawOutput := session.NormalizeProtocolRawMap(update.RawOutput)
-	update = withSpawnReplayResult(update, rawOutput)
-	p.closed[spawnReplayKeyForRawOutput(update.ToolCallID, rawOutput)] = struct{}{}
+	update = withSpawnReplayResult(update, session.NormalizeProtocolRawMap(update.RawOutput))
 	notification.Update = update
 	return notification
-}
-
-func (p *spawnReplayProjector) observedParentCloses(env eventstream.Envelope, sessionID string) []eventstream.SessionNotification {
-	if p == nil {
-		return nil
-	}
-	results := taskstream.SpawnTaskResultsFromEnvelope(env)
-	if len(results) == 0 {
-		return nil
-	}
-	out := make([]eventstream.SessionNotification, 0, len(results))
-	for _, result := range results {
-		parentCallID := strings.TrimSpace(result.ParentCallID)
-		if parentCallID == "" {
-			continue
-		}
-		key := spawnReplayKeyForRawOutput(parentCallID, result.RawOutput)
-		if spawnReplaySetContains(p.closed, key) {
-			if key.TurnID == "" {
-				p.consumeLegacyFingerprint(parentCallID, result.Status, result.RawOutput)
-			}
-			continue
-		}
-		if p.authoritativeContains(key, result.Status, result.RawOutput) {
-			continue
-		}
-		p.closed[key] = struct{}{}
-		status := result.Status
-		update := withSpawnReplayResult(eventstream.ToolCallUpdate{
-			SessionUpdate: eventstream.UpdateToolCallInfo,
-			ToolCallID:    parentCallID,
-			Status:        &status,
-			RawOutput:     result.RawOutput,
-		}, result.RawOutput)
-		out = append(out, eventstream.SessionNotification{
-			SessionID: strings.TrimSpace(sessionID),
-			Update:    update,
-		})
-	}
-	return out
 }
 
 func withSpawnReplayResult(update eventstream.ToolCallUpdate, rawOutput map[string]any) eventstream.ToolCallUpdate {
@@ -200,91 +124,6 @@ func sessionEventOwnsSpawnCall(event *session.Event, toolCallID string) bool {
 	response := message.ToolResponse()
 	return response != nil && strings.TrimSpace(response.ID) == toolCallID &&
 		response.Name == spawn.ToolName
-}
-
-func finalSpawnEventKey(event *session.Event) spawnReplayKey {
-	if event == nil {
-		return spawnReplayKey{}
-	}
-	if event.Tool != nil && event.Tool.Name == spawn.ToolName &&
-		toolStatusFinalString(event.Tool.Status) {
-		return spawnReplayKeyForRawOutput(event.Tool.ID, event.Tool.Output)
-	}
-	update := session.ProtocolUpdateOf(event)
-	if update != nil && toolStatusFinalString(update.Status) &&
-		sessionEventOwnsSpawnCall(event, update.ToolCallID) {
-		return spawnReplayKeyForRawOutput(update.ToolCallID, update.RawOutput)
-	}
-	return spawnReplayKey{}
-}
-
-func spawnReplayKeyForRawOutput(toolCallID string, rawOutput map[string]any) spawnReplayKey {
-	return spawnReplayKey{
-		ToolCallID: strings.TrimSpace(toolCallID),
-		TurnID:     strings.TrimSpace(display.MapString(rawOutput, "turn_id")),
-	}
-}
-
-func spawnReplaySetContains(values map[spawnReplayKey]struct{}, key spawnReplayKey) bool {
-	_, ok := values[key]
-	return ok
-}
-
-// authoritativeContains pairs a legacy parent result without a Turn ID only
-// with an observed result carrying the same terminal payload. A successful
-// pairing adds an exact alias for repeated observations; it never makes the
-// empty Turn ID a wildcard for later executions reusing the Spawn call ID.
-func (p *spawnReplayProjector) authoritativeContains(key spawnReplayKey, status string, rawOutput map[string]any) bool {
-	if p == nil {
-		return false
-	}
-	if spawnReplaySetContains(p.authoritative, key) {
-		if key.TurnID == "" {
-			p.consumeLegacyFingerprint(key.ToolCallID, status, rawOutput)
-		}
-		return true
-	}
-	if key.ToolCallID == "" || key.TurnID == "" ||
-		!p.consumeLegacyFingerprint(key.ToolCallID, status, rawOutput) {
-		return false
-	}
-	p.authoritative[key] = struct{}{}
-	return true
-}
-
-func (p *spawnReplayProjector) consumeLegacyFingerprint(toolCallID string, status string, rawOutput map[string]any) bool {
-	if p == nil {
-		return false
-	}
-	fingerprints := p.legacyAuthoritative[strings.TrimSpace(toolCallID)]
-	fingerprint := spawnReplayFingerprint(status, rawOutput)
-	if fingerprints[fingerprint] == 0 {
-		return false
-	}
-	fingerprints[fingerprint]--
-	return true
-}
-
-func spawnReplayFingerprint(status string, rawOutput map[string]any) spawnReplayTerminalFingerprint {
-	status = spawnReplayStatus(status, rawOutput)
-	return spawnReplayTerminalFingerprint{
-		Status: status,
-		Text:   strings.TrimSpace(spawnReplayResultText(status, rawOutput)),
-	}
-}
-
-func finalSpawnEventFingerprint(event *session.Event) spawnReplayTerminalFingerprint {
-	if event == nil {
-		return spawnReplayTerminalFingerprint{}
-	}
-	if event.Tool != nil && event.Tool.Name == spawn.ToolName &&
-		toolStatusFinalString(event.Tool.Status) {
-		return spawnReplayFingerprint(event.Tool.Status, event.Tool.Output)
-	}
-	if update := session.ProtocolUpdateOf(event); update != nil {
-		return spawnReplayFingerprint(update.Status, update.RawOutput)
-	}
-	return spawnReplayTerminalFingerprint{}
 }
 
 func spawnReplayStatus(status string, rawOutput map[string]any) string {

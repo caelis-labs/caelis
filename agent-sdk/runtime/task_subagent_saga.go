@@ -17,7 +17,7 @@ import (
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 )
@@ -160,19 +160,24 @@ func (tm *taskRuntime) startSubagentTarget(
 	}
 	handle := firstNonEmpty(outcome.Entry.Handle, taskSpecString(outcome.Entry.Spec, "handle"))
 	var task *subagentTask
-	var initialResult *delegation.Result
 	if outcome.ShouldSpawn {
+		activityID := firstNonEmpty(
+			taskStringValue(outcome.Entry.Metadata[subagentActivityIDMeta]),
+			taskSpecString(outcome.Entry.Spec, subagentActivityIDMeta),
+		)
+		outputObserver := tm.bindSubagentOutput(ctx, ref, taskID, subagentTerminalID(taskID), activityID, true)
 		childPrompt := contextprompt.ComposeTextPrompt(spawnContextFromSpec(outcome.Entry.Spec), strings.TrimSpace(req.Prompt))
 		spawnContext := subagent.SpawnContext{
 			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession), CWD: strings.TrimSpace(activeSession.CWD),
-			TaskID: taskID, Handle: handle, Role: role, ParentCallID: strings.TrimSpace(req.ParentCall), Mode: mode, ApprovalMode: strings.TrimSpace(req.ApprovalMode),
-			ApprovalRequester: req.Approval, Streams: tm,
-			ActivityObserver: newSubagentActivityObserver(tm, taskID),
-			Completion:       newSubagentCompletionSink(ctx, tm, taskID, 1),
+			TaskID: taskID, ActivityID: activityID, Handle: handle, Role: role, ParentCallID: strings.TrimSpace(req.ParentCall), Mode: mode, ApprovalMode: strings.TrimSpace(req.ApprovalMode),
+			ApprovalRequester: req.Approval,
+			Output:            outputObserver,
+			Completion:        newSubagentCompletionSink(ctx, tm, taskID, 1),
 		}
 		anchor, result, err := spawnSubagentTarget(ctx, runner, spawnContext, target, childPrompt)
 		if err != nil {
 			if subagent.SpawnProvenNotStarted(err) {
+				closeTaskOutputProducer(context.WithoutCancel(ctx), outputObserver)
 				persistErr := tm.failSubagentSpawnBeforeCreation(ctx, outcome.Entry)
 				return taskapi.Snapshot{}, errors.Join(err, persistErr)
 			}
@@ -201,11 +206,10 @@ func (tm *taskRuntime) startSubagentTarget(
 			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, validationErr)
 		}
 		task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, target, req, mode, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhasePostSpawn)
-		// Persist a compatibility Final cursor before the post_spawn crash
-		// boundary. If real ACP frames raced Spawn, installation below replaces
-		// this fallback before exposing the live Task stream.
+		task.activityID = activityID
+		// Keep the exact completed result in the Task fallback. Transient ACP
+		// deltas already went directly to Control's bound output observer.
 		task.seedStreamFromResult(result)
-		initialResult = &result
 		spawnedEntry := task.entrySnapshot(tm.runtime.now())
 		if err := tm.persistSpawnEntry(ctx, spawnedEntry); err != nil {
 			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err)
@@ -215,37 +219,10 @@ func (tm *taskRuntime) startSubagentTarget(
 		task = tm.rehydrateSubagentTask(outcome.Entry)
 		task.runner = runner
 	}
-	// Hold the task's stream-order lock while making it discoverable and
-	// applying earlier pending frames. A concurrent publisher that resolves the
-	// newly installed task must not apply a later frame first.
-	task.streamMu.Lock()
 	tm.mu.Lock()
 	tm.subagents[taskID] = task
-	pending := append([]stream.Frame(nil), tm.pending[taskID]...)
-	delete(tm.pending, taskID)
 	tm.order[strings.TrimSpace(ref.SessionID)] = append(tm.order[strings.TrimSpace(ref.SessionID)], taskID)
 	tm.mu.Unlock()
-	if initialResult != nil && subagentFramesContainStructuredAssistantText(pending) {
-		task.mu.Lock()
-		task.discardInitialResultStreamFallbackLocked()
-		task.mu.Unlock()
-	}
-	task.applyStreamFramesLocked(pending)
-	if initialResult != nil {
-		task.mu.Lock()
-		// The result is only a compatibility fallback. Earlier ACP frames may
-		// have arrived before Task installation, so apply them first and avoid
-		// manufacturing a second full Final beside the real delta chain.
-		task.seedStreamFromResult(*initialResult)
-		if task.state == taskapi.StateCompleted && taskOutputHasNonBlankLine(initialResult.Result) {
-			// applyResult ran before pending ACP delivery. Re-protect the exact
-			// Final now so semantic current-state replay does not retain both the
-			// real assistant delta and the result fallback for this Turn.
-			task.retainCompletedFinalLocked(initialResult.Result)
-		}
-		task.mu.Unlock()
-	}
-	task.streamMu.Unlock()
 	snapshot, err := tm.advanceSubagentSpawn(ctx, activeSession, task, strings.TrimSpace(req.ParentCall), strings.TrimSpace(req.Prompt))
 	if err != nil {
 		return snapshot, err
@@ -289,6 +266,7 @@ func (tm *taskRuntime) beginSubagentSpawn(
 	}
 
 	now := tm.runtime.now()
+	activityID := tm.runtime.nextID("activity", nil)
 	entry := &taskapi.Entry{
 		TaskID: taskID, Handle: handle, Kind: taskapi.KindSubagent, Session: session.NormalizeSessionRef(ref),
 		Title: "Spawn " + target.Selector, State: taskapi.StatePrepared, CreatedAt: now, UpdatedAt: now,
@@ -304,12 +282,14 @@ func (tm *taskRuntime) beginSubagentSpawn(
 			"approval_mode":       strings.TrimSpace(req.ApprovalMode), "parent_call": strings.TrimSpace(req.ParentCall),
 			"participant_role": string(role),
 			"handle":           strings.TrimSpace(handle), "terminal_id": subagentTerminalID(taskID), "turn_seq": int64(1),
-			"spawn_phase": string(spawnPhaseIntent),
+			subagentActivityIDMeta: activityID,
+			"spawn_phase":          string(spawnPhaseIntent),
 		},
 		Metadata: map[string]any{
 			"spawn_status": string(spawnPhaseIntent), "spawn_identity": strings.TrimSpace(spawnID),
 			"spawn_request_digest": strings.TrimSpace(requestDigest),
 			"include_context":      req.IncludeContext, "context_unsupported": req.ContextUnsupported,
+			subagentActivityIDMeta: activityID,
 		},
 	}
 	if err := tm.persistSpawnEntry(ctx, entry); err != nil {
@@ -325,6 +305,24 @@ func (tm *taskRuntime) beginSubagentSpawn(
 		return outcome, err
 	}
 	return outcome, nil
+}
+
+func (tm *taskRuntime) bindSubagentOutput(
+	ctx context.Context,
+	ref session.SessionRef,
+	taskID string,
+	terminalID string,
+	activityID string,
+	originComplete bool,
+) output.Observer {
+	if tm == nil || tm.runtime == nil || tm.runtime.taskOutput == nil {
+		return output.Nop()
+	}
+	return tm.runtime.taskOutput.BindTaskOutput(ctx, output.Binding{
+		SessionID: strings.TrimSpace(ref.SessionID), TaskID: strings.TrimSpace(taskID),
+		TerminalID: strings.TrimSpace(terminalID), ActivityID: strings.TrimSpace(activityID),
+		Kind: output.TaskKindSubagent, StartsAtTaskOrigin: originComplete,
+	})
 }
 
 func (tm *taskRuntime) resumeExistingSpawn(ctx context.Context, existing *taskapi.Entry, spawnID string, runner subagent.Runner) (spawnBeginOutcome, error) {
@@ -409,9 +407,6 @@ func (tm *taskRuntime) failSubagentSpawnBeforeCreation(ctx context.Context, entr
 	if err := tm.persistSpawnEntry(context.WithoutCancel(ctx), failed); err != nil {
 		return err
 	}
-	tm.mu.Lock()
-	delete(tm.pending, strings.TrimSpace(failed.TaskID))
-	tm.mu.Unlock()
 	tm.discardSubagentCompletion(failed.TaskID)
 	tm.forgetTaskHandle(failed.Session.SessionID, handle)
 	return nil
@@ -756,7 +751,6 @@ func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task
 			task.running = false
 			task.state = taskapi.StateUnknownOutcome
 			normalizeSubagentResultForState(&task.result, taskapi.StateUnknownOutcome, subagentSpawnCompensationUnknownDiagnostic)
-			task.notifyStreamChangeLocked()
 			task.mu.Unlock()
 			persistErr := tm.markSubagentSpawnPhase(context.WithoutCancel(ctx), task, spawnPhaseUnknownOutcome, subagentSpawnCompensationUnknownDiagnostic)
 			return errors.Join(cause, cancelErr, persistErr)
@@ -768,7 +762,6 @@ func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task
 			task.result = map[string]any{}
 		}
 		normalizeSubagentResultForState(&task.result, taskapi.StateCancelled, "")
-		task.notifyStreamChangeLocked()
 		task.mu.Unlock()
 		if err := tm.markSubagentSpawnPhase(context.WithoutCancel(ctx), task, spawnPhaseChildCancelled, subagentSpawnCompensatedDiagnostic); err != nil {
 			return errors.Join(cause, err)
@@ -779,6 +772,7 @@ func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task
 		if err := tm.detachSubagentParticipant(context.WithoutCancel(ctx), task); err != nil {
 			return errors.Join(cause, err)
 		}
+		tm.closeSubagentOutputProducer(context.WithoutCancel(ctx), task.sessionRef, task.ref.TaskID)
 		if err := tm.markSubagentSpawnPhase(context.WithoutCancel(ctx), task, spawnPhaseCompensated, subagentSpawnCompensatedDiagnostic); err != nil {
 			return errors.Join(cause, err)
 		}
@@ -789,6 +783,22 @@ func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task
 		return fmt.Errorf("subagent spawn %q was compensated: %w", taskStringValue(task.metadata["spawn_identity"]), cause)
 	}
 	return errors.Join(cause, fmt.Errorf("cannot resume compensation from phase %q", phase))
+}
+
+func closeTaskOutputProducer(ctx context.Context, observer output.Observer) {
+	if observer == nil {
+		return
+	}
+	_ = observer.ObserveTaskOutput(ctx, output.Event{ProducerClosed: true})
+}
+
+func (tm *taskRuntime) closeSubagentOutputProducer(ctx context.Context, ref session.SessionRef, taskID string) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return
+	}
+	observer := tm.bindSubagentOutput(ctx, ref, taskID, subagentTerminalID(taskID), "", false)
+	closeTaskOutputProducer(ctx, observer)
 }
 
 func (tm *taskRuntime) detachSubagentParticipant(ctx context.Context, task *subagentTask) error {

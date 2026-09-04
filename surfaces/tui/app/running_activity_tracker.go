@@ -212,6 +212,26 @@ func (t *runningHintTracker) complete(key string, now time.Time) {
 	}
 }
 
+// completeTool closes the exact invocation key and any indexed presentation
+// owner for the same ACP tool call. Task-stream frames carry the runtime Turn
+// identity, while the parent RunCommand/Spawn activity was opened by the main
+// Turn; the typed tool-call relation is the stable join between those streams.
+func (t *runningHintTracker) completeTool(key string, callID string, now time.Time) {
+	t.complete(key, now)
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return
+	}
+	for _, owner := range t.ownersByCallID[callID] {
+		if owner.Key == key {
+			continue
+		}
+		if _, active := t.active[owner.Key]; active {
+			t.complete(owner.Key, now)
+		}
+	}
+}
+
 func (t *runningHintTracker) setCompact(now time.Time) {
 	startedAt := now
 	alreadyCompacting := t.compact.Phase == runningPhaseCompact

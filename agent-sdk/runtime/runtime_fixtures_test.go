@@ -23,7 +23,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
@@ -78,9 +77,14 @@ func (stubACPController) Deactivate(context.Context, session.SessionRef) error {
 
 func (s stubACPController) RunTurn(ctx context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
 	if s.runTurn != nil {
-		return s.runTurn(ctx, req)
+		result, err := s.runTurn(ctx, req)
+		if handle, ok := result.Handle.(*testControllerTurnHandle); ok {
+			handle.setObserver(req.Observer)
+		}
+		return result, err
 	}
 	handle := newTestControllerTurnHandle(nil)
+	handle.setObserver(req.Observer)
 	handle.finish()
 	return controller.TurnResult{Handle: handle}, nil
 }
@@ -94,9 +98,14 @@ func (s stubACPController) Attach(ctx context.Context, req controller.AttachRequ
 
 func (s stubACPController) PromptParticipant(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnResult, error) {
 	if s.promptParticipant != nil {
-		return s.promptParticipant(ctx, req)
+		result, err := s.promptParticipant(ctx, req)
+		if handle, ok := result.Handle.(*testControllerTurnHandle); ok {
+			handle.setObserver(req.Observer)
+		}
+		return result, err
 	}
 	handle := newTestControllerTurnHandle(nil)
+	handle.setObserver(req.Observer)
 	handle.finish()
 	return controller.TurnResult{Handle: handle}, nil
 }
@@ -109,31 +118,86 @@ func (s stubACPController) Detach(ctx context.Context, req controller.DetachRequ
 }
 
 type testControllerTurnHandle struct {
-	cancelFn  context.CancelFunc
-	eventsCh  chan testControllerTurnEvent
-	closeOnce sync.Once
-	mu        sync.Mutex
-	cancelled bool
+	cancelFn      context.CancelFunc
+	closeOnce     sync.Once
+	mu            sync.Mutex
+	cancelled     bool
+	finished      bool
+	observer      agent.SourceEventObserver
+	pending       []agent.SourceEvent
+	completionErr error
+	done          chan struct{}
 }
 
-type testControllerTurnEvent struct {
-	event *session.Event
-	err   error
+type testSourceCapture struct {
+	mu     sync.Mutex
+	events []*session.Event
+	errs   []error
+}
+
+func (c *testSourceCapture) ObserveSourceEvent(_ context.Context, event agent.SourceEvent) error {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if event.Canonical != nil {
+		c.events = append(c.events, session.CloneEvent(event.Canonical))
+	}
+	if event.Err != nil {
+		c.errs = append(c.errs, event.Err)
+	}
+	return nil
+}
+
+func (c *testSourceCapture) Events() []*session.Event {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]*session.Event, 0, len(c.events))
+	for _, event := range c.events {
+		out = append(out, session.CloneEvent(event))
+	}
+	return out
+}
+
+func (c *testSourceCapture) Err() error {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.errs) == 0 {
+		return nil
+	}
+	return c.errs[len(c.errs)-1]
 }
 
 func newTestControllerTurnHandle(cancel context.CancelFunc) *testControllerTurnHandle {
 	return &testControllerTurnHandle{
 		cancelFn: cancel,
-		eventsCh: make(chan testControllerTurnEvent, 16),
+		done:     make(chan struct{}),
 	}
 }
 
-func (h *testControllerTurnHandle) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		for item := range h.eventsCh {
-			if !yield(session.CloneEvent(item.event), item.err) {
-				return
+func (h *testControllerTurnHandle) setObserver(observer agent.SourceEventObserver) {
+	if h == nil || observer == nil {
+		return
+	}
+	h.mu.Lock()
+	h.observer = observer
+	pending := append([]agent.SourceEvent(nil), h.pending...)
+	h.pending = nil
+	h.mu.Unlock()
+	for _, event := range pending {
+		if err := observer.ObserveSourceEvent(context.Background(), event); err != nil {
+			h.mu.Lock()
+			if h.completionErr == nil {
+				h.completionErr = err
 			}
+			h.mu.Unlock()
 		}
 	}
 }
@@ -153,18 +217,55 @@ func (h *testControllerTurnHandle) Cancel() controller.CancelResult {
 
 func (h *testControllerTurnHandle) Close() error { return nil }
 
+func (h *testControllerTurnHandle) WaitCompletion(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-h.done:
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return h.completionErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (h *testControllerTurnHandle) publishEvent(event *session.Event) {
 	if h == nil || event == nil {
 		return
 	}
-	h.eventsCh <- testControllerTurnEvent{event: session.CloneEvent(event)}
+	h.publishSourceEvent(agent.SourceEvent{Canonical: session.CloneEvent(event)})
 }
 
 func (h *testControllerTurnHandle) publishError(err error) {
 	if h == nil || err == nil {
 		return
 	}
-	h.eventsCh <- testControllerTurnEvent{err: err}
+	h.publishSourceEvent(agent.SourceEvent{Err: err})
+	h.mu.Lock()
+	if h.completionErr == nil {
+		h.completionErr = err
+	}
+	h.mu.Unlock()
+}
+
+func (h *testControllerTurnHandle) publishSourceEvent(event agent.SourceEvent) {
+	h.mu.Lock()
+	observer := h.observer
+	if observer == nil {
+		h.pending = append(h.pending, agent.CloneSourceEvent(event))
+		h.mu.Unlock()
+		return
+	}
+	h.mu.Unlock()
+	if err := observer.ObserveSourceEvent(context.Background(), event); err != nil {
+		h.mu.Lock()
+		if h.completionErr == nil {
+			h.completionErr = err
+		}
+		h.mu.Unlock()
+	}
 }
 
 func (h *testControllerTurnHandle) finish() {
@@ -172,7 +273,10 @@ func (h *testControllerTurnHandle) finish() {
 		return
 	}
 	h.closeOnce.Do(func() {
-		close(h.eventsCh)
+		h.mu.Lock()
+		h.finished = true
+		h.mu.Unlock()
+		close(h.done)
 	})
 }
 
@@ -593,88 +697,111 @@ type testControllerForwarder struct {
 	sessions session.Service
 }
 
-func (f testControllerForwarder) ForwardControllerEvents(ctx context.Context, req agent.ControllerEventForwardRequest) error {
-	if req.Source == nil {
+func (f testControllerForwarder) BeginControllerEvents(_ context.Context, req agent.ControllerEventForwardRequest) (agent.ControllerEventSession, error) {
+	return &testControllerEventSession{forwarder: f, req: req}, nil
+}
+
+type testControllerEventSession struct {
+	forwarder      testControllerForwarder
+	req            agent.ControllerEventForwardRequest
+	finalAssistant *session.Event
+}
+
+func (s *testControllerEventSession) ObserveSourceEvent(ctx context.Context, source agent.SourceEvent) error {
+	if source.Err != nil {
+		return source.Err
+	}
+	if source.Canonical == nil {
+		if s.req.Publisher != nil && source.Native != nil {
+			s.req.Publisher.PublishSourceEvent(source)
+		}
 		return nil
 	}
-	var finalAssistant *session.Event
-	for event, seqErr := range req.Source.Events() {
-		if seqErr != nil {
-			return seqErr
-		}
-		normalized := session.CloneEvent(event)
-		if req.Normalize != nil {
-			normalized = req.Normalize(req.ActiveSession, req.TurnID, event)
-		}
-		if normalized == nil {
-			continue
-		}
-		if req.IsUserEcho != nil && req.IsUserEcho(normalized) {
-			continue
-		}
-		if testIsControllerNarrativeChunk(normalized) {
-			live := session.CloneEvent(normalized)
-			live.ID = ""
-			live.Visibility = session.VisibilityUIOnly
-			if session.ProtocolSessionUpdateType(live) == string(session.ProtocolUpdateTypeAgentMessage) {
-				text := session.EventText(normalized)
-				message := model.NewTextMessage(model.RoleAssistant, text)
-				var scope *session.EventScope
-				if normalized.Scope != nil {
-					cloned := session.CloneEventScope(*normalized.Scope)
-					scope = &cloned
-				}
-				finalAssistant = &session.Event{
-					Type:       session.EventTypeAssistant,
-					Visibility: session.VisibilityCanonical,
-					Time:       normalized.Time,
-					Actor:      normalized.Actor,
-					Scope:      scope,
-					Message:    &message,
-					Text:       text,
-					Protocol: &session.EventProtocol{
-						Update: &session.ProtocolUpdate{
-							SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
-							Content:       session.ProtocolTextContent(text),
-						},
-					},
-				}
-			}
-			if req.Publisher != nil {
-				req.Publisher.PublishEvent(live)
-			}
-			continue
-		}
-		if f.sessions != nil && testShouldPersistExternalControllerEvent(normalized) {
-			persisted, err := f.sessions.AppendEvent(ctx, session.AppendEventRequest{
-				SessionRef:    req.SessionRef,
-				MutationGuard: req.MutationGuard,
-				Event:         normalized,
-			})
-			if err != nil {
-				return err
-			}
-			normalized = persisted
-		}
-		if req.Publisher != nil {
-			req.Publisher.PublishEvent(normalized)
-		}
+	event := source.Canonical
+	normalized := session.CloneEvent(event)
+	if s.req.Normalize != nil {
+		normalized = s.req.Normalize(s.req.ActiveSession, s.req.TurnID, event)
 	}
-	if finalAssistant != nil {
-		if f.sessions != nil {
-			persisted, err := f.sessions.AppendEvent(ctx, session.AppendEventRequest{
-				SessionRef:    req.SessionRef,
-				MutationGuard: req.MutationGuard,
-				Event:         finalAssistant,
-			})
-			if err != nil {
-				return err
+	if normalized == nil {
+		return nil
+	}
+	if s.req.IsUserEcho != nil && s.req.IsUserEcho(normalized) {
+		return nil
+	}
+	if testIsControllerNarrativeChunk(normalized) {
+		live := session.CloneEvent(normalized)
+		live.ID = ""
+		live.Visibility = session.VisibilityUIOnly
+		if session.ProtocolSessionUpdateType(live) == string(session.ProtocolUpdateTypeAgentMessage) {
+			text := session.EventText(normalized)
+			message := model.NewTextMessage(model.RoleAssistant, text)
+			var scope *session.EventScope
+			if normalized.Scope != nil {
+				cloned := session.CloneEventScope(*normalized.Scope)
+				scope = &cloned
 			}
-			finalAssistant = persisted
+			s.finalAssistant = &session.Event{
+				Type:       session.EventTypeAssistant,
+				Visibility: session.VisibilityCanonical,
+				Time:       normalized.Time,
+				Actor:      normalized.Actor,
+				Scope:      scope,
+				Message:    &message,
+				Text:       text,
+				Protocol: &session.EventProtocol{
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+						Content:       session.ProtocolTextContent(text),
+					},
+				},
+			}
 		}
-		if req.Publisher != nil {
-			req.Publisher.PublishEvent(finalAssistant)
+		if s.req.Publisher != nil {
+			s.req.Publisher.PublishSourceEvent(agent.SourceEvent{
+				Canonical: live, Native: source.Native,
+				CanonicalContentAlreadyPublished: source.CanonicalContentAlreadyPublished,
+			})
 		}
+		return nil
+	}
+	if s.forwarder.sessions != nil && testShouldPersistExternalControllerEvent(normalized) {
+		persisted, err := s.forwarder.sessions.AppendEvent(ctx, session.AppendEventRequest{
+			SessionRef:    s.req.SessionRef,
+			MutationGuard: s.req.MutationGuard,
+			Event:         normalized,
+		})
+		if err != nil {
+			return err
+		}
+		normalized = persisted
+	}
+	if s.req.Publisher != nil {
+		s.req.Publisher.PublishSourceEvent(agent.SourceEvent{
+			Canonical: normalized, Native: source.Native,
+			CanonicalContentAlreadyPublished: source.CanonicalContentAlreadyPublished,
+		})
+	}
+	return nil
+}
+
+func (s *testControllerEventSession) Complete(ctx context.Context) error {
+	if s.finalAssistant == nil {
+		return nil
+	}
+	finalAssistant := s.finalAssistant
+	if s.forwarder.sessions != nil {
+		persisted, err := s.forwarder.sessions.AppendEvent(ctx, session.AppendEventRequest{
+			SessionRef:    s.req.SessionRef,
+			MutationGuard: s.req.MutationGuard,
+			Event:         finalAssistant,
+		})
+		if err != nil {
+			return err
+		}
+		finalAssistant = persisted
+	}
+	if s.req.Publisher != nil {
+		s.req.Publisher.PublishEvent(finalAssistant)
 	}
 	return nil
 }
@@ -1795,14 +1922,6 @@ func taskHandleFromSessionEvent(event *session.Event) string {
 		}
 	}
 	return ""
-}
-
-func terminalFramesText(frames []stream.Frame) string {
-	var out strings.Builder
-	for _, frame := range frames {
-		out.WriteString(frame.Text)
-	}
-	return out.String()
 }
 
 type approvalRequesterFunc func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)

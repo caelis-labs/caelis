@@ -207,9 +207,6 @@ func runSessionOnce(
 			terminalSeen = true
 		}
 	}
-	if out.LastCursor == "" {
-		out.LastCursor = turn.LastCursor()
-	}
 	return out, errors.Join(
 		observedErr,
 		turn.Err(),

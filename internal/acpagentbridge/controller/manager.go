@@ -106,7 +106,6 @@ type controllerRun struct {
 	turnMode            string
 	approvalRequester   controller.ApprovalRequester
 	handle              *turnHandle
-	events              []*session.Event
 	steeringActive      bool
 	steeringCancel      context.CancelFunc
 	steeringUpdates     []turnHandleEvent
@@ -150,7 +149,6 @@ type participantRun struct {
 	turnMode              string
 	approvalRequester     controller.ApprovalRequester
 	handle                *turnHandle
-	events                []*session.Event
 	steeringActive        bool
 	steeringCancel        context.CancelFunc
 	steeringUpdates       []turnHandleEvent
@@ -392,7 +390,7 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 
 	prompt := buildPromptParts(req.Input, req.ContentParts)
 	turnCtx, cancel := context.WithCancel(ctx)
-	handle := newTurnHandle(cancel)
+	handle := newTurnHandle(turnCtx, cancel, req.Observer)
 	if err := run.beginTurn(req, handle); err != nil {
 		cancel()
 		return controller.TurnResult{}, err
@@ -432,12 +430,7 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 			return
 		}
 		run.markContextSynced(attemptedContextSyncSeq)
-		buffered, stream := run.finishTurn(handle)
-		if !stream {
-			for _, event := range buffered {
-				handle.publishEvent(event)
-			}
-		}
+		run.finishTurn(handle)
 	}()
 	return controller.TurnResult{Handle: handle, UpdatedAt: m.clock()}, nil
 }
@@ -866,7 +859,7 @@ func (m *Manager) PromptParticipant(ctx context.Context, req controller.Particip
 		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: participant prompt is required")
 	}
 	turnCtx, cancel := context.WithCancel(ctx)
-	handle := newTurnHandle(cancel)
+	handle := newTurnHandle(turnCtx, cancel, req.Observer)
 	if err := run.beginPrompt(req, handle); err != nil {
 		cancel()
 		return controller.TurnResult{}, err
@@ -874,16 +867,11 @@ func (m *Manager) PromptParticipant(ctx context.Context, req controller.Particip
 	go func() {
 		defer handle.finish()
 		if _, err := run.promptParts(turnCtx, prompt); err != nil {
-			_, _ = run.finishPrompt(handle)
+			run.finishPrompt(handle)
 			handle.publishError(err)
 			return
 		}
-		buffered, stream := run.finishPrompt(handle)
-		if !stream {
-			for _, event := range buffered {
-				handle.publishEvent(event)
-			}
-		}
+		run.finishPrompt(handle)
 	}()
 	return controller.TurnResult{Handle: handle, UpdatedAt: m.clock()}, nil
 }
@@ -1391,9 +1379,6 @@ func (r *controllerRun) handleUpdate(clock func() time.Time, env client.UpdateEn
 		return
 	}
 	r.updatedAt = clock()
-	if event != nil {
-		r.events = append(r.events, session.CloneEvent(event))
-	}
 	if stream && handle != nil {
 		if r.steeringActive {
 			r.steeringUpdates = append(r.steeringUpdates, turnHandleEvent{event: acpbridge.SourceEvent{
@@ -1796,9 +1781,6 @@ func (r *participantRun) handleUpdate(clock func() time.Time, env client.UpdateE
 		return
 	}
 	r.updatedAt = clock()
-	if event != nil {
-		r.events = append(r.events, session.CloneEvent(event))
-	}
 	if stream && handle != nil {
 		if r.steeringActive {
 			r.steeringUpdates = append(r.steeringUpdates, turnHandleEvent{event: acpbridge.SourceEvent{

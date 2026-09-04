@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -69,7 +68,7 @@ func (v *recordingExecutionValidator) ValidateExecutionRequest(req agent.RunRequ
 	return v.err
 }
 
-func (r *recordingRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
+func (r *recordingRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
 	r.lastReq = req
 	if r.ran != nil {
 		select {
@@ -78,6 +77,7 @@ func (r *recordingRuntime) Run(_ context.Context, req agent.RunRequest) (agent.R
 			close(r.ran)
 		}
 	}
+	publishTestRunnerEvents(ctx, req.SourceObserver, r.result.Handle)
 	return r.result, nil
 }
 
@@ -129,12 +129,14 @@ func (r *approvalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 			r.executions.Add(1)
 		}
 	}
-	return agent.RunResult{
+	result := agent.RunResult{
 		Session: r.session,
 		Handle: &recordingRunner{
 			events: []*session.Event{{ID: "approved", Type: session.EventTypeNotice}},
 		},
-	}, nil
+	}
+	publishTestRunnerEvents(ctx, req.SourceObserver, result.Handle)
+	return result, nil
 }
 
 func (r *approvalRuntime) executionCount() int {
@@ -418,9 +420,7 @@ func newLostRunRecoveryRunner(id string) *lostRunRecoveryRunner {
 
 func (r *lostRunRecoveryRunner) RunID() string { return r.id }
 
-func (r *lostRunRecoveryRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(func(*session.Event, error) bool) { <-r.done }
-}
+func (r *lostRunRecoveryRunner) WaitCompletion(context.Context) error { <-r.done; return nil }
 
 func (*lostRunRecoveryRunner) Submit(agent.Submission) error { return nil }
 
@@ -568,6 +568,7 @@ func (r *controlPlaneRuntime) PromptParticipant(ctx context.Context, req agent.P
 		return agent.RunResult{}, r.promptErr
 	}
 	if r.promptResp.Handle != nil || r.promptResp.Session.SessionID != "" {
+		publishTestRunnerEvents(ctx, req.SourceObserver, r.promptResp.Handle)
 		return r.promptResp, nil
 	}
 	return agent.RunResult{Session: r.attachResp}, nil
@@ -830,16 +831,7 @@ type recordingRunner struct {
 
 func (r *recordingRunner) RunID() string { return "run-1" }
 
-func (r *recordingRunner) Events() iter.Seq2[*session.Event, error] {
-	events := append([]*session.Event(nil), r.events...)
-	return func(yield func(*session.Event, error) bool) {
-		for _, event := range events {
-			if !yield(event, nil) {
-				return
-			}
-		}
-	}
-}
+func (*recordingRunner) WaitCompletion(context.Context) error { return nil }
 
 func (r *recordingRunner) Submit(sub agent.Submission) error {
 	r.submissions = append(r.submissions, sub)
@@ -862,11 +854,7 @@ type blockingRunner struct {
 
 func (blockingRunner) RunID() string { return "run-blocking" }
 
-func (r blockingRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		<-r.release
-	}
-}
+func (r blockingRunner) WaitCompletion(context.Context) error { <-r.release; return nil }
 
 func (blockingRunner) Submit(agent.Submission) error { return nil }
 func (blockingRunner) Cancel() agent.CancelResult {
@@ -882,10 +870,9 @@ type submitRecordingBlockingRunner struct {
 
 func (r *submitRecordingBlockingRunner) RunID() string { return "run-submit-blocking" }
 
-func (r *submitRecordingBlockingRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		<-r.release
-	}
+func (r *submitRecordingBlockingRunner) WaitCompletion(context.Context) error {
+	<-r.release
+	return nil
 }
 
 func (r *submitRecordingBlockingRunner) Submit(sub agent.Submission) error {
@@ -918,11 +905,10 @@ type blockingCancelRunner struct {
 
 func (r *blockingCancelRunner) RunID() string { return "run-blocking-cancel" }
 
-func (r *blockingCancelRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		close(r.eventsStarted)
-		<-r.release
-	}
+func (r *blockingCancelRunner) WaitCompletion(context.Context) error {
+	close(r.eventsStarted)
+	<-r.release
+	return nil
 }
 
 func (r *blockingCancelRunner) Submit(agent.Submission) error { return nil }
@@ -948,19 +934,19 @@ func TestSanityTestClock(t *testing.T) {
 
 func collectHandleEvents(t *testing.T, handle TurnHandle) []eventstream.Envelope {
 	t.Helper()
+	if err := handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
+	}
+	return nil
+}
 
-	var out []eventstream.Envelope
-	timeout := time.After(2 * time.Second)
-	for {
-		select {
-		case env, ok := <-handle.ACPEvents():
-			if !ok {
-				return out
-			}
-			out = append(out, env)
-		case <-timeout:
-			t.Fatalf("timed out waiting for handle events: %#v", out)
-		}
+func publishTestRunnerEvents(ctx context.Context, observer agent.SourceEventObserver, handle agent.Runner) {
+	runner, ok := handle.(*recordingRunner)
+	if !ok || observer == nil {
+		return
+	}
+	for _, event := range runner.events {
+		_ = observer.ObserveSourceEvent(ctx, agent.SourceEvent{Canonical: session.CloneEvent(event)})
 	}
 }
 

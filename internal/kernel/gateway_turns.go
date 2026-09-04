@@ -58,6 +58,7 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 	runID := g.allocateID("run")
 	turnID := g.allocateID("turn")
 	handle := newTurnHandle(turnHandleConfig{
+		ctx:                     runCtx,
 		handleID:                handleID,
 		runID:                   runID,
 		turnID:                  turnID,
@@ -73,6 +74,7 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 			return cancelFn()
 		},
 		approvals:       approvals,
+		observer:        req.Observer,
 		persistApproval: g.approvalPersister(activeSession.SessionRef, turnID),
 		settleApproval:  g.approvalSettler(activeSession.SessionRef, turnID),
 	})
@@ -192,6 +194,9 @@ func (g *Gateway) runTurn(
 	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		return g.resolveApprovalRequest(ctx, approvalCtx, handle, &req, runReq.AgentSpec.Model)
 	})
+	runReq.SourceObserver = agent.SourceEventObserverFunc(func(observeCtx context.Context, event agent.SourceEvent) error {
+		return g.observeSourceEvent(observeCtx, session, handle, event)
+	})
 
 	result, err := g.runtime.Run(ctx, runReq)
 	if err != nil {
@@ -203,7 +208,13 @@ func (g *Gateway) runTurn(
 	}
 	handle.setRunner(result.Handle)
 	defer result.Handle.Close()
-	g.forwardHandleSourceEvents(session, handle, result.Handle)
+	// Cancellation stops the producer through both runCtx and Runner.Cancel, but
+	// it must not also short-circuit the drain. Releasing the active Turn before
+	// the Runner has finished can expose an execution fence that the supposedly
+	// completed Turn still owns to the next control mutation.
+	if err := result.Handle.WaitCompletion(context.WithoutCancel(ctx)); err != nil && !handle.didFail() {
+		handle.publishError(err)
+	}
 }
 
 func normalizeRunRequestPolicyProfile(req *agent.RunRequest) {
@@ -248,6 +259,9 @@ func (g *Gateway) runParticipantTurn(
 	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		return g.resolveApprovalRequest(ctx, approvalCtx, handle, &req, nil)
 	})
+	runReq.SourceObserver = agent.SourceEventObserverFunc(func(observeCtx context.Context, event agent.SourceEvent) error {
+		return g.observeSourceEvent(observeCtx, session, handle, event)
+	})
 
 	result, err := g.control.PromptParticipant(ctx, runReq)
 	if err != nil {
@@ -259,7 +273,9 @@ func (g *Gateway) runParticipantTurn(
 	}
 	handle.setRunner(result.Handle)
 	defer result.Handle.Close()
-	g.forwardHandleSourceEvents(session, handle, result.Handle)
+	if err := result.Handle.WaitCompletion(context.WithoutCancel(ctx)); err != nil && !handle.didFail() {
+		handle.publishError(err)
+	}
 }
 
 func (g *Gateway) dispatchSessionStartHooks(ctx context.Context, sessionObj session.Session, handle *turnHandle) error {

@@ -3,7 +3,6 @@ package controlplane
 import (
 	"context"
 	"errors"
-	"iter"
 	"sync"
 	"testing"
 	"time"
@@ -119,10 +118,8 @@ func TestFencedRuntimeSleepDoesNotRenewOrExpireTurnFence(t *testing.T) {
 	}
 
 	runner.finish()
-	for _, eventErr := range run.Handle.Events() {
-		if eventErr != nil {
-			t.Fatal(eventErr)
-		}
+	if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 	_, releases = fences.calls()
 	if releases != 1 {
@@ -192,10 +189,8 @@ func TestFencedRuntimeContinuesAfterCommittedAcquire(t *testing.T) {
 		t.Fatalf("Run() error = %v, want committed acquire confirmation", err)
 	}
 	runner.finish()
-	for _, eventErr := range run.Handle.Events() {
-		if eventErr != nil {
-			t.Fatal(eventErr)
-		}
+	if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -305,36 +300,7 @@ func TestFencedRunnerCloseRetainsFenceUntilProducerQuiescent(t *testing.T) {
 	}
 }
 
-func TestFencedRuntimeRejectsRunnerWithoutCompletionBarrierAndRetainsFence(t *testing.T) {
-	t.Parallel()
-
-	service := inmemory.NewStore(inmemory.Config{})
-	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "user-1", PreferredSessionID: "missing-completion-barrier",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	wrapper, err := NewFencedRuntime(FencedRuntimeConfig{
-		Runtime: singleEventRuntime{runner: &singleEventRunner{id: "no-waiter"}},
-		Fences:  service, OwnerID: "host-a",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef}); err == nil {
-		t.Fatal("Run() error = nil, want missing completion waiter rejection")
-	}
-	durable, err := service.SessionFence(context.Background(), active.SessionRef)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if durable.FenceID == "" {
-		t.Fatalf("fence after rejected runner = %#v, want retained fail closed", durable)
-	}
-}
-
-func TestFencedRuntimeRetainsFenceWhenCompletionWaiterFails(t *testing.T) {
+func TestFencedRuntimeReleasesFenceAfterProducerCompletesWithTerminalError(t *testing.T) {
 	t.Parallel()
 
 	service := inmemory.NewStore(inmemory.Config{})
@@ -344,26 +310,25 @@ func TestFencedRuntimeRetainsFenceWhenCompletionWaiterFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := newFenceFailedCompletionRunner("run-failed-completion")
+	runner := newFenceTerminalErrorRunner("run-failed-completion")
 	wrapper, err := NewFencedRuntime(FencedRuntimeConfig{
 		Runtime: singleEventRuntime{runner: runner}, Fences: service, OwnerID: "host-a",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef}); err != nil {
+	run, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
+	if err != nil {
 		t.Fatal(err)
 	}
 	close(runner.producerDone)
-	select {
-	case <-runner.waitReturned:
-	case <-time.After(time.Second):
-		t.Fatal("completion waiter did not return")
+	if err := run.Handle.WaitCompletion(t.Context()); err == nil || err.Error() != "producer failed" {
+		t.Fatalf("WaitCompletion() error = %v, want terminal producer error", err)
 	}
 	if _, err := service.AcquireSessionFence(context.Background(), session.AcquireSessionFenceRequest{
 		SessionRef: active.SessionRef, OwnerID: "host-b",
-	}); !errors.Is(err, session.ErrFenceConflict) {
-		t.Fatalf("competing acquire after failed completion proof = %v, want ErrFenceConflict", err)
+	}); err != nil {
+		t.Fatalf("competing acquire after terminal producer error = %v", err)
 	}
 }
 
@@ -405,10 +370,8 @@ func TestFencedRuntimeRetriesTransientReleaseWithoutHostRestart(t *testing.T) {
 		t.Fatalf("same Host Run after release retry = %v", err)
 	}
 	nextRunner.finish()
-	for _, eventErr := range run.Handle.Events() {
-		if eventErr != nil {
-			t.Fatal(eventErr)
-		}
+	if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -615,17 +578,13 @@ func (singleEventRuntime) RunState(context.Context, session.SessionRef) (agent.R
 
 type singleEventRunner struct{ id string }
 
-func (r *singleEventRunner) RunID() string { return r.id }
-func (*singleEventRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		yield(&session.Event{Type: session.EventTypeNotice, Text: "one"}, nil)
-	}
-}
+func (r *singleEventRunner) RunID() string               { return r.id }
 func (*singleEventRunner) Submit(agent.Submission) error { return nil }
 func (*singleEventRunner) Cancel() agent.CancelResult {
 	return agent.CancelResult{Status: agent.CancelStatusCancelled}
 }
-func (*singleEventRunner) Close() error { return nil }
+func (*singleEventRunner) Close() error                         { return nil }
+func (*singleEventRunner) WaitCompletion(context.Context) error { return nil }
 
 type fenceTestRuntime struct{ runner *fenceTestRunner }
 
@@ -664,35 +623,25 @@ type fenceCompletionRunner struct {
 	producerDone chan struct{}
 }
 
-type fenceFailedCompletionRunner struct {
-	*fenceCompletionRunner
-	waitReturned chan struct{}
+type fenceTerminalErrorRunner struct{ *fenceCompletionRunner }
+
+func newFenceTerminalErrorRunner(id string) *fenceTerminalErrorRunner {
+	return &fenceTerminalErrorRunner{fenceCompletionRunner: newFenceCompletionRunner(id)}
 }
 
-func newFenceFailedCompletionRunner(id string) *fenceFailedCompletionRunner {
-	return &fenceFailedCompletionRunner{
-		fenceCompletionRunner: newFenceCompletionRunner(id),
-		waitReturned:          make(chan struct{}),
-	}
-}
-
-func (r *fenceFailedCompletionRunner) WaitCompletion(ctx context.Context) error {
+func (r *fenceTerminalErrorRunner) WaitCompletion(ctx context.Context) error {
 	err := r.fenceCompletionRunner.WaitCompletion(ctx)
-	close(r.waitReturned)
 	if err != nil {
 		return err
 	}
-	return errors.New("completion proof unavailable")
+	return errors.New("producer failed")
 }
 
 func newFenceCompletionRunner(id string) *fenceCompletionRunner {
 	return &fenceCompletionRunner{id: id, closed: make(chan struct{}), producerDone: make(chan struct{})}
 }
 
-func (r *fenceCompletionRunner) RunID() string { return r.id }
-func (*fenceCompletionRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(func(*session.Event, error) bool) {}
-}
+func (r *fenceCompletionRunner) RunID() string               { return r.id }
 func (*fenceCompletionRunner) Submit(agent.Submission) error { return nil }
 func (*fenceCompletionRunner) Cancel() agent.CancelResult {
 	return agent.CancelResult{Status: agent.CancelStatusCancelled}
@@ -715,12 +664,6 @@ func newFenceTestRunner(id string) *fenceTestRunner {
 }
 
 func (r *fenceTestRunner) RunID() string { return r.id }
-
-func (r *fenceTestRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(func(*session.Event, error) bool) {
-		<-r.complete
-	}
-}
 
 func (*fenceTestRunner) Submit(agent.Submission) error { return nil }
 

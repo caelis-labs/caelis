@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -272,16 +271,12 @@ func TestCommandTaskEntryMetadataKeepsObservationDeltaOutOfDurableTaskState(t *t
 		"output_cursor":               int64(42),
 		"model_output_cursor":         int64(42),
 		commandStreamOutputCursorMeta: int64(64),
-		commandStreamEventCursorMeta:  int64(7),
 	}, false)
 	if _, ok := terminal["output_cursor"]; ok {
 		t.Fatalf("terminal metadata contains model resume cursor: %#v", terminal)
 	}
 	if terminal[commandStreamOutputCursorMeta] != int64(64) {
 		t.Fatalf("terminal metadata lost stream replay cursor: %#v", terminal)
-	}
-	if terminal[commandStreamEventCursorMeta] != int64(7) {
-		t.Fatalf("terminal metadata lost stream event baseline: %#v", terminal)
 	}
 }
 
@@ -375,17 +370,13 @@ func TestStartCommandSynchronousOutputBeforeFirstObservationResumesFromDurableSt
 	if err != nil {
 		t.Fatalf("lookupCommandCanonical() after restart error = %v", err)
 	}
-	streamed, err := (&streamService{}).readCommand(context.Background(), reloaded, stream.Cursor{})
-	if err != nil {
-		t.Fatalf("readCommand() after restart error = %v", err)
+	if reloaded == nil || reloaded.session == nil {
+		t.Fatalf("lookupCommandCanonical() = %#v, want reattached command producer", reloaded)
 	}
 	release()
 	result := <-started
 	if result.err != nil {
 		t.Fatalf("StartCommand() error = %v", result.err)
-	}
-	if got := streamFrameText(streamed.Frames); got != early+later {
-		t.Fatalf("rehydrated stream = %q, want unobserved early output plus later output %q", got, early+later)
 	}
 }
 
@@ -1324,31 +1315,6 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsCommandResult(t *testing.T) {
 		t.Fatalf("stored UpdatedAt = %v, want canonical event time %v", entry.UpdatedAt, eventTime)
 	}
 
-	reloaded, err := newStreamService(runtime.tasks).Read(context.Background(), stream.ReadRequest{
-		Ref: stream.Ref{
-			SessionID: activeSession.SessionID,
-			TaskID:    snapshot.Ref.TaskID,
-		},
-		Cursor: stream.Cursor{Output: 12},
-	})
-	if err != nil {
-		t.Fatalf("stream Read() after canonical durable reload error = %v", err)
-	}
-	if reloaded.Cursor.Output != int64(len([]byte("raw full output\n"))) ||
-		reloaded.TruncatedBefore != int64(len([]byte("raw full output\n"))) {
-		t.Fatalf(
-			"canonical reload cursor/truncation = %d/%d, want monotonic live cursor %d",
-			reloaded.Cursor.Output,
-			reloaded.TruncatedBefore,
-			len([]byte("raw full output\n")),
-		)
-	}
-	if got := streamFrameText(reloaded.Frames); got != "" {
-		t.Fatalf("canonical result was remapped onto an old live cursor range: %q", got)
-	}
-	if reloaded.FinalText != canonicalText {
-		t.Fatalf("canonical reload FinalText = %q, want %q", reloaded.FinalText, canonicalText)
-	}
 }
 
 func TestTaskRuntimeSyncCanonicalToolResultPersistsBatchTaskResults(t *testing.T) {
@@ -1646,17 +1612,12 @@ func TestTaskStreamBackfillDefersToActiveSessionFenceOwner(t *testing.T) {
 		t.Fatalf("AppendEvent(tool result) error = %v", err)
 	}
 
-	snapshot, err := newStreamService(runtime.tasks).Read(context.Background(), stream.ReadRequest{
-		Ref: stream.Ref{
-			SessionID: activeSession.SessionID,
-			TaskID:    stale.TaskID,
-		},
-	})
+	snapshot, err := runtime.tasks.lookupCommandCanonical(context.Background(), activeSession.SessionRef, stale.TaskID)
 	if err != nil {
-		t.Fatalf("Task stream Read() error = %v, want authoritative reload", err)
+		t.Fatalf("canonical command reload error = %v", err)
 	}
-	if snapshot.FinalText != "producer-owned result\n" {
-		t.Fatalf("Task stream FinalText = %q, want producer-owned result", snapshot.FinalText)
+	if snapshot == nil || taskRawStringValue(snapshot.result["result"]) != "producer-owned result\n" {
+		t.Fatalf("canonical command = %#v, want producer-owned result", snapshot)
 	}
 	if calls := store.calls(); calls != 1 {
 		t.Fatalf("backfill Put calls = %d, want one fenced attempt without retry", calls)

@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"iter"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -142,43 +141,3 @@ func TestLiveContentOwnershipKeepsUnpublishedAnswerWithSharedThoughtMessageID(t 
 		t.Fatalf("published content = %03b, want thought only", published)
 	}
 }
-
-func TestSourceEventsAdaptsEventsOnlyRunnerWithTerminalOwnership(t *testing.T) {
-	event := &session.Event{
-		Type: session.EventTypeToolResult, Visibility: session.VisibilityCanonical,
-		Tool: &session.EventTool{Name: "RunCommand", Status: "completed"},
-		Meta: trustedTaskResultMeta(map[string]any{"caelis": map[string]any{"runtime": map[string]any{
-			"task": map[string]any{"task_id": "task-1", "kind": "command"},
-		}}}),
-	}
-	var got []agent.SourceEvent
-	for sourceEvent, err := range SourceEvents(eventsOnlyRunner{events: []*session.Event{event}}) {
-		if err != nil {
-			t.Fatal(err)
-		}
-		got = append(got, sourceEvent)
-	}
-	if len(got) != 1 || !got[0].CanonicalContentAlreadyPublished.Has(agent.PublishedTerminal) {
-		t.Fatalf("SourceEvents() = %#v, want terminal ownership", got)
-	}
-}
-
-type eventsOnlyRunner struct {
-	events []*session.Event
-}
-
-func (eventsOnlyRunner) RunID() string { return "legacy-run" }
-
-func (r eventsOnlyRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		for _, event := range r.events {
-			if !yield(event, nil) {
-				return
-			}
-		}
-	}
-}
-
-func (eventsOnlyRunner) Submit(agent.Submission) error { return nil }
-func (eventsOnlyRunner) Cancel() agent.CancelResult    { return agent.CancelResult{} }
-func (eventsOnlyRunner) Close() error                  { return nil }

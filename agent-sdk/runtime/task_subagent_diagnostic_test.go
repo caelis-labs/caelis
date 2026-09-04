@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
 func TestSubagentApplyResultKeepsFailureDiagnosticTerminalOnly(t *testing.T) {
@@ -87,48 +86,6 @@ func TestNormalizeSubagentCancelledClearsStaleFailureAndOutputFields(t *testing.
 	}
 	if got := taskStringValue(result["handle"]); got != "reviewer" {
 		t.Fatalf("unrelated result metadata = %q, want reviewer", got)
-	}
-}
-
-func TestSubagentTerminalStreamObservationDoesNotOwnFailureLifecycle(t *testing.T) {
-	tests := []struct {
-		name  string
-		state task.State
-	}{
-		{name: "failed", state: task.StateFailed},
-		{name: "interrupted", state: task.StateInterrupted},
-		{name: "unknown outcome", state: task.StateUnknownOutcome},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			subtask := &subagentTask{
-				ref:     task.Ref{TaskID: "task-stream-state"},
-				state:   task.StateRunning,
-				running: true,
-				result: map[string]any{
-					"result":         "previous completed turn",
-					"final_message":  "previous completed turn",
-					"output_preview": "stale activity",
-				},
-			}
-			subtask.applyStreamFrames([]stream.Frame{{
-				State:   string(test.state),
-				Running: false,
-				Closed:  true,
-			}})
-			snapshot := subtask.snapshot()
-			if snapshot.State != task.StateRunning || !snapshot.Running {
-				t.Fatalf("snapshot = state %q running %v, want running true", snapshot.State, snapshot.Running)
-			}
-			if got := taskStringValue(snapshot.Result["error"]); got != "" {
-				t.Fatalf("snapshot error = %q, want empty observation-only stream diagnostic", got)
-			}
-			for _, key := range []string{"result", "final_message", "output_preview"} {
-				if _, exists := snapshot.Result[key]; !exists {
-					t.Fatalf("terminal stream observation removed %q: %#v", key, snapshot.Result)
-				}
-			}
-		})
 	}
 }
 
@@ -415,13 +372,7 @@ func TestLegacyNonFailureSubagentErrorIsDroppedFromRehydratePayloadAndStream(t *
 				t.Fatalf("rehydrated non-failure retained error: %#v", snapshot.Result)
 			}
 			payload := taskToolPayload(snapshot)
-			streamSnapshot, err := runtime.Streams().Read(ctx, stream.ReadRequest{
-				Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: taskID},
-			})
-			if err != nil {
-				t.Fatalf("Streams().Read() error = %v", err)
-			}
-			exposed := fmt.Sprint(snapshot.Result, payload, streamSnapshot.FinalText)
+			exposed := fmt.Sprint(snapshot.Result, payload)
 			for _, secret := range []string{"nonfailure-secret", "nonfailure-key", "/Users/alice"} {
 				if strings.Contains(exposed, secret) {
 					t.Fatalf("legacy non-failure secret %q crossed read boundary: %s", secret, exposed)

@@ -14,7 +14,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
@@ -24,7 +23,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/loader"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
-	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/google/uuid"
@@ -791,11 +789,24 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req PromptInput, cb PromptCal
 		return acpsdk.PromptResponse{}, err
 	}
 
+	runEvents := make(chan runtimeRunnerEvent)
 	result, err := a.runtime.Run(runCtx, agent.RunRequest{
 		SessionRef:   ref,
 		Input:        input,
 		ContentParts: contentParts,
 		Request:      agent.ModelRequestOptions{Stream: boolPtr(true)},
+		SourceObserver: agent.SourceEventObserverFunc(func(_ context.Context, sourceEvent agent.SourceEvent) error {
+			select {
+			case <-runCtx.Done():
+				return runCtx.Err()
+			case runEvents <- runtimeRunnerEvent{
+				event:                            sourceEvent.Canonical,
+				canonicalContentAlreadyPublished: sourceEvent.CanonicalContentAlreadyPublished,
+				err:                              sourceEvent.Err,
+			}:
+				return nil
+			}
+		}),
 		ApprovalRequester: approvalRequester{
 			callbacks:     cb,
 			reviewer:      a.approvalReviewer,
@@ -810,7 +821,19 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req PromptInput, cb PromptCal
 		}
 		return acpsdk.PromptResponse{}, err
 	}
-	if err := a.emitRunEvents(runCtx, ctx, cb, ref, result.Handle, true); err != nil {
+	go func() {
+		defer close(runEvents)
+		// runCtx may be cancelled by the observer when the ACP consumer exits.
+		// Keep the channel open until producer quiescence is proven so a final
+		// producer callback can never race a premature close.
+		if waitErr := result.Handle.WaitCompletion(context.WithoutCancel(runCtx)); waitErr != nil {
+			select {
+			case <-runCtx.Done():
+			case runEvents <- runtimeRunnerEvent{err: waitErr}:
+			}
+		}
+	}()
+	if err := a.emitRunEvents(runCtx, ctx, cb, ref, result.Handle, runEvents, true); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonCancelled}, nil
 		}
@@ -819,7 +842,7 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req PromptInput, cb PromptCal
 	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 }
 
-func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, cb PromptCallbacks, ref session.SessionRef, handle agent.Runner, suppressUserEcho bool) error {
+func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, cb PromptCallbacks, ref session.SessionRef, handle agent.Runner, runEvents <-chan runtimeRunnerEvent, suppressUserEcho bool) error {
 	if handle == nil {
 		return nil
 	}
@@ -827,13 +850,7 @@ func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, 
 	taskMux := a.startACPTaskStreamMux(runCtx, ref.SessionID)
 	taskEvents := taskMux.Events()
 	defer a.detachACPTaskStreamMux(runCtx, taskMux, cb, ref.SessionID, outboundFilter)
-	eventCtx, cancelEvents := context.WithCancel(runCtx)
-	defer func() {
-		cancelEvents()
-		_ = handle.Close()
-	}()
-	runEvents := runtimeRunnerEvents(eventCtx, handle)
-	var observationGapSequence uint64
+	defer handle.Close()
 	for runEvents != nil {
 		select {
 		case <-runCtx.Done():
@@ -852,22 +869,6 @@ func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, 
 				continue
 			}
 			if item.err != nil {
-				if gap, ok := agent.AsEventStreamGap(item.err); ok {
-					observationGapSequence++
-					notice := acpbridge.RuntimeObservationGapEnvelope(gap.Dropped)
-					notice.SessionID = strings.TrimSpace(ref.SessionID)
-					if err := emitACPNotice(
-						runCtx,
-						cb,
-						notice.SessionID,
-						notice,
-						fmt.Sprintf("caelis-runtime-observation-%d", observationGapSequence),
-						outboundFilter,
-					); err != nil {
-						return err
-					}
-					continue
-				}
 				if errors.Is(item.err, context.Canceled) {
 					return context.Canceled
 				}
@@ -915,25 +916,6 @@ type runtimeRunnerEvent struct {
 	event                            *session.Event
 	canonicalContentAlreadyPublished agent.PublishedContent
 	err                              error
-}
-
-func runtimeRunnerEvents(ctx context.Context, handle agent.Runner) <-chan runtimeRunnerEvent {
-	events := make(chan runtimeRunnerEvent)
-	go func() {
-		defer close(events)
-		for sourceEvent, err := range runtime.SourceEvents(handle) {
-			select {
-			case <-ctx.Done():
-				return
-			case events <- runtimeRunnerEvent{
-				event:                            sourceEvent.Canonical,
-				canonicalContentAlreadyPublished: sourceEvent.CanonicalContentAlreadyPublished,
-				err:                              err,
-			}:
-			}
-		}
-	}()
-	return events
 }
 
 func (a *RuntimeAgent) Cancel(_ context.Context, req acpsdk.CancelNotification) error {
@@ -1143,9 +1125,24 @@ func (a *RuntimeAgent) loadSessionFromClient(
 	defer reconnected.Subscription.Close()
 	if cb != nil {
 		filter := newACPNarrativeFilter(false)
-		for envelope := range reconnected.Subscription.Backfill() {
-			if err := a.emitControlBackfillEnvelope(ctx, cb, sessionID, envelope, filter); err != nil {
+		assembler := &appserver.FeedDeliveryAssembler{}
+		irreversible := false
+		for delivery := range reconnected.Subscription.Deliveries() {
+			events, replacement, err := assembler.Accept(delivery)
+			if err != nil {
 				return acpsdk.LoadSessionResponse{}, err
+			}
+			if replacement && irreversible {
+				return acpsdk.LoadSessionResponse{}, errors.New("internal/acpagentbridge: Session replacement crossed emitted ACP load output")
+			}
+			for _, envelope := range events {
+				if err := a.emitControlBackfillEnvelope(ctx, cb, sessionID, envelope, filter); err != nil {
+					return acpsdk.LoadSessionResponse{}, err
+				}
+				irreversible = true
+			}
+			if delivery.Kind == appserver.FeedDeliverySync {
+				break
 			}
 		}
 	}

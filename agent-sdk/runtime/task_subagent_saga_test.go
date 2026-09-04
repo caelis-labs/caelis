@@ -21,7 +21,6 @@ import (
 	memory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	taskstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 )
 
@@ -54,7 +53,7 @@ func (s *completionGateTaskStore) Upsert(ctx context.Context, entry *taskapi.Ent
 
 func (s *completionGateTaskStore) Put(ctx context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {
 	if req.Entry != nil && req.Entry.Kind == taskapi.KindSubagent && !req.Entry.Running &&
-		taskstream.IsTerminalState(string(req.Entry.State)) {
+		taskapi.IsTerminalState(req.Entry.State) {
 		s.once.Do(func() { close(s.started) })
 		select {
 		case <-ctx.Done():
@@ -575,7 +574,7 @@ func TestSubagentProducerCompletionDoesNotWaitForCompletionNotice(t *testing.T) 
 		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
 	}
 	runtime, active := newSubagentCompletionSagaRuntime(t, store, sessions, runner)
-	parentRun := newRunner("parent-run", func() {})
+	parentRun := newRunner(t.Context(), "parent-run", func() {}, nil)
 	noticeStarted := make(chan agent.Submission, 1)
 	releaseNotice := make(chan struct{})
 	if err := parentRun.setSubmissionHandler(context.Background(), func(_ context.Context, submission agent.Submission) error {
@@ -878,12 +877,6 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 				if getErr != nil || taskStringValue(entry.Metadata["spawn_status"]) != test.wantStatus {
 					t.Fatalf("durable spawn status = entry %#v error %v, want %q", entry, getErr, test.wantStatus)
 				}
-				if test.rollForward {
-					cursor, ok := taskInt64Value(entry.Metadata[subagentStreamEventCursorMeta])
-					if !ok || cursor < 1 {
-						t.Fatalf("post_spawn stream cursor = %d/%v, want durable Final fallback", cursor, ok)
-					}
-				}
 				if test.wantStatus == spawnStatusUnknownOutcome {
 					if got := taskStringValue(entry.Result["error"]); got != subagentSpawnCompensationUnknownDiagnostic {
 						t.Fatalf("unknown compensation error = %q, want fixed diagnostic", got)
@@ -926,21 +919,12 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 				if getErr != nil || taskStringValue(entry.Metadata["spawn_status"]) != spawnStatusCommitted {
 					t.Fatalf("rolled-forward entry = %#v, %v", entry, getErr)
 				}
-				streamSnapshot, readErr := restarted.Streams().Read(context.Background(), taskstream.ReadRequest{
-					Ref: taskstream.Ref{SessionID: active.SessionID, TaskID: taskID},
-				})
-				if readErr != nil {
-					t.Fatalf("rolled-forward Task stream read error = %v", readErr)
+				loaded, loadErr := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+				if loadErr != nil {
+					t.Fatal(loadErr)
 				}
-				assistantFinals := 0
-				for _, frame := range streamSnapshot.Frames {
-					if frame.Event != nil && session.EventTypeOf(frame.Event) == session.EventTypeAssistant &&
-						session.EventText(frame.Event) == "saga result" {
-						assistantFinals++
-					}
-				}
-				if assistantFinals != 1 {
-					t.Fatalf("rolled-forward assistant Finals = %d in %#v, want one", assistantFinals, streamSnapshot.Frames)
+				if got := lastAssistantText(loaded.Events); got != "saga result" {
+					t.Fatalf("rolled-forward canonical Final = %q, want saga result", got)
 				}
 			}
 			assertSubagentSagaModelRoundTrip(t, sessions, active.SessionRef)
@@ -1309,7 +1293,10 @@ func TestSubagentSpawnReleasesHandleWhenRunnerProvesNoChildWasCreated(t *testing
 	}
 	store := newFileTaskStoreForTest(t)
 	runner := &sagaRunner{spawnErr: subagent.MarkSpawnNotStarted(errors.New("runner setup failed"))}
-	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	producerLifecycle := &recordingProducerLifecycle{}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store, TaskOutput: producerLifecycle,
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1334,6 +1321,9 @@ func TestSubagentSpawnReleasesHandleWhenRunnerProvesNoChildWasCreated(t *testing
 	}
 	if _, err := store.GetSessionTaskByHandle(context.Background(), active.SessionRef, "reviewer"); err == nil {
 		t.Fatal("failed Spawn handle remained in the durable handle index")
+	}
+	if producerLifecycle.binding.TaskID != taskID || len(producerLifecycle.events) != 1 || !producerLifecycle.events[0].ProducerClosed {
+		t.Fatalf("proven-not-started producer lifecycle = %#v / %#v", producerLifecycle.binding, producerLifecycle.events)
 	}
 
 	runner.spawnErr = nil

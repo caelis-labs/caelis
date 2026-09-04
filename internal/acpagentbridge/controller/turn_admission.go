@@ -23,11 +23,10 @@ func (r *controllerRun) beginTurn(req controller.TurnRequest, handle *turnHandle
 	}
 	r.turnID = strings.TrimSpace(req.TurnID)
 	r.turnSession = session.CloneSession(req.Session)
-	r.turnStream = req.Stream
+	r.turnStream = req.Observer != nil
 	r.turnMode = strings.TrimSpace(req.Mode)
 	r.approvalRequester = req.ApprovalRequester
 	r.handle = handle
-	r.events = nil
 	return nil
 }
 
@@ -63,20 +62,16 @@ func (r *controllerRun) restoreContext(pending agent.ContextTransfer, checkpoint
 	r.mu.Unlock()
 }
 
-func (r *controllerRun) finishTurn(owner *turnHandle) ([]*session.Event, bool) {
+func (r *controllerRun) finishTurn(owner *turnHandle) bool {
 	if r == nil || owner == nil {
-		return nil, false
+		return false
 	}
 	r.operationMu.Lock()
 	defer r.operationMu.Unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.handle != owner {
-		return nil, false
-	}
-	buffered := make([]*session.Event, 0, len(r.events))
-	for _, event := range r.events {
-		buffered = append(buffered, session.CloneEvent(event))
+		return false
 	}
 	stream := r.turnStream
 	r.turnID = ""
@@ -85,8 +80,7 @@ func (r *controllerRun) finishTurn(owner *turnHandle) ([]*session.Event, bool) {
 	r.turnMode = ""
 	r.approvalRequester = nil
 	r.handle = nil
-	r.events = nil
-	return buffered, stream
+	return stream
 }
 
 // closeTurnAdmission permanently rejects new turns on this run and cancels the
@@ -129,28 +123,23 @@ func (r *participantRun) beginPrompt(req controller.ParticipantPromptRequest, ha
 	}
 	r.turnID = firstNonEmpty(strings.TrimSpace(req.TurnID), strings.TrimSpace(req.ParticipantID), r.id)
 	r.turnSession = session.CloneSession(req.Session)
-	r.turnStream = req.Stream
+	r.turnStream = req.Observer != nil
 	r.turnMode = strings.TrimSpace(req.Mode)
 	r.approvalRequester = req.ApprovalRequester
 	r.handle = handle
-	r.events = nil
 	return nil
 }
 
-func (r *participantRun) finishPrompt(owner *turnHandle) ([]*session.Event, bool) {
+func (r *participantRun) finishPrompt(owner *turnHandle) bool {
 	if r == nil || owner == nil {
-		return nil, false
+		return false
 	}
 	r.operationMu.Lock()
 	defer r.operationMu.Unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.handle != owner {
-		return nil, false
-	}
-	buffered := make([]*session.Event, 0, len(r.events))
-	for _, event := range r.events {
-		buffered = append(buffered, session.CloneEvent(event))
+		return false
 	}
 	stream := r.turnStream
 	r.turnID = ""
@@ -159,8 +148,7 @@ func (r *participantRun) finishPrompt(owner *turnHandle) ([]*session.Event, bool
 	r.turnMode = ""
 	r.approvalRequester = nil
 	r.handle = nil
-	r.events = nil
-	return buffered, stream
+	return stream
 }
 
 // closePromptAdmission permanently rejects new prompts on a detached

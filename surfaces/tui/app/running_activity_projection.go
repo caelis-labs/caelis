@@ -62,7 +62,20 @@ func foregroundRunningActivityEvent(env eventstream.Envelope, event TranscriptEv
 		return event, true
 	}
 	if event.Observation {
-		return TranscriptEvent{}, false
+		_, isUpdate := env.Update.(eventstream.ToolCallUpdate)
+		parentCallID := ""
+		if env.ParentTool != nil {
+			parentCallID = strings.TrimSpace(env.ParentTool.ToolCallID)
+		}
+		if !isUpdate || parentCallID == "" || parentCallID != strings.TrimSpace(event.ToolCallID) ||
+			(!env.Final && !event.Final) {
+			return TranscriptEvent{}, false
+		}
+		// A command Task-stream terminal frame is an observation, but its typed
+		// parent relation makes it the lifecycle close for that RunCommand. Child
+		// tool observations have a different call ID and remain excluded.
+		event.Final = true
+		return event, true
 	}
 	switch env.Update.(type) {
 	case eventstream.ToolCall:
@@ -159,8 +172,10 @@ func (m *Model) applyToolRunningActivity(event TranscriptEvent) {
 	if event.Final {
 		// Standard ACP tool_call_update results may contain only the call ID and
 		// status. Invocation identity is sufficient to close an activity that a
-		// richer tool_call start opened; repeated tool semantics are not required.
-		m.completeRunningActivity(key)
+		// richer tool_call start opened. Task-stream finals have a distinct
+		// runtime TurnID, so also close the indexed parent owner by tool-call ID.
+		m.runningHintTracker.completeTool(key, event.ToolCallID, time.Now())
+		m.refreshRunningActivity()
 		return
 	}
 

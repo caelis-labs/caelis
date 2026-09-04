@@ -9,7 +9,6 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -27,22 +26,22 @@ func TestForwardControllerEventsPreservesActiveTurnFence(t *testing.T) {
 		t.Fatalf("AcquireSessionFence() error = %v", err)
 	}
 	forwarder := NewControllerForwarder(sessions)
+	source := scriptedSourceHandle{events: []SourceEvent{{
+		Canonical: acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "done"),
+	}}}
 	request := agent.ControllerEventForwardRequest{
 		ActiveSession: activeSession,
 		SessionRef:    activeSession.SessionRef,
 		TurnID:        "participant-turn-1",
-		Source: scriptedSourceHandle{events: []SourceEvent{{
-			Canonical: acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "done"),
-		}}},
-		Publisher: newTestPublisher(),
+		Publisher:     newTestPublisher(),
 	}
-	if err := forwarder.ForwardControllerEvents(context.Background(), request); !errors.Is(err, session.ErrFenceConflict) {
+	if err := forwardTestControllerEvents(context.Background(), forwarder, request, source); !errors.Is(err, session.ErrFenceConflict) {
 		t.Fatalf("unfenced ForwardControllerEvents() error = %v, want ErrFenceConflict", err)
 	}
 
 	request.MutationGuard = session.RuntimeMutationGuard(session.ContextWithRuntimeFence(context.Background(), fence))
 	request.Publisher = newTestPublisher()
-	if err := forwarder.ForwardControllerEvents(context.Background(), request); err != nil {
+	if err := forwardTestControllerEvents(context.Background(), forwarder, request, source); err != nil {
 		t.Fatalf("fenced ForwardControllerEvents() error = %v", err)
 	}
 	stored, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: activeSession.SessionRef})
@@ -77,13 +76,12 @@ func TestForwardControllerEventsPublishesPersistedCanonicalWhenACPPresent(t *tes
 		},
 	}}}
 
-	if err := forwarder.ForwardControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
+	if err := forwardTestControllerEvents(context.Background(), forwarder, agent.ControllerEventForwardRequest{
 		ActiveSession: activeSession,
 		SessionRef:    activeSession.SessionRef,
 		TurnID:        "turn-1",
-		Source:        source,
 		Publisher:     publisher,
-	}); err != nil {
+	}, source); err != nil {
 		t.Fatalf("ForwardControllerEvents() error = %v", err)
 	}
 	publisher.finish()
@@ -134,13 +132,12 @@ func TestForwardControllerEventsPersistsACPUsageMirror(t *testing.T) {
 			Update: eventstream.UsageUpdate{SessionUpdate: eventstream.UpdateUsage, Size: 200000, Used: 42000},
 		},
 	}}}
-	if err := forwarder.ForwardControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
+	if err := forwardTestControllerEvents(context.Background(), forwarder, agent.ControllerEventForwardRequest{
 		ActiveSession: activeSession,
 		SessionRef:    activeSession.SessionRef,
 		TurnID:        "turn-1",
-		Source:        source,
 		Publisher:     publisher,
-	}); err != nil {
+	}, source); err != nil {
 		t.Fatal(err)
 	}
 	paged, ok := sessions.(session.PagedReader)
@@ -164,30 +161,25 @@ func TestForwardControllerEventsRequiresDependencies(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession := newTestSessionService(t, "sess-acp-forward-dependencies")
-	source := scriptedSourceHandle{}
-
-	if err := (*ControllerForwarder)(nil).ForwardControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
+	if _, err := (*ControllerForwarder)(nil).BeginControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
 		ActiveSession: activeSession,
 		SessionRef:    activeSession.SessionRef,
-		Source:        source,
 		Publisher:     newTestPublisher(),
 	}); err == nil {
-		t.Fatal("nil forwarder ForwardControllerEvents() error = nil, want dependency error")
+		t.Fatal("nil forwarder BeginControllerEvents() error = nil, want dependency error")
 	}
-	if err := NewControllerForwarder(nil).ForwardControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
+	if _, err := NewControllerForwarder(nil).BeginControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
 		ActiveSession: activeSession,
 		SessionRef:    activeSession.SessionRef,
-		Source:        source,
 		Publisher:     newTestPublisher(),
 	}); err == nil {
-		t.Fatal("nil session service ForwardControllerEvents() error = nil, want dependency error")
+		t.Fatal("nil session service BeginControllerEvents() error = nil, want dependency error")
 	}
-	if err := NewControllerForwarder(sessions).ForwardControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
+	if _, err := NewControllerForwarder(sessions).BeginControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
 		ActiveSession: activeSession,
 		SessionRef:    activeSession.SessionRef,
-		Source:        source,
 	}); err == nil {
-		t.Fatal("nil publisher ForwardControllerEvents() error = nil, want dependency error")
+		t.Fatal("nil publisher BeginControllerEvents() error = nil, want dependency error")
 	}
 }
 
@@ -212,14 +204,13 @@ func TestForwardControllerEventsPublishesNarrativeDeltasWithRepairedNativeACP(t 
 		},
 	}}
 
-	if err := forwarder.ForwardControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
+	if err := forwardTestControllerEvents(context.Background(), forwarder, agent.ControllerEventForwardRequest{
 		ActiveSession: activeSession,
 		SessionRef:    activeSession.SessionRef,
 		TurnID:        "turn-1",
-		Source:        source,
 		Publisher:     publisher,
 		IsUserEcho:    isControllerUserEcho,
-	}); err != nil {
+	}, source); err != nil {
 		t.Fatalf("ForwardControllerEvents() error = %v", err)
 	}
 	publisher.finish()
@@ -290,13 +281,12 @@ func TestForwardControllerEventsAssignsStableIdentityToAnonymousNarrative(t *tes
 		},
 	}}
 
-	if err := forwarder.ForwardControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
+	if err := forwardTestControllerEvents(context.Background(), forwarder, agent.ControllerEventForwardRequest{
 		ActiveSession: activeSession,
 		SessionRef:    activeSession.SessionRef,
 		TurnID:        "turn-1",
-		Source:        source,
 		Publisher:     publisher,
-	}); err != nil {
+	}, source); err != nil {
 		t.Fatalf("ForwardControllerEvents() error = %v", err)
 	}
 	publisher.finish()
@@ -370,14 +360,13 @@ func TestForwardControllerEventsSuppressesACPControllerUserEcho(t *testing.T) {
 		},
 	}}}
 
-	if err := forwarder.ForwardControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
+	if err := forwardTestControllerEvents(context.Background(), forwarder, agent.ControllerEventForwardRequest{
 		ActiveSession: activeSession,
 		SessionRef:    activeSession.SessionRef,
 		TurnID:        "turn-1",
-		Source:        source,
 		Publisher:     publisher,
 		IsUserEcho:    isControllerUserEcho,
-	}); err != nil {
+	}, source); err != nil {
 		t.Fatalf("ForwardControllerEvents() error = %v", err)
 	}
 	publisher.finish()
@@ -419,14 +408,13 @@ func TestForwardControllerEventsMaterializesFinalAssistantAfterThoughtBarrier(t 
 		{Canonical: acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "final")},
 	}}
 
-	if err := forwarder.ForwardControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
+	if err := forwardTestControllerEvents(context.Background(), forwarder, agent.ControllerEventForwardRequest{
 		ActiveSession: activeSession,
 		SessionRef:    activeSession.SessionRef,
 		TurnID:        "turn-1",
-		Source:        source,
 		Publisher:     publisher,
 		IsUserEcho:    isControllerUserEcho,
-	}); err != nil {
+	}, source); err != nil {
 		t.Fatalf("ForwardControllerEvents() error = %v", err)
 	}
 	publisher.finish()
@@ -479,13 +467,12 @@ func TestForwardControllerEventsPreservesLegacyUIOnlyWhenACPPresent(t *testing.T
 				},
 			}}}
 
-			if err := forwarder.ForwardControllerEvents(context.Background(), agent.ControllerEventForwardRequest{
+			if err := forwardTestControllerEvents(context.Background(), forwarder, agent.ControllerEventForwardRequest{
 				ActiveSession: activeSession,
 				SessionRef:    activeSession.SessionRef,
 				TurnID:        "turn-1",
-				Source:        source,
 				Publisher:     publisher,
-			}); err != nil {
+			}, source); err != nil {
 				t.Fatalf("ForwardControllerEvents() error = %v", err)
 			}
 			publisher.finish()
@@ -539,31 +526,22 @@ type scriptedSourceHandle struct {
 	events []SourceEvent
 }
 
-func (h scriptedSourceHandle) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		for _, event := range h.events {
-			if !yield(event.Canonical, nil) {
-				return
-			}
+func forwardTestControllerEvents(ctx context.Context, forwarder *ControllerForwarder, request agent.ControllerEventForwardRequest, source scriptedSourceHandle) error {
+	forwarding, err := forwarder.BeginControllerEvents(ctx, request)
+	if err != nil {
+		return err
+	}
+	for _, event := range source.events {
+		if err := forwarding.ObserveSourceEvent(ctx, agent.SourceEvent{
+			Canonical:                        session.CloneEvent(event.Canonical),
+			Native:                           CloneEnvelopePtr(event.ACP),
+			CanonicalContentAlreadyPublished: event.CanonicalContentAlreadyPublished,
+		}); err != nil {
+			return err
 		}
 	}
+	return forwarding.Complete(ctx)
 }
-
-func (h scriptedSourceHandle) SourceEvents() iter.Seq2[SourceEvent, error] {
-	return func(yield func(SourceEvent, error) bool) {
-		for _, event := range h.events {
-			if !yield(CloneSourceEvent(event), nil) {
-				return
-			}
-		}
-	}
-}
-
-func (scriptedSourceHandle) Cancel() controller.CancelResult {
-	return controller.CancelResult{Status: controller.CancelStatusCancelled}
-}
-
-func (scriptedSourceHandle) Close() error { return nil }
 
 func acpNarrativeEnvelope(text string, meta map[string]any) *eventstream.Envelope {
 	return &eventstream.Envelope{

@@ -1,13 +1,14 @@
 package runtime
 
 import (
-	"math"
+	"context"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
 func (t *commandTask) appendSandboxOutput(chunk sandbox.OutputChunk) {
@@ -102,16 +103,13 @@ func (t *commandTask) markRecoveredOutputGapLocked() {
 		return
 	}
 	nextBase := max(t.outputCursorLocked(), t.outputState.frontier.model) + 1
-	eventCursor := t.commandStreamEventCursorLocked()
 	t.output = ""
 	t.outputState.frontier.base = nextBase
 	t.outputState.frontier.model = max(t.outputState.frontier.model, nextBase)
-	t.streamFrames = nil
-	t.streamEventBase = eventCursor
 	t.outputState.checkpoint.gap = true
 	t.outputState.checkpoint.coherent = false
 	t.outputState.exact = false
-	t.notifyCommandStreamChangeLocked()
+	t.notifyCommandOutputChangeLocked()
 }
 
 func (t *commandTask) commitOutputCheckpointLocked(stdoutCursor int64, stderrCursor int64) {
@@ -145,7 +143,7 @@ func (t *commandTask) appendOutput(text string) {
 }
 
 func (t *commandTask) appendOutputLocked(text string) {
-	if t == nil || text == "" || t.streamTerminalFramed {
+	if t == nil || text == "" || t.outputTerminal {
 		return
 	}
 	raw := []byte(t.output)
@@ -163,125 +161,54 @@ func (t *commandTask) appendOutputLocked(text string) {
 	}
 	t.output = string(raw)
 	t.outputState.live = true
-	t.appendCommandStreamFrameLocked(stream.Frame{
-		Text:    text,
-		Running: t.running,
-	})
-	t.trimCommandStreamFramesLocked()
+	if t.outputObserver != nil {
+		_ = t.outputObserver.ObserveTaskOutput(context.Background(), output.Event{
+			OccurredAt: time.Now(), Text: text, Running: t.running,
+		})
+	}
+	t.notifyCommandOutputChangeLocked()
 }
 
-func (t *commandTask) appendCommandStreamFrameLocked(frame stream.Frame) {
-	if t == nil || t.streamTerminalFramed {
+func (t *commandTask) emitOutputTerminalLocked(state taskapi.State, status sandbox.SessionStatus, includeExitCode bool) {
+	if t == nil || t.outputTerminal {
 		return
 	}
-	frame = stream.CloneFrame(frame)
-	frame.Ref = stream.Ref{
-		SessionID:  strings.TrimSpace(t.sessionRef.SessionID),
-		TaskID:     strings.TrimSpace(t.ref.TaskID),
-		TerminalID: strings.TrimSpace(t.ref.TerminalID),
+	t.outputTerminal = true
+	event := output.Event{OccurredAt: status.UpdatedAt, State: string(state), Closed: true}
+	if event.OccurredAt.IsZero() {
+		event.OccurredAt = time.Now()
 	}
-	frame.Cursor = stream.Cursor{
-		Output: t.outputCursorLocked(),
-		Events: nextCommandStreamEventCursor(t.commandStreamEventCursorLocked()),
+	if includeExitCode {
+		code := status.ExitCode
+		event.ExitCode = &code
 	}
-	t.streamFrames = append(t.streamFrames, frame)
-	t.notifyCommandStreamChangeLocked()
+	if t.outputObserver != nil {
+		_ = t.outputObserver.ObserveTaskOutput(context.Background(), event)
+	}
+	t.notifyCommandOutputChangeLocked()
 }
 
-func (t *commandTask) notifyCommandStreamChangeLocked() {
+// notifyCommandOutputChangeLocked wakes Task-control callers waiting for a
+// post-input observation. It retains no output; Control's spool is the sole
+// transient delivery buffer.
+func (t *commandTask) notifyCommandOutputChangeLocked() {
 	if t == nil {
 		return
 	}
-	if t.streamChanged != nil {
-		close(t.streamChanged)
+	if t.outputChanged != nil {
+		close(t.outputChanged)
 	}
-	t.streamChanged = make(chan struct{})
+	t.outputChanged = make(chan struct{})
 }
 
-func (t *commandTask) commandStreamEventCursorLocked() int64 {
-	if t == nil {
-		return 0
-	}
-	cursor := max(t.streamEventBase, int64(0))
-	if count := len(t.streamFrames); count > 0 {
-		cursor = max(cursor, t.streamFrames[count-1].Cursor.Events)
-	}
-	return cursor
-}
-
-func nextCommandStreamEventCursor(cursor int64) int64 {
-	if cursor < 0 {
-		return 1
-	}
-	if cursor == math.MaxInt64 {
-		return math.MaxInt64
-	}
-	return cursor + 1
-}
-
-func (t *commandTask) commandStreamChangeWaiterLocked(cursor stream.Cursor) (<-chan struct{}, bool) {
-	if t == nil || commandStreamAdvancedLocked(t, cursor) {
+func (t *commandTask) commandOutputChangeWaiterLocked(cursor int64) (<-chan struct{}, bool) {
+	if t == nil || t.outputCursorLocked() > cursor || !t.running {
 		return nil, true
 	}
-	if t.streamChanged == nil {
-		t.streamChanged = make(chan struct{})
+	if t.outputChanged == nil {
+		t.outputChanged = make(chan struct{})
 	}
-	return t.streamChanged, false
-}
-
-func commandStreamAdvancedLocked(task *commandTask, cursor stream.Cursor) bool {
-	if task == nil {
-		return true
-	}
-	eventCursor := task.commandStreamEventCursorLocked()
-	return task.outputCursorLocked() > cursor.Output || eventCursor > cursor.Events ||
-		(!task.running && stream.IsTerminalState(string(task.state)))
-}
-
-func (t *commandTask) trimCommandStreamFramesLocked() {
-	if t == nil || len(t.streamFrames) == 0 {
-		return
-	}
-	for len(t.streamFrames) > 0 {
-		first := &t.streamFrames[0]
-		end := first.Cursor.Output
-		start := end - int64(len([]byte(first.Text)))
-		if end <= t.outputState.frontier.base && first.Text != "" {
-			t.streamEventBase = max(t.streamEventBase, first.Cursor.Events)
-			t.streamFrames[0] = stream.Frame{}
-			t.streamFrames = t.streamFrames[1:]
-			continue
-		}
-		if first.Text != "" && start < t.outputState.frontier.base {
-			first.Text = sliceStringFromByteCursor(first.Text, t.outputState.frontier.base-start)
-		}
-		break
-	}
-}
-
-func (t *commandTask) ensureCommandOutputSeedLocked() {
-	if t == nil || len(t.streamFrames) != 0 || t.output == "" {
-		return
-	}
-	t.appendCommandStreamFrameLocked(stream.Frame{Text: t.output, Running: t.running})
-}
-
-func (t *commandTask) ensureCommandTerminalFrameLocked(state taskapi.State, status sandbox.SessionStatus, includeExitCode bool) {
-	if t == nil || !stream.IsTerminalState(string(state)) || t.streamTerminalFramed {
-		return
-	}
-	frame := stream.Frame{
-		State:     string(state),
-		Running:   false,
-		Closed:    true,
-		UpdatedAt: status.UpdatedAt,
-	}
-	if !status.Running && includeExitCode {
-		exitCode := status.ExitCode
-		frame.ExitCode = &exitCode
-	}
-	t.appendCommandStreamFrameLocked(frame)
-	t.streamTerminalFramed = true
+	return t.outputChanged, false
 }
 
 func (t *commandTask) outputCursorLocked() int64 {
@@ -302,7 +229,7 @@ func (t *commandTask) outputFromCursorLocked(cursor int64) string {
 }
 
 // reconcileFinalOutputLocked appends only the canonical result suffix that is
-// not yet present in the callback-backed stream. A mismatch is left untouched:
+// not yet present in the callback-backed output. A mismatch is left untouched:
 // stdout/stderr result grouping is not guaranteed to preserve live interleave
 // order, so replacing or appending an unaligned result would duplicate bytes.
 func (t *commandTask) reconcileFinalOutputLocked(finalOutput string) bool {
@@ -327,28 +254,16 @@ func (t *commandTask) reconcileFinalOutputLocked(finalOutput string) bool {
 	return true
 }
 
-func commandTaskStreamRef(task *commandTask) stream.Ref {
-	if task == nil {
-		return stream.Ref{}
+func sliceStringFromByteCursor(text string, cursor int64) string {
+	if cursor < 0 {
+		cursor = 0
 	}
-	task.mu.Lock()
-	defer task.mu.Unlock()
-	return stream.Ref{
-		SessionID:  task.sessionRef.SessionID,
-		TaskID:     task.ref.TaskID,
-		TerminalID: task.ref.TerminalID,
+	raw := []byte(text)
+	if cursor >= int64(len(raw)) {
+		return ""
 	}
-}
-
-func commandTaskStreamCursor(task *commandTask) (stream.Cursor, bool) {
-	if task == nil {
-		return stream.Cursor{}, false
+	for cursor < int64(len(raw)) && !utf8.RuneStart(raw[cursor]) {
+		cursor++
 	}
-	task.mu.Lock()
-	defer task.mu.Unlock()
-	eventCursor := task.commandStreamEventCursorLocked()
-	return stream.Cursor{
-		Output: task.outputCursorLocked(),
-		Events: eventCursor,
-	}, task.outputState.frontier.model < task.outputCursorLocked()
+	return string(raw[cursor:])
 }

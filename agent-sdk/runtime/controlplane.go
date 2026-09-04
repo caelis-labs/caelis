@@ -79,7 +79,7 @@ func (r *Runtime) runACPControllerTurn(
 		ActiveRunID: runID,
 		UpdatedAt:   r.now(),
 	})
-	handle := newRunner(runID, cancel)
+	handle := newRunner(ctx, runID, cancel, req.SourceObserver)
 	handle.setCancelHook(func() error {
 		return r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 	})
@@ -199,10 +199,34 @@ func (r *Runtime) executeACPControllerTurn(
 	if contextRoute.SyncSeq > activeSession.Controller.ContextSyncSeq {
 		turnReq.Context = contextRoute.Context
 	}
+	var toolFactOrdinal uint64
+	newForwarding := func(forwardCtx context.Context) (agent.ControllerEventSession, error) {
+		return r.beginControllerEvents(forwardCtx, agent.ControllerEventForwardRequest{
+			ActiveSession: activeSession,
+			SessionRef:    ref,
+			MutationGuard: session.RuntimeMutationGuard(ctx),
+			TurnID:        turnID,
+			Publisher:     handle,
+			Normalize: func(active session.Session, turn string, event *session.Event) *session.Event {
+				normalized := normalizeEvent(active, turn, event)
+				if scopeRuntimeToolFactIdentity(normalized, runID, turnID, toolFactOrdinal+1) {
+					toolFactOrdinal++
+				}
+				return normalized
+			},
+			IsUserEcho: isACPControllerUserEcho,
+		})
+	}
 	var turnResult controller.TurnResult
+	var forwarding agent.ControllerEventSession
 	err = r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "acp", ""), func(runCtx context.Context) error {
 		return r.executeLifecycle(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "acp", ""), func(turnCtx context.Context) error {
 			var turnErr error
+			forwarding, turnErr = newForwarding(turnCtx)
+			if turnErr != nil {
+				return turnErr
+			}
+			turnReq.Observer = forwarding
 			turnResult, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
 			if turnErr != nil && isMissingACPControllerRun(turnErr) {
 				if r.controllerRecovery == nil {
@@ -220,7 +244,11 @@ func (r *Runtime) executeACPControllerTurn(
 						turnReq.Context = contextRoute.Context
 						turnReq.FreshContext = contextRoute.FreshContext
 						turnReq.ContextSyncSeq = contextRoute.SyncSeq
-						turnResult, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
+						forwarding, turnErr = newForwarding(turnCtx)
+						if turnErr == nil {
+							turnReq.Observer = forwarding
+							turnResult, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
+						}
 					}
 				}
 			}
@@ -239,7 +267,6 @@ func (r *Runtime) executeACPControllerTurn(
 		return
 	}
 	if turnResult.Handle != nil {
-		var toolFactOrdinal uint64
 		handle.setCancelHook(func() error {
 			journalErr := r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 			return errors.Join(journalErr, turnResult.Handle.Cancel().Err)
@@ -247,22 +274,13 @@ func (r *Runtime) executeACPControllerTurn(
 		defer turnResult.Handle.Close()
 		admission.resolve(nil)
 		admitted = true
-		if err := r.forwardControllerEvents(ctx, agent.ControllerEventForwardRequest{
-			ActiveSession: activeSession,
-			SessionRef:    ref,
-			MutationGuard: session.RuntimeMutationGuard(ctx),
-			TurnID:        turnID,
-			Source:        turnResult.Handle,
-			Publisher:     handle,
-			Normalize: func(active session.Session, turn string, event *session.Event) *session.Event {
-				normalized := normalizeEvent(active, turn, event)
-				if scopeRuntimeToolFactIdentity(normalized, runID, turnID, toolFactOrdinal+1) {
-					toolFactOrdinal++
-				}
-				return normalized
-			},
-			IsUserEcho: isACPControllerUserEcho,
-		}); err != nil {
+		err = turnResult.Handle.WaitCompletion(ctx)
+		if err == nil && forwarding != nil {
+			err = forwarding.Complete(ctx)
+		} else if err == nil {
+			err = errors.New("agent-sdk/runtime: controller event forwarding session is unavailable")
+		}
+		if err != nil {
 			terminalErr = err
 			r.setRunState(ref.SessionID, agent.RunState{
 				Status:      interruptedOrFailedStatus(ctx, err),

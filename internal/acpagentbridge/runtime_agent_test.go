@@ -20,14 +20,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
-	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
@@ -528,50 +526,6 @@ func TestRuntimeAgentPromptConvertsLocalTerminalTextToTerminalMetaForACPStdio(t 
 	}
 	if got := terminalOutputPayloads(cb.notifications, "call-1"); strings.Join(got, "") != "streamed output\n" {
 		t.Fatalf("terminal output payloads = %#v, want terminal output meta", got)
-	}
-}
-
-func TestRuntimeAgentPromptContinuesAfterObservationGap(t *testing.T) {
-	t.Parallel()
-
-	sessions := inmemory.NewStore(inmemory.Config{})
-	bridge, err := runtimeacp.New(runtimeacp.Config{
-		Runtime:  observationGapRuntime{},
-		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, runtimeacp.PromptInput) (agent.AgentSpec, error) {
-			return agent.AgentSpec{Name: "fake"}, nil
-		},
-		AppName: "caelis",
-		UserID:  "user-1",
-	})
-	if err != nil {
-		t.Fatalf("runtimeacp.New() error = %v", err)
-	}
-	active, err := bridge.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
-	}
-	callbacks := &recordingPromptCallbacks{}
-	response, err := bridge.Prompt(context.Background(), runtimeacp.PromptInput{SessionID: string(active.SessionId)}, callbacks)
-	if err != nil {
-		t.Fatalf("Prompt() error = %v", err)
-	}
-	if response.StopReason != acpsdk.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", response.StopReason, acpsdk.StopReasonEndTurn)
-	}
-	chunks := agentMessageChunks(callbacks.notifications)
-	if len(chunks) != 2 || chunks[0] != acpbridge.RuntimeObservationGapNotice || chunks[1] != "durable final" {
-		t.Fatalf("agent messages = %#v, want gap notice then final message", chunks)
-	}
-	gapUpdate, ok := callbacks.notifications[0].Update.(eventstream.ContentChunk)
-	if !ok || strings.TrimSpace(gapUpdate.MessageID) == "" {
-		t.Fatalf("gap update = %#v, want independently keyed ACP notice", callbacks.notifications[0].Update)
-	}
-	caelisMeta, _ := gapUpdate.Meta["caelis"].(map[string]any)
-	runtimeMeta, _ := caelisMeta["runtime"].(map[string]any)
-	observation, _ := runtimeMeta["observation"].(map[string]any)
-	if observation["code"] != "observation_gap" || observation["dropped"] != uint64(17) {
-		t.Fatalf("gap metadata = %#v", observation)
 	}
 }
 
@@ -1161,28 +1115,6 @@ type recordingRunRuntime struct {
 	request agent.RunRequest
 }
 
-type observationGapRuntime struct{}
-
-func (observationGapRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
-	message := model.NewTextMessage(model.RoleAssistant, "durable final")
-	return agent.RunResult{
-		Session: session.Session{SessionRef: req.SessionRef},
-		Handle: terminalBridgeRun{
-			gapDropped: 17,
-			events: []*session.Event{{
-				SessionID: req.SessionRef.SessionID,
-				Type:      session.EventTypeAssistant,
-				Message:   &message,
-				Text:      message.TextContent(),
-			}},
-		},
-	}, nil
-}
-
-func (observationGapRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
-	return agent.RunState{}, nil
-}
-
 func (r *recordingRunRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
 	r.request = req
 	return agent.RunResult{
@@ -1252,7 +1184,7 @@ func (r *promptRouterRuntime) PromptParticipant(ctx context.Context, req agent.P
 			Update: &session.ProtocolUpdate{SessionUpdate: eventstream.UpdateAgentMessage},
 		},
 	}
-	return agent.RunResult{Session: activeSession, Handle: promptRouterRun{event: event}}, nil
+	return agent.RunResult{Session: activeSession, Handle: promptRouterRun{event: event, observer: req.SourceObserver}}, nil
 }
 
 func (r *promptRouterRuntime) DetachParticipant(context.Context, agent.DetachParticipantRequest) (session.Session, error) {
@@ -1264,15 +1196,17 @@ func (r *promptRouterRuntime) HandoffController(context.Context, agent.HandoffCo
 }
 
 type promptRouterRun struct {
-	event *session.Event
+	event    *session.Event
+	observer agent.SourceEventObserver
 }
 
 func (r promptRouterRun) RunID() string { return "prompt-router-run-1" }
 
-func (r promptRouterRun) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		yield(r.event, nil)
+func (r promptRouterRun) WaitCompletion(ctx context.Context) error {
+	if r.observer == nil || r.event == nil {
+		return nil
 	}
+	return r.observer.ObserveSourceEvent(ctx, agent.SourceEvent{Canonical: r.event})
 }
 
 func (r promptRouterRun) Submit(agent.Submission) error { return nil }
@@ -1367,13 +1301,10 @@ func (r staticApprovalModelResolver) ResolveApprovalModel(context.Context, sessi
 }
 
 type terminalBridgeRuntime struct {
-	closedState        string
-	closedText         string
-	toolName           string
-	taskID             string
-	terminalID         string
-	omitStreamedOutput bool
-	includeFinalEvent  bool
+	toolName          string
+	taskID            string
+	terminalID        string
+	includeFinalEvent bool
 }
 
 func (r terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
@@ -1464,19 +1395,11 @@ func (r terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (age
 			},
 		})
 	}
-	return agent.RunResult{Handle: terminalBridgeRun{events: events}}, nil
+	return agent.RunResult{Handle: terminalBridgeRun{observer: req.SourceObserver, events: events}}, nil
 }
 
 func (terminalBridgeRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
 	return agent.RunState{}, nil
-}
-
-func (r terminalBridgeRuntime) Streams() stream.Service {
-	return terminalBridgeStream{
-		closedState:        r.closedState,
-		closedText:         r.closedText,
-		omitStreamedOutput: r.omitStreamedOutput,
-	}
 }
 
 type terminalBridgeFinalRuntime struct {
@@ -1504,7 +1427,7 @@ func (r terminalBridgeFinalRuntime) Run(_ context.Context, req agent.RunRequest)
 		rawInput = map[string]any{"agent": "claude", "prompt": "stream child output"}
 	}
 	return agent.RunResult{
-		Handle: terminalBridgeRun{events: []*session.Event{
+		Handle: terminalBridgeRun{observer: req.SourceObserver, events: []*session.Event{
 			{
 				SessionID: sessionID,
 				Type:      session.EventTypeToolCall,
@@ -1554,10 +1477,6 @@ func (terminalBridgeFinalRuntime) RunState(context.Context, session.SessionRef) 
 	return agent.RunState{}, nil
 }
 
-func (terminalBridgeFinalRuntime) Streams() stream.Service {
-	return terminalBridgeStream{}
-}
-
 type narrativeReplayRuntime struct{}
 
 func (narrativeReplayRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
@@ -1568,7 +1487,7 @@ func (narrativeReplayRuntime) Run(_ context.Context, req agent.RunRequest) (agen
 	finalHelloWorld := model.NewTextMessage(model.RoleAssistant, "hello world")
 	return agent.RunResult{
 		Session: session.Session{SessionRef: req.SessionRef},
-		Handle: terminalBridgeRun{events: []*session.Event{
+		Handle: terminalBridgeRun{observer: req.SourceObserver, events: []*session.Event{
 			{
 				SessionID:  sessionID,
 				Type:       session.EventTypeAssistant,
@@ -1628,7 +1547,7 @@ func (narrativeThoughtReplayRuntime) Run(_ context.Context, req agent.RunRequest
 	finalStarted := model.NewReasoningMessage(model.RoleAssistant, "任务已启动", model.ReasoningVisibilityVisible)
 	return agent.RunResult{
 		Session: session.Session{SessionRef: req.SessionRef},
-		Handle: terminalBridgeRun{events: []*session.Event{
+		Handle: terminalBridgeRun{observer: req.SourceObserver, events: []*session.Event{
 			{
 				SessionID:  sessionID,
 				Type:       session.EventTypeAssistant,
@@ -1689,7 +1608,7 @@ func (narrativeToolBoundaryReplayRuntime) Run(_ context.Context, req agent.RunRe
 	)
 	return agent.RunResult{
 		Session: session.Session{SessionRef: req.SessionRef},
-		Handle: terminalBridgeRun{events: []*session.Event{
+		Handle: terminalBridgeRun{observer: req.SourceObserver, events: []*session.Event{
 			{
 				SessionID:  sessionID,
 				Type:       session.EventTypeAssistant,
@@ -1747,23 +1666,78 @@ func (narrativeToolBoundaryReplayRuntime) RunState(context.Context, session.Sess
 }
 
 type terminalBridgeRun struct {
-	events     []*session.Event
-	gapDropped uint64
+	observer agent.SourceEventObserver
+	events   []*session.Event
 }
 
 func (r terminalBridgeRun) RunID() string { return "run-1" }
 
-func (r terminalBridgeRun) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		if r.gapDropped > 0 && !yield(nil, &agent.EventStreamGapError{Dropped: r.gapDropped}) {
-			return
+func (r terminalBridgeRun) WaitCompletion(ctx context.Context) error {
+	published := map[string]agent.PublishedContent{}
+	for _, event := range r.events {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		for _, event := range r.events {
-			if !yield(event, nil) {
-				return
+		if r.observer != nil {
+			content := testNarrativeContent(event)
+			key := testNarrativeKey(event)
+			var already agent.PublishedContent
+			if session.IsUIOnly(event) {
+				published[key] |= content
+			} else if session.IsCanonicalHistoryEvent(event) {
+				already = published[key] & content
+				delete(published, key)
+			}
+			if err := r.observer.ObserveSourceEvent(ctx, agent.SourceEvent{
+				Canonical: event, CanonicalContentAlreadyPublished: already,
+			}); err != nil {
+				return err
 			}
 		}
 	}
+	return nil
+}
+
+func testNarrativeKey(event *session.Event) string {
+	if event == nil {
+		return ""
+	}
+	key := session.EventMessageID(event)
+	if event.Scope != nil {
+		key = strings.Join([]string{
+			event.Scope.Participant.ID, event.Scope.Participant.DelegationID,
+			event.Scope.ACP.SessionID, event.Scope.TurnID, key,
+		}, "\x00")
+	}
+	return key
+}
+
+func testNarrativeContent(event *session.Event) agent.PublishedContent {
+	if event == nil {
+		return 0
+	}
+	var content agent.PublishedContent
+	switch strings.TrimSpace(session.ProtocolSessionUpdateType(event)) {
+	case string(session.ProtocolUpdateTypeAgentMessage):
+		content |= agent.PublishedAssistantMessage
+	case string(session.ProtocolUpdateTypeAgentThought):
+		content |= agent.PublishedAssistantThought
+	}
+	message := event.Message
+	if message == nil {
+		if projected, ok := session.ModelMessageOf(event); ok {
+			message = &projected
+		}
+	}
+	if message != nil && message.Role == model.RoleAssistant {
+		if strings.TrimSpace(message.TextContent()) != "" {
+			content |= agent.PublishedAssistantMessage
+		}
+		if strings.TrimSpace(message.ReasoningText()) != "" {
+			content |= agent.PublishedAssistantThought
+		}
+	}
+	return content
 }
 
 func (terminalBridgeRun) Submit(agent.Submission) error { return nil }
@@ -1771,59 +1745,6 @@ func (terminalBridgeRun) Cancel() agent.CancelResult {
 	return agent.CancelResult{Status: agent.CancelStatusCancelled}
 }
 func (terminalBridgeRun) Close() error { return nil }
-
-type terminalBridgeStream struct {
-	closedState        string
-	closedText         string
-	omitStreamedOutput bool
-}
-
-func (s terminalBridgeStream) Read(context.Context, stream.ReadRequest) (stream.Snapshot, error) {
-	state := strings.TrimSpace(s.closedState)
-	if state == "" {
-		state = "completed"
-	}
-	exitCode := 0
-	if terminalFrameFailedForTest(state) {
-		exitCode = 1
-	}
-	snap := stream.Snapshot{
-		Running:  false,
-		State:    state,
-		ExitCode: &exitCode,
-	}
-	if !s.omitStreamedOutput {
-		snap.Frames = append(snap.Frames, stream.Frame{Text: "streamed output\n"})
-	}
-	if s.closedText != "" {
-		snap.FinalText = s.closedText
-	}
-	return snap, nil
-}
-
-func (s terminalBridgeStream) Subscribe(context.Context, stream.SubscribeRequest) iter.Seq2[*stream.Frame, error] {
-	return func(yield func(*stream.Frame, error) bool) {
-		if !s.omitStreamedOutput {
-			if !yield(&stream.Frame{Text: "streamed output\n"}, nil) {
-				return
-			}
-		}
-		state := strings.TrimSpace(s.closedState)
-		if state == "" {
-			state = "completed"
-		}
-		yield(&stream.Frame{Text: s.closedText, Closed: true, State: state}, nil)
-	}
-}
-
-func terminalFrameFailedForTest(state string) bool {
-	switch strings.ToLower(strings.TrimSpace(state)) {
-	case "failed", "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout":
-		return true
-	default:
-		return false
-	}
-}
 
 type terminalBridgeCallbacks struct {
 	mu            sync.Mutex

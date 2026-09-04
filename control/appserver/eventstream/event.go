@@ -229,6 +229,31 @@ type Envelope struct {
 	Error string         `json:"error,omitempty"`
 }
 
+// UnmarshalJSON restores the typed Update union when an Envelope is read from
+// a Control-owned cache such as the Session spool. Transport codecs may apply
+// additional numeric normalization, but plain JSON round trips must not turn
+// Update into an un-decodable interface value.
+func (e *Envelope) UnmarshalJSON(raw []byte) error {
+	type envelopeAlias Envelope
+	decoded := envelopeAlias{}
+	wire := struct {
+		Update json.RawMessage `json:"update"`
+		*envelopeAlias
+	}{envelopeAlias: &decoded}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return err
+	}
+	if len(wire.Update) > 0 && string(wire.Update) != "null" {
+		update, err := DecodeUpdateJSON(wire.Update)
+		if err != nil {
+			return err
+		}
+		decoded.Update = update
+	}
+	*e = Envelope(decoded)
+	return nil
+}
+
 type ApprovalReview struct {
 	ToolCallID    string         `json:"tool_call_id,omitempty"`
 	ToolName      string         `json:"tool_name,omitempty"`

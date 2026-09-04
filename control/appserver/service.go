@@ -18,8 +18,6 @@ type ListSessionsRequest struct {
 // EventBatch is a finite replay prefix and its resumable feed boundary.
 type EventBatch struct {
 	Events         []eventstream.Envelope `json:"events,omitempty"`
-	ResumeMode     ResumeMode             `json:"resume_mode"`
-	TransientGap   bool                   `json:"transient_gap,omitempty"`
 	BoundaryCursor string                 `json:"boundary_cursor,omitempty"`
 }
 

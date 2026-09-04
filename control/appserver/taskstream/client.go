@@ -11,7 +11,7 @@ import (
 // plane; closing a Subscription only detaches this observer.
 type Client interface {
 	List(context.Context, ListRequest) (ListResult, error)
-	Events(context.Context, ReadRequest) (Batch, error)
+	Events(context.Context, ReadRequest) (ReadResult, error)
 	Subscribe(context.Context, SubscribeRequest) (SubscribeResult, error)
 }
 
@@ -43,7 +43,7 @@ func (c *boundClient) List(ctx context.Context, request ListRequest) (ListResult
 	return c.service.List(ctx, c.boundPrincipal(), request)
 }
 
-func (c *boundClient) Events(ctx context.Context, request ReadRequest) (Batch, error) {
+func (c *boundClient) Events(ctx context.Context, request ReadRequest) (ReadResult, error) {
 	return c.service.Events(ctx, c.boundPrincipal(), request)
 }
 

@@ -2,12 +2,10 @@ package appserver
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
@@ -17,10 +15,7 @@ func TestStateServiceReturnsTypedConsistentBootstrapBySessionID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeds, err := NewFeedRegistry(FeedRegistryConfig{CursorCodec: codec})
-	if err != nil {
-		t.Fatal(err)
-	}
+	feeds := newTestFeedRegistry(t, FeedRegistryConfig{CursorCodec: codec})
 	feed, err := feeds.Session(session.SessionRef{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -68,10 +63,7 @@ func TestStateServiceDoesNotStarveWhileSessionRevisionChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeds, err := NewFeedRegistry(FeedRegistryConfig{CursorCodec: codec})
-	if err != nil {
-		t.Fatal(err)
-	}
+	feeds := newTestFeedRegistry(t, FeedRegistryConfig{CursorCodec: codec})
 	sessions := &changingStateSessionReader{}
 	service, err := NewStateService(StateServiceConfig{
 		Sessions: sessions, Runtime: staticRuntimeStateReader{}, Feeds: feeds,
@@ -93,10 +85,7 @@ func TestStateServicePreparesExplicitReconnectButKeepsInspectPure(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeds, err := NewFeedRegistry(FeedRegistryConfig{CursorCodec: codec})
-	if err != nil {
-		t.Fatal(err)
-	}
+	feeds := newTestFeedRegistry(t, FeedRegistryConfig{CursorCodec: codec})
 	sessions := &stateSessionReader{session: session.Session{
 		SessionRef: session.SessionRef{SessionID: "session-1"}, Revision: 7,
 	}}
@@ -164,12 +153,7 @@ func TestStateServiceReconnectSucceedsDuringContinuousPublish(t *testing.T) {
 		active: session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}, Revision: 1},
 		events: []*session.Event{durableProtocolEvent(1, "durable history")},
 	}
-	feeds, err := NewFeedRegistry(FeedRegistryConfig{
-		Reader: reader, CursorCodec: codec, RingEvents: 100_000, RingBytes: 64 << 20,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	feeds := newTestFeedRegistry(t, FeedRegistryConfig{Reader: reader, CursorCodec: codec})
 	feed, err := feeds.Session(session.SessionRef{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -216,41 +200,6 @@ func TestStateServiceReconnectSucceedsDuringContinuousPublish(t *testing.T) {
 	}
 }
 
-func TestStateServiceMapsCheckpointLagToRevisionConflict(t *testing.T) {
-	codec, err := NewCursorCodec(CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reader := &checkpointPageReader{active: session.Session{
-		SessionRef: session.SessionRef{SessionID: "session-1"}, Revision: 1,
-	}, events: []*session.Event{durableProtocolEvent(1, "accepted before checkpoint")}}
-	feeds, err := NewFeedRegistry(FeedRegistryConfig{Reader: reader, CursorCodec: codec})
-	if err != nil {
-		t.Fatal(err)
-	}
-	feed, err := feeds.Session(session.SessionRef{SessionID: "session-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := feed.Publish(projectedEnvelope(1, "accepted before checkpoint")); err != nil {
-		t.Fatal(err)
-	}
-	// Model the observed bootstrap window after Feed acceptance but before the
-	// checkpoint reader makes that durable position visible.
-	reader.events = nil
-	service, err := NewStateService(StateServiceConfig{
-		Sessions: readerSessionLookup{reader}, Runtime: staticRuntimeStateReader{}, Feeds: feeds,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = service.State(context.Background(), StateRequest{SessionID: "session-1"})
-	if !errors.Is(err, ErrStateRevisionConflict) || errorcode.CodeOf(err) != errorcode.Conflict {
-		t.Fatalf("State error = %v (code %q), want ErrStateRevisionConflict", err, errorcode.CodeOf(err))
-	}
-}
-
 func TestStateServiceAcceptsCheckpointCoveredByNonProjectingCanonicalEvent(t *testing.T) {
 	codec, err := NewCursorCodec(CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {
@@ -267,10 +216,7 @@ func TestStateServiceAcceptsCheckpointCoveredByNonProjectingCanonicalEvent(t *te
 			Text:  "Subagent @reviewer is completed.",
 		},
 	}}
-	feeds, err := NewFeedRegistry(FeedRegistryConfig{Reader: reader, CursorCodec: codec})
-	if err != nil {
-		t.Fatal(err)
-	}
+	feeds := newTestFeedRegistry(t, FeedRegistryConfig{Reader: reader, CursorCodec: codec})
 	feed, err := feeds.Session(session.SessionRef{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -301,7 +247,7 @@ func TestStateServiceAcceptsCheckpointCoveredByNonProjectingCanonicalEvent(t *te
 	}
 }
 
-func TestReconnectStateUsesExactFeedCutModeGapAndBoundary(t *testing.T) {
+func TestReconnectStateUsesExactFeedCursorAndBoundary(t *testing.T) {
 	codec, err := NewCursorCodec(CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {
 		t.Fatal(err)
@@ -309,10 +255,7 @@ func TestReconnectStateUsesExactFeedCutModeGapAndBoundary(t *testing.T) {
 	reader := &checkpointPageReader{active: session.Session{
 		SessionRef: session.SessionRef{SessionID: "session-1"}, Revision: 2,
 	}, events: []*session.Event{durableProtocolEvent(1, "one")}}
-	feeds, err := NewFeedRegistry(FeedRegistryConfig{Reader: reader, CursorCodec: codec, RingEvents: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
+	feeds := newTestFeedRegistry(t, FeedRegistryConfig{Reader: reader, CursorCodec: codec})
 	feed, err := feeds.Session(session.SessionRef{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -321,7 +264,7 @@ func TestReconnectStateUsesExactFeedCutModeGapAndBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, firstCursor := feed.Boundary()
-	reader.events = append(reader.events, durableProtocolEvent(2, "two"))
+	reader.setEvents(durableProtocolEvent(1, "one"), durableProtocolEvent(2, "two"))
 	if err := feed.Publish(projectedEnvelope(2, "two")); err != nil {
 		t.Fatal(err)
 	}
@@ -329,31 +272,27 @@ func TestReconnectStateUsesExactFeedCutModeGapAndBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fallback, err := service.Reconnect(context.Background(), ReconnectRequest{SessionID: "session-1", Cursor: firstCursor})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer fallback.Subscription.Close()
-	if fallback.State.ResumeMode != ResumeModeDurableFallback || !fallback.State.TransientGap {
-		t.Fatalf("fallback state = %#v", fallback.State)
-	}
-	decoded, err := codec.Decode("session-1", fallback.State.BoundaryCursor)
-	if err != nil || decoded.Durable == nil || fallback.State.BoundaryPosition == nil || fallback.State.BoundaryPosition.Durable == nil ||
-		compareDurablePosition(*decoded.Durable, *fallback.State.BoundaryPosition.Durable) != 0 {
-		t.Fatalf("fallback boundary cursor/position = %q / %#v, decode=%#v err=%v", fallback.State.BoundaryCursor, fallback.State.BoundaryPosition, decoded, err)
-	}
-	backfill := receiveEnvelopes(t, fallback.Subscription.Backfill(), 1)
-	if backfill[0].EventID != "event-2" {
-		t.Fatalf("fallback backfill = %#v", backfill)
-	}
-	_, currentCursor := feed.Boundary()
-	exact, err := service.Reconnect(context.Background(), ReconnectRequest{SessionID: "session-1", Cursor: currentCursor})
+	exact, err := service.Reconnect(context.Background(), ReconnectRequest{SessionID: "session-1", Cursor: firstCursor})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer exact.Subscription.Close()
-	if exact.State.ResumeMode != ResumeModeExact || exact.State.TransientGap {
-		t.Fatalf("exact state = %#v", exact.State)
+	decoded, err := codec.Decode("session-1", exact.State.BoundaryCursor)
+	if err != nil || exact.State.BoundaryPosition == nil {
+		t.Fatalf("exact boundary cursor/position = %q / %#v, decode=%#v err=%v", exact.State.BoundaryCursor, exact.State.BoundaryPosition, decoded, err)
+	}
+	appended := receiveFeedEvents(t, exact.Subscription, 1)
+	if appended[0].EventID != "event-2" {
+		t.Fatalf("exact append = %#v", appended)
+	}
+	_, currentCursor := feed.Boundary()
+	current, err := service.Reconnect(context.Background(), ReconnectRequest{SessionID: "session-1", Cursor: currentCursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer current.Subscription.Close()
+	if current.State.BoundaryCursor == "" {
+		t.Fatalf("current state = %#v", current.State)
 	}
 }
 

@@ -2,11 +2,9 @@ package taskstream
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
 // Principal is trusted Control-host context. Transport adapters construct it
@@ -16,16 +14,23 @@ type Principal struct {
 	Roles []string
 }
 
-// ResumeMode describes whether a Task subscription retained the requested
-// process-local observation boundary.
-type ResumeMode string
+type SourceClass string
 
 const (
-	ResumeModeExact        ResumeMode = "exact"
-	ResumeModeCurrentState ResumeMode = "current_state"
+	SourceExact       SourceClass = "exact"
+	SourceReplacement SourceClass = "replacement"
+	SourceStatus      SourceClass = "status"
 )
 
-var ErrSlowConsumer = errors.New("taskstream: slow consumer")
+type DeliveryKind string
+
+const (
+	DeliveryReplaceBegin DeliveryKind = "replace_begin"
+	DeliveryReplacePage  DeliveryKind = "replace_page"
+	DeliveryReplaceEnd   DeliveryKind = "replace_end"
+	DeliveryAppendPage   DeliveryKind = "append_page"
+	DeliveryStatus       DeliveryKind = "status"
+)
 
 // ParentTool identifies the canonical parent tool call for one Task.
 type ParentTool struct {
@@ -104,23 +109,17 @@ type SubscribeRequest struct {
 	Follow bool `json:"follow,omitempty"`
 }
 
-type Batch struct {
-	Records        []Record   `json:"records,omitempty"`
-	ActivityID     string     `json:"activity_id,omitempty"`
-	ResumeMode     ResumeMode `json:"resume_mode"`
-	TransientGap   bool       `json:"transient_gap,omitempty"`
-	BoundaryCursor string     `json:"boundary_cursor,omitempty"`
+type Delivery struct {
+	Kind       DeliveryKind `json:"kind"`
+	Source     SourceClass  `json:"source"`
+	SnapshotID string       `json:"snapshot_id,omitempty"`
+	Page       uint32       `json:"page,omitempty"`
+	Records    []Record     `json:"records,omitempty"`
+	NextCursor string       `json:"next_cursor,omitempty"`
+	ActivityID string       `json:"activity_id,omitempty"`
 }
 
-// Gap marks transient Task output that is no longer observable.
-type Gap struct {
-	SessionID string     `json:"session_id"`
-	TaskID    string     `json:"task_id"`
-	Kind      task.Kind  `json:"kind"`
-	State     task.State `json:"state"`
-}
-
-// Record is one cursor-stamped Task frame or gap. ACP-shaped Surface projection
+// Record is one cursor-stamped Task frame or descriptor. ACP-shaped Surface projection
 // belongs to control/appserver/taskstream; Control owns authorization, cursor
 // binding, and fan-out.
 type Record struct {
@@ -128,29 +127,30 @@ type Record struct {
 	Generation string         `json:"generation"`
 	Sequence   uint64         `json:"sequence"`
 	Task       TaskDescriptor `json:"task"`
-	Frame      *stream.Frame  `json:"frame,omitempty"`
-	Gap        *Gap           `json:"gap,omitempty"`
+	Frame      *Frame         `json:"frame,omitempty"`
+}
+
+type ReadResult struct {
+	Deliveries []Delivery `json:"deliveries,omitempty"`
+	ActivityID string     `json:"activity_id,omitempty"`
 }
 
 // Subscription owns only client delivery; closing it never cancels the Task.
+// Consumers commit Delivery.NextCursor after successfully applying the page.
 type Subscription interface {
-	Records() <-chan Record
+	Deliveries() <-chan Delivery
 	Close() error
 	Err() error
-	LastCursor() string
 }
 
 type SubscribeResult struct {
-	Subscription   Subscription `json:"-"`
-	ResumeMode     ResumeMode   `json:"resume_mode"`
-	TransientGap   bool         `json:"transient_gap,omitempty"`
-	BoundaryCursor string       `json:"boundary_cursor,omitempty"`
+	Subscription Subscription `json:"-"`
 }
 
 // Service is the coherent Control boundary consumed by Task-aware Surfaces.
 type Service interface {
 	List(context.Context, Principal, ListRequest) (ListResult, error)
-	Events(context.Context, Principal, ReadRequest) (Batch, error)
+	Events(context.Context, Principal, ReadRequest) (ReadResult, error)
 	Subscribe(context.Context, Principal, SubscribeRequest) (SubscribeResult, error)
 }
 

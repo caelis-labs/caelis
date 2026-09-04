@@ -2,7 +2,6 @@ package tuiapp
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -150,8 +149,8 @@ func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing
 	close(live)
 	reconnect := &tuiReconnect{
 		state: appserver.SessionState{
-			SessionID: "session-1", ResumeMode: appserver.ResumeModeExact,
-			Run: appserver.RunState{Active: true, HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
+			SessionID: "session-1",
+			Run:       appserver.RunState{Active: true, HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
 			Approval: appserver.ApprovalState{Active: &appserver.ActiveApproval{
 				RequestID:  "approval-original",
 				Permission: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call-1", Name: "Bash"}},
@@ -183,7 +182,7 @@ func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing
 		Handled: true, ClearHistory: true, Reconnect: reconnect, SuppressTurnDivider: true,
 	})
 	if !result.queued {
-		t.Fatalf("execute reconnect result = %#v, want live terminal queued", result)
+		t.Fatalf("execute reconnect result = %#v error=%v, want live terminal queued", result, result.completion.Err)
 	}
 	deadline := time.Now().Add(time.Second)
 	for {
@@ -211,45 +210,7 @@ func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing
 	}
 }
 
-func TestForwardSessionReconnectPreservesFeedGapAndDoesNotCompleteTurn(t *testing.T) {
-	t.Parallel()
-
-	live := make(chan eventstream.Envelope)
-	close(live)
-	gap := &appserver.FeedGapError{
-		Cause:        appserver.ErrSlowConsumer,
-		RetryCursor:  "retry-cursor",
-		Mode:         appserver.ResumeModeDurableFallback,
-		TransientGap: true,
-	}
-	reconnect := &tuiReconnect{
-		state: appserver.SessionState{
-			SessionID: "session-1",
-			Run: appserver.RunState{
-				Active: true, HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1",
-			},
-		},
-		live: live,
-		err:  gap,
-	}
-	var messages []tea.Msg
-	result := forwardSessionReconnectEventStream(context.Background(), reconnect, &ProgramSender{Send: func(message tea.Msg) {
-		messages = append(messages, message)
-	}})
-	if !result.queued || len(messages) != 1 {
-		t.Fatalf("result = %#v, messages = %#v, want one queued interrupted terminal", result, messages)
-	}
-	terminal, ok := messages[0].(eventstream.Envelope)
-	if !ok || !eventstream.IsTurnTerminalLifecycle(terminal) || terminal.Lifecycle.State != eventstream.LifecycleStateInterrupted {
-		t.Fatalf("terminal = %#v, want interrupted lifecycle", messages[0])
-	}
-	var gotGap *appserver.FeedGapError
-	if !errors.As(terminal.Err, &gotGap) || gotGap.RetryCursor != gap.RetryCursor || gotGap.Mode != gap.Mode || !gotGap.TransientGap {
-		t.Fatalf("terminal error = %#v, want typed feed gap with retry cursor", terminal.Err)
-	}
-}
-
-func TestStreamReconnectBackfillCarriesNormalizedObservedSpawnResult(t *testing.T) {
+func TestStreamReconnectBackfillPreservesCanonicalSpawnResult(t *testing.T) {
 	t.Parallel()
 
 	events := canonicalOutputFidelityEvents()
@@ -291,17 +252,8 @@ func TestStreamReconnectBackfillCarriesNormalizedObservedSpawnResult(t *testing.
 	if !message.ReconnectReplay {
 		t.Fatal("backfill batch is not marked as reconnect replay")
 	}
-	if len(message.Events) != 2 {
-		t.Fatalf("transcript events = %#v, want Spawn call plus hidden Task observation", message.Events)
-	}
-	if len(message.OwnerRepairs.Spawns) != 1 {
-		t.Fatalf("observed Spawn results = %#v, want one normalized terminal child", message.OwnerRepairs.Spawns)
-	}
-	result := message.OwnerRepairs.Spawns[0]
-	if result.ParentCallID != "spawn-call-1" ||
-		result.Status != eventstream.ToolStatusCompleted ||
-		result.RawOutput["final_message"] != structuredFinalMessageForFidelityTest {
-		t.Fatalf("observed Spawn result = %#v, want exact durable terminal child payload", result)
+	if len(message.Events) != 3 {
+		t.Fatalf("transcript events = %#v, want Spawn call, Task observation, and canonical Spawn result", message.Events)
 	}
 }
 
@@ -397,27 +349,50 @@ func TestApplySessionReconnectStateAtomicallyResetsTaskStreamSession(t *testing.
 }
 
 type tuiReconnect struct {
-	mu        sync.Mutex
-	state     appserver.SessionState
-	backfill  <-chan eventstream.Envelope
-	live      <-chan eventstream.Envelope
-	bootstrap []eventstream.Envelope
-	decisions []controlprompt.ApprovalDecision
-	err       error
+	mu           sync.Mutex
+	state        appserver.SessionState
+	backfill     <-chan eventstream.Envelope
+	live         <-chan eventstream.Envelope
+	bootstrap    []eventstream.Envelope
+	decisions    []controlprompt.ApprovalDecision
+	err          error
+	deliveryOnce sync.Once
+	deliveries   chan appserver.FeedDelivery
 }
 
 func (r *tuiReconnect) State() appserver.SessionState { return r.state }
 func (r *tuiReconnect) HandleID() string              { return r.state.Run.HandleID }
 func (r *tuiReconnect) RunID() string                 { return r.state.Run.RunID }
 func (r *tuiReconnect) TurnID() string                { return r.state.Run.TurnID }
-func (r *tuiReconnect) Backfill() <-chan eventstream.Envelope {
-	return r.backfill
-}
-func (r *tuiReconnect) Events() <-chan eventstream.Envelope { return r.live }
-func (r *tuiReconnect) BackfillDone() <-chan struct{} {
-	done := make(chan struct{})
-	close(done)
-	return done
+func (r *tuiReconnect) Deliveries() <-chan appserver.FeedDelivery {
+	r.deliveryOnce.Do(func() {
+		r.deliveries = make(chan appserver.FeedDelivery)
+		go func() {
+			defer close(r.deliveries)
+			var events []eventstream.Envelope
+			if r.backfill != nil {
+				for envelope := range r.backfill {
+					events = append(events, envelope)
+				}
+			}
+			if len(events) > 0 {
+				const snapshotID = "test-reconnect"
+				r.deliveries <- appserver.FeedDelivery{Kind: appserver.FeedDeliveryReplaceBegin, Source: appserver.FeedSourceReplacement, SnapshotID: snapshotID}
+				r.deliveries <- appserver.FeedDelivery{Kind: appserver.FeedDeliveryReplacePage, Source: appserver.FeedSourceReplacement, SnapshotID: snapshotID, Events: events}
+				r.deliveries <- appserver.FeedDelivery{Kind: appserver.FeedDeliveryReplaceEnd, Source: appserver.FeedSourceReplacement, SnapshotID: snapshotID, Page: 1}
+			}
+			r.deliveries <- appserver.FeedDelivery{Kind: appserver.FeedDeliverySync, Source: appserver.FeedSourceExact}
+			if r.live != nil {
+				for envelope := range r.live {
+					r.deliveries <- appserver.FeedDelivery{
+						Kind: appserver.FeedDeliveryAppendPage, Source: appserver.FeedSourceExact,
+						Events: []eventstream.Envelope{envelope}, NextCursor: envelope.Cursor,
+					}
+				}
+			}
+		}()
+	})
+	return r.deliveries
 }
 func (r *tuiReconnect) BootstrapEvents() []eventstream.Envelope {
 	return eventstream.CloneEnvelopes(r.bootstrap)

@@ -287,22 +287,19 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resumedBackfill := 0
-	for range resumed.Subscription.Backfill() {
-		resumedBackfill++
+	select {
+	case delivery, ok := <-resumed.Subscription.Deliveries():
+		if !ok || delivery.Kind != appserver.FeedDeliverySync || delivery.Source != appserver.FeedSourceExact || len(delivery.Events) != 0 {
+			t.Fatalf("resume from terminal Cursor delivery = %#v, open:%t; want exact sync", delivery, ok)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 	if err := resumed.Subscription.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if resumed.State.Run.Active ||
-		resumed.State.ResumeMode != appserver.ResumeModeExact ||
-		resumedBackfill != 0 {
-		t.Fatalf(
-			"resume from terminal Cursor = active:%t mode:%q backfill:%d",
-			resumed.State.Run.Active,
-			resumed.State.ResumeMode,
-			resumedBackfill,
-		)
+	if resumed.State.Run.Active {
+		t.Fatalf("resume from terminal Cursor = active:%t, want inactive", resumed.State.Run.Active)
 	}
 
 	for _, spec := range specs {
@@ -374,6 +371,9 @@ func observeRealMimoTurn(
 			result.err = fmt.Errorf("received foreign Session %q", envelope.SessionID)
 			return true
 		}
+		if envelope.Cursor != "" {
+			result.cursor = envelope.Cursor
+		}
 		if envelope.Update != nil {
 			accumulator.ObserveUpdate(envelope.Update)
 		}
@@ -383,31 +383,21 @@ func observeRealMimoTurn(
 		}
 		return false
 	}
-	for envelope := range subscription.Backfill() {
-		if observe(envelope) {
-			result.finalText = strings.TrimSpace(accumulator.FinalText())
-			result.cursor = subscription.LastCursor()
+	assembler := &appserver.FeedDeliveryAssembler{}
+	for {
+		events, replaced, err := nextGatewayFeedEvents(ctx, subscription, assembler)
+		if err != nil {
+			result.err = err
 			return result
 		}
-	}
-	for {
-		select {
-		case envelope, ok := <-subscription.Events():
-			if !ok {
-				result.err = subscription.Err()
-				if result.err == nil {
-					result.err = fmt.Errorf("Session feed closed before terminal lifecycle")
-				}
-				return result
-			}
+		if replaced {
+			accumulator = acpbridge.FinalAssistantAccumulator{}
+		}
+		for _, envelope := range events {
 			if observe(envelope) {
 				result.finalText = strings.TrimSpace(accumulator.FinalText())
-				result.cursor = subscription.LastCursor()
 				return result
 			}
-		case <-ctx.Done():
-			result.err = ctx.Err()
-			return result
 		}
 	}
 }

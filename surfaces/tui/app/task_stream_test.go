@@ -15,7 +15,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	sdkstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
@@ -102,9 +101,9 @@ func TestTUISubagentWorkspaceObservesOnlyWhileOpenAndResumesCursor(t *testing.T)
 			State: task.StateRunning, Running: true, CurrentTurnID: "child-turn-1",
 			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
-		Frame: &sdkstream.Frame{
-			Ref:     sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "child-turn-1"},
-			Running: true, Cursor: sdkstream.Cursor{Events: 1},
+		Frame: &controltaskstream.Frame{
+			TerminalID: "child-turn-1",
+			Running:    true,
 			Event: &session.Event{
 				ID: "child-event-1", Type: session.EventTypeAssistant,
 				Scope: &session.EventScope{Participant: session.ParticipantRef{Kind: session.ParticipantKindSubagent}},
@@ -168,9 +167,9 @@ func TestTUISubagentWorkspaceObservesOnlyWhileOpenAndResumesCursor(t *testing.T)
 			State: task.StateRunning, Running: true, CurrentTurnID: "child-turn-2",
 			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
-		Frame: &sdkstream.Frame{
-			Ref:     sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "child-turn-2"},
-			Running: true, Cursor: sdkstream.Cursor{Events: 2},
+		Frame: &controltaskstream.Frame{
+			TerminalID: "child-turn-2",
+			Running:    true,
 			Event: &session.Event{
 				ID: "child-event-2", Type: session.EventTypeAssistant,
 				Scope: &session.EventScope{Participant: session.ParticipantRef{Kind: session.ParticipantKindSubagent}},
@@ -192,10 +191,9 @@ func TestTUISubagentWorkspaceObservesOnlyWhileOpenAndResumesCursor(t *testing.T)
 			State: task.StateRunning, Running: true, CurrentTurnID: "child-turn-2",
 			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
-		Frame: &sdkstream.Frame{
-			Ref:     sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "child-turn-2"},
-			Running: true,
-			Cursor:  sdkstream.Cursor{Events: 3},
+		Frame: &controltaskstream.Frame{
+			TerminalID: "child-turn-2",
+			Running:    true,
 			Event: &session.Event{
 				ID: "child-event-final", Type: session.EventTypeAssistant,
 				Scope: &session.EventScope{Participant: session.ParticipantRef{Kind: session.ParticipantKindSubagent}},
@@ -217,11 +215,10 @@ func TestTUISubagentWorkspaceObservesOnlyWhileOpenAndResumesCursor(t *testing.T)
 			State: task.StateCompleted, CurrentTurnID: "child-turn-2",
 			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
-		Frame: &sdkstream.Frame{
-			Ref:    sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "child-turn-2"},
-			State:  string(task.StateCompleted),
-			Closed: true,
-			Cursor: sdkstream.Cursor{Events: 4},
+		Frame: &controltaskstream.Frame{
+			TerminalID: "child-turn-2",
+			State:      string(task.StateCompleted),
+			Closed:     true,
 		},
 	}
 	batch = receiveTUITaskStreamMessage[taskStreamBatchMsg](t, messages)
@@ -720,7 +717,7 @@ func TestTUILiveTaskStreamBatchesUseOneCoalescedOverlayFrame(t *testing.T) {
 	}
 }
 
-func TestTUIVisibleSubagentGapOnlyBatchWaitsForTaskLifecycleBeforeDetaching(t *testing.T) {
+func TestTUIVisibleSubagentEmptyBatchWaitsForTaskLifecycleBeforeDetaching(t *testing.T) {
 	t.Parallel()
 
 	subscription := newTUIProtocolTaskSubscription()
@@ -743,16 +740,11 @@ func TestTUIVisibleSubagentGapOnlyBatchWaitsForTaskLifecycleBeforeDetaching(t *t
 
 	next, _ := model.handleTaskStreamBatch(taskStreamBatchMsg{
 		sessionID: "session-1", taskID: "task-1", token: 7,
-		events: []eventstream.Envelope{{
-			Kind: eventstream.KindNotice, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
-			ScopeID: "task-1", Cursor: "gap-cursor",
-			Meta: map[string]any{"task_stream": map[string]any{"transient_gap": true}},
-		}},
 	})
 	model = next.(*Model)
 	view = requireSubagentOutputViewForTest(t, model, "spawn-1")
 	if !view.historyResolved || subagentOutputViewHasTranscript(view) {
-		t.Fatalf("gap-only current state resolved=%v transcript=%v, want resolved empty view", view.historyResolved, subagentOutputViewHasTranscript(view))
+		t.Fatalf("empty batch resolved=%v transcript=%v, want resolved empty view", view.historyResolved, subagentOutputViewHasTranscript(view))
 	}
 
 	startedAt := time.Unix(100, 0)
@@ -765,7 +757,7 @@ func TestTUIVisibleSubagentGapOnlyBatchWaitsForTaskLifecycleBeforeDetaching(t *t
 		t.Fatal("terminal directory metadata detached an empty visible child before its Task lifecycle frame")
 	}
 	if got := subscription.closeCalls.Load(); got != 0 {
-		t.Fatalf("terminal directory metadata closed gap-only subscription %d time(s), want zero", got)
+		t.Fatalf("terminal directory metadata closed empty subscription %d time(s), want zero", got)
 	}
 
 	terminal := eventstream.Envelope{
@@ -781,13 +773,13 @@ func TestTUIVisibleSubagentGapOnlyBatchWaitsForTaskLifecycleBeforeDetaching(t *t
 	model = next.(*Model)
 	view = requireSubagentOutputViewForTest(t, model, "spawn-1")
 	if view.block.Status != eventstream.LifecycleStateCompleted {
-		t.Fatalf("gap-only child status = %q, want completed lifecycle", view.block.Status)
+		t.Fatalf("empty child status = %q, want completed lifecycle", view.block.Status)
 	}
 	if model.taskStreamSubscriptions["task-1"] != subscription || !model.taskStreamWanted["task-1"] {
-		t.Fatal("terminal lifecycle detached the gap-only cross-activity observer")
+		t.Fatal("terminal lifecycle detached the empty cross-activity observer")
 	}
 	if got := subscription.closeCalls.Load(); got != 0 {
-		t.Fatalf("terminal lifecycle closed gap-only subscription %d time(s), want zero", got)
+		t.Fatalf("terminal lifecycle closed empty subscription %d time(s), want zero", got)
 	}
 }
 
@@ -848,24 +840,24 @@ func TestTUIClearHistoryClosesVisibleSubagentStreams(t *testing.T) {
 	}
 }
 
-func TestTUITaskMailboxBoundsOneUpdateBatch(t *testing.T) {
+func TestTUITaskMailboxAcceptsOneDeliveryPage(t *testing.T) {
 	t.Parallel()
 
-	events := make(chan eventstream.Envelope, taskStreamMailboxBatchSize+8)
-	for i := 0; i < cap(events); i++ {
-		events <- eventstream.Envelope{EventID: "event"}
+	events := make([]eventstream.Envelope, taskStreamMailboxBatchSize+8)
+	for i := range events {
+		events[i] = tuiExactEnvelope(eventstream.Envelope{EventID: "event"}, "cursor-1", uint64(i+1))
 	}
-	batch, open := readTaskStreamMailbox(context.Background(), events)
-	if !open || len(batch) != taskStreamMailboxBatchSize {
-		t.Fatalf("mailbox batch = %d open=%v, want %d/open", len(batch), open, taskStreamMailboxBatchSize)
+	deliveries := make(chan taskstream.Delivery, 1)
+	deliveries <- taskstream.Delivery{
+		Kind: taskstream.DeliveryAppendPage, Source: taskstream.SourceExact,
+		Events: events, NextCursor: "cursor-1",
 	}
-
-	one := make(chan eventstream.Envelope, 1)
-	one <- eventstream.Envelope{EventID: "one"}
 	started := time.Now()
-	batch, open = readTaskStreamMailbox(context.Background(), one)
-	if !open || len(batch) != 1 || time.Since(started) > 100*time.Millisecond {
-		t.Fatalf("time-bounded mailbox batch = %d open=%v elapsed=%v", len(batch), open, time.Since(started))
+	batch, cursor, _, replacement, open, err := readTaskStreamMailbox(
+		context.Background(), deliveries, &taskstream.DeliveryAssembler{},
+	)
+	if err != nil || !open || replacement || cursor != "cursor-1" || len(batch) != len(events) || time.Since(started) > 100*time.Millisecond {
+		t.Fatalf("mailbox page = %d cursor=%q replacement=%v open=%v err=%v elapsed=%v", len(batch), cursor, replacement, open, err, time.Since(started))
 	}
 }
 
@@ -1229,7 +1221,7 @@ func TestTUILiveSuccessorActivityWaitsForDirectoryBeforeLoadingHistory(t *testin
 	}
 }
 
-func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
+func TestTUISubagentReplacementRebuildsCompleteMultiTurnHistory(t *testing.T) {
 	t.Parallel()
 
 	startedAt := time.Unix(300, 0)
@@ -1242,20 +1234,11 @@ func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 	view.block.AppendStreamEvent(SEReasoning, "stale partial prefix", narrativeSourceIdentity{})
 
 	next, _ := model.handleTaskStreamBatch(taskStreamBatchMsg{
-		sessionID: "session-1",
-		taskID:    "task-1",
-		token:     7,
+		sessionID:   "session-1",
+		taskID:      "task-1",
+		token:       7,
+		replacement: true,
 		events: []eventstream.Envelope{{
-			Kind:      eventstream.KindNotice,
-			SessionID: "session-1",
-			Scope:     eventstream.ScopeSubagent,
-			ScopeID:   "task-1",
-			Cursor:    "boundary-cursor",
-			Notice:    "transient Task output before this boundary is no longer available",
-			Meta: map[string]any{
-				"task_stream": map[string]any{"transient_gap": true},
-			},
-		}, {
 			Kind:       eventstream.KindSessionUpdate,
 			SessionID:  "session-1",
 			TurnID:     "task-1:1",
@@ -1357,22 +1340,19 @@ func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 		"second exact Final Message",
 	} {
 		if !strings.Contains(plain, want) {
-			t.Fatalf("rebuilt multi-Turn current state omitted %q:\n%s", want, plain)
+			t.Fatalf("rebuilt multi-Turn replacement omitted %q:\n%s", want, plain)
 		}
 	}
 	if strings.Contains(plain, "stale partial prefix") {
-		t.Fatalf("rebuilt multi-Turn current state retained stale prefix:\n%s", plain)
+		t.Fatalf("rebuilt multi-Turn replacement retained stale prefix:\n%s", plain)
 	}
 	if len(view.turnBlocks) != 2 {
 		t.Fatalf("rebuilt internal Turn groups = %d, want two", len(view.turnBlocks))
 	}
 	for _, duration := range []string{"4.0s", "8.0s"} {
 		if !strings.Contains(plain, duration) {
-			t.Fatalf("rebuilt multi-Turn current state omitted footer %q:\n%s", duration, plain)
+			t.Fatalf("rebuilt multi-Turn replacement omitted footer %q:\n%s", duration, plain)
 		}
-	}
-	if frame := model.View().Content; strings.Contains(frame, "transient Task output") {
-		t.Fatalf("Task transient gap leaked into TUI frame:\n%s", frame)
 	}
 }
 
@@ -1410,17 +1390,47 @@ type tuiRetryTaskStreamService struct {
 
 type tuiProtocolTaskSubscription struct {
 	events     chan eventstream.Envelope
+	deliveries chan taskstream.Delivery
 	closeOnce  sync.Once
 	closeCalls atomic.Int32
 }
 
 func newTUIProtocolTaskSubscription() *tuiProtocolTaskSubscription {
-	return &tuiProtocolTaskSubscription{events: make(chan eventstream.Envelope)}
+	subscription := &tuiProtocolTaskSubscription{
+		events: make(chan eventstream.Envelope), deliveries: make(chan taskstream.Delivery),
+	}
+	go func() {
+		defer close(subscription.deliveries)
+		sequence := uint64(0)
+		for envelope := range subscription.events {
+			sequence++
+			envelope = tuiExactEnvelope(envelope, fmt.Sprintf("tui-test-cursor-%d", sequence), sequence)
+			subscription.deliveries <- taskstream.Delivery{
+				Kind: taskstream.DeliveryAppendPage, Source: taskstream.SourceExact,
+				Events: []eventstream.Envelope{envelope}, NextCursor: envelope.Cursor,
+			}
+		}
+	}()
+	return subscription
 }
 
-func (s *tuiProtocolTaskSubscription) Events() <-chan eventstream.Envelope { return s.events }
-func (*tuiProtocolTaskSubscription) Err() error                            { return nil }
-func (*tuiProtocolTaskSubscription) LastCursor() string                    { return "" }
+func tuiExactEnvelope(envelope eventstream.Envelope, fallbackCursor string, sequence uint64) eventstream.Envelope {
+	if envelope.Cursor == "" {
+		envelope.Cursor = fallbackCursor
+	}
+	if envelope.Position == nil {
+		envelope.Position = &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
+			Generation: "tui-test", Sequence: sequence,
+		}}
+	}
+	if envelope.Delivery == nil {
+		envelope.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+	}
+	return envelope
+}
+
+func (s *tuiProtocolTaskSubscription) Deliveries() <-chan taskstream.Delivery { return s.deliveries }
+func (*tuiProtocolTaskSubscription) Err() error                               { return nil }
 func (s *tuiProtocolTaskSubscription) Close() error {
 	s.closeOnce.Do(func() {
 		s.closeCalls.Add(1)
@@ -1448,8 +1458,8 @@ func (s *tuiRetryTaskStreamService) List(context.Context, taskstream.Principal, 
 	}}}, nil
 }
 
-func (*tuiRetryTaskStreamService) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.Batch, error) {
-	return taskstream.Batch{}, nil
+func (*tuiRetryTaskStreamService) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.ReadResult, error) {
+	return taskstream.ReadResult{}, nil
 }
 
 func (s *tuiRetryTaskStreamService) Subscribe(context.Context, taskstream.Principal, taskstream.SubscribeRequest) (taskstream.SubscribeResult, error) {
@@ -1460,7 +1470,7 @@ func (s *tuiRetryTaskStreamService) Subscribe(context.Context, taskstream.Princi
 	if s.subscribeCalls.Add(1) <= failures {
 		return taskstream.SubscribeResult{}, errorcode.New(errorcode.Unavailable, "task stream temporarily unavailable")
 	}
-	return taskstream.SubscribeResult{Subscription: s.subscription, ResumeMode: taskstream.ResumeModeExact}, nil
+	return taskstream.SubscribeResult{Subscription: s.subscription}, nil
 }
 
 func bindTaskStreamTestClient(t *testing.T, service taskstream.Service) taskstream.Client {
@@ -1476,28 +1486,40 @@ func (s *tuiTestTaskStreamService) List(context.Context, controltaskstream.Princ
 	return s.list, nil
 }
 
-func (s *tuiTestTaskStreamService) Events(context.Context, controltaskstream.Principal, controltaskstream.ReadRequest) (controltaskstream.Batch, error) {
-	return controltaskstream.Batch{}, nil
+func (s *tuiTestTaskStreamService) Events(context.Context, controltaskstream.Principal, controltaskstream.ReadRequest) (controltaskstream.ReadResult, error) {
+	return controltaskstream.ReadResult{}, nil
 }
 
 func (s *tuiTestTaskStreamService) Subscribe(_ context.Context, _ controltaskstream.Principal, request controltaskstream.SubscribeRequest) (controltaskstream.SubscribeResult, error) {
 	s.requests <- request
-	return controltaskstream.SubscribeResult{Subscription: s.subscription, ResumeMode: controltaskstream.ResumeModeExact}, nil
+	return controltaskstream.SubscribeResult{Subscription: s.subscription}, nil
 }
 
 type tuiTestTaskSubscription struct {
 	records    chan controltaskstream.Record
+	deliveries chan controltaskstream.Delivery
 	closeOnce  sync.Once
 	closeCalls atomic.Int32
 }
 
 func newTUITestTaskSubscription() *tuiTestTaskSubscription {
-	return &tuiTestTaskSubscription{records: make(chan controltaskstream.Record, 8)}
+	subscription := &tuiTestTaskSubscription{
+		records: make(chan controltaskstream.Record, 8), deliveries: make(chan controltaskstream.Delivery, 8),
+	}
+	go func() {
+		defer close(subscription.deliveries)
+		for record := range subscription.records {
+			subscription.deliveries <- controltaskstream.Delivery{
+				Kind: controltaskstream.DeliveryAppendPage, Source: controltaskstream.SourceExact,
+				Records: []controltaskstream.Record{record}, NextCursor: record.Cursor,
+			}
+		}
+	}()
+	return subscription
 }
 
-func (s *tuiTestTaskSubscription) Records() <-chan controltaskstream.Record { return s.records }
-func (s *tuiTestTaskSubscription) Err() error                               { return nil }
-func (s *tuiTestTaskSubscription) LastCursor() string                       { return "" }
+func (s *tuiTestTaskSubscription) Deliveries() <-chan controltaskstream.Delivery { return s.deliveries }
+func (s *tuiTestTaskSubscription) Err() error                                    { return nil }
 func (s *tuiTestTaskSubscription) Close() error {
 	s.closeOnce.Do(func() {
 		s.closeCalls.Add(1)

@@ -3,7 +3,6 @@ package gatewayapp
 import (
 	"context"
 	"errors"
-	"iter"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,7 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -242,168 +241,6 @@ func TestControlHandlePlacementStoreFailureRemainsUnknown(t *testing.T) {
 	}
 }
 
-func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
-	t.Parallel()
-
-	sessions := sessionmemory.NewStore(sessionmemory.Config{
-		SessionIDGenerator: func() string { return "session-1" },
-	})
-	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "owner", PreferredSessionID: "session-1",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	codec, err := appserver.NewCursorCodec(appserver.CursorCodecConfig{
-		Secret: []byte("0123456789abcdef0123456789abcdef"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	feeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{
-		Reader: sessions, CursorCodec: codec,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	taskStream := &controlClientIngressStream{
-		started: make(chan struct{}, 1),
-		release: make(chan struct{}),
-	}
-	runtime := controlClientIngressRuntime{streams: taskStream}
-	kernel, err := kernelimpl.New(kernelimpl.Config{
-		Sessions: sessions,
-		Runtime:  runtime,
-		Resolver: controlClientIngressResolver{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	stack := &Stack{
-		composition: runtimeComposition{
-			authorities: runtimeHostAuthorities{controlFeeds: feeds}, sessions: sessions, gateway: kernel,
-		},
-	}
-	feed, err := feeds.Session(active.SessionRef)
-	if err != nil {
-		t.Fatal(err)
-	}
-	subscription, err := feed.SubscribeFromNow(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer subscription.Close()
-
-	mainEvents := make(chan eventstream.Envelope, 2)
-	handle := &controlClientIngressHandle{events: mainEvents}
-	stack.composition.attachControlClientHandle(handle)
-
-	status := eventstream.ToolStatusInProgress
-	title := "RunCommand"
-	mainEvents <- eventstream.Envelope{
-		Kind:      eventstream.KindSessionUpdate,
-		SessionID: active.SessionID,
-		HandleID:  handle.HandleID(),
-		RunID:     handle.RunID(),
-		TurnID:    handle.TurnID(),
-		Scope:     eventstream.ScopeMain,
-		Update: eventstream.ToolCallUpdate{
-			SessionUpdate: eventstream.UpdateToolCallInfo,
-			ToolCallID:    "run-command-1",
-			Title:         &title,
-			Status:        &status,
-		},
-		Meta: map[string]any{
-			"caelis": map[string]any{
-				"runtime": map[string]any{
-					"tool": map[string]any{
-						"name": "RunCommand",
-					},
-					"task": map[string]any{
-						"task_id":     "task-1",
-						"terminal_id": "terminal-1",
-					},
-				},
-			},
-		},
-	}
-	first := receiveControlClientIngressEnvelope(t, subscription.Events())
-	assertControlClientIngressTool(t, first, "run-command-1")
-	select {
-	case <-taskStream.started:
-		t.Fatal("Session ingress read the Task stream")
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	mainEvents <- eventstream.TurnCompleted(handle.HandleID(), handle.RunID(), handle.TurnID(), time.Now())
-	close(mainEvents)
-	terminal := receiveControlClientIngressEnvelope(t, subscription.Events())
-	if !eventstream.IsTurnTerminalLifecycle(terminal) {
-		t.Fatalf("last envelope = %#v, want terminal lifecycle", terminal)
-	}
-}
-
-func TestAttachControlClientHandleFailureCancelsAndPublishesAfterProducerBarrier(t *testing.T) {
-	t.Parallel()
-
-	handle := newControlClientAttachmentFailureHandle()
-	published := make(chan eventstream.Envelope, 4)
-	var attachCalls atomic.Int32
-	feed := &controlClientSessionFeed{attachFn: func(events <-chan eventstream.Envelope) <-chan error {
-		call := attachCalls.Add(1)
-		result := make(chan error, 1)
-		if call == 1 {
-			result <- errors.New("injected feed publish failure")
-			close(result)
-			return result
-		}
-		go func() {
-			defer close(result)
-			for envelope := range events {
-				published <- envelope
-			}
-		}()
-		return result
-	}}
-	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{
-		controlFeeds: controlClientFeedRegistry{feed: feed},
-	}}}
-	stack.composition.attachControlClientHandle(handle)
-
-	select {
-	case <-handle.cancelRequested:
-	case <-time.After(2 * time.Second):
-		t.Fatal("attachment failure did not cancel the owning producer")
-	}
-	select {
-	case envelope := <-published:
-		t.Fatalf("envelope before producer barrier = %#v", envelope)
-	case <-time.After(30 * time.Millisecond):
-	}
-	close(handle.releaseProducer)
-
-	terminal := receiveControlClientIngressEnvelope(t, published)
-	if !eventstream.IsTurnTerminalLifecycle(terminal) || terminal.Lifecycle.State != eventstream.LifecycleStateFailed {
-		t.Fatalf("terminal = %#v, want one failed terminal", terminal)
-	}
-	select {
-	case <-handle.producerDone:
-	default:
-		t.Fatal("failed terminal arrived before producer completion")
-	}
-	if calls := handle.cancelCalls.Load(); calls != 1 {
-		t.Fatalf("Cancel calls = %d, want one", calls)
-	}
-	if calls := attachCalls.Load(); calls != 2 {
-		t.Fatalf("Attach calls = %d, want initial failure plus one fallback", calls)
-	}
-	select {
-	case duplicate := <-published:
-		t.Fatalf("duplicate terminal = %#v", duplicate)
-	case <-time.After(30 * time.Millisecond):
-	}
-}
-
 func TestCommittedCommandKeepsOutcomeWhenFeedPrimeFailsAndLedgerReplays(t *testing.T) {
 	t.Parallel()
 
@@ -476,7 +313,7 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{Reader: sessions, CursorCodec: codec})
+	feeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{Reader: sessions, Spool: newGatewayTestStreamSpool(t), CursorCodec: codec})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,14 +321,23 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	subscription, err := feed.SubscribeFromNow(context.Background())
+	_, cursor := feed.Boundary()
+	subscribed, err := feed.Subscribe(context.Background(), appserver.SubscribeRequest{
+		SessionID: active.SessionID,
+		Cursor:    cursor,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	subscription := subscribed.Subscription
 	defer subscription.Close()
+	taskLifecycle := &recordingTaskOutputLifecycle{}
 	stack := &Stack{
 		composition: runtimeComposition{
-			authorities: runtimeHostAuthorities{controlFeeds: feeds}, sessions: sessions, gateway: kernel,
+			authorities: runtimeHostAuthorities{
+				controlFeeds: feeds, controlFeedLifecycle: feeds, taskOutputLifecycle: taskLifecycle,
+			},
+			sessions: sessions, gateway: kernel,
 		},
 	}
 	expected := active.Revision
@@ -501,13 +347,19 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision <= active.Revision {
 		t.Fatalf("CloseSession result = %#v, %v", result, err)
 	}
-	select {
-	case envelope := <-subscription.Events():
-		if envelope.Lifecycle == nil || envelope.Lifecycle.State != "closed" || envelope.Position == nil || envelope.Position.Durable == nil {
-			t.Fatalf("live close envelope = %#v", envelope)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for live close lifecycle")
+	events, _, err := nextGatewayFeedEvents(t.Context(), subscription, &appserver.FeedDeliveryAssembler{})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("live close delivery = %#v, %v", events, err)
+	}
+	envelope := events[0]
+	if envelope.Lifecycle == nil || envelope.Lifecycle.State != "closed" || envelope.Position == nil || envelope.Position.Durable == nil {
+		t.Fatalf("live close envelope = %#v", envelope)
+	}
+	taskLifecycle.mu.Lock()
+	releasedSessions := append([]session.SessionRef(nil), taskLifecycle.sessions...)
+	taskLifecycle.mu.Unlock()
+	if len(releasedSessions) != 1 || releasedSessions[0].SessionID != active.SessionID {
+		t.Fatalf("released Session traces = %#v", releasedSessions)
 	}
 	if _, ok := kernel.ActiveTurn(active.SessionID); ok {
 		t.Fatal("close left an active turn")
@@ -524,6 +376,55 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 		t.Fatalf("prompt after close = %#v, %v", result, err)
 	}
 	_ = turn.Handle.Close()
+}
+
+func TestControlClientParticipantDetachReleasesSubagentTaskTrace(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	sessions := sessionmemory.NewStore(sessionmemory.Config{})
+	active, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "owner", PreferredSessionID: "session-detach-trace",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := active.Revision
+	active, err = sessions.PutParticipant(ctx, session.PutParticipantRequest{
+		SessionRef: active.SessionRef, ExpectedRevision: &expected,
+		Binding: session.ParticipantBinding{
+			ID: "participant-1", Kind: session.ParticipantKindSubagent,
+			DelegationID: "task-1", SessionID: "child-session-1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &controlClientLifecycleRuntime{session: active}
+	kernel, err := kernelimpl.New(kernelimpl.Config{
+		Sessions: sessions, Runtime: runtime, Control: runtime, Resolver: controlClientIngressResolver{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := &recordingTaskOutputLifecycle{}
+	stack := &Stack{composition: runtimeComposition{
+		authorities: runtimeHostAuthorities{taskOutputLifecycle: lifecycle}, sessions: sessions, gateway: kernel,
+	}}
+	expected = active.Revision
+	result, err := testControlCommandBackend(stack).ExecuteControlCommand(ctx, appserver.Principal{ID: "owner"}, appserver.ActionParticipantDetach, appserver.DetachParticipantRequest{
+		WriteBase:     appserver.WriteBase{SessionID: active.SessionID, ExpectedRevision: &expected},
+		ParticipantID: "participant-1",
+	})
+	if err != nil || result.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("DetachParticipant result = %#v, %v", result, err)
+	}
+	lifecycle.mu.Lock()
+	released := append([]taskapi.Ref(nil), lifecycle.tasks...)
+	lifecycle.mu.Unlock()
+	if len(released) != 1 || released[0].SessionID != active.SessionID || released[0].TaskID != "task-1" {
+		t.Fatalf("released Task traces = %#v", released)
+	}
 }
 
 func TestControlClientPromptUsesHostLifecycleAfterAdmission(t *testing.T) {
@@ -554,7 +455,7 @@ func TestControlClientPromptUsesHostLifecycleAfterAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	feeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{
-		Reader: sessions, CursorCodec: codec,
+		Reader: sessions, Spool: newGatewayTestStreamSpool(t), CursorCodec: codec,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -637,7 +538,7 @@ func TestControlClientParticipantPromptUsesHostLifecycleAfterAdmission(t *testin
 		t.Fatal(err)
 	}
 	feeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{
-		Reader: sessions, CursorCodec: codec,
+		Reader: sessions, Spool: newGatewayTestStreamSpool(t), CursorCodec: codec,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -723,7 +624,7 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	feeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{
-		Reader: sessions, CursorCodec: codec,
+		Reader: sessions, Spool: newGatewayTestStreamSpool(t), CursorCodec: codec,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -901,8 +802,8 @@ func (controlClientNoopTaskStreams) List(context.Context, acptaskstream.Principa
 	return acptaskstream.ListResult{}, nil
 }
 
-func (controlClientNoopTaskStreams) Events(context.Context, acptaskstream.Principal, acptaskstream.ReadRequest) (acptaskstream.Batch, error) {
-	return acptaskstream.Batch{}, nil
+func (controlClientNoopTaskStreams) Events(context.Context, acptaskstream.Principal, acptaskstream.ReadRequest) (acptaskstream.ReadResult, error) {
+	return acptaskstream.ReadResult{}, nil
 }
 
 func (controlClientNoopTaskStreams) Subscribe(context.Context, acptaskstream.Principal, acptaskstream.SubscribeRequest) (acptaskstream.SubscribeResult, error) {
@@ -988,8 +889,17 @@ func newControlClientFencedRuntime(active session.Session) *controlClientFencedR
 	}
 }
 
-func (runtime *controlClientFencedRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
+func (runtime *controlClientFencedRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
 	close(runtime.runner.started)
+	if req.SourceObserver != nil {
+		message := model.NewTextMessage(model.RoleAssistant, "working")
+		if err := req.SourceObserver.ObserveSourceEvent(ctx, agent.SourceEvent{Canonical: &session.Event{
+			ID: "assistant-fenced-http", SessionID: runtime.runner.ref.SessionID, Type: session.EventTypeAssistant,
+			Visibility: session.VisibilityCanonical, Message: &message, Text: "working",
+		}}); err != nil {
+			return agent.RunResult{}, err
+		}
+	}
 	return agent.RunResult{Session: runtime.session, Handle: runtime.runner}, nil
 }
 
@@ -1008,19 +918,6 @@ type controlClientFencedRunner struct {
 }
 
 func (*controlClientFencedRunner) RunID() string { return "run-fenced-http" }
-
-func (runner *controlClientFencedRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(yield func(*session.Event, error) bool) {
-		message := model.NewTextMessage(model.RoleAssistant, "working")
-		if !yield(&session.Event{
-			ID: "assistant-fenced-http", SessionID: runner.ref.SessionID, Type: session.EventTypeAssistant,
-			Visibility: session.VisibilityCanonical, Message: &message, Text: "working",
-		}, nil) {
-			return
-		}
-		<-runner.done
-	}
-}
 
 func (runner *controlClientFencedRunner) Submit(submission agent.Submission) error {
 	select {
@@ -1073,34 +970,28 @@ func waitForControlClientTurnTarget(t *testing.T, subscription appserver.FeedSub
 	if subscription == nil {
 		t.Fatal("client B reconnect returned no subscription")
 	}
-	backfill := subscription.Backfill()
-	events := subscription.Events()
+	assembler := &appserver.FeedDeliveryAssembler{}
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
-	for backfill != nil || events != nil {
+	for {
 		select {
-		case envelope, ok := <-backfill:
+		case delivery, ok := <-subscription.Deliveries():
 			if !ok {
-				backfill = nil
-				continue
+				t.Fatal("client B feed closed before observing the active Turn target")
 			}
-			if envelope.HandleID != "" && envelope.RunID != "" && envelope.TurnID != "" {
-				return appserver.TurnTarget{HandleID: envelope.HandleID, RunID: envelope.RunID, TurnID: envelope.TurnID}
+			delivered, _, err := assembler.Accept(delivery)
+			if err != nil {
+				t.Fatal(err)
 			}
-		case envelope, ok := <-events:
-			if !ok {
-				events = nil
-				continue
-			}
-			if envelope.HandleID != "" && envelope.RunID != "" && envelope.TurnID != "" {
-				return appserver.TurnTarget{HandleID: envelope.HandleID, RunID: envelope.RunID, TurnID: envelope.TurnID}
+			for _, envelope := range delivered {
+				if envelope.HandleID != "" && envelope.RunID != "" && envelope.TurnID != "" {
+					return appserver.TurnTarget{HandleID: envelope.HandleID, RunID: envelope.RunID, TurnID: envelope.TurnID}
+				}
 			}
 		case <-timer.C:
 			t.Fatal("client B did not observe the active Turn target")
 		}
 	}
-	t.Fatal("client B feed closed before observing the active Turn target")
-	return appserver.TurnTarget{}
 }
 
 func (runtime *controlClientLifecycleRuntime) Run(ctx context.Context, _ agent.RunRequest) (agent.RunResult, error) {
@@ -1133,9 +1024,7 @@ func (runtime *controlClientLifecycleRuntime) DetachParticipant(context.Context,
 	return runtime.session, nil
 }
 
-type controlClientIngressRuntime struct {
-	streams stream.Service
-}
+type controlClientIngressRuntime struct{}
 
 func (controlClientIngressRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
 	return agent.RunResult{}, nil
@@ -1145,115 +1034,11 @@ func (controlClientIngressRuntime) RunState(context.Context, session.SessionRef)
 	return agent.RunState{}, nil
 }
 
-func (runtime controlClientIngressRuntime) Streams() stream.Service {
-	return runtime.streams
-}
-
 type controlClientIngressResolver struct{}
 
 func (controlClientIngressResolver) ResolveTurn(context.Context, kernelimpl.TurnIntent) (kernelimpl.ResolvedTurn, error) {
 	return kernelimpl.ResolvedTurn{}, nil
 }
-
-type controlClientIngressStream struct {
-	started chan struct{}
-	release chan struct{}
-}
-
-func (service *controlClientIngressStream) Read(ctx context.Context, request stream.ReadRequest) (stream.Snapshot, error) {
-	select {
-	case service.started <- struct{}{}:
-	default:
-	}
-	select {
-	case <-service.release:
-	case <-ctx.Done():
-		return stream.Snapshot{}, ctx.Err()
-	}
-	exitCode := 0
-	return stream.Snapshot{
-		Ref:      request.Ref,
-		Cursor:   stream.Cursor{Output: 12, Events: 1},
-		Running:  false,
-		State:    "completed",
-		ExitCode: &exitCode,
-		Frames: []stream.Frame{{
-			Ref: request.Ref, Text: "task output\n", State: "completed",
-			Cursor: stream.Cursor{Output: 12, Events: 1}, Closed: true, ExitCode: &exitCode,
-		}},
-	}, nil
-}
-
-func (*controlClientIngressStream) Subscribe(context.Context, stream.SubscribeRequest) iter.Seq2[*stream.Frame, error] {
-	return func(func(*stream.Frame, error) bool) {}
-}
-
-type controlClientIngressHandle struct {
-	events <-chan eventstream.Envelope
-}
-
-func (*controlClientIngressHandle) HandleID() string { return "handle-1" }
-func (*controlClientIngressHandle) RunID() string    { return "run-1" }
-func (*controlClientIngressHandle) TurnID() string   { return "turn-1" }
-func (*controlClientIngressHandle) SessionRef() session.SessionRef {
-	return session.SessionRef{SessionID: "session-1"}
-}
-func (*controlClientIngressHandle) CreatedAt() time.Time { return time.Time{} }
-func (handle *controlClientIngressHandle) ACPEvents() <-chan eventstream.Envelope {
-	return handle.events
-}
-func (*controlClientIngressHandle) Submit(context.Context, kernelimpl.SubmitRequest) error {
-	return nil
-}
-func (*controlClientIngressHandle) Cancel() agent.CancelResult {
-	return agent.CancelResult{Status: agent.CancelStatusCancelled}
-}
-func (*controlClientIngressHandle) Close() error { return nil }
-
-type controlClientAttachmentFailureHandle struct {
-	events          chan eventstream.Envelope
-	cancelRequested chan struct{}
-	releaseProducer chan struct{}
-	producerDone    chan struct{}
-	cancelOnce      sync.Once
-	cancelCalls     atomic.Int32
-}
-
-func newControlClientAttachmentFailureHandle() *controlClientAttachmentFailureHandle {
-	return &controlClientAttachmentFailureHandle{
-		events:          make(chan eventstream.Envelope),
-		cancelRequested: make(chan struct{}),
-		releaseProducer: make(chan struct{}),
-		producerDone:    make(chan struct{}),
-	}
-}
-
-func (*controlClientAttachmentFailureHandle) HandleID() string { return "handle-attachment-failure" }
-func (*controlClientAttachmentFailureHandle) RunID() string    { return "run-attachment-failure" }
-func (*controlClientAttachmentFailureHandle) TurnID() string   { return "turn-attachment-failure" }
-func (*controlClientAttachmentFailureHandle) SessionRef() session.SessionRef {
-	return session.SessionRef{SessionID: "session-attachment-failure"}
-}
-func (*controlClientAttachmentFailureHandle) CreatedAt() time.Time { return time.Time{} }
-func (handle *controlClientAttachmentFailureHandle) ACPEvents() <-chan eventstream.Envelope {
-	return handle.events
-}
-func (*controlClientAttachmentFailureHandle) Submit(context.Context, kernelimpl.SubmitRequest) error {
-	return nil
-}
-func (handle *controlClientAttachmentFailureHandle) Cancel() agent.CancelResult {
-	handle.cancelCalls.Add(1)
-	handle.cancelOnce.Do(func() {
-		close(handle.cancelRequested)
-		go func() {
-			<-handle.releaseProducer
-			close(handle.producerDone)
-			close(handle.events)
-		}()
-	})
-	return agent.CancelResult{Status: agent.CancelStatusCancelled}
-}
-func (*controlClientAttachmentFailureHandle) Close() error { return nil }
 
 type controlClientFeedRegistry struct {
 	feed appserver.SessionFeed
@@ -1264,37 +1049,45 @@ func (registry controlClientFeedRegistry) Session(session.SessionRef) (appserver
 	return registry.feed, registry.err
 }
 
+type recordingTaskOutputLifecycle struct {
+	mu       sync.Mutex
+	tasks    []taskapi.Ref
+	sessions []session.SessionRef
+}
+
+func (r *recordingTaskOutputLifecycle) ReleaseTask(_ context.Context, ref taskapi.Ref) error {
+	r.mu.Lock()
+	r.tasks = append(r.tasks, ref)
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *recordingTaskOutputLifecycle) ReleaseSession(_ context.Context, ref session.SessionRef) error {
+	r.mu.Lock()
+	r.sessions = append(r.sessions, ref)
+	r.mu.Unlock()
+	return nil
+}
+
+func (*recordingTaskOutputLifecycle) Close(context.Context) error { return nil }
+
 type controlClientSessionFeed struct {
-	primeErr   error
-	primeCalls atomic.Int32
-	attachFn   func(<-chan eventstream.Envelope) <-chan error
+	primeErr     error
+	publishErr   error
+	primeCalls   atomic.Int32
+	publishCalls atomic.Int32
 }
 
 func (feed *controlClientSessionFeed) Prime(context.Context) error {
 	feed.primeCalls.Add(1)
 	return feed.primeErr
 }
-func (*controlClientSessionFeed) Publish(eventstream.Envelope) error { return nil }
+func (feed *controlClientSessionFeed) Publish(eventstream.Envelope) error {
+	feed.publishCalls.Add(1)
+	return feed.publishErr
+}
 func (*controlClientSessionFeed) Subscribe(context.Context, appserver.SubscribeRequest) (appserver.SubscribeResult, error) {
 	return appserver.SubscribeResult{}, errors.New("test feed does not support Subscribe")
-}
-func (*controlClientSessionFeed) SubscribeFromNow(context.Context) (appserver.FeedSubscription, error) {
-	return nil, errors.New("test feed does not support SubscribeFromNow")
-}
-func (feed *controlClientSessionFeed) Attach(events <-chan eventstream.Envelope) <-chan error {
-	if feed.attachFn != nil {
-		return feed.attachFn(events)
-	}
-	result := make(chan error)
-	go func() {
-		for range events {
-		}
-		close(result)
-	}()
-	return result
-}
-func (feed *controlClientSessionFeed) AttachTo(_ appserver.FeedSubscription, events <-chan eventstream.Envelope) <-chan error {
-	return feed.Attach(events)
 }
 func (*controlClientSessionFeed) Boundary() (*eventstream.FeedPosition, string) { return nil, "" }
 
@@ -1317,32 +1110,4 @@ func (backend *countingControlClientBackend) ExecuteControlCommand(
 ) (appserver.CommandResult, error) {
 	backend.calls.Add(1)
 	return backend.backend.ExecuteControlCommand(ctx, principal, action, request)
-}
-
-func receiveControlClientIngressEnvelope(t *testing.T, events <-chan eventstream.Envelope) eventstream.Envelope {
-	t.Helper()
-	select {
-	case envelope := <-events:
-		return envelope
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for Control client ingress envelope")
-		return eventstream.Envelope{}
-	}
-}
-
-func waitControlClientIngressSignal(t *testing.T, signal <-chan struct{}) {
-	t.Helper()
-	select {
-	case <-signal:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for task stream read")
-	}
-}
-
-func assertControlClientIngressTool(t *testing.T, envelope eventstream.Envelope, callID string) {
-	t.Helper()
-	update, ok := envelope.Update.(eventstream.ToolCallUpdate)
-	if !ok || update.ToolCallID != callID {
-		t.Fatalf("tool update = %#v, want call %q", envelope.Update, callID)
-	}
 }

@@ -20,16 +20,11 @@ type ToolUpdateMeta struct {
 	OutputNarrative    bool
 	// OutputAuthoritative marks a canonical semantic final that must replace a
 	// transient preview for the same physical task panel.
-	OutputAuthoritative    bool
-	Terminal               bool
-	OutputSynthetic        bool
-	OutputCollection       bool
-	OutputTerminal         bool
-	OutputGapBefore        bool
-	OutputCursor           int64
-	OutputCursorKnown      bool
-	OutputStartCursor      int64
-	OutputStartCursorKnown bool
+	OutputAuthoritative bool
+	Terminal            bool
+	OutputSynthetic     bool
+	OutputCollection    bool
+	OutputTerminal      bool
 }
 
 type toolEventUpdate struct {
@@ -104,64 +99,58 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			return out, true, false
 		}
 		out = append(out, SubagentEvent{
-			Kind:              SEToolCall,
-			CallID:            callID,
-			Name:              name,
-			ToolKind:          toolKind,
-			Title:             toolTitle,
-			ExplorationVerb:   explorationVerb,
-			Args:              args,
-			StartArgs:         args,
-			FullArgs:          fullArgs,
-			Output:            output,
-			OutputMessageID:   messageID,
-			OutputMessage:     output,
-			OutputNarrative:   update.Meta.OutputNarrative,
-			Terminal:          update.Meta.Terminal,
-			OutputSynthetic:   update.Meta.OutputSynthetic,
-			OutputCollection:  update.Meta.OutputCollection,
-			OutputTerminal:    update.Meta.OutputTerminal,
-			OutputGapBefore:   update.Meta.OutputGapBefore,
-			OutputCursor:      update.Meta.OutputCursor,
-			OutputCursorKnown: update.Meta.OutputCursorKnown,
-			TaskHandle:        taskHandle,
-			TaskAction:        taskAction,
-			TaskInput:         taskInput,
-			TaskTargetKind:    taskTargetKind,
-			MessageTarget:     messageTarget,
+			Kind:             SEToolCall,
+			CallID:           callID,
+			Name:             name,
+			ToolKind:         toolKind,
+			Title:            toolTitle,
+			ExplorationVerb:  explorationVerb,
+			Args:             args,
+			StartArgs:        args,
+			FullArgs:         fullArgs,
+			Output:           output,
+			OutputMessageID:  messageID,
+			OutputMessage:    output,
+			OutputNarrative:  update.Meta.OutputNarrative,
+			Terminal:         update.Meta.Terminal,
+			OutputSynthetic:  update.Meta.OutputSynthetic,
+			OutputCollection: update.Meta.OutputCollection,
+			OutputTerminal:   update.Meta.OutputTerminal,
+			TaskHandle:       taskHandle,
+			TaskAction:       taskAction,
+			TaskInput:        taskInput,
+			TaskTargetKind:   taskTargetKind,
+			MessageTarget:    messageTarget,
 		})
 		clearTaskWriteTerminalOwnership(&out[len(out)-1])
 		return out, true, false
 	}
 
 	finalEvent := SubagentEvent{
-		Kind:              SEToolCall,
-		CallID:            callID,
-		Name:              name,
-		ToolKind:          toolKind,
-		Title:             toolTitle,
-		ExplorationVerb:   explorationVerb,
-		Args:              args,
-		StartArgs:         args,
-		FullArgs:          fullArgs,
-		Output:            output,
-		OutputMessageID:   messageID,
-		OutputMessage:     output,
-		OutputNarrative:   update.Meta.OutputNarrative,
-		Terminal:          update.Meta.Terminal,
-		OutputSynthetic:   update.Meta.OutputSynthetic,
-		OutputCollection:  update.Meta.OutputCollection,
-		OutputTerminal:    update.Meta.OutputTerminal,
-		OutputGapBefore:   update.Meta.OutputGapBefore,
-		OutputCursor:      update.Meta.OutputCursor,
-		OutputCursorKnown: update.Meta.OutputCursorKnown,
-		Done:              true,
-		Err:               update.Err,
-		TaskHandle:        taskHandle,
-		TaskAction:        taskAction,
-		TaskInput:         taskInput,
-		TaskTargetKind:    taskTargetKind,
-		MessageTarget:     messageTarget,
+		Kind:             SEToolCall,
+		CallID:           callID,
+		Name:             name,
+		ToolKind:         toolKind,
+		Title:            toolTitle,
+		ExplorationVerb:  explorationVerb,
+		Args:             args,
+		StartArgs:        args,
+		FullArgs:         fullArgs,
+		Output:           output,
+		OutputMessageID:  messageID,
+		OutputMessage:    output,
+		OutputNarrative:  update.Meta.OutputNarrative,
+		Terminal:         update.Meta.Terminal,
+		OutputSynthetic:  update.Meta.OutputSynthetic,
+		OutputCollection: update.Meta.OutputCollection,
+		OutputTerminal:   update.Meta.OutputTerminal,
+		Done:             true,
+		Err:              update.Err,
+		TaskHandle:       taskHandle,
+		TaskAction:       taskAction,
+		TaskInput:        taskInput,
+		TaskTargetKind:   taskTargetKind,
+		MessageTarget:    messageTarget,
 	}
 	clearTaskWriteTerminalOwnership(&finalEvent)
 	if i := openToolEventIndexForUpdate(out, update, toolIndex); i >= 0 {
@@ -337,7 +326,6 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 	if meta.Terminal {
 		ev.Terminal = true
 	}
-	ev.OutputGapBefore = ev.OutputGapBefore || meta.OutputGapBefore
 	// Spawn may carry a terminal relation for Task linkage, but its live output
 	// is structured child narrative rather than terminal bytes and must retain
 	// message scope.
@@ -352,20 +340,15 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 		} else if terminalOutput {
 			if meta.OutputTerminal && !ev.OutputTerminal && (semanticName != surfaceToolRunCommand || ev.OutputCollection) {
 				resetToolEventOutputMode(ev)
-				ev.OutputGapBefore = meta.OutputGapBefore
 			}
-			if meta.OutputTerminal && meta.OutputCursorKnown {
-				mergeTerminalOutputByCursor(ev, output, meta)
-			} else if meta.OutputTerminal {
-				// Legacy ACP terminal_output without a cursor is still an exact
-				// next byte delta and must not use textual overlap guessing. Keep
-				// an existing absolute cursor coherent with the represented bytes.
+			if meta.OutputTerminal {
+				// Control owns ordering and resume. Every terminal_output value that
+				// reaches the Surface is the next exact FIFO delta.
 				ev.Output += output
-				if ev.OutputCursorKnown {
-					ev.OutputCursor += int64(len([]byte(output)))
-				}
 			} else {
-				ev.Output = mergeCommandStreamChunk(ev.Output, output)
+				// A non-terminal RunCommand update is a producer delta too. Full
+				// fallback results arrive as an atomic replacement delivery.
+				ev.Output += output
 			}
 			ev.OutputCollection = false
 			ev.OutputTerminal = true
@@ -410,9 +393,6 @@ func resetToolEventOutputMode(ev *SubagentEvent) {
 	ev.OutputNarrativeBoundary = false
 	ev.OutputCollection = false
 	ev.OutputTerminal = false
-	ev.OutputGapBefore = false
-	ev.OutputCursor = 0
-	ev.OutputCursorKnown = false
 }
 
 func clearTaskWriteTerminalOwnership(ev *SubagentEvent) {
@@ -422,7 +402,6 @@ func clearTaskWriteTerminalOwnership(ev *SubagentEvent) {
 	ev.Terminal = false
 	ev.OutputTerminal = false
 	ev.OutputCollection = false
-	ev.OutputGapBefore = false
 }
 
 func shouldMergeOpenToolOutput(semanticName string, output string, terminal bool) bool {
@@ -463,10 +442,6 @@ func fillFinalToolEventFromExisting(finalEvent *SubagentEvent, existing Subagent
 	}
 	if !finalEvent.Terminal {
 		finalEvent.Terminal = existing.Terminal
-	}
-	if !finalEvent.OutputCollection && !finalEvent.OutputCursorKnown && existing.OutputCursorKnown {
-		finalEvent.OutputCursor = existing.OutputCursor
-		finalEvent.OutputCursorKnown = true
 	}
 	clearTaskWriteTerminalOwnership(finalEvent)
 }
@@ -532,10 +507,6 @@ func fillMissingFinalToolEventFromExisting(finalEvent *SubagentEvent, existing S
 	if !finalEvent.Terminal {
 		finalEvent.Terminal = existing.Terminal
 	}
-	if !finalEvent.OutputCursorKnown && existing.OutputCursorKnown {
-		finalEvent.OutputCursor = existing.OutputCursor
-		finalEvent.OutputCursorKnown = true
-	}
 	clearTaskWriteTerminalOwnership(finalEvent)
 }
 
@@ -559,9 +530,7 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authorita
 	ev.FullArgs = finalEvent.FullArgs
 	ev.MessageTarget = firstNonEmpty(finalEvent.MessageTarget, ev.MessageTarget)
 	ev.Terminal = ev.Terminal || finalEvent.Terminal
-	ev.OutputGapBefore = ev.OutputGapBefore || finalEvent.OutputGapBefore
 	clearTaskWriteTerminalOwnership(ev)
-	outputReplaced := false
 	if finalToolOutputShouldReplace(*ev, *finalEvent, authoritativeFinal) {
 		ev.Output = finalEvent.Output
 		ev.OutputMessageID = finalEvent.OutputMessageID
@@ -569,20 +538,6 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authorita
 		ev.OutputSynthetic = finalEvent.OutputSynthetic
 		ev.OutputCollection = finalEvent.OutputCollection
 		ev.OutputTerminal = finalEvent.OutputTerminal
-		if finalEvent.OutputCollection {
-			ev.OutputGapBefore = false
-			ev.OutputCursor = 0
-			ev.OutputCursorKnown = false
-		}
-		outputReplaced = true
-	}
-	// A contentless close frame proves lifecycle completion, not delivery of
-	// bytes through its end cursor. Keep the last represented cursor so a
-	// later durable Task observation can still repair the missing suffix.
-	if outputReplaced && finalEvent.Output != "" && finalEvent.OutputCursorKnown &&
-		(!ev.OutputCursorKnown || finalEvent.OutputCursor >= ev.OutputCursor) {
-		ev.OutputCursor = finalEvent.OutputCursor
-		ev.OutputCursorKnown = true
 	}
 	if !isTaskWriteInteractionEvent(*ev) {
 		ev.OutputNarrative = ev.OutputNarrative || finalEvent.OutputNarrative

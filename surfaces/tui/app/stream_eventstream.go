@@ -7,7 +7,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -47,14 +46,11 @@ func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea
 // mutation and live activity remain separate Surface consumers of the same
 // typed projection; neither re-parses Task/Spawn relations independently.
 func (m *Model) projectACPEnvelopePresentation(env eventstream.Envelope) TranscriptEventsMsg {
-	return transcriptEventsMsgForEnvelope(m.projectACPEventToTranscriptEvents(env), env)
+	return transcriptEventsMsg(m.projectACPEventToTranscriptEvents(env))
 }
 
-func transcriptEventsMsgForEnvelope(events []TranscriptEvent, env eventstream.Envelope) TranscriptEventsMsg {
-	return TranscriptEventsMsg{
-		Events:       events,
-		OwnerRepairs: taskstream.TaskOwnerRepairsFromEnvelope(env),
-	}
+func transcriptEventsMsg(events []TranscriptEvent) TranscriptEventsMsg {
+	return TranscriptEventsMsg{Events: events}
 }
 
 type compactNoticeSource uint8

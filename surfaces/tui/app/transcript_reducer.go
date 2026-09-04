@@ -36,12 +36,6 @@ func (m *Model) applyTranscriptToolToParticipant(event TranscriptEvent, mutation
 	if action, hidden := hiddenTaskControlAction(event); hidden {
 		mutation.meta.TaskAction = action
 		var changed bool
-		if action == "wait" || action == "read" {
-			if owner := m.absorbParticipantCommandTaskObservation(event, &mutation); owner != nil {
-				m.markViewportBlockDirty(owner.BlockID())
-				changed = true
-			}
-		}
 		block := m.findParticipantTurnBlock(transcriptParticipantTurnKey(event))
 		if block != nil {
 			bindParticipantTurnBlock(block, event)
@@ -154,11 +148,6 @@ func (m *Model) applyTranscriptToolToMain(event TranscriptEvent, mutation transc
 				m.markViewportBlockDirty(block.BlockID())
 			}
 		}
-		if action == "wait" || action == "read" {
-			if owner := m.absorbCommandTaskObservation(event, &mutation); owner != nil {
-				m.markViewportBlockDirty(owner.BlockID())
-			}
-		}
 		return m, m.requestStreamViewportSync()
 	}
 	block := m.mainBlockForStreamOwner(event, mutation)
@@ -225,81 +214,6 @@ func taskControlObservedTerminalTarget(event TranscriptEvent) bool {
 	}
 }
 
-// absorbCommandTaskObservation folds a durable TASK read/wait observation into
-// the original async command panel. Cursors make this order-independent with
-// transient exact stream delivery; legacy compact observations remain
-// recovery-only and never append onto already rendered bytes.
-func (m *Model) absorbCommandTaskObservation(event TranscriptEvent, mutation *transcriptToolMutation) *MainACPTurnBlock {
-	if m == nil || m.doc == nil || mutation == nil ||
-		taskControlInvocationFailed(event) ||
-		mutation.name != surfaceToolTask ||
-		!commandTaskTargetKind(mutation.meta.TaskTargetKind) ||
-		!taskObservationHasOutput(*mutation) {
-		return nil
-	}
-	action := strings.ToLower(strings.TrimSpace(mutation.meta.TaskAction))
-	if action != "read" && action != "wait" {
-		return nil
-	}
-	block, ok := m.mainCommandTaskOwnerBlock(mutation.meta.TaskHandle, event.AnchorToolCallID)
-	if !ok || !absorbCommandTaskObservationIntoEvents(block.Events, mutation) {
-		return nil
-	}
-	return block
-}
-
-func absorbCommandTaskObservationIntoEvents(events []SubagentEvent, mutation *transcriptToolMutation) bool {
-	if mutation == nil || !taskObservationHasOutput(*mutation) {
-		return false
-	}
-	taskHandle := strings.TrimSpace(mutation.meta.TaskHandle)
-	if taskHandle == "" {
-		return false
-	}
-	for i := len(events) - 1; i >= 0; i-- {
-		owner := &events[i]
-		ownerName := owner.Name
-		if owner.Kind != SEToolCall || !sameTaskHandle(owner.TaskHandle, taskHandle) ||
-			!toolEventOwnsTerminalOutput(*owner) || ownerName == surfaceToolSpawn || ownerName == surfaceToolTask {
-			continue
-		}
-		switch {
-		case mutation.meta.OutputTerminal:
-			mergeTerminalOutputByCursor(owner, mutation.output, mutation.meta)
-		case owner.OutputSynthetic || !renderableTextHasContent(owner.Output):
-			// Older durable observations only carry compact latest_output.
-			// Present that snapshot when no exact bytes exist, but mark it as
-			// replaceable so a later exact stream frame can recover fidelity.
-			owner.Output = mutation.output
-			owner.OutputSynthetic = true
-		}
-		mutation.output = ""
-		mutation.meta.OutputSynthetic = false
-		mutation.meta.OutputTerminal = false
-		return true
-	}
-	return false
-}
-
-func (m *Model) absorbParticipantCommandTaskObservation(event TranscriptEvent, mutation *transcriptToolMutation) *ParticipantTurnBlock {
-	if m == nil || m.doc == nil || mutation == nil || taskControlInvocationFailed(event) {
-		return nil
-	}
-	participantID := transcriptParticipantLaneID(event)
-	turnID := strings.TrimSpace(transcriptParticipantTurnKey(event))
-	blocks := m.doc.Blocks()
-	for i := len(blocks) - 1; i >= 0; i-- {
-		block, ok := blocks[i].(*ParticipantTurnBlock)
-		if !ok || !participantTurnBlockMatchesLane(block, participantID, turnID) {
-			continue
-		}
-		if absorbCommandTaskObservationIntoEvents(block.Events, mutation) {
-			return block
-		}
-	}
-	return nil
-}
-
 func bindParticipantTurnBlock(block *ParticipantTurnBlock, event TranscriptEvent) {
 	if block == nil {
 		return
@@ -327,48 +241,7 @@ func participantTurnBlockMatchesLane(block *ParticipantTurnBlock, participantID 
 	return turnID != "" && strings.TrimSpace(block.SessionID) == turnID
 }
 
-func taskObservationHasOutput(mutation transcriptToolMutation) bool {
-	if mutation.meta.OutputTerminal {
-		return mutation.output != ""
-	}
-	return renderableTextHasContent(mutation.output)
-}
-
-func commandTaskTargetKind(kind string) bool {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "command", "terminal":
-		return true
-	default:
-		return false
-	}
-}
-
-// mainCommandTaskOwnerBlock resolves transcript ownership from the
-// Session-unique public Task handle. A parent call narrows the match, and any
-// duplicate rendered owner fails closed.
-func (m *Model) mainCommandTaskOwnerBlock(taskHandle string, parentCallID string) (*MainACPTurnBlock, bool) {
-	if m == nil || m.doc == nil || strings.TrimSpace(taskHandle) == "" {
-		return nil, false
-	}
-	var match *MainACPTurnBlock
-	for _, candidate := range m.doc.Blocks() {
-		block, ok := candidate.(*MainACPTurnBlock)
-		if !ok {
-			continue
-		}
-		ownerCount := mainACPBlockStreamOwnerCount(block, parentCallID, taskHandle, surfaceToolRunCommand)
-		if ownerCount == 0 {
-			continue
-		}
-		if ownerCount != 1 || match != nil {
-			return nil, false
-		}
-		match = block
-	}
-	return match, match != nil
-}
-
-// mainBlockForStreamOwner lets a later TASK observer deliver bytes to the
+// mainBlockForStreamOwner lets a later TaskStream record deliver bytes to the
 // original async tool panel. Cross-Turn routing is deliberately limited to
 // projector-owned stream frames and requires both physical task and call
 // identity, so an ordinary reused CallID still starts in the current Turn.

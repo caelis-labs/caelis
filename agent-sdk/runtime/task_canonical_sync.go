@@ -271,12 +271,21 @@ func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref sessi
 	applyCanonicalTaskEntry(entry, canonicalOutput, latest.Status, latest.UpdatedAt)
 	if err := tm.persistTaskEntry(ctx, entry); err != nil {
 		var conflict *taskapi.RevisionConflictError
-		if !errors.As(err, &conflict) {
+		var fenceConflict *session.FenceConflictError
+		isRevisionConflict := errors.As(err, &conflict)
+		isFenceConflict := errors.As(err, &fenceConflict)
+		if !isRevisionConflict && !isFenceConflict {
 			return nil, err
 		}
 		reloaded, loadErr := tm.store.Get(context.WithoutCancel(ctx), entry.TaskID)
 		if loadErr != nil || !storedTaskEntryMatches(reloaded, ref, entry.Kind) {
 			return nil, errors.Join(err, loadErr)
+		}
+		// A fence conflict is safe to observe through the winning owner's newer
+		// Task revision. If no revision advanced, the owner has not published a
+		// replacement and control operations must still fail closed.
+		if isFenceConflict && reloaded.Revision <= entry.Revision {
+			return nil, err
 		}
 		return taskapi.CloneEntry(reloaded), nil
 	}

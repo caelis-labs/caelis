@@ -7,7 +7,6 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/control/appserver/projection"
 )
 
 type promptCallbacks interface {
@@ -91,7 +90,6 @@ func (l *SessionServiceLoader) LoadSession(
 			if event == nil {
 				continue
 			}
-			base := projection.EnvelopeBaseFromSessionEvent(loaded.Session.SessionRef, event, projection.SessionEventTransport{})
 			notifications, err := projectSessionEventNotifications(strings.TrimSpace(string(req.SessionId)), event)
 			if err != nil {
 				return acpsdk.LoadSessionResponse{}, err
@@ -100,13 +98,6 @@ func (l *SessionServiceLoader) LoadSession(
 				notification = spawnReplay.normalize(event, notification)
 				if err := cb.SessionUpdate(ctx, notification); err != nil {
 					return acpsdk.LoadSessionResponse{}, err
-				}
-				base.Kind = eventstream.KindSessionUpdate
-				base.Update = notification.Update
-				for _, parentClose := range spawnReplay.observedParentCloses(base, notification.SessionID) {
-					if err := cb.SessionUpdate(ctx, parentClose); err != nil {
-						return acpsdk.LoadSessionResponse{}, err
-					}
 				}
 			}
 		}

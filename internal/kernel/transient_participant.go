@@ -26,6 +26,7 @@ type startParticipantRequest struct {
 	DisplayTitle   string
 	ContentParts   []model.ContentPart
 	Source         string
+	Observer       TurnEventObserver
 }
 
 func (g *Gateway) StartParticipant(ctx context.Context, req StartParticipantRequest) (BeginTurnResult, error) {
@@ -50,6 +51,7 @@ func (g *Gateway) StartParticipant(ctx context.Context, req StartParticipantRequ
 		DisplayTitle:   req.DisplayTitle,
 		ContentParts:   req.ContentParts,
 		Source:         req.Source,
+		Observer:       req.Observer,
 	})
 	if err != nil {
 		return BeginTurnResult{}, err
@@ -95,6 +97,7 @@ func (g *Gateway) startParticipant(ctx context.Context, req startParticipantRequ
 		DisplayTitle:   req.DisplayTitle,
 		ContentParts:   req.ContentParts,
 		Source:         strings.TrimSpace(req.Source),
+		Observer:       req.Observer,
 	})
 	if err != nil {
 		if rollbackErr := g.detachTransientParticipant(ctx, attached.SessionRef, req.BindingKey, participantID, "side_agent_prompt_rollback"); rollbackErr != nil {

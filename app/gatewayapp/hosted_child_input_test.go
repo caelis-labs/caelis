@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"iter"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -443,10 +442,6 @@ type hostedChildClosingRunner struct {
 
 func (*hostedChildClosingRunner) RunID() string { return "closing-parent-run" }
 
-func (r *hostedChildClosingRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(func(*session.Event, error) bool) { <-r.release }
-}
-
 func (*hostedChildClosingRunner) Submit(agent.Submission) error {
 	return agent.ErrRunInputClosed
 }
@@ -456,14 +451,18 @@ func (*hostedChildClosingRunner) Cancel() agent.CancelResult {
 }
 
 func (*hostedChildClosingRunner) Close() error { return nil }
+func (r *hostedChildClosingRunner) WaitCompletion(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.release:
+		return nil
+	}
+}
 
 type hostedChildTerminalRunner struct{}
 
 func (hostedChildTerminalRunner) RunID() string { return "replacement-parent-run" }
-
-func (hostedChildTerminalRunner) Events() iter.Seq2[*session.Event, error] {
-	return func(func(*session.Event, error) bool) {}
-}
 
 func (hostedChildTerminalRunner) Submit(agent.Submission) error { return nil }
 
@@ -471,4 +470,5 @@ func (hostedChildTerminalRunner) Cancel() agent.CancelResult {
 	return agent.CancelResult{Status: agent.CancelStatusCancelled}
 }
 
-func (hostedChildTerminalRunner) Close() error { return nil }
+func (hostedChildTerminalRunner) Close() error                         { return nil }
+func (hostedChildTerminalRunner) WaitCompletion(context.Context) error { return nil }

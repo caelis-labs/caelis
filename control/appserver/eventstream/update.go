@@ -81,10 +81,13 @@ func DecodeUpdateJSON(raw json.RawMessage) (Update, error) {
 	}
 	switch typed := target.(type) {
 	case *ContentChunk:
+		typed.Content = restoreDecodedTextContent(typed.Content)
 		return *typed, nil
 	case *ToolCall:
+		restoreDecodedToolContent(typed.Content)
 		return *typed, nil
 	case *ToolCallUpdate:
+		restoreDecodedToolContent(typed.Content)
 		return *typed, nil
 	case *PlanUpdate:
 		return *typed, nil
@@ -92,6 +95,37 @@ func DecodeUpdateJSON(raw json.RawMessage) (Update, error) {
 		return *typed, nil
 	default:
 		panic("unreachable ACP update target")
+	}
+}
+
+// restoreDecodedTextContent recovers Control's typed text projection after a
+// JSON-backed transport such as the local stream spool. Other standard and
+// extension content blocks stay structurally lossless as generic JSON values.
+func restoreDecodedTextContent(content any) any {
+	object, ok := content.(map[string]any)
+	if !ok {
+		return content
+	}
+	typeName, _ := object["type"].(string)
+	if strings.TrimSpace(typeName) != "text" {
+		return content
+	}
+	raw, err := json.Marshal(object)
+	if err != nil {
+		return content
+	}
+	var text TextContent
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return content
+	}
+	return text
+}
+
+func restoreDecodedToolContent(content []ToolCallContent) {
+	for index := range content {
+		if strings.TrimSpace(content[index].Type) == "content" {
+			content[index].Content = restoreDecodedTextContent(content[index].Content)
+		}
 	}
 }
 
@@ -118,8 +152,10 @@ type SessionNotification struct {
 }
 
 type TextContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type        string                     `json:"type"`
+	Text        string                     `json:"text"`
+	Annotations *acpsdk.Annotations        `json:"annotations,omitempty"`
+	Meta        map[string]json.RawMessage `json:"_meta,omitempty"`
 }
 
 type ToolCallLocation struct {

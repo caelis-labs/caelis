@@ -110,7 +110,7 @@ func TestACPTaskStreamMuxFollowsMessageAuthoredSubagentActivityUntilSeal(t *test
 	}
 }
 
-func TestACPTaskStreamMuxResumesActiveStreamFromLastCursorAndFiltersGap(t *testing.T) {
+func TestACPTaskStreamMuxResumesActiveStreamExactlyFromCommittedCursor(t *testing.T) {
 	t.Parallel()
 
 	first := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 2)}
@@ -136,34 +136,68 @@ func TestACPTaskStreamMuxResumesActiveStreamFromLastCursorAndFiltersGap(t *testi
 	case <-time.After(time.Second):
 		t.Fatal("initial Task output was not forwarded")
 	}
-	first.finish(errorcode.New(errorcode.Unavailable, "active backend disconnected"), "cursor-1")
+	first.finish(errorcode.New(errorcode.Unavailable, "active backend disconnected"))
 
 	select {
 	case request := <-service.requests:
 		if request.TaskID != "task-1" || request.Cursor != "cursor-1" {
-			t.Fatalf("resume Subscribe request = %#v, want LastCursor cursor-1", request)
+			t.Fatalf("resume Subscribe request = %#v, want CommittedCursor cursor-1", request)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("active Task stream was not resumed")
-	}
-	resumed.events <- eventstream.Envelope{
-		Kind: eventstream.KindNotice, SessionID: "session-1", Scope: eventstream.ScopeMain,
-		Cursor: "cursor-gap",
-		Notice: "transient Task output before this boundary is no longer available",
-		Meta:   map[string]any{"task_stream": map[string]any{"transient_gap": true}},
 	}
 	resumed.events <- acpMuxCommandOutputEnvelope("cursor-2", "after resume\n")
 	select {
 	case envelope := <-mux.Events():
 		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
 		if !ok || output.Data != "after resume\n" {
-			t.Fatalf("post-resume envelope = %#v, want typed gap filtered before output", envelope)
+			t.Fatalf("post-resume envelope = %#v, want next exact output", envelope)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("resumed Task output was not forwarded")
 	}
 	if calls := service.listCallCount(); calls != 1 {
 		t.Fatalf("Task directory List calls = %d, want identity resolved only before the first subscription", calls)
+	}
+}
+
+func TestACPTaskStreamMuxRejectsReplacementAfterForwardedPrefix(t *testing.T) {
+	t.Parallel()
+
+	first := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 2)}
+	replacement := &acpMuxTestSubscription{deliveries: make(chan taskstream.Delivery, 1)}
+	service := newACPMuxReconnectService([]acpMuxSubscribeStep{{sub: first}, {sub: replacement}})
+	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
+	defer mux.Close()
+	mux.Observe(acpMuxCommandAnchor("command"))
+
+	_ = receiveACPTaskStreamRequest(t, service.requests)
+	first.events <- acpMuxCommandOutputEnvelope("cursor-prefix", "irreversible prefix\n")
+	select {
+	case envelope := <-mux.Events():
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		if !ok || output.Data != "irreversible prefix\n" {
+			t.Fatalf("prefix envelope = %#v", envelope)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("prefix was not forwarded")
+	}
+	first.finish(errorcode.New(errorcode.Unavailable, "trace expired"))
+	request := receiveACPTaskStreamRequest(t, service.requests)
+	if request.Cursor != "cursor-prefix" {
+		t.Fatalf("resume cursor = %q, want cursor-prefix", request.Cursor)
+	}
+	replacement.deliveries <- taskstream.Delivery{
+		Kind: taskstream.DeliveryReplaceBegin, Source: taskstream.SourceReplacement, SnapshotID: "replacement-1",
+	}
+
+	select {
+	case envelope := <-mux.Events():
+		if envelope.Kind != eventstream.KindNotice || !strings.Contains(envelope.Notice, "interrupted") {
+			t.Fatalf("replacement rejection envelope = %#v", envelope)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("replacement after ACP prefix was not rejected")
 	}
 }
 
@@ -191,12 +225,12 @@ func TestACPTaskStreamMuxResumesAfterUnexpectedEOFFromLastAcceptedCursor(t *test
 		t.Fatal("accepted Task output was not forwarded")
 	}
 	// Abrupt transport truncation classified as Unavailable must resume, not stop.
-	first.finish(errorcode.New(errorcode.Unavailable, "control http client: Task stream ended without a done event"), "cursor-accepted")
+	first.finish(errorcode.New(errorcode.Unavailable, "control http client: Task stream ended without a done event"))
 
 	select {
 	case request := <-service.requests:
 		if request.TaskID != "task-1" || request.Cursor != "cursor-accepted" {
-			t.Fatalf("unexpected-EOF resume request = %#v, want LastCursor cursor-accepted", request)
+			t.Fatalf("unexpected-EOF resume request = %#v, want CommittedCursor cursor-accepted", request)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("active Task stream was not resumed after abrupt transport failure")
@@ -237,12 +271,12 @@ func TestACPTaskStreamMuxResumesAfterSlowConsumerFromLastAcceptedCursor(t *testi
 		t.Fatal("accepted Task output was not forwarded")
 	}
 	// Slow-consumer failure must reconnect from the last accepted cursor, not stop.
-	first.finish(taskstream.ErrSlowConsumer, "cursor-accepted")
+	first.finish(errorcode.New(errorcode.Unavailable, "slow consumer"))
 
 	select {
 	case request := <-service.requests:
 		if request.TaskID != "task-1" || request.Cursor != "cursor-accepted" {
-			t.Fatalf("slow-consumer resume request = %#v, want LastCursor cursor-accepted", request)
+			t.Fatalf("slow-consumer resume request = %#v, want CommittedCursor cursor-accepted", request)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("active Task stream was not resumed after slow consumer")
@@ -291,7 +325,7 @@ func TestACPTaskStreamMuxGivesEachInterruptionAFreshResumeBudget(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatalf("interruption %d output was not forwarded", index+1)
 		}
-		subscriptions[index].finish(errorcode.New(errorcode.Unavailable, "active stream disconnected"), cursor)
+		subscriptions[index].finish(errorcode.New(errorcode.Unavailable, "active stream disconnected"))
 		request := receiveACPTaskStreamRequest(t, service.requests)
 		if request.TaskID != "task-1" || request.Cursor != cursor {
 			t.Fatalf("resume request %d = %#v, want Task task-1 cursor %s", index+1, request, cursor)
@@ -308,9 +342,9 @@ func TestACPTaskStreamMuxGivesEachInterruptionAFreshResumeBudget(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Task stream stopped after several independently successful reconnects")
 	}
-	subscriptions[interruptions].finish(nil, "cursor-final")
+	subscriptions[interruptions].finish(nil)
 	select {
-	case <-mux.parentBoundary("command-1"):
+	case <-mux.observationBoundary("command-1"):
 	case <-time.After(time.Second):
 		t.Fatal("normally completed Task stream did not signal its observation boundary")
 	}
@@ -321,7 +355,7 @@ func TestACPTaskStreamMuxGivesEachInterruptionAFreshResumeBudget(t *testing.T) {
 	}
 }
 
-func TestACPTaskStreamMuxActiveResumeExhaustionReportsSanitizedGap(t *testing.T) {
+func TestACPTaskStreamMuxActiveResumeExhaustionReportsSanitizedFallback(t *testing.T) {
 	t.Parallel()
 
 	const internalTaskID = "95537455f400"
@@ -345,13 +379,13 @@ func TestACPTaskStreamMuxActiveResumeExhaustionReportsSanitizedGap(t *testing.T)
 	case <-time.After(time.Second):
 		t.Fatal("initial retained Task output was not forwarded")
 	}
-	first.finish(errorcode.New(errorcode.Unavailable, "active stream disconnected"), "cursor-1")
+	first.finish(errorcode.New(errorcode.Unavailable, "active stream disconnected"))
 
 	for attempt := 0; attempt < acpTaskStreamResumeMaxAttempts; attempt++ {
 		select {
 		case request := <-service.requests:
 			if request.Cursor != "cursor-1" {
-				t.Fatalf("resume request %d cursor = %q, want retained LastCursor", attempt+1, request.Cursor)
+				t.Fatalf("resume request %d cursor = %q, want retained CommittedCursor", attempt+1, request.Cursor)
 			}
 		case <-time.After(time.Second):
 			t.Fatalf("resume attempt %d was not made", attempt+1)
@@ -360,16 +394,14 @@ func TestACPTaskStreamMuxActiveResumeExhaustionReportsSanitizedGap(t *testing.T)
 	select {
 	case envelope := <-mux.Events():
 		if envelope.Kind != eventstream.KindNotice ||
-			!taskstream.IsTransientGapEnvelope(envelope) ||
 			strings.Contains(envelope.Notice, internalTaskID) ||
 			strings.Contains(envelope.Notice, "not found") ||
 			!strings.Contains(envelope.Notice, "was interrupted") ||
 			!strings.Contains(envelope.Notice, "final Task result remains authoritative") {
-			t.Fatalf("active resume exhaustion notice = %#v, want sanitized transient gap", envelope)
+			t.Fatalf("active resume exhaustion notice = %#v, want sanitized fallback", envelope)
 		}
 		meta, _ := envelope.Meta["task_stream"].(map[string]any)
-		if meta["transient_gap"] != true ||
-			meta["active_stream_interrupted"] != true ||
+		if meta["active_stream_interrupted"] != true ||
 			meta["resume_exhausted"] != true ||
 			meta["resume_cursor_available"] != true {
 			t.Fatalf("active resume exhaustion metadata = %#v", meta)
@@ -378,7 +410,7 @@ func TestACPTaskStreamMuxActiveResumeExhaustionReportsSanitizedGap(t *testing.T)
 			t.Fatalf("active failure reused resolve retry metadata: %#v", meta)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("active resume exhaustion emitted no gap notice")
+		t.Fatal("active resume exhaustion emitted no interruption notice")
 	}
 }
 
@@ -392,18 +424,17 @@ func TestACPTaskStreamMuxDoesNotReconnectActiveStreamWithoutCursor(t *testing.T)
 	mux.Observe(acpMuxCommandAnchor("command"))
 
 	_ = receiveACPTaskStreamRequest(t, service.requests)
-	first.finish(errorcode.New(errorcode.Unavailable, "active stream disconnected"), "")
+	first.finish(errorcode.New(errorcode.Unavailable, "active stream disconnected"))
 	select {
 	case envelope := <-mux.Events():
 		meta, _ := envelope.Meta["task_stream"].(map[string]any)
-		if meta["transient_gap"] != true ||
-			meta["resume_cursor_available"] != false ||
+		if meta["resume_cursor_available"] != false ||
 			meta["resume_exhausted"] != false ||
 			!strings.Contains(envelope.Notice, "before a safe resume cursor was available") {
 			t.Fatalf("cursorless active failure = %#v", envelope)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("cursorless active failure emitted no gap notice")
+		t.Fatal("cursorless active failure emitted no interruption notice")
 	}
 	select {
 	case request := <-service.requests:
@@ -435,7 +466,7 @@ func TestACPTaskStreamMuxSealPreservesActiveResumeToTerminal(t *testing.T) {
 	}
 
 	mux.Seal()
-	first.finish(errorcode.New(errorcode.Unavailable, "active stream disconnected after prompt"), "cursor-before-seal")
+	first.finish(errorcode.New(errorcode.Unavailable, "active stream disconnected after prompt"))
 	resume := receiveACPTaskStreamRequest(t, service.requests)
 	if resume.TaskID != "task-1" || resume.Cursor != "cursor-before-seal" {
 		t.Fatalf("post-Seal resume request = %#v, want retained Task and cursor", resume)
@@ -471,9 +502,9 @@ func TestACPTaskStreamMuxSealPreservesActiveResumeToTerminal(t *testing.T) {
 		t.Fatal("post-Seal terminal delivery was not forwarded")
 	}
 
-	resumed.finish(nil, "cursor-terminal")
+	resumed.finish(nil)
 	select {
-	case <-mux.parentBoundary("command-1"):
+	case <-mux.observationBoundary("command-1"):
 	case <-time.After(time.Second):
 		t.Fatal("post-Seal completed stream did not signal its observation boundary")
 	}
@@ -598,7 +629,7 @@ func TestACPTaskStreamMuxParentTerminalCancelsInFlightResume(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("initial Task stream output was not forwarded")
 	}
-	first.finish(errorcode.New(errorcode.Unavailable, "active stream disconnected"), "cursor-before-resume")
+	first.finish(errorcode.New(errorcode.Unavailable, "active stream disconnected"))
 	resume := receiveACPTaskStreamRequest(t, service.requests)
 	if resume.Cursor != "cursor-before-resume" {
 		t.Fatalf("resume cursor = %q, want retained cursor", resume.Cursor)
@@ -714,7 +745,7 @@ func TestACPTaskStreamMuxSealKeepsInFlightResumeAlive(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("initial Task stream output was not forwarded")
 	}
-	first.finish(errorcode.New(errorcode.Unavailable, "active stream disconnected"), "cursor-before-seal")
+	first.finish(errorcode.New(errorcode.Unavailable, "active stream disconnected"))
 	_ = receiveACPTaskStreamRequest(t, service.requests)
 	select {
 	case <-started:
@@ -739,7 +770,7 @@ func TestACPTaskStreamMuxSealKeepsInFlightResumeAlive(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Seal prevented the in-flight resume from attaching")
 	}
-	resumed.finish(nil, "cursor-after-seal")
+	resumed.finish(nil)
 	select {
 	case _, open := <-mux.Events():
 		if open {

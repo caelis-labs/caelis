@@ -48,10 +48,13 @@ type taskStreamOpenedMsg struct {
 }
 
 type taskStreamBatchMsg struct {
-	sessionID string
-	taskID    string
-	token     uint64
-	events    []eventstream.Envelope
+	sessionID   string
+	taskID      string
+	token       uint64
+	events      []eventstream.Envelope
+	cursor      string
+	activityID  string
+	replacement bool
 }
 
 type taskStreamClosedMsg struct {
@@ -213,9 +216,9 @@ func (m *Model) taskStreamDemandForOwner(callID, handle string) taskStreamDemand
 
 // subagentOutputTerminalContentSettled prevents a terminal child workspace
 // from repeatedly reopening a finite idle read. Normally that read is the
-// complete Agent-owned ACP history. If the endpoint has no session/load
-// capability, Control may instead return its retained Runtime current state;
-// this Surface cache marker makes no completeness claim.
+// complete Agent-owned ACP history. If history reload is unavailable, Control
+// may instead return the canonical terminal Task result; this Surface cache
+// marker makes no completeness claim.
 func (m *Model) subagentOutputTerminalContentSettled(callID string, view *subagentOutputView) bool {
 	if m == nil || view == nil || !view.idleHistorySettled {
 		return false
@@ -498,17 +501,26 @@ func (m *Model) startTaskStreamForwarder(
 			return
 		}
 		defer sub.Close()
+		assembler := &taskstream.DeliveryAssembler{}
+		committedCursor := cursor
 		for {
-			batch, open := readTaskStreamMailbox(ctx, sub.Events())
-			if len(batch) > 0 {
+			events, cursor, activityID, replacement, open, readErr := readTaskStreamMailbox(ctx, sub.Deliveries(), assembler)
+			if len(events) > 0 || replacement || cursor != "" || activityID != "" {
 				cfg.ProgramSender.SendMsg(taskStreamBatchMsg{
-					sessionID: sessionID, taskID: taskID, token: token, events: batch,
+					sessionID: sessionID, taskID: taskID, token: token, events: events,
+					cursor: cursor, activityID: activityID, replacement: replacement,
 				})
+				if cursor != "" {
+					committedCursor = cursor
+				}
 			}
 			if !open {
+				if readErr == nil {
+					readErr = sub.Err()
+				}
 				cfg.ProgramSender.SendMsg(taskStreamClosedMsg{
 					sessionID: sessionID, taskID: taskID, token: token,
-					cursor: sub.LastCursor(), err: sub.Err(),
+					cursor: committedCursor, err: readErr,
 				})
 				return
 			}
@@ -524,31 +536,30 @@ func (m *Model) startTaskStreamForwarder(
 	}
 }
 
-func readTaskStreamMailbox(ctx context.Context, events <-chan eventstream.Envelope) ([]eventstream.Envelope, bool) {
-	select {
-	case <-ctx.Done():
-		return nil, false
-	case event, ok := <-events:
-		if !ok {
-			return nil, false
-		}
-		batch := []eventstream.Envelope{event}
-		timer := time.NewTimer(taskStreamMailboxBudget)
-		defer timer.Stop()
-		for len(batch) < taskStreamMailboxBatchSize {
-			select {
-			case <-ctx.Done():
-				return batch, false
-			case event, ok = <-events:
-				if !ok {
-					return batch, false
+func readTaskStreamMailbox(
+	ctx context.Context,
+	deliveries <-chan taskstream.Delivery,
+	assembler *taskstream.DeliveryAssembler,
+) ([]eventstream.Envelope, string, string, bool, bool, error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, "", "", false, false, ctx.Err()
+		case delivery, ok := <-deliveries:
+			if !ok {
+				if assembler.Pending() {
+					return nil, "", "", false, false, errorcode.New(errorcode.Unavailable, "Task replacement ended before commit")
 				}
-				batch = append(batch, event)
-			case <-timer.C:
-				return batch, true
+				return nil, "", "", false, false, nil
+			}
+			events, replacement, err := assembler.Accept(delivery)
+			if err != nil {
+				return nil, "", "", false, false, err
+			}
+			if len(events) > 0 || replacement || delivery.NextCursor != "" || delivery.ActivityID != "" && delivery.Kind == taskstream.DeliveryStatus {
+				return events, delivery.NextCursor, delivery.ActivityID, replacement, true, nil
 			}
 		}
-		return batch, true
 	}
 }
 
@@ -578,6 +589,23 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 	// not let the older finite read overwrite output that has already arrived.
 	m.cancelTaskStreamHistory(msg.taskID)
 	delete(m.taskStreamRetries, msg.taskID)
+	if cursor := strings.TrimSpace(msg.cursor); cursor != "" {
+		m.taskStreamCursors[msg.taskID] = cursor
+	}
+	if activityID := taskStreamActivityKey(msg.activityID); activityID != "" {
+		if callID := strings.TrimSpace(m.taskStreamCallIDsByID[msg.taskID]); callID != "" {
+			if view := m.subagentOutputViews[callID]; view != nil {
+				view.liveActivityID = activityID
+			}
+		}
+	}
+	if msg.replacement {
+		if callID := strings.TrimSpace(m.taskStreamCallIDsByID[msg.taskID]); callID != "" {
+			if view := m.subagentOutputViews[callID]; view != nil {
+				view.resetForReplacement()
+			}
+		}
+	}
 	cmds := make([]tea.Cmd, 0, len(msg.events))
 	for _, envelope := range msg.events {
 		if activityID := taskStreamActivityKey(envelope.ActivityID); activityID != "" {
@@ -589,14 +617,6 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 		}
 		if cursor := strings.TrimSpace(envelope.Cursor); cursor != "" {
 			m.taskStreamCursors[msg.taskID] = cursor
-		}
-		if taskstream.IsTransientGapEnvelope(envelope) {
-			if callID := strings.TrimSpace(m.taskStreamCallIDsByID[msg.taskID]); callID != "" {
-				if view := m.subagentOutputViews[callID]; view != nil {
-					view.resetForCurrentState()
-				}
-			}
-			continue
 		}
 		model, cmd := m.handleACPEventEnvelope(envelope)
 		if next, ok := model.(*Model); ok {
@@ -652,8 +672,9 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 		m.taskStreamTokens[msg.taskID] = 0
 		return m, taskStreamSubscribeRetryCmd(msg.sessionID, msg.taskID, m.taskStreamRetries[msg.taskID])
 	}
-	// Delivery failures are local to this panel. Recoverable failures resume
-	// from the last accepted cursor; an evicted prefix is returned as a gap.
+	// Delivery failures are local to this panel. A valid cursor prefers the
+	// retained trace; Control may answer a cache miss with an atomic replacement,
+	// which this panel applies through the delivery assembler before retrying.
 	if taskStreamRetryable(msg.err) && m.taskStreamWanted[msg.taskID] && demand.wanted() {
 		m.taskStreamRetries[msg.taskID]++
 		m.taskStreamTokens[msg.taskID] = 0
@@ -738,7 +759,7 @@ func taskStreamRetryable(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
-	if errors.Is(err, errTaskStreamNotDiscoverable) || errors.Is(err, taskstream.ErrSlowConsumer) {
+	if errors.Is(err, errTaskStreamNotDiscoverable) {
 		return true
 	}
 	switch errorcode.CodeOf(err) {

@@ -70,6 +70,11 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 					},
 				},
 			}),
+		loadGoldenToolEvent(session.EventTypeToolResult, "spawn-alpha", "Spawn", "completed",
+			nil, map[string]any{
+				"handle": "alpha", "state": "completed", "target_kind": "subagent",
+				"final_message": alphaFinal,
+			}),
 		loadGoldenNarrativeToolCall(
 			"wait-two", "Task", `{"action":"wait","handle":"beta"}`,
 			"Beta is still running after the first wait. I will wait again.",
@@ -89,6 +94,11 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 						"state": "completed", "target_kind": "subagent", "final_message": "duplicate alpha",
 					},
 				},
+			}),
+		loadGoldenToolEvent(session.EventTypeToolResult, "spawn-beta", "Spawn", "completed",
+			nil, map[string]any{
+				"handle": "beta", "state": "completed", "target_kind": "subagent",
+				"final_message": betaFinal,
 			}),
 		loadGoldenNarrativeToolCall(
 			"read-report", "Read", `{"path":"report.md"}`,
@@ -131,7 +141,7 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 			continue
 		}
 		seenFinal[update.ToolCallID]++
-		if update.Meta != nil || len(update.Content) != 1 || update.Content[0].Type != "content" {
+		if len(update.Content) != 1 || update.Content[0].Type != "content" {
 			t.Fatalf("Spawn %s result = %#v, want one standard content result", update.ToolCallID, update)
 		}
 		text, ok := update.Content[0].Content.(eventstream.TextContent)

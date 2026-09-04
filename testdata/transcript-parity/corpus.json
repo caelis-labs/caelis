@@ -3,7 +3,6 @@
   "cases": [
     {
       "name": "narrative_live_replay_splice",
-      "boundary": {"resume_mode": "exact", "transient_gap": false, "boundary_cursor": "cursor-4"},
       "envelopes": [
         {
           "kind": "session/update", "cursor": "cursor-1", "projection_id": "projection-message-1",
@@ -41,8 +40,7 @@
           {"cursor": "cursor-2", "runId": "run-main", "scope": "main", "final": true, "id": "message:main::run-main:message-1", "kind": "narrative", "messageId": "message-1", "role": "assistant", "text": "Hello world"},
           {"cursor": "cursor-3", "runId": "run-main", "scope": "main", "final": true, "id": "message:main::run-main:thought-1", "kind": "narrative", "messageId": "thought-1", "role": "reasoning", "text": "check assumptions"},
           {"actor": "reviewer", "cursor": "cursor-4", "scope": "participant", "scopeId": "participant-1", "final": true, "id": "message:participant:participant-1::user-1", "kind": "narrative", "messageId": "user-1", "role": "user", "text": "review this"}
-        ],
-        "boundary": {"resumeMode": "exact", "transientGap": false, "boundaryCursor": "cursor-4"}
+        ]
       }
     },
     {
@@ -127,7 +125,6 @@
     },
     {
       "name": "approval_participant_lifecycle_error_raw_and_fallback",
-      "boundary": {"resume_mode": "durable_fallback", "transient_gap": true, "boundary_cursor": "approval-cursor-7"},
       "envelopes": [
         {
           "kind": "session/update", "cursor": "approval-cursor-1", "projection_id": "projection-approval-tool",
@@ -189,8 +186,7 @@
           {"actor": "direct-agent", "cursor": "approval-cursor-5", "runId": "direct-agent-run", "scope": "main", "id": "projection:projection-lifecycle", "kind": "lifecycle", "state": "completed", "stopReason": "end_turn"},
           {"actor": "direct-agent", "cursor": "approval-cursor-6", "runId": "direct-agent-run", "scope": "main", "id": "projection:projection-error", "kind": "error", "text": "network failed"},
           {"cursor": "approval-cursor-7", "runId": "direct-agent-run", "scope": "main", "id": "projection:projection-raw", "kind": "raw_extension", "sessionUpdate": "vendor/future", "update": {"sessionUpdate": "vendor/future", "payload": {"future": true, "label": "inspectable"}}}
-        ],
-        "boundary": {"resumeMode": "durable_fallback", "transientGap": true, "boundaryCursor": "approval-cursor-7"}
+        ]
       }
     },
     {

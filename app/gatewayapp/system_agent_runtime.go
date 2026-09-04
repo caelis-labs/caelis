@@ -356,9 +356,8 @@ func (r *systemManagedAgentRuntime) CompactContext(
 	}, nil
 }
 
-// collectSystemManagedAgentResult treats Runner events as a best-effort live
-// observation stream. The isolated staging Session is the authoritative source
-// for the final assistant result after the execution producer is quiescent.
+// collectSystemManagedAgentResult waits for producer quiescence, then reads the
+// isolated staging Session as the sole authority for the final assistant result.
 func collectSystemManagedAgentResult(
 	ctx context.Context,
 	staging session.Service,
@@ -367,19 +366,9 @@ func collectSystemManagedAgentResult(
 	handle agent.Runner,
 ) (systemManagedAgentRunResult, error) {
 	result := systemManagedAgentRunResult{}
-	for event, runErr := range handle.Events() {
-		if runErr != nil {
-			if _, ok := agent.AsEventStreamGap(runErr); ok {
-				continue
-			}
-			return result, runErr
-		}
-		if event == nil {
-			continue
-		}
-		cloned := session.CloneEvent(event)
-		if session.EventTypeOf(cloned) == session.EventTypeAssistant {
-			result.AssistantEvent = cloned
+	if handle != nil {
+		if err := handle.WaitCompletion(ctx); err != nil {
+			return result, err
 		}
 	}
 	durableEvents, err := staging.Events(ctx, session.EventsRequest{

@@ -2,7 +2,8 @@ package runtime
 
 import (
 	"context"
-	"iter"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -75,19 +76,24 @@ func TestACPControllerCancelPersistsFencedRequestWhileRemoteTurnIsLive(t *testin
 	}
 
 	close(release)
-	for range run.Handle.Events() {
+	if err := run.Handle.WaitCompletion(t.Context()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("WaitCompletion() error = %v, want cancellation", err)
 	}
 }
 
 type fencedCancelControllerHandle struct {
 	streaming chan struct{}
 	release   chan struct{}
+	startOnce sync.Once
 }
 
-func (h *fencedCancelControllerHandle) Events() iter.Seq2[*session.Event, error] {
-	return func(func(*session.Event, error) bool) {
-		close(h.streaming)
-		<-h.release
+func (h *fencedCancelControllerHandle) WaitCompletion(ctx context.Context) error {
+	h.startOnce.Do(func() { close(h.streaming) })
+	select {
+	case <-h.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

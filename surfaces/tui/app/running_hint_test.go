@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -737,41 +736,6 @@ func TestNarrativeForegroundOverridesRunningBackgroundTool(t *testing.T) {
 	m.applyTranscriptRunningActivity(spawn)
 	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetShell {
 		t.Fatalf("runningActivity = %#v, want active background command after foreground Spawn completes", m.runningActivity)
-	}
-}
-
-func TestObservedTerminalCommandClosesExactRunningActivityOwner(t *testing.T) {
-	t.Parallel()
-
-	m := NewModel(Config{NoColor: true, NoAnimation: true})
-	m.liveTurn.Active = true
-	key := "tool:turn-1:command-call"
-	m.runningHintTracker.start(key, runningPhaseToolWait, runningTargetShell, time.Unix(1, 0), "command-call")
-	m.runningHintTracker.observeOwner("command-3", runningActivityOwner{
-		Key:     key,
-		CallID:  "command-call",
-		BlockID: "block-1",
-		Target:  runningTargetShell,
-	})
-	m.refreshRunningActivity()
-
-	m.applyObservedCommandResults([]taskstream.CommandTaskResult{{
-		ParentCallID: "different-command",
-		Handle:       "command-3",
-	}})
-	if _, active := m.runningHintTracker.active[key]; !active {
-		t.Fatal("conflicting command observation closed the owner")
-	}
-
-	m.applyObservedCommandResults([]taskstream.CommandTaskResult{{
-		ParentCallID: "command-call",
-		Handle:       "command-3",
-	}})
-	if _, active := m.runningHintTracker.active[key]; active {
-		t.Fatalf("active activities = %#v, want exact terminal command owner closed", m.runningHintTracker.active)
-	}
-	if m.runningActivity.Phase != runningPhaseModelWait {
-		t.Fatalf("runningActivity = %#v, want model waiting after terminal command", m.runningActivity)
 	}
 }
 

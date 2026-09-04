@@ -191,7 +191,7 @@ func (tm *taskRuntime) appendSideSubagentFinalEvent(ctx context.Context, task *s
 		return nil
 	}
 	text := firstNonBlankTaskOutput(taskRawStringValue(task.result["final_message"]), taskRawStringValue(task.result["result"]))
-	if !taskOutputHasNonBlankLine(text) && subagentFramesContainAssistantText(task.streamFrames) {
+	if !taskOutputHasNonBlankLine(text) {
 		text = compactFinalOutput(task.stdout, task.stderr)
 	}
 	if !taskOutputHasNonBlankLine(text) {

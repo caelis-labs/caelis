@@ -9,7 +9,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	sdkstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
@@ -69,9 +68,9 @@ func TestProjectRecordPreservesStandardChildToolLifecycle(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			record := controltaskstream.Record{
 				Cursor: "cursor-" + tt.name, Generation: "generation-1", Sequence: uint64(index + 1), Task: descriptor,
-				Frame: &sdkstream.Frame{
-					Ref:     sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "child-turn-1"},
-					Running: true, Cursor: sdkstream.Cursor{Events: int64(index + 1)},
+				Frame: &controltaskstream.Frame{
+					TerminalID: "child-turn-1",
+					Running:    true,
 					Event: &session.Event{
 						Type: tt.eventType,
 						Scope: &session.EventScope{Participant: session.ParticipantRef{
@@ -107,9 +106,9 @@ func TestIdenticalChildPayloadsRemainBoundToTheirTaskStreams(t *testing.T) {
 				State: task.StateRunning, Running: true, CurrentTurnID: "shared-turn",
 				ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-" + taskID, ToolName: "Spawn"},
 			},
-			Frame: &sdkstream.Frame{
-				Ref:     sdkstream.Ref{SessionID: "session-1", TaskID: taskID, TerminalID: "shared-turn"},
-				Running: true, Cursor: sdkstream.Cursor{Events: 1},
+			Frame: &controltaskstream.Frame{
+				TerminalID: "shared-turn",
+				Running:    true,
 				Event: &session.Event{
 					ID: "shared-event", Type: session.EventTypeAssistant,
 					Scope: &session.EventScope{Participant: session.ParticipantRef{Kind: session.ParticipantKindSubagent}},
@@ -138,9 +137,9 @@ func TestProjectRecordKeepsTaskScopeAndTransientCursor(t *testing.T) {
 			State: task.StateCompleted, ActivityID: "activity-2", CurrentTurnID: "turn-2",
 			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
-		Frame: &sdkstream.Frame{
-			Ref:   sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-2"},
-			State: string(task.StateCompleted), Closed: true, Cursor: sdkstream.Cursor{Events: 9},
+		Frame: &controltaskstream.Frame{
+			TerminalID: "turn-2",
+			State:      string(task.StateCompleted), Closed: true,
 		},
 	}
 
@@ -164,6 +163,32 @@ func TestProjectRecordKeepsTaskScopeAndTransientCursor(t *testing.T) {
 	}
 }
 
+func TestReplacementDeliveryClearsRecordResumeIdentity(t *testing.T) {
+	t.Parallel()
+
+	delivery := projectDelivery(controltaskstream.Delivery{
+		Kind: controltaskstream.DeliveryReplacePage, Source: controltaskstream.SourceReplacement,
+		SnapshotID: "snapshot-1",
+		Records: []controltaskstream.Record{{
+			Cursor: "fallback-record-cursor", Generation: "fallback-generation", Sequence: 1,
+			Task: controltaskstream.TaskDescriptor{
+				SessionID: "session-1", TaskID: "task-1", Kind: task.KindSubagent,
+				State: task.StateCompleted, CurrentTurnID: "turn-1",
+				ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
+			},
+			Frame: &controltaskstream.Frame{
+				TerminalID: "turn-1", State: string(task.StateCompleted), Closed: true,
+			},
+		}},
+	})
+	if len(delivery.Events) != 1 {
+		t.Fatalf("replacement events = %#v", delivery.Events)
+	}
+	if delivery.Events[0].Cursor != "" || delivery.Events[0].Position != nil {
+		t.Fatalf("replacement exposed record resume identity: %#v", delivery.Events[0])
+	}
+}
+
 func TestProjectRecordProjectsHistoricalTurnBoundaryWithoutTaskTerminalTransport(t *testing.T) {
 	t.Parallel()
 
@@ -175,9 +200,9 @@ func TestProjectRecordProjectsHistoricalTurnBoundaryWithoutTaskTerminalTransport
 			State: task.StateRunning, Running: true, CurrentTurnID: "turn-2",
 			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
-		Frame: &sdkstream.Frame{
-			Ref:    sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"},
-			Cursor: sdkstream.Cursor{Events: 200}, UpdatedAt: at,
+		Frame: &controltaskstream.Frame{
+			TerminalID: "turn-1",
+			UpdatedAt:  at,
 			Event: &session.Event{
 				ID: "boundary-turn-1", Type: session.EventTypeLifecycle, Visibility: session.VisibilityUIOnly,
 				Time: at,
@@ -217,11 +242,9 @@ func TestProjectRecordMountsRunCommandOutputOnParentTerminal(t *testing.T) {
 	}
 	output := projectRecord(controltaskstream.Record{
 		Cursor: "cursor-1", Generation: "generation-1", Sequence: 1, Task: taskDescriptor,
-		Frame: &sdkstream.Frame{
-			Ref: sdkstream.Ref{
-				SessionID: "session-1", TaskID: "task-1", TerminalID: "runtime-terminal-1",
-			},
-			Text: "line\n", Running: true, Cursor: sdkstream.Cursor{Output: 5},
+		Frame: &controltaskstream.Frame{
+			TerminalID: "runtime-terminal-1",
+			Text:       "line\n", Running: true,
 		},
 	})
 	if len(output) != 1 {
@@ -237,11 +260,9 @@ func TestProjectRecordMountsRunCommandOutputOnParentTerminal(t *testing.T) {
 	exitCode := 0
 	final := projectRecord(controltaskstream.Record{
 		Cursor: "cursor-2", Generation: "generation-1", Sequence: 2, Task: taskDescriptor,
-		Frame: &sdkstream.Frame{
-			Ref: sdkstream.Ref{
-				SessionID: "session-1", TaskID: "task-1", TerminalID: "runtime-terminal-1",
-			},
-			State: "completed", Closed: true, ExitCode: &exitCode, Cursor: sdkstream.Cursor{Output: 5},
+		Frame: &controltaskstream.Frame{
+			TerminalID: "runtime-terminal-1",
+			State:      "completed", Closed: true, ExitCode: &exitCode,
 		},
 	})
 	if len(final) != 1 {
@@ -264,9 +285,9 @@ func TestProjectRecordKeepsOneEnvelopePerCursorWhenEventCarriesUsage(t *testing.
 			State: task.StateRunning, Running: true,
 			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
 		},
-		Frame: &sdkstream.Frame{
-			Ref:    sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"},
-			Cursor: sdkstream.Cursor{Events: 1}, Running: true,
+		Frame: &controltaskstream.Frame{
+			TerminalID: "turn-1",
+			Running:    true,
 			Event: &session.Event{
 				ID: "child-event-1", Type: session.EventTypeAssistant,
 				Meta: map[string]any{"usage": map[string]any{
@@ -290,45 +311,11 @@ func TestProjectRecordKeepsOneEnvelopePerCursorWhenEventCarriesUsage(t *testing.
 	}
 }
 
-func TestProjectRecordMakesGapExplicitAndDropsEmptyOversizeMarker(t *testing.T) {
-	descriptor := controltaskstream.TaskDescriptor{
-		SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand, State: task.StateRunning,
-	}
-	gap := controltaskstream.Record{
-		Cursor: "cursor-1", Generation: "generation-1", Sequence: 1, Task: descriptor,
-		Gap: &controltaskstream.Gap{SessionID: "session-1", TaskID: "task-1", Kind: task.KindCommand, State: task.StateRunning},
-	}
-	projected := projectRecord(gap)
-	if len(projected) != 1 || projected[0].Kind != eventstream.KindNotice || projected[0].Cursor != "cursor-1" {
-		t.Fatalf("gap projection = %#v", projected)
-	}
-	if !IsTransientGapEnvelope(projected[0]) {
-		t.Fatalf("gap projection = %#v, want structured transient-gap identity", projected[0])
-	}
-	if IsTransientGapEnvelope(eventstream.Envelope{
-		Kind: eventstream.KindNotice,
-		Meta: map[string]any{"task_stream": map[string]any{"transient_gap": false}},
-	}) {
-		t.Fatal("ordinary Task notice was classified as a transient gap")
-	}
-
-	marker := controltaskstream.Record{
-		Cursor: "cursor-2", Generation: "generation-1", Sequence: 2, Task: descriptor,
-		Frame: &sdkstream.Frame{
-			Ref:     sdkstream.Ref{SessionID: "session-1", TaskID: "task-1"},
-			Running: true, Cursor: sdkstream.Cursor{Events: 1, Output: 5 * 1024 * 1024},
-		},
-	}
-	if projected := projectRecord(marker); len(projected) != 0 {
-		t.Fatalf("oversize marker projection = %#v, want no body envelope", projected)
-	}
-}
-
 func TestProtocolSubscriptionClosesControlSubscriptionWhenContextEnds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	inner := &closingControlTaskSubscription{
-		records: make(chan controltaskstream.Record),
-		closed:  make(chan struct{}),
+		deliveries: make(chan controltaskstream.Delivery),
+		closed:     make(chan struct{}),
 	}
 	sub := newSubscription(ctx, inner)
 	cancel()
@@ -339,7 +326,7 @@ func TestProtocolSubscriptionClosesControlSubscriptionWhenContextEnds(t *testing
 		t.Fatal("context cancellation did not close the Control Task subscription")
 	}
 	select {
-	case _, open := <-sub.Events():
+	case _, open := <-sub.Deliveries():
 		if open {
 			t.Fatal("protocol Task subscription remained open after context cancellation")
 		}
@@ -349,18 +336,19 @@ func TestProtocolSubscriptionClosesControlSubscriptionWhenContextEnds(t *testing
 }
 
 type closingControlTaskSubscription struct {
-	records chan controltaskstream.Record
-	closed  chan struct{}
-	once    sync.Once
+	deliveries chan controltaskstream.Delivery
+	closed     chan struct{}
+	once       sync.Once
 }
 
-func (s *closingControlTaskSubscription) Records() <-chan controltaskstream.Record { return s.records }
-func (*closingControlTaskSubscription) Err() error                                 { return nil }
-func (*closingControlTaskSubscription) LastCursor() string                         { return "" }
+func (s *closingControlTaskSubscription) Deliveries() <-chan controltaskstream.Delivery {
+	return s.deliveries
+}
+func (*closingControlTaskSubscription) Err() error { return nil }
 func (s *closingControlTaskSubscription) Close() error {
 	s.once.Do(func() {
 		close(s.closed)
-		close(s.records)
+		close(s.deliveries)
 	})
 	return nil
 }

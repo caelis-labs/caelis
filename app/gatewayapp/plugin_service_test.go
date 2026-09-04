@@ -619,7 +619,8 @@ func TestPluginServiceCommitsWhileTurnIsActiveWithoutReplacingRuntime(t *testing
 	defer handle.Handle.Close()
 	defer func() {
 		close(blocking.release)
-		for range handle.Handle.ACPEvents() {
+		if err := handle.Handle.WaitCompletion(t.Context()); err != nil {
+			t.Error(err)
 		}
 	}()
 

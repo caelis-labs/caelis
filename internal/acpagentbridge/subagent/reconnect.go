@@ -51,7 +51,7 @@ func (r *Runner) reconnectChildEndpointLocked(
 	run := &childRun{
 		anchor: anchor, agentName: strings.TrimSpace(cfg.Name),
 		configuredAuth: controlagents.NormalizeAuthentication(cfg.Authentication),
-		spawn:          spawn, taskID: strings.TrimSpace(anchor.TaskID), sink: spawn.Streams,
+		spawn:          spawn, taskID: strings.TrimSpace(anchor.TaskID), output: spawn.Output,
 		completion: spawn.Completion, state: delegation.StateCompleted,
 		updatedAt: r.clock(), done: done,
 	}
@@ -157,14 +157,6 @@ func (r *Runner) reconnectChildEndpointLocked(
 		childCancel()
 		_ = acpcleanup.CloseClient(ctx, acpClient)
 		return nil, err
-	}
-	slot.mu.Lock()
-	hasObserver := slot.observer != nil
-	slot.mu.Unlock()
-	if !hasObserver && recovery.Spawn.ActivityObserver != nil {
-		slot.bindObserver(recovery.Spawn.ActivityAfterCursor, recovery.Spawn.ActivityObserver)
-	} else if !hasObserver {
-		slot.bindObserver(0, compatibilityActivityObserver{run: run})
 	}
 	r.mu.Lock()
 	if r.runs == nil {

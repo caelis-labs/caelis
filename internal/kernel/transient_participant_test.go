@@ -40,7 +40,7 @@ func TestTransientParticipantFinishHookCanPublishError(t *testing.T) {
 	handle.finish()
 
 	var sawDetachFailure bool
-	for env := range handle.ACPEvents() {
+	for _, env := range testObservedTurnEvents(handle) {
 		if strings.Contains(env.Error, "detach failed") {
 			sawDetachFailure = true
 		}
@@ -119,6 +119,7 @@ func TestStartParticipantTransientDetachesWhenRuntimeReturnsNoHandle(t *testing.
 		t.Fatalf("StartSession() error = %v", err)
 	}
 
+	recorder := newTestTurnEventRecorder()
 	result, err := gw.StartParticipant(context.Background(), StartParticipantRequest{
 		BindingKey:   "surface-agent",
 		Agent:        "reviewer",
@@ -127,6 +128,7 @@ func TestStartParticipantTransientDetachesWhenRuntimeReturnsNoHandle(t *testing.
 		Source:       "slash_review",
 		Lifecycle:    ParticipantLifecycleTransient,
 		DetachSource: "side_agent_complete",
+		Observer:     recorder,
 	})
 	if err != nil {
 		t.Fatalf("StartParticipant(transient) error = %v", err)
@@ -134,7 +136,8 @@ func TestStartParticipantTransientDetachesWhenRuntimeReturnsNoHandle(t *testing.
 	if result.Handle == nil {
 		t.Fatal("StartParticipant(transient) handle = nil, want kernel wrapper handle")
 	}
-	for range result.Handle.ACPEvents() {
+	if err := result.Handle.WaitCompletion(context.Background()); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 	if rt.promptReq.ParticipantID != "participant-1" || rt.promptReq.Input != "inspect" {
 		t.Fatalf("promptReq = %+v, want participant prompt", rt.promptReq)
@@ -184,6 +187,7 @@ func TestStartParticipantTransientPublishesDetachFailure(t *testing.T) {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 
+	recorder := newTestTurnEventRecorder()
 	result, err := gw.StartParticipant(context.Background(), StartParticipantRequest{
 		BindingKey:   "surface-agent",
 		Agent:        "reviewer",
@@ -192,12 +196,14 @@ func TestStartParticipantTransientPublishesDetachFailure(t *testing.T) {
 		Source:       "slash_review",
 		Lifecycle:    ParticipantLifecycleTransient,
 		DetachSource: "side_agent_complete",
+		Observer:     recorder,
 	})
 	if err != nil {
 		t.Fatalf("StartParticipant(transient) error = %v", err)
 	}
+	_ = collectHandleEvents(t, result.Handle)
 	var sawDetachFailure bool
-	for env := range result.Handle.ACPEvents() {
+	for _, env := range recorder.snapshot() {
 		if strings.Contains(env.Error, "transient participant detach failed") &&
 			strings.Contains(env.Error, "store unavailable") {
 			sawDetachFailure = true
@@ -313,6 +319,7 @@ func TestStartParticipantTransientDetachesWhenRuntimePromptErrors(t *testing.T) 
 		t.Fatalf("StartSession() error = %v", err)
 	}
 
+	recorder := newTestTurnEventRecorder()
 	result, err := gw.StartParticipant(context.Background(), StartParticipantRequest{
 		BindingKey: "surface-agent",
 		Agent:      "copilot",
@@ -320,6 +327,7 @@ func TestStartParticipantTransientDetachesWhenRuntimePromptErrors(t *testing.T) 
 		Input:      "inspect",
 		Source:     "slash_copilot",
 		Lifecycle:  ParticipantLifecycleTransient,
+		Observer:   recorder,
 	})
 	if err != nil {
 		t.Fatalf("StartParticipant(transient) error = %v", err)
@@ -327,8 +335,9 @@ func TestStartParticipantTransientDetachesWhenRuntimePromptErrors(t *testing.T) 
 	if result.Handle == nil {
 		t.Fatal("StartParticipant(transient) handle = nil, want kernel wrapper handle")
 	}
+	_ = collectHandleEvents(t, result.Handle)
 	var sawPromptError bool
-	for env := range result.Handle.ACPEvents() {
+	for _, env := range recorder.snapshot() {
 		if strings.Contains(env.Error, "active run conflict") {
 			sawPromptError = true
 		}

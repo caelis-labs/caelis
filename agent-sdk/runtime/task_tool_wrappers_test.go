@@ -26,6 +26,33 @@ type recordingAgentInputSender struct {
 	requests []agent.AgentInput
 }
 
+type runtimeChildInputRunner struct {
+	mu          sync.Mutex
+	spawnResult delegation.Result
+	request     agent.ChildInputRequest
+}
+
+func (r *runtimeChildInputRunner) Spawn(_ context.Context, spawn agent.SubagentSpawnContext, _ delegation.Request) (delegation.Anchor, delegation.Result, error) {
+	return delegation.Anchor{
+		TaskID:    spawn.TaskID,
+		SessionID: "child-1",
+		AgentID:   spawn.TaskID,
+	}, delegation.CloneResult(r.spawnResult), nil
+}
+
+func (*runtimeChildInputRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
+	return delegation.Result{}, nil
+}
+
+func (*runtimeChildInputRunner) Cancel(context.Context, delegation.Anchor) error { return nil }
+
+func (r *runtimeChildInputRunner) SubmitChildInput(_ context.Context, req agent.ChildInputRequest) (agent.ChildInputResult, error) {
+	r.mu.Lock()
+	r.request = agent.CloneChildInputRequest(req)
+	r.mu.Unlock()
+	return agent.ChildInputResult{ActivityID: req.ActivityID, StartedActivity: true}, nil
+}
+
 type preRuntimeToolWrapper struct {
 	tool.Tool
 }

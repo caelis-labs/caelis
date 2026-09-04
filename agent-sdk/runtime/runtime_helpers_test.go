@@ -9,13 +9,10 @@ import (
 )
 
 func runnerError(handle agent.Runner) error {
-	var out error
-	for _, err := range handle.Events() {
-		if err != nil {
-			out = err
-		}
+	if handle == nil {
+		return nil
 	}
-	return out
+	return handle.WaitCompletion(context.Background())
 }
 
 type scriptedTestModel struct {

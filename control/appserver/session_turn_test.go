@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -18,15 +19,15 @@ func TestSessionTurnClientAttachesBeforePromptAndFiltersExactTarget(t *testing.T
 
 	target := TurnTarget{HandleID: "handle-current", RunID: "run-current", TurnID: "turn-current"}
 	between := eventstream.TurnCompleted("handle-old", "run-old", "turn-old", time.Now())
-	between.Cursor = "cursor-between"
 	between.SessionID = "session-1"
+	between = sessionTurnTestExactEnvelope(between, "cursor-between", 1)
 	current := sessionTurnTestMessage("session-1", target, "cursor-current", "done")
 	foreignTerminal := eventstream.TurnCompleted("handle-other", "run-other", "turn-other", time.Now())
-	foreignTerminal.Cursor = "cursor-foreign"
 	foreignTerminal.SessionID = "session-1"
+	foreignTerminal = sessionTurnTestExactEnvelope(foreignTerminal, "cursor-foreign", 2)
 	terminal := eventstream.TurnCompleted(target.HandleID, target.RunID, target.TurnID, time.Now())
-	terminal.Cursor = "cursor-terminal"
 	terminal.SessionID = "session-1"
+	terminal = sessionTurnTestExactEnvelope(terminal, "cursor-terminal", 3)
 
 	subscription := newSessionTurnTestSubscription(
 		[]eventstream.Envelope{between},
@@ -99,8 +100,53 @@ func TestSessionTurnClientAttachesBeforePromptAndFiltersExactTarget(t *testing.T
 	if err := turn.Err(); err != nil {
 		t.Fatalf("Turn Err() = %v", err)
 	}
-	if turn.LastCursor() != "cursor-terminal" {
-		t.Fatalf("LastCursor() = %q", turn.LastCursor())
+}
+
+func TestSessionTurnClientRejectsReplacementAfterTargetOutput(t *testing.T) {
+	t.Parallel()
+
+	target := TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
+	subscription := &sessionTurnTestSubscription{deliveries: make(chan FeedDelivery), stop: make(chan struct{})}
+	go func() {
+		defer close(subscription.deliveries)
+		message := sessionTurnTestMessage("session-1", target, "cursor-1", "prefix")
+		replacement := eventstream.CloneEnvelope(message)
+		replacement.Cursor = ""
+		replacement.Position = nil
+		if !subscription.send(FeedDelivery{Kind: FeedDeliverySync, Source: FeedSourceExact}) ||
+			!subscription.send(FeedDelivery{Kind: FeedDeliveryAppendPage, Source: FeedSourceExact, Events: []eventstream.Envelope{message}, NextCursor: message.Cursor}) ||
+			!subscription.send(FeedDelivery{Kind: FeedDeliveryReplaceBegin, Source: FeedSourceReplacement, SnapshotID: "replacement"}) ||
+			!subscription.send(FeedDelivery{Kind: FeedDeliveryReplacePage, Source: FeedSourceReplacement, SnapshotID: "replacement", Events: []eventstream.Envelope{replacement}}) {
+			return
+		}
+		_ = subscription.send(FeedDelivery{Kind: FeedDeliveryReplaceEnd, Source: FeedSourceReplacement, SnapshotID: "replacement", Page: 1})
+	}()
+	client := &sessionTurnTestClient{
+		inspectFn: func(context.Context, StateRequest) (SessionState, error) {
+			return SessionState{SessionID: "session-1", BoundaryCursor: "cursor-boundary"}, nil
+		},
+		reconnectFn: func(context.Context, ReconnectRequest) (ReconnectResult, error) {
+			return ReconnectResult{State: SessionState{SessionID: "session-1", Revision: 1}, Subscription: subscription}, nil
+		},
+		promptFn: func(_ context.Context, request PromptRequest) (CommandResult, error) {
+			return CommandResult{OperationID: request.OperationID, Outcome: OutcomeCommitted, SessionID: request.SessionID, Target: target}, nil
+		},
+	}
+	starter, err := NewSessionTurnClient(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := starter.Start(context.Background(), SessionTurnStartRequest{SessionID: "session-1", Input: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer turn.Close()
+	got := collectSessionTurnTestEvents(turn.Events())
+	if len(got) != 1 || got[0].Cursor != "cursor-1" {
+		t.Fatalf("events = %#v, want exact prefix only", got)
+	}
+	if !errorcode.Is(turn.Err(), errorcode.Conflict) {
+		t.Fatalf("Turn Err() = %v, want conflict", turn.Err())
 	}
 }
 
@@ -517,103 +563,6 @@ func TestSessionTurnClientReportsUnknownAdmissionWithoutTarget(t *testing.T) {
 	}
 }
 
-func TestSessionTurnClientRecoversGapFromLastAcceptedCursor(t *testing.T) {
-	t.Parallel()
-
-	target := TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
-	first := newSessionTurnTestSubscription(
-		nil,
-		[]eventstream.Envelope{
-			sessionTurnTestMessage("session-1", target, "cursor-1", "provisional"),
-		},
-		&FeedGapError{
-			Cause:        ErrSlowConsumer,
-			RetryCursor:  "cursor-1",
-			Mode:         ResumeModeDurableFallback,
-			TransientGap: true,
-		},
-	)
-	final := sessionTurnTestMessage("session-1", target, "cursor-2", "final")
-	final.Final = true
-	terminal := eventstream.TurnCompleted(target.HandleID, target.RunID, target.TurnID, time.Now())
-	terminal.SessionID = "session-1"
-	terminal.Cursor = "cursor-3"
-	second := newSessionTurnTestSubscription(
-		[]eventstream.Envelope{final, terminal},
-		nil,
-		nil,
-	)
-
-	var reconnectMu sync.Mutex
-	var reconnects []ReconnectRequest
-	client := &sessionTurnTestClient{
-		inspectFn: func(context.Context, StateRequest) (SessionState, error) {
-			return SessionState{
-				SessionID:      "session-1",
-				BoundaryCursor: "cursor-boundary",
-			}, nil
-		},
-		reconnectFn: func(_ context.Context, request ReconnectRequest) (ReconnectResult, error) {
-			reconnectMu.Lock()
-			reconnects = append(reconnects, request)
-			call := len(reconnects)
-			reconnectMu.Unlock()
-			switch call {
-			case 1:
-				return ReconnectResult{
-					State:        SessionState{SessionID: "session-1", Revision: 1},
-					Subscription: first,
-				}, nil
-			case 2:
-				return ReconnectResult{
-					State:        SessionState{SessionID: "session-1", Revision: 2},
-					Subscription: second,
-				}, nil
-			default:
-				return ReconnectResult{}, errors.New("unexpected reconnect")
-			}
-		},
-		promptFn: func(_ context.Context, request PromptRequest) (CommandResult, error) {
-			return CommandResult{
-				OperationID: request.OperationID,
-				Outcome:     OutcomeCommitted,
-				SessionID:   request.SessionID,
-				Target:      target,
-			}, nil
-		},
-	}
-	starter, err := NewSessionTurnClient(client)
-	if err != nil {
-		t.Fatal(err)
-	}
-	turn, err := starter.Start(context.Background(), SessionTurnStartRequest{
-		SessionID: "session-1",
-		Input:     "hello",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer turn.Close()
-
-	got := collectSessionTurnTestEvents(turn.Events())
-	if len(got) != 3 ||
-		got[0].Cursor != "cursor-1" ||
-		got[1].Cursor != "cursor-2" ||
-		got[2].Cursor != "cursor-3" {
-		t.Fatalf("recovered events = %#v", got)
-	}
-	if err := turn.Err(); err != nil {
-		t.Fatalf("Turn Err() = %v", err)
-	}
-	reconnectMu.Lock()
-	defer reconnectMu.Unlock()
-	if len(reconnects) != 2 ||
-		reconnects[0].Cursor != "cursor-boundary" ||
-		reconnects[1].Cursor != "cursor-1" {
-		t.Fatalf("Reconnect requests = %#v", reconnects)
-	}
-}
-
 func TestSessionTurnClientRoutesApprovalAndCancelWithoutClosingSession(t *testing.T) {
 	t.Parallel()
 
@@ -726,19 +675,27 @@ func sessionTurnTestMessage(
 	cursor string,
 	text string,
 ) eventstream.Envelope {
-	return eventstream.Envelope{
+	return sessionTurnTestExactEnvelope(eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: sessionID,
 		HandleID:  target.HandleID,
 		RunID:     target.RunID,
 		TurnID:    target.TurnID,
 		Scope:     eventstream.ScopeMain,
-		Cursor:    cursor,
 		Update: eventstream.ContentChunk{
 			SessionUpdate: eventstream.UpdateAgentMessage,
 			Content:       eventstream.TextContent{Type: "text", Text: text},
 		},
-	}
+	}, cursor, 1)
+}
+
+func sessionTurnTestExactEnvelope(envelope eventstream.Envelope, cursor string, sequence uint64) eventstream.Envelope {
+	envelope.Cursor = cursor
+	envelope.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+	envelope.Position = &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
+		Generation: "session-turn-test", Sequence: sequence,
+	}}
+	return envelope
 }
 
 func collectSessionTurnTestEvents(events <-chan eventstream.Envelope) []eventstream.Envelope {
@@ -845,15 +802,12 @@ func (c *sessionTurnTestClient) ResolveApproval(ctx context.Context, request Res
 }
 
 type sessionTurnTestSubscription struct {
-	backfill     chan eventstream.Envelope
-	events       chan eventstream.Envelope
-	backfillDone chan struct{}
-	stop         chan struct{}
+	deliveries chan FeedDelivery
+	stop       chan struct{}
 
 	closeOnce sync.Once
 	mu        sync.RWMutex
 	err       error
-	last      string
 }
 
 func newSessionTurnTestSubscription(
@@ -862,72 +816,70 @@ func newSessionTurnTestSubscription(
 	err error,
 ) *sessionTurnTestSubscription {
 	subscription := &sessionTurnTestSubscription{
-		backfill:     make(chan eventstream.Envelope),
-		events:       make(chan eventstream.Envelope),
-		backfillDone: make(chan struct{}),
-		stop:         make(chan struct{}),
-		err:          err,
+		deliveries: make(chan FeedDelivery),
+		stop:       make(chan struct{}),
+		err:        err,
 	}
 	go subscription.deliver(backfill, events)
 	return subscription
 }
 
 func newOpenSessionTurnTestSubscription() *sessionTurnTestSubscription {
-	backfill := make(chan eventstream.Envelope)
-	close(backfill)
-	backfillDone := make(chan struct{})
-	close(backfillDone)
-	return &sessionTurnTestSubscription{
-		backfill:     backfill,
-		events:       make(chan eventstream.Envelope),
-		backfillDone: backfillDone,
-		stop:         make(chan struct{}),
-	}
+	subscription := &sessionTurnTestSubscription{deliveries: make(chan FeedDelivery), stop: make(chan struct{})}
+	go func() {
+		select {
+		case <-subscription.stop:
+			close(subscription.deliveries)
+		case subscription.deliveries <- FeedDelivery{Kind: FeedDeliverySync, Source: FeedSourceExact}:
+			<-subscription.stop
+			close(subscription.deliveries)
+		}
+	}()
+	return subscription
 }
 
 func (s *sessionTurnTestSubscription) deliver(
 	backfill []eventstream.Envelope,
 	events []eventstream.Envelope,
 ) {
-	defer close(s.events)
-	for _, envelope := range backfill {
-		select {
-		case <-s.stop:
-			close(s.backfill)
-			close(s.backfillDone)
+	defer close(s.deliveries)
+	if len(backfill) > 0 {
+		backfill = cloneEnvelopes(backfill)
+		for index := range backfill {
+			backfill[index].Cursor = ""
+			backfill[index].Position = nil
+		}
+		if !s.send(FeedDelivery{Kind: FeedDeliveryReplaceBegin, Source: FeedSourceReplacement, SnapshotID: "test-snapshot"}) {
 			return
-		case s.backfill <- envelope:
-			s.record(envelope.Cursor)
+		}
+		if !s.send(FeedDelivery{Kind: FeedDeliveryReplacePage, Source: FeedSourceReplacement, SnapshotID: "test-snapshot", Events: backfill}) {
+			return
+		}
+		if !s.send(FeedDelivery{Kind: FeedDeliveryReplaceEnd, Source: FeedSourceReplacement, SnapshotID: "test-snapshot", Page: 1}) {
+			return
 		}
 	}
-	close(s.backfill)
-	close(s.backfillDone)
+	if !s.send(FeedDelivery{Kind: FeedDeliverySync, Source: FeedSourceExact}) {
+		return
+	}
 	for _, envelope := range events {
-		select {
-		case <-s.stop:
+		if !s.send(FeedDelivery{Kind: FeedDeliveryAppendPage, Source: FeedSourceExact, Events: []eventstream.Envelope{envelope}, NextCursor: envelope.Cursor}) {
 			return
-		case s.events <- envelope:
-			s.record(envelope.Cursor)
 		}
 	}
 }
 
-func (s *sessionTurnTestSubscription) record(cursor string) {
-	s.mu.Lock()
-	s.last = cursor
-	s.mu.Unlock()
+func (s *sessionTurnTestSubscription) send(delivery FeedDelivery) bool {
+	select {
+	case <-s.stop:
+		return false
+	case s.deliveries <- delivery:
+		return true
+	}
 }
 
-func (s *sessionTurnTestSubscription) Backfill() <-chan eventstream.Envelope {
-	return s.backfill
-}
-
-func (s *sessionTurnTestSubscription) Events() <-chan eventstream.Envelope {
-	return s.events
-}
-
-func (s *sessionTurnTestSubscription) BackfillDone() <-chan struct{} {
-	return s.backfillDone
+func (s *sessionTurnTestSubscription) Deliveries() <-chan FeedDelivery {
+	return s.deliveries
 }
 
 func (s *sessionTurnTestSubscription) Close() error {
@@ -939,12 +891,6 @@ func (s *sessionTurnTestSubscription) Err() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.err
-}
-
-func (s *sessionTurnTestSubscription) LastCursor() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.last
 }
 
 var _ SessionClient = (*sessionTurnTestClient)(nil)

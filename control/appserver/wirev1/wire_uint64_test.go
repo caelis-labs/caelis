@@ -217,7 +217,7 @@ func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
 
 			state := appserver.SessionState{
 				ProtocolVersion: 1, EnvelopeVersion: appserver.EnvelopeVersion, APIVersion: appserver.HTTPAPIVersion,
-				SessionID: "session-1", Revision: value, ResumeMode: appserver.ResumeModeExact,
+				SessionID: "session-1", Revision: value,
 				BoundaryPosition: &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
 					Anchor: eventstream.DurableFeedPosition{Seq: value}, Generation: "generation-1", Sequence: value,
 				}},

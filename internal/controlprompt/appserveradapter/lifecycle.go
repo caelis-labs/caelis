@@ -179,18 +179,13 @@ func (a *SessionClientAdapter) replaceSessionPresence(next *sessionPresence) {
 func (p *sessionPresence) drain(ctx context.Context) {
 	defer close(p.done)
 	defer p.subscription.Close()
-	for _, events := range []<-chan eventstream.Envelope{
-		p.subscription.Backfill(),
-		p.subscription.Events(),
-	} {
-		for events != nil {
-			select {
-			case <-ctx.Done():
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, open := <-p.subscription.Deliveries():
+			if !open {
 				return
-			case _, open := <-events:
-				if !open {
-					events = nil
-				}
 			}
 		}
 	}
@@ -275,25 +270,13 @@ func (r *clientSessionReconnect) State() appserver.SessionState {
 func (r *clientSessionReconnect) HandleID() string { return strings.TrimSpace(r.state.Run.HandleID) }
 func (r *clientSessionReconnect) RunID() string    { return strings.TrimSpace(r.state.Run.RunID) }
 func (r *clientSessionReconnect) TurnID() string   { return strings.TrimSpace(r.state.Run.TurnID) }
-func (r *clientSessionReconnect) Backfill() <-chan eventstream.Envelope {
+func (r *clientSessionReconnect) Deliveries() <-chan appserver.FeedDelivery {
 	if r == nil || r.subscription == nil {
-		return closedEnvelopeChannel()
+		closed := make(chan appserver.FeedDelivery)
+		close(closed)
+		return closed
 	}
-	return r.subscription.Backfill()
-}
-func (r *clientSessionReconnect) BackfillDone() <-chan struct{} {
-	if r == nil || r.subscription == nil {
-		done := make(chan struct{})
-		close(done)
-		return done
-	}
-	return r.subscription.BackfillDone()
-}
-func (r *clientSessionReconnect) Events() <-chan eventstream.Envelope {
-	if r == nil || r.subscription == nil {
-		return closedEnvelopeChannel()
-	}
-	return r.subscription.Events()
+	return r.subscription.Deliveries()
 }
 func (r *clientSessionReconnect) Err() error {
 	if r == nil || r.subscription == nil {

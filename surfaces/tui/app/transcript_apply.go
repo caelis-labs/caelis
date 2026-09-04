@@ -23,8 +23,6 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 		subagentOutputChanged = m.observeSubagentOutputEvents(one) || subagentOutputChanged
 		m.decorateAgentMessageDisplayTargets(one)
 	}
-	// Mount/update transcript owners before applying the correlated repairs;
-	// exact owner resolution intentionally fails closed without a BlockID.
 	model, transcriptCmd := m.applyTranscriptEvents(msg.Events)
 	if next, ok := model.(*Model); ok {
 		m = next
@@ -32,10 +30,7 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	if msg.ReconnectReplay {
 		m.seedReconnectReplayExploration()
 	}
-	observedSpawnCmd := m.applyObservedSpawnResults(msg.OwnerRepairs.Spawns)
-	m.applyObservedCommandResults(msg.OwnerRepairs.Commands)
-	// Spawn views, including terminal owner repairs projected from Task
-	// observations, drive child subscription lifetime. The Task invocation does
+	// Spawn views drive child subscription lifetime. The Task invocation does
 	// not own or redirect that stream.
 	m.reconcileSubagentOutputTaskStreams()
 	var subagentOutputCmd, subagentDirectoryCmd tea.Cmd
@@ -43,7 +38,7 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 		subagentOutputCmd = m.requestSubagentOutputRender()
 		subagentDirectoryCmd = m.ensureSubagentDirectoryWatch()
 	}
-	return m, tea.Batch(transcriptCmd, observedSpawnCmd, subagentOutputCmd, subagentDirectoryCmd, m.resumeRunningAnimationIfNeeded())
+	return m, tea.Batch(transcriptCmd, subagentOutputCmd, subagentDirectoryCmd, m.resumeRunningAnimationIfNeeded())
 }
 
 func (m *Model) decorateAgentMessageDisplayTargets(events []TranscriptEvent) []TranscriptEvent {
@@ -723,25 +718,20 @@ func transcriptParticipantTurnKey(event TranscriptEvent) string {
 
 func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 	return ToolUpdateMeta{
-		TaskHandle:             event.ToolTaskHandle,
-		TaskAction:             event.ToolTaskAction,
-		TaskInput:              event.ToolTaskInput,
-		TaskTargetKind:         event.ToolTaskTargetKind,
-		MessageTarget:          event.ToolMessageTarget,
-		ToolKind:               event.ToolKind,
-		ToolTitle:              event.ToolTitle,
-		ExplorationVerb:        event.ToolExplorationVerb,
-		FullArgs:               event.ToolFullArgs,
-		ToolStatus:             event.ToolStatus,
-		ToolStatusExplicit:     event.ToolStatusExplicit,
-		Terminal:               event.ToolTerminal,
-		OutputSynthetic:        event.ToolOutputSynthetic,
-		OutputCollection:       event.ToolOutputCollection,
-		OutputTerminal:         event.ToolOutputTerminal,
-		OutputGapBefore:        event.ToolOutputGapBefore,
-		OutputCursor:           event.ToolOutputCursor,
-		OutputCursorKnown:      event.ToolOutputCursorKnown,
-		OutputStartCursor:      event.ToolOutputStartCursor,
-		OutputStartCursorKnown: event.ToolOutputStartCursorKnown,
+		TaskHandle:         event.ToolTaskHandle,
+		TaskAction:         event.ToolTaskAction,
+		TaskInput:          event.ToolTaskInput,
+		TaskTargetKind:     event.ToolTaskTargetKind,
+		MessageTarget:      event.ToolMessageTarget,
+		ToolKind:           event.ToolKind,
+		ToolTitle:          event.ToolTitle,
+		ExplorationVerb:    event.ToolExplorationVerb,
+		FullArgs:           event.ToolFullArgs,
+		ToolStatus:         event.ToolStatus,
+		ToolStatusExplicit: event.ToolStatusExplicit,
+		Terminal:           event.ToolTerminal,
+		OutputSynthetic:    event.ToolOutputSynthetic,
+		OutputCollection:   event.ToolOutputCollection,
+		OutputTerminal:     event.ToolOutputTerminal,
 	}
 }

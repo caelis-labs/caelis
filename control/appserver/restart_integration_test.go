@@ -80,10 +80,7 @@ func TestProcessRestartRebuildsDurableClientStateFromSessionTruth(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeds, err := NewFeedRegistry(FeedRegistryConfig{Reader: afterRestart, CursorCodec: codec})
-	if err != nil {
-		t.Fatal(err)
-	}
+	feeds := newTestFeedRegistry(t, FeedRegistryConfig{Reader: afterRestart, CursorCodec: codec})
 	stateService, err := NewStateService(StateServiceConfig{Sessions: afterRestart, Runtime: staticRuntimeStateReader{}, Feeds: feeds})
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +101,7 @@ func TestProcessRestartRebuildsDurableClientStateFromSessionTruth(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer replayed.Subscription.Close()
-	events := receiveEnvelopes(t, replayed.Subscription.Backfill(), 2)
+	events := receiveFeedEvents(t, replayed.Subscription, 2)
 	if events[0].Delivery == nil || events[0].Delivery.Mode != eventstream.DeliveryCanonical ||
 		events[1].Delivery == nil || events[1].Delivery.Mode != eventstream.DeliveryMirror || events[1].Kind != eventstream.KindParticipant {
 		t.Fatalf("restart durable replay = %#v", events)

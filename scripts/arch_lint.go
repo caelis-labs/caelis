@@ -828,7 +828,7 @@ func deletedSDKImplPaths() []deletedSDKImplPath {
 	paths = append(paths,
 		deletedSDKImplPath{prefix: "impl/policy", sdk: "agent-sdk/policy"},
 		deletedSDKImplPath{prefix: "impl/session", sdk: "agent-sdk/session"},
-		deletedSDKImplPath{prefix: "impl/stream", sdk: "agent-sdk/task/stream"},
+		deletedSDKImplPath{prefix: "impl/stream", sdk: "agent-sdk/task/output"},
 		deletedSDKImplPath{prefix: "impl/sandbox", sdk: "agent-sdk/sandbox"},
 		deletedSDKImplPath{prefix: "impl/tool", sdk: "agent-sdk/tool"},
 	)
@@ -1184,7 +1184,7 @@ func sdkOwnedPortsImportMessage(target string) string {
 		{"ports/sandbox", "agent-sdk/sandbox"},
 		{"ports/session", "agent-sdk/session"},
 		{"ports/policy", "agent-sdk/policy"},
-		{"ports/stream", "agent-sdk/task/stream"},
+		{"ports/stream", "agent-sdk/task/output"},
 		{"ports/agent", "agent-sdk"},
 		{"ports/model", "agent-sdk/model"},
 		{"ports/tool", "agent-sdk/tool"},

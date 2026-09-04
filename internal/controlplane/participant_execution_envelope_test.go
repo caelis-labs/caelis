@@ -3,7 +3,6 @@ package controlplane
 import (
 	"context"
 	"errors"
-	"iter"
 	"sync"
 	"testing"
 
@@ -11,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
 func TestParticipantPromptUsesSessionFenceWithoutOrchestrationWatchdog(t *testing.T) {
@@ -25,16 +23,13 @@ func TestParticipantPromptUsesSessionFenceWithoutOrchestrationWatchdog(t *testin
 		t.Fatal(err)
 	}
 	mainRunner := newFenceTestRunner("main-run")
-	inner := &participantEnvelopeRuntime{sessions: service, mainRunner: mainRunner, streams: &participantStreamService{}}
+	inner := &participantEnvelopeRuntime{sessions: service, mainRunner: mainRunner}
 	ownerA := newParticipantEnvelopeRuntime(t, inner, service, "host-a")
 	ownerB := newParticipantEnvelopeRuntime(t, inner, service, "host-b")
 
 	mainRun, err := ownerA.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if ownerA.Streams() != inner.streams {
-		t.Fatal("decorated Streams() did not preserve the underlying stream service")
 	}
 	attached, err := ownerA.AttachLiveRun(context.Background(), agent.AttachLiveRunRequest{SessionRef: active.SessionRef, RunID: mainRunner.RunID()})
 	if err != nil {
@@ -113,21 +108,10 @@ type participantEnvelopeRuntime struct {
 	promptCalls       int
 	promptGuard       session.MutationGuard
 	participantRunner *fenceTestRunner
-	streams           stream.Service
 	approvals         int
 }
 
 func (*participantEnvelopeRuntime) RunnerCompletionWaiterGuaranteed() {}
-
-type participantStreamService struct{}
-
-func (*participantStreamService) Read(context.Context, stream.ReadRequest) (stream.Snapshot, error) {
-	return stream.Snapshot{}, nil
-}
-
-func (*participantStreamService) Subscribe(context.Context, stream.SubscribeRequest) iter.Seq2[*stream.Frame, error] {
-	return func(func(*stream.Frame, error) bool) {}
-}
 
 func (r *participantEnvelopeRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
 	return agent.RunResult{Handle: r.mainRunner}, nil
@@ -136,8 +120,6 @@ func (r *participantEnvelopeRuntime) Run(context.Context, agent.RunRequest) (age
 func (*participantEnvelopeRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
 	return agent.RunState{}, nil
 }
-
-func (r *participantEnvelopeRuntime) Streams() stream.Service { return r.streams }
 
 func (r *participantEnvelopeRuntime) AttachLiveRun(context.Context, agent.AttachLiveRunRequest) (agent.RunResult, error) {
 	return agent.RunResult{Handle: r.mainRunner}, nil

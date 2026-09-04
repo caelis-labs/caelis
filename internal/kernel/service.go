@@ -6,7 +6,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 )
 
 type Service interface {
@@ -39,8 +39,8 @@ type ControlPlaneService interface {
 	DetachParticipant(context.Context, DetachParticipantRequest) (session.Session, error)
 }
 
-type StreamProvider interface {
-	Streams() stream.Service
+type TerminalProvider interface {
+	Terminals() terminal.Controller
 }
 
 type TurnResolver interface {
