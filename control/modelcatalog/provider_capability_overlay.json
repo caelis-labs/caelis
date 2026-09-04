@@ -57,13 +57,13 @@
   "deepseek:deepseek-v4-flash": {
     "reasoning": true,
     "reasoning_mode": "toggle",
-    "reasoning_efforts": ["high", "max"],
+    "reasoning_efforts": ["low", "high", "max"],
     "default_reasoning_effort": "high"
   },
   "deepseek:deepseek-v4-pro": {
     "reasoning": true,
     "reasoning_mode": "toggle",
-    "reasoning_efforts": ["high", "max"],
+    "reasoning_efforts": ["low", "high", "max"],
     "default_reasoning_effort": "high"
   },
   "xiaomi:mimo-v2.5-pro": {

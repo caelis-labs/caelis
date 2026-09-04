@@ -107,7 +107,7 @@ func TestAssembleConnectBuildsCompleteKnownModelConfig(t *testing.T) {
 	if cfg.ReasoningMode != modelcatalog.ReasoningModeToggle || cfg.ReasoningEffort != "high" || cfg.DefaultReasoningEffort != "high" {
 		t.Fatalf("assembled reasoning = mode:%q effort:%q default:%q", cfg.ReasoningMode, cfg.ReasoningEffort, cfg.DefaultReasoningEffort)
 	}
-	if !slices.Equal(cfg.ReasoningLevels, []string{"none", "high", "max"}) {
+	if !slices.Equal(cfg.ReasoningLevels, []string{"none", "low", "high", "max"}) {
 		t.Fatalf("assembled reasoning levels = %#v", cfg.ReasoningLevels)
 	}
 }
@@ -178,7 +178,7 @@ func TestSelectableOllamaModelsUsesStaticCloudCatalogWithoutRemoteDiscovery(t *t
 	if err != nil {
 		t.Fatalf("selectableOllamaModels() error = %v", err)
 	}
-	want := []string{"glm-5.2", "minimax-m3", "kimi-k3", "deepseek-v4-flash", "deepseek-v4-pro"}
+	want := []string{"glm-5.3", "glm-5.3-flash", "minimax-m3", "kimi-k3", "kimi-k2.7-code", "deepseek-v4-flash", "deepseek-v4-pro"}
 	if requests != 0 || !slices.Equal(selectableModelNames(models), want) {
 		t.Fatalf("selectableOllamaModels() requests/models = %d/%#v, want static %#v", requests, models, want)
 	}
@@ -506,14 +506,14 @@ func TestMaintainedSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) 
 	if err != nil {
 		t.Fatalf("MaintainedSelectableModels(codex) error = %v", err)
 	}
-	if !selectableModelNamesContain(models, "gpt-5.5") || !selectableModelNamesContain(models, "gpt-5.6-sol") || !selectableModelNamesContain(models, "gpt-5.4") || !selectableModelNamesContain(models, "gpt-5.4-mini") || !selectableModelNamesContain(models, "gpt-5.3-codex-spark") {
+	if !selectableModelNamesContain(models, "gpt-5.5") || !selectableModelNamesContain(models, "gpt-5.6-sol") {
 		t.Fatalf("codex selectable models = %#v", models)
 	}
-	wantOrder := []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"}
+	wantOrder := []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"}
 	if got := selectableModelNames(models); !slices.Equal(got, wantOrder) {
 		t.Fatalf("codex selectable model order = %#v, want %#v", got, wantOrder)
 	}
-	if selectableModelNamesContain(models, "gpt-5.2") || selectableModelNamesContain(models, "gpt-5.5-pro") || selectableModelNamesContain(models, "gpt-5.6") || selectableModelNamesContain(models, "gpt-5.7-unknown") || selectableModelNamesContain(models, "gpt-5.5-instant") {
+	if selectableModelNamesContain(models, "gpt-6-astra") || selectableModelNamesContain(models, "gpt-5.4") || selectableModelNamesContain(models, "gpt-5.4-mini") || selectableModelNamesContain(models, "gpt-5.3-codex-spark") || selectableModelNamesContain(models, "gpt-5.2") || selectableModelNamesContain(models, "gpt-5.5-pro") || selectableModelNamesContain(models, "gpt-5.6") || selectableModelNamesContain(models, "gpt-5.7-unknown") || selectableModelNamesContain(models, "gpt-5.5-instant") {
 		t.Fatalf("codex selectable models include disallowed entries = %#v", models)
 	}
 	for _, item := range models {
@@ -521,7 +521,7 @@ func TestMaintainedSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) 
 			t.Fatalf("codex selectable model requires unnecessary advanced setup = %#v", item)
 		}
 	}
-	if isCodexOAuthModel("gpt-5.7-pro") || isCodexOAuthModel("gpt-5.7-sol") || !isCodexOAuthModel("gpt-5.6-sol") || !isCodexOAuthModel("gpt-5.3-codex-spark") {
+	if isCodexOAuthModel("gpt-5.7-pro") || isCodexOAuthModel("gpt-5.7-sol") || !isCodexOAuthModel("gpt-6-astra") || !isCodexOAuthModel("gpt-5.6-sol") || !isCodexOAuthModel("gpt-5.3-codex-spark") {
 		t.Fatalf("codex model allowlist accepted an unknown model or rejected a maintained one")
 	}
 }
@@ -535,6 +535,7 @@ func TestResolveCodexOAuthModelDefaultsUseCodexCatalogMetadata(t *testing.T) {
 		defaultEffort  string
 		reasoningLevel []string
 	}{
+		{name: "gpt-6-astra", context: codexOAuthEffectiveContextWindowTokens, defaultEffort: "low", reasoningLevel: []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
 		{name: "gpt-5.6-sol", context: codexOAuthEffectiveContextWindowTokens, defaultEffort: "low", reasoningLevel: []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
 		{name: "gpt-5.6-luna", context: codexOAuthEffectiveContextWindowTokens, defaultEffort: "medium", reasoningLevel: []string{"low", "medium", "high", "xhigh", "max"}},
 		{name: "gpt-5.5", context: 272000, defaultEffort: "medium", reasoningLevel: []string{"low", "medium", "high", "xhigh"}},

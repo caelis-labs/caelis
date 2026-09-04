@@ -52,6 +52,147 @@ func TestAnthropicBuildRequestIncludesStructuredOutputFormat(t *testing.T) {
 	}
 }
 
+func TestAnthropicBuildRequestUsesAdaptiveThinkingForSupportedModels(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		provider string
+		model    string
+	}{
+		{name: "current Claude 5", provider: "anthropic", model: "claude-sonnet-5"},
+		{name: "legacy Claude 4", provider: "anthropic", model: "claude-opus-4-8"},
+		{name: "compatible endpoint", provider: "anthropic-compatible", model: "claude-fable-5-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			llm := newAnthropic(Config{
+				Provider: tc.provider,
+				Model:    tc.model,
+				Auth: AuthConfig{
+					Type:  AuthAPIKey,
+					Token: "anthropic-token",
+				},
+			}, "anthropic-token").(*anthropicSDKLLM)
+
+			params, err := llm.buildRequest(&model.Request{
+				Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "reason carefully")},
+				Reasoning: model.ReasoningConfig{Effort: "high"},
+				Output:    &model.OutputSpec{MaxOutputTokens: 512},
+			})
+			if err != nil {
+				t.Fatalf("buildRequest() error = %v", err)
+			}
+
+			payload := marshalAnthropicParamsForTest(t, params)
+			thinking := nestedMapForTest(t, payload, "thinking")
+			if got := thinking["type"]; got != "adaptive" {
+				t.Fatalf("thinking.type = %#v, want adaptive", got)
+			}
+			if _, ok := thinking["budget_tokens"]; ok {
+				t.Fatalf("thinking = %#v, did not want a manual budget", thinking)
+			}
+			outputConfig := nestedMapForTest(t, payload, "output_config")
+			if got := outputConfig["effort"]; got != "high" {
+				t.Fatalf("output_config.effort = %#v, want high", got)
+			}
+			if got := payload["max_tokens"]; got != float64(512) {
+				t.Fatalf("max_tokens = %#v, want unchanged adaptive-thinking output limit", got)
+			}
+		})
+	}
+}
+
+func TestMiniMaxM3BuildRequestUsesAdaptiveThinkingWithoutEffort(t *testing.T) {
+	llm := newMiniMax(Config{Provider: "minimax", Model: "MiniMax-M3"}, "minimax-token").(*anthropicSDKLLM)
+
+	params, err := llm.buildRequest(&model.Request{
+		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "reason carefully")},
+		Reasoning: model.ReasoningConfig{Effort: "high"},
+		Output:    &model.OutputSpec{MaxOutputTokens: 512},
+	})
+	if err != nil {
+		t.Fatalf("buildRequest() error = %v", err)
+	}
+
+	payload := marshalAnthropicParamsForTest(t, params)
+	thinking := nestedMapForTest(t, payload, "thinking")
+	if got := thinking["type"]; got != "adaptive" {
+		t.Fatalf("thinking.type = %#v, want adaptive", got)
+	}
+	if _, ok := thinking["budget_tokens"]; ok {
+		t.Fatalf("thinking = %#v, did not want a manual budget", thinking)
+	}
+	if raw, ok := payload["output_config"]; ok {
+		outputConfig, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("output_config = %#v, want map when present", raw)
+		}
+		if _, ok := outputConfig["effort"]; ok {
+			t.Fatalf("output_config = %#v, did not want an Anthropic effort", outputConfig)
+		}
+	}
+	if got := payload["max_tokens"]; got != float64(512) {
+		t.Fatalf("max_tokens = %#v, want unchanged adaptive-thinking output limit", got)
+	}
+}
+
+func TestMiniMaxM3BuildRequestCanDisableThinking(t *testing.T) {
+	llm := newMiniMax(Config{Provider: "minimax", Model: "MiniMax-M3"}, "minimax-token").(*anthropicSDKLLM)
+
+	params, err := llm.buildRequest(&model.Request{
+		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "answer directly")},
+		Reasoning: model.ReasoningConfig{Effort: "none"},
+	})
+	if err != nil {
+		t.Fatalf("buildRequest() error = %v", err)
+	}
+
+	thinking := nestedMapForTest(t, marshalAnthropicParamsForTest(t, params), "thinking")
+	if got := thinking["type"]; got != "disabled" {
+		t.Fatalf("thinking.type = %#v, want disabled", got)
+	}
+}
+
+func TestMiniMaxM2BuildRequestKeepsManualThinkingBudget(t *testing.T) {
+	llm := newMiniMax(Config{Provider: "minimax", Model: "MiniMax-M2.7"}, "minimax-token").(*anthropicSDKLLM)
+
+	params, err := llm.buildRequest(&model.Request{
+		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "reason carefully")},
+		Reasoning: model.ReasoningConfig{Effort: "high"},
+		Output:    &model.OutputSpec{MaxOutputTokens: 512},
+	})
+	if err != nil {
+		t.Fatalf("buildRequest() error = %v", err)
+	}
+
+	payload := marshalAnthropicParamsForTest(t, params)
+	thinking := nestedMapForTest(t, payload, "thinking")
+	if got := thinking["type"]; got != "enabled" {
+		t.Fatalf("thinking.type = %#v, want enabled", got)
+	}
+	if got := thinking["budget_tokens"]; got != float64(8192) {
+		t.Fatalf("thinking.budget_tokens = %#v, want high budget", got)
+	}
+	if got := payload["max_tokens"]; got != float64(8193) {
+		t.Fatalf("max_tokens = %#v, want budget+1", got)
+	}
+}
+
+func TestAnthropicBuildRequestKeepsThinkingOnForLegacyFable(t *testing.T) {
+	llm := newAnthropic(Config{Provider: "anthropic", Model: "claude-fable-5"}, "anthropic-token").(*anthropicSDKLLM)
+
+	params, err := llm.buildRequest(&model.Request{
+		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "answer briefly")},
+		Reasoning: model.ReasoningConfig{Effort: "none"},
+	})
+	if err != nil {
+		t.Fatalf("buildRequest() error = %v", err)
+	}
+
+	thinking := nestedMapForTest(t, marshalAnthropicParamsForTest(t, params), "thinking")
+	if got := thinking["type"]; got != "adaptive" {
+		t.Fatalf("thinking.type = %#v, want always-on adaptive thinking", got)
+	}
+}
+
 func TestAnthropicBuildRequestUsesObjectSchemaForJSONMode(t *testing.T) {
 	llm := newAnthropic(Config{
 		Provider: "anthropic",

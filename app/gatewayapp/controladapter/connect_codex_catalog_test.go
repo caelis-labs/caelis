@@ -24,26 +24,30 @@ func TestCodexConnectCompletionUsesMaintainedCatalogWithoutAuthentication(t *tes
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-model:codex) error = %v", err)
 	}
-	for _, name := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"} {
+	for _, name := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"} {
 		if !slashCandidatesHaveValue(models, name) {
 			t.Fatalf("Codex model candidates = %#v, missing %q", models, name)
 		}
 	}
-	if slashCandidatesHaveValue(models, "gpt-5.2") {
-		t.Fatalf("Codex account model candidates retained retired 5.2 = %#v", models)
+	for _, hidden := range []string{"gpt-6-astra", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark", "gpt-5.2"} {
+		if slashCandidatesHaveValue(models, hidden) {
+			t.Fatalf("Codex account model candidates retained hidden %q = %#v", hidden, models)
+		}
 	}
-	wantOrder := []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"}
+	wantOrder := []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"}
 	if got := slashCandidateValues(models); !slices.Equal(got, wantOrder) {
 		t.Fatalf("Codex account model candidate order = %#v, want %#v", got, wantOrder)
 	}
 
-	state.Model = "gpt-5.6-sol"
-	contexts, err := driver.CompleteSlashArg(ctx, "connect-context:"+state.EncodeCompletionState(), "", 10)
-	if err != nil {
-		t.Fatalf("CompleteSlashArg(connect-context:codex) error = %v", err)
-	}
-	if len(contexts) != 1 || contexts[0].Value != "258400" {
-		t.Fatalf("Codex 5.6 context candidates = %#v, want 258400", contexts)
+	for _, modelName := range []string{"gpt-5.6-sol", "gpt-6-astra"} {
+		state.Model = modelName
+		contexts, err := driver.CompleteSlashArg(ctx, "connect-context:"+state.EncodeCompletionState(), "", 10)
+		if err != nil {
+			t.Fatalf("CompleteSlashArg(connect-context:codex %s) error = %v", modelName, err)
+		}
+		if len(contexts) != 1 || contexts[0].Value != "258400" {
+			t.Fatalf("Codex %s context candidates = %#v, want 258400", modelName, contexts)
+		}
 	}
 }
 
@@ -55,7 +59,7 @@ func slashCandidateValues(candidates []controlprompt.SlashArgCandidate) []string
 	return values
 }
 
-func TestCodexConnectCompletionFallbackOmitsDeprecated52(t *testing.T) {
+func TestCodexConnectCompletionFallbackOmitsHiddenModels(t *testing.T) {
 	t.Parallel()
 
 	driver := newHostAssembler(&runtimeDeps{}, "", "")
@@ -64,13 +68,15 @@ func TestCodexConnectCompletionFallbackOmitsDeprecated52(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-model:codex fallback) error = %v", err)
 	}
-	for _, name := range []string{"gpt-5.6-sol", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"} {
+	for _, name := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"} {
 		if !slashCandidatesHaveValue(models, name) {
 			t.Fatalf("Codex fallback candidates = %#v, missing %q", models, name)
 		}
 	}
-	if slashCandidatesHaveValue(models, "gpt-5.2") {
-		t.Fatalf("Codex fallback candidates retained deprecated 5.2 = %#v", models)
+	for _, hidden := range []string{"gpt-6-astra", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark", "gpt-5.2"} {
+		if slashCandidatesHaveValue(models, hidden) {
+			t.Fatalf("Codex fallback candidates retained hidden %q = %#v", hidden, models)
+		}
 	}
 }
 

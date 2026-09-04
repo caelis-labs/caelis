@@ -159,8 +159,9 @@ func LookupOverlayModelCapabilities(provider, modelName string) (ModelCapabiliti
 }
 
 // ListRecommendedModels returns the curated model recommendations for a
-// provider. It includes local overrides, built-in catalog entries, and provider
-// overlays, but intentionally does not enumerate the models.dev directory.
+// provider. Hidden built-in entries and matching provider overlays stay out of
+// recommendations, while an explicit local override may add the model back.
+// The models.dev directory is intentionally not enumerated.
 func ListRecommendedModels(provider string) []string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
@@ -173,7 +174,7 @@ func ListRecommendedModels(provider string) []string {
 
 	collector.addSnapshot(local, provider, providerMatches)
 	for _, entry := range builtinCatalog {
-		if strings.EqualFold(strings.TrimSpace(entry.provider), provider) {
+		if strings.EqualFold(strings.TrimSpace(entry.provider), provider) && !entry.hiddenFromRecommendations {
 			collector.add(entry.pattern)
 		}
 	}
@@ -244,6 +245,9 @@ func (c modelListCollector) addOverlaySnapshot(snap overlaySnapshot, provider st
 	for key := range snap {
 		p, model, ok := splitCatalogKey(key)
 		if !ok || !match(provider, p) {
+			continue
+		}
+		if entry := findBuiltinEntry(provider, strings.ToLower(strings.TrimSpace(model))); entry != nil && entry.hiddenFromRecommendations {
 			continue
 		}
 		c.add(model)

@@ -315,7 +315,11 @@ func (l *anthropicSDKLLM) buildRequest(req *model.Request) (anthropic.MessageNew
 		params.MaxTokens = int64(req.Output.MaxOutputTokens)
 	}
 	applyAnthropicOutputConfig(&params, req.Output)
-	if thinking := anthropicThinkingConfig(l.provider, req.Reasoning); thinking != nil {
+	if isMiniMaxAdaptiveThinkingModel(l.provider, l.name) {
+		applyMiniMaxAdaptiveThinking(&params, req.Reasoning)
+	} else if isAnthropicAdaptiveThinkingModel(l.name) {
+		applyAnthropicAdaptiveThinking(&params, l.name, req.Reasoning)
+	} else if thinking := anthropicThinkingConfig(l.provider, req.Reasoning); thinking != nil {
 		params.Thinking = *thinking
 		applyAnthropicMaxTokensForThinking(&params)
 	}
@@ -368,6 +372,84 @@ func anthropicAuthOptions(cfg Config, token string) []option.RequestOption {
 		return nil
 	default:
 		return []option.RequestOption{option.WithAPIKey(token)}
+	}
+}
+
+func isMiniMaxAdaptiveThinkingModel(provider, modelName string) bool {
+	if !strings.EqualFold(strings.TrimSpace(provider), "minimax") {
+		return false
+	}
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	return modelName == "minimax-m3" || strings.HasPrefix(modelName, "minimax-m3-")
+}
+
+func applyMiniMaxAdaptiveThinking(params *anthropic.MessageNewParams, reasoning model.ReasoningConfig) {
+	if params == nil {
+		return
+	}
+	effort := strings.ToLower(strings.TrimSpace(reasoning.Effort))
+	if effort == "none" || effort == "off" || effort == "disabled" {
+		disabled := anthropic.NewThinkingConfigDisabledParam()
+		params.Thinking.OfDisabled = &disabled
+		return
+	}
+	if effort == "" && reasoning.BudgetTokens <= 0 {
+		return
+	}
+	params.Thinking.OfAdaptive = &anthropic.ThinkingConfigAdaptiveParam{}
+}
+
+func isAnthropicAdaptiveThinkingModel(modelName string) bool {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	for _, prefix := range []string{
+		"claude-fable-5",
+		"claude-mythos-5",
+		"claude-mythos-preview",
+		"claude-opus-5",
+		"claude-sonnet-5",
+		"claude-opus-4-8",
+		"claude-opus-4-7",
+		"claude-opus-4-6",
+		"claude-sonnet-4-6",
+	} {
+		if modelName == prefix || strings.HasPrefix(modelName, prefix+"-") {
+			return true
+		}
+	}
+	return false
+}
+
+func isAnthropicAlwaysOnThinkingModel(modelName string) bool {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	for _, prefix := range []string{"claude-fable-5", "claude-mythos-5", "claude-mythos-preview"} {
+		if modelName == prefix || strings.HasPrefix(modelName, prefix+"-") {
+			return true
+		}
+	}
+	return false
+}
+
+func applyAnthropicAdaptiveThinking(params *anthropic.MessageNewParams, modelName string, reasoning model.ReasoningConfig) {
+	if params == nil {
+		return
+	}
+	effort := strings.ToLower(strings.TrimSpace(reasoning.Effort))
+	if effort == "none" || effort == "off" || effort == "disabled" {
+		if isAnthropicAlwaysOnThinkingModel(modelName) {
+			params.Thinking.OfAdaptive = &anthropic.ThinkingConfigAdaptiveParam{}
+			return
+		}
+		disabled := anthropic.NewThinkingConfigDisabledParam()
+		params.Thinking.OfDisabled = &disabled
+		return
+	}
+	if effort == "" && reasoning.BudgetTokens <= 0 {
+		return
+	}
+	params.Thinking.OfAdaptive = &anthropic.ThinkingConfigAdaptiveParam{}
+	switch effort {
+	case "low", "medium", "high", "xhigh", "max":
+		params.OutputConfig.Effort = anthropic.OutputConfigEffort(effort)
 	}
 }
 

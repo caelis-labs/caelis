@@ -129,12 +129,16 @@ func TestMaintainedSelectableGrokOAuthModels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 2 || models[0].Name != "grok-4.6" || models[1].Name != "grok-4.5" {
-		t.Fatalf("models = %#v, want grok-4.6 then grok-4.5", models)
+	if len(models) != 1 || models[0].Name != "grok-4.6" {
+		t.Fatalf("models = %#v, want only current grok-4.6", models)
 	}
 	for _, model := range models {
 		if !model.MetadataComplete || !model.ImageInputKnown {
 			t.Fatalf("model = %#v, want complete image-capable metadata", model)
 		}
+	}
+	legacy, err := ResolveModelDefaults("xai", "grok-4.5")
+	if err != nil || legacy.ContextWindowTokens != 500000 {
+		t.Fatalf("ResolveModelDefaults(xai, grok-4.5) = %#v, %v; want retained compatibility defaults", legacy, err)
 	}
 }

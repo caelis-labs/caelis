@@ -13,20 +13,25 @@ const (
 
 // grokOAuthModelSpecs is the maintained fallback when xAI's account model
 // directory is unavailable. xAI's official Grok Build catalog currently uses
-// grok-4.6 over the Responses API; grok-4.5 remains selectable.
+// grok-4.6 over the Responses API; older defaults remain available only for
+// persisted or explicitly typed configurations.
 var grokOAuthModelSpecs = []struct {
 	name                   string
 	defaultReasoningEffort string
 	reasoningLevels        []string
 	imageInput             bool
+	fallbackSelectable     bool
 }{
-	{name: "grok-4.6", defaultReasoningEffort: "high", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, imageInput: true},
+	{name: "grok-4.6", defaultReasoningEffort: "high", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, imageInput: true, fallbackSelectable: true},
 	{name: "grok-4.5", defaultReasoningEffort: "high", reasoningLevels: []string{"low", "medium", "high"}, imageInput: true},
 }
 
 func grokOAuthSelectableModels() []string {
 	out := make([]string, 0, len(grokOAuthModelSpecs))
 	for _, spec := range grokOAuthModelSpecs {
+		if !spec.fallbackSelectable {
+			continue
+		}
 		out = append(out, spec.name)
 	}
 	return out

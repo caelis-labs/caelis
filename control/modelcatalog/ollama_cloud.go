@@ -5,12 +5,13 @@ package modelcatalog
 const OllamaCloudProvider = "ollama-cloud"
 
 type ollamaCloudModel struct {
-	Name                   string
-	ContextWindowTokens    int
-	SupportsImages         bool
-	ReasoningMode          string
-	ReasoningEfforts       []string
-	DefaultReasoningEffort string
+	Name                      string
+	ContextWindowTokens       int
+	SupportsImages            bool
+	ReasoningMode             string
+	ReasoningEfforts          []string
+	DefaultReasoningEffort    string
+	HiddenFromRecommendations bool
 }
 
 // ollamaCloudModels is the curated frontier catalog shown for the direct
@@ -19,11 +20,27 @@ type ollamaCloudModel struct {
 // selectable Cloud catalog.
 var ollamaCloudModels = []ollamaCloudModel{
 	{
-		Name:                   "glm-5.2",
+		Name:                   "glm-5.3",
 		ContextWindowTokens:    1000000,
 		ReasoningMode:          ReasoningModeEffort,
-		ReasoningEfforts:       []string{"high", "max"},
-		DefaultReasoningEffort: "high",
+		ReasoningEfforts:       []string{"low", "high", "max"},
+		DefaultReasoningEffort: "max",
+	},
+	{
+		Name:                   "glm-5.3-flash",
+		ContextWindowTokens:    1000000,
+		SupportsImages:         true,
+		ReasoningMode:          ReasoningModeEffort,
+		ReasoningEfforts:       []string{"low", "high", "max"},
+		DefaultReasoningEffort: "max",
+	},
+	{
+		Name:                      "glm-5.2",
+		ContextWindowTokens:       1000000,
+		ReasoningMode:             ReasoningModeEffort,
+		ReasoningEfforts:          []string{"high", "max"},
+		DefaultReasoningEffort:    "high",
+		HiddenFromRecommendations: true,
 	},
 	{
 		Name:                   "minimax-m3",
@@ -35,6 +52,13 @@ var ollamaCloudModels = []ollamaCloudModel{
 	{
 		Name:                   "kimi-k3",
 		ContextWindowTokens:    1000000,
+		SupportsImages:         true,
+		ReasoningMode:          ReasoningModeToggle,
+		DefaultReasoningEffort: "high",
+	},
+	{
+		Name:                   "kimi-k2.7-code",
+		ContextWindowTokens:    262144,
 		SupportsImages:         true,
 		ReasoningMode:          ReasoningModeToggle,
 		DefaultReasoningEffort: "high",
@@ -60,6 +84,9 @@ var ollamaCloudModels = []ollamaCloudModel{
 func ListOllamaCloudModels() []string {
 	out := make([]string, 0, len(ollamaCloudModels))
 	for _, model := range ollamaCloudModels {
+		if model.HiddenFromRecommendations {
+			continue
+		}
 		out = append(out, model.Name)
 	}
 	return out
@@ -69,8 +96,9 @@ func ollamaCloudCatalogEntries() []catalogEntry {
 	out := make([]catalogEntry, 0, len(ollamaCloudModels))
 	for _, model := range ollamaCloudModels {
 		out = append(out, catalogEntry{
-			provider: OllamaCloudProvider,
-			pattern:  model.Name,
+			provider:                  OllamaCloudProvider,
+			pattern:                   model.Name,
+			hiddenFromRecommendations: model.HiddenFromRecommendations,
 			caps: ModelCapabilities{
 				ContextWindowTokens: model.ContextWindowTokens,
 				// Ollama does not publish a hard maximum output limit for these

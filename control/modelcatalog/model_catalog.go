@@ -153,6 +153,16 @@ func LookupSuggestedModelCapabilities(provider, modelName string) (ModelCapabili
 
 // lookupBuiltin searches only the hard-coded builtinCatalog.
 func lookupBuiltin(provider, modelName string) (ModelCapabilities, bool) {
+	entry := findBuiltinEntry(provider, modelName)
+	if entry == nil {
+		return DefaultModelCapabilities(), false
+	}
+	out := entry.caps
+	normalizeModelCapabilitiesReasoning(&out)
+	return out, true
+}
+
+func findBuiltinEntry(provider, modelName string) *catalogEntry {
 	var best *catalogEntry
 	bestLen := 0
 
@@ -176,13 +186,7 @@ func lookupBuiltin(provider, modelName string) (ModelCapabilities, bool) {
 			bestLen = len(entryPattern)
 		}
 	}
-
-	if best == nil {
-		return DefaultModelCapabilities(), false
-	}
-	out := best.caps
-	normalizeModelCapabilitiesReasoning(&out)
-	return out, true
+	return best
 }
 
 // ApplyConfigDefaults enriches the given provider config with capabilities from the
