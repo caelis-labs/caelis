@@ -50,23 +50,28 @@ See the upstream
 [ACP authentication methods RFD](https://agentclientprotocol.com/rfds/auth-methods)
 for standard wire behavior.
 
-## Input and child Sessions
+## Input and collaborator Sessions
 
-An idle external child receives `session/prompt` on its existing ACP Session. A
-running child receives `_session/steering` only when the Agent advertised that
-capability; otherwise active input is rejected.
+An idle external collaborator receives `session/prompt` on its existing ACP
+Session. A running collaborator receives `_session/steering` only when the Agent
+advertised that capability; otherwise active input is rejected until the
+current Turn finishes. Spawn reports this fixed capability once as
+`supports_steering`; Task read/wait do not repeat it.
 
 `SendMessage {to, message}` is the model-facing address adapter over those
 standard methods. Caelis binds trusted source identity and dispatches one
-Agent-communication input. It has no delivery MessageID, durable mailbox, target
-completion claim, or Task mutation. Ambiguous post-dispatch outcomes are not
-blindly retried.
+Agent-communication input. Accepted input is projected as standard ACP
+`session/update` with `user_message_chunk`; display-only source metadata may use
+`_meta.caelis.agent_communication`, while typed event identity remains
+authoritative. It has no delivery MessageID, durable mailbox, target completion
+claim, or Task mutation. Ambiguous post-dispatch outcomes are not blindly
+retried.
 
-Task observes subsequent child output. A child's terminal response is retrieved
-through Task read/wait and should not also be sent as a message. Durable
-participant placement preserves the child handle, ACP Session ID, and Task
-identity across Runtime or Host restart; later input resumes that exact Session
-rather than substituting `session/new`.
+Task observes subsequent collaborator output on demand. A terminal response
+retrieved through Task read/wait should not also be sent as a message. Durable
+participant placement preserves the collaborator handle, ACP Session ID, and
+Task identity across Runtime or Host restart; later input resumes that exact
+Session rather than substituting `session/new`.
 
 A nested Spawn performed inside a third-party participant stays behind that
 participant boundary. Caelis may render its final standard tool result, but it

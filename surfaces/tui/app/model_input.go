@@ -1624,6 +1624,9 @@ func (m *Model) tryToggleFoldToken(blockID string, token string) bool {
 	if key, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_exploration_stable:"); ok {
 		return m.tryToggleACPExplorationStageToken(blockID, key)
 	}
+	if key, ok := strings.CutPrefix(strings.TrimSpace(token), agentMessageFoldTokenPrefix); ok {
+		return m.tryToggleACPAgentMessageToken(blockID, key)
+	}
 	if callID, ok := strings.CutPrefix(strings.TrimSpace(token), subagentOutputOverlayTokenPrefix); ok {
 		return m.openSubagentOutputOverlay(blockID, callID)
 	}
@@ -1653,6 +1656,21 @@ func (m *Model) tryToggleFoldToken(blockID string, token string) bool {
 			m.reconcileTaskStreamOwner(callID, handle)
 		}
 		return true
+	default:
+		return false
+	}
+}
+
+func (m *Model) tryToggleACPAgentMessageToken(blockID string, key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	switch blk := m.doc.Find(strings.TrimSpace(blockID)).(type) {
+	case *ParticipantTurnBlock:
+		return blk.toggleAgentMessageExpanded(key)
+	case *MainACPTurnBlock:
+		return blk.toggleAgentMessageExpanded(key)
 	default:
 		return false
 	}

@@ -3,6 +3,7 @@ package client
 import (
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 	"github.com/caelis-labs/caelis/internal/jsonvalue"
 )
@@ -17,7 +18,7 @@ const (
 func NormalizeInboundUpdate(update Update) Update {
 	switch typed := update.(type) {
 	case ContentChunk:
-		typed.Meta = normalizeInboundTerminalOutput(typed.Meta)
+		typed.Meta = normalizeInboundContentMeta(typed.Meta)
 		return typed
 	case ToolCall:
 		typed.Meta, typed.Kind = normalizeInboundToolDisplay(typed.Meta, typed.Kind)
@@ -36,6 +37,24 @@ func NormalizeInboundUpdate(update Update) Update {
 	default:
 		return update
 	}
+}
+
+// normalizeInboundContentMeta removes local Agent-input identity before the
+// external update branches into native live output and canonical history.
+func normalizeInboundContentMeta(meta map[string]any) map[string]any {
+	out := normalizeInboundTerminalOutput(meta)
+	caelis, ok := out["caelis"].(map[string]any)
+	if !ok {
+		return out
+	}
+	delete(caelis, session.AgentCommunicationMetaKey)
+	if len(caelis) == 0 {
+		delete(out, "caelis")
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func normalizeInboundToolDisplay(meta map[string]any, standardKind string) (map[string]any, string) {

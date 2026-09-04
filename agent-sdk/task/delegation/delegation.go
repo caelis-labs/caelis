@@ -89,14 +89,16 @@ type CompletionSink interface {
 	PublishSubagentCompletion(Result)
 }
 
-// Result captures one delegated child summary visible to runtime and the
-// calling agent. The child transcript remains in its own session.
+// Result captures one collaborating Agent summary visible to Runtime and the
+// calling Agent. The collaborator transcript remains in its own Session.
 type Result struct {
-	TaskID        string `json:"task_id,omitempty"`
-	State         State  `json:"state,omitempty"`
-	Running       bool   `json:"running,omitempty"`
-	Yielded       bool   `json:"yielded,omitempty"`
-	OutputPreview string `json:"output_preview,omitempty"`
+	TaskID  string `json:"task_id,omitempty"`
+	State   State  `json:"state,omitempty"`
+	Running bool   `json:"running,omitempty"`
+	Yielded bool   `json:"yielded,omitempty"`
+	// SupportsSteering allows Agent input while the current Turn is running.
+	SupportsSteering bool   `json:"supports_steering"`
+	OutputPreview    string `json:"output_preview,omitempty"`
 	// Error is one bounded, non-sensitive operation summary for a terminal
 	// delegated child. Producers must not include raw provider errors, stderr,
 	// credentials, or local paths. It remains distinct from Result, which is

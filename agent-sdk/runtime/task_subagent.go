@@ -813,6 +813,8 @@ func normalizeSubagentEntryResult(entry *taskapi.Entry, diagnostic string) {
 	if entry == nil {
 		return
 	}
+	entry.SupportsInput = false
+	entry.SupportsCancel = false
 	diagnostic, failureState := subagentFailureDiagnostic(entry.State, diagnostic)
 	if failureState {
 		entry.FailureDiagnostic = diagnostic
@@ -871,7 +873,7 @@ func (t *subagentTask) snapshotLocked() taskapi.Snapshot {
 		State:          t.state,
 		Running:        t.running,
 		SupportsInput:  false,
-		SupportsCancel: true,
+		SupportsCancel: false,
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      time.Now(),
 		Lease:          taskapi.CloneLease(t.lease),
@@ -902,7 +904,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		State:          t.state,
 		Running:        t.running,
 		SupportsInput:  false,
-		SupportsCancel: true,
+		SupportsCancel: false,
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      now,
 		Lease:          taskapi.CloneLease(t.lease),

@@ -31,6 +31,7 @@ type acpTranscriptRenderOptions struct {
 	StableExplorationRows   func(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool)
 	ToolPanelScrollState    func(callID string) toolPanelScrollState
 	ReasoningExpanded       func(key string) bool
+	AgentMessageExpanded    func(key string) bool
 	AgentMessageTargetLinks bool
 	SubagentOutputLinks     bool
 }
@@ -155,7 +156,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				lastGroup = acpTranscriptGroupNotice
 			}
 		case SEAgentCommunication:
-			communicationRows := renderAgentCommunicationRows(blockID, ev, width, ctx, opts)
+			communicationRows := renderAgentCommunicationRows(blockID, ev, i, width, ctx, opts)
 			if len(communicationRows) > 0 {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupAgentCommunication, false)
 				rows = appendACPTranscriptSemanticRows(rows, blockID, communicationRows, &pendingSemanticGap)
@@ -821,12 +822,22 @@ func acpToolPanelClickToken(callID string) string {
 
 const agentMessageTargetOverlayTokenPrefix = "agent_message_target_overlay:"
 
+const agentMessageFoldTokenPrefix = "acp_agent_message:"
+
 func agentMessageTargetOverlayClickToken(callID string) string {
 	callID = strings.TrimSpace(callID)
 	if callID == "" {
 		return ""
 	}
 	return agentMessageTargetOverlayTokenPrefix + callID
+}
+
+func agentMessageFoldClickToken(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	return agentMessageFoldTokenPrefix + key
 }
 
 func acpToolPanelClickTokenIf(callID string, enabled bool) string {

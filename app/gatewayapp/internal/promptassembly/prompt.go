@@ -59,18 +59,16 @@ func BuildSystemPrompt(cfg Config) (string, error) {
 	return result.Prompt, err
 }
 
-// WithDelegationGuidance adds the parent-agent delegation contract to the
+// WithCollaborationGuidance adds the main Agent collaboration contract to the
 // system instruction block without duplicating it.
-func WithDelegationGuidance(prompt string) string {
-	prompt = withoutSystemInstructionSection(prompt, builtInSharedWorkspacePrompt())
-	return withSystemInstructionSection(prompt, builtInDelegationPrompt())
+func WithCollaborationGuidance(prompt string) string {
+	return withSystemInstructionSection(prompt, builtInCollaborationPrompt())
 }
 
-// WithSharedWorkspaceGuidance adds the spawned-child workspace contract to the
-// system instruction block without duplicating it.
-func WithSharedWorkspaceGuidance(prompt string) string {
-	prompt = withoutSystemInstructionSection(prompt, builtInDelegationPrompt())
-	return withSystemInstructionSection(prompt, builtInSharedWorkspacePrompt())
+// WithoutCollaborationGuidance removes main-only collaboration guidance from a
+// collaborating Agent's inherited system prompt.
+func WithoutCollaborationGuidance(prompt string) string {
+	return withoutSystemInstructionSection(prompt, builtInCollaborationPrompt())
 }
 
 func BuildSystemPromptResult(cfg Config) (Result, error) {
@@ -218,21 +216,13 @@ func builtInPermissionBoundariesPrompt() string {
 	}, "\n")
 }
 
-func builtInDelegationPrompt() string {
+func builtInCollaborationPrompt() string {
 	return strings.Join([]string{
-		"## Delegation",
+		"## Collaboration",
 		"",
-		"- Delegate only when the subtask has clear independent scope, useful parallelism, or a focused review/investigation role.",
-		"- Make delegated prompts self-contained: goal, scope, constraints, edit permission, and expected output.",
-		"- Keep architecture, integration, validation, and user-facing judgment in the main session. Verify only delegated findings that affect the next action; do not repeat the investigation.",
-	}, "\n")
-}
-
-func builtInSharedWorkspacePrompt() string {
-	return strings.Join([]string{
-		"## Shared Workspace",
-		"",
-		"You share this workspace and current working directory with the parent agent and any sibling agents. Their edits are immediately visible. Change only files in this task's scope; do not assume you have an isolated copy.",
+		"- Spawn a collaborating Agent only for independent work that benefits from parallelism or focused expertise.",
+		"- Give each collaborator a self-contained task: goal, scope, constraints, edit permission, and expected output.",
+		"- Own integration, validation, and the user-facing result. Verify only findings that affect the next action; do not repeat completed work.",
 	}, "\n")
 }
 

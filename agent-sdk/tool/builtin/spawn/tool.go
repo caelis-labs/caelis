@@ -145,7 +145,7 @@ func spawnDefinition(agents []delegation.Agent) tool.Definition {
 		"prompt": map[string]any{
 			"type":        "string",
 			"minLength":   1,
-			"description": "Specific self-contained sub-task.",
+			"description": "Self-contained collaboration task.",
 		},
 		"handle": map[string]any{
 			"type":        "string",
@@ -164,7 +164,7 @@ func spawnDefinition(agents []delegation.Agent) tool.Definition {
 	}
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Start a bounded delegated child session for work that can proceed independently. Use it for parallel investigation, isolated review, or a clearly scoped subtask, not for final integration or user-facing judgment. The prompt must be self-contained with goal, scope, constraints, expected output, and whether edits are allowed. To observe or wait for an existing child task, use Task wait with the returned handle; do not call Spawn again.",
+		Description: "Start a collaborating Agent for independent work that benefits from parallel execution or focused expertise. Give it a self-contained task with the goal, scope, constraints, edit permission, and expected output. Use Task with the returned handle only when its result is needed.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"properties":           props,

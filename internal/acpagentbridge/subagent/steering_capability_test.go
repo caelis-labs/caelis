@@ -27,7 +27,7 @@ func TestSpawnedChildRetainsNegotiatedSteeringCapability(t *testing.T) {
 			defer cancel()
 			runner := steeringChildTestRunner(t, fmt.Sprintf(`{"supported":%v}`, supported), "")
 			completion := make(chan delegation.Result, 1)
-			anchor, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
+			anchor, spawnResult, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
 				ActivityID: "activity-new-" + fmt.Sprint(supported),
 				TaskID:     "task-new-" + fmt.Sprint(supported),
 				CWD:        t.TempDir(),
@@ -39,6 +39,9 @@ func TestSpawnedChildRetainsNegotiatedSteeringCapability(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if spawnResult.SupportsSteering != supported {
+				t.Fatalf("Spawn result supports_steering = %v, want %v", spawnResult.SupportsSteering, supported)
+			}
 			run, err := runner.lookup(anchor)
 			if err != nil {
 				t.Fatal(err)
@@ -47,7 +50,10 @@ func TestSpawnedChildRetainsNegotiatedSteeringCapability(t *testing.T) {
 				t.Fatalf("child steering capability = %v, want %v", run.supportsSteering, supported)
 			}
 			select {
-			case <-completion:
+			case result := <-completion:
+				if result.SupportsSteering != supported {
+					t.Fatalf("completion supports_steering = %v, want %v", result.SupportsSteering, supported)
+				}
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}

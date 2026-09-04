@@ -237,6 +237,11 @@ func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 		})
 	}
 
+	agentInput := baseEnvelope(eventstream.KindSessionUpdate)
+	agentInput.Update = eventstream.ContentChunk{SessionUpdate: eventstream.UpdateUserMessage, Content: text}
+	agentInput.AgentCommunicationSource = &eventstream.ActorIdentity{Kind: "participant", ID: "reviewer-1", Name: "reviewer"}
+	validateWireValue(t, "Envelope", agentInput)
+
 	permission := baseEnvelope(eventstream.KindRequestPermission)
 	permission.ApprovalRequestID = "approval-1"
 	permission.Permission = &eventstream.RequestPermissionRequest{

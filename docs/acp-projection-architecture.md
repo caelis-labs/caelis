@@ -155,11 +155,16 @@ remain correlation values resolved through Control. Child output is observation;
 the parent receives one canonical tool result, and child messages, reasoning,
 tools, plans, and terminal bytes never become parent model context.
 
-Agent communication is not Task input. `Task write` is command stdin only when
-the command explicitly supports it. Agents use `SendMessage {to, message}`,
-which binds trusted source identity and dispatches one input without a delivery
-ID, lifecycle claim, or Task mutation. Later child output alone advances Task
-activity.
+Agent communication is not Task input. `Task write` and Task cancel apply only
+to command Tasks that advertise those capabilities. Agents use
+`SendMessage {to, message}`, which binds trusted source identity and dispatches
+one input without a delivery ID, lifecycle claim, or Task mutation. The
+recipient sees a standard ACP `user_message_chunk`; display-only sender metadata
+lives under `_meta.caelis.agent_communication`. Control derives
+`Envelope.AgentCommunicationSource` from the typed event actor; Surfaces use
+that field to identify Agent input. External ACP ingress removes the reserved
+marker before live or canonical projection. Later collaborator output alone
+advances Task activity.
 
 Task status is a replaceable directory snapshot and contains no transcript.
 Visible content demand has an independent spool cursor. When an exact retained
@@ -170,9 +175,10 @@ read a child Session file as a presentation shortcut. A Surface never joins a
 partial spool prefix to a fallback or reconstructs content from overlap.
 
 The canonical parent Spawn result closes the parent tool once; child Task
-observation never manufactures that result from Task read/wait. Cancel stops
-the current child Turn without retiring the child identity. Spawn-created
-children do not receive Spawn, so delegation cannot nest.
+observation never manufactures that result from Task read/wait. A completion
+hint may notify the exact active parent Run once. Task read/wait observes final
+output on demand; it does not require the parent to wait for every collaborator.
+Spawn-created collaborators do not receive Spawn, so collaboration cannot nest.
 
 Permission requests are Session-feed interactions, not Task frames. Control
 publishes a typed approval identity; a Surface returns only that identity and the

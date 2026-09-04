@@ -73,15 +73,18 @@ func (m *Model) agentMessageTargetDisplayLabel(rawTarget string) string {
 		if view == nil || normalizeTaskStreamHandle(view.taskHandle) != target {
 			continue
 		}
-		label := strings.TrimSpace(view.title)
-		if before, _, ok := strings.Cut(label, ":"); ok {
-			label = strings.TrimSpace(before)
+		label := agentCommunicationViewIdentity(view)
+		if label == "" {
+			label = strings.TrimSpace(view.title)
+			if before, _, ok := strings.Cut(label, ":"); ok {
+				label = strings.TrimSpace(before)
+			}
 		}
 		if label != "" {
-			return label
+			return display.AgentMessageTarget(label)
 		}
 	}
-	return target
+	return display.AgentMessageTarget(target)
 }
 
 func replaceAgentMessageDisplayTarget(args, rawTarget, label string) string {
@@ -94,11 +97,12 @@ func replaceAgentMessageDisplayTarget(args, rawTarget, label string) string {
 	if target == "" {
 		target = "@" + normalizeTaskStreamHandle(rawTarget)
 	}
-	prefix := "to " + target
-	if !strings.HasPrefix(args, prefix) {
-		return args
+	for _, prefix := range []string{target, "to " + target} {
+		if strings.HasPrefix(args, prefix) {
+			return label + strings.TrimPrefix(args, prefix)
+		}
 	}
-	return label + strings.TrimPrefix(args, prefix)
+	return args
 }
 
 func (m *Model) applyTranscriptEvents(events []TranscriptEvent) (tea.Model, tea.Cmd) {

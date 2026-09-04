@@ -65,7 +65,7 @@ func (s *childInputTestSink) PublishSubagentCompletion(result delegation.Result)
 
 var childInputTestActivity atomic.Uint64
 
-func TestActiveChildInputUsesSteeringAndReleasesBufferedUpdate(t *testing.T) {
+func TestActiveChildInputPreservesIngressOrderAndPublishesAcceptedInput(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -91,29 +91,23 @@ func TestActiveChildInputUsesSteeringAndReleasesBufferedUpdate(t *testing.T) {
 	if err != nil || result.StartedActivity || result.ActivityID == "" {
 		t.Fatalf("SubmitChildInput() = (%#v, %v), want active steering", result, err)
 	}
-	var frameEvent childInputTestEvent
-	var terminal childInputTestEvent
-	for terminal.Result == nil {
-		select {
-		case event := <-events:
-			if event.Frame != nil {
-				frameEvent = event
-			}
-			if event.Result != nil {
-				terminal = event
-			}
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
+	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, result.ActivityID)
+	if len(frames) != 2 || frames[0].Event == nil || frames[1].Event == nil {
+		t.Fatalf("active input frames = %#v, want Agent output then accepted input", frames)
 	}
-	if frameEvent.Frame == nil || frameEvent.ActivityID != result.ActivityID {
-		t.Fatalf("buffered steering frame = %#v, want original activity %q", frameEvent, result.ActivityID)
+	// The provider emits output before acknowledging steering. It reaches the
+	// Control observer immediately; acceptance is projected only after the reply.
+	outputFrame, acceptedFrame := frames[0], frames[1]
+	if communication := session.ProtocolAgentCommunicationOf(acceptedFrame.Event); communication == nil ||
+		communication.Text != "guide now" || acceptedFrame.Event.Actor.ID != "controller-1" ||
+		!strings.HasPrefix(acceptedFrame.Event.ID, "agent-input:"+result.ActivityID+":") {
+		t.Fatalf("accepted active input = %#v, want stable standard Agent communication", acceptedFrame.Event)
 	}
-	if got := frameEvent.Frame.Event.Text; got != "steered output" {
-		t.Fatalf("steering output = %q, want buffered notification", got)
+	if got := outputFrame.Event.Text; got != "steered output" {
+		t.Fatalf("steering output = %q, want notification received before acceptance", got)
 	}
-	if terminal.ActivityID != result.ActivityID || terminal.Cursor <= frameEvent.Cursor {
-		t.Fatalf("terminal order = %#v after frame %#v", terminal, frameEvent)
+	if terminal.ActivityID != result.ActivityID || terminal.Cursor <= 2 {
+		t.Fatalf("terminal order = %#v after frames %#v", terminal, frames)
 	}
 	if err := runner.Quiesce(ctx); err != nil {
 		t.Fatal(err)
@@ -164,7 +158,7 @@ func TestActiveChildInputUnsupportedErrorIsModelFacing(t *testing.T) {
 	if !errorcode.Is(err, errorcode.Unsupported) {
 		t.Fatalf("error = %v, want unsupported", err)
 	}
-	want := "ACP Agent @child lacks _session/steering; cancel turn, retry SendMessage."
+	want := "ACP Agent @child does not support additional messages while its current turn is running. You can send a message after this turn finishes."
 	if got := err.Error(); got != want {
 		t.Fatalf("error = %q, want %q", got, want)
 	}
@@ -202,7 +196,7 @@ func TestRejectedChildSteeringReleasesOriginalActivityUpdates(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	runner := childInputTestRunner(t, "failed")
+	runner := childInputTestRunner(t, "failed-echo")
 	events := make(chan childInputTestEvent, 8)
 	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-rejected-input", events), delegation.Request{
 		Agent: "helper", Prompt: "initial",
@@ -222,6 +216,7 @@ func TestRejectedChildSteeringReleasesOriginalActivityUpdates(t *testing.T) {
 	if !errorcode.Is(err, errorcode.FailedPrecondition) {
 		t.Fatalf("rejected SubmitChildInput() error = %v, want failed precondition", err)
 	}
+	communicationCount := 0
 	var frame childInputTestEvent
 	var terminal childInputTestEvent
 	for terminal.Result == nil {
@@ -229,6 +224,9 @@ func TestRejectedChildSteeringReleasesOriginalActivityUpdates(t *testing.T) {
 		case event := <-events:
 			if event.Frame != nil {
 				frame = event
+				if session.ProtocolAgentCommunicationOf(event.Frame.Event) != nil {
+					communicationCount++
+				}
 			}
 			if event.Result != nil {
 				terminal = event
@@ -239,6 +237,9 @@ func TestRejectedChildSteeringReleasesOriginalActivityUpdates(t *testing.T) {
 	}
 	if frame.Frame == nil || frame.Frame.Event.Text != "not injected output" || terminal.Cursor <= frame.Cursor {
 		t.Fatalf("released rejection events = frame %#v terminal %#v", frame, terminal)
+	}
+	if communicationCount != 0 {
+		t.Fatalf("rejected input projected %d Agent communication events, want none", communicationCount)
 	}
 	if err := runner.Quiesce(ctx); err != nil {
 		t.Fatal(err)
@@ -270,32 +271,85 @@ func TestIdleChildInputStartsPromptOnExistingSession(t *testing.T) {
 	if err != nil || !result.StartedActivity || result.ActivityID == "" || result.ActivityID == firstTerminal.ActivityID {
 		t.Fatalf("SubmitChildInput() = (%#v, %v), want new prompt activity", result, err)
 	}
-	var output childInputTestEvent
-	var terminal childInputTestEvent
-	for terminal.Result == nil {
-		select {
-		case event := <-events:
-			if event.ActivityID != result.ActivityID {
-				continue
-			}
-			if event.Frame != nil {
-				output = event
-			}
-			if event.Result != nil {
-				terminal = event
-			}
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
+	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, result.ActivityID)
+	if len(frames) != 2 || frames[0].Event == nil || frames[1].Event == nil {
+		t.Fatalf("idle input frames = %#v, want accepted input and Agent output", frames)
 	}
-	if output.Frame == nil || output.Frame.Event.Text != "prompt output 2" {
-		t.Fatalf("idle prompt output = %#v", output)
+	acceptedFrame, outputFrame := frames[0], frames[1]
+	if session.ProtocolAgentCommunicationOf(acceptedFrame.Event) == nil {
+		acceptedFrame, outputFrame = outputFrame, acceptedFrame
+	}
+	if communication := session.ProtocolAgentCommunicationOf(acceptedFrame.Event); communication == nil ||
+		communication.Text != "second prompt" || acceptedFrame.Event.Actor.ID != "controller-1" {
+		t.Fatalf("accepted idle input = %#v, want standard Agent communication", acceptedFrame.Event)
+	}
+	if outputFrame.Event.Text != "prompt output 2" {
+		t.Fatalf("idle prompt output = %#v", outputFrame)
 	}
 	if terminal.Result.State != delegation.StateCompleted {
 		t.Fatalf("idle prompt terminal = %#v", terminal.Result)
 	}
 	if err := runner.Quiesce(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAcceptedChildInputDeduplicatesProviderEcho(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		mode string
+		idle bool
+		text string
+	}{
+		{name: "active", mode: "active-echo", text: "guide now"},
+		{name: "idle", mode: "idle-echo", idle: true, text: "second prompt"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			runner := childInputTestRunner(t, test.mode)
+			events := make(chan childInputTestEvent, 12)
+			anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-echo-"+test.name, events), delegation.Request{
+				Agent: "helper", Prompt: "initial",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.idle {
+				waitChildActivityTerminal(t, ctx, events)
+			}
+			run, err := runner.lookup(anchor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+				Target: run.slot.target,
+				Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
+				Input:  test.text,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			frames, _ := waitChildActivityFramesUntilTerminalFor(t, ctx, events, result.ActivityID)
+			communicationCount := 0
+			for _, frame := range frames {
+				if communication := session.ProtocolAgentCommunicationOf(frame.Event); communication != nil {
+					communicationCount++
+					if communication.Text != test.text {
+						t.Fatalf("communication text = %q, want %q", communication.Text, test.text)
+					}
+				}
+			}
+			if communicationCount != 1 {
+				t.Fatalf("Agent communication count = %d in %#v, want one", communicationCount, frames)
+			}
+			if err := runner.Quiesce(ctx); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -894,6 +948,32 @@ func waitChildActivityTerminalFor(t *testing.T, ctx context.Context, events <-ch
 	}
 }
 
+func waitChildActivityFramesUntilTerminalFor(
+	t *testing.T,
+	ctx context.Context,
+	events <-chan childInputTestEvent,
+	activityID string,
+) ([]output.Event, childInputTestEvent) {
+	t.Helper()
+	var frames []output.Event
+	for {
+		select {
+		case event := <-events:
+			if event.ActivityID != activityID {
+				continue
+			}
+			if event.Frame != nil {
+				frames = append(frames, *event.Frame)
+			}
+			if event.Result != nil {
+				return frames, event
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+}
+
 func waitChildActivityTextBeforeTerminal(t *testing.T, ctx context.Context, events <-chan childInputTestEvent, text string) int {
 	t.Helper()
 	return waitChildActivityTextBeforeTerminalFor(t, ctx, events, "", text)
@@ -1003,13 +1083,18 @@ func TestChildInputHelperProcess(t *testing.T) {
 				}
 				return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 			}
-			if (mode == "active" || mode == "unknown" || mode == "image" || mode == "failed" || mode == "malformed-steering") && count == 1 || mode == "second-active" && count == 2 {
+			if (mode == "active" || mode == "active-echo" || mode == "unknown" || mode == "image" || mode == "failed" || mode == "failed-echo" || mode == "malformed-steering") && count == 1 || mode == "second-active" && count == 2 {
 				select {
 				case <-steered:
 				case <-time.After(4 * time.Second):
 					return nil, &jsonrpc.RPCError{Code: -32000, Message: "steering timeout"}
 				}
 			} else if count > 1 {
+				if mode == "idle-echo" {
+					if err := childInputNotifyUpdate(conn, client.UpdateUserMessage, "second prompt"); err != nil {
+						return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+					}
+				}
 				if err := childInputNotify(conn, fmt.Sprintf("prompt output %d", count)); err != nil {
 					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
 				}
@@ -1025,10 +1110,15 @@ func TestChildInputHelperProcess(t *testing.T) {
 				}
 			}
 			output := "steered output"
+			if mode == "active-echo" || mode == "failed-echo" {
+				if err := childInputNotifyUpdate(conn, client.UpdateUserMessage, "guide now"); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+			}
 			switch mode {
 			case "unknown":
 				output = "ambiguous output"
-			case "failed":
+			case "failed", "failed-echo":
 				output = "not injected output"
 			case "malformed-steering":
 				output = "malformed steering output"
@@ -1062,7 +1152,7 @@ func TestChildInputHelperProcess(t *testing.T) {
 			switch mode {
 			case "unknown":
 				outcome = client.SessionSteeringStartedNewTurn
-			case "failed":
+			case "failed", "failed-echo":
 				outcome = client.SessionSteeringFailed
 			}
 			return client.SessionSteeringResponse{Outcome: outcome}, nil
@@ -1078,10 +1168,14 @@ func TestChildInputHelperProcess(t *testing.T) {
 }
 
 func childInputNotify(conn *jsonrpc.Conn, text string) error {
+	return childInputNotifyUpdate(conn, client.UpdateAgentMessage, text)
+}
+
+func childInputNotifyUpdate(conn *jsonrpc.Conn, updateType string, text string) error {
 	return conn.Notify(client.MethodSessionUpdate, client.SessionNotification{
 		SessionID: "child-input-session",
 		Update: jsonrpc.MustMarshalRaw(client.ContentChunk{
-			SessionUpdate: client.UpdateAgentMessage,
+			SessionUpdate: updateType,
 			MessageID:     "message-" + text,
 			Content:       jsonrpc.MustMarshalRaw(client.TextContent{Type: "text", Text: text}),
 		}),

@@ -13,11 +13,13 @@ import (
 type Kind string
 
 const (
-	KindSessionUpdate      Kind = acpsdk.ClientMethodSessionUpdate
-	KindRequestPermission  Kind = acpsdk.ClientMethodSessionRequestPermission
-	KindNotice             Kind = "caelis/notice"
-	KindParticipant        Kind = "caelis/participant"
-	KindLifecycle          Kind = "caelis/lifecycle"
+	KindSessionUpdate     Kind = acpsdk.ClientMethodSessionUpdate
+	KindRequestPermission Kind = acpsdk.ClientMethodSessionRequestPermission
+	KindNotice            Kind = "caelis/notice"
+	KindParticipant       Kind = "caelis/participant"
+	KindLifecycle         Kind = "caelis/lifecycle"
+	// KindAgentCommunication is retained only to decode Control v1 events
+	// written before Agent inputs moved onto standard ACP session/update.
 	KindAgentCommunication Kind = "caelis/agent_communication"
 	KindApprovalReview     Kind = "caelis/approval_review"
 	KindError              Kind = "caelis/error"
@@ -214,6 +216,10 @@ type Envelope struct {
 	// payload so standard RequestPermissionRequest wire shape remains unchanged.
 	ApprovalRequestID ApprovalRequestID `json:"approval_request_id,omitempty"`
 
+	// AgentCommunicationSource identifies a Control-projected Agent input.
+	// ACP _meta may describe a sender but cannot populate this authority.
+	AgentCommunicationSource *ActorIdentity `json:"agent_communication_source,omitempty"`
+
 	Update     Update                    `json:"update,omitempty"`
 	Permission *RequestPermissionRequest `json:"permission,omitempty"`
 	Notice     string                    `json:"notice,omitempty"`
@@ -289,7 +295,9 @@ func (a ActorIdentity) HasIdentity() bool {
 	return strings.TrimSpace(a.ID) != "" || strings.TrimSpace(a.Name) != ""
 }
 
-// AgentCommunication is one explicitly internal Agent-to-Agent message.
+// AgentCommunication is the legacy Control v1 shape for one Agent-to-Agent
+// message. New projections use a standard ACP user_message_chunk with
+// _meta.caelis.agent_communication.
 type AgentCommunication struct {
 	Source ActorIdentity `json:"source"`
 	Text   string        `json:"text"`
@@ -413,6 +421,10 @@ func CloneEnvelope(in Envelope) Envelope {
 	if in.AgentCommunication != nil {
 		communication := *in.AgentCommunication
 		out.AgentCommunication = &communication
+	}
+	if in.AgentCommunicationSource != nil {
+		source := *in.AgentCommunicationSource
+		out.AgentCommunicationSource = &source
 	}
 	out.Update = CloneUpdate(in.Update)
 	return out

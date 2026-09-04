@@ -224,6 +224,20 @@ func (b *MainACPTurnBlock) toggleReasoningExpanded(key string) bool {
 	return toggleKeyedExpansion(&b.ExpandedThought, key)
 }
 
+func (b *MainACPTurnBlock) agentMessageExpanded(key string) bool {
+	if b == nil {
+		return false
+	}
+	return keyedExpansion(b.ExpandedAgentMessages, key)
+}
+
+func (b *MainACPTurnBlock) toggleAgentMessageExpanded(key string) bool {
+	if b == nil {
+		return false
+	}
+	return toggleKeyedExpansion(&b.ExpandedAgentMessages, key)
+}
+
 func (b *MainACPTurnBlock) explorationExpanded(key string) bool {
 	if b == nil {
 		return false
@@ -321,6 +335,20 @@ func (b *ParticipantTurnBlock) toggleReasoningExpanded(key string) bool {
 		return false
 	}
 	return toggleKeyedExpansion(&b.ExpandedThought, key)
+}
+
+func (b *ParticipantTurnBlock) agentMessageExpanded(key string) bool {
+	if b == nil {
+		return false
+	}
+	return keyedExpansion(b.ExpandedAgentMessages, key)
+}
+
+func (b *ParticipantTurnBlock) toggleAgentMessageExpanded(key string) bool {
+	if b == nil {
+		return false
+	}
+	return toggleKeyedExpansion(&b.ExpandedAgentMessages, key)
 }
 
 func (b *ParticipantTurnBlock) explorationExpanded(key string) bool {

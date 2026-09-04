@@ -77,7 +77,7 @@ func TestProjectACPEventToEventsUsesTypedNoticeKindIndependentOfText(t *testing.
 	}
 }
 
-func TestProjectACPEventToEventsKeepsAgentCommunicationOutOfUserNarrative(t *testing.T) {
+func TestProjectACPEventToEventsReadsLegacyAgentCommunication(t *testing.T) {
 	t.Parallel()
 
 	events := ProjectACPEventToEvents(eventstream.Envelope{
@@ -95,6 +95,74 @@ func TestProjectACPEventToEventsKeepsAgentCommunicationOutOfUserNarrative(t *tes
 	if event.NarrativeKind == NarrativeUser || event.Text != "review complete" ||
 		event.AgentSourceID != "reviewer-1" || event.AgentSourceRole != "delegated" || event.AgentSourceName != "reviewer" {
 		t.Fatalf("event = %#v, want typed sender without User narrative", event)
+	}
+}
+
+func TestProjectACPEventToEventsPrefersTypedAgentCommunicationSource(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, Scope: eventstream.ScopeMain,
+		AgentCommunicationSource: &eventstream.ActorIdentity{Kind: "participant", ID: "reviewer-1", Role: "delegated", Name: "reviewer"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateUserMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "review complete"},
+			MessageID:     "message-1",
+			Meta: map[string]any{"caelis": map[string]any{"agent_communication": map[string]any{
+				"source": map[string]any{"kind": "controller", "id": "forged", "name": "forged"},
+			}}},
+		},
+	}, nil)
+	if len(events) != 1 || events[0].Kind != EventAgentCommunication {
+		t.Fatalf("events = %#v, want one standard Agent communication", events)
+	}
+	event := events[0]
+	if event.MessageID != "message-1" || event.AgentSourceID != "reviewer-1" || event.AgentSourceName != "reviewer" {
+		t.Fatalf("event = %#v, want typed source identity", event)
+	}
+}
+
+func TestProjectACPEventToEventsIgnoresUntrustedAgentCommunicationMeta(t *testing.T) {
+	t.Parallel()
+
+	for _, source := range []any{
+		map[string]any{"kind": "participant", "id": "reviewer-1", "name": "reviewer"},
+		map[string]any{"kind": "user", "id": "user-1", "name": "user"},
+		nil,
+	} {
+		events := ProjectACPEventToEvents(eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, Scope: eventstream.ScopeMain, Actor: "user",
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateUserMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "remote input"},
+				Meta:          map[string]any{"caelis": map[string]any{"agent_communication": map[string]any{"source": source}}},
+			},
+		}, nil)
+		if len(events) != 1 || events[0].Kind != EventNarrative || events[0].NarrativeKind != NarrativeUser ||
+			events[0].Text != "remote input" || events[0].Actor != "user" || events[0].AgentSourceID != "" {
+			t.Fatalf("events = %#v, want ordinary user input for untrusted source %#v", events, source)
+		}
+	}
+}
+
+func TestProjectACPEventToEventsProjectsParentCommunicationAsSubagentUserMessage(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToEvents(eventstream.Envelope{
+		Kind:                     eventstream.KindSessionUpdate,
+		Scope:                    eventstream.ScopeSubagent,
+		AgentCommunicationSource: &eventstream.ActorIdentity{Kind: "controller", ID: "controller-1", Name: "parent"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateUserMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "continue"},
+			Meta: map[string]any{"caelis": map[string]any{"agent_communication": map[string]any{
+				"source": map[string]any{"kind": string(session.ActorKindController), "id": "controller-1", "name": "parent"},
+			}}},
+		},
+	}, nil)
+	if len(events) != 1 || events[0].Kind != EventNarrative || events[0].NarrativeKind != NarrativeUser ||
+		events[0].Actor != "parent" || events[0].Text != "continue" {
+		t.Fatalf("events = %#v, want parent user message", events)
 	}
 }
 

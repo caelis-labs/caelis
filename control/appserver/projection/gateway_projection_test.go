@@ -2,6 +2,7 @@ package projection
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -592,21 +593,37 @@ func TestProjectSessionEventEnvelopeProjectsAgentCommunication(t *testing.T) {
 	}
 	base := EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, event, SessionEventTransport{})
 	events := ProjectSessionEventEnvelope(base, event)
-	if len(events) != 1 || events[0].Kind != eventstream.KindAgentCommunication || events[0].AgentCommunication == nil {
+	if len(events) != 1 || events[0].Kind != eventstream.KindSessionUpdate {
 		t.Fatalf("Agent communication projection = %#v", events)
 	}
-	communication := events[0].AgentCommunication
-	if communication.Text != "review complete" || communication.Source.Kind != string(session.ActorKindParticipant) ||
-		communication.Source.ID != "reviewer-1" || communication.Source.Role != "delegated" ||
-		communication.Source.Name != "reviewer" {
-		t.Fatalf("Agent communication payload = %#v", communication)
+	wantSource := agentCommunicationSource(actor)
+	if events[0].AgentCommunicationSource == nil || *events[0].AgentCommunicationSource != wantSource {
+		t.Fatalf("Agent communication source = %#v, want %#v", events[0].AgentCommunicationSource, wantSource)
 	}
-	if events[0].Update != nil || events[0].Delivery == nil || events[0].Delivery.Mode != eventstream.DeliveryCanonical {
-		t.Fatalf("Agent communication envelope = %#v, want canonical non-session/update", events[0])
+	chunk, ok := events[0].Update.(eventstream.ContentChunk)
+	content, contentOK := chunk.Content.(eventstream.TextContent)
+	if !ok || !contentOK || chunk.SessionUpdate != eventstream.UpdateUserMessage || content.Text != "review complete" {
+		t.Fatalf("Agent communication update = %#v", events[0].Update)
+	}
+	caelisMeta, ok := chunk.Meta["caelis"].(map[string]any)
+	if !ok {
+		t.Fatalf("Agent communication meta = %#v", chunk.Meta)
+	}
+	communicationMeta, ok := caelisMeta[session.AgentCommunicationMetaKey].(map[string]any)
+	if !ok {
+		t.Fatalf("Agent communication meta = %#v", chunk.Meta)
+	}
+	source, ok := communicationMeta["source"].(map[string]any)
+	if !ok || source["kind"] != string(session.ActorKindParticipant) || source["id"] != "reviewer-1" ||
+		source["role"] != "delegated" || source["name"] != "reviewer" {
+		t.Fatalf("Agent communication source meta = %#v", chunk.Meta)
+	}
+	if events[0].AgentCommunication != nil || events[0].Delivery == nil || events[0].Delivery.Mode != eventstream.DeliveryCanonical {
+		t.Fatalf("Agent communication envelope = %#v, want canonical session/update", events[0])
 	}
 }
 
-func TestProjectSessionEventEnvelopeSkipsUnattributedAgentCommunication(t *testing.T) {
+func TestProjectSessionEventEnvelopeRejectsUnattributedAgentCommunication(t *testing.T) {
 	t.Parallel()
 
 	message := model.NewTextMessage(model.RoleUser, "[Internal agent message]\nMessage:\nreview complete")
@@ -617,8 +634,9 @@ func TestProjectSessionEventEnvelopeSkipsUnattributedAgentCommunication(t *testi
 		Actor: session.ActorRef{Kind: session.ActorKindParticipant}, Message: &message, Protocol: &protocol,
 	}
 	base := EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, event, SessionEventTransport{})
-	if events := ProjectSessionEventEnvelope(base, event); len(events) != 0 {
-		t.Fatalf("unattributed Agent communication projection = %#v, want none", events)
+	if events := ProjectSessionEventEnvelope(base, event); len(events) != 1 || events[0].Kind != eventstream.KindError ||
+		!strings.Contains(events[0].Error, "source ID or name") {
+		t.Fatalf("unattributed Agent communication projection = %#v, want explicit error", events)
 	}
 }
 

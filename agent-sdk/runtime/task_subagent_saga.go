@@ -270,7 +270,7 @@ func (tm *taskRuntime) beginSubagentSpawn(
 	entry := &taskapi.Entry{
 		TaskID: taskID, Handle: handle, Kind: taskapi.KindSubagent, Session: session.NormalizeSessionRef(ref),
 		Title: "Spawn " + target.Selector, State: taskapi.StatePrepared, CreatedAt: now, UpdatedAt: now,
-		SupportsCancel: true,
+		SupportsCancel: false,
 		Spec: map[string]any{
 			"spawn_identity": strings.TrimSpace(spawnID), "spawn_request_digest": strings.TrimSpace(requestDigest),
 			"target":              target,
@@ -510,6 +510,7 @@ func newSubagentTaskFromSpawn(
 			"spawn_status": string(phase), "spawn_identity": spawnID, "spawn_request_digest": requestDigest,
 			"parent_call": strings.TrimSpace(req.ParentCall), "parent_tool": spawn.ToolName,
 			"include_context": req.IncludeContext, "context_unsupported": req.ContextUnsupported,
+			"supports_steering": result.SupportsSteering,
 		},
 	}
 	task.applyResult(result)
@@ -630,7 +631,7 @@ func snapshotFromTaskEntry(entry *taskapi.Entry) taskapi.Snapshot {
 		Ref:      taskapi.Ref{TaskID: entry.TaskID, SessionID: taskSpecString(entry.Spec, "session_id"), TerminalID: taskSpecString(entry.Spec, "terminal_id")},
 		Handle:   firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"])),
 		Revision: entry.Revision, Kind: entry.Kind, Title: entry.Title, State: entry.State, Running: entry.Running,
-		SupportsInput: entry.SupportsInput, SupportsCancel: entry.SupportsCancel, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt,
+		SupportsInput: entry.SupportsInput, SupportsCancel: entry.Kind == taskapi.KindCommand && entry.SupportsCancel, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt,
 		Result: result, Metadata: session.CloneState(entry.Metadata),
 	}
 }

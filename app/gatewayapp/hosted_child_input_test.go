@@ -290,8 +290,10 @@ func assertHostedChildInputEvent(t *testing.T, event *session.Event) {
 	if event == nil || event.Actor.Kind != session.ActorKindParticipant || !strings.HasPrefix(event.Actor.ID, "child-agent-") {
 		t.Fatalf("input event actor = %#v, want trusted child participant", event)
 	}
-	if session.EventTypeOf(event) != session.EventTypeContext || session.ProtocolUpdateOf(event) != nil {
-		t.Fatalf("input event = %#v, want Agent Context without user_message projection", event)
+	update := session.ProtocolUpdateOf(event)
+	if session.EventTypeOf(event) != session.EventTypeContext || update == nil ||
+		update.SessionUpdate != string(session.ProtocolUpdateTypeUserMessage) {
+		t.Fatalf("input event = %#v, want Agent Context with standard user_message projection", event)
 	}
 	communication := session.ProtocolAgentCommunicationOf(event)
 	if communication == nil || communication.Text == "" || !session.IsClientReplayEvent(event) {

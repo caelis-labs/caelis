@@ -408,10 +408,18 @@ func TestProjectTaskFrameProjectsEventOnlySpawnChildSemantics(t *testing.T) {
 			},
 			assert: func(t *testing.T, env eventstream.Envelope) {
 				t.Helper()
-				if env.Kind != eventstream.KindAgentCommunication || env.AgentCommunication == nil ||
-					env.AgentCommunication.Text != "continue from parent" ||
-					env.AgentCommunication.Source.Kind != string(session.ActorKindController) || env.Actor != "parent" {
-					t.Fatalf("child input = %#v, want scoped parent Agent communication", env)
+				chunk, ok := env.Update.(eventstream.ContentChunk)
+				content, contentOK := chunk.Content.(eventstream.TextContent)
+				caelisMeta, metaOK := chunk.Meta["caelis"].(map[string]any)
+				communicationMeta, communicationOK := caelisMeta[session.AgentCommunicationMetaKey].(map[string]any)
+				source, sourceOK := communicationMeta["source"].(map[string]any)
+				if env.Kind != eventstream.KindSessionUpdate || !ok || !contentOK ||
+					chunk.SessionUpdate != eventstream.UpdateUserMessage || content.Text != "continue from parent" ||
+					!metaOK || !communicationOK || !sourceOK ||
+					source["kind"] != string(session.ActorKindController) || source["id"] != "parent" || env.Actor != "parent" ||
+					env.AgentCommunication != nil || env.AgentCommunicationSource == nil ||
+					env.AgentCommunicationSource.ID != "parent" || env.AgentCommunicationSource.Kind != "controller" {
+					t.Fatalf("child input = %#v, want standard scoped parent Agent communication", env)
 				}
 			},
 		},
@@ -810,8 +818,7 @@ func spawnSubagentScope(taskID string) *session.EventScope {
 
 func assertSpawnSemanticEnvelope(t *testing.T, env eventstream.Envelope, taskID string, parentCallID string) {
 	t.Helper()
-	if (env.Kind != eventstream.KindSessionUpdate && env.Kind != eventstream.KindAgentCommunication) ||
-		env.Scope != eventstream.ScopeSubagent || env.ScopeID != taskID {
+	if env.Kind != eventstream.KindSessionUpdate || env.Scope != eventstream.ScopeSubagent || env.ScopeID != taskID {
 		t.Fatalf("child envelope = %#v, want scoped subagent semantic event for task %q", env, taskID)
 	}
 	if env.ParentTool == nil || env.ParentTool.ToolCallID != parentCallID || env.ParentTool.ToolName != "Spawn" {

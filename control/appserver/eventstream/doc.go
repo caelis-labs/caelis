@@ -27,7 +27,10 @@
 // EventID, the durable source session event id, and ProjectionID, the stable
 // per-source projection identity. Neither identity is accepted as a resume
 // token. Clients should render standard ACP
-// payloads directly; helpers in this package only identify those payloads and
+// payloads directly; Agent-to-Agent inputs use standard user_message_chunk
+// payloads with authoritative AgentCommunicationSource identity beside the
+// update and optional display metadata under _meta.caelis.agent_communication.
+// Helpers in this package only identify those payloads and
 // without depending on TUI transcript view models. Final marks a completed
 // semantic projection for the scoped
 // actor/message, while lifecycle terminal states close the turn stream.

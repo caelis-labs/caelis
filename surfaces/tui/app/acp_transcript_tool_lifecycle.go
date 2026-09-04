@@ -16,6 +16,9 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 	}
 	callID := strings.TrimSpace(ev.CallID)
 	if callID == "" {
+		if ev.Name == surfaceToolSendMessage && (!ev.Done || ev.Err) {
+			return nil, idx
+		}
 		if !shouldRenderToolEvent(ev) {
 			return nil, idx
 		}
@@ -32,6 +35,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 	}
 
 	group := events[idx : end+1]
+	sendMessageLifecycle := toolLifecycleIsSendMessage(group)
 	start := group[0]
 	singleCompletedLifecycle := len(group) == 1 && start.Done && toolEventHasPresentation(start)
 	if start.Done && len(group) > 1 {
@@ -60,6 +64,11 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 			continue
 		}
 		settled = true
+		if sendMessageLifecycle {
+			final = item
+			hasFinal = true
+			continue
+		}
 		if !toolEventHasPresentation(item) || !shouldRenderToolEvent(item) {
 			continue
 		}
@@ -68,9 +77,12 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 	}
 	if singleCompletedLifecycle {
 		final = start
-		hasFinal = shouldRenderToolEvent(final)
+		hasFinal = sendMessageLifecycle || shouldRenderToolEvent(final)
 		start.Done = false
 		start.Output = ""
+	}
+	if sendMessageLifecycle && (!settled || !hasFinal || final.Err) {
+		return nil, end
 	}
 
 	if !hasStart {
@@ -155,6 +167,9 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 }
 
 func renderACPStandaloneFinalToolRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
+	if ev.Name == surfaceToolSendMessage && ev.Err {
+		return nil
+	}
 	if opts.SubagentOutputLinks && isSpawnToolEvent(ev) {
 		return renderACPSpawnToolRows(blockID, ev, ev.CallID, width, ctx)
 	}
@@ -282,6 +297,15 @@ func toolEventHasPresentation(ev SubagentEvent) bool {
 	}
 	kind := strings.ToLower(strings.TrimSpace(ev.ToolKind))
 	return kind != "" && kind != "other"
+}
+
+func toolLifecycleIsSendMessage(events []SubagentEvent) bool {
+	for _, event := range events {
+		if event.Name == surfaceToolSendMessage {
+			return true
+		}
+	}
+	return false
 }
 
 func shouldRenderACPToolPanel(text string, err bool) bool {
@@ -551,18 +575,17 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 		headerEvent.Args, _ = longCommandDisplayPreview(fullArgs, compactSingleLineBudget(width))
 	}
 	header := terminalLifecycleHeader(headerEvent)
-	if sendMessage && err {
-		header = failedSendMessageHeader(headerEvent)
-	}
 	if !fullOutput && fullArgs != "" {
 		header = compactSingleLineHeader(header, width)
 	}
 	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, text, final, err))
 	tone, dim := acpToolHeaderMark(ctx, err, final)
 	var headerRow RenderedRow
-	if sendMessage && opts.AgentMessageTargetLinks && agentMessageTargetCanOpenOverlay(ev.MessageTarget) {
+	if sendMessage && opts.AgentMessageTargetLinks && fullArgs == "" && agentMessageTargetCanOpenOverlay(ev.MessageTarget) {
 		token = agentMessageTargetOverlayClickToken(callID)
-		headerRow = renderACPTranscriptLinkedHeaderRowMarked(blockID, header, ctx, token, tone, dim)
+		headerRow = renderSendMessageHeaderRow(blockID, headerEvent.Args, ctx, token, tone, dim)
+	} else if sendMessage {
+		headerRow = renderSendMessageHeaderRow(blockID, headerEvent.Args, ctx, token, tone, dim)
 	} else {
 		headerRow = renderACPTranscriptHeaderRowMarked(blockID, header, width, ctx, token, tone, dim)
 	}
@@ -579,11 +602,23 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 	return rows
 }
 
-func failedSendMessageHeader(ev SubagentEvent) string {
-	if args := strings.TrimSpace(ev.Args); args != "" {
-		return "• Failed to send " + args
+func renderSendMessageHeaderRow(blockID string, args string, ctx BlockRenderContext, token string, tone acpHeaderMarkTone, dim bool) RenderedRow {
+	args = sanitizeRenderableText(args)
+	target := strings.TrimSpace(args)
+	message := ""
+	if before, after, ok := strings.Cut(args, ":"); ok {
+		target = strings.TrimSpace(before)
+		message = strings.TrimSpace(after)
 	}
-	return "• Failed to send"
+	plain := "• " + target
+	styled := renderACPTranscriptHeaderMark(ctx, tone, dim) + " " + styleSpawnedHeaderTarget(ctx, target)
+	if message != "" {
+		plain += ": " + message
+		styled += ctx.Theme.TextStyle().Render(": " + message)
+	}
+	row := StyledPlainClickableRow(blockID, plain, styled, token)
+	row.selectionIndent = 2
+	return row
 }
 
 func isSpawnToolEvent(ev SubagentEvent) bool {
@@ -661,9 +696,9 @@ func terminalLifecycleHeader(ev SubagentEvent) string {
 		return "• Spawned"
 	case surfaceToolSendMessage:
 		if args != "" {
-			return "• Sent " + args
+			return "• " + args
 		}
-		return "• Sent"
+		return "• SendMessage"
 	default:
 		if isExecuteToolKind(ev.ToolKind) {
 			if command := executeToolCommandDisplay(rawName, args); command != "" {

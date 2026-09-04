@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
@@ -442,12 +443,12 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	if err != nil {
 		return tool.Result{}, err
 	}
-	result := taskSnapshotToolResult(call, t.base.Definition(), snapshot)
+	payload := taskToolPayload(snapshot)
+	payload["supports_steering"] = taskSpecBool(snapshot.Metadata, "supports_steering")
 	if spawnContextUnsupported(snapshot) {
-		payload := taskToolPayload(snapshot)
 		payload["system_hint"] = spawnContextUnsupportedHint
-		result = taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
 	}
+	result := taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
 	t.tasks.markSubagentFinalResponseObserved(snapshot)
 	return result, nil
 }
@@ -676,6 +677,9 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if normalizedAction == "write" && identity.kind != taskapi.KindCommand {
 		return tool.Result{}, fmt.Errorf("task write accepts RunCommand handles only; use SendMessage for subagent %q", handles[0])
 	}
+	if normalizedAction == "cancel" && identity.kind == taskapi.KindSubagent {
+		return tool.Result{}, errorcode.New(errorcode.Unsupported, "Task cancel accepts RunCommand handles only")
+	}
 	yield := time.Duration(0)
 	switch normalizedAction {
 	case "wait":
@@ -740,6 +744,10 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Cal
 		identity, resolveErr := t.tasks.resolveTaskHandle(ctx, t.sessionRef, handle)
 		if resolveErr != nil {
 			items = append(items, taskBatchControlItem{Handle: handle, Err: resolveErr})
+			continue
+		}
+		if strings.EqualFold(action, "cancel") && identity.kind == taskapi.KindSubagent {
+			items = append(items, taskBatchControlItem{Handle: handle, Err: errorcode.New(errorcode.Unsupported, "Task cancel accepts RunCommand handles only")})
 			continue
 		}
 		req := taskapi.ControlRequest{

@@ -130,8 +130,8 @@ func (s *runtimeComposition) estimatedPromptPrefixTokens(ctx context.Context, re
 
 	extra := 0
 	baseSystemPrompt := stringFromMap(runtimeCfg.BaseMetadata, "system_prompt")
-	withDelegation := systemPromptWithDelegationGuidance(baseSystemPrompt)
-	if delta := estimatePromptTextTokens(withDelegation) - estimatePromptTextTokens(baseSystemPrompt); delta > 0 {
+	withCollaboration := systemPromptWithCollaborationGuidance(baseSystemPrompt)
+	if delta := estimatePromptTextTokens(withCollaboration) - estimatePromptTextTokens(baseSystemPrompt); delta > 0 {
 		extra += delta
 	}
 	extra += estimateToolPromptTokens(spawnTools(agents))

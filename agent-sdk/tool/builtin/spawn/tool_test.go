@@ -47,14 +47,16 @@ func TestDefinitionDoesNotExposeYieldTimeMS(t *testing.T) {
 	}
 }
 
-func TestDefinitionGuidesWaitingWithTaskTool(t *testing.T) {
+func TestDefinitionDescribesBoundedCollaboration(t *testing.T) {
 	t.Parallel()
 
 	desc := New([]delegation.Agent{{Name: "codex"}}).Definition().Description
 	for _, want := range []string{
-		"To observe or wait for an existing child task, use Task wait",
+		"collaborating Agent",
+		"independent work",
+		"self-contained task",
 		"returned handle",
-		"do not call Spawn again",
+		"only when its result is needed",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("SPAWN description missing %q:\n%s", want, desc)

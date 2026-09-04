@@ -364,6 +364,9 @@ func (m *Model) toggleSubagentOutputRow(token string) bool {
 		case strings.HasPrefix(token, "acp_exploration_stable:"):
 			key := strings.TrimSpace(strings.TrimPrefix(token, "acp_exploration_stable:"))
 			changed = block.toggleExplorationExpanded(key)
+		case strings.HasPrefix(token, agentMessageFoldTokenPrefix):
+			key := strings.TrimSpace(strings.TrimPrefix(token, agentMessageFoldTokenPrefix))
+			changed = block.toggleAgentMessageExpanded(key)
 		default:
 			return false
 		}

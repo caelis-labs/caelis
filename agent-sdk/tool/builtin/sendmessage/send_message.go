@@ -36,7 +36,7 @@ func New() Tool { return Tool{} }
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Send one input to another Agent or the parent. Success confirms dispatch, not task completion.",
+		Description: "Send one message to another Agent. An Agent with supports_steering=true can receive messages while running; otherwise it can receive messages only while idle. Success confirms dispatch, not completion.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

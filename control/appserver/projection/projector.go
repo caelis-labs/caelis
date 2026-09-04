@@ -16,6 +16,18 @@ func ProjectEvent(event *session.Event) ([]eventstream.Update, error) {
 	if event == nil {
 		return nil, nil
 	}
+	if session.IsAgentCommunicationProtocol(event) {
+		communication := session.ProtocolAgentCommunicationOf(event)
+		if communication == nil {
+			return nil, fmt.Errorf("agent communication is missing display text")
+		}
+		if err := session.ValidateAgentCommunicationActor(event.Actor); err != nil {
+			return nil, err
+		}
+		chunk := contentChunkForEvent(event, eventstream.UpdateUserMessage, communication.Text)
+		chunk.Meta = eventmeta.Merge(chunk.Meta, agentCommunicationMeta(agentCommunicationSource(event.Actor)))
+		return []eventstream.Update{chunk}, nil
+	}
 	if _, ok, err := projectPermissionRequest(event); err != nil {
 		return nil, err
 	} else if ok {
@@ -26,6 +38,36 @@ func ProjectEvent(event *session.Event) ([]eventstream.Update, error) {
 		return updates, nil
 	}
 	return inferredUpdates(event), nil
+}
+
+func agentCommunicationSource(actor session.ActorRef) eventstream.ActorIdentity {
+	return eventstream.ActorIdentity{
+		Kind: strings.TrimSpace(string(actor.Kind)),
+		ID:   strings.TrimSpace(actor.ID),
+		Role: strings.TrimSpace(actor.Role),
+		Name: strings.TrimSpace(actor.Name),
+	}
+}
+
+func agentCommunicationMeta(actor eventstream.ActorIdentity) map[string]any {
+	source := map[string]any{}
+	if kind := strings.TrimSpace(actor.Kind); kind != "" {
+		source["kind"] = kind
+	}
+	if id := strings.TrimSpace(actor.ID); id != "" {
+		source["id"] = id
+	}
+	if role := strings.TrimSpace(actor.Role); role != "" {
+		source["role"] = role
+	}
+	if name := strings.TrimSpace(actor.Name); name != "" {
+		source["name"] = name
+	}
+	return map[string]any{
+		"caelis": map[string]any{
+			session.AgentCommunicationMetaKey: map[string]any{"source": source},
+		},
+	}
 }
 
 func projectPermissionRequest(event *session.Event) (*eventstream.RequestPermissionRequest, bool, error) {

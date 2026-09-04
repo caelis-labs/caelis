@@ -14,7 +14,7 @@ func TestSendMessageSchemaKeepsOnlyRoutingEssentials(t *testing.T) {
 	t.Parallel()
 
 	def := New().Definition()
-	if got := def.Description; got != "Send one input to another Agent or the parent. Success confirms dispatch, not task completion." {
+	if got := def.Description; got != "Send one message to another Agent. An Agent with supports_steering=true can receive messages while running; otherwise it can receive messages only while idle. Success confirms dispatch, not completion." {
 		t.Fatalf("description = %q", got)
 	}
 	properties, _ := def.InputSchema["properties"].(map[string]any)

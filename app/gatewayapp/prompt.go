@@ -18,12 +18,12 @@ func buildSystemPromptResult(cfg promptConfig) (promptResult, error) {
 	return promptassembly.BuildSystemPromptResult(cfg)
 }
 
-func systemPromptWithDelegationGuidance(prompt string) string {
-	return promptassembly.WithDelegationGuidance(prompt)
+func systemPromptWithCollaborationGuidance(prompt string) string {
+	return promptassembly.WithCollaborationGuidance(prompt)
 }
 
-func systemPromptWithSharedWorkspaceGuidance(prompt string) string {
-	return promptassembly.WithSharedWorkspaceGuidance(prompt)
+func systemPromptWithoutCollaborationGuidance(prompt string) string {
+	return promptassembly.WithoutCollaborationGuidance(prompt)
 }
 
 func DefaultSkillDiscoveryDirs(workspaceDir string) []string {

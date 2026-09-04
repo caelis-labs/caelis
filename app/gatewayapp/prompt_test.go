@@ -204,7 +204,7 @@ func containsStandalonePromptTerm(prompt, term string) bool {
 	return regexp.MustCompile(pattern).MatchString(prompt)
 }
 
-func TestSystemPromptWithSharedWorkspaceGuidanceIsIdempotentAndChildOnly(t *testing.T) {
+func TestSystemPromptCollaborationGuidanceIsMainOnlyAndIdempotent(t *testing.T) {
 	t.Parallel()
 
 	base, err := buildSystemPrompt(promptConfig{
@@ -214,43 +214,41 @@ func TestSystemPromptWithSharedWorkspaceGuidanceIsIdempotentAndChildOnly(t *test
 	if err != nil {
 		t.Fatalf("buildSystemPrompt() error = %v", err)
 	}
-	first := systemPromptWithSharedWorkspaceGuidance(base)
-	if !strings.Contains(first, "## Shared Workspace") {
-		t.Fatalf("shared workspace guidance missing:\n%s", first)
+	mainPrompt := systemPromptWithCollaborationGuidance(base)
+	if !strings.Contains(mainPrompt, "## Collaboration") {
+		t.Fatalf("collaboration guidance missing:\n%s", mainPrompt)
 	}
-	if strings.Index(first, "## Shared Workspace") > strings.Index(first, "</system_instructions>") {
-		t.Fatalf("shared workspace guidance rendered outside system instructions:\n%s", first)
+	if strings.Index(mainPrompt, "## Collaboration") > strings.Index(mainPrompt, "</system_instructions>") {
+		t.Fatalf("collaboration guidance rendered outside system instructions:\n%s", mainPrompt)
 	}
-	if strings.Index(first, "## Shared Workspace") > strings.Index(first, "## Sandbox And Host Approval") {
-		t.Fatalf("shared workspace guidance rendered after permission guidance:\n%s", first)
+	if strings.Index(mainPrompt, "## Collaboration") > strings.Index(mainPrompt, "## Sandbox And Host Approval") {
+		t.Fatalf("collaboration guidance rendered after permission guidance:\n%s", mainPrompt)
 	}
-	if got := systemPromptWithSharedWorkspaceGuidance(first); got != first {
-		t.Fatalf("shared workspace guidance is not idempotent:\n%s", got)
+	if got := systemPromptWithCollaborationGuidance(mainPrompt); got != mainPrompt {
+		t.Fatalf("collaboration guidance is not idempotent:\n%s", got)
 	}
-	parent := systemPromptWithDelegationGuidance(base)
-	if strings.Contains(parent, "## Shared Workspace") {
-		t.Fatalf("parent delegation guidance unexpectedly includes child workspace reminder:\n%s", parent)
+	for _, want := range []string{
+		"Spawn a collaborating Agent only for independent work that benefits from parallelism or focused expertise.",
+		"Give each collaborator a self-contained task: goal, scope, constraints, edit permission, and expected output.",
+		"Own integration, validation, and the user-facing result. Verify only findings that affect the next action; do not repeat completed work.",
+	} {
+		if !strings.Contains(mainPrompt, want) {
+			t.Fatalf("collaboration guidance missing %q:\n%s", want, mainPrompt)
+		}
 	}
-	if strings.Index(parent, "## Delegation") > strings.Index(parent, "</system_instructions>") {
-		t.Fatalf("delegation guidance rendered outside system instructions:\n%s", parent)
+	childPrompt := systemPromptWithoutCollaborationGuidance(mainPrompt)
+	if strings.Contains(childPrompt, "## Collaboration") || strings.Contains(childPrompt, "## Shared Workspace") {
+		t.Fatalf("collaborator prompt retained role-specific guidance:\n%s", childPrompt)
 	}
-	if strings.Index(parent, "## Delegation") > strings.Index(parent, "## Sandbox And Host Approval") {
-		t.Fatalf("delegation guidance rendered after permission guidance:\n%s", parent)
+	if got := systemPromptWithoutCollaborationGuidance(childPrompt); got != childPrompt {
+		t.Fatalf("collaboration guidance removal is not idempotent:\n%s", got)
 	}
-	if !strings.Contains(parent, "Verify only delegated findings that affect the next action; do not repeat the investigation.") {
-		t.Fatalf("parent delegation guidance missing bounded verification:\n%s", parent)
+	if got := systemPromptWithoutCollaborationGuidance(systemPromptWithCollaborationGuidance("")); strings.Contains(got, "## Collaboration") {
+		t.Fatalf("standalone collaboration guidance was not removed: %q", got)
 	}
-	switched := systemPromptWithSharedWorkspaceGuidance(parent)
-	if strings.Contains(switched, "## Delegation") || !strings.Contains(switched, "## Shared Workspace") {
-		t.Fatalf("runtime role guidance did not switch atomically:\n%s", switched)
-	}
-	onlyRole := systemPromptWithSharedWorkspaceGuidance(systemPromptWithDelegationGuidance(""))
-	if strings.Contains(onlyRole, "## Delegation") || strings.Count(onlyRole, "## Shared Workspace") != 1 {
-		t.Fatalf("standalone runtime role guidance did not switch atomically:\n%s", onlyRole)
-	}
-	end := strings.Index(parent, "</system_instructions>") + len("</system_instructions>")
-	if got, max := len(parent[:end]), 4700; got > max {
-		t.Fatalf("system instructions with delegation length = %d, want <= %d:\n%s", got, max, parent)
+	end := strings.Index(mainPrompt, "</system_instructions>") + len("</system_instructions>")
+	if got, max := len(mainPrompt[:end]), 4700; got > max {
+		t.Fatalf("system instructions with collaboration length = %d, want <= %d:\n%s", got, max, mainPrompt)
 	}
 }
 

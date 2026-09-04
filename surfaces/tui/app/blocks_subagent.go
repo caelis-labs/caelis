@@ -36,6 +36,11 @@ type SubagentEvent struct {
 	SourceName string
 	SourceRole string
 	SourceID   string
+	// SourceEventID, SourceProjectionID, and MessageID preserve stable
+	// presentation identity for Agent-message dedupe and folding.
+	SourceEventID      string
+	SourceProjectionID string
+	MessageID          string
 	// SourceCallID is the retained Spawn owner for a received Agent message.
 	// It is presentation-only and lets the compact row reuse the existing
 	// whole-row child-workspace navigation without parsing its rendered label.

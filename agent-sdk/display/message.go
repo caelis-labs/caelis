@@ -10,9 +10,9 @@ func AgentMessageFullDisplayArgs(args map[string]any) string {
 	message := NormalizeDisplayArg(MapString(args, "message"))
 	switch {
 	case target != "" && message != "":
-		return "to " + target + ": " + message
+		return target + ": " + message
 	case target != "":
-		return "to " + target
+		return target
 	case message != "":
 		return message
 	default:

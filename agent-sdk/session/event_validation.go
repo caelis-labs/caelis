@@ -81,15 +81,12 @@ func ValidateDurableCoreEvent(event *Event) error {
 		if event.Message == nil {
 			return coreEventValidationError("model-visible event is missing durable Event.Message")
 		}
-		if event.Protocol != nil {
-			protocol := CloneEventProtocol(*event.Protocol)
-			if protocol.Method == ProtocolMethodAgentCommunication {
-				if ProtocolAgentCommunicationOf(event) == nil {
-					return coreEventValidationError("Agent communication is missing durable display text")
-				}
-				if err := ValidateAgentCommunicationActor(event.Actor); err != nil {
-					return coreEventValidationError(err.Error())
-				}
+		if IsAgentCommunicationProtocol(event) {
+			if ProtocolAgentCommunicationOf(event) == nil {
+				return coreEventValidationError("Agent communication is missing durable display text")
+			}
+			if err := ValidateAgentCommunicationActor(event.Actor); err != nil {
+				return coreEventValidationError(err.Error())
 			}
 		}
 	case EventTypeToolCall:

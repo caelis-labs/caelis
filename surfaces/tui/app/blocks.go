@@ -89,6 +89,7 @@ type MainACPTurnBlock struct {
 	ToolPanelScroll       map[string]toolPanelScrollState
 	ExpandedThought       map[string]bool
 	ExpandedExplore       map[string]bool
+	ExpandedAgentMessages map[string]bool
 	explorationProjection explorationProjectionState
 	toolPanelRenderCache  map[string]toolOutputRenderCache
 	toolEventIndex        map[string]int
@@ -223,6 +224,9 @@ func (b *MainACPTurnBlock) AddAgentCommunication(event SubagentEvent) {
 	if b == nil || event.Kind != SEAgentCommunication || strings.TrimSpace(event.Text) == "" {
 		return
 	}
+	if subagentEventsContainAgentCommunication(b.Events, event) {
+		return
+	}
 	b.clearTransientRetryNotice()
 	b.Events = append(b.Events, event)
 	b.advanceNarrativeBoundary()
@@ -299,6 +303,7 @@ func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		StableExplorationRows:   b.stableExplorationRows,
 		ToolPanelScrollState:    b.toolPanelScrollState,
 		ReasoningExpanded:       b.reasoningExpanded,
+		AgentMessageExpanded:    b.agentMessageExpanded,
 		AgentMessageTargetLinks: true,
 		SubagentOutputLinks:     true,
 	})
@@ -400,6 +405,7 @@ type ParticipantTurnBlock struct {
 	ToolPanelScroll       map[string]toolPanelScrollState
 	ExpandedThought       map[string]bool
 	ExpandedExplore       map[string]bool
+	ExpandedAgentMessages map[string]bool
 	explorationProjection explorationProjectionState
 	toolPanelRenderCache  map[string]toolOutputRenderCache
 	toolEventIndex        map[string]int
@@ -478,9 +484,27 @@ func (b *ParticipantTurnBlock) AddAgentCommunication(event SubagentEvent) {
 	if b == nil || event.Kind != SEAgentCommunication || strings.TrimSpace(event.Text) == "" {
 		return
 	}
+	if subagentEventsContainAgentCommunication(b.Events, event) {
+		return
+	}
 	b.clearTransientRetryNotice()
 	b.Events = append(b.Events, event)
 	b.advanceNarrativeBoundary()
+}
+
+func subagentEventsContainAgentCommunication(events []SubagentEvent, incoming SubagentEvent) bool {
+	for _, event := range events {
+		if event.Kind != SEAgentCommunication {
+			continue
+		}
+		if incoming.SourceProjectionID != "" && event.SourceProjectionID == incoming.SourceProjectionID {
+			return true
+		}
+		if incoming.SourceProjectionID == "" && incoming.SourceEventID != "" && event.SourceEventID == incoming.SourceEventID {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *ParticipantTurnBlock) SetStatus(state string, approvalTool string, approvalCommand string, occurredAt time.Time) {
@@ -553,6 +577,7 @@ func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		StableExplorationRows:  b.stableExplorationRows,
 		ToolPanelScrollState:   b.toolPanelScrollState,
 		ReasoningExpanded:      b.reasoningExpanded,
+		AgentMessageExpanded:   b.agentMessageExpanded,
 	})
 	if len(bodyRows) == 0 && participantTurnIsTerminal(b.Status) && strings.TrimSpace(b.Actor) == "" {
 		return nil

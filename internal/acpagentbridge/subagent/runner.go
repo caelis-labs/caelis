@@ -98,22 +98,26 @@ type childRun struct {
 	cancel                context.CancelFunc
 	slot                  *childSlot
 
-	mu              sync.RWMutex
-	state           delegation.State
-	outputPreview   string
-	actionSummary   subagentActionSummary
-	failureDetail   string
-	result          string
-	agentText       string
-	finalAssistant  acpbridge.FinalAssistantAccumulator
-	inputActor      session.ActorRef
-	updatedAt       time.Time
-	running         bool
-	finishing       bool
-	cancelRequested bool
-	cancelFailed    bool
-	cancelResolved  chan struct{}
-	done            chan struct{}
+	mu             sync.RWMutex
+	state          delegation.State
+	outputPreview  string
+	actionSummary  subagentActionSummary
+	failureDetail  string
+	result         string
+	agentText      string
+	finalAssistant acpbridge.FinalAssistantAccumulator
+	inputActor     session.ActorRef
+	// suppressInputEcho makes the locally projected accepted input authoritative
+	// for the remainder of this activity. ACP Agents may echo prompt input, but
+	// that provider behavior is optional and must not control recipient visibility.
+	suppressInputEcho bool
+	updatedAt         time.Time
+	running           bool
+	finishing         bool
+	cancelRequested   bool
+	cancelFailed      bool
+	cancelResolved    chan struct{}
+	done              chan struct{}
 }
 
 func (run *childRun) childSlot() *childSlot {
@@ -768,14 +772,15 @@ func childResultLocked(run *childRun) delegation.Result {
 		return delegation.Result{}
 	}
 	out := delegation.Result{
-		TaskID:        strings.TrimSpace(run.taskID),
-		State:         run.state,
-		Running:       run.running,
-		Yielded:       run.running,
-		OutputPreview: strings.TrimSpace(run.outputPreview),
-		Error:         strings.TrimSpace(run.failureDetail),
-		Result:        "",
-		UpdatedAt:     run.updatedAt,
+		TaskID:           strings.TrimSpace(run.taskID),
+		State:            run.state,
+		Running:          run.running,
+		Yielded:          run.running,
+		SupportsSteering: run.supportsSteering,
+		OutputPreview:    strings.TrimSpace(run.outputPreview),
+		Error:            strings.TrimSpace(run.failureDetail),
+		Result:           "",
+		UpdatedAt:        run.updatedAt,
 	}
 	if !run.running {
 		out.Result = strings.TrimSpace(run.result)
@@ -970,8 +975,10 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 		if text := chunkText(update); text != "" {
 			switch strings.TrimSpace(update.SessionUpdate) {
 			case client.UpdateUserMessage:
-				event = run.acpUpdateEvent(env, run.updatedAt)
-				markSubagentInputEvent(event, run.inputActor)
+				if !run.suppressInputEcho {
+					event = run.acpUpdateEvent(env, run.updatedAt)
+					markSubagentInputEvent(event, run.inputActor)
+				}
 			case client.UpdateAgentMessage:
 				if acceptOutput {
 					textOverride, messageID := run.appendAgentMessageChunkLocked(update.MessageID, text)
@@ -1053,7 +1060,17 @@ func markSubagentInputEvent(event *session.Event, source session.ActorRef) sessi
 	event.Actor = session.CloneActorRef(source)
 	header := session.AgentCommunicationPromptHeader(event.Actor)
 	event.Text = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(event.Text), header))
+	messageID := ""
+	if event.Protocol != nil {
+		existing := session.CloneEventProtocol(*event.Protocol)
+		if existing.Update != nil {
+			messageID = strings.TrimSpace(existing.Update.MessageID)
+		}
+	}
 	protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: event.Text})
+	if protocol.Update != nil {
+		protocol.Update.MessageID = messageID
+	}
 	event.Protocol = &protocol
 	if event.Scope != nil {
 		event.Scope.Source = "agent_input"

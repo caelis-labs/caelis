@@ -12,7 +12,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
@@ -160,6 +162,64 @@ func buildAgentCommunicationPrompt(req agent.ChildInputRequest) []json.RawMessag
 	return acputil.BuildPromptParts("", parts)
 }
 
+// acceptedChildInputOutput constructs the recipient-visible standard ACP input
+// event from the trusted request. Provider user-message echoes are optional, so
+// they cannot own whether an accepted Agent message appears in the transcript.
+func (r *Runner) acceptedChildInputOutput(
+	slot *childSlot,
+	run *childRun,
+	req agent.ChildInputRequest,
+	activityID string,
+) *output.Event {
+	if r == nil || slot == nil || run == nil {
+		return nil
+	}
+	_, displayText, _ := userdisplay.Resolve(req.Input, req.DisplayInput, req.ContentParts, nil)
+	displayText = strings.TrimSpace(displayText)
+	if displayText == "" {
+		var imageMarkers []string
+		for _, part := range req.ContentParts {
+			if part.Type == model.ContentPartImage {
+				imageMarkers = append(imageMarkers, fmt.Sprintf("[image #%d]", len(imageMarkers)+1))
+			}
+		}
+		displayText = strings.Join(imageMarkers, " ")
+	}
+	if displayText == "" {
+		return nil
+	}
+	projectionID := slot.nextInputProjectionID(activityID)
+	content, err := json.Marshal(client.TextContent{Type: "text", Text: displayText})
+	if err != nil {
+		return nil
+	}
+	at := r.clock()
+	run.mu.Lock()
+	event := run.acpUpdateEvent(client.UpdateEnvelope{
+		SessionID: strings.TrimSpace(run.anchor.SessionID),
+		Update: client.ContentChunk{
+			SessionUpdate: client.UpdateUserMessage,
+			MessageID:     projectionID,
+			Content:       content,
+		},
+	}, at)
+	markSubagentInputEvent(event, req.Source)
+	if event != nil {
+		event.ID = projectionID
+	}
+	frame := &output.Event{
+		State:      string(run.state),
+		Running:    run.running,
+		Event:      event,
+		OccurredAt: at,
+	}
+	run.mu.Unlock()
+	if frame.Event == nil {
+		return nil
+	}
+	return frame
+}
+
 func (r *Runner) lookupChildSlot(target agent.ChildEndpointRef) (*childSlot, error) {
 	key := strings.TrimSpace(target.EndpointKey)
 	if key == "" {
@@ -195,7 +255,7 @@ func (r *Runner) submitActiveChildInputLocked(
 			targetHandle = strings.TrimPrefix(firstNonEmpty(req.Target.ParticipantID, req.Target.EndpointKey), "@")
 		}
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, fmt.Sprintf(
-			"ACP Agent @%s lacks _session/steering; cancel turn, retry SendMessage.",
+			"ACP Agent @%s does not support additional messages while its current turn is running. You can send a message after this turn finishes.",
 			targetHandle,
 		))
 	}
@@ -203,24 +263,26 @@ func (r *Runner) submitActiveChildInputLocked(
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent does not accept image input.")
 	}
 	rpcCtx, cancelRPC := context.WithCancel(ctx)
-	if !slot.beginSteering(cancelRPC) {
+	if !slot.beginInput(cancelRPC) {
 		cancelRPC()
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, "Target Agent state changed before the message was sent.")
 	}
 	run.mu.Lock()
 	previousInputActor := run.inputActor
 	run.inputActor = session.CloneActorRef(req.Source)
+	run.suppressInputEcho = true
 	run.mu.Unlock()
+	acceptedInput := r.acceptedChildInputOutput(slot, run, req, activityID)
 	response, err := r.callChildSteering(rpcCtx, run, prompt)
 	cancelRPC()
 	if err != nil {
 		if childInputEffectUnknown(err) {
 			unknown := joinChildInputUnknown("Message delivery outcome cannot be confirmed.", err)
-			slot.settleSteeringFrames(false)
+			slot.settleInput(run, false, nil)
 			r.finishDriveLocked(context.WithoutCancel(ctx), run, "", unknown)
 			return agent.ChildInputResult{}, unknown
 		}
-		slot.settleSteeringFrames(true)
+		slot.settleInput(run, true, nil)
 		run.mu.Lock()
 		run.inputActor = previousInputActor
 		run.mu.Unlock()
@@ -228,22 +290,22 @@ func (r *Runner) submitActiveChildInputLocked(
 	}
 	switch response.Outcome {
 	case client.SessionSteeringInjected:
-		slot.settleSteeringFrames(true)
+		slot.settleInput(run, true, acceptedInput)
 		return agent.ChildInputResult{ActivityID: activityID}, nil
 	case client.SessionSteeringFailed, client.SessionSteeringPromptRequired:
-		slot.settleSteeringFrames(true)
+		slot.settleInput(run, true, nil)
 		run.mu.Lock()
 		run.inputActor = previousInputActor
 		run.mu.Unlock()
 		return agent.ChildInputResult{}, errorcode.New(errorcode.FailedPrecondition, "Target Agent did not accept the message.")
 	case client.SessionSteeringStartedNewTurn:
 		unknown := errorcode.New(errorcode.UnknownOutcome, "Message delivery outcome cannot be confirmed.")
-		slot.settleSteeringFrames(false)
+		slot.settleInput(run, false, nil)
 		r.finishDriveLocked(context.WithoutCancel(ctx), run, "", unknown)
 		return agent.ChildInputResult{}, unknown
 	default:
 		unknown := errorcode.New(errorcode.UnknownOutcome, "Message delivery outcome cannot be confirmed.")
-		slot.settleSteeringFrames(false)
+		slot.settleInput(run, false, nil)
 		r.finishDriveLocked(context.WithoutCancel(ctx), run, "", unknown)
 		return agent.ChildInputResult{}, unknown
 	}
@@ -271,21 +333,22 @@ func (r *Runner) callChildSteering(ctx context.Context, run *childRun, prompt []
 }
 
 type childIdleCheckpoint struct {
-	state           delegation.State
-	outputPreview   string
-	failureDetail   string
-	result          string
-	agentText       string
-	actionSummary   subagentActionSummary
-	finalAssistant  acpbridge.FinalAssistantAccumulator
-	inputActor      session.ActorRef
-	updatedAt       time.Time
-	running         bool
-	finishing       bool
-	cancelRequested bool
-	cancelFailed    bool
-	cancelResolved  chan struct{}
-	done            chan struct{}
+	state             delegation.State
+	outputPreview     string
+	failureDetail     string
+	result            string
+	agentText         string
+	actionSummary     subagentActionSummary
+	finalAssistant    acpbridge.FinalAssistantAccumulator
+	inputActor        session.ActorRef
+	suppressInputEcho bool
+	updatedAt         time.Time
+	running           bool
+	finishing         bool
+	cancelRequested   bool
+	cancelFailed      bool
+	cancelResolved    chan struct{}
+	done              chan struct{}
 }
 
 // promptAuthRetryFence owns the atomic handoff from a fully written prompt to
@@ -388,7 +451,8 @@ func checkpointIdleRun(run *childRun) childIdleCheckpoint {
 		state: run.state, outputPreview: run.outputPreview, failureDetail: run.failureDetail,
 		result: run.result, agentText: run.agentText, updatedAt: run.updatedAt,
 		actionSummary: actionSummary, finalAssistant: run.finalAssistant, inputActor: session.CloneActorRef(run.inputActor),
-		running: run.running, finishing: run.finishing, cancelRequested: run.cancelRequested,
+		suppressInputEcho: run.suppressInputEcho,
+		running:           run.running, finishing: run.finishing, cancelRequested: run.cancelRequested,
 		cancelFailed: run.cancelFailed, cancelResolved: run.cancelResolved, done: run.done,
 	}
 }
@@ -402,6 +466,7 @@ func restoreIdleRun(run *childRun, checkpoint childIdleCheckpoint) {
 	run.actionSummary = checkpoint.actionSummary
 	run.finalAssistant = checkpoint.finalAssistant
 	run.inputActor = session.CloneActorRef(checkpoint.inputActor)
+	run.suppressInputEcho = checkpoint.suppressInputEcho
 	run.updatedAt = checkpoint.updatedAt
 	run.running = checkpoint.running
 	run.finishing = checkpoint.finishing
@@ -483,6 +548,7 @@ func (r *Runner) submitIdleChildInput(
 		run.completion = req.Completion
 	}
 	run.inputActor = session.CloneActorRef(req.Source)
+	run.suppressInputEcho = true
 	run.updatedAt = r.clock()
 	run.finishing = false
 	run.cancelRequested = false
@@ -490,12 +556,14 @@ func (r *Runner) submitIdleChildInput(
 	run.cancelResolved = nil
 	run.done = make(chan struct{})
 	run.mu.Unlock()
-	slot.beginActivity(activityID, run)
 	dispatchCtx, cancelDispatch := context.WithCancel(ctx)
+	slot.beginActivity(activityID, run)
+	acceptedInput := r.acceptedChildInputOutput(slot, run, req, activityID)
 	dispatchDone := slot.beginPromptDispatch(cancelDispatch)
 	fence := newPromptAuthRetryFence(slot, dispatchDone, cancelResponse)
 	if observeErr := prepared.ObserveAuthRequired(fence.observeAuthRequired); observeErr != nil {
 		fence.closeLocked()
+		slot.settleInput(run, false, nil)
 		run.mu.Lock()
 		restoreIdleRun(run, runCheckpoint)
 		run.mu.Unlock()
@@ -518,6 +586,7 @@ func (r *Runner) submitIdleChildInput(
 	if dispatchErr != nil {
 		cancelResponse()
 		if client.DispatchMayHaveCommitted(dispatchErr) {
+			slot.settleInput(run, false, nil)
 			unknown := joinChildInputUnknown("Message delivery outcome cannot be confirmed.", dispatchErr)
 			terminalDone := r.finishDriveLocked(context.WithoutCancel(ctx), run, "", unknown)
 			slot.opMu.Unlock()
@@ -531,6 +600,7 @@ func (r *Runner) submitIdleChildInput(
 			}
 			return agent.ChildInputResult{}, unknown
 		}
+		slot.settleInput(run, false, nil)
 		run.mu.Lock()
 		restoreIdleRun(run, runCheckpoint)
 		run.mu.Unlock()
@@ -540,6 +610,7 @@ func (r *Runner) submitIdleChildInput(
 		slot.opMu.Unlock()
 		return agent.ChildInputResult{}, dispatchErr
 	}
+	slot.settleInput(run, true, acceptedInput)
 	go r.drivePreparedPrompt(responseCtx, run, prepared, prompt, fence)
 	slot.opMu.Unlock()
 	return agent.ChildInputResult{ActivityID: activityID, StartedActivity: true}, nil

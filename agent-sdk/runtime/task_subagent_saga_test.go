@@ -350,7 +350,7 @@ func (s *sagaSessionService) AppendEvent(ctx context.Context, req session.Append
 	return persisted, err
 }
 
-func TestSubagentProducerCompletionAcknowledgesDurableCommitAndWakesCancelWaiter(t *testing.T) {
+func TestSubagentProducerCompletionAcknowledgesDurableCommit(t *testing.T) {
 	baseStore := newSagaTaskStore()
 	store := &completionGateTaskStore{
 		base:    baseStore,
@@ -389,51 +389,11 @@ func TestSubagentProducerCompletionAcknowledgesDurableCommitAndWakesCancelWaiter
 	default:
 	}
 
-	type cancelOutcome struct {
-		snapshot taskapi.Snapshot
-		err      error
-	}
-	cancelled := make(chan cancelOutcome, 1)
-	cancelCtx, cancelWait := context.WithCancel(context.Background())
-	defer cancelWait()
-	go func() {
-		snapshot, cancelErr := runtime.tasks.Cancel(cancelCtx, active.SessionRef, taskapi.ControlRequest{
-			TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Source: "agent_tool",
-		})
-		cancelled <- cancelOutcome{snapshot: snapshot, err: cancelErr}
-	}()
-	operationKey := taskOperationKey(active.SessionRef, started.Ref.TaskID)
-	waitDeadline := time.Now().Add(time.Second)
-	for {
-		runtime.tasks.mu.RLock()
-		waiting := runtime.tasks.operationChanged[operationKey] != nil
-		runtime.tasks.mu.RUnlock()
-		if waiting {
-			break
-		}
-		if time.Now().After(waitDeadline) {
-			close(store.release)
-			t.Fatal("Task cancel did not wait for the producer completion claim")
-		}
-		time.Sleep(time.Millisecond)
-	}
-
 	close(store.release)
 	select {
 	case <-published:
 	case <-time.After(time.Second):
 		t.Fatal("PublishSubagentCompletion did not acknowledge durable terminal commit")
-	}
-	select {
-	case outcome := <-cancelled:
-		if outcome.err != nil || outcome.snapshot.Running || outcome.snapshot.State != taskapi.StateCompleted {
-			t.Fatalf("Cancel() after producer completion = %#v, %v; want completed without remote cancel", outcome.snapshot, outcome.err)
-		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("Task cancel was not woken by producer completion claim release")
-	}
-	if runner.cancelCalls != 0 {
-		t.Fatalf("runner Cancel calls = %d, want no remote effect after producer completion", runner.cancelCalls)
 	}
 	entry, err := store.Get(context.Background(), started.Ref.TaskID)
 	if err != nil || entry.Running || entry.State != taskapi.StateCompleted {
@@ -1520,38 +1480,6 @@ func TestSubagentSpawnRequiresCASBeforeExternalEffect(t *testing.T) {
 	_, err = runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{SpawnID: "upsert-only", Agent: "helper", Prompt: "review"})
 	if err == nil || !strings.Contains(err.Error(), "CASStore") || runner.spawnCalls != 0 {
 		t.Fatalf("StartSubagent() = %v, spawn calls %d; want fail closed before spawn", err, runner.spawnCalls)
-	}
-}
-
-func TestSubagentCancelFailsClosedWhenDurableReloadFails(t *testing.T) {
-	t.Parallel()
-
-	base := memory.NewStore(memory.Config{})
-	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "reload-outage"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner := &sagaRunner{}
-	storeErr := errors.New("forced task store reload outage")
-	store := &getFailingSagaTaskStore{sagaTaskStore: newSagaTaskStore(), err: storeErr}
-	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	taskID := "cached-subagent"
-	runtime.tasks.subagents[taskID] = &subagentTask{
-		ref: taskapi.Ref{TaskID: taskID}, sessionRef: active.SessionRef,
-		anchor: delegation.Anchor{TaskID: taskID, SessionID: "child"}, runner: runner,
-		state: taskapi.StateRunning, running: true,
-	}
-	_, err = runtime.tasks.Cancel(context.Background(), active.SessionRef, taskapi.ControlRequest{
-		TaskID: taskID, Principal: session.ActorKindUser,
-	})
-	if !errors.Is(err, storeErr) {
-		t.Fatalf("Cancel() error = %v, want durable reload outage", err)
-	}
-	if runner.cancelCalls != 0 {
-		t.Fatalf("external Cancel calls = %d, want 0 before durable reload", runner.cancelCalls)
 	}
 }
 

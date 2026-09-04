@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -28,7 +29,8 @@ type childSlot struct {
 	activityID         string
 	activityInitial    bool
 	terminalActivity   string
-	steeringActive     bool
+	inputActive        bool
+	inputProjectionSeq uint64
 	outputQuarantined  bool
 	setupActive        bool
 	terminalPending    chan struct{}
@@ -236,7 +238,7 @@ func (s *childSlot) beginActivityKind(activityID string, run *childRun, initial 
 	s.activityID = strings.TrimSpace(activityID)
 	s.activityInitial = initial
 	s.terminalActivity = ""
-	s.steeringActive = false
+	s.inputActive = false
 	s.outputQuarantined = false
 	s.setupActive = false
 	s.activeInputCancel = nil
@@ -267,7 +269,7 @@ func (s *childSlot) restoreActivity(checkpoint childActivityCheckpoint, run *chi
 	s.activityID = checkpoint.activityID
 	s.activityInitial = checkpoint.activityInitial
 	s.terminalActivity = checkpoint.terminalActivity
-	s.steeringActive = false
+	s.inputActive = false
 	s.outputQuarantined = checkpoint.outputQuarantined
 	s.setupActive = checkpoint.setupActive
 	s.activeInputCancel = nil
@@ -302,17 +304,20 @@ func (s *childSlot) publishRunOutputLocked(run *childRun, event output.Event) {
 	_ = observer.ObserveTaskOutput(context.Background(), event)
 }
 
-func (s *childSlot) settleSteeringFrames(release bool) {
+func (s *childSlot) settleInput(run *childRun, release bool, acceptedInput *output.Event) {
 	if s == nil {
 		return
 	}
 	s.ingressMu.Lock()
 	defer s.ingressMu.Unlock()
 	s.mu.Lock()
-	s.steeringActive = false
+	s.inputActive = false
 	s.outputQuarantined = !release
 	s.activeInputCancel = nil
 	s.mu.Unlock()
+	if release && acceptedInput != nil {
+		s.publishRunOutputLocked(run, *acceptedInput)
+	}
 }
 
 func (s *childSlot) quarantineOutput(run *childRun) {
@@ -324,14 +329,14 @@ func (s *childSlot) quarantineOutput(run *childRun) {
 	s.mu.Lock()
 	if run == nil || s.run == run {
 		s.outputQuarantined = true
-		s.steeringActive = false
+		s.inputActive = false
 		s.setupActive = false
 		s.activeInputCancel = nil
 	}
 	s.mu.Unlock()
 }
 
-func (s *childSlot) beginSteering(cancel context.CancelFunc) bool {
+func (s *childSlot) beginInput(cancel context.CancelFunc) bool {
 	if s == nil {
 		return false
 	}
@@ -339,12 +344,23 @@ func (s *childSlot) beginSteering(cancel context.CancelFunc) bool {
 	defer s.ingressMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.steeringActive || s.activityID == "" || s.outputQuarantined {
+	if s.inputActive || s.activityID == "" || s.outputQuarantined {
 		return false
 	}
-	s.steeringActive = true
+	s.inputActive = true
 	s.activeInputCancel = cancel
 	return true
+}
+
+func (s *childSlot) nextInputProjectionID(activityID string) string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	s.inputProjectionSeq++
+	sequence := s.inputProjectionSeq
+	s.mu.Unlock()
+	return fmt.Sprintf("agent-input:%s:%d", strings.TrimSpace(activityID), sequence)
 }
 
 func (s *childSlot) revokeActiveInput() (*childRun, context.CancelFunc) {

@@ -765,6 +765,7 @@ func viewportBlockRenderKey(block Block, ctx BlockRenderContext) string {
 		writeExpandedTools(builder, b.ExpandedToolOutput)
 		writeExpandedTools(builder, b.ExpandedThought)
 		writeExpandedTools(builder, b.ExpandedExplore)
+		writeExpandedTools(builder, b.ExpandedAgentMessages)
 		writeToolPanelScrollStates(builder, b.ToolPanelScroll)
 		writeSubagentEvents(builder, b.Events, ctx)
 	case *DividerBlock:
@@ -779,6 +780,7 @@ func viewportBlockRenderKey(block Block, ctx BlockRenderContext) string {
 		writeExpandedTools(builder, b.ExpandedToolOutput)
 		writeExpandedTools(builder, b.ExpandedThought)
 		writeExpandedTools(builder, b.ExpandedExplore)
+		writeExpandedTools(builder, b.ExpandedAgentMessages)
 		writeToolPanelScrollStates(builder, b.ToolPanelScroll)
 		writeSubagentEvents(builder, b.Events, ctx)
 	case *WelcomeBlock:
@@ -849,6 +851,9 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 		builder.addString(event.SourceName)
 		builder.addString(event.SourceRole)
 		builder.addString(event.SourceID)
+		builder.addString(event.SourceEventID)
+		builder.addString(event.SourceProjectionID)
+		builder.addString(event.MessageID)
 		builder.addString(event.SourceCallID)
 		if event.ActiveBuffer != nil && !event.ActiveBuffer.Empty() {
 			builder.addString(event.ActiveBuffer.CacheKey())

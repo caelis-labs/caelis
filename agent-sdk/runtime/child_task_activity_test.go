@@ -36,6 +36,20 @@ func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
 		t.Fatalf("follow-up binding = %#v", req)
 	}
 	assertChildActivityEntry(t, r, task, before.Revision, 1, taskStringValue(before.Metadata[subagentActivityIDMeta]), false)
+	// An accepted input is recipient-visible, but is not child execution evidence.
+	observed := &childActivityOutputCounter{}
+	req.Output.(*childTaskActivity).observer = observed
+	protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: "follow up"})
+	if err := req.Output.ObserveTaskOutput(t.Context(), output.Event{State: "running", Running: true, Event: &session.Event{
+		Type: session.EventTypeContext, Actor: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
+		Protocol: &protocol, Text: "follow up",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if observed.count.Load() != 1 {
+		t.Fatal("accepted input was not forwarded to the application observer")
+	}
+	assertChildActivityEntry(t, r, task, before.Revision, 1, taskStringValue(before.Metadata[subagentActivityIDMeta]), false)
 	// Closing a stable producer with no new activity must not open a turn.
 	if err := req.Output.ObserveTaskOutput(t.Context(), output.Event{ProducerClosed: true}); err != nil {
 		t.Fatal(err)

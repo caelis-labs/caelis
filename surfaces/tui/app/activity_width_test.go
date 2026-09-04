@@ -77,7 +77,7 @@ func TestProjectedActivityHeadersStayWithinViewport(t *testing.T) {
 	}, "sent", "", width, ctx, false, false, true, false, acpTranscriptRenderOptions{})
 	received := renderAgentCommunicationRows("block", SubagentEvent{
 		Kind: SEToolCall, SourceName: strings.Repeat("reviewer", 8), Text: fullArgs,
-	}, width, ctx, acpTranscriptRenderOptions{})
+	}, 0, width, ctx, acpTranscriptRenderOptions{})
 
 	for name, rows := range map[string][]RenderedRow{
 		"generic":  generic,
@@ -108,13 +108,13 @@ func TestReceivedAgentCommunicationUsesAdaptiveWidth(t *testing.T) {
 		SourceName: "reviewer",
 		Text:       strings.Repeat("message-segment ", 20),
 	}
-	narrow := renderAgentCommunicationRows("block", event, 80, model.blockRenderContext(80), acpTranscriptRenderOptions{})
-	wide := renderAgentCommunicationRows("block", event, 160, model.blockRenderContext(160), acpTranscriptRenderOptions{})
+	narrow := renderAgentCommunicationRows("block", event, 0, 80, model.blockRenderContext(80), acpTranscriptRenderOptions{})
+	wide := renderAgentCommunicationRows("block", event, 0, 160, model.blockRenderContext(160), acpTranscriptRenderOptions{})
 	if len(narrow) != 1 || len(wide) != 1 {
 		t.Fatalf("adaptive Received rows = %d narrow, %d wide; want one each", len(narrow), len(wide))
 	}
-	narrowDetail := strings.TrimPrefix(narrow[0].Plain, "• Received ")
-	wideDetail := strings.TrimPrefix(wide[0].Plain, "• Received ")
+	narrowDetail := strings.TrimPrefix(narrow[0].Plain, "• ")
+	wideDetail := strings.TrimPrefix(wide[0].Plain, "• ")
 	if got := displayColumns(narrowDetail); got > compactSingleLineBudget(80) {
 		t.Fatalf("narrow Received detail width = %d, want <= %d", got, compactSingleLineBudget(80))
 	}

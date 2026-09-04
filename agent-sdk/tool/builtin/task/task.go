@@ -62,7 +62,7 @@ func (Tool) Definition() tool.Definition {
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        []string{"wait", "read", "write", "cancel"},
-					"description": "read inspects now; wait observes for up to one minute and waits on commands until terminal state or the window expires; write sends stdin only to an input-capable command; cancel requests interruption of the current activity.",
+					"description": "read inspects now; wait observes for up to one minute and waits on commands until terminal state or the window expires; write sends stdin only to an input-capable command; cancel interrupts only command tasks.",
 				},
 				"handle": map[string]any{
 					"type":        "string",

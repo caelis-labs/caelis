@@ -1293,6 +1293,7 @@ export interface SessionUpdateEnvelope {
   _meta?: ACPMetadata;
   activity_id?: string;
   actor?: string;
+  agent_communication_source?: ActorIdentity;
   cursor?: string;
   delivery: Delivery;
   event_id?: string;

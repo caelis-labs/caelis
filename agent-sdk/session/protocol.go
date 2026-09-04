@@ -22,14 +22,18 @@ const (
 )
 
 const (
-	ProtocolMethodSessionUpdate      = "session/update"
-	ProtocolMethodRequestPermission  = "session/request_permission"
-	ProtocolMethodParticipantUpdate  = "caelis/participant"
-	ProtocolMethodControllerHandoff  = "caelis/handoff"
-	ProtocolMethodRuntimeLifecycle   = "caelis/lifecycle"
-	ProtocolMethodContextCheckpoint  = "caelis/context_checkpoint"
+	ProtocolMethodSessionUpdate     = "session/update"
+	ProtocolMethodRequestPermission = "session/request_permission"
+	ProtocolMethodParticipantUpdate = "caelis/participant"
+	ProtocolMethodControllerHandoff = "caelis/handoff"
+	ProtocolMethodRuntimeLifecycle  = "caelis/lifecycle"
+	ProtocolMethodContextCheckpoint = "caelis/context_checkpoint"
+	// ProtocolMethodAgentCommunication is retained only to read events written
+	// before Agent communication moved onto standard session/update messages.
 	ProtocolMethodAgentCommunication = "caelis/agent_communication"
 )
+
+const AgentCommunicationMetaKey = "agent_communication"
 
 // ProtocolToolCall is the ACP-compatible tool call or tool update view of one
 // canonical event.
@@ -61,8 +65,8 @@ type ProtocolToolCallContent struct {
 }
 
 // ProtocolUpdate is the normalized ACP session/update payload carried by one
-// canonical event. Caelis-specific data belongs in Event.Meta["_meta"].caelis,
-// not in this protocol payload.
+// canonical event. Caelis-specific projection data belongs under Meta["caelis"]
+// and is serialized as the standard payload's private _meta field.
 type ProtocolUpdate struct {
 	SessionUpdate string                     `json:"sessionUpdate,omitempty"`
 	Content       any                        `json:"content,omitempty"`
@@ -163,13 +167,19 @@ func NewHandoffProtocol(handoff ProtocolHandoff) EventProtocol {
 	})
 }
 
-// NewAgentCommunicationProtocol constructs the explicit client projection for
-// one Agent-to-Agent message. It does not grant sender identity; callers must
-// supply the trusted source through Event.Actor.
+// NewAgentCommunicationProtocol constructs the standard ACP user-message
+// projection for one Agent-to-Agent input. It does not grant sender identity;
+// callers must supply the trusted source through Event.Actor.
 func NewAgentCommunicationProtocol(communication ProtocolAgentCommunication) EventProtocol {
 	return CloneEventProtocol(EventProtocol{
-		Method:             ProtocolMethodAgentCommunication,
-		AgentCommunication: &communication,
+		Method: ProtocolMethodSessionUpdate,
+		Update: &ProtocolUpdate{
+			SessionUpdate: string(ProtocolUpdateTypeUserMessage),
+			Content:       ProtocolTextContent(strings.TrimSpace(communication.Text)),
+			Meta: map[string]any{
+				"caelis": map[string]any{AgentCommunicationMetaKey: map[string]any{}},
+			},
+		},
 	})
 }
 
@@ -290,21 +300,64 @@ func ProtocolHandoffOf(event *Event) *ProtocolHandoff {
 	return &out
 }
 
-// ProtocolAgentCommunicationOf returns the explicit Agent communication
-// projection carried by one event.
+// ProtocolAgentCommunicationOf returns the Agent communication projection
+// carried by one event. New events use a standard ACP user-message update;
+// the custom protocol method remains readable for durable compatibility.
 func ProtocolAgentCommunicationOf(event *Event) *ProtocolAgentCommunication {
-	if event == nil || event.Protocol == nil {
+	if !IsAgentCommunicationProtocol(event) {
 		return nil
 	}
 	normalized := CloneEventProtocol(*event.Protocol)
-	if normalized.Method != ProtocolMethodAgentCommunication || normalized.AgentCommunication == nil {
+	if normalized.Method == ProtocolMethodAgentCommunication && normalized.AgentCommunication != nil {
+		out := *normalized.AgentCommunication
+		if strings.TrimSpace(out.Text) == "" {
+			return nil
+		}
+		return &out
+	}
+	if normalized.Method != ProtocolMethodSessionUpdate || normalized.Update == nil ||
+		strings.TrimSpace(normalized.Update.SessionUpdate) != string(ProtocolUpdateTypeUserMessage) ||
+		!protocolUpdateHasAgentCommunicationMeta(normalized.Update) {
 		return nil
 	}
-	out := *normalized.AgentCommunication
-	if strings.TrimSpace(out.Text) == "" {
+	text := strings.TrimSpace(textFromProtocolContent(normalized.Update.Content))
+	if text == "" {
+		text = strings.TrimSpace(event.Text)
+	}
+	if text == "" {
 		return nil
 	}
-	return &out
+	return &ProtocolAgentCommunication{Text: text}
+}
+
+// IsAgentCommunicationProtocol reports whether an event declares the standard
+// Agent-communication marker or the legacy custom protocol method. It also
+// reports malformed declarations on typed Context events so validation can
+// reject them. Private ACP metadata alone cannot turn user input into Context.
+func IsAgentCommunicationProtocol(event *Event) bool {
+	if event == nil || event.Protocol == nil {
+		return false
+	}
+	normalized := CloneEventProtocol(*event.Protocol)
+	if normalized.Method == ProtocolMethodAgentCommunication {
+		return true
+	}
+	return event.Type == EventTypeContext &&
+		normalized.Method == ProtocolMethodSessionUpdate && normalized.Update != nil &&
+		strings.TrimSpace(normalized.Update.SessionUpdate) == string(ProtocolUpdateTypeUserMessage) &&
+		protocolUpdateHasAgentCommunicationMeta(normalized.Update)
+}
+
+func protocolUpdateHasAgentCommunicationMeta(update *ProtocolUpdate) bool {
+	if update == nil {
+		return false
+	}
+	caelis, ok := update.Meta["caelis"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = caelis[AgentCommunicationMetaKey]
+	return ok
 }
 
 func protocolContentIsText(content any, want string) bool {

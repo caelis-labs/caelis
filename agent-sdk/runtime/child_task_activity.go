@@ -27,7 +27,9 @@ type childTaskActivity struct {
 }
 
 func (a *childTaskActivity) ObserveTaskOutput(ctx context.Context, event output.Event) error {
-	if event.Event != nil || event.Text != "" || event.Running || event.Closed || event.State != "" {
+	// Recipient-visible input is admission evidence, not child execution.
+	if !session.IsAgentCommunicationProtocol(event.Event) &&
+		(event.Event != nil || event.Text != "" || event.Running || event.Closed || event.State != "") {
 		a.started.Do(func() {
 			// A producer may hold its endpoint lock while calling us. Waiting for
 			// a Task control owner here would deadlock concurrent cancellation.

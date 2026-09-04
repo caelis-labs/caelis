@@ -1224,8 +1224,11 @@ func TestChatAgentDrainsAgentCommunicationWithTrustedIdentity(t *testing.T) {
 		t.Fatalf("Agent communication event = %#v", events)
 	}
 	communication := session.ProtocolAgentCommunicationOf(events[0])
-	if communication == nil || communication.Text != "review complete" || session.ProtocolUpdateOf(events[0]) != nil {
-		t.Fatalf("Agent communication protocol = %#v, want typed non-user projection", events[0].Protocol)
+	update := session.ProtocolUpdateOf(events[0])
+	if communication == nil || communication.Text != "review complete" ||
+		update == nil || update.SessionUpdate != string(session.ProtocolUpdateTypeUserMessage) ||
+		!session.IsAgentCommunicationProtocol(events[0]) {
+		t.Fatalf("Agent communication protocol = %#v, want standard update with typed Context identity", events[0].Protocol)
 	}
 }
 

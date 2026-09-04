@@ -85,9 +85,6 @@ func taskSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskap
 
 func taskControlSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot, action string, actualWaitMS int) tool.Result {
 	if strings.EqualFold(strings.TrimSpace(action), "cancel") {
-		if snapshot.Kind == taskapi.KindSubagent {
-			return taskSnapshotTextToolResult(call, def, snapshot, subagentInterruptedText(snapshot))
-		}
 		return taskSnapshotToolResultWithPayload(call, def, snapshot, taskCancelToolPayload(snapshot))
 	}
 	payload := taskToolPayload(snapshot)
@@ -95,15 +92,6 @@ func taskControlSnapshotToolResult(call tool.Call, def tool.Definition, snapshot
 		payload["actual_wait_time_ms"] = actualWaitMS
 	}
 	return taskSnapshotToolResultWithPayload(call, def, snapshot, payload)
-}
-
-func taskSnapshotTextToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot, text string) tool.Result {
-	return tool.Result{
-		ID:       strings.TrimSpace(call.ID),
-		Name:     strings.TrimSpace(def.Name),
-		Content:  []model.Part{model.NewTextPart(strings.TrimSpace(text))},
-		Metadata: taskToolMeta(snapshot),
-	}
 }
 
 type taskBatchControlItem struct {
@@ -192,25 +180,9 @@ func taskBatchErrorCount(items []taskBatchControlItem) int {
 }
 
 func taskCancelToolPayload(snapshot taskapi.Snapshot) map[string]any {
-	if snapshot.Kind == taskapi.KindSubagent {
-		return map[string]any{"message": subagentInterruptedText(snapshot)}
-	}
 	return map[string]any{
 		"handle": taskPublicHandle(snapshot),
 		"state":  string(snapshot.State),
-	}
-}
-
-func subagentInterruptedText(snapshot taskapi.Snapshot) string {
-	handle := strings.TrimPrefix(taskPublicHandle(snapshot), "@")
-	if snapshot.Running {
-		return fmt.Sprintf("Cancel requested for @%s; wait for it to stop.", handle)
-	}
-	switch snapshot.State {
-	case taskapi.StateCompleted, taskapi.StateFailed:
-		return fmt.Sprintf("Subagent @%s is already %s.", handle, snapshot.State)
-	default:
-		return fmt.Sprintf("Subagent @%s is interrupted.", handle)
 	}
 }
 

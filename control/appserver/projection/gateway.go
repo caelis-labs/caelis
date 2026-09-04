@@ -308,6 +308,10 @@ func projectSessionEventToACPEnvelopes(base eventstream.Envelope, sessionEvent *
 		next := base
 		next.Kind = eventstream.KindSessionUpdate
 		next.Update = update
+		if session.IsAgentCommunicationProtocol(sessionEvent) {
+			source := agentCommunicationSource(sessionEvent.Actor)
+			next.AgentCommunicationSource = &source
+		}
 		if len(updateMeta) > 0 {
 			next.Meta = mergeACPEventMeta(updateMeta, next.Meta)
 		}
@@ -379,23 +383,7 @@ func projectSessionEventstreamOnlyEvents(base eventstream.Envelope, event *sessi
 	}
 	switch session.EventTypeOf(event) {
 	case session.EventTypeContext:
-		communication := session.ProtocolAgentCommunicationOf(event)
-		if communication == nil || session.ValidateAgentCommunicationActor(event.Actor) != nil {
-			return nil
-		}
-		next := base
-		next.Kind = eventstream.KindAgentCommunication
-		next.Actor = firstNonEmpty(strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID), strings.TrimSpace(base.Actor))
-		next.AgentCommunication = &eventstream.AgentCommunication{
-			Source: eventstream.ActorIdentity{
-				Kind: strings.TrimSpace(string(event.Actor.Kind)),
-				ID:   strings.TrimSpace(event.Actor.ID),
-				Role: strings.TrimSpace(event.Actor.Role),
-				Name: strings.TrimSpace(event.Actor.Name),
-			},
-			Text: communication.Text,
-		}
-		return []eventstream.Envelope{next}
+		return nil
 	case session.EventTypeNotice:
 		notice, ok := session.NoticeOf(event)
 		if !ok || strings.TrimSpace(notice.Text) == "" {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -32,8 +31,6 @@ const (
 	taskControlCancel
 )
 
-const subagentCancelOperationClaimTimeout = time.Second
-
 func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest, access taskControlAccess, fn func(taskControlTarget, taskapi.ControlRequest) (taskapi.Snapshot, error)) (taskapi.Snapshot, error) {
 	req = normalizeTaskControlRequest(req)
 	if err := validateTaskControlPrincipal(req.Principal); err != nil {
@@ -42,6 +39,9 @@ func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req 
 	identity, err := tm.resolveControlIdentity(ctx, ref, req.TaskID)
 	if err != nil {
 		return taskapi.Snapshot{}, err
+	}
+	if access == taskControlCancel && identity.kind == taskapi.KindSubagent {
+		return taskapi.Snapshot{}, errorcode.New(errorcode.Unsupported, "task cancel accepts command tasks only")
 	}
 	// Subagent read/wait are observations, not lifecycle operations. They must
 	// not contend with SendMessage or producer completion for the mutation
@@ -54,34 +54,14 @@ func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req 
 		return fn(subagentControlTarget{runtime: tm, task: task}, req)
 	}
 	var release func()
-	if access == taskControlCancel && identity.kind == taskapi.KindSubagent {
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		claimCtx, cancelClaim := context.WithTimeout(ctx, subagentCancelOperationClaimTimeout)
-		defer cancelClaim()
-		release, err = tm.waitForTaskOperationClaim(claimCtx, ref, identity.taskID)
-		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return taskapi.Snapshot{}, ctxErr
-			}
-			return taskapi.Snapshot{}, errorcode.Wrap(
-				errorcode.Timeout,
-				fmt.Sprintf("task cancel timed out after %s waiting for task state update", subagentCancelOperationClaimTimeout),
-				err,
-			)
-		}
-	} else {
-		var claimed bool
-		release, claimed = tm.tryClaimSubagentOperation(ref, identity.taskID)
-		if !claimed {
-			return taskapi.Snapshot{}, fmt.Errorf("task already has an operation in progress")
-		}
+	var claimed bool
+	release, claimed = tm.tryClaimSubagentOperation(ref, identity.taskID)
+	if !claimed {
+		return taskapi.Snapshot{}, fmt.Errorf("task already has an operation in progress")
 	}
 	defer release()
-	// Reload after claim admission. A producer that completed while cancel was
-	// waiting wins, and cancelSubagentSaga rechecks that canonical running state
-	// before it can publish or send a cancellation effect.
+	// Reload after claim admission so a concurrent producer update wins before
+	// the requested operation observes or mutates task state.
 	target, err := tm.lookupControlTargetClaimed(ctx, ref, identity)
 	if err != nil {
 		return taskapi.Snapshot{}, err
@@ -293,8 +273,7 @@ func (t subagentControlTarget) Write(ctx context.Context, req taskapi.ControlReq
 }
 
 func (t subagentControlTarget) Cancel(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	if err := t.runtime.authorizeSubagentControl(t.task, req.Principal, "cancel"); err != nil {
-		return taskapi.Snapshot{}, err
-	}
-	return t.runtime.cancelSubagent(ctx, t.task)
+	_ = ctx
+	_ = req
+	return taskapi.Snapshot{}, errorcode.New(errorcode.Unsupported, "task cancel accepts command tasks only")
 }

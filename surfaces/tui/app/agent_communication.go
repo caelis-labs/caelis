@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
@@ -9,13 +10,16 @@ import (
 
 func agentCommunicationSubagentEvent(event TranscriptEvent) SubagentEvent {
 	return SubagentEvent{
-		Kind:       SEAgentCommunication,
-		Text:       strings.TrimSpace(tuikit.SanitizeLogText(event.Text)),
-		StartedAt:  event.OccurredAt,
-		EndedAt:    event.OccurredAt,
-		SourceName: agentCommunicationDisplayIdentity(firstNonEmpty(event.AgentSourceName, event.Actor), event.AgentSourceID),
-		SourceRole: agentCommunicationIdentityField(event.AgentSourceRole),
-		SourceID:   agentCommunicationIdentityField(event.AgentSourceID),
+		Kind:               SEAgentCommunication,
+		Text:               strings.TrimSpace(tuikit.SanitizeLogText(event.Text)),
+		StartedAt:          event.OccurredAt,
+		EndedAt:            event.OccurredAt,
+		SourceName:         agentCommunicationDisplayIdentity(firstNonEmpty(event.AgentSourceName, event.Actor), event.AgentSourceID),
+		SourceRole:         agentCommunicationIdentityField(event.AgentSourceRole),
+		SourceID:           agentCommunicationIdentityField(event.AgentSourceID),
+		SourceEventID:      strings.TrimSpace(event.SourceEventID),
+		SourceProjectionID: strings.TrimSpace(event.SourceProjectionID),
+		MessageID:          strings.TrimSpace(event.MessageID),
 	}
 }
 
@@ -130,18 +134,57 @@ func agentCommunicationSourceMatchesView(sourceID string, sourceName string, des
 	return false
 }
 
-func renderAgentCommunicationRows(blockID string, event SubagentEvent, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
+func renderAgentCommunicationRows(blockID string, event SubagentEvent, eventIndex int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
 	text := strings.TrimSpace(event.Text)
 	if text == "" {
 		return nil
 	}
 	name := firstNonEmpty(event.SourceName, event.SourceID, "agent")
-	detail, _ := longCommandDisplayPreview(name+": "+text, compactSingleLineBudget(width))
-	header := compactSingleLineHeader("• Received "+detail, width)
-	if opts.AgentMessageTargetLinks {
-		if token := subagentOutputOverlayClickToken(event.SourceCallID); token != "" {
-			return []RenderedRow{renderACPTranscriptLinkedHeaderRow(blockID, header, ctx, token)}
+	key := agentCommunicationFoldKey(event, eventIndex)
+	expanded := opts.AgentMessageExpanded != nil && opts.AgentMessageExpanded(key)
+	bodyBudget := maxInt(1, compactSingleLineBudget(width)-displayColumns("• "+name+": "))
+	displayText, folded := longCommandDisplayPreview(text, bodyBudget)
+	token := ""
+	if folded {
+		token = agentMessageFoldClickToken(key)
+		if expanded {
+			displayText = text
 		}
 	}
-	return []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, "")}
+	if token != "" {
+		return []RenderedRow{renderAgentMessageRow(blockID, name, displayText, ctx, token)}
+	}
+	if opts.AgentMessageTargetLinks {
+		if token := subagentOutputOverlayClickToken(event.SourceCallID); token != "" {
+			return []RenderedRow{renderAgentMessageRow(blockID, name, displayText, ctx, token)}
+		}
+	}
+	return []RenderedRow{renderAgentMessageRow(blockID, name, displayText, ctx, "")}
+}
+
+func agentCommunicationFoldKey(event SubagentEvent, eventIndex int) string {
+	if value := strings.TrimSpace(event.MessageID); value != "" {
+		return "message:" + value
+	}
+	if value := strings.TrimSpace(event.SourceProjectionID); value != "" {
+		return "projection:" + value
+	}
+	if value := strings.TrimSpace(event.SourceEventID); value != "" {
+		return "event:" + value
+	}
+	return fmt.Sprintf("%d:%d:%s", eventIndex, event.StartedAt.UnixNano(), strings.TrimSpace(event.SourceID))
+}
+
+func renderAgentMessageRow(blockID string, name string, text string, ctx BlockRenderContext, token string) RenderedRow {
+	name = strings.TrimSpace(name)
+	text = sanitizeRenderableText(text)
+	plain := "• " + name
+	styled := renderACPTranscriptHeaderMark(ctx, acpHeaderMarkDefault, false) + " " + styleSpawnedHeaderTarget(ctx, name)
+	if text != "" {
+		plain += ": " + text
+		styled += ctx.Theme.TextStyle().Render(": " + text)
+	}
+	row := StyledPlainClickableRow(blockID, plain, styled, token)
+	row.selectionIndent = 2
+	return row
 }

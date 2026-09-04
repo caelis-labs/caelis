@@ -179,6 +179,26 @@ func TestValidateDurableCoreEventRejectsUnattributedAgentCommunication(t *testin
 	}
 }
 
+func TestValidateDurableCoreEventRejectsAgentCommunicationWithoutDisplayText(t *testing.T) {
+	t.Parallel()
+
+	message := model.NewTextMessage(model.RoleUser, "[Internal agent message]")
+	protocol := NewAgentCommunicationProtocol(ProtocolAgentCommunication{})
+	event := &Event{
+		Type: EventTypeContext, Visibility: VisibilityCanonical,
+		Actor: ActorRef{
+			Kind: ActorKindParticipant, ID: "reviewer-1", Role: string(ParticipantRoleDelegated), Name: "reviewer",
+		},
+		Message: &message, Protocol: &protocol,
+	}
+	if err := ValidateDurableCoreEvent(event); err == nil || !strings.Contains(err.Error(), "missing durable display text") {
+		t.Fatalf("ValidateDurableCoreEvent() error = %v, want missing display text", err)
+	}
+	if IsClientReplayEvent(event) {
+		t.Fatal("Agent communication without display text should not enter client replay")
+	}
+}
+
 func TestMainInvocationVisibleSharesSideDialogueAndExcludesDelegatedWork(t *testing.T) {
 	t.Parallel()
 

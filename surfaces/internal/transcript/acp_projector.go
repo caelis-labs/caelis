@@ -401,6 +401,41 @@ func projectACPContentChunk(env eventstream.Envelope, update eventstream.Content
 		if scope != ScopeMain && scope != ScopeParticipant && scope != ScopeSubagent {
 			return nil
 		}
+		if source := env.AgentCommunicationSource; source != nil {
+			if !source.HasIdentity() {
+				return nil
+			}
+			communicationMeta := MergeMeta(meta, update.Meta)
+			if scope == ScopeSubagent && strings.EqualFold(strings.TrimSpace(source.Kind), string(session.ActorKindController)) {
+				return []Event{{
+					Kind:          EventNarrative,
+					Scope:         scope,
+					ScopeID:       scopeID,
+					Actor:         firstNonEmptyString(source.Name, source.ID, "parent"),
+					OccurredAt:    env.OccurredAt,
+					Meta:          communicationMeta,
+					NarrativeKind: NarrativeUser,
+					MessageID:     strings.TrimSpace(update.MessageID),
+					Text:          strings.TrimSpace(text),
+					Final:         true,
+				}}
+			}
+			return []Event{{
+				Kind:            EventAgentCommunication,
+				Scope:           scope,
+				ScopeID:         scopeID,
+				Actor:           firstNonEmptyString(source.Name, source.ID, strings.TrimSpace(env.Actor)),
+				OccurredAt:      env.OccurredAt,
+				Meta:            communicationMeta,
+				MessageID:       strings.TrimSpace(update.MessageID),
+				Text:            strings.TrimSpace(text),
+				Final:           true,
+				AgentSourceKind: source.Kind,
+				AgentSourceID:   source.ID,
+				AgentSourceRole: source.Role,
+				AgentSourceName: source.Name,
+			}}
+		}
 		return []Event{{
 			Kind:          EventNarrative,
 			Scope:         scope,
