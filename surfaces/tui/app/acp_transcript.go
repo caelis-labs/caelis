@@ -50,6 +50,10 @@ type toolPanelRenderRequest struct {
 const (
 	acpToolDetailPreviewBudget = 4
 	acpTerminalPanelMaxLines   = 5
+
+	interruptedTurnTitle = "Turn interrupted"
+	interruptedTurnCause = "Stopped by an interrupt command — this is not a system error."
+	interruptedTurnNext  = "Send another message to continue or change direction."
 )
 
 func renderACPTranscriptRows(blockID string, events []SubagentEvent, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
@@ -175,6 +179,9 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 	}
 	statusRows := renderACPStatusRows(blockID, status, width, ctx, opts)
 	if len(statusRows) > 0 {
+		if hasContent && isACPInterruptedStatus(status) {
+			rows = appendBlankRowIfNeeded(rows, blockID)
+		}
 		rows = appendACPTranscriptSemanticRows(rows, blockID, statusRows, &pendingSemanticGap)
 	}
 	markACPTranscriptSelectionIndents(rows)
@@ -1113,6 +1120,10 @@ func pluralizeMoreLines(n int) string {
 }
 
 func renderACPStatusRows(blockID string, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
+	if isACPInterruptedStatus(status) {
+		return renderACPInterruptedStatusRows(blockID, width, ctx)
+	}
+
 	label := ""
 	style := ctx.Theme.HelpHintTextStyle().Width(width)
 	switch strings.ToLower(strings.TrimSpace(status)) {
@@ -1135,9 +1146,6 @@ func renderACPStatusRows(blockID string, status string, width int, ctx BlockRend
 		}
 		label = "✗ failed"
 		style = ctx.Theme.ErrorStyle().Width(width)
-	case "interrupted", "cancelled", "canceled":
-		label = "⊘ interrupted"
-		style = ctx.Theme.WarnStyle().Width(width)
 	case "timed_out":
 		label = "⌛ timed out"
 		style = ctx.Theme.WarnStyle().Width(width)
@@ -1146,6 +1154,38 @@ func renderACPStatusRows(blockID string, status string, width int, ctx BlockRend
 		return nil
 	}
 	return []RenderedRow{StyledPlainRow(blockID, label, style.Render(label))}
+}
+
+func isACPInterruptedStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "interrupted", "cancelled", "canceled":
+		return true
+	default:
+		return false
+	}
+}
+
+func renderACPInterruptedStatusRows(blockID string, width int, ctx BlockRenderContext) []RenderedRow {
+	elements := []struct {
+		text  string
+		style lipgloss.Style
+	}{
+		{text: interruptedTurnTitle, style: ctx.Theme.TextStyle()},
+		{text: interruptedTurnCause, style: ctx.Theme.HelpHintTextStyle()},
+		{text: interruptedTurnNext, style: ctx.Theme.HelpHintTextStyle()},
+	}
+	rows := make([]RenderedRow, 0, len(elements))
+	for _, element := range elements {
+		for _, line := range graphemeWordWrap(element.text, maxInt(1, width)) {
+			rows = append(rows, RenderedRow{
+				Styled:     element.style.Render(line),
+				Plain:      line,
+				BlockID:    blockID,
+				PreWrapped: true,
+			})
+		}
+	}
+	return rows
 }
 
 func renderACPApprovalReviewRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext) []RenderedRow {

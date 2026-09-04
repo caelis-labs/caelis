@@ -97,6 +97,67 @@ func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
 	})
 }
 
+func TestRegressionACPEventstreamInterruptedTurnNotice80x24(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{
+		AppName:     "CAELIS",
+		Version:     "dev",
+		Workspace:   "/tmp/workspace",
+		ModelAlias:  "glm-4.5",
+		Commands:    DefaultCommands(),
+		Wizards:     DefaultWizards(),
+		NoColor:     true,
+		NoAnimation: true,
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	model = updated.(*Model)
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+
+	for _, env := range []eventstream.Envelope{
+		{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "sess-interrupted",
+			Scope:     eventstream.ScopeMain,
+			TurnID:    "turn-interrupted",
+			Final:     true,
+			Update: eventstream.ContentChunk{
+				SessionUpdate: eventstream.UpdateAgentMessage,
+				Content:       eventstream.TextContent{Type: "text", Text: "Partial response before the stop."},
+			},
+		},
+		eventstream.TurnCancelled("handle-interrupted", "run-interrupted", "turn-interrupted", "tui interrupt", time.Unix(121, 0)),
+	} {
+		updated, _ = model.Update(env)
+		model = updated.(*Model)
+	}
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	plainRows := renderedPlainRows(block.Render(model.blockRenderContext(72)))
+	plain := strings.Join(plainRows, "\n")
+	want := strings.Join([]string{
+		"Partial response before the stop.",
+		"",
+		interruptedTurnTitle,
+		interruptedTurnCause,
+		interruptedTurnNext,
+	}, "\n")
+	if !strings.Contains(plain, want) {
+		t.Fatalf("interrupted turn render missing product notice or spacing:\n%s", plain)
+	}
+	if strings.Contains(plain, "⊘") {
+		t.Fatalf("interrupted turn render retained warning icon:\n%s", plain)
+	}
+
+	frame := evalharness.NormalizeFrame(model.View().Content)
+	assertFrameContainsInOrder(t, "interrupted turn 80x24", frame, []string{
+		"Partial response before the stop.",
+		interruptedTurnTitle,
+		interruptedTurnCause,
+		interruptedTurnNext,
+	})
+}
+
 func TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBeforeTool(t *testing.T) {
 	t.Parallel()
 

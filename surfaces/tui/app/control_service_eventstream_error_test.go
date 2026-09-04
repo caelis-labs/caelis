@@ -3,7 +3,9 @@ package tuiapp
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -29,6 +31,44 @@ func TestForwardTurnEventStreamPreservesTypedClientClosureError(t *testing.T) {
 		terminal.Lifecycle.State != eventstream.LifecycleStateInterrupted ||
 		!errors.Is(terminal.Err, want) {
 		t.Fatalf("terminal = %#v", messages[0])
+	}
+}
+
+func TestInterruptedLifecycleWithTypedErrorRendersAsFailure(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeMain,
+		TurnID:    "turn-1",
+		Final:     true,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "Partial response."},
+		},
+	})
+
+	want := errors.New("feed gap requires reconnect")
+	terminal := eventstream.TurnLifecycle(
+		"handle-1", "run-1", "turn-1",
+		eventstream.LifecycleStateInterrupted, want.Error(), "", time.Unix(121, 0),
+	)
+	terminal.Err = want
+	terminal.Error = want.Error()
+	model = applyACPEnvelopeForTest(t, model, terminal)
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if block.Status != eventstream.LifecycleStateFailed {
+		t.Fatalf("main turn status = %q, want failure presentation for typed stream error", block.Status)
+	}
+	model.syncViewportContent()
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if strings.Contains(plain, interruptedTurnTitle) || strings.Contains(plain, "not a system error") {
+		t.Fatalf("typed stream error rendered as a user interruption:\n%s", plain)
+	}
+	if !strings.Contains(plain, want.Error()) {
+		t.Fatalf("typed stream error missing failure detail:\n%s", plain)
 	}
 }
 

@@ -219,6 +219,74 @@ func TestACPCompactNoticeUsesCompactedLabelAndMetaStyle(t *testing.T) {
 	}
 }
 
+func TestACPInterruptedTurnNoticeUsesNeutralHierarchyAndOneLeadingBlankLine(t *testing.T) {
+	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme}
+	rows := renderACPTranscriptRows("block-1", []SubagentEvent{{
+		Kind: SEAssistant,
+		Text: "Partial response before the stop.",
+	}}, eventstream.LifecycleStateInterrupted, 96, ctx, acpTranscriptRenderOptions{})
+
+	noticeIndex := -1
+	for i, row := range rows {
+		if row.Plain == interruptedTurnTitle {
+			noticeIndex = i
+			break
+		}
+	}
+	if noticeIndex < 2 {
+		t.Fatalf("interruption title index = %d, rows = %#v", noticeIndex, renderedPlainRows(rows))
+	}
+	if strings.TrimSpace(rows[noticeIndex-1].Plain) != "" || strings.TrimSpace(rows[noticeIndex-2].Plain) == "" {
+		t.Fatalf("interruption notice does not have exactly one blank row before it: %#v", renderedPlainRows(rows))
+	}
+
+	want := []string{interruptedTurnTitle, interruptedTurnCause, interruptedTurnNext}
+	if noticeIndex+len(want) > len(rows) {
+		t.Fatalf("interruption rows = %#v, want %q", renderedPlainRows(rows), want)
+	}
+	for i, text := range want {
+		row := rows[noticeIndex+i]
+		if row.Plain != text {
+			t.Fatalf("interruption row %d = %q, want %q", i, row.Plain, text)
+		}
+		style := ctx.Theme.HelpHintTextStyle()
+		if i == 0 {
+			style = ctx.Theme.TextStyle()
+		}
+		if row.Styled != style.Render(text) {
+			t.Fatalf("interruption row %d uses non-neutral styling: %q", i, row.Styled)
+		}
+		if !row.PreWrapped {
+			t.Fatalf("interruption row %d is not marked pre-wrapped", i)
+		}
+	}
+	if plain := strings.Join(renderedPlainRows(rows), "\n"); strings.Contains(plain, "⊘") {
+		t.Fatalf("interruption notice retained warning icon:\n%s", plain)
+	}
+}
+
+func TestACPInterruptedTurnNoticeWordWrapsAtNarrowWidths(t *testing.T) {
+	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	ctx := BlockRenderContext{Width: 32, TermWidth: 32, Theme: model.theme}
+	rows := renderACPStatusRows("block-1", eventstream.LifecycleStateCancelled, 32, ctx, acpTranscriptRenderOptions{})
+	want := []string{
+		"Turn interrupted",
+		"Stopped by an interrupt command",
+		"— this is not a system error.",
+		"Send another message to continue",
+		"or change direction.",
+	}
+	if got := renderedPlainRows(rows); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("narrow interruption notice = %#v, want %#v", got, want)
+	}
+	for i, row := range rows {
+		if displayColumns(row.Plain) > 32 {
+			t.Fatalf("interruption row %d width = %d, want at most 32: %q", i, displayColumns(row.Plain), row.Plain)
+		}
+	}
+}
+
 func TestTerminalErrorLineRedactsModelRetryDetails(t *testing.T) {
 	line := terminalErrorLine(&model.RetryExhaustedError{
 		MaxRetries: 5,

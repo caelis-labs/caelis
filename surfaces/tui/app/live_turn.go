@@ -50,7 +50,7 @@ func (m *Model) finishLiveTurnFromEnvelope(env eventstream.Envelope) (tea.Cmd, b
 		return nil, false
 	}
 	err := errorFromTerminalLifecycle(env)
-	interrupted := liveTurnLifecycleInterrupted(env)
+	interrupted := err == nil && liveTurnLifecycleInterrupted(env)
 	cmd := m.finishLiveTurn(liveTurnEndedAt(env), interrupted, err)
 	return cmd, true
 }
