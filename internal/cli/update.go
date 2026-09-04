@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -73,9 +72,8 @@ func runUpdate(ctx context.Context, storeDir string, checkOnly bool, stdout io.W
 	}
 	if result.Updated {
 		if err := activateUpdatedCaelis(ctx, storeDir); err != nil {
-			recordManagedProductDiagnostic(storeDir, "finish update", err)
 			renderer.Fail()
-			return errors.New("caelis was updated but could not finish setup; try again or run `caelis doctor`")
+			return managedProductFailure(storeDir, "finish update", err)
 		}
 	}
 	return writeUpdateResult(stdout, result)

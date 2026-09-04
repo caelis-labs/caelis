@@ -16,6 +16,7 @@ const (
 	lockFilename                          = ".sessions.lock"
 	transactionRecoveryMarkerFilename     = ".sessions.transactions.pending"
 	generatedTitleMigrationMarkerFilename = ".sessions.generated-title-unicode-v1"
+	workspaceKeyRepairMarkerFilename      = ".sessions.workspace-key-repair-v1.json"
 )
 
 var storeRootLocks sync.Map

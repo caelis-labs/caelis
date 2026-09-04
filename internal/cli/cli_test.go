@@ -1125,7 +1125,7 @@ func TestRunDoctorUsesDiagnosticStatusClient(t *testing.T) {
 		ModelStatus: controlstatus.StatusModel{Provider: "mimo", Name: "mimo-v2.5-pro"},
 	}}
 	var out bytes.Buffer
-	if err := runDoctor(context.Background(), client, "session-1", outputJSON, &out); err != nil {
+	if err := runDoctor(context.Background(), client, "session-1", nil, outputJSON, &out); err != nil {
 		t.Fatal(err)
 	}
 	if client.request.SessionID != "session-1" || client.request.Surface != "cli" || !client.request.IncludeDiagnostics {
@@ -1137,6 +1137,41 @@ func TestRunDoctorUsesDiagnosticStatusClient(t *testing.T) {
 	}
 	if result.ActiveProvider != "mimo" || result.ActiveModel != "mimo-v2.5-pro" {
 		t.Fatalf("doctor result = %#v, want canonical model status", result)
+	}
+}
+
+func TestDoctorOutputReportsRepairAndCodedStartupFailure(t *testing.T) {
+	report := doctorResult{
+		ServiceState:     "unavailable",
+		ServiceErrorCode: string(gatewayapp.StartupIssueWorkspaceIdentityConflict),
+		ServiceError:     "stored Session workspace identities conflict",
+		ServiceLogPath:   "/private/logs/service.log",
+		Repairs: []doctorRepairResult{{
+			Code: string(gatewayapp.StartupIssueWorkspaceIdentityConflict), Status: "repaired",
+			ConflictingWorkspaceKeys: 2, AffectedSessions: 4, RepairedSessions: 4, RepairedTasks: 3,
+		}},
+	}
+	text := formatDoctorResult(report)
+	for _, want := range []string{
+		"repair [CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT]: repaired",
+		"affected_sessions=4 repaired_sessions=4 repaired_tasks=3 conflicting_workspace_keys=2",
+		"blocked [CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT]: stored Session workspace identities conflict",
+		"service_error_code: CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("doctor text missing %q:\n%s", want, text)
+		}
+	}
+	var out bytes.Buffer
+	if err := writeDoctorResult(&out, outputJSON, report); err != nil {
+		t.Fatal(err)
+	}
+	var decoded doctorResult
+	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.ServiceErrorCode != report.ServiceErrorCode || len(decoded.Repairs) != 1 || decoded.Repairs[0].RepairedTasks != 3 {
+		t.Fatalf("doctor JSON = %#v", decoded)
 	}
 }
 

@@ -324,18 +324,17 @@ func runWithProductClientOpener(
 		return errors.New("cli: --dangerously-skip-permissions requires explicit --embedded mode; attached Hosts cannot enable Host escape mode")
 	}
 	clientOptions := productClientOptions{
-		Mode:             clientMode,
-		ControlURL:       strings.TrimSpace(*controlURL),
-		Token:            strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN")),
-		TokenFile:        strings.TrimSpace(*controlTokenFile),
-		WorkspaceKey:     cfg.WorkspaceKey,
-		WorkspaceCWD:     cfg.WorkspaceCWD,
-		UserID:           cfg.UserID,
-		AppName:          cfg.AppName,
-		StoreDir:         cfg.StoreDir,
-		ListenAddress:    managedListen,
-		SurfaceHostCause: doctorSubcommand || sandboxSubcommand != "",
-		ACPIngress:       acpSubcommand,
+		Mode:          clientMode,
+		ControlURL:    strings.TrimSpace(*controlURL),
+		Token:         strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN")),
+		TokenFile:     strings.TrimSpace(*controlTokenFile),
+		WorkspaceKey:  cfg.WorkspaceKey,
+		WorkspaceCWD:  cfg.WorkspaceCWD,
+		UserID:        cfg.UserID,
+		AppName:       cfg.AppName,
+		StoreDir:      cfg.StoreDir,
+		ListenAddress: managedListen,
+		ACPIngress:    acpSubcommand,
 	}
 	if interactiveLaunch {
 		clientOptions.AdditionalRemoteCapabilities = []string{
@@ -357,6 +356,16 @@ func runWithProductClientOpener(
 			return runSandboxResetCommand(ctx, cfg, clientOptions, outFmt, stdout)
 		}
 	}
+	var doctorRepairs []doctorRepairResult
+	if doctorSubcommand && clientMode == productClientModeManaged {
+		if err := validateManagedProductClientOptions(clientOptions); err != nil {
+			return err
+		}
+		doctorRepairs, err = runDoctorStartupRepairs(ctx, cfg, clientOptions)
+		if err != nil {
+			return err
+		}
+	}
 
 	product, err := openClients(ctx, cfg, clientOptions)
 	if err != nil {
@@ -365,7 +374,9 @@ func runWithProductClientOpener(
 			if formatErr != nil {
 				return formatErr
 			}
-			return writeDoctorResult(stdout, outFmt, doctorResultFromStartupFailure(cfg.StoreDir, clientMode == productClientModeManaged, err))
+			result := doctorResultFromStartupFailure(cfg.StoreDir, clientMode == productClientModeManaged, err)
+			result.Repairs = doctorRepairs
+			return writeDoctorResult(stdout, outFmt, result)
 		}
 		return sandboxStartupEscapeError(err)
 	}
@@ -406,7 +417,7 @@ func runWithProductClientOpener(
 		if err != nil {
 			return err
 		}
-		return runDoctor(ctx, product.Clients.Status, strings.TrimSpace(*sessionID), outFmt, stdout)
+		return runDoctor(ctx, product.Clients.Status, strings.TrimSpace(*sessionID), doctorRepairs, outFmt, stdout)
 	}
 
 	if headlessMode {
@@ -721,7 +732,14 @@ func createOrResumeHeadlessSession(
 	return strings.TrimSpace(result.SessionID), nil
 }
 
-func runDoctor(ctx context.Context, statusClient appserver.StatusClient, sessionID string, format outputFormat, stdout io.Writer) error {
+func runDoctor(
+	ctx context.Context,
+	statusClient appserver.StatusClient,
+	sessionID string,
+	repairs []doctorRepairResult,
+	format outputFormat,
+	stdout io.Writer,
+) error {
 	if statusClient == nil {
 		return errors.New("cli: status client is unavailable")
 	}
@@ -731,7 +749,9 @@ func runDoctor(ctx context.Context, statusClient appserver.StatusClient, session
 	if err != nil {
 		return err
 	}
-	return writeDoctorResult(stdout, format, doctorResultFromStatus(status))
+	result := doctorResultFromStatus(status)
+	result.Repairs = append([]doctorRepairResult(nil), repairs...)
+	return writeDoctorResult(stdout, format, result)
 }
 
 func runSandboxSetupFromConfig(ctx context.Context, cfg gatewayapp.Config, options productClientOptions, format outputFormat, stdout io.Writer) error {

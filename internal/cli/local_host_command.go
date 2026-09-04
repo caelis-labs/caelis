@@ -70,6 +70,9 @@ func runLocalHostCommandWithOptions(
 		return writeLocalHostCommandResult(stdout, format, localHostCommandResult{State: "stopped"})
 	}
 	if err != nil {
+		if action == "start" || action == "restart" {
+			return managedProductFailure(config.StoreDir, action, err)
+		}
 		return fmt.Errorf("cli: %s Caelis service: %w", action, err)
 	}
 	return writeLocalHostCommandResult(stdout, format, localHostCommandResult{

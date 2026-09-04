@@ -793,7 +793,8 @@ func TestManagedLocalHostRejectsDiscoveryEndpointInstanceMismatch(t *testing.T) 
 		},
 		StartupTimeout: 20 * time.Millisecond, PollInterval: time.Millisecond,
 	})
-	if err == nil || err.Error() != "caelis could not start; try again or run `caelis doctor`" {
+	wantError := "caelis startup failed [CAELIS_STARTUP_FAILED]: local Control Host could not start; details: " + filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
+	if err == nil || err.Error() != wantError {
 		t.Fatalf("managed instance mismatch product error = %v", err)
 	}
 	if starts.Load() != 0 {
@@ -874,8 +875,9 @@ func TestManagedLifecycleProbeIgnoresSurfaceCapabilityCompatibility(t *testing.T
 
 func TestManagedProductFailureKeepsImplementationDetailsInPrivateLog(t *testing.T) {
 	storeDir := t.TempDir()
-	err := managedProductFailure(storeDir, "start", errors.New("servicelifecycle: hidden implementation detail"), false)
-	if got := err.Error(); got != "caelis could not start; try again or run `caelis doctor`" {
+	err := managedProductFailure(storeDir, "start", errors.New("servicelifecycle: hidden implementation detail"))
+	want := "caelis startup failed [CAELIS_STARTUP_FAILED]: local Control Host could not start; details: " + filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
+	if got := err.Error(); got != want {
 		t.Fatalf("product error = %q", got)
 	}
 	logPath := filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
@@ -897,21 +899,47 @@ func TestManagedProductFailureKeepsImplementationDetailsInPrivateLog(t *testing.
 
 func TestManagedProductFailureSurfacesPermissionBlocker(t *testing.T) {
 	storeDir := t.TempDir()
-	err := managedProductFailure(storeDir, "start", errors.New("open store: permission denied"), false)
-	if err == nil || err.Error() != "caelis could not start: permission denied" {
+	err := managedProductFailure(storeDir, "start", errors.New("open store: permission denied"))
+	wantPermission := "caelis startup failed [CAELIS_STARTUP_PERMISSION_DENIED]: permission denied; details: " + filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
+	if err == nil || err.Error() != wantPermission {
 		t.Fatalf("permission product error = %v", err)
 	}
 	secret := "seccomp failed path=/private/customer token=super-secret"
-	diagnostic := managedProductFailure(storeDir, "start", errors.New(secret), true)
-	if diagnostic == nil || diagnostic.Error() != "caelis could not start: sandbox isolation is unavailable" {
+	diagnostic := managedProductFailure(storeDir, "start", errors.New(secret))
+	wantSandbox := "caelis startup failed [CAELIS_STARTUP_SANDBOX_UNAVAILABLE]: sandbox isolation is unavailable; details: " + filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
+	if diagnostic == nil || diagnostic.Error() != wantSandbox {
 		t.Fatalf("doctor-facing product error = %v, want bounded sandbox cause", diagnostic)
 	}
 	if strings.Contains(diagnostic.Error(), "customer") || strings.Contains(diagnostic.Error(), "super-secret") {
 		t.Fatalf("doctor-facing product error leaked private log content: %v", diagnostic)
 	}
 	logPath := filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
-	if got := managedStartupCauseFromLog(logPath, 0); got != "sandbox isolation is unavailable" {
-		t.Fatalf("managedStartupCauseFromLog() = %q", got)
+	if got := managedStartupCauseFromLog(logPath, 0); got == nil || got.Error() != "sandbox isolation is unavailable" {
+		t.Fatalf("managedStartupCauseFromLog() = %v", got)
+	}
+}
+
+func TestManagedStartupLogPromotesRecognizedIssueCodeWithoutDetails(t *testing.T) {
+	storeDir := t.TempDir()
+	logPath := filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	line := "serve failed [" + string(gatewayapp.StartupIssueWorkspaceIdentityConflict) + "]: key=work cwd=/private/customer\n"
+	if err := os.WriteFile(logPath, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cause := managedStartupCauseFromLog(logPath, 0)
+	if code, ok := gatewayapp.StartupIssueCodeOf(cause); !ok || code != gatewayapp.StartupIssueWorkspaceIdentityConflict {
+		t.Fatalf("promoted startup issue = %v, code=%q ok=%t", cause, code, ok)
+	}
+	productErr := managedProductFailure(storeDir, "start", cause)
+	want := "caelis startup failed [CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT]: stored Session workspace identities conflict; run `caelis doctor` to repair"
+	if productErr.Error() != want {
+		t.Fatalf("product error = %q, want %q", productErr, want)
+	}
+	if strings.Contains(productErr.Error(), "customer") || strings.Contains(productErr.Error(), "key=work") {
+		t.Fatalf("product error exposed private details: %v", productErr)
 	}
 }
 
@@ -942,7 +970,8 @@ func TestManagedLocalHostRejectsDifferentAppOrPrincipalForSameStore(t *testing.T
 		},
 		StartupTimeout: 20 * time.Millisecond, PollInterval: time.Millisecond,
 	})
-	if err == nil || err.Error() != "caelis could not start; try again or run `caelis doctor`" {
+	wantError := "caelis startup failed [CAELIS_STARTUP_FAILED]: local Control Host could not start; details: " + filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
+	if err == nil || err.Error() != wantError {
 		t.Fatalf("managed Host scope product error = %v", err)
 	}
 	if starts.Load() != 0 {

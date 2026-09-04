@@ -60,7 +60,8 @@ func TestRunUpdateActivationFailureDoesNotExposeServiceDetails(t *testing.T) {
 		return errors.New("servicelifecycle: selected process did not become ready")
 	}
 	err := runUpdate(context.Background(), storeDir, false, io.Discard, io.Discard)
-	if err == nil || err.Error() != "caelis was updated but could not finish setup; try again or run `caelis doctor`" {
+	want := "caelis startup failed [CAELIS_STARTUP_TIMEOUT]: local Control Host did not become ready before the startup deadline; details: " + filepath.Join(storeDir, "logs", localHostLogFilename)
+	if err == nil || err.Error() != want {
 		t.Fatalf("product update error = %v", err)
 	}
 	raw, readErr := os.ReadFile(filepath.Join(storeDir, "logs", localHostLogFilename))

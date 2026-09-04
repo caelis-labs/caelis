@@ -27,6 +27,17 @@ import (
 const (
 	defaultLocalHostListen = "127.0.0.1:0"
 	localHostLogFilename   = "service.log"
+
+	startupCodeFailed              = "CAELIS_STARTUP_FAILED"
+	startupCodePermissionDenied    = "CAELIS_STARTUP_PERMISSION_DENIED"
+	startupCodeNoSpace             = "CAELIS_STARTUP_NO_SPACE"
+	startupCodeAddressInUse        = "CAELIS_STARTUP_ADDRESS_IN_USE"
+	startupCodeSandboxUnavailable  = "CAELIS_STARTUP_SANDBOX_UNAVAILABLE"
+	startupCodeTimeout             = "CAELIS_STARTUP_TIMEOUT"
+	startupCodeProcessExited       = "CAELIS_STARTUP_PROCESS_EXITED"
+	startupCodeUnsupportedSchema   = "CAELIS_STARTUP_UNSUPPORTED_SCHEMA"
+	startupCodeStoreOwned          = "CAELIS_STARTUP_STORE_OWNED"
+	startupCodeVersionIncompatible = "CAELIS_STARTUP_VERSION_INCOMPATIBLE"
 )
 
 type localHostStartRequest struct {
@@ -37,13 +48,10 @@ type localHostStartRequest struct {
 }
 
 func openManagedProductClients(ctx context.Context, cfg gatewayapp.Config, options productClientOptions) (*productClients, error) {
+	if err := validateManagedProductClientOptions(options); err != nil {
+		return nil, err
+	}
 	defaultTokenFile := controlserver.DefaultTokenFile(options.StoreDir)
-	if options.Token != "" {
-		return nil, errors.New("CAELIS_CONTROL_TOKEN requires an explicit --control-url")
-	}
-	if options.TokenFile != "" && filepath.Clean(options.TokenFile) != filepath.Clean(defaultTokenFile) {
-		return nil, errors.New("--control-token-file requires an explicit --control-url or `caelis serve`")
-	}
 	options.TokenFile = defaultTokenFile
 	manager, candidate, err := newLocalServiceManager(options)
 	if err != nil {
@@ -51,22 +59,37 @@ func openManagedProductClients(ctx context.Context, cfg gatewayapp.Config, optio
 	}
 	missingBeforeStart := inspectManagedHost(ctx, options).Probe.State == servicelifecycle.ProbeMissing
 	if _, err := manager.Start(ctx, candidate); err != nil {
-		managedErr := managedProductFailure(options.StoreDir, "start", err, options.SurfaceHostCause)
+		managedErr := managedProductFailure(options.StoreDir, "start", err)
 		if !missingBeforeStart || ctx.Err() != nil {
 			return nil, managedErr
 		}
 		embedded, embeddedErr := openEmbeddedProductClients(cfg, options)
 		if embeddedErr != nil {
-			return nil, errors.Join(managedErr, fmt.Errorf("cli: embedded fallback failed: %w", embeddedErr))
+			return nil, managedProductFailure(
+				options.StoreDir,
+				"start",
+				errors.Join(err, fmt.Errorf("cli: embedded fallback failed: %w", embeddedErr)),
+			)
 		}
 		embedded.ManagedFallback = true
 		return embedded, nil
 	}
 	product, err := openManagedProductClientsFromDiscovery(ctx, options)
 	if err != nil {
-		return nil, managedProductFailure(options.StoreDir, "connect", err, options.SurfaceHostCause)
+		return nil, managedProductFailure(options.StoreDir, "connect", err)
 	}
 	return product, nil
+}
+
+func validateManagedProductClientOptions(options productClientOptions) error {
+	defaultTokenFile := controlserver.DefaultTokenFile(options.StoreDir)
+	if options.Token != "" {
+		return errors.New("CAELIS_CONTROL_TOKEN requires an explicit --control-url")
+	}
+	if options.TokenFile != "" && filepath.Clean(options.TokenFile) != filepath.Clean(defaultTokenFile) {
+		return errors.New("--control-token-file requires an explicit --control-url or `caelis serve`")
+	}
+	return nil
 }
 
 func openManagedProductClientsFromDiscovery(ctx context.Context, options productClientOptions) (*productClients, error) {
@@ -258,14 +281,14 @@ type managedCompatibilityError struct {
 }
 
 func (e *managedCompatibilityError) Error() string {
-	return "this version of Caelis needs an update before it can continue"
+	return "caelis startup failed [" + startupCodeVersionIncompatible + "]: this version of Caelis needs an update before it can continue"
 }
 
 func (e *managedCompatibilityError) Unwrap() error {
 	return e.cause
 }
 
-func managedProductFailure(storeDir string, phase string, err error, surfaceCause bool) error {
+func managedProductFailure(storeDir string, phase string, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -277,59 +300,85 @@ func managedProductFailure(storeDir string, phase string, err error, surfaceCaus
 	if errors.Is(err, context.Canceled) {
 		return context.Canceled
 	}
-	if cause := userFacingHostBlocker(err); cause != "" {
-		return fmt.Errorf("caelis could not %s: %s", phase, cause)
+	detail := classifyManagedStartupFailure(err)
+	return &managedStartupFailure{
+		code: detail.code, description: detail.description, repairable: detail.repairable,
+		logPath: filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename), cause: err,
 	}
-	if surfaceCause {
-		if detail := compactUserVisibleCause(err); detail != "" {
-			return fmt.Errorf("caelis could not %s: %s", phase, detail)
-		}
-	}
-	return fmt.Errorf("caelis could not %s; try again or run `caelis doctor`", phase)
 }
 
-func userFacingHostBlocker(err error) string {
+type managedStartupFailure struct {
+	code        string
+	description string
+	repairable  bool
+	logPath     string
+	cause       error
+}
+
+func (e *managedStartupFailure) Error() string {
+	message := fmt.Sprintf("caelis startup failed [%s]: %s", e.code, e.description)
+	if e.repairable {
+		return message + "; run `caelis doctor` to repair"
+	}
+	if e.logPath != "" {
+		return message + "; details: " + e.logPath
+	}
+	return message
+}
+
+func (e *managedStartupFailure) Unwrap() error { return e.cause }
+
+type managedStartupFailureDetail struct {
+	code        string
+	description string
+	repairable  bool
+}
+
+func classifyManagedStartupFailure(err error) managedStartupFailureDetail {
+	code, ok := gatewayapp.StartupIssueCodeOf(err)
+	if !ok {
+		code, ok = gatewayapp.ParseStartupIssueCode(err.Error())
+	}
+	if ok {
+		return managedStartupFailureDetail{
+			code: string(code), description: gatewayapp.StartupIssueDescription(code),
+			repairable: gatewayapp.StartupIssueRepairable(code),
+		}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return managedStartupFailureDetail{code: startupCodeTimeout, description: "local Control Host did not become ready before the startup deadline"}
+	}
 	text := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(text, "unsupported unreleased schema"):
-		return "Memory data uses an unsupported unreleased schema; remove the prerelease Memory database and restart Caelis"
+		return managedStartupFailureDetail{code: startupCodeUnsupportedSchema, description: "Memory data uses an unsupported unreleased schema"}
 	case strings.Contains(text, "memory data directory is already owned"):
-		return "Memory data directory is already owned by another process"
+		return managedStartupFailureDetail{code: startupCodeStoreOwned, description: "Memory data directory is already owned by another process"}
 	case strings.Contains(text, "permission denied"), strings.Contains(text, "operation not permitted"),
 		strings.Contains(text, "read-only file system"):
-		return "permission denied"
+		return managedStartupFailureDetail{code: startupCodePermissionDenied, description: "permission denied"}
 	case strings.Contains(text, "no space left"):
-		return "no space left on device"
+		return managedStartupFailureDetail{code: startupCodeNoSpace, description: "no space left on device"}
 	case strings.Contains(text, "address already in use"):
-		return "listen address already in use"
+		return managedStartupFailureDetail{code: startupCodeAddressInUse, description: "listen address already in use"}
 	case strings.Contains(text, "bwrap"), strings.Contains(text, "bubblewrap"),
 		strings.Contains(text, "landlock"), strings.Contains(text, "seccomp"):
-		return "sandbox isolation is unavailable"
+		return managedStartupFailureDetail{code: startupCodeSandboxUnavailable, description: "sandbox isolation is unavailable"}
+	case strings.Contains(text, "context deadline exceeded"), strings.Contains(text, "did not become ready"):
+		return managedStartupFailureDetail{code: startupCodeTimeout, description: "local Control Host did not become ready before the startup deadline"}
+	case strings.Contains(text, "process exited before readiness"), strings.Contains(text, "exit status"):
+		return managedStartupFailureDetail{code: startupCodeProcessExited, description: "local Control Host exited before readiness"}
 	default:
+		return managedStartupFailureDetail{code: startupCodeFailed, description: "local Control Host could not start"}
+	}
+}
+
+func userFacingHostBlocker(err error) string {
+	detail := classifyManagedStartupFailure(err)
+	if detail.code == startupCodeFailed || detail.code == startupCodeTimeout || detail.code == startupCodeProcessExited {
 		return ""
 	}
-}
-
-func managedStartupDoctorCause(err error) string {
-	if err == nil {
-		return "local Control Host is unavailable"
-	}
-	if cause := userFacingHostBlocker(err); cause != "" {
-		return cause
-	}
-	text := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(text, "context deadline exceeded"), strings.Contains(text, "did not become ready"):
-		return "local Control Host did not become ready before the startup deadline"
-	case strings.Contains(text, "process exited before readiness"), strings.Contains(text, "exit status"):
-		return "local Control Host exited before readiness"
-	default:
-		return "local Control Host could not start"
-	}
-}
-
-func compactUserVisibleCause(err error) string {
-	return strings.Join(strings.Fields(strings.TrimSpace(err.Error())), " ")
+	return detail.description
 }
 
 func recordManagedProductDiagnostic(storeDir string, phase string, err error) {
@@ -495,8 +544,8 @@ func newDetachedLocalHostProcess(command *exec.Cmd, logPath string, logOffset in
 	}
 	go func() {
 		waitErr := command.Wait()
-		if cause := managedStartupCauseFromLog(logPath, logOffset); cause != "" {
-			waitErr = errors.New(cause)
+		if cause := managedStartupCauseFromLog(logPath, logOffset); cause != nil {
+			waitErr = cause
 		}
 		process.exited <- waitErr
 		close(process.exited)
@@ -532,15 +581,27 @@ func (p *detachedLocalHostProcess) release() error {
 	return nil
 }
 
-func managedStartupCauseFromLog(path string, offset int64) string {
+type managedLoggedStartupIssue struct {
+	code gatewayapp.StartupIssueCode
+}
+
+func (e *managedLoggedStartupIssue) Error() string {
+	return gatewayapp.StartupIssueDescription(e.code)
+}
+
+func (e *managedLoggedStartupIssue) StartupIssueCode() gatewayapp.StartupIssueCode {
+	return e.code
+}
+
+func managedStartupCauseFromLog(path string, offset int64) error {
 	file, err := os.Open(path)
 	if err != nil {
-		return ""
+		return nil
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil || info.Size() <= offset {
-		return ""
+		return nil
 	}
 	const maxStartupLogBytes = int64(64 << 10)
 	start := offset
@@ -548,19 +609,22 @@ func managedStartupCauseFromLog(path string, offset int64) string {
 		start = info.Size() - maxStartupLogBytes
 	}
 	if _, err := file.Seek(start, io.SeekStart); err != nil {
-		return ""
+		return nil
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, maxStartupLogBytes))
 	if err != nil {
-		return ""
+		return nil
 	}
 	lines := strings.Split(string(raw), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
+		if code, ok := gatewayapp.ParseStartupIssueCode(lines[i]); ok {
+			return &managedLoggedStartupIssue{code: code}
+		}
 		if cause := userFacingHostBlocker(errors.New(lines[i])); cause != "" {
-			return cause
+			return errors.New(cause)
 		}
 	}
-	return ""
+	return nil
 }
 
 func loadManagedDiscovery(storeDir string) (controlserver.DiscoveryRecord, string, error) {

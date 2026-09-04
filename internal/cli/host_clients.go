@@ -61,10 +61,6 @@ type productClientOptions struct {
 	ServiceInstallDir  string
 	StartupTimeout     time.Duration
 	PollInterval       time.Duration
-	// SurfaceHostCause keeps the user-visible Host start/connect blocker in the
-	// command error. Diagnostic commands such as doctor need the real cause
-	// instead of a generic retry hint.
-	SurfaceHostCause bool
 	// EmbeddedControlEndpoint replaces the private child-facing loopback
 	// adapter in tests. Production leaves it nil and binds an OS-selected port.
 	EmbeddedControlEndpoint func() (embeddedControlEndpoint, error)

@@ -80,9 +80,12 @@ truth, never a substitute for live Host authority.
 
 Managed startup retains and reaps the exact launched process until its identity
 is ready. A child exit ends readiness polling immediately; phase durations and
-the complete cause stay in the owner-only service log. `caelis doctor` can emit
-a bounded startup diagnosis and that log path even when no Host client could be
-constructed.
+the complete cause stay in the owner-only service log. Startup failures expose
+a stable `CAELIS_STARTUP_*` code and bounded public description. Recognized
+compatibility repair belongs to `caelis doctor`: it stops the local Host,
+performs a resumable offline Store repair through the persistence owner, and
+then starts the Host and validates current status. Normal Host startup detects
+incompatible durable state but never mutates it.
 
 `control/appserver.AppServerClients` is the aggregate capability boundary used by
 product clients. Focused Control packages remain the semantic owners behind it.

@@ -27,8 +27,10 @@ type doctorResult struct {
 	ConfigFileSecure                bool                              `json:"config_file_secure,omitempty"`
 	ConfigPermissionsSecure         bool                              `json:"config_permissions_secure,omitempty"`
 	ServiceState                    string                            `json:"service_state,omitempty"`
+	ServiceErrorCode                string                            `json:"service_error_code,omitempty"`
 	ServiceError                    string                            `json:"service_error,omitempty"`
 	ServiceLogPath                  string                            `json:"service_log_path,omitempty"`
+	Repairs                         []doctorRepairResult              `json:"repairs,omitempty"`
 	SessionID                       string                            `json:"session_id,omitempty"`
 	SessionMode                     string                            `json:"session_mode,omitempty"`
 	PolicyProfile                   string                            `json:"policy_profile,omitempty"`
@@ -77,6 +79,15 @@ type doctorResult struct {
 	Warnings                        []string                          `json:"warnings,omitempty"`
 }
 
+type doctorRepairResult struct {
+	Code                     string `json:"code"`
+	Status                   string `json:"status"`
+	ConflictingWorkspaceKeys int    `json:"conflicting_workspace_keys,omitempty"`
+	AffectedSessions         int    `json:"affected_sessions,omitempty"`
+	RepairedSessions         int    `json:"repaired_sessions,omitempty"`
+	RepairedTasks            int    `json:"repaired_tasks,omitempty"`
+}
+
 func doctorResultFromStartupFailure(storeDir string, managed bool, err error) doctorResult {
 	result := doctorResult{
 		GoVersion:    runtime.Version(),
@@ -87,7 +98,9 @@ func doctorResultFromStartupFailure(storeDir string, managed bool, err error) do
 		ServiceState: "unavailable",
 	}
 	if managed {
-		result.ServiceError = managedStartupDoctorCause(err)
+		detail := classifyManagedStartupFailure(err)
+		result.ServiceErrorCode = detail.code
+		result.ServiceError = detail.description
 		result.ServiceLogPath = filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
 		return result
 	}
@@ -249,8 +262,26 @@ func doctorResultFromStatus(status controlstatus.StatusSnapshot) doctorResult {
 
 func formatDoctorResult(report doctorResult) string {
 	lines := make([]string, 0, 48)
+	for _, repair := range report.Repairs {
+		lines = append(lines, fmt.Sprintf(
+			"repair [%s]: %s (affected_sessions=%d repaired_sessions=%d repaired_tasks=%d conflicting_workspace_keys=%d)",
+			firstNonEmptyString(repair.Code, "unknown"),
+			firstNonEmptyString(repair.Status, "unknown"),
+			repair.AffectedSessions,
+			repair.RepairedSessions,
+			repair.RepairedTasks,
+			repair.ConflictingWorkspaceKeys,
+		))
+	}
+	if len(report.Repairs) > 0 {
+		lines = append(lines, "")
+	}
 	if serviceError := strings.TrimSpace(report.ServiceError); serviceError != "" {
-		lines = append(lines, "blocked: "+serviceError)
+		if code := strings.TrimSpace(report.ServiceErrorCode); code != "" {
+			lines = append(lines, "blocked ["+code+"]: "+serviceError)
+		} else {
+			lines = append(lines, "blocked: "+serviceError)
+		}
 		if logPath := strings.TrimSpace(report.ServiceLogPath); logPath != "" {
 			lines = append(lines, "fix: inspect the private service log at "+logPath)
 		}
@@ -272,6 +303,7 @@ func formatDoctorResult(report doctorResult) string {
 	if report.ServiceState != "" || report.ServiceError != "" || report.ServiceLogPath != "" {
 		lines = append(lines,
 			fmt.Sprintf("service_state: %s", firstNonEmptyString(report.ServiceState, "-")),
+			fmt.Sprintf("service_error_code: %s", firstNonEmptyString(report.ServiceErrorCode, "-")),
 			fmt.Sprintf("service_error: %s", firstNonEmptyString(report.ServiceError, "-")),
 			fmt.Sprintf("service_log_path: %s", firstNonEmptyString(report.ServiceLogPath, "-")),
 		)

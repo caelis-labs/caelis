@@ -140,8 +140,8 @@ func loadDurableWorkspaceIdentities(
 				return nil, fmt.Errorf("gatewayapp: Session %q has an invalid durable workspace identity", summary.SessionID)
 			}
 			if existing := identities[key]; existing != "" && existing != cwd {
-				return nil, errorcode.New(
-					errorcode.FailedPrecondition,
+				return nil, newStartupIssueError(
+					StartupIssueWorkspaceIdentityConflict,
 					fmt.Sprintf("gatewayapp: durable workspace key %q is bound to both %q and %q", key, existing, cwd),
 				)
 			}

@@ -76,9 +76,13 @@ Building from source requires the Go version declared in [`go.mod`](go.mod).
 | Stream ACP envelopes | `caelis -p "Run the tests." -format jsonl` |
 | Read a prompt from stdin | `printf '%s\n' "Explain this code." \| caelis -format text` |
 | Serve Caelis over ACP | `caelis acp` |
-| Inspect configuration and runtime health | `caelis doctor` |
+| Repair recognized compatibility data and report current health | `caelis doctor` |
 | Inspect the managed local Host | `caelis service status` |
 | Show all options | `caelis -h` |
+
+Managed local startup failures include a stable `CAELIS_STARTUP_*` code. In
+particular, `CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT` is repaired by
+`caelis doctor`; normal startup does not rewrite durable Session data.
 
 Use `-session` to target a durable Session, `-store-dir` to choose another data
 root, `-control-url` to attach to a specific Host, and `-embedded` for explicit
