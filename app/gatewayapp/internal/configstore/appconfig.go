@@ -113,6 +113,7 @@ func Validate(doc AppConfig) error {
 	}
 
 	endpointIDs := make(map[string]struct{}, len(doc.Models.ProviderEndpoints))
+	endpointsByID := make(map[string]modelconfig.ProviderEndpointConfig, len(doc.Models.ProviderEndpoints))
 	for _, raw := range doc.Models.ProviderEndpoints {
 		endpoint := modelconfig.NormalizeProviderEndpoint(raw)
 		if endpoint.ID == "" || endpoint.Provider == "" {
@@ -122,8 +123,10 @@ func Validate(doc AppConfig) error {
 			return fmt.Errorf("gatewayapp: duplicate provider endpoint %q", endpoint.ID)
 		}
 		endpointIDs[endpoint.ID] = struct{}{}
+		endpointsByID[endpoint.ID] = endpoint
 	}
 	modelIDs := make(map[string]struct{}, len(doc.Models.Configs))
+	modelConfigs := make(map[string]modelconfig.Config, len(doc.Models.Configs))
 	for _, raw := range doc.Models.Configs {
 		configured := modelconfig.NormalizeConfig(raw)
 		if configured.ID == "" || strings.TrimSpace(configured.Model) == "" {
@@ -133,18 +136,21 @@ func Validate(doc AppConfig) error {
 			return fmt.Errorf("gatewayapp: duplicate provider model %q", configured.ID)
 		}
 		modelIDs[configured.ID] = struct{}{}
-		if _, ok := endpointIDs[configured.ProviderEndpointID]; !ok {
+		endpoint, ok := endpointsByID[configured.ProviderEndpointID]
+		if !ok {
 			return fmt.Errorf(
 				"gatewayapp: provider model %q references unknown provider endpoint %q",
 				configured.ID,
 				configured.ProviderEndpointID,
 			)
 		}
+		modelConfigs[configured.ID] = modelconfig.MergeConfigProviderEndpoint(configured, endpoint)
 	}
 	if strings.TrimSpace(doc.Models.DefaultID) != "" || strings.TrimSpace(doc.Models.DefaultAlias) != "" {
 		return fmt.Errorf("gatewayapp: model default must use ModelProfiles.default_profile_id")
 	}
-	for _, profile := range modelprofile.NormalizeConfiguration(doc.ModelProfiles).Profiles {
+	profiles := modelprofile.NormalizeConfiguration(doc.ModelProfiles)
+	for _, profile := range profiles.Profiles {
 		switch profile.Kind() {
 		case modelprofile.BackendProvider:
 			if _, ok := modelIDs[profile.Backend.Provider.ModelConfigID]; !ok {
@@ -154,6 +160,12 @@ func Validate(doc AppConfig) error {
 			if _, ok := controlagents.LookupAgent(doc.ExternalAgents, profile.Backend.ACP.AgentID); !ok {
 				return fmt.Errorf("gatewayapp: ACP profile %q references unknown external Agent %q", profile.ID, profile.Backend.ACP.AgentID)
 			}
+		}
+	}
+	if profiles.DefaultFastMode {
+		profile, _ := modelprofile.Lookup(profiles, profiles.DefaultProfileID)
+		if profile.Backend.Provider == nil || !modelconfig.SupportsSpeedMode(modelConfigs[profile.Backend.Provider.ModelConfigID], "fast") {
+			return fmt.Errorf("gatewayapp: default model profile %q does not support fast mode", profiles.DefaultProfileID)
 		}
 	}
 	return nil

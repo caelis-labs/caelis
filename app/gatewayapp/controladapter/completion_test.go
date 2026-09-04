@@ -11,6 +11,51 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
+func TestCompleteModelSpeedModesOffersFastOnlyForSupportedGPT(t *testing.T) {
+	t.Parallel()
+
+	configs := map[string]ModelConfig{
+		"openai/gpt-5.6-sol": {Provider: "openai", Model: "gpt-5.6-sol"},
+		"openai/gpt-6-astra": {Provider: "openai", Model: "gpt-6-astra"},
+		"openai/gpt-5.5-pro": {Provider: "openai", Model: "gpt-5.5-pro"},
+	}
+	driver := &assembler{deps: &runtimeDeps{Model: ModelRuntimeDeps{
+		ConfigFn: func(alias string) (ModelConfig, bool) {
+			config, ok := configs[alias]
+			return config, ok
+		},
+		ListChoicesFn: func(context.Context, session.SessionRef) ([]ModelChoice, error) {
+			return []ModelChoice{
+				{ID: "openai/gpt-5.6-sol", Alias: "openai/gpt-5.6-sol", ReasoningLevels: []string{"xhigh"}},
+				{ID: "openai/gpt-6-astra", Alias: "openai/gpt-6-astra", ReasoningLevels: []string{"xhigh"}},
+				{ID: "openai/gpt-5.5-pro", Alias: "openai/gpt-5.5-pro", ReasoningLevels: []string{"xhigh"}},
+			}, nil
+		},
+	}}}
+
+	fast, err := driver.CompleteSlashArg(context.Background(), "model openai/gpt-5.6-sol xhigh", "", 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fast) != 2 || fast[0].Value != "default" || fast[1].Value != "fast" || fast[1].Detail != "1.5x faster, more usage" {
+		t.Fatalf("supported GPT speed candidates = %#v, want default and model-specific Fast hint", fast)
+	}
+	astra, err := driver.CompleteSlashArg(context.Background(), "model openai/gpt-6-astra xhigh", "", 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(astra) != 2 || astra[1].Value != "fast" || astra[1].Detail != "2x faster, more usage" {
+		t.Fatalf("Astra speed candidates = %#v, want 2x Fast hint", astra)
+	}
+	standard, err := driver.CompleteSlashArg(context.Background(), "model openai/gpt-5.5-pro xhigh", "", 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(standard) != 0 {
+		t.Fatalf("unsupported model speed candidates = %#v, want no speed picker", standard)
+	}
+}
+
 func TestNormalizeCompletionLimitAllowsPagedCompletion(t *testing.T) {
 	t.Parallel()
 

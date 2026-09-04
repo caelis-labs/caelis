@@ -28,7 +28,7 @@ func (s *runtimeComposition) setRuntimeDefaultModelFromLookup() {
 		profileID = modelprofile.BuildProviderID(defaultID)
 		cfg.ReasoningEffort = s.lookup.DefaultEffort()
 	}
-	s.setRuntimeModel(profileID, cfg)
+	s.setRuntimeModel(profileID, cfg, s.lookup.DefaultFastMode())
 }
 
 func (s *runtimeComposition) setRuntimeDefaultProfile(profiles modelprofile.Configuration) {
@@ -38,7 +38,7 @@ func (s *runtimeComposition) setRuntimeDefaultProfile(profiles modelprofile.Conf
 	profiles = modelprofile.NormalizeConfiguration(profiles)
 	profile, ok := modelprofile.Lookup(profiles, profiles.DefaultProfileID)
 	if !ok {
-		s.setRuntimeModel("", ModelConfig{})
+		s.setRuntimeModel("", ModelConfig{}, false)
 		return
 	}
 	cfg := ModelConfig{}
@@ -46,21 +46,23 @@ func (s *runtimeComposition) setRuntimeDefaultProfile(profiles modelprofile.Conf
 		cfg, _ = s.lookup.Config(profile.Backend.Provider.ModelConfigID)
 		cfg.ReasoningEffort = profiles.DefaultEffort
 	}
-	s.setRuntimeModel(profile.ID, cfg)
+	s.setRuntimeModel(profile.ID, cfg, profiles.DefaultFastMode)
 	if s.process != nil && s.process.config != nil {
 		runtimeCfg := s.runtimeProcessSnapshot().runtime
 		runtimeCfg.ModelProfileEffort = profiles.DefaultEffort
+		runtimeCfg.ModelFastMode = profiles.DefaultFastMode
 		s.process.config.setRuntime(runtimeCfg)
 	}
 }
 
-func (s *runtimeComposition) setRuntimeModel(profileID string, cfg ModelConfig) {
+func (s *runtimeComposition) setRuntimeModel(profileID string, cfg ModelConfig, fastMode bool) {
 	if s == nil || s.process == nil || s.process.config == nil {
 		return
 	}
 	runtimeCfg := s.runtimeProcessSnapshot().runtime
 	runtimeCfg.ModelProfileID = modelprofile.NormalizeID(profileID)
 	runtimeCfg.ModelProfileEffort = strings.ToLower(strings.TrimSpace(cfg.ReasoningEffort))
+	runtimeCfg.ModelFastMode = fastMode
 	runtimeCfg.Model = cfg
 	s.process.config.setRuntime(runtimeCfg)
 }
@@ -285,6 +287,15 @@ func (s *runtimeComposition) EffectiveModelEffort() string {
 		return s.DefaultModelEffort()
 	}
 	return ""
+}
+
+// EffectiveModelFastMode reports whether new work in this Host uses the
+// priority service tier.
+func (s *runtimeComposition) EffectiveModelFastMode() bool {
+	if s == nil {
+		return false
+	}
+	return s.runtimeProcessSnapshot().runtime.ModelFastMode
 }
 
 func (s *runtimeComposition) ModelConfig(alias string) (ModelConfig, bool) {

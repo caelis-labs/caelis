@@ -75,7 +75,7 @@ func (*interruptBridgeStub) SetSessionMode(context.Context, string) (controlstat
 func (*interruptBridgeStub) Connect(context.Context, controlprompt.ConnectConfig) (controlstatus.StatusSnapshot, error) {
 	return controlstatus.StatusSnapshot{}, nil
 }
-func (*interruptBridgeStub) UseModel(context.Context, string, ...string) (controlstatus.StatusSnapshot, error) {
+func (*interruptBridgeStub) UseModel(context.Context, string, string, bool) (controlstatus.StatusSnapshot, error) {
 	return controlstatus.StatusSnapshot{}, nil
 }
 func (*interruptBridgeStub) DeleteModel(context.Context, string) error { return nil }

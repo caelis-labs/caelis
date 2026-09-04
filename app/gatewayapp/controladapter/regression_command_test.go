@@ -118,23 +118,23 @@ func TestRegressionSlashCompletionModelAliases(t *testing.T) {
 	driver, _ := newRegressionDriver(t)
 	ctx := context.Background()
 
-	candidates, err := driver.CompleteSlashArg(ctx, "model use", "", 10)
+	candidates, err := driver.CompleteSlashArg(ctx, "model", "", 10)
 	if err != nil {
-		t.Fatalf("CompleteSlashArg(model use) error = %v", err)
+		t.Fatalf("CompleteSlashArg(model) error = %v", err)
 	}
 	if len(candidates) == 0 {
-		t.Fatal("CompleteSlashArg(model use) should return at least one candidate")
+		t.Fatal("CompleteSlashArg(model) should return at least one candidate")
 	}
 }
 
-func TestRegressionSlashCompletionModelDelete(t *testing.T) {
+func TestRegressionSlashCompletionDisconnectProvider(t *testing.T) {
 	t.Parallel()
 	driver, _ := newRegressionDriver(t)
 	ctx := context.Background()
 
-	candidates, err := driver.CompleteSlashArg(ctx, "model del", "", 10)
+	candidates, err := driver.CompleteSlashArg(ctx, "disconnect-provider", "", 10)
 	if err != nil {
-		t.Fatalf("CompleteSlashArg(model del) error = %v", err)
+		t.Fatalf("CompleteSlashArg(disconnect-provider) error = %v", err)
 	}
 	_ = candidates
 }
@@ -163,14 +163,14 @@ func TestRegressionSlashCompletionConnect(t *testing.T) {
 	_ = candidates
 }
 
-func TestRegressionSlashCompletionModelUseFiltered(t *testing.T) {
+func TestRegressionSlashCompletionModelFiltered(t *testing.T) {
 	t.Parallel()
 	driver, _ := newRegressionDriver(t)
 	ctx := context.Background()
 
-	candidates, err := driver.CompleteSlashArg(ctx, "model use", "llama", 10)
+	candidates, err := driver.CompleteSlashArg(ctx, "model", "llama", 10)
 	if err != nil {
-		t.Fatalf("CompleteSlashArg(model use llama) error = %v", err)
+		t.Fatalf("CompleteSlashArg(model llama) error = %v", err)
 	}
 	for _, c := range candidates {
 		_ = c

@@ -2,7 +2,22 @@ package tuiapp
 
 import "strings"
 
-const toolArgsPreviewWidth = 96
+const (
+	toolArgsPreviewWidth       = 96
+	compactSingleLineMinBudget = 16
+	compactSingleLineChrome    = 12
+	// Keep compact activity readable on very wide terminals while allowing it
+	// to use substantially more of ordinary viewports than the old fixed cap.
+	compactSingleLineHardCap = 132
+)
+
+func compactSingleLineBudget(width int) int {
+	return minInt(compactSingleLineHardCap, maxInt(compactSingleLineMinBudget, width-compactSingleLineChrome))
+}
+
+func compactSingleLineHeader(text string, width int) string {
+	return truncateDisplayPreviewMiddle(text, maxInt(1, width))
+}
 
 func truncateDisplayPreviewMiddle(text string, budget int) string {
 	text = strings.TrimSpace(text)

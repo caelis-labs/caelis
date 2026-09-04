@@ -710,3 +710,47 @@ func assertOpenAICodexReplayRequest(t *testing.T, body map[string]any) {
 		t.Fatalf("tool replay = call %#v output %#v", call, output)
 	}
 }
+
+func TestOpenAICodexRequestSerializesPriorityServiceTier(t *testing.T) {
+	t.Parallel()
+
+	messages := []model.Message{model.NewTextMessage(model.RoleUser, "hi")}
+	for _, tt := range []struct {
+		name string
+		tier model.ServiceTier
+		omit bool
+	}{
+		{name: "priority", tier: model.ServiceTierPriority},
+		{name: "omitted when unset", omit: true},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			payload, err := openAICodexRequestFromModel(&model.Request{
+				Messages:    messages,
+				ServiceTier: tt.tier,
+			}, "gpt-5.4")
+			if err != nil {
+				t.Fatalf("openAICodexRequestFromModel() error = %v", err)
+			}
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+			got, ok := decoded["service_tier"]
+			if tt.omit {
+				if ok {
+					t.Fatalf("service_tier = %#v, want omitted", got)
+				}
+				return
+			}
+			if !ok || got != "priority" {
+				t.Fatalf("service_tier = %#v, %v, want priority", got, ok)
+			}
+		})
+	}
+}

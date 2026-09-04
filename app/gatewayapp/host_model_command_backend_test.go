@@ -100,6 +100,80 @@ func TestHostModelCommandsUseHostCASAndSharedLedger(t *testing.T) {
 	}
 }
 
+func TestHostModelCommandPersistsSupportedFastModeDefault(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	stack, _ := newLocalStateTestStack(t)
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-fast-connect", ExpectedRevision: &revision},
+		Config: appserver.ConnectConfig{
+			Provider: "openai", Model: "gpt-5.6-sol", BaseURL: "https://api.openai.com/v1", APIKey: "fast-test-secret",
+			ReasoningEffort: "xhigh", ReasoningLevels: []string{"low", "high", "xhigh"},
+		},
+	})
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
+	}
+	selected, err := stack.ConfigurationCommands().UseModel(ctx, principal, appserver.UseModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-fast-select", ExpectedRevision: &connected.Revision},
+		Model:     "openai/gpt-5.6-sol", ReasoningEffort: "xhigh", FastMode: true,
+	})
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("UseModel(fast) = %#v, %v", selected, err)
+	}
+	persisted, err := stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !persisted.ModelProfiles.DefaultFastMode || !stack.composition.lookup.DefaultFastMode() || !stack.composition.EffectiveModelFastMode() {
+		t.Fatalf("fast Host default was not reconciled: profiles=%#v lookup=%v runtime=%v", persisted.ModelProfiles, stack.composition.lookup.DefaultFastMode(), stack.composition.EffectiveModelFastMode())
+	}
+
+	rejected, err := stack.ConfigurationCommands().UseModel(ctx, principal, appserver.UseModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-fast-unsupported", ExpectedRevision: &selected.Revision},
+		Model:     "ollama/llama3", ReasoningEffort: "none", FastMode: true,
+	})
+	if err == nil || rejected.Outcome != appserver.OutcomeRejected || errorcode.CodeOf(err) != errorcode.InvalidArgument {
+		t.Fatalf("UseModel(unsupported fast) = %#v, %v", rejected, err)
+	}
+
+	unrelatedDeleted, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-fast-delete-unrelated", ExpectedRevision: &selected.Revision},
+		Model:     "ollama/llama3",
+	})
+	if err != nil || unrelatedDeleted.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("DeleteModel(unrelated) = %#v, %v", unrelatedDeleted, err)
+	}
+	persisted, err = stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !persisted.ModelProfiles.DefaultFastMode || !stack.composition.lookup.DefaultFastMode() || !stack.composition.EffectiveModelFastMode() {
+		t.Fatalf("unrelated deletion cleared fast Host default: profiles=%#v lookup=%v runtime=%v", persisted.ModelProfiles, stack.composition.lookup.DefaultFastMode(), stack.composition.EffectiveModelFastMode())
+	}
+
+	deleted, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-fast-delete", ExpectedRevision: &unrelatedDeleted.Revision},
+		Model:     "openai/gpt-5.6-sol",
+	})
+	if err != nil || deleted.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("DeleteModel(fast default) = %#v, %v", deleted, err)
+	}
+	persisted, err = stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.ModelProfiles.DefaultFastMode || stack.composition.lookup.DefaultFastMode() || stack.composition.EffectiveModelFastMode() {
+		t.Fatalf("deleted fast Host default survived reconciliation: profiles=%#v lookup=%v runtime=%v", persisted.ModelProfiles, stack.composition.lookup.DefaultFastMode(), stack.composition.EffectiveModelFastMode())
+	}
+}
+
 func TestHostModelConnectUsesCanonicalDocumentAndDoesNotPersistSecretInLedger(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)

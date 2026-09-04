@@ -980,3 +980,62 @@ func TestOpenAICompatNonStream_DefaultDoesNotApplyRequestTimeout(t *testing.T) {
 		t.Fatalf("unexpected final text %q", finalText)
 	}
 }
+
+func TestOpenAICompatRequestSerializesPriorityServiceTier(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name string
+		tier model.ServiceTier
+		omit bool
+	}{
+		{name: "priority", tier: model.ServiceTierPriority},
+		{name: "omitted when unset", omit: true},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var payload map[string]any
+			server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/chat/completions" {
+					http.NotFound(w, r)
+					return
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Errorf("decode request payload: %v", err)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprint(w, `{"model":"gpt-5.4","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+			}))
+			defer server.Close()
+
+			llm := newOpenAICompat(Config{
+				Provider:   "openai",
+				API:        APIOpenAI,
+				Model:      "gpt-5.4",
+				BaseURL:    server.URL,
+				HTTPClient: server.Client(),
+				Timeout:    2 * time.Second,
+			}, "token")
+			for _, err := range llm.Generate(context.Background(), &model.Request{
+				Messages:    []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
+				ServiceTier: tt.tier,
+			}) {
+				if err != nil {
+					t.Fatalf("Generate() error = %v", err)
+				}
+			}
+			got, ok := payload["service_tier"]
+			if tt.omit {
+				if ok {
+					t.Fatalf("service_tier = %#v, want omitted", got)
+				}
+				return
+			}
+			if !ok || got != "priority" {
+				t.Fatalf("service_tier = %#v, %v, want priority", got, ok)
+			}
+		})
+	}
+}

@@ -7,6 +7,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 )
 
+// SpeedMode describes one non-default request-speed level supported by a model.
+type SpeedMode struct {
+	Level       string `json:"level"`
+	Description string `json:"description"`
+}
+
 // ModelCapabilities describes known capabilities and limits for a specific model.
 type ModelCapabilities struct {
 	// ContextWindowTokens is the maximum input context window size.
@@ -31,6 +37,9 @@ type ModelCapabilities struct {
 	// DefaultReasoningEffort is the recommended default effort when the model
 	// uses effort-based reasoning.
 	DefaultReasoningEffort string
+	// SpeedModes lists non-default request-speed levels and their user-facing
+	// tradeoffs. An empty list means no speed selector should be offered.
+	SpeedModes []SpeedMode
 	// SupportsJSONOutput indicates whether the model supports structured JSON output.
 	SupportsJSONOutput bool
 }
@@ -149,6 +158,37 @@ func LookupSuggestedModelCapabilities(provider, modelName string) (ModelCapabili
 		return caps, true
 	}
 	return lookupOverlayModelCapabilities(provider, modelName)
+}
+
+// SpeedModesForModel returns the maintained non-default request-speed levels
+// for one model. Entries without both a level and description are omitted.
+func SpeedModesForModel(provider, modelName string) []SpeedMode {
+	caps, ok := LookupModelCapabilities(provider, modelName)
+	if !ok {
+		return nil
+	}
+	return normalizeSpeedModes(caps.SpeedModes)
+}
+
+func normalizeSpeedModes(modes []SpeedMode) []SpeedMode {
+	if len(modes) == 0 {
+		return nil
+	}
+	out := make([]SpeedMode, 0, len(modes))
+	seen := make(map[string]struct{}, len(modes))
+	for _, mode := range modes {
+		level := strings.ToLower(strings.TrimSpace(mode.Level))
+		description := strings.TrimSpace(mode.Description)
+		if level == "" || description == "" {
+			continue
+		}
+		if _, ok := seen[level]; ok {
+			continue
+		}
+		seen[level] = struct{}{}
+		out = append(out, SpeedMode{Level: level, Description: description})
+	}
+	return out
 }
 
 // lookupBuiltin searches only the hard-coded builtinCatalog.

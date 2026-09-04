@@ -60,7 +60,7 @@ func (s *Stack) useTestHostModel(ctx context.Context, ref session.SessionRef, al
 	if len(reasoningEffort) > 0 {
 		reasoning = strings.TrimSpace(reasoningEffort[0])
 	}
-	result, err := s.commandBackend.useHostModelAtRevision(ctx, alias, reasoning, nil)
+	result, err := s.commandBackend.useHostModelAtRevision(ctx, alias, reasoning, false, nil)
 	return errors.Join(err, result.Warning)
 }
 

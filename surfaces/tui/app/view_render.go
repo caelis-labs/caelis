@@ -464,13 +464,10 @@ func (m *Model) suggestedSlashArgInput(choice string) string {
 	switch {
 	case command == "model":
 		return "/model " + choice
-	case command == "model use":
-		return "/model use " + choice
-	case command == "model del":
-		return "/model del " + choice
-	case strings.HasPrefix(command, "model use "):
-		return "/" + command + " " + choice
-	case strings.HasPrefix(command, "model del "):
+	case strings.HasPrefix(command, "model "):
+		if len(strings.Fields(command)) == 3 && strings.EqualFold(choice, "default") {
+			return "/" + command
+		}
 		return "/" + command + " " + choice
 	default:
 		if command == "" {

@@ -829,3 +829,46 @@ func TestApplyConfigProviderEndpointFieldsRetainsOmittedCredential(t *testing.T)
 		t.Fatalf("ApplyConfigProviderEndpointFields() settings = %#v", got)
 	}
 }
+
+func TestSpeedModesForConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		cfg      Config
+		want     bool
+		wantHint string
+	}{
+		{name: "openai gpt uses chat completions", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.4"}, want: true, wantHint: "1.5x faster, more usage"},
+		{name: "openai-codex gpt uses responses", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-5.6-sol"}, want: true, wantHint: "1.5x faster, more usage"},
+		{name: "astra has model-specific hint", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6-astra"}, want: true, wantHint: "2x faster, more usage"},
+		{name: "normalizes official openai gpt identity", cfg: Config{Provider: " OpenAI ", Model: "GPT-5.4", BaseURL: "https://api.openai.com/v1/"}, want: true, wantHint: "1.5x faster, more usage"},
+		{name: "rejects unknown gpt model", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-unknown"}},
+		{name: "rejects unsupported catalog variant", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.5-pro"}},
+		{name: "rejects custom openai endpoint", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.4", BaseURL: "https://proxy.example/v1"}},
+		{name: "rejects custom openai-codex endpoint", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-5.6-sol", BaseURL: "https://proxy.example/codex"}},
+		{name: "rejects non-gpt openai model", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "o3"}},
+		{name: "rejects openai-compatible gpt", cfg: Config{Provider: "openai-compatible", API: model.APIOpenAICompatible, Model: "gpt-5.4"}},
+		{name: "rejects openai gpt on compatible api", cfg: Config{Provider: "openai", API: model.APIOpenAICompatible, Model: "gpt-5.4"}},
+		{name: "rejects openai-codex gpt on chat api", cfg: Config{Provider: "openai-codex", API: model.APIOpenAI, Model: "gpt-5.4"}},
+		{name: "rejects xai grok", cfg: Config{Provider: "xai", Model: "grok-4.6"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := SupportsSpeedMode(tt.cfg, " FAST "); got != tt.want {
+				t.Fatalf("SupportsSpeedMode(%#v, fast) = %v, want %v", tt.cfg, got, tt.want)
+			}
+			modes := SpeedModesForConfig(tt.cfg)
+			if !tt.want {
+				if len(modes) != 0 {
+					t.Fatalf("SpeedModesForConfig(%#v) = %#v, want no non-default speed modes", tt.cfg, modes)
+				}
+				return
+			}
+			if len(modes) != 1 || modes[0].Level != "fast" || modes[0].Description != tt.wantHint {
+				t.Fatalf("SpeedModesForConfig(%#v) = %#v; want Fast with %q", tt.cfg, modes, tt.wantHint)
+			}
+		})
+	}
+}

@@ -84,6 +84,46 @@ type Choice struct {
 	ReasoningLevels    []string
 }
 
+// SpeedModesForConfig returns the maintained non-default request-speed levels
+// when the configured model uses an official OpenAI endpoint whose wire
+// protocol supports service tier requests.
+func SpeedModesForConfig(cfg Config) []modelcatalog.SpeedMode {
+	cfg = NormalizeConfig(cfg)
+	var provider string
+	switch cfg.API {
+	case providers.APIOpenAI:
+		provider = "openai"
+	case providers.APIOpenAICodex:
+		provider = "openai-codex"
+	default:
+		return nil
+	}
+	if cfg.Provider != provider {
+		return nil
+	}
+	template, ok := LookupProvider(provider)
+	if !ok {
+		return nil
+	}
+	baseURL := NormalizeBaseURL(cfg.BaseURL)
+	if baseURL != "" && baseURL != NormalizeBaseURL(template.DefaultBaseURL) {
+		return nil
+	}
+	return modelcatalog.SpeedModesForModel("openai", cfg.Model)
+}
+
+// SupportsSpeedMode reports whether level is present in the configured model's
+// maintained non-default speed-mode list.
+func SupportsSpeedMode(cfg Config, level string) bool {
+	level = strings.ToLower(strings.TrimSpace(level))
+	for _, mode := range SpeedModesForConfig(cfg) {
+		if mode.Level == level {
+			return true
+		}
+	}
+	return false
+}
+
 // NormalizeConfig canonicalizes identifiers, endpoint defaults, credentials,
 // and model limits.
 func NormalizeConfig(cfg Config) Config {

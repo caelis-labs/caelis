@@ -16,7 +16,6 @@ func TestRouterServiceMethodSetStaysConsumerFocused(t *testing.T) {
 		"AgentStatus",
 		"Compact",
 		"ContinueAgentRun",
-		"DeleteModel",
 		"ListSessions",
 		"RepairSandbox",
 		"ResetSession",

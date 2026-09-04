@@ -490,6 +490,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if modelProfileEffort == "" && modelProfileID == defaultProfiles.DefaultProfileID {
 		modelProfileEffort = defaultProfiles.DefaultEffort
 	}
+	modelFastMode := modelProfileID == defaultProfiles.DefaultProfileID && defaultProfiles.DefaultFastMode
 	runtimeModel, err := resolveRuntimeProfile(doc.ModelProfiles, lookup, modelProfileID, modelProfileEffort)
 	if err != nil {
 		return nil, err
@@ -523,6 +524,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		SystemPrompt:               cfg.SystemPrompt,
 		ModelProfileID:             modelProfileID,
 		ModelProfileEffort:         modelProfileEffort,
+		ModelFastMode:              modelFastMode,
 		Model:                      runtimeModel,
 		SkillDirs:                  cloneStringSlicePreserveNil(cfg.SkillDirs),
 		Plugins:                    clonePluginConfigs(doc.Plugins),

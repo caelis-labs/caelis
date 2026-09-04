@@ -143,42 +143,18 @@ func (r router) dispatchDoctor(ctx context.Context, args string) (Result, error)
 }
 
 func (r router) dispatchModel(ctx context.Context, args string) (Result, error) {
-	sub, rest, _ := ParseFirst(strings.TrimSpace(args))
-	switch strings.ToLower(strings.TrimSpace(sub)) {
-	case "use":
-		alias, reasoning := parseModelUseArgs(rest)
-		if alias == "" {
-			return r.noticeResult("usage: /model use <alias> [effort]"), nil
-		}
-		status, err := r.service.UseModel(ctx, alias, reasoning)
-		if err != nil {
-			return Result{}, FriendlyCommandError("model use", err)
-		}
-		text := fmt.Sprintf("Switched to %s", status.ModelStatus.Display)
-		if strings.TrimSpace(reasoning) != "" {
-			text = fmt.Sprintf("Switched to %s (%s)", status.ModelStatus.Display, reasoning)
-		}
-		result := r.noticeResult(text)
-		result.StatusUpdate = &status
-		result.RefreshCommands = true
-		return result, nil
-	case "del", "delete", "rm":
-		alias := strings.TrimSpace(rest)
-		if alias == "" {
-			return r.noticeResult("usage: /model del <alias>"), nil
-		}
-		if err := r.service.DeleteModel(ctx, alias); err != nil {
-			return Result{}, FriendlyCommandError("model delete", err)
-		}
-		result := r.noticeResult(fmt.Sprintf("Deleted %s", alias))
-		if status, err := r.service.Status(ctx); err == nil {
-			result.StatusUpdate = &status
-		}
-		result.RefreshCommands = true
-		return result, nil
-	default:
-		return r.noticeResult("usage: /model use <alias> [effort] | del <alias>"), nil
+	alias, reasoning, fastMode, ok := parseModelSelectionArgs(args)
+	if !ok {
+		return r.noticeResult("usage: /model <model> <effort> [fast]"), nil
 	}
+	status, err := r.service.UseModel(ctx, alias, reasoning, fastMode)
+	if err != nil {
+		return Result{}, FriendlyCommandError("model", err)
+	}
+	result := r.noticeResult(fmt.Sprintf("Switched to %s", status.ModelStatus.Display))
+	result.StatusUpdate = &status
+	result.RefreshCommands = true
+	return result, nil
 }
 
 func (r router) dispatchCompact(ctx context.Context, args string) (Result, error) {
@@ -223,7 +199,27 @@ func (r router) dispatchAgentRun(ctx context.Context, command string, promptText
 	return Result{Handled: true, Turn: turn, RefreshCommands: true}, nil
 }
 
-func parseModelUseArgs(args string) (alias string, reasoning string) {
-	alias, rest, _ := ParseFirst(strings.TrimSpace(args))
-	return strings.TrimSpace(alias), strings.TrimSpace(rest)
+func parseModelSelectionArgs(args string) (alias string, reasoning string, fastMode bool, ok bool) {
+	fields := strings.Fields(strings.TrimSpace(args))
+	if len(fields) < 2 || len(fields) > 3 {
+		return "", "", false, false
+	}
+	alias = strings.TrimSpace(fields[0])
+	switch strings.ToLower(alias) {
+	case "use", "del", "delete", "rm":
+		return "", "", false, false
+	}
+	if len(fields) >= 2 {
+		reasoning = strings.TrimSpace(fields[1])
+		if strings.EqualFold(reasoning, "fast") {
+			return "", "", false, false
+		}
+	}
+	if len(fields) == 3 {
+		if !strings.EqualFold(strings.TrimSpace(fields[2]), "fast") {
+			return "", "", false, false
+		}
+		fastMode = true
+	}
+	return alias, reasoning, fastMode, alias != ""
 }

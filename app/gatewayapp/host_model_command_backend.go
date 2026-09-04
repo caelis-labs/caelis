@@ -57,7 +57,7 @@ func (s *controlCommandBackend) executeHostModelConfigurationCommand(ctx context
 				errorcode.New(errorcode.InvalidArgument, "gatewayapp: use-model request/action mismatch"),
 			)
 		}
-		result, err = s.useHostModelAtRevision(ctx, req.Model, req.ReasoningEffort, req.ExpectedRevision)
+		result, err = s.useHostModelAtRevision(ctx, req.Model, req.ReasoningEffort, req.FastMode, req.ExpectedRevision)
 	case appserver.DeleteModelRequest:
 		if action != appserver.ActionModelDelete {
 			return configurationCommandResult(0), configurationRejectedError(

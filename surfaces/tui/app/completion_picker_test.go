@@ -21,7 +21,7 @@ func TestSlashArgPickerHintHidesModelOperationalRemarks(t *testing.T) {
 			Detail:  "endpoint:xai@default · https://cli-chat-proxy.grok.com/v1 · managed auth",
 		},
 	}
-	if got := slashArgPickerHint("model use", candidates, 0); got != "" {
+	if got := slashArgPickerHint("model", candidates, 0); got != "" {
 		t.Fatalf("slashArgPickerHint() = %q, want empty for unique model alias", got)
 	}
 }
@@ -39,13 +39,11 @@ func TestSlashArgPickerHintDisambiguatesDuplicateModelAliases(t *testing.T) {
 			Detail:  "endpoint:xiaomi@token-plan-cn · token-plan-cn · https://token-plan-cn.xiaomimimo.com/v1 · managed auth",
 		},
 	}
-	for _, command := range []string{"model", "model use"} {
-		if got := slashArgPickerHint(command, candidates, 0); got != "default" {
-			t.Fatalf("slashArgPickerHint(%q, default) = %q, want default", command, got)
-		}
-		if got := slashArgPickerHint(command, candidates, 1); got != "xiaomi@token-plan-cn" {
-			t.Fatalf("slashArgPickerHint(%q, token-plan) = %q, want xiaomi@token-plan-cn", command, got)
-		}
+	if got := slashArgPickerHint("model", candidates, 0); got != "default" {
+		t.Fatalf("slashArgPickerHint(model, default) = %q, want default", got)
+	}
+	if got := slashArgPickerHint("model", candidates, 1); got != "xiaomi@token-plan-cn" {
+		t.Fatalf("slashArgPickerHint(model, token-plan) = %q, want xiaomi@token-plan-cn", got)
 	}
 }
 
@@ -59,11 +57,29 @@ func TestSanitizeCompletionHintDropsOperationalFragments(t *testing.T) {
 	}
 }
 
+func TestRenderModelSpeedPickerShowsCatalogDescription(t *testing.T) {
+	model := NewModel(Config{Commands: DefaultCommands()})
+	model.width = 100
+	model.slashArgActive = true
+	model.slashArgCommand = "model openai/gpt-5.6-sol xhigh"
+	model.slashArgCandidates = []SlashArgCandidate{
+		{Value: "default", Display: "Default", Detail: "standard request speed"},
+		{Value: "fast", Display: "Fast", Detail: "1.5x faster, more usage"},
+	}
+
+	rendered := ansi.Strip(model.renderSlashArgList())
+	for _, want := range []string{"Fast", "1.5x faster, more usage"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("renderSlashArgList() = %q, want %q", rendered, want)
+		}
+	}
+}
+
 func TestRenderSlashArgListHidesModelOperationalRemarks(t *testing.T) {
 	model := NewModel(Config{Commands: DefaultCommands()})
 	model.width = 140
 	model.slashArgActive = true
-	model.slashArgCommand = "model use"
+	model.slashArgCommand = "model"
 	model.slashArgCandidates = []SlashArgCandidate{
 		{
 			Value:   "xai@default/xai/grok-4.6",

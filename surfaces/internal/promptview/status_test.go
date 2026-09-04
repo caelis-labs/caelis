@@ -30,6 +30,19 @@ func TestSharedCompactStatusProjection(t *testing.T) {
 	}
 }
 
+func TestModelDisplayPrefixesFastMode(t *testing.T) {
+	t.Parallel()
+
+	model := ModelDisplayFromStatus(controlstatus.StatusModel{
+		Display:         "openai-codex/gpt-5.6-sol [xhigh]",
+		ReasoningEffort: "xhigh",
+		FastMode:        true,
+	})
+	if got := model.Text(""); got != "⚡openai-codex/gpt-5.6-sol [xhigh]" {
+		t.Fatalf("ModelDisplay.Text() = %q", got)
+	}
+}
+
 func TestStatusDisplayTreatsLegacySandboxFallbackReasonAsRepairContext(t *testing.T) {
 	t.Parallel()
 

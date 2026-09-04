@@ -134,6 +134,11 @@ func (s ModelService) EffectiveEffort() string {
 	return s.composition.EffectiveModelEffort()
 }
 
+// EffectiveFastMode reports whether new work requests priority service.
+func (s ModelService) EffectiveFastMode() bool {
+	return s.composition.EffectiveModelFastMode()
+}
+
 func (s ModelService) Config(alias string) (ModelConfig, bool) {
 	return s.composition.ModelConfig(alias)
 }

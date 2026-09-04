@@ -327,8 +327,9 @@ type AgentSpec struct {
 // ModelRequestOptions controls per-turn model request behavior independent of
 // provider implementation.
 type ModelRequestOptions struct {
-	Stream *bool             `json:"stream,omitempty"`
-	Output *model.OutputSpec `json:"output,omitempty"`
+	Stream      *bool             `json:"stream,omitempty"`
+	Output      *model.OutputSpec `json:"output,omitempty"`
+	ServiceTier model.ServiceTier `json:"service_tier,omitempty"`
 }
 
 func (o ModelRequestOptions) WithDefaults(defaults ModelRequestOptions) ModelRequestOptions {
@@ -339,6 +340,9 @@ func (o ModelRequestOptions) WithDefaults(defaults ModelRequestOptions) ModelReq
 	}
 	if o.Output != nil {
 		out.Output = cloneOutputSpec(o.Output)
+	}
+	if o.ServiceTier != "" {
+		out.ServiceTier = o.ServiceTier
 	}
 	return out
 }

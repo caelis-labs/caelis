@@ -69,6 +69,7 @@ type ModelDisplay struct {
 	Model           string
 	Provider        string
 	ReasoningEffort string
+	FastMode        bool
 	MissingAPIKey   bool
 }
 
@@ -79,6 +80,7 @@ func ModelDisplayFromStatus(status controlstatus.StatusModel) ModelDisplay {
 		Model:           firstNonEmpty(strings.TrimSpace(status.Display), strings.TrimSpace(status.Name), "not configured"),
 		Provider:        firstNonEmpty(strings.TrimSpace(status.Provider), deriveProviderFromAlias(status.Display), "not configured"),
 		ReasoningEffort: strings.TrimSpace(status.ReasoningEffort),
+		FastMode:        status.FastMode,
 		MissingAPIKey:   status.MissingAPIKey,
 	}
 }
@@ -95,6 +97,9 @@ func (d ModelDisplay) Text(fallback string) string {
 	}
 	if d.MissingAPIKey {
 		model += " · key missing"
+	}
+	if d.FastMode {
+		model = "⚡" + model
 	}
 	return strings.TrimSpace(model)
 }

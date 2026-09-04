@@ -89,7 +89,7 @@ func TestRegressionCommandExecModelReasoningCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
-	if _, err := driver.CompleteSlashArg(ctx, "model use", "ollama/llama3 ", 10); err != nil {
-		t.Fatalf("CompleteSlashArg(model use + reasoning) error = %v", err)
+	if _, err := driver.CompleteSlashArg(ctx, "model ollama/llama3", "", 10); err != nil {
+		t.Fatalf("CompleteSlashArg(model reasoning) error = %v", err)
 	}
 }

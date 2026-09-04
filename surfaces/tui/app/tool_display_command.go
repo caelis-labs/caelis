@@ -20,28 +20,29 @@ func commandTextDisplayArguments(name string, kind string, command string) (stri
 	if command == "" {
 		return "", "", false
 	}
-	preview, folded := longCommandDisplayPreview(command)
+	preview, folded := longCommandDisplayPreview(command, toolArgsPreviewWidth)
 	if !folded {
 		return preview, "", true
 	}
 	return preview, command, true
 }
 
-func longCommandDisplayPreview(command string) (string, bool) {
+func longCommandDisplayPreview(command string, budget int) (string, bool) {
 	command = display.NormalizeDisplayArg(command)
 	if command == "" {
 		return "", false
 	}
 	lines := strings.Split(command, "\n")
-	if len(lines) == 1 && displayColumns(command) <= toolArgsPreviewWidth {
+	budget = maxInt(compactSingleLineMinBudget, budget)
+	if len(lines) == 1 && displayColumns(command) <= budget {
 		return command, false
 	}
 	inline := strings.Join(strings.Fields(command), " ")
 	if len(lines) == 1 {
-		return truncateDisplayPreviewMiddle(inline, toolArgsPreviewWidth), true
+		return truncateDisplayPreviewMiddle(inline, budget), true
 	}
 	suffix := fmt.Sprintf(" ... +%d lines", len(lines)-1)
-	previewBudget := maxInt(16, toolArgsPreviewWidth-displayColumns(suffix))
+	previewBudget := maxInt(compactSingleLineMinBudget, budget-displayColumns(suffix))
 	preview := truncateDisplayPreviewMiddle(inline, previewBudget)
 	return preview + suffix, true
 }

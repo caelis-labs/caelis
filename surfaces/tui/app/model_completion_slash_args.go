@@ -129,7 +129,7 @@ func (m *Model) currentSlashArgCompletionTarget() (command string, query string,
 	if parsedCommand == command {
 		return command, query, true
 	}
-	if isExactModelUseReasoningCommand(command, parsedCommand, query) {
+	if isExactModelCompletionCommand(command, parsedCommand, query) {
 		return command, "", true
 	}
 	return "", "", false
@@ -445,26 +445,35 @@ func acpSetupAdapterDisplayName(adapterID string) string {
 	}
 }
 
-func isExactModelUseReasoningCommand(command string, parsedCmd string, query string) bool {
-	command = strings.TrimSpace(command)
-	parsedCmd = strings.TrimSpace(parsedCmd)
+func isExactModelCompletionCommand(command string, parsedCommand string, query string) bool {
+	commandFields := strings.Fields(strings.TrimSpace(command))
+	parsedFields := strings.Fields(strings.TrimSpace(parsedCommand))
 	query = strings.TrimSpace(query)
-	if command == "" || query == "" || parsedCmd != "model use" || !strings.HasPrefix(command, "model use ") {
+	if query == "" || len(commandFields) < 2 || len(commandFields) > 3 {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(strings.TrimPrefix(command, "model use ")), query)
+	if len(parsedFields) != len(commandFields)-1 || !strings.EqualFold(parsedFields[0], "model") {
+		return false
+	}
+	for i := 1; i < len(parsedFields); i++ {
+		if !strings.EqualFold(parsedFields[i], commandFields[i]) {
+			return false
+		}
+	}
+	return strings.EqualFold(query, commandFields[len(commandFields)-1])
 }
 
-func exactModelUseReasoningCommandForQuery(query string, candidates []SlashArgCandidate) string {
+func nextModelCompletionCommand(command string, query string, candidates []SlashArgCandidate) string {
+	fields := strings.Fields(strings.TrimSpace(command))
 	query = strings.TrimSpace(query)
-	if query == "" {
+	if query == "" || len(fields) < 1 || len(fields) > 2 || !strings.EqualFold(fields[0], "model") {
 		return ""
 	}
 	for _, candidate := range candidates {
 		value := strings.TrimSpace(candidate.Value)
 		display := strings.TrimSpace(candidate.Display)
 		if strings.EqualFold(query, value) || strings.EqualFold(query, display) {
-			return "model use " + value
+			return strings.TrimSpace(command) + " " + value
 		}
 	}
 	return ""
@@ -547,32 +556,27 @@ func (m *Model) applySlashArgCompletion() tea.Cmd {
 		m.setInputText("/" + command + " " + choice)
 		m.clearSlashArg()
 		return nil
-	case "model":
-		m.setInputText("/model use " + choice + " ")
-		m.syncTextareaFromInput()
-		return m.activateSlashArgPickerFromInput("model use " + choice)
-	case "model use":
-		m.setInputText("/model use " + choice + " ")
-		m.syncTextareaFromInput()
-		return m.activateSlashArgPickerFromInput("model use " + choice)
-	case "model del":
-		m.setInputText("/model del " + choice + " ")
-		m.clearSlashArg()
-		return nil
-	case "model use ":
-		m.setInputText("/model use " + choice + " ")
-		m.clearSlashArg()
-		return nil
 	}
-	if strings.HasPrefix(command, "model use ") {
-		m.setInputText("/" + command + " " + choice)
-		m.clearSlashArg()
-		return nil
-	}
-	if strings.HasPrefix(command, "model del ") {
-		m.setInputText("/" + command + " " + choice)
-		m.clearSlashArg()
-		return nil
+	modelFields := strings.Fields(command)
+	if len(modelFields) > 0 && strings.EqualFold(modelFields[0], "model") {
+		switch len(modelFields) {
+		case 1:
+			m.setInputText("/model " + choice + " ")
+			m.syncTextareaFromInput()
+			return m.activateSlashArgPickerFromInput("model " + choice)
+		case 2:
+			m.setInputText("/" + command + " " + choice + " ")
+			m.syncTextareaFromInput()
+			return m.activateSlashArgPickerFromInput(command + " " + choice)
+		case 3:
+			line := "/" + command
+			if !strings.EqualFold(choice, "default") {
+				line += " " + choice
+			}
+			m.setInputText(line)
+			m.clearSlashArg()
+			return nil
+		}
 	}
 	m.setInputText("/" + command + " " + choice + " ")
 	m.clearSlashArg()
@@ -603,20 +607,16 @@ func (m *Model) shouldExecuteSlashArgSelection(command string, choice string) bo
 		return true
 	case "model":
 		return false
-	case "model use":
-		return false
-	case "model del":
-		return true
 	}
-	if strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
-		return true
+	if fields := strings.Fields(command); len(fields) > 0 && strings.EqualFold(fields[0], "model") {
+		return len(fields) >= 3
 	}
 	return true
 }
 
 func requiresExactSlashArgSelection(command string) bool {
 	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "model del", "plugin rm", "plugin marketplace update", "plugin marketplace rm":
+	case "plugin rm", "plugin marketplace update", "plugin marketplace rm":
 		return true
 	default:
 		return false
@@ -636,15 +636,17 @@ func isExecutableSlashArgInput(line string) bool {
 	}
 	switch strings.ToLower(strings.TrimSpace(fields[0])) {
 	case "/model":
-		action := strings.ToLower(strings.TrimSpace(fields[1]))
-		switch action {
-		case "use":
-			return len(fields) >= 3
-		case "del":
-			return len(fields) >= 3
-		default:
+		if len(fields) > 4 {
 			return false
 		}
+		switch strings.ToLower(strings.TrimSpace(fields[1])) {
+		case "use", "del", "delete", "rm":
+			return false
+		}
+		if len(fields) >= 3 && strings.EqualFold(strings.TrimSpace(fields[2]), "fast") {
+			return false
+		}
+		return len(fields) >= 3 && (len(fields) < 4 || strings.EqualFold(strings.TrimSpace(fields[3]), "fast"))
 	case "/plugin":
 		action := strings.ToLower(strings.TrimSpace(fields[1]))
 		switch action {
@@ -780,7 +782,7 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			_, submitCmd := m.submitLine(line)
 			return true, submitCmd
 		}
-		if command == "plugin" || command == "plugin marketplace" || command == "plugin marketplace update" || command == "plugin marketplace rm" || command == "model" || command == "model use" || command == "model del" || strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
+		if command == "plugin" || command == "plugin marketplace" || command == "plugin marketplace update" || command == "plugin marketplace rm" || strings.HasPrefix(command, "model") {
 			cmd := m.applySlashArgCompletion()
 			m.syncTextareaFromInput()
 			return true, cmd

@@ -68,6 +68,7 @@ type ModelProfile struct {
 type Configuration struct {
 	DefaultProfileID string         `json:"default_profile_id,omitempty"`
 	DefaultEffort    string         `json:"default_effort,omitempty"`
+	DefaultFastMode  bool           `json:"default_fast_mode,omitempty"`
 	Profiles         []ModelProfile `json:"profiles,omitempty"`
 }
 
@@ -187,6 +188,7 @@ func NormalizeConfiguration(in Configuration) Configuration {
 	out := Configuration{
 		DefaultProfileID: NormalizeID(in.DefaultProfileID),
 		DefaultEffort:    modelcatalog.NormalizeReasoningEffort(in.DefaultEffort),
+		DefaultFastMode:  in.DefaultFastMode,
 	}
 	seen := make(map[string]struct{}, len(in.Profiles))
 	for _, raw := range in.Profiles {
@@ -203,6 +205,7 @@ func NormalizeConfiguration(in Configuration) Configuration {
 	sort.Slice(out.Profiles, func(i, j int) bool { return out.Profiles[i].ID < out.Profiles[j].ID })
 	if out.DefaultProfileID == "" {
 		out.DefaultEffort = ""
+		out.DefaultFastMode = false
 	} else if out.DefaultEffort == "" {
 		for _, profile := range out.Profiles {
 			if profile.ID == out.DefaultProfileID {
@@ -242,6 +245,8 @@ func ValidateConfiguration(in Configuration) error {
 		}
 	} else if modelcatalog.NormalizeReasoningEffort(in.DefaultEffort) != "" {
 		return fmt.Errorf("control/modelprofile: default effort requires a default profile")
+	} else if in.DefaultFastMode {
+		return fmt.Errorf("control/modelprofile: default fast mode requires a default profile")
 	}
 	return nil
 }
@@ -284,13 +289,21 @@ func Upsert(current Configuration, profiles ...ModelProfile) (Configuration, err
 }
 
 // SelectDefault returns a catalog whose global default is one profile and one
-// supported effort. An empty profile clears the selection.
+// supported effort with fast mode disabled. An empty profile clears the selection.
 func SelectDefault(current Configuration, profileID, effort string) (Configuration, error) {
+	return SelectDefaultWithFastMode(current, profileID, effort, false)
+}
+
+// SelectDefaultWithFastMode returns a catalog whose global default is one
+// profile, one supported effort, and an explicit fast-mode selection. The
+// caller owns backend capability validation.
+func SelectDefaultWithFastMode(current Configuration, profileID, effort string, fastMode bool) (Configuration, error) {
 	next := NormalizeConfiguration(current)
 	profileID = NormalizeID(profileID)
 	if profileID == "" {
 		next.DefaultProfileID = ""
 		next.DefaultEffort = ""
+		next.DefaultFastMode = false
 		return next, nil
 	}
 	profile, ok := Lookup(next, profileID)
@@ -306,6 +319,7 @@ func SelectDefault(current Configuration, profileID, effort string) (Configurati
 	}
 	next.DefaultProfileID = profileID
 	next.DefaultEffort = effort
+	next.DefaultFastMode = fastMode
 	return next, nil
 }
 
@@ -324,6 +338,7 @@ func Remove(current Configuration, profileID string) Configuration {
 	if next.DefaultProfileID == profileID {
 		next.DefaultProfileID = ""
 		next.DefaultEffort = ""
+		next.DefaultFastMode = false
 	}
 	return next
 }

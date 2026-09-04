@@ -302,6 +302,7 @@ func (s *runtimeComposition) selectPinnedSpawnedSessionModel(ctx context.Context
 					next = map[string]any{}
 				}
 				next[kernel.StateCurrentModelAlias] = pinned.ID
+				next[kernel.StateCurrentModelFastMode] = false
 				if effort == "" {
 					delete(next, kernel.StateCurrentReasoningEffort)
 				} else {

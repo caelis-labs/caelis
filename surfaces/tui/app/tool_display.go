@@ -233,7 +233,7 @@ func toolDisplayArguments(name string, kind string, raw map[string]any, fallback
 func toolDisplayArgumentsWithRecoveredInput(name string, kind string, raw map[string]any, recoveredInput bool, fallback ...string) (string, string) {
 	if name == surfaceToolSendMessage {
 		if full := display.AgentMessageFullDisplayArgs(raw); full != "" {
-			preview, folded := longCommandDisplayPreview(full)
+			preview, folded := longCommandDisplayPreview(full, toolArgsPreviewWidth)
 			if folded {
 				return preview, full
 			}

@@ -79,12 +79,15 @@ func TestTwoRuntimesRejectStaleCompactionAndRebuildWholeModelContext(t *testing.
 
 	compactResult := make(chan error, 1)
 	go func() {
-		_, compactErr := runtimeA.Compact(context.Background(), CompactRequest{SessionRef: activeSession.SessionRef, Trigger: "test interleaving"})
+		_, compactErr := runtimeA.Compact(context.Background(), CompactRequest{SessionRef: activeSession.SessionRef, ServiceTier: model.ServiceTierPriority, Trigger: "test interleaving"})
 		compactResult <- compactErr
 	}()
 	source := <-compactor.started
 	if source.Session.Revision != 10 || session.LastEventSeq(source.Events) != 10 {
 		t.Fatalf("compaction source = revision %d through Seq %d, want revision/Seq 10", source.Session.Revision, session.LastEventSeq(source.Events))
+	}
+	if source.ServiceTier != model.ServiceTierPriority {
+		t.Fatalf("compaction service tier = %q, want %q", source.ServiceTier, model.ServiceTierPriority)
 	}
 
 	runB, err := runtimeB.Run(context.Background(), agent.RunRequest{

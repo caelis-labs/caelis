@@ -84,6 +84,20 @@ func TestFromSnapshotFooterModeOmitsSandboxRuntimeDetails(t *testing.T) {
 	}
 }
 
+func TestHeaderModelTextPrefixesFastMode(t *testing.T) {
+	vm := FromSnapshot(controlstatus.StatusSnapshot{
+		ModelStatus: controlstatus.StatusModel{
+			Display:         "openai-codex/gpt-5.6-sol [xhigh]",
+			ReasoningEffort: "xhigh",
+			FastMode:        true,
+		},
+	})
+
+	if got := vm.HeaderModelText(""); got != "⚡openai-codex/gpt-5.6-sol [xhigh]" {
+		t.Fatalf("HeaderModelText() = %q", got)
+	}
+}
+
 func TestHeaderModelTextDoesNotPrefixACPControllerProvider(t *testing.T) {
 	vm := FromSnapshot(controlstatus.StatusSnapshot{
 		ModelStatus: controlstatus.StatusModel{

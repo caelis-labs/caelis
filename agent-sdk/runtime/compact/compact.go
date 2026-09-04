@@ -44,6 +44,9 @@ type Request struct {
 	Events        []*session.Event
 	PendingEvents []*session.Event
 	Model         model.LLM
+	// ServiceTier applies the selected provider service level when compaction
+	// must issue a fresh model request.
+	ServiceTier model.ServiceTier
 	// InContextRequest is an exact, already assembled model request whose prefix
 	// may still be hot at the provider. The compactor clones it before use.
 	InContextRequest *model.Request

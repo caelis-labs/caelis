@@ -482,6 +482,150 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 	}
 }
 
+func TestSessionFastModePersistsAcrossRestartIntoResolvedModelRequest(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workspace := t.TempDir()
+	const (
+		appName = "caelis"
+		userID  = "fast-mode-round-trip"
+	)
+
+	first, err := newGatewayAppTestStack(t, Config{
+		AppName:      appName,
+		UserID:       userID,
+		StoreDir:     root,
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
+		Model: ModelConfig{
+			Provider: "openai", API: providers.APIOpenAI, Model: "gpt-5.6-sol",
+			BaseURL: "https://api.openai.com/v1", Token: "fast-round-trip-secret",
+			ReasoningEffort: "xhigh", ReasoningLevels: []string{"low", "high", "xhigh"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack(first) error = %v", err)
+	}
+	active, err := startGatewayAppTestSession(ctx, first, "fast mode context resume")
+	if err != nil {
+		_ = first.Close()
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	current := mustCurrentSession(t, first, active.SessionID)
+	selected, err := first.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: userID}, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID:             "persist-fast-session-model",
+			SessionID:               current.SessionID,
+			ExpectedRevision:        &current.Revision,
+			ExpectedControllerEpoch: current.Controller.EpochID,
+		},
+		Model: first.composition.lookup.DefaultID(), ReasoningEffort: "xhigh", FastMode: true,
+	})
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
+		_ = first.Close()
+		t.Fatalf("UseSessionModel(fast) = %#v, %v", selected, err)
+	}
+	legacy, err := startGatewayAppTestSession(ctx, first, "legacy-fast-off")
+	if err != nil {
+		_ = first.Close()
+		t.Fatalf("StartSession(legacy) error = %v", err)
+	}
+	legacy, err = first.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
+		SessionRef:    legacy.SessionRef,
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		Update: func(state map[string]any) (map[string]any, error) {
+			next := session.CloneState(state)
+			if next == nil {
+				next = map[string]any{}
+			}
+			next[kernel.StateCurrentModelAlias] = first.composition.lookup.DefaultID()
+			delete(next, kernel.StateCurrentModelFastMode)
+			return next, nil
+		},
+	})
+	if err != nil {
+		_ = first.Close()
+		t.Fatalf("UpdateState(legacy alias) error = %v", err)
+	}
+	configurationRevision, err := first.ControlStatus().ConfigurationRevision(ctx)
+	if err != nil {
+		_ = first.Close()
+		t.Fatalf("ConfigurationRevision() error = %v", err)
+	}
+	hostSelected, err := first.ConfigurationCommands().UseModel(ctx, appserver.Principal{ID: userID}, appserver.UseModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "persist-fast-host-model", ExpectedRevision: &configurationRevision},
+		Model:     first.composition.lookup.DefaultID(), ReasoningEffort: "xhigh", FastMode: true,
+	})
+	if err != nil || hostSelected.Outcome != appserver.OutcomeCommitted {
+		_ = first.Close()
+		t.Fatalf("UseModel(host fast) = %#v, %v", hostSelected, err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close(first) error = %v", err)
+	}
+
+	reloaded, err := newGatewayAppTestStack(t, Config{
+		AppName: appName, UserID: userID, StoreDir: root,
+		WorkspaceKey: workspace, WorkspaceCWD: workspace,
+		ApprovalMode: "auto-review", Assembly: assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
+	}
+	defer reloaded.Close()
+	client, err := appserver.BindSessionClient(reloaded.ControlClient(), appserver.Principal{ID: userID})
+	if err != nil {
+		t.Fatalf("BindSessionClient() error = %v", err)
+	}
+	reconnected, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: active.SessionID})
+	if err != nil {
+		t.Fatalf("Reconnect() error = %v", err)
+	}
+	if reconnected.Subscription != nil {
+		defer func() { _ = reconnected.Subscription.Close() }()
+	}
+	resumedRef := session.SessionRef{SessionID: reconnected.State.SessionID}
+	runtimeState, err := reloaded.ControlStatus().SessionRuntimeState(ctx, resumedRef)
+	if err != nil || !runtimeState.FastMode {
+		t.Fatalf("SessionRuntimeState(reloaded) = %#v, %v; want fast mode", runtimeState, err)
+	}
+	resolved, err := reloaded.composition.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: resumedRef})
+	if err != nil {
+		t.Fatalf("ResolveTurn(reloaded) error = %v", err)
+	}
+	if got := resolved.RunRequest.AgentSpec.Request.ServiceTier; got != model.ServiceTierPriority {
+		t.Fatalf("reloaded AgentSpec service tier = %q, want %q", got, model.ServiceTierPriority)
+	}
+
+	legacyState, err := reloaded.ControlStatus().SessionRuntimeState(ctx, legacy.SessionRef)
+	if err != nil || legacyState.FastMode {
+		t.Fatalf("SessionRuntimeState(legacy) = %#v, %v; want standard speed", legacyState, err)
+	}
+	legacyRuntime, recoveredLegacy, err := reloaded.sessionRuntimes.activateSession(ctx, legacy.SessionID)
+	if err != nil {
+		t.Fatalf("activateSession(legacy) error = %v", err)
+	}
+	if recoveredLegacy.Revision != legacy.Revision+1 {
+		t.Fatalf("legacy recovery revision = %d, want %d", recoveredLegacy.Revision, legacy.Revision+1)
+	}
+	legacyDurableState, err := reloaded.composition.sessions.SnapshotState(ctx, legacy.SessionRef)
+	if err != nil {
+		t.Fatalf("SnapshotState(legacy) error = %v", err)
+	}
+	if fast, ok := kernel.CurrentModelFastMode(legacyDurableState); !ok || fast {
+		t.Fatalf("legacy fast state = %v, %v; want explicit false", fast, ok)
+	}
+	legacyResolved, err := legacyRuntime.instance.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: legacy.SessionRef})
+	if err != nil {
+		t.Fatalf("ResolveTurn(legacy) error = %v", err)
+	}
+	if got := legacyResolved.RunRequest.AgentSpec.Request.ServiceTier; got != "" {
+		t.Fatalf("legacy AgentSpec service tier = %q, want standard speed", got)
+	}
+}
+
 func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	root := t.TempDir()
 	workdir := t.TempDir()

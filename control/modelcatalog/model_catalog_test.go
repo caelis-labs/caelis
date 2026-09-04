@@ -195,6 +195,24 @@ func TestCurrentOpenAIStaticModels(t *testing.T) {
 	if levels := ReasoningLevelsForModel("openai", "gpt-6-astra"); !sameStrings(levels, []string{"low", "medium", "high", "xhigh", "max"}) {
 		t.Fatalf("ReasoningLevelsForModel(openai, gpt-6-astra) = %#v, want low through max", levels)
 	}
+	for model, wantDescription := range map[string]string{
+		"gpt-6-astra":   "2x faster, more usage",
+		"gpt-5.6-sol":   "1.5x faster, more usage",
+		"gpt-5.6-terra": "1.5x faster, more usage",
+		"gpt-5.6-luna":  "1.5x faster, more usage",
+		"gpt-5.5":       "1.5x faster, more usage",
+		"gpt-5.4":       "1.5x faster, more usage",
+	} {
+		modes := SpeedModesForModel("openai", model)
+		if len(modes) != 1 || modes[0].Level != "fast" || modes[0].Description != wantDescription {
+			t.Fatalf("SpeedModesForModel(openai, %q) = %#v; want Fast with %q", model, modes, wantDescription)
+		}
+	}
+	for _, model := range []string{"gpt-5.5-pro", "gpt-5.5-instant", "gpt-5.4-pro", "gpt-5.4-mini", "gpt-5.4-nano", "o3", "gpt-unknown"} {
+		if modes := SpeedModesForModel("openai", model); len(modes) != 0 {
+			t.Fatalf("SpeedModesForModel(openai, %q) = %#v; want no non-default speed modes", model, modes)
+		}
+	}
 	for _, legacy := range []string{"gpt-5.5", "gpt-5.4", "gpt-4o", "o1", "o3", "gpt-4.1-nano"} {
 		if containsString(models, legacy) {
 			t.Fatalf("ListCatalogModels(openai) = %#v, did not want superseded %q", models, legacy)
@@ -603,6 +621,37 @@ func TestListRecommendedModelsAllowsLocalOverrideToReAddHiddenBuiltin(t *testing
 
 	if models := ListRecommendedModels("openai"); !containsString(models, "gpt-5.5") {
 		t.Fatalf("ListRecommendedModels(openai) = %#v, want explicit local override to re-add hidden gpt-5.5", models)
+	}
+}
+
+func TestSpeedModesForModelUsesLocalOverrideMetadata(t *testing.T) {
+	dynamicMu.Lock()
+	savedLocal := localOverrides
+	localOverrides = parseSnapshotBytes([]byte(`{
+		"openai:gpt-5.6-sol": {
+			"speed_modes": [
+				{"level": "FAST", "description": "local priority hint"}
+			]
+		},
+		"openai:gpt-6-astra": {
+			"speed_modes": [
+				{"level": "fast"}
+			]
+		}
+	}`))
+	dynamicMu.Unlock()
+	t.Cleanup(func() {
+		dynamicMu.Lock()
+		localOverrides = savedLocal
+		dynamicMu.Unlock()
+	})
+
+	modes := SpeedModesForModel("openai", "gpt-5.6-sol")
+	if len(modes) != 1 || modes[0].Level != "fast" || modes[0].Description != "local priority hint" {
+		t.Fatalf("SpeedModesForModel(openai, gpt-5.6-sol) = %#v; want normalized local override", modes)
+	}
+	if modes := SpeedModesForModel("openai", "gpt-6-astra"); len(modes) != 0 {
+		t.Fatalf("SpeedModesForModel(openai, gpt-6-astra) = %#v; want incomplete local override rejected", modes)
 	}
 }
 

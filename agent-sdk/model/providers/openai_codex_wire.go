@@ -30,6 +30,7 @@ type openAICodexRequest struct {
 	Store        bool                  `json:"store"`
 	Include      []string              `json:"include,omitempty"`
 	Reasoning    *openAICodexReasoning `json:"reasoning,omitempty"`
+	ServiceTier  model.ServiceTier     `json:"service_tier,omitempty"`
 	Stream       bool                  `json:"stream"`
 }
 
@@ -127,6 +128,7 @@ func openAICodexRequestFromModel(req *model.Request, modelName string) (openAICo
 		Store:        false,
 		Include:      []string{"reasoning.encrypted_content"},
 		Reasoning:    reasoning,
+		ServiceTier:  req.ServiceTier,
 		Stream:       true,
 	}, nil
 }

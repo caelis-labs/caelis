@@ -95,3 +95,30 @@ func TestCurrentPolicyProfileNormalizesCompatibilityValues(t *testing.T) {
 		})
 	}
 }
+
+func TestCurrentModelFastModeReportsPresence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		state       map[string]any
+		wantValue   bool
+		wantPresent bool
+	}{
+		{name: "nil state is absent"},
+		{name: "missing key is absent", state: map[string]any{}},
+		{name: "explicit true", state: map[string]any{StateCurrentModelFastMode: true}, wantValue: true, wantPresent: true},
+		{name: "explicit false remains present", state: map[string]any{StateCurrentModelFastMode: false}, wantPresent: true},
+		{name: "non-bool value is absent", state: map[string]any{StateCurrentModelFastMode: "true"}},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, present := CurrentModelFastMode(tt.state)
+			if got != tt.wantValue || present != tt.wantPresent {
+				t.Fatalf("CurrentModelFastMode(%#v) = %v, %v, want %v, %v", tt.state, got, present, tt.wantValue, tt.wantPresent)
+			}
+		})
+	}
+}

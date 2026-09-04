@@ -465,47 +465,30 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 			}
 			return command, "", true
 		}
-		action := strings.ToLower(strings.TrimSpace(fields[1]))
-		if len(fields) == 2 {
-			if hasTrailingDelimiter {
-				switch action {
-				case "use":
-					return "model " + action, "", true
-				case "del":
-					return "model " + action, "", true
-				default:
-					return "", "", false
-				}
-			}
-			if action == "" {
-				return "", "", false
-			}
-			switch action {
-			case "use", "del":
-			default:
-				return "model", action, true
-			}
-			return "model", action, true
-		}
-		switch action {
-		case "use", "del":
-		default:
+		alias := strings.TrimSpace(fields[1])
+		if alias == "" {
 			return "", "", false
 		}
-		if action == "del" {
-			return "model " + action, strings.TrimSpace(fields[2]), true
+		if len(fields) == 2 {
+			if hasTrailingDelimiter {
+				return "model " + alias, "", true
+			}
+			return "model", alias, true
 		}
-		alias := strings.TrimSpace(fields[2])
-		if alias == "" {
+		effort := strings.TrimSpace(fields[2])
+		if effort == "" {
 			return "", "", false
 		}
 		if len(fields) == 3 {
 			if hasTrailingDelimiter {
-				return "model use " + alias, "", true
+				return "model " + alias + " " + effort, "", true
 			}
-			return "model use", alias, true
+			return "model " + alias, effort, true
 		}
-		return "model use " + alias, strings.TrimSpace(strings.Join(fields[3:], " ")), true
+		if len(fields) == 4 {
+			return "model " + alias + " " + effort, strings.TrimSpace(fields[3]), true
+		}
+		return "", "", false
 	case "plugin":
 		return pluginSlashArgQuery(command, fields, hasTrailingDelimiter)
 	case "sandbox":

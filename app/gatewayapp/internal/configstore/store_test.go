@@ -259,6 +259,28 @@ func TestStoreCurrentProfileDefaultDoesNotReadModelConfigEffort(t *testing.T) {
 	}
 }
 
+func TestStoreRoundTripsDefaultFastModeThroughModelProfiles(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := New(root)
+	doc := Normalize(currentValidationFixture())
+	doc.ModelProfiles.DefaultFastMode = true
+	if err := store.Save(doc); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.ModelProfiles.DefaultFastMode {
+		t.Fatalf("loaded model profiles = %#v, want fast default", loaded.ModelProfiles)
+	}
+	if loaded.Models.DefaultFastMode {
+		t.Fatalf("loaded provider model config retained duplicate fast authority: %#v", loaded.Models)
+	}
+}
+
 func TestStoreRejectsCredentialMaterialEvenAlongsideOpaqueReference(t *testing.T) {
 	t.Parallel()
 

@@ -57,6 +57,7 @@ func modelRuntimeDeps(models gatewayapp.ModelService) controladapter.ModelRuntim
 	return controladapter.ModelRuntimeDeps{
 		EffectiveAliasFn:       models.EffectiveAlias,
 		EffectiveEffortFn:      models.EffectiveEffort,
+		EffectiveFastModeFn:    models.EffectiveFastMode,
 		ConfigFn:               models.Config,
 		SessionUsageSnapshotFn: models.UsageSnapshot,
 		ProviderUsageFn:        models.ProviderUsage,

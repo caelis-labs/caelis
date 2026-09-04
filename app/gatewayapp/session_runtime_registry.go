@@ -525,7 +525,14 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 	}
 	defer unlock()
 	loaded, releaseUse, err := r.acquireLoadedRuntime(sessionID)
-	if err != nil {
+	if isSessionRuntimeReleasingError(err) {
+		// The activation lock prevents a replacement Runtime from being bound
+		// while the releasing tombstone drains. Wait for that known lifecycle
+		// transition before assembling the disposable configuration snapshot.
+		if err := r.waitSessionRelease(buildCtx, sessionID); err != nil {
+			return nil, session.Session{}, nil, err
+		}
+	} else if err != nil {
 		return nil, session.Session{}, nil, err
 	}
 	if loaded != nil {

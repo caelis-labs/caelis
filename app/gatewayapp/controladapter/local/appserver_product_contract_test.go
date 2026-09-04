@@ -96,10 +96,10 @@ func TestModelCatalogMutationsRefreshActiveSessionPickerWithoutReplacingRuntime(
 	if err != nil || defaulted.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseModel(fallback) = %#v, %v", defaulted, err)
 	}
-	assertSlashArgCandidate(t, clients.Completion, sessionID, "model use", "ollama/late", true)
-	assertSlashArgCandidate(t, clients.Completion, sessionID, "model del", "ollama/late", true)
+	assertSlashArgCandidate(t, clients.Completion, sessionID, "model", "ollama/late", true)
+	assertSlashArgCandidate(t, clients.Completion, sessionID, "disconnect-provider", "ollama/late", true)
 	remote := bindAppServerHTTPTestClient(t, appServer, "local-user")
-	assertSlashArgCandidate(t, remote, sessionID, "model use", "ollama/late", true)
+	assertSlashArgCandidate(t, remote, sessionID, "model", "ollama/late", true)
 
 	active, err := clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
 	if err != nil {
@@ -124,9 +124,9 @@ func TestModelCatalogMutationsRefreshActiveSessionPickerWithoutReplacingRuntime(
 	if err != nil || deleted.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DeleteModel() = %#v, %v", deleted, err)
 	}
-	assertSlashArgCandidate(t, clients.Completion, sessionID, "model use", "ollama/late", false)
-	assertSlashArgCandidate(t, clients.Completion, sessionID, "model del", "ollama/late", false)
-	assertSlashArgCandidate(t, remote, sessionID, "model del", "ollama/late", false)
+	assertSlashArgCandidate(t, clients.Completion, sessionID, "model", "ollama/late", false)
+	assertSlashArgCandidate(t, clients.Completion, sessionID, "disconnect-provider", "ollama/late", false)
+	assertSlashArgCandidate(t, remote, sessionID, "disconnect-provider", "ollama/late", false)
 
 	afterDelete, err := clients.Status.SessionStatus(ctx, appserver.StatusRequest{SessionID: sessionID, Surface: "test"})
 	if err != nil {

@@ -19,8 +19,9 @@ type SessionModelRequest struct {
 	WriteBase
 	Model           string `json:"model"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	FastMode        bool   `json:"fast_mode,omitempty"`
 	// Clear removes the Session override when no provider model remains.
-	// Model and ReasoningEffort must be empty when Clear is true.
+	// Model, ReasoningEffort, and FastMode must be empty when Clear is true.
 	Clear bool `json:"clear,omitempty"`
 }
 
@@ -55,6 +56,7 @@ type UseModelRequest struct {
 	WriteBase
 	Model           string `json:"model"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	FastMode        bool   `json:"fast_mode,omitempty"`
 }
 
 type DeleteModelRequest struct {

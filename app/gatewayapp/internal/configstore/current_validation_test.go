@@ -240,10 +240,25 @@ func TestStoreRejectsUnreleasedMemoryWireWithoutRewritingIt(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsUnsupportedFastModeDefault(t *testing.T) {
+	t.Parallel()
+
+	doc := Normalize(currentValidationFixture())
+	doc.ModelProfiles.DefaultFastMode = true
+	if err := Validate(doc); err != nil {
+		t.Fatalf("Validate(fast GPT default) error = %v", err)
+	}
+
+	doc.Models.Configs[0].Model = "not-a-gpt-model"
+	if err := Validate(doc); err == nil || !strings.Contains(err.Error(), "does not support fast mode") {
+		t.Fatalf("Validate(unsupported fast default) error = %v", err)
+	}
+}
+
 func currentValidationFixture() AppConfig {
 	model := modelconfig.NormalizeConfig(modelconfig.Config{
 		Provider:               "openai-codex",
-		Model:                  "gpt-5.6",
+		Model:                  "gpt-5.6-sol",
 		CredentialRef:          modelconfig.CodexOAuthCredentialRef,
 		ReasoningMode:          "effort",
 		ReasoningLevels:        []string{"low", "high"},

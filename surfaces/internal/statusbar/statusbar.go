@@ -15,6 +15,7 @@ type ViewModel struct {
 	Model           string
 	Provider        string
 	ReasoningEffort string
+	FastMode        bool
 	Mode            string
 	Sandbox         string
 	Route           string
@@ -40,6 +41,7 @@ func FromSnapshot(status controlstatus.StatusSnapshot) ViewModel {
 		Model:           modelDisplay.Model,
 		Provider:        modelDisplay.Provider,
 		ReasoningEffort: modelDisplay.ReasoningEffort,
+		FastMode:        modelDisplay.FastMode,
 		Mode:            firstNonEmpty(strings.TrimSpace(status.Session.ModeLabel), strings.TrimSpace(status.Session.SessionMode), "auto-review"),
 		Sandbox:         sandbox,
 		Route:           strings.TrimSpace(status.SandboxStatus.Route),
@@ -56,6 +58,7 @@ func (s ViewModel) HeaderModelText(fallback string) string {
 		Model:           s.Model,
 		Provider:        s.Provider,
 		ReasoningEffort: s.ReasoningEffort,
+		FastMode:        s.FastMode,
 		MissingAPIKey:   s.MissingAPIKey,
 	}).Text(fallback)
 }

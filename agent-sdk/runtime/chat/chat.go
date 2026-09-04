@@ -207,11 +207,12 @@ func (a *Agent) collectCanonicalModelStep(
 	for attempt := 0; ; attempt++ {
 		messageID := uuid.NewString()
 		request := &model.Request{
-			Messages:  messages,
-			Tools:     visibility.ModelSpecs(),
-			Reasoning: a.reasoning,
-			Output:    a.request.OutputSpec(),
-			Stream:    stream,
+			Messages:    messages,
+			Tools:       visibility.ModelSpecs(),
+			Reasoning:   a.reasoning,
+			Output:      a.request.OutputSpec(),
+			ServiceTier: a.request.ServiceTier,
+			Stream:      stream,
 		}
 		request.Instructions = append(request.Instructions, instructionsFromContext(ctx, a.systemPrompt)...)
 

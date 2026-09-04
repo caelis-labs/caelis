@@ -136,8 +136,8 @@ func renderAgentCommunicationRows(blockID string, event SubagentEvent, width int
 		return nil
 	}
 	name := firstNonEmpty(event.SourceName, event.SourceID, "agent")
-	detail, _ := longCommandDisplayPreview(name + ": " + text)
-	header := "• Received " + detail
+	detail, _ := longCommandDisplayPreview(name+": "+text, compactSingleLineBudget(width))
+	header := compactSingleLineHeader("• Received "+detail, width)
 	if opts.AgentMessageTargetLinks {
 		if token := subagentOutputOverlayClickToken(event.SourceCallID); token != "" {
 			return []RenderedRow{renderACPTranscriptLinkedHeaderRow(blockID, header, ctx, token)}

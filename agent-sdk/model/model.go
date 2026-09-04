@@ -761,6 +761,14 @@ type ReasoningConfig struct {
 	Effort       string `json:"effort,omitempty"`
 }
 
+// ServiceTier selects an optional provider request service level.
+type ServiceTier string
+
+const (
+	// ServiceTierPriority requests priority processing when the provider supports it.
+	ServiceTierPriority ServiceTier = "priority"
+)
+
 // Request is the provider-agnostic model request contract.
 type Request struct {
 	Instructions []Part          `json:"instructions,omitempty"`
@@ -768,6 +776,7 @@ type Request struct {
 	Tools        []ToolSpec      `json:"tools,omitempty"`
 	Output       *OutputSpec     `json:"output,omitempty"`
 	Reasoning    ReasoningConfig `json:"reasoning,omitempty"`
+	ServiceTier  ServiceTier     `json:"service_tier,omitempty"`
 	Stream       bool            `json:"stream,omitempty"`
 }
 

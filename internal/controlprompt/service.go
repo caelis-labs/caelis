@@ -65,7 +65,7 @@ type SessionModeService interface {
 
 type ModelService interface {
 	Connect(context.Context, ConnectConfig) (controlstatus.StatusSnapshot, error)
-	UseModel(context.Context, string, ...string) (controlstatus.StatusSnapshot, error)
+	UseModel(context.Context, string, string, bool) (controlstatus.StatusSnapshot, error)
 	DeleteModel(context.Context, string) error
 }
 
@@ -117,8 +117,7 @@ type RouterService interface {
 	ResumeSession(context.Context, string) (SessionSnapshot, error)
 	ListSessions(context.Context, int) ([]ResumeCandidate, error)
 	Compact(context.Context) (bool, error)
-	UseModel(context.Context, string, ...string) (controlstatus.StatusSnapshot, error)
-	DeleteModel(context.Context, string) error
+	UseModel(context.Context, string, string, bool) (controlstatus.StatusSnapshot, error)
 	RepairSandbox(context.Context) (controlstatus.StatusSnapshot, error)
 	AgentStatus(context.Context) (AgentStatusSnapshot, error)
 	StartAgentRun(context.Context, string, string, []Attachment) (Turn, error)

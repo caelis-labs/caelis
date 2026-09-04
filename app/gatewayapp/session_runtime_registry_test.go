@@ -1055,6 +1055,48 @@ func TestDormantSessionModelRecoveryClearsSelectionImmediatelyWhenCatalogIsEmpty
 	}
 }
 
+func TestDormantSessionModelRecoveryClearsUnsupportedFastMode(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	stack, active := newLocalStateTestStack(t)
+	t.Cleanup(func() { _ = stack.Close() })
+	modelID := stack.composition.lookup.DefaultID()
+	updated, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
+		SessionRef:    active.SessionRef,
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		Update: func(state map[string]any) (map[string]any, error) {
+			next := session.CloneState(state)
+			if next == nil {
+				next = map[string]any{}
+			}
+			next[kernelimpl.StateCurrentModelAlias] = modelID
+			next[kernelimpl.StateCurrentModelFastMode] = true
+			return next, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := stack.modelRecovery.repairMissingSessionModelSelection(ctx, stack.composition.sessions, updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Revision != updated.Revision+1 {
+		t.Fatalf("recovered revision = %d, want %d", recovered.Revision, updated.Revision+1)
+	}
+	state, err := stack.composition.sessions.SnapshotState(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := kernelimpl.CurrentModelAlias(state); got != modelID {
+		t.Fatalf("recovered model = %q, want %q", got, modelID)
+	}
+	if fast, ok := kernelimpl.CurrentModelFastMode(state); !ok || fast {
+		t.Fatalf("unsupported fast selection recovery = %v, %v; want explicit false in %#v", fast, ok, state)
+	}
+}
+
 func TestDormantSessionModelRecoveryReturnsLastRevisionConflict(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
@@ -1979,6 +2021,97 @@ func TestSessionRuntimeActivationWaitsForReleaseAndBuildsFreshRuntime(t *testing
 	stack.sessionRuntimes.mu.RUnlock()
 	if retained != result.runtime {
 		t.Fatalf("registered Runtime after release = %p, want %p", retained, result.runtime)
+	}
+}
+
+func TestSessionRuntimeConfigurationWaitsForReleaseAndBuildsDisposableSnapshot(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
+	stack, err := NewLocalStack(Config{
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: "workspace",
+		WorkspaceCWD: workspace,
+		SkillDirs:    []string{},
+		Sandbox:      SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := createWorkspaceRuntimeTestSession(t, client, "create-configuration-release-race", "configuration-release-race", "workspace", workspace)
+	runtime := activateSessionRuntime(t, stack, sessionID)
+	active, err := stack.composition.sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowStop := make(chan struct{})
+	blockingGateway, err := kernelimpl.New(kernelimpl.Config{
+		Sessions: stack.composition.sessions,
+		Runtime:  &blockingRuntime{session: active, release: allowStop},
+		Resolver: blockingResolver{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.instance.mu.Lock()
+	runtime.instance.gateway = blockingGateway
+	runtime.instance.mu.Unlock()
+	if _, err := client.Prompt(ctx, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{OperationID: "prompt-configuration-release-race", SessionID: sessionID},
+		Input:     "hold release open",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	releaseDone := make(chan error, 1)
+	go func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		releaseDone <- stack.sessionRuntimes.release(releaseCtx, sessionID)
+	}()
+	waitForSessionRuntimeReleasing(t, stack.sessionRuntimes, sessionID)
+
+	type acquireResult struct {
+		runtime *sessionRuntime
+		close   func(context.Context) error
+		err     error
+	}
+	acquireDone := make(chan acquireResult, 1)
+	go func() {
+		acquireCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		acquired, _, closeRuntime, acquireErr := stack.sessionRuntimes.acquireControlRuntime(acquireCtx, sessionID, false)
+		acquireDone <- acquireResult{runtime: acquired, close: closeRuntime, err: acquireErr}
+	}()
+	select {
+	case result := <-acquireDone:
+		t.Fatalf("configuration Runtime acquisition returned before the previous Runtime released: %#v", result)
+	default:
+	}
+
+	close(allowStop)
+	if err := <-releaseDone; err != nil {
+		t.Fatalf("release() error = %v", err)
+	}
+	result := <-acquireDone
+	if result.err != nil {
+		t.Fatalf("configuration Runtime acquisition after release error = %v", result.err)
+	}
+	if result.runtime == nil || result.runtime == runtime || result.runtime.instance == runtime.instance {
+		t.Fatalf("configuration acquisition reused released Runtime: old=%p new=%p", runtime, result.runtime)
+	}
+	if result.close == nil {
+		t.Fatal("configuration acquisition did not return disposable Runtime cleanup")
+	}
+	if err := result.close(ctx); err != nil {
+		t.Fatalf("close disposable configuration Runtime: %v", err)
+	}
+	if loaded, ok := stack.sessionRuntimes.loaded(sessionID); ok || loaded != nil {
+		t.Fatalf("configuration acquisition registered disposable Runtime = %p, %t", loaded, ok)
 	}
 }
 

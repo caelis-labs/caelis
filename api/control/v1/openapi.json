@@ -1783,13 +1783,13 @@
       "PromptParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["participant_id"],"properties":{"participant_id":{"type":"string"},"input":{"type":"string"},"display_input":{"type":"string"},"display_address":{"type":"string"},"display_title":{"type":"string"},"content_parts":{"type":"array","items":{"$ref":"#/components/schemas/PromptContentPart"}},"source":{"type":"string"}}}],"unevaluatedProperties":false},
       "CancelParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["participant_id","target"],"properties":{"participant_id":{"type":"string"},"target":{"$ref":"#/components/schemas/TurnTarget"},"reason":{"type":"string"}}}],"unevaluatedProperties":false},
       "SessionModeRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["mode"],"properties":{"mode":{"type":"string"}}}],"unevaluatedProperties":false},
-      "SessionModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["model"],"properties":{"model":{"type":"string"},"reasoning_effort":{"type":"string"},"clear":{"type":"boolean"}}}],"unevaluatedProperties":false},
+      "SessionModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["model"],"properties":{"model":{"type":"string"},"reasoning_effort":{"type":"string"},"fast_mode":{"type":"boolean"},"clear":{"type":"boolean"}}}],"unevaluatedProperties":false},
       "SessionControllerModeRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["mode"],"properties":{"mode":{"type":"string"}}}],"unevaluatedProperties":false},
       "SessionPresentationModeRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["mode"],"properties":{"mode":{"type":"string"}}}],"unevaluatedProperties":false},
       "SessionPresentationConfigRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["config_id","value"],"properties":{"config_id":{"type":"string"},"value":{"type":"string"}}}],"unevaluatedProperties":false},
       "ConnectConfig": {"type":"object","required":["provider","model"],"properties":{"provider":{"type":"string"},"endpoint_id":{"type":"string"},"model":{"type":"string"},"base_url":{"type":"string"},"timeout_seconds":{"type":"integer"},"stream_first_event_timeout_seconds":{"type":"integer"},"api_key":{"type":"string","writeOnly":true},"auth_type":{"type":"string"},"context_window_tokens":{"type":"integer"},"max_output_tokens":{"type":"integer"},"reasoning_effort":{"type":"string"},"reasoning_levels":{"type":"array","items":{"type":"string"}},"image_input":{"type":"boolean"}},"additionalProperties":false},
       "ConnectModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["config"],"properties":{"config":{"$ref":"#/components/schemas/ConnectConfig"}}}],"unevaluatedProperties":false},
-      "UseModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["model"],"properties":{"model":{"type":"string"},"reasoning_effort":{"type":"string"}}}],"unevaluatedProperties":false},
+      "UseModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["model"],"properties":{"model":{"type":"string"},"reasoning_effort":{"type":"string"},"fast_mode":{"type":"boolean"}}}],"unevaluatedProperties":false},
       "DeleteModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["model"],"properties":{"model":{"type":"string"}}}],"unevaluatedProperties":false},
       "SandboxRequest": {
         "allOf": [
@@ -2096,7 +2096,7 @@
         "type": "object", "additionalProperties": false,
         "properties": {
           "display": {"type": "string"}, "alias": {"type": "string"}, "provider": {"type": "string"}, "name": {"type": "string"},
-          "reasoning_effort": {"type": "string"}, "missing_api_key": {"type": "boolean"}
+          "reasoning_effort": {"type": "string"}, "fast_mode": {"type": "boolean"}, "missing_api_key": {"type": "boolean"}
         }
       },
       "SandboxSetupCheck": {

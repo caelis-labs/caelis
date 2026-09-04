@@ -38,6 +38,7 @@ func (s *runtimeComposition) compactSession(ctx context.Context, ref session.Ses
 			SessionRef:       ref,
 			ExpectedRevision: expectedRevision,
 			Model:            resolved.RunRequest.AgentSpec.Model,
+			ServiceTier:      resolved.RunRequest.AgentSpec.Request.ServiceTier,
 			Trigger:          "manual",
 		})
 		return compactErr

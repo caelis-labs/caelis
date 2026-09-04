@@ -24,6 +24,7 @@ type stackRuntimeConfig struct {
 	SystemPrompt                string
 	ModelProfileID              string
 	ModelProfileEffort          string
+	ModelFastMode               bool
 	Model                       ModelConfig
 	SkillDirs                   []string
 	PluginSkills                []skill.PluginBundle

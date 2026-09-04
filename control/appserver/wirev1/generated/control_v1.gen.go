@@ -1335,6 +1335,7 @@ type SessionModelRequest struct {
 	Clear                   *bool          `json:"clear,omitempty"`
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
+	FastMode                *bool          `json:"fast_mode,omitempty"`
 	Model                   string         `json:"model"`
 	OperationId             *string        `json:"operation_id,omitempty"`
 	ReasoningEffort         *string        `json:"reasoning_effort,omitempty"`
@@ -1479,6 +1480,7 @@ type StatusDiagnostics struct {
 type StatusModel struct {
 	Alias           *string `json:"alias,omitempty"`
 	Display         *string `json:"display,omitempty"`
+	FastMode        *bool   `json:"fast_mode,omitempty"`
 	MissingApiKey   *bool   `json:"missing_api_key,omitempty"`
 	Name            *string `json:"name,omitempty"`
 	Provider        *string `json:"provider,omitempty"`
@@ -1729,6 +1731,7 @@ type UsageSnapshot struct {
 type UseModelRequest struct {
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
+	FastMode                *bool          `json:"fast_mode,omitempty"`
 	Model                   string         `json:"model"`
 	OperationId             *string        `json:"operation_id,omitempty"`
 	ReasoningEffort         *string        `json:"reasoning_effort,omitempty"`

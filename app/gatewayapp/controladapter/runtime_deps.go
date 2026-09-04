@@ -173,6 +173,7 @@ type AgentRuntimeDeps struct {
 type ModelRuntimeDeps struct {
 	EffectiveAliasFn       func() string
 	EffectiveEffortFn      func() string
+	EffectiveFastModeFn    func() bool
 	ConfigFn               func(string) (ModelConfig, bool)
 	SessionUsageSnapshotFn func(context.Context, session.SessionRef, string) (compact.UsageSnapshot, error)
 	ProviderUsageFn        func(context.Context, string) (providerusage.Snapshot, bool, error)

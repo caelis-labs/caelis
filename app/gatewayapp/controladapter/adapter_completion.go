@@ -140,7 +140,7 @@ func (d *assembler) CompleteSlashArg(ctx context.Context, command string, query 
 	command = strings.TrimSpace(command)
 	normalizedCommand := strings.ToLower(command)
 	switch normalizedCommand {
-	case "model", "model use", "model del", "disconnect-provider":
+	case "model", "disconnect-provider":
 		return d.completeModelAliases(ctx, query, limit)
 	case "disconnect":
 		return filterSlashCandidates([]controlprompt.SlashArgCandidate{
@@ -164,8 +164,14 @@ func (d *assembler) CompleteSlashArg(ctx context.Context, command string, query 
 	if strings.HasPrefix(normalizedCommand, "connect-") {
 		return completeConnectArgs(ctx, d, command, query, limit)
 	}
-	if alias, ok := strings.CutPrefix(normalizedCommand, "model use "); ok {
-		return d.completeModelReasoningLevels(ctx, alias, query, limit)
+	if modelArgs, ok := strings.CutPrefix(normalizedCommand, "model "); ok {
+		fields := strings.Fields(modelArgs)
+		switch len(fields) {
+		case 1:
+			return d.completeModelReasoningLevels(ctx, fields[0], query, limit)
+		case 2:
+			return d.completeModelSpeedModes(ctx, fields[0], query, limit)
+		}
 	}
 	candidates := controlprompt.RootArgCandidates(command)
 	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(candidates)))
@@ -236,6 +242,43 @@ func (d *assembler) completeModelReasoningLevels(ctx context.Context, aliasQuery
 		}
 	}
 	return out, nil
+}
+
+func (d *assembler) completeModelSpeedModes(ctx context.Context, aliasQuery string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+	alias, err := d.resolveStoredModelAlias(ctx, aliasQuery)
+	if err != nil {
+		//nolint:nilerr // Completion is best-effort; an unresolved alias yields no candidates.
+		return nil, nil
+	}
+	if d.deps.Model.ConfigFn == nil {
+		return nil, nil
+	}
+	cfg, ok := d.deps.Model.ConfigFn(alias)
+	if !ok {
+		return nil, nil
+	}
+	speedModes := modelconfig.SpeedModesForConfig(cfg)
+	candidates := make([]controlprompt.SlashArgCandidate, 0, len(speedModes)+1)
+	for _, mode := range speedModes {
+		// The current /model contract accepts only the optional Fast level.
+		if mode.Level != "fast" {
+			continue
+		}
+		candidates = append(candidates, controlprompt.SlashArgCandidate{
+			Value:   mode.Level,
+			Display: "Fast",
+			Detail:  mode.Description,
+		})
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	candidates = append([]controlprompt.SlashArgCandidate{{
+		Value:   "default",
+		Display: "Default",
+		Detail:  "standard request speed",
+	}}, candidates...)
+	return filterSlashCandidates(candidates, query, limit), nil
 }
 
 func (d *assembler) modelAliasSupportsReasoningLevel(alias string, level string) bool {

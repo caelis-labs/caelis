@@ -43,19 +43,15 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	if len(status.Events) != 0 {
 		t.Fatalf("Route(/status).Events = %#v, want no eager fallback events", status.Events)
 	}
-	model, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/model use fast high"}})
+	model, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/model ollama/llama3 high"}})
 	if err != nil {
-		t.Fatalf("Route(/model use) error = %v", err)
+		t.Fatalf("Route(/model) error = %v", err)
 	}
-	if svc.usedModel != "fast" || svc.usedReasoning != "high" || model.StatusUpdate == nil || !model.RefreshCommands {
-		t.Fatalf("model route used model=%q reasoning=%q status=%#v", svc.usedModel, svc.usedReasoning, model.StatusUpdate)
+	if svc.usedModel != "ollama/llama3" || svc.usedReasoning != "high" || svc.usedFastMode || model.StatusUpdate == nil || !model.RefreshCommands {
+		t.Fatalf("model route used model=%q reasoning=%q fast=%v status=%#v", svc.usedModel, svc.usedReasoning, svc.usedFastMode, model.StatusUpdate)
 	}
-	deleted, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/model del fast"}})
-	if err != nil {
-		t.Fatalf("Route(/model del) error = %v", err)
-	}
-	if !deleted.RefreshCommands {
-		t.Fatalf("Route(/model del).RefreshCommands = false, want refreshed Agent slash commands")
+	if notice := firstNotice(model); notice != "Switched to ollama/llama3" || strings.Contains(notice, "(high)") {
+		t.Fatalf("Route(/model) notice = %q, want Display without duplicated effort", notice)
 	}
 	compactResult, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/compact"}})
 	if err != nil {
@@ -729,23 +725,81 @@ func TestRouterCompactReportsNoop(t *testing.T) {
 	}
 }
 
-func TestRouterModelDeleteIsAppScoped(t *testing.T) {
-	svc := &fakeService{}
-	router := New(RouterConfig{Service: svc})
-	usage, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/model"}})
+func TestRouterModelDirectSyntax(t *testing.T) {
+	const usage = "usage: /model <model> <effort> [fast]"
+	const display = "openai-codex/gpt-5.6-sol [xhigh]"
+
+	for _, text := range []string{
+		"/model",
+		"/model use openai-codex/gpt-5.6-sol xhigh",
+		"/model del openai-codex/gpt-5.6-sol",
+		"/model delete openai-codex/gpt-5.6-sol",
+		"/model rm openai-codex/gpt-5.6-sol",
+		"/model openai-codex/gpt-5.6-sol",
+		"/model openai-codex/gpt-5.6-sol fast",
+		"/model openai-codex/gpt-5.6-sol xhigh quick",
+		"/model openai-codex/gpt-5.6-sol xhigh fast extra",
+	} {
+		svc := &fakeService{}
+		result, err := New(RouterConfig{Service: svc}).Route(context.Background(), Request{Submission: Submission{Text: text}})
+		if err != nil {
+			t.Fatalf("Route(%s) error = %v", text, err)
+		}
+		if firstNotice(result) != usage || svc.usedModel != "" || svc.deletedModel != "" || result.RefreshCommands {
+			t.Fatalf(
+				"Route(%s) notice=%q used=%q deleted=%q result=%#v, want usage without mutation",
+				text,
+				firstNotice(result),
+				svc.usedModel,
+				svc.deletedModel,
+				result,
+			)
+		}
+	}
+
+	switchedSvc := &fakeService{status: controlstatus.StatusSnapshot{
+		ModelStatus: controlstatus.StatusModel{Display: display},
+	}}
+	switched, err := New(RouterConfig{Service: switchedSvc}).Route(context.Background(), Request{
+		Submission: Submission{Text: "/model openai-codex/gpt-5.6-sol xhigh"},
+	})
 	if err != nil {
-		t.Fatalf("Route(/model) error = %v", err)
+		t.Fatalf("Route(/model <model> <effort>) error = %v", err)
 	}
-	if got := firstNotice(usage); !strings.Contains(got, "del <alias>") {
-		t.Fatalf("Route(/model) notice = %q, want App-scoped deletion usage", got)
+	notice := firstNotice(switched)
+	if switchedSvc.usedModel != "openai-codex/gpt-5.6-sol" || switchedSvc.usedReasoning != "xhigh" || switchedSvc.usedFastMode ||
+		!switched.RefreshCommands || switched.StatusUpdate == nil || notice != "Switched to "+display || strings.Contains(notice, "(xhigh)") {
+		t.Fatalf(
+			"Route(/model <model> <effort>) used model=%q reasoning=%q fast=%v notice=%q result=%#v",
+			switchedSvc.usedModel,
+			switchedSvc.usedReasoning,
+			switchedSvc.usedFastMode,
+			notice,
+			switched,
+		)
 	}
-	result, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/model del ollama/old"}})
+
+	fastSvc := &fakeService{status: controlstatus.StatusSnapshot{
+		ModelStatus: controlstatus.StatusModel{Display: display},
+	}}
+	fast, err := New(RouterConfig{Service: fastSvc}).Route(context.Background(), Request{
+		Submission: Submission{Text: "/model openai-codex/gpt-5.6-sol xhigh fast"},
+	})
 	if err != nil {
-		t.Fatalf("Route(/model del) error = %v", err)
+		t.Fatalf("Route(/model <model> <effort> fast) error = %v", err)
 	}
-	if svc.deletedModel != "ollama/old" || !result.RefreshCommands {
-		t.Fatalf("Route(/model del) deleted=%q result=%#v, want App deletion with refreshed commands", svc.deletedModel, result)
+	if fastSvc.usedModel != "openai-codex/gpt-5.6-sol" || fastSvc.usedReasoning != "xhigh" || !fastSvc.usedFastMode ||
+		!fast.RefreshCommands || firstNotice(fast) != "Switched to "+display || strings.Contains(firstNotice(fast), "(xhigh)") {
+		t.Fatalf(
+			"Route(/model <model> <effort> fast) used model=%q reasoning=%q fast=%v notice=%q result=%#v",
+			fastSvc.usedModel,
+			fastSvc.usedReasoning,
+			fastSvc.usedFastMode,
+			firstNotice(fast),
+			fast,
+		)
 	}
+
 }
 
 func firstNotice(result Result) string {
@@ -765,6 +819,7 @@ type fakeService struct {
 	submitted          Submission
 	usedModel          string
 	usedReasoning      string
+	usedFastMode       bool
 	deletedModel       string
 	compacted          bool
 	compactNoop        bool
@@ -874,12 +929,15 @@ func (s *fakeService) SetSessionMode(context.Context, string) (controlstatus.Sta
 func (s *fakeService) Connect(context.Context, ConnectConfig) (controlstatus.StatusSnapshot, error) {
 	return s.status, nil
 }
-func (s *fakeService) UseModel(_ context.Context, model string, reasoning ...string) (controlstatus.StatusSnapshot, error) {
+func (s *fakeService) UseModel(_ context.Context, model string, reasoning string, fastMode bool) (controlstatus.StatusSnapshot, error) {
 	s.usedModel = model
-	if len(reasoning) > 0 {
-		s.usedReasoning = reasoning[0]
+	s.usedReasoning = reasoning
+	s.usedFastMode = fastMode
+	if strings.TrimSpace(s.status.ModelStatus.Display) == "" {
+		s.status.ModelStatus.Display = model
 	}
-	s.status.ModelStatus.Display = model
+	s.status.ModelStatus.ReasoningEffort = reasoning
+	s.status.ModelStatus.FastMode = fastMode
 	return s.status, nil
 }
 func (s *fakeService) DeleteModel(_ context.Context, model string) error {

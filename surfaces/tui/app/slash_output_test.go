@@ -94,7 +94,7 @@ func TestSlashHelpOutputUsesTUIGrouping(t *testing.T) {
 		Kind: controlprompt.SlashCommandResultHelp,
 		Help: controlprompt.CommandHelpSnapshot{Items: []controlprompt.CommandHelpItem{
 			{Name: "help", Usage: "/help", Description: "Show commands and shortcuts", Known: true},
-			{Name: "model", Usage: "/model <action>", Description: "Switch model", Details: []string{"actions: use <alias> [effort], del <alias>"}, Known: true},
+			{Name: "model", Usage: "/model <model> [effort] [fast]", Description: "Switch model", Details: []string{"optional GPT fast mode"}, Known: true},
 			{Name: "helper", Usage: "/helper <prompt>", Description: "Send a prompt to the registered ACP agent", Dynamic: true},
 		}},
 	})
@@ -105,8 +105,8 @@ func TestSlashHelpOutputUsesTUIGrouping(t *testing.T) {
 		"  /help  Show commands and shortcuts",
 		"",
 		"Model & Session",
-		"  /model <action>  Switch model",
-		"                   actions: use <alias> [effort], del <alias>",
+		"  /model <model> [effort] [fast]  Switch model",
+		"                                  optional GPT fast mode",
 		"",
 		"Agents",
 		"  /helper <prompt>  Send a prompt to the registered ACP agent",

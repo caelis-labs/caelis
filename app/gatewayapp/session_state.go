@@ -52,6 +52,12 @@ func (s *runtimeComposition) SessionRuntimeState(ctx context.Context, ref sessio
 		}
 	}
 	runtimeConfig := s.runtimeProcessSnapshot().runtime
+	fastMode := runtimeConfig.ModelFastMode
+	if selected, ok := kernel.CurrentModelFastMode(state); ok {
+		fastMode = selected
+	} else if modelRef != "" {
+		fastMode = false
+	}
 	securityPosture := resolveProcessSecurityPosture(runtimeConfig)
 	sessionMode := kernel.CurrentSessionModeOrDefault(state, runtimeConfig.ApprovalMode)
 	effectivePolicyProfile := firstNonEmpty(kernel.CurrentPolicyProfile(state), policyProfile(runtimeConfig.PolicyProfile))
@@ -63,6 +69,7 @@ func (s *runtimeComposition) SessionRuntimeState(ctx context.Context, ref sessio
 		ModelID:         modelID,
 		ModelAlias:      modelAlias,
 		ReasoningEffort: kernel.CurrentReasoningEffort(state),
+		FastMode:        fastMode,
 		SessionMode:     sessionMode,
 		PolicyProfile:   effectivePolicyProfile,
 	}, nil

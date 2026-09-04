@@ -20,6 +20,21 @@ func TestFooterOmitsYoloBadgeByDefault(t *testing.T) {
 	}
 }
 
+func TestFooterPlacesFastModeLightningNextToModel(t *testing.T) {
+	t.Parallel()
+
+	model := newFooterYoloTestModel(Config{Workspace: "caelis"})
+	model.statusView.Model = "openai-codex/gpt-5.6-sol [xhigh]"
+	model.statusView.FastMode = true
+	footer := ansi.Strip(model.footerRowText())
+	if !strings.Contains(footer, "⚡openai-codex/gpt-5.6-sol [xhigh]") {
+		t.Fatalf("footer = %q, want lightning adjacent to model", footer)
+	}
+	if strings.Contains(footer, "⚡ openai-codex") {
+		t.Fatalf("footer = %q, contains an extra space after lightning", footer)
+	}
+}
+
 func TestFooterShowsYoloBadgeFromLaunchConfig(t *testing.T) {
 	t.Parallel()
 

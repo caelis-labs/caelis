@@ -151,11 +151,12 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 			tools = append(tools, l.options.ProviderTools(l.name, req.Tools)...)
 		}
 		payload := openAICompatRequest{
-			Model:     l.requestModel(),
-			Messages:  l.fromKernelMessages(req.Instructions, req.Messages),
-			Tools:     tools,
-			Stream:    req.Stream,
-			MaxTokens: l.maxOutputTok,
+			Model:       l.requestModel(),
+			Messages:    l.fromKernelMessages(req.Instructions, req.Messages),
+			Tools:       tools,
+			Stream:      req.Stream,
+			MaxTokens:   l.maxOutputTok,
+			ServiceTier: req.ServiceTier,
 		}
 		if l.api == APIOpenRouter {
 			payload.Models = normalizeOpenRouterModelIDs(l.openRouter.Models)
@@ -372,6 +373,7 @@ type openAICompatRequest struct {
 	ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
 	Reasoning       *openAIReasoning           `json:"reasoning,omitempty"`
 	Thinking        *openAIThinking            `json:"thinking,omitempty"`
+	ServiceTier     model.ServiceTier          `json:"service_tier,omitempty"`
 	Transforms      []string                   `json:"transforms,omitempty"`
 	Provider        map[string]any             `json:"provider,omitempty"`
 	Plugins         []map[string]any           `json:"plugins,omitempty"`

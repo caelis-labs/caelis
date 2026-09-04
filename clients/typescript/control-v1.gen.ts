@@ -1221,6 +1221,7 @@ export interface SessionModelRequest {
   clear?: boolean;
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
+  fast_mode?: boolean;
   model: string;
   operation_id?: string;
   reasoning_effort?: string;
@@ -1365,6 +1366,7 @@ export interface StatusDiagnostics {
 export interface StatusModel {
   alias?: string;
   display?: string;
+  fast_mode?: boolean;
   missing_api_key?: boolean;
   name?: string;
   provider?: string;
@@ -1595,6 +1597,7 @@ export interface UsageSnapshot {
 export interface UseModelRequest {
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
+  fast_mode?: boolean;
   model: string;
   operation_id?: string;
   reasoning_effort?: string;

@@ -1180,11 +1180,13 @@ func TestTUISelectedExternalMainControllerAllowsModelMutation(t *testing.T) {
 	configuration := &modelConfigurationClientProbe{}
 	adapter.configClient = configuration
 
-	if _, err := adapter.UseModel(context.Background(), "ollama/late"); err != nil {
+	if _, err := adapter.UseModel(context.Background(), "ollama/late", "", false); err != nil {
 		t.Fatalf("UseModel(ACP controller) error = %v", err)
 	}
-	if configuration.sessionCalls != 1 || configuration.hostCalls != 0 {
-		t.Fatalf("ACP controller model mutation calls = session %d host %d", configuration.sessionCalls, configuration.hostCalls)
+	if configuration.sessionCalls != 1 || configuration.hostCalls != 0 ||
+		configuration.sessionRequest.Model != "ollama/late" || configuration.sessionRequest.ReasoningEffort != "" ||
+		configuration.sessionRequest.FastMode {
+		t.Fatalf("ACP controller model mutation calls = session %d host %d request=%#v", configuration.sessionCalls, configuration.hostCalls, configuration.sessionRequest)
 	}
 }
 
@@ -1356,14 +1358,16 @@ func TestAppServerAdapterRoutesSlashDiscoveryAndPluginsThroughTypedClients(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidates, err := adapter.CompleteSlashArg(context.Background(), "model use", "mi", 7)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 1 || candidates[0].Value != "mimo" ||
-		completion.slash.SessionID != "session-typed" || completion.slash.Surface != "cli-tui" ||
-		completion.slash.Command != "model use" || completion.slash.Query != "mi" || completion.slash.Limit != 7 {
-		t.Fatalf("slash candidates/request = %#v / %#v", candidates, completion.slash)
+	for _, command := range []string{"model", "model gpt-5.6-sol", "model gpt-5.6-sol xhigh"} {
+		candidates, err := adapter.CompleteSlashArg(context.Background(), command, "mi", 7)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(candidates) != 1 || candidates[0].Value != "mimo" ||
+			completion.slash.SessionID != "session-typed" || completion.slash.Surface != "cli-tui" ||
+			completion.slash.Command != command || completion.slash.Query != "mi" || completion.slash.Limit != 7 {
+			t.Fatalf("slash candidates/request for %q = %#v / %#v", command, candidates, completion.slash)
+		}
 	}
 	skills, err := adapter.CompleteSkill(context.Background(), "review", 5)
 	if err != nil {
@@ -2174,14 +2178,14 @@ func TestSessionClientAdapterHostModelReceiptsAndObservation(t *testing.T) {
 		}
 		adapter := &SessionClientAdapter{statusClient: statusClient, configClient: configuration, surface: "tui"}
 
-		got, err := adapter.UseModel(context.Background(), "xiaomi/mimo-v2.5-pro", "high")
+		got, err := adapter.UseModel(context.Background(), "xiaomi/mimo-v2.5-pro", "high", false)
 		if err != nil || !reflect.DeepEqual(got, committedStatus) {
 			t.Fatalf("UseModel(Host) = %#v, %v", got, err)
 		}
 		req := configuration.hostRequest
 		if configuration.hostCalls != 1 || configuration.sessionCalls != 0 || req.SessionID != "" ||
 			req.ExpectedControllerEpoch != "" || req.ExpectedRevision == nil || *req.ExpectedRevision != 41 ||
-			req.Model != "xiaomi/mimo-v2.5-pro" || req.ReasoningEffort != "high" ||
+			req.Model != "xiaomi/mimo-v2.5-pro" || req.ReasoningEffort != "high" || req.FastMode ||
 			!strings.HasPrefix(req.OperationID, "model-use-") {
 			t.Fatalf("Host use request/calls = %#v / %d / %d", req, configuration.hostCalls, configuration.sessionCalls)
 		}
@@ -2205,19 +2209,69 @@ func TestSessionClientAdapterHostModelReceiptsAndObservation(t *testing.T) {
 			statusClient: statusClient, configClient: configuration, surface: "tui", sessionID: "session-1",
 		}
 
-		got, err := adapter.UseModel(context.Background(), "xiaomi/mimo-v2.5-pro", "high")
+		got, err := adapter.UseModel(context.Background(), "xiaomi/mimo-v2.5-pro", "high", false)
 		if err != nil || !reflect.DeepEqual(got, committedStatus) {
 			t.Fatalf("UseModel(Session) = %#v, %v", got, err)
 		}
 		req := configuration.sessionRequest
 		if configuration.hostCalls != 0 || configuration.sessionCalls != 1 || req.SessionID != "session-1" ||
 			req.ExpectedRevision == nil || *req.ExpectedRevision != 7 || req.ExpectedControllerEpoch != "epoch-1" ||
-			req.Model != "xiaomi/mimo-v2.5-pro" || req.ReasoningEffort != "high" ||
+			req.Model != "xiaomi/mimo-v2.5-pro" || req.ReasoningEffort != "high" || req.FastMode ||
 			!strings.HasPrefix(req.OperationID, "session-model-") {
 			t.Fatalf("Session use request/calls = %#v / %d / %d", req, configuration.hostCalls, configuration.sessionCalls)
 		}
 		if len(statusClient.requests) != 1 || statusClient.requests[0].SessionID != "session-1" {
 			t.Fatalf("Session use status requests = %#v", statusClient.requests)
+		}
+	})
+
+	t.Run("use without selected Session propagates fast mode", func(t *testing.T) {
+		committedStatus := controlstatus.StatusSnapshot{
+			Configuration: controlstatus.StatusConfiguration{Revision: 42},
+			ModelStatus:   controlstatus.StatusModel{Alias: "openai-codex/gpt-5.6-sol", FastMode: true},
+		}
+		statusClient := &sandboxStatusClientProbe{statuses: []controlstatus.StatusSnapshot{
+			{Configuration: controlstatus.StatusConfiguration{Revision: 41}},
+			committedStatus,
+		}}
+		configuration := &modelConfigurationClientProbe{
+			hostResult: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 42},
+		}
+		adapter := &SessionClientAdapter{statusClient: statusClient, configClient: configuration, surface: "tui"}
+
+		got, err := adapter.UseModel(context.Background(), "openai-codex/gpt-5.6-sol", "xhigh", true)
+		if err != nil || !reflect.DeepEqual(got, committedStatus) {
+			t.Fatalf("UseModel(Host fast) = %#v, %v", got, err)
+		}
+		req := configuration.hostRequest
+		if configuration.hostCalls != 1 || configuration.sessionCalls != 0 || req.Model != "openai-codex/gpt-5.6-sol" ||
+			req.ReasoningEffort != "xhigh" || !req.FastMode {
+			t.Fatalf("Host fast use request/calls = %#v / %d / %d", req, configuration.hostCalls, configuration.sessionCalls)
+		}
+	})
+
+	t.Run("use with selected Session propagates fast mode", func(t *testing.T) {
+		committedStatus := controlstatus.StatusSnapshot{
+			Session:     controlstatus.StatusSession{ID: "session-1"},
+			ModelStatus: controlstatus.StatusModel{Alias: "openai-codex/gpt-5.6-sol", FastMode: true},
+		}
+		statusClient := &sandboxStatusClientProbe{statuses: []controlstatus.StatusSnapshot{committedStatus}}
+		configuration := &modelConfigurationClientProbe{}
+		adapter := &SessionClientAdapter{
+			sessionClient: &sessionClientAdapterTestClient{state: appserver.SessionState{
+				SessionID: "session-1", Revision: 7, Controller: session.ControllerBinding{EpochID: "epoch-1"},
+			}},
+			statusClient: statusClient, configClient: configuration, surface: "tui", sessionID: "session-1",
+		}
+
+		got, err := adapter.UseModel(context.Background(), "openai-codex/gpt-5.6-sol", "xhigh", true)
+		if err != nil || !reflect.DeepEqual(got, committedStatus) {
+			t.Fatalf("UseModel(Session fast) = %#v, %v", got, err)
+		}
+		req := configuration.sessionRequest
+		if configuration.hostCalls != 0 || configuration.sessionCalls != 1 || req.Model != "openai-codex/gpt-5.6-sol" ||
+			req.ReasoningEffort != "xhigh" || !req.FastMode {
+			t.Fatalf("Session fast use request/calls = %#v / %d / %d", req, configuration.hostCalls, configuration.sessionCalls)
 		}
 	})
 
@@ -2334,10 +2388,12 @@ func TestSessionClientAdapterHostModelReceiptsAndObservation(t *testing.T) {
 		}
 		request := configuration.sessionRequest
 		if configuration.sessionCalls != 1 || request.Clear || request.Model != "ollama@local/ollama/default" ||
+			request.ReasoningEffort != "" || request.FastMode ||
 			request.ExpectedRevision == nil || *request.ExpectedRevision != 7 || request.ExpectedControllerEpoch != "epoch-1" {
 			t.Fatalf("fallback Session request/calls = %#v / %d", request, configuration.sessionCalls)
 		}
-		if completion.slash.Command != "model use" || completion.slash.SessionID != "session-1" {
+		if completion.slash.Command != "model" || completion.slash.Query != "" || completion.slash.Limit != 1 ||
+			completion.slash.SessionID != "session-1" {
 			t.Fatalf("fallback completion request = %#v", completion.slash)
 		}
 	})
@@ -2369,6 +2425,7 @@ func TestSessionClientAdapterHostModelReceiptsAndObservation(t *testing.T) {
 		}
 		request := configuration.sessionRequest
 		if configuration.sessionCalls != 1 || !request.Clear || request.Model != "" || request.ReasoningEffort != "" ||
+			request.FastMode ||
 			request.ExpectedRevision == nil || *request.ExpectedRevision != 7 || request.ExpectedControllerEpoch != "epoch-1" {
 			t.Fatalf("clear Session request/calls = %#v / %d", request, configuration.sessionCalls)
 		}

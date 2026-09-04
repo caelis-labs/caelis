@@ -15,6 +15,7 @@ type SessionRuntimeState struct {
 	ModelID         string
 	ModelAlias      string
 	ReasoningEffort string
+	FastMode        bool
 	SessionMode     string
 	PolicyProfile   string
 	SandboxMode     string
@@ -61,6 +62,7 @@ type StatusModel struct {
 	Provider        string `json:"provider,omitempty"`
 	Name            string `json:"name,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	FastMode        bool   `json:"fast_mode,omitempty"`
 	MissingAPIKey   bool   `json:"missing_api_key,omitempty"`
 }
 

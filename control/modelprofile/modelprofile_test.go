@@ -68,7 +68,7 @@ func TestCatalogUpsertAndRemoveArePure(t *testing.T) {
 		Backend: Backend{Provider: &ProviderBackend{ModelConfigID: "one"}},
 		Effort:  EffortCapability{DefaultEffort: "high", Choices: []EffortChoice{{Canonical: "high", WireValue: "high"}}},
 	}
-	current := Configuration{DefaultProfileID: provider.ID, DefaultEffort: "high", Profiles: []ModelProfile{provider}}
+	current := Configuration{DefaultProfileID: provider.ID, DefaultEffort: "high", DefaultFastMode: true, Profiles: []ModelProfile{provider}}
 	replacement := provider
 	replacement.DisplayName = "Replacement"
 	next, err := Upsert(current, replacement)
@@ -79,7 +79,7 @@ func TestCatalogUpsertAndRemoveArePure(t *testing.T) {
 		t.Fatalf("Upsert() current=%#v next=%#v", current, next)
 	}
 	removed := Remove(next, provider.ID)
-	if len(removed.Profiles) != 0 || removed.DefaultProfileID != "" || removed.DefaultEffort != "" {
+	if len(removed.Profiles) != 0 || removed.DefaultProfileID != "" || removed.DefaultEffort != "" || removed.DefaultFastMode {
 		t.Fatalf("Remove() = %#v", removed)
 	}
 }
@@ -144,6 +144,9 @@ func TestConfigurationRejectsDuplicateAndUnknownDefault(t *testing.T) {
 	if err := ValidateConfiguration(Configuration{DefaultEffort: "high", Profiles: []ModelProfile{profile}}); err == nil || !strings.Contains(err.Error(), "requires a default profile") {
 		t.Fatalf("ValidateConfiguration(orphan effort) error = %v", err)
 	}
+	if err := ValidateConfiguration(Configuration{DefaultFastMode: true, Profiles: []ModelProfile{profile}}); err == nil || !strings.Contains(err.Error(), "requires a default profile") {
+		t.Fatalf("ValidateConfiguration(orphan fast mode) error = %v", err)
+	}
 	if err := ValidateConfiguration(Configuration{DefaultProfileID: profile.ID, DefaultEffort: "max", Profiles: []ModelProfile{profile}}); err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("ValidateConfiguration(unsupported effort) error = %v", err)
 	}
@@ -161,15 +164,55 @@ func TestSelectDefaultStoresOneProfileIDAndEffort(t *testing.T) {
 			},
 		},
 	}
-	selected, err := SelectDefault(Configuration{Profiles: []ModelProfile{profile}}, profile.ID, "high")
+	selected, err := SelectDefault(Configuration{
+		DefaultProfileID: profile.ID, DefaultEffort: "none", DefaultFastMode: true, Profiles: []ModelProfile{profile},
+	}, profile.ID, "high")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selected.DefaultProfileID != profile.ID || selected.DefaultEffort != "high" {
+	if selected.DefaultProfileID != profile.ID || selected.DefaultEffort != "high" || selected.DefaultFastMode {
 		t.Fatalf("SelectDefault() = %#v", selected)
 	}
 	if !reflect.DeepEqual(selected.Profiles, []ModelProfile{Normalize(profile)}) {
 		t.Fatalf("SelectDefault() mutated profile definitions: %#v", selected.Profiles)
+	}
+}
+
+func TestSelectDefaultWithFastModeStoresExplicitSelection(t *testing.T) {
+	profile := ModelProfile{
+		ID: "provider:model", DisplayName: "Model",
+		Backend: Backend{Provider: &ProviderBackend{ModelConfigID: "model"}},
+		Effort: EffortCapability{
+			DefaultEffort: "none",
+			Choices: []EffortChoice{
+				{Canonical: "none", WireValue: "none"},
+				{Canonical: "high", WireValue: "high"},
+			},
+		},
+	}
+	selected, err := SelectDefaultWithFastMode(Configuration{Profiles: []ModelProfile{profile}}, profile.ID, "high", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.DefaultProfileID != profile.ID || selected.DefaultEffort != "high" || !selected.DefaultFastMode {
+		t.Fatalf("SelectDefaultWithFastMode() = %#v", selected)
+	}
+	if err := ValidateConfiguration(selected); err != nil {
+		t.Fatalf("ValidateConfiguration(selected) error = %v", err)
+	}
+	cleared, err := SelectDefaultWithFastMode(selected, "", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.DefaultProfileID != "" || cleared.DefaultEffort != "" || cleared.DefaultFastMode {
+		t.Fatalf("SelectDefaultWithFastMode(clear) = %#v", cleared)
+	}
+}
+
+func TestNormalizeConfigurationClearsOrphanFastMode(t *testing.T) {
+	got := NormalizeConfiguration(Configuration{DefaultFastMode: true})
+	if got.DefaultFastMode || got.DefaultProfileID != "" || got.DefaultEffort != "" {
+		t.Fatalf("NormalizeConfiguration() = %#v, want orphan fast mode cleared", got)
 	}
 }
 

@@ -88,6 +88,85 @@ func TestSessionModelCommandDoesNotChangeHostDefaultOrConfigurationRevision(t *t
 	}
 }
 
+func TestSessionModelCommandPersistsExplicitFastMode(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	stack, active := newLocalStateTestStack(t)
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	hostRevision, err := stack.ControlStatus().ConfigurationRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "session-fast-connect", ExpectedRevision: &hostRevision},
+		Config: appserver.ConnectConfig{
+			Provider: "openai", Model: "gpt-5.6-sol", BaseURL: "https://api.openai.com/v1", APIKey: "session-fast-secret",
+			ReasoningEffort: "xhigh", ReasoningLevels: []string{"low", "high", "xhigh"},
+		},
+	})
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
+	}
+
+	active = mustCurrentSession(t, stack, active.SessionID)
+	revision := active.Revision
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID: "session-fast-select", SessionID: active.SessionID, ExpectedRevision: &revision,
+			ExpectedControllerEpoch: active.Controller.EpochID,
+		},
+		Model: "openai/gpt-5.6-sol", ReasoningEffort: "xhigh", FastMode: true,
+	})
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("UseSessionModel(fast) = %#v, %v", selected, err)
+	}
+	state, err := stack.composition.sessions.SnapshotState(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fast, ok := kernel.CurrentModelFastMode(state); !ok || !fast {
+		t.Fatalf("persisted fast mode = %v, %v; want explicit true in %#v", fast, ok, state)
+	}
+	runtimeState, err := stack.ControlStatus().SessionRuntimeState(ctx, active.SessionRef)
+	if err != nil || !runtimeState.FastMode {
+		t.Fatalf("SessionRuntimeState() = %#v, %v; want fast mode", runtimeState, err)
+	}
+
+	active = mustCurrentSession(t, stack, active.SessionID)
+	revision = active.Revision
+	standard, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID: "session-fast-disable", SessionID: active.SessionID, ExpectedRevision: &revision,
+			ExpectedControllerEpoch: active.Controller.EpochID,
+		},
+		Model: "openai/gpt-5.6-sol", ReasoningEffort: "xhigh",
+	})
+	if err != nil || standard.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("UseSessionModel(default speed) = %#v, %v", standard, err)
+	}
+	state, err = stack.composition.sessions.SnapshotState(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fast, ok := kernel.CurrentModelFastMode(state); !ok || fast {
+		t.Fatalf("persisted fast mode = %v, %v; want explicit false in %#v", fast, ok, state)
+	}
+
+	active = mustCurrentSession(t, stack, active.SessionID)
+	revision = active.Revision
+	rejected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
+			OperationID: "session-fast-unsupported", SessionID: active.SessionID, ExpectedRevision: &revision,
+			ExpectedControllerEpoch: active.Controller.EpochID,
+		},
+		Model: "ollama/llama3", ReasoningEffort: "none", FastMode: true,
+	})
+	if err == nil || rejected.Outcome != appserver.OutcomeRejected {
+		t.Fatalf("UseSessionModel(unsupported fast) = %#v, %v", rejected, err)
+	}
+}
+
 func TestSessionModelCommandCanClearLocalSelection(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)

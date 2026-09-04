@@ -100,6 +100,61 @@ func TestAssemblyResolverAppliesAssemblyStateAndModelDefaults(t *testing.T) {
 	}
 }
 
+func TestAssemblyResolverMapsFastModeToRequestServiceTier(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		state           map[string]any
+		resolutionFast  bool
+		wantServiceTier model.ServiceTier
+	}{
+		{name: "resolution fast without session key", resolutionFast: true, wantServiceTier: model.ServiceTierPriority},
+		{name: "resolution off without session key"},
+		{name: "legacy alias without speed remains off", state: map[string]any{StateCurrentModelAlias: "provider:model"}, resolutionFast: true},
+		{name: "session true overrides resolution off", state: map[string]any{StateCurrentModelFastMode: true}, wantServiceTier: model.ServiceTierPriority},
+		{name: "session false overrides resolution on", state: map[string]any{StateCurrentModelFastMode: false}, resolutionFast: true},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			state := tt.state
+			if state == nil {
+				state = map[string]any{}
+			}
+			resolver, err := NewAssemblyResolver(AssemblyResolverConfig{
+				Sessions: snapshotStateFunc(func(context.Context, session.SessionRef) (map[string]any, error) {
+					return state, nil
+				}),
+				DefaultModelAlias: "mini",
+				ModelLookup: modelLookupFunc(func(context.Context, string, int) (ModelResolution, error) {
+					return ModelResolution{Model: fakeLLM{name: "mini"}, FastMode: tt.resolutionFast}, nil
+				}),
+			})
+			if err != nil {
+				t.Fatalf("NewAssemblyResolver() error = %v", err)
+			}
+			turn, err := resolver.ResolveTurn(context.Background(), TurnIntent{
+				SessionRef: session.SessionRef{SessionID: "s1"},
+				Input:      "hello",
+			})
+			if err != nil {
+				t.Fatalf("ResolveTurn() error = %v", err)
+			}
+			if got := turn.RunRequest.AgentSpec.Request.ServiceTier; got != tt.wantServiceTier {
+				t.Fatalf("AgentSpec.Request.ServiceTier = %q, want %q", got, tt.wantServiceTier)
+			}
+			if _, ok := turn.RunRequest.AgentSpec.Metadata["fast_mode"]; ok {
+				t.Fatalf("metadata fast_mode = %#v, want typed request ServiceTier only", turn.RunRequest.AgentSpec.Metadata["fast_mode"])
+			}
+			if _, ok := turn.RunRequest.AgentSpec.Metadata["service_tier"]; ok {
+				t.Fatalf("metadata service_tier = %#v, want typed request ServiceTier only", turn.RunRequest.AgentSpec.Metadata["service_tier"])
+			}
+		})
+	}
+}
+
 func TestAssemblyResolverSessionReasoningOverridesModeAndModelDefault(t *testing.T) {
 	t.Parallel()
 

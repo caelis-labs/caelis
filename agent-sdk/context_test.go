@@ -136,6 +136,21 @@ func TestAgentSpecCarriesExecutionCapabilitiesOutsideContext(t *testing.T) {
 	}
 }
 
+func TestModelRequestOptionsWithDefaultsCopiesServiceTier(t *testing.T) {
+	t.Parallel()
+
+	priority := ModelRequestOptions{ServiceTier: model.ServiceTierPriority}
+	if got := (ModelRequestOptions{}).WithDefaults(priority); got.ServiceTier != model.ServiceTierPriority {
+		t.Fatalf("empty overlay ServiceTier = %q, want default priority", got.ServiceTier)
+	}
+	if got := priority.WithDefaults(ModelRequestOptions{}); got.ServiceTier != model.ServiceTierPriority {
+		t.Fatalf("overlay ServiceTier = %q, want priority", got.ServiceTier)
+	}
+	if got := (ModelRequestOptions{}).WithDefaults(ModelRequestOptions{}); got.ServiceTier != "" {
+		t.Fatalf("empty ServiceTier = %q, want omitted", got.ServiceTier)
+	}
+}
+
 type staticModel struct {
 	name string
 }

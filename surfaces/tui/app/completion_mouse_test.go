@@ -344,8 +344,8 @@ func TestCompletionMouseClickAppliesSharedOverlayKinds(t *testing.T) {
 		model.slashArgCandidates = candidates
 
 		clickCompletionCandidate(t, model, 1)
-		if got := model.textarea.Value(); got != "/model use bravo " {
-			t.Fatalf("slash-arg click = %q, want /model use bravo ", got)
+		if got := model.textarea.Value(); got != "/model bravo " {
+			t.Fatalf("slash-arg click = %q, want /model bravo ", got)
 		}
 	})
 }

@@ -81,7 +81,7 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		},
 		"CompletionRequest": appserver.CompletionRequest{
 			SessionID: "session-1", WorkspaceKey: "workspace-1", CWD: "/tmp/workspace",
-			Surface: "tui", Query: "read", Command: "model use", Name: "review", Limit: 10,
+			Surface: "tui", Query: "read", Command: "model", Name: "review", Limit: 10,
 		},
 	}
 	for name, request := range requests {

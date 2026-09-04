@@ -233,13 +233,6 @@ func (m *Model) tryOpenSlashArgPicker(line string) (bool, tea.Cmd) {
 		m.openResumePicker()
 		return m.resumeActive, m.updateResumeCandidates()
 	}
-	if text == "/model use" {
-		if !m.isCommandAvailable("model") {
-			return false, nil
-		}
-		loadCmd := m.openSlashArgPicker("model use")
-		return m.slashArgActive, loadCmd
-	}
 	if strings.HasPrefix(text, "/") && !strings.Contains(text, " ") {
 		cmd := strings.TrimPrefix(text, "/")
 		if !m.isCommandAvailable(cmd) {

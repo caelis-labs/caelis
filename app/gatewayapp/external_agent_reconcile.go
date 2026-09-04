@@ -23,6 +23,7 @@ const committedExternalAgentObserveTimeout = 10 * time.Second
 type disconnectedACPFallback struct {
 	profile   modelprofile.ModelProfile
 	effort    string
+	fastMode  bool
 	placement sdkplacement.Placement
 }
 
@@ -146,7 +147,7 @@ func resolveDisconnectedACPFallback(
 	if !ok {
 		return disconnectedACPFallback{}, nil
 	}
-	fallback := disconnectedACPFallback{profile: profile, effort: profiles.DefaultEffort}
+	fallback := disconnectedACPFallback{profile: profile, effort: profiles.DefaultEffort, fastMode: profiles.DefaultFastMode}
 	if profile.Kind() != modelprofile.BackendACP {
 		return fallback, nil
 	}
@@ -474,6 +475,7 @@ func disconnectedACPStateUpdate(fallback disconnectedACPFallback) session.Append
 		delete(next, stateControllerConfigOperationID)
 		if fallback.profile.Kind() == modelprofile.BackendProvider && fallback.profile.Backend.Provider != nil {
 			next[kernel.StateCurrentModelAlias] = fallback.profile.Backend.Provider.ModelConfigID
+			next[kernel.StateCurrentModelFastMode] = fallback.fastMode
 			if fallback.effort == "" {
 				delete(next, kernel.StateCurrentReasoningEffort)
 			} else {
@@ -483,6 +485,7 @@ func disconnectedACPStateUpdate(fallback disconnectedACPFallback) session.Append
 		}
 		delete(next, kernel.StateCurrentModelAlias)
 		delete(next, kernel.StateCurrentReasoningEffort)
+		delete(next, kernel.StateCurrentModelFastMode)
 		return next, nil
 	}
 }
@@ -553,6 +556,7 @@ func (s *runtimeComposition) applyDisconnectedACPAgent(doc AppConfig, agentID st
 		if _, ok := modelprofile.Lookup(profiles, current); !ok {
 			s.activeRuntime.ModelProfileID = profile.ID
 			s.activeRuntime.ModelProfileEffort = profiles.DefaultEffort
+			s.activeRuntime.ModelFastMode = profiles.DefaultFastMode
 			s.activeRuntime.Model = ModelConfig{}
 			if profile.Kind() == modelprofile.BackendProvider && profile.Backend.Provider != nil && s.lookup != nil {
 				s.activeRuntime.Model, _ = s.lookup.Config(profile.Backend.Provider.ModelConfigID)

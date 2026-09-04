@@ -295,6 +295,52 @@ func TestFactoryPassesOutputSpecToModelRequest(t *testing.T) {
 	}
 }
 
+func TestFactoryPassesServiceTierToModelRequest(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name string
+		tier model.ServiceTier
+	}{
+		{name: "priority", tier: model.ServiceTierPriority},
+		{name: "unset"},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			testModel := &recordingModel{}
+			chatAgent, err := (Factory{}).NewAgent(context.Background(), agent.AgentSpec{
+				Name:    "chat",
+				Model:   testModel,
+				Request: agent.ModelRequestOptions{ServiceTier: tt.tier},
+			})
+			if err != nil {
+				t.Fatalf("NewAgent() error = %v", err)
+			}
+
+			ctx := agent.NewContext(agent.ContextSpec{
+				Context: context.Background(),
+				Session: session.Session{
+					SessionRef: session.SessionRef{SessionID: "sess-service-tier"},
+				},
+				Events: []*session.Event{{
+					Type:    session.EventTypeUser,
+					Message: ptrMessage(model.NewTextMessage(model.RoleUser, "hello")),
+					Text:    "hello",
+				}},
+			})
+			for _, runErr := range chatAgent.Run(ctx) {
+				if runErr != nil {
+					t.Fatalf("Run() error = %v", runErr)
+				}
+			}
+			if testModel.last.ServiceTier != tt.tier {
+				t.Fatalf("ServiceTier = %q, want %q", testModel.last.ServiceTier, tt.tier)
+			}
+		})
+	}
+}
+
 func TestModelRequestOptionsOutputSpecReturnsClone(t *testing.T) {
 	t.Parallel()
 

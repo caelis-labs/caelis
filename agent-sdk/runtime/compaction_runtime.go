@@ -49,7 +49,8 @@ func (r *Runtime) prepareInvocationContext(
 		Events:           events,
 		PendingEvents:    pendingEventsForCompaction(pendingInput),
 		Model:            req.AgentSpec.Model,
-		InContextRequest: r.inContextRequest(ref, req.AgentSpec.Model, events),
+		ServiceTier:      req.AgentSpec.Request.ServiceTier,
+		InContextRequest: r.inContextRequest(ref, req.AgentSpec.Model, events, req.AgentSpec.Request.ServiceTier),
 		RuntimeAppendix:  appendix,
 	})
 	if err != nil {
@@ -85,6 +86,7 @@ type CompactRequest struct {
 	// Runtime's Session write queue. Nil accepts the latest admitted revision.
 	ExpectedRevision *uint64
 	Model            model.LLM
+	ServiceTier      model.ServiceTier
 	Trigger          string
 }
 
@@ -139,7 +141,8 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 			SessionRef:       ref,
 			Events:           events,
 			Model:            req.Model,
-			InContextRequest: r.inContextRequest(ref, req.Model, events),
+			ServiceTier:      req.ServiceTier,
+			InContextRequest: r.inContextRequest(ref, req.Model, events, req.ServiceTier),
 			RuntimeAppendix:  appendix,
 		}, req.Trigger)
 		if compactErr != nil || !result.Compacted {
@@ -228,7 +231,7 @@ func (r *Runtime) compactAfterOverflow(
 		}
 		var inContext *model.Request
 		if len(pendingEvents) == 0 {
-			inContext = r.inContextRequest(ref, req.AgentSpec.Model, sourceEvents)
+			inContext = r.inContextRequest(ref, req.AgentSpec.Model, sourceEvents, req.AgentSpec.Request.ServiceTier)
 		}
 		return r.compactor.CompactOnOverflow(compactCtx, compact.Request{
 			Session:          current,
@@ -236,6 +239,7 @@ func (r *Runtime) compactAfterOverflow(
 			Events:           sourceEvents,
 			PendingEvents:    pendingEvents,
 			Model:            req.AgentSpec.Model,
+			ServiceTier:      req.AgentSpec.Request.ServiceTier,
 			InContextRequest: inContext,
 			RuntimeAppendix:  appendix,
 		}, cause)
@@ -295,12 +299,18 @@ func (r *Runtime) compactAfterModelRequestWatermark(
 		if err != nil {
 			return compact.Result{}, err
 		}
+		inContext := model.CloneRequest(decision.Request)
+		serviceTier := model.ServiceTier("")
+		if inContext != nil {
+			serviceTier = inContext.ServiceTier
+		}
 		return forceCompactor.Force(compactCtx, compact.Request{
 			Session:          current,
 			SessionRef:       ref,
 			Events:           events,
 			Model:            decision.Model,
-			InContextRequest: model.CloneRequest(decision.Request),
+			ServiceTier:      serviceTier,
+			InContextRequest: inContext,
 			RuntimeAppendix:  appendix,
 		}, trigger)
 	})

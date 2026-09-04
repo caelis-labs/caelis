@@ -59,16 +59,17 @@ func (c *codexStyleCompactor) generateCompactMarkdown(
 	llm model.LLM,
 	baseText string,
 	events []*session.Event,
+	serviceTier model.ServiceTier,
 ) (string, error) {
 	if len(events) == 0 {
 		return normalizeCompactMarkdown(baseText), nil
 	}
-	text, err := c.generateCompactMarkdownOnce(ctx, llm, baseText, events)
+	text, err := c.generateCompactMarkdownOnce(ctx, llm, baseText, events, serviceTier)
 	if err == nil {
 		return text, nil
 	}
 	if isCompactionOverflowError(err) {
-		return c.generateCompactMarkdownSegmented(ctx, llm, baseText, events, 0)
+		return c.generateCompactMarkdownSegmented(ctx, llm, baseText, events, serviceTier, 0)
 	}
 	return "", err
 }
@@ -78,6 +79,7 @@ func (c *codexStyleCompactor) generateCompactMarkdownSegmented(
 	llm model.LLM,
 	baseText string,
 	events []*session.Event,
+	serviceTier model.ServiceTier,
 	depth int,
 ) (string, error) {
 	if len(events) == 0 {
@@ -99,10 +101,10 @@ func (c *codexStyleCompactor) generateCompactMarkdownSegmented(
 		if len(segment) == 0 {
 			continue
 		}
-		update, err := c.generateCompactMarkdownOnce(ctx, llm, current, segment)
+		update, err := c.generateCompactMarkdownOnce(ctx, llm, current, segment, serviceTier)
 		if err != nil {
 			if isCompactionOverflowError(err) {
-				update, err = c.generateCompactMarkdownSegmented(ctx, llm, current, segment, depth+1)
+				update, err = c.generateCompactMarkdownSegmented(ctx, llm, current, segment, serviceTier, depth+1)
 			}
 			if err != nil {
 				return "", err
@@ -118,6 +120,7 @@ func (c *codexStyleCompactor) generateCompactMarkdownOnce(
 	llm model.LLM,
 	baseText string,
 	events []*session.Event,
+	serviceTier model.ServiceTier,
 ) (string, error) {
 	var lastErr error
 	for attempt := 0; attempt < c.cfg.MaxRetryAttempts; attempt++ {
@@ -127,7 +130,7 @@ func (c *codexStyleCompactor) generateCompactMarkdownOnce(
 				return "", err
 			}
 		}
-		text, err := modelCompactMarkdown(ctx, llm, baseText, events)
+		text, err := modelCompactMarkdown(ctx, llm, baseText, events, serviceTier)
 		if err == nil {
 			return text, nil
 		}
@@ -167,6 +170,7 @@ func modelCompactMarkdown(
 	llm model.LLM,
 	baseText string,
 	events []*session.Event,
+	serviceTier model.ServiceTier,
 ) (string, error) {
 	input := renderCheckpointCompactionInput(baseText, events)
 	if strings.TrimSpace(input) == "" {
@@ -180,7 +184,8 @@ Across the prior summary and all source=user frames, preserve Session-wide User 
 		Messages: []model.Message{
 			model.NewTextMessage(model.RoleUser, input),
 		},
-		Stream: true,
+		ServiceTier: serviceTier,
+		Stream:      true,
 	}
 	final, err := collectCompactionResponse(ctx, llm, request)
 	if err != nil {
@@ -188,7 +193,7 @@ Across the prior summary and all source=user frames, preserve Session-wide User 
 	}
 	text := normalizeCompactMarkdown(strings.TrimSpace(final.Message.TextContent()))
 	if compactMarkdownLooksEmpty(text) {
-		salvaged, salvageErr := salvageCompactMarkdown(ctx, llm, input, text)
+		salvaged, salvageErr := salvageCompactMarkdown(ctx, llm, input, text, serviceTier)
 		if salvageErr == nil && !compactMarkdownLooksEmpty(salvaged) {
 			return salvaged, nil
 		}
@@ -238,7 +243,7 @@ func compactMarkdownLooksEmpty(text string) bool {
 	return len(text) < 24
 }
 
-func salvageCompactMarkdown(ctx context.Context, llm model.LLM, input string, prior string) (string, error) {
+func salvageCompactMarkdown(ctx context.Context, llm model.LLM, input string, prior string, serviceTier model.ServiceTier) (string, error) {
 	salvageInput := strings.TrimSpace(input)
 	if strings.TrimSpace(prior) != "" {
 		salvageInput = strings.TrimSpace(salvageInput + "\n" + renderCompactionSourceFrame(
@@ -254,7 +259,8 @@ You are repairing an internal CONTEXT COMPACTION SUMMARY for the same ongoing co
 		Messages: []model.Message{
 			model.NewTextMessage(model.RoleUser, salvageInput),
 		},
-		Stream: true,
+		ServiceTier: serviceTier,
+		Stream:      true,
 	}
 	final, err := collectCompactionResponse(ctx, llm, request)
 	if err != nil {

@@ -99,15 +99,16 @@ func TestStatusPropagatesConfigurationRevisionReadFailure(t *testing.T) {
 
 func TestStatusProjectsEffectiveProcessModelWithoutSession(t *testing.T) {
 	driver := NewStatusAssemblerForHost(StatusAssemblyDeps{Model: ModelRuntimeDeps{
-		EffectiveAliasFn:  func() string { return "xiaomi/mimo-v2.5-pro" },
-		EffectiveEffortFn: func() string { return "high" },
+		EffectiveAliasFn:    func() string { return "openai-codex/gpt-5.6-sol" },
+		EffectiveEffortFn:   func() string { return "xhigh" },
+		EffectiveFastModeFn: func() bool { return true },
 	}}, "test", "")
 	status, err := driver.LightweightStatus(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Session.ID != "" || status.ModelStatus.Display != "xiaomi/mimo-v2.5-pro [high]" ||
-		status.ModelStatus.ReasoningEffort != "high" {
+	if status.Session.ID != "" || status.ModelStatus.Display != "openai-codex/gpt-5.6-sol [xhigh]" ||
+		status.ModelStatus.ReasoningEffort != "xhigh" || !status.ModelStatus.FastMode {
 		t.Fatalf("Host effective model status = %#v", status)
 	}
 }

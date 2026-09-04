@@ -86,8 +86,8 @@ func (m *Model) handleSlashArgCompletionResultMsg(msg slashArgCompletionResultMs
 		return m, nil
 	}
 	m.applySlashArgCandidates(msg.command, msg.query, msg.candidates, msg.err)
-	if msg.err == nil && !m.isWizardActive() && msg.command == "model use" {
-		if nextCommand := exactModelUseReasoningCommandForQuery(msg.query, m.slashArgCandidates); nextCommand != "" {
+	if msg.err == nil && !m.isWizardActive() {
+		if nextCommand := nextModelCompletionCommand(msg.command, msg.query, m.slashArgCandidates); nextCommand != "" {
 			m.slashArgCommand = nextCommand
 			m.slashArgCandidates = nil
 			m.slashArgCandidateCommand = ""

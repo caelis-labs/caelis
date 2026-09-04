@@ -26,6 +26,9 @@ const (
 	// StateCurrentReasoningEffort is the durable session-state key for a
 	// per-session reasoning effort override selected by the TUI.
 	StateCurrentReasoningEffort = "gateway.current_reasoning_effort"
+	// StateCurrentModelFastMode is the durable session-state key for the
+	// explicitly selected model request speed.
+	StateCurrentModelFastMode = "gateway.current_model_fast_mode"
 	// StateUsageAccounting is the durable non-invocation session-state key for
 	// token usage bookkeeping that must not enter canonical prompt history.
 	StateUsageAccounting = "gateway.usage.v1"
@@ -44,6 +47,7 @@ type ModelResolution struct {
 	ProfileID              string
 	ReasoningEffort        string
 	DefaultReasoningEffort string
+	FastMode               bool
 }
 
 type ModelLookup interface {
@@ -349,10 +353,23 @@ func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, in
 			metadata[key] = value
 		}
 	}
+	request := agent.ModelRequestOptions{}
+	fastMode := modelResolution.FastMode
+	if selected, ok := CurrentModelFastMode(state); ok {
+		fastMode = selected
+	} else if CurrentModelAlias(state) != "" {
+		// Provider aliases written before fast mode existed remain explicit
+		// standard-speed selections rather than inheriting a later Host default.
+		fastMode = false
+	}
+	if fastMode {
+		request.ServiceTier = model.ServiceTierPriority
+	}
 	return agent.AgentSpec{
 		Name:     snap.agentName,
 		Model:    modelResolution.Model,
 		Tools:    tools,
+		Request:  request,
 		Metadata: metadata,
 	}, nil
 }
@@ -424,6 +441,16 @@ func CurrentReasoningEffort(state map[string]any) string {
 	}
 	value, _ := state[StateCurrentReasoningEffort].(string)
 	return strings.TrimSpace(value)
+}
+
+// CurrentModelFastMode returns the explicit per-session fast-mode selection and
+// whether the durable state contains that selection.
+func CurrentModelFastMode(state map[string]any) (bool, bool) {
+	if state == nil {
+		return false, false
+	}
+	value, ok := state[StateCurrentModelFastMode].(bool)
+	return value, ok
 }
 
 // CurrentSessionMode returns the normalized per-session approval routing mode.

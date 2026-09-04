@@ -105,8 +105,11 @@ var builtinCatalog = []catalogEntry{
 			ReasoningMode:          ReasoningModeEffort,
 			ReasoningEfforts:       []string{"low", "medium", "high", "xhigh", "max"},
 			DefaultReasoningEffort: "medium",
-			SupportsJSONOutput:     true,
-			SupportsImages:         true,
+			SpeedModes: []SpeedMode{
+				{Level: "fast", Description: "2x faster, more usage"},
+			},
+			SupportsJSONOutput: true,
+			SupportsImages:     true,
 		},
 	},
 	{
@@ -121,8 +124,11 @@ var builtinCatalog = []catalogEntry{
 			ReasoningMode:          ReasoningModeEffort,
 			ReasoningEfforts:       []string{"none", "low", "medium", "high", "xhigh", "max"},
 			DefaultReasoningEffort: "medium",
-			SupportsJSONOutput:     true,
-			SupportsImages:         true,
+			SpeedModes: []SpeedMode{
+				{Level: "fast", Description: "1.5x faster, more usage"},
+			},
+			SupportsJSONOutput: true,
+			SupportsImages:     true,
 		},
 	},
 	{
@@ -137,8 +143,11 @@ var builtinCatalog = []catalogEntry{
 			ReasoningMode:          ReasoningModeEffort,
 			ReasoningEfforts:       []string{"none", "low", "medium", "high", "xhigh", "max"},
 			DefaultReasoningEffort: "medium",
-			SupportsJSONOutput:     true,
-			SupportsImages:         true,
+			SpeedModes: []SpeedMode{
+				{Level: "fast", Description: "1.5x faster, more usage"},
+			},
+			SupportsJSONOutput: true,
+			SupportsImages:     true,
 		},
 	},
 	{
@@ -153,8 +162,11 @@ var builtinCatalog = []catalogEntry{
 			ReasoningMode:          ReasoningModeEffort,
 			ReasoningEfforts:       []string{"none", "low", "medium", "high", "xhigh", "max"},
 			DefaultReasoningEffort: "medium",
-			SupportsJSONOutput:     true,
-			SupportsImages:         true,
+			SpeedModes: []SpeedMode{
+				{Level: "fast", Description: "1.5x faster, more usage"},
+			},
+			SupportsJSONOutput: true,
+			SupportsImages:     true,
 		},
 	},
 	{
@@ -170,8 +182,11 @@ var builtinCatalog = []catalogEntry{
 			ReasoningMode:          ReasoningModeEffort,
 			ReasoningEfforts:       []string{"none", "low", "medium", "high", "xhigh"},
 			DefaultReasoningEffort: "medium",
-			SupportsJSONOutput:     true,
-			SupportsImages:         true,
+			SpeedModes: []SpeedMode{
+				{Level: "fast", Description: "1.5x faster, more usage"},
+			},
+			SupportsJSONOutput: true,
+			SupportsImages:     true,
 		},
 	},
 	{
@@ -221,8 +236,11 @@ var builtinCatalog = []catalogEntry{
 			ReasoningMode:          ReasoningModeEffort,
 			ReasoningEfforts:       []string{"none", "low", "medium", "high", "xhigh"},
 			DefaultReasoningEffort: "medium",
-			SupportsJSONOutput:     true,
-			SupportsImages:         true,
+			SpeedModes: []SpeedMode{
+				{Level: "fast", Description: "1.5x faster, more usage"},
+			},
+			SupportsJSONOutput: true,
+			SupportsImages:     true,
 		},
 	},
 	{

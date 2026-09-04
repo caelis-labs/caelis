@@ -93,7 +93,7 @@ func defaultSharedSpecs() []CommandSpec {
 		{Name: "breeze", Usage: "/breeze <prompt>", Description: "Run the bound Breeze profile"},
 		{Name: "orbit", Usage: "/orbit <prompt>", Description: "Run the bound Orbit profile"},
 		{Name: "zenith", Usage: "/zenith <prompt>", Description: "Run the bound Zenith profile"},
-		{Name: "model", Usage: "/model", Description: "Choose the model for the current or next session", DynamicCompleter: true},
+		{Name: "model", Usage: "/model <model> <effort> [fast]", Description: "Choose the model, effort, and optional GPT fast mode for the current or next session", DynamicCompleter: true},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info"},
 		{Name: "doctor", Usage: "/doctor", Description: "Diagnose and repair Windows sandbox readiness", Platforms: []string{"windows"}},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},

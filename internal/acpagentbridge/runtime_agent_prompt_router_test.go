@@ -467,11 +467,11 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 	resp, err := agent.Prompt(context.Background(), runtimeacp.PromptInput{
 		SessionID: string(activeSession.SessionId),
 		Prompt: []json.RawMessage{
-			json.RawMessage(`{"type":"text","text":"/model use fast"}`),
+			json.RawMessage(`{"type":"text","text":"/model fast high"}`),
 		},
 	}, cb)
 	if err != nil {
-		t.Fatalf("Prompt(/model use fast) error = %v", err)
+		t.Fatalf("Prompt(/model fast high) error = %v", err)
 	}
 	if resp.StopReason != acpsdk.StopReasonEndTurn {
 		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acpsdk.StopReasonEndTurn)

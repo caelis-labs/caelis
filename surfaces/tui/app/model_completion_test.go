@@ -16,7 +16,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func TestModelSelectionOpensReasoningPickerDirectly(t *testing.T) {
+func TestModelSelectionOpensEffortPickerDirectly(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
 		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
@@ -26,7 +26,7 @@ func TestModelSelectionOpensReasoningPickerDirectly(t *testing.T) {
 					{Value: "minimax/minimax-m1", Display: "minimax/minimax-m1"},
 					{Value: "alt-model", Display: "alt-model"},
 				}, nil
-			case "model use alt-model":
+			case "model alt-model":
 				return []SlashArgCandidate{{Value: "none", Display: "none"}}, nil
 			default:
 				return nil, nil
@@ -38,14 +38,14 @@ func TestModelSelectionOpensReasoningPickerDirectly(t *testing.T) {
 	model.slashArgIndex = 1
 	runCompletionCmd(t, model, model.applySlashArgCompletion())
 
-	if got := string(model.input); got != "/model use alt-model " {
-		t.Fatalf("input after model selection = %q, want %q", got, "/model use alt-model ")
+	if got := string(model.input); got != "/model alt-model " {
+		t.Fatalf("input after model selection = %q, want %q", got, "/model alt-model ")
 	}
-	if got := model.slashArgCommand; got != "model use alt-model" {
-		t.Fatalf("slashArgCommand = %q, want model use alt-model", got)
+	if got := model.slashArgCommand; got != "model alt-model" {
+		t.Fatalf("slashArgCommand = %q, want model alt-model", got)
 	}
 	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "none" {
-		t.Fatalf("reasoning candidates = %#v, want none", model.slashArgCandidates)
+		t.Fatalf("effort candidates = %#v, want none", model.slashArgCandidates)
 	}
 }
 
@@ -292,6 +292,25 @@ func candidateValuesForTUITest(candidates []SlashArgCandidate) []string {
 	return out
 }
 
+func modelSwitchSlashArgComplete(alias string) func(context.Context, string, string, int) ([]SlashArgCandidate, error) {
+	alias = strings.TrimSpace(alias)
+	return func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		switch command {
+		case "model":
+			return []SlashArgCandidate{{Value: alias, Display: alias}}, nil
+		case "model " + alias:
+			return []SlashArgCandidate{{Value: "none", Display: "none"}, {Value: "high", Display: "high"}}, nil
+		case "model " + alias + " high":
+			return []SlashArgCandidate{
+				{Value: "default", Display: "Default"},
+				{Value: "fast", Display: "Fast"},
+			}, nil
+		default:
+			return nil, nil
+		}
+	}
+}
+
 func TestTryOpenSlashArgPickerUsesCommandRegistry(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
@@ -313,37 +332,19 @@ func TestTryOpenSlashArgPickerUsesCommandRegistry(t *testing.T) {
 	}
 }
 
-func TestTryOpenSlashArgPickerOpensModelUseList(t *testing.T) {
-	var requested []string
+func TestTryOpenSlashArgPickerRejectsLegacyModelUseAndDelete(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
-			requested = append(requested, command)
-			if command != "model use" {
-				return nil, nil
-			}
-			return []SlashArgCandidate{
-				{Value: "deepseek/deepseek-v4-pro", Display: "deepseek/deepseek-v4-pro"},
-			}, nil
+		SlashArgComplete: func(context.Context, string, string, int) ([]SlashArgCandidate, error) {
+			t.Fatal("legacy /model use and /model del should not request completion")
+			return nil, nil
 		},
 	})
-
-	opened, cmd := model.tryOpenSlashArgPicker("/model use")
-	if !opened {
-		t.Fatal("tryOpenSlashArgPicker(/model use) = false, want true")
-	}
-	runCompletionCmd(t, model, cmd)
-	if got := model.slashArgCommand; got != "model use" {
-		t.Fatalf("slashArgCommand = %q, want model use", got)
-	}
-	if got := model.textarea.Value(); got != "/model use " {
-		t.Fatalf("input = %q, want /model use ", got)
-	}
-	if !reflect.DeepEqual(requested, []string{"model use"}) {
-		t.Fatalf("requested commands = %#v, want [model use]", requested)
-	}
-	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "deepseek/deepseek-v4-pro" {
-		t.Fatalf("model candidates = %#v, want configured alias", model.slashArgCandidates)
+	for _, line := range []string{"/model use", "/model del"} {
+		opened, cmd := model.tryOpenSlashArgPicker(line)
+		if opened || cmd != nil || model.slashArgActive {
+			t.Fatalf("tryOpenSlashArgPicker(%q) opened picker command=%q active=%v", line, model.slashArgCommand, model.slashArgActive)
+		}
 	}
 }
 
@@ -400,15 +401,56 @@ func TestPluginManageCompletionSubmitsPickerCommand(t *testing.T) {
 	}
 }
 
-func TestModelUseSelectionOpensReasoningPicker(t *testing.T) {
+func TestModelSelectionOpensEffortThenSpeedPicker(t *testing.T) {
+	const alias = "deepseek/deepseek-v4-pro"
+	model := NewModel(Config{
+		Commands:         DefaultCommands(),
+		SlashArgComplete: modelSwitchSlashArgComplete(alias),
+	})
+
+	runCompletionCmd(t, model, model.openSlashArgPicker("model"))
+	runCompletionCmd(t, model, model.applySlashArgCompletion())
+	if got := string(model.input); got != "/model "+alias+" " {
+		t.Fatalf("input after model alias = %q, want alias plus trailing space", got)
+	}
+	if got := model.slashArgCommand; got != "model "+alias {
+		t.Fatalf("slashArgCommand = %q, want effort picker command", got)
+	}
+	if len(model.slashArgCandidates) != 2 || model.slashArgCandidates[1].Value != "high" {
+		t.Fatalf("effort candidates = %#v, want none/high", model.slashArgCandidates)
+	}
+
+	model.slashArgIndex = 1
+	runCompletionCmd(t, model, model.applySlashArgCompletion())
+	if got := string(model.input); got != "/model "+alias+" high " {
+		t.Fatalf("input after effort selection = %q, want high plus trailing space", got)
+	}
+	if got := model.slashArgCommand; got != "model "+alias+" high" {
+		t.Fatalf("slashArgCommand = %q, want speed picker command", got)
+	}
+	if got := candidateValuesForTUITest(model.slashArgCandidates); strings.Join(got, ",") != "default,fast" {
+		t.Fatalf("speed candidates = %#v, want default/fast", model.slashArgCandidates)
+	}
+
+	runCompletionCmd(t, model, model.applySlashArgCompletion())
+	if got := string(model.input); got != "/model "+alias+" high" {
+		t.Fatalf("input after default speed = %q, want no speed token", got)
+	}
+	if model.slashArgActive {
+		t.Fatal("default speed tab should close the picker without submitting")
+	}
+}
+
+func TestModelSelectionSkipsSpeedPickerWithoutSpeedModes(t *testing.T) {
+	const alias = "ollama/llama3"
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
-				return []SlashArgCandidate{{Value: "deepseek/deepseek-v4-pro", Display: "deepseek/deepseek-v4-pro"}}, nil
-			case "model use deepseek/deepseek-v4-pro":
-				return []SlashArgCandidate{{Value: "none", Display: "none"}, {Value: "high", Display: "high"}}, nil
+				return []SlashArgCandidate{{Value: alias, Display: alias}}, nil
+			case "model " + alias:
+				return []SlashArgCandidate{{Value: "none", Display: "none"}}, nil
 			default:
 				return nil, nil
 			}
@@ -417,30 +459,85 @@ func TestModelUseSelectionOpensReasoningPicker(t *testing.T) {
 
 	runCompletionCmd(t, model, model.openSlashArgPicker("model"))
 	runCompletionCmd(t, model, model.applySlashArgCompletion())
-	if got := string(model.input); got != "/model use deepseek/deepseek-v4-pro " {
-		t.Fatalf("input after model alias = %q, want alias plus trailing space", got)
-	}
-	if got := model.slashArgCommand; got != "model use deepseek/deepseek-v4-pro" {
-		t.Fatalf("slashArgCommand = %q, want reasoning picker command", got)
-	}
-	if len(model.slashArgCandidates) != 2 || model.slashArgCandidates[1].Value != "high" {
-		t.Fatalf("reasoning candidates = %#v, want none/high", model.slashArgCandidates)
-	}
-	model.slashArgIndex = 1
 	runCompletionCmd(t, model, model.applySlashArgCompletion())
-	if got := string(model.input); got != "/model use deepseek/deepseek-v4-pro high" {
-		t.Fatalf("input after reasoning selection = %q, want high reasoning", got)
+
+	if got := string(model.input); got != "/model "+alias+" none " {
+		t.Fatalf("input after effort selection = %q, want complete model command", got)
+	}
+	if len(model.slashArgCandidates) != 0 || model.completionOverlayActive() {
+		t.Fatalf("unsupported speed picker candidates = %#v, active=%v", model.slashArgCandidates, model.completionOverlayActive())
 	}
 }
 
-func TestModelUseExactAliasInputOpensReasoningPicker(t *testing.T) {
+func TestModelSpeedDefaultSelectionSubmitsWithoutToken(t *testing.T) {
+	const alias = "deepseek/deepseek-v4-pro"
+	var submitted string
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			submitted = submission.Text
+			return TaskResultMsg{SuppressTurnDivider: true}
+		},
+		SlashArgComplete: modelSwitchSlashArgComplete(alias),
+	})
+
+	runCompletionCmd(t, model, model.openSlashArgPicker("model"))
+	runCompletionCmd(t, model, model.applySlashArgCompletion())
+	model.slashArgIndex = 1
+	runCompletionCmd(t, model, model.applySlashArgCompletion())
+
+	handled, cmd := model.handleSlashArgKey(keyPress("enter"))
+	if !handled {
+		t.Fatal("handleSlashArgKey(enter default) = false, want true")
+	}
+	if cmd == nil {
+		t.Fatal("handleSlashArgKey(enter default) command = nil, want submit command")
+	}
+	findAndRunTaskResult(cmd(), model)
+	if submitted != "/model "+alias+" high" {
+		t.Fatalf("submitted input = %q, want /model %s high without a speed token", submitted, alias)
+	}
+}
+
+func TestModelSpeedFastSelectionAppendsFast(t *testing.T) {
+	const alias = "deepseek/deepseek-v4-pro"
+	var submitted string
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			submitted = submission.Text
+			return TaskResultMsg{SuppressTurnDivider: true}
+		},
+		SlashArgComplete: modelSwitchSlashArgComplete(alias),
+	})
+
+	runCompletionCmd(t, model, model.openSlashArgPicker("model"))
+	runCompletionCmd(t, model, model.applySlashArgCompletion())
+	model.slashArgIndex = 1
+	runCompletionCmd(t, model, model.applySlashArgCompletion())
+	model.slashArgIndex = 1
+
+	handled, cmd := model.handleSlashArgKey(keyPress("enter"))
+	if !handled {
+		t.Fatal("handleSlashArgKey(enter fast) = false, want true")
+	}
+	if cmd == nil {
+		t.Fatal("handleSlashArgKey(enter fast) command = nil, want submit command")
+	}
+	findAndRunTaskResult(cmd(), model)
+	if submitted != "/model "+alias+" high fast" {
+		t.Fatalf("submitted input = %q, want /model %s high fast", submitted, alias)
+	}
+}
+
+func TestModelExactAliasInputOpensEffortPicker(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
 		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "model use":
+			case "model":
 				return []SlashArgCandidate{{Value: "gpt-5.5", Display: "GPT-5.5"}}, nil
-			case "model use gpt-5.5":
+			case "model gpt-5.5":
 				return []SlashArgCandidate{{Value: "high", Display: "High"}, {Value: "xhigh", Display: "Xhigh"}}, nil
 			default:
 				return nil, nil
@@ -448,15 +545,46 @@ func TestModelUseExactAliasInputOpensReasoningPicker(t *testing.T) {
 		},
 	})
 
-	model.setInputText("/model use gpt-5.5")
+	model.setInputText("/model gpt-5.5")
 	model.syncTextareaFromInput()
 	syncSlashInputOverlaysForTest(t, model)
 
-	if got := model.slashArgCommand; got != "model use gpt-5.5" {
-		t.Fatalf("slashArgCommand = %q, want reasoning picker command", got)
+	if got := model.slashArgCommand; got != "model gpt-5.5" {
+		t.Fatalf("slashArgCommand = %q, want effort picker command", got)
 	}
 	if len(model.slashArgCandidates) != 2 || model.slashArgCandidates[1].Value != "xhigh" {
-		t.Fatalf("reasoning candidates = %#v, want high/xhigh", model.slashArgCandidates)
+		t.Fatalf("effort candidates = %#v, want high/xhigh", model.slashArgCandidates)
+	}
+}
+
+func TestModelExactEffortInputOpensSpeedPicker(t *testing.T) {
+	model := NewModel(Config{
+		Commands:         DefaultCommands(),
+		SlashArgComplete: modelSwitchSlashArgComplete("gpt-5.5"),
+	})
+
+	model.setInputText("/model gpt-5.5 high")
+	model.syncTextareaFromInput()
+	syncSlashInputOverlaysForTest(t, model)
+
+	if got := model.slashArgCommand; got != "model gpt-5.5 high" {
+		t.Fatalf("slashArgCommand = %q, want speed picker command", got)
+	}
+	if got := candidateValuesForTUITest(model.slashArgCandidates); strings.Join(got, ",") != "default,fast" {
+		t.Fatalf("speed candidates = %#v, want default/fast", model.slashArgCandidates)
+	}
+}
+
+func TestSuggestedSlashArgInputOmitsDefaultSpeedToken(t *testing.T) {
+	model := NewModel(Config{Commands: DefaultCommands()})
+	model.slashArgActive = true
+	model.slashArgCommand = "model gpt-5.5 high"
+
+	if got := model.suggestedSlashArgInput("default"); got != "/model gpt-5.5 high" {
+		t.Fatalf("suggested default speed = %q, want command without a speed token", got)
+	}
+	if got := model.suggestedSlashArgInput("fast"); got != "/model gpt-5.5 high fast" {
+		t.Fatalf("suggested fast speed = %q, want fast appended", got)
 	}
 }
 
@@ -469,11 +597,11 @@ func TestDestructiveSlashArgEnterCompletesBeforeSubmit(t *testing.T) {
 		wantInput string
 	}{
 		{
-			name:      "model delete",
-			command:   "model del",
-			input:     "/model del ",
-			candidate: "stale-model",
-			wantInput: "/model del stale-model ",
+			name:      "plugin remove",
+			command:   "plugin rm",
+			input:     "/plugin rm ",
+			candidate: "stale-plugin",
+			wantInput: "/plugin rm stale-plugin",
 		},
 	}
 	for _, tt := range tests {
@@ -957,21 +1085,21 @@ func TestDestructiveSlashArgEnterWaitsForCurrentCompletion(t *testing.T) {
 			return TaskResultMsg{}
 		},
 		SlashArgComplete: func(ctx context.Context, command string, query string, _ int) ([]SlashArgCandidate, error) {
-			if command != "model del" || query != "stale-model" {
-				t.Errorf("SlashArgComplete(%q, %q), want model del stale-model", command, query)
+			if command != "plugin rm" || query != "stale-plugin" {
+				t.Errorf("SlashArgComplete(%q, %q), want plugin rm stale-plugin", command, query)
 			}
 			close(started)
 			select {
 			case <-release:
-				return []SlashArgCandidate{{Value: "stale-model", Display: "stale-model"}}, nil
+				return []SlashArgCandidate{{Value: "stale-plugin", Display: "stale-plugin"}}, nil
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
 		},
 	})
 	model.slashArgActive = true
-	model.slashArgCommand = "model del"
-	model.setInputText("/model del stale-model")
+	model.slashArgCommand = "plugin rm"
+	model.setInputText("/plugin rm stale-plugin")
 	model.syncTextareaFromInput()
 
 	_, cmd := model.handleKey(keyPress("enter"))
@@ -1004,8 +1132,8 @@ func TestDestructiveSlashArgEnterWaitsForCurrentCompletion(t *testing.T) {
 	if submitCmd == nil || !findAndRunTaskResult(submitCmd(), model) {
 		t.Fatal("validated destructive selection did not submit")
 	}
-	if !reflect.DeepEqual(submitted, []string{"/model del stale-model"}) {
-		t.Fatalf("submitted = %#v, want validated model deletion", submitted)
+	if !reflect.DeepEqual(submitted, []string{"/plugin rm stale-plugin"}) {
+		t.Fatalf("submitted = %#v, want validated plugin removal", submitted)
 	}
 }
 
@@ -1411,7 +1539,7 @@ func TestModelPrefixTypingOpensMatchingReasoningPicker(t *testing.T) {
 					{Value: "user/model", Display: "user/model"},
 					{Value: "deepseek/model", Display: "deepseek/model"},
 				}, nil
-			case "model use deepseek/model":
+			case "model deepseek/model":
 				return []SlashArgCandidate{
 					{Value: "none", Display: "none"},
 				}, nil
@@ -1439,11 +1567,11 @@ func TestModelPrefixTypingOpensMatchingReasoningPicker(t *testing.T) {
 	if cmd != nil {
 		cmd()
 	}
-	if got := string(model.input); got != "/model use deepseek/model " {
+	if got := string(model.input); got != "/model deepseek/model " {
 		t.Fatalf("input after /model de enter = %q, want model selection", got)
 	}
-	if got := model.slashArgCommand; got != "model use deepseek/model" {
-		t.Fatalf("slashArgCommand after /model de enter = %q, want reasoning picker", got)
+	if got := model.slashArgCommand; got != "model deepseek/model" {
+		t.Fatalf("slashArgCommand after /model de enter = %q, want effort picker", got)
 	}
 }
 
@@ -1849,7 +1977,7 @@ func TestSlashCompletionRendersDescriptionsWithoutHeaderOrBorder(t *testing.T) {
 	if strings.ContainsAny(rendered, "┌┐└┘│─") || strings.ContainsAny(rendered, "╭╮╰╯│─") {
 		t.Fatalf("renderSlashCommandList() = %q, should not show borders", rendered)
 	}
-	for _, want := range []string{"/model", "Choose the model for the current or next session", "/status", "Show current provider"} {
+	for _, want := range []string{"/model", "Choose the model, effort", "/status", "Show current provider"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("renderSlashCommandList() = %q, want %q", rendered, want)
 		}
@@ -1919,13 +2047,13 @@ func TestWizardSuppressesRootSlashCompletion(t *testing.T) {
 	}
 }
 
-func TestModelUseCompletionUsesWideDisplayForLongAliases(t *testing.T) {
+func TestModelCompletionUsesWideDisplayForLongAliases(t *testing.T) {
 	const alias = "openai-compatible/team-platform-evaluation-gpt-5.5-coding-preview-with-extended-context-and-tool-router"
 
 	model := NewModel(Config{Commands: DefaultCommands()})
 	model.width = 140
 	model.slashArgActive = true
-	model.slashArgCommand = "model use"
+	model.slashArgCommand = "model"
 	model.slashArgCandidates = []SlashArgCandidate{
 		{Value: alias, Display: alias, Detail: "configured model alias"},
 	}
@@ -1959,7 +2087,7 @@ func TestInputCompletionSelectionsAvoidFocusAccent(t *testing.T) {
 	cases["file"] = model.renderMentionList()
 
 	model.slashArgCandidates = []SlashArgCandidate{
-		{Value: "use", Display: "use", Detail: "switch active model"},
+		{Value: "gpt-5.5", Display: "gpt-5.5", Detail: "configured model alias"},
 	}
 	model.slashArgIndex = 0
 	model.slashArgActive = true

@@ -8,6 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -113,7 +114,10 @@ func (r *sessionModelRecovery) repairMissingSessionModelSelection(
 		}
 		currentConfig, currentConfigured := catalog.Config(currentModel)
 		currentEffort := modelcatalog.NormalizeReasoningEffort(kernel.CurrentReasoningEffort(state))
-		if currentConfigured && (currentEffort == "" || modelConfigSupportsReasoningEffort(currentConfig, currentEffort)) {
+		currentFastMode, fastModePresent := kernel.CurrentModelFastMode(state)
+		if currentConfigured && fastModePresent &&
+			(currentEffort == "" || modelConfigSupportsReasoningEffort(currentConfig, currentEffort)) &&
+			(!currentFastMode || modelconfig.SupportsSpeedMode(currentConfig, "fast")) {
 			return active, nil
 		}
 
@@ -140,9 +144,11 @@ func (r *sessionModelRecovery) repairMissingSessionModelSelection(
 				if !hasFallback {
 					delete(next, kernel.StateCurrentModelAlias)
 					delete(next, kernel.StateCurrentReasoningEffort)
+					delete(next, kernel.StateCurrentModelFastMode)
 					return next, nil
 				}
 				next[kernel.StateCurrentModelAlias] = fallback.ID
+				next[kernel.StateCurrentModelFastMode] = false
 				if currentEffort == "" || !modelConfigSupportsReasoningEffort(fallback, currentEffort) {
 					delete(next, kernel.StateCurrentReasoningEffort)
 				} else {

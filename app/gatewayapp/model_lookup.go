@@ -24,6 +24,7 @@ type modelLookup struct {
 	contextWindow              int
 	defaultID                  string
 	defaultEffort              string
+	defaultFastMode            bool
 	resolveHTTPClient          func(context.Context, ModelConfig) (*http.Client, error)
 	resolveTransportHTTPClient func(context.Context, ModelConfig) (*http.Client, error)
 	resolveAPIKey              func(context.Context, string) (string, error)
@@ -64,7 +65,7 @@ func newModelLookupFromDocument(doc AppConfig, contextWindow int) (*modelLookup,
 	}
 	defaults := modelprofile.NormalizeConfiguration(doc.ModelProfiles)
 	if profile, ok := modelprofile.Lookup(defaults, defaults.DefaultProfileID); ok && profile.Backend.Provider != nil {
-		lookup.SetDefault(profile.Backend.Provider.ModelConfigID, defaults.DefaultEffort)
+		lookup.SetDefaultWithFastMode(profile.Backend.Provider.ModelConfigID, defaults.DefaultEffort, defaults.DefaultFastMode)
 	}
 	return lookup, nil
 }
@@ -98,6 +99,15 @@ func (l *modelLookup) DefaultEffort() string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.defaultEffort
+}
+
+func (l *modelLookup) DefaultFastMode() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.defaultFastMode
 }
 
 func (l *modelLookup) ListModelAliases() []string {
@@ -167,6 +177,7 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 	fallbackContextWindow := l.contextWindow
 	defaultID := l.defaultID
 	defaultEffort := l.defaultEffort
+	defaultFastMode := l.defaultFastMode
 	l.mu.RUnlock()
 	if resolveErr != nil {
 		return kernelimpl.ModelResolution{}, resolveErr
@@ -177,7 +188,12 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 	if strings.EqualFold(cfg.ID, defaultID) && defaultEffort != "" {
 		cfg.ReasoningEffort = defaultEffort
 	}
-	return resolveModelFromConfig(ctx, cfg, fallbackContextWindow, contextWindow, l.resolveHTTPClient, l.resolveTransportHTTPClient, l.resolveAPIKey)
+	resolution, err := resolveModelFromConfig(ctx, cfg, fallbackContextWindow, contextWindow, l.resolveHTTPClient, l.resolveTransportHTTPClient, l.resolveAPIKey)
+	if err != nil {
+		return kernelimpl.ModelResolution{}, err
+	}
+	resolution.FastMode = strings.EqualFold(cfg.ID, defaultID) && defaultFastMode
+	return resolution, nil
 }
 
 func (l *modelLookup) ResolveModelConfig(ctx context.Context, cfg ModelConfig, contextWindow int) (kernelimpl.ModelResolution, error) {
@@ -317,6 +333,7 @@ func (l *modelLookup) upsertLocked(cfg ModelConfig, setDefault bool) (string, er
 	if setDefault {
 		l.defaultID = cfg.ID
 		l.defaultEffort = firstNonEmpty(cfg.ReasoningEffort, cfg.DefaultReasoningEffort, "none")
+		l.defaultFastMode = false
 	}
 	if cfg.ContextWindowTokens > 0 {
 		l.contextWindow = cfg.ContextWindowTokens
@@ -384,6 +401,7 @@ func (l *modelLookup) Delete(alias string) error {
 	if strings.EqualFold(l.defaultID, cfg.ID) {
 		l.defaultID = ""
 		l.defaultEffort = ""
+		l.defaultFastMode = false
 		ids := make([]string, 0, len(l.configs))
 		for id := range l.configs {
 			ids = append(ids, id)
@@ -397,6 +415,14 @@ func (l *modelLookup) Delete(alias string) error {
 }
 
 func (l *modelLookup) SetDefault(alias string, effort ...string) {
+	selectedEffort := ""
+	if len(effort) > 0 {
+		selectedEffort = effort[0]
+	}
+	l.SetDefaultWithFastMode(alias, selectedEffort, false)
+}
+
+func (l *modelLookup) SetDefaultWithFastMode(alias string, effort string, fastMode bool) {
 	if l == nil {
 		return
 	}
@@ -408,10 +434,8 @@ func (l *modelLookup) SetDefault(alias string, effort ...string) {
 	defer l.mu.Unlock()
 	if cfg, ok, err := l.resolveConfigLocked(alias); err == nil && ok {
 		l.defaultID = cfg.ID
-		l.defaultEffort = ""
-		if len(effort) > 0 {
-			l.defaultEffort = strings.ToLower(strings.TrimSpace(effort[0]))
-		}
+		l.defaultEffort = strings.ToLower(strings.TrimSpace(effort))
+		l.defaultFastMode = fastMode
 		if l.defaultEffort == "" {
 			l.defaultEffort = firstNonEmpty(cfg.ReasoningEffort, cfg.DefaultReasoningEffort, "none")
 		}
@@ -453,6 +477,7 @@ func (l *modelLookup) snapshotLocked() persistedModelConfig {
 		DefaultAlias:      defaultAlias,
 		DefaultID:         l.defaultID,
 		DefaultEffort:     l.defaultEffort,
+		DefaultFastMode:   l.defaultFastMode,
 		ProviderEndpoints: endpoints,
 		Configs:           configs,
 	}
@@ -484,6 +509,7 @@ func (l *modelLookup) restoreLocked(snapshot persistedModelConfig, contextWindow
 	}
 	l.defaultID = strings.TrimSpace(snapshot.DefaultID)
 	l.defaultEffort = strings.ToLower(strings.TrimSpace(snapshot.DefaultEffort))
+	l.defaultFastMode = snapshot.DefaultFastMode
 	l.contextWindow = contextWindow
 	if l.defaultID == "" && strings.TrimSpace(snapshot.DefaultAlias) != "" {
 		if cfg, ok, err := l.resolveConfigLocked(snapshot.DefaultAlias); err == nil && ok {

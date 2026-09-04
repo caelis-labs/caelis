@@ -48,7 +48,6 @@ type toolPanelRenderRequest struct {
 }
 
 const (
-	acpToolInlineArgsMaxWidth  = 72
 	acpToolDetailPreviewBudget = 4
 	acpTerminalPanelMaxLines   = 5
 )
@@ -1068,7 +1067,7 @@ func compactACPToolInline(text string, width int) string {
 	if text == "" {
 		return ""
 	}
-	budget := minInt(acpToolInlineArgsMaxWidth, maxInt(16, width-12))
+	budget := compactSingleLineBudget(width)
 	if displayColumns(text) <= budget {
 		return text
 	}

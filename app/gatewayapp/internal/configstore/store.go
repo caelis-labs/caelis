@@ -62,6 +62,7 @@ type PersistedModelConfig struct {
 	DefaultAlias      string                               `json:"default_alias,omitempty"`
 	DefaultID         string                               `json:"default_model_id,omitempty"`
 	DefaultEffort     string                               `json:"-"`
+	DefaultFastMode   bool                                 `json:"-"`
 	ProviderEndpoints []modelconfig.ProviderEndpointConfig `json:"provider_endpoints,omitempty"`
 	Configs           []modelconfig.Config                 `json:"configs,omitempty"`
 }

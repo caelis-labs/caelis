@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -138,6 +139,9 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 		return sessionCommandResult(active), sessionConfigurationConflict(err)
 	}
 	if req.Clear {
+		if strings.TrimSpace(req.Model) != "" || strings.TrimSpace(req.ReasoningEffort) != "" || req.FastMode {
+			return sessionCommandResult(active), sessionConfigurationRejected("cleared Session model request must not include model settings")
+		}
 		if active.Controller.Kind == session.ControllerKindACP {
 			return sessionCommandResult(active), sessionConfigurationRejected("external ACP controller model cannot be cleared locally")
 		}
@@ -148,6 +152,7 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 			}
 			delete(next, kernel.StateCurrentModelAlias)
 			delete(next, kernel.StateCurrentReasoningEffort)
+			delete(next, kernel.StateCurrentModelFastMode)
 			return next, nil
 		})
 		return sessionCommandResult(updated), classifyControlBackendError(clearErr)
@@ -159,12 +164,18 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 	if found {
 		switch selected.Profile.Kind() {
 		case modelprofile.BackendACP:
+			if req.FastMode {
+				return sessionCommandResult(active), sessionConfigurationRejected(fmt.Sprintf("model profile %q does not support fast mode", selected.Profile.ID))
+			}
 			return s.configureSessionACPProfile(ctx, active, selected)
 		case modelprofile.BackendProvider:
-			return s.configureSessionProviderProfile(ctx, active, selected)
+			return s.configureSessionProviderProfile(ctx, active, selected, req.FastMode)
 		}
 	}
 	if active.Controller.Kind == session.ControllerKindACP && active.Controller.Placement.Kind == "" {
+		if req.FastMode {
+			return sessionCommandResult(active), sessionConfigurationRejected("external ACP controller model does not support fast mode")
+		}
 		// Compatibility for pre-ModelProfile ACP bindings. New product-owned ACP
 		// controllers always switch through a frozen profile placement.
 		return s.configureACPControllerModel(ctx, active, req)
@@ -176,6 +187,7 @@ func (s *runtimeComposition) configureSessionProviderProfile(
 	ctx context.Context,
 	active session.Session,
 	selected resolvedSessionModelProfile,
+	fastMode bool,
 ) (appserver.CommandResult, error) {
 	var err error
 	configured := selected.Config
@@ -189,6 +201,9 @@ func (s *runtimeComposition) configureSessionProviderProfile(
 	reasoning := modelcatalog.NormalizeReasoningEffort(selected.Effort)
 	if reasoning != "" && !modelConfigSupportsReasoningEffort(configured, reasoning) {
 		return sessionCommandResult(active), sessionConfigurationRejected(fmt.Sprintf("model %q does not support reasoning effort %q", configured.ID, reasoning))
+	}
+	if fastMode && !modelconfig.SupportsSpeedMode(configured, "fast") {
+		return sessionCommandResult(active), sessionConfigurationRejected(fmt.Sprintf("model %q does not support fast mode", configured.ID))
 	}
 	// The App catalog decides whether a model may be selected. Once accepted,
 	// install its hydrated configuration and matching placement profile into
@@ -207,6 +222,7 @@ func (s *runtimeComposition) configureSessionProviderProfile(
 			next = map[string]any{}
 		}
 		next[kernel.StateCurrentModelAlias] = configured.ID
+		next[kernel.StateCurrentModelFastMode] = fastMode
 		if reasoning == "" {
 			delete(next, kernel.StateCurrentReasoningEffort)
 		} else {
@@ -272,6 +288,7 @@ func (s *runtimeComposition) configureSessionACPProfile(
 			}
 			delete(next, kernel.StateCurrentModelAlias)
 			delete(next, kernel.StateCurrentReasoningEffort)
+			delete(next, kernel.StateCurrentModelFastMode)
 			delete(next, stateControllerConfigModel)
 			delete(next, stateControllerConfigReasoning)
 			delete(next, stateControllerConfigMode)

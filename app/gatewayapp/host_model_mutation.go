@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
@@ -86,7 +87,7 @@ func (s *controlCommandBackend) connectModelsAtRevision(ctx context.Context, con
 		if err != nil {
 			return result, fmt.Errorf("gatewayapp: select default model profile: %w", err)
 		}
-		candidate.SetDefault(modelIDs[0], doc.ModelProfiles.DefaultEffort)
+		candidate.SetDefaultWithFastMode(modelIDs[0], doc.ModelProfiles.DefaultEffort, doc.ModelProfiles.DefaultFastMode)
 	}
 	doc.Models = candidate.Snapshot()
 
@@ -117,7 +118,7 @@ func (s *controlCommandBackend) connectModelsAtRevision(ctx context.Context, con
 	return result, nil
 }
 
-func (s *controlCommandBackend) useHostModelAtRevision(ctx context.Context, alias string, reasoningEffort string, expected *uint64) (result hostModelMutationResult, returnErr error) {
+func (s *controlCommandBackend) useHostModelAtRevision(ctx context.Context, alias string, reasoningEffort string, fastMode bool, expected *uint64) (result hostModelMutationResult, returnErr error) {
 	if s == nil {
 		return result, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -149,7 +150,16 @@ func (s *controlCommandBackend) useHostModelAtRevision(ctx context.Context, alia
 	if !profile.SupportsEffort(reasoning) {
 		return result, errorcode.New(errorcode.InvalidArgument, fmt.Sprintf("gatewayapp: model profile %q does not support reasoning level %q", profile.ID, reasoning))
 	}
-	doc.ModelProfiles, err = modelprofile.SelectDefault(doc.ModelProfiles, profile.ID, reasoning)
+	if fastMode {
+		if profile.Kind() != modelprofile.BackendProvider || profile.Backend.Provider == nil {
+			return result, errorcode.New(errorcode.InvalidArgument, fmt.Sprintf("gatewayapp: model profile %q does not support fast mode", profile.ID))
+		}
+		configured, ok := candidate.Config(profile.Backend.Provider.ModelConfigID)
+		if !ok || !modelconfig.SupportsSpeedMode(configured, "fast") {
+			return result, errorcode.New(errorcode.InvalidArgument, fmt.Sprintf("gatewayapp: model profile %q does not support fast mode", profile.ID))
+		}
+	}
+	doc.ModelProfiles, err = modelprofile.SelectDefaultWithFastMode(doc.ModelProfiles, profile.ID, reasoning, fastMode)
 	if err != nil {
 		return result, err
 	}
@@ -206,7 +216,7 @@ func (s *controlCommandBackend) deleteHostModelAtRevision(ctx context.Context, a
 		}
 	}
 	if candidate.DefaultID() != "" {
-		candidate.SetDefault(candidate.DefaultID(), doc.ModelProfiles.DefaultEffort)
+		candidate.SetDefaultWithFastMode(candidate.DefaultID(), doc.ModelProfiles.DefaultEffort, doc.ModelProfiles.DefaultFastMode)
 	}
 	doc.Models = candidate.Snapshot()
 
@@ -505,11 +515,13 @@ func (s *runtimeComposition) applyDeletedModelProfile(ctx context.Context, doc A
 	snapshot.DefaultAlias = ""
 	snapshot.DefaultID = ""
 	snapshot.DefaultEffort = ""
+	snapshot.DefaultFastMode = false
 	for _, configured := range snapshot.Configs {
 		if strings.EqualFold(strings.TrimSpace(configured.ID), canonicalDefault) {
 			snapshot.DefaultID = configured.ID
 			snapshot.DefaultAlias = configured.Alias
 			snapshot.DefaultEffort = canonical.DefaultEffort()
+			snapshot.DefaultFastMode = canonical.DefaultFastMode()
 			break
 		}
 	}
@@ -531,8 +543,14 @@ func (s *runtimeComposition) applyDeletedModelProfile(ctx context.Context, doc A
 		s.activeRuntime.ModelProfileID = modelprofile.BuildProviderID(configured.ID)
 		if !profileConfigured {
 			s.activeRuntime.ModelProfileEffort = s.lookup.DefaultEffort()
-		} else if effort := modelcatalog.NormalizeReasoningEffort(s.activeRuntime.ModelProfileEffort); effort != "" && !modelConfigSupportsReasoningEffort(configured, effort) {
-			s.activeRuntime.ModelProfileEffort = ""
+			s.activeRuntime.ModelFastMode = s.lookup.DefaultFastMode()
+		} else {
+			if effort := modelcatalog.NormalizeReasoningEffort(s.activeRuntime.ModelProfileEffort); effort != "" && !modelConfigSupportsReasoningEffort(configured, effort) {
+				s.activeRuntime.ModelProfileEffort = ""
+			}
+			if !modelconfig.SupportsSpeedMode(configured, "fast") {
+				s.activeRuntime.ModelFastMode = false
+			}
 		}
 	}
 	gateway := s.gateway

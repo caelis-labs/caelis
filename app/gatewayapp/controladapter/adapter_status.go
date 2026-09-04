@@ -33,6 +33,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 	}
 	modelText, sessionMode, sandboxType := d.defaultDisplays()
 	reasoningEffort := ""
+	fastMode := false
 	effectiveModelText := ""
 	if d.deps != nil && d.deps.Model.EffectiveAliasFn != nil {
 		if alias := strings.TrimSpace(d.deps.Model.EffectiveAliasFn()); alias != "" {
@@ -42,6 +43,9 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 	}
 	if d.deps != nil && d.deps.Model.EffectiveEffortFn != nil {
 		reasoningEffort = strings.TrimSpace(d.deps.Model.EffectiveEffortFn())
+	}
+	if d.deps != nil && d.deps.Model.EffectiveFastModeFn != nil {
+		fastMode = d.deps.Model.EffectiveFastModeFn()
 	}
 	sandboxStatus := SandboxStatusProjection{}
 	if d.deps != nil && d.deps.Sandbox.StatusFn != nil {
@@ -59,6 +63,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 			if strings.TrimSpace(state.ReasoningEffort) != "" {
 				reasoningEffort = strings.TrimSpace(state.ReasoningEffort)
 			}
+			fastMode = state.FastMode
 			if strings.TrimSpace(state.SessionMode) != "" {
 				sessionMode = strings.TrimSpace(state.SessionMode)
 			}
@@ -81,6 +86,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		acpModelText = acpControllerModelText(acpStatus, activeSession)
 		modelText = acpModelText
 		reasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
+		fastMode = false
 		acpModeID = strings.TrimSpace(acpStatus.Mode)
 		acpModeLabel = acpControllerModeDisplay(acpStatus)
 	}
@@ -139,6 +145,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		ModelStatus: controlstatus.StatusModel{
 			Display:         formatReasoningModelDisplay(rawModelText, reasoningEffort),
 			ReasoningEffort: reasoningEffort,
+			FastMode:        fastMode,
 		},
 		SandboxStatus: controlstatus.StatusSandbox{
 			Type:             firstNonEmpty(sandboxType, liveSandboxType),
@@ -240,6 +247,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		status.ModelStatus.Alias = rawModelText
 		status.ModelStatus.Display = formatReasoningModelDisplay(rawModelText, strings.TrimSpace(acpStatus.ReasoningEffort))
 		status.ModelStatus.ReasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
+		status.ModelStatus.FastMode = false
 		if acpModeID != "" && !processOwnedSessionMode {
 			status.Session.SessionMode = acpModeID
 		}

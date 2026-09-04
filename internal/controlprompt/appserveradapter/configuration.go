@@ -90,7 +90,7 @@ func (a *SessionClientAdapter) Connect(ctx context.Context, config controlprompt
 		if model != "" {
 			// Host connection and Session selection are distinct mutations. The
 			// latter therefore receives its own operation identity and exact CAS.
-			selected, selectionErr := a.useModelForSelectedSession(ctx, selectedSessionID, model, "")
+			selected, selectionErr := a.useModelForSelectedSession(ctx, selectedSessionID, model, "", false)
 			if selectionErr != nil {
 				selectionErr = fmt.Errorf(
 					"app/gatewayapp/controladapter: Host model connection committed as operation %q, but Session selection failed; do not retry the connection blindly: %w",
@@ -117,20 +117,17 @@ func statusHasConfiguredModel(snapshot controlstatus.StatusSnapshot) bool {
 	return strings.TrimSpace(model.Alias) != "" || strings.TrimSpace(model.Name) != "" || strings.TrimSpace(model.Display) != ""
 }
 
-func (a *SessionClientAdapter) UseModel(ctx context.Context, model string, effort ...string) (controlstatus.StatusSnapshot, error) {
+func (a *SessionClientAdapter) UseModel(ctx context.Context, model string, effort string, fastMode bool) (controlstatus.StatusSnapshot, error) {
 	if a == nil || a.configClient == nil || a.statusClient == nil {
 		return controlstatus.StatusSnapshot{}, errors.New("app/gatewayapp/controladapter: configuration client is unavailable")
 	}
-	reasoning := ""
-	if len(effort) > 0 {
-		reasoning = strings.TrimSpace(effort[0])
-	}
+	reasoning := strings.TrimSpace(effort)
 	model = strings.TrimSpace(model)
 
 	// Freeze the presentation Session address while choosing the mutation
-	// scope. With no selected Session, /model use changes the canonical Host
-	// default used by future Sessions. Once a Session is selected, the same
-	// command changes only that Session's model selection.
+	// scope. With no selected Session, /model changes the canonical Host default
+	// used by future Sessions. Once a Session is selected, the same command
+	// changes only that Session's model selection.
 	a.sessionChangeMu.Lock()
 	defer a.sessionChangeMu.Unlock()
 	if a.clientSessionID() == "" {
@@ -144,11 +141,11 @@ func (a *SessionClientAdapter) UseModel(ctx context.Context, model string, effor
 				OperationID:      "model-use-" + uuid.NewString(),
 				ExpectedRevision: &revision,
 			},
-			Model: model, ReasoningEffort: reasoning,
+			Model: model, ReasoningEffort: reasoning, FastMode: fastMode,
 		})
 		return a.observeCommittedHostConfiguration(ctx, "Host default model", result, commandErr)
 	}
-	return a.useModelForSelectedSessionLocked(ctx, a.clientSessionID(), model, reasoning)
+	return a.useModelForSelectedSessionLocked(ctx, a.clientSessionID(), model, reasoning, fastMode)
 }
 
 func (a *SessionClientAdapter) useModelForSelectedSession(
@@ -156,6 +153,7 @@ func (a *SessionClientAdapter) useModelForSelectedSession(
 	selectedSessionID string,
 	model string,
 	reasoning string,
+	fastMode bool,
 ) (controlstatus.StatusSnapshot, error) {
 	a.sessionChangeMu.Lock()
 	defer a.sessionChangeMu.Unlock()
@@ -167,7 +165,7 @@ func (a *SessionClientAdapter) useModelForSelectedSession(
 			currentSessionID,
 		)
 	}
-	return a.useModelForSelectedSessionLocked(ctx, currentSessionID, strings.TrimSpace(model), strings.TrimSpace(reasoning))
+	return a.useModelForSelectedSessionLocked(ctx, currentSessionID, strings.TrimSpace(model), strings.TrimSpace(reasoning), fastMode)
 }
 
 // useModelForSelectedSessionLocked requires sessionChangeMu. It binds the
@@ -178,6 +176,7 @@ func (a *SessionClientAdapter) useModelForSelectedSessionLocked(
 	selectedSessionID string,
 	model string,
 	reasoning string,
+	fastMode bool,
 ) (controlstatus.StatusSnapshot, error) {
 	if a.sessionClient == nil {
 		return controlstatus.StatusSnapshot{}, errors.New("app/gatewayapp/controladapter: Session client is unavailable")
@@ -204,7 +203,7 @@ func (a *SessionClientAdapter) useModelForSelectedSessionLocked(
 			ExpectedRevision:        &revision,
 			ExpectedControllerEpoch: state.Controller.EpochID,
 		},
-		Model: model, ReasoningEffort: reasoning,
+		Model: model, ReasoningEffort: reasoning, FastMode: fastMode,
 	})
 	return a.observeCommittedSessionConfiguration(ctx, "session model", result, err)
 }
@@ -260,7 +259,7 @@ func (a *SessionClientAdapter) DeleteModel(ctx context.Context, model string) er
 		if selectedErr == nil {
 			selectedUsesDeletedModel = statusModelMatches(selected.ModelStatus, selectedModelReference)
 			if !selectedUsesDeletedModel && statusHasConfiguredModel(selected) && a.completionClient != nil {
-				if candidates, completionErr := a.CompleteSlashArg(ctx, "model use", "", 200); completionErr == nil {
+				if candidates, completionErr := a.CompleteSlashArg(ctx, "model", "", 200); completionErr == nil {
 					selectedModelReference, selectedUsesDeletedModel = matchingStatusModelReference(
 						selected.ModelStatus,
 						selectedModelReference,
@@ -296,9 +295,9 @@ func (a *SessionClientAdapter) DeleteModel(ctx context.Context, model string) er
 	if !statusModelMatches(selected.ModelStatus, selectedModelReference) {
 		return nil
 	}
-	candidates, selectionErr := a.CompleteSlashArg(ctx, "model use", "", 1)
+	candidates, selectionErr := a.CompleteSlashArg(ctx, "model", "", 1)
 	if selectionErr == nil && len(candidates) > 0 {
-		_, selectionErr = a.useModelForSelectedSession(ctx, selectedSessionID, candidates[0].Value, "")
+		_, selectionErr = a.useModelForSelectedSession(ctx, selectedSessionID, candidates[0].Value, "", false)
 	} else if selectionErr == nil {
 		_, selectionErr = a.clearModelForSelectedSession(ctx, selectedSessionID)
 	}

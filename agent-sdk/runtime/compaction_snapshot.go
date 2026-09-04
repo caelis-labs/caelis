@@ -46,7 +46,7 @@ func (r *Runtime) completeCompactionRequest(ref session.SessionRef, llm model.LL
 	r.trimCompactionRequestsLocked()
 }
 
-func (r *Runtime) inContextRequest(ref session.SessionRef, llm model.LLM, events []*session.Event) *model.Request {
+func (r *Runtime) inContextRequest(ref session.SessionRef, llm model.LLM, events []*session.Event, serviceTier model.ServiceTier) *model.Request {
 	if r == nil || llm == nil {
 		return nil
 	}
@@ -59,7 +59,9 @@ func (r *Runtime) inContextRequest(ref session.SessionRef, llm model.LLM, events
 	if snapshot.throughSeq != session.LastEventSeq(mainInvocationEvents(events)) {
 		return nil
 	}
-	return model.CloneRequest(snapshot.request)
+	request := model.CloneRequest(snapshot.request)
+	request.ServiceTier = serviceTier
+	return request
 }
 
 func (r *Runtime) advanceCompactionRequest(ref session.SessionRef, throughSeq uint64) {
