@@ -140,12 +140,14 @@ func (d *assembler) CompleteSlashArg(ctx context.Context, command string, query 
 	command = strings.TrimSpace(command)
 	normalizedCommand := strings.ToLower(command)
 	switch normalizedCommand {
-	case "model", "disconnect-provider":
+	case "model":
 		return d.completeModelAliases(ctx, query, limit)
+	case "disconnect-provider":
+		return d.completeDisconnectProviderModels(ctx, query, limit)
 	case "disconnect":
 		return filterSlashCandidates([]controlprompt.SlashArgCandidate{
-			{Value: "provider", Display: "Provider", Detail: "Disconnect a configured provider model"},
-			{Value: "acp", Display: "ACP Agent", Detail: "Disconnect a local ACP Agent"},
+			{Value: "provider", Display: "Provider", Detail: "Disconnect configured provider models"},
+			{Value: "acp", Display: "ACP Agent", Detail: "Disconnect local ACP Agents"},
 		}, query, limit), nil
 	case "disconnect-acp":
 		return completeConnectDisconnectAgents(ctx, d, query, limit)
@@ -430,6 +432,10 @@ func (d *assembler) completeModelAliases(ctx context.Context, query string, limi
 	if err != nil {
 		return nil, err
 	}
+	return modelChoiceCandidates(choices, query, limit), nil
+}
+
+func modelChoiceCandidates(choices []ModelChoice, query string, limit int) []controlprompt.SlashArgCandidate {
 	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(choices)))
 	for _, choice := range choices {
 		value := strings.TrimSpace(firstNonEmpty(choice.ID, choice.Alias))
@@ -449,7 +455,7 @@ func (d *assembler) completeModelAliases(ctx context.Context, query string, limi
 			break
 		}
 	}
-	return out, nil
+	return out
 }
 
 func (d *assembler) agentCatalog(limit int) []controlprompt.AgentCandidate {

@@ -7,9 +7,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 )
@@ -288,9 +290,30 @@ func completeConnectModels(ctx context.Context, driver *assembler, payload conne
 	if err != nil {
 		return nil, err
 	}
+	connected := map[string]bool{}
+	if driver != nil && driver.deps != nil && driver.deps.Model.ListChoicesFn != nil {
+		// Connect adds models. Read the current Host catalog without a Session
+		// override, and omit existing models only on the selected endpoint.
+		configured, err := driver.deps.Model.ListChoicesFn(ctx, session.SessionRef{})
+		if err != nil {
+			return nil, err
+		}
+		endpointID := modelconfig.NormalizeEndpointID(template.Provider, "", firstNonEmpty(payload.BaseURL, template.DefaultBaseURL), template.API)
+		for _, choice := range configured {
+			if choice.Backend == string(modelprofile.BackendACP) ||
+				!strings.EqualFold(strings.TrimSpace(choice.Provider), template.Provider) ||
+				modelconfig.NormalizeEndpointID(choice.Provider, choice.EndpointID, choice.BaseURL, "") != endpointID {
+				continue
+			}
+			connected[strings.ToLower(strings.TrimSpace(choice.Model))] = true
+		}
+	}
 	choices := buildConnectModelChoices(template.Provider, models)
 	out := make([]controlprompt.SlashArgCandidate, 0, len(choices))
 	for _, choice := range choices {
+		if connected[strings.ToLower(choice.Name)] {
+			continue
+		}
 		if query != "" && !strings.Contains(strings.ToLower(choice.Name+" "+choice.Display+" "+choice.Detail), strings.ToLower(strings.TrimSpace(query))) {
 			continue
 		}

@@ -78,7 +78,12 @@ func (*interruptBridgeStub) Connect(context.Context, controlprompt.ConnectConfig
 func (*interruptBridgeStub) UseModel(context.Context, string, string, bool) (controlstatus.StatusSnapshot, error) {
 	return controlstatus.StatusSnapshot{}, nil
 }
-func (*interruptBridgeStub) DeleteModel(context.Context, string) error { return nil }
+func (*interruptBridgeStub) DeleteModels(context.Context, []string) ([]string, error) {
+	return nil, nil
+}
+func (*interruptBridgeStub) DisconnectACPAgents(context.Context, []string) ([]string, error) {
+	return nil, nil
+}
 func (*interruptBridgeStub) SetSandboxBackend(context.Context, string) (controlstatus.StatusSnapshot, error) {
 	return controlstatus.StatusSnapshot{}, nil
 }

@@ -396,8 +396,8 @@ func disconnectProviderWizard() WizardDef {
 	return WizardDef{
 		Command: "disconnect", DisplayLine: "/disconnect",
 		Steps: []WizardStepDef{{
-			Key: "provider_model", HintLabel: "/disconnect provider",
-			FreeformHint: "/disconnect provider: choose a configured provider model", RequireCandidate: true,
+			Key: "provider_model", HintLabel: "/disconnect provider", MultiSelect: true,
+			FreeformHint: "/disconnect provider: select configured models, then press enter to disconnect", RequireCandidate: true,
 			CompletionCommand: func(map[string]string) string { return "disconnect-provider" },
 		}},
 		BuildExecLine: func(state map[string]string) string {
@@ -410,8 +410,8 @@ func disconnectACPWizard() WizardDef {
 	return WizardDef{
 		Command: "disconnect", DisplayLine: "/disconnect",
 		Steps: []WizardStepDef{{
-			Key: "disconnect_agent", HintLabel: "/disconnect ACP Agent",
-			FreeformHint: "/disconnect ACP Agent: choose a connected local ACP Agent", RequireCandidate: true,
+			Key: "disconnect_agent", HintLabel: "/disconnect ACP Agent", MultiSelect: true,
+			FreeformHint: "/disconnect ACP Agent: select connected Agents, then press enter to disconnect", RequireCandidate: true,
 			CompletionCommand: func(map[string]string) string { return "disconnect-acp" },
 		}},
 		BuildExecLine: func(state map[string]string) string {

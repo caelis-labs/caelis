@@ -100,9 +100,10 @@ Subagent gauges remain on their Tasks and contribute once to Session totals.
 
 ## Disconnect
 
-`/disconnect acp` removes the Agent, its ACP profiles, and bindings in one
-revision-aware Host command. The selected Agent is the explicit removal target;
-no second confirmation is required.
+`/disconnect acp` supports selecting multiple Agents. Each Agent, its ACP
+profiles, and bindings are removed in one revision-aware Host command. Enter
+submits the selected targets without a second confirmation. Commands run in
+selection order and stop at the first error; confirmed removals remain applied.
 
 Control immediately revokes the removed placement from live Runtime catalogs,
 detaches matching participants, and repairs affected main-controller bindings.
@@ -110,7 +111,8 @@ An accepted in-flight operation may finish with already resolved values, but lat
 work cannot select or display the deleted profile. A post-commit repair warning
 never restores disconnected configuration.
 
-`/disconnect provider` is separate and never removes an ACP Agent connection.
+`/disconnect provider` lists configured provider models grouped by Provider and
+supports the same multi-selection flow. It never removes an ACP Agent connection.
 
 ## Models
 

@@ -258,7 +258,8 @@ type ControlServices interface {
 	WorkspaceDir() string
 	Interrupt(context.Context) error
 	Connect(context.Context, controlprompt.ConnectConfig) (controlstatus.StatusSnapshot, error)
-	DeleteModel(context.Context, string) error
+	DeleteModels(context.Context, []string) ([]string, error)
+	DisconnectACPAgents(context.Context, []string) ([]string, error)
 	controlprompt.SessionModeService
 	controlprompt.CompletionService
 	controlprompt.PluginService

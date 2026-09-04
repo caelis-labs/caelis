@@ -49,7 +49,7 @@ func dispatchTUIPrivateSlashCommandWithContext(ctx context.Context, service Cont
 	case "connect":
 		return executeLineResult{completion: slashConnectWithContext(ctx, service, service, send, args)}
 	case "disconnect":
-		return executeLineResult{completion: slashDisconnectWithContext(ctx, service, service, send, args)}
+		return executeLineResult{completion: slashDisconnectWithContext(ctx, service, send, args)}
 	case "subagent":
 		return executeLineResult{completion: slashSubagentWithContext(ctx, service, send, args)}
 	case "exit", "quit":
@@ -158,47 +158,6 @@ func slashConnectWithContext(ctx context.Context, service ControlServices, agent
 	sendStatusUpdate(send, status)
 	refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
 	return TaskResultMsg{SuppressTurnDivider: true}
-}
-
-func slashDisconnectWithContext(ctx context.Context, service ControlServices, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {
-	ctx = contextOrBackground(ctx)
-	kind, target, _ := controlprompt.ParseFirst(strings.TrimSpace(args))
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "provider":
-		model := strings.TrimSpace(target)
-		if model == "" {
-			sendNotice(send, "Choose a provider model in /disconnect", SlashNoticeHint)
-			return TaskResultMsg{SuppressTurnDivider: true}
-		}
-		if err := service.DeleteModel(ctx, model); err != nil {
-			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("disconnect provider model", err)}
-		}
-		sendNotice(send, "Disconnected "+model, SlashNoticeFeedback)
-		if status, err := service.Status(ctx); err == nil {
-			sendStatusUpdate(send, status)
-		}
-		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
-		return TaskResultMsg{SuppressTurnDivider: true}
-	case "acp":
-		agentID := strings.TrimSpace(target)
-		if agentID == "" {
-			sendNotice(send, "Choose a local ACP Agent in /disconnect", SlashNoticeHint)
-			return TaskResultMsg{SuppressTurnDivider: true}
-		}
-		if agents == nil {
-			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("disconnect ACP Agent", fmt.Errorf("ACP Agent roster service is unavailable"))}
-		}
-		result, err := agents.DisconnectACP(ctx, agentID)
-		if err != nil {
-			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("disconnect ACP Agent", err)}
-		}
-		sendNotice(send, "Disconnected /"+strings.TrimSpace(result.Agent.ID), SlashNoticeFeedback)
-		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
-		return TaskResultMsg{SuppressTurnDivider: true}
-	default:
-		sendNotice(send, "usage: /disconnect", SlashNoticeHint)
-		return TaskResultMsg{SuppressTurnDivider: true}
-	}
 }
 
 func connectedModelAliases(cfg controlprompt.ConnectConfig) []string {

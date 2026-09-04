@@ -509,11 +509,11 @@ func TestMaintainedSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) 
 	if !selectableModelNamesContain(models, "gpt-5.5") || !selectableModelNamesContain(models, "gpt-5.6-sol") {
 		t.Fatalf("codex selectable models = %#v", models)
 	}
-	wantOrder := []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"}
+	wantOrder := []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"}
 	if got := selectableModelNames(models); !slices.Equal(got, wantOrder) {
 		t.Fatalf("codex selectable model order = %#v, want %#v", got, wantOrder)
 	}
-	if selectableModelNamesContain(models, "gpt-6-astra") || selectableModelNamesContain(models, "gpt-5.4") || selectableModelNamesContain(models, "gpt-5.4-mini") || selectableModelNamesContain(models, "gpt-5.3-codex-spark") || selectableModelNamesContain(models, "gpt-5.2") || selectableModelNamesContain(models, "gpt-5.5-pro") || selectableModelNamesContain(models, "gpt-5.6") || selectableModelNamesContain(models, "gpt-5.7-unknown") || selectableModelNamesContain(models, "gpt-5.5-instant") {
+	if selectableModelNamesContain(models, "gpt-5.4") || selectableModelNamesContain(models, "gpt-5.4-mini") || selectableModelNamesContain(models, "gpt-5.3-codex-spark") || selectableModelNamesContain(models, "gpt-5.2") || selectableModelNamesContain(models, "gpt-5.5-pro") || selectableModelNamesContain(models, "gpt-5.6") || selectableModelNamesContain(models, "gpt-5.7-unknown") || selectableModelNamesContain(models, "gpt-5.5-instant") {
 		t.Fatalf("codex selectable models include disallowed entries = %#v", models)
 	}
 	for _, item := range models {

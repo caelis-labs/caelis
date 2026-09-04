@@ -34,9 +34,9 @@ func (s *modelConnectControlStub) Connect(_ context.Context, config controlpromp
 	return controlstatus.StatusSnapshot{ModelStatus: controlstatus.StatusModel{Display: "openai/gpt-5.6"}}, nil
 }
 
-func (s *modelConnectControlStub) DeleteModel(_ context.Context, model string) error {
-	s.deleted = model
-	return nil
+func (s *modelConnectControlStub) DeleteModels(_ context.Context, models []string) ([]string, error) {
+	s.deleted = strings.Join(models, ",")
+	return slices.Clone(models), nil
 }
 
 func (*modelConnectControlStub) Status(context.Context) (controlstatus.StatusSnapshot, error) {
@@ -102,6 +102,11 @@ func (s *acpConnectControlStub) DisconnectACP(_ context.Context, agentID string)
 	}, nil
 }
 
+func (s *acpConnectControlStub) DisconnectACPAgents(_ context.Context, agentIDs []string) ([]string, error) {
+	s.disconnected = strings.Join(agentIDs, ",")
+	return slices.Clone(agentIDs), nil
+}
+
 func TestSlashConnectMapsACPWizardSelectionToConnector(t *testing.T) {
 	service := &acpConnectControlStub{}
 	payload := buildACPConnectWizardPayload(map[string]string{
@@ -163,13 +168,13 @@ func TestSlashConnectDisconnectsOnlyAfterWizardConfirmation(t *testing.T) {
 
 func TestSlashDisconnectSeparatesProviderAndACP(t *testing.T) {
 	provider := &modelConnectControlStub{}
-	result := slashDisconnectWithContext(context.Background(), provider, provider, nil, "provider ollama/qwen3")
+	result := slashDisconnectWithContext(context.Background(), provider, nil, "provider ollama/qwen3")
 	if result.Err != nil || !result.SuppressTurnDivider || provider.deleted != "ollama/qwen3" {
 		t.Fatalf("provider disconnect = %#v, deleted %q", result, provider.deleted)
 	}
 
 	acp := &acpConnectControlStub{}
-	result = slashDisconnectWithContext(context.Background(), acp, acp, nil, "acp codex")
+	result = slashDisconnectWithContext(context.Background(), acp, nil, "acp codex")
 	if result.Err != nil || !result.SuppressTurnDivider || acp.disconnected != "codex" {
 		t.Fatalf("ACP disconnect = %#v, disconnected %q", result, acp.disconnected)
 	}
