@@ -1,6 +1,8 @@
 package tuikit
 
 import (
+	"github.com/charmbracelet/x/ansi"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -64,5 +66,36 @@ func TestLinkifyText_PreservesExistingOSC8WithoutNesting(t *testing.T) {
 		if strings.Count(got, "https://example.com/docs") != 1 {
 			t.Fatalf("existing OSC 8 link was nested: %q", got)
 		}
+	}
+}
+
+func TestLinkifyTextUnicodeTargetPreservesVisibleText(t *testing.T) {
+	for _, input := range []string{
+		"https://example.com/服务/文件?q=审批#当前",
+		"[源码](https://example.com/file.go)：服务与审批。",
+		"https://例子.example/路径?q=%E6%96%87#章节",
+	} {
+		t.Run(input, func(t *testing.T) {
+			got := LinkifyText(input, lipgloss.NewStyle())
+			if visible := ansi.Strip(got); visible != input {
+				t.Fatalf("visible text changed: got %q, want %q", visible, input)
+			}
+			start := strings.Index(got, "\x1b]8;;")
+			if start < 0 {
+				t.Fatal("missing hyperlink")
+			}
+			end, _ := oscSequenceEnd(got, start+len("\x1b]8;;"))
+			target := got[start+len("\x1b]8;;") : end]
+			for _, b := range []byte(target) {
+				if b >= 0x80 {
+					t.Fatalf("non-ASCII OSC target %q", target)
+				}
+			}
+			decoded, err := url.PathUnescape(target)
+			decodedInput, inputErr := url.PathUnescape(input)
+			if err != nil || inputErr != nil || !strings.Contains(decodedInput, decoded) {
+				t.Fatalf("target does not round trip: %q, %v", decoded, err)
+			}
+		})
 	}
 }

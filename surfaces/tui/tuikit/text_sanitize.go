@@ -50,8 +50,27 @@ func linkifyPlainHTTP(text string, style lipgloss.Style) string {
 		if url == "" {
 			return candidate
 		}
-		return style.Hyperlink(url).Render(url) + suffix
+		return style.Hyperlink(escapeHyperlinkURI(url)).Render(url) + suffix
 	})
+}
+
+// escapeHyperlinkURI keeps OSC payloads ASCII. UTF-8 continuation bytes can be
+// interpreted as C1 controls (notably ST) by terminal escape parsers, exposing
+// the rest of a link target as screen text and invalidating row geometry.
+func escapeHyperlinkURI(uri string) string {
+	const hex = "0123456789ABCDEF"
+	var out strings.Builder
+	for i := 0; i < len(uri); i++ {
+		b := uri[i]
+		if b < 0x80 {
+			out.WriteByte(b)
+		} else {
+			out.WriteByte('%')
+			out.WriteByte(hex[b>>4])
+			out.WriteByte(hex[b&15])
+		}
+	}
+	return out.String()
 }
 
 func oscSequenceEnd(text string, after int) (int, int) {
