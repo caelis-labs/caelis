@@ -13,7 +13,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.51.1
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1
 	github.com/caelis-labs/acp-go-sdk v1.1.0
-	github.com/caelis-labs/memory v0.5.0
+	github.com/caelis-labs/memory v0.5.1
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
 	github.com/charmbracelet/x/ansi v0.11.8

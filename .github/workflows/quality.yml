@@ -36,3 +36,18 @@ jobs:
 
       - name: Build
         run: make build
+
+  windows-host-open:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Embedded Memory Open
+        shell: bash
+        run: go test -count=1 -timeout 10m ./app/gatewayapp/internal/memoryhost -run '^TestEmbeddedHostBindsSDKClient$'

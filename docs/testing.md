@@ -28,6 +28,7 @@ adds cost without improving unrelated changes:
 | Runtime, Control, projection, or physical TUI contracts | `make product-acceptance` |
 | Broad TUI, command, or ACP integration | `make regression` |
 | In-process Host or built-in Memory composition | `make startup-performance` |
+| Native Windows Host Memory Open | `go test ./app/gatewayapp/internal/memoryhost -run TestEmbeddedHostBindsSDKClient` |
 | Managed Host lifecycle or process ownership | `go test -race ./internal/servicelifecycle ./internal/cli` |
 | Maintained documentation links | `make docs-links` |
 | npm launcher or package handoff | `npm --prefix npm test` |
