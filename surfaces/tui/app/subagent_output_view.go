@@ -323,13 +323,20 @@ func (v *subagentOutputView) appendInput(event TranscriptEvent) {
 	if actor != "" && actor != "user" {
 		text = actor + ": " + text
 	}
-	if v.document == nil {
-		v.document = NewDocument()
+	block := v.blockForEvent(event)
+	if block == nil {
+		return
 	}
-	if v.block != nil && len(v.block.Events) == 0 && v.turnID == "" {
-		v.document.Remove(v.block.BlockID())
-	}
-	v.document.Append(NewUserNarrativeBlock(text))
+	// Input is a visible narrative boundary, not a new child Turn. Keep tool
+	// identity and lifecycle on the existing block while placing subsequent
+	// output after the user row in the same ordered event sequence.
+	closeLatestReasoningTiming(block.Events, event.OccurredAt)
+	block.advanceNarrativeBoundary()
+	block.Events = append(block.Events, SubagentEvent{
+		Kind: SEUserInput, Text: text, StartedAt: event.OccurredAt,
+		SourceEventID: event.SourceEventID, SourceProjectionID: event.SourceProjectionID,
+		MessageID: event.MessageID,
+	})
 }
 
 func (v *subagentOutputView) touch(immediate bool) {

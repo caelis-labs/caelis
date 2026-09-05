@@ -581,7 +581,7 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, text, final, err))
 	tone, dim := acpToolHeaderMark(ctx, err, final)
 	var headerRow RenderedRow
-	if sendMessage && opts.AgentMessageTargetLinks && fullArgs == "" && agentMessageTargetCanOpenOverlay(ev.MessageTarget) {
+	if sendMessage && opts.AgentMessageTargetLinks && agentMessageTargetCanOpenOverlay(ev.MessageTarget) {
 		token = agentMessageTargetOverlayClickToken(callID)
 		headerRow = renderSendMessageHeaderRow(blockID, headerEvent.Args, ctx, token, tone, dim)
 	} else if sendMessage {

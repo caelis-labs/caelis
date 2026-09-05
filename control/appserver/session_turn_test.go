@@ -102,6 +102,109 @@ func TestSessionTurnClientAttachesBeforePromptAndFiltersExactTarget(t *testing.T
 	}
 }
 
+func TestSessionTurnWithoutSpoolCorrelatesCanonicalTargetByDurableTurnID(t *testing.T) {
+	t.Parallel()
+
+	reader := &emptyPageBarrierReader{
+		checkpointPageReader: &checkpointPageReader{},
+		emptyReturned:        make(chan struct{}),
+	}
+	codec, err := NewCursorCodec(CursorCodecConfig{Secret: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker, err := NewFeedBroker(FeedBrokerConfig{
+		SessionRef: session.SessionRef{SessionID: "session-1"}, Reader: reader, CursorCodec: codec,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broker.Close()
+	result, err := broker.Subscribe(t.Context(), SubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target := TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
+	feedCtx, stopFeed := context.WithCancel(context.Background())
+	turn := newTargetTurn(nil, "session-1", ReconnectResult{Subscription: result.Subscription}, feedCtx, stopFeed, target)
+	go turn.relay()
+	defer turn.Close()
+
+	// Force followCanonical to observe an empty page before the producer commits
+	// and publishes the answer and terminal. The terminal must trigger a fresh
+	// canonical read rather than being judged against the stale page watermark.
+	select {
+	case <-reader.emptyReturned:
+	case <-time.After(time.Second):
+		t.Fatal("canonical follower did not reach the empty-page barrier")
+	}
+	foreign := durableProtocolEvent(1, "foreign")
+	foreign.Scope = &session.EventScope{TurnID: "turn-other"}
+	answer := durableProtocolEvent(2, "answer")
+	answer.Scope = &session.EventScope{TurnID: target.TurnID}
+	reader.setEvents(foreign, answer)
+
+	live := projectedEnvelope(2, "answer")
+	live.HandleID = target.HandleID
+	live.RunID = target.RunID
+	live.TurnID = target.TurnID
+	if err := broker.Publish(live); err != nil {
+		t.Fatal(err)
+	}
+	terminal := eventstream.TurnCompleted(target.HandleID, target.RunID, target.TurnID, time.Now())
+	terminal.SessionID = "session-1"
+	if err := broker.Publish(terminal); err != nil {
+		t.Fatal(err)
+	}
+
+	got := collectSessionTurnTestEvents(turn.Events())
+	if err := turn.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || !eventstream.IsTurnTerminalLifecycle(got[1]) {
+		t.Fatalf("target events = %#v, want canonical answer and terminal", got)
+	}
+	chunk, ok := got[0].Update.(eventstream.ContentChunk)
+	if !ok {
+		t.Fatalf("target answer update = %T, want ContentChunk", got[0].Update)
+	}
+	text, ok := chunk.Content.(eventstream.TextContent)
+	if !ok || text.Text != "answer" {
+		t.Fatalf("target answer = %#v, want answer without foreign content", chunk.Content)
+	}
+	if got[0].HandleID != "" || got[0].RunID != "" || got[0].TurnID != target.TurnID {
+		t.Fatalf("canonical target identity = %#v, want durable Turn ID without invented transport identity", got[0])
+	}
+}
+
+func TestSessionTurnCanonicalFallbackRejectsConflictingIdentity(t *testing.T) {
+	t.Parallel()
+
+	target := TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
+	canonical := projectedEnvelope(1, "answer")
+	canonical.TurnID = target.TurnID
+	for name, mutate := range map[string]func(*eventstream.Envelope){
+		"partial handle":       func(envelope *eventstream.Envelope) { envelope.HandleID = target.HandleID },
+		"partial run":          func(envelope *eventstream.Envelope) { envelope.RunID = target.RunID },
+		"conflicting identity": func(envelope *eventstream.Envelope) { envelope.HandleID, envelope.RunID = "other-handle", "other-run" },
+		"foreign turn":         func(envelope *eventstream.Envelope) { envelope.TurnID = "turn-other" },
+		"foreign session":      func(envelope *eventstream.Envelope) { envelope.SessionID = "session-other" },
+		"transient": func(envelope *eventstream.Envelope) {
+			envelope.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+			envelope.Position = nil
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			envelope := eventstream.CloneEnvelope(canonical)
+			mutate(&envelope)
+			if sessionTurnEnvelopeMatches("session-1", target, envelope) {
+				t.Fatalf("matched untrusted canonical fallback: %#v", envelope)
+			}
+		})
+	}
+}
+
 func TestSessionTurnClientRejectsReplacementAfterTargetOutput(t *testing.T) {
 	t.Parallel()
 

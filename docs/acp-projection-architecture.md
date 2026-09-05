@@ -59,7 +59,8 @@ Slow or disconnected observers cannot block execution or durable publication.
 Control appends normalized delivery records to a bounded file spool without
 waiting for a Surface. A valid cursor prefers its exact spool range; if that
 cache is missing, expired, or corrupt, Control begins one complete canonical or
-final-result replacement. Replace-capable consumers swap it atomically, while
+final-result replacement. Replacement transport is page-bounded, but valid
+Session history has no fixed total replay limit. Replace-capable consumers swap it atomically, while
 an ACP or other irreversible consumer rejects replacement after it has exposed
 an exact prefix. No gap event or second Runtime stream repairs it.
 
@@ -129,6 +130,12 @@ One live Turn has one content source:
   emitted; consumers do not infer ownership from text;
 - a native ACP update owns its live content, while its paired canonical Event may
   contribute accounting only.
+
+The Session spool owner retains the typed identities of successfully appended
+live narratives until canonical catch-up or Turn completion. Catch-up omits
+their already-published content while advancing the complete durable boundary;
+accounting and other content still flow. This identity-only bookkeeping is
+discarded with the trace and never filters canonical replacement replay.
 
 Fresh replay may materialize a durable complete value once. If retained deltas
 and a complete value coexist, Control selects the source by typed message or tool

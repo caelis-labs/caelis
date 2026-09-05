@@ -197,8 +197,9 @@ closes on proven producer loss, Task release, permanent participant detach,
 Session close, or Host close. Session close first tries to catch the feed up
 from canonical truth and seals it; attached readers drain accepted records to
 EOF. If the canonical checkpoint contains a tail missed by final catch-up,
-Control delivers an atomic canonical replacement: a complete message may overlap
-transient fragments already delivered from the spool. A later read of a closed Session
+Control delivers an atomic canonical replacement in bounded transport pages,
+with no fixed valid-history limit: a complete message may overlap transient
+fragments already delivered from the spool. A later read of a closed Session
 uses finite canonical replay and allocates no new spool writer or registry
 entry. Logical admission closure and successful physical sealing are distinct:
 canceled callers cannot skip local cleanup, and a failed physical seal retains

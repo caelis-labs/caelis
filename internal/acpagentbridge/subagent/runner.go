@@ -372,9 +372,48 @@ func (r *Runner) dispatchInitialPrompt(
 		err = prepared.ObserveAuthRequired(fence.observeAuthRequired)
 	}
 	if err == nil {
+		// A successful Dispatch proves that the complete prompt frame reached the
+		// local ACP writer, which is the earliest non-speculative boundary for
+		// projecting child input. Hold the shared ingress ordering point so prompt
+		// echoes and output already arriving from the peer cannot overtake the
+		// locally owned projection. Provider echoes remain optional and are
+		// suppressed for the rest of this activity.
+		run.mu.Lock()
+		previousInputActor := run.inputActor
+		previousSuppressInputEcho := run.suppressInputEcho
+		run.inputActor = session.ParentCommunicationActor()
+		run.suppressInputEcho = true
+		run.mu.Unlock()
+		restoreInputEcho := func() {
+			run.mu.Lock()
+			run.inputActor = previousInputActor
+			run.suppressInputEcho = previousSuppressInputEcho
+			run.mu.Unlock()
+		}
+		slot.ingressMu.Lock()
 		err = prepared.DispatchWithAbort(callerCtx, func() {
+			// Abort proves dispatch failed. Let pending peer evidence drain before
+			// Close joins its notification callback, which also needs ingressMu.
+			// Successful dispatch keeps the input-before-output ordering lock.
+			restoreInputEcho()
+			slot.ingressMu.Unlock()
+			defer slot.ingressMu.Lock()
 			_ = run.client.Close(context.Background())
 		})
+		if err == nil {
+			acceptedInput := r.acceptedChildInputOutput(slot, run, agent.ChildInputRequest{
+				Source: session.ParentCommunicationActor(),
+				Input:  promptText,
+			}, strings.TrimSpace(run.spawn.ActivityID))
+			if acceptedInput != nil {
+				slot.publishRunOutputLocked(run, *acceptedInput)
+			}
+		} else {
+			// No local projection was published. Restore provider echo handling so
+			// an indeterminate write can still expose concrete peer evidence.
+			restoreInputEcho()
+		}
+		slot.ingressMu.Unlock()
 	}
 	slot.opMu.Lock()
 	fence.finishLocked(dispatchDone)
@@ -1055,7 +1094,7 @@ func markSubagentInputEvent(event *session.Event, source session.ActorRef) sessi
 	// a canonical end-user submission to the parent Session.
 	event.Type = session.EventTypeContext
 	if session.ValidateAgentCommunicationActor(source) != nil {
-		source = session.ActorRef{Kind: session.ActorKindController, ID: "parent", Name: "parent"}
+		source = session.ParentCommunicationActor()
 	}
 	event.Actor = session.CloneActorRef(source)
 	header := session.AgentCommunicationPromptHeader(event.Actor)

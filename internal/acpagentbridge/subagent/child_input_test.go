@@ -72,12 +72,14 @@ func TestActiveChildInputPreservesIngressOrderAndPublishesAcceptedInput(t *testi
 	defer cancel()
 	runner := childInputTestRunner(t, "active")
 	events := make(chan childInputTestEvent, 8)
-	anchor, initial, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-active-input", events), delegation.Request{
+	spawn := childInputSpawnContext(t, "task-active-input", events)
+	anchor, initial, err := runner.Spawn(ctx, spawn, delegation.Request{
 		Agent: "helper", Prompt: "initial",
 	})
 	if err != nil || !initial.Running {
 		t.Fatalf("Spawn() = (%#v, %v), want running prompt", initial, err)
 	}
+	consumeSpawnInitialInput(t, ctx, events, spawn.ActivityID, "initial")
 	run, err := runner.lookup(anchor)
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +171,7 @@ func TestBuildAgentCommunicationPromptCarriesTrustedSource(t *testing.T) {
 
 	prompt := buildAgentCommunicationPrompt(agent.ChildInputRequest{
 		Source: session.ActorRef{
-			Kind: session.ActorKindController, ID: "controller-1", Role: "kernel", Name: "main",
+			Kind: session.ActorKindController, ID: "sdk-kernel", Role: "kernel", Name: "local",
 		},
 		Input: "review this change",
 	})
@@ -185,8 +187,11 @@ func TestBuildAgentCommunicationPromptCarriesTrustedSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(header.Text, "[Internal agent message]") ||
-		!strings.Contains(header.Text, "Sender: main") ||
-		!strings.Contains(header.Text, "Role: kernel") || message.Text != "review this change" {
+		!strings.Contains(header.Text, "Sender: parent") ||
+		strings.Contains(header.Text, "Reply-To:") ||
+		strings.Contains(header.Text, "local") ||
+		strings.Contains(header.Text, "kernel") ||
+		message.Text != "review this change" {
 		t.Fatalf("prompt header = %q message = %q", header.Text, message.Text)
 	}
 }
@@ -198,12 +203,14 @@ func TestRejectedChildSteeringReleasesOriginalActivityUpdates(t *testing.T) {
 	defer cancel()
 	runner := childInputTestRunner(t, "failed-echo")
 	events := make(chan childInputTestEvent, 8)
-	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-rejected-input", events), delegation.Request{
+	spawn := childInputSpawnContext(t, "task-rejected-input", events)
+	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{
 		Agent: "helper", Prompt: "initial",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	consumeSpawnInitialInput(t, ctx, events, spawn.ActivityID, "initial")
 	run, err := runner.lookup(anchor)
 	if err != nil {
 		t.Fatal(err)
@@ -312,12 +319,14 @@ func TestAcceptedChildInputDeduplicatesProviderEcho(t *testing.T) {
 			defer cancel()
 			runner := childInputTestRunner(t, test.mode)
 			events := make(chan childInputTestEvent, 12)
-			anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-echo-"+test.name, events), delegation.Request{
+			spawn := childInputSpawnContext(t, "task-echo-"+test.name, events)
+			anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{
 				Agent: "helper", Prompt: "initial",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
+			consumeSpawnInitialInput(t, ctx, events, spawn.ActivityID, "initial")
 			if test.idle {
 				waitChildActivityTerminal(t, ctx, events)
 			}
@@ -892,6 +901,31 @@ func newChildInputTestRunner(t *testing.T, mode string, extraEnv map[string]stri
 		t.Fatal(err)
 	}
 	return runner
+}
+
+func consumeSpawnInitialInput(t *testing.T, ctx context.Context, events <-chan childInputTestEvent, activityID, wantText string) {
+	t.Helper()
+	for {
+		select {
+		case event := <-events:
+			if event.ActivityID != activityID {
+				continue
+			}
+			if event.Result != nil {
+				t.Fatalf("Spawn completed before initial input projection: %#v", event.Result)
+			}
+			if event.Frame == nil || event.Frame.Event == nil {
+				continue
+			}
+			communication := session.ProtocolAgentCommunicationOf(event.Frame.Event)
+			if communication == nil || communication.Text != wantText || event.Frame.Event.Actor != session.ParentCommunicationActor() {
+				t.Fatalf("Spawn initial input = %#v, want typed parent message %q", event.Frame.Event, wantText)
+			}
+			return
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
 }
 
 func waitForPromptDispatchFence(t *testing.T, ctx context.Context, slot *childSlot) {

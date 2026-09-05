@@ -28,8 +28,9 @@ const (
 )
 
 // FeedDelivery is one explicit Session projection transaction unit. Exact
-// spool records append; canonical replay is a bounded replacement that a
-// consumer must keep off-screen until the matching end marker. Result is one
+// spool records append; canonical replay transports a replacement in bounded
+// pages that a consumer must keep off-screen until the matching end marker.
+// Valid Session history has no fixed total replacement limit. Result is one
 // cursorless terminal semantic fallback used only when the spool is unavailable.
 type FeedDelivery struct {
 	Kind       FeedDeliveryKind       `json:"kind"`

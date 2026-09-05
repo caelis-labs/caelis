@@ -155,6 +155,15 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				hasContent = true
 				lastGroup = acpTranscriptGroupNotice
 			}
+		case SEUserInput:
+			input := UserNarrativeBlock{id: blockID, Raw: ev.Text}
+			inputRows := input.Render(ctx)
+			if len(inputRows) > 0 {
+				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupAgentCommunication, false)
+				rows = appendACPTranscriptSemanticRows(rows, blockID, inputRows, &pendingSemanticGap)
+				hasContent = true
+				lastGroup = acpTranscriptGroupAgentCommunication
+			}
 		case SEAgentCommunication:
 			communicationRows := renderAgentCommunicationRows(blockID, ev, i, width, ctx, opts)
 			if len(communicationRows) > 0 {

@@ -245,6 +245,9 @@ func loadedAgentCommunicationPrompt(text string) (session.ActorRef, string, bool
 		// included in the header. The identity remains display-only.
 		actor.Kind = session.ActorKindSystem
 	}
+	if actor.Kind == session.ActorKindController {
+		actor = session.ParentCommunicationActor()
+	}
 	if err := session.ValidateAgentCommunicationActor(actor); err != nil {
 		return session.ActorRef{}, "", false
 	}

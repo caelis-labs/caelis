@@ -599,6 +599,8 @@ func ActorRefHasIdentity(ref ActorRef) bool {
 // ControllerExecutor returns the durable Turn executor identity for one
 // controller binding. The executor is distinct from an individual event actor:
 // a user event is authored by the user but executed by this Agent.
+// Parent-to-child Agent communication uses ParentCommunicationActor, not this
+// executor's product AgentName.
 func ControllerExecutor(binding ControllerBinding) ActorRef {
 	binding = CloneControllerBinding(binding)
 	return ActorRef{

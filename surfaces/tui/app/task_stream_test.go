@@ -853,9 +853,7 @@ func TestTUITaskMailboxAcceptsOneDeliveryPage(t *testing.T) {
 		Events: events, NextCursor: "cursor-1",
 	}
 	started := time.Now()
-	batch, cursor, _, replacement, open, err := readTaskStreamMailbox(
-		context.Background(), deliveries, &taskstream.DeliveryAssembler{},
-	)
+	batch, cursor, _, replacement, open, err := (&taskStreamMailbox{}).read(context.Background(), deliveries)
 	if err != nil || !open || replacement || cursor != "cursor-1" || len(batch) != len(events) || time.Since(started) > 100*time.Millisecond {
 		t.Fatalf("mailbox page = %d cursor=%q replacement=%v open=%v err=%v elapsed=%v", len(batch), cursor, replacement, open, err, time.Since(started))
 	}

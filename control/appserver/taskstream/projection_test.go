@@ -399,10 +399,10 @@ func TestProjectTaskFrameProjectsEventOnlySpawnChildSemantics(t *testing.T) {
 		assert func(*testing.T, eventstream.Envelope)
 	}{
 		{
-			name: "parent Agent input",
+			name: "parent Agent input from recorded controller identity",
 			event: &session.Event{
 				ID: "child-input-1", Type: session.EventTypeContext, Visibility: session.VisibilityUIOnly,
-				Actor: session.ActorRef{Kind: session.ActorKindController, ID: "parent", Name: "parent"},
+				Actor: session.ActorRef{Kind: session.ActorKindController, ID: "sdk-kernel", Name: "local"},
 				Text:  "continue from parent", Scope: spawnSubagentScope("jack"),
 				Protocol: eventProtocolPtrForTest(session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: "continue from parent"})),
 			},
@@ -525,6 +525,7 @@ func TestProjectTaskFrameProjectsEventOnlySpawnChildSemantics(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			actor := tc.event.Actor
 			events := projectTaskStreamFrame(req, controltaskstream.Frame{
 				TerminalID: req.TurnID,
 				Running:    true,
@@ -535,6 +536,9 @@ func TestProjectTaskFrameProjectsEventOnlySpawnChildSemantics(t *testing.T) {
 			}
 			assertSpawnSemanticEnvelope(t, events[0], "jack", "spawn-call-1")
 			tc.assert(t, events[0])
+			if tc.event.Actor != actor {
+				t.Fatal("Task projection mutated the recorded actor")
+			}
 		})
 	}
 }

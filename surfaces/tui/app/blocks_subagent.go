@@ -18,6 +18,9 @@ const (
 	SEApproval
 	SENotice
 	SEAgentCommunication
+	// SEUserInput keeps child input inside its Turn timeline, between the
+	// surrounding output events rather than after the whole Turn block.
+	SEUserInput
 	// SESemanticBoundary is a zero-row structural event. It preserves the
 	// ordering effect of canonical events whose physical panel is suppressed,
 	// so later transcript projections cannot fold narratives across them.

@@ -86,8 +86,10 @@ func TestRunnerPromptFailureBeforeFirstUpdateDoesNotPersistRawDiagnostics(t *tes
 			}
 		}
 	}
-	if len(streams.frames) != 1 || !streams.frames[0].Closed || streams.frames[0].State != string(delegation.StateFailed) {
-		t.Fatalf("stream frames = %#v, want only terminal failed marker", streams.frames)
+	if len(streams.frames) != 2 || streams.frames[0].Event == nil ||
+		session.ProtocolAgentCommunicationOf(streams.frames[0].Event) == nil || streams.frames[0].Event.Text != "review" ||
+		!streams.frames[1].Closed || streams.frames[1].State != string(delegation.StateFailed) {
+		t.Fatalf("stream frames = %#v, want submitted input then terminal failed marker", streams.frames)
 	}
 }
 

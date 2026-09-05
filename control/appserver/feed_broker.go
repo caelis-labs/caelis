@@ -60,6 +60,8 @@ type FeedBroker struct {
 	sealedCh      chan struct{}
 	closed        bool
 
+	liveNarratives map[feedNarrativeKey]struct{}
+
 	subsMu sync.Mutex
 	subs   map[*feedSubscription]struct{}
 }
@@ -121,6 +123,13 @@ func (b *FeedBroker) Prime(ctx context.Context) error {
 	}
 	b.primeMu.Lock()
 	defer b.primeMu.Unlock()
+	return b.primeCanonicalLocked(ctx, 0)
+}
+
+// primeCanonicalLocked fills the authoritative prefix through throughSeq. A
+// zero boundary scans all currently committed events. The caller holds primeMu
+// so a later producer event cannot overtake a missing canonical predecessor.
+func (b *FeedBroker) primeCanonicalLocked(ctx context.Context, throughSeq uint64) error {
 	if b.reader == nil {
 		return nil
 	}
@@ -133,11 +142,11 @@ func (b *FeedBroker) Prime(ctx context.Context) error {
 		if closed {
 			return errors.New("controlclient: feed broker is closed")
 		}
-		if sealed {
+		if sealed || (throughSeq > 0 && after >= throughSeq) {
 			return nil
 		}
 		page, err := b.reader.EventsPage(ctx, session.EventPageRequest{
-			SessionRef: b.ref, AfterSeq: after, Visibility: session.EventPageClientReplay,
+			SessionRef: b.ref, AfterSeq: after, ThroughSeq: throughSeq, Visibility: session.EventPageClientReplay,
 		})
 		if err != nil {
 			return err
@@ -151,25 +160,16 @@ func (b *FeedBroker) Prime(ctx context.Context) error {
 			if suppressHistoricalChildStreamMirror(event) {
 				continue
 			}
-			base := acpprojector.EnvelopeBaseFromSessionEvent(b.ref, event, acpprojector.SessionEventTransport{})
-			for _, envelope := range acpprojector.ProjectSessionEventEnvelope(base, event) {
-				if envelope.Position == nil || envelope.Position.Durable == nil {
-					continue
-				}
-				if err := b.publishAccepted(ctx, envelope); err != nil {
-					return err
-				}
+			if err := b.publishCanonicalCatchup(ctx, event); err != nil {
+				return err
 			}
 		}
 		b.acceptMu.Lock()
-		b.scannedSeq = max(b.scannedSeq, observed)
+		b.scannedSeq = max(b.scannedSeq, observed, page.NextSeq)
 		b.acceptMu.Unlock()
-		if page.NextSeq <= after || len(page.Events) == 0 {
+		if page.NextSeq <= after {
 			return nil
 		}
-		b.acceptMu.Lock()
-		b.scannedSeq = max(b.scannedSeq, page.NextSeq)
-		b.acceptMu.Unlock()
 	}
 }
 
@@ -185,9 +185,28 @@ func (b *FeedBroker) Publish(envelope eventstream.Envelope) error {
 	}
 	// A normalized durable producer Envelope carries the active Handle/Run/Turn
 	// target that canonical Session replay intentionally does not retain. Keep
-	// that exact delivery identity in the lossy spool. Prime remains the
-	// ordering barrier before a terminal lifecycle so any canonical facts not
-	// observed through this producer are appended first.
+	// that exact delivery identity in the lossy spool, but first fill any missing
+	// durable predecessor from Session truth. Append-before-Publish producers can
+	// race across steering, so accepting seq N must not advance the watermark
+	// past an unpublished seq N-1.
+	if isDurableFeedEnvelope(envelope) {
+		b.primeMu.Lock()
+		defer b.primeMu.Unlock()
+		if seq := envelope.Position.Durable.Seq; seq > 1 {
+			if err := b.primeCanonicalLocked(brokerContext(b), seq-1); err != nil {
+				return err
+			}
+			b.acceptMu.Lock()
+			contiguous := b.scannedSeq >= seq-1
+			b.acceptMu.Unlock()
+			if !contiguous {
+				return fmt.Errorf("controlclient: durable feed gap before sequence %d", seq)
+			}
+		}
+		return b.publishAccepted(brokerContext(b), envelope)
+	}
+	// Prime remains the ordering barrier before a terminal lifecycle so any
+	// canonical facts not observed through a producer are appended first.
 	if isMainTerminalEnvelope(envelope) {
 		// Prime is an ordering optimization for canonical facts, not authority
 		// over the producer terminal. A read-side failure must not suppress the
@@ -255,6 +274,7 @@ func (b *FeedBroker) publishAccepted(ctx context.Context, envelope eventstream.E
 		return nil
 	}
 	b.acceptDurableLocked(envelope)
+	b.observeLiveNarrativeLocked(envelope)
 	return nil
 }
 
@@ -317,6 +337,7 @@ func (b *FeedBroker) acceptDurableLocked(envelope eventstream.Envelope) {
 func (b *FeedBroker) disableSpoolLocked(err error) {
 	if err != nil && b.spoolErr == nil {
 		b.spoolErr = err
+		b.liveNarratives = nil
 	}
 }
 
@@ -537,6 +558,7 @@ func (b *FeedBroker) Seal(ctx context.Context) error {
 	b.acceptMu.Lock()
 	if !b.sealed {
 		b.sealed = true
+		b.liveNarratives = nil
 		close(b.sealedCh)
 	}
 	writer := b.writer
@@ -787,7 +809,6 @@ func (s *feedSubscription) replayCanonical() (uint32, error) {
 	}
 	after := uint64(0)
 	pageNumber := uint32(0)
-	totalBytes := 0
 	for after < s.replayThrough.Seq {
 		page, err := s.broker.reader.EventsPage(s.ctx, session.EventPageRequest{
 			SessionRef: s.broker.ref, AfterSeq: after, ThroughSeq: s.replayThrough.Seq,
@@ -813,10 +834,9 @@ func (s *feedSubscription) replayCanonical() (uint32, error) {
 				if err != nil {
 					return pageNumber, err
 				}
-				if int(pageNumber) >= maxFeedReplacementEvents || totalBytes+len(raw) > maxFeedReplacementBytes {
-					return pageNumber, errorcode.New(errorcode.ResourceExhausted, "controlclient: Session replacement exceeds limit")
+				if len(raw) > maxFeedReplacementPageBytes {
+					return pageNumber, errorcode.New(errorcode.ResourceExhausted, "controlclient: Session replacement page exceeds byte limit")
 				}
-				totalBytes += len(raw)
 				if !s.deliver(FeedDelivery{
 					Kind: FeedDeliveryReplacePage, Source: FeedSourceReplacement,
 					SnapshotID: s.replacementID, Page: pageNumber,
@@ -849,6 +869,8 @@ func (s *feedSubscription) followCanonical(after eventstream.DurableFeedPosition
 	if after.Seq > 0 {
 		pageAfter--
 	}
+	var pendingTerminal *eventstream.Envelope
+	var pendingThrough eventstream.DurableFeedPosition
 	for {
 		page, err := s.broker.reader.EventsPage(s.ctx, session.EventPageRequest{
 			SessionRef: s.broker.ref, AfterSeq: pageAfter, Visibility: session.EventPageClientReplay,
@@ -888,6 +910,15 @@ func (s *feedSubscription) followCanonical(after eventstream.DurableFeedPosition
 			s.canonicalAfter = pageAfter
 			continue
 		}
+		if pendingTerminal != nil {
+			if compareDurablePosition(after, pendingThrough) < 0 {
+				return errors.New("controlclient: canonical Session feed did not reach the accepted durable watermark before terminal")
+			}
+			if !s.deliverFallbackTerminal(*pendingTerminal) {
+				return s.ctx.Err()
+			}
+			pendingTerminal = nil
+		}
 		sealed, complete := s.broker.canonicalSealState(after)
 		if complete {
 			select {
@@ -904,9 +935,10 @@ func (s *feedSubscription) followCanonical(after eventstream.DurableFeedPosition
 			case <-s.ctx.Done():
 				return s.ctx.Err()
 			case terminal := <-s.terminals:
-				if !s.deliverFallbackTerminal(terminal) {
-					return s.ctx.Err()
-				}
+				clone := eventstream.CloneEnvelope(terminal)
+				pendingTerminal = &clone
+				pendingThrough = s.canonicalWatermark()
+				continue
 			case <-ticker.C:
 			}
 			continue
@@ -915,13 +947,26 @@ func (s *feedSubscription) followCanonical(after eventstream.DurableFeedPosition
 		case <-s.ctx.Done():
 			return s.ctx.Err()
 		case terminal := <-s.terminals:
-			if !s.deliverFallbackTerminal(terminal) {
-				return s.ctx.Err()
-			}
+			clone := eventstream.CloneEnvelope(terminal)
+			pendingTerminal = &clone
+			pendingThrough = s.canonicalWatermark()
+			continue
 		case <-s.broker.sealedCh:
 		case <-ticker.C:
 		}
 	}
+}
+
+// canonicalWatermark captures the accepted durable cut that a pending terminal
+// must follow. Later unrelated publications do not move this terminal's cut.
+func (s *feedSubscription) canonicalWatermark() eventstream.DurableFeedPosition {
+	if s == nil || s.broker == nil {
+		return eventstream.DurableFeedPosition{}
+	}
+	s.broker.acceptMu.Lock()
+	through := s.broker.latestDurable
+	s.broker.acceptMu.Unlock()
+	return through
 }
 
 func (b *FeedBroker) canonicalSealState(after eventstream.DurableFeedPosition) (sealed, complete bool) {

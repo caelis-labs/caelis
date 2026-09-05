@@ -29,10 +29,16 @@ func ProjectSessionEventLiveSupplementEnvelope(base eventstream.Envelope, event 
 	if event == nil || event.Visibility == session.VisibilityUIOnly || isLiveStreamingNarrativeEvent(event) {
 		return out
 	}
-	return withoutLiveFinalContent(out, published)
+	return WithoutPublishedContent(out, published)
 }
 
-func withoutLiveFinalContent(events []eventstream.Envelope, published agentsdk.PublishedContent) []eventstream.Envelope {
+// WithoutPublishedContent omits content with an already accepted live owner
+// from a canonical projection, retaining its original projection positions and
+// non-content updates. It must not be applied to fresh canonical replay.
+func WithoutPublishedContent(events []eventstream.Envelope, published agentsdk.PublishedContent) []eventstream.Envelope {
+	if published == 0 {
+		return events
+	}
 	out := make([]eventstream.Envelope, 0, len(events))
 	for _, env := range events {
 		switch update := env.Update.(type) {

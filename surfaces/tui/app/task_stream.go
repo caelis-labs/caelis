@@ -501,10 +501,10 @@ func (m *Model) startTaskStreamForwarder(
 			return
 		}
 		defer sub.Close()
-		assembler := &taskstream.DeliveryAssembler{}
+		mailbox := &taskStreamMailbox{}
 		committedCursor := cursor
 		for {
-			events, cursor, activityID, replacement, open, readErr := readTaskStreamMailbox(ctx, sub.Deliveries(), assembler)
+			events, cursor, activityID, replacement, open, readErr := mailbox.read(ctx, sub.Deliveries())
 			if len(events) > 0 || replacement || cursor != "" || activityID != "" {
 				cfg.ProgramSender.SendMsg(taskStreamBatchMsg{
 					sessionID: sessionID, taskID: taskID, token: token, events: events,
@@ -532,33 +532,6 @@ func (m *Model) startTaskStreamForwarder(
 			delete(m.taskStreamCancels, taskID)
 			m.taskStreamTokens[taskID] = 0
 			m.taskStreamWanted[taskID] = false
-		}
-	}
-}
-
-func readTaskStreamMailbox(
-	ctx context.Context,
-	deliveries <-chan taskstream.Delivery,
-	assembler *taskstream.DeliveryAssembler,
-) ([]eventstream.Envelope, string, string, bool, bool, error) {
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, "", "", false, false, ctx.Err()
-		case delivery, ok := <-deliveries:
-			if !ok {
-				if assembler.Pending() {
-					return nil, "", "", false, false, errorcode.New(errorcode.Unavailable, "Task replacement ended before commit")
-				}
-				return nil, "", "", false, false, nil
-			}
-			events, replacement, err := assembler.Accept(delivery)
-			if err != nil {
-				return nil, "", "", false, false, err
-			}
-			if len(events) > 0 || replacement || delivery.NextCursor != "" || delivery.ActivityID != "" && delivery.Kind == taskstream.DeliveryStatus {
-				return events, delivery.NextCursor, delivery.ActivityID, replacement, true, nil
-			}
 		}
 	}
 }

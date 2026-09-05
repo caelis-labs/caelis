@@ -57,7 +57,7 @@ func TestShortAgentCommunicationLinksToSourceOverlay(t *testing.T) {
 	}
 }
 
-func TestReceivedAgentCommunicationExpandsLongMessage(t *testing.T) {
+func TestReceivedAgentCommunicationOpensOverlayForLongMessage(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.width = 120
 	model.height = 40
@@ -109,7 +109,7 @@ func TestReceivedAgentCommunicationExpandsLongMessage(t *testing.T) {
 	if strings.Contains(plain, "middle-marker") || !strings.Contains(model.viewportPlainLines[headerLine], "...") {
 		t.Fatalf("Received row did not reuse compact preview:\n%s", plain)
 	}
-	if token := model.viewportClickTokens[headerLine]; !strings.HasPrefix(token, agentMessageFoldTokenPrefix) {
+	if token := model.viewportClickTokens[headerLine]; token != subagentOutputOverlayClickToken("spawn-1") {
 		t.Fatalf("Received row click token = %q", token)
 	}
 	if bounds := model.viewportClickBounds[headerLine]; bounds.valid() {
@@ -118,8 +118,11 @@ func TestReceivedAgentCommunicationExpandsLongMessage(t *testing.T) {
 
 	clickViewportLine(t, model, headerLine)
 	plain = strings.Join(model.viewportPlainLines, "\n")
-	if !strings.Contains(plain, "middle-marker") {
-		t.Fatalf("Received row did not expand the hidden message:\n%s", plain)
+	if model.subagentOutputOverlay == nil || model.subagentOutputOverlay.callID != "spawn-1" {
+		t.Fatalf("Received row did not open its source overlay: %#v", model.subagentOutputOverlay)
+	}
+	if strings.Contains(plain, "middle-marker") {
+		t.Fatalf("Received row expanded the hidden message:\n%s", plain)
 	}
 }
 
@@ -136,8 +139,8 @@ func TestSubagentOverlayRendersParentMessageAsUserInput(t *testing.T) {
 	if len(blocks) != 1 {
 		t.Fatalf("overlay blocks = %#v, want one participant timeline block", blocks)
 	}
-	block, ok := blocks[0].(*UserNarrativeBlock)
-	if !ok || block.Raw != "parent: continue" {
+	block, ok := blocks[0].(*ParticipantTurnBlock)
+	if !ok || len(block.Events) != 1 || block.Events[0].Kind != SEUserInput || block.Events[0].Text != "parent: continue" {
 		t.Fatalf("overlay block = %#v, want parent user message", blocks[0])
 	}
 	if !subagentOutputViewHasTranscript(view) {

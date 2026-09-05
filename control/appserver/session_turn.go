@@ -528,9 +528,20 @@ func sessionTurnEnvelopeMatches(
 	if actual := strings.TrimSpace(envelope.SessionID); actual != "" && actual != sessionID {
 		return false
 	}
-	return strings.TrimSpace(envelope.HandleID) == strings.TrimSpace(target.HandleID) &&
-		strings.TrimSpace(envelope.RunID) == strings.TrimSpace(target.RunID) &&
-		strings.TrimSpace(envelope.TurnID) == strings.TrimSpace(target.TurnID)
+	handleID := strings.TrimSpace(envelope.HandleID)
+	runID := strings.TrimSpace(envelope.RunID)
+	turnID := strings.TrimSpace(envelope.TurnID)
+	if handleID == strings.TrimSpace(target.HandleID) &&
+		runID == strings.TrimSpace(target.RunID) &&
+		turnID == strings.TrimSpace(target.TurnID) {
+		return true
+	}
+	// Canonical Session replay retains the durable Turn ID but intentionally
+	// lacks live transport Handle/Run IDs. The command receipt is Control's
+	// trusted target, so accept only a durable identity-free projection for that
+	// exact Turn. Partial or conflicting transport identity still fails closed.
+	return handleID == "" && runID == "" && turnID != "" &&
+		turnID == strings.TrimSpace(target.TurnID) && isDurableFeedEnvelope(envelope)
 }
 
 func validSessionTurnTarget(target TurnTarget) bool {

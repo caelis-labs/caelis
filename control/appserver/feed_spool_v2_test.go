@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -269,6 +270,44 @@ func TestFeedBrokerSealedEOFDrainsCanonicalTailAfterInterruptedPrime(t *testing.
 	}
 }
 
+func TestFeedBrokerGapFillsBeforeOutOfOrderDurablePublish(t *testing.T) {
+	t.Parallel()
+
+	reader := &checkpointPageReader{}
+	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{})
+	reader.setEvents(durableProtocolEvent(1, "first"), durableProtocolEvent(2, "second"))
+
+	second := projectedEnvelope(2, "second")
+	second.HandleID = "handle-2"
+	second.RunID = "run-2"
+	second.TurnID = "turn-2"
+	if err := broker.Publish(second); err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.Prime(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.Seal(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := broker.Subscribe(t.Context(), SubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Subscription.Close()
+	events := receiveFeedEvents(t, result.Subscription, 2)
+	if events[0].EventID != "event-1" || events[1].EventID != "event-2" {
+		t.Fatalf("durable order = %#v, want event-1 then event-2", events)
+	}
+	if events[0].HandleID != "" || events[0].RunID != "" {
+		t.Fatalf("gap-filled canonical event invented live identity: %#v", events[0])
+	}
+	if events[1].HandleID != "handle-2" || events[1].RunID != "run-2" || events[1].TurnID != "turn-2" {
+		t.Fatalf("published event lost trusted live identity: %#v", events[1])
+	}
+}
+
 func TestFeedBrokerWithoutSpoolKeepsCanonicalFallbackAvailable(t *testing.T) {
 	t.Parallel()
 
@@ -373,6 +412,51 @@ func TestFeedBrokerWithoutSpoolDoesNotSkipCheckpointAheadOfAcceptedWatermark(t *
 	appendDelivery := assertFeedDelivery(t, result.Subscription.Deliveries(), FeedDeliveryAppendPage)
 	if len(appendDelivery.Events) != 1 || appendDelivery.Events[0].EventID != "event-2" {
 		t.Fatalf("canonical follower = %#v, want committed event after accepted watermark", appendDelivery)
+	}
+}
+
+func TestFeedBrokerWithoutSpoolErrorsWhenTerminalOvertakesMissingCanonicalEvent(t *testing.T) {
+	t.Parallel()
+
+	reader := &checkpointPageReader{}
+	codec, err := NewCursorCodec(CursorCodecConfig{Secret: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker, err := NewFeedBroker(FeedBrokerConfig{
+		SessionRef: session.SessionRef{SessionID: "session-1"}, Reader: reader, CursorCodec: codec,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broker.Close()
+	result, err := broker.Subscribe(t.Context(), SubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Subscription.Close()
+	assertFeedDelivery(t, result.Subscription.Deliveries(), FeedDeliveryReplaceBegin)
+	assertFeedDelivery(t, result.Subscription.Deliveries(), FeedDeliveryReplaceEnd)
+	assertFeedDelivery(t, result.Subscription.Deliveries(), FeedDeliverySync)
+
+	if err := broker.Publish(projectedEnvelope(1, "not visible from canonical reader")); err != nil {
+		t.Fatal(err)
+	}
+	terminal := eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Now())
+	terminal.SessionID = "session-1"
+	if err := broker.Publish(terminal); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case _, open := <-result.Subscription.Deliveries():
+		if open {
+			t.Fatal("unexpected delivery after canonical watermark failure")
+		}
+		if err := result.Subscription.Err(); err == nil || !strings.Contains(err.Error(), "accepted durable watermark") {
+			t.Fatalf("subscription error = %v, want canonical watermark error", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("subscription hung waiting for a canonical event that cannot be read")
 	}
 }
 
@@ -636,6 +720,53 @@ func TestFeedBrokerCapturesFallbackAndSpoolHighWaterAtomically(t *testing.T) {
 	}
 }
 
+func TestFeedCanonicalReplacementSupportsLongSession(t *testing.T) {
+	reader := &checkpointPageReader{}
+	events := make([]*session.Event, maxFeedReplacementPageEvents+1)
+	for index := range events {
+		events[index] = durableProtocolEvent(uint64(index+1), "message")
+		events[index].ID = fmt.Sprintf("event-%d", index+1)
+	}
+	reader.setEvents(events...)
+	codec, err := NewCursorCodec(CursorCodecConfig{Secret: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker, err := NewFeedBroker(FeedBrokerConfig{
+		SessionRef: session.SessionRef{SessionID: "session-1"}, Reader: reader, CursorCodec: codec,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broker.Close()
+	if err := broker.Seal(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := broker.Subscribe(t.Context(), SubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Subscription.Close()
+
+	assembler := new(FeedDeliveryAssembler)
+	var replacement []eventstream.Envelope
+	for delivery := range result.Subscription.Deliveries() {
+		assembled, replaced, err := assembler.Accept(delivery)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if replaced {
+			replacement = assembled
+		}
+	}
+	if err := result.Subscription.Err(); err != nil {
+		t.Fatalf("long canonical replacement: %v", err)
+	}
+	if len(replacement) != len(events) {
+		t.Fatalf("replacement event count = %d, want %d", len(replacement), len(events))
+	}
+}
+
 func TestFeedDeliveryAssemblerDiscardsIncompleteReplacement(t *testing.T) {
 	t.Parallel()
 
@@ -775,6 +906,20 @@ type checkpointPageReader struct {
 
 type cancelableCheckpointPageReader struct {
 	*checkpointPageReader
+}
+
+type emptyPageBarrierReader struct {
+	*checkpointPageReader
+	emptyReturned chan struct{}
+	once          sync.Once
+}
+
+func (r *emptyPageBarrierReader) EventsPage(ctx context.Context, req session.EventPageRequest) (session.EventPage, error) {
+	page, err := r.checkpointPageReader.EventsPage(ctx, req)
+	if err == nil && page.NextSeq <= req.AfterSeq {
+		r.once.Do(func() { close(r.emptyReturned) })
+	}
+	return page, err
 }
 
 func (r *cancelableCheckpointPageReader) EventsPage(ctx context.Context, req session.EventPageRequest) (session.EventPage, error) {

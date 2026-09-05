@@ -5,10 +5,11 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 // AgentInputParent is the topology address of the current Agent's parent.
-const AgentInputParent = "parent"
+const AgentInputParent = session.AgentCommunicationParentHandle
 
 // AgentInput is one Agent-to-Agent communication addressed within an Agent
 // topology. The sender is supplied by the trusted runtime context rather than

@@ -2,6 +2,7 @@ package appserver
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -74,6 +75,12 @@ func TestProcessRestartRebuildsDurableClientStateFromSessionTruth(t *testing.T) 
 	}}); err != nil {
 		t.Fatal(err)
 	}
+	canonicalEventsBeforeRestart, err := beforeRestart.EventsPage(ctx, session.EventPageRequest{
+		SessionRef: active.SessionRef, Visibility: session.EventPageCanonical,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	afterRestart := newService()
 	codec, err := NewCursorCodec(CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
@@ -110,5 +117,14 @@ func TestProcessRestartRebuildsDurableClientStateFromSessionTruth(t *testing.T) 
 		if event.Scope == eventstream.ScopeSubagent {
 			t.Fatalf("restart replay exposed retired child stream mirror: %#v", event)
 		}
+	}
+	canonicalEventsAfterReplay, err := afterRestart.EventsPage(ctx, session.EventPageRequest{
+		SessionRef: active.SessionRef, Visibility: session.EventPageCanonical,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(canonicalEventsAfterReplay, canonicalEventsBeforeRestart) {
+		t.Fatalf("canonical events changed across persistence and client replay:\nbefore = %#v\nafter  = %#v", canonicalEventsBeforeRestart, canonicalEventsAfterReplay)
 	}
 }

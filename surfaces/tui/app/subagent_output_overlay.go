@@ -79,20 +79,25 @@ func (m *Model) openSubagentOutputOverlay(blockID, callID string) bool {
 		return false
 	}
 	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return false
+	}
 	owner, ok := m.subagentOutputOwner(blockID, callID)
-	if !ok {
-		return false
+	if ok {
+		view := m.ensureSubagentOutputView(callID)
+		if view == nil {
+			return false
+		}
+		// Opening a presentation surface must not advance child lifecycle. The
+		// Spawn invocation is already Done once it returns a handle, while the
+		// child Task represented by that handle may still be running. Only hydrate
+		// the stable identity here; terminal Task observations arrive separately.
+		view.observeOwnerIdentity(owner)
+		return m.openSubagentOutputOverlayView(callID, view)
 	}
-	view := m.ensureSubagentOutputView(callID)
-	if view == nil {
-		return false
-	}
-	// Opening a presentation surface must not advance child lifecycle. The
-	// Spawn invocation is already Done once it returns a handle, while the
-	// child Task represented by that handle may still be running. Only hydrate
-	// the stable identity here; terminal Task observations arrive separately.
-	view.observeOwnerIdentity(owner)
-	return m.openSubagentOutputOverlayView(callID, view)
+	// SourceCallID links from later Turns may not share the Spawn block.
+	// Open the retained workspace only when this call is already a known owner.
+	return m.openSubagentOutputOverlayView(callID, m.subagentOutputViews[callID])
 }
 
 // openSubagentOutputOverlayView opens a retained child workspace without
@@ -141,7 +146,7 @@ func (m *Model) openSubagentOutputOverlayForMessage(blockID, messageCallID strin
 			return m.openSubagentOutputOverlay(block.BlockID(), callID)
 		}
 	}
-	return false
+	return m.openSubagentOutputOverlay(blockID, callID)
 }
 
 func agentMessageTargetFromBlock(block Block, messageCallID string) string {
@@ -617,15 +622,8 @@ func subagentOutputViewHasTranscript(view *subagentOutputView) bool {
 		return false
 	}
 	for _, block := range view.document.Blocks() {
-		switch typed := block.(type) {
-		case *ParticipantTurnBlock:
-			if len(typed.Events) > 0 {
-				return true
-			}
-		case *UserNarrativeBlock:
-			if strings.TrimSpace(typed.Raw) != "" {
-				return true
-			}
+		if typed, ok := block.(*ParticipantTurnBlock); ok && len(typed.Events) > 0 {
+			return true
 		}
 	}
 	return false

@@ -219,7 +219,7 @@ func resolveTrustedChildInputSource(
 			strings.TrimSpace(source.ID) != strings.TrimSpace(active.Controller.ControllerID) {
 			return session.ActorRef{}, nil, errorcode.New(errorcode.PermissionDenied, "Source Agent controller identity is stale")
 		}
-		return session.ControllerExecutor(active.Controller), nil, nil
+		return session.ParentCommunicationActor(), nil, nil
 	case session.ActorKindParticipant:
 		for i := range active.Participants {
 			binding := &active.Participants[i]

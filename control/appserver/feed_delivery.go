@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	maxFeedReplacementEvents = 8192
-	maxFeedReplacementBytes  = 32 << 20
+	maxFeedReplacementPageEvents = 8192
+	maxFeedReplacementPageBytes  = 32 << 20
 )
 
 // FeedDeliveryAssembler applies the common append/replacement transaction
@@ -18,7 +18,6 @@ const (
 type FeedDeliveryAssembler struct {
 	snapshotID string
 	nextPage   uint32
-	bytes      int
 	events     []eventstream.Envelope
 }
 
@@ -59,21 +58,22 @@ func (a *FeedDeliveryAssembler) Accept(delivery FeedDelivery) ([]eventstream.Env
 		if delivery.Source != FeedSourceReplacement || !a.Pending() || delivery.SnapshotID != a.snapshotID || delivery.Page != a.nextPage || delivery.NextCursor != "" || !cursorlessReplacementEnvelopes(delivery.Events) {
 			return nil, false, invalidFeedDelivery("replacement page")
 		}
-		if len(a.events)+len(delivery.Events) > maxFeedReplacementEvents {
+		if len(delivery.Events) > maxFeedReplacementPageEvents {
 			a.Reset()
-			return nil, false, errorcode.New(errorcode.ResourceExhausted, "Session replacement exceeds event limit")
+			return nil, false, errorcode.New(errorcode.ResourceExhausted, "Session replacement page exceeds event limit")
 		}
+		pageBytes := 0
 		for _, event := range delivery.Events {
 			raw, err := json.Marshal(event)
 			if err != nil {
 				a.Reset()
 				return nil, false, err
 			}
-			if a.bytes+len(raw) > maxFeedReplacementBytes {
+			pageBytes += len(raw)
+			if pageBytes > maxFeedReplacementPageBytes {
 				a.Reset()
-				return nil, false, errorcode.New(errorcode.ResourceExhausted, "Session replacement exceeds byte limit")
+				return nil, false, errorcode.New(errorcode.ResourceExhausted, "Session replacement page exceeds byte limit")
 			}
-			a.bytes += len(raw)
 		}
 		a.events = append(a.events, cloneEnvelopes(delivery.Events)...)
 		a.nextPage++
@@ -128,7 +128,6 @@ func (a *FeedDeliveryAssembler) Reset() {
 	}
 	a.snapshotID = ""
 	a.nextPage = 0
-	a.bytes = 0
 	a.events = nil
 }
 

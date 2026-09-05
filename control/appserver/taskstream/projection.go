@@ -276,6 +276,11 @@ func streamFrameEmbeddedEvents(req taskFrameProjectionRequest, frame controltask
 	if session.ProtocolPermissionOf(event) != nil {
 		return nil
 	}
+	// The child-facing source is the parent topology identity, not the
+	// controller executor name retained by a recorded Task frame.
+	if session.ProtocolAgentCommunicationOf(event) != nil && event.Actor.Kind == session.ActorKindController {
+		event.Actor = session.ParentCommunicationActor()
+	}
 	parentTool := streamParentToolRelation(req)
 	event.Meta = streamFrameEventMeta(event.Meta)
 	base := acpprojector.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: req.SessionID}, event, acpprojector.SessionEventTransport{

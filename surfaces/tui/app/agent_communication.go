@@ -140,26 +140,22 @@ func renderAgentCommunicationRows(blockID string, event SubagentEvent, eventInde
 		return nil
 	}
 	name := firstNonEmpty(event.SourceName, event.SourceID, "agent")
-	key := agentCommunicationFoldKey(event, eventIndex)
-	expanded := opts.AgentMessageExpanded != nil && opts.AgentMessageExpanded(key)
 	bodyBudget := maxInt(1, compactSingleLineBudget(width)-displayColumns("• "+name+": "))
 	displayText, folded := longCommandDisplayPreview(text, bodyBudget)
-	token := ""
-	if folded {
-		token = agentMessageFoldClickToken(key)
-		if expanded {
-			displayText = text
-		}
-	}
-	if token != "" {
-		return []RenderedRow{renderAgentMessageRow(blockID, name, displayText, ctx, token)}
-	}
 	if opts.AgentMessageTargetLinks {
 		if token := subagentOutputOverlayClickToken(event.SourceCallID); token != "" {
 			return []RenderedRow{renderAgentMessageRow(blockID, name, displayText, ctx, token)}
 		}
 	}
-	return []RenderedRow{renderAgentMessageRow(blockID, name, displayText, ctx, "")}
+	token := ""
+	if folded {
+		key := agentCommunicationFoldKey(event, eventIndex)
+		token = agentMessageFoldClickToken(key)
+		if opts.AgentMessageExpanded != nil && opts.AgentMessageExpanded(key) {
+			displayText = text
+		}
+	}
+	return []RenderedRow{renderAgentMessageRow(blockID, name, displayText, ctx, token)}
 }
 
 func agentCommunicationFoldKey(event SubagentEvent, eventIndex int) string {

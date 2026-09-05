@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 )
 
-func TestSendMessageToolAppearsAfterSuccessAndExpandsLongMessage(t *testing.T) {
+func TestSendMessageToolAppearsAfterSuccessAndOpensOverlay(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.width = 120
 	model.height = 40
@@ -91,7 +91,7 @@ func TestSendMessageToolAppearsAfterSuccessAndExpandsLongMessage(t *testing.T) {
 	if strings.Contains(plain, `Ran SendMessage`) || strings.Contains(plain, `"message"`) || strings.Contains(plain, "middle-marker") {
 		t.Fatalf("collapsed SendMessage leaked raw/full input:\n%s", plain)
 	}
-	if token := model.viewportClickTokens[headerLine]; token != acpToolPanelClickToken("message-1") {
+	if token := model.viewportClickTokens[headerLine]; token != agentMessageTargetOverlayClickToken("message-1") {
 		t.Fatalf("SendMessage header click token = %q", token)
 	}
 	if bounds := model.viewportClickBounds[headerLine]; bounds.valid() {
@@ -100,9 +100,13 @@ func TestSendMessageToolAppearsAfterSuccessAndExpandsLongMessage(t *testing.T) {
 
 	clickViewportLine(t, model, headerLine)
 	plain = strings.Join(model.viewportPlainLines, "\n")
-	if !strings.Contains(plain, "middle-marker") {
-		t.Fatalf("SendMessage row did not expand its hidden message:\n%s", plain)
+	if model.subagentOutputOverlay == nil || model.subagentOutputOverlay.callID != "spawn-1" {
+		t.Fatalf("SendMessage row did not open its target overlay: %#v", model.subagentOutputOverlay)
 	}
+	if strings.Contains(plain, "middle-marker") {
+		t.Fatalf("SendMessage row expanded its hidden message:\n%s", plain)
+	}
+	model.subagentOutputOverlay = nil
 
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2",

@@ -1235,51 +1235,86 @@ func TestChatAgentDrainsAgentCommunicationWithTrustedIdentity(t *testing.T) {
 func TestAgentCommunicationPersistenceRoundTripMatchesRuntimeModelContext(t *testing.T) {
 	t.Parallel()
 
-	actor := session.ActorRef{
-		Kind: session.ActorKindParticipant, ID: "reviewer-1", Role: "delegated", Name: "reviewer",
-	}
-	messages := []model.Message{}
-	var produced []*session.Event
-	accepted, err := (&Agent{}).drainPendingSubmissions(agent.NewContext(agent.ContextSpec{
-		Context: context.Background(),
-		DrainSubmissions: func() []agent.Submission {
-			return []agent.Submission{{
-				Kind: agent.SubmissionKindAgentCommunication, Text: "review complete", Actor: actor,
-			}}
+	for _, test := range []struct {
+		name   string
+		actor  session.ActorRef
+		text   string
+		header string
+		leaked []string
+	}{
+		{
+			name: "participant",
+			actor: session.ActorRef{
+				Kind: session.ActorKindParticipant, ID: "reviewer-1", Role: "delegated", Name: "reviewer",
+			},
+			text:   "review complete",
+			header: "Sender: reviewer",
 		},
-	}), &messages, func(event *session.Event) bool {
-		produced = append(produced, session.CloneEvent(event))
-		return true
-	})
-	if err != nil || !accepted || len(produced) != 1 {
-		t.Fatalf("runtime production = accepted %v events %#v err %v", accepted, produced, err)
-	}
-	want := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: context.Background(), Events: produced}))
-	raw, err := json.Marshal(produced)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded []session.Event
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	replayed := make([]*session.Event, 0, len(decoded))
-	for _, event := range decoded {
-		migrated, migrateErr := session.MigrateEvent(event)
-		if migrateErr != nil {
-			t.Fatal(migrateErr)
-		}
-		if validateErr := session.ValidateDurableCoreEvent(&migrated); validateErr != nil {
-			t.Fatal(validateErr)
-		}
-		replayed = append(replayed, &migrated)
-	}
-	got := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: context.Background(), Events: replayed}))
-	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(got, messages) {
-		t.Fatalf("rebuilt model context = %#v, want runtime-produced %#v", got, want)
-	}
-	if display := session.EventDisplayText(replayed[0]); display != "review complete" {
-		t.Fatalf("round-trip display text = %q, want raw Agent message", display)
+		{
+			name: "controller parent identity",
+			actor: session.ControllerExecutor(session.ControllerBinding{
+				Kind: session.ControllerKindKernel, ControllerID: "sdk-kernel", AgentName: "local",
+			}),
+			text:   "continue from parent",
+			header: "Sender: parent",
+			leaked: []string{"local", "sdk-kernel", "kernel"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			messages := []model.Message{}
+			var produced []*session.Event
+			accepted, err := (&Agent{}).drainPendingSubmissions(agent.NewContext(agent.ContextSpec{
+				Context: context.Background(),
+				DrainSubmissions: func() []agent.Submission {
+					return []agent.Submission{{
+						Kind: agent.SubmissionKindAgentCommunication, Text: test.text, Actor: test.actor,
+					}}
+				},
+			}), &messages, func(event *session.Event) bool {
+				produced = append(produced, session.CloneEvent(event))
+				return true
+			})
+			if err != nil || !accepted || len(produced) != 1 || len(messages) != 1 {
+				t.Fatalf("runtime production = accepted %v events %#v messages %#v err %v", accepted, produced, messages, err)
+			}
+			modelText := messages[0].TextContent()
+			if !strings.Contains(modelText, test.header) {
+				t.Fatalf("runtime model header = %q, want %q", modelText, test.header)
+			}
+			for _, leaked := range test.leaked {
+				if strings.Contains(modelText, leaked) {
+					t.Fatalf("runtime model context leaked %q: %q", leaked, modelText)
+				}
+			}
+			want := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: context.Background(), Events: produced}))
+			raw, err := json.Marshal(produced)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded []session.Event
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			replayed := make([]*session.Event, 0, len(decoded))
+			for _, event := range decoded {
+				migrated, migrateErr := session.MigrateEvent(event)
+				if migrateErr != nil {
+					t.Fatal(migrateErr)
+				}
+				if validateErr := session.ValidateDurableCoreEvent(&migrated); validateErr != nil {
+					t.Fatal(validateErr)
+				}
+				replayed = append(replayed, &migrated)
+			}
+			got := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: context.Background(), Events: replayed}))
+			if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(got, messages) {
+				t.Fatalf("rebuilt model context = %#v, want runtime-produced %#v", got, want)
+			}
+			if display := session.EventDisplayText(replayed[0]); display != test.text {
+				t.Fatalf("round-trip display text = %q, want raw Agent message", display)
+			}
+		})
 	}
 }
 
