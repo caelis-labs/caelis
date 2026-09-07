@@ -96,6 +96,14 @@ func TestInitializeUsesSDKClientCapabilities(t *testing.T) {
 }
 
 func TestPendingPromptAndSteeringResponsesShareUpdateBarrier(t *testing.T) {
+	for _, batch := range []bool{false, true} {
+		t.Run(fmt.Sprintf("batch=%t", batch), func(t *testing.T) {
+			testPendingPromptAndSteeringResponsesShareUpdateBarrier(t, batch)
+		})
+	}
+}
+
+func testPendingPromptAndSteeringResponsesShareUpdateBarrier(t *testing.T, batch bool) {
 	t.Parallel()
 
 	clientSide, peerSide := net.Pipe()
@@ -116,7 +124,7 @@ func TestPendingPromptAndSteeringResponsesShareUpdateBarrier(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	responsesWritten := make(chan struct{})
-	go servePromptAndSteering(t, peerSide, responsesWritten)
+	go servePromptAndSteering(t, peerSide, responsesWritten, batch)
 
 	prompt, err := acpClient.PreparePromptParts("session-1", []json.RawMessage{
 		mustMarshalRaw(TextContent{Type: "text", Text: "start"}),
@@ -249,7 +257,7 @@ func TestDecodeStandardSessionStateUpdatesRejectsInvalidVariants(t *testing.T) {
 	}
 }
 
-func servePromptAndSteering(t *testing.T, peer net.Conn, responsesWritten chan<- struct{}) {
+func servePromptAndSteering(t *testing.T, peer net.Conn, responsesWritten chan<- struct{}, batch bool) {
 	t.Helper()
 	scanner := bufio.NewScanner(peer)
 	ids := make(map[string]json.RawMessage)
@@ -288,8 +296,16 @@ func servePromptAndSteering(t *testing.T, peer net.Conn, responsesWritten chan<-
 			"result":  PromptResponse{StopReason: "end_turn"},
 		},
 	}
-	for _, message := range messages {
-		raw, err := json.Marshal(message)
+	frames := make([]any, 0, len(messages))
+	if batch {
+		frames = append(frames, messages)
+	} else {
+		for _, message := range messages {
+			frames = append(frames, message)
+		}
+	}
+	for _, frame := range frames {
+		raw, err := json.Marshal(frame)
 		if err != nil {
 			t.Errorf("encode response: %v", err)
 			return
