@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"io"
 	"strings"
 	"time"
@@ -90,7 +89,7 @@ func runTUI(
 		NoAnimation:         options.NoAnimation,
 		TaskStreams:         clients.Tasks,
 		OnStart: func() {
-			startTUISandboxRefresh(programCtx, typedDriver, sender)
+			startTUISandboxRefresh(programCtx, typedDriver)
 			startTUIUpdateCheck(programCtx, storeDir, sender)
 		},
 		OnUpdateRequested: func() {
@@ -119,29 +118,22 @@ type tuiSandboxRefresher interface {
 	RefreshSandbox(context.Context) error
 }
 
-func startTUISandboxRefresh(ctx context.Context, service tuiSandboxRefresher, sender *tuiapp.ProgramSender) {
-	if service == nil || sender == nil {
+func startTUISandboxRefresh(ctx context.Context, service tuiSandboxRefresher) {
+	if service == nil {
 		return
 	}
-	go func() {
-		refreshCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		defer cancel()
-		if err := service.RefreshSandbox(refreshCtx); err != nil && !errors.Is(err, context.Canceled) {
-			sender.SendMsg(tuiapp.SetHintMsg{
-				Hint:           formatTUISandboxRefreshHint(err),
-				Priority:       tuiapp.HintPriorityHigh,
-				ClearOnMessage: true,
-			})
-		}
-	}()
+	go runTUISandboxRefresh(ctx, service)
 }
 
-func formatTUISandboxRefreshHint(err error) string {
-	detail := strings.Join(strings.Fields(strings.TrimSpace(err.Error())), " ")
-	if detail == "" {
-		return "Windows sandbox refresh failed. Run /doctor."
+// runTUISandboxRefresh is best-effort Host maintenance. Failures stay in Host
+// diagnostics; this path must not emit a TUI hint or write stdout/stderr.
+func runTUISandboxRefresh(ctx context.Context, service tuiSandboxRefresher) {
+	if service == nil {
+		return
 	}
-	return "Windows sandbox refresh failed: " + detail
+	refreshCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	_ = service.RefreshSandbox(refreshCtx)
 }
 
 func startTUIUpdateCheck(ctx context.Context, storeDir string, sender *tuiapp.ProgramSender) {

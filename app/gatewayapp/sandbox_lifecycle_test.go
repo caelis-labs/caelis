@@ -1,12 +1,16 @@
 package gatewayapp
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 func (s *Stack) runSandboxLifecycle(ctx context.Context, action sandboxLifecycleAction) (SandboxStatus, error) {
@@ -245,6 +249,165 @@ func TestSandboxLifecyclePropagatesActionError(t *testing.T) {
 	}
 }
 
+func TestSandboxRefreshFailureLogsRawErrorAndKeepsUnknownOutcome(t *testing.T) {
+	refreshErr := errors.New("impl/sandbox/windows: refresh sandbox: Access is denied")
+	closeErr := errors.New("impl/sandbox/windows: close sandbox: ACL handle still held")
+	runtime := &sandboxLifecycleRefreshRuntime{
+		sandboxLifecycleTestRuntime: newSandboxLifecycleTestRuntime(sandbox.BackendWindows, sandbox.BackendWindows),
+		refreshErr:                  refreshErr,
+	}
+	runtime.closeErr = closeErr
+	stack := sandboxLifecycleTestStack(newSandboxLifecycleTestRuntime("", sandbox.BackendHost), "windows")
+	logger, logs := sandboxLifecycleTestDiagnostics()
+	stack.composition.authorities.diagnostics = logger
+	stack.commandBackend.sandboxLifecycleFactory = func(cfg sandbox.Config, _ sandbox.Runtime) (sandbox.LifecycleTarget, error) {
+		return sandbox.LifecycleTarget{Runtime: runtime, Config: cfg}, nil
+	}
+
+	result, err := stack.commandBackend.executeConfigurationCommand(context.Background(), appserver.ActionSandboxRefresh, appserver.SandboxRequest{})
+	if !errors.Is(err, refreshErr) || !errors.Is(err, closeErr) {
+		t.Fatalf("RefreshSandbox() error = %v, want refresh and close errors", err)
+	}
+	var outcomeErr *appserver.OutcomeError
+	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeUnknown || result.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("RefreshSandbox() = %#v, %v, want unknown effect outcome", result, err)
+	}
+	if runtime.refreshCalls != 1 {
+		t.Fatalf("Refresh() calls = %d, want 1", runtime.refreshCalls)
+	}
+	if runtime.closeCalls != 1 {
+		t.Fatalf("Close() calls = %d, want 1 for temporary runtime", runtime.closeCalls)
+	}
+	got := logs.String()
+	for _, want := range []string{
+		`"msg":"Windows sandbox refresh failed"`,
+		`"component":"sandbox"`,
+		`"operation":"refresh"`,
+		refreshErr.Error(),
+		closeErr.Error(),
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("diagnostics = %q, want %s", got, want)
+		}
+	}
+}
+
+func TestSandboxRefreshCanceledDoesNotLogUnlessCloseFails(t *testing.T) {
+	runtime := &sandboxLifecycleRefreshRuntime{
+		sandboxLifecycleTestRuntime: newSandboxLifecycleTestRuntime(sandbox.BackendWindows, sandbox.BackendWindows),
+		refreshErr:                  context.Canceled,
+	}
+	stack := sandboxLifecycleTestStack(runtime, "windows")
+	logger, logs := sandboxLifecycleTestDiagnostics()
+	stack.composition.authorities.diagnostics = logger
+
+	_, _, _, err := stack.commandBackend.runSandboxLifecycleCommand(context.Background(), sandboxLifecycleCommand{refresh: true}, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("refresh canceled error = %v", err)
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("canceled refresh diagnostics = %q, want empty", logs.String())
+	}
+
+	aclErr := errors.New("ACL update denied")
+	runtime.refreshErr = errors.Join(aclErr, context.Canceled)
+	_, _, _, err = stack.commandBackend.runSandboxLifecycleCommand(context.Background(), sandboxLifecycleCommand{refresh: true}, nil)
+	if !errors.Is(err, aclErr) || !strings.Contains(logs.String(), aclErr.Error()) {
+		t.Fatalf("joined cancellation lost ACL failure: err=%v, logs=%q", err, logs.String())
+	}
+	logs.Reset()
+
+	closeErr := errors.New("impl/sandbox/windows: close sandbox: Access is denied")
+	temp := &sandboxLifecycleRefreshRuntime{
+		sandboxLifecycleTestRuntime: newSandboxLifecycleTestRuntime(sandbox.BackendWindows, sandbox.BackendWindows),
+		refreshErr:                  context.Canceled,
+	}
+	temp.closeErr = closeErr
+	stack.commandBackend.sandboxLifecycleFactory = func(cfg sandbox.Config, _ sandbox.Runtime) (sandbox.LifecycleTarget, error) {
+		return sandbox.LifecycleTarget{Runtime: temp, Config: cfg}, nil
+	}
+	stack.composition.exec = newSandboxLifecycleTestRuntime("", sandbox.BackendHost)
+	_, _, _, err = stack.commandBackend.runSandboxLifecycleCommand(context.Background(), sandboxLifecycleCommand{refresh: true}, nil)
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("canceled refresh with close error = %v, want %v", err, closeErr)
+	}
+	if !strings.Contains(logs.String(), closeErr.Error()) || strings.Contains(logs.String(), "context canceled") {
+		t.Fatalf("diagnostics = %q, want raw close error without canceled refresh", logs.String())
+	}
+}
+
+func TestSandboxRefreshNilDiagnosticsDoesNotPanic(t *testing.T) {
+	runtime := &sandboxLifecycleRefreshRuntime{
+		sandboxLifecycleTestRuntime: newSandboxLifecycleTestRuntime(sandbox.BackendWindows, sandbox.BackendWindows),
+		refreshErr:                  errors.New("refresh failed"),
+	}
+	stack := sandboxLifecycleTestStack(runtime, "windows")
+	_, _, _, err := stack.commandBackend.runSandboxLifecycleCommand(context.Background(), sandboxLifecycleCommand{refresh: true}, nil)
+	if err == nil {
+		t.Fatal("Refresh() error = nil, want refresh failure")
+	}
+}
+
+func TestSandboxExplicitLifecycleFailuresStayErrorsWithoutRefreshLog(t *testing.T) {
+	prepareErr := errors.New("prepare failed")
+	repairErr := errors.New("repair failed")
+	resetErr := errors.New("reset failed")
+	tests := []struct {
+		name    string
+		action  appserver.Action
+		runtime sandbox.Runtime
+		wantErr error
+	}{
+		{
+			name:   "prepare",
+			action: appserver.ActionSandboxPrepare,
+			runtime: &sandboxLifecyclePrepareRuntime{
+				sandboxLifecycleTestRuntime: newSandboxLifecycleTestRuntime(sandbox.BackendWindows, sandbox.BackendWindows),
+				prepareErr:                  prepareErr,
+			},
+			wantErr: prepareErr,
+		},
+		{
+			name:   "repair",
+			action: appserver.ActionSandboxRepair,
+			runtime: &sandboxLifecycleRepairRuntime{
+				sandboxLifecyclePrepareRuntime: &sandboxLifecyclePrepareRuntime{
+					sandboxLifecycleTestRuntime: newSandboxLifecycleTestRuntime(sandbox.BackendWindows, sandbox.BackendWindows),
+				},
+				repairErr: repairErr,
+			},
+			wantErr: repairErr,
+		},
+		{
+			name:   "reset",
+			action: appserver.ActionSandboxReset,
+			runtime: &sandboxLifecycleResetRuntime{
+				sandboxLifecycleTestRuntime: newSandboxLifecycleTestRuntime(sandbox.BackendWindows, sandbox.BackendWindows),
+				resetErr:                    resetErr,
+			},
+			wantErr: resetErr,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stack := sandboxLifecycleTestStack(tt.runtime, "windows")
+			logger, logs := sandboxLifecycleTestDiagnostics()
+			stack.composition.authorities.diagnostics = logger
+			result, err := stack.commandBackend.executeConfigurationCommand(context.Background(), tt.action, appserver.SandboxRequest{})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("%s error = %v, want %v", tt.name, err, tt.wantErr)
+			}
+			var outcomeErr *appserver.OutcomeError
+			if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeUnknown || result.Outcome != appserver.OutcomeCommitted {
+				t.Fatalf("%s = %#v, %v, want unknown effect outcome", tt.name, result, err)
+			}
+			if strings.Contains(logs.String(), "Windows sandbox refresh failed") {
+				t.Fatalf("%s wrote refresh diagnostics = %q", tt.name, logs.String())
+			}
+		})
+	}
+}
+
 func TestCloseWorkspaceResourcesRetainsFailedRuntimeForRetry(t *testing.T) {
 	closeErr := errors.New("close failed")
 	runtime := newSandboxLifecycleTestRuntime(sandbox.BackendHost, sandbox.BackendHost)
@@ -377,4 +540,20 @@ type sandboxLifecycleResetRuntime struct {
 func (r *sandboxLifecycleResetRuntime) Reset(context.Context) error {
 	r.resetCalls++
 	return r.resetErr
+}
+
+type sandboxLifecycleRefreshRuntime struct {
+	*sandboxLifecycleTestRuntime
+	refreshCalls int
+	refreshErr   error
+}
+
+func (r *sandboxLifecycleRefreshRuntime) Refresh(context.Context) error {
+	r.refreshCalls++
+	return r.refreshErr
+}
+
+func sandboxLifecycleTestDiagnostics() (*slog.Logger, *bytes.Buffer) {
+	logs := &bytes.Buffer{}
+	return slog.New(slog.NewJSONHandler(logs, nil)), logs
 }

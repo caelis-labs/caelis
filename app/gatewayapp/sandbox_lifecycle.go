@@ -64,7 +64,9 @@ func (s *controlCommandBackend) runSandboxLifecycleCommand(
 		}
 		effectErr := refresher.Refresh(ctx)
 		status := s.sandboxLifecycleStatus(target)
-		return status, doc.ConfigurationRevision, true, errors.Join(effectErr, target.Close())
+		closeErr := target.Close()
+		s.logSandboxRefreshFailure(effectErr, closeErr)
+		return status, doc.ConfigurationRevision, true, errors.Join(effectErr, closeErr)
 	}
 	if target.NoOp {
 		return s.composition.SandboxStatus(), doc.ConfigurationRevision, false, nil
@@ -179,4 +181,23 @@ func sandboxConfigFromPort(cfg sandbox.Config) SandboxConfig {
 		WritableRoots:    append([]string(nil), cfg.WritableRoots...),
 		ReadOnlySubpaths: append([]string(nil), cfg.ReadOnlySubpaths...),
 	}
+}
+
+// logSandboxRefreshFailure records the raw refresh and close errors on the
+// Host diagnostics logger. The caller still returns those errors so Control
+// keeps OutcomeUnknown for an unproven effect.
+func (s *controlCommandBackend) logSandboxRefreshFailure(refreshErr, closeErr error) {
+	if refreshErr == context.Canceled { //nolint:errorlint // Joined cancellation may also carry an ACL or cache failure.
+		refreshErr = nil
+	}
+	err := errors.Join(refreshErr, closeErr)
+	if err == nil || s.composition.authorities.diagnostics == nil {
+		return
+	}
+	s.composition.authorities.diagnostics.Warn(
+		"Windows sandbox refresh failed",
+		"component", "sandbox",
+		"operation", "refresh",
+		"error", err,
+	)
 }

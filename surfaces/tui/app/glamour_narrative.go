@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	"charm.land/glamour/v2"
 	gansi "charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
 
@@ -128,7 +127,7 @@ type glamourRendererKey struct {
 
 var glamourCache struct {
 	sync.Mutex
-	entries map[glamourRendererKey]*glamour.TermRenderer
+	entries map[glamourRendererKey]*narrativeMarkdown
 	order   []glamourRendererKey
 }
 
@@ -162,13 +161,13 @@ func clearGlamourCache() {
 	glamourStreamingCache.Unlock()
 }
 
-func getGlamourRenderer(width int, theme tuikit.Theme, roleStyle tuikit.LineStyle) *glamour.TermRenderer {
+func getGlamourRenderer(width int, theme tuikit.Theme, roleStyle tuikit.LineStyle) *narrativeMarkdown {
 	glamourCache.Lock()
 	defer glamourCache.Unlock()
 	return getGlamourRendererLocked(width, theme, roleStyle)
 }
 
-func getGlamourRendererLocked(width int, theme tuikit.Theme, roleStyle tuikit.LineStyle) *glamour.TermRenderer {
+func getGlamourRendererLocked(width int, theme tuikit.Theme, roleStyle tuikit.LineStyle) *narrativeMarkdown {
 	themeKey := themeRenderCacheKey(theme)
 	key := glamourRendererKey{width: width, themeKey: themeKey, role: roleStyle}
 	if renderer := glamourCache.entries[key]; renderer != nil {
@@ -176,15 +175,12 @@ func getGlamourRendererLocked(width int, theme tuikit.Theme, roleStyle tuikit.Li
 		return renderer
 	}
 
-	renderer, err := glamour.NewTermRenderer(
-		glamour.WithStyles(narrativeStyleConfig(theme, roleStyle)),
-		glamour.WithWordWrap(width),
-		glamour.WithTableWrap(true),
-		glamour.WithInlineTableLinks(true),
-	)
-	if err != nil {
-		return nil
-	}
+	renderer := newNarrativeMarkdown(gansi.Options{
+		Styles:           narrativeStyleConfig(theme, roleStyle),
+		WordWrap:         width,
+		TableWrap:        boolPtr(true),
+		InlineTableLinks: true,
+	})
 
 	storeGlamourRenderer(key, renderer)
 	return renderer
@@ -193,11 +189,7 @@ func getGlamourRendererLocked(width int, theme tuikit.Theme, roleStyle tuikit.Li
 func renderGlamourMarkdown(raw string, width int, theme tuikit.Theme, roleStyle tuikit.LineStyle) (string, error) {
 	glamourCache.Lock()
 	defer glamourCache.Unlock()
-	renderer := getGlamourRendererLocked(width, theme, roleStyle)
-	if renderer == nil {
-		return "", nil
-	}
-	return renderer.Render(raw)
+	return getGlamourRendererLocked(width, theme, roleStyle).Render(raw)
 }
 
 func touchGlamourRendererCacheKey(key glamourRendererKey) {
@@ -211,9 +203,9 @@ func touchGlamourRendererCacheKey(key glamourRendererKey) {
 	glamourCache.order = append(glamourCache.order, key)
 }
 
-func storeGlamourRenderer(key glamourRendererKey, renderer *glamour.TermRenderer) {
+func storeGlamourRenderer(key glamourRendererKey, renderer *narrativeMarkdown) {
 	if glamourCache.entries == nil {
-		glamourCache.entries = make(map[glamourRendererKey]*glamour.TermRenderer, glamourRendererCacheMaxEntries)
+		glamourCache.entries = make(map[glamourRendererKey]*narrativeMarkdown, glamourRendererCacheMaxEntries)
 	}
 	if old := glamourCache.entries[key]; old != nil {
 		glamourCache.entries[key] = renderer
