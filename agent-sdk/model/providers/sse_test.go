@@ -31,6 +31,52 @@ func TestReadSSEWithFirstEventTimeout(t *testing.T) {
 	}
 }
 
+type sseCloseObservedReader struct {
+	*io.PipeReader
+	closed chan struct{}
+}
+
+func (r sseCloseObservedReader) Close() error {
+	close(r.closed)
+	return r.PipeReader.Close()
+}
+
+func TestSSETimeoutDrainsActiveCallbackBeforeReturning(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	closed, entered, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- readSSEWithEventTimeout(sseCloseObservedReader{reader, closed}, time.Second, 20*time.Millisecond, func([]byte) error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	_, err := io.WriteString(writer, "data: {}\n\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	<-closed
+	select {
+	case err := <-done:
+		close(release)
+		t.Fatalf("timeout returned before callback drained: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case err := <-done:
+		if !errors.Is(err, errStreamIdleTimeout) {
+			t.Fatalf("cause=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("callback did not drain")
+	}
+}
+
 func TestReadSSEWithFirstEventTimeout_AllowsSilenceAfterFirstEvent(t *testing.T) {
 	reader, writer := io.Pipe()
 	defer reader.Close()

@@ -33,6 +33,8 @@ func (m *systemAgentReasoningModel) Name() string {
 	return m.inner.Name()
 }
 
+func (*systemAgentReasoningModel) TracksInvocations() {}
+
 func (m *systemAgentReasoningModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	if m == nil || m.inner == nil {
 		return func(yield func(*model.StreamEvent, error) bool) {
@@ -40,11 +42,11 @@ func (m *systemAgentReasoningModel) Generate(ctx context.Context, req *model.Req
 		}
 	}
 	if req == nil {
-		return m.inner.Generate(ctx, nil)
+		return model.Generate(ctx, m.inner, nil)
 	}
 	cloned := *req
 	cloned.Reasoning.Effort = m.effort
-	return m.inner.Generate(ctx, &cloned)
+	return model.Generate(ctx, m.inner, &cloned)
 }
 
 func (m *systemAgentReasoningModel) Capabilities() model.Capabilities {

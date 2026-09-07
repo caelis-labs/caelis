@@ -189,6 +189,7 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 				yield(nil, err)
 				return
 			}
+			model.RecordInvocationUsage(ctx, ollamaUsage(out))
 			msg, err := ollamaToKernelMessage(out.Message)
 			if err != nil {
 				yield(nil, err)
@@ -221,8 +222,9 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			if strings.TrimSpace(chunk.Model) != "" {
 				modelID = chunk.Model
 			}
-			if one := ollamaUsage(chunk); one.TotalTokens > 0 || one.PromptTokens > 0 || one.CompletionTokens > 0 {
+			if one := ollamaUsage(chunk); one.IsReported() {
 				usage = one
+				model.RecordInvocationUsage(ctx, usage)
 			}
 			if text := chunk.Message.Thinking; text != "" {
 				acc.reasoning.WriteString(text)

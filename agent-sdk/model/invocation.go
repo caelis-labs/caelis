@@ -5,6 +5,7 @@ import (
 	"errors"
 	"iter"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 )
@@ -20,6 +21,27 @@ type Invocation struct {
 }
 
 type invocationObserverKey struct{}
+
+type invocationUsageKey struct{}
+type invocationUsage struct {
+	mu     sync.Mutex
+	latest Usage
+}
+
+// RecordInvocationUsage retains a provider-normalized cumulative measurement
+// as soon as it is decoded, even if no successful response is emitted later.
+// It updates only the current actual attempt, never adds cumulative chunks,
+// and is a no-op outside Generate's invocation accounting context.
+func RecordInvocationUsage(ctx context.Context, usage Usage) {
+	if !usage.IsReported() {
+		return
+	}
+	if state, _ := ctx.Value(invocationUsageKey{}).(*invocationUsage); state != nil {
+		state.mu.Lock()
+		state.latest = usage
+		state.mu.Unlock()
+	}
+}
 
 // WithInvocationObserver installs a synchronous, caller-owned accounting sink.
 // Provider payloads cannot install observers or choose invocation identities.
@@ -54,11 +76,16 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 			return
 		}
 		receipt := Invocation{ID: uuid.NewString(), Model: strings.TrimSpace(llm.Name()), Outcome: "failed"}
+		usage := &invocationUsage{}
+		attemptCtx := context.WithValue(ctx, invocationUsageKey{}, usage)
 		if provider, ok := llm.(interface{ ProviderName() string }); ok {
 			receipt.Provider = strings.TrimSpace(provider.ProviderName())
 		}
 		var cause error
 		defer func() {
+			usage.mu.Lock()
+			receipt.Usage = usage.latest
+			usage.mu.Unlock()
 			if errors.Is(cause, context.Canceled) || ctx.Err() != nil {
 				receipt.Outcome = "cancelled"
 			}
@@ -66,16 +93,14 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 				observer(receipt)
 			}
 		}()
-		for event, err := range llm.Generate(ctx, CloneRequest(req)) {
+		for event, err := range llm.Generate(attemptCtx, CloneRequest(req)) {
 			if event != nil && event.Response != nil {
 				cloned := *event
 				response := *event.Response
 				response.InvocationID = receipt.ID
 				cloned.Response = &response
 				event = &cloned
-				if response.Usage.IsReported() {
-					receipt.Usage = response.Usage
-				}
+				RecordInvocationUsage(attemptCtx, response.Usage)
 				if receipt.Provider == "" {
 					receipt.Provider = strings.TrimSpace(response.Provider)
 				}

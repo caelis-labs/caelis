@@ -3,12 +3,33 @@ package gatewayapp
 import (
 	"context"
 	"fmt"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
+
+type guardianInvocationCollector struct {
+	mu       sync.Mutex
+	attempts []model.Invocation
+}
+
+func (c *guardianInvocationCollector) collect(in model.Invocation) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.attempts = append(c.attempts, in)
+}
+
+// snapshot is consumed only after system-managed Run has drained its producer.
+// The lock protects observer delivery; it does not replace that completion gate.
+func (c *guardianInvocationCollector) snapshot() []model.Invocation {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.attempts)
+}
 
 // guardianUsagePersistenceError is an accounting failure after actual model
 // work. It must not turn a completed policy decision into a retryable decision.

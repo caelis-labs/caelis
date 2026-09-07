@@ -81,10 +81,10 @@ func (r *guardianApprovalReviewer) Decide(ctx context.Context, req kernel.Approv
 			return guardianDeterministicDenial(req.Approval, "automatic approval review denied malformed approval options: "+err.Error()), nil
 		}
 	}
-	var attempts []model.Invocation
-	ctx = model.WithInvocationObserver(ctx, func(in model.Invocation) { attempts = append(attempts, in) })
+	attempts := &guardianInvocationCollector{}
+	ctx = model.WithInvocationObserver(ctx, attempts.collect)
 	defer func() {
-		if persistErr := r.persistGuardianInvocations(ctx, req, attempts); persistErr != nil {
+		if persistErr := r.persistGuardianInvocations(ctx, req, attempts.snapshot()); persistErr != nil {
 			if resultErr != nil {
 				resultErr = errors.Join(resultErr, persistErr)
 			} else {
@@ -104,7 +104,7 @@ func (r *guardianApprovalReviewer) Decide(ctx context.Context, req kernel.Approv
 	}
 	// Compatibility for injected legacy runners that do not emit receipts. Drop
 	// this fallback when every supported system-agent runner uses model.Generate.
-	if len(attempts) == 0 {
+	if len(attempts.snapshot()) == 0 {
 		r.storeApprovalReviewAccounting(approvalAccountingKey(req), approvalReviewAccountingFromEvent(assistantEvent))
 	}
 	return finalizeGuardianDecision(req.Approval, parsed)

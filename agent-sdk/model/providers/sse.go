@@ -143,6 +143,9 @@ func readSSEWithFirstEventTimeout(reader io.Reader, timeout time.Duration, onDat
 			if closer, ok := reader.(interface{ Close() error }); ok {
 				_ = closer.Close()
 			}
+			// Closing initiates shutdown; callbacks must actually finish before
+			// their provider iterator and invocation receipt can terminate.
+			<-errCh
 			return newStreamFirstEventTimeoutError(timeout)
 		}
 	}
@@ -228,6 +231,7 @@ func readSSEWithActivityTimeout(
 			if closer, ok := reader.(interface{ Close() error }); ok {
 				_ = closer.Close()
 			}
+			<-errCh
 			if !seenEvent {
 				return newStreamFirstEventTimeoutError(firstEventTimeout)
 			}

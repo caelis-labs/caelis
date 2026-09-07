@@ -139,6 +139,9 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 			if err := json.Unmarshal(data, &event); err != nil {
 				return fmt.Errorf("openai codex: decode stream event: %w", err)
 			}
+			if event.Response != nil && event.Response.Usage != nil {
+				model.RecordInvocationUsage(ctx, event.Response.Usage.toKernelUsage())
+			}
 			switch event.Type {
 			case "response.output_item.added", "response.output_item.done":
 				if event.Item != nil {

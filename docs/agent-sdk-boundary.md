@@ -137,6 +137,16 @@ not establish completeness for attempts interrupted by process crashes. Historic
 responses without a matching receipt remain readable until the supported upgrade
 floor requires receipts; equal token values alone never prove duplicate calls.
 
+Forwarding model wrappers implement `InvocationTracker` and delegate through
+`model.Generate`, including when the injected provider has no retry wrapper.
+Provider adapters call `RecordInvocationUsage` when cumulative measurements are
+decoded; later stream errors or cancellation must not discard those measurements
+or turn them into successful responses. Successive snapshots replace, not add to,
+the measurement for that attempt. System-managed reviews drain their Runner with
+an uncancelled wait before consuming observers. A non-cooperative producer keeps
+the parent invocation and its fence alive until actual quiescence; bounded receipt
+writes begin only after that gate, and `Close` is not proof of completion.
+
 Persistence requires revision CAS, full-payload idempotency, fenced writes,
 monotonic replay, schema migration before typed decode, and fail-closed handling
 of unknown versions. Persistence or replay changes require whole-object round
