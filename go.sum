@@ -46,8 +46,8 @@ github.com/bahlo/generic-list-go v0.2.0 h1:5sz/EEAK+ls5wF+NeqDpk5+iNdMDXrh3z3nPn
 github.com/bahlo/generic-list-go v0.2.0/go.mod h1:2KvAjgMlE5NNynlg/5iLrrCCZ2+5xWbdbCW3pNTGyYg=
 github.com/buger/jsonparser v1.1.2 h1:frqHqw7otoVbk5M8LlE/L7HTnIq2v9RX6EJ48i9AxJk=
 github.com/buger/jsonparser v1.1.2/go.mod h1:6RYKKt7H4d4+iWqouImQ9R2FZql3VbhNgx27UK13J/0=
-github.com/caelis-labs/acp-go-sdk v1.1.0 h1:/8iE6Hs2M4jQoiVOsLuhruj1OhzmSCquGMHoYqiV0Rw=
-github.com/caelis-labs/acp-go-sdk v1.1.0/go.mod h1:e7QRdJfJFrPtixgiJBRwqQMLCrwV7X6e2X2ZDF06ohg=
+github.com/caelis-labs/acp-go-sdk v1.2.0 h1:QLJW8C+1F6rJKwJvjUwdyb84aP6tuVzDu2RsRP2aZ8w=
+github.com/caelis-labs/acp-go-sdk v1.2.0/go.mod h1:e7QRdJfJFrPtixgiJBRwqQMLCrwV7X6e2X2ZDF06ohg=
 github.com/caelis-labs/memory v0.5.1 h1:DfKQP8bsAW8k7nngkDZkNuU80nfevlx2VU9yfJdKIWA=
 github.com/caelis-labs/memory v0.5.1/go.mod h1:C2/X3ya/mZ0AABL9JHdOW91MvfAXoen3LVesJetszE4=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
