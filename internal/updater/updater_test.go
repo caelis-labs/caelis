@@ -64,16 +64,16 @@ func TestAutoCheckUsesDailyCache(t *testing.T) {
 	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 	storeDir := t.TempDir()
 	server := newUpdaterTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"tag_name":"v1.1.0"}`)
+		fmt.Fprint(w, "v1.1.0\n")
 	}))
 	defer server.Close()
 	manager := New(Config{
-		StoreDir:       storeDir,
-		CurrentVersion: "v1.0.0",
-		GitHubAPIURL:   server.URL,
-		HTTPClient:     server.Client(),
-		Now:            func() time.Time { return now },
-		Env:            emptyUpdaterEnv,
+		StoreDir:        storeDir,
+		CurrentVersion:  "v1.0.0",
+		ReleasesBaseURL: server.URL,
+		HTTPClient:      server.Client(),
+		Now:             func() time.Time { return now },
+		Env:             emptyUpdaterEnv,
 	})
 	first, err := manager.Check(context.Background(), CheckOptions{Auto: true})
 	if err != nil {
@@ -83,11 +83,11 @@ func TestAutoCheckUsesDailyCache(t *testing.T) {
 		t.Fatalf("first Check() = %#v, want available v1.1.0", first)
 	}
 	cached := New(Config{
-		StoreDir:       storeDir,
-		CurrentVersion: "v1.0.0",
-		GitHubAPIURL:   "http://127.0.0.1:1/unreachable",
-		Now:            func() time.Time { return now.Add(time.Hour) },
-		Env:            emptyUpdaterEnv,
+		StoreDir:        storeDir,
+		CurrentVersion:  "v1.0.0",
+		ReleasesBaseURL: "http://127.0.0.1:1/unreachable",
+		Now:             func() time.Time { return now.Add(time.Hour) },
+		Env:             emptyUpdaterEnv,
 	})
 	second, err := cached.Check(context.Background(), CheckOptions{Auto: true})
 	if err != nil {
@@ -455,12 +455,12 @@ func TestRawUpdateReportsStructuredInstallProgress(t *testing.T) {
 	sum := sha256.Sum256(archive)
 	server := newUpdaterTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/latest":
-			fmt.Fprint(w, `{"tag_name":"v1.2.0"}`)
-		case "/release/v1.2.0/caelis_1.2.0_linux_amd64.tar.gz":
+		case "/latest.txt":
+			fmt.Fprint(w, "v1.2.0\r\n")
+		case "/releases/v1.2.0/caelis_1.2.0_linux_amd64.tar.gz":
 			w.Header().Set("Content-Length", strconv.Itoa(len(archive)))
 			_, _ = w.Write(archive)
-		case "/release/v1.2.0/checksums.txt":
+		case "/releases/v1.2.0/checksums.txt":
 			fmt.Fprintf(w, "%s  caelis_1.2.0_linux_amd64.tar.gz\n", hex.EncodeToString(sum[:]))
 		default:
 			http.NotFound(w, r)
@@ -473,15 +473,14 @@ func TestRawUpdateReportsStructuredInstallProgress(t *testing.T) {
 	}
 	var progress []ProgressEvent
 	manager := New(Config{
-		StoreDir:          t.TempDir(),
-		CurrentVersion:    "v1.0.0",
-		Executable:        exe,
-		GOOS:              "linux",
-		GOARCH:            "amd64",
-		GitHubAPIURL:      server.URL + "/latest",
-		GitHubReleaseBase: server.URL + "/release",
-		HTTPClient:        server.Client(),
-		Env:               emptyUpdaterEnv,
+		StoreDir:        t.TempDir(),
+		CurrentVersion:  "v1.0.0",
+		Executable:      exe,
+		GOOS:            "linux",
+		GOARCH:          "amd64",
+		ReleasesBaseURL: server.URL,
+		HTTPClient:      server.Client(),
+		Env:             emptyUpdaterEnv,
 	})
 	_, err := manager.Update(context.Background(), UpdateOptions{
 		Progress: func(event ProgressEvent) {
@@ -515,11 +514,11 @@ func TestRawUpdateDownloadsVerifiesAndReplacesExecutable(t *testing.T) {
 	sum := sha256.Sum256(archive)
 	server := newUpdaterTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/latest":
-			fmt.Fprint(w, `{"tag_name":"v1.2.0"}`)
-		case "/release/v1.2.0/caelis_1.2.0_linux_amd64.tar.gz":
+		case "/latest.txt":
+			fmt.Fprint(w, "v1.2.0\r\n")
+		case "/releases/v1.2.0/caelis_1.2.0_linux_amd64.tar.gz":
 			_, _ = w.Write(archive)
-		case "/release/v1.2.0/checksums.txt":
+		case "/releases/v1.2.0/checksums.txt":
 			fmt.Fprintf(w, "%s  caelis_1.2.0_linux_amd64.tar.gz\n", hex.EncodeToString(sum[:]))
 		default:
 			http.NotFound(w, r)
@@ -531,15 +530,14 @@ func TestRawUpdateDownloadsVerifiesAndReplacesExecutable(t *testing.T) {
 		t.Fatalf("write executable: %v", err)
 	}
 	manager := New(Config{
-		StoreDir:          t.TempDir(),
-		CurrentVersion:    "v1.0.0",
-		Executable:        exe,
-		GOOS:              "linux",
-		GOARCH:            "amd64",
-		GitHubAPIURL:      server.URL + "/latest",
-		GitHubReleaseBase: server.URL + "/release",
-		HTTPClient:        server.Client(),
-		Env:               emptyUpdaterEnv,
+		StoreDir:        t.TempDir(),
+		CurrentVersion:  "v1.0.0",
+		Executable:      exe,
+		GOOS:            "linux",
+		GOARCH:          "amd64",
+		ReleasesBaseURL: server.URL,
+		HTTPClient:      server.Client(),
+		Env:             emptyUpdaterEnv,
 	})
 	result, err := manager.Update(context.Background(), UpdateOptions{})
 	if err != nil {

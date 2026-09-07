@@ -15,7 +15,25 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"golang.org/x/mod/semver"
 )
+
+// latestRawVersion reads the same latest-only channel as install.sh and install.ps1.
+func (m *Manager) latestRawVersion(ctx context.Context) (string, error) {
+	const maxLatestBytes = 1024
+	body, err := m.downloadBytes(ctx, m.cfg.HTTPClient, m.cfg.ReleasesBaseURL+"/latest.txt", maxLatestBytes+1)
+	if err != nil {
+		return "", err
+	}
+	version := strings.TrimSpace(string(body))
+	// Canonical tags require all three version components and exclude build
+	// metadata, matching the versioned paths published to the raw channel.
+	if len(body) > maxLatestBytes || !semver.IsValid(version) || semver.Canonical(version) != version {
+		return "", errors.New("release channel returned an invalid latest version")
+	}
+	return version, nil
+}
 
 func (m *Manager) installRaw(ctx context.Context, latest string, progress progressReporter) (bool, error) {
 	archiveName, err := rawArchiveName(latest, m.cfg.GOOS, m.cfg.GOARCH)
@@ -74,7 +92,7 @@ func (m *Manager) installHTTPClient() *http.Client {
 }
 
 func (m *Manager) releaseAssetURL(version string, name string) string {
-	return strings.TrimRight(m.cfg.GitHubReleaseBase, "/") + "/" + displayVersion(version) + "/" + name
+	return m.cfg.ReleasesBaseURL + "/releases/" + displayVersion(version) + "/" + name
 }
 
 func rawArchiveName(version string, goos string, goarch string) (string, error) {
