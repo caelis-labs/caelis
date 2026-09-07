@@ -219,7 +219,14 @@ func (a *Agent) collectCanonicalModelStep(
 		modelCtx := model.WithProviderRequestMetadata(ctx, model.ProviderRequestMetadata{
 			SessionAffinity: ctx.Session().SessionID,
 		})
+		var receipts []model.Invocation
+		modelCtx = model.WithInvocationObserver(modelCtx, func(in model.Invocation) { receipts = append(receipts, in) })
 		final, err := collectFinalResponse(modelCtx, a.model, request, messageID, watchdog, yield)
+		for _, receipt := range receipts {
+			if yield != nil && !yield(session.NewModelInvocationReceipt(receipt, "chat")) {
+				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, false, nil
+			}
+		}
 		if err != nil {
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}

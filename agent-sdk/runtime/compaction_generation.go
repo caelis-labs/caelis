@@ -203,10 +203,16 @@ Across the prior summary and all source=user frames, preserve Session-wide User 
 }
 
 func collectCompactionResponse(ctx context.Context, llm model.LLM, req *model.Request) (*model.Response, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var final *model.Response
-	for event, err := range llm.Generate(ctx, req) {
+	for event, err := range model.Generate(ctx, llm, req) {
 		if err != nil {
 			return nil, err
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
 		}
 		if compactionResponseUsesTools(event) {
 			return nil, errCompactionToolRequest
@@ -214,6 +220,9 @@ func collectCompactionResponse(ctx context.Context, llm model.LLM, req *model.Re
 		if event != nil && event.Response != nil && event.TurnComplete {
 			final = event.Response
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if final == nil {
 		return nil, errors.New("agent-sdk/runtime: model returned no compaction response")

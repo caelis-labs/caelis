@@ -147,6 +147,9 @@ func (l *anthropicSDKLLM) generateNonStreaming(ctx context.Context, params anthr
 		yield(nil, err)
 		return
 	}
+	if resp != nil {
+		model.RecordInvocationUsage(runCtx, anthropicUsageToKernel(resp.Usage))
+	}
 	msg, finishReason, rawFinishReason, usage, err := anthropicResponseToMessage(l.provider, resp)
 	if err != nil {
 		yield(nil, err)
@@ -189,13 +192,24 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 		}
 		switch ev := event.AsAny().(type) {
 		case anthropic.MessageDeltaEvent:
-			acc.Usage.InputTokens = ev.Usage.InputTokens
-			acc.Usage.CacheCreationInputTokens = ev.Usage.CacheCreationInputTokens
-			acc.Usage.CacheReadInputTokens = ev.Usage.CacheReadInputTokens
-			acc.Usage.OutputTokens = ev.Usage.OutputTokens
+			if ev.Usage.JSON.InputTokens.Valid() {
+				acc.Usage.InputTokens = ev.Usage.InputTokens
+			}
+			if ev.Usage.JSON.CacheCreationInputTokens.Valid() {
+				acc.Usage.CacheCreationInputTokens = ev.Usage.CacheCreationInputTokens
+			}
+			if ev.Usage.JSON.CacheReadInputTokens.Valid() {
+				acc.Usage.CacheReadInputTokens = ev.Usage.CacheReadInputTokens
+			}
+			if ev.Usage.JSON.OutputTokens.Valid() {
+				acc.Usage.OutputTokens = ev.Usage.OutputTokens
+			}
 			if ev.Usage.JSON.OutputTokensDetails.Valid() {
 				acc.Usage.OutputTokensDetails = ev.Usage.OutputTokensDetails
 			}
+			model.RecordInvocationUsage(ctx, anthropicUsageToKernel(acc.Usage))
+		case anthropic.MessageStartEvent:
+			model.RecordInvocationUsage(ctx, anthropicUsageToKernel(acc.Usage))
 		case anthropic.ContentBlockStartEvent:
 			if !l.emitStreamingStartBlock(ev, yield) {
 				return
@@ -801,13 +815,13 @@ func anthropicUsageToKernel(usage anthropic.Usage) model.Usage {
 	cachedTokens := usage.CacheReadInputTokens
 	outputTokens := usage.OutputTokens
 	reasoningTokens := usage.OutputTokensDetails.ThinkingTokens
-	return model.Usage{
+	return usageWithPresence(model.Usage{
 		PromptTokens:      int(promptTokens),
 		CachedInputTokens: int(cachedTokens),
 		CompletionTokens:  int(outputTokens),
 		ReasoningTokens:   int(reasoningTokens),
 		TotalTokens:       int(promptTokens + cachedTokens + outputTokens),
-	}
+	}, reportedTokenFields([]byte(usage.RawJSON())))
 }
 
 func normalizeAnthropicFinishReason(reason anthropic.StopReason) model.FinishReason {

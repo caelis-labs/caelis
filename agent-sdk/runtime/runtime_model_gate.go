@@ -97,6 +97,8 @@ func (l *autoCompactGatedLLM) WebSearchUnavailableReason() string {
 	return ""
 }
 
+func (*autoCompactGatedLLM) TracksInvocations() {}
+
 func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {
 		if l == nil || l.inner == nil {
@@ -114,7 +116,7 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 		l.runtime.rememberCompactionRequest(l.sessionRef, l.inner, req, decision.SourceThroughSeq)
 		var final *model.Response
 		failed := false
-		for event, err := range l.inner.Generate(ctx, model.CloneRequest(req)) {
+		for event, err := range model.Generate(ctx, l.inner, req) {
 			if err != nil {
 				failed = true
 				if decision, compact, decisionErr := l.runtime.autoCompactDecisionAfterModelRequestFailure(ctx, l.sessionRef, l.inner, req, err); decisionErr != nil {

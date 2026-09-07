@@ -782,11 +782,14 @@ type Request struct {
 
 // Usage reports model token usage on a best-effort basis.
 type Usage struct {
-	PromptTokens      int `json:"prompt_tokens,omitempty"`
-	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
-	CompletionTokens  int `json:"completion_tokens,omitempty"`
-	ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
-	TotalTokens       int `json:"total_tokens,omitempty"`
+	// Reported marks explicitly supplied zero usage. Nonzero counters also
+	// imply availability; callers should use IsReported.
+	Reported          bool `json:"reported,omitempty"`
+	PromptTokens      int  `json:"prompt_tokens,omitempty"`
+	CachedInputTokens int  `json:"cached_input_tokens,omitempty"`
+	CompletionTokens  int  `json:"completion_tokens,omitempty"`
+	ReasoningTokens   int  `json:"reasoning_tokens,omitempty"`
+	TotalTokens       int  `json:"total_tokens,omitempty"`
 	// CostMicros is provider-reported monetary usage in one millionth of the
 	// configured billing currency unit. Zero means unavailable or no charge.
 	CostMicros int64 `json:"cost_micros,omitempty"`
@@ -815,6 +818,8 @@ type PartDelta struct {
 
 // Response is the completed semantic result of one step or turn.
 type Response struct {
+	// InvocationID is assigned by Generate, never trusted from provider payloads.
+	InvocationID        string         `json:"-"`
 	Message             Message        `json:"message"`
 	StepComplete        bool           `json:"step_complete,omitempty"`
 	TurnComplete        bool           `json:"turn_complete,omitempty"`

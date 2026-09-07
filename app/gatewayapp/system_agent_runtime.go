@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -367,8 +368,13 @@ func collectSystemManagedAgentResult(
 ) (systemManagedAgentRunResult, error) {
 	result := systemManagedAgentRunResult{}
 	if handle != nil {
-		if err := handle.WaitCompletion(ctx); err != nil {
-			return result, err
+		// The run already receives caller cancellation. As with the owning
+		// Gateway Turn, the wait must still prove producer quiescence before
+		// observers are consumed or the parent execution fence can be released.
+		// A non-cooperative producer keeps this invocation draining; Close alone
+		// or a timed-out wait cannot establish completion.
+		if err := handle.WaitCompletion(context.WithoutCancel(ctx)); err != nil || ctx.Err() != nil {
+			return result, errors.Join(ctx.Err(), err)
 		}
 	}
 	durableEvents, err := staging.Events(ctx, session.EventsRequest{

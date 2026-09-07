@@ -34,6 +34,9 @@ func collectFinalResponse(
 	watchdog *generationWatchdog,
 	yieldChunk func(*session.Event) bool,
 ) (*model.Response, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := model.ValidateRequestCapabilities(llm, req); err != nil {
 		return nil, err
 	}
@@ -43,9 +46,12 @@ func collectFinalResponse(
 	if watchdog != nil {
 		watchdog.beginModelStep()
 	}
-	for event, err := range llm.Generate(ctx, req) {
+	for event, err := range model.Generate(ctx, llm, req) {
 		if err != nil {
 			return nil, err
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
 		}
 		if err := watchdog.observeStreamEvent(event); err != nil {
 			return nil, err
@@ -75,6 +81,9 @@ func collectFinalResponse(
 		if event != nil && event.Response != nil && event.TurnComplete {
 			final = event.Response
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if req != nil && req.Stream && yieldChunk != nil {
 		for _, index := range textFilterOrder {

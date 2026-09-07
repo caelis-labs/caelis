@@ -215,9 +215,11 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 				return
 			}
 			if len(out.Choices) == 0 {
+				model.RecordInvocationUsage(runCtx, out.Usage.toKernelUsage())
 				yield(nil, fmt.Errorf("model: empty choices"))
 				return
 			}
+			model.RecordInvocationUsage(runCtx, out.Usage.toKernelUsage())
 			msg, err := toKernelMessage(out.Choices[0].Message)
 			if err != nil {
 				yield(nil, err)
@@ -253,6 +255,7 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 			}
 			if chunk.Usage.hasAny() {
 				usage = chunk.Usage.toKernelUsage()
+				model.RecordInvocationUsage(runCtx, usage)
 			}
 			if len(chunk.Choices) == 0 {
 				return nil

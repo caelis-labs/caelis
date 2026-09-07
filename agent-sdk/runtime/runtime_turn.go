@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -251,6 +252,11 @@ func (r *Runtime) appendRuntimeEventOrLifecycle(
 	turnID string,
 	event *session.Event,
 ) (*session.Event, error) {
+	if session.IsModelInvocationReceipt(event) {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		return r.sessions.AppendEvent(cleanup, session.AppendEventRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Event: event})
+	}
 	persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
 		SessionRef:    ref,
 		MutationGuard: session.RuntimeMutationGuard(ctx),

@@ -202,6 +202,8 @@ func (l *lifecycleLLM) WebSearchUnavailableReason() string {
 	return ""
 }
 
+func (*lifecycleLLM) TracksInvocations() {}
+
 func (l *lifecycleLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {
 		if l == nil || l.inner == nil {
@@ -210,7 +212,7 @@ func (l *lifecycleLLM) Generate(ctx context.Context, req *model.Request) iter.Se
 		}
 		event := l.runtime.lifecycleEvent(ctx, agent.LifecycleModel, l.inner.Name(), "")
 		err := l.runtime.executeLifecycle(ctx, event, func(callCtx context.Context) error {
-			for streamEvent, streamErr := range l.inner.Generate(callCtx, model.CloneRequest(req)) {
+			for streamEvent, streamErr := range model.Generate(callCtx, l.inner, req) {
 				if streamErr != nil {
 					return streamErr
 				}

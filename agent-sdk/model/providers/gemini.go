@@ -103,7 +103,14 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		}
 		defer cancel()
 
-		client, err := l.newClient(runCtx)
+		clientModel := l
+		var streamRead geminiStreamReadError
+		if req.Stream {
+			cloned := *l
+			cloned.httpClient = streamRead.client(l.httpClient)
+			clientModel = &cloned
+		}
+		client, err := clientModel.newClient(runCtx)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -115,6 +122,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 				yield(nil, err)
 				return
 			}
+			model.RecordInvocationUsage(runCtx, geminiUsageFromResponse(out))
 			msg, usage, err := geminiResponseToMessage(out)
 			if err != nil {
 				yield(nil, err)
@@ -148,6 +156,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 				continue
 			}
 			usage = mergeGeminiUsage(usage, geminiUsageFromResponse(out))
+			model.RecordInvocationUsage(runCtx, usage)
 
 			msg, _, convErr := geminiResponseToMessage(out)
 			if convErr != nil {
@@ -174,6 +183,10 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			}
 		}
 
+		if err := errors.Join(runCtx.Err(), streamRead.err()); err != nil {
+			yield(nil, err)
+			return
+		}
 		yield(&model.StreamEvent{
 			Type: model.StreamEventTurnDone,
 			Response: &model.Response{
@@ -601,16 +614,17 @@ func geminiUsageFromResponse(out *genai.GenerateContentResponse) model.Usage {
 	if out == nil || out.UsageMetadata == nil {
 		return model.Usage{}
 	}
-	return model.Usage{
+	return usageWithPresence(model.Usage{
 		PromptTokens:      int(out.UsageMetadata.PromptTokenCount),
 		CachedInputTokens: int(out.UsageMetadata.CachedContentTokenCount),
 		CompletionTokens:  int(out.UsageMetadata.CandidatesTokenCount),
 		ReasoningTokens:   int(out.UsageMetadata.ThoughtsTokenCount),
 		TotalTokens:       int(out.UsageMetadata.TotalTokenCount),
-	}
+	}, true)
 }
 
 func mergeGeminiUsage(existing, next model.Usage) model.Usage {
+	existing.Reported = existing.Reported || next.Reported
 	if next.PromptTokens != 0 {
 		existing.PromptTokens = next.PromptTokens
 	}

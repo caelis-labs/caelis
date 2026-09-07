@@ -1335,8 +1335,8 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	if err != nil || result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("AppServer CompactSession() = %#v, %v", result, err)
 	}
-	if result.Revision != revision+1 {
-		t.Fatalf("AppServer CompactSession().Revision = %d, want committed revision %d", result.Revision, revision+1)
+	if result.Revision != revision+2 {
+		t.Fatalf("AppServer CompactSession().Revision = %d, want committed revision %d", result.Revision, revision+2)
 	}
 	if got := server.compactionCalls.Load(); got != 1 {
 		t.Fatalf("compactionCalls = %d, want 1", got)

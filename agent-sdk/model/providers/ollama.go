@@ -84,6 +84,7 @@ type ollamaToolCallContent struct {
 }
 
 type ollamaChatResponse struct {
+	usageReported   bool
 	Model           string            `json:"model"`
 	Message         ollamaChatMessage `json:"message"`
 	Done            bool              `json:"done"`
@@ -188,6 +189,7 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 				yield(nil, err)
 				return
 			}
+			model.RecordInvocationUsage(ctx, ollamaUsage(out))
 			msg, err := ollamaToKernelMessage(out.Message)
 			if err != nil {
 				yield(nil, err)
@@ -220,8 +222,9 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			if strings.TrimSpace(chunk.Model) != "" {
 				modelID = chunk.Model
 			}
-			if one := ollamaUsage(chunk); one.TotalTokens > 0 || one.PromptTokens > 0 || one.CompletionTokens > 0 {
+			if one := ollamaUsage(chunk); one.IsReported() {
 				usage = one
+				model.RecordInvocationUsage(ctx, usage)
 			}
 			if text := chunk.Message.Thinking; text != "" {
 				acc.reasoning.WriteString(text)
@@ -442,11 +445,11 @@ func applyOllamaOutput(payload *ollamaChatRequest, output *model.OutputSpec) {
 
 func ollamaUsage(resp ollamaChatResponse) model.Usage {
 	total := resp.PromptEvalCount + resp.EvalCount
-	return model.Usage{
+	return usageWithPresence(model.Usage{
 		PromptTokens:     resp.PromptEvalCount,
 		CompletionTokens: resp.EvalCount,
 		TotalTokens:      total,
-	}
+	}, resp.usageReported)
 }
 
 func ollamaToKernelMessage(msg ollamaChatMessage) (model.Message, error) {
@@ -481,4 +484,21 @@ func ollamaToolCallsToKernel(calls []ollamaToolCall) ([]model.ToolCall, error) {
 		})
 	}
 	return out, nil
+}
+
+func (r *ollamaChatResponse) UnmarshalJSON(data []byte) error {
+	type wire ollamaChatResponse
+	var decoded wire
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*r = ollamaChatResponse(decoded)
+	_, prompt := fields["prompt_eval_count"]
+	_, output := fields["eval_count"]
+	r.usageReported = prompt || output
+	return nil
 }

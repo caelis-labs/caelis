@@ -414,6 +414,9 @@ func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
 		if runErr != nil {
 			t.Fatalf("Run() error = %v", runErr)
 		}
+		if session.IsModelInvocationReceipt(event) {
+			continue
+		}
 		events = append(events, event)
 	}
 
@@ -501,6 +504,9 @@ func TestChatAgentReplacesUnsupportedImageToolResultBeforeNextModelRequest(t *te
 	for event, runErr := range chatAgent.Run(ctx) {
 		if runErr != nil {
 			t.Fatalf("Run() error = %v", runErr)
+		}
+		if session.IsModelInvocationReceipt(event) {
+			continue
 		}
 		events = append(events, event)
 	}
@@ -723,6 +729,9 @@ func TestChatAgentRetriesInvalidModelToolCallWithoutPersistingIt(t *testing.T) {
 			if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Status == "failed" {
 				invalidWarning = event
 			}
+			continue
+		}
+		if session.IsJournal(event) {
 			continue
 		}
 		canonicalEvents = append(canonicalEvents, event)
@@ -3230,6 +3239,9 @@ func TestChatAgentStreamsAssistantChunksBeforeFinalMessage(t *testing.T) {
 		if runErr != nil {
 			t.Fatalf("Run() error = %v", runErr)
 		}
+		if session.IsModelInvocationReceipt(event) {
+			continue
+		}
 		events = append(events, event)
 	}
 
@@ -3296,6 +3308,9 @@ func TestChatAgentDefaultsToNonStreamingRequests(t *testing.T) {
 	for event, runErr := range chatAgent.Run(ctx) {
 		if runErr != nil {
 			t.Fatalf("Run() error = %v", runErr)
+		}
+		if session.IsModelInvocationReceipt(event) {
+			continue
 		}
 		events = append(events, event)
 	}
