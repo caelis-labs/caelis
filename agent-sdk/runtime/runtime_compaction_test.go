@@ -749,8 +749,8 @@ func TestRuntimeManualCompactUsesCompletedHotRequest(t *testing.T) {
 	if testModel.compactionCalls != 1 {
 		t.Fatalf("compaction calls = %d, want one hot request", testModel.compactionCalls)
 	}
-	if result.Session.Revision != expectedRevision+1 {
-		t.Fatalf("Compact().Session.Revision = %d, want committed revision %d", result.Session.Revision, expectedRevision+1)
+	if result.Session.Revision != expectedRevision+2 {
+		t.Fatalf("Compact().Session.Revision = %d, want committed revision %d", result.Session.Revision, expectedRevision+2)
 	}
 }
 
@@ -1639,11 +1639,11 @@ func TestGenerateCompactMarkdownOnceStopsWhenCallerContextDone(t *testing.T) {
 	_, err := compactor.generateCompactMarkdownOnce(ctx, testModel, "base", []*session.Event{
 		userTextEvent("content that would otherwise be compacted"),
 	}, "")
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("generateCompactMarkdownOnce() error = %v, want provider deadline from stopped attempt", err)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("generateCompactMarkdownOnce() error = %v, want caller cancellation", err)
 	}
-	if testModel.calls != 1 {
-		t.Fatalf("model calls = %d, want 1 after caller context ended", testModel.calls)
+	if testModel.calls != 0 {
+		t.Fatalf("model calls = %d, want zero after caller context ended", testModel.calls)
 	}
 }
 

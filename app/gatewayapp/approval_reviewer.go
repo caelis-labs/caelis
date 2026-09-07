@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -25,6 +26,7 @@ type guardianApprovalReviewer struct {
 }
 
 type approvalReviewAccounting struct {
+	err        error
 	usage      *kernel.UsageSnapshot
 	invocation *session.EventInvocation
 }
@@ -66,7 +68,7 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req kerne
 // Decide returns one fully resolved Guardian decision. The Guardian path owns
 // strict model-output validation and must not pass through generic reviewer
 // reconciliation that guesses options or lets an option override its outcome.
-func (r *guardianApprovalReviewer) Decide(ctx context.Context, req kernel.ApprovalReviewRequest) (kernel.ApprovalReviewResult, error) {
+func (r *guardianApprovalReviewer) Decide(ctx context.Context, req kernel.ApprovalReviewRequest) (result kernel.ApprovalReviewResult, resultErr error) {
 	if req.Model == nil {
 		return kernel.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires the current session model")
 	}
@@ -75,10 +77,24 @@ func (r *guardianApprovalReviewer) Decide(ctx context.Context, req kernel.Approv
 	}
 	if req.Approval != nil && len(req.Approval.Options) > 0 {
 		if err := approval.ValidateStrictOptions(req.Approval.Options); err != nil {
-			//nolint:nilerr // Strict validation failure is a resolved deterministic denial, not a reviewer transport error.
+			// Strict validation failure is a resolved deterministic denial.
 			return guardianDeterministicDenial(req.Approval, "automatic approval review denied malformed approval options: "+err.Error()), nil
 		}
 	}
+	var attempts []model.Invocation
+	ctx = model.WithInvocationObserver(ctx, func(in model.Invocation) { attempts = append(attempts, in) })
+	defer func() {
+		if persistErr := r.persistGuardianInvocations(ctx, req, attempts); persistErr != nil {
+			if resultErr != nil {
+				resultErr = errors.Join(resultErr, persistErr)
+			} else {
+				r.storeApprovalReviewAccounting(approvalAccountingKey(req), approvalReviewAccounting{err: persistErr})
+				// Preserve the completed decision: the Gateway treats any Decide error
+				// as a failed review and would discard this valid policy result.
+				result.DisplayText = strings.TrimSpace(result.DisplayText + "\nGuardian usage accounting could not be persisted.")
+			}
+		}
+	}()
 	promptItems, _, assistantEvent, parsed, err := r.runGuardianReview(ctx, req)
 	if err != nil {
 		return kernel.ApprovalReviewResult{}, err
@@ -86,7 +102,11 @@ func (r *guardianApprovalReviewer) Decide(ctx context.Context, req kernel.Approv
 	if promptItems.MandatoryInputTooLarge {
 		return guardianDeterministicDenial(req.Approval, "automatic approval review denied because the exact approval request exceeds the Guardian model input budget; narrow the action"), nil
 	}
-	r.storeApprovalReviewAccounting(req.ReviewID, approvalReviewAccountingFromEvent(assistantEvent))
+	// Compatibility for injected legacy runners that do not emit receipts. Drop
+	// this fallback when every supported system-agent runner uses model.Generate.
+	if len(attempts) == 0 {
+		r.storeApprovalReviewAccounting(approvalAccountingKey(req), approvalReviewAccountingFromEvent(assistantEvent))
+	}
 	return finalizeGuardianDecision(req.Approval, parsed)
 }
 
@@ -95,15 +115,15 @@ func (r *guardianApprovalReviewer) ApprovalReviewAccounting(
 	req kernel.ApprovalReviewRequest,
 	_ kernel.ApprovalReviewResult,
 ) (*kernel.UsageSnapshot, *session.EventInvocation, error) {
-	accounting, ok := r.takeApprovalReviewAccounting(req.ReviewID)
+	accounting, ok := r.takeApprovalReviewAccounting(approvalAccountingKey(req))
 	if !ok {
 		return nil, nil, nil
 	}
-	return accounting.usage, accounting.invocation, nil
+	return accounting.usage, accounting.invocation, accounting.err
 }
 
 func (r *guardianApprovalReviewer) storeApprovalReviewAccounting(reviewID string, accounting approvalReviewAccounting) {
-	if r == nil || strings.TrimSpace(reviewID) == "" || accounting.usage == nil {
+	if r == nil || strings.TrimSpace(reviewID) == "" || (accounting.usage == nil && accounting.err == nil) {
 		return
 	}
 	r.accountingMu.Lock()

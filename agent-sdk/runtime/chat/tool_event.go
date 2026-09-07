@@ -162,22 +162,18 @@ func responseMeta(resp *model.Response) map[string]any {
 	if resp == nil {
 		return nil
 	}
-	usage := map[string]any{
-		"prompt_tokens":       resp.Usage.PromptTokens,
-		"cached_input_tokens": resp.Usage.CachedInputTokens,
-		"completion_tokens":   resp.Usage.CompletionTokens,
-		"reasoning_tokens":    resp.Usage.ReasoningTokens,
-		"total_tokens":        resp.Usage.TotalTokens,
-		"cost_micros":         resp.Usage.CostMicros,
-	}
-	if provider := responseUsageAccountingProvider(resp); provider != "" {
-		usage["provider"] = provider
-	}
+	usage := session.ModelUsageMetadata(responseUsageAccountingProvider(resp), resp.Usage)
 	sdk := map[string]any{
 		"model":         strings.TrimSpace(resp.Model),
 		"provider":      strings.TrimSpace(resp.Provider),
 		"finish_reason": string(resp.FinishReason),
 		"usage":         usage,
+	}
+	if !resp.Usage.IsReported() {
+		delete(sdk, "usage")
+	}
+	if resp.InvocationID != "" {
+		sdk["usage_receipt_id"] = resp.InvocationID
 	}
 	if resp.ContextWindowTokens > 0 {
 		sdk["context_window_tokens"] = resp.ContextWindowTokens

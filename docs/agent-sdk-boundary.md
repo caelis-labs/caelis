@@ -124,6 +124,19 @@ no longer wrote `continue_phase`; v0.35.0 is the last known writer.
 - mirrors are durable client projection, not a second model context;
 - UI, overlay, notice, and raw observation values are transient.
 
+Runtime model attempts append `lifecycle` accounting records with `journal`
+visibility. Each actual provider attempt has one Runtime-generated identity;
+accepted response usage remains available for context budgeting, while a matching
+same-Session receipt owns accounting. Missing measurements remain unknown,
+explicit provider zero remains distinguishable, and no local price is invented.
+Guardian staging attempts are accounted in their parent Session with Guardian
+scope. Journal receipts never enter model context or client replay. Receipt
+completion writes retain the original fence under bounded cancellation cleanup;
+failures stay explicit and are not blindly retried. These terminal receipts do
+not establish completeness for attempts interrupted by process crashes. Historical
+responses without a matching receipt remain readable until the supported upgrade
+floor requires receipts; equal token values alone never prove duplicate calls.
+
 Persistence requires revision CAS, full-payload idempotency, fenced writes,
 monotonic replay, schema migration before typed decode, and fail-closed handling
 of unknown versions. Persistence or replay changes require whole-object round

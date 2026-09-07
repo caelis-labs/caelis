@@ -171,7 +171,17 @@ func contextUsageMatchesInvocation(event *session.Event, expectedProvider string
 func sessionUsageEvents(ctx context.Context, reader session.Reader, ref session.SessionRef) ([]*session.Event, error) {
 	paged, ok := reader.(session.PagedReader)
 	if !ok {
-		return reader.Events(ctx, session.EventsRequest{SessionRef: ref})
+		events, err := reader.Events(ctx, session.EventsRequest{SessionRef: ref, IncludeTransient: true})
+		if err != nil {
+			return nil, err
+		}
+		durable := make([]*session.Event, 0, len(events))
+		for _, event := range events {
+			if !session.IsTransient(event) {
+				durable = append(durable, event)
+			}
+		}
+		return durable, nil
 	}
 	var throughSeq uint64
 	if checkpointReader, ok := reader.(session.EventCheckpointReader); ok {
@@ -188,7 +198,7 @@ func sessionUsageEvents(ctx context.Context, reader session.Reader, ref session.
 			SessionRef: ref,
 			AfterSeq:   afterSeq,
 			ThroughSeq: throughSeq,
-			Visibility: session.EventPageClientReplay,
+			Visibility: session.EventPageAllDurable,
 		})
 		if err != nil {
 			return nil, err
@@ -205,6 +215,7 @@ func sessionUsageEvents(ctx context.Context, reader session.Reader, ref session.
 }
 
 func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCategory string) sessionTokenUsageBreakdown {
+	events = session.InvocationAccountingEvents(events)
 	var breakdown sessionTokenUsageBreakdown
 	latestContextUsage := map[string]modelUsageSnapshot{}
 	latestContextCategory := map[string]string{}
@@ -231,7 +242,10 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 			continue
 		}
 		isToolCall := session.EventTypeOf(event) == session.EventTypeToolCall
-		usageKey := usageSnapshotDedupeKey(*one)
+		usageKey := ""
+		if event.MessageID != "" {
+			usageKey = fmt.Sprintf("%s:%s:%#v:%#v", event.SessionID, event.MessageID, event.Scope, event.Invocation)
+		}
 		if isToolCall && lastUsageWasToolCall && usageKey != "" && usageKey == lastToolCallUsageKey {
 			continue
 		}
@@ -589,13 +603,6 @@ func (d *assembler) subagentChildren(ctx context.Context, ref session.SessionRef
 		})
 	}
 	return out
-}
-
-func usageSnapshotDedupeKey(usage session.UsageSnapshot) string {
-	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 && usage.TotalTokens == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d/%d/%d/%d/%d", usage.PromptTokens, usage.CachedInputTokens, usage.CompletionTokens, usage.ReasoningTokens, usage.TotalTokens)
 }
 
 func modelUsageSnapshotsFromBreakdown(breakdown sessionTokenUsageBreakdown) []controlstatus.ModelUsageSnapshot {

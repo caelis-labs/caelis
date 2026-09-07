@@ -192,10 +192,12 @@ func (l *retryingLLM) Generate(ctx context.Context, req *Request) iter.Seq2[*Str
 	}
 }
 
+func (*retryingLLM) TracksInvocations() {}
+
 func (l *retryingLLM) runAttempt(ctx context.Context, req *Request, yield func(*StreamEvent, error) bool) (bool, bool, bool, error) {
 	committed := false
 	semanticDeltaEmitted := false
-	for event, err := range l.inner.Generate(ctx, CloneRequest(req)) {
+	for event, err := range Generate(ctx, l.inner, req) {
 		if err != nil {
 			return committed, semanticDeltaEmitted, false, err
 		}

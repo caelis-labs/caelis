@@ -238,6 +238,11 @@ func sessionEventTurnID(event *session.Event) string {
 }
 
 func projectSessionEventEnvelope(base eventstream.Envelope, event *session.Event) []eventstream.Envelope {
+	// Journals are internal durable evidence. Client lifecycle, permission and
+	// tool updates have their own typed events and must not be inferred here.
+	if session.IsJournal(event) {
+		return nil
+	}
 	out := projectSessionEventToACPEnvelopes(base, event)
 	if len(out) == 0 {
 		out = append(out, projectSessionEventstreamOnlyEvents(base, event)...)

@@ -403,6 +403,7 @@ func openAICodexToolResultOutput(result model.ToolResultPart) (any, error) {
 }
 
 type openAICodexUsage struct {
+	reported          bool
 	InputTokens       int `json:"input_tokens"`
 	OutputTokens      int `json:"output_tokens"`
 	TotalTokens       int `json:"total_tokens"`
@@ -419,13 +420,13 @@ func (u openAICodexUsage) toKernelUsage() model.Usage {
 	if total == 0 {
 		total = u.InputTokens + u.OutputTokens
 	}
-	return model.Usage{
+	return usageWithPresence(model.Usage{
 		PromptTokens:      u.InputTokens,
 		CachedInputTokens: u.InputTokenDetails.CachedTokens,
 		CompletionTokens:  u.OutputTokens,
 		ReasoningTokens:   u.OutputTokenDetails.ReasoningTokens,
 		TotalTokens:       total,
-	}
+	}, u.reported)
 }
 
 type openAICodexErrorPayload struct {
@@ -713,4 +714,15 @@ func openAICodexFinishReason(response *openAICodexResponseWire, hasToolCall bool
 		}
 		return model.FinishReasonUnknown, reason
 	}
+}
+
+func (u *openAICodexUsage) UnmarshalJSON(data []byte) error {
+	type wire openAICodexUsage
+	var decoded wire
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*u = openAICodexUsage(decoded)
+	u.reported = reportedTokenFields(data)
+	return nil
 }

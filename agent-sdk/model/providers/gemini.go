@@ -601,16 +601,17 @@ func geminiUsageFromResponse(out *genai.GenerateContentResponse) model.Usage {
 	if out == nil || out.UsageMetadata == nil {
 		return model.Usage{}
 	}
-	return model.Usage{
+	return usageWithPresence(model.Usage{
 		PromptTokens:      int(out.UsageMetadata.PromptTokenCount),
 		CachedInputTokens: int(out.UsageMetadata.CachedContentTokenCount),
 		CompletionTokens:  int(out.UsageMetadata.CandidatesTokenCount),
 		ReasoningTokens:   int(out.UsageMetadata.ThoughtsTokenCount),
 		TotalTokens:       int(out.UsageMetadata.TotalTokenCount),
-	}
+	}, true)
 }
 
 func mergeGeminiUsage(existing, next model.Usage) model.Usage {
+	existing.Reported = existing.Reported || next.Reported
 	if next.PromptTokens != 0 {
 		existing.PromptTokens = next.PromptTokens
 	}

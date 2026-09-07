@@ -801,13 +801,13 @@ func anthropicUsageToKernel(usage anthropic.Usage) model.Usage {
 	cachedTokens := usage.CacheReadInputTokens
 	outputTokens := usage.OutputTokens
 	reasoningTokens := usage.OutputTokensDetails.ThinkingTokens
-	return model.Usage{
+	return usageWithPresence(model.Usage{
 		PromptTokens:      int(promptTokens),
 		CachedInputTokens: int(cachedTokens),
 		CompletionTokens:  int(outputTokens),
 		ReasoningTokens:   int(reasoningTokens),
 		TotalTokens:       int(promptTokens + cachedTokens + outputTokens),
-	}
+	}, reportedTokenFields([]byte(usage.RawJSON())))
 }
 
 func normalizeAnthropicFinishReason(reason anthropic.StopReason) model.FinishReason {

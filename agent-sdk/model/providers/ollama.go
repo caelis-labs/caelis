@@ -84,6 +84,7 @@ type ollamaToolCallContent struct {
 }
 
 type ollamaChatResponse struct {
+	usageReported   bool
 	Model           string            `json:"model"`
 	Message         ollamaChatMessage `json:"message"`
 	Done            bool              `json:"done"`
@@ -442,11 +443,11 @@ func applyOllamaOutput(payload *ollamaChatRequest, output *model.OutputSpec) {
 
 func ollamaUsage(resp ollamaChatResponse) model.Usage {
 	total := resp.PromptEvalCount + resp.EvalCount
-	return model.Usage{
+	return usageWithPresence(model.Usage{
 		PromptTokens:     resp.PromptEvalCount,
 		CompletionTokens: resp.EvalCount,
 		TotalTokens:      total,
-	}
+	}, resp.usageReported)
 }
 
 func ollamaToKernelMessage(msg ollamaChatMessage) (model.Message, error) {
@@ -481,4 +482,21 @@ func ollamaToolCallsToKernel(calls []ollamaToolCall) ([]model.ToolCall, error) {
 		})
 	}
 	return out, nil
+}
+
+func (r *ollamaChatResponse) UnmarshalJSON(data []byte) error {
+	type wire ollamaChatResponse
+	var decoded wire
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*r = ollamaChatResponse(decoded)
+	_, prompt := fields["prompt_eval_count"]
+	_, output := fields["eval_count"]
+	r.usageReported = prompt || output
+	return nil
 }

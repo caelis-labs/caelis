@@ -42,7 +42,8 @@ func (r *Runtime) prepareInvocationContext(
 	if err != nil {
 		return invocationContext{}, err
 	}
-	compactCtx := r.withCompactActivity(ctx, loaded.Session, turnID, sink)
+	records := &compactionInvocations{}
+	compactCtx := records.context(r.withCompactActivity(ctx, loaded.Session, turnID, sink))
 	result, err := r.compactor.Prepare(compactCtx, compact.Request{
 		Session:          loaded.Session,
 		SessionRef:       ref,
@@ -53,6 +54,7 @@ func (r *Runtime) prepareInvocationContext(
 		InContextRequest: r.inContextRequest(ref, req.AgentSpec.Model, events, req.AgentSpec.Request.ServiceTier),
 		RuntimeAppendix:  appendix,
 	})
+	err = errors.Join(err, r.persistCompactionInvocations(ctx, &loaded.Session, turnID, records))
 	if err != nil {
 		return invocationContext{}, wrapCompactionFailure("prepare", err)
 	}
@@ -131,7 +133,8 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 	}
 	scope := lifecycleScopeFromContext(ctx)
 	scope.sessionRef = ref
-	compactCtx := withLifecycleScope(ctx, scope)
+	records := &compactionInvocations{}
+	compactCtx := records.context(withLifecycleScope(ctx, scope))
 	var result compact.Result
 	var persisted *session.Event
 	err = r.executeLifecycle(compactCtx, r.lifecycleEvent(compactCtx, agent.LifecycleCompact, "", ""), func(callCtx context.Context) error {
@@ -145,6 +148,7 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 			InContextRequest: r.inContextRequest(ref, req.Model, events, req.ServiceTier),
 			RuntimeAppendix:  appendix,
 		}, req.Trigger)
+		compactErr = errors.Join(compactErr, r.persistCompactionInvocations(callCtx, &activeSession, "", records))
 		if compactErr != nil || !result.Compacted {
 			return compactErr
 		}
@@ -156,7 +160,7 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 			activeSession,
 			ref,
 			"",
-			loaded.Session.Revision,
+			activeSession.Revision,
 			result,
 		)
 		return compactErr
@@ -338,11 +342,12 @@ func (r *Runtime) compactAndNotify(
 	activeSession := loaded.Session
 	events := loaded.Events
 	var result compact.Result
-	compactCtx := r.withCompactActivity(ctx, activeSession, turnID, sink)
+	records := &compactionInvocations{}
+	compactCtx := records.context(r.withCompactActivity(ctx, activeSession, turnID, sink))
 	err = r.executeLifecycle(compactCtx, r.lifecycleEvent(compactCtx, agent.LifecycleCompact, "", ""), func(callCtx context.Context) error {
 		var compactErr error
 		result, compactErr = compactFn(callCtx, activeSession, events, loaded.State)
-		return compactErr
+		return errors.Join(compactErr, r.persistCompactionInvocations(callCtx, &activeSession, turnID, records))
 	})
 	if err != nil {
 		r.publishCompactFailureNotice(activeSession, turnID, sink, err)

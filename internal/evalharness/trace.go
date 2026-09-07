@@ -49,10 +49,12 @@ type NoticeTrace struct {
 	Text  string `json:"text,omitempty"`
 }
 
+// EventTrace describes the visible agent trace, excluding internal journals.
+// Inspect raw RunChatScenario.Events for persistence and accounting assertions.
 func EventTrace(events []*session.Event) []EventTraceEntry {
 	out := make([]EventTraceEntry, 0, len(events))
 	for _, event := range events {
-		if event == nil {
+		if event == nil || session.IsJournal(event) {
 			continue
 		}
 		entry := EventTraceEntry{
@@ -87,10 +89,12 @@ func EventTrace(events []*session.Event) []EventTraceEntry {
 	return out
 }
 
+// CanonicalEvents selects the model/visible trace used by regression goldens.
+// It is not an all-durable selector for journal or accounting verification.
 func CanonicalEvents(events []*session.Event) []*session.Event {
 	var out []*session.Event
 	for _, event := range events {
-		if event == nil || event.Visibility == session.VisibilityUIOnly {
+		if event == nil || event.Visibility == session.VisibilityUIOnly || session.IsJournal(event) {
 			continue
 		}
 		out = append(out, session.CanonicalizeEvent(event))
