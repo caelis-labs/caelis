@@ -112,8 +112,11 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 		return commandFailure(operationID, sessionID, OutcomeConflicted, publicCommandDetail(err, OutcomeConflicted), err), err
 	}
 	if err != nil {
-		coded := internalCommandError("controlclient: begin operation", err)
-		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected), coded), coded
+		// Begin may have failed while reading a previously committed receipt.
+		// Failure to establish admission is not proof that this stable operation
+		// never ran; keep callers from treating storage loss as safe to retry.
+		coded := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: begin operation", err)
+		return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
 	}
 	if !created {
 		if record.Result != nil {
