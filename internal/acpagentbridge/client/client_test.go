@@ -9,6 +9,7 @@ import (
 	"net"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -104,28 +105,57 @@ func TestPendingPromptAndSteeringResponsesShareUpdateBarrier(t *testing.T) {
 }
 
 func testPendingPromptAndSteeringResponsesShareUpdateBarrier(t *testing.T, batch bool) {
+	t.Helper()
 	t.Parallel()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	clientSide, peerSide := net.Pipe()
-	defer peerSide.Close()
 	notificationStarted := make(chan struct{})
 	releaseNotification := make(chan struct{})
-	acpClient, err := NewStreamClient(clientSide, clientSide, Config{
+	release := sync.OnceFunc(func() { close(releaseNotification) })
+	var handlerCompleted atomic.Bool
+	var workers sync.WaitGroup
+	var acpClient *Client
+	t.Cleanup(func() {
+		// Release the callback before joining the connection, even on Fatal.
+		release()
+		cancel()
+		_ = peerSide.Close()
+		_ = clientSide.Close()
+		joined := make(chan struct{})
+		go func() {
+			defer close(joined)
+			if acpClient != nil {
+				closeCtx, closeCancel := context.WithTimeout(context.Background(), time.Second)
+				defer closeCancel()
+				_ = acpClient.Close(closeCtx)
+			}
+			workers.Wait()
+		}()
+		select {
+		case <-joined:
+		case <-time.After(2 * time.Second):
+			t.Error("client or response workers did not stop")
+		}
+	})
+	deadline, _ := ctx.Deadline()
+	if err := peerSide.SetDeadline(deadline); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	acpClient, err = NewStreamClient(clientSide, clientSide, Config{
 		OnUpdate: func(UpdateEnvelope) {
 			close(notificationStarted)
 			<-releaseNotification
+			handlerCompleted.Store(true)
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer acpClient.Close(context.Background())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	responsesWritten := make(chan struct{})
-	go servePromptAndSteering(t, peerSide, responsesWritten, batch)
-
+	responsesWritten := make(chan error, 1)
+	workers.Go(func() { responsesWritten <- servePromptAndSteering(peerSide, batch) })
 	prompt, err := acpClient.PreparePromptParts("session-1", []json.RawMessage{
 		mustMarshalRaw(TextContent{Type: "text", Text: "start"}),
 	}, nil)
@@ -135,28 +165,65 @@ func testPendingPromptAndSteeringResponsesShareUpdateBarrier(t *testing.T, batch
 	if err := prompt.Dispatch(ctx); err != nil {
 		t.Fatal(err)
 	}
-	promptDone := make(chan error, 1)
-	go func() {
+	type completion struct {
+		err              error
+		handlerCompleted bool
+	}
+	promptDone := make(chan completion, 1)
+	workers.Go(func() {
 		_, waitErr := prompt.Wait(ctx)
-		promptDone <- waitErr
-	}()
-	steeringDone := make(chan error, 1)
-	go func() {
+		promptDone <- completion{err: waitErr, handlerCompleted: handlerCompleted.Load()}
+	})
+	steeringDone := make(chan completion, 1)
+	workers.Go(func() {
 		response, steerErr := acpClient.SteerPartsWithAbort(ctx, "session-1", []json.RawMessage{
 			mustMarshalRaw(TextContent{Type: "text", Text: "adjust"}),
 		}, nil, nil)
+		completed := handlerCompleted.Load()
 		if steerErr == nil && response.Outcome != SessionSteeringInjected {
 			steerErr = errors.New("steering response was not injected")
 		}
-		steeringDone <- steerErr
-	}()
+		steeringDone <- completion{err: steerErr, handlerCompleted: completed}
+	})
 
-	<-notificationStarted
-	<-responsesWritten
-	close(releaseNotification)
-	for name, done := range map[string]<-chan error{"prompt": promptDone, "steering": steeringDone} {
-		if err := <-done; err != nil {
-			t.Fatalf("%s response: %v", name, err)
+	select {
+	case <-notificationStarted:
+	case <-ctx.Done():
+		t.Fatal("notification handler did not start:", ctx.Err())
+	}
+	select {
+	case err := <-responsesWritten:
+		if err != nil {
+			t.Fatal("peer could not write responses:", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("peer did not finish writing responses:", ctx.Err())
+	}
+	// Both responses are in the receive path. Keep the handler blocked long enough
+	// to observe early completion; one select/default can miss a runnable waiter.
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case got := <-promptDone:
+		t.Fatalf("prompt completed before notification release: %+v", got)
+	case got := <-steeringDone:
+		t.Fatalf("steering completed before notification release: %+v", got)
+	case <-ctx.Done():
+		t.Fatal("response observation timed out:", ctx.Err())
+	case <-timer.C:
+	}
+	release()
+	for name, done := range map[string]<-chan completion{"prompt": promptDone, "steering": steeringDone} {
+		select {
+		case got := <-done:
+			if got.err != nil {
+				t.Fatalf("%s response: %v", name, got.err)
+			}
+			if !got.handlerCompleted {
+				t.Fatalf("%s completed before notification handler finished", name)
+			}
+		case <-ctx.Done():
+			t.Fatalf("%s response did not finish: %v", name, ctx.Err())
 		}
 	}
 }
@@ -257,8 +324,7 @@ func TestDecodeStandardSessionStateUpdatesRejectsInvalidVariants(t *testing.T) {
 	}
 }
 
-func servePromptAndSteering(t *testing.T, peer net.Conn, responsesWritten chan<- struct{}, batch bool) {
-	t.Helper()
+func servePromptAndSteering(peer net.Conn, batch bool) error {
 	scanner := bufio.NewScanner(peer)
 	ids := make(map[string]json.RawMessage)
 	for len(ids) < 2 && scanner.Scan() {
@@ -267,10 +333,15 @@ func servePromptAndSteering(t *testing.T, peer net.Conn, responsesWritten chan<-
 			Method string          `json:"method"`
 		}
 		if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
-			t.Errorf("decode request: %v", err)
-			return
+			return fmt.Errorf("decode request: %w", err)
 		}
 		ids[request.Method] = request.ID
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if len(ids) != 2 {
+		return errors.New("peer closed before prompt and steering requests")
 	}
 	messages := []map[string]any{
 		{
@@ -307,14 +378,13 @@ func servePromptAndSteering(t *testing.T, peer net.Conn, responsesWritten chan<-
 	for _, frame := range frames {
 		raw, err := json.Marshal(frame)
 		if err != nil {
-			t.Errorf("encode response: %v", err)
-			return
+			return fmt.Errorf("encode response: %w", err)
 		}
 		if _, err := peer.Write(append(raw, '\n')); err != nil {
-			return
+			return err
 		}
 	}
-	close(responsesWritten)
+	return nil
 }
 
 func TestDispatchMayHaveCommittedClassifiesCompletedResponses(t *testing.T) {
