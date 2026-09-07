@@ -300,6 +300,67 @@ func TestFencedRunnerCloseRetainsFenceUntilProducerQuiescent(t *testing.T) {
 	}
 }
 
+func TestFencedRunnerWaitTimeoutRetainsFenceUntilProducerCompletes(t *testing.T) {
+	t.Parallel()
+	service := inmemory.NewStore(inmemory.Config{})
+	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "wait-timeout",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := newFenceCompletionRunner("run-wait-timeout")
+	runner.waitExpired = make(chan struct{})
+	var finishOnce sync.Once
+	finish := func() { finishOnce.Do(func() { close(runner.producerDone) }) }
+	defer finish()
+	wrapper, err := NewFencedRuntime(FencedRuntimeConfig{
+		Runtime: singleEventRuntime{runner: runner}, Fences: service, OwnerID: "host-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Handle.Cancel()
+	// An already elapsed deadline makes the timeout deterministic while the
+	// independent producer completion channel remains blocked.
+	waitCtx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- run.Handle.WaitCompletion(waitCtx) }()
+	select {
+	case <-runner.waitExpired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("inner waiter did not observe deadline")
+	}
+	if _, err := service.AcquireSessionFence(context.Background(), session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "host-b",
+	}); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("acquire after wait timeout = %v, want fence conflict", err)
+	}
+	finish()
+	select {
+	case err := <-waitDone:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("WaitCompletion after drain = %v, want deadline exceeded", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiter did not return after producer completion")
+	}
+	claim, err := service.AcquireSessionFence(context.Background(), session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "host-b",
+	})
+	if err != nil {
+		t.Fatalf("acquire after producer completion = %v", err)
+	}
+	if err := service.ReleaseSessionFence(context.Background(), session.SessionFenceReleaseRequest(claim)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFencedRuntimeReleasesFenceAfterProducerCompletesWithTerminalError(t *testing.T) {
 	t.Parallel()
 
@@ -621,6 +682,7 @@ type fenceCompletionRunner struct {
 	closed       chan struct{}
 	closeOnce    sync.Once
 	producerDone chan struct{}
+	waitExpired  chan struct{}
 }
 
 type fenceTerminalErrorRunner struct{ *fenceCompletionRunner }
@@ -655,6 +717,9 @@ func (r *fenceCompletionRunner) WaitCompletion(ctx context.Context) error {
 	case <-r.producerDone:
 		return nil
 	case <-ctx.Done():
+		if r.waitExpired != nil {
+			close(r.waitExpired)
+		}
 		return ctx.Err()
 	}
 }

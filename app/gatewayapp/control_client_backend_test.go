@@ -605,6 +605,7 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	inner := newControlClientFencedRuntime(active)
+	defer inner.runner.finish()
 	fenced, err := controlplane.NewFencedRuntime(controlplane.FencedRuntimeConfig{
 		Runtime: inner, Fences: sessions, OwnerID: "host-epoch-a",
 	})
@@ -736,7 +737,7 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	select {
 	case <-inner.runner.done:
 		t.Fatal("completed HTTP request owned the accepted Turn lifetime")
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 
 	observedTarget := waitForControlClientTurnTarget(t, observed.Subscription)
@@ -769,21 +770,61 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 		t.Fatalf("second-client observation/steer changed durable fence: before=%#v after=%#v", beforeSteer, durable)
 	}
 
-	if _, err := remoteB.Cancel(context.Background(), appserver.CancelRequest{
+	// Detaching the observing HTTP client must not terminate accepted work.
+	if err := observed.Subscription.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cancelRequest := appserver.CancelRequest{
 		WriteBase: appserver.WriteBase{
 			OperationID: "operation-remote-host-cancel",
 			SessionID:   active.SessionID,
 		},
 		Target: prompt.Target,
 		Reason: "cancel from a second client request",
-	}); err != nil {
+	}
+	stale := cancelRequest
+	stale.OperationID = "operation-stale-epoch-cancel"
+	stale.ExpectedControllerEpoch = "obsolete-controller-epoch"
+	if _, err := remoteB.Cancel(ctx, stale); errorcode.CodeOf(err) != errorcode.Conflict {
+		t.Fatalf("stale epoch cancel = %v, want conflict", err)
+	}
+	if calls := inner.runner.cancelCalls.Load(); calls != 0 {
+		t.Fatalf("stale epoch reached producer: %d cancel calls", calls)
+	}
+	if _, err := remoteB.Cancel(ctx, cancelRequest); err != nil {
 		t.Fatal(err)
+	}
+	// Cancel acknowledges a request; only finish releases the non-cooperative
+	// producer barrier. Replaying the same operation must not call it twice.
+	if _, err := remoteA.Cancel(ctx, cancelRequest); err != nil {
+		t.Fatalf("idempotent cancel replay = %v", err)
+	}
+	if calls := inner.runner.cancelCalls.Load(); calls != 1 {
+		t.Fatalf("cancel calls after replay = %d, want 1", calls)
+	}
+	changed := cancelRequest
+	changed.Reason = "different intent under the same operation ID"
+	if _, err := remoteA.Cancel(ctx, changed); errorcode.CodeOf(err) != errorcode.Conflict {
+		t.Fatalf("changed cancel intent = %v, want conflict", err)
 	}
 	select {
 	case <-inner.runner.done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("remote Cancel did not stop the Host-owned Turn")
+		t.Fatal("cancel acknowledgement completed the delayed producer")
+	default:
 	}
+	durable, err = sessions.SessionFence(ctx, active.SessionRef)
+	if err != nil || durable.FenceID != beforeSteer.FenceID || durable.FencingToken != beforeSteer.FencingToken || durable.OwnerID != beforeSteer.OwnerID {
+		t.Fatalf("cancel acknowledgement changed fence: before=%#v after=%#v err=%v", beforeSteer, durable, err)
+	}
+	if _, err := sessions.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{
+		SessionRef: active.SessionRef, OwnerID: "competing-host",
+	}); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("competing acquire after cancel acknowledgement = %v, want fence conflict", err)
+	}
+	if turn, ok := kernel.ActiveTurn(active.SessionID); !ok || turn.TurnID != prompt.Target.TurnID {
+		t.Fatal("gateway released active Turn before producer completion")
+	}
+	inner.runner.finish()
 	waitForControlClientFenceRelease(t, sessions, active.SessionRef)
 	if err := stack.Close(); err != nil {
 		t.Fatal(err)
@@ -915,6 +956,7 @@ type controlClientFencedRunner struct {
 	done        chan struct{}
 	submissions chan agent.Submission
 	finishOnce  sync.Once
+	cancelCalls atomic.Int32
 }
 
 func (*controlClientFencedRunner) RunID() string { return "run-fenced-http" }
@@ -929,13 +971,14 @@ func (runner *controlClientFencedRunner) Submit(submission agent.Submission) err
 }
 
 func (runner *controlClientFencedRunner) Cancel() agent.CancelResult {
-	runner.finishOnce.Do(func() { close(runner.done) })
+	runner.cancelCalls.Add(1)
 	return agent.CancelResult{Status: agent.CancelStatusCancelled}
 }
 
-func (runner *controlClientFencedRunner) Close() error {
+func (*controlClientFencedRunner) Close() error { return nil }
+
+func (runner *controlClientFencedRunner) finish() {
 	runner.finishOnce.Do(func() { close(runner.done) })
-	return nil
 }
 
 func (runner *controlClientFencedRunner) WaitCompletion(ctx context.Context) error {
