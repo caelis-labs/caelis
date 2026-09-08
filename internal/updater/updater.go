@@ -2,7 +2,6 @@ package updater
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +15,9 @@ import (
 )
 
 const (
+	// EnvReleasesBaseURL overrides the raw release channel used by the installers.
+	EnvReleasesBaseURL = "CAELIS_RELEASES_BASE_URL"
+
 	EnvInstallMethod         = "CAELIS_INSTALL_METHOD"
 	EnvNPMPackageDir         = "CAELIS_NPM_PACKAGE_DIR"
 	EnvNPMPlatformPackage    = "CAELIS_NPM_PLATFORM_PACKAGE"
@@ -26,11 +28,10 @@ const (
 	MethodNPM = "npm"
 	MethodDev = "dev"
 
-	defaultGitHubAPIURL      = "https://api.github.com/repos/caelis-labs/caelis/releases/latest"
-	defaultGitHubReleaseBase = "https://github.com/caelis-labs/caelis/releases/download"
-	defaultNPMRegistry       = "https://registry.npmjs.org"
-	npmPackageName           = "@caelis/caelis"
-	dailyCheckInterval       = 24 * time.Hour
+	defaultReleasesBaseURL = "https://releases.caelis.dev"
+	defaultNPMRegistry     = "https://registry.npmjs.org"
+	npmPackageName         = "@caelis/caelis"
+	dailyCheckInterval     = 24 * time.Hour
 	// updateLockMaxAge is only a PID-reuse fallback. Abandoned locks are
 	// reclaimed as soon as the recorded owner process is gone.
 	updateLockMaxAge        = 30 * time.Minute
@@ -45,9 +46,9 @@ type Config struct {
 	GOOS           string
 	GOARCH         string
 
-	GitHubAPIURL      string
-	GitHubReleaseBase string
-	NPMRegistry       string
+	// ReleasesBaseURL overrides EnvReleasesBaseURL and the default raw release channel.
+	ReleasesBaseURL string
+	NPMRegistry     string
 
 	HTTPClient    *http.Client
 	Now           func() time.Time
@@ -116,12 +117,6 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.GOARCH == "" {
 		cfg.GOARCH = runtime.GOARCH
 	}
-	if cfg.GitHubAPIURL == "" {
-		cfg.GitHubAPIURL = defaultGitHubAPIURL
-	}
-	if cfg.GitHubReleaseBase == "" {
-		cfg.GitHubReleaseBase = defaultGitHubReleaseBase
-	}
 	if cfg.NPMRegistry == "" {
 		cfg.NPMRegistry = defaultNPMRegistry
 	}
@@ -134,6 +129,14 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.Env == nil {
 		cfg.Env = os.Getenv
 	}
+	cfg.ReleasesBaseURL = strings.TrimSpace(cfg.ReleasesBaseURL)
+	if cfg.ReleasesBaseURL == "" {
+		cfg.ReleasesBaseURL = strings.TrimSpace(cfg.Env(EnvReleasesBaseURL))
+	}
+	if cfg.ReleasesBaseURL == "" {
+		cfg.ReleasesBaseURL = defaultReleasesBaseURL
+	}
+	cfg.ReleasesBaseURL = strings.TrimRight(cfg.ReleasesBaseURL, "/")
 	if cfg.LookPath == nil {
 		cfg.LookPath = exec.LookPath
 	}
@@ -379,25 +382,12 @@ func cleanExistingPath(path string) string {
 func (m *Manager) latestVersion(ctx context.Context, method string) (string, error) {
 	switch method {
 	case MethodRaw:
-		return m.latestGitHubVersion(ctx)
+		return m.latestRawVersion(ctx)
 	case MethodNPM:
 		return m.latestNPMVersion(ctx)
 	default:
 		return "", fmt.Errorf("unsupported install method %q", method)
 	}
-}
-
-func (m *Manager) latestGitHubVersion(ctx context.Context) (string, error) {
-	var payload struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := m.getJSON(ctx, m.cfg.GitHubAPIURL, &payload); err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(payload.TagName) == "" {
-		return "", errors.New("latest GitHub release has no tag_name")
-	}
-	return payload.TagName, nil
 }
 
 func (m *Manager) latestNPMVersion(ctx context.Context) (string, error) {
@@ -414,24 +404,6 @@ func (m *Manager) latestNPMVersion(ctx context.Context) (string, error) {
 		return "", errors.New("npm returned an empty latest version")
 	}
 	return version, nil
-}
-
-func (m *Manager) getJSON(ctx context.Context, url string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "caelis-updater")
-	resp, err := m.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("GET %s: %s", url, resp.Status)
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 func (m *Manager) currentDisplayVersion() string {

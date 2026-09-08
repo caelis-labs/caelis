@@ -4,7 +4,15 @@ All Go packages share the root `vX.Y.Z` tag. A release publishes six CLI
 archives plus checksums to GitHub Releases. The workflow also publishes six
 platform npm packages, the main
 `@caelis/caelis` package, and mirrors the latest archives to the public R2 bucket
-used by the installers.
+used by the installers and raw self-updater.
+
+Raw installations check `https://releases.caelis.dev/latest.txt` and download
+the archive and `checksums.txt` from `/releases/<tag>/` on the same host.
+`CAELIS_RELEASES_BASE_URL` overrides that base URL for both installation and
+self-update. The raw channel serves the latest release only and does not fall
+back to GitHub; GitHub Releases retains historical versions for manual installs.
+The updater verifies SHA256 before replacing the executable. Global npm
+installations continue to update through npm.
 
 Release builds stamp the distribution version, commit, build time, BuildID, and
 `build_kind=release`. Local or unstamped builds remain development builds and use
