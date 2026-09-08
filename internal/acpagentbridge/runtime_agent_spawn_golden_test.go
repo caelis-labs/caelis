@@ -334,6 +334,7 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 			},
 		},
 	})
+	turn.events <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Now())
 	close(turn.events)
 	select {
 	case err := <-promptErr:

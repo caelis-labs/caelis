@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
-func TestRunnerCancelNonCooperativeProcessConverges(t *testing.T) {
+func TestRunnerCancelNonCooperativeProcessConvergesWithoutClaimingRemoteCancellation(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
@@ -54,14 +54,14 @@ func TestRunnerCancelNonCooperativeProcessConverges(t *testing.T) {
 	}
 	select {
 	case event := <-events:
-		if event.Result == nil || event.Result.TaskID != spawn.TaskID || event.Result.State != delegation.StateCancelled || event.Result.Running {
+		if event.Result == nil || event.Result.TaskID != spawn.TaskID || event.Result.State != delegation.StateUnknownOutcome || event.Result.Running {
 			t.Fatalf("completion = %#v", event)
 		}
 	case <-ctx.Done():
 		t.Fatal("noncooperative producer did not converge")
 	}
 	final, err := runner.Wait(ctx, anchor, 1000)
-	if err != nil || final.Running || final.State != delegation.StateCancelled || final.TaskID != spawn.TaskID {
+	if err != nil || final.Running || final.State != delegation.StateUnknownOutcome || final.TaskID != spawn.TaskID {
 		t.Fatalf("terminal Wait = %#v, %v", final, err)
 	}
 }

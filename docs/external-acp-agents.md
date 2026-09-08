@@ -67,6 +67,35 @@ authoritative. It has no delivery MessageID, durable mailbox, target completion
 claim, or Task mutation. Ambiguous post-dispatch outcomes are not blindly
 retried.
 
+An admitted `session/prompt` remains open until its execution reaches a Turn
+terminal. If ACP forwarding fails, the bridge can no longer reliably service
+permissions: it requests Control cancellation and waits for the actual terminal,
+rather than silently draining a Run that may be waiting for approval. Cancellation
+requests do not prove cancellation completion. If observation is lost, or
+cancellation cannot be settled within 30 seconds, the prompt reports an error,
+not a successful `end_turn` or `cancelled` response. A completed Turn wins a race
+with observation cancellation and returns `end_turn`; unrelated forwarding
+failures remain errors, even when their cleanup successfully cancels the Turn.
+
+A standard RPC internal error, request-cancellation error, or unrecognized peer
+error does not prove that remote execution stopped. The child Task records
+`unknown_outcome`, retaining the response phase and numeric RPC code when
+available without exposing peer text or data. Such an activity rejects
+follow-up input, including after Runtime reload: `session/resume` restores access
+to a Session, not proof that its old execution is idle. Automatic execution
+reconciliation is not available through standard ACP resume; unresolved Tasks
+remain isolated rather than retrying a prompt blindly. Proven admission
+rejections and normal completed Turns retain ordinary follow-up behavior.
+
+The Host records ACP prompt-response, settlement and cleanup failures in
+`<Store>/logs/runtime.jsonl`, with Task, activity, parent-call and Session
+identities, RPC code, submission classification when available, and a bounded
+original error chain. This private sink is independent from model context and
+Task output. It uses owner-only file access and the existing 2 MiB rotation with
+one `.1` backup. Error details may contain sensitive peer data or paths; review
+logs before sharing. Prompts, launch environments and child stderr are not
+attached to these records.
+
 Task observes subsequent collaborator output on demand. A terminal response
 retrieved through Task read/wait should not also be sent as a message. Durable
 participant placement preserves the collaborator handle, ACP Session ID, and

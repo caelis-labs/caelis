@@ -487,6 +487,12 @@ func (r *Runner) submitIdleChildInput(
 	run.mu.RLock()
 	state := run.state
 	run.mu.RUnlock()
+	if state == delegation.StateUnknownOutcome {
+		slot.opMu.Unlock()
+		err := errorcode.New(errorcode.UnknownOutcome, "Target Agent execution outcome is unresolved; another prompt cannot be submitted")
+		r.logChildError(ctx, run, "follow_up_rejected", err)
+		return agent.ChildInputResult{}, err
+	}
 	if !delegationStateCanStartTurn(state) {
 		slot.opMu.Unlock()
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, fmt.Sprintf(
@@ -651,12 +657,18 @@ func (r *Runner) drivePreparedPrompt(
 		slot = fence.slot
 	}
 	first := true
+	// Authentication recovery can replace auth_required with a local selection
+	// or authenticate error. Keep the prompt's admission evidence separate:
+	// those errors do not make a rejected, not-yet-retried prompt indeterminate.
+	promptNotAdmitted := false
 	resp, err := authentication.RecoverConfiguredCall(
 		ctx, acpClient, methods, agentID, configured,
 		func(callCtx context.Context, activeClient *client.Client) (client.PromptResponse, error) {
 			if first {
 				first = false
-				return prepared.Wait(callCtx)
+				response, waitErr := prepared.Wait(callCtx)
+				promptNotAdmitted = authentication.IsRequired(waitErr)
+				return response, waitErr
 			}
 			retryDispatchDone := fence.current()
 			if slot == nil || retryDispatchDone == nil {
@@ -681,23 +693,30 @@ func (r *Runner) drivePreparedPrompt(
 				return client.PromptResponse{}, observeErr
 			}
 			slot.opMu.Unlock()
+			// From this point the retry may be submitted. The earlier rejection
+			// cannot classify this new request's execution outcome.
+			promptNotAdmitted = false
 			if dispatchErr := retry.DispatchWithAbort(callCtx, func() {
 				_ = activeClient.Close(context.Background())
 			}); dispatchErr != nil {
+				promptNotAdmitted = client.SubmissionProvenNotStarted(dispatchErr)
 				if client.DispatchMayHaveCommitted(dispatchErr) {
 					return client.PromptResponse{}, joinChildInputUnknown("Authenticated message retry outcome cannot be confirmed.", dispatchErr)
 				}
 				return client.PromptResponse{}, dispatchErr
 			}
 			fence.finish(retryDispatchDone)
-			return retry.Wait(callCtx)
+			response, waitErr := retry.Wait(callCtx)
+			promptNotAdmitted = authentication.IsRequired(waitErr)
+			return response, waitErr
 		},
 	)
-	if err != nil && ctx.Err() == nil && (childConnectionError(err) || client.DispatchMayHaveCommitted(err)) {
-		err = joinChildInputUnknown("Message delivery outcome cannot be confirmed.", err)
+	r.logChildError(ctx, run, "prompt_response", err)
+	if err != nil && !promptNotAdmitted && ctx.Err() == nil && client.PromptOutcomeUnknown(err) {
+		err = joinChildInputUnknown(subagentPromptUnknownDetail(err), err)
 	}
-	if ctx.Err() != nil {
-		err = ctx.Err()
+	if err != nil && !promptNotAdmitted && ctx.Err() != nil {
+		err = joinChildInputUnknown("Prompt observation ended before execution completion could be confirmed.", ctx.Err())
 	}
 	if slot := run.childSlot(); errorcode.Is(err, errorcode.UnknownOutcome) && slot != nil {
 		slot.quarantineOutput(run)

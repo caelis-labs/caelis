@@ -43,6 +43,7 @@ func injectACPControlPlane(
 	endpointResolver endpoint.Resolver,
 ) (runtime.Config, *acpassembly.ControlPlane, error) {
 	controlPlane, err := acpassembly.NewControlPlane(acpassembly.ControlPlaneConfig{
+		Diagnostics:       cfg.Diagnostics,
 		Agents:            resolved.Agents,
 		PlacementResolver: placementResolver,
 		SessionPreparer:   sessionPreparer,

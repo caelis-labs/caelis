@@ -23,7 +23,12 @@ func (r *Runner) reconnectChildEndpointLocked(
 	anchor delegation.Anchor,
 	recovery *tasksubagent.ReconnectRequest,
 	slot *childSlot,
-) (*childRun, error) {
+) (reconnected *childRun, reconnectErr error) {
+	if slot != nil {
+		defer func() {
+			r.logChildError(ctx, slot.currentRun(), "endpoint_reconnect", reconnectErr)
+		}()
+	}
 	if recovery == nil {
 		return nil, fmt.Errorf("target Agent reconnect context is required")
 	}

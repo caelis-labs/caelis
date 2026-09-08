@@ -517,9 +517,9 @@ func ErrorCode(err error) (int, bool) {
 	return requestErr.Code, true
 }
 
-// DispatchMayHaveCommitted retains Caelis's product recovery distinction. A
-// peer RequestError is a completed rejection, while transport ambiguity or a
-// successful response that cannot be decoded must never be retried blindly.
+// DispatchMayHaveCommitted reports transport submission ambiguity. A peer
+// RequestError completes the RPC, but says nothing about an admitted prompt's
+// execution outcome; prompt callers must also use PromptOutcomeUnknown.
 func DispatchMayHaveCommitted(err error) bool {
 	if err == nil {
 		return false
@@ -534,6 +534,27 @@ func DispatchMayHaveCommitted(err error) bool {
 	}
 	state, ok := acpsdk.RequestSubmissionStateOf(err)
 	return ok && state != acpsdk.RequestSubmissionNotStarted
+}
+
+// PromptOutcomeUnknown distinguishes a completed RPC from a completed Turn.
+// Standard validation, authentication and overload errors reject admission.
+// Internal errors, request cancellation and unrecognized peer errors do not
+// prove that an already admitted execution stopped. No message-text matching
+// or product-specific ACP error code participates in this decision.
+func PromptOutcomeUnknown(err error) bool {
+	if err == nil {
+		return false
+	}
+	var requestErr *acpsdk.RequestError
+	if errors.As(err, &requestErr) {
+		switch requestErr.Code {
+		case -32700, -32600, -32601, -32602, -32000, -32001:
+			return false
+		default:
+			return true
+		}
+	}
+	return !SubmissionProvenNotStarted(err)
 }
 
 // SubmissionProvenNotStarted reports the SDK's positive proof that the

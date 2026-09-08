@@ -426,11 +426,13 @@ func TestLoadedAgentCommunicationPromptRestoresDisplayIdentity(t *testing.T) {
 func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 	mode := os.Getenv("CAELIS_ACP_SUBAGENT_HELPER")
 	switch mode {
-	case "prompt-failure", "prompt-authentication", "message-reconnect", "history-load", "history-load-capability", "history-load-mismatch", "history-unsupported", "initialize-exit", "session-options":
+	case "prompt-failure", "prompt-internal-error", "prompt-authentication", "message-reconnect", "history-load", "history-load-capability", "history-load-mismatch", "history-unsupported", "initialize-exit", "session-options":
 	default:
 		return
 	}
 	authenticated := false
+	authFailure := os.Getenv("CAELIS_ACP_AUTH_FAILURE")
+	authTrace := os.Getenv("CAELIS_ACP_AUTH_TRACE")
 	configuredModel := "model-default"
 	configuredMode := "auto-review"
 	configuredEffort := "low"
@@ -453,6 +455,17 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 	}
 	conn := jsonrpc.New(os.Stdin, os.Stdout)
 	err := conn.Serve(context.Background(), func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
+		if mode == "prompt-authentication" && authTrace != "" {
+			file, err := os.OpenFile(authTrace, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+			if err != nil {
+				os.Exit(24)
+			}
+			_, writeErr := file.WriteString(msg.Method + "\n")
+			closeErr := file.Close()
+			if writeErr != nil || closeErr != nil {
+				os.Exit(25)
+			}
+		}
 		switch msg.Method {
 		case client.MethodInitialize:
 			if mode == "initialize-exit" {
@@ -464,6 +477,7 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				response.AgentCapabilities.LoadSession = true
 			}
 			if mode == "prompt-authentication" {
+				response.AgentCapabilities.SessionCapabilities = map[string]json.RawMessage{"resume": json.RawMessage(`{}`)}
 				response.AuthMethods = []json.RawMessage{
 					json.RawMessage(`{"id":"agent-login","name":"Agent login"}`),
 				}
@@ -508,6 +522,12 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 			var req client.ResumeSessionRequest
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if mode == "prompt-authentication" {
+				if req.SessionId != "child-prompt-failure" {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: "wrong authentication Session"}
+				}
+				return client.ResumeSessionResponse{}, nil
 			}
 			meta := diagnosticRawMeta(req.Meta)
 			claim, ok := acputil.ParseSubagentSessionMeta(meta)
@@ -562,6 +582,12 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 			if err := json.Unmarshal(msg.Params, &req); err != nil || req.MethodId != "agent-login" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected authenticate request"}
 			}
+			if authFailure == "authenticate" {
+				return nil, &jsonrpc.RPCError{Code: -32603, Message: "private authentication failure"}
+			}
+			if authFailure == "authenticate-disconnect" {
+				os.Exit(0)
+			}
 			authenticated = true
 			return client.AuthenticateResponse{}, nil
 		case client.MethodSessionPrompt:
@@ -572,14 +598,24 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 			}
 			if mode == "prompt-authentication" {
-				if !authenticated {
+				if !authenticated || authFailure == "retry-auth-required" {
 					return nil, &jsonrpc.RPCError{Code: client.ErrorCodeAuthRequired, Message: "Authentication required"}
+				}
+				if authFailure == "retry" {
+					return nil, &jsonrpc.RPCError{Code: -32603, Message: "private retry failure"}
+				}
+				if authFailure == "retry-disconnect" {
+					os.Exit(0)
 				}
 				return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 			}
 			fmt.Fprintln(os.Stderr, "OPENAI_API_KEY=sk-stderr-super-secret cwd=/Users/private/workspace")
+			code := -32602
+			if mode == "prompt-internal-error" {
+				code = -32603
+			}
 			return nil, &jsonrpc.RPCError{
-				Code:    -32000,
+				Code:    code,
 				Message: "prompt rejected Authorization: Bearer rpc-super-secret at /Users/private/workspace",
 			}
 		default:

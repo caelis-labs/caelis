@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -27,6 +28,8 @@ type ControlPlane struct {
 
 // ControlPlaneConfig configures one shared-registry ACP control plane.
 type ControlPlaneConfig struct {
+	// Diagnostics is the Host-private ACP lifecycle error sink.
+	Diagnostics       *slog.Logger
 	Agents            []assembly.AgentConfig
 	PlacementResolver acpsubagent.PlacementResolver
 	SessionPreparer   acpsubagent.SessionPreparer
@@ -41,6 +44,7 @@ func NewControlPlane(cfg ControlPlaneConfig) (*ControlPlane, error) {
 		return nil, err
 	}
 	runner, err := acpsubagent.NewRunner(acpsubagent.RunnerConfig{
+		Diagnostics:       cfg.Diagnostics,
 		Registry:          registry,
 		PlacementResolver: cfg.PlacementResolver,
 		SessionPreparer:   cfg.SessionPreparer,

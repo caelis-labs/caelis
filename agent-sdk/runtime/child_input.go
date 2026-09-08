@@ -130,6 +130,15 @@ func (r *Runtime) submitChildInputLocked(
 	if err := validateTaskActivityTarget(task, target); err != nil {
 		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.Conflict, "Target Agent binding changed", err)
 	}
+	// An unresolved producer is not an idle endpoint. Consult the durable
+	// Task projection before binding a fresh connection, including after a
+	// Runtime restart; session resume alone cannot settle the old activity.
+	task.mu.Lock()
+	unresolved := task.state == taskapi.StateUnknownOutcome
+	task.mu.Unlock()
+	if unresolved {
+		return agent.ChildInputResult{}, errorcode.New(errorcode.UnknownOutcome, "Target Agent execution outcome is unresolved; another prompt cannot be submitted")
+	}
 	activityID, outputObserver, completion, err := r.prepareChildTaskOutput(ctx, task)
 	if err != nil {
 		return agent.ChildInputResult{}, err

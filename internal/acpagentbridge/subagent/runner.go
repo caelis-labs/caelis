@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"strings"
 	"sync"
@@ -55,6 +56,9 @@ type PermissionRequest struct {
 }
 
 type RunnerConfig struct {
+	// Diagnostics is an optional Host-private sink for bounded error details.
+	// It must never target model output or public Task/Session streams.
+	Diagnostics       *slog.Logger
 	Registry          *Registry
 	ClientInfo        *acpsdk.Implementation
 	Clock             func() time.Time
@@ -66,6 +70,7 @@ type RunnerConfig struct {
 }
 
 type Runner struct {
+	diagnostics       *slog.Logger
 	registry          *Registry
 	clientInfo        *acpsdk.Implementation
 	clock             func() time.Time
@@ -149,6 +154,7 @@ func NewRunner(cfg RunnerConfig) (*Runner, error) {
 		clock = time.Now
 	}
 	return &Runner{
+		diagnostics:       cfg.Diagnostics,
 		registry:          cfg.Registry,
 		clientInfo:        cfg.ClientInfo,
 		clock:             clock,
@@ -514,8 +520,7 @@ func delegationStateCanStartTurn(state delegation.State) bool {
 	case delegation.StateCompleted,
 		delegation.StateFailed,
 		delegation.StateCancelled,
-		delegation.StateInterrupted,
-		delegation.StateUnknownOutcome:
+		delegation.StateInterrupted:
 		return true
 	default:
 		return false
@@ -573,6 +578,7 @@ func (r *Runner) Cancel(ctx context.Context, anchor delegation.Anchor) error {
 	if client != nil {
 		remoteErr = client.Cancel(ctx, sessionID)
 	}
+	r.logChildError(ctx, run, "cancel_dispatch", remoteErr)
 	run.mu.Lock()
 	if run.done != turnDone {
 		close(cancelResolved)
@@ -695,16 +701,16 @@ func (r *Runner) finishDriveLocked(ctx context.Context, run *childRun, stopReaso
 	run.finishing = true
 	run.updatedAt = r.clock()
 	closeClient := false
-	if run.cancelRequested {
+	if run.cancelRequested && err != nil {
+		// Sending session/cancel or terminating our observation does not prove
+		// that a managed Host execution stopped. Only a prompt response can
+		// confirm cancellation; local teardown remains an unknown outcome.
+		run.state = delegation.StateUnknownOutcome
+		run.failureDetail = "subagent cancellation outcome cannot be confirmed"
 		if run.cancelFailed {
-			run.state = delegation.StateInterrupted
-			run.outputPreview = "cancellation outcome unknown"
 			run.failureDetail = "subagent cancellation failed"
-		} else {
-			run.state = delegation.StateCancelled
-			run.outputPreview = "cancelled"
-			run.failureDetail = ""
 		}
+		run.outputPreview = run.failureDetail
 		run.result = ""
 		closeClient = true
 	} else if err != nil {
@@ -748,9 +754,18 @@ func (r *Runner) finishDriveLocked(ctx context.Context, run *childRun, stopReaso
 	slot := run.slot
 	acpClient := run.client
 	run.mu.Unlock()
+	r.logChildError(ctx, run, "prompt_settlement", err)
 
 	if closeClient && acpClient != nil {
-		_ = acpClient.Close(context.WithoutCancel(ctx))
+		if closeErr := acpClient.Close(context.WithoutCancel(ctx)); closeErr != nil {
+			r.logChildError(ctx, run, "connection_cleanup", closeErr)
+			run.mu.Lock()
+			run.state = delegation.StateUnknownOutcome
+			run.failureDetail = "subagent connection cleanup outcome cannot be confirmed"
+			run.outputPreview = run.failureDetail
+			run.result = ""
+			run.mu.Unlock()
+		}
 	}
 	if slot != nil {
 		slot.beginTerminalSettlement(done)
@@ -761,8 +776,9 @@ func (r *Runner) finishDriveLocked(ctx context.Context, run *childRun, stopReaso
 			run.finishing = false
 			run.mu.Unlock()
 			slot.finishTerminalSettlement(done)
-			// done is the full producer barrier: terminal observation is
-			// durable and the endpoint admission fence is clear.
+			// done settles this local ACP activity's publication and admission.
+			// An unknown outcome is not remote execution quiescence and remains
+			// ineligible for another prompt after this barrier closes.
 			close(done)
 		}()
 		return done
@@ -777,8 +793,8 @@ func (r *Runner) finishDriveLocked(ctx context.Context, run *childRun, stopReaso
 	run.mu.Lock()
 	run.finishing = false
 	run.mu.Unlock()
-	// done is the full producer barrier: completion publication may persist the
-	// durable Task terminal record, so Host quiesce must not cross it early.
+	// Settle local completion publication before Host quiesce proceeds. This
+	// barrier does not strengthen an unknown remote execution outcome.
 	close(done)
 	return done
 }
@@ -973,6 +989,17 @@ func trimStringPtr(value *string) string {
 		return ""
 	}
 	return strings.TrimSpace(*value)
+}
+
+func subagentPromptUnknownDetail(err error) string {
+	var response *acpsdk.RequestError
+	if errors.As(err, &response) {
+		// The standard numeric code is safe to retain alongside the existing
+		// Task, activity and Session identities. Peer text/data can contain
+		// credentials and must not enter model context or public diagnostics.
+		return fmt.Sprintf("Subagent prompt outcome cannot be confirmed (ACP response code %d).", response.Code)
+	}
+	return "Subagent prompt outcome cannot be confirmed (response observation lost)."
 }
 
 func subagentPromptFailureDetail(err error) string {
