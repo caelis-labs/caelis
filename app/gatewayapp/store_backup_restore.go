@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -27,17 +28,29 @@ const (
 )
 
 type storeRestoreJournal struct {
-	Format               string    `json:"format"`
-	State                string    `json:"state"`
-	StoreDir             string    `json:"store_dir"`
-	StageDir             string    `json:"stage_dir"`
-	RollbackDir          string    `json:"rollback_dir"`
-	Applied              []string  `json:"applied"`
-	Pending              string    `json:"pending,omitempty"`
-	PendingTargetExisted bool      `json:"pending_target_existed,omitempty"`
-	MemoryRestorePending bool      `json:"memory_restore_pending,omitempty"`
-	MemoryCommitPending  bool      `json:"memory_commit_pending,omitempty"`
-	CreatedAt            time.Time `json:"created_at"`
+	Format               string                                   `json:"format"`
+	State                string                                   `json:"state"`
+	StoreDir             string                                   `json:"store_dir"`
+	StageDir             string                                   `json:"stage_dir"`
+	RollbackDir          string                                   `json:"rollback_dir"`
+	Applied              []string                                 `json:"applied"`
+	Components           map[string]storeRestoreComponentEvidence `json:"components,omitempty"`
+	RollbackCompleted    []string                                 `json:"rollback_completed,omitempty"`
+	Pending              string                                   `json:"pending,omitempty"`
+	PendingTargetExisted bool                                     `json:"pending_target_existed,omitempty"`
+	MemoryRestorePending bool                                     `json:"memory_restore_pending,omitempty"`
+	MemoryCommitPending  bool                                     `json:"memory_commit_pending,omitempty"`
+	CreatedAt            time.Time                                `json:"created_at"`
+}
+
+// storeRestoreComponentEvidence records enough durable content evidence to
+// recognize a completed rollback after the component rename succeeded but the
+// journal update did not. It deliberately contains digests only; component
+// contents remain owned by their existing Store authorities.
+type storeRestoreComponentEvidence struct {
+	TargetExisted   bool   `json:"target_existed"`
+	OriginalDigest  string `json:"original_digest,omitempty"`
+	InstalledDigest string `json:"installed_digest,omitempty"`
 }
 
 // RestoreStore installs all non-secret components and delegates the Memory
@@ -99,6 +112,7 @@ func RestoreStore(ctx context.Context, options StoreRestoreOptions) (StoreRestor
 	journal := storeRestoreJournal{
 		Format: StoreBackupFormat, State: "applying", StoreDir: storeDir,
 		StageDir: stageDir, RollbackDir: rollbackDir, CreatedAt: time.Now().UTC(),
+		Components: make(map[string]storeRestoreComponentEvidence),
 	}
 	if err := writeStoreRestoreJournal(storeDir, journal); err != nil {
 		os.RemoveAll(rollbackDir)
@@ -127,11 +141,26 @@ func RestoreStore(ctx context.Context, options StoreRestoreOptions) (StoreRestor
 		rollbackTarget := filepath.Join(rollbackDir, relative)
 		journal.Pending = relative
 		journal.PendingTargetExisted = false
+		evidence := storeRestoreComponentEvidence{}
 		if _, err := os.Lstat(target); err == nil {
 			journal.PendingTargetExisted = true
+			evidence.TargetExisted = true
+			evidence.OriginalDigest, err = storeRestorePathDigest(target)
+			if err != nil {
+				return rollbackStoreRestoreWithError(storeDir, fmt.Errorf("capture original %s evidence: %w", relative, err), report)
+			}
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return rollbackStoreRestoreWithError(storeDir, err, report)
 		}
+		installedDigest, err := storeRestorePathDigest(stagedPath)
+		if err != nil {
+			return rollbackStoreRestoreWithError(storeDir, fmt.Errorf("capture staged %s evidence: %w", relative, err), report)
+		}
+		evidence.InstalledDigest = installedDigest
+		if journal.Components == nil {
+			journal.Components = make(map[string]storeRestoreComponentEvidence)
+		}
+		journal.Components[relative] = evidence
 		if err := writeStoreRestoreJournal(storeDir, journal); err != nil {
 			return rollbackStoreRestoreWithError(storeDir, err, report)
 		}
@@ -306,6 +335,74 @@ func sha256Bytes(raw []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// storeRestorePathDigest is a read-only, deterministic digest for one Store
+// component. It includes relative names and entry kinds so a directory with
+// different children cannot be mistaken for the original component after a
+// crash. Symlinks and other special entries are refused by the Store
+// authority instead of being followed during recovery.
+func storeRestorePathDigest(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || (!info.Mode().IsRegular() && !info.IsDir()) {
+		return "", fmt.Errorf("path is not a regular file or directory")
+	}
+	hash := sha256.New()
+	addEntry := func(relative string, entryType string, mode os.FileMode, raw []byte) {
+		_, _ = io.WriteString(hash, entryType)
+		_, _ = hash.Write([]byte{0})
+		_, _ = io.WriteString(hash, relative)
+		_, _ = hash.Write([]byte{0})
+		_, _ = io.WriteString(hash, fmt.Sprintf("%o", mode.Perm()))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write(raw)
+		_, _ = hash.Write([]byte{0})
+	}
+	if info.Mode().IsRegular() {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		addEntry(filepath.Base(path), "file", info.Mode(), raw)
+		return hex.EncodeToString(hash.Sum(nil)), nil
+	}
+	err = filepath.WalkDir(path, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		entryInfo, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 || (!entryInfo.Mode().IsRegular() && !entryInfo.IsDir()) {
+			return fmt.Errorf("component entry %q is not a regular file or directory", current)
+		}
+		relative, err := filepath.Rel(path, current)
+		if err != nil {
+			return err
+		}
+		if relative == "." {
+			addEntry(".", "directory", entryInfo.Mode(), nil)
+			return nil
+		}
+		if entryInfo.IsDir() {
+			addEntry(filepath.ToSlash(relative), "directory", entryInfo.Mode(), nil)
+			return nil
+		}
+		raw, err := os.ReadFile(current)
+		if err != nil {
+			return err
+		}
+		addEntry(filepath.ToSlash(relative), "file", entryInfo.Mode(), raw)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
 func rollbackStoreRestoreWithError(storeDir string, cause error, report StoreRestoreReport) (StoreRestoreReport, error) {
 	rollbackErr := rollbackStoreRestore(storeDir)
 	report.RolledBackOnFailure = rollbackErr == nil
@@ -400,23 +497,63 @@ func rollbackStoreRestore(storeDir string) error {
 	}
 	relatives := append([]string(nil), journal.Applied...)
 	if journal.Pending != "" {
-		alreadyApplied := false
-		for _, relative := range relatives {
-			if relative == journal.Pending {
-				alreadyApplied = true
-				break
-			}
-		}
-		if !alreadyApplied {
+		if !containsStoreRestorePath(relatives, journal.Pending) {
 			relatives = append(relatives, journal.Pending)
+		}
+	}
+	componentRelatives := make([]string, 0, len(journal.Components))
+	for relative := range journal.Components {
+		componentRelatives = append(componentRelatives, relative)
+	}
+	sort.Strings(componentRelatives)
+	for _, relative := range componentRelatives {
+		if !containsStoreRestorePath(relatives, relative) {
+			relatives = append(relatives, relative)
 		}
 	}
 	for index := len(relatives) - 1; index >= 0; index-- {
 		relative := relatives[index]
+		evidence, hasEvidence := journal.Components[relative]
+		if containsStoreRestorePath(journal.RollbackCompleted, relative) {
+			if err := verifyStoreRestoreRollbackCompletion(storeDir, relative, evidence, hasEvidence); err != nil {
+				return err
+			}
+			continue
+		}
 		target := filepath.Join(storeDir, relative)
 		rollbackTarget := filepath.Join(journal.RollbackDir, relative)
 		_, rollbackErr := os.Lstat(rollbackTarget)
 		if rollbackErr == nil {
+			if hasEvidence && !evidence.TargetExisted {
+				return fmt.Errorf("rollback evidence for existing %s contradicts the original target state", relative)
+			}
+			if !hasEvidence {
+				originalDigest, err := storeRestorePathDigest(rollbackTarget)
+				if err != nil {
+					return fmt.Errorf("capture rollback evidence for %s: %w", relative, err)
+				}
+				evidence = storeRestoreComponentEvidence{TargetExisted: true, OriginalDigest: originalDigest}
+				if journal.Components == nil {
+					journal.Components = make(map[string]storeRestoreComponentEvidence)
+				}
+				journal.Components[relative] = evidence
+				if err := writeStoreRestoreJournal(storeDir, journal); err != nil {
+					return err
+				}
+			}
+			rollbackDigest, err := storeRestorePathDigest(rollbackTarget)
+			if err != nil {
+				return fmt.Errorf("inspect rollback evidence for %s: %w", relative, err)
+			}
+			if evidence.OriginalDigest == "" {
+				evidence.OriginalDigest = rollbackDigest
+				journal.Components[relative] = evidence
+				if err := writeStoreRestoreJournal(storeDir, journal); err != nil {
+					return err
+				}
+			} else if rollbackDigest != evidence.OriginalDigest {
+				return fmt.Errorf("rollback evidence for %s does not match the recorded original", relative)
+			}
 			if _, err := os.Lstat(target); err == nil {
 				if err := os.RemoveAll(target); err != nil {
 					return err
@@ -436,25 +573,56 @@ func rollbackStoreRestore(storeDir string) error {
 			if err := syncStoreRestoreDirectories(filepath.Dir(rollbackTarget), filepath.Dir(target)); err != nil {
 				return err
 			}
+			if err := verifyStoreRestorePathDigest(target, evidence.OriginalDigest, relative); err != nil {
+				return err
+			}
+			journal.RollbackCompleted = append(journal.RollbackCompleted, relative)
+			if err := writeStoreRestoreJournal(storeDir, journal); err != nil {
+				return err
+			}
 			continue
 		}
 		if !errors.Is(rollbackErr, os.ErrNotExist) {
 			return rollbackErr
 		}
-		// If the target existed before the pending move, the absence of a
-		// rollback copy means the rename never happened; preserve that target.
-		// A newly-created target has no prior copy and must be removed.
-		if relative == journal.Pending && journal.PendingTargetExisted {
-			continue
+		if !hasEvidence {
+			return fmt.Errorf("rollback evidence for %s is missing; refusing to remove an uncertain target", relative)
 		}
-		if _, err := os.Lstat(target); err == nil {
-			if err := os.RemoveAll(target); err != nil {
+		if evidence.TargetExisted {
+			if err := verifyStoreRestorePathDigest(target, evidence.OriginalDigest, relative); err != nil {
 				return err
 			}
-			if err := storeRestoreSyncDirectory(filepath.Dir(target)); err != nil {
+		} else {
+			info, err := os.Lstat(target)
+			switch {
+			case errors.Is(err, os.ErrNotExist):
+				// The new component was already removed before the crash.
+			case err != nil:
 				return err
+			default:
+				if evidence.InstalledDigest == "" {
+					return fmt.Errorf("rollback evidence for new %s has no installed digest; refusing to remove an uncertain target", relative)
+				}
+				if info.Mode()&os.ModeSymlink != 0 {
+					return fmt.Errorf("rollback target %s is a symlink", relative)
+				}
+				installedDigest, err := storeRestorePathDigest(target)
+				if err != nil {
+					return fmt.Errorf("inspect installed %s during rollback: %w", relative, err)
+				}
+				if installedDigest != evidence.InstalledDigest {
+					return fmt.Errorf("installed %s changed before rollback; refusing to remove it", relative)
+				}
+				if err := os.RemoveAll(target); err != nil {
+					return err
+				}
+				if err := storeRestoreSyncDirectory(filepath.Dir(target)); err != nil {
+					return err
+				}
 			}
-		} else if !errors.Is(err, os.ErrNotExist) {
+		}
+		journal.RollbackCompleted = append(journal.RollbackCompleted, relative)
+		if err := writeStoreRestoreJournal(storeDir, journal); err != nil {
 			return err
 		}
 	}
@@ -468,6 +636,45 @@ func rollbackStoreRestore(storeDir string) error {
 		return err
 	}
 	return clearStoreRestoreJournal(storeDir)
+}
+
+func containsStoreRestorePath(paths []string, want string) bool {
+	for _, path := range paths {
+		if path == want {
+			return true
+		}
+	}
+	return false
+}
+
+func verifyStoreRestorePathDigest(target, wantDigest, relative string) error {
+	if strings.TrimSpace(wantDigest) == "" {
+		return fmt.Errorf("rollback evidence for %s has no original digest", relative)
+	}
+	got, err := storeRestorePathDigest(target)
+	if err != nil {
+		return fmt.Errorf("verify restored %s: %w", relative, err)
+	}
+	if got != wantDigest {
+		return fmt.Errorf("restored %s does not match the recorded original", relative)
+	}
+	return nil
+}
+
+func verifyStoreRestoreRollbackCompletion(storeDir, relative string, evidence storeRestoreComponentEvidence, hasEvidence bool) error {
+	if !hasEvidence {
+		return fmt.Errorf("rollback completion for %s has no component evidence", relative)
+	}
+	target := filepath.Join(storeDir, relative)
+	if evidence.TargetExisted {
+		return verifyStoreRestorePathDigest(target, evidence.OriginalDigest, relative)
+	}
+	if _, err := os.Lstat(target); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return fmt.Errorf("rollback completion for new %s has a surviving target", relative)
 }
 
 func writeStoreRestoreJournal(storeDir string, journal storeRestoreJournal) error {
@@ -592,10 +799,36 @@ func readStoreRestoreJournal(storeDir string) (storeRestoreJournal, error) {
 			return storeRestoreJournal{}, errors.New("gatewayapp: Store restore journal contains an invalid applied path")
 		}
 	}
+	for relative, evidence := range journal.Components {
+		if !validStoreRestoreRelativePath(relative) {
+			return storeRestoreJournal{}, errors.New("gatewayapp: Store restore journal contains an invalid component path")
+		}
+		for name, digest := range map[string]string{
+			"original": evidence.OriginalDigest, "installed": evidence.InstalledDigest,
+		} {
+			if digest != "" && (len(digest) != sha256.Size*2 || !isLowerHexDigest(digest)) {
+				return storeRestoreJournal{}, fmt.Errorf("gatewayapp: Store restore journal contains an invalid %s digest", name)
+			}
+		}
+	}
+	for _, relative := range journal.RollbackCompleted {
+		if !validStoreRestoreRelativePath(relative) {
+			return storeRestoreJournal{}, errors.New("gatewayapp: Store restore journal contains an invalid completed path")
+		}
+	}
 	if journal.Pending != "" && !validStoreRestoreRelativePath(journal.Pending) {
 		return storeRestoreJournal{}, errors.New("gatewayapp: Store restore journal contains an invalid pending path")
 	}
 	return journal, nil
+}
+
+func isLowerHexDigest(value string) bool {
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func validateStoreRestoreJournalPath(storeDir, path, prefix string) error {

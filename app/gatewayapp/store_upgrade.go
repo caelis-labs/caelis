@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/version"
 )
 
@@ -79,6 +81,9 @@ func readStoreUpgradePreflight(ctx context.Context, storeDir string) (storeUpgra
 	if err := rejectStoreSQLiteSidecars(controlPath, "Control"); err != nil {
 		return storeUpgradePreflight{}, err
 	}
+	if err := appserver.ValidateSQLiteOperationStoreReadOnly(ctx, controlPath); err != nil {
+		return storeUpgradePreflight{}, fmt.Errorf("store upgrade preflight Control owner validation: %w", err)
+	}
 	controlRaw, err := readStoreUpgradeRegularFile(controlPath, "Control database")
 	if err != nil {
 		return storeUpgradePreflight{}, err
@@ -90,15 +95,21 @@ func readStoreUpgradePreflight(ctx context.Context, storeDir string) (storeUpgra
 	database.SetMaxOpenConns(1)
 	var integrity string
 	queryErr := database.QueryRowContext(ctx, `PRAGMA integrity_check`).Scan(&integrity)
-	closeErr := database.Close()
 	if queryErr != nil {
+		_ = database.Close()
 		return storeUpgradePreflight{}, fmt.Errorf("check Control database for Store upgrade preflight: %w", queryErr)
+	}
+	if !strings.EqualFold(strings.TrimSpace(integrity), "ok") {
+		_ = database.Close()
+		return storeUpgradePreflight{}, fmt.Errorf("store upgrade preflight: Control integrity check = %q", integrity)
+	}
+	acpErr := validateStoreACPPreparationReadOnly(ctx, database)
+	closeErr := database.Close()
+	if acpErr != nil {
+		return storeUpgradePreflight{}, fmt.Errorf("store upgrade preflight Control ACP owner validation: %w", acpErr)
 	}
 	if closeErr != nil {
 		return storeUpgradePreflight{}, fmt.Errorf("close Control database after Store upgrade preflight: %w", closeErr)
-	}
-	if !strings.EqualFold(strings.TrimSpace(integrity), "ok") {
-		return storeUpgradePreflight{}, fmt.Errorf("store upgrade preflight: Control integrity check = %q", integrity)
 	}
 	add("control", controlRaw)
 
@@ -109,6 +120,9 @@ func readStoreUpgradePreflight(ctx context.Context, storeDir string) (storeUpgra
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return storeUpgradePreflight{}, errors.New("store upgrade preflight: Session directory is not a regular directory")
+	}
+	if err := sessionfile.ValidateStoreRoot(ctx, sessionsDir); err != nil {
+		return storeUpgradePreflight{}, fmt.Errorf("store upgrade preflight Session owner validation: %w", err)
 	}
 	add("sessions/", nil)
 	walkErr := filepath.WalkDir(sessionsDir, func(path string, entry os.DirEntry, walkErr error) error {
@@ -154,6 +168,101 @@ func readStoreUpgradePreflight(ctx context.Context, storeDir string) (storeUpgra
 		return storeUpgradePreflight{}, walkErr
 	}
 	return storeUpgradePreflight{Digest: hex.EncodeToString(hash.Sum(nil))}, nil
+}
+
+func validateStoreACPPreparationReadOnly(ctx context.Context, database *sql.DB) error {
+	tableRows, err := database.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table'`)
+	if err != nil {
+		return fmt.Errorf("inspect Control tables: %w", err)
+	}
+	allowedTables := map[string]bool{
+		"control_operation_policy": true,
+		"control_operations":       true,
+		"control_acp_preparations": true,
+	}
+	for tableRows.Next() {
+		var name string
+		if err := tableRows.Scan(&name); err != nil {
+			tableRows.Close()
+			return fmt.Errorf("read Control tables: %w", err)
+		}
+		if !allowedTables[name] && !strings.HasPrefix(name, "sqlite_") {
+			tableRows.Close()
+			return fmt.Errorf("unsupported Control table %q", name)
+		}
+	}
+	if err := tableRows.Err(); err != nil {
+		tableRows.Close()
+		return fmt.Errorf("read Control tables: %w", err)
+	}
+	if err := tableRows.Close(); err != nil {
+		return fmt.Errorf("close Control tables: %w", err)
+	}
+	rows, err := database.QueryContext(ctx, `PRAGMA table_info(control_acp_preparations)`)
+	if err != nil {
+		return fmt.Errorf("inspect ACP preparation schema: %w", err)
+	}
+	columns := make([]string, 0, 7)
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return fmt.Errorf("read ACP preparation schema: %w", err)
+		}
+		columns = append(columns, name)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("read ACP preparation schema: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close ACP preparation schema: %w", err)
+	}
+	// Older stopped Stores may not have the optional ACP staging table. A
+	// present table is owner state and must match the exact current schema;
+	// preflight never creates it as a side effect.
+	if len(columns) == 0 {
+		return nil
+	}
+	want := []string{"ref", "principal_id", "operation_id", "intent_digest", "content_digest", "expires_at_ns", "record_json"}
+	if len(columns) != len(want) {
+		return fmt.Errorf("unsupported ACP preparation schema columns %v", columns)
+	}
+	for index := range want {
+		if columns[index] != want[index] {
+			return fmt.Errorf("unsupported ACP preparation schema columns %v", columns)
+		}
+	}
+	rows, err = database.QueryContext(ctx, `
+SELECT ref, principal_id, operation_id, intent_digest, content_digest, expires_at_ns, record_json
+FROM control_acp_preparations`)
+	if err != nil {
+		return fmt.Errorf("read ACP preparations: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ref, principalID, operationID, intentDigest, contentDigest string
+		var expiresAtNS int64
+		var raw []byte
+		if err := rows.Scan(&ref, &principalID, &operationID, &intentDigest, &contentDigest, &expiresAtNS, &raw); err != nil {
+			return fmt.Errorf("read ACP preparation: %w", err)
+		}
+		preparation, err := decodeACPPreparation(raw)
+		if err != nil {
+			return fmt.Errorf("decode ACP preparation %q: %w", ref, err)
+		}
+		if preparation.Ref != ref || preparation.PrincipalID != principalID ||
+			preparation.OperationID != operationID || preparation.IntentDigest != intentDigest ||
+			preparation.ContentDigest != contentDigest || preparation.ExpiresAt.UnixNano() != expiresAtNS {
+			return fmt.Errorf("ACP preparation %q indexes do not match the stored record", ref)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read ACP preparations: %w", err)
+	}
+	return nil
 }
 
 func readStoreUpgradeRegularFile(path, name string) ([]byte, error) {

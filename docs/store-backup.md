@@ -45,7 +45,12 @@ provision that identity through the Memory owner lifecycle before restore.
 Restore stages and verifies every listed component in a private directory. It
 uses a `.caelis-restore.json` journal and a rollback directory while replacing
 Config, Control, and the complete Session directory. The journal records a
-pending rename before each destructive step, so a process interruption can
+pending rename and component digests before each destructive step, and records
+durable per-component rollback completion. If a process stops after a rollback
+rename but before the journal update, the next owner-held recovery verifies the
+original digest and completes the journal instead of deleting the only
+restored copy. Missing or mismatched evidence leaves the recovery journal in
+place and refuses uncertain removal. A process interruption can therefore
 restore a prior target even when it stopped between two filesystem renames.
 The live product Host authority lock is required throughout restore; a free
 lock probe is not used as restore authorization.
@@ -60,10 +65,13 @@ state for an explicit operator retry. A successful restore is complete only
 after the Memory owner has accepted its generation and the Caelis journal and
 rollback directory have been removed.
 
-`upgrade prepare` performs a read-only Config, Control integrity, and canonical
-Session preflight, then records the stopped Memory generation, preflight
-digest, and target writer capability in a Store-owned upgrade journal. The
-current writer refuses to open while that journal is pending, so Config
+`upgrade prepare` performs a read-only Config owner validation, Control owner
+schema/integrity/record validation, and canonical Session owner validation of
+document, event-log, and transaction schemas. Future versions, malformed JSON,
+and unknown Control tables or columns are rejected before the Store journal or
+Memory prepare can be written. It then records the stopped Memory generation,
+preflight digest, and target writer capability in a Store-owned upgrade journal.
+The current writer refuses to open while that journal is pending, so Config
 migration and Control/Session writes cannot run before the owner barrier is
 committed. The new writer must repeat the same read-only preflight and match
 the recorded digest before `upgrade commit`; `upgrade rollback` restores the
