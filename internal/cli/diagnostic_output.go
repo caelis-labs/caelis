@@ -128,7 +128,7 @@ func annotateStartupStorageDiagnostics(diagnostics *gatewayapp.StoreDiagnostics,
 	switch {
 	case strings.Contains(text, "unsupported unreleased schema"), strings.Contains(text, "unsupported schema"):
 		diagnostics.Memory.SchemaState = "unsupported"
-	case strings.Contains(text, "memory data directory is already owned"), strings.Contains(text, "owner lock"):
+	case strings.Contains(text, "memory data directory is already owned"):
 		diagnostics.Memory.OwnerLockState = "held"
 	}
 }

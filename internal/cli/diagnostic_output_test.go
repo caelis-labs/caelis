@@ -71,3 +71,35 @@ func TestDoctorHealthyStorageDoesNotPrintRecoveryAdvice(t *testing.T) {
 		t.Fatalf("unavailable doctor output omitted recovery advice: %s", output)
 	}
 }
+
+func TestAnnotateStartupStorageDiagnosticsOnlyMarksExplicitOwnerContention(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  string
+	}{
+		{name: "secure", err: "secure owner lock: permission denied"},
+		{name: "open", err: "open owner lock: permission denied"},
+		{name: "acquire", err: "acquire owner lock: input/output error"},
+		{name: "truncate", err: "truncate owner lock: read-only file system"},
+		{name: "write", err: "write owner lock: no space left on device"},
+		{name: "sync", err: "sync owner lock: input/output error"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			diagnostics := gatewayapp.StoreDiagnostics{
+				Memory: gatewayapp.MemoryStorageDiagnostics{OwnerLockState: "unknown"},
+			}
+			annotateStartupStorageDiagnostics(&diagnostics, errors.New(test.err))
+			if diagnostics.Memory.OwnerLockState != "unknown" {
+				t.Fatalf("startup error %q changed owner lock state to %q; want unknown", test.err, diagnostics.Memory.OwnerLockState)
+			}
+		})
+	}
+
+	diagnostics := gatewayapp.StoreDiagnostics{
+		Memory: gatewayapp.MemoryStorageDiagnostics{OwnerLockState: "unknown"},
+	}
+	annotateStartupStorageDiagnostics(&diagnostics, errors.New("open embedded Memory: memory data directory is already owned"))
+	if diagnostics.Memory.OwnerLockState != "held" {
+		t.Fatalf("explicit owner contention state = %q, want held", diagnostics.Memory.OwnerLockState)
+	}
+}
