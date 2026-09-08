@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/caelis-labs/caelis/app/gatewayapp"
 )
 
 func TestDoctorStartupFailureIncludesReadOnlyStorageDiagnostics(t *testing.T) {
@@ -45,5 +47,27 @@ func TestDoctorStartupFailureIncludesReadOnlyStorageDiagnostics(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "ignored") {
 		t.Fatalf("doctor startup diagnostics copied raw startup error: %s", raw)
+	}
+}
+
+func TestDoctorHealthyStorageDoesNotPrintRecoveryAdvice(t *testing.T) {
+	report := doctorResult{
+		StorageDiagnostics: &gatewayapp.StoreDiagnostics{
+			ConfigState:          "present",
+			ControlDatabaseState: "present",
+			SessionsState:        "present",
+			Memory: gatewayapp.MemoryStorageDiagnostics{
+				DatabaseState:  "present",
+				DatabaseFormat: "sqlite3",
+			},
+			RecoveryAdvice: []string{"recovery advice should remain structured only"},
+		},
+	}
+	if output := formatDoctorResult(report); strings.Contains(output, "recovery_advice:") {
+		t.Fatalf("healthy doctor output included recovery advice: %s", output)
+	}
+	report.ServiceState = "unavailable"
+	if output := formatDoctorResult(report); !strings.Contains(output, "recovery_advice: recovery advice should remain structured only") {
+		t.Fatalf("unavailable doctor output omitted recovery advice: %s", output)
 	}
 }
