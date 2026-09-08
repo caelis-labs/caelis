@@ -142,26 +142,6 @@ func runWithProductClientOpener(
 	if controlServerSubcommand {
 		args = args[1:]
 	}
-	storeSubcommand := ""
-	upgradeSubcommand := ""
-	if len(args) > 0 {
-		switch strings.ToLower(strings.TrimSpace(args[0])) {
-		case "backup", "restore":
-			storeSubcommand = strings.ToLower(strings.TrimSpace(args[0]))
-			args = args[1:]
-		case "upgrade":
-			if len(args) < 2 {
-				return errors.New("cli: upgrade requires prepare, commit, or rollback")
-			}
-			switch subcommand := strings.ToLower(strings.TrimSpace(args[1])); subcommand {
-			case "prepare", "commit", "rollback":
-				upgradeSubcommand = subcommand
-			default:
-				return fmt.Errorf("cli: unknown upgrade subcommand %q", subcommand)
-			}
-			args = args[2:]
-		}
-	}
 	serviceSubcommand := ""
 	if len(args) > 0 && isServiceCommand(args[0]) {
 		if len(args) < 2 {
@@ -212,8 +192,6 @@ func runWithProductClientOpener(
 		controlTLSKey    = fs.String("control-tls-key", envOr("CAELIS_CONTROL_TLS_KEY", ""), "TLS private key file for the Control server")
 		acpAdapter       = fs.String("adapter", "", "Serve a built-in ACP adapter (codex)")
 		adapterGrantFile = fs.String("adapter-grant-file", "", "Internal one-use built-in adapter channel grant")
-		backupOutput     = fs.String("output", "", "Destination archive path for backup")
-		backupInput      = fs.String("input", "", "Source archive path for restore")
 	)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -246,8 +224,6 @@ func runWithProductClientOpener(
 	headlessCandidate := !acpSubcommand &&
 		!controlServerSubcommand &&
 		!doctorSubcommand &&
-		storeSubcommand == "" &&
-		upgradeSubcommand == "" &&
 		serviceSubcommand == "" &&
 		sandboxSubcommand == "" &&
 		!*forceInteractive &&
@@ -306,19 +282,6 @@ func runWithProductClientOpener(
 	cfg.Assembly, err = assemblyFromEnv()
 	if err != nil {
 		return err
-	}
-	if storeSubcommand != "" || upgradeSubcommand != "" {
-		if *embeddedHost || strings.TrimSpace(*controlURL) != "" {
-			return errors.New("cli: Store backup, restore, and upgrade commands use the managed local Store and do not accept --embedded or --control-url")
-		}
-		if strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN")) != "" || strings.TrimSpace(*controlTokenFile) != "" {
-			return errors.New("cli: Store backup, restore, and upgrade commands do not accept custom Control credentials")
-		}
-		outFmt, err := parseOutputFormat(*format)
-		if err != nil {
-			return err
-		}
-		return runStoreLifecycleCommand(ctx, storeSubcommand, upgradeSubcommand, cfg, outFmt, strings.TrimSpace(*backupOutput), strings.TrimSpace(*backupInput), stdout, stderr)
 	}
 	interactiveLaunch := !acpSubcommand && !controlServerSubcommand && !doctorSubcommand && serviceSubcommand == "" && sandboxSubcommand == "" && !headlessMode
 	if cfg.DangerouslySkipPermissions && !interactiveLaunch {

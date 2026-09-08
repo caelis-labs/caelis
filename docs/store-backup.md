@@ -1,102 +1,90 @@
-# Store backup and recovery
+# Internal Store recovery primitives
 
-Caelis backup is an offline Host lifecycle operation. The CLI first stops the
-managed Host, then a newly opened Host closes admission and drains active
-producers before it creates the archive:
+Store snapshots are Host-private building blocks for temporary upgrade recovery,
+not a user-facing backup, export, import, or machine-migration feature. The CLI
+exposes neither archive commands nor manual Store prepare/commit/rollback
+commands. The raw and npm updaters do not currently coordinate these primitives;
+updating the executable does not imply automatic Store rollback protection.
 
-```text
-caelis backup --store-dir <store> --output <archive.zip>
-caelis restore --store-dir <store> --input <archive.zip>
-caelis upgrade prepare --store-dir <store>
-caelis upgrade commit --store-dir <store>
-caelis upgrade rollback --store-dir <store>
-```
+## Ownership and scope
 
-The backup archive uses `caelis.store-backup.v1` and records the source layout
-floor, the last writer of that layout, the minimum reader capability, the
-Caelis version, the quiesce boundary, each component's size and SHA-256, and
-the explicit statement that its components are independent snapshots under one
-quiesce boundary. The source floor and last writer are storage facts; the
-reader capability is a format contract, not a guessed Caelis release. It does
-not claim a cross-database transaction.
+A recovery point belongs to one stopped Store owner. Its purpose is to protect
+state that an upgrade may change, not to maintain a history of user backups.
+A lifecycle caller must remove its recovery point after verified success or
+verified rollback. Interrupted or uncertain recovery must retain its evidence
+and keep writers out until the owning operation is resolved. A timeout is not
+permission to delete the only recovery material.
 
-The archive contains only the following durable authorities:
+The internal archive records independent component snapshots under one
+quiesce boundary; it does not claim a cross-database transaction:
 
-| Component | Authority and restore rule |
+| Component | Owner and snapshot rule |
 | --- | --- |
-| `config` | Host AppConfig document; an unknown AppConfig schema is rejected by the normal config owner before a writer starts. |
-| `control` | Host-owned `control/control.sqlite`; its WAL is checkpointed after quiesce. |
-| `session-canonical` | Canonical Session JSONL and documents under `sessions/`; the SDK-owned `.sessions.index.sqlite` is captured as a quiesced lookup cache while canonical documents remain the source of truth, and delivery spool is discarded. A non-empty Session index `-wal`, `-shm`, or `-journal` sidecar rejects the backup until the owner recovers it; Caelis never drops a sidecar and claims success. |
-| `memory-owner-snapshot` | A consistent image created by the embedded Memory public owner API; Caelis never opens or copies `memory.db`. |
+| Config | Host AppConfig document, validated by the config owner. |
+| Control | Host-owned `control/control.sqlite`, checkpointed after quiesce. |
+| Session | Canonical documents and JSONL under `sessions/`, with the SDK-owned index as a lookup cache. Session index SQLite sidecars require owner recovery before capture. |
+| Memory | A consistent image from the embedded Memory owner API. Caelis never opens or copies the live Memory database. |
 
-Provider credentials, Memory management and Steward credentials, Control
-tokens and cursor keys, runtime locks, logs, and the disposable Control spool
-are excluded. References to excluded credentials remain in configuration only
-when they are opaque and safe to recreate; the backup never makes those bytes
-portable.
+Credentials, Control tokens and cursor keys, runtime locks, logs, and the
+Control spool are excluded. Recovery requires the existing Memory owner
+credentials to authorize the restored generation. An archive alone is not a
+portable identity or a complete disaster-recovery artifact. Reconstructed model
+context comes from canonical Session state, not a second transcript in the
+snapshot or the disposable spool.
 
-The destination archive must be outside the Store directory. Restore is an
-offline operation against an existing or separately provisioned Store owner:
-the target must already have the owner credentials required by Memory, because
-those credentials are intentionally excluded from the archive. The target
-credential must authorize the restored Memory generation; operators must
-provision that identity through the Memory owner lifecycle before restore.
+`Stack.WriteStoreBackup` permanently quiesces its Stack, checkpoints Control,
+and delegates Memory capture to its owner. The caller must hold Store ownership
+and close the Stack afterwards. The lower-level writer requires an already
+quiesced Store. A caller owns the archive destination and its cleanup; the
+snapshot writer does not publish to a user-selected path. Writer and reader
+share a 1 GiB compressed archive budget and a 512 MiB uncompressed entry budget.
+Oversized captures fail before publication; readers reject excess bytes rather
+than accepting truncated input. Capture stages the ZIP in a private temporary
+file and removes that staging file on return. Restore likewise stages its input
+ZIP on disk rather than retaining the compressed archive in memory.
 
-Restore stages and verifies every listed component in a private directory. It
-uses a `.caelis-restore.json` journal and a rollback directory while replacing
-Config, Control, and the complete Session directory. The journal records a
-pending rename and component digests before each destructive step, and records
-durable per-component rollback completion. If a process stops after a rollback
-rename but before the journal update, the next owner-held recovery verifies the
-original digest and completes the journal instead of deleting the only
-restored copy. Missing or mismatched evidence leaves the recovery journal in
-place and refuses uncertain removal. A process interruption can therefore
-restore a prior target even when it stopped between two filesystem renames.
-The live product Host authority lock is required throughout restore; a free
-lock probe is not used as restore authorization.
+## Restore safety
 
-Memory restore, Memory commit, and Memory rollback remain Memory-owner
-operations. Caelis installs its independent components, asks Memory to install
-its snapshot as a pending generation, and commits that generation last. If
-commit fails, the owner rollback is requested and the Caelis journal restores
-the previous Config, Control, and Session state. If finalization is
-interrupted, the journal retries the owner commit or retains the recovery
-state for an explicit operator retry. A successful restore is complete only
-after the Memory owner has accepted its generation and the Caelis journal and
-rollback directory have been removed.
+Restore holds the product Host authority lock throughout recovery. A free lock
+probe is never authorization. It stages and verifies the component digests and
+Config, Control, and Session schemas before replacing any authority. Target
+Control SQLite sidecars require owner recovery; they cannot be left next to a
+replacement main database or silently discarded.
 
-`upgrade prepare` performs a read-only Config owner validation, Control owner
-schema/integrity/record validation, and canonical Session owner validation of
-document, event-log, and transaction schemas. Future versions, malformed JSON,
-and unknown Control tables or columns are rejected before the Store journal or
-Memory prepare can be written. It then records the stopped Memory generation,
-preflight digest, and target writer capability in a Store-owned upgrade journal.
-The current writer refuses to open while that journal is pending, so Config
-migration and Control/Session writes cannot run before the owner barrier is
-committed. The new writer must repeat the same read-only preflight and match
-the recorded digest before `upgrade commit`; `upgrade rollback` restores the
-owner generation and removes the journal before a writer is admitted. The
-journal is understood by writers carrying this contract; pre-contract writers
-do not magically parse it, so operators must keep the old process stopped after
-prepare. Unknown archive capabilities, future reader capabilities, unknown
-component kinds, malformed paths, invalid digests, and unsupported persisted
-schemas fail closed before any target component is replaced. Feature flags do
-not reverse a durable migration.
+Restored files and their directory entries must be durable before Memory commit
+and before original data can be removed. The `.caelis-restore.json` journal
+records each pending rename, original and installed digests, and completed
+rollback steps. Re-entry verifies evidence rather than deleting an original
+whose rollback rename may already have succeeded. Missing or mismatched
+evidence leaves the recovery journal in place and refuses uncertain cleanup.
+The Windows directory-sync adapter is currently a no-op; file flushing does not
+establish a power-loss-safe directory-rename guarantee on that platform. These
+reserved primitives are not a substitute for native-platform recovery evidence.
 
-The source floor for this contract is `caelis.store-layout.v0`; `v0.51.2` is
-the last writer of that source layout. The first release carrying the reader
-capability is intentionally left unassigned until the release process records
-it. A release that does not implement `caelis.store-backup.v1` must reject the
-archive before writing. The migration sequence is: create and verify an
-external backup, stop the managed Host, run `upgrade prepare`, install the new
-writer, allow its owner-controlled schema checks to pass, and run
-`upgrade commit`. If the new writer does not become healthy, stop it and run
-`upgrade rollback`; if any independent Config, Control, or Session step fails,
-restore the external archive and let Memory rollback remain owner-controlled.
-No old and new process may write the Store concurrently, and a feature flag is
-never a rollback for a durable schema change.
+Memory install, commit, and rollback remain Memory-owner operations. A restore
+is complete only after the accepted Memory generation, installed independent
+components, and removal of its temporary journal and rollback directory are
+confirmed. Failed cleanup is not successful completion.
 
-After a successful restore, opening a Host reads the restored canonical Session
-documents and Control operation records. The normal Session admission and
-model-context reconstruction paths rebuild the accepted work context; the
-backup feature does not introduce a second transcript or memory authority.
+## Generation barrier
+
+The retained Store upgrade primitive validates Config, Control schema and
+records, and canonical Session documents, events, and recovery transactions
+without opening a writer. It records their digest, the Memory generation, and
+the target writer capability in `.caelis-upgrade.json`. An ordinary Host refuses
+to open while that journal is pending. Commit repeats the preflight and requires
+the same digest; rollback restores the Memory generation. These primitives do
+not migrate or roll back Config, Control, or Session on their own, and do not
+restore an executable or npm installation.
+
+An owner commit error retains `committing`: it may follow an irreversible owner
+effect and must not advertise rollback availability. Only an idempotent commit
+retry can resolve it. A successful terminal operation removes its journal;
+unresolved state remains fenced. Writers that predate this contract do not
+understand the journal and must remain stopped under external lifecycle control.
+
+The archive capability `caelis.store-backup.v1`, source floor
+`caelis.store-layout.v0`, and source last writer `v0.51.2` describe the retained
+internal reader contract, not a published portable backup format. Unknown
+capabilities, component kinds, unsafe paths, invalid digests, and unsupported
+persisted schemas are rejected before installation.

@@ -147,6 +147,7 @@ func clearStoreRestoreHooks() {
 	storeRestoreHooks.Lock()
 	storeRestoreHooks.rename = nil
 	storeRestoreHooks.syncDirectory = nil
+	storeRestoreHooks.syncFile = nil
 	storeRestoreHooks.writeJournal = nil
 	storeRestoreHooks.Unlock()
 }

@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
@@ -78,15 +77,23 @@ func RestoreStore(ctx context.Context, options StoreRestoreOptions) (StoreRestor
 		return StoreRestoreReport{}, fmt.Errorf("gatewayapp: Store is owned by another Host: %w", err)
 	}
 	defer ownership.Close()
+	if err := rejectStoreRestoreControlSidecars(storeDir); err != nil {
+		return StoreRestoreReport{}, err
+	}
 	recovered, err := recoverStoreRestore(ctx, storeDir, options)
 	if err != nil {
 		return StoreRestoreReport{}, err
 	}
-	rawArchive, err := io.ReadAll(io.LimitReader(options.Backup, 1<<30))
+	archiveFile, archiveSize, err := materializeStoreBackupArchive(options.Backup, storeBackupArchiveMaxBytes)
 	if err != nil {
 		return StoreRestoreReport{}, fmt.Errorf("read Store restore archive: %w", err)
 	}
-	reader, err := zip.NewReader(bytes.NewReader(rawArchive), int64(len(rawArchive)))
+	defer func() {
+		name := archiveFile.Name()
+		_ = archiveFile.Close()
+		_ = os.Remove(name)
+	}()
+	reader, err := zip.NewReader(archiveFile, archiveSize)
 	if err != nil {
 		return StoreRestoreReport{}, fmt.Errorf("open Store restore archive: %w", err)
 	}
@@ -117,6 +124,9 @@ func RestoreStore(ctx context.Context, options StoreRestoreOptions) (StoreRestor
 	if err := writeStoreRestoreJournal(storeDir, journal); err != nil {
 		os.RemoveAll(rollbackDir)
 		return StoreRestoreReport{}, err
+	}
+	if err := storeRestoreSyncDirectory(filepath.Dir(rollbackDir)); err != nil {
+		return rollbackStoreRestoreWithError(storeDir, fmt.Errorf("sync Store restore recovery directories: %w", err), StoreRestoreReport{RecoveredPrevious: recovered})
 	}
 	report := StoreRestoreReport{
 		Format: manifest.Format, QuiesceBoundary: manifest.QuiesceBoundary,
@@ -167,6 +177,9 @@ func RestoreStore(ctx context.Context, options StoreRestoreOptions) (StoreRestor
 		if err := os.MkdirAll(filepath.Dir(rollbackTarget), 0o700); err != nil {
 			return rollbackStoreRestoreWithError(storeDir, err, report)
 		}
+		if err := syncStoreRestoreDirectories(filepath.Dir(rollbackTarget), journal.RollbackDir); err != nil {
+			return rollbackStoreRestoreWithError(storeDir, fmt.Errorf("sync rollback destination for %s: %w", relative, err), report)
+		}
 		if journal.PendingTargetExisted {
 			if err := storeRestoreRename(target, rollbackTarget); err != nil {
 				return rollbackStoreRestoreWithError(storeDir, fmt.Errorf("move existing %s to rollback: %w", relative, err), report)
@@ -205,6 +218,9 @@ func RestoreStore(ctx context.Context, options StoreRestoreOptions) (StoreRestor
 	journal.MemoryRestorePending = false
 	journal.MemoryCommitPending = true
 	if err := writeStoreRestoreJournal(storeDir, journal); err != nil {
+		return report, err
+	}
+	if err := refuseUnsyncedStoreRestoreCommit(storeDir, journal.Applied); err != nil {
 		return report, err
 	}
 	if err := options.MemoryCommit(ctx); err != nil {
@@ -305,6 +321,15 @@ func stageStoreRestore(ctx context.Context, reader *zip.Reader, storeDir string)
 		if !found[required] {
 			return cleanup(fmt.Errorf("%w: required component %s is missing", ErrStoreBackupFormat, required))
 		}
+	}
+	if err := validateStagedStoreRestore(ctx, stageDir); err != nil {
+		return cleanup(err)
+	}
+	if err := syncStoreRestoreTree(stageDir); err != nil {
+		return cleanup(fmt.Errorf("sync staged Store restore: %w", err))
+	}
+	if err := storeRestoreSyncDirectory(filepath.Dir(stageDir)); err != nil {
+		return cleanup(fmt.Errorf("sync staged Store restore parent: %w", err))
 	}
 	return manifest, memoryBytes, stageDir, nil
 }
@@ -451,6 +476,9 @@ func recoverStoreRestore(ctx context.Context, storeDir string, options StoreRest
 		if options.MemoryCommit == nil || options.MemoryRollback == nil {
 			return false, ErrStoreRestoreMemory
 		}
+		if err := refuseUnsyncedStoreRestoreCommit(storeDir, journal.Applied); err != nil {
+			return false, err
+		}
 		if err := options.MemoryCommit(ctx); err == nil {
 			journal.MemoryCommitPending = false
 			if err := writeStoreRestoreJournal(storeDir, journal); err != nil {
@@ -489,6 +517,9 @@ func recoverStoreRestore(ctx context.Context, storeDir string, options StoreRest
 
 func rollbackStoreRestore(storeDir string) error {
 	if err := validateStoreRestoreTargets(storeDir); err != nil {
+		return err
+	}
+	if err := rejectStoreRestoreControlSidecars(storeDir); err != nil {
 		return err
 	}
 	journal, err := readStoreRestoreJournal(storeDir)
@@ -565,6 +596,9 @@ func rollbackStoreRestore(storeDir string) error {
 				return err
 			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+				return err
+			}
+			if err := storeRestoreSyncDirectory(filepath.Dir(target)); err != nil {
 				return err
 			}
 			if err := storeRestoreRename(rollbackTarget, target); err != nil {
@@ -891,49 +925,4 @@ func clearStoreRestoreJournal(storeDir string) error {
 		return err
 	}
 	return storeRestoreSyncDirectory(storeDir)
-}
-
-var storeRestoreHooks struct {
-	sync.RWMutex
-	rename        func(string, string) error
-	syncDirectory func(string) error
-	writeJournal  func(storeRestoreJournal) error
-}
-
-func storeRestoreRename(oldPath, newPath string) error {
-	storeRestoreHooks.RLock()
-	rename := storeRestoreHooks.rename
-	storeRestoreHooks.RUnlock()
-	if rename != nil {
-		return rename(oldPath, newPath)
-	}
-	return os.Rename(oldPath, newPath)
-}
-
-func storeRestoreSyncDirectory(path string) error {
-	storeRestoreHooks.RLock()
-	syncDirectory := storeRestoreHooks.syncDirectory
-	storeRestoreHooks.RUnlock()
-	if syncDirectory != nil {
-		return syncDirectory(path)
-	}
-	return syncStoreRestoreDirectory(path)
-}
-
-func syncStoreRestoreDirectories(paths ...string) error {
-	seen := make(map[string]struct{}, len(paths))
-	for _, path := range paths {
-		path = filepath.Clean(strings.TrimSpace(path))
-		if path == "." || path == "" {
-			continue
-		}
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		if err := storeRestoreSyncDirectory(path); err != nil {
-			return fmt.Errorf("sync Store restore directory %s: %w", path, err)
-		}
-	}
-	return nil
 }

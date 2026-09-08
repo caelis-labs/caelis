@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/hostownership"
 )
 
@@ -264,8 +265,12 @@ func TestRestoreStoreReplacesAuthoritiesAndCommitsMemoryLast(t *testing.T) {
 	if got := readStoreBackupFile(t, filepath.Join(target, "config.json")); got != `{"schema_version":2}` {
 		t.Fatalf("restored config = %q", got)
 	}
-	if got := readStoreBackupFile(t, controlStoreDatabasePath(target)); got != "control-source" {
-		t.Fatalf("restored Control = %q", got)
+	sourceControl, err := storeRestorePathDigest(controlStoreDatabasePath(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := storeRestorePathDigest(controlStoreDatabasePath(target)); err != nil || got != sourceControl {
+		t.Fatalf("restored Control digest = %q, %v; want source %q", got, err, sourceControl)
 	}
 	if _, err := os.Stat(filepath.Join(target, "sessions", "stale.jsonl")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stale Session survived restore: %v", err)
@@ -807,7 +812,6 @@ func makeStoreBackupFixture(t *testing.T, name string) string {
 	}
 	for path, content := range map[string]string{
 		filepath.Join(storeDir, "config.json"):                             `{"schema_version":2}`,
-		controlStoreDatabasePath(storeDir):                                 "control-" + name,
 		filepath.Join(storeDir, "sessions", "accepted.jsonl"):              "accepted-" + name,
 		filepath.Join(storeDir, "providers", "openai.key"):                 "provider-secret",
 		filepath.Join(storeDir, "memory", "appliance", "management.token"): "management-secret",
@@ -819,7 +823,39 @@ func makeStoreBackupFixture(t *testing.T, name string) string {
 			t.Fatal(err)
 		}
 	}
+	writeStoreBackupControlDatabase(t, storeDir, name)
 	return storeDir
+}
+
+func writeStoreBackupControlDatabase(t *testing.T, storeDir, name string) {
+	t.Helper()
+	path := controlStoreDatabasePath(storeDir)
+	store, err := appserver.NewSQLiteOperationStoreWithConfig(path, appserver.OperationRetentionConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Initialize(t.Context()); err != nil {
+		_ = store.Close()
+		t.Fatal(err)
+	}
+	if _, _, err := store.Begin(t.Context(), appserver.OperationIntent{
+		PrincipalID: "backup-fixture-" + name,
+		OperationID: "backup-fixture-" + name,
+		Action:      appserver.ActionPrompt,
+		SessionID:   "backup-fixture-" + name,
+		Digest:      "backup-fixture-" + name,
+	}); err != nil {
+		_ = store.Close()
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		if _, err := os.Lstat(path + suffix); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("Control fixture sidecar %s = %v", filepath.Base(path+suffix), err)
+		}
+	}
 }
 
 func readStoreBackupFile(t *testing.T, path string) string {

@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	// StoreBackupFormat is the stable archive format identifier.
+	// StoreBackupFormat identifies the Host-private recovery archive encoding.
 	StoreBackupFormat = "caelis.store-backup.v1"
 	// StoreBackupSourceFloor identifies the pre-backup Store layout accepted by
 	// this archive. It is a layout capability, not a Caelis reader version.
@@ -31,18 +31,101 @@ const (
 	// It is recorded separately from the reader capability because the first
 	// release carrying this reader contract has not been assigned yet.
 	StoreBackupLastWriter = "v0.51.2"
-	// StoreBackupReaderCapability is the minimum reader capability required to
-	// consume this archive. Future capabilities are rejected before restore.
+	// StoreBackupReaderCapability is the internal reader capability required to
+	// consume a recovery snapshot. Future capabilities are rejected before restore.
 	StoreBackupReaderCapability = "caelis.store-backup.v1"
 	storeBackupManifestName     = "manifest.json"
 	storeBackupComponentRoot    = "components/"
+	storeBackupArchiveMaxBytes  = int64(1 << 30)
+	storeBackupEntryMaxBytes    = int64(512 << 20)
 )
 
 var (
-	ErrStoreBackupFormat  = errors.New("gatewayapp: unsupported Store backup format")
-	ErrStoreBackupMemory  = errors.New("gatewayapp: embedded Memory owner backup is unavailable")
-	ErrStoreRestoreMemory = errors.New("gatewayapp: embedded Memory owner restore is unavailable")
+	// ErrStoreBackupTooLarge means an internal recovery snapshot exceeds the
+	// shared writer/reader size budget; no truncated snapshot is accepted.
+	ErrStoreBackupTooLarge = errors.New("gatewayapp: Store recovery snapshot exceeds size limit")
+	ErrStoreBackupFormat   = errors.New("gatewayapp: unsupported Store backup format")
+	ErrStoreBackupMemory   = errors.New("gatewayapp: embedded Memory owner backup is unavailable")
+	ErrStoreRestoreMemory  = errors.New("gatewayapp: embedded Memory owner restore is unavailable")
 )
+
+// storeBackupLimits applies the same byte budgets to every capture path.
+type storeBackupLimits struct {
+	archive int64
+	entry   int64
+}
+
+type storeBackupLimitWriter struct {
+	writer    io.Writer
+	remaining int64
+	exceeded  bool
+}
+
+func (w *storeBackupLimitWriter) Write(data []byte) (int, error) {
+	if w.exceeded || int64(len(data)) > w.remaining {
+		w.exceeded = true
+		return 0, ErrStoreBackupTooLarge
+	}
+	n, err := w.writer.Write(data)
+	w.remaining -= int64(n)
+	return n, err
+}
+
+func readStoreBackupLimited(reader io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, ErrStoreBackupTooLarge
+	}
+	return data, nil
+}
+
+func copyStoreBackupLimited(dst io.Writer, src io.Reader, limit int64) (int64, error) {
+	if src == nil {
+		return 0, errors.New("gatewayapp: Store backup archive is required")
+	}
+	if dst == nil {
+		return 0, errors.New("gatewayapp: Store backup output is required")
+	}
+	if limit < 0 {
+		return 0, ErrStoreBackupTooLarge
+	}
+	written, err := io.Copy(dst, io.LimitReader(src, limit+1))
+	if err != nil {
+		return written, err
+	}
+	if written > limit {
+		return written, ErrStoreBackupTooLarge
+	}
+	return written, nil
+}
+
+func materializeStoreBackupArchive(src io.Reader, limit int64) (*os.File, int64, error) {
+	if src == nil {
+		return nil, 0, errors.New("gatewayapp: Store restore archive is required")
+	}
+	file, err := os.CreateTemp("", ".caelis-recovery-*.zip")
+	if err != nil {
+		return nil, 0, err
+	}
+	cleanup := func() {
+		name := file.Name()
+		_ = file.Close()
+		_ = os.Remove(name)
+	}
+	size, err := copyStoreBackupLimited(file, src, limit)
+	if err != nil {
+		cleanup()
+		return nil, 0, err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return nil, 0, err
+	}
+	return file, size, nil
+}
 
 // MemoryBackup writes one consistent Memory-owned snapshot into output. The
 // callback is deliberately narrow so Caelis cannot inspect Memory storage.
@@ -125,8 +208,19 @@ type StoreRestoreReport struct {
 
 // WriteStoreBackup writes one complete archive. It excludes credentials,
 // runtime tokens, provider OAuth/API-key stores, lock files, logs and lossy
-// spool cache.
+// spool cache. This Host-private primitive requires an already quiesced Store.
+// Internal callers share a 1GiB compressed ZIP budget and a 512MiB uncompressed
+// entry budget, including the Memory owner snapshot and encoded manifest.
+// Exceeding either limit fails with ErrStoreBackupTooLarge and publishes no
+// archive bytes. Callers own destination cleanup after publication errors and
+// after verified recovery completion.
 func WriteStoreBackup(ctx context.Context, options StoreBackupOptions, output io.Writer) (StoreBackupManifest, error) {
+	return writeStoreBackupLimited(ctx, options, output, storeBackupLimits{
+		archive: storeBackupArchiveMaxBytes, entry: storeBackupEntryMaxBytes,
+	})
+}
+
+func writeStoreBackupLimited(ctx context.Context, options StoreBackupOptions, output io.Writer, limits storeBackupLimits) (StoreBackupManifest, error) {
 	if output == nil {
 		return StoreBackupManifest{}, errors.New("gatewayapp: Store backup output is required")
 	}
@@ -161,8 +255,16 @@ func WriteStoreBackup(ctx context.Context, options StoreBackupOptions, output io
 	// Build the archive completely before publishing it. A failed owner
 	// snapshot must never leave a caller's destination looking like a usable
 	// backup prefix.
-	var archiveBytes bytes.Buffer
-	archive := zip.NewWriter(&archiveBytes)
+	archiveFile, err := os.CreateTemp("", ".caelis-recovery-*.zip")
+	if err != nil {
+		return StoreBackupManifest{}, err
+	}
+	defer func() {
+		_ = archiveFile.Close()
+		_ = os.Remove(archiveFile.Name())
+	}()
+	archiveLimit := &storeBackupLimitWriter{writer: archiveFile, remaining: limits.archive}
+	archive := zip.NewWriter(archiveLimit)
 	fail := func(cause error) (StoreBackupManifest, error) {
 		_ = archive.Close()
 		return StoreBackupManifest{}, cause
@@ -173,7 +275,7 @@ func WriteStoreBackup(ctx context.Context, options StoreBackupOptions, output io
 		{name: "sessions", path: filepath.Join(storeDir, "sessions"), kind: "session-canonical", required: true},
 	}
 	for _, source := range sources {
-		components, err := addStoreBackupSource(ctx, archive, source)
+		components, err := addStoreBackupSource(ctx, archive, source, limits.entry)
 		if err != nil {
 			return fail(fmt.Errorf("backup %s: %w", source.name, err))
 		}
@@ -183,23 +285,24 @@ func WriteStoreBackup(ctx context.Context, options StoreBackupOptions, output io
 	if err != nil {
 		return fail(fmt.Errorf("create Memory backup entry: %w", err))
 	}
-	var memory bytes.Buffer
-	if err := options.MemoryBackup(ctx, &memory); err != nil {
+	memoryHash := sha256.New()
+	memoryLimit := &storeBackupLimitWriter{
+		writer: io.MultiWriter(memoryEntry, memoryHash), remaining: limits.entry,
+	}
+	if err := options.MemoryBackup(ctx, memoryLimit); err != nil {
 		return fail(fmt.Errorf("memory owner backup: %w", err))
+	}
+	if memoryLimit.exceeded {
+		return fail(ErrStoreBackupTooLarge)
 	}
 	if err := ctx.Err(); err != nil {
 		return fail(err)
 	}
-	memoryBytes := memory.Bytes()
-	if _, err := io.Copy(memoryEntry, bytes.NewReader(memoryBytes)); err != nil {
-		return fail(fmt.Errorf("write Memory backup entry: %w", err))
-	}
-	memoryHash := sha256.Sum256(memoryBytes)
 	manifest.Components = append(manifest.Components, StoreBackupComponent{
 		Name: "memory", ArchivePath: storeBackupComponentRoot + "memory/memory.db",
 		SourcePath: "Memory owner snapshot", Kind: "memory-owner-snapshot",
-		Consistency: "memory-owner-consistent-snapshot", Size: int64(len(memoryBytes)),
-		SHA256: hex.EncodeToString(memoryHash[:]), Required: true,
+		Consistency: "memory-owner-consistent-snapshot", Size: limits.entry - memoryLimit.remaining,
+		SHA256: hex.EncodeToString(memoryHash.Sum(nil)), Required: true,
 	})
 	sort.Slice(manifest.Components, func(i, j int) bool {
 		return manifest.Components[i].ArchivePath < manifest.Components[j].ArchivePath
@@ -207,6 +310,9 @@ func WriteStoreBackup(ctx context.Context, options StoreBackupOptions, output io
 	raw, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return fail(fmt.Errorf("encode Store backup manifest: %w", err))
+	}
+	if int64(len(raw))+1 > limits.entry {
+		return fail(ErrStoreBackupTooLarge)
 	}
 	entry, err := archive.Create(storeBackupManifestName)
 	if err != nil {
@@ -218,7 +324,13 @@ func WriteStoreBackup(ctx context.Context, options StoreBackupOptions, output io
 	if err := archive.Close(); err != nil {
 		return StoreBackupManifest{}, fmt.Errorf("close Store backup archive: %w", err)
 	}
-	if _, err := io.Copy(output, bytes.NewReader(archiveBytes.Bytes())); err != nil {
+	if archiveLimit.exceeded {
+		return StoreBackupManifest{}, ErrStoreBackupTooLarge
+	}
+	if _, err := archiveFile.Seek(0, io.SeekStart); err != nil {
+		return StoreBackupManifest{}, err
+	}
+	if _, err := io.Copy(output, archiveFile); err != nil {
 		return StoreBackupManifest{}, fmt.Errorf("publish Store backup archive: %w", err)
 	}
 	return manifest, nil
@@ -231,7 +343,7 @@ type storeBackupSource struct {
 	required bool
 }
 
-func addStoreBackupSource(ctx context.Context, archive *zip.Writer, source storeBackupSource) ([]StoreBackupComponent, error) {
+func addStoreBackupSource(ctx context.Context, archive *zip.Writer, source storeBackupSource, entryLimit int64) ([]StoreBackupComponent, error) {
 	info, err := os.Lstat(source.path)
 	if err != nil {
 		return nil, err
@@ -246,7 +358,7 @@ func addStoreBackupSource(ctx context.Context, archive *zip.Writer, source store
 		return nil, fmt.Errorf("Session store is not a directory")
 	}
 	if info.Mode().IsRegular() {
-		component, err := addStoreBackupFile(ctx, archive, source.name, source.path, source.kind, source.required)
+		component, err := addStoreBackupFile(ctx, archive, source.name, source.path, source.kind, source.required, entryLimit)
 		if err != nil {
 			return nil, err
 		}
@@ -274,7 +386,7 @@ func addStoreBackupSource(ctx context.Context, archive *zip.Writer, source store
 		if (strings.HasPrefix(relative, ".") && relative != ".sessions.index.sqlite") || strings.HasSuffix(relative, ".lock") || strings.HasSuffix(relative, ".tmp") {
 			return nil
 		}
-		component, err := addStoreBackupFile(ctx, archive, source.name+"/"+relative, path, source.kind, source.required)
+		component, err := addStoreBackupFile(ctx, archive, source.name+"/"+relative, path, source.kind, source.required, entryLimit)
 		if err != nil {
 			return err
 		}
@@ -302,32 +414,50 @@ func isSessionIndexSQLiteSidecar(relative string) bool {
 	return strings.HasPrefix(filepath.ToSlash(strings.TrimSpace(relative)), ".sessions.index.sqlite-")
 }
 
-func addStoreBackupFile(ctx context.Context, archive *zip.Writer, name, path, kind string, required bool) (StoreBackupComponent, error) {
+func addStoreBackupFile(ctx context.Context, archive *zip.Writer, name, path, kind string, required bool, entryLimit int64) (StoreBackupComponent, error) {
 	if err := ctx.Err(); err != nil {
 		return StoreBackupComponent{}, err
 	}
-	raw, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return StoreBackupComponent{}, err
 	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return StoreBackupComponent{}, err
+	}
+	if info.Size() > entryLimit {
+		return StoreBackupComponent{}, ErrStoreBackupTooLarge
+	}
+	var source io.Reader = file
 	if kind == "config" {
+		raw, err := readStoreBackupLimited(file, entryLimit)
+		if err != nil {
+			return StoreBackupComponent{}, err
+		}
 		if err := validateStoreBackupConfig(raw); err != nil {
 			return StoreBackupComponent{}, err
 		}
+		source = bytes.NewReader(raw)
 	}
-	sum := sha256.Sum256(raw)
+	sum := sha256.New()
 	archivePath := storeBackupComponentRoot + strings.ReplaceAll(name, string(filepath.Separator), "/")
 	entry, err := archive.Create(archivePath)
 	if err != nil {
 		return StoreBackupComponent{}, err
 	}
-	if _, err := entry.Write(raw); err != nil {
+	limited := &storeBackupLimitWriter{writer: io.MultiWriter(entry, sum), remaining: entryLimit}
+	if _, err := io.Copy(limited, source); err != nil {
 		return StoreBackupComponent{}, err
+	}
+	if limited.exceeded {
+		return StoreBackupComponent{}, ErrStoreBackupTooLarge
 	}
 	return StoreBackupComponent{
 		Name: name, ArchivePath: archivePath, SourcePath: name,
-		Kind: kind, Consistency: "host-quiesced-file", Size: int64(len(raw)),
-		SHA256: hex.EncodeToString(sum[:]), Required: required,
+		Kind: kind, Consistency: "host-quiesced-file", Size: entryLimit - limited.remaining,
+		SHA256: hex.EncodeToString(sum.Sum(nil)), Required: required,
 	}, nil
 }
 
@@ -346,9 +476,15 @@ func validateStoreBackupConfig(raw []byte) error {
 }
 
 // ReadStoreBackupManifest validates only the archive envelope and manifest.
+// Callers must pass the complete archive size; a ZIP larger than 1GiB is
+// rejected with ErrStoreBackupTooLarge before entries are opened. Manifest
+// and component payloads are capped at 512MiB uncompressed.
 func ReadStoreBackupManifest(input io.ReaderAt, size int64) (StoreBackupManifest, error) {
 	if input == nil || size <= 0 {
 		return StoreBackupManifest{}, errors.New("gatewayapp: Store backup archive is required")
+	}
+	if size > storeBackupArchiveMaxBytes {
+		return StoreBackupManifest{}, ErrStoreBackupTooLarge
 	}
 	reader, err := zip.NewReader(input, size)
 	if err != nil {
@@ -468,10 +604,13 @@ func readZipEntry(entry *zip.File) ([]byte, error) {
 	if entry == nil {
 		return nil, errors.New("gatewayapp: archive entry is missing")
 	}
+	if entry.UncompressedSize64 > uint64(storeBackupEntryMaxBytes) {
+		return nil, ErrStoreBackupTooLarge
+	}
 	reader, err := entry.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer reader.Close()
-	return io.ReadAll(io.LimitReader(reader, 512<<20))
+	return readStoreBackupLimited(reader, storeBackupEntryMaxBytes)
 }

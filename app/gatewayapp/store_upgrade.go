@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,7 +89,13 @@ func readStoreUpgradePreflight(ctx context.Context, storeDir string) (storeUpgra
 	if err != nil {
 		return storeUpgradePreflight{}, err
 	}
-	database, err := sql.Open("sqlite", controlPath)
+	sqlitePath := filepath.ToSlash(controlPath)
+	if filepath.VolumeName(controlPath) != "" && !strings.HasPrefix(sqlitePath, "/") {
+		sqlitePath = "/" + sqlitePath
+	}
+	database, err := sql.Open("sqlite", (&url.URL{
+		Scheme: "file", Path: sqlitePath, RawQuery: "mode=ro&immutable=1",
+	}).String())
 	if err != nil {
 		return storeUpgradePreflight{}, fmt.Errorf("open Control database for Store upgrade preflight: %w", err)
 	}
@@ -372,7 +379,7 @@ func rejectPendingStoreUpgrade(storeDir string) error {
 	if err != nil {
 		return err
 	}
-	return fmt.Errorf("gatewayapp: Store upgrade is %s for writer %s; run upgrade commit or rollback before starting a Host", journal.State, journal.TargetWriter)
+	return fmt.Errorf("gatewayapp: Store upgrade is %s for writer %s; owner-held recovery must finish before starting a Host", journal.State, journal.TargetWriter)
 }
 
 func upgradeReportFromJournal(journal storeUpgradeJournal, rollbackAvailable bool) StoreUpgradeReport {

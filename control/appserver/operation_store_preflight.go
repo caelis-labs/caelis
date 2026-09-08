@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,8 @@ const sqliteOperationStoreSchemaVersion = 0
 // ValidateSQLiteOperationStoreReadOnly validates the Control operation
 // ledger without opening its owner or running schema initialization. It is
 // intended for a stopped-Host backup/upgrade preflight and never writes,
-// migrates, or repairs the database.
+// migrates, or repairs the database. Existing SQLite WAL, shared-memory, and
+// rollback-journal sidecars are rejected before the immutable read-only open.
 func ValidateSQLiteOperationStoreReadOnly(ctx context.Context, path string) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -35,14 +37,24 @@ func ValidateSQLiteOperationStoreReadOnly(ctx context.Context, path string) erro
 	if err != nil {
 		return fmt.Errorf("controlclient: resolve operation store database: %w", err)
 	}
-	info, err := os.Lstat(filepath.Clean(path))
+	path = filepath.Clean(path)
+	if err := rejectSQLiteOperationStoreSidecars(path); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("controlclient: inspect operation store database: %w", err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return errors.New("controlclient: operation store database is not a secure regular file")
 	}
-	db, err := sql.Open("sqlite", filepath.Clean(path))
+	sqlitePath := filepath.ToSlash(path)
+	if filepath.VolumeName(path) != "" && !strings.HasPrefix(sqlitePath, "/") {
+		sqlitePath = "/" + sqlitePath
+	}
+	db, err := sql.Open("sqlite", (&url.URL{
+		Scheme: "file", Path: sqlitePath, RawQuery: "mode=ro&immutable=1",
+	}).String())
 	if err != nil {
 		return fmt.Errorf("controlclient: open operation store database for read-only validation: %w", err)
 	}
@@ -70,6 +82,24 @@ func ValidateSQLiteOperationStoreReadOnly(ctx context.Context, path string) erro
 	}
 	if err := validateSQLiteOperationRows(ctx, db); err != nil {
 		return err
+	}
+	return nil
+}
+
+func rejectSQLiteOperationStoreSidecars(path string) error {
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		candidate := path + suffix
+		info, err := os.Lstat(candidate)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("controlclient: inspect operation store SQLite sidecar: %w", err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("controlclient: operation store SQLite sidecar %q is unsafe", filepath.Base(candidate))
+		}
+		return fmt.Errorf("controlclient: operation store SQLite sidecar %q requires owner recovery", filepath.Base(candidate))
 	}
 	return nil
 }

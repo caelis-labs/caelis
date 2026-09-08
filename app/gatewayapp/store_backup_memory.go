@@ -82,7 +82,7 @@ func PrepareStoreUpgrade(ctx context.Context, storeDir string) (StoreUpgradeRepo
 		}
 		result, err := memoryhost.PrepareUpgrade(ctx, memoryDir)
 		if err != nil {
-			_, rollbackErr := memoryhost.RollbackRestore(ctx, memoryDir)
+			_, rollbackErr := memoryhost.RollbackRestore(context.WithoutCancel(ctx), memoryDir)
 			if rollbackErr == nil {
 				rollbackErr = clearStoreUpgradeJournal(storeDir)
 			}
@@ -112,6 +112,9 @@ func RollbackStoreUpgrade(ctx context.Context, storeDir string) (StoreUpgradeRep
 		}
 		if journal.State == "committed" {
 			return StoreUpgradeReport{}, errors.New("gatewayapp: Store upgrade is already committed")
+		}
+		if journal.State == "committing" {
+			return StoreUpgradeReport{}, errors.New("gatewayapp: Store upgrade commit outcome is unresolved; finish owner commit before admitting a writer")
 		}
 		if journal.State == "preparing" {
 			preflight, err := readStoreUpgradePreflight(ctx, storeDir)
@@ -186,26 +189,32 @@ func CommitStoreUpgrade(ctx context.Context, storeDir string) (StoreUpgradeRepor
 				return StoreUpgradeReport{}, err
 			}
 		}
-		journal.State = "committing"
-		if err := writeStoreUpgradeJournal(storeDir, journal); err != nil {
-			return StoreUpgradeReport{}, err
-		}
-		if err := memoryhost.CommitRestore(memoryDir); err != nil {
-			journal.State = "prepared"
-			if writeErr := writeStoreUpgradeJournal(storeDir, journal); writeErr != nil {
-				return StoreUpgradeReport{}, errors.Join(err, writeErr)
-			}
-			return StoreUpgradeReport{}, err
-		}
-		journal.State = "committed"
-		if err := writeStoreUpgradeJournal(storeDir, journal); err != nil {
-			return StoreUpgradeReport{}, err
-		}
-		if err := clearStoreUpgradeJournal(storeDir); err != nil {
-			return StoreUpgradeReport{}, err
-		}
-		return upgradeReportFromJournal(journal, false), nil
+		return commitStoreUpgradeGeneration(storeDir, journal, func() error {
+			return memoryhost.CommitRestore(memoryDir)
+		})
 	})
+}
+
+// commitStoreUpgradeGeneration records the irreversible owner commit decision.
+// An error may follow deletion of the owner's rollback image, so it must never
+// restore a rollbackable journal state. Only an idempotent owner commit retry
+// can resolve this state; successful cleanup removes the temporary journal.
+func commitStoreUpgradeGeneration(storeDir string, journal storeUpgradeJournal, commit func() error) (StoreUpgradeReport, error) {
+	journal.State = "committing"
+	if err := writeStoreUpgradeJournal(storeDir, journal); err != nil {
+		return StoreUpgradeReport{}, err
+	}
+	if err := commit(); err != nil {
+		return StoreUpgradeReport{}, err
+	}
+	journal.State = "committed"
+	if err := writeStoreUpgradeJournal(storeDir, journal); err != nil {
+		return StoreUpgradeReport{}, err
+	}
+	if err := clearStoreUpgradeJournal(storeDir); err != nil {
+		return StoreUpgradeReport{}, err
+	}
+	return upgradeReportFromJournal(journal, false), nil
 }
 
 func withStoreUpgradeAuthority(
@@ -213,6 +222,9 @@ func withStoreUpgradeAuthority(
 	storeDir string,
 	operation func(string, string) (StoreUpgradeReport, error),
 ) (StoreUpgradeReport, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	storeDir, err := normalizeStoreBackupDir(storeDir)
 	if err != nil {
 		return StoreUpgradeReport{}, err
