@@ -5,6 +5,7 @@ package memoryhost
 import (
 	"context"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"sync"
@@ -48,6 +49,46 @@ type Host struct {
 	close       sync.Once
 	closed      atomic.Bool
 	closeErr    error
+}
+
+// PrepareUpgrade captures the owner generation while no embedded Runtime is
+// open. The Memory appliance reads its own management credential and keeps
+// the rollback image private to its authority.
+func PrepareUpgrade(ctx context.Context, dataDir string) (appliance.RestoreResult, error) {
+	return appliance.PrepareUpgradeOwned(ctx, dataDir)
+}
+
+// Restore installs one owner-authenticated Memory snapshot while the Host is
+// offline. It does not expose Memory's database, schema or credentials.
+func Restore(ctx context.Context, dataDir string, snapshot io.Reader) (appliance.RestoreResult, error) {
+	return appliance.RestoreOwned(ctx, appliance.OfflineRestoreOptions{
+		DataDir: dataDir, Snapshot: snapshot,
+	})
+}
+
+// RollbackRestore restores the appliance-owned pre-restore generation.
+func RollbackRestore(ctx context.Context, dataDir string) (appliance.RestoreResult, error) {
+	return appliance.RollbackRestoreOwned(ctx, dataDir, nil)
+}
+
+// CommitRestore accepts the installed Memory generation after Caelis has
+// completed its independent component restore.
+func CommitRestore(dataDir string) error {
+	return appliance.CommitRestoreOwned(dataDir)
+}
+
+// Backup delegates the consistent snapshot to the formal Memory owner API.
+// Caelis never reads memory.db or reconstructs a Memory snapshot itself.
+func (h *Host) Backup(ctx context.Context, output io.Writer) error {
+	if h == nil {
+		return fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
+	}
+	h.runtimeMu.RLock()
+	defer h.runtimeMu.RUnlock()
+	if h.closed.Load() || h.runtime == nil {
+		return fmt.Errorf("gatewayapp/memoryhost: embedded Memory is unavailable")
+	}
+	return h.runtime.Backup(ctx, output)
 }
 
 // Open synchronously opens the embedded Memory database and applies its schema

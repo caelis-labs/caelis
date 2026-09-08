@@ -22,7 +22,11 @@ func TestStackPublicMethodsStayAtDeclaredHostBoundary(t *testing.T) {
 		"ControlTerminalStreams": true,
 		"Models":                 true,
 		"PluginCommands":         true, "PresentationDependencies": true, "PresentationSource": true,
-		"Quiesce":                true,
+		"Quiesce": true,
+		// Store backup is an intentional Host lifecycle boundary. It closes
+		// admission before delegating each durable authority to its owner and
+		// is consumed by the local lifecycle CLI.
+		"WriteStoreBackup":       true,
 		"Sessions":               true,
 		"SetBuiltInChildControl": true, "Skills": true,
 		"StartApprovalRecovery": true, "TaskStreams": true,

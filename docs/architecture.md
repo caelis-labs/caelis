@@ -290,6 +290,11 @@ cursor keys, runtime locks and tokens, diagnostic logs, and immutable plugin
 content also remain outside the Control database because their lifecycle or
 security boundary is different.
 
+The supported offline archive and restore contract is maintained in
+[Store backup and recovery](store-backup.md). It preserves the independent
+authority boundaries above and does not present Config, Control, Session, and
+Memory as one cross-database transaction.
+
 An upgrade starts a new Control operation epoch. Retired `control-operations`,
 `acp-preparations`, and plugin operation-receipt directories are not read,
 imported, or allowed to participate in Host startup. They are disposable legacy

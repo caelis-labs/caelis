@@ -38,6 +38,9 @@ change-scoped gates.
 5. Confirm the imported `github.com/caelis-labs/memory` version is released and
    declares a forward-migration floor for the persisted appliance database.
    A prerelease development baseline is a release blocker.
+   Store backup/restore consumers must pin the Memory release that provides the
+   owner snapshot and offline generation APIs; a local module replacement is
+   development evidence only.
 6. Commit and push the intended SHA to `main`, then wait for or identify its
    quality run. Do not rerun unchanged local gates merely because a tag is next.
 7. Prepare concise user-visible release notes. When retiring a durable writer,
