@@ -344,9 +344,11 @@ func formatDoctorResult(report doctorResult) string {
 			fmt.Sprintf("memory_shm_state: %s", firstNonEmptyString(storage.Memory.SHMState, "-")),
 			fmt.Sprintf("memory_rollback_state: %s", firstNonEmptyString(storage.Memory.RollbackState, "-")),
 		)
-		for _, advice := range storage.RecoveryAdvice {
-			if advice = strings.TrimSpace(advice); advice != "" {
-				lines = append(lines, "recovery_advice: "+advice)
+		if shouldShowStorageRecoveryAdvice(report) {
+			for _, advice := range storage.RecoveryAdvice {
+				if advice = strings.TrimSpace(advice); advice != "" {
+					lines = append(lines, "recovery_advice: "+advice)
+				}
 			}
 		}
 		lines = append(lines, "")
@@ -420,6 +422,21 @@ func formatDoctorResult(report doctorResult) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func shouldShowStorageRecoveryAdvice(report doctorResult) bool {
+	if strings.TrimSpace(report.ServiceError) != "" || strings.EqualFold(strings.TrimSpace(report.ServiceState), "unavailable") {
+		return true
+	}
+	storage := report.StorageDiagnostics
+	if storage == nil {
+		return false
+	}
+	return storage.ConfigState != "present" ||
+		storage.ControlDatabaseState != "present" ||
+		storage.SessionsState != "present" ||
+		storage.Memory.DatabaseState != "present" ||
+		storage.Memory.DatabaseFormat != "sqlite3"
 }
 
 func sandboxSetupDiagnosticsFromStatus(status controlstatus.SandboxSetupStatus) sandboxSetupDiagnostics {
