@@ -45,7 +45,10 @@ change-scoped gates.
    quality run. Do not rerun unchanged local gates merely because a tag is next.
 7. Prepare concise user-visible release notes. When retiring a durable writer,
    record the last writer and first no-write version; retain its compatibility
-   reader until the supported upgrade floor reaches that version.
+   reader until the supported upgrade floor reaches that version. For Store
+   archives, record the source layout floor and last writer separately from the
+   `caelis.store-backup.v1` reader capability; do not invent a reader release
+   version before the first capability-bearing release is assigned.
 
 Run optional architecture, SDK, protocol, race, regression, proxy, documentation,
 or dry-run checks only when the release changes those boundaries. See

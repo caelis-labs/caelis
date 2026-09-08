@@ -29,7 +29,8 @@ func TestWriteStoreBackupPublishesManifestAndExcludesSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteStoreBackup() error = %v", err)
 	}
-	if manifest.Format != StoreBackupFormat || manifest.MinimumReader != StoreBackupMinimumReader {
+	if manifest.Format != StoreBackupFormat || manifest.SourceFloor != StoreBackupSourceFloor ||
+		manifest.LastWriter != StoreBackupLastWriter || manifest.MinimumReaderCapability != StoreBackupReaderCapability {
 		t.Fatalf("manifest identity = %#v", manifest)
 	}
 	if _, err := ReadStoreBackupManifest(bytes.NewReader(archive.Bytes()), int64(archive.Len())); err != nil {
@@ -111,6 +112,47 @@ func TestWriteStoreBackupDoesNotPublishPartialArchiveOnMemoryFailure(t *testing.
 	}
 }
 
+func TestWriteStoreBackupRejectsSessionIndexSQLiteSidecars(t *testing.T) {
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		t.Run(suffix, func(t *testing.T) {
+			storeDir := makeStoreBackupFixture(t, "session-index-sidecar")
+			path := filepath.Join(storeDir, "sessions", ".sessions.index.sqlite"+suffix)
+			if err := os.WriteFile(path, []byte("uncheckpointed"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var archive bytes.Buffer
+			ownerCalled := false
+			if _, err := WriteStoreBackup(t.Context(), StoreBackupOptions{
+				StoreDir: storeDir,
+				MemoryBackup: func(context.Context, io.Writer) error {
+					ownerCalled = true
+					return nil
+				},
+			}, &archive); err == nil || !strings.Contains(err.Error(), "Session index SQLite sidecar") {
+				t.Fatalf("WriteStoreBackup() error = %v, want sidecar rejection", err)
+			}
+			if ownerCalled || archive.Len() != 0 {
+				t.Fatalf("sidecar rejection ownerCalled=%v archiveBytes=%d", ownerCalled, archive.Len())
+			}
+		})
+	}
+}
+
+func TestValidateStoreBackupManifestRejectsFutureReaderCapability(t *testing.T) {
+	storeDir := makeStoreBackupFixture(t, "future-reader")
+	manifest, err := WriteStoreBackup(t.Context(), StoreBackupOptions{
+		StoreDir:     storeDir,
+		MemoryBackup: func(context.Context, io.Writer) error { return nil },
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.MinimumReaderCapability = "caelis.store-backup.v2"
+	if err := validateStoreBackupManifest(manifest); !errors.Is(err, ErrStoreBackupFormat) {
+		t.Fatalf("validateStoreBackupManifest() error = %v, want unsupported future reader capability", err)
+	}
+}
+
 func TestWriteStoreBackupRejectsUnknownConfigSchemaBeforeOwnerSnapshot(t *testing.T) {
 	storeDir := makeStoreBackupFixture(t, "future-config")
 	if err := os.WriteFile(filepath.Join(storeDir, "config.json"), []byte(`{"schema_version":99}`), 0o600); err != nil {
@@ -134,10 +176,12 @@ func TestWriteStoreBackupRejectsUnknownConfigSchemaBeforeOwnerSnapshot(t *testin
 
 func TestValidateStoreBackupManifestRejectsKindPathMismatch(t *testing.T) {
 	base := StoreBackupManifest{
-		Format:          StoreBackupFormat,
-		MinimumReader:   StoreBackupMinimumReader,
-		QuiesceBoundary: "host-admission-closed-and-all-producers-drained",
-		Atomicity:       "independent-component-snapshots-under-one-quiesce-boundary",
+		Format:                  StoreBackupFormat,
+		SourceFloor:             StoreBackupSourceFloor,
+		LastWriter:              StoreBackupLastWriter,
+		MinimumReaderCapability: StoreBackupReaderCapability,
+		QuiesceBoundary:         "host-admission-closed-and-all-producers-drained",
+		Atomicity:               "independent-component-snapshots-under-one-quiesce-boundary",
 	}
 	tests := []struct {
 		name string
@@ -405,8 +449,26 @@ func TestPrepareStoreUpgradeGatesNewEmbeddedHostUntilRollback(t *testing.T) {
 		WorkspaceKey: "upgrade-workspace", WorkspaceCWD: workspace,
 		Sandbox: SandboxConfig{RequestedType: "host"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "restored generation awaits operator commit") {
+	if err == nil || !strings.Contains(err.Error(), "Store upgrade is prepared") {
 		t.Fatalf("NewLocalStack() while upgrade is pending error = %v", err)
+	}
+	_, err = RestoreStore(t.Context(), StoreRestoreOptions{
+		StoreDir: storeDir, Backup: strings.NewReader("not-an-archive"),
+		MemoryRestore: func(context.Context, io.Reader) error {
+			t.Fatal("MemoryRestore() ran while upgrade was pending")
+			return nil
+		},
+		MemoryCommit: func(context.Context) error {
+			t.Fatal("MemoryCommit() ran while upgrade was pending")
+			return nil
+		},
+		MemoryRollback: func(context.Context) error {
+			t.Fatal("MemoryRollback() ran while upgrade was pending")
+			return nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot restore while Store upgrade is pending") {
+		t.Fatalf("RestoreStore() while upgrade is pending error = %v", err)
 	}
 	rolledBack, err := RollbackStoreUpgrade(t.Context(), storeDir)
 	if err != nil {
@@ -422,6 +484,150 @@ func TestPrepareStoreUpgradeGatesNewEmbeddedHostUntilRollback(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() after upgrade rollback error = %v", err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStoreUpgradePreflightCommitAdmitsHost(t *testing.T) {
+	root := t.TempDir()
+	storeDir := filepath.Join(root, "store")
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName: "upgrade-commit-test", UserID: "local-user", StoreDir: storeDir,
+		WorkspaceKey: "upgrade-commit-workspace", WorkspaceCWD: workspace,
+		Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.Close(); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := PrepareStoreUpgrade(t.Context(), storeDir)
+	if err != nil {
+		t.Fatalf("PrepareStoreUpgrade() error = %v", err)
+	}
+	if prepared.State != "prepared" || prepared.TargetWriter != storeUpgradeWriterCapability || prepared.PreflightDigest == "" {
+		t.Fatalf("PrepareStoreUpgrade() report = %+v", prepared)
+	}
+	committed, err := CommitStoreUpgrade(t.Context(), storeDir)
+	if err != nil {
+		t.Fatalf("CommitStoreUpgrade() error = %v", err)
+	}
+	if committed.State != "committed" || committed.PreflightDigest != prepared.PreflightDigest {
+		t.Fatalf("CommitStoreUpgrade() report = %+v, prepared = %+v", committed, prepared)
+	}
+	if _, err := os.Stat(filepath.Join(storeDir, storeUpgradeJournalName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("upgrade journal remains after commit: %v", err)
+	}
+	reopened, err := newGatewayAppTestStack(t, Config{
+		AppName: "upgrade-commit-test", UserID: "local-user", StoreDir: storeDir,
+		WorkspaceKey: "upgrade-commit-workspace", WorkspaceCWD: workspace,
+		Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() after upgrade commit error = %v", err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStoreUpgradeCommitRejectsChangedPreflightAuthorities(t *testing.T) {
+	root := t.TempDir()
+	storeDir := filepath.Join(root, "store")
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName: "upgrade-digest-test", UserID: "local-user", StoreDir: storeDir,
+		WorkspaceKey: "upgrade-digest-workspace", WorkspaceCWD: workspace,
+		Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.Close(); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := PrepareStoreUpgrade(t.Context(), storeDir)
+	if err != nil {
+		t.Fatalf("PrepareStoreUpgrade() error = %v", err)
+	}
+	configPath := filepath.Join(storeDir, "config.json")
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CommitStoreUpgrade(t.Context(), storeDir); err == nil || !strings.Contains(err.Error(), "preflight changed") {
+		t.Fatalf("CommitStoreUpgrade() error = %v, want changed preflight rejection", err)
+	}
+	if _, err := os.Stat(filepath.Join(storeDir, storeUpgradeJournalName)); err != nil {
+		t.Fatalf("upgrade journal after changed preflight = %v", err)
+	}
+	if _, err := RollbackStoreUpgrade(t.Context(), storeDir); err != nil {
+		t.Fatalf("RollbackStoreUpgrade() after changed preflight error = %v", err)
+	}
+	if prepared.PreflightDigest == "" {
+		t.Fatal("PrepareStoreUpgrade() returned empty preflight digest")
+	}
+}
+
+func TestStoreUpgradeRecoversInterruptedPreparationBeforeRollback(t *testing.T) {
+	root := t.TempDir()
+	storeDir := filepath.Join(root, "store")
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName: "upgrade-interrupted-prepare-test", UserID: "local-user", StoreDir: storeDir,
+		WorkspaceKey: "upgrade-interrupted-prepare-workspace", WorkspaceCWD: workspace,
+		Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.Close(); err != nil {
+		t.Fatal(err)
+	}
+	preflight, err := readStoreUpgradePreflight(t.Context(), storeDir)
+	if err != nil {
+		t.Fatalf("readStoreUpgradePreflight() error = %v", err)
+	}
+	if err := writeStoreUpgradeJournal(storeDir, storeUpgradeJournal{
+		Format: storeUpgradeJournalFormat, State: "preparing", StoreDir: storeDir,
+		TargetWriter: currentStoreUpgradeWriter(), PreflightDigest: preflight.Digest,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("write interrupted upgrade journal: %v", err)
+	}
+	rolledBack, err := RollbackStoreUpgrade(t.Context(), storeDir)
+	if err != nil {
+		t.Fatalf("RollbackStoreUpgrade() recovery error = %v", err)
+	}
+	if rolledBack.State != "rolled_back" || rolledBack.PreflightDigest != preflight.Digest {
+		t.Fatalf("RollbackStoreUpgrade() report = %+v", rolledBack)
+	}
+	if _, err := os.Stat(filepath.Join(storeDir, storeUpgradeJournalName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("upgrade journal remains after interrupted preparation recovery: %v", err)
+	}
+	reopened, err := newGatewayAppTestStack(t, Config{
+		AppName: "upgrade-interrupted-prepare-test", UserID: "local-user", StoreDir: storeDir,
+		WorkspaceKey: "upgrade-interrupted-prepare-workspace", WorkspaceCWD: workspace,
+		Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() after interrupted preparation rollback error = %v", err)
 	}
 	if err := reopened.Close(); err != nil {
 		t.Fatal(err)

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
@@ -53,6 +54,9 @@ func RestoreStore(ctx context.Context, options StoreRestoreOptions) (StoreRestor
 	if options.MemoryRestore == nil || options.MemoryCommit == nil || options.MemoryRollback == nil {
 		return StoreRestoreReport{}, ErrStoreRestoreMemory
 	}
+	if err := rejectPendingStoreUpgrade(storeDir); err != nil {
+		return StoreRestoreReport{}, fmt.Errorf("gatewayapp: cannot restore while Store upgrade is pending: %w", err)
+	}
 	if err := validateStoreRestoreTargets(storeDir); err != nil {
 		return StoreRestoreReport{}, err
 	}
@@ -77,7 +81,11 @@ func RestoreStore(ctx context.Context, options StoreRestoreOptions) (StoreRestor
 	if err != nil {
 		return StoreRestoreReport{}, err
 	}
-	defer os.RemoveAll(stageDir)
+	defer func() {
+		if err := os.RemoveAll(stageDir); err == nil {
+			_ = storeRestoreSyncDirectory(filepath.Dir(stageDir))
+		}
+	}()
 	if err := writeStoreRestoreJournal(storeDir, storeRestoreJournal{
 		Format: StoreBackupFormat, State: "staged", StoreDir: storeDir,
 		StageDir: stageDir, CreatedAt: time.Now().UTC(),
@@ -131,15 +139,21 @@ func RestoreStore(ctx context.Context, options StoreRestoreOptions) (StoreRestor
 			return rollbackStoreRestoreWithError(storeDir, err, report)
 		}
 		if journal.PendingTargetExisted {
-			if err := os.Rename(target, rollbackTarget); err != nil {
+			if err := storeRestoreRename(target, rollbackTarget); err != nil {
 				return rollbackStoreRestoreWithError(storeDir, fmt.Errorf("move existing %s to rollback: %w", relative, err), report)
+			}
+			if err := syncStoreRestoreDirectories(filepath.Dir(target), filepath.Dir(rollbackTarget)); err != nil {
+				return rollbackStoreRestoreWithError(storeDir, fmt.Errorf("sync moved %s to rollback: %w", relative, err), report)
 			}
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return rollbackStoreRestoreWithError(storeDir, err, report)
 		}
-		if err := os.Rename(stagedPath, target); err != nil {
+		if err := storeRestoreRename(stagedPath, target); err != nil {
 			return rollbackStoreRestoreWithError(storeDir, fmt.Errorf("install restored %s: %w", relative, err), report)
+		}
+		if err := syncStoreRestoreDirectories(filepath.Dir(stagedPath), filepath.Dir(target)); err != nil {
+			return rollbackStoreRestoreWithError(storeDir, fmt.Errorf("sync installed %s: %w", relative, err), report)
 		}
 		journal.Applied = append(journal.Applied, relative)
 		journal.Pending = ""
@@ -177,6 +191,9 @@ func RestoreStore(ctx context.Context, options StoreRestoreOptions) (StoreRestor
 	}
 	if err := os.RemoveAll(rollbackDir); err != nil {
 		return StoreRestoreReport{}, fmt.Errorf("remove Store restore rollback: %w", err)
+	}
+	if err := storeRestoreSyncDirectory(filepath.Dir(rollbackDir)); err != nil {
+		return StoreRestoreReport{}, fmt.Errorf("sync Store restore rollback cleanup: %w", err)
 	}
 	if err := clearStoreRestoreJournal(storeDir); err != nil {
 		return StoreRestoreReport{}, err
@@ -304,7 +321,12 @@ func recoverStoreRestore(ctx context.Context, storeDir string, options StoreRest
 		return false, err
 	}
 	if journal.State == "staged" {
-		_ = os.RemoveAll(journal.StageDir)
+		if err := os.RemoveAll(journal.StageDir); err != nil {
+			return false, err
+		}
+		if err := storeRestoreSyncDirectory(filepath.Dir(journal.StageDir)); err != nil {
+			return false, err
+		}
 		if err := clearStoreRestoreJournal(storeDir); err != nil {
 			return false, err
 		}
@@ -315,6 +337,9 @@ func recoverStoreRestore(ctx context.Context, storeDir string, options StoreRest
 			return false, err
 		}
 		if err := os.RemoveAll(journal.RollbackDir); err != nil {
+			return false, err
+		}
+		if err := syncStoreRestoreDirectories(filepath.Dir(journal.StageDir), filepath.Dir(journal.RollbackDir)); err != nil {
 			return false, err
 		}
 		if err := clearStoreRestoreJournal(storeDir); err != nil {
@@ -337,7 +362,12 @@ func recoverStoreRestore(ctx context.Context, storeDir string, options StoreRest
 			if err := os.RemoveAll(journal.RollbackDir); err != nil {
 				return false, err
 			}
-			_ = os.RemoveAll(journal.StageDir)
+			if err := os.RemoveAll(journal.StageDir); err != nil {
+				return false, err
+			}
+			if err := syncStoreRestoreDirectories(filepath.Dir(journal.RollbackDir), filepath.Dir(journal.StageDir)); err != nil {
+				return false, err
+			}
 			if err := clearStoreRestoreJournal(storeDir); err != nil {
 				return false, err
 			}
@@ -391,13 +421,19 @@ func rollbackStoreRestore(storeDir string) error {
 				if err := os.RemoveAll(target); err != nil {
 					return err
 				}
+				if err := storeRestoreSyncDirectory(filepath.Dir(target)); err != nil {
+					return err
+				}
 			} else if !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 				return err
 			}
-			if err := os.Rename(rollbackTarget, target); err != nil {
+			if err := storeRestoreRename(rollbackTarget, target); err != nil {
+				return err
+			}
+			if err := syncStoreRestoreDirectories(filepath.Dir(rollbackTarget), filepath.Dir(target)); err != nil {
 				return err
 			}
 			continue
@@ -415,16 +451,34 @@ func rollbackStoreRestore(storeDir string) error {
 			if err := os.RemoveAll(target); err != nil {
 				return err
 			}
+			if err := storeRestoreSyncDirectory(filepath.Dir(target)); err != nil {
+				return err
+			}
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
-	_ = os.RemoveAll(journal.StageDir)
-	_ = os.RemoveAll(journal.RollbackDir)
+	if err := os.RemoveAll(journal.StageDir); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(journal.RollbackDir); err != nil {
+		return err
+	}
+	if err := syncStoreRestoreDirectories(filepath.Dir(journal.StageDir), filepath.Dir(journal.RollbackDir)); err != nil {
+		return err
+	}
 	return clearStoreRestoreJournal(storeDir)
 }
 
 func writeStoreRestoreJournal(storeDir string, journal storeRestoreJournal) error {
+	storeRestoreHooks.RLock()
+	writeJournal := storeRestoreHooks.writeJournal
+	storeRestoreHooks.RUnlock()
+	if writeJournal != nil {
+		if err := writeJournal(journal); err != nil {
+			return err
+		}
+	}
 	raw, err := json.Marshal(journal)
 	if err != nil {
 		return err
@@ -456,7 +510,7 @@ func writeStoreRestoreJournal(storeDir string, journal storeRestoreJournal) erro
 	if err := atomicfile.Replace(tempPath, filepath.Join(storeDir, storeRestoreJournalName)); err != nil {
 		return err
 	}
-	return syncStoreRestoreDirectory(storeDir)
+	return storeRestoreSyncDirectory(storeDir)
 }
 
 func validateStoreRestoreTargets(storeDir string) error {
@@ -600,5 +654,53 @@ func clearStoreRestoreJournal(storeDir string) error {
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return storeRestoreSyncDirectory(storeDir)
+}
+
+var storeRestoreHooks struct {
+	sync.RWMutex
+	rename        func(string, string) error
+	syncDirectory func(string) error
+	writeJournal  func(storeRestoreJournal) error
+}
+
+func storeRestoreRename(oldPath, newPath string) error {
+	storeRestoreHooks.RLock()
+	rename := storeRestoreHooks.rename
+	storeRestoreHooks.RUnlock()
+	if rename != nil {
+		return rename(oldPath, newPath)
+	}
+	return os.Rename(oldPath, newPath)
+}
+
+func storeRestoreSyncDirectory(path string) error {
+	storeRestoreHooks.RLock()
+	syncDirectory := storeRestoreHooks.syncDirectory
+	storeRestoreHooks.RUnlock()
+	if syncDirectory != nil {
+		return syncDirectory(path)
+	}
+	return syncStoreRestoreDirectory(path)
+}
+
+func syncStoreRestoreDirectories(paths ...string) error {
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		path = filepath.Clean(strings.TrimSpace(path))
+		if path == "." || path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		if err := storeRestoreSyncDirectory(path); err != nil {
+			return fmt.Errorf("sync Store restore directory %s: %w", path, err)
+		}
+	}
+	return nil
 }

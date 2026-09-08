@@ -2,8 +2,12 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/memoryhost"
 	"github.com/caelis-labs/caelis/internal/hostownership"
@@ -16,6 +20,9 @@ type StoreUpgradeReport struct {
 	StorageGeneration string `json:"storage_generation"`
 	SchemaVersion     int    `json:"schema_version"`
 	RollbackAvailable bool   `json:"rollback_available"`
+	State             string `json:"state"`
+	TargetWriter      string `json:"target_writer"`
+	PreflightDigest   string `json:"preflight_digest"`
 }
 
 // RestoreStoreWithEmbeddedMemory restores a complete Store using the
@@ -48,40 +55,163 @@ func RestoreStoreWithEmbeddedMemory(ctx context.Context, storeDir string, backup
 // capture its exact stopped generation before a new writer is allowed to
 // migrate the Store.
 func PrepareStoreUpgrade(ctx context.Context, storeDir string) (StoreUpgradeReport, error) {
-	return withStoreUpgradeAuthority(ctx, storeDir, func(memoryDir string) (StoreUpgradeReport, error) {
+	return withStoreUpgradeAuthority(ctx, storeDir, func(storeDir, memoryDir string) (StoreUpgradeReport, error) {
+		existing, readErr := readStoreUpgradeJournal(storeDir)
+		existingPreparing := readErr == nil && existing.State == "preparing"
+		if readErr == nil && !existingPreparing {
+			return StoreUpgradeReport{}, errors.New("gatewayapp: Store upgrade is already prepared")
+		} else if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			return StoreUpgradeReport{}, readErr
+		}
+		preflight, err := readStoreUpgradePreflight(ctx, storeDir)
+		if err != nil {
+			return StoreUpgradeReport{}, err
+		}
+		if existingPreparing && existing.PreflightDigest != preflight.Digest {
+			return StoreUpgradeReport{}, errors.New("gatewayapp: Store upgrade preflight changed while preparing")
+		}
+		journal := storeUpgradeJournal{
+			Format: storeUpgradeJournalFormat, State: "preparing", StoreDir: storeDir,
+			TargetWriter: currentStoreUpgradeWriter(), PreparedBy: currentStoreUpgradeBuildVersion(),
+			PreflightDigest: preflight.Digest, CreatedAt: time.Now().UTC(),
+		}
+		if existingPreparing {
+			journal = existing
+		} else if err := writeStoreUpgradeJournal(storeDir, journal); err != nil {
+			return StoreUpgradeReport{}, err
+		}
 		result, err := memoryhost.PrepareUpgrade(ctx, memoryDir)
-		return StoreUpgradeReport{
-			SourceGeneration: result.SourceGeneration, StorageGeneration: result.StorageGeneration,
-			SchemaVersion: result.SchemaVersion, RollbackAvailable: result.RollbackAvailable,
-		}, err
+		if err != nil {
+			_, rollbackErr := memoryhost.RollbackRestore(ctx, memoryDir)
+			if rollbackErr == nil {
+				rollbackErr = clearStoreUpgradeJournal(storeDir)
+			}
+			return StoreUpgradeReport{}, errors.Join(err, rollbackErr)
+		}
+		journal.State = "prepared"
+		journal.SourceGeneration = result.SourceGeneration
+		journal.StorageGeneration = result.StorageGeneration
+		journal.SchemaVersion = result.SchemaVersion
+		if err := writeStoreUpgradeJournal(storeDir, journal); err != nil {
+			return StoreUpgradeReport{}, err
+		}
+		return upgradeReportFromJournal(journal, result.RollbackAvailable), nil
 	})
 }
 
 // RollbackStoreUpgrade restores Memory's pre-upgrade generation while the
 // product Host remains stopped.
 func RollbackStoreUpgrade(ctx context.Context, storeDir string) (StoreUpgradeReport, error) {
-	return withStoreUpgradeAuthority(ctx, storeDir, func(memoryDir string) (StoreUpgradeReport, error) {
+	return withStoreUpgradeAuthority(ctx, storeDir, func(storeDir, memoryDir string) (StoreUpgradeReport, error) {
+		journal, err := readStoreUpgradeJournal(storeDir)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return StoreUpgradeReport{}, errors.New("gatewayapp: Store upgrade journal is missing")
+			}
+			return StoreUpgradeReport{}, err
+		}
+		if journal.State == "committed" {
+			return StoreUpgradeReport{}, errors.New("gatewayapp: Store upgrade is already committed")
+		}
+		if journal.State == "preparing" {
+			preflight, err := readStoreUpgradePreflight(ctx, storeDir)
+			if err != nil {
+				return StoreUpgradeReport{}, err
+			}
+			if preflight.Digest != journal.PreflightDigest {
+				return StoreUpgradeReport{}, errors.New("gatewayapp: Store upgrade preflight changed while recovering preparation")
+			}
+			prepared, err := memoryhost.PrepareUpgrade(ctx, memoryDir)
+			if err != nil {
+				return StoreUpgradeReport{}, err
+			}
+			journal.State = "prepared"
+			journal.SourceGeneration = prepared.SourceGeneration
+			journal.StorageGeneration = prepared.StorageGeneration
+			journal.SchemaVersion = prepared.SchemaVersion
+			if err := writeStoreUpgradeJournal(storeDir, journal); err != nil {
+				return StoreUpgradeReport{}, err
+			}
+		}
 		result, err := memoryhost.RollbackRestore(ctx, memoryDir)
+		if err != nil {
+			return StoreUpgradeReport{}, err
+		}
+		if err := clearStoreUpgradeJournal(storeDir); err != nil {
+			return StoreUpgradeReport{}, err
+		}
+		journal.State = "rolled_back"
 		return StoreUpgradeReport{
 			SourceGeneration: result.SourceGeneration, StorageGeneration: result.StorageGeneration,
 			SchemaVersion: result.SchemaVersion, RollbackAvailable: result.RollbackAvailable,
-		}, err
+			State: journal.State, TargetWriter: journal.TargetWriter, PreflightDigest: journal.PreflightDigest,
+		}, nil
 	})
 }
 
 // CommitStoreUpgrade accepts Memory's migrated generation after all other
 // Store authorities have passed their own checks.
-func CommitStoreUpgrade(ctx context.Context, storeDir string) error {
-	_, err := withStoreUpgradeAuthority(ctx, storeDir, func(memoryDir string) (StoreUpgradeReport, error) {
-		return StoreUpgradeReport{}, memoryhost.CommitRestore(memoryDir)
+func CommitStoreUpgrade(ctx context.Context, storeDir string) (StoreUpgradeReport, error) {
+	return withStoreUpgradeAuthority(ctx, storeDir, func(storeDir, memoryDir string) (StoreUpgradeReport, error) {
+		journal, err := readStoreUpgradeJournal(storeDir)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return StoreUpgradeReport{}, errors.New("gatewayapp: Store upgrade journal is missing")
+			}
+			return StoreUpgradeReport{}, err
+		}
+		if journal.State == "committed" {
+			if err := clearStoreUpgradeJournal(storeDir); err != nil {
+				return StoreUpgradeReport{}, err
+			}
+			return upgradeReportFromJournal(journal, false), nil
+		}
+		preflight, err := readStoreUpgradePreflight(ctx, storeDir)
+		if err != nil {
+			return StoreUpgradeReport{}, err
+		}
+		if preflight.Digest != journal.PreflightDigest {
+			return StoreUpgradeReport{}, fmt.Errorf("gatewayapp: Store upgrade preflight changed since prepare")
+		}
+		if journal.State == "preparing" {
+			prepared, err := memoryhost.PrepareUpgrade(ctx, memoryDir)
+			if err != nil {
+				return StoreUpgradeReport{}, err
+			}
+			journal.State = "prepared"
+			journal.SourceGeneration = prepared.SourceGeneration
+			journal.StorageGeneration = prepared.StorageGeneration
+			journal.SchemaVersion = prepared.SchemaVersion
+			if err := writeStoreUpgradeJournal(storeDir, journal); err != nil {
+				return StoreUpgradeReport{}, err
+			}
+		}
+		journal.State = "committing"
+		if err := writeStoreUpgradeJournal(storeDir, journal); err != nil {
+			return StoreUpgradeReport{}, err
+		}
+		if err := memoryhost.CommitRestore(memoryDir); err != nil {
+			journal.State = "prepared"
+			if writeErr := writeStoreUpgradeJournal(storeDir, journal); writeErr != nil {
+				return StoreUpgradeReport{}, errors.Join(err, writeErr)
+			}
+			return StoreUpgradeReport{}, err
+		}
+		journal.State = "committed"
+		if err := writeStoreUpgradeJournal(storeDir, journal); err != nil {
+			return StoreUpgradeReport{}, err
+		}
+		if err := clearStoreUpgradeJournal(storeDir); err != nil {
+			return StoreUpgradeReport{}, err
+		}
+		return upgradeReportFromJournal(journal, false), nil
 	})
-	return err
 }
 
 func withStoreUpgradeAuthority(
 	ctx context.Context,
 	storeDir string,
-	operation func(string) (StoreUpgradeReport, error),
+	operation func(string, string) (StoreUpgradeReport, error),
 ) (StoreUpgradeReport, error) {
 	storeDir, err := normalizeStoreBackupDir(storeDir)
 	if err != nil {
@@ -92,5 +222,5 @@ func withStoreUpgradeAuthority(
 		return StoreUpgradeReport{}, err
 	}
 	defer authority.Close()
-	return operation(filepath.Join(storeDir, "memory", "appliance"))
+	return operation(storeDir, filepath.Join(storeDir, "memory", "appliance"))
 }

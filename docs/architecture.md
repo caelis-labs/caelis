@@ -293,7 +293,12 @@ security boundary is different.
 The supported offline archive and restore contract is maintained in
 [Store backup and recovery](store-backup.md). It preserves the independent
 authority boundaries above and does not present Config, Control, Session, and
-Memory as one cross-database transaction.
+Memory as one cross-database transaction. Its upgrade journal is a Host-owned
+barrier: a writer performs a read-only Config/Control/Session preflight, records
+the target writer capability and digest, refuses semantic startup while the
+barrier is pending, and commits the owner generation only after the same
+preflight is reproduced. Pre-contract writers cannot understand that marker and
+must remain stopped for the procedure.
 
 An upgrade starts a new Control operation epoch. Retired `control-operations`,
 `acp-preparations`, and plugin operation-receipt directories are not read,

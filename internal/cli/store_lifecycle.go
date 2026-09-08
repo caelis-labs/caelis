@@ -167,9 +167,11 @@ func runStoreUpgradeCommand(ctx context.Context, command string, cfg gatewayapp.
 		}
 		result.Upgrade = &report
 	case "commit":
-		if err := gatewayapp.CommitStoreUpgrade(ctx, cfg.StoreDir); err != nil {
+		report, err := gatewayapp.CommitStoreUpgrade(ctx, cfg.StoreDir)
+		if err != nil {
 			return err
 		}
+		result.Upgrade = &report
 	case "rollback":
 		report, err := gatewayapp.RollbackStoreUpgrade(ctx, cfg.StoreDir)
 		if err != nil {

@@ -24,11 +24,18 @@ import (
 const (
 	// StoreBackupFormat is the stable archive format identifier.
 	StoreBackupFormat = "caelis.store-backup.v1"
-	// StoreBackupMinimumReader is the first reader that can consume this
-	// archive. It is recorded in every manifest.
-	StoreBackupMinimumReader = "0.51.0"
-	storeBackupManifestName  = "manifest.json"
-	storeBackupComponentRoot = "components/"
+	// StoreBackupSourceFloor identifies the pre-backup Store layout accepted by
+	// this archive. It is a layout capability, not a Caelis reader version.
+	StoreBackupSourceFloor = "caelis.store-layout.v0"
+	// StoreBackupLastWriter identifies the last writer of the source layout.
+	// It is recorded separately from the reader capability because the first
+	// release carrying this reader contract has not been assigned yet.
+	StoreBackupLastWriter = "v0.51.2"
+	// StoreBackupReaderCapability is the minimum reader capability required to
+	// consume this archive. Future capabilities are rejected before restore.
+	StoreBackupReaderCapability = "caelis.store-backup.v1"
+	storeBackupManifestName     = "manifest.json"
+	storeBackupComponentRoot    = "components/"
 )
 
 var (
@@ -56,16 +63,18 @@ type StoreBackupOptions struct {
 // Components are independently durable snapshots under one Host quiesce
 // boundary; the manifest never claims a cross-database transaction.
 type StoreBackupManifest struct {
-	Format          string                 `json:"format"`
-	MinimumReader   string                 `json:"minimum_reader"`
-	CreatedAt       time.Time              `json:"created_at"`
-	CaelisVersion   string                 `json:"caelis_version,omitempty"`
-	GoOS            string                 `json:"goos"`
-	GoArch          string                 `json:"goarch"`
-	QuiesceBoundary string                 `json:"quiesce_boundary"`
-	Atomicity       string                 `json:"atomicity"`
-	SecretsExcluded []string               `json:"secrets_excluded"`
-	Components      []StoreBackupComponent `json:"components"`
+	Format                  string                 `json:"format"`
+	SourceFloor             string                 `json:"source_floor"`
+	LastWriter              string                 `json:"last_writer"`
+	MinimumReaderCapability string                 `json:"minimum_reader_capability"`
+	CreatedAt               time.Time              `json:"created_at"`
+	CaelisVersion           string                 `json:"caelis_version,omitempty"`
+	GoOS                    string                 `json:"goos"`
+	GoArch                  string                 `json:"goarch"`
+	QuiesceBoundary         string                 `json:"quiesce_boundary"`
+	Atomicity               string                 `json:"atomicity"`
+	SecretsExcluded         []string               `json:"secrets_excluded"`
+	Components              []StoreBackupComponent `json:"components"`
 }
 
 // StoreBackupComponent identifies one archive member and its integrity
@@ -133,14 +142,16 @@ func WriteStoreBackup(ctx context.Context, options StoreBackupOptions, output io
 		now = time.Now
 	}
 	manifest := StoreBackupManifest{
-		Format:          StoreBackupFormat,
-		MinimumReader:   StoreBackupMinimumReader,
-		CreatedAt:       now().UTC(),
-		CaelisVersion:   version.String(),
-		GoOS:            runtime.GOOS,
-		GoArch:          runtime.GOARCH,
-		QuiesceBoundary: "host-admission-closed-and-all-producers-drained",
-		Atomicity:       "independent-component-snapshots-under-one-quiesce-boundary",
+		Format:                  StoreBackupFormat,
+		SourceFloor:             StoreBackupSourceFloor,
+		LastWriter:              StoreBackupLastWriter,
+		MinimumReaderCapability: StoreBackupReaderCapability,
+		CreatedAt:               now().UTC(),
+		CaelisVersion:           version.String(),
+		GoOS:                    runtime.GOOS,
+		GoArch:                  runtime.GOARCH,
+		QuiesceBoundary:         "host-admission-closed-and-all-producers-drained",
+		Atomicity:               "independent-component-snapshots-under-one-quiesce-boundary",
 		SecretsExcluded: []string{
 			"providers/**", "memory/**/management.token", "memory/**/steward-worker.token",
 			"runtime/**", "control/auth.token", "control/acp-ingress.token",
@@ -257,6 +268,9 @@ func addStoreBackupSource(ctx context.Context, archive *zip.Writer, source store
 			return err
 		}
 		relative = filepath.ToSlash(relative)
+		if source.kind == "session-canonical" && isSessionIndexSQLiteSidecar(relative) {
+			return fmt.Errorf("Session index SQLite sidecar %q prevents a consistent backup; recover the Session owner first", relative)
+		}
 		if (strings.HasPrefix(relative, ".") && relative != ".sessions.index.sqlite") || strings.HasSuffix(relative, ".lock") || strings.HasSuffix(relative, ".tmp") {
 			return nil
 		}
@@ -282,6 +296,10 @@ func addStoreBackupSource(ctx context.Context, archive *zip.Writer, source store
 		})
 	}
 	return components, err
+}
+
+func isSessionIndexSQLiteSidecar(relative string) bool {
+	return strings.HasPrefix(filepath.ToSlash(strings.TrimSpace(relative)), ".sessions.index.sqlite-")
 }
 
 func addStoreBackupFile(ctx context.Context, archive *zip.Writer, name, path, kind string, required bool) (StoreBackupComponent, error) {
@@ -355,7 +373,10 @@ func ReadStoreBackupManifest(input io.ReaderAt, size int64) (StoreBackupManifest
 }
 
 func validateStoreBackupManifest(manifest StoreBackupManifest) error {
-	if manifest.Format != StoreBackupFormat || !isSupportedMinimumReader(manifest.MinimumReader) {
+	if manifest.Format != StoreBackupFormat ||
+		manifest.SourceFloor != StoreBackupSourceFloor ||
+		manifest.LastWriter != StoreBackupLastWriter ||
+		manifest.MinimumReaderCapability != StoreBackupReaderCapability {
 		return ErrStoreBackupFormat
 	}
 	if manifest.Atomicity != "independent-component-snapshots-under-one-quiesce-boundary" ||
@@ -420,46 +441,6 @@ func validStoreBackupArchivePath(component StoreBackupComponent) bool {
 	default:
 		return false
 	}
-}
-
-func isSupportedMinimumReader(raw string) bool {
-	got, ok := parseStoreBackupVersion(raw)
-	if !ok {
-		return false
-	}
-	current, ok := parseStoreBackupVersion(StoreBackupMinimumReader)
-	if !ok {
-		return false
-	}
-	for index := range got {
-		if got[index] != current[index] {
-			return got[index] < current[index]
-		}
-	}
-	return true
-}
-
-func parseStoreBackupVersion(raw string) ([3]int, bool) {
-	var result [3]int
-	raw = strings.TrimPrefix(strings.TrimSpace(raw), "v")
-	parts := strings.Split(raw, ".")
-	if len(parts) != len(result) {
-		return result, false
-	}
-	for index, part := range parts {
-		if part == "" {
-			return result, false
-		}
-		value := 0
-		for _, character := range part {
-			if character < '0' || character > '9' {
-				return result, false
-			}
-			value = value*10 + int(character-'0')
-		}
-		result[index] = value
-	}
-	return result, true
 }
 
 func normalizeStoreBackupDir(storeDir string) (string, error) {

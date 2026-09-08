@@ -51,8 +51,24 @@ func checkpointStoreControlDatabase(ctx context.Context, storeDir string) error 
 			_ = database.Close()
 		}
 	}()
-	if _, err := database.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+	var busy, logFrames, checkpointedFrames int
+	if err := database.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &logFrames, &checkpointedFrames); err != nil {
 		return fmt.Errorf("checkpoint Control database for Store backup: %w", err)
+	}
+	// wal_checkpoint reports a busy reader as a result row rather than a SQL
+	// execution error. A non-empty WAL would make copying the main database an
+	// incomplete snapshot, so refuse the backup until the reader is gone and
+	// SQLite has fully checkpointed and truncated the WAL.
+	// SQLite reports (-1, -1) when the database is not in WAL mode; there is
+	// then no sidecar to include in the snapshot. A positive log count means
+	// frames remain outside the main database and is never safe to copy.
+	if busy != 0 || logFrames > 0 {
+		return fmt.Errorf(
+			"checkpoint Control database for Store backup incomplete: busy=%d log=%d checkpointed=%d",
+			busy,
+			logFrames,
+			checkpointedFrames,
+		)
 	}
 	if err := database.Close(); err != nil {
 		return fmt.Errorf("close Control database after Store backup checkpoint: %w", err)
