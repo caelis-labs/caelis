@@ -304,7 +304,7 @@ func (s *childSlot) publishRunOutputLocked(run *childRun, event output.Event) {
 	_ = observer.ObserveTaskOutput(context.Background(), event)
 }
 
-func (s *childSlot) settleInput(run *childRun, release bool, acceptedInput *output.Event) {
+func (s *childSlot) settleInput(run *childRun, release bool, acceptedInput []*output.Event) {
 	if s == nil {
 		return
 	}
@@ -315,8 +315,10 @@ func (s *childSlot) settleInput(run *childRun, release bool, acceptedInput *outp
 	s.outputQuarantined = !release
 	s.activeInputCancel = nil
 	s.mu.Unlock()
-	if release && acceptedInput != nil {
-		s.publishRunOutputLocked(run, *acceptedInput)
+	if release {
+		for _, event := range acceptedInput {
+			s.publishRunOutputLocked(run, *event)
+		}
 	}
 }
 

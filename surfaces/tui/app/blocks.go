@@ -589,10 +589,8 @@ func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	}
 	rows := append([]RenderedRow(nil), bodyRows...)
 	rows = b.compactHeightBudget.apply(b.id, rows, b.Events, b.Status, ctx)
-	if participantTurnIsTerminal(b.Status) {
-		if footer := renderParticipantTurnFooter(b, ctx); strings.TrimSpace(ansi.Strip(footer)) != "" {
-			rows = append(rows, StyledRow(b.id, footer))
-		}
+	if footer := renderParticipantTurnFooter(b, ctx); strings.TrimSpace(ansi.Strip(footer)) != "" {
+		rows = append(rows, StyledRow(b.id, footer))
 	}
 	return rows
 }

@@ -1063,6 +1063,9 @@ func TestChildInputHelperProcess(t *testing.T) {
 					SessionCapabilities: map[string]json.RawMessage{"resume": json.RawMessage(`{}`)},
 				},
 			}
+			if mode == "idle-no-steering" {
+				response.Meta = nil
+			}
 			if strings.HasPrefix(mode, "auth-") {
 				response.AuthMethods = []json.RawMessage{json.RawMessage(`{"id":"agent-login","name":"Agent login"}`)}
 			}

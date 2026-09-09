@@ -25,8 +25,8 @@ func (b *testBackend) List(_ context.Context, id string) ([]Thread, error) {
 	}
 	return []Thread{{ID: "a", SessionID: "a", Handle: "a"}, {ID: "b", SessionID: "b", Handle: "b", CanDeliver: b.deliver}}, nil
 }
-func (b *testBackend) Deliver(_ context.Context, _ string, m Message) error {
-	b.delivered = append(b.delivered, m)
+func (b *testBackend) Deliver(_ context.Context, _ string, messages []Message) error {
+	b.delivered = append(b.delivered, messages...)
 	if b.failure {
 		return errors.New("peer disconnected")
 	}
@@ -174,8 +174,8 @@ type isolatedDeliveryBackend struct {
 func (b *isolatedDeliveryBackend) List(context.Context, string) ([]Thread, error) {
 	return []Thread{{Handle: "a"}, {Handle: "b", CanDeliver: true}}, nil
 }
-func (b *isolatedDeliveryBackend) Deliver(ctx context.Context, id string, m Message) error {
-	b.started <- id + ":" + m.Text
+func (b *isolatedDeliveryBackend) Deliver(ctx context.Context, id string, messages []Message) error {
+	b.started <- id + ":" + messages[0].Text
 	if id == "blocked" {
 		<-ctx.Done()
 		b.expired <- ctx.Err()

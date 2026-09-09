@@ -1,6 +1,10 @@
 // Package collaboration owns Session-scoped Agent discovery and mailboxes.
 // Taking or dispatching a message removes it. Delivery is best effort: there
 // are no acknowledgements, automatic retries, or exactly-once guarantees.
+// Collaborator prompt slices are Control-owned instruction: they name the
+// assigned handle, reserved parent address, and role; they state that ACP
+// session/prompt is collaboration input, not a user follow-up; and they may
+// require mailbox polling when steering is unavailable.
 package collaboration
 
 import (
@@ -21,6 +25,10 @@ import (
 const MaxResponseBytes = 4 << 20
 const mailboxBatchBytes = MaxResponseBytes - (64 << 10)
 const deliveryTimeout = 10 * time.Second
+
+// ErrSessionClosed proves the owning Session permanently stopped accepting mail.
+// Backends must not use it for unavailable stores or transient discovery errors.
+var ErrSessionClosed = errors.New("collaboration Session is closed")
 
 // Identity is supplied by the Host, never by model arguments.
 type Identity struct {
@@ -50,10 +58,12 @@ type Message struct {
 
 // Backend resolves canonical membership and dispatches through the execution
 // owner. It must honor context cancellation and must not wait for the
-// recipient's work to complete.
+// recipient's work to complete. Deliver admits the complete ordered, nonempty
+// batch for one recipient as one prompt or steering operation. It must not
+// split the batch into separate Turns or retry an uncertain dispatch.
 type Backend interface {
 	List(context.Context, string) ([]Thread, error)
-	Deliver(context.Context, string, Message) error
+	Deliver(context.Context, string, []Message) error
 }
 
 // Service owns the persistent pending mailbox and process-bound credentials.
@@ -150,7 +160,15 @@ func (s *Service) Send(ctx context.Context, i Identity, to, text, replyTo string
 		return Message{}, errors.New("encoded message exceeds mailbox response budget")
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO collaboration_mailbox(session,recipient,body) VALUES(?,?,?)`, i.Session, to, string(body))
-	return m, err
+	if err != nil {
+		return m, err
+	}
+	// A close may have raced membership validation and an earlier cleanup.
+	// Rechecking after insertion prevents that cleanup from stranding this row.
+	if _, err := s.backend.List(ctx, i.Session); errors.Is(err, ErrSessionClosed) {
+		return m, errors.Join(err, s.purgeClosedSession(context.WithoutCancel(ctx), i.Session))
+	}
+	return m, nil
 }
 
 // Receive atomically removes a bounded batch from the caller's mailbox.
@@ -302,6 +320,9 @@ func (s *Service) pendingRecipients(ctx context.Context) ([]Identity, error) {
 
 func (s *Service) deliverRecipient(ctx context.Context, i Identity) error {
 	threads, err := s.backend.List(ctx, i.Session)
+	if errors.Is(err, ErrSessionClosed) {
+		return s.purgeClosedSession(ctx, i.Session)
+	}
 	if err != nil {
 		return err
 	}
@@ -309,18 +330,25 @@ func (s *Service) deliverRecipient(ctx context.Context, i Identity) error {
 		if t.Handle != i.Member || !t.CanDeliver {
 			continue
 		}
-		messages, err := s.take(ctx, i, 1)
+		// Automatic admission drains the pending encoded-byte-bounded batch;
+		// the pull API's message-count limit must not create extra Turns.
+		messages, err := s.take(ctx, i, -1)
 		if err != nil {
 			return err
 		}
-		for _, m := range messages {
-			// The message is already consumed. Timeout does not prove non-execution
-			// and never causes a retry or a second mailbox insertion.
-			if err := s.backend.Deliver(ctx, i.Session, m); err != nil {
-				return fmt.Errorf("deliver message %s (removed; remote outcome may be unknown): %w", m.ID, err)
+		if len(messages) > 0 {
+			// The entire bounded batch is consumed before its one dispatch.
+			// An ambiguous outcome never reinserts any member of the batch.
+			if err := s.backend.Deliver(ctx, i.Session, messages); err != nil {
+				return fmt.Errorf("deliver %d messages (removed; remote outcome may be unknown): %w", len(messages), err)
 			}
 		}
 		break
 	}
 	return nil
+}
+
+func (s *Service) purgeClosedSession(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM collaboration_mailbox WHERE session=?`, id)
+	return err
 }

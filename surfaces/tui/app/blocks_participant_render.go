@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"strings"
+	"time"
 
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -94,7 +95,7 @@ func participantTurnIsTerminal(state string) bool {
 }
 
 func renderParticipantTurnFooter(b *ParticipantTurnBlock, ctx BlockRenderContext) string {
-	label := participantTurnFooterLabel(b)
+	label := participantTurnFooterLabel(b, ctx.Now)
 	if label == "" {
 		return ""
 	}
@@ -103,15 +104,24 @@ func renderParticipantTurnFooter(b *ParticipantTurnBlock, ctx BlockRenderContext
 }
 
 func participantTurnHasFooter(b *ParticipantTurnBlock) bool {
-	if participantTurnFooterLabel(b) == "" {
+	if participantTurnFooterLabel(b, time.Time{}) == "" {
 		return false
 	}
 	return strings.TrimSpace(b.Actor) != "" || len(b.Events) > 0
 }
 
-func participantTurnFooterLabel(b *ParticipantTurnBlock) string {
-	if b == nil || !participantTurnIsTerminal(b.Status) || b.StartedAt.IsZero() || b.EndedAt.IsZero() || !b.EndedAt.After(b.StartedAt) {
+func participantTurnFooterLabel(b *ParticipantTurnBlock, now time.Time) string {
+	if b == nil || b.StartedAt.IsZero() {
 		return ""
 	}
-	return formatTurnDuration(b.EndedAt.Sub(b.StartedAt))
+	if participantTurnIsTerminal(b.Status) {
+		if b.EndedAt.IsZero() || !b.EndedAt.After(b.StartedAt) {
+			return ""
+		}
+		return formatTurnDuration(b.EndedAt.Sub(b.StartedAt))
+	}
+	if now.IsZero() || !now.After(b.StartedAt) {
+		return ""
+	}
+	return formatTurnDuration(now.Sub(b.StartedAt))
 }

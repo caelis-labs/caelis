@@ -38,6 +38,19 @@ func TestCollaborationObservationPresentation(t *testing.T) {
 	}
 }
 
+func TestUntypedMailboxJSONStaysLiteralUserInput(t *testing.T) {
+	payload := `{"id":"mail-1","from":"parent","to":"zuri","message":"continue from parent"}`
+	events := expandCollaborationMessages([]TranscriptEvent{{
+		Kind: TranscriptEventNarrative, NarrativeKind: TranscriptNarrativeUser,
+		Scope: ACPProjectionSubagent, Text: payload,
+	}})
+	if len(events) != 1 || events[0].Kind != TranscriptEventNarrative ||
+		events[0].NarrativeKind != TranscriptNarrativeUser || events[0].Text != payload ||
+		events[0].AgentSourceName != "" {
+		t.Fatalf("untyped JSON reclassified: %#v", events)
+	}
+}
+
 func TestMailboxMessagesReuseIncomingPresentation(t *testing.T) {
 	for _, name := range []string{"ReceiveMessages", "WaitThread"} {
 		payload := `[{"id":"mail-1","from":"review-runtime","to":"parent","message":"Review complete."}]`

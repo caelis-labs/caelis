@@ -87,6 +87,9 @@ type RunRequest struct {
 	Input        string              `json:"input,omitempty"`
 	DisplayInput string              `json:"display_input,omitempty"`
 	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
+	// Inputs admits an ordered Agent-communication batch as one Turn. When set,
+	// singular Input, DisplayInput, ContentParts, and InputActor must be empty.
+	Inputs []AgentCommunicationInput `json:"-"`
 	// InputActor identifies who authored Input. Agent communication requires a
 	// trusted source identity; ordinary conversation defaults to the real user.
 	InputActor session.ActorRef `json:"-"`

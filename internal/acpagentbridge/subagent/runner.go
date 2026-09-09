@@ -369,7 +369,7 @@ func (r *Runner) dispatchInitialPrompt(
 	dispatchDone chan struct{},
 	promptText string,
 ) {
-	prompt := acputil.BuildPromptParts(promptText, nil)
+	prompt := r.withCollaborationPromptSlice(run, acputil.BuildPromptParts(promptText, nil))
 	responseCtx, cancelResponse := context.WithCancel(producerCtx)
 	prepared, err := run.client.PreparePromptParts(run.anchor.SessionID, prompt, nil)
 	fence := newPromptAuthRetryFence(slot, dispatchDone, cancelResponse)

@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
@@ -111,6 +112,7 @@ type BlockRenderContext struct {
 	AnimationsEnabled     bool         // whether transient block animation is allowed
 	ObserveGlamourRender  func()
 	ObserveInlineMarkdown func()
+	Now                   time.Time
 }
 
 // ---------------------------------------------------------------------------

@@ -90,6 +90,14 @@ func (r *Runner) BindChildEndpoint(
 	return nil
 }
 
+// SubmitChildInputBatch admits the ordered messages as one prompt or steering operation.
+func (r *Runner) SubmitChildInputBatch(ctx context.Context, req agent.ChildInputRequest) (agent.ChildInputResult, error) {
+	if len(req.Messages) == 0 {
+		return agent.ChildInputResult{}, errorcode.New(errorcode.InvalidArgument, "Input batch is empty")
+	}
+	return r.SubmitChildInput(ctx, req)
+}
+
 // SubmitChildInput routes trusted Agent communication to one exact child
 // endpoint. It never claims or mutates a Task operation; Task observation is
 // driven only by child activity output.
@@ -104,8 +112,16 @@ func (r *Runner) SubmitChildInput(ctx context.Context, raw agent.ChildInputReque
 	if err := validateChildEndpointRef(req.Target); err != nil {
 		return agent.ChildInputResult{}, err
 	}
-	if err := session.ValidateAgentCommunicationActor(req.Source); err != nil {
-		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.InvalidArgument, "Source Agent identity is invalid", err)
+	if len(req.Messages) != 0 && (session.ActorRefHasIdentity(req.Source) || req.Input != "" || req.DisplayInput != "" || len(req.ContentParts) != 0) {
+		return agent.ChildInputResult{}, errorcode.New(errorcode.InvalidArgument, "Batch and singular input cannot be combined")
+	}
+	for _, message := range childInputMessages(req) {
+		if err := session.ValidateAgentCommunicationActor(message.Source); err != nil {
+			return agent.ChildInputResult{}, errorcode.Wrap(errorcode.InvalidArgument, "Source Agent identity is invalid", err)
+		}
+		if message.Input == "" && len(message.ContentParts) == 0 {
+			return agent.ChildInputResult{}, errorcode.New(errorcode.InvalidArgument, "Message content is required")
+		}
 	}
 	prompt := buildAgentCommunicationPrompt(req)
 	if len(prompt) == 0 {
@@ -153,13 +169,40 @@ func (r *Runner) SubmitChildInput(ctx context.Context, raw agent.ChildInputReque
 	return r.submitIdleChildInput(ctx, slot, run, req, prompt)
 }
 
+func childInputMessages(req agent.ChildInputRequest) []agent.AgentCommunicationInput {
+	if len(req.Messages) > 0 {
+		return req.Messages
+	}
+	return []agent.AgentCommunicationInput{{Source: req.Source, Input: req.Input, DisplayInput: req.DisplayInput, ContentParts: req.ContentParts}}
+}
+
+func childInputContainsImage(req agent.ChildInputRequest) bool {
+	for _, message := range childInputMessages(req) {
+		if acputil.ContentPartsContainImage(message.ContentParts) {
+			return true
+		}
+	}
+	return false
+}
+
 func buildAgentCommunicationPrompt(req agent.ChildInputRequest) []json.RawMessage {
-	message := model.MessageFromTextAndContentParts(model.RoleUser, req.Input, req.ContentParts)
-	parts := model.ContentPartsFromParts(message.Parts)
-	parts = append([]model.ContentPart{{
-		Type: model.ContentPartText, Text: session.AgentCommunicationPromptHeader(req.Source),
-	}}, parts...)
+	var parts []model.ContentPart
+	for _, input := range childInputMessages(req) {
+		message := model.MessageFromTextAndContentParts(model.RoleUser, input.Input, input.ContentParts)
+		parts = append(parts, model.ContentPart{Type: model.ContentPartText, Text: session.AgentCommunicationPromptHeader(input.Source)})
+		parts = append(parts, model.ContentPartsFromParts(message.Parts)...)
+	}
 	return acputil.BuildPromptParts("", parts)
+}
+
+func (r *Runner) acceptedChildInputOutputs(slot *childSlot, run *childRun, req agent.ChildInputRequest, activityID string) []*output.Event {
+	var events []*output.Event
+	for _, message := range childInputMessages(req) {
+		if event := r.acceptedChildInputOutput(slot, run, agent.ChildInputRequest{Source: message.Source, Input: message.Input, DisplayInput: message.DisplayInput, ContentParts: message.ContentParts}, activityID); event != nil {
+			events = append(events, event)
+		}
+	}
+	return events
 }
 
 // acceptedChildInputOutput constructs the recipient-visible standard ACP input
@@ -259,7 +302,7 @@ func (r *Runner) submitActiveChildInputLocked(
 			targetHandle,
 		))
 	}
-	if acputil.ContentPartsContainImage(req.ContentParts) && !supportsImages {
+	if childInputContainsImage(req) && !supportsImages {
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent does not accept image input.")
 	}
 	rpcCtx, cancelRPC := context.WithCancel(ctx)
@@ -272,7 +315,7 @@ func (r *Runner) submitActiveChildInputLocked(
 	run.inputActor = session.CloneActorRef(req.Source)
 	run.suppressInputEcho = true
 	run.mu.Unlock()
-	acceptedInput := r.acceptedChildInputOutput(slot, run, req, activityID)
+	acceptedInput := r.acceptedChildInputOutputs(slot, run, req, activityID)
 	response, err := r.callChildSteering(rpcCtx, run, prompt)
 	cancelRPC()
 	if err != nil {
@@ -522,10 +565,11 @@ func (r *Runner) submitIdleChildInput(
 		slot.opMu.Unlock()
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, "Target Agent messaging transport is unavailable")
 	}
-	if acputil.ContentPartsContainImage(req.ContentParts) && !supportsImages {
+	if childInputContainsImage(req) && !supportsImages {
 		slot.opMu.Unlock()
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent does not accept image input.")
 	}
+	prompt = r.withCollaborationPromptSlice(run, prompt)
 	prepared, err := acpClient.PreparePromptParts(sessionID, prompt, nil)
 	if err != nil {
 		slot.opMu.Unlock()
@@ -567,7 +611,7 @@ func (r *Runner) submitIdleChildInput(
 	run.mu.Unlock()
 	dispatchCtx, cancelDispatch := context.WithCancel(ctx)
 	slot.beginActivity(activityID, run)
-	acceptedInput := r.acceptedChildInputOutput(slot, run, req, activityID)
+	acceptedInput := r.acceptedChildInputOutputs(slot, run, req, activityID)
 	dispatchDone := slot.beginPromptDispatch(cancelDispatch)
 	fence := newPromptAuthRetryFence(slot, dispatchDone, cancelResponse)
 	if observeErr := prepared.ObserveAuthRequired(fence.observeAuthRequired); observeErr != nil {

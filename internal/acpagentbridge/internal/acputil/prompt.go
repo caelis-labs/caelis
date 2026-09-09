@@ -61,6 +61,19 @@ func marshalPromptImage(part model.ContentPart) json.RawMessage {
 	return raw
 }
 
+// PrefixTextBlock prepends one Control-owned text part. Empty text or an empty
+// prompt is a no-op. Matching prompt bytes never suppress the injection.
+func PrefixTextBlock(prompt []json.RawMessage, text string) []json.RawMessage {
+	text = strings.TrimSpace(text)
+	if text == "" || len(prompt) == 0 {
+		return prompt
+	}
+	raw, _ := json.Marshal(acpsdk.TextBlock(text))
+	out := make([]json.RawMessage, 0, len(prompt)+1)
+	out = append(out, raw)
+	return append(out, prompt...)
+}
+
 // ContentPartsContainImage reports whether prompt content requires ACP image
 // support.
 func ContentPartsContainImage(parts []model.ContentPart) bool {

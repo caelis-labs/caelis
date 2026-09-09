@@ -44,7 +44,7 @@ func (r *Runtime) SubmitChildInput(
 	if err != nil {
 		return agent.ChildInputResult{}, err
 	}
-	return r.submitChildInputLocked(ctx, ref, active, command, source, sourceBinding)
+	return r.submitChildInputLocked(ctx, ref, active, command, source, sourceBinding, nil)
 }
 
 // SubmitParticipantInput admits one child-originated input against the exact
@@ -100,7 +100,7 @@ func (r *Runtime) SubmitParticipantInput(
 	_, err = r.submitChildInputLocked(ctx, ref, active, agent.ChildInputCommand{
 		Target: input.Target, Source: source, Input: input.Input,
 		DisplayInput: input.DisplayInput, ContentParts: input.ContentParts,
-	}, source, sourceBinding)
+	}, source, sourceBinding, nil)
 	return err
 }
 
@@ -111,6 +111,7 @@ func (r *Runtime) submitChildInputLocked(
 	command agent.ChildInputCommand,
 	source session.ActorRef,
 	sourceBinding *session.ParticipantBinding,
+	messages []agent.AgentCommunicationInput,
 ) (agent.ChildInputResult, error) {
 	binding, err := resolveChildInputBinding(active, command.Target)
 	if err != nil {
@@ -162,9 +163,17 @@ func (r *Runtime) submitChildInputLocked(
 	if !ok || runner == nil {
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent cannot receive follow-up messages")
 	}
-	result, err := runner.SubmitChildInput(ctx, agent.ChildInputRequest{
+	submit := runner.SubmitChildInput
+	if len(messages) > 0 {
+		batchRunner, ok := task.runner.(agent.ChildInputBatchRunner)
+		if !ok {
+			return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent cannot receive batched messages")
+		}
+		submit = batchRunner.SubmitChildInputBatch
+	}
+	result, err := submit(ctx, agent.ChildInputRequest{
 		Target: target, Source: source, ActivityID: activityID, Output: outputObserver, Completion: completion, Input: command.Input,
-		DisplayInput: command.DisplayInput, ContentParts: command.ContentParts,
+		DisplayInput: command.DisplayInput, ContentParts: command.ContentParts, Messages: messages,
 	})
 	if result.StartedActivity || errorcode.Is(err, errorcode.UnknownOutcome) {
 		if sink, ok := completion.(subagentCompletionSink); ok && sink.activity != nil {

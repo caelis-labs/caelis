@@ -151,6 +151,53 @@ func routeHostedChildInputToParent(
 	}
 }
 
+func routeHostedChildInputBatchToParent(
+	ctx context.Context,
+	composition *runtimeComposition,
+	active session.Session,
+	messages []agent.AgentCommunicationInput,
+) error {
+	if composition == nil || composition.currentGateway() == nil {
+		return fmt.Errorf("gatewayapp: parent Agent input gateway is unavailable")
+	}
+	messages = agent.CloneAgentCommunicationInputs(messages)
+	if len(messages) == 0 {
+		return errorcode.New(errorcode.InvalidArgument, "gatewayapp: parent Agent input batch is empty")
+	}
+	for _, item := range messages {
+		if strings.TrimSpace(item.Input) == "" && len(item.ContentParts) == 0 {
+			return errorcode.New(errorcode.InvalidArgument, "gatewayapp: parent Agent input requires content")
+		}
+		if err := session.ValidateAgentCommunicationActor(item.Source); err != nil {
+			return errorcode.Wrap(errorcode.InvalidArgument, "gatewayapp: invalid parent Agent input source", err)
+		}
+	}
+	gw := composition.currentGateway()
+	for {
+		if turn, ok := gw.ActiveTurn(active.SessionID); ok {
+			if waitErr := gw.WaitActiveTurnChange(ctx, turn); waitErr != nil {
+				return waitErr
+			}
+			continue
+		}
+		observer, releaseTurn := composition.controlTurnObserver(active.SessionRef)
+		result, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
+			SessionRef:     active.SessionRef,
+			RuntimeContext: composition.controlRuntimeContext(context.Background(), active),
+			InputKind:      kernel.SubmissionKindAgentCommunication,
+			Inputs:         messages, Surface: "agent-input",
+			Observer: observer,
+		})
+		retainControlTurn(result.Handle, releaseTurn)
+		if err == nil {
+			return nil
+		}
+		if !isHostedChildInputSelectionRace(err) {
+			return err
+		}
+	}
+}
+
 func isHostedChildInputSelectionRace(err error) bool {
 	if err == nil {
 		return false

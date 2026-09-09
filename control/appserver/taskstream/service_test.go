@@ -232,6 +232,150 @@ func TestProjectRecordProjectsHistoricalTurnBoundaryWithoutTaskTerminalTransport
 	}
 }
 
+func TestProjectRecordUsesSubagentTurnIdentityNotBindingTerminal(t *testing.T) {
+	t.Parallel()
+
+	at := time.Unix(310, 0)
+	record := controltaskstream.Record{
+		Cursor: "cursor-live", Generation: "generation-2", Sequence: 8,
+		Task: controltaskstream.TaskDescriptor{
+			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
+			State: task.StateRunning, Running: true, ActivityID: "activity-2", CurrentTurnID: "task-1:2",
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
+		},
+		Frame: &controltaskstream.Frame{
+			TerminalID: "subagent-task-1",
+			ActivityID: "activity-2",
+			UpdatedAt:  at,
+			Event: &session.Event{
+				ID: "child-input-2", Type: session.EventTypeContext, Visibility: session.VisibilityUIOnly,
+				Time: at, Text: "continue from parent",
+				Actor: session.ActorRef{Kind: session.ActorKindController, ID: "parent", Name: "parent"},
+				Scope: &session.EventScope{
+					Participant: session.ParticipantRef{
+						ID: "task-1", Kind: session.ParticipantKindSubagent, DelegationID: "task-1",
+					},
+				},
+				Protocol: eventProtocolPtrForTest(session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: "continue from parent"})),
+			},
+		},
+	}
+
+	projected := projectRecord(record)
+	if len(projected) != 1 {
+		t.Fatalf("projectRecord() = %#v, want one parent Agent communication", projected)
+	}
+	envelope := projected[0]
+	if envelope.TurnID != "activity-2" {
+		t.Fatalf("live child TurnID = %q, want record-local ActivityID rather than binding terminal or latest CurrentTurnID", envelope.TurnID)
+	}
+	if envelope.AgentCommunicationSource == nil || envelope.AgentCommunicationSource.ID != "parent" {
+		t.Fatalf("live child Agent communication = %#v", envelope)
+	}
+}
+
+func TestProjectRecordKeepsEarlierActivityTurnWhenLatestCurrentTurnIDChanges(t *testing.T) {
+	t.Parallel()
+
+	parent := controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"}
+	latest := controltaskstream.TaskDescriptor{
+		SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
+		State: task.StateRunning, Running: true, CurrentTurnID: "task-1:2",
+		ParentTool: parent,
+	}
+	first := latest
+	first.ActivityID = "activity-1"
+	second := latest
+	second.ActivityID = "activity-2"
+	at := time.Unix(400, 0)
+	event := func(id, text string) *session.Event {
+		return &session.Event{
+			ID: id, Type: session.EventTypeContext, Visibility: session.VisibilityUIOnly,
+			Time: at, Text: text,
+			Actor: session.ActorRef{Kind: session.ActorKindController, ID: "parent", Name: "parent"},
+			Scope: &session.EventScope{
+				Participant: session.ParticipantRef{
+					ID: "task-1", Kind: session.ParticipantKindSubagent, DelegationID: "task-1",
+				},
+			},
+			Protocol: eventProtocolPtrForTest(session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: text})),
+		}
+	}
+	firstEnv := projectRecord(controltaskstream.Record{
+		Task: first,
+		Frame: &controltaskstream.Frame{
+			TerminalID: "subagent-task-1", ActivityID: "activity-1", UpdatedAt: at,
+			Event: event("input-1", "first turn"),
+		},
+	})
+	secondEnv := projectRecord(controltaskstream.Record{
+		Task: second,
+		Frame: &controltaskstream.Frame{
+			TerminalID: "subagent-task-1", ActivityID: "activity-2", UpdatedAt: at.Add(time.Second),
+			Event: event("input-2", "second turn"),
+		},
+	})
+	if len(firstEnv) != 1 || firstEnv[0].TurnID != "activity-1" {
+		t.Fatalf("first activity TurnID = %#v, want activity-1", firstEnv)
+	}
+	if len(secondEnv) != 1 || secondEnv[0].TurnID != "activity-2" {
+		t.Fatalf("second activity TurnID = %#v, want activity-2", secondEnv)
+	}
+}
+
+func TestProjectRecordFallbackTerminalSharesPrecedingContentTurnID(t *testing.T) {
+	t.Parallel()
+
+	at := time.Unix(520, 0)
+	parent := controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"}
+	taskDesc := controltaskstream.TaskDescriptor{
+		SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
+		State: task.StateCompleted, ActivityID: "activity-2", CurrentTurnID: "task-1:2",
+		ParentTool: parent,
+	}
+	participant := session.ParticipantRef{
+		ID: "task-1", Kind: session.ParticipantKindSubagent, DelegationID: "task-1",
+	}
+	content := projectRecord(controltaskstream.Record{
+		Task: taskDesc,
+		Frame: &controltaskstream.Frame{
+			TerminalID: "task-1:2", ActivityID: "activity-2", UpdatedAt: at,
+			Event: &session.Event{
+				ID: "content-1", Type: session.EventTypeAssistant, Text: "follow-up", Time: at,
+				Scope: &session.EventScope{TurnID: "task-1:2", Participant: participant},
+				Protocol: &session.EventProtocol{
+					Method: session.ProtocolMethodSessionUpdate,
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+						Content:       session.ProtocolTextContent("follow-up"),
+					},
+				},
+			},
+		},
+	})
+	terminal := projectRecord(controltaskstream.Record{
+		Task: taskDesc,
+		Frame: &controltaskstream.Frame{
+			TerminalID: "task-1:2", ActivityID: "activity-2", State: string(task.StateCompleted),
+			Closed: true, UpdatedAt: at.Add(4 * time.Second),
+			Event: &session.Event{
+				Type: session.EventTypeLifecycle, Time: at.Add(4 * time.Second),
+				Scope:     &session.EventScope{TurnID: "task-1:2", Participant: participant},
+				Lifecycle: &session.EventLifecycle{Status: string(task.StateCompleted)},
+			},
+		},
+	})
+	if len(content) != 1 || len(terminal) != 1 {
+		t.Fatalf("projected fallback = content %#v terminal %#v", content, terminal)
+	}
+	if content[0].TurnID != "task-1:2" || terminal[0].TurnID != content[0].TurnID {
+		t.Fatalf("terminal TurnID = %q, content TurnID = %q, want the same Scope.TurnID", terminal[0].TurnID, content[0].TurnID)
+	}
+	if terminal[0].Kind != eventstream.KindLifecycle {
+		t.Fatalf("terminal envelope = %#v, want lifecycle", terminal[0])
+	}
+}
+
 func TestProjectRecordMountsRunCommandOutputOnParentTerminal(t *testing.T) {
 	t.Parallel()
 

@@ -2130,8 +2130,10 @@ func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T
 	if strings.Contains(overlay, "loaded child settings") {
 		t.Fatalf("standard ACP read result was not folded as exploration activity:\n%s", overlay)
 	}
-	if model.subagentOutputOverlay.geometry.totalRows != 1 {
-		t.Fatalf("standard ACP read did not share the compact exploration renderer:\n%s", overlay)
+	// The tool stays on one compact exploration row; the running Turn owns
+	// the second row for its live elapsed footer.
+	if model.subagentOutputOverlay.geometry.totalRows != 2 {
+		t.Fatalf("standard ACP read did not retain one compact row plus its Turn footer:\n%s", overlay)
 	}
 
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{

@@ -361,7 +361,7 @@ func (s *service) projectSpoolRecord(entry *task.Entry, raw streamspool.Record, 
 	if recorded.ActivityID != "" {
 		descriptor.ActivityID = strings.TrimSpace(recorded.ActivityID)
 	}
-	if recorded.TerminalID != "" {
+	if recorded.TerminalID != "" && descriptor.Kind != task.KindSubagent {
 		descriptor.CurrentTurnID = strings.TrimSpace(recorded.TerminalID)
 	}
 	event := recorded.Event

@@ -142,6 +142,7 @@ func (g *Gateway) resolveBeginTurn(ctx context.Context, activeSession session.Se
 				Input:        req.Input,
 				DisplayInput: strings.TrimSpace(req.DisplayInput),
 				ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
+				Inputs:       agent.CloneAgentCommunicationInputs(req.Inputs),
 				InputActor:   session.CloneActorRef(req.InputActor),
 			},
 		}, nil
@@ -189,6 +190,9 @@ func (g *Gateway) runTurn(
 	}
 	if runReq.InputActor.Kind == "" && strings.TrimSpace(runReq.InputActor.ID) == "" && strings.TrimSpace(runReq.InputActor.Name) == "" {
 		runReq.InputActor = req.InputActor
+	}
+	if len(runReq.Inputs) == 0 && len(req.Inputs) > 0 {
+		runReq.Inputs = agent.CloneAgentCommunicationInputs(req.Inputs)
 	}
 	normalizeRunRequestPolicyProfile(&runReq)
 	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {

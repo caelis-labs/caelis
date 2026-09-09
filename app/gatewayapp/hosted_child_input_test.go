@@ -73,6 +73,130 @@ func TestHostedChildInputStartsIdleParentTurnWithTrustedActor(t *testing.T) {
 	}
 }
 
+func TestHostedChildInputBatchStartsIdleParentTurnWithTrustedSources(t *testing.T) {
+	provider := newHostedChildInputTestProvider(t, false)
+	host := newHostedChildInputTestStack(t, provider)
+	parent, _, _ := newHostedChildInputTestTopology(t, host, "batch-idle")
+	second := addHostedChildParticipant(t, host, parent, "batch-idle-b", "zenith")
+	parent = hostedChildReloadSession(t, host, parent.SessionRef)
+	orbit := hostedChildBinding(t, parent, "child-agent-batch-idle")
+	zenith := hostedChildBinding(t, parent, second.ID)
+	parentRuntime := activateSessionRuntime(t, host, parent.SessionID)
+
+	err := parentRuntime.instance.engine.SubmitAgentInputBatch(
+		context.Background(),
+		parent.SessionRef,
+		agent.AgentInputParent,
+		[]agent.AgentInputBatchEntry{
+			{Message: agent.AgentCommunicationInput{Input: "from orbit"}, Participant: &orbit},
+			{Message: agent.AgentCommunicationInput{Input: "from zenith"}, Participant: &zenith},
+		},
+		func(ctx context.Context, current session.Session, messages []agent.AgentCommunicationInput) error {
+			return routeHostedChildInputBatchToParent(ctx, &parentRuntime.instance.runtimeComposition, current, messages)
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := waitHostedChildInputEvent(t, host, parent.SessionRef, "from orbit")
+	secondEvent := waitHostedChildInputEvent(t, host, parent.SessionRef, "from zenith")
+	assertHostedChildInputEvent(t, first)
+	assertHostedChildInputEvent(t, secondEvent)
+	if first.Actor.ID != orbit.ID || secondEvent.Actor.ID != zenith.ID {
+		t.Fatalf("durable sources = (%#v, %#v), want orbit then zenith", first.Actor, secondEvent.Actor)
+	}
+	if first.Scope == nil || secondEvent.Scope == nil || first.Scope.TurnID != secondEvent.Scope.TurnID {
+		t.Fatalf("batch used different Turns: (%#v, %#v)", first.Scope, secondEvent.Scope)
+	}
+	waitHostedChildParentIdle(t, host, parent.SessionID)
+	if got := provider.CallCount(); got != 1 {
+		t.Fatalf("model calls = %d, want one follow-up Turn", got)
+	}
+	payload := string(provider.LastMessages())
+	if !strings.Contains(payload, "from orbit") || !strings.Contains(payload, "from zenith") ||
+		!strings.Contains(payload, "orbit") || !strings.Contains(payload, "zenith") {
+		t.Fatalf("model request = %s, want both ordered source-attributed messages", payload)
+	}
+}
+
+func TestHostedChildInputBatchWaitsForActiveParentBeforeIdleTurn(t *testing.T) {
+	provider := newHostedChildInputTestProvider(t, true)
+	host := newHostedChildInputTestStack(t, provider)
+	parent, _, _ := newHostedChildInputTestTopology(t, host, "batch-wait")
+	second := addHostedChildParticipant(t, host, parent, "batch-wait-b", "zenith")
+	parent = hostedChildReloadSession(t, host, parent.SessionRef)
+	orbit := hostedChildBinding(t, parent, "child-agent-batch-wait")
+	zenith := hostedChildBinding(t, parent, second.ID)
+
+	runDone := make(chan error, 1)
+	go func() {
+		_, err := runHeadlessOnceForGatewayAppTest(context.Background(), host, parent, "", "initial parent input", headless.Options{})
+		runDone <- err
+	}()
+	select {
+	case <-provider.firstRequest:
+	case <-time.After(5 * time.Second):
+		t.Fatal("parent model request did not start")
+	}
+	firstPayload := string(provider.LastMessages())
+	parentRuntime := activateSessionRuntime(t, host, parent.SessionID)
+	routed := make(chan error, 1)
+	go func() {
+		routed <- parentRuntime.instance.engine.SubmitAgentInputBatch(
+			context.Background(),
+			parent.SessionRef,
+			agent.AgentInputParent,
+			[]agent.AgentInputBatchEntry{
+				{Message: agent.AgentCommunicationInput{Input: "idle from orbit"}, Participant: &orbit},
+				{Message: agent.AgentCommunicationInput{Input: "idle from zenith"}, Participant: &zenith},
+			},
+			func(ctx context.Context, current session.Session, messages []agent.AgentCommunicationInput) error {
+				return routeHostedChildInputBatchToParent(ctx, &parentRuntime.instance.runtimeComposition, current, messages)
+			},
+		)
+	}()
+	select {
+	case err := <-routed:
+		t.Fatalf("batch returned while the parent Turn still owned admission: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	if strings.Contains(firstPayload, "idle from orbit") || strings.Contains(firstPayload, "idle from zenith") {
+		t.Fatalf("active Turn received bulk mail: %s", firstPayload)
+	}
+	close(provider.releaseFirst)
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("parent Turn did not complete")
+	}
+	if err := <-routed; err != nil {
+		t.Fatal(err)
+	}
+	first := waitHostedChildInputEvent(t, host, parent.SessionRef, "idle from orbit")
+	secondEvent := waitHostedChildInputEvent(t, host, parent.SessionRef, "idle from zenith")
+	assertHostedChildInputEvent(t, first)
+	assertHostedChildInputEvent(t, secondEvent)
+	if first.Actor.ID != orbit.ID || secondEvent.Actor.ID != zenith.ID {
+		t.Fatalf("durable sources = (%#v, %#v), want orbit then zenith", first.Actor, secondEvent.Actor)
+	}
+	if first.Scope == nil || secondEvent.Scope == nil || first.Scope.TurnID != secondEvent.Scope.TurnID {
+		t.Fatalf("batch used different Turns: (%#v, %#v)", first.Scope, secondEvent.Scope)
+	}
+	waitHostedChildParentIdle(t, host, parent.SessionID)
+	if got := provider.CallCount(); got != 2 {
+		t.Fatalf("model calls = %d, want original Turn then one idle batch Turn", got)
+	}
+	payload := string(provider.LastMessages())
+	orbitAt := strings.Index(payload, "idle from orbit")
+	zenithAt := strings.Index(payload, "idle from zenith")
+	if orbitAt < 0 || zenithAt < 0 || zenithAt < orbitAt {
+		t.Fatalf("idle batch prompt = %s, want orbit then zenith", payload)
+	}
+}
+
 func TestHostedChildInputDetachedSourceDoesNotPersistParentContext(t *testing.T) {
 	provider := newHostedChildInputTestProvider(t, false)
 	host := newHostedChildInputTestStack(t, provider)
@@ -140,6 +264,78 @@ func TestHostedChildInputSubmitsToExactActiveParentTurn(t *testing.T) {
 	}
 }
 
+func TestHostedChildInputBatchRejectsEmptyOrUntrustedAdmission(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	composition, active, runtime := newHostedChildRouteFixture(t, ctx)
+	source := session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@child"}
+
+	if err := routeHostedChildInputBatchToParent(ctx, composition, active, nil); !errorcode.Is(err, errorcode.InvalidArgument) {
+		t.Fatalf("empty batch error = %v, want invalid argument", err)
+	}
+	if err := routeHostedChildInputBatchToParent(ctx, composition, active, []agent.AgentCommunicationInput{
+		{Source: source, Input: "ok"},
+		{Source: source},
+	}); !errorcode.Is(err, errorcode.InvalidArgument) {
+		t.Fatalf("empty member error = %v, want invalid argument", err)
+	}
+	if err := routeHostedChildInputBatchToParent(ctx, composition, active, []agent.AgentCommunicationInput{
+		{Source: session.ActorRef{Kind: session.ActorKindUser, ID: "user-1", Name: "user"}, Input: "nope"},
+	}); !errorcode.Is(err, errorcode.InvalidArgument) {
+		t.Fatalf("user source error = %v, want invalid argument", err)
+	}
+	select {
+	case req := <-runtime.requests:
+		t.Fatalf("rejected batch started a parent Turn: %#v", req)
+	default:
+	}
+}
+
+func TestHostedChildInputBatchDetachedMemberDoesNotAdmitPartialParentTurn(t *testing.T) {
+	provider := newHostedChildInputTestProvider(t, false)
+	host := newHostedChildInputTestStack(t, provider)
+	parent, _, _ := newHostedChildInputTestTopology(t, host, "batch-partial")
+	second := addHostedChildParticipant(t, host, parent, "batch-partial-b", "zenith")
+	parent = hostedChildReloadSession(t, host, parent.SessionRef)
+	orbit := hostedChildBinding(t, parent, "child-agent-batch-partial")
+	zenith := hostedChildBinding(t, parent, second.ID)
+	if _, err := host.composition.sessions.RemoveParticipant(context.Background(), session.RemoveParticipantRequest{
+		SessionRef: parent.SessionRef, ParticipantID: zenith.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	parentRuntime := activateSessionRuntime(t, host, parent.SessionID)
+	err := parentRuntime.instance.engine.SubmitAgentInputBatch(
+		context.Background(),
+		parent.SessionRef,
+		agent.AgentInputParent,
+		[]agent.AgentInputBatchEntry{
+			{Message: agent.AgentCommunicationInput{Input: "from orbit"}, Participant: &orbit},
+			{Message: agent.AgentCommunicationInput{Input: "from detached zenith"}, Participant: &zenith},
+		},
+		func(ctx context.Context, current session.Session, messages []agent.AgentCommunicationInput) error {
+			return routeHostedChildInputBatchToParent(ctx, &parentRuntime.instance.runtimeComposition, current, messages)
+		},
+	)
+	if !errorcode.Is(err, errorcode.PermissionDenied) {
+		t.Fatalf("SubmitAgentInputBatch() error = %v, want permission denied for detached member", err)
+	}
+	events, err := host.composition.sessions.Events(context.Background(), session.EventsRequest{SessionRef: parent.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event != nil && session.EventTypeOf(event) == session.EventTypeContext {
+			t.Fatalf("partial batch persisted parent Context event: %#v", event)
+		}
+	}
+	if got := provider.CallCount(); got != 0 {
+		t.Fatalf("partial batch triggered %d parent model calls", got)
+	}
+}
+
 func TestHostedChildInputWaitsForClosingParentBeforeStartingIdleTurn(t *testing.T) {
 	t.Parallel()
 
@@ -201,6 +397,27 @@ func TestHostedChildInputWaitsForClosingParentBeforeStartingIdleTurn(t *testing.
 	}
 }
 
+func newHostedChildRouteFixture(t *testing.T, ctx context.Context) (*runtimeComposition, session.Session, *hostedChildHandoffRuntime) {
+	t.Helper()
+	sessions := sessionmemory.NewStore(sessionmemory.Config{})
+	active, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "owner", PreferredSessionID: "admission-parent",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &hostedChildHandoffRuntime{
+		session: active, requests: make(chan agent.RunRequest, 1),
+	}
+	gateway, err := kernel.New(kernel.Config{
+		Sessions: sessions, Runtime: runtime, Resolver: hostedChildInputResolver{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &runtimeComposition{sessions: sessions, gateway: gateway}, active, runtime
+}
+
 func newHostedChildInputTestStack(t *testing.T, provider *hostedChildInputTestProvider) *Stack {
 	t.Helper()
 	root := t.TempDir()
@@ -256,6 +473,40 @@ func newHostedChildInputTestTopology(t *testing.T, host *Stack, suffix string) (
 		t.Fatal("hosted child Runtime has no Agent input sender")
 	}
 	return parent, child, sender
+}
+
+func addHostedChildParticipant(t *testing.T, host *Stack, parent session.Session, suffix, name string) session.ParticipantBinding {
+	t.Helper()
+	binding := session.ParticipantBinding{
+		ID: "child-agent-" + suffix, Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated,
+		SessionID: "child-" + suffix, DelegationID: "task-" + suffix, AgentName: name, Label: "@" + name,
+	}
+	if _, err := host.composition.sessions.PutParticipant(context.Background(), session.PutParticipantRequest{
+		SessionRef: parent.SessionRef, Binding: binding,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return binding
+}
+
+func hostedChildReloadSession(t *testing.T, host *Stack, ref session.SessionRef) session.Session {
+	t.Helper()
+	active, err := host.composition.sessions.Session(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return active
+}
+
+func hostedChildBinding(t *testing.T, parent session.Session, id string) session.ParticipantBinding {
+	t.Helper()
+	for _, binding := range parent.Participants {
+		if binding.ID == id {
+			return session.CloneParticipantBinding(binding)
+		}
+	}
+	t.Fatalf("participant %q is not attached", id)
+	return session.ParticipantBinding{}
 }
 
 func waitHostedChildInputEvent(t *testing.T, host *Stack, ref session.SessionRef, text string) *session.Event {
@@ -408,6 +659,12 @@ func (p *hostedChildInputTestProvider) CallCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.calls
+}
+
+func (p *hostedChildInputTestProvider) LastMessages() json.RawMessage {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append(json.RawMessage(nil), p.lastMessages...)
 }
 
 type hostedChildInputResolver struct{}

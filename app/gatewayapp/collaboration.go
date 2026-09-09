@@ -39,7 +39,7 @@ func (b *collaborationBackend) List(ctx context.Context, id string) ([]collabora
 		return nil, err
 	}
 	if closed {
-		return nil, appserver.ErrSessionClosed
+		return nil, errors.Join(collaboration.ErrSessionClosed, appserver.ErrSessionClosed)
 	}
 	out := []collaboration.Thread{{ID: id, SessionID: id, Handle: "parent", Name: "Main Agent", State: "running"}}
 	// Runtime acquisition is unnecessary for discovery. Automatic parent
@@ -88,7 +88,7 @@ func (b *collaborationBackend) List(ctx context.Context, id string) ([]collabora
 	return out, nil
 }
 
-func (b *collaborationBackend) Deliver(ctx context.Context, id string, m collaboration.Message) error {
+func (b *collaborationBackend) Deliver(ctx context.Context, id string, messages []collaboration.Message) error {
 	b.router.mu.RLock()
 	registry := b.router.runtimes
 	b.router.mu.RUnlock()
@@ -105,23 +105,39 @@ func (b *collaborationBackend) Deliver(ctx context.Context, id string, m collabo
 	if rt == nil || rt.instance == nil {
 		return errors.New("collaboration runtime unavailable")
 	}
-	body, err := json.Marshal(m)
-	if err != nil {
-		return err
+	if len(messages) == 0 {
+		return errors.New("collaboration batch is empty")
 	}
-	input := agent.AgentInput{Target: m.To, Input: string(body)}
-	if m.From == "parent" {
-		_, err = rt.instance.engine.SubmitChildInput(ctx, active.SessionRef, agent.ChildInputCommand{Target: m.To, Source: session.ControllerExecutor(active.Controller), Input: input.Input})
-		return err
-	}
-	for _, p := range active.Participants {
-		if hostedChildHandle(p) == m.From && p.Kind == session.ParticipantKindSubagent {
-			return rt.instance.engine.SubmitParticipantInput(ctx, active.SessionRef, p, input, func(ctx context.Context, current session.Session, source session.ActorRef, input agent.AgentInput) error {
-				return routeHostedChildInputToParent(ctx, &rt.instance.runtimeComposition, current, source, input)
-			})
+	entries := make([]agent.AgentInputBatchEntry, len(messages))
+	target := messages[0].To
+	for i, m := range messages {
+		if m.To != target {
+			return errors.New("collaboration batch has multiple recipients")
+		}
+		body, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		entries[i].Message.Input = string(body)
+		entries[i].Message.DisplayInput = m.Text
+		if m.From == "parent" {
+			entries[i].Message.Source = session.ControllerExecutor(active.Controller)
+			continue
+		}
+		for _, p := range active.Participants {
+			if hostedChildHandle(p) == m.From && p.Kind == session.ParticipantKindSubagent {
+				binding := session.CloneParticipantBinding(p)
+				entries[i].Participant = &binding
+				break
+			}
+		}
+		if entries[i].Participant == nil {
+			return errors.New("collaboration sender detached")
 		}
 	}
-	return errors.New("collaboration sender detached")
+	return rt.instance.engine.SubmitAgentInputBatch(ctx, active.SessionRef, target, entries, func(ctx context.Context, current session.Session, inputs []agent.AgentCommunicationInput) error {
+		return routeHostedChildInputBatchToParent(ctx, &rt.instance.runtimeComposition, current, inputs)
+	})
 }
 
 // CollaborationService exposes the focused Host-owned mailbox service.

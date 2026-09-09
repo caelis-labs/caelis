@@ -96,19 +96,19 @@ func (r *Runtime) runWithOverflowRecovery(
 	runID string,
 	turnID string,
 	req agent.RunRequest,
-	pendingInput *session.Event,
+	pendingInputs []*session.Event,
 	batch *[]*session.Event,
 	sink *runner,
 ) error {
-	currentTurnInput := session.CloneEvent(pendingInput)
+	currentTurnInputs := session.CloneEvents(pendingInputs)
 	var toolFactOrdinal uint64
 	// Share the durable tool-step counter across overflow retries so a reused
 	// provider-local call ID cannot collide with a prior successful execution.
 	toolStepSequence := &atomic.Uint64{}
 	for {
-		attemptBatch, _, inputPersisted, err := r.runAttempt(ctx, activeSession, ref, runID, turnID, req, pendingInput, sink, &toolFactOrdinal, toolStepSequence)
+		attemptBatch, _, inputPersisted, err := r.runAttempt(ctx, activeSession, ref, runID, turnID, req, pendingInputs, sink, &toolFactOrdinal, toolStepSequence)
 		if inputPersisted {
-			pendingInput = nil
+			pendingInputs = nil
 		}
 		if err == nil {
 			*batch = append(*batch, attemptBatch...)
@@ -116,7 +116,7 @@ func (r *Runtime) runWithOverflowRecovery(
 		}
 		if recovery, ok := compactionRecoveryFromError(err); ok {
 			*batch = append(*batch, attemptBatch...)
-			progress, compacted, compactErr := r.recoverByCompacting(ctx, ref, turnID, req, recovery, currentTurnInput, sink)
+			progress, compacted, compactErr := r.recoverByCompacting(ctx, ref, turnID, req, recovery, currentTurnInputs, sink)
 			if compactErr != nil {
 				return compactErr
 			}
@@ -140,12 +140,12 @@ func (r *Runtime) runAttempt(
 	runID string,
 	turnID string,
 	req agent.RunRequest,
-	pendingInput *session.Event,
+	pendingInputs []*session.Event,
 	sink *runner,
 	toolFactOrdinal *uint64,
 	toolStepSequence *atomic.Uint64,
 ) ([]*session.Event, bool, bool, error) {
-	invocation, err := r.prepareInvocationContext(ctx, activeSession, ref, turnID, req, pendingInput, sink)
+	invocation, err := r.prepareInvocationContext(ctx, activeSession, ref, turnID, req, pendingInputs, sink)
 	if err != nil {
 		var compactErr *compactionFailureError
 		if errors.As(err, &compactErr) {
@@ -155,15 +155,14 @@ func (r *Runtime) runAttempt(
 	}
 
 	batch := make([]*session.Event, 0, 3)
-	inputPersisted := false
-	if pendingInput != nil {
-		persisted, appendErr := r.appendRuntimeEventOrLifecycle(ctx, activeSession, ref, turnID, pendingInput)
-		if appendErr != nil {
-			return nil, false, false, appendErr
-		}
+	persistedInputs, appendErr := r.appendInputEvents(ctx, ref, pendingInputs)
+	if appendErr != nil {
+		return nil, false, false, appendErr
+	}
+	inputPersisted := len(persistedInputs) > 0
+	for _, persisted := range persistedInputs {
 		batch = append(batch, persisted)
 		invocation.PromptEvents = append(invocation.PromptEvents, session.CloneEvent(persisted))
-		inputPersisted = true
 		if sink != nil {
 			sink.publishEvent(persisted)
 		}

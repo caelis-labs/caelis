@@ -58,6 +58,19 @@ advertised `_meta.steering.supported`. This is a negotiated custom extension,
 not a standard ACP v1 method. Direct running input remains unsupported without
 it. StartThread reports this capability as `supports_steering`.
 
+Control prepends a tagged collaboration slice to each child `session/prompt`,
+including the initial launch prompt and later idle follow-up or reconnect
+prompts. The slice is Control instruction, not a peer message, task prose, or a
+user follow-up: it names the assigned handle, the reserved parent address
+`parent`, and the participant role, and it states that ACP `session/prompt`
+delivers Caelis collaboration input from Control or another Agent. Agents that
+did not advertise steering also receive a concise instruction to call
+`ReceiveMessages` during the turn so mailbox messages do not backlog. Steering
+input is not rewritten with this slice. Credential values, mailbox contents,
+and Session or Task identifiers stay outside it. Built-in spawned Sessions
+receive the same handle, parent, and role facts through the system-prompt
+assembly path and do not inherit main-only StartThread guidance.
+
 Product Agents share one Control-owned mailbox service within their owning work
 Session. `ListThreads` discovers its participants. `SendMessage {to, message,
 reply_to?}` places a message in the recipient's persistent mailbox and returns
@@ -85,11 +98,18 @@ mailbox. A failed dispatch or lost tool response can lose the message; there is
 no acknowledgement, retry, or redelivery protocol. Repeating SendMessage creates
 another message. Pull and automatic delivery share the same atomic removal.
 Automatic delivery is serial per recipient and independent across recipients,
-with a ten-second deadline per attempt. A deadline does not establish whether
-the peer executed the input and does not trigger a retry.
+with a ten-second deadline per attempt. Each attempt atomically claims the
+pending messages that fit the encoded batch budget and submits them as one
+input admission, preserving their order and individual source identities. The
+32-message pull limit does not split automatic delivery; messages beyond the
+encoded budget remain queued. A deadline does not establish whether the peer
+executed the input and does not trigger a retry.
 Agents without steering can take mail through MCP during their current turn;
-otherwise the Host waits for a known terminal activity before starting another
-prompt on the existing Session. An unresolved execution does not qualify as idle.
+otherwise the Host waits for a known terminal activity before submitting the
+queued batch as one prompt on the existing Session. An unresolved execution
+does not qualify as idle. Confirmed Session closure discards its pending mail,
+including mail recovered after Host restart; transient discovery failures do
+not authorize cleanup.
 
 Native tools and the `caelis collaboration mcp --stdio` bridge call the same
 AppServer service. The bridge uses Host-issued `CAELIS_COLLABORATION_URL` and

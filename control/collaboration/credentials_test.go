@@ -11,7 +11,7 @@ import (
 type credentialBackend struct{ threads []Thread }
 
 func (b *credentialBackend) List(context.Context, string) ([]Thread, error) { return b.threads, nil }
-func (*credentialBackend) Deliver(context.Context, string, Message) error   { return nil }
+func (*credentialBackend) Deliver(context.Context, string, []Message) error { return nil }
 
 func TestGrantExpiryRevocationAndActivationBinding(t *testing.T) {
 	b := &credentialBackend{threads: []Thread{{ID: "instance-a", Handle: "a", SessionID: "remote-a"}}}

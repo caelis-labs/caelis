@@ -14,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/skilldiscovery"
+	"github.com/caelis-labs/caelis/control/collaboration"
 )
 
 const (
@@ -69,6 +70,12 @@ func WithCollaborationGuidance(prompt string) string {
 // collaborating Agent's inherited system prompt.
 func WithoutCollaborationGuidance(prompt string) string {
 	return withoutSystemInstructionSection(prompt, builtInCollaborationPrompt())
+}
+
+// WithCollaboratorIdentity adds the Control-owned handle, parent, and role
+// section for a spawned collaborator without duplicating it.
+func WithCollaboratorIdentity(prompt, handle, role string) string {
+	return withSystemInstructionSection(prompt, builtInCollaboratorIdentityPrompt(handle, role))
 }
 
 func BuildSystemPromptResult(cfg Config) (Result, error) {
@@ -224,6 +231,18 @@ func builtInCollaborationPrompt() string {
 		"- StartThread creates a collaborating Agent only for independent work that benefits from parallelism or focused expertise.",
 		"- Give each collaborator a self-contained task: goal, scope, constraints, edit permission, and expected output.",
 		"- Own integration, validation, and the user-facing result. Verify only findings that affect the next action; do not repeat completed work.",
+	}, "\n")
+}
+
+func builtInCollaboratorIdentityPrompt(handle, role string) string {
+	identity := collaboration.IdentityInstructions(handle, role)
+	if identity == "" {
+		return ""
+	}
+	return strings.Join([]string{
+		"## Collaboration",
+		"",
+		identity,
 	}, "\n")
 }
 

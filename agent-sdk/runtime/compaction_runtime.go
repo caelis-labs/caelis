@@ -18,7 +18,7 @@ func (r *Runtime) prepareInvocationContext(
 	ref session.SessionRef,
 	turnID string,
 	req agent.RunRequest,
-	pendingInput *session.Event,
+	pendingInputs []*session.Event,
 	sink *runner,
 ) (invocationContext, error) {
 	if err := r.recoverRuntimeState(ctx, ref); err != nil {
@@ -48,7 +48,7 @@ func (r *Runtime) prepareInvocationContext(
 		Session:          loaded.Session,
 		SessionRef:       ref,
 		Events:           events,
-		PendingEvents:    pendingEventsForCompaction(pendingInput),
+		PendingEvents:    pendingEventsForCompaction(pendingInputs),
 		Model:            req.AgentSpec.Model,
 		ServiceTier:      req.AgentSpec.Request.ServiceTier,
 		InContextRequest: r.inContextRequest(ref, req.AgentSpec.Model, events, req.AgentSpec.Request.ServiceTier),
@@ -223,12 +223,12 @@ func (r *Runtime) compactAfterOverflow(
 	ref session.SessionRef,
 	turnID string,
 	req agent.RunRequest,
-	currentTurnInput *session.Event,
+	currentTurnInputs []*session.Event,
 	cause error,
 	sink *runner,
 ) (compactionProgress, bool, error) {
 	return r.compactAndNotify(ctx, ref, turnID, sink, func(compactCtx context.Context, current session.Session, events []*session.Event, state map[string]any) (compact.Result, error) {
-		sourceEvents, pendingEvents := overflowCompactionEvents(events, currentTurnInput)
+		sourceEvents, pendingEvents := overflowCompactionEvents(events, currentTurnInputs)
 		appendix, err := r.runtimeCompactionAppendix(compactCtx, ref, state)
 		if err != nil {
 			return compact.Result{}, err
@@ -250,24 +250,25 @@ func (r *Runtime) compactAfterOverflow(
 	})
 }
 
-func overflowCompactionEvents(events []*session.Event, currentTurnInput *session.Event) ([]*session.Event, []*session.Event) {
-	if currentTurnInput == nil {
+func overflowCompactionEvents(events []*session.Event, currentTurnInputs []*session.Event) ([]*session.Event, []*session.Event) {
+	if len(currentTurnInputs) == 0 {
 		return session.CloneEvents(events), nil
 	}
-	wantKey := strings.TrimSpace(currentTurnInput.IdempotencyKey)
-	wantID := strings.TrimSpace(currentTurnInput.ID)
+	first := currentTurnInputs[0]
 	for index, event := range events {
-		if event == nil {
+		if !overflowInputMatches(event, first) {
 			continue
 		}
-		matches := wantKey != "" && strings.TrimSpace(event.IdempotencyKey) == wantKey
-		if !matches && wantID != "" {
-			matches = strings.TrimSpace(event.ID) == wantID
+		last := index
+		for offset, want := range currentTurnInputs[1:] {
+			next := index + 1 + offset
+			if next < len(events) && overflowInputMatches(events[next], want) {
+				last = next
+				continue
+			}
+			break
 		}
-		if !matches {
-			continue
-		}
-		for _, later := range events[index+1:] {
+		for _, later := range events[last+1:] {
 			if session.EventTypeOf(later) == session.EventTypeToolResult {
 				// A post-tool overflow must checkpoint the complete durable Turn,
 				// including the accepted Tool call and result. Keeping only the
@@ -278,9 +279,20 @@ func overflowCompactionEvents(events []*session.Event, currentTurnInput *session
 		// Without a completed Tool effect, preserve the current input exactly.
 		// This is required for approval and other system-managed prompts that
 		// must not be replaced by a model-authored summary.
-		return session.CloneEvents(events[:index]), []*session.Event{session.CloneEvent(event)}
+		return session.CloneEvents(events[:index]), session.CloneEvents(currentTurnInputs)
 	}
-	return session.CloneEvents(events), []*session.Event{session.CloneEvent(currentTurnInput)}
+	return session.CloneEvents(events), session.CloneEvents(currentTurnInputs)
+}
+
+func overflowInputMatches(event, want *session.Event) bool {
+	if event == nil || want == nil {
+		return false
+	}
+	if key := strings.TrimSpace(want.IdempotencyKey); key != "" && strings.TrimSpace(event.IdempotencyKey) == key {
+		return true
+	}
+	id := strings.TrimSpace(want.ID)
+	return id != "" && strings.TrimSpace(event.ID) == id
 }
 
 func (r *Runtime) compactAfterModelRequestWatermark(

@@ -14,6 +14,8 @@ func collaborationObservationTool(name string) bool {
 
 // Mailbox results reuse the existing incoming-message presentation. The message
 // ID supplies display identity; parsing here never consumes or delivers mail.
+// Delivered child input is already typed Agent communication; Surfaces do not
+// parse mailbox JSON out of user_message_chunk or Agent communication text.
 func expandCollaborationMessages(events []TranscriptEvent) []TranscriptEvent {
 	var out []TranscriptEvent
 	for _, event := range events {

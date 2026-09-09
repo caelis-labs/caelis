@@ -22,7 +22,7 @@ func (mailboxTestBackend) List(context.Context, string) ([]collaboration.Thread,
 	return []collaboration.Thread{{ID: "a", SessionID: "a", Handle: "a"}, {ID: "b", SessionID: "b", Handle: "b"}}, nil
 }
 
-func (mailboxTestBackend) Deliver(context.Context, string, collaboration.Message) error {
+func (mailboxTestBackend) Deliver(context.Context, string, []collaboration.Message) error {
 	return errors.New("automatic delivery is not used by the transport test")
 }
 

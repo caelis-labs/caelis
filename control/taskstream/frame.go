@@ -59,15 +59,43 @@ func framesForFallback(snapshot fallbackSnapshot) []Frame {
 	if hasClosed || snapshot.TerminalFramed || !task.IsTerminalState(task.State(snapshot.State)) {
 		return frames
 	}
-	frames = append(frames, Frame{
+	closed := Frame{
 		ActivityID: strings.TrimSpace(snapshot.ActivityID),
 		Text:       snapshot.FinalText,
 		State:      normalizedClosedState(snapshot.State, snapshot.ExitCode),
 		Closed:     true,
 		ExitCode:   cloneExitCode(snapshot.ExitCode),
 		UpdatedAt:  snapshot.UpdatedAt,
-	})
+	}
+	if n := len(frames); n > 0 {
+		last := frames[n-1]
+		closed.TerminalID = strings.TrimSpace(last.TerminalID)
+		if closed.ActivityID == "" {
+			closed.ActivityID = last.ActivityID
+		}
+		closed.Event = closedFallbackLifecycleEvent(last, closed)
+	}
+	frames = append(frames, closed)
 	return frames
+}
+
+func closedFallbackLifecycleEvent(last, closed Frame) *session.Event {
+	if last.Event == nil || last.Event.Scope == nil {
+		return nil
+	}
+	turnID := strings.TrimSpace(last.Event.Scope.TurnID)
+	if turnID == "" {
+		return nil
+	}
+	return &session.Event{
+		Type: session.EventTypeLifecycle,
+		Time: closed.UpdatedAt,
+		Scope: &session.EventScope{
+			TurnID:      turnID,
+			Participant: last.Event.Scope.Participant,
+		},
+		Lifecycle: &session.EventLifecycle{Status: closed.State},
+	}
 }
 
 func normalizedClosedState(state string, exitCode *int) string {
