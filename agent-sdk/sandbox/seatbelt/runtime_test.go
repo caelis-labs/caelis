@@ -17,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/cmdsession"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/runnerruntime"
 )
 
@@ -233,6 +234,104 @@ func TestWaitSessionTimeoutDoesNotConsumeExitForLaterResultWait(t *testing.T) {
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func TestSeatbeltProbeUsesFixedExecutableWithoutLoginShell(t *testing.T) {
+	var (
+		gotName     string
+		gotArgs     []string
+		gotDeadline bool
+		started     *exec.Cmd
+	)
+	runner := &seatbeltRunner{
+		execCommand: func(ctx context.Context, name string, args ...string) *exec.Cmd {
+			gotName = name
+			gotArgs = append([]string(nil), args...)
+			_, gotDeadline = ctx.Deadline()
+			cmd := exec.CommandContext(ctx, seatbeltProbeExecutable)
+			started = cmd
+			return cmd
+		},
+		lookPath: func(name string) (string, error) {
+			if name == "sandbox-exec" {
+				return "/usr/bin/sandbox-exec", nil
+			}
+			return "", os.ErrNotExist
+		},
+		goos: "darwin",
+		cfg:  sandbox.NormalizeConfig(sandbox.Config{}),
+	}
+	if err := runner.probe(context.Background()); err != nil {
+		t.Fatalf("probe() error = %v", err)
+	}
+	if gotName != "sandbox-exec" {
+		t.Fatalf("exec name = %q, want sandbox-exec", gotName)
+	}
+	if !gotDeadline {
+		t.Fatal("probe context has no deadline")
+	}
+	if len(gotArgs) < 3 || gotArgs[0] != "-p" || gotArgs[len(gotArgs)-1] != seatbeltProbeExecutable {
+		t.Fatalf("probe args = %#v, want -p <profile> %s", gotArgs, seatbeltProbeExecutable)
+	}
+	for _, arg := range gotArgs {
+		switch arg {
+		case "-lc", "-l", "bash", "/bin/sh", "sh", "seatbelt-probe":
+			t.Fatalf("probe args = %#v, did not want login shell or profile execution", gotArgs)
+		}
+	}
+	if started == nil {
+		t.Fatal("probe did not start a command")
+	}
+	if started.WaitDelay != seatbeltProbeWaitDelay {
+		t.Fatalf("WaitDelay = %v, want %v", started.WaitDelay, seatbeltProbeWaitDelay)
+	}
+	if _, ok := started.Stderr.(*procutil.BoundedWriter); !ok {
+		t.Fatalf("Stderr type = %T, want bounded writer", started.Stderr)
+	}
+}
+
+func TestSeatbeltProbePreservesResourceLimitsWriteAndNetworkPolicy(t *testing.T) {
+	writeRoot := t.TempDir()
+	for _, network := range []sandbox.Network{sandbox.NetworkEnabled, sandbox.NetworkDisabled} {
+		var profile string
+		runner := &seatbeltRunner{
+			execCommand: func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+				for i := 0; i+1 < len(args); i++ {
+					if args[i] == "-p" {
+						profile = args[i+1]
+						break
+					}
+				}
+				return exec.CommandContext(ctx, seatbeltProbeExecutable)
+			},
+			lookPath: func(name string) (string, error) {
+				if name == "sandbox-exec" {
+					return "/usr/bin/sandbox-exec", nil
+				}
+				return "", os.ErrNotExist
+			},
+			goos: "darwin",
+			cfg: sandbox.NormalizeConfig(sandbox.Config{
+				CWD: writeRoot,
+				ResourceLimits: &sandbox.ResourceLimits{
+					WritePaths: []string{writeRoot},
+					Network:    network,
+				},
+			}),
+		}
+		if err := runner.probe(context.Background()); err != nil {
+			t.Fatalf("network=%s probe() error = %v", network, err)
+		}
+		if profile == "" || strings.Contains(profile, "(allow default)") {
+			t.Fatalf("network=%s probe used unconstrained profile: %q", network, profile)
+		}
+		if !strings.Contains(profile, writeRoot) {
+			t.Fatalf("network=%s probe profile missing write root %q:\n%s", network, writeRoot, profile)
+		}
+		if strings.Contains(profile, "(allow network*)") != (network == sandbox.NetworkEnabled) {
+			t.Fatalf("network=%s probe profile network grant mismatch:\n%s", network, profile)
+		}
+	}
 }
 
 func containsString(values []string, want string) bool {

@@ -228,24 +228,16 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		launchEnv["SDK_ACP_CHILD_NO_SPAWN"] = "1"
 	}
 	acpClient, err := client.Start(childCtx, client.Config{
-		HostedAdapterID:  cfg.HostedAdapterID,
-		ConnectionID:     cfg.Name,
-		EndpointResolver: r.endpointResolver,
-		Command:          cfg.Command,
-		Args:             append([]string(nil), cfg.Args...),
-		Env:              launchEnv,
-		WorkDir:          pickWorkDir(cfg.WorkDir, spawn.CWD),
-		ClientInfo:       r.clientInfo,
-		OnUpdate:         func(env client.UpdateEnvelope) { r.handleUpdate(run, env) },
-		OnPermissionRequest: func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
-			run.mu.Lock()
-			boundID := run.anchor.SessionID
-			run.mu.Unlock()
-			if boundID == "" || boundID != string(req.SessionId) {
-				return client.RequestPermissionResponse{}, fmt.Errorf("ACP permission Session does not match bound child")
-			}
-			return r.permissionCallback(spawn, cfg, agentID)(ctx, req)
-		},
+		HostedAdapterID:     cfg.HostedAdapterID,
+		ConnectionID:        cfg.Name,
+		EndpointResolver:    r.endpointResolver,
+		Command:             cfg.Command,
+		Args:                append([]string(nil), cfg.Args...),
+		Env:                 launchEnv,
+		WorkDir:             pickWorkDir(cfg.WorkDir, spawn.CWD),
+		ClientInfo:          r.clientInfo,
+		OnUpdate:            func(env client.UpdateEnvelope) { r.handleUpdate(run, env) },
+		OnPermissionRequest: boundChildPermissionHandler(run, r.permissionCallback(spawn, cfg, agentID)),
 	})
 	if err != nil {
 		childCancel()

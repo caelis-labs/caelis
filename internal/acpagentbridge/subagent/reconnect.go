@@ -90,10 +90,8 @@ func (r *Runner) reconnectChildEndpointLocked(
 		HostedAdapterID: cfg.HostedAdapterID, ConnectionID: cfg.Name, EndpointResolver: r.endpointResolver,
 		Command: cfg.Command, Args: append([]string(nil), cfg.Args...), Env: launchEnv,
 		WorkDir: pickWorkDir(cfg.WorkDir, spawn.CWD), ClientInfo: r.clientInfo,
-		OnUpdate: func(env client.UpdateEnvelope) { r.handleUpdate(run, env) },
-		OnPermissionRequest: func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
-			return r.permissionCallback(spawn, cfg, anchor.AgentID)(ctx, req)
-		},
+		OnUpdate:            func(env client.UpdateEnvelope) { r.handleUpdate(run, env) },
+		OnPermissionRequest: boundChildPermissionHandler(run, r.permissionCallback(spawn, cfg, anchor.AgentID)),
 	})
 	if err != nil {
 		childCancel()

@@ -24,6 +24,7 @@ const (
 	binaryDetectionBytes = 8 * 1024
 	searchResultLimit    = 100
 	maxSearchLineRunes   = 2000
+	maxSearchLineBytes   = 8 * 1024 * 1024
 )
 
 var errSearchLimitReached = errors.New("search: result limit reached")
@@ -55,7 +56,7 @@ func NewSearch(runtime sandbox.Runtime) (*SearchTool, error) {
 func (t *SearchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        SearchToolName,
-		Description: "Search file contents with a regular expression. Matching is case-sensitive by default; use (?i) in pattern for case-insensitive search. Results are capped at 100 lines; use Read for surrounding context or RunCommand with rg for advanced search.",
+		Description: "Search file contents with a regular expression. Matching is case-sensitive by default; use (?i) in pattern for case-insensitive search. Results are capped at 100 lines; a line over 8MiB fails the search rather than reporting no matches. Use Read for surrounding context or RunCommand with rg for advanced search.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -141,6 +142,9 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	}
 	if info.IsDir() {
 		walkErr := walkDir(fsys, target, func(path string, d fs.DirEntry, walkErr error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if walkErr != nil {
 				//nolint:nilerr // Search is best-effort across unreadable paths and returns accessible matches.
 				return nil
@@ -154,7 +158,13 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 			if d == nil || d.IsDir() || !shouldIncludeFilePath(root, path, includeRules) {
 				return nil
 			}
-			fileResult := searchSelectedFile(fsys, path, compiled, &hits, &stats, appendMatch)
+			fileResult, err := searchSelectedFile(ctx, fsys, path, compiled, &hits, &stats, appendMatch)
+			if err != nil {
+				if isSkippableSearchError(err) {
+					return nil
+				}
+				return err
+			}
 			if fileResult.stop {
 				return errSearchLimitReached
 			}
@@ -167,7 +177,9 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 		if shouldExcludePath(root, target, false, excludeRules) || !shouldIncludeFilePath(root, target, includeRules) {
 			return newSearchResult(target, pattern, include, hits, stats)
 		}
-		searchSelectedFile(fsys, target, compiled, &hits, &stats, appendMatch)
+		if _, err := searchSelectedFile(ctx, fsys, target, compiled, &hits, &stats, appendMatch); err != nil {
+			return tool.Result{}, err
+		}
 	}
 
 	return newSearchResult(target, pattern, include, hits, stats)
@@ -183,21 +195,35 @@ func (s *searchStats) observe(result searchFileResult) {
 }
 
 func searchSelectedFile(
+	ctx context.Context,
 	fsys sandbox.FileSystem,
 	path string,
 	pattern *regexp.Regexp,
 	hits *[]map[string]any,
 	stats *searchStats,
 	appendMatch func(string, int, string) bool,
-) searchFileResult {
+) (searchFileResult, error) {
 	stats.filesSelected++
 	hitStart := len(*hits)
-	result := searchInFile(fsys, path, pattern, appendMatch)
+	result, err := searchInFile(ctx, fsys, path, pattern, appendMatch)
 	if result.binary {
 		*hits = (*hits)[:hitStart]
 	}
 	stats.observe(result)
-	return result
+	return result, err
+}
+
+func isSkippableSearchError(err error) bool {
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, errNotRegularFile), errors.Is(err, fs.ErrInvalid):
+		return true
+	case errors.Is(err, fs.ErrNotExist), errors.Is(err, fs.ErrPermission):
+		return true
+	default:
+		return false
+	}
 }
 
 func newSearchResult(path string, pattern string, include string, hits []map[string]any, stats searchStats) (tool.Result, error) {
@@ -274,31 +300,37 @@ func extensionGlobSuggestion(include string) string {
 	}
 }
 
-func searchInFile(fsys sandbox.FileSystem, path string, pattern *regexp.Regexp, appendMatch func(string, int, string) bool) searchFileResult {
-	file, err := fsys.Open(path)
+func searchInFile(ctx context.Context, fsys sandbox.FileSystem, path string, pattern *regexp.Regexp, appendMatch func(string, int, string) bool) (searchFileResult, error) {
+	if err := ctx.Err(); err != nil {
+		return searchFileResult{}, err
+	}
+	file, err := openRegularFile(fsys, path)
 	if err != nil {
-		return searchFileResult{}
+		return searchFileResult{}, err
 	}
 	defer file.Close()
 
 	reader := bufio.NewReaderSize(file, binaryDetectionBytes)
 	sample, err := reader.Peek(binaryDetectionBytes)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
-		return searchFileResult{}
+		return searchFileResult{}, err
 	}
 	if bytes.IndexByte(sample, 0) >= 0 {
-		return searchFileResult{binary: true}
+		return searchFileResult{binary: true}, nil
 	}
 
 	result := searchFileResult{scanned: true}
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxSearchLineBytes)
 	lineNum := 0
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return searchFileResult{}, err
+		}
 		lineNum++
 		text := scanner.Text()
 		if strings.IndexByte(text, 0) >= 0 {
-			return searchFileResult{binary: true}
+			return searchFileResult{binary: true}, nil
 		}
 		match := pattern.FindStringIndex(text)
 		if match == nil {
@@ -306,10 +338,20 @@ func searchInFile(fsys sandbox.FileSystem, path string, pattern *regexp.Regexp, 
 		}
 		if appendMatch(path, lineNum, searchLineExcerpt(text, match[0], match[1])) {
 			result.stop = true
-			return result
+			return result, nil
 		}
 	}
-	return result
+	if err := scanner.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return searchFileResult{}, searchLineTooLongError(path)
+		}
+		return searchFileResult{}, err
+	}
+	return result, nil
+}
+
+func searchLineTooLongError(path string) error {
+	return tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("Grep path %q has a line that exceeds the 8MiB limit", path))
 }
 
 func searchLineExcerpt(text string, matchStart, matchEnd int) string {

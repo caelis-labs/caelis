@@ -15,9 +15,76 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 )
+
+func TestGuardianFileToolsReuseBuiltinDefinitionsAndResults(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "evidence.txt")
+	if err := os.WriteFile(path, []byte(strings.Repeat("evidence\n", 230)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rt, err := host.New(host.Config{CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := &guardianQueries{runtime: rt}
+	t.Cleanup(func() { _ = q.close() })
+	read, err := filesystem.NewRead(filesystem.DefaultReadConfig(), rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grep, err := filesystem.NewSearch(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, builtin := range []tool.Tool{read, grep} {
+		definition := builtin.Definition()
+		t.Run(definition.Name, func(t *testing.T) {
+			query := guardianQueryTool{q, definition.Name}
+			definition.ExecutionRequirements = nil
+			if got := query.Definition(); !reflect.DeepEqual(got, definition) {
+				t.Fatalf("Guardian changed the built-in definition:\ngot: %#v\nwant: %#v", got, definition)
+			}
+			args := map[string]any{"path": path}
+			if definition.Name == "Grep" {
+				args["pattern"] = "evidence"
+			}
+			raw, err := json.Marshal(args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			call := tool.Call{ID: "query", Name: definition.Name, Input: raw}
+			want, err := builtin.Call(t.Context(), call)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := query.Call(t.Context(), call)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("Guardian changed built-in output:\ngot: %#v\nwant: %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestGuardianCancelledQueryDoesNotOpenSandbox(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	q := &guardianQueries{}
+	_, err := (guardianQueryTool{q, "Read"}).Call(ctx, tool.Call{Input: json.RawMessage(`{"path":"unused"}`)})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled query error = %v", err)
+	}
+	if q.runtime != nil || q.scratch != "" || q.calls != 0 {
+		t.Fatal("cancelled query opened or consumed query resources")
+	}
+}
 
 func TestGuardianNativeTemporaryWritesAndReadOnlyEvidence(t *testing.T) {
 	if os.Getenv("CAELIS_TEST_GUARDIAN_NATIVE") != "1" {

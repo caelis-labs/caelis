@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -80,6 +81,21 @@ func TestGitignoreExcludePatternsHonorNegatedRules(t *testing.T) {
 	}
 	if shouldExcludePath(root, filepath.Join(root, "important.log"), false, patterns) {
 		t.Fatal("negated important.log rule was not honored")
+	}
+}
+
+func TestGitignoreExcludePatternsBoundOversizedFile(t *testing.T) {
+	root := t.TempDir()
+	body := "/vendor\n" + strings.Repeat("#\n", maxGitignoreBytes/2+1) + "!/vendor\n"
+	if len(body) <= maxGitignoreBytes {
+		t.Fatal("fixture must exceed the read limit")
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(body), 0o644); err != nil {
+		t.Fatalf("WriteFile(.gitignore) error = %v", err)
+	}
+	patterns := gitignoreExcludePatterns(hostFileSystem{cwd: root}, root)
+	if len(patterns) != 0 {
+		t.Fatal("oversized gitignore must not apply a prefix missing later negations")
 	}
 }
 
@@ -173,5 +189,25 @@ func (f hostFileSystem) WriteFile(name string, data []byte, mode os.FileMode) er
 func (f hostFileSystem) MkdirAll(name string, mode os.FileMode) error { return os.MkdirAll(name, mode) }
 func (f hostFileSystem) Glob(pattern string) ([]string, error)        { return filepath.Glob(pattern) }
 func (f hostFileSystem) WalkDir(root string, fn fs.WalkDirFunc) error {
+	return filepath.WalkDir(root, fn)
+}
+
+type cancelOnOpenFileSystem struct {
+	hostFileSystem
+	cancel context.CancelFunc
+}
+
+func (f cancelOnOpenFileSystem) Open(name string) (*os.File, error) {
+	f.cancel()
+	return f.hostFileSystem.Open(name)
+}
+
+type cancelOnWalkFileSystem struct {
+	hostFileSystem
+	cancel context.CancelFunc
+}
+
+func (f cancelOnWalkFileSystem) WalkDir(root string, fn fs.WalkDirFunc) error {
+	f.cancel()
 	return filepath.WalkDir(root, fn)
 }

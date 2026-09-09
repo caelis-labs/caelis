@@ -117,10 +117,12 @@ func (t guardianQueryTool) Definition() tool.Definition {
 	if t.name == "RunCommand" {
 		return tool.Definition{Name: t.name, Description: "Run a local evidence query or script. Only the private temporary directory is writable; TMPDIR points there. Network policy matches the main Agent. Commands complete synchronously; no escalation is available.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}}, "required": []any{"command"}, "additionalProperties": false}}
 	}
-	if t.name == "Read" {
-		return tool.Definition{Name: "Read", Description: "Read a file by line range. Offset is zero-based; default 80 lines, maximum 200.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "minimum": 0}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 200}}, "required": []any{"path"}, "additionalProperties": false}}
-	}
 	d := (&filesystem.SearchTool{}).Definition()
+	if t.name == "Read" {
+		d = (&filesystem.ReadTool{}).Definition()
+	}
+	// The private query runtime enforces execution policy; file semantics and
+	// the model-visible definition belong to the shared built-in tool.
 	d.ExecutionRequirements = nil
 	return d
 }
@@ -132,6 +134,11 @@ func (t guardianQueryTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 	if q.failure != nil {
 		return tool.Result{}, q.failure
 	}
+	if err := ctx.Err(); err != nil {
+		return tool.Result{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	q.calls++
 	if q.calls > 8 {
 		q.failure = fmt.Errorf("guardian evidence query budget exhausted")
@@ -141,14 +148,12 @@ func (t guardianQueryTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 		q.failure = err
 		return tool.Result{}, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
 	var result tool.Result
 	var err error
 	switch t.name {
 	case "Read":
 		var read *filesystem.ReadTool
-		read, err = filesystem.NewRead(filesystem.ReadConfig{DefaultLimit: 80, MaxLimit: 200}, q.runtime)
+		read, err = filesystem.NewRead(filesystem.DefaultReadConfig(), q.runtime)
 		if err == nil {
 			result, err = read.Call(ctx, call)
 		}

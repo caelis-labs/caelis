@@ -151,10 +151,10 @@ func NormalizeSandboxPermissionOutput(stream string, data []byte) []byte {
 }
 
 func SandboxPermissionDetail(result CommandResult, err error) (string, bool) {
-	if !isSandboxExecutionResult(result) {
+	if !isSandboxExecutionResult(result) || !sandboxCommandFailed(result, err) {
 		return "", false
 	}
-	if detail := strings.TrimSpace(result.Error); detail != "" {
+	if detail := strings.TrimSpace(result.Error); detail != "" && IsSandboxPermissionDeniedText(detail) {
 		return detail, true
 	}
 	raw := sandboxPermissionRawDetail(result, err)
@@ -165,6 +165,10 @@ func SandboxPermissionDetail(result CommandResult, err error) (string, bool) {
 		return raw, true
 	}
 	return SandboxPermissionDeniedMessage, true
+}
+
+func sandboxCommandFailed(result CommandResult, err error) bool {
+	return err != nil || result.ExitCode != 0 || strings.TrimSpace(result.Error) != ""
 }
 
 func isSandboxExecutionResult(result CommandResult) bool {
@@ -195,6 +199,7 @@ func sandboxPermissionRawDetail(result CommandResult, err error) string {
 	}
 	appendOne(result.Stderr)
 	appendOne(result.Stdout)
+	appendOne(result.Error)
 	if err != nil {
 		appendOne(err.Error())
 	}
@@ -223,15 +228,35 @@ func IsSandboxPermissionDeniedText(text string) bool {
 		"cannot lock config file",
 		"unable to lock config file",
 		"无法锁定配置文件",
-		"eacces",
-		"eperm",
 	}
 	for _, pattern := range patterns {
 		if strings.Contains(text, pattern) {
 			return true
 		}
 	}
+	return containsErrnoToken(text, "eacces") || containsErrnoToken(text, "eperm")
+}
+
+func containsErrnoToken(text, token string) bool {
+	for start := 0; start <= len(text)-len(token); {
+		i := strings.Index(text[start:], token)
+		if i < 0 {
+			return false
+		}
+		i += start
+		beforeOK := i == 0 || !isASCIILetterOrDigit(text[i-1])
+		after := i + len(token)
+		afterOK := after == len(text) || !isASCIILetterOrDigit(text[after])
+		if beforeOK && afterOK {
+			return true
+		}
+		start = i + 1
+	}
 	return false
+}
+
+func isASCIILetterOrDigit(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
 }
 
 func IsSandboxCachePathEvidenceText(text string) bool {

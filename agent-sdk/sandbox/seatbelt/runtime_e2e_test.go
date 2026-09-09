@@ -5,6 +5,7 @@ package seatbelt
 import (
 	"context"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -66,5 +67,25 @@ func TestSandboxedCommandTTYSmoke(t *testing.T) {
 	ttyResult, err := ttySession.Result(ctx)
 	if err != nil || !strings.Contains(ttyResult.Stdout, "got:x") || ttyResult.Stderr != "" {
 		t.Fatalf("TTY Result() = %+v, %v", ttyResult, err)
+	}
+}
+
+func TestSeatbeltNativeProbe(t *testing.T) {
+	if os.Getenv("CAELIS_MACOS_SANDBOX_SMOKE_E2E") != "1" {
+		t.Skip("set CAELIS_MACOS_SANDBOX_SMOKE_E2E=1 to run the macOS seatbelt smoke test")
+	}
+	runner := &seatbeltRunner{
+		execCommand: exec.CommandContext,
+		lookPath:    exec.LookPath,
+		goos:        "darwin",
+		cfg:         sandbox.NormalizeConfig(sandbox.Config{CWD: t.TempDir()}),
+	}
+	if err := runner.probe(context.Background()); err != nil {
+		t.Fatalf("native probe error = %v", err)
+	}
+	writeRoot := t.TempDir()
+	runner.cfg.ResourceLimits = &sandbox.ResourceLimits{WritePaths: []string{writeRoot}, Network: sandbox.NetworkDisabled}
+	if err := runner.probe(context.Background()); err != nil {
+		t.Fatalf("native resource-limits probe error = %v", err)
 	}
 }

@@ -214,9 +214,11 @@ pinned prefix and join in model-call order. Steering invalidates pending
 automatic approvals before their settlement.
 
 Additional retrieval is optional and is appropriate only when the supplied
-context cannot support an accurate decision. Read, Grep and synchronous local
-scripts can inspect the live canonical JSONL; there is no derived history tree
-or additional main-Agent recall injection. The address identifies a live log,
+context cannot support an accurate decision. Read and Grep reuse the SDK's
+built-in file tools; Guardian supplies its sandbox policy and cumulative review
+budgets, not separate file semantics. These tools and synchronous local scripts
+can inspect the live canonical JSONL; there is no derived history tree or
+additional main-Agent recall injection. The address identifies a live log,
 not an immutable snapshot; readers must tolerate an incomplete final append.
 
 Evidence commands use a private temporary write directory and read-only access

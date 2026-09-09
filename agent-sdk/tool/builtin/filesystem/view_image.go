@@ -81,13 +81,10 @@ func (t *ViewImageTool) Call(ctx context.Context, call tool.Call) (tool.Result, 
 	if err != nil {
 		return tool.Result{}, err
 	}
-	if !info.Mode().IsRegular() {
-		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("ViewImage path %q is not a regular file", targetPath))
-	}
 	if info.Size() > maxViewImageBytes {
 		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("ViewImage file %q exceeds the %d byte limit", targetPath, maxViewImageBytes))
 	}
-	file, err := fsys.Open(targetPath)
+	file, err := openRegularFile(fsys, targetPath)
 	if err != nil {
 		return tool.Result{}, err
 	}

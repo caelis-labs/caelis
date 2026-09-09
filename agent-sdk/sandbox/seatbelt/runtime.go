@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,7 +25,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 )
 
-const seatbeltSandboxType = "seatbelt"
+const (
+	seatbeltSandboxType      = "seatbelt"
+	seatbeltProbeExecutable  = "/usr/bin/true"
+	seatbeltProbeTimeout     = 5 * time.Second
+	seatbeltProbeWaitDelay   = time.Second
+	seatbeltProbeStderrLimit = 64 * 1024
+)
 
 type Config = sandbox.Config
 
@@ -104,11 +111,38 @@ func (s *seatbeltRunner) probe(ctx context.Context) error {
 	if _, err := s.lookPath("sandbox-exec"); err != nil {
 		return fmt.Errorf("seatbelt sandbox unavailable: sandbox-exec not found: %w", err)
 	}
-	cmd := s.execCommand(ctx, "sandbox-exec", "-p", "(version 1) (allow default)", "/bin/sh", "-lc", "echo seatbelt-probe")
+	profile := "(version 1) (allow default)"
+	if s.cfg.ResourceLimits != nil {
+		workDir, err := procutil.ResolveHostWorkDir(s.cfg.CWD)
+		if err != nil {
+			return fmt.Errorf("seatbelt sandbox probe failed: %w", err)
+		}
+		profile, err = buildSeatbeltProfile(policy.Default(s.cfg, sandbox.Constraints{}), workDir)
+		if err != nil {
+			return fmt.Errorf("seatbelt sandbox probe failed: %w", err)
+		}
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, seatbeltProbeTimeout)
+	defer cancel()
+	cmd := s.execCommand(probeCtx, "sandbox-exec", "-p", profile, seatbeltProbeExecutable)
+	procutil.ApplyNonInteractiveCommandDefaults(cmd)
+	cmd.WaitDelay = seatbeltProbeWaitDelay
+	cmd.Stdout = io.Discard
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
+	bounded := &procutil.BoundedWriter{Writer: &stderr, Remaining: seatbeltProbeStderrLimit}
+	cmd.Stderr = bounded
+	err := cmd.Run()
+	msg := strings.TrimSpace(stderr.String())
+	if bounded.Exceeded {
+		if err != nil {
+			return fmt.Errorf("seatbelt sandbox probe failed: %w; stderr budget exceeded", err)
+		}
+		return fmt.Errorf("seatbelt sandbox probe failed: stderr budget exceeded")
+	}
+	if err != nil {
 		if msg == "" {
 			return fmt.Errorf("seatbelt sandbox probe failed: %w", err)
 		}

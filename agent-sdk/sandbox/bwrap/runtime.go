@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,8 +26,12 @@ import (
 )
 
 const (
-	bwrapSandboxType  = "bwrap"
-	bubblewrapDocsURL = "https://github.com/containers/bubblewrap"
+	bwrapSandboxType      = "bwrap"
+	bubblewrapDocsURL     = "https://github.com/containers/bubblewrap"
+	bwrapProbeExecutable  = "/bin/true"
+	bwrapProbeTimeout     = 5 * time.Second
+	bwrapProbeWaitDelay   = time.Second
+	bwrapProbeStderrLimit = 64 * 1024
 )
 
 type Config = sandbox.Config
@@ -127,12 +132,28 @@ func (b *bwrapRunner) probe(ctx context.Context) error {
 	if !policy.Default(b.cfg, sandbox.Constraints{}).NetworkAccess {
 		probeArgs = append(probeArgs, "--unshare-net")
 	}
-	probeArgs = append(probeArgs, "--", "bash", "-lc", "echo bwrap-probe")
-	cmd := b.execCommand(ctx, "bwrap", probeArgs...)
+	probeArgs = append(probeArgs, "--", bwrapProbeExecutable)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, bwrapProbeTimeout)
+	defer cancel()
+	cmd := b.execCommand(probeCtx, "bwrap", probeArgs...)
+	procutil.ApplyNonInteractiveCommandDefaults(cmd)
+	cmd.WaitDelay = bwrapProbeWaitDelay
+	cmd.Stdout = io.Discard
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
+	bounded := &procutil.BoundedWriter{Writer: &stderr, Remaining: bwrapProbeStderrLimit}
+	cmd.Stderr = bounded
+	err = cmd.Run()
+	msg := strings.TrimSpace(stderr.String())
+	if bounded.Exceeded {
+		if err != nil {
+			return fmt.Errorf("bwrap sandbox probe failed: %w; stderr budget exceeded", err)
+		}
+		return fmt.Errorf("bwrap sandbox probe failed: stderr budget exceeded")
+	}
+	if err != nil {
 		if msg == "" {
 			return fmt.Errorf("bwrap sandbox probe failed: %w", err)
 		}

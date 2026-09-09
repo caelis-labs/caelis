@@ -3,7 +3,9 @@
 package bwrap
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
 )
 
 func TestBuildBwrapArgsPreservesHostReadsAndManagedMounts(t *testing.T) {
@@ -206,6 +209,57 @@ func hasBwrapPair(args []string, flag string, left string, right string) bool {
 		}
 	}
 	return false
+}
+
+func TestBwrapProbeUsesFixedExecutableWithoutLoginShell(t *testing.T) {
+	var (
+		gotArgs     []string
+		gotDeadline bool
+		started     *exec.Cmd
+	)
+	runner := &bwrapRunner{
+		execCommand: func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+			gotArgs = append([]string(nil), args...)
+			_, gotDeadline = ctx.Deadline()
+			cmd := exec.CommandContext(ctx, bwrapProbeExecutable)
+			started = cmd
+			return cmd
+		},
+		lookPath: func(name string) (string, error) {
+			switch name {
+			case "bwrap", "bash":
+				return "/usr/bin/" + name, nil
+			default:
+				return "", os.ErrNotExist
+			}
+		},
+		goos: "linux",
+		cfg:  sandbox.NormalizeConfig(sandbox.Config{}),
+	}
+	if err := runner.probe(context.Background()); err != nil {
+		t.Fatalf("probe() error = %v", err)
+	}
+	if !gotDeadline {
+		t.Fatal("probe context has no deadline")
+	}
+	if len(gotArgs) < 2 || gotArgs[len(gotArgs)-2] != "--" || gotArgs[len(gotArgs)-1] != bwrapProbeExecutable {
+		t.Fatalf("probe args = %#v, want -- %s", gotArgs, bwrapProbeExecutable)
+	}
+	for _, arg := range gotArgs {
+		switch arg {
+		case "-lc", "-l", "bash", "bwrap-probe":
+			t.Fatalf("probe args = %#v, did not want login shell or profile execution", gotArgs)
+		}
+	}
+	if started == nil {
+		t.Fatal("probe did not start a command")
+	}
+	if started.WaitDelay != bwrapProbeWaitDelay {
+		t.Fatalf("WaitDelay = %v, want %v", started.WaitDelay, bwrapProbeWaitDelay)
+	}
+	if _, ok := started.Stderr.(*procutil.BoundedWriter); !ok {
+		t.Fatalf("Stderr type = %T, want bounded writer", started.Stderr)
+	}
 }
 
 func containsString(values []string, want string) bool {

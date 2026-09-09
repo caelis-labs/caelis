@@ -946,7 +946,7 @@ func (m *Manager) startParticipant(
 			if run != nil {
 				return run.permissionHandler(ctx, req)
 			}
-			return m.permissionHandler(session.CloneSession(parentSession), strings.TrimSpace(cfg.Name), "", nil)(ctx, req)
+			return client.RequestPermissionResponse{}, errACPPermissionSessionMismatchEndpoint
 		},
 	)
 	if err != nil {
@@ -1170,62 +1170,6 @@ func acpSessionCapability(resp client.InitializeResponse, name string) bool {
 	}
 	_, ok := resp.AgentCapabilities.SessionCapabilities[name]
 	return ok
-}
-
-func (m *Manager) permissionHandler(
-	session session.Session,
-	agent string,
-	mode string,
-	requester controller.ApprovalRequester,
-) func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
-	return func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
-		trimmedAgent := strings.TrimSpace(agent)
-		if requester != nil {
-			approvalReq, err := translateApprovalRequest(session, trimmedAgent, mode, req)
-			if err != nil {
-				return client.RequestPermissionResponse{}, err
-			}
-			resp, err := requester.RequestControllerApproval(ctx, approvalReq)
-			if err != nil {
-				return client.RequestPermissionResponse{}, err
-			}
-			if selected, ok := acputil.SelectedOutcome(resp.Outcome, resp.OptionID); ok {
-				return selected, nil
-			}
-		}
-		return acputil.RejectOnce(), nil
-	}
-}
-
-func (r *controllerRun) permissionHandler(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
-	if r == nil {
-		return acputil.RejectOnce(), nil
-	}
-	r.mu.Lock()
-	remoteID := r.remoteSessionID
-	activeSession := session.CloneSession(r.turnSession)
-	mode := strings.TrimSpace(r.turnMode)
-	requester := r.approvalRequester
-	agent := strings.TrimSpace(r.agent)
-	r.mu.Unlock()
-	if remoteID != "" && string(req.SessionId) != remoteID {
-		return client.RequestPermissionResponse{}, fmt.Errorf("ACP permission Session does not match bound endpoint")
-	}
-	if requester != nil {
-		approvalReq, err := translateApprovalRequest(activeSession, agent, mode, req)
-		if err != nil {
-			return client.RequestPermissionResponse{}, err
-		}
-		approvalReq.EndpointSessionID = remoteID
-		resp, err := requester.RequestControllerApproval(ctx, approvalReq)
-		if err != nil {
-			return client.RequestPermissionResponse{}, err
-		}
-		if selected, ok := acputil.SelectedOutcome(resp.Outcome, resp.OptionID); ok {
-			return selected, nil
-		}
-	}
-	return acputil.RejectOnce(), nil
 }
 
 func translateApprovalRequest(
@@ -1726,37 +1670,6 @@ func newControllerEpoch() (string, error) {
 		return "", fmt.Errorf("internal/acpagentbridge/controller: generate controller epoch: %w", err)
 	}
 	return "controller-" + hex.EncodeToString(raw[:]), nil
-}
-
-func (r *participantRun) permissionHandler(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
-	if r == nil {
-		return acputil.RejectOnce(), nil
-	}
-	r.mu.Lock()
-	remoteID := r.remoteSessionID
-	activeSession := session.CloneSession(r.turnSession)
-	mode := strings.TrimSpace(r.turnMode)
-	requester := r.approvalRequester
-	agent := strings.TrimSpace(r.agent)
-	r.mu.Unlock()
-	if remoteID != "" && string(req.SessionId) != remoteID {
-		return client.RequestPermissionResponse{}, fmt.Errorf("ACP permission Session does not match bound endpoint")
-	}
-	if requester != nil {
-		approvalReq, err := translateApprovalRequest(activeSession, agent, mode, req)
-		if err != nil {
-			return client.RequestPermissionResponse{}, err
-		}
-		approvalReq.EndpointSessionID = remoteID
-		resp, err := requester.RequestControllerApproval(ctx, approvalReq)
-		if err != nil {
-			return client.RequestPermissionResponse{}, err
-		}
-		if selected, ok := acputil.SelectedOutcome(resp.Outcome, resp.OptionID); ok {
-			return selected, nil
-		}
-	}
-	return acputil.RejectOnce(), nil
 }
 
 func (r *participantRun) handleUpdate(clock func() time.Time, env client.UpdateEnvelope) {

@@ -3,6 +3,7 @@ package filesystem
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"path"
 	"path/filepath"
@@ -211,12 +212,20 @@ func pathHasMatchingDirSegment(rel string, pattern string) bool {
 	return false
 }
 
+const maxGitignoreBytes = 1 * 1024 * 1024
+
 func gitignoreExcludePatterns(fsys sandbox.FileSystem, root string) []pathExcludeRule {
 	if fsys == nil || strings.TrimSpace(root) == "" {
 		return nil
 	}
-	raw, err := fsys.ReadFile(filepath.Join(root, ".gitignore"))
+	file, err := openRegularFile(fsys, filepath.Join(root, ".gitignore"))
 	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, maxGitignoreBytes+1))
+	if err != nil || len(raw) > maxGitignoreBytes {
+		// A prefix can omit later negations and must not become an ignore policy.
 		return nil
 	}
 	lines := strings.Split(strings.ReplaceAll(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\r", "\n"), "\n")
