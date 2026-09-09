@@ -19,7 +19,6 @@ import (
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -463,7 +462,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 				return kernelimpl.ToolAugmentation{}, err
 			}
 			spawnedChild := sessionvisibility.IsSpawnedSubagentSession(activeSession)
-			augmentedTools := []tool.Tool{sendmessage.New()}
+			augmentedTools := s.collaborationTools(activeSession)
 			if !spawnedChild {
 				agents, targets, resolveErr := s.delegationSpawnConfiguration(req.Session)
 				if resolveErr != nil {
@@ -475,6 +474,9 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 			if systemPrompt := stringFromMap(effectiveBaseMetadata, "system_prompt"); systemPrompt != "" {
 				if spawnedChild {
 					systemPrompt = systemPromptWithoutCollaborationGuidance(systemPrompt)
+					if handle, role, ok := s.spawnedCollaboratorIdentity(ctx, activeSession); ok {
+						systemPrompt = systemPromptWithCollaboratorIdentity(systemPrompt, handle, role)
+					}
 				} else {
 					systemPrompt = systemPromptWithCollaborationGuidance(systemPrompt)
 				}
@@ -491,6 +493,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	guardianApprover := s.newGuardianApprover()
+	guardianApprover.queryNetwork = sandboxPolicySnapshot.Network
 	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions:             s.sessions,
 		Runtime:              fencedRuntime,
@@ -521,6 +524,37 @@ func runtimeDefaultModelAlias(runtimeCfg stackRuntimeConfig, lookup *modelLookup
 		return ""
 	}
 	return lookup.DefaultID()
+}
+
+func (s *runtimeComposition) spawnedCollaboratorIdentity(ctx context.Context, child session.Session) (handle, role string, ok bool) {
+	taskID := hostedChildMetadataString(child.Metadata, sessionvisibility.MetadataSystemManagedTask)
+	if s == nil || s.authorities.taskStore == nil || taskID == "" {
+		return "", "", false
+	}
+	entry, err := s.authorities.taskStore.Get(ctx, taskID)
+	if err != nil || entry == nil {
+		return "", "", false
+	}
+	handle = strings.TrimPrefix(strings.TrimSpace(entry.Handle), "@")
+	if handle == "" {
+		handle = strings.TrimPrefix(strings.TrimSpace(taskMapString(entry.Spec, "handle")), "@")
+	}
+	role = strings.TrimSpace(firstNonEmpty(
+		taskMapString(entry.Metadata, "participant_role"),
+		taskMapString(entry.Spec, "participant_role"),
+	))
+	if handle == "" {
+		return "", "", false
+	}
+	return handle, role, true
+}
+
+func taskMapString(values map[string]any, key string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	value, _ := values[key].(string)
+	return strings.TrimSpace(value)
 }
 
 func (s *runtimeComposition) installGatewayRuntimeBundle(oldGateway *kernelimpl.Gateway, bundle *gatewayRuntimeBundle) error {

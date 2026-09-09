@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
@@ -40,6 +41,19 @@ func (g *Gateway) prepareBeginTurnRequest(ctx context.Context, activeSession ses
 		req.InputKind = SubmissionKindConversation
 	}
 	if req.InputKind == SubmissionKindAgentCommunication {
+		if len(req.Inputs) > 0 {
+			if strings.TrimSpace(req.Input) != "" || strings.TrimSpace(req.DisplayInput) != "" ||
+				len(req.ContentParts) > 0 || session.ActorRefHasIdentity(req.InputActor) {
+				return BeginTurnRequest{}, invalidSubmissionKind(req.InputKind)
+			}
+			req.Inputs = clonePreparedAgentCommunicationInputs(req.Inputs)
+			for _, item := range req.Inputs {
+				if err := session.ValidateAgentCommunicationActor(item.Source); err != nil {
+					return BeginTurnRequest{}, invalidAgentCommunication(err)
+				}
+			}
+			return req, nil
+		}
 		if err := session.ValidateAgentCommunicationActor(req.InputActor); err != nil {
 			return BeginTurnRequest{}, invalidAgentCommunication(err)
 		}
@@ -95,6 +109,16 @@ func (g *Gateway) prepareSubmitRequest(ctx context.Context, activeSession sessio
 	req.ContentParts = parts
 	req.Metadata = meta
 	return req, nil
+}
+
+func clonePreparedAgentCommunicationInputs(inputs []agent.AgentCommunicationInput) []agent.AgentCommunicationInput {
+	out := agent.CloneAgentCommunicationInputs(inputs)
+	for i := range out {
+		out[i].Input = strings.TrimSpace(out[i].Input)
+		out[i].DisplayInput = strings.TrimSpace(out[i].DisplayInput)
+		out[i].ContentParts = append([]model.ContentPart(nil), out[i].ContentParts...)
+	}
+	return out
 }
 
 func invalidAgentCommunication(err error) error {

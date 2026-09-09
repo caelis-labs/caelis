@@ -131,7 +131,7 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"Write",
 		"Patch",
 		"Task",
-		"Spawn",
+		"StartThread",
 	} {
 		if containsStandalonePromptTerm(toolNeutralPrompt, forbidden) {
 			t.Fatalf("prompt should not contain tool-coupled %q:\n%s", forbidden, prompt)
@@ -190,7 +190,7 @@ func TestBuildSystemPromptCoreContractIsConciseAndToolAgnostic(t *testing.T) {
 		"Write",
 		"Patch",
 		"Task",
-		"Spawn",
+		"StartThread",
 		"with_additional_permissions",
 	} {
 		if containsStandalonePromptTerm(toolNeutralPrompt, forbidden) {
@@ -228,7 +228,7 @@ func TestSystemPromptCollaborationGuidanceIsMainOnlyAndIdempotent(t *testing.T) 
 		t.Fatalf("collaboration guidance is not idempotent:\n%s", got)
 	}
 	for _, want := range []string{
-		"Spawn a collaborating Agent only for independent work that benefits from parallelism or focused expertise.",
+		"StartThread creates a collaborating Agent only for independent work that benefits from parallelism or focused expertise.",
 		"Give each collaborator a self-contained task: goal, scope, constraints, edit permission, and expected output.",
 		"Own integration, validation, and the user-facing result. Verify only findings that affect the next action; do not repeat completed work.",
 	} {
@@ -249,6 +249,41 @@ func TestSystemPromptCollaborationGuidanceIsMainOnlyAndIdempotent(t *testing.T) 
 	end := strings.Index(mainPrompt, "</system_instructions>") + len("</system_instructions>")
 	if got, max := len(mainPrompt[:end]), 4700; got > max {
 		t.Fatalf("system instructions with collaboration length = %d, want <= %d:\n%s", got, max, mainPrompt)
+	}
+}
+
+func TestSystemPromptCollaboratorIdentityIsControlOwnedAndIdempotent(t *testing.T) {
+	t.Parallel()
+
+	base, err := buildSystemPrompt(promptConfig{
+		AppName:      "CAELIS",
+		WorkspaceDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("buildSystemPrompt() error = %v", err)
+	}
+	childPrompt := systemPromptWithCollaboratorIdentity(systemPromptWithoutCollaborationGuidance(systemPromptWithCollaborationGuidance(base)), "orbit", "delegated")
+	if strings.Contains(childPrompt, "StartThread creates a collaborating Agent") {
+		t.Fatalf("collaborator prompt retained main-only guidance:\n%s", childPrompt)
+	}
+	for _, want := range []string{
+		"## Collaboration",
+		"Your assigned handle is orbit.",
+		"Address the parent as parent.",
+		"Your role is delegated.",
+	} {
+		if !strings.Contains(childPrompt, want) {
+			t.Fatalf("collaborator identity missing %q:\n%s", want, childPrompt)
+		}
+	}
+	if strings.Index(childPrompt, "## Collaboration") > strings.Index(childPrompt, "</system_instructions>") {
+		t.Fatalf("collaborator identity rendered outside system instructions:\n%s", childPrompt)
+	}
+	if strings.Contains(childPrompt, "ReceiveMessages") || strings.Contains(childPrompt, "CAELIS_COLLABORATION_TOKEN") {
+		t.Fatalf("collaborator system prompt leaked mailbox polling or secrets:\n%s", childPrompt)
+	}
+	if got := systemPromptWithCollaboratorIdentity(childPrompt, "orbit", "delegated"); got != childPrompt {
+		t.Fatalf("collaborator identity is not idempotent:\n%s", got)
 	}
 }
 

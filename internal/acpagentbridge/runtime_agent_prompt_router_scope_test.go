@@ -94,7 +94,7 @@ func TestRuntimeAgentPromptRouterKeepsSiblingTerminalOutputsWithSharedToolIDs(t 
 }
 
 func TestRuntimeAgentPromptRouterChildTerminalKeepsOnlyLatestAssistantMessage(t *testing.T) {
-	parentTool := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+	parentTool := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 	first := scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", eventstream.UpdateAgentMessage, "message-a", "repeat", false)
 	first.ParentTool = parentTool
 	firstFinalReplay := scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", eventstream.UpdateAgentMessage, "message-a", "repeat", true)

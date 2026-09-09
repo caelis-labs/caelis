@@ -295,7 +295,6 @@ func (tm *taskRuntime) persistSubagentCompletion(completion *subagentCompletion)
 	}
 	if !completion.taskPersisted {
 		if task.running {
-			task.seedStreamFromResult(completion.result)
 			task.applyResult(completion.result)
 		} else if completion.observedTerminal {
 			task.applyResult(completion.result)
@@ -310,6 +309,9 @@ func (tm *taskRuntime) persistSubagentCompletion(completion *subagentCompletion)
 		task.mu.Unlock()
 	}
 
+	if completion.activity != nil {
+		completion.activity.settled.Store(true)
+	}
 	if err := tm.appendSideSubagentFinalEvent(completion.ctx, task); err != nil {
 		return err
 	}
@@ -359,7 +361,7 @@ func subagentCompletionNotice(task *subagentTask, result delegation.Result) (ses
 	task.mu.Unlock()
 
 	state := strings.TrimSpace(string(result.State))
-	text := fmt.Sprintf("Subagent @%s is %s. Use Task read with handle %s for its full result.", strings.TrimPrefix(handle, "@"), state, handle)
+	text := fmt.Sprintf("Subagent @%s is %s.", strings.TrimPrefix(handle, "@"), state)
 	if result.State == delegation.StateCancelled || result.State == delegation.StateInterrupted {
 		text = fmt.Sprintf("Subagent @%s is interrupted.", strings.TrimPrefix(handle, "@"))
 	}

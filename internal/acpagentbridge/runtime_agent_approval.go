@@ -2,6 +2,7 @@ package acpagentbridge
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -30,7 +31,11 @@ func (r approvalRequester) reviewApproval(ctx context.Context, req agent.Approva
 	payload := approval.PayloadFromRuntimeRequest(req)
 	var reviewModel model.LLM
 	if r.modelResolver != nil {
-		reviewModel, _ = r.modelResolver.ResolveApprovalModel(ctx, req.SessionRef)
+		var err error
+		reviewModel, err = r.modelResolver.ResolveApprovalModel(ctx, req.SessionRef)
+		if err != nil {
+			return agent.ApprovalResponse{}, fmt.Errorf("resolve automatic approval model: %w", err)
+		}
 	}
 	result, err := approval.ReviewerAdapter{Reviewer: r.reviewer}.Decide(ctx, approval.ReviewRequest{
 		SessionRef:     req.SessionRef,
@@ -43,16 +48,7 @@ func (r approvalRequester) reviewApproval(ctx context.Context, req agent.Approva
 		RuntimeRequest: req,
 	})
 	if err != nil {
-		rationale := "automatic approval review failed: " + err.Error()
-		result = approval.FinalizeReviewResult(payload, approval.ReviewResult{
-			Approved:       false,
-			Outcome:        string(approval.StatusRejected),
-			Risk:           "unknown",
-			Authorization:  "unknown",
-			Rationale:      rationale,
-			DisplayText:    approval.FormatReviewText(false, "unknown", "unknown", rationale),
-			DecisionSource: string(approval.ModeAutoReview),
-		})
+		return agent.ApprovalResponse{}, fmt.Errorf("automatic approval review failed: %w", err)
 	}
 	return approval.RuntimeResponseFromFinalReview(result), nil
 }

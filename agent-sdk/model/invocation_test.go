@@ -64,3 +64,25 @@ func TestNestedInvocationObserversReceiveEachAttemptOnce(t *testing.T) {
 		t.Fatalf("outer=%d inner=%d", outer, inner)
 	}
 }
+
+func TestInvocationAdmissionStopsRetriesBeforeProviderAndReceipt(t *testing.T) {
+	inner := &retryTestLLM{errs: []error{errors.New("provider unavailable"), nil}}
+	llm := WithRetry(inner, RetryConfig{MaxRetries: 3, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond})
+	var admitted, receipts int
+	exhausted := errors.New("budget exhausted")
+	ctx := WithInvocationObserver(t.Context(), func(Invocation) { receipts++ })
+	ctx = WithInvocationAdmission(ctx, func(context.Context, *Request) error {
+		admitted++
+		if admitted > 1 {
+			return exhausted
+		}
+		return nil
+	})
+	var last error
+	for _, err := range Generate(ctx, llm, &Request{}) {
+		last = err
+	}
+	if !errors.Is(last, exhausted) || inner.calls != 1 || receipts != 1 {
+		t.Fatalf("err=%v calls=%d receipts=%d", last, inner.calls, receipts)
+	}
+}

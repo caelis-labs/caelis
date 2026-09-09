@@ -30,8 +30,12 @@ func (s *runtimeComposition) LoadHistory(ctx context.Context, req sdksubagent.Hi
 }
 
 func (s *runtimeComposition) delegationPlacementResolver(runtimeCfg stackRuntimeConfig) acpsubagent.PlacementResolver {
-	return func(_ context.Context, _ sdksubagent.SpawnContext, req delegation.TargetRequest) (acpsubagent.AgentConfig, error) {
-		return s.resolveDelegationPlacement(req, runtimeCfg)
+	return func(_ context.Context, spawn sdksubagent.SpawnContext, req delegation.TargetRequest) (acpsubagent.AgentConfig, error) {
+		cfg, err := s.resolveDelegationPlacement(req, runtimeCfg)
+		if err == nil && !cfg.BuiltinRuntime {
+			cfg.MCPServers, cfg.MCPGrant, err = s.collaborationServers(spawn)
+		}
+		return cfg, err
 	}
 }
 
@@ -43,6 +47,7 @@ func injectACPControlPlane(
 	endpointResolver endpoint.Resolver,
 ) (runtime.Config, *acpassembly.ControlPlane, error) {
 	controlPlane, err := acpassembly.NewControlPlane(acpassembly.ControlPlaneConfig{
+		Diagnostics:       cfg.Diagnostics,
 		Agents:            resolved.Agents,
 		PlacementResolver: placementResolver,
 		SessionPreparer:   sessionPreparer,

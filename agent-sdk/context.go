@@ -146,6 +146,8 @@ type ChildEndpointRef struct {
 // steering must retain the running producer's binding even when this request
 // carries another candidate; the first output may not yet be observed by Task.
 type ChildInputRequest struct {
+	// Messages is an ordered batch; when set, singular source/content fields must be empty.
+	Messages     []AgentCommunicationInput `json:"messages,omitempty"`
 	Target       ChildEndpointRef          `json:"target"`
 	Source       session.ActorRef          `json:"source"`
 	ActivityID   string                    `json:"activity_id,omitempty"`
@@ -181,6 +183,12 @@ type ChildInputRunner interface {
 	SubmitChildInput(context.Context, ChildInputRequest) (ChildInputResult, error)
 }
 
+// ChildInputBatchRunner explicitly accepts all ordered Messages in one admission.
+// A singular-only runner must never silently accept and discard a batch.
+type ChildInputBatchRunner interface {
+	SubmitChildInputBatch(context.Context, ChildInputRequest) (ChildInputResult, error)
+}
+
 // ChildEndpointBinder rehydrates process-local endpoint ownership from one
 // Runtime-validated durable binding. It performs no remote operation; a later
 // ChildInputRunner call may resume the exact remote Session.
@@ -210,6 +218,7 @@ type SubagentApprovalToolCall = EndpointApprovalToolCall
 // SubagentApprovalRequest is one child permission request bridged into the
 // parent runtime approval surface.
 type SubagentApprovalRequest struct {
+	Origin       ApprovalOrigin           `json:"origin"`
 	SessionRef   session.SessionRef       `json:"session_ref,omitempty"`
 	Session      session.Session          `json:"session,omitempty"`
 	TaskID       string                   `json:"task_id,omitempty"`

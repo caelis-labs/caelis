@@ -248,6 +248,11 @@ func TestChildActivityOutputDoesNotWaitForTaskControl(t *testing.T) {
 
 func newIdleChildActivityTask(t *testing.T) (*Runtime, *subagentTask, *runtimeChildInputRunner) {
 	t.Helper()
+	return newIdleChildActivityTaskWithRole(t, session.ParticipantRoleDelegated)
+}
+
+func newIdleChildActivityTaskWithRole(t *testing.T, role session.ParticipantRole) (*Runtime, *subagentTask, *runtimeChildInputRunner) {
+	t.Helper()
 	runner := &runtimeChildInputRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first done"}}
 	r, active := newSubagentTaskTestRuntime(t, runner)
 	_, err := r.sessions.BindController(t.Context(), session.BindControllerRequest{
@@ -257,7 +262,7 @@ func newIdleChildActivityTask(t *testing.T) (*Runtime, *subagentTask, *runtimeCh
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := r.tasks.StartSubagent(t.Context(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{Agent: "helper", Prompt: "first"})
+	started, err := r.tasks.StartSubagent(t.Context(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{Agent: "helper", Prompt: "first", Role: role})
 	if err != nil {
 		t.Fatal(err)
 	}

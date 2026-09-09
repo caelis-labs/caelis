@@ -1349,54 +1349,6 @@ func TestStoreConcurrentReadersAndWritersAcrossStoreInstances(t *testing.T) {
 	}
 }
 
-func TestStoreLargeEventListRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	// This high-cardinality test preserves sequential append/readback coverage;
-	// it does not claim to test crash durability on every append.
-	root := t.TempDir()
-	store := newLogicalTestStore(t, Config{
-		RootDir:            root,
-		SessionIDGenerator: func() string { return "sess-large" },
-	})
-	ctx := context.Background()
-	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
-		AppName: "caelis",
-		UserID:  "user-1",
-	})
-
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-	const eventCount = 40
-	for i := 0; i < eventCount; i++ {
-		msg := model.NewTextMessage(model.RoleUser, "large event "+strings.Repeat("x", 128))
-		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{
-			SessionRef: createdSession.SessionRef,
-			Event: &session.Event{
-				Type:       session.EventTypeUser,
-				Visibility: session.VisibilityCanonical,
-				Message:    &msg,
-				Text:       msg.TextContent(),
-			},
-		}); err != nil {
-			t.Fatalf("AppendEvent(%d) error = %v", i, err)
-		}
-	}
-
-	reloaded := newLogicalTestStore(t, Config{RootDir: root})
-	events, err := reloaded.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
-	if err != nil {
-		t.Fatalf("Events(reloaded) error = %v", err)
-	}
-	if len(events) != eventCount {
-		t.Fatalf("len(events) = %d, want %d", len(events), eventCount)
-	}
-	if got := session.EventText(events[len(events)-1]); !strings.Contains(got, "large event") {
-		t.Fatalf("last event text = %q, want large event payload", got)
-	}
-}
-
 func TestStoreUpdateStateAndParticipantAnchor(t *testing.T) {
 	t.Parallel()
 

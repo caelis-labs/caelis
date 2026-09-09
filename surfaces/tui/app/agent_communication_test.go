@@ -67,7 +67,7 @@ func TestReceivedAgentCommunicationOpensOverlayForLongMessage(t *testing.T) {
 		Update: eventstream.ToolCall{
 			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
 			Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-			RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("Spawn"),
+			RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	running := eventstream.ToolStatusInProgress
@@ -75,7 +75,7 @@ func TestReceivedAgentCommunicationOpensOverlayForLongMessage(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
-			RawOutput: map[string]any{"handle": "kian", "state": "running"}, Meta: acpToolNameMeta("Spawn"),
+			RawOutput: map[string]any{"handle": "kian", "state": "running"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	view := requireSubagentOutputViewForTest(t, model, "spawn-1")
@@ -126,28 +126,28 @@ func TestReceivedAgentCommunicationOpensOverlayForLongMessage(t *testing.T) {
 	}
 }
 
-func TestSubagentOverlayRendersParentMessageAsUserInput(t *testing.T) {
+func TestSubagentOverlayRendersParentMessageAsAgentCommunication(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	view := model.ensureSubagentOutputView("spawn-1")
 	view.observeChildEvent(TranscriptEvent{
-		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent,
-		NarrativeKind: TranscriptNarrativeUser, Actor: "parent", Text: "continue",
+		Kind: TranscriptEventAgentCommunication, Scope: ACPProjectionSubagent,
+		AgentSourceKind: "controller", AgentSourceID: "parent", AgentSourceName: "parent", Text: "continue",
 	})
 	blocks := view.document.Blocks()
 	if len(blocks) != 1 {
 		t.Fatalf("overlay blocks = %#v, want one participant timeline block", blocks)
 	}
 	block, ok := blocks[0].(*ParticipantTurnBlock)
-	if !ok || len(block.Events) != 1 || block.Events[0].Kind != SEUserInput || block.Events[0].Text != "parent: continue" {
+	if !ok || len(block.Events) != 1 || block.Events[0].Kind != SEAgentCommunication || block.Events[0].Text != "continue" || block.Events[0].SourceName != "parent" {
 		t.Fatalf("overlay block = %#v, want parent user message", blocks[0])
 	}
 	if !subagentOutputViewHasTranscript(view) {
 		t.Fatal("Agent communication did not count as overlay transcript")
 	}
 	plain := renderedRowsPlain(block.Render(model.blockRenderContext(80)))
-	if !strings.Contains(plain, "> parent: continue") || strings.Contains(plain, "[kernel]") {
+	if !strings.Contains(plain, "• parent: continue") || strings.Contains(plain, "[kernel]") {
 		t.Fatalf("overlay Agent communication = %q", plain)
 	}
 }
@@ -196,8 +196,8 @@ func TestAgentCommunicationHeaderUsesThemeHandleAndNormalBody(t *testing.T) {
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: theme}
 	row := renderAgentMessageRow("block", "kian[breeze]", "compact message", ctx, "")
-	if got := ansiTextForForeground(t, row.Styled, ctx.Theme.Focus); !strings.Contains(got, "kian") {
-		t.Fatalf("Agent source did not receive focus styling: %q", row.Styled)
+	if got := ansiTextForForeground(t, row.Styled, ctx.Theme.AgentMessageReceivedFg); !strings.Contains(got, "kian") {
+		t.Fatalf("Agent source did not receive incoming styling: %q", row.Styled)
 	}
 	if got := ansiTextForForeground(t, row.Styled, ctx.Theme.TextStyle().GetForeground()); !strings.Contains(got, "compact message") {
 		t.Fatalf("Agent message did not retain normal text styling: %q", row.Styled)

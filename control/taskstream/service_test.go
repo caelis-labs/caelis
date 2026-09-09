@@ -18,6 +18,66 @@ import (
 
 var taskStreamTestSecret = []byte("0123456789abcdef0123456789abcdef")
 
+func TestEventsPreservesRecordLocalSubagentActivityAcrossReplay(t *testing.T) {
+	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
+	entry.State = task.StateRunning
+	entry.Running = true
+	entry.Metadata["turn_id"] = "task-1:2"
+	entry.Metadata["child_activity_id"] = "activity-2"
+	store := newTaskStreamTestStore(entry)
+	spool := newTaskStreamTestSpool(t)
+	recorder := NewRecorder(spool, nil)
+	first := recorder.BindTaskOutput(t.Context(), output.Binding{
+		SessionID: "session-1", TaskID: "task-1", TerminalID: "subagent-task-1",
+		ActivityID: "activity-1", Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true,
+	})
+	second := recorder.BindTaskOutput(t.Context(), output.Binding{
+		SessionID: "session-1", TaskID: "task-1", TerminalID: "subagent-task-1",
+		ActivityID: "activity-2", Kind: output.TaskKindSubagent,
+	})
+	if err := first.ObserveTaskOutput(t.Context(), output.Event{
+		Running: true, OccurredAt: time.Unix(100, 0),
+		Event: &session.Event{ID: "input-1", Type: session.EventTypeContext, Text: "first turn"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.ObserveTaskOutput(t.Context(), output.Event{
+		Running: true, OccurredAt: time.Unix(110, 0),
+		Event: &session.Event{ID: "input-2", Type: session.EventTypeContext, Text: "second turn"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	service := newTaskStreamTestService(t, store, spool)
+	read := func() []Record {
+		t.Helper()
+		batch, err := service.Events(t.Context(), Principal{ID: "owner"}, ReadRequest{
+			SessionID: "session-1", TaskID: "task-1",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var records []Record
+		for _, delivery := range batch.Deliveries {
+			records = append(records, delivery.Records...)
+		}
+		if len(records) != 2 {
+			t.Fatalf("records = %#v, want two activity frames", records)
+		}
+		return records
+	}
+	live := read()
+	replay := read()
+	for _, records := range [][]Record{live, replay} {
+		if records[0].Frame.ActivityID != "activity-1" || records[1].Frame.ActivityID != "activity-2" {
+			t.Fatalf("record-local ActivityID = %q/%q, want activity-1/activity-2", records[0].Frame.ActivityID, records[1].Frame.ActivityID)
+		}
+		if records[0].Task.CurrentTurnID != "task-1:2" || records[1].Task.CurrentTurnID != "task-1:2" {
+			t.Fatalf("latest snapshot CurrentTurnID = %q/%q", records[0].Task.CurrentTurnID, records[1].Task.CurrentTurnID)
+		}
+	}
+}
+
 func TestEventsReadsExactControlSpool(t *testing.T) {
 	entry := taskStreamTestEntry("session-1", "task-1", task.KindCommand)
 	entry.State = task.StateRunning

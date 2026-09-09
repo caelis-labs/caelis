@@ -1006,9 +1006,9 @@ func TestDurableTaskWaitNarrativeSiblingsRemainVisibleAcrossHiddenControls(t *te
 			model = applyACPEnvelopeForTest(t, model, envelope)
 		}
 	}
-	apply("spawn-call", narrativeTestToolCallEvent("spawn-1", "Spawn", `{"agent":"breeze","prompt":"inspect"}`, "", ""))
+	apply("spawn-call", narrativeTestToolCallEvent("spawn-1", "StartThread", `{"agent":"breeze","prompt":"inspect"}`, "", ""))
 	apply("spawn-running", narrativeTestToolResultEvent(
-		"spawn-1", "Spawn", "running",
+		"spawn-1", "StartThread", "running",
 		map[string]any{"agent": "breeze", "prompt": "inspect"},
 		map[string]any{"handle": "child-1", "state": "running", "target_kind": "subagent"},
 	))
@@ -1032,7 +1032,7 @@ func TestDurableTaskWaitNarrativeSiblingsRemainVisibleAcrossHiddenControls(t *te
 		map[string]any{"action": "wait", "handle": "child-1"},
 		map[string]any{
 			"action": "wait", "handle": "child-1", "state": "completed", "target_kind": "subagent",
-			"parent_call": "spawn-1", "parent_tool": "Spawn", "final_message": "done",
+			"parent_call": "spawn-1", "parent_tool": "StartThread", "final_message": "done",
 		},
 	))
 	apply("read-call", narrativeTestToolCallEvent(
@@ -1273,7 +1273,7 @@ func TestSemanticBoundaryStillAllowsNewDenseExplorationRun(t *testing.T) {
 func narrativeTestToolCallEvent(toolCallID, toolName, args, reasoning, assistant string) *session.Event {
 	input := map[string]any{}
 	switch toolName {
-	case "Spawn":
+	case "StartThread":
 		input = map[string]any{"agent": "breeze", "prompt": "inspect"}
 	case "Task":
 		input = map[string]any{"action": "wait", "handle": "child-1"}

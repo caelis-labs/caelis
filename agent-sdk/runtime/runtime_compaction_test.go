@@ -2135,7 +2135,7 @@ func TestOverflowCompactionIncludesPersistedCurrentTurnFacts(t *testing.T) {
 	current.IdempotencyKey = "input-current"
 	toolResult := &session.Event{ID: "event-tool-result", Type: session.EventTypeToolResult}
 
-	source, pending := overflowCompactionEvents([]*session.Event{prior, current, toolResult}, current)
+	source, pending := overflowCompactionEvents([]*session.Event{prior, current, toolResult}, []*session.Event{current})
 	if len(source) != 3 || source[0].ID != prior.ID || source[1].ID != current.ID || source[2].ID != toolResult.ID {
 		t.Fatalf("overflow source events = %+v, want complete durable current-turn prefix", source)
 	}
@@ -2143,7 +2143,7 @@ func TestOverflowCompactionIncludesPersistedCurrentTurnFacts(t *testing.T) {
 		t.Fatalf("overflow pending events = %+v, want none after current input is durable", pending)
 	}
 
-	source, pending = overflowCompactionEvents([]*session.Event{prior, current}, current)
+	source, pending = overflowCompactionEvents([]*session.Event{prior, current}, []*session.Event{current})
 	if len(source) != 1 || source[0].ID != prior.ID {
 		t.Fatalf("pre-tool overflow source events = %+v, want history before current input", source)
 	}
@@ -2154,7 +2154,7 @@ func TestOverflowCompactionIncludesPersistedCurrentTurnFacts(t *testing.T) {
 	unpersisted := userTextEvent("unpersisted current turn")
 	unpersisted.ID = "event-unpersisted"
 	unpersisted.IdempotencyKey = "input-unpersisted"
-	source, pending = overflowCompactionEvents([]*session.Event{prior}, unpersisted)
+	source, pending = overflowCompactionEvents([]*session.Event{prior}, []*session.Event{unpersisted})
 	if len(source) != 1 || source[0].ID != prior.ID {
 		t.Fatalf("unpersisted overflow source events = %+v, want prior durable history", source)
 	}

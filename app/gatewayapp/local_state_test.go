@@ -1507,6 +1507,18 @@ func TestDefaultStoreDirUsesHomeDirectory(t *testing.T) {
 
 func newLocalStateTestStack(t *testing.T) (*Stack, session.Session) {
 	t.Helper()
+	stack := newLocalStateTestHost(t, nil)
+	activeSession, err := startGatewayAppTestSession(context.Background(), stack, "state-test-session")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	return stack, activeSession
+}
+
+// Session scenarios retain real Memory. Configuration-only tests can supply
+// the Memory stub without paying for unrelated appliance provisioning.
+func newLocalStateTestHost(t *testing.T, memoryHost runtimeMemoryHost) *Stack {
+	t.Helper()
 	root := t.TempDir()
 	workdir := t.TempDir()
 	stack, err := newGatewayAppTestStack(t, Config{
@@ -1516,6 +1528,7 @@ func newLocalStateTestStack(t *testing.T) (*Stack, session.Session) {
 		WorkspaceKey: workdir,
 		WorkspaceCWD: workdir,
 		ApprovalMode: "auto-review",
+		memoryHost:   memoryHost,
 		Assembly:     assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
@@ -1526,11 +1539,7 @@ func newLocalStateTestStack(t *testing.T) (*Stack, session.Session) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	activeSession, err := startGatewayAppTestSession(context.Background(), stack, "state-test-session")
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-	return stack, activeSession
+	return stack
 }
 
 type gatewayAppCompactionOllamaServer struct {

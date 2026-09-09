@@ -17,6 +17,7 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	// observed before a later SendMessage resolves that owner's public handle.
 	// Decorating the whole batch first would permanently erase the structured
 	// target before the earlier Spawn event had mounted its view.
+	msg.Events = expandCollaborationMessages(msg.Events)
 	subagentOutputChanged := false
 	for index := range msg.Events {
 		one := msg.Events[index : index+1]
@@ -433,11 +434,6 @@ func (m *Model) applyTranscriptApproval(event TranscriptEvent) (tea.Model, tea.C
 }
 
 func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model, tea.Cmd) {
-	if strings.TrimSpace(event.AnchorToolCallID) != "" {
-		if applied, cmd := m.applyAnchoredApprovalReviewToTool(event); applied {
-			return m, cmd
-		}
-	}
 	switch event.Scope {
 	case ACPProjectionParticipant:
 		return m.applyTranscriptApprovalReviewToParticipantTurn(event)
@@ -460,34 +456,6 @@ func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model,
 	}
 }
 
-func (m *Model) applyAnchoredApprovalReviewToTool(event TranscriptEvent) (bool, tea.Cmd) {
-	if m == nil {
-		return false, nil
-	}
-	callID := strings.TrimSpace(event.AnchorToolCallID)
-	if callID == "" {
-		return false, nil
-	}
-	if parentToolIsTaskControl(event.AnchorToolName) {
-		return false, nil
-	}
-	output := approvalReviewTailOutput(event)
-	if output == "" {
-		return true, nil
-	}
-	toolName := strings.TrimSpace(event.AnchorToolName)
-	for _, docBlock := range m.doc.Blocks() {
-		block, ok := docBlock.(*MainACPTurnBlock)
-		if !ok || !mainACPBlockHasToolCall(block, callID) {
-			continue
-		}
-		block.UpdateToolWithMeta(callID, toolName, "", output, false, false, ToolUpdateMeta{ToolKind: "execute"})
-		m.markViewportBlockDirty(block.BlockID())
-		return true, m.requestStreamViewportSync()
-	}
-	return false, nil
-}
-
 func mainACPBlockHasToolCall(block *MainACPTurnBlock, callID string) bool {
 	if block == nil {
 		return false
@@ -502,17 +470,6 @@ func mainACPBlockHasToolCall(block *MainACPTurnBlock, callID string) bool {
 		}
 	}
 	return false
-}
-
-func approvalReviewTailOutput(event TranscriptEvent) string {
-	return transcript.ApprovalReviewTailOutput(transcript.ApprovalReviewFields{
-		Tool:          event.ApprovalTool,
-		Command:       event.ApprovalCommand,
-		Status:        event.ApprovalStatus,
-		Risk:          event.ApprovalRisk,
-		Authorization: event.ApprovalAuth,
-		Text:          event.ApprovalText,
-	})
 }
 
 func (m *Model) applyTranscriptParticipant(event TranscriptEvent) (tea.Model, tea.Cmd) {

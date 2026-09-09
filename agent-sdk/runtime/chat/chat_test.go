@@ -1609,7 +1609,7 @@ func TestChildVisibilityMirrorDoesNotChangeParentModelContext(t *testing.T) {
 			ScopeID:       "task-1",
 			TaskID:        "task-1",
 			SourceEventID: "task-1:1",
-			ParentTool:    session.EventParentTool{CallID: "spawn-1", Name: "Spawn"},
+			ParentTool:    session.EventParentTool{CallID: "spawn-1", Name: "StartThread"},
 		},
 		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
 			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
@@ -1931,9 +1931,9 @@ func TestMessagesFromContextGroupsConsecutiveToolCalls(t *testing.T) {
 				Text:    "demo async tools",
 			},
 			persistedToolCallEvent("command-1", "RunCommand", map[string]any{"command": "sleep 1", "yield_time_ms": 5}),
-			persistedToolCallEvent("spawn-1", "Spawn", map[string]any{"agent": "self", "prompt": "check"}),
+			persistedToolCallEvent("spawn-1", "StartThread", map[string]any{"agent": "self", "prompt": "check"}),
 			persistedToolResultEvent("command-1", "RunCommand", map[string]any{"command": "sleep 1", "yield_time_ms": 5}, map[string]any{"task_id": "command-task", "state": "running"}),
-			persistedToolResultEvent("spawn-1", "Spawn", map[string]any{"agent": "self", "prompt": "check"}, map[string]any{"task_id": "spawn-task", "state": "running"}),
+			persistedToolResultEvent("spawn-1", "StartThread", map[string]any{"agent": "self", "prompt": "check"}, map[string]any{"task_id": "spawn-task", "state": "running"}),
 			{
 				Type:    session.EventTypeUser,
 				Message: ptrMessage(model.NewTextMessage(model.RoleUser, "next turn")),
@@ -1977,7 +1977,7 @@ func TestMessagesFromContextDropsIncompleteToolCallRun(t *testing.T) {
 				Text:    "demo async tools",
 			},
 			persistedToolCallEvent("command-1", "RunCommand", map[string]any{"command": "sleep 1"}),
-			persistedToolCallEvent("spawn-1", "Spawn", map[string]any{"agent": "self", "prompt": "check"}),
+			persistedToolCallEvent("spawn-1", "StartThread", map[string]any{"agent": "self", "prompt": "check"}),
 			persistedToolResultEvent("command-1", "RunCommand", map[string]any{"command": "sleep 1"}, map[string]any{"task_id": "command-task", "state": "running"}),
 			{
 				Type:    session.EventTypeUser,
@@ -2614,11 +2614,11 @@ func TestToolResultEventCompletesSpawnInvocationWhileChildRuns(t *testing.T) {
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "spawn-1",
-		Name: "Spawn",
+		Name: "StartThread",
 		Args: `{"agent":"self","prompt":"inspect"}`,
 	}, tool.Result{
 		ID:   "spawn-1",
-		Name: "Spawn",
+		Name: "StartThread",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"task_id": "task-1",
 			"state":   "running",

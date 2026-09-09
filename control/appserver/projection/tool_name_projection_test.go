@@ -42,7 +42,7 @@ func TestEventProjectorProjectsEventToolSemanticNameInStandardNotifications(t *t
 				Meta:      map[string]any{"event_only": "do not project"},
 				Tool: &session.EventTool{
 					ID:     "call-spawn",
-					Name:   "Spawn",
+					Name:   "StartThread",
 					Kind:   eventstream.ToolKindExecute,
 					Title:  "Spawn orbit: inspect",
 					Status: eventstream.ToolStatusCompleted,
@@ -50,7 +50,7 @@ func TestEventProjectorProjectsEventToolSemanticNameInStandardNotifications(t *t
 					Output: map[string]any{"state": "completed"},
 				},
 			},
-			wantName: "Spawn",
+			wantName: "StartThread",
 		},
 	}
 
@@ -92,7 +92,7 @@ func TestEventProjectorProjectsProtocolToolSemanticNameWithoutEventMetaLeak(t *t
 		{
 			name:       "spawn update",
 			updateType: eventstream.UpdateToolCallInfo,
-			toolName:   "Spawn",
+			toolName:   "StartThread",
 			title:      "Spawn orbit: inspect",
 		},
 	}
@@ -165,7 +165,7 @@ func TestProtocolToolNameForUpdateKeepsCanonicalAndProtocolCandidatesOrdered(t *
 				Name: "Task",
 			}},
 			update: &session.ProtocolUpdate{
-				Meta: runtimeToolMeta("Spawn"), RawInput: map[string]any{"command": "go test"},
+				Meta: runtimeToolMeta("StartThread"), RawInput: map[string]any{"command": "go test"},
 				Title: "Spawn orbit", Kind: "execute",
 			},
 			want: "Task",
@@ -174,18 +174,18 @@ func TestProtocolToolNameForUpdateKeepsCanonicalAndProtocolCandidatesOrdered(t *
 			name:  "update meta wins event meta",
 			event: &session.Event{Meta: runtimeToolMeta("Task")},
 			update: &session.ProtocolUpdate{
-				Meta: runtimeToolMeta("Spawn"), RawInput: map[string]any{"command": "go test"},
+				Meta: runtimeToolMeta("StartThread"), RawInput: map[string]any{"command": "go test"},
 				Title: "Task wait", Kind: "execute",
 			},
-			want: "Spawn",
+			want: "StartThread",
 		},
 		{
 			name:  "empty canonical event tool does not skip update meta",
 			event: &session.Event{Tool: &session.EventTool{}},
 			update: &session.ProtocolUpdate{
-				Meta: runtimeToolMeta("Spawn"), Title: "Unknown action", Kind: "execute",
+				Meta: runtimeToolMeta("StartThread"), Title: "Unknown action", Kind: "execute",
 			},
-			want: "Spawn",
+			want: "StartThread",
 		},
 		{
 			name: "unmatched canonical message call does not skip update meta",
@@ -196,10 +196,10 @@ func TestProtocolToolNameForUpdateKeepsCanonicalAndProtocolCandidatesOrdered(t *
 				}},
 			}},
 			update: &session.ProtocolUpdate{
-				ToolCallID: "call-1", Meta: runtimeToolMeta("Spawn"),
+				ToolCallID: "call-1", Meta: runtimeToolMeta("StartThread"),
 				Title: "Unknown action", Kind: "execute",
 			},
-			want: "Spawn",
+			want: "StartThread",
 		},
 		{
 			name:  "event meta supplies maintained protocol name",

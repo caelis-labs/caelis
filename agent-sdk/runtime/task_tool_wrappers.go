@@ -29,9 +29,7 @@ import (
 func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session.SessionRef, spec agent.AgentSpec, toolCtx runtimeToolContext) []tool.Tool {
 	out := make([]tool.Tool, 0, len(spec.Tools)+2)
 	hasCommand := false
-	hasSpawn := false
 	hasTask := false
-	hasSendMessage := false
 	for _, one := range spec.Tools {
 		if one == nil {
 			continue
@@ -49,7 +47,6 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 				tasks:      r.tasks,
 			})
 		case isBuiltinSpawnTool(one):
-			hasSpawn = true
 			resolver, _ := one.(spawn.Resolver)
 			out = append(out, runtimeSpawnTool{
 				runtime:      r,
@@ -71,7 +68,6 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 				tasks:      r.tasks,
 			})
 		case isBuiltinSendMessageTool(one):
-			hasSendMessage = true
 			out = append(out, runtimeSendMessageTool{
 				base: one, runtime: r, session: session.CloneSession(activeSession),
 				sessionRef: session.NormalizeSessionRef(ref), external: toolCtx.inputSender,
@@ -80,23 +76,14 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 			out = append(out, one)
 		}
 	}
-	if (hasCommand || hasSpawn) && !hasTask {
+	if hasCommand && !hasTask {
 		out = append(out, runtimeTaskTool{
 			base:       tasktool.New(),
 			sessionRef: session.NormalizeSessionRef(ref),
 			tasks:      r.tasks,
 		})
 	}
-	// Product Agents assemble SendMessage explicitly with Spawn so AgentSpec is
-	// auditable. A hosted child receives its parent/sibling transport only at
-	// runtime through context, so that SDK host boundary remains the sole
-	// intentional augmentation.
-	if toolCtx.inputSender != nil && !hasSendMessage {
-		out = append(out, runtimeSendMessageTool{
-			base: sendmessage.New(), runtime: r, session: session.CloneSession(activeSession),
-			sessionRef: session.NormalizeSessionRef(ref), external: toolCtx.inputSender,
-		})
-	}
+
 	return out
 }
 
@@ -365,7 +352,7 @@ type runtimeSpawnTool struct {
 	approval     agent.ApprovalRequester
 }
 
-func (runtimeSpawnTool) RuntimeTaskResultSource(toolbinding.Token) bool { return true }
+// StartThread returns conversation identity; producer completion owns its output.
 
 func (t runtimeSpawnTool) Definition() tool.Definition {
 	def := tool.CloneDefinition(t.base.Definition())
@@ -443,13 +430,12 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	if err != nil {
 		return tool.Result{}, err
 	}
-	payload := taskToolPayload(snapshot)
+	payload := map[string]any{"id": snapshot.Ref.TaskID, "handle": snapshot.Handle, "state": snapshot.State, "revision": snapshot.Revision}
 	payload["supports_steering"] = taskSpecBool(snapshot.Metadata, "supports_steering")
 	if spawnContextUnsupported(snapshot) {
 		payload["system_hint"] = spawnContextUnsupportedHint
 	}
 	result := taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
-	t.tasks.markSubagentFinalResponseObserved(snapshot)
 	return result, nil
 }
 
@@ -577,7 +563,15 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 			callInput = data
 		}
 	}
+	origin := req.Origin
+	origin.Role = agent.ApprovalRoleSubagent
+	origin.ParentSessionID = r.sessionRef.SessionID
+	origin.TaskID = req.TaskID
+	origin.ParentCallID = req.ParentCallID
+	origin.ToolCallID = req.ToolCall.ID
+	origin.Agent = req.Agent
 	runtimeRequest := agent.ApprovalRequest{
+		Origin:     &origin,
 		SessionRef: r.sessionRef,
 		Session:    session.CloneSession(r.session),
 		Tool: tool.Definition{
@@ -628,6 +622,7 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 		Outcome:  strings.TrimSpace(resp.Outcome),
 		OptionID: strings.TrimSpace(resp.OptionID),
 		Approved: resp.Approved,
+		Reason:   resp.Reason, ReviewText: resp.ReviewText,
 	}, nil
 }
 
@@ -670,16 +665,11 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		result := t.callBatchTaskControl(ctx, call, normalizedAction, handles, input)
 		return result, nil
 	}
-	identity, err := t.tasks.resolveTaskHandle(ctx, t.sessionRef, handles[0])
+	identity, err := t.resolveJobHandle(ctx, handles[0])
 	if err != nil {
 		return tool.Result{}, err
 	}
-	if normalizedAction == "write" && identity.kind != taskapi.KindCommand {
-		return tool.Result{}, fmt.Errorf("task write accepts RunCommand handles only; use SendMessage for subagent %q", handles[0])
-	}
-	if normalizedAction == "cancel" && identity.kind == taskapi.KindSubagent {
-		return tool.Result{}, errorcode.New(errorcode.Unsupported, "Task cancel accepts RunCommand handles only")
-	}
+
 	yield := time.Duration(0)
 	switch normalizedAction {
 	case "wait":
@@ -707,9 +697,7 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if controlErr != nil {
 		return tool.Result{}, controlErr
 	}
-	if identity.kind == taskapi.KindSubagent && (normalizedAction == "read" || normalizedAction == "wait") {
-		snapshot = t.tasks.consumeSubagentFinalResponses(snapshot)
-	}
+
 	result := taskControlSnapshotToolResult(call, t.base.Definition(), snapshot, normalizedAction, actualWaitMS)
 	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, actualWaitMS, snapshot)
 	return result, nil
@@ -741,15 +729,12 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Cal
 				yield -= elapsed
 			}
 		}
-		identity, resolveErr := t.tasks.resolveTaskHandle(ctx, t.sessionRef, handle)
+		identity, resolveErr := t.resolveJobHandle(ctx, handle)
 		if resolveErr != nil {
 			items = append(items, taskBatchControlItem{Handle: handle, Err: resolveErr})
 			continue
 		}
-		if strings.EqualFold(action, "cancel") && identity.kind == taskapi.KindSubagent {
-			items = append(items, taskBatchControlItem{Handle: handle, Err: errorcode.New(errorcode.Unsupported, "Task cancel accepts RunCommand handles only")})
-			continue
-		}
+
 		req := taskapi.ControlRequest{
 			TaskID:    identity.taskID,
 			Yield:     yield,
@@ -769,9 +754,7 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Cal
 			items = append(items, taskBatchControlItem{Handle: handle, Err: err, ActualWaitMS: actualWaitMS})
 			continue
 		}
-		if identity.kind == taskapi.KindSubagent && strings.EqualFold(action, "wait") {
-			snapshot = t.tasks.consumeSubagentFinalResponses(snapshot)
-		}
+
 		items = append(items, taskBatchControlItem{Handle: handle, Snapshot: snapshot, OK: true, ActualWaitMS: actualWaitMS})
 	}
 	actualWaitMS := 0
@@ -797,7 +780,7 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Cal
 	itemsByHandle := make(map[string]taskBatchControlItem, len(handles))
 	targets := make([]target, 0, len(handles))
 	for _, handle := range handles {
-		identity, err := t.tasks.resolveTaskHandle(ctx, t.sessionRef, handle)
+		identity, err := t.resolveJobHandle(ctx, handle)
 		if err != nil {
 			itemsByHandle[handle] = taskBatchControlItem{Handle: handle, Err: err}
 			continue
@@ -829,7 +812,7 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Cal
 			// observation taken while another lifecycle owner is committing,
 			// or a normal yield expiry. Keep the other waits alive until one
 			// target is terminal or every target has returned.
-			if result.err == nil && (!result.snapshot.Running || snapshotHasUnreadSubagentFinalResponses(result.snapshot)) {
+			if result.err == nil && !result.snapshot.Running {
 				winner = result
 				break
 			}
@@ -843,9 +826,7 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Cal
 		for _, item := range targets {
 			waited := outcomes[item.handle]
 			if waited.err == nil {
-				if item.identity.kind == taskapi.KindSubagent {
-					waited.snapshot = t.tasks.consumeSubagentFinalResponses(waited.snapshot)
-				}
+
 				itemsByHandle[item.handle] = taskBatchControlItem{Handle: item.handle, Snapshot: waited.snapshot, OK: true, ActualWaitMS: waited.waitMS}
 				continue
 			}
@@ -856,9 +837,7 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Cal
 			snapshot, err := t.tasks.Read(ctx, t.sessionRef, taskapi.ControlRequest{
 				TaskID: item.identity.taskID, Principal: session.ActorKindTool, Source: "agent_tool",
 			})
-			if err == nil && item.identity.kind == taskapi.KindSubagent {
-				snapshot = t.tasks.consumeSubagentFinalResponses(snapshot)
-			}
+
 			itemsByHandle[item.handle] = taskBatchControlItem{Handle: item.handle, Snapshot: snapshot, OK: err == nil, Err: err}
 		}
 	}
@@ -1015,4 +994,12 @@ func taskRuntimeMetaSection(meta map[string]any, section string) map[string]any 
 		runtime[section] = values
 	}
 	return values
+}
+
+func (t runtimeTaskTool) resolveJobHandle(ctx context.Context, handle string) (taskControlIdentity, error) {
+	identity, err := t.tasks.resolveTaskHandle(ctx, t.sessionRef, handle)
+	if err == nil && identity.kind == taskapi.KindSubagent {
+		return taskControlIdentity{}, errorcode.New(errorcode.Unsupported, "participant handles require ReadThread or WaitThread; use SendMessage for input")
+	}
+	return identity, err
 }

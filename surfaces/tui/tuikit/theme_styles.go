@@ -383,3 +383,13 @@ func (t Theme) ScrollbarThumbStyle() lipgloss.Style {
 func (t Theme) LinkStyle() lipgloss.Style {
 	return t.MarkdownLinkStyle()
 }
+
+// AgentMessageSentStyle identifies the target of an outgoing Agent message.
+func (t Theme) AgentMessageSentStyle() lipgloss.Style {
+	return fgStyle(t.AgentMessageSentFg).Bold(true)
+}
+
+// AgentMessageReceivedStyle identifies the source of an incoming Agent message.
+func (t Theme) AgentMessageReceivedStyle() lipgloss.Style {
+	return fgStyle(t.AgentMessageReceivedFg).Bold(true)
+}

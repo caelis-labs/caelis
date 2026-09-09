@@ -34,7 +34,7 @@ func TestSpawnReplayNormalizesCanonicalTerminalStatus(t *testing.T) {
 	event := &session.Event{
 		Type: session.EventTypeToolResult,
 		Tool: &session.EventTool{
-			ID: "spawn-alpha", Name: "Spawn", Status: interrupted,
+			ID: "spawn-alpha", Name: "StartThread", Status: interrupted,
 			Output: map[string]any{
 				"state": "cancelled", "turn_id": "turn-1", "final_message": "stale completed final", "error": "cancelled by parent",
 			},

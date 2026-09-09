@@ -18,7 +18,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Update: eventstream.ToolCall{
 			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1",
 			Title: "Spawn orbit: inspect", Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-			RawInput: map[string]any{"agent": "orbit", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
+			RawInput: map[string]any{"agent": "orbit", "prompt": "inspect"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	running := eventstream.ToolStatusInProgress
@@ -26,7 +26,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
-			RawOutput: map[string]any{"handle": "command-48", "state": "running"}, Meta: acpToolNameMeta("Spawn"),
+			RawOutput: map[string]any{"handle": "command-48", "state": "running"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	taskInput := map[string]any{
@@ -57,13 +57,13 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "task-wait-1", Status: &completed,
 			RawInput: taskInput, RawOutput: map[string]any{
 				"action": "wait", "handle": "command-48", "target_kind": "subagent",
-				"state": "running", "parent_call": "spawn-1", "parent_tool": "Spawn",
+				"state": "running", "parent_call": "spawn-1", "parent_tool": "StartThread",
 			},
 			Meta: acpToolNameMeta("Task"),
 		},
@@ -111,13 +111,13 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "task-wait-1", Status: &completed,
 			RawInput: taskInput, RawOutput: map[string]any{
 				"action": "wait", "handle": "command-48", "target_kind": "subagent",
-				"state": "completed", "parent_call": "spawn-1", "parent_tool": "Spawn", "final_message": "done",
+				"state": "completed", "parent_call": "spawn-1", "parent_tool": "StartThread", "final_message": "done",
 			},
 			Meta: acpToolNameMeta("Task"),
 		},
@@ -129,7 +129,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &completed,
-			RawOutput: map[string]any{"handle": "command-48", "state": "completed"}, Meta: acpToolNameMeta("Spawn"),
+			RawOutput: map[string]any{"handle": "command-48", "state": "completed"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	if model.runningActivity.Phase != runningPhaseModelWait {
@@ -190,7 +190,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 			Kind:          eventstream.ToolKindExecute,
 			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "orbit", "prompt": "inspect"},
-			Meta:          acpToolNameMeta("Spawn"),
+			Meta:          acpToolNameMeta("StartThread"),
 		},
 	})
 	running := eventstream.ToolStatusInProgress
@@ -201,7 +201,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 			ToolCallID:    "spawn-1",
 			Status:        &running,
 			RawOutput:     map[string]any{"handle": "orbit", "state": "running"},
-			Meta:          acpToolNameMeta("Spawn"),
+			Meta:          acpToolNameMeta("StartThread"),
 		},
 	})
 	apply(eventstream.Envelope{
@@ -231,7 +231,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 		EventID: "wait-1-result",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo,
@@ -240,7 +240,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 			RawInput:      firstWaitInput,
 			RawOutput: map[string]any{
 				"action": "wait", "handle": "orbit", "target_kind": "subagent",
-				"state": "running", "parent_call": "spawn-1", "parent_tool": "Spawn",
+				"state": "running", "parent_call": "spawn-1", "parent_tool": "StartThread",
 			},
 			Meta: acpToolNameMeta("Task"),
 		},
@@ -271,7 +271,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 		EventID: "wait-2-result",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo,
@@ -280,7 +280,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 			RawInput:      secondWaitInput,
 			RawOutput: map[string]any{
 				"action": "wait", "handle": "orbit", "target_kind": "subagent",
-				"state": "completed", "parent_call": "spawn-1", "parent_tool": "Spawn",
+				"state": "completed", "parent_call": "spawn-1", "parent_tool": "StartThread",
 				"final_message": "child done",
 			},
 			Meta: acpToolNameMeta("Task"),
@@ -295,7 +295,7 @@ func TestSpawnPollingPreservesEveryNarrativeStepAndClosesActivity(t *testing.T) 
 			RawOutput: map[string]any{
 				"handle": "orbit", "state": "completed", "final_message": "child done",
 			},
-			Meta: acpToolNameMeta("Spawn"),
+			Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	apply(eventstream.Envelope{

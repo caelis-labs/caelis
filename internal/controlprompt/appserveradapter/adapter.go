@@ -586,7 +586,9 @@ func (t *sessionClientTurn) SubmitApproval(
 }
 
 func (t *sessionClientTurn) Cancel() {
-	_ = t.cancel(context.Background(), "tui interrupt")
+	ctx, cancel := context.WithTimeout(context.Background(), interruptCancelTimeout)
+	defer cancel()
+	_ = t.cancel(ctx, "client interrupt")
 }
 
 func (t *sessionClientTurn) cancel(ctx context.Context, reason string) error {

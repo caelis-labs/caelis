@@ -281,8 +281,22 @@ func (r *Runtime) Run(
 func validateRunInput(req agent.RunRequest) error {
 	switch normalizeInputKind(req.InputKind) {
 	case agent.SubmissionKindConversation:
+		if len(req.Inputs) > 0 {
+			return errorcode.New(errorcode.InvalidArgument, "agent-sdk/runtime: conversation turns cannot carry Agent communication batches")
+		}
 		return nil
 	case agent.SubmissionKindAgentCommunication:
+		if len(req.Inputs) > 0 {
+			if agentCommunicationSingularFieldsSet(req.Input, req.DisplayInput, req.ContentParts, req.InputActor) {
+				return errorcode.New(errorcode.InvalidArgument, "agent-sdk/runtime: batch and singular Agent communication cannot be combined")
+			}
+			for _, item := range req.Inputs {
+				if err := session.ValidateAgentCommunicationActor(item.Source); err != nil {
+					return errorcode.Wrap(errorcode.InvalidArgument, "agent-sdk/runtime: invalid Agent communication", err)
+				}
+			}
+			return nil
+		}
 		if err := session.ValidateAgentCommunicationActor(req.InputActor); err != nil {
 			return errorcode.Wrap(errorcode.InvalidArgument, "agent-sdk/runtime: invalid Agent communication", err)
 		}
@@ -323,14 +337,14 @@ func (r *Runtime) executeKernelTurn(
 	defer r.unregisterActiveRun(runID)
 
 	batch := make([]*session.Event, 0, 4)
-	inputEvent, inputErr := buildInputEvent(activeSession, turnID, req.InputKind, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputCompaction)
+	inputEvents, inputErr := buildRunInputEvents(activeSession, turnID, req)
 	if inputErr != nil {
 		handle.publishError(inputErr)
 		return
 	}
 	lifecycleErr := r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "", ""), func(runCtx context.Context) error {
 		return r.executeLifecycle(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "", ""), func(turnCtx context.Context) error {
-			return r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, inputEvent, &batch, handle)
+			return r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, inputEvents, &batch, handle)
 		})
 	})
 	if err := lifecycleErr; err != nil {

@@ -111,10 +111,13 @@ func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *tes
 	if err != nil {
 		t.Fatalf("task store Get() error = %v", err)
 	}
-	for _, key := range []string{"result", "final_message", "output", "text", "latest_output", "output_preview"} {
+	for _, key := range []string{"output", "text", "latest_output", "output_preview"} {
 		if _, exists := entry.Result[key]; exists {
 			t.Fatalf("side task index unexpectedly contains %q: %#v", key, entry.Result)
 		}
+	}
+	if got, _ := entry.Result["final_message"].(string); got != "review result" {
+		t.Fatalf("side task final_message = %q, want producer final result", got)
 	}
 	updated, err := runtime.sessions.Session(ctx, activeSession.SessionRef)
 	if err != nil {
@@ -631,6 +634,9 @@ func TestSubagentProducerCompletionDoesNotRequireTaskObservation(t *testing.T) {
 			t.Fatalf("Get() error = %v", getErr)
 		}
 		if stored != nil && !stored.Running && stored.State == task.StateCompleted {
+			if got, _ := stored.Result["final_message"].(string); got != "producer-owned final" {
+				t.Fatalf("durable final_message = %q, want producer result without Task observation", got)
+			}
 			break
 		}
 		if time.Now().After(deadline) {
@@ -663,7 +669,7 @@ func TestSubagentProducerCompletionDoesNotRequireTaskObservation(t *testing.T) {
 	if notice.Kind != runtimeinput.ModelContext || notice.Actor.Kind != session.ActorKindParticipant {
 		t.Fatalf("completion notice = %#v, want participant-authored model context", notice)
 	}
-	if !strings.Contains(notice.Text, "Use Task read") || !strings.Contains(notice.Text, started.Handle) || strings.Contains(notice.Text, "producer-owned final") {
+	if strings.Contains(notice.Text, "ReadThread") || !strings.Contains(notice.Text, started.Handle) || strings.Contains(notice.Text, "producer-owned final") {
 		t.Fatalf("completion notice text = %q, want compact handle hint without final payload", notice.Text)
 	}
 }
@@ -730,7 +736,7 @@ func TestSubagentCompletionNoticeDropsWhenParentIsIdle(t *testing.T) {
 	}
 	for _, event := range after {
 		if event != nil && session.EventTypeOf(event) == session.EventTypeUser &&
-			strings.Contains(session.EventText(event), "Use Task read") {
+			strings.Contains(session.EventText(event), "Use ReadThread") {
 			t.Fatalf("idle parent received persisted completion hint: %#v", event)
 		}
 	}
@@ -1099,61 +1105,25 @@ func TestStartSubagentAllocatesUniqueHandlesFromRuntimeReservations(t *testing.T
 	}
 }
 
-func TestTaskRuntimeSyncCanonicalToolResultPersistsSubagentResult(t *testing.T) {
-	ctx := context.Background()
-	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "raw full child answer\n"},
-	}
+func TestSubagentProducerFinalResultSurvivesRehydration(t *testing.T) {
+	ctx := t.Context()
+	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "producer final answer"}}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	runtime.tasks.store = newFileTaskStoreForTest(t)
-
-	snapshot, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent:  "helper",
-		Prompt: "review",
-		Source: "agent_spawn",
-	})
+	snapshot, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{Agent: "helper", Prompt: "review", Source: "agent_spawn"})
 	if err != nil {
-		t.Fatalf("StartSubagent() error = %v", err)
-	}
-	handle := taskStringValue(snapshot.Result["handle"])
-	if handle == "" {
-		t.Fatalf("snapshot handle empty: %#v", snapshot.Result)
+		t.Fatal(err)
 	}
 	entry, err := runtime.tasks.store.Get(ctx, snapshot.Ref.TaskID)
 	if err != nil {
-		t.Fatalf("task store Get(before sync) error = %v", err)
+		t.Fatal(err)
 	}
-	if _, exists := entry.Result["result"]; exists {
-		t.Fatalf("stored pre-canonical delegated result unexpectedly contains raw output: %#v", entry.Result)
+	if got, _ := entry.Result["final_message"].(string); got != "producer final answer" {
+		t.Fatalf("durable final_message = %q", got)
 	}
-
-	canonicalText := "canonical truncated child answer\n"
-	err = runtime.tasks.syncCanonicalToolResult(ctx, activeSession.SessionRef, &session.Event{
-		Type: session.EventTypeToolResult,
-		Meta: trustedTaskResultMeta(taskToolMeta(snapshot)),
-		Tool: &session.EventTool{
-			Name:   "Spawn",
-			Status: "completed",
-			Output: map[string]any{
-				"handle":        handle,
-				"state":         string(task.StateCompleted),
-				"agent":         "helper",
-				"final_message": canonicalText,
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("syncCanonicalToolResult() error = %v", err)
-	}
-	entry, err = runtime.tasks.store.Get(ctx, snapshot.Ref.TaskID)
-	if err != nil {
-		t.Fatalf("task store Get(after sync) error = %v", err)
-	}
-	if got, _ := entry.Result["final_message"].(string); got != canonicalText {
-		t.Fatalf("stored final_message = %q, want canonical result", got)
-	}
-	if _, exists := entry.Result["result"]; exists {
-		t.Fatalf("stored result unexpectedly kept pre-canonical field: %#v", entry.Result)
+	restored := runtime.tasks.rehydrateSubagentTask(entry).snapshot()
+	if got, _ := restored.Result["final_message"].(string); got != "producer final answer" || restored.Running || restored.State != task.StateCompleted {
+		t.Fatalf("rehydrated result = %#v", restored)
 	}
 }
 
@@ -1240,7 +1210,7 @@ func TestTaskCancelRejectsSubagentWithoutRemoteEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = target.Call(ctx, tool.Call{ID: "cancel-collaborator", Name: tasktool.ToolName, Input: raw})
-	if !errorcode.Is(err, errorcode.Unsupported) || !strings.Contains(err.Error(), "RunCommand handles only") {
+	if !errorcode.Is(err, errorcode.Unsupported) || !strings.Contains(err.Error(), "ReadThread or WaitThread") {
 		t.Fatalf("Task cancel error = %v, want unsupported command-only contract", err)
 	}
 	if runner.cancelCalls != 0 {
@@ -1262,7 +1232,7 @@ func TestSubagentTaskToolMetaCarriesPhysicalTurnCursorAndSpawnParent(t *testing.
 		Metadata: map[string]any{
 			"turn_id":     "task-1:2",
 			"parent_call": "spawn-call-1",
-			"parent_tool": "Spawn",
+			"parent_tool": "StartThread",
 		},
 	})
 	caelisMeta, ok := meta["caelis"].(map[string]any)
@@ -1283,7 +1253,7 @@ func TestSubagentTaskToolMetaCarriesPhysicalTurnCursorAndSpawnParent(t *testing.
 	if got, ok := taskInt64Value(taskMeta["event_cursor"]); !ok || got != 17 {
 		t.Fatalf("event_cursor = %#v, want 17", taskMeta["event_cursor"])
 	}
-	if taskStringValue(taskMeta["parent_call"]) != "spawn-call-1" || taskStringValue(taskMeta["parent_tool"]) != "Spawn" {
+	if taskStringValue(taskMeta["parent_call"]) != "spawn-call-1" || taskStringValue(taskMeta["parent_tool"]) != "StartThread" {
 		t.Fatalf("parent task metadata = %#v, want canonical Spawn relation", taskMeta)
 	}
 }
@@ -1298,7 +1268,7 @@ func TestSubagentTaskToolPayloadCarriesCanonicalFinalAndSpawnParent(t *testing.T
 		Metadata: map[string]any{
 			"turn_id":     "task-1:2",
 			"parent_call": "spawn-call-1",
-			"parent_tool": "Spawn",
+			"parent_tool": "StartThread",
 		},
 	})
 
@@ -1311,7 +1281,7 @@ func TestSubagentTaskToolPayloadCarriesCanonicalFinalAndSpawnParent(t *testing.T
 	if got := taskStringValue(payload["turn_id"]); got != "task-1:2" {
 		t.Fatalf("child Turn identity payload = %#v, want task-1:2", payload)
 	}
-	if taskStringValue(payload["parent_call"]) != "spawn-call-1" || taskStringValue(payload["parent_tool"]) != "Spawn" {
+	if taskStringValue(payload["parent_call"]) != "spawn-call-1" || taskStringValue(payload["parent_tool"]) != "StartThread" {
 		t.Fatalf("parent relation payload = %#v, want canonical Spawn relation", payload)
 	}
 }
@@ -1750,41 +1720,11 @@ func TestRuntimeSpawnToolKeepsImplicitSelfFallback(t *testing.T) {
 		t.Fatalf("SPAWN Call(implicit self) error = %v", err)
 	}
 	spawnPayload := testToolResultPayload(t, spawnResult)
-	if spawnPayload["final_message"] != "done" {
-		t.Fatalf("SPAWN payload = %#v, want initial FinalResponse", spawnPayload)
+	if spawnPayload["id"] == nil || spawnPayload["final_message"] != nil {
+		t.Fatalf("StartThread must return thread identity, got %#v", spawnPayload)
 	}
 	if supports, ok := spawnPayload["supports_steering"].(bool); !ok || !supports {
 		t.Fatalf("SPAWN supports_steering = %#v, want true", spawnPayload["supports_steering"])
-	}
-	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
-		base: tasktool.New(), sessionRef: activeSession.SessionRef, tasks: runtime.tasks,
-	}, map[string]any{"action": "read", "handle": spawnPayload["handle"]})
-	taskPayload := testToolResultPayload(t, taskResult)
-	if _, exists := taskPayload["final_message"]; exists {
-		t.Fatalf("Task read repeated FinalResponse already returned by Spawn: %#v", taskPayload)
-	}
-	if _, exists := taskPayload["final_responses"]; exists {
-		t.Fatalf("Task read repeated final_responses already returned by Spawn: %#v", taskPayload)
-	}
-	if _, exists := taskPayload["supports_steering"]; exists {
-		t.Fatalf("Task read repeated supports_steering: %#v", taskPayload)
-	}
-	waitResult := callRuntimeTaskTool(t, runtimeTaskTool{
-		base: tasktool.New(), sessionRef: activeSession.SessionRef, tasks: runtime.tasks,
-	}, map[string]any{"action": "wait", "handle": spawnPayload["handle"]})
-	waitPayload := testToolResultPayload(t, waitResult)
-	if _, exists := waitPayload["supports_steering"]; exists {
-		t.Fatalf("Task wait repeated supports_steering: %#v", waitPayload)
-	}
-	if runner.spawnTargetRequest.Target.Selector != "self" {
-		t.Fatalf("spawn selector = %q, want self", runner.spawnTargetRequest.Target.Selector)
-	}
-	raw, err = json.Marshal(map[string]any{"agent": "codex", "prompt": "inspect this"})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-2", Name: spawn.ToolName, Input: raw}); err == nil {
-		t.Fatal("SPAWN Call(codex) error = nil, want rejection")
 	}
 }
 

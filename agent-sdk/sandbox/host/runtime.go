@@ -646,7 +646,9 @@ func (h hostFS) Getwd() (string, error) { return h.cwd, nil }
 
 func (h hostFS) UserHomeDir() (string, error) { return os.UserHomeDir() }
 
-func (h hostFS) Open(path string) (*os.File, error) { return os.Open(path) }
+func (h hostFS) Open(path string) (*os.File, error) {
+	return openRegularFile(path)
+}
 
 func (h hostFS) ReadDir(path string) ([]os.DirEntry, error) { return os.ReadDir(path) }
 

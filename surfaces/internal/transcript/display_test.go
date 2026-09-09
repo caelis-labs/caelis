@@ -21,7 +21,7 @@ func TestApprovalReviewTailOutputUsesParsedFallbackFields(t *testing.T) {
 		Text:    "Automatic approval review approved (risk: low, authorization: allow): safe read-only command",
 	})
 
-	want := "Approval review approved RunCommand git status (risk: low, authorization: allow)\nsafe read-only command\n"
+	want := "Auto approval · approved RunCommand git status (risk: low, authorization: allow)\nsafe read-only command\n"
 	if output != want {
 		t.Fatalf("ApprovalReviewTailOutput() = %q, want %q", output, want)
 	}
@@ -232,9 +232,9 @@ func TestDelegatedTaskResultTextUsesCanonicalTaskResultWithoutTerminalOutput(t *
 		status   string
 		want     string
 	}{
-		{name: "spawn final", toolName: "Spawn", status: ToolStatusCompleted, want: "child final result"},
+		{name: "spawn final", toolName: "StartThread", status: ToolStatusCompleted, want: "child final result"},
 		{name: "task final", toolName: "Task", status: ToolStatusCompleted, want: "child final result"},
-		{name: "running", toolName: "Spawn", status: ToolStatusRunning},
+		{name: "running", toolName: "StartThread", status: ToolStatusRunning},
 		{name: "command", toolName: "RunCommand", status: ToolStatusCompleted},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

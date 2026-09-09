@@ -2,9 +2,11 @@ package gatewayapp
 
 import (
 	"context"
+	"path/filepath"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/collaboration"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 )
 
@@ -126,11 +128,18 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 
 func activateHostRuntime(stack *Stack, assembly hostControlAssembly) error {
 	stack.composition.authorities.lifecycleCtx, stack.lifecycleCancel = context.WithCancel(context.Background())
+	inputRouter := &hostedChildInputRouter{}
+	mailboxes, mailErr := collaboration.Open(filepath.Join(stack.composition.authorities.storeDir, "control", "control.sqlite"), &collaborationBackend{sessions: stack.composition.sessions, tasks: stack.composition.authorities.taskStore, router: inputRouter})
+	if mailErr != nil {
+		stack.lifecycleCancel()
+		return mailErr
+	}
+	stack.composition.authorities.collaboration = mailboxes
 	if err := stack.composition.buildInitialGatewayRuntime(context.Background()); err != nil {
 		stack.lifecycleCancel()
+		_ = mailboxes.Close()
 		return err
 	}
-	inputRouter := &hostedChildInputRouter{}
 	stack.composition.authorities.hostedChildInput = inputRouter.route
 	assemblyDeps, err := newSessionRuntimeAssemblyDeps(stack)
 	if err != nil {
@@ -171,5 +180,15 @@ func activateHostRuntime(stack *Stack, assembly hostControlAssembly) error {
 		_ = stack.Close()
 		return err
 	}
+	done := make(chan struct{})
+	stack.composition.authorities.collaborationDone = done
+	go func() {
+		defer close(done)
+		mailboxes.Run(stack.composition.authorities.lifecycleCtx, func(err error) {
+			if logger := stack.composition.authorities.diagnostics; logger != nil {
+				logger.Warn("collaboration delivery failed", "error", err)
+			}
+		})
+	}()
 	return nil
 }

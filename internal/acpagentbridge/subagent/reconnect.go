@@ -23,7 +23,12 @@ func (r *Runner) reconnectChildEndpointLocked(
 	anchor delegation.Anchor,
 	recovery *tasksubagent.ReconnectRequest,
 	slot *childSlot,
-) (*childRun, error) {
+) (reconnected *childRun, reconnectErr error) {
+	if slot != nil {
+		defer func() {
+			r.logChildError(ctx, slot.currentRun(), "endpoint_reconnect", reconnectErr)
+		}()
+	}
 	if recovery == nil {
 		return nil, fmt.Errorf("target Agent reconnect context is required")
 	}
@@ -82,13 +87,13 @@ func (r *Runner) reconnectChildEndpointLocked(
 		launchEnv["SDK_ACP_CHILD_NO_SPAWN"] = "1"
 	}
 	acpClient, err := client.Start(childCtx, client.Config{
+		MCPGrant:        cfg.MCPGrant,
+		MCPServers:      cfg.MCPServers,
 		HostedAdapterID: cfg.HostedAdapterID, ConnectionID: cfg.Name, EndpointResolver: r.endpointResolver,
 		Command: cfg.Command, Args: append([]string(nil), cfg.Args...), Env: launchEnv,
 		WorkDir: pickWorkDir(cfg.WorkDir, spawn.CWD), ClientInfo: r.clientInfo,
-		OnUpdate: func(env client.UpdateEnvelope) { r.handleUpdate(run, env) },
-		OnPermissionRequest: func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
-			return r.permissionCallback(spawn, cfg, anchor.AgentID)(ctx, req)
-		},
+		OnUpdate:            func(env client.UpdateEnvelope) { r.handleUpdate(run, env) },
+		OnPermissionRequest: boundChildPermissionHandler(run, r.permissionCallback(spawn, cfg, anchor.AgentID)),
 	})
 	if err != nil {
 		childCancel()

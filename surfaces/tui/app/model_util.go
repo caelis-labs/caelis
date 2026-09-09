@@ -256,6 +256,7 @@ func (m *Model) blockRenderContext(width int) BlockRenderContext {
 		AnimationsEnabled:     !m.noAnimation,
 		ObserveGlamourRender:  m.observeGlamourRender,
 		ObserveInlineMarkdown: m.observeInlineMarkdownRender,
+		Now:                   time.Now(),
 	}
 }
 

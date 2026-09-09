@@ -22,6 +22,7 @@ func NormalizeChildEndpointRef(in ChildEndpointRef) ChildEndpointRef {
 // CloneChildInputRequest returns a detached normalized request.
 func CloneChildInputRequest(in ChildInputRequest) ChildInputRequest {
 	out := in
+	out.Messages = CloneAgentCommunicationInputs(in.Messages)
 	out.Target = NormalizeChildEndpointRef(in.Target)
 	out.Source = session.CloneActorRef(in.Source)
 	out.ActivityID = strings.TrimSpace(in.ActivityID)

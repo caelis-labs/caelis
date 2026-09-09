@@ -4,7 +4,7 @@
     "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "spawn-alpha",
-      "title": "Spawn breeze: alpha work",
+      "title": "StartThread breeze: alpha work",
       "kind": "execute",
       "status": "pending",
       "rawInput": {
@@ -15,7 +15,7 @@
         "caelis": {
           "runtime": {
             "tool": {
-              "name": "Spawn"
+              "name": "StartThread"
             }
           },
           "version": 1
@@ -28,7 +28,7 @@
     "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "spawn-beta",
-      "title": "Spawn orbit: beta work",
+      "title": "StartThread orbit: beta work",
       "kind": "execute",
       "status": "pending",
       "rawInput": {
@@ -39,7 +39,7 @@
         "caelis": {
           "runtime": {
             "tool": {
-              "name": "Spawn"
+              "name": "StartThread"
             }
           },
           "version": 1
@@ -52,13 +52,13 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "spawn-alpha",
-      "title": "Spawn",
+      "title": "StartThread",
       "kind": "execute",
       "status": "in_progress",
       "rawOutput": {
         "handle": "alpha",
         "parent_call": "spawn-alpha",
-        "parent_tool": "Spawn",
+        "parent_tool": "StartThread",
         "state": "running",
         "target_kind": "subagent"
       },
@@ -66,7 +66,7 @@
         "caelis": {
           "runtime": {
             "tool": {
-              "name": "Spawn"
+              "name": "StartThread"
             }
           },
           "version": 1
@@ -79,13 +79,13 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "spawn-beta",
-      "title": "Spawn",
+      "title": "StartThread",
       "kind": "execute",
       "status": "in_progress",
       "rawOutput": {
         "handle": "beta",
         "parent_call": "spawn-beta",
-        "parent_tool": "Spawn",
+        "parent_tool": "StartThread",
         "state": "running",
         "target_kind": "subagent"
       },
@@ -93,7 +93,7 @@
         "caelis": {
           "runtime": {
             "tool": {
-              "name": "Spawn"
+              "name": "StartThread"
             }
           },
           "version": 1
@@ -164,14 +164,14 @@
             "final_message": "# Alpha final\n\n- exact markdown\n",
             "handle": "alpha",
             "parent_call": "spawn-alpha",
-            "parent_tool": "Spawn",
+            "parent_tool": "StartThread",
             "state": "completed",
             "target_kind": "subagent"
           },
           {
             "handle": "beta",
             "parent_call": "spawn-beta",
-            "parent_tool": "Spawn",
+            "parent_tool": "StartThread",
             "state": "running",
             "target_kind": "subagent"
           },
@@ -201,7 +201,7 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "spawn-alpha",
-      "title": "Spawn",
+      "title": "StartThread",
       "kind": "execute",
       "status": "completed",
       "rawOutput": {
@@ -223,7 +223,7 @@
         "caelis": {
           "runtime": {
             "tool": {
-              "name": "Spawn"
+              "name": "StartThread"
             }
           },
           "version": 1
@@ -294,7 +294,7 @@
             "final_message": "Beta final.",
             "handle": "beta",
             "parent_call": "spawn-beta",
-            "parent_tool": "Spawn",
+            "parent_tool": "StartThread",
             "state": "completed",
             "target_kind": "subagent"
           },
@@ -302,7 +302,7 @@
             "final_message": "duplicate alpha",
             "handle": "alpha",
             "parent_call": "spawn-alpha",
-            "parent_tool": "Spawn",
+            "parent_tool": "StartThread",
             "state": "completed",
             "target_kind": "subagent"
           }
@@ -325,7 +325,7 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "spawn-beta",
-      "title": "Spawn",
+      "title": "StartThread",
       "kind": "execute",
       "status": "completed",
       "rawOutput": {
@@ -347,7 +347,7 @@
         "caelis": {
           "runtime": {
             "tool": {
-              "name": "Spawn"
+              "name": "StartThread"
             }
           },
           "version": 1

@@ -593,7 +593,7 @@ func TestParallelToolCompletionRestoresRemainingActivity(t *testing.T) {
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		ToolCallID: "spawn-1",
-		ToolName:   "Spawn",
+		ToolName:   "StartThread",
 	})
 	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetSubagent {
 		t.Fatalf("runningActivity = %#v, want latest parallel Spawn activity", m.runningActivity)
@@ -603,7 +603,7 @@ func TestParallelToolCompletionRestoresRemainingActivity(t *testing.T) {
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		ToolCallID: "spawn-1",
-		ToolName:   "Spawn",
+		ToolName:   "StartThread",
 		Final:      true,
 	})
 	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetShell ||
@@ -726,7 +726,7 @@ func TestNarrativeForegroundOverridesRunningBackgroundTool(t *testing.T) {
 		Kind:       TranscriptEventTool,
 		Scope:      ACPProjectionMain,
 		ToolCallID: "spawn-1",
-		ToolName:   "Spawn",
+		ToolName:   "StartThread",
 	}
 	m.applyTranscriptRunningActivity(spawn)
 	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetSubagent {

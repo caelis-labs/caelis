@@ -19,47 +19,35 @@ type guardianConversationManager struct {
 }
 
 type guardianConversation struct {
-	events        []*session.Event
-	parentCompact guardianParentCompactIdentity
-	parentCursor  guardianParentCanonicalCursor
-	version       uint64
-	fork          *guardianConversationFork
+	events []*session.Event
+
+	parentCursor guardianParentCanonicalCursor
+	version      uint64
+	fork         *guardianConversationFork
 }
 
 // guardianConversationFork pins one model step to a common reusable prefix.
 // Validated branches join back into the conversation in original ToolCall
 // order regardless of review completion order.
 type guardianConversationFork struct {
-	ref           guardianConversationForkRef
-	base          guardianConversationSnapshot
-	parentEvents  []*session.Event
-	branches      map[int]guardianConversationBranch
-	parentCompact guardianParentCompactIdentity
-	parentCursor  guardianParentCanonicalCursor
-	hasParent     bool
+	ref          guardianConversationForkRef
+	base         guardianConversationSnapshot
+	parentEvents []*session.Event
+	branches     map[int]guardianConversationBranch
+
+	parentCursor guardianParentCanonicalCursor
+	hasParent    bool
 }
 
 type guardianConversationBranch struct {
-	user          *session.Event
-	assistant     *session.Event
+	turn          []*session.Event
 	contextPrefix []*session.Event
-	hasContext    bool
 }
 
 type guardianConversationForkRef struct {
 	Key       string
 	Index     int
 	CallCount int
-}
-
-// guardianParentCompactIdentity identifies the canonical compact event whose
-// summary forms the current parent-context baseline. The summarized-through
-// fields distinguish the compact coverage from the compact event position.
-type guardianParentCompactIdentity struct {
-	EventID              string
-	EventSeq             uint64
-	SummarizedThroughID  string
-	SummarizedThroughSeq uint64
 }
 
 // guardianParentCanonicalCursor identifies the last canonical parent event
@@ -70,22 +58,24 @@ type guardianParentCanonicalCursor struct {
 }
 
 type guardianConversationSnapshot struct {
-	Events        []*session.Event
-	ParentEvents  []*session.Event
-	ParentCompact guardianParentCompactIdentity
-	ParentCursor  guardianParentCanonicalCursor
-	Version       uint64
+	Events       []*session.Event
+	ParentEvents []*session.Event
+
+	ParentCursor guardianParentCanonicalCursor
+	Version      uint64
 }
 
 type guardianConversationCommit struct {
+	PrefixEvents    []*session.Event
+	TurnID          string
 	SessionID       string
 	ExpectedVersion uint64
 	Fork            guardianConversationForkRef
-	ParentCompact   guardianParentCompactIdentity
-	ParentCursor    guardianParentCanonicalCursor
-	User            *session.Event
-	Assistant       *session.Event
-	ContextEvents   []*session.Event
+
+	ParentCursor  guardianParentCanonicalCursor
+	User          *session.Event
+	Assistant     *session.Event
+	ContextEvents []*session.Event
 }
 
 func newGuardianConversationManager() *guardianConversationManager {
@@ -105,10 +95,9 @@ func (m *guardianConversationManager) snapshot(sessionID string) (guardianConver
 	defer m.mu.Unlock()
 	conversation := m.bySession[sessionID]
 	return guardianConversationSnapshot{
-		Events:        session.CloneEvents(conversation.events),
-		ParentCompact: conversation.parentCompact,
-		ParentCursor:  conversation.parentCursor,
-		Version:       conversation.version,
+		Events:       session.CloneEvents(conversation.events),
+		ParentCursor: conversation.parentCursor,
+		Version:      conversation.version,
 	}, nil
 }
 
@@ -144,10 +133,9 @@ func (m *guardianConversationManager) fork(
 		conversation.fork = &guardianConversationFork{
 			ref: ref,
 			base: guardianConversationSnapshot{
-				Events:        session.CloneEvents(conversation.events),
-				ParentCompact: conversation.parentCompact,
-				ParentCursor:  conversation.parentCursor,
-				Version:       conversation.version,
+				Events:       session.CloneEvents(conversation.events),
+				ParentCursor: conversation.parentCursor,
+				Version:      conversation.version,
 			},
 			parentEvents: session.CloneEvents(parentEvents),
 			branches:     map[int]guardianConversationBranch{},
@@ -165,152 +153,6 @@ func (m *guardianConversationManager) fork(
 	return base, nil
 }
 
-// commitValidated records exactly one already-validated Guardian user/assistant
-// exchange. Concurrent branches from one model step share a pinned fork and
-// join in original ToolCall order; linear callers retain optimistic versioned
-// commits. When ContextEvents carries the staging runtime's model-visible
-// context, its prefix retains transparent runtime compaction. A newer parent
-// compact identity atomically replaces the old exchange history so prompts
-// derived from different compact baselines are not mixed.
-func (m *guardianConversationManager) commitValidated(req guardianConversationCommit) (committed bool, rebased bool, err error) {
-	if m == nil {
-		return false, false, fmt.Errorf("guardian conversation manager is nil")
-	}
-	req.SessionID = strings.TrimSpace(req.SessionID)
-	if req.SessionID == "" {
-		return false, false, fmt.Errorf("guardian conversation requires parent session ID")
-	}
-	parentCompact, err := normalizeGuardianParentCompactIdentity(req.ParentCompact)
-	if err != nil {
-		return false, false, err
-	}
-	parentCursor, err := normalizeGuardianParentCanonicalCursor(req.ParentCursor)
-	if err != nil {
-		return false, false, err
-	}
-	if err := validateGuardianParentPosition(parentCompact, parentCursor); err != nil {
-		return false, false, err
-	}
-	req.ParentCompact = parentCompact
-	req.ParentCursor = parentCursor
-	user, assistant, err := validatedGuardianConversationPair(req.User, req.Assistant)
-	if err != nil {
-		return false, false, err
-	}
-	contextEvents, err := validatedGuardianConversationContext(req.ContextEvents, user, assistant)
-	if err != nil {
-		return false, false, err
-	}
-	forkRef, err := normalizeGuardianConversationForkRef(req.Fork)
-	if err != nil {
-		return false, false, err
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	conversation := m.bySession[req.SessionID]
-	if forkRef != (guardianConversationForkRef{}) {
-		return m.commitForkValidatedLocked(conversation, req, forkRef, user, assistant, contextEvents)
-	}
-	if conversation.version != req.ExpectedVersion {
-		return false, false, nil
-	}
-	compactChanged, err := guardianParentCompactAdvanced(conversation.parentCompact, parentCompact)
-	if err != nil {
-		return false, false, err
-	}
-	if err := validateGuardianParentCursorAdvance(conversation.parentCursor, parentCursor); err != nil {
-		return false, false, err
-	}
-
-	nextEvents := conversation.events
-	if compactChanged {
-		rebased = len(nextEvents) > 0
-		nextEvents = nil
-	}
-	if len(contextEvents) > 0 {
-		nextEvents = contextEvents
-	} else {
-		nextEvents = append(session.CloneEvents(nextEvents), user, assistant)
-	}
-	if m.bySession == nil {
-		m.bySession = map[string]guardianConversation{}
-	}
-	m.bySession[req.SessionID] = guardianConversation{
-		events:        nextEvents,
-		parentCompact: parentCompact,
-		parentCursor:  parentCursor,
-		version:       conversation.version + 1,
-	}
-	return true, rebased, nil
-}
-
-func (m *guardianConversationManager) commitForkValidatedLocked(
-	conversation guardianConversation,
-	req guardianConversationCommit,
-	ref guardianConversationForkRef,
-	user *session.Event,
-	assistant *session.Event,
-	contextEvents []*session.Event,
-) (bool, bool, error) {
-	fork := conversation.fork
-	if fork == nil || fork.ref.Key != ref.Key || fork.ref.CallCount != ref.CallCount || fork.base.Version != req.ExpectedVersion {
-		return false, false, nil
-	}
-	if _, exists := fork.branches[ref.Index]; exists {
-		return false, false, fmt.Errorf("guardian conversation fork already contains ToolCall index %d", ref.Index)
-	}
-	compactChanged, err := guardianParentCompactAdvanced(fork.base.ParentCompact, req.ParentCompact)
-	if err != nil {
-		return false, false, err
-	}
-	if err := validateGuardianParentCursorAdvance(fork.base.ParentCursor, req.ParentCursor); err != nil {
-		return false, false, err
-	}
-	if fork.hasParent && (fork.parentCompact != req.ParentCompact || fork.parentCursor != req.ParentCursor) {
-		return false, false, fmt.Errorf("guardian conversation fork branches observed different parent transcript positions")
-	}
-	if !fork.hasParent {
-		fork.parentCompact = req.ParentCompact
-		fork.parentCursor = req.ParentCursor
-		fork.hasParent = true
-	}
-	branch := guardianConversationBranch{user: user, assistant: assistant}
-	if len(contextEvents) > 0 {
-		branch.contextPrefix = session.CloneEvents(contextEvents[:len(contextEvents)-2])
-		branch.hasContext = true
-	}
-	fork.branches[ref.Index] = branch
-
-	indexes := make([]int, 0, len(fork.branches))
-	for index := range fork.branches {
-		indexes = append(indexes, index)
-	}
-	sort.Ints(indexes)
-	nextEvents := session.CloneEvents(fork.base.Events)
-	if compactChanged {
-		nextEvents = nil
-	}
-	for _, index := range indexes {
-		candidate := fork.branches[index]
-		if candidate.hasContext {
-			nextEvents = session.CloneEvents(candidate.contextPrefix)
-			break
-		}
-	}
-	for _, index := range indexes {
-		candidate := fork.branches[index]
-		nextEvents = append(nextEvents, session.CloneEvent(candidate.user), session.CloneEvent(candidate.assistant))
-	}
-	conversation.events = nextEvents
-	conversation.parentCompact = fork.parentCompact
-	conversation.parentCursor = fork.parentCursor
-	conversation.version = fork.base.Version + uint64(len(fork.branches))
-	conversation.fork = fork
-	m.bySession[req.SessionID] = conversation
-	return true, compactChanged && len(fork.base.Events) > 0, nil
-}
-
 func normalizeGuardianConversationForkRef(ref guardianConversationForkRef) (guardianConversationForkRef, error) {
 	ref.Key = strings.TrimSpace(ref.Key)
 	if ref == (guardianConversationForkRef{}) {
@@ -320,41 +162,6 @@ func normalizeGuardianConversationForkRef(ref guardianConversationForkRef) (guar
 		return guardianConversationForkRef{}, fmt.Errorf("guardian conversation fork requires a valid model step key, index, and call count")
 	}
 	return ref, nil
-}
-
-func validatedGuardianConversationContext(
-	events []*session.Event,
-	currentUser *session.Event,
-	currentAssistant *session.Event,
-) ([]*session.Event, error) {
-	if len(events) == 0 {
-		return nil, nil
-	}
-	validated := make([]*session.Event, 0, len(events))
-	start := 0
-	if session.EventTypeOf(events[0]) == session.EventTypeCompact {
-		checkpoint := session.CanonicalizeEvent(events[0])
-		if !session.IsCanonicalHistoryEvent(checkpoint) || strings.TrimSpace(session.EventText(checkpoint)) == "" {
-			return nil, fmt.Errorf("guardian conversation compact checkpoint must be canonical and non-empty")
-		}
-		validated = append(validated, checkpoint)
-		start = 1
-	}
-	if (len(events)-start)%2 != 0 {
-		return nil, fmt.Errorf("guardian conversation context must contain complete user/assistant pairs")
-	}
-	for index := start; index < len(events); index += 2 {
-		user, assistant, err := validatedGuardianConversationPair(events[index], events[index+1])
-		if err != nil {
-			return nil, err
-		}
-		validated = append(validated, user, assistant)
-	}
-	if len(validated)-start < 2 || !sameGuardianConversationEvent(validated[len(validated)-2], currentUser) ||
-		!sameGuardianConversationEvent(validated[len(validated)-1], currentAssistant) {
-		return nil, fmt.Errorf("guardian conversation context must end with the current validated pair")
-	}
-	return validated, nil
 }
 
 func sameGuardianConversationEvent(left *session.Event, right *session.Event) bool {
@@ -414,24 +221,6 @@ func validatedGuardianConversationEvent(
 	return validated, nil
 }
 
-func normalizeGuardianParentCompactIdentity(identity guardianParentCompactIdentity) (guardianParentCompactIdentity, error) {
-	identity.EventID = strings.TrimSpace(identity.EventID)
-	identity.SummarizedThroughID = strings.TrimSpace(identity.SummarizedThroughID)
-	if identity == (guardianParentCompactIdentity{}) {
-		return identity, nil
-	}
-	if identity.EventID == "" || identity.EventSeq == 0 {
-		return guardianParentCompactIdentity{}, fmt.Errorf("guardian parent compact identity requires canonical event seq and ID")
-	}
-	if identity.SummarizedThroughSeq > identity.EventSeq {
-		return guardianParentCompactIdentity{}, fmt.Errorf("guardian parent compact coverage seq %d exceeds compact event seq %d", identity.SummarizedThroughSeq, identity.EventSeq)
-	}
-	if identity.SummarizedThroughSeq == 0 && identity.SummarizedThroughID != "" {
-		return guardianParentCompactIdentity{}, fmt.Errorf("guardian parent compact coverage ID requires coverage seq")
-	}
-	return identity, nil
-}
-
 func normalizeGuardianParentCanonicalCursor(cursor guardianParentCanonicalCursor) (guardianParentCanonicalCursor, error) {
 	cursor.EventID = strings.TrimSpace(cursor.EventID)
 	if cursor == (guardianParentCanonicalCursor{}) {
@@ -441,44 +230,6 @@ func normalizeGuardianParentCanonicalCursor(cursor guardianParentCanonicalCursor
 		return guardianParentCanonicalCursor{}, fmt.Errorf("guardian parent cursor requires canonical event seq and ID")
 	}
 	return cursor, nil
-}
-
-func validateGuardianParentPosition(compact guardianParentCompactIdentity, cursor guardianParentCanonicalCursor) error {
-	if compact == (guardianParentCompactIdentity{}) || cursor == (guardianParentCanonicalCursor{}) {
-		return nil
-	}
-	if cursor.EventSeq == compact.EventSeq && cursor.EventID != compact.EventID {
-		return fmt.Errorf("guardian parent cursor and compact event disagree at seq %d", cursor.EventSeq)
-	}
-	if cursor.EventSeq < compact.EventSeq {
-		if compact.SummarizedThroughSeq == 0 || cursor.EventSeq <= compact.SummarizedThroughSeq {
-			return fmt.Errorf(
-				"guardian parent cursor seq %d is not an uncovered successor of compact coverage seq %d",
-				cursor.EventSeq,
-				compact.SummarizedThroughSeq,
-			)
-		}
-	}
-	return nil
-}
-
-func guardianParentCompactAdvanced(current guardianParentCompactIdentity, next guardianParentCompactIdentity) (bool, error) {
-	if current == next {
-		return false, nil
-	}
-	if current == (guardianParentCompactIdentity{}) {
-		return true, nil
-	}
-	if next == (guardianParentCompactIdentity{}) {
-		return false, fmt.Errorf("guardian parent compact identity regressed from seq %d", current.EventSeq)
-	}
-	if next.EventSeq < current.EventSeq || next.SummarizedThroughSeq < current.SummarizedThroughSeq {
-		return false, fmt.Errorf("guardian parent compact identity regressed from seq %d to %d", current.EventSeq, next.EventSeq)
-	}
-	if next.EventSeq == current.EventSeq {
-		return false, fmt.Errorf("guardian parent compact identity changed at canonical seq %d", current.EventSeq)
-	}
-	return true, nil
 }
 
 func validateGuardianParentCursorAdvance(current guardianParentCanonicalCursor, next guardianParentCanonicalCursor) error {
@@ -492,4 +243,97 @@ func validateGuardianParentCursorAdvance(current guardianParentCanonicalCursor, 
 		return fmt.Errorf("guardian parent cursor changed ID at canonical seq %d", current.EventSeq)
 	}
 	return nil
+}
+
+// commitTurn keeps a complete tool loop. Shared source input is joined once;
+// concurrent approval branches are joined in their original model-call order.
+func (m *guardianConversationManager) commitTurn(req guardianConversationCommit) (bool, bool, error) {
+	if m == nil || req.SessionID == "" || req.Assistant == nil {
+		return false, false, fmt.Errorf("invalid Guardian turn")
+	}
+	if _, err := normalizeGuardianConversationForkRef(req.Fork); err != nil {
+		return false, false, err
+	}
+	if _, err := normalizeGuardianParentCanonicalCursor(req.ParentCursor); err != nil {
+		return false, false, err
+	}
+	if _, _, err := validatedGuardianConversationPair(req.User, req.Assistant); err != nil {
+		return false, false, err
+	}
+	var turn []*session.Event
+	if len(req.ContextEvents) > 0 {
+		start := -1
+		for i, e := range req.ContextEvents {
+			if sameGuardianConversationEvent(e, req.User) {
+				start = i
+			}
+		}
+		if start < 0 {
+			return false, false, fmt.Errorf("guardian context lost current request")
+		}
+		turn = session.CloneEvents(req.ContextEvents[start:])
+	} else {
+		turn = session.CloneEvents([]*session.Event{req.User, req.Assistant})
+	}
+	if len(turn) < 2 || !sameGuardianConversationEvent(turn[len(turn)-1], req.Assistant) {
+		return false, false, fmt.Errorf("incomplete Guardian turn")
+	}
+	if turn[0].Meta == nil {
+		turn[0].Meta = map[string]any{}
+	}
+	turn[0].Meta[guardianCallKey] = req.User.Meta[guardianCallKey]
+	for _, e := range turn {
+		if e.Meta == nil {
+			e.Meta = map[string]any{}
+		}
+		e.Meta[guardianTurnKey] = req.TurnID
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := m.bySession[req.SessionID]
+	if req.Fork.Key == "" {
+		if c.version != req.ExpectedVersion {
+			return false, false, nil
+		}
+		if err := validateGuardianParentCursorAdvance(c.parentCursor, req.ParentCursor); err != nil {
+			return false, false, err
+		}
+		c.fork = nil
+		c.events = append(session.CloneEvents(req.PrefixEvents), turn...)
+		c.version++
+	} else {
+		f := c.fork
+		if f == nil || f.ref.Key != req.Fork.Key || f.ref.CallCount != req.Fork.CallCount || f.base.Version != req.ExpectedVersion {
+			return false, false, nil
+		}
+		if _, ok := f.branches[req.Fork.Index]; ok {
+			return false, false, fmt.Errorf("guardian branch already committed")
+		}
+		if err := validateGuardianParentCursorAdvance(f.base.ParentCursor, req.ParentCursor); err != nil {
+			return false, false, err
+		}
+		if f.hasParent && f.parentCursor != req.ParentCursor {
+			return false, false, fmt.Errorf("guardian fork source cursor changed")
+		}
+		f.hasParent = true
+		f.parentCursor = req.ParentCursor
+		f.branches[req.Fork.Index] = guardianConversationBranch{contextPrefix: session.CloneEvents(req.PrefixEvents), turn: turn}
+		indexes := make([]int, 0, len(f.branches))
+		for i := range f.branches {
+			indexes = append(indexes, i)
+		}
+		sort.Ints(indexes)
+		c.events = session.CloneEvents(f.branches[indexes[0]].contextPrefix)
+		for _, i := range indexes {
+			c.events = append(c.events, session.CloneEvents(f.branches[i].turn)...)
+		}
+		c.version = f.base.Version + uint64(len(indexes))
+	}
+	c.parentCursor = req.ParentCursor
+	m.bySession[req.SessionID] = c
+	return true, false, nil
+}
+
+func (m *guardianConversationManager) commitValidated(req guardianConversationCommit) (bool, bool, error) {
+	return m.commitTurn(req)
 }

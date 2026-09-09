@@ -9,6 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
@@ -20,6 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/kernel"
+	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
 func TestLocalStackInjectsOnlySelfUntilProfileIsBound(t *testing.T) {
@@ -103,6 +105,62 @@ func TestSpawnedSubagentSessionCannotReceiveNestedSpawn(t *testing.T) {
 	}
 	if strings.Contains(childPrompt, "## Shared Workspace") {
 		t.Fatalf("spawned collaborator prompt retained removed shared-workspace guidance:\n%s", childPrompt)
+	}
+}
+
+func TestBuiltinChildFirstProviderRequestIncludesAssignedHandle(t *testing.T) {
+	provider := newHostedChildInputTestProvider(t, false)
+	host := newHostedChildInputTestStack(t, provider)
+	ctx := context.Background()
+	parent, err := startGatewayAppTestSession(ctx, host, "parent-first-prompt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = host.composition.authorities.taskStore.Upsert(ctx, &taskapi.Entry{
+		TaskID: "task-first-prompt", Handle: "orbit", Kind: taskapi.KindSubagent,
+		Session: parent.SessionRef, State: taskapi.StateRunning,
+		Metadata: map[string]any{"participant_role": string(session.ParticipantRoleSidecar)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	child, err := host.composition.sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: host.composition.authorities.appName,
+		UserID:  host.composition.authorities.userID,
+		Workspace: session.WorkspaceRef{
+			Key: host.composition.workspace.Key,
+			CWD: host.composition.workspace.CWD,
+		},
+		Metadata: map[string]any{
+			sessionvisibility.MetadataSystemManagedAgent:  sessionvisibility.SystemManagedAgentSubagent,
+			sessionvisibility.MetadataSystemManagedParent: parent.SessionID,
+			sessionvisibility.MetadataSystemManagedTask:   "task-first-prompt",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = runHeadlessOnceForGatewayAppTest(ctx, host, child, child.SessionID, "do the assigned work", headless.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	parentNow, err := host.composition.sessions.Session(ctx, parent.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parentNow.Participants) != 0 {
+		t.Fatalf("parent participants = %#v, first provider request must not require attach", parentNow.Participants)
+	}
+	messages := string(provider.LastMessages())
+	for _, want := range []string{
+		"Your assigned handle is orbit.",
+		"Address the parent as parent.",
+		"Your role is sidecar.",
+	} {
+		if !strings.Contains(messages, want) {
+			t.Fatalf("first provider request missing %q:\n%s", want, messages)
+		}
+	}
+	if strings.Contains(messages, "StartThread creates a collaborating Agent") || strings.Contains(messages, "CAELIS_COLLABORATION_TOKEN") {
+		t.Fatalf("first provider request leaked main-only guidance or secrets:\n%s", messages)
 	}
 }
 

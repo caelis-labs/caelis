@@ -1063,6 +1063,9 @@ func TestChildInputHelperProcess(t *testing.T) {
 					SessionCapabilities: map[string]json.RawMessage{"resume": json.RawMessage(`{}`)},
 				},
 			}
+			if mode == "idle-no-steering" {
+				response.Meta = nil
+			}
 			if strings.HasPrefix(mode, "auth-") {
 				response.AuthMethods = []json.RawMessage{json.RawMessage(`{"id":"agent-login","name":"Agent login"}`)}
 			}
@@ -1070,6 +1073,11 @@ func TestChildInputHelperProcess(t *testing.T) {
 		case client.MethodSessionNew:
 			return client.NewSessionResponse{SessionID: "child-input-session"}, nil
 		case client.MethodSessionResume:
+			if mode == "permission-resume" {
+				if err := childInputProbeBoundPermissions(conn); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+			}
 			if mode == "resume-update" {
 				if err := childInputNotify(conn, "resume setup output"); err != nil {
 					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
@@ -1199,6 +1207,20 @@ func TestChildInputHelperProcess(t *testing.T) {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+func childInputProbeBoundPermissions(conn *jsonrpc.Conn) error {
+	for _, sessionID := range []string{"", "other", " child-input-session "} {
+		if err := childInputProbePermission(conn, sessionID); err == nil {
+			return fmt.Errorf("permission Session %q was accepted", sessionID)
+		}
+	}
+	return childInputProbePermission(conn, "child-input-session")
+}
+
+func childInputProbePermission(conn *jsonrpc.Conn, sessionID string) error {
+	var response client.RequestPermissionResponse
+	return conn.Call(context.Background(), client.MethodSessionReqPermission, testPermissionRequest(sessionID), &response)
 }
 
 func childInputNotify(conn *jsonrpc.Conn, text string) error {

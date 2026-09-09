@@ -30,16 +30,16 @@ when a required feature is absent.
 
 The assembled Tool set is the execution-admission boundary. Product policy may
 further restrict an admitted invocation, but tool names do not form a second
-allowlist. A Spawn-created collaborator receives `SendMessage` but not `Spawn`,
+allowlist. A StartThread-created collaborator receives mailbox tools but not `StartThread`,
 keeping Agent collaboration one level deep.
 
-Spawn uses a Session-scoped Task identity. An optional handle must be unique.
+Participant startup uses an internal Session-scoped execution identity. An optional handle must be unique.
 Optional context transfer is derived by the host's recipient-specific
 `ContextRouter`; an empty transfer or an unavailable router is not child-start
 failure. A Runner may release a requested handle after an error only when it
 positively proves that no child or producer started. Unknown creation outcomes
-retain the handle and reject blind retry. A successful Spawn result declares
-`supports_steering`; Task read/wait do not repeat that fixed capability.
+retain the handle and reject blind retry. A successful StartThread result declares
+`supports_steering`; thread observations do not repeat that fixed capability.
 
 Runtime exposes producer-side source and Task-output observers installed before
 external effects begin. Observer calls are synchronous handoff points, not an
@@ -51,19 +51,20 @@ observation began before the Task's first possible output. A
 `ProducerClosed` event means that stable producer can emit no future output;
 Control alone interprets that fact as cache-writer reclamation.
 
-Task cancel is a command-task capability. Spawned Agent collaborators never
-advertise it and the model-facing Task tool rejects cancel for their handles.
+Task addresses individual asynchronous Jobs. The model-facing tool rejects
+participant handles for every action. Input and cancellation follow the Job
+producer capabilities; command execution is the current built-in producer.
 
 ## Agent input and task observation
 
 `agent-sdk.AgentInputSender` is the provider-neutral Agent input contract.
 Runtime resolves Session-scoped addresses and binds trusted source identity.
-`SendMessage {to, message}` submits one Agent-communication input and claims
+The explicitly assembled standalone SDK `SendMessage {to, message}` submits one Agent-communication input and claims
 neither target completion nor Task mutation. An Agent with
 `supports_steering=true` can accept it while running; other Agents accept it
 only while idle.
 
-Task remains the lifecycle and final-result abstraction. Command stdin is a
+The internal Task service remains the lifecycle and final-result abstraction. Command stdin is a
 separate Task capability; Agent communication never falls back to Task input.
 The SDK may expose a bounded current/final command result and ACP child final
 result, but it does not retain Surface replay history or understand how a
@@ -187,3 +188,48 @@ remains typed, and only Control can transfer ownership.
 Consumer setup and package layout live in
 [`agent-sdk/README.md`](../agent-sdk/README.md). Projection rules live in
 [ACP Projection Contract](acp-projection-architecture.md).
+
+### Guardian evidence and context
+
+Control assembles Guardian as a private tool-capable approval Agent. Each review
+includes the exact action, request options, reason, and Runtime-bound producer
+origin. Main/subagent role and built-in/external endpoint are independent;
+parent Session history does not represent a child's private execution history.
+Guardian selects an exact supplied option. Allow responses contain `option_id`;
+denials also contain a rationale. Execution failures are not policy denials.
+
+Guardian retains its validated dialogue in process memory. User-source messages
+remain chronological, including steering, and have a separate budget. Long user
+messages are mechanically folded in the middle before older messages are
+removed. Each new approval adds up to three newly observed tool calls with
+bounded arguments and source IDs, without success or failure result bodies.
+Already observed calls do not roll into subsequent approvals. The approval,
+optional evidence tools and decision form one complete Guardian Turn.
+
+Instructions, tools, output schema and the local Session JSONL address stay
+fixed between reviews. Below budget the dialogue only appends. At the budget
+threshold Guardian removes whole oldest turns to leave headroom, retaining user
+messages independently. It never asks a model to summarize this dialogue and
+never imports the main Agent's compact summary. Parallel approvals share a
+pinned prefix and join in model-call order. Steering invalidates pending
+automatic approvals before their settlement.
+
+Additional retrieval is optional and is appropriate only when the supplied
+context cannot support an accurate decision. Read and Grep reuse the SDK's
+built-in file tools; Guardian supplies its sandbox policy and cumulative review
+budgets, not separate file semantics. These tools and synchronous local scripts
+can inspect the live canonical JSONL; there is no derived history tree or
+additional main-Agent recall injection. The address identifies a live log,
+not an immutable snapshot; readers must tolerate an incomplete final append.
+
+Evidence commands use a private temporary write directory and read-only access
+to other directories. Network policy is inherited from the main Agent. macOS
+uses Seatbelt and Linux uses Bubblewrap; unavailable isolation fails the query
+without falling back to Host execution. Queries, output, provider attempts and
+review duration are bounded. Each complete assessment attempt has a three-minute
+budget, shared by its model and evidence calls. A format-validation retry gets a
+fresh three-minute budget; caller cancellation and cumulative resource limits
+still apply. Guardian stops gathering evidence as soon as the supplied facts
+support its decision. Simple decisions do not start a query sandbox.
+Guardian tool transcripts stay private; provider usage receipts retain the
+existing parent-Session accounting and producer-drain contract.

@@ -1,6 +1,7 @@
 package controlassembly
 
 import (
+	acp "github.com/caelis-labs/acp-go-sdk"
 	"maps"
 	"strings"
 
@@ -18,11 +19,21 @@ const (
 	StateCurrentConfigValues = "plugin.current_config_values"
 )
 
-// AgentConfig is one pure ACP agent declaration resolved by the app layer.
-// Runtime code consumes these values to build concrete registries and managers.
+// AgentConfig is an ACP declaration with Host-bound activation capabilities.
+// Credentials and MCPGrant are ephemeral; they must never enter persisted config.
 type AgentConfig struct {
-	Name        string
-	Description string
+	// MCPServers are activation-scoped caller-provided tool connections.
+	MCPServers []acp.McpServer
+	// MCPGrant is the Host-owned lifetime of injected collaboration authority.
+	MCPGrant interface {
+		Bind(string) error
+		Close()
+		Valid() bool
+	}
+	// BuiltinRuntime is bound by Host assembly, never external ACP metadata.
+	BuiltinRuntime bool
+	Name           string
+	Description    string
 	// SystemSceneID marks a Host-owned scene without overloading the child
 	// process environment.
 	SystemSceneID string

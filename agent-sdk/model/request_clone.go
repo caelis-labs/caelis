@@ -69,7 +69,8 @@ func cloneRawMessageMap(in map[string]json.RawMessage) map[string]json.RawMessag
 }
 
 func cloneJSONMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
+	// Empty schema objects must remain objects on the wire, not null.
+	if in == nil {
 		return nil
 	}
 	out := make(map[string]any, len(in))

@@ -830,8 +830,8 @@ func automaticApprovalReviewDisplayText(req *approvalPayload) string {
 		return ""
 	}
 	switch req.ReviewStatus {
-	case approvalReviewStatusApproved, approvalReviewStatusDenied, approvalReviewStatusTimedOut, approvalReviewStatusFailed:
-		return firstNonEmpty(strings.TrimSpace(req.ReviewText), "Automatic approval review "+strings.TrimSpace(req.ReviewStatus))
+	case approvalReviewStatusApproved, approvalReviewStatusDenied, approvalReviewStatusTimedOut, approvalReviewStatusFailed, "needs_user", "needs user", "needs-user":
+		return firstNonEmpty(strings.TrimSpace(req.ReviewText), strings.TrimSpace(req.ReviewStatus))
 	default:
 		if text := strings.TrimSpace(req.ReviewText); text != "" {
 			return text

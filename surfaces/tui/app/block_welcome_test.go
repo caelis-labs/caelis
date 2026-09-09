@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/vt"
 
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -41,11 +43,11 @@ func TestWelcomeBlockResponsiveRender(t *testing.T) {
 		height      int
 		wantLogoRow string
 	}{
-		{name: "fullscreen workspace", width: 190, height: 50, wantLogoRow: welcomeRelayLogoASCII[0]},
-		{name: "100x30 terminal workspace", width: 97, height: 25, wantLogoRow: welcomeRelayLogoASCII[0]},
-		{name: "80x24 terminal workspace", width: 77, height: 19, wantLogoRow: welcomeRelayLogoASCII[0]},
-		{name: "55x20 terminal workspace", width: 52, height: 15, wantLogoRow: welcomeRelayLogoASCII[0]},
-		{name: "35x16 terminal workspace", width: 33, height: 11, wantLogoRow: welcomeRelayCompactASCII[0]},
+		{name: "fullscreen workspace", width: 190, height: 50, wantLogoRow: "█"},
+		{name: "100x30 terminal workspace", width: 97, height: 25, wantLogoRow: "█"},
+		{name: "80x24 terminal workspace", width: 77, height: 19, wantLogoRow: "█"},
+		{name: "55x20 terminal workspace", width: 52, height: 15, wantLogoRow: "█"},
+		{name: "35x16 terminal workspace", width: 33, height: 11, wantLogoRow: "CAELIS"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -67,17 +69,18 @@ func TestWelcomeBlockResponsiveRender(t *testing.T) {
 				}
 			}
 			if !strings.Contains(plain, tc.wantLogoRow) {
-				t.Fatalf("welcome missing selected relay logo row %q\n%s", tc.wantLogoRow, plain)
+				t.Fatalf("welcome missing selected brand row %q\n%s", tc.wantLogoRow, plain)
 			}
-			if !strings.Contains(plain, "CAELIS") {
+			if !strings.Contains(plain, "CAELIS") && !strings.Contains(plain, welcomeWordmarkASCII[0]) {
 				t.Fatalf("welcome missing brand treatment\n%s", plain)
 			}
 			if got := strings.Count(plain, "v9.9.9"); got != 1 {
 				t.Fatalf("version count = %d, want 1\n%s", got, plain)
 			}
-			if strings.Count(plain, "type / for") != 1 || strings.Count(plain, "commands") != 1 {
-				t.Fatalf("welcome does not contain one complete default tip\n%s", plain)
+			if !strings.Contains(plain, "type / for commands") {
+				t.Fatalf("default notice missing\n%s", plain)
 			}
+
 			if strings.Contains(plain, "Click an action") {
 				t.Fatalf("welcome still contains removed click hint\n%s", plain)
 			}
@@ -86,11 +89,12 @@ func TestWelcomeBlockResponsiveRender(t *testing.T) {
 					t.Fatalf("welcome retained command hint %q\n%s", action.command, plain)
 				}
 			}
-			for _, required := range []string{"╭", "╮", "╰", "╯"} {
-				if !strings.Contains(plain, required) {
-					t.Fatalf("welcome missing restored frame %q\n%s", required, plain)
+			for _, border := range []string{"╭", "╮", "╰", "╯", "│"} {
+				if strings.Contains(plain, border) {
+					t.Fatalf("welcome retained outer frame %q\n%s", border, plain)
 				}
 			}
+
 			for _, unwanted := range []string{
 				"Start a task",
 				"One workspace",
@@ -117,30 +121,23 @@ func TestWelcomeBlockResponsiveRender(t *testing.T) {
 	}
 }
 
-func TestWelcomeDetailsKeepFormalVersionOrderAndReplaceableNotice(t *testing.T) {
-	t.Parallel()
+func TestWelcomeAnnouncementHeightFollowsContent(t *testing.T) {
 	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
-	styles := newWelcomePanelStyles(theme.Tokens())
-	rows := buildWelcomeDetails(34, "v1.2.3", newWelcomeAnnouncement("New workspace flow available."), styles)
-	if got := strings.TrimSpace(rows[0].plain); got != "CAELIS  v1.2.3" {
-		t.Fatalf("identity row = %q", got)
+	ctx := BlockRenderContext{Width: 80, Height: 24, Theme: theme}
+	empty := buildWelcomePanel(ctx, "v1.2.3", newWelcomeAnnouncement(""))
+	short := buildWelcomePanel(ctx, "v1.2.3", newWelcomeAnnouncement("New workspace flow available."))
+	long := buildWelcomePanel(ctx, "v1.2.3", newWelcomeAnnouncement(strings.Repeat("Long announcement. ", 40)))
+	if len(short) != len(empty) || len(long) <= len(short) || len(long) > ctx.Height {
+		t.Fatalf("heights empty=%d short=%d long=%d", len(empty), len(short), len(long))
 	}
-	if strings.TrimSpace(rows[1].plain) != "" {
-		t.Fatalf("identity and notice are not separated: %#v", rowPlainTextsForWelcomePanel(rows))
-	}
-	plain := strings.Join(rowPlainTextsForWelcomePanel(rows), "\n")
-	if !strings.Contains(plain, "New workspace flow available.") {
-		t.Fatalf("details missing replacement notice\n%s", plain)
-	}
-	var tokens []string
-	for _, row := range rows {
-		if row.token != "" {
-			tokens = append(tokens, row.token)
+	for _, rows := range [][]welcomePanelRow{empty, short, long} {
+		plain := strings.Join(rowPlainTextsForWelcomePanel(rows), "\n")
+		if strings.Count(plain, "v1.2.3") != 1 {
+			t.Fatalf("missing version: %s", plain)
 		}
-	}
-	want := []string{welcomeActionTokenResume, welcomeActionTokenModel, welcomeActionTokenConnect, welcomeActionTokenQuit}
-	if !reflect.DeepEqual(tokens, want) {
-		t.Fatalf("detail action order = %#v, want %#v", tokens, want)
+		if strings.Count(plain, strings.Repeat("─", 64)) != 1 {
+			t.Fatalf("missing shared divider: %s", plain)
+		}
 	}
 }
 
@@ -243,99 +240,6 @@ func TestWelcomeGenericAnnouncementsRemainMuted(t *testing.T) {
 	}
 }
 
-func TestWelcomePanelKeepsWideLayoutsCompact(t *testing.T) {
-	t.Parallel()
-	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
-	medium := buildWelcomePanel(BlockRenderContext{Width: 77, Height: 19, Theme: theme}, "v1.0.0", newWelcomeAnnouncement(""))
-	fullscreen := buildWelcomePanel(BlockRenderContext{Width: 190, Height: 50, Theme: theme}, "v1.0.0", newWelcomeAnnouncement(""))
-	if got, want := displayColumns(medium[0].plain), welcomePanelBaseWidth; got != want {
-		t.Fatalf("medium panel width = %d, want %d", got, want)
-	}
-	if got, want := displayColumns(fullscreen[0].plain), welcomePanelMaxWidth; got != want {
-		t.Fatalf("fullscreen panel width = %d, want %d", got, want)
-	}
-	const verticalPadding = 2
-	wantRows := 2 + len(welcomeRelayLogoASCII) + verticalPadding*2
-	if got := len(medium); got != wantRows {
-		t.Fatalf("medium panel rows = %d, want compact height %d", got, wantRows)
-	}
-	if got := len(fullscreen); got != wantRows {
-		t.Fatalf("fullscreen panel rows = %d, want compact height %d", got, wantRows)
-	}
-}
-
-func TestWelcomeStandardLogoKeepsAspect(t *testing.T) {
-	t.Parallel()
-	if got, want := len(welcomeRelayLogoASCII), 8; got != want {
-		t.Fatalf("logo rows = %d, want %d", got, want)
-	}
-	maxWidth := 0
-	for i, row := range welcomeRelayLogoASCII {
-		width := displayColumns(row)
-		if width > 18 {
-			t.Fatalf("logo row %d width = %d, want <= 18: %q", i, width, row)
-		}
-		maxWidth = maxInt(maxWidth, width)
-	}
-	if maxWidth != 18 {
-		t.Fatalf("logo max width = %d, want 18", maxWidth)
-	}
-}
-
-func TestWelcomeStandardLayoutShiftsLogoAndBalancesItsSpacing(t *testing.T) {
-	t.Parallel()
-	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
-	rows := buildWelcomePanel(BlockRenderContext{Width: 190, Height: 50, Theme: theme}, "v1.0.0", newWelcomeAnnouncement(""))
-	logoStart := -1
-	detailsStart := -1
-	for _, row := range rows {
-		line := strings.TrimSuffix(strings.TrimPrefix(row.plain, "│"), "│")
-		if logoStart < 0 {
-			if logoByte := strings.Index(line, welcomeRelayLogoASCII[1]); logoByte >= 0 {
-				logoStart = displayColumns(line[:logoByte])
-			}
-		}
-		if detailsStart < 0 {
-			actionText := welcomeActionMarker + welcomeActions[0].label
-			if detailsByte := strings.Index(line, actionText); detailsByte >= 0 {
-				detailsStart = displayColumns(line[:detailsByte])
-			}
-		}
-	}
-	if logoStart < 0 || detailsStart < 0 {
-		t.Fatalf("wide layout positions = logo %d, details %d\n%s",
-			logoStart, detailsStart, strings.Join(rowPlainTextsForWelcomePanel(rows), "\n"))
-	}
-	middleSpace := detailsStart - logoStart - 18
-	if logoStart != middleSpace {
-		t.Fatalf("logo spacing = left %d, middle %d; want balanced\n%s",
-			logoStart, middleSpace, strings.Join(rowPlainTextsForWelcomePanel(rows), "\n"))
-	}
-	centeredLogoStart := (welcomePanelMaxWidth - 2 - 18 - 4 - welcomeDetailsMinWidth) / 2
-	if got := centeredLogoStart - logoStart; got != welcomeLogoLeftShift {
-		t.Fatalf("logo left shift = %d, want %d", got, welcomeLogoLeftShift)
-	}
-}
-
-func TestWelcomePanelWidthUsesCompactBounds(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		width int
-		want  int
-	}{
-		{width: 33, want: 33},
-		{width: 52, want: 52},
-		{width: 77, want: 72},
-		{width: 97, want: 72},
-		{width: 190, want: 80},
-		{width: 300, want: 80},
-	} {
-		if got := welcomeStandardPanelWidth(tc.width); got != tc.want {
-			t.Fatalf("viewport width %d panel width = %d, want %d", tc.width, got, tc.want)
-		}
-	}
-}
-
 func TestWelcomeActionRowsOmitCommandHints(t *testing.T) {
 	t.Parallel()
 	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
@@ -349,26 +253,6 @@ func TestWelcomeActionRowsOmitCommandHints(t *testing.T) {
 		}
 		if got := displayColumns(row.plain); got != width {
 			t.Fatalf("action %q row width = %d, want %d", action.label, got, width)
-		}
-	}
-}
-
-func TestWelcomeLayoutKeepsDenseActionStack(t *testing.T) {
-	t.Parallel()
-	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
-	rows := buildWelcomePanel(BlockRenderContext{Width: 190, Height: 50, Theme: theme}, "v1.0.0", newWelcomeAnnouncement(""))
-	actionRows := make([]int, 0, len(welcomeActions))
-	for i, row := range rows {
-		if row.token != "" {
-			actionRows = append(actionRows, i)
-		}
-	}
-	if len(actionRows) != len(welcomeActions) {
-		t.Fatalf("action rows=%v", actionRows)
-	}
-	for i := 1; i < len(actionRows); i++ {
-		if got, want := actionRows[i]-actionRows[i-1], 1; got != want {
-			t.Fatalf("action row spacing at %d = %d, want %d", i, got, want)
 		}
 	}
 }
@@ -400,10 +284,14 @@ func TestWelcomeBlockActionRowsCarryStableTokens(t *testing.T) {
 			if !ok {
 				t.Fatalf("%dx%d token %q is outside welcome namespace", size.width, size.height, row.ClickToken)
 			}
-			if got, want := row.ClickEndCol-row.ClickStartCol, welcomeStandardPanelWidth(size.width); got != want {
-				t.Fatalf("%dx%d action %q click width = %d, want full panel width %d",
-					size.width, size.height, action.label, got, want)
+			clicked := sliceByDisplayColumns(row.Plain, row.ClickStartCol, row.ClickEndCol)
+			if !strings.HasPrefix(clicked, welcomeActionMarker+action.label) {
+				t.Fatalf("action bounds include another column: %q", clicked)
 			}
+			if row.ClickEndCol > size.width {
+				t.Fatalf("click bounds overflow: %#v", row)
+			}
+
 		}
 		want := []string{
 			welcomeActionTokenResume,
@@ -426,10 +314,10 @@ func TestWelcomeBlockUltraSmallFallbackKeepsActionsClickable(t *testing.T) {
 			Height: 3,
 			Theme:  theme,
 		})
-		if len(rows) != len(welcomeActions) {
+		if len(rows) != len(welcomeActions)+1 {
 			t.Fatalf("width %d rows = %d, want %d action rows", width, len(rows), len(welcomeActions))
 		}
-		for i, row := range rows {
+		for i, row := range rows[1:] {
 			action := welcomeActions[i]
 			if row.ClickToken != action.token {
 				t.Fatalf("width %d row %d token = %q, want %q", width, i, row.ClickToken, action.token)
@@ -468,7 +356,7 @@ func TestWelcomeFramesFitRequiredTerminalSizes(t *testing.T) {
 		}
 		plain := ansi.Strip(frame)
 		for _, action := range welcomeActions {
-			label := fitWelcomeText(welcomeActionMarker+action.label, welcomeStandardPanelWidth(model.viewport.Width()))
+			label := fitWelcomeText(welcomeActionMarker+action.label, minInt(welcomePanelMaxWidth, model.viewport.Width()))
 			if !strings.Contains(plain, strings.TrimSpace(label)) {
 				t.Fatalf("%dx%d frame missing responsive action label %q\n%s", size.width, size.height, label, plain)
 			}
@@ -569,7 +457,7 @@ func TestWelcomeMouseActionsMatchManualSlashSubmission(t *testing.T) {
 	})
 }
 
-func TestWelcomeMouseHitTestingUsesFullRowsAndRejectsMismatchedRelease(t *testing.T) {
+func TestWelcomeMouseHitTestingUsesActionColumnAndRejectsMismatchedRelease(t *testing.T) {
 	var submissions []Submission
 	model := newWelcomeTestModel(t, 80, 24, Config{
 		ExecuteLine: func(submission Submission) TaskResultMsg {
@@ -689,20 +577,20 @@ func TestWelcomeClickExecutesOnceAndTracksViewportOffset(t *testing.T) {
 
 func TestWelcomeHeightOnlyResizeRebuildsResponsiveLayoutAndClickTargets(t *testing.T) {
 	model := newWelcomeTestModel(t, 80, 24, Config{})
-	if plain := strings.Join(model.viewportPlainLines, "\n"); !strings.Contains(plain, welcomeRelayLogoASCII[0]) {
+	if plain := strings.Join(model.viewportPlainLines, "\n"); !strings.ContainsAny(plain, "█▀▄") {
 		t.Fatalf("initial viewport missing responsive welcome logo\n%s", plain)
 	}
 
-	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 14})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
 	model = updated.(*Model)
 	plain := strings.Join(model.viewportPlainLines, "\n")
-	if strings.Contains(plain, welcomeRelayLogoASCII[0]) ||
-		strings.Contains(plain, welcomeRelayCompactASCII[0]) {
+	if strings.ContainsAny(plain, "█▀▄") {
 		t.Fatalf("height-only resize reused the standard welcome layout\n%s", plain)
 	}
-	if !strings.Contains(plain, welcomeDefaultNotice) || !strings.Contains(plain, "─") {
-		t.Fatalf("height-only resize lost the notice-only upper region\n%s", plain)
+	if strings.Contains(plain, "type / for commands") {
+		t.Fatal("short terminal must prioritize identity and actions over the default hint")
 	}
+
 	for _, action := range welcomeActions {
 		if !strings.Contains(plain, action.label) {
 			t.Fatalf("height-only resize lost action %q\n%s", action.label, plain)
@@ -752,8 +640,7 @@ func TestAcceptedOrdinarySubmissionDismissesWelcomeAndKeepsInitialLogs(t *testin
 	})
 	plainRows := rowPlainTexts(rows)
 	plain := strings.Join(plainRows, "\n")
-	if strings.Contains(plain, welcomeRelayLogoASCII[0]) ||
-		strings.Contains(plain, welcomeRelayCompactASCII[0]) ||
+	if strings.Contains(plain, welcomeWordmarkASCII[0]) ||
 		strings.Contains(plain, welcomeActions[0].label) {
 		t.Fatalf("submitted workspace still contains welcome content\n%s", plain)
 	}
@@ -960,4 +847,33 @@ func rowPlainTextsForWelcomePanel(rows []welcomePanelRow) []string {
 		out[i] = row.plain
 	}
 	return out
+}
+
+func TestWelcomeAnnouncementPhysicalFrames(t *testing.T) {
+	for _, size := range [][2]int{{120, 32}, {80, 24}, {55, 20}, {35, 16}} {
+		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
+			model := newWelcomeTestModel(t, size[0], size[1], Config{Version: "dev", Workspace: "/workspace/caelis"})
+			var frames []string
+			for _, notice := range []string{"", strings.Repeat("公告示例：版本更新与工作区提示。", 30), ""} {
+				model.setWelcomeNotice(notice)
+				frames = append(frames, model.View().Content)
+			}
+			if !strings.Contains(ansi.Strip(frames[1]), "…") {
+				t.Fatalf("long announcement has no truncation marker\n%s", ansi.Strip(frames[1]))
+			}
+			terminal := vt.NewSafeEmulator(size[0], size[1])
+			t.Cleanup(func() { _ = terminal.Close() })
+			for i, output := range renderFullscreenFramesForTest(t, size[0], size[1], frames...) {
+				if _, err := terminal.Write([]byte(output)); err != nil {
+					t.Fatal(err)
+				}
+				if got, want := trimPhysicalFramePadding(ansi.Strip(terminal.Render())), trimPhysicalFramePadding(ansi.Strip(frames[i])); got != want {
+					t.Fatalf("physical frame %d differs\ngot:\n%s\nwant:\n%s", i, got, want)
+				}
+			}
+			if frames[0] != frames[2] {
+				t.Fatalf("clearing the announcement did not restore the original frame\nbefore:\n%s\nafter:\n%s", ansi.Strip(frames[0]), ansi.Strip(frames[2]))
+			}
+		})
+	}
 }

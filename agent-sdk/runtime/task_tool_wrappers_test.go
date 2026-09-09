@@ -163,18 +163,18 @@ func (s *recordingConcurrentAgentInputSender) Count() int {
 	return s.count
 }
 
-func TestRuntimeInjectsSendMessageForHostedChildWithoutOtherTools(t *testing.T) {
+func TestRuntimeDoesNotInjectLegacySendMessage(t *testing.T) {
 	t.Parallel()
 
 	sender := &recordingAgentInputSender{}
 	runtime := &Runtime{}
 	wrapped := runtime.wrapToolsForRuntime(session.Session{}, session.SessionRef{SessionID: "child"}, agent.AgentSpec{}, runtimeToolContext{inputSender: sender})
-	if len(wrapped) != 1 || wrapped[0].Definition().Name != "SendMessage" {
-		t.Fatalf("wrapped tools = %#v, want only SendMessage", wrapped)
+	if len(wrapped) != 0 {
+		t.Fatalf("unexpected implicit tools: %#v", wrapped)
 	}
 }
 
-func TestRuntimeInjectedSendMessageSurvivesWorkspaceWritePolicy(t *testing.T) {
+func TestRuntimeExplicitSDKSendMessageSurvivesWorkspaceWritePolicy(t *testing.T) {
 	t.Parallel()
 
 	registry, err := presets.NewRegistry()
@@ -188,7 +188,7 @@ func TestRuntimeInjectedSendMessageSurvivesWorkspaceWritePolicy(t *testing.T) {
 		Controller: session.ControllerBinding{ControllerID: "child-controller"},
 	}
 	runtime := &Runtime{policies: registry, defaultPolicyMode: presets.ModeWorkspaceWrite}
-	runtimeTools := runtime.wrapToolsForRuntime(activeSession, activeSession.SessionRef, agent.AgentSpec{}, runtimeToolContext{inputSender: sender})
+	runtimeTools := runtime.wrapToolsForRuntime(activeSession, activeSession.SessionRef, agent.AgentSpec{Tools: []tool.Tool{sendmessage.New()}}, runtimeToolContext{inputSender: sender})
 	wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{Tools: runtimeTools}, approvalContext{
 		ctx: context.Background(), session: activeSession, sessionRef: activeSession.SessionRef,
 	})
@@ -531,5 +531,26 @@ func TestRuntimeTaskRejectsNonStringInput(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "input") {
 		t.Fatalf("Task non-string input error = %v, want input validation failure", err)
+	}
+}
+
+func TestTaskRejectsParticipantHandlesForEveryAction(t *testing.T) {
+	_, active, runtime := newRuntimeRunCommandToolTestHarness(t)
+	runtime.tasks.subagents["child"] = &subagentTask{ref: taskapi.Ref{TaskID: "child", SessionID: "child-session"}, sessionRef: active.SessionRef, handle: "worker", state: taskapi.StateCompleted}
+	target := runtimeTaskTool{base: tasktool.New(), sessionRef: active.SessionRef, tasks: runtime.tasks}
+	for _, action := range []string{"read", "wait", "write", "cancel"} {
+		args := map[string]any{"action": action, "handle": "worker"}
+		if action == "write" {
+			args["input"] = "hello"
+		}
+		raw, _ := json.Marshal(args)
+		if _, err := target.Call(t.Context(), tool.Call{ID: action, Input: raw}); err == nil || !strings.Contains(err.Error(), "ReadThread") {
+			t.Fatalf("%s: %v", action, err)
+		}
+	}
+	raw := []byte(`{"action":"wait","handle":"worker,missing"}`)
+	result, err := target.Call(t.Context(), tool.Call{ID: "batch", Input: raw})
+	if err != nil || !result.IsError {
+		t.Fatalf("batch %v %v", result, err)
 	}
 }

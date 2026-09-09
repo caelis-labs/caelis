@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -45,44 +46,17 @@ func guardianApprovalOptionsJSON(payload *kernel.ApprovalPayload) (string, bool,
 }
 
 func guardianOutputSpec(payload *kernel.ApprovalPayload) (*model.OutputSpec, error) {
-	properties := map[string]any{
-		"risk_level": map[string]any{
-			"type": "string",
-			"enum": []any{"low", "medium", "high", "critical"},
-		},
-		"user_authorization": map[string]any{
-			"type": "string",
-			"enum": []any{"unknown", "low", "medium", "high"},
-		},
-		"outcome": map[string]any{
-			"type": "string",
-			"enum": []any{"allow", "deny"},
-		},
-		"rationale": map[string]any{"type": "string", "minLength": 1},
+	if payload == nil || len(payload.Options) == 0 {
+		return nil, fmt.Errorf("guardian requires normalized approval options")
 	}
-	required := []any{"outcome"}
-	if payload != nil {
-		optionIDs, err := approval.StrictOptionIDs(payload.Options)
-		if err != nil {
-			return nil, err
-		}
-		if len(optionIDs) > 0 {
-			properties["option_id"] = map[string]any{
-				"type": "string",
-				"enum": stringsToAny(optionIDs),
-			}
-			required = []any{"option_id", "risk_level", "user_authorization", "outcome", "rationale"}
-		}
+	if err := approval.ValidateStrictOptions(payload.Options); err != nil {
+		return nil, err
 	}
-	return &model.OutputSpec{
-		Mode: model.OutputModeSchema,
-		JSONSchema: map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties":           properties,
-			"required":             required,
-		},
-	}, nil
+	return &model.OutputSpec{Mode: model.OutputModeSchema, JSONSchema: map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{"option_id": map[string]any{"type": "string"}, "rationale": map[string]any{"type": "string"}},
+		"required":   []any{"option_id"},
+	}}, nil
 }
 
 // guardianOutputSpecForModel preserves Guardian's structured response contract
@@ -101,12 +75,4 @@ func guardianOutputSpecForModel(llm model.LLM, payload *kernel.ApprovalPayload) 
 	output.Mode = model.OutputModeText
 	output.JSONSchema = nil
 	return output, nil
-}
-
-func stringsToAny(values []string) []any {
-	out := make([]any, 0, len(values))
-	for _, value := range values {
-		out = append(out, value)
-	}
-	return out
 }

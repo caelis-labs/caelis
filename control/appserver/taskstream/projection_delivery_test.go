@@ -60,7 +60,7 @@ func TestProjectTaskFrameSeparatesDelegatedSemanticsFromCommandTerminalOutput(t 
 				Closed:     true,
 				State:      "completed",
 			},
-			want: []streamFrameEnvelopeExpectation{{parentCallID: "spawn-call-1", parentTool: "Spawn", transient: true}},
+			want: []streamFrameEnvelopeExpectation{{parentCallID: "spawn-call-1", parentTool: "StartThread", transient: true}},
 		},
 		{
 			name: "run command running",

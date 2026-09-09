@@ -34,12 +34,13 @@ type ApprovalToolCall = agent.EndpointApprovalToolCall
 // ApprovalRequest is the runtime-owned approval bridge payload used by remote
 // ACP controllers. It is system-controlled and never exposed to the model.
 type ApprovalRequest struct {
-	SessionRef session.SessionRef `json:"session_ref,omitempty"`
-	Session    session.Session    `json:"session,omitempty"`
-	Agent      string             `json:"agent,omitempty"`
-	Mode       string             `json:"mode,omitempty"`
-	ToolCall   ApprovalToolCall   `json:"tool_call,omitempty"`
-	Options    []ApprovalOption   `json:"options,omitempty"`
+	EndpointSessionID string             `json:"endpoint_session_id,omitempty"`
+	SessionRef        session.SessionRef `json:"session_ref,omitempty"`
+	Session           session.Session    `json:"session,omitempty"`
+	Agent             string             `json:"agent,omitempty"`
+	Mode              string             `json:"mode,omitempty"`
+	ToolCall          ApprovalToolCall   `json:"tool_call,omitempty"`
+	Options           []ApprovalOption   `json:"options,omitempty"`
 }
 
 // ApprovalResponse is one bridged controller approval outcome.

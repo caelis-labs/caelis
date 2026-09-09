@@ -206,8 +206,13 @@ func taskFrameProjectionRequestFor(descriptor controltaskstream.TaskDescriptor, 
 		}
 	}
 	terminalID := firstString(frame.TerminalID, descriptor.CurrentTurnID)
+	turnID := terminalID
 	scope := eventstream.ScopeMain
 	if descriptor.Kind == task.KindSubagent {
+		// Binding TerminalID is the stable Task stream address. Envelope.TurnID
+		// must be record-local: event Scope.TurnID, then the frame's ActivityID.
+		// Latest Task CurrentTurnID would relabel earlier spool frames on replay.
+		turnID = firstString(subagentFrameTurnID(frame), frame.ActivityID, descriptor.ActivityID, frame.TerminalID)
 		scope = eventstream.ScopeSubagent
 	}
 	displayTerminalID := terminalID
@@ -218,7 +223,7 @@ func taskFrameProjectionRequestFor(descriptor controltaskstream.TaskDescriptor, 
 		displayTerminalID = strings.TrimSpace(descriptor.ParentTool.ToolCallID)
 	}
 	return taskFrameProjectionRequest{
-		TurnID: terminalID, SessionID: descriptor.SessionID,
+		TurnID: turnID, SessionID: descriptor.SessionID,
 		CallID: descriptor.ParentTool.ToolCallID, ToolName: toolName, TaskHandle: descriptor.Handle,
 		TaskID:            descriptor.TaskID,
 		DisplayTerminalID: displayTerminalID, Scope: scope, ParticipantID: descriptor.ParticipantID,
@@ -247,6 +252,13 @@ func stampEnvelope(record controltaskstream.Record, envelope eventstream.Envelop
 		Generation: record.Generation, Sequence: record.Sequence,
 	}}
 	return envelope
+}
+
+func subagentFrameTurnID(frame controltaskstream.Frame) string {
+	if frame.Event == nil || frame.Event.Scope == nil {
+		return ""
+	}
+	return strings.TrimSpace(frame.Event.Scope.TurnID)
 }
 
 func firstString(values ...string) string {

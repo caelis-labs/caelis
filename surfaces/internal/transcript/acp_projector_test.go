@@ -21,7 +21,7 @@ func TestProjectACPEventToEventsUsesTypedRelationAndDeliveryWithoutMetadata(t *t
 		Actor:        "worker",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Update: eventstream.ContentChunk{
@@ -35,7 +35,7 @@ func TestProjectACPEventToEventsUsesTypedRelationAndDeliveryWithoutMetadata(t *t
 		t.Fatalf("events = %#v, want one transcript event", events)
 	}
 	event := events[0]
-	if event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "Spawn" || !event.Observation {
+	if event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "StartThread" || !event.Observation {
 		t.Fatalf("typed event delivery = %#v, want typed transient child observation", event)
 	}
 	if event.MessageID != "message-1" {
@@ -145,7 +145,7 @@ func TestProjectACPEventToEventsIgnoresUntrustedAgentCommunicationMeta(t *testin
 	}
 }
 
-func TestProjectACPEventToEventsProjectsParentCommunicationAsSubagentUserMessage(t *testing.T) {
+func TestProjectACPEventToEventsProjectsParentCommunicationAsAgentMessage(t *testing.T) {
 	t.Parallel()
 
 	events := ProjectACPEventToEvents(eventstream.Envelope{
@@ -160,9 +160,9 @@ func TestProjectACPEventToEventsProjectsParentCommunicationAsSubagentUserMessage
 			}}},
 		},
 	}, nil)
-	if len(events) != 1 || events[0].Kind != EventNarrative || events[0].NarrativeKind != NarrativeUser ||
+	if len(events) != 1 || events[0].Kind != EventAgentCommunication || events[0].AgentSourceID != "controller-1" ||
 		events[0].Actor != "parent" || events[0].Text != "continue" {
-		t.Fatalf("events = %#v, want parent user message", events)
+		t.Fatalf("events = %#v, want attributed parent Agent message", events)
 	}
 }
 
@@ -175,7 +175,7 @@ func TestProjectACPEventToEventsPrefersTypedRelationAndDeliveryOverConflictingLe
 		ScopeID: "task-1",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "typed-spawn-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Delivery: &eventstream.Delivery{},
 		Meta: map[string]any{
@@ -198,7 +198,7 @@ func TestProjectACPEventToEventsPrefersTypedRelationAndDeliveryOverConflictingLe
 		t.Fatalf("events = %#v, want one transcript event", events)
 	}
 	event := events[0]
-	if event.AnchorToolCallID != "typed-spawn-1" || event.AnchorToolName != "Spawn" || event.Observation {
+	if event.AnchorToolCallID != "typed-spawn-1" || event.AnchorToolName != "StartThread" || event.Observation {
 		t.Fatalf("event = %#v, want typed relation and zero delivery without observation authority", event)
 	}
 }
@@ -212,7 +212,7 @@ func TestProjectACPEventToEventsRetainsEventOnlyPlanParentRelation(t *testing.T)
 		ScopeID: "task-1",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Update: eventstream.PlanUpdate{
@@ -227,7 +227,7 @@ func TestProjectACPEventToEventsRetainsEventOnlyPlanParentRelation(t *testing.T)
 		t.Fatalf("events = %#v, want one plan event", events)
 	}
 	event := events[0]
-	if event.Kind != EventPlan || event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "Spawn" {
+	if event.Kind != EventPlan || event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "StartThread" {
 		t.Fatalf("event-only plan = %#v, want Spawn relation", event)
 	}
 }
@@ -247,7 +247,7 @@ func TestProjectACPEventToEventsFallsBackToLegacyRelationAndDeliveryMetadata(t *
 				"runtime": map[string]any{
 					"stream": map[string]any{
 						"parent_call_id": "spawn-1",
-						"parent_tool":    "Spawn",
+						"parent_tool":    "StartThread",
 					},
 				},
 			},
@@ -268,7 +268,7 @@ func TestProjectACPEventToEventsFallsBackToLegacyRelationAndDeliveryMetadata(t *
 	if event.Scope != ScopeSubagent || event.ScopeID != "task-1" || event.Actor != "worker" || event.TurnID != "turn-1" {
 		t.Fatalf("event scope = %#v, want subagent/task-1/worker/turn-1", event)
 	}
-	if event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "Spawn" || event.Observation {
+	if event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "StartThread" || event.Observation {
 		t.Fatalf("event anchor = %#v, want compatibility anchor without typed observation authority", event)
 	}
 }
@@ -285,14 +285,14 @@ func TestProjectACPEventToEventsFallsBackToLegacyRelationMetadataInUpdate(t *tes
 			Content:       eventstream.TextContent{Type: "text", Text: "legacy update metadata"},
 			Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"stream": map[string]any{
 				"parent_call_id": "spawn-1",
-				"parent_tool":    "Spawn",
+				"parent_tool":    "StartThread",
 			}}}},
 		},
 	}, nil)
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want one transcript event", events)
 	}
-	if event := events[0]; event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "Spawn" || event.Observation {
+	if event := events[0]; event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "StartThread" || event.Observation {
 		t.Fatalf("event = %#v, want legacy update relation without typed observation authority", event)
 	}
 }

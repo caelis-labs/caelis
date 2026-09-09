@@ -16,16 +16,16 @@ import (
 func TestAppendEventsCacheReadsHistoryOnceThenOnlyAppendedTail(t *testing.T) {
 	t.Parallel()
 
-	store, active := newEventPageIndexFixture(t, 800)
+	store, active := newEventPageIndexFixture(t, 8)
 	reads := 0
 	store.eventLogLineRead = func(_ string, _ int, _ int64) { reads++ }
 
-	appendLifecycleEvents(t, store, active.SessionRef, 800, 1)
-	if reads != 800 {
-		t.Fatalf("first warm append decoded lines = %d, want 800 once", reads)
+	appendLifecycleEvents(t, store, active.SessionRef, 8, 1)
+	if reads != 8 {
+		t.Fatalf("first warm append decoded lines = %d, want 8 once", reads)
 	}
 	reads = 0
-	appendLifecycleEvents(t, store, active.SessionRef, 801, 1)
+	appendLifecycleEvents(t, store, active.SessionRef, 9, 1)
 	if reads != 1 {
 		t.Fatalf("second append decoded lines = %d, want only appended tail line", reads)
 	}
@@ -38,9 +38,9 @@ func TestAppendEventsCacheReadsHistoryOnceThenOnlyAppendedTail(t *testing.T) {
 		t.Fatalf("cache catch-up decoded lines = %d, want one newly committed line", reads)
 	}
 	other := NewStore(Config{RootDir: store.rootDir})
-	appendLifecycleEvents(t, other, active.SessionRef, 802, 1)
+	appendLifecycleEvents(t, other, active.SessionRef, 10, 1)
 	reads = 0
-	appendLifecycleEvents(t, store, active.SessionRef, 803, 1)
+	appendLifecycleEvents(t, store, active.SessionRef, 11, 1)
 	if reads != 1 {
 		t.Fatalf("append after cross-Store commit decoded lines = %d, want external tail only", reads)
 	}

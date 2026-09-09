@@ -4,31 +4,34 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 func TestReadSSEWithFirstEventTimeout(t *testing.T) {
-	reader, writer := io.Pipe()
-	defer reader.Close()
-	defer writer.Close()
+	synctest.Test(t, func(t *testing.T) {
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		defer writer.Close()
 
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- readSSEWithFirstEventTimeout(reader, 20*time.Millisecond, func([]byte) error {
-			return nil
-		})
-	}()
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- readSSEWithFirstEventTimeout(reader, 20*time.Millisecond, func([]byte) error {
+				return nil
+			})
+		}()
 
-	select {
-	case err := <-errCh:
-		if !errors.Is(err, errStreamFirstEventTimeout) {
-			t.Fatalf("readSSEWithFirstEventTimeout() error = %v, want first event timeout", err)
+		select {
+		case err := <-errCh:
+			if !errors.Is(err, errStreamFirstEventTimeout) {
+				t.Fatalf("readSSEWithFirstEventTimeout() error = %v, want first event timeout", err)
+			}
+		case <-time.After(250 * time.Millisecond):
+			t.Fatal("readSSEWithFirstEventTimeout() did not time out")
 		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("readSSEWithFirstEventTimeout() did not time out")
-	}
+	})
 }
 
 type sseCloseObservedReader struct {
@@ -42,212 +45,223 @@ func (r sseCloseObservedReader) Close() error {
 }
 
 func TestSSETimeoutDrainsActiveCallbackBeforeReturning(t *testing.T) {
-	reader, writer := io.Pipe()
-	defer reader.Close()
-	defer writer.Close()
-	closed, entered, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	done := make(chan error, 1)
-	go func() {
-		done <- readSSEWithEventTimeout(sseCloseObservedReader{reader, closed}, time.Second, 20*time.Millisecond, func([]byte) error {
-			close(entered)
-			<-release
-			return nil
-		})
-	}()
-	_, err := io.WriteString(writer, "data: {}\n\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	<-entered
-	<-closed
-	select {
-	case err := <-done:
-		close(release)
-		t.Fatalf("timeout returned before callback drained: %v", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-	close(release)
-	select {
-	case err := <-done:
-		if !errors.Is(err, errStreamIdleTimeout) {
-			t.Fatalf("cause=%v", err)
+	synctest.Test(t, func(t *testing.T) {
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		defer writer.Close()
+		closed, entered, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			done <- readSSEWithEventTimeout(sseCloseObservedReader{reader, closed}, time.Second, 20*time.Millisecond, func([]byte) error {
+				close(entered)
+				<-release
+				return nil
+			})
+		}()
+		_, err := io.WriteString(writer, "data: {}\n\n")
+		if err != nil {
+			t.Fatal(err)
 		}
-	case <-time.After(time.Second):
-		t.Fatal("callback did not drain")
-	}
+		<-entered
+		<-closed
+		synctest.Wait()
+		select {
+		case err := <-done:
+			close(release)
+			t.Fatalf("timeout returned before callback drained: %v", err)
+		default:
+		}
+		close(release)
+		select {
+		case err := <-done:
+			if !errors.Is(err, errStreamIdleTimeout) {
+				t.Fatalf("cause=%v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("callback did not drain")
+		}
+	})
 }
 
 func TestReadSSEWithFirstEventTimeout_AllowsSilenceAfterFirstEvent(t *testing.T) {
-	reader, writer := io.Pipe()
-	defer reader.Close()
-	defer writer.Close()
+	synctest.Test(t, func(t *testing.T) {
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		defer writer.Close()
 
-	dataCh := make(chan string, 2)
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- readSSEWithFirstEventTimeout(reader, 20*time.Millisecond, func(data []byte) error {
-			dataCh <- string(data)
-			return nil
-		})
-	}()
+		dataCh := make(chan string, 2)
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- readSSEWithFirstEventTimeout(reader, 20*time.Millisecond, func(data []byte) error {
+				dataCh <- string(data)
+				return nil
+			})
+		}()
 
-	if _, err := writer.Write([]byte("data: first\n\n")); err != nil {
-		t.Fatalf("write first event: %v", err)
-	}
-	select {
-	case got := <-dataCh:
-		if got != "first" {
-			t.Fatalf("first data = %q, want first", got)
+		if _, err := writer.Write([]byte("data: first\n\n")); err != nil {
+			t.Fatalf("write first event: %v", err)
 		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("first event was not observed")
-	}
-
-	time.Sleep(80 * time.Millisecond)
-	select {
-	case err := <-errCh:
-		t.Fatalf("readSSEWithFirstEventTimeout() returned during post-first silence: %v", err)
-	default:
-	}
-
-	if _, err := writer.Write([]byte("data: second\n\ndata: [DONE]\n\n")); err != nil {
-		t.Fatalf("write second event: %v", err)
-	}
-	select {
-	case err := <-errCh:
-		if err != nil {
-			t.Fatalf("readSSEWithFirstEventTimeout() error = %v, want nil", err)
+		select {
+		case got := <-dataCh:
+			if got != "first" {
+				t.Fatalf("first data = %q, want first", got)
+			}
+		case <-time.After(250 * time.Millisecond):
+			t.Fatal("first event was not observed")
 		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("readSSEWithFirstEventTimeout() did not finish")
-	}
-	select {
-	case got := <-dataCh:
-		if got != "second" {
-			t.Fatalf("second data = %q, want second", got)
+
+		time.Sleep(80 * time.Millisecond)
+		select {
+		case err := <-errCh:
+			t.Fatalf("readSSEWithFirstEventTimeout() returned during post-first silence: %v", err)
+		default:
 		}
-	default:
-		t.Fatal("second event was not observed")
-	}
+
+		if _, err := writer.Write([]byte("data: second\n\ndata: [DONE]\n\n")); err != nil {
+			t.Fatalf("write second event: %v", err)
+		}
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("readSSEWithFirstEventTimeout() error = %v, want nil", err)
+			}
+		case <-time.After(250 * time.Millisecond):
+			t.Fatal("readSSEWithFirstEventTimeout() did not finish")
+		}
+		select {
+		case got := <-dataCh:
+			if got != "second" {
+				t.Fatalf("second data = %q, want second", got)
+			}
+		default:
+			t.Fatal("second event was not observed")
+		}
+	})
 }
 
 func TestReadSSEWithEventTimeout_TimesOutAfterFirstEventSilence(t *testing.T) {
-	reader, writer := io.Pipe()
-	defer reader.Close()
-	defer writer.Close()
+	synctest.Test(t, func(t *testing.T) {
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		defer writer.Close()
 
-	dataCh := make(chan string, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- readSSEWithEventTimeout(reader, 250*time.Millisecond, 20*time.Millisecond, func(data []byte) error {
-			dataCh <- string(data)
-			return nil
-		})
-	}()
+		dataCh := make(chan string, 1)
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- readSSEWithEventTimeout(reader, 250*time.Millisecond, 20*time.Millisecond, func(data []byte) error {
+				dataCh <- string(data)
+				return nil
+			})
+		}()
 
-	if _, err := writer.Write([]byte("data: first\n\n")); err != nil {
-		t.Fatalf("write first event: %v", err)
-	}
-	select {
-	case got := <-dataCh:
-		if got != "first" {
-			t.Fatalf("first data = %q, want first", got)
+		if _, err := writer.Write([]byte("data: first\n\n")); err != nil {
+			t.Fatalf("write first event: %v", err)
 		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("first event was not observed")
-	}
-	select {
-	case err := <-errCh:
-		if !errors.Is(err, errStreamIdleTimeout) {
-			t.Fatalf("readSSEWithEventTimeout() error = %v, want idle timeout", err)
+		select {
+		case got := <-dataCh:
+			if got != "first" {
+				t.Fatalf("first data = %q, want first", got)
+			}
+		case <-time.After(250 * time.Millisecond):
+			t.Fatal("first event was not observed")
 		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("readSSEWithEventTimeout() did not time out")
-	}
+		select {
+		case err := <-errCh:
+			if !errors.Is(err, errStreamIdleTimeout) {
+				t.Fatalf("readSSEWithEventTimeout() error = %v, want idle timeout", err)
+			}
+		case <-time.After(250 * time.Millisecond):
+			t.Fatal("readSSEWithEventTimeout() did not time out")
+		}
+	})
 }
 
 func TestReadSSEWithEventTimeout_AllowsSilenceWhenIdleDisabled(t *testing.T) {
-	reader, writer := io.Pipe()
-	defer reader.Close()
-	defer writer.Close()
+	synctest.Test(t, func(t *testing.T) {
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		defer writer.Close()
 
-	dataCh := make(chan string, 2)
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- readSSEWithEventTimeout(reader, 20*time.Millisecond, 0, func(data []byte) error {
-			dataCh <- string(data)
-			return nil
-		})
-	}()
+		dataCh := make(chan string, 2)
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- readSSEWithEventTimeout(reader, 20*time.Millisecond, 0, func(data []byte) error {
+				dataCh <- string(data)
+				return nil
+			})
+		}()
 
-	if _, err := writer.Write([]byte("data: first\n\n")); err != nil {
-		t.Fatalf("write first event: %v", err)
-	}
-	select {
-	case got := <-dataCh:
-		if got != "first" {
-			t.Fatalf("first data = %q, want first", got)
+		if _, err := writer.Write([]byte("data: first\n\n")); err != nil {
+			t.Fatalf("write first event: %v", err)
 		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("first event was not observed")
-	}
-
-	time.Sleep(80 * time.Millisecond)
-	select {
-	case err := <-errCh:
-		t.Fatalf("readSSEWithEventTimeout() returned with idle disabled: %v", err)
-	default:
-	}
-
-	if _, err := writer.Write([]byte("data: second\n\ndata: [DONE]\n\n")); err != nil {
-		t.Fatalf("write second event: %v", err)
-	}
-	select {
-	case err := <-errCh:
-		if err != nil {
-			t.Fatalf("readSSEWithEventTimeout() error = %v, want nil", err)
+		select {
+		case got := <-dataCh:
+			if got != "first" {
+				t.Fatalf("first data = %q, want first", got)
+			}
+		case <-time.After(250 * time.Millisecond):
+			t.Fatal("first event was not observed")
 		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("readSSEWithEventTimeout() did not finish")
-	}
+
+		time.Sleep(80 * time.Millisecond)
+		select {
+		case err := <-errCh:
+			t.Fatalf("readSSEWithEventTimeout() returned with idle disabled: %v", err)
+		default:
+		}
+
+		if _, err := writer.Write([]byte("data: second\n\ndata: [DONE]\n\n")); err != nil {
+			t.Fatalf("write second event: %v", err)
+		}
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("readSSEWithEventTimeout() error = %v, want nil", err)
+			}
+		case <-time.After(250 * time.Millisecond):
+			t.Fatal("readSSEWithEventTimeout() did not finish")
+		}
+	})
 }
 
 func TestReadSSEWithActivityTimeout_HeartbeatsDoNotResetIdle(t *testing.T) {
 	t.Parallel()
 
-	reader, writer := io.Pipe()
-	defer reader.Close()
-	defer writer.Close()
-	writerDone := make(chan struct{})
-	go func() {
-		defer close(writerDone)
-		if _, err := writer.Write([]byte("data: first\n\n")); err != nil {
-			return
-		}
-		ticker := time.NewTicker(5 * time.Millisecond)
-		defer ticker.Stop()
-		for range ticker.C {
-			if _, err := writer.Write([]byte("data: heartbeat\n\n")); err != nil {
+	synctest.Test(t, func(t *testing.T) {
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		defer writer.Close()
+		writerDone := make(chan struct{})
+		go func() {
+			defer close(writerDone)
+			if _, err := writer.Write([]byte("data: first\n\n")); err != nil {
 				return
 			}
-		}
-	}()
+			ticker := time.NewTicker(5 * time.Millisecond)
+			defer ticker.Stop()
+			for range ticker.C {
+				if _, err := writer.Write([]byte("data: heartbeat\n\n")); err != nil {
+					return
+				}
+			}
+		}()
 
-	err := readSSEWithActivityTimeout(
-		reader,
-		time.Second,
-		30*time.Millisecond,
-		func(data []byte) bool { return string(data) != "heartbeat" },
-		func([]byte) error { return nil },
-	)
-	if !errors.Is(err, errStreamIdleTimeout) {
-		t.Fatalf("readSSEWithActivityTimeout() error = %v, want idle timeout", err)
-	}
-	select {
-	case <-writerDone:
-	case <-time.After(time.Second):
-		t.Fatal("heartbeat writer did not stop after reader timeout")
-	}
+		err := readSSEWithActivityTimeout(
+			reader,
+			time.Second,
+			30*time.Millisecond,
+			func(data []byte) bool { return string(data) != "heartbeat" },
+			func([]byte) error { return nil },
+		)
+		if !errors.Is(err, errStreamIdleTimeout) {
+			t.Fatalf("readSSEWithActivityTimeout() error = %v, want idle timeout", err)
+		}
+		select {
+		case <-writerDone:
+		case <-time.After(time.Second):
+			t.Fatal("heartbeat writer did not stop after reader timeout")
+		}
+	})
 }
 
 func TestStreamFirstEventTimeoutErrorIsRetryable(t *testing.T) {

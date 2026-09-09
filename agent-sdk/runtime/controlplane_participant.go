@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
 const participantLifecycleConfirmTimeout = 2 * time.Second
@@ -126,6 +127,33 @@ func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachPartici
 		return session.Session{}, fmt.Errorf("agent-sdk/runtime: participant lifecycle store does not support atomic event persistence")
 	}
 	binding, _ := participantBinding(activeSession, req.ParticipantID)
+	if req.ExpectedDelegationID != "" && binding.DelegationID != req.ExpectedDelegationID ||
+		req.ExpectedAttachmentGeneration != "" && binding.AttachmentGeneration != req.ExpectedAttachmentGeneration {
+		return session.Session{}, fmt.Errorf("participant was replaced before removal")
+	}
+	if req.RequireSettled {
+		if binding.ID == "" || binding.DelegationID == "" || r.tasks == nil || r.tasks.store == nil {
+			return session.Session{}, fmt.Errorf("participant Task is unavailable")
+		}
+		r.tasks.mu.RLock()
+		live := r.tasks.subagents[binding.DelegationID]
+		r.tasks.mu.RUnlock()
+		if live != nil {
+			live.mu.Lock()
+			pending := live.pendingInput != nil && !live.pendingInput.settled.Load()
+			live.mu.Unlock()
+			if pending {
+				return session.Session{}, fmt.Errorf("participant has an unsettled admitted input")
+			}
+		}
+		entry, err := r.tasks.store.Get(ctx, binding.DelegationID)
+		if err != nil {
+			return session.Session{}, err
+		}
+		if entry == nil || entry.Session.SessionID != ref.SessionID || entry.Running || !task.IsTerminalState(entry.State) || entry.State == task.StateUnknownOutcome {
+			return session.Session{}, fmt.Errorf("participant must be settled before removal")
+		}
+	}
 	mutationGuard := session.ControlMutationGuard(session.ControlMutationPurposeParticipant)
 	if err := r.controllers.Detach(ctx, controller.DetachRequest{
 		SessionRef: ref, Session: activeSession,

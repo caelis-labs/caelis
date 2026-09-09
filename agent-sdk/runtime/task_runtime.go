@@ -297,19 +297,7 @@ func subagentTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 		"handle": taskPublicHandle(snapshot),
 		"state":  string(snapshot.State),
 	}
-	if responses, ok := snapshot.Result[subagentFinalResponsesResultKey]; ok {
-		payload[subagentFinalResponsesResultKey] = responses
-		if items, valid := responses.([]any); valid && len(items) > 0 {
-			if latest, mapped := items[len(items)-1].(map[string]any); mapped {
-				if finalMessage := taskRawStringValue(latest["final_message"]); taskOutputHasNonBlankLine(finalMessage) {
-					// Keep the singular field as a compatibility alias for the
-					// newest unread response. final_responses is authoritative when
-					// more than one child Turn completed between observations.
-					payload["final_message"] = finalMessage
-				}
-			}
-		}
-	}
+
 	if diagnostic, ok := subagentFailureDiagnostic(snapshot.State, taskRawStringValue(snapshot.Result["error"])); ok {
 		payload["error"] = diagnostic
 		return payload

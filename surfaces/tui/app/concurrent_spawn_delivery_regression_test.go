@@ -132,13 +132,13 @@ func concurrentSpawnStartEnvelope(sequence int, task concurrentSpawnTask) events
 		Kind:          eventstream.ToolKindExecute,
 		Status:        eventstream.ToolStatusInProgress,
 		RawInput:      map[string]any{"agent": "breeze", "prompt": task.prompt},
-		Meta:          acpToolNameMeta("Spawn"),
+		Meta:          acpToolNameMeta("StartThread"),
 	})
 }
 
 func concurrentSpawnResultEnvelope(sequence int, task concurrentSpawnTask) eventstream.Envelope {
 	completed := eventstream.ToolStatusCompleted
-	meta := testMeta.WithRuntimeSection(acpToolNameMeta("Spawn"), testMeta.RuntimeTask, map[string]any{
+	meta := testMeta.WithRuntimeSection(acpToolNameMeta("StartThread"), testMeta.RuntimeTask, map[string]any{
 		"agent": "breeze", "handle": task.handle, "prompt": task.prompt, "target_kind": "subagent",
 	})
 	return concurrentSpawnEnvelope(sequence, eventstream.ToolCallUpdate{
@@ -150,7 +150,7 @@ func concurrentSpawnResultEnvelope(sequence int, task concurrentSpawnTask) event
 		RawInput:      map[string]any{"agent": "breeze", "prompt": task.prompt},
 		RawOutput: map[string]any{
 			"handle": task.handle, "state": "running", "target_kind": "subagent",
-			"parent_call": task.callID, "parent_tool": "Spawn",
+			"parent_call": task.callID, "parent_tool": "StartThread",
 		},
 		Meta: meta,
 	})

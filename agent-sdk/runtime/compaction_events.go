@@ -129,11 +129,21 @@ func eventTextForCompaction(event *session.Event) string {
 	return ""
 }
 
-func pendingEventsForCompaction(event *session.Event) []*session.Event {
-	if event == nil || !session.IsMainInvocationVisibleEvent(event) {
+func pendingEventsForCompaction(events []*session.Event) []*session.Event {
+	if len(events) == 0 {
 		return nil
 	}
-	return []*session.Event{session.CloneEvent(event)}
+	out := make([]*session.Event, 0, len(events))
+	for _, event := range events {
+		if event == nil || !session.IsMainInvocationVisibleEvent(event) {
+			continue
+		}
+		out = append(out, session.CloneEvent(event))
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func promptEventsWithPending(promptEvents []*session.Event, pendingEvents []*session.Event) []*session.Event {

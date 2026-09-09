@@ -132,8 +132,9 @@ func (a *agent) NewSession(ctx context.Context, request acp.NewSessionRequest) (
 	if err := a.waitConnection(ctx); err != nil {
 		return acp.NewSessionResponse{}, err
 	}
-	if len(request.McpServers) != 0 {
-		return acp.NewSessionResponse{}, acp.NewInvalidParams(map[string]any{"error": "Codex built-in adapter does not support ACP MCP server injection yet"})
+	config, configErr := mcpConfig(request.McpServers)
+	if configErr != nil {
+		return acp.NewSessionResponse{}, acp.NewInvalidParams(map[string]any{"error": configErr.Error()})
 	}
 	roots, err := a.options.Workspace.validate(request.Cwd, request.AdditionalDirectories)
 	if err != nil {
@@ -141,7 +142,8 @@ func (a *agent) NewSession(ctx context.Context, request acp.NewSessionRequest) (
 	}
 	var response threadOpenResponse
 	err = a.backend.rpc.Request(ctx, "thread/start", map[string]any{
-		"cwd": request.Cwd, "runtimeWorkspaceRoots": roots,
+		"config": config,
+		"cwd":    request.Cwd, "runtimeWorkspaceRoots": roots,
 		"approvalPolicy": "on-request", "sandbox": "workspace-write",
 		"experimentalRawEvents": false, "ephemeral": false,
 	}, &response)
@@ -166,8 +168,9 @@ func (a *agent) ResumeSession(ctx context.Context, request acp.ResumeSessionRequ
 	if err := a.waitConnection(ctx); err != nil {
 		return acp.ResumeSessionResponse{}, err
 	}
-	if len(request.McpServers) != 0 {
-		return acp.ResumeSessionResponse{}, acp.NewInvalidParams(map[string]any{"error": "Codex built-in adapter does not support ACP MCP server injection yet"})
+	config, configErr := mcpConfig(request.McpServers)
+	if configErr != nil {
+		return acp.ResumeSessionResponse{}, acp.NewInvalidParams(map[string]any{"error": configErr.Error()})
 	}
 	roots, err := a.options.Workspace.validate(request.Cwd, request.AdditionalDirectories)
 	if err != nil {
@@ -189,6 +192,7 @@ func (a *agent) ResumeSession(ctx context.Context, request acp.ResumeSessionRequ
 	route.state.markSubscribed()
 	var response threadOpenResponse
 	err = a.backend.rpc.Request(ctx, "thread/resume", map[string]any{
+		"config":   config,
 		"threadId": threadID, "cwd": request.Cwd,
 		"runtimeWorkspaceRoots": roots, "excludeTurns": true,
 		"approvalPolicy": "on-request", "sandbox": "workspace-write",

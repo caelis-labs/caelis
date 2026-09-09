@@ -44,6 +44,7 @@ type ApprovalOption struct {
 // ApprovalRequest is one runtime-owned approval request emitted before one
 // sensitive tool execution continues.
 type ApprovalRequest struct {
+	Origin     *ApprovalOrigin    `json:"origin,omitempty"`
 	SessionRef session.SessionRef `json:"session_ref"`
 	Session    session.Session    `json:"session"`
 	RunID      string             `json:"run_id,omitempty"`
@@ -86,6 +87,9 @@ type RunRequest struct {
 	Input        string              `json:"input,omitempty"`
 	DisplayInput string              `json:"display_input,omitempty"`
 	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
+	// Inputs admits an ordered Agent-communication batch as one Turn. When set,
+	// singular Input, DisplayInput, ContentParts, and InputActor must be empty.
+	Inputs []AgentCommunicationInput `json:"-"`
 	// InputActor identifies who authored Input. Agent communication requires a
 	// trusted source identity; ordinary conversation defaults to the real user.
 	InputActor session.ActorRef `json:"-"`
@@ -185,6 +189,12 @@ type DetachParticipantRequest struct {
 	SessionRef    session.SessionRef `json:"session_ref"`
 	ParticipantID string             `json:"participant_id,omitempty"`
 	Source        string             `json:"source,omitempty"`
+	// RequireSettled checks the delegated Task under the input-admission lock.
+	RequireSettled bool `json:"require_settled,omitempty"`
+	// ExpectedDelegationID and ExpectedAttachmentGeneration reject replacement
+	// participants between discovery and removal.
+	ExpectedDelegationID         string `json:"expected_delegation_id,omitempty"`
+	ExpectedAttachmentGeneration string `json:"expected_attachment_generation,omitempty"`
 }
 
 // PromptParticipantRequest prompts one attached participant.

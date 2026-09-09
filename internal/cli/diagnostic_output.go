@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/productpaths"
 )
@@ -71,6 +72,7 @@ type doctorResult struct {
 	SandboxWorkspaceSetupWriteRoots int                               `json:"sandbox_workspace_setup_write_roots,omitempty"`
 	SandboxWorkspaceSetupPolicyHash string                            `json:"sandbox_workspace_setup_policy_hash,omitempty"`
 	SandboxWorkspaceSetupUpdatedAt  time.Time                         `json:"sandbox_workspace_setup_updated_at,omitempty"`
+	StorageDiagnostics              *gatewayapp.StoreDiagnostics      `json:"storage_diagnostics,omitempty"`
 	HostExecution                   bool                              `json:"host_execution,omitempty"`
 	FullAccessMode                  bool                              `json:"full_access_mode,omitempty"`
 	HasActiveTurn                   bool                              `json:"has_active_turn,omitempty"`
@@ -88,16 +90,26 @@ type doctorRepairResult struct {
 	RepairedTasks            int    `json:"repaired_tasks,omitempty"`
 }
 
-func doctorResultFromStartupFailure(storeDir string, managed bool, err error) doctorResult {
+func doctorResultFromStartupFailure(storeDir string, mode productClientMode, err error) doctorResult {
 	result := doctorResult{
 		GoVersion:    runtime.Version(),
 		GOOS:         runtime.GOOS,
 		GOARCH:       runtime.GOARCH,
-		StoreDir:     filepath.Clean(storeDir),
-		ConfigPath:   filepath.Join(storeDir, "config.json"),
 		ServiceState: "unavailable",
 	}
-	if managed {
+	if mode == productClientModeRemote {
+		result.ServiceError = "configured remote Control Host is unavailable"
+		return result
+	}
+	result.StoreDir = filepath.Clean(storeDir)
+	result.ConfigPath = filepath.Join(storeDir, "config.json")
+	if diagnostics, diagnosticsErr := gatewayapp.InspectStoreDiagnostics(storeDir); diagnosticsErr == nil {
+		annotateStartupStorageDiagnostics(&diagnostics, err)
+		result.StorageDiagnostics = &diagnostics
+	} else {
+		result.Warnings = append(result.Warnings, "read-only Store diagnostics unavailable")
+	}
+	if mode == productClientModeManaged {
 		detail := classifyManagedStartupFailure(err)
 		result.ServiceErrorCode = detail.code
 		result.ServiceError = detail.description
@@ -110,6 +122,16 @@ func doctorResultFromStartupFailure(storeDir string, managed bool, err error) do
 		result.ServiceError = "configured Control Host is unavailable"
 	}
 	return result
+}
+
+func annotateStartupStorageDiagnostics(diagnostics *gatewayapp.StoreDiagnostics, startupErr error) {
+	if diagnostics == nil || startupErr == nil {
+		return
+	}
+	text := strings.ToLower(startupErr.Error())
+	if strings.Contains(text, "memory data directory is already owned") {
+		diagnostics.Memory.OwnerLockState = "held"
+	}
 }
 
 // sandboxStatusResult mirrors the established CamelCase sandbox command JSON
@@ -291,6 +313,36 @@ func formatDoctorResult(report doctorResult) string {
 		lines = append(lines, "blocked: "+blocker)
 		if hint := strings.TrimSpace(report.SandboxInstallHint); hint != "" {
 			lines = append(lines, "fix: "+hint)
+		}
+		lines = append(lines, "")
+	}
+	if storage := report.StorageDiagnostics; storage != nil {
+		lines = append(lines,
+			fmt.Sprintf("storage_diagnostics_read_only: %t", storage.ReadOnly),
+			fmt.Sprintf("storage_config_path: %s", firstNonEmptyString(storage.ConfigPath, "-")),
+			fmt.Sprintf("storage_config_state: %s", firstNonEmptyString(storage.ConfigState, "-")),
+			fmt.Sprintf("storage_control_database_path: %s", firstNonEmptyString(storage.ControlDatabasePath, "-")),
+			fmt.Sprintf("storage_control_database_state: %s", firstNonEmptyString(storage.ControlDatabaseState, "-")),
+			fmt.Sprintf("storage_sessions_path: %s", firstNonEmptyString(storage.SessionsPath, "-")),
+			fmt.Sprintf("storage_sessions_state: %s", firstNonEmptyString(storage.SessionsState, "-")),
+			fmt.Sprintf("memory_data_dir: %s", firstNonEmptyString(storage.Memory.DataDir, "-")),
+			fmt.Sprintf("memory_data_dir_state: %s", firstNonEmptyString(storage.Memory.DataDirState, "-")),
+			fmt.Sprintf("memory_database_path: %s", firstNonEmptyString(storage.Memory.DatabasePath, "-")),
+			fmt.Sprintf("memory_database_state: %s", firstNonEmptyString(storage.Memory.DatabaseState, "-")),
+			fmt.Sprintf("memory_database_format: %s", firstNonEmptyString(storage.Memory.DatabaseFormat, "-")),
+			fmt.Sprintf("memory_expected_schema_version: %d", storage.Memory.ExpectedSchemaVersion),
+			fmt.Sprintf("memory_schema_state: %s", firstNonEmptyString(storage.Memory.SchemaState, "-")),
+			fmt.Sprintf("memory_owner_lock_path: %s", firstNonEmptyString(storage.Memory.OwnerLockPath, "-")),
+			fmt.Sprintf("memory_owner_lock_file_state: %s", firstNonEmptyString(storage.Memory.OwnerLockFileState, "-")),
+			fmt.Sprintf("memory_owner_lock_state: %s", firstNonEmptyString(storage.Memory.OwnerLockState, "-")),
+			fmt.Sprintf("memory_wal_state: %s", firstNonEmptyString(storage.Memory.WALState, "-")),
+			fmt.Sprintf("memory_shm_state: %s", firstNonEmptyString(storage.Memory.SHMState, "-")),
+			fmt.Sprintf("memory_rollback_state: %s", firstNonEmptyString(storage.Memory.RollbackState, "-")),
+		)
+		for _, advice := range storage.RecoveryAdvice {
+			if advice = strings.TrimSpace(advice); advice != "" {
+				lines = append(lines, "recovery_advice: "+advice)
+			}
 		}
 		lines = append(lines, "")
 	}

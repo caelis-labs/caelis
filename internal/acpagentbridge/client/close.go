@@ -59,6 +59,9 @@ func (e *CloseError) Unwrap() error {
 // has no deadline, DefaultProcessExitGrace supplies the window. The first call
 // owns the terminal result returned by later calls.
 func (c *Client) Close(ctx context.Context) error {
+	if c != nil && c.cfg.MCPGrant != nil {
+		c.cfg.MCPGrant.Close()
+	}
 	if c == nil {
 		return nil
 	}

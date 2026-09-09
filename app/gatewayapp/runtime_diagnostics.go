@@ -15,9 +15,11 @@ const (
 )
 
 // newRuntimeDiagnosticsLogger returns a best-effort, bounded JSONL logger for
-// runtime and environment failures. Call sites must use fixed classifications;
-// user content, Session identities, workspace values, and full paths are not
-// permitted fields.
+// runtime and environment failures. Ordinary Runtime callers use fixed
+// classifications. Host-private ACP lifecycle diagnostics additionally retain
+// correlation identities and bounded error chains, which can contain sensitive
+// peer response details or paths. Never attach prompts, environment or stderr,
+// and never project this sink into public Session/Task output.
 func newRuntimeDiagnosticsLogger(storeDir string) *slog.Logger {
 	path := filepath.Join(storeDir, "logs", runtimeDiagnosticsFilename)
 	writer := &boundedDiagnosticWriter{path: path, maxBytes: runtimeDiagnosticsMaxBytes}

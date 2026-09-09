@@ -146,8 +146,18 @@ type Descriptor struct {
 	DefaultConstraints Constraints   `json:"default_constraints,omitempty"`
 }
 
+// ResourceLimits is an embedding-owned mandatory resource ceiling. It cannot
+// be widened by command constraints or a Host/full-access request. Reads retain
+// the backend default. Backends without enforcement reject construction.
+type ResourceLimits struct {
+	WritePaths []string
+	Network    Network
+}
+
 // Config configures one composed sandbox runtime.
 type Config struct {
+	ResourceLimits *ResourceLimits `json:"-"`
+
 	CWD                 string    `json:"cwd,omitempty"`
 	RequestedBackend    Backend   `json:"requested_backend,omitempty"`
 	BackendCandidates   []Backend `json:"backend_candidates,omitempty"`

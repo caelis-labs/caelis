@@ -484,7 +484,7 @@ func TestRunnerCancelNaturalTerminalIsEndpointNoop(t *testing.T) {
 	}
 }
 
-func TestDelegationTerminalStatesRemainEligibleForAnotherTurn(t *testing.T) {
+func TestOnlyResolvedDelegationStatesRemainEligibleForAnotherTurn(t *testing.T) {
 	t.Parallel()
 
 	for _, state := range []delegation.State{
@@ -492,13 +492,12 @@ func TestDelegationTerminalStatesRemainEligibleForAnotherTurn(t *testing.T) {
 		delegation.StateFailed,
 		delegation.StateCancelled,
 		delegation.StateInterrupted,
-		delegation.StateUnknownOutcome,
 	} {
 		if !delegationStateCanStartTurn(state) {
 			t.Fatalf("delegationStateCanStartTurn(%q) = false, want idle child to remain resumable", state)
 		}
 	}
-	for _, state := range []delegation.State{delegation.StateRunning, delegation.StateWaitingApproval, ""} {
+	for _, state := range []delegation.State{delegation.StateRunning, delegation.StateWaitingApproval, delegation.StateUnknownOutcome, ""} {
 		if delegationStateCanStartTurn(state) {
 			t.Fatalf("delegationStateCanStartTurn(%q) = true, want active/incomplete Turn rejected", state)
 		}

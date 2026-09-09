@@ -145,10 +145,10 @@ func canonicalOutputFidelityEvents() []*session.Event {
 			Visibility: session.VisibilityCanonical,
 			Time:       time.Unix(300, 0),
 			Scope:      &session.EventScope{TurnID: "turn-1"},
-			Meta:       acpToolNameMeta("Spawn"),
+			Meta:       acpToolNameMeta("StartThread"),
 			Tool: &session.EventTool{
 				ID:     "spawn-call-1",
-				Name:   "Spawn",
+				Name:   "StartThread",
 				Kind:   "execute",
 				Title:  "Spawn reviewer: inspect",
 				Status: "running",
@@ -176,7 +176,7 @@ func canonicalOutputFidelityEvents() []*session.Event {
 					"state":         "completed",
 					"target_kind":   "subagent",
 					"parent_call":   "spawn-call-1",
-					"parent_tool":   "Spawn",
+					"parent_tool":   "StartThread",
 					"final_message": structuredFinalMessageForFidelityTest,
 				},
 			},
@@ -189,10 +189,10 @@ func canonicalOutputFidelityEvents() []*session.Event {
 			Visibility: session.VisibilityCanonical,
 			Time:       time.Unix(302, 0),
 			Scope:      &session.EventScope{TurnID: "turn-1"},
-			Meta:       acpToolNameMeta("Spawn"),
+			Meta:       acpToolNameMeta("StartThread"),
 			Tool: &session.EventTool{
 				ID:     "spawn-call-1",
-				Name:   "Spawn",
+				Name:   "StartThread",
 				Kind:   "execute",
 				Title:  "Spawn reviewer: inspect",
 				Status: "completed",
@@ -249,13 +249,13 @@ func TestHiddenChildToolWithoutMessageIDCreatesMarkdownBoundary(t *testing.T) {
 		Update: eventstream.ToolCall{
 			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-call-1",
 			Title: "Spawn explorer: inspect", Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
+			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	child := func(update eventstream.Update) eventstream.Envelope {
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeSubagent, ScopeID: "task-1",
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"}, Update: update,
+			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "StartThread"}, Update: update,
 		}
 	}
 	model = applyACPEnvelopeForTest(t, model, child(eventstream.ContentChunk{

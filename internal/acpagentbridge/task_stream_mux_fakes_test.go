@@ -61,9 +61,9 @@ func acpMuxSubagentAnchor(handle string) eventstream.Envelope {
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1",
 			RawOutput: map[string]any{
 				"handle": handle, "state": "running", "target_kind": "subagent",
-				"parent_call": "spawn-1", "parent_tool": "Spawn",
+				"parent_call": "spawn-1", "parent_tool": "StartThread",
 			},
-			Meta: acpmeta.WithToolName(nil, "Spawn"),
+			Meta: acpmeta.WithToolName(nil, "StartThread"),
 		},
 	}
 }
@@ -72,7 +72,7 @@ func acpMuxSubagentLifecycleEnvelope(cursor string, turnID string, state string)
 	return eventstream.Envelope{
 		Kind: eventstream.KindLifecycle, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
 		ScopeID: "task-1", TurnID: turnID, Cursor: cursor,
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
 		Lifecycle:  &eventstream.Lifecycle{State: state},
 		Final:      eventstream.IsTerminalLifecycleState(state),
 	}
@@ -82,7 +82,7 @@ func acpMuxSubagentMessageEnvelope(cursor string, turnID string, messageID strin
 	return eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
 		ScopeID: "task-1", TurnID: turnID, Cursor: cursor,
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
 		Update: eventstream.ContentChunk{
 			SessionUpdate: eventstream.UpdateAgentMessage, MessageID: messageID,
 			Content: eventstream.TextContent{Type: "text", Text: text},

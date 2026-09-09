@@ -21,13 +21,16 @@ type BeginTurnRequest struct {
 	Input          string
 	DisplayInput   string
 	ContentParts   []model.ContentPart
-	ModeName       string
-	ModelHint      string
-	Surface        string
-	Metadata       map[string]any
-	Request        agent.ModelRequestOptions
-	InputActor     session.ActorRef
-	Observer       TurnEventObserver
+	// Inputs admits an ordered Agent-communication batch as one Turn. When set,
+	// singular Input, DisplayInput, ContentParts, and InputActor must be empty.
+	Inputs     []agent.AgentCommunicationInput
+	ModeName   string
+	ModelHint  string
+	Surface    string
+	Metadata   map[string]any
+	Request    agent.ModelRequestOptions
+	InputActor session.ActorRef
+	Observer   TurnEventObserver
 }
 
 type TurnIntent = BeginTurnRequest

@@ -170,7 +170,8 @@ func canonicalTaskParentToolRelation(event *session.Event) *eventstream.ParentTo
 	}
 	parentCall := display.MapString(event.Tool.Output, "parent_call")
 	parentName := display.MapString(event.Tool.Output, "parent_tool")
-	if parentCall == "" || parentName != expectedParent {
+	validParent := parentName == expectedParent || (expectedParent == spawn.ToolName && parentName == "Spawn")
+	if parentCall == "" || !validParent {
 		return nil
 	}
 	return &eventstream.ParentToolRelation{

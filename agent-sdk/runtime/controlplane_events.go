@@ -132,7 +132,14 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 		metadata["participant_session_id"] = strings.TrimSpace(r.participantSessionID)
 		metadata["source"] = "acp_participant"
 	}
+	origin := &agent.ApprovalOrigin{Role: agent.ApprovalRoleMain, Endpoint: agent.ApprovalEndpointExternalACP, SessionID: req.EndpointSessionID, ToolCallID: req.ToolCall.ID, Agent: req.Agent, ParticipantID: r.participantID}
+
+	if r.participantID != "" {
+		origin.Role = agent.ApprovalRoleParticipant
+		origin.ParentSessionID = r.sessionRef.SessionID
+	}
 	runtimeRequest := agent.ApprovalRequest{
+		Origin:     origin,
 		SessionRef: session.NormalizeSessionRef(r.sessionRef),
 		Session:    session.CloneSession(r.session),
 		RunID:      strings.TrimSpace(r.runID),

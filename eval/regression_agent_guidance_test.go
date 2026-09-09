@@ -77,7 +77,7 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 		{name: "patch uses current exact text", toolName: filesystem.PatchToolName, wants: []string{"surgical exact text replacements", "current file"}},
 		{name: "read exposes Write revision guard", toolName: filesystem.ReadToolName, wants: []string{"has_more", "next_offset", "revision", "if_revision", "Write"}},
 		{name: "task reaches model boundary", toolName: task.ToolName},
-		{name: "spawn coordinates collaborators", toolName: spawn.ToolName, wants: []string{"collaborating Agent", "self-contained", "only when its result is needed"}},
+		{name: "spawn coordinates collaborators", toolName: spawn.ToolName, wants: []string{"collaborating Agent", "self-contained", "ReadThread or WaitThread"}},
 		{name: "send message explains steering", toolName: sendmessage.ToolName, wants: []string{"supports_steering=true", "only while idle"}},
 	}
 	for _, check := range checks {
@@ -97,8 +97,8 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 			}
 		})
 	}
-	if description := functionPropertyDescription(t, toolByName[task.ToolName], "action"); !strings.Contains(description, "cancel interrupts only command tasks") {
-		t.Fatalf("Task action description missing command-only cancel contract: %q", description)
+	if description := functionPropertyDescription(t, toolByName[task.ToolName], "action"); !strings.Contains(description, "cancel requests cancellation when supported") {
+		t.Fatalf("Task action description missing Job cancellation capability: %q", description)
 	}
 
 	runCommandSpec := toolByName[shell.RunCommandToolName]

@@ -23,6 +23,9 @@ func nordTheme(profile colorprofile.Profile) Theme {
 			DiffRemove:    profileColor(profile, "#d08770", "131", "1"),
 			DiffLineNo:    profileColor(profile, "#7f8a9d", "244", "8"),
 			Scrollbar:     profileColor(profile, "#81a1c1", "110", "7"),
+
+			AgentMessageSent:     profileColor(profile, "#81a1c1", "110", "4"),
+			AgentMessageReceived: profileColor(profile, "#8fbcbb", "109", "6"),
 		},
 		themeSurfaces{
 			App:              profileColor(profile, "#2e3440", "236", ""),
@@ -61,6 +64,9 @@ func solarizedTheme(profile colorprofile.Profile) Theme {
 			BorderStrong:  profileColor(profile, "#657b83", "243", "8"),
 			DiffLineNo:    profileColor(profile, "#839496", "244", "8"),
 			Scrollbar:     profileColor(profile, "#586e75", "242", "7"),
+
+			AgentMessageSent:     profileColor(profile, "#268bd2", "33", "4"),
+			AgentMessageReceived: profileColor(profile, "#2aa198", "36", "6"),
 		},
 		themeSurfaces{
 			App:              profileColor(profile, "#002b36", "235", ""),
@@ -99,6 +105,9 @@ func draculaTheme(profile colorprofile.Profile) Theme {
 			BorderStrong:  profileColor(profile, "#8be9fd", "123", "6"),
 			DiffLineNo:    profileColor(profile, "#8a8fa8", "245", "8"),
 			Scrollbar:     profileColor(profile, "#6272a4", "61", "7"),
+
+			AgentMessageSent:     profileColor(profile, "#a5b4fc", "147", "4"),
+			AgentMessageReceived: profileColor(profile, "#8be9fd", "117", "6"),
 		},
 		themeSurfaces{
 			App:              profileColor(profile, "#282a36", "236", ""),

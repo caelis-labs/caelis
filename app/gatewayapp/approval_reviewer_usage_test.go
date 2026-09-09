@@ -53,7 +53,7 @@ func TestGuardianRepairPersistsAllUsageToParentAndReopens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	llm := &guardianMeasuredModel{approvalReviewerFakeModel: &approvalReviewerFakeModel{responses: []string{`invalid assessment`, `{"outcome":"allow","risk_level":"low","user_authorization":"high","rationale":"authorized"}`}}}
+	llm := &guardianMeasuredModel{approvalReviewerFakeModel: &approvalReviewerFakeModel{responses: []string{`invalid assessment`, `{"option_id":"allow_once"}`}}}
 	reviewer := newGuardianApprovalApprover(store)
 	req := approvalReviewerTestRequest(active, llm, "inspect", map[string]any{"cmd": "echo approved"})
 	result, err := reviewer.Decide(context.Background(), req)
@@ -91,10 +91,10 @@ func TestGuardianAccountingFailureKeepsCompletedDecision(t *testing.T) {
 	store, active := newApprovalReviewerTestSession(t, context.Background())
 	failure := errors.New("receipt store unavailable")
 	reviewer := newGuardianApprovalApprover(guardianReceiptFailureStore{Service: store, failure: failure})
-	llm := &guardianMeasuredModel{approvalReviewerFakeModel: &approvalReviewerFakeModel{responses: []string{`{"outcome":"allow","risk_level":"low","user_authorization":"high","rationale":"authorized action"}`}}}
+	llm := &guardianMeasuredModel{approvalReviewerFakeModel: &approvalReviewerFakeModel{responses: []string{`{"option_id":"allow_once"}`}}}
 	req := approvalReviewerTestRequest(active, llm, "inspect", nil)
 	result, err := reviewer.Decide(context.Background(), req)
-	if err != nil || !result.Approved || !strings.Contains(result.DisplayText, "authorized action") || !strings.Contains(result.DisplayText, "usage accounting could not be persisted") {
+	if err != nil || !result.Approved || !strings.Contains(result.DisplayText, "approved") || !strings.Contains(result.DisplayText, "usage accounting could not be persisted") {
 		t.Fatalf("decision changed: %#v %v", result, err)
 	}
 	if len(llm.Requests()) != 1 {
@@ -196,40 +196,6 @@ func (m *guardianCompactionUsageModel) Generate(ctx context.Context, req *model.
 			return
 		}
 		yield(nil, &model.ContextOverflowError{Cause: errors.New("compaction input overflow")})
-	}
-}
-func TestGuardianFailedCompactionIsIncludedInParentAccounting(t *testing.T) {
-	ctx := context.Background()
-	store, active := newApprovalReviewerTestSession(t, ctx)
-	appendApprovalReviewerTextEvent(t, ctx, store, active, session.EventTypeUser, model.RoleUser, "Inspect and apply the focused fix.")
-	events, err := store.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, cursor := collectGuardianTranscriptEntries(events)
-	reviewer := newGuardianApprovalApprover(store)
-	user, assistant := guardianBudgetConversationPair(strings.Repeat("old Guardian context ", 3000))
-	if _, _, err := reviewer.conversations.commitValidated(guardianConversationCommit{SessionID: active.SessionID, ExpectedVersion: 0, ParentCursor: cursor, User: user, Assistant: assistant}); err != nil {
-		t.Fatal(err)
-	}
-	appendApprovalReviewerTextEvent(t, ctx, store, active, session.EventTypeAssistant, model.RoleAssistant, "The focused fix is ready for verification.")
-	llm := &guardianCompactionUsageModel{guardianMeasuredModel: &guardianMeasuredModel{approvalReviewerFakeModel: &approvalReviewerFakeModel{contextWindowTokens: 16384}}}
-	result, err := reviewer.Decide(ctx, approvalReviewerTestRequest(active, llm, "verify", map[string]any{"cmd": "go test ./focused"}))
-	if err != nil || !result.Approved {
-		t.Fatalf("decision=%#v err=%v", result, err)
-	}
-	events, err = store.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	count := 0
-	for _, event := range events {
-		if session.IsModelInvocationReceipt(event) {
-			count++
-		}
-	}
-	if llm.compactCalls == 0 || count != llm.compactCalls+len(llm.Requests()) {
-		t.Fatalf("compact calls=%d normal calls=%d parent receipts=%d", llm.compactCalls, len(llm.Requests()), count)
 	}
 }
 

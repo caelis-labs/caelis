@@ -49,6 +49,10 @@ type Theme struct {
 	InputSelectionFg color.Color
 	InputSelectionBg color.Color
 
+	// Agent message directions remain distinct from tool and accent colors.
+	AgentMessageSentFg     color.Color
+	AgentMessageReceivedFg color.Color
+
 	// Line-level semantic colors (conversation / tool / diff).
 	AssistantFg        color.Color
 	ReasoningFg        color.Color

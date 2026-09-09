@@ -15,6 +15,55 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 )
 
+func buildRunInputEvents(
+	activeSession session.Session,
+	turnID string,
+	req agent.RunRequest,
+) ([]*session.Event, error) {
+	inputs := communicationInputsFromRunRequest(req)
+	if len(inputs) == 0 {
+		return nil, nil
+	}
+	events := make([]*session.Event, 0, len(inputs))
+	for index, item := range inputs {
+		event, err := buildInputEvent(
+			activeSession, turnID, req.InputKind, item.Input, item.DisplayInput,
+			item.ContentParts, item.Source, req.InputCompaction,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if event == nil {
+			continue
+		}
+		if len(inputs) > 1 {
+			event.IdempotencyKey = fmt.Sprintf("turn-input:%s:%d", strings.TrimSpace(turnID), index)
+		}
+		events = append(events, event)
+	}
+	return events, nil
+}
+
+func communicationInputsFromRunRequest(req agent.RunRequest) []agent.AgentCommunicationInput {
+	if len(req.Inputs) > 0 {
+		return agent.CloneAgentCommunicationInputs(req.Inputs)
+	}
+	if strings.TrimSpace(req.Input) == "" && len(req.ContentParts) == 0 {
+		return nil
+	}
+	return []agent.AgentCommunicationInput{{
+		Source:       session.CloneActorRef(req.InputActor),
+		Input:        req.Input,
+		DisplayInput: req.DisplayInput,
+		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
+	}}
+}
+
+func agentCommunicationSingularFieldsSet(input, displayInput string, parts []model.ContentPart, actor session.ActorRef) bool {
+	return strings.TrimSpace(input) != "" || strings.TrimSpace(displayInput) != "" ||
+		len(parts) > 0 || session.ActorRefHasIdentity(actor)
+}
+
 func buildInputEvent(
 	activeSession session.Session,
 	turnID string,

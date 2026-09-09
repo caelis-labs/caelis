@@ -228,6 +228,7 @@ func (b *MainACPTurnBlock) AddAgentCommunication(event SubagentEvent) {
 		return
 	}
 	b.clearTransientRetryNotice()
+	closeLatestReasoningTiming(b.Events, event.StartedAt)
 	b.Events = append(b.Events, event)
 	b.advanceNarrativeBoundary()
 }
@@ -392,6 +393,8 @@ func hasDeferredLiveTailCompactStage(events []SubagentEvent, status string) bool
 // ---------------------------------------------------------------------------
 
 type ParticipantTurnBlock struct {
+	// FullAgentMessages keeps received messages unabridged in detached overlays.
+	FullAgentMessages     bool
 	id                    string
 	SessionID             string
 	ParticipantID         string
@@ -488,6 +491,7 @@ func (b *ParticipantTurnBlock) AddAgentCommunication(event SubagentEvent) {
 		return
 	}
 	b.clearTransientRetryNotice()
+	closeLatestReasoningTiming(b.Events, event.StartedAt)
 	b.Events = append(b.Events, event)
 	b.advanceNarrativeBoundary()
 }
@@ -578,16 +582,15 @@ func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		ToolPanelScrollState:   b.toolPanelScrollState,
 		ReasoningExpanded:      b.reasoningExpanded,
 		AgentMessageExpanded:   b.agentMessageExpanded,
+		FullAgentMessages:      b.FullAgentMessages,
 	})
 	if len(bodyRows) == 0 && participantTurnIsTerminal(b.Status) && strings.TrimSpace(b.Actor) == "" {
 		return nil
 	}
 	rows := append([]RenderedRow(nil), bodyRows...)
 	rows = b.compactHeightBudget.apply(b.id, rows, b.Events, b.Status, ctx)
-	if participantTurnIsTerminal(b.Status) {
-		if footer := renderParticipantTurnFooter(b, ctx); strings.TrimSpace(ansi.Strip(footer)) != "" {
-			rows = append(rows, StyledRow(b.id, footer))
-		}
+	if footer := renderParticipantTurnFooter(b, ctx); strings.TrimSpace(ansi.Strip(footer)) != "" {
+		rows = append(rows, StyledRow(b.id, footer))
 	}
 	return rows
 }
@@ -663,7 +666,16 @@ func visibleNarrativeEvents(events []SubagentEvent, status string) []SubagentEve
 	}
 	hidePlan := strings.EqualFold(strings.TrimSpace(status), "waiting_approval") && hasApprovalEvent(events)
 	out := make([]SubagentEvent, 0, len(events))
+	reviews := make(map[string]string)
+	for _, ev := range events {
+		if ev.Kind == SEApproval && ev.CallID != "" {
+			reviews[ev.CallID] = firstNonEmpty(ev.ApprovalStatus, "reviewed")
+		}
+	}
 	for i, ev := range events {
+		if ev.Kind == SEToolCall {
+			ev.ApprovalStatus = reviews[ev.CallID]
+		}
 		// Defense for replayed or legacy snapshots that may already contain a
 		// whitespace-only narrative event. New live streams are guarded by
 		// narrativeStreamState before events are appended.

@@ -92,7 +92,7 @@ func projectedBuiltinToolProfile(name string) (projectedToolProfile, bool) {
 		return projectedToolProfile{kind: projectedToolKindSearch, title: projectedTitleQuery, result: projectedResultWebSearch}, true
 	case web.FetchToolName:
 		return projectedToolProfile{kind: projectedToolKindSearch, title: projectedTitleURL, result: projectedResultWebFetch}, true
-	case spawn.ToolName:
+	case spawn.ToolName, "Spawn": // Historical presentation only; never an execution alias.
 		return projectedToolProfile{kind: projectedToolKindExecute, title: projectedTitleSpawn, result: projectedResultSpawn, terminalKnown: true, terminalPanel: true}, true
 	case sendmessage.ToolName:
 		return projectedToolProfile{kind: projectedToolKindExecute, title: projectedTitleMessage}, true

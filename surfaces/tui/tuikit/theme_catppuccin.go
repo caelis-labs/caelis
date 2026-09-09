@@ -38,6 +38,9 @@ func catppuccinMochaTheme(profile colorprofile.Profile, background color.Color) 
 			DiffHunk:      profileColor(profile, "#f2cdcd", "211", "5"),
 			DiffLineNo:    profileColor(profile, "#6c7086", "242", "8"),
 			Scrollbar:     profileColor(profile, "#585b70", "240", "7"),
+
+			AgentMessageSent:     profileColor(profile, "#89b4fa", "111", "4"),
+			AgentMessageReceived: profileColor(profile, "#94e2d5", "116", "6"),
 		},
 		themeSurfaces{
 			Base:             surface1,
@@ -80,6 +83,9 @@ func catppuccinLatteTheme(profile colorprofile.Profile, background color.Color) 
 			DiffHunk:      profileColor(profile, "#d20f39", "160", "5"),
 			DiffLineNo:    profileColor(profile, "#6c6f85", "242", "8"),
 			Scrollbar:     profileColor(profile, "#8c8fa1", "245", "0"),
+
+			AgentMessageSent:     profileColor(profile, "#1e66f5", "63", "4"),
+			AgentMessageReceived: profileColor(profile, "#087c9e", "30", "6"),
 		},
 		themeSurfaces{
 			Base:             surface1,

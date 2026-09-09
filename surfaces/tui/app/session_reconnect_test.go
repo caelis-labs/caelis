@@ -25,17 +25,17 @@ func TestSessionReconnectMessageInstallsSessionBeforeSubagentBackfill(t *testing
 		{
 			SessionID: "session-old", TaskID: "task-kira", Handle: "kira", Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(103, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "Spawn"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "StartThread"},
 		},
 		{
 			SessionID: "session-old", TaskID: "task-wen", Handle: "wen", Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(102, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-wen", ToolName: "Spawn"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-wen", ToolName: "StartThread"},
 		},
 		{
 			SessionID: "session-old", TaskID: "task-yara", Handle: "yara", Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(101, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-yara", ToolName: "Spawn"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-yara", ToolName: "StartThread"},
 		},
 	}
 	service := &subagentRosterTestTaskStreamService{
@@ -56,7 +56,7 @@ func TestSessionReconnectMessageInstallsSessionBeforeSubagentBackfill(t *testing
 	for _, descriptor := range descriptors {
 		events = append(events, TranscriptEvent{
 			Kind: TranscriptEventTool, Scope: ACPProjectionMain,
-			ToolCallID: descriptor.ParentTool.ToolCallID, ToolName: "Spawn", ToolTaskHandle: descriptor.Handle,
+			ToolCallID: descriptor.ParentTool.ToolCallID, ToolName: "StartThread", ToolTaskHandle: descriptor.Handle,
 			ToolArgs: descriptor.Handle + "[self]: historical task", OccurredAt: time.Unix(90, 0),
 		})
 	}

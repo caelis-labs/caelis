@@ -215,7 +215,6 @@ func (tm *taskRuntime) persistSubagentCancelPhase(
 	if result != nil {
 		desired := tm.rehydrateSubagentTask(entry)
 		desired.applyResult(*result)
-		desired.seedStreamFromResult(*result)
 		entry = desired.entrySnapshot(tm.runtime.now())
 	}
 	if entry.Metadata == nil {
@@ -254,7 +253,6 @@ func (tm *taskRuntime) persistSubagentCancelPhase(
 	task.metadata = session.CloneState(entry.Metadata)
 	if result != nil {
 		task.applyResult(*result)
-		task.seedStreamFromResult(*result)
 	}
 	if terminal {
 		task.metadata["state"] = string(task.state)

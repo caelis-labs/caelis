@@ -144,6 +144,7 @@ func (m *Model) ensureSubagentOutputView(callID string) *subagentOutputView {
 		return existing
 	}
 	block := NewParticipantTurnBlock(callID, "")
+	block.FullAgentMessages = true
 	document := NewDocument()
 	document.Append(block)
 	view := &subagentOutputView{
@@ -165,6 +166,7 @@ func (v *subagentOutputView) resetForReplacement() {
 		return
 	}
 	block := NewParticipantTurnBlock(v.callID, v.actor)
+	block.FullAgentMessages = true
 	block.ParticipantID = v.taskHandle
 	document := NewDocument()
 	document.Append(block)
@@ -209,7 +211,7 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 		return
 	}
 	actor := strings.TrimSpace(v.actor)
-	if actor == "" {
+	if actor == "" && event.Kind != TranscriptEventAgentCommunication {
 		actor = subagentOutputActor(event.Actor, v.title, v.taskHandle)
 		if actor != "" {
 			v.actor = actor
@@ -294,6 +296,7 @@ func (v *subagentOutputView) blockForEvent(event TranscriptEvent) *ParticipantTu
 	block := v.block
 	if v.turnID != "" || block == nil || len(block.Events) > 0 {
 		block = NewParticipantTurnBlock(turnID, v.actor)
+		block.FullAgentMessages = true
 		v.document.Append(block)
 	}
 	block.SessionID = turnID
@@ -318,10 +321,6 @@ func (v *subagentOutputView) appendInput(event TranscriptEvent) {
 	text := strings.TrimSpace(transcriptNarrativeText(event))
 	if text == "" {
 		return
-	}
-	actor := strings.TrimPrefix(strings.TrimSpace(event.Actor), "@")
-	if actor != "" && actor != "user" {
-		text = actor + ": " + text
 	}
 	block := v.blockForEvent(event)
 	if block == nil {

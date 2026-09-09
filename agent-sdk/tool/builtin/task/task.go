@@ -62,7 +62,7 @@ func (Tool) Definition() tool.Definition {
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        []string{"wait", "read", "write", "cancel"},
-					"description": "read inspects now; wait observes for up to one minute and waits on commands until terminal state or the window expires; write sends stdin only to an input-capable command; cancel interrupts only command tasks.",
+					"description": "read inspects now; wait observes for up to one minute; write sends input when the Job supports input; cancel requests cancellation when supported. Participant threads use ReadThread and WaitThread.",
 				},
 				"handle": map[string]any{
 					"type":        "string",
@@ -72,7 +72,7 @@ func (Tool) Definition() tool.Definition {
 				"input": map[string]any{
 					"type":        "string",
 					"minLength":   1,
-					"description": "Command stdin; valid only for write on an input-capable command.",
+					"description": "Job input; valid only for write on an input-capable Job.",
 				},
 				"append_newline": map[string]any{
 					"type":        "boolean",

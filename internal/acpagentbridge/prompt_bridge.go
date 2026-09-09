@@ -81,7 +81,13 @@ func promptRouterAttachmentsFromContentParts(input string, parts []model.Content
 	return out
 }
 
-func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession session.Session, result controlprompt.Result, cb PromptCallbacks, suppressUserEcho bool) error {
+func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession session.Session, result controlprompt.Result, cb PromptCallbacks, suppressUserEcho bool) (resultErr error) {
+	var terminal *eventstream.Envelope
+	if result.Turn != nil {
+		defer func() {
+			resultErr = settlePromptTurn(ctx, result.Turn, terminal, resultErr)
+		}()
+	}
 	if cb == nil {
 		return nil
 	}
@@ -198,16 +204,13 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 	for events := result.Turn.Events(); events != nil; {
 		select {
 		case <-ctx.Done():
-			result.Turn.Cancel()
-			_ = result.Turn.Close()
-			return context.Canceled
+			return ctx.Err()
 		case taskEnvelope, ok := <-taskEvents:
 			if !ok {
 				taskEvents = nil
 				continue
 			}
 			if err := a.emitControlEnvelope(ctx, cb, sessionID, nil, taskEnvelope, outboundFilter); err != nil {
-				_ = result.Turn.Close()
 				return err
 			}
 		case env, ok := <-events:
@@ -215,15 +218,16 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 				events = nil
 				continue
 			}
+			if eventstream.IsTurnTerminalLifecycle(env) {
+				terminal = &env
+			}
 			if err := a.emitTaskAwareControlEnvelope(ctx, cb, sessionID, result.Turn, taskMux, &taskEvents, env, outboundFilter); err != nil {
-				_ = result.Turn.Close()
 				return err
 			}
+			if terminal != nil {
+				return nil
+			}
 		}
-	}
-	closeErr := result.Turn.Close()
-	if closeErr != nil {
-		return closeErr
 	}
 	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -1024,11 +1025,14 @@ func (p availableCommandProvider) AvailableCommands(context.Context, string) ([]
 }
 
 type testControlTurn struct {
-	events chan eventstream.Envelope
-	closed bool
+	events   chan eventstream.Envelope
+	closed   bool
+	onCancel func()
 }
 
 func newTestControlTurn(events ...eventstream.Envelope) *testControlTurn {
+	// A complete Control Turn always publishes its terminal before EOF.
+	events = append(events, eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Now()))
 	ch := make(chan eventstream.Envelope, len(events))
 	for _, env := range events {
 		ch <- env
@@ -1049,7 +1053,11 @@ func (t *testControlTurn) SubmitApproval(context.Context, controlprompt.Approval
 	return nil
 }
 
-func (t *testControlTurn) Cancel() {}
+func (t *testControlTurn) Cancel() {
+	if t.onCancel != nil {
+		t.onCancel()
+	}
+}
 
 func (t *testControlTurn) Close() error {
 	t.closed = true
@@ -1322,7 +1330,7 @@ func (r terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (age
 		terminalID = "terminal-1"
 	}
 	rawInput := map[string]any{"command": "printf streamed"}
-	if strings.EqualFold(toolName, "Spawn") {
+	if strings.EqualFold(toolName, "StartThread") {
 		rawInput = map[string]any{"agent": "claude", "prompt": "stream child output"}
 	}
 	events := []*session.Event{
@@ -1423,7 +1431,7 @@ func (r terminalBridgeFinalRuntime) Run(_ context.Context, req agent.RunRequest)
 		terminalID = "terminal-1"
 	}
 	rawInput := map[string]any{"command": "printf streamed"}
-	if strings.EqualFold(toolName, "Spawn") {
+	if strings.EqualFold(toolName, "StartThread") {
 		rawInput = map[string]any{"agent": "claude", "prompt": "stream child output"}
 	}
 	return agent.RunResult{

@@ -178,25 +178,37 @@ func TestParseMetaCacheIsBounded(t *testing.T) {
 		metaCache.Unlock()
 	})
 
+	// Seed the full cache directly; only misses crossing the capacity boundary
+	// need real files and parsing. Keep deterministic recency for eviction checks.
+	metaCache.Lock()
+	for i := range maxMetaCacheEntries {
+		metaCache.entries[fmt.Sprintf("cached-%03d", i)] = metaCacheEntry{used: uint64(i + 1)}
+	}
+	metaCache.next = maxMetaCacheEntries
+	metaCache.Unlock()
 	root := t.TempDir()
-	for i := 0; i < maxMetaCacheEntries+25; i++ {
-		dir := filepath.Join(root, fmt.Sprintf("skill-%03d", i))
-		name := fmt.Sprintf("skill-%03d", i)
+	for i := range 2 {
+		name := fmt.Sprintf("new-%d", i)
+		dir := filepath.Join(root, name)
 		writeSkillForDiscoveryTest(t, dir, name, "cache bounded")
 		path := filepath.Join(dir, "SKILL.md")
 		info, err := os.Stat(path)
 		if err != nil {
-			t.Fatalf("Stat(%s) error = %v", path, err)
+			t.Fatal(err)
 		}
-		if _, err := parseMetaCached(path, info); err != nil {
-			t.Fatalf("parseMetaCached(%s) error = %v", path, err)
+		meta, err := parseMetaCached(path, info)
+		if err != nil || meta.Name != name {
+			t.Fatalf("parseMetaCached(%s) = %#v, %v", path, meta, err)
 		}
 	}
 	metaCache.Lock()
 	got := len(metaCache.entries)
+	_, oldestRetained := metaCache.entries["cached-000"]
+	_, secondOldestRetained := metaCache.entries["cached-001"]
+	_, newestRetained := metaCache.entries[fmt.Sprintf("cached-%03d", maxMetaCacheEntries-1)]
 	metaCache.Unlock()
-	if got > maxMetaCacheEntries {
-		t.Fatalf("meta cache entries = %d, want <= %d", got, maxMetaCacheEntries)
+	if got != maxMetaCacheEntries || oldestRetained || secondOldestRetained || !newestRetained {
+		t.Fatalf("cache entries=%d, oldest retained=%v/%v, newest retained=%v", got, oldestRetained, secondOldestRetained, newestRetained)
 	}
 }
 

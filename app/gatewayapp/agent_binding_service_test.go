@@ -57,7 +57,7 @@ func TestAgentBindingServicePersistsUnifiedProfileBindingForFutureActivation(t *
 }
 
 func TestAgentBindingServiceRollsForwardAfterCommittedConfigWriteFault(t *testing.T) {
-	stack, _ := newLocalStateTestStack(t)
+	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
 	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", Model: "binding-committed"})
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func TestAgentBindingServiceRollsForwardAfterCommittedConfigWriteFault(t *testin
 }
 
 func TestAgentBindingCommandCachesUnknownWhenCommittedRevisionCannotBeObserved(t *testing.T) {
-	stack, _ := newLocalStateTestStack(t)
+	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
 	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", Model: "binding-readback"})
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestAgentBindingCommandCachesUnknownWhenCommittedRevisionCannotBeObserved(t
 }
 
 func TestAgentBindingCommandCommitsWithoutRuntimeRefresh(t *testing.T) {
-	stack, _ := newLocalStateTestStack(t)
+	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
 	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", Model: "binding-refresh"})
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestAgentBindingCommandCommitsWithoutRuntimeRefresh(t *testing.T) {
 }
 
 func TestAgentBindingServicePersistsCustomRoleAndSwitchesNamedSnapshot(t *testing.T) {
-	stack, _ := newLocalStateTestStack(t)
+	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
 	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", Model: "binding-role"})
 	if err != nil {
 		t.Fatal(err)

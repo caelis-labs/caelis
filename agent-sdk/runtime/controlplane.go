@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -141,7 +142,7 @@ func (r *Runtime) executeACPControllerTurn(
 		}
 	}()
 
-	inputEvent, inputErr := buildInputEvent(activeSession, turnID, req.InputKind, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputCompaction)
+	inputEvents, inputErr := buildRunInputEvents(activeSession, turnID, req)
 	if inputErr != nil {
 		terminalErr = inputErr
 		r.setRunState(ref.SessionID, agent.RunState{
@@ -151,31 +152,48 @@ func (r *Runtime) executeACPControllerTurn(
 		handle.publishError(inputErr)
 		return
 	}
-	if inputEvent != nil {
-		persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-			SessionRef:    ref,
-			MutationGuard: session.RuntimeMutationGuard(ctx),
-			Event:         inputEvent,
+	var lastInputEvent *session.Event
+	persistedInputs, err := r.appendInputEvents(ctx, ref, inputEvents)
+	if err != nil {
+		terminalErr = err
+		r.setRunState(ref.SessionID, agent.RunState{
+			Status:      interruptedOrFailedStatus(ctx, err),
+			ActiveRunID: runID,
+			LastError:   err.Error(),
+			UpdatedAt:   r.now(),
 		})
-		if err != nil {
-			terminalErr = err
-			r.setRunState(ref.SessionID, agent.RunState{
-				Status:      interruptedOrFailedStatus(ctx, err),
-				ActiveRunID: runID,
-				LastError:   err.Error(),
-				UpdatedAt:   r.now(),
-			})
-			handle.publishError(err)
-			return
-		}
+		handle.publishError(err)
+		return
+	}
+	for _, persisted := range persistedInputs {
 		handle.publishEvent(persisted)
+		lastInputEvent = persisted
 	}
 
 	controllerInput := req.Input
 	controllerParts := append([]model.ContentPart(nil), req.ContentParts...)
-	if normalizeInputKind(req.InputKind) == agent.SubmissionKindAgentCommunication && inputEvent != nil && inputEvent.Message != nil {
-		controllerInput = ""
-		controllerParts = model.ContentPartsFromParts(inputEvent.Message.Parts)
+	if normalizeInputKind(req.InputKind) == agent.SubmissionKindAgentCommunication {
+		inputs := communicationInputsFromRunRequest(req)
+		if len(inputs) > 1 {
+			controllerInput = ""
+			controllerParts = nil
+			for _, item := range inputs {
+				_, parts, err := agentcommunication.Prompt(item.Input, item.ContentParts, item.Source)
+				if err != nil {
+					terminalErr = err
+					r.setRunState(ref.SessionID, agent.RunState{
+						Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID,
+						LastError: err.Error(), UpdatedAt: r.now(),
+					})
+					handle.publishError(err)
+					return
+				}
+				controllerParts = append(controllerParts, parts...)
+			}
+		} else if lastInputEvent != nil && lastInputEvent.Message != nil {
+			controllerInput = ""
+			controllerParts = model.ContentPartsFromParts(lastInputEvent.Message.Parts)
+		}
 	}
 	turnReq := controller.TurnRequest{
 		SessionRef:        ref,

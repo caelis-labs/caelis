@@ -172,6 +172,7 @@ func (t policyWrappedTool) requestApproval(
 		return policyDecisionResult(call, t.tool.Definition(), decision), nil
 	}
 	request := agent.ApprovalRequest{
+		Origin:     &agent.ApprovalOrigin{WorkingDirectory: t.session.CWD, Role: agent.ApprovalRoleMain, Endpoint: agent.ApprovalEndpointBuiltin, SessionID: t.sessionRef.SessionID, ToolCallID: call.ID},
 		SessionRef: t.sessionRef,
 		Session:    session.CloneSession(t.session),
 		RunID:      strings.TrimSpace(t.approval.runID),
@@ -181,6 +182,9 @@ func (t policyWrappedTool) requestApproval(
 		ModelStep:  cloneModelStepRef(call.ModelStep),
 		Approval:   cloneApproval(decision.Approval),
 		Metadata:   mapsClone(decision.Metadata),
+	}
+	if len(request.Approval.Options) == 0 {
+		request.Approval.Options = []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}, {ID: "reject_once", Name: "Reject", Kind: "reject_once"}}
 	}
 	var resp agent.ApprovalResponse
 	var err error

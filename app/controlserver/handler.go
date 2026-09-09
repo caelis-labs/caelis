@@ -97,6 +97,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) routes() {
+	s.mux.HandleFunc("POST "+apiPrefix+"/collaboration", s.collaborationCall)
 	s.mux.HandleFunc("GET /healthz", s.health)
 	s.mux.HandleFunc("GET /readyz", s.readiness)
 	s.mux.HandleFunc("GET "+apiPrefix+"/initialize", s.initialize)

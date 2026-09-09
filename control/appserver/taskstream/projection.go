@@ -62,7 +62,7 @@ func projectTaskStreamFrame(req taskFrameProjectionRequest, frame controltaskstr
 	return []eventstream.Envelope{{
 		Kind:       eventstream.KindLifecycle,
 		SessionID:  strings.TrimSpace(req.SessionID),
-		TurnID:     firstString(strings.TrimSpace(frame.TerminalID), strings.TrimSpace(req.TurnID)),
+		TurnID:     firstString(strings.TrimSpace(req.TurnID), strings.TrimSpace(frame.TerminalID)),
 		OccurredAt: occurredAt,
 		Scope:      eventstream.ScopeSubagent,
 		ScopeID:    strings.TrimSpace(req.TaskID),

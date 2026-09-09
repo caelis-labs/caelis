@@ -165,6 +165,9 @@ func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
 		}
 		h.mu.Unlock()
 		if runner != nil {
+			if req.Kind == SubmissionKindConversation {
+				h.approvals.invalidateAutoReviews()
+			}
 			submission := runnerSubmissionFromSubmitRequest(req)
 			if contextual, ok := runner.(agent.ContextSubmissionRunner); ok {
 				return contextual.SubmitContext(ctx, submission)

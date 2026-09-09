@@ -227,7 +227,7 @@ func TestEnvelopeV1SpawnChildSemanticGolden(t *testing.T) {
 		Actor:      "reviewer",
 		ParentTool: &ParentToolRelation{
 			ToolCallID: "spawn-call-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Delivery: &Delivery{Mode: DeliveryTransient},
 		Update: ToolCall{
@@ -629,14 +629,14 @@ func TestCloneEnvelopeDeepCopiesRelationAndDelivery(t *testing.T) {
 	t.Parallel()
 
 	env := Envelope{
-		ParentTool: &ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
+		ParentTool: &ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "StartThread"},
 		Delivery:   &Delivery{Mode: DeliveryTransient},
 	}
 	cloned := CloneEnvelope(env)
 	cloned.ParentTool.ToolCallID = "changed-call"
 	cloned.Delivery.Mode = DeliveryCanonical
 
-	if env.ParentTool.ToolCallID != "spawn-call-1" || env.ParentTool.ToolName != "Spawn" {
+	if env.ParentTool.ToolCallID != "spawn-call-1" || env.ParentTool.ToolName != "StartThread" {
 		t.Fatalf("original parent relation mutated = %#v", env.ParentTool)
 	}
 	if env.Delivery.Mode != DeliveryTransient {

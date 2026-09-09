@@ -22,6 +22,34 @@ func TestSandboxPermissionDetailDetectsStdoutRedirectedDiagnostics(t *testing.T)
 	}
 }
 
+func TestSandboxPermissionDetailIgnoresSuccessfulPermissionLikeOutput(t *testing.T) {
+	t.Parallel()
+
+	quoted := "quoted DecodePermissionRequest and go/pkg/mod cache: permission denied; EPERM EACCES\n"
+	detail, ok := SandboxPermissionDetail(CommandResult{
+		Stdout:  quoted,
+		Route:   RouteSandbox,
+		Backend: BackendSeatbelt,
+	}, nil)
+	if ok {
+		t.Fatalf("SandboxPermissionDetail() = %q, true; successful textual output is not a sandbox denial", detail)
+	}
+}
+
+func TestSandboxPermissionDetailIgnoresNonPermissionResultError(t *testing.T) {
+	t.Parallel()
+
+	detail, ok := SandboxPermissionDetail(CommandResult{
+		Error:    "command timed out",
+		ExitCode: 1,
+		Route:    RouteSandbox,
+		Backend:  BackendBwrap,
+	}, fmt.Errorf("command timed out"))
+	if ok {
+		t.Fatalf("SandboxPermissionDetail() = %q, true; want no permission classification", detail)
+	}
+}
+
 func TestIsSandboxPermissionDeniedTextDetectsDotNetDeniedPath(t *testing.T) {
 	t.Parallel()
 
@@ -37,6 +65,44 @@ func TestIsSandboxPermissionDeniedTextDoesNotTreatGenericDeniedAsFilesystem(t *t
 	text := "remote cache policy is denied."
 	if IsSandboxPermissionDeniedText(text) {
 		t.Fatalf("IsSandboxPermissionDeniedText(%q) = true, want false", text)
+	}
+}
+
+func TestIsSandboxPermissionDeniedTextMatchesErrnoTokensNotSubstrings(t *testing.T) {
+	t.Parallel()
+
+	for _, text := range []string{
+		"EPERM",
+		"open /tmp/x: EPERM",
+		"Error: EACCES: mkdir failed",
+		"errno=EACCES",
+		"(EPERM)",
+	} {
+		if !IsSandboxPermissionDeniedText(text) {
+			t.Fatalf("IsSandboxPermissionDeniedText(%q) = false, want true", text)
+		}
+	}
+
+	for _, text := range []string{
+		"DecodePermissionRequest",
+		"control/acppermission.DecodePermissionRequest converts the wire request",
+		"theaccess token was refreshed",
+	} {
+		if IsSandboxPermissionDeniedText(text) {
+			t.Fatalf("IsSandboxPermissionDeniedText(%q) = true, want false", text)
+		}
+	}
+}
+
+func TestSharedClassifiersDoNotTreatQuotedSuccessTextAsCacheDenial(t *testing.T) {
+	t.Parallel()
+
+	quoted := "quoted DecodePermissionRequest uses gocache and go/pkg/mod"
+	if IsSandboxPermissionDeniedText(quoted) {
+		t.Fatalf("IsSandboxPermissionDeniedText(%q) = true, want false so cache-denial hints stay off", quoted)
+	}
+	if !IsSandboxCachePathEvidenceText(quoted) {
+		t.Fatalf("IsSandboxCachePathEvidenceText(%q) = false, want cache path evidence without a denial", quoted)
 	}
 }
 

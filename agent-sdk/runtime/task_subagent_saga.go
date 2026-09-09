@@ -209,7 +209,6 @@ func (tm *taskRuntime) startSubagentTarget(
 		task.activityID = activityID
 		// Keep the exact completed result in the Task fallback. Transient ACP
 		// deltas already went directly to Control's bound output observer.
-		task.seedStreamFromResult(result)
 		spawnedEntry := task.entrySnapshot(tm.runtime.now())
 		if err := tm.persistSpawnEntry(ctx, spawnedEntry); err != nil {
 			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err)

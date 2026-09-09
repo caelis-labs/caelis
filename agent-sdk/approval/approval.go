@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 // Mode describes how one approval request should be resolved.
@@ -150,6 +151,33 @@ func PayloadFromRuntimeRequest(req agentsdk.ApprovalRequest) *Payload {
 		return nil
 	}
 	return payload
+}
+
+// CloneRuntimeRequest returns an isolated approval request snapshot for a
+// Control-owned admission boundary. Runtime producers may reuse their request
+// buffers after handing an approval to Control; the action, protocol payload,
+// options, and provenance metadata must remain the exact values that entered
+// the approval queue.
+func CloneRuntimeRequest(in agentsdk.ApprovalRequest) agentsdk.ApprovalRequest {
+	out := in
+	if in.Origin != nil {
+		origin := *in.Origin
+		out.Origin = &origin
+	}
+	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
+	out.Session = session.CloneSession(in.Session)
+	out.RunID = strings.TrimSpace(in.RunID)
+	out.TurnID = strings.TrimSpace(in.TurnID)
+	out.PauseTokenID = strings.TrimSpace(in.PauseTokenID)
+	out.Tool = tool.CloneDefinition(in.Tool)
+	out.Call = tool.CloneCall(in.Call)
+	out.ModelStep = tool.CloneModelStepRef(in.ModelStep)
+	out.Metadata = jsonvalue.CloneMap(in.Metadata)
+	if in.Approval != nil {
+		approval := session.CloneProtocolApproval(*in.Approval)
+		out.Approval = &approval
+	}
+	return out
 }
 
 // ProtocolApprovalFromPayload returns the normalized transport-neutral ACP

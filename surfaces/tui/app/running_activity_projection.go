@@ -189,6 +189,10 @@ func (m *Model) applyToolRunningActivity(event TranscriptEvent) {
 		m.setRunningToolActivity(runningPhaseToolWait, runningTargetShell, key, event.ToolCallID)
 	case surfaceToolSpawn:
 		m.setRunningToolActivity(runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
+	case "WaitThread":
+		m.setRunningToolActivity(runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
+	case "ReadThread", "ListThreads", "ReceiveMessages":
+		// Observation has no long-running activity hint.
 	case surfaceToolTask:
 		action := strings.ToLower(strings.TrimSpace(event.ToolTaskAction))
 		target := m.taskControlActivityTarget(event)

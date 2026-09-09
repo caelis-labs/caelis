@@ -746,6 +746,13 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 	if s.lifecycleCancel != nil {
 		s.lifecycleCancel()
 	}
+	if done := s.composition.authorities.collaborationDone; done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	s.composition.closing.Store(true)
 	var memoryStewardErr error
 	if s.memorySteward != nil {
@@ -832,6 +839,11 @@ func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 	s.composition.mu.Unlock()
 
 	var errs []error
+	if mailboxes := s.composition.authorities.collaboration; mailboxes != nil {
+		if err := mailboxes.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	if quiesceErr != nil {
 		errs = append(errs, fmt.Errorf("quiesce: %w", quiesceErr))
 	}

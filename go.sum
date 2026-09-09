@@ -50,6 +50,8 @@ github.com/caelis-labs/acp-go-sdk v1.2.0 h1:QLJW8C+1F6rJKwJvjUwdyb84aP6tuVzDu2Rs
 github.com/caelis-labs/acp-go-sdk v1.2.0/go.mod h1:e7QRdJfJFrPtixgiJBRwqQMLCrwV7X6e2X2ZDF06ohg=
 github.com/caelis-labs/memory v0.5.1 h1:DfKQP8bsAW8k7nngkDZkNuU80nfevlx2VU9yfJdKIWA=
 github.com/caelis-labs/memory v0.5.1/go.mod h1:C2/X3ya/mZ0AABL9JHdOW91MvfAXoen3LVesJetszE4=
+github.com/caelis-labs/memory v0.5.2 h1:JJyO7PQHFxjICnmCD9uO/frgqFzgHFkGL9OjqJqYhxk=
+github.com/caelis-labs/memory v0.5.2/go.mod h1:C2/X3ya/mZ0AABL9JHdOW91MvfAXoen3LVesJetszE4=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/charmbracelet/colorprofile v0.4.3 h1:QPa1IWkYI+AOB+fE+mg/5/4HRMZcaXex9t5KX76i20Q=
 github.com/charmbracelet/colorprofile v0.4.3/go.mod h1:/zT4BhpD5aGFpqQQqw7a+VtHCzu+zrQtt1zhMt9mR4Q=

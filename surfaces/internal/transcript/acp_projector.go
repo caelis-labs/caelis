@@ -406,20 +406,6 @@ func projectACPContentChunk(env eventstream.Envelope, update eventstream.Content
 				return nil
 			}
 			communicationMeta := MergeMeta(meta, update.Meta)
-			if scope == ScopeSubagent && strings.EqualFold(strings.TrimSpace(source.Kind), string(session.ActorKindController)) {
-				return []Event{{
-					Kind:          EventNarrative,
-					Scope:         scope,
-					ScopeID:       scopeID,
-					Actor:         firstNonEmptyString(source.Name, source.ID, "parent"),
-					OccurredAt:    env.OccurredAt,
-					Meta:          communicationMeta,
-					NarrativeKind: NarrativeUser,
-					MessageID:     strings.TrimSpace(update.MessageID),
-					Text:          strings.TrimSpace(text),
-					Final:         true,
-				}}
-			}
 			return []Event{{
 				Kind:            EventAgentCommunication,
 				Scope:           scope,
@@ -526,8 +512,8 @@ func projectACPApprovalReview(env eventstream.Envelope, meta map[string]any, sco
 
 func acpApprovalReviewDisplayText(review eventstream.ApprovalReview) string {
 	switch strings.ToLower(strings.TrimSpace(review.Status)) {
-	case "approved", "denied", "timed_out", "failed":
-		return FirstNonEmpty(strings.TrimSpace(review.Text), "Automatic approval review "+strings.TrimSpace(review.Status))
+	case "approved", "denied", "timed_out", "failed", "needs_user", "needs user", "needs-user":
+		return FirstNonEmpty(strings.TrimSpace(review.Text), strings.TrimSpace(review.Status))
 	default:
 		return strings.TrimSpace(review.Text)
 	}

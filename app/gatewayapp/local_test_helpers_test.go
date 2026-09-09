@@ -26,6 +26,10 @@ func newGatewayAppTestStack(t *testing.T, cfg Config) (*Stack, error) {
 		}
 	}
 	stack, err := NewLocalStack(cfg)
+	if err == nil {
+		// Release background workers and stores before this test's directories.
+		t.Cleanup(func() { _ = stack.Close() })
+	}
 	if err != nil || !modelConfigSupplied(model) {
 		return stack, err
 	}

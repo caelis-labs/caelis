@@ -19,7 +19,7 @@ func TestSendMessageToolAppearsAfterSuccessAndOpensOverlay(t *testing.T) {
 		Update: eventstream.ToolCall{
 			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
 			Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-			RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("Spawn"),
+			RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	running := eventstream.ToolStatusInProgress
@@ -27,7 +27,7 @@ func TestSendMessageToolAppearsAfterSuccessAndOpensOverlay(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
-			RawOutput: map[string]any{"handle": "ziva", "state": "running"}, Meta: acpToolNameMeta("Spawn"),
+			RawOutput: map[string]any{"handle": "ziva", "state": "running"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	view := model.ensureSubagentOutputView("spawn-1")
@@ -72,7 +72,8 @@ func TestSendMessageToolAppearsAfterSuccessAndOpensOverlay(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "message-1", Status: &completed,
-			RawOutput: map[string]any{"accepted": true}, Meta: acpToolNameMeta("SendMessage"),
+			RawOutput: map[string]any{"id": "mail-1", "from": "parent", "to": "ziva", "message": message},
+			Content:   []eventstream.ToolCallContent{{Type: "content", Content: eventstream.TextContent{Type: "text", Text: `{"id":"mail-1","from":"parent","to":"ziva","message":"receipt-must-not-render"}`}}}, Meta: acpToolNameMeta("SendMessage"),
 		},
 	})
 
@@ -88,7 +89,7 @@ func TestSendMessageToolAppearsAfterSuccessAndOpensOverlay(t *testing.T) {
 		t.Fatalf("semantic SendMessage header missing: %#v", model.viewportPlainLines)
 	}
 	plain := strings.Join(model.viewportPlainLines, "\n")
-	if strings.Contains(plain, `Ran SendMessage`) || strings.Contains(plain, `"message"`) || strings.Contains(plain, "middle-marker") {
+	if strings.Contains(plain, `Ran SendMessage`) || strings.Contains(plain, `"message"`) || strings.Contains(plain, "middle-marker") || strings.Contains(plain, "receipt-must-not-render") {
 		t.Fatalf("collapsed SendMessage leaked raw/full input:\n%s", plain)
 	}
 	if token := model.viewportClickTokens[headerLine]; token != agentMessageTargetOverlayClickToken("message-1") {
@@ -160,14 +161,14 @@ func TestSendMessageReplayBatchResolvesEarlierSpawnTarget(t *testing.T) {
 			Update: eventstream.ToolCall{
 				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
 				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-				RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("Spawn"),
+				RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("StartThread"),
 			},
 		},
 		{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 			Update: eventstream.ToolCallUpdate{
 				SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
-				RawOutput: map[string]any{"handle": "ziva", "state": "running"}, Meta: acpToolNameMeta("Spawn"),
+				RawOutput: map[string]any{"handle": "ziva", "state": "running"}, Meta: acpToolNameMeta("StartThread"),
 			},
 		},
 		{
@@ -276,6 +277,10 @@ func TestSendMessageFailureDoesNotClaimDelivery(t *testing.T) {
 			Meta:     acpToolNameMeta("SendMessage"),
 		},
 	})
+	model.syncViewportContent()
+	if plain := strings.Join(model.viewportPlainLines, "\n"); !strings.Contains(plain, " · sending") {
+		t.Fatalf("pending message lost its status:\n%s", plain)
+	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
@@ -292,17 +297,20 @@ func TestSendMessageFailureDoesNotClaimDelivery(t *testing.T) {
 
 	model.syncViewportContent()
 	plain := strings.Join(model.viewportPlainLines, "\n")
-	if strings.Contains(plain, "validation recommendation") || strings.Contains(plain, "ACP Agent @orbit") || strings.Contains(plain, "SendMessage") {
-		t.Fatalf("failed SendMessage appeared in the transcript:\n%s", plain)
+	if !strings.Contains(plain, "@orbit: validation recommendation · failed") || !strings.Contains(plain, "does not support additional messages") {
+		t.Fatalf("failed SendMessage lost status or reason:\n%s", plain)
+	}
+	if strings.Contains(plain, " · sending") {
+		t.Fatalf("failed message retained pending state:\n%s", plain)
 	}
 }
 
-func TestSendMessageHeaderUsesSpawnTargetStyling(t *testing.T) {
+func TestSendMessageHeaderUsesOutgoingTargetStyling(t *testing.T) {
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: theme}
 	row := renderSendMessageHeaderRow("block", "@ziva: compact message", ctx, "", acpHeaderMarkDefault, false)
-	if got := ansiTextForForeground(t, row.Styled, ctx.Theme.Focus); !strings.Contains(got, "@ziva") {
-		t.Fatalf("SendMessage target did not receive focus styling: %q", row.Styled)
+	if got := ansiTextForForeground(t, row.Styled, ctx.Theme.AgentMessageSentFg); !strings.Contains(got, "@ziva") {
+		t.Fatalf("SendMessage target did not receive outgoing styling: %q", row.Styled)
 	}
 	if got := ansiTextForForeground(t, row.Styled, ctx.Theme.TextStyle().GetForeground()); !strings.Contains(got, "compact message") {
 		t.Fatalf("SendMessage body did not retain normal text styling: %q", row.Styled)

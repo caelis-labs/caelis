@@ -14,14 +14,17 @@ import (
 )
 
 func TestRecorderReleasesTerminalPartitionsAndCanRebindAfterRemoval(t *testing.T) {
-	store, err := spoolfile.New(t.Context(), spoolfile.Config{RootDir: t.TempDir(), GCInterval: -1})
+	store, err := spoolfile.New(t.Context(), spoolfile.Config{
+		RootDir: t.TempDir(), GCInterval: -1, MaxRegistrations: 1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	recorder := NewRecorder(store, nil)
 
-	for index := range 128 {
+	// Each completed command must free the sole registration for its successor.
+	for index := range 3 {
 		observer := recorder.BindTaskOutput(t.Context(), output.Binding{
 			SessionID: "session-1", TaskID: fmt.Sprintf("task-%d", index),
 			Kind: output.TaskKindCommand, StartsAtTaskOrigin: true,
@@ -31,12 +34,19 @@ func TestRecorderReleasesTerminalPartitionsAndCanRebindAfterRemoval(t *testing.T
 		}); err != nil {
 			t.Fatal(err)
 		}
-	}
-	recorder.mu.Lock()
-	retained := len(recorder.writers)
-	recorder.mu.Unlock()
-	if retained != 0 {
-		t.Fatalf("terminal Recorder entries = %d, want 0", retained)
+		logical := streamspool.LogicalKey{
+			Namespace: streamspool.NamespaceTask,
+			Digest:    streamspool.DigestStrings("session-1", fmt.Sprintf("task-%d", index)),
+		}
+		if _, _, err := store.Resolve(t.Context(), logical); err != nil {
+			t.Fatalf("task %d did not obtain a spool partition: %v", index, err)
+		}
+		recorder.mu.Lock()
+		retained := len(recorder.writers)
+		recorder.mu.Unlock()
+		if retained != 0 {
+			t.Fatalf("terminal Recorder entries after task %d = %d, want 0", index, retained)
+		}
 	}
 
 	logical := streamspool.LogicalKey{
@@ -55,6 +65,9 @@ func TestRecorderReleasesTerminalPartitionsAndCanRebindAfterRemoval(t *testing.T
 	})
 	if err := observer.ObserveTaskOutput(t.Context(), output.Event{State: "completed", Closed: true}); err != nil {
 		t.Fatalf("rebound terminal ObserveTaskOutput() error = %v", err)
+	}
+	if _, _, err := store.Resolve(t.Context(), logical); err != nil {
+		t.Fatalf("rebound task did not obtain a new spool partition: %v", err)
 	}
 }
 
@@ -82,8 +95,9 @@ func TestRecorderReleasesFailedPartitionEntry(t *testing.T) {
 }
 
 func TestRecorderTaskReleaseBoundsRegistrationsByConcurrencyNotLifetime(t *testing.T) {
+	const registrations = 2
 	store, err := spoolfile.New(t.Context(), spoolfile.Config{
-		RootDir: t.TempDir(), GCInterval: -1, MaxRegistrations: 2, MaxPartitions: 64,
+		RootDir: t.TempDir(), GCInterval: -1, MaxRegistrations: registrations, MaxPartitions: 64,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +105,8 @@ func TestRecorderTaskReleaseBoundsRegistrationsByConcurrencyNotLifetime(t *testi
 	t.Cleanup(func() { _ = store.Close() })
 	recorder := NewRecorder(store, nil)
 
-	for index := range 16 {
+	// Each release context must independently exceed the registration limit.
+	for index := range 2 * (registrations + 1) {
 		taskID := fmt.Sprintf("subagent-%d", index)
 		observer := recorder.BindTaskOutput(t.Context(), output.Binding{
 			SessionID: "session-1", TaskID: taskID, ActivityID: "activity-1",

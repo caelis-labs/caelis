@@ -454,6 +454,18 @@ func CloneCall(in Call) Call {
 	return out
 }
 
+// CloneModelStepRef returns an isolated view of one model-call position while
+// retaining the shared admission barrier. The fields are request metadata; the
+// barrier remains the Runtime-owned synchronization authority.
+func CloneModelStepRef(in *ModelStepRef) *ModelStepRef {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.ID = strings.TrimSpace(in.ID)
+	return &out
+}
+
 // CloneResult returns one copy of one tool result.
 func CloneResult(in Result, err error) (Result, error) {
 	out := in

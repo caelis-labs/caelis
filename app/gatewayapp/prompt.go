@@ -26,6 +26,10 @@ func systemPromptWithoutCollaborationGuidance(prompt string) string {
 	return promptassembly.WithoutCollaborationGuidance(prompt)
 }
 
+func systemPromptWithCollaboratorIdentity(prompt, handle, role string) string {
+	return promptassembly.WithCollaboratorIdentity(prompt, handle, role)
+}
+
 func DefaultSkillDiscoveryDirs(workspaceDir string) []string {
 	return promptassembly.DefaultSkillDiscoveryDirs(workspaceDir)
 }

@@ -1748,7 +1748,7 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	spawnMeta := testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
-		testMeta.RuntimeToolName: "Spawn",
+		testMeta.RuntimeToolName: "StartThread",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
@@ -1772,7 +1772,7 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 		Final:     true,
 		Meta: testMeta.WithRuntimeSection(nil, testMeta.RuntimeStream, map[string]any{
 			testMeta.RuntimeStreamParentCallID: "spawn-1",
-			testMeta.RuntimeStreamParentTool:   "Spawn",
+			testMeta.RuntimeStreamParentTool:   "StartThread",
 		}),
 		Update: eventstream.ContentChunk{
 			SessionUpdate: eventstream.UpdateAgentMessage,
@@ -1785,7 +1785,7 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 		t.Fatalf("main events = %#v, want anchored spawn event", block.Events)
 	}
 	event := block.Events[0]
-	if event.Kind != SEToolCall || event.CallID != "spawn-1" || event.Name != "Spawn" {
+	if event.Kind != SEToolCall || event.CallID != "spawn-1" || event.Name != "StartThread" {
 		t.Fatalf("spawn event = %#v, want Spawn tool call", event)
 	}
 	if strings.Contains(event.Output, "subagent found the issue") {
@@ -1813,7 +1813,7 @@ func TestHandleACPEventEnvelopeStreamsDurableChildNarrativeBeforeCompletion(t *t
 			Kind:          eventstream.ToolKindExecute,
 			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect"},
-			Meta:          acpToolNameMeta("Spawn"),
+			Meta:          acpToolNameMeta("StartThread"),
 		},
 	})
 
@@ -1840,7 +1840,7 @@ func TestHandleACPEventEnvelopeStreamsDurableChildNarrativeBeforeCompletion(t *t
 				ParticipantID: "child-1",
 				ACPSessionID:  "child-session-1",
 				SourceEventID: chunk.eventID,
-				ParentTool:    session.EventParentTool{CallID: "spawn-call-1", Name: "Spawn"},
+				ParentTool:    session.EventParentTool{CallID: "spawn-call-1", Name: "StartThread"},
 			},
 			Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
@@ -1895,7 +1895,7 @@ func TestHandleACPEventEnvelopeStreamsDurableChildNarrativeBeforeCompletion(t *t
 	}
 
 	completed := eventstream.ToolStatusCompleted
-	finalMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Spawn"), testMeta.RuntimeTask, map[string]any{
+	finalMeta := testMeta.WithRuntimeSection(acpToolNameMeta("StartThread"), testMeta.RuntimeTask, map[string]any{
 		"task_id": "task-1",
 		"running": false,
 		"state":   "completed",
@@ -1944,7 +1944,7 @@ func TestHandleACPEventEnvelopeChildFinalChunksDoNotCloseOrTruncateSpawn(t *test
 			Kind:          eventstream.ToolKindExecute,
 			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect"},
-			Meta:          acpToolNameMeta("Spawn"),
+			Meta:          acpToolNameMeta("StartThread"),
 		},
 	})
 
@@ -1968,7 +1968,7 @@ func TestHandleACPEventEnvelopeChildFinalChunksDoNotCloseOrTruncateSpawn(t *test
 			Final:     true,
 			ParentTool: &eventstream.ParentToolRelation{
 				ToolCallID: "spawn-call-1",
-				ToolName:   "Spawn",
+				ToolName:   "StartThread",
 			},
 			Update: eventstream.ContentChunk{
 				SessionUpdate: eventstream.UpdateAgentMessage,
@@ -1992,7 +1992,7 @@ func TestHandleACPEventEnvelopeChildFinalChunksDoNotCloseOrTruncateSpawn(t *test
 	}
 
 	completed := eventstream.ToolStatusCompleted
-	finalMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Spawn"), testMeta.RuntimeTask, map[string]any{
+	finalMeta := testMeta.WithRuntimeSection(acpToolNameMeta("StartThread"), testMeta.RuntimeTask, map[string]any{
 		"task_id": "task-1",
 		"running": false,
 		"state":   "completed",
@@ -2037,14 +2037,14 @@ func TestHandleACPEventEnvelopePreservesHiddenChildToolAsBlankMessageBoundary(t 
 		Update: eventstream.ToolCall{
 			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-call-1",
 			Title: "Spawn explorer: inspect", Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
+			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	childEnvelope := func(update eventstream.Update) eventstream.Envelope {
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "child-turn-1",
 			Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Actor: "explorer",
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
+			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "StartThread"},
 			Update:     update,
 		}
 	}
@@ -2081,13 +2081,13 @@ func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T
 		Update: eventstream.ToolCall{
 			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-call-1",
 			Title: "Spawn explorer: inspect", Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
+			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "child-turn-1",
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Actor: "explorer",
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "StartThread"},
 		Update: eventstream.ToolCall{
 			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "child-tool-1",
 			Title: "Read /workspace/config.go", Kind: eventstream.ToolKindRead, Status: eventstream.ToolStatusInProgress,
@@ -2117,7 +2117,7 @@ func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "child-turn-1",
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Actor: "explorer",
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "StartThread"},
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "child-tool-1",
 			Title: &readTitle, Kind: &readKind, Status: &completed,
@@ -2130,14 +2130,16 @@ func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T
 	if strings.Contains(overlay, "loaded child settings") {
 		t.Fatalf("standard ACP read result was not folded as exploration activity:\n%s", overlay)
 	}
-	if model.subagentOutputOverlay.geometry.totalRows != 1 {
-		t.Fatalf("standard ACP read did not share the compact exploration renderer:\n%s", overlay)
+	// The tool stays on one compact exploration row; the running Turn owns
+	// the second row for its live elapsed footer.
+	if model.subagentOutputOverlay.geometry.totalRows != 2 {
+		t.Fatalf("standard ACP read did not retain one compact row plus its Turn footer:\n%s", overlay)
 	}
 
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "child-turn-1",
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Actor: "explorer",
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "StartThread"},
 		Update: eventstream.ContentChunk{
 			SessionUpdate: eventstream.UpdateAgentMessage,
 			Content:       eventstream.TextContent{Type: "text", Text: "found the configuration issue"},
@@ -2159,8 +2161,8 @@ func TestHandleACPEventEnvelopeRoutesCrossTurnChildContinuationAfterSendMessage(
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(250, 0))
-	spawnMeta := testMeta.WithRuntimeSection(acpToolNameMeta("Spawn"), testMeta.RuntimeTool, map[string]any{
-		testMeta.RuntimeToolName: "Spawn",
+	spawnMeta := testMeta.WithRuntimeSection(acpToolNameMeta("StartThread"), testMeta.RuntimeTool, map[string]any{
+		testMeta.RuntimeToolName: "StartThread",
 		"target_id":              "task-1",
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -2239,7 +2241,7 @@ func TestHandleACPEventEnvelopeRoutesCrossTurnChildContinuationAfterSendMessage(
 			Final:     true,
 			ParentTool: &eventstream.ParentToolRelation{
 				ToolCallID: "spawn-call-1",
-				ToolName:   "Spawn",
+				ToolName:   "StartThread",
 			},
 			Update: eventstream.ContentChunk{
 				SessionUpdate: eventstream.UpdateAgentMessage,
@@ -2311,7 +2313,7 @@ func TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce(t *testing.T) {
 			Kind:          eventstream.ToolKindExecute,
 			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect"},
-			Meta:          acpToolNameMeta("Spawn"),
+			Meta:          acpToolNameMeta("StartThread"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -2322,7 +2324,7 @@ func TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce(t *testing.T) {
 		Actor:     "explorer",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-call-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Update: eventstream.ToolCall{
@@ -2342,7 +2344,7 @@ func TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce(t *testing.T) {
 		Actor:     "explorer",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-call-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Update: eventstream.PlanUpdate{
@@ -2361,7 +2363,7 @@ func TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce(t *testing.T) {
 		Actor:     "explorer",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-call-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Update: eventstream.ContentChunk{
@@ -2377,7 +2379,7 @@ func TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce(t *testing.T) {
 		Actor:     "explorer",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-call-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Update: eventstream.ContentChunk{
@@ -2430,7 +2432,7 @@ func TestHandleACPEventEnvelopeScopedChildTerminalKeepsOneSpawnPanelAndMainTurnA
 			Kind:          eventstream.ToolKindExecute,
 			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect"},
-			Meta:          acpToolNameMeta("Spawn"),
+			Meta:          acpToolNameMeta("StartThread"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -2440,7 +2442,7 @@ func TestHandleACPEventEnvelopeScopedChildTerminalKeepsOneSpawnPanelAndMainTurnA
 		ScopeID:   "task-1",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-call-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
@@ -2591,7 +2593,7 @@ func TestHandleACPEventEnvelopeAppliesSpawnFinalRuntimeResultWithoutTerminalOutp
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	spawnMeta := testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
-		testMeta.RuntimeToolName: "Spawn",
+		testMeta.RuntimeToolName: "StartThread",
 	})
 	spawnMeta = testMeta.WithRuntimeSection(spawnMeta, testMeta.RuntimeTask, map[string]any{
 		"task_id":                      "task-1",

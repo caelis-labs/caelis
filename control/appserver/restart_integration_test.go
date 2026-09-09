@@ -45,7 +45,7 @@ func TestProcessRestartRebuildsDurableClientStateFromSessionTruth(t *testing.T) 
 	}
 	origin := session.EventChildOrigin{
 		Scope: session.EventChildScopeSubagent, ScopeID: "task-1", TaskID: "task-1", DelegationID: "task-1",
-		SourceEventID: "child-message", ParentTool: session.EventParentTool{CallID: "spawn-1", Name: "Spawn"},
+		SourceEventID: "child-message", ParentTool: session.EventParentTool{CallID: "spawn-1", Name: "StartThread"},
 	}
 	childMessage := &session.Event{
 		ID: "legacy-child-message", Type: session.EventTypeAssistant, Visibility: session.VisibilityMirror,

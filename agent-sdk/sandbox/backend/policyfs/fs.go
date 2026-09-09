@@ -93,6 +93,13 @@ func (f *policyFileSystem) MkdirAll(path string, perm os.FileMode) error {
 
 func (f *policyFileSystem) checkWritePath(path string) error {
 	p := f.policy()
+	if p.ResourceLimits != nil {
+		target := fsboundary.ResolveAbsPath(path, f.base)
+		if target != "" && fsboundary.IsWithinRoots(target, p.ResourceLimits.WritePaths, f.base) {
+			return nil
+		}
+		return permissionError("write", path, "outside explicit writable roots")
+	}
 	switch p.Type {
 	case policy.TypeDangerFull, policy.TypeExternal:
 		return nil
