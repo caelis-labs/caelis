@@ -85,7 +85,7 @@ require (
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
