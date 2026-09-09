@@ -374,7 +374,7 @@ func runWithProductClientOpener(
 			if formatErr != nil {
 				return formatErr
 			}
-			result := doctorResultFromStartupFailure(cfg.StoreDir, clientMode == productClientModeManaged, err)
+			result := doctorResultFromStartupFailure(cfg.StoreDir, clientMode, err)
 			result.Repairs = doctorRepairs
 			return writeDoctorResult(stdout, outFmt, result)
 		}

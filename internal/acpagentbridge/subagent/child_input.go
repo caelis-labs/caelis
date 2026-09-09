@@ -346,7 +346,6 @@ type childIdleCheckpoint struct {
 	running           bool
 	finishing         bool
 	cancelRequested   bool
-	cancelFailed      bool
 	cancelResolved    chan struct{}
 	done              chan struct{}
 }
@@ -453,7 +452,7 @@ func checkpointIdleRun(run *childRun) childIdleCheckpoint {
 		actionSummary: actionSummary, finalAssistant: run.finalAssistant, inputActor: session.CloneActorRef(run.inputActor),
 		suppressInputEcho: run.suppressInputEcho,
 		running:           run.running, finishing: run.finishing, cancelRequested: run.cancelRequested,
-		cancelFailed: run.cancelFailed, cancelResolved: run.cancelResolved, done: run.done,
+		cancelResolved: run.cancelResolved, done: run.done,
 	}
 }
 
@@ -471,7 +470,6 @@ func restoreIdleRun(run *childRun, checkpoint childIdleCheckpoint) {
 	run.running = checkpoint.running
 	run.finishing = checkpoint.finishing
 	run.cancelRequested = checkpoint.cancelRequested
-	run.cancelFailed = checkpoint.cancelFailed
 	run.cancelResolved = checkpoint.cancelResolved
 	run.done = checkpoint.done
 }
@@ -558,7 +556,6 @@ func (r *Runner) submitIdleChildInput(
 	run.updatedAt = r.clock()
 	run.finishing = false
 	run.cancelRequested = false
-	run.cancelFailed = false
 	run.cancelResolved = nil
 	run.done = make(chan struct{})
 	run.mu.Unlock()
@@ -667,7 +664,7 @@ func (r *Runner) drivePreparedPrompt(
 			if first {
 				first = false
 				response, waitErr := prepared.Wait(callCtx)
-				promptNotAdmitted = authentication.IsRequired(waitErr)
+				promptNotAdmitted = waitErr != nil && !client.PromptOutcomeUnknown(waitErr)
 				return response, waitErr
 			}
 			retryDispatchDone := fence.current()
@@ -707,16 +704,13 @@ func (r *Runner) drivePreparedPrompt(
 			}
 			fence.finish(retryDispatchDone)
 			response, waitErr := retry.Wait(callCtx)
-			promptNotAdmitted = authentication.IsRequired(waitErr)
+			promptNotAdmitted = waitErr != nil && !client.PromptOutcomeUnknown(waitErr)
 			return response, waitErr
 		},
 	)
 	r.logChildError(ctx, run, "prompt_response", err)
-	if err != nil && !promptNotAdmitted && ctx.Err() == nil && client.PromptOutcomeUnknown(err) {
+	if err != nil && !promptNotAdmitted && client.PromptOutcomeUnknown(err) {
 		err = joinChildInputUnknown(subagentPromptUnknownDetail(err), err)
-	}
-	if err != nil && !promptNotAdmitted && ctx.Err() != nil {
-		err = joinChildInputUnknown("Prompt observation ended before execution completion could be confirmed.", ctx.Err())
 	}
 	if slot := run.childSlot(); errorcode.Is(err, errorcode.UnknownOutcome) && slot != nil {
 		slot.quarantineOutput(run)

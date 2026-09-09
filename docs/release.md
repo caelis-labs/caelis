@@ -38,16 +38,11 @@ change-scoped gates.
 5. Confirm the imported `github.com/caelis-labs/memory` version is released and
    declares a forward-migration floor for the persisted appliance database.
    A prerelease development baseline is a release blocker.
-   Internal Store recovery primitives must pin the Memory release that provides
-   the owner snapshot and offline generation APIs; a local module replacement
-   is development evidence only.
 6. Commit and push the intended SHA to `main`, then wait for or identify its
    quality run. Do not rerun unchanged local gates merely because a tag is next.
 7. Prepare concise user-visible release notes. When retiring a durable writer,
    record the last writer and first no-write version; retain its compatibility
-   reader until the supported upgrade floor reaches that version. Internal
-   [Store recovery primitives](store-backup.md) are not an automatic updater
-   rollback guarantee or a user-facing archive compatibility promise.
+   reader until the supported upgrade floor reaches that version.
 
 Run optional architecture, SDK, protocol, race, regression, proxy, documentation,
 or dry-run checks only when the release changes those boundaries. See

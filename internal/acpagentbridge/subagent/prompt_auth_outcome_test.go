@@ -2,9 +2,12 @@ package subagent
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,19 +22,22 @@ import (
 
 func TestPromptAuthenticationFailureKeepsAdmissionEvidence(t *testing.T) {
 	for _, test := range []struct {
-		name          string
-		method        string
-		failure       string
-		prompts       int
-		authenticates int
-		state         delegation.State
+		name                   string
+		method                 string
+		failure                string
+		prompts                int
+		authenticates          int
+		state                  delegation.State
+		cancelBeforeSettlement bool
 	}{
-		{"removed method", "removed-login", "", 1, 0, delegation.StateFailed},
-		{"authenticate RPC failed", "agent-login", "authenticate", 1, 1, delegation.StateFailed},
-		{"authenticate connection lost", "agent-login", "authenticate-disconnect", 1, 1, delegation.StateFailed},
-		{"retry rejected", "agent-login", "retry-auth-required", 2, 1, delegation.StateFailed},
-		{"retry internal error", "agent-login", "retry", 2, 1, delegation.StateUnknownOutcome},
-		{"retry connection lost", "agent-login", "retry-disconnect", 2, 1, delegation.StateUnknownOutcome},
+		{"removed method", "removed-login", "", 1, 0, delegation.StateFailed, false},
+		{"authenticate RPC failed", "agent-login", "authenticate", 1, 1, delegation.StateFailed, false},
+		{"authenticate connection lost", "agent-login", "authenticate-disconnect", 1, 1, delegation.StateFailed, false},
+		{"retry rejected", "agent-login", "retry-auth-required", 2, 1, delegation.StateFailed, false},
+		{"retry internal error", "agent-login", "retry", 2, 1, delegation.StateUnknownOutcome, false},
+		{"retry connection lost", "agent-login", "retry-disconnect", 2, 1, delegation.StateUnknownOutcome, false},
+		{"rejected authentication races cancellation", "removed-login", "", 1, 0, delegation.StateFailed, true},
+		{"internal retry error races cancellation", "agent-login", "retry", 2, 1, delegation.StateUnknownOutcome, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -49,6 +55,13 @@ func TestPromptAuthenticationFailureKeepsAdmissionEvidence(t *testing.T) {
 			runner, err := NewRunner(RunnerConfig{Registry: registry})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if test.cancelBeforeSettlement {
+				runner.diagnostics = slog.New(&promptResponseCancelHandler{Handler: slog.NewTextHandler(io.Discard, nil), cancel: func() {
+					// Authentication failure may already have closed the peer. Neither
+					// a successful nor failed cancel changes admission evidence.
+					_ = runner.Cancel(context.Background(), delegation.Anchor{TaskID: "task-auth"})
+				}})
 			}
 			defer func() {
 				if err := runner.Quiesce(context.Background()); err != nil {
@@ -118,4 +131,22 @@ func TestPromptAuthenticationFailureKeepsAdmissionEvidence(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Cancel after the actual peer response and authentication recovery, before the
+// result is settled. The diagnostic boundary makes the ordering deterministic.
+type promptResponseCancelHandler struct {
+	slog.Handler
+	once   sync.Once
+	cancel func()
+}
+
+func (h *promptResponseCancelHandler) Handle(_ context.Context, record slog.Record) error {
+	record.Attrs(func(attr slog.Attr) bool {
+		if attr.Key == "phase" && attr.Value.String() == "prompt_response" {
+			h.once.Do(h.cancel)
+		}
+		return true
+	})
+	return nil
 }

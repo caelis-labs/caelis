@@ -120,7 +120,6 @@ type childRun struct {
 	running           bool
 	finishing         bool
 	cancelRequested   bool
-	cancelFailed      bool
 	cancelResolved    chan struct{}
 	done              chan struct{}
 }
@@ -585,7 +584,6 @@ func (r *Runner) Cancel(ctx context.Context, anchor delegation.Anchor) error {
 		run.mu.Unlock()
 		return remoteErr
 	}
-	run.cancelFailed = remoteErr != nil
 	run.updatedAt = r.clock()
 	close(cancelResolved)
 	run.mu.Unlock()
@@ -701,19 +699,9 @@ func (r *Runner) finishDriveLocked(ctx context.Context, run *childRun, stopReaso
 	run.finishing = true
 	run.updatedAt = r.clock()
 	closeClient := false
-	if run.cancelRequested && err != nil {
-		// Sending session/cancel or terminating our observation does not prove
-		// that a managed Host execution stopped. Only a prompt response can
-		// confirm cancellation; local teardown remains an unknown outcome.
-		run.state = delegation.StateUnknownOutcome
-		run.failureDetail = "subagent cancellation outcome cannot be confirmed"
-		if run.cancelFailed {
-			run.failureDetail = "subagent cancellation failed"
-		}
-		run.outputPreview = run.failureDetail
-		run.result = ""
-		closeClient = true
-	} else if err != nil {
+	// Dispatch and response handling own admission and outcome classification.
+	// Cancellation requests and connection cleanup cannot weaken that evidence.
+	if err != nil {
 		if errorcode.Is(err, errorcode.UnknownOutcome) {
 			run.state = delegation.StateUnknownOutcome
 			run.failureDetail = strings.TrimSpace(err.Error())
@@ -759,12 +747,6 @@ func (r *Runner) finishDriveLocked(ctx context.Context, run *childRun, stopReaso
 	if closeClient && acpClient != nil {
 		if closeErr := acpClient.Close(context.WithoutCancel(ctx)); closeErr != nil {
 			r.logChildError(ctx, run, "connection_cleanup", closeErr)
-			run.mu.Lock()
-			run.state = delegation.StateUnknownOutcome
-			run.failureDetail = "subagent connection cleanup outcome cannot be confirmed"
-			run.outputPreview = run.failureDetail
-			run.result = ""
-			run.mu.Unlock()
 		}
 	}
 	if slot != nil {

@@ -367,9 +367,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if storeDir == "" {
 		storeDir = defaultStoreDir()
 	}
-	if err := rejectPendingStoreUpgrade(storeDir); err != nil {
-		return nil, err
-	}
 	if cfg.HostOwnership != nil && !cfg.HostOwnership.Authorizes(storeDir) {
 		return nil, fmt.Errorf("gatewayapp: Host ownership does not authorize StoreDir")
 	}

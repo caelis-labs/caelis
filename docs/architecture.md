@@ -290,12 +290,10 @@ cursor keys, runtime locks and tokens, diagnostic logs, and immutable plugin
 content also remain outside the Control database because their lifecycle or
 security boundary is different.
 
-[Internal Store recovery primitives](store-backup.md) preserve these independent
-authorities under an offline quiesce boundary. They are reserved for temporary
-upgrade recovery, not exposed as backup, migration, or manual upgrade commands.
-Their Host-owned journal fences ordinary startup while owner recovery is
-pending. The raw and npm update paths do not currently coordinate Store
-snapshots or provide automatic Store rollback.
+Executable updates replace the installed program. Durable format migrations
+belong to each persistence owner and run under exclusive Store ownership.
+Component-local migrations use their owner's transaction or atomic replacement
+mechanism; updating the executable does not provide automatic Store rollback.
 
 An upgrade starts a new Control operation epoch. Retired `control-operations`,
 `acp-preparations`, and plugin operation-receipt directories are not read,

@@ -2,6 +2,8 @@ package subagent
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -11,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
 func TestCancellationSettlementRequiresPromptResponse(t *testing.T) {
@@ -22,7 +25,9 @@ func TestCancellationSettlementRequiresPromptResponse(t *testing.T) {
 	}{
 		{"confirmed cancellation", "cancelled", nil, delegation.StateCancelled},
 		{"completion won cancellation race", "end_turn", nil, delegation.StateCompleted},
-		{"cancelled observation", "", context.Canceled, delegation.StateUnknownOutcome},
+		{"cancelled observation", "", joinChildInputUnknown("unconfirmed prompt", context.Canceled), delegation.StateUnknownOutcome},
+		{"rejected authentication", "", errors.New("configured authentication method unavailable"), delegation.StateFailed},
+		{"cancelled before dispatch", "", context.Canceled, delegation.StateInterrupted},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runner := &Runner{clock: time.Now}
@@ -86,5 +91,30 @@ func TestInternalPromptErrorQuarantinesSubprocessActivity(t *testing.T) {
 	}
 	if got := run.slot.currentRun(); got != run {
 		t.Fatal("unresolved execution was silently reconnected")
+	}
+}
+
+func TestConfirmedCancellationSurvivesConnectionCleanupFailure(t *testing.T) {
+	reader, peer := io.Pipe()
+	defer peer.Close()
+	remote, err := client.NewStreamClient(io.Discard, struct{ io.Reader }{reader}, client.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep the transport reader blocked while cleanup loses its observation.
+	cleanupCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := remote.Close(cleanupCtx); err == nil {
+		t.Fatal("expected connection join failure")
+	}
+	_ = peer.Close()
+	runner := &Runner{clock: time.Now}
+	run := &childRun{running: true, cancelRequested: true, state: delegation.StateRunning, client: remote}
+	runner.finishDrive(t.Context(), run, "cancelled", nil)
+	if got := childResultLocked(run); got.State != delegation.StateCancelled || got.Running {
+		t.Fatalf("confirmed cancellation changed after cleanup: %#v", got)
+	}
+	if err := remote.Close(t.Context()); err == nil {
+		t.Fatal("expected connection cleanup failure")
 	}
 }

@@ -90,22 +90,26 @@ type doctorRepairResult struct {
 	RepairedTasks            int    `json:"repaired_tasks,omitempty"`
 }
 
-func doctorResultFromStartupFailure(storeDir string, managed bool, err error) doctorResult {
+func doctorResultFromStartupFailure(storeDir string, mode productClientMode, err error) doctorResult {
 	result := doctorResult{
 		GoVersion:    runtime.Version(),
 		GOOS:         runtime.GOOS,
 		GOARCH:       runtime.GOARCH,
-		StoreDir:     filepath.Clean(storeDir),
-		ConfigPath:   filepath.Join(storeDir, "config.json"),
 		ServiceState: "unavailable",
 	}
+	if mode == productClientModeRemote {
+		result.ServiceError = "configured remote Control Host is unavailable"
+		return result
+	}
+	result.StoreDir = filepath.Clean(storeDir)
+	result.ConfigPath = filepath.Join(storeDir, "config.json")
 	if diagnostics, diagnosticsErr := gatewayapp.InspectStoreDiagnostics(storeDir); diagnosticsErr == nil {
 		annotateStartupStorageDiagnostics(&diagnostics, err)
 		result.StorageDiagnostics = &diagnostics
 	} else {
 		result.Warnings = append(result.Warnings, "read-only Store diagnostics unavailable")
 	}
-	if managed {
+	if mode == productClientModeManaged {
 		detail := classifyManagedStartupFailure(err)
 		result.ServiceErrorCode = detail.code
 		result.ServiceError = detail.description
@@ -125,10 +129,7 @@ func annotateStartupStorageDiagnostics(diagnostics *gatewayapp.StoreDiagnostics,
 		return
 	}
 	text := strings.ToLower(startupErr.Error())
-	switch {
-	case strings.Contains(text, "unsupported unreleased schema"), strings.Contains(text, "unsupported schema"):
-		diagnostics.Memory.SchemaState = "unsupported"
-	case strings.Contains(text, "memory data directory is already owned"):
+	if strings.Contains(text, "memory data directory is already owned") {
 		diagnostics.Memory.OwnerLockState = "held"
 	}
 }
@@ -221,7 +222,7 @@ func doctorResultFromStatus(status controlstatus.StatusSnapshot) doctorResult {
 	if policyProfile == "" && status.SandboxStatus.FullAccessMode {
 		policyProfile = "danger-full-access"
 	}
-	result := doctorResult{
+	return doctorResult{
 		GoVersion:                       firstNonEmptyString(status.Diagnostics.GoVersion, runtime.Version()),
 		GOOS:                            firstNonEmptyString(status.Diagnostics.GOOS, runtime.GOOS),
 		GOARCH:                          firstNonEmptyString(status.Diagnostics.GOARCH, runtime.GOARCH),
@@ -279,12 +280,6 @@ func doctorResultFromStatus(status controlstatus.StatusSnapshot) doctorResult {
 		ActiveTurnSessions:              append([]string(nil), status.Runtime.ActiveSessions...),
 		Warnings:                        append([]string(nil), status.Diagnostics.Warnings...),
 	}
-	if diagnostics, err := gatewayapp.InspectStoreDiagnostics(result.StoreDir); err == nil {
-		result.StorageDiagnostics = &diagnostics
-	} else {
-		result.Warnings = append(result.Warnings, "read-only Store diagnostics unavailable")
-	}
-	return result
 }
 
 func formatDoctorResult(report doctorResult) string {
@@ -344,11 +339,9 @@ func formatDoctorResult(report doctorResult) string {
 			fmt.Sprintf("memory_shm_state: %s", firstNonEmptyString(storage.Memory.SHMState, "-")),
 			fmt.Sprintf("memory_rollback_state: %s", firstNonEmptyString(storage.Memory.RollbackState, "-")),
 		)
-		if shouldShowStorageRecoveryAdvice(report) {
-			for _, advice := range storage.RecoveryAdvice {
-				if advice = strings.TrimSpace(advice); advice != "" {
-					lines = append(lines, "recovery_advice: "+advice)
-				}
+		for _, advice := range storage.RecoveryAdvice {
+			if advice = strings.TrimSpace(advice); advice != "" {
+				lines = append(lines, "recovery_advice: "+advice)
 			}
 		}
 		lines = append(lines, "")
@@ -422,21 +415,6 @@ func formatDoctorResult(report doctorResult) string {
 		}
 	}
 	return strings.Join(lines, "\n")
-}
-
-func shouldShowStorageRecoveryAdvice(report doctorResult) bool {
-	if strings.TrimSpace(report.ServiceError) != "" || strings.EqualFold(strings.TrimSpace(report.ServiceState), "unavailable") {
-		return true
-	}
-	storage := report.StorageDiagnostics
-	if storage == nil {
-		return false
-	}
-	return storage.ConfigState != "present" ||
-		storage.ControlDatabaseState != "present" ||
-		storage.SessionsState != "present" ||
-		storage.Memory.DatabaseState != "present" ||
-		storage.Memory.DatabaseFormat != "sqlite3"
 }
 
 func sandboxSetupDiagnosticsFromStatus(status controlstatus.SandboxSetupStatus) sandboxSetupDiagnostics {
