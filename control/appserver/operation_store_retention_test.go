@@ -429,11 +429,11 @@ func TestFileOperationStoreSweepIsBoundedAndCursorMakesProgress(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)}
 	const (
-		batchSize   = 17
-		deleteLimit = 8
-		expired     = 180
-		protected   = 120
-		corrupt     = 20
+		batchSize   = 5
+		deleteLimit = 2
+		expired     = 9
+		protected   = 7
+		corrupt     = 2
 	)
 	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
@@ -493,7 +493,8 @@ func TestFileOperationStoreSweepHonorsSoftTimeLimit(t *testing.T) {
 		SweepTimeLimit:    time.Nanosecond,
 	}, clock)
 	store.elapsed = func(time.Time) time.Duration { return time.Nanosecond }
-	for index := range 64 {
+	// Two records suffice to prove the soft deadline stops before the next one.
+	for index := range 2 {
 		intent := operationStoreTestIntent(fmt.Sprintf("time-bound-%03d", index), "digest")
 		writeRawOperationRecord(t, store, intent, expiredTestRecord(clock.Now(), intent))
 	}

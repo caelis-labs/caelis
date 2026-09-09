@@ -83,49 +83,50 @@ func TestFencedRuntimeUsesHostScopedFenceWithoutRenewal(t *testing.T) {
 func TestFencedRuntimeSleepDoesNotRenewOrExpireTurnFence(t *testing.T) {
 	t.Parallel()
 
-	store := inmemory.NewStore(inmemory.Config{})
-	active, err := store.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "user-1", PreferredSessionID: "sleep-with-fence",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	fences := &countingSessionFenceService{SessionFenceService: store}
-	runner := newFenceTestRunner("run-sleep")
-	wrapper, err := NewFencedRuntime(FencedRuntimeConfig{
-		Runtime: fenceTestRuntime{runner: runner}, Fences: fences, OwnerID: "host-a",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	run, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
-	if err != nil {
-		t.Fatal(err)
-	}
-	acquires, releases := fences.calls()
-	if acquires != 1 || releases != 0 {
-		t.Fatalf("fence calls after admission = acquire %d / release %d, want 1/0", acquires, releases)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		store := inmemory.NewStore(inmemory.Config{})
+		active, err := store.StartSession(context.Background(), session.StartSessionRequest{
+			AppName: "caelis", UserID: "user-1", PreferredSessionID: "sleep-with-fence",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		fences := &countingSessionFenceService{SessionFenceService: store}
+		runner := newFenceTestRunner("run-sleep")
+		wrapper, err := NewFencedRuntime(FencedRuntimeConfig{
+			Runtime: fenceTestRuntime{runner: runner}, Fences: fences, OwnerID: "host-a",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		run, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
+		if err != nil {
+			t.Fatal(err)
+		}
+		acquires, releases := fences.calls()
+		if acquires != 1 || releases != 0 {
+			t.Fatalf("fence calls after admission = acquire %d / release %d, want 1/0", acquires, releases)
+		}
 
-	// This pause is deliberately longer than the focused test's scheduling
-	// granularity. A one-shot fence has no timer or storage activity to wake.
-	time.Sleep(150 * time.Millisecond)
-	acquires, releases = fences.calls()
-	if acquires != 1 || releases != 0 {
-		t.Fatalf("fence calls while producer slept = acquire %d / release %d, want 1/0", acquires, releases)
-	}
-	if durable, err := store.SessionFence(context.Background(), active.SessionRef); err != nil || durable.FenceID == "" {
-		t.Fatalf("durable fence after sleep = %#v, %v; want active", durable, err)
-	}
+		// Advance fake time while the producer is idle; the fence has no TTL.
+		time.Sleep(150 * time.Millisecond)
+		acquires, releases = fences.calls()
+		if acquires != 1 || releases != 0 {
+			t.Fatalf("fence calls while producer slept = acquire %d / release %d, want 1/0", acquires, releases)
+		}
+		if durable, err := store.SessionFence(context.Background(), active.SessionRef); err != nil || durable.FenceID == "" {
+			t.Fatalf("durable fence after sleep = %#v, %v; want active", durable, err)
+		}
 
-	runner.finish()
-	if err := run.Handle.WaitCompletion(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	_, releases = fences.calls()
-	if releases != 1 {
-		t.Fatalf("release calls after producer completion = %d, want 1", releases)
-	}
+		runner.finish()
+		if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		_, releases = fences.calls()
+		if releases != 1 {
+			t.Fatalf("release calls after producer completion = %d, want 1", releases)
+		}
+	})
 }
 
 func TestNewFencedRuntimeRequiresCompletionCapability(t *testing.T) {
@@ -445,38 +446,41 @@ func TestFencedRuntimeRetriesTransientReleaseWithoutHostRestart(t *testing.T) {
 func TestFencedRuntimeStopsReleaseRetryAfterHostLifecycleEnds(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewStore(inmemory.Config{})
-	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "user-1", PreferredSessionID: "release-lifecycle",
+	synctest.Test(t, func(t *testing.T) {
+		service := inmemory.NewStore(inmemory.Config{})
+		active, err := service.StartSession(context.Background(), session.StartSessionRequest{
+			AppName: "caelis", UserID: "user-1", PreferredSessionID: "release-lifecycle",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		fences := &transientReleaseFenceService{SessionFenceService: service, reader: service, failAlways: true}
+		runner := newFenceTestRunner("run-release-lifecycle")
+		hostCtx, cancelHost := context.WithCancel(context.Background())
+		wrapper, err := NewFencedRuntime(FencedRuntimeConfig{
+			Runtime: fenceTestRuntime{runner: runner}, Fences: fences, OwnerID: "host-a", LifecycleContext: hostCtx,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef}); err != nil {
+			t.Fatal(err)
+		}
+		runner.finish()
+		waitForReleaseCalls(t, fences, 1)
+		cancelHost()
+		synctest.Wait()
+		fences.mu.Lock()
+		callsAfterCancel := fences.releaseCalls
+		fences.mu.Unlock()
+		time.Sleep(250 * time.Millisecond)
+		fences.mu.Lock()
+		finalCalls := fences.releaseCalls
+		fences.mu.Unlock()
+		if finalCalls != callsAfterCancel {
+			t.Fatalf("release retries after Host lifecycle ended = %d -> %d", callsAfterCancel, finalCalls)
+		}
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	fences := &transientReleaseFenceService{SessionFenceService: service, reader: service, failAlways: true}
-	runner := newFenceTestRunner("run-release-lifecycle")
-	hostCtx, cancelHost := context.WithCancel(context.Background())
-	wrapper, err := NewFencedRuntime(FencedRuntimeConfig{
-		Runtime: fenceTestRuntime{runner: runner}, Fences: fences, OwnerID: "host-a", LifecycleContext: hostCtx,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef}); err != nil {
-		t.Fatal(err)
-	}
-	runner.finish()
-	waitForReleaseCalls(t, fences, 1)
-	cancelHost()
-	fences.mu.Lock()
-	callsAfterCancel := fences.releaseCalls
-	fences.mu.Unlock()
-	time.Sleep(250 * time.Millisecond)
-	fences.mu.Lock()
-	finalCalls := fences.releaseCalls
-	fences.mu.Unlock()
-	if finalCalls != callsAfterCancel {
-		t.Fatalf("release retries after Host lifecycle ended = %d -> %d", callsAfterCancel, finalCalls)
-	}
 }
 
 func TestReleaseReconcilesUnreportedCommitWithFreshReadContext(t *testing.T) {

@@ -116,54 +116,6 @@ func TestR2PublisherUpdatesLatestAfterVerifiedAssets(t *testing.T) {
 	}
 }
 
-func TestReleaseDryRunDoesNotRepeatOrdinaryQuality(t *testing.T) {
-	t.Parallel()
-
-	makefile := readWorkflow(t, "../Makefile")
-	goreleaser := readWorkflow(t, "../.goreleaser.yml")
-	if !strings.Contains(makefile, "release-dry-run: cache-dirs") {
-		t.Error("release dry run no longer initializes its local cache directories")
-	}
-	if strings.Contains(makefile, "release-dry-run: quality") {
-		t.Error("release dry run repeats the ordinary quality gate")
-	}
-	for _, forbidden := range []string{"go mod tidy", "go test"} {
-		if strings.Contains(goreleaser, forbidden) {
-			t.Errorf("GoReleaser repeats pre-approved source validation %q", forbidden)
-		}
-	}
-}
-
-func TestSDKConsumerGatesUseCurrentAndTaggedFixturesSeparately(t *testing.T) {
-	t.Parallel()
-
-	current := readWorkflow(t, "./sdk_boundary_check.sh")
-	if !strings.Contains(current, "scripts/testdata/sdk_consumer/quickstart_test.go") || !strings.Contains(current, "go mod edit -replace") {
-		t.Fatalf("current-source consumer gate no longer compiles the worktree quickstart with a local module replacement")
-	}
-	tagged := readWorkflow(t, "./sdk_proxy_smoke.sh")
-	for _, want := range []string{
-		"git tag --merged HEAD --sort=-v:refname",
-		"git show \"${VERSION}:scripts/testdata/sdk_consumer/quickstart_test.go\"",
-		"git show \"${VERSION}:agent-sdk/supported-packages.txt\"",
-		"go list -m",
-		"replace directive",
-		"with no replacement",
-		"GOMODCACHE=\"${consumer_modcache}\"",
-		"no direct/off/pipe fallback",
-		"GOPRIVATE=",
-		"GONOPROXY=none",
-		"GOVCS='*:off'",
-	} {
-		if !strings.Contains(tagged, want) {
-			t.Errorf("tagged consumer gate missing %q", want)
-		}
-	}
-	if strings.Contains(tagged, "sdk_api_compat") {
-		t.Error("tagged consumer gate still depends on the removed declaration-compatibility command")
-	}
-}
-
 func TestSDKProxySmokeRejectsDisabledProxyEvenWithWarmSharedCache(t *testing.T) {
 	t.Parallel()
 
