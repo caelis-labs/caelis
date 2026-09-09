@@ -6,7 +6,7 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
-func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int) {
+func renderACPToolLifecycleRowsWithoutReview(blockID string, events []SubagentEvent, idx int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int) {
 	if idx < 0 || idx >= len(events) {
 		return nil, idx
 	}

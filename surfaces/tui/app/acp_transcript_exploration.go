@@ -667,7 +667,8 @@ func isCompactExplorationTool(ev SubagentEvent) bool {
 }
 
 func isExplorationToolEvent(ev SubagentEvent) bool {
-	if ev.Kind != SEToolCall {
+	// A reviewed invocation keeps its own header and decision visible.
+	if ev.Kind != SEToolCall || ev.ApprovalStatus != "" {
 		return false
 	}
 	if strings.TrimSpace(ev.CallID) == "" {

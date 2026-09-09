@@ -84,7 +84,7 @@ func TestApprovalReviewCompactStatusAndWrappedReason(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	for _, status := range []string{"approved", "denied", "failed", "timed_out", "needs_user"} {
 		rows := renderACPApprovalReviewRows("b", SubagentEvent{ApprovalStatus: status, ApprovalText: status}, 40, model.blockRenderContext(40))
-		if len(rows) != 1 || rows[0].Plain != "• Auto approval · "+status {
+		if len(rows) != 1 || rows[0].Plain != "• "+status {
 			t.Fatalf("status %s: %#v", status, rows)
 		}
 	}

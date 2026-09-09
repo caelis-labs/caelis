@@ -132,6 +132,9 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			}
 			i = consumed
 		case SEApproval:
+			if approvalReviewHasTool(visible, ev) {
+				continue
+			}
 			approvalRows := renderACPApprovalReviewRows(blockID, ev, width, ctx)
 			if len(approvalRows) > 0 {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupApproval, false)
@@ -1217,7 +1220,10 @@ func renderACPApprovalReviewRows(blockID string, ev SubagentEvent, width int, ct
 	if display.Status == "" && display.Rationale == "" {
 		return nil
 	}
-	prefixPlain, prefixStyled := approvalReviewPrefix(display, ctx)
+	header := strings.TrimSpace(ev.ApprovalTool + " " + ev.ApprovalCommand)
+	prefix := strings.TrimSpace("• "+header) + " "
+	prefixPlain := prefix + display.Status
+	prefixStyled := ctx.Theme.ToolStyle().Render(prefix) + approvalReviewStatusStyle(ctx, display.Status).Render(display.Status)
 	if display.Rationale == "" {
 		return []RenderedRow{StyledPlainRow(blockID, prefixPlain, prefixStyled)}
 	}
@@ -1244,39 +1250,6 @@ func renderACPApprovalReviewRows(blockID string, ev SubagentEvent, width int, ct
 	return rows
 }
 
-func approvalReviewPrefix(display transcript.ApprovalReviewDisplay, ctx BlockRenderContext) (string, string) {
-	status := strings.TrimSpace(display.Status)
-	plain := "• Auto approval ·"
-	styled := ctx.Theme.ToolStyle().Render("•") + " " + ctx.Theme.TranscriptMetaStyle().Render("Auto approval ·")
-	if status != "" {
-		plain += " " + status
-		styled += " " + approvalReviewStatusStyle(ctx, status).Render(status)
-	}
-	meta := make([]string, 0, 2)
-	if risk := strings.TrimSpace(display.Risk); risk != "" {
-		meta = append(meta, "risk: "+risk)
-	}
-	if authorization := strings.TrimSpace(display.Authorization); authorization != "" {
-		meta = append(meta, "authorization: "+authorization)
-	}
-	if len(meta) == 0 {
-		return plain, styled
-	}
-	plain += " (" + strings.Join(meta, ", ") + ")"
-	styled += ctx.Theme.TranscriptMetaStyle().Render(" (")
-	if risk := strings.TrimSpace(display.Risk); risk != "" {
-		styled += ctx.Theme.TranscriptMetaStyle().Render("risk: ") + approvalReviewValueStyle(ctx, risk).Render(risk)
-		if strings.TrimSpace(display.Authorization) != "" {
-			styled += ctx.Theme.TranscriptMetaStyle().Render(", ")
-		}
-	}
-	if authorization := strings.TrimSpace(display.Authorization); authorization != "" {
-		styled += ctx.Theme.TranscriptMetaStyle().Render("authorization: ") + approvalReviewValueStyle(ctx, authorization).Render(authorization)
-	}
-	styled += ctx.Theme.TranscriptMetaStyle().Render(")")
-	return plain, styled
-}
-
 func approvalReviewStatusStyle(ctx BlockRenderContext, status string) lipgloss.Style {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "approved":
@@ -1287,21 +1260,6 @@ func approvalReviewStatusStyle(ctx BlockRenderContext, status string) lipgloss.S
 		return ctx.Theme.WarnStyle().Bold(true)
 	default:
 		return ctx.Theme.TranscriptLabelStyle()
-	}
-}
-
-func approvalReviewValueStyle(ctx BlockRenderContext, value string) lipgloss.Style {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "low":
-		return lipgloss.NewStyle().Foreground(ctx.Theme.Success)
-	case "medium":
-		return lipgloss.NewStyle().Foreground(ctx.Theme.Accent).Bold(true)
-	case "high":
-		return lipgloss.NewStyle().Foreground(ctx.Theme.Warning).Bold(true)
-	case "critical":
-		return ctx.Theme.ErrorStyle().Bold(true)
-	default:
-		return ctx.Theme.TranscriptMetaStyle()
 	}
 }
 

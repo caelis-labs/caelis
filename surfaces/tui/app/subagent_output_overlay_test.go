@@ -268,7 +268,7 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 		}
 		plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
 		toolAt := strings.Index(plain, "ps aux | head -5")
-		reviewAt := strings.Index(plain, "Auto approval · denied")
+		reviewAt := strings.Index(plain, " denied")
 		if toolAt < 0 || reviewAt <= toolAt {
 			t.Fatalf("approval review did not render after its child tool:\n%s", plain)
 		}

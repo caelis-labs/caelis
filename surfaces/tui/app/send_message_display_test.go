@@ -72,7 +72,8 @@ func TestSendMessageToolAppearsAfterSuccessAndOpensOverlay(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "message-1", Status: &completed,
-			RawOutput: map[string]any{"accepted": true}, Meta: acpToolNameMeta("SendMessage"),
+			RawOutput: map[string]any{"id": "mail-1", "from": "parent", "to": "ziva", "message": message},
+			Content:   []eventstream.ToolCallContent{{Type: "content", Content: eventstream.TextContent{Type: "text", Text: `{"id":"mail-1","from":"parent","to":"ziva","message":"receipt-must-not-render"}`}}}, Meta: acpToolNameMeta("SendMessage"),
 		},
 	})
 
@@ -88,7 +89,7 @@ func TestSendMessageToolAppearsAfterSuccessAndOpensOverlay(t *testing.T) {
 		t.Fatalf("semantic SendMessage header missing: %#v", model.viewportPlainLines)
 	}
 	plain := strings.Join(model.viewportPlainLines, "\n")
-	if strings.Contains(plain, `Ran SendMessage`) || strings.Contains(plain, `"message"`) || strings.Contains(plain, "middle-marker") {
+	if strings.Contains(plain, `Ran SendMessage`) || strings.Contains(plain, `"message"`) || strings.Contains(plain, "middle-marker") || strings.Contains(plain, "receipt-must-not-render") {
 		t.Fatalf("collapsed SendMessage leaked raw/full input:\n%s", plain)
 	}
 	if token := model.viewportClickTokens[headerLine]; token != agentMessageTargetOverlayClickToken("message-1") {

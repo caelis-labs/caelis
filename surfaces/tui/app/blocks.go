@@ -668,7 +668,16 @@ func visibleNarrativeEvents(events []SubagentEvent, status string) []SubagentEve
 	}
 	hidePlan := strings.EqualFold(strings.TrimSpace(status), "waiting_approval") && hasApprovalEvent(events)
 	out := make([]SubagentEvent, 0, len(events))
+	reviews := make(map[string]string)
+	for _, ev := range events {
+		if ev.Kind == SEApproval && ev.CallID != "" {
+			reviews[ev.CallID] = firstNonEmpty(ev.ApprovalStatus, "reviewed")
+		}
+	}
 	for i, ev := range events {
+		if ev.Kind == SEToolCall {
+			ev.ApprovalStatus = reviews[ev.CallID]
+		}
 		// Defense for replayed or legacy snapshots that may already contain a
 		// whitespace-only narrative event. New live streams are guarded by
 		// narrativeStreamState before events are appended.
