@@ -21,8 +21,10 @@ const (
 // AgentConfig is one pure ACP agent declaration resolved by the app layer.
 // Runtime code consumes these values to build concrete registries and managers.
 type AgentConfig struct {
-	Name        string
-	Description string
+	// BuiltinRuntime is bound by Host assembly, never external ACP metadata.
+	BuiltinRuntime bool
+	Name           string
+	Description    string
 	// SystemSceneID marks a Host-owned scene without overloading the child
 	// process environment.
 	SystemSceneID string

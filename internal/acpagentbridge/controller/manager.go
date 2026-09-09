@@ -1202,16 +1202,21 @@ func (r *controllerRun) permissionHandler(ctx context.Context, req client.Reques
 		return acputil.RejectOnce(), nil
 	}
 	r.mu.Lock()
+	remoteID := r.remoteSessionID
 	activeSession := session.CloneSession(r.turnSession)
 	mode := strings.TrimSpace(r.turnMode)
 	requester := r.approvalRequester
 	agent := strings.TrimSpace(r.agent)
 	r.mu.Unlock()
+	if remoteID != "" && string(req.SessionId) != remoteID {
+		return client.RequestPermissionResponse{}, fmt.Errorf("ACP permission Session does not match bound endpoint")
+	}
 	if requester != nil {
 		approvalReq, err := translateApprovalRequest(activeSession, agent, mode, req)
 		if err != nil {
 			return client.RequestPermissionResponse{}, err
 		}
+		approvalReq.EndpointSessionID = remoteID
 		resp, err := requester.RequestControllerApproval(ctx, approvalReq)
 		if err != nil {
 			return client.RequestPermissionResponse{}, err
@@ -1231,11 +1236,13 @@ func translateApprovalRequest(
 ) (controller.ApprovalRequest, error) {
 	wire, err := acpingress.PermissionRequest(req)
 	if err != nil {
-		return controller.ApprovalRequest{}, err
+		return controller.ApprovalRequest{
+			EndpointSessionID: string(req.SessionId)}, err
 	}
 	approval, err := acppermission.DecodePermissionRequest(wire)
 	if err != nil {
-		return controller.ApprovalRequest{}, err
+		return controller.ApprovalRequest{
+			EndpointSessionID: string(req.SessionId)}, err
 	}
 	options := make([]controller.ApprovalOption, 0, len(approval.Options))
 	for _, item := range approval.Options {
@@ -1250,10 +1257,11 @@ func translateApprovalRequest(
 		toolName = acputil.ToolCallName(req.ToolCall)
 	}
 	return controller.ApprovalRequest{
-		SessionRef: session.NormalizeSessionRef(turnSession.SessionRef),
-		Session:    session.CloneSession(turnSession),
-		Agent:      strings.TrimSpace(agent),
-		Mode:       strings.TrimSpace(mode),
+		EndpointSessionID: string(req.SessionId),
+		SessionRef:        session.NormalizeSessionRef(turnSession.SessionRef),
+		Session:           session.CloneSession(turnSession),
+		Agent:             strings.TrimSpace(agent),
+		Mode:              strings.TrimSpace(mode),
 		ToolCall: controller.ApprovalToolCall{
 			ID:        strings.TrimSpace(approval.ToolCall.ID),
 			Name:      toolName,
@@ -1725,16 +1733,21 @@ func (r *participantRun) permissionHandler(ctx context.Context, req client.Reque
 		return acputil.RejectOnce(), nil
 	}
 	r.mu.Lock()
+	remoteID := r.remoteSessionID
 	activeSession := session.CloneSession(r.turnSession)
 	mode := strings.TrimSpace(r.turnMode)
 	requester := r.approvalRequester
 	agent := strings.TrimSpace(r.agent)
 	r.mu.Unlock()
+	if remoteID != "" && string(req.SessionId) != remoteID {
+		return client.RequestPermissionResponse{}, fmt.Errorf("ACP permission Session does not match bound endpoint")
+	}
 	if requester != nil {
 		approvalReq, err := translateApprovalRequest(activeSession, agent, mode, req)
 		if err != nil {
 			return client.RequestPermissionResponse{}, err
 		}
+		approvalReq.EndpointSessionID = remoteID
 		resp, err := requester.RequestControllerApproval(ctx, approvalReq)
 		if err != nil {
 			return client.RequestPermissionResponse{}, err

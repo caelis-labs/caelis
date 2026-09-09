@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
@@ -14,6 +15,7 @@ import (
 // pendingApproval belongs to one Session-scoped Control approval plane. owner
 // supplies origin and live Turn publication only; it does not own the FIFO.
 type pendingApproval struct {
+	reviewCancel      context.CancelFunc
 	id                eventstream.ApprovalRequestID
 	decisions         chan ApprovalDecision
 	done              chan struct{}
@@ -61,6 +63,10 @@ func newApprovalCoordinator(ref session.SessionRef) *approvalCoordinator {
 func (c *approvalCoordinator) enqueue(owner *turnHandle, req *agent.ApprovalRequest, publishOnActivate bool) (*pendingApproval, error) {
 	if c == nil {
 		return nil, approvalUnavailableError()
+	}
+	if req != nil {
+		snapshot := approval.CloneRuntimeRequest(*req)
+		req = &snapshot
 	}
 	detached := detachedApprovalRequest(req)
 	if owner != nil && owner.isTerminal() && !detached {
@@ -532,4 +538,27 @@ func (h *turnHandle) releasePendingApproval(pending *pendingApproval, state stri
 
 func (h *turnHandle) publishApproval(req *agent.ApprovalRequest) (*pendingApproval, error) {
 	return h.enqueueApproval(req, true)
+}
+
+// invalidateAutoReviews serializes steering with approval settlement. A decision
+// already settled precedes steering; pending automatic reviews cannot authorize
+// execution using the previous user intent, including detached child reviews.
+func (c *approvalCoordinator) invalidateAutoReviews() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, pending := range append([]*pendingApproval(nil), c.queue...) {
+		if pending.publishOnActivate || c.pending[pending.id] != pending {
+			continue
+		}
+		if pending.reviewCancel != nil {
+			pending.reviewCancel()
+		}
+		_ = c.settleLocked(pending, "cancelled")
+		c.removeLocked(pending, "cancelled")
+		close(pending.done)
+	}
+	c.activateNextLocked()
 }

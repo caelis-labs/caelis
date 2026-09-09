@@ -17,11 +17,9 @@ import (
 const guardianMaxAssessmentBytes = 8 * 1024
 
 type guardianReviewModelOutput struct {
-	RiskLevel         string `json:"risk_level"`
-	UserAuthorization string `json:"user_authorization"`
-	Outcome           string `json:"outcome"`
-	OptionID          string `json:"option_id"`
-	Rationale         string `json:"rationale"`
+	Outcome   string `json:"-"`
+	OptionID  string `json:"option_id"`
+	Rationale string `json:"rationale"`
 }
 
 // parseGuardianAssessmentForMode separates provider-envelope compatibility
@@ -149,16 +147,24 @@ func decodeGuardianAssessmentCandidate(candidate string, options []kernel.Approv
 		}
 		return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer returned trailing content: %w", err)
 	}
-	return normalizeGuardianAssessment(parsed, options)
+	parsed, err := normalizeGuardianAssessment(parsed, options)
+	if err != nil {
+		return guardianReviewModelOutput{}, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(candidate), &fields); err != nil {
+		return guardianReviewModelOutput{}, err
+	}
+	if _, present := fields["rationale"]; present && parsed.Outcome == "allow" {
+		return guardianReviewModelOutput{}, fmt.Errorf("allow must omit rationale")
+	}
+	return parsed, nil
 }
 
 func validateGuardianAssessmentObjectKeys(candidate string) error {
 	allowed := map[string]struct{}{
-		"option_id":          {},
-		"risk_level":         {},
-		"user_authorization": {},
-		"outcome":            {},
-		"rationale":          {},
+		"option_id": {},
+		"rationale": {},
 	}
 	decoder := json.NewDecoder(strings.NewReader(candidate))
 	opening, err := decoder.Token()
@@ -200,62 +206,20 @@ func validateGuardianAssessmentObjectKeys(candidate string) error {
 	return nil
 }
 
-func finalizeGuardianDecision(
-	payload *kernel.ApprovalPayload,
-	parsed guardianReviewModelOutput,
-) (kernel.ApprovalReviewResult, error) {
-	approved := parsed.Outcome == "allow"
-	optionID := strings.TrimSpace(parsed.OptionID)
-	outcome := approvalOutcome(approved)
-	if payload != nil && len(payload.Options) > 0 {
-		_, optionDecision, err := approval.ResolveStrictOption(payload.Options, optionID)
-		if err != nil {
-			return kernel.ApprovalReviewResult{}, err
-		}
-		if (optionDecision == approval.OptionDecisionAllow) != approved {
-			return kernel.ApprovalReviewResult{}, fmt.Errorf("approval reviewer option %q does not match outcome %q", optionID, parsed.Outcome)
-		}
-		outcome = string(kernel.ApprovalStatusSelected)
-	} else if optionID != "" {
-		return kernel.ApprovalReviewResult{}, fmt.Errorf("approval reviewer returned option_id %q without approval options", optionID)
+func finalizeGuardianDecision(payload *kernel.ApprovalPayload, parsed guardianReviewModelOutput) (kernel.ApprovalReviewResult, error) {
+	if payload == nil {
+		return kernel.ApprovalReviewResult{}, fmt.Errorf("missing approval")
 	}
-	risk := normalizeReviewLabel(parsed.RiskLevel, "unknown")
-	authorization := normalizeAuthorizationLabel(parsed.UserAuthorization, "unknown")
-	rationale := firstNonEmpty(parsed.Rationale, "approval reviewer returned no rationale")
-	result := kernel.ApprovalReviewResult{
-		Approved:       approved,
-		Outcome:        outcome,
-		Risk:           risk,
-		Authorization:  authorization,
-		OptionID:       optionID,
-		Rationale:      rationale,
-		DecisionSource: "auto-review",
+	_, decision, err := approval.ResolveStrictOption(payload.Options, parsed.OptionID)
+	if err != nil {
+		return kernel.ApprovalReviewResult{}, err
 	}
-	result.DisplayText = kernel.FormatApprovalReviewText(result.Approved, result.Risk, result.Authorization, result.Rationale)
-	return result, nil
-}
-
-func guardianDeterministicDenial(payload *kernel.ApprovalPayload, rationale string) kernel.ApprovalReviewResult {
-	result := kernel.ApprovalReviewResult{
-		Approved:       false,
-		Outcome:        string(kernel.ApprovalStatusRejected),
-		Risk:           "unknown",
-		Authorization:  "unknown",
-		Rationale:      strings.TrimSpace(rationale),
-		DecisionSource: "auto-review",
+	approved := decision == approval.OptionDecisionAllow
+	display := "approved"
+	if !approved {
+		display = "denied: " + parsed.Rationale
 	}
-	if payload != nil && len(payload.Options) > 0 {
-		if optionID, ok, err := approval.StrictOptionIDForDecision(payload.Options, approval.OptionDecisionDeny); err == nil && ok {
-			result.OptionID = optionID
-			result.Outcome = string(kernel.ApprovalStatusSelected)
-		}
-	}
-	result.DisplayText = kernel.FormatApprovalReviewText(false, result.Risk, result.Authorization, result.Rationale)
-	return result
-}
-
-func parseGuardianAssessment(text string) (guardianReviewModelOutput, error) {
-	return parseGuardianAssessmentForMode(text, model.OutputModeSchema, nil)
+	return kernel.ApprovalReviewResult{Approved: approved, Outcome: string(kernel.ApprovalStatusSelected), OptionID: parsed.OptionID, Rationale: parsed.Rationale, DisplayText: display, DecisionSource: "auto-review"}, nil
 }
 
 func parseGuardianAssessmentWithOptions(text string, options []kernel.ApprovalOption) (guardianReviewModelOutput, error) {
@@ -263,132 +227,17 @@ func parseGuardianAssessmentWithOptions(text string, options []kernel.ApprovalOp
 }
 
 func normalizeGuardianAssessment(parsed guardianReviewModelOutput, options []kernel.ApprovalOption) (guardianReviewModelOutput, error) {
-	hasOptions := len(options) > 0
-	if hasOptions {
-		if strings.TrimSpace(parsed.OptionID) == "" ||
-			strings.TrimSpace(parsed.RiskLevel) == "" ||
-			strings.TrimSpace(parsed.UserAuthorization) == "" ||
-			strings.TrimSpace(parsed.Outcome) == "" ||
-			strings.TrimSpace(parsed.Rationale) == "" {
-			return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer must return option_id, risk_level, user_authorization, outcome, and rationale when options are present")
-		}
-	} else if strings.TrimSpace(parsed.OptionID) != "" {
-		return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer returned option_id without approval options")
+	_, decision, err := approval.ResolveStrictOption(options, parsed.OptionID)
+	if err != nil {
+		return guardianReviewModelOutput{}, err
 	}
-
-	outcome := strings.ToLower(strings.TrimSpace(parsed.Outcome))
-	switch outcome {
-	case "allow", "deny":
-		parsed.Outcome = outcome
-	default:
-		return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer returned unsupported outcome %q", parsed.Outcome)
+	parsed.Outcome = string(decision)
+	parsed.Rationale = strings.TrimSpace(parsed.Rationale)
+	if decision == approval.OptionDecisionAllow && parsed.Rationale != "" {
+		return guardianReviewModelOutput{}, fmt.Errorf("allow must not include rationale")
 	}
-
-	risk := strings.TrimSpace(parsed.RiskLevel)
-	if risk == "" {
-		if outcome == "allow" {
-			parsed.RiskLevel = "low"
-		} else {
-			parsed.RiskLevel = "high"
-		}
-	} else if normalized, ok := canonicalGuardianRiskLabel(risk); ok {
-		parsed.RiskLevel = normalized
-	} else {
-		return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer returned unsupported risk_level %q", parsed.RiskLevel)
+	if decision == approval.OptionDecisionDeny && parsed.Rationale == "" {
+		return guardianReviewModelOutput{}, fmt.Errorf("deny requires a specific rationale")
 	}
-
-	authorization := strings.TrimSpace(parsed.UserAuthorization)
-	if authorization == "" {
-		parsed.UserAuthorization = "unknown"
-	} else if normalized, ok := canonicalGuardianAuthorizationLabel(authorization); ok {
-		parsed.UserAuthorization = normalized
-	} else {
-		return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer returned unsupported user_authorization %q", parsed.UserAuthorization)
-	}
-
-	if strings.TrimSpace(parsed.Rationale) == "" {
-		if outcome == "allow" {
-			if parsed.RiskLevel == "low" {
-				parsed.Rationale = "Auto-review returned a low-risk allow decision."
-			} else {
-				parsed.Rationale = "Auto-review returned an allow decision without a rationale."
-			}
-		} else {
-			parsed.Rationale = "Auto-review returned a deny decision without a rationale."
-		}
-	} else {
-		parsed.Rationale = strings.TrimSpace(parsed.Rationale)
-	}
-	parsed.OptionID = strings.TrimSpace(parsed.OptionID)
-	if hasOptions {
-		_, optionDecision, err := approval.ResolveStrictOption(options, parsed.OptionID)
-		if err != nil {
-			return guardianReviewModelOutput{}, err
-		}
-		if (optionDecision == approval.OptionDecisionAllow) != (parsed.Outcome == "allow") {
-			return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer option %q does not match outcome %q", parsed.OptionID, parsed.Outcome)
-		}
-	}
-	if parsed.RiskLevel == "critical" && parsed.Outcome == "allow" {
-		return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer cannot allow a critical-risk action")
-	}
-
 	return parsed, nil
-}
-
-func canonicalGuardianRiskLabel(value string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "low":
-		return "low", true
-	case "medium":
-		return "medium", true
-	case "high":
-		return "high", true
-	case "critical":
-		return "critical", true
-	default:
-		return "", false
-	}
-}
-
-func canonicalGuardianAuthorizationLabel(value string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "unknown":
-		return "unknown", true
-	case "low":
-		return "low", true
-	case "medium":
-		return "medium", true
-	case "high":
-		return "high", true
-	default:
-		return "", false
-	}
-}
-
-func approvalOutcome(approved bool) string {
-	if approved {
-		return string(kernel.ApprovalStatusApproved)
-	}
-	return string(kernel.ApprovalStatusRejected)
-}
-
-func normalizeReviewLabel(value string, fallback string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	switch value {
-	case "low", "medium", "high", "critical", "unknown":
-		return value
-	default:
-		return strings.TrimSpace(fallback)
-	}
-}
-
-func normalizeAuthorizationLabel(value string, fallback string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	switch value {
-	case "low", "medium", "high", "unknown":
-		return value
-	default:
-		return strings.TrimSpace(fallback)
-	}
 }

@@ -84,6 +84,7 @@ func configuredSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
 	// base environment. When a child bridge is available, authentication is
 	// supplied explicitly through the protected token-file argument above.
 	return assembly.AgentConfig{
+		BuiltinRuntime: true,
 		Name:           "self",
 		Description:    "Caelis self ACP agent",
 		Command:        executable,

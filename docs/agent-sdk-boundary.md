@@ -187,3 +187,46 @@ remains typed, and only Control can transfer ownership.
 Consumer setup and package layout live in
 [`agent-sdk/README.md`](../agent-sdk/README.md). Projection rules live in
 [ACP Projection Contract](acp-projection-architecture.md).
+
+### Guardian evidence and context
+
+Control assembles Guardian as a private tool-capable approval Agent. Each review
+includes the exact action, request options, reason, and Runtime-bound producer
+origin. Main/subagent role and built-in/external endpoint are independent;
+parent Session history does not represent a child's private execution history.
+Guardian selects an exact supplied option. Allow responses contain `option_id`;
+denials also contain a rationale. Execution failures are not policy denials.
+
+Guardian retains its validated dialogue in process memory. User-source messages
+remain chronological, including steering, and have a separate budget. Long user
+messages are mechanically folded in the middle before older messages are
+removed. Each new approval adds up to three newly observed tool calls with
+bounded arguments and source IDs, without success or failure result bodies.
+Already observed calls do not roll into subsequent approvals. The approval,
+optional evidence tools and decision form one complete Guardian Turn.
+
+Instructions, tools, output schema and the local Session JSONL address stay
+fixed between reviews. Below budget the dialogue only appends. At the budget
+threshold Guardian removes whole oldest turns to leave headroom, retaining user
+messages independently. It never asks a model to summarize this dialogue and
+never imports the main Agent's compact summary. Parallel approvals share a
+pinned prefix and join in model-call order. Steering invalidates pending
+automatic approvals before their settlement.
+
+Additional retrieval is optional and is appropriate only when the supplied
+context cannot support an accurate decision. Read, Grep and synchronous local
+scripts can inspect the live canonical JSONL; there is no derived history tree
+or additional main-Agent recall injection. The address identifies a live log,
+not an immutable snapshot; readers must tolerate an incomplete final append.
+
+Evidence commands use a private temporary write directory and read-only access
+to other directories. Network policy is inherited from the main Agent. macOS
+uses Seatbelt and Linux uses Bubblewrap; unavailable isolation fails the query
+without falling back to Host execution. Queries, output, provider attempts and
+review duration are bounded. Each complete assessment attempt has a three-minute
+budget, shared by its model and evidence calls. A format-validation retry gets a
+fresh three-minute budget; caller cancellation and cumulative resource limits
+still apply. Guardian stops gathering evidence as soon as the supplied facts
+support its decision. Simple decisions do not start a query sandbox.
+Guardian tool transcripts stay private; provider usage receipts retain the
+existing parent-Session accounting and producer-drain contract.

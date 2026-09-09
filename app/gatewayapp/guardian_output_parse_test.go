@@ -11,7 +11,7 @@ import (
 func TestParseGuardianAssessmentForModeEnvelopePolicy(t *testing.T) {
 	t.Parallel()
 
-	valid := `{"outcome":"allow","risk_level":"low","user_authorization":"high","rationale":"bounded inspection"}`
+	valid := `{"option_id":"allow_once"}`
 	tests := []struct {
 		name    string
 		mode    model.OutputMode
@@ -31,7 +31,7 @@ func TestParseGuardianAssessmentForModeEnvelopePolicy(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			parsed, err := parseGuardianAssessmentForMode(test.input, test.mode, nil)
+			parsed, err := parseGuardianAssessmentForMode(test.input, test.mode, []kernel.ApprovalOption{{ID: "allow_once", Kind: "allow_once"}})
 			if test.wantErr {
 				if err == nil {
 					t.Fatalf("parseGuardianAssessmentForMode() = %#v, nil; want error", parsed)
@@ -41,7 +41,7 @@ func TestParseGuardianAssessmentForModeEnvelopePolicy(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseGuardianAssessmentForMode() error = %v", err)
 			}
-			if parsed.Outcome != "allow" || parsed.RiskLevel != "low" {
+			if parsed.OptionID != "allow_once" {
 				t.Fatalf("parsed = %#v, want low-risk allow", parsed)
 			}
 		})
@@ -104,7 +104,7 @@ func TestParseGuardianAssessmentForModePreservesStrictDecisionValidation(t *test
 		{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
 		{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
 	}
-	valid := `{"option_id":"allow_once","risk_level":"medium","user_authorization":"high","outcome":"allow","rationale":"bounded action"}`
+	valid := `{"option_id":"allow_once"}`
 	parsed, err := parseGuardianAssessmentForMode("Decision:\n```json\n"+valid+"\n```", model.OutputModeText, options)
 	if err != nil {
 		t.Fatalf("parseGuardianAssessmentForMode(valid) error = %v", err)
@@ -114,12 +114,12 @@ func TestParseGuardianAssessmentForModePreservesStrictDecisionValidation(t *test
 	}
 
 	longRationale := strings.Repeat("material approval reason ", 32)
-	longAssessment := `{"option_id":"allow_once","risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"` + longRationale + `"}`
+	longAssessment := `{"option_id":"reject_once","rationale":"` + longRationale + `"}`
 	parsed, err = parseGuardianAssessmentForMode("Result: "+longAssessment, model.OutputModeText, options)
 	if err != nil {
 		t.Fatalf("parseGuardianAssessmentForMode(long rationale) error = %v", err)
 	}
-	if parsed.Outcome != "allow" || parsed.Rationale != strings.TrimSpace(longRationale) {
+	if parsed.Outcome != "deny" || parsed.Rationale != strings.TrimSpace(longRationale) {
 		t.Fatalf("long-rationale assessment = %#v, want preserved allow decision", parsed)
 	}
 
@@ -157,5 +157,14 @@ func TestParseGuardianAssessmentForModeRejectsUnsupportedMode(t *testing.T) {
 	_, err := parseGuardianAssessmentForMode(`{"outcome":"allow"}`, model.OutputMode("binary"), nil)
 	if err == nil || !strings.Contains(err.Error(), "unsupported output mode") {
 		t.Fatalf("parseGuardianAssessmentForMode() error = %v, want unsupported mode", err)
+	}
+}
+
+func TestGuardianOptionOnlyDecisionRejectsSpuriousAllowRationale(t *testing.T) {
+	for _, text := range []string{`{"option_id":"allow_once","rationale":""}`, `{"option_id":"allow_once","rationale":null}`, `{"option_id":"reject_once"}`} {
+		_, err := parseGuardianAssessmentForMode(text, model.OutputModeSchema, []kernel.ApprovalOption{{ID: "allow_once", Kind: "allow_once"}, {ID: "reject_once", Kind: "reject_once"}})
+		if err == nil {
+			t.Fatalf("accepted invalid decision %s", text)
+		}
 	}
 }

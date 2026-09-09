@@ -15,7 +15,7 @@ type guardianCleanupBarrierModel struct{ started, cancelled, release chan struct
 
 func (*guardianCleanupBarrierModel) Name() string { return "guardian-drain" }
 func (*guardianCleanupBarrierModel) Capabilities() model.Capabilities {
-	return model.Capabilities{Streaming: true}
+	return model.Capabilities{ToolCalls: true, Streaming: true}
 }
 func (m *guardianCleanupBarrierModel) Generate(ctx context.Context, _ *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {

@@ -7,17 +7,22 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 const guardianAssessmentMaxAttempts = 3
+const guardianReviewAttemptTimeout = 3 * time.Minute
 
 type guardianApprovalReviewer struct {
+	queryNetwork  sandbox.Network
 	sessions      session.Service
 	systemAgents  systemManagedAgentRunner
 	conversations *guardianConversationManager
@@ -32,8 +37,7 @@ type approvalReviewAccounting struct {
 }
 
 // newModelApprovalReviewer keeps the historical constructor name used by local
-// stack setup and tests while the concrete implementation is now a no-tool
-// guardian agent.
+// stack setup and tests. The implementation is a tool-capable Guardian agent.
 func newModelApprovalReviewer(sessions ...session.Service) kernel.ApprovalReviewer {
 	var service session.Service
 	if len(sessions) > 0 {
@@ -77,8 +81,8 @@ func (r *guardianApprovalReviewer) Decide(ctx context.Context, req kernel.Approv
 	}
 	if req.Approval != nil && len(req.Approval.Options) > 0 {
 		if err := approval.ValidateStrictOptions(req.Approval.Options); err != nil {
-			// Strict validation failure is a resolved deterministic denial.
-			return guardianDeterministicDenial(req.Approval, "automatic approval review denied malformed approval options: "+err.Error()), nil
+			// Invalid input is a review failure, not a policy decision.
+			return kernel.ApprovalReviewResult{}, fmt.Errorf("invalid approval options: %w", err)
 		}
 	}
 	attempts := &guardianInvocationCollector{}
@@ -100,7 +104,7 @@ func (r *guardianApprovalReviewer) Decide(ctx context.Context, req kernel.Approv
 		return kernel.ApprovalReviewResult{}, err
 	}
 	if promptItems.MandatoryInputTooLarge {
-		return guardianDeterministicDenial(req.Approval, "automatic approval review denied because the exact approval request exceeds the Guardian model input budget; narrow the action"), nil
+		return kernel.ApprovalReviewResult{}, fmt.Errorf("exact approval request exceeds Guardian input budget")
 	}
 	// Compatibility for injected legacy runners that do not emit receipts. Drop
 	// this fallback when every supported system-agent runner uses model.Generate.
@@ -177,7 +181,13 @@ func approvalInvocationFromEvent(event *session.Event) *session.EventInvocation 
 func (r *guardianApprovalReviewer) runGuardianReview(
 	ctx context.Context,
 	req kernel.ApprovalReviewRequest,
-) (guardianPromptItems, *session.Event, *session.Event, guardianReviewModelOutput, error) {
+) (items guardianPromptItems, prompt *session.Event, assistant *session.Event, assessment guardianReviewModelOutput, reviewErr error) {
+	queries := &guardianQueries{network: r.queryNetwork, model: req.Model}
+	baseCtx := model.WithInvocationAdmission(ctx, queries.admit)
+	ctx, cancel := context.WithTimeout(baseCtx, guardianReviewAttemptTimeout)
+	defer cancel()
+	defer func() { reviewErr = errors.Join(reviewErr, queries.close()) }()
+	path := guardianHistoryPath(ctx, r.sessions, req.SessionRef)
 	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
 	if err != nil {
 		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
@@ -194,69 +204,17 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 	if err != nil {
 		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
 	}
-	parentEvents = conversation.ParentEvents
-	parentCompact := guardianParentCompactIdentityFromEvents(parentEvents)
-	promptMode, err := guardianPromptModeForConversation(conversation, parentCompact)
-	if err != nil {
-		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
-	}
 	outputSpec, err := guardianOutputSpecForModel(req.Model, req.Approval)
 	if err != nil {
 		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
 	}
+	turnKey := fmt.Sprintf("%d:%s", conversation.Version, req.ReviewID)
+	windowReq := req
+	windowReq.ReviewID = turnKey
 	compactionCfg := guardianCompactionConfig(req.Model, outputSpec)
-	historyEvents := conversation.Events
-	if !promptMode.Delta {
-		historyEvents = nil
-	}
-	promptItems, err := buildGuardianPromptItemsWithinBudget(parentEvents, promptMode, req, guardianPromptBudget{
-		Model:         req.Model,
-		HistoryEvents: historyEvents,
-		Output:        outputSpec,
-		Compaction:    compactionCfg,
-	})
+	historyEvents, promptItems, err := guardianWindow(conversation, windowReq, outputSpec)
 	if err != nil {
 		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
-	}
-	if promptItems.HistoryNeedsCompaction {
-		compacted, compactErr := r.compactGuardianHistory(ctx, req.Model, activeSession, historyEvents, compactionCfg)
-		if compactErr != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, ctxErr
-			}
-			// Compaction is an optimization of process-local history, not approval
-			// authority. If its transient staging/model step fails, cold-rebase from
-			// the authoritative parent projection and still ask Guardian to decide.
-			compacted = systemManagedAgentCompactResult{}
-		}
-		if compacted.Compacted && len(compacted.Events) > 0 {
-			historyEvents = compacted.Events
-			promptItems, err = buildGuardianPromptItemsWithinBudget(parentEvents, promptMode, req, guardianPromptBudget{
-				Model:         req.Model,
-				HistoryEvents: historyEvents,
-				Output:        outputSpec,
-				Compaction:    compactionCfg,
-			})
-			if err != nil {
-				return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
-			}
-		}
-		if !compacted.Compacted || promptItems.HistoryNeedsCompaction {
-			// A checkpoint that still consumes the request watermark cannot be
-			// compacted further without new dialogue. Start a new process-local
-			// Guardian epoch from the authoritative parent projection instead.
-			historyEvents = nil
-			promptMode.Delta = false
-			promptMode.Cursor = guardianParentCanonicalCursor{}
-			promptItems, err = buildGuardianPromptItemsWithinBudget(parentEvents, promptMode, req, guardianPromptBudget{
-				Model:      req.Model,
-				Output:     outputSpec,
-				Compaction: compactionCfg,
-			})
-			if err != nil {
-				return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
-			}
-		}
 	}
 	if promptItems.MandatoryInputTooLarge {
 		return promptItems, nil, nil, guardianReviewModelOutput{}, nil
@@ -267,12 +225,28 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 	}
 	promptEvent := guardianUserEvent(activeSession, promptItems.Text)
 	annotateGuardianReviewEvent(promptEvent, req.ReviewID)
+	promptEvent.Meta[guardianCallKey] = guardianApprovalCallKey(req)
+	promptEvent.Meta[guardianPendingCallKey] = guardianCurrentSourceCall(conversation, req) == 0
 	var lastAssistantEvent *session.Event
 	var lastParseErr error
 	for attempt := 0; attempt < guardianAssessmentMaxAttempts; attempt++ {
-		runResult, err := r.runGuardianAgent(ctx, req.Model, activeSession, historyEvents, promptItems.Text, promptItems.UserEvidence, outputSpec, compactionCfg)
+		attemptCtx := ctx
+		releaseAttempt := func() {}
+		if attempt > 0 {
+			cancel()
+			attemptCtx, releaseAttempt = context.WithTimeout(baseCtx, guardianReviewAttemptTimeout)
+		}
+		attemptHistory := historyEvents
+		if lastParseErr != nil {
+			attemptHistory = append(session.CloneEvents(historyEvents), guardianEvidenceEvent("The previous response could not be used: "+lastParseErr.Error()+". Return only option_id for an allow option; include a nonempty rationale only for a reject option. Choose from this request's options."))
+		}
+		runResult, err := r.runGuardianAgent(attemptCtx, req.Model, activeSession, attemptHistory, promptItems.Text, promptItems.UserEvidence, outputSpec, compactionCfg, guardianQueryContext{queries, path})
+		releaseAttempt()
 		if err != nil {
 			return promptItems, promptEvent, runResult.AssistantEvent, guardianReviewModelOutput{}, err
+		}
+		if queries.failure != nil {
+			return promptItems, promptEvent, runResult.AssistantEvent, guardianReviewModelOutput{}, queries.failure
 		}
 		lastAssistantEvent = runResult.AssistantEvent
 		parsed, err := parseGuardianAssessmentForMode(runResult.Text, outputSpec.Mode, options)
@@ -287,11 +261,12 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 			SessionID:       req.SessionRef.SessionID,
 			ExpectedVersion: conversation.Version,
 			Fork:            forkRef,
-			ParentCompact:   promptItems.ParentCompact,
 			ParentCursor:    promptItems.ParentCursor,
 			User:            promptEvent,
 			Assistant:       runResult.AssistantEvent,
 			ContextEvents:   runResult.ContextEvents,
+			PrefixEvents:    historyEvents,
+			TurnID:          turnKey,
 		})
 		if err != nil {
 			return promptItems, promptEvent, runResult.AssistantEvent, guardianReviewModelOutput{}, err
@@ -330,6 +305,7 @@ func (r *guardianApprovalReviewer) runGuardianAgent(
 	userEvidence []string,
 	output *model.OutputSpec,
 	compaction sdkruntime.CompactionConfig,
+	queryArgs ...guardianQueryContext,
 ) (systemManagedAgentRunResult, error) {
 	runner := r.systemAgents
 	if runner == nil {
@@ -339,17 +315,30 @@ func (r *guardianApprovalReviewer) runGuardianAgent(
 	if !ok {
 		return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: missing %q system-managed agent", guardianSceneID)
 	}
+	var tools []tool.Tool
+	instructions := ""
+	profile := spec.CapabilityProfile
+	if len(queryArgs) > 0 && queryArgs[0].queries != nil {
+		tools = queryArgs[0].queries.tools()
+		profile = systemManagedAgentCapabilityReadOnly
+		if queryArgs[0].path != "" {
+			instructions = "Available parent Session JSONL (approval context, not a child endpoint's private log): " + queryArgs[0].path
+		}
+	}
+
 	result, err := runner.Run(ctx, systemManagedAgentRunRequest{
-		AgentID:           spec.ID,
-		Purpose:           spec.Purpose,
-		Model:             model,
-		ParentSession:     guardianSession,
-		Events:            events,
-		Input:             input,
-		InputUserEvidence: userEvidence,
-		Output:            output,
-		Compaction:        compaction,
-		CapabilityProfile: spec.CapabilityProfile,
+		AgentID:            spec.ID,
+		Purpose:            spec.Purpose,
+		Model:              model,
+		ParentSession:      guardianSession,
+		Events:             events,
+		Input:              input,
+		InputUserEvidence:  userEvidence,
+		Output:             output,
+		Compaction:         compaction,
+		CapabilityProfile:  profile,
+		Tools:              tools,
+		PolicyInstructions: instructions,
 	})
 	if err != nil {
 		return result, err
@@ -358,31 +347,6 @@ func (r *guardianApprovalReviewer) runGuardianAgent(
 		return result, fmt.Errorf("approval reviewer returned no final assessment")
 	}
 	return result, nil
-}
-
-func (r *guardianApprovalReviewer) compactGuardianHistory(
-	ctx context.Context,
-	llm model.LLM,
-	parent session.Session,
-	events []*session.Event,
-	compaction sdkruntime.CompactionConfig,
-) (systemManagedAgentCompactResult, error) {
-	runner := r.systemAgents
-	if runner == nil {
-		runner = newSystemManagedAgentRuntime(nil)
-	}
-	compactor, ok := runner.(systemManagedAgentContextCompactor)
-	if !ok {
-		return systemManagedAgentCompactResult{}, nil
-	}
-	return compactor.CompactContext(ctx, systemManagedAgentCompactRequest{
-		AgentID:       guardianSceneID,
-		Purpose:       systemManagedAgentPurposeApprovalReview,
-		Model:         llm,
-		ParentSession: parent,
-		Events:        events,
-		Compaction:    compaction,
-	})
 }
 
 func guardianUserEvent(_ session.Session, text string) *session.Event {
@@ -424,3 +388,8 @@ func annotateGuardianReviewEvent(event *session.Event, reviewID string) {
 
 var _ kernel.ApprovalReviewer = (*guardianApprovalReviewer)(nil)
 var _ kernel.ApprovalApprover = (*guardianApprovalReviewer)(nil)
+
+type guardianQueryContext struct {
+	queries *guardianQueries
+	path    string
+}

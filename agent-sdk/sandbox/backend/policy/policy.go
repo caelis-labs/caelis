@@ -19,9 +19,10 @@ const (
 )
 
 type Policy struct {
-	Type          Type
-	NetworkAccess bool
-	WritableRoots []string
+	ResourceLimits *sandbox.ResourceLimits
+	Type           Type
+	NetworkAccess  bool
+	WritableRoots  []string
 	// GitProtectionRoots limits bounded metadata discovery to app-provided
 	// authorities rather than temporary and developer-cache write grants.
 	GitProtectionRoots []string
@@ -33,6 +34,12 @@ type Policy struct {
 }
 
 func Default(cfg sandbox.Config, constraints sandbox.Constraints) Policy {
+	if cfg.ResourceLimits != nil {
+		limits := *cfg.ResourceLimits
+		limits.WritePaths = append([]string(nil), limits.WritePaths...)
+		return Policy{Type: TypeWorkspaceWrite, ResourceLimits: &limits, NetworkAccess: limits.Network != sandbox.NetworkDisabled, WritableRoots: limits.WritePaths}
+	}
+
 	p := Policy{
 		Type:               TypeWorkspaceWrite,
 		NetworkAccess:      constraints.Network != sandbox.NetworkDisabled,

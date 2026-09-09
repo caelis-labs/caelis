@@ -238,6 +238,12 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		ClientInfo:       r.clientInfo,
 		OnUpdate:         func(env client.UpdateEnvelope) { r.handleUpdate(run, env) },
 		OnPermissionRequest: func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
+			run.mu.Lock()
+			boundID := run.anchor.SessionID
+			run.mu.Unlock()
+			if boundID == "" || boundID != string(req.SessionId) {
+				return client.RequestPermissionResponse{}, fmt.Errorf("ACP permission Session does not match bound child")
+			}
 			return r.permissionCallback(spawn, cfg, agentID)(ctx, req)
 		},
 	})
@@ -936,7 +942,12 @@ func translateApprovalRequest(
 			Kind: strings.TrimSpace(item.Kind),
 		})
 	}
+	endpoint := agent.ApprovalEndpointExternalACP
+	if cfg.BuiltinRuntime {
+		endpoint = agent.ApprovalEndpointBuiltin
+	}
 	return subagent.ApprovalRequest{
+		Origin:       agent.ApprovalOrigin{Role: agent.ApprovalRoleSubagent, Endpoint: endpoint, SessionID: string(req.SessionId), ParentSessionID: spawn.SessionRef.SessionID, TaskID: spawn.TaskID, ParentCallID: spawn.ParentCallID, ToolCallID: approval.ToolCall.ID, Agent: agentID},
 		SessionRef:   session.NormalizeSessionRef(spawn.SessionRef),
 		Session:      session.CloneSession(spawn.Session),
 		TaskID:       strings.TrimSpace(spawn.TaskID),

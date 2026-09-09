@@ -54,6 +54,18 @@ func (g *Gateway) resolveApprovalRequest(
 		return agent.ApprovalResponse{}, err
 	}
 	defer handle.releasePendingApproval(pending, "abandoned")
+	req = pending.request
+	if mode != ApprovalModeManual {
+		var cancel context.CancelFunc
+		approvalCtx, cancel = context.WithCancel(approvalCtx)
+		defer cancel()
+		handle.approvals.mu.Lock()
+		pending.reviewCancel = cancel
+		if handle.approvals.pending[pending.id] != pending {
+			cancel()
+		}
+		handle.approvals.mu.Unlock()
+	}
 
 	if mode != ApprovalModeManual {
 		select {
@@ -168,6 +180,9 @@ func (g *Gateway) resolveActiveAutoApproval(
 	} else {
 		result, err = approver.Decide(approvalCtx, reviewReq)
 	}
+	if err == nil && approvalCtx.Err() != nil {
+		err = approvalCtx.Err()
+	}
 	var reviewErrStatus ApprovalReviewStatus
 	if err != nil {
 		status, rationale, _ := approval.ReviewErrorOutcome(err)
@@ -176,8 +191,8 @@ func (g *Gateway) resolveActiveAutoApproval(
 		terminal.Status = ApprovalStatusRejected
 		terminal.ReviewStatus = reviewErrStatus
 		terminal.ReviewText = strings.TrimSpace(rationale)
-		terminal.Risk = "unknown"
-		terminal.Authorization = "unknown"
+		terminal.Risk = ""
+		terminal.Authorization = ""
 		terminal.DecisionSource = ""
 		handle.publishApprovalReviewPayload(req, terminal)
 		if turnCtx.Err() != nil {

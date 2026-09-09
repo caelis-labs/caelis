@@ -33,9 +33,8 @@ type systemManagedAgentCapabilityProfile string
 
 const (
 	systemManagedAgentCapabilityNone systemManagedAgentCapabilityProfile = "none"
-	// ReadOnly and Controller are reserved capability cuts for future
-	// system-managed agents. Guardian uses None so approval review cannot
-	// receive runtime tools.
+	// ReadOnly accepts owner-supplied evidence tools. Their sandbox enforces
+	// temporary-only writes; no main-agent tool registry is inherited.
 	systemManagedAgentCapabilityReadOnly   systemManagedAgentCapabilityProfile = "read_only"
 	systemManagedAgentCapabilityController systemManagedAgentCapabilityProfile = "controller"
 )
@@ -80,23 +79,6 @@ type systemManagedAgentRunResult struct {
 	Text           string
 }
 
-// systemManagedAgentCompactRequest asks the transient system-agent runner to
-// compact only its supplied process-local context. The staging Session used to
-// perform the compaction is discarded with the call.
-type systemManagedAgentCompactRequest struct {
-	AgentID       string
-	Purpose       systemManagedAgentPurpose
-	Model         model.LLM
-	ParentSession session.Session
-	Events        []*session.Event
-	Compaction    sdkruntime.CompactionConfig
-}
-
-type systemManagedAgentCompactResult struct {
-	Events    []*session.Event
-	Compacted bool
-}
-
 // systemManagedAgentRunPlan is the normalized runtime plan after applying the
 // agent spec defaults, purpose, capability profile, session projection, and
 // metadata used by the underlying Agent runtime.
@@ -119,10 +101,6 @@ type systemManagedAgentRunPlan struct {
 
 type systemManagedAgentRunner interface {
 	Run(context.Context, systemManagedAgentRunRequest) (systemManagedAgentRunResult, error)
-}
-
-type systemManagedAgentContextCompactor interface {
-	CompactContext(context.Context, systemManagedAgentCompactRequest) (systemManagedAgentCompactResult, error)
 }
 
 func boolPtr(value bool) *bool {
@@ -232,7 +210,12 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 			baselineSeq = event.Seq
 		}
 	}
+	var compactor compact.Engine
+	if plan.Purpose == systemManagedAgentPurposeApprovalReview {
+		compactor = guardianTurnCompactor{}
+	}
 	core, err := sdkruntime.New(sdkruntime.Config{
+		Compactor:             compactor,
 		Sessions:              staging,
 		AgentFactory:          config.AgentFactory,
 		Compaction:            plan.Compaction,
@@ -273,88 +256,6 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	}
 	defer run.Handle.Close()
 	return collectSystemManagedAgentResult(stagingCtx, staging, activeSession.SessionRef, baselineSeq, run.Handle)
-}
-
-// CompactContext performs one explicit compaction of a system agent's supplied
-// in-memory dialogue. It does not create or update any durable system-agent
-// Session; the returned Events are the only state that can leave the staging
-// store.
-func (r *systemManagedAgentRuntime) CompactContext(
-	ctx context.Context,
-	req systemManagedAgentCompactRequest,
-) (systemManagedAgentCompactResult, error) {
-	plan, err := systemManagedAgentRunPlanFor(systemManagedAgentRunRequest{
-		AgentID:       req.AgentID,
-		Purpose:       req.Purpose,
-		Model:         req.Model,
-		ParentSession: req.ParentSession,
-		Events:        req.Events,
-		Compaction:    req.Compaction,
-	})
-	if err != nil {
-		return systemManagedAgentCompactResult{}, err
-	}
-	if len(plan.Events) == 0 {
-		return systemManagedAgentCompactResult{}, nil
-	}
-
-	config := systemManagedAgentRuntimeConfig{}
-	if r != nil {
-		config = r.config
-	}
-	if config.AgentFactory == nil || config.StagingSessions == nil {
-		config = newSystemManagedAgentRuntimeWithConfig(config).config
-	}
-	staging := config.StagingSessions()
-	if staging == nil {
-		return systemManagedAgentCompactResult{}, fmt.Errorf("gatewayapp: system-managed agent staging session service is unavailable")
-	}
-	stagingCtx := session.ContextWithoutRuntimeFence(ctx)
-	activeSession, err := startSystemManagedAgentStagingSession(stagingCtx, staging, plan.Session)
-	if err != nil {
-		return systemManagedAgentCompactResult{}, err
-	}
-	batch, ok := staging.(session.EventBatchService)
-	if !ok {
-		return systemManagedAgentCompactResult{}, fmt.Errorf("gatewayapp: system-managed agent staging service requires event batches")
-	}
-	if _, err := batch.AppendEvents(stagingCtx, session.AppendEventsRequest{
-		SessionRef: activeSession.SessionRef,
-		Events:     session.CloneEvents(plan.Events),
-	}); err != nil {
-		return systemManagedAgentCompactResult{}, err
-	}
-	core, err := sdkruntime.New(sdkruntime.Config{
-		Sessions:              staging,
-		AgentFactory:          config.AgentFactory,
-		Compaction:            plan.Compaction,
-		LifecycleInterceptors: config.LifecycleInterceptors,
-		TraceSink:             config.TraceSink,
-		Guardrails:            config.Guardrails,
-		Diagnostics:           config.Diagnostics,
-	})
-	if err != nil {
-		return systemManagedAgentCompactResult{}, err
-	}
-	compacted, err := core.Compact(stagingCtx, sdkruntime.CompactRequest{
-		SessionRef: activeSession.SessionRef,
-		Model:      plan.Model,
-		Trigger:    "guardian_prompt_budget",
-	})
-	if err != nil {
-		return systemManagedAgentCompactResult{}, err
-	}
-	events, err := staging.Events(stagingCtx, session.EventsRequest{
-		SessionRef:       activeSession.SessionRef,
-		IncludeTransient: true,
-	})
-	if err != nil {
-		return systemManagedAgentCompactResult{}, err
-	}
-	return systemManagedAgentCompactResult{
-		Events:    systemManagedAgentConversationEvents(events),
-		Compacted: compacted.Compacted,
-	}, nil
 }
 
 // collectSystemManagedAgentResult waits for producer quiescence, then reads the

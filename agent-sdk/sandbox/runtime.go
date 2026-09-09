@@ -43,7 +43,13 @@ func backendRegistrationError() error {
 
 func New(cfg Config) (Runtime, error) {
 	cfg = NormalizeConfig(cfg)
+	if cfg.ResourceLimits != nil && cfg.RequestedBackend != BackendSeatbelt && cfg.RequestedBackend != BackendBwrap {
+		return nil, fmt.Errorf("sandbox: mandatory resource limits require Seatbelt or Bubblewrap")
+	}
 
+	if cfg.ResourceLimits != nil {
+		return buildRegisteredRuntime(cfg.RequestedBackend, cfg)
+	}
 	hostRuntime, err := buildRegisteredRuntime(BackendHost, cfg)
 	if err != nil {
 		return nil, err
@@ -110,6 +116,11 @@ func New(cfg Config) (Runtime, error) {
 }
 
 func NormalizeConfig(cfg Config) Config {
+	if cfg.ResourceLimits != nil {
+		limits := *cfg.ResourceLimits
+		limits.WritePaths = append([]string(nil), limits.WritePaths...)
+		cfg.ResourceLimits = &limits
+	}
 	cfg.CWD = strings.TrimSpace(cfg.CWD)
 	if cfg.CWD == "" {
 		if cwd, err := os.Getwd(); err == nil {

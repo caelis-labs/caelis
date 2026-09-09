@@ -577,7 +577,15 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 			callInput = data
 		}
 	}
+	origin := req.Origin
+	origin.Role = agent.ApprovalRoleSubagent
+	origin.ParentSessionID = r.sessionRef.SessionID
+	origin.TaskID = req.TaskID
+	origin.ParentCallID = req.ParentCallID
+	origin.ToolCallID = req.ToolCall.ID
+	origin.Agent = req.Agent
 	runtimeRequest := agent.ApprovalRequest{
+		Origin:     &origin,
 		SessionRef: r.sessionRef,
 		Session:    session.CloneSession(r.session),
 		Tool: tool.Definition{
@@ -628,6 +636,7 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 		Outcome:  strings.TrimSpace(resp.Outcome),
 		OptionID: strings.TrimSpace(resp.OptionID),
 		Approved: resp.Approved,
+		Reason:   resp.Reason, ReviewText: resp.ReviewText,
 	}, nil
 }
 

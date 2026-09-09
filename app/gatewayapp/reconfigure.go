@@ -491,6 +491,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	guardianApprover := s.newGuardianApprover()
+	guardianApprover.queryNetwork = sandboxPolicySnapshot.Network
 	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions:             s.sessions,
 		Runtime:              fencedRuntime,

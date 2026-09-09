@@ -135,7 +135,7 @@ func (s *seatbeltRunner) Run(ctx context.Context, req runnerruntime.Request) (sa
 		return sandbox.CommandResult{}, fmt.Errorf("tool: prepare seatbelt sandbox policy failed: %w", err)
 	}
 
-	args := []string{"-p", profile, "bash", "-lc", req.Command}
+	args := []string{"-p", profile, "bash", seatbeltShellFlag(s.cfg), req.Command}
 	cmd := s.execCommand(runCtx, "sandbox-exec", args...)
 	procutil.ApplyNonInteractiveCommandDefaults(cmd)
 	if strings.TrimSpace(req.Dir) != "" {
@@ -150,11 +150,21 @@ func (s *seatbeltRunner) Run(ctx context.Context, req runnerruntime.Request) (sa
 	cmd.Stdout = procutil.NewActivityWriter(&stdout, &lastOutput, "stdout", emitOutput(req.OnOutput))
 	cmd.Stderr = procutil.NewActivityWriter(&stderr, &lastOutput, "stderr", emitOutput(req.OnOutput))
 
+	if s.cfg.ResourceLimits != nil {
+		cmd.Stdout = &procutil.BoundedWriter{Writer: cmd.Stdout, Remaining: 64 * 1024}
+		cmd.Stderr = &procutil.BoundedWriter{Writer: cmd.Stderr, Remaining: 64 * 1024}
+	}
 	if err := cmd.Start(); err != nil {
 		return sandbox.CommandResult{}, fmt.Errorf("tool: seatbelt sandbox command start failed: %w", err)
 	}
 	waitErr := procutil.WaitWithIdleTimeout(runCtx, cmd, req.IdleTimeout, &lastOutput)
+	if s.cfg.ResourceLimits != nil {
+		_ = procutil.KillProcess(cmd)
+	}
 
+	if s.cfg.ResourceLimits != nil && (cmd.Stdout.(*procutil.BoundedWriter).Exceeded || cmd.Stderr.(*procutil.BoundedWriter).Exceeded) {
+		return sandbox.CommandResult{}, fmt.Errorf("sandbox command output budget exceeded")
+	}
 	result := sandbox.CommandResult{
 		Stdout:  stdout.String(),
 		Stderr:  stderr.String(),
@@ -334,10 +344,15 @@ func buildSeatbeltProfile(p policy.Policy, workDir string) (string, error) {
 	for _, sub := range readOnlyPaths {
 		fmt.Fprintf(&b, "(deny file-write* (subpath %s))\n", sbplString(sub))
 	}
+
 	return b.String(), nil
 }
 
 func seatbeltWritableRoots(p policy.Policy, workDir string) ([]string, error) {
+	if p.ResourceLimits != nil {
+		return append([]string(nil), p.ResourceLimits.WritePaths...), nil
+	}
+
 	if p.Type == policy.TypeReadOnly {
 		return nil, nil
 	}
@@ -451,4 +466,11 @@ func emitOutput(fn func(runnerruntime.OutputChunk)) func(string, string) {
 
 func init() {
 	sandbox.RegisterBuiltInBackendFactory(backendFactory{})
+}
+
+func seatbeltShellFlag(cfg Config) string {
+	if cfg.ResourceLimits != nil {
+		return "-c"
+	}
+	return "-lc"
 }

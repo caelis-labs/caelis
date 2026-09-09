@@ -210,6 +210,7 @@ type SubagentApprovalToolCall = EndpointApprovalToolCall
 // SubagentApprovalRequest is one child permission request bridged into the
 // parent runtime approval surface.
 type SubagentApprovalRequest struct {
+	Origin       ApprovalOrigin           `json:"origin"`
 	SessionRef   session.SessionRef       `json:"session_ref,omitempty"`
 	Session      session.Session          `json:"session,omitempty"`
 	TaskID       string                   `json:"task_id,omitempty"`

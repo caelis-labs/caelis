@@ -174,10 +174,20 @@ func (b *bwrapRunner) Run(ctx context.Context, req runnerruntime.Request) (sandb
 	lastOutput.Store(time.Now().UnixNano())
 	cmd.Stdout = procutil.NewActivityWriter(&stdout, &lastOutput, "stdout", emitOutput(req.OnOutput))
 	cmd.Stderr = procutil.NewActivityWriter(&stderr, &lastOutput, "stderr", emitOutput(req.OnOutput))
+	if b.cfg.ResourceLimits != nil {
+		cmd.Stdout = &procutil.BoundedWriter{Writer: cmd.Stdout, Remaining: 64 * 1024}
+		cmd.Stderr = &procutil.BoundedWriter{Writer: cmd.Stderr, Remaining: 64 * 1024}
+	}
 	if err := cmd.Start(); err != nil {
 		return sandbox.CommandResult{}, fmt.Errorf("tool: bwrap sandbox command start failed: %w", err)
 	}
 	waitErr := procutil.WaitWithIdleTimeout(runCtx, cmd, req.IdleTimeout, &lastOutput)
+	if b.cfg.ResourceLimits != nil {
+		_ = procutil.KillProcess(cmd)
+	}
+	if b.cfg.ResourceLimits != nil && (cmd.Stdout.(*procutil.BoundedWriter).Exceeded || cmd.Stderr.(*procutil.BoundedWriter).Exceeded) {
+		return sandbox.CommandResult{}, fmt.Errorf("sandbox command output budget exceeded")
+	}
 	result := sandbox.CommandResult{
 		Stdout:  stdout.String(),
 		Stderr:  stderr.String(),
@@ -354,6 +364,9 @@ func buildBwrapArgs(p policy.Policy, workDir string) ([]string, error) {
 }
 
 func bwrapWritableRoots(p policy.Policy, workDir string) ([]string, error) {
+	if p.ResourceLimits != nil {
+		return append([]string(nil), p.ResourceLimits.WritePaths...), nil
+	}
 	if p.Type == policy.TypeReadOnly {
 		return nil, nil
 	}

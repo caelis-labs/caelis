@@ -56,6 +56,26 @@ func WithInvocationObserver(ctx context.Context, observer func(Invocation)) cont
 	return context.WithValue(ctx, invocationObserverKey{}, observer)
 }
 
+type invocationAdmissionKey struct{}
+
+// WithInvocationAdmission installs an embedding-owned gate before each actual
+// provider attempt, including retries. Rejection creates no invocation receipt.
+func WithInvocationAdmission(ctx context.Context, admit func(context.Context, *Request) error) context.Context {
+	if admit == nil {
+		return ctx
+	}
+	if parent, ok := ctx.Value(invocationAdmissionKey{}).(func(context.Context, *Request) error); ok {
+		next := admit
+		admit = func(ctx context.Context, req *Request) error {
+			if err := parent(ctx, req); err != nil {
+				return err
+			}
+			return next(ctx, req)
+		}
+	}
+	return context.WithValue(ctx, invocationAdmissionKey{}, admit)
+}
+
 // InvocationTracker is implemented by request gates and retry wrappers that
 // delegate accounting to their actual provider attempts rather than counting
 // their own admission or orchestration as an attempt.
@@ -66,6 +86,11 @@ type InvocationTracker interface{ TracksInvocations() }
 func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent, error] {
 	if _, ok := llm.(InvocationTracker); ok {
 		return llm.Generate(ctx, req)
+	}
+	if admit, ok := ctx.Value(invocationAdmissionKey{}).(func(context.Context, *Request) error); ok {
+		if err := admit(ctx, CloneRequest(req)); err != nil {
+			return func(yield func(*StreamEvent, error) bool) { yield(nil, err) }
+		}
 	}
 	if observer, _ := ctx.Value(invocationObserverKey{}).(func(Invocation)); observer == nil {
 		return llm.Generate(ctx, CloneRequest(req))

@@ -44,6 +44,7 @@ type ApprovalOption struct {
 // ApprovalRequest is one runtime-owned approval request emitted before one
 // sensitive tool execution continues.
 type ApprovalRequest struct {
+	Origin     *ApprovalOrigin    `json:"origin,omitempty"`
 	SessionRef session.SessionRef `json:"session_ref"`
 	Session    session.Session    `json:"session"`
 	RunID      string             `json:"run_id,omitempty"`
