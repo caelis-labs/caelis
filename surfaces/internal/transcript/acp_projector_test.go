@@ -145,7 +145,7 @@ func TestProjectACPEventToEventsIgnoresUntrustedAgentCommunicationMeta(t *testin
 	}
 }
 
-func TestProjectACPEventToEventsProjectsParentCommunicationAsSubagentUserMessage(t *testing.T) {
+func TestProjectACPEventToEventsProjectsParentCommunicationAsAgentMessage(t *testing.T) {
 	t.Parallel()
 
 	events := ProjectACPEventToEvents(eventstream.Envelope{
@@ -160,9 +160,9 @@ func TestProjectACPEventToEventsProjectsParentCommunicationAsSubagentUserMessage
 			}}},
 		},
 	}, nil)
-	if len(events) != 1 || events[0].Kind != EventNarrative || events[0].NarrativeKind != NarrativeUser ||
+	if len(events) != 1 || events[0].Kind != EventAgentCommunication || events[0].AgentSourceID != "controller-1" ||
 		events[0].Actor != "parent" || events[0].Text != "continue" {
-		t.Fatalf("events = %#v, want parent user message", events)
+		t.Fatalf("events = %#v, want attributed parent Agent message", events)
 	}
 }
 

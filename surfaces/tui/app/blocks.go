@@ -228,6 +228,7 @@ func (b *MainACPTurnBlock) AddAgentCommunication(event SubagentEvent) {
 		return
 	}
 	b.clearTransientRetryNotice()
+	closeLatestReasoningTiming(b.Events, event.StartedAt)
 	b.Events = append(b.Events, event)
 	b.advanceNarrativeBoundary()
 }
@@ -392,6 +393,8 @@ func hasDeferredLiveTailCompactStage(events []SubagentEvent, status string) bool
 // ---------------------------------------------------------------------------
 
 type ParticipantTurnBlock struct {
+	// FullAgentMessages keeps received messages unabridged in detached overlays.
+	FullAgentMessages     bool
 	id                    string
 	SessionID             string
 	ParticipantID         string
@@ -488,6 +491,7 @@ func (b *ParticipantTurnBlock) AddAgentCommunication(event SubagentEvent) {
 		return
 	}
 	b.clearTransientRetryNotice()
+	closeLatestReasoningTiming(b.Events, event.StartedAt)
 	b.Events = append(b.Events, event)
 	b.advanceNarrativeBoundary()
 }
@@ -578,6 +582,7 @@ func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		ToolPanelScrollState:   b.toolPanelScrollState,
 		ReasoningExpanded:      b.reasoningExpanded,
 		AgentMessageExpanded:   b.agentMessageExpanded,
+		FullAgentMessages:      b.FullAgentMessages,
 	})
 	if len(bodyRows) == 0 && participantTurnIsTerminal(b.Status) && strings.TrimSpace(b.Actor) == "" {
 		return nil

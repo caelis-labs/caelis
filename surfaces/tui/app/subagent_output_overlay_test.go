@@ -268,7 +268,7 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 		}
 		plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
 		toolAt := strings.Index(plain, "ps aux | head -5")
-		reviewAt := strings.Index(plain, "Automatic approval review denied")
+		reviewAt := strings.Index(plain, "Auto approval · denied")
 		if toolAt < 0 || reviewAt <= toolAt {
 			t.Fatalf("approval review did not render after its child tool:\n%s", plain)
 		}
@@ -282,7 +282,7 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 
 		view := requireSubagentOutputViewForTest(t, model, "spawn-1")
 		plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
-		if strings.Contains(plain, "Automatic approval review") || strings.Contains(plain, "approval denied") {
+		if strings.Contains(plain, "Auto approval ·") || strings.Contains(plain, "approval denied") {
 			t.Fatalf("unanchored approval review was rendered in the overlay:\n%s", plain)
 		}
 		if !strings.Contains(plain, "ps aux | head -5") {
@@ -346,8 +346,8 @@ func TestSubagentOutputWorkspaceRendersMultipleTurnsAsOneChronologicalTranscript
 		State: eventstream.LifecycleStateCompleted, OccurredAt: startedAt.Add(4 * time.Second),
 	})
 	view.observeChildEvent(TranscriptEvent{
-		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "child-turn-2",
-		NarrativeKind: TranscriptNarrativeUser, Actor: "parent", Text: "check the follow-up",
+		Kind: TranscriptEventAgentCommunication, Scope: ACPProjectionSubagent, TurnID: "child-turn-2",
+		AgentSourceKind: "controller", AgentSourceName: "parent", AgentSourceID: "parent", Text: "check the follow-up",
 	})
 	view.observeChildEvent(TranscriptEvent{
 		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "child-turn-2",

@@ -32,9 +32,13 @@ func TestRegressionSubagentInputKeepsItsPlaceWithinTurn(t *testing.T) {
 				view.observeChildEvent(TranscriptEvent{Kind: TranscriptEventNarrative, NarrativeKind: TranscriptNarrativeAssistant, Text: "stale prefix"})
 			}
 			chunk := func(kind, id, text string) eventstream.Envelope {
-				return eventstream.Envelope{Kind: eventstream.KindSessionUpdate, Update: eventstream.ContentChunk{
+				env := eventstream.Envelope{Kind: eventstream.KindSessionUpdate, Update: eventstream.ContentChunk{
 					SessionUpdate: kind, MessageID: id, Content: eventstream.TextContent{Type: "text", Text: text},
 				}}
+				if kind == eventstream.UpdateUserMessage {
+					env.AgentCommunicationSource = &eventstream.ActorIdentity{Kind: "controller", ID: "parent", Name: "parent"}
+				}
+				return env
 			}
 			completed := eventstream.ToolStatusCompleted
 			events := []eventstream.Envelope{
@@ -68,7 +72,7 @@ func TestRegressionSubagentInputKeepsItsPlaceWithinTurn(t *testing.T) {
 			view.prepareVisibleRender()
 			plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 100, 40)), "\n")
 			previous := -1
-			for _, text := range []string{"> parent: initial assignment", "before guidance", "> parent: first guidance", "after first guidance", "> parent: second guidance", "after second guidance"} {
+			for _, text := range []string{"• parent: initial assignment", "before guidance", "• parent: first guidance", "after first guidance", "• parent: second guidance", "after second guidance"} {
 				position := strings.Index(plain, text)
 				if position <= previous {
 					t.Fatalf("input/output order lost at %q:\n%s", text, plain)

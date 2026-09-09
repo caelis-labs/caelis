@@ -351,7 +351,7 @@ func wrapACPTranscriptHeaderForViewport(
 }
 
 func isApprovalReviewHeaderPlain(plain string) bool {
-	return strings.HasPrefix(strings.TrimSpace(plain), "• Automatic approval review ")
+	return strings.HasPrefix(strings.TrimSpace(plain), "• Auto approval · ")
 }
 
 func acpTranscriptHeaderUsesRailContinuation(verb string) bool {

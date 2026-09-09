@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -140,6 +142,9 @@ func renderAgentCommunicationRows(blockID string, event SubagentEvent, eventInde
 		return nil
 	}
 	name := firstNonEmpty(event.SourceName, event.SourceID, "agent")
+	if opts.FullAgentMessages {
+		return wrapAgentMessageRows(renderAgentMessageRow(blockID, name, text, ctx, ""), width)
+	}
 	bodyBudget := maxInt(1, compactSingleLineBudget(width)-displayColumns("• "+name+": "))
 	displayText, folded := longCommandDisplayPreview(text, bodyBudget)
 	if opts.AgentMessageTargetLinks {
@@ -175,7 +180,7 @@ func renderAgentMessageRow(blockID string, name string, text string, ctx BlockRe
 	name = strings.TrimSpace(name)
 	text = sanitizeRenderableText(text)
 	plain := "• " + name
-	styled := renderACPTranscriptHeaderMark(ctx, acpHeaderMarkDefault, false) + " " + styleSpawnedHeaderTarget(ctx, name)
+	styled := renderACPTranscriptHeaderMark(ctx, acpHeaderMarkDefault, false) + " " + styleAgentMessageTarget(ctx, name, false)
 	if text != "" {
 		plain += ": " + text
 		styled += ctx.Theme.TextStyle().Render(": " + text)
@@ -183,4 +188,42 @@ func renderAgentMessageRow(blockID string, name string, text string, ctx BlockRe
 	row := StyledPlainClickableRow(blockID, plain, styled, token)
 	row.selectionIndent = 2
 	return row
+}
+
+// styleAgentMessageTarget styles the display label, never inferring direction
+// from message text. Binding annotations retain their secondary emphasis.
+func styleAgentMessageTarget(ctx BlockRenderContext, target string, sent bool) string {
+	handle, annotation := target, ""
+	if before, after, ok := strings.Cut(target, "["); ok && strings.HasSuffix(after, "]") {
+		handle, annotation = before, "["+after
+	}
+	style := ctx.Theme.AgentMessageReceivedStyle()
+	if sent {
+		style = ctx.Theme.AgentMessageSentStyle()
+	}
+	styled := style.Render(handle)
+	if annotation != "" {
+		styled += ctx.Theme.SecondaryTextStyle().Render(annotation)
+	}
+	return styled
+}
+
+// wrapAgentMessageRows keeps complete input readable with a two-column gutter.
+func wrapAgentMessageRows(row RenderedRow, width int) []RenderedRow {
+	// Wrap the content after the bullet, keeping ANSI styles and explicit newlines.
+	mark, body, _ := strings.Cut(row.Styled, " ")
+	prefix := mark + " "
+	lines := strings.Split(ansi.Wrap(body, maxInt(1, width-2), ""), "\n")
+	rows := make([]RenderedRow, 0, len(lines))
+	for i, line := range lines {
+		indent := "  "
+		if i == 0 {
+			indent = prefix
+		}
+		next := StyledPlainClickableRow(row.BlockID, ansi.Strip(indent+line), indent+line, row.ClickToken)
+		next.PreWrapped = true
+		next.selectionIndent = 2
+		rows = append(rows, next)
+	}
+	return rows
 }

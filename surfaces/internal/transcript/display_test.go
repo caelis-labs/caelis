@@ -21,7 +21,7 @@ func TestApprovalReviewTailOutputUsesParsedFallbackFields(t *testing.T) {
 		Text:    "Automatic approval review approved (risk: low, authorization: allow): safe read-only command",
 	})
 
-	want := "Approval review approved RunCommand git status (risk: low, authorization: allow)\nsafe read-only command\n"
+	want := "Auto approval · approved RunCommand git status (risk: low, authorization: allow)\nsafe read-only command\n"
 	if output != want {
 		t.Fatalf("ApprovalReviewTailOutput() = %q, want %q", output, want)
 	}

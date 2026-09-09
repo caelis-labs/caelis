@@ -39,6 +39,9 @@ func caelisDuskTheme(profile colorprofile.Profile, background color.Color) Theme
 			DiffLineNo:    profileColor(profile, "#7f8899", "244", "8"),
 			DiffGutter:    profileColor(profile, "#979fb0", "246", "8"),
 			Scrollbar:     profileColor(profile, "#71829d", "244", "7"),
+
+			AgentMessageSent:     profileColor(profile, "#7c9cf5", "111", "4"),
+			AgentMessageReceived: profileColor(profile, "#65b8b0", "73", "6"),
 		},
 		themeSurfaces{
 			Base:             surface1,
@@ -81,6 +84,9 @@ func caelisDawnTheme(profile colorprofile.Profile, background color.Color) Theme
 			DiffLineNo:    profileColor(profile, "#768093", "244", "8"),
 			DiffGutter:    profileColor(profile, "#667184", "242", "8"),
 			Scrollbar:     profileColor(profile, "#7485a5", "244", "0"),
+
+			AgentMessageSent:     profileColor(profile, "#315fbb", "25", "4"),
+			AgentMessageReceived: profileColor(profile, "#0f766e", "30", "6"),
 		},
 		themeSurfaces{
 			Base:             surface1,

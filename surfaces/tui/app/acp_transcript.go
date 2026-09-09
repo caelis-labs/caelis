@@ -33,6 +33,7 @@ type acpTranscriptRenderOptions struct {
 	ReasoningExpanded       func(key string) bool
 	AgentMessageExpanded    func(key string) bool
 	AgentMessageTargetLinks bool
+	FullAgentMessages       bool
 	SubagentOutputLinks     bool
 }
 
@@ -1245,8 +1246,8 @@ func renderACPApprovalReviewRows(blockID string, ev SubagentEvent, width int, ct
 
 func approvalReviewPrefix(display transcript.ApprovalReviewDisplay, ctx BlockRenderContext) (string, string) {
 	status := strings.TrimSpace(display.Status)
-	plain := "• Automatic approval review"
-	styled := ctx.Theme.ToolStyle().Render("•") + " " + ctx.Theme.TranscriptMetaStyle().Render("Automatic approval review")
+	plain := "• Auto approval ·"
+	styled := ctx.Theme.ToolStyle().Render("•") + " " + ctx.Theme.TranscriptMetaStyle().Render("Auto approval ·")
 	if status != "" {
 		plain += " " + status
 		styled += " " + approvalReviewStatusStyle(ctx, status).Render(status)

@@ -276,6 +276,10 @@ func TestSendMessageFailureDoesNotClaimDelivery(t *testing.T) {
 			Meta:     acpToolNameMeta("SendMessage"),
 		},
 	})
+	model.syncViewportContent()
+	if plain := strings.Join(model.viewportPlainLines, "\n"); !strings.Contains(plain, " · sending") {
+		t.Fatalf("pending message lost its status:\n%s", plain)
+	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
@@ -292,17 +296,20 @@ func TestSendMessageFailureDoesNotClaimDelivery(t *testing.T) {
 
 	model.syncViewportContent()
 	plain := strings.Join(model.viewportPlainLines, "\n")
-	if strings.Contains(plain, "validation recommendation") || strings.Contains(plain, "ACP Agent @orbit") || strings.Contains(plain, "SendMessage") {
-		t.Fatalf("failed SendMessage appeared in the transcript:\n%s", plain)
+	if !strings.Contains(plain, "@orbit: validation recommendation · failed") || !strings.Contains(plain, "does not support additional messages") {
+		t.Fatalf("failed SendMessage lost status or reason:\n%s", plain)
+	}
+	if strings.Contains(plain, " · sending") {
+		t.Fatalf("failed message retained pending state:\n%s", plain)
 	}
 }
 
-func TestSendMessageHeaderUsesSpawnTargetStyling(t *testing.T) {
+func TestSendMessageHeaderUsesOutgoingTargetStyling(t *testing.T) {
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: theme}
 	row := renderSendMessageHeaderRow("block", "@ziva: compact message", ctx, "", acpHeaderMarkDefault, false)
-	if got := ansiTextForForeground(t, row.Styled, ctx.Theme.Focus); !strings.Contains(got, "@ziva") {
-		t.Fatalf("SendMessage target did not receive focus styling: %q", row.Styled)
+	if got := ansiTextForForeground(t, row.Styled, ctx.Theme.AgentMessageSentFg); !strings.Contains(got, "@ziva") {
+		t.Fatalf("SendMessage target did not receive outgoing styling: %q", row.Styled)
 	}
 	if got := ansiTextForForeground(t, row.Styled, ctx.Theme.TextStyle().GetForeground()); !strings.Contains(got, "compact message") {
 		t.Fatalf("SendMessage body did not retain normal text styling: %q", row.Styled)

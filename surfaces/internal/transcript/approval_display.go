@@ -20,10 +20,16 @@ type ApprovalReviewFields struct {
 
 func ApprovalReviewDisplayParts(status string, risk string, authorization string, text string) ApprovalReviewDisplay {
 	text = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), "⚠"))
+	// Only historical wrapper text encodes risk and authorization. A current
+	// denial rationale mentioning those words is ordinary prose.
+	legacyText := ""
+	if strings.HasPrefix(strings.ToLower(text), "automatic approval review ") || strings.HasPrefix(strings.ToLower(text), "approval review ") {
+		legacyText = text
+	}
 	return ApprovalReviewDisplay{
 		Status:        FirstNonEmpty(strings.TrimSpace(status), ApprovalReviewStatusFromText(text), "reviewed"),
-		Risk:          FirstNonEmpty(strings.TrimSpace(risk), ApprovalReviewValueFromText(text, "risk")),
-		Authorization: FirstNonEmpty(strings.TrimSpace(authorization), ApprovalReviewValueFromText(text, "authorization")),
+		Risk:          FirstNonEmpty(strings.TrimSpace(risk), ApprovalReviewValueFromText(legacyText, "risk")),
+		Authorization: FirstNonEmpty(strings.TrimSpace(authorization), ApprovalReviewValueFromText(legacyText, "authorization")),
 		Rationale:     ApprovalReviewRationaleFromText(text),
 	}
 }
@@ -34,7 +40,7 @@ func ApprovalReviewTailOutput(fields ApprovalReviewFields) string {
 	if status == "" {
 		status = "reviewed"
 	}
-	line := "Approval review " + status
+	line := "Auto approval · " + status
 	if tool := strings.TrimSpace(fields.Tool); tool != "" {
 		line += " " + tool
 	}
@@ -59,8 +65,8 @@ func ApprovalReviewTailOutput(fields ApprovalReviewFields) string {
 
 func ApprovalReviewStatusFromText(text string) string {
 	lower := strings.ToLower(strings.TrimSpace(text))
-	for _, status := range []string{"approved", "denied", "failed", "timed_out"} {
-		if strings.Contains(lower, "approval review "+status) {
+	for _, status := range approvalReviewStatuses {
+		if lower == status || strings.HasPrefix(lower, status+":") || strings.Contains(lower, "approval review "+status) {
 			return status
 		}
 	}
@@ -88,15 +94,25 @@ func ApprovalReviewValueFromText(text string, key string) string {
 	return strings.TrimSpace(value)
 }
 
+var approvalReviewStatuses = []string{"approved", "denied", "failed", "timed_out", "timed out", "needs_user", "needs user", "needs-user"}
+
 func ApprovalReviewRationaleFromText(text string) string {
 	text = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), "⚠"))
 	if text == "" {
 		return ""
 	}
+	for _, status := range approvalReviewStatuses {
+		if strings.EqualFold(text, status) {
+			return ""
+		}
+		if strings.HasPrefix(strings.ToLower(text), status+":") {
+			return strings.TrimSpace(text[len(status)+1:])
+		}
+	}
 	if before, after, ok := strings.Cut(text, "):"); ok && strings.Contains(strings.ToLower(before), "approval review") {
 		return strings.TrimSpace(after)
 	}
-	if before, after, ok := strings.Cut(text, ":"); ok && strings.Contains(strings.ToLower(before), "approval review") {
+	if before, after, ok := strings.Cut(text, ":"); ok && strings.Contains(strings.ToLower(before), "approval review") && !strings.Contains(before, "(") {
 		return strings.TrimSpace(after)
 	}
 	if strings.Contains(strings.ToLower(text), "approval review") {

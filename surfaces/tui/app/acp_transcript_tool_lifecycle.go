@@ -16,8 +16,8 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 	}
 	callID := strings.TrimSpace(ev.CallID)
 	if callID == "" {
-		if ev.Name == surfaceToolSendMessage && (!ev.Done || ev.Err) {
-			return nil, idx
+		if ev.Name == surfaceToolSendMessage {
+			return renderACPTerminalLifecycleRows(blockID, ev, "", ev.Output, width, ctx, ev.Err, true, ev.Done, false, opts), idx
 		}
 		if !shouldRenderToolEvent(ev) {
 			return nil, idx
@@ -82,7 +82,9 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 		start.Output = ""
 	}
 	if sendMessageLifecycle && (!settled || !hasFinal || final.Err) {
-		return nil, end
+		header := toolLifecycleHeaderEvent(start, final, hasFinal, settled, width)
+		text, failed := acpToolPanelText(preview, final, hasFinal)
+		return renderACPTerminalLifecycleRows(blockID, header, callID, text, width, ctx, failed, true, settled, false, opts), end
 	}
 
 	if !hasStart {
@@ -167,9 +169,6 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 }
 
 func renderACPStandaloneFinalToolRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
-	if ev.Name == surfaceToolSendMessage && ev.Err {
-		return nil
-	}
 	if opts.SubagentOutputLinks && isSpawnToolEvent(ev) {
 		return renderACPSpawnToolRows(blockID, ev, ev.CallID, width, ctx)
 	}
@@ -581,7 +580,7 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, text, final, err))
 	tone, dim := acpToolHeaderMark(ctx, err, final)
 	var headerRow RenderedRow
-	if sendMessage && opts.AgentMessageTargetLinks && agentMessageTargetCanOpenOverlay(ev.MessageTarget) {
+	if sendMessage && !err && opts.AgentMessageTargetLinks && agentMessageTargetCanOpenOverlay(ev.MessageTarget) {
 		token = agentMessageTargetOverlayClickToken(callID)
 		headerRow = renderSendMessageHeaderRow(blockID, headerEvent.Args, ctx, token, tone, dim)
 	} else if sendMessage {
@@ -590,6 +589,15 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 		headerRow = renderACPTranscriptHeaderRowMarked(blockID, header, width, ctx, token, tone, dim)
 	}
 	rows := []RenderedRow{headerRow}
+	if sendMessage && (err || !final) {
+		status, style := "sending", ctx.Theme.TranscriptMetaStyle()
+		if err {
+			status, style = "failed", ctx.Theme.ErrorStyle()
+		}
+		headerRow.Plain += " · " + status
+		headerRow.Styled += style.Render(" · " + status)
+		rows = wrapAgentMessageRows(headerRow, width)
+	}
 	if !expanded || !shouldRenderACPToolPanel(text, err) {
 		return rows
 	}
@@ -611,7 +619,7 @@ func renderSendMessageHeaderRow(blockID string, args string, ctx BlockRenderCont
 		message = strings.TrimSpace(after)
 	}
 	plain := "• " + target
-	styled := renderACPTranscriptHeaderMark(ctx, tone, dim) + " " + styleSpawnedHeaderTarget(ctx, target)
+	styled := renderACPTranscriptHeaderMark(ctx, tone, dim) + " " + styleAgentMessageTarget(ctx, target, true)
 	if message != "" {
 		plain += ": " + message
 		styled += ctx.Theme.TextStyle().Render(": " + message)

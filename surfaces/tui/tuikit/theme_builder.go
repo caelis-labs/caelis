@@ -8,6 +8,9 @@ type themePalette struct {
 	Name   string
 	IsDark bool
 
+	AgentMessageSent     color.Color
+	AgentMessageReceived color.Color
+
 	TextPrimary   color.Color
 	TextSecondary color.Color
 	Muted         color.Color
@@ -51,6 +54,9 @@ type themeSurfaces struct {
 // writer after a theme has been resolved.
 func themeFrom(p themePalette, s themeSurfaces) Theme {
 	return Theme{
+		AgentMessageSentFg:     p.AgentMessageSent,
+		AgentMessageReceivedFg: p.AgentMessageReceived,
+
 		Name:             p.Name,
 		IsDark:           p.IsDark,
 		AppBg:            s.App,
