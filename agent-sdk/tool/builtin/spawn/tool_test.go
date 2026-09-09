@@ -56,7 +56,7 @@ func TestDefinitionDescribesBoundedCollaboration(t *testing.T) {
 		"independent work",
 		"self-contained task",
 		"returned handle",
-		"only when its result is needed",
+		"ReadThread or WaitThread",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("SPAWN description missing %q:\n%s", want, desc)

@@ -19,9 +19,8 @@ import (
 )
 
 const (
-	subagentFinalResponseCursorMeta = "final_response_cursor"
-	subagentActivityIDMeta          = "child_activity_id"
-	subagentActivityGenerationMeta  = "child_activity_generation"
+	subagentActivityIDMeta         = "child_activity_id"
+	subagentActivityGenerationMeta = "child_activity_generation"
 )
 
 func subagentSpawnTaskID(ref session.SessionRef, spawnID string) (string, error) {
@@ -222,20 +221,11 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata[subagentCancelPhaseKey]))
 	runner := task.runner
 	running := task.running
-	hasUnreadFinalResponses := task.hasUnreadFinalResponsesLocked()
 	anchor := delegation.CloneAnchor(task.anchor)
 	turnSeq := task.turnSeq
 	task.mu.Unlock()
 	if cancelPhase != subagentCancelPhaseNone && cancelPhase != subagentCancelPhaseCompleted {
 		return tm.observePendingSubagentCancel(ctx, task, turnSeq, int(yield/time.Millisecond))
-	}
-	if hasUnreadFinalResponses {
-		snapshot := task.snapshot()
-		if snapshot.Metadata == nil {
-			snapshot.Metadata = map[string]any{}
-		}
-		snapshot.Metadata[subagentUnreadFinalResponsesMetaKey] = true
-		return snapshot, nil
 	}
 	if runner == nil || !running {
 		return task.snapshot(), nil
@@ -384,7 +374,6 @@ func (tm *taskRuntime) applyObservedSubagentResult(
 	// runner sample was in flight. Terminal state is monotonic: persist the
 	// current result instead of reopening it with an older running snapshot.
 	if task.running {
-		task.seedStreamFromResult(result)
 		task.applyResult(result)
 	}
 	snapshot := task.snapshotLocked()
@@ -643,23 +632,13 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		contextUsage:    taskapi.CloneContextUsageRecord(entry.ContextUsage),
 		completionReady: true,
 	}
-	if cursor, ok := taskInt64Value(entry.Metadata[subagentFinalResponseCursorMeta]); ok && cursor >= 0 {
-		task.finalResponseCursor = cursor
-	}
+	// Retired observation markers do not govern current activity or output.
+	delete(task.metadata, "final_response_cursor")
+	delete(task.metadata, "unread_final_responses")
+	delete(task.result, "final_responses")
 	task.activityID = strings.TrimSpace(taskStringValue(entry.Metadata[subagentActivityIDMeta]))
 	if generation, ok := taskInt64Value(entry.Metadata[subagentActivityGenerationMeta]); ok && generation > 0 {
 		task.activityGeneration = generation
-	}
-	if task.state == taskapi.StateCompleted {
-		if final := firstNonBlankTaskOutput(taskRawStringValue(task.result["final_message"]), taskRawStringValue(task.result["result"])); taskOutputHasNonBlankLine(final) {
-			task.latestFinalText = final
-			task.latestFinalTurnSeq = max(task.turnSeq, 1)
-			task.latestFinalAt = entry.UpdatedAt
-			task.latestFinalActivityID = task.activityID
-			if task.latestFinalAt.IsZero() {
-				task.latestFinalAt = entry.CreatedAt
-			}
-		}
 	}
 	if task.metadata == nil {
 		task.metadata = map[string]any{}
@@ -695,9 +674,6 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 	result = delegation.CloneResult(result)
 	t.state = taskStateFromDelegation(result.State)
 	t.running = result.State == delegation.StateRunning
-	if t.state == taskapi.StateCompleted && taskOutputHasNonBlankLine(result.Result) {
-		t.retainCompletedFinalLocked(result.Result)
-	}
 	if t.result == nil {
 		t.result = map[string]any{}
 	}
@@ -893,7 +869,6 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
-	metadata[subagentFinalResponseCursorMeta] = t.finalResponseCursor
 	entry := &taskapi.Entry{
 		TaskID:         t.ref.TaskID,
 		Handle:         t.handle,
@@ -929,7 +904,9 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"participant_role":     string(subagentParticipantRole(t)),
 			"spawn_result":         taskapi.SanitizeResultForPersistence(t.result, taskapi.ResultPersistenceCanonical),
 		},
-		Result:   subagentTaskEntryResult(t.result, t.running),
+		// Producer completion publishes the public result without waiting for a
+		// model-facing Task observation to synchronize it.
+		Result:   taskapi.SanitizeResultForPersistence(t.result, taskapi.ResultPersistenceCanonical),
 		Metadata: metadata,
 	}
 	if phase := subagentCancelPhase(taskStringValue(t.metadata[subagentCancelPhaseKey])); phase == subagentCancelPhaseNone {
@@ -942,14 +919,6 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 	}
 	normalizeSubagentEntryResult(entry, taskRawStringValue(t.result["error"]))
 	return entry
-}
-
-func subagentTaskEntryResult(result map[string]any, running bool) map[string]any {
-	mode := taskapi.ResultPersistenceCanonical
-	if !running {
-		mode = taskapi.ResultPersistenceDeferred
-	}
-	return taskapi.SanitizeResultForPersistence(result, mode)
 }
 
 func taskSpecTarget(values map[string]any, key string) delegation.Target {

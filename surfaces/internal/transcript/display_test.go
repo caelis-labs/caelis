@@ -232,9 +232,9 @@ func TestDelegatedTaskResultTextUsesCanonicalTaskResultWithoutTerminalOutput(t *
 		status   string
 		want     string
 	}{
-		{name: "spawn final", toolName: "Spawn", status: ToolStatusCompleted, want: "child final result"},
+		{name: "spawn final", toolName: "StartThread", status: ToolStatusCompleted, want: "child final result"},
 		{name: "task final", toolName: "Task", status: ToolStatusCompleted, want: "child final result"},
-		{name: "running", toolName: "Spawn", status: ToolStatusRunning},
+		{name: "running", toolName: "StartThread", status: ToolStatusRunning},
 		{name: "command", toolName: "RunCommand", status: ToolStatusCompleted},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

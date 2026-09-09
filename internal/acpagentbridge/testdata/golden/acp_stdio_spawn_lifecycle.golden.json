@@ -15,7 +15,7 @@
         "caelis": {
           "runtime": {
             "tool": {
-              "name": "Spawn"
+              "name": "StartThread"
             }
           },
           "version": 1
@@ -38,7 +38,7 @@
       "rawOutput": {
         "handle": "yara",
         "parent_call": "spawn-call-1",
-        "parent_tool": "Spawn",
+        "parent_tool": "StartThread",
         "state": "running",
         "target_kind": "subagent"
       },
@@ -46,7 +46,7 @@
         "caelis": {
           "runtime": {
             "tool": {
-              "name": "Spawn"
+              "name": "StartThread"
             }
           },
           "version": 1
@@ -108,7 +108,7 @@
             "final_message": "I can inspect, edit, test, and review code.",
             "handle": "yara",
             "parent_call": "spawn-call-1",
-            "parent_tool": "Spawn",
+            "parent_tool": "StartThread",
             "state": "completed",
             "target_kind": "subagent"
           }

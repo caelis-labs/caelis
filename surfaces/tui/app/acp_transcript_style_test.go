@@ -373,7 +373,7 @@ func TestViewportCacheKeyIncludesPulseOnlyForRunningTools(t *testing.T) {
 	if viewportBlockRenderKey(block, bright) != viewportBlockRenderKey(block, dim) {
 		t.Fatal("completed tool cache key changed with pulse phase")
 	}
-	block.Events[0].Name = "Spawn"
+	block.Events[0].Name = "StartThread"
 	block.Events[0].Done = false
 	if viewportBlockRenderKey(block, bright) != viewportBlockRenderKey(block, dim) {
 		t.Fatal("Spawn row cache key should stay independent of pulse phase")

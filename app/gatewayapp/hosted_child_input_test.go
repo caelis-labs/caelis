@@ -355,6 +355,7 @@ type hostedChildInputTestProvider struct {
 	firstOnce    sync.Once
 	mu           sync.Mutex
 	calls        int
+	lastMessages json.RawMessage
 }
 
 func newHostedChildInputTestProvider(t *testing.T, blockFirst bool) *hostedChildInputTestProvider {
@@ -381,6 +382,7 @@ func (p *hostedChildInputTestProvider) handle(w http.ResponseWriter, r *http.Req
 		return
 	}
 	p.mu.Lock()
+	p.lastMessages, _ = json.Marshal(payload["messages"])
 	p.calls++
 	call := p.calls
 	p.mu.Unlock()

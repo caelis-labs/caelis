@@ -11,7 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
 )
 
-const ToolName = "Spawn"
+const ToolName = "StartThread"
 
 const (
 	maxModelVisibleAgents                = 32
@@ -164,7 +164,7 @@ func spawnDefinition(agents []delegation.Agent) tool.Definition {
 	}
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Start a collaborating Agent for independent work that benefits from parallel execution or focused expertise. Give it a self-contained task with the goal, scope, constraints, edit permission, and expected output. Use Task with the returned handle only when its result is needed.",
+		Description: "Start a collaborating Agent for independent work that benefits from parallel execution or focused expertise. Give it a self-contained task with the goal, scope, constraints, edit permission, and expected output. Use ReadThread or WaitThread with the returned handle to observe its result. Continue the same thread with SendMessage.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"properties":           props,

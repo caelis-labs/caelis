@@ -13,7 +13,7 @@ func TestACPChildTerminalProjectorEmitsOnlyFinalResponseContent(t *testing.T) {
 	t.Parallel()
 
 	projector := newACPChildTerminalProjector()
-	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 	child := func(update eventstream.Update) eventstream.Envelope {
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
@@ -78,7 +78,7 @@ func TestACPChildTerminalProjectorGatesEachTurnAndParentIndependently(t *testing
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
 			ScopeID: "task-1", TurnID: turnID,
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: parentCallID, ToolName: "Spawn"},
+			ParentTool: &eventstream.ParentToolRelation{ToolCallID: parentCallID, ToolName: "StartThread"},
 			Update: eventstream.ContentChunk{
 				SessionUpdate: eventstream.UpdateAgentMessage, MessageID: turnID,
 				Content: eventstream.TextContent{Type: "text", Text: text},
@@ -89,7 +89,7 @@ func TestACPChildTerminalProjectorGatesEachTurnAndParentIndependently(t *testing
 		return eventstream.Envelope{
 			Kind: eventstream.KindLifecycle, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
 			ScopeID: "task-1", TurnID: turnID, Final: true,
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: parentCallID, ToolName: "Spawn"},
+			ParentTool: &eventstream.ParentToolRelation{ToolCallID: parentCallID, ToolName: "StartThread"},
 			Lifecycle:  &eventstream.Lifecycle{State: state, Reason: reason},
 		}
 	}
@@ -138,7 +138,7 @@ func TestACPChildTerminalProjectorDeduplicatesLifecyclePerTurn(t *testing.T) {
 	t.Parallel()
 
 	projector := newACPChildTerminalProjector()
-	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 	progress := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
 		ScopeID: "task-1", TurnID: "turn-1", ParentTool: parent,
@@ -177,7 +177,7 @@ func TestACPChildTerminalProjectorCompactsSequentialClosedTurns(t *testing.T) {
 
 	const turnCount = 300
 	projector := newACPChildTerminalProjector()
-	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 	for sequence := 1; sequence <= turnCount; sequence++ {
 		turnID := fmt.Sprintf("task-1:%d", sequence)
 		projector.project(eventstream.Envelope{
@@ -232,7 +232,7 @@ func TestACPChildTerminalProjectorClosesEmptyFailedLifecycle(t *testing.T) {
 	result, handled := projector.projectLifecycle(eventstream.Envelope{
 		Kind: eventstream.KindLifecycle, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
 		TurnID:     "task-1:1",
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
 		Final:      true,
 		Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateFailed},
 	}, "")
@@ -243,7 +243,7 @@ func TestACPChildTerminalProjectorClosesEmptyFailedLifecycle(t *testing.T) {
 	if duplicate, handled := projector.projectLifecycle(eventstream.Envelope{
 		Kind: eventstream.KindLifecycle, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
 		TurnID:     "task-1:1",
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
 		Final:      true,
 		Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateFailed},
 	}, ""); !handled || duplicate.Update != nil {
@@ -333,7 +333,7 @@ func TestNormalizeACPStdioTerminalExtensionDoesNotInventTerminalForPlainTool(t *
 }
 
 func TestNormalizeACPStdioTerminalExtensionDoesNotMountFinalOnlySpawn(t *testing.T) {
-	meta := acpmeta.WithToolName(nil, "Spawn")
+	meta := acpmeta.WithToolName(nil, "StartThread")
 	meta = acpmeta.WithTerminalInfo(meta, "spawn-1")
 	notification := normalizeACPStdioTerminalExtension(eventstream.SessionNotification{
 		SessionID: "session-1",
@@ -357,7 +357,7 @@ func TestNormalizeACPStdioTerminalExtensionDoesNotMountFinalOnlySpawn(t *testing
 	if _, ok := acpmeta.ReadTerminalInfo(call.Meta); ok {
 		t.Fatalf("Spawn meta = %#v, want no terminal_info", call.Meta)
 	}
-	if got := acpmeta.ToolName(call.Meta); got != "Spawn" {
+	if got := acpmeta.ToolName(call.Meta); got != "StartThread" {
 		t.Fatalf("Spawn runtime tool name = %q, want preserved", got)
 	}
 
@@ -371,7 +371,7 @@ func TestNormalizeACPStdioTerminalExtensionDoesNotMountFinalOnlySpawn(t *testing
 		{name: "explicit empty patch", content: []eventstream.ToolCallContent{}, wantPresent: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			updateMeta := acpmeta.WithToolName(nil, "Spawn")
+			updateMeta := acpmeta.WithToolName(nil, "StartThread")
 			updateMeta = acpmeta.WithTerminalInfo(updateMeta, "spawn-1")
 			normalized := normalizeACPStdioTerminalExtension(eventstream.SessionNotification{
 				SessionID: "session-1",

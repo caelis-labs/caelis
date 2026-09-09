@@ -39,14 +39,14 @@ func TestMainProjectedTaskWaitMatchesNativeSubagentSemantics(t *testing.T) {
 		Type:      session.EventTypeToolCall,
 		Tool: &session.EventTool{
 			ID:     "spawn-1",
-			Name:   "Spawn",
+			Name:   "StartThread",
 			Kind:   "execute",
 			Title:  "Spawn orbit: inspect",
 			Status: "pending",
 			Input:  map[string]any{"agent": "orbit", "prompt": "inspect"},
 		},
 		Meta: testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
-			testMeta.RuntimeToolName: "Spawn",
+			testMeta.RuntimeToolName: "StartThread",
 		}),
 	})
 	project(&session.Event{
@@ -56,7 +56,7 @@ func TestMainProjectedTaskWaitMatchesNativeSubagentSemantics(t *testing.T) {
 		Type:      session.EventTypeToolResult,
 		Tool: &session.EventTool{
 			ID:     "spawn-1",
-			Name:   "Spawn",
+			Name:   "StartThread",
 			Kind:   "execute",
 			Title:  "Spawn orbit: inspect",
 			Status: "running",
@@ -129,7 +129,7 @@ func TestMainProjectedSpawnFailureOwnsItsReason(t *testing.T) {
 		Type:      session.EventTypeToolCall,
 		Tool: &session.EventTool{
 			ID:     "spawn-1",
-			Name:   "Spawn",
+			Name:   "StartThread",
 			Kind:   "execute",
 			Title:  "Spawn breeze: inspect",
 			Status: "pending",
@@ -143,7 +143,7 @@ func TestMainProjectedSpawnFailureOwnsItsReason(t *testing.T) {
 		Type:      session.EventTypeToolResult,
 		Tool: &session.EventTool{
 			ID:     "spawn-1",
-			Name:   "Spawn",
+			Name:   "StartThread",
 			Kind:   "execute",
 			Title:  "Spawn breeze: inspect",
 			Status: "running",
@@ -179,7 +179,7 @@ func TestMainProjectedSpawnFailureOwnsItsReason(t *testing.T) {
 			Input:  map[string]any{"action": "wait", "handle": "breeze"},
 			Output: map[string]any{
 				"handle": "breeze", "target_kind": "subagent", "state": "failed",
-				"parent_call": "spawn-1", "parent_tool": "Spawn",
+				"parent_call": "spawn-1", "parent_tool": "StartThread",
 				"error": "ACP child prompt failed",
 			},
 		},
@@ -196,7 +196,7 @@ func TestMainProjectedSpawnFailureOwnsItsReason(t *testing.T) {
 		Type:      session.EventTypeToolResult,
 		Tool: &session.EventTool{
 			ID:     "spawn-1",
-			Name:   "Spawn",
+			Name:   "StartThread",
 			Kind:   "execute",
 			Title:  "Spawn breeze: inspect",
 			Status: "failed",
@@ -250,7 +250,7 @@ func TestParticipantSpawnRendersStandardFinalResultWithoutSubagentUI(t *testing.
 	spawnTitle := "Spawn orbit: inspect"
 	spawnKind := eventstream.ToolKindExecute
 	meta := testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
-		testMeta.RuntimeToolName: "Spawn",
+		testMeta.RuntimeToolName: "StartThread",
 	})
 	for _, result := range []struct {
 		name   string
@@ -360,7 +360,7 @@ func TestParticipantSpawnToolPanelExpandsFullFinalResponse(t *testing.T) {
 				Kind: spawnKind, Status: pending,
 				RawInput: map[string]any{"agent": "orbit", "prompt": "read-only strict review"},
 				Meta: testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
-					testMeta.RuntimeToolName: "Spawn",
+					testMeta.RuntimeToolName: "StartThread",
 				}),
 			},
 		},
@@ -510,23 +510,23 @@ func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testi
 			Update: eventstream.ToolCall{
 				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn zenith: inspect",
 				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-				RawInput: map[string]any{"agent": "zenith", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
+				RawInput: map[string]any{"agent": "zenith", "prompt": "inspect"}, Meta: acpToolNameMeta("StartThread"),
 			},
 		})
 		childThought := narrative(eventstream.ScopeSubagent, "task-1", "codex", "@zenith", eventstream.UpdateAgentThought, "SHARED_REASONING")
-		childThought.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		childThought.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 		model = applyACPEnvelopeForTest(t, model, childThought)
 		childStart := start(eventstream.ScopeSubagent, "task-1", "codex", "@zenith")
-		childStart.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		childStart.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 		model = applyACPEnvelopeForTest(t, model, childStart)
 		childDelta := delta(eventstream.ScopeSubagent, "task-1", "codex", "@zenith")
-		childDelta.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		childDelta.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 		model = applyACPEnvelopeForTest(t, model, childDelta)
 		childFinish := finish(eventstream.ScopeSubagent, "task-1", "codex", "@zenith")
-		childFinish.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		childFinish.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 		model = applyACPEnvelopeForTest(t, model, childFinish)
 		childAnswer := narrative(eventstream.ScopeSubagent, "task-1", "codex", "@zenith", eventstream.UpdateAgentMessage, "SHARED_ASSISTANT")
-		childAnswer.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		childAnswer.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 		model = applyACPEnvelopeForTest(t, model, childAnswer)
 		block := requireMainACPTurnBlockForTest(t, model)
 		if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-1") {
@@ -598,14 +598,14 @@ func TestStandardACPWaitIsHiddenLikeTaskWaitAcrossParticipantAndOverlay(t *testi
 			Update: eventstream.ToolCall{
 				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn reviewer: inspect",
 				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-				RawInput: map[string]any{"agent": "reviewer", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
+				RawInput: map[string]any{"agent": "reviewer", "prompt": "inspect"}, Meta: acpToolNameMeta("StartThread"),
 			},
 		})
 		thought := narrative(eventstream.ScopeSubagent, "task-1", "codex", "@reviewer")
-		thought.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		thought.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 		model = applyACPEnvelopeForTest(t, model, thought)
 		for _, envelope := range waitUpdates(eventstream.ScopeSubagent, "task-1", "codex", "@reviewer") {
-			envelope.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+			envelope.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 			model = applyACPEnvelopeForTest(t, model, envelope)
 		}
 		block := requireMainACPTurnBlockForTest(t, model)
@@ -789,11 +789,11 @@ func TestStandardACPToolPresentationSettlesAcrossParticipantAndOverlay(t *testin
 			Update: eventstream.ToolCall{
 				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn reviewer: inspect",
 				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-				RawInput: map[string]any{"agent": "reviewer", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
+				RawInput: map[string]any{"agent": "reviewer", "prompt": "inspect"}, Meta: acpToolNameMeta("StartThread"),
 			},
 		})
 		for _, envelope := range toolUpdates(eventstream.ScopeSubagent, "task-1", "codex", "@reviewer") {
-			envelope.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+			envelope.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 			model = applyACPEnvelopeForTest(t, model, envelope)
 		}
 		view := requireSubagentOutputViewForTest(t, model, "spawn-1")
@@ -909,10 +909,10 @@ func TestProjectedGrokSparseToolPatchesRetainRichHeaderAcrossParticipantAndOverl
 			Update: eventstream.ToolCall{
 				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn grok: inspect shell",
 				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-				RawInput: map[string]any{"agent": "grok", "prompt": "inspect shell"}, Meta: acpToolNameMeta("Spawn"),
+				RawInput: map[string]any{"agent": "grok", "prompt": "inspect shell"}, Meta: acpToolNameMeta("StartThread"),
 			},
 		})
-		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 		model = apply(t, model, eventstream.ScopeSubagent, parent)
 		view := requireSubagentOutputViewForTest(t, model, "spawn-1")
 		assertTool(t, model, view.block)
@@ -1006,10 +1006,10 @@ func TestGeneratedACPMessageIdentityReplacesCumulativeFinalAcrossToolBoundary(t 
 			Update: eventstream.ToolCall{
 				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn grok: inspect",
 				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-				RawInput: map[string]any{"agent": "grok", "prompt": "inspect"}, Meta: acpToolNameMeta("Spawn"),
+				RawInput: map[string]any{"agent": "grok", "prompt": "inspect"}, Meta: acpToolNameMeta("StartThread"),
 			},
 		})
-		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 		model = apply(t, model, eventstream.ScopeSubagent, parent)
 		view := requireSubagentOutputViewForTest(t, model, "spawn-1")
 		assertTranscript(t, model, view.block)
@@ -1125,10 +1125,10 @@ func TestCapturedGrokBuildShellAndAnonymousFinalStreamRenderAcrossParticipantAnd
 			Update: eventstream.ToolCall{
 				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn grok: inspect shell",
 				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-				RawInput: map[string]any{"agent": "grok", "prompt": "inspect shell"}, Meta: acpToolNameMeta("Spawn"),
+				RawInput: map[string]any{"agent": "grok", "prompt": "inspect shell"}, Meta: acpToolNameMeta("StartThread"),
 			},
 		})
-		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 		model = apply(t, model, eventstream.ScopeSubagent, parent)
 		view := requireSubagentOutputViewForTest(t, model, "spawn-1")
 		assertTranscript(t, model, view.block)
@@ -1261,10 +1261,10 @@ func TestSideACPContentPresenceSurvivesSparseStatusAcrossParticipantAndSubagent(
 			Update: eventstream.ToolCall{
 				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-content-presence", Title: "Spawn executor",
 				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-				RawInput: map[string]any{"agent": "executor"}, Meta: acpToolNameMeta("Spawn"),
+				RawInput: map[string]any{"agent": "executor"}, Meta: acpToolNameMeta("StartThread"),
 			},
 		})
-		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-content-presence", ToolName: "Spawn"}
+		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-content-presence", ToolName: "StartThread"}
 		run(t, model, eventstream.ScopeSubagent, parent, func(model *Model) SubagentEvent {
 			block := requireSubagentOutputViewForTest(t, model, "spawn-content-presence").block
 			if len(block.Events) != 1 {
@@ -1344,10 +1344,10 @@ func TestSideACPProjectedStandardExecuteContentReplacesEarlierTerminalBytesAcros
 			Update: eventstream.ToolCall{
 				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-terminal-collection", Title: "Spawn executor",
 				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-				RawInput: map[string]any{"agent": "executor"}, Meta: acpToolNameMeta("Spawn"),
+				RawInput: map[string]any{"agent": "executor"}, Meta: acpToolNameMeta("StartThread"),
 			},
 		})
-		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-terminal-collection", ToolName: "Spawn"}
+		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-terminal-collection", ToolName: "StartThread"}
 		model = apply(t, model, eventstream.ScopeSubagent, parent)
 		assertResult(t, model, requireSubagentOutputViewForTest(t, model, "spawn-terminal-collection").block)
 	})
@@ -1405,10 +1405,10 @@ func TestMixedIdentityNarrativeRunsStayOrderedAcrossParticipantAndSubagent(t *te
 			Update: eventstream.ToolCall{
 				SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-mixed", Title: "Spawn mixed",
 				Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-				RawInput: map[string]any{"agent": "mixed"}, Meta: acpToolNameMeta("Spawn"),
+				RawInput: map[string]any{"agent": "mixed"}, Meta: acpToolNameMeta("StartThread"),
 			},
 		})
-		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-mixed", ToolName: "Spawn"}
+		parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-mixed", ToolName: "StartThread"}
 		model = apply(t, model, eventstream.ScopeSubagent, parent)
 		assertOrder(t, requireSubagentOutputViewForTest(t, model, "spawn-mixed").block)
 	})

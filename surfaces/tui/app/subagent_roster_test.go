@@ -306,17 +306,17 @@ func TestSubagentRosterColdResumeLoadsOnlySelectedWorkspace(t *testing.T) {
 		{
 			SessionID: "session-old", TaskID: "task-kira", Handle: "kira", Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, ActivityID: "activity-kira", UpdatedAt: time.Unix(103, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "Spawn"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "StartThread"},
 		},
 		{
 			SessionID: "session-old", TaskID: "task-wen", Handle: "wen", Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, ActivityID: "activity-wen", UpdatedAt: time.Unix(102, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-wen", ToolName: "Spawn"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-wen", ToolName: "StartThread"},
 		},
 		{
 			SessionID: "session-old", TaskID: "task-yara", Handle: "yara", Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, ActivityID: "activity-yara", UpdatedAt: time.Unix(101, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-yara", ToolName: "Spawn"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-yara", ToolName: "StartThread"},
 		},
 	}
 	requests := make(chan protocoltaskstream.ReadRequest, len(descriptors))
@@ -369,7 +369,7 @@ func TestSubagentRosterColdResumeLoadsOnlySelectedWorkspace(t *testing.T) {
 			Events: []eventstream.Envelope{tuiExactEnvelope(eventstream.Envelope{
 				Kind: eventstream.KindSessionUpdate, SessionID: "session-old", TurnID: selectedTaskID + ":1",
 				Scope: eventstream.ScopeSubagent, ScopeID: selectedTaskID,
-				ParentTool: &eventstream.ParentToolRelation{ToolCallID: selectedCallID, ToolName: "Spawn"},
+				ParentTool: &eventstream.ParentToolRelation{ToolCallID: selectedCallID, ToolName: "StartThread"},
 				Update: eventstream.ContentChunk{
 					SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "history-answer",
 					Content: eventstream.TextContent{Type: "text", Text: "restored complete child history"},
@@ -377,7 +377,7 @@ func TestSubagentRosterColdResumeLoadsOnlySelectedWorkspace(t *testing.T) {
 			}, "history-cursor-1", 1), tuiExactEnvelope(eventstream.Envelope{
 				Kind: eventstream.KindLifecycle, SessionID: "session-old", TurnID: selectedTaskID + ":1",
 				Scope: eventstream.ScopeSubagent, ScopeID: selectedTaskID, Final: true,
-				ParentTool: &eventstream.ParentToolRelation{ToolCallID: selectedCallID, ToolName: "Spawn"},
+				ParentTool: &eventstream.ParentToolRelation{ToolCallID: selectedCallID, ToolName: "StartThread"},
 				Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
 			}, "history-cursor-2", 2)},
 		}},
@@ -500,7 +500,7 @@ func TestSubagentDirectorySnapshotUsesTerminalStateWithoutMutatingWorkspace(t *t
 	service := &subagentRosterTestTaskStreamService{list: protocoltaskstream.ListResult{Tasks: []protocoltaskstream.TaskDescriptor{{
 		SessionID: "session-1", TaskID: "task-1", Handle: "rhea", Kind: task.KindSubagent,
 		State: task.StateCompleted, Running: false, UpdatedAt: endedAt,
-		ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-rhea", ToolName: "Spawn"},
+		ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-rhea", ToolName: "StartThread"},
 	}}}}
 	model := NewModel(Config{
 		NoColor: true, NoAnimation: true, TaskStreams: bindTaskStreamTestClient(t, service),
@@ -533,7 +533,7 @@ func TestSubagentRosterResumeLetsTerminalDirectorySupersedeHistoricalSpawn(t *te
 		descriptors = append(descriptors, protocoltaskstream.TaskDescriptor{
 			SessionID: "session-old", TaskID: "task-" + handles[index], Handle: handles[index], Kind: task.KindSubagent,
 			State: task.StateCompleted, Running: false, CurrentTurnID: "task-" + handles[index] + ":1", UpdatedAt: endedAt,
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: callIDs[index], ToolName: "Spawn"},
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: callIDs[index], ToolName: "StartThread"},
 		})
 	}
 	service := &subagentRosterTestTaskStreamService{list: protocoltaskstream.ListResult{Tasks: descriptors}}
@@ -549,7 +549,7 @@ func TestSubagentRosterResumeLetsTerminalDirectorySupersedeHistoricalSpawn(t *te
 	for index := range callIDs {
 		model.observeSubagentOutputEvents([]TranscriptEvent{{
 			Kind: TranscriptEventTool, Scope: ACPProjectionMain, OccurredAt: startedAt,
-			ToolCallID: callIDs[index], ToolName: "Spawn", ToolTaskHandle: handles[index],
+			ToolCallID: callIDs[index], ToolName: "StartThread", ToolTaskHandle: handles[index],
 			ToolArgs: handles[index] + "[breeze]: historical task",
 		}})
 		view := model.subagentOutputViews[callIDs[index]]
@@ -583,7 +583,7 @@ func TestSubagentRosterColdResumeLetsDirectorySupersedeFreshReplayShell(t *testi
 	service := &subagentRosterTestTaskStreamService{list: protocoltaskstream.ListResult{Tasks: []protocoltaskstream.TaskDescriptor{{
 		SessionID: "session-old", TaskID: "task-kira", Handle: "kira", Kind: task.KindSubagent,
 		State: task.StateCompleted, Running: false, CurrentTurnID: "task-kira:1", UpdatedAt: endedAt,
-		ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "Spawn"},
+		ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "StartThread"},
 	}}}}
 	model := NewModel(Config{
 		NoColor: true, NoAnimation: true, Workspace: "caelis",
@@ -592,7 +592,7 @@ func TestSubagentRosterColdResumeLetsDirectorySupersedeFreshReplayShell(t *testi
 	model.currentSessionID = "session-old"
 	model.observeSubagentOutputEvents([]TranscriptEvent{{
 		Kind: TranscriptEventTool, Scope: ACPProjectionMain,
-		ToolCallID: "spawn-kira", ToolName: "Spawn", ToolTaskHandle: "kira",
+		ToolCallID: "spawn-kira", ToolName: "StartThread", ToolTaskHandle: "kira",
 		ToolArgs: "kira[self]: historical task",
 	}})
 	view := model.subagentOutputViews["spawn-kira"]
@@ -749,7 +749,7 @@ func TestSubagentDirectoryNewActivityReopensVisibleContentBeforeParentFinal(t *t
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2",
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", OccurredAt: time.Unix(111, 0),
 		Delivery:   &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-rhea", ToolName: "Spawn"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-rhea", ToolName: "StartThread"},
 	}
 	first := base
 	first.Cursor = "cursor-turn-2-1"
@@ -799,7 +799,7 @@ func transcriptTaskDescriptor(turnID string, state task.State, running bool, upd
 	return protocoltaskstream.TaskDescriptor{
 		SessionID: "session-1", TaskID: "task-1", Handle: "rhea", Kind: task.KindSubagent,
 		State: state, Running: running, CurrentTurnID: turnID, UpdatedAt: updatedAt,
-		ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-rhea", ToolName: "Spawn"},
+		ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-rhea", ToolName: "StartThread"},
 	}
 }
 

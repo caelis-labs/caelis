@@ -139,7 +139,7 @@ func TestNarrativeInlineCodeStyleScopesToolNamesInCJKLists(t *testing.T) {
 		"我能做什么：",
 		"",
 		"- 执行 `Shell` 命令（默认沙箱模式，需要时可申请提权）",
-		"- 通过 `Spawn` 委托子任务",
+		"- 通过 `StartThread` 委托子任务",
 	}, "\n")
 	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
 	inlineFG := sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())
@@ -147,7 +147,7 @@ func TestNarrativeInlineCodeStyleScopesToolNamesInCJKLists(t *testing.T) {
 	rendered := glamourRenderNarrative(raw, 180, theme, tuikit.LineStyleAssistant)
 	assertInlineCodeForegroundScope(t, firstStyledLineContaining(rendered, "验证"), inlineFG, "Shell")
 	assertInlineCodeForegroundScope(t, firstStyledLineContaining(rendered, "命令"), inlineFG, "Shell")
-	assertInlineCodeForegroundScope(t, firstStyledLineContaining(rendered, "委托"), inlineFG, "Spawn")
+	assertInlineCodeForegroundScope(t, firstStyledLineContaining(rendered, "委托"), inlineFG, "StartThread")
 
 	ctx := BlockRenderContext{Width: 180, Theme: theme, ThemeKey: themeRenderCacheKey(theme)}
 	stream := RenderTextWithContext(ctx, TextRenderRequest{
@@ -192,7 +192,7 @@ func TestGlamourListStrongDoesNotStealToolCodeColor(t *testing.T) {
 		"- **读/写/编辑文件**（`Read`, `Write`, `Patch`）",
 		"- **搜索文件内容与路径**（`Grep`, `Glob`, `LIST`）",
 		"- **执行 `Shell` 命令**（`RunCommand`）",
-		"- **管理多步骤任务**（`Plan`, `Task`, `Spawn`）",
+		"- **管理多步骤任务**（`Plan`, `Task`, `StartThread`）",
 	}, "\n")
 	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
 	rendered := glamourRenderNarrative(raw, 180, theme, tuikit.LineStyleAssistant)
@@ -210,7 +210,7 @@ func TestGlamourListStrongDoesNotStealToolCodeColor(t *testing.T) {
 
 	codeFG := sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())
 	codeText := textWithSGRForeground(rendered, codeFG)
-	for _, want := range []string{"Read", "Write", "Patch", "Grep", "Glob", "LIST", "Shell", "RunCommand", "Plan", "Task", "Spawn"} {
+	for _, want := range []string{"Read", "Write", "Patch", "Grep", "Glob", "LIST", "Shell", "RunCommand", "Plan", "Task", "StartThread"} {
 		if !strings.Contains(codeText, want) {
 			t.Fatalf("inline code %q should use code foreground\ncodeText=%q\nstyled=%q", want, codeText, rendered)
 		}

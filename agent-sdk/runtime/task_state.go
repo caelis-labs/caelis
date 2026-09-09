@@ -206,23 +206,16 @@ type subagentTask struct {
 	metadata        map[string]any
 	contextUsage    *taskapi.ContextUsageRecord
 
-	stdout                string
-	stderr                string
-	stdoutCursor          int64
-	stderrCursor          int64
-	turnSeq               int64
-	latestFinalText       string
-	latestFinalTurnSeq    int64
-	latestFinalAt         time.Time
-	latestFinalActivityID string
-	// finalResponseCursor is the highest completed child Turn whose exact Final
-	// Response has already been exposed by Spawn or an explicit Task read/wait.
-	// It is an observation frontier, not a second output store; exact text stays
-	// owned by latestFinalText and the durable Task result.
-	finalResponseCursor int64
-	completionReady     bool
-	activityID          string
-	activityGeneration  int64
+	stdout       string
+	stderr       string
+	stdoutCursor int64
+	stderrCursor int64
+	turnSeq      int64
+	// Admitted follow-up ownership can precede the first Task output event.
+	pendingInput       *childTaskActivity
+	completionReady    bool
+	activityID         string
+	activityGeneration int64
 }
 
 func newTaskRuntime(

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -24,6 +25,7 @@ type childTaskActivity struct {
 	turnSeq    int64
 	observer   output.Observer
 	started    sync.Once
+	settled    atomic.Bool
 }
 
 func (a *childTaskActivity) ObserveTaskOutput(ctx context.Context, event output.Event) error {

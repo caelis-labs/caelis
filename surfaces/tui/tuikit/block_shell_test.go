@@ -36,7 +36,7 @@ func TestRenderBlockShell_ExpandedRail(t *testing.T) {
 		Variant:  BlockShellRail,
 		Width:    60,
 		Expanded: true,
-		Kind:     "Spawn",
+		Kind:     "StartThread",
 		Title:    "helper",
 		State:    "running",
 		Elapsed:  3 * time.Second,

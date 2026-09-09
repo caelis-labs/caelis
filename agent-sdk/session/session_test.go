@@ -1493,7 +1493,7 @@ func TestCanonicalizeToolResultPreservesRuntimeTaskMetadata(t *testing.T) {
 		Visibility: VisibilityCanonical,
 		Tool: &EventTool{
 			ID:     "spawn-1",
-			Name:   "Spawn",
+			Name:   "StartThread",
 			Status: "running",
 			Output: map[string]any{"task_id": "reya", "state": "running"},
 		},
@@ -1502,7 +1502,7 @@ func TestCanonicalizeToolResultPreservesRuntimeTaskMetadata(t *testing.T) {
 				"version": 1,
 				"runtime": map[string]any{
 					"tool": map[string]any{
-						"name": "Spawn",
+						"name": "StartThread",
 					},
 					"task": map[string]any{
 						"task_id":          "reya",

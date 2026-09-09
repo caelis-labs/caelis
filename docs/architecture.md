@@ -52,6 +52,7 @@ and acceptance history belong in Git and CI, not in this map.
 | `control/modelcatalog`, `modelconfig`, `modelprofile`, `placement`, `agentbinding` | Provider and model discovery, credentials/configuration, selectable profiles, placement, and fixed Agent bindings |
 | `control/agents` | External ACP Agent identity, preparation, connection, and configuration |
 | `control/memorybinding` | Opaque host-selected Memory binding references, Runtime actor and audience delegation, and immutable logical snapshots |
+| `control/collaboration` | Session-scoped participant discovery, public-result observation, mailboxes, and expiring external grants |
 | `control/mcpconfig`, `control/plugin`, `control/status` | MCP assembly inputs, plugin lifecycle, and product status read models |
 | `app/controlserver` | Authenticated HTTP/SSE Host listener, policy, readiness, and drain |
 | `app/gatewayapp` | Product Host composition, Session Runtime registry, concrete Control services, and shutdown |
@@ -267,7 +268,7 @@ content assets:
 
 ```text
 config.json                 canonical product configuration
-control/control.sqlite      Control operation and ACP preparation state
+control/control.sqlite      Control operations, ACP preparation, pending Agent mail
 control/cursor.key          private cursor-signing secret
 control/spool/v1/           disposable append-only Session and Task delivery traces
 sessions/                   canonical Session documents and event JSONL plus derived SQLite indexes
@@ -280,6 +281,12 @@ logs/, updates/, skills/    diagnostics, update state, and prompt assets
 ```
 
 `control/control.sqlite` is one physical database with separate domain tables.
+`control/collaboration` owns pending Session-scoped Agent mail. Native tools and
+the MCP stdio Surface share its AppServer entry; neither adapter owns a mailbox
+or a second execution path. Taking or dispatching mail removes it without retries.
+Thread tools observe participant conversations; Task addresses individual async
+Jobs. External collaboration grants are process-local and expire independently
+from durable participant history.
 `control/appserver` owns the operation ledger, while Host-private Gateway
 composition owns ACP preparation state. Indexed SQLite columns are checked
 against the complete stored record before cleanup.

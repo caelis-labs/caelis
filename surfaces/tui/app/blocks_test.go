@@ -639,7 +639,7 @@ func TestParticipantIdentifiedFinalStaysWithPreToolMessage(t *testing.T) {
 
 func TestTaskWaitResultDoesNotCompleteLinkedSpawnTool(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	block.UpdateToolWithMeta("spawn-1", "Spawn", "inspect files", "", false, false, ToolUpdateMeta{TaskHandle: "jack"})
+	block.UpdateToolWithMeta("spawn-1", "StartThread", "inspect files", "", false, false, ToolUpdateMeta{TaskHandle: "jack"})
 	block.UpdateToolWithMeta("task-wait-1", "Task", "Wait jack", "final answer", true, false, ToolUpdateMeta{TaskHandle: "jack"})
 
 	if len(block.Events) != 2 {
@@ -716,10 +716,10 @@ func TestCompletedToolKeepsEstablishedExactNameAcrossRepeatedFinal(t *testing.T)
 	t.Parallel()
 
 	block := NewMainACPTurnBlock("session-1")
-	block.UpdateTool("spawn-1", "Spawn", "reviewer: inspect", "done", true, false)
+	block.UpdateTool("spawn-1", "StartThread", "reviewer: inspect", "done", true, false)
 	block.UpdateTool("spawn-1", "SPAWN", "reviewer: inspect", "done", true, false)
 
-	if len(block.Events) != 1 || block.Events[0].Name != "Spawn" || !block.Events[0].Done {
+	if len(block.Events) != 1 || block.Events[0].Name != "StartThread" || !block.Events[0].Done {
 		t.Fatalf("events = %#v, want one final with its established exact runtime name", block.Events)
 	}
 }
@@ -776,8 +776,8 @@ func TestTaskCancelShowsLinkedCommandWithoutCompletingCommand(t *testing.T) {
 
 func TestCompletedSpawnFinalWithSameCallIDReplacesExistingEvent(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	block.UpdateToolWithMeta("spawn-1", "Spawn", "claude: first very long original prompt", "first done", true, false, ToolUpdateMeta{TaskHandle: "amy"})
-	block.UpdateToolWithMeta("spawn-1", "Spawn", "claude: ok", "second done", true, false, ToolUpdateMeta{TaskHandle: "amy"})
+	block.UpdateToolWithMeta("spawn-1", "StartThread", "claude: first very long original prompt", "first done", true, false, ToolUpdateMeta{TaskHandle: "amy"})
+	block.UpdateToolWithMeta("spawn-1", "StartThread", "claude: ok", "second done", true, false, ToolUpdateMeta{TaskHandle: "amy"})
 
 	if len(block.Events) != 1 {
 		t.Fatalf("events = %#v, want one replaced Spawn event", block.Events)

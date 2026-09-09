@@ -61,7 +61,7 @@ func TestRegressionSubagentInputKeepsItsPlaceWithinTurn(t *testing.T) {
 				event := &events[index]
 				event.SessionID = "session-1"
 				event.Scope, event.ScopeID = eventstream.ScopeSubagent, "task-1"
-				event.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+				event.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 				event.Actor = "parent"
 				event.TurnID = "same-child-turn"
 				event.OccurredAt = time.Unix(100+int64(index), 0)

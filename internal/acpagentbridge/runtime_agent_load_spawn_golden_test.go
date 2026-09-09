@@ -32,18 +32,18 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 	alphaFinal := "# Alpha final\n\n- exact markdown\n"
 	betaFinal := "Beta final."
 	events := []*session.Event{
-		loadGoldenToolEvent(session.EventTypeToolCall, "spawn-alpha", "Spawn", "pending",
+		loadGoldenToolEvent(session.EventTypeToolCall, "spawn-alpha", "StartThread", "pending",
 			map[string]any{"agent": "breeze", "prompt": "alpha work"}, nil),
-		loadGoldenToolEvent(session.EventTypeToolCall, "spawn-beta", "Spawn", "pending",
+		loadGoldenToolEvent(session.EventTypeToolCall, "spawn-beta", "StartThread", "pending",
 			map[string]any{"agent": "orbit", "prompt": "beta work"}, nil),
-		loadGoldenToolEvent(session.EventTypeToolResult, "spawn-alpha", "Spawn", "running",
+		loadGoldenToolEvent(session.EventTypeToolResult, "spawn-alpha", "StartThread", "running",
 			nil, map[string]any{
-				"handle": "alpha", "parent_call": "spawn-alpha", "parent_tool": "Spawn",
+				"handle": "alpha", "parent_call": "spawn-alpha", "parent_tool": "StartThread",
 				"state": "running", "target_kind": "subagent",
 			}),
-		loadGoldenToolEvent(session.EventTypeToolResult, "spawn-beta", "Spawn", "running",
+		loadGoldenToolEvent(session.EventTypeToolResult, "spawn-beta", "StartThread", "running",
 			nil, map[string]any{
-				"handle": "beta", "parent_call": "spawn-beta", "parent_tool": "Spawn",
+				"handle": "beta", "parent_call": "spawn-beta", "parent_tool": "StartThread",
 				"state": "running", "target_kind": "subagent",
 			}),
 		loadGoldenNarrativeToolCall(
@@ -57,11 +57,11 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 				"action": "wait",
 				"tasks": []any{
 					map[string]any{
-						"handle": "alpha", "parent_call": "spawn-alpha", "parent_tool": "Spawn",
+						"handle": "alpha", "parent_call": "spawn-alpha", "parent_tool": "StartThread",
 						"state": "completed", "target_kind": "subagent", "final_message": alphaFinal,
 					},
 					map[string]any{
-						"handle": "beta", "parent_call": "spawn-beta", "parent_tool": "Spawn",
+						"handle": "beta", "parent_call": "spawn-beta", "parent_tool": "StartThread",
 						"state": "running", "target_kind": "subagent",
 					},
 					map[string]any{
@@ -70,7 +70,7 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 					},
 				},
 			}),
-		loadGoldenToolEvent(session.EventTypeToolResult, "spawn-alpha", "Spawn", "completed",
+		loadGoldenToolEvent(session.EventTypeToolResult, "spawn-alpha", "StartThread", "completed",
 			nil, map[string]any{
 				"handle": "alpha", "state": "completed", "target_kind": "subagent",
 				"final_message": alphaFinal,
@@ -86,16 +86,16 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 				"action": "wait",
 				"tasks": []any{
 					map[string]any{
-						"handle": "beta", "parent_call": "spawn-beta", "parent_tool": "Spawn",
+						"handle": "beta", "parent_call": "spawn-beta", "parent_tool": "StartThread",
 						"state": "completed", "target_kind": "subagent", "final_message": betaFinal,
 					},
 					map[string]any{
-						"handle": "alpha", "parent_call": "spawn-alpha", "parent_tool": "Spawn",
+						"handle": "alpha", "parent_call": "spawn-alpha", "parent_tool": "StartThread",
 						"state": "completed", "target_kind": "subagent", "final_message": "duplicate alpha",
 					},
 				},
 			}),
-		loadGoldenToolEvent(session.EventTypeToolResult, "spawn-beta", "Spawn", "completed",
+		loadGoldenToolEvent(session.EventTypeToolResult, "spawn-beta", "StartThread", "completed",
 			nil, map[string]any{
 				"handle": "beta", "state": "completed", "target_kind": "subagent",
 				"final_message": betaFinal,

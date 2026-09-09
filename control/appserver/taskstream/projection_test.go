@@ -18,7 +18,7 @@ func TestProjectTaskFrameDoesNotProjectChildPermissionOutsideControl(t *testing.
 		TurnID:    "turn-1",
 		SessionID: "root-session",
 		CallID:    "spawn-call-1",
-		ToolName:  "Spawn",
+		ToolName:  "StartThread",
 		TaskID:    "task-1",
 		Scope:     eventstream.ScopeMain,
 	}
@@ -335,7 +335,7 @@ func TestProjectTaskFrameProjectsSubagentSemanticEventWithoutParentTerminal(t *t
 		TurnID:            "turn-1",
 		SessionID:         "root-session",
 		CallID:            "spawn-call-1",
-		ToolName:          "Spawn",
+		ToolName:          "StartThread",
 		TaskID:            "jack",
 		DisplayTerminalID: "spawn-call-1",
 		Scope:             eventstream.ScopeMain,
@@ -638,7 +638,7 @@ func TestProjectTaskFrameDoesNotPromoteDelegatedResultIntoParentTool(t *testing.
 	req := taskFrameProjectionRequest{
 		SessionID:         "root-session",
 		CallID:            "spawn-call-1",
-		ToolName:          "Spawn",
+		ToolName:          "StartThread",
 		TaskID:            "jack",
 		TurnID:            "subagent-jack",
 		DisplayTerminalID: "spawn-call-1",
@@ -665,7 +665,7 @@ func TestProjectTaskFrameSuppressesEmbeddedParentToolEcho(t *testing.T) {
 	req := taskFrameProjectionRequest{
 		SessionID: "root-session",
 		CallID:    "spawn-call-1",
-		ToolName:  "Spawn",
+		ToolName:  "StartThread",
 		TaskID:    "jack",
 		Scope:     eventstream.ScopeMain,
 	}
@@ -689,7 +689,7 @@ func TestProjectTaskFrameSuppressesEmbeddedParentToolEcho(t *testing.T) {
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
 					ToolCallID:    "spawn-call-1",
-					Kind:          "Spawn",
+					Kind:          "StartThread",
 					Title:         `SPAWN {"agent":"self","prompt":"inspect"}`,
 					Status:        "running",
 					RawInput:      map[string]any{"agent": "self", "prompt": "inspect"},
@@ -801,7 +801,7 @@ func spawnProjectionRequestForTest() taskFrameProjectionRequest {
 		TurnID:            "turn-1",
 		SessionID:         "root-session",
 		CallID:            "spawn-call-1",
-		ToolName:          "Spawn",
+		ToolName:          "StartThread",
 		TaskID:            "jack",
 		DisplayTerminalID: "spawn-call-1",
 		Scope:             eventstream.ScopeMain,
@@ -825,7 +825,7 @@ func assertSpawnSemanticEnvelope(t *testing.T, env eventstream.Envelope, taskID 
 	if env.Kind != eventstream.KindSessionUpdate || env.Scope != eventstream.ScopeSubagent || env.ScopeID != taskID {
 		t.Fatalf("child envelope = %#v, want scoped subagent semantic event for task %q", env, taskID)
 	}
-	if env.ParentTool == nil || env.ParentTool.ToolCallID != parentCallID || env.ParentTool.ToolName != "Spawn" {
+	if env.ParentTool == nil || env.ParentTool.ToolCallID != parentCallID || env.ParentTool.ToolName != "StartThread" {
 		t.Fatalf("child parent relation = %#v, want SPAWN/%q", env.ParentTool, parentCallID)
 	}
 	assertStreamDelivery(t, env, true)
@@ -915,7 +915,7 @@ func runtimeTaskMeta(meta map[string]any) map[string]any {
 func TestStreamParentEchoMatchingUsesExactToolName(t *testing.T) {
 	t.Parallel()
 
-	req := taskFrameProjectionRequest{CallID: "call-1", ToolName: "Spawn"}
+	req := taskFrameProjectionRequest{CallID: "call-1", ToolName: "StartThread"}
 	event := &session.Event{Tool: &session.EventTool{ID: "call-1", Name: "SPAWN"}}
 	if streamFrameSessionEventIsParentToolEcho(req, event) {
 		t.Fatal("SPAWN alias unexpectedly matched exact Spawn parent")

@@ -65,7 +65,7 @@ func TestValidateEventChildOriginRequiresDurableRelation(t *testing.T) {
 		ScopeID:       "task-1",
 		TaskID:        "task-1",
 		SourceEventID: "child-session:7",
-		ParentTool:    EventParentTool{CallID: "spawn-1", Name: "Spawn"},
+		ParentTool:    EventParentTool{CallID: "spawn-1", Name: "StartThread"},
 	}
 	if err := ValidateEventChildOrigin(valid); err != nil {
 		t.Fatalf("ValidateEventChildOrigin(valid) error = %v", err)

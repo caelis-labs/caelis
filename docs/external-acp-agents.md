@@ -54,18 +54,79 @@ for standard wire behavior.
 
 An idle external collaborator receives `session/prompt` on its existing ACP
 Session. A running collaborator receives `_session/steering` only when the Agent
-advertised that capability; otherwise active input is rejected until the
-current Turn finishes. Spawn reports this fixed capability once as
-`supports_steering`; Task read/wait do not repeat it.
+advertised `_meta.steering.supported`. This is a negotiated custom extension,
+not a standard ACP v1 method. Direct running input remains unsupported without
+it. StartThread reports this capability as `supports_steering`.
 
-`SendMessage {to, message}` is the model-facing address adapter over those
-standard methods. Caelis binds trusted source identity and dispatches one
-Agent-communication input. Accepted input is projected as standard ACP
-`session/update` with `user_message_chunk`; display-only source metadata may use
-`_meta.caelis.agent_communication`, while typed event identity remains
-authoritative. It has no delivery MessageID, durable mailbox, target completion
-claim, or Task mutation. Ambiguous post-dispatch outcomes are not blindly
-retried.
+Product Agents share one Control-owned mailbox service within their owning work
+Session. `ListThreads` discovers its participants. `SendMessage {to, message,
+reply_to?}` places a message in the recipient's persistent mailbox and returns
+its identity; success confirms queuing, not completion. `ReceiveMessages` takes
+up to 32 messages from the caller's own mailbox, bounded by encoded JSON size
+within the shared 4 MiB response limit. Messages outside the returned batch
+remain queued. Message text is limited to 65,536 bytes; `reply_to`, when present,
+is a canonical message UUID. `ReadThread` returns a
+participant's latest public result and observation cursor, not its reasoning or
+complete conversation. Supplying `after` suppresses already observed output.
+`WaitThread` waits up to 60 seconds for incoming mail or new terminal/attention
+states among at most eight selected threads. It returns the wake reason,
+consumed messages and thread observations; timeout does not cancel work.
+Neither tool exposes the parent transcript or cross-Session routing.
+
+Only the controller receives `StartThread`. It creates a persistent participant
+conversation and starts its initial prompt, returning identity and status without
+folding its result into the creation result. Follow-up messages reuse that
+conversation. Participant removal is an internal Control operation; it is not
+exposed as a model tool and preserves Session history. Running or unresolved
+participants must settle before removal.
+
+Taking a message or claiming it for automatic delivery removes it from the
+mailbox. A failed dispatch or lost tool response can lose the message; there is
+no acknowledgement, retry, or redelivery protocol. Repeating SendMessage creates
+another message. Pull and automatic delivery share the same atomic removal.
+Automatic delivery is serial per recipient and independent across recipients,
+with a ten-second deadline per attempt. A deadline does not establish whether
+the peer executed the input and does not trigger a retry.
+Agents without steering can take mail through MCP during their current turn;
+otherwise the Host waits for a known terminal activity before starting another
+prompt on the existing Session. An unresolved execution does not qualify as idle.
+
+Native tools and the `caelis collaboration mcp --stdio` bridge call the same
+AppServer service. The bridge uses Host-issued `CAELIS_COLLABORATION_URL` and
+`CAELIS_COLLABORATION_TOKEN` environment values, never general Host credentials.
+External child creation and resume inject this stdio server through ACP
+`mcpServers` when the Host has a child Control endpoint. The built-in Codex
+adapter translates stdio MCP declarations into per-thread app-server overrides;
+HTTP and SSE injection are not supported by that adapter. Bridge exit does not
+cancel queued messages.
+
+The Host keeps random bearer grants in memory. Each grant binds one work
+Session, immutable participant instance, and exact ACP Session. A pending grant
+must bind after a successful handshake within two minutes. An active grant has
+a fixed 24-hour deadline; tool calls and repeated binding cannot extend it.
+Before another idle turn, a connection with less than one hour remaining is
+replaced and resumes the same ACP Session with a new grant. Expired credentials
+are rejected even during a long turn. A peer that cannot resume reports a
+reconnection error rather than silently starting another Session.
+
+Every call checks the current participant instance and work-Session lifecycle;
+mailbox waits recheck authorization as they wait. The first call may wait up to
+two seconds for the initial participant commit. Connection close or failure,
+participant removal, replacement activation and Host shutdown invalidate the
+affected grant. A closed work Session cannot use existing grants. Host restart
+requires new grants. A bearer copied elsewhere still represents its original
+identity; it never grants access to a caller-selected Session.
+
+Credential values remain outside model prompts, tool schemas, results and
+canonical history. Tool schemas are stable across credential changes. Pending
+mail survives connection replacement, but consumed mail is never retried.
+
+Delivered input follows the ordinary Agent-communication context path. Accepted
+input is projected as ACP `session/update` with `user_message_chunk`; display-only
+source metadata may use `_meta.caelis.agent_communication`, while typed event
+identity remains authoritative. Caelis mailbox IDs are separate from peer-owned
+ACP message IDs. Delivered context remains in canonical Session history after
+its mailbox entry is removed.
 
 An admitted `session/prompt` remains open until its execution reaches a Turn
 terminal. If ACP forwarding fails, the bridge can no longer reliably service
@@ -96,11 +157,16 @@ one `.1` backup. Error details may contain sensitive peer data or paths; review
 logs before sharing. Prompts, launch environments and child stderr are not
 attached to these records.
 
-Task observes subsequent collaborator output on demand. A terminal response
-retrieved through Task read/wait should not also be sent as a message. Durable
-participant placement preserves the collaborator handle, ACP Session ID, and
-Task identity across Runtime or Host restart; later input resumes that exact
-Session rather than substituting `session/new`.
+ReadThread and WaitThread observe subsequent public results. Thread identity
+and ACP Session placement survive Runtime or Host restart; later input resumes
+that exact Session rather than substituting `session/new`.
+
+Task addresses individual asynchronous Jobs. Its model-facing operations reject
+participant handles. Job input and cancellation depend on the producer's
+capabilities; RunCommand is the current built-in Job producer. The standalone
+SDK direct-input SendMessage tool is available only when an embedder explicitly
+assembles it. Product assembly always uses the Control mailbox tools; Runtime
+never injects a legacy SendMessage tool implicitly.
 
 A nested Spawn performed inside a third-party participant stays behind that
 participant boundary. Caelis may render its final standard tool result, but it

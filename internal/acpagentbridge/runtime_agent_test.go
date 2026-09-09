@@ -1330,7 +1330,7 @@ func (r terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (age
 		terminalID = "terminal-1"
 	}
 	rawInput := map[string]any{"command": "printf streamed"}
-	if strings.EqualFold(toolName, "Spawn") {
+	if strings.EqualFold(toolName, "StartThread") {
 		rawInput = map[string]any{"agent": "claude", "prompt": "stream child output"}
 	}
 	events := []*session.Event{
@@ -1431,7 +1431,7 @@ func (r terminalBridgeFinalRuntime) Run(_ context.Context, req agent.RunRequest)
 		terminalID = "terminal-1"
 	}
 	rawInput := map[string]any{"command": "printf streamed"}
-	if strings.EqualFold(toolName, "Spawn") {
+	if strings.EqualFold(toolName, "StartThread") {
 		rawInput = map[string]any{"agent": "claude", "prompt": "stream child output"}
 	}
 	return agent.RunResult{

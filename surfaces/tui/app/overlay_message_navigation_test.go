@@ -182,14 +182,14 @@ func applyOverlayNavSpawn(t *testing.T, model *Model, turnID, callID, handle, pr
 		Update: eventstream.ToolCall{
 			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: callID, Title: "Spawn breeze",
 			Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-			RawInput: map[string]any{"agent": "breeze", "prompt": prompt}, Meta: acpToolNameMeta("Spawn"),
+			RawInput: map[string]any{"agent": "breeze", "prompt": prompt}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	return applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: turnID, Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: callID, Status: &running,
-			RawOutput: map[string]any{"handle": handle, "state": "running"}, Meta: acpToolNameMeta("Spawn"),
+			RawOutput: map[string]any{"handle": handle, "state": "running"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 }

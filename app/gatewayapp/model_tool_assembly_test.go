@@ -51,9 +51,14 @@ func TestProductAgentFinalModelRequestIncludesCanonicalTaskCommunicationTools(t 
 	}
 
 	functions := provider.Functions(t)
-	for _, name := range []string{spawn.ToolName, tasktool.ToolName, sendmessage.ToolName} {
+	for _, name := range []string{spawn.ToolName, tasktool.ToolName, sendmessage.ToolName, "ListThreads", "ReceiveMessages", "WaitThread", "ReadThread"} {
 		if got := countFinalToolFunctions(functions, name); got != 1 {
 			t.Fatalf("final model tools contain %d %s definitions, want exactly 1: %#v", got, name, functions)
+		}
+	}
+	for _, retired := range []string{"Spawn", "CloseThread"} {
+		if countFinalToolFunctions(functions, retired) != 0 {
+			t.Fatalf("unexpected tool %s", retired)
 		}
 	}
 	spawnFunction := finalToolFunction(t, functions, spawn.ToolName)
@@ -68,10 +73,10 @@ func TestProductAgentFinalModelRequestIncludesCanonicalTaskCommunicationTools(t 
 	taskFunction := finalToolFunction(t, functions, tasktool.ToolName)
 	assertFinalToolProperties(t, taskFunction, "action", "handle", "input")
 	sendFunction := finalToolFunction(t, functions, sendmessage.ToolName)
-	if got, _ := sendFunction["description"].(string); got != "Send one message to another Agent. An Agent with supports_steering=true can receive messages while running; otherwise it can receive messages only while idle. Success confirms dispatch, not completion." {
+	if got, _ := sendFunction["description"].(string); !strings.Contains(got, "Success means queued, not completed") {
 		t.Fatalf("final SendMessage description = %q", got)
 	}
-	assertFinalToolProperties(t, sendFunction, "to", "message")
+	assertFinalToolProperties(t, sendFunction, "to", "message", "reply_to")
 	sendParameters := finalToolParameters(sendFunction)
 	if required := stringSliceFromFinalToolValue(sendParameters["required"]); !slices.Equal(required, []string{"to", "message"}) {
 		t.Fatalf("final SendMessage required = %#v, want [to message]", required)

@@ -1181,7 +1181,7 @@ func testChildApprovalRequest(taskID string, path string) *agent.ApprovalRequest
 			"scope_id":       taskID,
 			"task_id":        taskID,
 			"parent_call_id": "spawn-call-1",
-			"parent_tool":    "Spawn",
+			"parent_tool":    "StartThread",
 		},
 	}
 }
@@ -1194,7 +1194,7 @@ func assertChildPermissionEnvelope(t *testing.T, env eventstream.Envelope, reque
 	if env.Scope != eventstream.ScopeSubagent || env.ScopeID != taskID {
 		t.Fatalf("child permission scope = %q/%q, want subagent/%q", env.Scope, env.ScopeID, taskID)
 	}
-	if env.ParentTool == nil || env.ParentTool.ToolCallID != "spawn-call-1" || env.ParentTool.ToolName != "Spawn" {
+	if env.ParentTool == nil || env.ParentTool.ToolCallID != "spawn-call-1" || env.ParentTool.ToolName != "StartThread" {
 		t.Fatalf("child parent relation = %#v, want SPAWN/spawn-call-1", env.ParentTool)
 	}
 	if env.Delivery == nil || env.Delivery.Mode != eventstream.DeliveryMirror {

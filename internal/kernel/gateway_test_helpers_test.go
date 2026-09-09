@@ -185,7 +185,7 @@ func (r *childApprovalRuntime) Run(ctx context.Context, req agent.RunRequest) (a
 			"scope_id":       "task-1",
 			"task_id":        "task-1",
 			"parent_call_id": "spawn-call-1",
-			"parent_tool":    "Spawn",
+			"parent_tool":    "StartThread",
 		},
 	})
 	if err != nil {

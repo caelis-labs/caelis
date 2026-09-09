@@ -11,7 +11,7 @@
   "actor": "reviewer",
   "parent_tool": {
     "tool_call_id": "spawn-call-1",
-    "tool_name": "Spawn"
+    "tool_name": "StartThread"
   },
   "delivery": {
     "mode": "transient"

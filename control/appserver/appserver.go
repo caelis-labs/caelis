@@ -5,12 +5,15 @@ import (
 	"fmt"
 
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/collaboration"
 )
 
 // AppServerServices is the complete transport-neutral product capability set
 // exposed by an AppServer. Presentation surfaces bind a principal once and
 // consume AppServerClients; they do not assemble individual Control services.
 type AppServerServices struct {
+	// Collaboration is the source-bound Agent mailbox surface.
+	Collaboration *collaboration.Service
 	Sessions      Service
 	Participants  ParticipantService
 	Status        StatusService

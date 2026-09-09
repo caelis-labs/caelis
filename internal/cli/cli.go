@@ -72,6 +72,9 @@ var (
 )
 
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "collaboration" {
+		return runCollaboration(ctx, args[1:], stdin, stdout)
+	}
 	providers.SetAttributionBuildVersion(version.String())
 	return run(ctx, args, stdin, stdout, stderr)
 }

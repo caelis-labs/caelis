@@ -131,7 +131,7 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"Write",
 		"Patch",
 		"Task",
-		"Spawn",
+		"StartThread",
 	} {
 		if containsStandalonePromptTerm(toolNeutralPrompt, forbidden) {
 			t.Fatalf("prompt should not contain tool-coupled %q:\n%s", forbidden, prompt)
@@ -190,7 +190,7 @@ func TestBuildSystemPromptCoreContractIsConciseAndToolAgnostic(t *testing.T) {
 		"Write",
 		"Patch",
 		"Task",
-		"Spawn",
+		"StartThread",
 		"with_additional_permissions",
 	} {
 		if containsStandalonePromptTerm(toolNeutralPrompt, forbidden) {
@@ -228,7 +228,7 @@ func TestSystemPromptCollaborationGuidanceIsMainOnlyAndIdempotent(t *testing.T) 
 		t.Fatalf("collaboration guidance is not idempotent:\n%s", got)
 	}
 	for _, want := range []string{
-		"Spawn a collaborating Agent only for independent work that benefits from parallelism or focused expertise.",
+		"StartThread creates a collaborating Agent only for independent work that benefits from parallelism or focused expertise.",
 		"Give each collaborator a self-contained task: goal, scope, constraints, edit permission, and expected output.",
 		"Own integration, validation, and the user-facing result. Verify only findings that affect the next action; do not repeat completed work.",
 	} {

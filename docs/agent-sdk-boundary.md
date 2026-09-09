@@ -30,16 +30,16 @@ when a required feature is absent.
 
 The assembled Tool set is the execution-admission boundary. Product policy may
 further restrict an admitted invocation, but tool names do not form a second
-allowlist. A Spawn-created collaborator receives `SendMessage` but not `Spawn`,
+allowlist. A StartThread-created collaborator receives mailbox tools but not `StartThread`,
 keeping Agent collaboration one level deep.
 
-Spawn uses a Session-scoped Task identity. An optional handle must be unique.
+Participant startup uses an internal Session-scoped execution identity. An optional handle must be unique.
 Optional context transfer is derived by the host's recipient-specific
 `ContextRouter`; an empty transfer or an unavailable router is not child-start
 failure. A Runner may release a requested handle after an error only when it
 positively proves that no child or producer started. Unknown creation outcomes
-retain the handle and reject blind retry. A successful Spawn result declares
-`supports_steering`; Task read/wait do not repeat that fixed capability.
+retain the handle and reject blind retry. A successful StartThread result declares
+`supports_steering`; thread observations do not repeat that fixed capability.
 
 Runtime exposes producer-side source and Task-output observers installed before
 external effects begin. Observer calls are synchronous handoff points, not an
@@ -51,19 +51,20 @@ observation began before the Task's first possible output. A
 `ProducerClosed` event means that stable producer can emit no future output;
 Control alone interprets that fact as cache-writer reclamation.
 
-Task cancel is a command-task capability. Spawned Agent collaborators never
-advertise it and the model-facing Task tool rejects cancel for their handles.
+Task addresses individual asynchronous Jobs. The model-facing tool rejects
+participant handles for every action. Input and cancellation follow the Job
+producer capabilities; command execution is the current built-in producer.
 
 ## Agent input and task observation
 
 `agent-sdk.AgentInputSender` is the provider-neutral Agent input contract.
 Runtime resolves Session-scoped addresses and binds trusted source identity.
-`SendMessage {to, message}` submits one Agent-communication input and claims
+The explicitly assembled standalone SDK `SendMessage {to, message}` submits one Agent-communication input and claims
 neither target completion nor Task mutation. An Agent with
 `supports_steering=true` can accept it while running; other Agents accept it
 only while idle.
 
-Task remains the lifecycle and final-result abstraction. Command stdin is a
+The internal Task service remains the lifecycle and final-result abstraction. Command stdin is a
 separate Task capability; Agent communication never falls back to Task input.
 The SDK may expose a bounded current/final command result and ACP child final
 result, but it does not retain Surface replay history or understand how a

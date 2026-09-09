@@ -457,7 +457,7 @@ func TestEnvelopeBaseFromSessionEventUsesDurableChildOrigin(t *testing.T) {
 			ParticipantID: "child-1",
 			ACPSessionID:  "acp-child-1",
 			SourceEventID: "task-1:8",
-			ParentTool:    session.EventParentTool{CallID: "spawn-1", Name: "Spawn"},
+			ParentTool:    session.EventParentTool{CallID: "spawn-1", Name: "StartThread"},
 		},
 		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
 			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
@@ -469,7 +469,7 @@ func TestEnvelopeBaseFromSessionEventUsesDurableChildOrigin(t *testing.T) {
 	if base.Scope != eventstream.ScopeSubagent || base.ScopeID != "task-1" || base.ParticipantID != "child-1" {
 		t.Fatalf("base scope = %#v", base)
 	}
-	if base.ParentTool == nil || base.ParentTool.ToolCallID != "spawn-1" || base.ParentTool.ToolName != "Spawn" {
+	if base.ParentTool == nil || base.ParentTool.ToolCallID != "spawn-1" || base.ParentTool.ToolName != "StartThread" {
 		t.Fatalf("base parent relation = %#v", base.ParentTool)
 	}
 	if base.Delivery == nil || base.Delivery.Mode != eventstream.DeliveryMirror {
@@ -496,7 +496,7 @@ func TestEnvelopeBaseKeepsCanonicalizedDurableChildDeltaNonFinal(t *testing.T) {
 			Scope:      session.EventChildScopeSubagent,
 			ScopeID:    "task-1",
 			TaskID:     "task-1",
-			ParentTool: session.EventParentTool{CallID: "spawn-1", Name: "Spawn"},
+			ParentTool: session.EventParentTool{CallID: "spawn-1", Name: "StartThread"},
 		},
 		Message: &message,
 		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{

@@ -19,7 +19,6 @@ import (
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -463,7 +462,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 				return kernelimpl.ToolAugmentation{}, err
 			}
 			spawnedChild := sessionvisibility.IsSpawnedSubagentSession(activeSession)
-			augmentedTools := []tool.Tool{sendmessage.New()}
+			augmentedTools := s.collaborationTools(activeSession)
 			if !spawnedChild {
 				agents, targets, resolveErr := s.delegationSpawnConfiguration(req.Session)
 				if resolveErr != nil {

@@ -67,7 +67,7 @@ func TestReceivedAgentCommunicationOpensOverlayForLongMessage(t *testing.T) {
 		Update: eventstream.ToolCall{
 			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
 			Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
-			RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("Spawn"),
+			RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	running := eventstream.ToolStatusInProgress
@@ -75,7 +75,7 @@ func TestReceivedAgentCommunicationOpensOverlayForLongMessage(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
-			RawOutput: map[string]any{"handle": "kian", "state": "running"}, Meta: acpToolNameMeta("Spawn"),
+			RawOutput: map[string]any{"handle": "kian", "state": "running"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	view := requireSubagentOutputViewForTest(t, model, "spawn-1")

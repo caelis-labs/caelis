@@ -4,7 +4,7 @@
     "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "spawn-call-1",
-      "title": "Spawn breeze: explain your capability",
+      "title": "StartThread breeze: explain your capability",
       "kind": "execute",
       "status": "pending",
       "rawInput": {
@@ -15,7 +15,7 @@
         "caelis": {
           "runtime": {
             "tool": {
-              "name": "Spawn"
+              "name": "StartThread"
             }
           },
           "version": 1
@@ -28,13 +28,13 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "spawn-call-1",
-      "title": "Spawn",
+      "title": "StartThread",
       "kind": "execute",
       "status": "in_progress",
       "rawOutput": {
         "handle": "yara",
         "parent_call": "spawn-call-1",
-        "parent_tool": "Spawn",
+        "parent_tool": "StartThread",
         "state": "running",
         "target_kind": "subagent"
       },
@@ -42,7 +42,7 @@
         "caelis": {
           "runtime": {
             "tool": {
-              "name": "Spawn"
+              "name": "StartThread"
             }
           },
           "version": 1
@@ -110,7 +110,7 @@
             "final_message": "exact fallback final",
             "handle": "yara",
             "parent_call": "spawn-call-1",
-            "parent_tool": "Spawn",
+            "parent_tool": "StartThread",
             "state": "completed",
             "target_kind": "subagent"
           }

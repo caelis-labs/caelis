@@ -497,7 +497,13 @@ func (r *Runner) submitIdleChildInput(
 			"Target Agent is %s", state,
 		))
 	}
-	if state != delegation.StateCompleted {
+	if !run.client.CollaborationReady() {
+		if err := run.client.Close(ctx); err != nil {
+			slot.opMu.Unlock()
+			return agent.ChildInputResult{}, childInputProvenFailure("close expired collaboration connection", err)
+		}
+	}
+	if state != delegation.StateCompleted || !run.client.CollaborationReady() {
 		recovery := childInputReconnectRequest(run, req.Target)
 		var err error
 		run, err = r.reconnectChildEndpointLocked(ctx, run.anchor, recovery, slot)

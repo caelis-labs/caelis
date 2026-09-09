@@ -29,8 +29,9 @@ type historyThread struct {
 }
 
 func (a *agent) loadSession(ctx context.Context, request acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
-	if len(request.McpServers) != 0 {
-		return acp.LoadSessionResponse{}, acp.NewInvalidParams(map[string]any{"error": "Codex built-in adapter does not support ACP MCP server injection yet"})
+	config, configErr := mcpConfig(request.McpServers)
+	if configErr != nil {
+		return acp.LoadSessionResponse{}, acp.NewInvalidParams(map[string]any{"error": configErr.Error()})
 	}
 	roots, err := a.options.Workspace.validate(request.Cwd, request.AdditionalDirectories)
 	if err != nil {
@@ -60,6 +61,7 @@ func (a *agent) loadSession(ctx context.Context, request acp.LoadSessionRequest)
 
 	var opened threadOpenResponse
 	if err := a.backend.rpc.Request(ctx, "thread/resume", map[string]any{
+		"config":   config,
 		"threadId": threadID, "cwd": request.Cwd,
 		"runtimeWorkspaceRoots": roots, "excludeTurns": true,
 		"approvalPolicy": "on-request", "sandbox": "workspace-write",

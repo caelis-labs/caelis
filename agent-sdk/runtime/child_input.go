@@ -162,10 +162,18 @@ func (r *Runtime) submitChildInputLocked(
 	if !ok || runner == nil {
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent cannot receive follow-up messages")
 	}
-	return runner.SubmitChildInput(ctx, agent.ChildInputRequest{
+	result, err := runner.SubmitChildInput(ctx, agent.ChildInputRequest{
 		Target: target, Source: source, ActivityID: activityID, Output: outputObserver, Completion: completion, Input: command.Input,
 		DisplayInput: command.DisplayInput, ContentParts: command.ContentParts,
 	})
+	if result.StartedActivity || errorcode.Is(err, errorcode.UnknownOutcome) {
+		if sink, ok := completion.(subagentCompletionSink); ok && sink.activity != nil {
+			task.mu.Lock()
+			task.pendingInput = sink.activity
+			task.mu.Unlock()
+		}
+	}
+	return result, err
 }
 
 func (r *Runtime) prepareChildTaskOutput(ctx context.Context, task *subagentTask) (string, output.Observer, delegation.CompletionSink, error) {

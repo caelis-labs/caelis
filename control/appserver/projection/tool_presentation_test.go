@@ -29,7 +29,7 @@ func TestBuiltinToolPresentationRequiresExactDefinitionName(t *testing.T) {
 	if got := projectedToolKind(tasktool.ToolName); got != projectedToolKindOther {
 		t.Fatalf("projectedToolKind(Task) = %q, want control-plane other", got)
 	}
-	if got := projectedToolTitle(spawn.ToolName, map[string]any{"agent": "self", "prompt": "inspect"}, eventstream.ToolStatusPending); got != "Spawn self: inspect" {
+	if got := projectedToolTitle(spawn.ToolName, map[string]any{"agent": "self", "prompt": "inspect"}, eventstream.ToolStatusPending); got != "StartThread self: inspect" {
 		t.Fatalf("projectedToolTitle(Spawn) = %q", got)
 	}
 }

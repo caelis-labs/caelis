@@ -25,7 +25,7 @@ func TestACPTaskStreamMuxDoesNotTreatChildLifecycleAsObservationControl(t *testi
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindLifecycle, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
 		ScopeID: "task-1", TurnID: "child-turn-2",
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
 		Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateRunning, Reason: "turn_started"},
 	})
 
@@ -46,7 +46,7 @@ func TestACPTaskStreamMuxFollowsMessageAuthoredSubagentActivityUntilSeal(t *test
 		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
 			SessionID: "session-1", TaskID: "task-1", Handle: "orbit", Kind: task.KindSubagent,
 			State: task.StateRunning, Running: true,
-			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
+			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
 		}}},
 	}
 	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")

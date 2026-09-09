@@ -220,7 +220,8 @@ func builtInCollaborationPrompt() string {
 	return strings.Join([]string{
 		"## Collaboration",
 		"",
-		"- Spawn a collaborating Agent only for independent work that benefits from parallelism or focused expertise.",
+		"- After a participant completion notice, use ReadThread with its handle to read its public result; WaitThread can wait for a new result or incoming messages.",
+		"- StartThread creates a collaborating Agent only for independent work that benefits from parallelism or focused expertise.",
 		"- Give each collaborator a self-contained task: goal, scope, constraints, edit permission, and expected output.",
 		"- Own integration, validation, and the user-facing result. Verify only findings that affect the next action; do not repeat completed work.",
 	}, "\n")

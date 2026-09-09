@@ -105,7 +105,7 @@ func TestACPTaskStreamMuxForwardsAgentCommunicationWithSenderIdentity(t *testing
 		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
 			SessionID: "session-1", TaskID: "task-1", Handle: "maia", Kind: task.KindSubagent,
 			State: task.StateRunning, Running: true,
-			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
+			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
 		}}},
 	}
 	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
@@ -124,7 +124,7 @@ func TestACPTaskStreamMuxForwardsAgentCommunicationWithSenderIdentity(t *testing
 		ScopeID:   "task-1",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		AgentCommunication: &eventstream.AgentCommunication{
 			Source: eventstream.ActorIdentity{
@@ -239,7 +239,7 @@ func TestEmitTaskAwareControlEnvelopeSuppressesChildStreamAndClosesParentOnceFro
 		ScopeID:   "task-yara",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Update: eventstream.ContentChunk{
 			SessionUpdate: eventstream.UpdateAgentMessage,
@@ -250,7 +250,7 @@ func TestEmitTaskAwareControlEnvelopeSuppressesChildStreamAndClosesParentOnceFro
 	taskEvents <- eventstream.Envelope{
 		Kind: eventstream.KindLifecycle, SessionID: "session-1", TurnID: "child-turn-1",
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-yara",
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
 		Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
 		Final:      true,
 	}
@@ -274,7 +274,7 @@ func TestEmitTaskAwareControlEnvelopeSuppressesChildStreamAndClosesParentOnceFro
 					"final_message": "fallback final",
 					"handle":        "yara",
 					"parent_call":   "spawn-1",
-					"parent_tool":   "Spawn",
+					"parent_tool":   "StartThread",
 					"state":         "completed",
 					"target_kind":   "subagent",
 				}},
@@ -774,7 +774,7 @@ func TestACPTaskStreamAnchorDoesNotTrustRuntimeToolName(t *testing.T) {
 		output   map[string]any
 	}{
 		{name: "command", toolName: "RunCommand", callID: "command-spoof", output: map[string]any{"handle": "command"}},
-		{name: "subagent", toolName: "Spawn", callID: "spawn-spoof", output: map[string]any{"handle": "helper"}},
+		{name: "subagent", toolName: "StartThread", callID: "spawn-spoof", output: map[string]any{"handle": "helper"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

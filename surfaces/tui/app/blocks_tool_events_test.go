@@ -145,11 +145,11 @@ func TestSpawnNarrativeReplacesExplicitContentCollection(t *testing.T) {
 
 	index := map[string]int{}
 	events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
-		CallID: "spawn-collection-1", Name: "Spawn", Output: "starting",
+		CallID: "spawn-collection-1", Name: "StartThread", Output: "starting",
 		Meta: ToolUpdateMeta{ToolKind: "execute", OutputCollection: true},
 	}, index)
 	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
-		CallID: "spawn-collection-1", Name: "Spawn", Output: "answer",
+		CallID: "spawn-collection-1", Name: "StartThread", Output: "answer",
 		Meta: ToolUpdateMeta{ToolKind: "execute", MessageID: "child-1", OutputNarrative: true},
 	}, index)
 
@@ -161,7 +161,7 @@ func TestSpawnNarrativeReplacesExplicitContentCollection(t *testing.T) {
 func TestExactNameToolsReplaceExplicitContentCollections(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"RunCommand", "Spawn"} {
+	for _, name := range []string{"RunCommand", "StartThread"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			index := map[string]int{}
@@ -203,19 +203,19 @@ func TestSpawnCollectionClearsPriorNarrativeProvenanceBeforeFinalSnapshot(t *tes
 
 	index := map[string]int{}
 	events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
-		CallID: "spawn-mode-1", Name: "Spawn", Output: "answer",
+		CallID: "spawn-mode-1", Name: "StartThread", Output: "answer",
 		Meta: ToolUpdateMeta{ToolKind: "execute", MessageID: "child-1", OutputNarrative: true},
 	}, index)
 	events[0].OutputNarrativeBoundary = true
 	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
-		CallID: "spawn-mode-1", Name: "Spawn", Output: "status",
+		CallID: "spawn-mode-1", Name: "StartThread", Output: "status",
 		Meta: ToolUpdateMeta{ToolKind: "execute", OutputCollection: true},
 	}, index)
 	if events[0].Output != "status" || !events[0].OutputCollection || events[0].OutputNarrative || events[0].OutputNarrativeBoundary {
 		t.Fatalf("Spawn running collection = %#v, want collection mode without stale narrative provenance", events[0])
 	}
 	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
-		CallID: "spawn-mode-1", Name: "Spawn", Output: "final", Final: true,
+		CallID: "spawn-mode-1", Name: "StartThread", Output: "final", Final: true,
 		Meta: ToolUpdateMeta{ToolKind: "execute", OutputCollection: true},
 	}, index)
 	if len(events) != 1 || !events[0].Done || events[0].Output != "final" || !events[0].OutputCollection || events[0].OutputNarrative {
@@ -248,7 +248,7 @@ func TestSpawnFinalOutputDoesNotTruncateLiveChildNarrative(t *testing.T) {
 
 	events, changed, _ := applyToolEventUpdate(nil, toolEventUpdate{
 		CallID: "spawn-1",
-		Name:   "Spawn",
+		Name:   "StartThread",
 		Output: "当前目录下共有 12 个文件",
 		Meta:   ToolUpdateMeta{ToolKind: "execute", MessageID: "child-message-1", OutputNarrative: true},
 	}, map[string]int{})
@@ -258,7 +258,7 @@ func TestSpawnFinalOutputDoesNotTruncateLiveChildNarrative(t *testing.T) {
 
 	events, changed, _ = applyToolEventUpdate(events, toolEventUpdate{
 		CallID: "spawn-1",
-		Name:   "Spawn",
+		Name:   "StartThread",
 		Output: "当前",
 		Final:  true,
 		Meta:   ToolUpdateMeta{ToolKind: "execute"},
@@ -276,13 +276,13 @@ func TestCompletedSpawnDuplicateFinalDoesNotTruncateChildNarrative(t *testing.T)
 
 	events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
 		CallID: "spawn-1",
-		Name:   "Spawn",
+		Name:   "StartThread",
 		Output: "当前目录下共有 12 个文件。",
 		Meta:   ToolUpdateMeta{ToolKind: "execute", MessageID: "child-message-1", OutputNarrative: true},
 	}, map[string]int{})
 	events, changed, _ := applyToolEventUpdate(events, toolEventUpdate{
 		CallID: "spawn-1",
-		Name:   "Spawn",
+		Name:   "StartThread",
 		Output: "。",
 		Final:  true,
 		Meta:   ToolUpdateMeta{ToolKind: "execute"},
@@ -293,7 +293,7 @@ func TestCompletedSpawnDuplicateFinalDoesNotTruncateChildNarrative(t *testing.T)
 
 	events, changed, _ = applyToolEventUpdate(events, toolEventUpdate{
 		CallID: "spawn-1",
-		Name:   "Spawn",
+		Name:   "StartThread",
 		Output: "。",
 		Final:  true,
 		Meta:   ToolUpdateMeta{ToolKind: "execute"},
@@ -346,7 +346,7 @@ func TestSubagentFailureFinalReplacesLiveChildNarrative(t *testing.T) {
 		final     string
 		expectErr bool
 	}{
-		{name: "spawn failed", toolName: "Spawn", status: "failed", err: true, final: "subagent failed: boom", expectErr: true},
+		{name: "spawn failed", toolName: "StartThread", status: "failed", err: true, final: "subagent failed: boom", expectErr: true},
 		{name: "task cancelled", toolName: "Task", status: "cancelled", final: "subagent cancelled"},
 	}
 	for _, test := range tests {
@@ -389,7 +389,7 @@ func TestLinkedSubagentFailureFinalReplacesLiveChildNarrative(t *testing.T) {
 		final       string
 		expectErr   bool
 	}{
-		{name: "linked spawn failed", ownerName: "Spawn", status: "failed", err: true, final: "subagent failed: boom", expectErr: true},
+		{name: "linked spawn failed", ownerName: "StartThread", status: "failed", err: true, final: "subagent failed: boom", expectErr: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -406,7 +406,7 @@ func TestLinkedSubagentFailureFinalReplacesLiveChildNarrative(t *testing.T) {
 			}, map[string]int{})
 			events, changed, _ := applyToolEventUpdate(events, toolEventUpdate{
 				CallID: "observer-call",
-				Name:   "Spawn",
+				Name:   "StartThread",
 				Output: test.final,
 				Final:  true,
 				Err:    test.err,
@@ -457,7 +457,7 @@ func TestLinkedCompletedSpawnFinalRespectsChildNarrativeProvenance(t *testing.T)
 			t.Parallel()
 			events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
 				CallID: "spawn-owner",
-				Name:   "Spawn",
+				Name:   "StartThread",
 				Output: test.existing,
 				Final:  true,
 				Meta: ToolUpdateMeta{
@@ -467,7 +467,7 @@ func TestLinkedCompletedSpawnFinalRespectsChildNarrativeProvenance(t *testing.T)
 			}, map[string]int{})
 			events, changed, _ := applyToolEventUpdate(events, toolEventUpdate{
 				CallID: "spawn-observer",
-				Name:   "Spawn",
+				Name:   "StartThread",
 				Output: test.observerFinal,
 				Final:  true,
 				Meta:   ToolUpdateMeta{TaskHandle: "task-1"},
@@ -485,7 +485,7 @@ func TestLinkedCompletedSpawnFinalRespectsChildNarrativeProvenance(t *testing.T)
 
 			events, changed, _ = applyToolEventUpdate(events, toolEventUpdate{
 				CallID: "spawn-late-observer",
-				Name:   "Spawn",
+				Name:   "StartThread",
 				Output: "。",
 				Meta:   ToolUpdateMeta{TaskHandle: "task-1"},
 			}, map[string]int{})
@@ -515,7 +515,7 @@ func TestSpawnFinalDoesNotAttachToTaskWriteInteraction(t *testing.T) {
 	}, map[string]int{})
 	events, changed, _ := applyToolEventUpdate(events, toolEventUpdate{
 		CallID: "spawn-observer",
-		Name:   "Spawn",
+		Name:   "StartThread",
 		Output: "完整的子代理输出。",
 		Final:  true,
 		Meta:   ToolUpdateMeta{TaskHandle: "task-1"},
@@ -552,21 +552,21 @@ func TestSpawnFinalOutputConvergesWithoutLiveNarrativeOrWhenMoreComplete(t *test
 			if test.live != "" {
 				events, _, _ = applyToolEventUpdate(nil, toolEventUpdate{
 					CallID: "spawn-1",
-					Name:   "Spawn",
+					Name:   "StartThread",
 					Output: test.live,
 					Meta:   ToolUpdateMeta{ToolKind: "execute", MessageID: "child-message-1"},
 				}, map[string]int{})
 			} else {
 				events, _, _ = applyToolEventUpdate(nil, toolEventUpdate{
 					CallID: "spawn-1",
-					Name:   "Spawn",
+					Name:   "StartThread",
 					Meta:   ToolUpdateMeta{ToolKind: "execute"},
 				}, map[string]int{})
 			}
 
 			events, changed, _ := applyToolEventUpdate(events, toolEventUpdate{
 				CallID: "spawn-1",
-				Name:   "Spawn",
+				Name:   "StartThread",
 				Output: test.final,
 				Final:  true,
 				Meta:   ToolUpdateMeta{ToolKind: "execute"},
@@ -584,7 +584,7 @@ func TestSpawnFinalOutputConvergesWithoutLiveNarrativeOrWhenMoreComplete(t *test
 func TestParentOnlyRunningSubagentSnapshotYieldsToAuthoritativeFinal(t *testing.T) {
 	t.Parallel()
 
-	for _, toolName := range []string{"Spawn", "Task"} {
+	for _, toolName := range []string{"StartThread", "Task"} {
 		t.Run(toolName, func(t *testing.T) {
 			t.Parallel()
 			events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
@@ -614,13 +614,13 @@ func TestSpawnLiveNarrativeKeepsEqualTextFromDifferentMessages(t *testing.T) {
 
 	events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
 		CallID: "spawn-1",
-		Name:   "Spawn",
+		Name:   "StartThread",
 		Output: "same child text",
 		Meta:   ToolUpdateMeta{ToolKind: "execute", MessageID: "child-message-1"},
 	}, map[string]int{})
 	events, changed, _ := applyToolEventUpdate(events, toolEventUpdate{
 		CallID: "spawn-1",
-		Name:   "Spawn",
+		Name:   "StartThread",
 		Output: "same child text",
 		Meta:   ToolUpdateMeta{ToolKind: "execute", MessageID: "child-message-2"},
 	}, map[string]int{})
@@ -638,13 +638,13 @@ func TestSpawnLiveNarrativeKeepsEqualDeltasFromSameMessage(t *testing.T) {
 
 	events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
 		CallID: "spawn-1",
-		Name:   "Spawn",
+		Name:   "StartThread",
 		Output: "ha",
 		Meta:   ToolUpdateMeta{ToolKind: "execute", MessageID: "child-message-1", OutputNarrative: true},
 	}, map[string]int{})
 	events, changed, _ := applyToolEventUpdate(events, toolEventUpdate{
 		CallID: "spawn-1",
-		Name:   "Spawn",
+		Name:   "StartThread",
 		Output: "ha",
 		Meta:   ToolUpdateMeta{ToolKind: "execute", MessageID: "child-message-1", OutputNarrative: true},
 	}, map[string]int{})

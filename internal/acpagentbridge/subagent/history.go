@@ -49,6 +49,9 @@ func (r *Runner) LoadHistory(ctx context.Context, raw tasksubagent.HistoryReques
 		return session.LoadedSession{}, err
 	}
 
+	if cfg.MCPGrant != nil {
+		cfg.MCPGrant.Close()
+	}
 	collector := newHistoryCollector(r, anchor, cfg.Name)
 	launchEnv := maps.Clone(cfg.Env)
 	historyToken := ""

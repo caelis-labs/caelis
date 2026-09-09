@@ -186,6 +186,12 @@ type DetachParticipantRequest struct {
 	SessionRef    session.SessionRef `json:"session_ref"`
 	ParticipantID string             `json:"participant_id,omitempty"`
 	Source        string             `json:"source,omitempty"`
+	// RequireSettled checks the delegated Task under the input-admission lock.
+	RequireSettled bool `json:"require_settled,omitempty"`
+	// ExpectedDelegationID and ExpectedAttachmentGeneration reject replacement
+	// participants between discovery and removal.
+	ExpectedDelegationID         string `json:"expected_delegation_id,omitempty"`
+	ExpectedAttachmentGeneration string `json:"expected_attachment_generation,omitempty"`
 }
 
 // PromptParticipantRequest prompts one attached participant.

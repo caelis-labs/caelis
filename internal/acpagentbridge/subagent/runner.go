@@ -228,6 +228,8 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		launchEnv["SDK_ACP_CHILD_NO_SPAWN"] = "1"
 	}
 	acpClient, err := client.Start(childCtx, client.Config{
+		MCPGrant:            cfg.MCPGrant,
+		MCPServers:          cfg.MCPServers,
 		HostedAdapterID:     cfg.HostedAdapterID,
 		ConnectionID:        cfg.Name,
 		EndpointResolver:    r.endpointResolver,

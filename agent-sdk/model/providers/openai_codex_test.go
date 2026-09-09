@@ -754,3 +754,49 @@ func TestOpenAICodexRequestSerializesPriorityServiceTier(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAICodexRequestPreservesEmptyToolProperties(t *testing.T) {
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Tools []struct {
+				Name       string         `json:"name"`
+				Parameters map[string]any `json:"parameters"`
+			} `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if len(body.Tools) != 2 {
+			t.Errorf("tools = %d, want 2", len(body.Tools))
+		}
+		for _, one := range body.Tools {
+			if properties, ok := one.Parameters["properties"].(map[string]any); !ok || len(properties) != 0 {
+				t.Errorf("%s properties = %#v, want empty object", one.Name, one.Parameters["properties"])
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeOpenAICodexSSE(t, w, map[string]any{"type": "response.completed", "response": map[string]any{"id": "resp_empty_tools", "status": "completed", "output": []any{}}})
+	}))
+	defer server.Close()
+	llm := newOpenAICodex(Config{Provider: "openai-codex", Model: "gpt-test", BaseURL: server.URL, HTTPClient: server.Client()})
+	req := &model.Request{Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")}, Stream: true}
+	for _, name := range []string{"ListThreads", "ReceiveMessages"} {
+		req.Tools = append(req.Tools, model.NewFunctionToolSpec(name, "No arguments", map[string]any{"type": "object", "properties": map[string]any{}, "required": []string{}, "additionalProperties": false}))
+	}
+	_, _, _, err := collectOpenAICodexTestResponse(llm, model.CloneRequest(req))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenAICompatStrictToolsPreserveEmptyProperties(t *testing.T) {
+	schema := map[string]any{"type": "object", "properties": map[string]any{}, "required": []string{}, "additionalProperties": false}
+	tools := fromKernelTools([]model.ToolDefinition{{Name: "no_args", Parameters: schema, Strict: true}}, true)
+	raw, err := json.Marshal(tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"properties":{}`) || !strings.Contains(string(raw), `"required":[]`) {
+		t.Fatalf("empty properties changed on wire: %s", raw)
+	}
+}

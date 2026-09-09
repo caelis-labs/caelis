@@ -31,7 +31,7 @@ func TestRuntimeAgentDirectRunnerSpawnStreamGolden(t *testing.T) {
 		descriptor: taskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-yara", Handle: "yara", AgentHandle: "breeze",
 			Kind: task.KindSubagent, State: task.StateRunning, Running: true,
-			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
+			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-call-1", ToolName: "StartThread"},
 		},
 	}
 	runtimeAgent, sessionID := newSpawnGoldenDirectRunnerAgent(t, runnerEvents, streams)
@@ -49,7 +49,7 @@ func TestRuntimeAgentDirectRunnerSpawnStreamGolden(t *testing.T) {
 		loadGoldenToolEvent(
 			session.EventTypeToolCall,
 			"spawn-call-1",
-			"Spawn",
+			"StartThread",
 			"pending",
 			map[string]any{"agent": "breeze", "prompt": "explain your capability"},
 			nil,
@@ -59,11 +59,11 @@ func TestRuntimeAgentDirectRunnerSpawnStreamGolden(t *testing.T) {
 		loadGoldenToolEvent(
 			session.EventTypeToolResult,
 			"spawn-call-1",
-			"Spawn",
+			"StartThread",
 			"running",
 			nil,
 			map[string]any{
-				"handle": "yara", "parent_call": "spawn-call-1", "parent_tool": "Spawn",
+				"handle": "yara", "parent_call": "spawn-call-1", "parent_tool": "StartThread",
 				"state": "running", "target_kind": "subagent",
 			},
 		),
@@ -77,7 +77,7 @@ func TestRuntimeAgentDirectRunnerSpawnStreamGolden(t *testing.T) {
 		t.Fatal("direct Runtime runner did not subscribe the Spawn Task stream")
 	}
 
-	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"}
+	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "StartThread"}
 	subscription.events <- eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1",
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-yara", ParentTool: parent,
@@ -121,7 +121,7 @@ func TestRuntimeAgentDirectRunnerSpawnStreamGolden(t *testing.T) {
 				"final_message": "exact fallback final",
 				"handle":        "yara",
 				"parent_call":   "spawn-call-1",
-				"parent_tool":   "Spawn",
+				"parent_tool":   "StartThread",
 				"state":         "completed",
 				"target_kind":   "subagent",
 			}},
@@ -180,8 +180,8 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 	spawnKind := eventstream.ToolKindExecute
 	waitTitle := "Task wait"
 	waitKind := eventstream.ToolKindExecute
-	spawnMeta := acpmeta.WithToolName(nil, "Spawn")
-	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"}
+	spawnMeta := acpmeta.WithToolName(nil, "StartThread")
+	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "StartThread"}
 	turn := &testControlTurn{events: make(chan eventstream.Envelope)}
 	subscription := &spawnGoldenSubscription{events: make(chan eventstream.Envelope), closed: make(chan struct{})}
 	streams := &spawnGoldenTaskStreams{
@@ -190,7 +190,7 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 		descriptor: taskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-yara", Handle: "yara", AgentHandle: "breeze",
 			Kind: task.KindSubagent, State: task.StateRunning, Running: true,
-			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
+			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-call-1", ToolName: "StartThread"},
 		},
 	}
 	runtimeAgent, sessionID := newSpawnGoldenAgent(t, turn, streams)
@@ -221,7 +221,7 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 			Kind: &spawnKind, Status: &spawnStatus,
 			RawInput: map[string]any{"agent": "breeze", "prompt": "explain your capability"},
 			RawOutput: map[string]any{
-				"handle": "yara", "parent_call": "spawn-call-1", "parent_tool": "Spawn",
+				"handle": "yara", "parent_call": "spawn-call-1", "parent_tool": "StartThread",
 				"state": "running", "target_kind": "subagent",
 			},
 			Content: []eventstream.ToolCallContent{{Type: "terminal", TerminalID: "spawn-call-1"}},
@@ -327,7 +327,7 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 					"final_message":       "I can inspect, edit, test, and review code.",
 					"handle":              "yara",
 					"parent_call":         "spawn-call-1",
-					"parent_tool":         "Spawn",
+					"parent_tool":         "StartThread",
 					"state":               "completed",
 					"target_kind":         "subagent",
 				}},

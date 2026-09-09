@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -689,7 +690,8 @@ func openAICompatNullableEnumStrings(values []string) []any {
 }
 
 func openAICompatCloneSchemaMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
+	// Empty schema objects must remain objects on the wire, not null.
+	if in == nil {
 		return nil
 	}
 	out := make(map[string]any, len(in))
@@ -710,7 +712,7 @@ func openAICompatCloneSchemaValue(value any) any {
 		}
 		return out
 	case []string:
-		return append([]string(nil), typed...)
+		return slices.Clone(typed)
 	default:
 		return typed
 	}

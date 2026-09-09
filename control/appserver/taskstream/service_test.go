@@ -20,7 +20,7 @@ func TestProjectRecordPreservesStandardChildToolLifecycle(t *testing.T) {
 	descriptor := controltaskstream.TaskDescriptor{
 		SessionID: "session-1", TaskID: "task-1", Handle: "grok-child", AgentHandle: "grok", Kind: task.KindSubagent,
 		State: task.StateRunning, Running: true, CurrentTurnID: "child-turn-1",
-		ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
 	}
 	completed := eventstream.ToolStatusCompleted
 	tests := []struct {
@@ -104,7 +104,7 @@ func TestIdenticalChildPayloadsRemainBoundToTheirTaskStreams(t *testing.T) {
 			Task: controltaskstream.TaskDescriptor{
 				SessionID: "session-1", TaskID: taskID, Handle: "zuri-" + taskID, AgentHandle: "orbit", Kind: task.KindSubagent,
 				State: task.StateRunning, Running: true, CurrentTurnID: "shared-turn",
-				ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-" + taskID, ToolName: "Spawn"},
+				ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-" + taskID, ToolName: "StartThread"},
 			},
 			Frame: &controltaskstream.Frame{
 				TerminalID: "shared-turn",
@@ -135,7 +135,7 @@ func TestProjectRecordKeepsTaskScopeAndTransientCursor(t *testing.T) {
 		Task: controltaskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", AgentHandle: "orbit", Kind: task.KindSubagent,
 			State: task.StateCompleted, ActivityID: "activity-2", CurrentTurnID: "turn-2",
-			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
 		},
 		Frame: &controltaskstream.Frame{
 			TerminalID: "turn-2",
@@ -174,7 +174,7 @@ func TestReplacementDeliveryClearsRecordResumeIdentity(t *testing.T) {
 			Task: controltaskstream.TaskDescriptor{
 				SessionID: "session-1", TaskID: "task-1", Kind: task.KindSubagent,
 				State: task.StateCompleted, CurrentTurnID: "turn-1",
-				ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
+				ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
 			},
 			Frame: &controltaskstream.Frame{
 				TerminalID: "turn-1", State: string(task.StateCompleted), Closed: true,
@@ -198,7 +198,7 @@ func TestProjectRecordProjectsHistoricalTurnBoundaryWithoutTaskTerminalTransport
 		Task: controltaskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
 			State: task.StateRunning, Running: true, CurrentTurnID: "turn-2",
-			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
 		},
 		Frame: &controltaskstream.Frame{
 			TerminalID: "turn-1",
@@ -283,7 +283,7 @@ func TestProjectRecordKeepsOneEnvelopePerCursorWhenEventCarriesUsage(t *testing.
 		Task: controltaskstream.TaskDescriptor{
 			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
 			State: task.StateRunning, Running: true,
-			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
 		},
 		Frame: &controltaskstream.Frame{
 			TerminalID: "turn-1",

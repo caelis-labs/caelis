@@ -16,6 +16,7 @@ func TestStackPublicMethodsStayAtDeclaredHostBoundary(t *testing.T) {
 		"AppName": true, "Close": true,
 		"ConfigurationCommands": true,
 		"ControlClient":         true,
+		"CollaborationService":  true,
 		"ControlKernelReads":    true,
 		"ControlPluginReads":    true, "ControlParticipants": true,
 		"ControlRuntimes": true, "ControlStatus": true,

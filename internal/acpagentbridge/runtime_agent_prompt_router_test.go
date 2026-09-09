@@ -750,11 +750,11 @@ func TestRuntimeAgentPromptRouterProjectsOnlyChildFinalResponseIntoParentSpawnRe
 	runtime := &promptRouterRuntime{sessions: sessions}
 	status := eventstream.ToolStatusInProgress
 	completed := eventstream.ToolStatusCompleted
-	spawnKind := "Spawn"
+	spawnKind := "StartThread"
 	childTitle := "Apply child patch"
 	childCommandTitle := "Run child command"
 	line := 12
-	parentTool := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+	parentTool := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"}
 	childDelivery := &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
 	main := eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,

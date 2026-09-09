@@ -25,6 +25,12 @@ const maxFrameSize = 64 * 1024 * 1024
 type PermissionHandler func(context.Context, RequestPermissionRequest) (RequestPermissionResponse, error)
 
 type Config struct {
+	MCPServers []acpsdk.McpServer
+	MCPGrant   interface {
+		Bind(string) error
+		Close()
+		Valid() bool
+	}
 	HostedAdapterID     string
 	ConnectionID        string
 	EndpointResolver    endpoint.Resolver
@@ -54,7 +60,12 @@ type Client struct {
 	release     func()
 }
 
-func Start(ctx context.Context, cfg Config) (*Client, error) {
+func Start(ctx context.Context, cfg Config) (started *Client, startErr error) {
+	defer func() {
+		if startErr != nil && cfg.MCPGrant != nil {
+			cfg.MCPGrant.Close()
+		}
+	}()
 	if ctx == nil {
 		return nil, errors.New("acp client context is required")
 	}
@@ -126,6 +137,9 @@ func (c *Client) bind(peerInput io.Writer, peerOutput io.Reader) error {
 		return err
 	}
 	c.conn = conn
+	if c.cfg.MCPGrant != nil {
+		go func() { _ = conn.Wait(context.Background()); c.cfg.MCPGrant.Close() }()
+	}
 	return nil
 }
 
@@ -158,11 +172,15 @@ func (c *Client) NewSession(ctx context.Context, cwd string, meta map[string]any
 	if err != nil {
 		return NewSessionResponse{}, err
 	}
-	return sendRequest[NewSessionResponse](c, ctx, MethodSessionNew, NewSessionRequest{
+	result, err := sendRequest[NewSessionResponse](c, ctx, MethodSessionNew, NewSessionRequest{
 		Cwd:        cwd,
-		McpServers: []acpsdk.McpServer{},
+		McpServers: append([]acpsdk.McpServer{}, c.cfg.MCPServers...),
 		Meta:       rawMeta,
 	})
+	if err == nil && c.cfg.MCPGrant != nil {
+		err = c.cfg.MCPGrant.Bind(result.SessionID)
+	}
+	return result, err
 }
 
 func (c *Client) ListSessions(ctx context.Context, req acpsdk.ListSessionsRequest) (acpsdk.ListSessionsResponse, error) {
@@ -174,12 +192,16 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, cwd string, 
 	if err != nil {
 		return LoadSessionResponse{}, err
 	}
-	return sendRequest[LoadSessionResponse](c, ctx, MethodSessionLoad, LoadSessionRequest{
+	result, err := sendRequest[LoadSessionResponse](c, ctx, MethodSessionLoad, LoadSessionRequest{
 		SessionId:  acpsdk.SessionId(sessionID),
 		Cwd:        cwd,
-		McpServers: []acpsdk.McpServer{},
+		McpServers: append([]acpsdk.McpServer{}, c.cfg.MCPServers...),
 		Meta:       rawMeta,
 	})
+	if err == nil && c.cfg.MCPGrant != nil {
+		err = c.cfg.MCPGrant.Bind(sessionID)
+	}
+	return result, err
 }
 
 func (c *Client) ResumeSession(ctx context.Context, sessionID string, cwd string, meta map[string]any) (ResumeSessionResponse, error) {
@@ -187,18 +209,25 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, cwd string
 	if err != nil {
 		return ResumeSessionResponse{}, err
 	}
-	return sendRequest[ResumeSessionResponse](c, ctx, MethodSessionResume, ResumeSessionRequest{
+	result, err := sendRequest[ResumeSessionResponse](c, ctx, MethodSessionResume, ResumeSessionRequest{
 		SessionId:  acpsdk.SessionId(sessionID),
 		Cwd:        cwd,
-		McpServers: []acpsdk.McpServer{},
+		McpServers: append([]acpsdk.McpServer{}, c.cfg.MCPServers...),
 		Meta:       rawMeta,
 	})
+	if err == nil && c.cfg.MCPGrant != nil {
+		err = c.cfg.MCPGrant.Bind(sessionID)
+	}
+	return result, err
 }
 
 func (c *Client) CloseSession(ctx context.Context, sessionID string) error {
 	_, err := sendRequest[CloseSessionResponse](c, ctx, MethodSessionClose, CloseSessionRequest{
 		SessionId: acpsdk.SessionId(strings.TrimSpace(sessionID)),
 	})
+	if err == nil && c.cfg.MCPGrant != nil {
+		c.cfg.MCPGrant.Close()
+	}
 	return err
 }
 
@@ -640,4 +669,9 @@ func (w stderrBufferWriter) Write(p []byte) (int, error) {
 	}
 	_, err := w.client.stderrBuf.Write(p)
 	return len(p), err
+}
+
+// CollaborationReady reports whether injected authority can admit another turn.
+func (c *Client) CollaborationReady() bool {
+	return c == nil || c.cfg.MCPGrant == nil || c.cfg.MCPGrant.Valid()
 }

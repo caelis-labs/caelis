@@ -41,7 +41,7 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 			Kind:          eventstream.ToolKindExecute,
 			Status:        eventstream.ToolStatusInProgress,
 			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect task streams"},
-			Meta:          acpToolNameMeta("Spawn"),
+			Meta:          acpToolNameMeta("StartThread"),
 		},
 	})
 	running := eventstream.ToolStatusInProgress
@@ -55,7 +55,7 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 			ToolCallID:    "spawn-1",
 			Status:        &running,
 			RawOutput:     map[string]any{"handle": "zuri", "state": "running"},
-			Meta:          acpToolNameMeta("Spawn"),
+			Meta:          acpToolNameMeta("StartThread"),
 		},
 	})
 
@@ -69,7 +69,7 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 			Actor:     "explorer",
 			ParentTool: &eventstream.ParentToolRelation{
 				ToolCallID: "spawn-1",
-				ToolName:   "Spawn",
+				ToolName:   "StartThread",
 			},
 			Update: update,
 		}
@@ -115,7 +115,7 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 		Actor:     "explorer",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Notice: "retrying child request",
 	})
@@ -128,7 +128,7 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 		Actor:     "explorer",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Err: errors.New("child transport failed"),
 	})
@@ -202,7 +202,7 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 				Kind:          eventstream.ToolKindExecute,
 				Status:        eventstream.ToolStatusInProgress,
 				RawInput:      map[string]any{"agent": "breeze", "prompt": "inspect process state"},
-				Meta:          acpToolNameMeta("Spawn"),
+				Meta:          acpToolNameMeta("StartThread"),
 			},
 		})
 	}
@@ -215,7 +215,7 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 		Actor:     "breeze",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		Update: eventstream.ToolCall{
 			SessionUpdate: eventstream.UpdateToolCall,
@@ -237,7 +237,7 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 		Actor:   "breeze",
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-1",
-			ToolName:   "Spawn",
+			ToolName:   "StartThread",
 		},
 		ApprovalReview: &eventstream.ApprovalReview{
 			ToolCallID:    "child-command-1",
@@ -298,13 +298,13 @@ func TestSubagentOutputViewUsesSpawnOnlyForIdentityAndDropsSyntheticNoOutput(t *
 	view := model.ensureSubagentOutputView("spawn-1")
 	initialStatus := view.block.Status
 	view.observeOwnerIdentity(SubagentEvent{
-		Kind: SEToolCall, CallID: "spawn-1", Name: "Spawn",
+		Kind: SEToolCall, CallID: "spawn-1", Name: "StartThread",
 		Args: "xena[breeze]: inspect", TaskHandle: "xena",
 		Done: true, Output: "(no output)", OutputSynthetic: true,
 	})
 	view.observeChildEvent(TranscriptEvent{
 		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent,
-		Actor: "self", TurnID: "task-1:1", AnchorToolCallID: "spawn-1", AnchorToolName: "Spawn",
+		Actor: "self", TurnID: "task-1:1", AnchorToolCallID: "spawn-1", AnchorToolName: "StartThread",
 		NarrativeKind: TranscriptNarrativeReasoning, Text: "child reasoning",
 	})
 
@@ -424,7 +424,7 @@ func TestOpeningSubagentOutputOverlayDoesNotCompleteRunningChild(t *testing.T) {
 	// child Task is independently still running.
 	block.UpdateToolWithMeta(
 		"spawn-1",
-		"Spawn",
+		"StartThread",
 		"zuri[breeze]: inspect",
 		"(no output)",
 		true,
@@ -489,7 +489,7 @@ func TestSubagentOutputOverlayDeduplicatesSameProjectionAcrossDeliveryPaths(t *t
 		ScopeID:            "zuri",
 		Actor:              "reviewer",
 		AnchorToolCallID:   "spawn-1",
-		AnchorToolName:     "Spawn",
+		AnchorToolName:     "StartThread",
 		SourceEventID:      "child-event-1",
 		SourceProjectionID: "child-event-1:0",
 		MessageID:          "child-message-1",
@@ -521,7 +521,7 @@ func TestSubagentOutputOverlayLatePlanDoesNotReopenTerminalStatus(t *testing.T) 
 		Scope:            ACPProjectionSubagent,
 		ScopeID:          "zuri",
 		AnchorToolCallID: "spawn-1",
-		AnchorToolName:   "Spawn",
+		AnchorToolName:   "StartThread",
 		State:            eventstream.LifecycleStateCompleted,
 	})
 	view.observeChildEvent(TranscriptEvent{
@@ -529,7 +529,7 @@ func TestSubagentOutputOverlayLatePlanDoesNotReopenTerminalStatus(t *testing.T) 
 		Scope:            ACPProjectionSubagent,
 		ScopeID:          "zuri",
 		AnchorToolCallID: "spawn-1",
-		AnchorToolName:   "Spawn",
+		AnchorToolName:   "StartThread",
 		PlanEntries: []transcript.PlanEntry{{
 			Content: "late plan projection",
 			Status:  "completed",
@@ -613,7 +613,7 @@ func TestVisibleSubagentOutputOverlaySchedulesRefreshFromTranscriptPath(t *testi
 		ScopeID:          "zuri",
 		Actor:            "reviewer",
 		AnchorToolCallID: "spawn-1",
-		AnchorToolName:   "Spawn",
+		AnchorToolName:   "StartThread",
 		NarrativeKind:    TranscriptNarrativeAssistant,
 		Text:             "live child output from the Session projection",
 	}}})
@@ -1135,7 +1135,7 @@ func TestSpawnToolRowUsesOrdinaryHeaderAndOverlayLink(t *testing.T) {
 	base := SubagentEvent{
 		Kind:   SEToolCall,
 		CallID: "spawn-1",
-		Name:   "Spawn",
+		Name:   "StartThread",
 		Args:   "reviewer: inspect",
 	}
 
@@ -1184,7 +1184,7 @@ func TestSpawnToolRowDoesNotScheduleIndependentAnimation(t *testing.T) {
 	block.Events = append(block.Events, SubagentEvent{
 		Kind:   SEToolCall,
 		CallID: "spawn-1",
-		Name:   "Spawn",
+		Name:   "StartThread",
 		Args:   "reviewer: inspect",
 	})
 	model.doc.Append(block)
