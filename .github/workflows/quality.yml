@@ -5,15 +5,40 @@ env:
 
 on:
   pull_request:
-  push:
     branches: [main]
+  schedule:
+    - cron: '23 6 * * *'
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOWORK: 'off'
+      GOFLAGS: -mod=readonly
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+
+      - name: Check reachable vulnerabilities
+        run: govulncheck -mode=source -scan=symbol ./...
+
   go-quality:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -38,6 +63,7 @@ jobs:
         run: make build
 
   windows-host-open:
+    if: github.event_name != 'schedule'
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
