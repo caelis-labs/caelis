@@ -1,6 +1,17 @@
 package controlprompt
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
+
+func TestFriendlyCommandErrorAmbiguousModelSelector(t *testing.T) {
+	err := FriendlyCommandError("select model", errors.New("ambiguous model selector xiaomi/mimo"))
+	const want = "select model: model selector is ambiguous. Use an endpoint-qualified selector or a full model ID"
+	if err == nil || err.Error() != want {
+		t.Fatalf("FriendlyCommandError = %v, want %q", err, want)
+	}
+}
 
 func TestParseConnectArgsKeepsLegacyStreamTimeoutAndOptionalImageInput(t *testing.T) {
 	cfg := ParseConnectArgs("openai-compatible acme-vision https://models.acme.example/v1 120 - 131072 8192 low,high 45 true")

@@ -807,12 +807,12 @@ func TestStackUseModelReportsAmbiguousVisibleAlias(t *testing.T) {
 		t.Fatal("HasAlias(duplicate visible alias) = false, want true")
 	}
 	err := stack.useTestHostModel(ctx, session.SessionRef{}, "xiaomi/mimo-v2.5-pro")
-	if err == nil || !strings.Contains(err.Error(), "ambiguous model alias") {
+	if err == nil || !strings.Contains(err.Error(), "ambiguous model selector") {
 		t.Fatalf("UseModel(duplicate visible alias) error = %v, want ambiguity", err)
 	}
 }
 
-func TestPresentationSourceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
+func TestPresentationSourceUsesPublicSelectorsForDuplicateAliases(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
 	apiProfile, err := stack.connectTestModel(ModelConfig{
@@ -859,15 +859,37 @@ func TestPresentationSourceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 		t.Fatal("SessionModels() = nil, want models")
 		return
 	}
-	if models.CurrentModelID != tokenPlanID {
-		t.Fatalf("CurrentModelID = %q, want %q", models.CurrentModelID, tokenPlanID)
+	if models.CurrentModelID != "xiaomi@token-plan-cn/mimo-v2.5-pro" {
+		t.Fatalf("CurrentModelID = %q, want token-plan public selector", models.CurrentModelID)
 	}
 	seen := map[string]string{}
 	for _, model := range models.AvailableModels {
 		seen[model.ID] = model.Name
 	}
-	if seen[apiID] != "xiaomi/mimo-v2.5-pro" || seen[tokenPlanID] != "xiaomi/mimo-v2.5-pro" {
-		t.Fatalf("available models = %#v, want stable ids with visible alias names", models.AvailableModels)
+	if seen["xiaomi@api-cn/mimo-v2.5-pro"] != "xiaomi/mimo-v2.5-pro" || seen["xiaomi@token-plan-cn/mimo-v2.5-pro"] != "xiaomi/mimo-v2.5-pro" {
+		t.Fatalf("available models = %#v, want endpoint-qualified public selectors", models.AvailableModels)
+	}
+	options, err := source.SessionConfigOptions(ctx, activeSession)
+	if err != nil {
+		t.Fatalf("SessionConfigOptions() error = %v", err)
+	}
+	foundModel := false
+	for _, option := range options {
+		if option.ID != "model" {
+			continue
+		}
+		foundModel = true
+		if option.CurrentValue != models.CurrentModelID {
+			t.Fatalf("model option current = %v, want %q", option.CurrentValue, models.CurrentModelID)
+		}
+		for _, choice := range option.Options {
+			if _, ok := seen[choice.Value]; !ok {
+				t.Fatalf("model option %q is absent from public models", choice.Value)
+			}
+		}
+	}
+	if !foundModel {
+		t.Fatal("model configuration option missing")
 	}
 	current = mustCurrentSession(t, stack, activeSession.SessionID)
 	revision = current.Revision
@@ -878,10 +900,10 @@ func TestPresentationSourceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 			ExpectedRevision:        &revision,
 			ExpectedControllerEpoch: current.Controller.EpochID,
 		},
-		Model: apiID,
+		Model: "xiaomi@api-cn/mimo-v2.5-pro",
 	})
 	if err != nil || result.Outcome != appserver.OutcomeCommitted {
-		t.Fatalf("UseSessionModel(stable id) = %#v, %v", result, err)
+		t.Fatalf("UseSessionModel(public selector) = %#v, %v", result, err)
 	}
 	state, err := stack.ControlStatus().SessionRuntimeState(ctx, activeSession.SessionRef)
 	if err != nil {

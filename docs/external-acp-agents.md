@@ -246,6 +246,38 @@ Guided onboarding selects the remote model but does not impose a reasoning
 effort. The Agent-advertised choices become profile capabilities; fixed Agent
 bindings and participant attachment choose an explicit effort later.
 
+### Provider selectors exposed by Caelis
+
+Caelis publishes configured provider models as `provider[@endpoint]/model` in
+AppServer presentation, ACP model configuration options, and `/model` completion.
+Only the literal `default` endpoint is omitted: `deepseek/deepseek-flash`,
+`xiaomi@api-cn/mimo-v2.5-pro`, and
+`xiaomi@token-plan-cn/mimo-v2.5-pro` name distinct routes. Adding another endpoint
+never changes a route's selector. Custom model aliases retain their fully
+qualified configuration ID so multiple configurations of one upstream model
+remain distinct.
+
+Control's `modelconfig` package owns selector generation and resolution. Model
+options and their current value use the same public selector; selection resolves
+to the existing internal configuration and ModelProfile identities before any
+Session write. Credentials, durable bindings, and upstream model IDs are not
+renamed. Remote model IDs owned by external ACP Agents are unaffected.
+
+Selection first matches an exact internal ID, then a public selector, and only
+then an unambiguous historical alias. A historical alias cannot shadow a public
+selector: `deepseek/model` names the `default` route when that route exists,
+while `deepseek@office/model` names the `office` route even if both configurations
+share an alias. Without a matching public selector, ambiguous aliases such as
+`xiaomi/model` are rejected rather than resolved through the Host default.
+
+Compatibility aliases are input-only, not additional options. Historical alias
+resolution is not a stable route binding when the catalog changes; clients that
+need one must use an advertised selector or an exact internal ID. Alias support
+remains while historical client references are supported and can be removed
+only through an explicit breaking migration. A public selector colliding with
+another configuration's public selector or exact internal ID is still a catalog
+error; shared historical aliases alone do not invalidate the catalog.
+
 ## Endpoint catalog
 
 The built-in catalog contains stable commands for official ACP stdio modes plus a

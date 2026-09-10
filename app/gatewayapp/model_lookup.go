@@ -15,8 +15,6 @@ import (
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
 
-var errAmbiguousModelAlias = errors.New("ambiguous model alias")
-
 type modelLookup struct {
 	mu                         sync.RWMutex
 	configs                    map[string]ModelConfig
@@ -266,7 +264,7 @@ func (l *modelLookup) HasAlias(alias string) bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	_, ok, err := l.resolveConfigLocked(alias)
-	return ok || errors.Is(err, errAmbiguousModelAlias)
+	return ok || errors.Is(err, modelconfig.ErrAmbiguousSelector)
 }
 
 func (l *modelLookup) UpsertProviderEndpoint(endpoint ProviderEndpointConfig) (string, error) {
@@ -558,7 +556,7 @@ func (l *modelLookup) ResolveConfig(alias string) (ModelConfig, error) {
 	return cfg, nil
 }
 
-// ResolveConfigIfPresent resolves one configured ID or unambiguous alias and
+// ResolveConfigIfPresent resolves one configured ID or unambiguous selector and
 // distinguishes an absent selection from an invalid ambiguous selection.
 func (l *modelLookup) ResolveConfigIfPresent(alias string) (ModelConfig, bool, error) {
 	if l == nil {
@@ -574,28 +572,11 @@ func (l *modelLookup) ResolveConfigIfPresent(alias string) (ModelConfig, bool, e
 }
 
 func (l *modelLookup) resolveConfigLocked(ref string) (ModelConfig, bool, error) {
-	ref = strings.ToLower(strings.TrimSpace(ref))
-	if ref == "" {
-		return ModelConfig{}, false, nil
-	}
-	if cfg, ok := l.configs[ref]; ok {
-		return l.hydrateModelConfigLocked(cfg), true, nil
-	}
-	var match ModelConfig
-	matches := 0
+	configs := make([]ModelConfig, 0, len(l.configs))
 	for _, cfg := range l.configs {
-		if strings.EqualFold(strings.TrimSpace(cfg.Alias), ref) {
-			match = cfg
-			matches++
-		}
+		configs = append(configs, l.hydrateModelConfigLocked(cfg))
 	}
-	if matches > 1 {
-		return ModelConfig{}, false, fmt.Errorf("gatewayapp: %w %q; use a profile-qualified model id", errAmbiguousModelAlias, ref)
-	}
-	if matches == 0 {
-		return ModelConfig{}, false, nil
-	}
-	return l.hydrateModelConfigLocked(match), true, nil
+	return modelconfig.ResolveSelector(configs, ref)
 }
 
 func (l *modelLookup) providerEndpointReferencedLocked(profileID string) bool {

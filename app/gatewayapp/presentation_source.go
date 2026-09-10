@@ -134,6 +134,9 @@ func (p gatewayPresentationSource) SessionModels(ctx context.Context, session se
 	if len(snapshot.Configs) == 0 {
 		return nil, nil
 	}
+	if err := modelconfig.ValidatePublicSelectors(snapshot.Configs); err != nil {
+		return nil, err
+	}
 	current, _, ok, err := p.currentModelConfig(ctx, session)
 	if err != nil {
 		return nil, err
@@ -144,7 +147,7 @@ func (p gatewayPresentationSource) SessionModels(ctx context.Context, session se
 	models := make([]appserver.PresentationModel, 0, len(snapshot.Configs))
 	for _, cfg := range snapshot.Configs {
 		models = append(models, appserver.PresentationModel{
-			ID:          cfg.ID,
+			ID:          modelconfig.PublicSelector(cfg),
 			Name:        cfg.Alias,
 			Description: modelDescription(cfg),
 		})
@@ -313,6 +316,9 @@ func (p gatewayPresentationSource) modelConfigOptions(ctx context.Context, sessi
 	if len(snapshot.Configs) == 0 {
 		return nil, nil
 	}
+	if err := modelconfig.ValidatePublicSelectors(snapshot.Configs); err != nil {
+		return nil, err
+	}
 	current, cfg, ok, err := p.currentModelConfig(ctx, session)
 	if err != nil {
 		return nil, err
@@ -357,11 +363,14 @@ func (p gatewayPresentationSource) currentModelConfig(ctx context.Context, sessi
 		return "", ModelConfig{}, false, err
 	}
 	ref := firstNonEmpty(state.ModelID, state.ModelAlias, snapshot.DefaultID, snapshot.DefaultAlias)
-	if cfg, ok := configByRef(snapshot.Configs, ref); ok {
-		return cfg.ID, cfg, true, nil
+	cfg, ok, err := modelconfig.ResolveSelector(snapshot.Configs, ref)
+	if err != nil {
+		return "", ModelConfig{}, false, err
 	}
-	cfg := snapshot.Configs[0]
-	return cfg.ID, cfg, true, nil
+	if !ok {
+		cfg = snapshot.Configs[0]
+	}
+	return modelconfig.PublicSelector(cfg), cfg, true, nil
 }
 
 func (p gatewayPresentationSource) currentReasoningEffort(ctx context.Context, session session.Session, cfg ModelConfig, levels []string) string {
@@ -453,7 +462,7 @@ func modelSelectOptions(configs []ModelConfig) []appserver.PresentationSelectOpt
 	options := make([]appserver.PresentationSelectOption, 0, len(configs))
 	for _, cfg := range configs {
 		options = append(options, appserver.PresentationSelectOption{
-			Value:       cfg.ID,
+			Value:       modelconfig.PublicSelector(cfg),
 			Name:        cfg.Alias,
 			Description: modelDescription(cfg),
 		})
@@ -470,27 +479,6 @@ func reasoningSelectOptions(levels []string) []appserver.PresentationSelectOptio
 		})
 	}
 	return options
-}
-
-func configByRef(configs []ModelConfig, ref string) (ModelConfig, bool) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ModelConfig{}, false
-	}
-	for _, cfg := range configs {
-		if strings.EqualFold(strings.TrimSpace(cfg.ID), ref) {
-			return cfg, true
-		}
-	}
-	var match ModelConfig
-	matches := 0
-	for _, cfg := range configs {
-		if strings.EqualFold(strings.TrimSpace(cfg.Alias), ref) {
-			match = cfg
-			matches++
-		}
-	}
-	return match, matches == 1
 }
 
 func reasoningLevelsForACPModel(cfg ModelConfig) []string {

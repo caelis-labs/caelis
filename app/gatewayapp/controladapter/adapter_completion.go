@@ -432,13 +432,32 @@ func (d *assembler) completeModelAliases(ctx context.Context, query string, limi
 	if err != nil {
 		return nil, err
 	}
-	return modelChoiceCandidates(choices, query, limit), nil
+	return modelChoiceCandidates(choices, query, limit)
 }
 
-func modelChoiceCandidates(choices []ModelChoice, query string, limit int) []controlprompt.SlashArgCandidate {
+func modelChoiceConfig(choice ModelChoice) modelconfig.Config {
+	return modelconfig.Config{
+		ID: firstNonEmpty(choice.ID, choice.Alias), Alias: choice.Alias,
+		Provider: choice.Provider, Model: choice.Model,
+		ProviderEndpointID: choice.ProviderEndpointID,
+	}
+}
+
+func modelChoiceConfigs(choices []ModelChoice) []modelconfig.Config {
+	configs := make([]modelconfig.Config, 0, len(choices))
+	for _, choice := range choices {
+		configs = append(configs, modelChoiceConfig(choice))
+	}
+	return configs
+}
+
+func modelChoiceCandidates(choices []ModelChoice, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+	if err := modelconfig.ValidatePublicSelectors(modelChoiceConfigs(choices)); err != nil {
+		return nil, err
+	}
 	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(choices)))
 	for _, choice := range choices {
-		value := strings.TrimSpace(firstNonEmpty(choice.ID, choice.Alias))
+		value := modelconfig.PublicSelector(modelChoiceConfig(choice))
 		display := strings.TrimSpace(firstNonEmpty(choice.Alias, choice.ID))
 		if display == "" {
 			continue
@@ -455,7 +474,7 @@ func modelChoiceCandidates(choices []ModelChoice, query string, limit int) []con
 			break
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (d *assembler) agentCatalog(limit int) []controlprompt.AgentCandidate {
@@ -495,38 +514,17 @@ func (d *assembler) resolveStoredModelAlias(ctx context.Context, input string) (
 	if err != nil {
 		return "", err
 	}
-	var exact string
-	exactAliasMatches := make([]string, 0, 2)
+	configs := modelChoiceConfigs(choices)
+	if cfg, ok, err := modelconfig.ResolveSelector(configs, input); err != nil {
+		return "", err
+	} else if ok {
+		return cfg.ID, nil
+	}
 	prefixMatches := make([]string, 0, 2)
-	for _, choice := range choices {
-		id := strings.TrimSpace(firstNonEmpty(choice.ID, choice.Alias))
-		alias := strings.TrimSpace(choice.Alias)
-		normalizedID := strings.ToLower(id)
-		normalizedAlias := strings.ToLower(alias)
-		if normalizedID == "" && normalizedAlias == "" {
-			continue
+	for _, cfg := range configs {
+		if hasSlashArgPrefix(input, cfg.ID, cfg.Alias, modelconfig.PublicSelector(cfg)) {
+			prefixMatches = append(prefixMatches, cfg.ID)
 		}
-		if normalizedID == input {
-			exact = id
-			break
-		}
-		if normalizedAlias == input {
-			exactAliasMatches = append(exactAliasMatches, id)
-			continue
-		}
-		if strings.HasPrefix(normalizedID, input) || strings.HasPrefix(normalizedAlias, input) {
-			prefixMatches = append(prefixMatches, id)
-		}
-	}
-	if exact != "" {
-		return exact, nil
-	}
-	switch len(dedupeNonEmptyStrings(exactAliasMatches)) {
-	case 1:
-		return dedupeNonEmptyStrings(exactAliasMatches)[0], nil
-	case 0:
-	default:
-		return "", fmt.Errorf("app/gatewayapp/controladapter: ambiguous model alias %q", input)
 	}
 	prefixMatches = dedupeNonEmptyStrings(prefixMatches)
 	switch len(prefixMatches) {
@@ -535,7 +533,7 @@ func (d *assembler) resolveStoredModelAlias(ctx context.Context, input string) (
 	case 0:
 		return "", fmt.Errorf("app/gatewayapp/controladapter: unknown model alias %q", input)
 	default:
-		return "", fmt.Errorf("app/gatewayapp/controladapter: ambiguous model alias %q", input)
+		return "", fmt.Errorf("%w %q", modelconfig.ErrAmbiguousSelector, input)
 	}
 }
 
