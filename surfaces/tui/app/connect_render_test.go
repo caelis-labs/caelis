@@ -108,7 +108,7 @@ func TestRenderSlashArgListAlignsProviderHints(t *testing.T) {
 	model.slashArgCandidates = []SlashArgCandidate{
 		{Value: "codex", Display: "codex", Detail: "ChatGPT subscription models through Codex"},
 		{Value: "grok", Display: "grok", Detail: "Grok models through an eligible xAI subscription"},
-		{Value: "openai-compatible", Display: "openai-compatible", Detail: "OpenAI-compatible proxy or self-hosted endpoint"},
+		{Value: "openai-chat-compatible", Display: "openai-chat-compatible", Detail: "OpenAI Chat Completions compatible proxy or self-hosted endpoint"},
 	}
 	model.slashArgIndex = 0
 
@@ -116,15 +116,49 @@ func TestRenderSlashArgListAlignsProviderHints(t *testing.T) {
 	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
 	codex := lineContaining(lines, "codex")
 	grok := lineContaining(lines, "Grok models")
-	compat := lineContaining(lines, "openai-compatible")
+	compat := lineContaining(lines, "openai-chat-compatible")
 	if codex == "" || grok == "" || compat == "" {
 		t.Fatalf("renderSlashArgList() = %q, want provider rows", rendered)
 	}
 	codexHint := strings.Index(codex, "ChatGPT")
 	grokHint := strings.Index(grok, "Grok models")
-	compatHint := strings.Index(compat, "OpenAI-compatible")
+	compatHint := strings.Index(compat, "OpenAI Chat Completions")
 	if codexHint < 0 || grokHint < 0 || compatHint < 0 || codexHint != grokHint || grokHint != compatHint {
 		t.Fatalf("provider hint columns = %d, %d, %d, want aligned\n%s", codexHint, grokHint, compatHint, rendered)
+	}
+}
+
+func TestRenderSlashArgListDistinguishesOpenAIProtocolProviders(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		Wizards:  DefaultWizards(),
+	})
+	model.width = 140
+	model.slashArgActive = true
+	model.slashArgCommand = "connect-provider"
+	model.slashArgCandidates = []SlashArgCandidate{
+		{Value: "openai", Display: "openai", Detail: "OpenAI-hosted models through the Responses API"},
+		{Value: "openai-responses-compatible", Display: "openai-responses-compatible", Detail: "OpenAI Responses API compatible proxy or self-hosted endpoint"},
+		{Value: "openai-chat-compatible", Display: "openai-chat-compatible", Detail: "OpenAI Chat Completions compatible proxy or self-hosted endpoint"},
+	}
+	model.slashArgIndex = 0
+
+	rendered := ansi.Strip(model.renderSlashArgList())
+	t.Logf("provider menu:\n%s", rendered)
+	official := lineContaining(strings.Split(rendered, "\n"), "OpenAI-hosted models")
+	responses := lineContaining(strings.Split(rendered, "\n"), "openai-responses-compatible")
+	chat := lineContaining(strings.Split(rendered, "\n"), "openai-chat-compatible")
+	if official == "" || responses == "" || chat == "" {
+		t.Fatalf("renderSlashArgList() = %q, want distinct OpenAI protocol rows", rendered)
+	}
+	if !strings.Contains(official, "Responses") {
+		t.Fatalf("openai row = %q, want Responses", official)
+	}
+	if !strings.Contains(responses, "Responses") || strings.Contains(responses, "Chat Completions") {
+		t.Fatalf("responses compatible row = %q, want Responses without Chat Completions", responses)
+	}
+	if !strings.Contains(chat, "Chat Completions") {
+		t.Fatalf("chat compatible row = %q, want Chat Completions", chat)
 	}
 }
 
@@ -138,7 +172,7 @@ func TestRenderSlashArgListNarrowWidthKeepsANSIIntact(t *testing.T) {
 	model.slashArgCommand = "connect"
 	model.slashArgCandidates = []SlashArgCandidate{
 		{Value: "anthropic-compatible", Display: "anthropic-compatible", Detail: "OpenAI-compatible endpoint with custom base URL"},
-		{Value: "openai-compatible", Display: "openai-compatible", Detail: "OpenAI-compatible endpoint with custom base URL"},
+		{Value: "openai-chat-compatible", Display: "openai-chat-compatible", Detail: "OpenAI Chat Completions compatible endpoint with custom base URL"},
 	}
 	model.slashArgIndex = 0
 

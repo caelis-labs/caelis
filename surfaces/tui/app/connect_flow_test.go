@@ -900,6 +900,41 @@ func TestConnectWizardKeepsBaseURLStepForCompatibleProviders(t *testing.T) {
 	}
 }
 
+func TestConnectWizardKeepsBaseURLStepForOpenAIProtocolProviders(t *testing.T) {
+	for _, provider := range []string{"openai-chat-compatible", "openai-responses-compatible", "openai-compatible"} {
+		t.Run(provider, func(t *testing.T) {
+			m := NewModel(Config{
+				Wizards: DefaultWizards(),
+				SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
+					switch command {
+					case "connect":
+						return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+					case "connect-provider":
+						return []SlashArgCandidate{{Value: provider, Display: provider}}, nil
+					case "connect-baseurl:" + provider:
+						return []SlashArgCandidate{{Value: "https://api.openai.com/v1", Display: "https://api.openai.com/v1"}}, nil
+					default:
+						return nil, nil
+					}
+				},
+			})
+			openModelConnectWizard(t, m)
+			handled, cmd := m.handleWizardEnter()
+			if !handled {
+				t.Fatal("provider selection was not handled")
+			}
+			runConnectTestCmd(m, cmd)
+			want := "connect-baseurl:" + provider
+			if got := strings.TrimSpace(m.slashArgCommand); got != want {
+				t.Fatalf("slashArgCommand after %s = %q, want %s", provider, got, want)
+			}
+			if !connectWizardProviderHasBaseURLStep(provider) {
+				t.Fatalf("connectWizardProviderHasBaseURLStep(%q) = false, want custom base URL step", provider)
+			}
+		})
+	}
+}
+
 func TestConnectWizardSkipsAPIKeyForReusableBaseURLAuth(t *testing.T) {
 	const baseURL = "https://api.openai.com/v1"
 	m := NewModel(Config{

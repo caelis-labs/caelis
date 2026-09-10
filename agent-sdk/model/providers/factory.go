@@ -15,6 +15,7 @@ type Factory struct {
 
 var supportedAPITypes = map[APIType]struct{}{
 	APIOpenAI:              {},
+	APIOpenAIResponses:     {},
 	APIOpenAICodex:         {},
 	APIOpenAICompatible:    {},
 	APIOpenRouter:          {},
@@ -124,8 +125,8 @@ func (f *Factory) NewByAlias(alias string) (model.LLM, error) {
 		llm = newOpenAICompat(cfg, token)
 	case APIOpenRouter:
 		llm = newOpenRouter(cfg, token)
-	case APIOpenAI:
-		llm = newOpenAICompat(cfg, token)
+	case APIOpenAI, APIOpenAIResponses:
+		llm = newOpenAIResponses(cfg, token)
 	case APIAnthropic, APIAnthropicCompatible:
 		llm = newAnthropic(cfg, token)
 	case APIGemini:

@@ -39,7 +39,7 @@ func TestProviderTemplateOwnsModelSelectionPolicy(t *testing.T) {
 	if !ok || !openRouter.UseModelDirectory {
 		t.Fatalf("openrouter template = %#v, want model directory", openRouter)
 	}
-	for _, provider := range []string{"openai-compatible", "anthropic-compatible"} {
+	for _, provider := range []string{"openai-compatible", "openai-chat-compatible", "openai-responses-compatible", "anthropic-compatible"} {
 		template, ok := LookupProvider(provider)
 		if !ok || template.UseModelDirectory || !template.PromptForBaseURL || len(template.DefaultReasoningLevels) == 0 {
 			t.Fatalf("%s template = %#v, want custom endpoint setup with maintained advanced defaults", provider, template)
@@ -705,6 +705,13 @@ func TestCompatibleEndpointsDoNotInheritVendorImageCapabilities(t *testing.T) {
 		t.Fatal("generic OpenAI-compatible endpoint inherited OpenAI image capability")
 	}
 	if ModelSupportsImages(Config{
+		Provider: "openai-responses-compatible",
+		Model:    "gpt-4o-mini",
+		BaseURL:  "https://proxy.example/v1",
+	}) {
+		t.Fatal("generic OpenAI Responses-compatible endpoint inherited OpenAI image capability")
+	}
+	if ModelSupportsImages(Config{
 		Provider: "anthropic-compatible",
 		Model:    "claude-sonnet-4",
 		BaseURL:  "https://proxy.example/anthropic",
@@ -837,7 +844,7 @@ func TestSpeedModesForConfig(t *testing.T) {
 		want     bool
 		wantHint string
 	}{
-		{name: "openai gpt uses chat completions", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.4"}, want: true, wantHint: "1.5x faster, more usage"},
+		{name: "openai gpt uses responses", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.4"}, want: true, wantHint: "1.5x faster, more usage"},
 		{name: "openai-codex gpt uses responses", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-5.6-sol"}, want: true, wantHint: "1.5x faster, more usage"},
 		{name: "astra has model-specific hint", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6-astra"}, want: true, wantHint: "2x faster, more usage"},
 		{name: "normalizes official openai gpt identity", cfg: Config{Provider: " OpenAI ", Model: "GPT-5.4", BaseURL: "https://api.openai.com/v1/"}, want: true, wantHint: "1.5x faster, more usage"},
@@ -847,6 +854,7 @@ func TestSpeedModesForConfig(t *testing.T) {
 		{name: "rejects custom openai-codex endpoint", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-5.6-sol", BaseURL: "https://proxy.example/codex"}},
 		{name: "rejects non-gpt openai model", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "o3"}},
 		{name: "rejects openai-compatible gpt", cfg: Config{Provider: "openai-compatible", API: model.APIOpenAICompatible, Model: "gpt-5.4"}},
+		{name: "rejects openai-responses-compatible gpt", cfg: Config{Provider: "openai-responses-compatible", API: model.APIOpenAIResponses, Model: "gpt-5.4"}},
 		{name: "rejects openai gpt on compatible api", cfg: Config{Provider: "openai", API: model.APIOpenAICompatible, Model: "gpt-5.4"}},
 		{name: "rejects openai-codex gpt on chat api", cfg: Config{Provider: "openai-codex", API: model.APIOpenAI, Model: "gpt-5.4"}},
 		{name: "rejects xai grok", cfg: Config{Provider: "xai", Model: "grok-4.6"}},

@@ -84,24 +84,13 @@ func newOpenAICompat(cfg Config, token string) *openAICompatLLM {
 		imageInput:          cfg.ImageInput,
 		options:             defaultOpenAICompatOptions(),
 	}
-	applyOpenAICompatCapabilities(&llm.options, cfg)
 	return llm
 }
 
 func newOpenAICompatWithProfile(cfg Config, token string, profile openAICompatProfile) *openAICompatLLM {
 	llm := newOpenAICompat(cfg, token)
 	llm.options = openAICompatOptionsForProfile(profile)
-	applyOpenAICompatCapabilities(&llm.options, cfg)
 	return llm
-}
-
-func applyOpenAICompatCapabilities(options *openAICompatOptions, cfg Config) {
-	// Only the official OpenAI API is known to accept wire-level function.strict.
-	// Generic OpenAI-compatible providers may expose the same route shape while
-	// using different tool-call parsers.
-	if cfg.API == APIOpenAI {
-		options.StrictFunctionTools = true
-	}
 }
 
 func openAICompatOptionsForProfile(profile openAICompatProfile) openAICompatOptions {

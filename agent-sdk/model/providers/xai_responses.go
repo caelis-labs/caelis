@@ -136,112 +136,15 @@ func (l *xAIResponsesLLM) Generate(ctx context.Context, req *model.Request) iter
 			return
 		}
 
-		accumulator := newOpenAIResponsesAccumulator("xai")
-		terminalSeen := false
-		stopped := false
-		err = readSSEWithActivityTimeout(resp.Body, l.firstEventTimeout, l.idleTimeout, responsesSSEHasSemanticActivity, func(data []byte) error {
-			var event openAICodexStreamWire
-			if err := json.Unmarshal(data, &event); err != nil {
-				return fmt.Errorf("xai responses: decode stream event: %w", err)
-			}
-			if event.Response != nil && event.Response.Usage != nil {
-				model.RecordInvocationUsage(ctx, event.Response.Usage.toKernelUsage())
-			}
-			switch event.Type {
-			case "response.output_item.added", "response.output_item.done":
-				if event.Item != nil {
-					accumulator.applyItem(*event.Item, event.OutputIndex)
-				}
-			case "response.output_text.delta":
-				if event.Delta == "" {
-					return nil
-				}
-				accumulator.appendText(event)
-				if req.Stream && !yield(&model.StreamEvent{
-					Type:      model.StreamEventPartDelta,
-					PartDelta: &model.PartDelta{Index: event.OutputIndex, Kind: model.PartKindText, TextDelta: event.Delta},
-				}, nil) {
-					stopped = true
-					return errStopSSE
-				}
-			case "response.reasoning_text.delta", "response.reasoning_summary.delta", "response.reasoning_summary_text.delta":
-				if event.Delta == "" {
-					return nil
-				}
-				delta := accumulator.appendReasoning(event)
-				if req.Stream && !yield(&model.StreamEvent{
-					Type:      model.StreamEventPartDelta,
-					PartDelta: &model.PartDelta{Index: event.OutputIndex, Kind: model.PartKindReasoning, TextDelta: delta},
-				}, nil) {
-					stopped = true
-					return errStopSSE
-				}
-			case "response.function_call_arguments.delta":
-				if event.Delta == "" {
-					return nil
-				}
-				accumulator.appendArguments(event)
-				if req.Stream && !yield(&model.StreamEvent{
-					Type:      model.StreamEventPartDelta,
-					PartDelta: &model.PartDelta{Index: event.OutputIndex, Kind: model.PartKindToolUse, InputDelta: event.Delta},
-				}, nil) {
-					stopped = true
-					return errStopSSE
-				}
-			case "response.completed", "response.incomplete":
-				if event.Response == nil {
-					return errorcode.New(errorcode.Internal, "xai responses: terminal response is empty")
-				}
-				for index, item := range event.Response.Output {
-					accumulator.applyItem(item, index)
-				}
-				message, err := accumulator.message()
-				if err != nil {
-					return err
-				}
-				finishReason, rawFinishReason := openAICodexFinishReason(event.Response, accumulator.hasToolCall)
-				usage := model.Usage{}
-				if event.Response.Usage != nil {
-					usage = event.Response.Usage.toKernelUsage()
-				}
-				responseModel := strings.TrimSpace(event.Response.Model)
-				if responseModel == "" {
-					responseModel = l.name
-				}
-				terminalSeen = true
-				if !yield(&model.StreamEvent{
-					Type: model.StreamEventTurnDone,
-					Response: &model.Response{
-						Message:             message,
-						StepComplete:        true,
-						TurnComplete:        true,
-						Status:              model.ResponseStatusCompleted,
-						FinishReason:        finishReason,
-						RawFinishReason:     rawFinishReason,
-						Usage:               usage,
-						Model:               responseModel,
-						Provider:            l.provider,
-						ContextWindowTokens: l.contextWindowTokens,
-					},
-				}, nil) {
-					stopped = true
-				}
-				return errStopSSE
-			case "response.failed", "error":
-				return xAIResponsesStreamError(event)
-			}
-			return nil
-		})
-		if stopped {
-			return
-		}
-		if err != nil {
-			yield(nil, err)
-			return
-		}
-		if !terminalSeen {
-			yield(nil, fmt.Errorf("xai responses: stream ended before a terminal response"))
-		}
+		readResponsesStream(ctx, resp.Body, req, responsesStreamConfig{
+			name:                "xai responses",
+			provider:            l.provider,
+			model:               l.name,
+			replayProvider:      "xai",
+			contextWindowTokens: l.contextWindowTokens,
+			firstEventTimeout:   l.firstEventTimeout,
+			idleTimeout:         l.idleTimeout,
+		}, yield)
 	}
 }
 

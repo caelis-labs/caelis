@@ -155,7 +155,7 @@ func TestOpenAICodexStreamErrorClassification(t *testing.T) {
 			if err := json.Unmarshal([]byte(tt.event), &event); err != nil {
 				t.Fatalf("decode event: %v", err)
 			}
-			err := openAICodexStreamError(event)
+			err := responsesStreamError("openai codex", event, openAICodexTerminalErrorCodes)
 			if got := errorcode.CodeOf(err); got != tt.wantCode {
 				t.Errorf("error code = %q, want %q; error = %v", got, tt.wantCode, err)
 			}

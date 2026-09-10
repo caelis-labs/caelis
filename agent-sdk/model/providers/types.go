@@ -12,6 +12,7 @@ type APIType = model.APIType
 
 const (
 	APIOpenAI              = model.APIOpenAI
+	APIOpenAIResponses     = model.APIOpenAIResponses
 	APIOpenAICompatible    = model.APIOpenAICompatible
 	APIOpenRouter          = model.APIOpenRouter
 	APIGemini              = model.APIGemini

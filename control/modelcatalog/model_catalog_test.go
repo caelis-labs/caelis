@@ -38,6 +38,7 @@ func TestLookupSuggestedModelCapabilitiesDoesNotInheritVendorForCompatibleEndpoi
 		model    string
 	}{
 		{provider: "openai-compatible", model: "gpt-4o-mini"},
+		{provider: "openai-responses-compatible", model: "gpt-4o-mini"},
 		{provider: "anthropic-compatible", model: "claude-sonnet-4"},
 	} {
 		if caps, ok := LookupSuggestedModelCapabilities(test.provider, test.model); ok {

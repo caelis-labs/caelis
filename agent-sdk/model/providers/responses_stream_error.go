@@ -118,10 +118,6 @@ func (e *responsesProviderError) ErrorCode() errorcode.Code {
 	return e.class.errorCode
 }
 
-func openAICodexStreamError(event openAICodexStreamWire) error {
-	return responsesStreamError("openai codex", event, openAICodexTerminalErrorCodes)
-}
-
 func xAIResponsesStreamError(event openAICodexStreamWire) error {
 	return responsesStreamError("xai responses", event, nil)
 }

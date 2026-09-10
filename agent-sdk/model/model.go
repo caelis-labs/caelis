@@ -15,7 +15,11 @@ import (
 type APIType string
 
 const (
-	APIOpenAI              APIType = "openai"
+	// APIOpenAI selects OpenAI's API-key authenticated Responses API.
+	APIOpenAI APIType = "openai"
+	// APIOpenAIResponses selects a standard Responses-compatible endpoint.
+	APIOpenAIResponses APIType = "openai_responses"
+	// APIOpenAICompatible selects a Chat Completions-compatible endpoint.
 	APIOpenAICompatible    APIType = "openai_compatible"
 	APIOpenRouter          APIType = "openrouter"
 	APIGemini              APIType = "gemini"
