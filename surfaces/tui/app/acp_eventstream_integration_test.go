@@ -1174,7 +1174,7 @@ func TestNormalizedGrokLiveOtherMatchesLoadedListPresentation(t *testing.T) {
 	}
 }
 
-func TestAnonymousProviderTitleRemainsAnAtomicLifecycleLabel(t *testing.T) {
+func TestAnonymousProviderTitleDoesNotSuppressArguments(t *testing.T) {
 	t.Parallel()
 
 	const title = "List `/tmp/foo`"
@@ -1183,8 +1183,8 @@ func TestAnonymousProviderTitleRemainsAnAtomicLifecycleLabel(t *testing.T) {
 		Title:    title,
 		Args:     "foo",
 	}, false)
-	if want := "• " + title; got != want {
-		t.Fatalf("anonymous provider header = %q, want atomic title %q", got, want)
+	if want := "• " + title + " foo"; got != want {
+		t.Fatalf("anonymous provider header = %q, want literal title and arguments %q", got, want)
 	}
 }
 
@@ -2130,10 +2130,9 @@ func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T
 	if strings.Contains(overlay, "loaded child settings") {
 		t.Fatalf("standard ACP read result was not folded as exploration activity:\n%s", overlay)
 	}
-	// The tool stays on one compact exploration row; the running Turn owns
-	// the second row for its live elapsed footer.
-	if model.subagentOutputOverlay.geometry.totalRows != 2 {
-		t.Fatalf("standard ACP read did not retain one compact row plus its Turn footer:\n%s", overlay)
+	// Tool completion does not complete its containing Turn.
+	if model.subagentOutputOverlay.geometry.totalRows != 1 {
+		t.Fatalf("standard ACP read should retain one compact row without a Turn footer:\n%s", overlay)
 	}
 
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{

@@ -229,7 +229,6 @@ func TestSystemPromptCollaborationGuidanceIsMainOnlyAndIdempotent(t *testing.T) 
 	}
 	for _, want := range []string{
 		"StartThread creates a collaborating Agent only for independent work that benefits from parallelism or focused expertise.",
-		"Give each collaborator a self-contained task: goal, scope, constraints, edit permission, and expected output.",
 		"Own integration, validation, and the user-facing result. Verify only findings that affect the next action; do not repeat completed work.",
 	} {
 		if !strings.Contains(mainPrompt, want) {
@@ -271,6 +270,8 @@ func TestSystemPromptCollaboratorIdentityIsControlOwnedAndIdempotent(t *testing.
 		"Your assigned handle is orbit.",
 		"Address the parent as parent.",
 		"Your role is delegated.",
+		"Process any messages returned by the tool.",
+		"end the turn",
 	} {
 		if !strings.Contains(childPrompt, want) {
 			t.Fatalf("collaborator identity missing %q:\n%s", want, childPrompt)

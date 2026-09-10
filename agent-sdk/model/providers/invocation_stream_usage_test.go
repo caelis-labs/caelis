@@ -35,12 +35,14 @@ func (*measuredStreamBody) Close() error { return nil }
 
 func TestProviderInvocationsPreserveCumulativeUsageOnReadFailureAndCancel(t *testing.T) {
 	constructors := map[string]func(Config) model.LLM{
-		"openai":    func(c Config) model.LLM { return newOpenAICompat(c, "test") },
-		"anthropic": func(c Config) model.LLM { return newAnthropic(c, "test") },
-		"gemini":    func(c Config) model.LLM { return newGemini(c, "test") },
-		"ollama":    func(c Config) model.LLM { return newOllama(c, "test") },
-		"codex":     func(c Config) model.LLM { return newOpenAICodex(c) },
-		"xai":       func(c Config) model.LLM { return newXAIResponses(c) },
+		"openai-compatible":           func(c Config) model.LLM { return newOpenAICompat(c, "test") },
+		"openai":                      func(c Config) model.LLM { c.API = APIOpenAI; return newOpenAIResponses(c, "test") },
+		"openai-responses-compatible": func(c Config) model.LLM { c.API = APIOpenAIResponses; return newOpenAIResponses(c, "test") },
+		"anthropic":                   func(c Config) model.LLM { return newAnthropic(c, "test") },
+		"gemini":                      func(c Config) model.LLM { return newGemini(c, "test") },
+		"ollama":                      func(c Config) model.LLM { return newOllama(c, "test") },
+		"codex":                       func(c Config) model.LLM { return newOpenAICodex(c) },
+		"xai":                         func(c Config) model.LLM { return newXAIResponses(c) },
 	}
 	for provider, newLLM := range constructors {
 		for _, mode := range []string{"failure", "cancel", "zero", "cumulative"} {
@@ -57,9 +59,9 @@ func TestProviderInvocationsPreserveCumulativeUsageOnReadFailureAndCancel(t *tes
 				var frames strings.Builder
 				for i, n := range values {
 					switch provider {
-					case "openai":
+					case "openai-compatible":
 						fmt.Fprintf(&frames, "data: {\"choices\":[],\"usage\":{\"total_tokens\":%d}}\n\n", n)
-					case "codex", "xai":
+					case "codex", "xai", "openai", "openai-responses-compatible":
 						fmt.Fprintf(&frames, "data: {\"type\":\"response.in_progress\",\"response\":{\"usage\":{\"input_tokens\":%d,\"output_tokens\":0,\"total_tokens\":%d}}}\n\n", n, n)
 					case "gemini":
 						fmt.Fprintf(&frames, "data: {\"usageMetadata\":{\"promptTokenCount\":%d,\"totalTokenCount\":%d}}\n\n", n, n)

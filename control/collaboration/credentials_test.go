@@ -82,7 +82,7 @@ func TestGrantCannotSelectAnotherWorkSession(t *testing.T) {
 		t.Fatal("accepted caller-selected Session")
 	}
 	s.Revoke(Identity{"work", "b"})
-	if _, err := s.CallAuthenticated(t.Context(), g.Token(), Request{Tool: "ReceiveMessages", Arguments: []byte(`{}`)}); err == nil {
+	if _, err := s.CallAuthenticated(t.Context(), g.Token(), Request{Tool: "ListThreads", Arguments: []byte(`{}`)}); err == nil {
 		t.Fatal("revocation ignored")
 	}
 }

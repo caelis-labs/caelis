@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 )
 
 func TestChatAgentLoadsDeferredMCPToolsAfterToolSearch(t *testing.T) {
@@ -19,8 +20,8 @@ func TestChatAgentLoadsDeferredMCPToolsAfterToolSearch(t *testing.T) {
 
 	const mcpToolName = "mcp__calendar__demo__create_event"
 	testModel := &toolSearchLoopModel{mcpToolName: mcpToolName}
-	searchTool := toolSearchToolForTest(t, mcpToolName)
 	mcpTool := mcpToolForTest(mcpToolName)
+	searchTool := toolsearch.New([]tool.Tool{mcpTool})
 	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{searchTool, mcpTool}, "")
 	if err != nil {
 		t.Fatalf("NewWithTools() error = %v", err)
@@ -52,6 +53,19 @@ func TestChatAgentLoadsDeferredMCPToolsAfterToolSearch(t *testing.T) {
 	}
 	if got, want := requestToolNames(testModel.requests[1]), []string{tool.ToolSearchToolName, mcpToolName}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("second request tools = %v, want %v", got, want)
+	}
+	for _, spec := range testModel.requests[1].Tools {
+		if spec.Function != nil && spec.Function.Name == mcpToolName && !reflect.DeepEqual(spec.Function.Parameters, mcpTool.Definition().InputSchema) {
+			t.Fatalf("discovered callable schema changed: %#v", spec.Function)
+		}
+	}
+	for _, event := range events {
+		if event.Tool != nil && event.Tool.Name == tool.ToolSearchToolName && event.Type == session.EventTypeToolResult {
+			items := event.Tool.Output["tools"].([]any)
+			if len(items[0].(map[string]any)) != 1 {
+				t.Fatalf("durable discovery repeated schema: %#v", items)
+			}
+		}
 	}
 	if got := events[len(events)-1].Text; got != "done" {
 		t.Fatalf("final text = %q, want done", got)

@@ -27,6 +27,7 @@ type runner struct {
 	finished      bool
 	completionErr error
 	submissions   []agent.Submission
+	inputReady    chan struct{}
 	cancelHook    func() error
 	dispatcher    *runnerSubmissionDispatcher
 }
@@ -36,11 +37,12 @@ func newRunner(ctx context.Context, runID string, cancel context.CancelFunc, obs
 		ctx = context.Background()
 	}
 	return &runner{
-		runID:    runID,
-		ctx:      ctx,
-		cancelFn: cancel,
-		observer: observer,
-		done:     make(chan struct{}),
+		runID:      runID,
+		ctx:        ctx,
+		cancelFn:   cancel,
+		observer:   observer,
+		done:       make(chan struct{}),
+		inputReady: make(chan struct{}),
 	}
 }
 
@@ -50,11 +52,21 @@ func (r *runner) Submit(sub agent.Submission) error {
 	return r.SubmitContext(context.Background(), sub)
 }
 
+func (r *runner) SubmitBatch(ctx context.Context, inputs []agent.AgentCommunicationInput) error {
+	if len(inputs) == 0 {
+		return errors.New("agent-sdk/runtime: input batch is empty")
+	}
+	return r.SubmitContext(ctx, agent.Submission{Kind: agent.SubmissionKindAgentCommunication, Inputs: inputs})
+}
+
 func (r *runner) SubmitContext(ctx context.Context, sub agent.Submission) error {
+	if err := agent.ValidateSubmissionInputs(sub); err != nil {
+		return err
+	}
 	if sub.Kind != agent.SubmissionKindConversation && sub.Kind != agent.SubmissionKindAgentCommunication {
 		return fmt.Errorf("agent-sdk/runtime: unsupported submission kind %q", sub.Kind)
 	}
-	if sub.Kind == agent.SubmissionKindAgentCommunication {
+	if sub.Kind == agent.SubmissionKindAgentCommunication && len(sub.Inputs) == 0 {
 		if err := session.ValidateAgentCommunicationActor(sub.Actor); err != nil {
 			return fmt.Errorf("agent-sdk/runtime: %w", err)
 		}
@@ -76,6 +88,9 @@ func (r *runner) submitContext(ctx context.Context, sub agent.Submission) error 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return submissionNotDispatchedError(err)
+	}
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
@@ -87,6 +102,9 @@ func (r *runner) submitContext(ctx context.Context, sub agent.Submission) error 
 		return dispatcher.submit(ctx, sub)
 	}
 	r.submissions = append(r.submissions, agent.CloneSubmission(sub))
+	if len(r.submissions) == 1 {
+		close(r.inputReady)
+	}
 	r.mu.Unlock()
 	return nil
 }
@@ -118,6 +136,22 @@ func (r *runner) setSubmissionHandler(ctx context.Context, handler func(context.
 }
 
 func (r *runner) drainSubmissions() []agent.Submission {
+	return r.drainInput(false)
+}
+
+func (r *runner) inputReadySignal() <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.inputReady
+}
+
+// drainFinalSubmissions atomically closes input only when the final safe point
+// has no continuation. A later sender can then reselect a new Turn safely.
+func (r *runner) drainFinalSubmissions() []agent.Submission {
+	return r.drainInput(true)
+}
+
+func (r *runner) drainInput(final bool) []agent.Submission {
 	if r == nil {
 		return nil
 	}
@@ -125,6 +159,12 @@ func (r *runner) drainSubmissions() []agent.Submission {
 	defer r.mu.Unlock()
 	out := agent.CloneSubmissions(r.submissions)
 	r.submissions = nil
+	if len(out) > 0 {
+		r.inputReady = make(chan struct{})
+	}
+	if final && len(out) == 0 {
+		r.closed = true
+	}
 	return out
 }
 

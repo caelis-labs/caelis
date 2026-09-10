@@ -65,7 +65,7 @@ func ComposeTextPrompt(context agent.ContextTransfer, prompt string) string {
 	if prompt == "" {
 		return ""
 	}
-	return background + "\n\n" + currentRequest + "\n" + prompt
+	return prompt + "\n\n" + background
 }
 
 // CurrentRequestMarker returns the trusted marker inserted immediately before

@@ -43,6 +43,9 @@ type Submission struct {
 	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
 	Metadata     map[string]any      `json:"metadata,omitempty"`
 	Actor        session.ActorRef    `json:"actor,omitempty"`
+	// Inputs is one ordered Agent-communication admission at a safe model
+	// boundary. It excludes all singular input fields and retains every source.
+	Inputs []AgentCommunicationInput `json:"-"`
 }
 
 // CancelStatus identifies the outcome of one cancellation request.
@@ -108,6 +111,12 @@ type Runner interface {
 // continue to implement only Runner.Submit and drain their local queue.
 type ContextSubmissionRunner interface {
 	SubmitContext(context.Context, Submission) error
+}
+
+// BatchSubmissionRunner admits one ordered Agent-communication batch to the
+// exact live Run. Callers must not fall back to per-message Submit calls.
+type BatchSubmissionRunner interface {
+	SubmitBatch(context.Context, []AgentCommunicationInput) error
 }
 
 // RunnerCompletionWaiter reports when the execution producer, including its
@@ -374,6 +383,9 @@ type ContextSpec struct {
 	State            map[string]any
 	DrainSubmissions func() []Submission
 	Overlay          bool
+	// InputReady optionally observes queued input without consuming it. The
+	// callback must support concurrent calls; see InputReady for signal semantics.
+	InputReady func() <-chan struct{}
 }
 
 // NewContext returns one immutable runtime context implementation suitable for
@@ -383,6 +395,8 @@ func NewContext(spec ContextSpec) Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Do not inherit another invocation's queue observer through the parent.
+	ctx = context.WithValue(ctx, inputReadyContextKey{}, spec.InputReady)
 	return &contextSnapshot{
 		Context:          ctx,
 		session:          session.CloneSession(spec.Session),
@@ -486,6 +500,7 @@ func CloneSubmission(sub Submission) Submission {
 		ContentParts: append([]model.ContentPart(nil), sub.ContentParts...),
 		Metadata:     jsonvalue.CloneMap(sub.Metadata),
 		Actor:        session.CloneActorRef(sub.Actor),
+		Inputs:       CloneAgentCommunicationInputs(sub.Inputs),
 	}
 	return out
 }

@@ -63,11 +63,12 @@ func TestToolSearchFindsDeferredMCPTools(t *testing.T) {
 		t.Fatalf("payload count/tools = %d/%d, want 1/1", payload.Count, len(payload.Tools))
 	}
 	got := payload.Tools[0]
-	if got.Type != "function" || got.Name != "mcp__calendar__demo__create_event" || !got.DeferLoading {
-		t.Fatalf("returned tool = %+v, want deferred calendar function", got)
+	if got.Name != "mcp__calendar__demo__create_event" {
+		t.Fatalf("returned tool = %+v, want calendar function", got)
 	}
-	if got.Source["plugin_id"] != "calendar" || got.Source["mcp_server"] != "demo" || got.Source["mcp_tool"] != "create_event" {
-		t.Fatalf("source = %#v, want MCP provenance", got.Source)
+	items := output["tools"].([]any)
+	if fields := items[0].(map[string]any); len(fields) != 1 {
+		t.Fatalf("discovery repeated callable schema or provenance: %#v", fields)
 	}
 }
 
@@ -99,7 +100,7 @@ func TestParseRequestRejectsOversizedQueryAndLimit(t *testing.T) {
 	}
 }
 
-func TestToolSearchBoundsOneResultByProjectedPromptCost(t *testing.T) {
+func TestToolSearchHeavySchemasDoNotBloatDiscoveryResult(t *testing.T) {
 	t.Parallel()
 
 	tools := make([]tool.Tool, 0, maxLimit)
@@ -126,8 +127,8 @@ func TestToolSearchBoundsOneResultByProjectedPromptCost(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := tool.ParseToolSearchOutput(output)
-	if !payload.Truncated || payload.OmittedCount == 0 {
-		t.Fatalf("payload = %#v, want prompt-cost truncation", payload)
+	if payload.Truncated || payload.OmittedCount != 0 || payload.Count != maxLimit {
+		t.Fatalf("payload = %#v, want all matching names without schema duplication", payload)
 	}
 	if tokens := tool.EstimateToolSearchResultPromptTokens(payload); tokens > tool.MaxToolSearchResultPromptTokens {
 		t.Fatalf("result projected tokens = %d, want <= %d", tokens, tool.MaxToolSearchResultPromptTokens)
@@ -172,13 +173,8 @@ func TestToolSearchBoundsProjectedSourceMetadataAndDescription(t *testing.T) {
 	if tokens := tool.EstimateToolSearchResultPromptTokens(payload); tokens > tool.MaxToolSearchResultPromptTokens {
 		t.Fatalf("ToolSearch result tokens = %d, want <= %d", tokens, tool.MaxToolSearchResultPromptTokens)
 	}
-	for _, discovered := range payload.Tools {
-		for key, value := range discovered.Source {
-			text, _ := value.(string)
-			if got := utf8.RuneCountInString(text); got > maxSourceMetadataRunes {
-				t.Fatalf("source[%s] runes = %d, want <= %d", key, got, maxSourceMetadataRunes)
-			}
-		}
+	if strings.Contains(string(result.Content[0].JSON.Value), "source") {
+		t.Fatal("discovery result repeated source metadata")
 	}
 }
 
@@ -194,4 +190,20 @@ func mcpCandidate(name, description, pluginID, server, mcpTool string, schema ma
 			tool.MetadataMCPTool:   mcpTool,
 		},
 	}}
+}
+
+func TestToolSearchFindsCollaborationByStableServerKey(t *testing.T) {
+	t.Parallel()
+	var candidates []tool.Tool
+	for _, name := range []string{"ListThreads", "SendMessage", "ReceiveMessages", "ReadThread", "WaitThread"} {
+		candidates = append(candidates, mcpCandidate("collab__"+name, "Agent mail", "", "caelis-collaboration", name, map[string]any{"type": "object"}))
+	}
+	result, err := New(candidates).Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"caelis-collaboration"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload tool.ToolSearchResult
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil || len(payload.Tools) != 5 {
+		t.Fatalf("stable collaboration key = %#v, %v", payload, err)
+	}
 }

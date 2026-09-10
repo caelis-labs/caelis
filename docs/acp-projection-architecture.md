@@ -199,6 +199,10 @@ A Task control invocation and its target have independent lifecycles. Surfaces
 must not render a successful observation as target success or a failed target as
 an observer-tool failure.
 
+Participant Turn separators render only after terminal lifecycle with valid
+start and end times. Their duration is fixed by those timestamps; running Turns
+and completed tools do not create an elapsed-time separator.
+
 ## Display and compatibility
 
 Standard ACP `kind` owns the coarse tool category. Exact Runtime tool names may

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 )
 
 // ThreadRead is a bounded observation of a participant's latest public result.
@@ -60,12 +62,21 @@ func (s *Service) Read(ctx context.Context, i Identity, target Target) (ThreadRe
 	return observer.Read(ctx, i.Session, target.Handle, target.After)
 }
 
-// WaitThreads wakes on incoming mail or a new terminal/attention observation.
-// Cursors suppress repeated observations; they are not message acknowledgements.
+// WaitThreads wakes on incoming mail, successful automatic Runtime admission,
+// or a new terminal/attention observation. Cursors suppress repeated
+// observations; they are not message acknowledgements.
 func (s *Service) WaitThreads(ctx context.Context, i Identity, targets []Target, timeout time.Duration) (WaitResult, error) {
 	empty := WaitResult{Reason: "timeout", Messages: []Message{}, Threads: []ThreadRead{}}
 	if timeout < 0 || timeout > time.Minute || len(targets) > 8 {
 		return empty, errors.New("wait accepts at most 8 threads and 0 to 60 seconds")
+	}
+	// Native tools observe the Runtime queue, including input admitted before
+	// this wait. Other Control callers observe admissions overlapping their wait.
+	delivery := agent.InputReady(ctx)
+	if delivery == nil {
+		wake := s.registerDeliveryWait(i)
+		defer s.unregisterDeliveryWait(i, wake)
+		delivery = wake
 	}
 	// Validate all targets before consuming any messages.
 	for _, target := range targets {
@@ -108,6 +119,11 @@ func (s *Service) WaitThreads(ctx context.Context, i Identity, targets []Target,
 		select {
 		case <-ctx.Done():
 			return result, ctx.Err()
+		case <-delivery:
+			// Automatic delivery already removed the mail and admitted it to the
+			// active Runtime. Returning reaches the normal safe-point drain.
+			result.Reason = "input"
+			return result, nil
 		case <-timer.C:
 			return result, nil
 		case <-tick.C:

@@ -175,8 +175,21 @@ func routeHostedChildInputBatchToParent(
 	gw := composition.currentGateway()
 	for {
 		if turn, ok := gw.ActiveTurn(active.SessionID); ok {
-			if waitErr := gw.WaitActiveTurnChange(ctx, turn); waitErr != nil {
-				return waitErr
+			if turn.Kind != kernel.ActiveTurnKindKernel || strings.TrimSpace(turn.ParticipantID) != "" {
+				return errorcode.New(errorcode.Conflict, "gatewayapp: parent controller is not the active Turn owner")
+			}
+			err := gw.SubmitActiveTurn(ctx, kernel.SubmitActiveTurnRequest{
+				SessionRef: active.SessionRef, HandleID: turn.HandleID, RunID: turn.RunID, TurnID: turn.TurnID,
+				Kind: kernel.SubmissionKindAgentCommunication, Inputs: messages,
+			})
+			if isHostedChildInputClosingEdge(err) {
+				if waitErr := gw.WaitActiveTurnChange(ctx, turn); waitErr != nil {
+					return waitErr
+				}
+				continue
+			}
+			if !isHostedChildInputSelectionRace(err) {
+				return err
 			}
 			continue
 		}

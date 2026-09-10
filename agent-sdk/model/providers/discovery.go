@@ -44,7 +44,7 @@ func DiscoverModels(ctx context.Context, cfg Config) ([]RemoteModel, error) {
 		client = &clone
 	}
 	switch cfg.API {
-	case APIOpenAI, APIOpenAICompatible, APIOpenRouter, APIDeepSeek, APIMimo, APIVolcengine, APIVolcengineCoding:
+	case APIOpenAI, APIOpenAIResponses, APIOpenAICompatible, APIOpenRouter, APIDeepSeek, APIMimo, APIVolcengine, APIVolcengineCoding:
 		return discoverOpenAIModels(ctx, client, cfg, token)
 	case APIGemini:
 		return discoverGeminiModels(ctx, client, cfg, token)

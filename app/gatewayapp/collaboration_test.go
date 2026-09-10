@@ -5,18 +5,38 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"net/http"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
+
+func TestBuiltInCollaborationToolsFollowSessionRole(t *testing.T) {
+	host := newHostedChildInputTestStack(t, newHostedChildInputTestProvider(t, false))
+	parent, child, _ := newHostedChildInputTestTopology(t, host, "tool-roles")
+	for _, active := range []session.Session{parent, child} {
+		var names []string
+		for _, configured := range host.composition.collaborationTools(active) {
+			names = append(names, configured.Definition().Name)
+		}
+		want := []string{"ListThreads", "SendMessage"}
+		if active.SessionID == parent.SessionID {
+			want = append(want, "ReadThread", "WaitThread")
+		}
+		if !slices.Equal(names, want) {
+			t.Fatalf("Session %s collaboration tools = %v, want %v", active.SessionID, names, want)
+		}
+	}
+}
 
 func TestCollaborationMailboxWakesIdleParentAndReplaysCanonicalContext(t *testing.T) {
 	provider := newHostedChildInputTestProvider(t, false)
@@ -158,8 +178,21 @@ func TestCollaborationQueuedMultipleSendersUseOneTurnAndPersistModelContext(t *t
 	case <-time.After(5 * time.Second):
 		t.Fatal("initial turn not running")
 	}
-	// Automatic parent delivery is unavailable while this first Turn is active.
-	service := host.CollaborationService()
+	// Observe the production backend admission without consuming the mailbox.
+	initialTurn := hostedChildCanonicalTurn(t, host, parent.SessionRef, "initial parent input")
+	backend := &collaborationAdmissionProbe{collaborationBackend: &collaborationBackend{
+		sessions: host.composition.sessions, tasks: host.composition.authorities.taskStore,
+		router: &hostedChildInputRouter{runtimes: host.sessionRuntimes},
+	}, admitted: make(chan int, 8)}
+	service, err := collaboration.Open(filepath.Join(t.TempDir(), "mail.sqlite"), backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCtx, cancel := context.WithCancel(t.Context())
+	mailDone := make(chan struct{})
+	errors := make(chan error, 8)
+	go func() { defer close(mailDone); service.Run(runCtx, func(err error) { errors <- err }) }()
+	t.Cleanup(func() { cancel(); <-mailDone; _ = service.Close() })
 	var mail []collaboration.Message
 	for i, from := range []string{"orbit", "nova", "orbit"} {
 		replyTo := ""
@@ -172,11 +205,21 @@ func TestCollaborationQueuedMultipleSendersUseOneTurnAndPersistModelContext(t *t
 		}
 		mail = append(mail, m)
 	}
+	for admitted := 0; admitted < len(mail); {
+		select {
+		case count := <-backend.admitted:
+			admitted += count
+		case err := <-errors:
+			t.Fatal(err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("mailbox did not steer the active parent")
+		}
+	}
 	close(provider.releaseFirst)
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	var turn string
+	turn := initialTurn
 	for _, m := range mail {
 		event := waitHostedChildInputEvent(t, host, parent.SessionRef, m.Text)
 		if communication := session.ProtocolAgentCommunicationOf(event); communication == nil || communication.Text != m.Text {
@@ -210,6 +253,15 @@ func TestCollaborationQueuedMultipleSendersUseOneTurnAndPersistModelContext(t *t
 			t.Fatalf("model context lost mail order: %s", before)
 		}
 		previous = position
+		if !strings.Contains(string(before), "Message-ID: "+m.ID) || !strings.Contains(string(before), "From: "+m.From) {
+			t.Fatalf("model context lost mail references or sender: %s", before)
+		}
+		if m.ReplyTo != "" && !strings.Contains(string(before), "In-Reply-To: "+m.ReplyTo) {
+			t.Fatalf("model context lost reply reference: %s", before)
+		}
+	}
+	if strings.Contains(string(before), "Internal agent message") || strings.Contains(string(before), `\"from\"`) {
+		t.Fatalf("model context repeated sender JSON: %s", before)
 	}
 	storeDir, workspace := host.composition.authorities.storeDir, host.composition.workspace
 	if err := host.Close(); err != nil {
@@ -249,4 +301,19 @@ func TestCollaborationQueuedMultipleSendersUseOneTurnAndPersistModelContext(t *t
 	if provider.CallCount() != 3 {
 		t.Fatalf("unexpected turns: %d", provider.CallCount())
 	}
+}
+
+// collaborationAdmissionProbe observes acceptance through the real Runtime
+// backend while leaving Send/claim ordering and removal with the mailbox owner.
+type collaborationAdmissionProbe struct {
+	*collaborationBackend
+	admitted chan int
+}
+
+func (b *collaborationAdmissionProbe) Deliver(ctx context.Context, id string, messages []collaboration.Message) error {
+	err := b.collaborationBackend.Deliver(ctx, id, messages)
+	if err == nil {
+		b.admitted <- len(messages)
+	}
+	return err
 }

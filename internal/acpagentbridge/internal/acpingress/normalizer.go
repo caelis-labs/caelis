@@ -41,6 +41,16 @@ func UIOnlyVisibility(string, session.EventType) session.Visibility {
 func NormalizeUpdate(update client.Update, opts Options) *session.Event {
 	update = client.NormalizeInboundUpdate(update)
 	switch typed := update.(type) {
+	case client.Notice:
+		text := strings.TrimSpace(typed.Title)
+		if text == "" {
+			return nil
+		}
+		if detail := strings.TrimSpace(typed.Description); detail != "" {
+			text += "\n" + detail
+		}
+		event := baseEvent("notice", session.EventTypeNotice, "", session.CloneActorRef(opts.Actor), opts)
+		return session.MarkNotice(event, typed.Severity, text)
 	case client.ContentChunk:
 		return normalizeContentChunk(typed, opts)
 	case client.ToolCall:

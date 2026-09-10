@@ -35,5 +35,5 @@ func (d *assembler) completeDisconnectProviderModels(ctx context.Context, query 
 		}
 		return false
 	})
-	return modelChoiceCandidates(providers, query, limit), nil
+	return modelChoiceCandidates(providers, query, limit)
 }

@@ -22,6 +22,11 @@ func (r *Runtime) controllerSteeringHandler(
 		if submission.Kind != agent.SubmissionKindConversation && submission.Kind != agent.SubmissionKindAgentCommunication {
 			return errorcode.New(errorcode.Unsupported, "agent-sdk/runtime: active main controller accepts only conversation or Agent communication steering")
 		}
+		if len(submission.Inputs) > 1 {
+			if _, ok := r.sessions.(session.EventBatchService); !ok {
+				return errorcode.New(errorcode.Unsupported, "agent-sdk/runtime: batched steering requires atomic Session append")
+			}
+		}
 		steerer, ok := r.controllers.(controller.ControllerSteerer)
 		if !ok {
 			return controller.ErrControllerSteeringUnsupported
@@ -42,9 +47,20 @@ func (r *Runtime) controllerSteeringHandler(
 		input := submission.Text
 		parts := submission.ContentParts
 		if submission.Kind == agent.SubmissionKindAgentCommunication {
-			input, parts, err = agentcommunication.Prompt(input, parts, submission.Actor)
-			if err != nil {
-				return errorcode.Wrap(errorcode.InvalidArgument, "agent-sdk/runtime: prepare Agent communication steering", err)
+			if len(submission.Inputs) > 0 {
+				input, parts = "", nil
+				for _, item := range submission.Inputs {
+					_, itemParts, err := agentcommunication.Prompt(item.Input, item.ContentParts, item.Source)
+					if err != nil {
+						return errorcode.Wrap(errorcode.InvalidArgument, "agent-sdk/runtime: prepare Agent communication steering", err)
+					}
+					parts = append(parts, itemParts...)
+				}
+			} else {
+				input, parts, err = agentcommunication.Prompt(input, parts, submission.Actor)
+				if err != nil {
+					return errorcode.Wrap(errorcode.InvalidArgument, "agent-sdk/runtime: prepare Agent communication steering", err)
+				}
 			}
 		}
 		return steerer.SteerController(ctx, controller.ControllerSteerRequest{
@@ -72,25 +88,19 @@ func (r *Runtime) commitControllerSteering(
 	}
 	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(producerCtx), steeringCommitTimeout)
 	defer cancel()
-	event, err := buildInputEvent(
-		activeSession, turnID, submission.Kind, submission.Text, submission.DisplayInput,
-		submission.ContentParts, submission.Actor, nil,
-	)
+	events, err := buildSteeringInputEvents(activeSession, turnID, submission)
 	if err != nil {
 		return err
 	}
-	if event == nil {
+	if len(events) == 0 {
 		return errorcode.New(errorcode.InvalidArgument, "agent-sdk/runtime: main-controller steering input is required")
 	}
-	// The initial Turn input owns turn-input:<turn>. Steering has no delivery
-	// identity and each accepted call is an independent ordinary user event.
-	event.IdempotencyKey = ""
-	persisted, err := r.sessions.AppendEvent(commitCtx, session.AppendEventRequest{
-		SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(producerCtx), Event: event,
-	})
+	persisted, err := r.appendInputEvents(commitCtx, ref, events)
 	if err != nil {
 		return err
 	}
-	handle.publishEvent(persisted)
+	for _, event := range persisted {
+		handle.publishEvent(event)
+	}
 	return nil
 }

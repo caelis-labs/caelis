@@ -39,7 +39,7 @@ func TestProviderTemplateOwnsModelSelectionPolicy(t *testing.T) {
 	if !ok || !openRouter.UseModelDirectory {
 		t.Fatalf("openrouter template = %#v, want model directory", openRouter)
 	}
-	for _, provider := range []string{"openai-compatible", "anthropic-compatible"} {
+	for _, provider := range []string{"openai-compatible", "openai-chat-compatible", "openai-responses-compatible", "anthropic-compatible"} {
 		template, ok := LookupProvider(provider)
 		if !ok || template.UseModelDirectory || !template.PromptForBaseURL || len(template.DefaultReasoningLevels) == 0 {
 			t.Fatalf("%s template = %#v, want custom endpoint setup with maintained advanced defaults", provider, template)
@@ -82,7 +82,7 @@ func TestAssembleConnectBuildsCompleteKnownModelConfig(t *testing.T) {
 
 	configs, err := AssembleConnect(context.Background(), ConnectRequest{
 		Provider: "deepseek",
-		Models:   []ModelSelection{{Name: "deepseek-v4-flash"}},
+		Models:   []ModelSelection{{Name: "deepseek-flash"}},
 		APIKey:   "secret",
 	}, ConnectOptions{})
 	if err != nil {
@@ -92,13 +92,13 @@ func TestAssembleConnectBuildsCompleteKnownModelConfig(t *testing.T) {
 		t.Fatalf("AssembleConnect() configs = %#v, want one", configs)
 	}
 	cfg := configs[0]
-	if cfg.ID != "deepseek@default/deepseek/deepseek-v4-flash" || cfg.API != model.APIDeepSeek {
+	if cfg.ID != "deepseek@default/deepseek/deepseek-flash" || cfg.API != model.APIDeepSeek {
 		t.Fatalf("assembled identity = %#v", cfg)
 	}
 	if cfg.BaseURL != "https://api.deepseek.com/anthropic" || cfg.AuthType != model.AuthAPIKey {
 		t.Fatalf("assembled endpoint/auth = %#v", cfg)
 	}
-	if cfg.ContextWindowTokens != 1048576 || cfg.MaxOutputTok != 32768 {
+	if cfg.ContextWindowTokens != 1000000 || cfg.MaxOutputTok != 256000 {
 		t.Fatalf("assembled limits = context:%d max:%d", cfg.ContextWindowTokens, cfg.MaxOutputTok)
 	}
 	if cfg.Timeout != DefaultProviderRequestTimeoutSeconds*time.Second {
@@ -127,10 +127,8 @@ func TestMaintainedSelectableModelsOnlyReturnsMetadataBackedModels(t *testing.T)
 	if err != nil {
 		t.Fatalf("MaintainedSelectableModels(deepseek) error = %v", err)
 	}
-	if selectableModelNamesContain(models, "private-deepseek") ||
-		!selectableModelNamesContain(models, "deepseek-v4-flash") ||
-		!selectableModelNamesContain(models, "deepseek-v4-flash-vision-exp") {
-		t.Fatalf("known provider models = %#v, want only metadata-backed choices including Flash Vision", models)
+	if len(models) != 1 || models[0].Name != "deepseek-flash" {
+		t.Fatalf("known provider models = %#v, want only deepseek-flash for new connections", models)
 	}
 	for _, item := range models {
 		if !item.MetadataComplete {
@@ -656,7 +654,7 @@ func TestBuildModelPropagatesMaintainedImageInputCapability(t *testing.T) {
 		{
 			Provider: "deepseek",
 			API:      model.APIDeepSeek,
-			Model:    "deepseek-v4-flash-vision-exp",
+			Model:    "deepseek-flash",
 			BaseURL:  "https://api.deepseek.com/anthropic",
 			Token:    "test-token",
 		},
@@ -705,6 +703,13 @@ func TestCompatibleEndpointsDoNotInheritVendorImageCapabilities(t *testing.T) {
 		BaseURL:  "https://proxy.example/v1",
 	}) {
 		t.Fatal("generic OpenAI-compatible endpoint inherited OpenAI image capability")
+	}
+	if ModelSupportsImages(Config{
+		Provider: "openai-responses-compatible",
+		Model:    "gpt-4o-mini",
+		BaseURL:  "https://proxy.example/v1",
+	}) {
+		t.Fatal("generic OpenAI Responses-compatible endpoint inherited OpenAI image capability")
 	}
 	if ModelSupportsImages(Config{
 		Provider: "anthropic-compatible",
@@ -839,7 +844,7 @@ func TestSpeedModesForConfig(t *testing.T) {
 		want     bool
 		wantHint string
 	}{
-		{name: "openai gpt uses chat completions", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.4"}, want: true, wantHint: "1.5x faster, more usage"},
+		{name: "openai gpt uses responses", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.4"}, want: true, wantHint: "1.5x faster, more usage"},
 		{name: "openai-codex gpt uses responses", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-5.6-sol"}, want: true, wantHint: "1.5x faster, more usage"},
 		{name: "astra has model-specific hint", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6-astra"}, want: true, wantHint: "2x faster, more usage"},
 		{name: "normalizes official openai gpt identity", cfg: Config{Provider: " OpenAI ", Model: "GPT-5.4", BaseURL: "https://api.openai.com/v1/"}, want: true, wantHint: "1.5x faster, more usage"},
@@ -849,6 +854,7 @@ func TestSpeedModesForConfig(t *testing.T) {
 		{name: "rejects custom openai-codex endpoint", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-5.6-sol", BaseURL: "https://proxy.example/codex"}},
 		{name: "rejects non-gpt openai model", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "o3"}},
 		{name: "rejects openai-compatible gpt", cfg: Config{Provider: "openai-compatible", API: model.APIOpenAICompatible, Model: "gpt-5.4"}},
+		{name: "rejects openai-responses-compatible gpt", cfg: Config{Provider: "openai-responses-compatible", API: model.APIOpenAIResponses, Model: "gpt-5.4"}},
 		{name: "rejects openai gpt on compatible api", cfg: Config{Provider: "openai", API: model.APIOpenAICompatible, Model: "gpt-5.4"}},
 		{name: "rejects openai-codex gpt on chat api", cfg: Config{Provider: "openai-codex", API: model.APIOpenAI, Model: "gpt-5.4"}},
 		{name: "rejects xai grok", cfg: Config{Provider: "xai", Model: "grok-4.6"}},

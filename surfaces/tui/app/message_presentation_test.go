@@ -112,7 +112,8 @@ func TestAgentMessageAndApprovalPhysicalFrames(t *testing.T) {
 				// the approval header when the terminal is narrower than its title.
 				model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
 				block := NewParticipantTurnBlock("b", "")
-				styled, plain, _, _, _ := model.wrapRenderedRowsForViewport(block, rows, width, ctx)
+				wrapped := model.wrapRenderedRowsForViewport(block, rows, width, ctx)
+				styled, plain := wrapped.styledLines, wrapped.plainLines
 				for i, line := range styled {
 					if displayColumns(line) > width || strings.TrimRight(ansi.Strip(line), " ") != plain[i] {
 						t.Fatalf("row mismatch: %q / %q", line, plain[i])

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -14,6 +15,138 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 )
+
+func TestActiveInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
+	for _, path := range []string{"kernel", "controller"} {
+		for _, fail := range []bool{false, true} {
+			t.Run(path+map[bool]string{false: "/roundtrip", true: "/second-input-failure"}[fail], func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				defer cancel()
+				root := t.TempDir()
+				store := &invalidSecondInputStore{Store: sessionfile.NewStore(sessionfile.Config{RootDir: root}), fail: fail}
+				active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "active-batch-test"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if path == "controller" {
+					active, err = store.BindController(ctx, session.BindControllerRequest{SessionRef: active.SessionRef,
+						Binding: session.ControllerBinding{Kind: session.ControllerKindACP, ControllerID: "remote", EpochID: "epoch", RemoteSessionID: "remote-session"}})
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				fence, err := store.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "test-host"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx = session.ContextWithRuntimeFence(ctx, fence)
+				defer func() {
+					if err := store.ReleaseSessionFence(context.WithoutCancel(ctx), session.SessionFenceReleaseRequest(fence)); err != nil {
+						t.Errorf("release test fence: %v", err)
+					}
+				}()
+				inputs := []agent.AgentCommunicationInput{
+					{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "one", Name: "one"}, Input: "first report", DisplayInput: "First report"},
+					{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "two", Name: "two"}, Input: "second report", DisplayInput: "Second report"},
+				}
+				probe := &steerRuntimeModel{started: make(chan struct{}), releaseFirst: make(chan struct{})}
+				remoteHandle := newTestControllerTurnHandle(nil)
+				remoteStarted := make(chan struct{})
+				var remoteParts []model.ContentPart
+				var remoteTurn string
+				remoteCalls := 0
+				backend := steeringACPController{
+					stubACPController: stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+						remoteTurn = req.TurnID
+						close(remoteStarted)
+						return controller.TurnResult{Handle: remoteHandle}, nil
+					}},
+					steerController: func(_ context.Context, req controller.ControllerSteerRequest) error {
+						remoteCalls++
+						if req.TurnID != remoteTurn {
+							t.Errorf("steering changed Turn")
+						}
+						remoteParts = req.ContentParts
+						return req.Commit()
+					},
+				}
+				rt, err := New(testConfigWithACPForwarder(Config{Sessions: store, AgentFactory: chat.Factory{}, Controllers: backend}))
+				if err != nil {
+					t.Fatal(err)
+				}
+				capture := &testSourceCapture{}
+				result, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "initial", SourceObserver: capture, AgentSpec: agent.AgentSpec{Name: "chat", Model: probe}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				started := probe.started
+				if path == "controller" {
+					started = remoteStarted
+				}
+				select {
+				case <-started:
+				case <-ctx.Done():
+					t.Fatal("initial Turn did not start")
+				}
+				err = result.Handle.Submit(agent.Submission{Kind: agent.SubmissionKindAgentCommunication, Inputs: inputs})
+				if path == "kernel" {
+					if err != nil {
+						t.Fatal(err)
+					}
+					close(probe.releaseFirst)
+					err = result.Handle.WaitCompletion(ctx)
+				} else {
+					remoteHandle.finish()
+					if waitErr := result.Handle.WaitCompletion(ctx); waitErr != nil {
+						t.Fatal(waitErr)
+					}
+				}
+				if (err != nil) != fail {
+					t.Fatalf("error = %v, want failure %v", err, fail)
+				}
+				loaded, err := sessionfile.NewStore(sessionfile.Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+				if err != nil {
+					t.Fatal(err)
+				}
+				events := contextEvents(loaded.Events)
+				if fail {
+					if len(events) != 0 || len(contextEvents(capture.Events())) != 0 {
+						t.Fatal("partial batch was persisted or published")
+					}
+					if path == "kernel" && len(probe.Requests()) != 1 {
+						t.Fatal("failed batch reached model")
+					}
+					return
+				}
+				if len(events) != 2 {
+					t.Fatalf("input events = %d", len(events))
+				}
+				var rebuilt []model.Message
+				var parts []model.ContentPart
+				for i, event := range events {
+					if !reflect.DeepEqual(event.Actor, inputs[i].Source) || event.Scope.TurnID != events[0].Scope.TurnID {
+						t.Fatalf("source/Turn changed: %#v", event)
+					}
+					message, _ := session.ModelMessageOf(event)
+					rebuilt = append(rebuilt, message)
+					parts = append(parts, model.ContentPartsFromParts(message.Parts)...)
+				}
+				if path == "kernel" {
+					requests := probe.Requests()
+					if len(requests) != 2 {
+						t.Fatalf("model calls = %d", len(requests))
+					}
+					messages := userMessages(requests[1].Messages)
+					if len(messages) != 3 || !reflect.DeepEqual(messages[1:], rebuilt) {
+						t.Fatal("reopened context differs from live model input")
+					}
+				} else if remoteCalls != 1 || !reflect.DeepEqual(parts, remoteParts) {
+					t.Fatal("batch did not use one canonical controller steering request")
+				}
+			})
+		}
+	}
+}
 
 // Fail validation of the second input inside the real Store. Individual
 // appends would have committed the first input before discovering this fault.

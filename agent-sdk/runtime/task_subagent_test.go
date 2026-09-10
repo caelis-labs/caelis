@@ -79,7 +79,7 @@ func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *tes
 	if prompt := runner.spawnRequest.Prompt; !strings.Contains(prompt, `<caelis_background version="1">`) ||
 		!strings.Contains(prompt, `"user_messages":["previous request"]`) ||
 		!strings.Contains(prompt, `"assistant_summary":"previous answer"`) ||
-		!strings.Contains(prompt, "<caelis_current_request>\nreview") {
+		!strings.HasPrefix(prompt, "review\n\n") {
 		t.Fatalf("spawn prompt missing shared side context:\n%s", prompt)
 	} else if strings.Count(prompt, "review") != 1 {
 		t.Fatalf("spawn prompt duplicated current request:\n%s", prompt)
@@ -159,7 +159,7 @@ func TestDelegatedSpawnIncludeContextAttachesPublicTurns(t *testing.T) {
 	if !strings.Contains(prompt, `<caelis_background version="1">`) ||
 		!strings.Contains(prompt, `"user_messages":["previous request"]`) ||
 		!strings.Contains(prompt, `"assistant_summary":"previous answer"`) ||
-		!strings.Contains(prompt, "<caelis_current_request>\nreview") {
+		!strings.HasPrefix(prompt, "review\n\n") {
 		t.Fatalf("spawn prompt missing public parent context:\n%s", prompt)
 	}
 }
@@ -1720,7 +1720,7 @@ func TestRuntimeSpawnToolKeepsImplicitSelfFallback(t *testing.T) {
 		t.Fatalf("SPAWN Call(implicit self) error = %v", err)
 	}
 	spawnPayload := testToolResultPayload(t, spawnResult)
-	if spawnPayload["id"] == nil || spawnPayload["final_message"] != nil {
+	if spawnPayload["handle"] == nil || spawnPayload["id"] != nil || spawnPayload["revision"] != nil || spawnPayload["final_message"] != nil {
 		t.Fatalf("StartThread must return thread identity, got %#v", spawnPayload)
 	}
 	if supports, ok := spawnPayload["supports_steering"].(bool); !ok || !supports {

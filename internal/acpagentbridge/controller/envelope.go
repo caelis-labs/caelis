@@ -80,7 +80,8 @@ func applyACPParticipantDisplayMeta(meta map[string]any, binding session.Partici
 
 func eventstreamUpdateFromClient(env client.UpdateEnvelope) eventstream.Update {
 	switch typed := client.NormalizeInboundUpdate(env.Update).(type) {
-	case nil:
+	case nil, client.Notice:
+		// Notices use the normalized transient Event projection only.
 		return nil
 	case client.ContentChunk:
 		return eventstream.ContentChunk{

@@ -372,6 +372,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
+		if _, ok := typed.(tea.MouseWheelMsg); ok {
+			now := time.Now()
+			m.diag.LastInputAt = now
+			m.pendingInputAt = now
+		}
 		return m.handleMouse(typed)
 
 	case tea.FocusMsg:

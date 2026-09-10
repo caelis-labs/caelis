@@ -38,6 +38,7 @@ func TestLookupSuggestedModelCapabilitiesDoesNotInheritVendorForCompatibleEndpoi
 		model    string
 	}{
 		{provider: "openai-compatible", model: "gpt-4o-mini"},
+		{provider: "openai-responses-compatible", model: "gpt-4o-mini"},
 		{provider: "anthropic-compatible", model: "claude-sonnet-4"},
 	} {
 		if caps, ok := LookupSuggestedModelCapabilities(test.provider, test.model); ok {
@@ -82,30 +83,18 @@ func TestPreferredReasoningEffort(t *testing.T) {
 	}
 }
 
-func TestListCatalogModelsIncludesBuiltinDefaults(t *testing.T) {
-	models := ListCatalogModels("deepseek")
-	if len(models) == 0 {
-		t.Fatal("ListCatalogModels(deepseek) returned no models")
+func TestDeepSeekRecommendationsOnlyIncludeCurrentFlash(t *testing.T) {
+	disableDynamicCatalogForTest(t)
+	models := ListRecommendedModels("deepseek")
+	if !sameStrings(models, []string{"deepseek-flash"}) {
+		t.Fatalf("ListRecommendedModels(deepseek) = %v, want only deepseek-flash", models)
 	}
-	foundFlash := false
-	foundVision := false
-	foundPro := false
-	for _, model := range models {
-		switch model {
-		case "deepseek-v4-flash":
-			foundFlash = true
-		case "deepseek-v4-flash-vision-exp":
-			foundVision = true
-		case "deepseek-v4-pro":
-			foundPro = true
+	for _, name := range []string{"deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"} {
+		if _, ok := lookupBuiltin("deepseek", name); ok {
+			t.Fatalf("removed model %q still has a builtin capability record", name)
 		}
-	}
-	if !foundFlash || !foundVision || !foundPro {
-		t.Fatalf("ListCatalogModels(deepseek) = %#v, want current Flash, Flash Vision, and Pro models", models)
-	}
-	for _, model := range models {
-		if model == "deepseek-chat" || model == "deepseek-reasoner" {
-			t.Fatalf("ListCatalogModels(deepseek) = %#v, did not want legacy DeepSeek models", models)
+		if _, ok := searchOverlay("deepseek", name); ok {
+			t.Fatalf("removed model %q still has an overlay record", name)
 		}
 	}
 }
@@ -483,36 +472,23 @@ func TestGrok46StaticCapabilitiesIncludeXHighReasoning(t *testing.T) {
 	}
 }
 
-func TestDeepSeekStaticModelsExposeMaintainedCapabilities(t *testing.T) {
-	tests := []struct {
-		model  string
-		images bool
-	}{
-		{model: "deepseek-v4-flash"},
-		{model: "deepseek-v4-flash-vision-exp", images: true},
-		{model: "deepseek-v4-pro"},
+func TestDeepSeekFlashMatchesHarnessCatalog(t *testing.T) {
+	caps, ok := LookupModelCapabilities("deepseek", "deepseek-flash")
+	if !ok {
+		t.Fatal("deepseek-flash missing from catalog")
 	}
-	for _, test := range tests {
-		caps, ok := LookupModelCapabilities("deepseek", test.model)
-		if !ok {
-			t.Fatalf("LookupModelCapabilities(deepseek, %q) = false, want true", test.model)
-		}
-		if !caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeToggle {
-			t.Fatalf("LookupModelCapabilities(deepseek, %q) = %#v, want toggle reasoning", test.model, caps)
-		}
-		if caps.ContextWindowTokens != 1048576 || caps.MaxOutputTokens != 393216 || caps.DefaultMaxOutputTokens != 32768 {
-			t.Fatalf("LookupModelCapabilities(deepseek, %q) limits = %d/%d default %d, want 1048576/393216 default 32768",
-				test.model, caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens)
-		}
-		if caps.SupportsImages != test.images || !caps.SupportsToolCalls || !caps.SupportsJSONOutput {
-			t.Fatalf("LookupModelCapabilities(deepseek, %q) capabilities = %#v, want images=%v, tools, and JSON", test.model, caps, test.images)
-		}
-		if !sameStrings(caps.ReasoningEfforts, []string{"low", "high", "max"}) {
-			t.Fatalf("LookupModelCapabilities(deepseek, %q) efforts = %#v, want low/high/max", test.model, caps.ReasoningEfforts)
-		}
-		if levels := ReasoningLevelsForModel("deepseek", test.model); !sameStrings(levels, []string{"none", "low", "high", "max"}) {
-			t.Fatalf("ReasoningLevelsForModel(deepseek, %q) = %#v, want none/low/high/max", test.model, levels)
-		}
+	if caps.ContextWindowTokens != 1000000 || caps.DefaultMaxOutputTokens != 256000 || caps.MaxOutputTokens != 0 {
+		t.Fatalf("limits = %d/%d default %d, want 1000000/unknown default 256000",
+			caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens)
+	}
+	if !caps.SupportsImages || !caps.SupportsToolCalls || caps.SupportsJSONOutput || !caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeToggle {
+		t.Fatalf("unexpected capabilities: %#v", caps)
+	}
+	if caps.DefaultReasoningEffort != "high" || !sameStrings(caps.ReasoningEfforts, []string{"low", "high", "max"}) {
+		t.Fatalf("unexpected reasoning: %#v", caps)
+	}
+	if levels := ReasoningLevelsForModel("deepseek", "deepseek-flash"); !sameStrings(levels, []string{"none", "low", "high", "max"}) {
+		t.Fatalf("reasoning levels = %v", levels)
 	}
 }
 

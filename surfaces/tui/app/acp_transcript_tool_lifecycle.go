@@ -407,14 +407,11 @@ func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 		return memoryLifecycleHeader(ev, err)
 	default:
 		if presentation.TitleAsLabel {
-			// Provider titles are complete presentation labels. Only a generic
-			// shell label is known to omit the command from that label.
-			args := ""
-			if genericExecuteTitle(presentation.DisplayName) {
-				args = strings.TrimSpace(ev.Args)
-				if strings.EqualFold(args, presentation.DisplayName) {
-					args = ""
-				}
+			// A title labels the tool; it does not replace standard input. The
+			// title-only fallback is already the label and must not repeat it.
+			args := strings.TrimSpace(ev.Args)
+			if strings.EqualFold(args, presentation.DisplayName) {
+				args = ""
 			}
 			return standardVerbLifecycleHeader(presentation.DisplayName, args, err)
 		}

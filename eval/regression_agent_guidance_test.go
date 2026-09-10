@@ -77,7 +77,7 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 		{name: "patch uses current exact text", toolName: filesystem.PatchToolName, wants: []string{"surgical exact text replacements", "current file"}},
 		{name: "read exposes Write revision guard", toolName: filesystem.ReadToolName, wants: []string{"has_more", "next_offset", "revision", "if_revision", "Write"}},
 		{name: "task reaches model boundary", toolName: task.ToolName},
-		{name: "spawn coordinates collaborators", toolName: spawn.ToolName, wants: []string{"collaborating Agent", "self-contained", "ReadThread or WaitThread"}},
+		{name: "spawn coordinates collaborators", toolName: spawn.ToolName, wants: []string{"collaborating Agent", "ReadThread or WaitThread"}},
 		{name: "send message explains steering", toolName: sendmessage.ToolName, wants: []string{"supports_steering=true", "only while idle"}},
 	}
 	for _, check := range checks {
@@ -96,6 +96,9 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 				t.Fatalf("%s Function.Strict = %v, want %v for its canonical schema", check.toolName, got, want)
 			}
 		})
+	}
+	if description := functionPropertyDescription(t, toolByName[spawn.ToolName], "prompt"); !strings.Contains(description, "Self-contained task") || !strings.Contains(description, "edit permission") {
+		t.Fatalf("StartThread prompt contract missing: %q", description)
 	}
 	if description := functionPropertyDescription(t, toolByName[task.ToolName], "action"); !strings.Contains(description, "cancel requests cancellation when supported") {
 		t.Fatalf("Task action description missing Job cancellation capability: %q", description)

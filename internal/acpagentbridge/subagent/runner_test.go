@@ -834,7 +834,7 @@ func TestRunnerHandleUpdateKeepsTrustedAgentCommunicationSource(t *testing.T) {
 		inputActor: source,
 	}
 	runner := &Runner{clock: time.Now}
-	input := session.AgentCommunicationPromptHeader(source) + "\nreview this change"
+	input := "review this change" + session.AgentCommunicationPromptFooter(source)
 
 	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateUserMessage, input))
 
@@ -1378,5 +1378,30 @@ func repoRootForRunnerTest(t *testing.T) string {
 			t.Fatal("could not locate repo root")
 		}
 		dir = parent
+	}
+}
+
+func TestRunnerNoticeStaysOutOfPublicResultWithoutTruncatingAssistant(t *testing.T) {
+	sink := &recordingStreams{}
+	run := &childRun{
+		anchor: delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "codex", AgentID: "codex-1"},
+		taskID: "task-1", output: sink, state: delegation.StateRunning, running: true,
+	}
+	runner := &Runner{clock: time.Now}
+	handleTestUpdate(runner, run, contentUpdateWithMessageID(t, client.UpdateAgentMessage, "answer-1", "First answer"))
+	for _, title := range []string{"Review approved", "Another review approved"} {
+		handleTestUpdate(runner, run, client.UpdateEnvelope{SessionID: "child-1", Update: client.Notice{SessionUpdate: "notice", Severity: "warning", Title: title}})
+	}
+	if run.result != "First answer" || len(sink.frames) != 3 || !run.running {
+		t.Fatalf("notice changed result or lifecycle: %#v, frames=%d", run, len(sink.frames))
+	}
+	for _, frame := range sink.frames[1:] {
+		if frame.Event == nil || !session.IsNotice(frame.Event) || frame.Event.Message != nil || session.IsCanonicalHistoryEvent(frame.Event) {
+			t.Fatalf("notice frame = %#v", frame)
+		}
+	}
+	handleTestUpdate(runner, run, contentUpdateWithMessageID(t, client.UpdateAgentMessage, "answer-1", ". More detail"))
+	if run.result != "First answer. More detail" {
+		t.Fatalf("notice truncated the assistant message: %q", run.result)
 	}
 }

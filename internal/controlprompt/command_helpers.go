@@ -85,8 +85,8 @@ func FriendlyCommandError(action string, err error) error {
 		return fmt.Errorf("%s: provider or model is not configured. Run /connect to add one", action)
 	case strings.Contains(lower, "unknown model alias"):
 		return fmt.Errorf("%s: model alias was not found. Run /model and choose a configured alias, or use /connect first", action)
-	case strings.Contains(lower, "ambiguous model alias"):
-		return fmt.Errorf("%s: model alias is ambiguous. Type more of the alias or pick from /model", action)
+	case strings.Contains(lower, "ambiguous model selector"):
+		return fmt.Errorf("%s: model selector is ambiguous. Use an endpoint-qualified selector or a full model ID", action)
 	case strings.Contains(lower, "agent name is required"), strings.Contains(lower, "agent ") && (strings.Contains(lower, " is not configured") || strings.Contains(lower, " not found")):
 		return fmt.Errorf("%s: Agent was not found. Run /connect to add an Agent", action)
 	case strings.Contains(lower, "agent ") && strings.Contains(lower, " is ambiguous"):

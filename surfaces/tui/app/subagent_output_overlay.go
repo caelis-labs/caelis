@@ -38,6 +38,7 @@ type subagentOutputOverlayState struct {
 	offset      int
 	followTail  bool
 	layout      subagentOutputOverlayLayout
+	composition centeredOverlayCache
 	geometry    subagentOutputOverlayGeometry
 	pressedItem string
 	selecting   bool
@@ -46,24 +47,25 @@ type subagentOutputOverlayState struct {
 }
 
 type subagentOutputOverlayLayout struct {
-	termWidth    int
-	termHeight   int
-	themeKey     string
-	useBorder    bool
-	frameWidth   int
-	frameHeight  int
-	innerWidth   int
-	contentRows  int
-	startX       int
-	startY       int
-	borderInset  int
-	contentInset int
-	blank        string
-	separator    string
-	topBorder    string
-	bottomBorder string
-	leftBorder   string
-	rightBorder  string
+	termWidth     int
+	termHeight    int
+	themeKey      string
+	useBorder     bool
+	frameWidth    int
+	frameHeight   int
+	innerWidth    int
+	contentRows   int
+	startX        int
+	startY        int
+	borderInset   int
+	contentInset  int
+	blank         string
+	paintedMargin string
+	separator     string
+	topBorder     string
+	bottomBorder  string
+	leftBorder    string
+	rightBorder   string
 }
 
 func subagentOutputOverlayClickToken(callID string) string {
@@ -232,14 +234,13 @@ func (m *Model) renderSubagentOutputOverlay() string {
 	appendSubagentOutputContentLine(
 		&frame,
 		layout,
-		surface,
 		renderSubagentOutputContentLine(
 			surface,
 			layout.innerWidth,
 			normalizeFullscreenFrameLine(m.renderSubagentOutputTitle(view, layout.innerWidth), layout.innerWidth),
 		),
 	)
-	appendSubagentOutputContentLine(&frame, layout, surface, layout.separator)
+	appendSubagentOutputContentLine(&frame, layout, layout.separator)
 	for index := 0; index < layout.contentRows; index++ {
 		content := layout.blank
 		if index < len(visible) {
@@ -256,13 +257,12 @@ func (m *Model) renderSubagentOutputOverlay() string {
 				)
 			}
 		}
-		appendSubagentOutputContentLine(&frame, layout, surface, content)
+		appendSubagentOutputContentLine(&frame, layout, content)
 	}
-	appendSubagentOutputContentLine(&frame, layout, surface, layout.separator)
+	appendSubagentOutputContentLine(&frame, layout, layout.separator)
 	appendSubagentOutputContentLine(
 		&frame,
 		layout,
-		surface,
 		renderSubagentOutputContentLine(
 			surface,
 			layout.innerWidth,
@@ -379,20 +379,21 @@ func (m *Model) subagentOutputLayout(state *subagentOutputOverlayState) subagent
 	blank := strings.Repeat(" ", innerWidth)
 	separator := normalizeFullscreenFrameLine(m.theme.SeparatorStyle().Render(strings.Repeat("─", innerWidth)), innerWidth)
 	layout := subagentOutputOverlayLayout{
-		termWidth:    m.width,
-		termHeight:   m.height,
-		themeKey:     themeKey,
-		useBorder:    useBorder,
-		frameWidth:   frameWidth,
-		frameHeight:  frameHeight,
-		innerWidth:   innerWidth,
-		contentRows:  contentRows,
-		startX:       maxInt(0, (m.width-frameWidth)/2),
-		startY:       maxInt(0, (m.height-frameHeight)/2),
-		borderInset:  borderInset,
-		contentInset: contentInset,
-		blank:        renderSubagentOutputContentLine(surface, innerWidth, blank),
-		separator:    renderSubagentOutputContentLine(surface, innerWidth, separator),
+		termWidth:     m.width,
+		termHeight:    m.height,
+		themeKey:      themeKey,
+		useBorder:     useBorder,
+		frameWidth:    frameWidth,
+		frameHeight:   frameHeight,
+		innerWidth:    innerWidth,
+		contentRows:   contentRows,
+		startX:        maxInt(0, (m.width-frameWidth)/2),
+		startY:        maxInt(0, (m.height-frameHeight)/2),
+		borderInset:   borderInset,
+		contentInset:  contentInset,
+		blank:         renderSubagentOutputContentLine(surface, innerWidth, blank),
+		paintedMargin: tuikit.PaintLineBackground(surface.Render(" "), 1, surface.GetBackground()),
+		separator:     renderSubagentOutputContentLine(surface, innerWidth, separator),
 	}
 	if useBorder {
 		borderStyle := m.theme.Tokens().OverlayBorder.Background(surface.GetBackground())
@@ -430,7 +431,6 @@ func appendSubagentOutputFrameLine(frame *strings.Builder, line string) {
 func appendSubagentOutputContentLine(
 	frame *strings.Builder,
 	layout subagentOutputOverlayLayout,
-	surface lipgloss.Style,
 	content string,
 ) {
 	if frame == nil {
@@ -443,18 +443,14 @@ func appendSubagentOutputContentLine(
 	line.Grow(layout.frameWidth)
 	if layout.useBorder {
 		line.WriteString(layout.leftBorder)
-		line.WriteString(surface.Render(" "))
+		line.WriteString(layout.paintedMargin)
 	}
 	line.WriteString(content)
 	if layout.useBorder {
-		line.WriteString(surface.Render(" "))
+		line.WriteString(layout.paintedMargin)
 		line.WriteString(layout.rightBorder)
 	}
-	frame.WriteString(tuikit.PaintLineBackground(
-		line.String(),
-		layout.frameWidth,
-		surface.GetBackground(),
-	))
+	frame.WriteString(line.String())
 }
 
 func renderSubagentOutputContentLine(surface lipgloss.Style, width int, line string) string {
@@ -518,12 +514,20 @@ func (m *Model) subagentOutputRows(view *subagentOutputView, width, height int) 
 		return rows
 	}
 	var rows []RenderedRow
+	var fixedRows []string
+	var entries []subagentOutputRenderEntry
 	ctx := m.blockRenderContext(width)
 	ctx.Width = width
 	ctx.Height = height
 	ctx.TermWidth = m.width
 	if view != nil && subagentOutputViewHasTranscript(view) && view.document != nil && view.document.Len() > 0 {
-		rows = m.subagentOutputDocumentRows(view.document, ctx)
+		var previous []subagentOutputRenderEntry
+		if cache := view.renderCache; cache.width == width && cache.height == height &&
+			cache.termWidth == m.width && cache.themeKey == ctx.renderThemeKey() &&
+			cache.workspace == strings.TrimSpace(ctx.Workspace) {
+			previous = cache.entries
+		}
+		rows, fixedRows, entries = m.renderSubagentOutputDocument(view, ctx, previous)
 	}
 	if len(rows) == 0 {
 		label := "Waiting for subagent output…"
@@ -543,7 +547,9 @@ func (m *Model) subagentOutputRows(view *subagentOutputView, width, height int) 
 	}
 	if view != nil {
 		previous := view.renderCache
-		fixedRows := fixedSubagentOutputRows(rows, width)
+		if len(fixedRows) != len(rows) {
+			fixedRows = fixedSubagentOutputRows(rows, width)
+		}
 		paintedRows := make([]string, len(fixedRows))
 		if previous.width == width && previous.termWidth == m.width &&
 			previous.themeKey == ctx.renderThemeKey() && previous.workspace == strings.TrimSpace(ctx.Workspace) {
@@ -556,6 +562,7 @@ func (m *Model) subagentOutputRows(view *subagentOutputView, width, height int) 
 		}
 		view.renderCache = subagentOutputRenderCache{
 			revision:    view.revision,
+			entries:     entries,
 			width:       width,
 			height:      height,
 			termWidth:   m.width,
@@ -567,38 +574,6 @@ func (m *Model) subagentOutputRows(view *subagentOutputView, width, height int) 
 			renders:     previous.renders + 1,
 		}
 		view.renderReady = false
-	}
-	return rows
-}
-
-func (m *Model) subagentOutputDocumentRows(document *Document, ctx BlockRenderContext) []RenderedRow {
-	if m == nil || document == nil {
-		return nil
-	}
-	rows := make([]RenderedRow, 0, document.Len()*2)
-	for _, block := range document.Blocks() {
-		styled, plain, indents, tokens, clickBounds := m.wrapRenderedRowsForViewport(
-			block,
-			block.Render(ctx),
-			ctx.Width,
-			ctx,
-		)
-		for index := range styled {
-			row := RenderedRow{
-				Styled:          styled[index],
-				Plain:           plain[index],
-				BlockID:         block.BlockID(),
-				ClickToken:      tokens[index],
-				PreWrapped:      true,
-				selectionIndent: indents[index],
-				activeTail:      strings.Contains(styled[index], wideCellRendererSentinel()),
-			}
-			if bound := clickBounds[index]; bound.valid() {
-				row.ClickStartCol = bound.start
-				row.ClickEndCol = bound.end
-			}
-			rows = append(rows, row)
-		}
 	}
 	return rows
 }

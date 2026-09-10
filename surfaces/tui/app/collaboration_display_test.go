@@ -9,8 +9,12 @@ import (
 )
 
 func TestCollaborationObservationPresentation(t *testing.T) {
-	for _, name := range []string{"ListThreads", "ReadThread", "WaitThread", "ReceiveMessages"} {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct{ name, reason string }{
+		{"ListThreads", "timeout"}, {"ReadThread", "timeout"},
+		{"WaitThread", "timeout"}, {"WaitThread", "input"}, {"ReceiveMessages", "timeout"},
+	} {
+		name := tc.name
+		t.Run(name+"/"+tc.reason, func(t *testing.T) {
 			m := NewModel(Config{NoColor: true, NoAnimation: true})
 			m.width, m.height = 100, 40
 			m.beginLiveTurn(SubmissionModeDefault, false, time.Now())
@@ -21,11 +25,11 @@ func TestCollaborationObservationPresentation(t *testing.T) {
 				t.Fatalf("missing wait hint: %#v", m.runningActivity)
 			}
 			status := eventstream.ToolStatusCompleted
-			env.Update = eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "observe", Status: &status, Content: []eventstream.ToolCallContent{{Type: "content", Content: eventstream.TextContent{Type: "text", Text: `{"reason":"timeout","messages":[],"threads":[]}`}}}, Meta: acpToolNameMeta(name)}
+			env.Update = eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "observe", Status: &status, Content: []eventstream.ToolCallContent{{Type: "content", Content: eventstream.TextContent{Type: "text", Text: `{"reason":"` + tc.reason + `"}`}}}, Meta: acpToolNameMeta(name)}
 			m = applyACPEnvelopeForTest(t, m, env)
 			for _, block := range m.doc.Blocks() {
 				for _, row := range block.Render(m.blockRenderContext(100)) {
-					if strings.Contains(row.Plain, name) || strings.Contains(row.Plain, "timeout") {
+					if strings.Contains(row.Plain, name) || strings.Contains(row.Plain, tc.reason) {
 						t.Fatalf("control leaked: %s", row.Plain)
 					}
 				}
@@ -33,6 +37,69 @@ func TestCollaborationObservationPresentation(t *testing.T) {
 			failure := TranscriptEvent{Kind: TranscriptEventTool, ToolName: name, ToolError: true, Final: true, ToolStatus: "failed"}
 			if _, hidden := hiddenTaskControlAction(failure); hidden {
 				t.Fatal("control failure hidden")
+			}
+		})
+	}
+}
+
+func TestSendMessageReturnedMailRendersInMainAndChildHistory(t *testing.T) {
+	for _, mode := range []string{"main", "child live", "child history"} {
+		t.Run(mode, func(t *testing.T) {
+			m := NewModel(Config{NoColor: true, NoAnimation: true})
+			m.currentSessionID = "session-1"
+			m.width, m.height = 120, 40
+			m.taskStreamWanted["task-1"] = true
+			m.taskStreamTokens["task-1"] = 7
+			m.taskStreamCallIDsByID["task-1"] = "spawn-1"
+			m.taskStreamIDsByCallID["spawn-1"] = "task-1"
+			view := m.ensureSubagentOutputView("spawn-1")
+			view.taskHandle, view.actor = "zuri", "zuri[breeze]"
+			stage := &subagentOutputHistoryStage{view: newSubagentOutputHistoryView(view)}
+			completed := eventstream.ToolStatusCompleted
+			payload := `{"id":"out-1","status":"queued","messages":[{"id":"in-1","from":"reviewer","message":"Review complete."},{"id":"in-2","from":"tester","message":"Tests passed."}]}`
+			updates := []eventstream.Update{
+				eventstream.ToolCall{SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "send-1", Title: "SendMessage", Kind: eventstream.ToolKindOther, Status: eventstream.ToolStatusInProgress, RawInput: map[string]any{"to": "parent", "message": "progress update"}, Meta: acpToolNameMeta("SendMessage")},
+				eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "send-1", Status: &completed, Content: []eventstream.ToolCallContent{{Type: "content", Content: eventstream.TextContent{Type: "text", Text: payload}}}, Meta: acpToolNameMeta("SendMessage")},
+			}
+			updates = append(updates, updates[1]) // A repeated final must not duplicate returned mail.
+			for _, update := range updates {
+				env := subagentMailboxEnvelope(t, "activity-1", time.Unix(120, 0), update)
+				switch mode {
+				case "main":
+					env.Scope, env.ScopeID, env.ParentTool = eventstream.ScopeMain, "", nil
+					m = applyACPEnvelopeForTest(t, m, env)
+				case "child live":
+					next, _ := m.handleTaskStreamBatch(taskStreamBatchMsg{sessionID: "session-1", taskID: "task-1", token: 7, events: []eventstream.Envelope{env}})
+					m = next.(*Model)
+				case "child history":
+					m.observeSubagentOutputHistoryEnvelope(stage, env)
+				}
+			}
+			var rows []string
+			if mode == "main" {
+				m.syncViewportContent()
+				rows = m.viewportPlainLines
+			} else {
+				if mode == "child history" {
+					view = stage.view
+				}
+				view.prepareVisibleRender()
+				rows = renderedPlainRows(m.subagentOutputRows(view, 120, 40))
+			}
+			plain := strings.Join(rows, "\n")
+			t.Log(plain)
+			for _, want := range []string{"progress update", "reviewer: Review complete.", "tester: Tests passed."} {
+				if strings.Count(plain, want) != 1 {
+					t.Fatalf("missing or repeated %q:\n%s", want, plain)
+				}
+			}
+			if strings.Index(plain, "Review complete.") > strings.Index(plain, "Tests passed.") {
+				t.Fatalf("mail order changed:\n%s", plain)
+			}
+			for _, hidden := range []string{"queued", "out-1", "in-1", "in-2", `"messages"`} {
+				if strings.Contains(plain, hidden) {
+					t.Fatalf("mail metadata leaked %q:\n%s", hidden, plain)
+				}
 			}
 		})
 	}
@@ -52,9 +119,9 @@ func TestUntypedMailboxJSONStaysLiteralUserInput(t *testing.T) {
 }
 
 func TestMailboxMessagesReuseIncomingPresentation(t *testing.T) {
-	for _, name := range []string{"ReceiveMessages", "WaitThread"} {
-		payload := `[{"id":"mail-1","from":"review-runtime","to":"parent","message":"Review complete."}]`
-		if name == "WaitThread" {
+	for _, name := range []string{"SendMessage", "ReceiveMessages", "WaitThread"} {
+		payload := `[{"id":"mail-1","from":"review-runtime","message":"Review complete."}]`
+		if name != "ReceiveMessages" {
 			payload = `{"messages":` + payload + `,"threads":[]}`
 		}
 		events := expandCollaborationMessages([]TranscriptEvent{{Kind: TranscriptEventTool, ToolName: name, Final: true, ToolOutput: payload}})
@@ -85,11 +152,11 @@ func TestToolReviewRendersOnOriginalHeader(t *testing.T) {
 }
 
 func TestMailboxResultRendersMessagesWithoutControlJSON(t *testing.T) {
-	for _, name := range []string{"ReceiveMessages", "WaitThread"} {
+	for _, name := range []string{"SendMessage", "ReceiveMessages", "WaitThread"} {
 		t.Run(name, func(t *testing.T) {
 			m := NewModel(Config{NoColor: true, NoAnimation: true})
-			payload := `[{"id":"mail-1","from":"review-runtime","to":"parent","message":"Review complete."}]`
-			if name == "WaitThread" {
+			payload := `[{"id":"mail-1","from":"review-runtime","message":"Review complete."}]`
+			if name != "ReceiveMessages" {
 				payload = `{"messages":` + payload + `,"threads":[]}`
 			}
 			status := eventstream.ToolStatusCompleted

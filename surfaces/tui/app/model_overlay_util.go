@@ -4,8 +4,26 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
+
+// centeredOverlayCache retains one composition for the lifetime of an open
+// overlay. Background events still update the model; identical physical input
+// frames can reuse the expensive character-cell composition.
+type centeredOverlayCache struct {
+	width, height         int
+	base, overlay, result string
+}
+
+func (c *centeredOverlayCache) compose(base, overlay string, width, height int) string {
+	if c.result != "" && c.width == width && c.height == height && c.base == base && c.overlay == overlay {
+		return c.result
+	}
+	result := tuikit.OverlayCenter(base, overlay, width, height)
+	*c = centeredOverlayCache{width: width, height: height, base: base, overlay: overlay, result: result}
+	return result
+}
 
 func overlayAboveBottomAreaLeft(base string, overlay string, screenWidth int, startX int, bottomHeight int, gap int) string {
 	baseLines := strings.Split(base, "\n")

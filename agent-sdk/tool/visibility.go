@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -17,7 +16,6 @@ const (
 	// MaxToolSearchResultPromptTokens bounds one complete model-visible and
 	// durable ToolSearch result before it changes run-local visibility.
 	MaxToolSearchResultPromptTokens = 8192
-	maxToolSearchSourceRunes        = 256
 )
 
 // ToolVisibility owns the current model-visible tool set for one run. It keeps
@@ -325,16 +323,11 @@ type ToolSearchResult struct {
 	AlreadyVisibleCount int                        `json:"already_visible_count,omitempty"`
 }
 
-// ToolSearchDiscoveredTool describes one deferred tool that can be made visible
-// after a tool_search result.
+// ToolSearchDiscoveredTool identifies one deferred tool. Full schemas come from
+// the registered definitions, not from model-visible discovery results.
 type ToolSearchDiscoveredTool struct {
-	Type         string                      `json:"type"`
-	Name         string                      `json:"name,omitempty"`
-	Description  string                      `json:"description,omitempty"`
-	Parameters   map[string]any              `json:"parameters,omitempty"`
-	DeferLoading bool                        `json:"defer_loading,omitempty"`
-	Source       map[string]any              `json:"source,omitempty"`
-	Function     *ToolSearchFunctionContract `json:"function,omitempty"`
+	Name     string                      `json:"name,omitempty"`
+	Function *ToolSearchFunctionContract `json:"function,omitempty"`
 }
 
 // ToolSearchFunctionContract accepts the nested function shape used by some
@@ -359,14 +352,9 @@ func NewToolSearchResult(definitions []Definition) ToolSearchResult {
 // NewToolSearchDiscoveredTool converts one deferred definition into the
 // tool_search result contract.
 func NewToolSearchDiscoveredTool(def Definition) ToolSearchDiscoveredTool {
-	return ToolSearchDiscoveredTool{
-		Type:         "function",
-		Name:         strings.TrimSpace(def.Name),
-		Description:  strings.TrimSpace(def.Description),
-		Parameters:   jsonvalue.CloneMap(def.InputSchema),
-		DeferLoading: true,
-		Source:       toolSearchSource(def),
-	}
+	// The registered definition supplies the callable schema on the next model
+	// request. Persist only its name so history does not repeat that schema.
+	return ToolSearchDiscoveredTool{Name: strings.TrimSpace(def.Name)}
 }
 
 // ParseToolSearchOutput decodes one tool_search output map into the canonical
@@ -454,30 +442,4 @@ func normalizeToolNameList(names []string) []string {
 		out = append(out, name)
 	}
 	return out
-}
-
-func toolSearchSource(def Definition) map[string]any {
-	source := map[string]any{}
-	if value, _ := def.Metadata[MetadataPluginID].(string); strings.TrimSpace(value) != "" {
-		source["plugin_id"] = truncateToolSearchSource(value)
-	}
-	if value, _ := def.Metadata[MetadataMCPServer].(string); strings.TrimSpace(value) != "" {
-		source["mcp_server"] = truncateToolSearchSource(value)
-	}
-	if value, _ := def.Metadata[MetadataMCPTool].(string); strings.TrimSpace(value) != "" {
-		source["mcp_tool"] = truncateToolSearchSource(value)
-	}
-	if len(source) == 0 {
-		return nil
-	}
-	return source
-}
-
-func truncateToolSearchSource(value string) string {
-	value = strings.TrimSpace(value)
-	runes := []rune(value)
-	if len(runes) <= maxToolSearchSourceRunes {
-		return value
-	}
-	return strings.TrimSpace(string(runes[:maxToolSearchSourceRunes]))
 }

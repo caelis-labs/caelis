@@ -1394,15 +1394,16 @@ func (r *controllerRun) controllerStatusLocked(ref session.SessionRef) Controlle
 	modelOption, _ := pickModelConfigOption(r.configOptions)
 	effortOption, _ := pickEffortConfigOption(r.configOptions)
 	status := ControllerStatus{
-		SessionRef:      session.NormalizeSessionRef(ref),
-		Agent:           strings.TrimSpace(r.agent),
-		RemoteSessionID: strings.TrimSpace(r.remoteSessionID),
-		RemoteTitle:     strings.TrimSpace(r.remoteTitle),
-		Commands:        cloneControllerCommands(r.commands),
-		ConfigOptions:   cloneControllerConfigOptions(r.configOptions),
-		Mode:            strings.TrimSpace(r.mode),
-		ModeOptions:     cloneControllerModes(r.modeOptions),
-		UpdatedAt:       r.updatedAt,
+		SupportsSteering: r.supportsSteering,
+		SessionRef:       session.NormalizeSessionRef(ref),
+		Agent:            strings.TrimSpace(r.agent),
+		RemoteSessionID:  strings.TrimSpace(r.remoteSessionID),
+		RemoteTitle:      strings.TrimSpace(r.remoteTitle),
+		Commands:         cloneControllerCommands(r.commands),
+		ConfigOptions:    cloneControllerConfigOptions(r.configOptions),
+		Mode:             strings.TrimSpace(r.mode),
+		ModeOptions:      cloneControllerModes(r.modeOptions),
+		UpdatedAt:        r.updatedAt,
 	}
 	if modelOption != nil {
 		status.Model = strings.TrimSpace(modelOption.CurrentValue)

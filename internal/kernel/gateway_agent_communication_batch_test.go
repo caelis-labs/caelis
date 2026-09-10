@@ -2,12 +2,61 @@ package kernel
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
+
+type batchRecordingRunner struct {
+	*submitRecordingBlockingRunner
+	batches [][]agent.AgentCommunicationInput
+}
+
+func (r *batchRecordingRunner) SubmitBatch(_ context.Context, inputs []agent.AgentCommunicationInput) error {
+	r.batches = append(r.batches, agent.CloneAgentCommunicationInputs(inputs))
+	return nil
+}
+
+func TestActiveTurnBatchRequiresExactTargetAndBatchCapability(t *testing.T) {
+	ref := session.SessionRef{SessionID: "active-batch"}
+	base := &submitRecordingBlockingRunner{release: make(chan struct{})}
+	runner := &batchRecordingRunner{submitRecordingBlockingRunner: base}
+	h := newTurnHandle(turnHandleConfig{sessionRef: ref, handleID: "handle", runID: "run", turnID: "turn"})
+	h.setRunner(runner)
+	gw := &Gateway{active: map[string]*turnHandle{ref.SessionID: h}}
+	inputs := []agent.AgentCommunicationInput{
+		{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "one"}, Input: "one"},
+		{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "two"}, Input: "two"},
+	}
+	req := SubmitActiveTurnRequest{SessionRef: ref, HandleID: "handle", RunID: "run", TurnID: "stale", Kind: SubmissionKindAgentCommunication, Inputs: inputs}
+	if err := gw.SubmitActiveTurn(t.Context(), req); err == nil {
+		t.Fatal("stale Turn accepted batch")
+	}
+	req.TurnID = "turn"
+	if err := gw.SubmitActiveTurn(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.batches) != 1 || !reflect.DeepEqual(runner.batches[0], inputs) || len(base.snapshot()) != 0 {
+		t.Fatalf("batch was split or changed: %#v", runner.batches)
+	}
+	h.setRunner(base)
+	if err := gw.SubmitActiveTurn(t.Context(), req); !errorcode.Is(err, errorcode.Unsupported) {
+		t.Fatalf("singular runner error = %v", err)
+	}
+	if len(base.snapshot()) != 0 {
+		t.Fatal("batch fell back to singular input")
+	}
+	h.setRunner(runner)
+	req.Inputs = agent.CloneAgentCommunicationInputs(inputs)
+	req.Inputs[1].Source = session.ActorRef{Kind: session.ActorKindUser}
+	if err := gw.SubmitActiveTurn(t.Context(), req); err == nil || len(runner.batches) != 1 {
+		t.Fatal("untrusted member partially admitted")
+	}
+}
 
 func TestBeginTurnAgentCommunicationBatchAdmitsOrderedInputs(t *testing.T) {
 	t.Parallel()

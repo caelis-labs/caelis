@@ -956,8 +956,9 @@ func TestChatAgentExecutesSameStepWebSearchCallsConcurrently(t *testing.T) {
 		if err := json.Unmarshal(toolResults[0].Content[0].JSON.Value, &payload); err != nil {
 			t.Fatalf("decode tool result[%d]: %v", index, err)
 		}
-		if got := payload["query"]; got != want.query {
-			t.Fatalf("tool result[%d] query = %#v, want %q", index, got, want.query)
+		sources := payload["results"].([]any)
+		if len(sources) != 1 || sources[0].(map[string]any)["url"] != "https://example.com/"+want.query {
+			t.Fatalf("tool result[%d] sources = %#v, want query %q", index, sources, want.query)
 		}
 	}
 }
@@ -1084,6 +1085,41 @@ func TestChatAgentDrainsPendingUserSubmissionAfterToolResults(t *testing.T) {
 		t.Fatalf("emitted user events = %#v, want queued guidance echoed once", userEvents)
 	}
 }
+
+func TestChatAgentFinalDrainDoesNotLoseInputBehindEmptySubmission(t *testing.T) {
+	testModel := &recordingModel{}
+	chatAgent, err := New("chat", testModel, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	drains := 0
+	ctx := finalDrainContext{Context: agent.NewContext(agent.ContextSpec{Context: t.Context()}), drain: func() []agent.Submission {
+		drains++
+		switch drains {
+		case 1:
+			return []agent.Submission{{Kind: agent.SubmissionKindConversation, Text: " "}}
+		case 2:
+			return []agent.Submission{{Kind: agent.SubmissionKindConversation, Text: "late report"}}
+		default:
+			return nil
+		}
+	}}
+	for _, err := range chatAgent.Run(ctx) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if drains != 3 || len(testModel.last.Messages) != 2 || testModel.last.Messages[1].TextContent() != "late report" {
+		t.Fatalf("final drain lost continuation: drains=%d, model input=%#v", drains, testModel.last.Messages)
+	}
+}
+
+type finalDrainContext struct {
+	agent.Context
+	drain func() []agent.Submission
+}
+
+func (c finalDrainContext) DrainFinalSubmissions() []agent.Submission { return c.drain() }
 
 func TestChatAgentDrainsPendingImageAsDurableUserMessage(t *testing.T) {
 	t.Parallel()
@@ -1221,10 +1257,7 @@ func TestChatAgentDrainsAgentCommunicationWithTrustedIdentity(t *testing.T) {
 		t.Fatalf("model input = accepted %v, messages %#v", accepted, messages)
 	}
 	modelText := messages[0].TextContent()
-	if !strings.Contains(modelText, "[Internal agent message]") ||
-		!strings.Contains(modelText, "Sender: reviewer") ||
-		!strings.Contains(modelText, "Role: delegated") ||
-		!strings.HasSuffix(modelText, "review complete") {
+	if modelText != "review complete\n\nFrom: reviewer" {
 		t.Fatalf("model input text = %q, want trusted sender identity and original message", modelText)
 	}
 	if len(events) != 1 || session.EventTypeOf(events[0]) != session.EventTypeContext ||
@@ -1257,7 +1290,7 @@ func TestAgentCommunicationPersistenceRoundTripMatchesRuntimeModelContext(t *tes
 				Kind: session.ActorKindParticipant, ID: "reviewer-1", Role: "delegated", Name: "reviewer",
 			},
 			text:   "review complete",
-			header: "Sender: reviewer",
+			header: "From: reviewer",
 		},
 		{
 			name: "controller parent identity",
@@ -1265,7 +1298,7 @@ func TestAgentCommunicationPersistenceRoundTripMatchesRuntimeModelContext(t *tes
 				Kind: session.ControllerKindKernel, ControllerID: "sdk-kernel", AgentName: "local",
 			}),
 			text:   "continue from parent",
-			header: "Sender: parent",
+			header: "From: parent",
 			leaked: []string{"local", "sdk-kernel", "kernel"},
 		},
 	} {

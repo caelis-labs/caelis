@@ -41,6 +41,8 @@ type ControllerMode struct {
 
 // ControllerStatus summarizes live remote state for Caelis product surfaces.
 type ControllerStatus struct {
+	// SupportsSteering reflects the currently connected endpoint's negotiation.
+	SupportsSteering     bool                                `json:"-"`
 	SessionRef           session.SessionRef                  `json:"session_ref,omitempty"`
 	Agent                string                              `json:"agent,omitempty"`
 	RemoteSessionID      string                              `json:"remote_session_id,omitempty"`

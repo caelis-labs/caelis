@@ -60,6 +60,7 @@ type subagentOutputView struct {
 }
 
 type subagentOutputRenderCache struct {
+	entries   []subagentOutputRenderEntry
 	revision  uint64
 	width     int
 	height    int

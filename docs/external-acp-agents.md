@@ -58,36 +58,53 @@ advertised `_meta.steering.supported`. This is a negotiated custom extension,
 not a standard ACP v1 method. Direct running input remains unsupported without
 it. StartThread reports this capability as `supports_steering`.
 
-Control prepends a tagged collaboration slice to each child `session/prompt`,
-including the initial launch prompt and later idle follow-up or reconnect
-prompts. The slice is Control instruction, not a peer message, task prose, or a
-user follow-up: it names the assigned handle, the reserved parent address
-`parent`, and the participant role, and it states that ACP `session/prompt`
-delivers Caelis collaboration input from Control or another Agent. Agents that
-did not advertise steering also receive a concise instruction to call
-`ReceiveMessages` during the turn so mailbox messages do not backlog. Steering
-input is not rewritten with this slice. Credential values, mailbox contents,
-and Session or Task identifiers stay outside it. Built-in spawned Sessions
-receive the same handle, parent, and role facts through the system-prompt
-assembly path and do not inherit main-only StartThread guidance.
+Control appends a tagged collaboration setup block to the child's initial
+`session/prompt`, after the task body and sender. It names the assigned handle,
+the reserved parent address `parent`, and the participant role. It supplies the
+stable MCP discovery key `caelis-collaboration` and asks children to report
+meaningful progress through `SendMessage`, process returned mail, and end the
+current Turn when finished or blocked. New messages resume the same Session. The setup is
+not appended to later idle prompts, steering, or reconnects to the same Session.
+Its text is English; task and message bodies retain the sender's language.
+Credentials, mailbox contents, and Session or Task identifiers stay outside it.
+Built-in spawned Sessions receive their identity through system-prompt assembly
+and do not inherit controller-only tool guidance. Transferred parent context
+follows the initial task body.
 
 Product Agents share one Control-owned mailbox service within their owning work
-Session. `ListThreads` discovers its participants. `SendMessage {to, message,
-reply_to?}` places a message in the recipient's persistent mailbox and returns
-its identity; success confirms queuing, not completion. `ReceiveMessages` takes
-up to 32 messages from the caller's own mailbox, bounded by encoded JSON size
-within the shared 4 MiB response limit. Messages outside the returned batch
-remain queued. Message text is limited to 65,536 bytes; `reply_to`, when present,
-is a canonical message UUID. `ReadThread` returns a
-participant's latest public result and observation cursor, not its reasoning or
-complete conversation. Supplying `after` suppresses already observed output.
-`WaitThread` waits up to 60 seconds for incoming mail or new terminal/attention
-states among at most eight selected threads. It returns the wake reason,
-consumed messages and thread observations; timeout does not cancel work.
-Neither tool exposes the parent transcript or cross-Session routing.
+Session. Children expose only `ListThreads` and `SendMessage`; the controller also
+has `ReadThread` and `WaitThread`. Built-in children and child MCP servers
+register only their tool set. `ListThreads` discovers all collaborators.
+
+`SendMessage {to, message, reply_to?}` first commits a message to the recipient's
+persistent mailbox, then independently takes up to 32 messages from the caller's
+own mailbox. The result contains `{id, status:"queued"}` and optional `messages`;
+it never echoes the outgoing body. Empty or failed inbox checks omit `messages`
+and do not change the successful send acknowledgement. A failed send does not
+take inbox messages. Incoming batches are bounded by encoded JSON size within
+the shared 4 MiB response limit; remaining mail stays queued. Automatic delivery,
+SendMessage replies, and controller waits share the atomic read-and-delete path:
+a message is consumed by only one path. There are no automatic retries if a
+response is lost or a dispatch outcome is unknown. Message text is limited to
+65,536 bytes; `reply_to`, when present, is a canonical message UUID.
+
+`ReadThread` returns a participant's latest public result and observation cursor,
+not its reasoning or complete conversation. Supplying `after` suppresses already
+observed output. `WaitThread` waits up to 60 seconds for incoming mail or new
+terminal/attention states among at most eight selected threads. It returns when
+any target needs attention or mail arrives, rather than waiting for all targets.
+The result contains the wake reason, consumed messages and thread observations;
+timeout does not cancel work. Neither tool exposes the parent transcript or
+cross-Session routing. Thread observations use one `cursor` with `handle`,
+`state`, and optional name or output, without internal Task IDs or a duplicate
+revision. Received mail retains `id`, `from`, `message`, and optional `reply_to`;
+its implicit recipient is omitted. Wait results omit empty message and thread
+lists. TUI keeps display-only decoding of retained `ReceiveMessages` results for
+historical transcripts; that compatibility can be removed when those records
+are no longer supported. The tool itself is not exposed or callable.
 
 Only the controller receives `StartThread`. It creates a persistent participant
-conversation and starts its initial prompt, returning identity and status without
+conversation and starts its initial prompt, returning its handle, status and steering capability without
 folding its result into the creation result. Follow-up messages reuse that
 conversation. Participant removal is an internal Control operation; it is not
 exposed as a model tool and preserves Session history. Running or unresolved
@@ -101,7 +118,14 @@ Automatic delivery is serial per recipient and independent across recipients,
 with a ten-second deadline per attempt. Each attempt atomically claims the
 pending messages that fit the encoded batch budget and submits them as one
 input admission, preserving their order and individual source identities. The
-32-message pull limit does not split automatic delivery; messages beyond the
+same rule applies to the parent: a running local controller accepts the batch
+at its next safe model boundary, and a running ACP controller receives one
+negotiated steering request. Local safe boundaries follow a completed model
+response or tool step; mail does not cancel an in-flight tool. Accepted local
+batches are committed atomically before entering model context. A final empty
+drain closes input admission so late mail can select the next Turn without
+being acknowledged into a completed Run.
+The 32-message pull limit does not split automatic delivery; messages beyond the
 encoded budget remain queued. A deadline does not establish whether the peer
 executed the input and does not trigger a retry.
 Agents without steering can take mail through MCP during their current turn;
@@ -141,12 +165,18 @@ Credential values remain outside model prompts, tool schemas, results and
 canonical history. Tool schemas are stable across credential changes. Pending
 mail survives connection replacement, but consumed mail is never retried.
 
-Delivered input follows the ordinary Agent-communication context path. Accepted
-input is projected as ACP `session/update` with `user_message_chunk`; display-only
+Delivered input follows the ordinary Agent-communication context path. The
+model receives the task body followed by mail reference lines (`Message-ID` and
+optional `In-Reply-To`) and a single `From` footer, without an embedded mailbox
+JSON object or repeated recipient identity. Typed source identity and the original
+display body remain separate from this text. Accepted input is projected as ACP `session/update` with `user_message_chunk`; display-only
 source metadata may use `_meta.caelis.agent_communication`, while typed event
 identity remains authoritative. Caelis mailbox IDs are separate from peer-owned
 ACP message IDs. Delivered context remains in canonical Session history after
-its mailbox entry is removed.
+its mailbox entry is removed. The external history reader removes collaboration
+setup and mail footers from child display and attributes preceding content blocks
+to the footer's sender. Its legacy header reader is display-only; remove that
+reader once supported external histories no longer contain header-format prompts.
 
 An admitted `session/prompt` remains open until its execution reaches a Turn
 terminal. If ACP forwarding fails, the bridge can no longer reliably service
@@ -239,6 +269,38 @@ Guided onboarding selects the remote model but does not impose a reasoning
 effort. The Agent-advertised choices become profile capabilities; fixed Agent
 bindings and participant attachment choose an explicit effort later.
 
+### Provider selectors exposed by Caelis
+
+Caelis publishes configured provider models as `provider[@endpoint]/model` in
+AppServer presentation, ACP model configuration options, and `/model` completion.
+Only the literal `default` endpoint is omitted: `deepseek/deepseek-flash`,
+`xiaomi@api-cn/mimo-v2.5-pro`, and
+`xiaomi@token-plan-cn/mimo-v2.5-pro` name distinct routes. Adding another endpoint
+never changes a route's selector. Custom model aliases retain their fully
+qualified configuration ID so multiple configurations of one upstream model
+remain distinct.
+
+Control's `modelconfig` package owns selector generation and resolution. Model
+options and their current value use the same public selector; selection resolves
+to the existing internal configuration and ModelProfile identities before any
+Session write. Credentials, durable bindings, and upstream model IDs are not
+renamed. Remote model IDs owned by external ACP Agents are unaffected.
+
+Selection first matches an exact internal ID, then a public selector, and only
+then an unambiguous historical alias. A historical alias cannot shadow a public
+selector: `deepseek/model` names the `default` route when that route exists,
+while `deepseek@office/model` names the `office` route even if both configurations
+share an alias. Without a matching public selector, ambiguous aliases such as
+`xiaomi/model` are rejected rather than resolved through the Host default.
+
+Compatibility aliases are input-only, not additional options. Historical alias
+resolution is not a stable route binding when the catalog changes; clients that
+need one must use an advertised selector or an exact internal ID. Alias support
+remains while historical client references are supported and can be removed
+only through an explicit breaking migration. A public selector colliding with
+another configuration's public selector or exact internal ID is still a catalog
+error; shared historical aliases alone do not invalidate the catalog.
+
 ## Endpoint catalog
 
 The built-in catalog contains stable commands for official ACP stdio modes plus a
@@ -276,6 +338,24 @@ observed message shape or advertised capabilities, never a guessed peer version.
 | Flat Session configuration options | Standard options fail normalization; standard shapes always win | Supported peers and upgrade fixtures no longer emit the flat shape |
 | Legacy `models` and `session/set_model` | No standard model option is advertised and the requested model exists in the legacy catalog | Every supported selectable peer uses standard model configuration and no fixture needs the legacy channel |
 | Prompt image `name` | Standard image content is valid and a non-empty top-level name supplies display metadata only | Supported peers use standard image URI/reference metadata |
+| Draft Session notices | The bridge accepts `session/update` with `sessionUpdate: "notice"`, required `severity` and non-empty `title`, and optional `description` and `_meta` | Replace the bridge decoder with the SDK Notice variant when available |
+| Codex Notice transport | The client advertises `_meta.session_notice: true`; the adapter sends `_session/notice` with the same `{sessionId, update}` payload as the draft standard notification | The pinned ACP SDK can encode the Notice variant; switch the adapter to `session/update` and remove the capability and extension method |
+| Codex MCP display identity | `_meta["codex/mcp_tool"]` names server `caelis-collaboration` and tool `SendMessage`, with no conflicting standard kind or existing exact display name | ACP supplies a standard structured MCP identity that replaces the provider hint |
+
+The [Session notices draft](https://github.com/agentclientprotocol/agent-client-protocol/pull/2004)
+defines advisory live events outside Session history. The standard update needs
+no capability negotiation; only the temporary Codex transport does. Unsupported
+clients may ignore notices. Unknown severity strings remain presentation hints,
+and malformed optional fields are ignored. The bridge projects notices through
+the existing transient Notice event, never reasoning, model input, public child
+results, or approval authority.
+
+Codex MCP compatibility belongs to the built-in adapter: `arguments` becomes
+standard `rawInput`, and supported `result.content` blocks become standard ACP
+tool content. Complete provider results, including `structuredContent` and
+unknown content blocks, remain in `rawOutput`. The Host-private bridge consumes
+the structured MCP display hint; it never derives a tool name from a title.
+Generic tools render standard input even without a recognized display profile.
 
 Older persisted connections may still use `package_exec` or `managed`
 launchers. Runtime keeps them read-compatible, but new onboarding cannot create

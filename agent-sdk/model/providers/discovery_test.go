@@ -7,6 +7,30 @@ import (
 	"testing"
 )
 
+func TestDiscoverResponsesModelsUsesModelsEndpoint(t *testing.T) {
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+			t.Errorf("request = %s %s, want GET /v1/models", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer token" {
+			t.Errorf("authorization = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"test-model","context_window":65536}]}`)
+	}))
+	defer server.Close()
+	models, err := DiscoverModels(t.Context(), Config{
+		API: APIOpenAIResponses, BaseURL: server.URL + "/v1", HTTPClient: server.Client(),
+		Auth: AuthConfig{Type: AuthAPIKey, Token: "token"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].Name != "test-model" || models[0].ContextWindowTokens != 65536 {
+		t.Fatalf("models = %#v", models)
+	}
+}
+
 func TestDiscoverGeminiModels_UsesAPIKeyHeader(t *testing.T) {
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("x-goog-api-key"); got != "token" {

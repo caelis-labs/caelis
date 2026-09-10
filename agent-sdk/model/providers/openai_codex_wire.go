@@ -134,18 +134,19 @@ func openAICodexRequestFromModel(req *model.Request, modelName string) (openAICo
 }
 
 func openAICodexTools(specs []model.ToolSpec, strictFunctionTools bool) []openAICodexTool {
-	definitions := model.FunctionToolDefinitions(specs)
-	if len(definitions) == 0 {
+	tools := fromKernelTools(model.FunctionToolDefinitions(specs), strictFunctionTools)
+	if len(tools) == 0 {
 		return nil
 	}
-	out := make([]openAICodexTool, 0, len(definitions))
-	for _, definition := range definitions {
+	out := make([]openAICodexTool, 0, len(tools))
+	for _, tool := range tools {
+		definition := tool.Function
 		out = append(out, openAICodexTool{
 			Type:        "function",
 			Name:        strings.TrimSpace(definition.Name),
 			Description: definition.Description,
 			Parameters:  cloneAnyMap(definition.Parameters),
-			Strict:      strictFunctionTools && definition.Strict,
+			Strict:      definition.Strict,
 		})
 	}
 	return out
@@ -285,7 +286,9 @@ func openAIResponsesAssistantContent(out []any, parts []model.Part, seenToolCall
 			}
 		case model.PartKindReasoning:
 			flushText()
-			if replay, ok := openAIResponsesReasoningReplay(part, replayProvider); ok {
+			if replay, ok := openAIResponsesPlainReasoningReplay(part, replayProvider); ok {
+				out = append(out, replay)
+			} else if replay, ok := openAIResponsesReasoningReplay(part, replayProvider); ok {
 				out = append(out, replay)
 			}
 		case model.PartKindToolUse:
@@ -443,6 +446,7 @@ type openAICodexIncompleteDetails struct {
 type openAICodexOutputContent struct {
 	Type        string                     `json:"type"`
 	Text        string                     `json:"text"`
+	Refusal     string                     `json:"refusal,omitempty"`
 	Annotations []openAICodexURLAnnotation `json:"annotations,omitempty"`
 }
 
@@ -502,6 +506,7 @@ type openAICodexOutputSlot struct {
 	encryptedContent        string
 	reasoningSummaryIndex   int
 	reasoningSummaryIndexed bool
+	plainReasoning          bool
 }
 
 type openAICodexAccumulator struct {
@@ -509,10 +514,7 @@ type openAICodexAccumulator struct {
 	itemIndexes    map[string]int
 	hasToolCall    bool
 	replayProvider string
-}
-
-func newOpenAICodexAccumulator() *openAICodexAccumulator {
-	return newOpenAIResponsesAccumulator(openAICodexReplayProvider)
+	plainReasoning bool
 }
 
 func newOpenAIResponsesAccumulator(replayProvider string) *openAICodexAccumulator {
@@ -551,6 +553,19 @@ func (a *openAICodexAccumulator) applyItem(item openAICodexOutputItem, index int
 			entry.reasoning.Reset()
 			entry.reasoning.WriteString(summary)
 		}
+		if a.plainReasoning {
+			var text strings.Builder
+			for _, content := range item.Content {
+				if content.Type == "reasoning_text" {
+					text.WriteString(content.Text)
+				}
+			}
+			if text.Len() > 0 {
+				entry.reasoning.Reset()
+				entry.reasoning.WriteString(text.String())
+				entry.plainReasoning = true
+			}
+		}
 	case "message":
 		if text := openAICodexOutputTextContent(item.Content); text != "" {
 			entry.text.Reset()
@@ -581,8 +596,11 @@ func openAICodexSummaryText(parts []openAICodexReasoningSummary) string {
 func openAICodexOutputTextContent(parts []openAICodexOutputContent) string {
 	var out strings.Builder
 	for _, part := range parts {
-		if part.Type == "output_text" {
+		switch part.Type {
+		case "output_text":
 			out.WriteString(part.Text)
+		case "refusal":
+			out.WriteString(part.Refusal)
 		}
 	}
 	return out.String()
@@ -627,6 +645,9 @@ func (a *openAICodexAccumulator) appendText(event openAICodexStreamWire) {
 
 func (a *openAICodexAccumulator) appendReasoning(event openAICodexStreamWire) string {
 	entry := a.slot(event.OutputIndex, event.ItemID, "reasoning")
+	if a.plainReasoning && event.Type == "response.reasoning_text.delta" {
+		entry.plainReasoning = true
+	}
 	delta := event.Delta
 	if event.SummaryIndex != nil {
 		if entry.reasoningSummaryIndexed && entry.reasoningSummaryIndex != *event.SummaryIndex &&
@@ -668,6 +689,12 @@ func (a *openAICodexAccumulator) message() (model.Message, error) {
 			part := model.NewReasoningPart(visible, visibility)
 			if token != "" && part.Reasoning != nil {
 				part.Reasoning.Replay = &model.ReplayMeta{Provider: a.replayProvider, Kind: openAICodexReplayKind, Token: token}
+			} else if entry.plainReasoning && part.Reasoning != nil {
+				part.Reasoning.Replay = &model.ReplayMeta{Provider: a.replayProvider, Kind: openAIResponsesReplayKindText}
+				if entry.id != "" {
+					raw, _ := json.Marshal(entry.id)
+					part.Reasoning.ProviderDetails = map[string]json.RawMessage{openAIResponsesReasoningItemID: raw}
+				}
 			}
 			parts = append(parts, part)
 		case "message":

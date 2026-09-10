@@ -169,7 +169,7 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 func TestOpenAICodexTokenOnlyReasoningAndPrematureEOF(t *testing.T) {
 	t.Parallel()
 
-	accumulator := newOpenAICodexAccumulator()
+	accumulator := newOpenAIResponsesAccumulator(openAICodexReplayProvider)
 	accumulator.applyItem(openAICodexOutputItem{ID: "rs_1", Type: "reasoning", EncryptedContent: "opaque"}, 0)
 	accumulator.applyItem(openAICodexOutputItem{ID: "msg_1", Type: "message", Content: []openAICodexOutputContent{{Type: "output_text", Text: "done"}}}, 1)
 	message, err := accumulator.message()
@@ -255,7 +255,7 @@ func TestOpenAIResponsesInputsCarryViewImageToolResult(t *testing.T) {
 func TestOpenAICodexOutputTextPreservesURLCitations(t *testing.T) {
 	t.Parallel()
 
-	accumulator := newOpenAICodexAccumulator()
+	accumulator := newOpenAIResponsesAccumulator(openAICodexReplayProvider)
 	accumulator.applyItem(openAICodexOutputItem{
 		ID:   "msg-cited",
 		Type: "message",

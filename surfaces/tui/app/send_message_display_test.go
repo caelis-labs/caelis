@@ -245,9 +245,9 @@ func TestSendMessageSuccessRendersSingleLineWithoutDispatchAck(t *testing.T) {
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "message-1", Status: &completed,
 			Content: []eventstream.ToolCallContent{{
-				Type: "content", Content: eventstream.TextContent{Type: "text", Text: "Message sent."},
+				Type: "content", Content: eventstream.TextContent{Type: "text", Text: `{"id":"mail-1","status":"queued"}`},
 			}},
-			RawOutput: map[string]any{"accepted": true, "state": "delivered", "to": "parent"},
+			RawOutput: map[string]any{"id": "mail-1", "status": "queued"},
 			Meta:      acpToolNameMeta("SendMessage"),
 		},
 	})
@@ -257,7 +257,8 @@ func TestSendMessageSuccessRendersSingleLineWithoutDispatchAck(t *testing.T) {
 	if !strings.Contains(plain, "• @parent: status update for parent") {
 		t.Fatalf("successful SendMessage header missing:\n%s", plain)
 	}
-	if strings.Contains(plain, "Message sent.") || strings.Contains(plain, "└") || strings.Contains(plain, "↗") {
+	t.Log(plain)
+	if strings.Contains(plain, "queued") || strings.Contains(plain, "mail-1") || strings.Contains(plain, "Message sent.") || strings.Contains(plain, "└") || strings.Contains(plain, "↗") {
 		t.Fatalf("successful SendMessage kept delivery chrome:\n%s", plain)
 	}
 }

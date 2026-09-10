@@ -49,9 +49,14 @@ func (s *Service) Call(ctx context.Context, i Identity, req Request) (json.RawMe
 	case "ReadThread":
 		result, err = s.Read(ctx, i, Target{Handle: args.Handle, After: args.After})
 	case "SendMessage":
-		result, err = s.Send(ctx, i, args.To, args.Message, args.ReplyTo)
-	case "ReceiveMessages":
-		result, err = s.Receive(ctx, i)
+		var sent Message
+		sent, err = s.Send(ctx, i, args.To, args.Message, args.ReplyTo)
+		if err == nil {
+			// Sending is already committed. A separate mailbox failure must not
+			// turn this acknowledgement into a failed send that invites a retry.
+			mail, _ := s.Receive(ctx, i)
+			result = toolSendResult{ID: sent.ID, Status: "queued", Messages: messageToolViews(mail)}
+		}
 	case "WaitThread":
 		seconds := 30
 		if args.TimeoutSeconds != nil {
@@ -64,30 +69,36 @@ func (s *Service) Call(ctx context.Context, i Identity, req Request) (json.RawMe
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(result)
+	return json.Marshal(toolResultView(result))
 }
 
-// Definitions is the identical model-visible schema for native and MCP tools.
-func Definitions() []tool.Definition {
+// Definitions selects the tool set from the Control-owned caller role. Children
+// can discover peers and exchange mail; only controllers observe or wait on work.
+func Definitions(controller bool) []tool.Definition {
 	object := func(props map[string]any, required ...string) map[string]any {
 		return map[string]any{"type": "object", "properties": props, "required": append([]string{}, required...), "additionalProperties": false}
 	}
 	text := func(description string) map[string]any {
 		return map[string]any{"type": "string", "minLength": 1, "description": description}
 	}
-	return []tool.Definition{
-		{Name: "ListThreads", Description: "Discover the participants in this work Session. Addresses are scoped to this Session.", InputSchema: object(map[string]any{}), EffectClass: tool.EffectReadOnly},
-		{Name: "SendMessage", Description: "Put a message in another participant's mailbox. Success means queued, not completed. The recipient can receive it through its collaboration tools or on a later turn. Do not repeat a successful send.", InputSchema: object(map[string]any{"to": text("Recipient handle from ListThreads."), "message": text("Message body."), "reply_to": map[string]any{"type": "string", "minLength": 36, "maxLength": 36, "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "Optional UUID of the message being answered."}}, "to", "message"), EffectClass: tool.EffectNonIdempotent},
-		{Name: "ReceiveMessages", Description: "Take pending messages from your own mailbox. Taken messages are removed. Reply using SendMessage and the received message ID as reply_to.", InputSchema: object(map[string]any{}), EffectClass: tool.EffectNonIdempotent},
-		{Name: "ReadThread", Description: "Read a participant's latest public result and status. Supply the returned cursor as after to suppress previously observed output. This is a latest-result snapshot, not full conversation history.", InputSchema: object(map[string]any{"handle": text("Participant handle from ListThreads."), "after": map[string]any{"type": "integer", "minimum": 0}}, "handle"), EffectClass: tool.EffectReadOnly},
-		{Name: "WaitThread", Description: "Wait for incoming mailbox messages or for selected threads to finish or need attention. Messages returned are removed; thread observations are repeatable using cursors. Timeout does not cancel work.", InputSchema: object(map[string]any{"threads": map[string]any{"type": "array", "maxItems": 8, "items": object(map[string]any{"handle": text("Participant handle."), "after": map[string]any{"type": "integer", "minimum": 0}}, "handle")}, "timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": 60}}), EffectClass: tool.EffectNonIdempotent},
+	definitions := []tool.Definition{
+		{Name: "ListThreads", Description: "List participants and their Session-scoped handles.", InputSchema: object(map[string]any{}), EffectClass: tool.EffectReadOnly},
+		{Name: "SendMessage", Description: "Queue mail, then independently take your pending mail. Success means queued, not delivered; do not resend. Delivery occurs at a supported input boundary or through a SendMessage reply. Use received IDs as reply_to.", InputSchema: object(map[string]any{"to": text("Recipient handle from ListThreads."), "message": text("Message body."), "reply_to": map[string]any{"type": "string", "minLength": 36, "maxLength": 36, "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "Optional UUID of the message being answered."}}, "to", "message"), EffectClass: tool.EffectNonIdempotent},
 	}
+	if !controller {
+		return definitions
+	}
+	return append(definitions, []tool.Definition{
+		{Name: "ReadThread", Description: "Read a participant's latest public result and status. Pass cursor as after to omit unchanged output; full history is not returned.", InputSchema: object(map[string]any{"handle": text("Participant handle from ListThreads."), "after": map[string]any{"type": "integer", "minimum": 0}}, "handle"), EffectClass: tool.EffectReadOnly},
+		{Name: "WaitThread", Description: "Wait for mail, new input, or selected threads to finish or need attention. Returned mail is removed; already admitted input is not repeated. Pass each cursor as after to suppress repeated results. Timeout leaves work running.", InputSchema: object(map[string]any{"threads": map[string]any{"type": "array", "maxItems": 8, "items": object(map[string]any{"handle": text("Participant handle."), "after": map[string]any{"type": "integer", "minimum": 0}}, "handle")}, "timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": 60}}), EffectClass: tool.EffectNonIdempotent},
+	}...)
 }
 
 // Tools binds the native tool surface to the same invocation contract as MCP.
-func Tools(invoke Invoke) []tool.Tool {
-	out := make([]tool.Tool, 0, 4)
-	for _, definition := range Definitions() {
+func Tools(controller bool, invoke Invoke) []tool.Tool {
+	definitions := Definitions(controller)
+	out := make([]tool.Tool, 0, len(definitions))
+	for _, definition := range definitions {
 		out = append(out, boundTool{definition: definition, invoke: invoke})
 	}
 	return out

@@ -189,10 +189,6 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		toolOutput = taskWriteFailureDisplayOutput(rawOutput, input.Meta, toolOutput, toolTaskHandle, status, toolErr)
 	}
 	toolMessageTarget := ""
-	if semanticName == surfaceToolSendMessage && !toolErr {
-		toolOutput = ""
-		toolOutputSynthetic = true
-	}
 	if semanticName == surfaceToolSendMessage {
 		toolMessageTarget = display.AgentMessageTarget(firstNonEmpty(
 			display.MapString(rawOutput, "to"),

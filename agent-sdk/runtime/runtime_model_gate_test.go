@@ -35,7 +35,7 @@ func TestAutoCompactModelWrapperPreservesWebSearcher(t *testing.T) {
 	if got := payload["status"]; got != "completed" {
 		t.Fatalf("status = %#v, want completed: %#v", got, payload)
 	}
-	if got := payload["provider"]; got != "test-search" {
+	if got := nestedMap(result.Metadata, "caelis", "runtime", "tool")["provider"]; got != "test-search" {
 		t.Fatalf("provider = %#v, want test-search", got)
 	}
 }

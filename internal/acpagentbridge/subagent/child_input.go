@@ -189,7 +189,12 @@ func buildAgentCommunicationPrompt(req agent.ChildInputRequest) []json.RawMessag
 	var parts []model.ContentPart
 	for _, input := range childInputMessages(req) {
 		message := model.MessageFromTextAndContentParts(model.RoleUser, input.Input, input.ContentParts)
-		parts = append(parts, model.ContentPart{Type: model.ContentPartText, Text: session.AgentCommunicationPromptHeader(input.Source)})
+		footer := session.AgentCommunicationPromptFooter(input.Source)
+		if n := len(message.Parts); n > 0 && message.Parts[n-1].Text != nil {
+			message.Parts[n-1].Text.Text += footer
+		} else {
+			message.Parts = append(message.Parts, model.NewTextPart(footer))
+		}
 		parts = append(parts, model.ContentPartsFromParts(message.Parts)...)
 	}
 	return acputil.BuildPromptParts("", parts)
@@ -569,7 +574,6 @@ func (r *Runner) submitIdleChildInput(
 		slot.opMu.Unlock()
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent does not accept image input.")
 	}
-	prompt = r.withCollaborationPromptSlice(run, prompt)
 	prepared, err := acpClient.PreparePromptParts(sessionID, prompt, nil)
 	if err != nil {
 		slot.opMu.Unlock()

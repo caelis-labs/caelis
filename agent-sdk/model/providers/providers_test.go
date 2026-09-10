@@ -1114,11 +1114,11 @@ func TestOpenAICompatProviderSpecificStrictToolStrategy(t *testing.T) {
 			wantStrict: false,
 		},
 		{
-			name: "openai",
-			llm: newOpenAICompat(Config{
-				Provider: "openai",
-				API:      APIOpenAI,
-				Model:    "gpt-5",
+			name: "openrouter",
+			llm: newOpenRouter(Config{
+				Provider: "openrouter",
+				API:      APIOpenRouter,
+				Model:    "openai/gpt-5",
 			}, "token"),
 			wantStrict: true,
 		},

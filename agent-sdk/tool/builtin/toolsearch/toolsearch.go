@@ -123,7 +123,7 @@ func description(entries []entry) string {
 	if len(sources) > 0 {
 		sourceDescriptions = strings.Join(sources, "\n")
 	}
-	return truncateRunes(fmt.Sprintf("# Tool discovery\n\nSearches over deferred MCP tool metadata and exposes matching tools for the next model call.\n\nYou have access to tools from the following sources:\n%s\nSome of the tools may not have been provided to you upfront, and you should use this tool (`%s`) to search for the required tools.", sourceDescriptions, tool.ToolSearchToolName), maxToolSearchDescriptionRunes)
+	return truncateRunes("Find deferred MCP tools by name or capability; matching tools become callable on the next model request. Sources:\n"+sourceDescriptions, maxToolSearchDescriptionRunes)
 }
 
 func (t *Tool) Definition() tool.Definition {

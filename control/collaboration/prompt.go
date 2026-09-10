@@ -15,13 +15,12 @@ const (
 )
 
 // PromptSlice is trusted Control instruction for one collaborator. It names the
-// assigned handle, reserved parent address, and role, and may require mailbox
-// polling when steering is unavailable. It never carries credentials, mailbox
-// contents, Session or Task identifiers, or peer-authored claims.
+// assigned handle, reserved parent address, role, and reporting behavior.
+// It never carries credentials, mailbox contents, Session or Task identifiers,
+// or peer-authored claims.
 type PromptSlice struct {
-	Handle         string
-	Role           string
-	MailboxPolling bool
+	Handle string
+	Role   string
 }
 
 // IdentityInstructions returns the handle, parent, and role sentences used by
@@ -50,26 +49,20 @@ func IdentityInstructions(handle, role string) string {
 	return b.String()
 }
 
-// ChannelInstruction tells an ACP child that session/prompt is collaboration
-// input. Without it, peers treat that method as a user follow-up.
-func ChannelInstruction() string {
-	return "ACP session/prompt delivers Caelis collaboration input from Control or another Agent, not a user follow-up."
+// DiscoveryInstruction supplies a stable MCP search key without listing schemas.
+func DiscoveryInstruction() string {
+	return `If collaboration tools are not visible, search for "caelis-collaboration".`
 }
 
-// MailboxPollingInstruction is the concise Control instruction for Agents that
-// cannot receive steering while a turn is running.
-func MailboxPollingInstruction() string {
-	return "Steering is not available. Periodically call ReceiveMessages during this turn so mailbox messages do not backlog."
+// CollaboratorInstructions defines reporting and turn completion for children.
+func CollaboratorInstructions() string {
+	return "Use SendMessage to report meaningful progress or blockers to parent; send brief updates during longer tasks. Process any messages returned by the tool. When finished or blocked, return your result and end the turn; new messages resume this Session."
 }
 
-// RenderPromptSlice returns the tagged ACP injection block. Identity always
-// includes the reserved parent address. The channel sentence is always present
-// so parent or peer mail cannot be read as a user follow-up.
+// RenderPromptSlice returns the one-time setup appended to a child's initial
+// ACP prompt. Follow-up messages carry only their body and sender.
 func RenderPromptSlice(in PromptSlice) string {
-	lines := []string{IdentityInstructions(in.Handle, in.Role), ChannelInstruction()}
-	if in.MailboxPolling {
-		lines = append(lines, MailboxPollingInstruction())
-	}
+	lines := []string{IdentityInstructions(in.Handle, in.Role), DiscoveryInstruction(), CollaboratorInstructions()}
 	return SliceOpenTag + "\n" + strings.Join(lines, "\n") + "\n" + SliceCloseTag
 }
 

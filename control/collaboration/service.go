@@ -2,9 +2,7 @@
 // Taking or dispatching a message removes it. Delivery is best effort: there
 // are no acknowledgements, automatic retries, or exactly-once guarantees.
 // Collaborator prompt slices are Control-owned instruction: they name the
-// assigned handle, reserved parent address, and role; they state that ACP
-// session/prompt is collaboration input, not a user follow-up; and they may
-// require mailbox polling when steering is unavailable.
+// assigned handle, reserved parent address, role, and reporting behavior.
 package collaboration
 
 import (
@@ -21,7 +19,7 @@ import (
 )
 
 // MaxResponseBytes is the shared HTTP response limit. Mailbox batches reserve
-// space for the WaitThread response envelope.
+// space for the SendMessage and WaitThread response envelopes.
 const MaxResponseBytes = 4 << 20
 const mailboxBatchBytes = MaxResponseBytes - (64 << 10)
 const deliveryTimeout = 10 * time.Second
@@ -72,6 +70,7 @@ type Service struct {
 	backend     Backend
 	mu          sync.Mutex
 	credentials map[string]*Grant
+	waiters     map[Identity]map[chan struct{}]struct{}
 	now         func() time.Time
 }
 
@@ -93,7 +92,7 @@ func Open(path string, backend Backend) (*Service, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Service{db: db, backend: backend, credentials: map[string]*Grant{}, now: time.Now}, nil
+	return &Service{db: db, backend: backend, credentials: map[string]*Grant{}, waiters: map[Identity]map[chan struct{}]struct{}{}, now: time.Now}, nil
 }
 
 // Close releases the service's database connection.
@@ -342,10 +341,45 @@ func (s *Service) deliverRecipient(ctx context.Context, i Identity) error {
 			if err := s.backend.Deliver(ctx, i.Session, messages); err != nil {
 				return fmt.Errorf("deliver %d messages (removed; remote outcome may be unknown): %w", len(messages), err)
 			}
+			s.notifyDelivery(i)
 		}
 		break
 	}
 	return nil
+}
+
+func (s *Service) registerDeliveryWait(i Identity) chan struct{} {
+	wake := make(chan struct{})
+	s.mu.Lock()
+	if s.waiters[i] == nil {
+		s.waiters[i] = map[chan struct{}]struct{}{}
+	}
+	s.waiters[i][wake] = struct{}{}
+	s.mu.Unlock()
+	return wake
+}
+
+func (s *Service) unregisterDeliveryWait(i Identity, wake chan struct{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	waiters := s.waiters[i]
+	delete(waiters, wake)
+	if len(waiters) == 0 {
+		delete(s.waiters, i)
+	}
+}
+
+// notifyDelivery wakes only waits that overlap a successful Runtime admission.
+// The admitted input remains owned by Runtime and is consumed at its next safe
+// point; it must not be copied back into the mailbox or returned by WaitThread.
+func (s *Service) notifyDelivery(i Identity) {
+	s.mu.Lock()
+	waiters := s.waiters[i]
+	delete(s.waiters, i)
+	for wake := range waiters {
+		close(wake)
+	}
+	s.mu.Unlock()
 }
 
 func (s *Service) purgeClosedSession(ctx context.Context, id string) error {

@@ -140,7 +140,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 					return
 				}
 				messages = append(messages, assistantMessage)
-				accepted, drainErr := a.drainPendingSubmissions(ctx, &messages, func(event *session.Event) bool {
+				accepted, drainErr := a.drainFinalSubmissions(ctx, &messages, func(event *session.Event) bool {
 					return yield(event, nil)
 				})
 				if drainErr != nil {
@@ -415,9 +415,44 @@ func (a *Agent) drainPendingSubmissions(
 	if ctx == nil {
 		return false, nil
 	}
-	drained := ctx.DrainSubmissions()
+	return a.drainSubmissions(ctx, ctx.DrainSubmissions(), messages, yield)
+}
+
+func (a *Agent) drainFinalSubmissions(ctx agent.Context, messages *[]model.Message, yield func(*session.Event) bool) (bool, error) {
+	drainer, ok := ctx.(runtimeinput.FinalSubmissionDrainer)
+	if !ok {
+		return a.drainPendingSubmissions(ctx, messages, yield)
+	}
+	for {
+		drained := drainer.DrainFinalSubmissions()
+		accepted, err := a.drainSubmissions(ctx, drained, messages, yield)
+		if accepted || err != nil || len(drained) == 0 {
+			return accepted, err
+		}
+		// Ignored or empty submissions do not continue the model loop. Drain
+		// again so a concurrent valid input is admitted or closure is atomic.
+	}
+}
+
+func (a *Agent) drainSubmissions(ctx agent.Context, drained []agent.Submission, messages *[]model.Message, yield func(*session.Event) bool) (bool, error) {
 	accepted := false
 	for _, submission := range drained {
+		if len(submission.Inputs) > 0 {
+			if err := agent.ValidateSubmissionInputs(submission); err != nil {
+				return accepted, err
+			}
+			committer, ok := ctx.(runtimeinput.BatchCommitter)
+			if !ok {
+				return accepted, fmt.Errorf("Agent communication batch requires Runtime safe-point persistence")
+			}
+			committed, err := committer.CommitAgentInputBatch(submission.Inputs)
+			if err != nil {
+				return accepted, err
+			}
+			*messages = append(*messages, committed...)
+			accepted = accepted || len(committed) > 0
+			continue
+		}
 		if !isModelInputSubmission(submission) {
 			continue
 		}
@@ -452,11 +487,11 @@ func (a *Agent) drainPendingSubmissions(
 				Content:       session.ProtocolTextContent(displayText),
 			}}
 		} else if submission.Kind == agent.SubmissionKindAgentCommunication {
-			prefixed, err := agentcommunication.PrefixMessage(message, actor)
+			prepared, err := agentcommunication.AppendSender(message, actor)
 			if err != nil {
 				return accepted, fmt.Errorf("submit model context: %w", err)
 			}
-			providerMessage = prefixed
+			providerMessage = prepared
 			event.Message = &providerMessage
 			protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: displayText})
 			event.Protocol = &protocol

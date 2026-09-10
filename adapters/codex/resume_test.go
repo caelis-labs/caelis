@@ -48,10 +48,10 @@ func TestResumeSessionPreservesHandshakeNotificationsAndPolicy(t *testing.T) {
 		}, clientToAgentReader, agentToClientWriter)
 	}()
 
-	recorder := &recordingACPClient{}
+	recorder := &recordingNoticeClient{}
 	client := acp.NewClientSideConnection(recorder, clientToAgentWriter, agentToClientReader)
 	defer client.Close()
-	if _, err := client.Initialize(ctx, acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersion(acp.WireProtocolVersion)}); err != nil {
+	if _, err := client.Initialize(ctx, acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersion(acp.WireProtocolVersion), ClientCapabilities: acp.ClientCapabilities{Meta: map[string]json.RawMessage{sessionNoticeCapability: json.RawMessage("true")}}}); err != nil {
 		t.Fatal(err)
 	}
 	response, err := client.ResumeSession(ctx, acp.ResumeSessionRequest{
@@ -64,12 +64,11 @@ func TestResumeSessionPreservesHandshakeNotificationsAndPolicy(t *testing.T) {
 		t.Fatal("resume response omitted model configuration")
 	}
 	updates := recorder.snapshot()
-	if len(updates) != 1 || updates[0].Update.AgentThoughtChunk == nil || updates[0].Update.AgentThoughtChunk.Content.Text == nil {
-		t.Fatalf("resume handshake updates = %#v", updates)
+	recorder.mu.Lock()
+	if len(updates) != 0 || len(recorder.notices) != 1 || recorder.notices[0].SessionID != "thread-resume-1" || recorder.notices[0].Update.Title != "resume warning" {
+		t.Fatalf("resume handshake = %#v, notices = %#v", updates, recorder.notices)
 	}
-	if got := updates[0].Update.AgentThoughtChunk.Content.Text.Text; got != "resume warning" {
-		t.Fatalf("resume warning = %q", got)
-	}
+	recorder.mu.Unlock()
 	prompt, err := client.Prompt(ctx, acp.PromptRequest{
 		SessionId: acp.SessionId("thread-resume-1"),
 		Prompt:    []acp.ContentBlock{acp.TextBlock("apply the change")},
@@ -81,7 +80,7 @@ func TestResumeSessionPreservesHandshakeNotificationsAndPolicy(t *testing.T) {
 		t.Fatalf("Prompt(object-kind file change) stop reason = %q, want end_turn", prompt.StopReason)
 	}
 	updates = recorder.snapshot()
-	if len(updates) != 3 || updates[1].Update.ToolCall == nil || updates[2].Update.ToolCallUpdate == nil {
+	if len(updates) != 2 || updates[0].Update.ToolCall == nil || updates[1].Update.ToolCallUpdate == nil {
 		t.Fatalf("object-kind file change prompt updates = %#v", updates)
 	}
 

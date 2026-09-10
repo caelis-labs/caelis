@@ -212,7 +212,7 @@ func completeConnectProviders(ctx context.Context, driver *assembler, authSource
 		if (authSource == "account" && !accountProvider) || (authSource == "api-key" && accountProvider) {
 			continue
 		}
-		if query != "" && !strings.Contains(strings.ToLower(template.Label+" "+template.Description), strings.ToLower(strings.TrimSpace(query))) {
+		if query != "" && !strings.Contains(strings.ToLower(template.Label+" "+template.Provider+" "+template.Description), strings.ToLower(strings.TrimSpace(query))) {
 			continue
 		}
 		// Only endpoint-less providers can safely skip authentication here. For

@@ -111,11 +111,11 @@ func TestRuntimeRunPersistsOrderedAgentCommunicationBatchInOneTurn(t *testing.T)
 
 func mustPrefixedAgentMessage(t *testing.T, actor session.ActorRef, text string) model.Message {
 	t.Helper()
-	prefixed, err := agentcommunication.PrefixMessage(model.NewTextMessage(model.RoleUser, text), actor)
+	prepared, err := agentcommunication.AppendSender(model.NewTextMessage(model.RoleUser, text), actor)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return prefixed
+	return prepared
 }
 
 func userMessages(messages []model.Message) []model.Message {

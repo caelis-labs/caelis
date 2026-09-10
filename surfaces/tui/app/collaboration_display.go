@@ -19,7 +19,13 @@ func collaborationObservationTool(name string) bool {
 func expandCollaborationMessages(events []TranscriptEvent) []TranscriptEvent {
 	var out []TranscriptEvent
 	for _, event := range events {
-		out = append(out, event)
+		visible := event
+		if event.Kind == TranscriptEventTool && event.ToolName == surfaceToolSendMessage && !event.ToolError {
+			// Expand returned mail before suppressing the outgoing send receipt.
+			visible.ToolOutput = ""
+			visible.ToolOutputSynthetic = true
+		}
+		out = append(out, visible)
 		if event.Kind != TranscriptEventTool || !event.Final || event.ToolError {
 			continue
 		}
@@ -31,10 +37,11 @@ func expandCollaborationMessages(events []TranscriptEvent) []TranscriptEvent {
 		var messages []message
 		switch event.ToolName {
 		case "ReceiveMessages":
+			// Display-only compatibility for retained tool-result history; remove when those records are no longer supported.
 			if json.Unmarshal([]byte(event.ToolOutput), &messages) != nil {
 				continue
 			}
-		case "WaitThread":
+		case "SendMessage", "WaitThread":
 			var result struct {
 				Messages []message `json:"messages"`
 			}
@@ -53,7 +60,9 @@ func expandCollaborationMessages(events []TranscriptEvent) []TranscriptEvent {
 			incoming.Kind = TranscriptEventAgentCommunication
 			incoming.MessageID = mail.ID
 			incoming.SourceEventID = ""
-			incoming.SourceProjectionID = ""
+			// Each expanded mail item needs a stable display key across repeated
+			// tool updates, separate from the enclosing tool's projection.
+			incoming.SourceProjectionID = "collaboration-mail:" + mail.ID
 			incoming.AgentSourceName = mail.From
 			incoming.AgentSourceID = ""
 			incoming.Text = mail.Text
