@@ -128,6 +128,7 @@ func TestMaintainedSelectableModelsOnlyReturnsMetadataBackedModels(t *testing.T)
 		t.Fatalf("MaintainedSelectableModels(deepseek) error = %v", err)
 	}
 	if selectableModelNamesContain(models, "private-deepseek") ||
+		!selectableModelNamesContain(models, "deepseek-flash") ||
 		!selectableModelNamesContain(models, "deepseek-v4-flash") ||
 		!selectableModelNamesContain(models, "deepseek-v4-flash-vision-exp") {
 		t.Fatalf("known provider models = %#v, want only metadata-backed choices including Flash Vision", models)

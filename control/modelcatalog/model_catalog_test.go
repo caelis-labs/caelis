@@ -87,11 +87,14 @@ func TestListCatalogModelsIncludesBuiltinDefaults(t *testing.T) {
 	if len(models) == 0 {
 		t.Fatal("ListCatalogModels(deepseek) returned no models")
 	}
+	foundV41Flash := false
 	foundFlash := false
 	foundVision := false
 	foundPro := false
 	for _, model := range models {
 		switch model {
+		case "deepseek-flash":
+			foundV41Flash = true
 		case "deepseek-v4-flash":
 			foundFlash = true
 		case "deepseek-v4-flash-vision-exp":
@@ -100,7 +103,7 @@ func TestListCatalogModelsIncludesBuiltinDefaults(t *testing.T) {
 			foundPro = true
 		}
 	}
-	if !foundFlash || !foundVision || !foundPro {
+	if !foundV41Flash || !foundFlash || !foundVision || !foundPro {
 		t.Fatalf("ListCatalogModels(deepseek) = %#v, want current Flash, Flash Vision, and Pro models", models)
 	}
 	for _, model := range models {
@@ -480,6 +483,26 @@ func TestGrok46StaticCapabilitiesIncludeXHighReasoning(t *testing.T) {
 		if levels := ReasoningLevelsForModel("xai", model); !sameStrings(levels, []string{"low", "medium", "high", "xhigh"}) {
 			t.Fatalf("ReasoningLevelsForModel(xai, %q) = %#v, want low/medium/high/xhigh", model, levels)
 		}
+	}
+}
+
+func TestDeepSeekFlashMatchesHarnessCatalog(t *testing.T) {
+	caps, ok := LookupModelCapabilities("deepseek", "deepseek-flash")
+	if !ok {
+		t.Fatal("deepseek-flash missing from catalog")
+	}
+	if caps.ContextWindowTokens != 1000000 || caps.DefaultMaxOutputTokens != 256000 || caps.MaxOutputTokens != 0 {
+		t.Fatalf("limits = %d/%d default %d, want 1000000/unknown default 256000",
+			caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens)
+	}
+	if !caps.SupportsImages || !caps.SupportsToolCalls || caps.SupportsJSONOutput || !caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeToggle {
+		t.Fatalf("unexpected capabilities: %#v", caps)
+	}
+	if caps.DefaultReasoningEffort != "high" || !sameStrings(caps.ReasoningEfforts, []string{"low", "high", "max"}) {
+		t.Fatalf("unexpected reasoning: %#v", caps)
+	}
+	if levels := ReasoningLevelsForModel("deepseek", "deepseek-flash"); !sameStrings(levels, []string{"none", "low", "high", "max"}) {
+		t.Fatalf("reasoning levels = %v", levels)
 	}
 }
 

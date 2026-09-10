@@ -46,6 +46,21 @@ var builtinCatalog = []catalogEntry{
 	// ── DeepSeek ──────────────────────────────────────────────────────────
 	{
 		provider: "deepseek",
+		pattern:  "deepseek-flash",
+		caps: ModelCapabilities{
+			ContextWindowTokens:    1000000,
+			DefaultMaxOutputTokens: 256000,
+			SupportsToolCalls:      true,
+			SupportsReasoning:      true,
+			ReasoningMode:          ReasoningModeToggle,
+			ReasoningEfforts:       []string{"low", "high", "max"},
+			DefaultReasoningEffort: "high",
+			SupportsJSONOutput:     false,
+			SupportsImages:         true,
+		},
+	},
+	{
+		provider: "deepseek",
 		pattern:  "deepseek-v4-flash-vision-exp",
 		caps: ModelCapabilities{
 			ContextWindowTokens:    1048576,
