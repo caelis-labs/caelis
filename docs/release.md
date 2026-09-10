@@ -20,13 +20,19 @@ their isolated default Store.
 
 ## Gate model
 
-`.github/workflows/quality.yml` owns the exact-SHA lint, full untagged test,
-build, and reachable-vulnerability gates. PR runs check proposed integration;
-`main` push runs validate the actual commit used for release. The tag workflow
-waits for a successful `main` push quality run at the tagged SHA before
-publishing; it does not repeat ordinary tests or optional change-scoped gates.
-Scheduled quality runs only refresh vulnerability results and cannot satisfy
-the release gate.
+`.github/workflows/quality.yml` runs lint, full untagged tests, build, and
+reachable-vulnerability checks for PRs targeting `main`, using GitHub's PR merge
+ref to check integration. The `main` branch ruleset requires up-to-date PRs and
+successful `go-quality`, `windows-host-open`, and `govulncheck` checks before
+merging. Keep these rules enabled; they are the quality gate for releases.
+Merging does not trigger a second quality run. Scheduled quality runs only
+refresh vulnerability results.
+
+The tag workflow verifies that the tagged commit belongs to `main`, then builds
+and publishes artifacts. It relies on the protected branch rather than querying
+historical CI runs or repeating ordinary tests. Maintainers must tag a reviewed
+commit on `main` without bypassing its required checks. Release workflows are
+serialized and do not cancel a publication already in progress.
 
 ## Preflight
 
@@ -41,8 +47,9 @@ the release gate.
 5. Confirm the imported `github.com/caelis-labs/memory` version is released and
    declares a forward-migration floor for the persisted appliance database.
    A prerelease development baseline is a release blocker.
-6. Commit and push the intended SHA to `main`, then wait for or identify its
-   quality run. Do not rerun unchanged local gates merely because a tag is next.
+6. Submit the intended changes through a PR, wait for its complete quality run,
+   and merge with the branch up to date. Tag the resulting commit on `main`, not
+   an intermediate PR commit. Do not rerun unchanged local gates just for a tag.
 7. Prepare concise user-visible release notes. When retiring a durable writer,
    record the last writer and first no-write version; retain its compatibility
    reader until the supported upgrade floor reaches that version.
@@ -60,8 +67,8 @@ git tag -a vX.Y.Z -m vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-The workflow waits for exact-SHA quality, runs GoReleaser, publishes the platform
-and main npm packages, verifies the GitHub assets, mirrors them under
+The workflow verifies that the tag belongs to `main`, runs GoReleaser, publishes
+the platform and main npm packages, verifies the GitHub assets, mirrors them under
 `releases/vX.Y.Z/` in R2, and updates `latest.txt` last. GitHub Releases remains
 the complete versioned archive.
 

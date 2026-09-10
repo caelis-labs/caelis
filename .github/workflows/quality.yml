@@ -5,10 +5,12 @@ env:
 
 on:
   pull_request:
-  push:
     branches: [main]
   schedule:
     - cron: '23 6 * * *'
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
@@ -18,8 +20,6 @@ jobs:
   govulncheck:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    permissions:
-      contents: read
     env:
       GOWORK: 'off'
       GOFLAGS: -mod=readonly
