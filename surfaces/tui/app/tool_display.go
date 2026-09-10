@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"encoding/json"
 	"os"
 	pathpkg "path"
 	"path/filepath"
@@ -94,6 +95,11 @@ func toolDisplayArgsForKindWithQueryWrapper(name string, kind string, raw map[st
 	}
 	if metadataOnlyToolArgs(raw) {
 		return ""
+	}
+	if len(raw) > 0 && (kind == "" || kind == "other") {
+		if encoded, err := json.Marshal(raw); err == nil {
+			return string(encoded)
+		}
 	}
 	return firstTrimmed(fallback...)
 }
@@ -247,6 +253,12 @@ func toolDisplayArgumentsWithRecoveredInput(name string, kind string, raw map[st
 	args := toolDisplayArgsForKindWithQueryWrapper(name, kind, raw, wrapGenericQuery, fallback...)
 	if preview, full, ok := commandTextDisplayArguments(name, kind, args); ok {
 		return preview, full
+	}
+	if name == "" && (kind == "" || kind == "other") && len(raw) > 0 && !metadataOnlyToolArgs(raw) {
+		preview, folded := longCommandDisplayPreview(args, toolArgsPreviewWidth)
+		if full, err := json.MarshalIndent(raw, "", "  "); err == nil && (folded || genericToolArgs(raw, wrapGenericQuery) != "") {
+			return preview, string(full)
+		}
 	}
 	return args, toolDisplayFullArgs(name, kind, raw)
 }

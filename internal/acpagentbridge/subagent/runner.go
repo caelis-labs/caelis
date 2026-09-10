@@ -1075,7 +1075,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 			run.outputPreview = run.actionSummary.previewOrEmpty()
 		}
 		event = run.acpUpdateEvent(env, run.updatedAt)
-	case client.UsageUpdate:
+	case client.Notice, client.UsageUpdate:
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	}
 	if event != nil {

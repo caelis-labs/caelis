@@ -178,7 +178,7 @@ func TestRegressionSubagentOverlayMailboxTurnGetsOwnElapsedDivider(t *testing.T)
 	}
 }
 
-func TestRegressionSubagentOverlayRunningFollowUpElapsedIncreases(t *testing.T) {
+func TestRegressionSubagentOverlayDividerWaitsForTurnCompletion(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now()
@@ -223,9 +223,22 @@ func TestRegressionSubagentOverlayRunningFollowUpElapsedIncreases(t *testing.T) 
 	early := strings.Join(renderedPlainRows(view.block.Render(ctx)), "\n")
 	view.block.StartedAt = now.Add(-8 * time.Second)
 	later := strings.Join(renderedPlainRows(view.block.Render(ctx)), "\n")
-	if !strings.Contains(early, "2.0s") || strings.Contains(early, "8.0s") ||
-		!strings.Contains(later, "8.0s") || strings.Contains(later, "2.0s") {
-		t.Fatalf("running elapsed did not increase:\n early=%q\n later=%q", early, later)
+	if early != later || strings.Contains(early, "2.0s") || strings.Contains(later, "8.0s") {
+		t.Fatalf("running Turn rendered an elapsed divider:\n early=%q\n later=%q", early, later)
+	}
+	next, _ = model.handleTaskStreamBatch(taskStreamBatchMsg{
+		sessionID: "session-1", taskID: "task-1", token: 7,
+		events: []eventstream.Envelope{subagentMailboxLifecycle(t, "activity-2", now, eventstream.LifecycleStateCompleted)},
+	})
+	model = next.(*Model)
+	view.prepareVisibleRender()
+	completed := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 40)), "\n")
+	if strings.Count(completed, "4.0s") != 1 || strings.Count(completed, "8.0s") != 1 {
+		t.Fatalf("completed Turns need one fixed divider each:\n%s", completed)
+	}
+	ctx.Now = now.Add(time.Minute)
+	if fixed := strings.Join(renderedPlainRows(view.block.Render(ctx)), "\n"); !strings.Contains(fixed, "8.0s") || strings.Contains(fixed, "68.0s") {
+		t.Fatalf("completed divider changed with render time: %s", fixed)
 	}
 }
 

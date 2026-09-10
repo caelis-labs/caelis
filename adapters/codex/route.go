@@ -209,6 +209,9 @@ func (r *sessionRoute) lastSequence() uint64 {
 }
 
 func (r *sessionRoute) publish(notification appserver.Notification) error {
+	if notice := codexNotice(notification); notice != nil {
+		return r.publishNotice(notice)
+	}
 	updates, terminal, err := r.translateNotification(notification)
 	if err != nil {
 		return err
@@ -455,14 +458,6 @@ func (r *sessionRoute) translateNotification(notification appserver.Notification
 			terminal.err = fmt.Errorf("codex turn failed: %v", value.Turn.Error)
 		}
 		return nil, terminal, nil
-	case "warning", "deprecationNotice", "configWarning", "guardianWarning":
-		var value struct {
-			Message string `json:"message"`
-		}
-		_ = json.Unmarshal(notification.Params, &value)
-		if strings.TrimSpace(value.Message) != "" {
-			return []acp.SessionUpdate{acp.UpdateAgentThoughtText(value.Message)}, nil, nil
-		}
 	}
 	return nil, nil, nil
 }

@@ -59,6 +59,7 @@ func normalizeInboundContentMeta(meta map[string]any) map[string]any {
 
 func normalizeInboundToolDisplay(meta map[string]any, standardKind string) (map[string]any, string) {
 	meta = normalizeInboundToolMeta(meta)
+	meta = normalizeCodexMCPDisplay(meta, standardKind)
 	provider := providerToolMeta(meta)
 	if mapString(provider, "namespace") != xAIToolNamespace {
 		return meta, standardKind

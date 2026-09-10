@@ -147,6 +147,7 @@ func (c *Client) Initialize(ctx context.Context) (InitializeResponse, error) {
 	clientCapabilities := acpsdk.ClientCapabilities{
 		Meta: map[string]json.RawMessage{
 			acpmeta.TerminalOutputKey: json.RawMessage("true"),
+			sessionNoticeCapability:   json.RawMessage("true"),
 		},
 	}
 	if c.cfg.TerminalAuth {
@@ -499,6 +500,9 @@ func (c *Client) handleRequest(ctx context.Context, method string, params json.R
 
 func (c *Client) handleNotification(method string, params json.RawMessage) (any, *acpsdk.RequestError) {
 	switch method {
+	case sessionNoticeMethod:
+		c.handleNotice(params)
+		return nil, nil
 	case MethodSessionUpdate:
 		c.handleUpdate(params)
 		return nil, nil

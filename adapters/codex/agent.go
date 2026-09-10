@@ -23,11 +23,12 @@ type agent struct {
 
 	mu       sync.Mutex
 	sessions map[string]*sessionState
-	// accountType and terminalMode are negotiated once for this ACP
+	// Account and presentation capabilities are negotiated once for this ACP
 	// connection. Authentication is Host-owned, so this adapter exposes no
 	// mutation that can make the cached account stale during the connection.
-	accountType  string
-	terminalMode terminalOutputMode
+	accountType    string
+	terminalMode   terminalOutputMode
+	sessionNotices bool
 }
 
 const (
@@ -49,6 +50,8 @@ func (a *agent) Initialize(ctx context.Context, request acp.InitializeRequest) (
 	}
 	a.mu.Lock()
 	a.terminalMode = terminalOutputModeForCapabilities(request.ClientCapabilities)
+	a.sessionNotices = false
+	_ = json.Unmarshal(request.ClientCapabilities.Meta[sessionNoticeCapability], &a.sessionNotices)
 	if account.Account != nil {
 		a.accountType = strings.TrimSpace(account.Account.Type)
 	} else {

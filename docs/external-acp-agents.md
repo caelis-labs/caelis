@@ -283,6 +283,24 @@ observed message shape or advertised capabilities, never a guessed peer version.
 | Flat Session configuration options | Standard options fail normalization; standard shapes always win | Supported peers and upgrade fixtures no longer emit the flat shape |
 | Legacy `models` and `session/set_model` | No standard model option is advertised and the requested model exists in the legacy catalog | Every supported selectable peer uses standard model configuration and no fixture needs the legacy channel |
 | Prompt image `name` | Standard image content is valid and a non-empty top-level name supplies display metadata only | Supported peers use standard image URI/reference metadata |
+| Draft Session notices | The bridge accepts `session/update` with `sessionUpdate: "notice"`, required `severity` and non-empty `title`, and optional `description` and `_meta` | Replace the bridge decoder with the SDK Notice variant when available |
+| Codex Notice transport | The client advertises `_meta.session_notice: true`; the adapter sends `_session/notice` with the same `{sessionId, update}` payload as the draft standard notification | The pinned ACP SDK can encode the Notice variant; switch the adapter to `session/update` and remove the capability and extension method |
+| Codex MCP display identity | `_meta["codex/mcp_tool"]` names server `caelis-collaboration` and tool `SendMessage`, with no conflicting standard kind or existing exact display name | ACP supplies a standard structured MCP identity that replaces the provider hint |
+
+The [Session notices draft](https://github.com/agentclientprotocol/agent-client-protocol/pull/2004)
+defines advisory live events outside Session history. The standard update needs
+no capability negotiation; only the temporary Codex transport does. Unsupported
+clients may ignore notices. Unknown severity strings remain presentation hints,
+and malformed optional fields are ignored. The bridge projects notices through
+the existing transient Notice event, never reasoning, model input, public child
+results, or approval authority.
+
+Codex MCP compatibility belongs to the built-in adapter: `arguments` becomes
+standard `rawInput`, and supported `result.content` blocks become standard ACP
+tool content. Complete provider results, including `structuredContent` and
+unknown content blocks, remain in `rawOutput`. The Host-private bridge consumes
+the structured MCP display hint; it never derives a tool name from a title.
+Generic tools render standard input even without a recognized display profile.
 
 Older persisted connections may still use `package_exec` or `managed`
 launchers. Runtime keeps them read-compatible, but new onboarding cannot create

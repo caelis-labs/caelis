@@ -150,6 +150,8 @@ func decodeUpdate(raw json.RawMessage) (Update, error) {
 		return nil, err
 	}
 	switch probe.SessionUpdate {
+	case "notice":
+		return decodeNotice(raw)
 	case UpdateUserMessage, UpdateAgentMessage, UpdateAgentThought:
 		var update ContentChunk
 		if err := json.Unmarshal(raw, &update); err != nil {

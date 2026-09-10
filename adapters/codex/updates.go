@@ -46,7 +46,7 @@ type threadItem struct {
 	Changes           []fileUpdateChange `json:"changes"`
 	Server            string             `json:"server"`
 	Tool              string             `json:"tool"`
-	Arguments         map[string]any     `json:"arguments"`
+	Arguments         any                `json:"arguments"`
 	Prompt            string             `json:"prompt"`
 	SenderThreadID    string             `json:"senderThreadId"`
 	ReceiverThreadIDs []string           `json:"receiverThreadIds"`
@@ -135,6 +135,7 @@ func toolStart(threadID string, item threadItem) acp.SessionUpdate {
 		acp.WithStartKind(kind), acp.WithStartStatus(acp.ToolCallStatusInProgress),
 		acp.WithStartLocations(locations), acp.WithStartRawInput(rawInput),
 	)
+	update.ToolCall.Meta = mcpToolMeta(item)
 	if commandExecutionUsesTerminal(item) {
 		terminalID := stableID(threadID, item.ID, "tool")
 		update.ToolCall.Content = []acp.ToolCallContent{acp.ToolTerminalRef(terminalID)}
@@ -178,6 +179,18 @@ func toolComplete(
 			acp.WithStartLocations(locations), acp.WithStartRawInput(rawInput),
 			acp.WithStartRawOutput(rawOutput),
 		)
+	}
+	if item.Type == "mcpToolCall" {
+		content := mcpToolContent(item)
+		if started {
+			update.ToolCallUpdate.Kind = acp.Ptr(acp.ToolKindOther)
+			update.ToolCallUpdate.RawInput = item.Arguments
+			update.ToolCallUpdate.Content = content
+			update.ToolCallUpdate.Meta = mcpToolMeta(item)
+		} else {
+			update.ToolCall.Content = content
+			update.ToolCall.Meta = mcpToolMeta(item)
+		}
 	}
 	if commandExecutionUsesTerminal(item) {
 		terminalID := stableID(threadID, item.ID, "tool")
