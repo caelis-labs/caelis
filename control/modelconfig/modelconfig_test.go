@@ -82,7 +82,7 @@ func TestAssembleConnectBuildsCompleteKnownModelConfig(t *testing.T) {
 
 	configs, err := AssembleConnect(context.Background(), ConnectRequest{
 		Provider: "deepseek",
-		Models:   []ModelSelection{{Name: "deepseek-v4-flash"}},
+		Models:   []ModelSelection{{Name: "deepseek-flash"}},
 		APIKey:   "secret",
 	}, ConnectOptions{})
 	if err != nil {
@@ -92,13 +92,13 @@ func TestAssembleConnectBuildsCompleteKnownModelConfig(t *testing.T) {
 		t.Fatalf("AssembleConnect() configs = %#v, want one", configs)
 	}
 	cfg := configs[0]
-	if cfg.ID != "deepseek@default/deepseek/deepseek-v4-flash" || cfg.API != model.APIDeepSeek {
+	if cfg.ID != "deepseek@default/deepseek/deepseek-flash" || cfg.API != model.APIDeepSeek {
 		t.Fatalf("assembled identity = %#v", cfg)
 	}
 	if cfg.BaseURL != "https://api.deepseek.com/anthropic" || cfg.AuthType != model.AuthAPIKey {
 		t.Fatalf("assembled endpoint/auth = %#v", cfg)
 	}
-	if cfg.ContextWindowTokens != 1048576 || cfg.MaxOutputTok != 32768 {
+	if cfg.ContextWindowTokens != 1000000 || cfg.MaxOutputTok != 256000 {
 		t.Fatalf("assembled limits = context:%d max:%d", cfg.ContextWindowTokens, cfg.MaxOutputTok)
 	}
 	if cfg.Timeout != DefaultProviderRequestTimeoutSeconds*time.Second {
@@ -127,11 +127,8 @@ func TestMaintainedSelectableModelsOnlyReturnsMetadataBackedModels(t *testing.T)
 	if err != nil {
 		t.Fatalf("MaintainedSelectableModels(deepseek) error = %v", err)
 	}
-	if selectableModelNamesContain(models, "private-deepseek") ||
-		!selectableModelNamesContain(models, "deepseek-flash") ||
-		!selectableModelNamesContain(models, "deepseek-v4-flash") ||
-		!selectableModelNamesContain(models, "deepseek-v4-flash-vision-exp") {
-		t.Fatalf("known provider models = %#v, want only metadata-backed choices including Flash Vision", models)
+	if len(models) != 1 || models[0].Name != "deepseek-flash" {
+		t.Fatalf("known provider models = %#v, want only deepseek-flash for new connections", models)
 	}
 	for _, item := range models {
 		if !item.MetadataComplete {
@@ -657,7 +654,7 @@ func TestBuildModelPropagatesMaintainedImageInputCapability(t *testing.T) {
 		{
 			Provider: "deepseek",
 			API:      model.APIDeepSeek,
-			Model:    "deepseek-v4-flash-vision-exp",
+			Model:    "deepseek-flash",
 			BaseURL:  "https://api.deepseek.com/anthropic",
 			Token:    "test-token",
 		},
