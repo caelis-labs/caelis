@@ -10,7 +10,7 @@ require (
 	codeberg.org/readeck/go-readability/v2 v2.1.2
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
 	github.com/alecthomas/chroma/v2 v2.27.0
-	github.com/anthropics/anthropic-sdk-go v1.51.1
+	github.com/anthropics/anthropic-sdk-go v1.71.0
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1
 	github.com/caelis-labs/acp-go-sdk v1.2.0
 	github.com/caelis-labs/memory v0.5.2
@@ -25,12 +25,12 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/rivo/uniseg v0.4.7
-	github.com/yuin/goldmark v1.8.2
-	golang.org/x/mod v0.40.0
+	github.com/yuin/goldmark v1.8.6
+	golang.org/x/mod v0.41.0
 	golang.org/x/net v0.58.0
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.48.0
 	google.golang.org/genai v1.61.0
-	modernc.org/sqlite v1.53.0
+	modernc.org/sqlite v1.58.0
 )
 
 require (
@@ -69,7 +69,7 @@ require (
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/itlightning/dateparse v0.2.1 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
-	github.com/mattn/go-isatty v0.0.22 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-runewidth v0.0.24 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -101,7 +101,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	modernc.org/libc v1.73.4 // indirect
+	modernc.org/libc v1.75.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.11.0 // indirect
+	modernc.org/memory v1.12.1 // indirect
 )
