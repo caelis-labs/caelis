@@ -11,7 +11,7 @@ import (
 // Run serves the participant tool set; it owns no Session or mailbox state.
 func Run(ctx context.Context, invoke collaboration.Invoke, transport mcp.Transport) error {
 	server := mcp.NewServer(&mcp.Implementation{Name: "caelis-collaboration", Version: "1"}, nil)
-	for _, definition := range collaboration.Definitions() {
+	for _, definition := range collaboration.Definitions(false) {
 		server.AddTool(&mcp.Tool{Name: definition.Name, Description: definition.Description, InputSchema: definition.InputSchema}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			out, err := invoke(ctx, collaboration.Request{Tool: definition.Name, Arguments: req.Params.Arguments})
 			result := &mcp.CallToolResult{}

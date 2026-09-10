@@ -94,11 +94,11 @@ func buildInputEvent(
 		if err := session.ValidateAgentCommunicationActor(actor); err != nil {
 			return nil, fmt.Errorf("agent-sdk/runtime: %w", err)
 		}
-		prefixed, err := agentcommunication.PrefixMessage(message, actor)
+		prepared, err := agentcommunication.AppendSender(message, actor)
 		if err != nil {
 			return nil, err
 		}
-		message = prefixed
+		message = prepared
 		eventType = session.EventTypeContext
 		protocol = session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: displayText})
 	default:

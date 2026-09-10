@@ -9,7 +9,7 @@ import (
 )
 
 func TestToolSchemasSurviveModelRequestCloning(t *testing.T) {
-	specs := tool.ModelSpecs(Tools(nil))
+	specs := tool.ModelSpecs(Tools(true, nil))
 	cloned := model.CloneRequest(&model.Request{Tools: specs})
 	for i, spec := range specs {
 		before, err := json.Marshal(spec.Function.Parameters)

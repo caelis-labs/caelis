@@ -487,11 +487,11 @@ func (a *Agent) drainSubmissions(ctx agent.Context, drained []agent.Submission, 
 				Content:       session.ProtocolTextContent(displayText),
 			}}
 		} else if submission.Kind == agent.SubmissionKindAgentCommunication {
-			prefixed, err := agentcommunication.PrefixMessage(message, actor)
+			prepared, err := agentcommunication.AppendSender(message, actor)
 			if err != nil {
 				return accepted, fmt.Errorf("submit model context: %w", err)
 			}
-			providerMessage = prefixed
+			providerMessage = prepared
 			event.Message = &providerMessage
 			protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: displayText})
 			event.Protocol = &protocol

@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -95,10 +94,8 @@ func TestRuntimeMainControllerSteeringWaitsForAdmissionAndCommitsCanonicalInput(
 		steer.ControllerEpoch != "epoch-1" || steer.RemoteSessionID != "remote-session-1" || steer.TurnID == "" {
 		t.Fatalf("main steering target = %#v, want exact controller generation and Turn", steer)
 	}
-	if steer.Input != "" || len(steer.ContentParts) != 2 ||
-		!strings.Contains(steer.ContentParts[0].Text, "Sender: @child") ||
-		!strings.Contains(steer.ContentParts[0].Text, "Role: delegated") ||
-		steer.ContentParts[1].Text != "guide active controller" {
+	if steer.Input != "" || len(steer.ContentParts) != 1 ||
+		steer.ContentParts[0].Text != "guide active controller\n\nFrom: @child" {
 		t.Fatalf("main steering prompt = input %q parts %#v, want trusted Agent header", steer.Input, steer.ContentParts)
 	}
 
@@ -188,9 +185,8 @@ func TestRuntimeACPControllerInitialAgentCommunicationCarriesIdentity(t *testing
 	}
 	select {
 	case turn := <-turns:
-		if turn.Input != "" || len(turn.ContentParts) != 2 ||
-			!strings.Contains(turn.ContentParts[0].Text, "Sender: @child") ||
-			turn.ContentParts[1].Text != "start from child" {
+		if turn.Input != "" || len(turn.ContentParts) != 1 ||
+			turn.ContentParts[0].Text != "start from child\n\nFrom: @child" {
 			t.Fatalf("controller prompt = input %q parts %#v", turn.Input, turn.ContentParts)
 		}
 	case <-ctx.Done():

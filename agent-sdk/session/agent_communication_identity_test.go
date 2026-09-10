@@ -23,13 +23,13 @@ func TestParentCommunicationActorUsesReservedHandleNotLocal(t *testing.T) {
 	}
 }
 
-func TestAgentCommunicationPromptHeaderUsesParentNotLocalControllerName(t *testing.T) {
+func TestAgentCommunicationPromptFooterUsesParentNotLocalControllerName(t *testing.T) {
 	t.Parallel()
 
-	header := AgentCommunicationPromptHeader(ControllerExecutor(ControllerBinding{
+	header := AgentCommunicationPromptFooter(ControllerExecutor(ControllerBinding{
 		Kind: ControllerKindKernel, ControllerID: "sdk-kernel", AgentName: "local", Label: "SDK Kernel",
 	}))
-	if !strings.Contains(header, "Sender: parent") {
+	if !strings.Contains(header, "From: parent") {
 		t.Fatalf("parent prompt = %q, want canonical parent sender", header)
 	}
 	if strings.Contains(header, "Reply-To:") {
@@ -42,13 +42,13 @@ func TestAgentCommunicationPromptHeaderUsesParentNotLocalControllerName(t *testi
 	}
 }
 
-func TestAgentCommunicationPromptHeaderKeepsParticipantSender(t *testing.T) {
+func TestAgentCommunicationPromptFooterKeepsParticipantSender(t *testing.T) {
 	t.Parallel()
 
-	header := AgentCommunicationPromptHeader(ActorRef{
+	header := AgentCommunicationPromptFooter(ActorRef{
 		Kind: ActorKindParticipant, ID: "reviewer-1", Role: "delegated", Name: "reviewer",
 	})
-	if !strings.Contains(header, "Sender: reviewer") || !strings.Contains(header, "Sender ID: reviewer-1") {
+	if header != "\n\nFrom: reviewer" {
 		t.Fatalf("participant prompt = %q, want reviewer identity", header)
 	}
 }

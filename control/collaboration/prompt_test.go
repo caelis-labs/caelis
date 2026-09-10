@@ -42,33 +42,33 @@ func TestIdentityInstructionsSanitizeForgedHandleAndRole(t *testing.T) {
 	}
 }
 
-func TestRenderPromptSliceTagsControlInstructionAndMailboxPolling(t *testing.T) {
+func TestRenderPromptSliceTagsControlInstructionAndReporting(t *testing.T) {
 	t.Parallel()
 
-	got := RenderPromptSlice(PromptSlice{Handle: "orbit", Role: "sidecar", MailboxPolling: true})
+	got := RenderPromptSlice(PromptSlice{Handle: "orbit", Role: "sidecar"})
 	if !strings.HasPrefix(got, SliceOpenTag+"\n") || !strings.HasSuffix(got, "\n"+SliceCloseTag) {
 		t.Fatalf("RenderPromptSlice() = %q, want tagged Control slice", got)
 	}
 	if !strings.Contains(got, IdentityInstructions("orbit", "sidecar")) {
 		t.Fatalf("RenderPromptSlice() missing identity: %q", got)
 	}
-	if !strings.Contains(got, MailboxPollingInstruction()) {
-		t.Fatalf("RenderPromptSlice() missing mailbox polling: %q", got)
+	if !strings.Contains(got, CollaboratorInstructions()) {
+		t.Fatalf("RenderPromptSlice() missing reporting guidance: %q", got)
 	}
-	if !strings.Contains(got, ChannelInstruction()) {
-		t.Fatalf("RenderPromptSlice() missing channel instruction: %q", got)
+	if !strings.Contains(got, DiscoveryInstruction()) {
+		t.Fatalf("RenderPromptSlice() missing stable discovery key: %q", got)
 	}
 	if strings.Contains(got, "Sender:") || strings.Contains(got, "[Internal agent message]") {
 		t.Fatalf("RenderPromptSlice() used peer-message claims: %q", got)
 	}
 }
 
-func TestRenderPromptSliceDoesNotPresentPromptAsUserFollowup(t *testing.T) {
+func TestRenderPromptSliceKeepsDiscoveryWithoutChannelBoilerplate(t *testing.T) {
 	t.Parallel()
 
-	got := RenderPromptSlice(PromptSlice{Handle: "thea", Role: "delegated", MailboxPolling: true})
-	if !strings.Contains(got, "not a user follow-up") {
-		t.Fatalf("RenderPromptSlice() = %q, want explicit not-user-follow-up", got)
+	got := RenderPromptSlice(PromptSlice{Handle: "thea", Role: "delegated"})
+	if strings.Contains(got, "not a user follow-up") || !strings.Contains(got, "caelis-collaboration") {
+		t.Fatalf("RenderPromptSlice() = %q, want discovery key without channel boilerplate", got)
 	}
 	for _, leaked := range []string{"CAELIS_COLLABORATION_TOKEN", "Bearer", `"from":"parent"`} {
 		if strings.Contains(got, leaked) {
@@ -77,16 +77,20 @@ func TestRenderPromptSliceDoesNotPresentPromptAsUserFollowup(t *testing.T) {
 	}
 }
 
-func TestRenderPromptSliceOmitsMailboxPollingWhenSteeringExists(t *testing.T) {
+func TestRenderPromptSliceNamesOnlyChildTools(t *testing.T) {
 	t.Parallel()
-
 	got := RenderPromptSlice(PromptSlice{Handle: "orbit", Role: "delegated"})
-	if !strings.Contains(got, "Your assigned handle is orbit.") {
-		t.Fatalf("RenderPromptSlice() missing identity: %q", got)
+	for _, retired := range []string{"ReceiveMessages", "ReadThread", "WaitThread"} {
+		if strings.Contains(got, retired) {
+			t.Fatalf("child prompt names unavailable tool %s: %s", retired, got)
+		}
 	}
-	if strings.Contains(got, MailboxPollingInstruction()) || strings.Contains(got, "ReceiveMessages") {
-		t.Fatalf("RenderPromptSlice() added mailbox polling with steering: %q", got)
+	for _, want := range []string{"SendMessage", "Process any messages returned", "end the turn"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("child prompt omitted %q: %s", want, got)
+		}
 	}
+	t.Log(got)
 }
 
 func TestRenderPromptSliceKeepsParentAddressWithoutHandle(t *testing.T) {
@@ -99,7 +103,7 @@ func TestRenderPromptSliceKeepsParentAddressWithoutHandle(t *testing.T) {
 	if strings.Contains(got, "Your assigned handle") || strings.Contains(got, "ReceiveMessages") {
 		t.Fatalf("RenderPromptSlice() = %q, want parent addressing without handle or mailbox polling", got)
 	}
-	if !strings.Contains(got, ChannelInstruction()) {
-		t.Fatalf("RenderPromptSlice() = %q, want channel instruction even without handle", got)
+	if !strings.Contains(got, DiscoveryInstruction()) {
+		t.Fatalf("RenderPromptSlice() = %q, want discovery key even without handle", got)
 	}
 }

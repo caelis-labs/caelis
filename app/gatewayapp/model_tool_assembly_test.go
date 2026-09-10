@@ -51,12 +51,12 @@ func TestProductAgentFinalModelRequestIncludesCanonicalTaskCommunicationTools(t 
 	}
 
 	functions := provider.Functions(t)
-	for _, name := range []string{spawn.ToolName, tasktool.ToolName, sendmessage.ToolName, "ListThreads", "ReceiveMessages", "WaitThread", "ReadThread"} {
+	for _, name := range []string{spawn.ToolName, tasktool.ToolName, sendmessage.ToolName, "ListThreads", "WaitThread", "ReadThread"} {
 		if got := countFinalToolFunctions(functions, name); got != 1 {
 			t.Fatalf("final model tools contain %d %s definitions, want exactly 1: %#v", got, name, functions)
 		}
 	}
-	for _, retired := range []string{"Spawn", "CloseThread"} {
+	for _, retired := range []string{"Spawn", "CloseThread", "ReceiveMessages"} {
 		if countFinalToolFunctions(functions, retired) != 0 {
 			t.Fatalf("unexpected tool %s", retired)
 		}
@@ -73,7 +73,7 @@ func TestProductAgentFinalModelRequestIncludesCanonicalTaskCommunicationTools(t 
 	taskFunction := finalToolFunction(t, functions, tasktool.ToolName)
 	assertFinalToolProperties(t, taskFunction, "action", "handle", "input")
 	sendFunction := finalToolFunction(t, functions, sendmessage.ToolName)
-	if got, _ := sendFunction["description"].(string); !strings.Contains(got, "Success confirms queuing only") || !strings.Contains(got, "Delivery is automatic at a safe boundary") {
+	if got, _ := sendFunction["description"].(string); !strings.Contains(got, "Success means queued, not delivered") || !strings.Contains(got, "supported input boundary") {
 		t.Fatalf("final SendMessage description = %q", got)
 	}
 	assertFinalToolProperties(t, sendFunction, "to", "message", "reply_to")

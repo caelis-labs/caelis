@@ -2,9 +2,7 @@
 // Taking or dispatching a message removes it. Delivery is best effort: there
 // are no acknowledgements, automatic retries, or exactly-once guarantees.
 // Collaborator prompt slices are Control-owned instruction: they name the
-// assigned handle, reserved parent address, and role; they state that ACP
-// session/prompt is collaboration input, not a user follow-up; and they may
-// require mailbox polling when steering is unavailable.
+// assigned handle, reserved parent address, role, and reporting behavior.
 package collaboration
 
 import (
@@ -21,7 +19,7 @@ import (
 )
 
 // MaxResponseBytes is the shared HTTP response limit. Mailbox batches reserve
-// space for the WaitThread response envelope.
+// space for the SendMessage and WaitThread response envelopes.
 const MaxResponseBytes = 4 << 20
 const mailboxBatchBytes = MaxResponseBytes - (64 << 10)
 const deliveryTimeout = 10 * time.Second

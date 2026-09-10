@@ -397,7 +397,7 @@ func (m *Model) observeSubagentOutputHistoryEnvelope(stage *subagentOutputHistor
 	if m == nil || stage == nil || stage.view == nil {
 		return
 	}
-	for _, event := range m.projectACPEventToTranscriptEvents(envelope) {
+	for _, event := range expandCollaborationMessages(m.projectACPEventToTranscriptEvents(envelope)) {
 		if !eventTargetsSubagentOutputView(event) ||
 			strings.TrimSpace(event.AnchorToolCallID) != stage.view.callID {
 			continue

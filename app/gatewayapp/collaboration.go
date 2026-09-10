@@ -121,11 +121,10 @@ func (b *collaborationBackend) Deliver(ctx context.Context, id string, messages 
 		if m.To != target {
 			return errors.New("collaboration batch has multiple recipients")
 		}
-		body, err := json.Marshal(m)
-		if err != nil {
-			return err
+		entries[i].Message.Input = m.Text + "\n\nMessage-ID: " + m.ID
+		if m.ReplyTo != "" {
+			entries[i].Message.Input += "\nIn-Reply-To: " + m.ReplyTo
 		}
-		entries[i].Message.Input = string(body)
 		entries[i].Message.DisplayInput = m.Text
 		if m.From == "parent" {
 			entries[i].Message.Source = session.ControllerExecutor(active.Controller)
@@ -157,7 +156,7 @@ func (s *runtimeComposition) collaborationTools(active session.Session) []tool.T
 	if service == nil {
 		return nil
 	}
-	return collaboration.Tools(func(ctx context.Context, req collaboration.Request) (json.RawMessage, error) {
+	return collaboration.Tools(!sessionvisibility.IsSpawnedSubagentSession(active), func(ctx context.Context, req collaboration.Request) (json.RawMessage, error) {
 		identity := collaboration.Identity{Session: active.SessionID, Member: "parent"}
 		if sessionvisibility.IsSpawnedSubagentSession(active) {
 			parentID := hostedChildMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedParent)

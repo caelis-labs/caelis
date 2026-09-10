@@ -834,7 +834,7 @@ func TestRunnerHandleUpdateKeepsTrustedAgentCommunicationSource(t *testing.T) {
 		inputActor: source,
 	}
 	runner := &Runner{clock: time.Now}
-	input := session.AgentCommunicationPromptHeader(source) + "\nreview this change"
+	input := "review this change" + session.AgentCommunicationPromptFooter(source)
 
 	handleTestUpdate(runner, run, contentUpdate(t, client.UpdateUserMessage, input))
 

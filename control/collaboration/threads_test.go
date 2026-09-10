@@ -26,16 +26,20 @@ func TestThreadWaitUsesCursorAndMailboxRemainsDestructive(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	i := Identity{"work", "a"}
+	i := Identity{"work", "parent"}
 	result, err := s.WaitThreads(t.Context(), i, []Target{{Handle: "b"}}, 0)
 	if err != nil || result.Reason != "thread" || len(result.Threads) != 1 {
 		t.Fatalf("first %v %v", result, err)
+	}
+	result, err = s.WaitThreads(t.Context(), i, []Target{{Handle: "a"}, {Handle: "b"}}, 0)
+	if err != nil || len(result.Threads) != 2 {
+		t.Fatalf("multiple targets: %v, %v", result, err)
 	}
 	result, err = s.WaitThreads(t.Context(), i, []Target{{Handle: "b", After: 2}}, 0)
 	if err != nil || result.Reason != "timeout" {
 		t.Fatalf("repeated %v %v", result, err)
 	}
-	_, err = s.Send(t.Context(), Identity{"work", "b"}, "a", "reply", "")
+	_, err = s.Send(t.Context(), Identity{"work", "b"}, "parent", "reply", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +53,7 @@ func TestThreadWaitUsesCursorAndMailboxRemainsDestructive(t *testing.T) {
 	if _, err = s.Read(t.Context(), i, Target{Handle: "parent"}); err == nil {
 		t.Fatal("parent transcript exposed")
 	}
-	for _, def := range Definitions() {
+	for _, def := range Definitions(false) {
 		if def.Name == "CloseThread" || def.Name == "StartThread" {
 			t.Fatalf("participant tool %s", def.Name)
 		}

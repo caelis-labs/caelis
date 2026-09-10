@@ -369,7 +369,7 @@ func (r *Runner) dispatchInitialPrompt(
 	dispatchDone chan struct{},
 	promptText string,
 ) {
-	prompt := r.withCollaborationPromptSlice(run, acputil.BuildPromptParts(promptText, nil))
+	prompt := r.withCollaborationPromptSlice(run, acputil.BuildPromptParts(promptText+session.AgentCommunicationPromptFooter(session.ParentCommunicationActor()), nil))
 	responseCtx, cancelResponse := context.WithCancel(producerCtx)
 	prepared, err := run.client.PreparePromptParts(run.anchor.SessionID, prompt, nil)
 	fence := newPromptAuthRetryFence(slot, dispatchDone, cancelResponse)
@@ -1030,6 +1030,9 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 			case client.UpdateUserMessage:
 				if !run.suppressInputEcho {
 					event = run.acpUpdateEvent(env, run.updatedAt)
+					if _, body, format := loadedAgentCommunicationPrompt(event.Text); format != loadedMailNone {
+						event.Text = body
+					}
 					markSubagentInputEvent(event, run.inputActor)
 				}
 			case client.UpdateAgentMessage:
@@ -1111,8 +1114,6 @@ func markSubagentInputEvent(event *session.Event, source session.ActorRef) sessi
 		source = session.ParentCommunicationActor()
 	}
 	event.Actor = session.CloneActorRef(source)
-	header := session.AgentCommunicationPromptHeader(event.Actor)
-	event.Text = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(event.Text), header))
 	messageID := ""
 	if event.Protocol != nil {
 		existing := session.CloneEventProtocol(*event.Protocol)

@@ -14,11 +14,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
+	"github.com/google/uuid"
 )
 
 // LoadHistory starts a short-lived ACP transport and calls session/load for an
@@ -137,6 +139,7 @@ type historyCollector struct {
 	turnSeq           int64
 	lastUpdateType    string
 	lastUserMessageID string
+	inputStart        int
 	events            []*session.Event
 	err               error
 }
@@ -193,10 +196,29 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 	if updateType == client.UpdateUserMessage {
 		if newInputTurn {
 			c.run.inputActor = session.ActorRef{}
+			c.inputStart = len(c.events)
 		}
-		if source, body, ok := loadedAgentCommunicationPrompt(event.Text); ok {
+		event.Text = stripLoadedCollaborationSetup(event.Text)
+		if strings.TrimSpace(event.Text) == "" {
+			c.lastUpdateType = updateType
+			return
+		}
+		if source, body, format := loadedAgentCommunicationPrompt(event.Text); format != loadedMailNone {
 			c.run.inputActor = source
 			event.Text = body
+			if format == loadedMailFooter {
+				// ACP can replay a mail body/media and its footer as separate blocks.
+				// Legacy headers apply only to following content.
+				for _, previous := range c.events[c.inputStart:] {
+					markSubagentInputEvent(previous, source)
+				}
+			}
+			c.inputStart = len(c.events) + 1
+			if strings.TrimSpace(body) == "" {
+				c.inputStart = len(c.events)
+				c.lastUpdateType = updateType
+				return
+			}
 		}
 		c.run.inputActor = markSubagentInputEvent(event, c.run.inputActor)
 	}
@@ -210,13 +232,46 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 	c.lastUpdateType = updateType
 }
 
+type loadedMailFormat uint8
+
+const (
+	loadedMailNone loadedMailFormat = iota
+	loadedMailHeader
+	loadedMailFooter
+)
+
 // loadedAgentCommunicationPrompt reconstructs display-only sender provenance
-// from the exact header Caelis placed in a standard ACP prompt. The result is
+// from Caelis mail footers and retained legacy headers. The result is
 // used only for child transcript replay; it never authorizes routing or input.
-func loadedAgentCommunicationPrompt(text string) (session.ActorRef, string, bool) {
+func loadedAgentCommunicationPrompt(text string) (session.ActorRef, string, loadedMailFormat) {
+	if split := strings.LastIndex(text, "\n\nFrom: "); split >= 0 {
+		body, name := text[:split], strings.TrimSpace(text[split+len("\n\nFrom: "):])
+		if name == "" || strings.ContainsAny(name, "\r\n") {
+			return session.ActorRef{}, "", loadedMailNone
+		}
+		actor := session.ActorRef{Kind: session.ActorKindSystem, Name: name}
+		if name == session.AgentCommunicationParentHandle {
+			actor = session.ParentCommunicationActor()
+		}
+		// Mail references are model-visible; the body alone is display text.
+		if start := strings.LastIndex(body, "\n\nMessage-ID: "); start >= 0 {
+			lines := strings.Split(body[start+2:], "\n")
+			_, idErr := uuid.Parse(strings.TrimPrefix(lines[0], "Message-ID: "))
+			valid := idErr == nil && len(lines) <= 2
+			if len(lines) == 2 {
+				_, replyErr := uuid.Parse(strings.TrimPrefix(lines[1], "In-Reply-To: "))
+				valid = valid && strings.HasPrefix(lines[1], "In-Reply-To: ") && replyErr == nil
+			}
+			if valid {
+				body = body[:start]
+			}
+		}
+		return actor, body, loadedMailFooter
+	}
+	// Legacy headers remain readable for retained external session history.
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 	if len(lines) < 3 || strings.TrimSpace(lines[0]) != "[Internal agent message]" {
-		return session.ActorRef{}, "", false
+		return session.ActorRef{}, "", loadedMailNone
 	}
 	actor := session.ActorRef{}
 	messageLine := -1
@@ -234,14 +289,14 @@ func loadedAgentCommunicationPrompt(text string) (session.ActorRef, string, bool
 		case strings.HasPrefix(line, "Sender ID: "):
 			actor.ID = strings.TrimSpace(strings.TrimPrefix(line, "Sender ID: "))
 		default:
-			return session.ActorRef{}, "", false
+			return session.ActorRef{}, "", loadedMailNone
 		}
 		if messageLine >= 0 {
 			break
 		}
 	}
 	if messageLine < 0 {
-		return session.ActorRef{}, "", false
+		return session.ActorRef{}, "", loadedMailNone
 	}
 	if actor.Kind == "" {
 		// Compatibility for Agent communication prompts written before Kind was
@@ -252,9 +307,22 @@ func loadedAgentCommunicationPrompt(text string) (session.ActorRef, string, bool
 		actor = session.ParentCommunicationActor()
 	}
 	if err := session.ValidateAgentCommunicationActor(actor); err != nil {
-		return session.ActorRef{}, "", false
+		return session.ActorRef{}, "", loadedMailNone
 	}
-	return session.CloneActorRef(actor), strings.TrimSpace(strings.Join(lines[messageLine+1:], "\n")), true
+	return session.CloneActorRef(actor), strings.TrimSpace(strings.Join(lines[messageLine+1:], "\n")), loadedMailHeader
+}
+
+// Setup is visible to the external model but omitted from loaded child display.
+func stripLoadedCollaborationSetup(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasSuffix(trimmed, collaboration.SliceCloseTag) {
+		return text
+	}
+	if start := strings.LastIndex(trimmed, collaboration.SliceOpenTag+"\n"); start >= 0 &&
+		(start == 0 || strings.HasSuffix(trimmed[:start], "\n")) {
+		return strings.TrimSpace(trimmed[:start])
+	}
+	return text
 }
 
 func historyUpdateType(update client.Update) string {

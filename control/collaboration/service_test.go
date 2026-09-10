@@ -23,7 +23,7 @@ func (b *testBackend) List(_ context.Context, id string) ([]Thread, error) {
 	if id != "work" {
 		return nil, errors.New("unknown Session")
 	}
-	return []Thread{{ID: "a", SessionID: "a", Handle: "a"}, {ID: "b", SessionID: "b", Handle: "b", CanDeliver: b.deliver}}, nil
+	return []Thread{{ID: "parent", SessionID: "parent", Handle: "parent"}, {ID: "a", SessionID: "a", Handle: "a"}, {ID: "b", SessionID: "b", Handle: "b", CanDeliver: b.deliver}}, nil
 }
 func (b *testBackend) Deliver(_ context.Context, _ string, messages []Message) error {
 	b.delivered = append(b.delivered, messages...)
@@ -138,13 +138,13 @@ func TestWaitReceivesMailAndIdentityCannotCrossSession(t *testing.T) {
 	s := openTestService(t, &testBackend{})
 	done := make(chan []Message, 1)
 	go func() {
-		got, err := s.WaitThreads(t.Context(), Identity{"work", "b"}, nil, time.Second)
+		got, err := s.WaitThreads(t.Context(), Identity{"work", "parent"}, nil, time.Second)
 		if err != nil {
 			t.Error(err)
 		}
 		done <- got.Messages
 	}()
-	if _, err := s.Send(t.Context(), Identity{"work", "a"}, "b", "question", ""); err != nil {
+	if _, err := s.Send(t.Context(), Identity{"work", "a"}, "parent", "question", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := <-done; len(got) != 1 {
@@ -236,19 +236,19 @@ func TestMailboxBatchesUseEncodedByteBudget(t *testing.T) {
 		}
 	}
 	var receiver tool.Tool
-	for _, one := range Tools(func(ctx context.Context, req Request) (json.RawMessage, error) {
+	for _, one := range Tools(false, func(ctx context.Context, req Request) (json.RawMessage, error) {
 		return s.Call(ctx, Identity{"work", "b"}, req)
 	}) {
-		if one.Definition().Name == "ReceiveMessages" {
+		if one.Definition().Name == "SendMessage" {
 			receiver = one
 		}
 	}
 	if receiver == nil {
-		t.Fatal("native ReceiveMessages tool missing")
+		t.Fatal("native SendMessage tool missing")
 	}
 	seen := map[string]bool{}
 	for len(seen) < 32 {
-		result, err := receiver.Call(t.Context(), tool.Call{Name: "ReceiveMessages", Input: []byte(`{}`)})
+		result, err := receiver.Call(t.Context(), tool.Call{Name: "SendMessage", Input: []byte(`{"to":"a","message":"progress"}`)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -256,10 +256,13 @@ func TestMailboxBatchesUseEncodedByteBudget(t *testing.T) {
 		if len(raw) > MaxResponseBytes {
 			t.Fatalf("oversized response: %d", len(raw))
 		}
-		var batch []Message
-		if err := json.Unmarshal(raw, &batch); err != nil {
+		var receipt struct {
+			Messages []Message `json:"messages"`
+		}
+		if err := json.Unmarshal(raw, &receipt); err != nil {
 			t.Fatal(err)
 		}
+		batch := receipt.Messages
 		if len(batch) == 0 {
 			t.Fatalf("lost messages: %d", len(seen))
 		}

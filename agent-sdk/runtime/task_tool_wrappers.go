@@ -430,7 +430,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	if err != nil {
 		return tool.Result{}, err
 	}
-	payload := map[string]any{"id": snapshot.Ref.TaskID, "handle": snapshot.Handle, "state": snapshot.State, "revision": snapshot.Revision}
+	payload := map[string]any{"handle": snapshot.Handle, "state": snapshot.State}
 	payload["supports_steering"] = taskSpecBool(snapshot.Metadata, "supports_steering")
 	if spawnContextUnsupported(snapshot) {
 		payload["system_hint"] = spawnContextUnsupportedHint

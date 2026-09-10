@@ -145,7 +145,7 @@ func spawnDefinition(agents []delegation.Agent) tool.Definition {
 		"prompt": map[string]any{
 			"type":        "string",
 			"minLength":   1,
-			"description": "Self-contained collaboration task.",
+			"description": "Self-contained task: goal, scope, constraints, edit permission, and expected output.",
 		},
 		"handle": map[string]any{
 			"type":        "string",
@@ -164,7 +164,7 @@ func spawnDefinition(agents []delegation.Agent) tool.Definition {
 	}
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Start a collaborating Agent for independent work that benefits from parallel execution or focused expertise. Give it a self-contained task with the goal, scope, constraints, edit permission, and expected output. Use ReadThread or WaitThread with the returned handle to observe its result. Continue the same thread with SendMessage.",
+		Description: "Start a collaborating Agent. Observe its result with ReadThread or WaitThread; continue it with SendMessage using the returned handle.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"properties":           props,

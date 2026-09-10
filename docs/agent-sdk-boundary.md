@@ -30,8 +30,9 @@ when a required feature is absent.
 
 The assembled Tool set is the execution-admission boundary. Product policy may
 further restrict an admitted invocation, but tool names do not form a second
-allowlist. A StartThread-created collaborator receives mailbox tools but not `StartThread`,
-keeping Agent collaboration one level deep.
+allowlist. A StartThread-created collaborator receives only `ListThreads` and `SendMessage`
+from the collaboration tool set. Creation and work observation remain with the
+controller, keeping Agent collaboration one level deep.
 
 Participant startup uses an internal Session-scoped execution identity. An optional handle must be unique.
 Optional context transfer is derived by the host's recipient-specific
@@ -62,7 +63,9 @@ Runtime resolves Session-scoped addresses and binds trusted source identity.
 The explicitly assembled standalone SDK `SendMessage {to, message}` submits one Agent-communication input and claims
 neither target completion nor Task mutation. An Agent with
 `supports_steering=true` can accept it while running; other Agents accept it
-only while idle.
+only while idle. Model-visible communication preserves the body and media first,
+then appends one `From` footer. Durable ActorRef values retain the full source
+identity; footer text does not grant routing or execution authority.
 
 The internal Task service remains the lifecycle and final-result abstraction. Command stdin is a
 separate Task capability; Agent communication never falls back to Task input.
@@ -168,6 +171,16 @@ history and deferred admission preserve that identity.
 Canonical ToolSpecs describe Runtime-accepted input. Provider downgrade never
 weakens local schema, approval, or policy validation. Malformed external schemas
 are quarantined instead of replaced by permissive empty schemas.
+
+ToolSearch results persist discovered names and admission counts, not copies of
+schemas or source metadata. The next model request exposes the registered
+canonical definitions; replay restores visibility by those names. Admission still
+budgets the full callable schemas. WebSearch preserves `results` order for legacy
+positional references. Citation ranges use zero-based `result_indices` for
+matching sources instead of repeating their metadata; citation-only sources remain
+inline. Answer text and source metadata remain intact. Successful searches keep
+query, provider, model, and usage diagnostics in tool metadata instead of
+echoing them into model-visible output.
 
 Authority follows the Caelis channel and typed identity that introduced content,
 not labels or tags embedded in text. Skills gain instruction authority only

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,24 @@ import (
 	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
+
+func TestBuiltInCollaborationToolsFollowSessionRole(t *testing.T) {
+	host := newHostedChildInputTestStack(t, newHostedChildInputTestProvider(t, false))
+	parent, child, _ := newHostedChildInputTestTopology(t, host, "tool-roles")
+	for _, active := range []session.Session{parent, child} {
+		var names []string
+		for _, configured := range host.composition.collaborationTools(active) {
+			names = append(names, configured.Definition().Name)
+		}
+		want := []string{"ListThreads", "SendMessage"}
+		if active.SessionID == parent.SessionID {
+			want = append(want, "ReadThread", "WaitThread")
+		}
+		if !slices.Equal(names, want) {
+			t.Fatalf("Session %s collaboration tools = %v, want %v", active.SessionID, names, want)
+		}
+	}
+}
 
 func TestCollaborationMailboxWakesIdleParentAndReplaysCanonicalContext(t *testing.T) {
 	provider := newHostedChildInputTestProvider(t, false)
@@ -234,6 +253,15 @@ func TestCollaborationQueuedMultipleSendersUseOneTurnAndPersistModelContext(t *t
 			t.Fatalf("model context lost mail order: %s", before)
 		}
 		previous = position
+		if !strings.Contains(string(before), "Message-ID: "+m.ID) || !strings.Contains(string(before), "From: "+m.From) {
+			t.Fatalf("model context lost mail references or sender: %s", before)
+		}
+		if m.ReplyTo != "" && !strings.Contains(string(before), "In-Reply-To: "+m.ReplyTo) {
+			t.Fatalf("model context lost reply reference: %s", before)
+		}
+	}
+	if strings.Contains(string(before), "Internal agent message") || strings.Contains(string(before), `\"from\"`) {
+		t.Fatalf("model context repeated sender JSON: %s", before)
 	}
 	storeDir, workspace := host.composition.authorities.storeDir, host.composition.workspace
 	if err := host.Close(); err != nil {

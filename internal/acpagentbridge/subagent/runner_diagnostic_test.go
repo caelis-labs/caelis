@@ -412,13 +412,13 @@ func TestLoadedAgentCommunicationPromptRestoresDisplayIdentity(t *testing.T) {
 	source := session.ActorRef{
 		Kind: session.ActorKindParticipant, ID: "reviewer-1", Role: "delegated", Name: "reviewer",
 	}
-	got, body, ok := loadedAgentCommunicationPrompt(
-		session.AgentCommunicationPromptHeader(source) + "\nreview this change",
+	got, body, format := loadedAgentCommunicationPrompt(
+		"review this change" + session.AgentCommunicationPromptFooter(source),
 	)
-	if !ok || got != source || body != "review this change" {
-		t.Fatalf("loaded Agent communication = (%#v, %q, %v), want exact display identity and body", got, body, ok)
+	if format != loadedMailFooter || got.Name != source.Name || got.ID != "" || body != "review this change" {
+		t.Fatalf("loaded Agent communication = (%#v, %q, %v), want sender name and body without inferred routing identity", got, body, format)
 	}
-	if _, _, ok := loadedAgentCommunicationPrompt("ordinary user input"); ok {
+	if _, _, format := loadedAgentCommunicationPrompt("ordinary user input"); format != loadedMailNone {
 		t.Fatal("ordinary input was interpreted as an Agent communication header")
 	}
 }

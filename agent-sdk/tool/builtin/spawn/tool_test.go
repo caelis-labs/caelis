@@ -50,11 +50,14 @@ func TestDefinitionDoesNotExposeYieldTimeMS(t *testing.T) {
 func TestDefinitionDescribesBoundedCollaboration(t *testing.T) {
 	t.Parallel()
 
-	desc := New([]delegation.Agent{{Name: "codex"}}).Definition().Description
+	def := New([]delegation.Agent{{Name: "codex"}}).Definition()
+	prompt := def.InputSchema["properties"].(map[string]any)["prompt"].(map[string]any)["description"].(string)
+	if !strings.Contains(prompt, "Self-contained task") || !strings.Contains(prompt, "edit permission") {
+		t.Fatalf("task contract missing: %s", prompt)
+	}
+	desc := def.Description
 	for _, want := range []string{
 		"collaborating Agent",
-		"independent work",
-		"self-contained task",
 		"returned handle",
 		"ReadThread or WaitThread",
 	} {

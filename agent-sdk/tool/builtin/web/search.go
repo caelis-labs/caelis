@@ -21,7 +21,7 @@ func NewSearch() *SearchTool {
 func (t *SearchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        SearchToolName,
-		Description: "Search the web for current, external, or unknown information when no URL is available. Use WebFetch to read a specific result. Cite final sources with visible Markdown links, and do not expose result IDs or private citation markers. If provider-native web search is unavailable, fall back to WebFetch for a known URL or ask for a search backend.",
+		Description: "Search the web for current, external, or unknown information when no URL is available. Use WebFetch to read a specific result. Cite final sources with visible Markdown links, and do not expose result IDs or private citation markers.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -86,19 +86,63 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	if resp.Query == "" {
 		resp.Query = req.Query
 	}
-	return toolutil.JSONResult(SearchToolName, map[string]any{
-		"status":    "completed",
-		"query":     resp.Query,
-		"provider":  resp.Provider,
-		"model":     resp.Model,
-		"answer":    resp.Answer,
-		"results":   webSearchResultsPayload(resp.Results),
-		"citations": resp.Citations,
-		"usage":     usagePayload(resp.Usage),
-	}, map[string]any{
-		"query":    resp.Query,
-		"provider": resp.Provider,
+	results, citations := webSearchSourcesPayload(resp)
+	payload := map[string]any{"status": "completed", "results": results}
+	if resp.Answer != "" {
+		payload["answer"] = resp.Answer
+	}
+	if len(citations) != 0 {
+		payload["citations"] = citations
+	}
+	return toolutil.JSONResult(SearchToolName, payload, map[string]any{
+		"query": resp.Query, "provider": resp.Provider, "model": resp.Model,
+		"usage": usagePayload(resp.Usage),
 	})
+}
+
+// Keep the result order used by legacy positional references. Citations reuse
+// matching results by zero-based index; citation-only sources remain inline.
+func webSearchSourcesPayload(resp model.WebSearchResponse) ([]map[string]any, []webSearchCitation) {
+	indices := make(map[model.WebSearchResult]int)
+	position := 0
+	for _, source := range resp.Results {
+		source = normalizedSearchSource(source)
+		if source == (model.WebSearchResult{}) {
+			continue
+		}
+		if _, ok := indices[source]; !ok {
+			indices[source] = position
+		}
+		position++
+	}
+	citations := make([]webSearchCitation, 0, len(resp.Citations))
+	for _, citation := range resp.Citations {
+		item := webSearchCitation{StartIndex: citation.StartIndex, EndIndex: citation.EndIndex}
+		for _, source := range citation.Sources {
+			if index, ok := indices[normalizedSearchSource(model.WebSearchResult(source))]; ok {
+				item.ResultIndices = append(item.ResultIndices, index)
+			} else {
+				item.Sources = append(item.Sources, source)
+			}
+		}
+		citations = append(citations, item)
+	}
+	return webSearchResultsPayload(resp.Results), citations
+}
+
+func normalizedSearchSource(source model.WebSearchResult) model.WebSearchResult {
+	return model.WebSearchResult{
+		RefID: strings.TrimSpace(source.RefID), Title: strings.TrimSpace(source.Title),
+		URL: strings.TrimSpace(source.URL), Snippet: strings.TrimSpace(source.Snippet),
+		Source: strings.TrimSpace(source.Source), PublishedAt: strings.TrimSpace(source.PublishedAt),
+	}
+}
+
+type webSearchCitation struct {
+	StartIndex    int                    `json:"start_index,omitempty"`
+	EndIndex      int                    `json:"end_index,omitempty"`
+	ResultIndices []int                  `json:"result_indices,omitempty"`
+	Sources       []model.CitationSource `json:"sources,omitempty"`
 }
 
 func webSearchFailedResult(req model.WebSearchRequest, provider string, err error) (tool.Result, error) {

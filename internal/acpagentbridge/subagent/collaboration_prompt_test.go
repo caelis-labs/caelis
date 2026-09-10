@@ -21,7 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 )
 
-func TestWithCollaborationPromptSlicePrefixesControlInstruction(t *testing.T) {
+func TestWithCollaborationPromptSliceAppendsControlInstruction(t *testing.T) {
 	t.Parallel()
 
 	runner := &Runner{}
@@ -35,18 +35,18 @@ func TestWithCollaborationPromptSlicePrefixesControlInstruction(t *testing.T) {
 	}
 	raw := string(got[0]) + string(got[1])
 	assertCollaborationSlice(t, raw, collaboration.PromptSlice{
-		Handle: "orbit", Role: "sidecar", MailboxPolling: true,
+		Handle: "orbit", Role: "sidecar",
 	}, "review the diff")
 	steering := runner.withCollaborationPromptSlice(&childRun{
 		spawn:            tasksubagent.SpawnContext{Handle: "orbit", Role: session.ParticipantRoleDelegated},
 		supportsSteering: true,
 	}, prompt)
-	if strings.Contains(string(steering[0]), collaboration.MailboxPollingInstruction()) {
-		t.Fatalf("steering-capable slice asked for mailbox polling: %s", steering[0])
+	if !strings.Contains(string(steering[1]), collaboration.CollaboratorInstructions()) {
+		t.Fatalf("steering-capable slice omitted reporting guidance: %s", steering[1])
 	}
 }
 
-func TestACPChildPromptInjectsIdentityAndMailboxPollingWithoutSteering(t *testing.T) {
+func TestACPChildPromptInjectsIdentityAndReportingWithoutSteering(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -77,14 +77,14 @@ func TestACPChildPromptInjectsIdentityAndMailboxPollingWithoutSteering(t *testin
 		t.Fatalf("trace = %#v, want one session/prompt", payloads)
 	}
 	assertCollaborationSlice(t, payloads[0].Raw, collaboration.PromptSlice{
-		Handle: "orbit", Role: "sidecar", MailboxPolling: true,
+		Handle: "orbit", Role: "sidecar",
 	}, "review the diff")
 	if err := runner.Quiesce(ctx); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestACPChildIdleFollowupInjectsIdentitySlice(t *testing.T) {
+func TestACPChildIdleFollowupOmitsIdentitySlice(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -117,9 +117,13 @@ func TestACPChildIdleFollowupInjectsIdentitySlice(t *testing.T) {
 		if payload.Method != client.MethodSessionPrompt {
 			t.Fatalf("payload[%d] method = %q, want session/prompt", i, payload.Method)
 		}
-		assertCollaborationSlice(t, payload.Raw, collaboration.PromptSlice{
-			Handle: "orbit", Role: "delegated", MailboxPolling: true,
-		}, "")
+		if i == 0 {
+			assertCollaborationSlice(t, payload.Raw, collaboration.PromptSlice{
+				Handle: "orbit", Role: "delegated",
+			}, "first")
+		} else if strings.Contains(payload.Raw, "caelis_collaboration") || strings.Contains(payload.Raw, "assigned handle") {
+			t.Fatalf("followup repeated bootstrap: %s", payload.Raw)
+		}
 	}
 	if !strings.Contains(payloads[1].Raw, "continue") {
 		t.Fatalf("followup prompt missing task text: %s", payloads[1].Raw)
@@ -170,12 +174,12 @@ func TestACPChildSteeringOmitsCollaborationSlice(t *testing.T) {
 		t.Fatalf("trace = %#v, want session/prompt and steering", payloads)
 	}
 	assertCollaborationSlice(t, promptRaw, collaboration.PromptSlice{
-		Handle: "orbit", Role: "delegated", MailboxPolling: false,
+		Handle: "orbit", Role: "delegated",
 	}, "first")
-	if strings.Contains(promptRaw, collaboration.MailboxPollingInstruction()) {
-		t.Fatalf("steering-capable initial prompt asked for mailbox polling: %s", promptRaw)
+	if !strings.Contains(promptRaw, collaboration.CollaboratorInstructions()) {
+		t.Fatalf("steering-capable initial prompt omitted reporting guidance: %s", promptRaw)
 	}
-	if strings.Contains(steeringRaw, "caelis_collaboration") || strings.Contains(steeringRaw, "ReceiveMessages") || strings.Contains(steeringRaw, collaboration.ChannelInstruction()) {
+	if strings.Contains(steeringRaw, "caelis_collaboration") || strings.Contains(steeringRaw, "ReceiveMessages") || strings.Contains(steeringRaw, collaboration.DiscoveryInstruction()) {
 		t.Fatalf("steering mixed Control slice into a peer message: %s", steeringRaw)
 	}
 	if !strings.Contains(steeringRaw, "steer now") {
@@ -240,11 +244,11 @@ func assertCollaborationSlice(t *testing.T, raw string, slice collaboration.Prom
 	if !strings.Contains(raw, "caelis_collaboration") || !strings.Contains(raw, identity) {
 		t.Fatalf("ACP prompt missing Control identity slice %q: %s", identity, raw)
 	}
-	if !strings.Contains(raw, collaboration.ChannelInstruction()) {
-		t.Fatalf("ACP prompt missing not-user-follow-up channel instruction: %s", raw)
+	if !strings.Contains(raw, "caelis-collaboration") {
+		t.Fatalf("ACP prompt missing stable discovery key: %s", raw)
 	}
-	if slice.MailboxPolling != strings.Contains(raw, collaboration.MailboxPollingInstruction()) {
-		t.Fatalf("ACP prompt mailbox polling = %v, want %v: %s", strings.Contains(raw, collaboration.MailboxPollingInstruction()), slice.MailboxPolling, raw)
+	if !strings.Contains(raw, collaboration.CollaboratorInstructions()) {
+		t.Fatalf("ACP prompt omitted reporting guidance: %s", raw)
 	}
 	if strings.Contains(raw, "CAELIS_COLLABORATION_TOKEN") || strings.Contains(raw, "Bearer") {
 		t.Fatalf("ACP prompt leaked secret: %s", raw)
@@ -252,8 +256,8 @@ func assertCollaborationSlice(t *testing.T, raw string, slice collaboration.Prom
 	if task != "" && !strings.Contains(raw, task) {
 		t.Fatalf("ACP prompt missing task text %q: %s", task, raw)
 	}
-	if task != "" && strings.Index(raw, task) < strings.Index(raw, "caelis_collaboration") {
-		t.Fatalf("task prose preceded Control slice: %s", raw)
+	if task != "" && strings.Index(raw, task) > strings.Index(raw, "caelis_collaboration") {
+		t.Fatalf("Control slice preceded task prose: %s", raw)
 	}
 }
 

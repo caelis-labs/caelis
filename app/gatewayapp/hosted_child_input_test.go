@@ -565,7 +565,7 @@ func assertHostedChildInputEvent(t *testing.T, event *session.Event) {
 	if communication == nil || communication.Text == "" || !session.IsClientReplayEvent(event) {
 		t.Fatalf("input event protocol = %#v, want replayable Agent communication", event.Protocol)
 	}
-	if event.Message == nil || !strings.Contains(event.Message.TextContent(), "[Internal agent message]") ||
+	if event.Message == nil || !strings.Contains(event.Message.TextContent(), "From: ") ||
 		!strings.Contains(event.Message.TextContent(), event.Actor.Name) ||
 		!strings.Contains(event.Message.TextContent(), communication.Text) {
 		t.Fatalf("model message = %#v, want trusted sender header plus original text", event.Message)

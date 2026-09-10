@@ -175,24 +175,15 @@ func TestBuildAgentCommunicationPromptCarriesTrustedSource(t *testing.T) {
 		},
 		Input: "review this change",
 	})
-	if len(prompt) != 2 {
-		t.Fatalf("prompt = %#v, want sender header and message", prompt)
+	if len(prompt) != 1 {
+		t.Fatalf("prompt = %#v, want one mail body", prompt)
 	}
-	var header client.TextContent
 	var message client.TextContent
-	if err := json.Unmarshal(prompt[0], &header); err != nil {
+	if err := json.Unmarshal(prompt[0], &message); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(prompt[1], &message); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(header.Text, "[Internal agent message]") ||
-		!strings.Contains(header.Text, "Sender: parent") ||
-		strings.Contains(header.Text, "Reply-To:") ||
-		strings.Contains(header.Text, "local") ||
-		strings.Contains(header.Text, "kernel") ||
-		message.Text != "review this change" {
-		t.Fatalf("prompt header = %q message = %q", header.Text, message.Text)
+	if message.Text != "review this change\n\nFrom: parent" {
+		t.Fatalf("prompt = %q, want body then sender only", message.Text)
 	}
 }
 
@@ -1170,7 +1161,7 @@ func TestChildInputHelperProcess(t *testing.T) {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: "missing image prompt"}
 				}
 				var header client.TextContent
-				if err := json.Unmarshal(request.Prompt[0], &header); err != nil || !strings.Contains(header.Text, "[Internal agent message]") {
+				if err := json.Unmarshal(request.Prompt[1], &header); err != nil || header.Text != "\n\nFrom: parent" {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: "missing Agent sender header"}
 				}
 				var image struct {
@@ -1179,7 +1170,7 @@ func TestChildInputHelperProcess(t *testing.T) {
 					Data     string `json:"data"`
 					Name     string `json:"name"`
 				}
-				if err := json.Unmarshal(request.Prompt[1], &image); err != nil || image.Type != "image" || image.MimeType != "image/png" || image.Data != "aW1hZ2U=" || image.Name != "guide.png" {
+				if err := json.Unmarshal(request.Prompt[0], &image); err != nil || image.Type != "image" || image.MimeType != "image/png" || image.Data != "aW1hZ2U=" || image.Name != "guide.png" {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: "invalid image prompt"}
 				}
 			}

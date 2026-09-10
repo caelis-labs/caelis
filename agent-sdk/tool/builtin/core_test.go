@@ -239,7 +239,7 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 
 	requireStringMinLength(t, defs[web.SearchToolName], "query", 1)
 	requireIntegerBounds(t, defs[web.SearchToolName], "max_results", 1, ptrAny(10))
-	requireDescriptionContains(t, defs[web.SearchToolName], "Search the web", "specific result", "visible Markdown links", "provider-native web search", "unavailable", "fall back to WebFetch")
+	requireDescriptionContains(t, defs[web.SearchToolName], "Search the web", "specific result", "visible Markdown links")
 	requirePropertyDescriptionContains(t, defs[web.SearchToolName], "query", "Concise keyword query", "site:", "filetype:")
 	requireAnnotations(t, defs[web.SearchToolName], true, false, false, true)
 

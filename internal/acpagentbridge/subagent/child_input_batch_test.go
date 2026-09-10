@@ -35,8 +35,8 @@ func TestIdleChildBatchStartsOnePromptAndProjectsEverySource(t *testing.T) {
 		t.Fatal("fixture unexpectedly supports steering")
 	}
 	inputs := []agent.AgentCommunicationInput{
-		{Source: session.ParentCommunicationActor(), Input: `{"id":"mail-1","from":"parent","to":"helper","message":"first"}`, DisplayInput: "first"},
-		{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "sibling", Name: "sibling"}, Input: `{"id":"mail-2","from":"sibling","to":"helper","message":"second"}`, DisplayInput: "second"},
+		{Source: session.ParentCommunicationActor(), Input: "first\n\nMessage-ID: mail-1", DisplayInput: "first"},
+		{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "sibling", Name: "sibling"}, Input: "second\n\nMessage-ID: mail-2", DisplayInput: "second"},
 	}
 	result, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Messages: inputs})
 	if err != nil || !result.StartedActivity {
@@ -59,7 +59,7 @@ func TestIdleChildBatchStartsOnePromptAndProjectsEverySource(t *testing.T) {
 	}
 	encoded, _ := json.Marshal(buildAgentCommunicationPrompt(agent.ChildInputRequest{Messages: inputs}))
 	text := string(encoded)
-	if strings.Count(text, "Sender: parent") != 1 || strings.Count(text, "Sender: sibling") != 1 || strings.Index(text, "mail-1") > strings.Index(text, "mail-2") {
+	if strings.Count(text, "From: parent") != 1 || strings.Count(text, "From: sibling") != 1 || strings.Index(text, "mail-1") > strings.Index(text, "mail-2") {
 		t.Fatalf("prompt lost attributed order: %s", text)
 	}
 	if err := runner.Quiesce(ctx); err != nil {

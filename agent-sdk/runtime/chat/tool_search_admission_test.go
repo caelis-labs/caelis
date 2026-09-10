@@ -215,7 +215,7 @@ func TestChatAgentToolSearchBudgetsFinalPayloadBeforeRevealAndReplaysExactly(t *
 	for i := 0; i < tool.MaxDeferredToolsPerRun; i++ {
 		def := tool.Definition{
 			Name:        fmt.Sprintf("mcp__plugin__server__heavy_%03d", i),
-			Description: strings.Repeat("heavy metadata ", 70),
+			Description: strings.Repeat("heavy metadata ", 300),
 			InputSchema: map[string]any{"type": "object"},
 			Metadata: map[string]any{
 				tool.MetadataToolKind:  tool.MetadataToolKindMCP,

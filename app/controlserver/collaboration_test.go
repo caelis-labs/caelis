@@ -56,12 +56,29 @@ func TestCollaborationMCPHTTPRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	tools, err := session.ListTools(ctx, nil)
-	if err != nil || len(tools.Tools) != 5 {
+	if err != nil || len(tools.Tools) != 2 {
 		t.Fatalf("tools %v %v", tools, err)
+	}
+	for _, definition := range tools.Tools {
+		if definition.Name != "ListThreads" && definition.Name != "SendMessage" {
+			t.Fatalf("child MCP exposed %s", definition.Name)
+		}
+	}
+	for _, name := range []string{"ReadThread", "WaitThread", "ReceiveMessages"} {
+		if result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: map[string]any{}}); err == nil && !result.IsError {
+			t.Fatalf("child MCP registered unavailable tool %s", name)
+		}
 	}
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "SendMessage", Arguments: map[string]any{"to": "b", "message": "hello"}})
 	if err != nil || result.IsError {
 		t.Fatalf("send %#v %v", result, err)
+	}
+	if len(result.Content) != 1 || result.StructuredContent != nil {
+		t.Fatalf("MCP repeated result representations: %#v", result)
+	}
+	var receipt map[string]any
+	if err := json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &receipt); err != nil || len(receipt) != 2 || receipt["status"] != "queued" {
+		t.Fatalf("MCP receipt = %#v, %v", receipt, err)
 	}
 	mail, err := service.Receive(ctx, collaboration.Identity{Session: "work", Member: "b"})
 	if err != nil || len(mail) != 1 || mail[0].Text != "hello" {
@@ -78,11 +95,13 @@ func TestCollaborationMCPHTTPRoundTrip(t *testing.T) {
 	}
 	received := map[string]bool{}
 	for len(received) < 32 {
-		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "ReceiveMessages", Arguments: map[string]any{}})
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "SendMessage", Arguments: map[string]any{"to": "b", "message": "progress"}})
 		if err != nil || result.IsError {
 			t.Fatalf("large MCP receive: %#v %v", result, err)
 		}
-		var batch []collaboration.Message
+		var receipt struct {
+			Messages []collaboration.Message `json:"messages"`
+		}
 		if len(result.Content) != 1 {
 			t.Fatalf("content: %#v", result.Content)
 		}
@@ -90,9 +109,10 @@ func TestCollaborationMCPHTTPRoundTrip(t *testing.T) {
 		if !ok {
 			t.Fatalf("content type %T", result.Content[0])
 		}
-		if err := json.Unmarshal([]byte(content.Text), &batch); err != nil {
+		if err := json.Unmarshal([]byte(content.Text), &receipt); err != nil {
 			t.Fatal(err)
 		}
+		batch := receipt.Messages
 		if len(batch) == 0 {
 			t.Fatalf("lost large messages: %d", len(received))
 		}

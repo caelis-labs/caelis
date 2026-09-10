@@ -58,36 +58,53 @@ advertised `_meta.steering.supported`. This is a negotiated custom extension,
 not a standard ACP v1 method. Direct running input remains unsupported without
 it. StartThread reports this capability as `supports_steering`.
 
-Control prepends a tagged collaboration slice to each child `session/prompt`,
-including the initial launch prompt and later idle follow-up or reconnect
-prompts. The slice is Control instruction, not a peer message, task prose, or a
-user follow-up: it names the assigned handle, the reserved parent address
-`parent`, and the participant role, and it states that ACP `session/prompt`
-delivers Caelis collaboration input from Control or another Agent. Agents that
-did not advertise steering also receive a concise instruction to call
-`ReceiveMessages` during the turn so mailbox messages do not backlog. Steering
-input is not rewritten with this slice. Credential values, mailbox contents,
-and Session or Task identifiers stay outside it. Built-in spawned Sessions
-receive the same handle, parent, and role facts through the system-prompt
-assembly path and do not inherit main-only StartThread guidance.
+Control appends a tagged collaboration setup block to the child's initial
+`session/prompt`, after the task body and sender. It names the assigned handle,
+the reserved parent address `parent`, and the participant role. It supplies the
+stable MCP discovery key `caelis-collaboration` and asks children to report
+meaningful progress through `SendMessage`, process returned mail, and end the
+current Turn when finished or blocked. New messages resume the same Session. The setup is
+not appended to later idle prompts, steering, or reconnects to the same Session.
+Its text is English; task and message bodies retain the sender's language.
+Credentials, mailbox contents, and Session or Task identifiers stay outside it.
+Built-in spawned Sessions receive their identity through system-prompt assembly
+and do not inherit controller-only tool guidance. Transferred parent context
+follows the initial task body.
 
 Product Agents share one Control-owned mailbox service within their owning work
-Session. `ListThreads` discovers its participants. `SendMessage {to, message,
-reply_to?}` places a message in the recipient's persistent mailbox and returns
-its identity; success confirms queuing, not completion. `ReceiveMessages` takes
-up to 32 messages from the caller's own mailbox, bounded by encoded JSON size
-within the shared 4 MiB response limit. Messages outside the returned batch
-remain queued. Message text is limited to 65,536 bytes; `reply_to`, when present,
-is a canonical message UUID. `ReadThread` returns a
-participant's latest public result and observation cursor, not its reasoning or
-complete conversation. Supplying `after` suppresses already observed output.
-`WaitThread` waits up to 60 seconds for incoming mail or new terminal/attention
-states among at most eight selected threads. It returns the wake reason,
-consumed messages and thread observations; timeout does not cancel work.
-Neither tool exposes the parent transcript or cross-Session routing.
+Session. Children expose only `ListThreads` and `SendMessage`; the controller also
+has `ReadThread` and `WaitThread`. Built-in children and child MCP servers
+register only their tool set. `ListThreads` discovers all collaborators.
+
+`SendMessage {to, message, reply_to?}` first commits a message to the recipient's
+persistent mailbox, then independently takes up to 32 messages from the caller's
+own mailbox. The result contains `{id, status:"queued"}` and optional `messages`;
+it never echoes the outgoing body. Empty or failed inbox checks omit `messages`
+and do not change the successful send acknowledgement. A failed send does not
+take inbox messages. Incoming batches are bounded by encoded JSON size within
+the shared 4 MiB response limit; remaining mail stays queued. Automatic delivery,
+SendMessage replies, and controller waits share the atomic read-and-delete path:
+a message is consumed by only one path. There are no automatic retries if a
+response is lost or a dispatch outcome is unknown. Message text is limited to
+65,536 bytes; `reply_to`, when present, is a canonical message UUID.
+
+`ReadThread` returns a participant's latest public result and observation cursor,
+not its reasoning or complete conversation. Supplying `after` suppresses already
+observed output. `WaitThread` waits up to 60 seconds for incoming mail or new
+terminal/attention states among at most eight selected threads. It returns when
+any target needs attention or mail arrives, rather than waiting for all targets.
+The result contains the wake reason, consumed messages and thread observations;
+timeout does not cancel work. Neither tool exposes the parent transcript or
+cross-Session routing. Thread observations use one `cursor` with `handle`,
+`state`, and optional name or output, without internal Task IDs or a duplicate
+revision. Received mail retains `id`, `from`, `message`, and optional `reply_to`;
+its implicit recipient is omitted. Wait results omit empty message and thread
+lists. TUI keeps display-only decoding of retained `ReceiveMessages` results for
+historical transcripts; that compatibility can be removed when those records
+are no longer supported. The tool itself is not exposed or callable.
 
 Only the controller receives `StartThread`. It creates a persistent participant
-conversation and starts its initial prompt, returning identity and status without
+conversation and starts its initial prompt, returning its handle, status and steering capability without
 folding its result into the creation result. Follow-up messages reuse that
 conversation. Participant removal is an internal Control operation; it is not
 exposed as a model tool and preserves Session history. Running or unresolved
@@ -148,12 +165,18 @@ Credential values remain outside model prompts, tool schemas, results and
 canonical history. Tool schemas are stable across credential changes. Pending
 mail survives connection replacement, but consumed mail is never retried.
 
-Delivered input follows the ordinary Agent-communication context path. Accepted
-input is projected as ACP `session/update` with `user_message_chunk`; display-only
+Delivered input follows the ordinary Agent-communication context path. The
+model receives the task body followed by mail reference lines (`Message-ID` and
+optional `In-Reply-To`) and a single `From` footer, without an embedded mailbox
+JSON object or repeated recipient identity. Typed source identity and the original
+display body remain separate from this text. Accepted input is projected as ACP `session/update` with `user_message_chunk`; display-only
 source metadata may use `_meta.caelis.agent_communication`, while typed event
 identity remains authoritative. Caelis mailbox IDs are separate from peer-owned
 ACP message IDs. Delivered context remains in canonical Session history after
-its mailbox entry is removed.
+its mailbox entry is removed. The external history reader removes collaboration
+setup and mail footers from child display and attributes preceding content blocks
+to the footer's sender. Its legacy header reader is display-only; remove that
+reader once supported external histories no longer contain header-format prompts.
 
 An admitted `session/prompt` remains open until its execution reaches a Turn
 terminal. If ACP forwarding fails, the bridge can no longer reliably service

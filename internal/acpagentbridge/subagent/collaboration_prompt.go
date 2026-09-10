@@ -15,13 +15,13 @@ func (r *Runner) withCollaborationPromptSlice(run *childRun, prompt []json.RawMe
 	}
 	run.mu.RLock()
 	slice := collaboration.PromptSlice{
-		Handle:         strings.TrimPrefix(strings.TrimSpace(run.spawn.Handle), "@"),
-		Role:           strings.TrimSpace(string(run.spawn.Role)),
-		MailboxPolling: !run.supportsSteering,
+		Handle: strings.TrimPrefix(strings.TrimSpace(run.spawn.Handle), "@"),
+		Role:   strings.TrimSpace(string(run.spawn.Role)),
 	}
 	run.mu.RUnlock()
 	if slice.Role == "" {
 		slice.Role = string(session.ParticipantRoleDelegated)
 	}
-	return acputil.PrefixTextBlock(prompt, collaboration.RenderPromptSlice(slice))
+	out := append([]json.RawMessage(nil), prompt...)
+	return append(out, acputil.BuildPromptParts(collaboration.RenderPromptSlice(slice), nil)...)
 }

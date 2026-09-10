@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"iter"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -152,6 +153,7 @@ func TestSearchToolReturnsProviderResults(t *testing.T) {
 		Provider: "gemini",
 		Model:    "gemini-2.5-flash",
 		Answer:   "answer",
+		Usage:    model.Usage{TotalTokens: 15},
 		Results: []model.WebSearchResult{{
 			Title:  "Result",
 			URL:    "https://example.com/result",
@@ -173,6 +175,16 @@ func TestSearchToolReturnsProviderResults(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("results len = %d, want 1: %#v", len(results), payload["results"])
 	}
+	for _, field := range []string{"query", "provider", "model", "usage", "citations"} {
+		if _, ok := payload[field]; ok {
+			t.Fatalf("successful result repeated metadata or empty field %q: %#v", field, payload)
+		}
+	}
+	meta := result.Metadata["caelis"].(map[string]any)["runtime"].(map[string]any)["tool"].(map[string]any)
+	if meta["query"] != "latest release" || meta["model"] != llm.resp.Model || meta["usage"].(map[string]any)["total_tokens"] != 15 {
+		t.Fatalf("tool metadata lost diagnostics: %#v", meta)
+	}
+
 }
 
 func TestSearchToolReturnsErrorResultForProviderFailure(t *testing.T) {
@@ -208,4 +220,54 @@ func resultPayload(t *testing.T, result tool.Result) map[string]any {
 		t.Fatalf("decode result JSON: %v", err)
 	}
 	return payload
+}
+
+func TestSearchToolStoresSourcesOnceAndKeepsCitationOnlySources(t *testing.T) {
+	t.Parallel()
+	source := model.CitationSource{RefID: "ref-a", Title: "Primary", URL: "https://example.com/a", Snippet: "Evidence retained in full"}
+	other := model.CitationSource{RefID: "ref-a", URL: "https://example.com/other"}
+	noRef := model.CitationSource{URL: "https://example.com/no-ref"}
+	llm := searchableLLM{resp: model.WebSearchResponse{
+		Answer:  "answer",
+		Results: []model.WebSearchResult{{}, {Title: " \t"}, model.WebSearchResult(source)},
+		Citations: []model.Citation{
+			{StartIndex: 0, EndIndex: 3, Sources: []model.CitationSource{source, other}},
+			{StartIndex: 3, EndIndex: 6, Sources: []model.CitationSource{source, noRef}},
+		},
+	}}
+	result, err := NewSearch().Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"evidence"}`), RuntimeModel: llm})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := resultPayload(t, result)
+	results := payload["results"].([]any)
+	if len(results) != 1 || payload["answer"] != "answer" {
+		t.Fatalf("search lost or repeated sources: %#v", payload)
+	}
+	citations := payload["citations"].([]any)
+	for i, want := range [][]any{{float64(0)}, {float64(0)}} {
+		citation := citations[i].(map[string]any)
+		if len(citation["sources"].([]any)) != 1 || !reflect.DeepEqual(citation["result_indices"], want) {
+			t.Fatalf("citation %d = %#v", i, citation)
+		}
+	}
+	raw := string(result.Content[0].JSON.Value)
+	if strings.Count(raw, source.Snippet) != 1 || !strings.Contains(raw, noRef.URL) || !strings.Contains(raw, other.URL) {
+		t.Fatalf("source content changed: %s", raw)
+	}
+}
+
+func TestSearchToolPreservesDuplicateResultPositions(t *testing.T) {
+	t.Parallel()
+	first := model.WebSearchResult{Title: "First", URL: "https://example.com/a"}
+	last := model.WebSearchResult{Title: "Last", URL: "https://example.com/b"}
+	llm := searchableLLM{resp: model.WebSearchResponse{Results: []model.WebSearchResult{first, first, last}}}
+	result, err := NewSearch().Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"test"}`), RuntimeModel: llm})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := resultPayload(t, result)["results"].([]any)
+	if len(results) != 3 || results[2].(map[string]any)["url"] != last.URL {
+		t.Fatalf("legacy positional references changed: %#v", results)
+	}
 }
