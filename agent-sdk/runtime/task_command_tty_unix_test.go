@@ -6,6 +6,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -26,7 +27,7 @@ func TestRuntimeCommandTTYSupportsExactTaskInputAndPersistsCapability(t *testing
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"command":       "test -t 0 && stty raw -echo min 1 time 0 && value=$(dd bs=1 count=1 2>/dev/null) && stty min 0 time 2 && extra=$(dd bs=1 count=1 2>/dev/null | wc -c | tr -d '[:space:]') && printf 'got:%s;extra:%s' \"$value\" \"$extra\"",
+		"command":       "test -t 0 && stty raw -echo min 1 time 0 && printf 'tty-ready\\n' && value=$(dd bs=1 count=1 2>/dev/null) && stty min 0 time 2 && extra=$(dd bs=1 count=1 2>/dev/null | wc -c | tr -d '[:space:]') && printf 'got:%s;extra:%s' \"$value\" \"$extra\"",
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 		"tty":           true,
@@ -48,22 +49,55 @@ func TestRuntimeCommandTTYSupportsExactTaskInputAndPersistsCapability(t *testing
 		t.Fatalf("persisted spec = %#v, want tty=true", entry.Spec)
 	}
 
-	writeResult := callRuntimeTaskTool(t, runtimeTaskTool{
+	taskTool := runtimeTaskTool{
 		base:       tasktool.New(),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
-	}, map[string]any{
+	}
+	// RunCommand may yield before stty disables canonical input and echo.
+	// Accumulate observations because output is delivered as cursor-based deltas.
+	readyPayload := running
+	var readyOutput strings.Builder
+	readyDeadline := time.Now().Add(5 * time.Second)
+	for {
+		latest, _ := readyPayload["latest_output"].(string)
+		readyOutput.WriteString(latest)
+		if readyPayload["state"] != string(taskapi.StateRunning) {
+			t.Fatalf("Task readiness payload = %#v, want running raw TTY", readyPayload)
+		}
+		if strings.Contains(readyOutput.String(), "tty-ready") {
+			break
+		}
+		if time.Now().After(readyDeadline) {
+			t.Fatalf("Task readiness output = %q, want tty-ready marker", readyOutput.String())
+		}
+		time.Sleep(5 * time.Millisecond)
+		readyResult := callRuntimeTaskTool(t, taskTool, map[string]any{
+			"action": "read",
+			"handle": handle,
+		})
+		readyPayload = testToolResultPayload(t, readyResult)
+	}
+
+	writeResult := callRuntimeTaskTool(t, taskTool, map[string]any{
 		"action":         "write",
 		"handle":         handle,
 		"input":          "x",
 		"append_newline": false,
 	})
 	completed := testToolResultPayload(t, writeResult)
+	if completed["state"] == string(taskapi.StateRunning) {
+		waitResult := callRuntimeTaskTool(t, taskTool, map[string]any{
+			"action": "wait",
+			"handle": handle,
+		})
+		completed = testToolResultPayload(t, waitResult)
+	}
 	if completed["state"] != string(taskapi.StateCompleted) {
-		t.Fatalf("Task write payload = %#v, want completed", completed)
+		t.Fatalf("Task terminal payload = %#v, want completed", completed)
 	}
 	if got, _ := completed["result"].(string); !strings.Contains(got, "got:x;extra:0") {
-		t.Fatalf("Task write result = %q, want one exact raw byte and no appended newline", got)
+		t.Fatalf("Task terminal result = %q, want one exact raw byte and no appended newline", got)
 	}
 	if _, exists := completed["supports_input"]; exists {
 		t.Fatalf("terminal payload = %#v, want input capability removed", completed)

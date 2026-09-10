@@ -20,10 +20,13 @@ their isolated default Store.
 
 ## Gate model
 
-`.github/workflows/quality.yml` owns the exact-SHA lint, full untagged test, and
-build gates. The tag workflow waits for a successful `main` quality run at the
-tagged SHA before publishing; it does not repeat ordinary tests or optional
-change-scoped gates.
+`.github/workflows/quality.yml` owns the exact-SHA lint, full untagged test,
+build, and reachable-vulnerability gates. PR runs check proposed integration;
+`main` push runs validate the actual commit used for release. The tag workflow
+waits for a successful `main` push quality run at the tagged SHA before
+publishing; it does not repeat ordinary tests or optional change-scoped gates.
+Scheduled quality runs only refresh vulnerability results and cannot satisfy
+the release gate.
 
 ## Preflight
 
