@@ -10,7 +10,7 @@ require (
 	codeberg.org/readeck/go-readability/v2 v2.1.2
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
 	github.com/alecthomas/chroma/v2 v2.27.0
-	github.com/anthropics/anthropic-sdk-go v1.51.1
+	github.com/anthropics/anthropic-sdk-go v1.71.0
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1
 	github.com/caelis-labs/acp-go-sdk v1.2.0
 	github.com/caelis-labs/memory v0.5.2
