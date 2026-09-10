@@ -4,6 +4,8 @@ package host
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -226,17 +228,36 @@ func TestRuntimeRunCapsCapturedOutput(t *testing.T) {
 func TestRuntimeStartReadOutputCursorSurvivesCappedStream(t *testing.T) {
 	t.Parallel()
 
-	rt, err := New(Config{CWD: t.TempDir()})
+	dir := t.TempDir()
+	gatePath := filepath.Join(dir, "release")
+	if err := syscall.Mkfifo(gatePath, 0600); err != nil {
+		t.Fatalf("Mkfifo() error = %v", err)
+	}
+	// Open both ends so opening and releasing the gate cannot block the test.
+	gate, err := os.OpenFile(gatePath, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile() error = %v", err)
+	}
+	defer gate.Close()
+
+	rt, err := New(Config{CWD: dir})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	session, err := rt.Start(context.Background(), commandRequest("yes x | head -c "+strconv.Itoa(hostOutputCap)+"; sleep 0.2; printf 'tail-marker\\n'"))
+	// The tail must not be emitted until its preceding cursor has been read.
+	session, err := rt.Start(context.Background(), commandRequest("head -c "+strconv.Itoa(hostOutputCap)+" /dev/zero && IFS= read -r release < release && printf 'tail-marker\\n'"))
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer func() { _ = session.Terminate(context.Background()) }()
 
-	_, cursor := waitForStdoutMarkerAtLeast(t, session, hostOutputCap)
+	initial, cursor := waitForStdoutMarkerAtLeast(t, session, hostOutputCap)
+	if len(initial) != hostOutputCap || cursor != int64(hostOutputCap) {
+		t.Fatalf("initial stdout len = %d, cursor = %d, want both %d", len(initial), cursor, hostOutputCap)
+	}
+	if _, err := gate.WriteString("release\n"); err != nil {
+		t.Fatalf("release gate error = %v", err)
+	}
 	status, err := session.Wait(context.Background(), 2*time.Second)
 	if err != nil {
 		t.Fatalf("Wait() error = %v", err)
@@ -251,8 +272,15 @@ func TestRuntimeStartReadOutputCursorSurvivesCappedStream(t *testing.T) {
 	if got := string(stdout); !strings.Contains(got, "tail-marker") {
 		t.Fatalf("stdout after cursor %d = %q, next cursor %d; want tail-marker", cursor, tailString(got, 120), nextCursor)
 	}
-	if nextCursor <= cursor {
-		t.Fatalf("next stdout cursor = %d, want > %d", nextCursor, cursor)
+	if nextCursor != cursor+int64(len("tail-marker\n")) {
+		t.Fatalf("next stdout cursor = %d, want %d", nextCursor, cursor+int64(len("tail-marker\n")))
+	}
+	retained, _, total, _, err := session.ReadOutput(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatalf("ReadOutput(0,0) error = %v", err)
+	}
+	if len(retained) != hostOutputCap || total != nextCursor {
+		t.Fatalf("retained stdout len = %d, cursor = %d, want %d and %d", len(retained), total, hostOutputCap, nextCursor)
 	}
 }
 
@@ -288,7 +316,7 @@ func waitForStdoutMarkerAtLeast(t *testing.T, session sandbox.Session, want int)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		stdout, _, cursor, _, err := session.ReadOutput(context.Background(), 0, 0)
+		stdout, stderr, cursor, _, err := session.ReadOutput(context.Background(), 0, 0)
 		if err != nil {
 			t.Fatalf("ReadOutput(0,0) error = %v", err)
 		}
@@ -296,7 +324,8 @@ func waitForStdoutMarkerAtLeast(t *testing.T, session sandbox.Session, want int)
 			return stdout, cursor
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("stdout cursor = %d, want >= %d", cursor, want)
+			status, statusErr := session.Status(context.Background())
+			t.Fatalf("stdout cursor = %d, want >= %d; status = %+v, status error = %v, stderr = %q", cursor, want, status, statusErr, tailString(string(stderr), 500))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

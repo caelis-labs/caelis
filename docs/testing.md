@@ -15,6 +15,17 @@ pass. Local and sandboxed Make targets use the stable repository-local
 cache integration. Set `CACHE_ROOT=/path/to/cache` to select another persistent
 location, or set it to an empty value locally to use the standard caches.
 
+## Dependency update CI
+
+Dependabot PRs run the same required checks as other PRs; review does not
+replace CI, and bot jobs must not be skipped to satisfy branch protection.
+To bound routine CI volume, `.github/dependabot.yml` checks weekly and permits
+one open version-update PR per ecosystem (Go modules and GitHub Actions).
+Minor and patch updates are grouped within each ecosystem; major updates stay
+in individual PRs and share that ecosystem's limit. Security updates are not
+subject to the version-update limit and are not delayed for CI approval.
+The limit controls new PR creation, not CI reruns or already-open PRs.
+
 ## Change-scoped checks
 
 The following checks remain explicit because repeating them for every change
