@@ -443,7 +443,9 @@ type SubmitRequest struct {
 	ContentParts []model.ContentPart
 	Metadata     map[string]any
 	Actor        session.ActorRef
-	Approval     *ApprovalDecision
+	// Inputs retains one ordered Agent-communication admission.
+	Inputs   []agent.AgentCommunicationInput
+	Approval *ApprovalDecision
 }
 
 type SubmitActiveTurnRequest struct {
@@ -457,7 +459,9 @@ type SubmitActiveTurnRequest struct {
 	ContentParts []model.ContentPart
 	Metadata     map[string]any
 	Actor        session.ActorRef
-	Approval     *ApprovalDecision
+	// Inputs retains one ordered Agent-communication admission.
+	Inputs   []agent.AgentCommunicationInput
+	Approval *ApprovalDecision
 }
 
 type BeginTurnResult struct {

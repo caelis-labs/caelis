@@ -101,7 +101,14 @@ Automatic delivery is serial per recipient and independent across recipients,
 with a ten-second deadline per attempt. Each attempt atomically claims the
 pending messages that fit the encoded batch budget and submits them as one
 input admission, preserving their order and individual source identities. The
-32-message pull limit does not split automatic delivery; messages beyond the
+same rule applies to the parent: a running local controller accepts the batch
+at its next safe model boundary, and a running ACP controller receives one
+negotiated steering request. Local safe boundaries follow a completed model
+response or tool step; mail does not cancel an in-flight tool. Accepted local
+batches are committed atomically before entering model context. A final empty
+drain closes input admission so late mail can select the next Turn without
+being acknowledged into a completed Run.
+The 32-message pull limit does not split automatic delivery; messages beyond the
 encoded budget remain queued. A deadline does not establish whether the peer
 executed the input and does not trigger a retry.
 Agents without steering can take mail through MCP during their current turn;

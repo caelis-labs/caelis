@@ -119,7 +119,7 @@ func TestHostedChildInputBatchStartsIdleParentTurnWithTrustedSources(t *testing.
 	}
 }
 
-func TestHostedChildInputBatchWaitsForActiveParentBeforeIdleTurn(t *testing.T) {
+func TestHostedChildInputBatchSteersActiveParentWithTrustedSources(t *testing.T) {
 	provider := newHostedChildInputTestProvider(t, true)
 	host := newHostedChildInputTestStack(t, provider)
 	parent, _, _ := newHostedChildInputTestTopology(t, host, "batch-wait")
@@ -139,6 +139,7 @@ func TestHostedChildInputBatchWaitsForActiveParentBeforeIdleTurn(t *testing.T) {
 		t.Fatal("parent model request did not start")
 	}
 	firstPayload := string(provider.LastMessages())
+	initialTurn := hostedChildCanonicalTurn(t, host, parent.SessionRef, "initial parent input")
 	parentRuntime := activateSessionRuntime(t, host, parent.SessionID)
 	routed := make(chan error, 1)
 	go func() {
@@ -157,8 +158,11 @@ func TestHostedChildInputBatchWaitsForActiveParentBeforeIdleTurn(t *testing.T) {
 	}()
 	select {
 	case err := <-routed:
-		t.Fatalf("batch returned while the parent Turn still owned admission: %v", err)
-	case <-time.After(25 * time.Millisecond):
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("batch waited for parent completion instead of admitting steering")
 	}
 	if strings.Contains(firstPayload, "idle from orbit") || strings.Contains(firstPayload, "idle from zenith") {
 		t.Fatalf("active Turn received bulk mail: %s", firstPayload)
@@ -172,9 +176,6 @@ func TestHostedChildInputBatchWaitsForActiveParentBeforeIdleTurn(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("parent Turn did not complete")
 	}
-	if err := <-routed; err != nil {
-		t.Fatal(err)
-	}
 	first := waitHostedChildInputEvent(t, host, parent.SessionRef, "idle from orbit")
 	secondEvent := waitHostedChildInputEvent(t, host, parent.SessionRef, "idle from zenith")
 	assertHostedChildInputEvent(t, first)
@@ -182,12 +183,12 @@ func TestHostedChildInputBatchWaitsForActiveParentBeforeIdleTurn(t *testing.T) {
 	if first.Actor.ID != orbit.ID || secondEvent.Actor.ID != zenith.ID {
 		t.Fatalf("durable sources = (%#v, %#v), want orbit then zenith", first.Actor, secondEvent.Actor)
 	}
-	if first.Scope == nil || secondEvent.Scope == nil || first.Scope.TurnID != secondEvent.Scope.TurnID {
-		t.Fatalf("batch used different Turns: (%#v, %#v)", first.Scope, secondEvent.Scope)
+	if first.Scope == nil || secondEvent.Scope == nil || first.Scope.TurnID != secondEvent.Scope.TurnID || first.Scope.TurnID != initialTurn {
+		t.Fatalf("batch changed active Turn: (%#v, %#v), original %s", first.Scope, secondEvent.Scope, initialTurn)
 	}
 	waitHostedChildParentIdle(t, host, parent.SessionID)
 	if got := provider.CallCount(); got != 2 {
-		t.Fatalf("model calls = %d, want original Turn then one idle batch Turn", got)
+		t.Fatalf("model calls = %d, want initial response and continuation in the same Turn", got)
 	}
 	payload := string(provider.LastMessages())
 	orbitAt := strings.Index(payload, "idle from orbit")
@@ -337,63 +338,77 @@ func TestHostedChildInputBatchDetachedMemberDoesNotAdmitPartialParentTurn(t *tes
 }
 
 func TestHostedChildInputWaitsForClosingParentBeforeStartingIdleTurn(t *testing.T) {
-	t.Parallel()
+	for _, batch := range []bool{false, true} {
+		t.Run(fmt.Sprintf("batch-%v", batch), func(t *testing.T) {
+			t.Parallel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	sessions := sessionmemory.NewStore(sessionmemory.Config{})
-	active, err := sessions.StartSession(ctx, session.StartSessionRequest{
-		AppName: "caelis", UserID: "owner", PreferredSessionID: "closing-parent",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	closing := &hostedChildClosingRunner{release: make(chan struct{})}
-	runtime := &hostedChildHandoffRuntime{
-		session: active, closing: closing, requests: make(chan agent.RunRequest, 2),
-	}
-	gateway, err := kernel.New(kernel.Config{
-		Sessions: sessions, Runtime: runtime, Resolver: hostedChildInputResolver{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	composition := &runtimeComposition{sessions: sessions, gateway: gateway}
-	initial, err := gateway.BeginTurn(ctx, kernel.BeginTurnRequest{SessionRef: active.SessionRef, Input: "initial"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer initial.Handle.Close()
-	select {
-	case <-runtime.requests:
-	case <-ctx.Done():
-		t.Fatal("initial parent Runtime did not start")
-	}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			sessions := sessionmemory.NewStore(sessionmemory.Config{})
+			active, err := sessions.StartSession(ctx, session.StartSessionRequest{
+				AppName: "caelis", UserID: "owner", PreferredSessionID: "closing-parent",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			closing := &hostedChildClosingRunner{release: make(chan struct{})}
+			runtime := &hostedChildHandoffRuntime{
+				session: active, closing: closing, requests: make(chan agent.RunRequest, 2),
+			}
+			gateway, err := kernel.New(kernel.Config{
+				Sessions: sessions, Runtime: runtime, Resolver: hostedChildInputResolver{},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			composition := &runtimeComposition{sessions: sessions, gateway: gateway}
+			initial, err := gateway.BeginTurn(ctx, kernel.BeginTurnRequest{SessionRef: active.SessionRef, Input: "initial"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer initial.Handle.Close()
+			select {
+			case <-runtime.requests:
+			case <-ctx.Done():
+				t.Fatal("initial parent Runtime did not start")
+			}
 
-	routed := make(chan error, 1)
-	source := session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@child"}
-	go func() {
-		routed <- routeHostedChildInputToParent(ctx, composition, active, source, agent.AgentInput{
-			Target: agent.AgentInputParent, Input: "after closing edge",
+			routed := make(chan error, 1)
+			source := session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@child"}
+			go func() {
+				if batch {
+					routed <- routeHostedChildInputBatchToParent(ctx, composition, active, []agent.AgentCommunicationInput{
+						{Source: source, Input: "after closing edge"}, {Source: source, Input: "second message"},
+					})
+				} else {
+					routed <- routeHostedChildInputToParent(ctx, composition, active, source, agent.AgentInput{Target: agent.AgentInputParent, Input: "after closing edge"})
+				}
+			}()
+			select {
+			case err := <-routed:
+				t.Fatalf("route returned while the closing Turn still owned admission: %v", err)
+			case <-time.After(25 * time.Millisecond):
+			}
+			close(closing.release)
+			if err := <-routed; err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case req := <-runtime.requests:
+				if batch {
+					if req.InputKind != agent.SubmissionKindAgentCommunication || len(req.Inputs) != 2 || req.Inputs[0].Input != "after closing edge" || req.Inputs[1].Input != "second message" || req.Inputs[0].Source.ID != source.ID {
+						t.Fatalf("replacement batch = %#v", req)
+					}
+					return
+				}
+				if req.InputKind != agent.SubmissionKindAgentCommunication ||
+					req.Input != "after closing edge" || req.InputActor.ID != source.ID {
+					t.Fatalf("replacement idle prompt = %#v, want child input with trusted Actor", req)
+				}
+			case <-ctx.Done():
+				t.Fatal("child input did not start a new idle parent Turn")
+			}
 		})
-	}()
-	select {
-	case err := <-routed:
-		t.Fatalf("route returned while the closing Turn still owned admission: %v", err)
-	case <-time.After(25 * time.Millisecond):
-	}
-	close(closing.release)
-	if err := <-routed; err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case req := <-runtime.requests:
-		if req.InputKind != agent.SubmissionKindAgentCommunication ||
-			req.Input != "after closing edge" || req.InputActor.ID != source.ID {
-			t.Fatalf("replacement idle prompt = %#v, want child input with trusted Actor", req)
-		}
-	case <-ctx.Done():
-		t.Fatal("child input did not start a new idle parent Turn")
 	}
 }
 
@@ -563,19 +578,19 @@ func assertHostedChildInputEvent(t *testing.T, event *session.Event) {
 func waitHostedChildParentIdle(t *testing.T, host *Stack, sessionID string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	seenRuntime := false
 	for time.Now().Before(deadline) {
 		host.sessionRuntimes.mu.RLock()
 		active := host.sessionRuntimes.sessions[sessionID]
 		host.sessionRuntimes.mu.RUnlock()
-		if active != nil && active.instance != nil {
-			seenRuntime = true
+		// Callers have already observed the input or completed Turn. The idle
+		// Runtime may have been released before this helper first observes it.
+		if active == nil {
+			return
+		}
+		if active.instance != nil {
 			if _, ok := active.instance.currentGateway().ActiveTurn(sessionID); !ok {
 				return
 			}
-		}
-		if seenRuntime && active == nil {
-			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -707,6 +722,10 @@ func (*hostedChildClosingRunner) Submit(agent.Submission) error {
 	return agent.ErrRunInputClosed
 }
 
+func (*hostedChildClosingRunner) SubmitBatch(context.Context, []agent.AgentCommunicationInput) error {
+	return agent.ErrRunInputClosed
+}
+
 func (*hostedChildClosingRunner) Cancel() agent.CancelResult {
 	return agent.CancelResult{Status: agent.CancelStatusCancelled}
 }
@@ -733,3 +752,18 @@ func (hostedChildTerminalRunner) Cancel() agent.CancelResult {
 
 func (hostedChildTerminalRunner) Close() error                         { return nil }
 func (hostedChildTerminalRunner) WaitCompletion(context.Context) error { return nil }
+
+func hostedChildCanonicalTurn(t *testing.T, host *Stack, ref session.SessionRef, input string) string {
+	t.Helper()
+	events, err := host.composition.sessions.Events(t.Context(), session.EventsRequest{SessionRef: ref})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Type == session.EventTypeUser && session.EventText(event) == input && event.Scope != nil {
+			return event.Scope.TurnID
+		}
+	}
+	t.Fatal("initial canonical Turn input missing")
+	return ""
+}

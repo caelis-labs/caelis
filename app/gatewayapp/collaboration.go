@@ -17,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 type collaborationBackend struct {
@@ -55,9 +56,15 @@ func (b *collaborationBackend) List(ctx context.Context, id string) ([]collabora
 		}
 		if e == nil && rt != nil && rt.instance != nil {
 			if gw := rt.instance.currentGateway(); gw != nil {
-				if _, running := gw.ActiveTurn(id); !running {
+				if turn, running := gw.ActiveTurn(id); !running {
 					out[0].State = "idle"
 					out[0].CanDeliver = true
+				} else if turn.Kind == kernel.ActiveTurnKindKernel && turn.ParticipantID == "" {
+					if active.Controller.Kind != session.ControllerKindACP {
+						out[0].CanDeliver = true
+					} else if status, found, err := rt.instance.ACPControllerStatus(ctx, active.SessionRef); err == nil && found {
+						out[0].CanDeliver = status.SupportsSteering
+					}
 				}
 			}
 		}

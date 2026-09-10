@@ -10,6 +10,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -168,11 +169,7 @@ func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
 			if req.Kind == SubmissionKindConversation {
 				h.approvals.invalidateAutoReviews()
 			}
-			submission := runnerSubmissionFromSubmitRequest(req)
-			if contextual, ok := runner.(agent.ContextSubmissionRunner); ok {
-				return contextual.SubmitContext(ctx, submission)
-			}
-			return runner.Submit(submission)
+			return submitRunnerInput(ctx, runner, req)
 		}
 		if waitForRunner {
 			select {
@@ -253,7 +250,7 @@ func (h *turnHandle) setRunner(runner agent.Runner) {
 		return
 	}
 	for _, req := range pending {
-		if err := runner.Submit(runnerSubmissionFromSubmitRequest(req)); err != nil {
+		if err := submitRunnerInput(h.ctx, runner, req); err != nil {
 			h.publishError(err)
 		}
 	}
@@ -287,6 +284,7 @@ func cloneSubmitRequest(req SubmitRequest) SubmitRequest {
 		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
 		Metadata:     cloneMap(req.Metadata),
 		Actor:        session.CloneActorRef(req.Actor),
+		Inputs:       agent.CloneAgentCommunicationInputs(req.Inputs),
 	}
 	if req.Approval != nil {
 		approval := *req.Approval
@@ -303,10 +301,14 @@ func runnerSubmissionFromSubmitRequest(req SubmitRequest) agent.Submission {
 		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
 		Metadata:     cloneMap(req.Metadata),
 		Actor:        session.CloneActorRef(req.Actor),
+		Inputs:       agent.CloneAgentCommunicationInputs(req.Inputs),
 	}
 }
 
 func validateSubmitRequest(req SubmitRequest) error {
+	if err := agent.ValidateSubmissionInputs(runnerSubmissionFromSubmitRequest(req)); err != nil {
+		return invalidAgentCommunication(err)
+	}
 	switch req.Kind {
 	case SubmissionKindConversation:
 		if req.Approval != nil {
@@ -316,6 +318,9 @@ func validateSubmitRequest(req SubmitRequest) error {
 	case SubmissionKindAgentCommunication:
 		if req.Approval != nil {
 			return invalidSubmissionKind(req.Kind)
+		}
+		if len(req.Inputs) > 0 {
+			return nil
 		}
 		if err := session.ValidateAgentCommunicationActor(req.Actor); err != nil {
 			return invalidAgentCommunication(err)
@@ -650,4 +655,19 @@ func cloneMap(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func submitRunnerInput(ctx context.Context, runner agent.Runner, req SubmitRequest) error {
+	if len(req.Inputs) > 0 {
+		batch, ok := runner.(agent.BatchSubmissionRunner)
+		if !ok {
+			return errorcode.New(errorcode.Unsupported, "gateway: runner does not support batched input")
+		}
+		return batch.SubmitBatch(ctx, req.Inputs)
+	}
+	submission := runnerSubmissionFromSubmitRequest(req)
+	if contextual, ok := runner.(agent.ContextSubmissionRunner); ok {
+		return contextual.SubmitContext(ctx, submission)
+	}
+	return runner.Submit(submission)
 }

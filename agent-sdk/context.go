@@ -43,6 +43,9 @@ type Submission struct {
 	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
 	Metadata     map[string]any      `json:"metadata,omitempty"`
 	Actor        session.ActorRef    `json:"actor,omitempty"`
+	// Inputs is one ordered Agent-communication admission at a safe model
+	// boundary. It excludes all singular input fields and retains every source.
+	Inputs []AgentCommunicationInput `json:"-"`
 }
 
 // CancelStatus identifies the outcome of one cancellation request.
@@ -108,6 +111,12 @@ type Runner interface {
 // continue to implement only Runner.Submit and drain their local queue.
 type ContextSubmissionRunner interface {
 	SubmitContext(context.Context, Submission) error
+}
+
+// BatchSubmissionRunner admits one ordered Agent-communication batch to the
+// exact live Run. Callers must not fall back to per-message Submit calls.
+type BatchSubmissionRunner interface {
+	SubmitBatch(context.Context, []AgentCommunicationInput) error
 }
 
 // RunnerCompletionWaiter reports when the execution producer, including its
@@ -486,6 +495,7 @@ func CloneSubmission(sub Submission) Submission {
 		ContentParts: append([]model.ContentPart(nil), sub.ContentParts...),
 		Metadata:     jsonvalue.CloneMap(sub.Metadata),
 		Actor:        session.CloneActorRef(sub.Actor),
+		Inputs:       CloneAgentCommunicationInputs(sub.Inputs),
 	}
 	return out
 }

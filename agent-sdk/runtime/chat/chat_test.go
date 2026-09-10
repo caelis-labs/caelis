@@ -1085,6 +1085,41 @@ func TestChatAgentDrainsPendingUserSubmissionAfterToolResults(t *testing.T) {
 	}
 }
 
+func TestChatAgentFinalDrainDoesNotLoseInputBehindEmptySubmission(t *testing.T) {
+	testModel := &recordingModel{}
+	chatAgent, err := New("chat", testModel, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	drains := 0
+	ctx := finalDrainContext{Context: agent.NewContext(agent.ContextSpec{Context: t.Context()}), drain: func() []agent.Submission {
+		drains++
+		switch drains {
+		case 1:
+			return []agent.Submission{{Kind: agent.SubmissionKindConversation, Text: " "}}
+		case 2:
+			return []agent.Submission{{Kind: agent.SubmissionKindConversation, Text: "late report"}}
+		default:
+			return nil
+		}
+	}}
+	for _, err := range chatAgent.Run(ctx) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if drains != 3 || len(testModel.last.Messages) != 2 || testModel.last.Messages[1].TextContent() != "late report" {
+		t.Fatalf("final drain lost continuation: drains=%d, model input=%#v", drains, testModel.last.Messages)
+	}
+}
+
+type finalDrainContext struct {
+	agent.Context
+	drain func() []agent.Submission
+}
+
+func (c finalDrainContext) DrainFinalSubmissions() []agent.Submission { return c.drain() }
+
 func TestChatAgentDrainsPendingImageAsDurableUserMessage(t *testing.T) {
 	t.Parallel()
 

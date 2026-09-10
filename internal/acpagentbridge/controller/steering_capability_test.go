@@ -94,15 +94,15 @@ func TestControllerAndParticipantRunsRetainConnectionSteeringCapability(t *testi
 
 	mainRun := &controllerRun{}
 	mainRun.applyStartupStateLocked(nil, "remote-1", controllerClientState{supportsSteering: true}, 0)
-	if !mainRun.supportsSteering {
+	if !mainRun.supportsSteering || !mainRun.controllerStatusLocked(session.SessionRef{}).SupportsSteering {
 		t.Fatal("main controller did not retain supported steering capability")
 	}
 	mainRun.applyStartupStateLocked(nil, "remote-1", controllerClientState{supportsSteering: false}, 0)
-	if mainRun.supportsSteering {
+	if mainRun.supportsSteering || mainRun.controllerStatusLocked(session.SessionRef{}).SupportsSteering {
 		t.Fatal("main controller reconnect retained stale steering=true capability")
 	}
 	mainRun.applyStartupStateLocked(nil, "remote-1", controllerClientState{supportsSteering: true}, 0)
-	if !mainRun.supportsSteering {
+	if !mainRun.supportsSteering || !mainRun.controllerStatusLocked(session.SessionRef{}).SupportsSteering {
 		t.Fatal("main controller reconnect did not refresh steering=false to true")
 	}
 

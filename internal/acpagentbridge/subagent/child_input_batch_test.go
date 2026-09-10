@@ -66,3 +66,46 @@ func TestIdleChildBatchStartsOnePromptAndProjectsEverySource(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestActiveChildBatchSteersOnceAndProjectsEverySource(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	runner := childInputTestRunner(t, "active")
+	events := make(chan childInputTestEvent, 16)
+	spawn := childInputSpawnContext(t, "task-active-batch", events)
+	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumeSpawnInitialInput(t, ctx, events, spawn.ActivityID, "initial")
+	run, err := runner.lookup(anchor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := []agent.AgentCommunicationInput{
+		{Source: session.ParentCommunicationActor(), Input: "first report", DisplayInput: "First report"},
+		{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "sibling", Name: "sibling"}, Input: "second report", DisplayInput: "Second report"},
+	}
+	result, err := runner.SubmitChildInputBatch(ctx, agent.ChildInputRequest{Target: run.slot.target, Messages: inputs})
+	if err != nil || result.StartedActivity || result.ActivityID != spawn.ActivityID {
+		t.Fatalf("active batch = %#v, %v", result, err)
+	}
+	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, result.ActivityID)
+	accepted := 0
+	for _, frame := range frames {
+		if communication := session.ProtocolAgentCommunicationOf(frame.Event); communication != nil {
+			if accepted >= len(inputs) || communication.Text != inputs[accepted].DisplayInput || frame.Event.Actor.ID != inputs[accepted].Source.ID {
+				t.Fatalf("batch projection changed: %#v", frame.Event)
+			}
+			accepted++
+		} else if frame.Event.Text != "steered output" {
+			t.Fatalf("unexpected activity: %#v", frame.Event)
+		}
+	}
+	if accepted != 2 || len(frames) != 3 || terminal.Result.State != delegation.StateCompleted {
+		t.Fatalf("frames=%d accepted=%d terminal=%#v", len(frames), accepted, terminal.Result)
+	}
+	if err := runner.Quiesce(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

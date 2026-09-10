@@ -31,6 +31,55 @@ func TestRunnerPublicSubmitRejectsRuntimeModelContext(t *testing.T) {
 	}
 }
 
+func TestRunnerFinalDrainLinearizesContinuationAndClosure(t *testing.T) {
+	for range 100 {
+		r := newRunner(t.Context(), "race", func() {}, nil)
+		start := make(chan struct{})
+		sent := make(chan error, 1)
+		go func() {
+			<-start
+			sent <- r.Submit(agent.Submission{Kind: agent.SubmissionKindConversation, Text: "late input"})
+		}()
+		close(start)
+		drained := r.drainFinalSubmissions()
+		err := <-sent
+		if err == nil {
+			if len(drained) != 1 || drained[0].Text != "late input" {
+				t.Fatalf("accepted input lost at final drain: %#v", drained)
+			}
+		} else if !errors.Is(err, agent.ErrRunInputClosed) || len(drained) != 0 {
+			t.Fatalf("closure = %v, drain = %#v", err, drained)
+		}
+	}
+}
+
+func TestRunnerBatchAdmissionValidatesAllSourcesAndClones(t *testing.T) {
+	r := newRunner(t.Context(), "batch", func() {}, nil)
+	sub := agent.Submission{Kind: agent.SubmissionKindAgentCommunication, Inputs: []agent.AgentCommunicationInput{
+		{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "one"}, Input: "one"},
+		{Input: "two"},
+	}}
+	if err := r.Submit(sub); err == nil {
+		t.Fatal("invalid second source accepted")
+	}
+	if len(r.drainSubmissions()) != 0 {
+		t.Fatal("partial batch admitted")
+	}
+	sub.Inputs[1].Source = session.ActorRef{Kind: session.ActorKindParticipant, ID: "two"}
+	if err := r.Submit(sub); err != nil {
+		t.Fatal(err)
+	}
+	sub.Inputs[0].Input = "changed"
+	drained := r.drainSubmissions()
+	if len(drained) != 1 || len(drained[0].Inputs) != 2 || drained[0].Inputs[0].Input != "one" {
+		t.Fatalf("batch = %#v", drained)
+	}
+	sub.Text = "mixed"
+	if err := r.Submit(sub); err == nil {
+		t.Fatal("mixed admission accepted")
+	}
+}
+
 func TestRunnerSubmissionDispatcherPreservesFIFOAndPerItemResults(t *testing.T) {
 	t.Parallel()
 

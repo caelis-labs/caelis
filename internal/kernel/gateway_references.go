@@ -89,6 +89,13 @@ func (g *Gateway) preparePromptParticipantRequest(ctx context.Context, activeSes
 
 func (g *Gateway) prepareSubmitRequest(ctx context.Context, activeSession session.Session, req SubmitRequest) (SubmitRequest, error) {
 	if req.Kind == SubmissionKindAgentCommunication {
+		if len(req.Inputs) > 0 {
+			if err := agent.ValidateSubmissionInputs(runnerSubmissionFromSubmitRequest(req)); err != nil {
+				return SubmitRequest{}, invalidAgentCommunication(err)
+			}
+			req.Inputs = clonePreparedAgentCommunicationInputs(req.Inputs)
+			return req, nil
+		}
 		if err := session.ValidateAgentCommunicationActor(req.Actor); err != nil {
 			return SubmitRequest{}, invalidAgentCommunication(err)
 		}

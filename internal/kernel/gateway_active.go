@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -277,6 +278,7 @@ func (g *Gateway) SubmitActiveTurn(ctx context.Context, req SubmitActiveTurnRequ
 		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
 		Metadata:     cloneMap(req.Metadata),
 		Actor:        session.CloneActorRef(req.Actor),
+		Inputs:       agent.CloneAgentCommunicationInputs(req.Inputs),
 		Approval:     req.Approval,
 	})
 }

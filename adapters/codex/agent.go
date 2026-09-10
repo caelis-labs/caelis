@@ -114,7 +114,7 @@ func (a *agent) HandleExtensionMethod(ctx context.Context, method string, params
 		TurnID string `json:"turnId"`
 	}
 	err = a.backend.rpc.Request(ctx, "turn/steer", map[string]any{
-		"threadId": state.threadID, "turnId": turnID, "input": input,
+		"threadId": state.threadID, "expectedTurnId": turnID, "input": input,
 	}, &response)
 	if err != nil {
 		state.mu.Lock()
@@ -124,6 +124,11 @@ func (a *agent) HandleExtensionMethod(ctx context.Context, method string, params
 			return map[string]any{"outcome": "promptRequired", "reason": "noRunningTurn"}, nil
 		}
 		return nil, err
+	}
+	if response.TurnID != turnID {
+		// A successful RPC with a different acknowledgement does not prove
+		// rejection. Preserve uncertainty across the ACP extension boundary.
+		return map[string]any{"outcome": "unknown", "reason": "turnMismatch"}, nil
 	}
 	return map[string]any{"outcome": "injected"}, nil
 }

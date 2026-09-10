@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -449,6 +450,13 @@ func (r *fencedRunner) SubmitContext(ctx context.Context, submission agent.Submi
 		return contextual.SubmitContext(ctx, submission)
 	}
 	return r.inner.Submit(submission)
+}
+
+func (r *fencedRunner) SubmitBatch(ctx context.Context, inputs []agent.AgentCommunicationInput) error {
+	if batch, ok := r.inner.(agent.BatchSubmissionRunner); ok {
+		return batch.SubmitBatch(ctx, inputs)
+	}
+	return errorcode.New(errorcode.Unsupported, "controlplane: runner does not support batched input")
 }
 
 func (r *fencedRunner) Cancel() agent.CancelResult { return r.inner.Cancel() }

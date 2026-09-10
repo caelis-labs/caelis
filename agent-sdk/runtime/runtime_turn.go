@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -192,6 +193,26 @@ func (r *Runtime) runAttempt(
 	})
 
 	emitted := false
+	if sink != nil {
+		runCtx = &localInputContext{Context: runCtx, runner: sink, commit: func(inputs []agent.AgentCommunicationInput) ([]model.Message, error) {
+			events, err := buildSteeringInputEvents(activeSession, turnID, agent.Submission{Kind: agent.SubmissionKindAgentCommunication, Inputs: inputs})
+			if err != nil {
+				return nil, err
+			}
+			persisted, err := r.appendInputEvents(ctx, ref, events)
+			if err != nil {
+				return nil, err
+			}
+			messages := make([]model.Message, 0, len(persisted))
+			for _, event := range persisted {
+				batch = append(batch, event)
+				sink.publishEvent(event)
+				messages = append(messages, *event.Message)
+			}
+			emitted = emitted || len(persisted) > 0
+			return messages, nil
+		}}
+	}
 	for event, runErr := range activeAgent.Run(runCtx) {
 		if runErr != nil {
 			return batch, emitted, inputPersisted, runErr

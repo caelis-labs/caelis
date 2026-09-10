@@ -1,9 +1,34 @@
 package agentsdk
 
 import (
+	"errors"
+	"strings"
+
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
+
+// ValidateSubmissionInputs rejects mixed singular/batch input and validates all
+// batch members before any member can be admitted. Singular inputs retain their
+// existing kind-specific validation at the Runner boundary.
+func ValidateSubmissionInputs(sub Submission) error {
+	if len(sub.Inputs) == 0 {
+		return nil
+	}
+	if sub.Kind != SubmissionKindAgentCommunication || sub.Text != "" || sub.DisplayInput != "" ||
+		len(sub.ContentParts) != 0 || len(sub.Metadata) != 0 || session.ActorRefHasIdentity(sub.Actor) {
+		return errors.New("batch and singular Agent communication cannot be combined")
+	}
+	for _, item := range sub.Inputs {
+		if err := session.ValidateAgentCommunicationActor(item.Source); err != nil {
+			return err
+		}
+		if strings.TrimSpace(item.Input) == "" && len(item.ContentParts) == 0 {
+			return errors.New("Agent communication batch requires nonempty inputs")
+		}
+	}
+	return nil
+}
 
 // AgentCommunicationInput is one source-attributed input in an ordered admission.
 // Source is trusted embedding authority, never inferred from text or wire metadata.

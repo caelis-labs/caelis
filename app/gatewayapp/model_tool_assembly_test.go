@@ -73,7 +73,7 @@ func TestProductAgentFinalModelRequestIncludesCanonicalTaskCommunicationTools(t 
 	taskFunction := finalToolFunction(t, functions, tasktool.ToolName)
 	assertFinalToolProperties(t, taskFunction, "action", "handle", "input")
 	sendFunction := finalToolFunction(t, functions, sendmessage.ToolName)
-	if got, _ := sendFunction["description"].(string); !strings.Contains(got, "Success means queued, not completed") {
+	if got, _ := sendFunction["description"].(string); !strings.Contains(got, "Success confirms queuing only") || !strings.Contains(got, "Delivery is automatic at a safe boundary") {
 		t.Fatalf("final SendMessage description = %q", got)
 	}
 	assertFinalToolProperties(t, sendFunction, "to", "message", "reply_to")
