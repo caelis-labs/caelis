@@ -181,8 +181,10 @@ func (r *Runtime) runAttempt(
 		return batch, false, inputPersisted, err
 	}
 	var drainSubmissions func() []agent.Submission
+	var inputReady func() <-chan struct{}
 	if sink != nil {
 		drainSubmissions = sink.drainSubmissions
+		inputReady = sink.inputReadySignal
 	}
 	runCtx := agent.NewContext(agent.ContextSpec{
 		Context:          ctx,
@@ -190,6 +192,7 @@ func (r *Runtime) runAttempt(
 		Events:           invocation.PromptEvents,
 		State:            invocation.State,
 		DrainSubmissions: drainSubmissions,
+		InputReady:       inputReady,
 	})
 
 	emitted := false

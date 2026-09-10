@@ -27,6 +27,7 @@ type runner struct {
 	finished      bool
 	completionErr error
 	submissions   []agent.Submission
+	inputReady    chan struct{}
 	cancelHook    func() error
 	dispatcher    *runnerSubmissionDispatcher
 }
@@ -36,11 +37,12 @@ func newRunner(ctx context.Context, runID string, cancel context.CancelFunc, obs
 		ctx = context.Background()
 	}
 	return &runner{
-		runID:    runID,
-		ctx:      ctx,
-		cancelFn: cancel,
-		observer: observer,
-		done:     make(chan struct{}),
+		runID:      runID,
+		ctx:        ctx,
+		cancelFn:   cancel,
+		observer:   observer,
+		done:       make(chan struct{}),
+		inputReady: make(chan struct{}),
 	}
 }
 
@@ -100,6 +102,9 @@ func (r *runner) submitContext(ctx context.Context, sub agent.Submission) error 
 		return dispatcher.submit(ctx, sub)
 	}
 	r.submissions = append(r.submissions, agent.CloneSubmission(sub))
+	if len(r.submissions) == 1 {
+		close(r.inputReady)
+	}
 	r.mu.Unlock()
 	return nil
 }
@@ -134,6 +139,12 @@ func (r *runner) drainSubmissions() []agent.Submission {
 	return r.drainInput(false)
 }
 
+func (r *runner) inputReadySignal() <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.inputReady
+}
+
 // drainFinalSubmissions atomically closes input only when the final safe point
 // has no continuation. A later sender can then reselect a new Turn safely.
 func (r *runner) drainFinalSubmissions() []agent.Submission {
@@ -148,6 +159,9 @@ func (r *runner) drainInput(final bool) []agent.Submission {
 	defer r.mu.Unlock()
 	out := agent.CloneSubmissions(r.submissions)
 	r.submissions = nil
+	if len(out) > 0 {
+		r.inputReady = make(chan struct{})
+	}
 	if final && len(out) == 0 {
 		r.closed = true
 	}

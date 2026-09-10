@@ -80,6 +80,20 @@ func TestNewContextProvidesStableReadonlyViews(t *testing.T) {
 	}
 }
 
+func TestInputReadyIsScopedToInvocationAndSurvivesContextWrapping(t *testing.T) {
+	ready := make(chan struct{})
+	parent := NewContext(ContextSpec{Context: t.Context(), InputReady: func() <-chan struct{} { return ready }})
+	wrapped, cancel := context.WithCancel(parent)
+	defer cancel()
+	if got := InputReady(wrapped); got != ready {
+		t.Fatal("tool context wrapper lost the invocation's input signal")
+	}
+	child := NewContext(ContextSpec{Context: wrapped})
+	if got := InputReady(child); got != nil {
+		t.Fatal("new invocation inherited the parent's input signal")
+	}
+}
+
 type staticTool struct {
 	name string
 	desc string

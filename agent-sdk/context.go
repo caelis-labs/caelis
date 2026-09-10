@@ -383,6 +383,9 @@ type ContextSpec struct {
 	State            map[string]any
 	DrainSubmissions func() []Submission
 	Overlay          bool
+	// InputReady optionally observes queued input without consuming it. The
+	// callback must support concurrent calls; see InputReady for signal semantics.
+	InputReady func() <-chan struct{}
 }
 
 // NewContext returns one immutable runtime context implementation suitable for
@@ -392,6 +395,8 @@ func NewContext(spec ContextSpec) Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Do not inherit another invocation's queue observer through the parent.
+	ctx = context.WithValue(ctx, inputReadyContextKey{}, spec.InputReady)
 	return &contextSnapshot{
 		Context:          ctx,
 		session:          session.CloneSession(spec.Session),

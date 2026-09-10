@@ -9,8 +9,12 @@ import (
 )
 
 func TestCollaborationObservationPresentation(t *testing.T) {
-	for _, name := range []string{"ListThreads", "ReadThread", "WaitThread", "ReceiveMessages"} {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct{ name, reason string }{
+		{"ListThreads", "timeout"}, {"ReadThread", "timeout"},
+		{"WaitThread", "timeout"}, {"WaitThread", "input"}, {"ReceiveMessages", "timeout"},
+	} {
+		name := tc.name
+		t.Run(name+"/"+tc.reason, func(t *testing.T) {
 			m := NewModel(Config{NoColor: true, NoAnimation: true})
 			m.width, m.height = 100, 40
 			m.beginLiveTurn(SubmissionModeDefault, false, time.Now())
@@ -21,11 +25,11 @@ func TestCollaborationObservationPresentation(t *testing.T) {
 				t.Fatalf("missing wait hint: %#v", m.runningActivity)
 			}
 			status := eventstream.ToolStatusCompleted
-			env.Update = eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "observe", Status: &status, Content: []eventstream.ToolCallContent{{Type: "content", Content: eventstream.TextContent{Type: "text", Text: `{"reason":"timeout"}`}}}, Meta: acpToolNameMeta(name)}
+			env.Update = eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "observe", Status: &status, Content: []eventstream.ToolCallContent{{Type: "content", Content: eventstream.TextContent{Type: "text", Text: `{"reason":"` + tc.reason + `"}`}}}, Meta: acpToolNameMeta(name)}
 			m = applyACPEnvelopeForTest(t, m, env)
 			for _, block := range m.doc.Blocks() {
 				for _, row := range block.Render(m.blockRenderContext(100)) {
-					if strings.Contains(row.Plain, name) || strings.Contains(row.Plain, "timeout") {
+					if strings.Contains(row.Plain, name) || strings.Contains(row.Plain, tc.reason) {
 						t.Fatalf("control leaked: %s", row.Plain)
 					}
 				}

@@ -90,7 +90,7 @@ func Definitions(controller bool) []tool.Definition {
 	}
 	return append(definitions, []tool.Definition{
 		{Name: "ReadThread", Description: "Read a participant's latest public result and status. Pass cursor as after to omit unchanged output; full history is not returned.", InputSchema: object(map[string]any{"handle": text("Participant handle from ListThreads."), "after": map[string]any{"type": "integer", "minimum": 0}}, "handle"), EffectClass: tool.EffectReadOnly},
-		{Name: "WaitThread", Description: "Wait for mail or selected threads to finish or need attention. Returned mail is removed. Pass each cursor as after to suppress repeated results. Timeout leaves work running.", InputSchema: object(map[string]any{"threads": map[string]any{"type": "array", "maxItems": 8, "items": object(map[string]any{"handle": text("Participant handle."), "after": map[string]any{"type": "integer", "minimum": 0}}, "handle")}, "timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": 60}}), EffectClass: tool.EffectNonIdempotent},
+		{Name: "WaitThread", Description: "Wait for mail, new input, or selected threads to finish or need attention. Returned mail is removed; already admitted input is not repeated. Pass each cursor as after to suppress repeated results. Timeout leaves work running.", InputSchema: object(map[string]any{"threads": map[string]any{"type": "array", "maxItems": 8, "items": object(map[string]any{"handle": text("Participant handle."), "after": map[string]any{"type": "integer", "minimum": 0}}, "handle")}, "timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": 60}}), EffectClass: tool.EffectNonIdempotent},
 	}...)
 }
 

@@ -229,3 +229,70 @@ func TestRunnerSubmissionDispatcherSkipsCanceledQueuedRequest(t *testing.T) {
 	case <-time.After(25 * time.Millisecond):
 	}
 }
+
+func TestRunnerInputReadyTracksAdmissionAndDrain(t *testing.T) {
+	r := newRunner(t.Context(), "input-signal", func() {}, nil)
+	other := newRunner(t.Context(), "other-turn", func() {}, nil)
+	ready := r.inputReadySignal()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := r.SubmitContext(ctx, agent.Submission{Kind: agent.SubmissionKindConversation, Text: "rejected"}); err == nil {
+		t.Fatal("canceled submission accepted")
+	}
+	select {
+	case <-ready:
+		t.Fatal("rejected input signaled readiness")
+	default:
+	}
+
+	var senders sync.WaitGroup
+	for range 16 {
+		senders.Go(func() {
+			if err := r.Submit(agent.Submission{Kind: agent.SubmissionKindConversation, Text: "queued"}); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	senders.Wait()
+	for _, signal := range []<-chan struct{}{ready, r.inputReadySignal()} {
+		select {
+		case <-signal:
+		default:
+			t.Fatal("accepted input not visible to earlier and later observers")
+		}
+	}
+	select {
+	case <-other.inputReadySignal():
+		t.Fatal("input woke another turn")
+	default:
+	}
+	if got := r.drainSubmissions(); len(got) != 16 {
+		t.Fatalf("drained %d submissions, want 16", len(got))
+	}
+	fresh := r.inputReadySignal()
+	select {
+	case <-fresh:
+		t.Fatal("consumed input woke a later wait")
+	default:
+	}
+	if err := r.Submit(agent.Submission{Kind: agent.SubmissionKindConversation, Text: "next batch"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-fresh:
+	default:
+		t.Fatal("next batch did not wake existing observer")
+	}
+	if got := r.drainFinalSubmissions(); len(got) != 1 {
+		t.Fatalf("final drain = %#v", got)
+	}
+	r.drainFinalSubmissions()
+	if err := r.Submit(agent.Submission{Kind: agent.SubmissionKindConversation, Text: "after close"}); !errors.Is(err, agent.ErrRunInputClosed) {
+		t.Fatalf("closed submission = %v", err)
+	}
+	select {
+	case <-r.inputReadySignal():
+		t.Fatal("closed admission signaled pending input")
+	default:
+	}
+}
