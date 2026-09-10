@@ -95,7 +95,7 @@ func (m *Model) View() tea.View {
 	if m.subagentOutputOverlay != nil && m.width > 0 && m.height > 0 {
 		if overlay := m.renderSubagentOutputOverlay(); overlay != "" {
 			normalizeBaseForOverlay()
-			view = tuikit.OverlayCenter(view, overlay, m.width, m.height)
+			view = m.subagentOutputOverlay.composition.compose(view, overlay, m.width, m.height)
 		}
 	}
 	if m.subagentRosterOverlay != nil && m.width > 0 && m.height > 0 {

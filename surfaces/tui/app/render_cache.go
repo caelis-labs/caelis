@@ -14,16 +14,11 @@ import (
 )
 
 type viewportRenderEntry struct {
-	blockID          string
-	cacheKey         string
-	rhythm           viewportRhythmClass
-	lineStart        int
-	lineCount        int
-	styledLines      []string
-	plainLines       []string
-	selectionIndents []int
-	clickTokens      []string
-	clickBounds      []clickColumnRange
+	viewportRowCache
+	cacheKey  string
+	rhythm    viewportRhythmClass
+	lineStart int
+	lineCount int
 }
 
 type viewportRhythmClass string
@@ -44,11 +39,12 @@ func (m *Model) rebuildViewportRenderCache(ctx BlockRenderContext) {
 	nextEntries := make([]viewportRenderEntry, 0, m.doc.Len())
 	for _, block := range m.doc.Blocks() {
 		key := viewportBlockRenderKey(block, ctx)
-		if cached, ok := oldEntries[block.BlockID()]; ok && cached.cacheKey == key {
+		cached, ok := oldEntries[block.BlockID()]
+		if ok && cached.cacheKey == key {
 			nextEntries = append(nextEntries, cached)
 			continue
 		}
-		nextEntries = append(nextEntries, m.renderViewportEntry(block, key, ctx))
+		nextEntries = append(nextEntries, m.renderViewportEntry(block, key, ctx, cached.viewportRowCache))
 	}
 	m.viewportRenderEntries = nextEntries
 }
@@ -76,22 +72,25 @@ func (m *Model) viewportRenderCacheMatchesDocument(ctx BlockRenderContext) bool 
 	return true
 }
 
-func (m *Model) renderViewportEntry(block Block, cacheKey string, ctx BlockRenderContext) viewportRenderEntry {
-	m.observeBlockRender(block.Kind())
-	styledLines, plainLines, selectionIndents, clickTokens, clickBounds := m.wrapRenderedRowsForViewport(block, block.Render(ctx), ctx.Width, ctx)
+func (m *Model) renderViewportEntry(block Block, cacheKey string, ctx BlockRenderContext, previous viewportRowCache) viewportRenderEntry {
 	return viewportRenderEntry{
-		blockID:          block.BlockID(),
+		viewportRowCache: m.renderViewportRowCache(block, ctx, previous),
 		cacheKey:         cacheKey,
 		rhythm:           viewportRhythmForBlock(block),
-		styledLines:      styledLines,
-		plainLines:       plainLines,
-		selectionIndents: selectionIndents,
-		clickTokens:      clickTokens,
-		clickBounds:      clickBounds,
 	}
 }
 
-func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, wrapWidth int, ctx BlockRenderContext) ([]string, []string, []int, []string, []clickColumnRange) {
+type wrappedViewportRows struct {
+	styledLines      []string
+	plainLines       []string
+	selectionIndents []int
+	clickTokens      []string
+	clickBounds      []clickColumnRange
+	// sourceOffsets maps each source row, plus the end, to its wrapped row offset.
+	sourceOffsets []int
+}
+
+func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, wrapWidth int, ctx BlockRenderContext) wrappedViewportRows {
 	if wrapWidth <= 0 {
 		wrapWidth = 1
 	}
@@ -100,8 +99,10 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 	selectionIndents := make([]int, 0, len(rawRows)+8)
 	clickTokens := make([]string, 0, len(rawRows)+8)
 	clickBounds := make([]clickColumnRange, 0, len(rawRows)+8)
+	sourceOffsets := make([]int, 0, len(rawRows)+1)
 
 	for _, row := range rawRows {
+		sourceOffsets = append(sourceOffsets, len(styledLines))
 		styledLine := m.adaptHistoryLineForViewport(row.Styled, wrapWidth)
 		plainLine := strings.TrimRight(ansi.Strip(styledLine), " ")
 		if isACPTranscriptBlockKind(block.Kind()) && row.ACPHeader {
@@ -181,7 +182,8 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 		clickBounds = append(clickBounds, wrappedClickColumnRanges(row, plainParts)...)
 	}
 
-	return styledLines, plainLines, selectionIndents, clickTokens, clickBounds
+	sourceOffsets = append(sourceOffsets, len(styledLines))
+	return wrappedViewportRows{styledLines, plainLines, selectionIndents, clickTokens, clickBounds, sourceOffsets}
 }
 
 func wrappedClickColumnRanges(row RenderedRow, plainParts []string) []clickColumnRange {
@@ -472,7 +474,7 @@ func (m *Model) syncDirtyViewportRenderEntries(ctx BlockRenderContext) bool {
 			return false
 		}
 		key := viewportBlockRenderKey(block, ctx)
-		next := m.renderViewportEntry(block, key, ctx)
+		next := m.renderViewportEntry(block, key, ctx, old.viewportRowCache)
 		if next.rhythm != old.rhythm || viewportEntryHasVisibleContent(next) != viewportEntryHasVisibleContent(old) {
 			return false
 		}
@@ -757,6 +759,7 @@ func viewportBlockRenderKey(block Block, ctx BlockRenderContext) string {
 		builder.addString(b.Raw)
 	case *ParticipantTurnBlock:
 		builder.addString(b.SessionID)
+		builder.addBool(b.FullAgentMessages)
 		builder.addString(b.Actor)
 		builder.addString(b.Status)
 		builder.addTime(b.StartedAt)
@@ -767,7 +770,7 @@ func viewportBlockRenderKey(block Block, ctx BlockRenderContext) string {
 		writeExpandedTools(builder, b.ExpandedExplore)
 		writeExpandedTools(builder, b.ExpandedAgentMessages)
 		writeToolPanelScrollStates(builder, b.ToolPanelScroll)
-		writeSubagentEvents(builder, b.Events, ctx)
+		writeSubagentEvents(builder, b.Events, ctx, b.ExpandedToolOutput)
 	case *DividerBlock:
 		builder.addString(b.Label)
 		builder.addString(b.Text)
@@ -782,7 +785,7 @@ func viewportBlockRenderKey(block Block, ctx BlockRenderContext) string {
 		writeExpandedTools(builder, b.ExpandedExplore)
 		writeExpandedTools(builder, b.ExpandedAgentMessages)
 		writeToolPanelScrollStates(builder, b.ToolPanelScroll)
-		writeSubagentEvents(builder, b.Events, ctx)
+		writeSubagentEvents(builder, b.Events, ctx, b.ExpandedToolOutput)
 	case *WelcomeBlock:
 		builder.addString(b.Version)
 		builder.addString(b.announcement.text)
@@ -840,7 +843,7 @@ func writeRenderedRows(builder *blockKeyBuilder, rows []RenderedRow) {
 	}
 }
 
-func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx BlockRenderContext) {
+func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx BlockRenderContext, fullOutput map[string]bool) {
 	if ctx.AnimationsEnabled && acpTranscriptEventsHaveRunningTool(events) {
 		builder.addBool(subagentOutputPulseDim(ctx.SpinnerView))
 	}
@@ -848,6 +851,8 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 	for _, event := range events {
 		builder.addInt(int(event.Kind))
 		builder.addString(event.Text)
+		builder.addString(string(event.NoticeKind))
+		builder.addBool(event.narrativeFinal)
 		builder.addString(event.SourceName)
 		builder.addString(event.SourceRole)
 		builder.addString(event.SourceID)
@@ -870,11 +875,21 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 		builder.addString(event.Args)
 		builder.addString(event.StartArgs)
 		builder.addString(event.FullArgs)
-		if event.Kind == SEToolCall && isTerminalPanelToolEvent(event) {
+		if event.Kind == SEToolCall && isTerminalPanelToolEvent(event) && !toolPanelFullOutput(fullOutput, event.CallID) {
 			builder.addString(toolOutputRenderKey(event.Name, true, event.Output, ctx.Width))
 		} else {
 			builder.addString(event.Output)
 		}
+		builder.addString(event.OutputMessageID)
+		builder.addString(event.OutputMessage)
+		builder.addString(event.Activity)
+		builder.addBool(event.OutputNarrative)
+		builder.addBool(event.OutputNarrativeBoundary)
+		builder.addBool(event.Terminal)
+		builder.addBool(event.OutputSynthetic)
+		builder.addBool(event.OutputCollection)
+		builder.addBool(event.OutputTerminal)
+		builder.addString(event.MessageTarget)
 		builder.addString(event.TaskHandle)
 		builder.addString(event.TaskAction)
 		builder.addString(event.TaskInput)
@@ -883,6 +898,10 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 		builder.addBool(event.Err)
 		builder.addString(event.ApprovalTool)
 		builder.addString(event.ApprovalCommand)
+		builder.addString(event.ApprovalStatus)
+		builder.addString(event.ApprovalRisk)
+		builder.addString(event.ApprovalAuth)
+		builder.addString(event.ApprovalText)
 		builder.addInt(len(event.PlanEntries))
 		for _, entry := range event.PlanEntries {
 			builder.addString(entry.Content)
