@@ -67,21 +67,32 @@ func (m *Model) buildRunningHintTextAt(now time.Time) string {
 		}
 		return prefix + " " + m.theme.HelpHintTextStyle().Render(text)
 	}
-	text, style := m.runningActivityText()
+	width := 0
+	if m.width > 0 {
+		width = maxInt(1, m.fixedRowContentWidth()-2)
+	}
+	return m.renderActivityHint(m.runningActivity, now, width, m.pendingQueue.visibleCount())
+}
+
+// renderActivityHint shares presentation across panes without sharing their
+// activity or pending-input state. Width excludes the spinner and its space.
+func (m *Model) renderActivityHint(activity runningActivityState, now time.Time, width, pending int) string {
+	prefix := m.theme.SpinnerStyle().Render(m.runningFrame())
+	text, style := m.runningActivityStyle(activity)
 	if text == "" {
 		text = runningPhaseModelWait.label()
 		style = m.theme.HelpHintTextStyle()
 	}
 	parts := []string{text}
-	if m.runningActivity.Phase.showsElapsed() {
-		parts = append(parts, formatRunningActivityElapsed(now, m.runningActivity.StartedAt))
+	if activity.Phase.showsElapsed() {
+		parts = append(parts, formatRunningActivityElapsed(now, activity.StartedAt))
 	}
-	if pending := m.pendingQueue.visibleCount(); pending > 0 {
+	if pending > 0 {
 		parts = append(parts, fmt.Sprintf("%d pending", pending))
 	}
 	text = strings.Join(parts, " · ")
-	if m.width > 0 {
-		text = truncateTailDisplay(text, maxInt(1, m.fixedRowContentWidth()-2))
+	if width > 0 {
+		text = truncateTailDisplay(text, width)
 	}
 	return prefix + " " + style.Render(text)
 }

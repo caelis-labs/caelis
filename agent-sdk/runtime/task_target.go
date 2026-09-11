@@ -51,6 +51,17 @@ func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req 
 		if err != nil {
 			return taskapi.Snapshot{}, err
 		}
+		task.mu.Lock()
+		pending := task.pendingInput
+		task.mu.Unlock()
+		if err := pending.awaitObservedStart(ctx); err != nil {
+			return task.snapshot(), err
+		}
+		// A lifecycle CAS may have installed a newer canonical pointer.
+		task, err = tm.lookupSubagent(ctx, ref, identity.taskID)
+		if err != nil {
+			return taskapi.Snapshot{}, err
+		}
 		return fn(subagentControlTarget{runtime: tm, task: task}, req)
 	}
 	var release func()

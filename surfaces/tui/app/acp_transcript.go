@@ -165,6 +165,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			if len(inputRows) > 0 {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupAgentCommunication, false)
 				rows = appendACPTranscriptSemanticRows(rows, blockID, inputRows, &pendingSemanticGap)
+				pendingSemanticGap = true
 				hasContent = true
 				lastGroup = acpTranscriptGroupAgentCommunication
 			}
@@ -252,14 +253,14 @@ func appendACPTranscriptSemanticRows(rows []RenderedRow, blockID string, next []
 		return append(rows, next...)
 	}
 	firstVisible := 0
-	for firstVisible < len(next) && strings.TrimSpace(next[firstVisible].Plain) == "" {
+	for firstVisible < len(next) && isACPTranscriptGapRow(next[firstVisible]) {
 		firstVisible++
 	}
 	if firstVisible == len(next) {
 		return rows
 	}
 	next = next[firstVisible:]
-	for len(rows) > 0 && strings.TrimSpace(rows[len(rows)-1].Plain) == "" {
+	for len(rows) > 0 && isACPTranscriptGapRow(rows[len(rows)-1]) {
 		rows = rows[:len(rows)-1]
 	}
 	rows = appendBlankRowIfNeeded(rows, blockID)
@@ -296,11 +297,17 @@ func toolContinuesPreviousNarrative(events []SubagentEvent, idx int) bool {
 	return true
 }
 
+func isACPTranscriptGapRow(row RenderedRow) bool {
+	// Styled padding belongs to its surface (for example a user message box),
+	// even when it has no copyable text. Only collapse unpainted spacing.
+	return strings.TrimSpace(row.Plain) == "" && strings.TrimSpace(row.Styled) == ""
+}
+
 func appendBlankRowIfNeeded(rows []RenderedRow, blockID string) []RenderedRow {
 	if len(rows) == 0 {
 		return rows
 	}
-	if strings.TrimSpace(rows[len(rows)-1].Plain) == "" {
+	if isACPTranscriptGapRow(rows[len(rows)-1]) {
 		return rows
 	}
 	return append(rows, PlainRow(blockID, ""))

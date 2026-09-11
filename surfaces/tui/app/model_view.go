@@ -80,7 +80,14 @@ func (m *Model) View() tea.View {
 	}
 
 	view := strings.Join(sections, "\n")
+	mainRect := m.workspaceLayout().main
 	topTrim := 0
+	if m.workspaceLayout().split {
+		view, topTrim = normalizeFullscreenFrameWithTopTrim(view, m.width, mainRect.height)
+	}
+	if mainRect.y > 0 {
+		view = strings.Repeat("\n", mainRect.y) + view
+	}
 	baseNormalized := false
 	normalizeBaseForOverlay := func() {
 		if baseNormalized {
@@ -95,30 +102,34 @@ func (m *Model) View() tea.View {
 	if m.subagentOutputOverlay != nil && m.width > 0 && m.height > 0 {
 		if overlay := m.renderSubagentOutputOverlay(); overlay != "" {
 			normalizeBaseForOverlay()
-			view = m.subagentOutputOverlay.composition.compose(view, overlay, m.width, m.height)
+			if layout := m.workspaceLayout(); layout.split {
+				view = m.subagentOutputOverlay.splitFrame.compose(view, overlay, m.paneDivider(layout.divider), layout)
+				view = m.renderPaneResizePreview(view)
+			} else {
+				view = m.subagentOutputOverlay.composition.compose(view, overlay, m.width, m.height)
+			}
+			if menu := m.renderPaneMenu(); menu != "" {
+				rect := m.subagentOutputOverlay.menuRect
+				view = tuikit.OverlayAt(view, menu, m.width, m.height, rect.x, rect.y)
+			}
 		}
 	}
-	if m.subagentRosterOverlay != nil && m.width > 0 && m.height > 0 {
-		if overlay := m.renderSubagentRosterOverlay(); overlay != "" {
-			normalizeBaseForOverlay()
-			view = tuikit.OverlayCenter(view, overlay, m.width, m.height)
-		}
-	}
+
 	if m.activePrompt != nil && m.width > 0 && m.height > 0 {
 		if promptView := m.renderPromptModal(); promptView != "" {
 			normalizeBaseForOverlay()
-			view = overlayAboveBottomAreaLeft(view, promptView, m.width, m.mainColumnX()+inputHorizontalInset, maxInt(0, bottomHeight-m.promptModalReservedHeight()), 0)
+			view = overlayAboveBottomAreaLeft(view, promptView, m.width, m.mainColumnX()+inputHorizontalInset, maxInt(0, m.height-mainRect.y-mainRect.height+bottomHeight-m.promptModalReservedHeight()), 0)
 		}
 	} else if overlayView := m.renderInputOverlay(); overlayView != "" && m.width > 0 && m.height > 0 {
 		normalizeBaseForOverlay()
-		view = overlayAboveBottomAreaLeft(view, overlayView, m.width, m.mainColumnX()+inputHorizontalInset, bottomHeight, 0)
+		view = overlayAboveBottomAreaLeft(view, overlayView, m.width, m.mainColumnX()+inputHorizontalInset, m.height-mainRect.y-mainRect.height+bottomHeight, 0)
 	}
 
 	// Overlay: command palette.
 	if m.shouldRenderPalette() && m.width > 0 && m.height > 0 {
 		if paletteView := m.renderPaletteOverlay(); paletteView != "" {
 			normalizeBaseForOverlay()
-			view = overlayAboveBottomAreaLeft(view, paletteView, m.width, m.mainColumnX()+inputHorizontalInset, bottomHeight, 0)
+			view = overlayAboveBottomAreaLeft(view, paletteView, m.width, m.mainColumnX()+inputHorizontalInset, m.height-mainRect.y-mainRect.height+bottomHeight, 0)
 		}
 	}
 	if m.width > 0 && m.height > 0 {
@@ -145,11 +156,12 @@ func (m *Model) View() tea.View {
 	frame.MouseMode = m.desiredMouseMode()
 	frame.ReportFocus = true
 	frame.WindowTitle = m.windowTitle()
-	if m.subagentOverlay == nil && m.subagentOutputOverlay == nil && m.subagentRosterOverlay == nil {
+	if m.subagentOverlay == nil && (!m.workspace.childFocused || m.activePrompt != nil) {
 		if cursor := m.regularInputCursor(); cursor != nil {
 			cursor.X += m.mainColumnX()
 			cursor.Y += m.viewport.Height() + m.preComposerFixedHeight() + tuikit.ComposerPadTop
 			cursor.Y += m.composerChrome().topRows()
+			cursor.Y += mainRect.y
 			cursor.Y -= topTrim
 			if cursor.Y < 0 {
 				cursor.Y = 0
@@ -157,6 +169,11 @@ func (m *Model) View() tea.View {
 			if m.height > 0 && cursor.Y >= m.height {
 				cursor.Y = m.height - 1
 			}
+			frame.Cursor = cursor
+		}
+	}
+	if m.activePrompt == nil {
+		if cursor := m.paneCursor(); cursor != nil {
 			frame.Cursor = cursor
 		}
 	}

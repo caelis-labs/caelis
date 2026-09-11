@@ -28,6 +28,8 @@ type ControlPlane struct {
 
 // ControlPlaneConfig configures one shared-registry ACP control plane.
 type ControlPlaneConfig struct {
+	// RetainChildExecution retains the Host Runtime for a child prompt producer.
+	RetainChildExecution func(session.SessionRef) func()
 	// Diagnostics is the Host-private ACP lifecycle error sink.
 	Diagnostics       *slog.Logger
 	Agents            []assembly.AgentConfig
@@ -45,6 +47,7 @@ func NewControlPlane(cfg ControlPlaneConfig) (*ControlPlane, error) {
 	}
 	runner, err := acpsubagent.NewRunner(acpsubagent.RunnerConfig{
 		Diagnostics:       cfg.Diagnostics,
+		RetainExecution:   cfg.RetainChildExecution,
 		Registry:          registry,
 		PlacementResolver: cfg.PlacementResolver,
 		SessionPreparer:   cfg.SessionPreparer,
@@ -87,7 +90,7 @@ func (c *ControlPlane) Quiesce(ctx context.Context) error {
 }
 
 // LoadHistory delegates one read-only provider session/load to the shared
-// subagent runner without activating a Runtime.
+// subagent runner retained by its owning Session Runtime.
 func (c *ControlPlane) LoadHistory(ctx context.Context, req subagent.HistoryRequest) (session.LoadedSession, error) {
 	if c == nil || c.runner == nil {
 		return session.LoadedSession{}, fmt.Errorf("internal/acpagentbridge/assembly: subagent history loader is unavailable")

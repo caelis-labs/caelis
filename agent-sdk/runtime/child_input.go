@@ -30,6 +30,9 @@ func (r *Runtime) SubmitChildInput(
 		ctx = context.Background()
 	}
 	command := agent.CloneChildInputCommand(raw)
+	if command.UserInput {
+		return agent.ChildInputResult{}, errorcode.New(errorcode.PermissionDenied, "Agent messaging cannot submit user input")
+	}
 	if command.Target == "" || !session.ActorRefHasIdentity(command.Source) {
 		return agent.ChildInputResult{}, errorcode.New(errorcode.InvalidArgument, "Target Agent and Source Agent identities are required")
 	}
@@ -172,7 +175,8 @@ func (r *Runtime) submitChildInputLocked(
 		submit = batchRunner.SubmitChildInputBatch
 	}
 	result, err := submit(ctx, agent.ChildInputRequest{
-		Target: target, Source: source, ActivityID: activityID, Output: outputObserver, Completion: completion, Input: command.Input,
+		UserInput: command.UserInput,
+		Target:    target, Source: source, ActivityID: activityID, Output: outputObserver, Completion: completion, Input: command.Input,
 		DisplayInput: command.DisplayInput, ContentParts: command.ContentParts, Messages: messages,
 	})
 	if result.StartedActivity || errorcode.Is(err, errorcode.UnknownOutcome) {
@@ -203,7 +207,9 @@ func (r *Runtime) prepareChildTaskOutput(ctx context.Context, task *subagentTask
 	completion := newSubagentCompletionSink(ctx, r.tasks, taskRef.TaskID, turnSeq)
 	if !running {
 		activity := &childTaskActivity{
-			runtime: r.tasks, ctx: session.ContextWithControlMutation(context.WithoutCancel(ctx), session.ControlMutationPurposeSubagentActivity),
+			ready:       make(chan struct{}),
+			persistDone: make(chan struct{}),
+			runtime:     r.tasks, ctx: session.ContextWithControlMutation(context.WithoutCancel(ctx), session.ControlMutationPurposeSubagentActivity),
 			ref: ref, taskID: taskRef.TaskID,
 			activityID: activityID, turnSeq: turnSeq, observer: observer,
 		}

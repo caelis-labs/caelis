@@ -1,9 +1,10 @@
 package tuiapp
 
 import (
-	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
@@ -34,16 +35,38 @@ type subagentOutputOverlayGeometry struct {
 }
 
 type subagentOutputOverlayState struct {
-	callID      string
-	offset      int
-	followTail  bool
-	layout      subagentOutputOverlayLayout
-	composition centeredOverlayCache
-	geometry    subagentOutputOverlayGeometry
-	pressedItem string
-	selecting   bool
-	selectStart textSelectionPoint
-	selectEnd   textSelectionPoint
+	attachments        []inputAttachment
+	historyAttachments [][]inputAttachment
+	editorSelecting    bool
+	editorSelectStart  textSelectionPoint
+	editorSelectEnd    textSelectionPoint
+	history            []string
+	historyIndex       int
+	editor             textarea.Model
+	editorReady        bool
+	editorOffset       int
+	editorCursor       *tea.Cursor
+	editorY            int
+	editorHeight       int
+	inputStatus        string
+	receipts           []string
+	menu               string
+	menuIndex          int
+	menuRows           []paneMenuItem
+	menuItems          []paneMenuItem
+	menuRect           paneRect
+	headerActions      []paneHeaderAction
+	callID             string
+	offset             int
+	followTail         bool
+	layout             subagentOutputOverlayLayout
+	composition        centeredOverlayCache
+	splitFrame         splitWorkspaceFrameCache
+	geometry           subagentOutputOverlayGeometry
+	pressedItem        string
+	selecting          bool
+	selectStart        textSelectionPoint
+	selectEnd          textSelectionPoint
 }
 
 type subagentOutputOverlayLayout struct {
@@ -115,20 +138,26 @@ func (m *Model) openSubagentOutputOverlayView(callID string, view *subagentOutpu
 		return false
 	}
 	view.touch(true)
+	if m.subagentOutputOverlay != nil && m.subagentOutputOverlay.callID == callID {
+		m.workspace.childFocused = true
+		return true
+	}
 	if m.subagentOutputOverlay != nil {
 		m.closeSubagentOutputOverlay()
 	}
 	m.clearInputOverlays()
 	m.showPalette = false
 	m.subagentOverlay = nil
-	m.subagentRosterOverlay = nil
 	m.subagentRosterPressed = false
-	m.subagentOutputOverlay = &subagentOutputOverlayState{
-		callID:      callID,
-		followTail:  true,
-		selectStart: textSelectionPoint{line: -1, col: -1},
-		selectEnd:   textSelectionPoint{line: -1, col: -1},
+	if view.pane == nil {
+		view.pane = &subagentOutputOverlayState{callID: callID, followTail: true, selectStart: textSelectionPoint{line: -1, col: -1}, selectEnd: textSelectionPoint{line: -1, col: -1}}
 	}
+	m.subagentOutputOverlay = view.pane
+	m.workspace.childFocused = true
+	m.workspace.lastCallID = callID
+	m.ensureSubagentEditor(view.pane)
+	m.resizeWorkspace()
+
 	view.prepareVisibleRender()
 	m.reconcileTaskStreamOwner(callID, view.taskHandle)
 	return true
@@ -197,7 +226,13 @@ func (m *Model) closeSubagentOutputOverlay() {
 	callID := strings.TrimSpace(m.subagentOutputOverlay.callID)
 	view := m.subagentOutputViews[callID]
 	m.cancelSelectionAutoScroll()
+	m.clearSubagentOutputSelection()
+	m.subagentOutputOverlay.menu = ""
 	m.subagentOutputOverlay = nil
+	m.workspace.childFocused = false
+	m.workspace.dragging = false
+	m.cancelPaneResize()
+	m.resizeWorkspace()
 	if view != nil {
 		m.reconcileTaskStreamOwner(callID, view.taskHandle)
 		// The live activity fence belongs to the visible observation lifetime.
@@ -214,9 +249,18 @@ func (m *Model) renderSubagentOutputOverlay() string {
 	state := m.subagentOutputOverlay
 	view := m.subagentOutputViews[state.callID]
 	layout := m.subagentOutputLayout(state)
-	surface := m.theme.Tokens().OverlayBg
+	surface := m.subagentPaneSurface()
 	rows := m.subagentOutputRows(view, layout.innerWidth, layout.contentRows)
 	fixedRows := subagentOutputFixedRows(view, rows, layout.innerWidth)
+	if view != nil {
+		// Row wrapping is independent of the pane surface. Painted ANSI rows are
+		// reusable in both layouts only while their background remains the same.
+		surfaceKey := themeColorCacheKey(surface.GetBackground())
+		if view.renderCache.paintedSurfaceKey != surfaceKey {
+			clear(view.renderCache.paintedRows)
+			view.renderCache.paintedSurfaceKey = surfaceKey
+		}
+	}
 	maxOffset := maxInt(0, len(rows)-layout.contentRows)
 	if state.followTail {
 		state.offset = maxOffset
@@ -237,7 +281,7 @@ func (m *Model) renderSubagentOutputOverlay() string {
 		renderSubagentOutputContentLine(
 			surface,
 			layout.innerWidth,
-			normalizeFullscreenFrameLine(m.renderSubagentOutputTitle(view, layout.innerWidth), layout.innerWidth),
+			normalizeFullscreenFrameLine(m.renderPaneTitle(view, layout.innerWidth), layout.innerWidth),
 		),
 	)
 	appendSubagentOutputContentLine(&frame, layout, layout.separator)
@@ -259,19 +303,17 @@ func (m *Model) renderSubagentOutputOverlay() string {
 		}
 		appendSubagentOutputContentLine(&frame, layout, content)
 	}
-	appendSubagentOutputContentLine(&frame, layout, layout.separator)
-	appendSubagentOutputContentLine(
-		&frame,
-		layout,
-		renderSubagentOutputContentLine(
-			surface,
-			layout.innerWidth,
-			normalizeFullscreenFrameLine(
-				m.renderSubagentOutputFooter(state.offset, end, len(rows), layout.innerWidth),
-				layout.innerWidth,
-			),
-		),
-	)
+	appendSubagentOutputContentLine(&frame, layout, layout.blank)
+	appendSubagentOutputContentLine(&frame, layout, renderSubagentOutputContentLine(surface, layout.innerWidth, m.renderPaneHint(view, state, layout.innerWidth)))
+	appendSubagentOutputContentLine(&frame, layout, layout.blank)
+	state.editorY = layout.startY + layout.borderInset + 2 + layout.contentRows + 3
+	editorLines := strings.Split(m.renderPaneEditor(state, layout.innerWidth), "\n")
+	state.editorHeight = len(editorLines)
+	for _, line := range editorLines {
+		appendSubagentOutputContentLine(&frame, layout, tuikit.PaintLineBackground(normalizeFullscreenFrameLine(line, layout.innerWidth), layout.innerWidth, surface.GetBackground()))
+	}
+	appendSubagentOutputContentLine(&frame, layout, renderSubagentOutputContentLine(surface, layout.innerWidth, m.renderPaneFooter(state, layout.innerWidth)))
+
 	appendSubagentOutputFrameLine(&frame, layout.bottomBorder)
 	state.geometry = subagentOutputOverlayGeometry{
 		x:            layout.startX,
@@ -347,35 +389,26 @@ func (m *Model) subagentOutputLayout(state *subagentOutputOverlayState) subagent
 		return subagentOutputOverlayLayout{}
 	}
 	themeKey := m.cachedThemeRenderKey()
-	if layout := state.layout; layout.termWidth == m.width &&
-		layout.termHeight == m.height &&
-		layout.themeKey == themeKey &&
-		layout.useBorder == m.overlayUsesBorder() {
+	workspace := m.workspaceLayout()
+	rect := workspace.child
+	frameWidth, targetHeight := rect.width, rect.height
+	useBorder := !workspace.split && m.overlayUsesBorder() && frameWidth >= 8 && targetHeight >= 8
+	borderInset, contentInset, borderHeight := 0, 0, 0
+	if workspace.split {
+		contentInset = 1
+	}
+	if useBorder {
+		borderInset, contentInset, borderHeight = 1, 2, 2
+	}
+	innerWidth := maxInt(1, frameWidth-contentInset*2)
+	editor := m.paneEditorLayout(state, innerWidth)
+	editorHeight := editor.rowEnd - editor.rowOffset + m.composerChrome().verticalRows()
+	contentRows := maxInt(1, targetHeight-borderHeight-6-editorHeight)
+	frameHeight := contentRows + 6 + editorHeight + borderHeight
+	if layout := state.layout; layout.termWidth == m.width && layout.termHeight == m.height && layout.themeKey == themeKey && layout.frameWidth == frameWidth && layout.frameHeight == frameHeight && layout.startX == rect.x && layout.startY == rect.y && layout.contentRows == contentRows && layout.useBorder == useBorder {
 		return layout
 	}
-
-	frameWidth := minInt(maxInt(64, m.fixedRowWidth()-6), maxInt(20, m.width-4))
-	if m.width < tuikit.OverlayBorderMinWidth {
-		frameWidth = maxInt(20, m.width)
-	}
-	useBorder := m.overlayUsesBorder()
-	innerWidth := maxInt(16, frameWidth-m.overlayBorderChromeWidth())
-	borderHeight := 0
-	targetHeight := maxInt(6, m.height-4)
-	if useBorder {
-		borderHeight = 2
-	} else {
-		targetHeight = maxInt(6, m.height)
-	}
-	contentRows := maxInt(2, targetHeight-borderHeight-4)
-	frameHeight := contentRows + 4 + borderHeight
-	borderInset := 0
-	contentInset := 0
-	if useBorder {
-		borderInset = 1
-		contentInset = 2
-	}
-	surface := m.theme.Tokens().OverlayBg
+	surface := m.subagentPaneSurface()
 	blank := strings.Repeat(" ", innerWidth)
 	separator := normalizeFullscreenFrameLine(m.theme.SeparatorStyle().Render(strings.Repeat("─", innerWidth)), innerWidth)
 	layout := subagentOutputOverlayLayout{
@@ -387,8 +420,8 @@ func (m *Model) subagentOutputLayout(state *subagentOutputOverlayState) subagent
 		frameHeight:   frameHeight,
 		innerWidth:    innerWidth,
 		contentRows:   contentRows,
-		startX:        maxInt(0, (m.width-frameWidth)/2),
-		startY:        maxInt(0, (m.height-frameHeight)/2),
+		startX:        rect.x,
+		startY:        rect.y,
 		borderInset:   borderInset,
 		contentInset:  contentInset,
 		blank:         renderSubagentOutputContentLine(surface, innerWidth, blank),
@@ -441,15 +474,15 @@ func appendSubagentOutputContentLine(
 	}
 	var line strings.Builder
 	line.Grow(layout.frameWidth)
-	if layout.useBorder {
-		line.WriteString(layout.leftBorder)
+	line.WriteString(layout.leftBorder)
+	for range layout.contentInset - layout.borderInset {
 		line.WriteString(layout.paintedMargin)
 	}
 	line.WriteString(content)
-	if layout.useBorder {
+	for range layout.contentInset - layout.borderInset {
 		line.WriteString(layout.paintedMargin)
-		line.WriteString(layout.rightBorder)
 	}
+	line.WriteString(layout.rightBorder)
 	frame.WriteString(line.String())
 }
 
@@ -561,17 +594,18 @@ func (m *Model) subagentOutputRows(view *subagentOutputView, width, height int) 
 			}
 		}
 		view.renderCache = subagentOutputRenderCache{
-			revision:    view.revision,
-			entries:     entries,
-			width:       width,
-			height:      height,
-			termWidth:   m.width,
-			themeKey:    ctx.renderThemeKey(),
-			workspace:   strings.TrimSpace(ctx.Workspace),
-			rows:        rows,
-			fixedRows:   fixedRows,
-			paintedRows: paintedRows,
-			renders:     previous.renders + 1,
+			revision:          view.revision,
+			entries:           entries,
+			width:             width,
+			height:            height,
+			termWidth:         m.width,
+			themeKey:          ctx.renderThemeKey(),
+			workspace:         strings.TrimSpace(ctx.Workspace),
+			rows:              rows,
+			fixedRows:         fixedRows,
+			paintedRows:       paintedRows,
+			paintedSurfaceKey: previous.paintedSurfaceKey,
+			renders:           previous.renders + 1,
 		}
 		view.renderReady = false
 	}
@@ -587,7 +621,7 @@ func (m *Model) subagentOutputHistoryPending(view *subagentOutputView) bool {
 		return false
 	}
 	if taskID := strings.TrimSpace(m.taskStreamIDsByCallID[callID]); taskID != "" {
-		return m.taskStreamHistoryInFlight(taskID)
+		return m.taskStreamWanted[taskID] && (m.taskStreamTokens[taskID] != 0 || m.taskStreamSubscriptions[taskID] != nil)
 	}
 	return m.taskStreamResolveTokens[callID] != 0
 }
@@ -629,40 +663,4 @@ func (m *Model) cachedSubagentOutputRows(view *subagentOutputView, width, height
 		return cache.rows, true
 	}
 	return nil, false
-}
-
-func (m *Model) renderSubagentOutputTitle(view *subagentOutputView, width int) string {
-	actor := ""
-	status := subagentOutputRunning
-	if view != nil {
-		actor = firstNonEmpty(strings.TrimSpace(view.actor), strings.TrimSpace(view.taskHandle))
-		status = m.subagentOutputCurrentStatus(view)
-	}
-	title := "Subagent"
-	if actor != "" {
-		title += " · " + actor
-	}
-	closeText := "×"
-	titleBudget := maxInt(8, width-displayColumns("•  "+closeText)-2)
-	title = truncateTailDisplay(title, titleBudget)
-	ctx := m.blockRenderContext(width)
-	left := renderSubagentOutputStatusMark(ctx, status) + " " + m.theme.TitleStyle().Render(title)
-	right := m.theme.HelpHintTextStyle().Render(closeText)
-	gap := maxInt(1, width-displayColumns(left)-displayColumns(right))
-	return left + strings.Repeat(" ", gap) + right
-}
-
-func (m *Model) renderSubagentOutputFooter(start, end, total, width int) string {
-	position := "0 / 0"
-	if total > 0 {
-		position = fmt.Sprintf("%d–%d / %d", start+1, end, total)
-	}
-	help := "↑/↓ scroll  pgup/pgdn page  esc close"
-	gap := maxInt(1, width-displayColumns(position)-displayColumns(help))
-	if displayColumns(position)+displayColumns(help)+gap > width {
-		return m.theme.HelpHintTextStyle().Render(truncateTailDisplay(help, width))
-	}
-	return m.theme.TranscriptMetaStyle().Render(position) +
-		strings.Repeat(" ", gap) +
-		m.theme.HelpHintTextStyle().Render(help)
 }

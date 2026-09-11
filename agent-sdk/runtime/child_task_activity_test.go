@@ -19,6 +19,8 @@ import (
 
 func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
 	r, task, runner := newIdleChildActivityTask(t)
+	trace := &recordingProducerLifecycle{}
+	r.taskOutput = trace
 	before, err := r.tasks.store.Get(t.Context(), task.ref.TaskID)
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +36,9 @@ func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
 	runner.mu.Unlock()
 	if req.ActivityID == "" || req.ActivityID == task.activityID {
 		t.Fatalf("follow-up binding = %#v", req)
+	}
+	if trace.binding.ActivityID != req.ActivityID {
+		t.Fatalf("Agent follow-up lost shared output binding: %#v", trace.binding)
 	}
 	assertChildActivityEntry(t, r, task, before.Revision, 1, taskStringValue(before.Metadata[subagentActivityIDMeta]), false)
 	// An accepted input is recipient-visible, but is not child execution evidence.
@@ -57,6 +62,20 @@ func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
 	assertChildActivityEntry(t, r, task, before.Revision, 1, taskStringValue(before.Metadata[subagentActivityIDMeta]), false)
 	if err := req.Output.ObserveTaskOutput(t.Context(), output.Event{Text: "second", Running: true}); err != nil {
 		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		entry, err := r.tasks.store.Get(t.Context(), task.ref.TaskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if entry.Running && taskStringValue(entry.Metadata[subagentActivityIDMeta]) == req.ActivityID {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("producer evidence did not advance Task asynchronously")
+		}
+		time.Sleep(time.Millisecond)
 	}
 	assertChildActivityEntry(t, r, task, before.Revision+1, 2, req.ActivityID, true)
 	finishChildActivity(t, req.Completion, "second complete")
@@ -105,6 +124,9 @@ func TestChildActivityCASConflictPreservesCommittedGeneration(t *testing.T) {
 					t.Fatal(err)
 				}
 				if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "late first frame", Running: true}); err != nil {
+					t.Fatal(err)
+				}
+				if err := observer.(*childTaskActivity).awaitPersistence(t.Context()); err != nil {
 					t.Fatal(err)
 				}
 				assertChildActivityEntry(t, r, task, committed.Revision, 2, taskStringValue(entry.Metadata[subagentActivityIDMeta]), entry.Running)
@@ -234,6 +256,9 @@ func TestChildActivityOutputDoesNotWaitForTaskControl(t *testing.T) {
 					}
 					time.Sleep(time.Millisecond)
 				}
+			}
+			if err := observer.(*childTaskActivity).awaitPersistence(t.Context()); err != nil {
+				t.Fatal(err)
 			}
 			entry := assertChildActivityEntry(t, r, task, 0, 2, id, !terminal)
 			if seq, ok := subagentCancelTurnSeq(entry.Metadata); !ok || seq != 2 {

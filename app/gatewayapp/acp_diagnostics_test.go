@@ -29,7 +29,7 @@ func TestACPChildFailureReachesStoreLogsWithoutEnteringTaskResult(t *testing.T) 
 			Name: "diagnostic-helper", Command: os.Args[0],
 			Args: []string{"-test.run=^TestACPDiagnosticsHelperProcess$", "--"},
 			Env:  map[string]string{"CAELIS_ACP_DIAGNOSTICS_HELPER": "1"},
-		}}}, nil, nil, nil)
+		}}}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,144 +4,77 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"sync/atomic"
 	"testing"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 )
 
-var managedHistoryTestToken = strings.Repeat("ab", 32)
+func managedReplayState() appserver.SessionState {
+	return appserver.SessionState{SessionID: "child-session", CWD: "/workspace", Metadata: map[string]any{
+		sessionvisibility.MetadataSystemManagedAgent:  sessionvisibility.SystemManagedAgentSubagent,
+		sessionvisibility.MetadataSystemManagedParent: "parent-session",
+		sessionvisibility.MetadataSystemManagedTask:   "task-1",
+	}}
+}
 
-func TestRuntimeAgentProductLoadAcceptsExactManagedHistoryClaimWithoutOwnership(t *testing.T) {
+func TestRuntimeAgentManagedLoadReplaysThenRetainsExecutionOwnership(t *testing.T) {
 	t.Parallel()
-
-	state := appserver.SessionState{
-		SessionID: "child-session",
-		CWD:       "/workspace",
-		Metadata: map[string]any{
-			sessionvisibility.MetadataSystemManagedAgent:  sessionvisibility.SystemManagedAgentSubagent,
-			sessionvisibility.MetadataSystemManagedParent: "parent-session",
-			sessionvisibility.MetadataSystemManagedTask:   "task-1",
-		},
-	}
+	state := managedReplayState()
 	client := &managedHistorySessionClient{state: state}
 	agent := steeringTestAgent(client)
-	agent.managedHistoryToken = managedHistoryTestToken
-	claim := managedHistoryClaim("parent-session", "task-1", managedHistoryTestToken)
-
-	if _, err := agent.LoadSession(context.Background(), acpsdk.LoadSessionRequest{
-		SessionId: acpsdk.SessionId(state.SessionID),
-		Cwd:       state.CWD,
-		Meta:      managedHistoryRawMeta(t, claim),
-	}, nil); err != nil {
-		t.Fatalf("LoadSession(exact managed history claim) error = %v", err)
+	_, err := agent.LoadSession(t.Context(), acpsdk.LoadSessionRequest{
+		SessionId: acpsdk.SessionId(state.SessionID), Cwd: state.CWD,
+		Meta: managedHistoryRawMeta(t, acputil.NewSubagentSessionMeta("parent-session", "task-1")),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := client.reconnects.Load(); got != 1 {
-		t.Fatalf("Reconnect() calls = %d, want 1", got)
+	if client.reconnects.Load() != 1 {
+		t.Fatal("load did not replay exactly once")
 	}
-	if agent.ownsManagedSession(state.SessionID) {
-		t.Fatal("read-only session/load claimed managed Session execution ownership")
-	}
-	if _, err := agent.ResumeSession(context.Background(), acpsdk.ResumeSessionRequest{
-		SessionId: acpsdk.SessionId(state.SessionID),
-		Cwd:       state.CWD,
-		Meta:      managedHistoryRawMeta(t, claim),
-	}); !errors.Is(err, session.ErrSessionNotFound) {
-		t.Fatalf("ResumeSession(history claim) error = %v, want Session not found", err)
+	if _, err := agent.targetSession(t.Context(), state.SessionID); err != nil {
+		t.Fatalf("loaded connection cannot continue: %v", err)
 	}
 }
 
-func TestRuntimeAgentProductLoadRejectsMismatchedManagedHistoryClaim(t *testing.T) {
+func TestRuntimeAgentManagedLoadAndResumeRequireExactRelation(t *testing.T) {
 	t.Parallel()
-
-	state := appserver.SessionState{
-		SessionID: "child-session",
-		CWD:       "/workspace",
-		Metadata: map[string]any{
-			sessionvisibility.MetadataSystemManagedAgent:  sessionvisibility.SystemManagedAgentSubagent,
-			sessionvisibility.MetadataSystemManagedParent: "parent-session",
-			sessionvisibility.MetadataSystemManagedTask:   "task-1",
-		},
-	}
-	client := &managedHistorySessionClient{state: state}
-	agent := steeringTestAgent(client)
-	agent.managedHistoryToken = managedHistoryTestToken
-
-	for _, meta := range []map[string]any{
-		nil,
-		managedHistoryClaim("parent-session", "task-other", managedHistoryTestToken),
-		managedHistoryClaim("parent-session", "task-1", strings.Repeat("cd", 32)),
-		managedHistoryClaim("parent-session", "task-1", ""),
-	} {
-		if _, err := agent.LoadSession(context.Background(), acpsdk.LoadSessionRequest{
-			SessionId: acpsdk.SessionId(state.SessionID),
-			Cwd:       state.CWD,
-			Meta:      managedHistoryRawMeta(t, meta),
-		}, nil); !errors.Is(err, session.ErrSessionNotFound) {
-			t.Fatalf("LoadSession(metadata=%#v) error = %v, want Session not found", meta, err)
+	for _, load := range []bool{true, false} {
+		for _, claim := range []map[string]any{nil, acputil.NewSubagentSessionMeta("wrong", "task-1"), acputil.NewSubagentSessionMeta("parent-session", "wrong")} {
+			state := managedReplayState()
+			client := &managedHistorySessionClient{state: state}
+			agent := steeringTestAgent(client)
+			var err error
+			if load {
+				_, err = agent.LoadSession(t.Context(), acpsdk.LoadSessionRequest{SessionId: acpsdk.SessionId(state.SessionID), Meta: managedHistoryRawMeta(t, claim)}, nil)
+			} else {
+				_, err = agent.ResumeSession(t.Context(), acpsdk.ResumeSessionRequest{SessionId: acpsdk.SessionId(state.SessionID), Meta: managedHistoryRawMeta(t, claim)})
+			}
+			if !errors.Is(err, session.ErrSessionNotFound) {
+				t.Fatalf("load=%v claim=%v: %v", load, claim, err)
+			}
+			if agent.ownsManagedSession(state.SessionID) || client.reconnects.Load() != 0 {
+				t.Fatal("rejected relation acquired ownership or read history")
+			}
 		}
 	}
-	// Product ACP does not gain lifecycle-load permission merely because this
-	// bridge instance previously created or prompted the managed child.
-	agent.managedSessions[state.SessionID] = struct{}{}
-	if _, err := agent.LoadSession(context.Background(), acpsdk.LoadSessionRequest{
-		SessionId: acpsdk.SessionId(state.SessionID),
-		Cwd:       state.CWD,
-		Meta:      managedHistoryRawMeta(t, managedHistoryClaim("parent-session", "task-1", "")),
-	}, nil); !errors.Is(err, session.ErrSessionNotFound) {
-		t.Fatalf("LoadSession(owned managed Session without capability) error = %v, want Session not found", err)
-	}
-	if got := client.reconnects.Load(); got != 0 {
-		t.Fatalf("Reconnect() calls = %d, want 0 for rejected claims", got)
-	}
 }
 
-func TestRuntimeAgentProductResumeKeepsExecutionAndHistoryBridgesDisjoint(t *testing.T) {
+func TestRuntimeAgentFailedManagedReplayDoesNotAcquireOwnership(t *testing.T) {
 	t.Parallel()
-
-	state := appserver.SessionState{
-		SessionID: "child-session",
-		CWD:       "/workspace",
-		Metadata: map[string]any{
-			sessionvisibility.MetadataSystemManagedAgent:  sessionvisibility.SystemManagedAgentSubagent,
-			sessionvisibility.MetadataSystemManagedParent: "parent-session",
-			sessionvisibility.MetadataSystemManagedTask:   "task-1",
-		},
+	state := managedReplayState()
+	expected := errors.New("replay interrupted")
+	client := &managedHistorySessionClient{state: state, err: expected}
+	agent := steeringTestAgent(client)
+	_, err := agent.LoadSession(t.Context(), acpsdk.LoadSessionRequest{SessionId: acpsdk.SessionId(state.SessionID), Meta: managedHistoryRawMeta(t, acputil.NewSubagentSessionMeta("parent-session", "task-1"))}, nil)
+	if !errors.Is(err, expected) || agent.ownsManagedSession(state.SessionID) {
+		t.Fatalf("failed load: %v ownership=%v", err, agent.ownsManagedSession(state.SessionID))
 	}
-	claim := managedHistoryClaim("parent-session", "task-1", "")
-	execution := steeringTestAgent(&managedHistorySessionClient{state: state})
-	if _, err := execution.ResumeSession(context.Background(), acpsdk.ResumeSessionRequest{
-		SessionId: acpsdk.SessionId(state.SessionID),
-		Cwd:       state.CWD,
-		Meta:      managedHistoryRawMeta(t, claim),
-	}); err != nil {
-		t.Fatalf("ResumeSession(exact execution relation) error = %v", err)
-	}
-	if !execution.ownsManagedSession(state.SessionID) {
-		t.Fatal("execution reconnect did not reclaim managed Session ownership")
-	}
-
-	history := steeringTestAgent(&managedHistorySessionClient{state: state})
-	history.managedHistoryToken = managedHistoryTestToken
-	if _, err := history.ResumeSession(context.Background(), acpsdk.ResumeSessionRequest{
-		SessionId: acpsdk.SessionId(state.SessionID),
-		Cwd:       state.CWD,
-		Meta:      managedHistoryRawMeta(t, managedHistoryClaim("parent-session", "task-1", managedHistoryTestToken)),
-	}); !errors.Is(err, session.ErrSessionNotFound) {
-		t.Fatalf("ResumeSession(read-only history bridge) error = %v, want Session not found", err)
-	}
-	if history.ownsManagedSession(state.SessionID) {
-		t.Fatal("read-only history bridge acquired managed Session ownership")
-	}
-}
-
-func managedHistoryClaim(parentSessionID, taskID, token string) map[string]any {
-	return acputil.NewSubagentSessionMeta(parentSessionID, taskID, token)
 }
 
 func managedHistoryRawMeta(t *testing.T, meta map[string]any) map[string]json.RawMessage {
@@ -163,6 +96,7 @@ func managedHistoryRawMeta(t *testing.T, meta map[string]any) map[string]json.Ra
 type managedHistorySessionClient struct {
 	appserver.SessionClient
 	state      appserver.SessionState
+	err        error
 	reconnects atomic.Int32
 }
 
@@ -172,6 +106,9 @@ func (c *managedHistorySessionClient) InspectSession(context.Context, appserver.
 
 func (c *managedHistorySessionClient) Reconnect(context.Context, appserver.ReconnectRequest) (appserver.ReconnectResult, error) {
 	c.reconnects.Add(1)
+	if c.err != nil {
+		return appserver.ReconnectResult{}, c.err
+	}
 	return appserver.ReconnectResult{
 		State:        c.state,
 		Subscription: emptyManagedHistorySubscription{},

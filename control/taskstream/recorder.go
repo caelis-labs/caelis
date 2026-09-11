@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -18,6 +19,11 @@ import (
 const (
 	taskOutputRecordType     uint16 = 1
 	taskOutputReleaseTimeout        = 5 * time.Second
+	taskOutputFlushInterval         = 40 * time.Millisecond
+	taskOutputBatchBytes            = 64 << 10
+	taskOutputQueueBytes            = 32 << 20
+	taskOutputGlobalBytes           = 64 << 20
+	taskOutputQueueRecords          = 8192
 )
 
 type recordedTaskOutput struct {
@@ -32,25 +38,37 @@ type Recorder struct {
 	store       streamspool.Store
 	diagnostics *slog.Logger
 
-	mu      sync.Mutex
-	writers map[streamspool.LogicalKey]*recordingPartition
+	mu          sync.Mutex
+	writers     map[streamspool.LogicalKey]*recordingPartition
+	queuedBytes atomic.Int64
+	closed      bool
 }
 
 type recordingPartition struct {
-	writer    streamspool.Writer
-	sessionID string
-	taskID    string
-	mu        sync.Mutex
-	failed    bool
-	released  bool
+	writer            streamspool.Writer // worker-owned after registration
+	unpublished       bool
+	sessionID, taskID string
+	mu                sync.Mutex // never held during store or file I/O
+	queue             []outputWrite
+	bytes, records    int
+	failure           error
+	released          bool
+	wake              chan struct{}
+	done              chan struct{}
+}
+
+type outputWrite struct {
+	records []streamspool.Record
+	bytes   int
+	replace bool
+	seal    bool
+	barrier chan error
 }
 
 type boundRecorder struct {
 	recorder          *Recorder
-	logical           streamspool.LogicalKey
 	partition         *recordingPartition
 	binding           output.Binding
-	diagnostics       *slog.Logger
 	partitionTerminal bool
 }
 
@@ -76,69 +94,201 @@ func (r *Recorder) BindTaskOutput(ctx context.Context, binding output.Binding) o
 	}
 	r.mu.Lock()
 	partition := r.writers[logical]
+	unpublished := false
+	if r.closed {
+		r.mu.Unlock()
+		return output.Nop()
+	}
+	if partition != nil {
+		partition.mu.Lock()
+		failed := partition.failure != nil
+		partition.mu.Unlock()
+		if failed {
+			select {
+			case <-partition.done:
+				// A new binding may recover a failed cache through ordered
+				// provider replay. Old observers remain failed, never redirected.
+				partition = nil
+				unpublished = true
+			default:
+			}
+		}
+	}
 	if partition == nil {
-		writer, err := r.store.Register(ctx, logical, streamspool.WriterOptions{OriginComplete: binding.StartsAtTaskOrigin})
+		writer, err := r.store.Register(ctx, logical, streamspool.WriterOptions{OriginComplete: binding.StartsAtTaskOrigin, Unpublished: unpublished})
+		if errors.Is(err, streamspool.ErrInUse) && binding.Kind == output.TaskKindSubagent {
+			// A retired connection can leave a sealed incarnation behind. Its
+			// replacement stays private until session/load supplies the origin.
+			unpublished = true
+			writer, err = r.store.Register(ctx, logical, streamspool.WriterOptions{Unpublished: true})
+		}
 		if err != nil {
 			r.mu.Unlock()
 			r.logFailure("register", binding, err)
 			return output.Nop()
 		}
-		partition = &recordingPartition{writer: writer, sessionID: binding.SessionID, taskID: binding.TaskID}
+		partition = &recordingPartition{writer: writer, unpublished: unpublished, sessionID: binding.SessionID, taskID: binding.TaskID, wake: make(chan struct{}, 1), done: make(chan struct{})}
 		r.writers[logical] = partition
+		go r.writeLoop(logical, partition)
 	}
 	r.mu.Unlock()
 	return &boundRecorder{
-		recorder: r, logical: logical, partition: partition, binding: binding, diagnostics: r.diagnostics,
+		recorder: r, partition: partition, binding: binding,
 		partitionTerminal: binding.Kind == output.TaskKindCommand,
 	}
 }
 
+// ObserveTaskOutput copies and admits an event into bounded memory. Consumer
+// speed, file writes and fsync are never on this callback's lock path.
 func (o *boundRecorder) ObserveTaskOutput(ctx context.Context, event output.Event) error {
-	if o == nil || o.partition == nil || o.partition.writer == nil {
+	if o == nil || o.partition == nil {
 		return nil
 	}
 	if event.ProducerClosed {
-		return o.recorder.releasePartition(ctx, o.logical, o.partition)
+		return o.recorder.enqueue(o.partition, outputWrite{seal: true})
 	}
 	if event.OccurredAt.IsZero() {
 		event.OccurredAt = time.Now()
 	}
-	payload, err := json.Marshal(recordedTaskOutput{
-		TerminalID: o.binding.TerminalID,
-		ActivityID: o.binding.ActivityID,
-		Event:      cloneOutputEvent(event),
-	})
-	if err != nil {
-		return err
-	}
 	o.partition.mu.Lock()
-	if o.partition.failed || o.partition.released {
+	payload, err := json.Marshal(recordedTaskOutput{TerminalID: o.binding.TerminalID, ActivityID: o.binding.ActivityID, Event: cloneOutputEvent(event)})
+	if err != nil {
 		o.partition.mu.Unlock()
+		return o.recorder.failQueue(o.partition, err)
+	}
+	return o.recorder.enqueueLocked(o.partition, outputWrite{
+		records: []streamspool.Record{{Type: taskOutputRecordType, OccurredAt: event.OccurredAt, Payload: payload}}, bytes: len(payload),
+		seal: event.Closed && o.partitionTerminal,
+	})
+}
+
+// ReplaceTaskHistory queues an atomic cache replacement ahead of subsequent
+// live events. Only the writer publishes it, after every replay record is written.
+func (o *boundRecorder) ReplaceTaskHistory(ctx context.Context, events []*session.Event) error {
+	if o == nil || o.partition == nil {
 		return nil
 	}
-	_, err = o.partition.writer.Append(ctx, taskOutputRecordType, event.OccurredAt, payload)
-	if err != nil {
-		o.partition.failed = true
-		o.partition.mu.Unlock()
-		o.forgetPartition()
-		o.logFailure("append", err)
-		return err
-	}
-	if event.Closed && o.partitionTerminal {
-		o.partition.released = true
-		if err := o.partition.writer.Seal(ctx); err != nil && !errors.Is(err, streamspool.ErrEmptyTerminal) {
-			o.partition.failed = true
-			o.partition.mu.Unlock()
-			o.forgetPartition()
-			o.logFailure("seal", err)
+	item := outputWrite{replace: true}
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		terminalID := ""
+		if event.Scope != nil {
+			terminalID = event.Scope.TurnID
+		}
+		payload, err := json.Marshal(recordedTaskOutput{TerminalID: terminalID, ActivityID: o.binding.ActivityID, Event: output.Event{Event: event, OccurredAt: event.Time}})
+		if err != nil {
 			return err
 		}
-		o.partition.mu.Unlock()
-		o.forgetPartition()
+		item.bytes += len(payload)
+		if item.bytes > taskOutputQueueBytes || len(item.records) >= taskOutputQueueRecords {
+			return o.recorder.failQueue(o.partition, streamspool.ErrLimit)
+		}
+		item.records = append(item.records, streamspool.Record{Type: taskOutputRecordType, OccurredAt: event.Time, Payload: payload})
+	}
+	return o.recorder.enqueue(o.partition, item)
+}
+
+func (r *Recorder) enqueue(p *recordingPartition, item outputWrite) error {
+	p.mu.Lock()
+	return r.enqueueLocked(p, item)
+}
+
+// enqueueLocked always unlocks p.mu; neither it nor a producer waits for I/O.
+func (r *Recorder) enqueueLocked(p *recordingPartition, item outputWrite) error {
+	defer p.mu.Unlock()
+	if p.failure != nil {
+		return p.failure
+	}
+	if p.released {
+		return streamspool.ErrClosed
+	}
+	if len(p.queue) >= taskOutputQueueRecords || p.records+len(item.records) > taskOutputQueueRecords || p.bytes+item.bytes > taskOutputQueueBytes {
+		p.failure = streamspool.ErrLimit
+		signalOutputWriter(p)
+		return p.failure
+	}
+	if total := r.queuedBytes.Add(int64(item.bytes)); total > taskOutputGlobalBytes {
+		r.queuedBytes.Add(-int64(item.bytes))
+		p.failure = streamspool.ErrLimit
+		signalOutputWriter(p)
+		return p.failure
+	}
+	p.bytes += item.bytes
+	p.records += len(item.records)
+	p.queue = append(p.queue, item)
+	if item.seal {
+		p.released = true
+	}
+	signalOutputWriter(p)
+	return nil
+}
+
+func signalOutputWriter(p *recordingPartition) {
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (r *Recorder) failQueue(p *recordingPartition, err error) error {
+	p.mu.Lock()
+	if p.failure == nil {
+		p.failure = err
+	}
+	signalOutputWriter(p)
+	p.mu.Unlock()
+	return err
+}
+
+// Flush waits for observations already accepted by a Task writer. It is a
+// reader/lifecycle barrier, never called by live producer callbacks.
+func (r *Recorder) Flush(ctx context.Context, ref taskapi.Ref) error {
+	if r == nil {
 		return nil
 	}
-	o.partition.mu.Unlock()
-	return nil
+	logical := streamspool.LogicalKey{Namespace: streamspool.NamespaceTask, Digest: streamspool.DigestStrings(ref.SessionID, ref.TaskID)}
+	r.mu.Lock()
+	p := r.writers[logical]
+	r.mu.Unlock()
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	released := p.released
+	failure := p.failure
+	p.mu.Unlock()
+	if failure != nil {
+		return failure
+	}
+	if released {
+		return waitOutputDone(ctx, p)
+	}
+	barrier := make(chan error, 1)
+	if err := r.enqueue(p, outputWrite{barrier: barrier}); err != nil {
+		if errors.Is(err, streamspool.ErrClosed) {
+			return waitOutputDone(ctx, p)
+		}
+		return err
+	}
+	select {
+	case err := <-barrier:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func waitOutputDone(ctx context.Context, p *recordingPartition) error {
+	select {
+	case <-p.done:
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.failure
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // ReleaseTask permanently closes one Task partition after its product address
@@ -202,6 +352,7 @@ func (r *Recorder) Close(ctx context.Context) error {
 		partition *recordingPartition
 	}
 	r.mu.Lock()
+	r.closed = true
 	partitions := make([]candidate, 0, len(r.writers))
 	for logical, partition := range r.writers {
 		partitions = append(partitions, candidate{logical: logical, partition: partition})
@@ -214,44 +365,26 @@ func (r *Recorder) Close(ctx context.Context) error {
 	return joined
 }
 
-func (r *Recorder) releasePartition(ctx context.Context, logical streamspool.LogicalKey, partition *recordingPartition) error {
-	if r == nil || partition == nil || partition.writer == nil {
+func (r *Recorder) releasePartition(ctx context.Context, logical streamspool.LogicalKey, p *recordingPartition) error {
+	if r == nil || p == nil {
 		return nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	partition.mu.Lock()
-	if partition.failed {
-		partition.mu.Unlock()
-		r.forgetPartition(logical, partition)
-		return nil
-	}
-	partition.released = true
-	// A detached client must not turn a permanent product-address release into
-	// a process-lifetime registration leak. Preserve values but make physical
-	// sealing independent of caller cancellation; failures stay in the map so a
-	// later lifecycle close can retry.
-	sealCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), taskOutputReleaseTimeout)
-	err := partition.writer.Seal(sealCtx)
-	cancel()
-	if errors.Is(err, streamspool.ErrEmptyTerminal) || errors.Is(err, streamspool.ErrClosed) {
-		err = nil
-	}
-	partition.mu.Unlock()
-	if err == nil {
-		r.forgetPartition(logical, partition)
+	p.mu.Lock()
+	if !p.released && p.failure == nil {
+		_ = r.enqueueLocked(p, outputWrite{seal: true})
 	} else {
-		r.logReleaseFailure(partition, err)
+		p.mu.Unlock()
+	}
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), taskOutputReleaseTimeout)
+	defer cancel()
+	err := waitOutputDone(releaseCtx, p)
+	if releaseCtx.Err() == nil {
+		r.forgetPartition(logical, p)
 	}
 	return err
-}
-
-func (o *boundRecorder) forgetPartition() {
-	if o == nil || o.recorder == nil || o.partition == nil {
-		return
-	}
-	o.recorder.forgetPartition(o.logical, o.partition)
 }
 
 func (r *Recorder) forgetPartition(logical streamspool.LogicalKey, partition *recordingPartition) {
@@ -280,21 +413,6 @@ func (r *Recorder) logFailure(operation string, binding output.Binding, err erro
 		return
 	}
 	r.diagnostics.Warn("Control Task output trace unavailable", "operation", operation, "error", err)
-}
-
-func (o *boundRecorder) logFailure(operation string, err error) {
-	if o == nil || o.diagnostics == nil || err == nil {
-		return
-	}
-	o.diagnostics.Warn("Control Task output trace unavailable", "operation", operation, "error", err)
-}
-
-func (r *Recorder) logReleaseFailure(partition *recordingPartition, err error) {
-	if r == nil || r.diagnostics == nil || partition == nil || err == nil {
-		return
-	}
-	r.diagnostics.Warn("Control Task output trace release failed",
-		"session_id", partition.sessionID, "task_id", partition.taskID, "error", err)
 }
 
 var _ output.Binder = (*Recorder)(nil)

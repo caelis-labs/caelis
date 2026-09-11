@@ -160,13 +160,10 @@ func (m *Model) handleSubagentDirectorySnapshot(msg subagentDirectorySnapshotMsg
 		activityID := subagentRosterDescriptorActivityID(descriptor)
 		newActivity := subagentRosterDescriptorIsNewActivity(descriptor, view)
 		view.directoryActivityID = activityID
-		if descriptor.Running || newActivity ||
-			(view.idleHistorySettled && view.idleHistoryActivityID != activityID) {
-			view.idleHistorySettled = false
-			view.idleHistoryActivityID = ""
-		}
-		if newActivity {
-			m.cancelTaskStreamHistoryForCallID(callID)
+		if descriptor.Running && (view.activity.visible(true).StartedAt.IsZero() || newActivity && view.liveActivityID != activityID) {
+			// Start the waiting clock when running state is observed, even before
+			// the first content frame. An already-observed live activity wins.
+			view.activity.beginTurn(time.Now())
 		}
 		if participantID := strings.TrimSpace(descriptor.ParticipantID); participantID != "" {
 			view.participantID = participantID

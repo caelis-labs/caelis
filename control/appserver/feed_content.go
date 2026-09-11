@@ -50,10 +50,13 @@ func narrativeFeedOwner(envelope eventstream.Envelope) feedNarrativeKey {
 	if key.scope == "" {
 		key.scope = eventstream.ScopeMain
 	}
-	// Main ScopeID may name either the Session or the Turn. Its typed TurnID
-	// owns correlation; participant/Task scopes also retain their own address.
 	if key.scope != eventstream.ScopeMain {
 		key.scopeID = strings.TrimSpace(envelope.ScopeID)
+	} else if scopeID := strings.TrimSpace(envelope.ScopeID); scopeID != "" && scopeID != strings.TrimSpace(envelope.SessionID) {
+		// Main projection retains the canonical Runtime Turn in ScopeID;
+		// the live Control handle overwrites TurnID with its delivery target.
+		// Catch-up has no handle, so correlate by the retained source scope.
+		key.turnID = scopeID
 	}
 	return key
 }
@@ -63,9 +66,9 @@ func (b *FeedBroker) observeLiveNarrativeLocked(envelope eventstream.Envelope) {
 	if envelope.Kind == eventstream.KindLifecycle && envelope.Lifecycle != nil &&
 		eventstream.IsTerminalLifecycleState(envelope.Lifecycle.State) && envelope.ApprovalRequestID == "" {
 		owner := narrativeFeedOwner(envelope)
-		for key := range b.liveNarratives {
+		for key, deliveryTurn := range b.liveNarratives {
 			if key.scope == owner.scope && key.scopeID == owner.scopeID &&
-				key.participantID == owner.participantID && key.turnID == owner.turnID {
+				key.participantID == owner.participantID && deliveryTurn == strings.TrimSpace(envelope.TurnID) {
 				delete(b.liveNarratives, key)
 			}
 		}
@@ -76,9 +79,9 @@ func (b *FeedBroker) observeLiveNarrativeLocked(envelope eventstream.Envelope) {
 	}
 	if key, ok := narrativeFeedKey(envelope); ok {
 		if b.liveNarratives == nil {
-			b.liveNarratives = make(map[feedNarrativeKey]struct{})
+			b.liveNarratives = make(map[feedNarrativeKey]string)
 		}
-		b.liveNarratives[key] = struct{}{}
+		b.liveNarratives[key] = strings.TrimSpace(envelope.TurnID)
 	}
 }
 

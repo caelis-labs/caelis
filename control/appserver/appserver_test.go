@@ -60,16 +60,18 @@ func TestAppServerAggregateRejectsMissingTaskCapability(t *testing.T) {
 
 func appServerTestServices(tasks taskstream.Service) AppServerServices {
 	return AppServerServices{
-		Sessions:      struct{ Service }{},
-		Participants:  struct{ ParticipantService }{},
-		Status:        struct{ StatusService }{},
-		Configuration: struct{ ConfigurationService }{},
-		Agents:        struct{ AgentService }{},
-		Completion:    struct{ CompletionService }{},
-		Plugins:       struct{ PluginService }{},
-		Presentation:  struct{ PresentationService }{},
-		Terminal:      struct{ TerminalService }{},
-		Tasks:         tasks,
+		SubagentInputs: &SubagentInputService{},
+		UIPreferences:  &UIPreferencesService{},
+		Sessions:       struct{ Service }{},
+		Participants:   struct{ ParticipantService }{},
+		Status:         struct{ StatusService }{},
+		Configuration:  struct{ ConfigurationService }{},
+		Agents:         struct{ AgentService }{},
+		Completion:     struct{ CompletionService }{},
+		Plugins:        struct{ PluginService }{},
+		Presentation:   struct{ PresentationService }{},
+		Terminal:       struct{ TerminalService }{},
+		Tasks:          tasks,
 	}
 }
 

@@ -13,25 +13,7 @@ func (m *Model) handleSubagentOutputOverlayKey(msg tea.KeyMsg) tea.Cmd {
 	if _, ok := msg.(tea.KeyReleaseMsg); ok {
 		return nil
 	}
-	keyEvent := msg.Key()
-	switch keyEvent.Code {
-	case tea.KeyEscape:
-		m.closeSubagentOutputOverlay()
-	case tea.KeyUp:
-		m.scrollSubagentOutputOverlay(-1)
-	case tea.KeyDown:
-		m.scrollSubagentOutputOverlay(1)
-	case tea.KeyPgUp:
-		m.scrollSubagentOutputOverlay(-m.subagentOutputOverlayPageSize())
-	case tea.KeyPgDown:
-		m.scrollSubagentOutputOverlay(m.subagentOutputOverlayPageSize())
-	case tea.KeyHome:
-		m.subagentOutputOverlay.offset = 0
-		m.subagentOutputOverlay.followTail = false
-	case tea.KeyEnd:
-		m.subagentOutputOverlay.followTail = true
-	}
-	return nil
+	return m.handlePaneEditorKey(msg)
 }
 
 func (m *Model) subagentOutputOverlayPageSize() int {
@@ -65,9 +47,26 @@ func (m *Model) handleSubagentOutputOverlayMouse(msg tea.MouseMsg) (bool, tea.Cm
 	}
 	state := m.subagentOutputOverlay
 	mouse := msg.Mouse()
+	if m.workspace.resizing {
+		return true, nil
+	}
 	geometry := state.geometry
 	inside := mouse.X >= geometry.x && mouse.X < geometry.x+geometry.width &&
 		mouse.Y >= geometry.y && mouse.Y < geometry.y+geometry.height
+	if !inside && !state.selecting && !state.editorSelecting && state.pressedItem == "" && state.menu == "" && m.workspaceLayout().split {
+		if _, press := msg.(tea.MouseClickMsg); press {
+			m.workspace.childFocused = false
+		}
+		return false, nil
+	}
+	if inside {
+		if _, press := msg.(tea.MouseClickMsg); press {
+			m.workspace.childFocused = true
+		}
+	}
+	if handled, cmd := m.handlePaneChromeMouse(msg); handled {
+		return true, cmd
+	}
 	switch msg.(type) {
 	case tea.MouseWheelMsg:
 		if state.selecting {

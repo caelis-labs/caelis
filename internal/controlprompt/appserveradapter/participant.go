@@ -34,7 +34,7 @@ func (a *SessionClientAdapter) StartAgentRun(
 	if source == "" {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: /%s is not an addressable Agent", handle)
 	}
-	contentParts, err := contentPartsFromSubmission(prompt, attachments, a.WorkspaceDir())
+	contentParts, err := ContentPartsFromSubmission(prompt, attachments, a.WorkspaceDir())
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func (a *SessionClientAdapter) ContinueAgentRun(
 		if err != nil {
 			return nil, err
 		}
-		contentParts, err := contentPartsFromSubmission(prompt, attachments, state.CWD)
+		contentParts, err := ContentPartsFromSubmission(prompt, attachments, state.CWD)
 		if err != nil {
 			return nil, err
 		}
@@ -120,7 +120,7 @@ func (a *SessionClientAdapter) StartReview(
 	}
 	prompt, attachmentOffset := controlprompt.ReviewPrompt(instructions)
 	shiftedAttachments := shiftControlAttachments(attachments, attachmentOffset)
-	contentParts, err := contentPartsFromSubmission(prompt, shiftedAttachments, a.WorkspaceDir())
+	contentParts, err := ContentPartsFromSubmission(prompt, shiftedAttachments, a.WorkspaceDir())
 	if err != nil {
 		return nil, err
 	}

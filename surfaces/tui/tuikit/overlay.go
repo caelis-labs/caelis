@@ -74,6 +74,11 @@ func paintBlockBackground(block string, width int, background color.Color) strin
 	if width <= 0 || background == nil {
 		return block
 	}
+	// Lipgloss returns NoColor for an inherited terminal background. Painting
+	// that sentinel into physical cells would convert transparency to black.
+	if _, ok := background.(lipgloss.NoColor); ok {
+		return block
+	}
 	lines := strings.Split(block, "\n")
 	screen := uv.NewScreenBuffer(width, len(lines))
 	screen.Method = ansi.GraphemeWidth
@@ -190,6 +195,11 @@ func RenderOverlayCompletion(theme Theme, m OverlayCompletionModel) string {
 // OverlayCenter places an overlay centered on the screen. The base is the
 // full-screen content, overlay is the rendered modal.
 func OverlayCenter(base string, overlay string, screenWidth, screenHeight int) string {
+	return OverlayAt(base, overlay, screenWidth, screenHeight, maxInt(0, (screenWidth-lipgloss.Width(overlay))/2), maxInt(0, (screenHeight-lipgloss.Height(overlay))/2))
+}
+
+// OverlayAt composes a bounded child surface at explicit terminal coordinates.
+func OverlayAt(base, overlay string, screenWidth, screenHeight, startX, startY int) string {
 	if overlay == "" || screenWidth <= 0 || screenHeight <= 0 {
 		return base
 	}
@@ -211,12 +221,11 @@ func OverlayCenter(base string, overlay string, screenWidth, screenHeight int) s
 		overlayWidth = screenWidth
 	}
 
-	startY := maxInt(0, (screenHeight-len(overlayLines))/2)
-	startX := maxInt(0, (screenWidth-overlayWidth)/2)
 	compositor := newOverlayLineCompositor(screenWidth)
+	startY = maxInt(0, startY)
 	for i, overlayLine := range overlayLines {
 		row := startY + i
-		if row >= len(baseLines) {
+		if row >= screenHeight {
 			break
 		}
 		baseLines[row] = compositor.compose(baseLines[row], overlayLine, overlayWidth, startX)

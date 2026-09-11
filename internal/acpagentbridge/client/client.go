@@ -131,7 +131,12 @@ func (c *Client) bind(peerInput io.Writer, peerOutput io.Reader) error {
 		c.handleMethod,
 		peerInput,
 		peerOutput,
-		acpsdk.ConnectionOptions{MaxFrameSize: maxFrameSize},
+		// Permit a complete bounded history burst while the ordered response hook
+		// runs. The independent byte cap prevents the frame limit multiplying into
+		// unbounded queue memory. Unsupported extension methods use no queue slots.
+		acpsdk.ConnectionOptions{MaxFrameSize: maxFrameSize, MaxQueuedNotifications: 8192, MaxNotificationBytes: 32 << 20,
+			AcceptNotification: func(method string) bool { return method == MethodSessionUpdate || method == sessionNoticeMethod },
+		},
 	)
 	if err != nil {
 		return err
@@ -189,15 +194,29 @@ func (c *Client) ListSessions(ctx context.Context, req acpsdk.ListSessionsReques
 }
 
 func (c *Client) LoadSession(ctx context.Context, sessionID string, cwd string, meta map[string]any) (LoadSessionResponse, error) {
+	return c.LoadSessionWithReplayEnd(ctx, sessionID, cwd, meta, nil)
+}
+
+// LoadSessionWithReplayEnd marks the ordered boundary between complete replay
+// and later notifications. replayEnd must not wait for later connection output.
+func (c *Client) LoadSessionWithReplayEnd(ctx context.Context, sessionID string, cwd string, meta map[string]any, replayEnd func(context.Context) error) (LoadSessionResponse, error) {
+	if c == nil || c.conn == nil {
+		return LoadSessionResponse{}, errors.New("acp client is unavailable")
+	}
 	rawMeta, err := rawMessagesFromValues(meta)
 	if err != nil {
 		return LoadSessionResponse{}, err
 	}
-	result, err := sendRequest[LoadSessionResponse](c, ctx, MethodSessionLoad, LoadSessionRequest{
+	result, err := acpsdk.SendRequestWithResponseHook[LoadSessionResponse](c.conn, ctx, MethodSessionLoad, LoadSessionRequest{
 		SessionId:  acpsdk.SessionId(sessionID),
 		Cwd:        cwd,
 		McpServers: append([]acpsdk.McpServer{}, c.cfg.MCPServers...),
 		Meta:       rawMeta,
+	}, func(hookCtx context.Context, _ LoadSessionResponse) error {
+		if replayEnd != nil {
+			return replayEnd(hookCtx)
+		}
+		return nil
 	})
 	if err == nil && c.cfg.MCPGrant != nil {
 		err = c.cfg.MCPGrant.Bind(sessionID)

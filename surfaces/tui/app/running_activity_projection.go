@@ -97,55 +97,51 @@ func (m *Model) applyTranscriptRunningActivity(event TranscriptEvent) {
 	if m == nil || !isForegroundRunningActivityScope(event.Scope) {
 		return
 	}
+	applyTranscriptActivity(&m.runningHintTracker, event, m.taskControlActivityTarget)
+	m.refreshRunningActivity()
+}
+func applyTranscriptActivity(tracker *runningHintTracker, event TranscriptEvent, targetFor func(TranscriptEvent) runningActivityTarget) {
 	if isRetryingAttemptReset(event) {
 		// attempt_reset clears only speculative model output. Active tool
 		// owners represent external work started by an earlier completed
 		// model step and must remain observable across the retry.
-		m.runningHintTracker.setFocus(runningPhaseRetrying, "", "retry", time.Now())
-		m.refreshRunningActivity()
+		tracker.setFocus(runningPhaseRetrying, "", "retry", time.Now())
 		return
 	}
 	if event.Kind == TranscriptEventNotice && event.NoticeKind == transcript.NoticeKindModelRetry {
 		return
 	}
-	m.runningHintTracker.clearRetryFocus()
-	m.refreshRunningActivity()
+	tracker.clearRetryFocus()
 	switch event.Kind {
 	case TranscriptEventNarrative:
 		switch event.NarrativeKind {
 		case TranscriptNarrativeReasoning:
-			m.runningHintTracker.setFocus(
+			tracker.setFocus(
 				runningPhaseThinking,
 				"",
 				runningNarrativeActivityKey("reasoning", event),
 				time.Now(),
 			)
 		case TranscriptNarrativeAssistant:
-			m.runningHintTracker.setFocus(
+			tracker.setFocus(
 				runningPhaseResponding,
 				"",
 				runningNarrativeActivityKey("response", event),
 				time.Now(),
 			)
 		}
-		m.refreshRunningActivity()
 	case TranscriptEventNotice:
 		if event.NoticeKind == transcript.NoticeKindCompact ||
 			event.NoticeKind == transcript.NoticeKindCompactFailed {
-			m.runningHintTracker.completeCompact(time.Now())
-			m.refreshRunningActivity()
+			tracker.completeCompact(time.Now())
 		}
 	case TranscriptEventPlan:
-		m.runningHintTracker.setFocus(runningPhaseThinking, "", "plan", time.Now())
-		m.refreshRunningActivity()
+		tracker.setFocus(runningPhaseThinking, "", "plan", time.Now())
 	case TranscriptEventTool:
-		m.applyToolRunningActivity(event)
+		applyToolActivity(tracker, event, targetFor)
 	case TranscriptEventLifecycle:
 		if strings.EqualFold(strings.TrimSpace(event.State), session.LifecycleStatusContextCompacting) {
-			m.runningHintTracker.setCompact(time.Now())
-			m.refreshRunningActivity()
-		} else {
-			m.refreshRunningActivity()
+			tracker.setCompact(time.Now())
 		}
 	}
 }
@@ -165,7 +161,15 @@ func isForegroundRunningActivityScope(scope ACPProjectionScope) bool {
 // current model phase unchanged; add a named case when a new tool has reliable
 // long-running semantics instead of inferring activity from text or a timeout.
 func (m *Model) applyToolRunningActivity(event TranscriptEvent) {
-	key := m.runningHintTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt)
+	applyToolActivity(&m.runningHintTracker, event, m.taskControlActivityTarget)
+	m.refreshRunningActivity()
+}
+
+func applyToolActivity(tracker *runningHintTracker, event TranscriptEvent, targetFor func(TranscriptEvent) runningActivityTarget) {
+	start := func(phase runningActivityPhase, target runningActivityTarget, key, callID string) {
+		tracker.start(key, phase, target, time.Now(), callID)
+	}
+	key := tracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt)
 	if key == "" {
 		return
 	}
@@ -174,33 +178,32 @@ func (m *Model) applyToolRunningActivity(event TranscriptEvent) {
 		// status. Invocation identity is sufficient to close an activity that a
 		// richer tool_call start opened. Task-stream finals have a distinct
 		// runtime TurnID, so also close the indexed parent owner by tool-call ID.
-		m.runningHintTracker.completeTool(key, event.ToolCallID, time.Now())
-		m.refreshRunningActivity()
+		tracker.completeTool(key, event.ToolCallID, time.Now())
 		return
 	}
 
 	semanticName := event.ToolName
 	switch semanticName {
 	case surfaceToolWebSearch:
-		m.setRunningToolActivity(runningPhaseWebSearch, "", key, event.ToolCallID)
+		start(runningPhaseWebSearch, "", key, event.ToolCallID)
 	case surfaceToolWebFetch:
-		m.setRunningToolActivity(runningPhaseFetch, "", key, event.ToolCallID)
+		start(runningPhaseFetch, "", key, event.ToolCallID)
 	case surfaceToolRunCommand:
-		m.setRunningToolActivity(runningPhaseToolWait, runningTargetShell, key, event.ToolCallID)
+		start(runningPhaseToolWait, runningTargetShell, key, event.ToolCallID)
 	case surfaceToolSpawn:
-		m.setRunningToolActivity(runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
+		start(runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
 	case "WaitThread":
-		m.setRunningToolActivity(runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
+		start(runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
 	case "ReadThread", "ListThreads", "ReceiveMessages":
 		// Observation has no long-running activity hint.
 	case surfaceToolTask:
 		action := strings.ToLower(strings.TrimSpace(event.ToolTaskAction))
-		target := m.taskControlActivityTarget(event)
+		target := targetFor(event)
 		switch action {
 		case "wait":
-			m.setRunningToolActivity(runningPhaseToolWait, target, key, event.ToolCallID)
+			start(runningPhaseToolWait, target, key, event.ToolCallID)
 		case "cancel":
-			m.setRunningToolActivity(runningPhaseCancel, target, key, event.ToolCallID)
+			start(runningPhaseCancel, target, key, event.ToolCallID)
 		}
 	default:
 		// Standard ACP kind is the primary presentation category for anonymous
@@ -208,16 +211,16 @@ func (m *Model) applyToolRunningActivity(event TranscriptEvent) {
 		// category; it must not turn a read/edit/think operation into a shell wait.
 		switch strings.ToLower(strings.TrimSpace(event.ToolKind)) {
 		case eventstream.ToolKindExecute:
-			m.setRunningToolActivity(runningPhaseToolWait, runningTargetShell, key, event.ToolCallID)
+			start(runningPhaseToolWait, runningTargetShell, key, event.ToolCallID)
 		case eventstream.ToolKindSearch:
-			m.setRunningToolActivity(runningPhaseSearch, "", key, event.ToolCallID)
+			start(runningPhaseSearch, "", key, event.ToolCallID)
 		case eventstream.ToolKindFetch:
-			m.setRunningToolActivity(runningPhaseFetch, "", key, event.ToolCallID)
+			start(runningPhaseFetch, "", key, event.ToolCallID)
 		case eventstream.ToolKindOther, "":
 			if standardACPWaitControl(event) {
-				m.setRunningToolActivity(runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
+				start(runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
 			} else if event.ToolTerminal {
-				m.setRunningToolActivity(runningPhaseToolWait, runningTargetShell, key, event.ToolCallID)
+				start(runningPhaseToolWait, runningTargetShell, key, event.ToolCallID)
 			}
 		}
 	}

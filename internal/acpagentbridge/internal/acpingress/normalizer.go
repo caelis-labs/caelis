@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -131,7 +132,8 @@ func normalizeContentChunk(chunk client.ContentChunk, opts Options) *session.Eve
 	if opts.TextOverride != "" {
 		text = opts.TextOverride
 	}
-	if text == "" {
+	msg := messageForContentChunk(chunk, text)
+	if text == "" && len(msg.Parts) == 0 {
 		return nil
 	}
 	eventType := session.EventTypeAssistant
@@ -141,7 +143,6 @@ func normalizeContentChunk(chunk client.ContentChunk, opts Options) *session.Eve
 		actor = session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
 	}
 	event := baseEvent(updateType, eventType, text, actor, opts)
-	msg := messageForContentChunk(chunk, text)
 	event.Message = &msg
 	update, err := protocolUpdateFromContentChunk(chunk)
 	if err != nil {
@@ -274,6 +275,12 @@ func messageForContentChunk(chunk client.ContentChunk, text string) model.Messag
 	}
 	if strings.TrimSpace(chunk.SessionUpdate) == client.UpdateAgentThought {
 		return model.NewReasoningMessage(role, text, model.ReasoningVisibilityVisible)
+	}
+	var block acpsdk.ContentBlock
+	if json.Unmarshal(chunk.Content, &block) == nil && block.Image != nil {
+		return model.MessageFromTextAndContentParts(role, "", []model.ContentPart{{
+			Type: model.ContentPartImage, Data: block.Image.Data, MimeType: block.Image.MimeType,
+		}})
 	}
 	return model.NewTextMessage(role, text)
 }

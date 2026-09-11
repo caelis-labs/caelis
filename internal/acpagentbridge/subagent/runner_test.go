@@ -32,18 +32,10 @@ func TestSubagentSessionMetaMarksParentAndTask(t *testing.T) {
 		TaskID:     "task-1",
 	})
 	claim, ok := acputil.ParseSubagentSessionMeta(meta)
-	if !ok || claim.ParentSessionID != "parent-session" || claim.TaskID != "task-1" || claim.HistoryToken != "" {
-		t.Fatalf("ordinary Session metadata = %#v, %v; want parent/task claim without history token", claim, ok)
+	if !ok || claim.ParentSessionID != "parent-session" || claim.TaskID != "task-1" {
+		t.Fatalf("ordinary Session metadata = %#v, %v; want parent/task claim ", claim, ok)
 	}
 
-	historyMeta := subagentHistorySessionMeta(tasksubagent.SpawnContext{
-		SessionRef: session.SessionRef{SessionID: "parent-session"},
-		TaskID:     "task-1",
-	}, strings.Repeat("ab", 32))
-	historyClaim, ok := acputil.ParseSubagentSessionMeta(historyMeta)
-	if !ok || historyClaim.HistoryToken != strings.Repeat("ab", 32) {
-		t.Fatalf("history Session metadata = %#v, %v; want process capability", historyClaim, ok)
-	}
 }
 
 func TestChildACPUpdatePreservesUIOnlyRuntimeToolIdentity(t *testing.T) {

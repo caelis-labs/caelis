@@ -89,7 +89,8 @@ func runTUI(
 		PromptRouterFactory: controlprompt.New,
 		RenderFPS:           envInt("CAELIS_TUI_RENDER_FPS", 0),
 		NoAnimation:         options.NoAnimation,
-		TaskStreams:         clients.Tasks,
+		SubagentInputs:      clients.SubagentInputs, UIPreferences: clients.UIPreferences,
+		TaskStreams: clients.Tasks,
 		OnStart: func() {
 			startTUISandboxRefresh(programCtx, typedDriver)
 			startTUIUpdateCheck(programCtx, storeDir, sender)

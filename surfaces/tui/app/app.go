@@ -11,7 +11,6 @@ import (
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -44,37 +43,7 @@ func NewModel(cfg Config) *Model {
 	palette.Styles.PaginationStyle = theme.HelpHintTextStyle()
 	palette.Styles.HelpStyle = theme.HelpHintTextStyle()
 
-	ta := textarea.New()
-	ta.Placeholder = ""
-	ta.Prompt = "> "
-	ta.SetPromptFunc(2, func(info textarea.PromptInfo) string {
-		if info.LineNumber == 0 {
-			return "> "
-		}
-		return "  "
-	})
-	ta.CharLimit = 0
-	ta.SetWidth(80)
-	ta.SetHeight(1)
-	ta.MaxHeight = maxInputBarRows
-	ta.ShowLineNumbers = false
-	ta.SetVirtualCursor(false)
-	taStyles := ta.Styles()
-	taStyles.Focused.CursorLine = lipgloss.NewStyle()
-	taStyles.Focused.Base = lipgloss.NewStyle()
-	taStyles.Focused.Prompt = theme.PromptStyle()
-	taStyles.Focused.Text = theme.TextStyle()
-	taStyles.Focused.Placeholder = theme.HelpHintTextStyle()
-	taStyles.Blurred.CursorLine = lipgloss.NewStyle()
-	taStyles.Blurred.Base = lipgloss.NewStyle()
-	taStyles.Blurred.Prompt = theme.PromptStyle()
-	taStyles.Blurred.Text = theme.TextStyle()
-	taStyles.Blurred.Placeholder = theme.HelpHintTextStyle()
-	taStyles.Cursor.Color = theme.CursorFg
-	taStyles.Cursor.Shape = tea.CursorBar
-	taStyles.Cursor.Blink = true
-	ta.SetStyles(taStyles)
-	ta.Focus()
+	ta := newPromptTextarea(theme)
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Spinner{
@@ -137,10 +106,6 @@ func NewModel(cfg Config) *Model {
 		taskStreamResolveTokens:  map[string]uint64{},
 		taskStreamResolveRetries: map[string]int{},
 		taskStreamRetries:        map[string]int{},
-		taskStreamHistoryStages:  map[string]*subagentOutputHistoryStage{},
-		taskStreamHistoryTokens:  map[string]uint64{},
-		taskStreamHistoryCancels: map[string]context.CancelFunc{},
-		taskStreamHistoryRetries: map[string]taskStreamHistoryRetryState{},
 		subagentOutputViews:      map[string]*subagentOutputView{},
 		subagentRosterTasks:      map[string]taskstream.TaskDescriptor{},
 		runningHintTracker:       newRunningHintTracker(),
@@ -217,7 +182,7 @@ func (m *Model) Init() tea.Cmd {
 	}
 	m.hasCommittedLine = m.doc.Len() > 0
 	m.syncViewportContent()
-	cmds := []tea.Cmd{tickStatusCmd()}
+	cmds := []tea.Cmd{tickStatusCmd(), m.loadPanePreferences()}
 	if cmd := m.beginStatusRefreshCmd(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -249,6 +214,9 @@ func (m *Model) appendWelcomeCard() {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if handled, cmd := m.updateSubagentWorkspace(msg); handled {
+		return m, cmd
+	}
 	if handledModel, handledCmd, handled := m.dispatchRenderEvent(msg); handled {
 		return handledModel, handledCmd
 	}
@@ -263,15 +231,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case taskStreamClosedMsg:
 		return m.handleTaskStreamClosed(typed)
-
-	case taskStreamHistoryBatchMsg:
-		return m.handleTaskStreamHistoryBatch(typed)
-
-	case taskStreamHistoryClosedMsg:
-		return m.handleTaskStreamHistoryClosed(typed)
-
-	case taskStreamHistoryRetryMsg:
-		return m.handleTaskStreamHistoryRetry(typed)
 
 	case taskStreamResolvedMsg:
 		return m.handleTaskStreamResolved(typed)
@@ -298,6 +257,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleSubagentDirectoryRetry(typed)
 
 	case tea.WindowSizeMsg:
+		m.cancelPaneResize()
 		widthChanged := typed.Width != m.width
 		heightChanged := typed.Height != m.height
 		if widthChanged {
@@ -326,6 +286,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.width = typed.Width
 		m.height = typed.Height
+		m.reconcileSubagentPaneFocus()
 		m.syncTextareaChrome()
 		m.help.SetWidth(maxInt(20, m.fixedRowWidth()/2))
 		paletteWidth := minInt(maxInt(30, m.fixedRowWidth()-4), maxInt(30, m.width-12))
@@ -521,6 +482,11 @@ func (m *Model) applyTheme(theme tuikit.Theme) {
 	configureHelpStyles(&m.help, theme)
 	m.applyPaletteTheme(theme)
 	m.applyTextareaStyles(theme)
+	for _, view := range m.subagentOutputViews {
+		if view != nil && view.pane != nil && view.pane.editorReady {
+			applyPromptTextareaStyles(&view.pane.editor, theme)
+		}
+	}
 	m.spinner.Style = theme.SpinnerStyle()
 	m.sandboxProgressBar = newSandboxProgressBar(theme)
 	m.rethemeHistory()
@@ -571,21 +537,7 @@ func (m *Model) applyPaletteTheme(theme tuikit.Theme) {
 }
 
 func (m *Model) applyTextareaStyles(theme tuikit.Theme) {
-	styles := m.textarea.Styles()
-	styles.Focused.CursorLine = lipgloss.NewStyle()
-	styles.Focused.Base = lipgloss.NewStyle()
-	styles.Focused.Prompt = theme.PromptStyle()
-	styles.Focused.Text = theme.TextStyle()
-	styles.Focused.Placeholder = theme.HelpHintTextStyle()
-	styles.Blurred.CursorLine = lipgloss.NewStyle()
-	styles.Blurred.Base = lipgloss.NewStyle()
-	styles.Blurred.Prompt = theme.PromptStyle()
-	styles.Blurred.Text = theme.TextStyle()
-	styles.Blurred.Placeholder = theme.HelpHintTextStyle()
-	styles.Cursor.Color = theme.CursorFg
-	styles.Cursor.Shape = tea.CursorBar
-	styles.Cursor.Blink = true
-	m.textarea.SetStyles(styles)
+	applyPromptTextareaStyles(&m.textarea, theme)
 }
 
 func (m *Model) rethemeHistory() {
@@ -613,7 +565,7 @@ func (m *Model) syncTextareaFromInput() {
 }
 
 func (m *Model) viewportScrollbarWidth() int {
-	if m.width < 48 {
+	if m.mainColumnWidth() < 48 {
 		return 0
 	}
 	return 1
@@ -624,19 +576,11 @@ func (m *Model) viewportContentWidth() int {
 }
 
 func (m *Model) readableContentWidth() int {
-	return maxInt(1, m.width-tuikit.GutterNarrative-m.viewportScrollbarWidth())
+	return maxInt(1, m.mainColumnWidth()-tuikit.GutterNarrative-m.viewportScrollbarWidth())
 }
 
-func (m *Model) mainColumnWidth() int {
-	if m.width > 0 {
-		return m.width
-	}
-	return maxInt(1, m.readableContentWidth()+tuikit.GutterNarrative+m.viewportScrollbarWidth())
-}
-
-func (m *Model) mainColumnX() int {
-	return 0
-}
+func (m *Model) mainColumnWidth() int { return maxInt(1, m.workspaceLayout().main.width) }
+func (m *Model) mainColumnX() int     { return m.workspaceLayout().main.x }
 
 func (m *Model) placeInMainColumn(block string) string {
 	if block == "" {

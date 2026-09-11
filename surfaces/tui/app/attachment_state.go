@@ -274,13 +274,17 @@ func stripOrphanSentinels(value string, items []inputAttachment) (string, []inpu
 }
 
 func (m *Model) nextAttachmentIdentity() (id uint32, sentinel rune) {
+	return nextPromptAttachmentIdentity(m.textarea.Value(), m.inputAttachments)
+}
+
+func nextPromptAttachmentIdentity(value string, attachments []inputAttachment) (id uint32, sentinel rune) {
 	used := make(map[rune]struct{})
-	for _, item := range m.inputAttachments {
+	for _, item := range attachments {
 		if item.ID != 0 {
 			used[item.sentinelRune()] = struct{}{}
 		}
 	}
-	for _, r := range m.textarea.Value() {
+	for _, r := range value {
 		if isAttachmentSentinel(r) {
 			used[r] = struct{}{}
 		}

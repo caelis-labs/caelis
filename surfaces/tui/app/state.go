@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
 
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -117,6 +118,8 @@ const (
 )
 
 type Config struct {
+	SubagentInputs         appserver.SubagentInputClient
+	UIPreferences          appserver.UIPreferencesClient
 	Context                context.Context
 	AppName                string
 	Version                string
@@ -316,6 +319,7 @@ type sandboxProgressState struct {
 }
 
 type Model struct {
+	workspace     subagentWorkspaceState
 	cfg           Config
 	theme         tuikit.Theme
 	themeCacheKey string
@@ -373,10 +377,6 @@ type Model struct {
 	taskStreamResolveTokens  map[string]uint64
 	taskStreamResolveRetries map[string]int
 	taskStreamRetries        map[string]int
-	taskStreamHistoryStages  map[string]*subagentOutputHistoryStage
-	taskStreamHistoryTokens  map[string]uint64
-	taskStreamHistoryCancels map[string]context.CancelFunc
-	taskStreamHistoryRetries map[string]taskStreamHistoryRetryState
 	taskStreamNextToken      uint64
 	// Subagent output views are transient Surface projections keyed by the
 	// parent Spawn call. They are never persisted or used as Task identity.

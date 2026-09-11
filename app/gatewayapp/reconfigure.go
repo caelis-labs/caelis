@@ -389,6 +389,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		s.delegationPlacementResolver(runtimeCfg),
 		s.prepareSpawnedACPSession,
 		s.authorities.acpEndpointResolver,
+		s.retainRuntimeWork,
 	)
 	if err != nil {
 		bundle.Close()

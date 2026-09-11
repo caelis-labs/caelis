@@ -22,6 +22,7 @@ func gatewayTestAppServerServices(sessions appserver.Service, status appserver.S
 		taskService = tasks[0]
 	}
 	return appserver.AppServerServices{
+		SubagentInputs: &appserver.SubagentInputService{}, UIPreferences: &appserver.UIPreferencesService{},
 		Sessions: sessions, Participants: focused, Status: status, Configuration: focused,
 		Agents: focused, Completion: focused, Plugins: focused,
 		Presentation: focused, Terminal: focused, Tasks: taskService,

@@ -7,14 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/singleflight"
 	"io"
-	"reflect"
 	"strings"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
@@ -40,23 +41,30 @@ type SessionLoader interface {
 }
 
 type Config struct {
-	Tasks           task.Store
-	Spool           streamspool.Store
-	Sessions        SessionLoader
-	Directory       *DirectoryIndex
-	SubagentHistory subagent.HistoryRunner
-	Authorizer      Authorizer
-	Secret          []byte
+	// RetainObservation pins the child producer owner while a Task reader is attached.
+	// It does not subscribe to the parent Session feed or start a prompt.
+	RetainObservation func(session.SessionRef) (func(), error)
+	Tasks             task.Store
+	Spool             streamspool.Store
+	Recorder          *Recorder
+	Sessions          SessionLoader
+	Directory         *DirectoryIndex
+	SubagentHistory   subagent.HistoryRunner
+	Authorizer        Authorizer
+	Secret            []byte
 }
 
 type service struct {
-	tasks           task.Store
-	spool           streamspool.Store
-	sessions        SessionLoader
-	subagentHistory subagent.HistoryRunner
-	directory       *DirectoryIndex
-	authorizer      Authorizer
-	cursors         cursorCodec
+	retainObservation func(session.SessionRef) (func(), error)
+	tasks             task.Store
+	spool             streamspool.Store
+	recorder          *Recorder
+	historyLoads      singleflight.Group
+	sessions          SessionLoader
+	subagentHistory   subagent.HistoryRunner
+	directory         *DirectoryIndex
+	authorizer        Authorizer
+	cursors           cursorCodec
 }
 
 func New(config Config) (Service, error) {
@@ -67,7 +75,8 @@ func New(config Config) (Service, error) {
 		return nil, fmt.Errorf("taskstream: cursor secret must be at least 32 bytes")
 	}
 	return &service{
-		tasks: config.Tasks, spool: config.Spool, sessions: config.Sessions,
+		retainObservation: config.RetainObservation,
+		tasks:             config.Tasks, spool: config.Spool, recorder: config.Recorder, sessions: config.Sessions,
 		subagentHistory: config.SubagentHistory, directory: config.Directory,
 		authorizer: config.Authorizer, cursors: cursorCodec{secret: append([]byte(nil), config.Secret...)},
 	}, nil
@@ -103,6 +112,20 @@ func (s *service) Events(ctx context.Context, principal Principal, req ReadReque
 	if err != nil {
 		return ReadResult{}, err
 	}
+	if entry.Kind == task.KindSubagent {
+		release, err := s.retainChildObservation(entry.Session)
+		if err != nil {
+			return ReadResult{}, err
+		}
+		defer release()
+		result, _, err := s.childRead(ctx, entry, point, cursorPresent)
+		return result, err
+	}
+	if s.recorder != nil {
+		if err := s.recorder.Flush(ctx, task.Ref{SessionID: entry.Session.SessionID, TaskID: entry.TaskID}); err != nil {
+			return ReadResult{}, err
+		}
+	}
 	source, exact, err := s.selectExact(ctx, entry, point, cursorPresent)
 	if err != nil {
 		return ReadResult{}, err
@@ -136,6 +159,18 @@ func (s *service) Subscribe(ctx context.Context, principal Principal, req Subscr
 	if err != nil {
 		return SubscribeResult{}, err
 	}
+	if entry.Kind == task.KindSubagent {
+		release, err := s.retainChildObservation(entry.Session)
+		if err != nil {
+			return SubscribeResult{}, err
+		}
+		sub := newSubscription(ctx)
+		go func() {
+			defer release()
+			s.forwardChild(sub, entry, point, cursorPresent, req.Follow)
+		}()
+		return SubscribeResult{Subscription: sub}, nil
+	}
 	source, exact, err := s.selectExact(ctx, entry, point, cursorPresent)
 	if err != nil {
 		return SubscribeResult{}, err
@@ -149,31 +184,42 @@ func (s *service) Subscribe(ctx context.Context, principal Principal, req Subscr
 	return SubscribeResult{Subscription: sub}, nil
 }
 
-func (s *service) forwardExact(sub *subscription, entry *task.Entry, source exactSource, follow bool) {
+func (s *service) forwardExact(sub *subscription, entry *task.Entry, source exactSource, follow bool) (restart bool) {
 	reader, err := s.spool.Reader(sub.ctx, source.key, source.offset)
 	if err != nil {
 		s.forwardFallback(sub, entry, err)
-		return
+		return false
 	}
 	defer reader.Close()
-	defer sub.finish(nil)
+	defer func() {
+		if !restart {
+			sub.finish(nil)
+		}
+	}()
 	point := cursorPoint{Key: source.key, Offset: source.offset, Sequence: source.seq}
 	for {
 		raw, readErr := reader.Next(sub.ctx)
 		if readErr != nil {
+			if errors.Is(readErr, io.EOF) && follow && entry.Kind == task.KindSubagent {
+				key, _, resolveErr := s.spool.Resolve(sub.ctx, source.key.LogicalKey)
+				if resolveErr == nil && key != source.key {
+					_ = reader.Close()
+					return true
+				}
+			}
 			if errors.Is(readErr, io.EOF) || errors.Is(readErr, context.Canceled) {
 				sub.finish(nil)
-				return
+				return false
 			}
 			_ = reader.Close()
 			s.forwardFallback(sub, entry, readErr)
-			return
+			return false
 		}
 		record, next, decodeErr := s.projectSpoolRecord(entry, raw, point)
 		if decodeErr != nil {
 			_ = reader.Close()
 			s.forwardFallback(sub, entry, decodeErr)
-			return
+			return false
 		}
 		point = next
 		if !sub.deliver(Delivery{
@@ -181,17 +227,21 @@ func (s *service) forwardExact(sub *subscription, entry *task.Entry, source exac
 			Records: []Record{record}, NextCursor: record.Cursor,
 			ActivityID: record.Task.ActivityID,
 		}) {
-			return
+			return false
 		}
 		if record.Frame != nil && record.Frame.Closed && (!follow || entry.Kind != task.KindSubagent) {
 			sub.finish(nil)
-			return
+			return false
 		}
 	}
 }
 
 func (s *service) forwardFallback(sub *subscription, entry *task.Entry, exactErr error) {
 	if sub == nil {
+		return
+	}
+	if entry != nil && entry.Kind == task.KindSubagent {
+		sub.finish(s.exactReadError(exactErr))
 		return
 	}
 	if ctxErr := sub.ctx.Err(); ctxErr != nil {
@@ -389,42 +439,11 @@ func (s *service) fallbackDeliveries(ctx context.Context, entry *task.Entry) ([]
 	if entry.Running {
 		return []Delivery{{Kind: DeliveryStatus, Source: SourceStatus, Records: []Record{{Sequence: 1, Task: descriptor}}, ActivityID: descriptor.ActivityID}}, nil
 	}
-	var snapshot fallbackSnapshot
-	loadedACPHistory := false
 	if entry.Kind == task.KindSubagent {
-		loaded, err := s.loadDurableSubagentHistory(ctx, entry)
-		if err == nil {
-			if err := s.verifyFiniteSubagentRead(ctx, entry); err != nil {
-				return nil, err
-			}
-			snapshot = loaded
-			loadedACPHistory = true
-		} else {
-			snapshot = terminalSubagentFallbackSnapshot(entry)
-		}
-	} else {
-		snapshot = terminalCommandFallbackSnapshot(entry)
+		return nil, errorcode.New(errorcode.Unavailable, "Child output history is unavailable")
 	}
-	records := recordsForSnapshot(entry, snapshot)
-	if len(records) == 0 {
-		return []Delivery{{Kind: DeliveryStatus, Source: SourceStatus, Records: []Record{{Sequence: 1, Task: descriptor}}, ActivityID: descriptor.ActivityID}}, nil
-	}
-	deliveries, err := replacementDeliveries(entry, records)
-	if err == nil {
-		return deliveries, nil
-	}
-	if loadedACPHistory && errorcode.Is(err, errorcode.ResourceExhausted) {
-		fallback := terminalSubagentFallbackSnapshot(entry)
-		records = recordsForSnapshot(entry, fallback)
-		deliveries, err = replacementDeliveries(entry, records)
-		if err == nil {
-			return deliveries, nil
-		}
-	}
-	if errorcode.Is(err, errorcode.ResourceExhausted) {
-		return []Delivery{{Kind: DeliveryStatus, Source: SourceStatus, Records: []Record{{Sequence: 1, Task: descriptor}}, ActivityID: descriptor.ActivityID}}, nil
-	}
-	return nil, err
+	records := recordsForSnapshot(entry, terminalCommandFallbackSnapshot(entry))
+	return replacementDeliveries(entry, records)
 }
 
 func recordsForSnapshot(entry *task.Entry, snapshot fallbackSnapshot) []Record {
@@ -483,38 +502,6 @@ func replacementDeliveries(entry *task.Entry, records []Record) ([]Delivery, err
 	}
 	deliveries = append(deliveries, Delivery{Kind: DeliveryReplaceEnd, Source: SourceReplacement, SnapshotID: snapshotID, Page: page, ActivityID: descriptor.ActivityID})
 	return deliveries, nil
-}
-
-func (s *service) verifyFiniteSubagentRead(ctx context.Context, before *task.Entry) error {
-	if before == nil || before.Kind != task.KindSubagent || before.Running || !task.IsTerminalState(before.State) {
-		return errorcode.New(errorcode.FailedPrecondition, "taskstream: finite subagent history requires a terminal activity")
-	}
-	after, err := s.tasks.Get(ctx, before.TaskID)
-	if err != nil {
-		return errorcode.Wrap(errorcode.Unavailable, "taskstream: verify finite subagent history activity", err)
-	}
-	if !sameFiniteSubagentActivity(before, after) {
-		return errorcode.New(errorcode.Conflict, "taskstream: Task activity changed during history read")
-	}
-	return nil
-}
-
-func sameFiniteSubagentActivity(before, after *task.Entry) bool {
-	if before == nil || after == nil || before.TaskID != after.TaskID ||
-		before.Session.SessionID != after.Session.SessionID || after.Kind != task.KindSubagent ||
-		after.Running || !task.IsTerminalState(after.State) {
-		return false
-	}
-	beforeDescriptor := descriptorFromEntry(before)
-	afterDescriptor := descriptorFromEntry(after)
-	return before.State == after.State &&
-		beforeDescriptor.ActivityID == afterDescriptor.ActivityID &&
-		beforeDescriptor.CurrentTurnID == afterDescriptor.CurrentTurnID &&
-		beforeDescriptor.Handle == afterDescriptor.Handle &&
-		beforeDescriptor.AgentHandle == afterDescriptor.AgentHandle &&
-		beforeDescriptor.ParticipantID == afterDescriptor.ParticipantID &&
-		taskHistoryChildSessionID(before) == taskHistoryChildSessionID(after) &&
-		reflect.DeepEqual(taskHistoryTarget(before), taskHistoryTarget(after))
 }
 
 func terminalCommandFallbackSnapshot(entry *task.Entry) fallbackSnapshot {
@@ -602,7 +589,8 @@ func descriptorFromEntry(entry *task.Entry) TaskDescriptor {
 			parentTool = shell.RunCommandToolName
 		}
 	}
-	return TaskDescriptor{
+	descriptor := TaskDescriptor{
+		Model:     descriptorModelFromEntry(entry),
 		SessionID: strings.TrimSpace(entry.Session.SessionID), TaskID: strings.TrimSpace(entry.TaskID),
 		Handle:      firstString(entry.Handle, mapString(entry.Metadata, "handle"), mapString(entry.Spec, "handle"), entry.TaskID),
 		AgentHandle: firstString(mapString(entry.Metadata, "agent"), mapString(entry.Spec, "agent")),
@@ -614,6 +602,14 @@ func descriptorFromEntry(entry *task.Entry) TaskDescriptor {
 		CurrentTurnID: firstString(mapString(entry.Metadata, "turn_id"), mapString(entry.Spec, "turn_id"), entry.Terminal.TerminalID),
 		UpdatedAt:     entry.UpdatedAt,
 	}
+	if usage := entry.ContextUsage; usage != nil {
+		if usage.Invocation.Model != "" {
+			descriptor.Model = usage.Invocation.Model
+		}
+		descriptor.ContextUsed = usage.Snapshot.Used
+		descriptor.ContextSize = usage.Snapshot.Size
+	}
+	return descriptor
 }
 
 func mapString(values map[string]any, key string) string {
@@ -634,3 +630,20 @@ func firstString(values ...string) string {
 }
 
 var _ Service = (*service)(nil)
+
+// The frozen Spawn target is persisted by Runtime, so this display remains
+// independent of current Host model preferences and parent usage.
+func descriptorModelFromEntry(entry *task.Entry) string {
+	if entry == nil || entry.Kind != task.KindSubagent {
+		return ""
+	}
+	raw, err := json.Marshal(entry.Spec["target"])
+	if err != nil {
+		return ""
+	}
+	var target delegation.Target
+	if json.Unmarshal(raw, &target) != nil {
+		return ""
+	}
+	return target.Placement.Model
+}

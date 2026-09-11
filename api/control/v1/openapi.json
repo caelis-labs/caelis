@@ -6,6 +6,68 @@
   },
   "servers": [{"url": "/api/control/v1"}],
   "paths": {
+    "/sessions/{session_id}/subagents/input": {
+      "post": {
+        "operationId": "submitSubagentInput",
+        "responses": {
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SubagentInputStatus"}}}}
+        },
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SubagentInputRequest"}}}}
+      }
+    },
+    "/sessions/{session_id}/subagents/input-status": {
+      "post": {
+        "operationId": "subagentInputStatuses",
+        "responses": {
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "200": {
+            "description": "Success",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SubagentInputStatuses"}}}
+          }
+        },
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SubagentInputStatusRequest"}}}}
+      }
+    },
+    "/presentation/preferences": {
+      "get": {
+        "operationId": "loadUIPreferences",
+        "responses": {
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UIPreferences"}}}}
+        }
+      },
+      "put": {
+        "operationId": "saveUIPreferences",
+        "responses": {
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false}}}}
+        },
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UIPreferences"}}}}
+      }
+    },
     "/initialize": {
       "get": {
         "operationId": "initializeClient",
@@ -1748,6 +1810,46 @@
       "ServiceUnavailable": {"description": "Host is shutting down or temporarily unavailable", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
     },
     "schemas": {
+      "SubagentInputRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operation_id", "session_id", "participant_id", "task_id", "input"],
+        "properties": {
+          "operation_id": {"type": "string"},
+          "session_id": {"type": "string"},
+          "participant_id": {"type": "string"},
+          "task_id": {"type": "string"},
+          "input": {"type": "string"},
+          "content_parts": {"type": "array", "items": {"$ref": "#/components/schemas/PromptContentPart"}}
+        }
+      },
+      "SubagentInputStatusRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["session_id", "ids"],
+        "properties": {"session_id": {"type": "string"}, "ids": {"type": "array", "maxItems": 64, "items": {"type": "string"}}}
+      },
+      "SubagentInputStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "state"],
+        "properties": {
+          "id": {"type": "string"},
+          "state": {"type": "string", "enum": ["queued", "sending", "sent", "failed", "unknown"]},
+          "detail": {"type": "string"}
+        }
+      },
+      "SubagentInputStatuses": {"type": "array", "items": {"$ref": "#/components/schemas/SubagentInputStatus"}},
+      "UIPreferences": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "subagent_layout": {"type": "string", "enum": ["overlay", "left", "right", "up", "down"]},
+          "horizontal_ratio": {"type": "integer", "minimum": 30, "maximum": 70},
+          "vertical_ratio": {"type": "integer", "minimum": 30, "maximum": 70}
+        }
+      },
       "EmptyResult": {"type":"object","additionalProperties":false},
       "StringList": {"type":"array","items":{"type":"string"}},
       "PresentationCapabilities": {"type":"object","required":["audio","embedded_context","image"],"properties":{"audio":{"type":"boolean"},"embedded_context":{"type":"boolean"},"image":{"type":"boolean"}},"additionalProperties":false},
@@ -2393,6 +2495,9 @@
         "additionalProperties": false,
         "required": ["session_id", "task_id", "handle", "kind", "state", "running"],
         "properties": {
+          "model": {"type": "string"},
+          "context_used": {"$ref": "#/components/schemas/Uint64Decimal"},
+          "context_size": {"$ref": "#/components/schemas/Uint64Decimal"},
           "session_id": {"type": "string"},
           "task_id": {"type": "string"},
           "handle": {"type": "string"},

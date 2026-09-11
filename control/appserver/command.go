@@ -60,6 +60,7 @@ const (
 	ActionParticipantAttach         Action = "participant.attach"
 	ActionParticipantList           Action = "participant.list"
 	ActionParticipantStart          Action = "participant.start"
+	ActionSubagentInput             Action = "subagent.input"
 	ActionParticipantPrompt         Action = "participant.prompt"
 	ActionParticipantCancel         Action = "participant.cancel"
 	ActionParticipantDetach         Action = "participant.detach"

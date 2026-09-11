@@ -111,6 +111,7 @@ func themeFrom(p themePalette, s themeSurfaces) Theme {
 
 		InputBarFg:          p.TextPrimary,
 		ComposerBg:          s.Composer,
+		ComposerFocusBg:     s.Raised,
 		HelpHintFg:          p.TextSecondary,
 		SpinnerFg:           p.Focus,
 		SeparatorFg:         p.Border,

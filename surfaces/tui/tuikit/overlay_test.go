@@ -10,6 +10,16 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+func TestPaintLineBackgroundPreservesTerminalDefault(t *testing.T) {
+	line := lipgloss.NewStyle().Foreground(lipgloss.Color("#242a35")).Render("readable on a light terminal")
+	line += lipgloss.NewStyle().Background(lipgloss.Color("#f0f0f0")).Render(" selected")
+	for _, background := range []color.Color{nil, lipgloss.NewStyle().GetBackground()} {
+		if got := PaintLineBackground(line, ansi.StringWidth(line), background); got != line {
+			t.Fatalf("terminal background replaced by explicit paint: %q", got)
+		}
+	}
+}
+
 func TestRenderOverlayFrame_BasicContent(t *testing.T) {
 	theme := DefaultTheme()
 	frame := RenderOverlayFrame(theme, OverlayFrameModel{

@@ -16,6 +16,7 @@ const (
 
 	CapabilityAppServerClients        = "appserver-clients-v2"
 	CapabilityTaskStreams             = "task-streams-v2"
+	CapabilitySubagentWorkspace       = "subagent-workspace-v1"
 	CapabilitySessionFeed             = "session-feed-v2"
 	CapabilityMultiWorkspace          = "multi-workspace-sessions-v1"
 	CapabilityWorkspaceCWDList        = "workspace-cwd-session-list-v1"
@@ -55,6 +56,7 @@ func RequiredManagedHostCapabilities() []string {
 	return []string{
 		CapabilityAppServerClients,
 		CapabilityTaskStreams,
+		CapabilitySubagentWorkspace,
 		CapabilitySessionFeed,
 		CapabilityMultiWorkspace,
 		CapabilityWorkspaceCWDList,

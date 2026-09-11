@@ -324,6 +324,12 @@ func TestExplicitRemoteHostRequiresWorkspaceCapabilities(t *testing.T) {
 		missing                string
 	}{
 		{
+			name:                   "interactive subagent workspace",
+			capabilities:           []string{appserver.CapabilityWorkspaceCWDList},
+			additionalCapabilities: []string{appserver.CapabilitySubagentWorkspace},
+			missing:                appserver.CapabilitySubagentWorkspace,
+		},
+		{
 			name:         "cwd session listing",
 			capabilities: []string{appserver.CapabilityWorkspaceTrust},
 			missing:      appserver.CapabilityWorkspaceCWDList,

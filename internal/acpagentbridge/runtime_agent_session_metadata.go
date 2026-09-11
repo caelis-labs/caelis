@@ -52,9 +52,9 @@ func normalizedACPSessionMetadata(meta map[string]any) map[string]any {
 }
 
 // matchesManagedSubagentRelationClaim recognizes the exact durable relation
-// emitted by Host-owned child execution and history bridges. It is never an
-// authorization by itself: callers additionally require either an execution
-// bridge without the history token or the exact read-only history capability.
+// emitted by the Host-owned child connection. It is never an
+// authorization by itself: callers also require the principal-authorized
+// Host Session client or direct bridge ownership.
 func matchesManagedSubagentRelationClaim(active session.Session, meta map[string]any) bool {
 	if !sessionvisibility.IsSystemManagedSession(active) ||
 		!strings.EqualFold(

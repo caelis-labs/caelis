@@ -217,8 +217,10 @@ Both Session and Task clients receive explicit append or transactional
 replacement deliveries. Replacement pages remain non-visible until their
 matching end marker. A valid cursor prefers exact spool bytes, but missing,
 expired, or corrupt cache state selects one complete authoritative replacement:
-canonical Session replay, command final result, or ACP child session replay
-with Task final result as its fallback. Replace-capable Surfaces swap only after
+canonical Session replay, command final result, or ACP child session replay.
+Child replay is written and atomically published by the same recorder that
+accepts live updates from the loaded connection. Child history errors remain
+errors; a final answer never replaces a missing transcript. Replace-capable Surfaces swap only after
 the matching end marker; an irreversible ACP callback rejects a replacement
 after it has already emitted an exact prefix.
 
@@ -233,7 +235,7 @@ position because they have no Session-feed resume meaning.
 Consumers commit a delivery's `NextCursor` only after successfully applying its
 events. Subscriptions expose no separately advancing resume cursor.
 
-If a Session spool fails after an append/sync has crossed the consumer boundary,
+If a Session spool fails after an append has crossed the consumer boundary,
 Control replaces that prefix with canonical Session truth before following new
 durable projections. One latest
 cursorless Turn terminal result per Session and one coalesced slot per

@@ -48,7 +48,7 @@ func TestEventsPreservesRecordLocalSubagentActivityAcrossReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	service := newTaskStreamTestService(t, store, spool)
+	service := newTaskStreamTestService(t, store, spool, recorder)
 	read := func() []Record {
 		t.Helper()
 		batch, err := service.Events(t.Context(), Principal{ID: "owner"}, ReadRequest{
@@ -93,7 +93,7 @@ func TestEventsReadsExactControlSpool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	service := newTaskStreamTestService(t, store, spool)
+	service := newTaskStreamTestService(t, store, spool, recorder)
 	batch, err := service.Events(t.Context(), Principal{ID: "owner"}, ReadRequest{
 		SessionID: "session-1", TaskID: "task-1",
 	})
@@ -133,7 +133,7 @@ func TestSubscribeWaitsForFirstProducerRecord(t *testing.T) {
 	observer := recorder.BindTaskOutput(t.Context(), output.Binding{
 		SessionID: "session-1", TaskID: "task-1", Kind: output.TaskKindCommand, StartsAtTaskOrigin: true,
 	})
-	service := newTaskStreamTestService(t, store, spool)
+	service := newTaskStreamTestService(t, store, spool, recorder)
 	result, err := service.Subscribe(t.Context(), Principal{ID: "owner"}, SubscribeRequest{
 		SessionID: "session-1", TaskID: "task-1",
 	})
@@ -170,7 +170,7 @@ func TestUnreadSubscriptionDoesNotBackpressureProducer(t *testing.T) {
 	observer := recorder.BindTaskOutput(t.Context(), output.Binding{
 		SessionID: "session-1", TaskID: "task-1", Kind: output.TaskKindCommand, StartsAtTaskOrigin: true,
 	})
-	service := newTaskStreamTestService(t, store, spool)
+	service := newTaskStreamTestService(t, store, spool, recorder)
 	result, err := service.Subscribe(t.Context(), Principal{ID: "owner"}, SubscribeRequest{
 		SessionID: "session-1", TaskID: "task-1",
 	})
@@ -275,7 +275,7 @@ func TestValidCursorCacheMissReturnsAtomicFallback(t *testing.T) {
 	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "prefix", Running: true}); err != nil {
 		t.Fatal(err)
 	}
-	service := newTaskStreamTestService(t, newTaskStreamTestStore(entry), spool)
+	service := newTaskStreamTestService(t, newTaskStreamTestStore(entry), spool, recorder)
 	batch, err := service.Events(t.Context(), Principal{ID: "owner"}, ReadRequest{SessionID: "session-1", TaskID: "task-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -287,6 +287,9 @@ func TestValidCursorCacheMissReturnsAtomicFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := observer.ObserveTaskOutput(t.Context(), output.Event{State: string(task.StateCompleted), Closed: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := recorder.Flush(t.Context(), task.Ref{SessionID: entry.Session.SessionID, TaskID: entry.TaskID}); err != nil {
 		t.Fatal(err)
 	}
 	if err := spool.Remove(t.Context(), key); err != nil {
@@ -336,9 +339,13 @@ func TestExpectedActivityRejectsStaleRead(t *testing.T) {
 	}
 }
 
-func newTaskStreamTestService(t *testing.T, store task.Store, spool streamspool.Store) Service {
+func newTaskStreamTestService(t *testing.T, store task.Store, spool streamspool.Store, recorders ...*Recorder) Service {
 	t.Helper()
-	service, err := New(Config{
+	var recorder *Recorder
+	if len(recorders) > 0 {
+		recorder = recorders[0]
+	}
+	service, err := New(Config{Recorder: recorder,
 		Tasks: store, Spool: spool, Authorizer: taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret,
 	})
 	if err != nil {

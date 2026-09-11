@@ -39,7 +39,10 @@ func (m *Model) resetConversationView() {
 	m.runningActivity = runningActivityState{}
 	m.compactNoticePair = compactNoticePairState{}
 	m.subagentOutputOverlay = nil
-	m.subagentRosterOverlay = nil
+	m.workspace.childFocused = false
+	m.workspace.lastCallID = ""
+	m.workspace.dragging = false
+	m.cancelPaneResize()
 	m.subagentRosterPressed = false
 	m.subagentOutputViews = map[string]*subagentOutputView{}
 	m.resetSubagentDirectoryWatch()

@@ -27,6 +27,10 @@ func (m *Model) renderSubagentOutputDocument(view *subagentOutputView, ctx Block
 			entry.rows = subagentOutputWrappedRows(entry.blockID, entry.wrappedViewportRows)
 			entry.fixedWidthLines(ctx.Width)
 		}
+		if len(entry.rows) > 0 && len(rows) > 0 && !isACPTranscriptGapRow(rows[len(rows)-1]) {
+			rows = append(rows, PlainRow(entry.blockID, ""))
+			fixed = append(fixed, normalizeFullscreenFrameLine("", ctx.Width))
+		}
 		rows = append(rows, entry.rows...)
 		fixed = append(fixed, entry.fixedLines...)
 		entries = append(entries, entry)

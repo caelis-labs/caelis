@@ -10,21 +10,19 @@ const (
 	metaRuntimeSessionKindKey      = "kind"
 	metaRuntimeSessionParentIDKey  = "parent_session_id"
 	metaRuntimeSessionTaskIDKey    = "task_id"
-	metaRuntimeSessionHistoryToken = "history_token"
 	metaRuntimeSessionSubagentKind = "subagent"
 )
 
 // SubagentSessionMetadata is the Host-private relation claim carried by the
-// built-in ACP child and managed-history bridges.
+// built-in ACP child connection.
 type SubagentSessionMetadata struct {
 	ParentSessionID string
 	TaskID          string
-	HistoryToken    string
 }
 
 // NewSubagentSessionMeta encodes the Host-private managed-child relation for
 // one built-in ACP session/new or session/load request.
-func NewSubagentSessionMeta(parentSessionID, taskID, historyToken string) map[string]any {
+func NewSubagentSessionMeta(parentSessionID, taskID string) map[string]any {
 	sessionMeta := map[string]any{
 		metaRuntimeSessionKindKey: metaRuntimeSessionSubagentKind,
 	}
@@ -33,9 +31,6 @@ func NewSubagentSessionMeta(parentSessionID, taskID, historyToken string) map[st
 	}
 	if taskID = strings.TrimSpace(taskID); taskID != "" {
 		sessionMeta[metaRuntimeSessionTaskIDKey] = taskID
-	}
-	if historyToken = strings.TrimSpace(historyToken); historyToken != "" {
-		sessionMeta[metaRuntimeSessionHistoryToken] = historyToken
 	}
 	return map[string]any{
 		metaRootKey: map[string]any{
@@ -58,7 +53,6 @@ func ParseSubagentSessionMeta(meta map[string]any) (SubagentSessionMetadata, boo
 	return SubagentSessionMetadata{
 		ParentSessionID: strings.TrimSpace(stringValue(sessionMeta[metaRuntimeSessionParentIDKey])),
 		TaskID:          strings.TrimSpace(stringValue(sessionMeta[metaRuntimeSessionTaskIDKey])),
-		HistoryToken:    strings.TrimSpace(stringValue(sessionMeta[metaRuntimeSessionHistoryToken])),
 	}, true
 }
 

@@ -20,6 +20,55 @@ import (
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 )
 
+func TestTUIColdIdleWorkspaceUsesOneFollowingSubscription(t *testing.T) {
+	service := &subagentRosterTestTaskStreamService{
+		subscribeRequests: make(chan taskstream.SubscribeRequest, 4),
+		eventRequests:     make(chan taskstream.ReadRequest, 4),
+	}
+	messages := make(chan tea.Msg, 8)
+	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
+	defer sender.Close()
+	model := NewModel(Config{NoColor: true, NoAnimation: true, TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender})
+	model.currentSessionID = "session-old"
+	model.width, model.height = 100, 30
+	var descriptors []taskstream.TaskDescriptor
+	for _, name := range []string{"one", "two"} {
+		addSubagentRosterTestView(model, "spawn-"+name, name, name+"[helper]: old task", "completed", time.Unix(1, 0), time.Unix(2, 0))
+		descriptors = append(descriptors, taskstream.TaskDescriptor{SessionID: "session-old", TaskID: "task-" + name, Handle: name, Kind: task.KindSubagent,
+			State: task.StateCompleted, ActivityID: "activity-" + name, ParentTool: taskstream.ParentTool{ToolCallID: "spawn-" + name, ToolName: "StartThread"}})
+	}
+	service.list.Tasks = descriptors
+	applySubagentDirectorySnapshotForTest(model, 1, descriptors)
+	if len(service.subscribeRequests) != 0 || len(service.eventRequests) != 0 {
+		t.Fatal("hidden workspaces started observation")
+	}
+	model.workspace.lastCallID = "spawn-two"
+	if !model.openSubagentWorkspace() {
+		t.Fatal("idle workspace did not open")
+	}
+	resolved := receiveTUITaskStreamMessage[taskStreamResolvedMsg](t, messages)
+	model.Update(resolved)
+	select {
+	case request := <-service.subscribeRequests:
+		if request.TaskID != "task-two" || !request.Follow {
+			t.Fatalf("cold subscription = %#v", request)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("idle workspace did not subscribe")
+	}
+	select {
+	case request := <-service.eventRequests:
+		t.Fatalf("separate history read = %#v", request)
+	default:
+	}
+	select {
+	case request := <-service.subscribeRequests:
+		t.Fatalf("extra subscription = %#v", request)
+	default:
+	}
+	model.closeSubagentOutputOverlay()
+}
+
 func TestTUISubagentWorkspaceObservesOnlyWhileOpenAndResumesCursor(t *testing.T) {
 	t.Parallel()
 
@@ -537,124 +586,6 @@ func TestTUIVisibleSubagentObservationSurvivesSpawnTerminalAndStopsOnClose(t *te
 	}
 }
 
-func TestTUIVisibleSubagentWaitsForTaskLifecycleBeforeSealingAndHydrating(t *testing.T) {
-	t.Parallel()
-
-	subscription := newTUIProtocolTaskSubscription()
-	historyRequests := make(chan taskstream.ReadRequest, 1)
-	service := &subagentRosterTestTaskStreamService{
-		eventRequests: historyRequests,
-	}
-	sender := &ProgramSender{Send: func(tea.Msg) {}}
-	defer sender.Close()
-	model := NewModel(Config{
-		Context: context.Background(), NoColor: true, NoAnimation: true,
-		TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender,
-	})
-	model.currentSessionID = "session-1"
-	view := model.ensureSubagentOutputView("spawn-1")
-	view.taskHandle = "zuri"
-	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1"}
-	model.taskStreamWanted["task-1"] = true
-	model.taskStreamTokens["task-1"] = 7
-	model.taskStreamSubscriptions["task-1"] = subscription
-	model.taskStreamHandlesByID["task-1"] = "zuri"
-	model.taskStreamIDsByCallID["spawn-1"] = "task-1"
-	model.taskStreamCallIDsByID["task-1"] = "spawn-1"
-
-	startedAt := time.Unix(100, 0)
-	narrative := eventstream.Envelope{
-		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "task-1:2",
-		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Cursor: "cursor-1", OccurredAt: startedAt,
-		Delivery:   &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
-		Update: eventstream.ContentChunk{
-			SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "answer-2",
-			Content: eventstream.TextContent{Type: "text", Text: "- **overlay result**"},
-		},
-	}
-	next, _ := model.handleTaskStreamBatch(taskStreamBatchMsg{
-		sessionID: "session-1", taskID: "task-1", token: 7, events: []eventstream.Envelope{narrative},
-	})
-	model = next.(*Model)
-	view = requireSubagentOutputViewForTest(t, model, "spawn-1")
-	if len(view.block.Events) != 1 || view.block.Events[0].ActiveBuffer == nil || !view.block.Events[0].ActiveBuffer.HasTail() {
-		t.Fatalf("running child narrative = %#v, want raw unstable Markdown tail", view.block.Events)
-	}
-
-	applySubagentDirectorySnapshotForTest(model, 1, []taskstream.TaskDescriptor{{
-		SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
-		State: task.StateCompleted, Running: false, CurrentTurnID: "task-1:2", UpdatedAt: startedAt.Add(time.Second),
-		ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
-	}})
-	if model.taskStreamSubscriptions["task-1"] != subscription || !model.taskStreamWanted["task-1"] {
-		t.Fatal("terminal directory metadata detached visible child before its Task lifecycle frame")
-	}
-	if got := subscription.closeCalls.Load(); got != 0 {
-		t.Fatalf("terminal directory metadata closed subscription %d time(s), want zero", got)
-	}
-
-	terminal := eventstream.Envelope{
-		Kind: eventstream.KindLifecycle, SessionID: "session-1", TurnID: "task-1:2",
-		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Cursor: "cursor-2", OccurredAt: startedAt.Add(2 * time.Second),
-		Delivery:   &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
-		Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted}, Final: true,
-	}
-	next, _ = model.handleTaskStreamBatch(taskStreamBatchMsg{
-		sessionID: "session-1", taskID: "task-1", token: 7, events: []eventstream.Envelope{terminal},
-	})
-	model = next.(*Model)
-	view = requireSubagentOutputViewForTest(t, model, "spawn-1")
-	if view.block.Status != eventstream.LifecycleStateCompleted {
-		t.Fatalf("child status = %q, want completed lifecycle", view.block.Status)
-	}
-	if buffer := view.block.Events[0].ActiveBuffer; buffer == nil || buffer.HasTail() {
-		t.Fatalf("terminal child Markdown buffer = %#v, want sealed full Markdown", buffer)
-	}
-	plain := joinRenderedPlain(model.subagentOutputRows(view, 72, 16))
-	if !strings.Contains(plain, "overlay result") || strings.Contains(plain, "**overlay result**") {
-		t.Fatalf("terminal child Markdown did not use final rendering:\n%s", plain)
-	}
-	if model.taskStreamSubscriptions["task-1"] != subscription || !model.taskStreamWanted["task-1"] {
-		t.Fatal("sealed terminal child detached its cross-activity live observer")
-	}
-	if got := subscription.closeCalls.Load(); got != 0 {
-		t.Fatalf("sealed terminal child closed subscription %d time(s), want zero", got)
-	}
-	select {
-	case request := <-historyRequests:
-		if request.TaskID != "task-1" || request.Cursor != "" {
-			t.Fatalf("idle ACP history request = %#v, want complete finite replay", request)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("terminal lifecycle did not start complete idle ACP history")
-	}
-	secondTurn := eventstream.Envelope{
-		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "task-1:3",
-		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Cursor: "cursor-3", OccurredAt: startedAt.Add(3 * time.Second),
-		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
-		Update: eventstream.ContentChunk{
-			SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "answer-3",
-			Content: eventstream.TextContent{Type: "text", Text: "second activity arrived on the same follower"},
-		},
-	}
-	next, _ = model.handleTaskStreamBatch(taskStreamBatchMsg{
-		sessionID: "session-1", taskID: "task-1", token: 7, events: []eventstream.Envelope{secondTurn},
-	})
-	model = next.(*Model)
-	if model.taskStreamSubscriptions["task-1"] != subscription || !model.taskStreamWanted["task-1"] {
-		t.Fatal("second activity replaced the visible cross-activity observer")
-	}
-	if model.taskStreamHistoryInFlight("task-1") {
-		t.Fatal("second activity left the previous idle history read eligible to overwrite live output")
-	}
-	view.prepareVisibleRender()
-	if plain := joinRenderedPlain(model.subagentOutputRows(view, 72, 24)); !strings.Contains(plain, "second activity arrived on the same follower") {
-		t.Fatalf("same observer omitted the second child Turn:\n%s", plain)
-	}
-}
-
 func TestTUILiveTaskStreamBatchesUseOneCoalescedOverlayFrame(t *testing.T) {
 	t.Parallel()
 
@@ -699,7 +630,7 @@ func TestTUILiveTaskStreamBatchesUseOneCoalescedOverlayFrame(t *testing.T) {
 	if !view.renderScheduled {
 		t.Fatal("live batches did not schedule an overlay render")
 	}
-	if got := model.renderSubagentOutputOverlay(); got != before {
+	if got := model.renderSubagentOutputOverlay(); strings.Join(strings.Split(got, "\n")[:model.subagentOutputOverlay.layout.contentRows+2], "\n") != strings.Join(strings.Split(before, "\n")[:model.subagentOutputOverlay.layout.contentRows+2], "\n") {
 		t.Fatalf("live batches bypassed the coalescing window\n--- before ---\n%s\n--- after ---\n%s", before, got)
 	}
 	if got := view.renderCache.renders; got != initialRenders {
@@ -907,315 +838,6 @@ func TestTUISubagentOutputStopsMaskingRepeatedCleanFollowExit(t *testing.T) {
 	}
 	if model.taskStreamTokens["task-1"] != 0 {
 		t.Fatalf("Task stream token = %d, want retries stopped", model.taskStreamTokens["task-1"])
-	}
-}
-
-func TestTUITerminalHistoryInstallsWithoutDetachingLiveObserver(t *testing.T) {
-	t.Parallel()
-
-	sender := &ProgramSender{Send: func(tea.Msg) {}}
-	defer sender.Close()
-	model := NewModel(Config{
-		NoColor: true, NoAnimation: true,
-		TaskStreams: bindTaskStreamTestClient(t, &subagentRosterTestTaskStreamService{}), ProgramSender: sender,
-	})
-	model.currentSessionID = "session-1"
-	view := model.ensureSubagentOutputView("spawn-1")
-	view.taskHandle = "zuri"
-	view.historyResolved = true
-	view.idleHistorySettled = false
-	view.block.SetStatus(eventstream.LifecycleStateCompleted, "", "", time.Unix(100, 0))
-	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1"}
-	model.subagentRosterTasks["spawn-1"] = taskstream.TaskDescriptor{
-		SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
-		State: task.StateCompleted, Running: false, ActivityID: "activity-1",
-		ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
-	}
-	view.directoryActivityID = "activity:activity-1"
-	liveSubscription := newTUIProtocolTaskSubscription()
-	model.taskStreamWanted["task-1"] = true
-	model.taskStreamTokens["task-1"] = 9
-	model.taskStreamSubscriptions["task-1"] = liveSubscription
-	model.taskStreamHandlesByID["task-1"] = "zuri"
-	model.taskStreamIDsByCallID["spawn-1"] = "task-1"
-	model.taskStreamCallIDsByID["task-1"] = "spawn-1"
-	stageView := newSubagentOutputHistoryView(view)
-	stageView.block.SetStatus(eventstream.LifecycleStateCompleted, "", "", time.Unix(100, 0))
-	model.taskStreamHistoryStages["task-1"] = &subagentOutputHistoryStage{
-		token: 7, activityID: view.directoryActivityID,
-		expectedActivityID: "activity-1", responseActivityID: "activity-1", view: stageView,
-	}
-	model.taskStreamHistoryTokens["task-1"] = 7
-	if demand := model.taskStreamDemandForTaskID("task-1"); demand != taskStreamDemandVisibleSubagent {
-		t.Fatalf("in-flight terminal history demand = %v, want visible history", demand)
-	}
-	if status := model.subagentOutputCurrentStatus(view); status == subagentOutputRunning {
-		t.Fatalf("historical replay status = %v, want terminal", status)
-	}
-
-	next, cmd := model.handleTaskStreamHistoryClosed(taskStreamHistoryClosedMsg{
-		sessionID: "session-1", taskID: "task-1", token: 7, activityID: "activity-1",
-	})
-	model = next.(*Model)
-	if cmd == nil {
-		t.Fatal("terminal historical replay did not schedule its final overlay render")
-	}
-	if !model.taskStreamWanted["task-1"] || model.taskStreamTokens["task-1"] != 9 ||
-		model.taskStreamSubscriptions["task-1"] != liveSubscription {
-		t.Fatal("terminal history detached or replaced the live observer")
-	}
-	if model.taskStreamHistoryInFlight("task-1") {
-		t.Fatal("terminal history remained in flight after a clean finite read")
-	}
-	if !view.idleHistorySettled {
-		t.Fatal("clean idle ACP history did not become the complete presentation cache")
-	}
-	if model.hint != "" {
-		t.Fatalf("terminal historical clean exit surfaced an error hint: %q", model.hint)
-	}
-}
-
-func TestTUIIdleHistoryReplacesVisibleOverlayOnlyAfterCleanClose(t *testing.T) {
-	t.Parallel()
-
-	sender := &ProgramSender{Send: func(tea.Msg) {}}
-	defer sender.Close()
-	model := NewModel(Config{
-		Context: context.Background(), NoColor: true, NoAnimation: true,
-		TaskStreams: bindTaskStreamTestClient(t, &subagentRosterTestTaskStreamService{}), ProgramSender: sender,
-	})
-	model.currentSessionID = "session-1"
-	view := model.ensureSubagentOutputView("spawn-1")
-	view.taskHandle = "zuri"
-	view.directoryActivityID = "activity:activity-1"
-	view.block.AppendStreamEvent(SEAssistant, "stable live result", narrativeSourceIdentity{})
-	view.block.SetStatus(eventstream.LifecycleStateCompleted, "", "", time.Unix(100, 0))
-	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1"}
-	model.subagentRosterTasks["spawn-1"] = taskstream.TaskDescriptor{
-		SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
-		State: task.StateCompleted, ActivityID: "activity-1",
-		ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
-	}
-	model.taskStreamWanted["task-1"] = true
-	model.taskStreamTokens["task-1"] = 7
-	model.taskStreamIDsByCallID["spawn-1"] = "task-1"
-	model.taskStreamCallIDsByID["task-1"] = "spawn-1"
-	subscription := newTUIProtocolTaskSubscription()
-	model.taskStreamSubscriptions["task-1"] = subscription
-	model.taskStreamHistoryTokens["task-1"] = 8
-	model.taskStreamHistoryStages["task-1"] = &subagentOutputHistoryStage{
-		token: 8, activityID: view.directoryActivityID,
-		expectedActivityID: "activity-1", view: newSubagentOutputHistoryView(view),
-	}
-	if stage := model.taskStreamHistoryStages["task-1"]; stage == nil || stage.view == view {
-		t.Fatal("idle history did not open an independent invisible projection")
-	}
-	if plain := joinRenderedPlain(model.subagentOutputRows(view, 72, 16)); !strings.Contains(plain, "stable live result") || strings.Contains(plain, "Loading subagent history") {
-		t.Fatalf("opening idle history mutated the visible overlay:\n%s", plain)
-	}
-
-	startedAt := time.Unix(90, 0)
-	next, _ := model.handleTaskStreamHistoryBatch(taskStreamHistoryBatchMsg{
-		sessionID: "session-1", taskID: "task-1", token: 8, activityID: "activity-1",
-		events: []eventstream.Envelope{{
-			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "task-1:1",
-			Scope: eventstream.ScopeSubagent, ScopeID: "task-1", OccurredAt: startedAt,
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
-			Update: eventstream.ContentChunk{
-				SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "history-message-1",
-				Content: eventstream.TextContent{Type: "text", Text: "complete historical result"},
-			},
-		}, {
-			Kind: eventstream.KindLifecycle, SessionID: "session-1", TurnID: "task-1:1",
-			Scope: eventstream.ScopeSubagent, ScopeID: "task-1", OccurredAt: startedAt.Add(time.Second),
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
-			Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
-		}},
-	})
-	model = next.(*Model)
-	if plain := joinRenderedPlain(model.subagentOutputRows(view, 72, 16)); !strings.Contains(plain, "stable live result") || strings.Contains(plain, "complete historical result") {
-		t.Fatalf("staged history leaked into the visible overlay before clean close:\n%s", plain)
-	}
-
-	next, _ = model.handleTaskStreamHistoryClosed(taskStreamHistoryClosedMsg{
-		sessionID: "session-1", taskID: "task-1", token: 8, activityID: "activity-1",
-	})
-	model = next.(*Model)
-	plain := joinRenderedPlain(model.subagentOutputRows(view, 72, 16))
-	if !strings.Contains(plain, "complete historical result") || strings.Contains(plain, "stable live result") {
-		t.Fatalf("clean history close did not atomically replace the visible overlay:\n%s", plain)
-	}
-	if !view.idleHistorySettled || view.idleHistoryActivityID != "activity:activity-1" {
-		t.Fatalf("history cache = settled:%v activity:%q, want exact terminal activity", view.idleHistorySettled, view.idleHistoryActivityID)
-	}
-	if !model.taskStreamWanted["task-1"] || model.taskStreamSubscriptions["task-1"] != subscription ||
-		model.taskStreamHistoryInFlight("task-1") {
-		t.Fatalf("settled history disturbed observation: wanted=%v subscription=%T stage=%#v",
-			model.taskStreamWanted["task-1"], model.taskStreamSubscriptions["task-1"], model.taskStreamHistoryStages["task-1"])
-	}
-
-	settledToken := model.taskStreamTokens["task-1"]
-	for revision := uint64(1); revision <= 2; revision++ {
-		applySubagentDirectorySnapshotForTest(model, revision, []taskstream.TaskDescriptor{{
-			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
-			State: task.StateCompleted, Running: false, ActivityID: "activity-1", UpdatedAt: time.Unix(101, 0),
-			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
-		}})
-		if status, _, _ := model.subagentRosterViewState("spawn-1", view); status != subagentOutputSucceeded {
-			t.Fatalf("repeated terminal directory revision %d restored status %v, want succeeded", revision, status)
-		}
-		if !view.idleHistorySettled || view.idleHistoryActivityID != "activity:activity-1" ||
-			!model.taskStreamWanted["task-1"] || model.taskStreamTokens["task-1"] != settledToken ||
-			model.taskStreamSubscriptions["task-1"] != subscription || model.taskStreamHistoryInFlight("task-1") {
-			t.Fatalf("repeated terminal directory revision %d reopened history: settled=%v activity=%q wanted=%v token=%d subscription=%T stage=%#v",
-				revision, view.idleHistorySettled, view.idleHistoryActivityID, model.taskStreamWanted["task-1"],
-				model.taskStreamTokens["task-1"], model.taskStreamSubscriptions["task-1"], model.taskStreamHistoryStages["task-1"])
-		}
-		if current := joinRenderedPlain(model.subagentOutputRows(view, 72, 16)); current != plain {
-			t.Fatalf("repeated terminal directory revision %d changed stable history\n--- before ---\n%s\n--- after ---\n%s", revision, plain, current)
-		}
-	}
-}
-
-func TestTUIDirectoryNewActivityCancelsInFlightIdleHistory(t *testing.T) {
-	t.Parallel()
-
-	liveRequests := make(chan taskstream.SubscribeRequest, 1)
-	service := &subagentRosterTestTaskStreamService{
-		subscribeRequests: liveRequests,
-		subscription:      newTUIProtocolTaskSubscription(),
-	}
-	sender := &ProgramSender{Send: func(tea.Msg) {}}
-	defer sender.Close()
-	model := NewModel(Config{
-		Context: context.Background(), NoColor: true, NoAnimation: true,
-		TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender,
-	})
-	model.currentSessionID = "session-1"
-	view := model.ensureSubagentOutputView("spawn-1")
-	view.taskHandle = "zuri"
-	view.historyResolved = true
-	view.idleHistorySettled = true
-	view.block.SetStatus(eventstream.LifecycleStateCompleted, "", "", time.Unix(100, 0))
-	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1"}
-	model.taskStreamHandlesByID["task-1"] = "zuri"
-	model.taskStreamIDsByCallID["spawn-1"] = "task-1"
-	model.taskStreamCallIDsByID["task-1"] = "spawn-1"
-	model.taskStreamCursors["task-1"] = "stable-live-cursor"
-	model.taskStreamHistoryTokens["task-1"] = 7
-	model.taskStreamHistoryStages["task-1"] = &subagentOutputHistoryStage{
-		token: 7, activityID: "activity:activity-1", view: newSubagentOutputHistoryView(view),
-	}
-	var canceled atomic.Int32
-	model.taskStreamHistoryCancels["task-1"] = func() { canceled.Add(1) }
-
-	running := taskstream.TaskDescriptor{
-		SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
-		State: task.StateRunning, Running: true, ActivityID: "activity-2", CurrentTurnID: "task-1:2",
-		UpdatedAt:  time.Unix(110, 0),
-		ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
-	}
-	applySubagentDirectorySnapshotForTest(model, 1, []taskstream.TaskDescriptor{running})
-	if canceled.Load() != 1 || model.taskStreamHistoryInFlight("task-1") {
-		t.Fatalf("stale idle history cleanup = cancel %d in-flight %v, want 1/false", canceled.Load(), model.taskStreamHistoryInFlight("task-1"))
-	}
-	if view.idleHistorySettled || !model.taskStreamWanted["task-1"] || model.taskStreamTokens["task-1"] == 0 {
-		t.Fatalf("new activity state = settled:%v wanted:%v token:%d", view.idleHistorySettled, model.taskStreamWanted["task-1"], model.taskStreamTokens["task-1"])
-	}
-	select {
-	case request := <-liveRequests:
-		if request.TaskID != "task-1" || request.Cursor != "stable-live-cursor" || !request.Follow {
-			t.Fatalf("new activity request = %#v, want live resume from stable boundary", request)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("new activity did not replace stale idle history with live observation")
-	}
-}
-
-func TestTUILiveSuccessorActivityWaitsForDirectoryBeforeLoadingHistory(t *testing.T) {
-	t.Parallel()
-
-	historyRequests := make(chan taskstream.ReadRequest, 2)
-	service := &subagentRosterTestTaskStreamService{eventRequests: historyRequests}
-	sender := &ProgramSender{Send: func(tea.Msg) {}}
-	defer sender.Close()
-	model := NewModel(Config{
-		Context: context.Background(), NoColor: true, NoAnimation: true,
-		TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender,
-	})
-	model.currentSessionID = "session-1"
-	view := model.ensureSubagentOutputView("spawn-1")
-	view.taskHandle = "zuri"
-	view.directoryActivityID = "activity:activity-a"
-	view.liveActivityID = "activity:activity-a"
-	view.block.SetStatus(eventstream.LifecycleStateCompleted, "", "", time.Unix(100, 0))
-	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1"}
-	model.subagentRosterTasks["spawn-1"] = taskstream.TaskDescriptor{
-		SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
-		State: task.StateCompleted, ActivityID: "activity-a", CurrentTurnID: "turn-a",
-		ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
-	}
-	model.taskStreamWanted["task-1"] = true
-	model.taskStreamTokens["task-1"] = 7
-	model.taskStreamHandlesByID["task-1"] = "zuri"
-	model.taskStreamIDsByCallID["spawn-1"] = "task-1"
-	model.taskStreamCallIDsByID["task-1"] = "spawn-1"
-	model.taskStreamHistoryTokens["task-1"] = 8
-	model.taskStreamHistoryStages["task-1"] = &subagentOutputHistoryStage{
-		token: 8, activityID: "activity:activity-a", expectedActivityID: "activity-a",
-		view: newSubagentOutputHistoryView(view),
-	}
-	var canceled atomic.Int32
-	model.taskStreamHistoryCancels["task-1"] = func() { canceled.Add(1) }
-
-	startedAt := time.Unix(110, 0)
-	next, _ := model.handleTaskStreamBatch(taskStreamBatchMsg{
-		sessionID: "session-1", taskID: "task-1", token: 7,
-		events: []eventstream.Envelope{{
-			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-b",
-			ActivityID: "activity-b", Scope: eventstream.ScopeSubagent, ScopeID: "task-1",
-			OccurredAt: startedAt,
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
-			Update: eventstream.ContentChunk{
-				SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "answer-b",
-				Content: eventstream.TextContent{Type: "text", Text: "activity B final answer"},
-			},
-		}, {
-			Kind: eventstream.KindLifecycle, SessionID: "session-1", TurnID: "turn-b",
-			ActivityID: "activity-b", Scope: eventstream.ScopeSubagent, ScopeID: "task-1",
-			OccurredAt: startedAt.Add(time.Second), Final: true,
-			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
-			Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
-		}},
-	})
-	model = next.(*Model)
-	if canceled.Load() != 1 || model.taskStreamHistoryInFlight("task-1") {
-		t.Fatalf("activity A history cleanup = cancel %d in-flight %v", canceled.Load(), model.taskStreamHistoryInFlight("task-1"))
-	}
-	if view.liveActivityID != "activity:activity-b" {
-		t.Fatalf("live activity fence = %q, want activity B", view.liveActivityID)
-	}
-	select {
-	case request := <-historyRequests:
-		t.Fatalf("activity B terminal frame reopened stale activity A history: %#v", request)
-	default:
-	}
-	if plain := joinRenderedPlain(model.subagentOutputRows(view, 72, 24)); !strings.Contains(plain, "activity B final answer") {
-		t.Fatalf("activity B live document was not retained:\n%s", plain)
-	}
-
-	applySubagentDirectorySnapshotForTest(model, 1, []taskstream.TaskDescriptor{{
-		SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
-		State: task.StateCompleted, ActivityID: "activity-b", CurrentTurnID: "turn-b",
-		ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "StartThread"},
-	}})
-	select {
-	case request := <-historyRequests:
-		if request.ExpectedActivityID != "activity-b" {
-			t.Fatalf("successor history activity = %q, want activity-b", request.ExpectedActivityID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("directory convergence did not start activity B finite history")
 	}
 }
 

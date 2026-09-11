@@ -19,7 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
-	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 )
 
@@ -257,6 +256,7 @@ func TestRunnerLoadHistoryUsesSessionLoadAndPreservesMultipleTurns(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = runner.Quiesce(context.Background()) }()
 	loaded, err := runner.LoadHistory(ctx, tasksubagent.HistoryRequest{
 		Anchor: delegation.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
 		Reconnect: tasksubagent.ReconnectRequest{
@@ -297,7 +297,7 @@ func TestRunnerLoadHistoryUsesSessionLoadAndPreservesMultipleTurns(t *testing.T)
 	}
 }
 
-func TestRunnerLoadHistoryPassesMatchingCapabilityToBuiltInBridge(t *testing.T) {
+func TestRunnerLoadHistoryPassesExactRelationToBuiltInBridge(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	registry, err := NewRegistry([]AgentConfig{{
@@ -305,8 +305,7 @@ func TestRunnerLoadHistoryPassesMatchingCapabilityToBuiltInBridge(t *testing.T) 
 		Command: os.Args[0],
 		Args:    []string{"-test.run=TestRunnerPromptFailureHelperProcess", "--"},
 		Env: map[string]string{
-			"CAELIS_ACP_SUBAGENT_HELPER":              "history-load-capability",
-			acpagentenv.EnvManagedSessionHistoryToken: "",
+			"CAELIS_ACP_SUBAGENT_HELPER": "history-load-relation",
 		},
 	}})
 	if err != nil {
@@ -316,6 +315,7 @@ func TestRunnerLoadHistoryPassesMatchingCapabilityToBuiltInBridge(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = runner.Quiesce(context.Background()) }()
 	_, err = runner.LoadHistory(ctx, tasksubagent.HistoryRequest{
 		Anchor: delegation.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
 		Reconnect: tasksubagent.ReconnectRequest{
@@ -329,7 +329,7 @@ func TestRunnerLoadHistoryPassesMatchingCapabilityToBuiltInBridge(t *testing.T) 
 		},
 	})
 	if err != nil {
-		t.Fatalf("LoadHistory(built-in capability) error = %v", err)
+		t.Fatalf("LoadHistory(built-in relation) error = %v", err)
 	}
 }
 
@@ -351,6 +351,7 @@ func TestRunnerLoadHistoryReportsUnsupportedCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = runner.Quiesce(context.Background()) }()
 	_, err = runner.LoadHistory(ctx, tasksubagent.HistoryRequest{
 		Anchor: delegation.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
 		Reconnect: tasksubagent.ReconnectRequest{
@@ -386,6 +387,7 @@ func TestRunnerLoadHistoryRejectsUpdatesFromAnotherSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = runner.Quiesce(context.Background()) }()
 	loaded, err := runner.LoadHistory(ctx, tasksubagent.HistoryRequest{
 		Anchor: delegation.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
 		Reconnect: tasksubagent.ReconnectRequest{
@@ -426,7 +428,7 @@ func TestLoadedAgentCommunicationPromptRestoresDisplayIdentity(t *testing.T) {
 func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 	mode := os.Getenv("CAELIS_ACP_SUBAGENT_HELPER")
 	switch mode {
-	case "prompt-failure", "prompt-internal-error", "prompt-authentication", "message-reconnect", "history-load", "history-load-capability", "history-load-mismatch", "history-unsupported", "initialize-exit", "session-options":
+	case "prompt-failure", "prompt-internal-error", "prompt-authentication", "message-reconnect", "history-load", "history-load-relation", "history-load-mismatch", "history-unsupported", "initialize-exit", "session-options":
 	default:
 		return
 	}
@@ -473,7 +475,7 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				os.Exit(23)
 			}
 			response := client.InitializeResponse{ProtocolVersion: 1}
-			if mode == "history-load" || mode == "history-load-capability" || mode == "history-load-mismatch" {
+			if mode == "history-load" || mode == "history-load-relation" || mode == "history-load-mismatch" || mode == "prompt-authentication" {
 				response.AgentCapabilities.LoadSession = true
 			}
 			if mode == "prompt-authentication" {
@@ -537,7 +539,14 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 			}
 			return client.ResumeSessionResponse{}, nil
 		case client.MethodSessionLoad:
-			if mode != "history-load" && mode != "history-load-capability" && mode != "history-load-mismatch" {
+			if mode == "prompt-authentication" {
+				var req client.LoadSessionRequest
+				if err := json.Unmarshal(msg.Params, &req); err != nil || req.SessionId != "child-prompt-failure" {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: "wrong authentication Session"}
+				}
+				return client.LoadSessionResponse{}, nil
+			}
+			if mode != "history-load" && mode != "history-load-relation" && mode != "history-load-mismatch" {
 				return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 			}
 			var req client.LoadSessionRequest
@@ -550,12 +559,7 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				claim.ParentSessionID != "parent-history" || claim.TaskID != "task-history" {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/load request"}
 			}
-			if mode == "history-load-capability" {
-				requestToken := claim.HistoryToken
-				if processToken := strings.TrimSpace(os.Getenv(acpagentenv.EnvManagedSessionHistoryToken)); len(processToken) != 64 || requestToken != processToken {
-					return nil, &jsonrpc.RPCError{Code: -32602, Message: "managed history capability mismatch"}
-				}
-			}
+
 			updates := []client.Update{
 				client.ContentChunk{SessionUpdate: client.UpdateUserMessage, MessageID: "user-1", Content: jsonrpc.MustMarshalRaw(client.TextContent{Type: "text", Text: "first prompt"})},
 				client.ContentChunk{SessionUpdate: client.UpdateAgentMessage, MessageID: "assistant-1", Content: jsonrpc.MustMarshalRaw(client.TextContent{Type: "text", Text: "first answer"})},

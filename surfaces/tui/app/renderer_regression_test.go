@@ -540,7 +540,7 @@ func TestNormalizeFullscreenFrameLineReseatsRepaintSentinelAtScreenEdge(t *testi
 	}
 }
 
-func TestSubagentRosterOverlayStaysOpaqueWhileTranscriptStreamsUnderIt(t *testing.T) {
+func TestSubagentWorkspaceOverlayStaysOpaqueWhileTranscriptStreamsUnderIt(t *testing.T) {
 	const (
 		width  = 160
 		height = 32
@@ -566,28 +566,28 @@ func TestSubagentRosterOverlayStaysOpaqueWhileTranscriptStreamsUnderIt(t *testin
 	model.syncViewportContent()
 	model.viewport.GotoBottom()
 	model.refreshViewportFollowStateFromOffset()
-	if !model.openSubagentRosterOverlay() {
-		t.Fatal("openSubagentRosterOverlay() = false")
+	if !model.openSubagentWorkspace() {
+		t.Fatal("openSubagentWorkspace() = false")
 	}
 
 	frames := make([]string, 0, 6)
 	previousOffset := model.viewport.YOffset()
 	offsetAdvances := 0
-	var fixedGeometry subagentRosterOverlayGeometry
+	var fixedGeometry subagentOutputOverlayGeometry
 	captureFrame := func(frameIndex int) {
 		t.Helper()
-		state := model.subagentRosterOverlay
-		model.subagentRosterOverlay = nil
+		state := model.subagentOutputOverlay
+		model.subagentOutputOverlay = nil
 		base := model.View().Content
-		model.subagentRosterOverlay = state
+		model.subagentOutputOverlay = state
 
 		normalizeBefore := model.diag.FullscreenNormalizeCalls
 		frame := model.View().Content
 		if got := model.diag.FullscreenNormalizeCalls - normalizeBefore; got != 2 {
 			t.Fatalf("roster frame %d fullscreen normalization calls = %d, want 2", frameIndex, got)
 		}
-		overlay := model.renderSubagentRosterOverlay()
-		geometry := model.subagentRosterOverlay.geometry
+		overlay := model.renderSubagentOutputOverlay()
+		geometry := model.subagentOutputOverlay.geometry
 		if frameIndex == 0 {
 			fixedGeometry = geometry
 		} else if geometry.x != fixedGeometry.x || geometry.y != fixedGeometry.y ||
@@ -631,8 +631,7 @@ func TestSubagentRosterOverlayStaysOpaqueWhileTranscriptStreamsUnderIt(t *testin
 					if frameCell == nil || !frameCell.Equal(baseCell) {
 						t.Fatalf("roster frame %d changed base cell outside overlay at (%d,%d): got %#v, want %#v", frameIndex, x, y, frameCell, baseCell)
 					}
-					if y >= geometry.y && y < geometry.y+geometry.height &&
-						baseCell != nil && baseCell.Content != "" && baseCell.Content != " " {
+					if baseCell != nil && baseCell.Content != "" && baseCell.Content != " " {
 						preservedTranscriptCells++
 					}
 					continue

@@ -82,8 +82,10 @@ type Theme struct {
 	ScrollHintFg color.Color
 
 	// Inline layout.
-	InputBarFg          color.Color
-	ComposerBg          color.Color
+	InputBarFg color.Color
+	ComposerBg color.Color
+	// ComposerFocusBg marks the active editor when multiple composers are visible.
+	ComposerFocusBg     color.Color
 	ToolOutputBg        color.Color
 	HelpHintFg          color.Color
 	SpinnerFg           color.Color
@@ -592,6 +594,7 @@ func stripThemeBackgroundsForANSI(theme Theme, profile colorprofile.Profile) The
 	theme.InputSelectionBg = nil
 	theme.UserBg = nil
 	theme.ComposerBg = nil
+	theme.ComposerFocusBg = nil
 	theme.DiffAddBg = nil
 	theme.DiffAddStrongBg = nil
 	theme.DiffRemoveBg = nil

@@ -612,7 +612,8 @@ func TestStandardACPWaitIsHiddenLikeTaskWaitAcrossParticipantAndOverlay(t *testi
 		if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-1") {
 			t.Fatal("subagent output overlay did not open")
 		}
-		overlay := subagentOutputOverlayPlain(model)
+		layout := model.subagentOutputLayout(model.subagentOutputOverlay)
+		overlay := strings.Join(renderedPlainRows(model.subagentOutputRows(model.subagentOutputViews["spawn-1"], layout.innerWidth, layout.contentRows)), "\n")
 		if strings.Contains(strings.ToLower(overlay), "wait") {
 			t.Fatalf("subagent overlay exposed collaboration wait row:\n%s", overlay)
 		}

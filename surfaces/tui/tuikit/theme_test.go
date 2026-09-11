@@ -565,3 +565,25 @@ func colorIsPresent(value color.Color) bool {
 	}
 	return true
 }
+
+func TestComposerFocusSurfaceAcrossThemes(t *testing.T) {
+	for _, name := range []string{"dark", "light", "catppuccin-mocha", "catppuccin-latte", "nord", "solarized", "dracula"} {
+		for _, profile := range []colorprofile.Profile{colorprofile.TrueColor, colorprofile.ANSI256} {
+			t.Run(fmt.Sprintf("%s/%v", name, profile), func(t *testing.T) {
+				t.Setenv("NO_COLOR", "")
+				t.Setenv("CAELIS_THEME", name)
+				theme := ResolveThemeFromOptions(false, profile)
+				if theme.ComposerFocusBg == nil || colorsEqual(theme.ComposerFocusBg, theme.ComposerBg) || colorsEqual(theme.ComposerFocusBg, theme.ModalBg) {
+					t.Fatalf("focused composer lacks a distinct surface: %v", theme.ComposerFocusBg)
+				}
+				if brighter := relativeLuminance(theme.ComposerFocusBg) > relativeLuminance(theme.ComposerBg); brighter != theme.IsDark {
+					t.Fatal("composer focus brightness opposes theme direction")
+				}
+				plain := ResolveThemeFromOptions(true, profile)
+				if plain.ComposerFocusBg != nil {
+					t.Fatal("NO_COLOR retained focused background")
+				}
+			})
+		}
+	}
+}

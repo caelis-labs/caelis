@@ -54,7 +54,6 @@ func TestSendMessageReturnedMailRendersInMainAndChildHistory(t *testing.T) {
 			m.taskStreamIDsByCallID["spawn-1"] = "task-1"
 			view := m.ensureSubagentOutputView("spawn-1")
 			view.taskHandle, view.actor = "zuri", "zuri[breeze]"
-			stage := &subagentOutputHistoryStage{view: newSubagentOutputHistoryView(view)}
 			completed := eventstream.ToolStatusCompleted
 			payload := `{"id":"out-1","status":"queued","messages":[{"id":"in-1","from":"reviewer","message":"Review complete."},{"id":"in-2","from":"tester","message":"Tests passed."}]}`
 			updates := []eventstream.Update{
@@ -62,17 +61,15 @@ func TestSendMessageReturnedMailRendersInMainAndChildHistory(t *testing.T) {
 				eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "send-1", Status: &completed, Content: []eventstream.ToolCallContent{{Type: "content", Content: eventstream.TextContent{Type: "text", Text: payload}}}, Meta: acpToolNameMeta("SendMessage")},
 			}
 			updates = append(updates, updates[1]) // A repeated final must not duplicate returned mail.
-			for _, update := range updates {
+			for index, update := range updates {
 				env := subagentMailboxEnvelope(t, "activity-1", time.Unix(120, 0), update)
 				switch mode {
 				case "main":
 					env.Scope, env.ScopeID, env.ParentTool = eventstream.ScopeMain, "", nil
 					m = applyACPEnvelopeForTest(t, m, env)
-				case "child live":
-					next, _ := m.handleTaskStreamBatch(taskStreamBatchMsg{sessionID: "session-1", taskID: "task-1", token: 7, events: []eventstream.Envelope{env}})
+				case "child live", "child history":
+					next, _ := m.handleTaskStreamBatch(taskStreamBatchMsg{sessionID: "session-1", taskID: "task-1", token: 7, replacement: mode == "child history" && index == 0, events: []eventstream.Envelope{env}})
 					m = next.(*Model)
-				case "child history":
-					m.observeSubagentOutputHistoryEnvelope(stage, env)
 				}
 			}
 			var rows []string
@@ -80,9 +77,6 @@ func TestSendMessageReturnedMailRendersInMainAndChildHistory(t *testing.T) {
 				m.syncViewportContent()
 				rows = m.viewportPlainLines
 			} else {
-				if mode == "child history" {
-					view = stage.view
-				}
 				view.prepareVisibleRender()
 				rows = renderedPlainRows(m.subagentOutputRows(view, 120, 40))
 			}

@@ -5,81 +5,13 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 )
-
-func terminalSubagentFallbackSnapshot(entry *task.Entry) fallbackSnapshot {
-	if entry == nil {
-		return fallbackSnapshot{}
-	}
-	turnID := firstString(mapString(entry.Metadata, "turn_id"), mapString(entry.Spec, "turn_id"), entry.Terminal.TerminalID)
-	activityID := firstString(mapString(entry.Metadata, "child_activity_id"), mapString(entry.Spec, "child_activity_id"))
-	sessionID := strings.TrimSpace(entry.Session.SessionID)
-	text := display.SubagentTaskFinalText(string(entry.State), entry.Result)
-	if strings.TrimSpace(text) == "" {
-		text = strings.TrimSpace(entry.FailureDiagnostic)
-	}
-	frames := make([]Frame, 0, 1)
-	if strings.TrimSpace(text) != "" {
-		messageActivityID := firstString(activityID, turnID, entry.TaskID)
-		messageID := strings.Join([]string{"subagent-terminal", strings.TrimSpace(entry.TaskID), messageActivityID}, ":")
-		event := session.MarkUIOnly(&session.Event{
-			ID: messageID, MessageID: messageID, SessionID: sessionID,
-			Type: session.EventTypeAssistant, Time: entry.UpdatedAt, Text: text,
-			Actor: session.ActorRef{
-				Kind: session.ActorKindParticipant,
-				ID:   firstString(mapString(entry.Metadata, "agent_id"), mapString(entry.Spec, "agent_id")),
-				Role: string(session.ParticipantRoleDelegated),
-				Name: firstString(mapString(entry.Metadata, "agent"), mapString(entry.Spec, "agent"), entry.Handle),
-			},
-			Scope: &session.EventScope{
-				TurnID: turnID,
-				Participant: session.ParticipantRef{
-					ID:   firstString(mapString(entry.Metadata, "agent_id"), mapString(entry.Spec, "agent_id")),
-					Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated,
-					DelegationID: strings.TrimSpace(entry.TaskID),
-				},
-			},
-			Protocol: &session.EventProtocol{
-				Method: session.ProtocolMethodSessionUpdate,
-				Update: &session.ProtocolUpdate{
-					SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
-					MessageID:     messageID, Content: session.ProtocolTextContent(text),
-				},
-			},
-		})
-		frames = append(frames, Frame{
-			TerminalID: turnID, ActivityID: activityID, Event: event, UpdatedAt: entry.UpdatedAt,
-		})
-	}
-	return fallbackSnapshot{
-		ActivityID: activityID, State: string(entry.State), Running: false,
-		UpdatedAt: entry.UpdatedAt, Frames: frames,
-	}
-}
-
-func (s *service) loadDurableSubagentHistory(
-	ctx context.Context,
-	entry *task.Entry,
-) (fallbackSnapshot, error) {
-	if s == nil || s.sessions == nil || s.subagentHistory == nil || entry == nil {
-		return fallbackSnapshot{}, errorcode.New(errorcode.Unavailable, "taskstream: subagent ACP history is unavailable")
-	}
-	childSessionID := taskHistoryChildSessionID(entry)
-	if childSessionID == "" {
-		return fallbackSnapshot{}, errorcode.New(errorcode.FailedPrecondition, "taskstream: subagent child Session identity is unavailable")
-	}
-	loaded, err := s.loadProviderSubagentHistory(ctx, entry, childSessionID)
-	if err != nil {
-		return fallbackSnapshot{}, err
-	}
-	return durableSubagentHistorySnapshot(entry, loaded.Events), nil
-}
 
 func taskHistoryChildSessionID(entry *task.Entry) string {
 	if entry == nil {
@@ -124,6 +56,12 @@ func (s *service) loadProviderSubagentHistory(
 			Target: target,
 		},
 	}
+	if s.recorder == nil {
+		return session.LoadedSession{}, errorcode.New(errorcode.Unavailable, "Task output recorder is unavailable")
+	}
+	descriptor := descriptorFromEntry(entry)
+	req.Reconnect.Spawn.ActivityID = descriptor.ActivityID
+	req.Reconnect.Spawn.Output = s.recorder.BindTaskOutput(ctx, output.Binding{SessionID: entry.Session.SessionID, TaskID: entry.TaskID, ActivityID: descriptor.ActivityID, Kind: output.TaskKindSubagent})
 	return s.subagentHistory.LoadHistory(ctx, req)
 }
 
@@ -143,51 +81,4 @@ func taskHistoryTarget(entry *task.Entry) delegation.Target {
 	// through current configuration and risk loading the Session from another
 	// provider endpoint.
 	return delegation.Target{}
-}
-
-func durableSubagentHistorySnapshot(entry *task.Entry, events []*session.Event) fallbackSnapshot {
-	history := durableSubagentHistoryEvents(entry, events)
-	activityID := firstString(mapString(entry.Metadata, "child_activity_id"), mapString(entry.Spec, "child_activity_id"))
-	frames := make([]Frame, 0, len(history))
-	for _, event := range history {
-		turnID := ""
-		if event.Scope != nil {
-			turnID = strings.TrimSpace(event.Scope.TurnID)
-		}
-		frames = append(frames, Frame{
-			TerminalID: turnID, ActivityID: activityID, Event: event, UpdatedAt: event.Time,
-		})
-	}
-	return fallbackSnapshot{
-		ActivityID: activityID, State: string(entry.State), Running: false,
-		UpdatedAt: entry.UpdatedAt, Frames: frames,
-		FinalText: "", TerminalFramed: false,
-	}
-}
-
-func durableSubagentHistoryEvents(entry *task.Entry, events []*session.Event) []*session.Event {
-	out := make([]*session.Event, 0, len(events))
-	for _, event := range events {
-		if event == nil {
-			continue
-		}
-		cloned := session.CloneEvent(event)
-		if cloned.Scope == nil {
-			cloned.Scope = &session.EventScope{}
-		}
-		if cloned.Scope.Participant.Kind == "" {
-			cloned.Scope.Participant.Kind = session.ParticipantKindSubagent
-		}
-		if cloned.Scope.Participant.ID == "" {
-			cloned.Scope.Participant.ID = firstString(mapString(entry.Metadata, "agent_id"), mapString(entry.Spec, "agent_id"))
-		}
-		if cloned.Scope.Participant.Role == "" {
-			cloned.Scope.Participant.Role = session.ParticipantRoleDelegated
-		}
-		if cloned.Scope.Participant.DelegationID == "" {
-			cloned.Scope.Participant.DelegationID = strings.TrimSpace(entry.TaskID)
-		}
-		out = append(out, cloned)
-	}
-	return out
 }

@@ -123,7 +123,7 @@ func (a *SessionClientAdapter) Submit(
 		displayInput = ""
 	}
 	activeSubmission := submission.Mode == controlprompt.SubmissionModeActiveTurn
-	contentParts, err := contentPartsFromSubmission(
+	contentParts, err := ContentPartsFromSubmission(
 		rawInput,
 		submission.Attachments,
 		a.WorkspaceDir(),

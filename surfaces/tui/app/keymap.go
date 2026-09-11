@@ -33,6 +33,10 @@ type appKeyMap struct {
 	HalfPageUp    key.Binding
 	HalfPageDown  key.Binding
 	Quit          key.Binding
+	PaneFocus     key.Binding
+	PaneToggle    key.Binding
+	PaneAgents    key.Binding
+	PaneLayout    key.Binding
 }
 
 type helpBindings struct {
@@ -62,7 +66,7 @@ func defaultKeyMapForPlatform(goos string, isWSL bool) appKeyMap {
 	}
 	return appKeyMap{
 		Send:          key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
-		InsertNewline: key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"), key.WithHelp("shift+enter", "newline")),
+		InsertNewline: key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"), key.WithHelp("Ctrl+J", "Newline")),
 		Queue:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "queue")),
 		Interrupt:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "interrupt")),
 		Mode:          key.NewBinding(key.WithKeys("shift+tab", "backtab", "ctrl+o"), key.WithHelp("shift+tab", "mode")),
@@ -83,6 +87,10 @@ func defaultKeyMapForPlatform(goos string, isWSL bool) appKeyMap {
 		HalfPageUp:    key.NewBinding(key.WithKeys("shift+pgup"), key.WithHelp("shift+pgup", "½ scroll")),
 		HalfPageDown:  key.NewBinding(key.WithKeys("shift+pgdown"), key.WithHelp("shift+pgdn", "½ scroll")),
 		Quit:          key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+		PaneFocus:     key.NewBinding(key.WithKeys("f6", "shift+f6"), key.WithHelp("F6", "Focus")),
+		PaneToggle:    key.NewBinding(key.WithKeys("f7"), key.WithHelp("F7", "Hide")),
+		PaneAgents:    key.NewBinding(key.WithKeys("ctrl+g"), key.WithHelp("Ctrl+G", "Agents")),
+		PaneLayout:    key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("Ctrl+L", "Layout")),
 	}
 }
 
@@ -190,14 +198,6 @@ func (m *Model) currentFooterHelp() helpBindings {
 			short: enabledBindings(m.keys.OverlayClose),
 			full: [][]key.Binding{
 				enabledBindings(m.keys.OverlayClose),
-			},
-		}
-	}
-	if m.subagentOutputOverlay != nil {
-		return helpBindings{
-			short: enabledBindings(m.keys.OverlayScroll, m.keys.OverlayClose),
-			full: [][]key.Binding{
-				enabledBindings(m.keys.OverlayScroll, m.keys.PageUp, m.keys.PageDown, m.keys.OverlayClose),
 			},
 		}
 	}

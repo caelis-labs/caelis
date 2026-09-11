@@ -24,6 +24,8 @@ type subagentOutputNarrativeKey struct {
 }
 
 type subagentOutputView struct {
+	pane          *subagentOutputOverlayState
+	activity      runningHintTracker
 	callID        string
 	taskHandle    string
 	participantID string
@@ -35,24 +37,19 @@ type subagentOutputView struct {
 	// block is the current transcript block. Historical blocks remain in
 	// document and are rendered in stream order; TurnID is internal routing
 	// metadata, never overlay identity or lifecycle authority.
-	block              *ParticipantTurnBlock
-	revision           uint64
-	renderReady        bool
-	renderScheduled    bool
-	historyResolved    bool
-	idleHistorySettled bool
+	block           *ParticipantTurnBlock
+	revision        uint64
+	renderReady     bool
+	renderScheduled bool
+	historyResolved bool
 	// directoryActivityID is the latest Control-owned child activity identity.
-	// idleHistoryActivityID records the exact activity represented by the
-	// finite history projection. Transcript Turn IDs never participate in
-	// lifecycle or cache-validity decisions.
+	// Transcript Turn IDs do not own Task lifecycle.
 	directoryActivityID string
 	// liveActivityID is the latest Control-owned activity observed by this
-	// Surface's attached content follower. It fences a lagging directory from
-	// reopening history for the previous activity.
-	liveActivityID        string
-	idleHistoryActivityID string
-	renderCache           subagentOutputRenderCache
-	seenProjections       map[string]struct{}
+	// Surface's attached content follower.
+	liveActivityID  string
+	renderCache     subagentOutputRenderCache
+	seenProjections map[string]struct{}
 	// liveNarratives records typed messages that entered this detached view as
 	// live deltas. A later final snapshot with the same message identity replaces
 	// that stream; compatibility frames that arrive final-only remain deltas.
@@ -72,8 +69,9 @@ type subagentOutputRenderCache struct {
 	// paintedRows lazily caches the physical background pass for stable rows.
 	// Live revisions reuse the unchanged prefix instead of reparsing every
 	// visible ANSI row on every 50 ms render tick.
-	paintedRows []string
-	renders     uint64
+	paintedRows       []string
+	paintedSurfaceKey string
+	renders           uint64
 }
 
 func (m *Model) observeSubagentOutputEvents(events []TranscriptEvent) bool {
@@ -174,10 +172,9 @@ func (v *subagentOutputView) resetForReplacement() {
 	v.document = document
 	v.turnBlocks = map[string]*ParticipantTurnBlock{}
 	v.turnID = ""
+	v.activity.resetSession()
 	v.block = block
 	v.historyResolved = false
-	v.idleHistorySettled = false
-	v.idleHistoryActivityID = ""
 	v.seenProjections = nil
 	v.liveNarratives = nil
 	v.renderCache = subagentOutputRenderCache{}
@@ -211,6 +208,14 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 	if block == nil {
 		return
 	}
+	if block == v.block {
+		// Task events are observations relative to the parent, but describe
+		// this pane's own activity. Older child Turns cannot change its hint.
+		if v.activity.turnStartedAt.IsZero() {
+			v.activity.beginTurn(block.StartedAt)
+		}
+		applyTranscriptActivity(&v.activity, event, func(TranscriptEvent) runningActivityTarget { return runningTargetTask })
+	}
 	actor := strings.TrimSpace(v.actor)
 	if actor == "" && event.Kind != TranscriptEventAgentCommunication {
 		actor = subagentOutputActor(event.Actor, v.title, v.taskHandle)
@@ -229,6 +234,9 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 		return
 	}
 	if result.terminal {
+		if block == v.block {
+			v.activity.endTurn()
+		}
 		finalizeSubagentOutputNarratives(block)
 	}
 	v.touch(false)
@@ -312,6 +320,7 @@ func (v *subagentOutputView) blockForEvent(event TranscriptEvent) *ParticipantTu
 	v.turnBlocks[turnID] = block
 	v.block = block
 	v.turnID = turnID
+	v.activity.beginTurn(block.StartedAt)
 	return block
 }
 
