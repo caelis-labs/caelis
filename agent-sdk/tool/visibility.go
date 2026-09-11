@@ -2,6 +2,7 @@ package tool
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -22,6 +23,8 @@ const (
 // deferred-tool policy and tool_search replay interpretation in one place.
 type ToolVisibility struct {
 	tools                []Tool
+	byName               map[string]Tool
+	pendingReplay        []string
 	visible              map[string]bool
 	available            map[string]bool
 	definitions          map[string]Definition
@@ -47,6 +50,7 @@ func NewToolVisibilityForModel(tools []Tool, llm model.LLM) ToolVisibility {
 func newToolVisibility(tools []Tool, llm model.LLM) ToolVisibility {
 	visibility := ToolVisibility{
 		tools:         append([]Tool(nil), tools...),
+		byName:        map[string]Tool{},
 		visible:       map[string]bool{},
 		definitions:   map[string]Definition{},
 		replayAliases: map[string]string{},
@@ -65,6 +69,7 @@ func newToolVisibility(tools []Tool, llm model.LLM) ToolVisibility {
 		if name == "" {
 			continue
 		}
+		visibility.byName[name] = item
 		visibility.definitions[name] = CloneDefinition(def)
 		for _, alias := range definitionReplayAliases(def) {
 			if alias == name {
@@ -97,7 +102,7 @@ func (v *ToolVisibility) ApplyToolResult(name string, output map[string]any) {
 	if name != ToolSearchToolName {
 		return
 	}
-	v.ApplyToolSearchOutput(output)
+	v.ApplyDiscoveredToolNames(ParseToolSearchOutput(output).DiscoveredToolNames())
 }
 
 // ApplyToolSearchOutput reveals tools returned by the canonical tool_search
@@ -116,8 +121,67 @@ func (v *ToolVisibility) ApplyDiscoveredToolNames(names []string) {
 		return
 	}
 	for _, name := range names {
+		if name == "" || name != strings.TrimSpace(name) || len(name) > 64 {
+			continue
+		}
+		if _, known := v.definitions[v.resolveReplayAlias(name)]; !known {
+			if len(v.pendingReplay) < MaxDeferredToolsPerRun && !slices.Contains(v.pendingReplay, name) {
+				v.pendingReplay = append(v.pendingReplay, name)
+			}
+			continue
+		}
 		v.Reveal(name)
 	}
+}
+
+// RefreshDeferredTools admits ready MCP definitions without changing any
+// definition already pinned by this run. Discovery and replay still control
+// model visibility and its budgets.
+func (v *ToolVisibility) RefreshDeferredTools(tools []Tool, llm model.LLM) {
+	if v == nil {
+		return
+	}
+	for _, item := range tools {
+		if item == nil {
+			continue
+		}
+		def := item.Definition()
+		name := def.Name
+		if !IsMCPDefinition(def) || name == "" || name != strings.TrimSpace(name) {
+			continue
+		}
+		// Later ready servers may contribute replay aliases to the same
+		// configured winner without changing its pinned definition or callable.
+		for _, alias := range definitionReplayAliases(def) {
+			if old, exists := v.replayAliases[alias]; !exists {
+				v.replayAliases[alias] = name
+			} else if old != name {
+				v.replayAliases[alias] = ""
+			}
+		}
+		if _, known := v.definitions[name]; known {
+			continue
+		}
+		v.tools = append(v.tools, item)
+		v.byName[name] = item
+		v.definitions[name] = CloneDefinition(def)
+		v.deferred[name] = true
+		if v.available != nil {
+			v.available[name] = AvailableForModel(item, llm)
+		}
+	}
+	pending := v.pendingReplay
+	v.pendingReplay = nil
+	v.ApplyDiscoveredToolNames(pending)
+}
+
+// LookupTool returns the exact callable pinned with this run's definition.
+func (v *ToolVisibility) LookupTool(name string) (Tool, bool) {
+	if v == nil {
+		return nil, false
+	}
+	item, ok := v.byName[name]
+	return item, ok
 }
 
 // Reveal marks one named tool as model-visible.

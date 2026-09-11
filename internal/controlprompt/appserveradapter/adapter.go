@@ -29,6 +29,7 @@ type SessionClientAdapter struct {
 	surface          string
 	workspaceKey     string
 	preferredID      string
+	onSessionNotice  func(eventstream.Envelope)
 
 	sessionMu       sync.RWMutex
 	sessionChangeMu sync.Mutex
@@ -65,6 +66,9 @@ type AppServerAdapterConfig struct {
 	Agents             appserver.AgentClient
 	Completion         appserver.CompletionClient
 	Plugins            appserver.PluginClient
+	// OnSessionNotice observes transient Session notices through the existing
+	// TUI presence subscription, including while no Turn is active.
+	OnSessionNotice func(eventstream.Envelope)
 }
 
 // NewAppServerAdapter composes the complete typed facade used by production
@@ -99,6 +103,7 @@ func NewAppServerAdapter(config AppServerAdapterConfig) (*SessionClientAdapter, 
 		agentClient: config.Agents, completionClient: config.Completion, pluginClient: config.Plugins,
 		surface: strings.TrimSpace(config.Surface), workspaceKey: strings.TrimSpace(config.WorkspaceKey),
 		preferredID: strings.TrimSpace(config.PreferredSessionID), sessionID: strings.TrimSpace(config.SessionID),
+		onSessionNotice: config.OnSessionNotice,
 		workspaceDir:    strings.TrimSpace(config.WorkspaceDir),
 		acpPreparations: map[string]controlagents.ACPPreparation{},
 		acpPending:      map[string]pendingACPPreparationObservation{},

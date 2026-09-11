@@ -80,7 +80,7 @@ func TestManagerRejectsOversizedServerIdentityBeforeStart(t *testing.T) {
 	}}, func(context.Context, ServerSpec) (*Client, error) {
 		starts++
 		return nil, nil
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("newManager() succeeded")
 	}
@@ -99,7 +99,7 @@ func TestManagerRejectsDuplicateServerIdentityBeforeStart(t *testing.T) {
 	}, func(context.Context, ServerSpec) (*Client, error) {
 		starts++
 		return nil, nil
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("newManager() succeeded")
 	}

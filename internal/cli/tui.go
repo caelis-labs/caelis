@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
@@ -53,6 +54,7 @@ func runTUI(
 	if !proceed {
 		return nil
 	}
+	sender := &tuiapp.ProgramSender{}
 	typedDriver, err := appserveradapter.NewAppServerAdapter(appserveradapter.AppServerAdapterConfig{
 		PreferredSessionID: strings.TrimSpace(sessionID),
 		WorkspaceKey:       strings.TrimSpace(workspaceKey),
@@ -65,6 +67,7 @@ func runTUI(
 		Agents:             clients.Agents,
 		Completion:         clients.Completion,
 		Plugins:            clients.Plugins,
+		OnSessionNotice:    func(envelope eventstream.Envelope) { sender.SendMsg(envelope) },
 	})
 	if err != nil {
 		return err
@@ -72,7 +75,6 @@ func runTUI(
 	defer typedDriver.Close()
 	programCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	sender := &tuiapp.ProgramSender{}
 	updateRequested := false
 	tuiCfg := tuiapp.ConfigFromControlService(typedDriver, sender, tuiapp.Config{
 		Context:             programCtx,

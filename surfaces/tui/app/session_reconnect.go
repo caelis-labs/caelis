@@ -76,6 +76,9 @@ func streamReconnectBackfill(
 				batch = batch[:0]
 			}
 			for _, envelope := range events {
+				if eventstream.IsSessionNotice(envelope) {
+					continue
+				}
 				presentation := transcriptEventsMsg(projectResumeReplayEvents([]eventstream.Envelope{envelope}))
 				batch = append(batch, presentation.Events...)
 				if len(batch) >= batchSize {

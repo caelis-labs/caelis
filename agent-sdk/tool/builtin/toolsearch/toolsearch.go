@@ -25,6 +25,7 @@ const (
 type Tool struct {
 	def     tool.Definition
 	entries []entry
+	source  tool.Source
 }
 
 type entry struct {
@@ -44,6 +45,10 @@ func New(tools []tool.Tool) tool.Tool {
 	if len(entries) == 0 {
 		return nil
 	}
+	return newTool(entries)
+}
+
+func newTool(entries []entry) *Tool {
 	return &Tool{
 		def: tool.Definition{
 			Name:        tool.ToolSearchToolName,
@@ -73,6 +78,25 @@ func New(tools []tool.Tool) tool.Tool {
 		},
 		entries: entries,
 	}
+}
+
+// NewSource discovers only ready MCP tools from an asynchronous source. It is
+// present even while the source is empty so a running Agent can discover tools
+// that finish initialization later.
+func NewSource(source tool.Source) tool.Tool {
+	if source == nil {
+		return nil
+	}
+	t := newTool(nil)
+	t.source = source
+	return t
+}
+
+func (t *Tool) currentEntries() []entry {
+	if t.source != nil {
+		return buildEntries(t.source.Tools())
+	}
+	return t.entries
 }
 
 func buildEntries(tools []tool.Tool) []entry {
@@ -119,7 +143,7 @@ func description(entries []entry) string {
 	if omitted > 0 {
 		sources = append(sources, fmt.Sprintf("- %d additional sources omitted", omitted))
 	}
-	sourceDescriptions := "None currently enabled."
+	sourceDescriptions := "None currently ready."
 	if len(sources) > 0 {
 		sourceDescriptions = strings.Join(sources, "\n")
 	}
@@ -130,7 +154,11 @@ func (t *Tool) Definition() tool.Definition {
 	if t == nil {
 		return tool.Definition{}
 	}
-	return tool.CloneDefinition(t.def)
+	def := tool.CloneDefinition(t.def)
+	if t.source != nil {
+		def.Description = description(t.currentEntries())
+	}
+	return def
 }
 
 func (t *Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
@@ -141,7 +169,8 @@ func (t *Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 	if err != nil {
 		return tool.Result{}, err
 	}
-	matches := t.search(args.Query, args.Limit)
+	snapshot := Tool{entries: t.currentEntries()}
+	matches := snapshot.search(args.Query, args.Limit)
 	result := tool.ToolSearchResult{Tools: make([]tool.ToolSearchDiscoveredTool, 0, len(matches))}
 	for _, match := range matches {
 		result.Tools = append(result.Tools, tool.NewToolSearchDiscoveredTool(match.def))

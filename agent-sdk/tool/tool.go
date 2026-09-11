@@ -12,6 +12,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
 
+// Source returns a concurrency-safe snapshot of ready tools. Returned tools and
+// definitions must remain immutable. Reading a source must not wait for I/O.
+type Source interface{ Tools() []Tool }
+
 // Definition is the stable tool declaration exposed to runtimes and model
 // providers.
 type Definition struct {

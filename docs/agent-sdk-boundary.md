@@ -175,7 +175,13 @@ are quarantined instead of replaced by permissive empty schemas.
 ToolSearch results persist discovered names and admission counts, not copies of
 schemas or source metadata. The next model request exposes the registered
 canonical definitions; replay restores visibility by those names. Admission still
-budgets the full callable schemas. WebSearch preserves `results` order for legacy
+budgets the full callable schemas. An activation-owned deferred tool source may
+publish ready MCP tools after a run begins. Runtime wraps them with the same
+policy, execution journal, and lifecycle behavior as static tools. The run pins
+each accepted definition together with its callable, so later catalog changes
+cannot redirect an already-bound name. Replay discoveries whose server is still
+initializing become visible only when that definition is ready, under the same
+budgets. WebSearch preserves `results` order for legacy
 positional references. Citation ranges use zero-based `result_indices` for
 matching sources instead of repeating their metadata; citation-only sources remain
 inline. Answer text and source metadata remain intact. Successful searches keep

@@ -98,8 +98,9 @@ type ToolAugmentContext struct {
 }
 
 type ToolAugmentation struct {
-	Tools    []tool.Tool
-	Metadata map[string]any
+	DeferredTools tool.Source
+	Tools         []tool.Tool
+	Metadata      map[string]any
 }
 
 type modelAliasLister interface {
@@ -338,6 +339,7 @@ func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, in
 		return agent.AgentSpec{}, err
 	}
 	tools := append([]tool.Tool(nil), snap.tools...)
+	var deferredTools tool.Source
 	if snap.toolAugmenter != nil {
 		augmentation, err := snap.toolAugmenter(ctx, ToolAugmentContext{
 			SessionRef: intent.SessionRef,
@@ -348,6 +350,7 @@ func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, in
 			return agent.AgentSpec{}, err
 		}
 		tools = append(tools, augmentation.Tools...)
+		deferredTools = augmentation.DeferredTools
 		for key, value := range augmentation.Metadata {
 			if strings.TrimSpace(key) == "" {
 				continue
@@ -368,11 +371,12 @@ func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, in
 		request.ServiceTier = model.ServiceTierPriority
 	}
 	return agent.AgentSpec{
-		Name:     snap.agentName,
-		Model:    modelResolution.Model,
-		Tools:    tools,
-		Request:  request,
-		Metadata: metadata,
+		Name:          snap.agentName,
+		Model:         modelResolution.Model,
+		Tools:         tools,
+		DeferredTools: deferredTools,
+		Request:       request,
+		Metadata:      metadata,
 	}, nil
 }
 

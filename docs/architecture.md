@@ -320,7 +320,16 @@ writes use revision-aware atomic replacement; readers observe a complete documen
 Native MCP configuration is assembled from AppConfig plus supported user
 overlays. Project `.agents/mcp.json` or `.mcp.json` files are sampled only after
 the exact canonical workspace is trusted. Overlay changes never hot-reload an
-active Runtime.
+active Runtime. MCP servers initialize independently in the background with a
+30-second budget per server for connection and tool listing. Runtime startup
+and other servers do not wait for that work. Only complete, validated ready
+lists enter ToolSearch. An initialization failure emits one transient Session
+Notice; it does not fail the Turn or enter canonical history or model context.
+The TUI's Session presence subscription displays these notices during active
+and idle periods; Turn and reconnect views omit duplicate presentation.
+Overlapping tool namespaces wait for higher-priority initialization to settle
+before publication, preserving configured collision precedence.
+Runtime release cancels and drains pending initialization and closes its clients.
 
 Plugin configuration is also canonical AppConfig state. Managed plugin content
 is immutable and pinned while an active Runtime uses it; configuration mutation

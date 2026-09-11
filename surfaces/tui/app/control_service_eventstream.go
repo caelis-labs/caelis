@@ -125,6 +125,11 @@ func forwardControlEventStream(
 				events = nil
 				continue
 			}
+			// The Session presence observer owns these notices across active and
+			// idle periods; the Turn/reconnect view must not render them twice.
+			if eventstream.IsSessionNotice(env) {
+				continue
+			}
 			if reason := eventStreamEnvelopeErrorReason(env); reason != "" {
 				failureReason = reason
 				cancelled = eventstream.IsCancelledReason(reason)

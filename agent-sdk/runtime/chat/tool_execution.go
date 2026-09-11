@@ -54,7 +54,7 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 	progressCh := make(chan tool.Result, 16)
 	doneCh := make(chan toolExecutionResult, 1)
 	progressTaskResultMeta := runtimeTaskResultSourceMeta(false)
-	if selectedTool, ok := a.lookupTool(call.Name); ok && toolbinding.IsTaskResultSource(selectedTool) {
+	if selectedTool, ok := a.lookupRunTool(call.Name, visibility); ok && toolbinding.IsTaskResultSource(selectedTool) {
 		progressTaskResultMeta = runtimeTaskResultSourceMeta(true)
 	}
 	callCtx, cancel := context.WithCancel(ctx)
@@ -123,7 +123,7 @@ func (a *Agent) executeToolCallAdmitted(
 	visibility *tool.ToolVisibility,
 ) (model.Message, *session.Event, error) {
 	defer step.MarkAdmissionComplete()
-	selectedTool, ok := a.lookupTool(call.Name)
+	selectedTool, ok := a.lookupRunTool(call.Name, visibility)
 	if !ok {
 		rawOutput := tool.ErrorPayload(tool.NewError(tool.ErrorCodeNotFound, fmt.Sprintf("tool %q not found", call.Name)))
 		result := tool.Result{
@@ -150,6 +150,9 @@ func (a *Agent) executeToolCallAdmitted(
 	}
 	if err := model.ValidateRequestCapabilities(a.model, &model.Request{Instructions: result.Content}); err != nil {
 		result = modelVisibleToolErrorResult(call, result, err)
+	}
+	if tool.IsToolSearchDefinition(selectedTool.Definition()) {
+		a.refreshDeferredTools(visibility)
 	}
 	result = admitToolSearchResult(selectedTool.Definition(), call, result, visibility)
 	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
@@ -237,4 +240,11 @@ func toolResultMessageFromCanonical(call model.ToolCall, result tool.Result) mod
 		}},
 	}
 	return message
+}
+
+func (a *Agent) lookupRunTool(name string, visibility *tool.ToolVisibility) (tool.Tool, bool) {
+	if visibility == nil {
+		return a.lookupTool(name)
+	}
+	return visibility.LookupTool(name)
 }

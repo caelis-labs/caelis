@@ -29,9 +29,13 @@ func TestSessionTurnClientAttachesBeforePromptAndFiltersExactTarget(t *testing.T
 	terminal.SessionID = "session-1"
 	terminal = sessionTurnTestExactEnvelope(terminal, "cursor-terminal", 3)
 
+	notice := sessionTurnTestExactEnvelope(eventstream.Envelope{
+		Kind: eventstream.KindNotice, SessionID: "session-1", Notice: "MCP server unavailable; conversation can continue.",
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+	}, "cursor-notice", 4)
 	subscription := newSessionTurnTestSubscription(
 		[]eventstream.Envelope{between},
-		[]eventstream.Envelope{current, foreignTerminal, terminal},
+		[]eventstream.Envelope{notice, current, foreignTerminal, terminal},
 		nil,
 	)
 	client := &sessionTurnTestClient{
@@ -91,10 +95,11 @@ func TestSessionTurnClientAttachesBeforePromptAndFiltersExactTarget(t *testing.T
 	defer turn.Close()
 
 	got := collectSessionTurnTestEvents(turn.Events())
-	if len(got) != 2 ||
-		got[0].Cursor != "cursor-current" ||
-		!eventstream.IsTurnTerminalLifecycle(got[1]) ||
-		got[1].Cursor != "cursor-terminal" {
+	if len(got) != 3 ||
+		got[0].Notice != notice.Notice ||
+		got[1].Cursor != "cursor-current" ||
+		!eventstream.IsTurnTerminalLifecycle(got[2]) ||
+		got[2].Cursor != "cursor-terminal" {
 		t.Fatalf("target events = %#v", got)
 	}
 	if err := turn.Err(); err != nil {

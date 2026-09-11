@@ -284,9 +284,13 @@ type Agent interface {
 // AgentSpec describes the concrete execution capabilities assembled into one
 // agent instance before invocation begins.
 type AgentSpec struct {
-	Name                      string         `json:"name,omitempty"`
-	Model                     model.LLM      `json:"-"`
-	Tools                     []tool.Tool    `json:"-"`
+	Name  string      `json:"name,omitempty"`
+	Model model.LLM   `json:"-"`
+	Tools []tool.Tool `json:"-"`
+	// DeferredTools supplies MCP tools as their background initialization finishes.
+	// Runtime applies the same execution journal, policy and lifecycle wrappers
+	// as static tools. A run pins each accepted definition and callable together.
+	DeferredTools             tool.Source    `json:"-"`
 	SubagentRunner            SubagentRunner `json:"-"`
 	Request                   ModelRequestOptions
 	RequiredModelCapabilities model.Capabilities `json:"required_model_capabilities,omitempty"`

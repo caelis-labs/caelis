@@ -772,39 +772,28 @@ func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
 	}
 }
 
-func TestBuildGatewayRuntimeMCPFailureDoesNotSwapStack(t *testing.T) {
+func TestBuildGatewayRuntimeSurvivesMCPFailure(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
-	beforeGateway := stack.composition.gateway
-	beforeExec := stack.composition.exec
-	beforeMCP := stack.composition.mcpMgr
 	plan, err := stack.composition.loadGatewayBuildPlan(stack.composition.sandbox, stack.composition.activeRuntime)
 	if err != nil {
-		t.Fatalf("loadGatewayBuildPlan() error = %v", err)
+		t.Fatal(err)
 	}
-	plan.Plugins.MCPServerSpecs = []plugin.MCPServerSpec{{
-		PluginID:  "broken",
-		Name:      "server",
-		Transport: plugin.MCPTransportStdio,
-	}}
-
+	plan.Plugins.MCPServerSpecs = []plugin.MCPServerSpec{{PluginID: "broken", Name: "server", Transport: plugin.MCPTransportStdio}}
 	bundle, err := stack.composition.buildGatewayRuntime(plan)
-	if err == nil {
-		t.Fatal("buildGatewayRuntime() error = nil, want MCP init failure")
+	if err != nil {
+		t.Fatalf("MCP failure prevented Runtime startup: %v", err)
 	}
-	if bundle != nil {
-		t.Fatalf("buildGatewayRuntime() bundle = %+v, want nil on error", bundle)
+	defer bundle.Close()
+	if bundle.Gateway == nil || bundle.Engine == nil {
+		t.Fatal("Runtime did not initialize")
 	}
-	if !strings.Contains(err.Error(), "failed to initialize MCP servers") {
-		t.Fatalf("buildGatewayRuntime() error = %v, want MCP init failure", err)
+	<-bundle.MCP.Initialized()
+	if len(bundle.MCP.Tools()) != 0 {
+		t.Fatal("failed server published tools")
 	}
-	if stack.composition.gateway != beforeGateway {
-		t.Fatalf("gateway changed on build failure: before=%p after=%p", beforeGateway, stack.composition.gateway)
-	}
-	if stack.composition.exec != beforeExec {
-		t.Fatalf("exec changed on build failure: before=%p after=%p", beforeExec, stack.composition.exec)
-	}
-	if stack.composition.mcpMgr != beforeMCP {
-		t.Fatalf("mcp manager changed on build failure: before=%p after=%p", beforeMCP, stack.composition.mcpMgr)
+	infos := bundle.MCP.GetServerInfos("broken")
+	if len(infos) != 1 || infos[0].Status != "failed" {
+		t.Fatalf("server status = %#v", infos)
 	}
 }
 

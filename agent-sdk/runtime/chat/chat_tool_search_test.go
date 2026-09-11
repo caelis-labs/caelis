@@ -134,9 +134,14 @@ func TestChatAgentRestoresDeferredMCPVisibilityAfterSessionStoreRoundTrip(t *tes
 
 	const mcpToolName = "mcp__calendar__demo__create_event"
 	liveModel := &toolSearchLoopModel{mcpToolName: mcpToolName}
-	searchTool := toolSearchToolForTest(t, mcpToolName)
+	source := &readyMCPSource{}
 	mcpTool := mcpToolForTest(mcpToolName)
-	liveAgent, err := NewWithTools("chat", liveModel, []tool.Tool{searchTool, mcpTool}, "")
+	searchTool := toolsearch.NewSource(source)
+	liveModel.onFirst = func() { source.tools = []tool.Tool{mcpTool} }
+	liveAgent, err := NewWithTools("chat", liveModel, []tool.Tool{searchTool}, "")
+	if liveAgent != nil {
+		liveAgent.deferredTools = source
+	}
 	if err != nil {
 		t.Fatalf("NewWithTools(live) error = %v", err)
 	}
@@ -297,6 +302,7 @@ func toolSearchResultJSON(t *testing.T, name string) json.RawMessage {
 type toolSearchLoopModel struct {
 	requests    []model.Request
 	mcpToolName string
+	onFirst     func()
 }
 
 func (m *toolSearchLoopModel) Name() string { return "tool-search-loop" }
@@ -313,6 +319,9 @@ func (m *toolSearchLoopModel) Generate(_ context.Context, req *model.Request) it
 	return func(yield func(*model.StreamEvent, error) bool) {
 		switch index {
 		case 1:
+			if m.onFirst != nil {
+				m.onFirst()
+			}
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
@@ -354,5 +363,43 @@ func (m *toolSearchLoopModel) Generate(_ context.Context, req *model.Request) it
 				},
 			}, nil)
 		}
+	}
+}
+
+// Updated only at the controlled model boundary in these tests.
+type readyMCPSource struct{ tools []tool.Tool }
+
+func (s *readyMCPSource) Tools() []tool.Tool { return append([]tool.Tool(nil), s.tools...) }
+
+func TestChatDiscoversAndCallsMCPReadyDuringFirstModelRequest(t *testing.T) {
+	t.Parallel()
+	const name = "calendar__create_event"
+	source := &readyMCPSource{}
+	llm := &toolSearchLoopModel{mcpToolName: name, onFirst: func() { source.tools = []tool.Tool{mcpToolForTest(name)} }}
+	created, err := (Factory{}).NewAgent(t.Context(), agent.AgentSpec{Model: llm, Tools: []tool.Tool{toolsearch.NewSource(source)}, DeferredTools: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := agent.NewContext(agent.ContextSpec{Context: t.Context(), Session: session.Session{SessionRef: session.SessionRef{SessionID: "late-mcp"}}})
+	called := false
+	for event, err := range created.Run(ctx) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if event.Tool != nil && event.Tool.Name == name && event.Type == session.EventTypeToolResult {
+			if event.Tool.Status != "completed" {
+				t.Fatalf("late tool failed: %#v", event.Tool)
+			}
+			called = true
+		}
+	}
+	if !called {
+		t.Fatal("late MCP tool was not called")
+	}
+	if got := requestToolNames(llm.requests[0]); !reflect.DeepEqual(got, []string{tool.ToolSearchToolName}) {
+		t.Fatalf("first request=%v", got)
+	}
+	if got := requestToolNames(llm.requests[1]); !reflect.DeepEqual(got, []string{tool.ToolSearchToolName, name}) {
+		t.Fatalf("post discovery request=%v", got)
 	}
 }

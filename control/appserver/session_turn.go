@@ -484,7 +484,7 @@ func (t *sessionTurn) relay() {
 					continue
 				}
 				terminal, delivered := t.forwardTargetEnvelope(envelope)
-				forwardedTarget = true
+				forwardedTarget = forwardedTarget || !eventstream.IsSessionNotice(envelope)
 				if terminal || !delivered {
 					return
 				}
@@ -527,6 +527,9 @@ func sessionTurnEnvelopeMatches(
 ) bool {
 	if actual := strings.TrimSpace(envelope.SessionID); actual != "" && actual != sessionID {
 		return false
+	}
+	if envelope.SessionID == sessionID && eventstream.IsSessionNotice(envelope) {
+		return true
 	}
 	handleID := strings.TrimSpace(envelope.HandleID)
 	runID := strings.TrimSpace(envelope.RunID)

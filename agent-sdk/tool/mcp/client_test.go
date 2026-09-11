@@ -76,7 +76,7 @@ func TestMCPManagerQuarantinesOnlyMalformedToolAndReportsWarning(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	mgr, err := NewManager(ctx, []ServerSpec{{
+	mgr, err := newInitializedTestManager(ctx, []ServerSpec{{
 		PluginID: "myplugin",
 		Name:     "myserver",
 		Command:  os.Args[0],
@@ -123,7 +123,7 @@ func TestMCPToolCallServerExitReturnsErrorResult(t *testing.T) {
 		WorkDir: os.TempDir(),
 	}
 
-	mgr, err := NewManager(ctx, []ServerSpec{spec})
+	mgr, err := newInitializedTestManager(ctx, []ServerSpec{spec})
 	if err != nil {
 		t.Fatalf("failed to start MCP manager: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestMCPManagerAndTool(t *testing.T) {
 		WorkDir:  os.TempDir(),
 	}
 
-	mgr, err := NewManager(ctx, []ServerSpec{spec})
+	mgr, err := newInitializedTestManager(ctx, []ServerSpec{spec})
 	if err != nil {
 		t.Fatalf("failed to start MCP manager: %v", err)
 	}
@@ -373,7 +373,13 @@ func TestMCPManagerSSE(t *testing.T) {
 
 func requireNegotiatedProtocolVersion(t *testing.T, mgr *Manager, pluginID, serverName, want string) {
 	t.Helper()
-	client := mgr.clients[pluginID+"/"+serverName]
+	var client *Client
+	for _, server := range mgr.servers {
+		if server.spec.PluginID == pluginID && server.spec.Name == serverName {
+			client = server.client
+			break
+		}
+	}
 	if client == nil || client.session == nil {
 		t.Fatalf("MCP client %s/%s has no active session", pluginID, serverName)
 	}
@@ -389,9 +395,10 @@ func requireNegotiatedProtocolVersion(t *testing.T, mgr *Manager, pluginID, serv
 
 func newMCPManagerWithHTTPHandler(ctx context.Context, handler http.Handler, specs []ServerSpec) (*Manager, error) {
 	httpClient := &http.Client{Transport: mcpHandlerRoundTripper{handler: handler}}
-	return newManager(ctx, specs, func(ctx context.Context, spec ServerSpec) (*Client, error) {
+	mgr, err := newManager(ctx, specs, func(ctx context.Context, spec ServerSpec) (*Client, error) {
 		return startClientWithHTTPClient(ctx, spec, httpClient)
-	})
+	}, nil)
+	return awaitTestInitialization(ctx, mgr, err)
 }
 
 type mcpHandlerRoundTripper struct {
@@ -521,14 +528,14 @@ func TestMCPManagerCompactNamesUseFirstAcceptedToolAndKeepLaterUniqueTools(t *te
 		"CAELIS_MCP_HELPER_MODE": "extra_tool",
 	}
 
-	mgr, err := NewManager(ctx, []ServerSpec{catalogSpec, pluginSpec})
+	mgr, err := newInitializedTestManager(ctx, []ServerSpec{catalogSpec, pluginSpec})
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 	defer mgr.Close()
 
-	if len(mgr.clients) != 2 {
-		t.Fatalf("running clients = %d, want both same-named servers active", len(mgr.clients))
+	if len(mgr.servers) != 2 || mgr.servers[0].client == nil || mgr.servers[1].client == nil {
+		t.Fatal("expected both same-named servers active")
 	}
 	tools := mgr.Tools()
 	if len(tools) != 2 {
@@ -569,5 +576,23 @@ func TestMCPManagerCompactNamesUseFirstAcceptedToolAndKeepLaterUniqueTools(t *te
 	}
 	if len(discovered.Tools) != 1 || discovered.Tools[0].Name != "context7__echo" {
 		t.Fatalf("ToolSearch tools = %#v, want one compact first-win echo", discovered.Tools)
+	}
+}
+
+func newInitializedTestManager(ctx context.Context, specs []ServerSpec) (*Manager, error) {
+	mgr, err := NewManager(ctx, specs, nil)
+	return awaitTestInitialization(ctx, mgr, err)
+}
+
+func awaitTestInitialization(ctx context.Context, mgr *Manager, err error) (*Manager, error) {
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case <-mgr.Initialized():
+		return mgr, nil
+	case <-ctx.Done():
+		_ = mgr.Close()
+		return nil, ctx.Err()
 	}
 }
