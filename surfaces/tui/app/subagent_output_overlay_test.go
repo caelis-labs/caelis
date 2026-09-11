@@ -159,7 +159,7 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 	}
 	overlay := model.renderSubagentOutputOverlay()
 	for _, want := range []string{
-		"explorer",
+		"zuri",
 		"checking the task directory",
 		"inspect stream ownership",
 		"Read",
@@ -470,12 +470,38 @@ func TestSubagentOutputOverlayKeepsPromptAboveOutput(t *testing.T) {
 
 	frame := model.View().Content
 	promptIndex := strings.LastIndex(frame, "Approval")
-	outputIndex := strings.LastIndex(frame, "Subagent")
+	outputIndex := strings.LastIndex(frame, "Participant")
 	if promptIndex < 0 || outputIndex < 0 {
-		t.Fatalf("frame omitted prompt or subagent overlay:\n%s", frame)
+		t.Fatalf("frame omitted prompt or participant overlay:\n%s", frame)
 	}
 	if promptIndex < outputIndex {
-		t.Fatalf("approval prompt rendered beneath subagent output overlay:\n%s", frame)
+		t.Fatalf("approval prompt rendered beneath participant output overlay:\n%s", frame)
+	}
+}
+
+func TestSubagentOutputEmptyLabelsUseParticipantWording(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	unavailable := model.subagentOutputRows(nil, 80, 10)
+	if len(unavailable) != 1 || unavailable[0].Plain != "Participant transcript is unavailable." {
+		t.Fatalf("unavailable rows = %#v", unavailable)
+	}
+
+	waitingView := model.ensureSubagentOutputView("spawn-waiting")
+	waiting := model.subagentOutputRows(waitingView, 80, 10)
+	if len(waiting) != 1 || waiting[0].Plain != "Waiting for participant output…" {
+		t.Fatalf("waiting rows = %#v", waiting)
+	}
+
+	loadingView := model.ensureSubagentOutputView("spawn-loading")
+	loadingView.block.SetStatus("completed", "", "", time.Unix(200, 0))
+	model.taskStreamIDsByCallID[loadingView.callID] = "task-loading"
+	model.taskStreamWanted["task-loading"] = true
+	model.taskStreamTokens["task-loading"] = 1
+	loading := model.subagentOutputRows(loadingView, 80, 10)
+	if len(loading) != 1 || loading[0].Plain != "Loading participant history…" {
+		t.Fatalf("loading rows = %#v", loading)
 	}
 }
 
@@ -649,7 +675,7 @@ func TestSubagentOutputOverlayMouseCloseDoesNotInterruptRunningTurn(t *testing.T
 	_ = model.renderSubagentOutputOverlay()
 
 	geometry := model.subagentOutputOverlay.geometry
-	closeMouse := tea.Mouse{Button: tea.MouseLeft, X: geometry.closeX, Y: geometry.closeY}
+	closeMouse := tea.Mouse{Button: tea.MouseLeft, X: geometry.contentX + geometry.contentWidth - 2, Y: geometry.headerY}
 	next, _ := model.handleMouse(tea.MouseClickMsg(closeMouse))
 	model = next.(*Model)
 	next, _ = model.handleMouse(tea.MouseReleaseMsg(closeMouse))
@@ -1106,7 +1132,7 @@ func clickSubagentOutputToolPanelForTest(t *testing.T, model *Model, callID stri
 	}
 }
 
-func TestSubagentOutputOverlayTitleShowsFocusWithoutRunStatus(t *testing.T) {
+func TestSubagentOutputOverlayTitleShowsControlsWithoutRunStatus(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -1117,12 +1143,12 @@ func TestSubagentOutputOverlayTitleShowsFocusWithoutRunStatus(t *testing.T) {
 
 	model.openSubagentOutputOverlayView("spawn-1", view)
 	title := ansi.Strip(model.renderPaneTitle(view, 72))
-	for _, want := range []string{"▸", "reviewer", "×", "▾"} {
+	for _, want := range []string{"reviewer", "[x]", "≡"} {
 		if !strings.Contains(title, want) {
 			t.Fatalf("overlay title omitted %q: %q", want, title)
 		}
 	}
-	for _, forbidden := range []string{"output", "running", "done", "failed"} {
+	for _, forbidden := range []string{"output", "running", "done", "failed", "▸", "▾", "×"} {
 		if strings.Contains(strings.ToLower(title), forbidden) {
 			t.Fatalf("overlay title retained visible status/output label %q: %q", forbidden, title)
 		}

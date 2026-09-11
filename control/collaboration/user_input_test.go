@@ -279,3 +279,61 @@ func TestUserInputWorkersSerializeRecipientsAndDrain(t *testing.T) {
 		t.Fatal("shutdown failed")
 	}
 }
+
+func TestUserInputParticipantFacingCopy(t *testing.T) {
+	backend := &userInputTestBackend{threads: []Thread{userInputTestTarget()}}
+	service, err := Open(filepath.Join(t.TempDir(), "control.sqlite"), backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = service.Close() }()
+
+	if _, err := service.EnqueueUserInput(t.Context(), "incomplete", "user", "parent", "participant", "", "guide", nil); err == nil ||
+		err.Error() != "User input requires an exact participant, text or images, and at most 65536 text bytes" {
+		t.Fatalf("incomplete target error = %v", err)
+	}
+	backend.threads = nil
+	if _, err := service.EnqueueUserInput(t.Context(), "detached", "user", "parent", "participant", "task", "guide", nil); err == nil ||
+		err.Error() != "The selected participant is no longer attached" {
+		t.Fatalf("detached target error = %v", err)
+	}
+	backend.threads = []Thread{{ID: "task", ParticipantID: "participant", SessionID: "child", Generation: "generation", State: "unknown_outcome", CanDeliver: true}}
+	if _, err := service.EnqueueUserInput(t.Context(), "unresolved", "user", "parent", "participant", "task", "guide", nil); err == nil ||
+		err.Error() != "Participant execution is unresolved" {
+		t.Fatalf("unresolved target error = %v", err)
+	}
+
+	backend.threads = []Thread{userInputTestTarget()}
+	if _, err := service.EnqueueUserInput(t.Context(), "detached-delivery", "user", "parent", "participant", "task", "guide", nil); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := service.pendingUserInputs(t.Context())
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending=%#v,%v", pending, err)
+	}
+	backend.threads = nil
+	if err := service.deliverUserInput(t.Context(), backend, pending[0]); err != nil {
+		t.Fatal(err)
+	}
+	if statuses, err := service.UserInputStatuses(t.Context(), "user", "parent", []string{"detached-delivery"}); err != nil || len(statuses) != 1 ||
+		statuses[0].State != "failed" || statuses[0].Detail != "Participant detached before delivery" {
+		t.Fatalf("detached delivery receipt = %#v, %v", statuses, err)
+	}
+
+	backend.threads = []Thread{userInputTestTarget()}
+	if _, err := service.EnqueueUserInput(t.Context(), "unresolved-delivery", "user", "parent", "participant", "task", "guide", nil); err != nil {
+		t.Fatal(err)
+	}
+	pending, err = service.pendingUserInputs(t.Context())
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending=%#v,%v", pending, err)
+	}
+	backend.threads[0].State = "unknown_outcome"
+	if err := service.deliverUserInput(t.Context(), backend, pending[0]); err != nil {
+		t.Fatal(err)
+	}
+	if statuses, err := service.UserInputStatuses(t.Context(), "user", "parent", []string{"unresolved-delivery"}); err != nil || len(statuses) != 1 ||
+		statuses[0].State != "unknown" || statuses[0].Detail != "Participant execution is unresolved; input was not sent" {
+		t.Fatalf("unresolved delivery receipt = %#v, %v", statuses, err)
+	}
+}

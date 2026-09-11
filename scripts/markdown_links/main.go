@@ -37,7 +37,7 @@ func main() {
 }
 
 func documentationPaths(root string) ([]string, error) {
-	paths := []string{"README.md", "agent-sdk/README.md"}
+	paths := []string{"README.md", "README.zh-CN.md", "AGENTS.md", "agent-sdk/README.md"}
 	err := filepath.WalkDir(filepath.Join(root, "docs"), func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr

@@ -23,7 +23,7 @@ and handoff remain in the product Control layer.
 | `sandbox` | Sandbox contracts and local implementations |
 | `session` | Session contracts and bundled file/memory stores |
 | `skill` | Skill discovery and built-in Skill tooling |
-| `task` | Task and subagent contracts |
+| `task` | Asynchronous Job and collaborator execution contracts |
 | `tool` | Tool registry contracts and built-in tools |
 
 `tool.Definition.Name` is the sole executable identity and lookup is exact and

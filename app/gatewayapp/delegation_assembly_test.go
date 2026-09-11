@@ -142,6 +142,34 @@ func TestDelegationAgentsIncludeBoundCustomRoleDescription(t *testing.T) {
 	}
 }
 
+// A directly-runnable delegation handle materializes a Caelis-spawned model
+// Agent whose identity copy is user-visible in the agent list.
+func TestDelegatedModelAgentIdentityNamesParticipant(t *testing.T) {
+	stack, parent := newLocalStateTestStack(t)
+	t.Cleanup(func() { _ = stack.Close() })
+	profile, err := stack.connectTestModel(ModelConfig{
+		Provider:            "ollama",
+		API:                 "ollama",
+		Model:               "participant-model",
+		BaseURL:             "http://participant.example",
+		ReasoningLevels:     []string{"high"},
+		ContextWindowTokens: 196608,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, release := activateHeldSessionRuntime(t, stack, parent.SessionID)
+	defer release()
+
+	agent, err := instance.instance.materializeDelegatedModel("research", profile.ID, "high", instance.instance.activeRuntime)
+	if err != nil {
+		t.Fatalf("materializeDelegatedModel() error = %v", err)
+	}
+	if agent.Name != "research" || agent.Description != "Caelis participant model" {
+		t.Fatalf("delegated model identity = %q/%q, want configured handle with participant-facing copy", agent.Name, agent.Description)
+	}
+}
+
 func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	profile, err := stack.connectTestModel(ModelConfig{

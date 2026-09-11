@@ -15,9 +15,9 @@ func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
 	model, _ := newSubagentOverlayTestModel(t)
 	frame := ansi.Strip(model.View().Content)
 	for _, want := range []string{
-		"◆ Subagents",
+		"◆ Participants & system agents",
 		"Binding set",
-		"Delegation Profiles",
+		"Participant profiles",
 		"orbit",
 		"openai-codex/gpt-5.6-sol",
 		"System Agents",
@@ -41,6 +41,21 @@ func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
 	}
 	if strings.Contains(frame, "provider:sol") {
 		t.Fatalf("overlay exposed internal profile ID\n%s", frame)
+	}
+	foundParticipants := false
+	foundSystem := false
+	for _, row := range model.subagentOverlay.rows {
+		switch row.section {
+		case "Participant profiles":
+			foundParticipants = true
+		case "System Agents":
+			foundSystem = true
+		case "Delegation Profiles":
+			t.Fatalf("overlay retained delegation section: %#v", row)
+		}
+	}
+	if !foundParticipants || !foundSystem {
+		t.Fatalf("overlay sections missing participants=%v system=%v rows=%#v", foundParticipants, foundSystem, model.subagentOverlay.rows)
 	}
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 160, Height: 32})
 	model = updated.(*Model)

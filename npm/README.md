@@ -1,6 +1,12 @@
 # @caelis/caelis
 
-Install `caelis` from npm.
+Caelis is a collaboration workspace for AI agents. Its built-in runtime, native
+collaborators, and external ACP agents participate in the same Session-scoped
+network with shared mailbox and messaging semantics.
+
+See the [project README](https://github.com/caelis-labs/caelis#readme) or
+[中文说明](https://github.com/caelis-labs/caelis/blob/main/README.zh-CN.md) for
+setup and usage. This package installs the `caelis` CLI from npm.
 
 ## Install
 

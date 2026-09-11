@@ -362,9 +362,9 @@ func subagentCompletionNotice(task *subagentTask, result delegation.Result) (ses
 	task.mu.Unlock()
 
 	state := strings.TrimSpace(string(result.State))
-	text := fmt.Sprintf("Subagent @%s is %s.", strings.TrimPrefix(handle, "@"), state)
+	text := fmt.Sprintf("Participant @%s is %s.", strings.TrimPrefix(handle, "@"), state)
 	if result.State == delegation.StateCancelled || result.State == delegation.StateInterrupted {
-		text = fmt.Sprintf("Subagent @%s is interrupted.", strings.TrimPrefix(handle, "@"))
+		text = fmt.Sprintf("Participant @%s is interrupted.", strings.TrimPrefix(handle, "@"))
 	}
 	return ref, agent.Submission{
 		Kind: runtimeinput.ModelContext, Text: text,

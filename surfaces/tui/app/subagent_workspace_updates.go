@@ -218,7 +218,7 @@ func (m *Model) submitPanePrompt() tea.Cmd {
 	}
 	descriptor, ok := m.subagentRosterTasks[state.callID]
 	if !ok || descriptor.TaskID == "" || descriptor.ParticipantID == "" || m.cfg.SubagentInputs == nil {
-		state.inputStatus = "Input unavailable · waiting for child connection"
+		state.inputStatus = "Input unavailable · waiting for participant connection"
 		return nil
 	}
 	if len(state.receipts) >= 64 {

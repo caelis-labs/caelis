@@ -142,8 +142,8 @@ func TestPaneWorkspaceFocusPreservesTranscriptLayout(t *testing.T) {
 			}
 			m.applyTheme(tuikit.ResolveThemeWithState(true, true, colorprofile.Ascii))
 			m.View()
-			if !strings.Contains(ansi.Strip(m.renderPaneTitle(view, 80)), "▸") {
-				t.Fatal("monochrome focus has no shape cue")
+			if !strings.Contains(m.paneFooterHints(state), "▸ Focused") || strings.Contains(ansi.Strip(m.renderPaneTitle(view, 80)), "▸") {
+				t.Fatal("monochrome focus should be identified in the footer, leaving the title as a selector")
 			}
 			m.Update(tea.KeyPressMsg{Code: tea.KeyF6})
 			if !strings.Contains(m.paneFooterHints(state), "Main focused") {

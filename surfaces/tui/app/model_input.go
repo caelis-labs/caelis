@@ -14,6 +14,7 @@ import (
 )
 
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	m.updatePaneChromeHover(msg)
 	if handled, cmd := m.handleSubagentOverlayMouse(msg); handled {
 		return m, cmd
 	}

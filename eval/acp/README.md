@@ -6,7 +6,7 @@
 - product ACP typed Session lifecycle/main-Turn integration, including the
   durable product close gate, plus deterministic typed participant command
   translation and Host-owned producer-lifetime coverage;
-- TUI Side ACP and Subagent overlay live/replay fidelity;
+- TUI Side ACP and participant workspace live/replay fidelity;
 - real stdio initialize/new/prompt, process restart plus load/resume, terminal
   Task output approved by the Host's default `auto-review` path without an ACP
   client permission request, session/list, structured JSON events, and local
@@ -30,7 +30,7 @@ on exit, so the persistent report directory contains no API key.
 `tmux_acceptance.sh` complements the headless ACP client run with a physical
 TUI session. It binds a scripted external ACP Agent to `zenith`, leaves the
 Host in its default `auto-review` mode, and verifies both `/zenith` Side ACP and
-`Spawn` of that external ACP subagent without sending permission-decision
+`Spawn` of that external ACP participant without sending permission-decision
 keystrokes. The controller and Guardian use the configured MiMo ModelProfile;
 the external Agent is deterministic. Its reports persist under
 `${XDG_STATE_HOME:-$HOME/.local/state}/caelis/evals/acp-tmux`.

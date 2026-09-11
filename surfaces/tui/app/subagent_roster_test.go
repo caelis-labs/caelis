@@ -98,6 +98,18 @@ func TestSubagentRosterFooterRunningDotBreathesGreen(t *testing.T) {
 	}
 }
 
+func TestSubagentRosterMetadataFallsBackToParticipant(t *testing.T) {
+	t.Parallel()
+
+	handle, binding := subagentRosterMetadata(&subagentOutputView{title: "inspect workspace"})
+	if handle != "Participant" || binding != "" {
+		t.Fatalf("fallback identity = %q %q, want Participant", handle, binding)
+	}
+	if got := subagentTranscriptActor(TranscriptEvent{}); got != "Participant" {
+		t.Fatalf("subagentTranscriptActor() = %q, want Participant", got)
+	}
+}
+
 func TestSubagentRosterOmitsSpawnWithoutChildHandle(t *testing.T) {
 	t.Parallel()
 
@@ -140,66 +152,20 @@ func TestSubagentRosterFooterCompactsToIdentifiableMarker(t *testing.T) {
 	}
 }
 
-func TestSubagentRosterRowsKeepPromptAndTimeOnSingleLine(t *testing.T) {
-	t.Parallel()
-
-	model := newSubagentRosterTestModel()
+func TestSubagentRosterMenuOnlyShowsIdentity(t *testing.T) {
+	m := newSubagentRosterTestModel()
 	now := time.Date(2026, time.August, 4, 15, 0, 0, 0, time.Local)
-	addSubagentRosterTestView(model, "spawn-rhea", "rhea", "rhea[reviewer]: audit task-stream ownership", "running", now.Add(-2*time.Minute-41*time.Second), time.Time{})
-	addSubagentRosterTestView(model, "spawn-milo", "milo", "milo[breeze]: trace overlay interaction", "running", now.Add(-time.Minute-18*time.Second), time.Time{})
-	addSubagentRosterTestView(model, "spawn-sena", "sena", "sena[zenith]: verify metadata contracts", "completed", now.Add(-10*time.Minute), time.Date(2026, time.August, 4, 14, 57, 0, 0, time.Local))
-
-	rows := model.subagentRosterRows()
-	var lines []string
-	for i, row := range rows {
-		lines = append(lines, model.renderSubagentRosterRow(row, i == 0, 88, now))
+	addSubagentRosterTestView(m, "spawn-rhea", "rhea", "rhea[reviewer]: audit ownership", "running", now.Add(-time.Minute), time.Time{})
+	addSubagentRosterTestView(m, "spawn-sena", "sena", "sena[zenith]: verify metadata", "completed", now.Add(-10*time.Minute), now)
+	m.openSubagentWorkspace()
+	m.openPaneMenu("agents")
+	plain := ansi.Strip(m.renderPaneMenu())
+	lines := strings.Split(plain, "\n")
+	if len(lines) != 4 || strings.Trim(lines[1], "│ ") != "rhea[reviewer]" || strings.Trim(lines[2], "│ ") != "sena[zenith]" {
+		t.Fatalf("menu should contain only identities: %q", plain)
 	}
-	plain := ansi.Strip(strings.Join(lines, "\n"))
-	for _, expected := range []string{
-		"rhea  [reviewer]",
-		"milo  [breeze]",
-		"sena  [zenith]",
-		"audit task-stream ownership",
-		"trace overlay interaction",
-		"verify metadata contracts",
-	} {
-		if !strings.Contains(plain, expected) {
-			t.Fatalf("roster omitted %q:\n%s", expected, plain)
-		}
-	}
-	if !strings.Contains(plain, " • rhea") || !strings.Contains(plain, " ✓ sena") {
-		t.Fatalf("roster omitted status markers:\n%s", plain)
-	}
-
-	assertSubagentRosterRowEndsWith(t, lines, "rhea", "02:41")
-	assertSubagentRosterRowEndsWith(t, lines, "milo", "01:18")
-	assertSubagentRosterRowEndsWith(t, lines, "sena", "14:57")
-	assertSubagentRosterPromptSharesRow(t, lines, "rhea", "audit task-stream ownership")
-	assertSubagentRosterPromptSharesRow(t, lines, "milo", "trace overlay interaction")
-	assertSubagentRosterPromptSharesRow(t, lines, "sena", "verify metadata contracts")
-	for _, line := range lines {
-		if !strings.Contains(line, "rhea") && !strings.Contains(line, "milo") && !strings.Contains(line, "sena") {
-			continue
-		}
-		lower := strings.ToLower(ansi.Strip(line))
-		if strings.Contains(lower, "running") || strings.Contains(lower, "idle") || strings.Contains(lower, "last run") {
-			t.Fatalf("row repeats lifecycle prose instead of time only: %q", lower)
-		}
-	}
-}
-
-func TestSubagentRosterPromptUsesBoundedMiddleFold(t *testing.T) {
-	t.Parallel()
-
-	summary := "You are sub-agent 3 of 3. Perform a detailed ownership audit across the complete runtime projection and return a brief status summary. No edits needed."
-	got := subagentRosterPromptText(summary, 200)
-	if width := displayColumns(got); width > subagentRosterPromptMaxColumns {
-		t.Fatalf("prompt width = %d, want <= %d: %q", width, subagentRosterPromptMaxColumns, got)
-	}
-	for _, expected := range []string{"You are sub-agent", "...", "No edits needed."} {
-		if !strings.Contains(got, expected) {
-			t.Fatalf("middle-folded prompt omitted %q: %q", expected, got)
-		}
+	if width := m.subagentOutputOverlay.menuRect.width; width != displayColumns("rhea[reviewer]")+4 {
+		t.Fatalf("menu width=%d, want longest identity plus padding and border", width)
 	}
 }
 
@@ -213,7 +179,7 @@ func TestSubagentRosterSelectedRowUsesSlashSelectionSurface(t *testing.T) {
 	rows := model.subagentRosterRows()
 	var lines []string
 	for i, row := range rows {
-		lines = append(lines, model.renderSubagentRosterRow(row, i == 0, 88, now))
+		lines = append(lines, model.renderSubagentRosterRow(row, i == 0, 88))
 	}
 	selected := subagentRosterLineForHandle(t, lines, "rhea")
 	unselected := subagentRosterLineForHandle(t, lines, "milo")
@@ -224,9 +190,9 @@ func TestSubagentRosterSelectedRowUsesSlashSelectionSurface(t *testing.T) {
 	if strings.Contains(unselected, selectionBG) {
 		t.Fatalf("unselected roster row used selection background %q: %q", selectionBG, unselected)
 	}
-	promptFG := sgrForegroundCode(t, model.theme.HelpHintTextStyle().GetForeground())
-	if got := normalizeInlineStyleText(textWithSGRForeground(unselected, promptFG)); !strings.Contains(got, "trace overlay interaction") {
-		t.Fatalf("unselected prompt did not use low-contrast text: %q", got)
+	bindingFG := sgrForegroundCode(t, model.theme.MutedText)
+	if got := normalizeInlineStyleText(textWithSGRForeground(unselected, bindingFG)); got != "[breeze]" {
+		t.Fatalf("binding did not use low-contrast text: %q", got)
 	}
 }
 
@@ -275,7 +241,7 @@ func TestSubagentRosterFooterAndRowsAreMouseNavigable(t *testing.T) {
 	}
 	state := model.subagentOutputOverlay
 	_ = model.View()
-	point = tea.Mouse{X: state.geometry.contentX + 2, Y: state.geometry.closeY, Button: tea.MouseLeft}
+	point = tea.Mouse{X: state.geometry.contentX + 2, Y: state.geometry.headerY, Button: tea.MouseLeft}
 	_, _ = model.handleMouse(tea.MouseClickMsg(point))
 	point.Button = tea.MouseNone
 	_, _ = model.handleMouse(tea.MouseReleaseMsg(point))
@@ -283,7 +249,7 @@ func TestSubagentRosterFooterAndRowsAreMouseNavigable(t *testing.T) {
 	if state.menu != "agents" {
 		t.Fatal("title did not open agent menu")
 	}
-	point = tea.Mouse{X: state.menuRect.x + 2, Y: state.menuRect.y + 1, Button: tea.MouseLeft}
+	point = tea.Mouse{X: state.menuRect.x + 2, Y: state.menuRect.y + state.menuInset + 1, Button: tea.MouseLeft}
 	_, _ = model.handleMouse(tea.MouseClickMsg(point))
 	point.Button = tea.MouseNone
 	_, _ = model.handleMouse(tea.MouseReleaseMsg(point))
@@ -336,7 +302,7 @@ func TestSubagentDirectorySnapshotUsesTerminalStateWithoutMutatingWorkspace(t *t
 		t.Fatalf("running count = %d, want terminal directory to close stale hidden view", got)
 	}
 	rows := model.subagentRosterRows()
-	if len(rows) != 1 || subagentRosterTimeText(rows[0], endedAt) != "14:57" {
+	if len(rows) != 1 || !rows[0].endedAt.Equal(endedAt) {
 		t.Fatalf("terminal roster row = %#v", rows)
 	}
 	if view.block.Status != "running" || !view.block.EndedAt.IsZero() {
@@ -648,28 +614,6 @@ func addSubagentRosterTestView(
 	view.block.StartedAt = startedAt
 	view.block.EndedAt = endedAt
 	return view
-}
-
-func assertSubagentRosterRowEndsWith(t *testing.T, lines []string, handle string, suffix string) {
-	t.Helper()
-	for _, line := range lines {
-		plain := strings.TrimRight(ansi.Strip(line), " ")
-		if strings.Contains(plain, handle) {
-			if !strings.HasSuffix(plain, suffix) {
-				t.Fatalf("%s row = %q, want suffix %q", handle, plain, suffix)
-			}
-			return
-		}
-	}
-	t.Fatalf("missing %s row", handle)
-}
-
-func assertSubagentRosterPromptSharesRow(t *testing.T, lines []string, handle string, prompt string) {
-	t.Helper()
-	line := ansi.Strip(subagentRosterLineForHandle(t, lines, handle))
-	if !strings.Contains(line, prompt) {
-		t.Fatalf("%s row omitted inline prompt %q: %q", handle, prompt, line)
-	}
 }
 
 func subagentRosterLineForHandle(t *testing.T, lines []string, handle string) string {

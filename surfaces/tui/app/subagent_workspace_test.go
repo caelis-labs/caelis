@@ -156,6 +156,18 @@ func TestSubagentWorkspaceDraftFocusAndSendAreBoundToChild(t *testing.T) {
 		t.Fatal("reopen replaced retained state")
 	}
 }
+func TestSubmitPanePromptUnavailableUsesParticipantWording(t *testing.T) {
+	model, _ := newPaneTestModel(t)
+	model.cfg.SubagentInputs = nil
+	model.subagentOutputOverlay.editor.SetValue("follow up")
+	if cmd := model.submitPanePrompt(); cmd != nil {
+		t.Fatal("unavailable submit returned a command")
+	}
+	if got := model.subagentOutputOverlay.inputStatus; got != "Input unavailable · waiting for participant connection" {
+		t.Fatalf("inputStatus = %q", got)
+	}
+}
+
 func TestSubagentWorkspacePreferencesSerializeLatestChoice(t *testing.T) {
 	model, client := newPaneTestModel(t)
 	first := model.setSubagentLayout(uipreferences.Left)

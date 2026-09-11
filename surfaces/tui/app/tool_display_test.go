@@ -2,6 +2,20 @@ package tuiapp
 
 import "testing"
 
+func TestTaskTargetKindDisplayUsesParticipantFallback(t *testing.T) {
+	t.Parallel()
+
+	if got := taskTargetKindDisplay("subagent"); got != "participant" {
+		t.Fatalf("taskTargetKindDisplay(subagent) = %q, want participant", got)
+	}
+	if got := taskControlDisplay(map[string]any{"action": "wait", "target_kind": "subagent"}); got != "Wait participant" {
+		t.Fatalf("taskControlDisplay(wait subagent) = %q, want Wait participant", got)
+	}
+	if got := taskTargetKindDisplay("command"); got != "command" {
+		t.Fatalf("taskTargetKindDisplay(command) = %q, want unchanged wire mapping", got)
+	}
+}
+
 func TestTaskDisplayUsesPublicHandleBeforeLegacyTaskID(t *testing.T) {
 	t.Parallel()
 

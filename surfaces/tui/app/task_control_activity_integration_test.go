@@ -44,7 +44,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 	if model.runningActivity.Phase != runningPhaseToolWait || model.runningActivity.Target != runningTargetSubagent {
 		t.Fatalf("runningActivity = %#v, want Wait subagent", model.runningActivity)
 	}
-	if hint := model.buildHintText(); !strings.Contains(hint, "Waiting on subagent") || strings.Contains(hint, "command-48") {
+	if hint := model.buildHintText(); !strings.Contains(hint, "Waiting on participant") || strings.Contains(hint, "command-48") {
 		t.Fatalf("hint = %q, want semantic activity without raw Task handle", hint)
 	}
 	if blocks := mainACPTurnBlocksForTest(model); len(blocks) != 1 {

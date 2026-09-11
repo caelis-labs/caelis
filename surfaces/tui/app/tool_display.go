@@ -1003,7 +1003,7 @@ func taskTargetKindDisplay(value string) string {
 	case "command":
 		return "command"
 	case "subagent":
-		return "subagent"
+		return "participant"
 	default:
 		return ""
 	}

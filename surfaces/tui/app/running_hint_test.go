@@ -26,7 +26,7 @@ func TestRunningHintShowsStableActivityElapsedAndPending(t *testing.T) {
 	)
 
 	got := ansi.Strip(m.buildRunningHintTextAt(time.Unix(112, 0)))
-	if !strings.Contains(got, "Waiting on subagent · 12s · 2 pending") {
+	if !strings.Contains(got, "Waiting on participant · 12s · 2 pending") {
 		t.Fatalf("running hint = %q, want stable activity, elapsed time, and pending suffix", got)
 	}
 	if strings.Contains(got, "Esc") {

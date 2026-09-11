@@ -150,7 +150,7 @@ identity and scope. This is source selection, not text reconciliation.
 
 Standard `usage_update` is a replaceable context gauge, not a token delta.
 Caelis keeps the latest main-controller gauge as a typed Session mirror and each
-subagent lane's latest gauge on its Task. Accounting includes each latest lane
+collaborating participant lane's latest gauge on its Task. Accounting includes each latest lane
 once and never sums every streamed update.
 
 ## Task and child projection
@@ -186,8 +186,9 @@ The `subagent-workspace-v1` Host capability covers child input, receipts, layout
 preferences, and child model/context descriptors. Interactive attach requires
 this capability before opening the TUI.
 
-User prompts to a delegated child use the authenticated AppServer subagent-input
-service, independently of Agent mail and the parent's foreground Turn. Control
+User prompts from a [participant workspace](participants.md#participant-workspace)
+use the authenticated AppServer subagent-input service, independently of Agent
+mail and the controller's foreground Turn. Control
 pins the Task, participant, child Session, and available attachment generation
 before durable enqueue, then rechecks them at dispatch. The shared Runtime child
 admission path preserves user provenance; it does not add an Agent sender footer

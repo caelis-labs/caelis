@@ -604,7 +604,7 @@ func TestTUILiveTaskStreamBatchesUseOneCoalescedOverlayFrame(t *testing.T) {
 
 	before := model.renderSubagentOutputOverlay()
 	initialRenders := view.renderCache.renders
-	if !strings.Contains(before, "Waiting for subagent output") {
+	if !strings.Contains(before, "Waiting for participant output") {
 		t.Fatalf("initial overlay omitted waiting state:\n%s", before)
 	}
 

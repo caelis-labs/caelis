@@ -667,7 +667,7 @@ func participantTurnTranscriptActor(event TranscriptEvent) string {
 }
 
 func subagentTranscriptActor(event TranscriptEvent) string {
-	return firstNonEmpty(strings.TrimSpace(event.Actor), strings.TrimSpace(event.ScopeID), "subagent")
+	return firstNonEmpty(strings.TrimSpace(event.Actor), strings.TrimSpace(event.ScopeID), "Participant")
 }
 
 func transcriptParticipantTurnKey(event TranscriptEvent) string {

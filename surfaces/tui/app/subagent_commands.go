@@ -21,7 +21,7 @@ func slashSubagentWithContext(ctx context.Context, service subagentConfiguration
 	case "", "list":
 		status, err := service.AgentBindingStatus(contextOrBackground(ctx))
 		if err != nil {
-			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("list subagent bindings", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("list participant profiles and system agents", err)}
 		}
 		if send != nil {
 			send(SlashCommandResultMsg{Result: controlprompt.NewTableSlashResult("subagent", subagentStatusTable(status))})
@@ -48,19 +48,19 @@ func slashSubagentWithContext(ctx context.Context, service subagentConfiguration
 				if system {
 					label = "default"
 				}
-				return TaskResultMsg{Err: controlprompt.FriendlyCommandError("reset subagent binding", fmt.Errorf("%s does not accept a reasoning effort override", label))}
+				return TaskResultMsg{Err: controlprompt.FriendlyCommandError("reset participant or system-agent binding", fmt.Errorf("%s does not accept a reasoning effort override", label))}
 			}
 			status, err = service.ResetAgentBinding(contextOrBackground(ctx), handle)
 		} else {
 			if strings.TrimSpace(effort) == "" {
-				return TaskResultMsg{Err: controlprompt.FriendlyCommandError("bind subagent handle", fmt.Errorf("an explicit effort is required"))}
+				return TaskResultMsg{Err: controlprompt.FriendlyCommandError("bind participant or system-agent handle", fmt.Errorf("an explicit effort is required"))}
 			}
 			status, err = service.BindAgentBinding(contextOrBackground(ctx), agentbinding.Binding{
 				Handle: handle, ProfileID: target, Effort: effort,
 			})
 		}
 		if err != nil {
-			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("update subagent binding", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("update participant or system-agent binding", err)}
 		}
 		sendNotice(send, formatAgentBindingNotice(status, handle), SlashNoticeFeedback)
 		if controlService, ok := any(service).(ControlServices); ok && !system {
@@ -74,7 +74,7 @@ func slashSubagentWithContext(ctx context.Context, service subagentConfiguration
 }
 
 func subagentUsageText() string {
-	return "usage: /subagent list | /subagent bind <handle> <self|default|profile-id> [effort]\nrun /subagent to open the Agent configuration overlay"
+	return "usage: /subagent list | /subagent bind <handle> <self|default|profile-id> [effort]\nrun /subagent to open the Participants & system agents overlay"
 }
 
 func subagentStatusTable(status agentbinding.Status) controlprompt.SlashTableSnapshot {
@@ -89,9 +89,9 @@ func subagentStatusTable(status agentbinding.Status) controlprompt.SlashTableSna
 		}
 	}
 	return controlprompt.SlashTableSnapshot{
-		Title: "Subagents",
+		Title: "Participants & system agents",
 		Sections: []controlprompt.SlashTableSection{
-			{Title: "Delegation Profiles", Columns: []string{"Profile", "Name", "Binding"}, Rows: delegationRows},
+			{Title: "Participant profiles", Columns: []string{"Profile", "Name", "Binding"}, Rows: delegationRows},
 			{Title: "System Agents", Columns: []string{"Agent", "Name", "Binding"}, Rows: systemRows},
 		},
 	}

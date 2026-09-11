@@ -9,6 +9,11 @@ import (
 
 type paneRect struct{ x, y, width, height int }
 
+const (
+	workspaceMinPaneWidth  = 60
+	workspaceMinPaneHeight = 20
+)
+
 func (r paneRect) contains(x, y int) bool {
 	return x >= r.x && x < r.x+r.width && y >= r.y && y < r.y+r.height
 }
@@ -27,7 +32,7 @@ type subagentWorkspaceState struct {
 	resizing           bool
 	resizeRatio        int
 }
-type paneMenuItem struct{ label, value string }
+type paneMenuItem struct{ label, binding, value string }
 
 type paneHeaderAction struct {
 	x, width int
@@ -49,11 +54,11 @@ func (m *Model) workspaceLayoutForPreferences(p uipreferences.Preferences) works
 	p = p.WithDefaults()
 	horizontal := p.SubagentLayout == uipreferences.Left || p.SubagentLayout == uipreferences.Right
 	vertical := p.SubagentLayout == uipreferences.Up || p.SubagentLayout == uipreferences.Down
-	axis, minimum, ratio := w-1, 48, p.HorizontalRatio
+	axis, minimum, ratio := w-1, workspaceMinPaneWidth, p.HorizontalRatio
 	if vertical {
-		axis, minimum, ratio = h-1, 14, p.VerticalRatio
+		axis, minimum, ratio = h-1, workspaceMinPaneHeight, p.VerticalRatio
 	}
-	if (horizontal || vertical) && axis >= minimum*2 {
+	if (horizontal || vertical) && m.paneLayoutAvailable(p.SubagentLayout) {
 		lo, hi := maxInt(minimum, (axis*uipreferences.MinRatio+99)/100), minInt(axis-minimum, axis*uipreferences.MaxRatio/100)
 		if lo <= hi {
 			main := clampInt(axis*ratio/100, lo, hi)
@@ -92,6 +97,8 @@ func (m *Model) workspaceLayoutForPreferences(p uipreferences.Preferences) works
 }
 
 func (m *Model) resizeWorkspace() {
+	m.clearPaneChromeMouse()
+	m.refreshPaneLayoutMenu()
 	m.reconcileSubagentPaneFocus()
 	m.clearSelection()
 	m.clearInputSelection()
@@ -169,13 +176,37 @@ func (m *Model) handlePaneDivider(msg tea.MouseMsg) (bool, tea.Cmd) {
 	return false, nil
 }
 
-func (m *Model) paneLayoutLabel() string {
-	p := m.workspace.preferences.WithDefaults()
-	if !m.workspaceLayout().split && p.SubagentLayout != uipreferences.Overlay {
-		return "▣ Small screen"
+func (m *Model) paneLayoutAvailable(layout uipreferences.Layout) bool {
+	switch layout {
+	case uipreferences.Overlay:
+		return true
+	case uipreferences.Left, uipreferences.Right:
+		return m.width >= 2*workspaceMinPaneWidth+1 && m.height >= workspaceMinPaneHeight
+	case uipreferences.Up, uipreferences.Down:
+		return m.width >= workspaceMinPaneWidth && m.height >= 2*workspaceMinPaneHeight+1
 	}
-	labels := map[uipreferences.Layout]string{uipreferences.Overlay: "▣ Overlay", uipreferences.Left: "← Left", uipreferences.Right: "→ Right", uipreferences.Up: "↑ Up", uipreferences.Down: "↓ Down"}
-	return labels[p.SubagentLayout]
+	return false
+}
+
+func (m *Model) effectivePaneLayout() uipreferences.Layout {
+	if !m.workspaceLayout().split {
+		return uipreferences.Overlay
+	}
+	return m.workspace.preferences.WithDefaults().SubagentLayout
+}
+
+func paneLayoutSymbol(layout uipreferences.Layout) string {
+	switch layout {
+	case uipreferences.Left:
+		return "◧"
+	case uipreferences.Right:
+		return "◨"
+	case uipreferences.Up:
+		return "⬒"
+	case uipreferences.Down:
+		return "⬓"
+	}
+	return "▣"
 }
 func (m *Model) paneStatusParts(state *subagentOutputOverlayState) (string, string) {
 	descriptor := m.subagentRosterTasks[state.callID]

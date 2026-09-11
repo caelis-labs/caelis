@@ -71,7 +71,7 @@ func (s *Service) EnqueueUserInput(ctx context.Context, id, userID, sessionID, p
 		parts = nil
 	}
 	if id == "" || userID == "" || sessionID == "" || participantID == "" || taskID == "" || (text == "" && len(parts) == 0) || max(len(text), textBytes) > 65536 {
-		return UserInputStatus{}, errorcode.New(errorcode.InvalidArgument, "User input requires an exact child, text or images, and at most 65536 text bytes")
+		return UserInputStatus{}, errorcode.New(errorcode.InvalidArgument, "User input requires an exact participant, text or images, and at most 65536 text bytes")
 	}
 	if status, found, err := s.existingUserInput(ctx, id, userID, sessionID, participantID, taskID, text, parts); found || err != nil {
 		return status, err
@@ -88,10 +88,10 @@ func (s *Service) EnqueueUserInput(ctx context.Context, id, userID, sessionID, p
 		}
 	}
 	if target.ID == "" || target.SessionID == "" {
-		return UserInputStatus{}, errorcode.New(errorcode.Conflict, "The selected child is no longer attached")
+		return UserInputStatus{}, errorcode.New(errorcode.Conflict, "The selected participant is no longer attached")
 	}
 	if target.State == "unknown_outcome" {
-		return UserInputStatus{}, errorcode.New(errorcode.UnknownOutcome, "Child execution is unresolved")
+		return UserInputStatus{}, errorcode.New(errorcode.UnknownOutcome, "Participant execution is unresolved")
 	}
 	input := UserInput{ID: id, UserID: userID, SessionID: sessionID, ParticipantID: participantID, TaskID: taskID, ChildSessionID: target.SessionID, Generation: target.Generation, Text: text, ContentParts: parts}
 	body, err := json.Marshal(input)
@@ -214,10 +214,10 @@ func (s *Service) deliverUserInput(ctx context.Context, backend UserInputBackend
 		}
 	}
 	if target == nil {
-		return s.finishUserInput(ctx, input.ID, "failed", "Child detached before delivery")
+		return s.finishUserInput(ctx, input.ID, "failed", "Participant detached before delivery")
 	}
 	if target.State == "unknown_outcome" {
-		return s.finishUserInput(ctx, input.ID, "unknown", "Child execution is unresolved; input was not sent")
+		return s.finishUserInput(ctx, input.ID, "unknown", "Participant execution is unresolved; input was not sent")
 	}
 	if !target.CanDeliver {
 		return nil

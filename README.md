@@ -1,21 +1,32 @@
 # Caelis
 
-**A terminal-native AI coding agent for real repositories.**
+**A collaboration workspace for AI agents.**
 
 [![Latest release](https://img.shields.io/github/v/release/caelis-labs/caelis)](https://github.com/caelis-labs/caelis/releases/latest)
 [![Quality](https://github.com/caelis-labs/caelis/actions/workflows/quality.yml/badge.svg)](https://github.com/caelis-labs/caelis/actions/workflows/quality.yml)
 [![npm](https://img.shields.io/npm/v/@caelis/caelis)](https://www.npmjs.com/package/@caelis/caelis)
 
-Caelis can inspect and edit files, search code, run commands, keep durable
-sessions, and delegate bounded tasks. You choose the model or external agent;
-Caelis keeps tool execution visible and governed by an approval policy.
+[English](README.md) · [简体中文](README.zh-CN.md)
 
-Use the same runtime through an interactive TUI, a one-shot command, or an
-[Agent Client Protocol (ACP)](https://agentclientprotocol.com/) server.
+Any [ACP-compatible agent](https://agentclientprotocol.com/) can join the same
+Caelis collaboration network. The built-in runtime, native collaborators, and
+external ACP agents work as **participants** with shared mailbox and messaging
+semantics—not just isolated subtasks that report back once.
+
+Use Caelis to explore repositories, implement changes, run tests, and review
+work with one agent or several working together. Participants can discover and
+message each other, keep their own conversations, and continue working when new
+input arrives. You follow their progress and send input from a terminal workspace,
+or use Caelis through a one-shot command or ACP client.
+
+The collaboration network is scoped to a local Caelis Session, not a hosted or
+cross-Session messaging service. External agents connect through ACP stdio; their
+support for injected MCP tools, steering, and history determines which
+collaboration features are available.
 
 [Website](https://caelis.dev) · [Releases](https://github.com/caelis-labs/caelis/releases) · [Documentation](#documentation)
 
-## Start in 60 seconds
+## Quick start
 
 Install on macOS or Linux, then open a repository:
 
@@ -29,14 +40,13 @@ On first launch:
 
 1. Run `/connect` to sign in with ChatGPT Codex, configure an API or local
    model provider, or connect an ACP agent.
-2. Use `/model` to choose the model and reasoning effort.
-3. Ask for a concrete outcome, such as `Map this repository and explain how to
-   run its tests.`
+2. Use `/model` to choose the main agent's model and reasoning effort.
+3. Ask for a concrete outcome: `Map this repository and explain how to run its tests.`
 
-The launch directory is the workspace. Sessions are stored locally and can be
-resumed later.
+The launch directory is your workspace. Sessions are stored locally; use
+`/resume` to return to earlier work.
 
-Other installation methods:
+### Other installation methods
 
 | Method | Command |
 | --- | --- |
@@ -45,58 +55,56 @@ Other installation methods:
 | npm without install | `npx @caelis/caelis --help` |
 | Source | `git clone https://github.com/caelis-labs/caelis.git && cd caelis && make install` |
 
-Building from source requires the Go version declared in [`go.mod`](go.mod).
+Release binaries support macOS, Linux, and Windows on x64 and ARM64. Building
+from source requires the Go version declared in [`go.mod`](go.mod).
 
-## Why Caelis
+## Work with participants
 
-- **Terminal-native:** streaming output, tools, approvals, tasks, and history in
-  one TUI.
-- **Model-neutral:** ChatGPT Codex sign-in, API-key and local providers, and
-  ACP-compatible agents share one model picker.
-- **Guarded execution:** filesystem, search, shell, and extension tools pass
-  through explicit approval modes.
-- **Bounded delegation:** named subagent profiles keep child work observable
-  without flattening it into the parent transcript.
-- **Workspace extensions:** MCP servers, skills, and plugins are assembled for
-  the workspace; project MCP configuration requires workspace trust.
-- **Durable Memory:** the capability is enabled by default and exposes only
-  `Remember` and `Recall` from the Memory package embedded in the Host. It uses
-  zero model tokens unless you explicitly bind the Memory Steward in
-  `/subagent`; no separate Memory installation or endpoint is required.
-- **Scriptable:** text, versioned JSON, and streaming JSONL use the same durable
-  Session and Control paths as the TUI.
+Start with native participants using the current model, or mix in other models
+and ACP agents:
 
-## Subagent workspace
+1. Use `/connect` to add the providers or ACP agents you want. For an external
+   agent, install its executable separately and make it available on the Host's
+   `PATH`; choose **Custom** for another ACP stdio command.
+2. Open `/subagent` to configure participant profiles such as `breeze`, `orbit`,
+   and `zenith`, or create a custom role. This is the current command name for
+   participant and system-agent configuration.
+3. Ask the main agent to coordinate the work, for example:
 
-Click the running/done count in the footer or a child link in the transcript to
-open one subagent pane. The name dropdown switches agents; the layout dropdown
-chooses Overlay, Split left/right, or Split up/down. Drag the divider to resize
-within 30–70%; the divider previews the new position and the transcripts reflow
-once on release. Caelis remembers the layout and separate horizontal/vertical
-ratios in the Host's UI preferences. Small terminals temporarily use an overlay
-and restore the preferred split when space permits.
+   ```text
+   Review this change with two participants: one for correctness and one for
+   test coverage. Have them exchange relevant findings, then summarize the
+   issues and recommended fixes. Do not edit files yet.
+   ```
 
-Click a pane or press F6 (Shift+F6 in reverse) to focus its composer. F6 also
-opens the selected child when hidden; F7 shows or hides the pane. Both composers
-use the same focus colors: brighter in dark themes, deeper in light themes.
-The child title also marks focus; both transcripts and progress hints remain
-fully readable. Main composer Tab completion and Shift+Tab mode switching keep
-their usual behavior.
-Enter sends a prompt to the selected child; Shift+Enter or Ctrl+J adds a line.
-Ctrl+G opens the pane and its agent dropdown from either composer; Ctrl+L opens
-the layout dropdown while the pane is open. Choose Resize split, then use arrow
-keys along the divider axis to preview five-percentage-point adjustments. Enter
-applies and saves; Esc cancels. Terminal resizing cancels an unconfirmed resize
-preview. Up recalls the last submitted prompt when the child composer is empty.
-Esc dismisses a child menu or selection; it does not hide the pane or interrupt
-an agent. Main-composer Esc retains its interruption behavior. F7 or × hides the
-pane while the agent keeps working. The agent dropdown contains only agents.
-Drafts and scroll positions survive switching children during the Session.
-Click within the child composer to position the cursor; drag text to copy on
-release. Image paste uses the main composer's platform shortcut (Ctrl+V on
-macOS/Linux, Ctrl+Alt+V on Windows/WSL). Images stay with the selected child's
-draft and are included when recalling its last prompt.
-Model and context usage are read-only; the main agent retains orchestration.
+The controller starts participant conversations with `StartThread` and observes
+public results with `ReadThread` and `WaitThread`. All participants use
+`ListThreads` and `SendMessage` for discovery and communication through the same
+Control-owned mailbox service. Queued mail is not proof of delivery; collaboration
+does not grant participants permission to orchestrate or change authority.
+
+Click a participant link or the running/done count in the footer to open its
+workspace. Switch between participants, use an overlay or split view, and send
+text or images directly without replacing the main conversation. **F6** switches
+composer focus; **F7** shows or hides the pane without stopping work.
+
+See the [Participant guide](docs/participants.md) for configuration and workspace
+controls, and [External ACP agents](docs/external-acp-agents.md) for capability
+requirements and delivery guarantees.
+
+## What else you get
+
+- **Repository tools:** inspect and edit files, search code, and run commands
+  with visible tool requests and approval modes.
+- **Model choice:** ChatGPT Codex sign-in, API-key and local providers, and
+  ACP agents in one model picker.
+- **Workspace extensions:** MCP servers, skills, and plugins; project MCP
+  configuration requires workspace trust.
+- **Durable sessions and memory:** resume conversations and use built-in
+  `Remember` and `Recall`. Memory needs no separate installation and invokes no
+  model unless you explicitly bind the Memory Steward in `/subagent`.
+- **Interactive or scriptable:** a TUI, text, versioned JSON, streaming JSONL,
+  and an ACP server backed by the same Session and Control services.
 
 ## Common commands
 
@@ -108,13 +116,9 @@ Model and context usage are read-only; the main agent retains orchestration.
 | Stream ACP envelopes | `caelis -p "Run the tests." -format jsonl` |
 | Read a prompt from stdin | `printf '%s\n' "Explain this code." \| caelis -format text` |
 | Serve Caelis over ACP | `caelis acp` |
-| Repair recognized compatibility data and report current health | `caelis doctor` |
+| Repair recognized compatibility data and check health | `caelis doctor` |
 | Inspect the managed local Host | `caelis service status` |
 | Show all options | `caelis -h` |
-
-Managed local startup failures include a stable `CAELIS_STARTUP_*` code. In
-particular, `CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT` is repaired by
-`caelis doctor`; normal startup does not rewrite durable Session data.
 
 Use `-session` to target a durable Session, `-store-dir` to choose another data
 root, `-control-url` to attach to a specific Host, and `-embedded` for explicit
@@ -124,7 +128,8 @@ single-process operation.
 
 Caelis starts in `auto-review` mode. Guardian reviews tool requests and fails
 closed when it cannot make a valid decision. Use `/mode manual` when you want to
-approve each request yourself.
+approve each request yourself. External agents retain their own execution
+capabilities; Caelis handles the permission requests they expose through ACP.
 
 ChatGPT subscription access uses a community-compatible Codex OAuth flow rather
 than a documented third-party OpenAI integration. Browser or device login stores
@@ -132,16 +137,20 @@ the refresh credential in the selected Store with private file permissions.
 
 Release builds store Sessions and credentials under `~/.caelis`; development
 builds default to `~/.caelis-dev/default`. Credential files are private to the
-user. `-store-dir` selects a different data root; it does not change the
-workspace directory.
+user. `-store-dir` changes the data root, not the workspace. Model requests go to
+your selected provider or external agent; local storage does not imply offline
+inference.
+
+Managed local startup failures include a stable `CAELIS_STARTUP_*` code. In
+particular, `CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT` is repaired by
+`caelis doctor`; normal startup does not rewrite durable Session data.
 
 ## Documentation
 
-- [External ACP agents](docs/external-acp-agents.md): connect and operate local
-  ACP-compatible agents.
+- [Participants](docs/participants.md): configure collaborators and use their workspaces.
+- [External ACP agents](docs/external-acp-agents.md): connection, capabilities, and messaging contracts.
 - [Agent SDK](agent-sdk/README.md): embed or extend the reusable Go runtime.
-- [Architecture](docs/architecture.md): repository ownership and dependency
-  boundaries.
+- [Architecture](docs/architecture.md): repository ownership and dependency boundaries.
 - [Testing](docs/testing.md): default and change-scoped validation.
 - [Release](docs/release.md): publish and verify official artifacts.
 
@@ -154,3 +163,7 @@ make commit-check
 
 `make commit-check` runs lint, the full untagged test suite, and build. See
 [Testing](docs/testing.md) for checks selected by the affected boundary.
+
+## License
+
+[Apache-2.0](LICENSE).

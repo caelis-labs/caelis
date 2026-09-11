@@ -87,11 +87,6 @@ func (m *Model) handleSubagentOutputOverlayMouse(msg tea.MouseMsg) (bool, tea.Cm
 			m.clearSubagentOutputSelection()
 			return true, nil
 		}
-		if subagentOutputCloseHit(geometry, mouse) {
-			state.pressedItem = "close"
-			m.clearSubagentOutputSelection()
-			return true, nil
-		}
 		point, ok := m.subagentOutputPointFromMouse(mouse, false)
 		if !ok {
 			state.pressedItem = ""
@@ -140,10 +135,6 @@ func (m *Model) handleSubagentOutputOverlayMouse(msg tea.MouseMsg) (bool, tea.Cm
 				}
 				return true, m.copySelectionToClipboard(text)
 			}
-		}
-		if pressed == "close" && subagentOutputCloseHit(geometry, mouse) {
-			m.closeSubagentOutputOverlay()
-			return true, nil
 		}
 		index := subagentOutputRowAtY(geometry, mouse.Y)
 		if index < 0 || subagentOutputRowItem(geometry, index) != pressed {
@@ -308,12 +299,6 @@ func (m *Model) scrollSubagentOutputSelectionBy(delta int, mouse tea.Mouse) (boo
 		state.selectEnd = point
 	}
 	return true, nil
-}
-
-func subagentOutputCloseHit(geometry subagentOutputOverlayGeometry, mouse tea.Mouse) bool {
-	return mouse.Y == geometry.closeY &&
-		mouse.X >= geometry.closeX-1 &&
-		mouse.X <= geometry.closeX+1
 }
 
 func subagentOutputRowAtY(geometry subagentOutputOverlayGeometry, y int) int {
