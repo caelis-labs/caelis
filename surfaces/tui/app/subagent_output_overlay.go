@@ -25,8 +25,7 @@ type subagentOutputOverlayGeometry struct {
 	y            int
 	width        int
 	height       int
-	closeX       int
-	closeY       int
+	headerY      int
 	contentX     int
 	contentY     int
 	contentWidth int
@@ -53,10 +52,12 @@ type subagentOutputOverlayState struct {
 	receiptPoll        *paneReceiptPoll
 	menu               string
 	menuIndex          int
-	menuRows           []paneMenuItem
+	menuOffset         int
+	menuInset          int
 	menuItems          []paneMenuItem
 	menuRect           paneRect
 	headerActions      []paneHeaderAction
+	hoveredHeader      string
 	callID             string
 	offset             int
 	followTail         bool
@@ -228,6 +229,7 @@ func (m *Model) closeSubagentOutputOverlay() {
 	view := m.subagentOutputViews[callID]
 	m.cancelSelectionAutoScroll()
 	m.clearSubagentOutputSelection()
+	m.clearPaneChromeMouse()
 	m.subagentOutputOverlay.menu = ""
 	m.subagentOutputOverlay = nil
 	m.workspace.childFocused = false
@@ -321,8 +323,7 @@ func (m *Model) renderSubagentOutputOverlay() string {
 		y:            layout.startY,
 		width:        layout.frameWidth,
 		height:       layout.frameHeight,
-		closeX:       layout.startX + layout.contentInset + maxInt(0, layout.innerWidth-1),
-		closeY:       layout.startY + layout.borderInset,
+		headerY:      layout.startY + layout.borderInset,
 		contentX:     layout.startX + layout.contentInset,
 		contentY:     layout.startY + layout.borderInset + 2,
 		contentWidth: layout.innerWidth,

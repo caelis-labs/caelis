@@ -112,6 +112,7 @@ func (m *Model) View() tea.View {
 				rect := m.subagentOutputOverlay.menuRect
 				view = tuikit.OverlayAt(view, menu, m.width, m.height, rect.x, rect.y)
 			}
+			view = m.renderPaneTooltip(view)
 		}
 	}
 
@@ -181,5 +182,8 @@ func (m *Model) View() tea.View {
 }
 
 func (m *Model) desiredMouseMode() tea.MouseMode {
+	if m.subagentOutputOverlay != nil && m.activePrompt == nil && m.subagentOverlay == nil {
+		return tea.MouseModeAllMotion
+	}
 	return tea.MouseModeCellMotion
 }

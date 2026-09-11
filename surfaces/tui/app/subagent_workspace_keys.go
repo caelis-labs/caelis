@@ -9,6 +9,9 @@ import (
 // Workspace commands are available from either composer, below modal input
 // owners. Tab and Shift+Tab retain their existing main-composer behavior.
 func (m *Model) handlePaneWorkspaceKey(msg tea.KeyMsg) (bool, tea.Cmd) {
+	if state := m.subagentOutputOverlay; state != nil {
+		state.hoveredHeader = ""
+	}
 	if m.workspace.dragging {
 		if msg.Key().Code == tea.KeyEscape {
 			m.cancelPaneResize()
@@ -101,9 +104,9 @@ func (m *Model) handlePaneResizeKey(msg tea.KeyMsg) tea.Cmd {
 		if p.SubagentLayout == uipreferences.Left || p.SubagentLayout == uipreferences.Up {
 			delta = -delta
 		}
-		axis, minimum := m.width-1, 48
+		axis, minimum := m.width-1, workspaceMinPaneWidth
 		if !horizontal {
-			axis, minimum = m.height-1, 14
+			axis, minimum = m.height-1, workspaceMinPaneHeight
 		}
 		lo := maxInt(uipreferences.MinRatio, (minimum*100+axis-1)/axis)
 		hi := minInt(uipreferences.MaxRatio, (axis-minimum)*100/axis)

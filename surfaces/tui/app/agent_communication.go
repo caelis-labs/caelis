@@ -80,7 +80,7 @@ func agentCommunicationViewIdentity(view *subagentOutputView) string {
 	if view == nil {
 		return ""
 	}
-	handle, binding, _ := subagentRosterMetadata(view)
+	handle, binding := subagentRosterMetadata(view)
 	actor := agentCommunicationIdentityField(subagentOutputActor("", view.title, view.taskHandle))
 	if binding == "" && actor != "" && !strings.EqualFold(actor, handle) &&
 		!strings.ContainsAny(actor, "[] \t\r\n") {
@@ -116,7 +116,7 @@ func agentCommunicationSourceMatchesView(sourceID string, sourceName string, des
 			return false
 		}
 	}
-	handle, binding, _ := subagentRosterMetadata(view)
+	handle, binding := subagentRosterMetadata(view)
 	actor := agentCommunicationIdentityField(subagentOutputActor("", view.title, view.taskHandle))
 	if binding == "" && actor != "" && !strings.EqualFold(actor, handle) &&
 		!strings.ContainsAny(actor, "[] \t\r\n") {

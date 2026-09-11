@@ -286,6 +286,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.width = typed.Width
 		m.height = typed.Height
+		m.clearPaneChromeMouse()
+		m.refreshPaneLayoutMenu()
 		m.reconcileSubagentPaneFocus()
 		m.syncTextareaChrome()
 		m.help.SetWidth(maxInt(20, m.fixedRowWidth()/2))

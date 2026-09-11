@@ -159,7 +159,7 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 	}
 	overlay := model.renderSubagentOutputOverlay()
 	for _, want := range []string{
-		"explorer",
+		"zuri",
 		"checking the task directory",
 		"inspect stream ownership",
 		"Read",
@@ -649,7 +649,7 @@ func TestSubagentOutputOverlayMouseCloseDoesNotInterruptRunningTurn(t *testing.T
 	_ = model.renderSubagentOutputOverlay()
 
 	geometry := model.subagentOutputOverlay.geometry
-	closeMouse := tea.Mouse{Button: tea.MouseLeft, X: geometry.closeX, Y: geometry.closeY}
+	closeMouse := tea.Mouse{Button: tea.MouseLeft, X: geometry.contentX + geometry.contentWidth - 2, Y: geometry.headerY}
 	next, _ := model.handleMouse(tea.MouseClickMsg(closeMouse))
 	model = next.(*Model)
 	next, _ = model.handleMouse(tea.MouseReleaseMsg(closeMouse))
@@ -1106,7 +1106,7 @@ func clickSubagentOutputToolPanelForTest(t *testing.T, model *Model, callID stri
 	}
 }
 
-func TestSubagentOutputOverlayTitleShowsFocusWithoutRunStatus(t *testing.T) {
+func TestSubagentOutputOverlayTitleShowsControlsWithoutRunStatus(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -1117,12 +1117,12 @@ func TestSubagentOutputOverlayTitleShowsFocusWithoutRunStatus(t *testing.T) {
 
 	model.openSubagentOutputOverlayView("spawn-1", view)
 	title := ansi.Strip(model.renderPaneTitle(view, 72))
-	for _, want := range []string{"▸", "reviewer", "×", "▾"} {
+	for _, want := range []string{"reviewer", "[x]", "≡"} {
 		if !strings.Contains(title, want) {
 			t.Fatalf("overlay title omitted %q: %q", want, title)
 		}
 	}
-	for _, forbidden := range []string{"output", "running", "done", "failed"} {
+	for _, forbidden := range []string{"output", "running", "done", "failed", "▸", "▾", "×"} {
 		if strings.Contains(strings.ToLower(title), forbidden) {
 			t.Fatalf("overlay title retained visible status/output label %q: %q", forbidden, title)
 		}
