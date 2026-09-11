@@ -97,7 +97,7 @@ Main-composer Tab completion and Shift+Tab mode switching keep their usual behav
 
 Keyboard resizing previews five-percentage-point adjustments. Enter applies and
 saves; Esc cancels. Terminal resizing cancels an unconfirmed resize preview.
-F7 or **×** hides the pane while the participant keeps working.
+F7 or the close button hides the pane while the participant keeps working.
 
 ### Send input
 
