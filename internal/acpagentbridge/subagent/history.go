@@ -76,6 +76,8 @@ type historyCollector struct {
 	lastUpdateType    string
 	lastUserMessageID string
 	inputStart        int
+	userText          *session.Event
+	userTextBody      strings.Builder
 	events            []*session.Event
 	err               error
 	bytes             int
@@ -132,6 +134,7 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 			messageID = strings.TrimSpace(chunk.MessageID)
 		}
 		if c.lastUpdateType != client.UpdateUserMessage || messageID != "" && messageID != c.lastUserMessageID {
+			c.flushUserText()
 			c.turnSeq++
 			newInputTurn = true
 		}
@@ -139,6 +142,9 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 	}
 	if c.turnSeq <= 0 {
 		c.turnSeq = 1
+	}
+	if updateType != client.UpdateUserMessage {
+		c.flushUserText()
 	}
 	event := c.run.acpUpdateEvent(env, c.runner.clock())
 	if event == nil {
@@ -153,13 +159,46 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 			c.run.inputActor = session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
 			c.inputStart = len(c.events)
 		}
-		event.Text = stripLoadedCollaborationSetup(event.Text)
 		media := event.Message != nil && acputil.ContentPartsContainImage(model.ContentPartsFromParts(event.Message.Parts))
+		if media {
+			c.flushUserText()
+		}
+		quotedUser := false
+		if !media && (c.userText != nil || event.Text != "" &&
+			(strings.HasPrefix(userPromptOpen, event.Text) || strings.HasPrefix(event.Text, userPromptOpen))) {
+			if c.userText == nil {
+				c.userText = event
+			}
+			previousBytes := c.userTextBody.Len()
+			c.userTextBody.WriteString(event.Text)
+			text := c.userTextBody.String()
+			// Inspect only new bytes plus the possible split delimiter. Tiny
+			// ACP chunks must not repeatedly copy or rescan the whole input.
+			closed := strings.Contains(text[max(0, previousBytes-len(userPromptClose)+1):], userPromptClose)
+			if strings.HasPrefix(userPromptOpen, text) || strings.HasPrefix(text, userPromptOpen) && !closed {
+				c.lastUpdateType = updateType
+				return
+			}
+			event, c.userText = c.userText, nil
+			event.Text = text
+			c.userTextBody.Reset()
+			if body, ok := unquoteUserPrompt(text); ok {
+				event.Text = body
+				quotedUser = true
+				c.run.inputActor = session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
+				c.inputStart = len(c.events) + 1
+			}
+			// Only a complete envelope excludes legacy parsing. Agent mail can
+			// quote an envelope in its body, followed by its own sender footer.
+		}
+		if !quotedUser {
+			event.Text = stripLoadedCollaborationSetup(event.Text)
+		}
 		if strings.TrimSpace(event.Text) == "" && !media {
 			c.lastUpdateType = updateType
 			return
 		}
-		if source, body, format := loadedAgentCommunicationPrompt(event.Text); format != loadedMailNone {
+		if source, body, format := loadedAgentCommunicationPrompt(event.Text); !quotedUser && format != loadedMailNone {
 			c.run.inputActor = source
 			event.Text = body
 			if format == loadedMailFooter {
@@ -185,6 +224,11 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 		}
 		c.run.inputActor = markSubagentInputEvent(event, c.run.inputActor)
 	}
+	c.appendHistoryEvent(event)
+	c.lastUpdateType = updateType
+}
+
+func (c *historyCollector) appendHistoryEvent(event *session.Event) {
 	if event.Scope == nil {
 		event.Scope = &session.EventScope{}
 	}
@@ -192,7 +236,24 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 	event.SessionID = strings.TrimSpace(c.run.anchor.SessionID)
 	event.ID = fmt.Sprintf("subagent-load:%s:%d", strings.TrimSpace(c.run.taskID), len(c.events)+1)
 	c.events = append(c.events, event)
-	c.lastUpdateType = updateType
+}
+
+// A truncated or merely similar prefix is literal input, never discarded.
+func (c *historyCollector) flushUserText() {
+	if c.userText == nil {
+		return
+	}
+	event := c.userText
+	c.userText = nil
+	event.Text = c.userTextBody.String()
+	c.userTextBody.Reset()
+	message := model.NewTextMessage(model.RoleUser, event.Text)
+	event.Message = &message
+	if event.Protocol != nil && event.Protocol.Update != nil {
+		event.Protocol.Update.Content = session.ProtocolTextContent(event.Text)
+	}
+	markSubagentInputEvent(event, session.ActorRef{Kind: session.ActorKindUser, Name: "user"})
+	c.appendHistoryEvent(event)
 }
 
 type loadedMailFormat uint8
@@ -309,6 +370,7 @@ func (c *historyCollector) eventsSnapshot() []*session.Event {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.flushUserText()
 	out := make([]*session.Event, 0, len(c.events))
 	for _, event := range c.events {
 		out = append(out, session.CloneEvent(event))

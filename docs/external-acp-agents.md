@@ -178,6 +178,17 @@ setup and mail footers from child display and attributes preceding content block
 to the footer's sender. Its legacy header reader is display-only; remove that
 reader once supported external histories no longer contain header-format prompts.
 
+Direct user input quotes each text block as a JSON string inside a
+`<caelis_user_input version="1">` prompt envelope. ACP peers need not retain
+custom content metadata, so this text encoding distinguishes user content from
+mail syntax across `session/load`. The child model receives the envelope; the
+Task transcript decodes it once and displays the original text with a user
+source. Images remain ordinary ACP content blocks. The envelope carries no
+principal identifier and grants no authority. Replay joins fragmented envelope
+text before decoding and never interprets its decoded body as mail or setup.
+Unmarked retained history still uses the legacy display parser; an already
+stored ambiguous message has no reliable evidence for retroactive attribution.
+
 An admitted `session/prompt` remains open until its execution reaches a Turn
 terminal. If ACP forwarding fails, the bridge can no longer reliably service
 permissions: it requests Control cancellation and waits for the actual terminal,

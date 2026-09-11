@@ -50,6 +50,7 @@ type subagentOutputOverlayState struct {
 	editorHeight       int
 	inputStatus        string
 	receipts           []string
+	receiptPoll        *paneReceiptPoll
 	menu               string
 	menuIndex          int
 	menuRows           []paneMenuItem

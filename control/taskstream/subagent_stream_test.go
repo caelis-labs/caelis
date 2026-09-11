@@ -101,7 +101,7 @@ func TestChildReplayAndLiveShareOneSpoolAcrossIdleAndReopen(t *testing.T) {
 					texts = append(texts, session.EventText(record.Frame.Event))
 				}
 			}
-			if delivery.Kind == DeliveryReplaceEnd {
+			if delivery.Kind == DeliveryAppendPage && delivery.NextCursor != "" {
 				cursors = append(cursors, delivery.NextCursor)
 				break
 			}
@@ -293,7 +293,7 @@ func TestFailedChildCacheRebuildsFromProviderOnNewSubscription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Deliveries) < 3 || history.loads.Load() != 1 {
+	if len(result.Deliveries) != 1 || result.Deliveries[0].Kind != DeliveryAppendPage || len(result.Deliveries[0].Records) != 4 || history.loads.Load() != 1 {
 		t.Fatalf("recovery = %#v", result)
 	}
 	if err := observer.ObserveTaskOutput(ctx, output.Event{Text: "stale writer"}); !errors.Is(err, streamspool.ErrLimit) {

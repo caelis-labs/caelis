@@ -71,21 +71,18 @@ func (s *service) childSource(ctx context.Context, entry *task.Entry) (exactSour
 	}
 }
 
-// childRead captures one complete prefix and a real spool cursor. A consumer
-// replaces its previous document only at replace_end, then follows that cursor.
+// childRead pages an exact origin or cursor. Only a stale cursor needs an
+// atomic replacement of a document the consumer has already received.
 func (s *service) childRead(ctx context.Context, entry *task.Entry, point cursorPoint, present bool) (ReadResult, exactSource, error) {
 	current, err := s.childSource(ctx, entry)
 	if err != nil {
 		return ReadResult{}, exactSource{}, err
 	}
-	if present && point.Key == current.key && point.Offset >= current.bounds.Low && point.Offset <= current.bounds.High {
-		current.offset, current.seq = point.Offset, point.Sequence
-		records, next, err := s.readAvailable(ctx, entry, current)
-		if err != nil {
-			return ReadResult{}, exactSource{}, err
+	if !present || point.Key == current.key && point.Offset >= current.bounds.Low && point.Offset <= current.bounds.High {
+		if present {
+			current.offset, current.seq = point.Offset, point.Sequence
 		}
-		cursor, err := s.cursors.encode(entry.Session.SessionID, entry.TaskID, next)
-		return ReadResult{ActivityID: descriptorFromEntry(entry).ActivityID, Deliveries: []Delivery{{Kind: DeliveryAppendPage, Source: SourceExact, Records: records, NextCursor: cursor}}}, exactSource{key: current.key, offset: next.Offset, seq: next.Sequence, bounds: current.bounds}, err
+		return s.childAppendPage(ctx, entry, current)
 	}
 	var records []Record
 	next := cursorPoint{Key: current.key}
@@ -112,18 +109,7 @@ func (s *service) childRead(ctx context.Context, entry *task.Entry, point cursor
 		}
 		next = after
 	}
-	// A finite idle replay seals presentation using the Task's lifecycle facts.
-	// This descriptor has no resumable position and is never written as producer output.
-	if !entry.Running && task.IsTerminalState(entry.State) && len(records) > 0 {
-		last := &records[len(records)-1]
-		if last.Frame != nil && last.Frame.ActivityID == descriptorFromEntry(entry).ActivityID {
-			// Keep the last replayed Turn identity. A successor's first output
-			// can precede its directory commit and must never be sealed here.
-			last.Frame.Closed = true
-			last.Frame.Running = false
-			last.Frame.State = string(entry.State)
-		}
-	}
+	sealChildHistoryTail(entry, records)
 	deliveries, err := replacementDeliveries(entry, records)
 	if err != nil {
 		return ReadResult{}, exactSource{}, err
@@ -137,6 +123,37 @@ func (s *service) childRead(ctx context.Context, entry *task.Entry, point cursor
 	return ReadResult{Deliveries: deliveries, ActivityID: descriptorFromEntry(entry).ActivityID}, current, nil
 }
 
+func (s *service) childAppendPage(ctx context.Context, entry *task.Entry, source exactSource) (ReadResult, exactSource, error) {
+	records, next, err := s.readAvailable(ctx, entry, source)
+	if err != nil {
+		return ReadResult{}, exactSource{}, err
+	}
+	if next.Offset == source.bounds.High {
+		sealChildHistoryTail(entry, records)
+	}
+	cursor, err := s.cursors.encode(entry.Session.SessionID, entry.TaskID, next)
+	activityID := descriptorFromEntry(entry).ActivityID
+	source.offset, source.seq = next.Offset, next.Sequence
+	return ReadResult{ActivityID: activityID, Deliveries: []Delivery{{
+		Kind: DeliveryAppendPage, Source: SourceExact, Records: records, NextCursor: cursor, ActivityID: activityID,
+	}}}, source, err
+}
+
+// Idle history uses the directory's lifecycle facts for its final frame only.
+// The annotation never changes producer output or its resume position.
+func sealChildHistoryTail(entry *task.Entry, records []Record) {
+	if !entry.Running && task.IsTerminalState(entry.State) && len(records) > 0 {
+		last := &records[len(records)-1]
+		if last.Frame != nil && last.Frame.ActivityID == descriptorFromEntry(entry).ActivityID {
+			// Keep the last replayed Turn identity. A successor's first output
+			// can precede its directory commit and must never be sealed here.
+			last.Frame.Closed = true
+			last.Frame.Running = false
+			last.Frame.State = string(entry.State)
+		}
+	}
+}
+
 func (s *service) forwardChild(sub *subscription, entry *task.Entry, point cursorPoint, present, follow bool) {
 	for {
 		result, source, err := s.childRead(sub.ctx, entry, point, present)
@@ -144,9 +161,19 @@ func (s *service) forwardChild(sub *subscription, entry *task.Entry, point curso
 			sub.finish(err)
 			return
 		}
-		for _, delivery := range result.Deliveries {
-			if !sub.deliver(delivery) {
-				sub.finish(sub.ctx.Err())
+		for {
+			for _, delivery := range result.Deliveries {
+				if !sub.deliver(delivery) {
+					sub.finish(sub.ctx.Err())
+					return
+				}
+			}
+			if source.offset >= source.bounds.High {
+				break
+			}
+			result, source, err = s.childAppendPage(sub.ctx, entry, source)
+			if err != nil {
+				sub.finish(err)
 				return
 			}
 		}
@@ -157,7 +184,9 @@ func (s *service) forwardChild(sub *subscription, entry *task.Entry, point curso
 		if !s.forwardExact(sub, entry, source, follow) {
 			return
 		}
-		point, present = cursorPoint{}, false
+		// A new incarnation must replace the prefix already delivered, even
+		// when this subscription originally opened without a cursor.
+		point, present = cursorPoint{Key: source.key}, true
 	}
 }
 

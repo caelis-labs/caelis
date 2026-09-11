@@ -27,10 +27,18 @@ type paneInputResultMsg struct {
 }
 type paneInputPollMsg struct {
 	sessionID, callID string
+	poll              *paneReceiptPoll
 	statuses          []collaboration.UserInputStatus
 	err               error
 }
-type paneInputTickMsg struct{ sessionID, callID string }
+type paneInputTickMsg struct {
+	sessionID, callID string
+	poll              *paneReceiptPoll
+}
+
+// One retained pane owns one timer or request. Its identity also fences late
+// results from a prior Session, even if the same call ID is opened again.
+type paneReceiptPoll struct{ querying bool }
 
 func (m *Model) loadPanePreferences() tea.Cmd {
 	client := m.cfg.UIPreferences
@@ -99,16 +107,16 @@ func (m *Model) updateSubagentWorkspace(msg tea.Msg) (bool, tea.Cmd) {
 				return true, nil
 			}
 			state.inputStatus = "Delivery unconfirmed · check receipt"
-			return true, m.pollPaneInputs(value.sessionID, value.callID)
+			return true, m.schedulePaneInputPoll(value.sessionID, value.callID, true)
 		}
 		state.inputStatus = paneReceiptLabel(value.status)
 		if value.status.State == "queued" || value.status.State == "sending" {
-			return true, paneInputTick(value.sessionID, value.callID)
+			return true, m.schedulePaneInputPoll(value.sessionID, value.callID, false)
 		}
 		state.receipts = removePaneReceipt(state.receipts, value.id)
 		return true, nil
 	case paneInputTickMsg:
-		return true, m.pollPaneInputs(value.sessionID, value.callID)
+		return true, m.pollPaneInputs(value)
 	case paneInputPollMsg:
 		if value.sessionID != m.currentSessionID {
 			return true, nil
@@ -118,6 +126,10 @@ func (m *Model) updateSubagentWorkspace(msg tea.Msg) (bool, tea.Cmd) {
 			return true, nil
 		}
 		state := view.pane
+		if value.poll == nil || state.receiptPoll != value.poll || !value.poll.querying {
+			return true, nil
+		}
+		state.receiptPoll = nil
 		if value.err != nil {
 			state.inputStatus = "Receipt unavailable · not retried"
 			return true, nil
@@ -128,10 +140,7 @@ func (m *Model) updateSubagentWorkspace(msg tea.Msg) (bool, tea.Cmd) {
 				state.receipts = removePaneReceipt(state.receipts, receipt.ID)
 			}
 		}
-		if len(state.receipts) > 0 {
-			return true, paneInputTick(value.sessionID, value.callID)
-		}
-		return true, nil
+		return true, m.schedulePaneInputPoll(value.sessionID, value.callID, false)
 	}
 	return false, nil
 }
@@ -154,24 +163,43 @@ func paneReceiptLabel(status collaboration.UserInputStatus) string {
 	}
 	return label
 }
-func paneInputTick(sessionID, callID string) tea.Cmd {
-	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return paneInputTickMsg{sessionID, callID} })
-}
-func (m *Model) pollPaneInputs(sessionID, callID string) tea.Cmd {
+func (m *Model) schedulePaneInputPoll(sessionID, callID string, immediate bool) tea.Cmd {
 	if sessionID != m.currentSessionID || m.cfg.SubagentInputs == nil {
 		return nil
 	}
 	view := m.subagentOutputViews[callID]
-	if view == nil || view.pane == nil || len(view.pane.receipts) == 0 {
+	if view == nil || view.pane == nil || len(view.pane.receipts) == 0 || view.pane.receiptPoll != nil {
 		return nil
 	}
+	poll := &paneReceiptPoll{}
+	view.pane.receiptPoll = poll
+	tick := paneInputTickMsg{sessionID: sessionID, callID: callID, poll: poll}
+	if immediate {
+		return m.pollPaneInputs(tick)
+	}
+	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return tick })
+}
+
+func (m *Model) pollPaneInputs(tick paneInputTickMsg) tea.Cmd {
+	if tick.sessionID != m.currentSessionID || m.cfg.SubagentInputs == nil {
+		return nil
+	}
+	view := m.subagentOutputViews[tick.callID]
+	if view == nil || view.pane == nil || tick.poll == nil || view.pane.receiptPoll != tick.poll || tick.poll.querying {
+		return nil
+	}
+	if len(view.pane.receipts) == 0 {
+		view.pane.receiptPoll = nil
+		return nil
+	}
+	tick.poll.querying = true
 	ids := append([]string(nil), view.pane.receipts...)
 	client := m.cfg.SubagentInputs
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		statuses, err := client.SubagentInputStatuses(ctx, appserver.SubagentInputStatusRequest{SessionID: sessionID, IDs: ids})
-		return paneInputPollMsg{sessionID, callID, statuses, err}
+		statuses, err := client.SubagentInputStatuses(ctx, appserver.SubagentInputStatusRequest{SessionID: tick.sessionID, IDs: ids})
+		return paneInputPollMsg{sessionID: tick.sessionID, callID: tick.callID, poll: tick.poll, statuses: statuses, err: err}
 	}
 }
 func (m *Model) submitPanePrompt() tea.Cmd {

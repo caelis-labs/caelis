@@ -40,8 +40,9 @@ func TestUserChildInputActiveAndIdleKeepHumanProvenance(t *testing.T) {
 			if len(parts) == 1 {
 				_ = json.Unmarshal(parts[0], &part)
 			}
-			if len(parts) != 1 || part.Text != "guide now" {
-				t.Fatalf("human prompt gained Agent footer: %#v", parts)
+			body, quoted := unquoteUserPrompt(part.Text)
+			if len(parts) != 1 || !quoted || body != "guide now" {
+				t.Fatalf("human prompt lost its literal user body: %#v", parts)
 			}
 			_, err = submitChildInputTest(runner, events, ctx, req)
 			if err != nil {

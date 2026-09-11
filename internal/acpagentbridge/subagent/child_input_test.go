@@ -1065,6 +1065,11 @@ func TestChildInputHelperProcess(t *testing.T) {
 		case client.MethodSessionNew:
 			return client.NewSessionResponse{SessionID: "child-input-session"}, nil
 		case client.MethodSessionLoad:
+			if mode == "user-history" {
+				if err := replayUserInputTestPrompts(conn); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+			}
 			if mode == "permission-resume" {
 				if err := childInputProbeBoundPermissions(conn); err != nil {
 					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
@@ -1108,6 +1113,11 @@ func TestChildInputHelperProcess(t *testing.T) {
 			mu.Unlock()
 			return client.AuthenticateResponse{}, nil
 		case client.MethodSessionPrompt:
+			if mode == "user-history" {
+				if err := appendChildInputTestFile(os.Getenv("CAELIS_ACP_USER_HISTORY"), string(message.Params)+"\n"); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+			}
 			mu.Lock()
 			promptCount++
 			count := promptCount

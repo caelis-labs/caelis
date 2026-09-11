@@ -192,7 +192,7 @@ func childInputContainsImage(req agent.ChildInputRequest) bool {
 
 func buildAgentCommunicationPrompt(req agent.ChildInputRequest) []json.RawMessage {
 	if req.UserInput {
-		return acputil.BuildPromptParts(req.Input, req.ContentParts)
+		return quoteUserPrompt(acputil.BuildPromptParts(req.Input, req.ContentParts))
 	}
 	var parts []model.ContentPart
 	for _, input := range childInputMessages(req) {

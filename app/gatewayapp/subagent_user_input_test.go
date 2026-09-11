@@ -219,7 +219,7 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 					t.Fatalf("recovery stream ended: %v", result.Subscription.Err())
 				}
 				consume(delivery)
-				if delivery.Kind == taskstream.DeliveryReplaceEnd {
+				if delivery.Kind == taskstream.DeliveryAppendPage && delivery.NextCursor != "" && observed["reply-1"] == 1 {
 					goto recovered
 				}
 			case <-ctx.Done():

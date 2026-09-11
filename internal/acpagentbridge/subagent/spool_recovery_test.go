@@ -87,7 +87,7 @@ func TestRestoredChildFollowsRealACPConnectionThroughOneSpool(t *testing.T) {
 				history = append(history, session.EventText(record.Frame.Event))
 			}
 		}
-		if d.Kind == taskstream.DeliveryReplaceEnd {
+		if d.Kind == taskstream.DeliveryAppendPage && d.NextCursor != "" {
 			break
 		}
 	}
