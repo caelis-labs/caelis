@@ -79,7 +79,8 @@ func NewModel(cfg Config) *Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Spinner{
 		Frames: runningSpinnerFrames,
-		FPS:    60 * time.Millisecond,
+		// Faster updates can starve terminal title debouncing (75ms in Ghostty on macOS).
+		FPS: 120 * time.Millisecond,
 	}
 	sp.Style = theme.SpinnerStyle()
 
