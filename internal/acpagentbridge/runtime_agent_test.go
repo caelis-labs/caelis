@@ -86,7 +86,7 @@ func TestRuntimeAgentNewSessionNormalizesManagedSubagentMetadata(t *testing.T) {
 	t.Parallel()
 
 	agent, sessions := newRuntimeAgentWithConfig(t, runtimeacp.Config{})
-	meta := managedSubagentSessionMeta("parent-session", "task-1", "")
+	meta := managedSubagentSessionMeta("parent-session", "task-1")
 	meta["vendor"] = map[string]any{"untrusted": true}
 	resp, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{Cwd: t.TempDir(), Meta: testSDKRawMeta(t, meta)})
 	if err != nil {
@@ -128,7 +128,7 @@ func TestRuntimeAgentManagedLoadAndResumeIgnoreMetaAndRequireTrustedOwnership(t 
 	agent, _ := newRuntimeAgentWithSessionsAndConfig(t, sessions, runtimeacp.Config{})
 	created, err := agent.NewSession(context.Background(), acpsdk.NewSessionRequest{
 		Cwd:  t.TempDir(),
-		Meta: testSDKRawMeta(t, managedSubagentSessionMeta("parent-session", "task-1", "")),
+		Meta: testSDKRawMeta(t, managedSubagentSessionMeta("parent-session", "task-1")),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +138,7 @@ func TestRuntimeAgentManagedLoadAndResumeIgnoreMetaAndRequireTrustedOwnership(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	claim := managedSubagentSessionMeta("parent-session", "task-1", "")
+	claim := managedSubagentSessionMeta("parent-session", "task-1")
 	if _, err := agent.LoadSession(context.Background(), acpsdk.LoadSessionRequest{
 		SessionId: created.SessionId, Cwd: loaded.CWD,
 	}, &recordingPromptCallbacks{}); err != nil {
@@ -987,14 +987,11 @@ func (testConfigProvider) SetSessionConfigOption(context.Context, acpsdk.SetSess
 
 type availableCommandProvider []acpsdk.AvailableCommand
 
-func managedSubagentSessionMeta(parentSessionID, taskID, historyToken string) map[string]any {
+func managedSubagentSessionMeta(parentSessionID, taskID string) map[string]any {
 	sessionMeta := map[string]any{
 		"kind":              "subagent",
 		"parent_session_id": parentSessionID,
 		"task_id":           taskID,
-	}
-	if historyToken != "" {
-		sessionMeta["history_token"] = historyToken
 	}
 	return map[string]any{
 		"caelis": map[string]any{

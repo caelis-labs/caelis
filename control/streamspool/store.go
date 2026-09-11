@@ -104,6 +104,9 @@ type Bounds struct {
 // WriterOptions fixes immutable partition metadata at registration time.
 type WriterOptions struct {
 	OriginComplete bool
+	// Unpublished stages a new incarnation without changing Resolve. Publish
+	// makes it visible only after its complete replacement has been appended.
+	Unpublished bool
 }
 
 // Record is one validated raw record. Interpretation belongs to its Control
@@ -119,12 +122,17 @@ type Record struct {
 type Writer interface {
 	Key() Key
 	Append(context.Context, uint16, time.Time, []byte) (Offset, error)
+	// AppendBatch writes ordered records together; supplied offsets are ignored.
+	// A failed batch poisons the partition; callers must not retry its suffix.
+	AppendBatch(context.Context, []Record) (Offset, error)
 	Bounds(context.Context) (Bounds, error)
 	// FinishEmpty wakes readers when a producer terminates without one accepted
 	// record. A later writer incarnation must be registered explicitly.
 	FinishEmpty(context.Context) error
 	// Seal permanently closes this physical partition after all accepted records.
 	Seal(context.Context) error
+	// Invalidate marks a known gap or write failure; retained records stop being exact.
+	Invalidate(context.Context) error
 	Close() error
 }
 
@@ -140,6 +148,8 @@ type Reader interface {
 // projection semantics.
 type Store interface {
 	Register(context.Context, LogicalKey, WriterOptions) (Writer, error)
+	// Publish atomically selects a staged incarnation and seals its predecessor.
+	Publish(context.Context, Key) error
 	Resolve(context.Context, LogicalKey) (Key, Bounds, error)
 	Reader(context.Context, Key, Offset) (Reader, error)
 	Bounds(context.Context, Key) (Bounds, error)

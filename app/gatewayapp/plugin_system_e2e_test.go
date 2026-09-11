@@ -83,8 +83,22 @@ func TestPluginSystemE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Plugins().List() error = %v", err)
 	}
-	if !pluginSystemE2EPluginActive(list) {
-		t.Fatalf("e2e plugin not active in list: %+v", list)
+	// Runtime activation starts MCP asynchronously; readiness is the observed
+	// server/tool state, independent of helper-process startup speed.
+	ready, cancelReady := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancelReady()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for !pluginSystemE2EPluginActive(list) {
+		select {
+		case <-ready.Done():
+			t.Fatalf("e2e plugin did not become ready: %+v", list)
+		case <-tick.C:
+			list, err = stack.plugins().List(ready)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 
 	session, err := startGatewayAppTestSession(context.Background(), stack, "")

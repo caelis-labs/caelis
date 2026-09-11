@@ -2,6 +2,7 @@ package agentsdk
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"time"
 
@@ -148,6 +149,12 @@ type ChildEndpointRef struct {
 	Placement     placement.Placement     `json:"placement"`
 }
 
+// ErrChildInputNotReady proves that no input was admitted because the child is
+// busy or finishing its current Turn. An embedding may keep the input queued
+// and attempt admission later against the same participant instance. Unknown
+// effect outcomes must never wrap this sentinel.
+var ErrChildInputNotReady = errors.New("child input is not ready")
+
 // ChildInputRequest submits Agent communication to one exact child.
 // Source is assigned by the trusted Runtime topology boundary, never by a
 // model-facing tool or external wire label.
@@ -155,6 +162,9 @@ type ChildEndpointRef struct {
 // steering must retain the running producer's binding even when this request
 // carries another candidate; the first output may not yet be observed by Task.
 type ChildInputRequest struct {
+	// UserInput distinguishes an authorized human prompt from Agent mail.
+	// It requires a user Source and cannot be combined with Messages.
+	UserInput bool `json:"user_input,omitempty"`
 	// Messages is an ordered batch; when set, singular source/content fields must be empty.
 	Messages     []AgentCommunicationInput `json:"messages,omitempty"`
 	Target       ChildEndpointRef          `json:"target"`
@@ -171,6 +181,7 @@ type ChildInputRequest struct {
 // Runtime resolves Target to an exact ChildEndpointRef before crossing the
 // runner boundary.
 type ChildInputCommand struct {
+	UserInput    bool                `json:"user_input,omitempty"`
 	Target       string              `json:"target"`
 	Source       session.ActorRef    `json:"source"`
 	Input        string              `json:"input,omitempty"`
@@ -284,9 +295,13 @@ type Agent interface {
 // AgentSpec describes the concrete execution capabilities assembled into one
 // agent instance before invocation begins.
 type AgentSpec struct {
-	Name                      string         `json:"name,omitempty"`
-	Model                     model.LLM      `json:"-"`
-	Tools                     []tool.Tool    `json:"-"`
+	Name  string      `json:"name,omitempty"`
+	Model model.LLM   `json:"-"`
+	Tools []tool.Tool `json:"-"`
+	// DeferredTools supplies MCP tools as their background initialization finishes.
+	// Runtime applies the same execution journal, policy and lifecycle wrappers
+	// as static tools. A run pins each accepted definition and callable together.
+	DeferredTools             tool.Source    `json:"-"`
 	SubagentRunner            SubagentRunner `json:"-"`
 	Request                   ModelRequestOptions
 	RequiredModelCapabilities model.Capabilities `json:"required_model_capabilities,omitempty"`

@@ -12,6 +12,8 @@ import (
 // exposed by an AppServer. Presentation surfaces bind a principal once and
 // consume AppServerClients; they do not assemble individual Control services.
 type AppServerServices struct {
+	SubagentInputs *SubagentInputService
+	UIPreferences  *UIPreferencesService
 	// Collaboration is the source-bound Agent mailbox surface.
 	Collaboration *collaboration.Service
 	Sessions      Service
@@ -30,6 +32,9 @@ type AppServerServices struct {
 // smaller service directly in focused tests, but a product AppServer is one
 // coherent surface boundary.
 func (s AppServerServices) Validate() error {
+	if s.SubagentInputs == nil || s.UIPreferences == nil {
+		return errors.New("controlclient: subagent input and UI preferences services are required")
+	}
 	required := []struct {
 		name  string
 		value any
@@ -57,16 +62,18 @@ func (s AppServerServices) Validate() error {
 // presentation surface. Embedded and HTTP transports implement these same
 // interfaces.
 type AppServerClients struct {
-	Sessions      SessionClient
-	Participants  ParticipantClient
-	Status        StatusClient
-	Configuration ConfigurationClient
-	Agents        AgentClient
-	Completion    CompletionClient
-	Plugins       PluginClient
-	Presentation  PresentationClient
-	Terminal      TerminalClient
-	Tasks         taskstream.Client
+	SubagentInputs SubagentInputClient
+	UIPreferences  UIPreferencesClient
+	Sessions       SessionClient
+	Participants   ParticipantClient
+	Status         StatusClient
+	Configuration  ConfigurationClient
+	Agents         AgentClient
+	Completion     CompletionClient
+	Plugins        PluginClient
+	Presentation   PresentationClient
+	Terminal       TerminalClient
+	Tasks          taskstream.Client
 }
 
 // BindAppServerClients binds one trusted principal to a complete AppServer.
@@ -117,7 +124,9 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 		return AppServerClients{}, err
 	}
 	clients := AppServerClients{
-		Sessions: sessions, Participants: participants, Status: status,
+		SubagentInputs: &boundSubagentInputClient{service: services.SubagentInputs, principal: Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)}},
+		UIPreferences:  &boundUIPreferencesClient{service: services.UIPreferences, principal: Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)}},
+		Sessions:       sessions, Participants: participants, Status: status,
 		Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
 		Presentation: presentation, Terminal: terminal, Tasks: tasks,
 	}
@@ -129,7 +138,7 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 
 // Validate rejects a partial presentation client facade.
 func (c AppServerClients) Validate() error {
-	if c.Sessions == nil || c.Participants == nil || c.Status == nil || c.Configuration == nil ||
+	if c.SubagentInputs == nil || c.UIPreferences == nil || c.Sessions == nil || c.Participants == nil || c.Status == nil || c.Configuration == nil ||
 		c.Agents == nil || c.Completion == nil || c.Plugins == nil || c.Presentation == nil || c.Terminal == nil || c.Tasks == nil {
 		return errors.New("controlclient: complete AppServer clients are required")
 	}

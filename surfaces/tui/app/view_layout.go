@@ -19,7 +19,7 @@ import (
 // computeLayout returns (viewportHeight, bottomHeight).
 func (m *Model) computeLayout() (int, int) {
 	bottomHeight := m.bottomSectionHeight()
-	vpHeight := maxInt(1, m.height-bottomHeight)
+	vpHeight := maxInt(1, m.workspaceLayout().main.height-bottomHeight)
 	return vpHeight, bottomHeight
 }
 
@@ -672,7 +672,7 @@ func (m *Model) screenYToFrameY(y int) int {
 	if y < 0 {
 		return y
 	}
-	return y + maxInt(0, m.frameTopTrim)
+	return y - m.workspaceLayout().main.y + maxInt(0, m.frameTopTrim)
 }
 
 func (m *Model) fixedRowPoint(region fixedTextRegion, x int, clamp bool) (textSelectionPoint, bool) {

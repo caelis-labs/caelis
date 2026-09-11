@@ -14,15 +14,16 @@ import (
 )
 
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if handled, cmd := m.handleSubagentOutputOverlayMouse(msg); handled {
-		return m, cmd
-	}
-	if handled, cmd := m.handleSubagentRosterOverlayMouse(msg); handled {
-		return m, cmd
-	}
 	if handled, cmd := m.handleSubagentOverlayMouse(msg); handled {
 		return m, cmd
 	}
+	if handled, cmd := m.handlePaneDivider(msg); handled {
+		return m, cmd
+	}
+	if handled, cmd := m.handleSubagentOutputOverlayMouse(msg); handled {
+		return m, cmd
+	}
+
 	switch typed := msg.(type) {
 	case tea.MouseWheelMsg:
 		if m.btwOverlay != nil {
@@ -559,12 +560,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.activePrompt != nil {
 		return m, m.handlePromptKey(msg)
 	}
-	if m.subagentOutputOverlay != nil {
-		return m, m.handleSubagentOutputOverlayKey(msg)
-	}
-	if m.subagentRosterOverlay != nil {
-		return m, m.handleSubagentRosterOverlayKey(msg)
-	}
 	if m.subagentOverlay != nil {
 		return m, m.handleSubagentOverlayKey(msg)
 	}
@@ -574,6 +569,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Command palette overlay.
 	if m.showPalette {
 		return m, m.handlePaletteKey(msg)
+	}
+	if handled, cmd := m.handlePaneWorkspaceKey(msg); handled {
+		return m, cmd
+	}
+	if m.subagentOutputOverlay != nil && (m.workspace.childFocused || !m.workspaceLayout().split) {
+		return m, m.handleSubagentOutputOverlayKey(msg)
 	}
 	m.refreshCompletionOverlaysBeforeAccept(msg)
 	if handled, cmd := m.handleActiveCompletionKey(msg); handled {
@@ -1154,16 +1155,19 @@ func (m *Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if m.activePrompt != nil {
 		return m, m.handlePromptPaste(msg)
 	}
-	if m.subagentOutputOverlay != nil {
-		return m, nil
-	}
-	if m.subagentRosterOverlay != nil {
-		return m, nil
-	}
 	if m.subagentOverlay != nil {
 		return m, m.handleSubagentOverlayPaste(msg)
 	}
 	if m.btwOverlay != nil {
+		return m, nil
+	}
+	if state := m.subagentOutputOverlay; state != nil && m.workspace.childFocused {
+		if m.workspace.resizing || m.workspace.dragging || state.menu != "" || m.showPalette {
+			return m, nil
+		}
+		m.ensureSubagentEditor(state)
+		state.editor.InsertString(normalizeClipboardText(msg.String()))
+		state.reconcileEditorAttachments()
 		return m, nil
 	}
 	text := normalizeClipboardText(msg.String())

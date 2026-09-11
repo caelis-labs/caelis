@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
@@ -328,4 +329,33 @@ func canonicalVisibility(string, session.EventType) session.Visibility {
 
 func testStringPtr(value string) *string {
 	return &value
+}
+
+func TestImageReplayRetainsModelContentAcrossEventJSON(t *testing.T) {
+	event := NormalizeUpdate(client.ContentChunk{SessionUpdate: client.UpdateUserMessage,
+		Content: json.RawMessage(`{"type":"image","data":"aW1hZ2U=","mimeType":"image/png"}`), MessageID: "image-1"}, controllerTestOptions())
+	if event == nil || event.Message == nil {
+		t.Fatal("image-only update was dropped")
+	}
+	if err := session.ValidateDurableCoreEvent(event); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored session.Event
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored.Message == nil {
+		t.Fatal("lost model content after persistence")
+	}
+	parts := model.ContentPartsFromParts(restored.Message.Parts)
+	if len(parts) != 1 || parts[0].Data != "aW1hZ2U=" || parts[0].MimeType != "image/png" {
+		t.Fatalf("model image changed: %#v", parts)
+	}
+	if update := session.ProtocolUpdateOf(&restored); update == nil || update.MessageID != "image-1" {
+		t.Fatalf("protocol changed: %#v", update)
+	}
 }

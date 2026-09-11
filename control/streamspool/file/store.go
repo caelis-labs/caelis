@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caelis-labs/caelis/control/streamspool"
@@ -84,16 +85,18 @@ type partition struct {
 
 // Store owns one process epoch and every writer/reader in it.
 type Store struct {
-	cfg       Config
-	root      string
-	fsroot    *os.Root
-	epoch     streamspool.Epoch
-	owner     io.Closer
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	closeOnce sync.Once
-	closeErr  error
+	writeCalls atomic.Uint64
+	writeBytes atomic.Uint64
+	cfg        Config
+	root       string
+	fsroot     *os.Root
+	epoch      streamspool.Epoch
+	owner      io.Closer
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	closeOnce  sync.Once
+	closeErr   error
 
 	mu            sync.Mutex
 	closed        bool
@@ -247,7 +250,7 @@ func (s *Store) Register(ctx context.Context, logical streamspool.LogicalKey, op
 	if s.closed {
 		return nil, streamspool.ErrClosed
 	}
-	if key, ok := s.current[logical]; ok {
+	if key, ok := s.current[logical]; ok && !options.Unpublished {
 		if s.partitions[key] != nil {
 			return nil, streamspool.ErrInUse
 		}
@@ -266,9 +269,42 @@ func (s *Store) Register(ctx context.Context, logical streamspool.LogicalKey, op
 		state: streamspool.StatePending, writerActive: true, updatedAt: s.cfg.Now(),
 	}
 	s.partitions[key] = p
-	s.current[logical] = key
+	if !options.Unpublished {
+		s.current[logical] = key
+	}
 	s.registrations++
 	return &writer{partition: p}, nil
+}
+
+// Publish selects a fully written replacement. Readers already holding the old
+// incarnation may drain it, then observe EOF and resubscribe through Control.
+func (s *Store) Publish(ctx context.Context, key streamspool.Key) error {
+	p, err := s.lookup(ctx, key)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	if p.state != streamspool.StatePending && p.state != streamspool.StateOpen {
+		err := stateError(p.state)
+		p.mu.Unlock()
+		return err
+	}
+	s.mu.Lock()
+	if s.closed || s.partitions[key] != p {
+		s.mu.Unlock()
+		p.mu.Unlock()
+		return streamspool.ErrClosed
+	}
+	previous := s.partitions[s.current[key.LogicalKey]]
+	s.current[key.LogicalKey] = key
+	s.mu.Unlock()
+	p.mu.Unlock()
+	if previous != nil && previous != p {
+		// Publication has committed. Cleanup failure poisons only the obsolete
+		// predecessor and must not invalidate the newly selected cache.
+		_ = (&writer{partition: previous}).Seal(context.WithoutCancel(ctx))
+	}
+	return nil
 }
 
 func (s *Store) Resolve(ctx context.Context, logical streamspool.LogicalKey) (streamspool.Key, streamspool.Bounds, error) {
@@ -398,7 +434,7 @@ func (s *Store) Close() error {
 		for _, p := range parts {
 			p.mu.Lock()
 			if p.active != nil {
-				s.closeErr = errors.Join(s.closeErr, p.active.Sync(), p.active.Close())
+				s.closeErr = errors.Join(s.closeErr, p.active.Close())
 				p.active = nil
 			}
 			p.state = streamspool.StateStoreClosed
@@ -431,3 +467,13 @@ func (s *Store) gcLoop() {
 }
 
 var _ streamspool.Store = (*Store)(nil)
+
+// WriteStats reports application-level file writes in this cache epoch. It does
+// not estimate physical SSD writes; kernel writeback and device behavior differ.
+// Cache records are never explicitly fsynced and are discarded on new epochs.
+func (s *Store) WriteStats() (calls, bytes uint64) {
+	if s == nil {
+		return 0, 0
+	}
+	return s.writeCalls.Load(), s.writeBytes.Load()
+}

@@ -10,6 +10,7 @@ import (
 
 	acp "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
@@ -80,7 +81,7 @@ func (b *collaborationBackend) List(ctx context.Context, id string) ([]collabora
 		if p.Kind != session.ParticipantKindSubagent {
 			continue
 		}
-		t := collaboration.Thread{ID: p.DelegationID, SessionID: p.SessionID, Handle: hostedChildHandle(p), Name: p.AgentName, State: "starting"}
+		t := collaboration.Thread{ID: p.DelegationID, SessionID: p.SessionID, ParticipantID: p.ID, Generation: p.AttachmentGeneration, Handle: hostedChildHandle(p), Name: p.AgentName, State: "starting"}
 		for _, entry := range entries {
 			if entry.TaskID == p.DelegationID {
 				t.State = string(entry.State)
@@ -144,6 +145,34 @@ func (b *collaborationBackend) Deliver(ctx context.Context, id string, messages 
 	return rt.instance.engine.SubmitAgentInputBatch(ctx, active.SessionRef, target, entries, func(ctx context.Context, current session.Session, inputs []agent.AgentCommunicationInput) error {
 		return routeHostedChildInputBatchToParent(ctx, &rt.instance.runtimeComposition, current, inputs)
 	})
+}
+
+// DeliverUserInput retains the exact queued recipient and lets Runtime share
+// ordinary child admission and output observation with Agent communication.
+func (b *collaborationBackend) DeliverUserInput(ctx context.Context, input collaboration.UserInput) error {
+	b.router.mu.RLock()
+	registry := b.router.runtimes
+	b.router.mu.RUnlock()
+	if registry == nil {
+		return errorcode.New(errorcode.Unavailable, "Child runtime unavailable")
+	}
+	rt, active, release, err := registry.acquireControlRuntime(ctx, input.SessionID, true)
+	if err != nil {
+		return err
+	}
+	if release != nil {
+		defer func() { _ = release(context.WithoutCancel(ctx)) }()
+	}
+	if rt == nil || rt.instance == nil {
+		return errorcode.New(errorcode.Unavailable, "Child runtime unavailable")
+	}
+	for _, binding := range active.Participants {
+		if binding.ID == input.ParticipantID && binding.Kind == session.ParticipantKindSubagent && binding.DelegationID == input.TaskID && binding.SessionID == input.ChildSessionID && binding.AttachmentGeneration == input.Generation {
+			_, err := rt.instance.engine.SubmitUserChildInput(ctx, active.SessionRef, binding, input.UserID, input.Text, input.ContentParts)
+			return err
+		}
+	}
+	return errorcode.New(errorcode.Conflict, "Child detached or replaced before delivery")
 }
 
 // CollaborationService exposes the focused Host-owned mailbox service.

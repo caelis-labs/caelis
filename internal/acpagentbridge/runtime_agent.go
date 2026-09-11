@@ -2,7 +2,6 @@ package acpagentbridge
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
-	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/loader"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -89,11 +87,7 @@ type Config struct {
 	// canonical directory. ACP identifies a workspace by CWD, so typed Session
 	// creation uses this pair to preserve the Host's registered identity.
 	WorkspaceCWD string
-	// ManagedSessionHistoryToken is a Host-issued process capability used only
-	// by a short-lived product ACP bridge to load one managed child history.
-	// It does not authorize prompt, resume, discovery, or lifecycle mutations.
-	ManagedSessionHistoryToken string
-	AgentInfo                  *acpsdk.Implementation
+	AgentInfo    *acpsdk.Implementation
 }
 
 // RuntimeAgent adapts Agent SDK runtime and session contracts into the standard
@@ -121,7 +115,6 @@ type RuntimeAgent struct {
 	userID                string
 	workspaceKey          string
 	workspaceCWD          string
-	managedHistoryToken   string
 	agentInfo             *acpsdk.Implementation
 
 	mu              sync.Mutex
@@ -205,7 +198,6 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		userID:                userID,
 		workspaceKey:          strings.TrimSpace(cfg.WorkspaceKey),
 		workspaceCWD:          strings.TrimSpace(cfg.WorkspaceCWD),
-		managedHistoryToken:   strings.TrimSpace(cfg.ManagedSessionHistoryToken),
 		agentInfo:             normalizeAgentInfo(cfg.AgentInfo, appName),
 		cancels:               map[string]context.CancelFunc{},
 		managedSessions:       map[string]struct{}{},
@@ -455,7 +447,7 @@ func (a *RuntimeAgent) LoadSession(ctx context.Context, req acpsdk.LoadSessionRe
 	if err != nil {
 		return acpsdk.LoadSessionResponse{}, err
 	}
-	if !a.authorizeManagedSessionLoad(activeSession, acpRawMeta(req.Meta)) {
+	if !a.authorizeManagedSessionReconnect(activeSession, acpRawMeta(req.Meta)) {
 		return acpsdk.LoadSessionResponse{}, session.ErrSessionNotFound
 	}
 	loadCallbacks := cb
@@ -478,6 +470,9 @@ func (a *RuntimeAgent) LoadSession(ctx context.Context, req acpsdk.LoadSessionRe
 		}
 		resp.Modes, resp.ConfigOptions, _ = acpPresentationSnapshot(snapshot)
 	}
+	if a.authorizeManagedSessionReconnect(activeSession, acpRawMeta(req.Meta)) {
+		a.rememberManagedSession(activeSession)
+	}
 	return resp, nil
 }
 
@@ -488,7 +483,7 @@ func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acpsdk.ResumeSessi
 		return acpsdk.ResumeSessionResponse{}, err
 	}
 	managedSession := sessionvisibility.IsSystemManagedSession(activeSession)
-	if !a.authorizeManagedSessionResume(activeSession, acpRawMeta(req.Meta)) {
+	if !a.authorizeManagedSessionReconnect(activeSession, acpRawMeta(req.Meta)) {
 		return acpsdk.ResumeSessionResponse{}, session.ErrSessionNotFound
 	}
 	claimManagedSession := managedSession && !a.ownsManagedSession(sessionID)
@@ -995,64 +990,17 @@ func (a *RuntimeAgent) ownsManagedSession(sessionID string) bool {
 	return ok
 }
 
-// authorizeManagedSessionTarget keeps ACP request metadata out of durable
-// ownership decisions. Product ACP keeps every system-managed Session hidden
-// from user lifecycle load/resume even though its principal-bound client can
-// inspect the exact target. Only the lower-level direct conformance path may
-// access a managed Session, and only when this bridge instance created it.
-func (a *RuntimeAgent) authorizeManagedSessionTarget(activeSession session.Session) bool {
-	if !sessionvisibility.IsSystemManagedSession(activeSession) {
-		return true
-	}
-	return a.sessionClient == nil && a.ownsManagedSession(activeSession.SessionID)
-}
-
-// authorizeManagedSessionResume keeps the read-only history capability and the
-// execution reconnect capability disjoint. A normal Host-owned child bridge
-// may reclaim its exact durable parent/Task relation after its ACP process is
-// rebuilt. The short-lived history bridge carries a non-empty process token and
-// is therefore never allowed to resume, prompt, or acquire execution ownership.
-func (a *RuntimeAgent) authorizeManagedSessionResume(activeSession session.Session, meta map[string]any) bool {
+// authorizeManagedSessionReconnect gives load and resume the same exact-target
+// authorization. The principal-bound Host client authorizes access; the relation
+// must match the durable parent and Task. Direct bridges retain local ownership.
+func (a *RuntimeAgent) authorizeManagedSessionReconnect(activeSession session.Session, meta map[string]any) bool {
 	if !sessionvisibility.IsSystemManagedSession(activeSession) {
 		return true
 	}
 	if a.sessionClient == nil {
 		return a.ownsManagedSession(activeSession.SessionID)
 	}
-	return strings.TrimSpace(a.managedHistoryToken) == "" &&
-		matchesManagedSubagentRelationClaim(activeSession, meta)
-}
-
-// authorizeManagedSessionLoad permits a short-lived product ACP bridge to
-// replay one exact managed child without acquiring execution ownership.
-// Principal authorization has already happened on the bound AppServer client;
-// the Host-issued process capability distinguishes this internal read from an
-// ordinary ACP Surface, while the relation claim fences it to one durable
-// parent/Task. Direct Runtime bridges still require process-local ownership.
-func (a *RuntimeAgent) authorizeManagedSessionLoad(activeSession session.Session, meta map[string]any) bool {
-	if !sessionvisibility.IsSystemManagedSession(activeSession) {
-		return true
-	}
-	if a.sessionClient == nil {
-		return a.ownsManagedSession(activeSession.SessionID)
-	}
-	return matchesManagedSubagentHistoryCapability(a.managedHistoryToken, meta) &&
-		matchesManagedSubagentRelationClaim(activeSession, meta)
-}
-
-func matchesManagedSubagentHistoryCapability(configured string, meta map[string]any) bool {
-	configured = strings.TrimSpace(configured)
-	claim, ok := acputil.ParseSubagentSessionMeta(meta)
-	if !ok {
-		return false
-	}
-	provided := claim.HistoryToken
-	// Tokens are 32 random bytes encoded as 64 hexadecimal characters. Require
-	// the exact shape before comparing so malformed metadata fails closed.
-	if len(configured) != 64 || len(provided) != len(configured) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(provided), []byte(configured)) == 1
+	return matchesManagedSubagentRelationClaim(activeSession, meta)
 }
 
 func (a *RuntimeAgent) activeSessionRef(activeSession session.Session, sessionID string) session.SessionRef {

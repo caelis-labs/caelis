@@ -121,6 +121,8 @@ type sessionPresence struct {
 	cancel       context.CancelFunc
 	done         chan struct{}
 	once         sync.Once
+	sessionID    string
+	onNotice     func(eventstream.Envelope)
 }
 
 func (a *SessionClientAdapter) openSessionPresence(
@@ -155,6 +157,8 @@ func (a *SessionClientAdapter) openSessionPresence(
 		subscription: result.Subscription,
 		cancel:       cancel,
 		done:         make(chan struct{}),
+		sessionID:    sessionID,
+		onNotice:     a.onSessionNotice,
 	}
 	go presence.drain(presenceCtx)
 	return presence, nil
@@ -179,13 +183,23 @@ func (a *SessionClientAdapter) replaceSessionPresence(next *sessionPresence) {
 func (p *sessionPresence) drain(ctx context.Context) {
 	defer close(p.done)
 	defer p.subscription.Close()
+	assembler := &appserver.FeedDeliveryAssembler{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case _, open := <-p.subscription.Deliveries():
+		case delivery, open := <-p.subscription.Deliveries():
 			if !open {
 				return
+			}
+			events, _, err := assembler.Accept(delivery)
+			if err != nil {
+				return
+			}
+			for _, envelope := range events {
+				if envelope.SessionID == p.sessionID && eventstream.IsSessionNotice(envelope) && p.onNotice != nil {
+					p.onNotice(eventstream.CloneEnvelope(envelope))
+				}
 			}
 		}
 	}

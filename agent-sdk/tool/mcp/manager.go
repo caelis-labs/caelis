@@ -4,13 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type MCPServerInfo struct {
@@ -20,12 +21,37 @@ type MCPServerInfo struct {
 	Warning string
 }
 
-type Manager struct {
-	mu       sync.Mutex
-	clients  map[string]*Client // Key: pluginID + "/" + serverName
-	tools    []tool.Tool
-	warnings map[string][]string
+// ServerFailure describes one failed initialization attempt. Err is private
+// diagnostic data; presentation adapters must supply bounded public wording.
+type ServerFailure struct {
+	PluginID string
+	Name     string
+	Err      error
 }
+
+type managedServer struct {
+	spec   ServerSpec
+	client *Client
+	listed []*mcpsdk.Tool
+	err    error
+}
+
+// Manager owns background MCP initialization and immutable ready-tool snapshots.
+type Manager struct {
+	mu          sync.Mutex
+	servers     []*managedServer
+	tools       []tool.Tool
+	warnings    map[string][]string
+	cancel      context.CancelFunc
+	initialized chan struct{}
+	closed      bool
+	closeOnce   sync.Once
+	onFailure   func(ServerFailure)
+}
+
+// Initialized closes after every server has either initialized or failed.
+// Tool consumers do not need to wait: Tools returns only ready definitions.
+func (m *Manager) Initialized() <-chan struct{} { return m.initialized }
 
 func formatToolName(serverName, toolName string) string {
 	raw := fmt.Sprintf("%s__%s", serverName, toolName)
@@ -45,63 +71,99 @@ func legacyToolName(pluginID, serverName, toolName string) string {
 	return shortenToolName(name, raw)
 }
 
-func NewManager(ctx context.Context, specs []ServerSpec) (*Manager, error) {
-	return newManager(ctx, specs, StartClient)
+// NewManager starts each server independently in the background. Connection or
+// listing failures affect only that server and invoke onFailure once, if set.
+// ctx owns initialization; Close cancels and drains all initialization work.
+func NewManager(ctx context.Context, specs []ServerSpec, onFailure func(ServerFailure)) (*Manager, error) {
+	return newManager(ctx, specs, StartClient, onFailure)
 }
 
 type clientStarter func(context.Context, ServerSpec) (*Client, error)
 
-func newManager(ctx context.Context, specs []ServerSpec, start clientStarter) (*Manager, error) {
-	mgr := &Manager{
-		clients:  make(map[string]*Client),
-		warnings: make(map[string][]string),
-	}
-	// Compact names intentionally omit source identity. Keep every server
-	// running, but expose only the first accepted definition for a projected
-	// name; later servers can still contribute names not already claimed.
-	toolsByProjectedName := map[string]*MCPTool{}
-	seenServers := make(map[string]struct{}, len(specs))
-
+func newManager(ctx context.Context, specs []ServerSpec, start clientStarter, onFailure func(ServerFailure)) (*Manager, error) {
+	seen := make(map[string]bool, len(specs))
 	for _, spec := range specs {
 		if err := validateMCPIdentity("plugin id", spec.PluginID, maxMCPPluginIDRunes); err != nil {
-			_ = mgr.Close()
-			return nil, fmt.Errorf("mcp manager: %w", err)
-		}
-		for _, sourceID := range spec.ReplaySourceIDs {
-			if err := validateMCPIdentity("replay source id", sourceID, maxMCPPluginIDRunes); err != nil {
-				_ = mgr.Close()
-				return nil, fmt.Errorf("mcp manager: %w", err)
-			}
+			return nil, err
 		}
 		if err := validateMCPIdentity("server name", spec.Name, maxMCPServerNameRunes); err != nil {
-			_ = mgr.Close()
-			return nil, fmt.Errorf("mcp manager: %w", err)
+			return nil, err
+		}
+		for _, id := range spec.ReplaySourceIDs {
+			if err := validateMCPIdentity("replay source id", id, maxMCPPluginIDRunes); err != nil {
+				return nil, err
+			}
 		}
 		key := spec.PluginID + "/" + spec.Name
-		if _, exists := seenServers[key]; exists {
-			_ = mgr.Close()
-			return nil, fmt.Errorf("mcp manager: duplicate server %s/%s", spec.PluginID, spec.Name)
+		if seen[key] {
+			return nil, fmt.Errorf("mcp manager: duplicate server %s", key)
 		}
-		seenServers[key] = struct{}{}
+		seen[key] = true
 	}
-
+	ctx, cancel := context.WithCancel(ctx)
+	mgr := &Manager{warnings: make(map[string][]string), cancel: cancel, initialized: make(chan struct{}), onFailure: onFailure}
 	for _, spec := range specs {
+		spec.Args = append([]string(nil), spec.Args...)
+		spec.ReplaySourceIDs = append([]string(nil), spec.ReplaySourceIDs...)
+		spec.Env = maps.Clone(spec.Env)
+		spec.Headers = maps.Clone(spec.Headers)
+		mgr.servers = append(mgr.servers, &managedServer{spec: spec})
+	}
+	var workers sync.WaitGroup
+	for _, server := range mgr.servers {
+		workers.Go(func() { mgr.initialize(ctx, server, start) })
+	}
+	go func() { workers.Wait(); close(mgr.initialized) }()
+	return mgr, nil
+}
+
+func (m *Manager) initialize(parent context.Context, server *managedServer, start clientStarter) {
+	ctx, cancel := context.WithTimeout(parent, DefaultStartupTimeout)
+	defer cancel()
+	client, err := start(ctx, server.spec)
+	var listed []*mcpsdk.Tool
+	if err == nil {
+		listed, err = client.ListTools(ctx)
+	}
+	if err == nil {
+		err = ctx.Err()
+	}
+	m.mu.Lock()
+	if m.closed || parent.Err() != nil {
+		m.mu.Unlock()
+		if client != nil {
+			_ = client.Close()
+		}
+		return
+	}
+	server.err = err
+	if err == nil {
+		server.client, server.listed = client, listed
+	}
+	m.rebuildToolsLocked()
+	m.mu.Unlock()
+	if err != nil {
+		if client != nil {
+			_ = client.Close()
+		}
+		if m.onFailure != nil {
+			m.onFailure(ServerFailure{PluginID: server.spec.PluginID, Name: server.spec.Name, Err: err})
+		}
+	}
+}
+
+// Rebuild in configured order, never connection completion order. Previously
+// returned tools and their definitions remain immutable while readers use them.
+func (mgr *Manager) rebuildToolsLocked() {
+	mgr.tools = nil
+	mgr.warnings = make(map[string][]string)
+	toolsByProjectedName := map[string]*MCPTool{}
+	for index, server := range mgr.servers {
+		if server.client == nil || mgr.awaitingHigherPriorityServer(index) {
+			continue
+		}
+		spec, client, toolInfos := server.spec, server.client, server.listed
 		key := spec.PluginID + "/" + spec.Name
-		client, err := start(ctx, spec)
-		if err != nil {
-			_ = mgr.Close()
-			return nil, fmt.Errorf("mcp manager: failed to start server %s/%s: %w", spec.PluginID, spec.Name, err)
-		}
-		mgr.clients[key] = client
-
-		listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		toolInfos, err := client.ListTools(listCtx)
-		cancel()
-		if err != nil {
-			_ = mgr.Close()
-			return nil, fmt.Errorf("mcp manager: failed to list tools for %s/%s: %w", spec.PluginID, spec.Name, err)
-		}
-
 		sort.SliceStable(toolInfos, func(i, j int) bool {
 			if toolInfos[i] == nil {
 				return false
@@ -161,11 +223,28 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter) (*
 			acceptedForServer++
 		}
 	}
-	sort.SliceStable(mgr.tools, func(i, j int) bool {
-		return mgr.tools[i].Definition().Name < mgr.tools[j].Definition().Name
-	})
+	sort.SliceStable(mgr.tools, func(i, j int) bool { return mgr.tools[i].Definition().Name < mgr.tools[j].Definition().Name })
+}
 
-	return mgr, nil
+// A pending server can still own colliding projected tool names. Hold only
+// overlapping namespaces until their priority is known, so a run never pins a
+// temporary lower-priority callable. Independent namespaces publish immediately.
+func (mgr *Manager) awaitingHigherPriorityServer(index int) bool {
+	prefix := mcpToolNamePrefix(mgr.servers[index].spec.Name)
+	for _, earlier := range mgr.servers[:index] {
+		if earlier.client != nil || earlier.err != nil {
+			continue
+		}
+		earlierPrefix := mcpToolNamePrefix(earlier.spec.Name)
+		if strings.HasPrefix(prefix, earlierPrefix) || strings.HasPrefix(earlierPrefix, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func mcpToolNamePrefix(serverName string) string {
+	return strings.TrimSuffix(sanitizeToolName(serverName+"__tool"), "tool")
 }
 
 func legacyToolNames(spec ServerSpec, toolName string) []string {
@@ -264,18 +343,27 @@ func (m *Manager) Tools() []tool.Tool {
 	return append([]tool.Tool(nil), m.tools...)
 }
 
+// Close cancels pending startup and waits for its producers before closing
+// connected servers. No tools or failure callbacks are published after return.
 func (m *Manager) Close() error {
 	if m == nil {
 		return nil
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for _, client := range m.clients {
-		_ = client.Close()
-	}
-	m.clients = make(map[string]*Client)
-	m.tools = nil
+	m.closeOnce.Do(func() {
+		m.mu.Lock()
+		m.closed = true
+		m.cancel()
+		m.mu.Unlock()
+		<-m.initialized
+		m.mu.Lock()
+		m.tools = nil
+		m.mu.Unlock()
+		for _, server := range m.servers {
+			if server.client != nil {
+				_ = server.client.Close()
+			}
+		}
+	})
 	return nil
 }
 
@@ -287,22 +375,25 @@ func (m *Manager) GetServerInfos(pluginID string) []MCPServerInfo {
 	defer m.mu.Unlock()
 
 	var infos []MCPServerInfo
-	for key, client := range m.clients {
-		parts := strings.Split(key, "/")
-		if len(parts) != 2 || parts[0] != pluginID {
+
+	for _, server := range m.servers {
+		if server.spec.PluginID != pluginID {
 			continue
 		}
-		serverName := parts[1]
-
-		status := "running"
+		serverName, client := server.spec.Name, server.client
+		key := pluginID + "/" + serverName
+		status := "connecting"
 		warnings := append([]string(nil), m.warnings[key]...)
-		select {
-		case <-client.closed:
+		if server.err != nil {
 			status = "failed"
-			if client.closeErr != nil {
-				warnings = append(warnings, client.closeErr.Error())
+		}
+		if client != nil {
+			status = "running"
+			select {
+			case <-client.closed:
+				status = "failed"
+			default:
 			}
-		default:
 		}
 
 		var tools []string

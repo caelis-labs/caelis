@@ -23,7 +23,6 @@ type OverlayState struct {
 	subagentRequestSeq uint64
 
 	subagentOutputOverlay *subagentOutputOverlayState
-	subagentRosterOverlay *subagentRosterOverlayState
 	subagentRosterPressed bool
 
 	activePrompt  *promptState
@@ -107,7 +106,6 @@ func (o *OverlayState) HasActiveOverlay() bool {
 	return o.btwOverlay != nil ||
 		o.subagentOverlay != nil ||
 		o.subagentOutputOverlay != nil ||
-		o.subagentRosterOverlay != nil ||
 		o.activePrompt != nil ||
 		o.showPalette ||
 		len(o.mentionCandidates) > 0 ||

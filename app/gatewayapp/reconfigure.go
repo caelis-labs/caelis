@@ -307,7 +307,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
 	}
-	mcpMgr, err := mcp.NewManager(ctx, mcpSpecs)
+	mcpMgr, err := mcp.NewManager(context.WithoutCancel(ctx), mcpSpecs, s.mcpFailureNotifier())
 	if err != nil {
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
@@ -347,11 +347,9 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	tools = append(tools, memoryTools...)
-	mcpTools := mcpMgr.Tools()
-	if searchTool := toolsearch.New(mcpTools); searchTool != nil {
-		tools = append(tools, searchTool)
+	if len(mcpSpecs) > 0 {
+		tools = append(tools, toolsearch.NewSource(mcpMgr))
 	}
-	tools = append(tools, mcpTools...)
 	executionValidator, err := controlplane.NewExecutionValidator(controlplane.ExecutionValidatorConfig{
 		Sandbox: sandboxRuntime,
 	})
@@ -391,6 +389,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		s.delegationPlacementResolver(runtimeCfg),
 		s.prepareSpawnedACPSession,
 		s.authorities.acpEndpointResolver,
+		s.retainRuntimeWork,
 	)
 	if err != nil {
 		bundle.Close()
@@ -483,8 +482,9 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 				metadata["system_prompt"] = systemPrompt
 			}
 			return kernelimpl.ToolAugmentation{
-				Tools:    augmentedTools,
-				Metadata: metadata,
+				Tools:         augmentedTools,
+				DeferredTools: mcpMgr,
+				Metadata:      metadata,
 			}, nil
 		},
 	})

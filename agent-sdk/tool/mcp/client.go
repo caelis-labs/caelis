@@ -15,6 +15,9 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// DefaultStartupTimeout bounds one server initialization, including tool listing.
+const DefaultStartupTimeout = 30 * time.Second
+
 type Client struct {
 	spec      ServerSpec
 	session   *mcpsdk.ClientSession
@@ -56,7 +59,7 @@ func startClientWithHTTPClient(ctx context.Context, spec ServerSpec, httpClient 
 		Capabilities: &mcpsdk.ClientCapabilities{},
 	})
 	lifetimeCtx, cancel := context.WithCancel(context.Background())
-	session, err := connectWithTimeout(ctx, client, lifetimeCtx, cancel, transport, 15*time.Second)
+	session, err := connectWithTimeout(ctx, client, lifetimeCtx, cancel, transport, DefaultStartupTimeout)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("connect %s MCP server %s/%s: %w", transportName, spec.PluginID, spec.Name, err)
@@ -88,10 +91,18 @@ func connectWithTimeout(ctx context.Context, client *mcpsdk.Client, lifetimeCtx 
 		return result.session, result.err
 	case <-ctx.Done():
 		cancel()
+		result := <-done
+		if result.session != nil {
+			_ = result.session.Close()
+		}
 		return nil, ctx.Err()
 	case <-timer.C:
 		cancel()
-		return nil, fmt.Errorf("connection timed out after %s", timeout)
+		result := <-done
+		if result.session != nil {
+			_ = result.session.Close()
+		}
+		return nil, fmt.Errorf("connection timed out after %s: %w", timeout, context.DeadlineExceeded)
 	}
 }
 

@@ -132,7 +132,10 @@ func CloneHistoryRequest(in HistoryRequest) HistoryRequest {
 // HistoryRunner is the optional read-only extension used when Control lazily
 // opens a terminal child workspace whose transcript is provider-owned. The
 // implementation must load the existing Session and must not resume execution
-// or derive history from the parent Task result.
+// or derive history from the parent Task result. When Spawn.Output implements
+// output.HistoryObserver, replay completion must be observed before subsequent
+// live output on that binding. A loaded connection may be retained for later
+// authorized input; loading alone must not apply execution configuration.
 type HistoryRunner interface {
 	LoadHistory(context.Context, HistoryRequest) (session.LoadedSession, error)
 }

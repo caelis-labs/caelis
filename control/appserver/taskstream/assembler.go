@@ -75,7 +75,7 @@ func (a *DeliveryAssembler) Accept(delivery Delivery) (events []eventstream.Enve
 		a.nextPage++
 		return nil, false, nil
 	case DeliveryReplaceEnd:
-		if delivery.Source != SourceReplacement || !a.Pending() || delivery.SnapshotID != a.snapshotID || delivery.Page != a.nextPage || len(delivery.Events) != 0 || delivery.NextCursor != "" {
+		if delivery.Source != SourceReplacement || !a.Pending() || delivery.SnapshotID != a.snapshotID || delivery.Page != a.nextPage || len(delivery.Events) != 0 {
 			return nil, false, invalidTaskDelivery("replacement end")
 		}
 		events = append([]eventstream.Envelope(nil), a.events...)

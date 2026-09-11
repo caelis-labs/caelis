@@ -23,6 +23,10 @@ func (w *writer) Key() streamspool.Key {
 }
 
 func (w *writer) Append(ctx context.Context, recordType uint16, occurredAt time.Time, payload []byte) (streamspool.Offset, error) {
+	return w.AppendBatch(ctx, []streamspool.Record{{Type: recordType, OccurredAt: occurredAt, Payload: payload}})
+}
+
+func (w *writer) AppendBatch(ctx context.Context, records []streamspool.Record) (streamspool.Offset, error) {
 	if w == nil || w.partition == nil {
 		return 0, streamspool.ErrUnavailable
 	}
@@ -33,8 +37,8 @@ func (w *writer) Append(ctx context.Context, recordType uint16, occurredAt time.
 	}
 	p := w.partition
 	p.mu.Lock()
-	forget := false
 	defer func() {
+		forget := p.state == streamspool.StatePoisoned && !p.physical && p.readers == 0
 		p.mu.Unlock()
 		if forget {
 			_ = p.store.removePartition(p, false)
@@ -43,21 +47,43 @@ func (w *writer) Append(ctx context.Context, recordType uint16, occurredAt time.
 	if p.state != streamspool.StatePending && p.state != streamspool.StateOpen {
 		return 0, stateError(p.state)
 	}
-	if len(payload) > p.store.cfg.MaxRecordBytes {
-		p.poisonLocked(streamspool.ErrLimit)
-		forget = !p.physical && p.readers == 0
-		return 0, fmt.Errorf("%w: record payload is %d bytes", streamspool.ErrLimit, len(payload))
+	start := p.high
+	for len(records) > 0 {
+		var encoded []byte
+		count := 0
+		available := p.store.cfg.SegmentBytes - p.activeBytes
+		if p.active == nil {
+			available = p.store.cfg.SegmentBytes - segmentHeaderSize
+		}
+		for _, record := range records {
+			if len(record.Payload) > p.store.cfg.MaxRecordBytes {
+				p.poisonLocked(streamspool.ErrLimit)
+				return start, fmt.Errorf("%w: record payload is %d bytes", streamspool.ErrLimit, len(record.Payload))
+			}
+			next, err := encodeRecord(p.high+streamspool.Offset(count), record.Type, record.OccurredAt, record.Payload)
+			if err != nil {
+				p.poisonLocked(err)
+				return start, err
+			}
+			if count > 0 && int64(len(encoded)+len(next)) > available {
+				break
+			}
+			encoded = append(encoded, next...)
+			count++
+		}
+		if _, err := p.appendEncodedLocked(encoded, count); err != nil {
+			return start, err
+		}
+		records = records[count:]
 	}
-	// Offset must be encoded under the writer mutex.
-	encoded, err := encodeRecord(p.high, recordType, occurredAt, payload)
-	if err != nil {
-		return 0, err
-	}
+	return start, nil
+}
+
+func (p *partition) appendEncodedLocked(encoded []byte, count int) (streamspool.Offset, error) {
 	newPartition := !p.physical
 	newSegment := newPartition || p.active == nil || p.activeBytes+int64(len(encoded)) > p.store.cfg.SegmentBytes
 	if newSegment && p.allocSegments >= p.store.cfg.MaxSegmentsPerPartition {
 		p.poisonLocked(streamspool.ErrLimit)
-		forget = !p.physical && p.readers == 0
 		return 0, streamspool.ErrLimit
 	}
 	reserve := int64(len(encoded))
@@ -69,12 +95,10 @@ func (w *writer) Append(ctx context.Context, recordType uint16, occurredAt time.
 	}
 	if p.accounted+reserve > p.store.cfg.MaxStreamBytes {
 		p.poisonLocked(streamspool.ErrLimit)
-		forget = !p.physical && p.readers == 0
 		return 0, streamspool.ErrLimit
 	}
 	if err := p.store.reserve(reserve, newPartition, newSegment); err != nil {
 		p.poisonLocked(err)
-		forget = !p.physical && p.readers == 0
 		return 0, err
 	}
 	p.accounted += reserve
@@ -103,12 +127,13 @@ func (w *writer) Append(ctx context.Context, recordType uint16, occurredAt time.
 				p.store.release(payloadCharge, false, false)
 			}
 			p.poisonLocked(err)
-			forget = !p.physical && p.readers == 0
 			return 0, errors.Join(err, cleanupErr)
 		}
 	}
 	startSize := p.activeBytes
+	p.store.writeCalls.Add(1)
 	n, writeErr := p.active.Write(encoded)
+	p.store.writeBytes.Add(uint64(max(n, 0)))
 	if writeErr != nil || n != len(encoded) {
 		if writeErr == nil {
 			writeErr = errors.New("short write")
@@ -128,7 +153,7 @@ func (w *writer) Append(ctx context.Context, recordType uint16, occurredAt time.
 		return 0, fmt.Errorf("%w: append record: %w", streamspool.ErrUnavailable, writeErr)
 	}
 	offset := p.high
-	p.high++
+	p.high += streamspool.Offset(count)
 	p.activeBytes += int64(len(encoded))
 	p.segments[len(p.segments)-1].bytes = p.activeBytes
 	p.state = streamspool.StateOpen
@@ -197,7 +222,7 @@ func (w *writer) Seal(ctx context.Context) error {
 		return err
 	}
 	if p.active != nil {
-		if err := errors.Join(p.active.Sync(), p.active.Close()); err != nil {
+		if err := p.active.Close(); err != nil {
 			p.active = nil
 			p.poisonLocked(err)
 			p.mu.Unlock()
@@ -221,13 +246,24 @@ func (w *writer) Seal(ctx context.Context) error {
 	return nil
 }
 
+func (w *writer) Invalidate(ctx context.Context) error {
+	if w == nil || w.partition == nil {
+		return streamspool.ErrUnavailable
+	}
+	p := w.partition
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.poisonLocked(streamspool.ErrUnavailable)
+	return nil
+}
+
 func (w *writer) Close() error {
 	return nil
 }
 
 func (p *partition) rollLocked() error {
 	if p.active != nil {
-		if err := errors.Join(p.active.Sync(), p.active.Close()); err != nil {
+		if err := p.active.Close(); err != nil {
 			p.active = nil
 			return fmt.Errorf("roll previous segment: %w", err)
 		}
@@ -242,7 +278,9 @@ func (p *partition) rollLocked() error {
 		return err
 	}
 	header := encodeSegmentHeader(p.key, p.originComplete, p.high, p.store.cfg.Now())
+	p.store.writeCalls.Add(1)
 	n, err := file.Write(header)
+	p.store.writeBytes.Add(uint64(max(n, 0)))
 	if err != nil || n != len(header) {
 		if err == nil {
 			err = errors.New("short segment header write")

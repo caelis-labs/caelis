@@ -17,15 +17,19 @@ import (
 // Admission alone changes no Task state. The latch retains only identity;
 // output payloads go directly to the application observer.
 type childTaskActivity struct {
-	runtime    *taskRuntime
-	ctx        context.Context
-	ref        session.SessionRef
-	taskID     string
-	activityID string
-	turnSeq    int64
-	observer   output.Observer
-	started    sync.Once
-	settled    atomic.Bool
+	runtime     *taskRuntime
+	ctx         context.Context
+	ref         session.SessionRef
+	taskID      string
+	activityID  string
+	turnSeq     int64
+	observer    output.Observer
+	started     sync.Once
+	observed    atomic.Bool
+	ready       chan struct{}
+	readyOnce   sync.Once
+	persistDone chan struct{}
+	settled     atomic.Bool
 }
 
 func (a *childTaskActivity) ObserveTaskOutput(ctx context.Context, event output.Event) error {
@@ -33,15 +37,9 @@ func (a *childTaskActivity) ObserveTaskOutput(ctx context.Context, event output.
 	if !session.IsAgentCommunicationProtocol(event.Event) &&
 		(event.Event != nil || event.Text != "" || event.Running || event.Closed || event.State != "") {
 		a.started.Do(func() {
-			// A producer may hold its endpoint lock while calling us. Waiting for
-			// a Task control owner here would deadlock concurrent cancellation.
-			if release, claimed := a.runtime.tryClaimSubagentOperation(a.ref, a.taskID); claimed {
-				err := a.persist()
-				release()
-				if err == nil {
-					return
-				}
-			}
+			a.observed.Store(true)
+			// Activity persistence owns its existing operation claim and CAS path,
+			// but disk latency must not run under the producer's endpoint lock.
 			go a.persistWhenAvailable()
 		})
 	}
@@ -52,6 +50,8 @@ func (a *childTaskActivity) ObserveTaskOutput(ctx context.Context, event output.
 }
 
 func (a *childTaskActivity) persistWhenAvailable() {
+	defer close(a.persistDone)
+	defer a.signalReady()
 	for {
 		release, err := a.runtime.waitForTaskOperationClaim(a.ctx, a.ref, a.taskID)
 		if err != nil {
@@ -63,6 +63,37 @@ func (a *childTaskActivity) persistWhenAvailable() {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func (a *childTaskActivity) signalReady() { a.readyOnce.Do(func() { close(a.ready) }) }
+
+// awaitObservedStart lets readers cross the first-output registration barrier
+// without making the producer wait for Task persistence. Admission alone does
+// not wait or change the previous activity's state.
+func (a *childTaskActivity) awaitObservedStart(ctx context.Context) error {
+	if a == nil || !a.observed.Load() {
+		return nil
+	}
+	select {
+	case <-a.ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// awaitPersistence joins the first-output writer after terminal commit. It
+// runs outside the Task operation claim and never delays output callbacks.
+func (a *childTaskActivity) awaitPersistence(ctx context.Context) error {
+	if a == nil || !a.observed.Load() {
+		return nil
+	}
+	select {
+	case <-a.persistDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -114,6 +145,9 @@ func (a *childTaskActivity) persist() error {
 	entry := task.entrySnapshot(a.runtime.runtime.now())
 	task.mu.Unlock()
 	task.activityApplyMu.Unlock()
+	// Readers need the observed generation, not a disk acknowledgement. The
+	// existing operation claim still fences the asynchronous durable write.
+	a.signalReady()
 	for range 4 {
 		err = a.runtime.persistTaskEntryWithConflictInvalidation(a.ctx, entry, false)
 		var conflict *taskapi.RevisionConflictError
@@ -143,4 +177,12 @@ func (a *childTaskActivity) persist() error {
 		a.runtime.mu.Unlock()
 	}
 	return err
+}
+
+// ReplaceTaskHistory forwards recovery observations without opening an activity.
+func (a *childTaskActivity) ReplaceTaskHistory(ctx context.Context, events []*session.Event) error {
+	if observer, ok := a.observer.(output.HistoryObserver); ok {
+		return observer.ReplaceTaskHistory(ctx, events)
+	}
+	return nil
 }

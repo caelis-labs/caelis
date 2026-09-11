@@ -1,5 +1,5 @@
 // Package output defines the producer-only output hook used by asynchronous
-// Tasks. It deliberately has no read, cursor, retention, or replay API.
+// Tasks. It deliberately has no read, cursor, retention, or consumer API.
 package output
 
 import (
@@ -62,3 +62,11 @@ func (nopObserver) ObserveTaskOutput(context.Context, Event) error { return nil 
 
 // Nop returns an observer suitable when the application trace is unavailable.
 func Nop() Observer { return nopObserver{} }
+
+// HistoryObserver accepts an ordered, complete provider replay before new live
+// output on the same producer connection. It replaces only observation history,
+// never Session model context or Task lifecycle. Acceptance is not disk durability.
+// Implementations must bound retained work and report inability to accept it.
+type HistoryObserver interface {
+	ReplaceTaskHistory(context.Context, []*session.Event) error
+}

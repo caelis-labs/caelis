@@ -3,7 +3,10 @@ package tuiapp
 import (
 	"strings"
 
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 type composerRender struct {
@@ -66,6 +69,19 @@ func (m *Model) composeInputRender() composerRender {
 }
 
 func (m *Model) composeInputRenderFrom(snapshot composerInputLayout) composerRender {
+	placeholder := ""
+	if len(m.inputAttachments) == 0 && snapshot.value == "" {
+		placeholder = m.textarea.Placeholder
+	}
+	ghost := ""
+	if placeholder == "" && snapshot.cursorIndex == len([]rune(snapshot.value)) {
+		ghost = m.currentInputGhostHint()
+	}
+
+	return renderPromptEditor(snapshot, m.theme, m.textarea, m.composerChrome(), placeholder, ghost)
+}
+
+func renderPromptEditor(snapshot composerInputLayout, theme tuikit.Theme, editor textarea.Model, chrome composerChrome, placeholder, ghost string) composerRender {
 	rows := snapshot.layout.rows
 	cursorRow := snapshot.layout.cursorRow
 	cursorCol := snapshot.layout.cursorCol
@@ -74,24 +90,12 @@ func (m *Model) composeInputRenderFrom(snapshot composerInputLayout) composerRen
 	prompt := snapshot.prompt
 	continuation := snapshot.continuation
 	contentWidth := snapshot.contentWidth
-	value := snapshot.value
-	cursorIndex := snapshot.cursorIndex
 
-	placeholder := ""
-	if len(m.inputAttachments) == 0 && value == "" {
-		placeholder = m.textarea.Placeholder
-	}
-	ghost := ""
-	if placeholder == "" && cursorIndex == len([]rune(value)) {
-		ghost = m.currentInputGhostHint()
-	}
-
-	chrome := m.composerChrome()
-	promptStyle := m.theme.PromptStyle()
-	helpStyle := m.theme.HelpHintTextStyle()
-	textStyle := m.theme.TextStyle()
+	promptStyle := theme.PromptStyle()
+	helpStyle := theme.HelpHintTextStyle()
+	textStyle := theme.TextStyle()
 	if chrome.active {
-		bg := m.theme.ComposerBg
+		bg := chrome.background
 		promptStyle = promptStyle.Background(bg)
 		helpStyle = helpStyle.Background(bg)
 		textStyle = textStyle.Background(bg)
@@ -106,7 +110,7 @@ func (m *Model) composeInputRenderFrom(snapshot composerInputLayout) composerRen
 			promptPlain = prompt
 			promptStyled = promptStyle.Render(prompt)
 		} else if chrome.active {
-			promptStyled = m.composerBgStyle().Render(continuation)
+			promptStyled = lipgloss.NewStyle().Background(chrome.background).Render(continuation)
 		}
 
 		contentPlain := rows[idx]
@@ -129,8 +133,8 @@ func (m *Model) composeInputRenderFrom(snapshot composerInputLayout) composerRen
 	}
 
 	var cursor *tea.Cursor
-	if m.textarea.Focused() && cursorRow >= start && cursorRow < end {
-		styles := m.textarea.Styles()
+	if editor.Focused() && cursorRow >= start && cursorRow < end {
+		styles := editor.Styles()
 		cursor = tea.NewCursor(snapshot.promptWidth+cursorCol, cursorRow-start)
 		cursor.Blink = styles.Cursor.Blink
 		cursor.Color = styles.Cursor.Color
@@ -471,17 +475,19 @@ func desiredComposerRows(value string, _ string, width int, maxRows int) int {
 	return layout.totalRows
 }
 
-func (m *Model) textareaCursorIndex() int {
-	value := m.textarea.Value()
+func (m *Model) textareaCursorIndex() int { return promptTextareaCursorIndex(m.textarea) }
+
+func promptTextareaCursorIndex(editor textarea.Model) int {
+	value := editor.Value()
 	if value == "" {
 		return 0
 	}
 	lines := strings.Split(value, "\n")
-	row := max(m.textarea.Line(), 0)
+	row := max(editor.Line(), 0)
 	if row >= len(lines) {
 		row = len(lines) - 1
 	}
-	lineInfo := m.textarea.LineInfo()
+	lineInfo := editor.LineInfo()
 	col := lineInfo.StartColumn + lineInfo.ColumnOffset
 	lineRunes := []rune(lines[row])
 	if col < 0 {
@@ -502,10 +508,16 @@ func (m *Model) textareaCursorIndex() int {
 // Endpoints use MoveToBegin/MoveToEnd; intermediate positions walk hard lines
 // via CursorUp/Down then SetCursorColumn.
 func (m *Model) moveTextareaCursorToIndex(target int) {
-	if m == nil {
+	if m != nil {
+		movePromptTextareaCursor(&m.textarea, target)
+	}
+}
+
+func movePromptTextareaCursor(editor *textarea.Model, target int) {
+	if editor == nil {
 		return
 	}
-	value := m.textarea.Value()
+	value := editor.Value()
 	valueRunes := []rune(value)
 	if target < 0 {
 		target = 0
@@ -513,61 +525,61 @@ func (m *Model) moveTextareaCursorToIndex(target int) {
 	if target > len(valueRunes) {
 		target = len(valueRunes)
 	}
-	if m.textareaCursorIndex() == target {
+	if promptTextareaCursorIndex(*editor) == target {
 		return
 	}
 	if target == 0 {
-		m.textarea.MoveToBegin()
+		editor.MoveToBegin()
 		return
 	}
 	if target == len(valueRunes) {
-		m.textarea.MoveToEnd()
+		editor.MoveToEnd()
 		return
 	}
 
 	targetRow, targetCol := runeIndexToLineCol(value, target)
 	// Bound walk so soft-wrap lines cannot infinite-loop on a stuck cursor.
 	maxSteps := len(valueRunes) + 8
-	if targetRow < m.textarea.Line() {
-		for step := 0; m.textarea.Line() > targetRow && step < maxSteps; step++ {
-			prevRow, prevCol := m.textarea.Line(), m.textarea.Column()
-			m.textarea.CursorUp()
-			if m.textarea.Line() == prevRow && m.textarea.Column() == prevCol {
+	if targetRow < editor.Line() {
+		for step := 0; editor.Line() > targetRow && step < maxSteps; step++ {
+			prevRow, prevCol := editor.Line(), editor.Column()
+			editor.CursorUp()
+			if editor.Line() == prevRow && editor.Column() == prevCol {
 				break
 			}
 		}
-	} else if targetRow > m.textarea.Line() {
-		for step := 0; m.textarea.Line() < targetRow && step < maxSteps; step++ {
-			prevRow, prevCol := m.textarea.Line(), m.textarea.Column()
-			m.textarea.CursorDown()
-			if m.textarea.Line() == prevRow && m.textarea.Column() == prevCol {
+	} else if targetRow > editor.Line() {
+		for step := 0; editor.Line() < targetRow && step < maxSteps; step++ {
+			prevRow, prevCol := editor.Line(), editor.Column()
+			editor.CursorDown()
+			if editor.Line() == prevRow && editor.Column() == prevCol {
 				break
 			}
 		}
 	}
 	// If soft-wrap left us on a nearby hard line, snap by endpoint then re-walk.
-	if m.textarea.Line() != targetRow {
-		if targetRow <= m.textarea.LineCount()/2 {
-			m.textarea.MoveToBegin()
-			for step := 0; m.textarea.Line() < targetRow && step < maxSteps; step++ {
-				prevRow, prevCol := m.textarea.Line(), m.textarea.Column()
-				m.textarea.CursorDown()
-				if m.textarea.Line() == prevRow && m.textarea.Column() == prevCol {
+	if editor.Line() != targetRow {
+		if targetRow <= editor.LineCount()/2 {
+			editor.MoveToBegin()
+			for step := 0; editor.Line() < targetRow && step < maxSteps; step++ {
+				prevRow, prevCol := editor.Line(), editor.Column()
+				editor.CursorDown()
+				if editor.Line() == prevRow && editor.Column() == prevCol {
 					break
 				}
 			}
 		} else {
-			m.textarea.MoveToEnd()
-			for step := 0; m.textarea.Line() > targetRow && step < maxSteps; step++ {
-				prevRow, prevCol := m.textarea.Line(), m.textarea.Column()
-				m.textarea.CursorUp()
-				if m.textarea.Line() == prevRow && m.textarea.Column() == prevCol {
+			editor.MoveToEnd()
+			for step := 0; editor.Line() > targetRow && step < maxSteps; step++ {
+				prevRow, prevCol := editor.Line(), editor.Column()
+				editor.CursorUp()
+				if editor.Line() == prevRow && editor.Column() == prevCol {
 					break
 				}
 			}
 		}
 	}
-	m.textarea.SetCursorColumn(targetCol)
+	editor.SetCursorColumn(targetCol)
 }
 
 // runeIndexToLineCol maps a rune index in a newline-separated string to the

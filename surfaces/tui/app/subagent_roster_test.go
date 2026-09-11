@@ -111,7 +111,7 @@ func TestSubagentRosterOmitsSpawnWithoutChildHandle(t *testing.T) {
 	if text := strings.TrimSpace(model.footerSubagentText()); text != "" {
 		t.Fatalf("unresolved Spawn produced footer affordance: %q", model.footerRowText())
 	}
-	if model.openSubagentRosterOverlay() {
+	if model.openSubagentWorkspace() {
 		t.Fatal("unresolved Spawn opened an empty roster")
 	}
 	if cmd := model.ensureSubagentDirectoryWatch(); cmd != nil {
@@ -150,12 +150,12 @@ func TestSubagentRosterRowsKeepPromptAndTimeOnSingleLine(t *testing.T) {
 	addSubagentRosterTestView(model, "spawn-sena", "sena", "sena[zenith]: verify metadata contracts", "completed", now.Add(-10*time.Minute), time.Date(2026, time.August, 4, 14, 57, 0, 0, time.Local))
 
 	rows := model.subagentRosterRows()
-	model.subagentRosterOverlay = &subagentRosterOverlayState{rows: rows}
-	lines, _ := model.renderSubagentRosterRows(rows, 88, 2, now)
+	var lines []string
+	for i, row := range rows {
+		lines = append(lines, model.renderSubagentRosterRow(row, i == 0, 88, now))
+	}
 	plain := ansi.Strip(strings.Join(lines, "\n"))
 	for _, expected := range []string{
-		"Running  2",
-		"Done  1",
 		"rhea  [reviewer]",
 		"milo  [breeze]",
 		"sena  [zenith]",
@@ -188,48 +188,6 @@ func TestSubagentRosterRowsKeepPromptAndTimeOnSingleLine(t *testing.T) {
 	}
 }
 
-func TestSubagentRosterOverlayUsesExpandedWideBudgetAndFullWidthNarrowSheet(t *testing.T) {
-	model := newSubagentRosterTestModel()
-	addSubagentRosterTestView(
-		model,
-		"spawn-overlay-review",
-		"overlay-ux-review",
-		"overlay-ux-review[orbit]: inspect centered overlay composition and renderer performance",
-		"completed",
-		time.Unix(90, 0),
-		time.Unix(120, 0),
-	)
-	if !model.openSubagentRosterOverlay() {
-		t.Fatal("openSubagentRosterOverlay() = false")
-	}
-
-	for _, size := range []struct {
-		width int
-		want  int
-	}{
-		{width: 180, want: subagentRosterOverlayMaxWidth},
-		{width: 100, want: 84},
-		{width: 60, want: 60},
-	} {
-		model.width = size.width
-		_ = model.renderSubagentRosterOverlay()
-		if got := model.subagentRosterOverlay.geometry.width; got != size.want {
-			t.Fatalf("terminal width %d roster width = %d, want %d", size.width, got, size.want)
-		}
-	}
-
-	model.width = 180
-	plain := ansi.Strip(model.renderSubagentRosterOverlay())
-	if !strings.Contains(plain, "overlay-ux-review") || strings.Contains(plain, "overlay-ux-r...") {
-		t.Fatalf("wide roster did not use expanded identity budget:\n%s", plain)
-	}
-	for _, want := range []string{"↑↓ select", "Enter open", "Esc close"} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("wide roster footer omitted %q:\n%s", want, plain)
-		}
-	}
-}
-
 func TestSubagentRosterPromptUsesBoundedMiddleFold(t *testing.T) {
 	t.Parallel()
 
@@ -253,8 +211,10 @@ func TestSubagentRosterSelectedRowUsesSlashSelectionSurface(t *testing.T) {
 	addSubagentRosterTestView(model, "spawn-milo", "milo", "milo[breeze]: trace overlay interaction", "running", now.Add(-time.Minute), time.Time{})
 
 	rows := model.subagentRosterRows()
-	model.subagentRosterOverlay = &subagentRosterOverlayState{rows: rows}
-	lines, _ := model.renderSubagentRosterRows(rows, 88, 2, now)
+	var lines []string
+	for i, row := range rows {
+		lines = append(lines, model.renderSubagentRosterRow(row, i == 0, 88, now))
+	}
 	selected := subagentRosterLineForHandle(t, lines, "rhea")
 	unselected := subagentRosterLineForHandle(t, lines, "milo")
 	selectionBG := sgrBackgroundCode(t, model.theme.SelectionBg)
@@ -286,158 +246,13 @@ func TestSubagentRosterEnterOpensRetainedWorkspaceWithoutTranscriptOwner(t *test
 
 	model := newSubagentRosterTestModel()
 	addSubagentRosterTestView(model, "spawn-rhea", "rhea", "rhea[reviewer]: audit ownership", "running", time.Unix(100, 0), time.Time{})
-	if !model.openSubagentRosterOverlay() {
-		t.Fatal("openSubagentRosterOverlay() = false")
+	if !model.openSubagentWorkspace() {
+		t.Fatal("retained workspace did not open")
 	}
-	_ = model.renderSubagentRosterOverlay()
-	_ = model.handleSubagentRosterOverlayKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if model.subagentRosterOverlay != nil {
-		t.Fatal("roster remained open after workspace activation")
-	}
+
 	if model.subagentOutputOverlay == nil || model.subagentOutputOverlay.callID != "spawn-rhea" {
 		t.Fatalf("output overlay = %#v, want retained spawn-rhea workspace", model.subagentOutputOverlay)
 	}
-}
-
-func TestSubagentRosterColdResumeLoadsOnlySelectedWorkspace(t *testing.T) {
-	t.Parallel()
-
-	descriptors := []protocoltaskstream.TaskDescriptor{
-		{
-			SessionID: "session-old", TaskID: "task-kira", Handle: "kira", Kind: task.KindSubagent,
-			State: task.StateCompleted, Running: false, ActivityID: "activity-kira", UpdatedAt: time.Unix(103, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "StartThread"},
-		},
-		{
-			SessionID: "session-old", TaskID: "task-wen", Handle: "wen", Kind: task.KindSubagent,
-			State: task.StateCompleted, Running: false, ActivityID: "activity-wen", UpdatedAt: time.Unix(102, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-wen", ToolName: "StartThread"},
-		},
-		{
-			SessionID: "session-old", TaskID: "task-yara", Handle: "yara", Kind: task.KindSubagent,
-			State: task.StateCompleted, Running: false, ActivityID: "activity-yara", UpdatedAt: time.Unix(101, 0),
-			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-yara", ToolName: "StartThread"},
-		},
-	}
-	requests := make(chan protocoltaskstream.ReadRequest, len(descriptors))
-	service := &subagentRosterTestTaskStreamService{
-		list:          protocoltaskstream.ListResult{Tasks: descriptors},
-		eventRequests: requests,
-	}
-	messages := make(chan tea.Msg, 8)
-	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
-	defer sender.Close()
-	model := NewModel(Config{
-		Context: context.Background(), NoColor: true, NoAnimation: true,
-		TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender,
-	})
-	model.currentSessionID = "session-old"
-	model.width = 100
-	model.height = 32
-	for _, descriptor := range descriptors {
-		addSubagentRosterTestView(
-			model,
-			descriptor.ParentTool.ToolCallID,
-			descriptor.Handle,
-			descriptor.Handle+"[self]: historical task",
-			"running",
-			time.Unix(90, 0),
-			time.Time{},
-		)
-	}
-
-	applySubagentDirectorySnapshotForTest(model, 1, descriptors)
-	if !model.openSubagentRosterOverlay() {
-		t.Fatal("cold roster did not open")
-	}
-	_ = model.renderSubagentRosterOverlay()
-	select {
-	case request := <-requests:
-		t.Fatalf("metadata-only roster loaded child Task %q before selection", request.TaskID)
-	default:
-	}
-	if !model.activateSubagentRosterSelection() {
-		t.Fatal("selected roster row did not open its workspace")
-	}
-	selectedCallID := model.subagentOutputOverlay.callID
-	selectedTaskID := model.subagentRosterTasks[selectedCallID].TaskID
-	service.eventBatch = protocoltaskstream.ReadResult{
-		ActivityID: model.subagentRosterTasks[selectedCallID].ActivityID,
-		Deliveries: []protocoltaskstream.Delivery{{
-			Kind: protocoltaskstream.DeliveryAppendPage, Source: protocoltaskstream.SourceExact,
-			NextCursor: "history-cursor-2",
-			Events: []eventstream.Envelope{tuiExactEnvelope(eventstream.Envelope{
-				Kind: eventstream.KindSessionUpdate, SessionID: "session-old", TurnID: selectedTaskID + ":1",
-				Scope: eventstream.ScopeSubagent, ScopeID: selectedTaskID,
-				ParentTool: &eventstream.ParentToolRelation{ToolCallID: selectedCallID, ToolName: "StartThread"},
-				Update: eventstream.ContentChunk{
-					SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "history-answer",
-					Content: eventstream.TextContent{Type: "text", Text: "restored complete child history"},
-				},
-			}, "history-cursor-1", 1), tuiExactEnvelope(eventstream.Envelope{
-				Kind: eventstream.KindLifecycle, SessionID: "session-old", TurnID: selectedTaskID + ":1",
-				Scope: eventstream.ScopeSubagent, ScopeID: selectedTaskID, Final: true,
-				ParentTool: &eventstream.ParentToolRelation{ToolCallID: selectedCallID, ToolName: "StartThread"},
-				Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
-			}, "history-cursor-2", 2)},
-		}},
-	}
-	resolved := receiveTUITaskStreamMessage[taskStreamResolvedMsg](t, messages)
-	if next, _ := model.Update(resolved); next != nil {
-		model = next.(*Model)
-	}
-	select {
-	case request := <-requests:
-		if request.TaskID != selectedTaskID {
-			t.Fatalf("selected workspace loaded Task %q, want %q", request.TaskID, selectedTaskID)
-		}
-		if request.ExpectedActivityID != model.subagentRosterTasks[selectedCallID].ActivityID {
-			t.Fatalf("selected workspace history activity = %q, want %q",
-				request.ExpectedActivityID, model.subagentRosterTasks[selectedCallID].ActivityID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("selected cold workspace did not request lazy history")
-	}
-	select {
-	case request := <-requests:
-		if request.TaskID != selectedTaskID || request.Cursor != "history-cursor-2" {
-			t.Fatalf("history continuation = %#v, want selected Task after history-cursor-2", request)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("selected history did not verify its exact high-water mark")
-	}
-	select {
-	case request := <-requests:
-		t.Fatalf("selecting one workspace also loaded Task %q after exact EOF", request.TaskID)
-	default:
-	}
-	historyBatch := receiveTUITaskStreamMessage[taskStreamHistoryBatchMsg](t, messages)
-	if next, _ := model.Update(historyBatch); next != nil {
-		model = next.(*Model)
-	}
-	historyClosed := receiveTUITaskStreamMessage[taskStreamHistoryClosedMsg](t, messages)
-	if next, _ := model.Update(historyClosed); next != nil {
-		model = next.(*Model)
-	}
-	view := model.subagentOutputViews[selectedCallID]
-	plain := joinRenderedPlain(model.subagentOutputRows(view, 72, 16))
-	if !view.idleHistorySettled || !strings.Contains(plain, "restored complete child history") ||
-		strings.Contains(plain, "Loading subagent history") {
-		t.Fatalf("cold history settled=%v output=%q", view.idleHistorySettled, plain)
-	}
-	model.closeSubagentOutputOverlay()
-	if !model.openSubagentOutputOverlayView(selectedCallID, view) {
-		t.Fatal("cached terminal workspace did not reopen")
-	}
-	if model.taskStreamWanted[selectedTaskID] {
-		t.Fatal("cached terminal workspace reopened Task observation")
-	}
-	select {
-	case request := <-requests:
-		t.Fatalf("cached terminal workspace reloaded Task %q", request.TaskID)
-	default:
-	}
-	model.closeSubagentOutputOverlay()
 }
 
 func TestSubagentRosterFooterAndRowsAreMouseNavigable(t *testing.T) {
@@ -455,41 +270,49 @@ func TestSubagentRosterFooterAndRowsAreMouseNavigable(t *testing.T) {
 	_, _ = model.handleMouse(tea.MouseClickMsg(point))
 	point.Button = tea.MouseNone
 	_, _ = model.handleMouse(tea.MouseReleaseMsg(point))
-	if model.subagentRosterOverlay == nil {
-		t.Fatal("footer click did not open roster")
+	if model.subagentOutputOverlay == nil || model.subagentOutputOverlay.callID != "spawn-rhea" {
+		t.Fatal("footer did not directly open running child")
 	}
-
+	state := model.subagentOutputOverlay
 	_ = model.View()
-	geometry := model.subagentRosterOverlay.geometry
-	rowY := geometry.rows[1].top
-	point = tea.Mouse{X: geometry.x + 4, Y: rowY, Button: tea.MouseLeft}
+	point = tea.Mouse{X: state.geometry.contentX + 2, Y: state.geometry.closeY, Button: tea.MouseLeft}
+	_, _ = model.handleMouse(tea.MouseClickMsg(point))
+	point.Button = tea.MouseNone
+	_, _ = model.handleMouse(tea.MouseReleaseMsg(point))
+	_ = model.View()
+	if state.menu != "agents" {
+		t.Fatal("title did not open agent menu")
+	}
+	point = tea.Mouse{X: state.menuRect.x + 2, Y: state.menuRect.y + 1, Button: tea.MouseLeft}
 	_, _ = model.handleMouse(tea.MouseClickMsg(point))
 	point.Button = tea.MouseNone
 	_, _ = model.handleMouse(tea.MouseReleaseMsg(point))
 	if model.subagentOutputOverlay == nil || model.subagentOutputOverlay.callID != "spawn-sena" {
-		t.Fatalf("row click opened %#v, want spawn-sena", model.subagentOutputOverlay)
+		t.Fatal("dropdown did not switch the single pane")
 	}
+
 }
 
-func TestSubagentRosterFooterClickTogglesOverlay(t *testing.T) {
+func TestSubagentRosterFooterReopensLastPane(t *testing.T) {
 	model := newSubagentRosterTestModel()
 	addSubagentRosterTestView(model, "spawn-sena", "sena", "sena[self]: verify metadata", "completed", time.Unix(90, 0), time.Unix(120, 0))
 	model.ensureViewportLayout()
 	_ = model.View()
-
 	bounds, ok := model.subagentRosterFooterHitBounds()
 	if !ok {
-		t.Fatal("footer omitted subagent hit bounds")
+		t.Fatal("missing footer")
 	}
 	clickSubagentRosterFooter(t, model, bounds)
-	if model.subagentRosterOverlay == nil {
-		t.Fatal("first footer click did not open roster")
+	if model.subagentOutputOverlay == nil {
+		t.Fatal("footer did not open pane")
 	}
+	state := model.subagentOutputOverlay
+	state.editor.SetValue("retained draft")
+	model.closeSubagentOutputOverlay()
 	_ = model.View()
-
 	clickSubagentRosterFooter(t, model, bounds)
-	if model.subagentRosterOverlay != nil {
-		t.Fatal("second footer click did not close roster")
+	if model.subagentOutputOverlay != state || state.editor.Value() != "retained draft" {
+		t.Fatal("reopen discarded pane state")
 	}
 }
 
@@ -716,9 +539,7 @@ func TestSubagentDirectoryNewActivityReopensVisibleContentBeforeParentFinal(t *t
 	view.block.SessionID = "turn-1"
 	view.turnID = "turn-1"
 	view.historyResolved = true
-	view.idleHistorySettled = true
 	view.directoryActivityID = "activity:activity-1"
-	view.idleHistoryActivityID = view.directoryActivityID
 	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-rhea"}
 	model.taskStreamHandlesByID["task-1"] = "rhea"
 	model.taskStreamIDsByCallID["spawn-rhea"] = "task-1"

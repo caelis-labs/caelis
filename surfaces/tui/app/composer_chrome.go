@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"image/color"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -15,26 +16,37 @@ const containerHorizontalPadding = 1
 
 // composerChrome captures ComposerBg container padding applied around the composer.
 type composerChrome struct {
-	active bool
+	active            bool
+	horizontalPadding int
+	background        color.Color
 }
 
 func (m *Model) composerChrome() composerChrome {
+	return m.promptComposerChrome(m != nil && !m.workspace.childFocused)
+}
+
+// Both editors use the same focus colors without mutating the transcript theme.
+func (m *Model) promptComposerChrome(focused bool) composerChrome {
 	if m == nil || m.theme.ComposerBg == nil || m.theme.NoColor {
 		return composerChrome{}
 	}
-	return composerChrome{active: true}
+	bg := m.theme.ComposerBg
+	if m.subagentOutputOverlay != nil && m.activePrompt == nil && focused && m.theme.ComposerFocusBg != nil {
+		bg = m.theme.ComposerFocusBg
+	}
+	return composerChrome{active: true, horizontalPadding: containerHorizontalPadding, background: bg}
 }
 
 func (m *Model) composerBgStyle() lipgloss.Style {
 	if !m.composerChrome().active {
 		return lipgloss.NewStyle()
 	}
-	return lipgloss.NewStyle().Background(m.theme.ComposerBg)
+	return lipgloss.NewStyle().Background(m.composerChrome().background)
 }
 
 func (c composerChrome) horizontalInset() int {
 	if c.active {
-		return containerHorizontalPadding
+		return c.horizontalPadding
 	}
 	return 0
 }
@@ -79,31 +91,33 @@ func (m *Model) composerInputColumnOffset() int {
 }
 
 func (m *Model) wrapInputBarInContainer(text string) string {
-	chrome := m.composerChrome()
+	return wrapPromptEditor(text, m.composerChrome(), m.composerContainerWidth(), m.composerBgStyle())
+}
+
+func wrapPromptEditor(text string, chrome composerChrome, containerWidth int, bgStyle lipgloss.Style) string {
 	if !chrome.active {
 		return text
 	}
-
-	containerWidth := m.composerContainerWidth()
 	if containerWidth <= 0 {
 		return text
 	}
 
 	lines := strings.Split(text, "\n")
-	bgStyle := m.composerBgStyle()
 
-	contentWidth := containerWidth - (containerHorizontalPadding * 2)
+	padding := chrome.horizontalInset()
+	contentWidth := containerWidth - (padding * 2)
 	if contentWidth < 0 {
 		contentWidth = 0
 	}
 
-	padLeft := strings.Repeat(" ", containerHorizontalPadding)
-	padRight := strings.Repeat(" ", containerHorizontalPadding)
+	padLeft := strings.Repeat(" ", padding)
+	padRight := strings.Repeat(" ", padding)
 	styledPadLeft := bgStyle.Render(padLeft)
 	styledPadRight := bgStyle.Render(padRight)
+	top := bgStyle.Render(strings.Repeat(" ", containerWidth))
 
 	styledLines := make([]string, 0, len(lines)+2)
-	styledLines = append(styledLines, bgStyle.Render(strings.Repeat(" ", containerWidth)))
+	styledLines = append(styledLines, top)
 
 	for _, line := range lines {
 		plainLine := ansi.Strip(line)
@@ -122,7 +136,7 @@ func (m *Model) wrapInputBarInContainer(text string) string {
 		styledLines = append(styledLines, styledPadLeft+paddedContent+styledPadRight)
 	}
 
-	styledLines = append(styledLines, bgStyle.Render(strings.Repeat(" ", containerWidth)))
+	styledLines = append(styledLines, top)
 	return strings.Join(styledLines, "\n")
 }
 

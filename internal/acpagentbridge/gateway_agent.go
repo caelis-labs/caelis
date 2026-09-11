@@ -9,16 +9,13 @@ import (
 )
 
 type GatewayAgentConfig struct {
-	Clients             appserver.AppServerClients
-	SystemSessionClient appserver.SessionClient
-	AppName             string
-	UserID              string
-	WorkspaceKey        string
-	WorkspaceCWD        string
-	// ManagedSessionHistoryToken is Host assembly input for one short-lived,
-	// read-only managed child history bridge.
-	ManagedSessionHistoryToken string
-	SlashResultFormatter       SlashResultFormatter
+	Clients              appserver.AppServerClients
+	SystemSessionClient  appserver.SessionClient
+	AppName              string
+	UserID               string
+	WorkspaceKey         string
+	WorkspaceCWD         string
+	SlashResultFormatter SlashResultFormatter
 }
 
 // NewGatewayAgent constructs the product ACP surface exclusively from typed
@@ -34,18 +31,17 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		systemSessionClient = clients.Sessions
 	}
 	return New(Config{
-		SessionClient:              clients.Sessions,
-		ConfigurationClient:        clients.Configuration,
-		PresentationClient:         clients.Presentation,
-		PromptRouterFactory:        newGatewayPromptRouterFactory(clients, systemSessionClient),
-		SlashResultFormatter:       cfg.SlashResultFormatter,
-		TaskStreamClient:           clients.Tasks,
-		AppName:                    firstNonEmptyGatewayValue(cfg.AppName, "caelis"),
-		UserID:                     firstNonEmptyGatewayValue(cfg.UserID, "local-user"),
-		WorkspaceKey:               cfg.WorkspaceKey,
-		WorkspaceCWD:               cfg.WorkspaceCWD,
-		ManagedSessionHistoryToken: cfg.ManagedSessionHistoryToken,
-		AgentInfo:                  &acpsdk.Implementation{Name: cfg.AppName, Version: version.String()},
+		SessionClient:        clients.Sessions,
+		ConfigurationClient:  clients.Configuration,
+		PresentationClient:   clients.Presentation,
+		PromptRouterFactory:  newGatewayPromptRouterFactory(clients, systemSessionClient),
+		SlashResultFormatter: cfg.SlashResultFormatter,
+		TaskStreamClient:     clients.Tasks,
+		AppName:              firstNonEmptyGatewayValue(cfg.AppName, "caelis"),
+		UserID:               firstNonEmptyGatewayValue(cfg.UserID, "local-user"),
+		WorkspaceKey:         cfg.WorkspaceKey,
+		WorkspaceCWD:         cfg.WorkspaceCWD,
+		AgentInfo:            &acpsdk.Implementation{Name: cfg.AppName, Version: version.String()},
 	})
 }
 

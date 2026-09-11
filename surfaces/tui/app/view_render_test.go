@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFitHeaderRowPartsPreservesWorkspaceGitBranch(t *testing.T) {
@@ -74,6 +75,15 @@ func TestWindowTitleUsesWorkspaceName(t *testing.T) {
 	}
 	if strings.Contains(got, "xiaomi") || strings.Contains(got, "mimo") {
 		t.Fatalf("windowTitle() = %q, should not include model text", got)
+	}
+}
+
+func TestWindowTitleSpinnerLeavesTimeForTerminalDebounce(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(Config{})
+	if interval := m.spinner.Spinner.FPS; interval <= 75*time.Millisecond {
+		t.Fatalf("spinner interval = %s, must exceed the terminal title's 75ms debounce", interval)
 	}
 }
 

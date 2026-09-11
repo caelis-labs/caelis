@@ -7,18 +7,12 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
-
-	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 const (
 	subagentRosterIdentityMaxColumns = 32
 	subagentRosterPromptMaxColumns   = 64
 	subagentRosterPromptMinColumns   = 12
-
-	subagentRosterOverlayMinWidth    = 68
-	subagentRosterOverlayMaxWidth    = 120
-	subagentRosterOverlayScreenInset = 16
 )
 
 type subagentRosterRow struct {
@@ -33,29 +27,6 @@ type subagentRosterRow struct {
 
 func (r subagentRosterRow) running() bool {
 	return r.status == subagentOutputRunning
-}
-
-type subagentRosterOverlayGeometry struct {
-	x      int
-	y      int
-	closeX int
-	closeY int
-	width  int
-	height int
-	rows   []subagentRosterRowGeometry
-}
-
-type subagentRosterRowGeometry struct {
-	top    int
-	bottom int
-}
-
-type subagentRosterOverlayState struct {
-	index          int
-	selectedCallID string
-	rows           []subagentRosterRow
-	geometry       subagentRosterOverlayGeometry
-	pressedCallID  string
 }
 
 func (m *Model) subagentRosterCount() int {
@@ -176,178 +147,6 @@ func subagentRosterMetadata(view *subagentOutputView) (handle string, binding st
 
 func compactSingleLine(value string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
-}
-
-func (m *Model) openSubagentRosterOverlay() bool {
-	if m == nil || m.activePrompt != nil || m.subagentRosterCount() == 0 {
-		return false
-	}
-	if m.subagentOutputOverlay != nil {
-		m.closeSubagentOutputOverlay()
-	}
-	m.clearInputOverlays()
-	m.showPalette = false
-	m.subagentOverlay = nil
-	m.subagentRosterPressed = false
-	m.subagentRosterOverlay = &subagentRosterOverlayState{}
-	return true
-}
-
-func (m *Model) closeSubagentRosterOverlay() {
-	if m == nil {
-		return
-	}
-	m.subagentRosterOverlay = nil
-	m.subagentRosterPressed = false
-}
-
-func (m *Model) renderSubagentRosterOverlay() string {
-	if m == nil || m.subagentRosterOverlay == nil {
-		return ""
-	}
-	state := m.subagentRosterOverlay
-	state.rows = m.subagentRosterRows()
-	if len(state.rows) == 0 {
-		m.closeSubagentRosterOverlay()
-		return ""
-	}
-	m.reconcileSubagentRosterSelection()
-
-	width := m.subagentRosterOverlayWidth()
-	innerWidth := maxInt(16, width-m.overlayBorderChromeWidth())
-	body := []string{
-		m.renderSubagentRosterTitle(innerWidth),
-		"",
-	}
-	rowLines, rowOffsets := m.renderSubagentRosterRows(state.rows, innerWidth, len(body), time.Now())
-	body = append(body, rowLines...)
-	body = append(body, "", m.renderSubagentRosterFooter(innerWidth))
-
-	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
-		Body:      body,
-		Width:     width,
-		UseBorder: m.overlayUsesBorder(),
-	})
-	renderedWidth := lipgloss.Width(frame)
-	renderedHeight := len(strings.Split(frame, "\n"))
-	startX := maxInt(0, (m.width-renderedWidth)/2)
-	startY := maxInt(0, (m.height-renderedHeight)/2)
-	borderInset := 0
-	contentInset := 0
-	if m.overlayUsesBorder() {
-		borderInset = 1
-		contentInset = 2
-	}
-	screenRows := make([]subagentRosterRowGeometry, len(rowOffsets))
-	for index, offset := range rowOffsets {
-		screenRows[index] = subagentRosterRowGeometry{top: -1, bottom: -1}
-		if offset.top >= 0 {
-			screenRows[index] = subagentRosterRowGeometry{
-				top:    startY + borderInset + offset.top,
-				bottom: startY + borderInset + offset.bottom,
-			}
-		}
-	}
-	state.geometry = subagentRosterOverlayGeometry{
-		x: startX, y: startY,
-		closeX: startX + contentInset + maxInt(0, innerWidth-1),
-		closeY: startY + borderInset,
-		width:  renderedWidth, height: renderedHeight, rows: screenRows,
-	}
-	return frame
-}
-
-func (m *Model) subagentRosterOverlayWidth() int {
-	if m == nil || m.width <= 0 {
-		return subagentRosterOverlayMinWidth
-	}
-	if !m.overlayUsesBorder() {
-		return maxInt(20, m.width)
-	}
-	width := clampInt(
-		m.fixedRowWidth()-subagentRosterOverlayScreenInset,
-		subagentRosterOverlayMinWidth,
-		subagentRosterOverlayMaxWidth,
-	)
-	return minInt(width, maxInt(20, m.width-4))
-}
-
-func (m *Model) renderSubagentRosterTitle(width int) string {
-	title := m.theme.TitleStyle().Render("Subagents")
-	close := m.theme.HelpHintTextStyle().Render("×")
-	gap := maxInt(1, width-displayColumns(title)-displayColumns(close))
-	return title + strings.Repeat(" ", gap) + close
-}
-
-func (m *Model) renderSubagentRosterFooter(width int) string {
-	const plain = "↑↓ select  Enter open  Esc close"
-	if displayColumns(plain) > width {
-		return m.theme.HelpHintTextStyle().Render(truncateTailDisplay(plain, width))
-	}
-	key := m.theme.KeyLabelStyle().Bold(true)
-	description := m.theme.HelpHintTextStyle()
-	return key.Render("↑↓") + " " + description.Render("select") +
-		"  " + key.Render("Enter") + " " + description.Render("open") +
-		"  " + key.Render("Esc") + " " + description.Render("close")
-}
-
-func (m *Model) renderSubagentRosterRows(rows []subagentRosterRow, width int, bodyOffset int, now time.Time) ([]string, []subagentRosterRowGeometry) {
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	maxVisible := maxInt(1, m.height-12)
-	start := 0
-	if len(rows) > maxVisible {
-		start = m.subagentRosterOverlay.index - maxVisible/2
-		start = clampInt(start, 0, len(rows)-maxVisible)
-	}
-	end := minInt(len(rows), start+maxVisible)
-	lines := make([]string, 0, end-start+5)
-	offsets := make([]subagentRosterRowGeometry, len(rows))
-	for index := range offsets {
-		offsets[index] = subagentRosterRowGeometry{top: -1, bottom: -1}
-	}
-	if start > 0 {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render("  ↑ more"))
-	}
-	lastRunning := !rows[start].running()
-	for index := start; index < end; index++ {
-		row := rows[index]
-		if index == start || row.running() != lastRunning {
-			if len(lines) > 0 {
-				lines = append(lines, "")
-			}
-			label := "Done"
-			if row.running() {
-				label = "Running"
-			}
-			lines = append(lines, m.renderSubagentRosterSection(label, subagentRosterSectionCount(rows, row.running())))
-		}
-		lastRunning = row.running()
-		selected := index == m.subagentRosterOverlay.index
-		offsets[index].top = bodyOffset + len(lines)
-		lines = append(lines, m.renderSubagentRosterRow(row, selected, width, now))
-		offsets[index].bottom = bodyOffset + len(lines) - 1
-	}
-	if end < len(rows) {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render("  ↓ more"))
-	}
-	return lines, offsets
-}
-
-func (m *Model) renderSubagentRosterSection(label string, count int) string {
-	return m.theme.SecondaryTextStyle().Bold(true).Render(label) +
-		m.theme.MutedTextStyle().Render("  "+fmt.Sprintf("%d", count))
-}
-
-func subagentRosterSectionCount(rows []subagentRosterRow, running bool) int {
-	count := 0
-	for _, row := range rows {
-		if row.running() == running {
-			count++
-		}
-	}
-	return count
 }
 
 func (m *Model) renderSubagentRosterRow(row subagentRosterRow, selected bool, width int, now time.Time) string {
@@ -474,21 +273,4 @@ func formatSubagentRosterElapsed(now time.Time, startedAt time.Time) string {
 		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, seconds)
 	}
 	return fmt.Sprintf("%02d:%02d", minutes, seconds)
-}
-
-func (m *Model) reconcileSubagentRosterSelection() {
-	state := m.subagentRosterOverlay
-	if state == nil || len(state.rows) == 0 {
-		return
-	}
-	if state.selectedCallID != "" {
-		for index, row := range state.rows {
-			if row.callID == state.selectedCallID {
-				state.index = index
-				break
-			}
-		}
-	}
-	state.index = clampInt(state.index, 0, len(state.rows)-1)
-	state.selectedCallID = state.rows[state.index].callID
 }

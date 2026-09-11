@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 type promptAwareSelectionStyles struct {
@@ -16,14 +17,18 @@ type promptAwareSelectionStyles struct {
 }
 
 func (m *Model) promptAwareSelectionStyles() promptAwareSelectionStyles {
+	return promptSelectionStyles(m.theme, m.composerChrome())
+}
+
+func promptSelectionStyles(theme tuikit.Theme, chrome composerChrome) promptAwareSelectionStyles {
 	styles := promptAwareSelectionStyles{
-		selection: m.theme.InputSelectionStyle(),
-		text:      m.theme.TextStyle(),
-		prompt:    m.theme.PromptStyle(),
+		selection: theme.InputSelectionStyle(),
+		text:      theme.TextStyle(),
+		prompt:    theme.PromptStyle(),
 	}
-	if chrome := m.composerChrome(); chrome.active {
+	if chrome.active {
 		styles.hasBg = true
-		bg := m.theme.ComposerBg
+		bg := chrome.background
 		styles.prompt = styles.prompt.Background(bg)
 		styles.text = styles.text.Background(bg)
 		styles.continuation = lipgloss.NewStyle().Background(bg)

@@ -79,6 +79,7 @@ func (sink subagentCompletionSink) PublishSubagentCompletion(result delegation.R
 	done := sink.enqueue(result)
 	if done != nil {
 		<-done
+		_ = sink.activity.awaitPersistence(sink.ctx)
 	}
 }
 

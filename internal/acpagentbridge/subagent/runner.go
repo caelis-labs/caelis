@@ -14,6 +14,7 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
@@ -56,6 +57,9 @@ type PermissionRequest struct {
 }
 
 type RunnerConfig struct {
+	// RetainExecution keeps the owning Runtime alive until a prompt producer settles.
+	// It is optional, process-local, and must not block on storage.
+	RetainExecution func(session.SessionRef) func()
 	// Diagnostics is an optional Host-private sink for bounded error details.
 	// It must never target model output or public Task/Session streams.
 	Diagnostics       *slog.Logger
@@ -70,6 +74,7 @@ type RunnerConfig struct {
 }
 
 type Runner struct {
+	retainExecution   func(session.SessionRef) func()
 	diagnostics       *slog.Logger
 	registry          *Registry
 	clientInfo        *acpsdk.Implementation
@@ -87,6 +92,9 @@ type Runner struct {
 }
 
 type childRun struct {
+	observationOnly       bool
+	replay                *historyCollector
+	pendingConfiguration  *childPendingConfiguration
 	anchor                delegation.Anchor
 	agentName             string
 	invocation            session.EventInvocation
@@ -154,6 +162,7 @@ func NewRunner(cfg RunnerConfig) (*Runner, error) {
 	}
 	return &Runner{
 		diagnostics:       cfg.Diagnostics,
+		retainExecution:   cfg.RetainExecution,
 		registry:          cfg.Registry,
 		clientInfo:        cfg.ClientInfo,
 		clock:             clock,
@@ -372,7 +381,7 @@ func (r *Runner) dispatchInitialPrompt(
 	prompt := r.withCollaborationPromptSlice(run, acputil.BuildPromptParts(promptText+session.AgentCommunicationPromptFooter(session.ParentCommunicationActor()), nil))
 	responseCtx, cancelResponse := context.WithCancel(producerCtx)
 	prepared, err := run.client.PreparePromptParts(run.anchor.SessionID, prompt, nil)
-	fence := newPromptAuthRetryFence(slot, dispatchDone, cancelResponse)
+	fence := r.newPromptAuthRetryFence(run.spawn.SessionRef, slot, dispatchDone, cancelResponse)
 	if err == nil {
 		err = prepared.ObserveAuthRequired(fence.observeAuthRequired)
 	}
@@ -531,7 +540,7 @@ func detachedChildContext(ctx context.Context) context.Context {
 }
 
 func subagentSessionMeta(spawn subagent.SpawnContext) map[string]any {
-	return acputil.NewSubagentSessionMeta(spawn.SessionRef.SessionID, spawn.TaskID, "")
+	return acputil.NewSubagentSessionMeta(spawn.SessionRef.SessionID, spawn.TaskID)
 }
 
 func (r *Runner) Cancel(ctx context.Context, anchor delegation.Anchor) error {
@@ -1106,6 +1115,11 @@ func markSubagentInputEvent(event *session.Event, source session.ActorRef) sessi
 	if event == nil {
 		return session.ActorRef{}
 	}
+	if source.Kind == session.ActorKindUser {
+		event.Type = session.EventTypeUser
+		event.Actor = session.CloneActorRef(source)
+		return event.Actor
+	}
 	// ACP calls this a user_message because it is the input side of the child
 	// transcript. Within the parent Task stream it is observed Agent input, not
 	// a canonical end-user submission to the parent Session.
@@ -1124,6 +1138,9 @@ func markSubagentInputEvent(event *session.Event, source session.ActorRef) sessi
 	protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: event.Text})
 	if protocol.Update != nil {
 		protocol.Update.MessageID = messageID
+		if event.Message != nil && acputil.ContentPartsContainImage(model.ContentPartsFromParts(event.Message.Parts)) && event.Protocol != nil && event.Protocol.Update != nil {
+			protocol.Update.Content = session.CloneEventProtocol(*event.Protocol).Update.Content
+		}
 	}
 	event.Protocol = &protocol
 	if event.Scope != nil {

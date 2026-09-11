@@ -17,6 +17,7 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
+	"github.com/caelis-labs/caelis/control/taskstream"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
@@ -841,4 +842,23 @@ func assertKnownMetadataDecimals(t *testing.T, raw []byte, want string) {
 
 func stringsContains(value, fragment string) bool {
 	return bytes.Contains([]byte(value), []byte(fragment))
+}
+
+func TestTaskDescriptorContextGaugeMatchesGeneratedWire(t *testing.T) {
+	value := taskstream.TaskDescriptor{SessionID: "parent", TaskID: "child", Model: "child-model", ContextUsed: math.MaxUint64 - 1, ContextSize: math.MaxUint64}
+	raw := mustMarshalWire(t, value)
+	var dto generated.TaskDescriptor
+	if err := json.Unmarshal(raw, &dto); err != nil {
+		t.Fatal(err)
+	}
+	if dto.ContextSize == nil || string(*dto.ContextSize) != strconv.FormatUint(math.MaxUint64, 10) || dto.ContextUsed == nil || string(*dto.ContextUsed) != strconv.FormatUint(math.MaxUint64-1, 10) {
+		t.Fatalf("generated gauge=%s", raw)
+	}
+	var restored taskstream.TaskDescriptor
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored.ContextUsed != value.ContextUsed || restored.ContextSize != value.ContextSize {
+		t.Fatalf("roundtrip=%#v", restored)
+	}
 }

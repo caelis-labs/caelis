@@ -18,6 +18,7 @@ type hostControlAssembly struct {
 	participantHandles *participantHandleReader
 	taskStreamRouter   *hostTaskStreamService
 	taskDirectory      *controltaskstream.DirectoryIndex
+	subagentHistory    *subagentHistoryService
 }
 
 func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, cursorSecret []byte) (hostControlAssembly, error) {
@@ -105,14 +106,17 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	}
 	taskDirectory := controltaskstream.NewDirectoryIndex()
 	stack.composition.taskCommitted = taskDirectory.Notify
+	subagentHistory := &subagentHistoryService{}
 	controlTaskStreams, err := controltaskstream.New(controltaskstream.Config{
-		Tasks:           stack.composition.authorities.taskStore,
-		Spool:           stack.composition.authorities.streamSpool,
-		Sessions:        stack.composition.sessions,
-		Directory:       taskDirectory,
-		SubagentHistory: subagentHistoryService{composition: &stack.composition},
-		Authorizer:      taskStreamAuthorizer{inner: sessionAuthorizer},
-		Secret:          cursorSecret,
+		Tasks:             stack.composition.authorities.taskStore,
+		Spool:             stack.composition.authorities.streamSpool,
+		Recorder:          taskOutput,
+		Sessions:          stack.composition.sessions,
+		Directory:         taskDirectory,
+		SubagentHistory:   subagentHistory,
+		RetainObservation: subagentHistory.retainObservation,
+		Authorizer:        taskStreamAuthorizer{inner: sessionAuthorizer},
+		Secret:            cursorSecret,
 	})
 	if err != nil {
 		return hostControlAssembly{}, err
@@ -123,6 +127,7 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 		participantHandles: participantHandles,
 		taskStreamRouter:   taskStreamRouter,
 		taskDirectory:      taskDirectory,
+		subagentHistory:    subagentHistory,
 	}, nil
 }
 
@@ -176,6 +181,7 @@ func activateHostRuntime(stack *Stack, assembly hostControlAssembly) error {
 		}
 	}
 	assembly.taskStreamRouter.registry = sessionRuntimes
+	assembly.subagentHistory.registry = sessionRuntimes
 	if err := inputRouter.bind(sessionRuntimes); err != nil {
 		_ = stack.Close()
 		return err

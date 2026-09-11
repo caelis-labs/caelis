@@ -165,6 +165,49 @@ func TestFeedBrokerSuppressedFinalAdvancesCanonicalBoundary(t *testing.T) {
 	}
 }
 
+func TestFeedBrokerCatchupUsesCanonicalTurnBehindControlHandle(t *testing.T) {
+	reader := &checkpointPageReader{}
+	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{})
+	final := feedIdentifiedNarrative(1, "answer-1", "runtime-turn", "answer")
+	live := session.CloneEvent(final)
+	live.ID, live.Seq, live.Visibility = "", 0, session.VisibilityUIOnly
+	base := projection.EnvelopeBaseFromSessionEvent(broker.ref, live, projection.SessionEventTransport{})
+	base.HandleID, base.RunID, base.TurnID = "handle-1", "control-run", "control-turn"
+	for _, env := range projection.ProjectSessionEventEnvelope(base, live) {
+		if err := broker.Publish(env); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := broker.writer.Bounds(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader.setEvents(final)
+	if err := broker.Prime(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	after, err := broker.writer.Bounds(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.High != before.High {
+		t.Fatal("canonical catch-up appended the complete value after its owned deltas")
+	}
+	position, _ := broker.Boundary()
+	if position == nil || durableAnchor(*position).Seq != final.Seq {
+		t.Fatal("suppressed final did not advance the durable boundary")
+	}
+	// A terminal can arrive without catch-up (for example after read failure).
+	base.Update = eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "answer-1"}
+	broker.observeLiveNarrativeLocked(base)
+	terminal := eventstream.TurnCompleted("handle-1", "control-run", "control-turn", time.Now())
+	terminal.SessionID = broker.ref.SessionID
+	broker.observeLiveNarrativeLocked(terminal)
+	if len(broker.liveNarratives) != 0 {
+		t.Fatal("Control terminal did not release canonical-scope bookkeeping")
+	}
+}
+
 func feedIdentifiedNarrative(seq uint64, messageID, turnID, text string) *session.Event {
 	event := durableProtocolEvent(seq, text)
 	event.MessageID, event.Protocol.Update.MessageID = messageID, messageID

@@ -63,17 +63,28 @@ func (r *Runtime) resolveAgent(
 		turnID:            strings.TrimSpace(turnID),
 		inputSender:       agent.AgentInputSenderFromContext(ctx),
 	})
-	spec.Tools = r.wrapToolsForExecutionJournal(ref, runID, turnID, toolStepSequence, spec.Tools)
-	spec.Tools = r.wrapToolsForPolicy(activeSession, ref, state, spec, approvalContext{
-		ctx:        ctx,
-		requester:  req.ApprovalRequester,
-		runtime:    r,
-		session:    session.CloneSession(activeSession),
-		sessionRef: session.NormalizeSessionRef(ref),
-		runID:      strings.TrimSpace(runID),
-		turnID:     strings.TrimSpace(turnID),
-	})
-	spec.Tools = r.wrapToolsForLifecycle(spec.Tools)
+	wrappingSpec := spec
+	wrap := func(tools []tool.Tool) []tool.Tool {
+		bound := wrappingSpec
+		bound.Tools = tools
+		bound.Tools = r.wrapToolsForExecutionJournal(ref, runID, turnID, toolStepSequence, bound.Tools)
+		bound.Tools = r.wrapToolsForPolicy(activeSession, ref, state, bound, approvalContext{
+			ctx:        ctx,
+			requester:  req.ApprovalRequester,
+			runtime:    r,
+			session:    session.CloneSession(activeSession),
+			sessionRef: session.NormalizeSessionRef(ref),
+			runID:      strings.TrimSpace(runID),
+			turnID:     strings.TrimSpace(turnID),
+		})
+		bound.Tools = r.wrapToolsForLifecycle(bound.Tools)
+		return bound.Tools
+	}
+	spec.Tools = wrap(spec.Tools)
+	if spec.DeferredTools != nil {
+		spec.DeferredTools = &deferredToolSource{source: spec.DeferredTools, wrap: wrap}
+	}
+
 	return r.agentFactory.NewAgent(ctx, spec)
 }
 

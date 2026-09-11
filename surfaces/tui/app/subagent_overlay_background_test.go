@@ -53,12 +53,13 @@ func TestSubagentRosterOverlayPaintsOneBackgroundAcrossStyledRows(t *testing.T) 
 		now.Add(-2*time.Minute),
 		now,
 	)
-	if !model.openSubagentRosterOverlay() {
-		t.Fatal("openSubagentRosterOverlay() = false")
+	if !model.openSubagentWorkspace() {
+		t.Fatal("openSubagentWorkspace() = false")
 	}
 
-	frame := model.renderSubagentRosterOverlay()
-	geometry := model.subagentRosterOverlay.geometry
+	model.subagentOutputOverlay.menu = "agents"
+	frame := model.renderPaneMenu()
+	geometry := model.subagentOutputOverlay.menuRect
 	assertOverlayCellBackgrounds(
 		t,
 		frame,

@@ -73,6 +73,8 @@ func (r *Runner) BindChildEndpoint(
 	if !slot.matchesTarget(target) {
 		return childSlotTargetError(target)
 	}
+	slot.opMu.Lock()
+	defer slot.opMu.Unlock()
 	run := slot.currentRun()
 	if run == nil {
 		return errorcode.New(errorcode.Conflict, "Target Agent recovery state is unavailable")
@@ -109,6 +111,9 @@ func (r *Runner) SubmitChildInput(ctx context.Context, raw agent.ChildInputReque
 		ctx = context.Background()
 	}
 	req := agent.CloneChildInputRequest(raw)
+	if req.UserInput && (len(req.Messages) != 0 || req.Source.Kind != session.ActorKindUser || strings.TrimSpace(req.Source.ID) == "") {
+		return agent.ChildInputResult{}, errorcode.New(errorcode.InvalidArgument, "User input requires one authenticated user source")
+	}
 	if err := validateChildEndpointRef(req.Target); err != nil {
 		return agent.ChildInputResult{}, err
 	}
@@ -116,7 +121,7 @@ func (r *Runner) SubmitChildInput(ctx context.Context, raw agent.ChildInputReque
 		return agent.ChildInputResult{}, errorcode.New(errorcode.InvalidArgument, "Batch and singular input cannot be combined")
 	}
 	for _, message := range childInputMessages(req) {
-		if err := session.ValidateAgentCommunicationActor(message.Source); err != nil {
+		if err := session.ValidateAgentCommunicationActor(message.Source); !req.UserInput && err != nil {
 			return agent.ChildInputResult{}, errorcode.Wrap(errorcode.InvalidArgument, "Source Agent identity is invalid", err)
 		}
 		if message.Input == "" && len(message.ContentParts) == 0 {
@@ -186,6 +191,9 @@ func childInputContainsImage(req agent.ChildInputRequest) bool {
 }
 
 func buildAgentCommunicationPrompt(req agent.ChildInputRequest) []json.RawMessage {
+	if req.UserInput {
+		return quoteUserPrompt(acputil.BuildPromptParts(req.Input, req.ContentParts))
+	}
 	var parts []model.ContentPart
 	for _, input := range childInputMessages(req) {
 		message := model.MessageFromTextAndContentParts(model.RoleUser, input.Input, input.ContentParts)
@@ -203,7 +211,7 @@ func buildAgentCommunicationPrompt(req agent.ChildInputRequest) []json.RawMessag
 func (r *Runner) acceptedChildInputOutputs(slot *childSlot, run *childRun, req agent.ChildInputRequest, activityID string) []*output.Event {
 	var events []*output.Event
 	for _, message := range childInputMessages(req) {
-		if event := r.acceptedChildInputOutput(slot, run, agent.ChildInputRequest{Source: message.Source, Input: message.Input, DisplayInput: message.DisplayInput, ContentParts: message.ContentParts}, activityID); event != nil {
+		if event := r.acceptedChildInputOutput(slot, run, agent.ChildInputRequest{UserInput: req.UserInput, Source: message.Source, Input: message.Input, DisplayInput: message.DisplayInput, ContentParts: message.ContentParts}, activityID); event != nil {
 			events = append(events, event)
 		}
 	}
@@ -251,7 +259,12 @@ func (r *Runner) acceptedChildInputOutput(
 			Content:       content,
 		},
 	}, at)
-	markSubagentInputEvent(event, req.Source)
+	if req.UserInput && event != nil {
+		event.Type = session.EventTypeUser
+		event.Actor = session.CloneActorRef(req.Source)
+	} else {
+		markSubagentInputEvent(event, req.Source)
+	}
 	if event != nil {
 		event.ID = projectionID
 	}
@@ -302,10 +315,10 @@ func (r *Runner) submitActiveChildInputLocked(
 		if targetHandle == "" {
 			targetHandle = strings.TrimPrefix(firstNonEmpty(req.Target.ParticipantID, req.Target.EndpointKey), "@")
 		}
-		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, fmt.Sprintf(
+		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.Unsupported, fmt.Sprintf(
 			"ACP Agent @%s does not support additional messages while its current turn is running. You can send a message after this turn finishes.",
 			targetHandle,
-		))
+		), agent.ErrChildInputNotReady)
 	}
 	if childInputContainsImage(req) && !supportsImages {
 		return agent.ChildInputResult{}, errorcode.New(errorcode.Unsupported, "Target Agent does not accept image input.")
@@ -340,7 +353,13 @@ func (r *Runner) submitActiveChildInputLocked(
 	case client.SessionSteeringInjected:
 		slot.settleInput(run, true, acceptedInput)
 		return agent.ChildInputResult{ActivityID: activityID}, nil
-	case client.SessionSteeringFailed, client.SessionSteeringPromptRequired:
+	case client.SessionSteeringPromptRequired:
+		slot.settleInput(run, true, nil)
+		run.mu.Lock()
+		run.inputActor = previousInputActor
+		run.mu.Unlock()
+		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.FailedPrecondition, "Target Agent is finishing its current turn.", agent.ErrChildInputNotReady)
+	case client.SessionSteeringFailed:
 		slot.settleInput(run, true, nil)
 		run.mu.Lock()
 		run.inputActor = previousInputActor
@@ -402,15 +421,20 @@ type childIdleCheckpoint struct {
 // an auth-required retry. The JSON-RPC response observer establishes the next
 // slot reservation before the response is visible to its waiter.
 type promptAuthRetryFence struct {
-	mu     sync.Mutex
-	slot   *childSlot
-	cancel context.CancelFunc
-	done   chan struct{}
-	closed bool
+	mu          sync.Mutex
+	slot        *childSlot
+	cancel      context.CancelFunc
+	done        chan struct{}
+	closed      bool
+	releaseWork func()
 }
 
-func newPromptAuthRetryFence(slot *childSlot, dispatchDone chan struct{}, cancel context.CancelFunc) *promptAuthRetryFence {
-	return &promptAuthRetryFence{slot: slot, cancel: cancel, done: dispatchDone}
+func (r *Runner) newPromptAuthRetryFence(ref session.SessionRef, slot *childSlot, dispatchDone chan struct{}, cancel context.CancelFunc) *promptAuthRetryFence {
+	fence := &promptAuthRetryFence{slot: slot, cancel: cancel, done: dispatchDone}
+	if r.retainExecution != nil {
+		fence.releaseWork = r.retainExecution(ref)
+	}
+	return fence
 }
 
 func (f *promptAuthRetryFence) observeAuthRequired() error {
@@ -478,6 +502,10 @@ func (f *promptAuthRetryFence) closeLocked() {
 	}
 	f.mu.Lock()
 	f.closed = true
+	if f.releaseWork != nil {
+		f.releaseWork()
+		f.releaseWork = nil
+	}
 	if f.done != nil {
 		f.slot.finishPromptDispatch(f.done)
 		f.done = nil
@@ -560,6 +588,10 @@ func (r *Runner) submitIdleChildInput(
 			return agent.ChildInputResult{}, childInputProvenFailure("resume Target Agent", err)
 		}
 	}
+	if err := r.applyChildConfiguration(ctx, run); err != nil {
+		slot.opMu.Unlock()
+		return agent.ChildInputResult{}, childInputProvenFailure("configure Target Agent", err)
+	}
 	run.mu.RLock()
 	acpClient := run.client
 	sessionID := strings.TrimSpace(run.anchor.SessionID)
@@ -617,7 +649,7 @@ func (r *Runner) submitIdleChildInput(
 	slot.beginActivity(activityID, run)
 	acceptedInput := r.acceptedChildInputOutputs(slot, run, req, activityID)
 	dispatchDone := slot.beginPromptDispatch(cancelDispatch)
-	fence := newPromptAuthRetryFence(slot, dispatchDone, cancelResponse)
+	fence := r.newPromptAuthRetryFence(run.spawn.SessionRef, slot, dispatchDone, cancelResponse)
 	if observeErr := prepared.ObserveAuthRequired(fence.observeAuthRequired); observeErr != nil {
 		fence.closeLocked()
 		slot.settleInput(run, false, nil)
@@ -647,14 +679,12 @@ func (r *Runner) submitIdleChildInput(
 			unknown := joinChildInputUnknown("Message delivery outcome cannot be confirmed.", dispatchErr)
 			terminalDone := r.finishDriveLocked(context.WithoutCancel(ctx), run, "", unknown)
 			slot.opMu.Unlock()
-			if fence.current() != nil {
-				go func() {
-					if terminalDone != nil {
-						<-terminalDone
-					}
-					fence.closeAndFinishCurrent()
-				}()
-			}
+			go func() {
+				if terminalDone != nil {
+					<-terminalDone
+				}
+				fence.closeAndFinishCurrent()
+			}()
 			return agent.ChildInputResult{}, unknown
 		}
 		slot.settleInput(run, false, nil)

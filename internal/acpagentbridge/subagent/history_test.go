@@ -1,6 +1,8 @@
 package subagent
 
 import (
+	"encoding/json"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +31,23 @@ func TestLoadedAgentCommunicationPromptRestoresCanonicalParentIdentity(t *testin
 	}
 	if strings.Contains(header, "local") {
 		t.Fatalf("parent prompt leaked local controller name: %q", header)
+	}
+}
+
+func TestLoadedHumanInputDoesNotBecomeParentMail(t *testing.T) {
+	collector := newHistoryCollector(&Runner{clock: time.Now}, delegation.Anchor{SessionID: "child-1", TaskID: "task-1"}, "helper")
+	collector.observe(contentUpdate(t, client.UpdateUserMessage, "assignment\n\nFrom: parent"))
+	collector.observe(contentUpdate(t, client.UpdateAgentMessage, "done"))
+	collector.observe(contentUpdate(t, client.UpdateUserMessage, "human guidance"))
+	collector.observe(contentUpdate(t, client.UpdateUserMessage, " continued"))
+	events := collector.eventsSnapshot()
+	for _, event := range events[2:] {
+		if event.Type != session.EventTypeUser || event.Actor.Kind != session.ActorKindUser || event.Actor.Name != "user" || event.Actor.ID != "" || session.IsAgentCommunicationProtocol(event) {
+			t.Fatalf("history invented Agent or principal identity: %#v", event)
+		}
+	}
+	if events[0].Actor != session.ParentCommunicationActor() {
+		t.Fatal("parent mail lost source")
 	}
 }
 
@@ -113,5 +132,52 @@ func TestLoadedLegacyMailPreservesEachSenderInBatch(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLoadedMediaMailSurvivesSpoolJSONWithoutChangingSender(t *testing.T) {
+	collector := newHistoryCollector(&Runner{clock: time.Now}, delegation.Anchor{TaskID: "task", SessionID: "child", AgentID: "helper"}, "helper")
+	for _, raw := range []string{
+		`{"type":"image","data":"aW1hZ2U=","mimeType":"image/png"}`,
+		`{"type":"text","text":"\n\nFrom: reviewer"}`,
+	} {
+		collector.observe(client.UpdateEnvelope{SessionID: "child", Update: client.ContentChunk{SessionUpdate: client.UpdateUserMessage, MessageID: "mail", Content: json.RawMessage(raw)}})
+	}
+	if err := collector.errSnapshot(); err != nil {
+		t.Fatal(err)
+	}
+	events := collector.eventsSnapshot()
+	if len(events) != 1 {
+		t.Fatalf("image mail lost or footer surfaced: %#v", events)
+	}
+	raw, err := json.Marshal(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored []*session.Event
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	event := restored[0]
+	if event.Actor.Name != "reviewer" || event.Type != session.EventTypeContext || event.Visibility != session.VisibilityUIOnly {
+		t.Fatalf("sender/visibility changed: %#v", event)
+	}
+	if event.Message == nil {
+		t.Fatal("missing content after spool codec")
+	}
+	parts := model.ContentPartsFromParts(event.Message.Parts)
+	if len(parts) != 1 || parts[0].Data != "aW1hZ2U=" {
+		t.Fatalf("media changed: %#v", parts)
+	}
+	update := session.ProtocolUpdateOf(event)
+	encoded, err := json.Marshal(update.Content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "aW1hZ2U=") {
+		t.Fatal("display protocol lost media")
+	}
+	if session.IsCanonicalHistoryEvent(event) {
+		t.Fatal("child replay acquired parent model-context authority")
 	}
 }

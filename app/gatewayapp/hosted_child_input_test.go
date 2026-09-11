@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -436,12 +437,14 @@ func newHostedChildRouteFixture(t *testing.T, ctx context.Context) (*runtimeComp
 func newHostedChildInputTestStack(t *testing.T, provider *hostedChildInputTestProvider) *Stack {
 	t.Helper()
 	root := t.TempDir()
+	imageInput := true
 	host, err := newGatewayAppTestStack(t, Config{
 		AppName: "caelis-test", UserID: "owner", StoreDir: filepath.Join(root, "store"),
 		WorkspaceKey: "workspace", WorkspaceCWD: root, SkillDirs: []string{t.TempDir()},
 		Sandbox: SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
-			Provider: "openai-compatible", API: providers.APIOpenAICompatible,
+			ImageInput: &imageInput,
+			Provider:   "openai-compatible", API: providers.APIOpenAICompatible,
 			Model: "hosted-child-input", BaseURL: provider.URL, HTTPClient: provider.Client(),
 			Token: "test-token", AuthType: providers.AuthBearerToken,
 			ContextWindowTokens: 128000, MaxOutputTok: 1024, Timeout: 5 * time.Second,
@@ -614,7 +617,7 @@ func waitHostedChildParentGateway(t *testing.T, host *Stack, sessionID string) *
 }
 
 type hostedChildInputTestProvider struct {
-	*gatewayTestHTTPServer
+	*httptest.Server
 	firstRequest chan struct{}
 	releaseFirst chan struct{}
 	blockFirst   bool
@@ -622,6 +625,7 @@ type hostedChildInputTestProvider struct {
 	mu           sync.Mutex
 	calls        int
 	lastMessages json.RawMessage
+	afterChunk   func(context.Context, int)
 }
 
 func newHostedChildInputTestProvider(t *testing.T, blockFirst bool) *hostedChildInputTestProvider {
@@ -629,7 +633,7 @@ func newHostedChildInputTestProvider(t *testing.T, blockFirst bool) *hostedChild
 	provider := &hostedChildInputTestProvider{
 		firstRequest: make(chan struct{}), releaseFirst: make(chan struct{}), blockFirst: blockFirst,
 	}
-	provider.gatewayTestHTTPServer = newGatewayTestHTTPServer(http.HandlerFunc(provider.handle))
+	provider.Server = httptest.NewServer(http.HandlerFunc(provider.handle))
 	if !blockFirst {
 		close(provider.releaseFirst)
 	}
@@ -664,8 +668,15 @@ func (p *hostedChildInputTestProvider) handle(w http.ResponseWriter, r *http.Req
 	writePluginSystemE2ESSE(w, map[string]any{
 		"id": fmt.Sprintf("hosted-child-input-%d", call), "object": "chat.completion.chunk", "model": "hosted-child-input",
 		"choices": []map[string]any{{
-			"index": 0, "delta": map[string]any{"role": "assistant", "content": fmt.Sprintf("reply-%d", call)}, "finish_reason": "stop",
+			"index": 0, "delta": map[string]any{"role": "assistant", "content": fmt.Sprintf("reply-%d", call)}, "finish_reason": nil,
 		}},
+	})
+	if p.afterChunk != nil {
+		p.afterChunk(r.Context(), call)
+	}
+	writePluginSystemE2ESSE(w, map[string]any{
+		"id": fmt.Sprintf("hosted-child-input-%d", call), "object": "chat.completion.chunk", "model": "hosted-child-input",
+		"choices": []map[string]any{{"index": 0, "delta": map[string]any{}, "finish_reason": "stop"}},
 	})
 	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 }

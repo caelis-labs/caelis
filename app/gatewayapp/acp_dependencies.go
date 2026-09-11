@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
@@ -11,10 +12,11 @@ import (
 // assemble protocol-neutral presentation providers. Runtime execution and Task
 // streams remain behind their dedicated AppServer services.
 type AppServerPresentationDependencies struct {
-	Sessions session.Service
-	Assembly assembly.ResolvedAssembly
-	AppName  string
-	UserID   string
+	UIPreferences appserver.UIPreferencesStore
+	Sessions      session.Service
+	Assembly      assembly.ResolvedAssembly
+	AppName       string
+	UserID        string
 }
 
 // PresentationDependencies returns the inputs owned by AppServer presentation
@@ -25,10 +27,11 @@ func (s *Stack) PresentationDependencies() (AppServerPresentationDependencies, e
 	}
 	s.composition.mu.RLock()
 	deps := AppServerPresentationDependencies{
-		Sessions: s.composition.sessions,
-		Assembly: assembly.CloneResolvedAssembly(s.composition.activeRuntime.Assembly),
-		AppName:  s.composition.authorities.appName,
-		UserID:   s.composition.authorities.userID,
+		Sessions:      s.composition.sessions,
+		UIPreferences: s.composition.authorities.store,
+		Assembly:      assembly.CloneResolvedAssembly(s.composition.activeRuntime.Assembly),
+		AppName:       s.composition.authorities.appName,
+		UserID:        s.composition.authorities.userID,
 	}
 	s.composition.mu.RUnlock()
 	return deps, nil

@@ -66,6 +66,38 @@ Building from source requires the Go version declared in [`go.mod`](go.mod).
 - **Scriptable:** text, versioned JSON, and streaming JSONL use the same durable
   Session and Control paths as the TUI.
 
+## Subagent workspace
+
+Click the running/done count in the footer or a child link in the transcript to
+open one subagent pane. The name dropdown switches agents; the layout dropdown
+chooses Overlay, Split left/right, or Split up/down. Drag the divider to resize
+within 30–70%; the divider previews the new position and the transcripts reflow
+once on release. Caelis remembers the layout and separate horizontal/vertical
+ratios in the Host's UI preferences. Small terminals temporarily use an overlay
+and restore the preferred split when space permits.
+
+Click a pane or press F6 (Shift+F6 in reverse) to focus its composer. F6 also
+opens the selected child when hidden; F7 shows or hides the pane. Both composers
+use the same focus colors: brighter in dark themes, deeper in light themes.
+The child title also marks focus; both transcripts and progress hints remain
+fully readable. Main composer Tab completion and Shift+Tab mode switching keep
+their usual behavior.
+Enter sends a prompt to the selected child; Shift+Enter or Ctrl+J adds a line.
+Ctrl+G opens the pane and its agent dropdown from either composer; Ctrl+L opens
+the layout dropdown while the pane is open. Choose Resize split, then use arrow
+keys along the divider axis to preview five-percentage-point adjustments. Enter
+applies and saves; Esc cancels. Terminal resizing cancels an unconfirmed resize
+preview. Up recalls the last submitted prompt when the child composer is empty.
+Esc dismisses a child menu or selection; it does not hide the pane or interrupt
+an agent. Main-composer Esc retains its interruption behavior. F7 or × hides the
+pane while the agent keeps working. The agent dropdown contains only agents.
+Drafts and scroll positions survive switching children during the Session.
+Click within the child composer to position the cursor; drag text to copy on
+release. Image paste uses the main composer's platform shortcut (Ctrl+V on
+macOS/Linux, Ctrl+Alt+V on Windows/WSL). Images stay with the selected child's
+draft and are included when recalling its last prompt.
+Model and context usage are read-only; the main agent retains orchestration.
+
 ## Common commands
 
 | Goal | Command |

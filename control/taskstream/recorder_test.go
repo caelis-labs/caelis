@@ -34,6 +34,9 @@ func TestRecorderReleasesTerminalPartitionsAndCanRebindAfterRemoval(t *testing.T
 		}); err != nil {
 			t.Fatal(err)
 		}
+		if err := recorder.Flush(t.Context(), taskapi.Ref{SessionID: "session-1", TaskID: fmt.Sprintf("task-%d", index)}); err != nil {
+			t.Fatal(err)
+		}
 		logical := streamspool.LogicalKey{
 			Namespace: streamspool.NamespaceTask,
 			Digest:    streamspool.DigestStrings("session-1", fmt.Sprintf("task-%d", index)),
@@ -71,7 +74,7 @@ func TestRecorderReleasesTerminalPartitionsAndCanRebindAfterRemoval(t *testing.T
 	}
 }
 
-func TestRecorderReleasesFailedPartitionEntry(t *testing.T) {
+func TestRecorderRetainsKnownGapUntilTaskRelease(t *testing.T) {
 	store, err := spoolfile.New(t.Context(), spoolfile.Config{
 		RootDir: t.TempDir(), GCInterval: -1, MaxRecordBytes: 1,
 	})
@@ -83,14 +86,17 @@ func TestRecorderReleasesFailedPartitionEntry(t *testing.T) {
 	observer := recorder.BindTaskOutput(t.Context(), output.Binding{
 		SessionID: "session-1", TaskID: "task-failed", Kind: output.TaskKindCommand, StartsAtTaskOrigin: true,
 	})
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "too large"}); err == nil {
-		t.Fatal("ObserveTaskOutput unexpectedly succeeded")
+	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "too large"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := recorder.Flush(t.Context(), taskapi.Ref{SessionID: "session-1", TaskID: "task-failed"}); err == nil {
+		t.Fatal("failed write was not reported by read barrier")
 	}
 	recorder.mu.Lock()
 	retained := len(recorder.writers)
 	recorder.mu.Unlock()
-	if retained != 0 {
-		t.Fatalf("failed Recorder entries = %d, want 0", retained)
+	if retained != 1 {
+		t.Fatalf("failed Recorder entries = %d, want 1 known gap", retained)
 	}
 }
 
@@ -195,6 +201,9 @@ func TestRecorderProducerCloseReleasesSubagentPartition(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := recorder.Flush(t.Context(), taskapi.Ref{SessionID: "session-1", TaskID: "subagent-1"}); err != nil {
+		t.Fatal(err)
+	}
 	next := recorder.BindTaskOutput(t.Context(), output.Binding{
 		SessionID: "session-1", TaskID: "subagent-2", Kind: output.TaskKindSubagent,
 		StartsAtTaskOrigin: true,

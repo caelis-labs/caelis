@@ -1,6 +1,8 @@
-// Package collaboration owns Session-scoped Agent discovery and mailboxes.
-// Taking or dispatching a message removes it. Delivery is best effort: there
-// are no acknowledgements, automatic retries, or exactly-once guarantees.
+// Package collaboration owns Session-scoped discovery, Agent mailboxes, and
+// authenticated user input to delegated children. Taking or dispatching Agent
+// mail removes it; mail has no acknowledgements, retries, or exactly-once
+// guarantee. User input has a separate durable admission ledger and cannot be
+// consumed through Agent ReceiveMessages.
 // Collaborator prompt slices are Control-owned instruction: they name the
 // assigned handle, reserved parent address, role, and reporting behavior.
 package collaboration
@@ -36,13 +38,15 @@ type Identity struct {
 
 // Thread describes a participant in the owning work Session.
 type Thread struct {
-	ID         string `json:"id"`
-	SessionID  string `json:"-"`
-	Revision   uint64 `json:"revision"`
-	Handle     string `json:"handle"`
-	Name       string `json:"name,omitempty"`
-	State      string `json:"state"`
-	CanDeliver bool   `json:"-"`
+	ParticipantID string `json:"-"`
+	Generation    string `json:"-"`
+	ID            string `json:"id"`
+	SessionID     string `json:"-"`
+	Revision      uint64 `json:"revision"`
+	Handle        string `json:"handle"`
+	Name          string `json:"name,omitempty"`
+	State         string `json:"state"`
+	CanDeliver    bool   `json:"-"`
 }
 
 // Message carries trusted sender identity and ordinary collaboration text.
@@ -89,6 +93,10 @@ func Open(path string, backend Backend) (*Service, error) {
 	 seq INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, recipient TEXT NOT NULL, body TEXT NOT NULL
 	); CREATE INDEX IF NOT EXISTS collaboration_recipient ON collaboration_mailbox(session, recipient, seq);`)
 	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := prepareUserInputStore(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -254,6 +262,11 @@ func (s *Service) Run(ctx context.Context, report func(error)) {
 	finished := make(chan completion)
 	active := map[Identity]bool{}
 	var workers sync.WaitGroup
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		s.runUserInputs(ctx, report)
+	}()
 	defer workers.Wait()
 	for {
 		select {

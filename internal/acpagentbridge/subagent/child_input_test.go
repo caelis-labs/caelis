@@ -1051,6 +1051,7 @@ func TestChildInputHelperProcess(t *testing.T) {
 				},
 				AgentCapabilities: client.AgentCapabilities{
 					PromptCapabilities:  acpsdk.PromptCapabilities{Image: true},
+					LoadSession:         true,
 					SessionCapabilities: map[string]json.RawMessage{"resume": json.RawMessage(`{}`)},
 				},
 			}
@@ -1063,7 +1064,12 @@ func TestChildInputHelperProcess(t *testing.T) {
 			return response, nil
 		case client.MethodSessionNew:
 			return client.NewSessionResponse{SessionID: "child-input-session"}, nil
-		case client.MethodSessionResume:
+		case client.MethodSessionLoad:
+			if mode == "user-history" {
+				if err := replayUserInputTestPrompts(conn); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+			}
 			if mode == "permission-resume" {
 				if err := childInputProbeBoundPermissions(conn); err != nil {
 					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
@@ -1074,7 +1080,20 @@ func TestChildInputHelperProcess(t *testing.T) {
 					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
 				}
 			}
-			return client.ResumeSessionResponse{}, nil
+			if mode == "spool-recovery" {
+				for i := range 1500 {
+					if err := conn.Notify("_x.ai/session/update", map[string]any{"ignored": i}); err != nil {
+						return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+					}
+				}
+				for _, item := range []struct{ kind, text string }{{client.UpdateUserMessage, "original prompt"}, {client.UpdateAgentThought, "original reasoning"}, {client.UpdateAgentMessage, "original answer"}} {
+					if err := childInputNotifyUpdate(conn, item.kind, item.text); err != nil {
+						return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+					}
+				}
+			}
+
+			return client.LoadSessionResponse{}, nil
 		case client.MethodAuthenticate:
 			if !strings.HasPrefix(mode, "auth-") {
 				return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
@@ -1094,11 +1113,29 @@ func TestChildInputHelperProcess(t *testing.T) {
 			mu.Unlock()
 			return client.AuthenticateResponse{}, nil
 		case client.MethodSessionPrompt:
+			if mode == "user-history" {
+				if err := appendChildInputTestFile(os.Getenv("CAELIS_ACP_USER_HISTORY"), string(message.Params)+"\n"); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+			}
 			mu.Lock()
 			promptCount++
 			count := promptCount
 			isAuthenticated := authenticated
 			mu.Unlock()
+			if mode == "spool-recovery" {
+				if err := childInputNotify(conn, "live before completion"); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+				if err := waitForChildInputRelease(os.Getenv("CAELIS_ACP_CHILD_INPUT_AUTH_RELEASE")); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+				if err := childInputNotify(conn, "live final"); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+				return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
+			}
+
 			if strings.HasPrefix(mode, "auth-") {
 				authPrompt := 1
 				if mode == "auth-idle" {
@@ -1252,4 +1289,13 @@ func appendChildInputTestFile(path string, text string) error {
 		return err
 	}
 	return file.Close()
+}
+
+func (s *childInputTestSink) ReplaceTaskHistory(ctx context.Context, events []*session.Event) error {
+	for _, event := range events {
+		if err := s.ObserveTaskOutput(ctx, output.Event{Event: event}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

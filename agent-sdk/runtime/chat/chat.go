@@ -29,6 +29,7 @@ type Agent struct {
 	name                string
 	model               model.LLM
 	tools               []tool.Tool
+	deferredTools       tool.Source
 	toolsByName         map[string]tool.Tool
 	systemPrompt        string
 	reasoning           model.ReasoningConfig
@@ -94,6 +95,7 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 	if err != nil {
 		return nil, err
 	}
+	chatAgent.deferredTools = spec.DeferredTools
 	chatAgent.reasoning = reasoningFromMetadata(spec.Metadata)
 	chatAgent.request = spec.Request.WithDefaults(agent.ModelRequestOptions{})
 	return chatAgent, nil
@@ -109,6 +111,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 		stream := a.request.StreamEnabled(false)
 		watchdog := newDefaultGenerationWatchdog()
 		visibility := tool.NewToolVisibilityForModel(a.tools, a.model)
+		a.refreshDeferredTools(&visibility)
 		for event := range ctx.Events().All() {
 			if event != nil {
 				visibility.ApplyDiscoveredToolNames(tool.DiscoveredToolNamesFromMetadata(event.Meta))
@@ -205,6 +208,7 @@ func (a *Agent) collectCanonicalModelStep(
 	yield func(*session.Event) bool,
 ) (model.Message, []model.ToolCall, *model.Response, string, prefixusage.Snapshot, bool, error) {
 	for attempt := 0; ; attempt++ {
+		a.refreshDeferredTools(visibility)
 		messageID := uuid.NewString()
 		request := &model.Request{
 			Messages:    messages,
@@ -276,7 +280,7 @@ func (a *Agent) executeStepToolCalls(
 		}
 		return []model.Message{toolMessage}, []*session.Event{toolEvent}, true, nil
 	}
-	if !a.canExecuteStepToolCallsConcurrently(calls) {
+	if !a.canExecuteStepToolCallsConcurrently(calls, visibility) {
 		return a.executeStepToolCallsSerial(ctx, stepID, calls, yieldProgress, visibility)
 	}
 	stepRefs := tool.NewConcurrentModelStepRefs(stepID, len(calls))
@@ -394,12 +398,12 @@ func modelStepRef(stepID string, index int, callCount int) *tool.ModelStepRef {
 	return &tool.ModelStepRef{ID: stepID, Index: index, CallCount: callCount}
 }
 
-func (a *Agent) canExecuteStepToolCallsConcurrently(calls []model.ToolCall) bool {
+func (a *Agent) canExecuteStepToolCallsConcurrently(calls []model.ToolCall, visibility *tool.ToolVisibility) bool {
 	if len(calls) < 2 {
 		return false
 	}
 	for _, call := range calls {
-		item, ok := a.lookupTool(call.Name)
+		item, ok := a.lookupRunTool(call.Name, visibility)
 		if !ok || !item.Definition().Capabilities.ParallelSafe {
 			return false
 		}
@@ -534,4 +538,10 @@ func Metadata(systemPrompt string) map[string]any {
 // CloneMetadata returns one shallow metadata copy.
 func CloneMetadata(values map[string]any) map[string]any {
 	return session.CloneState(values)
+}
+
+func (a *Agent) refreshDeferredTools(visibility *tool.ToolVisibility) {
+	if a.deferredTools != nil {
+		visibility.RefreshDeferredTools(a.deferredTools.Tools(), a.model)
+	}
 }

@@ -110,8 +110,12 @@ func (m *Model) runningActivityText() (string, lipgloss.Style) {
 	if m == nil {
 		return "", lipgloss.Style{}
 	}
-	label := m.runningActivity.label()
-	switch m.runningActivity.Phase {
+	return m.runningActivityStyle(m.runningActivity)
+}
+
+func (m *Model) runningActivityStyle(activity runningActivityState) (string, lipgloss.Style) {
+	label := activity.label()
+	switch activity.Phase {
 	case runningPhaseReview, runningPhaseInterrupt:
 		return label, m.theme.WarnStyle()
 	default:

@@ -21,7 +21,7 @@ func TestDeliveryAssemblerCommitsReplacementAtomically(t *testing.T) {
 	if events, replacement, err := assembler.Accept(page); err != nil || replacement || len(events) != 0 {
 		t.Fatalf("page = (%#v, %v, %v), replacement leaked before commit", events, replacement, err)
 	}
-	end := Delivery{Kind: DeliveryReplaceEnd, Source: SourceReplacement, SnapshotID: "snapshot-1", Page: 1}
+	end := Delivery{Kind: DeliveryReplaceEnd, Source: SourceReplacement, SnapshotID: "snapshot-1", Page: 1, NextCursor: "signed-history-continuation"}
 	events, replacement, err := assembler.Accept(end)
 	if err != nil || !replacement || len(events) != 1 {
 		t.Fatalf("end = (%#v, %v, %v)", events, replacement, err)

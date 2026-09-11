@@ -76,6 +76,9 @@ last cursor equals `next_cursor`. A `result` has neither field. Replacement
 pages never carry a cursor: Session canonical replacement may retain durable
 position as provenance, while Task replacement removes record-local position
 because it is not a Session-feed resume source.
+The end of a complete Task replacement carries the cursor of its published
+spool incarnation and offset. Consumers save it only after replacement commits,
+then follow subsequent records in that same incarnation.
 Consumers save `next_cursor` after successfully applying the complete delivery;
 subscription read-ahead cannot advance their resume position.
 
@@ -136,6 +139,10 @@ live narratives until canonical catch-up or Turn completion. Catch-up omits
 their already-published content while advancing the complete durable boundary;
 accounting and other content still flow. This identity-only bookkeeping is
 discarded with the trace and never filters canonical replacement replay.
+For main content, the projected source scope retains the canonical Runtime Turn;
+the live Control handle's delivery Turn may differ. Catch-up matches source
+scope, message identity, and content kind. Terminal cleanup uses the delivery
+Turn that admitted the live content.
 
 Fresh replay may materialize a durable complete value once. If retained deltas
 and a complete value coexist, Control selects the source by typed message or tool
@@ -175,13 +182,71 @@ that field to identify Agent input. External ACP ingress removes the reserved
 marker before live or canonical projection. Later collaborator output alone
 advances Task activity.
 
+The `subagent-workspace-v1` Host capability covers child input, receipts, layout
+preferences, and child model/context descriptors. Interactive attach requires
+this capability before opening the TUI.
+
+User prompts to a delegated child use the authenticated AppServer subagent-input
+service, independently of Agent mail and the parent's foreground Turn. Control
+pins the Task, participant, child Session, and available attachment generation
+before durable enqueue, then rechecks them at dispatch. The shared Runtime child
+admission path preserves user provenance; it does not add an Agent sender footer
+or copy the prompt into parent context. A queued receipt means pending admission;
+`sent` means endpoint acceptance, not model application. Only a proven
+non-admission caused by a busy or finishing child remains queued. Uncertain
+sending outcomes, including Host restart during dispatch, are recorded as unknown
+and are never automatically resent. Operation IDs are immutable and idempotent.
+Text and inline image parts share the main prompt's image validation and byte
+limits. Control stores the encoded image payload with the queued input, so
+delivery does not depend on a Surface-local clipboard file surviving restart.
+Unmarked ACP history input is displayed as `user`; Agent mail retains its
+header/footer provenance. History without a product principal ID does not invent
+one or gain authenticated user authority.
+
 Task status is a replaceable directory snapshot and contains no transcript.
-Visible content demand has an independent spool cursor. When an exact retained
-range is unavailable, Control chooses one complete fallback: command
-`FinalResult`, ACP `session/load`, or a descriptor-only running state. A finite
-idle history read uses the Agent's advertised `session/load`; Control does not
-read a child Session file as a presentation shortcut. A Surface never joins a
-partial spool prefix to a fallback or reconstructs content from overlap.
+Visible content demand has an independent spool cursor. Child workspaces use
+one following subscription, including while idle. A complete retained origin
+and its live tail come from the same Task spool. If that origin is missing,
+Control shares one recovery per Task: the runner checks `loadSession`, performs
+ACP `session/load`, and queues its complete ordered replay before accepting live
+updates from the same connection. The load response is the replay boundary.
+An idle history open submits no prompt and defers execution configuration until
+authorized input; both Agent mail and user input reuse that loaded connection.
+Recovery resolves the same Session Runtime used by input admission. An attached
+Task reader retains that Runtime independently of the parent Session feed.
+Each prompt retains the existing Host work reference through producer settlement,
+including the interval before its first output advances the Task directory.
+Built-in managed children use the same exact parent/Task authorization for load
+and resume; a successful load retains connection ownership for later prompts.
+
+The recorder writes replay into a private incarnation, then atomically publishes
+it only after the whole replay is written. Later queued updates append to it.
+Readers commit a bounded replacement transaction and continue from its actual
+spool cursor. Failed or over-budget replay leaves the previous document visible
+and reports an error; a Task final answer never substitutes for child history.
+A failed cache can be rebuilt through the same ACP load path once the child is
+idle and settled. Command output still uses its terminal `FinalResult` when its
+cache is unavailable. Surfaces never merge provider history or infer overlap.
+
+Task producer callbacks admit immutable records into bounded memory; one writer
+per Task batches at 64 KiB or a 40 ms flush window. Small tails arriving during
+writes also receive a batching window. Reader/lifecycle barriers may flush early.
+Limits include in-flight records: 8,192 records / 32 MiB per Task and 64 MiB of
+queued payloads across the recorder. Overflow or a write failure invalidates the
+cache and reports a gap without blocking execution or silently losing a prefix.
+Spool segments use append writes and close without fsync; they are disposable
+cache files, never a second durable Session history. Ordinary follow-up turns
+append new output without rewriting prior history. Recovery replay is bounded
+at 8,192 events / 32 MiB and is never truncated into a supposedly complete view.
+
+Only implemented notification methods enter the ACP client's ordered queue;
+standard `session/update` and the supported notice extension remain enabled.
+Both notification count and bytes are bounded. Request/response handling and
+cancellation do not pass through this notification filter.
+
+Task descriptors expose the child's assigned or observed model and latest context
+gauge. Context counters use decimal strings on the wire. Surfaces never borrow
+the parent's model or usage when these child values are unavailable.
 
 The canonical StartThread result closes the creation tool once and exposes the
 persistent thread identity. Producer completion owns participant results; the

@@ -19,9 +19,6 @@ type ClientsConfig struct {
 	UserID       string
 	WorkspaceKey string
 	WorkspaceCWD string
-	// ManagedSessionHistoryToken is opaque Host composition input forwarded to
-	// the ACP bridge. The Surface neither interprets it nor owns its policy.
-	ManagedSessionHistoryToken string
 	// SystemSessionClient optionally addresses product-owned child Sessions.
 	// When nil, the principal-bound Session
 	// client is used; Host exact-target Reconnect authorizes owners without
@@ -32,14 +29,13 @@ type ClientsConfig struct {
 // NewFromClients builds the product ACP surface from focused clients only.
 func NewFromClients(cfg ClientsConfig) (*ProductAgent, error) {
 	agent, err := runtimeacp.NewGatewayAgent(runtimeacp.GatewayAgentConfig{
-		Clients:                    cfg.Clients,
-		SystemSessionClient:        cfg.SystemSessionClient,
-		AppName:                    cfg.AppName,
-		UserID:                     cfg.UserID,
-		WorkspaceKey:               strings.TrimSpace(cfg.WorkspaceKey),
-		WorkspaceCWD:               strings.TrimSpace(cfg.WorkspaceCWD),
-		ManagedSessionHistoryToken: strings.TrimSpace(cfg.ManagedSessionHistoryToken),
-		SlashResultFormatter:       promptview.FormatSlashResult,
+		Clients:              cfg.Clients,
+		SystemSessionClient:  cfg.SystemSessionClient,
+		AppName:              cfg.AppName,
+		UserID:               cfg.UserID,
+		WorkspaceKey:         strings.TrimSpace(cfg.WorkspaceKey),
+		WorkspaceCWD:         strings.TrimSpace(cfg.WorkspaceCWD),
+		SlashResultFormatter: promptview.FormatSlashResult,
 	})
 	if err != nil {
 		return nil, err

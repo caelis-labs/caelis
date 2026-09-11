@@ -98,7 +98,9 @@ func (m *Model) observeTaskStreamSession(env eventstream.Envelope) {
 	}
 	m.closeTaskStreamSubscriptions()
 	m.subagentOutputOverlay = nil
-	m.subagentRosterOverlay = nil
+	m.workspace.childFocused = false
+	m.workspace.lastCallID = ""
+	m.workspace.dragging = false
 	m.subagentRosterPressed = false
 	m.subagentOutputViews = map[string]*subagentOutputView{}
 	m.resetSubagentDirectoryWatch()
@@ -212,36 +214,6 @@ func (m *Model) taskStreamDemandForOwner(callID, handle string) taskStreamDemand
 		return taskStreamDemandExpandedPanel
 	}
 	return taskStreamDemandNone
-}
-
-// subagentOutputTerminalContentSettled prevents a terminal child workspace
-// from repeatedly reopening a finite idle read. Normally that read is the
-// complete Agent-owned ACP history. If history reload is unavailable, Control
-// may instead return the canonical terminal Task result; this Surface cache
-// marker makes no completeness claim.
-func (m *Model) subagentOutputTerminalContentSettled(callID string, view *subagentOutputView) bool {
-	if m == nil || view == nil || !view.idleHistorySettled {
-		return false
-	}
-	// Directory terminality may become visible before the final Task-stream
-	// lifecycle frame. Keep an active workspace attached until its retained
-	// transcript has consumed that frame; SetStatus then seals the same Markdown
-	// buffers used by the main transcript.
-	taskID := strings.TrimSpace(m.taskStreamIDsByCallID[strings.TrimSpace(callID)])
-	awaitingVisibleLifecycle := taskID != "" && m.taskStreamWanted[taskID]
-	if (awaitingVisibleLifecycle || subagentOutputViewHasTranscript(view)) &&
-		(view.block == nil || !eventstream.IsTerminalLifecycleState(view.block.Status)) {
-		return false
-	}
-	descriptor, ok := m.subagentRosterTasks[strings.TrimSpace(callID)]
-	if !ok || descriptor.Running {
-		return false
-	}
-	activityID := subagentRosterDescriptorActivityID(descriptor)
-	if activityID == "" || view.idleHistoryActivityID != activityID {
-		return false
-	}
-	return subagentOutputStatusFromState(string(descriptor.State)) != subagentOutputRunning
 }
 
 // reconcileSubagentOutputTaskStreams keeps Task output observation scoped to
@@ -388,20 +360,16 @@ func (m *Model) wantResolvedTaskStream(taskID string, wanted bool) {
 	if !wanted {
 		delete(m.taskStreamRetries, taskID)
 		if !m.taskStreamWanted[taskID] && m.taskStreamSubscriptions[taskID] == nil &&
-			m.taskStreamCancels[taskID] == nil && !m.taskStreamHistoryInFlight(taskID) {
+			m.taskStreamCancels[taskID] == nil {
 			return
 		}
 		m.taskStreamWanted[taskID] = false
 		m.taskStreamNextToken++
 		m.taskStreamTokens[taskID] = m.taskStreamNextToken
 		m.stopResolvedTaskStream(taskID)
-		m.cancelTaskStreamHistory(taskID)
 		return
 	}
 	demand := m.taskStreamDemandForTaskID(taskID)
-	if demand == taskStreamDemandVisibleSubagent {
-		m.reconcileTaskStreamHistory(taskID)
-	}
 	if !m.taskStreamLiveWanted(taskID, demand) {
 		m.taskStreamWanted[taskID] = false
 		return
@@ -421,28 +389,9 @@ func (m *Model) wantResolvedTaskStream(taskID string, wanted bool) {
 	m.startTaskStreamForwarder(sessionID, taskID, token, cursor, demand == taskStreamDemandVisibleSubagent)
 }
 
-func (m *Model) taskStreamLiveWanted(taskID string, demand taskStreamDemand) bool {
-	if m == nil || !demand.wanted() {
-		return false
-	}
-	if demand == taskStreamDemandExpandedPanel {
-		return true
-	}
-	// Once attached, a visible subagent observer remains parked across idle
-	// activity boundaries. Closing the overlay is the only Surface action that
-	// detaches it.
-	if m.taskStreamWanted[taskID] || m.taskStreamSubscriptions[taskID] != nil ||
-		m.taskStreamCancels[taskID] != nil {
-		return true
-	}
-	callID := strings.TrimSpace(m.taskStreamCallIDsByID[strings.TrimSpace(taskID)])
-	descriptor, ok := m.subagentRosterTasks[callID]
-	if !ok {
-		return true
-	}
-	// A cold terminal Task is hydrated through the finite ACP history read.
-	// Runtime following begins when the directory next observes it running.
-	return descriptor.Running || !eventstream.IsTerminalLifecycleState(string(descriptor.State))
+// A visible Task window has one follower across both running and idle periods.
+func (m *Model) taskStreamLiveWanted(_ string, demand taskStreamDemand) bool {
+	return m != nil && demand.wanted()
 }
 
 func (m *Model) stopResolvedTaskStream(taskID string) {
@@ -557,10 +506,6 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 		m.taskStreamTokens[msg.taskID] != msg.token {
 		return m, nil
 	}
-	// A live frame always wins over an idle snapshot already in flight. The
-	// directory may publish the next ActivityID a few milliseconds later; do
-	// not let the older finite read overwrite output that has already arrived.
-	m.cancelTaskStreamHistory(msg.taskID)
 	delete(m.taskStreamRetries, msg.taskID)
 	if cursor := strings.TrimSpace(msg.cursor); cursor != "" {
 		m.taskStreamCursors[msg.taskID] = cursor
@@ -600,7 +545,6 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 	if callID := strings.TrimSpace(m.taskStreamCallIDsByID[msg.taskID]); callID != "" {
 		if view := m.subagentOutputViews[callID]; view != nil {
 			view.historyResolved = true
-			view.idleHistorySettled = false
 			// Content batches may arrive every mailbox window. Keep their document
 			// mutations exact, but let the overlay's existing render scheduler fold
 			// several tiny batches into one physical frame. Lifecycle and Directory
@@ -771,12 +715,6 @@ func (m *Model) closeTaskStreamSubscriptions() {
 		}
 		delete(m.taskStreamSubscriptions, taskID)
 	}
-	for taskID, cancel := range m.taskStreamHistoryCancels {
-		if cancel != nil {
-			cancel()
-		}
-		delete(m.taskStreamHistoryCancels, taskID)
-	}
 	m.taskStreamWanted = map[string]bool{}
 	m.taskStreamTokens = map[string]uint64{}
 	m.taskStreamCancels = map[string]context.CancelFunc{}
@@ -787,8 +725,4 @@ func (m *Model) closeTaskStreamSubscriptions() {
 	m.taskStreamResolveTokens = map[string]uint64{}
 	m.taskStreamResolveRetries = map[string]int{}
 	m.taskStreamRetries = map[string]int{}
-	m.taskStreamHistoryStages = map[string]*subagentOutputHistoryStage{}
-	m.taskStreamHistoryTokens = map[string]uint64{}
-	m.taskStreamHistoryCancels = map[string]context.CancelFunc{}
-	m.taskStreamHistoryRetries = map[string]taskStreamHistoryRetryState{}
 }

@@ -41,6 +41,9 @@ type ParentTool struct {
 // TaskDescriptor is the durable discovery and current-state view of a
 // streamable Task. It intentionally excludes transient output bodies.
 type TaskDescriptor struct {
+	Model          string     `json:"model,omitempty"`
+	ContextUsed    uint64     `json:"context_used,omitempty,string"`
+	ContextSize    uint64     `json:"context_size,omitempty,string"`
 	SessionID      string     `json:"session_id"`
 	TaskID         string     `json:"task_id"`
 	Handle         string     `json:"handle"`

@@ -45,13 +45,15 @@ func injectACPControlPlane(
 	placementResolver acpsubagent.PlacementResolver,
 	sessionPreparer acpsubagent.SessionPreparer,
 	endpointResolver endpoint.Resolver,
+	retainWork func(session.SessionRef) func(),
 ) (runtime.Config, *acpassembly.ControlPlane, error) {
 	controlPlane, err := acpassembly.NewControlPlane(acpassembly.ControlPlaneConfig{
-		Diagnostics:       cfg.Diagnostics,
-		Agents:            resolved.Agents,
-		PlacementResolver: placementResolver,
-		SessionPreparer:   sessionPreparer,
-		EndpointResolver:  endpointResolver,
+		Diagnostics:          cfg.Diagnostics,
+		RetainChildExecution: retainWork,
+		Agents:               resolved.Agents,
+		PlacementResolver:    placementResolver,
+		SessionPreparer:      sessionPreparer,
+		EndpointResolver:     endpointResolver,
 	})
 	if err != nil {
 		return cfg, nil, err

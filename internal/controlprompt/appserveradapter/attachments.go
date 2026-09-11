@@ -20,7 +20,9 @@ import (
 
 const imageMIMESampleBytes = 512
 
-func contentPartsFromSubmission(input string, items []controlprompt.Attachment, workspace string) ([]model.ContentPart, error) {
+// ContentPartsFromSubmission encodes local composer attachments at the client
+// boundary, preserving inline order and the shared prompt image byte limit.
+func ContentPartsFromSubmission(input string, items []controlprompt.Attachment, workspace string) ([]model.ContentPart, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}

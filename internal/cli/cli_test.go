@@ -1408,7 +1408,6 @@ func clearSelfAgentEnv(t *testing.T) {
 		acpagentenv.EnvArgsJSON,
 		acpagentenv.EnvLegacyCmd,
 		acpagentenv.EnvWorkDir,
-		acpagentenv.EnvManagedSessionHistoryToken,
 		acpagentenv.EnvWorkspaceKey,
 		acpagentenv.EnvWorkspaceCWD,
 	} {

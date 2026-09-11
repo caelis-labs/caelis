@@ -82,9 +82,9 @@ func TestContentPartsFromSubmissionInterleavesTextAndImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parts, err := contentPartsFromSubmission("first second", []controlprompt.Attachment{{Name: "shot.png", Offset: len([]rune("first "))}}, workspace)
+	parts, err := ContentPartsFromSubmission("first second", []controlprompt.Attachment{{Name: "shot.png", Offset: len([]rune("first "))}}, workspace)
 	if err != nil {
-		t.Fatalf("contentPartsFromSubmission() error = %v", err)
+		t.Fatalf("ContentPartsFromSubmission() error = %v", err)
 	}
 	if len(parts) != 3 {
 		t.Fatalf("len(parts) = %d, want 3", len(parts))

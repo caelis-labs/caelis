@@ -14,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/plugin"
+	"github.com/caelis-labs/caelis/control/uipreferences"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
@@ -58,6 +59,7 @@ func wrapInvalidMemoryConfiguration(err error) error {
 // delegation, and system-Agent fields exist only in the private legacy wire
 // document used by the one-way migration.
 type AppConfig struct {
+	UI                    uipreferences.Preferences    `json:"ui,omitzero"`
 	SchemaVersion         int                          `json:"schema_version"`
 	ConfigurationRevision uint64                       `json:"configuration_revision,omitempty"`
 	Models                PersistedModelConfig         `json:"models,omitempty"`
@@ -76,6 +78,9 @@ type AppConfig struct {
 // Validate checks the current persisted truth without reconstructing legacy
 // Agent or binding projections.
 func Validate(doc AppConfig) error {
+	if err := doc.UI.Validate(); err != nil {
+		return fmt.Errorf("gatewayapp: invalid UI preferences: %w", err)
+	}
 	if doc.SchemaVersion != SchemaVersionV2 {
 		return fmt.Errorf("gatewayapp: unsupported AppConfig schema version %d", doc.SchemaVersion)
 	}

@@ -60,7 +60,7 @@ type FeedBroker struct {
 	sealedCh      chan struct{}
 	closed        bool
 
-	liveNarratives map[feedNarrativeKey]struct{}
+	liveNarratives map[feedNarrativeKey]string
 
 	subsMu sync.Mutex
 	subs   map[*feedSubscription]struct{}

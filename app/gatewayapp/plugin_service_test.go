@@ -771,6 +771,7 @@ func TestPluginServiceMCPServers(t *testing.T) {
 	}
 
 	activated := activateFutureAssemblyRuntime(t, stack, "plugin-mcp-enabled")
+	<-activated.mcpMgr.Initialized()
 	detail, err := activated.pluginReads().Inspect(ctx, "myplugin")
 	if err != nil {
 		t.Fatalf("Inspect() failed: %v", err)

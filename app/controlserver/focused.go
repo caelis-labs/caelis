@@ -11,6 +11,7 @@ import (
 // AppServer clients. Paths are explicit semantic operations; there is no raw
 // command or slash dispatch endpoint.
 func (s *Server) focusedRoutes() {
+	s.subagentWorkspaceRoutes()
 	s.mux.HandleFunc("GET "+apiPrefix+"/presentation/capabilities", s.presentationCapabilities)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/presentation", s.presentationSnapshot)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/terminals/output", s.terminalOutput)

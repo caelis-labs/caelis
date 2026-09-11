@@ -217,8 +217,10 @@ Both Session and Task clients receive explicit append or transactional
 replacement deliveries. Replacement pages remain non-visible until their
 matching end marker. A valid cursor prefers exact spool bytes, but missing,
 expired, or corrupt cache state selects one complete authoritative replacement:
-canonical Session replay, command final result, or ACP child session replay
-with Task final result as its fallback. Replace-capable Surfaces swap only after
+canonical Session replay, command final result, or ACP child session replay.
+Child replay is written and atomically published by the same recorder that
+accepts live updates from the loaded connection. Child history errors remain
+errors; a final answer never replaces a missing transcript. Replace-capable Surfaces swap only after
 the matching end marker; an irreversible ACP callback rejects a replacement
 after it has already emitted an exact prefix.
 
@@ -233,7 +235,7 @@ position because they have no Session-feed resume meaning.
 Consumers commit a delivery's `NextCursor` only after successfully applying its
 events. Subscriptions expose no separately advancing resume cursor.
 
-If a Session spool fails after an append/sync has crossed the consumer boundary,
+If a Session spool fails after an append has crossed the consumer boundary,
 Control replaces that prefix with canonical Session truth before following new
 durable projections. One latest
 cursorless Turn terminal result per Session and one coalesced slot per
@@ -320,7 +322,16 @@ writes use revision-aware atomic replacement; readers observe a complete documen
 Native MCP configuration is assembled from AppConfig plus supported user
 overlays. Project `.agents/mcp.json` or `.mcp.json` files are sampled only after
 the exact canonical workspace is trusted. Overlay changes never hot-reload an
-active Runtime.
+active Runtime. MCP servers initialize independently in the background with a
+30-second budget per server for connection and tool listing. Runtime startup
+and other servers do not wait for that work. Only complete, validated ready
+lists enter ToolSearch. An initialization failure emits one transient Session
+Notice; it does not fail the Turn or enter canonical history or model context.
+The TUI's Session presence subscription displays these notices during active
+and idle periods; Turn and reconnect views omit duplicate presentation.
+Overlapping tool namespaces wait for higher-priority initialization to settle
+before publication, preserving configured collision precedence.
+Runtime release cancels and drains pending initialization and closes its clients.
 
 Plugin configuration is also canonical AppConfig state. Managed plugin content
 is immutable and pinned while an active Runtime uses it; configuration mutation

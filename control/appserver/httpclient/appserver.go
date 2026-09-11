@@ -19,16 +19,18 @@ func AppServerClients(client *Client) (appserver.AppServerClients, error) {
 		return appserver.AppServerClients{}, err
 	}
 	clients := appserver.AppServerClients{
-		Sessions:      client,
-		Participants:  client,
-		Status:        client,
-		Configuration: client,
-		Agents:        client,
-		Completion:    client,
-		Plugins:       client,
-		Presentation:  client,
-		Terminal:      client,
-		Tasks:         tasks,
+		Sessions:       client,
+		SubagentInputs: client,
+		UIPreferences:  client,
+		Participants:   client,
+		Status:         client,
+		Configuration:  client,
+		Agents:         client,
+		Completion:     client,
+		Plugins:        client,
+		Presentation:   client,
+		Terminal:       client,
+		Tasks:          tasks,
 	}
 	if err := clients.Validate(); err != nil {
 		return appserver.AppServerClients{}, err

@@ -166,17 +166,17 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 		"The stream is Control-owned.",
 		"retrying child request",
 		"child transport failed",
-		"esc close",
+		"F7 Hide",
 	} {
 		if !strings.Contains(overlay, want) {
 			t.Fatalf("subagent output overlay omitted %q:\n%s", want, overlay)
 		}
 	}
 
-	next, _ := model.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	next, _ := model.handleKey(tea.KeyPressMsg{Code: tea.KeyF7})
 	model = next.(*Model)
 	if model.subagentOutputOverlay != nil {
-		t.Fatal("Esc did not close the subagent output overlay")
+		t.Fatal("F7 did not hide the subagent output overlay")
 	}
 }
 
@@ -412,7 +412,7 @@ func TestSubagentOutputOverlayPaintsOneBackgroundAcrossStyledTranscript(t *testi
 
 	frame := model.renderSubagentOutputOverlay()
 	layout := model.subagentOutputOverlay.layout
-	assertOverlayCellBackgrounds(t, frame, layout.frameWidth, layout.frameHeight, model.theme.ModalBg)
+	assertOverlayCellBackgrounds(t, frame, layout.frameWidth, layout.frameHeight, model.theme.ModalBg, model.theme.ComposerBg)
 }
 
 func TestOpeningSubagentOutputOverlayDoesNotCompleteRunningChild(t *testing.T) {
@@ -1106,7 +1106,7 @@ func clickSubagentOutputToolPanelForTest(t *testing.T, model *Model, callID stri
 	}
 }
 
-func TestSubagentOutputOverlayTitleUsesOnlySemanticDot(t *testing.T) {
+func TestSubagentOutputOverlayTitleShowsFocusWithoutRunStatus(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -1115,8 +1115,9 @@ func TestSubagentOutputOverlayTitleUsesOnlySemanticDot(t *testing.T) {
 	view.block.Actor = "reviewer"
 	view.block.Status = eventstream.LifecycleStateCompleted
 
-	title := ansi.Strip(model.renderSubagentOutputTitle(view, 72))
-	for _, want := range []string{"•", "Subagent", "reviewer", "×"} {
+	model.openSubagentOutputOverlayView("spawn-1", view)
+	title := ansi.Strip(model.renderPaneTitle(view, 72))
+	for _, want := range []string{"▸", "reviewer", "×", "▾"} {
 		if !strings.Contains(title, want) {
 			t.Fatalf("overlay title omitted %q: %q", want, title)
 		}
@@ -1351,6 +1352,9 @@ func paintLegacyOverlayBodyBackgroundForTest(frame string, bordered bool, backgr
 	if background == nil {
 		return frame
 	}
+	if _, ok := background.(lipgloss.NoColor); ok {
+		return frame
+	}
 	width := lipgloss.Width(frame)
 	height := len(strings.Split(frame, "\n"))
 	screen := uv.NewScreenBuffer(width, height)
@@ -1461,7 +1465,7 @@ func legacySubagentOutputOverlayFrameForTest(model *Model) string {
 	end := minInt(len(rows), state.offset+layout.contentRows)
 	visible := rows[state.offset:end]
 	body := make([]string, 0, layout.contentRows+4)
-	body = append(body, model.renderSubagentOutputTitle(view, layout.innerWidth))
+	body = append(body, model.renderPaneTitle(view, layout.innerWidth))
 	body = append(body, model.theme.SeparatorStyle().Render(strings.Repeat("─", layout.innerWidth)))
 	for index := 0; index < layout.contentRows; index++ {
 		if index < len(visible) {
@@ -1470,8 +1474,9 @@ func legacySubagentOutputOverlayFrameForTest(model *Model) string {
 			body = append(body, "")
 		}
 	}
-	body = append(body, model.theme.SeparatorStyle().Render(strings.Repeat("─", layout.innerWidth)))
-	body = append(body, model.renderSubagentOutputFooter(state.offset, end, len(rows), layout.innerWidth))
+	body = append(body, "", model.renderPaneHint(view, state, layout.innerWidth), "")
+	body = append(body, strings.Split(model.renderPaneEditor(state, layout.innerWidth), "\n")...)
+	body = append(body, model.renderPaneFooter(state, layout.innerWidth))
 	return tuikit.RenderResponsiveOverlayFrame(model.theme, tuikit.ResponsiveOverlayFrameModel{
 		Body:      body,
 		Width:     layout.frameWidth,
